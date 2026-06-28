@@ -922,6 +922,7 @@ async def run_goal(  # noqa: C901  -- core goal-execution loop
     try:
         from .audit import EventKind, record
         record(EventKind.GOAL_START, goal_id=goal_id, agent="orchestrator",
+               channel=channel, user_id=user_id,
                title=goal.title, description=getattr(goal, "description", None))
     except Exception:  # pragma: no cover
         pass
@@ -1346,6 +1347,7 @@ async def run_goal(  # noqa: C901  -- core goal-execution loop
             from .audit import EventKind, record
             _res = summary if isinstance(summary, str) else None
             record(EventKind.GOAL_END, goal_id=goal_id, agent="orchestrator",
+                   channel=channel, user_id=user_id,
                    status="succeeded",
                    result=(_res[:500] + "…") if _res and len(_res) > 500 else _res)
         except Exception:  # pragma: no cover

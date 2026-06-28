@@ -1538,7 +1538,8 @@ class Agent:
         that hot method, and never raises into a running tool call."""
         try:
             from .audit import record
-            record(kind, agent=self.name, goal_id=self.ctx.goal_id, **payload)
+            record(kind, agent=self.name, goal_id=self.ctx.goal_id,
+                   channel=self.ctx.channel, user_id=self.ctx.user_id, **payload)
         except Exception:  # pragma: no cover
             pass
 
