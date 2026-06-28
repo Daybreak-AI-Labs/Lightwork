@@ -2016,7 +2016,7 @@ def pick_persona() -> dict[str, str]:
         default=False,
     ):
         return {}
-    name = _q_text("  Agent name", default="Maverick").strip() or "Maverick"
+    name = _q_text("  Agent name", default="Lightwork").strip() or "Lightwork"
     style_pick = _q_select(
         "  Style:",
         [
@@ -3510,7 +3510,7 @@ def write_consumer_config(
             "mcp_*": "20/60",
         },
         retention={"audit_days": 30, "episodes_days": 90, "events_days": 30},
-        persona={"name": "Maverick", "style": "balanced", "user_name": user_name},
+        persona={"name": "Lightwork", "style": "balanced", "user_name": user_name},
         web_search_enabled=True,
     )
 
