@@ -1198,8 +1198,13 @@ def test_run_self_harness_bucket_by_domain(monkeypatch, store):
         score_with=lambda a, c: 0.9, score_without=lambda a, c: 0.4,
         bucket_by=("domain",))
     assert rep.mined == 2 and rep.promoted == 2     # one scoped line per department
-    recalled = sh.recall_addendum("M", store)
-    assert "domain=finance" in recalled and "domain=sales" in recalled
+    # scoped lines are NOT in the model-wide block...
+    assert sh.recall_addendum("M", store) == ""
+    # ...they recall only for their own department (wave 19 scoped recall)
+    fin = sh.recall_addendum("M", store, domain="finance")
+    sal = sh.recall_addendum("M", store, domain="sales")
+    assert "domain=finance" in fin and "domain=sales" not in fin
+    assert "domain=sales" in sal and "domain=finance" not in sal
 
 
 def test_config_mine_bucket_by_allowlist(monkeypatch):
@@ -1514,6 +1519,49 @@ def test_review_canaries_failures_win_ties(monkeypatch, store):
         sh.note_outcome("M", False, line="mixed line", path=store)
     res = sh.review_canaries("M", graduate_after=3, demote_after=2, path=store)
     assert res["demoted"] == ["mixed line"] and res["graduated"] == []  # failures win
+
+
+# ---------- wave 19: per-domain scoped recall ----------
+
+def test_scoped_key_namespaces():
+    assert sh._scoped_key("M", "") == "M"                        # model-wide unchanged
+    assert sh._scoped_key("M", "domain=finance") == "M\x00domain=finance"
+
+
+def test_scoped_recall_targets_domain(monkeypatch, store):
+    ctrl = _enable(monkeypatch)
+    rs = ([_refl_d("M", "timeout", "process the report", "finance") for _ in range(3)]
+          + [_refl_d("M", "timeout", "process the report", "sales") for _ in range(3)])
+    sh.run_self_harness(rs, model_id="M", controller=ctrl, min_support=3, path=store,
+                        held_in=["a", "b"], held_out=["c", "d", "e", "f", "g"],
+                        score_with=lambda a, c: 0.9, score_without=lambda a, c: 0.4,
+                        bucket_by=("domain",))
+    assert sh.recall_addendum("M", store) == ""                 # model-wide is empty
+    assert "domain=finance" in sh.recall_addendum("M", store, domain="finance")
+    assert "domain=finance" not in sh.recall_addendum("M", store, domain="sales")
+    assert sh.recall_addendum("M", store, domain="hr") == ""     # unknown domain -> nothing
+
+
+def test_scoped_recall_merges_model_wide_and_domain(monkeypatch, store):
+    ctrl = _enable(monkeypatch)
+    # a model-wide line AND a finance-scoped line
+    _promote_line(store, "M", "c0", "model wide line", ctrl)
+    rs = [_refl_d("M", "auth", "log into the partner portal", "finance") for _ in range(3)]
+    sh.run_self_harness(rs, model_id="M", controller=ctrl, min_support=3, path=store,
+                        held_in=["a", "b"], held_out=["c", "d", "e", "f", "g"],
+                        score_with=lambda a, c: 0.9, score_without=lambda a, c: 0.4,
+                        bucket_by=("domain",))
+    fin = sh.recall_addendum("M", store, domain="finance")
+    assert "model wide line" in fin and "domain=finance" in fin   # both ride a finance run
+    # a non-finance run gets ONLY the model-wide line
+    assert sh.recall_addendum("M", store) == "" or "model wide line" in sh.recall_addendum("M", store)
+    assert "domain=finance" not in sh.recall_addendum("M", store)
+
+
+def test_scoped_recall_disabled_returns_empty(monkeypatch, store):
+    monkeypatch.delenv("MAVERICK_SELF_HARNESS", raising=False)
+    monkeypatch.setattr("maverick.config.load_config", dict)
+    assert sh.recall_addendum("M", store, domain="finance") == ""
 
 
 def test_review_canaries_leaves_young_on_probation(monkeypatch, store):

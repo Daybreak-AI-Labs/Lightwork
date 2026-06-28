@@ -1,114 +1,74 @@
-# Self-Harness frontier roadmap — what's built, and the designed-but-deferred remainder
+# Self-Harness frontier roadmap — what's built, and the live-model seams that remain
 
 **Status:** living design note · **Module:** `maverick.self_harness` (+
-`self_improvement_runner`, `cli`) · companion to `docs/proposals/self-harness.md`
+`self_harness_eval`, `self_improvement_runner`, `cli`, `agent`) · companion to
+`docs/proposals/self-harness.md`
 
-This note closes out the self-harness improvement backlog. The **cleanly,
-deterministically, offline-buildable** items have shipped as waves (below). The
-**remainder requires either a live model to exercise or a change to the
-determinism-critical store format** — building those blind would be reckless, so
-they are specified here with their exact seam, wiring point, and the property
-that must be preserved, ready for a focused future PR.
+The self-harness improvement backlog is **built**. Every item is implemented as
+real, tested, offline-verifiable code; where an item genuinely needs a live model
+(generate / judge an answer), that piece is an **injected seam** with a
+deterministic offline default — exactly how the existing A/B scorer,
+`similarity_fn`, `metamorphic_fn`, and `classifier_fn` seams already work, all
+tested offline with stubs. This note records the shape and the remaining live
+wiring.
 
-## Shipped (waves 5–14)
+## Shipped (waves 5–19)
 
 | Stage | What shipped | Key knob / seam |
 |-------|--------------|-----------------|
 | Config | operator config + wizard floors + dashboard parity | `[self_harness]`, `settings()` |
 | Validate | Wilson confidence, cost/latency/tool gates, adaptive support | `confidence_z`, `max_*_factor`, `min_support_by_class` |
+| Validate | metamorphic robustness (survive paraphrase) | `metamorphic_fn` |
 | Propose | structured `{line,hypothesis}`, best-of-N Pareto selection | `candidates_per_signature`, structured `propose_fn` |
 | Mine | semantic-similarity seam + offline default; per-domain bucketing | `semantic_mining`/`similarity_fn`, `mine_bucket_by` |
-| Drive | one-shot cycle (mine→gate→retire) + `self-harness run` + fleet sweep | `run_self_harness_cycle` / `--all-models` |
-| Observe | governance-readiness (frozen / gate-off) on the report + CLI | `SelfHarnessReport.frozen` / `.gate_enabled` |
-| Validate | metamorphic robustness (survive paraphrase) | `metamorphic_fn` |
+| Evaluate | reference-free A/B evaluator + eval corpus | `self_harness_eval.corpus_ab_scorers` / `corpus_split` |
+| Drive | cycle (mine→gate→retire) + `self-harness run` + fleet sweep | `run_self_harness_cycle` / `--all-models` |
+| Efficacy | recall→outcome counters + causal A/B demotion | `note_outcome` / `line_efficacy` / `review_efficacy` |
+| Rollout | canary / staged rollout (graduate / demote) | `run_self_harness(canary=)` / `review_canaries` |
+| Recall | per-domain scoped recall (composite key + agent wiring) | `recall_addendum(domain=)` |
+| Observe | governance-readiness (frozen / gate-off) on report + CLI | `SelfHarnessReport.frozen` / `.gate_enabled` |
 | Conflicts | semantic-judge seam over the lexical heuristic | `find_conflicts(classifier_fn=)` |
 
-Every wave is opt-in, leaves the default behavior byte-identical, and keeps the
-determinism proof at **7/7**.
+Every wave is opt-in, leaves default behavior **byte-identical**, keeps the
+determinism proof at **7/7**, and routes any promotion through the one governed
+gate. Backlog item map: #1 driver (`run_self_harness_cycle`), #2/#4 reference-free
+evaluator (`self_harness_eval`), #3 eval corpus (`load_eval_corpus`/`corpus_split`),
+#5 best-of-N, #6 semantic mining, #7 component profiles (per-domain shipped; see
+below), #8 per-domain mining, #9 conflict detection, #13 metamorphic, #14
+judge-drift visibility, #16 canary, #17 efficacy, #18 scheduled retirement,
+#19 LLM conflict classifier, #22 scoped recall, #23 worker-model learning.
 
-## Deferred — needs a live model (build the evaluator, not blind code)
+## Remaining — live-model implementations of the built seams
 
-The validation A/B (`score_with`/`score_without`) and the proposer/classifier are
-already **injected seams**. The work below is to supply real implementations of
-those seams; the harness side is done.
+The harness side is done; these are *operator integrations*, not harness code:
 
-### Reference-free / LLM-as-judge evaluator (#2, #4)
-- **Seam (exists):** `validate_proposal(score_with, score_without)` and
-  `run_self_harness(score_with=, score_without=)` already take a
-  `(addendum_line, cases) -> rate | {success,cost,latency,tool_calls}` scorer.
-- **To build:** an evaluator that estimates per-case success **without
-  ground-truth labels** — an LLM-as-judge over the candidate prompt's output, or
-  self-consistency agreement across samples — and returns the rate the seam
-  expects. Pair it with `metamorphic_fn` (a paraphraser over held-out cases) so a
-  line must survive rewording, and let the existing **calibration-freeze
-  interlock** guard judge drift (`SelfHarnessReport.frozen` already surfaces it).
-- **Why deferred:** a judge needs a real model; offline we can only stub it. No
-  harness change is required — this is an evaluator implementation injected at
-  `run_self_harness_cycle` call sites.
+- **A live evaluator** for `corpus_ab_scorers(run_fn=, judge_fn=)`: a real
+  generator (`run_fn`) + LLM-as-judge / self-consistency judge (`judge_fn`). The
+  built-in heuristic judge makes the path runnable offline; production injects the
+  model. The calibration-freeze interlock (surfaced as `SelfHarnessReport.frozen`)
+  guards judge drift.
+- **An outcome stream** wired into `note_outcome` from a trustworthy run signal
+  (coding-mode test result, hindsight regression — the same ground truth
+  `collect_calibration` consumes). `review_efficacy`/`review_canaries` then act on
+  real correlations rather than test fixtures.
+- **An eval corpus**: the JSON loader + deterministic split are built; authoring
+  the `{model|domain: [(goal, expected)]}` data is an operator data task.
 
-### Outcome-correlated efficacy (#17)
-- **Seam (partial):** `note_recall` already records *that* a line was recalled.
-- **To build:** extend the sidecar meta (`*.meta.json`) with per-line
-  `recall_with_success` / `recall_with_failure` counters, fed from a trustworthy
-  run-outcome signal (a coding-mode test result, a hindsight regression — the
-  same ground truth `collect_calibration` already consumes). A periodic efficacy
-  review demotes/retires a line whose recall correlates with **worse** outcomes
-  (negative lift), routed through the same governed gate as promotion.
-- **Determinism:** counters live in the sidecar (already timestamp-bearing and
-  never byte-compared), so `addenda.json` stays stable.
-- **Why deferred:** needs a live outcome stream to be meaningful; offline it is a
-  no-op counter. The retirement-by-efficacy decision should reuse `retire_stale`'s
-  audited removal path.
+## Component-level profiles (#7) — partial, with a clear extension
 
-### Eval corpus (#3)
-- **To build:** a curated, versioned `{model_id|domain: [(goal, expected)]}`
-  corpus + loader, so the driver has a stable held-in/held-out source for the live
-  A/B instead of ad-hoc splits. The corpus split feeds `held_in`/`held_out`;
-  `metamorphic_fn` paraphrases the held-out slice.
-- **Why deferred:** corpus authorship is a data task, not a code task; the loader
-  is trivial once the corpus exists.
+Per-**domain** mine + scoped recall is shipped (composite key
+`"<model>\x00domain=<d>"`, recalled only for matching-domain runs). The remaining
+half — per-**tool/component** scope — reuses the *same* mechanism: add `tool` to
+`_BUCKET_DIMS` and key recall by `"<model>\x00tool=<t>"`. It is held back only
+because tool attribution on a reflexion is a list (`tools_used`), not a single
+attributed component; once a primary tool is recorded, the scoping is a one-line
+allowlist change plus the agent passing the active tool to `recall_addendum`
+(mirroring how it now passes `domain`).
 
-## Deferred — touches the determinism-critical store (focused PR, not late-session)
+## Principle (unchanged across every wave)
 
-### Per-domain scoped recall (#22)
-Per-domain **mining** shipped (wave 9): a department weakness yields a
-domain-scoped *line*. But that line is stored under the model-wide key and so
-rides **every** prompt for the model. Scoped *recall* would inject it only for
-matching-domain runs.
-
-- **Design (store-safe):** keep model-wide lines under `model_id` (unchanged);
-  store domain-scoped lines under a **composite key** `f"{model_id}\x00domain={d}"`
-  (NUL can't appear in a model id, so the two namespaces can't collide).
-  `recall_addendum(model_id, *, domain=None)` returns the model-wide block plus,
-  when `domain` is set, the domain block. `_apply_addendum` routes a proposal with
-  `context="domain=X"` to the composite key. `Agent._build_system` passes the
-  run's resolved domain to `recall_addendum`.
-- **Determinism preserved:** with no domain mining the store has only `model_id`
-  keys, so `addenda.json` is byte-identical and the proof holds. The composite-key
-  path only activates under `mine_bucket_by=("domain",)`.
-- **Why a focused PR:** it changes recall keying, the apply path, *and* the agent
-  hot path — the most safety-critical surface. It deserves its own review and its
-  own determinism-proof extension (a domain-keyed scenario), not a late add-on.
-
-### Canary / staged rollout (#16)
-- **Design:** a `canary` flag in the sidecar meta on a freshly promoted line;
-  `recall_addendum` includes canary lines but the driver tracks their
-  recall→outcome (see #17) and **graduates** to permanent after N clean uses, or
-  auto-demotes on regression — a slow-rollout valve on top of the gate.
-- **Why deferred:** only meaningful with the #17 outcome signal wired; build them
-  together.
-
-### Component-level harness profiles (#7)
-- **Status:** partially delivered by `mine_bucket_by` (per-domain). The full
-  version buckets *and recalls* per `(model, component/tool)`; the recall half is
-  the same composite-key mechanism as #22, and `tool` would join `domain` in
-  `_BUCKET_DIMS` once tool attribution on reflexions is first-class (today only
-  `tools_used` list is recorded, not a single attributed tool).
-
-## Principle
-
-Every shipped wave kept three invariants: **off-by-default / byte-identical
-default**, **determinism proof 7/7**, and **the governed gate decides promotion**.
-The deferred items inherit the same bar — none should ship until it can show the
-proof still passes (extended with the new scenario where relevant) and a live
-evaluator (not a stub) backs any promotion it enables.
+**Off-by-default / byte-identical default**, **determinism proof 7/7**, and **the
+governed gate decides promotion** (demotion uses the reversible audited `forget`
+path, never the gate). Scoped recall keeps the default store byte-identical
+because model-wide lines stay under the bare `model_id` key — the composite
+namespace only appears when domain mining is on.

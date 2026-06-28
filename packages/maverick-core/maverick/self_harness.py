@@ -128,12 +128,33 @@ def _write_addenda(addenda: dict[str, str], path: Path | None = None) -> None:
     atomic_write_text(p, json.dumps(addenda, indent=2, sort_keys=True), mode=0o600)
 
 
-def recall_addendum(model_id: str | None, path: Path | None = None) -> str:
+def _scoped_key(model_id: str, context: str) -> str:
+    """The store key for a (model, mining-scope). Model-wide guidance (no context)
+    lives under the bare ``model_id`` -- so the default store is byte-identical to
+    before scoping existed. A domain-scoped line lives under a COMPOSITE key
+    ``"<model_id>\\x00<context>"`` (e.g. ``"<model>\\x00domain=finance"``); the NUL
+    can't appear in a model id, so the two namespaces never collide."""
+    return f"{model_id}\x00{context}" if context else str(model_id)
+
+
+def recall_addendum(model_id: str | None, path: Path | None = None, *,
+                    domain: str | None = None) -> str:
     """The learned operating-guidance block for ``model_id`` (``""`` if none /
-    disabled). Recalled into the system prompt by the agent at build time."""
+    disabled). Recalled into the system prompt by the agent at build time.
+
+    When ``domain`` is given, any guidance mined SCOPED to that domain (under the
+    composite key) is appended after the model-wide block -- so a finance-specific
+    lesson rides only finance-domain runs, not every prompt for the model. With no
+    ``domain`` (the default) this is exactly the model-wide block, unchanged."""
     if not model_id or not enabled():
         return ""
-    return load_addenda(path).get(str(model_id), "")
+    store = load_addenda(path)
+    block = store.get(str(model_id), "")
+    if domain:
+        scoped = store.get(_scoped_key(str(model_id), f"domain={domain}"), "")
+        if scoped:
+            block = (block + "\n" + scoped) if block else scoped
+    return block
 
 
 # ---- sidecar: structured per-line provenance ------------------------------
@@ -704,6 +725,9 @@ class HarnessProposal:
                                  # supplied by a structured proposer. METADATA
                                  # ONLY -- it rides into the audit + provenance
                                  # sidecar, never into the recalled prompt.
+    context: str = ""            # mining scope carried from the signature (e.g.
+                                 # "domain=finance"); routes the line to a
+                                 # scoped store key so recall can target it.
 
 
 # An injected proposer: given a signature, return EITHER a single short guidance
@@ -939,7 +963,7 @@ def propose_addendum(sig: FailureSignature, *, propose_fn: ProposeFn | None = No
     hypothesis = _sanitize_line(hypothesis)[:280]
     return HarnessProposal(
         model_id=sig.model_id, signature=sig.signature,
-        addendum_line=line, hypothesis=hypothesis,
+        addendum_line=line, hypothesis=hypothesis, context=sig.context,
         rationale=f"targets {sig.support} '{sig.failure_class}' failures",
     )
 
@@ -1184,20 +1208,24 @@ def _apply_addendum(proposal: HarnessProposal, path: Path | None = None, *,
     written. The sidecar update is best-effort: a failure there never perturbs
     the addenda store (the source of truth)."""
     p = path if path is not None else _store_path()
+    # A domain-scoped line lands under a composite store key; a model-wide line
+    # under the bare model id (byte-identical to the pre-scoping store). The meta
+    # line-id and reconciliation use the SAME key, so the sidecar stays consistent
+    # with whichever block the line actually lives in.
+    store_key = _scoped_key(proposal.model_id, proposal.context)
     from .file_lock import cross_process_lock
     with _lock, cross_process_lock(p):
         before = load_addenda(p)
         after = dict(before)
         new_block = _compose_addendum(
-            proposal.model_id, before.get(proposal.model_id, ""),
-            proposal.addendum_line)
-        after[proposal.model_id] = new_block
+            store_key, before.get(store_key, ""), proposal.addendum_line)
+        after[store_key] = new_block
         _write_addenda(after, p)
         try:
             meta = load_line_meta(p)
-            _upsert_line_meta(meta, proposal.model_id, proposal.addendum_line,
+            _upsert_line_meta(meta, store_key, proposal.addendum_line,
                               provenance or {}, now=time.time())
-            _reconcile_meta(meta, proposal.model_id, _bullets(new_block))
+            _reconcile_meta(meta, store_key, _bullets(new_block))
             _write_line_meta(meta, p)
         except Exception:  # pragma: no cover -- sidecar is best-effort
             log.debug("self_harness: line-meta update failed", exc_info=True)
@@ -1215,34 +1243,43 @@ _recall_noted_monotonic: dict[str, float] = {}
 
 
 def note_recall(model_id: str | None, *, now: float | None = None,
-                path: Path | None = None, min_interval_s: float = 3600.0) -> None:
+                path: Path | None = None, min_interval_s: float = 3600.0,
+                domain: str | None = None) -> None:
     """Best-effort: record that ``model_id``'s guidance was just recalled, so
     staleness can be judged by USE, not only by promotion. In-process throttled
     (``min_interval_s``; 0 disables the throttle, for tests) so the hot recall
-    path does at most one cheap write per model per interval. Never raises."""
+    path does at most one cheap write per model per interval. Tracks the
+    model-wide block AND, when ``domain`` is given, the domain-scoped block (so a
+    recalled domain line isn't wrongly retired). Never raises."""
     if not model_id:
         return
     mid = str(model_id)
+    throttle_key = f"{mid}\x00{domain or ''}"
     if min_interval_s:
         mono = time.monotonic()
         with _recall_note_lock:
-            last = _recall_noted_monotonic.get(mid)
+            last = _recall_noted_monotonic.get(throttle_key)
             if last is not None and (mono - last) < min_interval_s:
                 return  # throttled -- pure in-memory, no I/O
-            _recall_noted_monotonic[mid] = mono
+            _recall_noted_monotonic[throttle_key] = mono
     try:
         p = path if path is not None else _store_path()
         ts = now if now is not None else time.time()
+        keys = [mid]
+        if domain:
+            keys.append(_scoped_key(mid, f"domain={domain}"))
         from .file_lock import cross_process_lock
         with _lock, cross_process_lock(p):
             meta = load_line_meta(p)
+            store = load_addenda(p)
             changed = False
-            for ln in _bullets(load_addenda(p).get(mid, "")):
-                rec = meta.get(_line_id(mid, ln))
-                if rec is not None:
-                    rec["last_recalled_at"] = ts
-                    rec["recall_notes"] = (rec.get("recall_notes") or 0) + 1
-                    changed = True
+            for key in keys:
+                for ln in _bullets(store.get(key, "")):
+                    rec = meta.get(_line_id(key, ln))
+                    if rec is not None:
+                        rec["last_recalled_at"] = ts
+                        rec["recall_notes"] = (rec.get("recall_notes") or 0) + 1
+                        changed = True
             if changed:
                 _write_line_meta(meta, p)
     except Exception:  # pragma: no cover -- usage tracking never perturbs a run
@@ -1591,9 +1628,11 @@ def run_self_harness(
                 continue
             report.promoted += 1
             report.applied_lines.append(proposal.addendum_line)
-            # Advisory conflict check: the new line is now in the block; flag any
-            # EXISTING line it appears to contradict (operator review, not a block).
-            existing = [ln for ln in _bullets(load_addenda(path).get(str(model_id), ""))
+            # Advisory conflict check within the block the line actually landed in
+            # (the scoped key for a domain line); flag any EXISTING line it appears
+            # to contradict (operator review, not a block).
+            block_key = _scoped_key(str(model_id), proposal.context)
+            existing = [ln for ln in _bullets(load_addenda(path).get(block_key, ""))
                         if _norm_line(ln) != _norm_line(proposal.addendum_line)]
             for c in find_conflicts(proposal.addendum_line, existing):
                 report.conflicts.append((proposal.addendum_line, c))
