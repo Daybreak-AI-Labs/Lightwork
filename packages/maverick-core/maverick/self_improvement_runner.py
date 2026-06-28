@@ -183,7 +183,11 @@ def run_self_harness_pass(
             score_with=score_with, score_without=score_without,
             propose_fn=propose_fn, controller=controller, min_support=min_support,
             require_held_out=require_held_out, min_delta=min_delta,
-            min_held_out=min_held_out)
+            min_held_out=min_held_out, confidence_z=st["confidence_z"],
+            max_cost_factor=st["max_cost_factor"],
+            max_latency_factor=st["max_latency_factor"],
+            max_tool_calls_factor=st["max_tool_calls_factor"],
+            min_support_by_class=st["min_support_by_class"])
     except Exception:  # pragma: no cover -- learning never perturbs a run
         log.debug("self-harness pass failed", exc_info=True)
         from . import self_harness

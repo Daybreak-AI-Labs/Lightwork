@@ -703,14 +703,66 @@ def test_settings_reads_and_clamps_config(monkeypatch):
         "min_held_out": 5, "min_delta": 0.05, "semantic_mining": True,
         "retire_after_days": 30}})
     st = sh.settings()
-    assert st == {"enable": True, "min_support": 7, "require_held_out": True,
-                  "min_held_out": 5, "min_delta": 0.05, "semantic_mining": True,
-                  "retire_after_days": 30.0}
+    for k, v in {"enable": True, "min_support": 7, "require_held_out": True,
+                 "min_held_out": 5, "min_delta": 0.05, "semantic_mining": True,
+                 "retire_after_days": 30.0}.items():
+        assert st[k] == v
     # bad/negative values clamp to safe defaults
     monkeypatch.setattr(config, "load_config", lambda *a, **k: {"self_harness": {
         "min_support": 0, "min_held_out": -3, "min_delta": "x"}})
     st2 = sh.settings()
     assert st2["min_support"] == 1 and st2["min_held_out"] == 0 and st2["min_delta"] == 0.0
+
+
+# ---------- wave 6: confidence, cost/latency, adaptive support ----------
+
+def test_wilson_lower_bound_rewards_more_evidence():
+    # same 100% rate, more samples -> higher (more confident) lower bound
+    assert sh._wilson_lower_bound(1, 1) < sh._wilson_lower_bound(50, 50)
+    assert sh._wilson_lower_bound(0, 0) == 0.0
+    assert 0.0 <= sh._wilson_lower_bound(8, 10) <= 1.0
+
+
+def test_validate_confidence_gate_rejects_lucky_small_sample():
+    p = _sig_proposal()
+    # candidate 1/1 on held-out vs baseline 0.0 -> point delta is +1.0, but the
+    # Wilson lower bound of 1/1 is well under the baseline+? confidence rejects.
+    vr = sh.validate_proposal(
+        p, held_in=["a", "b"], held_out=["o1"],
+        score_with=lambda a, c: 1.0, score_without=lambda a, c: 0.6,
+        confidence_z=1.96)
+    assert not vr.accepted and "not confident" in vr.reason
+    # plenty of held-out evidence -> the same lift IS confident
+    vr2 = sh.validate_proposal(
+        p, held_in=["a", "b"], held_out=[f"o{i}" for i in range(40)],
+        score_with=lambda a, c: 1.0, score_without=lambda a, c: 0.6,
+        confidence_z=1.96)
+    assert vr2.accepted
+
+
+def test_validate_rejects_cost_regression():
+    p = _sig_proposal()
+    sw = lambda a, c: {"success": 0.9, "cost": 2.0}      # noqa: E731
+    wo = lambda a, c: {"success": 0.5, "cost": 1.0}      # noqa: E731
+    # success improves, but cost doubled -> rejected under a 1.5x ceiling
+    vr = sh.validate_proposal(p, held_in=["a"], held_out=["b", "c"],
+                              score_with=sw, score_without=wo, max_cost_factor=1.5)
+    assert not vr.accepted and "cost regressed" in vr.reason
+    # under a looser ceiling it passes (and dict scorers still drive the delta)
+    vr2 = sh.validate_proposal(p, held_in=["a"], held_out=["b", "c"],
+                               score_with=sw, score_without=wo, max_cost_factor=3.0)
+    assert vr2.accepted
+
+
+def test_mine_adaptive_min_support_per_class():
+    def recs(fclass, goal, n):
+        return [{"model_id": "M", "failure_class": fclass, "goal_text": f"{goal} {i}",
+                 "failure_msg": "x", "channel": None, "user_id": None} for i in range(n)]
+    rs = recs("auth", "sync crm", 2) + recs("timeout", "export ledger", 2)
+    # global floor 3 -> nothing survives; auth lowered to 2 -> only the auth cluster
+    sigs = sh.mine_failures(rs, model_id="M", min_support=3,
+                            min_support_by_class={"auth": 2})
+    assert {s.failure_class for s in sigs} == {"auth"}
 
 
 def test_runner_pass_applies_config_floors(monkeypatch, store):

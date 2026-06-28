@@ -39,7 +39,7 @@ import re
 import threading
 import time
 import unicodedata
-from collections.abc import Callable
+from collections.abc import Callable, Mapping
 from dataclasses import dataclass, field
 from pathlib import Path
 
@@ -84,9 +84,11 @@ def settings() -> dict:
         from .config import get_self_harness
         return get_self_harness()
     except Exception:  # pragma: no cover -- config never blocks a run
-        return {"enable": False, "min_support": 3, "require_held_out": False,
-                "min_held_out": 0, "min_delta": 0.0, "semantic_mining": False,
-                "retire_after_days": 0.0}
+        return {"enable": False, "min_support": 3, "min_support_by_class": {},
+                "require_held_out": False, "min_held_out": 0, "min_delta": 0.0,
+                "confidence_z": 0.0, "max_cost_factor": None,
+                "max_latency_factor": None, "max_tool_calls_factor": None,
+                "semantic_mining": False, "retire_after_days": 0.0}
 
 
 def _store_path() -> Path:
@@ -466,7 +468,7 @@ def count_eligible(reflexions: list[dict], *, model_id: str) -> int:
 
 def mine_failures(
     reflexions: list[dict], *, model_id: str, min_support: int = 3,
-    similarity: float = 0.3,
+    similarity: float = 0.3, min_support_by_class: dict[str, int] | None = None,
 ) -> list[FailureSignature]:
     """Cluster ONE model's failure traces into recurring signatures.
 
@@ -512,6 +514,16 @@ def mine_failures(
 
     out: list[FailureSignature] = []
     for fclass, recs in by_class.items():
+        # Adaptive support: some failure classes warrant a lower (or higher)
+        # evidence bar -- two identical auth failures against the same connector
+        # are plenty; two unrelated timeouts may not be. Per-class override falls
+        # back to the global floor; clamped to >=1 so it can never admit a one-off.
+        eff_support = min_support
+        if min_support_by_class and fclass in min_support_by_class:
+            try:
+                eff_support = max(1, int(min_support_by_class[fclass]))
+            except (TypeError, ValueError):
+                eff_support = min_support
         clusters: list[list[dict]] = []
         # Cache each cluster HEAD's token set (parallel to ``clusters``). The
         # head's goal text never changes, so re-tokenizing it on every
@@ -532,7 +544,7 @@ def mine_failures(
                 clusters.append([r])
                 heads.append(rt)
         for cluster in clusters:
-            if len(cluster) < min_support:
+            if len(cluster) < eff_support:
                 continue
             examples = tuple(
                 dict.fromkeys(  # de-dupe, preserve order
@@ -756,15 +768,42 @@ class ValidationResult:
     samples: int = 0
 
 
-# (addendum_text, cases) -> success_rate in [0,1]. Injected: a live A/B needs a
-# real model, exactly like learning_rollout's constraints are injected.
-ScoreFn = Callable[[str, list[str]], float]
+# A scorer returns either a plain success rate in [0,1], OR a mapping
+# ``{"success": rate, "cost"?: float, "latency"?: float, "tool_calls"?: float}``
+# so validation can also gate on OPERATIONAL regressions (a line can raise the
+# pass rate while making the model slower / pricier / chattier). Injected: a
+# live A/B needs a real model, exactly like learning_rollout's constraints.
+ScoreFn = Callable[[str, list[str]], object]
+
+
+def _wilson_lower_bound(successes: float, n: int, z: float = 1.96) -> float:
+    """Lower bound of the Wilson score interval for a binomial proportion --
+    the statistically-honest "how good is this, conservatively?" given ``n``
+    observations. A 1-of-1 win has a low bound; a 50-of-50 win a high one."""
+    if n <= 0:
+        return 0.0
+    phat = max(0.0, min(1.0, successes / n))
+    z2 = z * z
+    denom = 1.0 + z2 / n
+    centre = phat + z2 / (2 * n)
+    margin = z * math.sqrt((phat * (1 - phat) + z2 / (4 * n)) / n)
+    return max(0.0, (centre - margin) / denom)
+
+
+def _score_parts(v: object) -> tuple:
+    """(success, cost, latency, tool_calls) from a scorer result -- a bare rate
+    or a mapping. Non-numeric/missing fields are ``None`` and simply not gated."""
+    if isinstance(v, Mapping):
+        return (v.get("success"), v.get("cost"), v.get("latency"), v.get("tool_calls"))
+    return (v, None, None, None)
 
 
 def validate_proposal(
     proposal: HarnessProposal, *, held_in: list[str], held_out: list[str],
     score_with: ScoreFn, score_without: ScoreFn,
-    min_delta: float = 0.0, min_held_out: int = 0,
+    min_delta: float = 0.0, min_held_out: int = 0, confidence_z: float = 0.0,
+    max_cost_factor: float | None = None, max_latency_factor: float | None = None,
+    max_tool_calls_factor: float | None = None,
 ) -> ValidationResult:
     """The Self-Harness acceptance test: a harness edit must not regress EITHER
     split and must help at least one (reject pure trades).
@@ -772,15 +811,22 @@ def validate_proposal(
     ``held_in`` are the mined cases the edit was written against; ``held_out``
     are unseen cases that guard against overfitting the edit to its own examples
     (the paper's central failure mode). ``score_with``/``score_without`` return
-    a success rate for the prompt WITH vs WITHOUT the candidate line.
+    a success rate (or a mapping with ``success`` + optional ``cost``/
+    ``latency``/``tool_calls``) for the prompt WITH vs WITHOUT the candidate line.
 
-    ``min_delta`` (effect-size floor) and ``min_held_out`` (unseen-sample floor)
-    default OFF (0.0 / 0), preserving the base rule. A live caller should set
-    them: agent eval scores are NOISY, so a sub-threshold lift or a 1-of-1
-    held-out "win" is not durable evidence (external-review hardening)."""
+    All of the following default OFF (preserving the base rule); a live caller
+    opts in. ``min_delta`` (effect-size floor) and ``min_held_out`` (unseen-sample
+    floor) -- a sub-threshold lift or a 1-of-1 held-out win is not durable
+    evidence. ``confidence_z`` (>0) requires the candidate's held-out Wilson lower
+    bound to clear the baseline rate -- statistically-confident generalization,
+    not luck. ``max_*_factor`` reject a candidate that regresses cost/latency/
+    tool-calls on the held-out split beyond the factor (a line in every prompt
+    must not quietly make the model slower or pricier)."""
     add = proposal.addendum_line
-    in_with, in_without = score_with(add, held_in), score_without(add, held_in)
-    out_with, out_without = score_with(add, held_out), score_without(add, held_out)
+    in_with, in_ci, in_li, in_ti = _score_parts(score_with(add, held_in))
+    in_without, *_ = _score_parts(score_without(add, held_in))
+    out_with, out_cost, out_lat, out_tc = _score_parts(score_with(add, held_out))
+    out_without, owo_cost, owo_lat, owo_tc = _score_parts(score_without(add, held_out))
     n = len(held_in) + len(held_out)
     # A score is a success RATE in [0,1]. A buggy/hostile scorer returning a
     # non-finite (NaN/inf) or out-of-range value must NOT drive a promotion: an
@@ -813,6 +859,28 @@ def validate_proposal(
             False, in_delta, out_delta,
             f"improvement below threshold ({max(in_delta, out_delta):.4g} < {min_delta})",
             **base)
+    # Statistical confidence: be CONFIDENT the candidate beats the baseline on
+    # unseen cases, not just lucky on a small sample (Wilson lower bound).
+    if confidence_z > 0 and held_out:
+        n_out = len(held_out)
+        lb = _wilson_lower_bound(round(out_with * n_out), n_out, confidence_z)
+        if lb < out_without:
+            return ValidationResult(
+                False, in_delta, out_delta,
+                f"held-out improvement not confident (lb {lb:.3g} < baseline {out_without:.3g})",
+                **base)
+    # Operational regression: a line that lifts pass rate but blows up cost,
+    # latency, or tool-call churn on the unseen split is not a net win.
+    for label, factor, cand, basel in (
+            ("cost", max_cost_factor, out_cost, owo_cost),
+            ("latency", max_latency_factor, out_lat, owo_lat),
+            ("tool_calls", max_tool_calls_factor, out_tc, owo_tc)):
+        if (factor is not None and isinstance(cand, (int, float))
+                and isinstance(basel, (int, float)) and cand > basel * factor):
+            return ValidationResult(
+                False, in_delta, out_delta,
+                f"{label} regressed on held-out ({cand:.3g} > {basel:.3g} x {factor})",
+                **base)
     return ValidationResult(True, in_delta, out_delta, "validated", **base)
 
 
@@ -984,6 +1052,9 @@ def run_self_harness(
     propose_fn: ProposeFn | None = None, controller=None,
     min_support: int = 3, path: Path | None = None,
     require_held_out: bool = False, min_delta: float = 0.0, min_held_out: int = 0,
+    confidence_z: float = 0.0, max_cost_factor: float | None = None,
+    max_latency_factor: float | None = None, max_tool_calls_factor: float | None = None,
+    min_support_by_class: dict[str, int] | None = None,
 ) -> SelfHarnessReport:
     """One self-harness pass for ``model_id``: mine weaknesses, propose minimal
     edits, validate on held-in/held-out, and GATE each survivor through the
@@ -998,7 +1069,8 @@ def run_self_harness(
         report.skipped.append("disabled")
         return report
     try:
-        sigs = mine_failures(reflexions, model_id=model_id, min_support=min_support)
+        sigs = mine_failures(reflexions, model_id=model_id, min_support=min_support,
+                             min_support_by_class=min_support_by_class)
         report.mined = len(sigs)
         for sig in sigs:
             # The addendum block holds at most _MAX_LINES_PER_MODEL lines. Stop
@@ -1029,7 +1101,10 @@ def run_self_harness(
                 proposal, held_in=held_in or list(sig.examples),
                 held_out=held_out or [], score_with=score_with,
                 score_without=score_without,
-                min_delta=min_delta, min_held_out=min_held_out)
+                min_delta=min_delta, min_held_out=min_held_out,
+                confidence_z=confidence_z, max_cost_factor=max_cost_factor,
+                max_latency_factor=max_latency_factor,
+                max_tool_calls_factor=max_tool_calls_factor)
             if not vr.accepted:
                 report.skipped.append(f"rejected ({vr.reason}): {proposal.addendum_line}")
                 continue
