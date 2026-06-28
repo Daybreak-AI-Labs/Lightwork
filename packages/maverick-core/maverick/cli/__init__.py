@@ -502,6 +502,146 @@ def version() -> None:
 
 
 @main.command()
+@click.option("--json", "as_json", is_flag=True,
+              help="Machine-readable output for FinOps/BI scripts.")
+@click.option("--tag-field", "tag_field", default="tag", show_default=True,
+              help="Episode/goal field to attribute spend by (team / project / cost-center).")
+@click.option("--limit", default=500, show_default=True,
+              help="Max recent priced episodes to scan.")
+@click.option("--top", default=15, show_default=True,
+              help="Show the top N goals by cost.")
+def spend(as_json: bool, tag_field: str, limit: int, top: int) -> None:
+    """Print spend — total, per-goal, and per-tag run costs.
+
+    The CLI face of the /spend dashboard: pull FinOps data into scripts and
+    chargeback exports without the dashboard. Use --json for a stable shape.
+    """
+    import json as _json
+
+    from ..cost.by_tag import gather, render, split_by_tag
+    from ..world_model import DEFAULT_DB, WorldModel
+    w = WorldModel(DEFAULT_DB)
+    total = w.total_spend()
+
+    by_goal: dict[int, dict] = {}
+    for e in w.list_episodes(limit=max(limit, top * 8)):
+        b = by_goal.setdefault(e.goal_id, {
+            "goal_id": e.goal_id, "cost": 0.0,
+            "input_tokens": 0, "output_tokens": 0, "runs": 0})
+        b["cost"] += e.cost_dollars
+        b["input_tokens"] += e.input_tokens
+        b["output_tokens"] += e.output_tokens
+        b["runs"] += 1
+    goals = sorted(by_goal.values(), key=lambda x: x["cost"], reverse=True)[:top]
+    for g in goals:
+        try:
+            go = w.get_goal(g["goal_id"])
+        except Exception:
+            go = None
+        g["cost"] = round(g["cost"], 6)
+        g["title"] = (go.title if go else "") or ""
+
+    tags = split_by_tag(gather(w, tag_field=tag_field, limit=limit))
+
+    if as_json:
+        click.echo(_json.dumps(
+            {"total": total, "by_goal": goals, "by_tag": tags,
+             "tag_field": tag_field}, indent=2))
+        return
+
+    click.echo(click.style("Total spend", bold=True))
+    click.echo(
+        f"  ${total['dollars']:.4f}   "
+        f"{int(total['input_tokens']):,} in / {int(total['output_tokens']):,} out tok   "
+        f"{int(total['runs'])} runs")
+    click.echo("")
+    click.echo(click.style(f"Top {len(goals)} goals by cost", bold=True))
+    if not goals:
+        click.echo("  (no priced episodes yet)")
+    for g in goals:
+        title = g["title"]
+        if len(title) > 44:
+            title = title[:43] + "…"
+        click.echo(f"  ${g['cost']:>9.4f}  #{g['goal_id']:<5} {title}  ({g['runs']} runs)")
+    click.echo("")
+    click.echo(click.style(f"Spend by {tag_field}", bold=True))
+    click.echo("  " + render(tags).replace("\n", "\n  "))
+
+
+@main.command()
+@click.option("--json", "as_json", is_flag=True,
+              help="Machine-readable posture for CI assertions.")
+def safety(as_json: bool) -> None:
+    """Print the safety posture — shield, sandbox backend, egress policy.
+
+    Assert deployment safety in CI without the dashboard (e.g. fail a pipeline
+    if the sandbox is unisolated). Exits 0; gate on the --json fields.
+    """
+    import json as _json
+
+    from ..config import get_sandbox
+    try:
+        from maverick_shield import Shield
+        shield = {"installed": True,
+                  "backend": Shield.from_config(warn_if_missing=False).backend}
+    except ImportError:
+        shield = {"installed": False, "backend": None}
+    except Exception:
+        shield = {"installed": True, "backend": None}
+
+    sb = get_sandbox()
+    backend = str(sb.get("backend", "local") or "local").strip().lower()
+    isolated = backend not in ("local", "")
+
+    try:
+        from ..enterprise import enterprise_enabled
+        locked = bool(enterprise_enabled())
+    except Exception:
+        locked = False
+    try:
+        from ..enterprise import _allowed_egress_hosts
+        hosts = sorted(_allowed_egress_hosts())
+    except Exception:
+        hosts = []
+    try:
+        from ..profile import active_profile
+        profile = active_profile()
+    except Exception:
+        profile = "standard"
+
+    posture = {
+        "profile": profile,
+        "shield": shield,
+        "sandbox": {"backend": backend, "isolated": isolated,
+                    "workdir": sb.get("workdir")},
+        "egress": {"locked": locked, "allowed_hosts": hosts},
+    }
+    if as_json:
+        click.echo(_json.dumps(posture, indent=2))
+        return
+
+    def mark(ok: bool) -> str:
+        return click.style("✔", fg="green") if ok else click.style("•", fg="yellow")
+
+    click.echo(click.style(f"Safety posture  (profile = {profile})", bold=True))
+    if shield["installed"]:
+        click.echo(f"  {mark(True)} shield   installed (backend = {shield['backend']})")
+    else:
+        click.echo(f"  {mark(False)} shield   not installed — kernel fails open "
+                   "(built-in fallback rules screen tool calls)")
+    if isolated:
+        click.echo(f"  {mark(True)} sandbox  {backend} (container-isolated)")
+    else:
+        click.echo(f"  {mark(False)} sandbox  {backend} — model-generated shell runs "
+                   "on this host with NO container isolation")
+    if locked:
+        click.echo(f"  {mark(True)} egress   LOCKED (enterprise boundary)"
+                   + (f" — allowed hosts: {', '.join(hosts)}" if hosts else ""))
+    else:
+        click.echo(f"  {mark(False)} egress   open (cloud-capable; not locked)")
+
+
+@main.command()
 @click.option("--output", "-o", "output", default=None,
               help="Write the bundle to this file (chmod 600) instead of stdout.")
 def support(output: str | None) -> None:
