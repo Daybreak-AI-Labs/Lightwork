@@ -19,8 +19,11 @@ record *why* it was flagged.
 Privacy: the high-risk classifier inspects typed *values* in memory, but the
 audit ``detail`` records selectors/coordinates and value *lengths* only -- a
 typed password or PII value must never land in the (potentially exported)
-audit log. Click/key targets are recorded verbatim because they are the
-operator-visible label that makes an approval meaningful.
+audit log. Navigation URLs are recorded without userinfo, query strings,
+or fragments so reset tokens, OAuth codes, pre-signed signatures, and email
+addresses in URL parameters are not persisted. Click/key targets are recorded
+verbatim because they are the operator-visible label that makes an approval
+meaningful.
 
 Gating is opt-in by the same switch as every other consent gate: with the
 default ``MAVERICK_CONSENT_MODE=auto-approve`` this is a logged no-op; ``ask``
@@ -31,6 +34,7 @@ from __future__ import annotations
 
 import re
 from typing import Any
+from urllib.parse import urlsplit, urlunsplit
 
 from .consent import ConsentDenied, require_consent
 
@@ -68,6 +72,30 @@ def _short(text: str | None) -> str | None:
         return None
     out = " ".join(str(text).split())[:_MAX_DETAIL]
     return out or None
+
+
+def _safe_url_label(url: str | None) -> str | None:
+    """Return a consent/audit-safe URL label without secret-bearing parts."""
+    if not url:
+        return None
+    text = str(url)
+    try:
+        parts = urlsplit(text)
+    except ValueError:
+        return "[invalid URL]"
+    if not parts.scheme and not parts.netloc:
+        return text.split("?", 1)[0].split("#", 1)[0] or "[URL]"
+    host = parts.hostname or ""
+    try:
+        port = parts.port
+    except ValueError:
+        port = None
+    if port is not None:
+        host = f"{host}:{port}"
+    netloc = host
+    if parts.scheme and not netloc:
+        return urlunsplit((parts.scheme, "", parts.path, "", "")) or "[URL]"
+    return urlunsplit((parts.scheme, netloc, parts.path, "", "")) or "[URL]"
 
 
 def _matches_high_risk(*texts: str | None, key: str | None = None) -> bool:
@@ -159,7 +187,7 @@ def gate_browser_action(action: str, args: dict[str, Any]) -> str | None:
     fields = raw_fields if isinstance(raw_fields, dict) else None
     field_keys = list(fields.keys()) if fields else []
     if action == "navigate":
-        scope = detail = url or action
+        scope = detail = _safe_url_label(url) or action
     elif action == "fill_form":
         scope = "fill_form"
         shown = ", ".join(str(k) for k in field_keys[:5])
