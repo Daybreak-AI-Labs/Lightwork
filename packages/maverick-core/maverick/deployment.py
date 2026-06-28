@@ -41,6 +41,36 @@ _CLOUD_PROBE = "anthropic"
 _LOCAL_PROBE = "ollama"
 _SEAL_PROBE = "maverick-at-rest-probe"
 
+_ISOLATED_SANDBOX_BACKENDS = {
+    "devcontainer",
+    "docker",
+    "firecracker",
+    "gvisor",
+    "kubernetes",
+    "modal",
+    "podman",
+}
+
+
+def _sandbox_isolated(backend: str) -> bool:
+    """Return whether ``backend`` names a supported isolated sandbox backend."""
+    return backend in _ISOLATED_SANDBOX_BACKENDS or backend.startswith("ep:")
+
+
+def _sandbox_isolation_detail(backend: str, sandboxed: bool) -> str:
+    if sandboxed:
+        return f"backend = {backend}"
+    if backend in ("", "local"):
+        return (
+            "set [sandbox] backend = \"docker\" (or podman/gvisor/kubernetes/"
+            "firecracker); 'local' runs agent code on the host unsandboxed"
+        )
+    known = ", ".join(sorted(_ISOLATED_SANDBOX_BACKENDS))
+    return (
+        f"unsupported [sandbox] backend = {backend!r}; use one of: {known}, "
+        "or an ep:<name> Sandbox SDK backend"
+    )
+
 
 @dataclass(frozen=True)
 class GuaranteeCheck:
@@ -145,13 +175,11 @@ def verify_deployment() -> list[GuaranteeCheck]:
         ).strip().lower()
     except Exception:
         pass
-    sandboxed = backend not in ("", "local")
+    sandboxed = _sandbox_isolated(backend)
     checks.append(GuaranteeCheck(
         "Sandbox isolation",
         sandboxed,
-        f"backend = {backend}" if sandboxed
-        else "set [sandbox] backend = \"docker\" (or podman/gvisor/kubernetes/"
-             "firecracker); 'local' runs agent code on the host unsandboxed",
+        _sandbox_isolation_detail(backend, sandboxed),
     ))
 
     # 7. Threat shield -- the input/tool/output screen must be installed and
