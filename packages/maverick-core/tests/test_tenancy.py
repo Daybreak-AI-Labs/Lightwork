@@ -52,14 +52,20 @@ def test_tenant_encoding_is_collision_resistant(monkeypatch):
     ).resolve()
 
 
-def test_tenant_segment_nfc_normalised(monkeypatch):
+def test_tenant_segment_preserves_unicode_normalization_forms(monkeypatch):
     monkeypatch.delenv("MAVERICK_TENANT", raising=False)
     import unicodedata
-    nfc = unicodedata.normalize("NFC", "josé")   # "josé" precomposed
-    nfd = unicodedata.normalize("NFD", "josé")   # "josé" decomposed
-    assert nfc != nfd  # distinct byte sequences pre-normalisation
-    # ...but the same on-disk namespace, so one tenant's data isn't split in two.
-    assert data_dir("memory", tenant=nfc) == data_dir("memory", tenant=nfd)
+
+    nfc = unicodedata.normalize("NFC", "slack:josé")
+    nfd = unicodedata.normalize("NFD", "slack:josé")
+    assert nfc != nfd  # distinct identity strings before path encoding
+
+    # Tenant ids are identity values. The path encoder must not canonicalize
+    # them globally because tenant-by-user deployments may receive raw external
+    # principal ids that are normalization-equivalent but distinct.
+    assert data_dir("memory", tenant=nfc) != data_dir("memory", tenant=nfd)
+    assert "%C3%A9" in str(data_dir("memory", tenant=nfc))
+    assert "e%CC%81" in str(data_dir("memory", tenant=nfd))
 
 
 # --- data_dir --------------------------------------------------------------
