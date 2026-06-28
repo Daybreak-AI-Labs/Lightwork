@@ -45,12 +45,12 @@ def test_third_party_cards_validate():
 
 
 def test_own_card_passes_own_validator():
-    """Self-interop: the card Maverick serves is consumable by its own
+    """Self-interop: the card Lightwork serves is consumable by its own
     consuming half (and therefore by any conformant peer)."""
     card = a2a.build_agent_card(base_url="https://mvk.example")
     assert a2a.validate_agent_card(card) == []
     parsed = a2a.parse_remote_card(card)
-    assert parsed["name"] == "Maverick" and parsed["streaming"] is True
+    assert parsed["name"] == "Lightwork" and parsed["streaming"] is True
 
 
 def test_parse_remote_card_normalizes():

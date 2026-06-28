@@ -127,7 +127,7 @@ def test_disabled_by_default_and_env_opt_in(monkeypatch):
 
 def test_hello_returns_parsed_agent_card():
     card = _node(_service()).hello("B")
-    assert card["name"] == "Maverick"
+    assert card["name"] == "Lightwork"
     assert card["url"].endswith("/a2a/v1")
     assert {s["id"] for s in card["skills"]} >= {"execute-goal"}
 
@@ -377,7 +377,7 @@ def test_grpc_servicer_maps_messages_over_the_dict_seam():
     info = servicer.Hello(
         SimpleNamespace(node="A", protocol=PROTOCOL, auth_token="tok"), _Context())
     assert info.protocol == PROTOCOL
-    assert json.loads(info.agent_card_json)["name"] == "Maverick"
+    assert json.loads(info.agent_card_json)["name"] == "Lightwork"
 
     result = servicer.DelegateGoal(SimpleNamespace(
         goal_title="t", goal_description="", correlation_id="c5",
