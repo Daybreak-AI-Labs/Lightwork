@@ -144,17 +144,17 @@ def run_self_harness_pass(
     score_with=None, score_without=None, propose_fn=None, controller=None,
     min_support: int | None = None, limit: int = 500,
     require_held_out: bool | None = None, min_delta: float | None = None,
-    min_held_out: int | None = None,
+    min_held_out: int | None = None, candidates_per_signature: int | None = None,
 ):
     """The automatic entry point for the self-harness loop (mine -> propose ->
     validate -> gate), to be called by a scheduler / the self-improvement loop.
 
     Resolves ``model_id`` to the configured orchestrator model and loads recent
     model-tagged reflexions when not supplied. The tuning knobs
-    (``min_support``/``require_held_out``/``min_delta``/``min_held_out``) default
-    to ``None`` and are then filled from ``[self_harness]`` config, so an
-    operator's settings take effect automatically; an explicit argument overrides
-    config. ``score_with``/``score_without`` are the LIVE held-in/held-out A/B
+    (``min_support``/``require_held_out``/``min_delta``/``min_held_out``/
+    ``candidates_per_signature``) default to ``None`` and are then filled from
+    ``[self_harness]`` config, so an operator's settings take effect
+    automatically; an explicit argument overrides config. ``score_with``/``score_without`` are the LIVE held-in/held-out A/B
     over the candidate prompt -- injected by the caller because a real evaluation
     needs a real model; without them the pass is a dry inspection that writes
     nothing. Never raises -- a learning pass must not perturb anything.
@@ -172,6 +172,8 @@ def run_self_harness_pass(
             min_delta = st["min_delta"]
         if min_held_out is None:
             min_held_out = st["min_held_out"]
+        if candidates_per_signature is None:
+            candidates_per_signature = st["candidates_per_signature"]
         if not model_id:
             from .llm import model_for_role
             model_id = model_for_role("orchestrator")
@@ -187,7 +189,8 @@ def run_self_harness_pass(
             max_cost_factor=st["max_cost_factor"],
             max_latency_factor=st["max_latency_factor"],
             max_tool_calls_factor=st["max_tool_calls_factor"],
-            min_support_by_class=st["min_support_by_class"])
+            min_support_by_class=st["min_support_by_class"],
+            candidates_per_signature=candidates_per_signature)
     except Exception:  # pragma: no cover -- learning never perturbs a run
         log.debug("self-harness pass failed", exc_info=True)
         from . import self_harness

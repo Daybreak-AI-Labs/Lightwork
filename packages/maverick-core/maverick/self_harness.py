@@ -88,7 +88,8 @@ def settings() -> dict:
                 "require_held_out": False, "min_held_out": 0, "min_delta": 0.0,
                 "confidence_z": 0.0, "max_cost_factor": None,
                 "max_latency_factor": None, "max_tool_calls_factor": None,
-                "semantic_mining": False, "retire_after_days": 0.0}
+                "semantic_mining": False, "retire_after_days": 0.0,
+                "candidates_per_signature": 1}
 
 
 def _store_path() -> Path:
@@ -197,6 +198,7 @@ def _upsert_line_meta(meta: dict[str, dict], model_id: str, line: str,
         "model_id": model_id, "text": line,
         "signature": provenance.get("signature"),
         "rationale": provenance.get("rationale"),
+        "hypothesis": provenance.get("hypothesis"),
         "held_out_delta": provenance.get("held_out_delta"),
         "samples": provenance.get("samples"),
         "learned_at": rec.get("learned_at", now),
@@ -212,7 +214,7 @@ def line_provenance(model_id: str, path: Path | None = None) -> list[dict]:
     with no record. Read-only; powers ``self-harness show --verbose``."""
     block = load_addenda(path).get(str(model_id), "")
     meta = load_line_meta(path)
-    fields = ("signature", "rationale", "held_out_delta", "samples",
+    fields = ("signature", "rationale", "hypothesis", "held_out_delta", "samples",
               "learned_at", "updated_at", "last_recalled_at", "recall_notes")
     out = []
     for ln in _bullets(block):
@@ -584,11 +586,30 @@ class HarnessProposal:
     signature: str
     addendum_line: str          # the minimal guidance to add
     rationale: str
+    hypothesis: str = ""         # optional richer "why this line should help",
+                                 # supplied by a structured proposer. METADATA
+                                 # ONLY -- it rides into the audit + provenance
+                                 # sidecar, never into the recalled prompt.
 
 
-# An injected proposer: given a signature, return a single short guidance line
-# (the model proposing how to avoid its OWN recurring failure). Pure/seam.
-ProposeFn = Callable[[FailureSignature], str]
+# An injected proposer: given a signature, return EITHER a single short guidance
+# line (str) OR a structured mapping ``{"line": str, "hypothesis"?: str}`` -- a
+# richer proposer (e.g. an LLM in the GEPA/RPT shape) can return its reasoning
+# alongside the line. The model proposes how to avoid its OWN recurring failure.
+# Pure/seam.
+ProposeFn = Callable[[FailureSignature], "str | Mapping[str, str]"]
+
+
+def _proposal_parts(raw: object) -> tuple[str, str]:
+    """Split a proposer's return into ``(line, hypothesis)``. A bare string is
+    the line with no hypothesis; a mapping may carry ``line`` (or the legacy
+    ``addendum_line``) plus an optional ``hypothesis``. Anything else is empty --
+    a malformed return degrades to "no proposal", it never crashes the loop."""
+    if isinstance(raw, Mapping):
+        line = raw.get("line") or raw.get("addendum_line") or ""
+        hypothesis = raw.get("hypothesis") or ""
+        return (str(line), str(hypothesis))
+    return (str(raw or ""), "")
 
 def _sanitize_line(text: str) -> str:
     """Neutralize a proposed addendum line before it can enter a prompt.
@@ -691,34 +712,77 @@ def _default_propose(sig: FailureSignature) -> str:
             f"tripped you before acting.")
 
 
+def _parse_structured_proposal(text: str) -> dict | None:
+    """Best-effort parse of a structured proposer's JSON ``{"line","hypothesis"}``.
+    Tolerates a fenced ```json block or surrounding prose by extracting the first
+    balanced ``{...}`` slice. Returns ``None`` if nothing parseable with a string
+    ``line`` is found -- the caller then falls back to plain-line extraction, so a
+    model that ignores the format still works."""
+    s = str(text or "")
+    i, j = s.find("{"), s.rfind("}")
+    if i == -1 or j == -1 or j <= i:
+        return None
+    try:
+        obj = json.loads(s[i:j + 1])
+    except Exception:
+        return None
+    if not isinstance(obj, dict):
+        return None
+    line = obj.get("line") or obj.get("addendum_line") or ""
+    hyp = obj.get("hypothesis") or ""
+    if not isinstance(line, str) or not line.strip():
+        return None
+    return {"line": line, "hypothesis": hyp if isinstance(hyp, str) else ""}
+
+
 def llm_proposer(llm, *, budget=None, model: str | None = None,
-                 max_tokens: int = 200) -> ProposeFn:
+                 max_tokens: int = 240, structured: bool = True) -> ProposeFn:
     """Build a REFLECTIVE proposer backed by an LLM -- the GEPA/RPT shape
     (arXiv 2507.19457, 2605.21781): read the mined failure signature + example
     goals and write ONE minimal operating-guidance line. Injected exactly like
     any other ``propose_fn``; the model is NOT hard-coded (kernel rule 2) --
     pass ``model`` or let the ``llm``'s own resolved model stand.
 
-    Fails OPEN to :func:`_default_propose` on any provider error, empty output,
-    or non-finite result, so a flaky model never blocks or skips a pass. The
-    returned line still flows through ``propose_addendum``'s ``_sanitize_line``
-    + length gate, so an attacker-influenced model cannot smuggle control chars,
-    secrets, or multi-line break-outs past the existing defenses."""
-    def _propose(sig: FailureSignature) -> str:
+    With ``structured`` (default) the proposer asks for a small JSON object
+    ``{"line", "hypothesis"}`` so the model's REASONING is captured alongside the
+    line (it rides into the audit + provenance sidecar, never the prompt). The
+    parse is best-effort: a model that returns a bare line instead still works
+    (the text becomes the line), and any provider/parse error falls OPEN to
+    :func:`_default_propose`, so a flaky or off-format model never blocks a pass.
+    Whichever shape comes back, the line still flows through ``propose_addendum``'s
+    ``_sanitize_line`` + length + policy gates, so an attacker-influenced model
+    cannot smuggle control chars, secrets, or multi-line break-outs."""
+    def _propose(sig: FailureSignature):
         try:
-            system = (
-                "You tune a coding agent's operating guidance. Given a recurring "
-                "failure pattern for ONE model, write a single short imperative "
-                "guidance line (<=200 characters, no preamble, no markdown, no "
-                "newlines) that, added to that model's system prompt, would help "
-                "it avoid this class of failure. Be specific and minimal.")
+            if structured:
+                system = (
+                    "You tune a coding agent's operating guidance. Given a "
+                    "recurring failure pattern for ONE model, return a JSON object "
+                    'with two string fields: "line" -- a single short imperative '
+                    "guidance line (<=200 characters, no markdown, no newlines) "
+                    "that, added to that model's system prompt, would help it "
+                    'avoid this class of failure; and "hypothesis" -- one sentence '
+                    "on why that line should help. Be specific and minimal. Return "
+                    "only the JSON object.")
+            else:
+                system = (
+                    "You tune a coding agent's operating guidance. Given a recurring "
+                    "failure pattern for ONE model, write a single short imperative "
+                    "guidance line (<=200 characters, no preamble, no markdown, no "
+                    "newlines) that, added to that model's system prompt, would help "
+                    "it avoid this class of failure. Be specific and minimal.")
             examples = "\n".join(f"- {e}" for e in sig.examples[:3]) or "(none)"
             user = (f"Model: {sig.model_id}\nFailure class: {sig.failure_class}\n"
                     f"Signature: {sig.signature}\nExample goals that failed:\n"
-                    f"{examples}\n\nGuidance line:")
+                    f"{examples}\n\n" + ("JSON:" if structured else "Guidance line:"))
             resp = llm.complete(system, [{"role": "user", "content": user}],
                                 budget=budget, max_tokens=max_tokens, model=model)
             text = (getattr(resp, "text", "") or "")
+            if structured:
+                parsed = _parse_structured_proposal(text)
+                if parsed:
+                    return parsed
+            # Plain-line extraction -- also the fallback when JSON parsing failed.
             line = next((s.strip() for s in text.splitlines() if s.strip()), "")
             line = line.lstrip("-*•> ").strip().strip('"').strip()
             if line:
@@ -732,11 +796,14 @@ def llm_proposer(llm, *, budget=None, model: str | None = None,
 def propose_addendum(sig: FailureSignature, *, propose_fn: ProposeFn | None = None,
                      ) -> HarnessProposal | None:
     """Produce a MINIMAL guidance line for ``sig`` via the injected proposer
-    (or the deterministic fallback). Returns ``None`` if the proposal is empty
-    or too long to be 'minimal'."""
+    (or the deterministic fallback). The proposer may return a bare line or a
+    structured ``{"line", "hypothesis"?}`` mapping -- the hypothesis (a richer
+    'why this should help') is carried as METADATA into the audit + provenance,
+    never into the prompt. Returns ``None`` if the proposal is empty or too long
+    to be 'minimal'."""
     fn = propose_fn or _default_propose
     try:
-        line = fn(sig) or ""
+        line, hypothesis = _proposal_parts(fn(sig))
     except Exception as e:  # pragma: no cover -- a bad proposer can't crash the loop
         log.warning("self_harness: proposer failed for %s (%s)", sig.signature, e)
         return None
@@ -746,9 +813,15 @@ def propose_addendum(sig: FailureSignature, *, propose_fn: ProposeFn | None = No
     if _erodes_policy(line):  # semantic screen: no "bypass/ignore <safety>" guidance
         log.warning("self_harness: refused policy-eroding proposal: %r", line)
         return None
+    # The hypothesis rides into the signed audit + the provenance sidecar (a human
+    # reads both), so it gets the SAME syntactic scrub as the line -- control
+    # chars / secrets / multi-line stripped -- plus a length bound. It is NOT
+    # policy-screened: it never enters a prompt, it only annotates WHY a line was
+    # learned, so the positive-phrasing rule the prompt needs doesn't apply.
+    hypothesis = _sanitize_line(hypothesis)[:280]
     return HarnessProposal(
         model_id=sig.model_id, signature=sig.signature,
-        addendum_line=line,
+        addendum_line=line, hypothesis=hypothesis,
         rationale=f"targets {sig.support} '{sig.failure_class}' failures",
     )
 
@@ -1045,6 +1118,47 @@ class SelfHarnessReport:
     conflicts: list[tuple[str, str]] = field(default_factory=list)
 
 
+def _best_validated_candidate(
+    sig: FailureSignature, *, first: HarnessProposal, propose_fn, k: int,
+    held_in: list[str], held_out: list[str], score_with, score_without,
+    validate_kwargs: dict,
+) -> tuple[HarnessProposal | None, ValidationResult | None]:
+    """Best-of-N candidate selection (GEPA-style): generate up to ``k`` candidate
+    lines for one signature, validate each, and keep the strongest ACCEPTED one.
+
+    ``first`` is the proposal already in hand (counted once by the caller); up to
+    ``k-1`` more are drawn from ``propose_fn`` and de-duped by normalized line, so
+    a DETERMINISTIC proposer -- which returns the same line every call -- collapses
+    to exactly the single-candidate result and ``k`` only ever matters for a
+    STOCHASTIC (e.g. LLM-at-temperature) proposer. "Best" is the highest held-out
+    delta (the generalization signal), ties broken toward more samples; operational
+    REGRESSIONS were already rejected inside ``validate_proposal``, so this only
+    PREFERS the strongest survivor. ``(None, None)`` if none pass."""
+    candidates = [first]
+    for _ in range(max(0, k - 1)):
+        p = propose_addendum(sig, propose_fn=propose_fn)
+        if p is not None:
+            candidates.append(p)
+    seen: set[str] = set()
+    best: tuple[tuple, HarnessProposal, ValidationResult] | None = None
+    for proposal in candidates:
+        norm = _norm_line(proposal.addendum_line)
+        if norm in seen:
+            continue
+        seen.add(norm)
+        vr = validate_proposal(
+            proposal, held_in=held_in, held_out=held_out,
+            score_with=score_with, score_without=score_without, **validate_kwargs)
+        if not vr.accepted:
+            continue
+        key = (round(vr.held_out_delta, 6), vr.samples)
+        if best is None or key > best[0]:
+            best = (key, proposal, vr)
+    if best is None:
+        return None, None
+    return best[1], best[2]
+
+
 def run_self_harness(
     reflexions: list[dict], *, model_id: str,
     held_in: list[str] | None = None, held_out: list[str] | None = None,
@@ -1055,6 +1169,7 @@ def run_self_harness(
     confidence_z: float = 0.0, max_cost_factor: float | None = None,
     max_latency_factor: float | None = None, max_tool_calls_factor: float | None = None,
     min_support_by_class: dict[str, int] | None = None,
+    candidates_per_signature: int = 1,
 ) -> SelfHarnessReport:
     """One self-harness pass for ``model_id``: mine weaknesses, propose minimal
     edits, validate on held-in/held-out, and GATE each survivor through the
@@ -1097,17 +1212,31 @@ def run_self_harness(
             if require_held_out and not held_out:
                 report.skipped.append(f"no held-out cases: {proposal.addendum_line}")
                 continue
-            vr = validate_proposal(
-                proposal, held_in=held_in or list(sig.examples),
-                held_out=held_out or [], score_with=score_with,
-                score_without=score_without,
+            validate_kwargs = dict(
                 min_delta=min_delta, min_held_out=min_held_out,
                 confidence_z=confidence_z, max_cost_factor=max_cost_factor,
                 max_latency_factor=max_latency_factor,
                 max_tool_calls_factor=max_tool_calls_factor)
-            if not vr.accepted:
-                report.skipped.append(f"rejected ({vr.reason}): {proposal.addendum_line}")
-                continue
+            hi, ho = held_in or list(sig.examples), held_out or []
+            if candidates_per_signature and candidates_per_signature > 1:
+                # Best-of-N: keep the strongest of several candidate lines for this
+                # signature (only meaningful with a stochastic proposer; a
+                # deterministic one collapses to the single candidate).
+                proposal, vr = _best_validated_candidate(
+                    sig, first=proposal, propose_fn=propose_fn,
+                    k=candidates_per_signature, held_in=hi, held_out=ho,
+                    score_with=score_with, score_without=score_without,
+                    validate_kwargs=validate_kwargs)
+                if proposal is None or vr is None:
+                    report.skipped.append(f"rejected (no candidate passed): {sig.signature}")
+                    continue
+            else:
+                vr = validate_proposal(
+                    proposal, held_in=hi, held_out=ho, score_with=score_with,
+                    score_without=score_without, **validate_kwargs)
+                if not vr.accepted:
+                    report.skipped.append(f"rejected ({vr.reason}): {proposal.addendum_line}")
+                    continue
             report.validated += 1
 
             ok, why = _gate_and_apply(proposal, vr, controller=controller, path=path)
@@ -1156,7 +1285,8 @@ def _gate_and_apply(proposal: HarnessProposal, vr: ValidationResult, *,
         samples=vr.samples,
         payload={"model_id": proposal.model_id, "line": proposal.addendum_line},
         rollback=_rollback_handle(path),
-        provenance={"source": "self_harness", "signature": proposal.signature},
+        provenance={"source": "self_harness", "signature": proposal.signature,
+                    "hypothesis": proposal.hypothesis or None},
     )
     verdict = si.consider(cand, controller=controller)
     if not getattr(verdict, "ok", False):
@@ -1164,6 +1294,7 @@ def _gate_and_apply(proposal: HarnessProposal, vr: ValidationResult, *,
         return False, reason  # gate refused -> nothing written
     _apply_addendum(proposal, path=path, provenance={
         "signature": proposal.signature, "rationale": proposal.rationale,
+        "hypothesis": proposal.hypothesis or None,
         "held_out_delta": round(vr.held_out_delta, 4), "samples": vr.samples})
     try:
         from .audit import EventKind, record
@@ -1177,6 +1308,7 @@ def _gate_and_apply(proposal: HarnessProposal, vr: ValidationResult, *,
                model_id=proposal.model_id, rung="prompt",
                line=proposal.addendum_line, phase="apply",
                signature=proposal.signature, rationale=proposal.rationale,
+               hypothesis=proposal.hypothesis or None,
                held_out_delta=round(vr.held_out_delta, 4), samples=vr.samples)
     except Exception:  # pragma: no cover -- audit best-effort
         pass

@@ -39,7 +39,17 @@ than adding a new ungoverned optimizer:
    per-class guidance, not a generic "slow down" line — arXiv 2603.23994 warns
    the starting artifact bounds what the loop can learn) and runs without a
    provider, so the loop stays testable offline. Either way the line flows
-   through `_sanitize_line` + the length gate.
+   through `_sanitize_line` + the length gate. A proposer may also return a
+   **structured** `{line, hypothesis}` (the LLM proposer asks for JSON and parses
+   it best-effort, falling back to a plain line then the deterministic fallback);
+   the *hypothesis* — a one-line "why this should help" — is carried as METADATA
+   into the signed audit + provenance sidecar, never into the prompt (it is
+   scrubbed like the line but not policy-screened, since it can't ride a prompt).
+   With `candidates_per_signature > 1` the stage does **best-of-N**: it draws
+   several candidate lines for the signature, validates each, and promotes the
+   strongest survivor (highest held-out delta) — GEPA-style Pareto selection that
+   only matters for a *stochastic* proposer (a deterministic one collapses to the
+   single candidate, so the determinism guarantee is unchanged at the default).
 3. **VALIDATE** — `validate_proposal(...)` runs the paper's acceptance test: the
    edit must not regress **either** a held-in split (the mined cases) or a
    **held-out** split (unseen cases — the overfitting guard), and must help at
@@ -101,7 +111,8 @@ safety model as skills and insights.
   rather than spending a second slot on a trivial reword — an ACE-style guard
   against "context collapse"/"brevity bias" (arXiv 2510.04618).
 - **Auditable provenance:** every applied line's signed `LEARNING_UPDATE` row
-  carries *why* it was learned — the weakness signature + rationale and the
+  carries *why* it was learned — the weakness signature + rationale, the
+  proposer's *hypothesis* (when a structured proposer supplied one), and the
   unseen-split evidence (`held_out_delta`, `samples`) — not just the text, so a
   rollback or compliance review can see the diagnostic behind each edit. The
   same provenance is also kept in a **structured per-line sidecar** (`*.meta.json`,
@@ -135,7 +146,9 @@ safety model as skills and insights.
 
 Config (`[self_harness]`, resolved by `config.get_self_harness` / `settings()`):
 `enable`, `min_support`, the validation floors (`require_held_out`, `min_held_out`,
-`min_delta`), `semantic_mining`, and `retire_after_days`. Defaults preserve the
+`min_delta`, `confidence_z`, `max_cost_factor`/`max_latency_factor`/
+`max_tool_calls_factor`, `min_support_by_class`), `candidates_per_signature`
+(best-of-N proposing), `semantic_mining`, and `retire_after_days`. Defaults preserve the
 loop's historical behavior; the installer wizard ships production-safe floors
 when self-harness is enabled. `run_self_harness_pass` reads these automatically,
 and the dashboard `/learned` page surfaces per-line provenance + conflict
