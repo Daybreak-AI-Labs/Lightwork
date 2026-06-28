@@ -27,9 +27,13 @@ def test_rotation_mints_new_active_key_and_keeps_old():
     assert kid_b != kid_a
 
     key_dir = signing._key_dir()
-    # Both public keys retained (old still verifies old rows).
+    # Both public keys retained (old still verifies old rows), but only the new
+    # private key remains online.
     assert (key_dir / f"{kid_a}.pub").exists()
     assert (key_dir / f"{kid_b}.pub").exists()
+    assert not (key_dir / f"{kid_a}.key").exists()
+    assert (key_dir / f"{kid_a}.trusted").exists()
+    assert (key_dir / f"{kid_b}.key").exists()
 
     # Make the new key unambiguously newest, then confirm it is now active.
     os.utime(key_dir / f"{kid_b}.key", None)
@@ -55,4 +59,20 @@ def test_chain_verifies_across_rotation(tmp_path):
 
     # No chain breaks: old rows verify under the old key, the new row under the
     # rotated key (resolved per-row by key_id). verify_chain returns [] when OK.
+    assert signing.verify_chain(audit) == []
+
+
+def test_rotation_verifies_old_rows_without_retired_private_key(tmp_path):
+    audit = tmp_path / "2026-06-19.ndjson"
+    s1 = signing.AuditSigner(audit)
+    s1.write({"event": "before"})
+    old_key_id = s1._key_id
+
+    new_key_id = signing.rotate_audit_keypair()
+
+    key_dir = signing._key_dir()
+    assert new_key_id != old_key_id
+    assert (key_dir / f"{old_key_id}.pub").exists()
+    assert (key_dir / f"{old_key_id}.trusted").exists()
+    assert not (key_dir / f"{old_key_id}.key").exists()
     assert signing.verify_chain(audit) == []

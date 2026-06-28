@@ -136,6 +136,35 @@ def _injected_marker_for_id(key_id: str) -> Path | None:
     return marker
 
 
+def _trusted_pub_marker_for_id(key_id: str) -> Path | None:
+    """Path of the local-trust marker for a generated public key.
+
+    The marker is non-secret and records that Maverick created the matching
+    private key on this host at some point. It lets rotation retire the private
+    ``<id>.key`` while keeping the local ``<id>.pub`` trusted for verification.
+    """
+    if not _is_valid_key_id(key_id):
+        return None
+    key_dir = _key_dir()
+    marker = (key_dir / f"{key_id}.trusted").resolve()
+    try:
+        marker.relative_to(key_dir.resolve())
+    except ValueError:
+        return None
+    return marker
+
+
+def _mark_pubkey_trusted(key_id: str) -> None:
+    """Best-effort mark that ``<key_id>.pub`` was provisioned locally."""
+    marker = _trusted_pub_marker_for_id(key_id)
+    if marker is None:
+        return
+    try:
+        marker.write_bytes(b"")
+    except OSError:
+        log.debug("could not persist trusted audit pubkey marker for %s", key_id)
+
+
 def _decode_injected_key(raw: str) -> bytes | None:
     """Decode a raw 32-byte Ed25519 private key from hex or base64.
 
@@ -314,23 +343,46 @@ def _save_keypair(priv: bytes, pub: bytes, key_id: str) -> Path:
         os.chmod(pub_path, 0o644)
     except OSError:
         pass
+    _mark_pubkey_trusted(key_id)
     return priv_path
 
 
 def rotate_audit_keypair() -> str:
     """Mint a fresh Ed25519 signing keypair and make it the active signer.
 
-    Safe and additive: the new key becomes active because it is the most-recent
-    ``.key`` (see :func:`_load_or_create_keypair`), while every prior ``<id>.pub``
-    is retained so ``verify_chain`` still validates rows signed under old keys
-    (each row carries its ``key_id``). No existing audit data is rewritten.
+    Safe and additive: the new key becomes active because it is the only
+    retained ``.key`` (see :func:`_load_or_create_keypair`), while every prior
+    ``<id>.pub`` is retained and locally trusted via a non-secret marker so
+    ``verify_chain`` still validates rows signed under old keys (each row
+    carries its ``key_id``). Old private keys are deleted from the live key
+    directory after the new signer is created. No existing audit data is
+    rewritten.
 
     Returns the new ``key_id``. Takes effect for new :class:`AuditSigner`
     instances (next day-file / process restart); a long-running signer keeps its
     in-memory key until restarted.
     """
+    key_dir = _key_dir()
+    old_priv_paths = list(key_dir.glob("*.key")) if key_dir.exists() else []
+    for old_priv_path in old_priv_paths:
+        old_key_id = old_priv_path.stem
+        if (key_dir / f"{old_key_id}.pub").exists():
+            _mark_pubkey_trusted(old_key_id)
+
     priv, pub, key_id = _generate_keypair()
     _save_keypair(priv, pub, key_id)
+
+    for old_priv_path in old_priv_paths:
+        if old_priv_path.stem == key_id:
+            continue
+        try:
+            old_priv_path.unlink()
+        except FileNotFoundError:
+            pass
+        except OSError as e:
+            raise RuntimeError(
+                f"could not retire old audit signing private key {old_priv_path}: {e}"
+            ) from e
     return key_id
 
 
@@ -594,21 +646,24 @@ def verify_chain(path: Path, pubkey_hex: str | None = None) -> list[ChainBreak]:
         if pubkey_hex:
             obj = ed25519.Ed25519PublicKey.from_public_bytes(bytes.fromhex(pubkey_hex))
         else:
-            # Trust a local .pub only when its private .key sibling also exists
-            # — i.e. this host actually generated that keypair — OR when an
-            # ``.injected`` marker is present (the key was provisioned out of
-            # band from a KMS/secret-manager, so the private half is
-            # deliberately absent from disk). That closes the "attacker drops a
-            # lone forged <id>.pub and re-signs rows" vector while still honoring
-            # key rotation (writes .key+.pub) and env-injected keys (write
-            # .pub+.injected). Both rest on the key dir being access-controlled;
-            # for third-party tamper-evidence, callers should pass the trusted
-            # pubkey_hex explicitly.
+            # Trust a local .pub when this host still has the private .key,
+            # when a rotation left a non-secret ``.trusted`` marker while
+            # deleting the retired private key, or when an ``.injected`` marker
+            # is present for a KMS/secret-manager provisioned key. A lone
+            # dropped <id>.pub is not enough. All local trust modes still rest
+            # on the key dir being access-controlled; for third-party
+            # tamper-evidence, callers should pass the trusted pubkey_hex
+            # explicitly.
             pub_path, priv_path = _key_paths_for_id(key_id)
             if pub_path is None or not pub_path.exists():
                 return None
-            marker = _injected_marker_for_id(key_id)
-            if not priv_path.exists() and (marker is None or not marker.exists()):
+            injected_marker = _injected_marker_for_id(key_id)
+            trusted_marker = _trusted_pub_marker_for_id(key_id)
+            trusted_without_private = (
+                (injected_marker is not None and injected_marker.exists())
+                or (trusted_marker is not None and trusted_marker.exists())
+            )
+            if not priv_path.exists() and not trusted_without_private:
                 return None
             obj = ed25519.Ed25519PublicKey.from_public_bytes(pub_path.read_bytes())
         pubkey_cache[key_id] = obj

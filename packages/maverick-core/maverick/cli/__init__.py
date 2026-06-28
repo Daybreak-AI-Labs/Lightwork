@@ -5523,8 +5523,9 @@ def audit_rotate_key() -> None:
 
     Mints a new keypair and makes it the active signer. Safe and additive: prior
     public keys are retained so 'audit verify' still validates rows signed under
-    the old key (each row carries its key_id) -- no audit data is rewritten.
-    Takes effect for the next day-file / process restart; restart a running
+    the old key (each row carries its key_id), while prior private keys are
+    removed from the live key directory -- no audit data is rewritten. Takes
+    effect for the next day-file / process restart; restart a running
     'maverick serve' to begin signing with the new key.
     """
     from ..audit.signing import _have_crypto, rotate_audit_keypair
@@ -5535,7 +5536,7 @@ def audit_rotate_key() -> None:
         )
     key_id = rotate_audit_keypair()
     click.echo(f"rotated audit signing key; new active key_id = {key_id}")
-    click.echo("old public keys retained for verification. Restart "
+    click.echo("old public keys retained and old private keys retired. Restart "
                "'maverick serve' to sign new entries with it.")
 
 

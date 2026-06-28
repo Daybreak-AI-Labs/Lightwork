@@ -279,8 +279,9 @@ start the prior version.
 
 **Secret / key rotation:** API keys — edit `~/.maverick/.env` and reload (no
 downtime). **Audit signing key:** `maverick audit rotate-key` (additive — old
-public keys retained, chain stays verifiable; restart `maverick serve` to sign
-with the new key). **At-rest encryption key:** `maverick encryption rotate` —
+public keys retained and old private keys removed from the live key directory,
+chain stays verifiable; restart `maverick serve` to sign with the new key).
+**At-rest encryption key:** `maverick encryption rotate` —
 mints a new active key in the keyring; new writes seal under it, prior keys keep
 decrypting old data (no flag-day re-encrypt). Keep old key material until you've
 re-sealed legacy data (`maverick encryption migrate`); then it can be retired.
@@ -312,7 +313,7 @@ Honest, current state — what's now enforced in code vs. what genuinely remains
 | **gRPC TLS** | A **non-loopback plaintext bind is now refused** (`TlsConfigError`) unless TLS is configured or `MAVERICK_ALLOW_INSECURE_GRPC=1` is set. Set `[grpc] tls=true` + `tls_client_ca` for mTLS. |
 | **MCP rate limiting** | Per-caller sliding-window limiter (bearer/IP), `MAVERICK_MCP_RATE_LIMIT` (default 600/min; 0 disables) → 429 over cap. |
 | **gRPC rate limiting** | Per-caller sliding-window limiter at the auth chokepoint (agent id / hashed peer), `MAVERICK_GRPC_RATE_LIMIT` (default 600/min; 0 disables) → RESOURCE_EXHAUSTED. Complements `maximum_concurrent_rpcs`. |
-| **Key rotation** | `maverick audit rotate-key` (signing) and `maverick encryption rotate` (at-rest) — both **additive**: a keyring/per-row key-id means new writes use the new key while prior keys keep decrypting old data. No flag-day re-encrypt. |
+| **Key rotation** | `maverick audit rotate-key` (signing) and `maverick encryption rotate` (at-rest) — both **additive**: a keyring/per-row key-id means new writes use the new key while prior public keys keep audit chains verifiable and prior encryption keys keep decrypting old data. Audit signing rotation removes old private keys from the live key directory. No flag-day re-encrypt. |
 | **Plugins** | Correction: load-time **allowlist** (`[plugins] enabled` / `MAVERICK_PLUGINS_ALLOW`) **and permission-grant enforcement are real and default-deny** (`enforce_permissions=true`) — an ungranted permission *skips* the plugin. (Earlier draft mis-stated this as unenforced.) |
 
 ### Remaining (disclose to the customer / roadmap)
