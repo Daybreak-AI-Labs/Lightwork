@@ -1,4 +1,4 @@
-"""Maverick CLI."""
+"""Lightwork CLI."""
 from __future__ import annotations
 
 import asyncio
@@ -88,7 +88,7 @@ def _require_llm_key() -> str:
     if _has_configured_provider():
         return "config"
     click.echo(
-        "Maverick can't reach an LLM. No provider key is set.\n"
+        "Lightwork can't reach an LLM. No provider key is set.\n"
         "\n"
         "Set one up with:  maverick init\n"
         "Or export an existing key, for example:\n"
@@ -303,7 +303,7 @@ def _configure_cli_logging() -> None:
 @click.option("--model", default=None, help="LLM model id (default: from config).")
 @click.pass_context
 def main(ctx: click.Context, db: str | None, model: str | None) -> None:
-    """Maverick: multi-agent swarm for long-horizon work."""
+    """Lightwork: multi-agent swarm for long-horizon work."""
     _configure_cli_logging()
     ctx.ensure_object(dict)
     # Default the world DB to the ACTIVE TENANT's world.db (selected via
@@ -413,13 +413,13 @@ def init(fast: bool, resume: bool, from_file: str | None) -> None:
         # `maverick-installer` into its own pipx venv (the previous
         # message's advice) creates an isolated env where the kernel
         # can't import it. The correct path is to inject the extra into
-        # the same env Maverick already lives in.
+        # the same env Lightwork already lives in.
         click.echo(
             "Install: pipx install 'maverick-agent[installer]'",
             err=True,
         )
         click.echo(
-            "Or, if Maverick is already installed:  "
+            "Or, if Lightwork is already installed:  "
             "pipx inject maverick-agent maverick-installer",
             err=True,
         )
@@ -429,7 +429,7 @@ def init(fast: bool, resume: bool, from_file: str | None) -> None:
 
 @main.command()
 def doctor() -> None:
-    """Diagnose your Maverick installation."""
+    """Diagnose your Lightwork installation."""
     from ..health import diagnose
     if diagnose():
         # At least one ✗ check: exit nonzero so `maverick doctor && ...` and CI
@@ -442,7 +442,7 @@ def version() -> None:
     """Show installed package versions + runtime info."""
     import importlib.metadata
 
-    click.echo(click.style("Maverick installed packages", bold=True))
+    click.echo(click.style("Lightwork installed packages", bold=True))
     # PyPI distribution name for the core is `maverick-agent` (the
     # `maverick` name was squatted). Fall back to `maverick` if the
     # squatter ever releases the original name.
@@ -1070,7 +1070,7 @@ def trust_verify_cmd(agent_id, tools, risk, direction) -> None:
 
 @main.group("client")
 def client_group() -> None:
-    """Inspect / export / erase THIS deployment's bound client (one per Maverick).
+    """Inspect / export / erase THIS deployment's bound client (one per Lightwork).
 
     Since one deployment serves exactly one client, the client's whole data set
     lives under one root — so export and right-to-erasure are provably complete."""
@@ -1747,7 +1747,7 @@ def airgap_cmd(action: str, as_json: bool) -> None:
     Audits for a remote model provider, a non-deny-all egress policy, and
     sandbox network access. Exits non-zero on any finding so it can gate a
     deployment. (OS-level air-gapping is the operator's job; this checks
-    Maverick's own config.)
+    Lightwork's own config.)
     """
     import json as _json
 
@@ -2374,7 +2374,7 @@ def dashboard(host: str, port: int, token) -> None:
         click.echo("Install: pip install maverick-dashboard", err=True)
         sys.exit(2)
     import uvicorn
-    click.echo(f"Maverick dashboard: http://{host}:{port}")
+    click.echo(f"Lightwork dashboard: http://{host}:{port}")
     click.echo(f"REST API docs:      http://{host}:{port}/docs")
     uvicorn.run(fastapi_app, host=host, port=port, log_level="info")
 
@@ -2389,7 +2389,7 @@ def dashboard(host: str, port: int, token) -> None:
 def mcp(use_http: bool, host: str, port: int) -> None:
     """Start the MCP server on stdio (or --http).
 
-    This is Maverick's official cross-language surface. Any MCP-speaking
+    This is Lightwork's official cross-language surface. Any MCP-speaking
     client (TypeScript, Go, Rust, .NET, JVM, plus every IDE-side MCP
     client like Claude Code / Cursor / Continue / Zed) can drive the
     swarm from outside Python via this command. See
@@ -2867,8 +2867,8 @@ def mcp_registry_group() -> None:
     A registry is a self-hostable `<base>/mcp/index.json` (point
     `[mcp_registries] indexes` at your own). `add` writes the chosen server into
     `[mcp_servers.<name>]` in ~/.maverick/config.toml; the kernel loads it on the
-    next run. (`maverick mcp` — without `-registry` — starts Maverick's own MCP
-    server; this group manages the servers Maverick *consumes*.)
+    next run. (`maverick mcp` — without `-registry` — starts Lightwork's own MCP
+    server; this group manages the servers Lightwork *consumes*.)
     """
 
 
@@ -3053,7 +3053,7 @@ def start(
         _ks.check()
     except _ks.Halted:
         click.echo(
-            "Stopped: Maverick is halted (a HALT file is present).\n"
+            "Stopped: Lightwork is halted (a HALT file is present).\n"
             "Run `maverick unhalt` to clear it, then try again.",
             err=True,
         )
@@ -3159,7 +3159,7 @@ def start(
 @main.command("report-issue")
 @click.argument("goal_id", type=int)
 @click.option("--repo", default=None,
-              help="GitHub repo owner/name to file against (default: Maverick).")
+              help="GitHub repo owner/name to file against (default: Lightwork).")
 @click.pass_context
 def report_issue(ctx, goal_id: int, repo: str | None) -> None:
     """Build a pre-filled GitHub bug-report URL from a failed goal run.
@@ -3275,7 +3275,7 @@ def chat(ctx, max_depth: int, max_dollars: float, workdir) -> None:
     # unrelated future prompts.
     session_user_id = f"local:{uuid.uuid4().hex}"
     conversation = world.get_or_create_conversation("cli", session_user_id)
-    click.echo(click.style("Maverick chat. Type 'exit' to leave.", fg="cyan"))
+    click.echo(click.style("Lightwork chat. Type 'exit' to leave.", fg="cyan"))
     click.echo(click.style(
         "Multi-line: end a line with \\ or wrap a block in \"\"\".",
         fg="bright_black",
@@ -3540,13 +3540,13 @@ def config_lint_cmd() -> None:
     # hard lint failure, not invisible.
     p = config_path()
     if not p.exists():
-        # No config at all is a legitimate state (Maverick runs on built-in
+        # No config at all is a legitimate state (Lightwork runs on built-in
         # defaults), but the file-less path used to fall through to
         # load_config() == {} and print "config OK" -- as if a real config had
         # been validated. Say plainly there's nothing to lint instead of
         # blessing a non-existent file (user-testing finding).
         click.echo(
-            f"no config file at {p}; Maverick is using built-in defaults. "
+            f"no config file at {p}; Lightwork is using built-in defaults. "
             "Create one with `maverick init` (nothing to lint yet)."
         )
         return
@@ -3834,7 +3834,7 @@ def schedule_goal(cron_expr: str, text: str, title: str | None) -> None:
 @click.option("--verbose", "-v", is_flag=True)
 def serve(max_depth: int, verbose: bool) -> None:
     """Start the channel server."""
-    # Use Maverick's shared logging config (JSON via MAVERICK_LOG_FORMAT=json,
+    # Use Lightwork's shared logging config (JSON via MAVERICK_LOG_FORMAT=json,
     # correlation-id context filter, secret scrubbing) for parity with the
     # dashboard server entrypoint -- `serve` is the other network-exposed
     # process and otherwise inherited a raw basicConfig with none of that
@@ -3883,7 +3883,7 @@ def serve(max_depth: int, verbose: bool) -> None:
         click.echo(f"ERROR: {e}", err=True)
         sys.exit(2)
     server.max_depth = max_depth
-    click.echo("Maverick serve running. Ctrl-C to stop.")
+    click.echo("Lightwork serve running. Ctrl-C to stop.")
     try:
         asyncio.run(server.run())
     except KeyboardInterrupt:
@@ -4264,7 +4264,7 @@ def learned(limit: int) -> None:
 
 @main.group()
 def plugin() -> None:
-    """Scaffold + manage Maverick plugins."""
+    """Scaffold + manage Lightwork plugins."""
 
 
 @plugin.command("list")
@@ -4526,7 +4526,7 @@ def _conversation_user_matches(conv_user_id: str, requested: str, channel: str) 
     room ids naturally contain colons, so treating any ``<prefix>:`` as the
     requested user can disclose or erase unrelated conversations.
 
-    The only family match Maverick currently needs is the local CLI chat
+    The only family match Lightwork currently needs is the local CLI chat
     namespace: each REPL session is stored as ``local:<uuid>``, while the
     documented GDPR subject is ``--channel cli --user local``.
     """
@@ -4541,7 +4541,7 @@ def _conversation_user_matches(conv_user_id: str, requested: str, channel: str) 
 @click.option("--yes", is_flag=True, help="Skip confirmation.")
 @click.pass_context
 def erase(ctx, channel: str, user: str, yes: bool) -> None:
-    """Erase everything Maverick knows about a (channel, user_id) pair.
+    """Erase everything Lightwork knows about a (channel, user_id) pair.
 
     GDPR Art. 17 right-to-erasure: removes conversations, turns,
     attachments on disk, and the conversation row itself. (First line kept
@@ -5221,7 +5221,7 @@ def insights_import(bundle: str) -> None:
               help="Write JSON to file (default stdout).")
 @click.pass_context
 def export_user(ctx, channel: str, user: str, output) -> None:
-    """Export everything Maverick knows about a (channel, user_id) as JSON.
+    """Export everything Lightwork knows about a (channel, user_id) as JSON.
 
     GDPR Art. 15 right-of-access. Registered as ``export-user`` so it does
     not collide with ``export`` (the goal-trajectory bundle below); a
