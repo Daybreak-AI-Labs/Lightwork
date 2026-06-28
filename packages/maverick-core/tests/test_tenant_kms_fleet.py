@@ -93,6 +93,34 @@ def test_ttl_raised_after_warm_cache_takes_effect(monkeypatch):
     assert kms.unwraps == 1
 
 
+def test_kms_config_for_merges_global_dashboard_and_env_overlays(monkeypatch, tmp_path):
+    from maverick.config import config_path, dashboard_overrides_path
+
+    cfg = config_path()
+    cfg.parent.mkdir(parents=True, exist_ok=True)
+    cfg.write_text('[kms]\nprovider = "local"\nregion = "base"\n', encoding="utf-8")
+    dashboard_overrides_path().write_text('[kms]\nprovider = "aws"\nregion = "dash"\n', encoding="utf-8")
+    overlay = tmp_path / "overlay.toml"
+    overlay.write_text('[kms]\nkey_id = "overlay-cmk"\n', encoding="utf-8")
+    monkeypatch.setenv("MAVERICK_CONFIG_OVERLAY", str(overlay))
+    _write_tenant_kms("tenant1", '[kms]\nregion = "tenant"\n')
+
+    assert K._kms_config_for("tenant1") == {
+        "provider": "aws",
+        "region": "tenant",
+        "key_id": "overlay-cmk",
+    }
+
+
+def test_kms_config_for_raw_tenant_with_escaped_chars_finds_byok_overlay():
+    _write_tenant_kms("slack:alice", '[kms]\nprovider = "aws"\nkey_id = "alice-cmk"\n')
+
+    cfg = K._kms_config_for("slack:alice")
+
+    assert cfg["provider"] == "aws"
+    assert cfg["key_id"] == "alice-cmk"
+
+
 def test_named_tenant_config_error_does_not_leak_ambient(monkeypatch):
     # A named tenant whose overlay is malformed must fall back to GLOBAL config,
     # never to the ambient (active) tenant's [kms] -- else its DEK is wrapped
