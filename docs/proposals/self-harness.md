@@ -144,9 +144,12 @@ safety model as skills and insights.
 
 - `maverick self-harness preview [--model M] [--min-support N]` — read-only dry
   run: shows the weaknesses and the lines it *would* propose, writes nothing.
-- `maverick self-harness run [--model M] [--retire/--no-retire]` — run one
-  governed **cycle**: mine → propose → validate → gate, then retire stale
+- `maverick self-harness run [--model M] [--all-models] [--retire/--no-retire]` —
+  run one governed **cycle**: mine → propose → validate → gate, then retire stale
   guidance. The on-demand / scheduled entry point (`run_self_harness_cycle`).
+  `--all-models` runs the cycle for **every distinct configured role model** (the
+  fleet, `run_self_harness_all_models`), so worker models learn their own
+  harness, not just the orchestrator — each mines only its own traces.
   Without a live A/B scorer (a real model + eval harness, injected
   programmatically) it is a **dry** pass that writes no new guidance; stale-line
   retirement still runs — so a cron'd `run` keeps guidance fresh before live

@@ -1566,29 +1566,8 @@ def harness_retire(older_than_days: float, model: str | None, yes: bool) -> None
     click.echo(f"retired {n} line{'' if n == 1 else 's'}.")
 
 
-@harness.command("run")
-@click.option("--model", default=None, help="Model to run for (default: orchestrator).")
-@click.option("--limit", type=int, default=500,
-              help="Max recent reflexions to scan for weaknesses.")
-@click.option("--retire/--no-retire", default=True,
-              help="Also retire stale lines (per [self_harness] retire_after_days).")
-def harness_run(model: str | None, limit: int, retire: bool) -> None:
-    """Run one governed self-harness cycle: mine → propose → validate → gate,
-    then retire stale guidance. The on-demand / scheduled entry point.
-
-    Without a live A/B scorer (a real model + eval harness, injected
-    programmatically via run_self_harness_cycle — a real evaluation needs a real
-    model) this is a DRY pass that writes no NEW guidance; stale-line retirement
-    still runs. Promotion also requires [self_improvement] enable (the shared
-    governed gate). Safe to schedule: it never perturbs a run.
-    """
-    from .. import self_harness
-    from .. import self_improvement_runner as runner
-    if not self_harness.enabled():
-        raise click.ClickException(
-            "self-harness is off. Set [self_harness] enable = true or "
-            "MAVERICK_SELF_HARNESS=1.")
-    report, retired = runner.run_self_harness_cycle(model_id=model, limit=limit, retire=retire)
+def _echo_harness_cycle(report, retired: int) -> None:
+    """Render one cycle's report + retirement count for the operator."""
     click.echo(f"model: {report.model_id or '(unresolved)'}")
     click.echo(f"  mined={report.mined} proposed={report.proposed} "
                f"validated={report.validated} promoted={report.promoted} retired={retired}")
@@ -1609,6 +1588,45 @@ def harness_run(model: str | None, limit: int, retire: bool) -> None:
         click.echo("  promoted lines:")
         for ln in report.applied_lines:
             click.echo(f"    + {ln}")
+
+
+@harness.command("run")
+@click.option("--model", default=None, help="Model to run for (default: orchestrator).")
+@click.option("--all-models", is_flag=True,
+              help="Run for every configured role model (the whole fleet), not just one.")
+@click.option("--limit", type=int, default=500,
+              help="Max recent reflexions to scan for weaknesses.")
+@click.option("--retire/--no-retire", default=True,
+              help="Also retire stale lines (per [self_harness] retire_after_days).")
+def harness_run(model: str | None, all_models: bool, limit: int, retire: bool) -> None:
+    """Run one governed self-harness cycle: mine → propose → validate → gate,
+    then retire stale guidance. The on-demand / scheduled entry point.
+
+    Without a live A/B scorer (a real model + eval harness, injected
+    programmatically via run_self_harness_cycle — a real evaluation needs a real
+    model) this is a DRY pass that writes no NEW guidance; stale-line retirement
+    still runs. Promotion also requires [self_improvement] enable (the shared
+    governed gate). Safe to schedule: it never perturbs a run.
+
+    --all-models runs the cycle for EVERY distinct configured role model so worker
+    models learn their own harness, not just the orchestrator.
+    """
+    from .. import self_harness
+    from .. import self_improvement_runner as runner
+    if not self_harness.enabled():
+        raise click.ClickException(
+            "self-harness is off. Set [self_harness] enable = true or "
+            "MAVERICK_SELF_HARNESS=1.")
+    if all_models:
+        results = runner.run_self_harness_all_models(limit=limit, retire=retire)
+        if not results:
+            click.echo("no configured role models to run.")
+            return
+        for _mid, (report, retired) in sorted(results.items()):
+            _echo_harness_cycle(report, retired)
+        return
+    report, retired = runner.run_self_harness_cycle(model_id=model, limit=limit, retire=retire)
+    _echo_harness_cycle(report, retired)
 
 
 @harness.command("conflicts")

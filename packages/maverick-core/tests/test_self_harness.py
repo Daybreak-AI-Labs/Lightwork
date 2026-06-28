@@ -1269,3 +1269,42 @@ def test_report_gate_disabled_is_recorded(monkeypatch, store):
         held_in=["a", "b"], held_out=["c", "d", "e"],
         score_with=lambda a, c: 0.9, score_without=lambda a, c: 0.4)
     assert rep.gate_enabled is False and rep.promoted == 0
+
+
+# ---------- wave 12: worker-model learning (fleet sweep) ----------
+
+def test_harness_fleet_models_distinct_sorted(monkeypatch):
+    from maverick import llm
+    from maverick import self_improvement_runner as runner
+    monkeypatch.setattr(llm, "ROLE_MODELS",
+                        {"orchestrator": "opus", "coder": "sonnet", "writer": "sonnet"})
+    monkeypatch.setattr(llm, "model_for_role", lambda role: llm.ROLE_MODELS[role])
+    # distinct + sorted (sonnet appears once though two roles use it)
+    assert runner.harness_fleet_models() == ["opus", "sonnet"]
+
+
+def test_run_all_models_learns_per_model(monkeypatch, store):
+    ctrl = _enable(monkeypatch)
+    monkeypatch.setattr(sh, "_store_path", lambda: store)
+    from maverick import self_improvement_runner as runner
+    monkeypatch.setattr(runner, "harness_fleet_models", lambda: ["A", "B"])
+    # one weakness for each model; each pass mines only its own traces
+    combined = ([_refl("A", "timeout", "export the nightly ledger") for _ in range(3)]
+                + [_refl("B", "auth", "log into the partner portal") for _ in range(3)])
+    results = runner.run_self_harness_all_models(
+        reflexions=combined, controller=ctrl,
+        held_in=["a", "b"], held_out=["c", "d", "e"],
+        score_with=lambda a, c: 0.9, score_without=lambda a, c: 0.4)
+    assert set(results) == {"A", "B"}
+    assert results["A"][0].promoted == 1 and results["B"][0].promoted == 1
+    # each model got its OWN guidance, no cross-bleed
+    assert "timeout" in sh.recall_addendum("A", store).lower()
+    assert "auth" in sh.recall_addendum("B", store).lower()
+    assert sh.recall_addendum("A", store) != sh.recall_addendum("B", store)
+
+
+def test_run_all_models_disabled_is_empty(monkeypatch):
+    monkeypatch.setenv("MAVERICK_SELF_HARNESS", "0")
+    monkeypatch.setattr("maverick.config.load_config", dict)
+    from maverick import self_improvement_runner as runner
+    assert runner.run_self_harness_all_models() == {}
