@@ -35,8 +35,8 @@ docker --version
 
 # Python deps
 pip install datasets swebench>=2.0
-pip install -e packages/maverick-core
-pip install -e packages/maverick-shield  # optional but recommended
+pip install -e packages/lightwork-core
+pip install -e packages/lightwork-shield  # optional but recommended
 ```
 
 API key:

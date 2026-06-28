@@ -5,7 +5,7 @@ rem Why this exists: the MSI cannot pip-install at install time without
 rem custom actions, so it ships the wheel next to this script and bootstraps
 rem lazily on first run. There is no maverick/__main__.py, so `py -m maverick`
 rem does not work; the real entry point is the console script maverick.cli:main
-rem (see packages/maverick-core/pyproject.toml [project.scripts]).
+rem (see packages/lightwork-core/pyproject.toml [project.scripts]).
 setlocal
 
 rem Fast path: pip already put the console script on PATH (e.g. pipx or a

@@ -64,7 +64,7 @@ candidate identity, the `stage_fraction` reached, and the phase. The audit chain
 therefore encodes a *cryptographically sequenced* history of how a self-modification
 propagated across the fleet, including rollbacks.
 
-Evidence: `packages/maverick-core/lightwork/learning_rollout.py:104-131`
+Evidence: `packages/lightwork-core/lightwork/learning_rollout.py:104-131`
 (staged promotion records a `LEARNING_UPDATE` audit event per stage, fail-safe so
 audit failure degrades to no-op rather than bypassing governance).
 
@@ -79,7 +79,7 @@ Each record stores:
 Durability ordering: canonicalize → hash → sign → write+`fsync` → only then
 advance the in-memory chain head, so a crash mid-write cannot fork the chain.
 
-Evidence: `packages/maverick-core/lightwork/audit/signing.py:135-156`
+Evidence: `packages/lightwork-core/lightwork/audit/signing.py:135-156`
 (`key_id` derivation, rotation) and `:271-310` (write ordering, prev_hash,
 sign-over-bytes, fsync-before-advance).
 
@@ -183,8 +183,8 @@ canonicalization preserves scientific-notation and signed-zero literals;
 
 ## 8. Evidence index (file:line)
 
-- `packages/maverick-core/lightwork/learning_rollout.py:104-131`
-- `packages/maverick-core/lightwork/audit/signing.py:135-156, 186-200, 271-310, 317-365`
+- `packages/lightwork-core/lightwork/learning_rollout.py:104-131`
+- `packages/lightwork-core/lightwork/audit/signing.py:135-156, 186-200, 271-310, 317-365`
 - `rust/maverick-verify-audit/src/canonical.rs:1-119`
 - `rust/maverick-verify-audit/src/lib.rs:62-64, 76-236, 272-300`
 - `rust/maverick-verify-audit/tests/parity.py` (cross-language parity test)

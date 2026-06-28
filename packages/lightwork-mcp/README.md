@@ -1,4 +1,4 @@
-# maverick-mcp-server
+# lightwork-mcp-server
 
 A Model Context Protocol (MCP) server that exposes Lightwork's agent
 loop as a set of MCP tools. Any MCP-compatible client (Claude Code,
@@ -18,7 +18,7 @@ Lightwork in via MCP, you get:
 ## Install
 
 ```bash
-pip install -e ./packages/maverick-mcp
+pip install -e ./packages/lightwork-mcp
 ```
 
 ## Wire into Claude Code
@@ -30,7 +30,7 @@ Add to your Claude Code MCP config (typically
 {
   "mcpServers": {
     "maverick": {
-      "command": "maverick-mcp",
+      "command": "lightwork-mcp",
       "args": []
     }
   }

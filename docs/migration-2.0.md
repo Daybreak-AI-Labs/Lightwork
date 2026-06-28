@@ -25,7 +25,7 @@ maverick config-lint        # unknown/typo'd keys with closest-match hints
 maverick schema-plan        # pending world-model migrations: hot vs window
 
 # 2) apply
-pip install -U 'maverick-agent==2.*'
+pip install -U 'lightwork-agent==2.*'
 maverick migrate --apply    # rewrites config.toml per the v2 schema
 maverick doctor             # post-upgrade health pass
 
@@ -81,6 +81,6 @@ cost-perf snapshot so the canary is judged on data.
 
 ## Rollback
 
-`pip install 'maverick-agent==0.1.*'` + restore `~/.maverick` from the
+`pip install 'lightwork-agent==0.1.*'` + restore `~/.maverick` from the
 step-0 snapshot. The world DB is forward-migrated in place — that's what
 the snapshot is for; do not run a 2.0-migrated DB under 0.1.x.

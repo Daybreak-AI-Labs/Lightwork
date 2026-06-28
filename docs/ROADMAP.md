@@ -158,7 +158,7 @@ AutoGen .NET, CrewAI, Mastra, OpenAI/Anthropic SDKs.
 ### Conclusion
 
 **Thin API clients port well; opinionated frameworks don't.** Lightwork is the
-second kind. We do **not** port `maverick-core` to a second language. Instead
+second kind. We do **not** port `lightwork-core` to a second language. Instead
 we expose Lightwork to other languages **over MCP** — the MCP surface and the
 TypeScript / Go / Rust / C# / Java quickstarts are shipped (see
 [`FEATURES.md`](./FEATURES.md)). What remains is the measurement gate below.
@@ -196,7 +196,7 @@ answer is the MCP surface, full stop.
 
 ### Hard constraints
 
-- No port of `maverick-core` to a second language ever — that's a permanent
+- No port of `lightwork-core` to a second language ever — that's a permanent
   ~40% team-headcount tax that LangChain.js shows still doesn't yield parity.
 - Sandbox backends (firecracker, k8s, devcontainer, podman) stay Linux-process
   glue in Python; they are not part of the cross-language contract.
@@ -236,12 +236,12 @@ This is the **ack-then-run** pattern already on the roadmap (Q3 2026 mobile alph
 sitting on seams that already exist:
 
 - **Channel adapter** — a new `glasses` adapter in
-  `packages/maverick-channels/maverick_channels/` next to `telegram.py` / `voice.py`,
+  `packages/lightwork-channels/maverick_channels/` next to `telegram.py` / `voice.py`,
   subclassing `base.py`. The HUD's short-text constraint reuses `formatting.py`.
 - **Transport** — the bridge fronts the existing inbound `POST /webhook/start`
   (Q3 2026 "Generic inbound webhook"); no new server surface.
 - **Long-task delivery** — results ride the existing **outbound webhooks**
-  (`packages/maverick-core/lightwork/webhooks.py`) + push bridge into a secondary
+  (`packages/lightwork-core/lightwork/webhooks.py`) + push bridge into a secondary
   channel, exactly as OpenClaw routes to Telegram.
 - **Voice tools optional** — `transcribe_audio` / `speak`
   (`maverick/tools/voice.py`) are *not* needed for G2 (on-device STT, HUD out), but

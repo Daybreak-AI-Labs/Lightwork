@@ -5,13 +5,13 @@
 The safest terminal path installs the published package with pipx instead of executing a remote bootstrap script:
 
 ```bash
-pipx install 'maverick-agent[installer]'
+pipx install 'lightwork-agent[installer]'
 maverick init
 ```
 
 If you need the no-prerequisite desktop bootstrap, download `deploy/desktop/install.sh` or `deploy/desktop/install.ps1` from a commit or release you trust, verify it, and set `MAVERICK_REF` to a full 40-character commit SHA. The scripts reject mutable branch/tag refs by default.
 
-The PyPI package is `maverick-agent` (the `maverick` name is
+The PyPI package is `lightwork-agent` (the `maverick` name is
 squatted). The `[installer]` extra pulls the wizard into the same
 pipx environment as the kernel so `maverick init` resolves.
 
@@ -20,7 +20,7 @@ From source while iterating:
 ```bash
 git clone https://github.com/Day-AI-Labs/maverick
 cd maverick
-pip install -e ./packages/maverick-core
+pip install -e ./packages/lightwork-core
 pip install -e ./apps/installer-cli
 maverick init
 ```

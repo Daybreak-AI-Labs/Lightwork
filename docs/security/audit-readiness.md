@@ -70,7 +70,7 @@ Each control, where it lives, and how to confirm it's active.
 | SSRF DNS-rebind pinning | `maverick/tools/_ssrf.py` | `test_ssrf_guard.py`, `test_ssrf_pinning.py` |
 | Secret redaction (+ ReDoS-hardened) | `maverick/secrets.py`, `safety/secret_detector.py` | `test_secrets_scrub_fuzz.py`, `test_replay_export_scrub.py` |
 | Env scrubbing for child shells | `sandbox/local.py` `scrub_env()` | `test_tool_subprocess_hardening.py` |
-| Shield injection detection | `maverick-shield/` | `test_builtin_rules.py`, `test_cascade.py`, `test_deobfuscation.py`, `test_injection_corpus.py` |
+| Shield injection detection | `lightwork-shield/` | `test_builtin_rules.py`, `test_cascade.py`, `test_deobfuscation.py`, `test_injection_corpus.py` |
 | Audit Ed25519 hash-chain + anchors | `maverick/audit/` | `test_audit_anchor.py`, `test_audit_reanchor.py`, `test_audit_durability.py` |
 | Fail-closed auth (dashboard/MCP/A2A) | dashboard `app.py`, `mcp/http_transport.py`, `a2a_tasks.py` | `test_tier0_security.py`, MCP/A2A test suites |
 | Webhook HMAC + atomic dedup | `maverick/webhooks.py`, `maverick_channels/` | `test_security_invariants.py`, channel test suites |
@@ -88,11 +88,11 @@ same battery CI runs on every PR, plus the manual sweeps.
 ### Setup
 
 ```bash
-pip install -e ./packages/maverick-core
-pip install --no-deps -e ./packages/maverick-shield \
-                      -e ./packages/maverick-channels \
-                      -e ./packages/maverick-dashboard \
-                      -e ./packages/maverick-mcp
+pip install -e ./packages/lightwork-core
+pip install --no-deps -e ./packages/lightwork-shield \
+                      -e ./packages/lightwork-channels \
+                      -e ./packages/lightwork-dashboard \
+                      -e ./packages/lightwork-mcp
 pip install pytest pytest-asyncio
 ```
 
@@ -115,13 +115,13 @@ ruff check .
 ### Security test suites by area
 
 ```bash
-cd packages/maverick-core
+cd packages/lightwork-core
 pytest tests/ -q -k "ssrf"                       # SSRF guard + DNS-rebind pinning
 pytest tests/ -q -k "sandbox or subprocess"      # sandbox isolation + env scrub
 pytest tests/ -q -k "audit"                      # Ed25519 chain, anchors, durability
 pytest tests/ -q -k "scrub or redact or secret"  # secret redaction + ReDoS fuzz
 pytest tests/ -q -k "inject or security or hardening or tier0"  # injection + invariants
-cd ../maverick-shield && pytest tests/ -q        # shield detection + injection corpus
+cd ../lightwork-shield && pytest tests/ -q        # shield detection + injection corpus
 ```
 
 ### ReDoS sweep (regex DoS)

@@ -9,7 +9,7 @@
   `packages/` + `apps/installer-cli`), FastAPI dashboard, Tauri desktop apps,
   one TypeScript SDK (`sdks/plugin-ts`, Node 22). pip editable installs; npm
   only for the TS SDK.
-- **Entry points:** `maverick` CLI (`packages/maverick-core/lightwork/cli.py`),
+- **Entry points:** `maverick` CLI (`packages/lightwork-core/lightwork/cli.py`),
   dashboard app (`maverick_dashboard.app:app`), MCP server (`maverick mcp`).
 
 ## Commands (verified working)
@@ -121,13 +121,13 @@ All verified locally green; each is a build-failer:
 - FastAPI: `@app.on_event` is deprecated (lifespan handlers replace it).
   `app.py:285` still uses it — the suite's DeprecationWarnings are known noise;
   don't "fix" drive-by, it's an intentional pending migration.
-- MCP protocol current = `2025-11-25` — exactly what maverick-mcp implements
+- MCP protocol current = `2025-11-25` — exactly what lightwork-mcp implements
   (plus `2024-11-05` fallback). Don't bump without the spec. (Also expect
   starlette's "install httpx2" TestClient deprecation warning — known noise.)
 
 ## Kernel rules (pre-existing, still enforced)
 
-Maverick = proprietary AGENTIC ENTERPRISE PLATFORM (kernel `maverick-core` +
+Maverick = proprietary AGENTIC ENTERPRISE PLATFORM (kernel `lightwork-core` +
 shield + channels + dashboard + mcp + evolve + knowledge): a governed,
 self-improving AI workforce — 2,020 lint-clean specialist packs across 53
 suites, a closed learning lifecycle (dreaming/hindsight/proof, snapshot +

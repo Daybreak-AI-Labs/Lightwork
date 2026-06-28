@@ -4,7 +4,7 @@ Run a Lightwork agent goal inside a GitLab pipeline — on a merge request, on
 a schedule, or on demand — under a **hard spend cap** and with
 non-interactive safety defaults. The reusable
 [`maverick.gitlab-ci.yml`](./maverick.gitlab-ci.yml) template installs
-`maverick-agent` from PyPI and runs `maverick start "$MAVERICK_GOAL"`.
+`lightwork-agent` from PyPI and runs `maverick start "$MAVERICK_GOAL"`.
 
 It is the GitLab counterpart to the [`deploy/github-action`](../github-action)
 wrapper and mirrors the same safety inputs: consent mode, budget cap, and
@@ -40,7 +40,7 @@ Set these under **Settings → CI/CD → Variables** (mark the API key as
 | `MAVERICK_GOAL` | yes | The goal text passed to `maverick start`. The job fails fast if it is empty. |
 | `MAVERICK_MAX_DOLLARS` | no (default `1.0`) | Hard USD spend cap, wired into `[budget] max_dollars`. The kernel refuses to exceed it. |
 | `MAVERICK_MODEL` | no | Model override, e.g. `anthropic:claude-sonnet-4-6` (passed as `maverick --model`). |
-| `MAVERICK_VERSION` | no (latest) | `maverick-agent` version to install. **Pin it** for reproducible runs. |
+| `MAVERICK_VERSION` | no (latest) | `lightwork-agent` version to install. **Pin it** for reproducible runs. |
 | `MAVERICK_PYTHON_VERSION` | no (default `3.12`) | Python image tag used for the job. |
 
 ## Safety defaults

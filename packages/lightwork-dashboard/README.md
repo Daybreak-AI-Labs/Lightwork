@@ -1,4 +1,4 @@
-# maverick-dashboard
+# lightwork-dashboard
 
 Local web dashboard for Lightwork. Reads `~/.maverick/world.db` and
 `~/.maverick/skills/` and surfaces:
@@ -31,8 +31,8 @@ Local web dashboard for Lightwork. Reads `~/.maverick/world.db` and
 ## Run
 
 ```bash
-pip install -e ./packages/maverick-dashboard
-maverick-dashboard          # listens on http://127.0.0.1:8765
+pip install -e ./packages/lightwork-dashboard
+lightwork-dashboard          # listens on http://127.0.0.1:8765
 ```
 
 Or via the core CLI:

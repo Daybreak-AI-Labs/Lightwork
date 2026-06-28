@@ -1,4 +1,4 @@
-# maverick-installer-desktop
+# lightwork-installer-desktop
 
 Native Tauri GUI installer for users who never open a terminal. A
 double-click app with one button: it runs the same bootstrap the CLI

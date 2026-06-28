@@ -35,7 +35,7 @@ export MAVERICK_PG_DSN='postgres://maverick:***@db.internal:5432/maverick'
 Install the extra that pulls the driver:
 
 ```bash
-pip install 'maverick-agent[postgres]'   # psycopg[binary]
+pip install 'lightwork-agent[postgres]'   # psycopg[binary]
 ```
 
 ## Tenant isolation (row-level security)

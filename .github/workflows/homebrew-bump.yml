@@ -1,7 +1,7 @@
 name: Bump Homebrew formula
 
 # When a release is published, pin deploy/homebrew/maverick.rb to the
-# freshly published maverick-agent sdist on PyPI (url + sha256), generate
+# freshly published lightwork-agent sdist on PyPI (url + sha256), generate
 # hash-locked dependency requirements, and open a PR.
 # Decoupled from publish.yml so a PyPI propagation lag can't fail the release.
 
@@ -36,7 +36,7 @@ jobs:
           import json, os, pathlib, re, subprocess, sys, tempfile, time, urllib.request
 
           version = os.environ["VERSION"].lstrip("v")
-          api = f"https://pypi.org/pypi/maverick-agent/{version}/json"
+          api = f"https://pypi.org/pypi/lightwork-agent/{version}/json"
 
           # PyPI's JSON API, simple index, and file CDN each propagate on
           # their own schedule after a publish, so every PyPI-touching step
@@ -50,7 +50,7 @@ jobs:
                       print(f"PyPI {label} not ready yet ({e}); retry {attempt + 1}/10")
                       time.sleep(15)
               raise SystemExit(
-                  f"maverick-agent=={version} {label} never became available on PyPI"
+                  f"lightwork-agent=={version} {label} never became available on PyPI"
               )
 
           def fetch_metadata():
@@ -66,7 +66,7 @@ jobs:
               tmp_path = pathlib.Path(tmp)
               input_path = tmp_path / "requirements.in"
               output_path = tmp_path / "requirements.txt"
-              input_path.write_text(f"maverick-agent[installer]=={version}\n")
+              input_path.write_text(f"lightwork-agent[installer]=={version}\n")
               subprocess.run(
                   [
                       sys.executable,
@@ -101,15 +101,15 @@ jobs:
 
               requirements = wait_for_pypi("dependency index", compile_requirements)
 
-          # Homebrew already downloads and verifies maverick-agent as the formula
+          # Homebrew already downloads and verifies lightwork-agent as the formula
           # source. Keep only its resolved dependencies in the hash-locked
-          # requirements file so install does not fetch maverick-agent from PyPI.
+          # requirements file so install does not fetch lightwork-agent from PyPI.
           blocks = re.split(r"(?m)(?=^[A-Za-z0-9_.-]+[<=>!~; \[])", requirements)
           dependency_blocks = []
           for block in blocks:
               requirement = block.lstrip().splitlines()[0] if block.lstrip() else ""
               name = re.split(r"[<=>!~; \[]", requirement, maxsplit=1)[0]
-              if name.lower().replace("_", "-") == "maverick-agent":
+              if name.lower().replace("_", "-") == "lightwork-agent":
                   continue
               dependency_blocks.append(block)
           requirements = "".join(dependency_blocks).strip() + "\n"
@@ -138,7 +138,7 @@ jobs:
           commit-message: "chore: bump Homebrew formula to the published sdist"
           body: |
             Automated by `homebrew-bump.yml`: pins `deploy/homebrew/maverick.rb`
-            to the just-published `maverick-agent` sdist (url + sha256) and
+            to the just-published `lightwork-agent` sdist (url + sha256) and
             refreshes the embedded hash-locked dependency requirements.
 
             After merge, sync the formula to the `homebrew-tap` repo.

@@ -7,20 +7,20 @@
 Der sicherste Weg im Terminal ist, das veröffentlichte Paket mit pipx zu installieren, statt ein entferntes Bootstrap-Skript auszuführen:
 
 ```bash
-pipx install 'maverick-agent[installer]'
+pipx install 'lightwork-agent[installer]'
 maverick init
 ```
 
 Wenn Sie das Desktop-Bootstrap ohne Voraussetzungen benötigen, laden Sie `deploy/desktop/install.sh` oder `deploy/desktop/install.ps1` von einem Commit oder Release herunter, dem Sie vertrauen, prüfen Sie das Skript und setzen Sie `MAVERICK_REF` auf einen vollständigen, 40 Zeichen langen Commit-SHA. Veränderliche Branch- oder Tag-Referenzen lehnen die Skripte standardmäßig ab.
 
-Das PyPI-Paket heißt `maverick-agent` (der Name `maverick` ist bereits von einem fremden Projekt belegt). Das Extra `[installer]` installiert den Assistenten in dieselbe pipx-Umgebung wie den Kernel, damit `maverick init` aufgelöst werden kann.
+Das PyPI-Paket heißt `lightwork-agent` (der Name `maverick` ist bereits von einem fremden Projekt belegt). Das Extra `[installer]` installiert den Assistenten in dieselbe pipx-Umgebung wie den Kernel, damit `maverick init` aufgelöst werden kann.
 
 Aus dem Quellcode, während Sie daran entwickeln:
 
 ```bash
 git clone https://github.com/Day-AI-Labs/maverick
 cd maverick
-pip install -e ./packages/maverick-core
+pip install -e ./packages/lightwork-core
 pip install -e ./apps/installer-cli
 maverick init
 ```

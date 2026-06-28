@@ -51,7 +51,7 @@ Lightwork is proprietary, commercially licensed software (see
 ## Quick start
 
 ```bash
-pipx install 'maverick-agent[installer]'
+pipx install 'lightwork-agent[installer]'
 maverick init                # interactive wizard (3 minutes)
 maverick start "review my latest commit"
 ```

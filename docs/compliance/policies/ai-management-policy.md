@@ -49,25 +49,25 @@ This policy applies to all AI systems designed, developed, deployed, operated, o
 
 | Control | Implementation (file/module) | Status |
 | --- | --- | --- |
-| EU AI Act risk classification | `packages/maverick-core/lightwork/ai_act.py` | Implemented |
-| Art. 50 first-turn AI disclosure | `packages/maverick-core/lightwork/compliance.py` | Implemented |
-| ALLOW/DENY/REQUIRE_HUMAN policy engine (human-oversight gate) | `packages/maverick-core/lightwork/governance.py` | Implemented |
-| Consent / HITL gating (high/critical fail-closed to ask in enterprise mode) | `packages/maverick-core/lightwork/safety/consent.py` | Implemented |
-| Two-person approval | `packages/maverick-core/lightwork/approval_delegation.py` | Implemented |
-| Role-based model selection (no hard-coded models; kernel rule 2) | `packages/maverick-core/lightwork/llm.py`, `packages/maverick-core/lightwork/config.py` (`get_role_model`) | Implemented |
-| Per-model usage cards + operator-declared metadata export | `packages/maverick-core/lightwork/model_cards.py` (`ModelCardMetadata`, `export_model_cards`) | Implemented |
-| Learning: candidate generation (dreaming) | `packages/maverick-core/lightwork/dreaming.py` | Implemented |
-| Learning: snapshot-replay regression detection | `packages/maverick-core/lightwork/hindsight.py` | Implemented |
-| Learning: staged 10%/50%/100% rollout with signed audit | `packages/maverick-core/lightwork/learning_rollout.py` | Implemented |
-| Learning: calibration-gated promotion | `packages/maverick-core/lightwork/calibration.py` | Implemented |
-| Ed25519 signed learning audit (Art. 12 record-keeping) | `packages/maverick-core/lightwork/audit/signing.py` | Implemented |
-| Governed shared memory with provenance | `packages/maverick-core/lightwork/fleet_memory.py` | Implemented |
-| Bias / fairness evaluation (four-fifths, demographic parity) — on-demand | `packages/maverick-core/lightwork/tools/bias_eval.py` | Implemented |
-| Continuous fairness monitoring (rolling window; four-fifths breach + drift; signed `FAIRNESS_ALERT`) | `packages/maverick-core/lightwork/fairness_monitor.py` | Implemented |
-| Right-to-explanation | `packages/maverick-core/lightwork/tools/right_to_explanation.py` | Implemented |
-| Prompt-injection / exfil / jailbreak detection + red-team corpus | `maverick-shield` package | Implemented |
-| Model-card metadata export (intended use / limitations / oversight / eval results) | `packages/maverick-core/lightwork/model_cards.py` | Implemented |
-| Governed AI-system retirement with signed `AI_SYSTEM_RETIRED` audit record | `packages/maverick-core/lightwork/retirement.py`; `packages/maverick-core/lightwork/audit/events.py` | Implemented |
+| EU AI Act risk classification | `packages/lightwork-core/lightwork/ai_act.py` | Implemented |
+| Art. 50 first-turn AI disclosure | `packages/lightwork-core/lightwork/compliance.py` | Implemented |
+| ALLOW/DENY/REQUIRE_HUMAN policy engine (human-oversight gate) | `packages/lightwork-core/lightwork/governance.py` | Implemented |
+| Consent / HITL gating (high/critical fail-closed to ask in enterprise mode) | `packages/lightwork-core/lightwork/safety/consent.py` | Implemented |
+| Two-person approval | `packages/lightwork-core/lightwork/approval_delegation.py` | Implemented |
+| Role-based model selection (no hard-coded models; kernel rule 2) | `packages/lightwork-core/lightwork/llm.py`, `packages/lightwork-core/lightwork/config.py` (`get_role_model`) | Implemented |
+| Per-model usage cards + operator-declared metadata export | `packages/lightwork-core/lightwork/model_cards.py` (`ModelCardMetadata`, `export_model_cards`) | Implemented |
+| Learning: candidate generation (dreaming) | `packages/lightwork-core/lightwork/dreaming.py` | Implemented |
+| Learning: snapshot-replay regression detection | `packages/lightwork-core/lightwork/hindsight.py` | Implemented |
+| Learning: staged 10%/50%/100% rollout with signed audit | `packages/lightwork-core/lightwork/learning_rollout.py` | Implemented |
+| Learning: calibration-gated promotion | `packages/lightwork-core/lightwork/calibration.py` | Implemented |
+| Ed25519 signed learning audit (Art. 12 record-keeping) | `packages/lightwork-core/lightwork/audit/signing.py` | Implemented |
+| Governed shared memory with provenance | `packages/lightwork-core/lightwork/fleet_memory.py` | Implemented |
+| Bias / fairness evaluation (four-fifths, demographic parity) — on-demand | `packages/lightwork-core/lightwork/tools/bias_eval.py` | Implemented |
+| Continuous fairness monitoring (rolling window; four-fifths breach + drift; signed `FAIRNESS_ALERT`) | `packages/lightwork-core/lightwork/fairness_monitor.py` | Implemented |
+| Right-to-explanation | `packages/lightwork-core/lightwork/tools/right_to_explanation.py` | Implemented |
+| Prompt-injection / exfil / jailbreak detection + red-team corpus | `lightwork-shield` package | Implemented |
+| Model-card metadata export (intended use / limitations / oversight / eval results) | `packages/lightwork-core/lightwork/model_cards.py` | Implemented |
+| Governed AI-system retirement with signed `AI_SYSTEM_RETIRED` audit record | `packages/lightwork-core/lightwork/retirement.py`; `packages/lightwork-core/lightwork/audit/events.py` | Implemented |
 
 ## 6. Framework control mapping
 

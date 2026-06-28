@@ -112,7 +112,7 @@ curl -fsSL https://raw.githubusercontent.com/Day-AI-Labs/Lightwork/main/scripts/
 BASE_MODEL=Qwen/Qwen3-Coder-30B-A3B LORA=1 BITS=4 bash train.sh
 ```
 
-It installs (`maverick-agent[training]` → torch + transformers + peft +
+It installs (`lightwork-agent[training]` → torch + transformers + peft +
 bitsandbytes), generates any missing inputs, trains the L2 PRM (CPU), runs real
 DPO (GPU, `--require-real-text`; `LORA=1 BITS=4` uses 4-bit QLoRA so 7B–30B fit
 one GPU), and prints where the outputs are.
@@ -147,7 +147,7 @@ python -m maverick.training.prm_linear --data trajectories.jsonl --out prm_linea
 export MAVERICK_PRM=linear MAVERICK_PRM_PATH="$PWD/prm_linear.json"
 
 # 3. L3 — real DPO (GPU; needs the [training] extra)
-pip install 'maverick-agent[training]'
+pip install 'lightwork-agent[training]'
 python -m maverick.training.rlaif \
     --data trajectories.jsonl \
     --text-sidecar proposer_texts.jsonl --require-real-text \
@@ -191,6 +191,6 @@ improved — a CI gate you can wire in.
 - **OOM during DPO** → the reference loop is full-param (no LoRA/4-bit); use a
   smaller `BASE_MODEL` or a bigger card. (Ask for LoRA/4-bit support if you need
   to tune a 7B+ model on one mid-range GPU.)
-- **`import transformers` fails** → install the extra: `pip install 'maverick-agent[training]'`.
+- **`import transformers` fails** → install the extra: `pip install 'lightwork-agent[training]'`.
 
 See also: `docs/self-learning.md` (concepts), `scripts/train_runpod.sh` (the runner).

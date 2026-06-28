@@ -52,7 +52,7 @@ The **full Agent Shield SDK** (`pip install agent-shield`, ~115 patterns, F1 0.9
 
 Two layers can be missing, and they degrade differently:
 
-- **Full `agent-shield` SDK absent** (but the `maverick-shield` wrapper present): detection uses the **built-in** layer — ~20 high-impact rules, the decode/defang pre-pass, and a cheap-probe (regex + Unicode heuristics, optionally ensembled with a trained linear model via `[shield] probe_model`). The F1 0.988 SDK ruleset is forgone, but scans — including obfuscation-decoding — still run.
+- **Full `agent-shield` SDK absent** (but the `lightwork-shield` wrapper present): detection uses the **built-in** layer — ~20 high-impact rules, the decode/defang pre-pass, and a cheap-probe (regex + Unicode heuristics, optionally ensembled with a trained linear model via `[shield] probe_model`). The F1 0.988 SDK ruleset is forgone, but scans — including obfuscation-decoding — still run.
 - **Shield wrapper absent entirely**: scans are **skipped (fail-open)** with a startup warning, per the kernel's "runs without the shield" rule.
 
 The installer does **not** pull in `agent-shield` automatically — install it with `pip install agent-shield` for the full ruleset.

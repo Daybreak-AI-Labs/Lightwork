@@ -118,11 +118,11 @@ upholding the trust invariant (local detection → privileged promotion). Same
 
 ## Verification
 
-- Implemented (Rung 0): `packages/maverick-shield/tests/test_compartment.py` —
+- Implemented (Rung 0): `packages/lightwork-shield/tests/test_compartment.py` —
   fingerprint folding, ledger record/check/evict/hits, immunity short-circuit
   (base not re-run on a repeat), obfuscation-variant immunity, tool-call
   immunity, fail-open on a broken ledger, backend label, and the enable flag.
-- Implemented (Rung 1): `packages/maverick-core/tests/test_quarantine.py` —
+- Implemented (Rung 1): `packages/lightwork-core/tests/test_quarantine.py` —
   registry seal/strike, conservative triage (critical-first vs repeat-offender),
   and blackboard withholding of a sealed agent's posts.
 - Rung 2 (when built): a fake swarm asserting a domain seal latches until

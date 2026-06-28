@@ -7,7 +7,7 @@
 
   What this MSI does:
     * Installs per user (no UAC prompt) under %LOCALAPPDATA%\Programs\Maverick.
-    * Ships the maverick-agent wheel + a maverick.cmd launcher and puts the
+    * Ships the lightwork-agent wheel + a maverick.cmd launcher and puts the
       bin\ directory on the *user* PATH.
     * maverick.cmd resolves the pip console script (maverick.cli:main); on
       first run it pip-installs the bundled wheel into the per-user site.
@@ -20,7 +20,7 @@
 
   Preprocessor variables (-d on the wix command line):
     ProductVersion  three-part version, defaults below
-    WheelPath       path to the built maverick-agent wheel (required)
+    WheelPath       path to the built lightwork-agent wheel (required)
 -->
 <?ifndef ProductVersion ?>
   <?define ProductVersion = "0.1.6" ?>

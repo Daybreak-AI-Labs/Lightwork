@@ -1,7 +1,7 @@
 # Dashboard UI primitives
 
 Shared, page-agnostic helpers defined once in
-`packages/maverick-dashboard/maverick_dashboard/templates/base.html` and
+`packages/lightwork-dashboard/maverick_dashboard/templates/base.html` and
 available on every page that `{% extends "base.html" %}`. **Prefer these over
 native `confirm()` / `alert()` or hand-rolled toasts** — they are accessible
 (assertive vs. polite live regions; a focus-trapping, focus-returning modal),

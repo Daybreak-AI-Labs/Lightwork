@@ -2,7 +2,7 @@
 
 An **honest feasibility scaffold** for running Lightwork *skill logic* on
 iOS/Android. Two paths, both executing the same real pure-Python module
-from `maverick-core`:
+from `lightwork-core`:
 
 | Path | What it is | Runs where |
 |---|---|---|
@@ -11,7 +11,7 @@ from `maverick-core`:
 
 ## The skill module — chosen, not hypothetical
 
-Both paths run `packages/maverick-core/lightwork/disagreement.py`
+Both paths run `packages/lightwork-core/lightwork/disagreement.py`
 (`answer_entropy`: the proposer-disagreement signal the swarm posts to the
 blackboard). It was picked by reading the candidates: **zero intra-package
 imports, stdlib only** (`math`, `re`, `collections`), so it loads by file

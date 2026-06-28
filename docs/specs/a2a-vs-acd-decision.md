@@ -28,7 +28,7 @@ ships.
    inventing our own forfeits it.
 
 2. **A2A is already implemented; ACD is vapor.** The discovery half shipped:
-   `packages/maverick-core/lightwork/a2a.py` (`build_agent_card()` returns the
+   `packages/lightwork-core/lightwork/a2a.py` (`build_agent_card()` returns the
    v1.0 shape — `protocolVersion`, `name`, `url`, `version`, `provider`,
    `capabilities`, `skills`; `mount()` serves it at `/.well-known/agent-card.json`
    and the `/.well-known/agent.json` alias, opt-in via `MAVERICK_A2A_ENABLED` /

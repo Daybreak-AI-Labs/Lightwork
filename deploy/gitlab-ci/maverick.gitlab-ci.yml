@@ -1,7 +1,7 @@
 # Maverick GitLab CI template (reusable)
 #
 # The GitLab counterpart to the `deploy/github-action` wrapper: install
-# `maverick-agent` from PyPI and run a Maverick goal inside a pipeline,
+# `lightwork-agent` from PyPI and run a Maverick goal inside a pipeline,
 # under a hard spend cap and with non-interactive safety defaults.
 #
 # A downstream project pulls this in with `include:` and sets a few CI/CD
@@ -21,7 +21,7 @@
 # Optional:
 #   MAVERICK_MAX_DOLLARS  hard USD spend cap (default below)
 #   MAVERICK_MODEL        model override, e.g. anthropic:claude-sonnet-4-6
-#   MAVERICK_VERSION      pin the maverick-agent version for reproducibility
+#   MAVERICK_VERSION      pin the lightwork-agent version for reproducibility
 
 .maverick:
   image: "python:${MAVERICK_PYTHON_VERSION}"
@@ -50,9 +50,9 @@
     - python -m pip install --upgrade pip
     - |
       if [ -n "$MAVERICK_VERSION" ]; then
-        pip install "maverick-agent==${MAVERICK_VERSION}"
+        pip install "lightwork-agent==${MAVERICK_VERSION}"
       else
-        pip install "maverick-agent"
+        pip install "lightwork-agent"
       fi
     - maverick version || maverick --help
     # Generate ~/.maverick/config.toml. The budget cap and sandbox scope

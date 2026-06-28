@@ -16,7 +16,7 @@ background; the requestor polls `tasks/get` and retrieves the result via
 
 ## 2. What shipped
 
-Server side, **stdio only** (`packages/maverick-mcp/maverick_mcp/`):
+Server side, **stdio only** (`packages/lightwork-mcp/maverick_mcp/`):
 
 - **Capability** — `handle_initialize` advertises
   `tasks: { list:{}, cancel:{}, requests:{ tools:{ call:{} } } }` when the

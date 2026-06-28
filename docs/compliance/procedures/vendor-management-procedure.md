@@ -128,10 +128,10 @@ controls above:
 
 | Control | Implementation |
 | --- | --- |
-| MCP command **hash-pinning** + tool-description **scanning** at registration | MCP tool registration path; `packages/maverick-core/lightwork/mcp_oauth.py` |
-| Plugin **default-deny allowlist** (`MAVERICK_PLUGINS_ALLOW`) + skill-body scan + **hash-pin** at install | `packages/maverick-core/lightwork/plugin_manifest.py` |
+| MCP command **hash-pinning** + tool-description **scanning** at registration | MCP tool registration path; `packages/lightwork-core/lightwork/mcp_oauth.py` |
+| Plugin **default-deny allowlist** (`MAVERICK_PLUGINS_ALLOW`) + skill-body scan + **hash-pin** at install | `packages/lightwork-core/lightwork/plugin_manifest.py` |
 | Automated **dependency monitoring** / update alerting | `.github/dependabot.yml` |
-| **Provenance tagging** (`vendor:agent_id`) of external agent contributions in fleet memory | `packages/maverick-core/lightwork/fleet_memory.py` |
+| **Provenance tagging** (`vendor:agent_id`) of external agent contributions in fleet memory | `packages/lightwork-core/lightwork/fleet_memory.py` |
 
 Plugins and MCP tools are **denied by default** and admitted only via explicit
 allowlisting plus integrity verification. This default-deny posture is not

@@ -5,7 +5,7 @@ from the [Zed](https://zed.dev) editor. Two surfaces:
 
 1. **Assistant context server (MCP).** The extension registers
    `maverick mcp` — Lightwork's official MCP server
-   (`packages/maverick-mcp`, stdio transport) — as a Zed context server, so
+   (`packages/lightwork-mcp`, stdio transport) — as a Zed context server, so
    Zed's assistant can start goals, check status, and read results through
    MCP tools.
 2. **Terminal tasks.** `tasks/maverick.json` ships ready-made Zed tasks for
@@ -28,7 +28,7 @@ split; anything else would be pretending the sandbox isn't there.
 ## Prerequisites
 
 - The `maverick` CLI installed and on PATH, with the MCP server package:
-  `pip install maverick-agent maverick-mcp-server` (or the installers under
+  `pip install lightwork-agent lightwork-mcp-server` (or the installers under
   `apps/` / `deploy/`).
 - Zed (stable) with assistant/context-server support.
 

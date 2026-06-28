@@ -25,7 +25,7 @@ It proves three things no one else can prove today:
    enforced at `agent._run_tool`).
 2. **The self-improvement loop never escaped that envelope** — the agent got
    smarter without ever granting itself new authority. The unique claim. Already
-   *enforced* (`maverick-evolve/adopt.py` whitelist, `calibration.py` freeze);
+   *enforced* (`lightwork-evolve/adopt.py` whitelist, `calibration.py` freeze);
    now *proved*.
 3. The decision history is authentic and reproducible from the signed trajectory
    (`audit/signing.py` chain + cross-file anchors).
@@ -159,7 +159,7 @@ interest, de-risked and made shippable.
 
 **The one feature.** Turn the existing loop into a demonstrable, certified
 **"safe self-improvement" engine** and then climb one rung past everyone else.
-Pieces already in the repo: `maverick-evolve` (config-only evolution; code
+Pieces already in the repo: `lightwork-evolve` (config-only evolution; code
 mutation deliberately deferred), `adopt.py` (adoption can never widen a
 capability scope — `ADOPTABLE_KEYS` excludes `allow_*`/`max_risk`),
 `calibration.py` (freezes learning the moment the verifier drifts —
@@ -178,7 +178,7 @@ properties that make it singular:
 **Bleeding edge.** Ship the rung the labs deferred: **bounded code
 self-modification** — the agent proposes changes to its *own* tools/policies, but
 only inside an out-of-process sandbox, under capability bounds, with
-human-gated promotion (the Darwin-Gödel step `maverick-evolve` explicitly
+human-gated promotion (the Darwin-Gödel step `lightwork-evolve` explicitly
 parked). Done *with* the governance rails, not without them. That is the frontier
 capability every lab wants and no one dares ship raw.
 
@@ -195,7 +195,7 @@ they can put in front of a board without the liability — the thing their own l
 teams won't let them ship ungoverned.
 
 **Build path (~1 quarter to demo).**
-1. Wire `maverick-evolve` continuous loop → live "improvement certificate":
+1. Wire `lightwork-evolve` continuous loop → live "improvement certificate":
    each round emits a signed proof that capabilities never widened and
    calibration never unfroze (chains into the Bet 1 capsule).
 2. Dashboard the cold-vs-warm improvement curve per department with the rollback
@@ -306,7 +306,7 @@ an opaque candidate payload and inherits the gates above:
 3. **Phase 2 policy** — stand up real `training/rlaif.py` (per-tenant LoRA/DPO).
 4. **Phase 3 action space** — close the loop on `self_learning.write_generated_tool`
    (measure/promote/retire by outcome).
-5. **Phase 4 strategy** — expand `maverick-evolve` beyond 5 config knobs to
+5. **Phase 4 strategy** — expand `lightwork-evolve` beyond 5 config knobs to
    prompts/playbooks/policies.
 6. **Phase 5 code** — sandboxed, human-gated code self-modification (Darwin-Gödel).
 7. **Phase 6 weights** — periodic per-tenant fine-tune on accumulated trajectories.

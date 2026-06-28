@@ -30,7 +30,7 @@ apply).
 ## Why the deny-proxy is load-bearing
 
 **The dashboard has no global read-only flag.** Verified at authoring time:
-`grep -ri read_only packages/maverick-dashboard/maverick_dashboard/` matches
+`grep -ri read_only packages/lightwork-dashboard/maverick_dashboard/` matches
 only two docstrings describing endpoints that happen to be GETs. Setting
 `MAVERICK_DASHBOARD_TOKEN` alone does NOT make a deployment read-only — the
 token authorizes *everything*. The mutating surface that must never be
@@ -112,7 +112,7 @@ key is needed or configured.
 ## What was and wasn't verified here
 
 Contract-tested statically in
-`packages/maverick-core/tests/test_demo_cluster.py` (compose/k8s/nginx
+`packages/lightwork-core/tests/test_demo_cluster.py` (compose/k8s/nginx
 invariants, seed script compiles and uses the real API, no baked secrets) —
 same pattern as the other reference architectures. **Not** stood up
 end-to-end in this environment (no Docker daemon available); the first

@@ -7,20 +7,20 @@
 터미널에서 가장 안전한 설치 방법은 원격 부트스트랩 스크립트를 실행하는 대신 pipx로 게시된 패키지를 설치하는 것입니다.
 
 ```bash
-pipx install 'maverick-agent[installer]'
+pipx install 'lightwork-agent[installer]'
 maverick init
 ```
 
 사전 요구 사항이 없는 데스크톱 부트스트랩이 필요하다면, 신뢰할 수 있는 커밋이나 릴리스에서 `deploy/desktop/install.sh` 또는 `deploy/desktop/install.ps1`을 내려받아 검증한 뒤 `MAVERICK_REF`에 40자 전체 커밋 SHA를 설정하세요. 이 스크립트들은 기본적으로 변경 가능한 브랜치/태그 참조를 거부합니다.
 
-PyPI 패키지 이름은 `maverick-agent`입니다(`maverick`이라는 이름은 이미 다른 곳에서 선점했습니다). `[installer]` 엑스트라는 마법사를 커널과 같은 pipx 환경에 설치하므로 `maverick init` 명령을 찾을 수 있게 됩니다.
+PyPI 패키지 이름은 `lightwork-agent`입니다(`maverick`이라는 이름은 이미 다른 곳에서 선점했습니다). `[installer]` 엑스트라는 마법사를 커널과 같은 pipx 환경에 설치하므로 `maverick init` 명령을 찾을 수 있게 됩니다.
 
 개발 중에 소스에서 설치하려면:
 
 ```bash
 git clone https://github.com/Day-AI-Labs/maverick
 cd maverick
-pip install -e ./packages/maverick-core
+pip install -e ./packages/lightwork-core
 pip install -e ./apps/installer-cli
 maverick init
 ```

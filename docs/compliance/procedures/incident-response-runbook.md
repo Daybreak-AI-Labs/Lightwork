@@ -12,7 +12,7 @@
 
 This runbook operationalizes the Incident Response Policy (POL-07). Use the
 incident report template (TPL-01) for every declared incident. Paths below are
-relative to `packages/maverick-core/` unless absolute.
+relative to `packages/lightwork-core/` unless absolute.
 
 ---
 

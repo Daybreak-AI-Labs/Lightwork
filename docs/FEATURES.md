@@ -6,7 +6,7 @@ yet) lives in [`ROADMAP.md`](./ROADMAP.md). When a roadmap item ships, it moves
 here.
 
 > Conventions: capabilities are grouped by concern. Module paths are relative to
-> `packages/maverick-core/lightwork/` unless noted. CLI verbs are shown as
+> `packages/lightwork-core/lightwork/` unless noted. CLI verbs are shown as
 > `maverick <verb>`.
 
 ## Agent kernel & orchestration
@@ -131,7 +131,7 @@ here.
   `~/.maverick/dreams/rehearsals.ndjson`); `maverick dream --rehearse` runs
   them as budgeted `[rehearsal]`-titled goals and reports how many
   previously-failing patterns now complete. Refused while verifier
-  calibration is frozen (the same interlock that gates maverick-evolve), so
+  calibration is frozen (the same interlock that gates lightwork-evolve), so
   the system never practices against a distrusted grader.
 - **Department-scoped routing memory** — a domain swarm's counterfactual
   credit is recorded both globally and per department
@@ -206,9 +206,9 @@ here.
   (`scope|kind` rows).
 - **Verifier-scored rehearsal + evolve bridge** — `maverick dream
   --rehearse` grades each practiced case with the calibrated verifier, and
-  `maverick-evolve --live --rehearsals` consumes the rehearsal queue as
+  `lightwork-evolve --live --rehearsals` consumes the rehearsal queue as
   weighted eval cases so config evolution optimizes against the operator's
-  own recurring failures. `maverick-evolve --adopt` overlays the archive's
+  own recurring failures. `lightwork-evolve --adopt` overlays the archive's
   best config onto a domain pack (persona/description/models only —
   capability scopes are refused), diff-shown, `--yes`-gated, `.bak`-backed.
 - **Learning-side canary** — probation retirement (a new skill that loses
@@ -836,7 +836,7 @@ here.
 
 ## Channels
 
-17 wired channels (`packages/maverick-channels/`): Telegram, Discord, Slack,
+17 wired channels (`packages/lightwork-channels/`): Telegram, Discord, Slack,
 Signal, Email, Matrix, Bluesky, Mastodon, Voice (Twilio), WhatsApp (Twilio),
 **WhatsApp Cloud API** (`whatsapp_cloud.py`: Meta's first-party Graph API —
 GET verification handshake, constant-time `X-Hub-Signature-256` HMAC,
@@ -1031,7 +1031,7 @@ pre-warming** (`max_tokens=0` prefill at orchestrator start) and a
 
 ## MCP & agent interop
 
-- **MCP server** (`packages/maverick-mcp/`) — stdio JSON-RPC **and** Streamable
+- **MCP server** (`packages/lightwork-mcp/`) — stdio JSON-RPC **and** Streamable
   HTTP transport; tool `outputSchema`, resource subscriptions.
 - **Registry publishing** (`maverick_mcp.publish`, `python -m
   maverick_mcp.publish [--validate]`) — emit the reverse-DNS-namespaced
@@ -1524,7 +1524,7 @@ pre-warming** (`max_tokens=0` prefill at orchestrator start) and a
   (sox_control / fraud_risk / itgc / credit_risk / close_readiness),
   compliance-regime packs (SOX/COSO/GAAP/PCI/GLBA/AML/SEC/IRS, strictest-wins),
   and the `maverick finance status` posture report (`maverick/finance/`).
-- **maverick-knowledge** — per-domain vector RAG package backing
+- **lightwork-knowledge** — per-domain vector RAG package backing
   `knowledge_search`; config-selected embedders (`embed.py`): hosted **Voyage**
   (or any OpenAI-compatible endpoint), **Cohere** (`/v2/embed`, typed
   `embedding_types`), local, or deterministic — fails loud rather than silently

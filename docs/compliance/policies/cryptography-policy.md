@@ -53,12 +53,12 @@ This policy applies to:
 
 | Control | Implementation (file/module) | Status |
 | --- | --- | --- |
-| AES-256-GCM at-rest encryption of world DB + memory; local key at `~/.maverick/keys/at_rest.key` (mode 0600); `MAVERICK_ENCRYPTION_KEY` for external KMS | `packages/maverick-core/lightwork/crypto_at_rest.py` | **On by default (secure-by-default) — keep enabled** |
-| Per-tenant envelope encryption (DEK + KEK; wrappers for AWS/GCP/Vault KMS) | `packages/maverick-core/lightwork/tenant/kms.py` | Operational (multi-tenant) |
-| Ed25519 Merkle hash-chain for tamper-evident audit | `packages/maverick-core/lightwork/audit/signing.py` | **On by default (secure-by-default) — keep enabled** |
-| AES-256-GCM sealing of closed audit day-files | `packages/maverick-core/lightwork/audit/sealing.py` | Operational |
-| Secret scrubbing | `packages/maverick-core/lightwork/secrets.py` | Operational |
-| Hardened profile: at-rest encryption + audit signing ON by default | `packages/maverick-core/lightwork/security_defaults.py` | Enable hardened profile |
+| AES-256-GCM at-rest encryption of world DB + memory; local key at `~/.maverick/keys/at_rest.key` (mode 0600); `MAVERICK_ENCRYPTION_KEY` for external KMS | `packages/lightwork-core/lightwork/crypto_at_rest.py` | **On by default (secure-by-default) — keep enabled** |
+| Per-tenant envelope encryption (DEK + KEK; wrappers for AWS/GCP/Vault KMS) | `packages/lightwork-core/lightwork/tenant/kms.py` | Operational (multi-tenant) |
+| Ed25519 Merkle hash-chain for tamper-evident audit | `packages/lightwork-core/lightwork/audit/signing.py` | **On by default (secure-by-default) — keep enabled** |
+| AES-256-GCM sealing of closed audit day-files | `packages/lightwork-core/lightwork/audit/sealing.py` | Operational |
+| Secret scrubbing | `packages/lightwork-core/lightwork/secrets.py` | Operational |
+| Hardened profile: at-rest encryption + audit signing ON by default | `packages/lightwork-core/lightwork/security_defaults.py` | Enable hardened profile |
 
 ## 6. Framework control mapping
 

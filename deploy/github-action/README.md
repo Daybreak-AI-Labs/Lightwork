@@ -2,7 +2,7 @@
 
 Run a Lightwork agent swarm inside a GitHub workflow — on a PR, on a
 schedule, or on demand — under a **hard spend cap**. It installs
-`maverick-agent` from PyPI and runs `maverick start` with the inputs you
+`lightwork-agent` from PyPI and runs `maverick start` with the inputs you
 give it, then writes the final answer to the job summary and exposes it as
 a step output.
 
@@ -30,7 +30,7 @@ a step output.
 | `model` | — | Override the model (e.g. `claude-sonnet-4-6`). |
 | `sandbox` | `local` | Shell sandbox backend. A CI runner is already an ephemeral VM, so `local` is the default. |
 | `anthropic-api-key` | `""` | Exported as `ANTHROPIC_API_KEY`. For other providers, leave blank and set that provider's env var on the job. |
-| `version` | latest | `maverick-agent` version to install. **Pin it** for reproducible runs. |
+| `version` | latest | `lightwork-agent` version to install. **Pin it** for reproducible runs. |
 | `python-version` | `3.12` | Python to set up. |
 | `step-summary` | `true` | Write the final answer to the job summary. |
 | `dry-run` | `false` | Install + print the resolved command, but don't run the swarm (no LLM calls, no spend). |

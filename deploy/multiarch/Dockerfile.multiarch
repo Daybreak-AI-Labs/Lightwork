@@ -17,7 +17,7 @@
 #
 #   --build-arg BASE_IMAGE=debian:sid-slim
 #
-# Scope: maverick-core (+ shield wrapper) only. The core's dependency tree
+# Scope: lightwork-core (+ shield wrapper) only. The core's dependency tree
 # (anthropic, click, httpx, tomli) is pure Python = architecture-independent.
 # The dashboard is opt-in (INSTALL_DASHBOARD=1) because fastapi -> pydantic-core
 # is a compiled Rust wheel: fine on amd64/arm64, a from-source Rust build on
@@ -52,17 +52,17 @@ RUN python3 -m venv /opt/maverick
 ENV PATH="/opt/maverick/bin:${PATH}"
 
 WORKDIR /app
-COPY packages/maverick-core ./packages/maverick-core
-COPY packages/maverick-shield ./packages/maverick-shield
-COPY packages/maverick-dashboard ./packages/maverick-dashboard
+COPY packages/lightwork-core ./packages/lightwork-core
+COPY packages/lightwork-shield ./packages/lightwork-shield
+COPY packages/lightwork-dashboard ./packages/lightwork-dashboard
 
-RUN pip install ./packages/maverick-core ./packages/maverick-shield
+RUN pip install ./packages/lightwork-core ./packages/lightwork-shield
 
 # Opt-in: pulls fastapi/pydantic-core (compiled). amd64/arm64 have wheels;
 # riscv64 builds pydantic-core from source and needs a Rust toolchain.
 ARG INSTALL_DASHBOARD=0
 RUN if [ "${INSTALL_DASHBOARD}" = "1" ]; then \
-        pip install ./packages/maverick-dashboard; \
+        pip install ./packages/lightwork-dashboard; \
     fi
 
 WORKDIR /workspace

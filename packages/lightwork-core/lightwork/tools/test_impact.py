@@ -11,7 +11,7 @@ Heuristic (intentionally simple, no AST):
   2. Cache each test file's import lines + literal-string references
      to module paths.
   3. For each changed file, compute the dotted module name (e.g.
-     ``packages/lightwork-core/maverick/foo.py`` ->
+     ``packages/lightwork-core/lightwork/foo.py`` ->
      ``lightwork.foo``) plus the bare basename (``foo``).
   4. A test file is "impacted" when ANY of its cached references
      matches one of the candidate strings for any changed file.

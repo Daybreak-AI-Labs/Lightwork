@@ -2,7 +2,7 @@
 
 > Teardown audit #4 for the commercial pivot (regulated-compliance + agent
 > governance vs OneTrust). Method: read the actual code in
-> `packages/maverick-core/lightwork/` and `packages/maverick-dashboard/`, then
+> `packages/lightwork-core/lightwork/` and `packages/lightwork-dashboard/`, then
 > test each enterprise must-have against it. All file:line pointers verified on
 > the working tree, 2026-06-06. Adversarial framing: "opt-in, default-off,
 > fail-open" primitives are scored as NOT enforced.

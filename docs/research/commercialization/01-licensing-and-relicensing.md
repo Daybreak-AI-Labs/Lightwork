@@ -11,12 +11,12 @@
 
 1. **You cannot "un-publish" MIT. The genie is out.** Every released version is
    already MIT under `Copyright (c) 2026 Christopher Day` (`LICENSE`), and all
-   six PyPI packages carry `license = { text = "MIT" }` at `0.1.6` (`maverick-agent`,
-   `maverick-channels`, `maverick-shield`, `maverick-dashboard`,
-   `maverick-mcp-server`, `maverick-installer`). An MIT grant on a published work
+   six PyPI packages carry `license = { text = "MIT" }` at `0.1.6` (`lightwork-agent`,
+   `lightwork-channels`, `lightwork-shield`, `lightwork-dashboard`,
+   `lightwork-mcp-server`, `lightwork-installer`). An MIT grant on a published work
    is irrevocable for that work — there is no clawback clause and no jurisdiction
    that lets a licensor rescind a perpetual grant already accepted. Anyone can
-   `pip download maverick-agent==0.1.6`, fork it, and build a competitor from that
+   `pip download lightwork-agent==0.1.6`, fork it, and build a competitor from that
    tree forever. **Relicensing only ever governs *future* commits.** Plan around
    that fact, don't fight it.
 
@@ -152,9 +152,9 @@ and could pollute the source-available layer. Options:
 Map onto the existing architecture (`packages/`):
 
 - **Keep permissive (MIT/Apache-2.0) — the kernel as an adoption funnel:**
-  `maverick-core` agent kernel, `maverick-shield` (CLAUDE.md rule 1: kernel runs
+  `lightwork-core` agent kernel, `lightwork-shield` (CLAUDE.md rule 1: kernel runs
   without the shield; it's a fail-open chokepoint, ideal as free/open),
-  `maverick-channels`, `maverick-mcp-server`, the installer/SDK, examples. These drive
+  `lightwork-channels`, `lightwork-mcp-server`, the installer/SDK, examples. These drive
   PyPI installs, community, and the "auditable runtime" trust. **Consider Apache-2.0
   for new permissive code** (explicit patent grant — better than MIT for an enterprise
   product) **[verify desire to change permissive license vs. staying MIT for continuity]**.

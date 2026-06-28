@@ -91,7 +91,7 @@ Current held-out misses and false positives are listed in
 ## Latency & ReDoS are a hard CI gate
 
 A scan that hangs is a detection *bypass*, not a perf nit:
-`packages/maverick-shield/tests/test_scan_latency_gate.py` fails the build if a
+`packages/lightwork-shield/tests/test_scan_latency_gate.py` fails the build if a
 hot-path scan exceeds its budget on adversarial input. `latency_bench.py`
 reports the p50/p95/p99/max distribution.
 

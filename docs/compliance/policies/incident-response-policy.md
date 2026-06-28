@@ -21,7 +21,7 @@ The policy explicitly covers AI-specific incidents as required by ISO/IEC 42001:
 
 This policy applies to:
 
-- The Maverick platform (kernel `maverick-core`, shield, channels, dashboard, MCP, evolve, knowledge) and all production deployments operated by or on behalf of the Organization.
+- The Maverick platform (kernel `lightwork-core`, shield, channels, dashboard, MCP, evolve, knowledge) and all production deployments operated by or on behalf of the Organization.
 - All personnel, contractors, and on-call responders involved in detecting, reporting, or responding to incidents.
 - All categories of incident: confidentiality/integrity/availability events, AI/agent safety and governance incidents, and externally reported vulnerabilities.
 - The audit, telemetry, and containment subsystems used to detect and evidence incidents.

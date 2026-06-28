@@ -13,7 +13,7 @@ maverick init
 
 `brew install cdayAI/tap/maverick` is shorthand for tapping
 `github.com/cdayAI/homebrew-tap` and installing the `maverick` formula from
-it. The formula drops `maverick-agent[installer]` into an isolated
+it. The formula drops `lightwork-agent[installer]` into an isolated
 virtualenv and links the `maverick` command onto your PATH.
 
 ## How the tap is maintained
@@ -26,7 +26,7 @@ to the tap repo on release:
    into its `Formula/` directory.
 2. **Each release:** [`/.github/workflows/homebrew-bump.yml`](../../.github/workflows/homebrew-bump.yml)
    runs when a GitHub Release is published. It resolves the freshly
-   published `maverick-agent` sdist from PyPI, rewrites the formula's `url`
+   published `lightwork-agent` sdist from PyPI, rewrites the formula's `url`
    and `sha256`, generates hash-locked requirements for the installer
    dependency set, and opens a PR here. Merge it, then copy the updated
    formula to the tap repo (or point the action at the tap repo once it
@@ -44,8 +44,8 @@ installable against a hand-typed checksum.
   formula installs the Homebrew-downloaded, checksum-verified sdist with
   `--no-deps` first, then installs only the hashed binary dependency artifacts
   listed in that generated requirements section. Installing the local sdist
-  first keeps packages such as `maverick-installer` from resolving
-  `maverick-agent` from PyPI while pip is in `--require-hashes` mode.
+  first keeps packages such as `lightwork-installer` from resolving
+  `lightwork-agent` from PyPI while pip is in `--require-hashes` mode.
 - **Needs a macOS `brew install --build-from-source maverick` smoke test**
   before the tap is announced — that can't run in this repo's Linux CI.
 - Pinned to a real release (not `main`), so `brew upgrade` tracks tagged

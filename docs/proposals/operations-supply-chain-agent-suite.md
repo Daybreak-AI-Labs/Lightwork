@@ -80,7 +80,7 @@ IoT/SCADA** — plus the **physical-action gate enforcement** and the **safety-r
 
 ## 2. How an operations agent maps onto Lightwork
 
-Each agent is a [`DomainProfile`](../../packages/maverick-core/lightwork/domain.py) pack.
+Each agent is a [`DomainProfile`](../../packages/lightwork-core/lightwork/domain.py) pack.
 The defining specific: **the capability envelope separates *planning* (digital, freely
 automatable) from *acting* (physical, gated or refused).** A planning agent gets read +
 optimize tools; a shop-floor or dispatch agent's physical-effect tools are on `deny_tools`
@@ -237,7 +237,7 @@ physical-commit.)
 - **Status:** **Partial** (governance + finance AP).
 
 ```toml
-# packages/maverick-core/lightwork/domains/ops_purchasing.toml
+# packages/lightwork-core/lightwork/domains/ops_purchasing.toml
 name = "ops_purchasing"
 compartment = "ops_procurement"
 description = "Purchase-order creation and 3-way match (amount-aware, human-committed)."
@@ -294,7 +294,7 @@ The physical tower — **safety-critical actuation is refused** (§3.2).
 - **Status:** **Gap** (with the safety-refusal floor as a hard property).
 
 ```toml
-# packages/maverick-core/lightwork/domains/ops_shopfloor.toml
+# packages/lightwork-core/lightwork/domains/ops_shopfloor.toml
 name = "ops_shopfloor"
 compartment = "ops_manufacturing"
 description = "Shop-floor / MES coordination (read + digital work-orders; no equipment control)."
@@ -470,7 +470,7 @@ Safety- and regulation-critical — the refusal floor lives here.
 - **Status:** **Gap**.
 
 ```toml
-# packages/maverick-core/lightwork/domains/ops_ehs.toml
+# packages/lightwork-core/lightwork/domains/ops_ehs.toml
 name = "ops_ehs"
 compartment = "ops_ehs"
 description = "Workplace safety (EHS): hazards, incidents, OSHA recordkeeping."

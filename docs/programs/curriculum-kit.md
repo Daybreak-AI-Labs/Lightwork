@@ -12,11 +12,11 @@ upper-division/graduate students, taught over the real codebase: ~680 test
 files, CI on Python 3.10-3.12, and the architecture documented in
 [`docs/architecture.md`](../architecture.md). Lectures teach the concept;
 labs read and extend the shipped implementation of it. Module paths are
-relative to `packages/maverick-core/lightwork/`; tests are under
-`packages/maverick-core/tests/`.
+relative to `packages/lightwork-core/lightwork/`; tests are under
+`packages/lightwork-core/tests/`.
 
 **Course-wide setup (week 1, keep it working all term):** the CONTRIBUTING
-dev setup (`pip install -e './packages/maverick-core[dev]'` + sibling
+dev setup (`pip install -e './packages/lightwork-core[dev]'` + sibling
 packages), `pytest -q` green, `maverick doctor` green. Students use local
 models (Ollama is a supported provider) or instructor-issued low-limit keys;
 every lab that runs goals sets `--max-dollars`. The `FakeLLM` fixture
@@ -33,7 +33,7 @@ tests.
 | 4 | Persistent state: the world model | `world_model.py`; `tests/test_world_model_concurrency.py`, `test_query_plans.py`, `test_wal_contention.py` | Profile one hot query with `EXPLAIN QUERY PLAN`; explain why the query-plan regression test exists; propose (don't ship) an index change with measurements |
 | 5 | Sandboxed execution | `sandbox/` (esp. `sdk.py`, `local.py`, `docker.py`); `tests/test_sandbox_sdk.py`, `test_sandbox_network_policy.py` | Implement a toy sandbox backend against the `SandboxV2` protocol as an entry-point package; pass `conformance()` |
 | 6 | Tools & extension surfaces | `tools/decorator.py`; `plugins.py`, `docs/plugin-api-v2.md`; `sdks/plugin-ts/` | Build one tool twice: as a `@tool`-decorated Python function and as a TS-SDK plugin; pass `python -m maverick.plugin_matrix --ci` |
-| 7 | Safety I: the shield | `docs/safety.md`; `packages/maverick-shield/maverick_shield/` (`builtin_rules.py`, `redteam.py`, `redteam_corpus.jsonl`) | Add ≥5 labeled attack/benign pairs to a corpus copy; run the red-team gate; write up a miss and why the heuristic missed it |
+| 7 | Safety I: the shield | `docs/safety.md`; `packages/lightwork-shield/maverick_shield/` (`builtin_rules.py`, `redteam.py`, `redteam_corpus.jsonl`) | Add ≥5 labeled attack/benign pairs to a corpus copy; run the red-team gate; write up a miss and why the heuristic missed it |
 | 8 | Safety II: capabilities & consent | `capability.py`, `capability_boot.py`, `safety/consent.py`; `tests/test_capability.py`, `test_capability_fuzzer.py` | Run the capability fuzzer; design 2 new probe families; argue (in writing) whether each could leak and verify with the fuzzer |
 | 9 | Audit & compliance engineering | `audit/` (signing, retention, federation); `tests/test_audit_verify_cli.py`, `test_audit_tenancy.py` | Tamper with a copied audit log byte-by-byte; show `maverick audit verify` catching each manipulation class; map which it can't and why |
 | 10 | Context engineering | `compaction/__init__.py`, `compaction/plugins.py`, `context_compactor.py`; `tests/test_compaction_plugins.py` | Register a custom compaction strategy; benchmark it against `"heuristic"` on a fixed transcript corpus (tokens kept vs. task success) |

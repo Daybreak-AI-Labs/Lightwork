@@ -32,7 +32,7 @@ If they differ, the English page changed after the translation was made. When yo
 
 ## Contributing a new language
 
-- **Docs (this directory):** copy the English page into `docs/i18n/<lang>/` (BCP 47 code, e.g. `es`, `pt-BR`), translate the prose, and leave code blocks, inline code, file paths, env var names, config keys, URLs, and product names untranslated. Add the source-commit header comment described above, and add your language to the table in this README. `packages/maverick-core/tests/test_docs_i18n_files.py` enforces the basics.
+- **Docs (this directory):** copy the English page into `docs/i18n/<lang>/` (BCP 47 code, e.g. `es`, `pt-BR`), translate the prose, and leave code blocks, inline code, file paths, env var names, config keys, URLs, and product names untranslated. Add the source-commit header comment described above, and add your language to the table in this README. `packages/lightwork-core/tests/test_docs_i18n_files.py` enforces the basics.
 - **Dashboard UI strings:** these are not managed here — contribute them through the dashboard i18n portal, `maverick_dashboard/i18n_portal.py`.
 
 ## Machine translation for additional languages

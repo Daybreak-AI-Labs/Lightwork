@@ -110,7 +110,7 @@ jobs:
         # install is plugin-free, so this validates the gate machinery; a
         # deployment pipeline runs the same command against its real install.
         run: |
-          pip install -e ./packages/maverick-core -q
+          pip install -e ./packages/lightwork-core -q
           python -m maverick.plugin_matrix --ci
       - name: Specialist catalog gate (1,000 packs, zero envelope errors)
         # Every domain pack must keep a non-empty tool allowlist, a valid
@@ -196,13 +196,13 @@ jobs:
           set -x
           # Mirror the test job's install (minus pytest) so pip-audit audits
           # the actual resolved/installed dependencies, not an empty env.
-          pip install -e ./packages/maverick-core
-          pip install --no-deps -e ./packages/maverick-shield
-          pip install --no-deps -e ./packages/maverick-channels
-          pip install --no-deps -e ./packages/maverick-evolve
-          pip install --no-deps -e ./packages/maverick-dashboard
-          pip install --no-deps -e ./packages/maverick-mcp
-          pip install --no-deps -e ./packages/maverick-knowledge
+          pip install -e ./packages/lightwork-core
+          pip install --no-deps -e ./packages/lightwork-shield
+          pip install --no-deps -e ./packages/lightwork-channels
+          pip install --no-deps -e ./packages/lightwork-evolve
+          pip install --no-deps -e ./packages/lightwork-dashboard
+          pip install --no-deps -e ./packages/lightwork-mcp
+          pip install --no-deps -e ./packages/lightwork-knowledge
           pip install --no-deps -e ./apps/installer-cli
           pip install 'questionary>=2.0' 'rich>=13.7'
           # Install the network-facing deps at the patched floors declared in
@@ -299,15 +299,15 @@ jobs:
       - name: Install packages
         run: |
           set -x
-          # Install maverick-core first; downstream packages use --no-deps to
+          # Install lightwork-core first; downstream packages use --no-deps to
           # avoid pip trying to resolve 'maverick>=0.1' from PyPI.
-          pip install -e ./packages/maverick-core
-          pip install --no-deps -e ./packages/maverick-shield
-          pip install --no-deps -e ./packages/maverick-channels
-          pip install --no-deps -e ./packages/maverick-evolve
-          pip install --no-deps -e ./packages/maverick-dashboard
-          pip install --no-deps -e ./packages/maverick-mcp
-          pip install --no-deps -e ./packages/maverick-knowledge
+          pip install -e ./packages/lightwork-core
+          pip install --no-deps -e ./packages/lightwork-shield
+          pip install --no-deps -e ./packages/lightwork-channels
+          pip install --no-deps -e ./packages/lightwork-evolve
+          pip install --no-deps -e ./packages/lightwork-dashboard
+          pip install --no-deps -e ./packages/lightwork-mcp
+          pip install --no-deps -e ./packages/lightwork-knowledge
           pip install --no-deps -e ./apps/installer-cli
           # Runtime deps the --no-deps installs dropped. python-multipart is
           # required by FastAPI for Form() params (used in /chat/send) and
@@ -337,7 +337,7 @@ jobs:
         with:
           python-version: "3.12"
       - name: Install shield
-        run: pip install -e ./packages/maverick-shield
+        run: pip install -e ./packages/lightwork-shield
       - name: Red-team gate (zero missed attacks)
         run: python -m maverick_shield.redteam
       - name: Calibration report (informational)
@@ -361,7 +361,7 @@ jobs:
           set -x
           # Mirror the test job's core install. The smoke imports nothing that
           # needs the network-facing extras, so we skip them to stay fast.
-          pip install -e ./packages/maverick-core
+          pip install -e ./packages/lightwork-core
           pip install pytest pytest-asyncio
       - name: Eval-harness smoke (offline regression gate)
         run: pytest -vvs --tb=long benchmarks/test_eval_smoke.py
@@ -395,18 +395,18 @@ jobs:
       - name: Install
         run: |
           set -x
-          pip install -e ./packages/maverick-core
-          pip install -e ./packages/maverick-knowledge
+          pip install -e ./packages/lightwork-core
+          pip install -e ./packages/lightwork-knowledge
           pip install 'psycopg[binary]>=3.1'
           pip install pytest pytest-asyncio
       - name: Test PostgresWorldModel
         env:
           MAVERICK_PG_DSN: postgres://maverick:maverick@localhost:5432/maverick_test
-        run: pytest -vvs packages/maverick-core/tests/test_postgres_world.py
+        run: pytest -vvs packages/lightwork-core/tests/test_postgres_world.py
       - name: Test pgvector knowledge store
         env:
           MAVERICK_PG_DSN: postgres://maverick:maverick@localhost:5432/maverick_test
-        run: pytest -vvs packages/maverick-knowledge/tests/test_knowledge.py -k PgVectorLive
+        run: pytest -vvs packages/lightwork-knowledge/tests/test_knowledge.py -k PgVectorLive
 
   docker:
     runs-on: ubuntu-latest
@@ -428,8 +428,8 @@ jobs:
             sleep $((n*15))
           done
       - name: Smoke run
-        # Beyond --help: dashboard and mcp import maverick-dashboard /
-        # maverick-mcp. Before those packages were added to the image they
+        # Beyond --help: dashboard and mcp import lightwork-dashboard /
+        # lightwork-mcp. Before those packages were added to the image they
         # exited 2 ("Install: pip install ..."). These prove they're present.
         run: |
           docker run --rm maverick:ci --help

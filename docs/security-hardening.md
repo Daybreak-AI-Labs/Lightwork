@@ -50,7 +50,7 @@ and how to confirm it's actually on.
 These are on by default and need no configuration. They are the floor the
 opt-in controls build on:
 
-- **Agent Shield** — the safety detection layer (`packages/maverick-shield/`).
+- **Agent Shield** — the safety detection layer (`packages/lightwork-shield/`).
   Fail-open with a warning if not installed; it's a chokepoint, not a hard
   dependency. All three scan surfaces — **input, tool-call arguments, and tool
   output** — run through a **decode/defang pre-pass** (`deobfuscate.py`):
@@ -448,7 +448,7 @@ so OIDC does not 401 inbound webhooks.
 **Gotchas**
 
 - **Needs the optional extra.** OIDC verification requires PyJWT:
-  `pip install 'maverick-agent[oidc]'` (equivalently `pip install
+  `pip install 'lightwork-agent[oidc]'` (equivalently `pip install
   'pyjwt[crypto]>=2.13.0'`). The kernel imports fine without it; you'll only hit
   the error when a token is actually verified.
 - **Asymmetric-only by design.** `algorithms` is filtered to asymmetric
@@ -518,7 +518,7 @@ audience = "maverick"                       # your client_id / API audience
 jwks_uri = "https://login.example.com/.well-known/jwks.json"
 
 # --- browser-login (authorization-code) flow ---
-client_id = "maverick-dashboard"            # the OAuth client registered for this app
+client_id = "lightwork-dashboard"            # the OAuth client registered for this app
 client_secret = "..."                       # the OAuth client secret
 redirect_uri = "https://dash.example.com/auth/callback"  # MUST match the IdP registration
 session_secret = "a-long-random-string"  # pragma: allowlist secret
@@ -531,7 +531,7 @@ session_secret = "a-long-random-string"  # pragma: allowlist secret
 **Environment variables**
 
 ```bash
-export MAVERICK_OIDC_CLIENT_ID="maverick-dashboard"
+export MAVERICK_OIDC_CLIENT_ID="lightwork-dashboard"
 export MAVERICK_OIDC_CLIENT_SECRET="..."
 export MAVERICK_OIDC_REDIRECT_URI="https://dash.example.com/auth/callback"
 export MAVERICK_OIDC_SESSION_SECRET="a-long-random-string"  # pragma: allowlist secret
@@ -668,7 +668,7 @@ want_assertions_signed = true
 session_secret = "<32+ random bytes>"   # SAML reuses the browser-login session secret
 ```
 
-**Needs the extra:** `pip install 'maverick-agent[saml]'` (pysaml2). The routes
+**Needs the extra:** `pip install 'lightwork-agent[saml]'` (pysaml2). The routes
 503 with a hint if it's absent.
 
 **Wizard toggle:** yes — "Enable SAML 2.0 SSO?" (writes the `[auth.saml]` template).
@@ -744,7 +744,7 @@ export MAVERICK_ENCRYPT_AT_REST=0     # 1 to force-enable; 0 to force-disable
   --to <dir>`; if it's lost, the data is unrecoverable.
 - **Requires `cryptography`.** With at-rest enabled but the package missing,
   `seal()` **fails closed** (raises `EncryptionUnavailable`) rather than writing
-  plaintext: `pip install 'maverick-agent[audit-signing]'`.
+  plaintext: `pip install 'lightwork-agent[audit-signing]'`.
 - **Transparent migration.** Sealed blobs carry a magic header; data written
   *before* you enabled encryption is read back transparently (no flag-day
   re-encrypt). New writes are sealed.
@@ -818,7 +818,7 @@ export MAVERICK_AUDIT_SIGN=0     # 1 to force-enable; 0 to force-disable
 
 - Precedence: explicit code arg > `MAVERICK_AUDIT_SIGN` env > `[audit] sign` in
   config > the secure-by-default posture (on).
-- Requires `cryptography` (`pip install 'maverick-agent[audit-signing]'`).
+- Requires `cryptography` (`pip install 'lightwork-agent[audit-signing]'`).
 - The signing key lives under `~/.maverick/keys/`; `maverick soc2`'s
   `audit_signing_key` probe reports whether a key is present.
 
@@ -1056,7 +1056,7 @@ sign = true
 [encryption]
 at_rest = true
 
-# SSO for `maverick serve` / dashboard. Requires:  pip install 'maverick-agent[oidc]'
+# SSO for `maverick serve` / dashboard. Requires:  pip install 'lightwork-agent[oidc]'
 [auth.oidc]
 enabled = true
 issuer = "https://login.example.com/"

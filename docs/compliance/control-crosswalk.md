@@ -47,7 +47,7 @@ Annex A (AI controls A.2–A.10).
 | --- | --- | --- | --- | --- | --- | --- |
 | Authentication | CC6.1 | A.5.16, A.5.17, A.8.5 | A.4.x | OIDC ID-token verifier (asymmetric-only, alg-confusion hardened); SAML SSO; reverse-proxy auth | Implemented (opt-in) | `maverick/oidc.py`; dashboard `auth.py`, `oidc_login.py`, `saml.py`; `maverick/proxy_auth.py` |
 | Authorization / least privilege | CC6.1, CC6.3 | A.5.15, A.5.18, A.8.2, A.8.3 | A.4.x | Signed attenuating capabilities (tool/path/host scope, max_risk, expiry); least-privilege on spawn | Implemented (opt-in) | `maverick/capability.py` |
-| Role-based access / SoD | CC6.1–6.3 | A.5.15, A.5.18 | A.3.2 | Dashboard RBAC (admin/operator/auditor/viewer; auditor read-only = SoD) | Implemented | `packages/maverick-dashboard/maverick_dashboard/rbac.py` |
+| Role-based access / SoD | CC6.1–6.3 | A.5.15, A.5.18 | A.3.2 | Dashboard RBAC (admin/operator/auditor/viewer; auditor read-only = SoD) | Implemented | `packages/lightwork-dashboard/maverick_dashboard/rbac.py` |
 | Per-user/channel authorization | CC6.2 | A.5.15, A.8.3 | A.9.x | Tool ACLs; consent/HITL gating | Implemented | `maverick/safety/tool_acl.py`, `consent.py` |
 | Secure MCP/3rd-party auth | CC6.1 | A.5.17 | A.10.2 | OAuth for MCP integrations | Implemented | `maverick/mcp_oauth.py` |
 
@@ -86,7 +86,7 @@ Annex A (AI controls A.2–A.10).
 
 | Theme | SOC 2 | ISO 27001 | ISO 42001 | Maverick control | Status | Evidence |
 | --- | --- | --- | --- | --- | --- | --- |
-| Boundary protection / threat detection | CC6.6 | A.8.16, A.8.23 | A.9.x | Agent Shield (prompt-injection/exfil/jailbreak); host-scope capabilities; SSRF guards | Implemented | `packages/maverick-shield/`; `maverick/capability.py` |
+| Boundary protection / threat detection | CC6.6 | A.8.16, A.8.23 | A.9.x | Agent Shield (prompt-injection/exfil/jailbreak); host-scope capabilities; SSRF guards | Implemented | `packages/lightwork-shield/`; `maverick/capability.py` |
 | Secure development lifecycle | CC8.1 | A.8.25–A.8.30 | A.6.2 | Secure coding rules; verifier; threat model | Partial / Process | `maverick/verifier.py`; `docs/security/threat-model.md` |
 | Separation of environments / isolation | CC5.2 | A.8.31 | A.6.2 | 8 sandbox backends; enterprise deny-local; docker hardening | Implemented | `maverick/sandbox/` |
 | Vulnerability management | CC7.1 | A.8.8 | — | Dependabot; detect-secrets; ruff/vulture CI gates | Partial / Process | `.github/dependabot.yml`; `.github/workflows/ci.yml` |
@@ -127,7 +127,7 @@ Annex A (AI controls A.2–A.10).
 | AI system lifecycle | — | — | A.6.2 | Governed learning loop: dreaming, hindsight (snapshot-replay regression), staged rollout, calibration gating, atomic rollback | Implemented | `maverick/dreaming.py`, `hindsight.py`, `learning_rollout.py`, `calibration.py` |
 | Learning audit / provable change | CC2.1 | A.8.15 | A.6.2 | Ed25519 signed, cross-language-verifiable learning audit | Implemented | `maverick/audit/signing.py` |
 | Model selection & management | — | — | A.6.2 | Role-based model selection (never hard-coded); per-model usage cards | Implemented | `maverick/llm.py`; `maverick/config.py` (`get_role_model`); `maverick/model_cards.py` |
-| Bias / fairness evaluation | — | — | A.6.2, A.5.x | On-demand group-fairness metrics (four-fifths, demographic parity); red-team corpus | Implemented | `maverick/tools/bias_eval.py`; `packages/maverick-shield/` (`redteam`) |
+| Bias / fairness evaluation | — | — | A.6.2, A.5.x | On-demand group-fairness metrics (four-fifths, demographic parity); red-team corpus | Implemented | `maverick/tools/bias_eval.py`; `packages/lightwork-shield/` (`redteam`) |
 | Continuous fairness monitoring | — | — | A.6.2.6 | Rolling-window monitor: four-fifths breach + drift detection, signed `FAIRNESS_ALERT` audit row | Implemented | `maverick/fairness_monitor.py`; `maverick/audit/events.py` (`FAIRNESS_ALERT`) |
 | Model card metadata export | — | — | A.6.2, A.8.x | Operator-declared model-card metadata (intended use, limitations, oversight, eval results) merged into the usage cards | Implemented | `maverick/model_cards.py` (`ModelCardMetadata`, `export_model_cards`) |
 | AI system retirement / decommissioning | — | — | A.6.2 | Governed retirement with data disposition + signed `AI_SYSTEM_RETIRED` audit record | Implemented | `maverick/retirement.py`; `maverick/audit/events.py` (`AI_SYSTEM_RETIRED`) |

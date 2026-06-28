@@ -7,20 +7,20 @@
 टर्मिनल से इंस्टॉल करने का सबसे सुरक्षित तरीका है कि रिमोट बूटस्ट्रैप स्क्रिप्ट चलाने के बजाय pipx से प्रकाशित पैकेज इंस्टॉल किया जाए:
 
 ```bash
-pipx install 'maverick-agent[installer]'
+pipx install 'lightwork-agent[installer]'
 maverick init
 ```
 
 अगर आपको बिना किसी पूर्व-आवश्यकता वाला डेस्कटॉप बूटस्ट्रैप चाहिए, तो किसी भरोसेमंद कमिट या रिलीज़ से `deploy/desktop/install.sh` या `deploy/desktop/install.ps1` डाउनलोड करें, उसे सत्यापित करें, और `MAVERICK_REF` में पूरा 40-अक्षर वाला कमिट SHA सेट करें। ये स्क्रिप्ट डिफ़ॉल्ट रूप से परिवर्तनशील ब्रांच/टैग रेफ़रेंस अस्वीकार कर देती हैं।
 
-PyPI पैकेज `maverick-agent` है (`maverick` नाम पहले से किसी और ने ले रखा है)। `[installer]` एक्स्ट्रा विज़ार्ड को कर्नेल वाले उसी pipx एनवायरनमेंट में इंस्टॉल करता है, ताकि `maverick init` कमांड उपलब्ध रहे।
+PyPI पैकेज `lightwork-agent` है (`maverick` नाम पहले से किसी और ने ले रखा है)। `[installer]` एक्स्ट्रा विज़ार्ड को कर्नेल वाले उसी pipx एनवायरनमेंट में इंस्टॉल करता है, ताकि `maverick init` कमांड उपलब्ध रहे।
 
 डेवलपमेंट के दौरान सोर्स से:
 
 ```bash
 git clone https://github.com/Day-AI-Labs/maverick
 cd maverick
-pip install -e ./packages/maverick-core
+pip install -e ./packages/lightwork-core
 pip install -e ./apps/installer-cli
 maverick init
 ```

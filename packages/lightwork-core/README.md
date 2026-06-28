@@ -1,4 +1,4 @@
-# maverick-core
+# lightwork-core
 
 The Lightwork agent kernel. A recursive multi-agent swarm with persistent
 world model, shared blackboard, hard budget caps, and closed-loop skill
@@ -11,7 +11,7 @@ This package installs on its own (PyPI publish is pending the first tagged
 release; install from a source clone for now):
 
 ```bash
-pip install -e packages/maverick-core   # `pip install maverick-agent` once published
+pip install -e packages/lightwork-core   # `pip install lightwork-agent` once published
 export ANTHROPIC_API_KEY=sk-ant-...
 maverick start "your goal"
 ```

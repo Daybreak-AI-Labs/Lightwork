@@ -35,7 +35,7 @@
 #   OUTBOX          donation outbox to auto-generate inputs from
 #                   (default ~/.maverick/outbox)
 #   SCORES          default ./scores.json (prove-learning runs only if present)
-#   INSTALL         1 (pip install 'maverick-agent[training]') | 0 to skip
+#   INSTALL         1 (pip install 'lightwork-agent[training]') | 0 to skip
 #   SKIP_DPO        0 | 1 to run only the CPU PRM step
 #   DRY_RUN         0 | 1 to print the commands without executing
 #   BETA EPOCHS LR MIN_MARGIN MAX_PAIRS   DPO hyperparameters (passed through)
@@ -80,7 +80,7 @@ run "mkdir -p '$OUT_DIR'"
 
 if [ "$INSTALL" = "1" ]; then
   say "1/4 Install (torch + transformers via the [training] extra)"
-  run "pip install --quiet 'maverick-agent[training]'"
+  run "pip install --quiet 'lightwork-agent[training]'"
 fi
 
 say "2/4 GPU check"

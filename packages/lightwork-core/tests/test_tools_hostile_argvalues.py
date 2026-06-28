@@ -3,7 +3,7 @@ arg VALUES the model can put in its JSON object (non-str where a str is
 expected, unhashable op, overlong path, non-finite numbers). The contract
 is a returned string (often ``ERROR: ...``), never an uncaught exception.
 
-These cover a fuzz mop-up pass over packages/lightwork-core/maverick/tools/.
+These cover a fuzz mop-up pass over packages/lightwork-core/lightwork/tools/.
 """
 from __future__ import annotations
 

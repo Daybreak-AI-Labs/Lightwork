@@ -10,7 +10,7 @@ on the dashboard, where auth, same-origin checks, and rate limits live.
 
 ## Endpoints used (all existing dashboard routes)
 
-From `packages/maverick-dashboard/maverick_dashboard/api.py`:
+From `packages/lightwork-dashboard/maverick_dashboard/api.py`:
 
 | Screen      | Endpoint |
 |-------------|----------|

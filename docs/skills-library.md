@@ -3,7 +3,7 @@
 > The first-party **`SKILL.md` library** the 2026 expansion council recommended
 > (see [`proposals/council-expansion-2026.md`](proposals/council-expansion-2026.md)).
 > Source files ship inside the package at
-> `packages/maverick-core/lightwork/skills_builtin/*.md`; each is reusable
+> `packages/lightwork-core/lightwork/skills_builtin/*.md`; each is reusable
 > procedural know-how any agent can follow mechanically, validated by
 > `maverick.skills.validate_skill_file` (test: `test_skills_library.py`).
 > **Wired at runtime:** `skills.available_skills()` recalls this library plus

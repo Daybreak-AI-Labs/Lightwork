@@ -3,7 +3,7 @@
 **Status:** design / roadmap. Companion to the finance, IT-GRC, sales-GTM, HR,
 product-engineering, and strategy/exec suites; indexed in
 [`agent-suites-overview.md`](agent-suites-overview.md). Extends the shipped
-[`legal.toml`](../../packages/maverick-core/lightwork/domains/legal.toml) starter pack into
+[`legal.toml`](../../packages/lightwork-core/lightwork/domains/legal.toml) starter pack into
 a full suite. ~36 agents (31 base + 5 council-added) across eight towers.
 
 > **Legal is horizontal — it touches every other suite — and uniquely risky for AI.** A
@@ -80,7 +80,7 @@ is wired; "verify *every* cite or mark it unverified" is the enforcement to buil
 
 ## 2. How a legal agent maps onto Lightwork
 
-Each agent is a [`DomainProfile`](../../packages/maverick-core/lightwork/domain.py) pack
+Each agent is a [`DomainProfile`](../../packages/lightwork-core/lightwork/domain.py) pack
 that **inherits the `legal.toml` spine** (cite precisely, not legal advice, human-confirm)
 and adds a practice-area persona + tools. Two specifics:
 
@@ -192,7 +192,7 @@ The shipped core (the `legal.toml` pack), expanded.
 - **Status:** **Shipped** (this *is* `legal.toml`).
 
 ```toml
-# packages/maverick-core/lightwork/domains/legal_research.toml  (extends legal.toml)
+# packages/lightwork-core/lightwork/domains/legal_research.toml  (extends legal.toml)
 name = "legal_research"
 compartment = "legal"
 description = "Legal research and memo drafting with verified authority."
@@ -248,7 +248,7 @@ The largest in-house workload — and the biggest legal-AI opportunity.
 - **Status:** **Gap** (the flagship legal-AI agent).
 
 ```toml
-# packages/maverick-core/lightwork/domains/legal_contracts.toml
+# packages/lightwork-core/lightwork/domains/legal_contracts.toml
 name = "legal_contracts"
 compartment = "legal_contracts"
 description = "Commercial contract review and redlining against the playbook."

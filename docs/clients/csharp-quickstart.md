@@ -13,8 +13,8 @@ it from any language an MCP SDK exists in.
 
 ```bash
 # PyPI publish pending: install from a source clone (pip install -e
-# packages/maverick-core packages/maverick-mcp) or the native installer for now.
-pip install maverick-agent maverick-mcp-server   # any venv on the same machine (post-publish)
+# packages/lightwork-core packages/lightwork-mcp) or the native installer for now.
+pip install lightwork-agent lightwork-mcp-server   # any venv on the same machine (post-publish)
 dotnet add package ModelContextProtocol           # official C# MCP SDK
 ```
 
@@ -87,7 +87,7 @@ use while running a goal.
   …) read credentials from the same env / `~/.maverick/config.toml`
   the CLI uses. The C# client doesn't pass credentials — the kernel
   reads them once.
-- Some tools require optional extras (`maverick-agent[redis]`,
+- Some tools require optional extras (`lightwork-agent[redis]`,
   `[s3]`, etc.). Install only what you use.
 
 ## Limits — please respect them
@@ -97,11 +97,11 @@ use while running a goal.
   spawn goals and let Lightwork run the swarm. The .NET process is the
   *client*, not a worker.
 - **Sandbox / kernel features are Python-side.** Backends
-  (firecracker, k8s, devcontainer) live in `maverick-core` and are
+  (firecracker, k8s, devcontainer) live in `lightwork-core` and are
   not part of the wire protocol.
 - **The MCP server is for cross-language clients, not for tunneling
   Lightwork over the public internet.** Pair with your own auth +
-  TLS layer if you go remote (see `packages/maverick-mcp/http_transport.py`).
+  TLS layer if you go remote (see `packages/lightwork-mcp/http_transport.py`).
 
 ## Why no `Lightwork.Core` NuGet package?
 
@@ -129,5 +129,5 @@ handshake by hand.
 - [TypeScript client quickstart](./typescript-quickstart.md)
 - [Go client quickstart](./go-quickstart.md)
 - [Rust client quickstart](./rust-quickstart.md)
-- `packages/maverick-mcp/README.md` — what tools are exposed + how
+- `packages/lightwork-mcp/README.md` — what tools are exposed + how
   to wire into Claude Code / Cursor / Continue / Zed

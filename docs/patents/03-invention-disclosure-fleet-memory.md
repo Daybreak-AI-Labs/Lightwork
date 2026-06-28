@@ -50,9 +50,9 @@ active, permitted for the direction (inbound/outbound), and its declared
 op), an external agent may deposit only into a scope its trust entry permits —
 explicitly closing the memory-poisoning hole that read-only gating leaves open.
 
-Evidence: `packages/maverick-core/lightwork/fleet_memory.py:169-185` (write-path
+Evidence: `packages/lightwork-core/lightwork/fleet_memory.py:169-185` (write-path
 gate; comment notes gating only reads was "backwards");
-`packages/maverick-core/lightwork/agent_trust.py:623-664` (`decide_memory_access`).
+`packages/lightwork-core/lightwork/agent_trust.py:623-664` (`decide_memory_access`).
 
 ### 3.2 Hard retrieval-layer scope filtering (not a ranking penalty)
 On recall, when the trust plane is engaged: an **empty/omitted domain is denied**
@@ -61,7 +61,7 @@ On recall, when the trust plane is engaged: an **empty/omitted domain is denied*
 **before** ranking can surface them — isolation is enforced at the retrieval
 layer, not merely de-prioritized.
 
-Evidence: `packages/maverick-core/lightwork/fleet_memory.py:219-287` (recall;
+Evidence: `packages/lightwork-core/lightwork/fleet_memory.py:219-287` (recall;
 unscoped-denied; `_in_scope` hard drop); `agent_trust.py:623-664`.
 
 ### 3.3 Provenance tagging + governed normalization of third-party contributions
@@ -71,10 +71,10 @@ trust tier) so it consolidates into the *same* offline learning loop as native
 experience while remaining attributable and trust-weightable on later recall.
 Unregistered agents are refused before any read/write; the whole plane is opt-in.
 
-Evidence: `packages/maverick-core/lightwork/fleet_memory.py:73-88` (redact +
+Evidence: `packages/lightwork-core/lightwork/fleet_memory.py:73-88` (redact +
 shield + cap), `:142-217` (ingest with provenance), `:219-287` (recall with audit
 of what was disclosed); MCP surface in
-`packages/maverick-mcp/maverick_mcp/server.py:265-300`.
+`packages/lightwork-mcp/maverick_mcp/server.py:265-300`.
 
 ## 4. Why it is novel / non-obvious
 
@@ -137,6 +137,6 @@ the read/write are exposed as protocol tools.
 
 ## 8. Evidence index (file:line)
 
-- `packages/maverick-core/lightwork/fleet_memory.py:73-88, 142-217, 169-185, 219-287`
-- `packages/maverick-core/lightwork/agent_trust.py:623-664` (`decide_memory_access`)
-- `packages/maverick-mcp/maverick_mcp/server.py:265-300` (MCP read/write tools)
+- `packages/lightwork-core/lightwork/fleet_memory.py:73-88, 142-217, 169-185, 219-287`
+- `packages/lightwork-core/lightwork/agent_trust.py:623-664` (`decide_memory_access`)
+- `packages/lightwork-mcp/maverick_mcp/server.py:265-300` (MCP read/write tools)

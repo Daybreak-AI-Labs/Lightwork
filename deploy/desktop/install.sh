@@ -114,11 +114,11 @@ install_maverick() {
   log "Installing the agent + setup wizard (this can take a minute) ..."
   if [ -n "$REF" ]; then
     fetch_source
-    pipx_cmd install --force "$SRC_DIR/packages/maverick-core"
+    pipx_cmd install --force "$SRC_DIR/packages/lightwork-core"
     # The wizard ships in apps/installer-cli; install it into the same venv.
-    pipx_cmd inject --force maverick-agent "$SRC_DIR/apps/installer-cli"
+    pipx_cmd inject --force lightwork-agent "$SRC_DIR/apps/installer-cli"
   else
-    pipx_cmd install --force 'maverick-agent[installer]'
+    pipx_cmd install --force 'lightwork-agent[installer]'
   fi
 }
 

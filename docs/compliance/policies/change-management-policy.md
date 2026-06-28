@@ -85,7 +85,7 @@ review, approve, or deploy changes.
 | Conventional Commits / PR-title enforcement | `.github/workflows/conventional-commits.yml` | Implemented |
 | Custom platform CI gates | `python -m maverick.plugin_matrix --ci`, `python -m maverick.deprecations --ci`, `python -m maverick.a11y_audit --ci` (per CLAUDE.md) | Implemented |
 | Additive-only proto/contract control | `python -m maverick.grpc_api.contract --check` (proto removals/renumbers fail) | Implemented |
-| Test-driven verification (anti-cheat) | `packages/maverick-core/lightwork/verifier.py` | Implemented |
+| Test-driven verification (anti-cheat) | `packages/lightwork-core/lightwork/verifier.py` | Implemented |
 | Peer review before merge | Pull request review requirement | Partial — tooling present; enforced reviewer count is **[Process — Organization to operationalize]** |
 | Documented approval workflow | — | **[Process — Organization to operationalize]** |
 | Production deploy sign-off | — | **[Process — Organization to operationalize]** |

@@ -3,7 +3,7 @@
 Drive a Lightwork swarm from your own CI with the composite action in
 [`deploy/github-action/`](../deploy/github-action/). Hand it a goal (or a
 [goal template](../benchmarks/example-templates/)) and a dollar cap; it
-installs `maverick-agent`, runs `maverick start`, and writes the answer to
+installs `lightwork-agent`, runs `maverick start`, and writes the answer to
 the job summary.
 
 ## Quickstart

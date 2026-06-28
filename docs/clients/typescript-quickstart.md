@@ -13,8 +13,8 @@ from any language an MCP SDK exists in.
 
 ```bash
 # PyPI publish pending: install from a source clone (pip install -e
-# packages/maverick-core packages/maverick-mcp) or the native installer for now.
-pip install maverick-agent maverick-mcp-server   # any venv on the same machine (post-publish)
+# packages/lightwork-core packages/lightwork-mcp) or the native installer for now.
+pip install lightwork-agent lightwork-mcp-server   # any venv on the same machine (post-publish)
 npm i @modelcontextprotocol/sdk
 ```
 
@@ -117,7 +117,7 @@ of the text block.
   …) read credentials from the same env / `~/.maverick/config.toml`
   the CLI uses. The TS client doesn't pass credentials — the kernel
   reads them once.
-- Some tools require optional extras (`maverick-agent[redis]`,
+- Some tools require optional extras (`lightwork-agent[redis]`,
   `[s3]`, etc.). Install only what you use.
 
 ## Limits — please respect them
@@ -127,11 +127,11 @@ of the text block.
   spawn goals and let Lightwork run the swarm. The TS process is the
   *client*, not a worker.
 - **Sandbox / kernel features are Python-side.** Backends
-  (firecracker, k8s, devcontainer) live in `maverick-core` and are
+  (firecracker, k8s, devcontainer) live in `lightwork-core` and are
   not part of the wire protocol.
 - **The MCP server is for cross-language clients, not for tunneling
   Lightwork over the public internet.** Pair with your own auth +
-  TLS layer if you go remote (see `packages/maverick-mcp/http_transport.py`).
+  TLS layer if you go remote (see `packages/lightwork-mcp/http_transport.py`).
 
 ## Why no `npm install @maverick/core`?
 
@@ -147,5 +147,5 @@ that kernel without giving up features.
 - [Rust client quickstart](./rust-quickstart.md)
 - [C# / .NET client quickstart](./csharp-quickstart.md)
 - [Java / JVM client quickstart](./java-quickstart.md)
-- `packages/maverick-mcp/README.md` — what tools are exposed + how
+- `packages/lightwork-mcp/README.md` — what tools are exposed + how
   to wire into Claude Code / Cursor / Continue / Zed

@@ -34,7 +34,7 @@ kernel-template mutation, and OFF by default.
 ### 1. Baseline + repeated full-suite runs
 
 ```
-python3 -m pytest packages/maverick-core/tests/ -q \
+python3 -m pytest packages/lightwork-core/tests/ -q \
   -k "self_harness or self_learning or self_improvement"
 ```
 
@@ -52,12 +52,12 @@ MAVERICK_SELF_HARNESS_ADV_ROUNDS=50000 \
 MAVERICK_SELF_HARNESS_CHAOS_ROUNDS=20000 \
 MAVERICK_SELF_HARNESS_EFFICACY_TRIALS=1000000 \
 python3 -m pytest -q \
-  packages/maverick-core/tests/test_self_harness_battery.py \
-  packages/maverick-core/tests/test_self_harness_adversarial.py \
-  packages/maverick-core/tests/test_self_harness_metamorphic.py \
-  packages/maverick-core/tests/test_self_harness_fault_injection.py \
-  packages/maverick-core/tests/test_self_harness_efficacy_soak.py \
-  packages/maverick-core/tests/test_self_harness_efficacy_adversarial_soak.py
+  packages/lightwork-core/tests/test_self_harness_battery.py \
+  packages/lightwork-core/tests/test_self_harness_adversarial.py \
+  packages/lightwork-core/tests/test_self_harness_metamorphic.py \
+  packages/lightwork-core/tests/test_self_harness_fault_injection.py \
+  packages/lightwork-core/tests/test_self_harness_efficacy_soak.py \
+  packages/lightwork-core/tests/test_self_harness_efficacy_adversarial_soak.py
 ```
 
 Result: **187 passed in 5m19s**. Scenario counts exercised this run:

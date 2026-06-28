@@ -94,13 +94,13 @@ recorded in the risk register.
 
 | Control | Implementation (file/module) | Status |
 | --- | --- | --- |
-| Structured risk-assessment engine | `packages/maverick-core/lightwork/assessment.py` | Implemented |
-| EU AI Act risk classification | `packages/maverick-core/lightwork/ai_act.py` | Implemented |
-| AI Act classifier tool | `packages/maverick-core/lightwork/tools/ai_act_classifier.py` | Implemented |
-| AI Risk Assessment persona (IT GRC / AIRA) | `packages/maverick-core/lightwork/domains/itgrc_aira.toml` | Implemented |
-| Tool risk classification (low/medium/high) | `packages/maverick-core/lightwork/safety/tool_risk.py` | Implemented |
-| Capability max-risk ceilings | `packages/maverick-core/lightwork/capability.py` | Implemented |
-| Map risks to control frameworks | `find_controls_tool` in `packages/maverick-core/lightwork/tools/control_tools.py` | Implemented |
+| Structured risk-assessment engine | `packages/lightwork-core/lightwork/assessment.py` | Implemented |
+| EU AI Act risk classification | `packages/lightwork-core/lightwork/ai_act.py` | Implemented |
+| AI Act classifier tool | `packages/lightwork-core/lightwork/tools/ai_act_classifier.py` | Implemented |
+| AI Risk Assessment persona (IT GRC / AIRA) | `packages/lightwork-core/lightwork/domains/itgrc_aira.toml` | Implemented |
+| Tool risk classification (low/medium/high) | `packages/lightwork-core/lightwork/safety/tool_risk.py` | Implemented |
+| Capability max-risk ceilings | `packages/lightwork-core/lightwork/capability.py` | Implemented |
+| Map risks to control frameworks | `find_controls_tool` in `packages/lightwork-core/lightwork/tools/control_tools.py` | Implemented |
 | Risk methodology, register, SoA, appetite thresholds | `docs/compliance/risk-management-methodology.md`, `docs/compliance/risk-register.md` | Partial |
 | Periodic risk review, management risk acceptance | Risk governance process (organizational) | Process |
 

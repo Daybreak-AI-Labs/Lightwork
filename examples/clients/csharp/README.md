@@ -12,9 +12,9 @@ swarm and needs a provider key + budget), so it's safe to run unattended.
 
 ```bash
 # PyPI publish is pending — until the first tagged release, install the `maverick`
-# CLI from a source clone (`pip install -e packages/maverick-core packages/maverick-mcp`)
+# CLI from a source clone (`pip install -e packages/lightwork-core packages/lightwork-mcp`)
 # or via the native installer (see Releases).
-pip install maverick-agent maverick-mcp-server   # provides the `maverick` CLI (post-publish)
+pip install lightwork-agent lightwork-mcp-server   # provides the `maverick` CLI (post-publish)
 dotnet run
 ```
 

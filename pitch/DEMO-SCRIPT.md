@@ -15,7 +15,7 @@
 ## Pre-flight (do this before they're in the room)
 
 ```bash
-pip install maverick-core            # or: from the monorepo, the editable install
+pip install lightwork-core            # or: from the monorepo, the editable install
 maverick version                     # confirm it runs
 ```
 

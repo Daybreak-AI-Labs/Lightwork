@@ -128,7 +128,7 @@ extra:
     - icon: fontawesome/brands/github
       link: https://github.com/Day-AI-Labs/Maverick
     - icon: fontawesome/brands/python
-      link: https://pypi.org/project/maverick-agent/
+      link: https://pypi.org/project/lightwork-agent/
   generator: false
 
 # How to preview locally:

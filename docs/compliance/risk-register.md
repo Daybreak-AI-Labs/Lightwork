@@ -24,7 +24,7 @@ cross-referenced to the [crosswalk](control-crosswalk.md) and SoA.
 | ID | Risk | L×I (I) | Treatment / control | L×I (R) | Owner | Status |
 | --- | --- | --- | --- | --- | --- | --- |
 | R-01 | **Sandbox escape** — agent-executed code breaks container isolation to reach the host | 4×5=20 | Mitigate: hardened container backends (`--network=none`, `--cap-drop=ALL`, `--no-new-privileges`, pid/mem limits); enterprise `require_container` deny-local (`maverick/sandbox/`) | 2×5=10 | Christopher Day | Treat — keep pen-test on roadmap |
-| R-02 | **Prompt injection** redirects the agent to attacker goals | 5×4=20 | Mitigate: Agent Shield input/tool/output scanning; memory injection-marker guard (`maverick-shield/`, `maverick/memory_guard.py`) | 3×3=9 | Christopher Day | Treat — tune red-team corpus |
+| R-02 | **Prompt injection** redirects the agent to attacker goals | 5×4=20 | Mitigate: Agent Shield input/tool/output scanning; memory injection-marker guard (`lightwork-shield/`, `maverick/memory_guard.py`) | 3×3=9 | Christopher Day | Treat — tune red-team corpus |
 | R-03 | **Secret/credential exfiltration** via tool output or logs | 4×5=20 | Mitigate: secret scrubber + PII detector + exfil detection; detect-secrets CI gate (`maverick/secrets.py`, `maverick/safety/`) | 2×4=8 | Christopher Day | Treat |
 | R-04 | **SSRF** to internal/cloud-metadata endpoints | 3×4=12 | Mitigate: DNS-rebind pinning, private-IP block (default-on) | 2×3=6 | Christopher Day | Treat |
 | R-05 | **Audit-log tampering** hides malicious activity | 3×5=15 | Mitigate: Ed25519 Merkle hash-chain + cross-file anchors + WORM; chain verification (`maverick/audit/signing.py`) | 1×5=5 | Christopher Day | Treat — requires signing ENABLED |

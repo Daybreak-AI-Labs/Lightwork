@@ -107,9 +107,9 @@ supply-chain integrity controls that exist in the Maverick codebase.
 
 | Control | Implementation (file/module) | Status |
 | --- | --- | --- |
-| MCP command hash-pinning and tool-description scanning at registration | `packages/maverick-core/lightwork/mcp_oauth.py`; MCP tool registration path | Implemented |
-| Plugin default-deny via allowlist (`MAVERICK_PLUGINS_ALLOW`) + skill-body scan + hash-pin at install | `packages/maverick-core/lightwork/plugin_manifest.py` | Implemented |
-| Provenance tagging (`vendor:agent_id`) of external agent contributions | `packages/maverick-core/lightwork/fleet_memory.py` | Implemented |
+| MCP command hash-pinning and tool-description scanning at registration | `packages/lightwork-core/lightwork/mcp_oauth.py`; MCP tool registration path | Implemented |
+| Plugin default-deny via allowlist (`MAVERICK_PLUGINS_ALLOW`) + skill-body scan + hash-pin at install | `packages/lightwork-core/lightwork/plugin_manifest.py` | Implemented |
+| Provenance tagging (`vendor:agent_id`) of external agent contributions | `packages/lightwork-core/lightwork/fleet_memory.py` | Implemented |
 | Automated dependency monitoring / update alerting | `.github/dependabot.yml` | Implemented |
 | DPA template for sub-processor agreements | `docs/enterprise/legal/dpa-template.md` | Implemented (template) |
 | SLA template for supplier service levels | `docs/enterprise/legal/sla-template.md` | Implemented (template) |

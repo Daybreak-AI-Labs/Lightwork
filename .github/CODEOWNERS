@@ -4,11 +4,11 @@
 
 # Per-package overrides (currently same person; structure ready for
 # future co-maintainers).
-/packages/maverick-core/                @cdayAI
-/packages/maverick-shield/              @cdayAI
-/packages/maverick-channels/            @cdayAI
-/packages/maverick-dashboard/           @cdayAI
-/packages/maverick-mcp/                 @cdayAI
+/packages/lightwork-core/                @cdayAI
+/packages/lightwork-shield/              @cdayAI
+/packages/lightwork-channels/            @cdayAI
+/packages/lightwork-dashboard/           @cdayAI
+/packages/lightwork-mcp/                 @cdayAI
 /apps/installer-cli/                    @cdayAI
 /apps/installer-desktop/                @cdayAI
 /deploy/                                @cdayAI

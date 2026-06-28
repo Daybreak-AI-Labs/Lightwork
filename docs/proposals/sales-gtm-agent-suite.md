@@ -61,7 +61,7 @@ GTM has a surprisingly strong base because the *engagement* primitives already e
 
 | Existing capability | Module / surface | Status | Reused by |
 |---|---|---|---|
-| **Multi-channel engagement** (email, SMS, voice, WhatsApp, Slack, Telegram, Signal, Discord, Mastodon, Bluesky, Matrix, iMessage) | `packages/maverick-channels/` (13 adapters) | **Shipped** | SDR (2.2), Nurture (1.6), Social (1.3), Support (6.1) |
+| **Multi-channel engagement** (email, SMS, voice, WhatsApp, Slack, Telegram, Signal, Discord, Mastodon, Bluesky, Matrix, iMessage) | `packages/lightwork-channels/` (13 adapters) | **Shipped** | SDR (2.2), Nurture (1.6), Social (1.3), Support (6.1) |
 | **AI / bot disclosure** (EU AI Act Art 50, CA SB 1001) | `compliance.py` (`first_turn_disclosure`) | **Shipped** | every customer-facing agent |
 | **"Send" tools classified high-risk** (the gate basis) | `safety/tool_risk.py` (`email`/`gmail`/`ses`/`sns`/`twilio`/`slack_bot`/…) | **Shipped** | the outbound gate (§3.1) |
 | **Human-in-the-loop send gate** | `safety/consent.py` (`ask`/`dashboard`) | **Shipped** | every outbound action |
@@ -88,7 +88,7 @@ churn/health models, partner/PRM, and win-loss. These are §9 connectors + new p
 ## 2. How a GTM agent maps onto Lightwork
 
 Same as the other suites: each agent is one
-[`DomainProfile`](../../packages/maverick-core/lightwork/domain.py) pack (compartment
+[`DomainProfile`](../../packages/lightwork-core/lightwork/domain.py) pack (compartment
 + persona + attenuating capability + tools + knowledge), governed by Layer A
 (`governance.py`), the consent gate, and the signed audit chain. Two GTM specifics:
 
@@ -319,7 +319,7 @@ capability + governance policy + consent config + enabled regimes + brand guardr
 - **Status:** **Partial** (engagement substrate shipped; enrichment/sales-engagement to build).
 
 ```toml
-# packages/maverick-core/lightwork/domains/gtm_sdr.toml
+# packages/lightwork-core/lightwork/domains/gtm_sdr.toml
 name = "gtm_sdr"
 compartment = "gtm_sales"
 description = "Outbound sales development: account research and compliant outreach."
@@ -398,7 +398,7 @@ authoring = "manual"
 - **Status:** **Partial** (governance gate shipped; amount-aware policy is the shared build).
 
 ```toml
-# packages/maverick-core/lightwork/domains/gtm_dealdesk.toml
+# packages/lightwork-core/lightwork/domains/gtm_dealdesk.toml
 name = "gtm_dealdesk"
 compartment = "gtm_revops"
 description = "Deal desk: discount/term approval, margin protection, quote integrity."
@@ -546,7 +546,7 @@ authoring = "manual"
 - **Status:** **Partial** (channels + disclosure + intake shipped; support platform to build).
 
 ```toml
-# packages/maverick-core/lightwork/domains/gtm_support.toml
+# packages/lightwork-core/lightwork/domains/gtm_support.toml
 name = "gtm_support"
 compartment = "gtm_service"
 description = "Tier-1 customer support: triage, KB answers, deflection, escalation."
@@ -719,7 +719,7 @@ Per CLAUDE.md rules 5 & 6, every connector ships a config knob + wizard toggle.
 
 | System class | Vendors | Status | Used by |
 |---|---|---|---|
-| **Engagement channels** | email/SMS/voice/Slack/WhatsApp/Telegram/Signal/Discord/Mastodon/Bluesky/Matrix/iMessage | **✅ shipped** (`maverick-channels`) | SDR, Nurture, Social, Support |
+| **Engagement channels** | email/SMS/voice/Slack/WhatsApp/Telegram/Signal/Discord/Mastodon/Bluesky/Matrix/iMessage | **✅ shipped** (`lightwork-channels`) | SDR, Nurture, Social, Support |
 | **Email / meetings / collateral** | Gmail, Google Calendar, Google Drive | **✅ exists** | 2.1, 2.5, 5.6, 1.8 |
 | **Creative / web** | Figma, Wix | **✅ exists** | Brand (1.5), Content (1.2) |
 | **CRM (system of record)** | Salesforce, HubSpot | ◻ build (P1) | most of Towers 2–5 |

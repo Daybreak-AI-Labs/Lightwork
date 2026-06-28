@@ -7,20 +7,20 @@
 Самый безопасный способ установки из терминала — поставить опубликованный пакет через pipx, а не выполнять удалённый bootstrap-скрипт:
 
 ```bash
-pipx install 'maverick-agent[installer]'
+pipx install 'lightwork-agent[installer]'
 maverick init
 ```
 
 Если вам нужен десктопный bootstrap без предварительных требований, скачайте `deploy/desktop/install.sh` или `deploy/desktop/install.ps1` из коммита или релиза, которому вы доверяете, проверьте скрипт и задайте в `MAVERICK_REF` полный 40-символьный SHA коммита. По умолчанию скрипты отклоняют изменяемые ссылки на ветки и теги.
 
-Пакет в PyPI называется `maverick-agent` (имя `maverick` занято посторонним проектом). Экстра `[installer]` устанавливает мастер настройки в то же окружение pipx, что и ядро, поэтому команда `maverick init` будет доступна.
+Пакет в PyPI называется `lightwork-agent` (имя `maverick` занято посторонним проектом). Экстра `[installer]` устанавливает мастер настройки в то же окружение pipx, что и ядро, поэтому команда `maverick init` будет доступна.
 
 Из исходного кода, во время разработки:
 
 ```bash
 git clone https://github.com/Day-AI-Labs/maverick
 cd maverick
-pip install -e ./packages/maverick-core
+pip install -e ./packages/lightwork-core
 pip install -e ./apps/installer-cli
 maverick init
 ```

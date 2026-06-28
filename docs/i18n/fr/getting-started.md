@@ -7,20 +7,20 @@
 La méthode la plus sûre en terminal consiste à installer le paquet publié avec pipx, plutôt qu'à exécuter un script d'amorçage distant :
 
 ```bash
-pipx install 'maverick-agent[installer]'
+pipx install 'lightwork-agent[installer]'
 maverick init
 ```
 
 Si vous avez besoin de l'amorçage bureau sans prérequis, téléchargez `deploy/desktop/install.sh` ou `deploy/desktop/install.ps1` depuis un commit ou une release de confiance, vérifiez le script, puis donnez à `MAVERICK_REF` la valeur d'un SHA de commit complet de 40 caractères. Par défaut, les scripts rejettent les références mutables vers des branches ou des tags.
 
-Le paquet PyPI s'appelle `maverick-agent` (le nom `maverick` est squatté). L'extra `[installer]` installe l'assistant dans le même environnement pipx que le noyau, afin que `maverick init` soit disponible.
+Le paquet PyPI s'appelle `lightwork-agent` (le nom `maverick` est squatté). L'extra `[installer]` installe l'assistant dans le même environnement pipx que le noyau, afin que `maverick init` soit disponible.
 
 Depuis les sources, pendant le développement :
 
 ```bash
 git clone https://github.com/Day-AI-Labs/maverick
 cd maverick
-pip install -e ./packages/maverick-core
+pip install -e ./packages/lightwork-core
 pip install -e ./apps/installer-cli
 maverick init
 ```

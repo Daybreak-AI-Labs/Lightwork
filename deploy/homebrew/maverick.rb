@@ -10,7 +10,7 @@
 # generates hash-locked dependency requirements, and opens a PR updating this
 # file (and you sync it to the tap repo).
 #
-# It installs the checksum-verified `maverick-agent` source plus the installer
+# It installs the checksum-verified `lightwork-agent` source plus the installer
 # wizard dependencies into an isolated virtualenv, then links the `maverick` CLI
 # onto the PATH.
 class Maverick < Formula
@@ -18,7 +18,7 @@ class Maverick < Formula
 
   desc "AI agent swarm that runs locally, works for hours, under a budget cap"
   homepage "https://github.com/Day-AI-Labs/Maverick"
-  url "https://files.pythonhosted.org/packages/source/m/maverick-agent/maverick_agent-0.1.6.tar.gz"
+  url "https://files.pythonhosted.org/packages/source/m/lightwork-agent/maverick_agent-0.1.6.tar.gz"
   sha256 "0000000000000000000000000000000000000000000000000000000000000000" # set by homebrew-bump.yml
   license :cannot_represent
 
@@ -29,7 +29,7 @@ class Maverick < Formula
 
     # Install the Homebrew-downloaded, checksum-verified sdist first so the
     # stripped, hash-locked dependency set can satisfy packages that declare a
-    # runtime dependency on maverick-agent without resolving it from PyPI.
+    # runtime dependency on lightwork-agent without resolving it from PyPI.
     system libexec/"bin/pip", "install", "--no-deps", "--no-build-isolation", buildpath
 
     requirements = libexec/"requirements.txt"

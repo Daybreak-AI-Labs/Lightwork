@@ -10,7 +10,7 @@ when you want a typed, streaming RPC contract and your own client codegen.
 The API is behind an optional extra:
 
 ```bash
-pip install 'maverick-agent[grpc]'
+pip install 'lightwork-agent[grpc]'
 export MAVERICK_GRPC_BEARER_TOKEN='replace-with-a-long-random-token'
 python -m maverick.grpc_api --address 127.0.0.1:50051
 ```
@@ -51,7 +51,7 @@ service Maverick {
   and the worker share the world DB.
 
 The full message definitions are in
-[`maverick.proto`](https://github.com/Day-AI-Labs/maverick/blob/main/packages/maverick-core/lightwork/grpc_api/maverick.proto).
+[`maverick.proto`](https://github.com/Day-AI-Labs/maverick/blob/main/packages/lightwork-core/lightwork/grpc_api/maverick.proto).
 
 ## Authentication
 

@@ -30,7 +30,7 @@ Maverick is a recursive multi-agent swarm with a safety layer at every chokepoin
 
 ## Components
 
-### `packages/maverick-core/`
+### `packages/lightwork-core/`
 
 The agent kernel. Ported from `cdayAI/research/maverick/` and evolved here.
 
@@ -55,7 +55,7 @@ The agent kernel. Ported from `cdayAI/research/maverick/` and evolved here.
 | `sandbox/` | Execution backends: `local.py` (subprocess), `docker.py` (`--network=none` default), gVisor (`runsc` runtime), `podman.py`, `devcontainer.py`, `kubernetes.py`, `firecracker.py`, `ssh.py` (uses user's `ssh` binary + keys), `modal_backend.py` — nine selectable. |
 | `tools/` | `read_file`, `write_file`, `list_dir`, `shell`, `ask_user`, `spawn_subagent`, `spawn_swarm`. |
 
-### `packages/maverick-shield/`
+### `packages/lightwork-shield/`
 
 Thin Python wrapper over `agent-shield`. Provides three chokepoints:
 
@@ -65,7 +65,7 @@ Thin Python wrapper over `agent-shield`. Provides three chokepoints:
 
 If `agent-shield` is not installed, Maverick falls back to ~20 high-impact built-in rules (`builtin_rules.py`): ignore-previous prompt injection, ChatML/DAN jailbreak, `rm -rf /`, curl-pipe-shell, sensitive file reads, etc. The shield never silently no-ops — `Shield.backend` reports which backend is active.
 
-### `packages/maverick-dashboard/`
+### `packages/lightwork-dashboard/`
 
 FastAPI local web UI + REST API.
 
@@ -73,11 +73,11 @@ FastAPI local web UI + REST API.
 - **REST**: `/api/v1/goals`, `/api/v1/goals/{id}`, `/api/v1/goals/{id}/events`, `/api/v1/goals/{id}/answer`, `/api/v1/facts`, `/api/v1/skills`, etc. OpenAPI schema at `/openapi.json`, Swagger UI at `/docs`.
 - **Auth**: layered. A bearer-token middleware (`MAVERICK_DASHBOARD_TOKEN`, `hmac.compare_digest`) plus an optional OIDC gate (`require_principal`) on every route; `/healthz`, `/openapi.json`, `/docs`, `/redoc` are exempt so monitors + API discovery work unauthenticated. HMAC-signed `/webhook/*`, signed `/share/*` links, and SCIM (`/scim/*`, see *enterprise layers*) carry their own credential and bypass both layers.
 
-### `packages/maverick-mcp/`
+### `packages/lightwork-mcp/`
 
 Maverick exposed as an MCP server. Hand-rolled JSON-RPC 2.0 (no SDK dep) over both **stdio** and a **streamable HTTP** transport (`http_transport.py`), negotiating the current protocol version `2025-11-25` with a `2024-11-05` fallback. Core tools (`start_goal`, `goal_status`, `goal_events`, `list_goals`, `answer_question`, `set_fact`, `get_facts`, `list_skills`) plus spec features: async pollable **Tasks** and **elicitation**. The HTTP transport is bearer-gated with a DNS-rebinding (Host/Origin) defense for the loopback case; server-initiated `sampling` is the remaining unimplemented capability. Protocol errors return JSON-RPC `error` payloads (e.g. `-32602`). Run via `maverick mcp`.
 
-### `packages/maverick-channels/`
+### `packages/lightwork-channels/`
 
 One adapter per messaging surface, all normalizing to the same `IncomingMessage` shape:
 
@@ -88,7 +88,7 @@ One adapter per messaging surface, all normalizing to the same `IncomingMessage`
 
 This is how phone-companion mode works: the swarm lives on Desktop or VPS, the user talks to it from their phone via Telegram/iMessage/etc.
 
-### `packages/maverick-installer/` (`apps/installer-cli/` from spec)
+### `packages/lightwork-installer/` (`apps/installer-cli/` from spec)
 
 `maverick init` — the interactive wizard. The single source of truth for user-facing UX. Walks through:
 
@@ -109,7 +109,7 @@ Tauri-based GUI installer for users who would never open a terminal. Cargo + tau
 
 ## Governance, learning & enterprise layers
 
-Beyond the swarm kernel, `maverick-core` carries the subsystems that make
+Beyond the swarm kernel, `lightwork-core` carries the subsystems that make
 Maverick a *governed, self-improving* platform rather than a bare runtime. All
 are opt-in and additive (kernel rule 1 — the kernel runs unchanged with them
 off). See `docs/FEATURES.md` for depth.
@@ -121,9 +121,9 @@ off). See `docs/FEATURES.md` for depth.
 | **Training flywheel** | `training/ingest.py`, `training/rlaif.py`, `training/reward_model.py` | Verifier rewards → DPO preference pairs (`rlaif`, GPU/torch for the policy update) and a CPU-trainable Bradley-Terry **reward model** (`reward_model`) that learns real weights over structural trajectory features to rank attempts — and, via `rlaif --reward-model`, cross-checks the verifier's preference labels, downweighting DPO pairs the two signals don't corroborate (label-noise mitigation). |
 | **Multi-tenancy** | `tenant/registry.py`, `tenant/kms.py`, `paths.py`, `world_model_backends/` | Per-tenant data isolation (`~/.maverick/tenants/<t>/`), per-tenant envelope encryption (DEK wrapped by a KEK), Postgres RLS. |
 | **Secrets at rest** | `tenant/kms.py`, `oauth_vault.py` | The OAuth vault seals captured access/refresh tokens under the tenant DEK (no plaintext token files, no cross-tenant readability). |
-| **Knowledge / RAG** | `maverick-knowledge/` | Per-domain vector retrieval; embedded `SqliteVectorStore` by default, `PgVectorStore` (pgvector `<=>` cosine + IVFFlat) as the scale-out backend. |
+| **Knowledge / RAG** | `lightwork-knowledge/` | Per-domain vector retrieval; embedded `SqliteVectorStore` by default, `PgVectorStore` (pgvector `<=>` cosine + IVFFlat) as the scale-out backend. |
 | **Enterprise auth & provisioning** | `oidc.py`, `maverick_dashboard/oidc_login.py`, `maverick_dashboard/scim.py` | OIDC login + a static-bearer SCIM 2.0 `/scim/v2` surface so an IdP (Okta/Azure AD) provisions/deprovisions users → tenants automatically. |
-| **Trained-safety seam** | `maverick-shield/probe_model.py` | The Constitutional-v2 cheap probe can ensemble a trained linear classifier (plain-JSON weights, no pickle) by MAX, raising recall without weakening the heuristic floor. |
+| **Trained-safety seam** | `lightwork-shield/probe_model.py` | The Constitutional-v2 cheap probe can ensemble a trained linear classifier (plain-JSON weights, no pickle) by MAX, raising recall without weakening the heuristic floor. |
 
 ## Long-horizon properties
 
@@ -149,7 +149,7 @@ What makes Maverick a real multi-agent system, not just N parallel instances:
 
 | Target | How it runs | Status |
 |---|---|---|
-| **Desktop** | `pipx install maverick-agent`; runs in user's home dir. Single-file PyInstaller binaries published per release. | v0.1.1 |
+| **Desktop** | `pipx install lightwork-agent`; runs in user's home dir. Single-file PyInstaller binaries published per release. | v0.1.1 |
 | **Docker** | `docker run -v ~/.maverick:/root/.maverick ghcr.io/day-ai-labs/maverick:<tag>`. Isolated sandbox. | v0.1.1 |
 | **VPS** | `deploy/vps/install.sh` provisions a systemd unit. `MAVERICK_VERSION=v0.1.0 deploy/vps/install.sh` pins the release. | v0.1.1 |
 | **Phone (companion)** | Swarm runs on Desktop or VPS; phone talks via Telegram / iMessage / WhatsApp / Signal / Discord / Slack / SMS / Matrix / email. Native iOS/Android later. | v0.1.1 |
@@ -158,7 +158,7 @@ What makes Maverick a real multi-agent system, not just N parallel instances:
 
 `.github/workflows/release.yml` triggers on `git tag v*`:
 
-- **PyPI**: `maverick-agent` (squatted, so we ship under this name; the Python import name + CLI name remain `maverick`), `maverick-shield`, `maverick-dashboard`, `maverick-mcp-server`, `maverick-channels`, `maverick-installer`. Gated on `PYPI_API_TOKEN`.
+- **PyPI**: `lightwork-agent` (squatted, so we ship under this name; the Python import name + CLI name remain `maverick`), `lightwork-shield`, `lightwork-dashboard`, `lightwork-mcp-server`, `lightwork-channels`, `lightwork-installer`. Gated on `PYPI_API_TOKEN`.
 - **GHCR**: multi-tag Docker image — `:latest`, `:vX.Y.Z`, `:vX.Y`.
 - **GitHub Releases**: PyInstaller single-file binaries for Linux x86_64, macOS arm64, Windows x86_64, each **Sigstore-signed keyless** (cosign via GitHub OIDC — `.sig` + `.pem` per artifact, logged to Rekor; verify with `deploy/verify-release.sh`), plus a per-release CycloneDX SBOM.
 

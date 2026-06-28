@@ -93,4 +93,4 @@ types, focuses, submits, or otherwise mutates the page.
   Password field values are never read.
 - **No remote code.** All scripts are local files; the extension-page CSP is
   `script-src 'self'`. CI parses `manifest.json` and statically checks these
-  invariants (`packages/maverick-dashboard/tests/test_extension_static.py`).
+  invariants (`packages/lightwork-dashboard/tests/test_extension_static.py`).

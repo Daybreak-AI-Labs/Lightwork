@@ -28,7 +28,7 @@ Hand Lightwork a goal. Its orchestrator decomposes it, spawns specialist sub-age
 > **Proprietary software — not open source.** Lightwork is enterprise software; use, redistribution, and derivative works require a license. [Contact us](https://github.com/Day-AI-Labs/Maverick) for evaluation or commercial access. See [`LICENSE`](./LICENSE) and [`TRADEMARK.md`](./TRADEMARK.md).
 
 ```bash
-pipx install 'maverick-agent[installer]'
+pipx install 'lightwork-agent[installer]'
 maverick init                        # four questions, safe defaults
 maverick start "Build a CLI that emails me a digest of today's top Hacker News stories — research the API, write it, and verify it runs"
 ```
@@ -73,18 +73,18 @@ It's unsigned for now, so the first launch shows an "unknown developer" prompt �
 If you already have Python 3.10+, install the published package instead of running a remote bootstrap script:
 
 ```bash
-pipx install 'maverick-agent[installer]'
+pipx install 'lightwork-agent[installer]'
 maverick init
 ```
 
 For source-based desktop bootstrapping, download `deploy/desktop/install.sh` or `deploy/desktop/install.ps1` from a commit or release you trust, verify it, and set `MAVERICK_REF` to a full 40-character commit SHA. The bootstrap scripts intentionally reject mutable branch/tag refs by default.
 
-The PyPI distribution name is `maverick-agent` (the `maverick` name is squatted on PyPI). The `[installer]` extra pulls the wizard into the same pipx environment so `maverick init` resolves.
+The PyPI distribution name is `lightwork-agent` (the `maverick` name is squatted on PyPI). The `[installer]` extra pulls the wizard into the same pipx environment so `maverick init` resolves.
 
 If you already installed the kernel without the extra, inject the wizard:
 
 ```bash
-pipx inject maverick-agent maverick-installer
+pipx inject lightwork-agent lightwork-installer
 ```
 
 ### From source
@@ -92,13 +92,13 @@ pipx inject maverick-agent maverick-installer
 ```bash
 git clone https://github.com/Day-AI-Labs/maverick
 cd maverick
-pip install -e ./packages/maverick-core
+pip install -e ./packages/lightwork-core
 pip install -e ./apps/installer-cli
 # Optional sister packages:
-pip install -e ./packages/maverick-shield
-pip install -e ./packages/maverick-channels
-pip install -e ./packages/maverick-dashboard
-pip install -e ./packages/maverick-mcp
+pip install -e ./packages/lightwork-shield
+pip install -e ./packages/lightwork-channels
+pip install -e ./packages/lightwork-dashboard
+pip install -e ./packages/lightwork-mcp
 
 maverick init                           # interactive wizard
 maverick start "Plan a 2-week trip"      # one-shot goal
@@ -142,18 +142,18 @@ maverick version                         # installed package versions
 
 ```
 packages/
-  maverick-core/       Python agent kernel: recursive swarm, persistent world
+  lightwork-core/       Python agent kernel: recursive swarm, persistent world
                        model (SQLite + FTS5, or Postgres; schema v23), 12 LLM providers, 9
                        sandboxes, MCP client, skills, templates, persona,
                        background runner, budget tracking
-  maverick-shield/     Agent Shield integration + built-in fallback rule set
-  maverick-channels/   17 channel adapters: Telegram, Discord, Slack, Signal,
+  lightwork-shield/     Agent Shield integration + built-in fallback rule set
+  lightwork-channels/   17 channel adapters: Telegram, Discord, Slack, Signal,
                        Email, Matrix, Bluesky, Mastodon, Voice, WhatsApp, WhatsApp
                        Cloud, SMS, iMessage, IRC, Threads, RCS, Glasses
                        (WhatsApp/SMS need Twilio; iMessage is macOS-only)
-  maverick-dashboard/  Local FastAPI web UI + REST API at /api/v1 + OpenAPI
+  lightwork-dashboard/  Local FastAPI web UI + REST API at /api/v1 + OpenAPI
                        docs at /docs. Live progress streaming via short-poll.
-  maverick-mcp/        MCP server (stdio JSON-RPC) -- exposes Lightwork to Claude
+  lightwork-mcp/        MCP server (stdio JSON-RPC) -- exposes Lightwork to Claude
                        Code, Cursor, Claude Desktop as a tool. The agent kernel
                        can also CONSUME external MCP servers as its own tools.
 apps/

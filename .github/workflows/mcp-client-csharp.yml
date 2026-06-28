@@ -16,15 +16,15 @@ on:
   push:
     branches: [main]
     paths:
-      - 'packages/maverick-core/**'
-      - 'packages/maverick-mcp/**'
+      - 'packages/lightwork-core/**'
+      - 'packages/lightwork-mcp/**'
       - 'examples/clients/csharp/**'
       - 'docs/clients/csharp-quickstart.md'
       - '.github/workflows/mcp-client-csharp.yml'
   pull_request:
     paths:
-      - 'packages/maverick-core/**'
-      - 'packages/maverick-mcp/**'
+      - 'packages/lightwork-core/**'
+      - 'packages/lightwork-mcp/**'
       - 'examples/clients/csharp/**'
       - 'docs/clients/csharp-quickstart.md'
       - '.github/workflows/mcp-client-csharp.yml'
@@ -42,8 +42,8 @@ jobs:
           dotnet-version: "8.0.x"
       - name: Install Maverick (kernel + MCP server)
         run: |
-          pip install -e ./packages/maverick-core
-          pip install --no-deps -e ./packages/maverick-mcp
+          pip install -e ./packages/lightwork-core
+          pip install --no-deps -e ./packages/lightwork-mcp
       - name: Run the C# MCP client end-to-end
         working-directory: examples/clients/csharp
         run: dotnet run

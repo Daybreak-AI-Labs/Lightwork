@@ -33,7 +33,7 @@ test and production), and ISO 42001 A.6.2 (the AI system change lifecycle).
 This procedure applies to all changes to:
 
 - **Code** — anything tracked in the `Maverick` git repository: the kernel
-  (`packages/maverick-core/`), shield, channels, dashboard, MCP, the installer
+  (`packages/lightwork-core/`), shield, channels, dashboard, MCP, the installer
   apps under `apps/`, the TypeScript SDK under `sdks/plugin-ts/`, specialist
   packs/domains, and CI workflows under `.github/workflows/`.
 - **Configuration** — runtime config (e.g. `~/.maverick/config.toml`, role/model
@@ -99,7 +99,7 @@ Follow these steps in order. Paths cited are the actual controls in this repo.
 - [ ] **5. Obtain a CODEOWNERS review.** At least one review from a code owner
       defined in **`.github/CODEOWNERS`** (added/maintained in this same change
       set). The approver must **not** be the author (§4). For files with a
-      per-area owner (e.g. `/packages/maverick-core/`, `/deploy/`,
+      per-area owner (e.g. `/packages/lightwork-core/`, `/deploy/`,
       `/.github/workflows/`), the matching owner reviews.
 - [ ] **6. All required CI gates pass before merge.** Required workflows:
   - **`.github/workflows/ci.yml`**, jobs:
@@ -192,11 +192,11 @@ A production deployment is itself a change and is authorized per §4.
 - [ ] Deploy authorized by the Engineering Lead (or Management per §4).
 - [ ] **Compliance posture verified** on the candidate build:
   - `maverick soc2` — collects SOC 2 control evidence and succeeds (the audit
-    chain / control probe is healthy; see `packages/maverick-core/lightwork/soc2.py`
+    chain / control probe is healthy; see `packages/lightwork-core/lightwork/soc2.py`
     and `docs/compliance/soc2-controls.md`).
   - `maverick enterprise verify` — verifies the enterprise/deployment posture and
     writes the signed enterprise-verify probe (see
-    `packages/maverick-core/lightwork/deployment.py`).
+    `packages/lightwork-core/lightwork/deployment.py`).
 - [ ] `maverick doctor` reports no blocking issues for the target environment;
       required secrets/keys present (a missing provider key degrades by design —
       `/healthz` returns 503 — so confirm intended).
@@ -299,7 +299,7 @@ in the deployment runbook or release notes is sufficient). Each entry records:
 - `.github/CODEOWNERS` — code-owner review assignments.
 - `.github/workflows/ci.yml`, `.github/workflows/conventional-commits.yml` —
   required CI gates.
-- `docs/compliance/soc2-controls.md`, `packages/maverick-core/lightwork/soc2.py` —
+- `docs/compliance/soc2-controls.md`, `packages/lightwork-core/lightwork/soc2.py` —
   SOC 2 evidence.
-- `packages/maverick-core/lightwork/deployment.py` — `maverick enterprise verify`.
+- `packages/lightwork-core/lightwork/deployment.py` — `maverick enterprise verify`.
 - `docs/compliance/control-crosswalk.md` — framework control mapping.

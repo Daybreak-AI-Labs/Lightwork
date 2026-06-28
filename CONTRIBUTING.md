@@ -15,13 +15,13 @@ git clone https://github.com/Day-AI-Labs/maverick
 cd maverick
 # Core + the full dev/test toolchain (pytest, ruff, pre-commit, and the
 # cross-package runtime deps the suite imports) in one shot:
-pip install -e './packages/maverick-core[dev]'
+pip install -e './packages/lightwork-core[dev]'
 # Sibling packages are import-time deps of the suite (installed --no-deps;
 # their runtime deps come from [dev] above at the floors CI enforces):
-pip install --no-deps -e ./packages/maverick-shield
-pip install --no-deps -e ./packages/maverick-channels
-pip install --no-deps -e ./packages/maverick-dashboard
-pip install --no-deps -e ./packages/maverick-mcp
+pip install --no-deps -e ./packages/lightwork-shield
+pip install --no-deps -e ./packages/lightwork-channels
+pip install --no-deps -e ./packages/lightwork-dashboard
+pip install --no-deps -e ./packages/lightwork-mcp
 pip install --no-deps -e ./apps/installer-cli
 pre-commit install
 
@@ -36,12 +36,12 @@ every commit, so you catch a ruff failure locally instead of in CI.
 
 ```
 packages/
-  maverick-core/       Python agent kernel (recursive swarm, world model,
+  lightwork-core/       Python agent kernel (recursive swarm, world model,
                        multi-provider LLM dispatch, skills, sandboxes)
-  maverick-shield/     Agent Shield integration with builtin fallback rules
-  maverick-channels/   12 channel adapters (Telegram, Discord, Slack, ...)
-  maverick-dashboard/  FastAPI local web UI (goals/skills/facts/spend)
-  maverick-mcp/        Model Context Protocol server (stdio JSON-RPC)
+  lightwork-shield/     Agent Shield integration with builtin fallback rules
+  lightwork-channels/   12 channel adapters (Telegram, Discord, Slack, ...)
+  lightwork-dashboard/  FastAPI local web UI (goals/skills/facts/spend)
+  lightwork-mcp/        Model Context Protocol server (stdio JSON-RPC)
 apps/
   installer-cli/       Interactive Python TUI wizard
   installer-desktop/   Tauri-based native GUI installer
@@ -74,7 +74,7 @@ or non-technical users can't reach it.
 ## Tests
 
 - Every package has a `tests/` directory with `test_*.py` files.
-- Use the `FakeLLM` fixture in `packages/maverick-core/tests/conftest.py`
+- Use the `FakeLLM` fixture in `packages/lightwork-core/tests/conftest.py`
   for any test that touches the agent loop -- never burn API credits in CI.
 - Tests run via `pytest -vvs --tb=long` in CI on Python 3.10/3.11/3.12.
 
@@ -110,10 +110,10 @@ prefix must start with a letter** -- not a digit, quote, or backtick
 
 ## Adding a provider
 
-1. Create `packages/maverick-core/lightwork/providers/<name>_provider.py`
+1. Create `packages/lightwork-core/lightwork/providers/<name>_provider.py`
    with a class implementing `complete()` and `complete_async()` that
    accept Anthropic-format messages/tools and return `LLMResponse`.
-2. Register in `packages/maverick-core/lightwork/providers/__init__.py`
+2. Register in `packages/lightwork-core/lightwork/providers/__init__.py`
    under `get_provider_client` and `KNOWN_PROVIDERS`.
 3. Add to the wizard catalog at
    `apps/installer-cli/maverick_installer/models.py`.
@@ -121,7 +121,7 @@ prefix must start with a letter** -- not a digit, quote, or backtick
 
 ## Adding a channel
 
-1. Subclass `Channel` in `packages/maverick-channels/maverick_channels/<name>.py`.
+1. Subclass `Channel` in `packages/lightwork-channels/maverick_channels/<name>.py`.
 2. Wire it in `server.py` (`_wire_<name>` + `_WIRES` dict).
 3. Add to the wizard `CHANNELS` list.
 4. Document setup steps in `docs/deployment.md`.

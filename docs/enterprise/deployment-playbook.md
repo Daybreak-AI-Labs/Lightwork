@@ -328,6 +328,6 @@ Honest, current state — what's now enforced in code vs. what genuinely remains
 ---
 
 *Grounded in: `deploy/{helm,vps,docker,postgres,observability,reference-architectures}/`,
-`packages/maverick-core/lightwork/{config.py,cli.py,sandbox/,enterprise.py,deployment.py,audit/,backup.py}`,
-and `packages/maverick-dashboard/maverick_dashboard/{app.py,api.py,auth.py,rbac.py}`.*
+`packages/lightwork-core/lightwork/{config.py,cli.py,sandbox/,enterprise.py,deployment.py,audit/,backup.py}`,
+and `packages/lightwork-dashboard/maverick_dashboard/{app.py,api.py,auth.py,rbac.py}`.*
 </content>

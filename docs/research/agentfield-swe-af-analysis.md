@@ -4,7 +4,7 @@
 > Scope: [agentfield.ai](https://agentfield.ai/) + [docs/learn](https://agentfield.ai/docs/learn),
 > [github.com/Agent-Field/agentfield](https://github.com/Agent-Field/agentfield),
 > [github.com/Agent-Field/SWE-AF](https://github.com/Agent-Field/SWE-AF), benchmarked against
-> Lightwork's actual codebase (`packages/maverick-core`, `packages/maverick-shield`).
+> Lightwork's actual codebase (`packages/lightwork-core`, `packages/lightwork-shield`).
 > Method: 5 parallel web-research angles + 1 codebase ground-truth pass, with adversarial
 > verification of load-bearing claims. Findings re-verified against Lightwork source before
 > publishing (an earlier draft mis-stated two items — see "Corrections" at the end).

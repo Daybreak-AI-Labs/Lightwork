@@ -53,7 +53,7 @@ In scope:
 
 - Privilege escalation beyond the sandbox backend (local subprocess,
   Docker `--network=none`, SSH-as-user).
-- Prompt-injection chains that bypass `maverick-shield` (e.g. tool
+- Prompt-injection chains that bypass `lightwork-shield` (e.g. tool
   output injection, image vision-block injection, cross-turn replay).
 - Webhook spoofing / signature bypass on channel adapters (Telegram,
   Twilio).
@@ -125,7 +125,7 @@ chooses the blast radius**. Defense in depth, from outermost to innermost:
    and the kernel logs a one-time warning when it runs on `local` (louder
    when the shield is absent). **For any untrusted goal, use a container
    backend.**
-2. **Agent Shield** (`maverick-shield`) — screens prompts, tool calls, and
+2. **Agent Shield** (`lightwork-shield`) — screens prompts, tool calls, and
    output. Optional and fail-open by design, so it is a *floor*, not a
    guarantee. Treat it as one layer, never the only one.
 3. **Tool ACL + budget + killswitch** — `[tool_acl] denied_tools`, the

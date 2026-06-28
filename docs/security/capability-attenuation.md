@@ -25,7 +25,7 @@ and a whole delegation chain (root → … → leaf) never re-widens.
 
 ## How it's verified
 
-Two complementary checks, both in `packages/maverick-core/tests/`:
+Two complementary checks, both in `packages/lightwork-core/tests/`:
 
 1. **Property-based suite** (`test_capability_monotonicity.py`) — generates
    thousands of random capability lattices and probes and asserts all five

@@ -17,13 +17,13 @@ updates:
   # floors are surfaced; grouped so a sweep lands as a single PR per package.
   - package-ecosystem: pip
     directories:
-      - "/packages/maverick-core"
-      - "/packages/maverick-shield"
-      - "/packages/maverick-channels"
-      - "/packages/maverick-dashboard"
-      - "/packages/maverick-mcp"
-      - "/packages/maverick-evolve"
-      - "/packages/maverick-knowledge"
+      - "/packages/lightwork-core"
+      - "/packages/lightwork-shield"
+      - "/packages/lightwork-channels"
+      - "/packages/lightwork-dashboard"
+      - "/packages/lightwork-mcp"
+      - "/packages/lightwork-evolve"
+      - "/packages/lightwork-knowledge"
       - "/apps/installer-cli"
     schedule:
       interval: weekly

@@ -1,17 +1,17 @@
-# maverick-installer
+# lightwork-installer
 
 The interactive setup wizard. Installed as part of the kernel's
 `[installer]` extra:
 
 ```bash
-pipx install 'maverick-agent[installer]'
+pipx install 'lightwork-agent[installer]'
 maverick init
 ```
 
 If the kernel is already installed without the extra:
 
 ```bash
-pipx inject maverick-agent maverick-installer
+pipx inject lightwork-agent lightwork-installer
 ```
 
 A standalone `maverick-init` entry point is also exposed (same flags).

@@ -39,6 +39,6 @@ hashing keeps working (it is plain JavaScript).
 ## Cross-language guarantee
 
 `node ahash.js --selftest` prints the gradient hash and exits non-zero on
-mismatch. `packages/maverick-core/tests/test_perceptual_hash.py` asserts the
+mismatch. `packages/lightwork-core/tests/test_perceptual_hash.py` asserts the
 same constant from Python — and, when `node` is on PATH, runs the JS
 self-test and compares outputs directly.

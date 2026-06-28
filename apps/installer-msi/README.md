@@ -1,8 +1,8 @@
-# maverick-installer-msi
+# lightwork-installer-msi
 
 WiX Toolset v4 authoring for a Windows MSI that installs the **maverick CLI**
 per user: a `maverick.cmd` launcher on the user PATH plus the
-`maverick-agent` wheel, bootstrapped into the per-user site-packages on
+`lightwork-agent` wheel, bootstrapped into the per-user site-packages on
 first run.
 
 ## What's in the package
@@ -23,10 +23,10 @@ Design notes:
   Never change it: `MajorUpgrade` uses it to find and replace older versions.
   `test_wxs.py` pins the exact value so a drive-by edit fails CI.
 - **The launcher uses the console-script entry point.** `py -m maverick`
-  does not work — `packages/maverick-core/lightwork/` has no `__main__.py` —
+  does not work — `packages/lightwork-core/lightwork/` has no `__main__.py` —
   so `maverick.cmd` runs `python -c "from maverick.cli import main; main()"`
   (the same target as the `maverick` console script in
-  `packages/maverick-core/pyproject.toml`).
+  `packages/lightwork-core/pyproject.toml`).
 - **Python is a prerequisite, not bundled.** The MSI is ~a few hundred KB +
   the wheel; it does not embed a Python runtime. `maverick.cmd` prints an
   actionable error if Python 3.10+ is missing. Users who want a
@@ -40,9 +40,9 @@ Requires a **Windows host**, the **WiX v4 CLI**, and a **built wheel**:
 ```powershell
 dotnet tool install --global wix
 python -m pip install build
-python -m build --wheel packages/maverick-core
+python -m build --wheel packages/lightwork-core
 cd apps\installer-msi
-.\build.ps1 -Wheel ..\..\packages\maverick-core\dist\maverick_agent-0.1.6-py3-none-any.whl
+.\build.ps1 -Wheel ..\..\packages\lightwork-core\dist\maverick_agent-0.1.6-py3-none-any.whl
 ```
 
 There is also a manual-dispatch CI workflow

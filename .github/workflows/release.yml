@@ -122,11 +122,11 @@ jobs:
           # which is why the binary crashed with "No module named 'maverick'".
           # A regular install puts the packages in site-packages where the
           # analyzer (and the spec's collect_submodules) can find them.
-          pip install ./packages/maverick-core
-          pip install --no-deps ./packages/maverick-shield
-          pip install --no-deps ./packages/maverick-channels
-          pip install --no-deps ./packages/maverick-dashboard
-          pip install --no-deps ./packages/maverick-mcp
+          pip install ./packages/lightwork-core
+          pip install --no-deps ./packages/lightwork-shield
+          pip install --no-deps ./packages/lightwork-channels
+          pip install --no-deps ./packages/lightwork-dashboard
+          pip install --no-deps ./packages/lightwork-mcp
           pip install --no-deps ./apps/installer-cli
           # Bundled deps the --no-deps installs above skipped:
           pip install 'questionary>=2.0' 'rich>=13.7'
@@ -204,13 +204,13 @@ jobs:
         # then emits one CycloneDX JSON named for the release tag.
         run: |
           python -m pip install --upgrade pip cyclonedx-bom
-          for p in packages/maverick-core packages/maverick-shield \
-                   packages/maverick-channels packages/maverick-dashboard \
-                   packages/maverick-mcp packages/maverick-evolve \
-                   packages/maverick-knowledge; do
+          for p in packages/lightwork-core packages/lightwork-shield \
+                   packages/lightwork-channels packages/lightwork-dashboard \
+                   packages/lightwork-mcp packages/lightwork-evolve \
+                   packages/lightwork-knowledge; do
             pip install --no-deps -e "$p" || true
           done
-          pip install -e packages/maverick-core || true
+          pip install -e packages/lightwork-core || true
           cyclonedx-py environment \
             -o "dist/maverick-sbom-${{ needs.validate-release-tag.outputs.tag }}.cdx.json" \
             || echo "SBOM generation failed (non-fatal); release continues"

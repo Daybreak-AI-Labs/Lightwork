@@ -3,13 +3,13 @@
 # the same way CI does, so tests and the CLI work out of the box.
 set -euo pipefail
 
-pip install -e ./packages/maverick-core
-pip install --no-deps -e ./packages/maverick-shield
-pip install --no-deps -e ./packages/maverick-channels
-pip install --no-deps -e ./packages/maverick-evolve
-pip install --no-deps -e ./packages/maverick-dashboard
-pip install --no-deps -e ./packages/maverick-mcp
-pip install --no-deps -e ./packages/maverick-knowledge
+pip install -e ./packages/lightwork-core
+pip install --no-deps -e ./packages/lightwork-shield
+pip install --no-deps -e ./packages/lightwork-channels
+pip install --no-deps -e ./packages/lightwork-evolve
+pip install --no-deps -e ./packages/lightwork-dashboard
+pip install --no-deps -e ./packages/lightwork-mcp
+pip install --no-deps -e ./packages/lightwork-knowledge
 pip install --no-deps -e ./apps/installer-cli
 
 # Runtime deps the --no-deps installs dropped, plus the dev tooling.
@@ -30,4 +30,4 @@ pip install 'openai>=1.30'
 echo
 echo "Maverick devcontainer ready."
 echo "  try:  maverick --help"
-echo "  test: python3 -m pytest packages/maverick-core/tests -q"
+echo "  test: python3 -m pytest packages/lightwork-core/tests -q"

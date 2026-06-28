@@ -135,8 +135,8 @@ install -d -o maverick -g maverick -m 0700 /var/lib/maverick/.maverick
 
 # 2. Install (per-package wheels; pre-built, no build-time network).
 python3 -m pip install --no-index --find-links /opt/maverick/wheels \
-  maverick-core maverick-shield maverick-channels maverick-dashboard \
-  maverick-mcp maverick-knowledge agent-shield
+  lightwork-core lightwork-shield lightwork-channels lightwork-dashboard \
+  lightwork-mcp lightwork-knowledge agent-shield
 
 # 3. Pre-generate gRPC stubs (so the runtime never compiles on a read-only FS),
 #    then provision config non-interactively.
@@ -196,7 +196,7 @@ tls_client_key  = "/etc/maverick/tls/client.key"
 
 ### 3.3 systemd unit
 
-`/etc/systemd/system/maverick-dashboard.service`:
+`/etc/systemd/system/lightwork-dashboard.service`:
 
 ```ini
 [Unit]
@@ -252,7 +252,7 @@ aws s3 cp /backups/acme.tgz s3://acme-maverick-dr/   # or rsync to standby
 # On the STANDBY (same MAVERICK_CLIENT_ID), restore + start on failover:
 maverick backup info  /backups/acme.tgz              # confirm client_id = acme-corp
 maverick backup restore /backups/acme.tgz            # fail-closed if client mismatches
-systemctl start maverick-dashboard
+systemctl start lightwork-dashboard
 ```
 
 The restore refuses a backup whose `client_id` differs from the standby's

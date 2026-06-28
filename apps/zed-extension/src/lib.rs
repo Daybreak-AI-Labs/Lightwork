@@ -4,7 +4,7 @@
 //! processes themselves. The one extension hook that launches a real local
 //! process is the context-server hook — the extension *returns* a command
 //! and Zed spawns it. We use it to register Maverick's MCP server
-//! (`maverick mcp`, stdio transport — packages/maverick-mcp), which is the
+//! (`maverick mcp`, stdio transport — packages/lightwork-mcp), which is the
 //! product's official cross-language surface, so Zed's assistant can drive
 //! the swarm: start goals, check status, read results.
 //!

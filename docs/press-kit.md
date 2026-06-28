@@ -75,7 +75,7 @@ Christopher Day / Day AI Labs and are **not** licensed under the software
 [`TRADEMARK.md`](../TRADEMARK.md); the short version for writers:
 
 - **Product name**: "Lightwork", capital M. The CLI command is lowercase
-  `maverick`; the PyPI distribution is `maverick-agent`.
+  `maverick`; the PyPI distribution is `lightwork-agent`.
 - **Permitted without asking**: nominative, factual references — naming
   Lightwork in an article, review, or comparison, or saying something is
   "compatible with Lightwork" — where no endorsement or affiliation is implied.

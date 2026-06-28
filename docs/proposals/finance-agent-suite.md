@@ -19,7 +19,7 @@ security domains; finance is the next, and highest-stakes, tower.
 > the proof that the control plane was built for exactly this.
 
 The cardinal rule, inherited verbatim from the existing
-[`finance.toml`](../../packages/maverick-core/lightwork/domains/finance.toml)
+[`finance.toml`](../../packages/lightwork-core/lightwork/domains/finance.toml)
 persona and applied to **every** agent below:
 
 > *You may research and analyze freely, but you must NEVER place a trade, move
@@ -54,7 +54,7 @@ persona and applied to **every** agent below:
 ## 1. How a finance agent maps onto Lightwork
 
 Every agent in this doc is **one domain pack** —
-a [`DomainProfile`](../../packages/maverick-core/lightwork/domain.py) emitted by
+a [`DomainProfile`](../../packages/lightwork-core/lightwork/domain.py) emitted by
 the agent factory, exactly like `finance.toml`/`legal.toml`/`privacy_compliance.toml`.
 Nothing here needs a new agent abstraction; it needs new *packs* plus the
 finance-specific connectors and policy packs. Each field of the pack is a control
@@ -64,21 +64,21 @@ surface:
 |---|---|
 | `compartment` | The Rung-2 **seal boundary**. Each finance function is its own compartment so a poisoned invoice that compromises AP can be quarantined without touching payroll or treasury (`maverick.quarantine`). |
 | `persona` | The job description + the "never move money without a human" guardrail in the system prompt. |
-| `allow_tools` / `deny_tools` | The **capability envelope** — becomes an attenuating [`Capability`](../../packages/maverick-core/lightwork/capability.py). This is the technical substrate for **segregation of duties**: an agent literally cannot call a tool outside its grant, and a child agent can only ever *narrow* it. |
-| `max_risk` | Risk ceiling. Money-moving tools (`stripe`, `plaid`, payment/trade tools) are classified **high** in [`tool_risk.py`](../../packages/maverick-core/lightwork/safety/tool_risk.py); a `max_risk = "medium"` pack drops them from the registry entirely. |
+| `allow_tools` / `deny_tools` | The **capability envelope** — becomes an attenuating [`Capability`](../../packages/lightwork-core/lightwork/capability.py). This is the technical substrate for **segregation of duties**: an agent literally cannot call a tool outside its grant, and a child agent can only ever *narrow* it. |
+| `max_risk` | Risk ceiling. Money-moving tools (`stripe`, `plaid`, payment/trade tools) are classified **high** in [`tool_risk.py`](../../packages/lightwork-core/lightwork/safety/tool_risk.py); a `max_risk = "medium"` pack drops them from the registry entirely. |
 | `allow_hosts` | Egress allow-list — pins the agent to its system-of-record vendor (e.g. `*.netsuite.com`) and nothing else. |
 | `mcp_servers` | The external systems the agent connects to (ERP, payroll, bank). |
 | `knowledge_sources` | The business's own docs — accounting policy manual, chart of accounts, delegation-of-authority matrix, contracts. |
 
 On top of the pack, three already-shipped layers do the governance:
 
-- **Layer A — oversight control plane** ([`governance.py`](../../packages/maverick-core/lightwork/governance.py)):
+- **Layer A — oversight control plane** ([`governance.py`](../../packages/lightwork-core/lightwork/governance.py)):
   every consequential action is evaluated to `ALLOW` / `DENY` / `REQUIRE_HUMAN`
   and the verdict is written to the audit chain. This is **maker-checker**.
-- **Consent / HITL** ([`safety/consent.py`](../../packages/maverick-core/lightwork/safety/consent.py)):
+- **Consent / HITL** ([`safety/consent.py`](../../packages/lightwork-core/lightwork/safety/consent.py)):
   the `REQUIRE_HUMAN` gate resolves through the approvals queue / dashboard — the
   **four-eyes** sign-off, with a recorded decision.
-- **Signed audit** ([`audit/`](../../packages/maverick-core/lightwork/audit/)):
+- **Signed audit** ([`audit/`](../../packages/lightwork-core/lightwork/audit/)):
   an Ed25519 **Merkle-chained, append-only** log — the SOX-grade, tamper-evident
   **book of record** for every journal entry, approval, and override.
 
@@ -357,7 +357,7 @@ The books. Highest concentration of SoD and SOX exposure.
   source-document citation or it's flagged unverified.
 
 ```toml
-# packages/maverick-core/lightwork/domains/finance_gl_close.toml
+# packages/lightwork-core/lightwork/domains/finance_gl_close.toml
 name = "finance_gl_close"
 compartment = "finance_controllership"   # shares a seal sector with AP/AR/FA
 description = "General-ledger maintenance and the period-end close."
@@ -422,7 +422,7 @@ authoring = "manual"
   `require_human` with the register diff shown; off-cycle runs flagged.
 
 ```toml
-# packages/maverick-core/lightwork/domains/finance_payroll.toml
+# packages/lightwork-core/lightwork/domains/finance_payroll.toml
 name = "finance_payroll"
 compartment = "finance_payroll"          # its own seal sector (PII isolation)
 description = "Payroll preparation, gross-to-net, and payroll-tax drafting."
@@ -561,7 +561,7 @@ risk — bad numbers steer real spending. `max_risk = "low"` for most.
   read-only — cannot change the plan of record.
 
 ```toml
-# packages/maverick-core/lightwork/domains/finance_fpa.toml
+# packages/lightwork-core/lightwork/domains/finance_fpa.toml
 name = "finance_fpa"
 compartment = "finance_fpa"
 description = "Budgeting, variance analysis, and management reporting."
@@ -646,7 +646,7 @@ authoring = "manual"
   alert.
 
 ```toml
-# packages/maverick-core/lightwork/domains/finance_treasury.toml
+# packages/lightwork-core/lightwork/domains/finance_treasury.toml
 name = "finance_treasury"
 compartment = "finance_treasury"         # custody — isolated from controllership
 description = "Cash positioning, liquidity, and treasury operations."
@@ -757,7 +757,7 @@ domains they assure, never the ability to fix what they find (independence).
   sampled and evidence-cited; deficiencies are findings for a human control owner.
 
 ```toml
-# packages/maverick-core/lightwork/domains/finance_sox.toml
+# packages/lightwork-core/lightwork/domains/finance_sox.toml
 name = "finance_sox"
 compartment = "finance_assurance"        # independent of the towers it tests
 description = "SOX / ICFR control testing, SoD monitoring, and deficiency tracking."
@@ -1041,7 +1041,7 @@ IFRS + GDPR residency.
 
 ## 7. Finance assessment templates (extend the assessment engine)
 
-The [`assessment.py`](../../packages/maverick-core/lightwork/assessment.py) engine
+The [`assessment.py`](../../packages/lightwork-core/lightwork/assessment.py) engine
 already turns a structured questionnaire into scored findings + a risk rating, and
 new types are **added by appending to `TEMPLATES`, not by writing code**. Add the
 finance set — each becomes a `run_assessment` capability for the agent that owns it:

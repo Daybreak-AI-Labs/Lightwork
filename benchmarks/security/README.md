@@ -18,7 +18,7 @@ for the built-in fallback most users actually run**. This makes both auditable.
 | `RESULTS.md` | Generated, checked-in (`source=measured`). |
 
 The pass/fail **CI gate** for latency/ReDoS lives with the shield:
-`packages/maverick-shield/tests/test_scan_latency_gate.py`. A scan that
+`packages/lightwork-shield/tests/test_scan_latency_gate.py`. A scan that
 times out **fails the build** — a hung scan that fails open is a *detection
 bypass*, not a perf nit.
 

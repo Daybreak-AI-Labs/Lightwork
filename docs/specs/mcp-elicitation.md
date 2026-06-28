@@ -9,7 +9,7 @@
 
 MCP **elicitation** lets an MCP **server** request structured input from the
 user *mid-request*, routed through the client. Lightwork's MCP server
-(`packages/maverick-mcp/maverick_mcp/server.py`) deliberately **does not advertise
+(`packages/lightwork-mcp/maverick_mcp/server.py`) deliberately **does not advertise
 the elicitation capability** today — the `handle_initialize` capabilities block
 omits it on purpose, with a comment that advertising it without a handler would
 make 2025-11-25 clients hang waiting on a request that never comes. Instead, the

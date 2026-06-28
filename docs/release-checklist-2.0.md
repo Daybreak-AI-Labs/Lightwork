@@ -42,7 +42,7 @@ shipped artifact; nothing here is aspirational.
 ## Release mechanics (maintainer)
 
 - [ ] Version bump (`0.1.x` → `2.0.0`) in every package's pyproject; the
-      lockstep versions of maverick-shield/-channels/-dashboard/-installer
+      lockstep versions of lightwork-shield/-channels/-dashboard/-installer
       bumped together
 - [ ] Tag `v2.0.0`; wheel + sdist built from the tag; artifacts signed
       (sigstore keyless per `sigstore_signing.py`)

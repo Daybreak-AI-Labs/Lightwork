@@ -13,7 +13,7 @@ This is an MVP (v0.1):
 
 ## Setup
 
-1. Install Lightwork: `pip install maverick-agent` (or run the
+1. Install Lightwork: `pip install lightwork-agent` (or run the
    wizard: `maverick init`).
 2. Build the extension: `cd apps/vscode-extension && npm install && npm run compile`.
 3. From VS Code: **Run** → **Run Extension** (F5), or package with

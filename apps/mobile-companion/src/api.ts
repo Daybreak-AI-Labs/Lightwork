@@ -1,7 +1,7 @@
 /* Read-only client for the Maverick dashboard REST API.
  *
  * Every function here is a GET against an endpoint that exists today in
- * packages/maverick-dashboard/maverick_dashboard/api.py:
+ * packages/lightwork-dashboard/maverick_dashboard/api.py:
  *
  *   GET /api/v1/goals?limit=&status=          listGoals()
  *   GET /api/v1/goals/{id}                    getGoal()

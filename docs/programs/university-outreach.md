@@ -93,20 +93,20 @@ would be just as welcome.
 Each project is sized for a 2-4 student team over one semester, has a
 testable definition of done, and names the real modules it touches. Paths
 are relative to the repo root; `maverick/` means
-`packages/maverick-core/lightwork/`.
+`packages/lightwork-core/lightwork/`.
 
 | # | Project | Repo area (verified) | Definition of done |
 |---|---|---|---|
-| 1 | New channel adapter (e.g. a campus chat system) | `packages/maverick-channels/maverick_channels/` — subclass `Channel` in `base.py`; wiring steps in [`CONTRIBUTING.md`](../../CONTRIBUTING.md) "Adding a channel" | Adapter + tests + wizard entry; messages round-trip in a live demo |
+| 1 | New channel adapter (e.g. a campus chat system) | `packages/lightwork-channels/maverick_channels/` — subclass `Channel` in `base.py`; wiring steps in [`CONTRIBUTING.md`](../../CONTRIBUTING.md) "Adding a channel" | Adapter + tests + wizard entry; messages round-trip in a live demo |
 | 2 | New sandbox backend via the entry-point SDK | `maverick/sandbox/sdk.py` (`SandboxV2` protocol, `conformance()`, `maverick.sandboxes` entry-point group) | Backend passes `conformance()`, ships as a separate package, runs a real goal |
 | 3 | New LLM provider adapter | `maverick/providers/` + registry in `providers/__init__.py`; steps in CONTRIBUTING "Adding a provider" | `complete()`/`complete_async()` + format-translation tests on the `FakeLLM` pattern |
 | 4 | Compaction strategy research | `maverick/compaction/plugins.py` (named-strategy registry; `learned`/`multimodal`/`streaming`/`graph` ship today), `tests/test_compaction_plugins.py` | A new registered strategy + a benchmark comparison against `"heuristic"` on a fixed corpus |
 | 5 | Benchmark evaluation study | `benchmarks/` — `harness.py`, `eval_gaia.py`, `eval_terminal_bench.py`, `eval_tau2.py`, `RESULTS.md` (append-only, `measured` vs `manual` rows) | Multi-seed measured rows + a written analysis; no single-run claims |
-| 6 | Red-team corpus expansion | `packages/maverick-shield/maverick_shield/redteam_corpus.jsonl` (grow-by-PR; CI `redteam` job fails on missed attacks) + the `--calibrate` operating-curve sweep | ≥N new labeled attack/benign pairs (N agreed with maintainer) that survive the CI gate, + a calibration write-up |
+| 6 | Red-team corpus expansion | `packages/lightwork-shield/maverick_shield/redteam_corpus.jsonl` (grow-by-PR; CI `redteam` job fails on missed attacks) + the `--calibrate` operating-curve sweep | ≥N new labeled attack/benign pairs (N agreed with maintainer) that survive the CI gate, + a calibration write-up |
 | 7 | Formal methods: extend the sandbox TLA+ spec | `docs/specs/tla/` (`SandboxInterface.tla`, TLC-checked: 982 states) | A new safety or liveness property model-checked, or a second interface modeled (e.g. capability attenuation) |
 | 8 | Skills authoring + evaluation | `SKILL.md` schema in `benchmarks/example-skills/README.md`; `maverick skill validate`; moderation gauntlet `python -m maverick.marketplace_moderation` | A themed skill pack that passes validator + moderation, with trigger-accuracy evaluation |
 | 9 | TypeScript plugin development | `sdks/plugin-ts/` (`@maverick/plugin-sdk`, `defineTool`/`servePlugin`, NDJSON stdio protocol; host: `maverick/ts_plugin_host.py`) | A working TS tool plugin passing `python -m maverick.plugin_matrix --ci` and the moderation checks |
-| 10 | Dashboard i18n for a new language | `packages/maverick-dashboard/maverick_dashboard/i18n_portal.py` (`scaffold(lang)`, `validate_catalog`) | A validated community catalog for a language the team speaks natively (feeds the localized-docs roadmap rows) |
+| 10 | Dashboard i18n for a new language | `packages/lightwork-dashboard/maverick_dashboard/i18n_portal.py` (`scaffold(lang)`, `validate_catalog`) | A validated community catalog for a language the team speaks natively (feeds the localized-docs roadmap rows) |
 | 11 | HCI study: approval friction | `maverick/ux_retrospective.py`, `maverick/consent_ergonomics.py`, `maverick/predictive_approvals.py` | An instrumented user study over the consent/approval UX with a written report; any code change is a bonus, the study is the deliverable |
 | 12 | Security analysis: capability model | `maverick/capability.py`, `maverick/capability_boot.py`, `maverick/capability_fuzzer.py` (CI gate: 0 leaks in ~2000 probes) | New fuzzer probe families or a written attack analysis; any found leak responsibly disclosed per [`SECURITY.md`](../../SECURITY.md) |
 

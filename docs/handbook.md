@@ -37,7 +37,7 @@ onto LLMs and tools under the same kinds of controls. (A lens, not a brand
 ## 2. The mental model — five primitives
 
 Everything in the runtime hangs off five ideas. Module paths are relative
-to `packages/maverick-core/lightwork/` unless noted.
+to `packages/lightwork-core/lightwork/` unless noted.
 
 ### The swarm
 
@@ -75,7 +75,7 @@ bypasses `budget.check()`.
 
 ### The shield
 
-Agent Shield (`packages/maverick-shield/`) screens content at **three
+Agent Shield (`packages/lightwork-shield/`) screens content at **three
 chokepoints**: input (the prompt), tool call (before execution), output
 (before delivery). With the full SDK installed you get its detector set;
 without it, a built-in rule set runs — secrets, PII, jailbreak heuristics,
@@ -108,7 +108,7 @@ vLLM), configured in `~/.maverick/config.toml`, never hard-coded — and the
 The 90-second path:
 
 ```bash
-pipx install 'maverick-agent[installer]'
+pipx install 'lightwork-agent[installer]'
 maverick init          # wizard: four questions, safe defaults (--fast skips)
 maverick start "Research the three best static site generators for a docs \
 site, compare them in a table, and scaffold the winner" --max-dollars 2.0
@@ -302,7 +302,7 @@ screened by the same shield/budget/sandbox machinery:
   (`sdks/plugin-ts/`, `@maverick/plugin-sdk`) and a **gRPC plugin host**
   for any language. Single Python tools need only the `@tool` decorator
   (`tools/decorator.py`).
-- **Channels** — 17 wired adapters (`packages/maverick-channels/`):
+- **Channels** — 17 wired adapters (`packages/lightwork-channels/`):
 - **Connectors & primary-source grounding** — 214 write-capable enterprise
   REST/GraphQL connectors plus 37 read-only primary-source / public-data
   connectors (SEC EDGAR, FRED, Treasury, World Bank, FDIC, Census, BLS, EIA,

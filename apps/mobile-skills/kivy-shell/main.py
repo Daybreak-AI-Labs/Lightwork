@@ -1,7 +1,7 @@
 """Kivy shell scaffold: run a pure-Python Maverick skill on a phone.
 
 Lists the bundled pure skills (today: one — ``disagreement.answer_entropy``,
-the proposer-disagreement signal from ``packages/lightwork-core/maverick/
+the proposer-disagreement signal from ``packages/lightwork-core/lightwork/
 disagreement.py``, chosen because it imports nothing but stdlib) and runs it
 on sample fan-outs.
 
@@ -42,7 +42,7 @@ def load_skill():
             return module
     raise FileNotFoundError(
         "disagreement.py not found. From a checkout, run from the repo; for "
-        "an APK, copy packages/lightwork-core/maverick/disagreement.py next "
+        "an APK, copy packages/lightwork-core/lightwork/disagreement.py next "
         "to main.py before `buildozer android debug` (see README.md)."
     )
 

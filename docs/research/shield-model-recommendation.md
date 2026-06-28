@@ -13,7 +13,7 @@
 
 ## Context: the integration seam (read this first)
 
-The seam is `packages/maverick-shield/maverick_shield/probe_model.py`. A model
+The seam is `packages/lightwork-shield/maverick_shield/probe_model.py`. A model
 is a plain-JSON artifact — **no pickle** (loading operator pickle into a safety
 component is code execution) — of the shape:
 

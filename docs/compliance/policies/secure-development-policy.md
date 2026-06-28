@@ -26,7 +26,7 @@ rather than added afterward, supporting SOC 2, ISO/IEC 27001:2022, and ISO/IEC
 ## 2. Scope
 
 This policy applies to all development activity on Maverick: the kernel
-(`maverick-core`), shield, channels, dashboard, MCP server, evolve, and
+(`lightwork-core`), shield, channels, dashboard, MCP server, evolve, and
 knowledge components; the specialist packs and suites that constitute the
 governed AI workforce; the installer CLI; the desktop apps; and the TypeScript
 SDK. It applies to all developers, reviewers, and any outsourced or contracted
@@ -85,13 +85,13 @@ development performed on behalf of the Organization.
 
 | Control | Implementation (file/module) | Status |
 | --- | --- | --- |
-| Sandboxed execution (8 isolation backends; enterprise `require_container` deny-local) | `packages/maverick-core/lightwork/sandbox/` | Implemented |
-| Docker hardening (`--network=none`, `--cap-drop=ALL`, `--no-new-privileges`, `--pids-limit`, `--memory`) | `packages/maverick-core/lightwork/sandbox/docker.py` | Implemented |
-| All shell routed through `sandbox.exec()`; `shell=True` outside sandbox blocked | CI grep gate (per CLAUDE.md) + `packages/maverick-core/lightwork/sandbox/` | Implemented |
+| Sandboxed execution (8 isolation backends; enterprise `require_container` deny-local) | `packages/lightwork-core/lightwork/sandbox/` | Implemented |
+| Docker hardening (`--network=none`, `--cap-drop=ALL`, `--no-new-privileges`, `--pids-limit`, `--memory`) | `packages/lightwork-core/lightwork/sandbox/docker.py` | Implemented |
+| All shell routed through `sandbox.exec()`; `shell=True` outside sandbox blocked | CI grep gate (per CLAUDE.md) + `packages/lightwork-core/lightwork/sandbox/` | Implemented |
 | Secrets handling | detect-secrets + `.secrets.baseline` gate in `.github/workflows/ci.yml` | Implemented |
-| Test-driven verification (anti-cheat) | `packages/maverick-core/lightwork/verifier.py` | Implemented |
-| Chaos / fault-injection testing | `packages/maverick-core/lightwork/chaos.py` | Implemented |
-| Preflight environment/config validation | `packages/maverick-core/lightwork/preflight.py` | Implemented |
+| Test-driven verification (anti-cheat) | `packages/lightwork-core/lightwork/verifier.py` | Implemented |
+| Chaos / fault-injection testing | `packages/lightwork-core/lightwork/chaos.py` | Implemented |
+| Preflight environment/config validation | `packages/lightwork-core/lightwork/preflight.py` | Implemented |
 | Dependency updates (pip/npm/cargo, weekly) | `.github/dependabot.yml` | Implemented |
 | Threat model (STRIDE) | `docs/security/threat-model.md` | Implemented |
 | Pen-test scope / audit readiness | `docs/security/audit-readiness.md` | Implemented |

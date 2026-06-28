@@ -24,7 +24,7 @@ scans only the installed tree — optional extras can slip past it):
 
 | Package | Likely license | Note |
 |---|---|---|
-| `psycopg` (psycopg 3) | LGPL-3.0 | Weak copyleft. Optional `[postgres]` extra in `maverick-core` and `maverick-knowledge`. LGPL notice/relink obligations apply. |
+| `psycopg` (psycopg 3) | LGPL-3.0 | Weak copyleft. Optional `[postgres]` extra in `lightwork-core` and `lightwork-knowledge`. LGPL notice/relink obligations apply. |
 | `python-telegram-bot` | LGPL-3.0 | Weak copyleft. Optional channel dependency. |
 | `caldav` | GPL-3.0 / dual | Verify the exact license of the pinned version; GPL would be incompatible with proprietary redistribution. |
 | `matrix-nio` | ISC (verify) | Generally permissive, but confirm — some optional crypto extras pull copyleft. |

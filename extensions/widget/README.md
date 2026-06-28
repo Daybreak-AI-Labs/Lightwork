@@ -117,5 +117,5 @@ of the CORS posture above, opening it from disk shows the widget in its
 ```bash
 # Test lives with the other artifact contract tests (pytest doesn't
 # collect extensions/):
-python -m pytest packages/maverick-core/tests/test_widget_extension.py -q
+python -m pytest packages/lightwork-core/tests/test_widget_extension.py -q
 ```

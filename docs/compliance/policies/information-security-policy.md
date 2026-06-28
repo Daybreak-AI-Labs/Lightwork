@@ -32,7 +32,7 @@ This policy applies to:
 - All information assets owned, processed, stored, or transmitted by the Organization,
   including source code, customer data, learning artifacts, audit records, and the Operating
   Record.
-- All components of the Maverick platform: the `maverick-core` kernel, agent shield, channels,
+- All components of the Maverick platform: the `lightwork-core` kernel, agent shield, channels,
   dashboard, MCP server, evolve/learning subsystem, and knowledge subsystem.
 - All employees, contractors, and third parties acting on behalf of the Organization.
 - All environments (development, build/CI, and production) and all supporting infrastructure.
@@ -106,10 +106,10 @@ the shield in governed production deployments.
 
 | Control | Implementation (file/module) | Status |
 | --- | --- | --- |
-| Secure-by-default posture (hardened but functional defaults) | `packages/maverick-core/lightwork/security_defaults.py` | Implemented |
-| Startup configuration validation (reject/warn on insecure config) | `packages/maverick-core/lightwork/preflight.py` | Implemented |
-| Policy engine / runtime governance enforcement | `packages/maverick-core/lightwork/governance.py` | Implemented |
-| Tamper-evident audit / Operating Record | `packages/maverick-core/lightwork/audit/` | Implemented |
+| Secure-by-default posture (hardened but functional defaults) | `packages/lightwork-core/lightwork/security_defaults.py` | Implemented |
+| Startup configuration validation (reject/warn on insecure config) | `packages/lightwork-core/lightwork/preflight.py` | Implemented |
+| Policy engine / runtime governance enforcement | `packages/lightwork-core/lightwork/governance.py` | Implemented |
+| Tamper-evident audit / Operating Record | `packages/lightwork-core/lightwork/audit/` | Implemented |
 | Documented security hardening guidance | `docs/security-hardening.md` | Implemented |
 | Enterprise security posture overview | `docs/enterprise/security-overview.md` | Implemented |
 | ISMS scope, SoA, asset inventory, management review records | ISMS register (organizational) | Process |

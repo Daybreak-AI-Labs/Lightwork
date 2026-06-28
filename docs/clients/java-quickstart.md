@@ -13,8 +13,8 @@ any language an MCP SDK exists in.
 
 ```bash
 # PyPI publish pending: install from a source clone (pip install -e
-# packages/maverick-core packages/maverick-mcp) or the native installer for now.
-pip install maverick-agent maverick-mcp-server   # any venv on the same machine (post-publish)
+# packages/lightwork-core packages/lightwork-mcp) or the native installer for now.
+pip install lightwork-agent lightwork-mcp-server   # any venv on the same machine (post-publish)
 ```
 
 Add the official [Java MCP SDK](https://github.com/modelcontextprotocol/java-sdk)
@@ -123,7 +123,7 @@ per-tool table.
   …) read credentials from the same env / `~/.maverick/config.toml`
   the CLI uses. The JVM client doesn't pass credentials — the kernel
   reads them once.
-- Some tools require optional extras (`maverick-agent[redis]`,
+- Some tools require optional extras (`lightwork-agent[redis]`,
   `[s3]`, etc.). Install only what you use.
 
 ## Limits — please respect them
@@ -133,11 +133,11 @@ per-tool table.
   spawn goals and let Lightwork run the swarm. The JVM process is the
   *client*, not a worker.
 - **Sandbox / kernel features are Python-side.** Backends
-  (firecracker, k8s, devcontainer) live in `maverick-core` and are
+  (firecracker, k8s, devcontainer) live in `lightwork-core` and are
   not part of the wire protocol.
 - **The MCP server is for cross-language clients, not for tunneling
   Lightwork over the public internet.** Pair with your own auth +
-  TLS layer if you go remote (see `packages/maverick-mcp/http_transport.py`).
+  TLS layer if you go remote (see `packages/lightwork-mcp/http_transport.py`).
 
 ## SDK status
 
@@ -146,7 +146,7 @@ Spring AI. Pin the version (this doc uses `1.1.3`) and audit the
 dependency. If the SDK API drifts, the wire protocol it speaks does
 not — you can also implement the JSON-RPC handshake by hand.
 
-## Why no `maven install maverick-core`?
+## Why no `maven install lightwork-core`?
 
 See [docs/ROADMAP.md → "Language Bindings — Council Decision"](../ROADMAP.md).
 Java / Kotlin is council target #5 (JVM enterprise + Android). Short

@@ -6,8 +6,8 @@ from PyInstaller.utils.hooks import collect_data_files, collect_submodules, copy
 # installed package versions from inside the frozen binary.
 _datas = collect_data_files('maverick_dashboard')
 for _dist in (
-    'maverick-agent', 'maverick-shield', 'maverick-channels',
-    'maverick-dashboard', 'maverick-mcp-server', 'maverick-installer',
+    'lightwork-agent', 'lightwork-shield', 'lightwork-channels',
+    'lightwork-dashboard', 'lightwork-mcp-server', 'lightwork-installer',
 ):
     try:
         _datas += copy_metadata(_dist)

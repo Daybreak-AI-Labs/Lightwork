@@ -54,7 +54,7 @@ asserts byte-identical decisions (URLs, forwarded headers, auth/route verdicts,
 SSRF blocks). Regenerate after changing either side so they can't drift:
 
 ```bash
-python3 go/model-proxy/gen_parity.py     # from the repo root, with maverick-core installed
+python3 go/model-proxy/gen_parity.py     # from the repo root, with lightwork-core installed
 go test ./go/model-proxy/...             # build + unit + parity + concurrency, run with -race in CI
 ```
 

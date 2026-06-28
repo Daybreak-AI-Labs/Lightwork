@@ -19,7 +19,7 @@ This policy defines how the Organization maintains the availability and resilien
 
 This policy applies to:
 
-- The Maverick platform (kernel `maverick-core`, shield, channels, dashboard, MCP, evolve, knowledge) and its production deployments.
+- The Maverick platform (kernel `lightwork-core`, shield, channels, dashboard, MCP, evolve, knowledge) and its production deployments.
 - The mechanisms that provide durability, resilience, capacity control, and health observability within the platform.
 - The personnel responsible for operating, recovering, and testing the platform.
 

@@ -110,7 +110,7 @@ framing. A second, deeper audit against `main` makes the point starker: the
 | EU AI Act Art. 50 disclosure | ✅ first-turn chatbot disclosure, configurable | `compliance.py` |
 | Data-minimized / anonymous logs | ✅ hashes ids, scrubs PII/paths | `privacy.py` |
 | Kill-switch | ✅ `~/.maverick/HALT` polled per tool call | `killswitch.py` |
-| Content safety / injection defense | ✅ Shield at 3 chokepoints, fail-open | `packages/maverick-shield/` |
+| Content safety / injection defense | ✅ Shield at 3 chokepoints, fail-open | `packages/lightwork-shield/` |
 | Cost governance | ✅ hard caps (per-run) | `budget.py` |
 | Tenant isolation | 🟡 in progress: data-path + memory done; world-model/audit next | `paths.py` |
 | Air-gapped / on-prem | ✅ self-host default, `--network=none`, local models | `sandbox/` |

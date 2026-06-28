@@ -22,7 +22,7 @@ forgiving handler that logs and continues.
 [project]
 name = "maverick-weather-plugin"
 version = "0.1.0"
-dependencies = ["maverick-agent>=0.1"]
+dependencies = ["lightwork-agent>=0.1"]
 
 [project.entry-points."maverick.tools"]
 weather = "my_plugin:weather_tool"

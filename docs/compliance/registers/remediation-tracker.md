@@ -50,7 +50,7 @@ for Maverick, operated under the
 
 | ID | Source | Description | CVSS / Severity | Affected component | Discovered | SLA due | Owner | Status | Verification |
 | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- |
-| VLN-0001 _(example)_ | dependabot | Vulnerable transitive dependency flagged by weekly Dependabot PR; upgrade available | 7.5 / High | `packages/maverick-core` (pip) | 2026-06-10 | 2026-07-10 | Eng — Core | in-progress | Pending — confirm fixed version + green CI on upgrade PR |
+| VLN-0001 _(example)_ | dependabot | Vulnerable transitive dependency flagged by weekly Dependabot PR; upgrade available | 7.5 / High | `packages/lightwork-core` (pip) | 2026-06-10 | 2026-07-10 | Eng — Core | in-progress | Pending — confirm fixed version + green CI on upgrade PR |
 | VLN-0002 _(example)_ | CI (detect-secrets) | New secret-like hash introduced in a PR diff, failed the `detect-secrets` gate vs `.secrets.baseline` | 9.1 / Critical | `apps/installer-cli` | 2026-06-18 | 2026-06-25 | Security Lead | remediated | Secret rotated; commit history scrubbed; baseline re-verified clean in CI on 2026-06-20 |
 | VLN-0003 _(example)_ | pen-test | SSRF reachable to internal host when `MAVERICK_FETCH_ALLOW_PRIVATE=1` set in a misconfigured deployment | 5.4 / Medium | `maverick/tools/_ssrf.py` | 2026-05-02 | 2026-07-31 | Security Lead | accepted | Accepted as low residual — compensating control (default-on private-IP block); linked to Risk Register **R-04**; re-review 2026-12-31 |
 

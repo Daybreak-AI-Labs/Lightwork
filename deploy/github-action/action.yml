@@ -44,7 +44,7 @@ inputs:
     required: false
     default: ""
   version:
-    description: "maverick-agent version to install from PyPI (e.g. 0.1.6). Default: latest. Pin this for reproducible runs."
+    description: "lightwork-agent version to install from PyPI (e.g. 0.1.6). Default: latest. Pin this for reproducible runs."
     required: false
     default: ""
   python-version:
@@ -83,9 +83,9 @@ runs:
       run: |
         set -o pipefail
         if [ -n "$IN_VERSION" ]; then
-          python -m pip install "maverick-agent==$IN_VERSION"
+          python -m pip install "lightwork-agent==$IN_VERSION"
         else
-          python -m pip install "maverick-agent"
+          python -m pip install "lightwork-agent"
         fi
         maverick version || maverick --help
 

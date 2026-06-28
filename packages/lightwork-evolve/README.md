@@ -1,4 +1,4 @@
-# maverick-evolve
+# lightwork-evolve
 
 Governed self-evolution for Lightwork — the safe rungs of the ladder.
 
@@ -25,5 +25,5 @@ That rung needs an out-of-process sandbox runtime, hard capability bounds, and
 human-gated promotion; it is research-cadence and is intentionally deferred. The
 design rationale lives in `docs/research/`.
 
-All of this is opt-in and depends on `maverick-agent`; nothing here runs unless
+All of this is opt-in and depends on `lightwork-agent`; nothing here runs unless
 an operator wires an evolution loop.

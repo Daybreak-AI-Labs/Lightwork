@@ -211,7 +211,7 @@ The launch-hardening pass that landed just after the 0.1.3 tag was cut.
 - **MCP HTTP transport** no longer crashes with `asyncio.run() ... running
   event loop`; client-supplied budgets are clamped and an arbitrary host-file
   read (`trusted_local`) was closed.
-- **VPS installer** references the correct pipx package name (`maverick-agent`)
+- **VPS installer** references the correct pipx package name (`lightwork-agent`)
   and its run-as-user model is coherent.
 - GDPR `erase` no longer fails on the foreign-key cascade; audit `scrub_user`
   is wired.
@@ -243,9 +243,9 @@ The launch-hardening pass that landed just after the 0.1.3 tag was cut.
   in the spec.
 
 ### Changed
-- The MCP server is published to PyPI as `maverick-mcp-server` (the
-  `maverick-mcp` name is taken by an unrelated project). The import
-  package (`maverick_mcp`) and the `maverick-mcp` command are unchanged.
+- The MCP server is published to PyPI as `lightwork-mcp-server` (the
+  `lightwork-mcp` name is taken by an unrelated project). The import
+  package (`maverick_mcp`) and the `lightwork-mcp` command are unchanged.
 - PyPI publishing runs one job per package (`fail-fast: false`), so a
   package without a trusted publisher can't abort the others.
 - Repository references updated to the `cdayAI` GitHub account.
@@ -260,8 +260,8 @@ The launch-hardening pass that landed just after the 0.1.3 tag was cut.
   PyInstaller to `>=6.0,<7.0`. A diagnostic step now verifies
   `sqlite3` is importable on the build host before the bundle runs.
 - `maverick version` reported `maverick: not installed` after the
-  PyPI rename to `maverick-agent`. The reporter now reads
-  `maverick-agent` as the canonical distribution name.
+  PyPI rename to `lightwork-agent`. The reporter now reads
+  `lightwork-agent` as the canonical distribution name.
 
 ### Added
 - Multi-turn conversation state per channel user (schema v3 -> v4).
@@ -284,7 +284,7 @@ command.
 
 ### Added
 
-**Agent kernel** (`maverick-core`)
+**Agent kernel** (`lightwork-core`)
 - Recursive multi-agent swarm: `spawn_subagent` (blocking) and `spawn_swarm` (parallel via `asyncio.gather`)
 - Persistent SQLite + FTS5 world model: goals, episodes, facts, questions, messages
 - Hard budget caps: tokens, $, wall-clock, tool calls
@@ -299,14 +299,14 @@ command.
 - Gemini (Google, via OpenAI-compatible endpoint)
 - Per-role model assignment via `[models]` section of config
 
-**Safety** (`maverick-shield`)
+**Safety** (`lightwork-shield`)
 - Agent Shield SDK integration when installed (full ~115 patterns)
 - Built-in fallback rules (~20 high-impact patterns) when SDK absent
 - Three chokepoints: input scan, tool-call scan, output scan
 - Profiles: strict / balanced / permissive / off
 - Shield is actually wired into the agent loop (not just documented)
 
-**Channels** (`maverick-channels`)
+**Channels** (`lightwork-channels`)
 - Telegram (Bot API), Discord (Gateway), Slack (Socket Mode)
 - Signal (via signal-cli subprocess)
 - Email (IMAP poll + SMTP send, stdlib only)
@@ -325,11 +325,11 @@ command.
 - Per-role model picker, channel picker, safety profile picker
 - Channels prompted for required env vars only
 
-**Web dashboard** (`maverick-dashboard`)
+**Web dashboard** (`lightwork-dashboard`)
 - Local FastAPI app at `127.0.0.1:8765` showing goals / skills / facts / spend
 - Dark monospace theme, no JS framework, htmx for the live bits
 
-**MCP server** (`maverick-mcp-server`)
+**MCP server** (`lightwork-mcp-server`)
 - Maverick exposed as a Model Context Protocol server over stdio
 - Drives the swarm from Claude Code / Cursor / Claude Desktop / any MCP client
 - 8 tools: start / status / resume / answer / skill_install / skills_list / fact_set / facts_get

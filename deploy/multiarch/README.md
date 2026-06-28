@@ -17,9 +17,9 @@ PUSH=1 TAG=registry.example.com/maverick:0.1.6 deploy/multiarch/build.sh
 
 ## Why this mostly Just Works: the core is pure Python
 
-`maverick-core`'s hard dependencies — `anthropic`, `click`, `httpx`,
+`lightwork-core`'s hard dependencies — `anthropic`, `click`, `httpx`,
 `tomli` — are pure-Python wheels, i.e. **architecture-independent**. The
-same is true of `maverick-shield` (the wrapper has zero hard deps). So the
+same is true of `lightwork-shield` (the wrapper has zero hard deps). So the
 base image's CPython is the only native code in the default build, and the
 image works on any arch the base supports.
 
@@ -43,7 +43,7 @@ image works on any arch the base supports.
   PLATFORMS=linux/riscv64 BASE_IMAGE=debian:sid-slim deploy/multiarch/build.sh
   ```
 
-## Optional extras: native-wheel availability (per `packages/maverick-core/pyproject.toml`)
+## Optional extras: native-wheel availability (per `packages/lightwork-core/pyproject.toml`)
 
 The default image installs **no extras**, exactly to stay arch-independent.
 If you add extras, this is the honest wheel situation (PyPI wheel tags as
@@ -63,7 +63,7 @@ of authoring; re-check before relying on it):
 | `calendar` | lxml (via caldav) | wheels | no wheels — source build needs libxml2/libxslt headers |
 | `computer-use`, `pdf` | pillow | wheels | no wheels — source build needs libjpeg/zlib headers |
 | `mongodb` | pymongo C extensions | wheels | sdist falls back to pure Python automatically (slower, works) |
-| dashboard (`maverick-dashboard`) | pydantic-core (Rust, via fastapi) | wheels | no wheels — source build needs a Rust toolchain. This is why `INSTALL_DASHBOARD` defaults to 0 |
+| dashboard (`lightwork-dashboard`) | pydantic-core (Rust, via fastapi) | wheels | no wheels — source build needs a Rust toolchain. This is why `INSTALL_DASHBOARD` defaults to 0 |
 | everything else (`openai`/provider extras, `math`, `queue`, `redis`, `s3`, `websocket`, `observability`, session extras, ...) | — pure Python | works | works |
 
 ## CI guidance
@@ -93,7 +93,7 @@ Notes:
 ## What was and wasn't verified here
 
 Authored + statically contract-tested
-(`packages/maverick-core/tests/test_multiarch.py`); **no image was built in
+(`packages/lightwork-core/tests/test_multiarch.py`); **no image was built in
 this environment** (no Docker daemon, no hadolint), and the riscv64 base
 availability is documented as a check-on-your-host step rather than
 asserted. The first `build.sh` run on a Docker-capable host is the smoke

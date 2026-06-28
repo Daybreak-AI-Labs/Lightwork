@@ -108,17 +108,17 @@ install_maverick() {
       || git -C /opt/maverick pull --ff-only
   fi
   # pipx names the venv after the distribution Name, which is
-  # `maverick-agent` (packages/maverick-core/pyproject.toml), NOT the
-  # `maverick` console-script. Every inject must target `maverick-agent`
+  # `lightwork-agent` (packages/lightwork-core/pyproject.toml), NOT the
+  # `maverick` console-script. Every inject must target `lightwork-agent`
   # or pipx errors with "Package maverick is not installed". (The desktop
   # install scripts already use the correct name.)
   run_as_user pipx ensurepath || true
-  run_as_user pipx install /opt/maverick/packages/maverick-core --force
-  run_as_user pipx inject maverick-agent /opt/maverick/packages/maverick-shield
-  run_as_user pipx inject maverick-agent /opt/maverick/packages/maverick-channels
-  run_as_user pipx inject maverick-agent /opt/maverick/packages/maverick-dashboard
-  run_as_user pipx inject maverick-agent /opt/maverick/packages/maverick-mcp
-  run_as_user pipx inject maverick-agent /opt/maverick/apps/installer-cli
+  run_as_user pipx install /opt/maverick/packages/lightwork-core --force
+  run_as_user pipx inject lightwork-agent /opt/maverick/packages/lightwork-shield
+  run_as_user pipx inject lightwork-agent /opt/maverick/packages/lightwork-channels
+  run_as_user pipx inject lightwork-agent /opt/maverick/packages/lightwork-dashboard
+  run_as_user pipx inject lightwork-agent /opt/maverick/packages/lightwork-mcp
+  run_as_user pipx inject lightwork-agent /opt/maverick/apps/installer-cli
 }
 
 run_wizard() {

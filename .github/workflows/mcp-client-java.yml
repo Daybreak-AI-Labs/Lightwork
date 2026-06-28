@@ -12,15 +12,15 @@ on:
   push:
     branches: [main]
     paths:
-      - 'packages/maverick-core/**'
-      - 'packages/maverick-mcp/**'
+      - 'packages/lightwork-core/**'
+      - 'packages/lightwork-mcp/**'
       - 'examples/clients/**'
       - 'docs/clients/**'
       - '.github/workflows/mcp-client-java.yml'
   pull_request:
     paths:
-      - 'packages/maverick-core/**'
-      - 'packages/maverick-mcp/**'
+      - 'packages/lightwork-core/**'
+      - 'packages/lightwork-mcp/**'
       - 'examples/clients/**'
       - 'docs/clients/**'
       - '.github/workflows/mcp-client-java.yml'
@@ -40,8 +40,8 @@ jobs:
           cache: "maven"
       - name: Install Maverick (kernel + MCP server)
         run: |
-          pip install -e ./packages/maverick-core
-          pip install --no-deps -e ./packages/maverick-mcp
+          pip install -e ./packages/lightwork-core
+          pip install --no-deps -e ./packages/lightwork-mcp
       - name: Run the Java MCP client end-to-end
         working-directory: examples/clients/java
         run: mvn -q compile exec:java

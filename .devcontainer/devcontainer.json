@@ -14,7 +14,7 @@
       "settings": {
         "python.defaultInterpreterPath": "/usr/local/bin/python",
         "python.testing.pytestEnabled": true,
-        "python.testing.pytestArgs": ["packages/maverick-core/tests"]
+        "python.testing.pytestArgs": ["packages/lightwork-core/tests"]
       }
     }
   },

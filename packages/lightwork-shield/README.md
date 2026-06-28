@@ -1,4 +1,4 @@
-# maverick-shield
+# lightwork-shield
 
 Agent Shield integration for Lightwork. Provides three safety chokepoints
 the agent loop wraps around:

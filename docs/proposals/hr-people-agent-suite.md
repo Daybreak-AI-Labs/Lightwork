@@ -69,7 +69,7 @@ privacy and AI-governance already exist.
 | **Bias / fairness evaluation** (LL144, Annex III) | AI-Gov bias-eval (it-grc 1.5) | **Gap** (shared build) | Screening (1.2), Pay equity (4.2), Recruiting analytics (1.7) |
 | **AI / bot disclosure** (Art 50 / CA SB 1001) | `compliance.py` | **Shipped** | candidate & employee chat (1.3, 3.1) |
 | **Need-to-know access control** (comp/perf/medical segregation) | `capability.py` (path scopes + RBAC) | **Shipped** | §3.4 |
-| **Multi-channel + intake + scheduling** | `packages/maverick-channels/`, `intake.py`, `scheduler.py` | **Shipped** | Helpdesk (3.1), Candidate engagement (1.3) |
+| **Multi-channel + intake + scheduling** | `packages/lightwork-channels/`, `intake.py`, `scheduler.py` | **Shipped** | Helpdesk (3.1), Candidate engagement (1.3) |
 | **Assessment engine** | `assessment.py` (`TEMPLATES`) | **Shipped** | the HR templates (§8) |
 | **Tamper-evident record** | the signed Merkle audit chain | **Shipped** | the LL144 / EEOC decision evidence |
 | **Knowledge** (handbook, policy) | `knowledge_search` | **Shipped** | Helpdesk (3.1), Policy (3.4) |
@@ -85,7 +85,7 @@ pack** and the **bias-evaluation** engine (shared with AI-Gov).
 
 ## 2. How an HR agent maps onto Lightwork
 
-Each agent is one [`DomainProfile`](../../packages/maverick-core/lightwork/domain.py)
+Each agent is one [`DomainProfile`](../../packages/lightwork-core/lightwork/domain.py)
 pack, governed by Layer A + consent + the signed audit chain. Three HR specifics:
 
 - **The employee/candidate is the data subject.** Reuse the privacy suite's PII,
@@ -244,7 +244,7 @@ The highest AI-governance exposure (Annex III + NYC LL144).
 - **Status:** **Gap**, behind the employment-decision pack + bias eval (the keystone builds).
 
 ```toml
-# packages/maverick-core/lightwork/domains/hr_screening.toml
+# packages/lightwork-core/lightwork/domains/hr_screening.toml
 name = "hr_screening"
 compartment = "hr_recruiting"
 description = "Job-related resume screening and ranking (EU AI Act Annex III high-risk)."
@@ -352,7 +352,7 @@ authoring = "manual"
 - **Status:** **Partial** (channels + intake + disclosure shipped).
 
 ```toml
-# packages/maverick-core/lightwork/domains/hr_helpdesk.toml
+# packages/lightwork-core/lightwork/domains/hr_helpdesk.toml
 name = "hr_helpdesk"
 compartment = "hr_operations"
 description = "Tier-1 HR helpdesk: policy Q&A, case triage, escalation."
@@ -466,7 +466,7 @@ Consequential decisions — **L1 ceiling**, bias-aware throughout.
 - **Status:** **Gap** (behind the employment-decision pack).
 
 ```toml
-# packages/maverick-core/lightwork/domains/hr_performance.toml
+# packages/lightwork-core/lightwork/domains/hr_performance.toml
 name = "hr_performance"
 compartment = "hr_talent"
 description = "Performance-review support (consequential — drafts only, human decides)."
@@ -562,7 +562,7 @@ The independent, confidential tower — **strictest access segregation**.
 - **Status:** **Gap**.
 
 ```toml
-# packages/maverick-core/lightwork/domains/hr_investigations.toml
+# packages/lightwork-core/lightwork/domains/hr_investigations.toml
 name = "hr_investigations"
 compartment = "hr_investigations"      # isolated seal — no cross-access
 description = "Workplace-investigation support (independent, confidential, human-led)."

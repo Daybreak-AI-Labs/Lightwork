@@ -54,15 +54,15 @@ This policy applies to:
 
 | Control | Implementation (file/module) | Status |
 | --- | --- | --- |
-| Role-based access; separation of duties (4 roles, auditor read-only) | `packages/maverick-dashboard/maverick_dashboard/rbac.py` | Operational |
-| Bearer-token auth gate (OIDC, alg-confusion hardened) | `packages/maverick-dashboard/maverick_dashboard/auth.py` | **Opt-in — default OFF; must enable** |
-| Browser OIDC login + session cookies | `packages/maverick-dashboard/maverick_dashboard/oidc_login.py` | Opt-in — configure IdP |
-| SAML SSO | `packages/maverick-dashboard/maverick_dashboard/saml.py` | Opt-in — configure IdP |
-| ID-token verification | `packages/maverick-core/lightwork/oidc.py` | **Opt-in — default OFF; must enable** |
-| Reverse-proxy authentication | `packages/maverick-core/lightwork/proxy_auth.py` | Opt-in — configure proxy |
-| Signed attenuating capabilities (tool/path/host scopes, max_risk ceiling, expiry; least privilege by construction) | `packages/maverick-core/lightwork/capability.py` | **Opt-in — default OFF; must enable** |
-| Per-channel / per-user tool ACLs | `packages/maverick-core/lightwork/safety/tool_acl.py` | Operational |
-| OAuth for MCP | `packages/maverick-core/lightwork/mcp_oauth.py` | Opt-in — configure |
+| Role-based access; separation of duties (4 roles, auditor read-only) | `packages/lightwork-dashboard/maverick_dashboard/rbac.py` | Operational |
+| Bearer-token auth gate (OIDC, alg-confusion hardened) | `packages/lightwork-dashboard/maverick_dashboard/auth.py` | **Opt-in — default OFF; must enable** |
+| Browser OIDC login + session cookies | `packages/lightwork-dashboard/maverick_dashboard/oidc_login.py` | Opt-in — configure IdP |
+| SAML SSO | `packages/lightwork-dashboard/maverick_dashboard/saml.py` | Opt-in — configure IdP |
+| ID-token verification | `packages/lightwork-core/lightwork/oidc.py` | **Opt-in — default OFF; must enable** |
+| Reverse-proxy authentication | `packages/lightwork-core/lightwork/proxy_auth.py` | Opt-in — configure proxy |
+| Signed attenuating capabilities (tool/path/host scopes, max_risk ceiling, expiry; least privilege by construction) | `packages/lightwork-core/lightwork/capability.py` | **Opt-in — default OFF; must enable** |
+| Per-channel / per-user tool ACLs | `packages/lightwork-core/lightwork/safety/tool_acl.py` | Operational |
+| OAuth for MCP | `packages/lightwork-core/lightwork/mcp_oauth.py` | Opt-in — configure |
 
 ## 6. Framework control mapping
 

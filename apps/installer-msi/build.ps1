@@ -2,12 +2,12 @@
 #
 # Requires (Windows host):
 #   * .NET SDK + WiX v4 CLI:  dotnet tool install --global wix
-#   * a built maverick-agent wheel:
+#   * a built lightwork-agent wheel:
 #       python -m pip install build
-#       python -m build --wheel packages/maverick-core   # writes packages/maverick-core/dist/
+#       python -m build --wheel packages/lightwork-core   # writes packages/lightwork-core/dist/
 #
 # Usage (from this directory):
-#   .\build.ps1 -Wheel ..\..\packages\maverick-core\dist\maverick_agent-0.1.6-py3-none-any.whl
+#   .\build.ps1 -Wheel ..\..\packages\lightwork-core\dist\maverick_agent-0.1.6-py3-none-any.whl
 #
 # The output MSI is UNSIGNED (same posture as apps/installer-desktop).
 param(
@@ -22,7 +22,7 @@ if (-not (Get-Command wix -ErrorAction SilentlyContinue)) {
     throw "WiX v4 CLI not found. Install it with: dotnet tool install --global wix"
 }
 if (-not (Test-Path $Wheel)) {
-    throw "wheel not found: $Wheel (build it with `python -m build --wheel packages/maverick-core`)"
+    throw "wheel not found: $Wheel (build it with `python -m build --wheel packages/lightwork-core`)"
 }
 
 $wheelPath = (Resolve-Path $Wheel).Path

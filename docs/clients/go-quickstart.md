@@ -12,8 +12,8 @@ Python kernel via the standard MCP SDK for Go.
 
 ```bash
 # PyPI publish pending: install from a source clone (pip install -e
-# packages/maverick-core packages/maverick-mcp) or the native installer for now.
-pip install maverick-agent maverick-mcp-server   # post-publish
+# packages/lightwork-core packages/lightwork-mcp) or the native installer for now.
+pip install lightwork-agent lightwork-mcp-server   # post-publish
 go get github.com/modelcontextprotocol/go-sdk@latest   # community SDK; pin to a tag
 ```
 

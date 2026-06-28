@@ -17,7 +17,7 @@ on:
   pull_request:
     paths:
       - "go/model-proxy/**"
-      - "packages/maverick-core/lightwork/model_proxy.py"
+      - "packages/lightwork-core/lightwork/model_proxy.py"
       - ".github/workflows/go-model-proxy.yml"
 
 permissions:
@@ -61,7 +61,7 @@ jobs:
           python-version: "3.11"
       # model_proxy imports maverick.config; an editable core install is enough
       # to regenerate the fixture from the source-of-truth Python.
-      - run: pip install -e ./packages/maverick-core
+      - run: pip install -e ./packages/lightwork-core
       - run: python3 go/model-proxy/gen_parity.py
       - name: fixture is up to date
         run: |

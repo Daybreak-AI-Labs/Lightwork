@@ -5,7 +5,7 @@
   <modelVersion>4.0.0</modelVersion>
 
   <groupId>ai.cday.maverick.examples</groupId>
-  <artifactId>maverick-mcp-java-example</artifactId>
+  <artifactId>lightwork-mcp-java-example</artifactId>
   <version>0.1.0</version>
   <packaging>jar</packaging>
   <name>Maverick MCP Java example</name>
@@ -30,7 +30,7 @@
   </dependencies>
 
   <build>
-    <finalName>maverick-mcp-java-example</finalName>
+    <finalName>lightwork-mcp-java-example</finalName>
     <plugins>
       <!-- `mvn -q compile exec:java` runs the client. -->
       <plugin>

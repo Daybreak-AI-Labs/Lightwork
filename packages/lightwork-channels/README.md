@@ -1,4 +1,4 @@
-# maverick-channels
+# lightwork-channels
 
 Channel adapters for Lightwork. A channel normalizes incoming messages
 from any platform into a shared `{user_id, text, attachments}` shape,
@@ -26,7 +26,7 @@ phone (or any other client) a frontend.
 or everything at once:
 
 ```bash
-pip install 'maverick-channels[all]'
+pip install 'lightwork-channels[all]'
 ```
 
 ## The interface

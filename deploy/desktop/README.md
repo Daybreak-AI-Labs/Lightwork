@@ -5,7 +5,7 @@
 Use the published package instead of piping a mutable remote script into a shell:
 
 ```bash
-pipx install 'maverick-agent[installer]'
+pipx install 'lightwork-agent[installer]'
 maverick init
 ```
 

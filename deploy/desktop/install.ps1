@@ -221,10 +221,10 @@ function Fetch-Source {
 Write-Step "Installing the agent + setup wizard (this can take a minute) ..."
 if ($Ref) {
   Fetch-Source
-  Py -m pipx install --force (Join-Path $SrcDir 'packages\maverick-core')
-  Py -m pipx inject --force maverick-agent (Join-Path $SrcDir 'apps\installer-cli')
+  Py -m pipx install --force (Join-Path $SrcDir 'packages\lightwork-core')
+  Py -m pipx inject --force lightwork-agent (Join-Path $SrcDir 'apps\installer-cli')
 } else {
-  Py -m pipx install --force 'maverick-agent[installer]'
+  Py -m pipx install --force 'lightwork-agent[installer]'
 }
 
 # 4. Locate the maverick shim and launch the wizard.

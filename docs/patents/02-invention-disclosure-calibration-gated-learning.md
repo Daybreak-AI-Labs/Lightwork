@@ -51,10 +51,10 @@ accumulated search archive**, and rehearsal/donation halt. When calibration
 recovers, the loop **resumes from the persisted archive** — a pause, not a reset
 and not a permanent shutdown.
 
-Evidence: `packages/maverick-core/lightwork/calibration.py` (discrimination
-computation + freeze decision); `packages/maverick-evolve/maverick_evolve/loop.py:29-86`
+Evidence: `packages/lightwork-core/lightwork/calibration.py` (discrimination
+computation + freeze decision); `packages/lightwork-evolve/maverick_evolve/loop.py:29-86`
 (per-round skip-on-freeze with archive persistence);
-`packages/maverick-core/lightwork/dreaming.py` (rehearsal refuses while frozen).
+`packages/lightwork-core/lightwork/dreaming.py` (rehearsal refuses while frozen).
 
 ### 3.2 Deterministic snapshot-replay regression detector (no agent re-execution)
 Before each consolidation pass, the entire learned state (reflexions, insights,
@@ -66,7 +66,7 @@ recall machinery the live agent uses**, with **no LLM calls and no agent
 re-execution**. It classifies each goal as *gained*, *regressed*, or *unchanged*,
 and emits the regression signal to the audit trail.
 
-Evidence: `packages/maverick-core/lightwork/hindsight.py:1-30, 139-214`
+Evidence: `packages/lightwork-core/lightwork/hindsight.py:1-30, 139-214`
 (snapshot-coverage replay, before/after comparison, deterministic recall reuse).
 
 ### 3.3 Atomic stage-then-swap rollback of the learned-state tree
@@ -76,7 +76,7 @@ success performs an **atomic `os.replace`** swap into the live location. A failu
 mid-copy abandons the temp dir and **never touches the live store**, eliminating
 the "a restore that destroys the good state" failure mode.
 
-Evidence: `packages/maverick-core/lightwork/dreaming.py:1301-1413`
+Evidence: `packages/lightwork-core/lightwork/dreaming.py:1301-1413`
 (snapshot creation; staged atomic restore).
 
 ### 3.4 (Supporting) Bounded, configuration-only evolutionary search with quality-diversity archive
@@ -85,7 +85,7 @@ schema bounds** (never code), so a candidate can never escape the sandbox; the
 archive retains a **quality-diverse** subset via greedy max-min selection on a
 normalized config-key distance, preventing collapse onto a local optimum.
 
-Evidence: `packages/maverick-evolve/maverick_evolve/config_space.py`,
+Evidence: `packages/lightwork-evolve/maverick_evolve/config_space.py`,
 `search.py`, `archive.py:35-103` (diverse() greedy selection; config_distance()).
 
 ## 4. Why it is novel / non-obvious
@@ -160,9 +160,9 @@ configuration distance.
 
 ## 8. Evidence index (file:line)
 
-- `packages/maverick-core/lightwork/calibration.py` (discrimination + freeze)
-- `packages/maverick-evolve/maverick_evolve/loop.py:29-86` (skip-on-freeze, archive persist)
-- `packages/maverick-core/lightwork/hindsight.py:1-30, 139-214` (regression replay)
-- `packages/maverick-core/lightwork/dreaming.py:1301-1413` (snapshot + atomic rollback)
-- `packages/maverick-evolve/maverick_evolve/archive.py:35-103` (quality-diversity)
-- `packages/maverick-evolve/maverick_evolve/config_space.py`, `search.py` (bounded search)
+- `packages/lightwork-core/lightwork/calibration.py` (discrimination + freeze)
+- `packages/lightwork-evolve/maverick_evolve/loop.py:29-86` (skip-on-freeze, archive persist)
+- `packages/lightwork-core/lightwork/hindsight.py:1-30, 139-214` (regression replay)
+- `packages/lightwork-core/lightwork/dreaming.py:1301-1413` (snapshot + atomic rollback)
+- `packages/lightwork-evolve/maverick_evolve/archive.py:35-103` (quality-diversity)
+- `packages/lightwork-evolve/maverick_evolve/config_space.py`, `search.py` (bounded search)

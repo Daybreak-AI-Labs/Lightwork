@@ -31,7 +31,7 @@ group, with a written record — not implicitly, one merge at a time.
    not merge without either an SSG approval or a recorded decline.
 2. **The Shield policy.** Ownership of the Shield's block thresholds,
    profiles, and ensemble membership (`docs/safety.md`,
-   `packages/maverick-shield/`, the Shield v3 ensemble framework). Changes to
+   `packages/lightwork-shield/`, the Shield v3 ensemble framework). Changes to
    what the Shield blocks by default are SSG decisions.
 3. **The kill switch and revocation paths.** Oversight of
    `maverick/killswitch.py` and `maverick/revocation.py` — the controls that
@@ -96,7 +96,7 @@ from nothing:
 
 - **Decision-doc trail** — `docs/specs/*-decision.md` (anti-bot evasion,
   Redis primary store, DuckDB, JIT, plugin API v3, learning substrate…).
-- **Shield** — `packages/maverick-shield/`, ensemble framework + explainable
+- **Shield** — `packages/lightwork-shield/`, ensemble framework + explainable
   reason codes (`docs/safety.md`).
 - **Kill switch / revocation** — `maverick/killswitch.py`,
 - **Roster-wide governance invariant tests** — a six-invariant test suite verified across all 2,020 packs and fault-injected at 1,000,000 iterations: (1) tool-reachability (no drafting/non-builder agent can reach a state-mutating tool); (2) autonomy dial (an onboarding agent is never autonomous; a high-risk action is never autonomous even when graduated); (3) capability attenuation (a spawned child can never exceed its parent grant); (4) compartment isolation (a quarantine seal never bleeds across compartments/suites); (5) hard refusals (the universal refusal floor is unstrippable); (6) budget caps (no cap is ever silently exceeded). Plus hostile-argument fuzzing of all connectors and tools, each test with a non-vacuous fault-injection control.
