@@ -145,3 +145,23 @@ def test_shield_guarantee_fails_when_profile_off(monkeypatch):
 
     checks = {c.name: c for c in verify_deployment()}
     assert checks["Threat shield"].passed is False
+
+
+@requires_shield
+def test_shield_guarantee_fails_when_any_scan_sink_disabled(monkeypatch):
+    monkeypatch.setattr(
+        "maverick.config.load_config",
+        lambda *a, **k: {
+            "safety": {
+                "profile": "balanced",
+                "scan_input": True,
+                "scan_tool_calls": False,
+                "scan_output": True,
+            }
+        },
+    )
+    from maverick.deployment import verify_deployment
+
+    checks = {c.name: c for c in verify_deployment()}
+    assert checks["Threat shield"].passed is False
+    assert "scan_tool_calls = true" in checks["Threat shield"].detail

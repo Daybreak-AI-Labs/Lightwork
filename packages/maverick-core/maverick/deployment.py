@@ -171,8 +171,13 @@ def verify_deployment() -> list[GuaranteeCheck]:
     return checks
 
 
+def _shield_sink_enabled(shield: object, attr: str) -> bool:
+    """Return whether a Shield scan sink is configured to enforce."""
+    return bool(getattr(shield, attr, True))
+
+
 def _verify_shield() -> GuaranteeCheck:
-    """Verify the threat shield is installed and enforcing (profile != off).
+    """Verify the threat shield is installed and fully enforcing.
 
     Optional import: maverick-shield is not a hard dependency (kernel rule 1).
     A required enterprise deployment, however, must not run with the screen off
@@ -196,6 +201,19 @@ def _verify_shield() -> GuaranteeCheck:
             name, False,
             "shield installed but disabled ([safety] profile = off); set a "
             "profile (strict/balanced) so screening is enforced",
+        )
+    sinks = {
+        "scan_input": _shield_sink_enabled(shield, "_scan_input_enabled"),
+        "scan_tool_calls": _shield_sink_enabled(shield, "_scan_tool_calls_enabled"),
+        "scan_output": _shield_sink_enabled(shield, "_scan_output_enabled"),
+    }
+    disabled = [key for key, enabled in sinks.items() if not enabled]
+    if disabled:
+        flags = ", ".join(f"{key} = true" for key in disabled)
+        return GuaranteeCheck(
+            name, False,
+            "shield installed but not fully enforcing; enable [safety] "
+            f"{flags}",
         )
     backend = getattr(shield, "backend", "?")
     full = backend == getattr(Shield, "BACKEND_SDK", "agent-shield")
