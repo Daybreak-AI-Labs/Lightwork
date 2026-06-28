@@ -38,21 +38,21 @@ below), #8 per-domain mining, #9 conflict detection, #13 metamorphic, #14
 judge-drift visibility, #16 canary, #17 efficacy, #18 scheduled retirement,
 #19 LLM conflict classifier, #22 scoped recall, #23 worker-model learning.
 
-## Remaining — live-model implementations of the built seams
+## Remaining — operator data + one provider binding, not harness code
 
-The harness side is done; these are *operator integrations*, not harness code:
+The harness side is done, including the **LLM-backed** evaluator (`llm_runner` /
+`llm_judge` in `self_harness_eval`, same fail-open shape as `llm_proposer`, tested
+with a fake provider). What's left is operator-supplied:
 
-- **A live evaluator** for `corpus_ab_scorers(run_fn=, judge_fn=)`: a real
-  generator (`run_fn`) + LLM-as-judge / self-consistency judge (`judge_fn`). The
-  built-in heuristic judge makes the path runnable offline; production injects the
-  model. The calibration-freeze interlock (surfaced as `SelfHarnessReport.frozen`)
-  guards judge drift.
+- **An LLM client + eval corpus**: pass your `llm` to `llm_runner`/`llm_judge`
+  (or inject custom `run_fn`/`judge_fn`) and author the `{model|domain: [(goal,
+  expected)]}` corpus the JSON loader + deterministic split already consume. The
+  calibration-freeze interlock (surfaced as `SelfHarnessReport.frozen`) guards
+  judge drift.
 - **An outcome stream** wired into `note_outcome` from a trustworthy run signal
   (coding-mode test result, hindsight regression — the same ground truth
   `collect_calibration` consumes). `review_efficacy`/`review_canaries` then act on
   real correlations rather than test fixtures.
-- **An eval corpus**: the JSON loader + deterministic split are built; authoring
-  the `{model|domain: [(goal, expected)]}` data is an operator data task.
 
 ## Component-level profiles (#7) — partial, with a clear extension
 

@@ -83,3 +83,66 @@ def test_corpus_ab_scorers_use_injected_judge():
     sw, wo = ev.corpus_ab_scorers(cases, run_fn=run_fn, judge_fn=judge)
     assert sw("line", ["g"]) == 1.0 and wo("line", ["g"]) == 0.0
     assert seen and seen[0][2] == "ignored"                     # corpus expected passed through
+
+
+# ---- LLM-backed run/judge (the live seam, tested with a fake provider) ----
+
+class _FakeLLM:
+    """Sync stand-in for maverick.llm.LLM.complete (the eval seam)."""
+
+    def __init__(self, text="", raises=False):
+        self._text, self._raises = text, raises
+        self.model = "fake:test"
+        self.calls = []
+
+    def complete(self, system, messages, **kw):
+        self.calls.append((system, messages, kw))
+        if self._raises:
+            raise RuntimeError("provider down")
+        return type("R", (), {"text": self._text})()
+
+
+def test_llm_judge_parses_yes_no():
+    assert ev.llm_judge(_FakeLLM(text="Yes, it did."))("g", "out", "exp") is True
+    assert ev.llm_judge(_FakeLLM(text="no"))("g", "out", "exp") is False
+
+
+def test_llm_judge_fails_open_to_heuristic():
+    # provider error -> heuristic (expected substring present)
+    j = ev.llm_judge(_FakeLLM(raises=True))
+    assert j("g", "the answer is DONE", "done") is True
+    assert j("g", "mismatch", "done") is False
+    # unparseable answer -> heuristic too
+    assert ev.llm_judge(_FakeLLM(text="maybe?"))("g", "has done", "done") is True
+
+
+def test_llm_runner_injects_line_and_generates():
+    llm = _FakeLLM(text="generated answer")
+    run = ev.llm_runner(llm, system_prefix="base")
+    assert run("Verify first.", "do the thing") == "generated answer"
+    # the candidate line is injected into the system prompt; baseline omits it
+    sys_with = llm.calls[-1][0]
+    assert "Verify first." in sys_with and "base" in sys_with
+    run("", "do the thing")
+    assert "Verify first." not in llm.calls[-1][0]              # baseline
+
+
+def test_llm_runner_returns_empty_on_error():
+    assert ev.llm_runner(_FakeLLM(raises=True))("line", "goal") == ""
+
+
+def test_llm_backed_evaluator_end_to_end():
+    # a fake model that "succeeds" only when the guidance line is present
+    class _Model:
+        def complete(self, system, messages, **kw):
+            ok = "Bound the window" in system            # run reflects the line...
+            if "evaluator" in system.lower():            # ...and the judge verdict
+                ok = "GOAL-MET" in (messages[0]["content"])
+            return type("R", (), {"text": "GOAL-MET" if ok else "nope"})()
+    llm = _Model()
+    cases = [{"goal": f"g{i}", "expected": "GOAL-MET"} for i in range(4)]
+    sw, wo = ev.corpus_ab_scorers(
+        cases, run_fn=ev.llm_runner(llm), judge_fn=ev.llm_judge(llm))
+    goals = [c["goal"] for c in cases]
+    assert sw("Bound the window first.", goals) == 1.0          # line -> success
+    assert wo("Bound the window first.", goals) == 0.0          # baseline -> fail

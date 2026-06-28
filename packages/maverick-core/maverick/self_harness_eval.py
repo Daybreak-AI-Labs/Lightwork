@@ -136,6 +136,60 @@ def corpus_ab_scorers(
     return score_with, score_without
 
 
+# ---- LLM-backed run/judge (the live seam, concretely) --------------------
+# corpus_ab_scorers takes injected run_fn/judge_fn; these BUILD them on a real
+# provider -- same shape as llm_proposer (an injected LLM, fail-open). A flaky or
+# absent model degrades to a safe default (judge -> heuristic, run -> "") so the
+# evaluation never crashes a learning pass. Offline-tested with a fake LLM.
+
+def llm_judge(llm, *, budget=None, model: str | None = None, max_tokens: int = 8,
+              ) -> Callable[[str, str, str], bool]:
+    """An LLM-as-judge ``judge_fn`` for :func:`corpus_ab_scorers`: ask the model
+    whether the OUTPUT accomplished the GOAL (yes/no). The model is NOT hard-coded
+    (kernel rule 2). Falls open to :func:`_heuristic_judge` on any provider error
+    or an unparseable answer, so evaluation is robust to a flaky judge."""
+    def _judge(goal: str, output: str, expected: str) -> bool:
+        try:
+            system = ("You are a strict evaluator. Answer ONLY 'yes' or 'no': did "
+                      "the OUTPUT correctly accomplish the GOAL?")
+            user = (f"GOAL:\n{goal}\n\nOUTPUT:\n{output}\n\n"
+                    f"Expected (hint): {expected}\n\nyes/no:")
+            resp = llm.complete(system, [{"role": "user", "content": user}],
+                                budget=budget, max_tokens=max_tokens, model=model)
+            text = (getattr(resp, "text", "") or "").strip().lower()
+            if text.startswith("yes"):
+                return True
+            if text.startswith("no"):
+                return False
+        except Exception as e:  # pragma: no cover -- fail open to heuristic
+            log.warning("eval: llm judge failed (%s); using heuristic", e)
+        return _heuristic_judge(goal, output, expected)
+    return _judge
+
+
+def llm_runner(llm, *, system_prefix: str = "", budget=None, model: str | None = None,
+               max_tokens: int = 512) -> Callable[[str, str], str]:
+    """An LLM-backed ``run_fn`` for :func:`corpus_ab_scorers`: generate an answer
+    for the goal with the candidate guidance ``line`` injected into the system
+    prompt (``""`` = baseline, no line). The model is NOT hard-coded. Returns
+    ``""`` on any provider error -- a failed generation simply scores as a
+    non-success, never crashing the pass."""
+    def _run(line: str, goal: str) -> str:
+        try:
+            system = system_prefix
+            if line:
+                system = (system + "\n" if system else "") + line
+            resp = llm.complete(system or "You are a helpful assistant.",
+                                [{"role": "user", "content": goal}],
+                                budget=budget, max_tokens=max_tokens, model=model)
+            return getattr(resp, "text", "") or ""
+        except Exception as e:  # pragma: no cover -- a failed generation isn't a success
+            log.warning("eval: llm runner failed (%s)", e)
+            return ""
+    return _run
+
+
 __all__ = [
     "load_eval_corpus", "corpus_cases", "corpus_split", "corpus_ab_scorers",
+    "llm_judge", "llm_runner",
 ]
