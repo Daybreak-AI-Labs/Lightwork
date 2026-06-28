@@ -971,3 +971,85 @@ def test_candidates_per_signature_config(monkeypatch):
     monkeypatch.setattr(config, "load_config", lambda *a, **k: {"self_harness": {}})
     assert config.get_self_harness()["candidates_per_signature"] == 1
     assert sh.settings()["candidates_per_signature"] == 1
+
+
+# ---------- wave 8: semantic mining (similarity_fn seam + offline default) ----------
+
+def test_semantic_similarity_helper():
+    # identical -> 1.0; symmetric; bounded
+    assert sh.semantic_similarity("export the ledger", "export the ledger") == 1.0
+    assert sh.semantic_similarity("a", "b") == sh.semantic_similarity("b", "a")
+    s = sh.semantic_similarity("export the ledger", "completely unrelated text")
+    assert 0.0 <= s < 0.3
+    # morphological variants share NO whole token (token-Jaccard 0) but the
+    # trigram component clusters them -> semantic_similarity beats token overlap.
+    assert sh._jaccard(sh._tokens("authenticating"), sh._tokens("authentication")) == 0.0
+    assert sh.semantic_similarity("authenticating", "authentication") >= 0.3
+
+
+def test_mine_with_similarity_fn_uses_the_seam():
+    # 3 auth failures with DISTINCT wording (no shared tokens) -> default token
+    # mining gives 3 singletons (none meet support=3); an injected similarity_fn
+    # that judges them all alike clusters them into one mined signature.
+    rs = [_refl("M", "auth", g) for g in ("alpha portal", "bravo gateway", "charlie endpoint")]
+    assert sh.mine_failures(rs, model_id="M", min_support=3) == []     # default: no cluster
+    sigs = sh.mine_failures(rs, model_id="M", min_support=3,
+                            similarity_fn=lambda a, b: 1.0)
+    assert len(sigs) == 1 and sigs[0].support == 3
+
+
+def test_mine_semantic_default_clusters_morphological_variants():
+    # The built-in deterministic default (semantic_similarity) clusters
+    # morphological variants that strict token overlap would split.
+    rs = [_refl("M", "auth", g) for g in ("authenticating", "authentication", "authenticate")]
+    assert sh.mine_failures(rs, model_id="M", min_support=3) == []     # token mining: split
+    sigs = sh.mine_failures(rs, model_id="M", min_support=3,
+                            similarity_fn=sh.semantic_similarity)
+    assert len(sigs) == 1 and sigs[0].support == 3
+
+
+def test_semantic_mining_is_deterministic_under_permutation():
+    # Determinism crown-jewel: semantic mining must be permutation-invariant too.
+    goals = ["authenticating", "authentication", "authenticate", "reauthenticate"]
+    rs = [_refl("M", "auth", g) for g in goals]
+    a = sh.mine_failures(rs, model_id="M", min_support=2, similarity_fn=sh.semantic_similarity)
+    b = sh.mine_failures(list(reversed(rs)), model_id="M", min_support=2,
+                         similarity_fn=sh.semantic_similarity)
+    assert [(s.failure_class, s.signature, s.support) for s in a] == \
+           [(s.failure_class, s.signature, s.support) for s in b]
+
+
+def test_similarity_fn_seam_robust_to_raising():
+    rs = [_refl("M", "auth", g) for g in ("alpha", "bravo", "charlie")]
+    def boom(a, b):
+        raise RuntimeError("bad embedding service")
+    # a raising seam degrades to "no match" (singletons), never crashes
+    assert sh.mine_failures(rs, model_id="M", min_support=3, similarity_fn=boom) == []
+
+
+def test_run_self_harness_semantic_flag(monkeypatch, store):
+    ctrl = _enable(monkeypatch)
+    rs = [_refl("M", "auth", g) for g in ("authenticating", "authentication", "authenticate")]
+    common = dict(model_id="M", controller=ctrl, min_support=3, path=store,
+                  held_in=["a", "b"], held_out=["c", "d", "e"],
+                  score_with=lambda a, c: 0.95, score_without=lambda a, c: 0.4)
+    # without semantic mining the variants don't cluster -> nothing mined
+    rep_off = sh.run_self_harness(rs, **common)
+    assert rep_off.mined == 0 and rep_off.promoted == 0
+    # the flag selects the deterministic built-in -> one weakness mined + promoted
+    rep_on = sh.run_self_harness(rs, semantic_mining=True, **common)
+    assert rep_on.mined == 1 and rep_on.promoted == 1
+
+
+def test_runner_pass_applies_semantic_config(monkeypatch, store):
+    from maverick import config
+    from maverick import self_improvement_runner as runner
+    ctrl = _enable(monkeypatch)
+    monkeypatch.setattr(config, "load_config", lambda *a, **k: {
+        "self_harness": {"enable": True, "semantic_mining": True}})
+    monkeypatch.setattr(sh, "_store_path", lambda: store)
+    rs = [_refl("M", "auth", g) for g in ("authenticating", "authentication", "authenticate")]
+    rep = runner.run_self_harness_pass(
+        rs, model_id="M", held_in=["a", "b"], held_out=["c", "d", "e"], controller=ctrl,
+        score_with=lambda a, c: 0.95, score_without=lambda a, c: 0.4)
+    assert rep.mined == 1 and rep.promoted == 1     # config flag drove semantic clustering
