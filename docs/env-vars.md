@@ -109,7 +109,7 @@ for false unless noted otherwise.
 | `MAVERICK_QDRANT_PATH` | default path | Qdrant local on-disk path (embedded mode). |
 | `MAVERICK_QDRANT_API_KEY` | unset | API key for a remote Qdrant server. |
 | `MAVERICK_WORLD_BACKEND` | config-driven | Set `postgres` to use the Postgres world-model backend. |
-| `MAVERICK_PG_DSN` | unset | Postgres DSN for the Postgres world model (e.g. `postgres://user:pass@host:5432/maverick`). |
+| `MAVERICK_PG_DSN` | unset | Postgres DSN for the Postgres world model (e.g. `postgres://user@host:5432/maverick`; prefer `PGSERVICE`, `~/.pgpass`, peer auth, or a secret manager over embedding passwords). |
 | `MAVERICK_ORPHAN_RECLAIM_SECONDS` | code default | Seconds before orphaned world-model goal locks are reclaimed. |
 | `MAVERICK_BLACKBOARD_MAX_ENTRIES` | `5000` (min 100) | Max entries retained in the shared blackboard. |
 
