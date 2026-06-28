@@ -14,9 +14,9 @@ def test_env_file_created_at_0600(tmp_path: Path, monkeypatch):
     eliminates the race: the file's first ``stat`` after creation must
     already be 0o600.
     """
-    monkeypatch.setattr("maverick_installer.wizard.CONFIG_DIR", tmp_path)
-    monkeypatch.setattr("maverick_installer.wizard.ENV_FILE", tmp_path / ".env")
-    monkeypatch.setattr("maverick_installer.wizard.CONFIG_FILE", tmp_path / "config.toml")
+    monkeypatch.setattr("lightwork_installer.wizard.CONFIG_DIR", tmp_path)
+    monkeypatch.setattr("lightwork_installer.wizard.ENV_FILE", tmp_path / ".env")
+    monkeypatch.setattr("lightwork_installer.wizard.CONFIG_FILE", tmp_path / "config.toml")
 
     # Patch the stat-on-create check by spying on the file inside write_config.
     observed_modes = []
@@ -30,15 +30,15 @@ def test_env_file_created_at_0600(tmp_path: Path, monkeypatch):
             pass
         return fd
 
-    with patch("maverick_installer.wizard.os.open", side_effect=_watching_open):
-        from maverick_installer.wizard import write_config
+    with patch("lightwork_installer.wizard.os.open", side_effect=_watching_open):
+        from lightwork_installer.wizard import write_config
         write_config(
             providers=["anthropic"],
             role_models={},
             channels={},
             safety={"profile": "balanced"},
             budget={"max_dollars": 5.0, "max_wall_seconds": 600, "max_tool_calls": 30},
-            sandbox={"backend": "local", "workdir": "~/maverick-workspace"},
+            sandbox={"backend": "local", "workdir": "~/lightwork-workspace"},
             keys={"ANTHROPIC_API_KEY": "sk-ant-test"},
             capabilities={},
         )
@@ -57,23 +57,23 @@ def test_env_file_created_at_0600(tmp_path: Path, monkeypatch):
 
 def test_env_file_overwrites_existing(tmp_path: Path, monkeypatch):
     """Re-running the wizard with the same keys must overwrite cleanly at 0o600."""
-    monkeypatch.setattr("maverick_installer.wizard.CONFIG_DIR", tmp_path)
-    monkeypatch.setattr("maverick_installer.wizard.ENV_FILE", tmp_path / ".env")
-    monkeypatch.setattr("maverick_installer.wizard.CONFIG_FILE", tmp_path / "config.toml")
+    monkeypatch.setattr("lightwork_installer.wizard.CONFIG_DIR", tmp_path)
+    monkeypatch.setattr("lightwork_installer.wizard.ENV_FILE", tmp_path / ".env")
+    monkeypatch.setattr("lightwork_installer.wizard.CONFIG_FILE", tmp_path / "config.toml")
 
     # Pre-create env at the wide mode the bug would leave it at.
     env = tmp_path / ".env"
     env.write_text("STALE=1\n")
     os.chmod(env, 0o644)
 
-    from maverick_installer.wizard import write_config
+    from lightwork_installer.wizard import write_config
     write_config(
         providers=["openai"],
         role_models={},
         channels={},
         safety={"profile": "balanced"},
         budget={"max_dollars": 5.0, "max_wall_seconds": 600, "max_tool_calls": 30},
-        sandbox={"backend": "local", "workdir": "~/maverick-workspace"},
+        sandbox={"backend": "local", "workdir": "~/lightwork-workspace"},
         keys={"OPENAI_API_KEY": "sk-new"},
         capabilities={},
     )
@@ -86,9 +86,9 @@ def test_env_file_overwrites_existing(tmp_path: Path, monkeypatch):
 
 def test_existing_env_backup_created_at_0600(tmp_path: Path, monkeypatch):
     """Backups of secret-bearing env files must never be created world-readable."""
-    monkeypatch.setattr("maverick_installer.wizard.CONFIG_DIR", tmp_path)
-    monkeypatch.setattr("maverick_installer.wizard.ENV_FILE", tmp_path / ".env")
-    monkeypatch.setattr("maverick_installer.wizard.CONFIG_FILE", tmp_path / "config.toml")
+    monkeypatch.setattr("lightwork_installer.wizard.CONFIG_DIR", tmp_path)
+    monkeypatch.setattr("lightwork_installer.wizard.ENV_FILE", tmp_path / ".env")
+    monkeypatch.setattr("lightwork_installer.wizard.CONFIG_FILE", tmp_path / "config.toml")
 
     env = tmp_path / ".env"
     env.write_text("ANTHROPIC_API_KEY=sk-old\n")
@@ -106,8 +106,8 @@ def test_existing_env_backup_created_at_0600(tmp_path: Path, monkeypatch):
                 pass
         return fd
 
-    with patch("maverick_installer.wizard.os.open", side_effect=_watching_open):
-        from maverick_installer.wizard import write_config
+    with patch("lightwork_installer.wizard.os.open", side_effect=_watching_open):
+        from lightwork_installer.wizard import write_config
 
         write_config(
             providers=["anthropic"],
@@ -115,7 +115,7 @@ def test_existing_env_backup_created_at_0600(tmp_path: Path, monkeypatch):
             channels={},
             safety={"profile": "balanced"},
             budget={"max_dollars": 5.0, "max_wall_seconds": 600, "max_tool_calls": 30},
-            sandbox={"backend": "local", "workdir": "~/maverick-workspace"},
+            sandbox={"backend": "local", "workdir": "~/lightwork-workspace"},
             keys={"ANTHROPIC_API_KEY": "sk-new"},
             capabilities={},
         )

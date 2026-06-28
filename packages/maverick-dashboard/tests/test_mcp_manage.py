@@ -7,17 +7,17 @@ _ORIGIN = {"origin": "http://testserver"}
 
 
 def _client():
-    from maverick_dashboard.app import app
+    from lightwork_dashboard.app import app
     return TestClient(app)
 
 
 def _prep(monkeypatch, tmp_path):
-    from maverick import world_model
+    from lightwork import world_model
     monkeypatch.setattr(world_model, "DEFAULT_DB", tmp_path / "world.db")
     monkeypatch.delenv("MAVERICK_DASHBOARD_TOKEN", raising=False)
-    import maverick.runtime_overrides as ro
+    import lightwork.runtime_overrides as ro
     monkeypatch.setattr(ro, "OVERRIDES_PATH", tmp_path / "runtime-overrides.toml")
-    from maverick_dashboard import app as dash_app
+    from lightwork_dashboard import app as dash_app
     dash_app._world_cache.clear()
 
 
@@ -39,7 +39,7 @@ def test_add_stdio_server_then_listed_removable(monkeypatch, tmp_path):
         "env": "API_BASE=https://example.com",
     })
     assert r.status_code == 303
-    from maverick.runtime_overrides import mcp_overlay
+    from lightwork.runtime_overrides import mcp_overlay
     ov = mcp_overlay()
     assert ov["filesystem"]["command"] == "npx"
     assert ov["filesystem"]["args"] == ["-y", "@modelcontextprotocol/server-filesystem", "/tmp"]
@@ -57,7 +57,7 @@ def test_add_http_server(monkeypatch, tmp_path):
         "headers": "X-Org=acme",
     })
     assert r.status_code == 303
-    from maverick.runtime_overrides import mcp_overlay
+    from lightwork.runtime_overrides import mcp_overlay
     ov = mcp_overlay()
     assert ov["remote"]["url"] == "https://host.example/mcp"
     assert ov["remote"]["headers"]["X-Org"] == "acme"
@@ -71,7 +71,7 @@ def test_remove_server(monkeypatch, tmp_path):
     r = c.post("/mcp/remove", headers=_ORIGIN, follow_redirects=False,
                data={"name": "gone"})
     assert r.status_code == 303
-    from maverick.runtime_overrides import mcp_overlay
+    from lightwork.runtime_overrides import mcp_overlay
     assert "gone" not in mcp_overlay()
 
 

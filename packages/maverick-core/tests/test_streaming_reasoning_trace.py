@@ -1,7 +1,7 @@
 """streaming_reasoning_trace: ordered, redaction-aware reasoning-trace channel."""
 from __future__ import annotations
 
-from maverick.tools.streaming_reasoning_trace import streaming_reasoning_trace
+from lightwork.tools.streaming_reasoning_trace import streaming_reasoning_trace
 
 
 def _fmt(**kw):

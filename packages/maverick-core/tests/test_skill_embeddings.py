@@ -9,13 +9,13 @@ from __future__ import annotations
 from pathlib import Path
 
 import pytest
-from maverick.skill.embeddings import (
+from lightwork.skill.embeddings import (
     _cosine,
     _have_fastembed,
     _skill_to_embed_text,
     relevant_skills_embed,
 )
-from maverick.skills import Skill
+from lightwork.skills import Skill
 
 
 def _mk_skill(name: str, triggers: list[str], body: str = "") -> Skill:
@@ -32,8 +32,8 @@ def test_embedding_cache_is_tenant_scoped(monkeypatch, tmp_path):
     tenant B read/wrote tenant A's cache; since it's keyed by skill name and
     learned skills are tenant-scoped, B could be served A's vector. Mirrors the
     isolation stats.py already has. Regression for the import-time freeze."""
-    from maverick.paths import reset_tenant, set_tenant
-    from maverick.skill.embeddings import (
+    from lightwork.paths import reset_tenant, set_tenant
+    from lightwork.skill.embeddings import (
         CachedEmbedding,
         _cache_path,
         _load_cache,

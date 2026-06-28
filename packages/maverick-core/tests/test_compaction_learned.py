@@ -6,8 +6,8 @@ import os
 import stat
 
 import pytest
-from maverick.compaction import compact_messages
-from maverick.compaction.learned import (
+from lightwork.compaction import compact_messages
+from lightwork.compaction.learned import (
     TEMPLATES,
     LearnedSummarizer,
     OutcomeLedger,
@@ -235,7 +235,7 @@ def test_record_is_concurrency_safe(tmp_path):
     flock-guarded (the discipline the docstring already promised)."""
     import threading
 
-    from maverick.compaction.learned import OutcomeLedger
+    from lightwork.compaction.learned import OutcomeLedger
 
     p = tmp_path / "ledger.json"
     n, per = 8, 20

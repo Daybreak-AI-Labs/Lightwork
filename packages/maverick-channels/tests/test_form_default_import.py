@@ -12,8 +12,8 @@ import pytest
 
 
 @pytest.mark.parametrize("modname,channel_cls,extra", [
-    ("maverick_channels.whatsapp", "WhatsAppChannel", "whatsapp"),
-    ("maverick_channels.sms", "SMSChannel", "sms"),
+    ("lightwork_channels.whatsapp", "WhatsAppChannel", "whatsapp"),
+    ("lightwork_channels.sms", "SMSChannel", "sms"),
 ])
 def test_import_does_not_crash_and_construct_is_actionable(modname, channel_cls, extra):
     import importlib

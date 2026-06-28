@@ -3,7 +3,7 @@ from __future__ import annotations
 
 import json
 
-from maverick import fastjson
+from lightwork import fastjson
 
 
 def test_roundtrip_basic():
@@ -50,7 +50,7 @@ def test_tool_cache_snapshot_roundtrips_via_fastjson(tmp_path, monkeypatch):
     monkeypatch.setenv("MAVERICK_HOME", str(tmp_path / "home"))
     monkeypatch.setenv("MAVERICK_TOOL_CACHE", "1")
     monkeypatch.setenv("MAVERICK_TOOL_CACHE_SNAPSHOT", "1")
-    from maverick.cache import tool as tool_cache
+    from lightwork.cache import tool as tool_cache
 
     class _Tool:
         name = "toolX"

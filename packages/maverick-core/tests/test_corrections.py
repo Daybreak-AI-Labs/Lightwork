@@ -3,7 +3,7 @@ from __future__ import annotations
 
 from types import SimpleNamespace
 
-from maverick import corrections, reflexion
+from lightwork import corrections, reflexion
 
 
 def _turn(role: str, content: str, ts: float = 0.0):

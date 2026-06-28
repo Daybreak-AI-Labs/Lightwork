@@ -7,8 +7,8 @@ so a run on the newest model silently billed at the Sonnet fallback rate
 """
 from __future__ import annotations
 
-from maverick.budget import Budget
-from maverick.llm import MODEL_OPUS, MODEL_OPUS_FAST, MODEL_PRICES
+from lightwork.budget import Budget
+from lightwork.llm import MODEL_OPUS, MODEL_OPUS_FAST, MODEL_PRICES
 
 
 def test_default_opus_is_4_8():
@@ -56,7 +56,7 @@ def test_gemini_35_priced_not_fallback():
 # threshold and the rejected `enabled` thinking mode. ---
 
 def test_opus_48_uses_adaptive_thinking_not_enabled():
-    from maverick.providers.anthropic_provider import AnthropicClient
+    from lightwork.providers.anthropic_provider import AnthropicClient
     client = AnthropicClient.__new__(AnthropicClient)
     for mid in ("claude-opus-4-8", "claude-opus-4-8-fast"):
         kwargs = client._build_request(
@@ -74,7 +74,7 @@ def test_opus_48_uses_adaptive_thinking_not_enabled():
 
 
 def test_opus_48_defaults_to_adaptive_without_budget():
-    from maverick.providers.anthropic_provider import AnthropicClient
+    from lightwork.providers.anthropic_provider import AnthropicClient
     client = AnthropicClient.__new__(AnthropicClient)
     kwargs = client._build_request(
         system="sys",
@@ -88,7 +88,7 @@ def test_opus_48_defaults_to_adaptive_without_budget():
 
 
 def test_opus_48_uses_4x_min_cache_threshold():
-    from maverick.providers.anthropic_provider import (
+    from lightwork.providers.anthropic_provider import (
         _MIN_CACHE_TOKENS_4X,
         _min_cache_tokens,
     )

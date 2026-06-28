@@ -8,9 +8,9 @@ are denied), and carry the cardinal "never move money without a human" guardrail
 from __future__ import annotations
 
 import pytest
-from maverick.domain import builtin_dir, load_domains
-from maverick.finance.sod_linter import lint_roster
-from maverick.safety.tool_risk import tools_exceeding
+from lightwork.domain import builtin_dir, load_domains
+from lightwork.finance.sod_linter import lint_roster
+from lightwork.safety.tool_risk import tools_exceeding
 
 _EXPECTED = {
     # Tower 1 — Controllership

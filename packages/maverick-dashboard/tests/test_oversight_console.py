@@ -14,7 +14,7 @@ from fastapi.testclient import TestClient
 
 
 def _client():
-    from maverick_dashboard.app import app
+    from lightwork_dashboard.app import app
     return TestClient(app)
 
 
@@ -23,11 +23,11 @@ def _isolate(monkeypatch, tmp_path):
     monkeypatch.setenv("MAVERICK_HOME", str(tmp_path))
     monkeypatch.delenv("MAVERICK_DASHBOARD_TOKEN", raising=False)
     monkeypatch.delenv("MAVERICK_TENANT", raising=False)
-    from maverick import world_model
+    from lightwork import world_model
     monkeypatch.setattr(world_model, "DEFAULT_DB", tmp_path / "world.db")
     # Use a fresh audit writer pinned at the isolated HOME so record() and the
     # page read the same log.
-    import maverick.audit.writer as aw
+    import lightwork.audit.writer as aw
     aw._default = None
 
 
@@ -43,7 +43,7 @@ def test_oversight_page_renders_and_nav_link(monkeypatch, tmp_path):
 
 def test_unifies_every_guardrail(monkeypatch, tmp_path):
     _isolate(monkeypatch, tmp_path)
-    from maverick.audit import record
+    from lightwork.audit import record
     record("governance_denied", agent="acme.coder", tool="shell",
            rule="require_human_actions", reason="'shell' requires human approval")
     record("shield_block", agent="acme.coder", stage="tool", reason="prompt injection")
@@ -64,7 +64,7 @@ def test_unifies_every_guardrail(monkeypatch, tmp_path):
 
 def test_consent_approve_excluded_deny_counted(monkeypatch, tmp_path):
     _isolate(monkeypatch, tmp_path)
-    from maverick.audit import record
+    from lightwork.audit import record
     record("consent_result", agent="a", decision="approve", action="deploy")
     record("consent_result", agent="a", decision="deny", action="rm -rf /")
     text = _client().get("/oversight").text
@@ -75,7 +75,7 @@ def test_consent_approve_excluded_deny_counted(monkeypatch, tmp_path):
 
 def test_non_intervention_events_excluded(monkeypatch, tmp_path):
     _isolate(monkeypatch, tmp_path)
-    from maverick.audit import record
+    from lightwork.audit import record
     record("tool_call", agent="a", name="read_file", input_summary="x")
     text = _client().get("/oversight").text
     # Ordinary activity isn't an intervention -> empty state.
@@ -84,7 +84,7 @@ def test_non_intervention_events_excluded(monkeypatch, tmp_path):
 
 def test_halt_state_reflected(monkeypatch, tmp_path):
     _isolate(monkeypatch, tmp_path)
-    import maverick.killswitch as ks
+    import lightwork.killswitch as ks
     ks.clear()  # no in-process latch
     # The HALT file stat is cached for 1s; reset the cache marker before each
     # read so it re-stats the isolated file. (base.html's halt-pill JS always
@@ -101,7 +101,7 @@ def test_halt_state_reflected(monkeypatch, tmp_path):
 
 def test_pending_holds_are_actionable_inline(monkeypatch, tmp_path):
     _isolate(monkeypatch, tmp_path)
-    from maverick.world_model import WorldModel
+    from lightwork.world_model import WorldModel
     w = WorldModel(tmp_path / "world.db")
     w.create_approval(
         "shell", risk="high", detail="'shell' requires human approval",
@@ -121,7 +121,7 @@ def test_pending_holds_are_actionable_inline(monkeypatch, tmp_path):
 
 def test_oversight_approval_sources_use_trusted_provenance(monkeypatch, tmp_path):
     _isolate(monkeypatch, tmp_path)
-    from maverick.world_model import WorldModel
+    from lightwork.world_model import WorldModel
 
     w = WorldModel(tmp_path / "world.db")
     w.create_approval(
@@ -149,8 +149,8 @@ def test_no_pending_holds_shows_empty_state(monkeypatch, tmp_path):
 
 def _enable_oidc_principal_map(monkeypatch):
     """Map ``Bearer <name>`` to the dashboard principal ``user:<name>``."""
-    import maverick_dashboard.auth as auth
-    from maverick.oidc import VerifiedPrincipal
+    import lightwork_dashboard.auth as auth
+    from lightwork.oidc import VerifiedPrincipal
 
     monkeypatch.setattr(auth, "oidc_enabled", lambda: True)
 
@@ -172,8 +172,8 @@ def test_oversight_audit_events_are_owner_scoped(monkeypatch, tmp_path):
     _enable_oidc_principal_map(monkeypatch)
     monkeypatch.delenv("MAVERICK_DASHBOARD_ADMINS", raising=False)
 
-    from maverick.audit import record
-    from maverick.world_model import WorldModel
+    from lightwork.audit import record
+    from lightwork.world_model import WorldModel
 
     w = WorldModel(tmp_path / "world.db")
     alice_goal = w.create_goal("alice active", owner="user:alice")
@@ -203,8 +203,8 @@ def test_oversight_admin_still_sees_all_audit_events(monkeypatch, tmp_path):
     _enable_oidc_principal_map(monkeypatch)
     monkeypatch.setenv("MAVERICK_DASHBOARD_ADMINS", "user:root")
 
-    from maverick.audit import record
-    from maverick.world_model import WorldModel
+    from lightwork.audit import record
+    from lightwork.world_model import WorldModel
 
     w = WorldModel(tmp_path / "world.db")
     alice_goal = w.create_goal("alice active", owner="user:alice")
@@ -229,7 +229,7 @@ def test_day_traversal_is_neutralized(monkeypatch, tmp_path):
 
 def test_active_endpoint_lists_running_agents(monkeypatch, tmp_path):
     _isolate(monkeypatch, tmp_path)
-    from maverick.world_model import WorldModel
+    from lightwork.world_model import WorldModel
     w = WorldModel(tmp_path / "world.db")
     gid = w.create_goal("ship the thing", "do it")
     w.set_goal_status(gid, "active")
@@ -251,7 +251,7 @@ def test_active_endpoint_lists_running_agents(monkeypatch, tmp_path):
 
 def test_active_endpoint_excludes_finished_goals(monkeypatch, tmp_path):
     _isolate(monkeypatch, tmp_path)
-    from maverick.world_model import WorldModel
+    from lightwork.world_model import WorldModel
     w = WorldModel(tmp_path / "world.db")
     done = w.create_goal("old", "x")
     w.set_goal_status(done, "done")
@@ -283,7 +283,7 @@ def _write_event_on_day(audit_dir, day, kind, **payload):
 
 def test_multiday_range_spans_day_files(monkeypatch, tmp_path):
     _isolate(monkeypatch, tmp_path)
-    from maverick.paths import data_dir
+    from lightwork.paths import data_dir
     audit_dir = data_dir("audit")
     _write_event_on_day(audit_dir, "2026-01-10", "governance_denied",
                         reason="jan-hold", rule="r")

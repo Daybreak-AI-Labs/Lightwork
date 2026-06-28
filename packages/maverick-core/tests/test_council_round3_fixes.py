@@ -11,8 +11,8 @@ def _boom(args):
 # --- ops HIGH: ToolRegistry must emit the tool_calls metric (was never wired) ---
 
 def test_tool_registry_emits_tool_metric(monkeypatch):
-    import maverick.observability as obs
-    from maverick.tools import Tool, ToolRegistry
+    import lightwork.observability as obs
+    from lightwork.tools import Tool, ToolRegistry
 
     calls: list = []
     monkeypatch.setattr(
@@ -38,10 +38,10 @@ def test_erase_emits_non_subject_derived_audit_event(tmp_path, monkeypatch):
     import os
 
     os.environ.pop("MAVERICK_DB", None)
-    import maverick.audit as audit_mod
+    import lightwork.audit as audit_mod
     from click.testing import CliRunner
-    from maverick import cli as cli_mod
-    from maverick.world_model import WorldModel
+    from lightwork import cli as cli_mod
+    from lightwork.world_model import WorldModel
 
     captured: list = []
     monkeypatch.setattr(
@@ -85,14 +85,14 @@ def test_erase_cascades_subgoals_without_fk_abort(tmp_path, monkeypatch):
     import os
 
     os.environ.pop("MAVERICK_DB", None)
-    import maverick.audit as audit_mod
+    import lightwork.audit as audit_mod
     from click.testing import CliRunner
-    from maverick import cli as cli_mod
-    from maverick.world_model import WorldModel
+    from lightwork import cli as cli_mod
+    from lightwork.world_model import WorldModel
 
     monkeypatch.setattr(audit_mod, "record", lambda kind, **payload: None)
     # scrub_user touches the real ~/.maverick/audit dir; neutralize for hermeticity.
-    monkeypatch.setattr("maverick.audit.scrub_user", lambda *a, **k: (0, 0))
+    monkeypatch.setattr("lightwork.audit.scrub_user", lambda *a, **k: (0, 0))
 
     db = tmp_path / "world.db"
     wm = WorldModel(db)

@@ -2,13 +2,13 @@
 engine curated into one agent's toolset."""
 from __future__ import annotations
 
-from maverick.assessment import (
+from lightwork.assessment import (
     PRIVACY_ANALYST_PERSONA,
     AssessmentSession,
     _privacy_analyst_tools,
     build_privacy_analyst_agent,
 )
-from maverick.tools import Tool, ToolRegistry
+from lightwork.tools import Tool, ToolRegistry
 
 
 async def _noop(args):

@@ -4,8 +4,8 @@ deconfound by domain.
 """
 from __future__ import annotations
 
-from maverick import data_engine as de
-from maverick.trajectory_store import TrajectoryStep
+from lightwork import data_engine as de
+from lightwork.trajectory_store import TrajectoryStep
 
 
 def _ep(eid, domain, tool, outcome):
@@ -57,7 +57,7 @@ def test_empty_corpus():
 
 def test_enabled_off_by_default(monkeypatch):
     monkeypatch.delenv("MAVERICK_DATA_ENGINE", raising=False)
-    monkeypatch.setattr("maverick.config.get_data_engine", lambda: {"enable": False})
+    monkeypatch.setattr("lightwork.config.get_data_engine", lambda: {"enable": False})
     assert de.enabled() is False
     monkeypatch.setenv("MAVERICK_DATA_ENGINE", "1")
     assert de.enabled() is True

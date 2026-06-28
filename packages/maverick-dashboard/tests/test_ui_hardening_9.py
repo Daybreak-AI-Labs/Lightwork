@@ -7,22 +7,22 @@ from fastapi.testclient import TestClient
 
 
 def _client():
-    from maverick_dashboard.app import app
+    from lightwork_dashboard.app import app
     return TestClient(app)
 
 
 def _setup_all(monkeypatch, tmp_path):
     """Full setup + the list of every HTML route (one goal exists)."""
-    from maverick import world_model
+    from lightwork import world_model
     db = tmp_path / "world.db"
     monkeypatch.setattr(world_model, "DEFAULT_DB", db)
     monkeypatch.setattr(
-        "maverick.audit.writer.DEFAULT_AUDIT_DIR", tmp_path / "audit",
+        "lightwork.audit.writer.DEFAULT_AUDIT_DIR", tmp_path / "audit",
     )
     monkeypatch.delenv("MAVERICK_DASHBOARD_TOKEN", raising=False)
-    import maverick.audit.writer as aw
+    import lightwork.audit.writer as aw
     aw._default = None
-    from maverick_dashboard import app as dash_app
+    from lightwork_dashboard import app as dash_app
     dash_app._world_cache.clear()
     gid = world_model.WorldModel(db).create_goal("g", "d")
     paths = [
@@ -47,10 +47,10 @@ def test_no_duplicate_element_ids(monkeypatch, tmp_path):
 
 def test_overview_goal_input_has_accessible_name(monkeypatch, tmp_path):
     # The first-run goal form only renders on an empty world (no goals).
-    from maverick import world_model
+    from lightwork import world_model
     monkeypatch.setattr(world_model, "DEFAULT_DB", tmp_path / "world.db")
     monkeypatch.delenv("MAVERICK_DASHBOARD_TOKEN", raising=False)
-    from maverick_dashboard import app as dash_app
+    from lightwork_dashboard import app as dash_app
     dash_app._world_cache.clear()
     r = _client().get("/")
     assert 'aria-label="Describe a goal for Lightwork to run"' in r.text

@@ -1,7 +1,7 @@
 """Per-goal file-write quota (ROADMAP Q4 2026, Safety)."""
 from __future__ import annotations
 
-from maverick import file_quota
+from lightwork import file_quota
 
 
 def test_disabled_by_default_allows_everything():
@@ -43,8 +43,8 @@ def test_goals_are_independent():
 
 def test_write_file_tool_enforces_when_configured(monkeypatch, tmp_path):
     # Wire-in: with a tiny configured cap, write_file refuses the over-cap write.
-    from maverick.sandbox import build_sandbox
-    from maverick.tools.fs import write_file
+    from lightwork.sandbox import build_sandbox
+    from lightwork.tools.fs import write_file
 
     file_quota.reset("default")
     monkeypatch.setattr(file_quota, "_limit_bytes", lambda: 50)
@@ -57,8 +57,8 @@ def test_write_file_tool_enforces_when_configured(monkeypatch, tmp_path):
 
 
 def test_base_registry_write_file_quota_is_scoped_by_goal(monkeypatch, tmp_path):
-    from maverick.sandbox import build_sandbox
-    from maverick.tools import base_registry
+    from lightwork.sandbox import build_sandbox
+    from lightwork.tools import base_registry
 
     class DummyWorld:
         def ask(self, question, goal_id=None):
@@ -88,8 +88,8 @@ def test_base_registry_write_file_quota_is_scoped_by_goal(monkeypatch, tmp_path)
 
 
 def test_write_file_tool_unaffected_when_off(monkeypatch, tmp_path):
-    from maverick.sandbox import build_sandbox
-    from maverick.tools.fs import write_file
+    from lightwork.sandbox import build_sandbox
+    from lightwork.tools.fs import write_file
 
     monkeypatch.setattr(file_quota, "_limit_bytes", lambda: 0)
     tool = write_file(build_sandbox(workdir=str(tmp_path)))

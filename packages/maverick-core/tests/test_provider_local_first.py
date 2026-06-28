@@ -1,7 +1,7 @@
 """Local-first model routing (ROADMAP 2028 H2)."""
 from __future__ import annotations
 
-from maverick import provider_local_first as lf
+from lightwork import provider_local_first as lf
 
 
 def test_is_local():

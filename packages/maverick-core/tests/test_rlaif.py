@@ -11,7 +11,7 @@ import builtins
 import json
 
 import pytest
-from maverick.training import rlaif
+from lightwork.training import rlaif
 
 
 def _row(rid, family, reward, conf=1.0, messages=None):
@@ -217,7 +217,7 @@ def test_train_returns_1_when_torch_missing(monkeypatch, capsys):
     )
     assert rc == 1
     err = capsys.readouterr().err
-    assert "maverick-agent[training]" in err
+    assert "lightwork-agent[training]" in err
     assert "torch" in err
 
 
@@ -273,7 +273,7 @@ def test_main_reward_model_cross_check(tmp_path, capsys, monkeypatch):
     # line prints; train still no-ops without torch.
     import builtins
 
-    from maverick.training.reward_model import PreferenceRewardModel
+    from lightwork.training.reward_model import PreferenceRewardModel
     p = tmp_path / "traj.jsonl"
     with p.open("w", encoding="utf-8") as fh:
         fh.write(json.dumps(_row("hi", "swe", 1.0)) + "\n")

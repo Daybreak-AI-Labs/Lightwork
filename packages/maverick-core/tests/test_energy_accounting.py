@@ -1,7 +1,7 @@
 """energy_accounting: energy / CO2 accounting for inference."""
 from __future__ import annotations
 
-from maverick.tools.energy_accounting import energy_accounting
+from lightwork.tools.energy_accounting import energy_accounting
 
 
 def _est(**kw):

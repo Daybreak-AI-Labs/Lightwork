@@ -3,7 +3,7 @@ from __future__ import annotations
 
 import json
 
-from maverick.tools.otel_semconv import otel_semconv
+from lightwork.tools.otel_semconv import otel_semconv
 
 
 def _map(span):

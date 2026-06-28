@@ -16,8 +16,8 @@ from __future__ import annotations
 import asyncio
 
 import pytest
-from maverick import config, verifier
-from maverick.verifier import VerifierVerdict
+from lightwork import config, verifier
+from lightwork.verifier import VerifierVerdict
 
 
 @pytest.fixture

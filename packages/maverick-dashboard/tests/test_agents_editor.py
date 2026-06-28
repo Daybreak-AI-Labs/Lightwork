@@ -8,13 +8,13 @@ from __future__ import annotations
 
 import pytest
 from fastapi.testclient import TestClient
-from maverick_dashboard.app import app
+from lightwork_dashboard.app import app
 
 client = TestClient(app, headers={"Origin": "http://testserver"})
 
 
 def _clean_builtin_name() -> str:
-    from maverick.domain import builtin_dir, lint_profile, load_domains
+    from lightwork.domain import builtin_dir, lint_profile, load_domains
     for name, prof in sorted(load_domains(builtin_dir()).items()):
         if not lint_profile(prof)[0]:
             return name
@@ -23,7 +23,7 @@ def _clean_builtin_name() -> str:
 
 @pytest.fixture(autouse=True)
 def _isolated(tmp_path, monkeypatch):
-    from maverick import world_model
+    from lightwork import world_model
     monkeypatch.setattr(world_model, "DEFAULT_DB", tmp_path / "world.db")
     monkeypatch.setenv("MAVERICK_DOMAINS_DIR", str(tmp_path / "domains"))
     yield
@@ -115,7 +115,7 @@ class TestOverrideLifecycle:
 
 class TestPackEditingGate:
     def test_mutations_403_when_disabled(self, monkeypatch):
-        import maverick.config as cfg
+        import lightwork.config as cfg
         monkeypatch.setattr(cfg, "get_features",
                             lambda: {"skills": True, "world_model": True,
                                      "streaming": True, "pack_editing": False})
@@ -128,7 +128,7 @@ class TestPackEditingGate:
 
 class TestPackEditingAuthorization:
     def test_authenticated_non_admin_cannot_mutate_overrides(self, monkeypatch):
-        import maverick_dashboard.api as api
+        import lightwork_dashboard.api as api
         monkeypatch.setattr(api, "caller_principal", lambda request: "user:alice")
         monkeypatch.setattr(api, "is_dashboard_admin", lambda principal: False)
         name = _clean_builtin_name()
@@ -139,7 +139,7 @@ class TestPackEditingAuthorization:
         assert client.get(f"/api/v1/agents/{name}").status_code == 200
 
     def test_dashboard_admin_can_mutate_overrides(self, monkeypatch):
-        import maverick_dashboard.api as api
+        import lightwork_dashboard.api as api
         monkeypatch.setattr(api, "caller_principal", lambda request: "user:root")
         monkeypatch.setattr(api, "is_dashboard_admin", lambda principal: True)
         name = _clean_builtin_name()
@@ -152,7 +152,7 @@ class TestPackEditingAuthorization:
 
 
 def _pack_with_denied_tool_and_risk_below_high() -> tuple[str, str]:
-    from maverick.domain import builtin_dir, lint_profile, load_domains
+    from lightwork.domain import builtin_dir, lint_profile, load_domains
     for name, prof in sorted(load_domains(builtin_dir()).items()):
         if not lint_profile(prof)[0] and prof.deny_tools and prof.max_risk != "high":
             return name, prof.deny_tools[0]

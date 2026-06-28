@@ -1,7 +1,7 @@
 """smart_goal_completion: pure-lexical goal completion from history."""
 from __future__ import annotations
 
-from maverick.tools.smart_goal_completion import smart_goal_completion
+from lightwork.tools.smart_goal_completion import smart_goal_completion
 
 
 def _suggest(**kw):

@@ -1,0 +1,563 @@
+"""Budget tracking. Long-horizon agents need hard caps.
+
+v0.2 cost-correctness fix:
+  - record_tokens() takes the actual model id (default falls back to
+    Sonnet rate for back-compat). Before this, an Opus orchestrator
+    call was billed at Sonnet rate, so max_dollars=5 was letting
+    ~$25 of real spend through.
+  - Cache tokens are priced correctly. Anthropic charges 0.1x for
+    cache reads and 1.25x for cache writes. The provider used to
+    collapse everything into ``input_tokens`` at full price.
+"""
+from __future__ import annotations
+
+import logging
+import math
+import os
+import threading
+import time
+from dataclasses import dataclass, field
+
+log = logging.getLogger(__name__)
+
+
+class BudgetExceeded(Exception):
+    pass
+
+
+class UnpricedModelError(BudgetExceeded):
+    """Raised when an unpriced model is billed under strict (billing-grade)
+    pricing. Subclasses ``BudgetExceeded`` so existing ``except BudgetExceeded``
+    handlers still stop the run, while callers that care can catch it by type."""
+
+
+# Fallback price (Sonnet 4.6 list, no cache discount) in $/Mtok.
+# Used only when the model id isn't in lightwork.llm.MODEL_PRICES.
+_FALLBACK_PRICE_IN = 3.0
+_FALLBACK_PRICE_OUT = 15.0
+
+# Model ids already warned about (estimate-priced); warn once each, not per call.
+_UNPRICED_WARNED: set[str] = set()
+_TRUTHY = {"1", "true", "yes", "on"}
+
+
+def _billing_strict() -> bool:
+    """Whether an unverified model price should fail closed (billing-grade).
+
+    Off by default: an unknown model bills at the documented fallback estimate
+    and warns once. Enabled via ``MAVERICK_BILLING_STRICT`` (truthy) or
+    ``[budget] strict_pricing = true``, an unpriced model raises
+    :class:`UnpricedModelError` instead of silently accruing estimated (and
+    possibly wrong) spend — the right default when the meter feeds a customer
+    invoice or chargeback rather than a soft internal cap.
+    """
+    if os.environ.get("MAVERICK_BILLING_STRICT", "").strip().lower() in _TRUTHY:
+        return True
+    try:
+        from .config import get_budget_overrides
+        return bool((get_budget_overrides() or {}).get("strict_pricing", False))
+    except Exception:  # pragma: no cover -- config never blocks accounting
+        return False
+
+
+def _coerce_count(v: object) -> int:
+    """Coerce a usage count to a non-negative int, failing closed on bad data.
+
+    Providers occasionally return ``None`` in ``usage`` on streaming refusals;
+    that remains a zero count for backwards-compatible null-safety. Non-finite,
+    unparseable, or negative counts are invalid accounting data. Raise
+    ``BudgetExceeded`` so the run stops instead of silently recording a paid
+    call as $0 and bypassing later budget checks.
+    """
+    if v is None:
+        return 0
+    try:
+        if isinstance(v, float) and not math.isfinite(v):
+            raise ValueError("non-finite")
+        n = int(v or 0)
+    except (TypeError, ValueError, OverflowError) as exc:
+        raise BudgetExceeded(f"invalid token usage count: {v!r}") from exc
+    if n < 0:
+        raise BudgetExceeded(f"invalid token usage count: negative value {n}")
+    return n
+
+# Anthropic cache multipliers (over the list input price).
+# Two TTLs: 5m default (1.25x write surcharge) and 1h (2.0x write surcharge).
+# Wave 12: prior code collapsed all writes to 1.25x; long-TTL writes were
+# under-billed by ~40%.
+_CACHE_READ_MULT = 0.1     # Anthropic: 90% discount on cache reads (both TTLs)
+_CACHE_WRITE_MULT_5M = 1.25
+_CACHE_WRITE_MULT_1H = 2.0
+
+# OpenAI / o-series / gpt-5 automatic prompt cache discounts cache reads ~50%
+# (0.5x), NOT 90% like Anthropic. Billing those reads at 0.1x under-counted
+# cached-input cost ~5x for every non-Anthropic provider with cache hits.
+# Callers pass the provider-appropriate multiplier; default stays Anthropic's.
+CACHE_READ_MULT_OPENAI = 0.5
+
+
+def _cache_write_mult_from_ttl(ttl: str | None) -> float:
+    """Map Anthropic cache TTL string to the write surcharge multiplier.
+
+    Wave 12 hardening: strip + lowercase before matching so trailing
+    whitespace ("1h ") or case variants ("1H") don't silently downgrade
+    to the 5m rate. Also: anything >= 5m duration is billed at 2.0x to
+    match Anthropic's published surcharge tiers (the SDK accepts more
+    TTL strings than the original 3-value whitelist).
+    """
+    if not ttl:
+        return _CACHE_WRITE_MULT_5M
+    norm = ttl.strip().lower()
+    # Known 1h-tier aliases.
+    if norm in ("1h", "60m", "3600s", "1hour", "1 hour"):
+        return _CACHE_WRITE_MULT_1H
+    # Parse duration suffixes — anything > 5m bills at 1h rate.
+    try:
+        if norm.endswith("h"):
+            return _CACHE_WRITE_MULT_1H if float(norm[:-1]) >= 1 else _CACHE_WRITE_MULT_5M
+        if norm.endswith("m"):
+            return _CACHE_WRITE_MULT_1H if float(norm[:-1]) > 5 else _CACHE_WRITE_MULT_5M
+        if norm.endswith("s"):
+            return _CACHE_WRITE_MULT_1H if float(norm[:-1]) > 300 else _CACHE_WRITE_MULT_5M
+    except ValueError:
+        pass
+    return _CACHE_WRITE_MULT_5M
+
+
+def _lookup_price(model: str | None) -> tuple[float, float]:
+    """Return (in_per_mtok, out_per_mtok) for a model id. Falls back to Sonnet."""
+    if not model:
+        return _FALLBACK_PRICE_IN, _FALLBACK_PRICE_OUT
+    try:
+        from .llm import MODEL_PRICES
+    except ImportError:
+        return _FALLBACK_PRICE_IN, _FALLBACK_PRICE_OUT
+    if model in MODEL_PRICES:
+        return MODEL_PRICES[model]
+    # Strip a "provider:" prefix (e.g. "anthropic:claude-opus-4-7").
+    bare = model.split(":", 1)[1] if ":" in model else model
+    if bare in MODEL_PRICES:
+        return MODEL_PRICES[bare]
+    # Models the cost-router can SELECT but that aren't in MODEL_PRICES
+    # (gpt-5-nano, gpt-5, gpt-5-pro, grok-4, gemini-2.5-*, the dated Haiku
+    # id) used to silently bill at the Sonnet fallback rate. Consult the
+    # router's own pricing table before giving up.
+    try:
+        from .cost.router import price_for_model
+        priced = price_for_model(model) or price_for_model(bare)
+        if priced is not None:
+            return priced
+    except ImportError:
+        pass
+    # Self-hosted providers have no per-token API bill: an UNKNOWN model id
+    # behind a local prefix is the operator's own server, so price it $0
+    # instead of the Sonnet fallback (which accrued phantom spend for free
+    # local models -- platform-test finding). A known table id behind the
+    # same prefix was matched above and keeps its real rate. The generic
+    # openai_compatible provider is intentionally excluded because it can
+    # point at paid public gateways.
+    if ":" in model and model.split(":", 1)[0] in (
+        "ollama", "vllm", "tgi",
+    ):
+        return 0.0, 0.0
+    # Genuinely unknown model: no verified rate exists. Default behaviour bills
+    # at the documented Sonnet fallback estimate, but that was silent — phantom
+    # mispricing with no signal. Make it observable (warn once per id), and let
+    # billing-grade deployments refuse the estimate outright (strict pricing).
+    if _billing_strict():
+        raise UnpricedModelError(
+            f"no verified price for model {model!r}; refusing to bill at an "
+            f"estimate under strict pricing. Add it to lightwork.llm.MODEL_PRICES, "
+            f"or unset [budget] strict_pricing / MAVERICK_BILLING_STRICT to bill "
+            f"at the fallback estimate."
+        )
+    if model not in _UNPRICED_WARNED:
+        _UNPRICED_WARNED.add(model)
+        log.warning(
+            "no verified price for model %r; billing at the Sonnet fallback "
+            "estimate ($%.2f/$%.2f per Mtok). Add it to MODEL_PRICES for accurate "
+            "accounting, or set [budget] strict_pricing to fail closed instead.",
+            model, _FALLBACK_PRICE_IN, _FALLBACK_PRICE_OUT,
+        )
+    return _FALLBACK_PRICE_IN, _FALLBACK_PRICE_OUT
+
+
+@dataclass
+class Budget:
+    max_input_tokens: int = 1_000_000
+    max_output_tokens: int = 200_000
+    max_dollars: float = 5.0
+    max_wall_seconds: float = 3600.0
+    max_tool_calls: int = 500
+
+    input_tokens: int = 0
+    output_tokens: int = 0
+    cache_read_tokens: int = 0
+    cache_write_tokens: int = 0
+    dollars: float = 0.0
+    tool_calls: int = 0
+    started_at: float = field(default_factory=time.time)
+
+    # Legacy defaults; only used when ``model`` isn't passed.
+    price_in_per_mtok: float = _FALLBACK_PRICE_IN
+    price_out_per_mtok: float = _FALLBACK_PRICE_OUT
+
+    def record_tokens(
+        self,
+        in_tok: int,
+        out_tok: int,
+        *,
+        model: str | None = None,
+        cache_read_tok: int = 0,
+        cache_write_tok: int = 0,
+        cache_write_ttl: str | None = None,
+        cache_read_mult: float | None = None,
+    ) -> None:
+        """Add usage from one LLM call.
+
+        ``in_tok`` is the number of input tokens billed at full rate
+        (i.e. excludes the cache_read_tok and cache_write_tok counts).
+        ``cache_read_tok`` is billed at ``cache_read_mult`` x the input rate
+        (default 0.1x for Anthropic; pass ``CACHE_READ_MULT_OPENAI`` =0.5 for
+        OpenAI/o-series/gpt-5 auto-cache). ``cache_write_tok`` at 1.25x (5m TTL)
+        or 2.0x (1h TTL) — pass ``cache_write_ttl="1h"`` for a 1h breakpoint.
+
+        Wave 12 nullsafety: ``None`` usage counts coerce to zero — Anthropic
+        occasionally returns ``None`` in ``usage`` on streaming refusals; the
+        prior code raised ``TypeError`` and the instance counted as $0 spent.
+        Non-finite, unparseable, or negative counts now fail closed with
+        ``BudgetExceeded`` instead of silently recording a paid call as zero.
+
+        Council finding: cache reads/writes accumulate in separate
+        counters so ``max_input_tokens`` reflects the BILLABLE input
+        budget (non-cached only). Caching is a discount, so heavy
+        caching should let you DO more work within the same input cap.
+        """
+        in_tok = _coerce_count(in_tok)
+        out_tok = _coerce_count(out_tok)
+        cache_read_tok = _coerce_count(cache_read_tok)
+        cache_write_tok = _coerce_count(cache_write_tok)
+        # Wave 12 (council F12b): make the accumulator atomic so a
+        # future parallel best-of-N (or multi-agent swarm where two
+        # agents share a Budget) can't lose updates. `+=` on float is
+        # NOT atomic in CPython under threads — we'd silently undercount.
+        # Wave 12 hardening: check() runs INSIDE the lock too — TOCTOU
+        # otherwise lets two threads both pass check() with state that
+        # the OTHER thread has already invalidated. check() does no I/O
+        # and elapsed() is reentrant-safe, so holding the lock through
+        # it is fine.
+        with self._lock:
+            self.input_tokens += in_tok
+            self.cache_read_tokens += cache_read_tok
+            self.cache_write_tokens += cache_write_tok
+            self.output_tokens += out_tok
+
+            in_rate, out_rate = _lookup_price(model)
+            write_mult = _cache_write_mult_from_ttl(cache_write_ttl)
+            # Provider-aware cache-read discount: Anthropic 0.1x (default),
+            # OpenAI/o-series/gpt-5 auto-cache ~0.5x (caller passes it).
+            read_mult = _CACHE_READ_MULT if cache_read_mult is None else float(cache_read_mult)
+            self.dollars += (in_tok / 1_000_000) * in_rate
+            self.dollars += (cache_read_tok / 1_000_000) * in_rate * read_mult
+            self.dollars += (cache_write_tok / 1_000_000) * in_rate * write_mult
+            self.dollars += (out_tok / 1_000_000) * out_rate
+            self.check()
+
+    def record_tool_call(self) -> None:
+        with self._lock:
+            self.tool_calls += 1
+            self.check()
+
+    def absorb(self, other: Budget) -> None:
+        """Roll another Budget's consumption into this one atomically and
+        enforce caps.
+
+        Used when a child/attempt runs on its own Budget (e.g. best-of-N)
+        and its spend must count against the parent cap. Replaces the raw
+        ``self.dollars += other.dollars`` roll-up, which bypassed both the
+        lock (lost updates under concurrency) and ``check()`` (so the
+        parent silently busted its cap across attempts).
+        """
+        with self._lock:
+            self.input_tokens += other.input_tokens
+            self.output_tokens += other.output_tokens
+            self.cache_read_tokens += other.cache_read_tokens
+            self.cache_write_tokens += other.cache_write_tokens
+            self.dollars += other.dollars
+            self.tool_calls += other.tool_calls
+            self.check()
+
+    def elapsed(self) -> float:
+        # Wave 12: use monotonic so NTP clock-skew doesn't bypass the wall
+        # cap. `started_at` is captured in __post_init__ for monotonic.
+        try:
+            return time.monotonic() - self._started_monotonic
+        except AttributeError:
+            # Legacy path: dataclass instance created before __post_init__
+            # extension landed. Fall back to wall clock.
+            return time.time() - self.started_at
+
+    def remaining_wall(self) -> float:
+        """Seconds left before the wall-clock cap (<= 0 means already over).
+
+        Lets a caller bound an in-flight async await (e.g. an LLM generation)
+        so the wall cap is HARD — interrupting a long generation — rather than
+        only checked at turn boundaries."""
+        return self.max_wall_seconds - self.elapsed()
+
+    def __post_init__(self) -> None:
+        self._started_monotonic = time.monotonic()
+        # Wave 12 (F12b): per-instance lock for atomic counter updates.
+        self._lock = threading.Lock()
+        # Dollar cost of in-flight calls, held by reserve() until release().
+        # Lets concurrent sub-agents sharing one budget account for each
+        # other's pending spend instead of all passing the same check and
+        # then collectively overshooting the cap.
+        self._reserved = 0.0
+        # A non-finite cap (nan/inf) silently disables enforcement: every
+        # `self.dollars > nan` comparison in check() is False, so the cap
+        # never trips. TOML 1.0 has native nan/inf and `--max-dollars inf`
+        # parses, so a cap could arrive non-finite from config or a flag.
+        # Coerce any non-finite dollar/wall/token cap back to a safe default
+        # rather than run uncapped. (Budget caps are not optional.)
+        for _field, _default in (
+            ("max_dollars", 5.0),
+            ("max_wall_seconds", 3600.0),
+            ("max_input_tokens", 1_000_000),
+            ("max_output_tokens", 200_000),
+        ):
+            _v = getattr(self, _field)
+            try:
+                if not math.isfinite(float(_v)):
+                    setattr(self, _field, _default)
+            except (TypeError, ValueError):
+                setattr(self, _field, _default)
+
+    def __getstate__(self):
+        """Wave 12 hardening: threading.Lock is unpicklable. Drop the
+        non-picklable transient fields so a Budget can survive being
+        sent to a multiprocessing worker (and the monotonic clock is
+        per-process — reset on unpickle to avoid bogus elapsed math)."""
+        state = self.__dict__.copy()
+        state.pop("_lock", None)
+        # Preserve consumed wall time across process boundaries.
+        # Monotonic baselines are process-local, so serialize elapsed
+        # duration and reconstruct a compatible baseline on restore.
+        state["_elapsed_at_pickle"] = self.elapsed()
+        state.pop("_started_monotonic", None)
+        return state
+
+    def __setstate__(self, state):
+        self.__dict__.update(state)
+        self._lock = threading.Lock()
+        elapsed = float(self.__dict__.pop("_elapsed_at_pickle", 0.0) or 0.0)
+        self._started_monotonic = time.monotonic() - max(0.0, elapsed)
+
+    def check(self) -> None:
+        if self.input_tokens > self.max_input_tokens:
+            raise BudgetExceeded(f"input tokens {self.input_tokens} > {self.max_input_tokens}")
+        if self.output_tokens > self.max_output_tokens:
+            raise BudgetExceeded(f"output tokens {self.output_tokens} > {self.max_output_tokens}")
+        if self.dollars > self.max_dollars:
+            raise BudgetExceeded(f"${self.dollars:.2f} > ${self.max_dollars:.2f}")
+        if self.tool_calls > self.max_tool_calls:
+            raise BudgetExceeded(f"tool calls {self.tool_calls} > {self.max_tool_calls}")
+        if self.elapsed() > self.max_wall_seconds:
+            raise BudgetExceeded(f"wall time {self.elapsed():.0f}s > {self.max_wall_seconds:.0f}s")
+
+    def check_projected(self, est_cost: float) -> None:
+        """Raise BEFORE a call whose estimated cost would push spend over the
+        dollar cap.
+
+        ``check()`` only fires once ``dollars`` ALREADY exceeds the cap, so a
+        single huge-context call -- or several concurrent sub-agent calls on a
+        shared budget -- can blow far past ``max_dollars`` before the next check
+        trips (observed: a $2.50 cap reached $6.81 with parallel Opus/Sonnet
+        researchers on 200k-token contexts). Gating each dispatch on its
+        projected cost bounds the overshoot to roughly the in-flight set.
+        """
+        if est_cost <= 0:
+            return
+        with self._lock:
+            projected = self.dollars + getattr(self, "_reserved", 0.0) + est_cost
+            if projected > self.max_dollars:
+                raise BudgetExceeded(
+                    f"projected ${projected:.2f} > ${self.max_dollars:.2f} "
+                    f"(spent ${self.dollars:.2f} + est ${est_cost:.2f} for this call)"
+                )
+
+    def reserve(self, est_cost: float) -> float:
+        """Atomically hold ``est_cost`` against the cap for an in-flight call;
+        return the amount held (0.0 if non-positive). Raises ``BudgetExceeded``
+        if spent + already-held + est would exceed the dollar cap -- so N
+        concurrent sub-agent calls on a shared budget can't each pass an
+        individual check and then collectively blow past it (a $2.50 cap hit
+        $6+ with a wide parallel fan-out). Pair every successful reserve() with
+        a release() in a ``finally``.
+        """
+        est = est_cost if (est_cost and est_cost > 0) else 0.0
+        if est == 0.0:
+            return 0.0
+        with self._lock:
+            held = getattr(self, "_reserved", 0.0)
+            projected = self.dollars + held + est
+            if projected > self.max_dollars:
+                raise BudgetExceeded(
+                    f"projected ${projected:.2f} > ${self.max_dollars:.2f} "
+                    f"(spent ${self.dollars:.2f} + in-flight ${held:.2f} "
+                    f"+ est ${est:.2f} for this call)"
+                )
+            self._reserved = held + est
+            return est
+
+    def release(self, held: float) -> None:
+        """Release a hold taken by reserve(). Safe to call with 0.0."""
+        if not held or held <= 0:
+            return
+        with self._lock:
+            self._reserved = max(0.0, getattr(self, "_reserved", 0.0) - held)
+
+    def cache_hit_rate(self) -> float:
+        """Fraction of prompt-input tokens served from cache this run, across
+        ALL providers (Anthropic ephemeral, OpenAI/Gemini auto-cache).
+
+        ``cache_read / (cache_read + billable_input)`` — the consolidated
+        signal there was no single cross-provider view of before (each
+        provider's cache was its own ledger). 0.0 when nothing was sent."""
+        seen = self.input_tokens + self.cache_read_tokens
+        return (self.cache_read_tokens / seen) if seen else 0.0
+
+    def cache_stats(self) -> dict:
+        """Read-only cross-provider cache accounting for this run."""
+        return {
+            "cache_read_tokens": self.cache_read_tokens,
+            "cache_write_tokens": self.cache_write_tokens,
+            "billable_input_tokens": self.input_tokens,
+            "hit_rate": self.cache_hit_rate(),
+        }
+
+    def summary(self) -> str:
+        return (
+            f"tokens in={self.input_tokens} out={self.output_tokens} "
+            f"cache_read={self.cache_read_tokens} hit_rate={self.cache_hit_rate():.0%} "
+            f"$={self.dollars:.3f} tools={self.tool_calls} wall={self.elapsed():.0f}s"
+        )
+
+
+_BUDGET_KEY_TYPES = {
+    "max_input_tokens": int,
+    "max_output_tokens": int,
+    "max_dollars": float,
+    "max_wall_seconds": float,
+    "max_tool_calls": int,
+}
+
+
+def budget_from_config(*, defaults: dict | None = None,
+                       task_class: str | None = None, **overrides) -> Budget:
+    """Build a Budget that honors the ``[budget]`` section of config.toml.
+
+    Precedence, lowest to highest:
+      learned **self-tuning** suggestion for ``task_class`` (opt-in; only when
+      that class has enough history) < ``defaults`` (a caller's own fallback,
+      e.g. the background runner's conservative caps) < the ``[budget]`` config
+      section < explicit ``overrides`` (e.g. a CLI ``--max-dollars`` flag). A
+      ``None`` value in either ``defaults`` or ``overrides`` is treated as
+      "unset", so a caller can pass an optional flag straight through.
+
+    The self-tuning layer is the *lowest* precedence: it only fills
+    ``max_dollars`` when nothing more explicit set it, so an operator's
+    configured cap always wins. Off by default (``[budget] self_tuning``).
+
+    ``config.get_budget_overrides()`` already existed but was never wired,
+    so the ``[budget]`` section had no effect on any run. This is the single
+    funnel that fixes that; malformed values are skipped (keep prior layer)
+    rather than crashing the run.
+    """
+    kwargs: dict = {}
+    # Lowest precedence: a learned per-task-class default cap (opt-in). Seeds
+    # max_dollars so `defaults`/config/overrides below still win if they set it.
+    if task_class:
+        try:
+            from .self_tuning_budget import suggested_max_dollars
+            learned = suggested_max_dollars(task_class)
+            if learned is not None:
+                kwargs["max_dollars"] = float(learned)
+        except Exception:  # pragma: no cover -- self-tuning never blocks a run
+            pass
+    if defaults:
+        for key, val in defaults.items():
+            if key in _BUDGET_KEY_TYPES and val is not None:
+                kwargs[key] = val
+    try:
+        from .config import get_budget_overrides
+        cfg = get_budget_overrides() or {}
+    except Exception:
+        cfg = {}
+    for key, caster in _BUDGET_KEY_TYPES.items():
+        if cfg.get(key) is not None:
+            try:
+                cast = caster(cfg[key])
+                # Reject non-finite caps from config (TOML nan/inf) -- they
+                # would disable the cap rather than set it. Skip -> prior layer.
+                if isinstance(cast, float) and not math.isfinite(cast):
+                    continue
+                kwargs[key] = cast
+            except (TypeError, ValueError):
+                pass  # malformed config value -> fall back to prior layer
+    # Dashboard-set spend cap (settings page; lives in runtime-overrides.toml,
+    # never config.toml). A live UI choice sits above [budget] config, below an
+    # explicit per-call override / env flag.
+    try:
+        from .runtime_overrides import budget_override
+        dash_cap = budget_override()
+        if dash_cap is not None:
+            kwargs["max_dollars"] = dash_cap
+    except Exception:  # pragma: no cover -- overlay never blocks a run
+        pass
+    # Env override for the documented MAVERICK_BUDGET_DOLLARS. The cookbooks
+    # use `MAVERICK_BUDGET_DOLLARS=0.5 maverick start ...` to cap a single
+    # invocation, but nothing read it -- so the cap silently did nothing and
+    # users ran at the default. Sits above [budget] config, below an explicit
+    # CLI override (--max-dollars). Malformed / non-finite -> keep prior layer.
+    env_dollars = os.environ.get("MAVERICK_BUDGET_DOLLARS")
+    if env_dollars:
+        try:
+            cast = float(env_dollars)
+            if math.isfinite(cast):
+                kwargs["max_dollars"] = cast
+        except (TypeError, ValueError):
+            pass
+    for key, val in overrides.items():
+        if val is not None and key in _BUDGET_KEY_TYPES:
+            kwargs[key] = val
+    _clamp_to_tenant_remainder(kwargs)
+    return Budget(**kwargs)
+
+
+def _clamp_to_tenant_remainder(kwargs: dict) -> None:
+    """Clamp ``kwargs['max_dollars']`` to the active tenant's remaining daily
+    allowance (#78), in place.
+
+    Highest precedence: the tenant's aggregate daily ceiling is a billing
+    guarantee, so it overrides even an explicit ``--max-dollars``. Without it the
+    over-quota gate only fires *between* runs, letting one run blow past the
+    tenant cap. No active tenant / no cap -> untouched (the default single-tenant
+    install is unchanged). Never *raises* a cap, only lowers it.
+    """
+    try:
+        from .paths import current_tenant
+        from .tenant.registry import tenant_remaining_today
+        remaining = tenant_remaining_today(current_tenant())
+    except Exception:  # pragma: no cover -- quota coordination never blocks a run
+        return
+    if remaining is None:
+        return
+    # The clamp must only ever LOWER the effective cap. When no max_dollars was
+    # set, the effective cap is Budget's own default (not "unbounded"), so clamp
+    # against that -- otherwise a tenant with a large remainder would silently
+    # RAISE an unset per-run cap above the default, contradicting the invariant.
+    current = kwargs.get("max_dollars")
+    if current is None:
+        current = Budget.__dataclass_fields__["max_dollars"].default
+    kwargs["max_dollars"] = min(float(current), remaining)

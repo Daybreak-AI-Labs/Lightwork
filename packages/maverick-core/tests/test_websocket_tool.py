@@ -4,7 +4,7 @@ from __future__ import annotations
 import asyncio
 
 import pytest
-from maverick.tools.websocket_tool import _check_url, websocket_tool
+from lightwork.tools.websocket_tool import _check_url, websocket_tool
 
 
 def test_check_url_rejects_bad_scheme():

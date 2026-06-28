@@ -5,7 +5,7 @@ from __future__ import annotations
 import json
 
 import pytest
-from maverick_dashboard import subject_directory as sd
+from lightwork_dashboard import subject_directory as sd
 
 
 @pytest.fixture(autouse=True)

@@ -15,7 +15,7 @@ import time
 import pytest
 from fastapi import HTTPException
 from fastapi.testclient import TestClient
-from maverick_dashboard.app import app
+from lightwork_dashboard.app import app
 
 # /webhook/start authenticates via HMAC, not the dashboard bearer / Origin,
 # so no Origin header is needed (it's in _AUTH_EXEMPT).
@@ -46,7 +46,7 @@ def _sign(body: bytes) -> str:
 
 @pytest.fixture(autouse=True)
 def _isolated_world(tmp_path, monkeypatch):
-    from maverick import world_model
+    from lightwork import world_model
     monkeypatch.setattr(world_model, "DEFAULT_DB", tmp_path / "world.db")
     yield
 
@@ -54,7 +54,7 @@ def _isolated_world(tmp_path, monkeypatch):
 @pytest.fixture
 def _no_real_run(monkeypatch):
     """Stub the background runner so the route returns immediately."""
-    import maverick.runner as runner_mod
+    import lightwork.runner as runner_mod
     called = []
 
     def fake_run(goal_id, max_dollars=None, max_wall_seconds=None, max_depth=3):
@@ -80,7 +80,7 @@ def test_valid_signature_creates_goal(_configured, _no_real_run):
     assert _no_real_run[0][0] == goal_id
 
     # The goal row really landed in the world model.
-    from maverick.world_model import DEFAULT_DB, WorldModel
+    from lightwork.world_model import DEFAULT_DB, WorldModel
     g = WorldModel(DEFAULT_DB).get_goal(goal_id)
     assert g is not None
     assert g.title == "ship it"
@@ -150,7 +150,7 @@ def test_no_secret_configured_fails_closed(monkeypatch, _no_real_run):
     monkeypatch.delenv("MAVERICK_WEBHOOK_SECRET", raising=False)
     monkeypatch.setenv("ANTHROPIC_API_KEY", "sk-ant-fake")
     # Make config-based secret resolution return nothing too.
-    import maverick.webhooks as wh
+    import lightwork.webhooks as wh
     monkeypatch.setattr(wh, "_load_config_outbound", lambda: ([], None))
 
     body = json.dumps({"title": "x"}).encode()
@@ -173,8 +173,8 @@ def test_missing_title_rejected(_configured, _no_real_run):
 def test_oversized_content_length_rejected_before_signature_check(
     _configured, _no_real_run, monkeypatch,
 ):
-    import maverick.webhooks as wh
-    from maverick_dashboard import app as app_mod
+    import lightwork.webhooks as wh
+    from lightwork_dashboard import app as app_mod
 
     def fail_verify(*args, **kwargs):
         raise AssertionError("signature verification should not run for oversized bodies")
@@ -194,7 +194,7 @@ def test_oversized_content_length_rejected_before_signature_check(
 
 
 def test_missing_signature_rejected_without_reading_body(_configured, _no_real_run, monkeypatch):
-    from maverick_dashboard import app as app_mod
+    from lightwork_dashboard import app as app_mod
 
     async def fail_read(request):
         raise AssertionError("body should not be read when signature is missing")
@@ -206,7 +206,7 @@ def test_missing_signature_rejected_without_reading_body(_configured, _no_real_r
 
 
 def test_lengthless_webhook_body_stream_is_bounded():
-    from maverick_dashboard import app as app_mod
+    from lightwork_dashboard import app as app_mod
 
     class ChunkedRequest:
         headers = {}
@@ -226,7 +226,7 @@ def test_lengthless_webhook_body_stream_is_bounded():
 def test_oversized_budget_clamped_to_default_ceiling(_configured, _no_real_run):
     # An unclamped webhook budget would defeat the budget cap. The route
     # must clamp to DEFAULT_MAX_DOLLARS, exactly as the REST route does.
-    from maverick.runner import DEFAULT_MAX_DOLLARS
+    from lightwork.runner import DEFAULT_MAX_DOLLARS
     body = json.dumps({"title": "greedy", "budget": 1_000_000}).encode()
     resp = client.post("/webhook/start", content=body, headers=_headers(body))
     assert resp.status_code == 201

@@ -1,9 +1,9 @@
 """Personalized starter templates: profile, scorer, suggest ranking."""
 from __future__ import annotations
 
-from maverick import starter_templates as st
-from maverick.templates import Template
-from maverick.world_model import WorldModel
+from lightwork import starter_templates as st
+from lightwork.templates import Template
+from lightwork.world_model import WorldModel
 
 
 def _world(tmp_path) -> WorldModel:
@@ -74,7 +74,7 @@ def test_suggest_owner_scopes_history(tmp_path):
 
 
 def test_suggest_reads_local_template_catalog(tmp_path, monkeypatch):
-    import maverick.templates as tpl_mod
+    import lightwork.templates as tpl_mod
     user_dir = tmp_path / "templates"
     user_dir.mkdir()
     (user_dir / "trip-plan.md").write_text(

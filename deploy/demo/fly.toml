@@ -10,7 +10,7 @@
 # dashboard token via the Authorization: Bearer header (the dashboard no longer
 # accepts ?token= in the URL, to keep the bearer out of logs/Referer headers).
 
-app = "maverick-demo"
+app = "lightwork-demo"
 primary_region = "iad"
 
 [build]

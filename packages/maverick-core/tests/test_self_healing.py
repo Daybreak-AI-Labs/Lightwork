@@ -1,8 +1,8 @@
 """Self-healing UX: failure classification + concrete remedies."""
 from __future__ import annotations
 
-from maverick.self_healing import diagnose, heal_report, remedies
-from maverick.world_model import WorldModel
+from lightwork.self_healing import diagnose, heal_report, remedies
+from lightwork.world_model import WorldModel
 
 
 def test_diagnose_classes():

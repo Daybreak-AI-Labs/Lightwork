@@ -12,7 +12,7 @@ class _Sandbox:
 
 
 def test_ast_edit_non_string_path(tmp_path):
-    from maverick.tools.ast_edit import ast_edit
+    from lightwork.tools.ast_edit import ast_edit
     fn = ast_edit(_Sandbox(tmp_path)).fn
     for v in (5, 1.5, True, [1, 2, 3], {"a": 1}):
         out = fn({"op": "info", "path": v})
@@ -21,7 +21,7 @@ def test_ast_edit_non_string_path(tmp_path):
 
 
 def test_apply_patch_non_string_patch(tmp_path):
-    from maverick.tools.apply_patch import apply_patch
+    from lightwork.tools.apply_patch import apply_patch
     fn = apply_patch(_Sandbox(tmp_path)).fn
     for v in (5, 1.5, True, [1, 2, 3], {"a": 1}):
         out = fn({"patch": v})
@@ -30,7 +30,7 @@ def test_apply_patch_non_string_patch(tmp_path):
 
 
 def test_cross_repo_deps_non_list_paths(tmp_path):
-    from maverick.tools.cross_repo_deps import cross_repo_deps
+    from lightwork.tools.cross_repo_deps import cross_repo_deps
     fn = cross_repo_deps(_Sandbox(tmp_path)).fn
     for v in (5, 1.5, True):
         out = fn({"op": "graph", "paths": v})
@@ -39,7 +39,7 @@ def test_cross_repo_deps_non_list_paths(tmp_path):
 
 
 def test_model3d_inspect_non_string_path(tmp_path):
-    from maverick.tools.model3d_inspect import model3d_inspect
+    from lightwork.tools.model3d_inspect import model3d_inspect
     fn = model3d_inspect(_Sandbox(tmp_path)).fn
     for v in (5, 1.5, True, [1, 2, 3], {"a": 1}):
         out = fn({"op": "inspect", "path": v})

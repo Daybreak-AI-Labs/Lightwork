@@ -2,9 +2,9 @@
 from __future__ import annotations
 
 import pytest
-from maverick import worker_review
-from maverick.departments import get_department
-from maverick.world_model import WorldModel
+from lightwork import worker_review
+from lightwork.departments import get_department
+from lightwork.world_model import WorldModel
 
 
 @pytest.fixture()

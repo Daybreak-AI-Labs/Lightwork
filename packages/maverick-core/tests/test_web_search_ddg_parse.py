@@ -5,7 +5,7 @@ old unbounded `(.+?) ... .*? ... (.+?)` with DOTALL was quadratic over many
 result anchors."""
 from __future__ import annotations
 
-from maverick.tools.web_search import _parse_ddg_results
+from lightwork.tools.web_search import _parse_ddg_results
 
 _SAMPLE = (
     '<a class="result__a" href="/l/?uddg=https%3A%2F%2Fexample.com%2Fa&rut=x">'

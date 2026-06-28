@@ -13,11 +13,11 @@ propagate its 403.
 """
 from __future__ import annotations
 
-import maverick_dashboard.api as apimod
+import lightwork_dashboard.api as apimod
 import pytest
 from fastapi import HTTPException
 from fastapi.testclient import TestClient
-from maverick_dashboard.app import app
+from lightwork_dashboard.app import app
 
 client = TestClient(app, headers={"Origin": "http://testserver"})
 

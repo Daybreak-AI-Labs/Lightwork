@@ -2,8 +2,8 @@
 and the image-content classifier (pure pixel heuristics)."""
 from __future__ import annotations
 
-from maverick.safety.voice_safety import redact_for_speech, scan_transcript
-from maverick.tools.image_content_classifier import (
+from lightwork.safety.voice_safety import redact_for_speech, scan_transcript
+from lightwork.tools.image_content_classifier import (
     classify_pixels,
     image_content_classifier,
 )
@@ -53,7 +53,7 @@ def test_clean_speech_unchanged():
 
 def test_speak_tool_redacts(monkeypatch, tmp_path):
     """The speak tool runs the voice safety pass before synthesis."""
-    import maverick.tools.voice as voice_mod
+    import lightwork.tools.voice as voice_mod
     spoken = {}
 
     def _fake_tts(text, voice, output_path):
@@ -129,7 +129,7 @@ def test_file_path_is_confined_to_sandbox(tmp_path):
 
 
 def test_registered():
-    from maverick.tools import base_registry
+    from lightwork.tools import base_registry
 
     class _W:
         pass

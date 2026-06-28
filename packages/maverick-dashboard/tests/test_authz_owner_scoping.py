@@ -13,11 +13,11 @@ neutered so POSTs don't spawn a real agent.
 """
 from __future__ import annotations
 
-import maverick_dashboard.auth as auth
+import lightwork_dashboard.auth as auth
 import pytest
 from fastapi.testclient import TestClient
-from maverick.oidc import VerifiedPrincipal
-from maverick_dashboard.app import app
+from lightwork.oidc import VerifiedPrincipal
+from lightwork_dashboard.app import app
 
 client = TestClient(app)
 
@@ -33,13 +33,13 @@ def world(tmp_path, monkeypatch):
     ``world_model.DEFAULT_DB``; pointing it at a unique tmp file gives each
     test an isolated DB that both surfaces agree on.
     """
-    from maverick import world_model
+    from lightwork import world_model
 
     db = tmp_path / "world.db"
     monkeypatch.setattr(world_model, "DEFAULT_DB", db)
     # Drop any cached WorldModel from a prior test so the new DEFAULT_DB binds.
-    from maverick_dashboard import api as api_mod
-    from maverick_dashboard import app as app_mod
+    from lightwork_dashboard import api as api_mod
+    from lightwork_dashboard import app as app_mod
 
     api_mod._world_cache.clear()
     app_mod._world_cache.clear()
@@ -87,7 +87,7 @@ def _as(user: str, *, post: bool = False) -> dict:
 @pytest.fixture
 def no_run(monkeypatch):
     """Neuter the background runner so POST /goals doesn't spawn an agent."""
-    import maverick.runner as runner
+    import lightwork.runner as runner
 
     monkeypatch.setattr(runner, "run_goal_in_thread", lambda *a, **k: None)
     # Generous rate cap so a test that creates several goals never 429s; the
@@ -229,7 +229,7 @@ def test_admin_via_config_admins_list(world, monkeypatch):
     _enable_oidc_principal_map(monkeypatch)
     # No env override -> admins come from [dashboard] admins in config.
     monkeypatch.delenv("MAVERICK_DASHBOARD_ADMINS", raising=False)
-    import maverick.config as config
+    import lightwork.config as config
 
     monkeypatch.setattr(config, "load_config", lambda *a, **k: {"dashboard": {"admins": ["user:root"]}})
     gid = world.create_goal("alice's goal", owner="user:alice")
@@ -254,7 +254,7 @@ def test_auth_off_sees_all_goals(world, monkeypatch):
 def test_gallery_delete_requires_goal_owner(world, monkeypatch, tmp_path):
     _enable_oidc_principal_map(monkeypatch)
 
-    import maverick.ux_store as ux
+    import lightwork.ux_store as ux
 
     monkeypatch.setattr(ux, "_shared", None)
     real = ux.UxStore
@@ -341,13 +341,13 @@ def test_chat_send_stamps_owner(world, monkeypatch, no_run):
 
 
 def _patch_fleets(monkeypatch):
-    from maverick.fleet import Fleet
+    from lightwork.fleet import Fleet
 
     fleets = [
         Fleet(name="alice-fleet", owner="user:alice"),
         Fleet(name="bob-fleet", owner="user:bob"),
     ]
-    import maverick.fleet as fleet_mod
+    import lightwork.fleet as fleet_mod
 
     monkeypatch.setattr(fleet_mod, "list_fleets", lambda *a, **k: list(fleets))
 

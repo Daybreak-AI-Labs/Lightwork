@@ -14,7 +14,7 @@ from fastapi.testclient import TestClient
 def world(tmp_path, monkeypatch):
     monkeypatch.setenv("HOME", str(tmp_path))
     monkeypatch.delenv("MAVERICK_DASHBOARD_TOKEN", raising=False)
-    from maverick import world_model
+    from lightwork import world_model
     monkeypatch.setattr(world_model, "DEFAULT_DB", tmp_path / "world.db")
     w = world_model.WorldModel(tmp_path / "world.db")
     yield w
@@ -23,8 +23,8 @@ def world(tmp_path, monkeypatch):
 
 @pytest.fixture
 def client(world, monkeypatch):
-    from maverick_dashboard import api as api_mod
-    from maverick_dashboard import app as app_mod
+    from lightwork_dashboard import api as api_mod
+    from lightwork_dashboard import app as app_mod
     monkeypatch.setattr(app_mod, "_world", lambda: world)
     monkeypatch.setattr(api_mod, "_world", lambda: world)
     return TestClient(app_mod.app, headers={"Origin": "http://testserver"})
@@ -33,7 +33,7 @@ def client(world, monkeypatch):
 @pytest.fixture
 def runner_stub(monkeypatch):
     monkeypatch.setenv("ANTHROPIC_API_KEY", "sk-ant-fake")
-    import maverick.runner as runner_mod
+    import lightwork.runner as runner_mod
     calls = []
 
     def fake_run(goal_id, max_dollars=None, *a, **kw):
@@ -78,7 +78,7 @@ def test_compose_assembles_brief_and_runs_with_budget(client, world, runner_stub
 
 
 def test_compose_budget_clamped_to_server_cap(client, world, runner_stub):
-    from maverick.runner import DEFAULT_MAX_DOLLARS
+    from lightwork.runner import DEFAULT_MAX_DOLLARS
     r = client.post("/api/v1/goals/compose", json={
         "title": "big spender", "budget_dollars": 99.0,
     })
@@ -93,7 +93,7 @@ def test_compose_without_blocks_uses_title_as_brief(client, world, runner_stub):
     g = world.get_goal(r.json()["id"])
     assert g.description == "just do it"
     # no budget block -> the server default cap applies
-    from maverick.runner import DEFAULT_MAX_DOLLARS
+    from lightwork.runner import DEFAULT_MAX_DOLLARS
     assert runner_stub[0][1] == DEFAULT_MAX_DOLLARS
 
 

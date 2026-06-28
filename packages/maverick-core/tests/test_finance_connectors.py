@@ -9,8 +9,8 @@ so no httpx/network needed; make_rest_tool's auth machinery is covered in
 test_enterprise_connectors)."""
 from __future__ import annotations
 
-from maverick.safety.tool_risk import tool_risk
-from maverick.tools.enterprise_connectors import (
+from lightwork.safety.tool_risk import tool_risk
+from lightwork.tools.enterprise_connectors import (
     _SPECS,
     ENTERPRISE_CONNECTOR_NAMES,
     enterprise_connectors,

@@ -7,8 +7,8 @@ everywhere, including CI without a DSN.
 from __future__ import annotations
 
 import pytest
-from maverick.world_model_backends import pg_rls
-from maverick.world_model_backends.postgres import _TENANT_TABLES
+from lightwork.world_model_backends import pg_rls
+from lightwork.world_model_backends.postgres import _TENANT_TABLES
 
 
 class _FakeCursor:
@@ -72,14 +72,14 @@ def test_resolve_dsn_prefers_arg_then_env_then_config(monkeypatch):
     assert pg_rls.resolve_dsn("arg-dsn") == "arg-dsn"
     assert pg_rls.resolve_dsn() == "env-dsn"
     monkeypatch.delenv("MAVERICK_PG_DSN", raising=False)
-    monkeypatch.setattr("maverick.config.load_config",
+    monkeypatch.setattr("lightwork.config.load_config",
                         lambda *a, **k: {"world_model": {"dsn": "cfg-dsn"}})
     assert pg_rls.resolve_dsn() == "cfg-dsn"
 
 
 def test_resolve_dsn_empty_when_unconfigured(monkeypatch):
     monkeypatch.delenv("MAVERICK_PG_DSN", raising=False)
-    monkeypatch.setattr("maverick.config.load_config", lambda *a, **k: {})
+    monkeypatch.setattr("lightwork.config.load_config", lambda *a, **k: {})
     assert pg_rls.resolve_dsn() == ""
 
 

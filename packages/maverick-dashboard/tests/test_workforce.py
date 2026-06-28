@@ -7,14 +7,14 @@ from __future__ import annotations
 
 import pytest
 from fastapi.testclient import TestClient
-from maverick_dashboard.app import app
+from lightwork_dashboard.app import app
 
 client = TestClient(app, headers={"Origin": "http://testserver"})
 
 
 @pytest.fixture(autouse=True)
 def _isolated_world(tmp_path, monkeypatch):
-    from maverick import world_model
+    from lightwork import world_model
     monkeypatch.setattr(world_model, "DEFAULT_DB", tmp_path / "world.db")
     yield
 
@@ -107,7 +107,7 @@ def test_deploy_department_creates_a_fleet(tmp_path, monkeypatch):
 def test_deploy_blocked_without_addon_returns_402(tmp_path, monkeypatch):
     monkeypatch.setenv("HOME", str(tmp_path))
     monkeypatch.delenv("MAVERICK_TENANT", raising=False)
-    import maverick.billing as billing
+    import lightwork.billing as billing
     monkeypatch.setattr(billing, "feature_allowed", lambda feature, **kw: False)
     r = client.post("/api/v1/departments/finance/deploy")
     assert r.status_code == 402
@@ -124,8 +124,8 @@ def test_deploy_managed_roster_without_active_tenant_fails_closed(tmp_path, monk
     monkeypatch.setenv("MAVERICK_HOME", str(tmp_path))
     monkeypatch.setenv("HOME", str(tmp_path))
     monkeypatch.delenv("MAVERICK_TENANT", raising=False)
-    from maverick.paths import reset_tenant, set_tenant
-    from maverick.tenant import registry as tenant_registry
+    from lightwork.paths import reset_tenant, set_tenant
+    from lightwork.tenant import registry as tenant_registry
 
     token = set_tenant(None)
     try:
@@ -144,8 +144,8 @@ def test_deploy_passes_active_tenant_to_entitlement(tmp_path, monkeypatch):
     monkeypatch.setenv("MAVERICK_HOME", str(tmp_path))
     monkeypatch.setenv("HOME", str(tmp_path))
     monkeypatch.delenv("MAVERICK_TENANT", raising=False)
-    from maverick.paths import reset_tenant, set_tenant
-    from maverick.tenant import registry as tenant_registry
+    from lightwork.paths import reset_tenant, set_tenant
+    from lightwork.tenant import registry as tenant_registry
 
     tenant_registry.create_tenant("acme", plan="free")
     token = set_tenant("acme")

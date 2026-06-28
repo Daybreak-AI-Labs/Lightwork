@@ -7,7 +7,7 @@ those hosts (and their subdomains) are allowed.
 """
 from __future__ import annotations
 
-from maverick_mcp.server import _elicit_allowed_hosts, _elicit_host_allowed
+from lightwork_mcp.server import _elicit_allowed_hosts, _elicit_host_allowed
 
 
 def test_empty_allowlist_allows_any():
@@ -38,7 +38,7 @@ def test_allowlist_from_env(monkeypatch):
 def test_allowlist_from_config(monkeypatch):
     monkeypatch.delenv("MAVERICK_MCP_ELICIT_ALLOWED_HOSTS", raising=False)
     monkeypatch.setattr(
-        "maverick.config.load_config",
+        "lightwork.config.load_config",
         lambda *a, **k: {"mcp": {"elicit_allowed_hosts": ["x.io", "y.io"]}},
     )
     assert _elicit_allowed_hosts() == frozenset({"x.io", "y.io"})
@@ -46,5 +46,5 @@ def test_allowlist_from_config(monkeypatch):
 
 def test_allowlist_default_empty(monkeypatch):
     monkeypatch.delenv("MAVERICK_MCP_ELICIT_ALLOWED_HOSTS", raising=False)
-    monkeypatch.setattr("maverick.config.load_config", lambda *a, **k: {})
+    monkeypatch.setattr("lightwork.config.load_config", lambda *a, **k: {})
     assert _elicit_allowed_hosts() == frozenset()

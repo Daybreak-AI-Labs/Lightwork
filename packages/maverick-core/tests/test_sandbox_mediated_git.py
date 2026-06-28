@@ -21,13 +21,13 @@ import subprocess
 from pathlib import Path
 
 import pytest
-from maverick.agent import Agent
-from maverick.blackboard import Blackboard
-from maverick.budget import Budget
-from maverick.sandbox import LocalBackend
-from maverick.sandbox.local import ExecResult
-from maverick.swarm import SwarmContext
-from maverick.world_model import WorldModel
+from lightwork.agent import Agent
+from lightwork.blackboard import Blackboard
+from lightwork.budget import Budget
+from lightwork.sandbox import LocalBackend
+from lightwork.sandbox.local import ExecResult
+from lightwork.swarm import SwarmContext
+from lightwork.world_model import WorldModel
 
 
 class RecordingSandbox:

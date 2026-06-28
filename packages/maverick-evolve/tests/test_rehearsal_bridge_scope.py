@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import json
 
-from maverick_evolve.rehearsal_bridge import cases_from_rehearsals
+from lightwork_evolve.rehearsal_bridge import cases_from_rehearsals
 
 
 def test_only_local_scope_rows_replayed(tmp_path):

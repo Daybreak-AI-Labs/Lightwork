@@ -1,7 +1,7 @@
 """Fuzz + ReDoS hardening for the secret redactors.
 
-Maverick has two mirror secret redactors -- ``maverick.secrets.scrub`` and
-``maverick.safety.secret_detector.redact`` -- and both are security
+Maverick has two mirror secret redactors -- ``lightwork.secrets.scrub`` and
+``lightwork.safety.secret_detector.redact`` -- and both are security
 controls: they run on tool stdout, MCP stderr drains, and LLM error
 payloads before any of those are logged / audited / replay-exported. All
 of those can carry attacker-influenced bytes (a prompt-injected agent can
@@ -31,12 +31,12 @@ import subprocess
 import sys
 import textwrap
 
-from maverick.secrets import scrub
+from lightwork.secrets import scrub
 
 
 def test_secret_redactors_do_not_redos_on_long_runs():
-    # Covers BOTH mirror redactors -- maverick.secrets.scrub and
-    # maverick.safety.secret_detector.redact -- against long single-character
+    # Covers BOTH mirror redactors -- lightwork.secrets.scrub and
+    # lightwork.safety.secret_detector.redact -- against long single-character
     # runs, including whitespace runs ("\n"/"\t"/" ") that triggered the
     # env_secret O(N^2) (its `(?:^|\n)\s*` backtracked on newline runs because
     # `\s` matches `\n` and re.MULTILINE anchors at every line start).
@@ -47,8 +47,8 @@ def test_secret_redactors_do_not_redos_on_long_runs():
     # linear (~3s total); a regression blows past the timeout and is killed.
     prog = textwrap.dedent(
         """
-        from maverick.secrets import scrub
-        from maverick.safety import secret_detector
+        from lightwork.secrets import scrub
+        from lightwork.safety import secret_detector
         N = 300_000
         evil = (
             "a" * N,                                  # url_credentials scheme run
@@ -64,8 +64,8 @@ def test_secret_redactors_do_not_redos_on_long_runs():
             "-----BEGIN RSA PRIVATE KEY-----" + "a" * N,  # pragma: allowlist secret (fake PEM)
         )
         for s in evil:
-            scrub(s)                      # maverick.secrets redactor
-            secret_detector.redact(s)     # maverick.safety mirror redactor
+            scrub(s)                      # lightwork.secrets redactor
+            secret_detector.redact(s)     # lightwork.safety mirror redactor
         """
     )
     try:

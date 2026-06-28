@@ -4,7 +4,7 @@ from __future__ import annotations
 import subprocess
 
 import pytest
-from maverick import parser_isolation as pi
+from lightwork import parser_isolation as pi
 
 
 def test_whitelist_enforced():
@@ -122,7 +122,7 @@ def test_child_env_is_scrubbed(monkeypatch):
 
 def test_should_isolate_off_by_default(monkeypatch):
     monkeypatch.delenv("MAVERICK_ISOLATE_PARSERS", raising=False)
-    monkeypatch.setattr("maverick.config.load_config", dict)
+    monkeypatch.setattr("lightwork.config.load_config", dict)
     assert pi.should_isolate() is False
     monkeypatch.setenv("MAVERICK_ISOLATE_PARSERS", "1")
     assert pi.should_isolate() is True
@@ -135,7 +135,7 @@ def test_inventory_renders_policy():
 
 def test_pdf_reader_routes_through_isolation(monkeypatch, tmp_path):
     monkeypatch.setenv("MAVERICK_ISOLATE_PARSERS", "1")
-    import maverick.parser_isolation as real_pi
+    import lightwork.parser_isolation as real_pi
 
     calls = {}
 
@@ -146,7 +146,7 @@ def test_pdf_reader_routes_through_isolation(monkeypatch, tmp_path):
     monkeypatch.setattr(real_pi, "parse_isolated", fake_isolated)
     monkeypatch.chdir(tmp_path)  # pdf_reader confines paths to cwd
     (tmp_path / "x.pdf").write_bytes(b"%PDF-1.4 fake")
-    from maverick.tools.pdf_reader import _run_read_pdf
+    from lightwork.tools.pdf_reader import _run_read_pdf
     out = _run_read_pdf({"source": "x.pdf"})
     assert out == "ISOLATED TEXT"
     assert calls["name"] == "pdf_text"
@@ -154,12 +154,12 @@ def test_pdf_reader_routes_through_isolation(monkeypatch, tmp_path):
 
 def test_pdf_reader_isolated_failure_refuses_inprocess_fallback(monkeypatch, tmp_path):
     monkeypatch.setenv("MAVERICK_ISOLATE_PARSERS", "1")
-    import maverick.parser_isolation as real_pi
+    import lightwork.parser_isolation as real_pi
     monkeypatch.setattr(real_pi, "parse_isolated",
                         lambda *a, **k: (_ for _ in ()).throw(
                             RuntimeError("child died (exit -11)")))
     monkeypatch.chdir(tmp_path)  # pdf_reader confines paths to cwd
     (tmp_path / "x.pdf").write_bytes(b"%PDF-1.4 hostile")
-    from maverick.tools.pdf_reader import _run_read_pdf
+    from lightwork.tools.pdf_reader import _run_read_pdf
     out = _run_read_pdf({"source": "x.pdf"})
     assert out.startswith("ERROR: isolated PDF parse failed")

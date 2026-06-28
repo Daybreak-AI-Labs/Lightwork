@@ -2,10 +2,10 @@
 from __future__ import annotations
 
 from click.testing import CliRunner
-from maverick.air_gap import audit
-from maverick.cli import main
-from maverick.llm import ROLE_MODELS
-from maverick.provider_local_first import is_local
+from lightwork.air_gap import audit
+from lightwork.cli import main
+from lightwork.llm import ROLE_MODELS
+from lightwork.provider_local_first import is_local
 
 # A model spec the local-first classifier recognizes as local.
 _LOCAL = next((m for m in ("ollama:llama3", "vllm:x", "tgi:x", "local:x")
@@ -103,7 +103,7 @@ def test_kubernetes_with_deny_all_networkpolicy_assertion_is_clean():
 
 
 def test_cli_airgap_check_fails_when_dirty(monkeypatch):
-    monkeypatch.setattr("maverick.air_gap.audit",
+    monkeypatch.setattr("lightwork.air_gap.audit",
                         lambda: {"clean": False, "violations": ["remote model(s) in use: x"]})
     res = CliRunner().invoke(main, ["airgap", "check"])
     assert res.exit_code == 1
@@ -111,7 +111,7 @@ def test_cli_airgap_check_fails_when_dirty(monkeypatch):
 
 
 def test_cli_airgap_check_passes_when_clean(monkeypatch):
-    monkeypatch.setattr("maverick.air_gap.audit",
+    monkeypatch.setattr("lightwork.air_gap.audit",
                         lambda: {"clean": True, "violations": []})
     res = CliRunner().invoke(main, ["airgap", "check"])
     assert res.exit_code == 0

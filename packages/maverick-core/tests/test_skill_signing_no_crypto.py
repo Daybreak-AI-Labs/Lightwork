@@ -4,8 +4,8 @@ from __future__ import annotations
 from pathlib import Path
 
 import pytest
-from maverick import skills
-from maverick.audit import signing
+from lightwork import skills
+from lightwork.audit import signing
 
 _NAME = "fake-signed-demo"
 _BODY = "# What it does\n\nDo a fake signed thing."

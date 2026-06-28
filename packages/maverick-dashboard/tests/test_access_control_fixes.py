@@ -10,16 +10,16 @@ import types
 
 import pytest
 from fastapi.testclient import TestClient
-from maverick_dashboard import api as api_mod
-from maverick_dashboard import app as app_mod
-from maverick_dashboard.app import app
+from lightwork_dashboard import api as api_mod
+from lightwork_dashboard import app as app_mod
+from lightwork_dashboard.app import app
 
 client = TestClient(app, headers={"Origin": "http://testserver"})
 
 
 @pytest.fixture(autouse=True)
 def _isolated(tmp_path, monkeypatch):
-    from maverick import world_model
+    from lightwork import world_model
     monkeypatch.setattr(world_model, "DEFAULT_DB", tmp_path / "world.db")
     monkeypatch.setenv("HOME", str(tmp_path))
     monkeypatch.delenv("MAVERICK_DASHBOARD_TOKEN", raising=False)
@@ -29,7 +29,7 @@ def _isolated(tmp_path, monkeypatch):
 
 def _as(monkeypatch, principal):
     """Simulate an authenticated caller with a given principal."""
-    from maverick_dashboard import auth
+    from lightwork_dashboard import auth
     monkeypatch.setattr(auth, "caller_principal", lambda request: principal)
 
 
@@ -37,7 +37,7 @@ def _as(monkeypatch, principal):
 
 def test_viewer_cannot_claim_or_release_approval(monkeypatch):
     monkeypatch.setenv("MAVERICK_DASHBOARD_ADMINS", "")
-    from maverick_dashboard import rbac
+    from lightwork_dashboard import rbac
     rbac.set_role("user:v", "viewer")
     aid = app_mod._world().create_approval(
         "wire_transfer", risk="high", scope="acct", detail="$5k")

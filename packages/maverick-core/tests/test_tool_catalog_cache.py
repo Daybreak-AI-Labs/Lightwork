@@ -1,7 +1,7 @@
 """ToolRegistry.to_anthropic() is memoized but stays correct across mutations."""
 from __future__ import annotations
 
-from maverick.tools import Tool, ToolRegistry
+from lightwork.tools import Tool, ToolRegistry
 
 
 def _tool(name: str) -> Tool:

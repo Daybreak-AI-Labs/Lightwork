@@ -9,7 +9,7 @@ from __future__ import annotations
 import zipfile
 
 import pytest
-from maverick_knowledge.parse import (
+from lightwork_knowledge.parse import (
     _check_docx_uncompressed_size,
     _check_pdf_page_count,
     extract_text,

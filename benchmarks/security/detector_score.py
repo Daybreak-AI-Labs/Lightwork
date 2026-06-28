@@ -28,16 +28,16 @@ from collections.abc import Callable
 from pathlib import Path
 
 _ROOT = Path(__file__).resolve().parents[2]
-for _p in (_ROOT, _ROOT / "packages" / "maverick-shield", _ROOT / "packages" / "maverick-core"):
+for _p in (_ROOT, _ROOT / "packages" / "lightwork-shield", _ROOT / "packages" / "lightwork-core"):
     if str(_p) not in sys.path:
         sys.path.insert(0, str(_p))
 
-from maverick_shield import builtin_rules, cascade  # noqa: E402
+from lightwork_shield import builtin_rules, cascade  # noqa: E402
 
 from benchmarks.security import corpus  # noqa: E402
 
 try:
-    from maverick.safety.jailbreak_heuristics import score_text  # noqa: E402
+    from lightwork.safety.jailbreak_heuristics import score_text  # noqa: E402
     _HEUR = True
 except Exception:  # pragma: no cover - core must be importable in CI
     _HEUR = False

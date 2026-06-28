@@ -11,15 +11,15 @@ from __future__ import annotations
 from pathlib import Path
 
 import pytest
-from maverick import checkpoint as ckpt_mod
-from maverick.agent import Agent
-from maverick.blackboard import Blackboard
-from maverick.budget import Budget
-from maverick.llm import LLMResponse, ToolCall
-from maverick.orchestrator import run_goal
-from maverick.sandbox import LocalBackend
-from maverick.swarm import SwarmContext
-from maverick.world_model import WorldModel
+from lightwork import checkpoint as ckpt_mod
+from lightwork.agent import Agent
+from lightwork.blackboard import Blackboard
+from lightwork.budget import Budget
+from lightwork.llm import LLMResponse, ToolCall
+from lightwork.orchestrator import run_goal
+from lightwork.sandbox import LocalBackend
+from lightwork.swarm import SwarmContext
+from lightwork.world_model import WorldModel
 
 
 def _resp(text="", tool_calls=None, stop_reason="end_turn") -> LLMResponse:

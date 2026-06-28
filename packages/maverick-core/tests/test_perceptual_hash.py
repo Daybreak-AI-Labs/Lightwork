@@ -1,4 +1,4 @@
-"""Tests for maverick.perceptual_hash (8x8 average-hash + hamming).
+"""Tests for lightwork.perceptual_hash (8x8 average-hash + hamming).
 
 The load-bearing assertion: Python and the JS twin
 (extensions/webgpu-vision/ahash.js) hash the shared synthetic gradient to the
@@ -13,7 +13,7 @@ import sys
 from pathlib import Path
 
 import pytest
-from maverick.perceptual_hash import (
+from lightwork.perceptual_hash import (
     GRADIENT_HASH,
     average_hash_file,
     average_hash_from_pixels,
@@ -76,7 +76,7 @@ def test_hamming_validates_and_measures():
 
 def test_file_hash_without_pillow_is_actionable(monkeypatch, tmp_path):
     monkeypatch.setitem(sys.modules, "PIL", None)  # forces ImportError
-    with pytest.raises(ImportError, match=r"maverick-agent\[computer-use\]"):
+    with pytest.raises(ImportError, match=r"lightwork-agent\[computer-use\]"):
         average_hash_file(str(tmp_path / "x.png"))
 
 

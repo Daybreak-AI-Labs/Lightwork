@@ -2,12 +2,12 @@
 
 ModuleNotFoundError subclasses ImportError, so `except ImportError` also
 catches a missing *transitive* dependency (openai -> httpx -> idna). The old
-message ("openai SDK not installed. Run: pip install maverick-agent[openai]")
+message ("openai SDK not installed. Run: pip install lightwork-agent[openai]")
 then misdirects the user, since openai IS installed.
 """
 from __future__ import annotations
 
-from maverick.providers.openai_provider import _openai_import_error_message
+from lightwork.providers.openai_provider import _openai_import_error_message
 
 
 def test_message_when_openai_package_truly_missing(monkeypatch):
@@ -17,7 +17,7 @@ def test_message_when_openai_package_truly_missing(monkeypatch):
     )
     msg = _openai_import_error_message(ModuleNotFoundError("No module named 'openai'"))
     assert "not installed" in msg
-    assert "maverick-agent[openai]" in msg
+    assert "lightwork-agent[openai]" in msg
 
 
 def test_message_when_openai_present_but_dependency_broken(monkeypatch):

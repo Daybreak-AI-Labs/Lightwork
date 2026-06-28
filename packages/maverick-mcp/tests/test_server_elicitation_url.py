@@ -11,7 +11,7 @@ import json
 import sys
 
 import pytest
-from maverick_mcp.server import MCPServer
+from lightwork_mcp.server import MCPServer
 
 
 def _stdin(*messages: dict) -> io.StringIO:

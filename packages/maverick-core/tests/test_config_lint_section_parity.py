@@ -16,8 +16,8 @@ sources migrate's set so they can't drift again.
 """
 from __future__ import annotations
 
-from maverick.config_lint import KNOWN_SCHEMA, lint_config
-from maverick.migrate import KNOWN_SECTIONS
+from lightwork.config_lint import KNOWN_SCHEMA, lint_config
+from lightwork.migrate import KNOWN_SECTIONS
 
 
 def test_every_runtime_section_is_known_to_config_lint():

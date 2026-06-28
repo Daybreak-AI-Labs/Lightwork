@@ -39,7 +39,7 @@ def test_datadog_monitors_name_filter_uses_search_endpoint(monkeypatch):
     body = {"monitors": [{"id": 7, "overall_state": "OK", "name": "cpu high"}]}
     get = MagicMock(return_value=_resp(200, body))
     _fake_httpx(monkeypatch, get=get)
-    from maverick.tools.datadog_tool import datadog_tool
+    from lightwork.tools.datadog_tool import datadog_tool
 
     out = datadog_tool().fn({"op": "monitors", "name": "cpu", "limit": 10})
     assert "cpu high" in out
@@ -55,7 +55,7 @@ def test_datadog_monitors_no_name_uses_list_endpoint(monkeypatch):
     body = [{"id": 1, "overall_state": "Alert", "name": "disk full"}]
     get = MagicMock(return_value=_resp(200, body))
     _fake_httpx(monkeypatch, get=get)
-    from maverick.tools.datadog_tool import datadog_tool
+    from lightwork.tools.datadog_tool import datadog_tool
 
     out = datadog_tool().fn({"op": "monitors"})
     assert "disk full" in out
@@ -67,7 +67,7 @@ def test_datadog_monitors_search_no_matches(monkeypatch):
     monkeypatch.setenv("DATADOG_APP_KEY", "a")
     get = MagicMock(return_value=_resp(200, {"monitors": []}))
     _fake_httpx(monkeypatch, get=get)
-    from maverick.tools.datadog_tool import datadog_tool
+    from lightwork.tools.datadog_tool import datadog_tool
 
     out = datadog_tool().fn({"op": "monitors", "name": "nope"})
     assert out == "no monitors"

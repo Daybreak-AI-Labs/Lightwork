@@ -14,7 +14,7 @@ import asyncio
 import sys
 import types
 
-import maverick.tools.websocket_tool as wst
+import lightwork.tools.websocket_tool as wst
 
 
 class _FakeWS:
@@ -48,7 +48,7 @@ def test_connects_to_pinned_ip_not_hostname(monkeypatch):
     monkeypatch.setitem(sys.modules, "websockets", _install_fake_websockets(captured))
     # The validated/pinned IP the resolver returns.
     monkeypatch.setattr(wst, "urlparse", wst.urlparse)  # keep real urlparse
-    import maverick.tools._ssrf as ssrf
+    import lightwork.tools._ssrf as ssrf
     monkeypatch.setattr(ssrf, "resolve_pinned_ip", lambda host: "93.184.216.34")
 
     out = asyncio.run(wst._run({"url": "wss://example.com:8443/feed", "recv": True}))
@@ -63,7 +63,7 @@ def test_connects_to_pinned_ip_not_hostname(monkeypatch):
 def test_rebind_to_private_ip_is_refused(monkeypatch):
     captured: dict = {}
     monkeypatch.setitem(sys.modules, "websockets", _install_fake_websockets(captured))
-    import maverick.tools._ssrf as ssrf
+    import lightwork.tools._ssrf as ssrf
 
     def _blocked(host):
         raise ssrf.BlockedHost(f"{host!r} resolves to non-public address 169.254.169.254")
@@ -77,7 +77,7 @@ def test_rebind_to_private_ip_is_refused(monkeypatch):
 def test_default_port_for_ws(monkeypatch):
     captured: dict = {}
     monkeypatch.setitem(sys.modules, "websockets", _install_fake_websockets(captured))
-    import maverick.tools._ssrf as ssrf
+    import lightwork.tools._ssrf as ssrf
     monkeypatch.setattr(ssrf, "resolve_pinned_ip", lambda host: "203.0.113.7")
     # This test exercises default-port selection, not the SSRF guard. The host
     # is a non-resolvable placeholder; the pre-flight host check now fails

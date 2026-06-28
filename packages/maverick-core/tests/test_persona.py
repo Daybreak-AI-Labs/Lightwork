@@ -4,7 +4,7 @@ from __future__ import annotations
 import tempfile
 from pathlib import Path
 
-from maverick.persona import STYLES, load_persona, render_persona_prompt
+from lightwork.persona import STYLES, load_persona, render_persona_prompt
 
 
 def test_no_config_returns_empty(monkeypatch):
@@ -52,14 +52,14 @@ def test_partial_persona_name_only(monkeypatch):
 def test_unknown_style_skipped_but_warns(monkeypatch, caplog):
     import logging
 
-    import maverick.persona as persona
+    import lightwork.persona as persona
     persona._warned_styles.clear()
     with tempfile.NamedTemporaryFile(mode="w", suffix=".toml", delete=False) as f:
         f.write('[persona]\nname = "X"\nstyle = "concice"\n')  # typo of "concise"
         path = Path(f.name)
     try:
         monkeypatch.setenv("MAVERICK_CONFIG", str(path))
-        with caplog.at_level(logging.WARNING, logger="maverick.persona"):
+        with caplog.at_level(logging.WARNING, logger="lightwork.persona"):
             prompt = render_persona_prompt()
         # Name still present; unknown style dropped, but now with a nudge.
         assert "X" in prompt
@@ -73,14 +73,14 @@ def test_unknown_style_skipped_but_warns(monkeypatch, caplog):
 def test_unknown_style_warns_once(monkeypatch, caplog):
     import logging
 
-    import maverick.persona as persona
+    import lightwork.persona as persona
     persona._warned_styles.clear()
     with tempfile.NamedTemporaryFile(mode="w", suffix=".toml", delete=False) as f:
         f.write('[persona]\nstyle = "nope"\n')
         path = Path(f.name)
     try:
         monkeypatch.setenv("MAVERICK_CONFIG", str(path))
-        with caplog.at_level(logging.WARNING, logger="maverick.persona"):
+        with caplog.at_level(logging.WARNING, logger="lightwork.persona"):
             render_persona_prompt()
             render_persona_prompt()
         # Misconfig logs at most once per process, not on every agent build.

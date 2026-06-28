@@ -9,7 +9,7 @@ from unittest.mock import patch
 
 def test_hooks_load_from_entry_points_empty(monkeypatch, tmp_path):
     """No matching entry points -> 0 hooks registered, no errors."""
-    from maverick.hooks import clear, load_from_entry_points
+    from lightwork.hooks import clear, load_from_entry_points
     clear()
     monkeypatch.delenv("MAVERICK_PLUGINS_ALLOW", raising=False)
     monkeypatch.setenv("MAVERICK_CONFIG", str(tmp_path / "nonexistent.toml"))
@@ -19,7 +19,7 @@ def test_hooks_load_from_entry_points_empty(monkeypatch, tmp_path):
 
 def test_hooks_load_from_entry_points_registers_specs(monkeypatch):
     """An entry-point factory returning HookSpec objects gets registered."""
-    from maverick.hooks import (
+    from lightwork.hooks import (
         HookEvent,
         HookSpec,
         clear,
@@ -51,7 +51,7 @@ def test_hooks_load_from_entry_points_registers_specs(monkeypatch):
 
 def test_hooks_load_from_entry_points_accepts_tuples(monkeypatch):
     """Factory returning (event, callable) tuples works too."""
-    from maverick.hooks import HookEvent, clear, installed, load_from_entry_points
+    from lightwork.hooks import HookEvent, clear, installed, load_from_entry_points
     clear()
     monkeypatch.setenv("MAVERICK_PLUGINS_ALLOW", "*")
 
@@ -74,7 +74,7 @@ def test_hooks_load_from_entry_points_accepts_tuples(monkeypatch):
 
 def test_hooks_load_from_entry_points_isolates_broken_plugin(monkeypatch):
     """A plugin that raises on load() doesn't disable other plugins."""
-    from maverick.hooks import HookEvent, HookSpec, clear, installed, load_from_entry_points
+    from lightwork.hooks import HookEvent, HookSpec, clear, installed, load_from_entry_points
     clear()
     monkeypatch.setenv("MAVERICK_PLUGINS_ALLOW", "*")
 
@@ -98,7 +98,7 @@ def test_hooks_load_from_entry_points_isolates_broken_plugin(monkeypatch):
 
 def test_hooks_load_from_entry_points_isolates_broken_factory_call(monkeypatch):
     """A factory that raises when called doesn't crash the loader."""
-    from maverick.hooks import HookEvent, HookSpec, clear, installed, load_from_entry_points
+    from lightwork.hooks import HookEvent, HookSpec, clear, installed, load_from_entry_points
     clear()
     monkeypatch.setenv("MAVERICK_PLUGINS_ALLOW", "*")
 
@@ -127,7 +127,7 @@ def test_hooks_load_from_entry_points_isolates_broken_factory_call(monkeypatch):
 
 def test_hooks_load_from_entry_points_ignores_invalid_items(monkeypatch):
     """Items that aren't HookSpec / (event, fn) get warned + dropped."""
-    from maverick.hooks import HookEvent, HookSpec, clear, installed, load_from_entry_points
+    from lightwork.hooks import HookEvent, HookSpec, clear, installed, load_from_entry_points
     clear()
     monkeypatch.setenv("MAVERICK_PLUGINS_ALLOW", "*")
 
@@ -166,12 +166,12 @@ def test_vscode_extension_package_json_valid():
     # Commands declared.
     commands = {c["command"] for c in data["contributes"]["commands"]}
     for required in (
-        "maverick.start",
-        "maverick.status",
-        "maverick.halt",
-        "maverick.unhalt",
-        "maverick.openExport",
-        "maverick.refreshRuns",
+        "lightwork.start",
+        "lightwork.status",
+        "lightwork.halt",
+        "lightwork.unhalt",
+        "lightwork.openExport",
+        "lightwork.refreshRuns",
     ):
         assert required in commands, f"missing command: {required}"
 

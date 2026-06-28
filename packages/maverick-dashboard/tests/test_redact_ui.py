@@ -6,7 +6,7 @@ import pytest
 pytest.importorskip("fastapi")
 
 from fastapi.testclient import TestClient  # noqa: E402
-from maverick_dashboard.app import app  # noqa: E402
+from lightwork_dashboard.app import app  # noqa: E402
 
 
 @pytest.fixture

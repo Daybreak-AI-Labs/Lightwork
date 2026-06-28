@@ -4,7 +4,7 @@ generic goal as today's plain prose."""
 from __future__ import annotations
 
 from fastapi.testclient import TestClient
-from maverick_dashboard.app import app
+from lightwork_dashboard.app import app
 
 client = TestClient(app)
 
@@ -19,7 +19,7 @@ Rolling 13-week cash forecast, every figure tied to its system of record.
 
 
 def _world(tmp_path, monkeypatch):
-    from maverick import world_model
+    from lightwork import world_model
     monkeypatch.setattr(world_model, "DEFAULT_DB", tmp_path / "world.db")
     return world_model.WorldModel(tmp_path / "world.db")
 

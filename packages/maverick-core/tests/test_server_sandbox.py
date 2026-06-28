@@ -4,7 +4,7 @@ from pathlib import Path
 
 
 def test_build_from_config_uses_configured_sandbox_backend(monkeypatch, tmp_path):
-    from maverick import server as server_mod
+    from lightwork import server as server_mod
 
     class _FakeWorld:
         pass

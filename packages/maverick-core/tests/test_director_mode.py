@@ -2,7 +2,7 @@
 from __future__ import annotations
 
 import pytest
-from maverick.director_mode import UnknownProfileError, direct
+from lightwork.director_mode import UnknownProfileError, direct
 
 
 def test_supervised_envelope():
@@ -43,7 +43,7 @@ def test_long_outcome_titled_safely():
 
 def test_config_profile_override(monkeypatch):
     monkeypatch.setattr(
-        "maverick.config.load_config",
+        "lightwork.config.load_config",
         lambda: {"director": {"profiles": {"semi": {
             "budget_multiplier": 3.0,
             "checkpoint": {"dollars": 4.0},

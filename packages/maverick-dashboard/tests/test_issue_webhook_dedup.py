@@ -1,7 +1,7 @@
 """Issue-webhook replay dedup: in-process window + shared store under HA (audit H17)."""
 from __future__ import annotations
 
-import maverick_dashboard.app as app_mod
+import lightwork_dashboard.app as app_mod
 
 
 class _FakeSharedWorld:
@@ -19,7 +19,7 @@ class _FakeSharedWorld:
 
 
 def test_in_process_window_is_default(monkeypatch):
-    from maverick import world_model_backends
+    from lightwork import world_model_backends
     monkeypatch.setattr(world_model_backends, "is_postgres_configured", lambda: False)
     app_mod._issue_webhook_seen.clear()
 
@@ -29,7 +29,7 @@ def test_in_process_window_is_default(monkeypatch):
 
 
 def test_shared_store_used_under_postgres(monkeypatch):
-    from maverick import world_model_backends
+    from lightwork import world_model_backends
     monkeypatch.setattr(world_model_backends, "is_postgres_configured", lambda: True)
     fake = _FakeSharedWorld()
     monkeypatch.setattr(app_mod, "_world", lambda: fake)
@@ -44,7 +44,7 @@ def test_shared_store_used_under_postgres(monkeypatch):
 
 
 def test_falls_back_when_shared_store_errors(monkeypatch):
-    from maverick import world_model_backends
+    from lightwork import world_model_backends
     monkeypatch.setattr(world_model_backends, "is_postgres_configured", lambda: True)
 
     def _boom():

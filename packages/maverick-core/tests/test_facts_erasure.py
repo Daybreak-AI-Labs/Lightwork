@@ -10,7 +10,7 @@ import json
 
 
 def test_facts_matching_requires_user_scoped_key_prefix(tmp_path):
-    from maverick.world_model import WorldModel
+    from lightwork.world_model import WorldModel
     w = WorldModel(tmp_path / "world.db")
     w.upsert_fact("user:u123:phone", "+1555")       # explicit subject scope
     w.upsert_fact("u123_phone", "+1555")            # legacy substring in key
@@ -21,7 +21,7 @@ def test_facts_matching_requires_user_scoped_key_prefix(tmp_path):
 
 
 def test_delete_facts_matching_returns_keys_and_keeps_others(tmp_path):
-    from maverick.world_model import WorldModel
+    from lightwork.world_model import WorldModel
     w = WorldModel(tmp_path / "world.db")
     w.upsert_fact("user:u123:phone", "+1555")
     w.upsert_fact("user:u123:note", "owner is u123")
@@ -38,14 +38,14 @@ def test_delete_facts_matching_returns_keys_and_keeps_others(tmp_path):
 
 
 def test_fact_subject_token_is_delimiter_safe():
-    from maverick.cli import _fact_subject_token
+    from lightwork.cli import _fact_subject_token
 
     assert _fact_subject_token("sms", "+1") == "sms:%2B1"
     assert _fact_subject_token("telegram", "a:b") == "telegram:a%3Ab"
 
 
 def test_short_user_id_does_not_match_unrelated_fact_substrings(tmp_path):
-    from maverick.world_model import WorldModel
+    from lightwork.world_model import WorldModel
     w = WorldModel(tmp_path / "world.db")
     w.upsert_fact("api_token", "SECRET-999")
     w.upsert_fact("team_password", "do-not-disclose")
@@ -58,7 +58,7 @@ def test_short_user_id_does_not_match_unrelated_fact_substrings(tmp_path):
 
 
 def _setup_subject_db(tmp_path):
-    from maverick.world_model import WorldModel
+    from lightwork.world_model import WorldModel
     db = tmp_path / "world.db"
     w = WorldModel(db)
     w.get_or_create_conversation("telegram", "u123")  # erase needs a conv
@@ -70,10 +70,10 @@ def _setup_subject_db(tmp_path):
 
 
 def test_erase_scrubs_only_user_scoped_facts(tmp_path, monkeypatch):
-    import maverick.audit as audit_mod
+    import lightwork.audit as audit_mod
     from click.testing import CliRunner
-    from maverick import cli as cli_mod
-    from maverick.world_model import WorldModel
+    from lightwork import cli as cli_mod
+    from lightwork.world_model import WorldModel
 
     monkeypatch.setattr(audit_mod, "scrub_user", lambda *a, **k: (0, 0))
     monkeypatch.setattr(audit_mod, "record", lambda kind, **payload: None)
@@ -97,7 +97,7 @@ def test_erase_scrubs_only_user_scoped_facts(tmp_path, monkeypatch):
 
 def test_export_user_includes_only_user_scoped_facts(tmp_path):
     from click.testing import CliRunner
-    from maverick import cli as cli_mod
+    from lightwork import cli as cli_mod
 
     db = _setup_subject_db(tmp_path)
     res = CliRunner().invoke(cli_mod.main, [
@@ -113,8 +113,8 @@ def test_export_user_includes_fact_history(tmp_path, monkeypatch):
     # personal data and must appear in the export (not just the current value).
     monkeypatch.setenv("MAVERICK_TEMPORAL_MEMORY", "1")
     from click.testing import CliRunner
-    from maverick import cli as cli_mod
-    from maverick.world_model import WorldModel
+    from lightwork import cli as cli_mod
+    from lightwork.world_model import WorldModel
 
     db = tmp_path / "world.db"
     w = WorldModel(db)

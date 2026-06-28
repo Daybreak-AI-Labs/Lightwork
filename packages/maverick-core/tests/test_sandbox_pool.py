@@ -9,11 +9,11 @@ import sys
 import types
 
 import pytest
-from maverick.sandbox import build_sandbox, pool
-from maverick.sandbox.docker import DockerBackend
-from maverick.sandbox.firecracker import FirecrackerBackend
-from maverick.sandbox.local import LocalBackend
-from maverick.sandbox.podman import PodmanBackend
+from lightwork.sandbox import build_sandbox, pool
+from lightwork.sandbox.docker import DockerBackend
+from lightwork.sandbox.firecracker import FirecrackerBackend
+from lightwork.sandbox.local import LocalBackend
+from lightwork.sandbox.podman import PodmanBackend
 
 
 @pytest.fixture(autouse=True)
@@ -114,11 +114,11 @@ def test_unhealthy_sandbox_is_not_parked(tmp_path, monkeypatch):
 # ------------------------------------------------------ build_sandbox wiring
 
 def _wire_config(monkeypatch, sandbox_cfg):
-    import maverick.config as config
+    import lightwork.config as config
     monkeypatch.setattr(config, "load_config", lambda *a, **k: {"sandbox": sandbox_cfg})
     monkeypatch.setattr(config, "get_sandbox", lambda: {
         "backend": sandbox_cfg.get("backend", "local"),
-        "workdir": sandbox_cfg.get("workdir", "~/maverick-workspace"),
+        "workdir": sandbox_cfg.get("workdir", "~/lightwork-workspace"),
         "timeout": sandbox_cfg.get("timeout", 60),
     })
     monkeypatch.delenv("MAVERICK_LANGUAGE", raising=False)
@@ -149,7 +149,7 @@ def test_knob_on_hands_parked_sandbox_to_next_run(tmp_path, docker_ok, monkeypat
 def test_warm_docker_backend_is_not_pool_eligible(tmp_path, docker_ok):
     p = pool.SandboxPool(clock=lambda: 0.0)
     sb = _backend(tmp_path, reuse_container=True)
-    sb._warm_name = "maverick-warm-existing"
+    sb._warm_name = "lightwork-warm-existing"
 
     assert p.park(sb) is False
     assert len(p) == 0
@@ -293,7 +293,7 @@ def test_e2b_warm_create_failure_surfaces(tmp_path, e2b, monkeypatch):
 
 
 def test_local_provider_warm_is_honestly_ignored(tmp_path, monkeypatch):
-    from maverick.sandbox.local import ExecResult
+    from lightwork.sandbox.local import ExecResult
     monkeypatch.setattr("shutil.which", lambda name: f"/usr/bin/{name}")
     calls = []
 

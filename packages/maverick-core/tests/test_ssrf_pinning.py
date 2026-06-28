@@ -4,7 +4,7 @@ from __future__ import annotations
 import socket
 
 import pytest
-from maverick.tools import _ssrf
+from lightwork.tools import _ssrf
 
 
 def _fake_getaddrinfo(*ips):

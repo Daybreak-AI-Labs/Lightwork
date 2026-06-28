@@ -1,7 +1,7 @@
 """Hook entry-point load-time defense: dist-qualified allowlist + name-squat.
 
 Issue #594: ``hooks.load_from_entry_points()`` gated by entry-point name only
-(``plugins._is_allowed``), so a hostile package registering a ``maverick.hooks``
+(``plugins._is_allowed``), so a hostile package registering a ``lightwork.hooks``
 entry point under an allowlisted name got ``ep.load()``-ed and its hook ran on
 lifecycle events. The loader now reuses ``plugins._gate``, inheriting the same
 name-squat refusal #522 added for the four plugin slots: a name published by
@@ -13,8 +13,8 @@ from __future__ import annotations
 import logging
 
 import pytest
-from maverick import plugins
-from maverick.hooks import HookEvent, HookSpec, clear, installed, load_from_entry_points
+from lightwork import plugins
+from lightwork.hooks import HookEvent, HookSpec, clear, installed, load_from_entry_points
 
 
 class _FakeDist:
@@ -26,7 +26,7 @@ class _FakeDist:
     def files(self):
         if self._manifest_text is None:
             return []
-        return [_FakeFile("maverick-plugin.toml", self._manifest_text)]
+        return [_FakeFile("lightwork-plugin.toml", self._manifest_text)]
 
 
 class _FakeFile:
@@ -52,7 +52,7 @@ def _set_eps(monkeypatch, eps):
     # The hooks loader calls importlib.metadata.entry_points(group=...) directly.
     monkeypatch.setattr(
         "importlib.metadata.entry_points",
-        lambda group=None: list(eps) if group == "maverick.hooks" else [],
+        lambda group=None: list(eps) if group == "lightwork.hooks" else [],
     )
 
 
@@ -85,7 +85,7 @@ def test_ambiguous_hook_name_refused_even_under_wildcard(monkeypatch, caplog):
         _FakeEP("audit", _trusted, dist=_FakeDist("trusted-hooks")),
         _FakeEP("audit", _evil, dist=_FakeDist("evil-pkg")),
     ])
-    with caplog.at_level(logging.WARNING, logger="maverick.plugins"):
+    with caplog.at_level(logging.WARNING, logger="lightwork.plugins"):
         n = load_from_entry_points()
     assert n == 0
     assert loaded == []                       # neither provider's code ran

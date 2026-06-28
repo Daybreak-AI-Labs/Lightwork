@@ -23,7 +23,7 @@ import pytest
 # --- inbound webhook signature verifiers must fail closed ------------------
 
 def test_github_app_signature_fails_closed_without_secret():
-    from maverick.github_app import verify_signature
+    from lightwork.github_app import verify_signature
     assert verify_signature(b"{}", "sha256=whatever", None) is False
     assert verify_signature(b"{}", None, "") is False
     # Sanity: a correct signature with a secret still verifies.
@@ -33,13 +33,13 @@ def test_github_app_signature_fails_closed_without_secret():
 
 
 def test_issue_webhook_signature_fails_closed_without_secret():
-    from maverick.issue_webhooks import verify_signature
+    from lightwork.issue_webhooks import verify_signature
     assert verify_signature(b"{}", "deadbeef", None) is False
     assert verify_signature(b"{}", None, "s") is False
 
 
 def test_outbound_webhook_verifier_rejects_unprefixed():
-    from maverick.webhooks import verify_signature
+    from lightwork.webhooks import verify_signature
     assert verify_signature(b"{}", "deadbeef", "s") is False  # no sha256= prefix
     assert verify_signature(b"{}", "", "s") is False
 
@@ -47,7 +47,7 @@ def test_outbound_webhook_verifier_rejects_unprefixed():
 # --- sandbox child env must not carry credentials --------------------------
 
 def test_scrub_env_strips_secret_shaped_vars():
-    from maverick.sandbox.local import scrub_env
+    from lightwork.sandbox.local import scrub_env
     src = {
         "ANTHROPIC_API_KEY": "sk-ant-secret",
         "GITHUB_TOKEN": "ghp_secret",
@@ -84,7 +84,7 @@ def test_scrub_env_keeps_git_config_injection_consistent():
     all-or-nothing: if any member is stripped, drop them all so git cleanly falls
     back to file config. Regression for the stress-test git-cluster finding.
     """
-    from maverick.sandbox.local import scrub_env
+    from lightwork.sandbox.local import scrub_env
     src = {
         "GIT_CONFIG_COUNT": "2",
         "GIT_CONFIG_KEY_0": "credential.interactive",
@@ -116,7 +116,7 @@ def _fake_getaddrinfo(*ips):
 
 
 def test_ssrf_guard_refuses_loopback_and_metadata(monkeypatch):
-    from maverick.tools._ssrf import BlockedHost, resolve_pinned_ip
+    from lightwork.tools._ssrf import BlockedHost, resolve_pinned_ip
     for ip in ("127.0.0.1", "169.254.169.254", "10.0.0.5", "::1"):
         monkeypatch.setattr(socket, "getaddrinfo", _fake_getaddrinfo(ip))
         with pytest.raises(BlockedHost):
@@ -131,7 +131,7 @@ def test_ssrf_guard_refuses_loopback_and_metadata(monkeypatch):
 def test_mcp_tool_names_are_validated():
     from types import SimpleNamespace
 
-    from maverick.mcp_tools import tools_from_mcp
+    from lightwork.mcp_tools import tools_from_mcp
     client = SimpleNamespace(
         spec=SimpleNamespace(name="srv"),
         tools=[

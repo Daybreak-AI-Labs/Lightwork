@@ -5,16 +5,16 @@ from fastapi.testclient import TestClient
 
 
 def _client():
-    from maverick_dashboard.app import app
+    from lightwork_dashboard.app import app
     return TestClient(app)
 
 
 def _goal_page(monkeypatch, tmp_path):
-    from maverick import world_model
+    from lightwork import world_model
     db = tmp_path / "world.db"
     monkeypatch.setattr(world_model, "DEFAULT_DB", db)
     monkeypatch.delenv("MAVERICK_DASHBOARD_TOKEN", raising=False)
-    from maverick_dashboard import app as dash_app
+    from lightwork_dashboard import app as dash_app
     dash_app._world_cache.clear()
     gid = world_model.WorldModel(db).create_goal("test goal", "desc")
     return _client().get(f"/chat/goal/{gid}")

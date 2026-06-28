@@ -3,7 +3,7 @@ from __future__ import annotations
 
 import time
 
-from maverick import runner
+from lightwork import runner
 
 
 def test_inflight_reflects_held_slots():

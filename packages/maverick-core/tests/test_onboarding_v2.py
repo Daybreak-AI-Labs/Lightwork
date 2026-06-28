@@ -1,8 +1,8 @@
 """Onboarding v2: usage-derived suggestions, honest when data is thin."""
 from __future__ import annotations
 
-from maverick.onboarding_v2 import render, suggest
-from maverick.world_model import WorldModel
+from lightwork.onboarding_v2 import render, suggest
+from lightwork.world_model import WorldModel
 
 
 def _world(tmp_path):

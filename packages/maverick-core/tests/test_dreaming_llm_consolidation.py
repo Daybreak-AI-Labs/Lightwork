@@ -10,7 +10,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 
-from maverick import dreaming, reflexion
+from lightwork import dreaming, reflexion
 
 # ---------- fakes ----------
 
@@ -88,7 +88,7 @@ def test_enrich_replaces_text_with_llm_output():
 
 
 def test_enrich_routes_to_cheap_summarizer_role():
-    from maverick.llm import model_for_role
+    from lightwork.llm import model_for_role
     llm = _FakeLLM()
     dreaming._llm_enrich_insight(_insight(), _cluster(), llm=llm)
     assert llm.last_model == model_for_role("summarizer")
@@ -169,7 +169,7 @@ def _run(tmp_path, **kw):
 
 
 def test_dream_cycle_deterministic_without_llm(tmp_path, monkeypatch):
-    monkeypatch.setattr("maverick.calibration.learning_frozen", lambda: False)
+    monkeypatch.setattr("lightwork.calibration.learning_frozen", lambda: False)
     _seed_failures(tmp_path / "reflexions.ndjson")
     report = _run(tmp_path)  # no llm passed
     assert report.insights_written >= 1
@@ -178,7 +178,7 @@ def test_dream_cycle_deterministic_without_llm(tmp_path, monkeypatch):
 
 
 def test_dream_cycle_uses_llm_when_enabled(tmp_path, monkeypatch):
-    monkeypatch.setattr("maverick.calibration.learning_frozen", lambda: False)
+    monkeypatch.setattr("lightwork.calibration.learning_frozen", lambda: False)
     _seed_failures(tmp_path / "reflexions.ndjson")
     llm = _FakeLLM()
     report = _run(
@@ -194,7 +194,7 @@ def test_dream_cycle_uses_llm_when_enabled(tmp_path, monkeypatch):
 
 def test_dream_cycle_llm_passed_but_knob_off_stays_deterministic(tmp_path, monkeypatch):
     monkeypatch.delenv("MAVERICK_LLM_CONSOLIDATION", raising=False)
-    monkeypatch.setattr("maverick.calibration.learning_frozen", lambda: False)
+    monkeypatch.setattr("lightwork.calibration.learning_frozen", lambda: False)
     _seed_failures(tmp_path / "reflexions.ndjson")
     llm = _FakeLLM()
     # llm wired in, but llm_consolidation not set -> must NOT call the model.

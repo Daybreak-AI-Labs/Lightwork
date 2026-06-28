@@ -10,10 +10,10 @@ from __future__ import annotations
 from pathlib import Path
 
 import pytest
-from maverick.budget import Budget
-from maverick.orchestrator import run_goal
-from maverick.sandbox import LocalBackend
-from maverick.world_model import WorldModel
+from lightwork.budget import Budget
+from lightwork.orchestrator import run_goal
+from lightwork.sandbox import LocalBackend
+from lightwork.world_model import WorldModel
 
 
 @pytest.mark.asyncio
@@ -47,10 +47,10 @@ async def test_run_goal_threads_answered_questions_into_brief(
 
 
 def test_resume_builds_and_passes_a_sandbox(tmp_path: Path, monkeypatch):
-    import maverick.cli as cli
-    import maverick.orchestrator as orch
+    import lightwork.cli as cli
+    import lightwork.orchestrator as orch
     from click.testing import CliRunner
-    from maverick.world_model import open_world
+    from lightwork.world_model import open_world
 
     monkeypatch.setattr(cli, "_require_llm_key", lambda: "test")
     captured: dict = {}
@@ -77,7 +77,7 @@ def test_resume_builds_and_passes_a_sandbox(tmp_path: Path, monkeypatch):
 async def test_run_goal_sanitizes_answered_questions_before_brief(
     tmp_path: Path, fake_llm, make_llm_response, monkeypatch,
 ):
-    import maverick.orchestrator as orch
+    import lightwork.orchestrator as orch
 
     class _Shield:
         def __init__(self):

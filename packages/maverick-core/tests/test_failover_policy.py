@@ -3,7 +3,7 @@ class-gated retry, cooldown ledger, chain ordering, and the v1-compat default.""
 from __future__ import annotations
 
 import pytest
-from maverick import failover_policy as fp
+from lightwork import failover_policy as fp
 
 
 class _StatusErr(Exception):
@@ -50,7 +50,7 @@ class TestPolicyShouldRetry:
         assert fp.policy_should_retry(RuntimeError("mystery")) is False  # other off
 
     def test_control_signals_never_fail_over(self, monkeypatch):
-        from maverick.budget import BudgetExceeded
+        from lightwork.budget import BudgetExceeded
         monkeypatch.setattr(fp, "_policy_cfg", lambda: {"failover_on": ["other"]})
         assert fp.policy_should_retry(BudgetExceeded("cap")) is False
 

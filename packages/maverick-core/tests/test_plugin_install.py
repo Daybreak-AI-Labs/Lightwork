@@ -6,11 +6,11 @@ import subprocess
 import types
 
 import pytest
-from maverick import plugins
+from lightwork import plugins
 
 
 def _cfg(monkeypatch, plugins_section):
-    monkeypatch.setattr("maverick.config.load_config",
+    monkeypatch.setattr("lightwork.config.load_config",
                         lambda *a, **k: {"plugins": plugins_section})
 
 

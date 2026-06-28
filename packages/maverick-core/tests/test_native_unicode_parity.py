@@ -10,7 +10,7 @@ pure-Python sanity check runs.
 from __future__ import annotations
 
 import pytest
-from maverick.safety import unicode_filter as uf
+from lightwork.safety import unicode_filter as uf
 
 _ZWSP, _RLO, _TAG = chr(0x200B), chr(0x202E), chr(0xE0001)
 

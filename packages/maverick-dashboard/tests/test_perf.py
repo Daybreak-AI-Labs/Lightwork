@@ -13,18 +13,18 @@ from fastapi.testclient import TestClient
 
 
 def _client():
-    from maverick_dashboard.app import app
+    from lightwork_dashboard.app import app
     return TestClient(app)
 
 
 def test_world_model_reused_across_requests(monkeypatch, tmp_path: Path):
     """Hitting / twice must reuse the same WorldModel, not open a new one."""
-    from maverick import world_model
+    from lightwork import world_model
     db = tmp_path / "world.db"
     monkeypatch.setattr(world_model, "DEFAULT_DB", db)
     monkeypatch.delenv("MAVERICK_DASHBOARD_TOKEN", raising=False)
 
-    from maverick_dashboard import app as dash_app
+    from lightwork_dashboard import app as dash_app
     dash_app._world_cache.clear()
 
     client = _client()
@@ -39,7 +39,7 @@ def test_world_model_reused_across_requests(monkeypatch, tmp_path: Path):
 
 def test_list_goals_limit_pushdown(monkeypatch, tmp_path: Path):
     """list_goals with limit=N must SELECT only N rows, not slice client-side."""
-    from maverick import world_model
+    from lightwork import world_model
     db = tmp_path / "world.db"
     monkeypatch.setattr(world_model, "DEFAULT_DB", db)
     w = world_model.WorldModel(db)
@@ -56,7 +56,7 @@ def test_list_goals_limit_pushdown(monkeypatch, tmp_path: Path):
 
 def test_list_goals_unbounded_still_works(monkeypatch, tmp_path: Path):
     """Backward compat: list_goals() with no kwargs returns everything."""
-    from maverick import world_model
+    from lightwork import world_model
     db = tmp_path / "world.db"
     monkeypatch.setattr(world_model, "DEFAULT_DB", db)
     w = world_model.WorldModel(db)
@@ -70,14 +70,14 @@ def test_index_handles_thousand_goals_without_loading_them_all(
 ):
     """Render the overview page against 1000 goals; the bounded slice + count
     aggregate must mean response payload stays in the kilobytes, not megabytes."""
-    from maverick import world_model
+    from lightwork import world_model
     db = tmp_path / "world.db"
     monkeypatch.setattr(world_model, "DEFAULT_DB", db)
     monkeypatch.delenv("MAVERICK_DASHBOARD_TOKEN", raising=False)
     w = world_model.WorldModel(db)
     for i in range(1000):
         w.create_goal(f"goal {i}", "desc")
-    from maverick_dashboard import app as dash_app
+    from lightwork_dashboard import app as dash_app
     dash_app._world_cache.clear()
     client = _client()
     resp = client.get("/")
@@ -94,7 +94,7 @@ def test_plan_tree_uses_constant_query_count(monkeypatch, tmp_path: Path):
     one statement = 2 DB calls total for the route (1 for get_goal,
     1 for the CTE).
     """
-    from maverick import world_model
+    from lightwork import world_model
     db = tmp_path / "world.db"
     monkeypatch.setattr(world_model, "DEFAULT_DB", db)
     monkeypatch.delenv("MAVERICK_DASHBOARD_TOKEN", raising=False)
@@ -126,7 +126,7 @@ def test_plan_tree_uses_constant_query_count(monkeypatch, tmp_path: Path):
 
     w.conn = CountingConn(real_conn)  # type: ignore[assignment]
 
-    from maverick_dashboard import app as dash_app
+    from lightwork_dashboard import app as dash_app
     dash_app._world_cache.clear()
     dash_app._world_cache[str(db)] = w
     try:
@@ -151,8 +151,8 @@ def test_plan_tree_uses_constant_query_count(monkeypatch, tmp_path: Path):
 
 def test_plan_tree_leaf_does_not_rank_unrelated_goals(monkeypatch, tmp_path: Path):
     """A tiny requested tree must not rank or scan unrelated goals."""
-    from maverick import world_model
-    from maverick_dashboard import app as dash_app
+    from lightwork import world_model
+    from lightwork_dashboard import app as dash_app
 
     db = tmp_path / "world.db"
     monkeypatch.setattr(world_model, "DEFAULT_DB", db)
@@ -183,7 +183,7 @@ def test_plan_tree_leaf_does_not_rank_unrelated_goals(monkeypatch, tmp_path: Pat
 
 def test_cost_csv_streams_not_buffers(monkeypatch, tmp_path: Path):
     """Response is streamed: setting up generator doesn't materialise all rows."""
-    from maverick import world_model
+    from lightwork import world_model
     db = tmp_path / "world.db"
     monkeypatch.setattr(world_model, "DEFAULT_DB", db)
     monkeypatch.delenv("MAVERICK_DASHBOARD_TOKEN", raising=False)
@@ -193,7 +193,7 @@ def test_cost_csv_streams_not_buffers(monkeypatch, tmp_path: Path):
         eid = w.start_episode(gid)
         w.end_episode(eid, "ok", "done", cost_dollars=0.01,
                       input_tokens=10, output_tokens=10, tool_calls=1)
-    from maverick_dashboard import app as dash_app
+    from lightwork_dashboard import app as dash_app
     dash_app._world_cache.clear()
     client = _client()
     resp = client.get("/api/v1/cost.csv")
@@ -207,7 +207,7 @@ def test_cost_csv_streams_not_buffers(monkeypatch, tmp_path: Path):
 
 def test_cost_csv_month_filter_in_sql(monkeypatch, tmp_path: Path):
     """Month filter pushes into SQL via WHERE; rows outside the month are absent."""
-    from maverick import world_model
+    from lightwork import world_model
     db = tmp_path / "world.db"
     monkeypatch.setattr(world_model, "DEFAULT_DB", db)
     monkeypatch.delenv("MAVERICK_DASHBOARD_TOKEN", raising=False)
@@ -227,7 +227,7 @@ def test_cost_csv_month_filter_in_sql(monkeypatch, tmp_path: Path):
     w.end_episode(eid_new, "ok", "new", cost_dollars=0.5,
                   input_tokens=1, output_tokens=1, tool_calls=1)
 
-    from maverick_dashboard import app as dash_app
+    from lightwork_dashboard import app as dash_app
     dash_app._world_cache.clear()
     client = _client()
     # Filter for January 2000 -- only the old episode matches.
@@ -248,7 +248,7 @@ def test_cost_csv_month_window_rolls_over_by_calendar(monkeypatch, tmp_path: Pat
     """
     import datetime as dt
 
-    from maverick import world_model
+    from lightwork import world_model
     db = tmp_path / "world.db"
     monkeypatch.setattr(world_model, "DEFAULT_DB", db)
     monkeypatch.delenv("MAVERICK_DASHBOARD_TOKEN", raising=False)
@@ -266,7 +266,7 @@ def test_cost_csv_month_window_rolls_over_by_calendar(monkeypatch, tmp_path: Pat
     w.conn.execute("UPDATE episodes SET started_at = ? WHERE id = ?", (mar, eid_mar))
     w.conn.commit()
 
-    from maverick_dashboard import app as dash_app
+    from lightwork_dashboard import app as dash_app
     dash_app._world_cache.clear()
     client = _client()
     resp = client.get("/api/v1/cost.csv?month=2001-02")
@@ -277,10 +277,10 @@ def test_cost_csv_month_window_rolls_over_by_calendar(monkeypatch, tmp_path: Pat
 
 
 def test_cost_csv_bad_month_400(monkeypatch, tmp_path: Path):
-    from maverick import world_model
+    from lightwork import world_model
     monkeypatch.setattr(world_model, "DEFAULT_DB", tmp_path / "world.db")
     monkeypatch.delenv("MAVERICK_DASHBOARD_TOKEN", raising=False)
-    from maverick_dashboard import app as dash_app
+    from lightwork_dashboard import app as dash_app
     dash_app._world_cache.clear()
     client = _client()
     resp = client.get("/api/v1/cost.csv?month=not-a-month")
@@ -288,10 +288,10 @@ def test_cost_csv_bad_month_400(monkeypatch, tmp_path: Path):
 
 
 def test_cost_csv_max_december_month_400(monkeypatch, tmp_path: Path):
-    from maverick import world_model
+    from lightwork import world_model
     monkeypatch.setattr(world_model, "DEFAULT_DB", tmp_path / "world.db")
     monkeypatch.delenv("MAVERICK_DASHBOARD_TOKEN", raising=False)
-    from maverick_dashboard import app as dash_app
+    from lightwork_dashboard import app as dash_app
     dash_app._world_cache.clear()
     client = _client()
     resp = client.get("/api/v1/cost.csv?month=9999-12")

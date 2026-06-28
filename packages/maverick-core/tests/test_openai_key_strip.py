@@ -26,7 +26,7 @@ def _install_fake_openai(monkeypatch):
 
 def test_openai_client_strips_key(monkeypatch):
     _install_fake_openai(monkeypatch)
-    from maverick.providers.openai_provider import OpenAIClient
+    from lightwork.providers.openai_provider import OpenAIClient
     client = OpenAIClient(api_key="sk-test-123\n  ")
     assert client._sync.api_key == "sk-test-123"
     assert client._async.api_key == "sk-test-123"
@@ -35,7 +35,7 @@ def test_openai_client_strips_key(monkeypatch):
 def test_openai_client_all_whitespace_key_becomes_none(monkeypatch):
     _install_fake_openai(monkeypatch)
     monkeypatch.delenv("OPENAI_API_KEY", raising=False)
-    from maverick.providers.openai_provider import OpenAIClient
+    from lightwork.providers.openai_provider import OpenAIClient
     # A whitespace-only key must not masquerade as a real one.
     client = OpenAIClient(api_key="   \n")
     assert client._sync.api_key in (None, "")
@@ -44,7 +44,7 @@ def test_openai_client_all_whitespace_key_becomes_none(monkeypatch):
 def test_openai_client_refuses_sdk_env_fallback_when_disabled(monkeypatch):
     _install_fake_openai(monkeypatch)
     monkeypatch.setenv("OPENAI_API_KEY", "sk-openai-env-secret")
-    from maverick.providers.openai_provider import OpenAIClient
+    from lightwork.providers.openai_provider import OpenAIClient
 
     with pytest.raises(RuntimeError, match="requires a non-empty API key"):
         OpenAIClient(
@@ -61,7 +61,7 @@ def test_gemini_client_rejects_whitespace_key_instead_of_openai_fallback(monkeyp
     monkeypatch.setenv(env_var, "   \n")
     other_env = "GOOGLE_API_KEY" if env_var == "GEMINI_API_KEY" else "GEMINI_API_KEY"
     monkeypatch.delenv(other_env, raising=False)
-    from maverick.providers.gemini_provider import GeminiClient
+    from lightwork.providers.gemini_provider import GeminiClient
 
     with pytest.raises(RuntimeError, match="requires a non-empty API key"):
         GeminiClient()

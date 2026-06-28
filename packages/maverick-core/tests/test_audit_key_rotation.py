@@ -9,7 +9,7 @@ from __future__ import annotations
 import os
 
 import pytest
-from maverick.audit import signing
+from lightwork.audit import signing
 
 
 @pytest.fixture(autouse=True)

@@ -6,7 +6,7 @@ from __future__ import annotations
 
 import hashlib
 
-from maverick.compaction import (
+from lightwork.compaction import (
     _shrink_tool_result,
     _source_locator,
     compact_messages,

@@ -2,7 +2,7 @@
 from __future__ import annotations
 
 import pytest
-from maverick.assessment import AssessmentSession, get_template
+from lightwork.assessment import AssessmentSession, get_template
 
 _FINANCE_TYPES = ("sox_control", "fraud_risk", "itgc", "credit_risk", "close_readiness")
 

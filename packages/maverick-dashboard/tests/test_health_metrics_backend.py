@@ -5,17 +5,17 @@ actually uses, and the goal-count gauge reflects the real store.
 from __future__ import annotations
 
 from fastapi.testclient import TestClient
-from maverick_dashboard.app import app
+from lightwork_dashboard.app import app
 
 client = TestClient(app, headers={"Origin": "http://testserver"})
 
 
 def _use_sqlite(monkeypatch, tmp_path):
     """Point the dashboard's _world() at an isolated SQLite world."""
-    from maverick import world_model
+    from lightwork import world_model
     db = tmp_path / "world.db"
     monkeypatch.setattr(world_model, "DEFAULT_DB", db)
-    from maverick_dashboard import app as dash_app
+    from lightwork_dashboard import app as dash_app
     dash_app._world_cache.clear()
     return world_model.WorldModel(db)
 
@@ -47,7 +47,7 @@ def test_healthz_db_fail_is_reported(monkeypatch, tmp_path):
         def ping(self):
             raise RuntimeError("db down")
 
-    from maverick_dashboard import app as dash_app
+    from lightwork_dashboard import app as dash_app
     monkeypatch.setattr(dash_app, "_world", lambda: _Broken())
     resp = client.get("/healthz")
     body = resp.json()
@@ -59,7 +59,7 @@ def test_metrics_omits_world_db_bytes_under_postgres(monkeypatch, tmp_path):
     _use_sqlite(monkeypatch, tmp_path)
     # Simulate a Postgres deployment: the SQLite-file size gauge is meaningless,
     # so it must be omitted while the disk-free gauge stays.
-    from maverick import world_model_backends
+    from lightwork import world_model_backends
     monkeypatch.setattr(world_model_backends, "is_postgres_configured", lambda: True)
     text = client.get("/metrics").text
     assert "maverick_world_db_bytes" not in text

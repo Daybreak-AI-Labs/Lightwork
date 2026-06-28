@@ -1,7 +1,7 @@
 """comparative_replay: step-aligned divergence diff of two run traces."""
 from __future__ import annotations
 
-from maverick.tools.comparative_replay import comparative_replay
+from lightwork.tools.comparative_replay import comparative_replay
 
 
 def _run(**kw):

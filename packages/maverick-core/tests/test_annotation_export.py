@@ -2,8 +2,8 @@
 from __future__ import annotations
 
 import pytest
-from maverick import annotation_export as ax
-from maverick.world_model import Goal, GoalEvent, WorldModel
+from lightwork import annotation_export as ax
+from lightwork.world_model import Goal, GoalEvent, WorldModel
 
 
 def _goal(created_at=1000.0) -> Goal:
@@ -63,7 +63,7 @@ def test_srt_clock_zero_uses_earliest_of_created_and_first_event():
 
 
 def test_export_reads_shared_store_and_validates(tmp_path):
-    import maverick.ux_store as ux
+    import lightwork.ux_store as ux
     ux.reset_shared()
     w = WorldModel(tmp_path / "world.db")
     gid = w.create_goal("run with notes", "")
@@ -94,7 +94,7 @@ def test_export_accepts_injected_annotations(tmp_path):
 
 
 def test_cli_prints_markdown_and_handles_unknown_goal(tmp_path, capsys):
-    import maverick.ux_store as ux
+    import lightwork.ux_store as ux
     ux.reset_shared()
     db = tmp_path / "world.db"
     w = WorldModel(db)

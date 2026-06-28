@@ -7,7 +7,7 @@ import pytest
 
 class TestReviewerParse:
     def test_clean_approval(self):
-        from maverick.reviewer import _parse
+        from lightwork.reviewer import _parse
         v = _parse(
             '{"approves": true, "confidence": 0.9, "comments": []}'
         )
@@ -16,7 +16,7 @@ class TestReviewerParse:
         assert v.comments == []
 
     def test_rejection_with_blocker(self):
-        from maverick.reviewer import _parse
+        from lightwork.reviewer import _parse
         v = _parse(
             '{"approves": false, "confidence": 0.4, "comments": ['
             '{"path": "foo.py", "line": 12, "severity": "blocker", '
@@ -28,7 +28,7 @@ class TestReviewerParse:
         assert v.blockers[0].path == "foo.py"
 
     def test_comment_severity_clamped_to_known(self):
-        from maverick.reviewer import _parse
+        from lightwork.reviewer import _parse
         v = _parse(
             '{"approves": false, "confidence": 0.5, "comments": ['
             '{"path": "x.py", "line": 1, "severity": "catastrophic", '
@@ -39,17 +39,17 @@ class TestReviewerParse:
         assert v.comments[0].severity == "warning"
 
     def test_empty_response_rejects(self):
-        from maverick.reviewer import _parse
+        from lightwork.reviewer import _parse
         v = _parse("")
         assert v.approves is False
 
     def test_unparseable_rejects(self):
-        from maverick.reviewer import _parse
+        from lightwork.reviewer import _parse
         v = _parse("not json")
         assert v.approves is False
 
     def test_string_approves_value(self):
-        from maverick.reviewer import _parse
+        from lightwork.reviewer import _parse
         v = _parse('{"approves": "true", "confidence": 0.8, "comments": []}')
         assert v.approves is True
 
@@ -58,8 +58,8 @@ class TestReviewDiff:
     @pytest.mark.asyncio
     async def test_empty_diff_short_circuits(self):
         """No diff = empty pass; no LLM call."""
-        from maverick.budget import Budget
-        from maverick.reviewer import review_diff
+        from lightwork.budget import Budget
+        from lightwork.reviewer import review_diff
 
         class _ShouldNotBeCalled:
             async def complete_async(self, **_kw):
@@ -71,8 +71,8 @@ class TestReviewDiff:
 
     @pytest.mark.asyncio
     async def test_reviews_diff_via_llm(self, fake_llm, make_llm_response):
-        from maverick.budget import Budget
-        from maverick.reviewer import review_diff
+        from lightwork.budget import Budget
+        from lightwork.reviewer import review_diff
         fake_llm.scripted = [make_llm_response(
             text=(
                 '{"approves": true, "confidence": 0.85, '
@@ -91,7 +91,7 @@ class TestReviewDiff:
 
 class TestGetDiff:
     def test_git_diff_disables_external_helpers(self, monkeypatch, tmp_path):
-        from maverick.reviewer import get_diff
+        from lightwork.reviewer import get_diff
 
         repo = tmp_path / "repo"
         (repo / ".git").mkdir(parents=True)
@@ -106,7 +106,7 @@ class TestGetDiff:
             seen["kwargs"] = kwargs
             return _Proc()
 
-        monkeypatch.setattr("maverick.reviewer.subprocess.run", _fake_run)
+        monkeypatch.setattr("lightwork.reviewer.subprocess.run", _fake_run)
 
         out = get_diff(repo)
         assert out == "ok"
@@ -116,19 +116,19 @@ class TestGetDiff:
         assert "diff.textconv=false" in seen["cmd"]
 
     def test_non_repo_returns_empty(self, tmp_path):
-        from maverick.reviewer import get_diff
+        from lightwork.reviewer import get_diff
 
         assert get_diff(tmp_path) == ""
 
 
 class TestReviewVerdictRendering:
     def test_empty_pass_is_short(self):
-        from maverick.reviewer import ReviewVerdict, format_for_human
+        from lightwork.reviewer import ReviewVerdict, format_for_human
         out = format_for_human(ReviewVerdict.empty_pass())
         assert "approved" in out
 
     def test_blocker_uses_stop_icon(self):
-        from maverick.reviewer import (
+        from lightwork.reviewer import (
             ReviewComment,
             ReviewVerdict,
             format_for_human,
@@ -145,7 +145,7 @@ class TestReviewVerdictRendering:
 
 class TestMAVCombine:
     def test_three_accept_majority(self):
-        from maverick.verifier import VerifierVerdict, _combine
+        from lightwork.verifier import VerifierVerdict, _combine
         verdicts = [
             VerifierVerdict(confidence=0.9, accepts=True, critique="ok"),
             VerifierVerdict(confidence=0.8, accepts=True, critique="ok"),
@@ -158,7 +158,7 @@ class TestMAVCombine:
 
     def test_weighted_overrides_count(self):
         """Weighted: 2 accepters at 0.5 + 1 strong rejecter at 0.95 -> reject."""
-        from maverick.verifier import VerifierVerdict, _combine
+        from lightwork.verifier import VerifierVerdict, _combine
         verdicts = [
             VerifierVerdict(confidence=0.5, accepts=True, critique=""),
             VerifierVerdict(confidence=0.5, accepts=True, critique=""),
@@ -170,7 +170,7 @@ class TestMAVCombine:
         assert v.accepts is True
 
     def test_unweighted_majority_wins(self):
-        from maverick.verifier import VerifierVerdict, _combine
+        from lightwork.verifier import VerifierVerdict, _combine
         verdicts = [
             VerifierVerdict(confidence=0.5, accepts=True, critique=""),
             VerifierVerdict(confidence=0.5, accepts=True, critique=""),
@@ -180,7 +180,7 @@ class TestMAVCombine:
         assert v.accepts is True  # 2-of-3
 
     def test_issues_deduplicated_across_panel(self):
-        from maverick.verifier import VerifierVerdict, _combine
+        from lightwork.verifier import VerifierVerdict, _combine
         verdicts = [
             VerifierVerdict(confidence=0.4, accepts=False,
                             critique="x", issues=["bad math", "missing units"]),
@@ -193,13 +193,13 @@ class TestMAVCombine:
         assert sorted(v.issues) == ["bad math", "missing units", "off by one"]
 
     def test_single_verdict_passthrough(self):
-        from maverick.verifier import VerifierVerdict, _combine
+        from lightwork.verifier import VerifierVerdict, _combine
         single = VerifierVerdict(confidence=0.7, accepts=True, critique="")
         v = _combine([single], weighted=True)
         assert v is single
 
     def test_empty_panel_rejects(self):
-        from maverick.verifier import _combine
+        from lightwork.verifier import _combine
         v = _combine([], weighted=True)
         assert v.accepts is False
 
@@ -207,8 +207,8 @@ class TestMAVCombine:
 class TestVerifyEnsemble:
     @pytest.mark.asyncio
     async def test_filters_same_family_panel_members(self, fake_llm, make_llm_response):
-        from maverick.budget import Budget
-        from maverick.verifier import verify_proposal_ensemble
+        from lightwork.budget import Budget
+        from lightwork.verifier import verify_proposal_ensemble
         # Both panel members return accept; we don't care about the
         # combined result -- we care that the Anthropic panel member is
         # FILTERED OUT when proposer is Anthropic.
@@ -234,8 +234,8 @@ class TestVerifyEnsemble:
 
     @pytest.mark.asyncio
     async def test_explicit_panel_used(self, fake_llm, make_llm_response):
-        from maverick.budget import Budget
-        from maverick.verifier import verify_proposal_ensemble
+        from lightwork.budget import Budget
+        from lightwork.verifier import verify_proposal_ensemble
         fake_llm.scripted = [
             make_llm_response(
                 text='{"confidence": 0.9, "accepts": true, "critique": "", "issues": []}',

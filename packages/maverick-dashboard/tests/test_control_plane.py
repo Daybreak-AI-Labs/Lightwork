@@ -3,8 +3,8 @@ from __future__ import annotations
 
 import pytest
 from fastapi.testclient import TestClient
-from maverick_dashboard.app import app
-from maverick_dashboard.control_plane import build_replay, trust_overview
+from lightwork_dashboard.app import app
+from lightwork_dashboard.control_plane import build_replay, trust_overview
 
 client = TestClient(app, headers={"Origin": "http://testserver"})
 
@@ -12,8 +12,8 @@ client = TestClient(app, headers={"Origin": "http://testserver"})
 @pytest.fixture(autouse=True)
 def _isolated(tmp_path, monkeypatch):
     # Fresh world DB + audit dir per test (MAVERICK_HOME steers data_dir("audit")).
-    from maverick import world_model
-    from maverick.audit import writer as audit_writer
+    from lightwork import world_model
+    from lightwork.audit import writer as audit_writer
     monkeypatch.setattr(world_model, "DEFAULT_DB", tmp_path / "world.db")
     monkeypatch.setenv("MAVERICK_HOME", str(tmp_path))
     monkeypatch.delenv("MAVERICK_AUDIT_SIGN", raising=False)
@@ -27,8 +27,8 @@ def _isolated(tmp_path, monkeypatch):
 
 def _seed_run() -> int:
     """Create a goal + write a few governed audit events for it; return its id."""
-    from maverick.audit import EventKind, record
-    from maverick.world_model import open_world
+    from lightwork.audit import EventKind, record
+    from lightwork.world_model import open_world
     w = open_world()
     gid = w.create_goal("Vendor payment run")
     record(EventKind.GOAL_START, goal_id=gid, title="Vendor payment run")
@@ -76,7 +76,7 @@ def test_replay_api_and_evidence_download():
     assert r.status_code == 200
     body = r.json()
     assert body["goal"]["id"] == gid
-    assert body["artifact"] == "maverick.run_evidence"
+    assert body["artifact"] == "lightwork.run_evidence"
     assert len(body["timeline"]) >= 5
     assert "chain" in body and "summary" in body
 
@@ -101,8 +101,8 @@ def test_replay_page_renders():
 # ---- agent trust / permission graph ----------------------------------------
 
 def _fake_trust(monkeypatch, *, enforced=True):
-    import maverick.agent_trust as at
-    from maverick.agent_trust import TrustedAgent
+    import lightwork.agent_trust as at
+    from lightwork.agent_trust import TrustedAgent
     agent = TrustedAgent(
         id="vega", pubkey="ab" * 32, direction="inbound",
         allow_tools=frozenset({"read_file", "web_search"}),
@@ -135,7 +135,7 @@ def test_trust_api_and_page(monkeypatch):
 
 
 def test_trust_empty_state_does_not_error(monkeypatch):
-    import maverick.agent_trust as at
+    import lightwork.agent_trust as at
     monkeypatch.setattr(at, "load_trust_state", lambda: (False, {}))
     ov = trust_overview()
     assert ov["agents"] == []
@@ -159,7 +159,7 @@ def test_trust_graph_layout(monkeypatch):
 # ---- discovery -------------------------------------------------------------
 
 def test_discovery_overview_shape():
-    from maverick_dashboard.control_plane import discovery_overview
+    from lightwork_dashboard.control_plane import discovery_overview
     ov = discovery_overview()
     assert {"tools", "mcp_servers", "providers", "channels", "agents"} <= ov.keys()
     assert {"entries", "by_tier", "count"} <= ov["tools"].keys()
@@ -178,26 +178,26 @@ def test_discovery_page_and_api():
 
 def test_simulate_browser_pay_is_high(monkeypatch):
     monkeypatch.delenv("MAVERICK_CONSENT_MODE", raising=False)
-    from maverick_dashboard.control_plane import simulate_action
+    from lightwork_dashboard.control_plane import simulate_action
     res = simulate_action("browser", "click", "text=Pay now")
     assert res["risk"] == "high" and res["decision"]
 
 
 def test_simulate_ask_mode_requires_approval(monkeypatch):
     monkeypatch.setenv("MAVERICK_CONSENT_MODE", "ask")
-    from maverick_dashboard.control_plane import simulate_action
+    from lightwork_dashboard.control_plane import simulate_action
     res = simulate_action("browser", "click", "text=Pay now")
     assert "APPROVAL" in res["decision"].upper()
 
 
 def test_simulate_readonly_not_gated(monkeypatch):
     monkeypatch.delenv("MAVERICK_CONSENT_MODE", raising=False)
-    from maverick_dashboard.control_plane import simulate_action
+    from lightwork_dashboard.control_plane import simulate_action
     assert simulate_action("browser", "extract_text", "")["decision"] == "not gated"
 
 
 def test_simulate_unknown_surface_errors():
-    from maverick_dashboard.control_plane import simulate_action
+    from lightwork_dashboard.control_plane import simulate_action
     assert "error" in simulate_action("rocket", "launch", "")
 
 
@@ -213,9 +213,9 @@ def test_simulate_api_and_page():
 # ---- compliance packet -----------------------------------------------------
 
 def test_compliance_packet_shape():
-    from maverick_dashboard.control_plane import compliance_packet
+    from lightwork_dashboard.control_plane import compliance_packet
     pkt = compliance_packet()
-    assert pkt["artifact"] == "maverick.compliance_packet"
+    assert pkt["artifact"] == "lightwork.compliance_packet"
     assert "soc2" in pkt and "controls" in pkt and "audit_chain" in pkt
 
 
@@ -223,5 +223,5 @@ def test_compliance_packet_download():
     r = client.get("/api/v1/compliance/packet")
     assert r.status_code == 200
     cd = r.headers.get("content-disposition", "")
-    assert "attachment" in cd and "maverick-compliance-packet.json" in cd
-    assert r.json()["artifact"] == "maverick.compliance_packet"
+    assert "attachment" in cd and "lightwork-compliance-packet.json" in cd
+    assert r.json()["artifact"] == "lightwork.compliance_packet"

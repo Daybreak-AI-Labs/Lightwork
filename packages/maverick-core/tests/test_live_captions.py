@@ -4,7 +4,7 @@ from __future__ import annotations
 import asyncio
 
 import pytest
-from maverick import live_captions as lc
+from lightwork import live_captions as lc
 
 
 def test_window_accumulates_finalized_segments():

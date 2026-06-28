@@ -7,7 +7,7 @@ physical-world suites, so a future edit can't quietly drop a prohibition.
 """
 from __future__ import annotations
 
-from maverick.domain_refusals import (
+from lightwork.domain_refusals import (
     SUITE_REFUSALS,
     UNIVERSAL,
     refusals_for,

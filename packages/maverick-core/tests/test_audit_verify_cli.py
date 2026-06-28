@@ -17,7 +17,7 @@ from datetime import datetime, timezone
 
 import pytest
 from click.testing import CliRunner
-from maverick.cli import main
+from lightwork.cli import main
 
 _HAVE_CRYPTO = True
 try:  # match the kernel's fail-soft crypto convention
@@ -37,10 +37,10 @@ def _isolate_home(monkeypatch, tmp_path):
     """
     monkeypatch.setenv("HOME", str(tmp_path))
     monkeypatch.setenv("USERPROFILE", str(tmp_path))  # Windows parity
-    from maverick.audit import signing
+    from lightwork.audit import signing
 
     monkeypatch.setattr(signing, "KEY_DIR", signing._LEGACY_KEY_DIR)
-    from maverick import paths
+    from lightwork import paths
 
     return paths.data_dir("audit")
 
@@ -51,8 +51,8 @@ def _today() -> str:
 
 def _write_signed_events(audit_dir, n=3):
     """Write ``n`` real signed + chained events into today's day-file."""
-    from maverick.audit.events import AuditEvent
-    from maverick.audit.writer import AuditLog
+    from lightwork.audit.events import AuditEvent
+    from lightwork.audit.writer import AuditLog
 
     log = AuditLog(audit_dir, sign=True)
     for i in range(n):
@@ -132,7 +132,7 @@ def test_verify_reports_no_crypto_state_and_exits_one(tmp_path, monkeypatch):
     ``cryptography``.
     """
     _isolate_home(monkeypatch, tmp_path)
-    from maverick.audit import signing
+    from lightwork.audit import signing
 
     monkeypatch.setattr(signing, "_have_crypto", lambda: False)
 

@@ -30,8 +30,8 @@ from __future__ import annotations
 import random
 
 import pytest
-from maverick import self_harness as sh
-from maverick import self_improvement as si
+from lightwork import self_harness as sh
+from lightwork import self_improvement as si
 
 CLASSES = ["auth_timeout", "schema_drift", "rate_limit", "pagination_bug", "retry_storm"]
 CONTROL = "unmined_flake"          # never taught -> must never improve

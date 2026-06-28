@@ -2,7 +2,7 @@
 fake transport; tokens are never echoed."""
 from __future__ import annotations
 
-from maverick.tools.oauth_helper import oauth_helper
+from lightwork.tools.oauth_helper import oauth_helper
 
 
 def _t():
@@ -20,7 +20,7 @@ def test_authorize_url_includes_pkce():
 
 
 def test_exchange_summarises_never_echoes(monkeypatch, tmp_path):
-    import maverick.tools.oauth_helper as mod
+    import lightwork.tools.oauth_helper as mod
     captured = {}
 
     def fake_post(url, data):
@@ -46,7 +46,7 @@ def test_exchange_summarises_never_echoes(monkeypatch, tmp_path):
 
 
 def test_exchange_without_outfile_hints(monkeypatch):
-    import maverick.tools.oauth_helper as mod
+    import lightwork.tools.oauth_helper as mod
     monkeypatch.setattr(mod, "_post_form",
                         lambda url, data: {"access_token": "tok"})
     monkeypatch.delenv("MAVERICK_OAUTH_OUT", raising=False)
@@ -56,7 +56,7 @@ def test_exchange_without_outfile_hints(monkeypatch):
 
 
 def test_refresh(monkeypatch):
-    import maverick.tools.oauth_helper as mod
+    import lightwork.tools.oauth_helper as mod
     captured = {}
 
     def fake_post(url, data):
@@ -77,8 +77,8 @@ def test_exchange_seals_to_vault_when_enabled(monkeypatch, tmp_path):
     import pytest
     if importlib.util.find_spec("cryptography") is None:
         pytest.skip("cryptography extra not installed")
-    import maverick.tools.oauth_helper as mod
-    from maverick.tenant import kms
+    import lightwork.tools.oauth_helper as mod
+    from lightwork.tenant import kms
     monkeypatch.setenv("HOME", str(tmp_path))
     monkeypatch.setenv("MAVERICK_HOME", str(tmp_path))
     monkeypatch.setenv("MAVERICK_KMS_KEK", "cd" * 32)
@@ -93,12 +93,12 @@ def test_exchange_seals_to_vault_when_enabled(monkeypatch, tmp_path):
     assert "vaulted-secret" not in out          # never echoed
     assert "sealed in the per-tenant OAuth vault" in out
     # Stored sealed and retrievable via the vault, not via a plaintext file.
-    from maverick.oauth_vault import get_vault
+    from lightwork.oauth_vault import get_vault
     assert get_vault().get("notion")["access_token"] == "vaulted-secret"
 
 
 def test_errors_shaped(monkeypatch):
-    import maverick.tools.oauth_helper as mod
+    import lightwork.tools.oauth_helper as mod
     t = _t()
     assert t.fn({"op": "authorize_url"}).startswith("ERROR")
     assert t.fn({"op": "exchange", "token_url": "u"}).startswith("ERROR")
@@ -111,7 +111,7 @@ def test_errors_shaped(monkeypatch):
 
 
 def test_no_access_token_error_does_not_echo_response(monkeypatch):
-    import maverick.tools.oauth_helper as mod
+    import lightwork.tools.oauth_helper as mod
 
     monkeypatch.setattr(mod, "_post_form",
                         lambda url, data: {"internal_secret": "IMDS-ROLE-CREDS-ABC123"})  # pragma: allowlist secret
@@ -122,7 +122,7 @@ def test_no_access_token_error_does_not_echo_response(monkeypatch):
 
 
 def test_token_post_requires_https_before_network():
-    import maverick.tools.oauth_helper as mod
+    import lightwork.tools.oauth_helper as mod
     import pytest
 
     with pytest.raises(ValueError, match="token_url must be https"):
@@ -132,9 +132,9 @@ def test_token_post_requires_https_before_network():
 def test_token_post_rejects_private_resolved_host(monkeypatch):
     import socket
 
-    import maverick.tools.oauth_helper as mod
+    import lightwork.tools.oauth_helper as mod
     import pytest
-    from maverick.tools._ssrf import BlockedHost
+    from lightwork.tools._ssrf import BlockedHost
 
     monkeypatch.setattr(
         socket,
@@ -146,7 +146,7 @@ def test_token_post_rejects_private_resolved_host(monkeypatch):
 
 
 def test_registered():
-    from maverick.tools import base_registry
+    from lightwork.tools import base_registry
 
     class _W:
         pass
@@ -159,7 +159,7 @@ def test_registered():
 
 
 def test_vault_enabled_requires_provider_without_plaintext_fallback(monkeypatch, tmp_path):
-    import maverick.tools.oauth_helper as mod
+    import lightwork.tools.oauth_helper as mod
 
     out_file = tmp_path / "tokens.json"
     monkeypatch.setenv("MAVERICK_OAUTH_VAULT", "1")
@@ -177,8 +177,8 @@ def test_vault_enabled_requires_provider_without_plaintext_fallback(monkeypatch,
 
 
 def test_vault_failure_does_not_plaintext_fallback(monkeypatch, tmp_path):
-    import maverick.oauth_vault as vault
-    import maverick.tools.oauth_helper as mod
+    import lightwork.oauth_vault as vault
+    import lightwork.tools.oauth_helper as mod
 
     out_file = tmp_path / "tokens.json"
     monkeypatch.setenv("MAVERICK_OAUTH_VAULT", "1")

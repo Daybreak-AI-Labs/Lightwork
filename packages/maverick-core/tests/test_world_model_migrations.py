@@ -18,7 +18,7 @@ from __future__ import annotations
 import sqlite3
 import time
 
-from maverick.world_model import SCHEMA_VERSION, WorldModel
+from lightwork.world_model import SCHEMA_VERSION, WorldModel
 
 V1_SCHEMA = """
 CREATE TABLE schema_version (version INTEGER PRIMARY KEY);
@@ -132,7 +132,7 @@ def test_pre_migration_backup_skipped_for_fresh_db(tmp_path):
 
 def test_pre_migration_backup_can_be_disabled(tmp_path, monkeypatch):
     """[world_model] pre_migration_backup = false opts out."""
-    import maverick.config as cfg
+    import lightwork.config as cfg
     db = tmp_path / "world.db"
     _build_legacy_db(db)
     monkeypatch.setattr(
@@ -249,7 +249,7 @@ def test_prune_goal_events(tmp_path):
 
 
 def test_recent_goal_events_returns_tail_in_chronological_order(tmp_path):
-    from maverick.world_model import WorldModel
+    from lightwork.world_model import WorldModel
 
     wm = WorldModel(tmp_path / "world.db")
     gid = wm.create_goal("long run")

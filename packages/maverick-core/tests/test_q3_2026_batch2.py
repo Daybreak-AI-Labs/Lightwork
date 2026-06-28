@@ -11,7 +11,7 @@ from unittest.mock import MagicMock
 
 def test_podman_verify_missing(tmp_path, monkeypatch):
     """No podman binary on PATH -> RuntimeError with actionable msg."""
-    from maverick.sandbox.podman import PodmanBackend
+    from lightwork.sandbox.podman import PodmanBackend
 
     def _no_podman(args, *a, **k):
         if args and args[0] == "podman":
@@ -28,7 +28,7 @@ def test_podman_verify_missing(tmp_path, monkeypatch):
 
 
 def test_podman_exec_runs_container(tmp_path, monkeypatch):
-    from maverick.sandbox.podman import PodmanBackend
+    from lightwork.sandbox.podman import PodmanBackend
 
     calls = {"n": 0, "args": []}
 
@@ -54,7 +54,7 @@ def test_podman_exec_runs_container(tmp_path, monkeypatch):
 
 
 def test_podman_allows_network_when_flag_set(tmp_path, monkeypatch):
-    from maverick.sandbox.podman import PodmanBackend
+    from lightwork.sandbox.podman import PodmanBackend
 
     captured = {"args": None}
 
@@ -76,8 +76,8 @@ def test_build_sandbox_constructs_podman(monkeypatch, tmp_path):
         lambda args, *a, **k: MagicMock(returncode=0, stdout=b"", stderr=b""),
     )
     # Monkeypatch config so backend = "podman" without writing a real file.
-    import maverick.config as cfg
-    from maverick.sandbox import build_sandbox
+    import lightwork.config as cfg
+    from lightwork.sandbox import build_sandbox
 
     def _fake_cfg():
         return {"sandbox": {"backend": "podman", "workdir": str(tmp_path),
@@ -92,12 +92,12 @@ def test_build_sandbox_constructs_podman(monkeypatch, tmp_path):
 # ---------- GitLab tool ----------
 
 def test_gitlab_requires_op():
-    from maverick.tools.gitlab import gitlab
+    from lightwork.tools.gitlab import gitlab
     assert "op is required" in gitlab().fn({})
 
 
 def test_gitlab_unknown_op():
-    from maverick.tools.gitlab import gitlab
+    from lightwork.tools.gitlab import gitlab
     out = gitlab().fn({"op": "wat"})
     assert "unknown op" in out or "ERROR" in out
 
@@ -107,7 +107,7 @@ def test_gitlab_missing_token(monkeypatch):
     fake = types.ModuleType("httpx")
     fake.Client = MagicMock()
     monkeypatch.setitem(sys.modules, "httpx", fake)
-    from maverick.tools.gitlab import gitlab
+    from lightwork.tools.gitlab import gitlab
     out = gitlab().fn({"op": "issues", "project": "group/repo"})
     assert "GITLAB_TOKEN" in out
 
@@ -129,7 +129,7 @@ def test_gitlab_issues_list_calls_rest(monkeypatch):
     fake_httpx.Client = MagicMock(return_value=fake_client)
     monkeypatch.setitem(sys.modules, "httpx", fake_httpx)
 
-    from maverick.tools.gitlab import gitlab
+    from lightwork.tools.gitlab import gitlab
     out = gitlab().fn({"op": "issues", "project": "group/repo"})
     assert "Crash on save" in out and "Improve docs" in out
     assert "opened" in out
@@ -159,7 +159,7 @@ def test_gitlab_issues_follows_next_page_header(monkeypatch):
     fake_httpx.Client = MagicMock(return_value=fake_client)
     monkeypatch.setitem(sys.modules, "httpx", fake_httpx)
 
-    from maverick.tools.gitlab import gitlab
+    from lightwork.tools.gitlab import gitlab
     out = gitlab().fn({"op": "issues", "project": "g/r", "limit": 50})
     assert "Page one issue" in out and "Page two issue" in out
     assert fake_client.get.call_count == 2
@@ -179,7 +179,7 @@ def test_gitlab_issue_get_404(monkeypatch):
     fake_httpx.Client = MagicMock(return_value=fake_client)
     monkeypatch.setitem(sys.modules, "httpx", fake_httpx)
 
-    from maverick.tools.gitlab import gitlab
+    from lightwork.tools.gitlab import gitlab
     out = gitlab().fn({"op": "issue_get", "project": "g/r", "iid": 999})
     assert "not found" in out
 
@@ -204,7 +204,7 @@ def test_gitlab_pipeline_get_renders(monkeypatch):
     fake_httpx.Client = MagicMock(return_value=fake_client)
     monkeypatch.setitem(sys.modules, "httpx", fake_httpx)
 
-    from maverick.tools.gitlab import gitlab
+    from lightwork.tools.gitlab import gitlab
     out = gitlab().fn({"op": "pipeline_get", "project": "g/r", "pipeline_id": 42})
     assert "success" in out and "main" in out
     assert "abc123def456"[:12] in out
@@ -213,14 +213,14 @@ def test_gitlab_pipeline_get_renders(monkeypatch):
 # ---------- embeddings tool ----------
 
 def test_embeddings_requires_op():
-    from maverick.tools.embeddings import embeddings
+    from lightwork.tools.embeddings import embeddings
     assert "op is required" in embeddings().fn({})
 
 
 def test_embeddings_missing_fastembed(monkeypatch):
     # Force ImportError even if fastembed is somehow installed.
     monkeypatch.setitem(sys.modules, "fastembed", None)
-    from maverick.tools.embeddings import embeddings
+    from lightwork.tools.embeddings import embeddings
     out = embeddings().fn({"op": "embed", "text": "hello"})
     assert "fastembed not installed" in out
 
@@ -240,7 +240,7 @@ def test_embeddings_embed_uses_fastembed(monkeypatch):
     fake_emb.TextEmbedding = _FakeModel
     monkeypatch.setitem(sys.modules, "fastembed", fake_emb)
     # Reset the cache so the new fake gets picked up.
-    from maverick.tools import embeddings as embmod
+    from lightwork.tools import embeddings as embmod
     embmod._model_cache.clear()
 
     out = embmod.embeddings().fn({"op": "embed", "text": "hello"})
@@ -266,7 +266,7 @@ def test_embeddings_similarity_cosine(monkeypatch):
 
     fake_emb.TextEmbedding = _FakeModel
     monkeypatch.setitem(sys.modules, "fastembed", fake_emb)
-    from maverick.tools import embeddings as embmod
+    from lightwork.tools import embeddings as embmod
     embmod._model_cache.clear()
 
     out = embmod.embeddings().fn(
@@ -295,7 +295,7 @@ def test_embeddings_rank_orders_by_similarity(monkeypatch):
 
     fake_emb.TextEmbedding = _FakeModel
     monkeypatch.setitem(sys.modules, "fastembed", fake_emb)
-    from maverick.tools import embeddings as embmod
+    from lightwork.tools import embeddings as embmod
     embmod._model_cache.clear()
 
     out = embmod.embeddings().fn({
@@ -312,7 +312,7 @@ def test_embeddings_rank_orders_by_similarity(monkeypatch):
 # ---------- provider health ----------
 
 def test_provider_health_records_calls():
-    from maverick.provider_health import ProviderHealth
+    from lightwork.provider_health import ProviderHealth
     ph = ProviderHealth()
     ph.record("openai", "gpt-5", latency_ms=120, dollars=0.001)
     ph.record("openai", "gpt-5", latency_ms=200, dollars=0.002)
@@ -332,7 +332,7 @@ def test_provider_health_records_calls():
 
 
 def test_provider_health_snapshot_sorts_by_calls():
-    from maverick.provider_health import ProviderHealth
+    from lightwork.provider_health import ProviderHealth
     ph = ProviderHealth()
     for _ in range(2):
         ph.record("a", "m1", latency_ms=10)
@@ -343,7 +343,7 @@ def test_provider_health_snapshot_sorts_by_calls():
 
 
 def test_provider_health_reset_clears():
-    from maverick.provider_health import ProviderHealth
+    from lightwork.provider_health import ProviderHealth
     ph = ProviderHealth()
     ph.record("x", "y", latency_ms=1)
     assert ph.snapshot()
@@ -352,7 +352,7 @@ def test_provider_health_reset_clears():
 
 
 def test_provider_health_singleton_is_shared():
-    from maverick.provider_health import get
+    from lightwork.provider_health import get
     a = get()
     b = get()
     assert a is b
@@ -362,9 +362,9 @@ def test_provider_health_singleton_is_shared():
 
 def test_cost_router_disabled_returns_none(monkeypatch):
     monkeypatch.delenv("MAVERICK_COST_ROUTING", raising=False)
-    import maverick.config as cfg
+    import lightwork.config as cfg
     monkeypatch.setattr(cfg, "load_config", dict)
-    from maverick.cost.router import CostSignal, pick
+    from lightwork.cost.router import CostSignal, pick
     assert pick(CostSignal(role="proposer")) is None
 
 
@@ -378,10 +378,10 @@ def test_cost_router_picks_cheapest_available(monkeypatch):
     monkeypatch.delenv("XAI_API_KEY", raising=False)
     monkeypatch.delenv("GEMINI_API_KEY", raising=False)
 
-    import maverick.config as cfg
+    import lightwork.config as cfg
     monkeypatch.setattr(cfg, "load_config", dict)
 
-    from maverick.cost.router import TIER_CHEAP, CostSignal, pick
+    from lightwork.cost.router import TIER_CHEAP, CostSignal, pick
     spec = pick(CostSignal(tier=TIER_CHEAP))
     assert spec is not None
     assert spec.startswith("deepseek:")
@@ -393,10 +393,10 @@ def test_cost_router_falls_back_when_no_provider_configured(monkeypatch):
               "MOONSHOT_API_KEY", "XAI_API_KEY", "GROK_API_KEY",
               "GEMINI_API_KEY", "GOOGLE_API_KEY"):
         monkeypatch.delenv(k, raising=False)
-    import maverick.config as cfg
+    import lightwork.config as cfg
     monkeypatch.setattr(cfg, "load_config", dict)
 
-    from maverick.cost.router import CostSignal, pick
+    from lightwork.cost.router import CostSignal, pick
     # When no provider has usable credentials, the picker returns None so
     # model_for_role() defers to the role defaults. Picking a provider we
     # have no key for would only blow up later at client construction.
@@ -412,12 +412,12 @@ def test_cost_router_avoids_high_error_provider(monkeypatch):
     monkeypatch.delenv("GEMINI_API_KEY", raising=False)
     monkeypatch.delenv("MOONSHOT_API_KEY", raising=False)
     monkeypatch.delenv("XAI_API_KEY", raising=False)
-    import maverick.config as cfg
+    import lightwork.config as cfg
     monkeypatch.setattr(cfg, "load_config", dict)
 
     # Poison deepseek with errors. With penalty factor (1 + 5 * 1.0) = 6x
     # cost surcharge, even DeepSeek's cheapness should be overridden.
-    from maverick.provider_health import get as _h
+    from lightwork.provider_health import get as _h
     # Use the real singleton — reset it so we can install our pattern.
     ph = _h()
     ph.reset()
@@ -425,7 +425,7 @@ def test_cost_router_avoids_high_error_provider(monkeypatch):
         ph.record("deepseek", "deepseek-chat",
                   latency_ms=100, error=True)
     try:
-        from maverick.cost.router import TIER_CHEAP, CostSignal, pick
+        from lightwork.cost.router import TIER_CHEAP, CostSignal, pick
         spec = pick(CostSignal(tier=TIER_CHEAP))
         assert spec is not None
         # Errored model itself should not be the pick (within-brand
@@ -439,9 +439,9 @@ def test_cost_router_avoids_high_error_provider(monkeypatch):
 
 def test_llm_complete_records_provider_health(monkeypatch):
     """A successful LLM call updates provider_health."""
-    from maverick.budget import Budget
-    from maverick.llm import LLM
-    from maverick.provider_health import get as _h
+    from lightwork.budget import Budget
+    from lightwork.llm import LLM
+    from lightwork.provider_health import get as _h
 
     _h().reset()
 
@@ -477,8 +477,8 @@ def test_llm_complete_records_provider_health(monkeypatch):
 
 
 def test_llm_complete_records_error(monkeypatch):
-    from maverick.llm import LLM
-    from maverick.provider_health import get as _h
+    from lightwork.llm import LLM
+    from lightwork.provider_health import get as _h
 
     _h().reset()
 
@@ -502,8 +502,8 @@ def test_llm_complete_records_error(monkeypatch):
 # ---------- registration smoke ----------
 
 def test_gitlab_and_embeddings_register(tmp_path):
-    from maverick.sandbox.local import LocalBackend
-    from maverick.tools import base_registry
+    from lightwork.sandbox.local import LocalBackend
+    from lightwork.tools import base_registry
 
     class _W:
         def open_questions(self, gid):
@@ -516,7 +516,7 @@ def test_gitlab_and_embeddings_register(tmp_path):
 
 
 def test_local_backend_strips_gitlab_token(monkeypatch, tmp_path):
-    from maverick.sandbox.local import LocalBackend
+    from lightwork.sandbox.local import LocalBackend
     monkeypatch.setenv("GITLAB_TOKEN", "glpat_test_secret")
     sb = LocalBackend(workdir=tmp_path)
     out = sb.exec("printf %s \"${GITLAB_TOKEN:-missing}\"")
@@ -532,14 +532,14 @@ def test_cost_router_respects_routing_provider_allowlist(monkeypatch):
               "GROK_API_KEY", "GEMINI_API_KEY", "GOOGLE_API_KEY"):
         monkeypatch.delenv(k, raising=False)
 
-    import maverick.config as cfg
+    import lightwork.config as cfg
     monkeypatch.setattr(
         cfg,
         "load_config",
         lambda: {"routing": {"allowed_providers": ["anthropic"]}},
     )
 
-    from maverick.cost.router import TIER_BASE, CostSignal, pick
+    from lightwork.cost.router import TIER_BASE, CostSignal, pick
 
     spec = pick(CostSignal(tier=TIER_BASE))
     assert spec is not None

@@ -12,7 +12,7 @@ TestClient = pytest.importorskip("fastapi.testclient").TestClient
 def world_with_tree(tmp_path, monkeypatch):
     """A WorldModel with a small parent/child goal tree + episodes."""
     monkeypatch.setenv("HOME", str(tmp_path))
-    from maverick.world_model import WorldModel
+    from lightwork.world_model import WorldModel
     db_path = tmp_path / "world.db"
     w = WorldModel(db_path)
     # Root + 2 children + 1 grandchild + episodes for cost rollup.
@@ -46,7 +46,7 @@ def world_with_tree(tmp_path, monkeypatch):
 def client(world_with_tree, monkeypatch):
     """Wired-up TestClient sharing the same world db as the fixture."""
     # Patch the dashboard's _world() to point at our test db.
-    from maverick_dashboard import app as app_mod
+    from lightwork_dashboard import app as app_mod
     w, g1, g2, g3, g4 = world_with_tree
     monkeypatch.setattr(app_mod, "_world", lambda: w)
     return TestClient(app_mod.app)

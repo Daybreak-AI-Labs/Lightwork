@@ -11,7 +11,7 @@ from __future__ import annotations
 import json
 
 import pytest
-from maverick.sandbox.devcontainer import _parse_devcontainer
+from lightwork.sandbox.devcontainer import _parse_devcontainer
 
 
 def _write_devcontainer(tmp_path, image):

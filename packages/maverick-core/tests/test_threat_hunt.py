@@ -3,9 +3,9 @@ from __future__ import annotations
 
 import pytest
 from click.testing import CliRunner
-from maverick import threat_hunt
-from maverick.audit import export
-from maverick.cli import main
+from lightwork import threat_hunt
+from lightwork.audit import export
+from lightwork.cli import main
 
 _EVENTS = [
     {"kind": "shield_block", "agent": "a1", "ts": 100.0, "reason": "injection"},

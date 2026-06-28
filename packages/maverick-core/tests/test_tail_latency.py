@@ -1,7 +1,7 @@
 """Tail-latency hunting: flag fat-tailed tools by p99/p50 ratio."""
 from __future__ import annotations
 
-from maverick import tail_latency as tl
+from lightwork import tail_latency as tl
 
 
 def _row(tool, count, p50, p99):
@@ -50,6 +50,6 @@ def test_hunt_over_live_report_is_empty_by_default():
     # first so this test is hermetic: in the full suite other tests record
     # tool latencies into that module global, so without the reset this
     # order-dependently sees a non-empty live report and fails.
-    from maverick import tool_latency
+    from lightwork import tool_latency
     tool_latency.reset()
     assert tl.hunt() == []

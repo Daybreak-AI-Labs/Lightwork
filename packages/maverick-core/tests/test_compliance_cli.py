@@ -3,7 +3,7 @@ from __future__ import annotations
 
 import pytest
 from click.testing import CliRunner
-from maverick.cli import main
+from lightwork.cli import main
 
 
 @pytest.fixture(autouse=True)
@@ -13,7 +13,7 @@ def _clean(monkeypatch):
         "MAVERICK_ENCRYPT_AT_REST", "MAVERICK_AI_DISCLOSURE",
     ):
         monkeypatch.delenv(var, raising=False)
-    monkeypatch.setattr("maverick.config.load_config", lambda *a, **k: {})
+    monkeypatch.setattr("lightwork.config.load_config", lambda *a, **k: {})
 
 
 def test_compliance_reports_and_exits_zero_without_strict():

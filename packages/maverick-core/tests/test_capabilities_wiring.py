@@ -9,13 +9,13 @@ from __future__ import annotations
 
 from pathlib import Path
 
-from maverick.agent import Agent
-from maverick.blackboard import Blackboard
-from maverick.budget import Budget
-from maverick.config import get_capabilities
-from maverick.sandbox import LocalBackend
-from maverick.swarm import SwarmContext
-from maverick.world_model import WorldModel
+from lightwork.agent import Agent
+from lightwork.blackboard import Blackboard
+from lightwork.budget import Budget
+from lightwork.config import get_capabilities
+from lightwork.sandbox import LocalBackend
+from lightwork.swarm import SwarmContext
+from lightwork.world_model import WorldModel
 
 
 def _write_caps(tmp_path: Path, body: str) -> None:

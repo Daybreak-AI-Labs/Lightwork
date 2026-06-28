@@ -4,7 +4,7 @@ from __future__ import annotations
 from dataclasses import dataclass
 
 import pytest
-from maverick.grpc_api.service import EventDTO, GoalService
+from lightwork.grpc_api.service import EventDTO, GoalService
 
 
 @dataclass

@@ -1,7 +1,7 @@
 """Real-time (online) anomaly detection: rolling z-score spike flagging."""
 from __future__ import annotations
 
-from maverick.realtime_anomaly import RollingAnomalyDetector, StreamMonitor
+from lightwork.realtime_anomaly import RollingAnomalyDetector, StreamMonitor
 
 
 def test_warmup_never_flags():

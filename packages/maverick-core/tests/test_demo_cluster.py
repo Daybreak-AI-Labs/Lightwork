@@ -50,7 +50,7 @@ def test_seed_script_compiles_and_uses_the_real_world_model_api():
     path = _DC / "seed_demo.py"
     source = path.read_text()
     compile(source, str(path), "exec")  # raises on syntax errors
-    assert "from maverick.world_model import" in source
+    assert "from lightwork.world_model import" in source
     assert "create_goal" in source and "set_goal_status" in source
     assert 'owner="demo"' in source
     # Only statuses the world model actually writes; nothing left 'active'.
@@ -90,11 +90,11 @@ def test_readme_documents_the_honest_posture():
     assert "path-allowlist" in text
     assert "method-only" in text
     assert "limit_except" in text
-    assert "TLS" in text and "demo.maverick.dev" in text
+    assert "TLS" in text and "demo.lightwork.dev" in text
 
 
 def test_dashboard_public_demo_route_is_redacted():
-    text = (_REPO_ROOT / "packages" / "maverick-dashboard" / "maverick_dashboard" / "app.py").read_text()
+    text = (_REPO_ROOT / "packages" / "lightwork-dashboard" / "lightwork_dashboard" / "app.py").read_text()
     assert '@app.get("/demo", response_class=HTMLResponse)' in text
     assert 'owner="demo"' in text
     route = text[text.index('async def public_demo'):text.index('@app.get("/overview", response_class=HTMLResponse)')]

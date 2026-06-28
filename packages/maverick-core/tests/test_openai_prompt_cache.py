@@ -13,7 +13,7 @@ from __future__ import annotations
 import sys
 
 import pytest
-from maverick.providers.openai_provider import OpenAIClient
+from lightwork.providers.openai_provider import OpenAIClient
 
 
 class _FakeClient:

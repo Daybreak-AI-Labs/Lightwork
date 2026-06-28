@@ -11,7 +11,7 @@ TestClient = pytest.importorskip("fastapi.testclient").TestClient
 
 
 def _no_provider_env(monkeypatch):
-    from maverick import config
+    from lightwork import config
     for v in config.PROVIDER_KEY_ENV_VARS + config.PROVIDER_BASE_URL_ENV_VARS:
         monkeypatch.delenv(v, raising=False)
     for v in ("GOOGLE_API_KEY", "GROK_API_KEY"):
@@ -21,8 +21,8 @@ def _no_provider_env(monkeypatch):
 def test_provider_key_overlay_unblocks(monkeypatch, tmp_path):
     monkeypatch.setenv("HOME", str(tmp_path))
     _no_provider_env(monkeypatch)
-    from maverick import config
-    from maverick_dashboard import settings_store
+    from lightwork import config
+    from lightwork_dashboard import settings_store
     assert config.any_provider_configured() is False
     settings_store.set_provider("anthropic", api_key="sk-test-123456")  # pragma: allowlist secret
     assert config.dashboard_overrides_path().exists()
@@ -35,8 +35,8 @@ def test_provider_key_overlay_unblocks(monkeypatch, tmp_path):
 
 def test_toggle_overlay_reflected(monkeypatch, tmp_path):
     monkeypatch.setenv("HOME", str(tmp_path))
-    from maverick import config
-    from maverick_dashboard import settings_store
+    from lightwork import config
+    from lightwork_dashboard import settings_store
     assert config.get_capabilities()["web_search"] is False
     settings_store.set_toggle("capabilities", "web_search", True)
     assert config.get_capabilities()["web_search"] is True
@@ -46,10 +46,10 @@ def test_toggle_overlay_reflected(monkeypatch, tmp_path):
 
 def _client(monkeypatch, tmp_path):
     monkeypatch.setenv("HOME", str(tmp_path))
-    from maverick import world_model
+    from lightwork import world_model
     monkeypatch.setattr(world_model, "DEFAULT_DB", tmp_path / "world.db")
     monkeypatch.delenv("MAVERICK_DASHBOARD_TOKEN", raising=False)
-    from maverick_dashboard import app as dash_app
+    from lightwork_dashboard import app as dash_app
     dash_app._world_cache.clear()
     return TestClient(dash_app.app, headers={"Origin": "http://testserver"})
 
@@ -67,7 +67,7 @@ def test_settings_page_has_provider_entry_and_toggles(monkeypatch, tmp_path):
 def test_provider_post_redacts_and_persists(monkeypatch, tmp_path):
     _no_provider_env(monkeypatch)
     c = _client(monkeypatch, tmp_path)
-    from maverick import config
+    from lightwork import config
     assert c.post("/settings/providers",
                   data={"provider": "openai", "api_key": "sk-secret-abcd9999"}).status_code == 200  # pragma: allowlist secret
     assert config.get_provider_config("openai")["api_key"] == "sk-secret-abcd9999"  # pragma: allowlist secret
@@ -78,7 +78,7 @@ def test_provider_post_redacts_and_persists(monkeypatch, tmp_path):
 
 def test_toggle_endpoints(monkeypatch, tmp_path):
     c = _client(monkeypatch, tmp_path)
-    from maverick import config
+    from lightwork import config
     assert c.post("/settings/capabilities", data={"browser": "on"}).status_code == 200
     assert config.get_capabilities()["browser"] is True
     # an unchecked box is omitted from the form -> deactivated on save
@@ -93,7 +93,7 @@ def test_concurrent_provider_and_toggle_both_apply(monkeypatch, tmp_path):
 
     monkeypatch.setenv("HOME", str(tmp_path))
     _no_provider_env(monkeypatch)
-    from maverick_dashboard import settings_store
+    from lightwork_dashboard import settings_store
 
     barrier = threading.Barrier(2)
 

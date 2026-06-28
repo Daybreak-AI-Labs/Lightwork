@@ -18,7 +18,7 @@ import json
 import sys
 from types import SimpleNamespace
 
-from maverick_mcp.server import _ELICIT_ANSWER_SCHEMA, MCPServer
+from lightwork_mcp.server import _ELICIT_ANSWER_SCHEMA, MCPServer
 
 
 def _stdin(*messages: dict) -> io.StringIO:
@@ -155,7 +155,7 @@ class _FakeWorld:
 
 def test_drain_elicits_answers_and_resumes(monkeypatch):
     fake = _FakeWorld([_Q(1, 5, "Which branch?")])
-    monkeypatch.setattr("maverick.world_model.WorldModel", lambda *a, **k: fake)
+    monkeypatch.setattr("lightwork.world_model.WorldModel", lambda *a, **k: fake)
     monkeypatch.setattr(sys, "stdin", _stdin(
         {"jsonrpc": "2.0", "id": "elicit-1",
          "result": {"action": "accept", "content": {"answer": "main"}}}))
@@ -177,7 +177,7 @@ def test_drain_elicits_answers_and_resumes(monkeypatch):
 
 def test_drain_preserves_original_resume_limits(monkeypatch):
     fake = _FakeWorld([_Q(1, 5, "Which branch?")])
-    monkeypatch.setattr("maverick.world_model.WorldModel", lambda *a, **k: fake)
+    monkeypatch.setattr("lightwork.world_model.WorldModel", lambda *a, **k: fake)
     monkeypatch.setattr(sys, "stdin", _stdin(
         {"jsonrpc": "2.0", "id": "elicit-1",
          "result": {"action": "accept", "content": {"answer": "main"}}}))
@@ -208,7 +208,7 @@ def test_drain_preserves_original_resume_limits(monkeypatch):
 
 def test_drain_decline_leaves_question_parked(monkeypatch):
     fake = _FakeWorld([_Q(1, 5, "Which branch?")])
-    monkeypatch.setattr("maverick.world_model.WorldModel", lambda *a, **k: fake)
+    monkeypatch.setattr("lightwork.world_model.WorldModel", lambda *a, **k: fake)
     monkeypatch.setattr(sys, "stdin", _stdin(
         {"jsonrpc": "2.0", "id": "elicit-1", "result": {"action": "decline"}}))
     s = _capable()
@@ -225,7 +225,7 @@ def test_drain_decline_leaves_question_parked(monkeypatch):
 def test_drain_only_targets_its_own_goal(monkeypatch):
     # A question parked under a different goal must not be elicited here.
     fake = _FakeWorld([_Q(7, 999, "other goal's question")])
-    monkeypatch.setattr("maverick.world_model.WorldModel", lambda *a, **k: fake)
+    monkeypatch.setattr("lightwork.world_model.WorldModel", lambda *a, **k: fake)
     s = _capable()
     s._structured_override = {"goal_id": 5}
     sent: list[dict] = []
@@ -239,7 +239,7 @@ def test_drain_noop_without_capability(monkeypatch):
     def boom(*_a, **_k):
         raise AssertionError("WorldModel must not be touched without elicitation")
 
-    monkeypatch.setattr("maverick.world_model.WorldModel", boom)
+    monkeypatch.setattr("lightwork.world_model.WorldModel", boom)
     s = MCPServer()
     s._stdio = False
     s._client_capabilities = {"elicitation": {}}
@@ -255,7 +255,7 @@ def test_run_loop_elicits_then_resumes_in_one_call(monkeypatch):
     elicitation/create -> the client's response (already queued on stdin) is
     consumed by the nested read -> resume -> single tools/call result."""
     fake = _FakeWorld([_Q(1, 5, "Which branch?")])
-    monkeypatch.setattr("maverick.world_model.WorldModel", lambda *a, **k: fake)
+    monkeypatch.setattr("lightwork.world_model.WorldModel", lambda *a, **k: fake)
 
     s = MCPServer()
 

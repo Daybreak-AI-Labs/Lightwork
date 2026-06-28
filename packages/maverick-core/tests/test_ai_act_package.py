@@ -3,7 +3,7 @@ from __future__ import annotations
 
 import json
 
-from maverick import ai_act_package as pkg
+from lightwork import ai_act_package as pkg
 
 
 def test_build_package_shape(tmp_path, monkeypatch):
@@ -27,7 +27,7 @@ def test_render_says_no_evidence_when_absent(tmp_path, monkeypatch):
 
 def test_render_embeds_present_evidence(tmp_path, monkeypatch):
     monkeypatch.setenv("MAVERICK_HOME", str(tmp_path / "home"))
-    from maverick.paths import data_dir
+    from lightwork.paths import data_dir
     cert = data_dir("reliability_cert.json")
     cert.parent.mkdir(parents=True, exist_ok=True)
     cert.write_text(json.dumps({"passed": True, "checks": {}}), encoding="utf-8")
@@ -54,7 +54,7 @@ def test_oversight_consent_mode_matches_real_resolver(monkeypatch, tmp_path):
     monkeypatch.setenv("MAVERICK_HOME", str(tmp_path / "home"))
     monkeypatch.delenv("MAVERICK_CONSENT_MODE", raising=False)
     monkeypatch.delenv("MAVERICK_ENTERPRISE", raising=False)
-    from maverick.safety import consent
+    from lightwork.safety import consent
 
     resolved = consent._resolve_mode()
     p = pkg.build_package()

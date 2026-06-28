@@ -3,8 +3,8 @@ appended to the agent system prompt (tone/format only)."""
 from __future__ import annotations
 
 import pytest
-from maverick import runtime_overrides as ro
-from maverick import styles
+from lightwork import runtime_overrides as ro
+from lightwork import styles
 
 
 @pytest.fixture

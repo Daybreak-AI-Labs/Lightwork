@@ -9,8 +9,8 @@ from __future__ import annotations
 
 import threading
 
-from maverick.blackboard import Blackboard
-from maverick.quarantine import QuarantineRegistry
+from lightwork.blackboard import Blackboard
+from lightwork.quarantine import QuarantineRegistry
 
 
 def test_by_agent_withholds_sealed_agent():

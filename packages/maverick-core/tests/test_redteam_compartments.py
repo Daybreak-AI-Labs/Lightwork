@@ -13,11 +13,11 @@ from __future__ import annotations
 
 import asyncio
 
-from maverick.blackboard import Blackboard
-from maverick.quarantine import QuarantineRegistry, triage_block
-from maverick_knowledge import DeterministicEmbedder, KnowledgeBase
-from maverick_shield.compartment import ImmunizingShield
-from maverick_shield.guard import ShieldVerdict
+from lightwork.blackboard import Blackboard
+from lightwork.quarantine import QuarantineRegistry, triage_block
+from lightwork_knowledge import DeterministicEmbedder, KnowledgeBase
+from lightwork_shield.compartment import ImmunizingShield
+from lightwork_shield.guard import ShieldVerdict
 
 
 class _BaseShield:
@@ -144,10 +144,10 @@ def _compartment_ctx(tmp_path):
     """A real SwarmContext with compartments on: ImmunizingShield + a shared
     QuarantineRegistry wired into the blackboard, exactly as the orchestrator
     assembles them when ``[safety] compartments`` is enabled."""
-    from maverick.budget import Budget
-    from maverick.sandbox import LocalBackend
-    from maverick.swarm import SwarmContext
-    from maverick.world_model import WorldModel
+    from lightwork.budget import Budget
+    from lightwork.sandbox import LocalBackend
+    from lightwork.swarm import SwarmContext
+    from lightwork.world_model import WorldModel
 
     world = WorldModel(tmp_path / "world.db")
     goal_id = world.create_goal("redteam", "")
@@ -170,7 +170,7 @@ class TestEndToEndCompartmentRun:
     domain -- escalates to a sector seal (Rung 2) while a clean domain sails on."""
 
     def test_blocked_tool_call_seals_and_contains_the_agent(self, tmp_path):
-        from maverick.agent import Agent
+        from lightwork.agent import Agent
 
         ctx, reg, bb = _compartment_ctx(tmp_path)
         agent = Agent(ctx=ctx, role="analyst", brief="task", depth=1, domain="finance")
@@ -190,7 +190,7 @@ class TestEndToEndCompartmentRun:
         assert "sealed by compartment quarantine" in out2
 
     def test_two_compromised_agents_seal_the_sector_not_the_neighbor(self, tmp_path):
-        from maverick.agent import Agent
+        from lightwork.agent import Agent
 
         ctx, reg, bb = _compartment_ctx(tmp_path)
         fin1 = Agent(ctx=ctx, role="analyst", brief="t", depth=1, domain="finance")

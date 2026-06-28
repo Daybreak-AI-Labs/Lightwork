@@ -3,8 +3,8 @@ from __future__ import annotations
 
 import time
 
-from maverick.ux_retrospective import collect, render
-from maverick.world_model import WorldModel
+from lightwork.ux_retrospective import collect, render
+from lightwork.world_model import WorldModel
 
 
 def _world(tmp_path):

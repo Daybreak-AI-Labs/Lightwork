@@ -5,7 +5,7 @@ import pytest
 
 cryptography = pytest.importorskip("cryptography")
 
-from maverick.plugin_ca import (  # noqa: E402
+from lightwork.plugin_ca import (  # noqa: E402
     PluginCA,
     new_publisher_keypair,
     sign_artifact,

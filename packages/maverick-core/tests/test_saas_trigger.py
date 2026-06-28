@@ -4,7 +4,7 @@ from __future__ import annotations
 import hashlib
 import hmac
 
-from maverick.tools.saas_trigger import saas_trigger
+from lightwork.tools.saas_trigger import saas_trigger
 
 
 def _run(**kw):

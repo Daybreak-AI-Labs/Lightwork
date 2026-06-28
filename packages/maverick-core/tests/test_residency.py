@@ -3,7 +3,7 @@ declared region against an allowed set and refuses boot when incoherent."""
 from __future__ import annotations
 
 import pytest
-from maverick import residency
+from lightwork import residency
 
 
 @pytest.fixture(autouse=True)
@@ -11,7 +11,7 @@ def _clean(monkeypatch):
     for var in ("MAVERICK_RESIDENCY_STRICT", "MAVERICK_DATA_REGION",
                 "MAVERICK_RESIDENCY_ALLOWED"):
         monkeypatch.delenv(var, raising=False)
-    monkeypatch.setattr("maverick.config.load_config", lambda *a, **k: {})
+    monkeypatch.setattr("lightwork.config.load_config", lambda *a, **k: {})
 
 
 def test_off_by_default_is_noop():
@@ -87,7 +87,7 @@ def test_superset_group_region_does_not_bypass_subset_policy(monkeypatch):
 
 def test_config_drives_when_env_absent(monkeypatch):
     monkeypatch.setattr(
-        "maverick.config.load_config",
+        "lightwork.config.load_config",
         lambda *a, **k: {"residency": {
             "strict": True, "region": "US", "allowed_regions": ["EU"]}},
     )
@@ -97,6 +97,6 @@ def test_config_drives_when_env_absent(monkeypatch):
 
 def test_verify_deployment_includes_residency(monkeypatch):
     # The guarantee surfaces in verify_deployment and passes when off.
-    from maverick.deployment import verify_deployment
+    from lightwork.deployment import verify_deployment
     names = {c.name for c in verify_deployment()}
     assert "Data residency" in names

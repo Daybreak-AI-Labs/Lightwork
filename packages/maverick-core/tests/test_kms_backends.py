@@ -12,9 +12,9 @@ import pytest
 pytest.importorskip("cryptography")
 from cryptography.exceptions import InvalidTag  # noqa: E402
 from cryptography.hazmat.primitives.ciphers.aead import AESGCM  # noqa: E402
-from maverick import kms_backends  # noqa: E402
-from maverick.crypto_at_rest import EncryptionUnavailable  # noqa: E402
-from maverick.tenant import kms as tenant_kms  # noqa: E402
+from lightwork import kms_backends  # noqa: E402
+from lightwork.crypto_at_rest import EncryptionUnavailable  # noqa: E402
+from lightwork.tenant import kms as tenant_kms  # noqa: E402
 
 _FIXED_KEK = b"\x11" * 32
 
@@ -105,7 +105,7 @@ def test_wrong_provider_magic_rejected(make):
 
 
 def test_build_cloud_kms_dispatch(monkeypatch):
-    monkeypatch.setattr("maverick.config.load_config",
+    monkeypatch.setattr("lightwork.config.load_config",
                         lambda: {"kms": {"provider": "aws", "key_id": "k"}})
     assert isinstance(kms_backends.build_cloud_kms("aws"), kms_backends.AwsKmsKEK)
     assert isinstance(kms_backends.build_cloud_kms("gcp"), kms_backends.GcpKmsKEK)
@@ -119,25 +119,25 @@ def test_build_cloud_kms_unknown_fails():
 
 
 def test_missing_key_id_fails(monkeypatch):
-    monkeypatch.setattr("maverick.config.load_config", lambda: {"kms": {}})
+    monkeypatch.setattr("lightwork.config.load_config", lambda: {"kms": {}})
     monkeypatch.delenv("MAVERICK_KMS_KEY_ID", raising=False)
     with pytest.raises(EncryptionUnavailable):
         kms_backends.AwsKmsKEK()
 
 
 def test_get_kms_routes_to_cloud(monkeypatch):
-    monkeypatch.setattr("maverick.config.load_config",
+    monkeypatch.setattr("lightwork.config.load_config",
                         lambda: {"kms": {"provider": "vault", "key_id": "k"}})
     assert isinstance(tenant_kms.get_kms(), kms_backends.VaultTransitKMS)
 
 
 def test_get_kms_local_default(monkeypatch):
-    monkeypatch.setattr("maverick.config.load_config", lambda: {"kms": {"provider": "local"}})
+    monkeypatch.setattr("lightwork.config.load_config", lambda: {"kms": {"provider": "local"}})
     assert isinstance(tenant_kms.get_kms(), tenant_kms.LocalKMS)
 
 
 def test_get_kms_unknown_provider_fails(monkeypatch):
-    monkeypatch.setattr("maverick.config.load_config", lambda: {"kms": {"provider": "oracle"}})
+    monkeypatch.setattr("lightwork.config.load_config", lambda: {"kms": {"provider": "oracle"}})
     with pytest.raises(EncryptionUnavailable):
         tenant_kms.get_kms()
 

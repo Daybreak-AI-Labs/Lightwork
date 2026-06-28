@@ -7,7 +7,7 @@ import pytest
 importorskip = pytest.importorskip
 importorskip("cryptography")
 
-from maverick.tenant import kms as K  # noqa: E402
+from lightwork.tenant import kms as K  # noqa: E402
 
 
 @pytest.fixture(autouse=True)
@@ -23,7 +23,7 @@ def _isolate(tmp_path, monkeypatch):
 
 
 def _write_tenant_kms(tid: str, body: str) -> None:
-    from maverick.paths import _tenant_segment, maverick_home
+    from lightwork.paths import _tenant_segment, maverick_home
     d = maverick_home() / "tenants" / _tenant_segment(tid)
     d.mkdir(parents=True, exist_ok=True)
     (d / "config.toml").write_text(body, encoding="utf-8")
@@ -36,7 +36,7 @@ def test_concurrent_first_use_loser_adopts_winner_dek(monkeypatch):
     # winner's persisted DEK, not crash on FileExistsError or seal under a DEK
     # that was never written. Simulate the race by writing the winner's wrapped
     # DEK to disk in the middle of the loser's generate->wrap->open sequence.
-    from maverick.tenant.kms import _wrapped_dek_path
+    from lightwork.tenant.kms import _wrapped_dek_path
     winner = K.tenant_dek("acme")          # process A persists DEK_A
     K._clear_cache()
     assert _wrapped_dek_path("acme").exists()
@@ -51,7 +51,7 @@ def test_generate_and_persist_dek_adopts_winner_on_oexcl_collision():
     # (winner persisted it), so generate-and-persist must re-read + unwrap it and
     # return the WINNER's DEK rather than raising FileExistsError or returning a
     # freshly-generated key that was never written.
-    from maverick.tenant.kms import (
+    from lightwork.tenant.kms import (
         _generate_and_persist_dek,
         _tenant_context,
         _wrapped_dek_path,
@@ -121,7 +121,7 @@ def test_each_tenant_resolves_its_own_provider_and_key(monkeypatch):
     _write_tenant_kms("globex", '[kms]\nprovider = "local"\n')
 
     acme = K.get_kms("acme")
-    from maverick.kms_backends import AwsKmsKEK
+    from lightwork.kms_backends import AwsKmsKEK
     assert isinstance(acme, AwsKmsKEK)
     assert acme.key_id == "acme-cmk"        # the TENANT's key, not ambient
     assert acme.region == "us-east-1"
@@ -133,7 +133,7 @@ def test_byok_resolution_ignores_ambient_context(monkeypatch):
     # config — so a fleet op rotating tenant X never wraps with tenant Y's key.
     _write_tenant_kms("xcorp", '[kms]\nprovider = "aws"\nkey_id = "xcorp-cmk"\n')
     monkeypatch.setenv("MAVERICK_TENANT", "someone-else")
-    from maverick.kms_backends import AwsKmsKEK
+    from lightwork.kms_backends import AwsKmsKEK
     k = K.get_kms("xcorp")
     assert isinstance(k, AwsKmsKEK) and k.key_id == "xcorp-cmk"
 
@@ -178,7 +178,7 @@ def test_positive_ttl_re_unwraps_after_expiry(monkeypatch):
 # ---- fleet KEK rotation ---------------------------------------------------
 
 def test_rotate_kek_fleet_rotates_all_provisioned_tenants(monkeypatch):
-    from maverick.tenant import registry
+    from lightwork.tenant import registry
     registry.create_tenant("a")
     registry.create_tenant("b")
     registry.create_tenant("c")  # provisioned but never seals -> no DEK
@@ -197,13 +197,13 @@ def test_rotate_kek_fleet_rotates_all_provisioned_tenants(monkeypatch):
     K._clear_cache()
     assert K.unseal_for_tenant("a", K.seal_for_tenant("a", b"x", kms=new), kms=new)
     K._clear_cache()
-    from maverick.crypto_at_rest import EncryptionUnavailable
+    from lightwork.crypto_at_rest import EncryptionUnavailable
     with pytest.raises(EncryptionUnavailable):
         K.tenant_dek("a", kms=old)
 
 
 def test_rotate_kek_fleet_isolates_per_tenant_failure(monkeypatch):
-    from maverick.tenant import registry
+    from lightwork.tenant import registry
     registry.create_tenant("good")
     registry.create_tenant("bad")
     old = K.LocalKMS(bytes.fromhex("ab" * 32))

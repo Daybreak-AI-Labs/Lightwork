@@ -3,7 +3,7 @@ from __future__ import annotations
 
 import zlib
 
-from maverick.tools.payload_compress import payload_compress
+from lightwork.tools.payload_compress import payload_compress
 
 
 def _stats(text, **kw):

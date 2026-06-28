@@ -5,7 +5,7 @@ from __future__ import annotations
 import stat
 
 import pytest
-from maverick import grpc_stubs
+from lightwork import grpc_stubs
 
 # ---- runtime-protoc opt-out -----------------------------------------------
 
@@ -25,16 +25,16 @@ def test_guard_raises_when_disabled(monkeypatch):
 
 def test_guard_noop_when_enabled(monkeypatch):
     monkeypatch.delenv("MAVERICK_NO_RUNTIME_PROTOC", raising=False)
-    assert grpc_stubs.guard_runtime_generation("maverick.proto") is None
+    assert grpc_stubs.guard_runtime_generation("lightwork.proto") is None
 
 
 def test_cli_gen_stubs(monkeypatch):
     from click.testing import CliRunner
-    from maverick.cli import main
+    from lightwork.cli import main
     monkeypatch.setattr(grpc_stubs, "generate_all",
-                        lambda: ["maverick.proto", "federation.proto"])
+                        lambda: ["lightwork.proto", "federation.proto"])
     r = CliRunner().invoke(main, ["gen-stubs"])
-    assert r.exit_code == 0 and "maverick.proto" in r.output
+    assert r.exit_code == 0 and "lightwork.proto" in r.output
 
 
 # ---- headless provisioning -------------------------------------------------
@@ -42,7 +42,7 @@ def test_cli_gen_stubs(monkeypatch):
 
 def test_init_from_file_installs(monkeypatch, tmp_path):
     from click.testing import CliRunner
-    from maverick.cli import main
+    from lightwork.cli import main
     src = tmp_path / "client.toml"
     src.write_text('[client]\nid = "acme-corp"\nenforce = true\n')
     dst = tmp_path / "installed" / "config.toml"
@@ -64,7 +64,7 @@ def test_init_from_file_is_0600_at_creation_not_world_readable(monkeypatch, tmp_
     import os
 
     from click.testing import CliRunner
-    from maverick.cli import main
+    from lightwork.cli import main
 
     src = tmp_path / "prod.toml"
     src.write_text(
@@ -104,7 +104,7 @@ def test_init_from_file_is_0600_at_creation_not_world_readable(monkeypatch, tmp_
 
 def test_init_from_file_missing(monkeypatch, tmp_path):
     from click.testing import CliRunner
-    from maverick.cli import main
+    from lightwork.cli import main
     monkeypatch.setenv("MAVERICK_CONFIG", str(tmp_path / "out.toml"))
     r = CliRunner().invoke(main, ["init", "--from-file", str(tmp_path / "nope.toml")])
     assert r.exit_code != 0
@@ -112,7 +112,7 @@ def test_init_from_file_missing(monkeypatch, tmp_path):
 
 def test_init_from_file_bad_toml(monkeypatch, tmp_path):
     from click.testing import CliRunner
-    from maverick.cli import main
+    from lightwork.cli import main
     bad = tmp_path / "bad.toml"
     bad.write_text("this is = = not toml")
     monkeypatch.setenv("MAVERICK_CONFIG", str(tmp_path / "out.toml"))

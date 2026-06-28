@@ -3,20 +3,20 @@ enabled, and never raises. Wired into the killswitch trip + provider cost cap.""
 from __future__ import annotations
 
 import pytest
-from maverick import ops_alert
+from lightwork import ops_alert
 
 
 @pytest.fixture
 def _spy_notify(monkeypatch):
     calls = []
-    monkeypatch.setattr("maverick.notifications.notify",
+    monkeypatch.setattr("lightwork.notifications.notify",
                         lambda body, **kw: calls.append((body, kw)) or 1)
     return calls
 
 
 def test_disabled_by_default_is_noop(_spy_notify, monkeypatch):
     monkeypatch.delenv("MAVERICK_ALERTS", raising=False)
-    monkeypatch.setattr("maverick.config.load_config", dict)
+    monkeypatch.setattr("lightwork.config.load_config", dict)
     assert ops_alert.alert("x", "detail") is False
     assert _spy_notify == []
 
@@ -32,7 +32,7 @@ def test_enabled_via_env_routes_to_notify(_spy_notify, monkeypatch):
 
 def test_enabled_via_config(_spy_notify, monkeypatch):
     monkeypatch.delenv("MAVERICK_ALERTS", raising=False)
-    monkeypatch.setattr("maverick.config.load_config",
+    monkeypatch.setattr("lightwork.config.load_config",
                         lambda: {"alerts": {"enabled": True}})
     assert ops_alert.alert("e") is True
 
@@ -43,7 +43,7 @@ def test_alert_never_raises(monkeypatch):
     def _boom(*a, **k):
         raise RuntimeError("transport down")
 
-    monkeypatch.setattr("maverick.notifications.notify", _boom)
+    monkeypatch.setattr("lightwork.notifications.notify", _boom)
     assert ops_alert.alert("e") is False  # swallowed
 
 
@@ -52,7 +52,7 @@ def test_alert_never_raises(monkeypatch):
 
 def test_killswitch_halt_alerts(_spy_notify, monkeypatch):
     monkeypatch.setenv("MAVERICK_ALERTS", "1")
-    from maverick import killswitch
+    from lightwork import killswitch
     killswitch.halt("manual stop", source="test")
     try:
         assert any("killswitch_tripped" in kw.get("title", "")
@@ -63,7 +63,7 @@ def test_killswitch_halt_alerts(_spy_notify, monkeypatch):
 
 def test_provider_cap_alerts_once_per_period(_spy_notify, monkeypatch, tmp_path):
     monkeypatch.setenv("MAVERICK_ALERTS", "1")
-    from maverick import provider_cost_cap as cap
+    from lightwork import provider_cost_cap as cap
     cap._alerted.clear()
     monkeypatch.setattr(cap, "check",
                         lambda provider, **kw: cap.CapStatus(

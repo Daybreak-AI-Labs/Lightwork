@@ -7,7 +7,7 @@ from __future__ import annotations
 import json
 
 from click.testing import CliRunner
-from maverick.cli import main
+from lightwork.cli import main
 
 
 def _run(args, env=None):
@@ -16,7 +16,7 @@ def _run(args, env=None):
 
 
 def _with_salesforce(monkeypatch):
-    import maverick.config as cfg
+    import lightwork.config as cfg
     monkeypatch.setattr(cfg, "get_governed_connectors",
                         lambda: {"enable": True, "connectors": ["salesforce"]})
 
@@ -33,7 +33,7 @@ def test_list_shows_registered(monkeypatch):
 
 
 def test_list_none_configured_clean_error(monkeypatch):
-    import maverick.config as cfg
+    import lightwork.config as cfg
     monkeypatch.setattr(cfg, "get_governed_connectors",
                         lambda: {"enable": False, "connectors": []})
     r = CliRunner().invoke(main, ["connectors", "list"],

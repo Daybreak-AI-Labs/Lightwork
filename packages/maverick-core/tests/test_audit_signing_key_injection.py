@@ -11,7 +11,7 @@ from __future__ import annotations
 import os
 
 import pytest
-from maverick.audit import signing
+from lightwork.audit import signing
 
 
 @pytest.fixture(autouse=True)
@@ -161,11 +161,11 @@ def test_kms_wrapped_key_source(monkeypatch):
 
     class _FakeKEK:
         def unwrap(self, wrapped, *, context=None):
-            assert context == b"maverick-audit-signing"
+            assert context == b"lightwork-audit-signing"
             return key32
 
-    monkeypatch.setattr("maverick.config.load_config", lambda: {"kms": {"provider": "vault"}})
-    with mock.patch("maverick.kms_backends.build_cloud_kms", return_value=_FakeKEK()):
+    monkeypatch.setattr("lightwork.config.load_config", lambda: {"kms": {"provider": "vault"}})
+    with mock.patch("lightwork.kms_backends.build_cloud_kms", return_value=_FakeKEK()):
         res = signing._kms_wrapped_keypair()
     assert res is not None and res[0] == key32
 

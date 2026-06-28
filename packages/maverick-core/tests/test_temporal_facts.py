@@ -8,7 +8,7 @@ from __future__ import annotations
 
 import time
 
-from maverick.world_model import WorldModel
+from lightwork.world_model import WorldModel
 
 
 def _wm(tmp_path) -> WorldModel:

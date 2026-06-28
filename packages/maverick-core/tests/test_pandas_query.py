@@ -6,7 +6,7 @@ file in full before the row cap is applied (audit unit ``pandas_query``).
 from __future__ import annotations
 
 import pytest
-from maverick.tools import pandas_query as pqmod
+from lightwork.tools import pandas_query as pqmod
 
 pd = pytest.importorskip("pandas")
 pq = pytest.importorskip("pyarrow.parquet")

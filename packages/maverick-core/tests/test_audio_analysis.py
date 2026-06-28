@@ -6,7 +6,7 @@ from __future__ import annotations
 import sys
 
 import pytest
-from maverick.audio_analysis import (
+from lightwork.audio_analysis import (
     DEFAULT_EMOTION_LABELS,
     SpeakerSegment,
     clap_frame_embed,
@@ -98,16 +98,16 @@ def test_emotion_custom_labels_and_validation():
 def test_emotion_default_adapter_needs_clap_extra(monkeypatch):
     monkeypatch.setitem(sys.modules, "transformers", None)
     monkeypatch.setitem(sys.modules, "torch", None)
-    import maverick.tools.audio_understanding as au
+    import lightwork.tools.audio_understanding as au
     monkeypatch.setattr(au, "_clap", None)
-    with pytest.raises(ImportError, match=r"maverick-agent\[clap\]"):
+    with pytest.raises(ImportError, match=r"lightwork-agent\[clap\]"):
         classify_emotion(b"clip")
 
 
 def test_clap_frame_embed_shares_clap_extra(monkeypatch):
     monkeypatch.setitem(sys.modules, "transformers", None)
     monkeypatch.setitem(sys.modules, "torch", None)
-    import maverick.tools.audio_understanding as au
+    import lightwork.tools.audio_understanding as au
     monkeypatch.setattr(au, "_clap", None)
     import io
     import wave
@@ -117,5 +117,5 @@ def test_clap_frame_embed_shares_clap_extra(monkeypatch):
         w.setsampwidth(2)
         w.setframerate(8000)
         w.writeframes(b"\x00\x40" * 8)
-    with pytest.raises(ImportError, match=r"maverick-agent\[clap\]"):
+    with pytest.raises(ImportError, match=r"lightwork-agent\[clap\]"):
         clap_frame_embed(buf.getvalue())

@@ -5,7 +5,7 @@ from __future__ import annotations
 import sys
 
 import pytest
-from maverick.live_mic import MicEvent, match_utterance, run_live_mic, whisper_transcriber
+from lightwork.live_mic import MicEvent, match_utterance, run_live_mic, whisper_transcriber
 
 _GRAMMAR = [
     {"intent": "pause", "pattern": "pause goal {id}"},
@@ -106,5 +106,5 @@ def test_match_utterance_rejects_bad_grammar():
 
 def test_whisper_transcriber_actionable_when_voice_extra_missing(monkeypatch):
     monkeypatch.setitem(sys.modules, "faster_whisper", None)
-    with pytest.raises(ImportError, match=r"maverick-agent\[voice\]"):
+    with pytest.raises(ImportError, match=r"lightwork-agent\[voice\]"):
         whisper_transcriber()

@@ -6,7 +6,7 @@ from fastapi.testclient import TestClient
 
 
 def _client():
-    from maverick_dashboard.app import app
+    from lightwork_dashboard.app import app
     return TestClient(app, headers={"Origin": "http://testserver"})
 
 

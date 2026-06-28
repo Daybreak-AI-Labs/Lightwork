@@ -1,8 +1,8 @@
 """Graph-structured compaction (v8): history -> triples + rendered digest."""
 from __future__ import annotations
 
-from maverick.compaction import compact_messages
-from maverick.compaction.graph import (
+from lightwork.compaction import compact_messages
+from lightwork.compaction.graph import (
     compact_graph,
     extract_triples,
     render_digest,

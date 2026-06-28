@@ -67,7 +67,7 @@ def _embedder(dim=3):
 
 def test_pgvector_missing_import_raises(monkeypatch):
     monkeypatch.setitem(sys.modules, "psycopg", None)
-    from maverick.vector_store.pgvector_store import PgVectorStore
+    from lightwork.vector_store.pgvector_store import PgVectorStore
     with pytest.raises(ImportError, match="psycopg not installed"):
         PgVectorStore(dsn="postgresql://x")
 
@@ -75,16 +75,16 @@ def test_pgvector_missing_import_raises(monkeypatch):
 def test_pgvector_needs_dsn(monkeypatch):
     _install_fake_psycopg(monkeypatch)
     monkeypatch.delenv("MAVERICK_PG_DSN", raising=False)
-    import maverick.config as cfg
+    import lightwork.config as cfg
     monkeypatch.setattr(cfg, "load_config", dict)
-    from maverick.vector_store.pgvector_store import PgVectorStore
+    from lightwork.vector_store.pgvector_store import PgVectorStore
     with pytest.raises(ValueError, match="needs a DSN"):
         PgVectorStore(dsn=None)
 
 
 def test_pgvector_init_creates_schema(monkeypatch):
     conn = _install_fake_psycopg(monkeypatch)
-    from maverick.vector_store.pgvector_store import PgVectorStore
+    from lightwork.vector_store.pgvector_store import PgVectorStore
     PgVectorStore(dsn="postgresql://x")
     sql = " | ".join(s for s, _ in conn.executed)
     assert "CREATE EXTENSION IF NOT EXISTS vector" in sql
@@ -95,7 +95,7 @@ def test_pgvector_init_creates_schema(monkeypatch):
 
 def test_pgvector_add_upserts_with_vectors(monkeypatch):
     conn = _install_fake_psycopg(monkeypatch)
-    from maverick.vector_store.pgvector_store import PgVectorStore
+    from lightwork.vector_store.pgvector_store import PgVectorStore
     store = PgVectorStore(dsn="postgresql://x", embedder=_embedder())
     store.add(["a", "b"], ids=["i1", "i2"], metadatas=[{"k": 1}, {"k": 2}])
     # vector column added once the dim is known
@@ -110,7 +110,7 @@ def test_pgvector_add_upserts_with_vectors(monkeypatch):
 
 def test_pgvector_add_empty_noop(monkeypatch):
     conn = _install_fake_psycopg(monkeypatch)
-    from maverick.vector_store.pgvector_store import PgVectorStore
+    from lightwork.vector_store.pgvector_store import PgVectorStore
     store = PgVectorStore(dsn="postgresql://x", embedder=_embedder())
     before = len(conn.executed)
     store.add([])
@@ -119,7 +119,7 @@ def test_pgvector_add_empty_noop(monkeypatch):
 
 def test_pgvector_add_without_embedder_raises(monkeypatch):
     _install_fake_psycopg(monkeypatch)
-    from maverick.vector_store.pgvector_store import PgVectorStore
+    from lightwork.vector_store.pgvector_store import PgVectorStore
     store = PgVectorStore(dsn="postgresql://x")
     with pytest.raises(RuntimeError, match="no embedder"):
         store.add(["a"])
@@ -127,7 +127,7 @@ def test_pgvector_add_without_embedder_raises(monkeypatch):
 
 def test_pgvector_dim_mismatch_raises(monkeypatch):
     _install_fake_psycopg(monkeypatch)
-    from maverick.vector_store.pgvector_store import PgVectorStore
+    from lightwork.vector_store.pgvector_store import PgVectorStore
     ragged = lambda texts: [[0.1, 0.2, 0.3], [0.1, 0.2]]  # noqa: E731
     store = PgVectorStore(dsn="postgresql://x", embedder=ragged)
     with pytest.raises(ValueError, match="embedding dim"):
@@ -137,7 +137,7 @@ def test_pgvector_dim_mismatch_raises(monkeypatch):
 def test_pgvector_query_uses_cosine_and_collection_tenant(monkeypatch):
     conn = _install_fake_psycopg(monkeypatch)
     conn.query_rows = [("i1", "doc one", {"k": 1}, 0.25)]
-    from maverick.vector_store.pgvector_store import PgVectorStore
+    from lightwork.vector_store.pgvector_store import PgVectorStore
     store = PgVectorStore(dsn="postgresql://x", collection="goals",
                           embedder=_embedder())
     out = store.query("hi", top_k=3)
@@ -155,8 +155,8 @@ def test_pgvector_query_uses_cosine_and_collection_tenant(monkeypatch):
 
 def test_pgvector_scopes_operations_to_active_tenant(monkeypatch):
     conn = _install_fake_psycopg(monkeypatch)
-    from maverick.paths import reset_tenant, set_tenant
-    from maverick.vector_store.pgvector_store import PgVectorStore
+    from lightwork.paths import reset_tenant, set_tenant
+    from lightwork.vector_store.pgvector_store import PgVectorStore
 
     token = set_tenant("tenant-a")
     try:
@@ -193,7 +193,7 @@ def test_pgvector_scopes_operations_to_active_tenant(monkeypatch):
 
 def test_pgvector_query_empty_text(monkeypatch):
     _install_fake_psycopg(monkeypatch)
-    from maverick.vector_store.pgvector_store import PgVectorStore
+    from lightwork.vector_store.pgvector_store import PgVectorStore
     store = PgVectorStore(dsn="postgresql://x", embedder=_embedder())
     assert store.query("") == []
 
@@ -201,7 +201,7 @@ def test_pgvector_query_empty_text(monkeypatch):
 def test_pgvector_count_and_reset_and_delete(monkeypatch):
     conn = _install_fake_psycopg(monkeypatch)
     conn.count_value = 9
-    from maverick.vector_store.pgvector_store import PgVectorStore
+    from lightwork.vector_store.pgvector_store import PgVectorStore
     store = PgVectorStore(dsn="postgresql://x", collection="c",
                           embedder=_embedder())
     assert store.count() == 9
@@ -215,7 +215,7 @@ def test_pgvector_count_and_reset_and_delete(monkeypatch):
 
 def test_pgvector_close(monkeypatch):
     conn = _install_fake_psycopg(monkeypatch)
-    from maverick.vector_store.pgvector_store import PgVectorStore
+    from lightwork.vector_store.pgvector_store import PgVectorStore
     store = PgVectorStore(dsn="postgresql://x")
     store.close()
     assert conn.closed is True
@@ -223,5 +223,5 @@ def test_pgvector_close(monkeypatch):
 
 def test_semantic_recall_recognizes_pgvector(monkeypatch):
     monkeypatch.setenv("MAVERICK_VECTOR_STORE", "pgvector")
-    from maverick import semantic_recall
+    from lightwork import semantic_recall
     assert semantic_recall.backend_name() == "pgvector"

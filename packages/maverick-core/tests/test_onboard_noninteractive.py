@@ -10,7 +10,7 @@ from __future__ import annotations
 
 import pytest
 from click.testing import CliRunner
-from maverick.cli import main
+from lightwork.cli import main
 
 
 @pytest.fixture(autouse=True)

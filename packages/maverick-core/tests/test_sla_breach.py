@@ -1,7 +1,7 @@
 """sla_breach: SLO-breach detection + escalation action."""
 from __future__ import annotations
 
-from maverick.tools.sla_breach import sla_breach
+from lightwork.tools.sla_breach import sla_breach
 
 
 def _check(**kw):

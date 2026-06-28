@@ -14,7 +14,7 @@ import pytest
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 import agent_solver  # noqa: E402
 import eval_gaia  # noqa: E402
-from maverick.llm import LLMResponse  # noqa: E402
+from lightwork.llm import LLMResponse  # noqa: E402
 
 
 class FakeLLM:

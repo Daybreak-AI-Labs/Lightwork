@@ -5,9 +5,9 @@ data -- while each tower's money seal stays intact. This closes, for finance, th
 domain-action gap that test_fleet_spine documented as "wired on paper"."""
 from __future__ import annotations
 
-from maverick.capability import Capability
-from maverick.domain import builtin_dir, domain_capability, load_domains
-from maverick.safety.tool_risk import tool_risk
+from lightwork.capability import Capability
+from lightwork.domain import builtin_dir, domain_capability, load_domains
+from lightwork.safety.tool_risk import tool_risk
 
 # tower -> a read seat (GET-only connector) it must be able to reach
 _WIRED = {

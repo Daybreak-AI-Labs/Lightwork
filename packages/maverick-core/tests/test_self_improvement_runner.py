@@ -1,16 +1,16 @@
 """Tests for the model-agnostic self-improvement glue (Phases 0/1/3/4)."""
 from __future__ import annotations
 
-from maverick.self_improvement import PromotionLedger, SelfImprovementController
-from maverick.self_improvement_runner import (
+from lightwork.self_improvement import PromotionLedger, SelfImprovementController
+from lightwork.self_improvement_runner import (
     build_prm_examples,
     collect_calibration,
     emit_strategy_candidate,
     review_generated_tools,
     should_retire,
 )
-from maverick.si_producers import ToolOutcomeTracker
-from maverick.trajectory_store import TrajectoryStep
+from lightwork.si_producers import ToolOutcomeTracker
+from lightwork.trajectory_store import TrajectoryStep
 
 
 def _ctrl(tmp_path):

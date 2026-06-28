@@ -4,7 +4,7 @@ from __future__ import annotations
 import asyncio
 
 import pytest
-from maverick.latency_best_of_n import AllAttemptsFailed, race_first_success
+from lightwork.latency_best_of_n import AllAttemptsFailed, race_first_success
 
 
 def test_first_success_wins_and_cancels_slow():

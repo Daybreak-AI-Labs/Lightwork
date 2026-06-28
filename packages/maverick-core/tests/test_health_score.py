@@ -1,7 +1,7 @@
 """Run health score (ROADMAP 2028 H2)."""
 from __future__ import annotations
 
-from maverick.health_score import compute_health, render
+from lightwork.health_score import compute_health, render
 
 
 def test_clean_success_scores_high():

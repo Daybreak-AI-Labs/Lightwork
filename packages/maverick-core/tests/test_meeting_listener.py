@@ -6,7 +6,7 @@ import json
 import os
 import stat
 
-from maverick.meeting_listener import (
+from lightwork.meeting_listener import (
     ActionItem,
     MeetingListener,
     MeetingSegment,

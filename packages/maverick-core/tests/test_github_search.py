@@ -10,7 +10,7 @@ import types
 from unittest.mock import MagicMock
 
 import pytest
-from maverick.tools.github_search import github_search
+from lightwork.tools.github_search import github_search
 
 
 def _fake_httpx(monkeypatch, **methods):

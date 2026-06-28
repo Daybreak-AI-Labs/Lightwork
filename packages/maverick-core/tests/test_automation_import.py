@@ -8,8 +8,8 @@ schedule. No network: ``fetch`` is not exercised here (it's the thin API layer);
 from __future__ import annotations
 
 import pytest
-from maverick import automation_import as ai
-from maverick.automation_import import ir, n8n
+from lightwork import automation_import as ai
+from lightwork.automation_import import ir, n8n
 
 # --- fixtures: realistic n8n workflow JSON ---------------------------------
 
@@ -246,7 +246,7 @@ class _FakeQueue:
 class TestMaterialize:
     @pytest.fixture(autouse=True)
     def _isolate_templates(self, tmp_path, monkeypatch):
-        import maverick.templates as t
+        import lightwork.templates as t
         monkeypatch.setattr(t, "USER_TEMPLATES", tmp_path / "templates")
 
     def test_webhook_automation_creates_template_and_suggests_trigger(self):
@@ -258,7 +258,7 @@ class TestMaterialize:
             "kind": "webhook", "template": res.template_name, "name": res.template_name,
         }
         # The template is loadable and renders a goal.
-        from maverick.templates import load_template
+        from lightwork.templates import load_template
         tpl = load_template(res.template_name)
         assert tpl is not None
         rt_title, rt_body = tpl.render()
@@ -334,7 +334,7 @@ class TestMaterialize:
         a = n8n.translate(WEBHOOK_WORKFLOW)
         res = ai.materialize(a, save=False)
         assert res.created_template is False
-        from maverick.templates import load_template
+        from lightwork.templates import load_template
         with pytest.raises(FileNotFoundError):
             load_template(res.template_name)
 
@@ -345,11 +345,11 @@ class TestMaterialize:
             calls.append((text, label))
             raise ValueError("blocked by test shield")
 
-        monkeypatch.setattr("maverick.catalog_trust.shield_scan", fake_scan)
+        monkeypatch.setattr("lightwork.catalog_trust.shield_scan", fake_scan)
         a = n8n.translate(WEBHOOK_WORKFLOW)
         with pytest.raises(ValueError, match="blocked by test shield"):
             ai.materialize(a)
         assert calls
-        from maverick.templates import load_template
+        from lightwork.templates import load_template
         with pytest.raises(FileNotFoundError):
             load_template(a.template_name())

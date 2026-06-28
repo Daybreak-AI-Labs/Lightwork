@@ -5,7 +5,7 @@ honest; the rest exercise the logic on synthetic ladders."""
 from __future__ import annotations
 
 import pytest
-from maverick import migration_governance as mg
+from lightwork import migration_governance as mg
 
 # ---- checksum -------------------------------------------------------------
 
@@ -125,5 +125,5 @@ def test_clean_ladder_against_its_own_lock_has_no_problems():
 
 def test_real_ladders_pass_governance():
     # If this fails, a migration was added/edited without regenerating the lock:
-    #   python -m maverick.migration_governance --regen
+    #   python -m lightwork.migration_governance --regen
     assert mg.validate() == [], mg.validate()

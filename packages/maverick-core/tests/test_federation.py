@@ -1,6 +1,6 @@
 """Federated swarm protocol: peers config, hello/delegate/status over a fake
 transport, shared-token auth (fail-closed), capability narrowing on accept,
-and audit reciprocity proven with maverick.audit.federation.cross_verify."""
+and audit reciprocity proven with lightwork.audit.federation.cross_verify."""
 from __future__ import annotations
 
 import json
@@ -8,10 +8,10 @@ from dataclasses import dataclass
 from types import SimpleNamespace
 
 import pytest
-from maverick import federation
-from maverick.audit import federation as fed_audit
-from maverick.capability import Capability
-from maverick.federation import (
+from lightwork import federation
+from lightwork.audit import federation as fed_audit
+from lightwork.capability import Capability
+from lightwork.federation import (
     PROTOCOL,
     FederationAuthError,
     FederationError,
@@ -149,10 +149,10 @@ def test_hello_refuses_non_conformant_card():
 
 def test_hello_refuses_protocol_mismatch():
     other = SimpleNamespace(call=lambda method, payload: {
-        "node": "B", "protocol": "maverick-federation/999", "agent_card_json": "{}",
+        "node": "B", "protocol": "lightwork-federation/999", "agent_card_json": "{}",
     })
     node = _node(None, transport_factory=lambda peer: other)
-    with pytest.raises(FederationError, match="maverick-federation/1"):
+    with pytest.raises(FederationError, match="lightwork-federation/1"):
         node.hello("B")
 
 

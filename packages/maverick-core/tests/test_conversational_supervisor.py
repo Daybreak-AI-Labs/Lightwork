@@ -2,7 +2,7 @@
 from __future__ import annotations
 
 import pytest
-from maverick.conversational_supervisor import (
+from lightwork.conversational_supervisor import (
     HELP_TEXT,
     MAX_GOAL_REF_DIGITS,
     MUTATING_INTENTS,
@@ -10,8 +10,8 @@ from maverick.conversational_supervisor import (
     parse_utterance,
     resolve_goal_ref,
 )
-from maverick.quotas import UsageLedger
-from maverick.world_model import WorldModel
+from lightwork.quotas import UsageLedger
+from lightwork.world_model import WorldModel
 
 
 @pytest.fixture

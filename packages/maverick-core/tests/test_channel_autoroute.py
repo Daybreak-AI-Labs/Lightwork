@@ -4,7 +4,7 @@ NO network: pure routing logic; every test runs the router directly.
 """
 from __future__ import annotations
 
-from maverick.tools.channel_autoroute import _route, channel_autoroute
+from lightwork.tools.channel_autoroute import _route, channel_autoroute
 
 _CHANNELS = [
     {"name": "sms", "supports_media": False, "max_len": 160, "realtime": False},

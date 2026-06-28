@@ -6,8 +6,8 @@ from __future__ import annotations
 import sys
 import types
 
-from maverick.tools import _ssrf
-from maverick.tools.http_fetch import _check_robots
+from lightwork.tools import _ssrf
+from lightwork.tools.http_fetch import _check_robots
 
 
 class _Resp:

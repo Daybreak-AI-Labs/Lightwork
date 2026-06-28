@@ -8,7 +8,7 @@ from __future__ import annotations
 from types import SimpleNamespace
 
 import pytest
-from maverick.tools.office_convert import office_convert
+from lightwork.tools.office_convert import office_convert
 
 
 class RecordingSandbox:
@@ -27,13 +27,13 @@ class RecordingSandbox:
 @pytest.fixture
 def have_lo(monkeypatch):
     monkeypatch.setattr(
-        "maverick.tools.office_convert.shutil.which",
+        "lightwork.tools.office_convert.shutil.which",
         lambda name: "/usr/bin/libreoffice" if name == "libreoffice" else None,
     )
 
 
 def test_missing_binary(monkeypatch):
-    monkeypatch.setattr("maverick.tools.office_convert.shutil.which", lambda name: None)
+    monkeypatch.setattr("lightwork.tools.office_convert.shutil.which", lambda name: None)
     t = office_convert()
     out = t.fn({"op": "convert", "input_path": "report.docx", "to": "pdf"})
     assert out.startswith("ERROR") and "libreoffice not on PATH" in out
@@ -154,7 +154,7 @@ def test_unknown_op():
 
 
 def test_registered():
-    from maverick.tools import base_registry
+    from lightwork.tools import base_registry
 
     class _W:
         pass

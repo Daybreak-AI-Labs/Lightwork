@@ -6,7 +6,7 @@ import csv
 import io
 
 from fastapi.testclient import TestClient
-from maverick_dashboard.app import app
+from lightwork_dashboard.app import app
 
 client = TestClient(app, headers={"Origin": "http://testserver"})
 
@@ -14,7 +14,7 @@ _TABLE = "| Week | Net |\n| --- | ---: |\n| W1 | 300 |\n| W2 | 100 |\n"
 
 
 def _world(tmp_path, monkeypatch):
-    from maverick import world_model
+    from lightwork import world_model
     monkeypatch.setattr(world_model, "DEFAULT_DB", tmp_path / "world.db")
     return world_model.WorldModel(tmp_path / "world.db")
 
@@ -54,7 +54,7 @@ class TestSignoffApi:
         assert r.status_code == 422
 
     def test_approval_fires_handoff_rejection_does_not(self, tmp_path, monkeypatch):
-        import maverick.webhooks as webhooks
+        import lightwork.webhooks as webhooks
         w = _world(tmp_path, monkeypatch)
         calls = []
         monkeypatch.setattr(webhooks, "fire_deliverable_handoff",
@@ -73,7 +73,7 @@ class TestSignoffApi:
         assert len(calls) == 1  # rejection does not hand off downstream
 
     def test_handoff_omits_unreviewed_raw_text_for_table(self, tmp_path, monkeypatch):
-        import maverick.webhooks as webhooks
+        import lightwork.webhooks as webhooks
         w = _world(tmp_path, monkeypatch)
         calls = []
         monkeypatch.setattr(webhooks, "fire_deliverable_handoff",

@@ -9,34 +9,34 @@ import types
 
 
 def test_dashboard_main_configures_logging(monkeypatch):
-    import maverick_dashboard.app as app_mod
+    import lightwork_dashboard.app as app_mod
 
     calls: list[int] = []
-    monkeypatch.setattr("maverick.logging_config.configure_logging",
+    monkeypatch.setattr("lightwork.logging_config.configure_logging",
                         lambda *a, **k: calls.append(1))
     # Stub uvicorn so main() doesn't actually bind/serve.
     monkeypatch.setitem(sys.modules, "uvicorn",
                         types.SimpleNamespace(run=lambda *a, **k: None))
     monkeypatch.setattr(sys, "argv",
-                        ["maverick-dashboard", "--host", "127.0.0.1", "--port", "0"])
+                        ["lightwork-dashboard", "--host", "127.0.0.1", "--port", "0"])
     app_mod.main()
     assert calls == [1]
 
 
 def test_mcp_main_configures_logging(monkeypatch):
-    import maverick_mcp.server as server
+    import lightwork_mcp.server as server
 
     calls: list[int] = []
     monkeypatch.setattr(server, "_configure_mcp_logging", lambda: calls.append(1))
     monkeypatch.setattr(server.MCPServer, "run", lambda self: None)
-    monkeypatch.setattr(sys, "argv", ["maverick-mcp"])
+    monkeypatch.setattr(sys, "argv", ["lightwork-mcp"])
     server.main()
     assert calls == [1]
 
 
 def test_shared_logging_targets_stderr_not_stdout():
     # MCP runs over stdio: a log handler on stdout would corrupt the protocol.
-    import maverick.logging_config as lc
+    import lightwork.logging_config as lc
 
     saved_handlers = logging.getLogger().handlers[:]
     saved_configured = lc._configured

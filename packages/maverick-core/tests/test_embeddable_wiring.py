@@ -2,7 +2,7 @@
 
 A library embedder drives the toolset programmatically and shouldn't inherit
 whatever plugins happen to be installed/allowlisted in the host environment.
-The no_cli() marker (maverick.embeddable) now actually gates the plugin
+The no_cli() marker (lightwork.embeddable) now actually gates the plugin
 discover_* functions, which previously checked it nowhere.
 """
 from __future__ import annotations
@@ -25,14 +25,14 @@ class _FakeChannelEP:
 
 
 def _patch_entry_points(monkeypatch):
-    from maverick import plugins
+    from lightwork import plugins
 
     def _eps(group):
         return {
-            "maverick.tools": [_FakeToolEP()],
-            "maverick.channels": [_FakeChannelEP()],
-            "maverick.skills": [_FakeToolEP()],
-            "maverick.personas": [],
+            "lightwork.tools": [_FakeToolEP()],
+            "lightwork.channels": [_FakeChannelEP()],
+            "lightwork.skills": [_FakeToolEP()],
+            "lightwork.personas": [],
         }.get(group, [])
 
     monkeypatch.setattr(plugins, "_entry_points", _eps)

@@ -11,16 +11,16 @@ from __future__ import annotations
 from pathlib import Path
 
 import pytest
-from maverick import hooks
-from maverick.agent import Agent
-from maverick.blackboard import Blackboard
-from maverick.budget import Budget
-from maverick.hooks import HookEvent
-from maverick.orchestrator import run_goal
-from maverick.sandbox import LocalBackend
-from maverick.swarm import SwarmContext
-from maverick.tools.spawn import spawn_subagent_tool
-from maverick.world_model import WorldModel
+from lightwork import hooks
+from lightwork.agent import Agent
+from lightwork.blackboard import Blackboard
+from lightwork.budget import Budget
+from lightwork.hooks import HookEvent
+from lightwork.orchestrator import run_goal
+from lightwork.sandbox import LocalBackend
+from lightwork.swarm import SwarmContext
+from lightwork.tools.spawn import spawn_subagent_tool
+from lightwork.world_model import WorldModel
 
 
 @pytest.fixture(autouse=True)

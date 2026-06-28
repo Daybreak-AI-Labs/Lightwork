@@ -18,7 +18,7 @@ Pure/offline: a temp ``MAVERICK_HOME`` so nothing touches the real home.
 from __future__ import annotations
 
 import pytest
-from maverick.paths import current_tenant, data_dir, reset_tenant, set_tenant
+from lightwork.paths import current_tenant, data_dir, reset_tenant, set_tenant
 
 
 @pytest.fixture(autouse=True)
@@ -66,7 +66,7 @@ def test_active_tenant_scope_restores():
 # ---- world model isolation ----
 
 def test_world_for_tenant_distinct_dbs():
-    from maverick import world_model
+    from lightwork import world_model
     world_model._tenant_worlds.clear()
     wa = world_model.world_for_tenant("acme")
     wb = world_model.world_for_tenant("globex")
@@ -83,7 +83,7 @@ def test_world_for_tenant_distinct_dbs():
 
 
 def test_world_for_tenant_caches_same_instance():
-    from maverick import world_model
+    from lightwork import world_model
     world_model._tenant_worlds.clear()
     assert world_model.world_for_tenant("acme") is world_model.world_for_tenant("acme")
     world_model._tenant_worlds.clear()
@@ -94,7 +94,7 @@ def test_world_for_tenant_caches_same_instance():
 def test_provider_keys_are_per_tenant(tmp_path, monkeypatch):
     """Each tenant's own config.toml overlay supplies its own provider API key;
     with no active tenant the global config is used unchanged."""
-    from maverick import config
+    from lightwork import config
     home = tmp_path / "home"
     monkeypatch.setenv("MAVERICK_HOME", str(home))
     monkeypatch.setattr(config, "config_path", lambda: home / "config.toml")
@@ -136,7 +136,7 @@ def test_provider_keys_are_per_tenant(tmp_path, monkeypatch):
 def test_calibration_samples_and_freeze_are_per_tenant(monkeypatch):
     """One tenant's calibration ledger and learning-freeze verdict must not
     bleed into another's self-improvement loop."""
-    from maverick import calibration
+    from lightwork import calibration
     # Enforcement on so learning_frozen() actually consults the verdict.
     monkeypatch.setattr(
         calibration, "_settings",
@@ -170,7 +170,7 @@ def test_calibration_samples_and_freeze_are_per_tenant(monkeypatch):
 # ---- per-tenant KMS isolation ----
 
 def test_tenant_dek_distinct_and_non_transferable():
-    from maverick.tenant.kms import tenant_dek
+    from lightwork.tenant.kms import tenant_dek
     dek_a = tenant_dek("acme")
     dek_b = tenant_dek("globex")
     assert dek_a != dek_b
@@ -181,8 +181,8 @@ def test_tenant_dek_distinct_and_non_transferable():
 
 
 def test_wrapped_dek_does_not_unwrap_cross_tenant():
-    from maverick.crypto_at_rest import EncryptionUnavailable
-    from maverick.tenant.kms import LocalKMS, tenant_dek
+    from lightwork.crypto_at_rest import EncryptionUnavailable
+    from lightwork.tenant.kms import LocalKMS, tenant_dek
     kms = LocalKMS()
     dek = tenant_dek("acme")
     wrapped = kms.wrap(dek, context=b"tenant:acme")
@@ -199,7 +199,7 @@ def test_wrapped_dek_does_not_unwrap_cross_tenant():
 def test_encrypted_field_opaque_across_tenants(monkeypatch):
     """A value encrypted under tenant A's key is not readable as A's plaintext
     when the active tenant is B."""
-    crypto = pytest.importorskip("maverick.crypto_at_rest")
+    crypto = pytest.importorskip("lightwork.crypto_at_rest")
     enc = getattr(crypto, "encrypt", None) or getattr(crypto, "encrypt_field", None)
     dec = getattr(crypto, "decrypt", None) or getattr(crypto, "decrypt_field", None)
     if enc is None or dec is None:
@@ -221,8 +221,8 @@ def test_encrypted_field_opaque_across_tenants(monkeypatch):
 
 def test_llm_provider_client_cache_is_tenant_aware(tmp_path, monkeypatch):
     """A shared LLM must not reuse tenant A's provider client for tenant B."""
-    from maverick import config
-    from maverick.llm import LLM
+    from lightwork import config
+    from lightwork.llm import LLM
 
     home = tmp_path / "home"
     monkeypatch.setenv("MAVERICK_HOME", str(home))
@@ -262,7 +262,7 @@ def test_llm_provider_client_cache_is_tenant_aware(tmp_path, monkeypatch):
             name, api_key=api_key, base_url=base_url, default_headers=default_headers
         )
 
-    import maverick.providers as providers_mod
+    import lightwork.providers as providers_mod
     monkeypatch.setattr(providers_mod, "get_provider_client", fake_get_provider_client)
 
     llm = LLM(model="openai:stub")
@@ -297,7 +297,7 @@ def test_tenant_world_cache_evicts_lru_not_raises(monkeypatch, tmp_path):
     # instead of hard-failing the next one. Shrink the cap for the test.
     monkeypatch.setenv("HOME", str(tmp_path))
     monkeypatch.setenv("MAVERICK_HOME", str(tmp_path))
-    from maverick import world_model
+    from lightwork import world_model
     world_model._tenant_worlds.clear()
     monkeypatch.setattr(world_model, "MAX_TENANT_WORLDS", 3)
 
@@ -319,7 +319,7 @@ def test_tenant_world_cache_evicts_lru_not_raises(monkeypatch, tmp_path):
 def test_tenant_world_cache_never_evicts_shared(monkeypatch, tmp_path):
     monkeypatch.setenv("HOME", str(tmp_path))
     monkeypatch.setenv("MAVERICK_HOME", str(tmp_path))
-    from maverick import world_model
+    from lightwork import world_model
     world_model._tenant_worlds.clear()
     monkeypatch.setattr(world_model, "MAX_TENANT_WORLDS", 2)
 
@@ -328,7 +328,7 @@ def test_tenant_world_cache_never_evicts_shared(monkeypatch, tmp_path):
     world_model.world_for_tenant("t2")         # at cap; next evicts a TENANT
     world_model.world_for_tenant("t3")
 
-    from maverick.paths import data_dir
+    from lightwork.paths import data_dir
     shared_key = str(data_dir("world.db", tenant=None))
     assert shared_key in world_model._tenant_worlds  # shared never evicted
     world_model._tenant_worlds.clear()

@@ -4,7 +4,7 @@ from __future__ import annotations
 import subprocess
 from pathlib import Path
 
-from maverick.coding_mode import (
+from lightwork.coding_mode import (
     Candidate,
     extract_unified_diff,
     find_final_marker_end,
@@ -355,7 +355,7 @@ class TestCodingModeFromEnv:
 
 class TestTestRunResult:
     def test_all_pass_property(self):
-        from maverick.coding_mode import TestRunResult
+        from lightwork.coding_mode import TestRunResult
         r = TestRunResult(
             fail_to_pass_passing=3, fail_to_pass_total=3,
             pass_to_pass_passing=10, pass_to_pass_total=10,
@@ -364,7 +364,7 @@ class TestTestRunResult:
         assert r.score == 1.0
 
     def test_partial_pass(self):
-        from maverick.coding_mode import TestRunResult
+        from lightwork.coding_mode import TestRunResult
         r = TestRunResult(
             fail_to_pass_passing=2, fail_to_pass_total=3,
             pass_to_pass_passing=10, pass_to_pass_total=10,
@@ -373,13 +373,13 @@ class TestTestRunResult:
         assert 0.9 < r.score < 1.0
 
     def test_error_zeros_score(self):
-        from maverick.coding_mode import TestRunResult
+        from lightwork.coding_mode import TestRunResult
         r = TestRunResult(error="sandbox crashed")
         assert r.all_pass is False
         assert r.score == 0.0
 
     def test_summary_renders(self):
-        from maverick.coding_mode import TestRunResult
+        from lightwork.coding_mode import TestRunResult
         r = TestRunResult(
             fail_to_pass_passing=2, fail_to_pass_total=3,
             pass_to_pass_passing=10, pass_to_pass_total=10,
@@ -391,7 +391,7 @@ class TestTestRunResult:
 
 class TestRepoMapTool:
     def test_emits_top_level_listing(self, tmp_path):
-        from maverick.tools.repo_map import repo_map
+        from lightwork.tools.repo_map import repo_map
         (tmp_path / "src").mkdir()
         (tmp_path / "src" / "main.py").write_text("print('hi')")
         (tmp_path / "tests").mkdir()
@@ -410,7 +410,7 @@ class TestRepoMapTool:
         assert "Python (pyproject)" in out
 
     def test_ignores_dotgit_and_venv(self, tmp_path):
-        from maverick.tools.repo_map import repo_map
+        from lightwork.tools.repo_map import repo_map
         (tmp_path / ".git").mkdir()
         (tmp_path / "node_modules").mkdir()
         (tmp_path / "src").mkdir()
@@ -425,7 +425,7 @@ class TestRepoMapTool:
         assert "src/" in out
 
     def test_missing_workdir_error(self, tmp_path):
-        from maverick.tools.repo_map import repo_map
+        from lightwork.tools.repo_map import repo_map
 
         class _Sandbox:
             workdir = tmp_path / "nonexistent"
@@ -434,7 +434,7 @@ class TestRepoMapTool:
         assert "ERROR" in out
 
     def test_skips_top_level_symlink(self, tmp_path):
-        from maverick.tools.repo_map import repo_map
+        from lightwork.tools.repo_map import repo_map
 
         outside = tmp_path.parent / "outside-secret-dir"
         outside.mkdir(exist_ok=True)
@@ -452,9 +452,9 @@ class TestRepoMapTool:
 class TestRepoMapInRegistry:
     def test_repo_map_registered(self, tmp_path):
         """The base registry now ships repo_map as a default tool."""
-        from maverick.sandbox import LocalBackend
-        from maverick.tools import base_registry
-        from maverick.world_model import WorldModel
+        from lightwork.sandbox import LocalBackend
+        from lightwork.tools import base_registry
+        from lightwork.world_model import WorldModel
 
         wm = WorldModel(path=tmp_path / "w.db")
         reg = base_registry(wm, LocalBackend(workdir=tmp_path))

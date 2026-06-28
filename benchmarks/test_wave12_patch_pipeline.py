@@ -33,7 +33,7 @@ def _init_repo(tmp_path: Path) -> Path:
 
 class TestRenderDiffNewFiles:
     def test_new_file_appears_in_diff(self, tmp_path):
-        from maverick.edit_format import render_diff
+        from lightwork.edit_format import render_diff
         repo = _init_repo(tmp_path)
         # Create a new (untracked) file. Callers MUST pass it via
         # `paths` so intent-to-add only touches files the caller knows
@@ -49,7 +49,7 @@ class TestRenderDiffNewFiles:
         assert "/dev/null" in diff or "new file" in diff
 
     def test_modify_and_new_file_both_appear(self, tmp_path):
-        from maverick.edit_format import render_diff
+        from lightwork.edit_format import render_diff
         repo = _init_repo(tmp_path)
         (repo / "seed.py").write_text("x = 2\n")          # modify tracked
         (repo / "newmod.py").write_text("y = 99\n")        # create new
@@ -61,7 +61,7 @@ class TestRenderDiffNewFiles:
         """Security contract: without an explicit `paths` argument,
         render_diff returns ONLY tracked-file changes. Unrelated
         untracked content must not leak into the patch."""
-        from maverick.edit_format import render_diff
+        from lightwork.edit_format import render_diff
         repo = _init_repo(tmp_path)
         (repo / "seed.py").write_text("x = 2\n")
         (repo / "scratch.txt").write_text("API_KEY=sk-do-not-leak\n")

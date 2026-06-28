@@ -9,7 +9,7 @@ import types
 from pathlib import Path
 from unittest.mock import MagicMock
 
-from maverick.tools.image_edit import image_edit
+from lightwork.tools.image_edit import image_edit
 
 
 def _fake_httpx(monkeypatch, **methods):
@@ -261,11 +261,11 @@ def test_local_ops_actionable_without_pillow(monkeypatch, tmp_path):
             "box": [0, 0, 1, 1],
         }
     )
-    assert out.startswith("ERROR") and "maverick-agent[computer-use]" in out
+    assert out.startswith("ERROR") and "lightwork-agent[computer-use]" in out
 
 
 def test_factory_registered_in_base_registry():
-    from maverick.tools import base_registry
+    from lightwork.tools import base_registry
 
     class _W:
         pass

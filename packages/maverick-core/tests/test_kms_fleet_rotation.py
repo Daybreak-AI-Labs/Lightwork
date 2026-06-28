@@ -5,9 +5,9 @@ import pytest
 
 pytest.importorskip("cryptography")
 
-from maverick.crypto_at_rest import EncryptionUnavailable  # noqa: E402
-from maverick.tenant import kms as K  # noqa: E402
-from maverick.tenant import kms_fleet as F  # noqa: E402
+from lightwork.crypto_at_rest import EncryptionUnavailable  # noqa: E402
+from lightwork.tenant import kms as K  # noqa: E402
+from lightwork.tenant import kms_fleet as F  # noqa: E402
 
 _OLD = "ab" * 32  # hex KEKs
 _NEW = "cd" * 32
@@ -25,7 +25,7 @@ def _isolate(tmp_path, monkeypatch):
 
 
 def _provision(*tenant_ids: str) -> None:
-    from maverick.tenant import registry
+    from lightwork.tenant import registry
     old_kms = K.LocalKMS(bytes.fromhex(_OLD))
     for tid in tenant_ids:
         registry.create_tenant(tid)
@@ -96,7 +96,7 @@ def test_bad_kek_length_raises():
 
 def test_cli_kms_rotate_reads_keks_from_files(tmp_path):
     from click.testing import CliRunner
-    from maverick.cli import main
+    from lightwork.cli import main
 
     _provision("a")
     old_file = tmp_path / "old-kek"
@@ -117,7 +117,7 @@ def test_cli_kms_rotate_reads_keks_from_files(tmp_path):
 
 def test_cli_kms_rotate_rejects_raw_kek_argv():
     from click.testing import CliRunner
-    from maverick.cli import main
+    from lightwork.cli import main
 
     res = CliRunner().invoke(main, [
         "tenant", "kms-rotate",

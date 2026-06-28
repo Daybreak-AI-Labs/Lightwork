@@ -18,7 +18,7 @@ TestClient = pytest.importorskip("fastapi.testclient").TestClient
 @pytest.fixture
 def world_with_tree(tmp_path, monkeypatch):
     monkeypatch.setenv("HOME", str(tmp_path))
-    from maverick import world_model
+    from lightwork import world_model
     monkeypatch.setattr(world_model, "DEFAULT_DB", tmp_path / "world.db")
     w = world_model.WorldModel(tmp_path / "world.db")
     g1 = w.create_goal("root task", "high-level")
@@ -31,7 +31,7 @@ def world_with_tree(tmp_path, monkeypatch):
 
 @pytest.fixture
 def client(world_with_tree, monkeypatch):
-    from maverick_dashboard import app as app_mod
+    from lightwork_dashboard import app as app_mod
     w, *_ = world_with_tree
     monkeypatch.setattr(app_mod, "_world", lambda: w)
     monkeypatch.delenv("MAVERICK_DASHBOARD_TOKEN", raising=False)

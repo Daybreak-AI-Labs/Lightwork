@@ -43,8 +43,8 @@ def _server(server_mod):
 
 
 def test_oidc_enabled_rejects_message_without_token(monkeypatch):
-    from maverick import oidc as oidc_mod
-    from maverick import server as server_mod
+    from lightwork import oidc as oidc_mod
+    from lightwork import server as server_mod
 
     monkeypatch.setattr(oidc_mod, "oidc_enabled", lambda: True)
     seen_tokens = []
@@ -75,13 +75,13 @@ def test_oidc_enabled_rejects_message_without_token(monkeypatch):
 
 
 def test_oidc_enabled_uses_verified_principal_for_goal_context(monkeypatch):
-    from maverick import oidc as oidc_mod
-    from maverick import server as server_mod
+    from lightwork import oidc as oidc_mod
+    from lightwork import server as server_mod
 
     monkeypatch.setattr(oidc_mod, "oidc_enabled", lambda: True)
-    monkeypatch.setattr("maverick.paths.tenant_by_user_enabled", lambda: False)
+    monkeypatch.setattr("lightwork.paths.tenant_by_user_enabled", lambda: False)
     monkeypatch.setattr(
-        "maverick.compliance.first_turn_disclosure", lambda *a, **k: None
+        "lightwork.compliance.first_turn_disclosure", lambda *a, **k: None
     )
 
     seen_tokens = []

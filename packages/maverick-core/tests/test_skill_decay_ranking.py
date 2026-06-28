@@ -9,8 +9,8 @@ ranking is untouched.
 from __future__ import annotations
 
 import pytest
-from maverick.skill import stats as skill_stats
-from maverick.skills import Skill, _relevant_skills_lexical
+from lightwork.skill import stats as skill_stats
+from lightwork.skills import Skill, _relevant_skills_lexical
 
 
 def _skill(name: str) -> Skill:

@@ -1,7 +1,7 @@
 """bias_eval: group-fairness metrics (four-fifths, parity, equal opportunity)."""
 from __future__ import annotations
 
-from maverick.tools.bias_eval import bias_eval
+from lightwork.tools.bias_eval import bias_eval
 
 
 def _e(groups, threshold=None):
@@ -70,7 +70,7 @@ def test_errors():
 
 
 def test_registered():
-    from maverick.tools import base_registry
+    from lightwork.tools import base_registry
 
     class _W:
         pass

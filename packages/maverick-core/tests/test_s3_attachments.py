@@ -1,7 +1,7 @@
 """Tests for the s3_attachments tool. No network calls."""
 from __future__ import annotations
 
-from maverick.tools import s3_attachments as s3a
+from lightwork.tools import s3_attachments as s3a
 
 
 def test_missing_op_errors():

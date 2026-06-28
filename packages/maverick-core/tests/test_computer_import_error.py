@@ -8,13 +8,13 @@ raised ImportError crashed direct callers and broke the ``fn -> str`` contract
 """
 from __future__ import annotations
 
-import maverick.tools.computer as computer
-from maverick.tools.computer import _run_computer_action
+import lightwork.tools.computer as computer
+from lightwork.tools.computer import _run_computer_action
 
 
 def test_non_screenshot_action_returns_error_string_when_dep_absent(monkeypatch):
     def _boom():
-        raise ImportError("pyautogui not installed. Run: pip install 'maverick-agent[computer-use]'")
+        raise ImportError("pyautogui not installed. Run: pip install 'lightwork-agent[computer-use]'")
 
     monkeypatch.setattr(computer, "_ensure_pyautogui", _boom)
     for action in ("left_click", "mouse_move", "type", "key", "scroll"):

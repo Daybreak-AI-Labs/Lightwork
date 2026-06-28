@@ -2,13 +2,13 @@
 from __future__ import annotations
 
 from fastapi.testclient import TestClient
-from maverick_dashboard.app import app
+from lightwork_dashboard.app import app
 
 client = TestClient(app, headers={"Origin": "http://testserver"})
 
 
 def test_tail_latency_endpoint_empty():
-    from maverick import tool_latency
+    from lightwork import tool_latency
     tool_latency.reset()  # the sample store is process-global; isolate it before
     resp = client.get("/api/v1/diag/tail-latency")
     assert resp.status_code == 200
@@ -16,7 +16,7 @@ def test_tail_latency_endpoint_empty():
 
 
 def test_tail_latency_endpoint_flags_recorded_spike():
-    from maverick import tool_latency
+    from lightwork import tool_latency
     # record a fat tail for a tool: many fast, a few slow
     for _ in range(40):
         tool_latency.record("spiky_tool", 10.0)

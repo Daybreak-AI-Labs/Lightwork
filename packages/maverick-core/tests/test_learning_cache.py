@@ -5,7 +5,7 @@ no real-looking credential is committed."""
 from __future__ import annotations
 
 import pytest
-from maverick.cache import learning as lc
+from lightwork.cache import learning as lc
 
 
 @pytest.fixture
@@ -124,7 +124,7 @@ def test_corrupt_file_fails_open(tmp_path, now):
 
 def test_off_by_default(monkeypatch):
     monkeypatch.delenv("MAVERICK_LEARNING_CACHE", raising=False)
-    import maverick.config as config_mod
+    import lightwork.config as config_mod
     monkeypatch.setattr(config_mod, "load_config", lambda *a, **k: {})
     assert lc.enabled() is False
     monkeypatch.setenv("MAVERICK_LEARNING_CACHE", "1")

@@ -11,7 +11,7 @@ from __future__ import annotations
 
 class TestCacheTtlConsistent:
     def test_messages_breakpoint_uses_default_ttl_5m_in_coding(self, monkeypatch):
-        from maverick.providers.anthropic_provider import (
+        from lightwork.providers.anthropic_provider import (
             _add_messages_cache_breakpoint,
         )
         monkeypatch.delenv("MAVERICK_ANTHROPIC_CACHE_TTL", raising=False)
@@ -32,7 +32,7 @@ class TestCacheTtlConsistent:
         )
 
     def test_messages_breakpoint_uses_1h_in_normal_mode(self, monkeypatch):
-        from maverick.providers.anthropic_provider import (
+        from lightwork.providers.anthropic_provider import (
             _add_messages_cache_breakpoint,
         )
         monkeypatch.delenv("MAVERICK_ANTHROPIC_CACHE_TTL", raising=False)
@@ -47,7 +47,7 @@ class TestCacheTtlConsistent:
         assert cc["ttl"] == "1h"
 
     def test_explicit_env_var_wins(self, monkeypatch):
-        from maverick.providers.anthropic_provider import (
+        from lightwork.providers.anthropic_provider import (
             _add_messages_cache_breakpoint,
         )
         monkeypatch.setenv("MAVERICK_ANTHROPIC_CACHE_TTL", "1h")
@@ -64,7 +64,7 @@ class TestCacheTtlConsistent:
 
 class TestToolsSorted:
     def test_tools_sorted_for_cache_determinism(self):
-        from maverick.providers.anthropic_provider import _cached_tools
+        from lightwork.providers.anthropic_provider import _cached_tools
         tools = [
             {"name": "zebra", "input_schema": {}},
             {"name": "apple", "input_schema": {}},
@@ -75,7 +75,7 @@ class TestToolsSorted:
         assert names == ["apple", "mango", "zebra"]
 
     def test_tools_sort_is_stable_across_calls(self):
-        from maverick.providers.anthropic_provider import _cached_tools
+        from lightwork.providers.anthropic_provider import _cached_tools
         a = [{"name": "x"}, {"name": "y"}, {"name": "z"}]
         b = [{"name": "z"}, {"name": "y"}, {"name": "x"}]
         # Same input set, different order → same canonical output.
@@ -84,7 +84,7 @@ class TestToolsSorted:
         assert [t["name"] for t in ax] == [t["name"] for t in bx]
 
     def test_last_tool_after_sort_gets_cache_control(self):
-        from maverick.providers.anthropic_provider import _cached_tools
+        from lightwork.providers.anthropic_provider import _cached_tools
         tools = [
             {"name": "zebra"},
             {"name": "apple"},
@@ -105,7 +105,7 @@ class TestInterleavedThinkingHeader:
     """
 
     def test_header_required_for_sonnet_4_5(self):
-        from maverick.providers.anthropic_provider import AnthropicClient
+        from lightwork.providers.anthropic_provider import AnthropicClient
 
         client = AnthropicClient.__new__(AnthropicClient)
         kwargs = client._build_request(
@@ -120,7 +120,7 @@ class TestInterleavedThinkingHeader:
         assert "interleaved-thinking-2025-05-14" in beta
 
     def test_header_required_for_opus_4_5(self):
-        from maverick.providers.anthropic_provider import AnthropicClient
+        from lightwork.providers.anthropic_provider import AnthropicClient
 
         client = AnthropicClient.__new__(AnthropicClient)
         kwargs = client._build_request(
@@ -137,7 +137,7 @@ class TestInterleavedThinkingHeader:
     def test_header_NOT_set_for_sonnet_4_6(self):
         """4.6+ has interleaved automatic in adaptive mode — header would
         be deprecated noise."""
-        from maverick.providers.anthropic_provider import AnthropicClient
+        from lightwork.providers.anthropic_provider import AnthropicClient
 
         client = AnthropicClient.__new__(AnthropicClient)
         kwargs = client._build_request(
@@ -154,7 +154,7 @@ class TestInterleavedThinkingHeader:
     def test_opus_4_7_uses_adaptive_not_enabled(self):
         """Opus 4.7 returns 400 on `thinking={"type":"enabled"}`. We must
         send `adaptive` instead."""
-        from maverick.providers.anthropic_provider import AnthropicClient
+        from lightwork.providers.anthropic_provider import AnthropicClient
 
         client = AnthropicClient.__new__(AnthropicClient)
         kwargs = client._build_request(
@@ -177,7 +177,7 @@ class TestInterleavedThinkingHeader:
         """Opus 4.7 only supports adaptive — if caller doesn't ask for
         thinking, we still emit adaptive so the model can think when
         it judges it useful."""
-        from maverick.providers.anthropic_provider import AnthropicClient
+        from lightwork.providers.anthropic_provider import AnthropicClient
 
         client = AnthropicClient.__new__(AnthropicClient)
         kwargs = client._build_request(
@@ -192,7 +192,7 @@ class TestInterleavedThinkingHeader:
         assert thinking.get("type") == "adaptive"
 
     def test_header_not_added_for_legacy_pre_4x_model(self):
-        from maverick.providers.anthropic_provider import AnthropicClient
+        from lightwork.providers.anthropic_provider import AnthropicClient
 
         client = AnthropicClient.__new__(AnthropicClient)
         kwargs = client._build_request(
@@ -211,8 +211,8 @@ class TestNullsafeUsage:
     def test_record_handles_none_usage_fields(self, monkeypatch):
         """If Anthropic returns None in usage fields (streaming refusal),
         _parse_response must not crash."""
-        from maverick.budget import Budget
-        from maverick.providers.anthropic_provider import AnthropicClient
+        from lightwork.budget import Budget
+        from lightwork.providers.anthropic_provider import AnthropicClient
 
         client = AnthropicClient.__new__(AnthropicClient)
 
@@ -250,7 +250,7 @@ class TestInterleavedThinkingOrder:
         return b
 
     def test_content_blocks_preserve_interleaved_order(self):
-        from maverick.providers.anthropic_provider import AnthropicClient
+        from lightwork.providers.anthropic_provider import AnthropicClient
 
         client = AnthropicClient.__new__(AnthropicClient)
 
@@ -287,7 +287,7 @@ class TestInterleavedThinkingOrder:
         assert [t[0] for t in out.thinking_blocks] == ["reason A", "reason B"]
 
     def test_thinking_block_without_signature_omits_key(self):
-        from maverick.providers.anthropic_provider import AnthropicClient
+        from lightwork.providers.anthropic_provider import AnthropicClient
 
         client = AnthropicClient.__new__(AnthropicClient)
 

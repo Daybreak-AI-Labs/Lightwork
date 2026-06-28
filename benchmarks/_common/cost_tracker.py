@@ -17,7 +17,7 @@ The tracker writes one JSONL line per task to `results.jsonl` in the
 caller-specified dir; the leaderboard aggregator reads that file.
 
 This intentionally does NOT call the LLM directly. Spend numbers come
-from `maverick.budget.Budget`; the tracker just persists them.
+from `lightwork.budget.Budget`; the tracker just persists them.
 """
 from __future__ import annotations
 

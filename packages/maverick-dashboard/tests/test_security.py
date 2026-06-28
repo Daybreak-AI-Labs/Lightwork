@@ -5,7 +5,7 @@ from fastapi.testclient import TestClient
 
 
 def _client():
-    from maverick_dashboard.app import app
+    from lightwork_dashboard.app import app
     return TestClient(app)
 
 
@@ -14,7 +14,7 @@ def _client():
 def test_query_token_no_longer_accepted(monkeypatch, tmp_path):
     """`?token=...` used to leak via Referer/history/access logs. Killed."""
     monkeypatch.setenv("MAVERICK_DASHBOARD_TOKEN", "sekret")
-    from maverick import world_model
+    from lightwork import world_model
     monkeypatch.setattr(world_model, "DEFAULT_DB", tmp_path / "world.db")
     client = _client()
     resp = client.get("/?token=sekret")
@@ -24,7 +24,7 @@ def test_query_token_no_longer_accepted(monkeypatch, tmp_path):
 
 def test_header_token_still_accepted(monkeypatch, tmp_path):
     monkeypatch.setenv("MAVERICK_DASHBOARD_TOKEN", "sekret")
-    from maverick import world_model
+    from lightwork import world_model
     monkeypatch.setattr(world_model, "DEFAULT_DB", tmp_path / "world.db")
     client = _client()
     resp = client.get("/", headers={"Authorization": "Bearer sekret"})
@@ -33,7 +33,7 @@ def test_header_token_still_accepted(monkeypatch, tmp_path):
 
 def test_unauth_request_blocked_when_token_set(monkeypatch, tmp_path):
     monkeypatch.setenv("MAVERICK_DASHBOARD_TOKEN", "sekret")
-    from maverick import world_model
+    from lightwork import world_model
     monkeypatch.setattr(world_model, "DEFAULT_DB", tmp_path / "world.db")
     client = _client()
     resp = client.get("/")
@@ -51,7 +51,7 @@ def test_healthz_still_exempt(monkeypatch):
 
 def test_is_same_origin_fails_closed_on_post_without_headers(monkeypatch, tmp_path):
     """Prior fail-open let any same-machine tab POST to /chat/send via no-cors fetch."""
-    from maverick import world_model
+    from lightwork import world_model
     monkeypatch.setattr(world_model, "DEFAULT_DB", tmp_path / "world.db")
     monkeypatch.setenv("ANTHROPIC_API_KEY", "sk-ant-fake")
     monkeypatch.delenv("MAVERICK_DASHBOARD_TOKEN", raising=False)
@@ -63,7 +63,7 @@ def test_is_same_origin_fails_closed_on_post_without_headers(monkeypatch, tmp_pa
 
 
 def test_is_same_origin_accepts_with_matching_origin(monkeypatch, tmp_path):
-    from maverick import world_model
+    from lightwork import world_model
     monkeypatch.setattr(world_model, "DEFAULT_DB", tmp_path / "world.db")
     monkeypatch.setenv("ANTHROPIC_API_KEY", "sk-ant-fake")
     monkeypatch.delenv("MAVERICK_DASHBOARD_TOKEN", raising=False)
@@ -79,7 +79,7 @@ def test_is_same_origin_accepts_with_matching_origin(monkeypatch, tmp_path):
 
 def test_safe_methods_skip_csrf(monkeypatch, tmp_path):
     """GET/HEAD/OPTIONS bypass the same-origin check — they don't mutate."""
-    from maverick import world_model
+    from lightwork import world_model
     monkeypatch.setattr(world_model, "DEFAULT_DB", tmp_path / "world.db")
     monkeypatch.delenv("MAVERICK_DASHBOARD_TOKEN", raising=False)
     client = _client()
@@ -95,7 +95,7 @@ def test_api_v1_mutation_blocks_forged_origin(monkeypatch, tmp_path):
     no-token (loopback) mode a malicious page could disable safety tools, arm
     the killswitch, or purge caches via an ambient cross-site POST. Now gated
     centrally in bearer_auth."""
-    from maverick import world_model
+    from lightwork import world_model
     monkeypatch.setattr(world_model, "DEFAULT_DB", tmp_path / "world.db")
     monkeypatch.delenv("MAVERICK_DASHBOARD_TOKEN", raising=False)
     client = _client()
@@ -109,7 +109,7 @@ def test_api_v1_mutation_blocks_forged_origin(monkeypatch, tmp_path):
 
 
 def test_api_v1_mutation_blocks_missing_origin(monkeypatch, tmp_path):
-    from maverick import world_model
+    from lightwork import world_model
     monkeypatch.setattr(world_model, "DEFAULT_DB", tmp_path / "world.db")
     monkeypatch.delenv("MAVERICK_DASHBOARD_TOKEN", raising=False)
     client = _client()
@@ -119,7 +119,7 @@ def test_api_v1_mutation_blocks_missing_origin(monkeypatch, tmp_path):
 
 def test_api_v1_mutation_allows_matching_origin(monkeypatch, tmp_path):
     """A legitimate same-origin request passes the gate and reaches the handler."""
-    from maverick import world_model
+    from lightwork import world_model
     monkeypatch.setattr(world_model, "DEFAULT_DB", tmp_path / "world.db")
     monkeypatch.delenv("MAVERICK_DASHBOARD_TOKEN", raising=False)
     client = _client()
@@ -138,7 +138,7 @@ def test_no_token_proxied_request_requires_token(monkeypatch, tmp_path):
     loopback peer in no-token mode would serve the control surface
     unauthenticated behind a public proxy. Any forwarding header => require a
     token (fail closed)."""
-    from maverick import world_model
+    from lightwork import world_model
     monkeypatch.setattr(world_model, "DEFAULT_DB", tmp_path / "world.db")
     monkeypatch.delenv("MAVERICK_DASHBOARD_TOKEN", raising=False)
     client = _client()
@@ -149,7 +149,7 @@ def test_no_token_proxied_request_requires_token(monkeypatch, tmp_path):
 
 def test_no_token_proxied_via_forwarded_header_requires_token(monkeypatch, tmp_path):
     """The RFC 7239 ``Forwarded`` header is honored too, not just X-Forwarded-*."""
-    from maverick import world_model
+    from lightwork import world_model
     monkeypatch.setattr(world_model, "DEFAULT_DB", tmp_path / "world.db")
     monkeypatch.delenv("MAVERICK_DASHBOARD_TOKEN", raising=False)
     client = _client()
@@ -159,7 +159,7 @@ def test_no_token_proxied_via_forwarded_header_requires_token(monkeypatch, tmp_p
 
 def test_no_token_direct_loopback_still_served(monkeypatch, tmp_path):
     """Direct local use (no proxy headers) is unaffected by the proxy guard."""
-    from maverick import world_model
+    from lightwork import world_model
     monkeypatch.setattr(world_model, "DEFAULT_DB", tmp_path / "world.db")
     monkeypatch.delenv("MAVERICK_DASHBOARD_TOKEN", raising=False)
     client = _client()
@@ -170,7 +170,7 @@ def test_no_token_direct_loopback_still_served(monkeypatch, tmp_path):
 # ---------- baseline security headers ----------
 
 def test_security_headers_present_on_every_response(monkeypatch, tmp_path):
-    from maverick import world_model
+    from lightwork import world_model
     monkeypatch.setattr(world_model, "DEFAULT_DB", tmp_path / "world.db")
     monkeypatch.delenv("MAVERICK_DASHBOARD_TOKEN", raising=False)
     client = _client()

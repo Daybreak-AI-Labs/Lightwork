@@ -2,7 +2,7 @@
 reality over the proxy -- only when enabled (OFF by default)."""
 from __future__ import annotations
 
-from maverick import consequence as cq
+from lightwork import consequence as cq
 
 
 def test_record_resolve_roundtrip(tmp_path):
@@ -37,7 +37,7 @@ def test_grounded_outcome_prefers_reality_only_when_enabled(tmp_path, monkeypatc
     store.record(1, 7, 1.0)  # reality says success...
 
     # disabled (default): keep the proxy
-    monkeypatch.setattr("maverick.config.get_consequence", lambda: {"enable": False})
+    monkeypatch.setattr("lightwork.config.get_consequence", lambda: {"enable": False})
     monkeypatch.delenv("MAVERICK_CONSEQUENCE", raising=False)
     assert cq.grounded_outcome(1, 7, proxy=0.4, store=store) == 0.4
 

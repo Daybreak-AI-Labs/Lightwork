@@ -3,7 +3,7 @@ import pytest
 
 
 def test_calendly_uuid_rejects_path_traversal():
-    from maverick.tools.calendly_tool import _safe_uuid
+    from lightwork.tools.calendly_tool import _safe_uuid
     assert _safe_uuid("AAAA-BBBB-1234")
     assert _safe_uuid("abc_def")
     assert not _safe_uuid("me/../users")
@@ -13,7 +13,7 @@ def test_calendly_uuid_rejects_path_traversal():
 
 
 def test_shopify_store_rejects_ssrf_chars(monkeypatch):
-    from maverick.tools import shopify_tool
+    from lightwork.tools import shopify_tool
     monkeypatch.setenv("SHOPIFY_ACCESS_TOKEN", "tok")
     for bad in ("evil.com#", "evil.com/", "user@evil.com", "evil.com:8080"):
         monkeypatch.setenv("SHOPIFY_STORE", bad)
@@ -22,7 +22,7 @@ def test_shopify_store_rejects_ssrf_chars(monkeypatch):
 
 
 def test_shopify_store_clean_subdomain_expands(monkeypatch):
-    from maverick.tools import shopify_tool
+    from lightwork.tools import shopify_tool
     monkeypatch.setenv("SHOPIFY_ACCESS_TOKEN", "tok")
     monkeypatch.setenv("SHOPIFY_STORE", "my-store")
     store, tok = shopify_tool._config()

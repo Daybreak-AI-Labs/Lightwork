@@ -16,7 +16,7 @@ try:
 except ModuleNotFoundError:  # Python 3.10
     import tomli as tomllib  # type: ignore[no-redef]
 
-from maverick_installer import bridge, wizard
+from lightwork_installer import bridge, wizard
 
 
 def _run(monkeypatch, tmp_path, answers):

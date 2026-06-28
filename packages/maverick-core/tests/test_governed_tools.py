@@ -8,12 +8,12 @@ from __future__ import annotations
 
 import asyncio
 
-from maverick.governed_tools import (
+from lightwork.governed_tools import (
     apply_governed_connectors,
     governance_enabled,
     wrap_connector_tool,
 )
-from maverick.tools import Tool, ToolRegistry
+from lightwork.tools import Tool, ToolRegistry
 
 _SCHEMA = {
     "type": "object",
@@ -66,7 +66,7 @@ class TestWrap:
 
     def test_write_without_approver_is_refused(self, monkeypatch):
         monkeypatch.delenv("MAVERICK_GOVERNED_APPROVER", raising=False)
-        import maverick.config as cfg
+        import lightwork.config as cfg
         monkeypatch.setattr(cfg, "get_governed_connectors",
                             lambda: {"enable": True, "connectors": ["acme"], "approver": ""})
         calls = []
@@ -93,7 +93,7 @@ class TestWrap:
 class TestApply:
     def test_off_by_default_is_noop(self, monkeypatch):
         monkeypatch.delenv("MAVERICK_GOVERNED_CONNECTORS", raising=False)
-        import maverick.config as cfg
+        import lightwork.config as cfg
         monkeypatch.setattr(cfg, "get_governed_connectors",
                             lambda: {"enable": False, "connectors": ["acme"], "approver": ""})
         reg = ToolRegistry()
@@ -103,7 +103,7 @@ class TestApply:
 
     def test_enabled_wraps_configured(self, monkeypatch):
         monkeypatch.setenv("MAVERICK_GOVERNED_CONNECTORS", "1")
-        import maverick.config as cfg
+        import lightwork.config as cfg
         monkeypatch.setattr(cfg, "get_governed_connectors",
                             lambda: {"enable": True, "connectors": ["acme"], "approver": "ops"})
         reg = ToolRegistry()
@@ -113,7 +113,7 @@ class TestApply:
 
     def test_enabled_wraps_bespoke_salesforce_schema(self, monkeypatch):
         monkeypatch.setenv("MAVERICK_GOVERNED_CONNECTORS", "1")
-        import maverick.config as cfg
+        import lightwork.config as cfg
         monkeypatch.setattr(cfg, "get_governed_connectors",
                             lambda: {"enable": True, "connectors": ["salesforce"], "approver": ""})
         calls = []
@@ -132,7 +132,7 @@ class TestApply:
 
     def test_skips_non_op_tool(self, monkeypatch):
         monkeypatch.setenv("MAVERICK_GOVERNED_CONNECTORS", "1")
-        import maverick.config as cfg
+        import lightwork.config as cfg
         monkeypatch.setattr(cfg, "get_governed_connectors",
                             lambda: {"enable": True, "connectors": ["plain"], "approver": "ops"})
         reg = ToolRegistry()
@@ -142,7 +142,7 @@ class TestApply:
 
     def test_unknown_connector_skipped(self, monkeypatch):
         monkeypatch.setenv("MAVERICK_GOVERNED_CONNECTORS", "1")
-        import maverick.config as cfg
+        import lightwork.config as cfg
         monkeypatch.setattr(cfg, "get_governed_connectors",
                             lambda: {"enable": True, "connectors": ["absent"], "approver": "ops"})
         assert apply_governed_connectors(ToolRegistry()) == []

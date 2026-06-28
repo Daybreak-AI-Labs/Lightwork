@@ -6,7 +6,7 @@ into the message — e.g. a hidden ``Bcc:`` that silently exfiltrates a
 copy of every email the agent sends. Recipients and subjects are always
 single-line, so a newline is an injection attempt, not data.
 """
-from maverick.tools.email_tool import _send
+from lightwork.tools.email_tool import _send
 
 
 def _creds(monkeypatch):

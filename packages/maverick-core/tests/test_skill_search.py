@@ -9,7 +9,7 @@ from __future__ import annotations
 import json
 
 import pytest
-from maverick.skill.search import (
+from lightwork.skill.search import (
     SkillSearchIndex,
     build_index,
     export_jsonl,
@@ -153,7 +153,7 @@ class TestHFPull:
         written = tmp_path / "imported-skill.md"
         assert written.exists()
         # The written file must pass the real publish-gate lint.
-        from maverick.skills import validate_skill_file
+        from lightwork.skills import validate_skill_file
         assert validate_skill_file(written).ok
 
     def test_import_rejects_record_with_embedded_secret(self, tmp_path):
@@ -254,7 +254,7 @@ class TestCLI:
             "tools_needed:\n  - shell\n---\n\n# Steps\n\n1. Research the topic well.\n",
             encoding="utf-8",
         )
-        monkeypatch.setattr("maverick.skills.SKILLS_DIR", skills_dir)
+        monkeypatch.setattr("lightwork.skills.SKILLS_DIR", skills_dir)
         rc = main(["research and summarize"])
         assert rc == 0
         out = capsys.readouterr().out
@@ -268,7 +268,7 @@ class TestCLI:
             "# Steps\n\n1. Do the s thing thoroughly.\n",
             encoding="utf-8",
         )
-        monkeypatch.setattr("maverick.skills.SKILLS_DIR", skills_dir)
+        monkeypatch.setattr("lightwork.skills.SKILLS_DIR", skills_dir)
         out = tmp_path / "out.jsonl"
         rc = main(["--export", str(out)])
         assert rc == 0
@@ -278,7 +278,7 @@ class TestCLI:
     def test_search_no_match_returns_zero(self, tmp_path, monkeypatch, capsys):
         skills_dir = tmp_path / "skills"
         skills_dir.mkdir()
-        monkeypatch.setattr("maverick.skills.SKILLS_DIR", skills_dir)
+        monkeypatch.setattr("lightwork.skills.SKILLS_DIR", skills_dir)
         rc = main(["nothing will match this"])
         assert rc == 0
         assert "no skills matched" in capsys.readouterr().out

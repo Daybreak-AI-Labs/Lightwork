@@ -7,7 +7,7 @@ at the auth chokepoint. MAVERICK_GRPC_RATE_LIMIT=0 disables it.
 from __future__ import annotations
 
 import pytest
-from maverick.grpc_api import server as gs
+from lightwork.grpc_api import server as gs
 
 
 @pytest.fixture(autouse=True)

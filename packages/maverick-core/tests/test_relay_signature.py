@@ -1,5 +1,5 @@
 """The self-hosted relay (deploy/relay/relay.py) must sign requests exactly the
-way maverick.webhooks verifies them — otherwise every forwarded request 403s.
+way lightwork.webhooks verifies them — otherwise every forwarded request 403s.
 This loads the standalone relay module by path and checks the round-trip.
 """
 from __future__ import annotations
@@ -9,7 +9,7 @@ import time
 from pathlib import Path
 
 import pytest
-from maverick.webhooks import verify_signature
+from lightwork.webhooks import verify_signature
 
 _RELAY = (
     Path(__file__).resolve().parents[3] / "deploy" / "relay" / "relay.py"

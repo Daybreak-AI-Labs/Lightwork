@@ -1,6 +1,6 @@
 """Wire the cron scheduler + job worker into the CLI.
 
-The scheduler engine (maverick.scheduler) and the worker existed but had no
+The scheduler engine (lightwork.scheduler) and the worker existed but had no
 entry point: nothing imported the scheduler, there was no `maverick worker`
 or `maverick schedule` command, and the worker never re-armed recurring
 jobs. These tests cover the wiring: JobQueue.cancel, the worker re-arm
@@ -14,7 +14,7 @@ from click.testing import CliRunner
 # ---------- JobQueue.cancel ----------
 
 def test_cancel_removes_pending_job(tmp_path):
-    from maverick.job_queue import JobQueue
+    from lightwork.job_queue import JobQueue
     q = JobQueue(db_path=tmp_path / "jobs.db")
     jid = q.enqueue("noop", {}, run_at=1000.0)
     assert q.cancel(jid) is True
@@ -22,7 +22,7 @@ def test_cancel_removes_pending_job(tmp_path):
 
 
 def test_cancel_running_or_unknown_returns_false(tmp_path):
-    from maverick.job_queue import JobQueue
+    from lightwork.job_queue import JobQueue
     q = JobQueue(db_path=tmp_path / "jobs.db")
     jid = q.enqueue("noop", {}, run_at=1000.0)
     q.claim(now=1000.0)  # -> running, no longer cancellable
@@ -33,8 +33,8 @@ def test_cancel_running_or_unknown_returns_false(tmp_path):
 # ---------- worker re-arm ----------
 
 def test_maybe_rearm_only_on_first_attempt(tmp_path):
-    from maverick.job_queue import Job, JobQueue
-    from maverick.worker import Worker
+    from lightwork.job_queue import Job, JobQueue
+    from lightwork.worker import Worker
     q = JobQueue(db_path=tmp_path / "jobs.db")
     w = Worker(queue=q)
     cron = "*/5 * * * *"
@@ -58,8 +58,8 @@ def test_maybe_rearm_only_on_first_attempt(tmp_path):
 
 
 def test_worker_run_once_rearms_recurring_job(tmp_path):
-    from maverick.job_queue import JobQueue
-    from maverick.worker import Worker
+    from lightwork.job_queue import JobQueue
+    from lightwork.worker import Worker
     q = JobQueue(db_path=tmp_path / "jobs.db")
     cron = "*/5 * * * *"
     # Past run_at so it's claimable now; carries its cron in the payload.
@@ -77,7 +77,7 @@ def test_worker_run_once_rearms_recurring_job(tmp_path):
 # ---------- CLI: maverick schedule / worker ----------
 
 def test_cli_registers_worker_and_schedule():
-    from maverick.cli import main
+    from lightwork.cli import main
     assert "worker" in main.commands
     assert "schedule" in main.commands
     assert set(main.commands["schedule"].commands) >= {"add", "list", "rm"}
@@ -86,8 +86,8 @@ def test_cli_registers_worker_and_schedule():
 def test_schedule_add_list_rm_roundtrip(tmp_path, monkeypatch):
     import re
 
-    from maverick.cli import main
-    monkeypatch.setattr("maverick.job_queue.DEFAULT_DB", tmp_path / "jobs.db")
+    from lightwork.cli import main
+    monkeypatch.setattr("lightwork.job_queue.DEFAULT_DB", tmp_path / "jobs.db")
     r = CliRunner()
 
     add = r.invoke(main, ["schedule", "add", "*/5 * * * *", "run_goal",
@@ -108,8 +108,8 @@ def test_schedule_add_list_rm_roundtrip(tmp_path, monkeypatch):
 
 
 def test_schedule_add_rejects_bad_cron(tmp_path, monkeypatch):
-    from maverick.cli import main
-    monkeypatch.setattr("maverick.job_queue.DEFAULT_DB", tmp_path / "jobs.db")
+    from lightwork.cli import main
+    monkeypatch.setattr("lightwork.job_queue.DEFAULT_DB", tmp_path / "jobs.db")
     res = CliRunner().invoke(main, ["schedule", "add", "not a cron", "run_goal"])
     assert res.exit_code == 2
     assert "bad cron" in res.output
@@ -119,8 +119,8 @@ def test_schedule_add_warns_unknown_kind_but_still_schedules(tmp_path, monkeypat
     # A typo'd kind has no handler; without a warning it would sit in the queue
     # and fail terminally only at worker time (visible only in logs). Warn, but
     # still schedule -- embedders register custom kinds via Worker.register().
-    from maverick.cli import main
-    monkeypatch.setattr("maverick.job_queue.DEFAULT_DB", tmp_path / "jobs.db")
+    from lightwork.cli import main
+    monkeypatch.setattr("lightwork.job_queue.DEFAULT_DB", tmp_path / "jobs.db")
     res = CliRunner().invoke(main, ["schedule", "add", "*/5 * * * *", "run_gaol",
                                     "--payload", '{"goal_id": 5}'])
     assert res.exit_code == 0, res.output
@@ -129,8 +129,8 @@ def test_schedule_add_warns_unknown_kind_but_still_schedules(tmp_path, monkeypat
 
 
 def test_schedule_add_builtin_kind_does_not_warn(tmp_path, monkeypatch):
-    from maverick.cli import main
-    monkeypatch.setattr("maverick.job_queue.DEFAULT_DB", tmp_path / "jobs.db")
+    from lightwork.cli import main
+    monkeypatch.setattr("lightwork.job_queue.DEFAULT_DB", tmp_path / "jobs.db")
     res = CliRunner().invoke(main, ["schedule", "add", "*/5 * * * *", "run_goal",
                                     "--payload", '{"goal_id": 5}'])
     assert res.exit_code == 0, res.output
@@ -140,20 +140,20 @@ def test_schedule_add_builtin_kind_does_not_warn(tmp_path, monkeypatch):
 def test_builtin_job_kinds_matches_worker_handlers(tmp_path):
     # Guard against drift: the advertised constant must equal the handlers the
     # bare worker actually installs.
-    from maverick.worker import BUILTIN_JOB_KINDS, Worker
+    from lightwork.worker import BUILTIN_JOB_KINDS, Worker
     w = Worker(db_path=tmp_path / "jobs.db")
     assert set(w._handlers) == set(BUILTIN_JOB_KINDS)
 
 
 def test_worker_command_runs_forever(tmp_path, monkeypatch):
-    from maverick.cli import main
-    monkeypatch.setattr("maverick.job_queue.DEFAULT_DB", tmp_path / "jobs.db")
+    from lightwork.cli import main
+    monkeypatch.setattr("lightwork.job_queue.DEFAULT_DB", tmp_path / "jobs.db")
     ran = {"forever": False}
 
     def _fake_run_forever(self):
         ran["forever"] = True
 
-    monkeypatch.setattr("maverick.worker.Worker.run_forever", _fake_run_forever)
+    monkeypatch.setattr("lightwork.worker.Worker.run_forever", _fake_run_forever)
     res = CliRunner().invoke(main, ["worker", "--idle-sleep", "0"])
     assert res.exit_code == 0, res.output
     assert ran["forever"] is True
@@ -164,7 +164,7 @@ def test_worker_command_runs_forever(tmp_path, monkeypatch):
 def test_start_goal_handler_creates_fresh_goal_and_runs_it(tmp_path, monkeypatch):
     # The handler must CREATE a new goal from the prompt (not re-run a fixed id)
     # and hand that fresh id to the runner.
-    monkeypatch.setattr("maverick.world_model.DEFAULT_DB", tmp_path / "world.db")
+    monkeypatch.setattr("lightwork.world_model.DEFAULT_DB", tmp_path / "world.db")
     seen = {}
 
     def _fake_run(goal_id, *a, **k):
@@ -172,10 +172,10 @@ def test_start_goal_handler_creates_fresh_goal_and_runs_it(tmp_path, monkeypatch
         seen["run_kwargs"] = k
         return "done"
 
-    monkeypatch.setattr("maverick.runner.run_goal_in_thread", _fake_run)
+    monkeypatch.setattr("lightwork.runner.run_goal_in_thread", _fake_run)
 
-    from maverick.job_queue import Job
-    from maverick.worker import Worker
+    from lightwork.job_queue import Job
+    from lightwork.worker import Worker
     w = Worker(db_path=tmp_path / "jobs.db")
     w._handlers["start_goal"](Job(
         id=1, kind="start_goal",
@@ -189,7 +189,7 @@ def test_start_goal_handler_creates_fresh_goal_and_runs_it(tmp_path, monkeypatch
         run_at=0.0, status="running", attempts=1,
     ))
 
-    from maverick.world_model import open_world
+    from lightwork.world_model import open_world
     world = open_world(tmp_path / "world.db")
     try:
         g = world.get_goal(seen["goal_id"])
@@ -205,12 +205,12 @@ def test_start_goal_handler_creates_fresh_goal_and_runs_it(tmp_path, monkeypatch
 def test_start_goal_records_schedule_provenance(tmp_path, monkeypatch):
     # A scheduled run stamps goal_origins so the dashboard can show the
     # schedule's run history; only when the payload carries a schedule_id.
-    monkeypatch.setattr("maverick.world_model.DEFAULT_DB", tmp_path / "world.db")
+    monkeypatch.setattr("lightwork.world_model.DEFAULT_DB", tmp_path / "world.db")
     monkeypatch.setattr(
-        "maverick.runner.run_goal_in_thread", lambda goal_id, *a, **k: "done")
+        "lightwork.runner.run_goal_in_thread", lambda goal_id, *a, **k: "done")
 
-    from maverick.job_queue import Job
-    from maverick.worker import Worker
+    from lightwork.job_queue import Job
+    from lightwork.worker import Worker
     w = Worker(db_path=tmp_path / "jobs.db")
     w._handlers["start_goal"](Job(
         id=1, kind="start_goal",
@@ -219,7 +219,7 @@ def test_start_goal_records_schedule_provenance(tmp_path, monkeypatch):
         run_at=0.0, status="running", attempts=1,
     ))
 
-    from maverick.world_model import open_world
+    from lightwork.world_model import open_world
     world = open_world(tmp_path / "world.db")
     try:
         runs = world.goals_for_origin("schedule", "sched-xyz")
@@ -230,16 +230,16 @@ def test_start_goal_records_schedule_provenance(tmp_path, monkeypatch):
 
 def test_start_goal_without_schedule_id_records_no_origin(tmp_path, monkeypatch):
     # A one-off (non-schedule) start_goal must not leave a provenance row.
-    monkeypatch.setattr("maverick.world_model.DEFAULT_DB", tmp_path / "world.db")
+    monkeypatch.setattr("lightwork.world_model.DEFAULT_DB", tmp_path / "world.db")
     monkeypatch.setattr(
-        "maverick.runner.run_goal_in_thread", lambda goal_id, *a, **k: "done")
-    from maverick.job_queue import Job
-    from maverick.worker import Worker
+        "lightwork.runner.run_goal_in_thread", lambda goal_id, *a, **k: "done")
+    from lightwork.job_queue import Job
+    from lightwork.worker import Worker
     Worker(db_path=tmp_path / "jobs.db")._handlers["start_goal"](Job(
         id=1, kind="start_goal", payload={"text": "one-off"},
         run_at=0.0, status="running", attempts=1,
     ))
-    from maverick.world_model import open_world
+    from lightwork.world_model import open_world
     world = open_world(tmp_path / "world.db")
     try:
         assert world.goals_for_origin("schedule", "") == []
@@ -251,13 +251,13 @@ def test_start_goal_idempotent_across_retries(tmp_path, monkeypatch):
     # A transient run failure requeues the job; the retry must REUSE the goal
     # created on the first attempt rather than mint a duplicate goal row each
     # time (a flapping provider would otherwise accumulate orphan goals).
-    monkeypatch.setattr("maverick.world_model.DEFAULT_DB", tmp_path / "world.db")
+    monkeypatch.setattr("lightwork.world_model.DEFAULT_DB", tmp_path / "world.db")
     monkeypatch.setattr(
-        "maverick.runner.run_goal_in_thread", lambda goal_id, *a, **k: "error"
+        "lightwork.runner.run_goal_in_thread", lambda goal_id, *a, **k: "error"
     )
 
-    from maverick.job_queue import JobQueue
-    from maverick.worker import Worker
+    from lightwork.job_queue import JobQueue
+    from lightwork.worker import Worker
     q = JobQueue(db_path=tmp_path / "jobs.db")
     q.enqueue("start_goal", {"text": "recurring task"}, run_at=0.0)
     w = Worker(queue=q, retry_after=0.0)
@@ -265,7 +265,7 @@ def test_start_goal_idempotent_across_retries(tmp_path, monkeypatch):
     assert w.run_once() is True   # attempt 1: creates goal #1, fails -> requeued
     assert w.run_once() is True   # attempt 2: reuses goal #1, fails -> requeued
 
-    from maverick.world_model import open_world
+    from lightwork.world_model import open_world
     world = open_world(tmp_path / "world.db")
     try:
         assert world.get_goal(1) is not None   # the one fresh goal
@@ -275,8 +275,8 @@ def test_start_goal_idempotent_across_retries(tmp_path, monkeypatch):
 
 
 def test_start_goal_requires_text(tmp_path):
-    from maverick.job_queue import Job
-    from maverick.worker import Worker
+    from lightwork.job_queue import Job
+    from lightwork.worker import Worker
     w = Worker(db_path=tmp_path / "jobs.db")
     with pytest.raises(ValueError):
         w._handlers["start_goal"](Job(
@@ -288,12 +288,12 @@ def test_start_goal_requires_text(tmp_path):
 def test_start_goal_recurs_with_same_prompt(tmp_path, monkeypatch):
     # End-to-end: a cron-armed start_goal runs and re-arms the next occurrence
     # carrying the same prompt -- a true recurring autonomous task.
-    monkeypatch.setattr("maverick.world_model.DEFAULT_DB", tmp_path / "world.db")
+    monkeypatch.setattr("lightwork.world_model.DEFAULT_DB", tmp_path / "world.db")
     monkeypatch.setattr(
-        "maverick.runner.run_goal_in_thread", lambda goal_id, *a, **k: "done"
+        "lightwork.runner.run_goal_in_thread", lambda goal_id, *a, **k: "done"
     )
-    from maverick.job_queue import JobQueue
-    from maverick.worker import Worker
+    from lightwork.job_queue import JobQueue
+    from lightwork.worker import Worker
     q = JobQueue(db_path=tmp_path / "jobs.db")
     jid = q.enqueue(
         "start_goal",
@@ -312,8 +312,8 @@ def test_start_goal_recurs_with_same_prompt(tmp_path, monkeypatch):
 
 
 def test_schedule_goal_cli_enqueues_recurring_start_goal(tmp_path, monkeypatch):
-    from maverick.cli import main
-    monkeypatch.setattr("maverick.job_queue.DEFAULT_DB", tmp_path / "jobs.db")
+    from lightwork.cli import main
+    monkeypatch.setattr("lightwork.job_queue.DEFAULT_DB", tmp_path / "jobs.db")
 
     res = CliRunner().invoke(main, [
         "schedule", "goal", "0 9 * * 1-5",
@@ -322,7 +322,7 @@ def test_schedule_goal_cli_enqueues_recurring_start_goal(tmp_path, monkeypatch):
     assert res.exit_code == 0, res.output
     assert "scheduled goal job" in res.output
 
-    from maverick.job_queue import JobQueue
+    from lightwork.job_queue import JobQueue
     jobs = JobQueue(db_path=tmp_path / "jobs.db").list(status="pending")
     assert len(jobs) == 1
     j = jobs[0]
@@ -336,8 +336,8 @@ def test_schedule_goal_cli_enqueues_recurring_start_goal(tmp_path, monkeypatch):
 
 
 def test_schedule_goal_cli_rejects_bad_cron_and_empty_text(tmp_path, monkeypatch):
-    from maverick.cli import main
-    monkeypatch.setattr("maverick.job_queue.DEFAULT_DB", tmp_path / "jobs.db")
+    from lightwork.cli import main
+    monkeypatch.setattr("lightwork.job_queue.DEFAULT_DB", tmp_path / "jobs.db")
     bad_cron = CliRunner().invoke(
         main, ["schedule", "goal", "not a cron", "do a thing"]
     )
@@ -349,8 +349,8 @@ def test_schedule_goal_cli_rejects_bad_cron_and_empty_text(tmp_path, monkeypatch
 # ---------- worker drain (one-shot, cron-friendly) ----------
 
 def test_drain_runs_all_ready_jobs_and_returns_count(tmp_path):
-    from maverick.job_queue import JobQueue
-    from maverick.worker import Worker
+    from lightwork.job_queue import JobQueue
+    from lightwork.worker import Worker
     q = JobQueue(db_path=tmp_path / "jobs.db")
     for _ in range(3):
         q.enqueue("noop", {}, run_at=1000.0)  # past run_at -> ready now
@@ -362,7 +362,7 @@ def test_drain_runs_all_ready_jobs_and_returns_count(tmp_path):
 
 
 def test_claim_ready_cutoff_uses_fresh_heartbeat(tmp_path):
-    from maverick.job_queue import JobQueue
+    from lightwork.job_queue import JobQueue
 
     q = JobQueue(db_path=tmp_path / "jobs.db")
     jid = q.enqueue("noop", {}, run_at=100.0)
@@ -378,8 +378,8 @@ def test_claim_ready_cutoff_uses_fresh_heartbeat(tmp_path):
 def test_drain_does_not_run_rearmed_future_occurrence(tmp_path):
     # A re-armed cron occurrence has a FUTURE run_at, so it must NOT run in the
     # same drain -- exactly one future occurrence stays pending for next time.
-    from maverick.job_queue import JobQueue
-    from maverick.worker import Worker
+    from lightwork.job_queue import JobQueue
+    from lightwork.worker import Worker
     q = JobQueue(db_path=tmp_path / "jobs.db")
     jid = q.enqueue("noop", {"__cron__": "*/5 * * * *"}, run_at=1000.0)
 
@@ -399,11 +399,11 @@ def test_drain_snapshots_ready_time_for_slow_recurring_jobs(
     # that becomes ready while a long handler is still running. Simulate that
     # by making the first cron re-arm due after the drain snapshot (200 > 100)
     # but before the real wall clock used by the old dynamic drain loop.
-    from maverick.job_queue import JobQueue
-    from maverick.worker import Worker
+    from lightwork.job_queue import JobQueue
+    from lightwork.worker import Worker
     q = JobQueue(db_path=tmp_path / "jobs.db")
     jid = q.enqueue("noop", {"__cron__": "* * * * *"}, run_at=0.0)
-    monkeypatch.setattr("maverick.worker.time.time", lambda: 100.0)
+    monkeypatch.setattr("lightwork.worker.time.time", lambda: 100.0)
     rearmed = {"count": 0}
 
     def _fake_schedule_cron(queue, expr, kind, payload):
@@ -411,7 +411,7 @@ def test_drain_snapshots_ready_time_for_slow_recurring_jobs(
         run_at = 200.0 if rearmed["count"] == 1 else 1_000_000_000_000.0
         return queue.enqueue(kind, payload, run_at=run_at), run_at
 
-    monkeypatch.setattr("maverick.scheduler.schedule_cron", _fake_schedule_cron)
+    monkeypatch.setattr("lightwork.scheduler.schedule_cron", _fake_schedule_cron)
     runs = []
     w = Worker(queue=q, idle_sleep=0.0)
     w.register("noop", lambda job: runs.append(job.id))
@@ -425,15 +425,15 @@ def test_drain_snapshots_ready_time_for_slow_recurring_jobs(
 
 
 def test_worker_command_once_drains(tmp_path, monkeypatch):
-    from maverick.cli import main
-    monkeypatch.setattr("maverick.job_queue.DEFAULT_DB", tmp_path / "jobs.db")
+    from lightwork.cli import main
+    monkeypatch.setattr("lightwork.job_queue.DEFAULT_DB", tmp_path / "jobs.db")
     called = {"drain": False}
 
     def _fake_drain(self):
         called["drain"] = True
         return 2
 
-    monkeypatch.setattr("maverick.worker.Worker.drain", _fake_drain)
+    monkeypatch.setattr("lightwork.worker.Worker.drain", _fake_drain)
     res = CliRunner().invoke(main, ["worker", "--once"])
     assert res.exit_code == 0, res.output
     assert called["drain"] is True

@@ -3,7 +3,7 @@ from __future__ import annotations
 
 import json
 
-from maverick import reliability_cert as rc
+from lightwork import reliability_cert as rc
 
 
 def test_certify_with_injected_checks_pass():
@@ -41,7 +41,7 @@ def test_write_cert_0600(tmp_path):
     assert path.exists()
     assert oct(path.stat().st_mode)[-3:] == "600"
     loaded = json.loads(path.read_text())
-    assert loaded["kind"] == "maverick-reliability-cert"
+    assert loaded["kind"] == "lightwork-reliability-cert"
 
 
 def test_sign_cert_signed_or_honestly_unsigned(tmp_path, monkeypatch):
@@ -52,7 +52,7 @@ def test_sign_cert_signed_or_honestly_unsigned(tmp_path, monkeypatch):
         return  # cryptography absent: honestly unsigned
     assert sig["alg"] == "ed25519" and len(sig["pubkey"]) == 64
     # the signature verifies over the canonical payload
-    from maverick.audit.signing import verify_ed25519
+    from lightwork.audit.signing import verify_ed25519
     payload = json.dumps({k: v for k, v in cert.items() if k != "signature"},
                          sort_keys=True, separators=(",", ":")).encode()
     assert verify_ed25519(sig["pubkey"], sig["sig"], payload)

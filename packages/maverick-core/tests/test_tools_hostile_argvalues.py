@@ -3,7 +3,7 @@ arg VALUES the model can put in its JSON object (non-str where a str is
 expected, unhashable op, overlong path, non-finite numbers). The contract
 is a returned string (often ``ERROR: ...``), never an uncaught exception.
 
-These cover a fuzz mop-up pass over packages/maverick-core/maverick/tools/.
+These cover a fuzz mop-up pass over packages/lightwork-core/maverick/tools/.
 """
 from __future__ import annotations
 
@@ -11,19 +11,19 @@ import tempfile
 from pathlib import Path
 
 import pytest
-from maverick.sandbox.local import LocalBackend
-from maverick.tools import compute as compute_mod
-from maverick.tools import file_watcher as fw_mod
-from maverick.tools import github_repo_search as ghrs_mod
-from maverick.tools import image_edit as ie_mod
-from maverick.tools import notebook_exec as nb_mod
-from maverick.tools import redact as redact_mod
-from maverick.tools import s3_attachments as s3_mod
-from maverick.tools import sanctions_screen as sanc_mod
-from maverick.tools import self_edit as se_mod
-from maverick.tools import semantic_code_search as scs_mod
-from maverick.tools import teams_tool as teams_mod
-from maverick.tools import translate as tr_mod
+from lightwork.sandbox.local import LocalBackend
+from lightwork.tools import compute as compute_mod
+from lightwork.tools import file_watcher as fw_mod
+from lightwork.tools import github_repo_search as ghrs_mod
+from lightwork.tools import image_edit as ie_mod
+from lightwork.tools import notebook_exec as nb_mod
+from lightwork.tools import redact as redact_mod
+from lightwork.tools import s3_attachments as s3_mod
+from lightwork.tools import sanctions_screen as sanc_mod
+from lightwork.tools import self_edit as se_mod
+from lightwork.tools import semantic_code_search as scs_mod
+from lightwork.tools import teams_tool as teams_mod
+from lightwork.tools import translate as tr_mod
 
 
 @pytest.fixture()

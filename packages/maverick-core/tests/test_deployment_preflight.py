@@ -9,7 +9,7 @@ depend on crypto, network, or the host config.
 from __future__ import annotations
 
 import pytest
-from maverick.deployment import (
+from lightwork.deployment import (
     EnterpriseRequiredError,
     GuaranteeCheck,
     enterprise_required,
@@ -33,12 +33,12 @@ def _isolate(monkeypatch, tmp_path):
     # default posture is genuinely fail-open.
     monkeypatch.delenv("MAVERICK_REQUIRE_ENTERPRISE", raising=False)
     monkeypatch.setenv("HOME", str(tmp_path))
-    monkeypatch.setattr("maverick.config.load_config", lambda *a, **k: {})
+    monkeypatch.setattr("lightwork.config.load_config", lambda *a, **k: {})
 
 
 def _force_verify(monkeypatch, checks):
     """Make verify_deployment() return a fixed result without exercising probes."""
-    monkeypatch.setattr("maverick.deployment.verify_deployment", lambda: checks)
+    monkeypatch.setattr("lightwork.deployment.verify_deployment", lambda: checks)
 
 
 # ----- detection: enterprise_required() -------------------------------------
@@ -61,7 +61,7 @@ def test_required_false_from_falsey_env(monkeypatch, val):
 
 def test_required_from_config(monkeypatch):
     monkeypatch.setattr(
-        "maverick.config.load_config", lambda *a, **k: {"enterprise": {"require": True}}
+        "lightwork.config.load_config", lambda *a, **k: {"enterprise": {"require": True}}
     )
     assert enterprise_required() is True
 
@@ -70,7 +70,7 @@ def test_env_wins_over_config(monkeypatch):
     # Operator can force-disable the gate at the env even if config requires it.
     monkeypatch.setenv("MAVERICK_REQUIRE_ENTERPRISE", "0")
     monkeypatch.setattr(
-        "maverick.config.load_config", lambda *a, **k: {"enterprise": {"require": True}}
+        "lightwork.config.load_config", lambda *a, **k: {"enterprise": {"require": True}}
     )
     assert enterprise_required() is False
 

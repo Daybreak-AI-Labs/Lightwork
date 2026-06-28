@@ -4,7 +4,7 @@ from __future__ import annotations
 from types import SimpleNamespace
 
 import pytest
-from maverick.tools.wasm_run import wasm_run
+from lightwork.tools.wasm_run import wasm_run
 
 
 class RecordingSandbox:
@@ -21,12 +21,12 @@ class RecordingSandbox:
 
 @pytest.fixture
 def have_wasmtime(monkeypatch):
-    monkeypatch.setattr("maverick.tools.wasm_run.shutil.which",
+    monkeypatch.setattr("lightwork.tools.wasm_run.shutil.which",
                         lambda n: "/usr/bin/wasmtime" if n == "wasmtime" else None)
 
 
 def test_missing_wasmtime(monkeypatch):
-    monkeypatch.setattr("maverick.tools.wasm_run.shutil.which", lambda n: None)
+    monkeypatch.setattr("lightwork.tools.wasm_run.shutil.which", lambda n: None)
     out = wasm_run().fn({"op": "run", "module": "m.wasm"})
     assert out.startswith("ERROR") and "wasmtime not on PATH" in out
 
@@ -98,7 +98,7 @@ def test_unknown_op():
 
 
 def test_registered():
-    from maverick.tools import base_registry
+    from lightwork.tools import base_registry
 
     class _W:
         pass
@@ -111,8 +111,8 @@ def test_registered():
 
 
 def test_wasm_run_is_high_risk():
-    from maverick.capability import Capability
-    from maverick.safety.tool_risk import tool_risk, tools_exceeding
+    from lightwork.capability import Capability
+    from lightwork.safety.tool_risk import tool_risk, tools_exceeding
 
     assert tool_risk("wasm_run") == "high"
     assert "wasm_run" in tools_exceeding(["wasm_run"], "medium")

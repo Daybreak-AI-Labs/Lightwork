@@ -13,13 +13,13 @@ dead.
 Pins:
   - ``get_provider_client`` forwards ``base_url`` to the local clients
   - the LLM facade reads ``[providers.<name>] base_url`` and forwards it
-  - ``maverick.config.any_provider_configured()`` is the ONE predicate:
+  - ``lightwork.config.any_provider_configured()`` is the ONE predicate:
     key envs, base-url envs, or config providers all count
 """
 from __future__ import annotations
 
 import pytest
-from maverick.config import any_provider_configured
+from lightwork.config import any_provider_configured
 
 _KEY_VARS = (
     "ANTHROPIC_API_KEY", "OPENAI_API_KEY", "GEMINI_API_KEY",
@@ -45,8 +45,8 @@ class _Recorder:
 
 
 def test_dispatch_forwards_base_url_to_vllm(monkeypatch):
-    import maverick.providers.vllm_provider as vp
-    from maverick.providers import get_provider_client
+    import lightwork.providers.vllm_provider as vp
+    from lightwork.providers import get_provider_client
 
     monkeypatch.setattr(vp, "VLLMClient", _Recorder)
     get_provider_client("vllm", api_key=None, base_url="http://h:1/v1")
@@ -54,8 +54,8 @@ def test_dispatch_forwards_base_url_to_vllm(monkeypatch):
 
 
 def test_dispatch_forwards_base_url_to_ollama(monkeypatch):
-    import maverick.providers.ollama_provider as op
-    from maverick.providers import get_provider_client
+    import lightwork.providers.ollama_provider as op
+    from lightwork.providers import get_provider_client
 
     monkeypatch.setattr(op, "OllamaClient", _Recorder)
     get_provider_client("ollama", base_url="http://h:2/v1")
@@ -66,14 +66,14 @@ def test_llm_facade_passes_config_base_url(clean_provider_env, monkeypatch):
     clean_provider_env.write_text(
         '[providers.vllm]\nbase_url = "http://cfg-host:9/v1"\n', encoding="utf-8"
     )
-    import maverick.llm as llm_mod
+    import lightwork.llm as llm_mod
     captured = {}
 
     def fake_get_provider_client(name, api_key=None, base_url=None, default_headers=None):
         captured["call"] = (name, api_key, base_url)
         return object()
 
-    import maverick.providers as providers_mod
+    import lightwork.providers as providers_mod
     monkeypatch.setattr(providers_mod, "get_provider_client", fake_get_provider_client)
     llm_mod.LLM(model="vllm:stub")._get_client("vllm")
     assert captured["call"] == ("vllm", None, "http://cfg-host:9/v1")
@@ -122,7 +122,7 @@ def test_channel_server_accepts_config_only_provider(clean_provider_env, monkeyp
     monkeypatch.setenv("USERPROFILE", str(clean_provider_env.parent))
 
     import pytest as _pytest
-    from maverick.server import build_from_config
+    from lightwork.server import build_from_config
     # Passing the provider gate is proven by reaching the NEXT error in the
     # build (no channels wired in this bare config) -- the gate itself must
     # not fire for a config-only self-hosted provider.
@@ -133,6 +133,6 @@ def test_channel_server_accepts_config_only_provider(clean_provider_env, monkeyp
 def test_channel_server_still_refuses_unconfigured(clean_provider_env, monkeypatch):
     monkeypatch.delenv("ANTHROPIC_API_KEY", raising=False)
     import pytest as _pytest
-    from maverick.server import build_from_config
+    from lightwork.server import build_from_config
     with _pytest.raises(RuntimeError, match="[Nn]o LLM provider"):
         build_from_config()

@@ -3,9 +3,9 @@ from __future__ import annotations
 
 import asyncio
 
-from maverick import threat_hunt
-from maverick.audit import export
-from maverick.tools.hunt_tools import hunt_tools
+from lightwork import threat_hunt
+from lightwork.audit import export
+from lightwork.tools.hunt_tools import hunt_tools
 
 
 def _tool():

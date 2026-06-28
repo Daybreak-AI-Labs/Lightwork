@@ -3,10 +3,10 @@ tamper-evident audit row, so an upgrade or cap change is provable rather than a
 silent control-plane edit (purchase-blocker audit #80)."""
 from __future__ import annotations
 
-import maverick.audit.writer as _writer
+import lightwork.audit.writer as _writer
 import pytest
-from maverick.audit import iter_events
-from maverick.tenant import registry
+from lightwork.audit import iter_events
+from lightwork.tenant import registry
 
 
 @pytest.fixture(autouse=True)

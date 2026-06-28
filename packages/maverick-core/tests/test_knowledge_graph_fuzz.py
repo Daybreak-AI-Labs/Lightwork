@@ -1,7 +1,7 @@
 """Regression: knowledge_graph must not crash on malformed model-supplied args."""
 from __future__ import annotations
 
-from maverick.tools.knowledge_graph import knowledge_graph
+from lightwork.tools.knowledge_graph import knowledge_graph
 
 
 def _fn():

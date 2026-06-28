@@ -4,12 +4,12 @@ from __future__ import annotations
 import asyncio
 
 import pytest
-from maverick.safety.rate_limiter import (
+from lightwork.safety.rate_limiter import (
     _Limiter,
     apply_to_registry,
     parse_limit,
 )
-from maverick.tools import Tool, ToolRegistry
+from lightwork.tools import Tool, ToolRegistry
 
 
 def test_parse_limit_basic():
@@ -127,7 +127,7 @@ def test_apply_to_registry_preserves_async():
 @pytest.mark.parametrize("spec", ["bogus", "", "5"])
 def test_apply_to_registry_invalid_limits_loaded_from_config(spec, monkeypatch):
     """Bad config entries are skipped, not crashy."""
-    from maverick.safety import rate_limiter as rl
+    from lightwork.safety import rate_limiter as rl
 
     def _fake_load():
         out = {}

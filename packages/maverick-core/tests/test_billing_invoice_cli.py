@@ -17,7 +17,7 @@ from __future__ import annotations
 
 import pytest
 from click.testing import CliRunner
-from maverick.cli import main
+from lightwork.cli import main
 
 
 @pytest.fixture(autouse=True)
@@ -27,12 +27,12 @@ def _isolate(monkeypatch, tmp_path):
 
 
 def _provision(tenant_id: str, **kw) -> None:
-    from maverick.tenant import registry as tr
+    from lightwork.tenant import registry as tr
     tr.create_tenant(tenant_id, **kw)
 
 
 def _record_usage(tenant_id: str, day: str = "2026-06-01") -> None:
-    from maverick.billing import ledger_for_tenant
+    from lightwork.billing import ledger_for_tenant
     ledger_for_tenant(tenant_id).record("user:alice", 1.25, 10_000, 2_000, day=day)
 
 
@@ -95,7 +95,7 @@ def test_deleted_but_unpurged_tenant_still_invoices_final():
     # ledger; that surviving usage must still bill a final time (line items
     # present => never the typo branch), even though it is no longer in the
     # roster (a sibling tenant keeps the roster non-empty).
-    from maverick.tenant import registry as tr
+    from lightwork.tenant import registry as tr
     _provision("acme", plan="pro")
     _provision("beta", plan="free")
     _record_usage("acme", day="2026-05-15")

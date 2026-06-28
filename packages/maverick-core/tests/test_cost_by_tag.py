@@ -1,8 +1,8 @@
 """Cost split by tag (ROADMAP 2028 H1)."""
 from __future__ import annotations
 
-from maverick.cost.by_tag import gather, render, split_by_tag
-from maverick.world_model import EpisodeSpend
+from lightwork.cost.by_tag import gather, render, split_by_tag
+from lightwork.world_model import EpisodeSpend
 
 
 class _FakeWorld:

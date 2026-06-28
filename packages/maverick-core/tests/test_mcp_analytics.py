@@ -2,7 +2,7 @@
 from __future__ import annotations
 
 import pytest
-from maverick import mcp_analytics as ma
+from lightwork import mcp_analytics as ma
 
 
 @pytest.fixture(autouse=True)

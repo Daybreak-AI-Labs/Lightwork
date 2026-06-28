@@ -17,8 +17,8 @@ import asyncio
 import inspect
 
 import pytest
-from maverick import observability as obs
-from maverick.tools import Tool, ToolRegistry
+from lightwork import observability as obs
+from lightwork.tools import Tool, ToolRegistry
 
 
 @pytest.fixture(autouse=True)

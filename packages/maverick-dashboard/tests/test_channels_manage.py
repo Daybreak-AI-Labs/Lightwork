@@ -10,7 +10,7 @@ _ORIGIN = {"origin": "http://testserver"}
 
 
 def _client():
-    from maverick_dashboard.app import app
+    from lightwork_dashboard.app import app
     return TestClient(app)
 
 
@@ -20,9 +20,9 @@ def _iso(monkeypatch, tmp_path):
     # dashboard-config.toml (the overlay settings_store writes) under tmp.
     monkeypatch.setenv("MAVERICK_CONFIG", str(tmp_path / "config.toml"))
     monkeypatch.delenv("MAVERICK_DASHBOARD_TOKEN", raising=False)
-    from maverick import world_model
+    from lightwork import world_model
     monkeypatch.setattr(world_model, "DEFAULT_DB", tmp_path / "world.db")
-    from maverick_dashboard import app as dash_app
+    from lightwork_dashboard import app as dash_app
     dash_app._world_cache.clear()
     yield
 
@@ -30,7 +30,7 @@ def _iso(monkeypatch, tmp_path):
 # ---- settings_store unit level ------------------------------------------------
 
 def test_set_channel_writes_enabled_and_fields():
-    from maverick_dashboard import settings_store as ss
+    from lightwork_dashboard import settings_store as ss
     ss.set_channel("slack", True, {"app_token": "xapp-1", "bot_token": "xoxb-1"})
     overlay = ss.load_overlay()
     assert overlay["channels"]["slack"]["enabled"] is True
@@ -38,7 +38,7 @@ def test_set_channel_writes_enabled_and_fields():
 
 
 def test_channels_state_masks_secrets():
-    from maverick_dashboard import settings_store as ss
+    from lightwork_dashboard import settings_store as ss
     ss.set_channel("slack", True, {"app_token": "xapp-supersecret", "bot_token": "xoxb-1"})
     state = {c["name"]: c for c in ss.channels_state()}
     slack = state["slack"]
@@ -51,7 +51,7 @@ def test_channels_state_masks_secrets():
 
 
 def test_blank_secret_keeps_existing():
-    from maverick_dashboard import settings_store as ss
+    from lightwork_dashboard import settings_store as ss
     ss.set_channel("discord", True, {"bot_token": "keepme"})
     # toggle off without re-entering the token
     ss.set_channel("discord", False, {"bot_token": ""})
@@ -61,7 +61,7 @@ def test_blank_secret_keeps_existing():
 
 
 def test_int_field_typed_and_validated():
-    from maverick_dashboard import settings_store as ss
+    from lightwork_dashboard import settings_store as ss
     ss.set_channel("sms", True, {"account_sid": "AC1", "auth_token": "t",
                                  "from_number": "+1", "port": "8770"})
     assert ss.load_overlay()["channels"]["sms"]["port"] == 8770
@@ -70,7 +70,7 @@ def test_int_field_typed_and_validated():
 
 
 def test_clear_and_unknown_channel():
-    from maverick_dashboard import settings_store as ss
+    from lightwork_dashboard import settings_store as ss
     ss.set_channel("telegram", True, {"bot_token": "t"})
     ss.clear_channel("telegram")
     assert "telegram" not in (ss.load_overlay().get("channels") or {})
@@ -81,8 +81,8 @@ def test_clear_and_unknown_channel():
 
 
 def test_overlay_deep_merges_into_load_config():
-    from maverick import config
-    from maverick_dashboard import settings_store as ss
+    from lightwork import config
+    from lightwork_dashboard import settings_store as ss
     ss.set_channel("telegram", True, {"bot_token": "12345:secret"})
     # this is the real wiring proof: server.build_from_config reads load_config()
     merged = config.load_config()
@@ -91,7 +91,7 @@ def test_overlay_deep_merges_into_load_config():
 
 
 def test_channel_coexists_with_provider_keys():
-    from maverick_dashboard import settings_store as ss
+    from lightwork_dashboard import settings_store as ss
     ss.set_provider("anthropic", api_key="sk-ant-xxx")  # pragma: allowlist secret
     ss.set_channel("slack", True, {"app_token": "xapp", "bot_token": "xoxb"})
     overlay = ss.load_overlay()
@@ -116,7 +116,7 @@ def test_save_channel_enables_and_hides_secret():
         "channel": "slack", "enabled": "on",
         "app_token": "xapp-leak", "bot_token": "xoxb-leak"})
     assert r.status_code == 303
-    from maverick_dashboard import settings_store as ss
+    from lightwork_dashboard import settings_store as ss
     assert ss.load_overlay()["channels"]["slack"]["enabled"] is True
     # the secret must never render back on the page
     page = c.get("/channels").text
@@ -131,7 +131,7 @@ def test_save_without_checkbox_disables():
     r = c.post("/channels/save", headers=_ORIGIN, follow_redirects=False, data={
         "channel": "telegram", "bot_token": ""})
     assert r.status_code == 303
-    from maverick_dashboard import settings_store as ss
+    from lightwork_dashboard import settings_store as ss
     ch = ss.load_overlay()["channels"]["telegram"]
     assert ch["enabled"] is False and ch["bot_token"] == "t"
 
@@ -143,7 +143,7 @@ def test_clear_route_removes_channel():
     r = c.post("/channels/clear", headers=_ORIGIN, follow_redirects=False,
                data={"channel": "discord"})
     assert r.status_code == 303
-    from maverick_dashboard import settings_store as ss
+    from lightwork_dashboard import settings_store as ss
     assert "discord" not in (ss.load_overlay().get("channels") or {})
 
 

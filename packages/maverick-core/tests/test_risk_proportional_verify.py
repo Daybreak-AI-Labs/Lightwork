@@ -9,17 +9,17 @@ get full verification.
 from pathlib import Path
 
 import pytest
-from maverick.agent import (
+from lightwork.agent import (
     Agent,
     _final_is_low_risk,
     _risk_proportional_verify_enabled,
 )
-from maverick.blackboard import Blackboard
-from maverick.budget import Budget
-from maverick.llm import LLMResponse
-from maverick.sandbox import LocalBackend
-from maverick.swarm import SwarmContext
-from maverick.world_model import WorldModel
+from lightwork.blackboard import Blackboard
+from lightwork.budget import Budget
+from lightwork.llm import LLMResponse
+from lightwork.sandbox import LocalBackend
+from lightwork.swarm import SwarmContext
+from lightwork.world_model import WorldModel
 
 # --- pure classifier -------------------------------------------------------
 
@@ -58,13 +58,13 @@ def test_embedded_code_is_not_low_risk(body):
 # --- enable flag -----------------------------------------------------------
 
 def test_enabled_via_env(monkeypatch):
-    monkeypatch.setattr("maverick.config.load_config", dict)
+    monkeypatch.setattr("lightwork.config.load_config", dict)
     monkeypatch.setenv("MAVERICK_RISK_PROPORTIONAL_VERIFY", "1")
     assert _risk_proportional_verify_enabled() is True
 
 
 def test_disabled_by_default(monkeypatch):
-    monkeypatch.setattr("maverick.config.load_config", dict)
+    monkeypatch.setattr("lightwork.config.load_config", dict)
     monkeypatch.delenv("MAVERICK_RISK_PROPORTIONAL_VERIFY", raising=False)
     assert _risk_proportional_verify_enabled() is False
 
@@ -72,7 +72,7 @@ def test_disabled_by_default(monkeypatch):
 def test_enabled_via_config(monkeypatch):
     monkeypatch.delenv("MAVERICK_RISK_PROPORTIONAL_VERIFY", raising=False)
     monkeypatch.setattr(
-        "maverick.config.load_config",
+        "lightwork.config.load_config",
         lambda: {"verification": {"risk_proportional": True}},
     )
     assert _risk_proportional_verify_enabled() is True
@@ -118,7 +118,7 @@ _FINAL = LLMResponse(text="FINAL: the answer is 42", thinking=None,
 
 @pytest.mark.asyncio
 async def test_low_risk_skips_verifier_when_enabled(tmp_path, monkeypatch):
-    monkeypatch.setattr("maverick.config.load_config", dict)
+    monkeypatch.setattr("lightwork.config.load_config", dict)
     monkeypatch.setenv("MAVERICK_RISK_PROPORTIONAL_VERIFY", "1")
     llm = _ScriptedLLM([_FINAL])
     ctx = _ctx(tmp_path, llm)
@@ -132,7 +132,7 @@ async def test_low_risk_skips_verifier_when_enabled(tmp_path, monkeypatch):
 
 @pytest.mark.asyncio
 async def test_low_risk_still_verified_when_disabled(tmp_path, monkeypatch):
-    monkeypatch.setattr("maverick.config.load_config", dict)
+    monkeypatch.setattr("lightwork.config.load_config", dict)
     monkeypatch.delenv("MAVERICK_RISK_PROPORTIONAL_VERIFY", raising=False)
     accept = '{"confidence":0.77,"accepts":true,"critique":"looks good","issues":[]}'
     llm = _ScriptedLLM([

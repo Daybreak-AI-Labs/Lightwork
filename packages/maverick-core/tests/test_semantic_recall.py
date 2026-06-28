@@ -10,11 +10,11 @@ from __future__ import annotations
 from pathlib import Path
 
 import pytest
-from maverick import semantic_recall as sr
-from maverick.budget import Budget
-from maverick.orchestrator import _maybe_recall_prior_work, run_goal
-from maverick.sandbox import LocalBackend
-from maverick.world_model import WorldModel
+from lightwork import semantic_recall as sr
+from lightwork.budget import Budget
+from lightwork.orchestrator import _maybe_recall_prior_work, run_goal
+from lightwork.sandbox import LocalBackend
+from lightwork.world_model import WorldModel
 
 
 class FakeStore:
@@ -207,7 +207,7 @@ class TestTenantCollectionIsolation:
     """
 
     def _capture(self, monkeypatch):
-        import maverick.vector_store as vs
+        import lightwork.vector_store as vs
         captured = {}
 
         class _Fake:
@@ -221,7 +221,7 @@ class TestTenantCollectionIsolation:
 
     def test_collection_is_tenant_namespaced(self, monkeypatch):
         captured = self._capture(monkeypatch)
-        from maverick import paths
+        from lightwork import paths
         monkeypatch.setattr(paths, "current_tenant", lambda: "acme-1")
 
         sr.build_store("chroma")
@@ -236,7 +236,7 @@ class TestTenantCollectionIsolation:
 
     def test_single_tenant_collection_unchanged(self, monkeypatch):
         captured = self._capture(monkeypatch)
-        from maverick import paths
+        from lightwork import paths
         monkeypatch.setattr(paths, "current_tenant", lambda: None)
 
         sr.build_store("chroma")
@@ -246,7 +246,7 @@ class TestTenantCollectionIsolation:
 
     def test_two_tenants_get_distinct_collections(self, monkeypatch):
         captured = self._capture(monkeypatch)
-        from maverick import paths
+        from lightwork import paths
 
         monkeypatch.setattr(paths, "current_tenant", lambda: "tenant_a")
         sr.build_store("qdrant")
@@ -267,7 +267,7 @@ class TestTenantCollectionIsolation:
         self, monkeypatch, tenant_a, tenant_b
     ):
         captured = self._capture(monkeypatch)
-        from maverick import paths
+        from lightwork import paths
 
         monkeypatch.setattr(paths, "current_tenant", lambda: tenant_a)
         sr.build_store("chroma")
@@ -306,16 +306,16 @@ class TestAtRestSealing:
 
     @pytest.fixture
     def _sealed(self, monkeypatch, tmp_path):
-        import maverick.crypto_at_rest as car
+        import lightwork.crypto_at_rest as car
         monkeypatch.setenv("MAVERICK_ENCRYPT_AT_REST", "1")
         monkeypatch.delenv("MAVERICK_ENCRYPTION_KEY", raising=False)
-        monkeypatch.setattr("maverick.config.load_config", lambda *a, **k: {})
+        monkeypatch.setattr("lightwork.config.load_config", lambda *a, **k: {})
         monkeypatch.setattr(car, "_KEY_PATH", tmp_path / "keys" / "at_rest.key")
-        monkeypatch.setattr("maverick.skill.embeddings.embed", _fake_embed)
+        monkeypatch.setattr("lightwork.skill.embeddings.embed", _fake_embed)
 
     @requires_crypto
     def test_document_is_sealed_and_embedding_precomputed(self, _sealed):
-        import maverick.crypto_at_rest as car
+        import lightwork.crypto_at_rest as car
         store = FakeStore()
         sr.index_goal(_Goal(1, "alpha task", result="SSN 123-45-6789"), store=store)
         doc, meta, emb = store.docs["goal:1"]
@@ -334,8 +334,8 @@ class TestAtRestSealing:
 
     def test_no_embedder_skips_index_under_at_rest(self, monkeypatch):
         monkeypatch.setenv("MAVERICK_ENCRYPT_AT_REST", "1")
-        monkeypatch.setattr("maverick.config.load_config", lambda *a, **k: {})
-        monkeypatch.setattr("maverick.skill.embeddings.embed", lambda texts: None)
+        monkeypatch.setattr("lightwork.config.load_config", lambda *a, **k: {})
+        monkeypatch.setattr("lightwork.skill.embeddings.embed", lambda texts: None)
         store = FakeStore()
         # No local embedder under at-rest -> skip rather than leak plaintext.
         assert sr.index_goal(_Goal(1, "x y z"), store=store) is False
@@ -351,18 +351,18 @@ class TestAtRestSealing:
     def test_qdrant_and_weaviate_disabled_under_at_rest(self, monkeypatch, caplog):
         import logging
         monkeypatch.setenv("MAVERICK_ENCRYPT_AT_REST", "1")
-        monkeypatch.setattr("maverick.config.load_config", lambda *a, **k: {})
+        monkeypatch.setattr("lightwork.config.load_config", lambda *a, **k: {})
         sr._sealed_warned.clear()
-        with caplog.at_level(logging.WARNING, logger="maverick.semantic_recall"):
+        with caplog.at_level(logging.WARNING, logger="lightwork.semantic_recall"):
             assert sr.build_store("qdrant") is None
             assert sr.build_store("weaviate") is None
         assert any("disabled for the 'qdrant'" in r.message for r in caplog.records)
 
     def test_chroma_collection_gets_sealed_suffix(self, monkeypatch):
         monkeypatch.setenv("MAVERICK_ENCRYPT_AT_REST", "1")
-        monkeypatch.setattr("maverick.config.load_config", lambda *a, **k: {})
-        import maverick.vector_store as vs
-        from maverick import paths
+        monkeypatch.setattr("lightwork.config.load_config", lambda *a, **k: {})
+        import lightwork.vector_store as vs
+        from lightwork import paths
         captured = {}
 
         class _Fake:

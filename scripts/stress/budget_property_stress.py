@@ -13,10 +13,10 @@ import sys
 from pathlib import Path
 
 _REPO = Path(__file__).resolve().parents[2]
-sys.path.insert(0, str(_REPO / "packages" / "maverick-core"))
+sys.path.insert(0, str(_REPO / "packages" / "lightwork-core"))
 os.environ.setdefault("MAVERICK_ENCRYPT_AT_REST", "0")
 
-from maverick.budget import Budget, BudgetExceeded  # noqa: E402
+from lightwork.budget import Budget, BudgetExceeded  # noqa: E402
 
 fails = []
 MODELS = [None, "claude-sonnet-4-6", "claude-opus-4-8", "claude-haiku-4-5-20251001"]

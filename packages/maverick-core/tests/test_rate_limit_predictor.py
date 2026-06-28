@@ -2,7 +2,7 @@
 from __future__ import annotations
 
 import pytest
-from maverick import rate_limit_predictor as rlp
+from lightwork import rate_limit_predictor as rlp
 
 
 @pytest.fixture(autouse=True)

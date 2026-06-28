@@ -1,9 +1,9 @@
 """Sanctions screening (finance-agent-suite §2.6)."""
 from __future__ import annotations
 
-import maverick.tools.sanctions_screen as sanctions_mod
+import lightwork.tools.sanctions_screen as sanctions_mod
 import pytest
-from maverick.tools.sanctions_screen import load_list, normalize, sanctions_screen, screen
+from lightwork.tools.sanctions_screen import load_list, normalize, sanctions_screen, screen
 
 _SDN = ["Evil Corp LLC", "Bad Actor", "Sanctioned Holdings Ltd", "John Q Public"]
 

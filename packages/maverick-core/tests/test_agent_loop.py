@@ -4,13 +4,13 @@ from __future__ import annotations
 from pathlib import Path
 
 import pytest
-from maverick.agent import Agent, AgentResult
-from maverick.blackboard import Blackboard
-from maverick.budget import Budget, BudgetExceeded
-from maverick.llm import LLMResponse, ToolCall
-from maverick.sandbox import LocalBackend
-from maverick.swarm import SwarmContext
-from maverick.world_model import WorldModel
+from lightwork.agent import Agent, AgentResult
+from lightwork.blackboard import Blackboard
+from lightwork.budget import Budget, BudgetExceeded
+from lightwork.llm import LLMResponse, ToolCall
+from lightwork.sandbox import LocalBackend
+from lightwork.swarm import SwarmContext
+from lightwork.world_model import WorldModel
 
 
 @pytest.fixture
@@ -138,10 +138,10 @@ class TestAgentLoop:
         actually stop a run: the loop calls killswitch.check() at the top of
         each turn, so an armed halt aborts BEFORE the next LLM call (no
         further spend). Regression for the wholly-unwired killswitch."""
-        from maverick import killswitch
+        from lightwork import killswitch
         # halt() best-effort writes a HALT audit event; neutralize it so the
         # test doesn't touch the real ~/.maverick/audit dir.
-        monkeypatch.setattr("maverick.audit.record", lambda *a, **k: None)
+        monkeypatch.setattr("lightwork.audit.record", lambda *a, **k: None)
         fake_llm.scripted = [
             make_llm_response(
                 text="acting",
@@ -165,8 +165,8 @@ class TestAgentLoop:
     ):
         """A halt that arrives DURING the LLM call (user hits Halt mid-think)
         is honoured at the tool-call boundary: the returned tool never runs."""
-        from maverick import killswitch
-        monkeypatch.setattr("maverick.audit.record", lambda *a, **k: None)
+        from lightwork import killswitch
+        monkeypatch.setattr("lightwork.audit.record", lambda *a, **k: None)
 
         class _HaltingLLM:
             model = "fake:test"
@@ -197,7 +197,7 @@ class TestAgentLoop:
     async def test_shield_blocks_tool_call(self, ctx, fake_llm, make_llm_response):
         class _BlockingShield:
             def scan_tool_call(self, name, args):
-                from maverick_shield import ShieldVerdict
+                from lightwork_shield import ShieldVerdict
                 return ShieldVerdict.block("high", "test block")
         ctx.shield = _BlockingShield()
         fake_llm.scripted = [
@@ -370,7 +370,7 @@ class TestMemoryInLoop:
         self, ctx, tmp_path, monkeypatch,
     ):
         monkeypatch.setenv("MAVERICK_MEMORY_DIR", str(tmp_path / "mem"))
-        from maverick.tools.memory import memory
+        from lightwork.tools.memory import memory
         memory().fn({"command": "create", "path": "conventions.md",
                      "file_text": "always run the linter"})
         memory().fn({"command": "create", "path": "index.md",
@@ -399,7 +399,7 @@ class TestLoopGuard:
     """Repeated-identical-failure guard in the loop (long-horizon robustness)."""
 
     def test_repeated_identical_failure_nudges(self, ctx):
-        from maverick import agent as agent_mod
+        from lightwork import agent as agent_mod
         a = Agent(ctx=ctx, role="researcher", brief="x")
         thr = agent_mod._LOOP_GUARD_THRESHOLD
         notes = [a._loop_guard_note("shell", {"cmd": "boom"}, "ERROR: nope")
@@ -416,7 +416,7 @@ class TestLoopGuard:
         assert a._loop_guard_note("shell", {"cmd": "x"}, "ERROR: a") == ""
 
     def test_intervening_call_resets_the_streak(self, ctx, monkeypatch):
-        from maverick import agent as agent_mod
+        from lightwork import agent as agent_mod
         monkeypatch.setattr(agent_mod, "_LOOP_GUARD_THRESHOLD", 2)
         a = Agent(ctx=ctx, role="researcher", brief="x")
         assert a._loop_guard_note("shell", {"cmd": "A"}, "ERROR: A") == ""
@@ -425,7 +425,7 @@ class TestLoopGuard:
         assert a._loop_guard_note("shell", {"cmd": "A"}, "ERROR: A") == ""
 
     def test_different_error_resets_the_streak(self, ctx, monkeypatch):
-        from maverick import agent as agent_mod
+        from lightwork import agent as agent_mod
         monkeypatch.setattr(agent_mod, "_LOOP_GUARD_THRESHOLD", 2)
         a = Agent(ctx=ctx, role="researcher", brief="x")
         assert a._loop_guard_note("shell", {"cmd": "A"}, "ERROR: one") == ""
@@ -436,7 +436,7 @@ class TestLoopGuard:
         )
 
     def test_can_be_disabled(self, ctx, monkeypatch):
-        from maverick import agent as agent_mod
+        from lightwork import agent as agent_mod
         monkeypatch.setattr(agent_mod, "_LOOP_GUARD_ENABLED", False)
         a = Agent(ctx=ctx, role="researcher", brief="x")
         for _ in range(agent_mod._LOOP_GUARD_THRESHOLD + 2):
@@ -444,7 +444,7 @@ class TestLoopGuard:
 
     @pytest.mark.asyncio
     async def test_run_tool_appends_note_after_the_framed_block(self, ctx, monkeypatch):
-        from maverick import agent as agent_mod
+        from lightwork import agent as agent_mod
 
         async def _boom(name, args):
             return "ERROR: boom"
@@ -469,14 +469,14 @@ class TestToolFailureClassification:
     was never set on a failed tool, and every failure scored as a success."""
 
     def test_classifier_sees_through_the_frame(self):
-        from maverick.agent import _tool_call_failed
+        from lightwork.agent import _tool_call_failed
         err = "<tool_output tool='shell' id=ab12>\nERROR: boom\n</tool_output ab12>"
         ok = "<tool_output tool='read_file' id=ab12>\nhello world\n</tool_output ab12>"
         assert _tool_call_failed(err) is True
         assert _tool_call_failed(ok) is False
 
     def test_classifier_on_unframed_errors_and_blocks(self):
-        from maverick.agent import _tool_call_failed
+        from lightwork.agent import _tool_call_failed
         assert _tool_call_failed("ERROR: nope") is True
         assert _tool_call_failed("⚠ BLOCKED by Shield (high): x. Not executed.") is True
         assert _tool_call_failed("⚠ BLOCKED by hook. The tool was not executed.") is True
@@ -485,7 +485,7 @@ class TestToolFailureClassification:
         assert _tool_call_failed("the answer is 42") is False
 
     def test_make_tool_result_flags_a_framed_error(self):
-        from maverick.agent import Agent
+        from lightwork.agent import Agent
         err = "<tool_output tool='shell' id=ab12>\nERROR: boom\n</tool_output ab12>"
         ok = "<tool_output tool='shell' id=ab12>\nall good\n</tool_output ab12>"
         assert Agent._make_tool_result("t1", err).get("is_error") is True
@@ -496,11 +496,11 @@ class TestToolOutputCap:
     """A single runaway tool result must not blow the context window."""
 
     def test_small_output_is_unchanged(self):
-        from maverick.agent import _cap_tool_output
+        from lightwork.agent import _cap_tool_output
         assert _cap_tool_output("short result") == "short result"
 
     def test_large_output_keeps_head_and_tail(self, monkeypatch):
-        from maverick import agent as agent_mod
+        from lightwork import agent as agent_mod
         monkeypatch.setattr(agent_mod, "_MAX_TOOL_RESULT_BYTES", 100)
         big = "H" * 400 + "T" * 400
         out = agent_mod._cap_tool_output(big)
@@ -511,7 +511,7 @@ class TestToolOutputCap:
         assert "of 800 chars" in out        # reports the original size
 
     def test_cap_preserves_leading_error_for_classification(self, monkeypatch):
-        from maverick import agent as agent_mod
+        from lightwork import agent as agent_mod
         monkeypatch.setattr(agent_mod, "_MAX_TOOL_RESULT_BYTES", 100)
         capped = agent_mod._cap_tool_output("ERROR: " + "x" * 1000)
         assert capped.startswith("ERROR: ")
@@ -519,7 +519,7 @@ class TestToolOutputCap:
 
     @pytest.mark.asyncio
     async def test_run_tool_caps_a_runaway_result(self, ctx, monkeypatch):
-        from maverick import agent as agent_mod
+        from lightwork import agent as agent_mod
         monkeypatch.setattr(agent_mod, "_MAX_TOOL_RESULT_BYTES", 200)
 
         async def _huge(name, args):
@@ -576,7 +576,7 @@ class TestStepBudgetWarning:
 
     @pytest.mark.asyncio
     async def test_can_be_disabled(self, ctx, fake_llm, make_llm_response, monkeypatch):
-        from maverick import agent as agent_mod
+        from lightwork import agent as agent_mod
         monkeypatch.setattr(agent_mod, "_STEP_BUDGET_WARNING", 0)
         sent = await self._run_with_tool_turns(
             ctx, fake_llm, make_llm_response, monkeypatch,
@@ -607,7 +607,7 @@ class TestGovernedActionLineage:
         # hook with the tool name -- proving the run path is wired up.
         monkeypatch.setenv("MAVERICK_GOVERNED_ACTIONS", "1")
         calls: list = []
-        monkeypatch.setattr("maverick.governed_actions.record_tool_lineage",
+        monkeypatch.setattr("lightwork.governed_actions.record_tool_lineage",
                             lambda *a, **k: calls.append(a))
         fake_llm.scripted = [
             make_llm_response(
@@ -625,7 +625,7 @@ class TestGovernedActionLineage:
     ):
         monkeypatch.setenv("MAVERICK_GOVERNED_ACTIONS", "0")
         calls: list = []
-        monkeypatch.setattr("maverick.governed_actions.record_tool_lineage",
+        monkeypatch.setattr("lightwork.governed_actions.record_tool_lineage",
                             lambda *a, **k: calls.append(a))
         fake_llm.scripted = [
             make_llm_response(text="need info",

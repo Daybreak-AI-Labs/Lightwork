@@ -3,30 +3,30 @@ from __future__ import annotations
 
 import pytest
 from fastapi.testclient import TestClient
-from maverick.oidc import VerifiedPrincipal
-from maverick_dashboard.app import app
+from lightwork.oidc import VerifiedPrincipal
+from lightwork_dashboard.app import app
 
 client = TestClient(app, headers={"Origin": "http://testserver"})
 
 
 @pytest.fixture(autouse=True)
 def _isolated(tmp_path, monkeypatch):
-    from maverick import consequence as cq
-    from maverick import world_model
-    from maverick_dashboard import api as api_mod
-    from maverick_dashboard import app as app_mod
+    from lightwork import consequence as cq
+    from lightwork import world_model
+    from lightwork_dashboard import api as api_mod
+    from lightwork_dashboard import app as app_mod
 
     monkeypatch.setattr(world_model, "DEFAULT_DB", tmp_path / "world.db")
     api_mod._world_cache.clear()
     app_mod._world_cache.clear()
     store = cq.ConsequenceStore(path=tmp_path / "c.ndjson")
-    monkeypatch.setattr("maverick.consequence.shared", lambda: store)
+    monkeypatch.setattr("lightwork.consequence.shared", lambda: store)
     yield store
 
 
 @pytest.fixture
 def world():
-    from maverick_dashboard.api import _world
+    from lightwork_dashboard.api import _world
 
     return _world()
 
@@ -38,8 +38,8 @@ def _episode(world, *, owner: str = "") -> tuple[int, int]:
 
 
 def _enable_oidc_principal_map(monkeypatch, *, default_role: str = "operator") -> None:
-    import maverick_dashboard.auth as auth
-    import maverick_dashboard.rbac as rbac
+    import lightwork_dashboard.auth as auth
+    import lightwork_dashboard.rbac as rbac
 
     monkeypatch.setattr(auth, "oidc_enabled", lambda: True)
     monkeypatch.setattr(rbac, "default_role", lambda: default_role)

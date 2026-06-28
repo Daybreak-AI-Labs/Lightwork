@@ -1,7 +1,7 @@
 """unified_inbox: multi-channel merge, threading, and unread counts."""
 from __future__ import annotations
 
-from maverick.tools.unified_inbox import unified_inbox
+from lightwork.tools.unified_inbox import unified_inbox
 
 
 def _merge(**kw):

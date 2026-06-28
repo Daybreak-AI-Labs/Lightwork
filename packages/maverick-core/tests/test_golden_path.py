@@ -4,7 +4,7 @@ code (no model) and emits tamper-evident receipts. See maverick/golden_path.py.
 from __future__ import annotations
 
 import pytest
-from maverick import golden_path
+from lightwork import golden_path
 
 
 def test_golden_path_receipts(tmp_path):
@@ -22,7 +22,7 @@ def test_golden_path_receipts(tmp_path):
 
     # The on-disk signed file independently verifies under the run's key dir
     # (restore the global afterward so this test doesn't leak it either).
-    from maverick.audit import signing
+    from lightwork.audit import signing
     saved = signing.KEY_DIR
     signing.KEY_DIR = tmp_path / "keys"
     try:

@@ -13,7 +13,7 @@ Two guards, because they catch different failures:
 * **Slow guard (in-process ceiling).** Catches finite-but-slow regressions
   well under the hang timeout.
 
-Mirrors ``packages/maverick-core/tests/test_secrets_scrub_fuzz.py``.
+Mirrors ``packages/lightwork-core/tests/test_secrets_scrub_fuzz.py``.
 """
 from __future__ import annotations
 
@@ -23,7 +23,7 @@ import time
 from pathlib import Path
 
 import pytest
-from maverick_shield import builtin_rules, cascade
+from lightwork_shield import builtin_rules, cascade
 
 _BIG = 200_000
 # Worst observed single scan is ~110ms locally on 200KB; CI runners are slower.
@@ -62,12 +62,12 @@ def test_scanner_under_ceiling_on_adversarial_input(sname):
 def test_scanners_do_not_hang_on_adversarial_input():
     """Hard backstop: kill on timeout. A timeout here is a *bypass*, not a blip."""
     root = Path(__file__).resolve().parents[3]
-    shield = root / "packages" / "maverick-shield"
-    core = root / "packages" / "maverick-core"
+    shield = root / "packages" / "lightwork-shield"
+    core = root / "packages" / "lightwork-core"
     prog = f"""
 import sys
 sys.path.insert(0, {str(shield)!r}); sys.path.insert(0, {str(core)!r})
-from maverick_shield import builtin_rules, cascade
+from lightwork_shield import builtin_rules, cascade
 B = {_BIG}
 inputs = ["a"*B, "\\n"*B, "sk-ant-"+"a"*B, "x "+("QUFB"*(B//4)),
           ("ignore "*20000)+"all previous instructions"]

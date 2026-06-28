@@ -1,7 +1,7 @@
 """Regression: compute must not crash on non-string model-supplied args."""
 from __future__ import annotations
 
-from maverick.tools.compute import compute
+from lightwork.tools.compute import compute
 
 
 def _fn():

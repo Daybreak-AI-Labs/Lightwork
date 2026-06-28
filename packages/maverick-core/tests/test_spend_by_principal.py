@@ -2,7 +2,7 @@
 which the point-lookup usage() couldn't."""
 from __future__ import annotations
 
-from maverick.quotas import UsageLedger
+from lightwork.quotas import UsageLedger
 
 
 def test_spend_by_principal(tmp_path):

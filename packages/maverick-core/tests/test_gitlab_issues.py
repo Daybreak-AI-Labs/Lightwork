@@ -1,7 +1,7 @@
 """Tests for the gitlab_issues tool. No network calls."""
 from __future__ import annotations
 
-from maverick.tools import gitlab_issues as gli
+from lightwork.tools import gitlab_issues as gli
 
 
 def test_missing_op_errors():
@@ -80,7 +80,7 @@ def test_tool_is_not_parallel_safe():
 import http.server  # noqa: E402
 import threading  # noqa: E402
 
-from maverick.tools import gitlab_issues as _gli_redir  # noqa: E402
+from lightwork.tools import gitlab_issues as _gli_redir  # noqa: E402
 
 
 class _RecordingHandler(http.server.BaseHTTPRequestHandler):

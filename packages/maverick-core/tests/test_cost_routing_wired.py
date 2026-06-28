@@ -28,7 +28,7 @@ def _clean(monkeypatch):
 
 
 def test_off_by_default_uses_role_defaults(_clean):
-    from maverick.llm import ROLE_MODELS, model_for_role
+    from lightwork.llm import ROLE_MODELS, model_for_role
     # No routing flag -> the static ROLE_MODELS default.
     assert model_for_role("coder") == ROLE_MODELS["coder"]
     assert model_for_role("orchestrator") == ROLE_MODELS["orchestrator"]
@@ -38,7 +38,7 @@ def test_env_override_beats_router(_clean, monkeypatch):
     monkeypatch.setenv("MAVERICK_COST_ROUTING", "1")
     monkeypatch.setenv("DEEPSEEK_API_KEY", "x")
     monkeypatch.setenv("MAVERICK_MODEL_OVERRIDE_CODER", "anthropic:claude-opus-4-8")
-    from maverick.llm import model_for_role
+    from lightwork.llm import model_for_role
     # Explicit user override wins even with routing on + a cheaper provider.
     assert model_for_role("coder") == "anthropic:claude-opus-4-8"
 
@@ -46,7 +46,7 @@ def test_env_override_beats_router(_clean, monkeypatch):
 def test_enabled_routes_base_role_to_cheapest_provider(_clean, monkeypatch):
     monkeypatch.setenv("MAVERICK_COST_ROUTING", "1")
     monkeypatch.setenv("DEEPSEEK_API_KEY", "x")
-    from maverick.llm import model_for_role
+    from lightwork.llm import model_for_role
     # coder is TIER_BASE; with only DeepSeek keyed, the cheapest base-tier
     # option is deepseek -> "deepseek:deepseek-chat".
     got = model_for_role("coder")
@@ -59,13 +59,13 @@ def test_enabled_keeps_orchestrator_at_premium_tier(_clean, monkeypatch):
     # on the premium Anthropic model (opus 4.8).
     monkeypatch.setenv("MAVERICK_COST_ROUTING", "1")
     monkeypatch.setenv("ANTHROPIC_API_KEY", "x")
-    from maverick.llm import model_for_role
+    from lightwork.llm import model_for_role
     got = model_for_role("orchestrator")
     assert got == "anthropic:claude-opus-4-8", got
 
 
 def test_router_premium_prefers_opus_4_8_over_4_7():
-    from maverick.cost import router as cost_router
+    from lightwork.cost import router as cost_router
     # Both opus rows are premium at equal cost; 4-8 is listed first so it
     # wins the cost sort (stable). Confirms enabling routing doesn't
     # regress the flagship to the prior generation.
@@ -75,7 +75,7 @@ def test_router_premium_prefers_opus_4_8_over_4_7():
 
 
 def test_signal_for_role_tiers():
-    from maverick.cost import router as cost_router
+    from lightwork.cost import router as cost_router
     assert cost_router.signal_for_role("orchestrator").tier == cost_router.TIER_PREMIUM
     assert cost_router.signal_for_role("summarizer").tier == cost_router.TIER_CHEAP
     assert cost_router.signal_for_role("coder").tier == cost_router.TIER_BASE
@@ -85,7 +85,7 @@ def test_signal_for_role_tiers():
 def test_enabled_defers_when_no_available_provider_at_required_tier(_clean, monkeypatch):
     monkeypatch.setenv("MAVERICK_COST_ROUTING", "1")
     monkeypatch.setenv("DEEPSEEK_API_KEY", "x")
-    from maverick.llm import ROLE_MODELS, model_for_role
+    from lightwork.llm import ROLE_MODELS, model_for_role
 
     # DeepSeek has no premium-tier pricing row. The router must not fall back
     # to an unconfigured premium provider such as Gemini; it should defer to
@@ -107,8 +107,8 @@ def test_config_provider_key_is_passed_to_provider_client(_clean, monkeypatch, t
         calls.append((name, api_key))
         return DummyClient()
 
-    import maverick.providers as providers
-    from maverick.llm import LLM
+    import lightwork.providers as providers
+    from lightwork.llm import LLM
 
     monkeypatch.setattr(providers, "get_provider_client", fake_get_provider_client)
 

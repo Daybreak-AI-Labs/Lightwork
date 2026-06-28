@@ -1,7 +1,7 @@
 """voice_cloning_consent: deny-by-default voice-clone consent gate."""
 from __future__ import annotations
 
-from maverick.tools.voice_cloning_consent import voice_cloning_consent
+from lightwork.tools.voice_cloning_consent import voice_cloning_consent
 
 
 def _check(**kw):

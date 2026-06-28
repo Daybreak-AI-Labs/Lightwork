@@ -12,7 +12,7 @@ import time
 def test_read_within_write_does_not_deadlock(tmp_path):
     """A read issued while this thread holds the write lock must return
     (RLock is reentrant), not self-deadlock."""
-    from maverick.world_model import WorldModel
+    from lightwork.world_model import WorldModel
     w = WorldModel(tmp_path / "world.db")
     gid = w.create_goal("g")
     with w._writing() as conn:
@@ -30,7 +30,7 @@ def test_reads_dont_observe_uncommitted_writes(tmp_path):
     block; a reader that ran mid-transaction on the same connection (the
     bug) would see them differ. With reads holding the same lock, it can't.
     """
-    from maverick.world_model import WorldModel
+    from lightwork.world_model import WorldModel
     w = WorldModel(tmp_path / "world.db")
     w.upsert_fact("a", "0")
     w.upsert_fact("b", "0")
@@ -70,7 +70,7 @@ def test_reads_dont_observe_uncommitted_writes(tmp_path):
 
 def test_many_threads_read_and_write_without_error(tmp_path):
     """Concurrent reads + writes on one shared WorldModel don't raise."""
-    from maverick.world_model import WorldModel
+    from lightwork.world_model import WorldModel
     w = WorldModel(tmp_path / "world.db")
     conv = w.get_or_create_conversation("tg", "u1")
     errors: list[tuple] = []

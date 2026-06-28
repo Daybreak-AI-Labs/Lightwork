@@ -1,7 +1,7 @@
 """openmetrics: OpenMetrics/Prometheus text exposition renderer."""
 from __future__ import annotations
 
-from maverick.tools.openmetrics import openmetrics
+from lightwork.tools.openmetrics import openmetrics
 
 
 def _render(**kw):

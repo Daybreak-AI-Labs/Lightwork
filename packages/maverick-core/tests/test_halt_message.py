@@ -8,11 +8,11 @@ from __future__ import annotations
 from pathlib import Path
 
 import pytest
-from maverick import killswitch
-from maverick.budget import Budget
-from maverick.orchestrator import run_goal
-from maverick.sandbox import LocalBackend
-from maverick.world_model import WorldModel
+from lightwork import killswitch
+from lightwork.budget import Budget
+from lightwork.orchestrator import run_goal
+from lightwork.sandbox import LocalBackend
+from lightwork.world_model import WorldModel
 
 
 @pytest.mark.asyncio

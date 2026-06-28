@@ -1,8 +1,8 @@
 """Plan-tree minimap: glyphs, indentation, depth budget, collapsed counts."""
 from __future__ import annotations
 
-from maverick import plan_minimap as pm
-from maverick.world_model import WorldModel
+from lightwork import plan_minimap as pm
+from lightwork.world_model import WorldModel
 
 
 def _world(tmp_path) -> WorldModel:

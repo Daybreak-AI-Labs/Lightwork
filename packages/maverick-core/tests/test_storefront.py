@@ -1,8 +1,8 @@
 """Marketplace catalogs: browsable packs (by department) and connectors."""
 from __future__ import annotations
 
-from maverick.domain import suite_for
-from maverick.marketplace import storefront as marketplace
+from lightwork.domain import suite_for
+from lightwork.marketplace import storefront as marketplace
 
 
 def test_pack_marketplace_groups_packs_under_departments():

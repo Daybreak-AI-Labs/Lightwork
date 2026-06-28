@@ -7,7 +7,7 @@ plan-tree map specifically. Both call sites now share `_status_color`.
 from __future__ import annotations
 
 import pytest
-from maverick.monitor import _status_color
+from lightwork.monitor import _status_color
 
 
 @pytest.mark.parametrize("status,color", [

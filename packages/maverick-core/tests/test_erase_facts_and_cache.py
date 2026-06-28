@@ -9,8 +9,8 @@ had ANY distilled fact failed the COMMIT and aborted the whole erase.
 import os
 
 from click.testing import CliRunner
-from maverick import cli as cli_mod
-from maverick.world_model import WorldModel
+from lightwork import cli as cli_mod
+from lightwork.world_model import WorldModel
 
 
 def _seed_user_with_fact(db):
@@ -27,7 +27,7 @@ def _seed_user_with_fact(db):
 
 def test_erase_succeeds_and_removes_facts(tmp_path, monkeypatch):
     os.environ.pop("MAVERICK_DB", None)
-    import maverick.audit as audit_mod
+    import lightwork.audit as audit_mod
     monkeypatch.setattr(audit_mod, "scrub_user", lambda *a, **k: (0, 0))
     monkeypatch.setattr(audit_mod, "record", lambda kind, **payload: None)
     monkeypatch.setattr(audit_mod, "reanchor_after_erase", lambda *a, **k: None)
@@ -52,14 +52,14 @@ def test_erase_succeeds_and_removes_facts(tmp_path, monkeypatch):
 
 def test_erase_clears_llm_cache(tmp_path, monkeypatch):
     os.environ.pop("MAVERICK_DB", None)
-    import maverick.audit as audit_mod
+    import lightwork.audit as audit_mod
     monkeypatch.setattr(audit_mod, "scrub_user", lambda *a, **k: (0, 0))
     monkeypatch.setattr(audit_mod, "record", lambda kind, **payload: None)
     monkeypatch.setattr(audit_mod, "reanchor_after_erase", lambda *a, **k: None)
 
     # Point the LLM cache at a temp db and seed it with a prompt+answer.
     cache_db = tmp_path / "llm_cache.db"
-    import maverick.cache.llm as llm_cache_mod
+    import lightwork.cache.llm as llm_cache_mod
     monkeypatch.setattr(llm_cache_mod, "DEFAULT_DB", cache_db)
     cache = llm_cache_mod.LLMCache(db_path=cache_db)
     key = llm_cache_mod.cache_key(

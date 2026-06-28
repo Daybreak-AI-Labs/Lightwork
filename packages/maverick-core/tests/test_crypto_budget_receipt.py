@@ -1,7 +1,7 @@
 """crypto_budget_receipt: HMAC-signed budget receipts."""
 from __future__ import annotations
 
-from maverick.tools.crypto_budget_receipt import crypto_budget_receipt
+from lightwork.tools.crypto_budget_receipt import crypto_budget_receipt
 
 
 def _run(**kw):

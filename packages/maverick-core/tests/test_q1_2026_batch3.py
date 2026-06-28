@@ -8,32 +8,32 @@ import pytest
 # ---------- preflight ----------
 
 def test_preflight_context_limit_known_model():
-    from maverick.preflight import context_limit
+    from lightwork.preflight import context_limit
     assert context_limit("claude-opus-4-7") == 200_000
     assert context_limit("gpt-5.4-nano") == 32_000
     assert context_limit("kimi-k2") == 128_000
 
 
 def test_preflight_context_limit_unknown_falls_back():
-    from maverick.preflight import context_limit
+    from lightwork.preflight import context_limit
     # Unknown id with no family prefix match -> 32k default.
     assert context_limit("totally-made-up-model-xyz") == 32_000
 
 
 def test_preflight_estimate_tokens_zero_for_empty():
-    from maverick.preflight import estimate_tokens
+    from lightwork.preflight import estimate_tokens
     assert estimate_tokens("") == 0
 
 
 def test_preflight_estimate_tokens_grows_with_length():
-    from maverick.preflight import estimate_tokens
+    from lightwork.preflight import estimate_tokens
     small = estimate_tokens("hi")
     big = estimate_tokens("hi " * 1000)
     assert big > small
 
 
 def test_preflight_under_budget_succeeds():
-    from maverick.preflight import preflight
+    from lightwork.preflight import preflight
     estimated = preflight(
         model="claude-sonnet-4-6",
         system="be brief",
@@ -44,7 +44,7 @@ def test_preflight_under_budget_succeeds():
 
 
 def test_preflight_over_budget_strict_raises():
-    from maverick.preflight import PreflightFailed, preflight
+    from lightwork.preflight import PreflightFailed, preflight
     # Build a payload bigger than the 32k default for unknown models.
     huge = "x" * 200_000
     with pytest.raises(PreflightFailed) as exc:
@@ -62,7 +62,7 @@ def test_preflight_over_budget_strict_raises():
 
 def test_preflight_over_budget_non_strict_warns_but_returns():
     """strict=False: log warning instead of raising."""
-    from maverick.preflight import preflight
+    from lightwork.preflight import preflight
     huge = "x" * 200_000
     est = preflight(
         model="unknown-model",
@@ -75,7 +75,7 @@ def test_preflight_over_budget_non_strict_warns_but_returns():
 
 
 def test_preflight_tools_count_toward_estimate():
-    from maverick.preflight import preflight
+    from lightwork.preflight import preflight
     tools = [{
         "name": "x",
         "description": "Y" * 5000,
@@ -110,14 +110,14 @@ def test_preflight_tools_count_toward_estimate():
     ("JSONDecodeError: malformed response",        "malformed_response"),
 ])
 def test_retry_classifier_substring_patterns(err_msg, expected):
-    from maverick.retry.classifier import classify
+    from lightwork.retry.classifier import classify
     err = RuntimeError(err_msg)
     assert classify(err).value == expected
 
 
 def test_retry_classifier_status_code_attr():
     """Some HTTP libraries put the status on the exception."""
-    from maverick.retry.classifier import ErrorClass, classify
+    from lightwork.retry.classifier import ErrorClass, classify
 
     class _HttpError(Exception):
         def __init__(self, code: int):
@@ -130,12 +130,12 @@ def test_retry_classifier_status_code_attr():
 
 
 def test_retry_classifier_unknown_defaults():
-    from maverick.retry.classifier import ErrorClass, classify
+    from lightwork.retry.classifier import ErrorClass, classify
     assert classify(RuntimeError("weird unhelpful message")) == ErrorClass.UNKNOWN
 
 
 def test_retry_classifier_should_retry_respects_max():
-    from maverick.retry.classifier import should_retry
+    from lightwork.retry.classifier import should_retry
     err = RuntimeError("429 Too Many Requests")
     assert should_retry(err, attempts_so_far=0)
     assert should_retry(err, attempts_so_far=5)
@@ -144,14 +144,14 @@ def test_retry_classifier_should_retry_respects_max():
 
 def test_retry_classifier_terminal_errors_dont_retry():
     """Auth + content filter + context overflow are terminal."""
-    from maverick.retry.classifier import should_retry
+    from lightwork.retry.classifier import should_retry
     assert not should_retry(RuntimeError("401 Unauthorized"), attempts_so_far=0)
     assert not should_retry(RuntimeError("content filter"), attempts_so_far=0)
     assert not should_retry(RuntimeError("context length exceeded"), attempts_so_far=0)
 
 
 def test_retry_classifier_next_delay_grows():
-    from maverick.retry.classifier import next_delay
+    from lightwork.retry.classifier import next_delay
     err = RuntimeError("Connection reset")  # transient_network
     d0 = next_delay(err, attempts_so_far=0)
     d3 = next_delay(err, attempts_so_far=3)
@@ -159,7 +159,7 @@ def test_retry_classifier_next_delay_grows():
 
 
 def test_retry_classifier_terminal_zero_delay():
-    from maverick.retry.classifier import next_delay
+    from lightwork.retry.classifier import next_delay
     assert next_delay(RuntimeError("401 Unauthorized"), attempts_so_far=0) == 0.0
 
 
@@ -167,7 +167,7 @@ def test_retry_classifier_next_delay_is_jittered():
     # No jitter -> every caller hitting the same class at once retries in
     # lockstep (synchronized storm against a recovering provider). Delays must
     # be decorrelated and bounded to (0.5*base, base].
-    from maverick.retry.classifier import next_delay
+    from lightwork.retry.classifier import next_delay
     err = RuntimeError("429 rate limit")  # rate_limit: base 10s at attempt 0
     samples = {next_delay(err, attempts_so_far=0) for _ in range(50)}
     assert len(samples) > 1                 # not deterministic
@@ -179,7 +179,7 @@ def test_retry_classifier_next_delay_is_jittered():
 def test_wizard_run_accepts_fast_flag(tmp_path, monkeypatch):
     monkeypatch.setenv("HOME", str(tmp_path))
     monkeypatch.setenv("ANTHROPIC_API_KEY", "sk-ant-test")
-    from maverick_installer import wizard
+    from lightwork_installer import wizard
     # Patch CONFIG_DIR / FILES so we write to tmp_path.
     wizard.CONFIG_DIR = tmp_path / ".maverick"
     wizard.CONFIG_FILE = wizard.CONFIG_DIR / "config.toml"
@@ -210,7 +210,7 @@ def test_wizard_run_default_still_interactive(tmp_path, monkeypatch):
     # we can verify the function signature accepts the kwarg.
     import inspect
 
-    from maverick_installer.wizard import run
+    from lightwork_installer.wizard import run
     sig = inspect.signature(run)
     assert "fast" in sig.parameters
     assert sig.parameters["fast"].default is False

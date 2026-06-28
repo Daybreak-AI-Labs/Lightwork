@@ -15,7 +15,7 @@ def _stub_subprocess_ok(monkeypatch):
 
 
 def test_devcontainer_strip_jsonc():
-    from maverick.sandbox.devcontainer import _strip_jsonc
+    from lightwork.sandbox.devcontainer import _strip_jsonc
     text = """
 {
   // a line comment
@@ -31,7 +31,7 @@ def test_devcontainer_strip_jsonc():
 
 def test_devcontainer_requires_spec(tmp_path, monkeypatch):
     _stub_subprocess_ok(monkeypatch)
-    from maverick.sandbox.devcontainer import DevcontainerBackend
+    from lightwork.sandbox.devcontainer import DevcontainerBackend
     try:
         DevcontainerBackend(project_dir=tmp_path)
     except RuntimeError as e:
@@ -46,7 +46,7 @@ def test_devcontainer_rejects_build_only_spec(tmp_path, monkeypatch):
     (tmp_path / ".devcontainer" / "devcontainer.json").write_text(
         json.dumps({"dockerFile": "Dockerfile"}),
     )
-    from maverick.sandbox.devcontainer import DevcontainerBackend
+    from lightwork.sandbox.devcontainer import DevcontainerBackend
     try:
         DevcontainerBackend(project_dir=tmp_path)
     except RuntimeError as e:
@@ -66,7 +66,7 @@ def test_devcontainer_parses_image(tmp_path, monkeypatch):
             "containerEnv": {"FOO": "bar"},
         }),
     )
-    from maverick.sandbox.devcontainer import DevcontainerBackend
+    from lightwork.sandbox.devcontainer import DevcontainerBackend
     backend = DevcontainerBackend(project_dir=tmp_path)
     assert backend.spec.image.endswith(":3.12")
     assert backend.spec.remote_user == "vscode"
@@ -82,7 +82,7 @@ def test_devcontainer_rejects_run_args(tmp_path, monkeypatch):
     (tmp_path / ".devcontainer" / "devcontainer.json").write_text(
         json.dumps({"image": "alpine", "runArgs": ["--privileged"]}),
     )
-    from maverick.sandbox.devcontainer import DevcontainerBackend
+    from lightwork.sandbox.devcontainer import DevcontainerBackend
     try:
         DevcontainerBackend(project_dir=tmp_path)
     except RuntimeError as e:
@@ -108,7 +108,7 @@ def test_devcontainer_exec_builds_docker_run(tmp_path, monkeypatch):
         return MagicMock(returncode=0, stdout="ran\n", stderr="")
 
     monkeypatch.setattr("subprocess.run", _fake_run)
-    from maverick.sandbox.devcontainer import DevcontainerBackend
+    from lightwork.sandbox.devcontainer import DevcontainerBackend
     backend = DevcontainerBackend(project_dir=tmp_path)
     result = backend.exec("echo hi")
     assert result.ok
@@ -127,7 +127,7 @@ def test_build_sandbox_constructs_devcontainer(monkeypatch, tmp_path):
     (tmp_path / ".devcontainer" / "devcontainer.json").write_text(
         json.dumps({"image": "alpine"}),
     )
-    import maverick.config as cfg
+    import lightwork.config as cfg
 
     def _fake_cfg():
         return {"sandbox": {
@@ -138,7 +138,7 @@ def test_build_sandbox_constructs_devcontainer(monkeypatch, tmp_path):
 
     monkeypatch.setattr(cfg, "load_config", _fake_cfg)
     monkeypatch.setattr(cfg, "get_sandbox", lambda: _fake_cfg()["sandbox"])
-    from maverick.sandbox import build_sandbox
+    from lightwork.sandbox import build_sandbox
     sb = build_sandbox()
     assert sb.__class__.__name__ == "DevcontainerBackend"
 
@@ -146,7 +146,7 @@ def test_build_sandbox_constructs_devcontainer(monkeypatch, tmp_path):
 # ---------- chaos harness ----------
 
 def test_chaos_disabled_is_noop():
-    from maverick.chaos import ChaosController, maybe_fail
+    from lightwork.chaos import ChaosController, maybe_fail
     c = ChaosController()
     c.disable()
     # No exception, no state change.
@@ -155,24 +155,24 @@ def test_chaos_disabled_is_noop():
 
 
 def test_chaos_active_block_injects_then_restores():
-    from maverick.chaos import ChaosController, ChaosInjected
+    from lightwork.chaos import ChaosController, ChaosInjected
     c = ChaosController()
     c.disable()
     seen_fail = False
     with c.active(sandbox_exec_fail_pct=100, seed=42):
         try:
-            from maverick.chaos import maybe_fail
+            from lightwork.chaos import maybe_fail
             maybe_fail("sandbox_exec")
         except ChaosInjected:
             seen_fail = True
     assert seen_fail
     # Restored — should not fail outside the block.
-    from maverick.chaos import maybe_fail
+    from lightwork.chaos import maybe_fail
     maybe_fail("sandbox_exec")
 
 
 def test_chaos_state_is_deterministic_with_seed():
-    from maverick.chaos import ChaosController, ChaosInjected, maybe_fail
+    from lightwork.chaos import ChaosController, ChaosInjected, maybe_fail
     c = ChaosController()
     c.set(active=True, seed=42, sandbox_exec_fail_pct=50)
     results = []
@@ -196,7 +196,7 @@ def test_chaos_state_is_deterministic_with_seed():
 
 
 def test_chaos_unknown_stage_is_ignored():
-    from maverick.chaos import ChaosController, maybe_fail
+    from lightwork.chaos import ChaosController, maybe_fail
     c = ChaosController()
     c.set(active=True, sandbox_exec_fail_pct=100)
     # An unknown stage never fails.
@@ -208,7 +208,7 @@ def test_chaos_env_parses_rates(monkeypatch):
     monkeypatch.setenv("MAVERICK_CHAOS", "sandbox:30,tool:10,llm:5")
     monkeypatch.setenv("MAVERICK_CHAOS_SEED", "7")
     # Clear the singleton so the env is re-read.
-    import maverick.chaos as chaos_mod
+    import lightwork.chaos as chaos_mod
     chaos_mod._singleton = None
     try:
         c = chaos_mod.get()
@@ -224,8 +224,8 @@ def test_chaos_env_parses_rates(monkeypatch):
 
 def test_chaos_propagates_through_local_sandbox(tmp_path):
     """LocalBackend.exec honors the chaos dial."""
-    from maverick.chaos import ChaosController, ChaosInjected
-    from maverick.sandbox.local import LocalBackend
+    from lightwork.chaos import ChaosController, ChaosInjected
+    from lightwork.sandbox.local import LocalBackend
     backend = LocalBackend(workdir=tmp_path, timeout=2.0)
     c = ChaosController()
     with c.active(sandbox_exec_fail_pct=100, seed=1):
@@ -239,8 +239,8 @@ def test_chaos_propagates_through_local_sandbox(tmp_path):
 def test_chaos_propagates_through_tool_dispatcher():
     import asyncio
 
-    from maverick.chaos import ChaosController
-    from maverick.tools import Tool, ToolRegistry
+    from lightwork.chaos import ChaosController
+    from lightwork.tools import Tool, ToolRegistry
 
     reg = ToolRegistry()
     reg.register(Tool(
@@ -261,7 +261,7 @@ def test_chaos_propagates_through_tool_dispatcher():
 # ---------- notify tool ----------
 
 def test_notify_requires_title():
-    from maverick.tools.notify import notify_tool
+    from lightwork.tools.notify import notify_tool
     out = notify_tool().fn({"body": "msg"})
     assert "requires title" in out
 
@@ -276,8 +276,8 @@ def test_notify_sanitizes_priority(monkeypatch):
         captured["title"] = title
         return 1
 
-    monkeypatch.setattr("maverick.notifications.notify", fake_notify)
-    from maverick.tools.notify import notify_tool
+    monkeypatch.setattr("lightwork.notifications.notify", fake_notify)
+    from lightwork.tools.notify import notify_tool
     out = notify_tool().fn({"title": "hi", "priority": "BOGUS"})
     assert "sent" in out
     assert captured["prio"] == "default"
@@ -288,10 +288,10 @@ def test_notify_sanitizes_priority(monkeypatch):
 def test_notify_no_backend_configured(monkeypatch):
     # notify() returns 0 when no backend fires.
     monkeypatch.setattr(
-        "maverick.notifications.notify",
+        "lightwork.notifications.notify",
         lambda *a, **k: 0,
     )
-    from maverick.tools.notify import notify_tool
+    from lightwork.tools.notify import notify_tool
     out = notify_tool().fn({"title": "hello"})
     assert "no notification backend" in out
 
@@ -301,10 +301,10 @@ def test_notify_reports_count(monkeypatch):
     # that int, not call len() on it (which raised TypeError -> every
     # successful send was reported to the agent as an error).
     monkeypatch.setattr(
-        "maverick.notifications.notify",
+        "lightwork.notifications.notify",
         lambda *a, **k: 2,
     )
-    from maverick.tools.notify import notify_tool
+    from lightwork.tools.notify import notify_tool
     out = notify_tool().fn({"title": "hello", "body": "body"})
     assert "sent (2 backends)" in out
 
@@ -313,11 +313,11 @@ def test_notify_urgent_maps_to_max(monkeypatch):
     # The tool exposes "urgent"; notify() backends use "max".
     captured = {}
     monkeypatch.setattr(
-        "maverick.notifications.notify",
+        "lightwork.notifications.notify",
         lambda body, *, title="Maverick", priority="default", **k:
         captured.__setitem__("prio", priority) or 1,
     )
-    from maverick.tools.notify import notify_tool
+    from lightwork.tools.notify import notify_tool
     notify_tool().fn({"title": "x", "priority": "urgent"})
     assert captured["prio"] == "max"
 
@@ -330,7 +330,7 @@ def test_diagnose_runs(monkeypatch):
     for k in ("DEEPSEEK_API_KEY", "MOONSHOT_API_KEY",
               "XAI_API_KEY", "GEMINI_API_KEY"):
         monkeypatch.delenv(k, raising=False)
-    from maverick.tools.diagnose import diagnose
+    from lightwork.tools.diagnose import diagnose
     out = diagnose().fn({})
     assert "Maverick self-diagnose" in out
     assert "python" in out
@@ -343,7 +343,7 @@ def test_diagnose_flags_missing_keys(monkeypatch):
     for k in ("ANTHROPIC_API_KEY", "OPENAI_API_KEY", "DEEPSEEK_API_KEY",
               "MOONSHOT_API_KEY", "XAI_API_KEY", "GEMINI_API_KEY"):
         monkeypatch.delenv(k, raising=False)
-    from maverick.tools.diagnose import diagnose
+    from lightwork.tools.diagnose import diagnose
     out = diagnose().fn({})
     assert "no provider keys set" in out
 
@@ -351,8 +351,8 @@ def test_diagnose_flags_missing_keys(monkeypatch):
 # ---------- registration smoke ----------
 
 def test_notify_and_diagnose_register(tmp_path):
-    from maverick.sandbox.local import LocalBackend
-    from maverick.tools import base_registry
+    from lightwork.sandbox.local import LocalBackend
+    from lightwork.tools import base_registry
 
     class _W:
         def open_questions(self, gid):

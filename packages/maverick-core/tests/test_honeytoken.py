@@ -1,7 +1,7 @@
 """honeytoken: decoy-credential mint + exfiltration tripwire."""
 from __future__ import annotations
 
-from maverick.tools.honeytoken import honeytoken
+from lightwork.tools.honeytoken import honeytoken
 
 
 def _mint(**kw):

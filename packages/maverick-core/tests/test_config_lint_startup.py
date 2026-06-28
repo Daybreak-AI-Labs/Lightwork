@@ -9,7 +9,7 @@ from __future__ import annotations
 import logging
 
 import pytest
-from maverick import config_lint
+from lightwork import config_lint
 
 
 class _ExistingPath:
@@ -24,10 +24,10 @@ class _MissingPath:
 
 def _stub_config(monkeypatch, cfg, *, exists=True):
     monkeypatch.setattr(
-        "maverick.config.config_path",
+        "lightwork.config.config_path",
         lambda: _ExistingPath() if exists else _MissingPath(),
     )
-    monkeypatch.setattr("maverick.config.load_config", lambda *a, **k: cfg)
+    monkeypatch.setattr("lightwork.config.load_config", lambda *a, **k: cfg)
 
 
 # 'max_dollarss' is an unknown key in [budget] -> a (warning-level) finding.
@@ -37,7 +37,7 @@ _TYPO_CFG = {"budget": {"max_dollarss": 5.0}}
 def test_warns_and_does_not_raise_by_default(monkeypatch, caplog):
     monkeypatch.delenv("MAVERICK_CONFIG_STRICT", raising=False)
     _stub_config(monkeypatch, _TYPO_CFG)
-    with caplog.at_level(logging.WARNING, logger="maverick.config"):
+    with caplog.at_level(logging.WARNING, logger="lightwork.config"):
         findings = config_lint.warn_config_at_startup()
     assert findings
     assert any("max_dollarss" in r.message for r in caplog.records)

@@ -45,24 +45,24 @@ def make_agent_solver(
         max_dollars / max_wall_seconds / max_depth: per-task caps (cost control).
         append_answer_instruction: nudge the agent to emit a ``FINAL ANSWER:``
             marker so GAIA-style scorers can extract a clean answer.
-        llm_factory: builds the LLM per task (default ``maverick.llm.LLM()``);
+        llm_factory: builds the LLM per task (default ``lightwork.llm.LLM()``);
             tests pass a factory returning a ``FakeLLM``.
         sandbox_factory: builds the sandbox (default ``build_sandbox()``).
     """
-    from maverick.budget import Budget
-    from maverick.orchestrator import run_goal_sync
-    from maverick.world_model import WorldModel
+    from lightwork.budget import Budget
+    from lightwork.orchestrator import run_goal_sync
+    from lightwork.world_model import WorldModel
 
     def _llm():
         if llm_factory is not None:
             return llm_factory()
-        from maverick.llm import LLM
+        from lightwork.llm import LLM
         return LLM()
 
     def _sandbox():
         if sandbox_factory is not None:
             return sandbox_factory()
-        from maverick.sandbox import build_sandbox
+        from lightwork.sandbox import build_sandbox
         return build_sandbox()
 
     def solve(task: Any) -> str:

@@ -3,7 +3,7 @@ from __future__ import annotations
 
 import re
 
-from maverick.tools.dp_stats import dp_stats
+from lightwork.tools.dp_stats import dp_stats
 
 
 def _val(out):

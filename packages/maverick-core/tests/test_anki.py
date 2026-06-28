@@ -1,7 +1,7 @@
 """Tests for the anki tool. No network calls."""
 from __future__ import annotations
 
-from maverick.tools import anki
+from lightwork.tools import anki
 
 
 def test_missing_op_errors():

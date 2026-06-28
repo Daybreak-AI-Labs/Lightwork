@@ -25,7 +25,7 @@ def _write_config(tmp_path, body: str = "") -> None:
     cfg_dir = tmp_path / ".maverick"
     cfg_dir.mkdir(exist_ok=True)
     (cfg_dir / "config.toml").write_text(body)
-    import maverick.config as cfg_mod
+    import lightwork.config as cfg_mod
     importlib.reload(cfg_mod)
 
 
@@ -40,15 +40,15 @@ def _home(monkeypatch, tmp_path):
 # --- the systematic rule: every enterprise connector spec is high -----------
 
 def test_every_enterprise_connector_is_high(_home):
-    from maverick.safety.tool_risk import tool_risk
-    from maverick.tools.enterprise_connectors import ENTERPRISE_CONNECTOR_NAMES
+    from lightwork.safety.tool_risk import tool_risk
+    from lightwork.tools.enterprise_connectors import ENTERPRISE_CONNECTOR_NAMES
     assert ENTERPRISE_CONNECTOR_NAMES, "expected a non-empty connector list"
     not_high = [n for n in ENTERPRISE_CONNECTOR_NAMES if tool_risk(n) != "high"]
     assert not_high == [], f"these connectors are not high: {not_high}"
 
 
 def test_sample_enterprise_connectors_high(_home):
-    from maverick.safety.tool_risk import tool_risk
+    from lightwork.safety.tool_risk import tool_risk
     for n in ("okta", "paypal", "kubernetes", "vault", "workday", "zendesk"):
         assert tool_risk(n) == "high", n
 
@@ -56,7 +56,7 @@ def test_sample_enterprise_connectors_high(_home):
 # --- dedicated-module connectors --------------------------------------------
 
 def test_dedicated_connectors_high(_home):
-    from maverick.safety.tool_risk import tool_risk
+    from lightwork.safety.tool_risk import tool_risk
     for n in (
         "salesforce", "jira", "servicenow", "snowflake", "oracle", "sap",
         "workday", "database", "bigquery", "http_fetch", "notebook_exec",
@@ -69,7 +69,7 @@ def test_dedicated_connectors_high(_home):
 # --- precision: read-only / unknown stay put --------------------------------
 
 def test_readonly_and_unknown_stay_medium(_home):
-    from maverick.safety.tool_risk import tool_risk
+    from lightwork.safety.tool_risk import tool_risk
     # bitbucket exposes only issue/pr/pipeline reads; translate/wolfram are
     # pure lookups; an unrecognized name keeps the medium fallback.
     for n in ("bitbucket", "translate", "wolfram", "some_unknown_tool"):
@@ -77,14 +77,14 @@ def test_readonly_and_unknown_stay_medium(_home):
 
 
 def test_builtin_classifications_unaffected(_home):
-    from maverick.safety.tool_risk import tool_risk
+    from lightwork.safety.tool_risk import tool_risk
     assert tool_risk("shell") == "high"
     assert tool_risk("read_file") == "low"
     assert tool_risk("mcp_x__y") == "high"  # MCP rule still applies
 
 
 def test_open_banking_connectors_exceed_medium_ceiling(_home):
-    from maverick.safety.tool_risk import tools_exceeding
+    from lightwork.safety.tool_risk import tools_exceeding
     assert tools_exceeding(["plaid", "truelayer"], "medium") == {
         "plaid", "truelayer",
     }
@@ -100,7 +100,7 @@ def test_override_relaxes_connector(monkeypatch, tmp_path):
         'salesforce = "low"',   # dedicated-module connector relaxed
         'okta = "medium"',      # long-tail enterprise connector relaxed
     ]))
-    from maverick.safety.tool_risk import tool_risk
+    from lightwork.safety.tool_risk import tool_risk
     assert tool_risk("salesforce") == "low"
     assert tool_risk("okta") == "medium"
     assert tool_risk("jira") == "high"  # untouched connector still high

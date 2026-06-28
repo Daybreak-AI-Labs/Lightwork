@@ -59,18 +59,18 @@ def make_terminal_solver(
 ) -> Callable[[Any, dict], None]:
     """Build a ``TerminalSolver`` that drives a real LLM tool-loop over the env.
 
-    ``llm_factory`` builds the LLM per task (default ``maverick.llm.LLM()``);
+    ``llm_factory`` builds the LLM per task (default ``lightwork.llm.LLM()``);
     tests pass a factory returning a scripted FakeLLM. The env is mutated in
     place through the bound ``tools``; the harness's ``verify`` grades it. Cost
     is bounded per task by a fresh ``Budget`` and a ``max_steps`` ceiling; any
     LLM/budget error ends the loop gracefully so partial work is still graded.
     """
-    from maverick.budget import Budget
+    from lightwork.budget import Budget
 
     def _llm():
         if llm_factory is not None:
             return llm_factory()
-        from maverick.llm import LLM
+        from lightwork.llm import LLM
         return LLM()
 
     def solve(task: Any, tools: dict[str, Callable]) -> None:

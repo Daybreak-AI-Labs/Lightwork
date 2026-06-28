@@ -22,7 +22,7 @@ SECRET = "test-webhook-secret"  # pragma: allowlist secret
 def _client():
     # Mutating /api/v1 requests in no-token mode need the same-origin CSRF header;
     # the HMAC-exempt /webhook/run ignores it.
-    from maverick_dashboard.app import app
+    from lightwork_dashboard.app import app
     return TestClient(app, headers={"Origin": "http://testserver"})
 
 
@@ -39,9 +39,9 @@ def _isolate(monkeypatch, tmp_path):
     monkeypatch.delenv("MAVERICK_CONFIG", raising=False)
     monkeypatch.delenv("MAVERICK_DASHBOARD_TOKEN", raising=False)
     monkeypatch.delenv("MAVERICK_WEBHOOK_SECRET", raising=False)
-    from maverick import world_model
+    from lightwork import world_model
     monkeypatch.setattr(world_model, "DEFAULT_DB", tmp_path / "world.db")
-    import maverick.templates as tpl
+    import lightwork.templates as tpl
     tdir = tmp_path / ".maverick" / "templates"
     monkeypatch.setattr(tpl, "USER_TEMPLATES", tdir)
     tdir.mkdir(parents=True, exist_ok=True)
@@ -52,7 +52,7 @@ def _isolate(monkeypatch, tmp_path):
 
 @pytest.fixture
 def _no_real_run(monkeypatch):
-    import maverick.runner as runner_mod
+    import lightwork.runner as runner_mod
     called = []
 
     def fake_run(goal_id, max_dollars=None, max_wall_seconds=None, max_depth=3):
@@ -108,7 +108,7 @@ def test_create_trigger_validates_template(monkeypatch, tmp_path):
 
 def test_triggers_feature_off_403(monkeypatch, tmp_path):
     _isolate(monkeypatch, tmp_path)
-    from maverick import config
+    from lightwork import config
     real = config.get_features
     monkeypatch.setattr(config, "get_features", lambda: {**real(), "triggers": False})
     c = _client()
@@ -129,7 +129,7 @@ def test_webhook_run_fires_registered_template(monkeypatch, tmp_path, _no_real_r
     assert r.status_code == 201, r.text
     goal_id = r.json()["goal_id"]
     assert _no_real_run == [goal_id]
-    from maverick.world_model import DEFAULT_DB, WorldModel
+    from lightwork.world_model import DEFAULT_DB, WorldModel
     g = WorldModel(DEFAULT_DB).get_goal(goal_id)
     assert g is not None and g.title == "Weekly rivals report"   # rendered defaults
 
@@ -157,7 +157,7 @@ def test_webhook_run_inbound_overrides_declared_param(monkeypatch, tmp_path, _no
     body = json.dumps({"trigger": name, "data": {"topic": "acme", "evil": "x"}}).encode()
     r = c.post("/webhook/run", content=body, headers=_sign_headers(body))
     assert r.status_code == 201
-    from maverick.world_model import DEFAULT_DB, WorldModel
+    from lightwork.world_model import DEFAULT_DB, WorldModel
     g = WorldModel(DEFAULT_DB).get_goal(r.json()["goal_id"])
     assert g.title == "Weekly acme report"
 
@@ -188,7 +188,7 @@ def test_webhook_run_bad_signature_403(monkeypatch, tmp_path, _no_real_run):
 def test_webhook_run_no_secret_fails_closed(monkeypatch, tmp_path, _no_real_run):
     _isolate(monkeypatch, tmp_path)
     monkeypatch.setenv("ANTHROPIC_API_KEY", "sk-ant-fake")    # but NO webhook secret
-    import maverick.webhooks as wh
+    import lightwork.webhooks as wh
     monkeypatch.setattr(wh, "_load_config_outbound", lambda: ([], None))
     c = _client()
     name = _register(c)                                       # managing needs no secret
@@ -203,7 +203,7 @@ def test_webhook_run_feature_off_404(monkeypatch, tmp_path, _no_real_run):
     _configured(monkeypatch)
     c = _client()
     name = _register(c)
-    from maverick import config
+    from lightwork import config
     real = config.get_features
     monkeypatch.setattr(config, "get_features", lambda: {**real(), "triggers": False})
     body = json.dumps({"trigger": name}).encode()
@@ -216,7 +216,7 @@ def test_webhook_run_feature_off_404(monkeypatch, tmp_path, _no_real_run):
 
 def test_store_slugifies_and_round_trips(monkeypatch, tmp_path):
     _isolate(monkeypatch, tmp_path)
-    from maverick_dashboard import triggers_store as ts
+    from lightwork_dashboard import triggers_store as ts
     rec = ts.set_trigger("My Weekly Report!", "weekly-report", {"topic": "rivals"})
     assert rec["name"] == "my-weekly-report"
     got = ts.get_trigger("my-weekly-report")
@@ -230,7 +230,7 @@ def test_concurrent_set_trigger_does_not_lose_triggers(monkeypatch, tmp_path):
     clobber each other. All N distinct triggers must survive."""
     import threading
 
-    from maverick_dashboard import triggers_store
+    from lightwork_dashboard import triggers_store
     n = 16
 
     def add(i: int):

@@ -23,9 +23,9 @@ from __future__ import annotations
 import dataclasses
 
 import pytest
-from maverick.capability import Capability
-from maverick.domain import available_domains, domain_capability
-from maverick.safety.tool_risk import risk_rank
+from lightwork.capability import Capability
+from lightwork.domain import available_domains, domain_capability
+from lightwork.safety.tool_risk import risk_rank
 
 _DOMAINS = available_domains()
 _NAMES = sorted(_DOMAINS)

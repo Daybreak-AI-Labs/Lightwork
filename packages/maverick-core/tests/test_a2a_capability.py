@@ -16,7 +16,7 @@ def _write_a2a_config(tmp_path, body: str = "") -> None:
     cfg_dir = tmp_path / ".maverick"
     cfg_dir.mkdir(exist_ok=True)
     (cfg_dir / "config.toml").write_text(body)
-    import maverick.config as cfg_mod
+    import lightwork.config as cfg_mod
     importlib.reload(cfg_mod)
 
 
@@ -31,7 +31,7 @@ def test_default_ceiling_is_medium(tmp_path, monkeypatch):
     monkeypatch.setenv("HOME", str(tmp_path))
     _clear_env(monkeypatch)
     _write_a2a_config(tmp_path)  # no [a2a] config
-    from maverick.a2a_tasks import _a2a_capability
+    from lightwork.a2a_tasks import _a2a_capability
     cap = _a2a_capability()
     assert cap.max_risk == "medium"
     assert cap.permits("read_file")            # low
@@ -45,7 +45,7 @@ def test_env_overrides_config_and_lifts_cap(tmp_path, monkeypatch):
     _clear_env(monkeypatch)
     _write_a2a_config(tmp_path, '[a2a]\nmax_risk = "low"\n')
     monkeypatch.setenv("MAVERICK_A2A_MAX_RISK", "none")  # env wins -> no cap
-    from maverick.a2a_tasks import _a2a_capability
+    from lightwork.a2a_tasks import _a2a_capability
     cap = _a2a_capability()
     assert cap.max_risk is None
     assert cap.permits("shell")  # uncapped
@@ -55,7 +55,7 @@ def test_config_max_risk_low(tmp_path, monkeypatch):
     monkeypatch.setenv("HOME", str(tmp_path))
     _clear_env(monkeypatch)
     _write_a2a_config(tmp_path, '[a2a]\nmax_risk = "low"\n')
-    from maverick.a2a_tasks import _a2a_capability
+    from lightwork.a2a_tasks import _a2a_capability
     cap = _a2a_capability()
     assert cap.max_risk == "low"
     assert cap.permits("read_file")
@@ -67,7 +67,7 @@ def test_unrecognized_risk_falls_back_to_medium(tmp_path, monkeypatch):
     _clear_env(monkeypatch)
     _write_a2a_config(tmp_path)
     monkeypatch.setenv("MAVERICK_A2A_MAX_RISK", "bogus")
-    from maverick.a2a_tasks import _a2a_capability
+    from lightwork.a2a_tasks import _a2a_capability
     assert _a2a_capability().max_risk == "medium"
 
 
@@ -77,7 +77,7 @@ def test_allowlist_from_config(tmp_path, monkeypatch):
     _write_a2a_config(
         tmp_path, '[a2a]\nmax_risk = "high"\ntools = ["read_file", "web_search"]\n'
     )
-    from maverick.a2a_tasks import _a2a_capability
+    from lightwork.a2a_tasks import _a2a_capability
     cap = _a2a_capability()
     assert cap.permits("read_file") and cap.permits("web_search")
     assert not cap.permits("shell")  # high risk allowed, but not on the allowlist
@@ -90,7 +90,7 @@ def test_allowlist_and_deny_from_env(tmp_path, monkeypatch):
     monkeypatch.setenv("MAVERICK_A2A_MAX_RISK", "none")
     monkeypatch.setenv("MAVERICK_A2A_TOOLS", "read_file, web_search")
     monkeypatch.setenv("MAVERICK_A2A_DENY_TOOLS", "web_search")
-    from maverick.a2a_tasks import _a2a_capability
+    from lightwork.a2a_tasks import _a2a_capability
     cap = _a2a_capability()
     assert cap.permits("read_file")
     assert not cap.permits("web_search")   # deny wins over allow
@@ -103,7 +103,7 @@ def test_default_runner_passes_capability(tmp_path, monkeypatch):
     monkeypatch.setenv("HOME", str(tmp_path))
     _clear_env(monkeypatch)
     _write_a2a_config(tmp_path)
-    import maverick.a2a_tasks as a2at
+    import lightwork.a2a_tasks as a2at
 
     captured: dict = {}
 
@@ -115,10 +115,10 @@ def test_default_runner_passes_capability(tmp_path, monkeypatch):
         def create_goal(self, *a, **k):
             return 1
 
-    monkeypatch.setattr("maverick.orchestrator.run_goal_sync", _fake_run_goal_sync)
-    monkeypatch.setattr("maverick.llm.LLM", lambda *a, **k: object())
-    monkeypatch.setattr("maverick.world_model.WorldModel", lambda *a, **k: _FakeWorld())
-    monkeypatch.setattr("maverick.sandbox.build_sandbox", lambda *a, **k: object())
+    monkeypatch.setattr("lightwork.orchestrator.run_goal_sync", _fake_run_goal_sync)
+    monkeypatch.setattr("lightwork.llm.LLM", lambda *a, **k: object())
+    monkeypatch.setattr("lightwork.world_model.WorldModel", lambda *a, **k: _FakeWorld())
+    monkeypatch.setattr("lightwork.sandbox.build_sandbox", lambda *a, **k: object())
 
     out = a2at._default_runner("hi", max_dollars=1.0, max_wall=10.0, max_depth=1)
     assert out == "ok"

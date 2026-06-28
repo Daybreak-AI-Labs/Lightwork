@@ -20,19 +20,19 @@ except ModuleNotFoundError:  # pragma: no cover -- Py 3.10 CI matrix
 # ---------- _safe_int / _safe_float ----------
 
 def test_safe_int_handles_whitespace():
-    from maverick_installer.wizard import _safe_int
+    from lightwork_installer.wizard import _safe_int
     assert _safe_int("  42 ", default=0) == 42
 
 
 def test_safe_int_falls_back_on_junk():
-    from maverick_installer.wizard import _safe_int
+    from lightwork_installer.wizard import _safe_int
     assert _safe_int("not-a-number", default=9) == 9
     assert _safe_int("", default=5) == 5
     assert _safe_int(None, default=7) == 7  # type: ignore[arg-type]
 
 
 def test_safe_float_falls_back_on_junk():
-    from maverick_installer.wizard import _safe_float
+    from lightwork_installer.wizard import _safe_float
     assert _safe_float("xyz", default=1.5) == 1.5
     assert _safe_float("", default=2.5) == 2.5
     assert _safe_float("3.14", default=0) == 3.14
@@ -52,8 +52,8 @@ def test_wizard_written_sections_are_known_to_config_lint():
     import re
     from pathlib import Path
 
-    from maverick.migrate import KNOWN_SECTIONS
-    from maverick_installer import wizard
+    from lightwork.migrate import KNOWN_SECTIONS
+    from lightwork_installer import wizard
 
     src = Path(wizard.__file__).read_text(encoding="utf-8")
     written = set(re.findall(
@@ -66,7 +66,7 @@ def test_wizard_written_sections_are_known_to_config_lint():
 # ---------- new CHANNELS entries ----------
 
 def test_new_channels_added():
-    from maverick_installer.wizard import CHANNELS
+    from lightwork_installer.wizard import CHANNELS
     ids = {c[0] for c in CHANNELS}
     assert "bluesky" in ids
     assert "mastodon" in ids
@@ -74,7 +74,7 @@ def test_new_channels_added():
 
 
 def test_bluesky_channel_env_vars():
-    from maverick_installer.wizard import CHANNELS
+    from lightwork_installer.wizard import CHANNELS
     spec = next(c for c in CHANNELS if c[0] == "bluesky")
     assert "BLUESKY_HANDLE" in spec[2]
     assert "BLUESKY_PASSWORD" in spec[2]
@@ -96,12 +96,12 @@ def test_bluesky_channel_env_vars():
     "pick_automation_import",
 ])
 def test_new_pick_exists(name):
-    from maverick_installer import wizard
+    from lightwork_installer import wizard
     assert callable(getattr(wizard, name)), f"{name} missing"
 
 
 def test_collect_api_keys_prompts_for_openai_compatible_base_url(monkeypatch):
-    from maverick_installer import wizard
+    from lightwork_installer import wizard
 
     prompts: list[str] = []
     answers = {
@@ -127,7 +127,7 @@ def test_collect_api_keys_prompts_for_openai_compatible_base_url(monkeypatch):
 # ---------- write_config emits new TOML sections ----------
 
 def _write_full_config(tmp_path: Path, monkeypatch, **overrides) -> dict:
-    from maverick_installer import wizard
+    from lightwork_installer import wizard
     monkeypatch.setattr(wizard, "CONFIG_DIR", tmp_path)
     monkeypatch.setattr(wizard, "CONFIG_FILE", tmp_path / "config.toml")
     monkeypatch.setattr(wizard, "ENV_FILE", tmp_path / ".env")
@@ -351,77 +351,77 @@ class _StubQ:
 
     def __init__(self, monkeypatch):
         monkeypatch.setattr(
-            "maverick_installer.wizard._q_confirm",
+            "lightwork_installer.wizard._q_confirm",
             lambda *a, **kw: False,
         )
         monkeypatch.setattr(
-            "maverick_installer.wizard._q_text",
+            "lightwork_installer.wizard._q_text",
             lambda *a, **kw: kw.get("default", ""),
         )
         monkeypatch.setattr(
-            "maverick_installer.wizard._q_select",
+            "lightwork_installer.wizard._q_select",
             lambda *a, **kw: kw.get("default", a[1][0]) if len(a) > 1 else "",
         )
         monkeypatch.setattr(
-            "maverick_installer.wizard._q_checkbox",
+            "lightwork_installer.wizard._q_checkbox",
             lambda *a, **kw: kw.get("default", []),
         )
 
 
 def test_pick_mcp_servers_skipped(monkeypatch):
     _StubQ(monkeypatch)
-    from maverick_installer.wizard import pick_mcp_servers
+    from lightwork_installer.wizard import pick_mcp_servers
     assert pick_mcp_servers() == {}
 
 
 def test_pick_plugins_returns_empty_when_no_entry_points(monkeypatch):
     _StubQ(monkeypatch)
     # Force empty entry_points discovery.
-    import maverick_installer.wizard as w
-    real_plugins = sys.modules.get("maverick.plugins")
+    import lightwork_installer.wizard as w
+    real_plugins = sys.modules.get("lightwork.plugins")
     try:
         # Remove module so the import in pick_plugins re-imports / fails.
-        sys.modules.pop("maverick.plugins", None)
+        sys.modules.pop("lightwork.plugins", None)
         out = w.pick_plugins()
         assert out == []
     finally:
         if real_plugins:
-            sys.modules["maverick.plugins"] = real_plugins
+            sys.modules["lightwork.plugins"] = real_plugins
 
 
 def test_pick_tool_acl_skipped(monkeypatch):
     _StubQ(monkeypatch)
-    from maverick_installer.wizard import pick_tool_acl
+    from lightwork_installer.wizard import pick_tool_acl
     assert pick_tool_acl(channels={}) == {}
 
 
 def test_pick_rate_limits_skipped(monkeypatch):
     _StubQ(monkeypatch)
-    from maverick_installer.wizard import pick_rate_limits
+    from lightwork_installer.wizard import pick_rate_limits
     assert pick_rate_limits(channels={}) == {}
 
 
 def test_pick_retention_skipped(monkeypatch):
     _StubQ(monkeypatch)
-    from maverick_installer.wizard import pick_retention
+    from lightwork_installer.wizard import pick_retention
     assert pick_retention() == {}
 
 
 def test_pick_persona_skipped(monkeypatch):
     _StubQ(monkeypatch)
-    from maverick_installer.wizard import pick_persona
+    from lightwork_installer.wizard import pick_persona
     assert pick_persona() == {}
 
 
 def test_pick_a2a_skipped(monkeypatch):
     _StubQ(monkeypatch)
-    from maverick_installer.wizard import pick_a2a
+    from lightwork_installer.wizard import pick_a2a
     assert pick_a2a() == ({}, [])
 
 
 def test_pick_notifications_skipped(monkeypatch):
     _StubQ(monkeypatch)
-    from maverick_installer.wizard import pick_notifications
+    from lightwork_installer.wizard import pick_notifications
     cfg, envs = pick_notifications()
     assert cfg == {}
     assert envs == []
@@ -429,7 +429,7 @@ def test_pick_notifications_skipped(monkeypatch):
 
 def test_pick_webhooks_skipped(monkeypatch):
     _StubQ(monkeypatch)
-    from maverick_installer.wizard import pick_webhooks
+    from lightwork_installer.wizard import pick_webhooks
     cfg, envs = pick_webhooks()
     assert cfg == {}
     assert envs == []
@@ -437,7 +437,7 @@ def test_pick_webhooks_skipped(monkeypatch):
 
 def test_pick_web_search_skipped(monkeypatch):
     _StubQ(monkeypatch)
-    from maverick_installer.wizard import pick_web_search
+    from lightwork_installer.wizard import pick_web_search
     enabled, envs = pick_web_search()
     assert enabled is False
     assert envs == []
@@ -524,7 +524,7 @@ def test_write_config_omits_new_knobs_when_off(tmp_path: Path, monkeypatch):
 
 def test_pick_advanced_includes_new_toggles(monkeypatch):
     _StubQ(monkeypatch)
-    from maverick_installer.wizard import pick_advanced
+    from lightwork_installer.wizard import pick_advanced
     adv = pick_advanced()
     for key in ("output_cache", "local_first", "energy_aware", "hardware_sensors"):
         assert key in adv, f"{key} missing from pick_advanced()"
@@ -532,8 +532,8 @@ def test_pick_advanced_includes_new_toggles(monkeypatch):
 
 def test_pick_self_learning_includes_distill_local(monkeypatch):
     # Force every confirm to True so the enabled branch runs.
-    monkeypatch.setattr("maverick_installer.wizard._q_confirm", lambda *a, **kw: True)
-    from maverick_installer.wizard import pick_self_learning
+    monkeypatch.setattr("lightwork_installer.wizard._q_confirm", lambda *a, **kw: True)
+    from lightwork_installer.wizard import pick_self_learning
     result = pick_self_learning()
     assert result["enable"] is True
     assert result["distill_local"] is True
@@ -543,7 +543,7 @@ def test_pick_self_learning_includes_distill_local(monkeypatch):
 
 def test_pick_finance_skipped(monkeypatch):
     _StubQ(monkeypatch)
-    from maverick_installer.wizard import pick_finance
+    from lightwork_installer.wizard import pick_finance
     assert pick_finance() == {"enable": False}
 
 

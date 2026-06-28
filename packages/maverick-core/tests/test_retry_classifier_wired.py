@@ -1,7 +1,7 @@
 """retry_classifier is wired into retry.py: terminal error classes (auth,
 content-filter, context-overflow) must stop retrying immediately even when
 the exception type/status looks transient."""
-import maverick.retry as retry
+import lightwork.retry as retry
 
 
 class _FakeStatusError(Exception):

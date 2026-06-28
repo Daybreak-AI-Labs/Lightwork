@@ -8,7 +8,7 @@ now take `expected_attempts` and no-op when the attempt count has moved on.
 import tempfile
 from pathlib import Path
 
-from maverick.job_queue import JobQueue
+from lightwork.job_queue import JobQueue
 
 
 def _q():

@@ -5,7 +5,7 @@ so the scheduling loop is exercised without spawning py-spy or sleeping.
 """
 from __future__ import annotations
 
-from maverick.profiling_daemon import (
+from lightwork.profiling_daemon import (
     ProfilingConfig,
     ProfilingDaemon,
     config_from_env,
@@ -37,7 +37,7 @@ def _cfg(**kw):
 def test_disabled_by_default(monkeypatch):
     for k in ("MAVERICK_PROFILING", "MAVERICK_PROFILING_FORMAT"):
         monkeypatch.delenv(k, raising=False)
-    monkeypatch.setattr("maverick.config.load_config", dict)
+    monkeypatch.setattr("lightwork.config.load_config", dict)
     cfg = config_from_env()
     assert cfg.enabled is False
     d = ProfilingDaemon(cfg, runner=Runner(), pid=4321)
@@ -74,7 +74,7 @@ def test_format_extension_mapping(tmp_path):
 
 
 def test_missing_pyspy_with_default_runner(monkeypatch, tmp_path):
-    monkeypatch.setattr("maverick.profiling_daemon.shutil.which", lambda n: None)
+    monkeypatch.setattr("lightwork.profiling_daemon.shutil.which", lambda n: None)
     d = ProfilingDaemon(_cfg(), output_dir=tmp_path, runner=None)
     out = d.sample_once()
     assert out.startswith("ERROR") and "py-spy not on PATH" in out

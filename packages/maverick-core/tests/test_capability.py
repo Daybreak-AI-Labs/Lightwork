@@ -7,14 +7,14 @@ unchanged. Opt in via [capabilities] enforce or MAVERICK_ENFORCE_CAPABILITIES.
 """
 
 import pytest
-from maverick.capability import (
+from lightwork.capability import (
     Capability,
     capability_enforced,
     capability_from_config,
     sign_capability,
     verify_capability,
 )
-from maverick.safety.tool_risk import tool_risk
+from lightwork.safety.tool_risk import tool_risk
 
 # --- permits ---------------------------------------------------------------
 
@@ -255,7 +255,7 @@ def test_signing_bytes_includes_scopes():
 def test_from_config_scopes_default_unrestricted(monkeypatch):
     # New fields don't disturb capability_from_config: scopes stay all-permissive.
     monkeypatch.setattr(
-        "maverick.config.load_config",
+        "lightwork.config.load_config",
         lambda *a, **k: {"security": {"denied_tools": ["shell"]}},
     )
     cap = capability_from_config("user:local")
@@ -272,7 +272,7 @@ def test_sign_verify_roundtrip():
     # present, _cffi_backend missing) panics on import rather than raising
     # ImportError, so skip on any failure -- CI installs a working build.
     try:
-        from maverick.audit.signing import _generate_keypair, _have_crypto
+        from lightwork.audit.signing import _generate_keypair, _have_crypto
         if not _have_crypto():
             pytest.skip("cryptography not installed")
         priv, pub, _ = _generate_keypair()
@@ -290,27 +290,27 @@ def test_sign_verify_roundtrip():
 # --- enable flag -----------------------------------------------------------
 
 def test_enforced_via_env(monkeypatch):
-    monkeypatch.setattr("maverick.config.load_config", dict)
+    monkeypatch.setattr("lightwork.config.load_config", dict)
     monkeypatch.setenv("MAVERICK_ENFORCE_CAPABILITIES", "1")
     assert capability_enforced() is True
 
 
 def test_disabled_by_default(monkeypatch):
-    monkeypatch.setattr("maverick.config.load_config", dict)
+    monkeypatch.setattr("lightwork.config.load_config", dict)
     monkeypatch.delenv("MAVERICK_ENFORCE_CAPABILITIES", raising=False)
     assert capability_enforced() is False
 
 
 def test_enforced_via_config(monkeypatch):
     monkeypatch.delenv("MAVERICK_ENFORCE_CAPABILITIES", raising=False)
-    monkeypatch.setattr("maverick.config.load_config",
+    monkeypatch.setattr("lightwork.config.load_config",
                         lambda: {"capabilities": {"enforce": True}})
     assert capability_enforced() is True
 
 
 def test_from_config_reuses_acl(monkeypatch):
     monkeypatch.setattr(
-        "maverick.config.load_config",
+        "lightwork.config.load_config",
         lambda *a, **k: {"security": {"denied_tools": ["shell"], "max_risk": "medium"}},
     )
     cap = capability_from_config("user:local")
@@ -322,7 +322,7 @@ def test_from_config_reuses_acl(monkeypatch):
 # --- propagation helper ----------------------------------------------------
 
 def test_child_capability_attenuates():
-    from maverick.tools.spawn import _child_capability
+    from lightwork.tools.spawn import _child_capability
 
     class _Parent:
         capability = Capability(principal="user:local", deny_tools=frozenset({"shell"}))
@@ -342,12 +342,12 @@ def test_child_capability_attenuates():
 # --- enforcement at the tool chokepoint ------------------------------------
 
 def _agent(tmp_path):
-    from maverick.agent import Agent
-    from maverick.blackboard import Blackboard
-    from maverick.budget import Budget
-    from maverick.sandbox import LocalBackend
-    from maverick.swarm import SwarmContext
-    from maverick.world_model import WorldModel
+    from lightwork.agent import Agent
+    from lightwork.blackboard import Blackboard
+    from lightwork.budget import Budget
+    from lightwork.sandbox import LocalBackend
+    from lightwork.swarm import SwarmContext
+    from lightwork.world_model import WorldModel
 
     world = WorldModel(tmp_path / "world.db")
     goal_id = world.create_goal("g", "")
@@ -361,7 +361,7 @@ def _agent(tmp_path):
 
 @pytest.mark.parametrize("spawn_tool", ["spawn_subagent", "spawn_swarm"])
 def test_child_capability_uses_active_handoff_grant(tmp_path, spawn_tool):
-    from maverick.tools.spawn import _child_capability
+    from lightwork.tools.spawn import _child_capability
 
     parent = _agent(tmp_path)
     parent.capability = Capability(
@@ -392,7 +392,7 @@ async def test_run_tool_denies_uncapable(tmp_path):
 
 @pytest.mark.asyncio
 async def test_run_tool_noop_when_unrestricted(tmp_path):
-    from maverick.tools import Tool
+    from lightwork.tools import Tool
     agent = _agent(tmp_path)
     agent.capability = None  # default: enforcement is a no-op
     agent.tools.register(Tool(
@@ -406,7 +406,7 @@ async def test_run_tool_noop_when_unrestricted(tmp_path):
 
 @pytest.mark.asyncio
 async def test_run_tool_allows_permitted(tmp_path):
-    from maverick.tools import Tool
+    from lightwork.tools import Tool
     agent = _agent(tmp_path)
     agent.capability = Capability(principal="agent:coder-1",
                                   allow_tools=frozenset({"ping"}))
@@ -421,10 +421,10 @@ async def test_run_tool_allows_permitted(tmp_path):
 
 @pytest.mark.asyncio
 async def test_capability_denial_is_audited(tmp_path, monkeypatch):
-    import maverick.audit
-    from maverick.audit import EventKind
+    import lightwork.audit
+    from lightwork.audit import EventKind
     calls = []
-    monkeypatch.setattr(maverick.audit, "record",
+    monkeypatch.setattr(lightwork.audit, "record",
                         lambda kind, **kw: calls.append((kind, kw)) or True)
     agent = _agent(tmp_path)
     agent.ctx.channel = "sms"
@@ -443,23 +443,23 @@ async def test_capability_denial_is_audited(tmp_path, monkeypatch):
 # --- RBAC: roles -> capability scopes --------------------------------------
 
 def _cfg(monkeypatch, cfg):
-    monkeypatch.setattr("maverick.config.load_config", lambda *a, **k: cfg)
+    monkeypatch.setattr("lightwork.config.load_config", lambda *a, **k: cfg)
 
 
 def test_role_for_principal_explicit(monkeypatch):
-    from maverick.capability import role_for_principal
+    from lightwork.capability import role_for_principal
     _cfg(monkeypatch, {"role_assignments": {"user:alice": "analyst"}})
     assert role_for_principal("user:alice") == "analyst"
 
 
 def test_role_for_principal_default_fallback(monkeypatch):
-    from maverick.capability import role_for_principal
+    from lightwork.capability import role_for_principal
     _cfg(monkeypatch, {"role_assignments": {"default": "readonly"}})
     assert role_for_principal("user:nobody") == "readonly"
 
 
 def test_role_for_principal_none_without_config(monkeypatch):
-    from maverick.capability import role_for_principal
+    from lightwork.capability import role_for_principal
     _cfg(monkeypatch, {})
     assert role_for_principal("user:alice") is None
 
@@ -536,8 +536,8 @@ def test_capability_from_config_fails_closed_on_resolver_error(monkeypatch):
     means 'all tools', so the error path must use the _DENY_ALL sentinel."""
     def _boom(**_kw):
         raise RuntimeError("resolver exploded")
-    monkeypatch.setattr("maverick.safety.tool_acl.resolve_lists", _boom)
-    monkeypatch.setattr("maverick.safety.tool_acl.resolve_max_risk", _boom)
+    monkeypatch.setattr("lightwork.safety.tool_acl.resolve_lists", _boom)
+    monkeypatch.setattr("lightwork.safety.tool_acl.resolve_max_risk", _boom)
     cap = capability_from_config("user:alice")
     assert cap.principal == "user:alice"
     assert cap.permits("read_file") is False

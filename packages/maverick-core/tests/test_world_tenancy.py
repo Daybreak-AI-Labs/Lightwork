@@ -1,7 +1,7 @@
 """P1 multi-tenancy: per-tenant ``world.db`` isolation.
 
 Completes the world-model leg of per-user tenancy. Cross-session memory and the
-audit log already resolve their dirs via :func:`maverick.paths.data_dir`; this
+audit log already resolve their dirs via :func:`lightwork.paths.data_dir`; this
 gives each tenant its OWN world.db the same way. Default off -> single-tenant
 behaviour (one shared ``~/.maverick/world.db``) is unchanged.
 
@@ -14,8 +14,8 @@ import asyncio
 from dataclasses import dataclass
 
 import pytest
-from maverick.paths import maverick_home
-from maverick.world_model import world_for_tenant
+from lightwork.paths import maverick_home
+from lightwork.world_model import world_for_tenant
 
 
 @pytest.fixture(autouse=True)
@@ -26,7 +26,7 @@ def _clear_world_cache():
     differ, but clearing (and closing) keeps SQLite FDs from leaking across the
     suite and makes instance-identity assertions deterministic.
     """
-    import maverick.world_model as wm
+    import lightwork.world_model as wm
 
     def _drain():
         for w in list(wm._tenant_worlds.values()):
@@ -99,10 +99,10 @@ class _Msg:
 
 def _build_server(monkeypatch):
     """A minimal Server whose shared world is the legacy ~/.maverick/world.db."""
-    from maverick import server as server_mod
-    from maverick.world_model import WorldModel
+    from lightwork import server as server_mod
+    from lightwork.world_model import WorldModel
 
-    monkeypatch.setattr("maverick.config.load_config", dict)
+    monkeypatch.setattr("lightwork.config.load_config", dict)
     shared = WorldModel(maverick_home() / "world.db")
     srv = server_mod.Server.__new__(server_mod.Server)
     srv.world = shared
@@ -161,7 +161,7 @@ def test_world_for_tenant_caps_cached_tenant_worlds(monkeypatch):
     # The cache is now an LRU: reaching MAX_TENANT_WORLDS evicts the
     # least-recently-used tenant instead of raising, so a busy fleet of many
     # tenants keeps working (audit M7).
-    import maverick.world_model as wm
+    import lightwork.world_model as wm
 
     monkeypatch.delenv("MAVERICK_TENANT", raising=False)
     wm._tenant_worlds.clear()
@@ -233,7 +233,7 @@ def test_handle_message_uses_shared_world_when_tenancy_off(monkeypatch):
 
 def test_cli_defaults_world_db_to_active_tenant(monkeypatch):
     from click.testing import CliRunner
-    from maverick.cli import main
+    from lightwork.cli import main
 
     monkeypatch.delenv("MAVERICK_HOME", raising=False)
     monkeypatch.setenv("MAVERICK_TENANT", "acme")
@@ -249,7 +249,7 @@ def test_cli_defaults_world_db_to_active_tenant(monkeypatch):
 
 def test_cli_no_tenant_uses_legacy_world_db(monkeypatch):
     from click.testing import CliRunner
-    from maverick.cli import main
+    from lightwork.cli import main
 
     monkeypatch.delenv("MAVERICK_HOME", raising=False)
     monkeypatch.delenv("MAVERICK_TENANT", raising=False)
@@ -264,7 +264,7 @@ def test_cli_no_tenant_uses_legacy_world_db(monkeypatch):
 
 def test_cli_explicit_db_overrides_tenant(tmp_path, monkeypatch):
     from click.testing import CliRunner
-    from maverick.cli import main
+    from lightwork.cli import main
 
     monkeypatch.delenv("MAVERICK_HOME", raising=False)
     monkeypatch.setenv("MAVERICK_TENANT", "acme")

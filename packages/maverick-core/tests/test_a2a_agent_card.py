@@ -8,7 +8,7 @@ default (outward-facing surface); opt in via MAVERICK_A2A_ENABLED=1.
 from __future__ import annotations
 
 import pytest
-from maverick import a2a
+from lightwork import a2a
 
 
 @pytest.fixture
@@ -32,10 +32,10 @@ def test_card_has_required_a2a_fields(_clean):
 
 
 def test_base_url_override(_clean, monkeypatch):
-    monkeypatch.setenv("MAVERICK_A2A_BASE_URL", "https://maverick.example.com/")
+    monkeypatch.setenv("MAVERICK_A2A_BASE_URL", "https://lightwork.example.com/")
     card = a2a.build_agent_card()
     # trailing slash stripped; path appended.
-    assert card["url"] == "https://maverick.example.com/a2a/v1"
+    assert card["url"] == "https://lightwork.example.com/a2a/v1"
 
 
 def test_disabled_by_default(_clean):

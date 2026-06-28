@@ -2,7 +2,7 @@
 consolidation path (skills + insights), not just rehearse()."""
 from __future__ import annotations
 
-from maverick import dreaming, reflexion
+from lightwork import dreaming, reflexion
 
 
 class _Profile:
@@ -32,7 +32,7 @@ def _run(tmp_path):
 
 def test_unfrozen_consolidates_insights(tmp_path, monkeypatch):
     monkeypatch.setattr(dreaming, "settings", lambda: {"enable": True, "min_cluster": 2})
-    monkeypatch.setattr("maverick.calibration.learning_frozen", lambda: False)
+    monkeypatch.setattr("lightwork.calibration.learning_frozen", lambda: False)
     _two_clustered_failures(tmp_path / "reflexions.ndjson")
     report = _run(tmp_path)
     assert report.learning_frozen is False
@@ -44,7 +44,7 @@ def test_frozen_verifier_blocks_consolidation(tmp_path, monkeypatch):
     # consolidation that writes live, recallable behavior -- otherwise the
     # grader's drift gets baked into learned skills/insights.
     monkeypatch.setattr(dreaming, "settings", lambda: {"enable": True, "min_cluster": 2})
-    monkeypatch.setattr("maverick.calibration.learning_frozen", lambda: True)
+    monkeypatch.setattr("lightwork.calibration.learning_frozen", lambda: True)
     _two_clustered_failures(tmp_path / "reflexions.ndjson")
     report = _run(tmp_path)
     assert report.learning_frozen is True
@@ -56,12 +56,12 @@ def test_frozen_verifier_blocks_consolidation(tmp_path, monkeypatch):
 def test_rollout_aborts_when_snapshot_raises(monkeypatch):
     # A pre-promotion snapshot failure must ABORT (no reliable rollback), not
     # proceed into a promotion that can't be cleanly undone.
-    from maverick import learning_rollout as lr
+    from lightwork import learning_rollout as lr
 
     def boom(*a, **k):
         raise OSError("disk full")
 
-    monkeypatch.setattr("maverick.dreaming.snapshot_learning_state", boom)
+    monkeypatch.setattr("lightwork.dreaming.snapshot_learning_state", boom)
     constraint_calls = []
 
     def _constraint(cand, fraction):

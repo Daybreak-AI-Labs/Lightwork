@@ -2,9 +2,9 @@
 capability_delegation_graph, agent_identity. Deterministic and offline."""
 from __future__ import annotations
 
-from maverick.tools.agent_identity import agent_identity
-from maverick.tools.collusion_detector import collusion_detector
-from maverick.tools.coordinated_disclosure import coordinated_disclosure
+from lightwork.tools.agent_identity import agent_identity
+from lightwork.tools.collusion_detector import collusion_detector
+from lightwork.tools.coordinated_disclosure import coordinated_disclosure
 
 # ---- collusion_detector ----
 
@@ -101,7 +101,7 @@ def test_identity_validation():
 
 
 def test_all_registered():
-    from maverick.tools import base_registry
+    from lightwork.tools import base_registry
 
     class _W:
         pass

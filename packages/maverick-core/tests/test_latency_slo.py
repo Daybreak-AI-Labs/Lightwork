@@ -1,7 +1,7 @@
 """latency_slo: tail-latency SLO calculator."""
 from __future__ import annotations
 
-from maverick.tools.latency_slo import latency_slo
+from lightwork.tools.latency_slo import latency_slo
 
 
 def _report(**kw):

@@ -28,7 +28,7 @@ def _run(code: str) -> subprocess.CompletedProcess:
 def test_cli_import_loads_no_heavy_modules():
     code = (
         "import sys\n"
-        "import maverick.cli\n"
+        "import lightwork.cli\n"
         f"heavy=[m for m in {_HEAVY!r} if m in sys.modules]\n"
         "print(','.join(heavy))\n"
     )
@@ -39,7 +39,7 @@ def test_cli_import_loads_no_heavy_modules():
 
 
 def test_help_runs_and_is_fast():
-    code = "from maverick.cli import main; main(['--help'])"
+    code = "from lightwork.cli import main; main(['--help'])"
     t0 = time.time()
     r = _run(code)
     wall_ms = (time.time() - t0) * 1000.0
@@ -54,7 +54,7 @@ def test_help_loads_no_heavy_modules():
     # Even after dispatching --help, no heavy dep should have been imported.
     code = (
         "import sys, io\n"
-        "from maverick.cli import main\n"
+        "from lightwork.cli import main\n"
         "import click\n"
         "_saved = sys.stdout\n"
         "sys.stdout = io.StringIO()\n"   # swallow the help text

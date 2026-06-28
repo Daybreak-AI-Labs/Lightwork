@@ -8,7 +8,7 @@ import pytest
 # --- SSRF: IDN/punycode host must still be pinned (no rebinding bypass) -------
 
 def test_request_host_matches_reconciles_idn_forms():
-    from maverick.tools._ssrf import _request_host_matches
+    from lightwork.tools._ssrf import _request_host_matches
     req = httpx.Request("GET", "https://xn--e1afmkfd.xn--p1ai/x")  # punycode URL
     # httpx decodes url.host to Unicode; the validated host is the punycode form.
     assert _request_host_matches(req, "xn--e1afmkfd.xn--p1ai")
@@ -16,7 +16,7 @@ def test_request_host_matches_reconciles_idn_forms():
 
 
 def test_pinned_transport_refuses_mismatched_host():
-    from maverick.tools._ssrf import BlockedHost, _PinnedTransport
+    from lightwork.tools._ssrf import BlockedHost, _PinnedTransport
 
     class _Inner:
         def handle_request(self, r):
@@ -30,8 +30,8 @@ def test_pinned_transport_refuses_mismatched_host():
 # --- enterprise: env truthy-word must not silently disable -------------------
 
 def test_enterprise_recognizes_affirmatives_and_negatives(monkeypatch):
-    from maverick import enterprise
-    monkeypatch.setattr("maverick.config.load_config", lambda *a, **k: {})
+    from lightwork import enterprise
+    monkeypatch.setattr("lightwork.config.load_config", lambda *a, **k: {})
     for v in ("1", "true", "on", "yes", "enable", "enabled", "y", "t"):
         monkeypatch.setenv("MAVERICK_ENTERPRISE", v)
         assert enterprise.enterprise_enabled() is True, v
@@ -41,9 +41,9 @@ def test_enterprise_recognizes_affirmatives_and_negatives(monkeypatch):
 
 
 def test_enterprise_ambiguous_env_falls_through_to_config(monkeypatch):
-    from maverick import enterprise
+    from lightwork import enterprise
     # An unrecognized env value must NOT silently disable the control: config decides.
-    monkeypatch.setattr("maverick.config.load_config",
+    monkeypatch.setattr("lightwork.config.load_config",
                         lambda *a, **k: {"enterprise": {"mode": True}})
     monkeypatch.setenv("MAVERICK_ENTERPRISE", "enabled-for-prod")
     assert enterprise.enterprise_enabled() is True
@@ -53,10 +53,10 @@ def test_enterprise_ambiguous_env_falls_through_to_config(monkeypatch):
 
 def test_graphql_connector_egress_blocked_under_enterprise(monkeypatch):
     monkeypatch.delenv("MAVERICK_ENTERPRISE", raising=False)
-    monkeypatch.setattr("maverick.config.load_config", lambda *a, **k: {})
+    monkeypatch.setattr("lightwork.config.load_config", lambda *a, **k: {})
     monkeypatch.setenv("ACME_GQL_URL", "https://acme.invalid/graphql")
     monkeypatch.setenv("ACME_GQL_TOKEN", "tok")
-    from maverick.tools._rest_connector import make_graphql_tool
+    from lightwork.tools._rest_connector import make_graphql_tool
     tool = make_graphql_tool(name="acmegql", base_url_env="ACME_GQL_URL",
                              token_env="ACME_GQL_TOKEN", description="x")
 

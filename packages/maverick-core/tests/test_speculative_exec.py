@@ -3,8 +3,8 @@ model; novel or ambiguous turns fall through to the frontier model.
 """
 from __future__ import annotations
 
-from maverick import speculative_exec as se
-from maverick.counterfactual_rollout import Transition, TransitionModel
+from lightwork import speculative_exec as se
+from lightwork.counterfactual_rollout import Transition, TransitionModel
 
 OPS = ("ops", "coder", "")
 
@@ -60,7 +60,7 @@ def test_draft_model_returned_for_speculatable_turn(monkeypatch):
     monkeypatch.setenv("MAVERICK_SPECULATIVE", "1")
     monkeypatch.setattr(se, "_settings", lambda: {
         "enable": True, "draft_model": "cheap:model", "min_confidence": 0.85, "min_support": 8})
-    monkeypatch.setattr("maverick.rehearsal_runtime.world_model",
+    monkeypatch.setattr("lightwork.rehearsal_runtime.world_model",
                         lambda: _model({"shell": 18, "read": 2}))
     # speculatable -> downshift to the cheap draft
     assert se.draft_model_for_turn("ops", "coder", "") == "cheap:model"
@@ -70,7 +70,7 @@ def test_draft_model_none_for_uncertain_turn(monkeypatch):
     monkeypatch.setenv("MAVERICK_SPECULATIVE", "1")
     monkeypatch.setattr(se, "_settings", lambda: {
         "enable": True, "draft_model": "cheap:model", "min_confidence": 0.85, "min_support": 8})
-    monkeypatch.setattr("maverick.rehearsal_runtime.world_model",
+    monkeypatch.setattr("lightwork.rehearsal_runtime.world_model",
                         lambda: _model({"shell": 10, "read": 10}))
     # ambiguous -> frontier model (None)
     assert se.draft_model_for_turn("ops", "coder", "") is None

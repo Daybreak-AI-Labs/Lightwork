@@ -2,14 +2,14 @@
 
 [1] safety.secret_detector.env_secret matched only `KEY=value`, silently missing
     colon-delimited `KEY: value` (YAML / k8s manifests / many logs) that its
-    documented mirror maverick.secrets.env_secret already caught.
-[6] maverick.secrets.private_key required an `-----END...-----` marker, so a PEM
+    documented mirror lightwork.secrets.env_secret already caught.
+[6] lightwork.secrets.private_key required an `-----END...-----` marker, so a PEM
     truncated by a buffer/summary boundary leaked its base64 body to logs.
 """
 from __future__ import annotations
 
-from maverick.safety.secret_detector import redact as sd_redact
-from maverick.secrets import scrub
+from lightwork.safety.secret_detector import redact as sd_redact
+from lightwork.secrets import scrub
 
 
 def test_secret_detector_redacts_colon_delimited_secret():

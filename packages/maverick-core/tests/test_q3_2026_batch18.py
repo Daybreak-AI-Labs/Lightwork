@@ -8,7 +8,7 @@ from __future__ import annotations
 
 import sqlite3
 
-from maverick.tools.sql_query import sql_query
+from lightwork.tools.sql_query import sql_query
 
 
 def _mkdb(tmp_path):
@@ -139,7 +139,7 @@ def test_requires_database_and_query():
 
 
 def test_registered_by_default():
-    from maverick.tools import base_registry
+    from lightwork.tools import base_registry
 
     class _FakeSandbox:
         pass

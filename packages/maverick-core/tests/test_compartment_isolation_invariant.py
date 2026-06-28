@@ -21,8 +21,8 @@ from __future__ import annotations
 
 import collections
 
-from maverick.domain import available_domains, suite_for
-from maverick.quarantine import _DOMAIN_SEAL_THRESHOLD, QuarantineRegistry
+from lightwork.domain import available_domains, suite_for
+from lightwork.quarantine import _DOMAIN_SEAL_THRESHOLD, QuarantineRegistry
 
 _DOMAINS = available_domains()
 

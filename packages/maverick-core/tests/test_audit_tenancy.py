@@ -1,4 +1,4 @@
-"""P1 data-plane: the audit log is tenant-isolated via ``maverick.paths``.
+"""P1 data-plane: the audit log is tenant-isolated via ``lightwork.paths``.
 
 Completes the cross-session-memory increment by routing the audit dir AND the
 signing-key dir through the tenant-aware ``data_dir`` helper. With no tenant the
@@ -14,13 +14,13 @@ from __future__ import annotations
 from datetime import datetime, timezone
 
 import pytest
-from maverick.audit.events import AuditEvent, EventKind
-from maverick.audit.writer import AuditLog, default_audit_log, record
-from maverick.paths import reset_tenant, set_tenant
+from lightwork.audit.events import AuditEvent, EventKind
+from lightwork.audit.writer import AuditLog, default_audit_log, record
+from lightwork.paths import reset_tenant, set_tenant
 
 
 def _reset_default_logs(monkeypatch):
-    import maverick.audit.writer as writer
+    import lightwork.audit.writer as writer
 
     monkeypatch.setattr(writer, "_default", None)
     monkeypatch.setattr(writer, "_defaults", {})
@@ -64,7 +64,7 @@ def test_default_audit_log_no_tenant_is_legacy(monkeypatch, tmp_path):
 def test_key_dir_no_tenant_is_legacy(monkeypatch, tmp_path):
     monkeypatch.setenv("HOME", str(tmp_path))
     monkeypatch.delenv("MAVERICK_TENANT", raising=False)
-    from maverick.audit import signing
+    from lightwork.audit import signing
 
     assert signing._key_dir() == tmp_path / ".maverick" / "audit" / "keys"
 
@@ -74,7 +74,7 @@ def test_key_dir_no_tenant_is_legacy(monkeypatch, tmp_path):
 def test_audit_dir_follows_tenant(monkeypatch, tmp_path):
     monkeypatch.setenv("HOME", str(tmp_path))
     monkeypatch.delenv("MAVERICK_TENANT", raising=False)
-    from maverick.audit import signing
+    from lightwork.audit import signing
 
     tok = set_tenant("acme")
     try:
@@ -110,7 +110,7 @@ def test_records_land_under_tenant_dir(monkeypatch, tmp_path):
 
 def test_signed_chain_verifies_for_tenant(monkeypatch, tmp_path):
     pytest.importorskip("cryptography")
-    from maverick.audit.signing import verify_chain
+    from lightwork.audit.signing import verify_chain
 
     monkeypatch.setenv("HOME", str(tmp_path))
     monkeypatch.delenv("MAVERICK_TENANT", raising=False)
@@ -134,7 +134,7 @@ def test_signed_chain_verifies_for_tenant(monkeypatch, tmp_path):
 
 def test_two_tenants_are_isolated(monkeypatch, tmp_path):
     pytest.importorskip("cryptography")
-    from maverick.audit.signing import verify_chain
+    from lightwork.audit.signing import verify_chain
 
     monkeypatch.setenv("HOME", str(tmp_path))
     monkeypatch.delenv("MAVERICK_TENANT", raising=False)

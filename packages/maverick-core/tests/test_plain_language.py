@@ -1,7 +1,7 @@
 """plain_language: plain-English narration of a plan/trace."""
 from __future__ import annotations
 
-from maverick.tools.plain_language import plain_language
+from lightwork.tools.plain_language import plain_language
 
 
 def _run(steps, op="explain"):

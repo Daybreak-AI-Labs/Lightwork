@@ -1,7 +1,7 @@
 """search_goals: text search across runs, owner-scoped, encryption-aware."""
 from __future__ import annotations
 
-from maverick.world_model import WorldModel
+from lightwork.world_model import WorldModel
 
 
 def test_search_matches_title_and_description(tmp_path):

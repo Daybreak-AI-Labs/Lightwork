@@ -1,6 +1,6 @@
 """`maverick onboard` CLI: generate + approve + save a domain pack (CliRunner).
 
-Imports maverick.cli (the full kernel + click), so it runs in CI. Uses
+Imports lightwork.cli (the full kernel + click), so it runs in CI. Uses
 ``--no-llm`` for deterministic, network-free generation.
 """
 from __future__ import annotations
@@ -8,7 +8,7 @@ from __future__ import annotations
 
 def test_onboard_generates_and_activates(tmp_path, monkeypatch):
     from click.testing import CliRunner
-    from maverick.cli import main
+    from lightwork.cli import main
 
     monkeypatch.setenv("MAVERICK_DOMAINS_DIR", str(tmp_path / "domains"))
     doc = tmp_path / "policy.txt"
@@ -23,7 +23,7 @@ def test_onboard_generates_and_activates(tmp_path, monkeypatch):
     assert result.exit_code == 0, result.output
     assert "Activated" in result.output
 
-    from maverick.domain import available_domains
+    from lightwork.domain import available_domains
     domains = available_domains()
     assert "acme_co" in domains
     assert domains["acme_co"].compartment == "acme_co"
@@ -31,7 +31,7 @@ def test_onboard_generates_and_activates(tmp_path, monkeypatch):
 
 def test_onboard_discards_without_approval(tmp_path, monkeypatch):
     from click.testing import CliRunner
-    from maverick.cli import main
+    from lightwork.cli import main
 
     monkeypatch.setenv("MAVERICK_HOME", str(tmp_path))
     monkeypatch.delenv("MAVERICK_DOMAINS_DIR", raising=False)
@@ -49,7 +49,7 @@ def test_onboard_discards_without_approval(tmp_path, monkeypatch):
     assert result.exit_code == 0, result.output
     assert "Discarded" in result.output
 
-    from maverick.domain import available_domains
+    from lightwork.domain import available_domains
 
     assert "beta_co" not in available_domains()  # nothing saved without a yes
 
@@ -59,7 +59,7 @@ def test_onboard_respects_disabled_knowledge_without_importing(tmp_path, monkeyp
     from types import SimpleNamespace
 
     from click.testing import CliRunner
-    from maverick.cli import main
+    from lightwork.cli import main
 
     def fail(*_args, **_kwargs):
         raise AssertionError("knowledge layer should not be constructed when disabled")
@@ -75,7 +75,7 @@ def test_onboard_respects_disabled_knowledge_without_importing(tmp_path, monkeyp
     doc.write_text("SECRET SHOULD NOT BE INGESTED")
     monkeypatch.setenv("MAVERICK_CONFIG", str(cfg))
     monkeypatch.setenv("MAVERICK_DOMAINS_DIR", str(tmp_path / "domains"))
-    monkeypatch.setitem(sys.modules, "maverick_knowledge", fake_knowledge)
+    monkeypatch.setitem(sys.modules, "lightwork_knowledge", fake_knowledge)
 
     result = CliRunner().invoke(
         main,
@@ -97,7 +97,7 @@ def test_onboard_decline_defers_enabled_knowledge_ingestion(tmp_path, monkeypatc
     from types import SimpleNamespace
 
     from click.testing import CliRunner
-    from maverick.cli import main
+    from lightwork.cli import main
 
     ingested = []
 
@@ -122,7 +122,7 @@ def test_onboard_decline_defers_enabled_knowledge_ingestion(tmp_path, monkeypatc
     doc.write_text("SECRET SHOULD NOT BE INGESTED BEFORE APPROVAL")
     monkeypatch.setenv("MAVERICK_CONFIG", str(cfg))
     monkeypatch.setenv("MAVERICK_DOMAINS_DIR", str(tmp_path / "domains"))
-    monkeypatch.setitem(sys.modules, "maverick_knowledge", fake_knowledge)
+    monkeypatch.setitem(sys.modules, "lightwork_knowledge", fake_knowledge)
 
     result = CliRunner().invoke(
         main,
@@ -140,7 +140,7 @@ def test_onboard_approval_ingests_enabled_knowledge_then_saves(tmp_path, monkeyp
     from types import SimpleNamespace
 
     from click.testing import CliRunner
-    from maverick.cli import main
+    from lightwork.cli import main
 
     ingested = []
 
@@ -165,7 +165,7 @@ def test_onboard_approval_ingests_enabled_knowledge_then_saves(tmp_path, monkeyp
     doc.write_text("Approved knowledge")
     monkeypatch.setenv("MAVERICK_CONFIG", str(cfg))
     monkeypatch.setenv("MAVERICK_DOMAINS_DIR", str(tmp_path / "domains"))
-    monkeypatch.setitem(sys.modules, "maverick_knowledge", fake_knowledge)
+    monkeypatch.setitem(sys.modules, "lightwork_knowledge", fake_knowledge)
 
     result = CliRunner().invoke(
         main,

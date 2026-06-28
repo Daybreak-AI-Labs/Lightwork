@@ -6,7 +6,7 @@ low-risk (see ``safety.tool_risk``).
 """
 from __future__ import annotations
 
-from maverick.governance import Decision, Policy, evaluate
+from lightwork.governance import Decision, Policy, evaluate
 
 
 def test_empty_policy_allows():
@@ -44,7 +44,7 @@ def test_risk_override_param():
 
 
 def test_capability_denial_takes_precedence():
-    from maverick.capability import Capability
+    from lightwork.capability import Capability
     cap = Capability(principal="p", deny_tools=frozenset({"shell"}))
     v = evaluate("shell", capability=cap,
                  policy=Policy(require_human_actions=frozenset({"shell"})))
@@ -58,7 +58,7 @@ def test_deny_beats_require_human():
 
 
 def test_from_config(monkeypatch):
-    monkeypatch.setattr("maverick.config.load_config", lambda *a, **k: {
+    monkeypatch.setattr("lightwork.config.load_config", lambda *a, **k: {
         "governance": {
             "deny_actions": ["delete_file"],
             "require_human_actions": ["send_email"],
@@ -73,7 +73,7 @@ def test_from_config(monkeypatch):
 
 
 def test_from_config_empty_is_default_allow(monkeypatch):
-    monkeypatch.setattr("maverick.config.load_config", lambda *a, **k: {})
+    monkeypatch.setattr("lightwork.config.load_config", lambda *a, **k: {})
     pol = Policy.from_config()
     assert pol.is_empty()
     assert evaluate("shell", policy=pol).decision is Decision.ALLOW

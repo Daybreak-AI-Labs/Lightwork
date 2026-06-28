@@ -1,7 +1,7 @@
 """Tests for the web_archive tool. No network calls."""
 from __future__ import annotations
 
-from maverick.tools import web_archive as wa
+from lightwork.tools import web_archive as wa
 
 
 def test_snapshot_missing_url_errors():

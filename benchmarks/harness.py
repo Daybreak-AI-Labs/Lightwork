@@ -68,7 +68,7 @@ def run_one(
         outcome = "ok" if proc.returncode == 0 else f"exit-{proc.returncode}"
 
         # Read the most recent episode from the world model.
-        from maverick.world_model import DEFAULT_DB, WorldModel
+        from lightwork.world_model import DEFAULT_DB, WorldModel
         wm = WorldModel(db_path or DEFAULT_DB)
         eps = wm.list_episodes(limit=1)
         if eps:

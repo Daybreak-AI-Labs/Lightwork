@@ -3,7 +3,7 @@ the is_refusal shape detector, and ceiling configuration (env > config >
 defaults). Deterministic and offline."""
 from __future__ import annotations
 
-from maverick.safety import refusal_calibration as rc
+from lightwork.safety import refusal_calibration as rc
 
 
 def _sample(should: bool, refused: bool) -> dict:

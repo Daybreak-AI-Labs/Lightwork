@@ -9,7 +9,7 @@ the runtime reads ~90; this pins the wizard-written and kernel-core ones.
 """
 from __future__ import annotations
 
-from maverick.migrate import KNOWN_SECTIONS
+from lightwork.migrate import KNOWN_SECTIONS
 
 # Sections the installer wizard itself writes into config.toml.
 _WIZARD_WRITTEN = {"providers", "budget", "safety", "sandbox", "capabilities",
@@ -47,7 +47,7 @@ def test_council_sections_are_known():
 
 
 def test_council_config_lints_clean():
-    from maverick.migrate import _lint_unknown_sections
+    from lightwork.migrate import _lint_unknown_sections
     cfg = {s: {"enable": True} for s in
            ("data_engine", "consequence", "emergent_protocol",
             "emergent_codec", "operations_scientist")}
@@ -59,7 +59,7 @@ def test_council_config_lints_clean():
 def test_wizard_fast_config_lints_clean(tmp_path):
     """The exact section set `maverick init --fast` writes must produce no
     'is not a section the runtime reads' lint findings."""
-    from maverick.migrate import migrate
+    from lightwork.migrate import migrate
     cfg = tmp_path / "config.toml"
     cfg.write_text(
         "\n".join([

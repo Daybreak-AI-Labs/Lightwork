@@ -1,4 +1,4 @@
-"""DSAR subject-data export (GDPR Art. 15 / 20) — :mod:`maverick.dsar`.
+"""DSAR subject-data export (GDPR Art. 15 / 20) — :mod:`lightwork.dsar`.
 
 The erase side is already tested (``test_erase_audit_scrub`` etc.); these cover
 its read-only mirror. The load-bearing properties:
@@ -21,10 +21,10 @@ from __future__ import annotations
 import json
 from pathlib import Path
 
-from maverick.audit.events import AuditEvent, EventKind
-from maverick.audit.writer import AuditLog
-from maverick.dsar import export_subject_data
-from maverick.world_model import WorldModel
+from lightwork.audit.events import AuditEvent, EventKind
+from lightwork.audit.writer import AuditLog
+from lightwork.dsar import export_subject_data
+from lightwork.world_model import WorldModel
 
 
 def _world_db() -> Path:
@@ -277,7 +277,7 @@ def test_bundle_is_json_serializable_with_no_datetimes_or_bytes():
 
 def test_tenant_isolation():
     """A tenant export reads that tenant's world/audit, not the shared one."""
-    from maverick.paths import data_dir
+    from lightwork.paths import data_dir
 
     # Shared (no-tenant) store: alice has a conversation here.
     shared = WorldModel(_world_db())

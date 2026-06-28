@@ -4,8 +4,8 @@ from __future__ import annotations
 import asyncio
 from types import SimpleNamespace
 
-from maverick.blackboard import Blackboard
-from maverick.quarantine import QuarantineRegistry, triage_block
+from lightwork.blackboard import Blackboard
+from lightwork.quarantine import QuarantineRegistry, triage_block
 
 
 class TestQuarantineRegistry:
@@ -124,10 +124,10 @@ class TestSectorSeal:
 
 
 def _minimal_ctx(tmp_path):
-    from maverick.budget import Budget
-    from maverick.sandbox import LocalBackend
-    from maverick.swarm import SwarmContext
-    from maverick.world_model import WorldModel
+    from lightwork.budget import Budget
+    from lightwork.sandbox import LocalBackend
+    from lightwork.swarm import SwarmContext
+    from lightwork.world_model import WorldModel
 
     world = WorldModel(tmp_path / "world.db")
     goal_id = world.create_goal("test", "")
@@ -150,7 +150,7 @@ class _CriticalVerdict:
 
 class TestAgentQuarantineEscalation:
     def test_spoofed_orchestrator_child_is_sealed(self, tmp_path):
-        from maverick.agent import Agent
+        from lightwork.agent import Agent
 
         ctx = _minimal_ctx(tmp_path)
         reg = QuarantineRegistry()
@@ -168,7 +168,7 @@ class TestAgentQuarantineEscalation:
         assert reg.is_sealed(child.name) is True
 
     def test_trusted_root_orchestrator_is_not_sealed(self, tmp_path):
-        from maverick.agent import Agent
+        from lightwork.agent import Agent
 
         ctx = _minimal_ctx(tmp_path)
         reg = QuarantineRegistry()
@@ -181,8 +181,8 @@ class TestAgentQuarantineEscalation:
 
 class TestSpawnReservedRoles:
     def test_spawn_subagent_rejects_orchestrator_role(self, tmp_path):
-        from maverick.agent import Agent
-        from maverick.tools.spawn import spawn_subagent_tool
+        from lightwork.agent import Agent
+        from lightwork.tools.spawn import spawn_subagent_tool
 
         ctx = _minimal_ctx(tmp_path)
         parent = Agent(ctx=ctx, role="orchestrator", brief="root", depth=0)
@@ -194,8 +194,8 @@ class TestSpawnReservedRoles:
         assert ctx._spawns_used == 0
 
     def test_spawn_swarm_rejects_orchestrator_role(self, tmp_path):
-        from maverick.agent import Agent
-        from maverick.tools.spawn import spawn_swarm_tool
+        from lightwork.agent import Agent
+        from lightwork.tools.spawn import spawn_swarm_tool
 
         ctx = _minimal_ctx(tmp_path)
         parent = Agent(ctx=ctx, role="orchestrator", brief="root", depth=0)
@@ -217,7 +217,7 @@ class TestSpawnWithholdsSealedChild:
     spawn return path is closed the same way render() is for blackboard posts."""
 
     def _sealed_parent(self, tmp_path):
-        from maverick.agent import Agent
+        from lightwork.agent import Agent
 
         ctx = _minimal_ctx(tmp_path)
 
@@ -235,8 +235,8 @@ class TestSpawnWithholdsSealedChild:
         return Agent(ctx=ctx, role="orchestrator", brief="root", depth=0)
 
     def test_subagent_sealed_childs_final_is_withheld(self, tmp_path, monkeypatch):
-        from maverick.agent import Agent
-        from maverick.tools.spawn import spawn_subagent_tool
+        from lightwork.agent import Agent
+        from lightwork.tools.spawn import spawn_subagent_tool
 
         parent = self._sealed_parent(tmp_path)
 
@@ -254,8 +254,8 @@ class TestSpawnWithholdsSealedChild:
         assert "withheld" in out.lower()
 
     def test_swarm_sealed_childs_final_is_withheld(self, tmp_path, monkeypatch):
-        from maverick.agent import Agent
-        from maverick.tools.spawn import spawn_swarm_tool
+        from lightwork.agent import Agent
+        from lightwork.tools.spawn import spawn_swarm_tool
 
         parent = self._sealed_parent(tmp_path)
 
@@ -285,9 +285,9 @@ class TestCompartmentStatus:
         assert s["agents_tracked"] == 1
 
     def test_combines_registry_and_ledger(self):
-        from maverick.quarantine import compartment_status, format_compartment_status
-        from maverick_shield.compartment import ImmunizingShield
-        from maverick_shield.guard import ShieldVerdict
+        from lightwork.quarantine import compartment_status, format_compartment_status
+        from lightwork_shield.compartment import ImmunizingShield
+        from lightwork_shield.guard import ShieldVerdict
 
         class _Base:
             backend = "test"
@@ -315,6 +315,6 @@ class TestCompartmentStatus:
         assert "immunized" in out and "finance" in out
 
     def test_disabled_when_none(self):
-        from maverick.quarantine import compartment_status, format_compartment_status
+        from lightwork.quarantine import compartment_status, format_compartment_status
         assert compartment_status(None, None)["enabled"] is False
         assert format_compartment_status(compartment_status(None, None)) == "compartments: off"

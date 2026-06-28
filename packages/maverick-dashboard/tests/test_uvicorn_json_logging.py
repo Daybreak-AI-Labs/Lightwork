@@ -6,13 +6,13 @@ from __future__ import annotations
 
 import sys
 
-import maverick_dashboard.app as appmod
+import lightwork_dashboard.app as appmod
 
 
 def _run_main(monkeypatch):
     captured: dict = {}
     monkeypatch.setattr(sys, "argv", ["dashboard", "--host", "127.0.0.1", "--port", "0"])
-    monkeypatch.setattr("maverick.logging_config.configure_logging", lambda *a, **k: None)
+    monkeypatch.setattr("lightwork.logging_config.configure_logging", lambda *a, **k: None)
     import uvicorn
     monkeypatch.setattr(uvicorn, "run", lambda *a, **k: captured.update(k))
     appmod.main()

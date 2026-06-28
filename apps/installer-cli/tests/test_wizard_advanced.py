@@ -11,10 +11,10 @@ except ModuleNotFoundError:  # Python 3.10
 
 
 def _write(cfg_dir, monkeypatch, advanced, capabilities=None):
-    monkeypatch.setattr("maverick_installer.wizard.CONFIG_DIR", cfg_dir)
-    monkeypatch.setattr("maverick_installer.wizard.ENV_FILE", cfg_dir / ".env")
-    monkeypatch.setattr("maverick_installer.wizard.CONFIG_FILE", cfg_dir / "config.toml")
-    from maverick_installer.wizard import write_config
+    monkeypatch.setattr("lightwork_installer.wizard.CONFIG_DIR", cfg_dir)
+    monkeypatch.setattr("lightwork_installer.wizard.ENV_FILE", cfg_dir / ".env")
+    monkeypatch.setattr("lightwork_installer.wizard.CONFIG_FILE", cfg_dir / "config.toml")
+    from lightwork_installer.wizard import write_config
     write_config(
         providers=["anthropic"], role_models={},
         channels={}, safety={"profile": "balanced"},
@@ -74,7 +74,7 @@ def test_kernel_modules_read_what_the_wizard_writes(tmp_path, monkeypatch):
         "cost_aware": True, "verify_ensemble": True,
     })
 
-    from maverick import context_compactor, reflexion, tree_of_thought
+    from lightwork import context_compactor, reflexion, tree_of_thought
     assert tree_of_thought.enabled() is True
     assert context_compactor.enabled() is True
     assert reflexion.enabled() is True
@@ -92,7 +92,7 @@ def test_self_harness_toggle_writes_and_reaches_the_kernel(tmp_path, monkeypatch
     cfg = _write(cfg_dir, monkeypatch, {"self_harness": True})
     assert "[self_harness]" in cfg and "enable = true" in cfg
 
-    from maverick import self_harness
+    from lightwork import self_harness
     assert self_harness.enabled() is True
 
 
@@ -114,8 +114,8 @@ def test_effort_and_cache_prewarm_write_and_are_read(tmp_path, monkeypatch):
     assert "[effort]" in cfg and "enabled = true" in cfg
     assert "[cache]" in cfg and "prewarm = true" in cfg
     # The kernel reads exactly these (config resolves via HOME/~/.maverick).
-    from maverick.effort import effort_for_role
-    from maverick.llm import cache_prewarm_enabled
+    from lightwork.effort import effort_for_role
+    from lightwork.llm import cache_prewarm_enabled
     assert effort_for_role("orchestrator", "claude-opus-4-8") == "high"
     assert cache_prewarm_enabled() is True
 
@@ -136,7 +136,7 @@ def test_risk_proportional_verify_writes_and_is_read(tmp_path, monkeypatch):
     assert "[verification]" in cfg
     assert "risk_proportional = true" in cfg
 
-    from maverick.agent import _risk_proportional_verify_enabled
+    from lightwork.agent import _risk_proportional_verify_enabled
     assert _risk_proportional_verify_enabled() is True
 
 
@@ -156,7 +156,7 @@ def test_autonomy_gate_writes_and_is_read(tmp_path, monkeypatch):
     parsed = tomllib.loads(cfg)
     assert parsed["routing"]["allowed_providers"] == ["anthropic"]
 
-    from maverick import autonomy
+    from lightwork import autonomy
     assert autonomy.autonomy_enabled() is True
 
 
@@ -176,7 +176,7 @@ def test_headless_assume_writes_and_is_read(tmp_path, monkeypatch):
     parsed = tomllib.loads(cfg)
     assert parsed["autonomy"] == {"headless_assume": True}  # enable stays off
 
-    from maverick import autonomy
+    from lightwork import autonomy
     assert autonomy.assume_when_headless() is True
     assert autonomy.autonomy_enabled() is False
 
@@ -193,7 +193,7 @@ def test_governed_actions_writes_and_is_read(tmp_path, monkeypatch):
     parsed = tomllib.loads(cfg)
     assert parsed["actions"] == {"enable": True}
 
-    from maverick import governed_actions
+    from lightwork import governed_actions
     assert governed_actions.enabled() is True
 
 
@@ -207,7 +207,7 @@ def test_calibration_enforce_writes_and_is_read(tmp_path, monkeypatch):
     assert "[calibration]" in cfg
     assert "enforce = true" in cfg
 
-    from maverick.config import get_calibration
+    from lightwork.config import get_calibration
     assert get_calibration()["enforce"] is True
 
 
@@ -222,7 +222,7 @@ def test_fairness_monitor_writes_and_is_read(tmp_path, monkeypatch):
     assert "[fairness_monitor]" in cfg
     assert "enable = true" in cfg
 
-    from maverick.config import get_fairness_monitor
+    from lightwork.config import get_fairness_monitor
     assert get_fairness_monitor()["enable"] is True
 
 
@@ -242,8 +242,8 @@ def test_sota_loop_toggles_write_and_are_read(tmp_path, monkeypatch):
     for section in ("[adaptive_compute]", "[search]", "[skill_synthesis]", "[experience]"):
         assert section in cfg
 
-    from maverick import adaptive_compute, best_of_n, experience
-    from maverick.skill import synthesis as skill_synthesis
+    from lightwork import adaptive_compute, best_of_n, experience
+    from lightwork.skill import synthesis as skill_synthesis
     assert adaptive_compute.enabled() is True
     assert best_of_n.enabled() is True
     assert skill_synthesis.enabled() is True
@@ -261,7 +261,7 @@ def test_credit_assignment_writes_and_is_read(tmp_path, monkeypatch):
     assert "[credit]" in cfg
     assert "enable = true" in cfg
 
-    from maverick import credit
+    from lightwork import credit
     assert credit.enabled() is True
 
 
@@ -276,7 +276,7 @@ def test_enforce_capabilities_writes_and_is_read(tmp_path, monkeypatch):
     assert "[capabilities]" in cfg
     assert "enforce = true" in cfg
 
-    from maverick.capability import capability_enforced
+    from lightwork.capability import capability_enforced
     assert capability_enforced() is True
 
 
@@ -294,7 +294,7 @@ def test_per_call_token_exchange_writes_and_is_read(tmp_path, monkeypatch):
     assert "per_call_tokens = true" in cfg
     assert "enforce = true" in cfg  # token exchange implies enforcement
 
-    from maverick.tool_token import tool_tokens_enabled
+    from lightwork.tool_token import tool_tokens_enabled
     assert tool_tokens_enabled() is True
 
 
@@ -324,7 +324,7 @@ def test_enforce_capabilities_reuses_existing_capabilities_table(tmp_path, monke
         "enforce": True,
     }
 
-    from maverick.capability import capability_enforced
+    from lightwork.capability import capability_enforced
 
     assert capability_enforced() is True
 def test_tenant_by_user_writes_and_is_read(tmp_path, monkeypatch):
@@ -338,7 +338,7 @@ def test_tenant_by_user_writes_and_is_read(tmp_path, monkeypatch):
     assert "[tenancy]" in cfg
     assert "by_user = true" in cfg
 
-    from maverick.paths import tenant_by_user_enabled
+    from lightwork.paths import tenant_by_user_enabled
     assert tenant_by_user_enabled() is True
 
 
@@ -357,7 +357,7 @@ def test_enforce_quotas_writes_and_is_read(tmp_path, monkeypatch):
     assert "max_dollars_per_day = 25.0" in cfg
     assert "max_tokens_per_day = 5000000" in cfg
 
-    from maverick.quotas import over_quota, quotas_enforced
+    from lightwork.quotas import over_quota, quotas_enforced
     assert quotas_enforced() is True
     # Nothing recorded yet, so a fresh principal is under quota.
     assert over_quota("alice") is None
@@ -366,7 +366,7 @@ def test_enforce_quotas_writes_and_is_read(tmp_path, monkeypatch):
 def test_oidc_writes_and_is_read(tmp_path, monkeypatch):
     """Rule-6 loop: the wizard's OIDC toggle writes a single [auth.oidc] table
     (enabled/issuer/audience/jwks_uri), the config round-trips through the TOML
-    parser, and the kernel reads it back via maverick.oidc."""
+    parser, and the kernel reads it back via lightwork.oidc."""
     monkeypatch.setenv("HOME", str(tmp_path))
     for env in ("MAVERICK_OIDC_ENABLED", "MAVERICK_OIDC_ISSUER",
                 "MAVERICK_OIDC_AUDIENCE", "MAVERICK_OIDC_JWKS_URI",
@@ -377,7 +377,7 @@ def test_oidc_writes_and_is_read(tmp_path, monkeypatch):
     cfg = _write(cfg_dir, monkeypatch, {"oidc": {
         "enabled": True,
         "issuer": "https://issuer.example.com",
-        "audience": "maverick-client",
+        "audience": "lightwork-client",
         "jwks_uri": "https://issuer.example.com/jwks",
     }})
     # Exactly one [auth.oidc] table -- no duplicate-table bug.
@@ -387,15 +387,15 @@ def test_oidc_writes_and_is_read(tmp_path, monkeypatch):
     assert parsed["auth"]["oidc"] == {
         "enabled": True,
         "issuer": "https://issuer.example.com",
-        "audience": "maverick-client",
+        "audience": "lightwork-client",
         "jwks_uri": "https://issuer.example.com/jwks",
     }
 
-    from maverick.oidc import load_oidc_config, oidc_enabled
+    from lightwork.oidc import load_oidc_config, oidc_enabled
     assert oidc_enabled() is True
     resolved = load_oidc_config()
     assert resolved.issuer == "https://issuer.example.com"
-    assert resolved.audience == "maverick-client"
+    assert resolved.audience == "lightwork-client"
     assert resolved.jwks_uri == "https://issuer.example.com/jwks"
     # Allowlist defaults to asymmetric-only (the wizard doesn't surface it).
     assert resolved.algorithms == ["RS256", "ES256"]
@@ -411,7 +411,7 @@ def test_oidc_disabled_writes_no_section(tmp_path, monkeypatch):
     cfg = _write(cfg_dir, monkeypatch, {"oidc": {"enabled": False}})
     assert "[auth.oidc]" not in cfg
 
-    from maverick.oidc import oidc_enabled
+    from lightwork.oidc import oidc_enabled
     assert oidc_enabled() is False
 
 
@@ -431,7 +431,7 @@ def test_oidc_browser_login_writes_and_enables(tmp_path, monkeypatch):
     cfg = _write(cfg_dir, monkeypatch, {"oidc": {
         "enabled": True,
         "issuer": "https://issuer.example.com",
-        "audience": "maverick-client",
+        "audience": "lightwork-client",
         "jwks_uri": "https://issuer.example.com/jwks",
         "client_id": "dash-client",
         "client_secret": "shhh",  # pragma: allowlist secret
@@ -444,7 +444,7 @@ def test_oidc_browser_login_writes_and_enables(tmp_path, monkeypatch):
     assert parsed["redirect_uri"] == "https://dash.example.com/auth/callback"
     assert parsed["session_secret"] == "a-long-random-session-secret"  # pragma: allowlist secret
 
-    from maverick.oidc import login_enabled
+    from lightwork.oidc import login_enabled
     assert login_enabled() is True
 
 
@@ -462,13 +462,13 @@ def test_oidc_bearer_only_omits_login_fields(tmp_path, monkeypatch):
     cfg = _write(cfg_dir, monkeypatch, {"oidc": {
         "enabled": True,
         "issuer": "https://issuer.example.com",
-        "audience": "maverick-client",
+        "audience": "lightwork-client",
         "jwks_uri": "https://issuer.example.com/jwks",
     }})
     assert "client_id" not in cfg
     assert "session_secret" not in cfg
 
-    from maverick.oidc import login_enabled, oidc_enabled
+    from lightwork.oidc import login_enabled, oidc_enabled
     assert oidc_enabled() is True
     assert login_enabled() is False
 
@@ -484,7 +484,7 @@ def test_enterprise_writes_and_is_read(tmp_path, monkeypatch):
     assert "[enterprise]" in cfg
     assert "mode = true" in cfg
 
-    from maverick.enterprise import enterprise_enabled
+    from lightwork.enterprise import enterprise_enabled
     assert enterprise_enabled() is True
 
 
@@ -500,7 +500,7 @@ def test_encrypt_at_rest_writes_and_is_read(tmp_path, monkeypatch):
     assert "[encryption]" in cfg
     assert "at_rest = true" in cfg
 
-    from maverick.crypto_at_rest import at_rest_enabled
+    from lightwork.crypto_at_rest import at_rest_enabled
     assert at_rest_enabled() is True
 
 
@@ -518,7 +518,7 @@ def test_encrypt_per_tenant_writes_and_is_read(tmp_path, monkeypatch):
     assert "[encryption]" in cfg
     assert "at_rest = true" in cfg and "per_tenant = true" in cfg
 
-    from maverick.crypto_at_rest import per_tenant_at_rest
+    from lightwork.crypto_at_rest import per_tenant_at_rest
     assert per_tenant_at_rest() is True
 
 
@@ -532,7 +532,7 @@ def test_hedge_requests_writes_and_is_read(tmp_path, monkeypatch):
     cfg = _write(cfg_dir, monkeypatch, {"hedge_requests": True})
     assert "[latency]" in cfg and "hedge_ms = 1500" in cfg
 
-    from maverick.llm import _hedge_ms
+    from lightwork.llm import _hedge_ms
     assert _hedge_ms() == 1500.0
 
 
@@ -548,7 +548,7 @@ def test_audit_sign_writes_and_is_read(tmp_path, monkeypatch):
     assert "[audit]" in cfg
     assert "sign = true" in cfg
 
-    from maverick.audit.writer import _resolve_signing
+    from lightwork.audit.writer import _resolve_signing
     # explicit=None -> falls through to MAVERICK_AUDIT_SIGN env (unset) ->
     # [audit] sign in the config the wizard just wrote.
     assert _resolve_signing(None) is True
@@ -566,7 +566,7 @@ def test_anonymous_logs_writes_and_is_read(tmp_path, monkeypatch):
     assert "[privacy]" in cfg
     assert "anonymous = true" in cfg
 
-    from maverick.privacy import anon_enabled
+    from lightwork.privacy import anon_enabled
     assert anon_enabled() is True
 
 
@@ -593,7 +593,7 @@ def test_pack_editing_lock_writes_and_is_read(tmp_path, monkeypatch):
     assert "[features]" in cfg
     assert "pack_editing = false" in cfg
 
-    from maverick.config import get_features
+    from lightwork.config import get_features
     assert get_features()["pack_editing"] is False
 
 
@@ -617,7 +617,7 @@ def test_role_editing_lock_writes_and_is_read(tmp_path, monkeypatch):
     assert "[features]" in cfg
     assert "role_editing = false" in cfg
 
-    from maverick.config import get_features
+    from lightwork.config import get_features
     assert get_features()["role_editing"] is False
 
 
@@ -635,7 +635,7 @@ def test_both_editing_locks_share_one_features_table(tmp_path, monkeypatch):
     parsed = tomllib.loads(cfg)  # a duplicate table would raise here
     assert parsed["features"] == {"pack_editing": False, "role_editing": False}
 
-    from maverick.config import get_features
+    from lightwork.config import get_features
     feats = get_features()
     assert feats["pack_editing"] is False and feats["role_editing"] is False
 
@@ -662,8 +662,8 @@ def test_dual_approval_writes_security_quorum(tmp_path, monkeypatch):
     assert "allow_self_approval = false" in cfg
     parsed = tomllib.loads(cfg)
     assert parsed["security"]["approvals_required"] == 2
-    from maverick.safety.dual_control import required_approvals
-    monkeypatch.setattr("maverick.safety.dual_control._security_cfg",
+    from lightwork.safety.dual_control import required_approvals
+    monkeypatch.setattr("lightwork.safety.dual_control._security_cfg",
                         lambda: parsed["security"])
     assert required_approvals("high") == 2   # rule-6: the kernel reads it back
 

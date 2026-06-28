@@ -3,8 +3,8 @@ from __future__ import annotations
 
 import asyncio
 
-from maverick import tool_latency
-from maverick.tools import Tool, ToolRegistry
+from lightwork import tool_latency
+from lightwork.tools import Tool, ToolRegistry
 
 
 def test_record_report_reset():

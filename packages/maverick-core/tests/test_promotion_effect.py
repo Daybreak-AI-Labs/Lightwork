@@ -3,10 +3,10 @@ promotion gate must judge a causal candidate on its effect's lower bound.
 """
 from __future__ import annotations
 
-from maverick import promotion_effect as pe
-from maverick.self_improvement import Candidate, SelfImprovementController
-from maverick.si_producers import propose_with_effect
-from maverick.trajectory_store import TrajectoryStep
+from lightwork import promotion_effect as pe
+from lightwork.self_improvement import Candidate, SelfImprovementController
+from lightwork.si_producers import propose_with_effect
+from lightwork.trajectory_store import TrajectoryStep
 
 
 def _units(spec):
@@ -140,7 +140,7 @@ def test_propose_with_effect_fail_closed_on_untrustworthy():
 def test_enabled_off_by_default(monkeypatch):
     monkeypatch.delenv("MAVERICK_CAUSAL_PROMOTION", raising=False)
     # With no env and the knob absent from config, the feature is off.
-    monkeypatch.setattr("maverick.config.get_self_improvement", lambda: {"causal_promotion": False})
+    monkeypatch.setattr("lightwork.config.get_self_improvement", lambda: {"causal_promotion": False})
     assert pe.enabled() is False
     # Env override turns it on.
     monkeypatch.setenv("MAVERICK_CAUSAL_PROMOTION", "1")

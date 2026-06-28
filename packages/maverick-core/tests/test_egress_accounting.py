@@ -2,7 +2,7 @@
 from __future__ import annotations
 
 import pytest
-from maverick import egress_accounting as eg
+from lightwork import egress_accounting as eg
 
 
 @pytest.fixture(autouse=True)

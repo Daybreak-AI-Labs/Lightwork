@@ -26,7 +26,7 @@ pytestmark = pytest.mark.skipif(
 def world(monkeypatch):
     # Temporal memory explicitly OFF — this is the fallback the finding targets.
     monkeypatch.delenv("MAVERICK_TEMPORAL_MEMORY", raising=False)
-    from maverick.world_model_backends.postgres import PostgresWorldModel
+    from lightwork.world_model_backends.postgres import PostgresWorldModel
     w = PostgresWorldModel(dsn=_DSN)
     # Unique key prefix per test (the DB is shared/persistent).
     w._kp = f"ft-{int(time.time() * 1e6)}-"
@@ -59,7 +59,7 @@ def test_default_tier_is_first_party(world):
 def test_memory_guard_drops_low_trust_without_temporal(world):
     """End-to-end parity with SQLite: a high-trust-only (high_risk) brief
     excludes the TOOL-tier fact, on the non-temporal Postgres backend."""
-    from maverick import memory_guard as mg
+    from lightwork import memory_guard as mg
     w = world
     k = w._kp + "tool"
     w.upsert_fact(k, "ship on friday", source="tool", trust_tier=1)

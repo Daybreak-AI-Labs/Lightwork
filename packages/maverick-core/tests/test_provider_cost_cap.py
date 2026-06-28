@@ -9,7 +9,7 @@ import stat
 from datetime import datetime, timezone
 
 import pytest
-from maverick import provider_cost_cap as pcc
+from lightwork import provider_cost_cap as pcc
 
 T0 = datetime(2026, 6, 10, 12, 0, tzinfo=timezone.utc).timestamp()
 DAY = 86400.0
@@ -205,7 +205,7 @@ def test_corrupt_ledger_fails_soft(caps_config, ledger):
 
 def test_default_ledger_under_data_dir(caps_config):
     # conftest isolates HOME, so the default path lands in the temp home.
-    from maverick.paths import data_dir
+    from lightwork.paths import data_dir
     pcc.record("anthropic", 4.0, now=T0)
     assert data_dir("provider_spend.json").exists()
     assert pcc.check("anthropic", now=T0).spent == 4.0

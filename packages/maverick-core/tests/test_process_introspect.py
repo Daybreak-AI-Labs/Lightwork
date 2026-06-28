@@ -1,7 +1,7 @@
 """process_introspect: offline analysis of a caller-supplied snapshot."""
 from __future__ import annotations
 
-from maverick.tools.process_introspect import process_introspect
+from lightwork.tools.process_introspect import process_introspect
 
 _SNAP = [
     {"pid": 1, "ppid": 0, "name": "init", "rss_kb": 100, "cpu_pct": 0.1},

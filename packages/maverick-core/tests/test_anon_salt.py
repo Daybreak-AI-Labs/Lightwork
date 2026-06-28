@@ -11,14 +11,14 @@ from __future__ import annotations
 import hashlib
 
 import pytest
-from maverick.privacy import _hash_id, anonymize_field
+from lightwork.privacy import _hash_id, anonymize_field
 
 
 @pytest.fixture(autouse=True)
 def _isolate(monkeypatch, tmp_path):
     monkeypatch.setenv("MAVERICK_HOME", str(tmp_path))
     monkeypatch.delenv("MAVERICK_TENANT", raising=False)
-    import maverick.privacy as privacy
+    import lightwork.privacy as privacy
     privacy._anon_salt_cache = None  # force a fresh salt under this tmp home
     yield
     privacy._anon_salt_cache = None
@@ -34,7 +34,7 @@ def test_anon_is_not_the_unsalted_sha256():
 
 
 def test_anon_differs_across_tenants():
-    from maverick.paths import reset_tenant, set_tenant
+    from lightwork.paths import reset_tenant, set_tenant
 
     def _hash_under(tenant: str) -> str:
         tok = set_tenant(tenant)
@@ -49,6 +49,6 @@ def test_anon_differs_across_tenants():
 
 def test_anon_salt_persisted_0600(tmp_path):
     anonymize_field("user_id", "alice123")  # triggers salt creation
-    from maverick.paths import data_dir
+    from lightwork.paths import data_dir
     p = data_dir("keys", "anon.salt", tenant=None)
     assert p.exists() and (p.stat().st_mode & 0o777) == 0o600

@@ -12,7 +12,7 @@ import sys
 import types
 
 import pytest
-from maverick.providers import KNOWN_PROVIDERS, get_provider_client
+from lightwork.providers import KNOWN_PROVIDERS, get_provider_client
 
 # All non-anthropic providers route through the OpenAI SDK (directly, or
 # via openai-compatible base_url). If the optional `openai` extra isn't
@@ -21,7 +21,7 @@ from maverick.providers import KNOWN_PROVIDERS, get_provider_client
 _HAS_OPENAI_SDK = importlib.util.find_spec("openai") is not None
 _needs_openai = pytest.mark.skipif(
     not _HAS_OPENAI_SDK,
-    reason="openai SDK not installed (pip install 'maverick-agent[openai]')",
+    reason="openai SDK not installed (pip install 'lightwork-agent[openai]')",
 )
 
 
@@ -100,7 +100,7 @@ class TestNewProviderEndpoints:
     def test_moonshot_default_url(self, monkeypatch):
         monkeypatch.setenv("MOONSHOT_API_KEY", "sk-test")
         monkeypatch.delenv("MOONSHOT_BASE_URL", raising=False)
-        from maverick.providers.moonshot_provider import MoonshotClient
+        from lightwork.providers.moonshot_provider import MoonshotClient
         client = MoonshotClient()
         # The OpenAI SDK stores base_url on the underlying client.
         assert "moonshot" in str(client._sync.base_url).lower()
@@ -108,14 +108,14 @@ class TestNewProviderEndpoints:
     def test_deepseek_default_url(self, monkeypatch):
         monkeypatch.setenv("DEEPSEEK_API_KEY", "sk-test")
         monkeypatch.delenv("DEEPSEEK_BASE_URL", raising=False)
-        from maverick.providers.deepseek_provider import DeepSeekClient
+        from lightwork.providers.deepseek_provider import DeepSeekClient
         client = DeepSeekClient()
         assert "deepseek" in str(client._sync.base_url).lower()
 
     def test_xai_default_url(self, monkeypatch):
         monkeypatch.setenv("XAI_API_KEY", "sk-test")
         monkeypatch.delenv("XAI_BASE_URL", raising=False)
-        from maverick.providers.xai_provider import XaiClient
+        from lightwork.providers.xai_provider import XaiClient
         client = XaiClient()
         assert "x.ai" in str(client._sync.base_url).lower()
 
@@ -124,7 +124,7 @@ class TestNewProviderEndpoints:
         of XAI_API_KEY. Both should work."""
         monkeypatch.delenv("XAI_API_KEY", raising=False)
         monkeypatch.setenv("GROK_API_KEY", "sk-grok-test")
-        from maverick.providers.xai_provider import XaiClient
+        from lightwork.providers.xai_provider import XaiClient
         client = XaiClient()
         # Key found via the alias → client constructs without error.
         assert client is not None
@@ -133,7 +133,7 @@ class TestNewProviderEndpoints:
         """For users behind corp proxies or China-region Moonshot users."""
         monkeypatch.setenv("MOONSHOT_API_KEY", "sk-test")
         monkeypatch.setenv("MOONSHOT_BASE_URL", "https://api.moonshot.cn/v1")
-        from maverick.providers.moonshot_provider import MoonshotClient
+        from lightwork.providers.moonshot_provider import MoonshotClient
         client = MoonshotClient()
         assert "moonshot.cn" in str(client._sync.base_url)
 
@@ -162,7 +162,7 @@ class TestThirdPartyProvidersDoNotFallbackToOpenAIKey:
         _install_fake_openai(monkeypatch)
         monkeypatch.setenv("OPENAI_API_KEY", "sk-openai-should-not-leak")
         monkeypatch.delenv("MOONSHOT_API_KEY", raising=False)
-        from maverick.providers.moonshot_provider import MoonshotClient
+        from lightwork.providers.moonshot_provider import MoonshotClient
         with pytest.raises(RuntimeError, match="requires a non-empty API key"):
             MoonshotClient()
 
@@ -170,7 +170,7 @@ class TestThirdPartyProvidersDoNotFallbackToOpenAIKey:
         _install_fake_openai(monkeypatch)
         monkeypatch.setenv("OPENAI_API_KEY", "sk-openai-should-not-leak")
         monkeypatch.delenv("DEEPSEEK_API_KEY", raising=False)
-        from maverick.providers.deepseek_provider import DeepSeekClient
+        from lightwork.providers.deepseek_provider import DeepSeekClient
         with pytest.raises(RuntimeError, match="requires a non-empty API key"):
             DeepSeekClient()
 
@@ -179,6 +179,6 @@ class TestThirdPartyProvidersDoNotFallbackToOpenAIKey:
         monkeypatch.setenv("OPENAI_API_KEY", "sk-openai-should-not-leak")
         monkeypatch.delenv("XAI_API_KEY", raising=False)
         monkeypatch.delenv("GROK_API_KEY", raising=False)
-        from maverick.providers.xai_provider import XaiClient
+        from lightwork.providers.xai_provider import XaiClient
         with pytest.raises(RuntimeError, match="requires a non-empty API key"):
             XaiClient()

@@ -10,7 +10,7 @@ from fastapi.testclient import TestClient
 
 
 def _client():
-    from maverick_dashboard.app import app
+    from lightwork_dashboard.app import app
     return TestClient(app)
 
 
@@ -20,12 +20,12 @@ def _isolate(monkeypatch, tmp_path):
     monkeypatch.setenv("HOME", str(tmp_path))
     monkeypatch.setenv("MAVERICK_HOME", str(tmp_path))
     monkeypatch.delenv("MAVERICK_DASHBOARD_TOKEN", raising=False)
-    from maverick import world_model
+    from lightwork import world_model
     monkeypatch.setattr(world_model, "DEFAULT_DB", tmp_path / "world.db")
 
 
 def _save_fleet(name="acme", owner="user:dana"):
-    from maverick.fleet import Fleet, FleetAgent, save_fleet
+    from lightwork.fleet import Fleet, FleetAgent, save_fleet
     fleet = Fleet(
         name=name,
         owner=owner,
@@ -69,7 +69,7 @@ def test_recent_oversight_panel_shows_governance_holds(monkeypatch, tmp_path):
     _isolate(monkeypatch, tmp_path)
     _save_fleet()
     # A governance verdict the kernel records when it parks/blocks an action.
-    from maverick.audit import record
+    from lightwork.audit import record
     record(
         "governance_denied",
         agent="acme.coder",
@@ -89,7 +89,7 @@ def test_recent_oversight_panel_shows_governance_holds(monkeypatch, tmp_path):
 
 def test_governance_hold_gets_source_label_on_approvals(monkeypatch, tmp_path):
     _isolate(monkeypatch, tmp_path)
-    from maverick.world_model import WorldModel
+    from lightwork.world_model import WorldModel
     w = WorldModel(tmp_path / "world.db")
     # A governance REQUIRE_HUMAN hold: parked with trusted provenance metadata.
     w.create_approval(

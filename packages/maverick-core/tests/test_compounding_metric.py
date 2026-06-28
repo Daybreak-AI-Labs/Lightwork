@@ -1,7 +1,7 @@
 """Tests for the compounding metric (cold -> warm improvement signal)."""
 from __future__ import annotations
 
-from maverick.compounding_metric import Row, compute, report_from_world
+from lightwork.compounding_metric import Row, compute, report_from_world
 
 
 def _rows(cls, costs, successes=None):

@@ -9,8 +9,8 @@ from __future__ import annotations
 import json
 
 import pytest
-from maverick import tax_constants
-from maverick.tax_prep import STATE_TY2025, TY2025
+from lightwork import tax_constants
+from lightwork.tax_prep import STATE_TY2025, TY2025
 
 
 def _have_crypto() -> bool:
@@ -163,7 +163,7 @@ class TestApply:
         assert federal == TY2025 and prov == "built-in defaults"
 
     def test_export_refuses_to_sign_garbage(self, tmp_path, monkeypatch):
-        from maverick.audit import signing
+        from lightwork.audit import signing
         monkeypatch.setattr(signing, "KEY_DIR", tmp_path / "keys")
         p = _payload()
         p["federal"]["ctc_per_child"] = -1
@@ -180,7 +180,7 @@ class TestApply:
 @crypto
 class TestUpdateChannel:
     def test_throttle_skips_recent_checks(self, store, monkeypatch):
-        from maverick import config as cfg_mod
+        from lightwork import config as cfg_mod
         monkeypatch.setattr(cfg_mod, "load_config", lambda: {
             "tax": {"update_url": "https://updates.example/tax.json"}})
         (store / ".tax-constants-check").write_text(str(1e12))
@@ -188,14 +188,14 @@ class TestUpdateChannel:
         assert status == "throttled"
 
     def test_no_url_is_disabled_not_an_error(self, store, monkeypatch):
-        from maverick import config as cfg_mod
+        from lightwork import config as cfg_mod
         monkeypatch.setattr(cfg_mod, "load_config", dict)
         assert tax_constants.check_for_update()[0] == "disabled"
 
     def test_prepare_computes_from_the_applied_bundle(self, store, tmp_path):
         # The whole point: a published law change reaches the next prep run.
         from click.testing import CliRunner
-        from maverick.cli import main
+        from lightwork.cli import main
         p = _payload()
         p["federal"]["standard_deduction"]["single"] = 20000.0
         env, pub = _sign(p)
@@ -215,8 +215,8 @@ class TestUpdateChannel:
     def test_update_cli_status_and_file_apply(self, store, tmp_path,
                                               monkeypatch):
         from click.testing import CliRunner
-        from maverick import config as cfg_mod
-        from maverick.cli import main
+        from lightwork import config as cfg_mod
+        from lightwork.cli import main
         env, pub = _sign(_payload())
         bundle = tmp_path / "bundle.json"
         bundle.write_text(json.dumps(env), encoding="utf-8")
@@ -236,7 +236,7 @@ def test_validate_payload_rejects_non_finite_numeric_header():
     # A JSON bundle with an out-of-range number (1e400) parses to float inf;
     # int(inf) raises OverflowError, which must be caught and reported as a
     # malformed header rather than escaping validate_payload.
-    from maverick.tax_constants import validate_payload
+    from lightwork.tax_constants import validate_payload
     errs = validate_payload({"schema_version": float("inf"), "year": 2025, "version": 1})
     assert errs == ["malformed header fields"]
 

@@ -1,7 +1,7 @@
 """two_person_rule: dual-control sign-off validation."""
 from __future__ import annotations
 
-from maverick.tools.two_person_rule import two_person_rule
+from lightwork.tools.two_person_rule import two_person_rule
 
 
 def _check(**kw):
@@ -69,7 +69,7 @@ def test_errors():
 
 
 def test_registered():
-    from maverick.tools import base_registry
+    from lightwork.tools import base_registry
 
     class _W:
         pass

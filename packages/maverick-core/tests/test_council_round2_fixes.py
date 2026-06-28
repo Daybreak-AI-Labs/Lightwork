@@ -20,21 +20,21 @@ def _crypto_works() -> bool:
 
 @pytest.mark.parametrize("expr", ["9**9**9**9", "2**1000000", "(10**100)**100"])
 def test_compute_rejects_unbounded_pow(expr):
-    from maverick.tools.compute import compute
+    from lightwork.tools.compute import compute
     # Must return promptly with an error, not hang/OOM the worker.
     out = compute().fn({"op": "evaluate", "expr": expr})
     assert out.startswith("ERROR")
 
 
 def test_compute_allows_small_pow():
-    from maverick.tools.compute import compute
+    from lightwork.tools.compute import compute
     assert compute().fn({"op": "evaluate", "expr": "2**10"}).strip().startswith("1024")
 
 
 # --- offensive HIGH-2: scrub_env strips connection-string secrets too ---
 
 def test_scrub_env_strips_dsn_and_url_secrets():
-    from maverick.sandbox.local import scrub_env
+    from lightwork.sandbox.local import scrub_env
     src = {
         "PATH": "/usr/bin",
         "DATABASE_URL": "postgres://u:p@h/db",
@@ -51,7 +51,7 @@ def test_scrub_env_strips_dsn_and_url_secrets():
 # --- privacy H2: world.db must not be world/group readable ---
 
 def test_world_db_permissions_locked(tmp_path):
-    from maverick.world_model import WorldModel
+    from lightwork.world_model import WorldModel
     p = tmp_path / "w.db"
     wm = WorldModel(p)
     wm.close()
@@ -63,7 +63,7 @@ def test_world_db_permissions_locked(tmp_path):
 # --- agent-safety H3: channel allowlist helpers ---
 
 def test_channel_allowlist_helpers():
-    base = pytest.importorskip("maverick_channels.base")
+    base = pytest.importorskip("lightwork_channels.base")
     al = base.normalize_allowlist(["a", "b ", " "], "X_UNUSED")
     assert al == {"a", "b"}
     assert base.is_allowed("a", al) is True
@@ -74,7 +74,7 @@ def test_channel_allowlist_helpers():
 
 
 def test_email_channel_requires_allowlist(monkeypatch):
-    mod = pytest.importorskip("maverick_channels.email")
+    mod = pytest.importorskip("lightwork_channels.email")
     monkeypatch.delenv("EMAIL_ALLOWED_USER_IDS", raising=False)
     with pytest.raises(ValueError):
         mod.EmailChannel(
@@ -86,7 +86,7 @@ def test_email_channel_requires_allowlist(monkeypatch):
 # --- agent-safety M3: per-goal spawn cap ---
 
 def test_swarm_total_spawn_cap():
-    from maverick.swarm import SwarmContext
+    from lightwork.swarm import SwarmContext
     ctx = SwarmContext(
         llm=None, world=None, budget=None, blackboard=None,
         sandbox=None, goal_id=1, max_total_spawns=3,
@@ -99,7 +99,7 @@ def test_swarm_total_spawn_cap():
 # --- API-contract MEDIUM: SSRF override is honored uniformly ---
 
 def test_is_blocked_host_respects_override(monkeypatch):
-    from maverick.tools.http_fetch import is_blocked_host
+    from lightwork.tools.http_fetch import is_blocked_host
     monkeypatch.delenv("MAVERICK_FETCH_ALLOW_PRIVATE", raising=False)
     assert is_blocked_host("127.0.0.1") is True
     monkeypatch.setenv("MAVERICK_FETCH_ALLOW_PRIVATE", "1")
@@ -109,7 +109,7 @@ def test_is_blocked_host_respects_override(monkeypatch):
 # --- architecture H2: shared env_bool ---
 
 def test_env_bool(monkeypatch):
-    from maverick._envparse import env_bool
+    from lightwork._envparse import env_bool
     monkeypatch.setenv("X_EB", "on")
     assert env_bool("X_EB") is True
     monkeypatch.setenv("X_EB", "OFF")
@@ -121,7 +121,7 @@ def test_env_bool(monkeypatch):
 
 
 def test_is_truthy():
-    from maverick._envparse import is_truthy
+    from lightwork._envparse import is_truthy
     for v in ("1", "true", "TRUE", "Yes", " on "):
         assert is_truthy(v) is True
     for v in ("0", "false", "no", "off", "", "garbage", None):
@@ -129,7 +129,7 @@ def test_is_truthy():
 
 
 def test_coerce_bool():
-    from maverick._envparse import coerce_bool
+    from lightwork._envparse import coerce_bool
     assert coerce_bool("yes") is True
     assert coerce_bool("off") is False
     assert coerce_bool(None) is False
@@ -146,7 +146,7 @@ def test_coerce_bool():
 # --- ops CRITICAL: provider SDK clients get a bounded timeout ---
 
 def test_llm_http_timeout_is_bounded():
-    from maverick.providers.base import llm_http_timeout
+    from lightwork.providers.base import llm_http_timeout
     t = llm_http_timeout()
     if t is not None:  # httpx present
         import httpx
@@ -158,7 +158,7 @@ def test_llm_http_timeout_is_bounded():
 def test_audit_signer_refuses_torn_resume(tmp_path, monkeypatch):
     if not _crypto_works():
         pytest.skip("cryptography backend unavailable")
-    import maverick.audit.signing as signing
+    import lightwork.audit.signing as signing
 
     monkeypatch.setattr(signing, "KEY_DIR", tmp_path / "keys")
     p = tmp_path / "a.ndjson"

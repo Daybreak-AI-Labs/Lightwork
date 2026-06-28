@@ -15,7 +15,7 @@ from __future__ import annotations
 import math
 
 import pytest
-from maverick.budget import Budget, BudgetExceeded, budget_from_config
+from lightwork.budget import Budget, BudgetExceeded, budget_from_config
 
 # ---- non-finite caps are coerced to a safe default, never run uncapped ----
 
@@ -45,7 +45,7 @@ def test_finite_caps_are_preserved():
 
 def test_config_budget_is_honored(monkeypatch):
     monkeypatch.setattr(
-        "maverick.config.get_budget_overrides",
+        "lightwork.config.get_budget_overrides",
         lambda: {"max_dollars": 1.0, "max_wall_seconds": 90.0},
     )
     b = budget_from_config(defaults={"max_dollars": 5.0, "max_wall_seconds": 3600.0})
@@ -55,7 +55,7 @@ def test_config_budget_is_honored(monkeypatch):
 
 def test_explicit_override_beats_config(monkeypatch):
     monkeypatch.setattr(
-        "maverick.config.get_budget_overrides",
+        "lightwork.config.get_budget_overrides",
         lambda: {"max_dollars": 1.0},
     )
     b = budget_from_config(defaults={"max_dollars": 5.0}, max_dollars=3.0)
@@ -64,7 +64,7 @@ def test_explicit_override_beats_config(monkeypatch):
 
 def test_none_override_passes_through_to_config(monkeypatch):
     monkeypatch.setattr(
-        "maverick.config.get_budget_overrides",
+        "lightwork.config.get_budget_overrides",
         lambda: {"max_dollars": 2.0},
     )
     # A None flag means "unset" -> config still applies.
@@ -74,7 +74,7 @@ def test_none_override_passes_through_to_config(monkeypatch):
 
 def test_nonfinite_config_value_is_skipped(monkeypatch):
     monkeypatch.setattr(
-        "maverick.config.get_budget_overrides",
+        "lightwork.config.get_budget_overrides",
         lambda: {"max_dollars": float("inf")},
     )
     b = budget_from_config(defaults={"max_dollars": 5.0})
@@ -85,7 +85,7 @@ def test_nonfinite_config_value_is_skipped(monkeypatch):
 
 def test_malformed_config_value_is_skipped(monkeypatch):
     monkeypatch.setattr(
-        "maverick.config.get_budget_overrides",
+        "lightwork.config.get_budget_overrides",
         lambda: {"max_dollars": "not-a-number"},
     )
     b = budget_from_config(defaults={"max_dollars": 4.0})

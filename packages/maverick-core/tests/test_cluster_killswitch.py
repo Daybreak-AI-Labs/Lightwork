@@ -11,7 +11,7 @@ from pathlib import Path
 from unittest import mock
 
 import pytest
-from maverick import killswitch, world_model
+from lightwork import killswitch, world_model
 
 
 @pytest.fixture
@@ -52,7 +52,7 @@ def test_world_halt_roundtrip(world):
 def test_shared_consult_skipped_on_sqlite(world):
     world.arm_halt("stop", source="dashboard")
     with mock.patch(
-        "maverick.world_model_backends.is_postgres_configured", return_value=False
+        "lightwork.world_model_backends.is_postgres_configured", return_value=False
     ):
         killswitch._last_shared_check_ts = 0.0
         assert killswitch._shared_halt_active() is None  # not consulted on SQLite
@@ -61,8 +61,8 @@ def test_shared_consult_skipped_on_sqlite(world):
 def test_check_raises_on_shared_halt_when_postgres(world):
     world.arm_halt("cluster stop", source="dashboard")
     with mock.patch(
-        "maverick.world_model_backends.is_postgres_configured", return_value=True
-    ), mock.patch("maverick.world_model.open_world", return_value=world):
+        "lightwork.world_model_backends.is_postgres_configured", return_value=True
+    ), mock.patch("lightwork.world_model.open_world", return_value=world):
         killswitch._last_shared_check_ts = 0.0
         with pytest.raises(killswitch.Halted) as ei:
             killswitch.check()
@@ -80,8 +80,8 @@ def test_shared_halt_throttled(world):
             return {"reason": "x", "source": "dashboard", "armed_by": "", "armed_at": 1.0}
 
     with mock.patch(
-        "maverick.world_model_backends.is_postgres_configured", return_value=True
-    ), mock.patch("maverick.world_model.open_world", return_value=_Probe()):
+        "lightwork.world_model_backends.is_postgres_configured", return_value=True
+    ), mock.patch("lightwork.world_model.open_world", return_value=_Probe()):
         killswitch._last_shared_check_ts = 0.0
         killswitch._shared_world = None
         killswitch._shared_halt_active(min_interval=1000.0)
@@ -92,8 +92,8 @@ def test_shared_halt_throttled(world):
 def test_shared_consult_fails_open(world):
     # A shared-store error must not wedge the run: _shared_halt_active swallows it.
     with mock.patch(
-        "maverick.world_model_backends.is_postgres_configured", return_value=True
-    ), mock.patch("maverick.world_model.open_world", side_effect=RuntimeError("db down")):
+        "lightwork.world_model_backends.is_postgres_configured", return_value=True
+    ), mock.patch("lightwork.world_model.open_world", side_effect=RuntimeError("db down")):
         killswitch._last_shared_check_ts = 0.0
         killswitch._shared_world = None
         assert killswitch._shared_halt_active() is None  # fail-open, no raise
@@ -115,12 +115,12 @@ def test_provider_spend_atomic_increment(world):
 def test_provider_cost_cap_uses_shared_store_when_postgres(world, monkeypatch):
     # record/check route through the shared world (not the per-host JSON file)
     # when a shared backend is configured, so the cap total is fleet-wide.
-    from maverick import provider_cost_cap as pcc
+    from lightwork import provider_cost_cap as pcc
     monkeypatch.setattr(pcc, "_shared_world_cache", None)
     monkeypatch.setattr(
-        "maverick.world_model_backends.is_postgres_configured", lambda: True
+        "lightwork.world_model_backends.is_postgres_configured", lambda: True
     )
-    monkeypatch.setattr("maverick.world_model.open_world", lambda: world)
+    monkeypatch.setattr("lightwork.world_model.open_world", lambda: world)
     monkeypatch.setenv("MAVERICK_PROVIDER_CAPS_PERIOD", "day")
     pcc.record("anthropic", 2.0, now=1_750_000_000.0)
     pcc.record("anthropic", 1.0, now=1_750_000_000.0)

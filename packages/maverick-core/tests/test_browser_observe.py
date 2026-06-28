@@ -11,8 +11,8 @@ from __future__ import annotations
 
 import json
 
-from maverick.safety import action_gate
-from maverick.tools import browser
+from lightwork.safety import action_gate
+from lightwork.tools import browser
 
 # --- read-only: never gated ------------------------------------------------
 

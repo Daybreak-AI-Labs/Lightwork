@@ -1,7 +1,7 @@
 """Regression tests for the standalone entry point and clean-abort handling.
 
 Two bugs these pin:
-  1. ``maverick-init --fast`` / ``--resume`` were silently ignored: the
+  1. ``lightwork-init --fast`` / ``--resume`` were silently ignored: the
      console script called ``run()`` with no argument parsing, so the
      flags did nothing.
   2. questionary returns ``None`` on Ctrl-C / Ctrl-D / no-TTY. Every
@@ -16,7 +16,7 @@ import pytest
 # ---------- entry point flag parsing ----------
 
 def test_main_passes_fast_flag(monkeypatch):
-    from maverick_installer import main as m
+    from lightwork_installer import main as m
     captured: dict = {}
     monkeypatch.setattr(m, "run", lambda **kw: captured.update(kw) or 0)
     assert m.main(["--fast"]) == 0
@@ -24,7 +24,7 @@ def test_main_passes_fast_flag(monkeypatch):
 
 
 def test_main_passes_resume_flag(monkeypatch):
-    from maverick_installer import main as m
+    from lightwork_installer import main as m
     captured: dict = {}
     monkeypatch.setattr(m, "run", lambda **kw: captured.update(kw) or 0)
     assert m.main(["--resume"]) == 0
@@ -32,7 +32,7 @@ def test_main_passes_resume_flag(monkeypatch):
 
 
 def test_main_defaults_no_flags(monkeypatch):
-    from maverick_installer import main as m
+    from lightwork_installer import main as m
     captured: dict = {}
     monkeypatch.setattr(m, "run", lambda **kw: captured.update(kw) or 0)
     assert m.main([]) == 0
@@ -40,7 +40,7 @@ def test_main_defaults_no_flags(monkeypatch):
 
 
 def test_main_aborts_cleanly_on_keyboard_interrupt(monkeypatch, capsys):
-    from maverick_installer import main as m
+    from lightwork_installer import main as m
 
     def _boom(**kw):
         raise KeyboardInterrupt
@@ -52,7 +52,7 @@ def test_main_aborts_cleanly_on_keyboard_interrupt(monkeypatch, capsys):
 
 
 def test_main_aborts_cleanly_on_eof(monkeypatch, capsys):
-    from maverick_installer import main as m
+    from lightwork_installer import main as m
 
     def _boom(**kw):
         raise EOFError
@@ -64,7 +64,7 @@ def test_main_aborts_cleanly_on_eof(monkeypatch, capsys):
 
 
 def test_main_rejects_unknown_flag(monkeypatch):
-    from maverick_installer import main as m
+    from lightwork_installer import main as m
     # argparse exits(2) on unknown args instead of silently ignoring them.
     with pytest.raises(SystemExit) as exc:
         m.main(["--nope"])
@@ -82,7 +82,7 @@ class _NullPrompt:
 
 @pytest.fixture
 def _require_questionary():
-    from maverick_installer import wizard
+    from lightwork_installer import wizard
     if wizard.questionary is None:  # pragma: no cover -- questionary is a dep
         pytest.skip("questionary not installed")
     return wizard

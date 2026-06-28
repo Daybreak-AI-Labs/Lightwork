@@ -14,7 +14,7 @@ import time
 
 import pytest
 from fastapi.testclient import TestClient
-from maverick_dashboard.app import app
+from lightwork_dashboard.app import app
 
 client = TestClient(app)
 
@@ -29,11 +29,11 @@ def _sign(body: bytes) -> str:
 
 @pytest.fixture(autouse=True)
 def _isolated_world(tmp_path, monkeypatch):
-    from maverick import world_model
+    from lightwork import world_model
     monkeypatch.setattr(world_model, "DEFAULT_DB", tmp_path / "world.db")
     # Reset the dashboard's per-DB-path WorldModel cache so each test gets
     # its own DB (the cache keys on DEFAULT_DB, which we just repointed).
-    from maverick_dashboard import app as app_mod
+    from lightwork_dashboard import app as app_mod
     app_mod._world_cache.clear()
     # Each test starts with an empty replay-dedup cache so a fresh delivery
     # isn't mistaken for a replay of an earlier test's identical body.
@@ -44,7 +44,7 @@ def _isolated_world(tmp_path, monkeypatch):
 @pytest.fixture
 def _no_real_run(monkeypatch):
     """Stub the background runner so the route returns immediately."""
-    import maverick.runner as runner_mod
+    import lightwork.runner as runner_mod
     called = []
 
     def fake_run(goal_id, max_dollars=None, max_wall_seconds=None, max_depth=3):
@@ -115,7 +115,7 @@ def test_linear_valid_signature_assigned_to_bot_creates_goal(_configured, _no_re
     assert len(_no_real_run) == 1 and _no_real_run[0][0] == goal_id
 
     # The goal row really landed in the world model with the issue content.
-    from maverick.world_model import DEFAULT_DB, WorldModel
+    from lightwork.world_model import DEFAULT_DB, WorldModel
     g = WorldModel(DEFAULT_DB).get_goal(goal_id)
     assert g is not None
     assert g.status == "pending"
@@ -186,7 +186,7 @@ def test_jira_valid_signature_assigned_to_bot_creates_goal(_configured, _no_real
     assert isinstance(goal_id, int)
     assert len(_no_real_run) == 1 and _no_real_run[0][0] == goal_id
 
-    from maverick.world_model import DEFAULT_DB, WorldModel
+    from lightwork.world_model import DEFAULT_DB, WorldModel
     g = WorldModel(DEFAULT_DB).get_goal(goal_id)
     assert g is not None
     assert g.status == "pending"
@@ -236,7 +236,7 @@ def test_jira_missing_bot_id_fails_closed(monkeypatch, _no_real_run):
 def test_no_secret_configured_fails_closed(monkeypatch, _no_real_run):
     monkeypatch.delenv("MAVERICK_WEBHOOK_SECRET", raising=False)
     monkeypatch.setenv("ANTHROPIC_API_KEY", "sk-ant-fake")
-    import maverick.webhooks as wh
+    import lightwork.webhooks as wh
     monkeypatch.setattr(wh, "_load_config_outbound", lambda: ([], None))
 
     body = json.dumps(_linear_assigned()).encode()
@@ -251,8 +251,8 @@ def test_no_secret_configured_fails_closed(monkeypatch, _no_real_run):
 def test_linear_oversized_content_length_rejected_before_signature_check(
     _configured, _no_real_run, monkeypatch,
 ):
-    import maverick.issue_webhooks as iw
-    from maverick_dashboard import app as app_mod
+    import lightwork.issue_webhooks as iw
+    from lightwork_dashboard import app as app_mod
 
     def fail_verify(*args, **kwargs):
         raise AssertionError("signature verification should not run for oversized bodies")
@@ -354,7 +354,7 @@ def test_jira_duplicate_delivery_rejected_with_bare_variant(_configured, _no_rea
 # ---- GitLab (X-Gitlab-Token + X-Gitlab-Event-UUID) --------------------------
 
 GITLAB_TOKEN = "gitlab-shared-token"
-GITLAB_BOT = "maverick-bot"
+GITLAB_BOT = "lightwork-bot"
 
 
 def _gitlab_payload(assignee=GITLAB_BOT, action="update"):
@@ -393,7 +393,7 @@ def test_gitlab_assigned_creates_goal(_gitlab_configured, _no_real_run):
     r = _post_gitlab(_gitlab_payload())
     assert r.status_code == 201, r.text
     goal_id = r.json()["goal_id"]
-    from maverick_dashboard.app import _world
+    from lightwork_dashboard.app import _world
     g = _world().get_goal(goal_id)
     assert g is not None and "group/repo#42" in g.title
     assert _no_real_run and _no_real_run[0][0] == goal_id

@@ -1,7 +1,7 @@
 """model_card: render/validate an LLM model card."""
 from __future__ import annotations
 
-from maverick.tools.model_card import model_card
+from lightwork.tools.model_card import model_card
 
 
 def _run(**kw):
@@ -9,7 +9,7 @@ def _run(**kw):
 
 
 _FULL = {
-    "model": "maverick-1",
+    "model": "lightwork-1",
     "provider": "ACME",
     "intended_use": "coding agent",
     "limitations": "may hallucinate",
@@ -20,7 +20,7 @@ def test_render_full():
     out = _run(op="render", training_cutoff="2026-01",
                eval_scores={"swe": 0.7, "math": 0.9}, **_FULL)
     assert out.startswith("OK")
-    assert "Model Card: maverick-1" in out
+    assert "Model Card: lightwork-1" in out
     assert "Provider: ACME" in out
     assert "Training cutoff: 2026-01" in out
     assert "swe: 0.7" in out and "math: 0.9" in out

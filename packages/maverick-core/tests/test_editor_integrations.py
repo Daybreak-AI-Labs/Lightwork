@@ -7,9 +7,9 @@ import re
 from pathlib import Path
 
 _REPO = Path(__file__).resolve().parents[3]
-_EMACS = _REPO / "apps" / "emacs" / "maverick.el"
+_EMACS = _REPO / "apps" / "emacs" / "lightwork.el"
 _NVIM_INIT = _REPO / "apps" / "nvim" / "lua" / "maverick" / "init.lua"
-_NVIM_PLUGIN = _REPO / "apps" / "nvim" / "plugin" / "maverick.lua"
+_NVIM_PLUGIN = _REPO / "apps" / "nvim" / "plugin" / "lightwork.lua"
 
 
 def _strip_elisp(text: str) -> str:
@@ -45,18 +45,18 @@ def _strip_elisp(text: str) -> str:
 
 def test_emacs_package_structure():
     text = _EMACS.read_text()
-    assert text.startswith(";;; maverick.el ---")
+    assert text.startswith(";;; lightwork.el ---")
     assert "lexical-binding: t" in text
     assert "(provide 'maverick)" in text
-    assert text.rstrip().endswith(";;; maverick.el ends here")
+    assert text.rstrip().endswith(";;; lightwork.el ends here")
     stripped = _strip_elisp(text)
     assert stripped.count("(") == stripped.count(")"), "unbalanced parens"
 
 
 def test_emacs_commands_present_and_autoloaded():
     text = _EMACS.read_text()
-    for fn in ("maverick-start", "maverick-status", "maverick-monitor",
-               "maverick-logs", "maverick-halt", "maverick-unhalt"):
+    for fn in ("lightwork-start", "lightwork-status", "lightwork-monitor",
+               "lightwork-logs", "lightwork-halt", "lightwork-unhalt"):
         assert f"(defun {fn}" in text, f"missing {fn}"
         assert "(interactive" in text.split(f"(defun {fn}", 1)[1][:400], \
             f"{fn} is not interactive"
@@ -77,7 +77,7 @@ def test_nvim_plugin_structure():
 
 def test_editor_integrations_only_call_real_cli_verbs():
     """Every CLI verb the integrations shell out to must exist in cli.py."""
-    from maverick.cli import main
+    from lightwork.cli import main
     real = set(main.commands)
     used = set()
     for text in (_EMACS.read_text(), _NVIM_INIT.read_text()):
@@ -92,7 +92,7 @@ def test_editor_integrations_only_call_real_cli_verbs():
 def test_editor_status_cost_option_is_supported(tmp_path):
     """The editor status wrappers pass --cost, so the CLI must accept it."""
     from click.testing import CliRunner
-    from maverick.cli import main
+    from lightwork.cli import main
 
     result = CliRunner().invoke(main, ["--db", str(tmp_path / "world.db"), "status", "--cost"])
 
@@ -104,5 +104,5 @@ def test_editor_status_cost_option_is_supported(tmp_path):
 def test_readmes_document_the_commands():
     emacs_readme = (_REPO / "apps" / "emacs" / "README.md").read_text()
     nvim_readme = (_REPO / "apps" / "nvim" / "README.md").read_text()
-    assert "maverick-start" in emacs_readme
+    assert "lightwork-start" in emacs_readme
     assert ":MaverickStart" in nvim_readme

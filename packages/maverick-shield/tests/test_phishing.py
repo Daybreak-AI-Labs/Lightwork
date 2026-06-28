@@ -4,8 +4,8 @@ Unit tests for the heuristic detector + the Shield.scan_output wiring.
 """
 from __future__ import annotations
 
-from maverick_shield import Shield, ShieldVerdict
-from maverick_shield.phishing import detect_phishing
+from lightwork_shield import Shield, ShieldVerdict
+from lightwork_shield.phishing import detect_phishing
 
 
 class TestDetector:

@@ -3,7 +3,7 @@ from __future__ import annotations
 
 from random import Random
 
-from maverick.plugin_reliability import (
+from lightwork.plugin_reliability import (
     FaultRates,
     PluginCrash,
     PluginTimeout,

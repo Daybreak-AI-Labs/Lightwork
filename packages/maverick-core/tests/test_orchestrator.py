@@ -15,10 +15,10 @@ from __future__ import annotations
 from pathlib import Path
 
 import pytest
-from maverick.budget import Budget
-from maverick.orchestrator import run_goal
-from maverick.sandbox import LocalBackend
-from maverick.world_model import WorldModel
+from lightwork.budget import Budget
+from lightwork.orchestrator import run_goal
+from lightwork.sandbox import LocalBackend
+from lightwork.world_model import WorldModel
 
 
 @pytest.mark.asyncio
@@ -61,7 +61,7 @@ async def test_simple_final_answer_marks_goal_done(tmp_path: Path, fake_llm, mak
 
 @pytest.mark.asyncio
 async def test_ask_user_pauses_goal_as_blocked(tmp_path: Path, fake_llm, make_llm_response):
-    from maverick.llm import ToolCall
+    from lightwork.llm import ToolCall
     fake_llm.scripted = [
         make_llm_response(
             text="I need clarification.",

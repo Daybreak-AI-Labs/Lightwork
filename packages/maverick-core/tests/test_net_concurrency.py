@@ -9,15 +9,15 @@ import asyncio
 from pathlib import Path
 
 import pytest
-from maverick import net_concurrency as nc
-from maverick.agent import Agent
-from maverick.blackboard import Blackboard
-from maverick.budget import Budget
-from maverick.llm import LLMResponse, ToolCall
-from maverick.sandbox import LocalBackend
-from maverick.swarm import SwarmContext
-from maverick.tools import Tool
-from maverick.world_model import WorldModel
+from lightwork import net_concurrency as nc
+from lightwork.agent import Agent
+from lightwork.blackboard import Blackboard
+from lightwork.budget import Budget
+from lightwork.llm import LLMResponse, ToolCall
+from lightwork.sandbox import LocalBackend
+from lightwork.swarm import SwarmContext
+from lightwork.tools import Tool
+from lightwork.world_model import WorldModel
 
 
 @pytest.fixture(autouse=True)

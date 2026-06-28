@@ -24,12 +24,12 @@ def _isolate(monkeypatch, tmp_path):
     # A valid 32-byte KEK (64 hex chars) so envelope sealing works hermetically.
     monkeypatch.setenv("MAVERICK_KMS_KEK", "ab" * 32)
     # Clear any cached DEKs between tests so each tmp HOME is independent.
-    from maverick.tenant import kms
+    from lightwork.tenant import kms
     kms._clear_cache()
 
 
 def _vault(tenant="__active__"):
-    from maverick.oauth_vault import OAuthVault
+    from lightwork.oauth_vault import OAuthVault
     return OAuthVault(tenant)
 
 
@@ -67,7 +67,7 @@ class TestRoundTrip:
 
 class TestAtRestSealing:
     def test_file_is_sealed_not_plaintext(self):
-        from maverick.paths import data_dir
+        from lightwork.paths import data_dir
         v = _vault()
         v.put("notion", {"access_token": "super-secret-token", "refresh_token": "rt"})
         blob = data_dir("oauth", "tokens.sealed").read_bytes()
@@ -77,7 +77,7 @@ class TestAtRestSealing:
     def test_tenant_isolation(self, monkeypatch):
         # A second tenant's vault must not read the first's tokens, and the KMS
         # context binding means the blobs aren't interchangeable.
-        from maverick.tenant import kms
+        from lightwork.tenant import kms
         a = _vault("tenant-a")
         a.put("notion", {"access_token": "a-secret"})
         kms._clear_cache()
@@ -88,7 +88,7 @@ class TestAtRestSealing:
 
 class TestExpiryAndRefresh:
     def test_is_expired_semantics(self):
-        from maverick.oauth_vault import is_expired
+        from lightwork.oauth_vault import is_expired
         now = 1_000_000.0
         assert is_expired({"expires_at": now - 10}, now=now) is True
         assert is_expired({"expires_at": now + 1000}, now=now, skew=0) is False
@@ -135,12 +135,12 @@ class TestExpiryAndRefresh:
 class TestToggles:
     def test_enabled_off_by_default(self, monkeypatch):
         monkeypatch.delenv("MAVERICK_OAUTH_VAULT", raising=False)
-        import maverick.config as cfg
+        import lightwork.config as cfg
         monkeypatch.setattr(cfg, "load_config", lambda *a, **k: {})
-        from maverick.oauth_vault import enabled
+        from lightwork.oauth_vault import enabled
         assert enabled() is False
 
     def test_env_override_on(self, monkeypatch):
         monkeypatch.setenv("MAVERICK_OAUTH_VAULT", "1")
-        from maverick.oauth_vault import enabled
+        from lightwork.oauth_vault import enabled
         assert enabled() is True

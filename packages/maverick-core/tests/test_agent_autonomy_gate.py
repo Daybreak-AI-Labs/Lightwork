@@ -8,17 +8,17 @@ low-risk tools are never gated.
 from __future__ import annotations
 
 import pytest
-from maverick.agent_autonomy import AutonomyLevel, AutonomyProfile
-from maverick.tools import Tool
+from lightwork.agent_autonomy import AutonomyLevel, AutonomyProfile
+from lightwork.tools import Tool
 
 
 def _agent(tmp_path, profile, *, role="fin_clerk"):
-    from maverick.agent import Agent
-    from maverick.blackboard import Blackboard
-    from maverick.budget import Budget
-    from maverick.sandbox import LocalBackend
-    from maverick.swarm import SwarmContext
-    from maverick.world_model import WorldModel
+    from lightwork.agent import Agent
+    from lightwork.blackboard import Blackboard
+    from lightwork.budget import Budget
+    from lightwork.sandbox import LocalBackend
+    from lightwork.swarm import SwarmContext
+    from lightwork.world_model import WorldModel
 
     world = WorldModel(tmp_path / "world.db")
     goal_id = world.create_goal("g", "")
@@ -46,8 +46,8 @@ def _high_risk_act(monkeypatch):
     resolver looks ``tool_risk`` up."""
     import importlib
 
-    import maverick.agent_autonomy as aa
-    tr = importlib.import_module("maverick.safety.tool_risk")
+    import lightwork.agent_autonomy as aa
+    tr = importlib.import_module("lightwork.safety.tool_risk")
     fake = lambda n, *a, **k: "high" if n == "act" else "low"  # noqa: E731
     monkeypatch.setattr(tr, "tool_risk", fake)          # the gate's `from ... import`
     monkeypatch.setattr(aa, "tool_risk", fake)          # resolver's module-level copy
@@ -56,18 +56,18 @@ def _high_risk_act(monkeypatch):
 def _enable(monkeypatch, agents=None):
     monkeypatch.setenv("MAVERICK_WORKFORCE_LEVELS", "1")
     monkeypatch.setattr(
-        "maverick.config.get_workforce",
+        "lightwork.config.get_workforce",
         lambda: {"levels": True, "agents": agents or {}},
     )
     # no org governance policy configured
-    monkeypatch.setattr("maverick.config.load_config", lambda *a, **k: {})
+    monkeypatch.setattr("lightwork.config.load_config", lambda *a, **k: {})
 
 
 @pytest.mark.asyncio
 async def test_off_by_default_runs(monkeypatch, tmp_path, _high_risk_act):
     monkeypatch.delenv("MAVERICK_WORKFORCE_LEVELS", raising=False)
-    monkeypatch.setattr("maverick.config.get_workforce", lambda: {"levels": False, "agents": {}})
-    monkeypatch.setattr("maverick.config.load_config", lambda *a, **k: {})
+    monkeypatch.setattr("lightwork.config.get_workforce", lambda: {"levels": False, "agents": {}})
+    monkeypatch.setattr("lightwork.config.load_config", lambda *a, **k: {})
     agent = _agent(tmp_path, AutonomyProfile(default=AutonomyLevel.OBSERVE, onboarding=False))
     out = await agent._run_tool("act", {})
     assert "done" in out  # disabled => historical behaviour, not gated here
@@ -128,7 +128,7 @@ async def test_spawned_child_role_cannot_broaden_inherited_autonomy(
     high-authority role name during ad-hoc spawn must not layer that role's
     override over the inherited profile.
     """
-    from maverick.agent import Agent
+    from lightwork.agent import Agent
 
     _enable(
         monkeypatch,

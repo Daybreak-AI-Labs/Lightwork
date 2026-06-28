@@ -26,7 +26,7 @@ from pathlib import Path
 
 _CORPUS_PATH = (
     Path(__file__).resolve().parents[2]
-    / "packages" / "maverick-core" / "tests" / "data" / "shield_jailbreak_corpus.txt"
+    / "packages" / "lightwork-core" / "tests" / "data" / "shield_jailbreak_corpus.txt"
 )
 
 

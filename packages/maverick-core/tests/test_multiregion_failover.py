@@ -1,7 +1,7 @@
 """multiregion_failover: multi-region failover selection."""
 from __future__ import annotations
 
-from maverick.tools.multiregion_failover import multiregion_failover
+from lightwork.tools.multiregion_failover import multiregion_failover
 
 
 def _select(regions, client_region):

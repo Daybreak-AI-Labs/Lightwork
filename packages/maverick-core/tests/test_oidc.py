@@ -1,4 +1,4 @@
-"""Adversarial test matrix for OIDC ID-token verification (maverick.oidc).
+"""Adversarial test matrix for OIDC ID-token verification (lightwork.oidc).
 
 Every token here is minted locally with a freshly-generated RSA keypair
 (via ``cryptography``, already a dep) and verified by injecting the *public*
@@ -26,7 +26,7 @@ from __future__ import annotations
 import time
 
 import pytest
-from maverick.oidc import (
+from lightwork.oidc import (
     DEFAULT_ALGORITHMS,
     OIDCConfig,
     OIDCError,
@@ -60,7 +60,7 @@ requires_crypto = pytest.mark.skipif(not _CRYPTO_OK, reason=_CRYPTO_SKIP_REASON)
 
 
 ISSUER = "https://issuer.example.com"
-AUDIENCE = "maverick-client-id"
+AUDIENCE = "lightwork-client-id"
 SUB = "abc123-user"
 
 
@@ -354,7 +354,7 @@ def test_pyjwt_missing_gives_actionable_error(monkeypatch):
     monkeypatch.setattr(builtins, "__import__", _fake_import)
     with pytest.raises(OIDCError) as ei:
         verify_oidc_token("a.b.c", config=_config(), signing_key=b"unused")
-    assert "maverick-agent[oidc]" in str(ei.value) or "pyjwt" in str(ei.value).lower()
+    assert "lightwork-agent[oidc]" in str(ei.value) or "pyjwt" in str(ei.value).lower()
 
 
 # ---- (9) oidc_enabled() env / config + default-off ----------------------------

@@ -2,8 +2,8 @@ import os
 import subprocess
 
 import pytest
-from maverick.sandbox.docker import DockerBackend
-from maverick.sandbox.podman import PodmanBackend
+from lightwork.sandbox.docker import DockerBackend
+from lightwork.sandbox.podman import PodmanBackend
 
 
 def _capture_run_argv(monkeypatch, Backend, verify_attr, tmp_path, **kw):
@@ -122,7 +122,7 @@ def test_build_sandbox_parses_string_false_docker_controls(monkeypatch, tmp_path
     monkeypatch.setenv("MAV_ALLOW_NETWORK", "false")
     monkeypatch.delenv("MAVERICK_SANDBOX_ALLOW_ROOT", raising=False)
 
-    from maverick.sandbox import DockerBackend, build_sandbox
+    from lightwork.sandbox import DockerBackend, build_sandbox
 
     monkeypatch.setattr(DockerBackend, "_verify_docker", lambda self: None)
 
@@ -169,7 +169,7 @@ def test_runtime_field_injects_runsc(monkeypatch, tmp_path):
 
 def test_build_sandbox_gvisor_uses_runsc(monkeypatch, tmp_path):
     monkeypatch.setattr(DockerBackend, "_verify_docker", lambda self: None)
-    from maverick.sandbox import build_sandbox
+    from lightwork.sandbox import build_sandbox
     sb = build_sandbox(workdir=tmp_path, backend="gvisor")
     assert isinstance(sb, DockerBackend)
     assert sb.runtime == "runsc"
@@ -177,7 +177,7 @@ def test_build_sandbox_gvisor_uses_runsc(monkeypatch, tmp_path):
 
 def test_build_sandbox_docker_has_no_runtime(monkeypatch, tmp_path):
     monkeypatch.setattr(DockerBackend, "_verify_docker", lambda self: None)
-    from maverick.sandbox import build_sandbox
+    from lightwork.sandbox import build_sandbox
     sb = build_sandbox(workdir=tmp_path, backend="docker")
     assert isinstance(sb, DockerBackend)
     assert sb.runtime is None
@@ -286,6 +286,6 @@ def test_warm_container_has_security_flags(monkeypatch, tmp_path):
 
 def test_build_sandbox_reuse_container(monkeypatch, tmp_path):
     monkeypatch.setattr(DockerBackend, "_verify_docker", lambda self: None)
-    from maverick.sandbox import build_sandbox
+    from lightwork.sandbox import build_sandbox
     sb = build_sandbox(workdir=tmp_path, backend="docker")
     assert sb.reuse_container is False  # default off

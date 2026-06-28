@@ -1,7 +1,7 @@
 """Microsoft Teams tool (ROADMAP 2027 H2)."""
 from __future__ import annotations
 
-from maverick.tools.teams_tool import _build_card, teams_tool
+from lightwork.tools.teams_tool import _build_card, teams_tool
 
 
 def test_build_card_plain():
@@ -41,7 +41,7 @@ def test_send_posts_card(monkeypatch):
             captured["json"] = json
             return _Resp()
 
-    import maverick.tools._ssrf as ssrf
+    import lightwork.tools._ssrf as ssrf
     monkeypatch.setattr(ssrf, "safe_client", lambda url, **kw: _FakeClient(url, **kw))
     out = teams_tool().fn({"text": "deploy done", "title": "CI",
                            "webhook": "https://outlook.office.com/webhook/abc"})

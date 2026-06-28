@@ -2,7 +2,7 @@
 """Maverick -- proof that the self-learning (self-harness) loop works, consistently.
 
 Not unit assertions buried in a suite: a single reproducible run that drives the
-REAL ``maverick.self_harness`` loop through the REAL ``maverick.self_improvement``
+REAL ``lightwork.self_harness`` loop through the REAL ``lightwork.self_improvement``
 gate -- the same code the agent calls -- and prints a scoreboard of the loop's
 core promises.
 
@@ -12,7 +12,7 @@ Each guarantee is checked with a fixed, seeded workload so the same run is
 reproducible byte-for-byte. The headline one is DETERMINISM: identical inputs
 produce a byte-identical learned store across independent runs -- "works
 consistently" made checkable. The companion adversarial/soak proof lives in the
-test batteries (``packages/maverick-core/tests/test_self_harness*.py``); this
+test batteries (``packages/lightwork-core/tests/test_self_harness*.py``); this
 file is the standalone scoreboard around the same invariants.
 """
 from __future__ import annotations
@@ -27,20 +27,20 @@ import tempfile
 import threading
 
 # Run entirely inside a throwaway MAVERICK_HOME so the proof leaves NOTHING in
-# the operator's real ~/.maverick. The gate's promotion path writes a signed
+# the operator's real ~/.lightwork. The gate's promotion path writes a signed
 # LEARNING_UPDATE row to the global audit log (data_dir, not the per-call store
 # path), so pointing the store at a temp dir is not enough on its own -- without
 # this, running the proof injects fake "self_harness" rows into the real audit
 # trail (the sibling `maverick demo` makes the same "nothing touches your real
 # state" promise). Must be set BEFORE any maverick import resolves paths;
 # data_dir reads MAVERICK_HOME at call time, and all imports below are lazy.
-_ISOLATED_HOME = tempfile.mkdtemp(prefix="maverick-self-harness-proof-")
+_ISOLATED_HOME = tempfile.mkdtemp(prefix="lightwork-self-harness-proof-")
 os.environ["MAVERICK_HOME"] = _ISOLATED_HOME
 atexit.register(shutil.rmtree, _ISOLATED_HOME, ignore_errors=True)
 
 # Make the shipped package importable however this is launched (repo root, CI, ...).
 sys.path.insert(0, str(pathlib.Path(__file__).resolve().parent.parent
-                       / "packages" / "maverick-core"))
+                       / "packages" / "lightwork-core"))
 
 # A real-looking secret + an attacker marker, assembled at runtime so neither is
 # a raw literal in the source (keeps detect-secrets quiet, mirrors the tests).
@@ -55,13 +55,13 @@ def _check(condition: bool, message: object) -> None:
 
 
 def _ctrl():
-    from maverick import self_improvement as si
+    from lightwork import self_improvement as si
     return si.SelfImprovementController(frozen_fn=lambda: False,
                                         ledger=si.PromotionLedger())
 
 
 def _frozen_ctrl():
-    from maverick import self_improvement as si
+    from lightwork import self_improvement as si
     return si.SelfImprovementController(frozen_fn=lambda: True,
                                         ledger=si.PromotionLedger())
 
@@ -88,7 +88,7 @@ _ENOUGH = dict(held_in=["a", "b"], held_out=["c", "d", "e"])
 
 def g_determinism() -> str:
     """Same inputs -> byte-identical learned store across 6 independent runs."""
-    from maverick import self_harness as sh
+    from lightwork import self_harness as sh
     os.environ["MAVERICK_SELF_HARNESS"] = "1"
     os.environ["MAVERICK_SELF_IMPROVEMENT"] = "1"
     digests = []
@@ -104,7 +104,7 @@ def g_determinism() -> str:
 
 def g_off_by_default() -> str:
     """Disabled -> recall returns '' and the store is never written."""
-    from maverick import self_harness as sh
+    from lightwork import self_harness as sh
     os.environ.pop("MAVERICK_SELF_HARNESS", None)
     os.environ.pop("MAVERICK_SELF_IMPROVEMENT", None)
     with tempfile.TemporaryDirectory() as d:
@@ -119,7 +119,7 @@ def g_off_by_default() -> str:
 
 def g_gate_enforced() -> str:
     """Promotion needs an open gate: a frozen verifier writes nothing."""
-    from maverick import self_harness as sh
+    from lightwork import self_harness as sh
     os.environ["MAVERICK_SELF_HARNESS"] = "1"
     os.environ["MAVERICK_SELF_IMPROVEMENT"] = "1"
     with tempfile.TemporaryDirectory() as d:
@@ -140,7 +140,7 @@ def g_gate_enforced() -> str:
 
 def g_no_poison() -> str:
     """Scoped/attacker traces, secrets, and control chars NEVER reach an addendum."""
-    from maverick import self_harness as sh
+    from lightwork import self_harness as sh
     os.environ["MAVERICK_SELF_HARNESS"] = "1"
     os.environ["MAVERICK_SELF_IMPROVEMENT"] = "1"
     checked = 0
@@ -166,7 +166,7 @@ def g_no_poison() -> str:
 
 def g_bounded() -> str:
     """An addendum stays within the line + char caps under repeated promotion."""
-    from maverick import self_harness as sh
+    from lightwork import self_harness as sh
     os.environ["MAVERICK_SELF_HARNESS"] = "1"
     os.environ["MAVERICK_SELF_IMPROVEMENT"] = "1"
     with tempfile.TemporaryDirectory() as d:
@@ -188,7 +188,7 @@ def g_bounded() -> str:
 
 def g_concurrency() -> str:
     """N threads promoting distinct lines into one store lose nothing, never corrupt it."""
-    from maverick import self_harness as sh
+    from lightwork import self_harness as sh
     os.environ["MAVERICK_SELF_HARNESS"] = "1"
     os.environ["MAVERICK_SELF_IMPROVEMENT"] = "1"
     N = sh._MAX_LINES_PER_MODEL  # distinct lines == cap, so all must survive
@@ -216,7 +216,7 @@ def g_concurrency() -> str:
 
 def g_reversible() -> str:
     """A learned line is reversible: the rollback handle and forget() both undo it."""
-    from maverick import self_harness as sh
+    from lightwork import self_harness as sh
     os.environ["MAVERICK_SELF_HARNESS"] = "1"
     with tempfile.TemporaryDirectory() as d:
         store = pathlib.Path(d) / "addenda.json"

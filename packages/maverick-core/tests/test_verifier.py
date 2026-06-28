@@ -2,7 +2,7 @@
 from __future__ import annotations
 
 import pytest
-from maverick.verifier import (
+from lightwork.verifier import (
     _parse,
     verify_proposal,
 )
@@ -82,7 +82,7 @@ class TestParse:
 class TestVerifyProposal:
     @pytest.mark.asyncio
     async def test_empty_proposal_rejected_without_llm_call(self):
-        from maverick.budget import Budget
+        from lightwork.budget import Budget
 
         class _ShouldNotBeCalled:
             async def complete_async(self, **kw):
@@ -93,7 +93,7 @@ class TestVerifyProposal:
 
     @pytest.mark.asyncio
     async def test_calls_llm_with_verifier_role(self, fake_llm, make_llm_response):
-        from maverick.budget import Budget
+        from lightwork.budget import Budget
         fake_llm.scripted = [make_llm_response(
             text='{"confidence": 0.9, "accepts": true, "critique": "ok", "issues": []}',
         )]
@@ -113,12 +113,12 @@ class TestAgentVerifierIntegration:
     ):
         """When the verifier rejects, the proposer gets a revision brief
         and a second chance. The second answer is accepted regardless."""
-        from maverick.agent import Agent
-        from maverick.blackboard import Blackboard
-        from maverick.budget import Budget
-        from maverick.sandbox import LocalBackend
-        from maverick.swarm import SwarmContext
-        from maverick.world_model import WorldModel
+        from lightwork.agent import Agent
+        from lightwork.blackboard import Blackboard
+        from lightwork.budget import Budget
+        from lightwork.sandbox import LocalBackend
+        from lightwork.swarm import SwarmContext
+        from lightwork.world_model import WorldModel
 
         # Scripted LLM responses:
         #   1. orchestrator FINAL: "first answer"
@@ -167,8 +167,8 @@ async def test_ensemble_reraises_budget_exceeded_not_swallowed():
     # mid-flight and leave siblings running.
     from types import SimpleNamespace
 
-    from maverick.budget import Budget, BudgetExceeded
-    from maverick.verifier import verify_proposal_ensemble
+    from lightwork.budget import Budget, BudgetExceeded
+    from lightwork.verifier import verify_proposal_ensemble
 
     class _PanelLLM:
         def __init__(self):

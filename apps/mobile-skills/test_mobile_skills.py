@@ -14,7 +14,7 @@ from pathlib import Path
 
 _HERE = Path(__file__).resolve().parent
 _REPO_ROOT = _HERE.parents[1]
-_MODULE = _REPO_ROOT / "packages" / "maverick-core" / "maverick" / "disagreement.py"
+_MODULE = _REPO_ROOT / "packages" / "lightwork-core" / "maverick" / "disagreement.py"
 _HTML = _HERE / "pyodide-runner" / "index.html"
 
 _ISOLATION_PROBE = """
@@ -59,7 +59,7 @@ def test_html_references_only_vendored_paths():
     # Pyodide comes from the vendored layout; the skill from the repo.
     assert 'src="./vendor/pyodide/pyodide.js"' in html
     assert 'indexURL: "./vendor/pyodide/"' in html
-    assert "../../../packages/maverick-core/maverick/disagreement.py" in html
+    assert "../../../packages/lightwork-core/maverick/disagreement.py" in html
 
 
 def test_vendor_readme_has_pinned_release_and_todo_checksum():

@@ -2,7 +2,7 @@
 from __future__ import annotations
 
 import pytest
-from maverick.access_policy import (
+from lightwork.access_policy import (
     AccessDenied,
     AccessPolicy,
     AccessRequest,

@@ -9,8 +9,8 @@ the whole roster, including a fault-injected pack that tries to negate it.
 """
 from __future__ import annotations
 
-from maverick.domain import available_domains, suite_for
-from maverick.domain_refusals import (
+from lightwork.domain import available_domains, suite_for
+from lightwork.domain_refusals import (
     SUITE_REFUSALS,
     UNIVERSAL,
     refusals_for,

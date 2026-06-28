@@ -13,7 +13,7 @@ from fastapi.testclient import TestClient
 
 def _client():
     # Mutating /api/v1 requests in no-token mode must pass the same-origin CSRF check.
-    from maverick_dashboard.app import app
+    from lightwork_dashboard.app import app
     return TestClient(app, headers={"Origin": "http://testserver"})
 
 
@@ -24,16 +24,16 @@ def _isolate(monkeypatch, tmp_path):
     # The playbook form saves a domain pack via /agents/<name>/override; point the
     # user domains dir at tmp so a test never writes to the real ~/.maverick/domains.
     monkeypatch.setenv("MAVERICK_DOMAINS_DIR", str(tmp_path / "domains"))
-    from maverick import world_model
+    from lightwork import world_model
     monkeypatch.setattr(world_model, "DEFAULT_DB", tmp_path / "world.db")
-    import maverick.templates as tpl
+    import lightwork.templates as tpl
     monkeypatch.setattr(tpl, "USER_TEMPLATES", tmp_path / ".maverick" / "templates")
 
 
 # --- pure parsing / prompt building (no LLM) --------------------------------
 
 def test_parse_workflow_normalizes():
-    from maverick_dashboard.workflow_ai import parse_workflow
+    from lightwork_dashboard.workflow_ai import parse_workflow
     d = parse_workflow(
         '{"name": "Weekly Report!", "title": "Weekly {{topic}} report", '
         '"params": ["topic", "bad-name", "topic"], "steps": ["a", "b", "  "], '
@@ -48,13 +48,13 @@ def test_parse_workflow_normalizes():
 
 
 def test_parse_workflow_strips_code_fence():
-    from maverick_dashboard.workflow_ai import parse_workflow
+    from lightwork_dashboard.workflow_ai import parse_workflow
     d = parse_workflow('```json\n{"name":"x","title":"X","steps":["do it"]}\n```')
     assert d["name"] == "x" and d["steps"] == ["do it"]
 
 
 def test_parse_workflow_rejects_unusable():
-    from maverick_dashboard.workflow_ai import parse_workflow
+    from lightwork_dashboard.workflow_ai import parse_workflow
     with pytest.raises(ValueError):
         parse_workflow("not json at all")
     with pytest.raises(ValueError):
@@ -62,13 +62,13 @@ def test_parse_workflow_rejects_unusable():
 
 
 def test_build_prompt_includes_brief_and_doc():
-    from maverick_dashboard.workflow_ai import build_prompt
+    from lightwork_dashboard.workflow_ai import build_prompt
     p = build_prompt("my brief", "DOC BODY TEXT")
     assert "my brief" in p and "DOC BODY TEXT" in p
 
 
 def test_draft_workflow_uses_injected_complete_under_cap():
-    from maverick_dashboard import workflow_ai
+    from lightwork_dashboard import workflow_ai
 
     seen = {}
 
@@ -91,7 +91,7 @@ def test_draft_workflow_uses_injected_complete_under_cap():
 # --- playbook parsing / drafting (no LLM) -----------------------------------
 
 def test_parse_playbook_normalizes():
-    from maverick_dashboard.workflow_ai import parse_playbook
+    from lightwork_dashboard.workflow_ai import parse_playbook
     d = parse_playbook(
         '{"name": "AP Invoice Bot!", "description": "  Pays   invoices ", '
         '"persona": "You are careful.", "max_risk": "EXTREME", '
@@ -110,7 +110,7 @@ def test_parse_playbook_normalizes():
 
 
 def test_parse_playbook_keeps_explicit_allowlist_and_strips_fence():
-    from maverick_dashboard.workflow_ai import parse_playbook
+    from lightwork_dashboard.workflow_ai import parse_playbook
     d = parse_playbook(
         '```json\n{"name":"x","allow_tools":["a","b"],"deny_tools":["shell"],'
         '"max_risk":"high","steps":[{"name":"go"}]}\n```'
@@ -121,7 +121,7 @@ def test_parse_playbook_keeps_explicit_allowlist_and_strips_fence():
 
 
 def test_parse_playbook_rejects_unusable():
-    from maverick_dashboard.workflow_ai import parse_playbook
+    from lightwork_dashboard.workflow_ai import parse_playbook
     with pytest.raises(ValueError):
         parse_playbook("not json at all")
     with pytest.raises(ValueError):
@@ -129,7 +129,7 @@ def test_parse_playbook_rejects_unusable():
 
 
 def test_draft_playbook_uses_injected_complete_under_cap():
-    from maverick_dashboard import workflow_ai
+    from lightwork_dashboard import workflow_ai
 
     seen = {}
 
@@ -150,14 +150,14 @@ def test_draft_playbook_uses_injected_complete_under_cap():
 # --- refine (iterate on an existing draft) ----------------------------------
 
 def test_build_refine_prompt_includes_current_and_instruction():
-    from maverick_dashboard.workflow_ai import build_refine_prompt
+    from lightwork_dashboard.workflow_ai import build_refine_prompt
     p = build_refine_prompt({"title": "Weekly report", "params": ["topic"]}, "make it daily")
     assert "Weekly report" in p and "make it daily" in p
     assert "COMPLETE" in p  # asks for a full revision, not a diff
 
 
 def test_refine_workflow_revises_under_cap():
-    from maverick_dashboard import workflow_ai
+    from lightwork_dashboard import workflow_ai
     seen = {}
 
     class _Resp:
@@ -180,7 +180,7 @@ def test_refine_workflow_revises_under_cap():
 
 
 def test_refine_playbook_uses_playbook_parser():
-    from maverick_dashboard import workflow_ai
+    from lightwork_dashboard import workflow_ai
 
     class _Resp:
         text = ('{"name":"bot","allow_tools":["pay"],"max_risk":"high",'
@@ -196,7 +196,7 @@ def test_refine_playbook_uses_playbook_parser():
 
 def test_save_user_template_round_trips(monkeypatch, tmp_path):
     _isolate(monkeypatch, tmp_path)
-    from maverick.templates import load_template, save_user_template
+    from lightwork.templates import load_template, save_user_template
     tpl = save_user_template(
         "trip-plan", title="Plan {{dest}}", body="## Steps\n1. go",
         params=["dest"], budget_dollars=3.0,
@@ -212,7 +212,7 @@ def test_save_user_template_round_trips(monkeypatch, tmp_path):
 
 def test_save_user_template_validates(monkeypatch, tmp_path):
     _isolate(monkeypatch, tmp_path)
-    from maverick.templates import save_user_template
+    from lightwork.templates import save_user_template
     with pytest.raises(ValueError):
         save_user_template("../escape", title="x", body="y")
     with pytest.raises(ValueError):
@@ -222,12 +222,12 @@ def test_save_user_template_validates(monkeypatch, tmp_path):
 # --- endpoints --------------------------------------------------------------
 
 def _stub_draft(monkeypatch, draft):
-    from maverick_dashboard import workflow_ai
+    from lightwork_dashboard import workflow_ai
     monkeypatch.setattr(workflow_ai, "draft_workflow", lambda *a, **k: draft)
 
 
 def _provider(monkeypatch, present):
-    import maverick_dashboard.api as api
+    import lightwork_dashboard.api as api
     monkeypatch.setattr(api, "_any_provider_key_set", lambda: present)
 
 
@@ -260,7 +260,7 @@ def test_draft_from_file_feeds_text(monkeypatch, tmp_path):
     _isolate(monkeypatch, tmp_path)
     _provider(monkeypatch, True)
     captured = {}
-    from maverick_dashboard import workflow_ai
+    from lightwork_dashboard import workflow_ai
 
     def fake(brief="", source_text="", **k):
         captured["src"] = source_text
@@ -295,7 +295,7 @@ def test_save_endpoint_persists_a_runnable_template(monkeypatch, tmp_path):
     })
     assert r.status_code == 201, r.text
     assert r.json()["saved"] is True
-    from maverick.templates import load_template
+    from lightwork.templates import load_template
     assert load_template("my-wf").title == "My WF"
 
 
@@ -308,7 +308,7 @@ def test_save_endpoint_rejects_bad_name(monkeypatch, tmp_path):
 
 
 def _stub_playbook(monkeypatch, draft):
-    from maverick_dashboard import workflow_ai
+    from lightwork_dashboard import workflow_ai
     monkeypatch.setattr(workflow_ai, "draft_playbook", lambda *a, **k: draft)
 
 
@@ -350,7 +350,7 @@ def test_draft_from_file_form_playbook(monkeypatch, tmp_path):
     _isolate(monkeypatch, tmp_path)
     _provider(monkeypatch, True)
     captured = {}
-    from maverick_dashboard import workflow_ai
+    from lightwork_dashboard import workflow_ai
 
     def fake(brief="", source_text="", **k):
         captured["src"] = source_text
@@ -381,7 +381,7 @@ def test_save_playbook_via_agent_override_round_trips(monkeypatch, tmp_path):
         ],
     })
     assert r.status_code == 200, r.text
-    from maverick.domain import available_domains
+    from lightwork.domain import available_domains
     prof = available_domains()["ap-bot"]
     assert [(s.name, s.gate) for s in prof.workflow] == [("Read", None), ("Pay", "approval")]
     assert prof.allow_tools == ["ocr_read", "send_payment"]
@@ -401,7 +401,7 @@ def test_save_playbook_rejects_lint_failure(monkeypatch, tmp_path):
 def test_refine_endpoint_routes_by_form(monkeypatch, tmp_path):
     _isolate(monkeypatch, tmp_path)
     _provider(monkeypatch, True)
-    from maverick_dashboard import workflow_ai
+    from lightwork_dashboard import workflow_ai
     monkeypatch.setattr(workflow_ai, "refine_workflow",
                         lambda cur, instr: {"name": "t", "title": "T", "params": [],
                                             "steps": ["s"], "body": "b", "budget_dollars": 5.0})
@@ -498,7 +498,7 @@ def test_builder_edit_agent_rehydrates_playbook(monkeypatch, tmp_path):
     # ?edit_agent=<name> rehydrates the playbook editor and round-trips the
     # override fields the builder can't show (so a save can't silently drop them).
     _isolate(monkeypatch, tmp_path)
-    import maverick.domain_edit as de
+    import lightwork.domain_edit as de
     monkeypatch.setattr(de, "resolved_view", lambda name: ({
         "name": name, "description": "d", "persona": "p",
         "allow_tools": ["a"], "deny_tools": [], "max_risk": "medium",

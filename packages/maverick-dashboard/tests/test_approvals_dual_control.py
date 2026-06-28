@@ -7,18 +7,18 @@ _ORIGIN = {"Origin": "http://testserver"}
 
 
 def _client():
-    from maverick_dashboard.app import app
+    from lightwork_dashboard.app import app
     return TestClient(app)
 
 
 def _isolate(monkeypatch, tmp_path):
-    from maverick import world_model
+    from lightwork import world_model
     monkeypatch.setattr(world_model, "DEFAULT_DB", tmp_path / "world.db")
     monkeypatch.delenv("MAVERICK_DASHBOARD_TOKEN", raising=False)
 
 
 def _world(tmp_path):
-    from maverick.world_model import WorldModel
+    from lightwork.world_model import WorldModel
     return WorldModel(tmp_path / "world.db")
 
 
@@ -26,7 +26,7 @@ def test_quorum_needs_two_distinct_approvers(monkeypatch, tmp_path):
     _isolate(monkeypatch, tmp_path)
     w = _world(tmp_path)
     aid = w.create_approval("wire $1M", risk="critical", approvals_required=2)
-    from maverick_dashboard import api
+    from lightwork_dashboard import api
     c = _client()
 
     monkeypatch.setattr(api, "_supervisor", lambda r: "u:alice")
@@ -47,9 +47,9 @@ def test_self_approval_barred_returns_403(monkeypatch, tmp_path):
     w = _world(tmp_path)
     aid = w.create_approval("wire $1M", risk="critical", approvals_required=2,
                             requested_by="u:alice")
-    from maverick_dashboard import api
+    from lightwork_dashboard import api
     monkeypatch.setattr(api, "_supervisor", lambda r: "u:alice")
-    monkeypatch.setattr("maverick.safety.dual_control.allow_self_approval",
+    monkeypatch.setattr("lightwork.safety.dual_control.allow_self_approval",
                         lambda: False)
     r = _client().post(f"/api/v1/approvals/{aid}/approve", headers=_ORIGIN)
     assert r.status_code == 403
@@ -59,7 +59,7 @@ def test_self_approval_barred_returns_403(monkeypatch, tmp_path):
 
 def test_unknown_approval_still_404(monkeypatch, tmp_path):
     _isolate(monkeypatch, tmp_path)
-    from maverick_dashboard import api
+    from lightwork_dashboard import api
     monkeypatch.setattr(api, "_supervisor", lambda r: "u:alice")
     r = _client().post("/api/v1/approvals/4242/approve", headers=_ORIGIN)
     assert r.status_code == 404

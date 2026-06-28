@@ -2,7 +2,7 @@
 from __future__ import annotations
 
 import pytest
-from maverick_installer import models
+from lightwork_installer import models
 
 
 def test_every_provider_has_required_fields():
@@ -83,14 +83,14 @@ def test_wizard_catalog_matches_kernel_registry():
     """The wizard offerings must be dispatchable by the kernel.
 
     Every provider the wizard shows must be reachable via the BYOK registry
-    (maverick.providers.KNOWN_PROVIDERS). If they drift, a user picks a
+    (lightwork.providers.KNOWN_PROVIDERS). If they drift, a user picks a
     provider in the wizard but the kernel refuses to instantiate it -- the
     worst possible UX bug.
     """
     try:
-        from maverick.providers import KNOWN_PROVIDERS
+        from lightwork.providers import KNOWN_PROVIDERS
     except ImportError:
-        pytest.skip("maverick-core not installed in this environment")
+        pytest.skip("lightwork-core not installed in this environment")
     dispatchable = set(KNOWN_PROVIDERS)
     wizard_only = set(models.PROVIDERS) - dispatchable
     assert not wizard_only, (
@@ -111,9 +111,9 @@ def test_wizard_model_ids_have_pricing():
         cost known to the kernel).
     """
     try:
-        from maverick.llm import MODEL_PRICES
+        from lightwork.llm import MODEL_PRICES
     except ImportError:
-        pytest.skip("maverick-core not installed in this environment")
+        pytest.skip("lightwork-core not installed in this environment")
     unpriced: list[str] = []
     for prov_id, info in models.PROVIDERS.items():
         if prov_id in ("ollama", "openrouter", "tgi", "openai_compatible"):

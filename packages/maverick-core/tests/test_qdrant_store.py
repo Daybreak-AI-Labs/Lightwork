@@ -15,7 +15,7 @@ import pytest
 def test_qdrant_missing_import_raises(monkeypatch):
     """No qdrant-client installed -> actionable ImportError."""
     monkeypatch.setitem(sys.modules, "qdrant_client", None)
-    from maverick.vector_store.qdrant_store import QdrantStore
+    from lightwork.vector_store.qdrant_store import QdrantStore
     with pytest.raises(ImportError, match="qdrant-client not installed"):
         QdrantStore()
 
@@ -41,7 +41,7 @@ def test_qdrant_local_path_init(monkeypatch, tmp_path):
     fake_client = _install_fake_qdrant(monkeypatch)
     monkeypatch.delenv("MAVERICK_QDRANT_URL", raising=False)
 
-    from maverick.vector_store.qdrant_store import QdrantStore
+    from lightwork.vector_store.qdrant_store import QdrantStore
     store = QdrantStore(path=tmp_path / "qd")
     assert store is not None
     assert (tmp_path / "qd").exists()
@@ -52,7 +52,7 @@ def test_qdrant_url_init_skips_path(monkeypatch, tmp_path):
     _install_fake_qdrant(monkeypatch)
     monkeypatch.setenv("MAVERICK_QDRANT_URL", "http://example:6333")
     monkeypatch.setenv("MAVERICK_QDRANT_API_KEY", "secret")
-    from maverick.vector_store.qdrant_store import QdrantStore
+    from lightwork.vector_store.qdrant_store import QdrantStore
     # Should not raise -- url path bypasses local dir creation.
     QdrantStore()
     import qdrant_client
@@ -64,7 +64,7 @@ def test_qdrant_url_init_skips_path(monkeypatch, tmp_path):
 def test_qdrant_add_autogenerates_ids(monkeypatch, tmp_path):
     fake_client = _install_fake_qdrant(monkeypatch)
     monkeypatch.delenv("MAVERICK_QDRANT_URL", raising=False)
-    from maverick.vector_store.qdrant_store import QdrantStore
+    from lightwork.vector_store.qdrant_store import QdrantStore
     store = QdrantStore(path=tmp_path / "qd")
     store.add(["doc1", "doc2"])
     fake_client.add.assert_called_once()
@@ -77,7 +77,7 @@ def test_qdrant_add_autogenerates_ids(monkeypatch, tmp_path):
 def test_qdrant_add_passes_metadata(monkeypatch, tmp_path):
     fake_client = _install_fake_qdrant(monkeypatch)
     monkeypatch.delenv("MAVERICK_QDRANT_URL", raising=False)
-    from maverick.vector_store.qdrant_store import QdrantStore
+    from lightwork.vector_store.qdrant_store import QdrantStore
     store = QdrantStore(path=tmp_path / "qd")
     store.add(["doc"], ids=["x"], metadatas=[{"src": "test"}])
     kwargs = fake_client.add.call_args.kwargs
@@ -88,7 +88,7 @@ def test_qdrant_add_passes_metadata(monkeypatch, tmp_path):
 def test_qdrant_add_empty_noop(monkeypatch, tmp_path):
     fake_client = _install_fake_qdrant(monkeypatch)
     monkeypatch.delenv("MAVERICK_QDRANT_URL", raising=False)
-    from maverick.vector_store.qdrant_store import QdrantStore
+    from lightwork.vector_store.qdrant_store import QdrantStore
     store = QdrantStore(path=tmp_path / "qd")
     store.add([])
     fake_client.add.assert_not_called()
@@ -101,7 +101,7 @@ def test_qdrant_query_shape(monkeypatch, tmp_path):
         SimpleNamespace(id="a", document="doc-a", score=0.9, metadata={"k": 1}),
         SimpleNamespace(id="b", document="doc-b", score=0.4, metadata=None),
     ]
-    from maverick.vector_store.qdrant_store import QdrantStore
+    from lightwork.vector_store.qdrant_store import QdrantStore
     store = QdrantStore(path=tmp_path / "qd")
     out = store.query("hello", top_k=2)
     assert len(out) == 2
@@ -114,7 +114,7 @@ def test_qdrant_query_shape(monkeypatch, tmp_path):
 def test_qdrant_query_empty_text(monkeypatch, tmp_path):
     _install_fake_qdrant(monkeypatch)
     monkeypatch.delenv("MAVERICK_QDRANT_URL", raising=False)
-    from maverick.vector_store.qdrant_store import QdrantStore
+    from lightwork.vector_store.qdrant_store import QdrantStore
     store = QdrantStore(path=tmp_path / "qd")
     assert store.query("") == []
 
@@ -124,7 +124,7 @@ def test_qdrant_query_is_tenant_scoped(monkeypatch, tmp_path):
     return t1's ids stripped of the namespace prefix."""
     fake_client = _install_fake_qdrant(monkeypatch)
     monkeypatch.delenv("MAVERICK_QDRANT_URL", raising=False)
-    import maverick.vector_store.qdrant_store as qs
+    import lightwork.vector_store.qdrant_store as qs
     monkeypatch.setattr(qs, "_active_tenant", lambda: "t1")
     fake_client.query.return_value = [
         SimpleNamespace(id="tenant:t2:secret", document="OTHER-TENANT", score=0.99, metadata=None),
@@ -140,7 +140,7 @@ def test_qdrant_query_is_tenant_scoped(monkeypatch, tmp_path):
 def test_qdrant_delete(monkeypatch, tmp_path):
     fake_client = _install_fake_qdrant(monkeypatch)
     monkeypatch.delenv("MAVERICK_QDRANT_URL", raising=False)
-    from maverick.vector_store.qdrant_store import QdrantStore
+    from lightwork.vector_store.qdrant_store import QdrantStore
     store = QdrantStore(path=tmp_path / "qd")
     store.delete(["a", "b"])
     fake_client.delete.assert_called_once()
@@ -154,7 +154,7 @@ def test_qdrant_count(monkeypatch, tmp_path):
     fake_client = _install_fake_qdrant(monkeypatch)
     monkeypatch.delenv("MAVERICK_QDRANT_URL", raising=False)
     fake_client.count.return_value = SimpleNamespace(count=42)
-    from maverick.vector_store.qdrant_store import QdrantStore
+    from lightwork.vector_store.qdrant_store import QdrantStore
     store = QdrantStore(path=tmp_path / "qd")
     assert store.count() == 42
 
@@ -163,6 +163,6 @@ def test_qdrant_count_swallows_errors(monkeypatch, tmp_path):
     fake_client = _install_fake_qdrant(monkeypatch)
     monkeypatch.delenv("MAVERICK_QDRANT_URL", raising=False)
     fake_client.count.side_effect = RuntimeError("no collection")
-    from maverick.vector_store.qdrant_store import QdrantStore
+    from lightwork.vector_store.qdrant_store import QdrantStore
     store = QdrantStore(path=tmp_path / "qd")
     assert store.count() == 0

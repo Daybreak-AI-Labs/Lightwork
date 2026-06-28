@@ -3,8 +3,8 @@ system of record (reference in-memory connector)."""
 from __future__ import annotations
 
 import pytest
-from maverick.governed_actions import ActionError, GovernedActions
-from maverick.governed_connectors import InMemoryConnector, register_connector
+from lightwork.governed_actions import ActionError, GovernedActions
+from lightwork.governed_connectors import InMemoryConnector, register_connector
 
 
 def _wired():

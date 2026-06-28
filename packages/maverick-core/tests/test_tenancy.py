@@ -4,8 +4,8 @@ A tenant namespaces on-disk state. With no tenant active, paths resolve to the
 legacy ~/.maverick locations (single-tenant unchanged). With a tenant, the
 cross-session memory store is isolated so one tenant cannot read another's.
 """
-import maverick.paths as paths
-from maverick.paths import current_tenant, data_dir, reset_tenant, set_tenant
+import lightwork.paths as paths
+from lightwork.paths import current_tenant, data_dir, reset_tenant, set_tenant
 
 # --- tenant resolution -----------------------------------------------------
 
@@ -97,7 +97,7 @@ def test_memory_root_follows_tenant(monkeypatch, tmp_path):
     monkeypatch.setenv("HOME", str(tmp_path))
     monkeypatch.delenv("MAVERICK_TENANT", raising=False)
     monkeypatch.delenv("MAVERICK_MEMORY_DIR", raising=False)
-    from maverick.tools.memory import _memory_root
+    from lightwork.tools.memory import _memory_root
 
     assert _memory_root() == tmp_path / ".maverick" / "memory"  # legacy default
     tok = set_tenant("acme")
@@ -111,7 +111,7 @@ def test_explicit_memory_dir_override_wins(monkeypatch, tmp_path):
     monkeypatch.setenv("MAVERICK_MEMORY_DIR", str(tmp_path / "mem"))
     tok = set_tenant("acme")
     try:
-        from maverick.tools.memory import _memory_root
+        from lightwork.tools.memory import _memory_root
         assert _memory_root() == tmp_path / "mem"  # override ignores tenant
     finally:
         reset_tenant(tok)
@@ -121,7 +121,7 @@ def test_memory_isolated_across_tenants(monkeypatch, tmp_path):
     monkeypatch.setenv("HOME", str(tmp_path))
     monkeypatch.delenv("MAVERICK_TENANT", raising=False)
     monkeypatch.delenv("MAVERICK_MEMORY_DIR", raising=False)
-    from maverick.tools.memory import _run
+    from lightwork.tools.memory import _run
 
     tok = set_tenant("tenant-a")
     try:
@@ -151,7 +151,7 @@ def test_memory_isolated_for_previously_colliding_tenants(monkeypatch, tmp_path)
     monkeypatch.setenv("HOME", str(tmp_path))
     monkeypatch.delenv("MAVERICK_TENANT", raising=False)
     monkeypatch.delenv("MAVERICK_MEMORY_DIR", raising=False)
-    from maverick.tools.memory import _run
+    from lightwork.tools.memory import _run
 
     tok = set_tenant("ac/me")
     try:
@@ -176,33 +176,33 @@ def test_memory_isolated_for_previously_colliding_tenants(monkeypatch, tmp_path)
 # --- per-user tenant scope (server wiring) ---------------------------------
 
 def test_tenant_by_user_disabled_by_default(monkeypatch):
-    monkeypatch.setattr("maverick.config.load_config", dict)
+    monkeypatch.setattr("lightwork.config.load_config", dict)
     monkeypatch.delenv("MAVERICK_TENANT_BY_USER", raising=False)
-    from maverick.paths import tenant_by_user_enabled
+    from lightwork.paths import tenant_by_user_enabled
     assert tenant_by_user_enabled() is False
 
 
 def test_tenant_by_user_via_env(monkeypatch):
-    monkeypatch.setattr("maverick.config.load_config", dict)
+    monkeypatch.setattr("lightwork.config.load_config", dict)
     monkeypatch.setenv("MAVERICK_TENANT_BY_USER", "1")
-    from maverick.paths import tenant_by_user_enabled
+    from lightwork.paths import tenant_by_user_enabled
     assert tenant_by_user_enabled() is True
 
 
 def test_tenant_scope_noop_when_disabled(monkeypatch):
-    monkeypatch.setattr("maverick.config.load_config", dict)
+    monkeypatch.setattr("lightwork.config.load_config", dict)
     monkeypatch.delenv("MAVERICK_TENANT_BY_USER", raising=False)
     monkeypatch.delenv("MAVERICK_TENANT", raising=False)
-    from maverick.paths import tenant_scope
+    from lightwork.paths import tenant_scope
     with tenant_scope(channel="tg", user_id="42"):
         assert current_tenant() is None  # disabled -> no isolation
 
 
 def test_tenant_scope_sets_and_restores(monkeypatch):
-    monkeypatch.setattr("maverick.config.load_config", dict)
+    monkeypatch.setattr("lightwork.config.load_config", dict)
     monkeypatch.setenv("MAVERICK_TENANT_BY_USER", "1")
     monkeypatch.delenv("MAVERICK_TENANT", raising=False)
-    from maverick.paths import tenant_scope
+    from lightwork.paths import tenant_scope
     assert current_tenant() is None
     with tenant_scope(channel="tg", user_id="42"):
         assert current_tenant() == "tg%3A42"  # ':' is percent-encoded
@@ -210,9 +210,9 @@ def test_tenant_scope_sets_and_restores(monkeypatch):
 
 
 def test_tenant_scope_explicit_tenant_ignores_flag(monkeypatch):
-    monkeypatch.setattr("maverick.config.load_config", dict)
+    monkeypatch.setattr("lightwork.config.load_config", dict)
     monkeypatch.delenv("MAVERICK_TENANT_BY_USER", raising=False)
-    from maverick.paths import tenant_scope
+    from lightwork.paths import tenant_scope
     with tenant_scope(tenant="acme"):
         assert current_tenant() == "acme"  # explicit tenant works even when flag off
 
@@ -220,12 +220,12 @@ def test_tenant_scope_explicit_tenant_ignores_flag(monkeypatch):
 def test_server_tenant_scope_uses_authenticated_principal(monkeypatch):
     import asyncio
 
-    import maverick.server as server_mod
+    import lightwork.server as server_mod
 
-    monkeypatch.setattr("maverick.config.load_config", dict)
+    monkeypatch.setattr("lightwork.config.load_config", dict)
     monkeypatch.setenv("MAVERICK_TENANT_BY_USER", "1")
     monkeypatch.delenv("MAVERICK_TENANT", raising=False)
-    monkeypatch.setattr("maverick.compliance.first_turn_disclosure", lambda *a, **k: None)
+    monkeypatch.setattr("lightwork.compliance.first_turn_disclosure", lambda *a, **k: None)
 
     class _World:
         def get_or_create_conversation(self, channel, user_id):

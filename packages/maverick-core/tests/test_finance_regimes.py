@@ -1,13 +1,13 @@
 """Finance compliance-regime packs (finance-agent-suite §5)."""
 from __future__ import annotations
 
-from maverick.finance.regimes import (
+from lightwork.finance.regimes import (
     REGIMES,
     compile_policy,
     list_regimes,
     union_policies,
 )
-from maverick.governance import Decision, Policy, evaluate
+from lightwork.governance import Decision, Policy, evaluate
 
 
 def test_all_regimes_present():

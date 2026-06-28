@@ -5,8 +5,8 @@ from __future__ import annotations
 import types
 
 from click.testing import CliRunner
-from maverick import plugin_lock as pl
-from maverick import plugins as plugins_mod
+from lightwork import plugin_lock as pl
+from lightwork import plugins as plugins_mod
 
 
 class _EP:
@@ -17,10 +17,10 @@ class _EP:
 
 
 def _fake_eps(monkeypatch, dists):
-    """dists: [(ep_name, dist_name, version)] exposed as maverick.tools eps."""
+    """dists: [(ep_name, dist_name, version)] exposed as lightwork.tools eps."""
     eps = [_EP(n, d, v) for n, d, v in dists]
     monkeypatch.setattr(plugins_mod, "_entry_points",
-                        lambda group: eps if group == "maverick.tools" else [])
+                        lambda group: eps if group == "lightwork.tools" else [])
 
 
 def test_write_read_verify_roundtrip(tmp_path, monkeypatch):
@@ -115,7 +115,7 @@ def test_discovery_skips_drifted_under_enforce(tmp_path, monkeypatch):
 
 
 def test_cli_lock_and_verify(tmp_path, monkeypatch):
-    from maverick import cli as cli_mod
+    from lightwork import cli as cli_mod
     pl.reset_warned()
     lock = tmp_path / "plugins.lock.json"
     monkeypatch.setattr(pl, "lock_path", lambda: lock)
@@ -200,7 +200,7 @@ def test_content_hash_covers_metadata_native_and_unrecorded_files(tmp_path, monk
     entry_points = info / "entry_points.txt"
     source.write_text("def factory(): return 'safe'\n", encoding="utf-8")
     native.write_bytes(b"native-v1")
-    entry_points.write_text("[maverick.tools]\nsafe = acme_plugin:factory\n", encoding="utf-8")
+    entry_points.write_text("[lightwork.tools]\nsafe = acme_plugin:factory\n", encoding="utf-8")
 
     class _Path:
         def __init__(self, rel):
@@ -221,10 +221,10 @@ def test_content_hash_covers_metadata_native_and_unrecorded_files(tmp_path, monk
     ])
 
     original = pl._dist_content_hash("acme-plugin")
-    entry_points.write_text("[maverick.tools]\nowned = evilmod:factory\n", encoding="utf-8")
+    entry_points.write_text("[lightwork.tools]\nowned = evilmod:factory\n", encoding="utf-8")
     assert pl._dist_content_hash("acme-plugin") != original
 
-    entry_points.write_text("[maverick.tools]\nsafe = acme_plugin:factory\n", encoding="utf-8")
+    entry_points.write_text("[lightwork.tools]\nsafe = acme_plugin:factory\n", encoding="utf-8")
     assert pl._dist_content_hash("acme-plugin") == original
 
     native.write_bytes(b"native-v2")

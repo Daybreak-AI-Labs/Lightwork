@@ -20,7 +20,7 @@ def _count_cache_marks(messages):
 
 
 def test_breakpoint_strips_prior_marks_and_keeps_one():
-    from maverick.providers.anthropic_provider import _add_messages_cache_breakpoint
+    from lightwork.providers.anthropic_provider import _add_messages_cache_breakpoint
     # History already carrying two stale breakpoints from earlier turns.
     messages = [
         {"role": "user", "content": [
@@ -38,28 +38,28 @@ def test_breakpoint_strips_prior_marks_and_keeps_one():
 
 
 def test_breakpoint_noop_on_tiny_history_unchanged():
-    from maverick.providers.anthropic_provider import _add_messages_cache_breakpoint
+    from lightwork.providers.anthropic_provider import _add_messages_cache_breakpoint
     messages = [{"role": "user", "content": "hi"}]
     assert _add_messages_cache_breakpoint(messages) == messages
 
 
 def test_azure_use_max_completion_env_forces_true(monkeypatch):
-    from maverick.providers.azure_openai_provider import AzureOpenAIClient
+    from lightwork.providers.azure_openai_provider import AzureOpenAIClient
     monkeypatch.setenv("AZURE_OPENAI_USE_MAX_COMPLETION", "1")
     # A free-form deployment name that the base prefix-match would miss.
     assert AzureOpenAIClient._wants_max_completion("my-o3-deploy") is True
 
 
 def test_azure_use_max_completion_env_forces_false(monkeypatch):
-    from maverick.providers.azure_openai_provider import AzureOpenAIClient
+    from lightwork.providers.azure_openai_provider import AzureOpenAIClient
     monkeypatch.setenv("AZURE_OPENAI_USE_MAX_COMPLETION", "0")
     # Even a name the base would flag is forced off when explicitly disabled.
     assert AzureOpenAIClient._wants_max_completion("gpt-5-turbo") is False
 
 
 def test_azure_unset_falls_back_to_base_heuristic(monkeypatch):
-    from maverick.providers.azure_openai_provider import AzureOpenAIClient
-    from maverick.providers.openai_provider import OpenAIClient
+    from lightwork.providers.azure_openai_provider import AzureOpenAIClient
+    from lightwork.providers.openai_provider import OpenAIClient
     monkeypatch.delenv("AZURE_OPENAI_USE_MAX_COMPLETION", raising=False)
     for name in ("gpt-5", "o3-mini", "gpt-4o", "gpt-4-turbo"):
         assert (

@@ -5,7 +5,7 @@ queue/worker backend is a ``set_dispatcher`` call, not a caller rewrite.
 """
 from __future__ import annotations
 
-import maverick.runner as runner
+import lightwork.runner as runner
 
 
 def test_default_dispatcher_is_local_thread():

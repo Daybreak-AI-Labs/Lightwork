@@ -1,7 +1,7 @@
 """safety_regression_budget: safety regression budget gate."""
 from __future__ import annotations
 
-from maverick.tools.safety_regression_budget import safety_regression_budget
+from lightwork.tools.safety_regression_budget import safety_regression_budget
 
 
 def _run(**kw):

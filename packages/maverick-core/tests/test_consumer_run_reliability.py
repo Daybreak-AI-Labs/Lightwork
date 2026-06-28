@@ -17,18 +17,18 @@ import pytest
 # ---------- A: provider key gate accepts config-configured providers ----------
 
 def test_has_configured_provider_detects_base_url(monkeypatch):
-    from maverick import cli
+    from lightwork import cli
     monkeypatch.setattr(
-        "maverick.config.load_config",
+        "lightwork.config.load_config",
         lambda: {"providers": {"openai_compatible": {"base_url": "http://127.0.0.1:1234/v1"}}},
     )
     assert cli._has_configured_provider() is True
 
 
 def test_has_configured_provider_detects_api_key(monkeypatch):
-    from maverick import cli
+    from lightwork import cli
     monkeypatch.setattr(
-        "maverick.config.load_config",
+        "lightwork.config.load_config",
         lambda: {"providers": {"anthropic": {"api_key": "sk-real"}}},
     )
     assert cli._has_configured_provider() is True
@@ -36,16 +36,16 @@ def test_has_configured_provider_detects_api_key(monkeypatch):
 
 def test_has_configured_provider_false_for_empty_interpolated_key(monkeypatch):
     # config interpolates ${UNSET} to "" -- an empty key is NOT availability.
-    from maverick import cli
+    from lightwork import cli
     monkeypatch.setattr(
-        "maverick.config.load_config",
+        "lightwork.config.load_config",
         lambda: {"providers": {"anthropic": {"api_key": ""}}},
     )
     assert cli._has_configured_provider() is False
 
 
 def test_require_llm_key_accepts_config_provider(monkeypatch):
-    from maverick import cli
+    from lightwork import cli
     for var in cli._PROVIDER_ENV_VARS:
         monkeypatch.delenv(var, raising=False)
     monkeypatch.setattr(cli, "_has_configured_provider", lambda: True)
@@ -53,7 +53,7 @@ def test_require_llm_key_accepts_config_provider(monkeypatch):
 
 
 def test_require_llm_key_blocks_when_nothing_configured(monkeypatch):
-    from maverick import cli
+    from lightwork import cli
     for var in cli._PROVIDER_ENV_VARS:
         monkeypatch.delenv(var, raising=False)
     monkeypatch.setattr(cli, "_has_configured_provider", lambda: False)
@@ -65,10 +65,10 @@ def test_require_llm_key_blocks_when_nothing_configured(monkeypatch):
 
 @pytest.mark.asyncio
 async def test_run_goal_marks_goal_failed_on_unexpected_error(tmp_path: Path):
-    from maverick.budget import Budget
-    from maverick.orchestrator import run_goal
-    from maverick.sandbox import LocalBackend
-    from maverick.world_model import WorldModel
+    from lightwork.budget import Budget
+    from lightwork.orchestrator import run_goal
+    from lightwork.sandbox import LocalBackend
+    from lightwork.world_model import WorldModel
 
     class BoomLLM:
         model = "fake:boom"
@@ -93,12 +93,12 @@ async def test_run_goal_marks_goal_failed_on_unexpected_error(tmp_path: Path):
 # ---------- C: advisories warn at most once per process ----------
 
 def test_shield_sdk_missing_warns_once(caplog):
-    from maverick_shield import guard
+    from lightwork_shield import guard
 
     if guard._HAVE_SDK:
         pytest.skip("agent-shield SDK installed; advisory not emitted")
     guard._WARNED_SDK_MISSING = False
-    with caplog.at_level(logging.WARNING, logger="maverick_shield.guard"):
+    with caplog.at_level(logging.WARNING, logger="lightwork_shield.guard"):
         guard.Shield(warn_if_missing=True)
         guard.Shield(warn_if_missing=True)
         guard.Shield(warn_if_missing=True)
@@ -109,10 +109,10 @@ def test_shield_sdk_missing_warns_once(caplog):
 # ---------- chat threads conversation memory across turns ----------
 
 def test_chat_threads_conversation_across_turns(tmp_path: Path, monkeypatch):
-    import maverick.cli as cli
-    import maverick.orchestrator as orch
+    import lightwork.cli as cli
+    import lightwork.orchestrator as orch
     from click.testing import CliRunner
-    from maverick.world_model import open_world
+    from lightwork.world_model import open_world
 
     monkeypatch.setattr(cli, "_require_llm_key", lambda: "test")
 
@@ -152,8 +152,8 @@ def test_chat_threads_conversation_across_turns(tmp_path: Path, monkeypatch):
 
 
 def test_chat_starts_new_conversation_for_each_repl_session(tmp_path: Path, monkeypatch):
-    import maverick.cli as cli
-    import maverick.orchestrator as orch
+    import lightwork.cli as cli
+    import lightwork.orchestrator as orch
     from click.testing import CliRunner
 
     monkeypatch.setattr(cli, "_require_llm_key", lambda: "test")

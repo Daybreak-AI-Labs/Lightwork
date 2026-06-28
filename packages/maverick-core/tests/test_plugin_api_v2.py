@@ -1,7 +1,7 @@
 """Plugin API v2 release: version bump + v1 deprecation window."""
 from __future__ import annotations
 
-from maverick import plugin_manifest as pm
+from lightwork import plugin_manifest as pm
 
 
 def _manifest(api_version: str):

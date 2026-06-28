@@ -6,8 +6,8 @@ from __future__ import annotations
 from types import SimpleNamespace
 
 import pytest
-from maverick import llm as llm_mod
-from maverick import migration_calculator as mc
+from lightwork import llm as llm_mod
+from lightwork import migration_calculator as mc
 
 PRICES = {
     "alpha": (1.0, 2.0),

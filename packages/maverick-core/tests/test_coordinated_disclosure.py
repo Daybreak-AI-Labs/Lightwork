@@ -1,7 +1,7 @@
 """coordinated_disclosure: vulnerability disclosure timeline/status tracking."""
 from __future__ import annotations
 
-from maverick.tools.coordinated_disclosure import coordinated_disclosure
+from lightwork.tools.coordinated_disclosure import coordinated_disclosure
 
 
 def _s(records, today=None, policy=None, embargo_days=None):
@@ -85,7 +85,7 @@ def test_errors():
 
 
 def test_registered():
-    from maverick.tools import base_registry
+    from lightwork.tools import base_registry
 
     class _W:
         pass

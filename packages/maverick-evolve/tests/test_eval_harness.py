@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 import pytest
-from maverick_evolve.eval_harness import EvalCase, evaluate
+from lightwork_evolve.eval_harness import EvalCase, evaluate
 
 
 @pytest.mark.asyncio

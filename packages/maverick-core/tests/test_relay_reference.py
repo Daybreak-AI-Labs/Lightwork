@@ -11,7 +11,7 @@ import hmac
 import json
 
 import pytest
-from maverick.relay_reference import (
+from lightwork.relay_reference import (
     DEFAULT_LONG_TASK_PATTERN,
     Relay,
     RelayConfig,

@@ -1,7 +1,7 @@
 """pia_generator: Privacy Impact Assessment generator."""
 from __future__ import annotations
 
-from maverick.tools.pia_generator import pia_generator
+from lightwork.tools.pia_generator import pia_generator
 
 
 def _run(**kw):

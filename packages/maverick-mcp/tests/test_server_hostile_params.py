@@ -14,7 +14,7 @@ import json
 import sys
 
 import pytest
-from maverick_mcp.server import MCPServer, _ProtocolError
+from lightwork_mcp.server import MCPServer, _ProtocolError
 
 
 def _run_lines(monkeypatch, *lines: str) -> list[dict]:

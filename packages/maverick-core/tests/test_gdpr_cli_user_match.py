@@ -10,8 +10,8 @@ from __future__ import annotations
 from pathlib import Path
 
 from click.testing import CliRunner
-from maverick.cli import _conversation_user_matches, main
-from maverick.world_model import open_world
+from lightwork.cli import _conversation_user_matches, main
+from lightwork.world_model import open_world
 
 
 def test_user_match_predicate():
@@ -82,7 +82,7 @@ def test_export_and_erase_do_not_prefix_match_non_cli_colon_ids(tmp_path: Path):
 
 
 def test_erase_scrubs_dreaming_user_notes(monkeypatch, tmp_path: Path):
-    from maverick import user_notes
+    from lightwork import user_notes
 
     db = tmp_path / "world.db"
     notes_path = tmp_path / "user_notes.ndjson"
@@ -111,9 +111,9 @@ def test_erase_scrubs_dreaming_user_notes(monkeypatch, tmp_path: Path):
 
 def test_erase_uses_backend_erase_hook_for_non_sqlite_world(monkeypatch, tmp_path: Path):
     """Postgres worlds must not be driven through SQLite-only ``world.conn`` SQL."""
-    from maverick import audit as audit_mod
-    from maverick import cli as cli_mod
-    from maverick.world_model import Conversation
+    from lightwork import audit as audit_mod
+    from lightwork import cli as cli_mod
+    from lightwork.world_model import Conversation
 
     class PostgresLikeWorld:
         conn = None  # The test fails if erase tries the SQLite direct-SQL path.

@@ -14,10 +14,10 @@ except ModuleNotFoundError:  # Python 3.10
 
 
 def _write(cfg_dir, monkeypatch, suites):
-    monkeypatch.setattr("maverick_installer.wizard.CONFIG_DIR", cfg_dir)
-    monkeypatch.setattr("maverick_installer.wizard.ENV_FILE", cfg_dir / ".env")
-    monkeypatch.setattr("maverick_installer.wizard.CONFIG_FILE", cfg_dir / "config.toml")
-    from maverick_installer.wizard import write_config
+    monkeypatch.setattr("lightwork_installer.wizard.CONFIG_DIR", cfg_dir)
+    monkeypatch.setattr("lightwork_installer.wizard.ENV_FILE", cfg_dir / ".env")
+    monkeypatch.setattr("lightwork_installer.wizard.CONFIG_FILE", cfg_dir / "config.toml")
+    from lightwork_installer.wizard import write_config
     write_config(
         providers=["anthropic"], role_models={},
         channels={}, safety={"profile": "balanced"},
@@ -42,5 +42,5 @@ def test_suite_choices_are_written(tmp_path, monkeypatch):
 def test_kernel_reads_what_the_wizard_writes(tmp_path, monkeypatch):
     cfg = _write(tmp_path, monkeypatch, {"operations": False, "legal": True})
     parsed = tomllib.loads(cfg)
-    from maverick.domain import _disabled_suites
+    from lightwork.domain import _disabled_suites
     assert _disabled_suites(parsed) == {"operations"}

@@ -4,8 +4,8 @@ from __future__ import annotations
 import dataclasses
 
 import pytest
-from maverick import governed_actions as ga_mod
-from maverick.governed_actions import ActionError, ActionSpec, GovernedActions
+from lightwork import governed_actions as ga_mod
+from lightwork.governed_actions import ActionError, ActionSpec, GovernedActions
 
 
 def _registry(applied):
@@ -151,8 +151,8 @@ def test_lineage_is_tenant_scoped(monkeypatch, tmp_path):
     # learned stores). Patch the tenant resolver to avoid coupling to its API.
     monkeypatch.setenv("HOME", str(tmp_path))
     tbase = tmp_path / "tenants" / "acme"
-    monkeypatch.setattr("maverick.paths.current_tenant", lambda: "acme")
-    monkeypatch.setattr("maverick.paths.data_dir", lambda *p: tbase.joinpath(*p))
+    monkeypatch.setattr("lightwork.paths.current_tenant", lambda: "acme")
+    monkeypatch.setattr("lightwork.paths.data_dir", lambda *p: tbase.joinpath(*p))
     ga_mod.record_tool_lineage(4, "shell", {"c": "y"})
     assert ga_mod.load_lineage(4)[0]["action"] == "shell"
     assert (tbase / "lineage" / "4.ndjson").exists()

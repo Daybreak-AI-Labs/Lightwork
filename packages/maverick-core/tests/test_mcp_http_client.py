@@ -13,7 +13,7 @@ import json
 
 import httpx
 import pytest
-from maverick.mcp_client import (
+from lightwork.mcp_client import (
     MCPClientError,
     MCPServerSpec,
     StreamableHttpMCPClient,
@@ -145,7 +145,7 @@ async def test_streaming_sse_returns_without_waiting_for_close(monkeypatch):
 
 @pytest.mark.asyncio
 async def test_sse_response_size_is_capped(monkeypatch):
-    import maverick.mcp_client as mcp_client
+    import lightwork.mcp_client as mcp_client
 
     def handler(request: httpx.Request) -> httpx.Response:
         body = json.loads(request.content)
@@ -231,7 +231,7 @@ def test_http_spec_rejects_bad_url():
 @pytest.mark.asyncio
 async def test_start_mcp_clients_builds_http_for_url(monkeypatch):
     _install(monkeypatch, make_handler())
-    from maverick.mcp_client import start_mcp_clients, stop_mcp_clients
+    from lightwork.mcp_client import start_mcp_clients, stop_mcp_clients
     clients = await start_mcp_clients([MCPServerSpec(name="remote", url="https://x/mcp")])
     assert len(clients) == 1
     assert type(clients[0]).__name__ == "StreamableHttpMCPClient"
@@ -244,7 +244,7 @@ async def test_tools_from_mcp_wraps_http_client(monkeypatch):
     _install(monkeypatch, make_handler())
     import inspect
 
-    from maverick.mcp_tools import tools_from_mcp
+    from lightwork.mcp_tools import tools_from_mcp
     c = _client()
     await c.start()
     tools = tools_from_mcp(c)

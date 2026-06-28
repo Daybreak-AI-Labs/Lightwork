@@ -3,7 +3,7 @@ the rolling-window accumulation, and the breach/drift alerting with an injected
 audit sink."""
 from __future__ import annotations
 
-from maverick import fairness_monitor as fm
+from lightwork import fairness_monitor as fm
 
 
 class TestComputeMetrics:

@@ -12,30 +12,30 @@ from click.testing import CliRunner
 
 
 def test_ps_registered():
-    from maverick.cli import main
+    from lightwork.cli import main
     assert "ps" in main.commands
 
 
 def test_ps_empty(tmp_path, monkeypatch):
-    monkeypatch.setattr("maverick.job_queue.DEFAULT_DB", tmp_path / "jobs.db")
-    from maverick.cli import main
+    monkeypatch.setattr("lightwork.job_queue.DEFAULT_DB", tmp_path / "jobs.db")
+    from lightwork.cli import main
     res = CliRunner().invoke(main, ["--db", str(tmp_path / "world.db"), "ps"])
     assert res.exit_code == 0, res.output
     assert "no goals or scheduled jobs" in res.output
 
 
 def test_ps_lists_goal_and_job(tmp_path, monkeypatch):
-    monkeypatch.setattr("maverick.job_queue.DEFAULT_DB", tmp_path / "jobs.db")
-    from maverick.world_model import open_world
+    monkeypatch.setattr("lightwork.job_queue.DEFAULT_DB", tmp_path / "jobs.db")
+    from lightwork.world_model import open_world
     db = tmp_path / "world.db"
     w = open_world(db)
     w.create_goal("Summarize emails", "do it")
     w.close()
-    from maverick.job_queue import JobQueue
+    from lightwork.job_queue import JobQueue
     JobQueue(db_path=tmp_path / "jobs.db").enqueue(
         "start_goal", {"text": "nightly", "__cron__": "0 9 * * *"}, run_at=1000.0)
 
-    from maverick.cli import main
+    from lightwork.cli import main
     res = CliRunner().invoke(main, ["--db", str(db), "ps"])
     assert res.exit_code == 0, res.output
     assert "goal" in res.output and "Summarize emails" in res.output
@@ -44,14 +44,14 @@ def test_ps_lists_goal_and_job(tmp_path, monkeypatch):
 
 
 def test_ps_json(tmp_path, monkeypatch):
-    monkeypatch.setattr("maverick.job_queue.DEFAULT_DB", tmp_path / "jobs.db")
-    from maverick.world_model import open_world
+    monkeypatch.setattr("lightwork.job_queue.DEFAULT_DB", tmp_path / "jobs.db")
+    from lightwork.world_model import open_world
     db = tmp_path / "world.db"
     w = open_world(db)
     w.create_goal("G1", "x")
     w.close()
 
-    from maverick.cli import main
+    from lightwork.cli import main
     res = CliRunner().invoke(main, ["--db", str(db), "ps", "--json"])
     assert res.exit_code == 0, res.output
     rows = json.loads(res.output)
@@ -59,21 +59,21 @@ def test_ps_json(tmp_path, monkeypatch):
 
 
 def test_ps_text_strips_terminal_control_sequences(tmp_path, monkeypatch):
-    monkeypatch.setattr("maverick.job_queue.DEFAULT_DB", tmp_path / "jobs.db")
-    from maverick.world_model import open_world
+    monkeypatch.setattr("lightwork.job_queue.DEFAULT_DB", tmp_path / "jobs.db")
+    from lightwork.world_model import open_world
     db = tmp_path / "world.db"
     w = open_world(db)
     w.create_goal("Goal\x1b[2JTitle\x1b]52;c;SGVsbG8=\x07", "x")
     w.close()
 
-    from maverick.job_queue import JobQueue
+    from lightwork.job_queue import JobQueue
     JobQueue(db_path=tmp_path / "jobs.db").enqueue(
         "job\x1b]8;;https://evil.example/\x07kind",
         {"__cron__": "* * * * *\x1b[31m"},
         run_at=1000.0,
     )
 
-    from maverick.cli import main
+    from lightwork.cli import main
     res = CliRunner().invoke(main, ["--db", str(db), "ps"])
     assert res.exit_code == 0, res.output
     assert "\x1b" not in res.output
@@ -83,15 +83,15 @@ def test_ps_text_strips_terminal_control_sequences(tmp_path, monkeypatch):
 
 
 def test_ps_json_preserves_raw_values(tmp_path, monkeypatch):
-    monkeypatch.setattr("maverick.job_queue.DEFAULT_DB", tmp_path / "jobs.db")
-    from maverick.world_model import open_world
+    monkeypatch.setattr("lightwork.job_queue.DEFAULT_DB", tmp_path / "jobs.db")
+    from lightwork.world_model import open_world
     db = tmp_path / "world.db"
     w = open_world(db)
     title = "Goal\x1b[2JTitle"
     w.create_goal(title, "x")
     w.close()
 
-    from maverick.cli import main
+    from lightwork.cli import main
     res = CliRunner().invoke(main, ["--db", str(db), "ps", "--json"])
     assert res.exit_code == 0, res.output
     rows = json.loads(res.output)

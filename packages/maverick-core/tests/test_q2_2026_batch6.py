@@ -7,18 +7,18 @@ from unittest.mock import MagicMock
 # ---------- calendar tool ----------
 
 def test_calendar_requires_op():
-    from maverick.tools.calendar_tool import calendar_tool
+    from lightwork.tools.calendar_tool import calendar_tool
     assert "op is required" in calendar_tool().fn({})
 
 
 def test_calendar_unknown_op():
-    from maverick.tools.calendar_tool import calendar_tool
+    from lightwork.tools.calendar_tool import calendar_tool
     out = calendar_tool().fn({"op": "garbage"})
     assert "unknown op" in out
 
 
 def test_calendar_create_requires_fields():
-    from maverick.tools.calendar_tool import calendar_tool
+    from lightwork.tools.calendar_tool import calendar_tool
     out = calendar_tool().fn({"op": "create_event"})
     assert "requires title + start + end" in out
 
@@ -38,7 +38,7 @@ def test_calendar_requires_credentials(monkeypatch):
     fake_caldav = types.ModuleType("caldav")
     fake_caldav.DAVClient = MagicMock()
     monkeypatch.setitem(sys.modules, "caldav", fake_caldav)
-    from maverick.tools.calendar_tool import calendar_tool
+    from lightwork.tools.calendar_tool import calendar_tool
     out = calendar_tool().fn({"op": "list_events"})
     assert "CALDAV_URL" in out
 
@@ -66,7 +66,7 @@ def test_calendar_create_event_calls_caldav(monkeypatch):
     fake_caldav.DAVClient = MagicMock(return_value=fake_client)
     monkeypatch.setitem(sys.modules, "caldav", fake_caldav)
 
-    from maverick.tools.calendar_tool import calendar_tool
+    from lightwork.tools.calendar_tool import calendar_tool
     out = calendar_tool().fn({
         "op": "create_event",
         "title": "Meeting with Alice",
@@ -103,7 +103,7 @@ def test_calendar_create_event_escapes_text_fields(monkeypatch):
     fake_caldav.DAVClient = MagicMock(return_value=fake_client)
     monkeypatch.setitem(sys.modules, "caldav", fake_caldav)
 
-    from maverick.tools.calendar_tool import calendar_tool
+    from lightwork.tools.calendar_tool import calendar_tool
     calendar_tool().fn({
         "op": "create_event",
         "title": "Team sync\nRRULE:FREQ=DAILY",
@@ -141,7 +141,7 @@ def test_calendar_find_slot_picks_free_window(monkeypatch):
     fake_caldav.DAVClient = MagicMock(return_value=fake_client)
     monkeypatch.setitem(sys.modules, "caldav", fake_caldav)
 
-    from maverick.tools.calendar_tool import calendar_tool
+    from lightwork.tools.calendar_tool import calendar_tool
     out = calendar_tool().fn({
         "op": "find_slot",
         "duration_minutes": 45,
@@ -153,7 +153,7 @@ def test_calendar_find_slot_picks_free_window(monkeypatch):
 
 
 def test_calendar_in_registry():
-    from maverick.tools import base_registry
+    from lightwork.tools import base_registry
 
     class _FakeSandbox:
         workdir = "."
@@ -169,7 +169,7 @@ def test_calendar_in_registry():
 # ---------- reflexion ----------
 
 def test_reflexion_record_and_recall(tmp_path):
-    from maverick.reflexion import recall, record
+    from lightwork.reflexion import recall, record
     p = tmp_path / "reflexions.ndjson"
     assert record(
         "Refactor the auth module to use sessions",
@@ -189,7 +189,7 @@ def test_reflexion_record_and_recall(tmp_path):
 
 
 def test_reflexion_recall_ranks_by_similarity(tmp_path):
-    from maverick.reflexion import recall, record
+    from lightwork.reflexion import recall, record
     p = tmp_path / "reflexions.ndjson"
     record(
         "Refactor the cart checkout flow",
@@ -220,20 +220,20 @@ def test_reflexion_recall_ranks_by_similarity(tmp_path):
 
 
 def test_reflexion_recall_empty_file(tmp_path):
-    from maverick.reflexion import recall
+    from lightwork.reflexion import recall
     p = tmp_path / "nonexistent.ndjson"
     assert recall("anything", path=p) == []
 
 
 def test_reflexion_recall_no_query(tmp_path):
-    from maverick.reflexion import recall, record
+    from lightwork.reflexion import recall, record
     p = tmp_path / "x.ndjson"
     record("g", "k", "m", "r", path=p)
     assert recall("", path=p) == []
 
 
 def test_reflexion_list_recent_newest_first(tmp_path):
-    from maverick.reflexion import list_recent, record
+    from lightwork.reflexion import list_recent, record
     p = tmp_path / "x.ndjson"
     record("first", "k", "m", "r", path=p)
     time.sleep(0.01)
@@ -245,7 +245,7 @@ def test_reflexion_list_recent_newest_first(tmp_path):
 
 
 def test_reflexion_clear(tmp_path):
-    from maverick.reflexion import clear, recall, record
+    from lightwork.reflexion import clear, recall, record
     p = tmp_path / "x.ndjson"
     record("g", "k", "m", "r", path=p)
     assert p.exists()
@@ -259,7 +259,7 @@ def test_reflexion_file_perms_600(tmp_path):
     import os
     import stat
 
-    from maverick.reflexion import record
+    from lightwork.reflexion import record
     p = tmp_path / "perm.ndjson"
     record("g", "k", "m", "r", path=p)
     assert p.exists()
@@ -272,7 +272,7 @@ def test_reflexion_file_perms_600(tmp_path):
 
 
 def test_reflexion_format_context_renders_sections():
-    from maverick.reflexion import Reflexion, format_context
+    from lightwork.reflexion import Reflexion, format_context
     r = Reflexion(
         ts=time.time(),
         goal_text="Refactor auth",
@@ -287,13 +287,13 @@ def test_reflexion_format_context_renders_sections():
 
 
 def test_reflexion_format_context_empty_returns_empty():
-    from maverick.reflexion import format_context
+    from lightwork.reflexion import format_context
     assert format_context([]) == ""
 
 
 def test_reflexion_record_failsafe_on_bad_path(tmp_path):
     """Writing to a path under a file (cannot create) is a soft failure."""
-    from maverick.reflexion import record
+    from lightwork.reflexion import record
     blocking = tmp_path / "blocker"
     blocking.write_text("x")
     bad = blocking / "subdir" / "f.ndjson"

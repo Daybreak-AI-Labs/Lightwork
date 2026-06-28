@@ -5,7 +5,7 @@ import shlex
 from pathlib import Path
 
 import pytest
-from maverick.tools.latex_tool import latex_tool, to_mathml
+from lightwork.tools.latex_tool import latex_tool, to_mathml
 
 
 class _FakeSandbox:

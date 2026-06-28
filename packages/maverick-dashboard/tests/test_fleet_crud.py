@@ -10,7 +10,7 @@ from fastapi.testclient import TestClient
 
 
 def _client():
-    from maverick_dashboard.app import app
+    from lightwork_dashboard.app import app
     return TestClient(app, headers={"Origin": "http://testserver"})
 
 
@@ -19,12 +19,12 @@ def _isolate(monkeypatch, tmp_path):
     monkeypatch.setenv("MAVERICK_HOME", str(tmp_path))
     monkeypatch.delenv("MAVERICK_DASHBOARD_TOKEN", raising=False)
     monkeypatch.delenv("MAVERICK_TENANT", raising=False)
-    from maverick import world_model
+    from lightwork import world_model
     monkeypatch.setattr(world_model, "DEFAULT_DB", tmp_path / "world.db")
 
 
 def _as(monkeypatch, principal, *, admin=False):
-    import maverick_dashboard.api as api
+    import lightwork_dashboard.api as api
     monkeypatch.setattr(api, "caller_principal", lambda request: principal)
     monkeypatch.setattr(api, "is_dashboard_admin", lambda p: admin)
 
@@ -40,7 +40,7 @@ def test_create_fleet(monkeypatch, tmp_path):
         ],
     })
     assert r.status_code == 201, r.text
-    from maverick.fleet import load_fleet
+    from lightwork.fleet import load_fleet
     f = load_fleet("acme")
     assert f is not None
     assert f.owner == ""  # auth-off
@@ -73,7 +73,7 @@ def test_create_rejects_missing_agent_role(monkeypatch, tmp_path):
 def test_create_rejects_unknown_configured_role(monkeypatch, tmp_path):
     _isolate(monkeypatch, tmp_path)
     monkeypatch.setattr(
-        "maverick.config.load_config",
+        "lightwork.config.load_config",
         lambda *a, **k: {"roles": {"analyst": {"allow_tools": ["read_file"]}}},
     )
     r = _client().post(
@@ -88,7 +88,7 @@ def test_create_owned_by_caller(monkeypatch, tmp_path):
     _as(monkeypatch, "user:dana")
     r = _client().post("/api/v1/fleets", json={"name": "dteam", "agents": []})
     assert r.status_code == 201
-    from maverick.fleet import load_fleet
+    from lightwork.fleet import load_fleet
     assert load_fleet("dteam").owner == "user:dana"
 
 
@@ -97,8 +97,8 @@ def test_fleet_run_schedules_against_caller_not_agent(monkeypatch, tmp_path):
     _as(monkeypatch, "user:alice")
     monkeypatch.setenv("ANTHROPIC_API_KEY", "sk-ant-fake")
 
-    import maverick.runner as runner_mod
-    from maverick.fleet import Fleet, FleetAgent, save_fleet
+    import lightwork.runner as runner_mod
+    from lightwork.fleet import Fleet, FleetAgent, save_fleet
 
     calls = []
 
@@ -126,7 +126,7 @@ def test_fleet_run_schedules_against_caller_not_agent(monkeypatch, tmp_path):
 
 def test_create_clobber_other_owner_404(monkeypatch, tmp_path):
     _isolate(monkeypatch, tmp_path)
-    from maverick.fleet import Fleet, load_fleet, save_fleet
+    from lightwork.fleet import Fleet, load_fleet, save_fleet
     save_fleet(Fleet(name="acme", owner="user:dana"))
     _as(monkeypatch, "user:eve")
     r = _client().post("/api/v1/fleets", json={"name": "acme", "agents": []})
@@ -136,7 +136,7 @@ def test_create_clobber_other_owner_404(monkeypatch, tmp_path):
 
 def test_delete_fleet(monkeypatch, tmp_path):
     _isolate(monkeypatch, tmp_path)
-    from maverick.fleet import Fleet, load_fleet, save_fleet
+    from lightwork.fleet import Fleet, load_fleet, save_fleet
     save_fleet(Fleet(name="acme", owner=""))
     assert _client().delete("/api/v1/fleets/acme").status_code == 204
     assert load_fleet("acme") is None
@@ -149,7 +149,7 @@ def test_delete_missing_404(monkeypatch, tmp_path):
 
 def test_delete_cross_owner_404(monkeypatch, tmp_path):
     _isolate(monkeypatch, tmp_path)
-    from maverick.fleet import Fleet, load_fleet, save_fleet
+    from lightwork.fleet import Fleet, load_fleet, save_fleet
     save_fleet(Fleet(name="acme", owner="user:dana"))
     _as(monkeypatch, "user:eve")
     assert _client().delete("/api/v1/fleets/acme").status_code == 404
@@ -158,7 +158,7 @@ def test_delete_cross_owner_404(monkeypatch, tmp_path):
 
 def test_page_has_create_form_and_remove(monkeypatch, tmp_path):
     _isolate(monkeypatch, tmp_path)
-    from maverick.fleet import Fleet, save_fleet
+    from lightwork.fleet import Fleet, save_fleet
     save_fleet(Fleet(name="acme", owner=""))
     text = _client().get("/fleets").text
     assert 'id="fleet-create-form"' in text

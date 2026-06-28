@@ -11,8 +11,8 @@ from dataclasses import dataclass, field
 from typing import Any
 
 import pytest
-from maverick import speculative_tools as st
-from maverick.cache import tool as tool_cache
+from lightwork import speculative_tools as st
+from lightwork.cache import tool as tool_cache
 
 
 @dataclass
@@ -164,7 +164,7 @@ def test_async_tool_fn_is_drained(cache_on):
 
 
 def test_works_with_a_real_tool_registry(cache_on):
-    from maverick.tools import Tool, ToolRegistry
+    from lightwork.tools import Tool, ToolRegistry
 
     registry = ToolRegistry()
     registry.register(Tool(name="read_file", description="read",

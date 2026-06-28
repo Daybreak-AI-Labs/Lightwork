@@ -2,7 +2,7 @@
 from __future__ import annotations
 
 import pytest
-from maverick import codec_telemetry as ct
+from lightwork import codec_telemetry as ct
 
 
 @pytest.fixture(autouse=True)

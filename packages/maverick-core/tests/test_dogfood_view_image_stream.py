@@ -43,12 +43,12 @@ class _FakeClient:
 
 
 def _patch(monkeypatch, resp):
-    import maverick.tools._ssrf as ssrf
+    import lightwork.tools._ssrf as ssrf
     monkeypatch.setattr(ssrf, "safe_client", lambda url, **k: _FakeClient(resp))
 
 
 def test_view_image_caps_without_reading_whole_body(monkeypatch):
-    from maverick.tools import view_image as vi
+    from lightwork.tools import view_image as vi
     consumed = {"chunks": 0}
 
     def chunks():
@@ -63,7 +63,7 @@ def test_view_image_caps_without_reading_whole_body(monkeypatch):
 
 
 def test_view_image_rejects_on_content_length_without_streaming(monkeypatch):
-    from maverick.tools import view_image as vi
+    from lightwork.tools import view_image as vi
     pulled = {"n": 0}
 
     def chunks():
@@ -77,7 +77,7 @@ def test_view_image_rejects_on_content_length_without_streaming(monkeypatch):
 
 
 def test_view_image_returns_bytes_and_mime_on_normal_body(monkeypatch):
-    from maverick.tools import view_image as vi
+    from lightwork.tools import view_image as vi
     resp = _FakeStreamResp([b"\x89PNG", b"data"], {"content-type": "image/png"})
     _patch(monkeypatch, resp)
     out = vi._load_image("https://example.com/ok.png")

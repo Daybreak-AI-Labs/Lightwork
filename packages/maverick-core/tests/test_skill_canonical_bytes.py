@@ -15,7 +15,7 @@ from __future__ import annotations
 
 from pathlib import Path
 
-from maverick.skills import Skill, _canonical_signed_bytes
+from lightwork.skills import Skill, _canonical_signed_bytes
 
 
 def _skill(

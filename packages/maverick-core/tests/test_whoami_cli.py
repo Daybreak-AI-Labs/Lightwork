@@ -12,7 +12,7 @@ from click.testing import CliRunner
 
 
 def _cfg(monkeypatch, cfg):
-    monkeypatch.setattr("maverick.config.load_config", lambda *a, **k: cfg)
+    monkeypatch.setattr("lightwork.config.load_config", lambda *a, **k: cfg)
 
 
 def _no_enforce_env(monkeypatch):
@@ -21,14 +21,14 @@ def _no_enforce_env(monkeypatch):
 
 
 def test_whoami_registered():
-    from maverick.cli import main
+    from lightwork.cli import main
     assert "whoami" in main.commands
 
 
 def test_whoami_default_unrestricted(monkeypatch):
     _cfg(monkeypatch, {})
     _no_enforce_env(monkeypatch)
-    from maverick.cli import main
+    from lightwork.cli import main
     res = CliRunner().invoke(main, ["whoami"])
     assert res.exit_code == 0, res.output
     assert "principal: user:local" in res.output
@@ -39,7 +39,7 @@ def test_whoami_default_unrestricted(monkeypatch):
 def test_whoami_shows_acl_deny(monkeypatch):
     _cfg(monkeypatch, {"security": {"denied_tools": ["shell"]}})
     _no_enforce_env(monkeypatch)
-    from maverick.cli import main
+    from lightwork.cli import main
     res = CliRunner().invoke(main, ["whoami", "--principal", "user:alice"])
     assert res.exit_code == 0, res.output
     assert "user:alice" in res.output
@@ -49,7 +49,7 @@ def test_whoami_shows_acl_deny(monkeypatch):
 def test_whoami_json(monkeypatch):
     _cfg(monkeypatch, {"security": {"denied_tools": ["shell"], "max_risk": "low"}})
     _no_enforce_env(monkeypatch)
-    from maverick.cli import main
+    from lightwork.cli import main
     res = CliRunner().invoke(main, ["whoami", "--principal", "user:bob", "--json"])
     assert res.exit_code == 0, res.output
     data = json.loads(res.output)
@@ -63,7 +63,7 @@ def test_whoami_json(monkeypatch):
 def test_whoami_reports_enforcement_on(monkeypatch):
     _cfg(monkeypatch, {"capabilities": {"enforce": True}})
     _no_enforce_env(monkeypatch)
-    from maverick.cli import main
+    from lightwork.cli import main
     res = CliRunner().invoke(main, ["whoami", "--json"])
     assert res.exit_code == 0, res.output
     assert json.loads(res.output)["enforcement"] is True

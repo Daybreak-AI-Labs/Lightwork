@@ -1,8 +1,8 @@
 """Provable redaction: fixpoint redaction + proof, and the redact tool."""
 from __future__ import annotations
 
-from maverick import provable_redaction as pr
-from maverick.tools.redact import redact_tool
+from lightwork import provable_redaction as pr
+from lightwork.tools.redact import redact_tool
 
 _SECRET = "AKIAIOSFODNN7EXAMPLE"
 _EMAIL = "alice@example.com"
@@ -75,7 +75,7 @@ def test_tool_default_op_is_redact():
 
 
 def test_tool_registered():
-    from maverick.tools import base_registry
+    from lightwork.tools import base_registry
 
     class _W:
         pass

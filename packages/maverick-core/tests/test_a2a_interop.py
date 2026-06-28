@@ -6,7 +6,7 @@ Maverick SERVES conforms, and cards OTHER agents serve are consumable).
 from __future__ import annotations
 
 import pytest
-from maverick import a2a
+from lightwork import a2a
 
 # Hand-authored third-party fixtures shaped per the A2A spec: a rich card
 # (LangGraph-style optional fields) and a minimal-conformant one.

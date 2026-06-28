@@ -1,8 +1,8 @@
 """Constitutional layer: operator-defined policy rules (re-triage build)."""
 from __future__ import annotations
 
-from maverick_shield import Shield
-from maverick_shield.constitutional import parse_rules, scan
+from lightwork_shield import Shield
+from lightwork_shield.constitutional import parse_rules, scan
 
 
 def test_parse_skips_bad_rules():

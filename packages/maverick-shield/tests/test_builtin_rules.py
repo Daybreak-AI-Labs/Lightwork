@@ -1,8 +1,8 @@
 """Built-in rule tests."""
 from __future__ import annotations
 
-from maverick_shield import Shield, ShieldVerdict
-from maverick_shield.builtin_rules import RULES, scan
+from lightwork_shield import Shield, ShieldVerdict
+from lightwork_shield.builtin_rules import RULES, scan
 
 
 class TestBuiltinRules:

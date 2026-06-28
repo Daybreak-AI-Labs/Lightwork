@@ -5,15 +5,15 @@ the adapters and interfaces actually fit together.
 """
 from __future__ import annotations
 
-from maverick import promotion_effect as pe
-from maverick import rehearsal as rh
-from maverick.counterfactual_rollout import (
+from lightwork import promotion_effect as pe
+from lightwork import rehearsal as rh
+from lightwork.counterfactual_rollout import (
     TransitionModel,
     estimate_effect_via_rollout,
     transitions_from_trajectories,
 )
-from maverick.self_improvement import Candidate, SelfImprovementController
-from maverick.trajectory_store import TrajectoryStep
+from lightwork.self_improvement import Candidate, SelfImprovementController
+from lightwork.trajectory_store import TrajectoryStep
 
 
 def _corpus():

@@ -8,9 +8,9 @@ MAVERICK_HOME or a tenant it reported a path the runtime never touches.
 """
 from __future__ import annotations
 
-import maverick.health as h
+import lightwork.health as h
 from click.testing import CliRunner
-from maverick.cli import main
+from lightwork.cli import main
 
 
 def test_doctor_exits_nonzero_when_a_check_fails(monkeypatch, tmp_path):
@@ -50,5 +50,5 @@ def test_doctor_world_db_row_follows_maverick_home(monkeypatch, tmp_path):
     monkeypatch.setenv("MAVERICK_HOME", str(tmp_path))
     monkeypatch.delenv("MAVERICK_TENANT", raising=False)
     res = CliRunner().invoke(main, ["doctor"])
-    # The world-db row must point under MAVERICK_HOME, not ~/.maverick.
+    # The world-db row must point under MAVERICK_HOME, not ~/.lightwork.
     assert f"{tmp_path}" in res.output

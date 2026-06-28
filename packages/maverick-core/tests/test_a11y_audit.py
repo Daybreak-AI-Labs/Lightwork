@@ -1,7 +1,7 @@
 """Static accessibility audit: per-rule detection + clean passes."""
 from __future__ import annotations
 
-from maverick import a11y_audit as a
+from lightwork import a11y_audit as a
 
 
 def _rules(html):

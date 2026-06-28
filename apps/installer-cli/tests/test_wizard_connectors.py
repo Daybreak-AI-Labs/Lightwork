@@ -18,9 +18,9 @@ def _fake_catalog():
 
 def _drive(monkeypatch, *, enable, names, texts, secrets):
     """Run pick_connectors with scripted prompt answers."""
-    # Patch the catalog import target (function lives in maverick-core).
-    import maverick.tools.enterprise_connectors as ec
-    from maverick_installer import wizard
+    # Patch the catalog import target (function lives in lightwork-core).
+    import lightwork.tools.enterprise_connectors as ec
+    from lightwork_installer import wizard
     monkeypatch.setattr(ec, "connector_catalog", _fake_catalog)
 
     monkeypatch.setattr(wizard, "_q_confirm", lambda *a, **k: enable)
@@ -76,7 +76,7 @@ def test_blank_values_are_not_written(monkeypatch):
 
 def test_catalog_is_the_source_of_truth():
     """The real catalog is well-formed and covers headline systems."""
-    from maverick.tools.enterprise_connectors import connector_catalog
+    from lightwork.tools.enterprise_connectors import connector_catalog
 
     cat = connector_catalog()
     names = [e["name"] for e in cat]

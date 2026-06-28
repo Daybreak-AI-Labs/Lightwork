@@ -1,7 +1,7 @@
 """Predictive approvals: suggestion logic, confidence, safety guards, grouping."""
 from __future__ import annotations
 
-from maverick.predictive_approvals import (
+from lightwork.predictive_approvals import (
     SUGGEST_APPROVE,
     SUGGEST_ASK,
     SUGGEST_DENY,

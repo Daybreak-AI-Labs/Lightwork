@@ -6,9 +6,9 @@ import json
 import sys
 
 import pytest
-from maverick import shield_updates
-from maverick.audit import signing
-from maverick.shield_updates import (
+from lightwork import shield_updates
+from lightwork.audit import signing
+from lightwork.shield_updates import (
     UpdateRefused,
     apply_update,
     check_and_apply,
@@ -262,9 +262,9 @@ def test_default_fetcher_refuses_oversized_stream_before_json(monkeypatch):
 
 def test_module_never_imports_maverick_shield():
     """Kernel rule 1: the updater only STAGES the rules file -- it must work
-    (and import clean) on deployments without maverick_shield installed."""
+    (and import clean) on deployments without lightwork_shield installed."""
     import pathlib
 
     src = pathlib.Path(shield_updates.__file__).read_text(encoding="utf-8")
-    assert "import maverick_shield" not in src
-    assert "from maverick_shield" not in src
+    assert "import lightwork_shield" not in src
+    assert "from lightwork_shield" not in src

@@ -17,13 +17,13 @@ from dataclasses import dataclass, field
 from types import SimpleNamespace
 
 import pytest
-from maverick import grpc_plugin_host as gph
-from maverick.grpc_plugin_host import (
+from lightwork import grpc_plugin_host as gph
+from lightwork.grpc_plugin_host import (
     GrpcPluginError,
     load_configured_grpc_plugins,
     load_grpc_plugin,
 )
-from maverick.tools import Tool
+from lightwork.tools import Tool
 
 # ---- fake generated messages (what plugin_host_pb2 would define) ----
 
@@ -104,7 +104,7 @@ def rig(monkeypatch):
 
     fake_grpc.insecure_channel = insecure_channel
 
-    pb2 = types.ModuleType("maverick.grpc_api.plugin_host_pb2")
+    pb2 = types.ModuleType("lightwork.grpc_api.plugin_host_pb2")
     pb2.DescribeRequest = DescribeRequest
     pb2.ToolSpec = ToolSpec
     pb2.Manifest = Manifest
@@ -134,12 +134,12 @@ def rig(monkeypatch):
                 raise rig.call_excs.pop(0)
             return rig.answer(request)
 
-    pb2_grpc = types.ModuleType("maverick.grpc_api.plugin_host_pb2_grpc")
+    pb2_grpc = types.ModuleType("lightwork.grpc_api.plugin_host_pb2_grpc")
     pb2_grpc.MaverickPluginStub = MaverickPluginStub
 
     monkeypatch.setitem(sys.modules, "grpc", fake_grpc)
-    monkeypatch.setitem(sys.modules, "maverick.grpc_api.plugin_host_pb2", pb2)
-    monkeypatch.setitem(sys.modules, "maverick.grpc_api.plugin_host_pb2_grpc", pb2_grpc)
+    monkeypatch.setitem(sys.modules, "lightwork.grpc_api.plugin_host_pb2", pb2)
+    monkeypatch.setitem(sys.modules, "lightwork.grpc_api.plugin_host_pb2_grpc", pb2_grpc)
     monkeypatch.setattr(gph, "_CHANNELS", [])  # per-test exit-cleanup registry
     return rig
 
@@ -332,7 +332,7 @@ def test_persistently_dropped_channel_is_error(rig):
 
 def test_missing_grpcio_import_error(monkeypatch):
     monkeypatch.setitem(sys.modules, "grpc", None)  # import grpc -> ImportError
-    with pytest.raises(ImportError, match=r"maverick-agent\[grpc\]"):
+    with pytest.raises(ImportError, match=r"lightwork-agent\[grpc\]"):
         load_grpc_plugin("localhost:50061")
 
 
@@ -371,7 +371,7 @@ def test_load_configured_grpc_plugins(rig, monkeypatch):
         "localhost:50062": FakeRpcError(details="nobody home"),
     }
     monkeypatch.setattr(
-        "maverick.config.load_config",
+        "lightwork.config.load_config",
         lambda *a, **k: {"plugins": {"grpc": [
             {"target": "localhost:50061"},
             {"target": "localhost:50062"},     # unreachable: logged + skipped
@@ -389,13 +389,13 @@ def test_load_configured_grpc_plugins(rig, monkeypatch):
 
 
 def test_load_configured_grpc_plugins_default_empty(monkeypatch):
-    monkeypatch.setattr("maverick.config.load_config", lambda *a, **k: {})
+    monkeypatch.setattr("lightwork.config.load_config", lambda *a, **k: {})
     assert load_configured_grpc_plugins() == []
 
 
 def test_load_configured_grpc_plugins_without_grpcio(monkeypatch):
     monkeypatch.setattr(
-        "maverick.config.load_config",
+        "lightwork.config.load_config",
         lambda *a, **k: {"plugins": {"grpc": [{"target": "good:50061"}]}},
     )
     monkeypatch.setitem(sys.modules, "grpc", None)

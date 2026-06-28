@@ -85,11 +85,11 @@ class _FakeSandbox:
     """Records the commands the loop runs; returns a canned ExecResult."""
 
     def __init__(self):
-        self.workdir = "/tmp/maverick-fake-workdir"
+        self.workdir = "/tmp/lightwork-fake-workdir"
         self.commands = []
 
     def exec(self, cmd, timeout=None):
-        from maverick.sandbox.local import ExecResult
+        from lightwork.sandbox.local import ExecResult
         self.commands.append(cmd)
         return ExecResult(stdout="(edited)", stderr="", exit_code=0)
 
@@ -97,7 +97,7 @@ class _FakeSandbox:
 def _wire(monkeypatch, scripted_turns, *, diff):
     """Mock every external boundary run_sonnet_tools touches."""
     sandbox = _FakeSandbox()
-    monkeypatch.setattr("maverick.sandbox.build_sandbox", lambda: sandbox)
+    monkeypatch.setattr("lightwork.sandbox.build_sandbox", lambda: sandbox)
     monkeypatch.setattr(_sb, "_reset_workdir", lambda *a, **k: None)
     monkeypatch.setattr(_sb, "_git_diff", lambda _wd: diff)
     monkeypatch.setitem(sys.modules, "anthropic", _fake_anthropic(scripted_turns))

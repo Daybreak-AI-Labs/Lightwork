@@ -84,7 +84,7 @@ def _install_fake_httpx(monkeypatch, calls, responder):
 
 @pytest.mark.skipif(not _have_deps(), reason="httpx not installed")
 def test_bluesky_requires_allowlist():
-    from maverick_channels.bluesky import BlueskyChannel
+    from lightwork_channels.bluesky import BlueskyChannel
     with pytest.raises(ValueError, match="BLUESKY_ALLOWED_USER_IDS"):
         BlueskyChannel(handler=_noop, handle="me.bsky.social",
                        password="app-pw", allowed_user_ids=set())
@@ -92,8 +92,8 @@ def test_bluesky_requires_allowlist():
 
 @pytest.mark.skipif(not _have_deps(), reason="httpx not installed")
 def test_bluesky_stores_allowlist_and_denies_non_member():
-    from maverick_channels.base import is_allowed
-    from maverick_channels.bluesky import BlueskyChannel
+    from lightwork_channels.base import is_allowed
+    from lightwork_channels.bluesky import BlueskyChannel
     chan = BlueskyChannel(handler=_noop, handle="me.bsky.social",
                           password="app-pw", allowed_user_ids={"did:plc:owner"})
     assert is_allowed("did:plc:owner", chan.allowed_user_ids) is True
@@ -106,7 +106,7 @@ def test_bluesky_stores_allowlist_and_denies_non_member():
 def test_bluesky_dispatch_denies_unauthorized_author(monkeypatch):
     """An author not on the allowlist must never reach the handler nor
     trigger an outbound reply."""
-    from maverick_channels.bluesky import BlueskyChannel
+    from lightwork_channels.bluesky import BlueskyChannel
 
     seen = []
 
@@ -138,7 +138,7 @@ def test_bluesky_dispatch_denies_unauthorized_author(monkeypatch):
 def test_bluesky_dispatch_allows_member_and_shapes_reply(monkeypatch):
     """An allowlisted author reaches the handler, and the reply is posted
     as an in-thread createRecord with the right shape."""
-    from maverick_channels.bluesky import BlueskyChannel
+    from lightwork_channels.bluesky import BlueskyChannel
 
     seen = []
 
@@ -186,7 +186,7 @@ def test_parse_indexed_at_handles_mixed_precision():
     # seeded at 6-digit microseconds. Parsing must make the boundary second equal
     # regardless of the fractional form (a raw string compare ranked "...:05Z"
     # ABOVE "...:05.000000Z" because 'Z' > '.').
-    from maverick_channels.bluesky import _parse_indexed_at
+    from lightwork_channels.bluesky import _parse_indexed_at
 
     no_frac = _parse_indexed_at("2026-01-01T00:00:05Z")
     micros = _parse_indexed_at("2026-01-01T00:00:05.000000Z")
@@ -205,7 +205,7 @@ def test_bluesky_poll_skips_boundary_second_at_mixed_precision(monkeypatch):
     no-fractional 'Z' form must be treated as pre-startup (skipped), not
     delivered. A raw string compare ranked '...:05Z' ABOVE the microsecond-seeded
     floor '...:05.000000Z' and backfilled it -- duplicate replies + LLM spend."""
-    from maverick_channels.bluesky import BlueskyChannel
+    from lightwork_channels.bluesky import BlueskyChannel
 
     notifications = {"notifications": [
         {"reason": "mention", "indexedAt": "2026-01-01T00:00:05Z",
@@ -235,7 +235,7 @@ def test_bluesky_poll_filters_and_advances_cursor(monkeypatch):
     """_poll_once returns only new mention/reply notifications and moves the
     cursor to the newest indexedAt; a second poll over the same data yields
     nothing."""
-    from maverick_channels.bluesky import BlueskyChannel
+    from lightwork_channels.bluesky import BlueskyChannel
 
     notifications = {
         "notifications": [
@@ -279,7 +279,7 @@ def test_bluesky_poll_delivers_out_of_order_notification(monkeypatch):
     """A genuinely-new notification indexed BEFORE the newest one (AT-proto
     indexedAt is not monotonic) must still be delivered -- a strict high-water-
     mark on indexedAt used to silently drop it."""
-    from maverick_channels.bluesky import BlueskyChannel
+    from lightwork_channels.bluesky import BlueskyChannel
 
     state = {"notifs": [
         {"reason": "mention", "indexedAt": "2026-01-01T00:00:08Z",
@@ -319,7 +319,7 @@ def test_bluesky_poll_delivers_out_of_order_notification(monkeypatch):
 
 @pytest.mark.skipif(not _have_deps(), reason="httpx not installed")
 def test_bluesky_send_shapes_top_level_post(monkeypatch):
-    from maverick_channels.bluesky import BlueskyChannel
+    from lightwork_channels.bluesky import BlueskyChannel
 
     calls = []
     _install_fake_httpx(monkeypatch, calls, lambda *a: _FakeResponse())

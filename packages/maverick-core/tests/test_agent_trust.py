@@ -7,8 +7,8 @@ from __future__ import annotations
 from types import SimpleNamespace
 
 import pytest
-from maverick import agent_trust
-from maverick.agent_trust import (
+from lightwork import agent_trust
+from lightwork.agent_trust import (
     TrustedAgent,
     clamp_budget,
     decide_inbound,
@@ -155,30 +155,30 @@ def test_permits_scope():
 
 def test_verify_identity_against_pinned_key():
     pytest.importorskip("cryptography")
-    from maverick import federation_envelope as fe
+    from lightwork import federation_envelope as fe
 
-    env = fe.sign_envelope({"schema": "maverick-test/1", "origin": "vega",
+    env = fe.sign_envelope({"schema": "lightwork-test/1", "origin": "vega",
                             "created_at": 1.0, "payload": "hi"})
     pinned = env["pubkey"]
     reg = _reg(TrustedAgent(id="vega", pubkey=pinned))
 
     ok, _ = agent_trust.verify_identity(
-        "vega", env, expected_schema="maverick-test/1", registry=reg)
+        "vega", env, expected_schema="lightwork-test/1", registry=reg)
     assert ok
 
     # Unknown agent and an agent without a pinned key both fail closed.
     ok2, reason2 = agent_trust.verify_identity(
-        "ghost", env, expected_schema="maverick-test/1", registry={})
+        "ghost", env, expected_schema="lightwork-test/1", registry={})
     assert not ok2 and "registry" in reason2
     ok3, reason3 = agent_trust.verify_identity(
-        "nopub", env, expected_schema="maverick-test/1",
+        "nopub", env, expected_schema="lightwork-test/1",
         registry=_reg(TrustedAgent(id="nopub")))
     assert not ok3 and "pinned" in reason3
 
     # Tampering with a signed field is rejected.
     tampered = dict(env, payload="changed")
     ok4, _ = agent_trust.verify_identity(
-        "vega", tampered, expected_schema="maverick-test/1", registry=reg)
+        "vega", tampered, expected_schema="lightwork-test/1", registry=reg)
     assert not ok4
 
 
@@ -208,8 +208,8 @@ def _patch_trust(monkeypatch, *, registry, enforced=True):
 
 
 def _fed_service(monkeypatch, *, registry, enforced=True):
-    from maverick import federation
-    from maverick.federation import FederationService, Peer
+    from lightwork import federation
+    from lightwork.federation import FederationService, Peer
 
     _patch_trust(monkeypatch, registry=registry, enforced=enforced)
     rows: list[dict] = []
@@ -252,7 +252,7 @@ def test_federation_inbound_tool_outside_ceiling_refused(monkeypatch):
 
 
 def test_federation_outbound_blocked_for_unregistered_peer(monkeypatch):
-    from maverick.federation import FederationNode, Peer
+    from lightwork.federation import FederationNode, Peer
 
     _patch_trust(monkeypatch, registry={}, enforced=True)
 
@@ -281,7 +281,7 @@ def test_federation_disengaged_unchanged(monkeypatch):
 
 
 def test_a2a_capability_tightened_by_registry(monkeypatch):
-    from maverick.a2a_tasks import _a2a_capability
+    from lightwork.a2a_tasks import _a2a_capability
 
     monkeypatch.setattr(agent_trust, "agent_trust_enforced", lambda: True)
     monkeypatch.setattr(
@@ -294,7 +294,7 @@ def test_a2a_capability_tightened_by_registry(monkeypatch):
 
 
 def test_a2a_capability_unchanged_when_disengaged(monkeypatch):
-    from maverick.a2a_tasks import _a2a_capability
+    from lightwork.a2a_tasks import _a2a_capability
 
     monkeypatch.setattr(agent_trust, "agent_trust_enforced", lambda: False)
     # Disengaged -> no [agent_trust] tightening; default ceiling (all tools,
@@ -307,7 +307,7 @@ def test_a2a_capability_unchanged_when_disengaged(monkeypatch):
 
 
 def _fleet(monkeypatch, *, registry, enforced=True):
-    from maverick import fleet_memory
+    from lightwork import fleet_memory
     monkeypatch.setattr(fleet_memory, "enabled", lambda: True)
     monkeypatch.setattr(fleet_memory, "roster",
                         lambda: [{"source": "acme:bot"}])
@@ -353,7 +353,7 @@ def test_fleet_recall_hard_filters_cross_department_content(monkeypatch):
     # dropped (data_scopes is a hard filter, not just a ranking boost).
     from types import SimpleNamespace
 
-    from maverick import reflexion
+    from lightwork import reflexion
     reg = _reg(TrustedAgent(id="bot", data_scopes=frozenset({"support"})))
     fleet_memory = _fleet(monkeypatch, registry=reg)
     monkeypatch.setattr(reflexion, "recall", lambda *a, **k: [
@@ -476,14 +476,14 @@ def test_inbound_unrecognised_risk_refused():
 
 
 def test_decide_memory_access_unscoped_denied():
-    from maverick.agent_trust import decide_memory_access
+    from lightwork.agent_trust import decide_memory_access
     reg = _reg(TrustedAgent(id="v", data_scopes=frozenset({"support"})))
     assert decide_memory_access("v", None, registry=reg, enforced=True).denied
     assert decide_memory_access("v", "", registry=reg, enforced=True).denied
 
 
 def test_decide_memory_access_scope_enforced():
-    from maverick.agent_trust import decide_memory_access
+    from lightwork.agent_trust import decide_memory_access
     reg = _reg(TrustedAgent(id="v", data_scopes=frozenset({"support"})))
     assert decide_memory_access("v", "finance", registry=reg, enforced=True).denied
     assert decide_memory_access("v", "support", registry=reg, enforced=True).allowed
@@ -496,22 +496,22 @@ def test_decide_memory_access_scope_enforced():
 
 def test_verify_identity_rejects_origin_mismatch():
     pytest.importorskip("cryptography")
-    from maverick import federation_envelope as fe
+    from lightwork import federation_envelope as fe
 
     # Signed with origin "other", but the registry entry is keyed "vega".
-    env = fe.sign_envelope({"schema": "maverick-test/1", "origin": "other",
+    env = fe.sign_envelope({"schema": "lightwork-test/1", "origin": "other",
                             "created_at": 1.0})
     reg = _reg(TrustedAgent(id="vega", pubkey=env["pubkey"]))
     ok, reason = agent_trust.verify_identity(
-        "vega", env, expected_schema="maverick-test/1", registry=reg)
+        "vega", env, expected_schema="lightwork-test/1", registry=reg)
     assert not ok and "origin" in reason.lower()
 
 
 def test_verify_identity_rejects_revoked():
     reg = _reg(TrustedAgent(id="vega", pubkey="ab" * 32, revoked=True))
     ok, reason = agent_trust.verify_identity(
-        "vega", {"origin": "vega", "schema": "maverick-test/1"},
-        expected_schema="maverick-test/1", registry=reg)
+        "vega", {"origin": "vega", "schema": "lightwork-test/1"},
+        expected_schema="lightwork-test/1", registry=reg)
     assert not ok and "revoked" in reason
 
 
@@ -519,20 +519,20 @@ def test_verify_identity_rejects_revoked():
 
 
 def test_a2a_trust_block_denies_when_engaged_and_no_entry(monkeypatch):
-    from maverick.a2a_tasks import _a2a_trust_block
+    from lightwork.a2a_tasks import _a2a_trust_block
     monkeypatch.setattr(agent_trust, "load_trust_state", lambda: (True, {}))
     reason = _a2a_trust_block()
     assert reason and "trust registry" in reason
 
 
 def test_a2a_trust_block_admits_with_entry(monkeypatch):
-    from maverick.a2a_tasks import _a2a_trust_block
+    from lightwork.a2a_tasks import _a2a_trust_block
     reg = _reg(TrustedAgent(id="a2a", direction="both"))
     monkeypatch.setattr(agent_trust, "load_trust_state", lambda: (True, reg))
     assert _a2a_trust_block() is None
 
 
 def test_a2a_trust_block_noop_when_disengaged(monkeypatch):
-    from maverick.a2a_tasks import _a2a_trust_block
+    from lightwork.a2a_tasks import _a2a_trust_block
     monkeypatch.setattr(agent_trust, "load_trust_state", lambda: (False, {}))
     assert _a2a_trust_block() is None

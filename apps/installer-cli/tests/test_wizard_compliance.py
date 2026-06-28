@@ -4,7 +4,7 @@ GDPR/EU AI Act documentation commands so a non-technical operator can find them
 reachable from the wizard)."""
 from __future__ import annotations
 
-from maverick_installer import wizard
+from lightwork_installer import wizard
 
 
 def test_regulated_deployment_detects_each_sensitive_control():

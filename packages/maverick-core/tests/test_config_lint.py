@@ -1,7 +1,7 @@
-"""Tests for the config validator (maverick.config_lint)."""
+"""Tests for the config validator (lightwork.config_lint)."""
 from __future__ import annotations
 
-from maverick.config_lint import Finding, format_findings, lint_config
+from lightwork.config_lint import Finding, format_findings, lint_config
 
 
 def _by_section(findings):

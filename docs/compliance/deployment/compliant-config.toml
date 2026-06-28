@@ -7,7 +7,7 @@
 # config — review every value for your environment before use.
 #
 # The keys below mirror what the installer wizard emits and what the SOC 2
-# evidence collector (maverick.soc2.collect_soc2_evidence) probes. After applying,
+# evidence collector (lightwork.soc2.collect_soc2_evidence) probes. After applying,
 # `maverick soc2` should report capability_enforcement / tenant_isolation /
 # usage_quotas / oidc_auth / encryption_at_rest = enabled, audit_log = ok, and an
 # audit_signing_key present.
@@ -20,7 +20,7 @@ enforce = true            # signed, attenuating per-agent grants enforced at the
 [auth.oidc]
 enabled = true
 issuer = "<https://your-idp.example.com>"
-audience = "<maverick-dashboard-client-id>"
+audience = "<lightwork-dashboard-client-id>"
 # jwks_uri is usually discovered from the issuer; set explicitly if required:
 # jwks_uri = "<https://your-idp.example.com/.well-known/jwks.json>"
 

@@ -7,18 +7,18 @@ back to gRPC when the queue backend isn't selected."""
 from __future__ import annotations
 
 import pytest
-from maverick_dashboard import app as dash_app
+from lightwork_dashboard import app as dash_app
 
 
 @pytest.mark.asyncio
 async def test_grpc_attempted_when_queue_not_installed(monkeypatch):
     calls = []
     monkeypatch.setattr(
-        "maverick.queue_dispatcher.install_from_config",
+        "lightwork.queue_dispatcher.install_from_config",
         lambda: calls.append("queue") or False,
     )
     monkeypatch.setattr(
-        "maverick.grpc_dispatcher.install_from_config",
+        "lightwork.grpc_dispatcher.install_from_config",
         lambda: calls.append("grpc") or True,
     )
     await dash_app._install_queue_dispatcher()
@@ -29,11 +29,11 @@ async def test_grpc_attempted_when_queue_not_installed(monkeypatch):
 async def test_grpc_skipped_when_queue_installs(monkeypatch):
     calls = []
     monkeypatch.setattr(
-        "maverick.queue_dispatcher.install_from_config",
+        "lightwork.queue_dispatcher.install_from_config",
         lambda: calls.append("queue") or True,
     )
     monkeypatch.setattr(
-        "maverick.grpc_dispatcher.install_from_config",
+        "lightwork.grpc_dispatcher.install_from_config",
         lambda: calls.append("grpc") or True,
     )
     await dash_app._install_queue_dispatcher()
@@ -43,8 +43,8 @@ async def test_grpc_skipped_when_queue_installs(monkeypatch):
 @pytest.mark.asyncio
 async def test_both_off_is_noop(monkeypatch):
     monkeypatch.setattr(
-        "maverick.queue_dispatcher.install_from_config", lambda: False)
+        "lightwork.queue_dispatcher.install_from_config", lambda: False)
     monkeypatch.setattr(
-        "maverick.grpc_dispatcher.install_from_config", lambda: False)
+        "lightwork.grpc_dispatcher.install_from_config", lambda: False)
     # No raise, no dispatcher change -> default in-process install.
     await dash_app._install_queue_dispatcher()

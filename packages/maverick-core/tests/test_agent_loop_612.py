@@ -13,13 +13,13 @@ from __future__ import annotations
 from pathlib import Path
 
 import pytest
-from maverick.agent import Agent
-from maverick.blackboard import Blackboard
-from maverick.budget import Budget, BudgetExceeded
-from maverick.llm import LLMResponse, ToolCall
-from maverick.sandbox import LocalBackend
-from maverick.swarm import SwarmContext
-from maverick.world_model import WorldModel
+from lightwork.agent import Agent
+from lightwork.blackboard import Blackboard
+from lightwork.budget import Budget, BudgetExceeded
+from lightwork.llm import LLMResponse, ToolCall
+from lightwork.sandbox import LocalBackend
+from lightwork.swarm import SwarmContext
+from lightwork.world_model import WorldModel
 
 
 def _assert_no_orphan_tool_use(messages: list[dict]) -> None:
@@ -193,7 +193,7 @@ class TestReleaseSpawns:
 
     @pytest.mark.asyncio
     async def test_spawn_subagent_releases_on_child_raise(self, tmp_path):
-        from maverick.tools.spawn import spawn_subagent_tool
+        from lightwork.tools.spawn import spawn_subagent_tool
 
         ctx = _ctx(tmp_path, _CapturingLLM([]))
         ctx.max_total_spawns = 1
@@ -203,7 +203,7 @@ class TestReleaseSpawns:
         async def _boom(self):
             raise RuntimeError("child blew up")
 
-        from maverick.agent import Agent as _A
+        from lightwork.agent import Agent as _A
         orig_run = _A.run
         _A.run = _boom
         try:
@@ -219,14 +219,14 @@ class TestReleaseSpawns:
 
     @pytest.mark.asyncio
     async def test_spawn_swarm_releases_failed_children_only(self, tmp_path):
-        from maverick.tools.spawn import spawn_swarm_tool
+        from lightwork.tools.spawn import spawn_swarm_tool
 
         ctx = _ctx(tmp_path, _CapturingLLM([]))
         ctx.max_total_spawns = 4
         parent = Agent(ctx=ctx, role="orchestrator", brief="root")
 
-        from maverick.agent import Agent as _A
-        from maverick.agent import AgentResult
+        from lightwork.agent import Agent as _A
+        from lightwork.agent import AgentResult
         calls = {"n": 0}
 
         async def _mixed(self):

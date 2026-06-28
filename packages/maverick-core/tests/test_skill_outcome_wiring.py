@@ -9,12 +9,12 @@ from __future__ import annotations
 
 from types import SimpleNamespace
 
-from maverick.orchestrator import _record_skill_outcome
-from maverick.skill import stats as skill_stats
+from lightwork.orchestrator import _record_skill_outcome
+from lightwork.skill import stats as skill_stats
 
 
 def test_swarmcontext_has_skills_used_set():
-    from maverick.swarm import SwarmContext
+    from lightwork.swarm import SwarmContext
     f = {f.name: f for f in SwarmContext.__dataclass_fields__.values()}
     assert "skills_used" in f
     # default_factory=set -> each ctx gets its own, not a shared mutable.

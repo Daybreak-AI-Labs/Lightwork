@@ -5,8 +5,8 @@ import json
 import xml.etree.ElementTree as ET
 
 import pytest
-from maverick.safety_bulletins import load_bulletins, parse_bulletin, render_rss
-from maverick.screenshot_seal import (
+from lightwork.safety_bulletins import load_bulletins, parse_bulletin, render_rss
+from lightwork.screenshot_seal import (
     SealKeyMissing,
     _anchor_path,
     seal,
@@ -175,7 +175,7 @@ def test_malformed_anchor_json_is_tampered_not_crash(tmp_path, anchor_json):
 
 def test_missing_key_refuses(tmp_path, monkeypatch):
     monkeypatch.delenv("MAVERICK_SCREENSHOT_KEY", raising=False)
-    import maverick.config as config_mod
+    import lightwork.config as config_mod
     monkeypatch.setattr(config_mod, "load_config", dict)
     p = _capture(tmp_path)
     with pytest.raises(SealKeyMissing):
@@ -196,8 +196,8 @@ def test_computer_screenshot_seals_when_key_set(tmp_path, monkeypatch):
     """The computer tool's screenshot path persists + seals when a key is set."""
     import base64 as _b64
 
-    import maverick.paths as paths_mod
-    import maverick.tools.computer as comp
+    import lightwork.paths as paths_mod
+    import lightwork.tools.computer as comp
 
     monkeypatch.setenv("MAVERICK_SCREENSHOT_KEY", KEY)
     monkeypatch.setattr(paths_mod, "data_dir",
@@ -212,9 +212,9 @@ def test_computer_screenshot_seals_when_key_set(tmp_path, monkeypatch):
 def test_computer_screenshot_no_key_no_capture(tmp_path, monkeypatch):
     import base64 as _b64
 
-    import maverick.config as config_mod
-    import maverick.paths as paths_mod
-    import maverick.tools.computer as comp
+    import lightwork.config as config_mod
+    import lightwork.paths as paths_mod
+    import lightwork.tools.computer as comp
 
     monkeypatch.delenv("MAVERICK_SCREENSHOT_KEY", raising=False)
     monkeypatch.setattr(config_mod, "load_config", dict)

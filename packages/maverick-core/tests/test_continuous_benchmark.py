@@ -2,7 +2,7 @@
 from __future__ import annotations
 
 import pytest
-from maverick.continuous_benchmark import (
+from lightwork.continuous_benchmark import (
     detect_regression,
     load_history,
     record_result,

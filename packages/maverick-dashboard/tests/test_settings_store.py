@@ -16,7 +16,7 @@ def _lock_held_during(monkeypatch, call) -> bool:
     in-process settings lock is held while the mutator is reading the overlay.
     _locked() acquires the (non-reentrant) _SETTINGS_LOCK, so a non-blocking
     acquire from inside load_overlay() fails iff the mutator holds the lock."""
-    from maverick_dashboard import settings_store
+    from lightwork_dashboard import settings_store
 
     held: list[bool] = []
     real_load = settings_store.load_overlay
@@ -44,7 +44,7 @@ def test_set_channel_holds_lock(monkeypatch, tmp_path):
 
 def test_clear_channel_holds_lock(monkeypatch, tmp_path):
     monkeypatch.setenv("HOME", str(tmp_path))
-    from maverick_dashboard import settings_store
+    from lightwork_dashboard import settings_store
 
     settings_store.set_channel("telegram", True, {"bot_token": "tok-12345"})  # pragma: allowlist secret
     held = _lock_held_during(monkeypatch, lambda s: s.clear_channel("telegram"))
@@ -55,10 +55,10 @@ def test_concurrent_channel_and_provider_both_apply(monkeypatch, tmp_path):
     """A set_channel racing a set_provider (different sections of one overlay
     file) must not have either change clobbered by a stale re-read."""
     monkeypatch.setenv("HOME", str(tmp_path))
-    from maverick import config
+    from lightwork import config
     for v in config.PROVIDER_KEY_ENV_VARS + config.PROVIDER_BASE_URL_ENV_VARS:
         monkeypatch.delenv(v, raising=False)
-    from maverick_dashboard import settings_store
+    from lightwork_dashboard import settings_store
 
     barrier = threading.Barrier(2)
 

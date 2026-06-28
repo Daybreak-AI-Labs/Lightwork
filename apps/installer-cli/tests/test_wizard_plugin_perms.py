@@ -1,14 +1,14 @@
 """The wizard can configure plugin permissions (#593): `[plugins].grant` and
 `enforce_permissions`. Rule-6 integrity check — the keys the wizard writes are
-exactly the ones `maverick.plugins` reads."""
+exactly the ones `lightwork.plugins` reads."""
 from __future__ import annotations
 
 
 def _write(cfg_dir, monkeypatch, **kw):
-    monkeypatch.setattr("maverick_installer.wizard.CONFIG_DIR", cfg_dir)
-    monkeypatch.setattr("maverick_installer.wizard.ENV_FILE", cfg_dir / ".env")
-    monkeypatch.setattr("maverick_installer.wizard.CONFIG_FILE", cfg_dir / "config.toml")
-    from maverick_installer.wizard import write_config
+    monkeypatch.setattr("lightwork_installer.wizard.CONFIG_DIR", cfg_dir)
+    monkeypatch.setattr("lightwork_installer.wizard.ENV_FILE", cfg_dir / ".env")
+    monkeypatch.setattr("lightwork_installer.wizard.CONFIG_FILE", cfg_dir / "config.toml")
+    from lightwork_installer.wizard import write_config
     write_config(
         providers=["anthropic"], role_models={},
         channels={}, safety={"profile": "balanced"},
@@ -42,7 +42,7 @@ def test_no_grant_no_enforce_omitted(tmp_path, monkeypatch):
 
 
 def test_keys_match_what_kernel_reads(tmp_path, monkeypatch):
-    # The wizard's TOML feeds maverick.plugins._plugin_permission_policy, which
+    # The wizard's TOML feeds lightwork.plugins._plugin_permission_policy, which
     # reads `grant` + `enforce_permissions` from the [plugins] section.
     cfg = _write(
         tmp_path, monkeypatch,

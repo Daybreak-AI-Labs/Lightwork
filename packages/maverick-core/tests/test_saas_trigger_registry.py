@@ -3,7 +3,7 @@ from __future__ import annotations
 
 import json
 
-from maverick.tools.saas_trigger_registry import saas_trigger_registry
+from lightwork.tools.saas_trigger_registry import saas_trigger_registry
 
 
 def _run(**kw):

@@ -16,7 +16,7 @@ import pytest
 
 fastapi = pytest.importorskip("fastapi")
 from fastapi.testclient import TestClient  # noqa: E402
-from maverick_channels.rcs import RcsChannel  # noqa: E402
+from lightwork_channels.rcs import RcsChannel  # noqa: E402
 
 TOKEN = "client-token-123"
 SENDER = "+14155551234"
@@ -55,7 +55,7 @@ def _envelope(event):
 def _no_db(monkeypatch):
     """No dedup DB in most tests: the claim path is exercised separately."""
     monkeypatch.setattr(
-        "maverick.world_model.WorldModel",
+        "lightwork.world_model.WorldModel",
         MagicMock(side_effect=RuntimeError("no db")),
     )
 
@@ -205,7 +205,7 @@ def test_dedup_claim_skips_redelivery(monkeypatch):
     ch.send = AsyncMock()
     wm = MagicMock()
     wm.mark_message_processed.return_value = False  # already claimed
-    monkeypatch.setattr("maverick.world_model.WorldModel", MagicMock(return_value=wm))
+    monkeypatch.setattr("lightwork.world_model.WorldModel", MagicMock(return_value=wm))
     client = TestClient(ch._app)
 
     r = client.post("/webhook/rcs", params={"clientToken": TOKEN},
@@ -221,7 +221,7 @@ def test_claim_released_on_handler_failure(monkeypatch):
     ch.send = AsyncMock()
     wm = MagicMock()
     wm.mark_message_processed.return_value = True
-    monkeypatch.setattr("maverick.world_model.WorldModel", MagicMock(return_value=wm))
+    monkeypatch.setattr("lightwork.world_model.WorldModel", MagicMock(return_value=wm))
     client = TestClient(ch._app)
 
     r = client.post("/webhook/rcs", params={"clientToken": TOKEN},
@@ -339,7 +339,7 @@ def test_send_missing_google_auth_raises_importerror(monkeypatch):
     for name in ("google", "google.auth", "google.auth.transport",
                  "google.auth.transport.requests"):
         monkeypatch.setitem(sys.modules, name, None)  # force ImportError
-    with pytest.raises(ImportError, match=r"maverick-channels\[rcs\]"):
+    with pytest.raises(ImportError, match=r"lightwork-channels\[rcs\]"):
         asyncio.run(ch.send(SENDER, "hi"))
 
 

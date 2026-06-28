@@ -1,7 +1,7 @@
 """key_rotation: key rotation planner."""
 from __future__ import annotations
 
-from maverick.tools.key_rotation import key_rotation
+from lightwork.tools.key_rotation import key_rotation
 
 
 def _run(**kw):

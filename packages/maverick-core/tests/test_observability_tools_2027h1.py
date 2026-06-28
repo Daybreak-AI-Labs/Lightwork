@@ -2,7 +2,7 @@
 latency_heatmap + tool_call_inspector have their own suites. Deterministic."""
 from __future__ import annotations
 
-from maverick.tools.trace_compare import trace_compare
+from lightwork.tools.trace_compare import trace_compare
 
 # ---- trace_compare ----
 
@@ -36,7 +36,7 @@ def test_trace_validation():
 
 
 def test_batch_registered():
-    from maverick.tools import base_registry
+    from lightwork.tools import base_registry
 
     class _W:
         pass

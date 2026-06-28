@@ -2,7 +2,7 @@
 from __future__ import annotations
 
 import pytest
-from maverick.compaction import plugins as cp
+from lightwork.compaction import plugins as cp
 
 
 @pytest.fixture(autouse=True)
@@ -37,7 +37,7 @@ def test_register_and_dispatch():
 
 def test_default_uses_heuristic(monkeypatch):
     monkeypatch.delenv("MAVERICK_COMPACTION_STRATEGY", raising=False)
-    monkeypatch.setattr("maverick.config.load_config", dict)
+    monkeypatch.setattr("lightwork.config.load_config", dict)
     # short message list -> heuristic returns it unchanged
     msgs = _msgs(3)
     assert cp.compact_with(msgs) == msgs
@@ -53,7 +53,7 @@ def test_unknown_strategy_fails_safe_to_builtin(monkeypatch):
 def test_config_selects_strategy(monkeypatch):
     cp.register(_Marker())
     monkeypatch.delenv("MAVERICK_COMPACTION_STRATEGY", raising=False)
-    monkeypatch.setattr("maverick.config.load_config",
+    monkeypatch.setattr("lightwork.config.load_config",
                         lambda: {"context": {"compaction_strategy": "marker"}})
     out = cp.compact_with(_msgs(2))
     assert out[0]["content"] == "compacted 2"
@@ -62,7 +62,7 @@ def test_config_selects_strategy(monkeypatch):
 def test_env_overrides_config(monkeypatch):
     cp.register(_Marker())
     monkeypatch.setenv("MAVERICK_COMPACTION_STRATEGY", "marker")
-    monkeypatch.setattr("maverick.config.load_config",
+    monkeypatch.setattr("lightwork.config.load_config",
                         lambda: {"context": {"compaction_strategy": "heuristic"}})
     assert cp.compact_with(_msgs(2))[0]["content"] == "compacted 2"
 
@@ -90,9 +90,9 @@ def test_hybrid_flag_warns_once_and_is_a_noop(monkeypatch, caplog):
     monkeypatch.setattr(cp, "_HYBRID_NOOP_WARNED", False)
     monkeypatch.setenv("MAVERICK_COMPACTION_HYBRID", "1")
     monkeypatch.delenv("MAVERICK_COMPACTION_STRATEGY", raising=False)
-    monkeypatch.setattr("maverick.config.load_config", dict)
+    monkeypatch.setattr("lightwork.config.load_config", dict)
     msgs = _msgs(3)
-    with caplog.at_level(logging.WARNING, logger="maverick.compaction.plugins"):
+    with caplog.at_level(logging.WARNING, logger="lightwork.compaction.plugins"):
         out = cp.compact_with(msgs)
         cp.compact_with(msgs)  # second call must not warn again
     assert out == msgs  # behavior unchanged
@@ -105,8 +105,8 @@ def test_hybrid_flag_off_does_not_warn(monkeypatch, caplog):
 
     monkeypatch.setattr(cp, "_HYBRID_NOOP_WARNED", False)
     monkeypatch.delenv("MAVERICK_COMPACTION_HYBRID", raising=False)
-    monkeypatch.setattr("maverick.config.load_config", dict)
-    with caplog.at_level(logging.WARNING, logger="maverick.compaction.plugins"):
+    monkeypatch.setattr("lightwork.config.load_config", dict)
+    with caplog.at_level(logging.WARNING, logger="lightwork.compaction.plugins"):
         cp.compact_with(_msgs(3))
     assert not [r for r in caplog.records if "hybrid" in r.getMessage()]
 

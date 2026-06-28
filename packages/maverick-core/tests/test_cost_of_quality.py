@@ -1,7 +1,7 @@
 """cost_of_quality: cost-of-quality study helper."""
 from __future__ import annotations
 
-from maverick.tools.cost_of_quality import cost_of_quality
+from lightwork.tools.cost_of_quality import cost_of_quality
 
 
 def _analyze(runs):

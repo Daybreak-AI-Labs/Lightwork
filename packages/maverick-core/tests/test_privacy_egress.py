@@ -8,7 +8,7 @@ providers (local/self-hosted data never leaves the box).
 from __future__ import annotations
 
 import pytest
-from maverick.llm import LLM, LLMResponse
+from lightwork.llm import LLM, LLMResponse
 
 OPUS = "claude-opus-4-8"
 
@@ -16,22 +16,22 @@ OPUS = "claude-opus-4-8"
 @pytest.fixture(autouse=True)
 def _clean(monkeypatch):
     monkeypatch.delenv("MAVERICK_REDACT_EGRESS", raising=False)
-    monkeypatch.setattr("maverick.config.load_config", lambda *a, **k: {})
+    monkeypatch.setattr("lightwork.config.load_config", lambda *a, **k: {})
 
 
 def test_disabled_by_default():
-    from maverick.privacy_egress import redact_egress_enabled
+    from lightwork.privacy_egress import redact_egress_enabled
     assert redact_egress_enabled() is False
 
 
 def test_env_enables(monkeypatch):
-    from maverick.privacy_egress import redact_egress_enabled
+    from lightwork.privacy_egress import redact_egress_enabled
     monkeypatch.setenv("MAVERICK_REDACT_EGRESS", "1")
     assert redact_egress_enabled() is True
 
 
 def test_redact_prompt_handles_str_and_block_content():
-    from maverick.privacy_egress import redact_prompt
+    from lightwork.privacy_egress import redact_prompt
     system, messages = redact_prompt(
         "reach me at jane@example.com",
         [
@@ -49,7 +49,7 @@ def test_redact_prompt_covers_tool_result_and_tool_use_channels():
     # carries its payload in `content` (str OR nested block list) and tool_use in
     # `input` -- neither is a `text` field, so the old redactor skipped them and
     # cat .env / db-query PII reached the provider verbatim.
-    from maverick.privacy_egress import redact_prompt
+    from lightwork.privacy_egress import redact_prompt
     _, messages = redact_prompt(
         "s",
         [
@@ -74,7 +74,7 @@ def test_redact_prompt_covers_tool_result_and_tool_use_channels():
 
 
 def test_redact_prompt_does_not_mutate_caller_messages():
-    from maverick.privacy_egress import redact_prompt
+    from lightwork.privacy_egress import redact_prompt
     original = [{"role": "user", "content": "ssn 123-45-6789"}]
     _, redacted = redact_prompt("s", original)
     assert original[0]["content"] == "ssn 123-45-6789"  # untouched
@@ -82,7 +82,7 @@ def test_redact_prompt_does_not_mutate_caller_messages():
 
 
 def test_local_provider_is_not_redacted(monkeypatch):
-    from maverick.privacy_egress import maybe_redact_egress
+    from lightwork.privacy_egress import maybe_redact_egress
     monkeypatch.setenv("MAVERICK_REDACT_EGRESS", "1")
     s, _ = maybe_redact_egress("ollama", "email a@b.com", [])
     assert s == "email a@b.com"  # data stays on-box; no redaction

@@ -1,7 +1,7 @@
 """consent_ergonomics: plain-language consent prompt + risk badge."""
 from __future__ import annotations
 
-from maverick.tools.consent_ergonomics import consent_ergonomics
+from lightwork.tools.consent_ergonomics import consent_ergonomics
 
 
 def _run(request):

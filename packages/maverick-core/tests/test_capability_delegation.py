@@ -1,7 +1,7 @@
 """capability_delegation: privilege-escalation validation of delegation graphs."""
 from __future__ import annotations
 
-from maverick.tools.capability_delegation import capability_delegation
+from lightwork.tools.capability_delegation import capability_delegation
 
 
 def _v(roots, grants):
@@ -57,7 +57,7 @@ def test_errors():
 
 
 def test_registered():
-    from maverick.tools import base_registry
+    from lightwork.tools import base_registry
 
     class _W:
         pass

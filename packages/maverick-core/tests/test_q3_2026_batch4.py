@@ -9,7 +9,7 @@ from unittest.mock import MagicMock
 # ---------- Kubernetes sandbox ----------
 
 def test_k8s_missing_kubectl(monkeypatch):
-    from maverick.sandbox.kubernetes import KubernetesBackend
+    from lightwork.sandbox.kubernetes import KubernetesBackend
 
     def _no_kubectl(args, *a, **k):
         if args and args[0] == "kubectl":
@@ -37,7 +37,7 @@ def test_k8s_exec_builds_kubectl_run(monkeypatch):
         return MagicMock(returncode=0, stdout="ran\n", stderr="")
 
     monkeypatch.setattr("subprocess.run", _fake_run)
-    from maverick.sandbox.kubernetes import KubernetesBackend
+    from lightwork.sandbox.kubernetes import KubernetesBackend
     backend = KubernetesBackend(image="alpine", namespace="ci", allow_network=True)
     result = backend.exec("echo hi")
     assert result.ok
@@ -63,7 +63,7 @@ def test_k8s_passes_context(monkeypatch):
         return MagicMock(returncode=0, stdout="", stderr="")
 
     monkeypatch.setattr("subprocess.run", _fake_run)
-    from maverick.sandbox.kubernetes import KubernetesBackend
+    from lightwork.sandbox.kubernetes import KubernetesBackend
     backend = KubernetesBackend(context="minikube", allow_network=True)
     backend.exec("true")
     assert "--context" in captured["args"]
@@ -75,7 +75,7 @@ def test_build_sandbox_constructs_k8s(monkeypatch):
         "subprocess.run",
         lambda args, *a, **k: MagicMock(returncode=0, stdout=b"", stderr=b""),
     )
-    import maverick.config as cfg
+    import lightwork.config as cfg
 
     def _fake_cfg():
         return {"sandbox": {"backend": "kubernetes", "namespace": "x",
@@ -83,7 +83,7 @@ def test_build_sandbox_constructs_k8s(monkeypatch):
 
     monkeypatch.setattr(cfg, "load_config", _fake_cfg)
     monkeypatch.setattr(cfg, "get_sandbox", lambda: _fake_cfg()["sandbox"])
-    from maverick.sandbox import build_sandbox
+    from lightwork.sandbox import build_sandbox
     sb = build_sandbox()
     assert sb.__class__.__name__ == "KubernetesBackend"
     assert sb.namespace == "x"
@@ -97,7 +97,7 @@ def test_k8s_disallow_network_fails_closed(monkeypatch):
         return MagicMock(returncode=0, stdout=b"", stderr=b"")
 
     monkeypatch.setattr("subprocess.run", _fake_run)
-    from maverick.sandbox.kubernetes import KubernetesBackend
+    from lightwork.sandbox.kubernetes import KubernetesBackend
     backend = KubernetesBackend(allow_network=False)
     out = backend.exec("echo hi")
     assert out.exit_code == 2
@@ -121,7 +121,7 @@ def test_k8s_pod_overrides_non_root_and_limits(monkeypatch):
         return MagicMock(returncode=0, stdout="ok\n", stderr="")
 
     monkeypatch.setattr("subprocess.run", _fake_run)
-    from maverick.sandbox.kubernetes import KubernetesBackend
+    from lightwork.sandbox.kubernetes import KubernetesBackend
     backend = KubernetesBackend(image="alpine", allow_network=True,
                                 memory="2g", cpus="1")
     backend.exec("echo hi")
@@ -144,7 +144,7 @@ def test_k8s_disallow_network_emits_networkpolicy_hint(monkeypatch, caplog):
         "subprocess.run",
         lambda args, *a, **k: MagicMock(returncode=0, stdout=b"", stderr=b""),
     )
-    from maverick.sandbox.kubernetes import KubernetesBackend
+    from lightwork.sandbox.kubernetes import KubernetesBackend
     backend = KubernetesBackend(namespace="ci", allow_network=False)
     with caplog.at_level(logging.WARNING):
         out = backend.exec("echo hi")
@@ -168,7 +168,7 @@ def _k8s_backend_recording_deletes(monkeypatch, run_behavior):
         return run_behavior(args, *a, **k)
 
     monkeypatch.setattr("subprocess.run", _fake_run)
-    from maverick.sandbox.kubernetes import KubernetesBackend
+    from lightwork.sandbox.kubernetes import KubernetesBackend
     backend = KubernetesBackend(allow_network=True)
     return backend, deletes
 
@@ -179,7 +179,7 @@ def _assert_deleted_pod(deletes):
     assert "delete" in args and "pod" in args
     # The pod name is the argv right after "pod".
     pod = args[args.index("pod") + 1]
-    assert pod.startswith("maverick-sb-")
+    assert pod.startswith("lightwork-sb-")
     assert "--force" in args and "--ignore-not-found=true" in args
 
 
@@ -231,19 +231,19 @@ def test_k8s_deletes_pod_on_unexpected_error(monkeypatch):
 # ---------- HuggingFace tool ----------
 
 def test_hf_requires_op():
-    from maverick.tools.huggingface import huggingface
+    from lightwork.tools.huggingface import huggingface
     assert "op is required" in huggingface().fn({})
 
 
 def test_hf_requires_model():
-    from maverick.tools.huggingface import huggingface
+    from lightwork.tools.huggingface import huggingface
     out = huggingface().fn({"op": "infer"})
     assert "model is required" in out
 
 
 def test_hf_missing_httpx(monkeypatch):
     monkeypatch.setitem(sys.modules, "httpx", None)
-    from maverick.tools.huggingface import huggingface
+    from lightwork.tools.huggingface import huggingface
     out = huggingface().fn({"op": "infer", "model": "x", "inputs": "y"})
     assert "httpx not installed" in out
 
@@ -259,7 +259,7 @@ def test_hf_infer_calls_api(monkeypatch):
     monkeypatch.setitem(sys.modules, "httpx", fake_httpx)
 
     monkeypatch.setenv("HUGGINGFACE_API_TOKEN", "hf_xxx")
-    from maverick.tools.huggingface import huggingface
+    from lightwork.tools.huggingface import huggingface
     out = huggingface().fn({
         "op": "infer", "model": "distilbert-base-uncased-finetuned-sst-2-english",
         "inputs": "I love this!",
@@ -277,19 +277,19 @@ def test_hf_infer_error_propagates(monkeypatch):
     fake_httpx = types.ModuleType("httpx")
     fake_httpx.post = MagicMock(return_value=resp)
     monkeypatch.setitem(sys.modules, "httpx", fake_httpx)
-    from maverick.tools.huggingface import huggingface
+    from lightwork.tools.huggingface import huggingface
     out = huggingface().fn({"op": "infer", "model": "x", "inputs": "y"})
     assert "ERROR" in out and "503" in out
 
 
 def test_hf_summarize_requires_text():
-    from maverick.tools.huggingface import huggingface
+    from lightwork.tools.huggingface import huggingface
     out = huggingface().fn({"op": "summarize", "model": "x"})
     assert "non-empty text" in out
 
 
 def test_hf_image_classify_requires_url():
-    from maverick.tools.huggingface import huggingface
+    from lightwork.tools.huggingface import huggingface
     out = huggingface().fn({"op": "image_classify", "model": "x"})
     assert "requires url" in out
 
@@ -297,8 +297,8 @@ def test_hf_image_classify_requires_url():
 def test_hf_image_classify_blocks_private_ip(monkeypatch):
     # Now routed through the IP-pinning _ssrf.safe_get (closes the TOCTOU
     # rebind window); a blocked host surfaces as BlockedHost.
-    import maverick.tools._ssrf as ssrf
-    from maverick.tools.huggingface import huggingface
+    import lightwork.tools._ssrf as ssrf
+    from lightwork.tools.huggingface import huggingface
 
     def _boom(url, **k):
         raise ssrf.BlockedHost("127.0.0.1 is loopback")
@@ -309,13 +309,13 @@ def test_hf_image_classify_blocks_private_ip(monkeypatch):
 
 
 def test_hf_image_classify_rejects_redirects(monkeypatch):
-    import maverick.tools._ssrf as ssrf
+    import lightwork.tools._ssrf as ssrf
     resp = MagicMock()
     resp.status_code = 302
     resp.content = b""
     resp.headers = {"content-type": "text/plain"}
     monkeypatch.setattr(ssrf, "safe_get", lambda url, **k: resp)
-    from maverick.tools.huggingface import huggingface
+    from lightwork.tools.huggingface import huggingface
     out = huggingface().fn({"op": "image_classify", "model": "x", "url": "https://example.com/i.png"})
     assert "image fetch 302" in out
 
@@ -323,7 +323,7 @@ def test_hf_image_classify_rejects_redirects(monkeypatch):
 # ---------- Context compactor ----------
 
 def test_compactor_passes_through_under_budget():
-    from maverick.context_compactor import compact
+    from lightwork.context_compactor import compact
     msgs = [
         {"role": "user", "content": "hello"},
         {"role": "assistant", "content": "hi"},
@@ -335,7 +335,7 @@ def test_compactor_passes_through_under_budget():
 
 
 def test_compactor_drops_least_relevant_when_over_budget():
-    from maverick.context_compactor import compact
+    from lightwork.context_compactor import compact
     msgs = []
     # 10 old turns about completely unrelated topics (low relevance).
     for i in range(10):
@@ -357,7 +357,7 @@ def test_compactor_drops_least_relevant_when_over_budget():
 
 
 def test_compactor_keeps_most_relevant_older_turn():
-    from maverick.context_compactor import compact
+    from lightwork.context_compactor import compact
     msgs = [
         # Highly relevant older turn (shares vocab with the query)
         {"role": "user", "content": "tell me about feature X and its history"},
@@ -380,7 +380,7 @@ def test_compactor_keeps_most_relevant_older_turn():
 
 
 def test_compactor_empty_history():
-    from maverick.context_compactor import compact
+    from lightwork.context_compactor import compact
     r = compact([], target_tokens=100)
     assert r.messages == []
     assert r.dropped == []
@@ -388,7 +388,7 @@ def test_compactor_empty_history():
 
 
 def test_compactor_estimate_tokens_increases_with_text():
-    from maverick.context_compactor import estimate_tokens
+    from lightwork.context_compactor import estimate_tokens
     short = estimate_tokens([{"role": "user", "content": "hi"}])
     long = estimate_tokens([{"role": "user", "content": "hi " * 500}])
     assert long > short
@@ -400,7 +400,7 @@ def test_tool_dispatch_opens_span(monkeypatch):
     """ToolRegistry.run wraps the call in a trace_span context."""
     import asyncio
 
-    from maverick.tools import Tool, ToolRegistry
+    from lightwork.tools import Tool, ToolRegistry
 
     seen = {"name": None, "attrs": None}
 
@@ -416,7 +416,7 @@ def test_tool_dispatch_opens_span(monkeypatch):
         seen["attrs"] = attributes
         return _FakeCtx()
 
-    import maverick.observability as obs
+    import lightwork.observability as obs
     monkeypatch.setattr(obs, "trace_span", _fake_trace_span)
 
     reg = ToolRegistry()
@@ -436,7 +436,7 @@ def test_tool_dispatch_opens_span(monkeypatch):
 
 
 def test_llm_complete_opens_span(monkeypatch):
-    from maverick.llm import LLM
+    from lightwork.llm import LLM
 
     seen = {"calls": []}
 
@@ -451,7 +451,7 @@ def test_llm_complete_opens_span(monkeypatch):
         seen["calls"].append((name, attributes))
         return _FakeCtx()
 
-    import maverick.observability as obs
+    import lightwork.observability as obs
     monkeypatch.setattr(obs, "trace_span", _fake_trace_span)
 
     class _FakeResp:
@@ -489,8 +489,8 @@ def test_llm_complete_opens_span(monkeypatch):
 # ---------- registration smoke ----------
 
 def test_huggingface_registers(tmp_path):
-    from maverick.sandbox.local import LocalBackend
-    from maverick.tools import base_registry
+    from lightwork.sandbox.local import LocalBackend
+    from lightwork.tools import base_registry
 
     class _W:
         def open_questions(self, gid):

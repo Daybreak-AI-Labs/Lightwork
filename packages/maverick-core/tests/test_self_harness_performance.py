@@ -24,7 +24,7 @@ from __future__ import annotations
 import random
 import time
 
-from maverick import self_harness as sh
+from lightwork import self_harness as sh
 
 
 def _recs(goals, *, fclass="timeout"):

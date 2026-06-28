@@ -1,7 +1,7 @@
 """Kivy shell scaffold: run a pure-Python Maverick skill on a phone.
 
 Lists the bundled pure skills (today: one — ``disagreement.answer_entropy``,
-the proposer-disagreement signal from ``packages/maverick-core/maverick/
+the proposer-disagreement signal from ``packages/lightwork-core/maverick/
 disagreement.py``, chosen because it imports nothing but stdlib) and runs it
 on sample fan-outs.
 
@@ -22,7 +22,7 @@ from pathlib import Path
 _HERE = Path(__file__).resolve().parent
 _BUNDLED_MODULE = _HERE / "disagreement.py"                      # APK layout
 _REPO_MODULE = (                                                  # checkout layout
-    _HERE.parents[2] / "packages" / "maverick-core" / "maverick" / "disagreement.py"
+    _HERE.parents[2] / "packages" / "lightwork-core" / "maverick" / "disagreement.py"
 )
 
 SAMPLES = {
@@ -42,7 +42,7 @@ def load_skill():
             return module
     raise FileNotFoundError(
         "disagreement.py not found. From a checkout, run from the repo; for "
-        "an APK, copy packages/maverick-core/maverick/disagreement.py next "
+        "an APK, copy packages/lightwork-core/maverick/disagreement.py next "
         "to main.py before `buildozer android debug` (see README.md)."
     )
 

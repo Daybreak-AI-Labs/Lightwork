@@ -3,8 +3,8 @@ from __future__ import annotations
 
 from types import SimpleNamespace
 
-from maverick.sandbox.modal_backend import ModalBackend
-from maverick.sandbox.sdk import conformance
+from lightwork.sandbox.modal_backend import ModalBackend
+from lightwork.sandbox.sdk import conformance
 
 
 class _FakeStream:
@@ -84,7 +84,7 @@ def test_missing_modal_actionable(tmp_path, monkeypatch):
     monkeypatch.setitem(sys.modules, "modal", None)
     sb = ModalBackend(workdir=tmp_path, allow_network=True)
     res = sb.exec("echo hi")
-    assert res.exit_code == 125 and "maverick-agent[modal]" in res.stderr
+    assert res.exit_code == 125 and "lightwork-agent[modal]" in res.stderr
 
 
 def test_sdk_v2_conformance(tmp_path):
@@ -93,7 +93,7 @@ def test_sdk_v2_conformance(tmp_path):
 
 
 def test_build_sandbox_routes_modal(tmp_path, monkeypatch):
-    import maverick.sandbox as s
+    import lightwork.sandbox as s
     sb = s.build_sandbox(workdir=tmp_path, backend="modal")
     assert isinstance(sb, ModalBackend)
 
@@ -108,7 +108,7 @@ def test_exec_fails_closed_when_network_disabled(tmp_path):
 
 
 def test_build_sandbox_modal_preserves_allow_network_default(tmp_path):
-    import maverick.sandbox as s
+    import lightwork.sandbox as s
     sb = s.build_sandbox(workdir=tmp_path, backend="modal")
     assert isinstance(sb, ModalBackend)
     assert sb.allow_network is False

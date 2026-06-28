@@ -9,7 +9,7 @@ sandbox builder -- denies ``shell``/``write_file`` (read-only by construction).
 from __future__ import annotations
 
 import pytest
-from maverick.domain import builtin_dir, lint_profile, load_domains
+from lightwork.domain import builtin_dir, lint_profile, load_domains
 
 # Net-new packs, grouped by family. Builders (sandbox shell/code_exec) and the
 # sealed legal matters are called out because they carry a different envelope.

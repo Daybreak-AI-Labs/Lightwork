@@ -1,7 +1,7 @@
 """diff_to_expected: actual-vs-expected comparator across modes."""
 from __future__ import annotations
 
-from maverick.tools.diff_to_expected import diff_to_expected
+from lightwork.tools.diff_to_expected import diff_to_expected
 
 
 def _cmp(**kw):

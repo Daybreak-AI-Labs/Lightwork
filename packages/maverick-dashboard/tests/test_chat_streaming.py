@@ -4,7 +4,7 @@ from __future__ import annotations
 import os
 
 from fastapi.testclient import TestClient
-from maverick_dashboard.app import app
+from lightwork_dashboard.app import app
 
 client = TestClient(app)
 
@@ -26,7 +26,7 @@ class TestBearerAuth:
 
     def test_token_allows_bearer_header(self, monkeypatch, tmp_path):
         monkeypatch.setenv("MAVERICK_DASHBOARD_TOKEN", "s3cr3t")
-        from maverick import world_model
+        from lightwork import world_model
         monkeypatch.setattr(world_model, "DEFAULT_DB", tmp_path / "world.db")
         resp = client.get("/", headers={"Authorization": "Bearer s3cr3t"})
         assert resp.status_code == 200
@@ -34,7 +34,7 @@ class TestBearerAuth:
     def test_query_token_no_longer_allowed(self, monkeypatch, tmp_path):
         """Council security pass: query-token auth was removed (leaked via Referer)."""
         monkeypatch.setenv("MAVERICK_DASHBOARD_TOKEN", "s3cr3t")
-        from maverick import world_model
+        from lightwork import world_model
         monkeypatch.setattr(world_model, "DEFAULT_DB", tmp_path / "world.db")
         resp = client.get("/?token=s3cr3t")
         assert resp.status_code == 401
@@ -57,7 +57,7 @@ class TestBearerAuth:
 
 class TestGoalEvents:
     def test_events_endpoint_with_real_goal(self, tmp_path, monkeypatch):
-        from maverick import world_model
+        from lightwork import world_model
         monkeypatch.setattr(world_model, "DEFAULT_DB", tmp_path / "world.db")
         w = world_model.WorldModel(tmp_path / "world.db")
         gid = w.create_goal("test", "desc")
@@ -74,7 +74,7 @@ class TestGoalEvents:
         assert data["next_id"] == data["events"][-1]["id"]
 
     def test_events_since_filter(self, tmp_path, monkeypatch):
-        from maverick import world_model
+        from lightwork import world_model
         monkeypatch.setattr(world_model, "DEFAULT_DB", tmp_path / "world.db")
         w = world_model.WorldModel(tmp_path / "world.db")
         gid = w.create_goal("test", "desc")

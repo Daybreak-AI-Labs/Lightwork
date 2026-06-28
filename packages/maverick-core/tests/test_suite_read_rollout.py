@@ -8,10 +8,10 @@ adds an exact risk override.
 """
 from __future__ import annotations
 
-from maverick.capability import Capability
-from maverick.domain import builtin_dir, domain_capability, load_domains
-from maverick.safety.tool_risk import tool_risk
-from maverick.tools.enterprise_connectors import READ_CONNECTOR_NAMES, READ_CONNECTOR_RISKS
+from lightwork.capability import Capability
+from lightwork.domain import builtin_dir, domain_capability, load_domains
+from lightwork.safety.tool_risk import tool_risk
+from lightwork.tools.enterprise_connectors import READ_CONNECTOR_NAMES, READ_CONNECTOR_RISKS
 
 # one representative (pack -> read seat) per suite
 _SAMPLES = {

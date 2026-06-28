@@ -1,7 +1,7 @@
 """watermark_detector: detect hidden text watermarks / steganography."""
 from __future__ import annotations
 
-from maverick.tools.watermark_detector import watermark_detector
+from lightwork.tools.watermark_detector import watermark_detector
 
 
 def _scan(text):
@@ -44,7 +44,7 @@ def test_errors():
 
 
 def test_registered():
-    from maverick.tools import base_registry
+    from lightwork.tools import base_registry
 
     class _W:
         pass

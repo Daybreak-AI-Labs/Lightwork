@@ -1,7 +1,7 @@
 """Right-to-explanation: governance decisions explained with counterfactuals."""
 from __future__ import annotations
 
-from maverick.tools.governance_explainer import governance_explainer
+from lightwork.tools.governance_explainer import governance_explainer
 
 
 def _t():
@@ -56,7 +56,7 @@ def test_validation():
 
 
 def test_omitted_policy_does_not_load_live_config(monkeypatch):
-    from maverick import governance
+    from lightwork import governance
 
     captured = {}
     original_evaluate = governance.evaluate
@@ -78,7 +78,7 @@ def test_omitted_policy_does_not_load_live_config(monkeypatch):
 
 
 def test_registered():
-    from maverick.tools import base_registry
+    from lightwork.tools import base_registry
 
     class _W:
         pass

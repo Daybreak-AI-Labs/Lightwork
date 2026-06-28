@@ -8,7 +8,7 @@ import pytest
 
 def _reload_dashboard_app(monkeypatch):
     monkeypatch.setenv("HOME", "/nonexistent-a2a-dashboard-test")
-    import maverick_dashboard.app as dashboard_app
+    import lightwork_dashboard.app as dashboard_app
 
     return importlib.reload(dashboard_app)
 

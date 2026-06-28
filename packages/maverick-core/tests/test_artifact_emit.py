@@ -3,10 +3,10 @@ goal completion (best-effort, deduped). Tests the helper directly."""
 from __future__ import annotations
 
 import pytest
-from maverick.deliverable import render_deliverable
-from maverick.domain import available_domains
-from maverick.orchestrator import _record_deliverable_artifact
-from maverick.world_model import WorldModel
+from lightwork.deliverable import render_deliverable
+from lightwork.domain import available_domains
+from lightwork.orchestrator import _record_deliverable_artifact
+from lightwork.world_model import WorldModel
 
 TBL = "| Week | Net |\n| --- | --- |\n| W1 | 300 |"
 

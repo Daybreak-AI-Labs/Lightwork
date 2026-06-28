@@ -4,7 +4,7 @@ building, and the federation client refusing to dial in the clear when required.
 from __future__ import annotations
 
 import pytest
-from maverick import grpc_tls
+from lightwork import grpc_tls
 
 # (_FakeServer is defined further down with the other bind_port tests.)
 
@@ -62,13 +62,13 @@ def test_tls_required_via_config():
 
 
 def test_tls_required_when_client_bound(monkeypatch):
-    from maverick import client
+    from lightwork import client
     monkeypatch.setattr(client, "client_binding_enforced", lambda: True)
     assert grpc_tls.tls_required("federation", {}) is True
 
 
 def test_tls_not_required_by_default(monkeypatch):
-    from maverick import client
+    from lightwork import client
     monkeypatch.setattr(client, "client_binding_enforced", lambda: False)
     assert grpc_tls.tls_required("federation", {}) is False
 
@@ -77,20 +77,20 @@ def test_tls_not_required_by_default(monkeypatch):
 
 
 def test_server_credentials_none_when_off_and_not_required(monkeypatch):
-    from maverick import client
+    from lightwork import client
     monkeypatch.setattr(client, "client_binding_enforced", lambda: False)
     assert grpc_tls.server_credentials("grpc", {}) is None
 
 
 def test_server_credentials_raises_when_required_but_unconfigured(monkeypatch):
-    from maverick import client
+    from lightwork import client
     monkeypatch.setattr(client, "client_binding_enforced", lambda: True)
     with pytest.raises(grpc_tls.TlsConfigError):
         grpc_tls.server_credentials("grpc", {})  # required (bound) but no tls
 
 
 def test_server_credentials_raises_when_enabled_but_certs_missing(monkeypatch):
-    from maverick import client
+    from lightwork import client
     monkeypatch.setattr(client, "client_binding_enforced", lambda: False)
     with pytest.raises(grpc_tls.TlsConfigError):
         grpc_tls.server_credentials("grpc", {"tls": True})  # tls on, no cert/key
@@ -120,7 +120,7 @@ class _FakeServer:
 
 
 def test_bind_port_insecure_when_off(monkeypatch):
-    from maverick import client
+    from lightwork import client
     monkeypatch.setattr(client, "client_binding_enforced", lambda: False)
     monkeypatch.setattr(grpc_tls, "_section", lambda name: {})
     srv = _FakeServer()
@@ -129,7 +129,7 @@ def test_bind_port_insecure_when_off(monkeypatch):
 
 
 def test_bind_port_raises_when_required(monkeypatch):
-    from maverick import client
+    from lightwork import client
     monkeypatch.setattr(client, "client_binding_enforced", lambda: True)
     monkeypatch.setattr(grpc_tls, "_section", lambda name: {})
     with pytest.raises(grpc_tls.TlsConfigError):
@@ -185,8 +185,8 @@ def test_channel_credentials_built(tmp_path):
 
 def test_federation_client_refuses_insecure_when_required(monkeypatch):
     pytest.importorskip("grpc")
-    from maverick import client
-    from maverick.federation import FederationError, Peer, _GrpcTransport
+    from lightwork import client
+    from lightwork.federation import FederationError, Peer, _GrpcTransport
     monkeypatch.setattr(client, "client_binding_enforced", lambda: True)
     monkeypatch.setattr(grpc_tls, "_section", lambda name: {})  # TLS not configured
     t = _GrpcTransport(Peer("vega", "vega:50061", "tok"))

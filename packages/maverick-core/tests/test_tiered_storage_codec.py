@@ -6,7 +6,7 @@ zstd is the [zstd] extra; the round-trip tests importorskip it. Codec
 from __future__ import annotations
 
 import pytest
-from maverick import tiered_storage as ts
+from lightwork import tiered_storage as ts
 
 
 @pytest.fixture(autouse=True)

@@ -3,7 +3,7 @@ cap typo that would otherwise run UNCAPPED) surfaces, not only in the dedicated
 `maverick config-lint`. Advisory: findings are warnings, never failures."""
 from __future__ import annotations
 
-import maverick.health as h
+import lightwork.health as h
 
 
 def test_doctor_config_lint_flags_budget_typo(capsys):

@@ -5,7 +5,7 @@ from __future__ import annotations
 import stat
 
 import pytest
-from maverick.computer_calibration import (
+from lightwork.computer_calibration import (
     CalibrationTransform,
     apply_saved,
     calibration_targets,

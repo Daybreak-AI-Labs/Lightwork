@@ -3,7 +3,7 @@ clamp, off-by-default, and the pack-schema + config binding."""
 from __future__ import annotations
 
 import pytest
-from maverick.agent_autonomy import (
+from lightwork.agent_autonomy import (
     AutonomyLevel,
     AutonomyProfile,
     clamp_down,
@@ -123,7 +123,7 @@ def test_graduation_lifts_clamp():
 # -- pack schema binding ---------------------------------------------------
 
 def test_domain_profile_parses_autonomy_block(tmp_path):
-    from maverick.domain import load_domain
+    from lightwork.domain import load_domain
 
     pack = tmp_path / "demo.toml"
     pack.write_text(
@@ -138,8 +138,8 @@ def test_domain_profile_parses_autonomy_block(tmp_path):
 
 
 def test_domain_profile_no_block_is_none_falls_to_suite_default(tmp_path):
-    from maverick.agent_autonomy import default_profile_for, effective_profile
-    from maverick.domain import load_domain
+    from lightwork.agent_autonomy import default_profile_for, effective_profile
+    from lightwork.domain import load_domain
 
     pack = tmp_path / "bare.toml"
     pack.write_text('name = "bare"\npersona = "x"\nallow_tools = ["read_file"]\n')
@@ -152,7 +152,7 @@ def test_domain_profile_no_block_is_none_falls_to_suite_default(tmp_path):
 
 def test_suite_default_tiers():
     """High-stakes suites -> STRICT (suggest); operational -> STANDARD (request)."""
-    from maverick.agent_autonomy import default_profile_for
+    from lightwork.agent_autonomy import default_profile_for
 
     assert default_profile_for("fin_ap_clerk").default is AutonomyLevel.SUGGEST  # finance
     assert default_profile_for("legal_contract").default is AutonomyLevel.SUGGEST  # legal
@@ -167,7 +167,7 @@ def test_suite_default_tiers():
 # -- config override binding -----------------------------------------------
 
 def test_client_override_layers_over_pack(monkeypatch):
-    import maverick.agent_autonomy as aa
+    import lightwork.agent_autonomy as aa
 
     pack = AutonomyProfile(default=AutonomyLevel.SUGGEST, onboarding=True)
     monkeypatch.setattr(
@@ -182,10 +182,10 @@ def test_client_override_layers_over_pack(monkeypatch):
 
 
 def test_effective_profile_applies_config_override(monkeypatch):
-    import maverick.agent_autonomy as aa
+    import lightwork.agent_autonomy as aa
 
     monkeypatch.setattr(
-        "maverick.config.get_workforce",
+        "lightwork.config.get_workforce",
         lambda: {"levels": True, "agents": {"clerk": {"default": "auto", "onboarding": False}}},
     )
     pack = AutonomyProfile(default=AutonomyLevel.SUGGEST, onboarding=True)
@@ -197,9 +197,9 @@ def test_effective_profile_applies_config_override(monkeypatch):
 
 
 def test_decide_off_by_default(monkeypatch):
-    import maverick.agent_autonomy as aa
+    import lightwork.agent_autonomy as aa
 
-    monkeypatch.setattr("maverick.config.get_workforce", lambda: {"levels": False, "agents": {}})
+    monkeypatch.setattr("lightwork.config.get_workforce", lambda: {"levels": False, "agents": {}})
     monkeypatch.delenv("MAVERICK_WORKFORCE_LEVELS", raising=False)
     p = AutonomyProfile(default=AutonomyLevel.AUTO, onboarding=False)
     assert aa.decide("x", p, risk="low").decision == "require_human"
@@ -208,14 +208,14 @@ def test_decide_off_by_default(monkeypatch):
 # -- prompt rendering ------------------------------------------------------
 
 def test_render_empty_when_disabled(monkeypatch):
-    import maverick.agent_autonomy as aa
+    import lightwork.agent_autonomy as aa
 
     monkeypatch.setattr(aa, "levels_enabled", lambda: False)
     assert aa.render_autonomy_prompt("x", AutonomyProfile(default=AutonomyLevel.AUTO)) == ""
 
 
 def test_render_describes_each_tier_when_enabled(monkeypatch):
-    import maverick.agent_autonomy as aa
+    import lightwork.agent_autonomy as aa
 
     monkeypatch.setattr(aa, "levels_enabled", lambda: True)
     monkeypatch.setattr(aa, "effective_profile", lambda n, p: p)
@@ -227,7 +227,7 @@ def test_render_describes_each_tier_when_enabled(monkeypatch):
 
 
 def test_render_flags_onboarding(monkeypatch):
-    import maverick.agent_autonomy as aa
+    import lightwork.agent_autonomy as aa
 
     monkeypatch.setattr(aa, "levels_enabled", lambda: True)
     monkeypatch.setattr(aa, "effective_profile", lambda n, p: p)
@@ -240,7 +240,7 @@ def test_render_flags_onboarding(monkeypatch):
 # -- dial-coupled governed action grant ------------------------------------
 
 def _pack(tmp_path):
-    from maverick.domain import load_domain
+    from lightwork.domain import load_domain
 
     p = tmp_path / "p.toml"
     p.write_text(
@@ -251,10 +251,10 @@ def _pack(tmp_path):
 
 
 def test_action_grant_off_by_default(monkeypatch, tmp_path):
-    from maverick.domain import domain_capability
+    from lightwork.domain import domain_capability
 
     monkeypatch.delenv("MAVERICK_WORKFORCE_LEVELS", raising=False)
-    monkeypatch.setattr("maverick.config.get_workforce", lambda: {"levels": False, "agents": {}})
+    monkeypatch.setattr("lightwork.config.get_workforce", lambda: {"levels": False, "agents": {}})
     cap = domain_capability(_pack(tmp_path), None, "agent:fin_clerk")
     assert not cap.permits("email")          # read-only: no action bundle
     assert cap.max_risk == "medium"          # ceiling unchanged
@@ -262,10 +262,10 @@ def test_action_grant_off_by_default(monkeypatch, tmp_path):
 
 
 def test_action_grant_when_levels_on(monkeypatch, tmp_path):
-    from maverick.domain import domain_capability
+    from lightwork.domain import domain_capability
 
     monkeypatch.setenv("MAVERICK_WORKFORCE_LEVELS", "1")
-    monkeypatch.setattr("maverick.config.get_workforce", lambda: {"levels": True, "agents": {}})
+    monkeypatch.setattr("lightwork.config.get_workforce", lambda: {"levels": True, "agents": {}})
     cap = domain_capability(_pack(tmp_path), None, "agent:fin_clerk")
     assert cap.permits("email")              # governed action bundle granted
     assert cap.permits("notify")
@@ -275,10 +275,10 @@ def test_action_grant_when_levels_on(monkeypatch, tmp_path):
 
 
 def test_action_grant_does_not_lift_existing_high_risk_tools(monkeypatch, tmp_path):
-    from maverick.domain import domain_capability
+    from lightwork.domain import domain_capability
 
     monkeypatch.setenv("MAVERICK_WORKFORCE_LEVELS", "1")
-    monkeypatch.setattr("maverick.config.get_workforce", lambda: {"levels": True, "agents": {}})
+    monkeypatch.setattr("lightwork.config.get_workforce", lambda: {"levels": True, "agents": {}})
     cap = domain_capability(_pack(tmp_path), None, "agent:fin_clerk")
     assert cap.permits("email")
     assert cap.permits("notify")
@@ -296,7 +296,7 @@ def _approval(agent, status):
 
 
 def test_graduation_needs_min_sample():
-    from maverick.agent_autonomy import graduation_status
+    from lightwork.agent_autonomy import graduation_status
 
     hist = [_approval("clerk", "approved") for _ in range(5)]  # < min_sample (8)
     v = graduation_status("clerk", hist)
@@ -305,7 +305,7 @@ def test_graduation_needs_min_sample():
 
 
 def test_graduation_on_clean_record():
-    from maverick.agent_autonomy import graduation_status
+    from lightwork.agent_autonomy import graduation_status
 
     hist = [_approval("clerk", "approved") for _ in range(10)]
     v = graduation_status("clerk", hist)
@@ -315,7 +315,7 @@ def test_graduation_on_clean_record():
 
 
 def test_graduation_blocked_by_denials():
-    from maverick.agent_autonomy import graduation_status
+    from lightwork.agent_autonomy import graduation_status
 
     hist = ([_approval("clerk", "approved") for _ in range(7)]
             + [_approval("clerk", "denied") for _ in range(3)])  # 70% < 90%
@@ -324,7 +324,7 @@ def test_graduation_blocked_by_denials():
 
 
 def test_graduation_filters_by_agent():
-    from maverick.agent_autonomy import graduation_status
+    from lightwork.agent_autonomy import graduation_status
 
     hist = ([_approval("clerk", "approved") for _ in range(10)]
             + [_approval("other", "denied") for _ in range(10)])
@@ -333,7 +333,7 @@ def test_graduation_filters_by_agent():
 
 
 def test_graduation_candidates_sorted():
-    from maverick.agent_autonomy import graduation_candidates
+    from lightwork.agent_autonomy import graduation_candidates
 
     hist = ([_approval("a", "approved") for _ in range(10)]
             + [_approval("b", "approved") for _ in range(4)])  # b under sample
@@ -342,7 +342,7 @@ def test_graduation_candidates_sorted():
 
 
 def test_effective_profile_graduated_lifts_onboarding():
-    from maverick.agent_autonomy import effective_profile
+    from lightwork.agent_autonomy import effective_profile
 
     pack = AutonomyProfile(default=AutonomyLevel.AUTO, onboarding=True)
     assert effective_profile("x", pack).onboarding is True
@@ -351,7 +351,7 @@ def test_effective_profile_graduated_lifts_onboarding():
 
 def test_coerce_approvals_from_objects():
     """A list of Approval-like objects (not dicts) is read via __dict__."""
-    from maverick.agent_autonomy import graduation_status
+    from lightwork.agent_autonomy import graduation_status
 
     class _A:
         def __init__(self):
@@ -368,7 +368,7 @@ def test_coerce_approvals_from_objects():
 def test_capability_permits_coordination_despite_narrow_allowlist():
     """A specialist with a narrow allowlist and a low risk ceiling still keeps
     the workforce control-plane (spawn/bus/delegate), even under enforcement."""
-    from maverick.capability import COORDINATION_TOOLS, Capability
+    from lightwork.capability import COORDINATION_TOOLS, Capability
 
     cap = Capability(
         principal="agent:fin_clerk-0",
@@ -383,7 +383,7 @@ def test_capability_permits_coordination_despite_narrow_allowlist():
 
 def test_coordination_floor_respects_deny():
     """deny_tools still wins -- an operator can revoke a coordination tool."""
-    from maverick.capability import Capability
+    from lightwork.capability import Capability
 
     cap = Capability(
         principal="x", allow_tools=frozenset({"read_file"}),
@@ -396,9 +396,9 @@ def test_coordination_floor_respects_deny():
 def test_domain_agent_coordinates_under_enforcement():
     from pathlib import Path
 
-    import maverick.domain as d
-    from maverick.capability import COORDINATION_TOOLS
-    from maverick.domain import domain_capability, load_domains
+    import lightwork.domain as d
+    from lightwork.capability import COORDINATION_TOOLS
+    from lightwork.domain import domain_capability, load_domains
 
     packs = load_domains(Path(d.__file__).parent / "domains")
     # any read-only specialist with a narrow allowlist

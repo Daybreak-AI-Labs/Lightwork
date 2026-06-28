@@ -14,8 +14,8 @@ import pytest
 
 pytest.importorskip("cryptography")
 
-from maverick.audit import signing  # noqa: E402
-from maverick.audit.signing import (  # noqa: E402
+from lightwork.audit import signing  # noqa: E402
+from lightwork.audit.signing import (  # noqa: E402
     AuditSigner,
     ensure_anchors,
     reanchor_day_after_erase,

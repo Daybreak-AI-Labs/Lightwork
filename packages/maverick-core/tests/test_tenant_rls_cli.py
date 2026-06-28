@@ -8,8 +8,8 @@ from __future__ import annotations
 
 import pytest
 from click.testing import CliRunner
-from maverick.cli import main
-from maverick.world_model_backends import pg_rls
+from lightwork.cli import main
+from lightwork.world_model_backends import pg_rls
 
 
 class _Conn:

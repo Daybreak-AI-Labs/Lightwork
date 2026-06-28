@@ -2,7 +2,7 @@
 ([routing.roles.<role>]). v1 behavior must be untouched when the table is absent."""
 from __future__ import annotations
 
-from maverick.cost import router as cr
+from lightwork.cost import router as cr
 
 
 def _enable(monkeypatch, providers=("anthropic", "deepseek", "openai")):
@@ -27,13 +27,13 @@ def _policy(monkeypatch, role_table):
 
 
 def test_empty_policy_when_table_absent(monkeypatch):
-    import maverick.config as config_mod
+    import lightwork.config as config_mod
     monkeypatch.setattr(config_mod, "load_config", dict)
     assert cr.role_policy("coder").is_empty()
 
 
 def test_role_policy_parses_config(monkeypatch):
-    import maverick.config as config_mod
+    import lightwork.config as config_mod
     monkeypatch.setattr(config_mod, "load_config", lambda: {
         "routing": {"roles": {"summarizer": {
             "providers": ["DeepSeek"],

@@ -12,8 +12,8 @@ from __future__ import annotations
 
 import random
 
-from maverick.capability import Capability
-from maverick.safety.tool_risk import RISK_LEVELS
+from lightwork.capability import Capability
+from lightwork.safety.tool_risk import RISK_LEVELS
 
 _TOOLS = ["read_file", "write_file", "shell", "browser", "http_fetch",
           "wire_transfer", "list_dir", "apply_patch", "web_search", "delete_file"]

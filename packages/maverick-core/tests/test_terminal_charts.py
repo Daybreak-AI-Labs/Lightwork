@@ -4,9 +4,9 @@ from __future__ import annotations
 import sys
 
 import pytest
-from maverick import tool_latency
-from maverick.quotas import UsageLedger
-from maverick.terminal_charts import (
+from lightwork import tool_latency
+from lightwork.quotas import UsageLedger
+from lightwork.terminal_charts import (
     bar_chart,
     goal_throughput,
     latency_rows,
@@ -18,7 +18,7 @@ from maverick.terminal_charts import (
     sparkline,
     spend_per_day,
 )
-from maverick.world_model import WorldModel
+from lightwork.world_model import WorldModel
 
 TODAY = "2025-06-15"
 

@@ -5,8 +5,8 @@ import json
 import struct
 from types import SimpleNamespace
 
-from maverick.tools.model3d_inspect import model3d_inspect
-from maverick.tools.synthetic_data import synthetic_data
+from lightwork.tools.model3d_inspect import model3d_inspect
+from lightwork.tools.synthetic_data import synthetic_data
 
 # ---- model3d_inspect ----
 
@@ -124,7 +124,7 @@ def test_synthetic_errors():
 # ---- registration ----
 
 def test_batch3_registered():
-    from maverick.tools import base_registry
+    from lightwork.tools import base_registry
 
     class _W:
         pass

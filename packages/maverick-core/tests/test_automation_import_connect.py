@@ -7,8 +7,8 @@ description into a Lightwork template.
 from __future__ import annotations
 
 import pytest
-from maverick import automation_import as ai
-from maverick.automation_import import ir, manual
+from lightwork import automation_import as ai
+from lightwork.automation_import import ir, manual
 
 DESC = {
     "name": "New Zapier lead → CRM + Slack",
@@ -64,13 +64,13 @@ class TestConnectImporters:
         assert "inbound webhook" in str(ei.value).lower()
 
     def test_zapier_translate_and_materialize(self, tmp_path, monkeypatch):
-        import maverick.templates as t
+        import lightwork.templates as t
         monkeypatch.setattr(t, "USER_TEMPLATES", tmp_path / "templates")
         a = ai.get_importer("zapier").translate(DESC)
         res = ai.materialize(a)
         assert res.created_template is True
         # webhook trigger -> suggested webhook wiring
         assert res.suggested_trigger["kind"] == "webhook"
-        from maverick.templates import load_template
+        from lightwork.templates import load_template
         _, body = load_template(res.template_name).render()
         assert "Add to CRM" in body

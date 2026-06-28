@@ -5,7 +5,7 @@ from fastapi.testclient import TestClient
 
 
 def _isolate(monkeypatch, tmp_path):
-    from maverick import runtime_overrides, world_model
+    from lightwork import runtime_overrides, world_model
     monkeypatch.setattr(world_model, "DEFAULT_DB", tmp_path / "world.db")
     monkeypatch.setattr(runtime_overrides, "OVERRIDES_PATH", tmp_path / "ro.toml")
     monkeypatch.setenv("MAVERICK_CONFIG", str(tmp_path / "config.toml"))
@@ -13,13 +13,13 @@ def _isolate(monkeypatch, tmp_path):
 
 
 def _client():
-    from maverick_dashboard.app import app
+    from lightwork_dashboard.app import app
     return TestClient(app)
 
 
 def _new_goal(title="do a thing"):
     # Read the monkeypatched DEFAULT_DB attr at call time (not at import).
-    import maverick.world_model as wm
+    import lightwork.world_model as wm
     w = wm.WorldModel(wm.DEFAULT_DB)
     gid = w.create_goal(title)
     return w, gid

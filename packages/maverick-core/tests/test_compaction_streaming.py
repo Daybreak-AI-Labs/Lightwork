@@ -7,7 +7,7 @@ import re
 import stat
 from types import SimpleNamespace
 
-from maverick.compaction.streaming import (
+from lightwork.compaction.streaming import (
     StreamingCompactor,
     _default_key,
     compact_streaming,

@@ -16,8 +16,8 @@ def _have_fastapi() -> bool:
 class TestHTTPTransport:
     def _client(self):
         from fastapi.testclient import TestClient
-        from maverick_mcp.http_transport import build_app
-        from maverick_mcp.server import MCPServer
+        from lightwork_mcp.http_transport import build_app
+        from lightwork_mcp.server import MCPServer
         app = build_app(MCPServer())
         return TestClient(app)
 
@@ -52,7 +52,7 @@ class TestHTTPTransport:
         running event loop'. The dispatch now runs in a worker thread."""
         import asyncio
 
-        from maverick_mcp import server as srv
+        from lightwork_mcp import server as srv
 
         async def _trivial():
             return "DONE: stub run"
@@ -79,7 +79,7 @@ class TestHTTPTransport:
         client can't read arbitrary host files via a bare local path."""
         from types import SimpleNamespace
 
-        from maverick import skills as skills_mod
+        from lightwork import skills as skills_mod
         captured: dict = {}
 
         def _fake_install(source, *, trusted_local=True):
@@ -254,8 +254,8 @@ class TestHTTPTransport:
 class TestHTTPNotifications:
     def _client(self):
         from fastapi.testclient import TestClient
-        from maverick_mcp.http_transport import build_app
-        from maverick_mcp.server import MCPServer
+        from lightwork_mcp.http_transport import build_app
+        from lightwork_mcp.server import MCPServer
         return TestClient(build_app(MCPServer()))
 
     def test_notification_returns_204_with_no_body(self, monkeypatch):
@@ -298,8 +298,8 @@ class TestHTTPTasks:
 
     def _client(self):
         from fastapi.testclient import TestClient
-        from maverick_mcp.http_transport import build_app
-        from maverick_mcp.server import MCPServer
+        from lightwork_mcp.http_transport import build_app
+        from lightwork_mcp.server import MCPServer
         # build_app reads MAVERICK_MCP_HTTP_TASKS, so env must be set first.
         return TestClient(build_app(MCPServer()))
 
@@ -310,7 +310,7 @@ class TestHTTPTasks:
     def _stub_start(self, monkeypatch):
         """Make maverick_start deterministic (no LLM): patched at the class so
         the fresh per-task worker MCPServer instance picks it up too."""
-        from maverick_mcp import server as srv
+        from lightwork_mcp import server as srv
 
         def _fake_start(self, args):
             return "DONE: " + str(args.get("title", ""))
@@ -388,7 +388,7 @@ class TestHTTPTasks:
         import threading
         self._enable(monkeypatch)
         # A worker that blocks until released, so cancel wins the race.
-        from maverick_mcp import server as srv
+        from lightwork_mcp import server as srv
         release = threading.Event()
 
         def _blocking_start(self, args):
@@ -420,8 +420,8 @@ class TestHTTPTasks:
         self._enable(monkeypatch)
         self._stub_start(monkeypatch)
         from fastapi.testclient import TestClient
-        from maverick_mcp.http_transport import build_app
-        from maverick_mcp.server import MCPServer
+        from lightwork_mcp.http_transport import build_app
+        from lightwork_mcp.server import MCPServer
 
         app = build_app(MCPServer())
         alice = TestClient(app)
@@ -478,8 +478,8 @@ class TestHTTPTasks:
 class TestHTTPMalformedBody:
     def _client(self):
         from fastapi.testclient import TestClient
-        from maverick_mcp.http_transport import build_app
-        from maverick_mcp.server import MCPServer
+        from lightwork_mcp.http_transport import build_app
+        from lightwork_mcp.server import MCPServer
         return TestClient(build_app(MCPServer()))
 
     def test_non_object_body_returns_400_not_500(self, monkeypatch):
@@ -512,8 +512,8 @@ class TestSessionCookieHardening:
     }
 
     def _app(self):
-        from maverick_mcp.http_transport import build_app
-        from maverick_mcp.server import MCPServer
+        from lightwork_mcp.http_transport import build_app
+        from lightwork_mcp.server import MCPServer
         return build_app(MCPServer())
 
     def test_loopback_peer_cookie_attributes(self, monkeypatch):

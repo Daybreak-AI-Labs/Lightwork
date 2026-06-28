@@ -8,8 +8,8 @@ import pytest
 
 
 def test_build_gist_payload_is_private_and_named(monkeypatch):
-    from maverick import run_share
-    from maverick.replay import export as replay_export
+    from lightwork import run_share
+    from lightwork.replay import export as replay_export
 
     def _fake_export(goal_id, out_path):
         Path(out_path).write_text(
@@ -20,13 +20,13 @@ def test_build_gist_payload_is_private_and_named(monkeypatch):
     monkeypatch.setattr(replay_export, "export_json", _fake_export)
     payload = run_share.build_gist_payload(7)
     assert payload["public"] is False                       # secret gist
-    assert "maverick-run-7.json" in payload["files"]
-    assert '"goal": 7' in payload["files"]["maverick-run-7.json"]["content"]
+    assert "lightwork-run-7.json" in payload["files"]
+    assert '"goal": 7' in payload["files"]["lightwork-run-7.json"]["content"]
 
 
 def test_share_run_posts_private_gist_and_returns_url(monkeypatch):
     import httpx
-    from maverick import run_share
+    from lightwork import run_share
 
     monkeypatch.setattr(run_share, "build_gist_payload", lambda gid: {"files": {}})
     seen = {}
@@ -50,7 +50,7 @@ def test_share_run_posts_private_gist_and_returns_url(monkeypatch):
 
 
 def test_share_run_requires_a_token(monkeypatch):
-    from maverick import run_share
+    from lightwork import run_share
     monkeypatch.delenv("GITHUB_TOKEN", raising=False)
     monkeypatch.delenv("GH_TOKEN", raising=False)
     with pytest.raises(RuntimeError, match="GitHub token"):

@@ -8,8 +8,8 @@ from __future__ import annotations
 
 import json
 
-from maverick.training import reward_model as rm
-from maverick.training.reward_model import (
+from lightwork.training import reward_model as rm
+from lightwork.training.reward_model import (
     PreferenceRewardModel,
     featurize,
     train_reward_model,
@@ -81,7 +81,7 @@ class TestLearning:
 
 class TestReweight:
     def test_agreement_keeps_weight_disagreement_downweights(self):
-        from maverick.training.reward_model import reweight_pairs_with_model
+        from lightwork.training.reward_model import reweight_pairs_with_model
         rows_by_id = {
             "good": _row("good", "f", 1.0, n_msgs=3, n_err=0),
             "bad": _row("bad", "f", 0.0, n_msgs=3, n_err=3),
@@ -99,7 +99,7 @@ class TestReweight:
         assert rep["agreement_rate"] == 0.5
 
     def test_unresolvable_ids_skipped(self):
-        from maverick.training.reward_model import reweight_pairs_with_model
+        from lightwork.training.reward_model import reweight_pairs_with_model
         model = PreferenceRewardModel()
         pairs = [{"chosen_id": "x", "rejected_id": "y", "weight": 1.0}]
         rep = reweight_pairs_with_model(pairs, {}, model)

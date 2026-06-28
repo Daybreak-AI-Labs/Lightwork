@@ -78,7 +78,7 @@ def _install_fake_httpx(monkeypatch, calls, responder):
 
 @pytest.mark.skipif(not _have_deps(), reason="httpx not installed")
 def test_mastodon_requires_allowlist():
-    from maverick_channels.mastodon import MastodonChannel
+    from lightwork_channels.mastodon import MastodonChannel
     with pytest.raises(ValueError, match="MASTODON_ALLOWED_USER_IDS"):
         MastodonChannel(handler=_noop, instance="mastodon.social",
                         access_token="tok", allowed_user_ids=set())
@@ -86,8 +86,8 @@ def test_mastodon_requires_allowlist():
 
 @pytest.mark.skipif(not _have_deps(), reason="httpx not installed")
 def test_mastodon_stores_allowlist_and_denies_non_member():
-    from maverick_channels.base import is_allowed
-    from maverick_channels.mastodon import MastodonChannel
+    from lightwork_channels.base import is_allowed
+    from lightwork_channels.mastodon import MastodonChannel
     chan = MastodonChannel(handler=_noop, instance="mastodon.social",
                            access_token="tok", allowed_user_ids={"owner@host"})
     assert is_allowed("owner@host", chan.allowed_user_ids) is True
@@ -98,7 +98,7 @@ def test_mastodon_stores_allowlist_and_denies_non_member():
 
 @pytest.mark.skipif(not _have_deps(), reason="httpx not installed")
 def test_mastodon_dispatch_denies_unauthorized_account(monkeypatch):
-    from maverick_channels.mastodon import MastodonChannel
+    from lightwork_channels.mastodon import MastodonChannel
 
     seen = []
 
@@ -126,7 +126,7 @@ def test_mastodon_dispatch_denies_unauthorized_account(monkeypatch):
 def test_mastodon_dispatch_allows_member_and_shapes_reply(monkeypatch):
     """Allowlisted account reaches the handler (with HTML stripped), and the
     reply posts as an in_reply_to status mentioning the account."""
-    from maverick_channels.mastodon import MastodonChannel
+    from lightwork_channels.mastodon import MastodonChannel
 
     seen = []
 
@@ -167,7 +167,7 @@ def test_mastodon_dispatch_allows_member_and_shapes_reply(monkeypatch):
 def test_mastodon_poll_advances_since_id_cursor(monkeypatch):
     """_poll_once requests mention notifications and advances since_id to the
     max id seen; the next poll carries that since_id as a request param."""
-    from maverick_channels.mastodon import MastodonChannel
+    from lightwork_channels.mastodon import MastodonChannel
 
     batch = [
         {"id": "100", "account": {"acct": "owner@host"},
@@ -208,7 +208,7 @@ def test_mastodon_poll_advances_since_id_cursor(monkeypatch):
 
 @pytest.mark.skipif(not _have_deps(), reason="httpx not installed")
 def test_mastodon_send_shapes_direct_status(monkeypatch):
-    from maverick_channels.mastodon import MastodonChannel
+    from lightwork_channels.mastodon import MastodonChannel
 
     calls = []
     _install_fake_httpx(monkeypatch, calls, lambda *a: _FakeResponse())
@@ -233,7 +233,7 @@ def test_mastodon_cursor_uses_numeric_not_lexicographic_max(monkeypatch):
     id digit-length boundary "9999999" sorted after "10000001" and the
     cursor moved backwards, re-delivering notifications. It must advance
     to the numeric max."""
-    from maverick_channels.mastodon import MastodonChannel
+    from lightwork_channels.mastodon import MastodonChannel
 
     batch = [
         {"id": "9999999", "account": {"acct": "owner@host"},

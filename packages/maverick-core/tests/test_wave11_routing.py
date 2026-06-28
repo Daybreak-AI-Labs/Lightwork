@@ -4,38 +4,38 @@ from __future__ import annotations
 
 class TestModelOverride:
     def test_env_override_wins_over_defaults(self, monkeypatch):
-        from maverick.llm import model_for_role
+        from lightwork.llm import model_for_role
         monkeypatch.setenv("MAVERICK_MODEL_OVERRIDE_CODER", "claude-opus-4-7")
         assert model_for_role("coder") == "claude-opus-4-7"
 
     def test_env_override_is_role_specific(self, monkeypatch):
-        from maverick.llm import model_for_role
+        from lightwork.llm import model_for_role
         # Setting coder override does NOT affect orchestrator.
         monkeypatch.setenv("MAVERICK_MODEL_OVERRIDE_CODER", "deepseek-v4-pro")
         monkeypatch.delenv("MAVERICK_MODEL_OVERRIDE_ORCHESTRATOR", raising=False)
         assert model_for_role("orchestrator") != "deepseek-v4-pro"
 
     def test_no_override_falls_back_to_defaults(self, monkeypatch):
-        from maverick.llm import ROLE_MODELS, model_for_role
+        from lightwork.llm import ROLE_MODELS, model_for_role
         monkeypatch.delenv("MAVERICK_MODEL_OVERRIDE_CODER", raising=False)
         assert model_for_role("coder") == ROLE_MODELS["coder"]
 
 
 class TestCacheTTL:
     def test_coding_mode_defaults_to_5m(self, monkeypatch):
-        from maverick.providers.anthropic_provider import _default_cache_ttl
+        from lightwork.providers.anthropic_provider import _default_cache_ttl
         monkeypatch.setenv("MAVERICK_CODING_MODE", "1")
         monkeypatch.delenv("MAVERICK_ANTHROPIC_CACHE_TTL", raising=False)
         assert _default_cache_ttl() == "5m"
 
     def test_non_coding_mode_defaults_to_1h(self, monkeypatch):
-        from maverick.providers.anthropic_provider import _default_cache_ttl
+        from lightwork.providers.anthropic_provider import _default_cache_ttl
         monkeypatch.delenv("MAVERICK_CODING_MODE", raising=False)
         monkeypatch.delenv("MAVERICK_ANTHROPIC_CACHE_TTL", raising=False)
         assert _default_cache_ttl() == "1h"
 
     def test_explicit_env_override_wins(self, monkeypatch):
-        from maverick.providers.anthropic_provider import _default_cache_ttl
+        from lightwork.providers.anthropic_provider import _default_cache_ttl
         monkeypatch.setenv("MAVERICK_CODING_MODE", "1")
         monkeypatch.setenv("MAVERICK_ANTHROPIC_CACHE_TTL", "30m")
         assert _default_cache_ttl() == "30m"
@@ -45,12 +45,12 @@ class TestThinkingOnOrchestrator:
     def test_orchestrator_role_gets_thinking_budget(self, tmp_path):
         """Wave 11: orchestrator + revisor get thinking_budget=8000
         (Anthropic effort=medium). Coder/researcher do not."""
-        from maverick.agent import Agent
-        from maverick.blackboard import Blackboard
-        from maverick.budget import Budget
-        from maverick.sandbox import LocalBackend
-        from maverick.swarm import SwarmContext
-        from maverick.world_model import WorldModel
+        from lightwork.agent import Agent
+        from lightwork.blackboard import Blackboard
+        from lightwork.budget import Budget
+        from lightwork.sandbox import LocalBackend
+        from lightwork.swarm import SwarmContext
+        from lightwork.world_model import WorldModel
         world = WorldModel(tmp_path / "w.db")
         gid = world.create_goal("t", "")
         ctx = SwarmContext(
@@ -69,7 +69,7 @@ class TestThinkingOnOrchestrator:
 
 class TestThinkingBudgetWiredThrough:
     def test_anthropic_provider_passes_thinking_to_kwargs(self, monkeypatch):
-        from maverick.providers.anthropic_provider import AnthropicClient
+        from lightwork.providers.anthropic_provider import AnthropicClient
         monkeypatch.setenv("ANTHROPIC_API_KEY", "test")
         c = AnthropicClient()
         kwargs = c._build_request(
@@ -84,7 +84,7 @@ class TestThinkingBudgetWiredThrough:
         assert kwargs["max_tokens"] >= 8000 + 1024
 
     def test_no_thinking_when_unset(self, monkeypatch):
-        from maverick.providers.anthropic_provider import AnthropicClient
+        from lightwork.providers.anthropic_provider import AnthropicClient
         monkeypatch.setenv("ANTHROPIC_API_KEY", "test")
         c = AnthropicClient()
         kwargs = c._build_request(

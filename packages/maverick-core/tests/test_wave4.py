@@ -9,13 +9,13 @@ import pytest
 async def test_tool_output_close_tag_unforgeable(tmp_path):
     """A tool returning literal `</tool_output>` cannot escape the
     framing because the close tag now includes a random per-call nonce."""
-    from maverick.agent import Agent
-    from maverick.blackboard import Blackboard
-    from maverick.budget import Budget
-    from maverick.sandbox import LocalBackend
-    from maverick.swarm import SwarmContext
-    from maverick.tools import Tool, ToolRegistry
-    from maverick.world_model import WorldModel
+    from lightwork.agent import Agent
+    from lightwork.blackboard import Blackboard
+    from lightwork.budget import Budget
+    from lightwork.sandbox import LocalBackend
+    from lightwork.swarm import SwarmContext
+    from lightwork.tools import Tool, ToolRegistry
+    from lightwork.world_model import WorldModel
 
     class _PermissiveShield:
         def scan_tool_call(self, name, args):
@@ -73,7 +73,7 @@ async def test_tool_output_close_tag_unforgeable(tmp_path):
 # ---------- MCP inputSchema is scanned ----------
 
 def test_mcp_schema_strings_are_walked():
-    from maverick.mcp_tools import _collect_schema_strings
+    from lightwork.mcp_tools import _collect_schema_strings
 
     schema = {
         "type": "object",
@@ -101,7 +101,7 @@ def test_mcp_schema_strings_are_walked():
 def test_mcp_schema_strings_collected_under_any_key():
     # A hostile server can hide attack text under const / $comment / a custom
     # key (not just description/title); every string value must be scanned.
-    from maverick.mcp_tools import _collect_schema_strings
+    from lightwork.mcp_tools import _collect_schema_strings
 
     schema = {
         "type": "object",
@@ -122,7 +122,7 @@ def test_mcp_schema_strings_collected_under_any_key():
 def test_mcp_spec_with_malicious_schema_description_blocked():
     """A hostile MCP server putting attack text in an inputSchema
     description must be rejected by Shield."""
-    from maverick.mcp_tools import _spec_passes_shield
+    from lightwork.mcp_tools import _spec_passes_shield
 
     class _BlockingShield:
         def scan_input(self, text):
@@ -153,7 +153,7 @@ def test_mcp_overdeep_schema_rejected_before_tool_registration(monkeypatch):
     unscanned nested metadata to the model tool catalog."""
     from types import SimpleNamespace
 
-    from maverick import mcp_tools
+    from lightwork import mcp_tools
 
     class _AllowingShield:
         def scan_input(self, text):
@@ -193,7 +193,7 @@ def test_mcp_tool_name_validation_rejects_unsafe_names():
     are rejected; a clean name registers as mcp_<server>__<tool>."""
     from types import SimpleNamespace
 
-    from maverick.mcp_tools import tools_from_mcp
+    from lightwork.mcp_tools import tools_from_mcp
 
     client = SimpleNamespace(
         spec=SimpleNamespace(name="srv"),
@@ -215,7 +215,7 @@ def test_mcp_tool_name_validation_rejects_unsafe_names():
 # ---------- Retry-After clamp ----------
 
 def test_retry_after_negative_is_clamped(monkeypatch):
-    from maverick import retry
+    from lightwork import retry
 
     class _Resp:
         headers = {"Retry-After": "-1"}
@@ -228,7 +228,7 @@ def test_retry_after_negative_is_clamped(monkeypatch):
 
 def test_retry_after_huge_is_clamped(monkeypatch):
     """Server returning Retry-After: 99999 must not block for a day."""
-    from maverick import retry
+    from lightwork import retry
     monkeypatch.setattr(retry, "MAX_DELAY", 30.0)
 
     class _Resp:
@@ -244,8 +244,8 @@ def test_retry_after_huge_is_clamped(monkeypatch):
 
 def test_input_cap_not_eaten_by_cache_reads():
     """A long cached prompt shouldn't prematurely trip max_input_tokens."""
-    from maverick.budget import Budget
-    from maverick.llm import MODEL_SONNET
+    from lightwork.budget import Budget
+    from lightwork.llm import MODEL_SONNET
 
     b = Budget(max_dollars=100.0, max_input_tokens=200_000)
     # 5x re-runs against a 100k-token cached system prompt: 500k cached
@@ -266,7 +266,7 @@ def test_input_cap_not_eaten_by_cache_reads():
 def test_schema_version_init_handles_concurrent_inserts(tmp_path, monkeypatch):
     """Two WorldModel constructions on the same fresh DB don't crash
     on the schema_version PRIMARY KEY collision."""
-    from maverick.world_model import WorldModel
+    from lightwork.world_model import WorldModel
 
     db = tmp_path / "race.db"
     # First connection initializes.
@@ -282,7 +282,7 @@ def test_schema_version_init_handles_concurrent_inserts(tmp_path, monkeypatch):
 def test_is_processed_message_handles_null_goal_id(tmp_path):
     """SMS/WhatsApp commit with goal_id=None; is_processed_message
     must still return True for those rows."""
-    from maverick.world_model import WorldModel
+    from lightwork.world_model import WorldModel
 
     wm = WorldModel(tmp_path / "w.db")
     wm.mark_message_processed("sms", "SMxyz", goal_id=None)
@@ -302,7 +302,7 @@ def test_prune_processed_messages(tmp_path):
     """Twilio dedup rows accumulate forever without explicit pruning."""
     import time as _time
 
-    from maverick.world_model import WorldModel
+    from lightwork.world_model import WorldModel
 
     wm = WorldModel(tmp_path / "w.db")
     wm.mark_message_processed("sms", "SM1")
@@ -323,16 +323,16 @@ def test_prune_processed_messages(tmp_path):
 
 def test_env_int_rejects_non_numeric(monkeypatch):
     """A typo'd env var doesn't crash module import."""
-    from maverick._envparse import env_int
+    from lightwork._envparse import env_int
     monkeypatch.setenv("MAVERICK_TEST_INT", "high")
     assert env_int("MAVERICK_TEST_INT", 7) == 7
 
 
 def test_env_float_rejects_non_numeric(monkeypatch):
-    from maverick._envparse import env_float
+    from lightwork._envparse import env_float
     monkeypatch.setenv("MAVERICK_TEST_FLOAT", "soon")
     assert env_float("MAVERICK_TEST_FLOAT", 1.5) == 1.5
 
 
 # /healthz exception-text sanitization is exercised in the dashboard
-# tests (test_api.py) since it requires importing maverick_dashboard.
+# tests (test_api.py) since it requires importing lightwork_dashboard.

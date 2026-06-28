@@ -3,7 +3,7 @@ from __future__ import annotations
 
 import json
 
-from maverick.tools.rectification import rectification
+from lightwork.tools.rectification import rectification
 
 
 def _a(record, changes, immutable=None, allow_new=None):
@@ -57,7 +57,7 @@ def test_errors():
 
 
 def test_registered():
-    from maverick.tools import base_registry
+    from lightwork.tools import base_registry
 
     class _W:
         pass

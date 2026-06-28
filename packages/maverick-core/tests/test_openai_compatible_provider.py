@@ -37,7 +37,7 @@ def fake_openai(monkeypatch):
 
 def test_registered_in_provider_registry():
     """Registry membership + aliases resolve without instantiating."""
-    from maverick.providers import KNOWN_PROVIDERS, _canonical
+    from lightwork.providers import KNOWN_PROVIDERS, _canonical
     assert "openai_compatible" in KNOWN_PROVIDERS
     assert _canonical("openai-compatible") == "openai_compatible"
     assert _canonical("custom") == "openai_compatible"
@@ -46,8 +46,8 @@ def test_registered_in_provider_registry():
 def test_base_url_from_env_passthrough(fake_openai, monkeypatch):
     monkeypatch.setenv("OPENAI_COMPATIBLE_BASE_URL", "https://api.groq.com/openai/v1")
     monkeypatch.setenv("OPENAI_COMPATIBLE_API_KEY", "gsk-secret")
-    from maverick.providers import get_provider_client
-    from maverick.providers.openai_compatible_provider import OpenAICompatibleClient
+    from lightwork.providers import get_provider_client
+    from lightwork.providers.openai_compatible_provider import OpenAICompatibleClient
 
     client = get_provider_client("openai-compatible")
     assert isinstance(client, OpenAICompatibleClient)
@@ -62,8 +62,8 @@ def test_custom_alias_dispatches(fake_openai, monkeypatch):
     # A custom base_url requires its own key -- the client refuses to leak
     # OPENAI_API_KEY to an arbitrary endpoint, so supply OPENAI_COMPATIBLE_API_KEY.
     monkeypatch.setenv("OPENAI_COMPATIBLE_API_KEY", "sk-local")
-    from maverick.providers import get_provider_client
-    from maverick.providers.openai_compatible_provider import OpenAICompatibleClient
+    from lightwork.providers import get_provider_client
+    from lightwork.providers.openai_compatible_provider import OpenAICompatibleClient
 
     client = get_provider_client("custom")
     assert isinstance(client, OpenAICompatibleClient)
@@ -82,7 +82,7 @@ def test_base_url_from_config(fake_openai, monkeypatch, tmp_path):
     )
     monkeypatch.setenv("MAVERICK_CONFIG", str(cfg))
     monkeypatch.setenv("MY_TOGETHER_KEY", "tok-from-env")
-    from maverick.providers.openai_compatible_provider import OpenAICompatibleClient
+    from lightwork.providers.openai_compatible_provider import OpenAICompatibleClient
 
     client = OpenAICompatibleClient()
     assert client._sync.base_url == "https://api.together.xyz/v1"
@@ -91,7 +91,7 @@ def test_base_url_from_config(fake_openai, monkeypatch, tmp_path):
 
 def test_missing_base_url_raises(fake_openai):
     """No base_url anywhere is a configuration error, not a silent default."""
-    from maverick.providers.openai_compatible_provider import OpenAICompatibleClient
+    from lightwork.providers.openai_compatible_provider import OpenAICompatibleClient
     with pytest.raises(ValueError) as exc:
         OpenAICompatibleClient()
     assert "base_url" in str(exc.value)

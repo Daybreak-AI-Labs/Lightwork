@@ -4,9 +4,9 @@ from __future__ import annotations
 from pathlib import Path
 
 from click.testing import CliRunner
-from maverick import erasure_verify
-from maverick.cli import main
-from maverick.world_model import WorldModel
+from lightwork import erasure_verify
+from lightwork.cli import main
+from lightwork.world_model import WorldModel
 
 # ---- differential (pure) ----
 
@@ -35,7 +35,7 @@ def test_differential_not_verified_when_nothing_to_remove():
 
 def test_verify_erasure_clean(monkeypatch):
     monkeypatch.setattr(
-        "maverick.dsar.export_subject_data",
+        "lightwork.dsar.export_subject_data",
         lambda u, *, channel=None, tenant=None: {
             "subject": {"user_id": u, "channel": channel},
             "counts": {"conversations": 0, "turns": 0, "goals": 0,
@@ -49,7 +49,7 @@ def test_verify_erasure_clean(monkeypatch):
 
 def test_verify_erasure_dirty(monkeypatch):
     monkeypatch.setattr(
-        "maverick.dsar.export_subject_data",
+        "lightwork.dsar.export_subject_data",
         lambda u, *, channel=None, tenant=None: {
             "subject": {"user_id": u, "channel": channel},
             "counts": {"conversations": 1, "turns": 3, "goals": 0},

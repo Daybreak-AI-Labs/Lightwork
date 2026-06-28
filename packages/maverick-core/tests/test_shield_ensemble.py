@@ -1,7 +1,7 @@
 """Shield v3 ensemble: deny-wins combination + explainable reason codes."""
 from __future__ import annotations
 
-from maverick.shield_ensemble import (
+from lightwork.shield_ensemble import (
     DetectorSignal,
     ShieldEnsemble,
 )

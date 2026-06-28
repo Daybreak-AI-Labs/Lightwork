@@ -7,8 +7,8 @@ import textwrap
 import types
 
 from click.testing import CliRunner
-from maverick import plugins as plugins_mod
-from maverick.plugins import reload_plugin
+from lightwork import plugins as plugins_mod
+from lightwork.plugins import reload_plugin
 
 
 class _EP:
@@ -32,7 +32,7 @@ def test_reload_drops_modules_and_picks_up_new_code(tmp_path, monkeypatch):
     mod_file = _install_plugin_module(tmp_path, "VERSION = 'v1'\n")
     eps = [_EP("hotdemo", "hotdemo_plugin:tool", "hotdemo-dist")]
     monkeypatch.setattr(plugins_mod, "_entry_points",
-                        lambda group: eps if group == "maverick.tools" else [])
+                        lambda group: eps if group == "lightwork.tools" else [])
 
     import hotdemo_plugin  # first import
     assert hotdemo_plugin.VERSION == "v1"
@@ -71,7 +71,7 @@ def test_reload_drops_submodules_too(tmp_path, monkeypatch):
     try:
         eps = [_EP("p", "hotpkg:factory", "hotpkg-dist")]
         monkeypatch.setattr(plugins_mod, "_entry_points",
-                            lambda group: eps if group == "maverick.channels" else [])
+                            lambda group: eps if group == "lightwork.channels" else [])
         import hotpkg  # noqa: F401
         assert "hotpkg.sub" in sys.modules
         dropped = reload_plugin("hotpkg-dist")
@@ -84,7 +84,7 @@ def test_reload_drops_submodules_too(tmp_path, monkeypatch):
 
 
 def test_cli_plugin_reload_command(monkeypatch):
-    from maverick import cli as cli_mod
+    from lightwork import cli as cli_mod
     monkeypatch.setattr(plugins_mod, "reload_plugin", lambda d: ["m1", "m2"])
     res = CliRunner().invoke(cli_mod.main, ["plugin", "reload", "some-dist"])
     assert res.exit_code == 0, res.output

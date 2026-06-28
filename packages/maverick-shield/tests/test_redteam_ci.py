@@ -6,7 +6,7 @@ from __future__ import annotations
 import json
 
 import pytest
-from maverick_shield import redteam
+from lightwork_shield import redteam
 
 
 def test_shipped_corpus_loads_and_is_labelled():

@@ -15,10 +15,10 @@ from __future__ import annotations
 from pathlib import Path
 
 import pytest
-from maverick.budget import Budget
-from maverick.orchestrator import run_goal
-from maverick.sandbox import LocalBackend
-from maverick.world_model import WorldModel
+from lightwork.budget import Budget
+from lightwork.orchestrator import run_goal
+from lightwork.sandbox import LocalBackend
+from lightwork.world_model import WorldModel
 
 
 @pytest.mark.asyncio
@@ -26,11 +26,11 @@ async def test_run_goal_fires_lifecycle_webhooks(
     tmp_path: Path, fake_llm, make_llm_response, monkeypatch,
 ):
     # No shield in the way; we only care about webhook emission.
-    monkeypatch.setattr("maverick.orchestrator._build_shield", lambda: None)
+    monkeypatch.setattr("lightwork.orchestrator._build_shield", lambda: None)
 
     calls: list[tuple[str, dict]] = []
     monkeypatch.setattr(
-        "maverick.orchestrator._fire_webhook",
+        "lightwork.orchestrator._fire_webhook",
         lambda event, payload: calls.append((event, payload)),
     )
 
@@ -96,11 +96,11 @@ async def test_run_goal_does_not_webhook_blocked_goal_input(
     tmp_path: Path, fake_llm, monkeypatch,
 ):
     monkeypatch.setattr(
-        "maverick.orchestrator._build_shield", lambda: _WebhookSentinelShield(),
+        "lightwork.orchestrator._build_shield", lambda: _WebhookSentinelShield(),
     )
     calls: list[tuple[str, dict]] = []
     monkeypatch.setattr(
-        "maverick.orchestrator._fire_webhook",
+        "lightwork.orchestrator._fire_webhook",
         lambda event, payload: calls.append((event, payload)),
     )
 
@@ -122,11 +122,11 @@ async def test_run_goal_does_not_webhook_blocked_final_output(
     tmp_path: Path, fake_llm, make_llm_response, monkeypatch,
 ):
     monkeypatch.setattr(
-        "maverick.orchestrator._build_shield", lambda: _WebhookSentinelShield(),
+        "lightwork.orchestrator._build_shield", lambda: _WebhookSentinelShield(),
     )
     calls: list[tuple[str, dict]] = []
     monkeypatch.setattr(
-        "maverick.orchestrator._fire_webhook",
+        "lightwork.orchestrator._fire_webhook",
         lambda event, payload: calls.append((event, payload)),
     )
 

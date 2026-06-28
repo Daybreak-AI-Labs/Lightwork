@@ -1,7 +1,7 @@
 """capability_delegation_graph: delegation-risk analysis."""
 from __future__ import annotations
 
-from maverick.tools.capability_delegation_graph import capability_delegation_graph
+from lightwork.tools.capability_delegation_graph import capability_delegation_graph
 
 
 def _an(grants, **kw):

@@ -4,8 +4,8 @@ from __future__ import annotations
 import json
 
 from click.testing import CliRunner
-from maverick import soc2 as soc2_module
-from maverick.cli import main
+from lightwork import soc2 as soc2_module
+from lightwork.cli import main
 
 
 def _passing_evidence() -> dict:

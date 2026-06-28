@@ -3,7 +3,7 @@
 Many maverick modules freeze ``Path.home()``-derived paths into module-level
 constants at import time (``world_model.DEFAULT_DB``, ``skills.SKILLS_DIR``,
 ``skill_stats.DEFAULT_PATH``, ``self_learning.LEARNED_PATH``, the audit dirs,
-...). The per-test ``HOME`` monkeypatch in maverick-core's conftest runs too
+...). The per-test ``HOME`` monkeypatch in lightwork-core's conftest runs too
 late for those: in a full-suite run the first collected module to import
 maverick bakes the REAL home into the constants, and every test that then
 relies on a default path writes the developer's actual ``~/.maverick`` --
@@ -28,7 +28,7 @@ import os
 import shutil
 import tempfile
 
-_session_home = tempfile.mkdtemp(prefix="maverick-test-home-")
+_session_home = tempfile.mkdtemp(prefix="lightwork-test-home-")
 os.environ["HOME"] = _session_home
 os.environ["USERPROFILE"] = _session_home  # Windows: what Path.home() reads
 atexit.register(shutil.rmtree, _session_home, True)

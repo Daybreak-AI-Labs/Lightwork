@@ -7,7 +7,7 @@ from __future__ import annotations
 import os
 
 import pytest
-from maverick import local_runtime as lr
+from lightwork import local_runtime as lr
 
 
 @pytest.fixture(autouse=True)
@@ -391,7 +391,7 @@ def test_cli_plan_prints_argv(tmp_path):
         encoding="utf-8",
     )
     from click.testing import CliRunner
-    from maverick.cli import main
+    from lightwork.cli import main
     res = CliRunner().invoke(main, ["local-runtime", "plan"])
     assert res.exit_code == 0, res.output
     assert "llama-server" in res.output and "/m/q4.gguf" in res.output
@@ -400,7 +400,7 @@ def test_cli_plan_prints_argv(tmp_path):
 
 def test_cli_plan_without_model_is_polite():
     from click.testing import CliRunner
-    from maverick.cli import main
+    from lightwork.cli import main
     res = CliRunner().invoke(main, ["local-runtime", "plan"])
     assert res.exit_code != 0
     assert "model" in res.output

@@ -5,8 +5,8 @@ from __future__ import annotations
 import types
 
 import pytest
-from maverick.budget import Budget, BudgetExceeded
-from maverick.plan_execute_reflect import run_plan_execute_reflect
+from lightwork.budget import Budget, BudgetExceeded
+from lightwork.plan_execute_reflect import run_plan_execute_reflect
 
 
 def _resp(text: str):
@@ -125,7 +125,7 @@ def test_validation():
 
 
 def test_plan_reflect_command_registered():
-    from maverick.cli import main
+    from lightwork.cli import main
     assert "plan-reflect" in main.commands
 
 
@@ -133,9 +133,9 @@ def test_plan_reflect_command_prints_trace(monkeypatch):
     # The commands now preflight providers (round-3 fix); the LLM is
     # still mocked -- a dummy key just satisfies the gate.
     monkeypatch.setenv("ANTHROPIC_API_KEY", "sk-ant-fake")
-    import maverick.plan_execute_reflect as per_mod
-    from maverick import cli as cli_mod
-    from maverick.plan_execute_reflect import (
+    import lightwork.plan_execute_reflect as per_mod
+    from lightwork import cli as cli_mod
+    from lightwork.plan_execute_reflect import (
         PlanExecuteReflectResult,
         Reflection,
         StepResult,

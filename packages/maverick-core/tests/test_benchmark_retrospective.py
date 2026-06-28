@@ -3,7 +3,7 @@ from __future__ import annotations
 
 from datetime import datetime, timezone
 
-from maverick.benchmark_retrospective import analyze, coverage, render
+from lightwork.benchmark_retrospective import analyze, coverage, render
 
 
 def _t(year, month):

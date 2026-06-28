@@ -1,7 +1,7 @@
 """Critical-path-aware scheduling: ready frontier ordered by remaining tail."""
 from __future__ import annotations
 
-from maverick.task_graph import TaskGraph
+from lightwork.task_graph import TaskGraph
 
 
 def _diamond():
@@ -58,8 +58,8 @@ def test_ready_prioritized_uses_weights():
 
 
 def test_schedule_op_renders_order(tmp_path, monkeypatch):
-    import maverick.task_graph as tg
-    from maverick.task_graph import _run
+    import lightwork.task_graph as tg
+    from lightwork.task_graph import _run
     g = _diamond()
     g.set_status("a", "done")
     monkeypatch.setenv("MAVERICK_HOME", str(tmp_path))

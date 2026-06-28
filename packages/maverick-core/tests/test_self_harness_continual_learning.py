@@ -30,8 +30,8 @@ from __future__ import annotations
 import random
 
 import pytest
-from maverick import self_harness as sh
-from maverick import self_improvement as si
+from lightwork import self_harness as sh
+from lightwork import self_improvement as si
 
 CAP = sh._MAX_LINES_PER_MODEL
 BASE_P, GUIDED_P = 0.15, 0.90

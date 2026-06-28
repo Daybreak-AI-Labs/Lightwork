@@ -5,7 +5,7 @@ import asyncio
 import json
 
 import pytest
-from maverick.mcp_client import (
+from lightwork.mcp_client import (
     MCPClient,
     MCPClientError,
     MCPServerSpec,
@@ -104,7 +104,7 @@ class TestLoadSpecsFromConfig:
         )
         monkeypatch.setenv("MAVERICK_CONFIG", str(cfg))
         # Clear LRU cache by re-importing or re-running load_config.
-        from maverick.config import load_config
+        from lightwork.config import load_config
         load_config.__wrapped__ if hasattr(load_config, "__wrapped__") else load_config
         specs = load_mcp_specs_from_config()
         assert len(specs) == 1
@@ -199,7 +199,7 @@ class TestCallTool:
     def test_wrapped_is_error_log_uses_redacted_exception(
         self, monkeypatch, caplog
     ):
-        from maverick.mcp_tools import _build_tool
+        from lightwork.mcp_tools import _build_tool
 
         secret = "ghp_" + "A" * 36
         c = self._client_returning(
@@ -210,7 +210,7 @@ class TestCallTool:
             },
         )
         tool = _build_tool(c, "mcp_x__t", "t", {"description": "d"})
-        caplog.set_level("ERROR", logger="maverick.mcp_tools")
+        caplog.set_level("ERROR", logger="lightwork.mcp_tools")
 
         result = asyncio.run(tool.fn({}))
 

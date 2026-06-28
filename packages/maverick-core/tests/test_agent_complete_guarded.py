@@ -6,9 +6,9 @@ import asyncio
 import types
 
 import pytest
-from maverick import killswitch
-from maverick.agent import Agent
-from maverick.budget import Budget, BudgetExceeded
+from lightwork import killswitch
+from lightwork.agent import Agent
+from lightwork.budget import Budget, BudgetExceeded
 
 
 class _FakeLLM:

@@ -60,18 +60,18 @@ from moat import RunMetrics  # noqa: E402
 # cold so the delta still isolates memory (see MOAT_RIGOROUS_RESULTS.md). Pull
 # the repo's Sonnet tier rather than a literal id so it cannot drift.
 try:
-    from maverick.llm import ROLE_MODELS as _ROLE_MODELS
+    from lightwork.llm import ROLE_MODELS as _ROLE_MODELS
     _COMPLETING_ORCHESTRATOR = _ROLE_MODELS.get("coder", "claude-sonnet-4-6")
 except Exception:  # pragma: no cover -- benchmark falls back to a sane default
     _COMPLETING_ORCHESTRATOR = "claude-sonnet-4-6"
 
 # The codebase the "analyze this codebase" tasks operate on. It MUST be mounted
-# into the sandbox workspace, or the agent sees an empty ~/maverick-workspace
+# into the sandbox workspace, or the agent sees an empty ~/lightwork-workspace
 # (config.get_sandbox's default workdir) and every run answers "no codebase
 # available" -- the bug that invalidated the first graded run. Default: this
 # repo's kernel source.
 DEFAULT_CODEBASE = str(Path(__file__).resolve().parents[1]
-                       / "packages" / "maverick-core" / "maverick")
+                       / "packages" / "lightwork-core" / "maverick")
 
 # A per-run cap below this guarantees truncation: the budget reserves ~$0.20
 # per Sonnet call pre-flight, so a sub-$1 cap leaves too little usable spend for
@@ -413,7 +413,7 @@ from pathlib import Path
 #  (1) Pin the orchestrator + revisor so the task COMPLETES within the cap (the
 #      product-default Opus orchestrator truncates and starves learning).
 #  (2) MOUNT the codebase into the sandbox workspace -- else the LocalBackend
-#      workdir defaults to an EMPTY ~/maverick-workspace and every "analyze this
+#      workdir defaults to an EMPTY ~/lightwork-workspace and every "analyze this
 #      codebase" run answers "no codebase available" (the bug that invalidated
 #      the first graded run). Copy is per-run (isolated), read-only in practice.
 _cfg = Path("~/.maverick").expanduser(); _cfg.mkdir(parents=True, exist_ok=True)
@@ -430,11 +430,11 @@ if _src and Path(_src).is_dir():
     _lines += ["[sandbox]", 'workdir = "%s"' % _ws]
 if _lines:
     (_cfg / "config.toml").write_text("\\n".join(_lines) + "\\n")
-from maverick.budget import Budget
-from maverick.llm import LLM
-from maverick.orchestrator import run_goal_sync
-from maverick.sandbox import build_sandbox
-from maverick.world_model import WorldModel
+from lightwork.budget import Budget
+from lightwork.llm import LLM
+from lightwork.orchestrator import run_goal_sync
+from lightwork.sandbox import build_sandbox
+from lightwork.world_model import WorldModel
 task = os.environ["MOAT_TASK"]; cap = float(os.environ.get("MOAT_CAP", "1.25"))
 world = WorldModel(path=Path("~/.maverick/world.db").expanduser())
 gid = world.create_goal(task[:80], task); budget = Budget(max_dollars=cap)

@@ -6,7 +6,7 @@ import hashlib
 import hmac
 import json
 
-from maverick.tools.jwt_inspect import jwt_inspect
+from lightwork.tools.jwt_inspect import jwt_inspect
 
 
 def _b64(obj) -> str:
@@ -82,7 +82,7 @@ def test_alg_none_flagged_without_secret():
 
 
 def test_not_cacheable_because_default_now_is_time_dependent():
-    from maverick.cache.tool import cacheable
+    from lightwork.cache.tool import cacheable
 
     tool = jwt_inspect()
     assert tool.parallel_safe is False
@@ -106,7 +106,7 @@ def test_errors():
 
 
 def test_registered():
-    from maverick.tools import base_registry
+    from lightwork.tools import base_registry
 
     class _W:
         pass

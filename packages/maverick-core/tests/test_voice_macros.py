@@ -6,8 +6,8 @@ import os
 import stat
 
 import pytest
-from maverick.conversational_supervisor import parse_utterance
-from maverick.voice_macros import (
+from lightwork.conversational_supervisor import parse_utterance
+from lightwork.voice_macros import (
     MAX_STEPS,
     delete_macro,
     load_macros,
@@ -228,7 +228,7 @@ def test_concurrent_record_macro_does_not_lose_macros(tmp_path):
     records of different macros clobber each other. All N must survive."""
     import threading
 
-    from maverick import voice_macros
+    from lightwork import voice_macros
 
     store = tmp_path / "voice_macros.json"
     n = 16

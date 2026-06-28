@@ -13,7 +13,7 @@ Scenarios (each returns ``{"scenario", "clamped", "detail"}``):
 
   * ``tool-loop``           a scripted agent re-calls the same read tool
                             100x; with the tool-output cache on
-                            (``maverick.tool_cache``) paid executions must
+                            (``lightwork.tool_cache``) paid executions must
                             stay <= 1 -- the cache absorbs the repeats.
   * ``token-bomb``          a tool returns a multi-megabyte string; the
                             agent loop's ``_cap_tool_output`` hook must
@@ -66,13 +66,13 @@ class _ReadTool:
 
 def scenario_tool_loop() -> dict:
     """Re-call the same read tool 100x; the cache must absorb the repeats."""
-    from maverick.cache import tool as tool_cache
+    from lightwork.cache import tool as tool_cache
 
     tool = _ReadTool()
     args = {"path": "src/big_module.py"}
     # A snapshot path that doesn't exist keeps warm-on-start inert even on a
     # host whose config enables it -- the scenario must be hermetic.
-    absent = os.path.join(tempfile.gettempdir(), "maverick-adversarial-no-snapshot.jsonl")
+    absent = os.path.join(tempfile.gettempdir(), "lightwork-adversarial-no-snapshot.jsonl")
     served = 0
     with _scoped_env(MAVERICK_TOOL_CACHE="1", MAVERICK_TOOL_CACHE_SNAPSHOT_PATH=absent):
         tool_cache.reset()
@@ -103,7 +103,7 @@ def scenario_tool_loop() -> dict:
 def scenario_token_bomb() -> dict:
     """A tool emits a multi-MB string; the truncation hook bounds what enters
     the context window (and therefore the next call's input-token spend)."""
-    from maverick.agent import _MAX_TOOL_RESULT_BYTES, _cap_tool_output
+    from lightwork.agent import _MAX_TOOL_RESULT_BYTES, _cap_tool_output
 
     bomb = "$" * (_MAX_TOOL_RESULT_BYTES * 50)  # ~5 MB at the default cap
     entered = _cap_tool_output(bomb)
@@ -123,7 +123,7 @@ def scenario_token_bomb() -> dict:
 
 def scenario_runaway_iterations() -> dict:
     """A scripted 1000-iteration loop must be halted at max_tool_calls=K."""
-    from maverick.budget import Budget, BudgetExceeded
+    from lightwork.budget import Budget, BudgetExceeded
 
     cap = 25
     budget = Budget(max_tool_calls=cap, max_dollars=1e9, max_wall_seconds=3600.0)

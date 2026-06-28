@@ -3,8 +3,8 @@ stable id so a downstream payment/AR step can dedup and never double-charge
 (purchase-blocker audit #83)."""
 from __future__ import annotations
 
-from maverick.billing import RateCard, generate_invoice, rate_ledger
-from maverick.quotas import UsageLedger
+from lightwork.billing import RateCard, generate_invoice, rate_ledger
+from lightwork.quotas import UsageLedger
 
 
 def _ledger(tmp_path):

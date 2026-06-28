@@ -13,7 +13,7 @@ from pathlib import Path
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 import eval_terminal_bench as H  # noqa: E402
 import terminal_solver  # noqa: E402
-from maverick.llm import LLMResponse, ToolCall  # noqa: E402
+from lightwork.llm import LLMResponse, ToolCall  # noqa: E402
 
 
 class FakeLLM:

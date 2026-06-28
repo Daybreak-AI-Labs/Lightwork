@@ -1,8 +1,8 @@
 """Replay export to MP4: deterministic storyboard + manifest; best-effort encode."""
 from __future__ import annotations
 
-from maverick.replay import video as rv
-from maverick.replay.video import MAX_FRAME_SECONDS, MIN_FRAME_SECONDS, render, storyboard
+from lightwork.replay import video as rv
+from lightwork.replay.video import MAX_FRAME_SECONDS, MIN_FRAME_SECONDS, render, storyboard
 
 
 def _evs():
@@ -70,7 +70,7 @@ def test_render_encodes_when_ffmpeg_present(tmp_path, monkeypatch):
         import pytest
         pytest.skip("Pillow not installed")
 
-    import maverick.tools as tools_mod
+    import lightwork.tools as tools_mod
     out = tmp_path / "replay.mp4"
 
     def fake_sandbox_run(sandbox, argv, **kw):

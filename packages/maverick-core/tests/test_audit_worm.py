@@ -11,7 +11,7 @@ import stat
 from pathlib import Path
 
 import pytest
-from maverick.audit import worm
+from lightwork.audit import worm
 
 
 class FakeSink:

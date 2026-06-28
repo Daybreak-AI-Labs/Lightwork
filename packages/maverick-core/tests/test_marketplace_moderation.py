@@ -4,7 +4,7 @@ NO network: pure heuristics; every test runs the scanner directly.
 """
 from __future__ import annotations
 
-from maverick.tools.marketplace_moderation import _scan, marketplace_moderation
+from lightwork.tools.marketplace_moderation import _scan, marketplace_moderation
 
 
 def _run(listing):

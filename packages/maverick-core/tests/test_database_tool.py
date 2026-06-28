@@ -3,8 +3,8 @@ from __future__ import annotations
 
 
 def test_database_registers(tmp_path):
-    from maverick.sandbox.local import LocalBackend
-    from maverick.tools import base_registry
+    from lightwork.sandbox.local import LocalBackend
+    from lightwork.tools import base_registry
 
     class _W:
         def open_questions(self, gid):
@@ -16,14 +16,14 @@ def test_database_registers(tmp_path):
 
 def test_requires_url(monkeypatch):
     monkeypatch.delenv("DATABASE_URL", raising=False)
-    from maverick.tools.database_tool import database_tool
+    from lightwork.tools.database_tool import database_tool
     out = database_tool().fn({"op": "query", "sql": "select 1"})
     assert "ERROR" in out and "DATABASE_URL" in out
 
 
 def test_write_needs_confirm(monkeypatch):
     monkeypatch.setenv("DATABASE_URL", "postgresql+psycopg://u:p@localhost/db")
-    from maverick.tools.database_tool import database_tool
+    from lightwork.tools.database_tool import database_tool
     out = database_tool().fn({"op": "query", "sql": "DELETE FROM t WHERE 1=1"})
     assert "DRY RUN" in out
 
@@ -31,14 +31,14 @@ def test_write_needs_confirm(monkeypatch):
 def test_read_returns_error_gracefully_without_server(monkeypatch):
     # No reachable DB / maybe no driver: must return an ERROR string, not raise.
     monkeypatch.setenv("DATABASE_URL", "postgresql+psycopg://u:p@127.0.0.1:1/db")
-    from maverick.tools.database_tool import database_tool
+    from lightwork.tools.database_tool import database_tool
     out = database_tool().fn({"op": "query", "sql": "SELECT 1"})
     assert out.startswith("ERROR")
 
 
 def test_cte_prefixed_write_needs_confirm(monkeypatch):
     monkeypatch.setenv("DATABASE_URL", "postgresql+psycopg://u:p@localhost/db")
-    from maverick.tools.database_tool import database_tool
+    from lightwork.tools.database_tool import database_tool
 
     out = database_tool().fn({
         "op": "query",
@@ -50,7 +50,7 @@ def test_cte_prefixed_write_needs_confirm(monkeypatch):
 
 def test_explain_prefixed_sql_needs_confirm(monkeypatch):
     monkeypatch.setenv("DATABASE_URL", "postgresql+psycopg://u:p@localhost/db")
-    from maverick.tools.database_tool import database_tool
+    from lightwork.tools.database_tool import database_tool
 
     out = database_tool().fn({"op": "query", "sql": "EXPLAIN ANALYZE DELETE FROM users"})
 
@@ -59,7 +59,7 @@ def test_explain_prefixed_sql_needs_confirm(monkeypatch):
 
 def test_comment_prefixed_write_needs_confirm(monkeypatch):
     monkeypatch.setenv("DATABASE_URL", "postgresql+psycopg://u:p@localhost/db")
-    from maverick.tools.database_tool import database_tool
+    from lightwork.tools.database_tool import database_tool
 
     for sql in (
         "/* select */ DELETE FROM users",
@@ -72,7 +72,7 @@ def test_comment_prefixed_write_needs_confirm(monkeypatch):
 
 def test_mysql_executable_comment_needs_confirm(monkeypatch):
     monkeypatch.setenv("DATABASE_URL", "mysql+pymysql://u:p@localhost/db")
-    from maverick.tools.database_tool import database_tool
+    from lightwork.tools.database_tool import database_tool
 
     for sql in (
         "/*! INSERT INTO audit_log */ SELECT * FROM users",
@@ -84,7 +84,7 @@ def test_mysql_executable_comment_needs_confirm(monkeypatch):
 
 def test_comment_prefixed_read_is_allowed(monkeypatch):
     monkeypatch.delenv("DATABASE_URL", raising=False)
-    from maverick.tools.database_tool import database_tool
+    from lightwork.tools.database_tool import database_tool
 
     out = database_tool().fn({"op": "query", "sql": "/* allowed */ -- still allowed\nSELECT 1"})
 
@@ -93,7 +93,7 @@ def test_comment_prefixed_read_is_allowed(monkeypatch):
 
 def test_stacked_write_behind_select_needs_confirm(monkeypatch):
     monkeypatch.setenv("DATABASE_URL", "postgresql+psycopg://u:p@localhost/db")
-    from maverick.tools.database_tool import database_tool
+    from lightwork.tools.database_tool import database_tool
 
     for sql in (
         "SELECT 1; DELETE FROM users",
@@ -105,7 +105,7 @@ def test_stacked_write_behind_select_needs_confirm(monkeypatch):
 
 def test_host_param_in_query_string_is_denied(monkeypatch):
     monkeypatch.delenv("DATABASE_URL", raising=False)
-    from maverick.tools.database_tool import database_tool
+    from lightwork.tools.database_tool import database_tool
 
     # libpq honors ?host=; the netloc host is empty so the old check failed open.
     for url in (
@@ -123,7 +123,7 @@ def test_host_param_in_query_string_is_denied(monkeypatch):
 
 def test_hostless_url_fails_closed_under_allowlist(monkeypatch):
     monkeypatch.delenv("DATABASE_URL", raising=False)
-    from maverick.tools.database_tool import database_tool
+    from lightwork.tools.database_tool import database_tool
 
     out = database_tool().fn({
         "op": "query",
@@ -177,7 +177,7 @@ def test_row_limit_is_clamped(monkeypatch):
     fake_sa.text = lambda s: s
     monkeypatch.setitem(__import__("sys").modules, "sqlalchemy", fake_sa)
 
-    from maverick.tools.database_tool import database_tool
+    from lightwork.tools.database_tool import database_tool
 
     database_tool().fn({
         "op": "query",
@@ -191,7 +191,7 @@ def test_row_limit_is_clamped(monkeypatch):
 
 def test_database_url_host_scope_applies_to_env_url(monkeypatch):
     monkeypatch.setenv("DATABASE_URL", "postgresql+psycopg://u:p@evil.com/db")
-    from maverick.tools.database_tool import database_tool
+    from lightwork.tools.database_tool import database_tool
 
     out = database_tool().fn({
         "op": "query",

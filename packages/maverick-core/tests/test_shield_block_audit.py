@@ -13,10 +13,10 @@ import types
 from pathlib import Path
 
 import pytest
-from maverick.budget import Budget
-from maverick.orchestrator import run_goal
-from maverick.sandbox import LocalBackend
-from maverick.world_model import WorldModel
+from lightwork.budget import Budget
+from lightwork.orchestrator import run_goal
+from lightwork.sandbox import LocalBackend
+from lightwork.world_model import WorldModel
 
 
 def _verdict(allowed, reasons):
@@ -54,10 +54,10 @@ async def test_shield_input_block_records_audit_event(tmp_path, monkeypatch, fak
     # The module-level audit writer is a process singleton cached across tests;
     # reset it (monkeypatch restores the originals on teardown) so record()
     # resolves THIS test's isolated audit dir rather than a prior test's writer.
-    import maverick.audit.writer as _w
+    import lightwork.audit.writer as _w
     monkeypatch.setattr(_w, "_default", None)
     monkeypatch.setattr(_w, "_defaults", {})
-    monkeypatch.setattr("maverick.orchestrator._build_shield",
+    monkeypatch.setattr("lightwork.orchestrator._build_shield",
                         lambda: _InputBlockingShield())
     world = WorldModel(path=tmp_path / "world.db")
     gid = world.create_goal("please do BLOCKME right now", "")

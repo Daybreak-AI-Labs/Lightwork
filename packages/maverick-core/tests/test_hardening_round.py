@@ -34,7 +34,7 @@ def test_elasticsearch_handles_null_score(monkeypatch):
         {"_id": "1", "_score": None, "_source": {"k": "v"}},
     ]}}
     _fake_httpx(monkeypatch, post=MagicMock(return_value=_resp(200, body)))
-    from maverick.tools.elasticsearch_tool import elasticsearch_tool
+    from lightwork.tools.elasticsearch_tool import elasticsearch_tool
     out = elasticsearch_tool().fn({"op": "search", "index": "logs"})
     assert "ERROR" not in out
     assert "1" in out  # the doc id rendered
@@ -47,7 +47,7 @@ def test_vercel_handles_null_project_name(monkeypatch):
          "latestDeployments": [{"readyState": "READY"}]},
     ]}
     _fake_httpx(monkeypatch, get=MagicMock(return_value=_resp(200, body)))
-    from maverick.tools.vercel_tool import vercel_tool
+    from lightwork.tools.vercel_tool import vercel_tool
     out = vercel_tool().fn({"op": "projects"})
     assert "ERROR" not in out and "p1" in out
 
@@ -57,7 +57,7 @@ def test_datadog_handles_null_monitor_id(monkeypatch):
     monkeypatch.setenv("DATADOG_APP_KEY", "a")
     body = [{"id": None, "overall_state": "OK", "name": "cpu"}]
     _fake_httpx(monkeypatch, get=MagicMock(return_value=_resp(200, body)))
-    from maverick.tools.datadog_tool import datadog_tool
+    from lightwork.tools.datadog_tool import datadog_tool
     out = datadog_tool().fn({"op": "monitors"})
     assert "ERROR" not in out and "cpu" in out
 
@@ -68,7 +68,7 @@ def test_reddit_handles_null_score(monkeypatch):
                   "title": "promoted"}},
     ]}}
     _fake_httpx(monkeypatch, get=MagicMock(return_value=_resp(200, body)))
-    from maverick.tools.reddit_tool import reddit_tool
+    from lightwork.tools.reddit_tool import reddit_tool
     out = reddit_tool().fn({"op": "subreddit", "name": "x"})
     assert "ERROR" not in out and "promoted" in out
 
@@ -81,7 +81,7 @@ def test_ga4_guards_non_json(monkeypatch):
     resp.json = MagicMock(side_effect=ValueError("not json"))
     resp.text = "<html>proxy error</html>"
     _fake_httpx(monkeypatch, post=MagicMock(return_value=resp))
-    from maverick.tools.ga4_tool import ga4_tool
+    from lightwork.tools.ga4_tool import ga4_tool
     out = ga4_tool().fn({"op": "run_report"})
     assert "non-JSON" in out  # graceful, not a raw TypeError/ValueError
 
@@ -92,7 +92,7 @@ def test_ses_dry_run_interpolates_subject(monkeypatch):
     boto3 = types.ModuleType("boto3")
     boto3.client = lambda *a, **k: MagicMock()
     monkeypatch.setitem(sys.modules, "boto3", boto3)
-    from maverick.tools.ses_tool import ses_tool
+    from lightwork.tools.ses_tool import ses_tool
     out = ses_tool().fn({
         "op": "send", "from_": "a@x", "to": ["b@x"],
         "subject": "Q3 report", "body": "hi",
@@ -107,8 +107,8 @@ def test_ses_dry_run_interpolates_subject(monkeypatch):
 def test_workflow_runs_inside_running_loop():
     import asyncio
 
-    from maverick.tools import Tool, ToolRegistry
-    from maverick.workflow import Step, Workflow
+    from lightwork.tools import Tool, ToolRegistry
+    from lightwork.workflow import Step, Workflow
 
     reg = ToolRegistry()
     reg.register(Tool(
@@ -129,8 +129,8 @@ def test_workflow_runs_inside_running_loop():
 
 
 def test_workflow_still_runs_without_loop():
-    from maverick.tools import Tool, ToolRegistry
-    from maverick.workflow import Step, Workflow
+    from lightwork.tools import Tool, ToolRegistry
+    from lightwork.workflow import Step, Workflow
     reg = ToolRegistry()
     reg.register(Tool(
         name="echo", description="echo",
@@ -144,7 +144,7 @@ def test_workflow_still_runs_without_loop():
 # ---------- circuit breaker: honor explicit reconfig on existing key ----
 
 def test_circuit_breaker_reconfigures_existing_key():
-    from maverick.circuit_breaker import get, reset_all
+    from lightwork.circuit_breaker import get, reset_all
     reset_all()
     first = get("svc")  # defaults: threshold 5, cooldown 30
     assert first.failure_threshold == 5
@@ -156,7 +156,7 @@ def test_circuit_breaker_reconfigures_existing_key():
 
 
 def test_circuit_breaker_default_get_does_not_clobber():
-    from maverick.circuit_breaker import get, reset_all
+    from lightwork.circuit_breaker import get, reset_all
     reset_all()
     get("svc2", failure_threshold=2)
     # A later default get() must NOT reset the custom threshold back to 5.
@@ -168,7 +168,7 @@ def test_circuit_breaker_default_get_does_not_clobber():
 # ---------- scheduler: impossible schedule is bounded + fast ----------
 
 def test_scheduler_impossible_schedule_raises_fast():
-    from maverick.scheduler import CronError, next_run
+    from lightwork.scheduler import CronError, next_run
     # Feb 30 never exists; must raise CronError quickly (day-skip walk),
     # not hang on ~2M minute iterations.
     t0 = time.time()
@@ -185,7 +185,7 @@ def test_scheduler_impossible_schedule_raises_fast():
 def test_scheduler_leap_day_still_resolves():
     import datetime as _dt
 
-    from maverick.scheduler import next_run
+    from lightwork.scheduler import next_run
     # Feb 29 IS valid on leap years; must resolve to 2028-02-29.
     base = _dt.datetime(2026, 6, 1, tzinfo=_dt.timezone.utc).timestamp()
     ts = next_run("0 0 29 2 *", after=base)
@@ -196,7 +196,7 @@ def test_scheduler_leap_day_still_resolves():
 # ---------- llm_cache: row cap eviction ----------
 
 def test_llm_cache_evicts_beyond_max_rows(tmp_path):
-    from maverick.cache.llm import LLMCache
+    from lightwork.cache.llm import LLMCache
     cache = LLMCache(db_path=tmp_path / "c.db", max_rows=3)
     # Insert 5 distinct keys; cap is 3.
     for i in range(5):
@@ -206,7 +206,7 @@ def test_llm_cache_evicts_beyond_max_rows(tmp_path):
 
 
 def test_llm_cache_eviction_is_lru_keeps_newest(tmp_path):
-    from maverick.cache.llm import LLMCache
+    from lightwork.cache.llm import LLMCache
     cache = LLMCache(db_path=tmp_path / "c.db", max_rows=2)
     cache.store("hot", provider="p", model="m", text="x")
     # hit_count is intentionally NOT the eviction key. A naive LFU policy
@@ -227,7 +227,7 @@ def test_llm_cache_eviction_is_lru_keeps_newest(tmp_path):
 
 
 def test_llm_cache_unbounded_when_max_rows_zero(tmp_path):
-    from maverick.cache.llm import LLMCache
+    from lightwork.cache.llm import LLMCache
     cache = LLMCache(db_path=tmp_path / "c.db", max_rows=0)
     for i in range(20):
         cache.store(f"k{i}", provider="p", model="m", text="x")
@@ -239,16 +239,16 @@ def test_llm_cache_unbounded_when_max_rows_zero(tmp_path):
 def test_cost_router_tolerates_snapshot_without_error_rate(monkeypatch):
     monkeypatch.setenv("MAVERICK_COST_ROUTING", "1")
     monkeypatch.setenv("DEEPSEEK_API_KEY", "k")
-    import maverick.config as cfg
+    import lightwork.config as cfg
     monkeypatch.setattr(cfg, "load_config", dict)
     # Health snapshot rows missing 'error_rate' must not crash pick().
-    import maverick.provider_health as ph
+    import lightwork.provider_health as ph
     monkeypatch.setattr(
         ph, "get",
         lambda: type("H", (), {"snapshot": staticmethod(
             lambda: [{"provider": "deepseek", "model": "deepseek-chat"}])})(),
     )
-    from maverick.cost.router import CostSignal, pick
+    from lightwork.cost.router import CostSignal, pick
     spec = pick(CostSignal())
     assert spec is None or ":" in spec  # no KeyError
 
@@ -256,7 +256,7 @@ def test_cost_router_tolerates_snapshot_without_error_rate(monkeypatch):
 # ---------- observability: record_metric label handling ----------
 
 def test_record_metric_unlabeled_gauge_no_crash(monkeypatch):
-    import maverick.observability as obs
+    import lightwork.observability as obs
 
     calls = {"set": None}
 
@@ -277,7 +277,7 @@ def test_record_metric_unlabeled_gauge_no_crash(monkeypatch):
 
 
 def test_record_metric_labeled_counter(monkeypatch):
-    import maverick.observability as obs
+    import lightwork.observability as obs
 
     seen = {"labels": None, "inc": None}
 
@@ -322,7 +322,7 @@ def test_prometheus_exporter_defaults_to_loopback_bind(monkeypatch):
     )
     monkeypatch.setitem(sys.modules, "prometheus_client", fake_prom)
 
-    import maverick.observability as obs
+    import lightwork.observability as obs
     obs = importlib.reload(obs)
     monkeypatch.setattr(obs, "_initialized", False)
     monkeypatch.setattr(obs, "_metrics", {})
@@ -337,7 +337,7 @@ def test_prometheus_exporter_defaults_to_loopback_bind(monkeypatch):
 def test_chaos_roll_is_thread_safe_smoke():
     import threading
 
-    from maverick.chaos import ChaosController, ChaosInjected, maybe_fail
+    from lightwork.chaos import ChaosController, ChaosInjected, maybe_fail
     c = ChaosController()
     c.set(active=True, seed=1, sandbox_exec_fail_pct=50)
     errors: list[str] = []
@@ -365,7 +365,7 @@ def test_chaos_roll_is_thread_safe_smoke():
 def test_podman_timeout_cleanup_swallows_cleanup_error(monkeypatch, tmp_path):
     import subprocess
 
-    from maverick.sandbox.podman import PodmanBackend
+    from lightwork.sandbox.podman import PodmanBackend
 
     def _run(args, *a, **k):
         if args[:2] == ["podman", "version"]:
@@ -398,7 +398,7 @@ def test_audit_verify_flags_nonhex_sig_instead_of_crashing(tmp_path, monkeypatch
         return
     import json as _json
 
-    from maverick.audit import signing
+    from lightwork.audit import signing
     monkeypatch.setattr(signing, "KEY_DIR", tmp_path / "keys")
     path = tmp_path / "audit.ndjson"
     s = signing.AuditSigner(path)
@@ -422,7 +422,7 @@ def test_audit_verify_rejects_lone_pubkey(tmp_path, monkeypatch):
         return
     import json as _json
 
-    from maverick.audit import signing
+    from lightwork.audit import signing
     keydir = tmp_path / "keys"
     monkeypatch.setattr(signing, "KEY_DIR", keydir)
     path = tmp_path / "audit.ndjson"
@@ -443,7 +443,7 @@ def test_audit_verify_rejects_path_traversal_key_id(tmp_path, monkeypatch):
         return
     import json as _json
 
-    from maverick.audit import signing
+    from lightwork.audit import signing
     monkeypatch.setattr(signing, "KEY_DIR", tmp_path / "keys")
     path = tmp_path / "audit.ndjson"
     s = signing.AuditSigner(path)
@@ -470,7 +470,7 @@ def test_hackernews_handles_null_points(monkeypatch):
     resp.status_code = 200
     resp.json = MagicMock(return_value=body)
     _fake_httpx(monkeypatch, get=MagicMock(return_value=resp))
-    from maverick.tools.hackernews import hackernews
+    from lightwork.tools.hackernews import hackernews
     out = hackernews().fn({"op": "search", "query": "x"})
     assert "ERROR" not in out
 
@@ -492,7 +492,7 @@ def test_calendar_find_slot_latest_hour_23(monkeypatch):
     fake_client.principal = MagicMock(return_value=fake_principal)
     fake_caldav.DAVClient = MagicMock(return_value=fake_client)
     monkeypatch.setitem(_sys.modules, "caldav", fake_caldav)
-    from maverick.tools.calendar_tool import calendar_tool
+    from lightwork.tools.calendar_tool import calendar_tool
     # earliest=23, latest=23 — previously max(24, min(23,23))=24 →
     # cursor.replace(hour=24) ValueError. Must not crash now.
     out = calendar_tool().fn({
@@ -508,7 +508,7 @@ def test_compute_fallback_blocks_power_tower(monkeypatch):
     import sys as _sys
     # Force the no-sympy fallback path.
     monkeypatch.setitem(_sys.modules, "sympy", None)
-    from maverick.tools.compute import compute
+    from lightwork.tools.compute import compute
     out = compute().fn({"op": "evaluate", "expr": "9**9**9"})
     assert "ERROR" in out  # blocked, not a 370M-digit hang
     ok = compute().fn({"op": "evaluate", "expr": "2**8"})
@@ -520,7 +520,7 @@ def test_compute_fallback_blocks_power_tower(monkeypatch):
 def test_replay_export_skips_bad_goal_id(tmp_path, monkeypatch):
     import json as _json
 
-    import maverick.replay.export as rex
+    import lightwork.replay.export as rex
     audit = tmp_path / "audit"
     audit.mkdir()
     f = audit / "2026-05-28.ndjson"
@@ -541,7 +541,7 @@ def test_replay_export_skips_bad_goal_id(tmp_path, monkeypatch):
 def test_retention_rejects_unknown_table(tmp_path):
     import sqlite3
 
-    from maverick.audit.retention import _purge_table_by_time
+    from lightwork.audit.retention import _purge_table_by_time
     db = tmp_path / "w.db"
     sqlite3.connect(str(db)).close()
     try:
@@ -555,7 +555,7 @@ def test_retention_rejects_unknown_table(tmp_path):
 def test_retention_allows_known_table(tmp_path):
     import sqlite3
 
-    from maverick.audit.retention import _purge_table_by_time
+    from lightwork.audit.retention import _purge_table_by_time
     db = tmp_path / "w.db"
     c = sqlite3.connect(str(db))
     c.execute("CREATE TABLE episodes (id INTEGER, ended_at REAL)")
@@ -571,8 +571,8 @@ def test_retention_allows_known_table(tmp_path):
 def test_verifier_fails_closed_on_llm_error():
     import asyncio
 
-    from maverick.budget import Budget
-    from maverick.verifier import verify_proposal
+    from lightwork.budget import Budget
+    from lightwork.verifier import verify_proposal
 
     class _Boom:
         async def complete_async(self, **kw):
@@ -586,8 +586,8 @@ def test_verifier_fails_closed_on_llm_error():
 def test_verifier_propagates_budget_exceeded():
     import asyncio
 
-    from maverick.budget import Budget, BudgetExceeded
-    from maverick.verifier import verify_proposal
+    from lightwork.budget import Budget, BudgetExceeded
+    from lightwork.verifier import verify_proposal
 
     class _OverBudget:
         async def complete_async(self, **kw):
@@ -605,7 +605,7 @@ def test_verifier_propagates_budget_exceeded():
 def test_edit_format_indent_match_slice_actually_matches():
     """When step 3 returns an indent_norm match, the mapped-back slice
     must really indent-match the needle (the recheck guard)."""
-    from maverick.edit_format import _find_with_fuzzy, _normalise_indent
+    from lightwork.edit_format import _find_with_fuzzy, _normalise_indent
     content = (
         "def a():\n"
         "    x = 1\n"
@@ -626,7 +626,7 @@ def test_edit_format_indent_match_slice_actually_matches():
 def test_edit_format_refuses_two_identical_blocks():
     """Two byte-identical blocks → fuzzy tiers must refuse (ambiguous),
     never silently pick the first."""
-    from maverick.edit_format import _find_with_fuzzy
+    from lightwork.edit_format import _find_with_fuzzy
     content = "    x = 1\n    return x\n\n    x = 1\n    return x\n"
     needle = "x = 1\nreturn x\n"
     start, end, strategy = _find_with_fuzzy(content, needle)

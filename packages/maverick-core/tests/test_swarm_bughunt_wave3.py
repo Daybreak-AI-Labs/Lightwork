@@ -5,7 +5,7 @@ from __future__ import annotations
 class TestRedditPrefixStrip:
     def test_subreddit_name_not_char_stripped(self, monkeypatch):
         # lstrip("r/") turned subreddit "rust" into "ust". removeprefix fixes it.
-        from maverick.tools import reddit_tool
+        from lightwork.tools import reddit_tool
         captured = {}
 
         def fake_get(url, params=None):
@@ -17,7 +17,7 @@ class TestRedditPrefixStrip:
         assert "/r/rust/" in captured["url"], captured["url"]
 
     def test_post_id_not_char_stripped(self, monkeypatch):
-        from maverick.tools import reddit_tool
+        from lightwork.tools import reddit_tool
         captured = {}
         monkeypatch.setattr(
             reddit_tool, "_get",
@@ -31,7 +31,7 @@ class TestRedditPrefixStrip:
 
 class TestLambdaConfirmGate:
     def test_stringy_false_does_not_fire_invoke(self):
-        from maverick.tools.lambda_tool import _op_invoke
+        from lightwork.tools.lambda_tool import _op_invoke
         # confirm="false" is truthy as a bare string; as_bool must read it as
         # False so the live invoke is NOT fired (returns the dry-run preview).
         out = _op_invoke({"function_name": "f", "confirm": "false"})
@@ -40,7 +40,7 @@ class TestLambdaConfirmGate:
 
 class TestPersonaStyleCasing:
     def test_style_case_insensitive(self, monkeypatch):
-        from maverick import persona
+        from lightwork import persona
         # Pick a real style key, upper-cased, and confirm it still applies.
         key = next(iter(persona.STYLES))
         monkeypatch.setattr(
@@ -53,27 +53,27 @@ class TestPersonaStyleCasing:
 
 class TestTemplateBudgetParse:
     def test_malformed_budget_does_not_crash(self):
-        from maverick.templates import _parse_frontmatter
+        from lightwork.templates import _parse_frontmatter
         meta = _parse_frontmatter("budget_dollars: 1.2.3\n")
         # The bad value must not raise; it is kept as a string, not float().
         assert meta.get("budget_dollars") == "1.2.3"
 
     def test_valid_budget_still_coerced(self):
-        from maverick.templates import _parse_frontmatter
+        from lightwork.templates import _parse_frontmatter
         meta = _parse_frontmatter("budget_dollars: 2.5\n")
         assert meta.get("budget_dollars") == 2.5
 
 
 class TestElasticsearchSeg:
     def test_path_traversal_encoded(self):
-        from maverick.tools.elasticsearch_tool import _seg
+        from lightwork.tools.elasticsearch_tool import _seg
         assert _seg("../../_cluster/settings") == "..%2F..%2F_cluster%2Fsettings"
         assert _seg("my-index") == "my-index"
 
 
 class TestReplayExportSanitize:
     def test_pii_and_secrets_redacted(self):
-        from maverick.replay.export import _sanitize
+        from lightwork.replay.export import _sanitize
         text = 'contact john@example.com key=sk-ant-abcdefghij0123456789XYZ'
         out = _sanitize(text)
         assert "john@example.com" not in out

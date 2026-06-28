@@ -4,7 +4,7 @@ shared root."""
 from __future__ import annotations
 
 import pytest
-from maverick import client
+from lightwork import client
 
 
 @pytest.fixture(autouse=True)
@@ -20,7 +20,7 @@ def _bound(monkeypatch, tmp_path):
 def _seed():
     import sqlite3
 
-    from maverick.paths import data_dir
+    from lightwork.paths import data_dir
     root = data_dir()
     (root / "audit").mkdir(parents=True, exist_ok=True)
     con = sqlite3.connect(str(root / "world.db"))  # a real DB (export uses backup API)
@@ -71,7 +71,7 @@ def test_erase_targets_client_subtree_only(monkeypatch, tmp_path):
 
 def _run(*args):
     from click.testing import CliRunner
-    from maverick.cli import main
+    from lightwork.cli import main
     return CliRunner().invoke(main, list(args))
 
 
@@ -79,7 +79,7 @@ def test_cli_erase_requires_confirm():
     _seed()
     r = _run("client", "erase")
     assert r.exit_code != 0 and "--confirm" in r.output
-    from maverick.paths import data_dir
+    from lightwork.paths import data_dir
     assert (data_dir() / "world.db").exists()  # nothing erased without --confirm
 
 
@@ -89,7 +89,7 @@ def test_cli_status_and_erase_confirm():
     assert r.exit_code == 0 and "acme" in r.output
     r = _run("client", "erase", "--confirm")
     assert r.exit_code == 0 and "erased client" in r.output
-    from maverick.paths import data_dir
+    from lightwork.paths import data_dir
     assert not (data_dir() / "world.db").exists()
 
 

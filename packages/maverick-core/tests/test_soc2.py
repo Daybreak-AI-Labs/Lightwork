@@ -1,4 +1,4 @@
-"""Tests for the SOC 2 evidence collector (``maverick.soc2``).
+"""Tests for the SOC 2 evidence collector (``lightwork.soc2``).
 
 Hermetic: the autouse ``_isolate_maverick_home`` fixture in ``conftest.py``
 points ``~/.maverick`` at a per-test temp dir, so these never touch a real
@@ -10,13 +10,13 @@ from __future__ import annotations
 
 from datetime import datetime, timedelta, timezone
 
-import maverick.capability as capability
-import maverick.crypto_at_rest as crypto_at_rest
-import maverick.oidc as oidc
-import maverick.paths as paths
-import maverick.quotas as quotas
+import lightwork.capability as capability
+import lightwork.crypto_at_rest as crypto_at_rest
+import lightwork.oidc as oidc
+import lightwork.paths as paths
+import lightwork.quotas as quotas
 import pytest
-from maverick import soc2
+from lightwork import soc2
 
 
 def test_returns_expected_shape():
@@ -123,7 +123,7 @@ def test_toggle_changes_snapshot(monkeypatch):
 
 
 def test_oidc_probe_reflects_real_toggle_by_default():
-    """``maverick.oidc`` ships and is off by default -> ``disabled`` (a real toggle,
+    """``lightwork.oidc`` ships and is off by default -> ``disabled`` (a real toggle,
     not ``absent``). Its presence is what makes OIDC an Implemented control."""
     probe = soc2.collect_soc2_evidence()["controls"]["oidc_auth"]
     assert probe["status"] == soc2.STATUS_DISABLED
@@ -137,14 +137,14 @@ def test_absent_optional_module_is_absent_not_crash():
     exist, so the test stays true even as OIDC (which now ships) toggles on/off.
     This is the path a future-only optional control would take.
     """
-    probe = soc2._probe_toggle("maverick._definitely_not_a_real_module", "anything")
+    probe = soc2._probe_toggle("lightwork._definitely_not_a_real_module", "anything")
     assert probe["status"] == soc2.STATUS_ABSENT
     assert probe["enabled"] is None
 
 
 def test_present_module_missing_attr_is_absent():
     """A shipped module without the expected predicate -> ``absent``, not a crash."""
-    probe = soc2._probe_toggle("maverick.capability", "no_such_predicate_xyz")
+    probe = soc2._probe_toggle("lightwork.capability", "no_such_predicate_xyz")
     assert probe["status"] == soc2.STATUS_ABSENT
     assert probe["enabled"] is None
 
@@ -190,7 +190,7 @@ def test_failsoft_when_toggle_probe_raises_base_exception(monkeypatch):
 def test_encryption_at_rest_toggle_changes_snapshot(monkeypatch):
     """Encryption at rest is a real toggle: on -> ``enabled``, off -> ``disabled``.
 
-    ``maverick.crypto_at_rest`` ships, so the control is never ``absent``; only
+    ``lightwork.crypto_at_rest`` ships, so the control is never ``absent``; only
     its ``at_rest_enabled()`` predicate moves the status.
     """
     monkeypatch.setattr(crypto_at_rest, "at_rest_enabled", lambda: True)
@@ -222,7 +222,7 @@ def test_failsoft_when_encryption_probe_raises(monkeypatch):
 
 
 def test_data_subject_export_present_is_enabled():
-    """``maverick.dsar.export_subject_data`` ships -> ``data_subject_export`` is
+    """``lightwork.dsar.export_subject_data`` ships -> ``data_subject_export`` is
     ``enabled``. It is a *presence* probe, so it never reports ``disabled``."""
     probe = soc2.collect_soc2_evidence()["controls"]["data_subject_export"]
     assert probe == {"status": soc2.STATUS_ENABLED, "enabled": True}
@@ -232,9 +232,9 @@ def test_probe_present_absent_when_module_missing():
     """The presence probe degrades to ``absent`` for a module/attr that does not
     exist, mirroring ``_probe_toggle``'s absent path (and never raising)."""
     assert soc2._probe_present(
-        "maverick._definitely_not_a_real_module", "anything"
+        "lightwork._definitely_not_a_real_module", "anything"
     ) == {"status": soc2.STATUS_ABSENT, "enabled": False}
-    assert soc2._probe_present("maverick.dsar", "no_such_export_xyz") == {
+    assert soc2._probe_present("lightwork.dsar", "no_such_export_xyz") == {
         "status": soc2.STATUS_ABSENT,
         "enabled": False,
     }
@@ -270,8 +270,8 @@ def _write_one_event(*, sign: bool):
     signing decision at construction) so each test controls signing in its own
     isolated home. Returns the resolved audit dir.
     """
-    from maverick.audit import AuditEvent, EventKind
-    from maverick.audit.writer import AuditLog
+    from lightwork.audit import AuditEvent, EventKind
+    from lightwork.audit.writer import AuditLog
 
     log = AuditLog(sign=sign)
     assert log.record(
@@ -333,7 +333,7 @@ def test_audit_chain_unsigned_completed_day_without_signing_is_not_broken(
 
 def test_audit_chain_uses_anchor_verification(tmp_path, monkeypatch):
     """Anchor breaks must make the SOC 2 audit status broken."""
-    import maverick.audit as audit
+    import lightwork.audit as audit
 
     class Break:
         reason = "anchored_file_deleted"
@@ -360,8 +360,8 @@ def test_audit_chain_uses_anchor_verification(tmp_path, monkeypatch):
 
 def _write_signed_past_day(audit_dir, monkeypatch, days_ago: int = 1, rows: int = 2):
     """Create and anchor a signed completed day-file for audit-integrity tests."""
-    from maverick.audit import signing
-    from maverick.audit.signing import AuditSigner, ensure_anchors
+    from lightwork.audit import signing
+    from lightwork.audit.signing import AuditSigner, ensure_anchors
 
     try:
         crypto_ok = signing._have_crypto()
@@ -398,7 +398,7 @@ def test_audit_chain_broken_when_anchor_ledger_deleted(tmp_path, monkeypatch):
     _write_signed_past_day(tmp_path, monkeypatch)
     monkeypatch.setattr(soc2, "_resolve_audit_dir", lambda: tmp_path)
 
-    from maverick.audit import signing
+    from lightwork.audit import signing
 
     (tmp_path / signing.ANCHOR_FILENAME).unlink()
 
@@ -418,7 +418,7 @@ def test_audit_chain_broken_when_signed_log_stripped_and_anchors_deleted(
 
     import json
 
-    from maverick.audit import signing
+    from lightwork.audit import signing
 
     day_file = tmp_path / f"{day}.ndjson"
     stripped_rows = []
@@ -453,7 +453,7 @@ def test_audit_chain_ok_after_a_signed_write():
     ``ok`` path; the fail-soft / unsigned paths are covered above.
     """
     import pytest
-    from maverick.audit import signing
+    from lightwork.audit import signing
 
     try:
         crypto_ok = signing._have_crypto()
@@ -478,7 +478,7 @@ def test_signing_key_offhost_injected_marker_counts_as_present(monkeypatch):
     secure (enterprise-required) custody fails the SOC 2 gate."""
     monkeypatch.delenv("MAVERICK_AUDIT_SIGNING_KEY", raising=False)
     monkeypatch.delenv("MAVERICK_AUDIT_SIGNING_KEY_WRAPPED", raising=False)
-    from maverick.audit import signing
+    from lightwork.audit import signing
 
     key_dir = signing._key_dir()
     key_dir.mkdir(parents=True, exist_ok=True)

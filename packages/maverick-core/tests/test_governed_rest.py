@@ -17,9 +17,9 @@ from contextlib import contextmanager
 from unittest.mock import MagicMock
 
 import pytest
-from maverick.governed_actions import ActionError, GovernedActions
-from maverick.governed_connectors import register_connector
-from maverick.governed_rest import (
+from lightwork.governed_actions import ActionError, GovernedActions
+from lightwork.governed_connectors import register_connector
+from lightwork.governed_rest import (
     RestConnector,
     available_rest_connectors,
     register_rest_connectors,
@@ -36,7 +36,7 @@ def _fake_safe_client(monkeypatch, **methods):
     def _ctx(url, **kwargs):
         yield client
 
-    from maverick.tools import _ssrf
+    from lightwork.tools import _ssrf
     monkeypatch.setattr(_ssrf, "safe_client", _ctx)
     return client
 
@@ -163,28 +163,28 @@ class TestRegistry:
 class TestConfiguredFactory:
     def test_disabled_registers_nothing(self, monkeypatch):
         monkeypatch.delenv("MAVERICK_GOVERNED_CONNECTORS", raising=False)
-        import maverick.config as cfg
+        import lightwork.config as cfg
         monkeypatch.setattr(cfg, "get_governed_connectors",
                             lambda: {"enable": False, "connectors": ["salesforce"]})
-        from maverick.governed_rest import configured_governed_actions
+        from lightwork.governed_rest import configured_governed_actions
         ga, registered = configured_governed_actions()
         assert registered == {}
 
     def test_enabled_registers_selected(self, monkeypatch):
         monkeypatch.delenv("MAVERICK_GOVERNED_CONNECTORS", raising=False)
-        import maverick.config as cfg
+        import lightwork.config as cfg
         monkeypatch.setattr(cfg, "get_governed_connectors",
                             lambda: {"enable": True, "connectors": ["servicenow"]})
-        from maverick.governed_rest import configured_governed_actions
+        from lightwork.governed_rest import configured_governed_actions
         ga, registered = configured_governed_actions()
         assert set(registered) == {"servicenow"}
         assert ga.get("servicenow.write").risk == "high"
 
     def test_env_override_forces_off(self, monkeypatch):
         monkeypatch.setenv("MAVERICK_GOVERNED_CONNECTORS", "0")
-        import maverick.config as cfg
+        import lightwork.config as cfg
         monkeypatch.setattr(cfg, "get_governed_connectors",
                             lambda: {"enable": True, "connectors": ["salesforce"]})
-        from maverick.governed_rest import configured_governed_actions
+        from lightwork.governed_rest import configured_governed_actions
         _ga, registered = configured_governed_actions()
         assert registered == {}

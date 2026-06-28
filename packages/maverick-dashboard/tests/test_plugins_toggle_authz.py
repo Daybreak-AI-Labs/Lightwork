@@ -6,7 +6,7 @@ the route checked only same-origin.
 """
 from __future__ import annotations
 
-import maverick_dashboard.app as appmod
+import lightwork_dashboard.app as appmod
 import pytest
 from fastapi import HTTPException
 from fastapi.testclient import TestClient

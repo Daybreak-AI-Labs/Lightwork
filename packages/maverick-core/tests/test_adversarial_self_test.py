@@ -3,7 +3,7 @@ from __future__ import annotations
 
 import base64
 
-from maverick.tools.adversarial_self_test import adversarial_self_test
+from lightwork.tools.adversarial_self_test import adversarial_self_test
 
 
 def _run(**kw):

@@ -5,7 +5,7 @@ import json
 
 import pytest
 from click.testing import CliRunner
-from maverick.cli import main
+from lightwork.cli import main
 
 
 @pytest.fixture(autouse=True)
@@ -15,13 +15,13 @@ def _clean(monkeypatch):
         "MAVERICK_CONSENT_MODE", "MAVERICK_AI_DISCLOSURE",
     ):
         monkeypatch.delenv(var, raising=False)
-    monkeypatch.setattr("maverick.config.load_config", lambda *a, **k: {})
+    monkeypatch.setattr("lightwork.config.load_config", lambda *a, **k: {})
 
 
 # --- DPIA -----------------------------------------------------------------
 
 def test_dpia_shape_and_open_risks_on_bare_deployment():
-    from maverick.dpia import generate_dpia
+    from lightwork.dpia import generate_dpia
 
     dpia = generate_dpia()
     assert dpia["assessment_type"].startswith("GDPR Article 35")
@@ -33,7 +33,7 @@ def test_dpia_shape_and_open_risks_on_bare_deployment():
 
 
 def test_dpia_enterprise_mitigates_egress_and_encryption(monkeypatch):
-    from maverick.dpia import generate_dpia
+    from lightwork.dpia import generate_dpia
 
     monkeypatch.setenv("MAVERICK_ENTERPRISE", "1")  # egress + consent + encryption
     dpia = generate_dpia()
@@ -60,7 +60,7 @@ def test_dpia_cli_text_json_and_file(tmp_path):
 # --- AI Act ---------------------------------------------------------------
 
 def test_ai_act_reports_default_limited_risk_and_checklists():
-    from maverick.ai_act import assess_ai_act
+    from lightwork.ai_act import assess_ai_act
 
     rep = assess_ai_act()
     assert "Limited risk" in rep["default_classification"]
@@ -71,7 +71,7 @@ def test_ai_act_reports_default_limited_risk_and_checklists():
 
 
 def test_ai_act_transparency_not_met_when_disclosure_disabled(monkeypatch):
-    from maverick.ai_act import assess_ai_act
+    from lightwork.ai_act import assess_ai_act
 
     monkeypatch.setenv("MAVERICK_AI_DISCLOSURE", "")  # operator opted out
     rep = assess_ai_act()

@@ -9,7 +9,7 @@ from __future__ import annotations
 
 class TestBrowserSSRF:
     def test_decimal_and_loopback_blocked_public_allowed(self):
-        from maverick.tools.browser import _is_safe_browser_url
+        from lightwork.tools.browser import _is_safe_browser_url
         # Decimal/octal-int encodings of 127.0.0.1 resolve to loopback but
         # do not parse via ipaddress.ip_address -- the old literal-only
         # check let them through.
@@ -24,7 +24,7 @@ class TestBrowserSSRF:
         # screenshot/extract can't read it.
         from types import SimpleNamespace
 
-        from maverick.tools import browser
+        from lightwork.tools import browser
         monkeypatch.delenv("MAVERICK_FETCH_ALLOW_PRIVATE", raising=False)
         closed = {"n": 0}
         monkeypatch.setattr(browser, "close_browser",
@@ -37,7 +37,7 @@ class TestBrowserSSRF:
     def test_post_nav_allows_public_host(self, monkeypatch):
         from types import SimpleNamespace
 
-        from maverick.tools import browser
+        from lightwork.tools import browser
         flag = {"closed": False}
         monkeypatch.setattr(browser, "close_browser",
                             lambda: flag.__setitem__("closed", True))
@@ -48,7 +48,7 @@ class TestBrowserSSRF:
     def test_post_nav_ignores_non_http_url(self, monkeypatch):
         from types import SimpleNamespace
 
-        from maverick.tools import browser
+        from lightwork.tools import browser
         flag = {"closed": False}
         monkeypatch.setattr(browser, "close_browser",
                             lambda: flag.__setitem__("closed", True))
@@ -60,7 +60,7 @@ class TestBrowserSSRF:
 
 class TestCompactorPreservesSystem:
     def test_system_message_never_dropped(self):
-        from maverick.context_compactor import compact
+        from lightwork.context_compactor import compact
         # One system message + many low-relevance head turns + a tail. Force
         # a tiny budget so the culler would otherwise drop the system msg.
         msgs = [{"role": "system", "content": "CRITICAL SYSTEM RULES " * 50}]
@@ -78,7 +78,7 @@ class TestCompactorPreservesSystem:
 
 class TestToTScoreCandidatesEmpty:
     def test_empty_candidates_no_crash(self):
-        from maverick.tree_of_thought import _score_candidates
+        from lightwork.tree_of_thought import _score_candidates
         scores, winner, reason = _score_candidates(
             None, "goal", [], budget=None, model=None,
         )

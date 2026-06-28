@@ -1,7 +1,7 @@
 """mutation_test: Python source mutant generator + malformed-arg robustness."""
 from __future__ import annotations
 
-from maverick.tools.mutation_test import mutation_test
+from lightwork.tools.mutation_test import mutation_test
 
 
 def _fn():

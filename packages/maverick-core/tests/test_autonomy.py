@@ -10,7 +10,7 @@ Covers the three loops we wired:
 from __future__ import annotations
 
 import pytest
-from maverick import autonomy
+from lightwork import autonomy
 
 
 # --------------------------------------------------------------------------
@@ -168,11 +168,11 @@ class TestGateTool:
 # integration: the gate is actually wired into Agent._run_tool (Loop 2)
 # --------------------------------------------------------------------------
 def _ctx(tmp_path, fake_llm):
-    from maverick.blackboard import Blackboard
-    from maverick.budget import Budget
-    from maverick.sandbox import LocalBackend
-    from maverick.swarm import SwarmContext
-    from maverick.world_model import WorldModel
+    from lightwork.blackboard import Blackboard
+    from lightwork.budget import Budget
+    from lightwork.sandbox import LocalBackend
+    from lightwork.swarm import SwarmContext
+    from lightwork.world_model import WorldModel
 
     world = WorldModel(tmp_path / "w.db")
     gid = world.create_goal("test", "")
@@ -190,7 +190,7 @@ class TestAgentGateIntegration:
         self, tmp_path, fake_llm, monkeypatch,
     ):
         monkeypatch.setenv("MAVERICK_AUTONOMY_GATE", "1")
-        from maverick.agent import Agent
+        from lightwork.agent import Agent
 
         ctx = _ctx(tmp_path, fake_llm)
         ctx.last_disagreement = 0.9  # the swarm couldn't agree
@@ -204,7 +204,7 @@ class TestAgentGateIntegration:
     @pytest.mark.asyncio
     async def test_gate_off_does_not_interfere(self, tmp_path, fake_llm, monkeypatch):
         monkeypatch.setenv("MAVERICK_AUTONOMY_GATE", "0")
-        from maverick.agent import Agent
+        from lightwork.agent import Agent
 
         ctx = _ctx(tmp_path, fake_llm)
         ctx.last_disagreement = 0.9
@@ -223,9 +223,9 @@ class TestSwarmEscalation:
         self, tmp_path, fake_llm, monkeypatch,
     ):
         monkeypatch.setenv("MAVERICK_AUTONOMY_GATE", "1")
-        import maverick.agent as agent_mod
-        from maverick.agent import Agent, AgentResult
-        from maverick.tools.spawn import spawn_swarm_tool
+        import lightwork.agent as agent_mod
+        from lightwork.agent import Agent, AgentResult
+        from lightwork.tools.spawn import spawn_swarm_tool
 
         ctx = _ctx(tmp_path, fake_llm)
         parent = Agent(ctx=ctx, role="orchestrator", brief="t", depth=0)
@@ -258,9 +258,9 @@ class TestSwarmEscalation:
         self, tmp_path, fake_llm, monkeypatch,
     ):
         monkeypatch.setenv("MAVERICK_AUTONOMY_GATE", "1")
-        import maverick.agent as agent_mod
-        from maverick.agent import Agent, AgentResult
-        from maverick.tools.spawn import spawn_swarm_tool
+        import lightwork.agent as agent_mod
+        from lightwork.agent import Agent, AgentResult
+        from lightwork.tools.spawn import spawn_swarm_tool
 
         ctx = _ctx(tmp_path, fake_llm)
         parent = Agent(ctx=ctx, role="orchestrator", brief="t", depth=0)
@@ -285,7 +285,7 @@ class TestSwarmEscalation:
 class TestVerifyFinalRouting:
     @pytest.mark.asyncio
     async def test_force_ensemble_routes_to_panel(self, monkeypatch):
-        import maverick.verifier as v
+        import lightwork.verifier as v
         called = {"ensemble": False, "single": False}
 
         async def _ens(*a, **k):
@@ -304,7 +304,7 @@ class TestVerifyFinalRouting:
 
     @pytest.mark.asyncio
     async def test_default_routes_to_single(self, monkeypatch):
-        import maverick.verifier as v
+        import lightwork.verifier as v
         called = {"ensemble": False, "single": False}
 
         async def _ens(*a, **k):

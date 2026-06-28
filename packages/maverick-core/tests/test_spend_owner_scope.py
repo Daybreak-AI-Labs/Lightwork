@@ -2,7 +2,7 @@
 episodes to the owning goal — backing the dashboard /spend cross-user fix."""
 from __future__ import annotations
 
-from maverick.world_model import WorldModel
+from lightwork.world_model import WorldModel
 
 
 def _run(w: WorldModel, owner: str, cost: float) -> None:

@@ -1,7 +1,7 @@
 """a11y_tree: static HTML -> compact accessibility tree."""
 from __future__ import annotations
 
-from maverick.tools.a11y_tree import a11y_tree
+from lightwork.tools.a11y_tree import a11y_tree
 
 _HTML = """
 <html><head><style>.x{color:red}</style><script>var a=1;</script></head>
@@ -56,7 +56,7 @@ def test_errors_and_empty():
 
 
 def test_registered():
-    from maverick.tools import base_registry
+    from lightwork.tools import base_registry
 
     class _W:
         pass

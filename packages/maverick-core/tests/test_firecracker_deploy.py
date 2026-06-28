@@ -36,7 +36,7 @@ class TestMissingKernelGuidance:
     def test_error_points_to_build_scripts(self, tmp_path, monkeypatch):
         # Pretend firecracker + firectl are installed so we reach _firectl, but
         # provide no kernel/rootfs -> the helpful build guidance must fire.
-        import maverick.sandbox.firecracker as fc
+        import lightwork.sandbox.firecracker as fc
         monkeypatch.setattr(fc.shutil, "which", lambda name: f"/usr/bin/{name}")
         monkeypatch.setattr(fc, "data_dir",
                             lambda *p: tmp_path.joinpath(*p))

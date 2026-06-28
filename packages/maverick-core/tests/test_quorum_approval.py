@@ -1,7 +1,7 @@
 """quorum_approval: M-of-N sign-off check."""
 from __future__ import annotations
 
-from maverick.tools.quorum_approval import quorum_approval
+from lightwork.tools.quorum_approval import quorum_approval
 
 
 def _run(**kw):

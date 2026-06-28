@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import json
 
-from maverick import support_bundle
+from lightwork import support_bundle
 
 
 def test_redacts_secret_named_keys():
@@ -32,7 +32,7 @@ def test_collect_has_core_sections_and_is_json():
 
 def test_collect_config_is_redacted(monkeypatch):
     monkeypatch.setattr(
-        "maverick.config.load_config",
+        "lightwork.config.load_config",
         lambda: {"providers": {"openai": {"api_key": "sk-LEAKME"}}})  # pragma: allowlist secret
     bundle = support_bundle.collect()
     assert "sk-LEAKME" not in json.dumps(bundle["config_redacted"], default=str)
@@ -40,9 +40,9 @@ def test_collect_config_is_redacted(monkeypatch):
 
 def test_cli_support_writes_redacted_file(tmp_path, monkeypatch):
     from click.testing import CliRunner
-    from maverick.cli import main
+    from lightwork.cli import main
     monkeypatch.setattr(
-        "maverick.config.load_config",
+        "lightwork.config.load_config",
         lambda: {"providers": {"openai": {"api_key": "sk-LEAKME"}}})  # pragma: allowlist secret
     out = tmp_path / "bundle.json"
     r = CliRunner().invoke(main, ["support", "-o", str(out)])
@@ -55,7 +55,7 @@ def test_cli_support_writes_redacted_file(tmp_path, monkeypatch):
 
 def test_cli_support_stdout():
     from click.testing import CliRunner
-    from maverick.cli import main
+    from lightwork.cli import main
     r = CliRunner().invoke(main, ["support"])
     assert r.exit_code == 0
     assert json.loads(r.output)["runtime"]["python"]

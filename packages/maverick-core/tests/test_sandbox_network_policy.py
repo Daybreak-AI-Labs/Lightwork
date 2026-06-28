@@ -1,7 +1,7 @@
 """Per-tool network egress policy (ROADMAP 2028 H2)."""
 from __future__ import annotations
 
-from maverick.sandbox.network_policy import describe, host_allowed
+from lightwork.sandbox.network_policy import describe, host_allowed
 
 _POLICY = {
     "http_fetch": {"allow_egress": ["api.github.com", "*.openai.com"]},

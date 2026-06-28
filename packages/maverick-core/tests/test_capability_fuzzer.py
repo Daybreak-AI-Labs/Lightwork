@@ -1,4 +1,4 @@
-"""Capability-leak fuzzer: the REAL maverick.capability boundary must survive
+"""Capability-leak fuzzer: the REAL lightwork.capability boundary must survive
 the full probe battery with zero leaks; a deliberately-broken substring
 matcher must not. Probe generation is seeded-PRNG deterministic.
 """
@@ -6,8 +6,8 @@ from __future__ import annotations
 
 import json
 
-from maverick.capability import Capability
-from maverick.capability_fuzzer import (
+from lightwork.capability import Capability
+from lightwork.capability_fuzzer import (
     FuzzReport,
     fuzz,
     fuzz_roundtrip,

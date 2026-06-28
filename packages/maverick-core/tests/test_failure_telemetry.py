@@ -4,9 +4,9 @@ from __future__ import annotations
 import json
 
 from click.testing import CliRunner
-from maverick import failure_telemetry as ft
-from maverick.budget import BudgetExceeded
-from maverick.cli import main
+from lightwork import failure_telemetry as ft
+from lightwork.budget import BudgetExceeded
+from lightwork.cli import main
 
 
 def test_classify_exception():
@@ -20,7 +20,7 @@ def test_classify_exception():
 
 def test_record_is_noop_when_disabled(tmp_path, monkeypatch):
     monkeypatch.delenv("MAVERICK_FAILURE_TELEMETRY", raising=False)
-    monkeypatch.setattr("maverick.config.load_config", dict)
+    monkeypatch.setattr("lightwork.config.load_config", dict)
     p = tmp_path / "f.jsonl"
     assert ft.record("budget", path=p) is False
     assert not p.exists()
@@ -80,7 +80,7 @@ def test_summarize_missing_and_malformed(tmp_path):
 def test_cli_failures_empty(tmp_path, monkeypatch):
     monkeypatch.setenv("MAVERICK_HOME", str(tmp_path / "home"))
     monkeypatch.delenv("MAVERICK_FAILURE_TELEMETRY", raising=False)
-    monkeypatch.setattr("maverick.config.load_config", dict)
+    monkeypatch.setattr("lightwork.config.load_config", dict)
     res = CliRunner().invoke(main, ["failures"])
     assert res.exit_code == 0
     assert "no recorded failures" in res.output and "telemetry is off" in res.output
@@ -89,7 +89,7 @@ def test_cli_failures_empty(tmp_path, monkeypatch):
 def test_cli_failures_reports(tmp_path, monkeypatch):
     monkeypatch.setenv("MAVERICK_HOME", str(tmp_path / "home"))
     monkeypatch.setenv("MAVERICK_FAILURE_TELEMETRY", "1")
-    from maverick.failure_telemetry import record
+    from lightwork.failure_telemetry import record
     record("budget")
     record("budget")
     record("auth")

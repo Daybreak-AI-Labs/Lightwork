@@ -18,15 +18,15 @@ from fastapi.testclient import TestClient
 
 
 def _client():
-    from maverick_dashboard.app import app
+    from lightwork_dashboard.app import app
     return TestClient(app)
 
 
 def test_sse_404_for_unknown_goal(monkeypatch, tmp_path):
-    from maverick import world_model
+    from lightwork import world_model
     monkeypatch.setattr(world_model, "DEFAULT_DB", tmp_path / "world.db")
     monkeypatch.delenv("MAVERICK_DASHBOARD_TOKEN", raising=False)
-    from maverick_dashboard import app as dash_app
+    from lightwork_dashboard import app as dash_app
     dash_app._world_cache.clear()
     client = _client()
     resp = client.get("/api/goal/9999/events/stream")
@@ -35,14 +35,14 @@ def test_sse_404_for_unknown_goal(monkeypatch, tmp_path):
 
 def test_sse_terminal_status_closes_stream(monkeypatch, tmp_path):
     """A goal already 'done' before the stream opens yields one terminal event and ends."""
-    from maverick import world_model
+    from lightwork import world_model
     monkeypatch.setattr(world_model, "DEFAULT_DB", tmp_path / "world.db")
     monkeypatch.delenv("MAVERICK_DASHBOARD_TOKEN", raising=False)
     wm = world_model.WorldModel(tmp_path / "world.db")
     gid = wm.create_goal("done-goal", "x")
     wm.append_event(gid, "agent", "plan", "first")
     wm.set_goal_status(gid, "done", result="ok")
-    from maverick_dashboard import app as dash_app
+    from lightwork_dashboard import app as dash_app
     dash_app._world_cache.clear()
 
     client = _client()
@@ -72,13 +72,13 @@ def test_sse_streams_new_events_then_closes(monkeypatch, tmp_path):
     """Open the stream against an active goal; a background thread appends an
     event mid-stream and then sets the goal done. The stream must surface the
     new event AND the terminal close."""
-    from maverick import world_model
+    from lightwork import world_model
     monkeypatch.setattr(world_model, "DEFAULT_DB", tmp_path / "world.db")
     monkeypatch.delenv("MAVERICK_DASHBOARD_TOKEN", raising=False)
     wm = world_model.WorldModel(tmp_path / "world.db")
     gid = wm.create_goal("active-goal", "x")
     wm.set_goal_status(gid, "active")
-    from maverick_dashboard import app as dash_app
+    from lightwork_dashboard import app as dash_app
     dash_app._world_cache.clear()
 
     def driver():
@@ -107,12 +107,12 @@ def test_sse_streams_new_events_then_closes(monkeypatch, tmp_path):
 
 def test_legacy_polling_endpoint_still_works(monkeypatch, tmp_path):
     """SSE migration must NOT break the polling fallback."""
-    from maverick import world_model
+    from lightwork import world_model
     monkeypatch.setattr(world_model, "DEFAULT_DB", tmp_path / "world.db")
     monkeypatch.delenv("MAVERICK_DASHBOARD_TOKEN", raising=False)
     wm = world_model.WorldModel(tmp_path / "world.db")
     gid = wm.create_goal("g", "x")
-    from maverick_dashboard import app as dash_app
+    from lightwork_dashboard import app as dash_app
     dash_app._world_cache.clear()
     client = _client()
     resp = client.get(f"/api/goal/{gid}/events")
@@ -123,12 +123,12 @@ def test_legacy_polling_endpoint_still_works(monkeypatch, tmp_path):
 def test_chat_goal_template_uses_eventsource(monkeypatch, tmp_path):
     """Inline contract: the template wires `new EventSource(...)` against
     the new endpoint. Catches accidental regressions to polling-only."""
-    from maverick import world_model
+    from lightwork import world_model
     monkeypatch.setattr(world_model, "DEFAULT_DB", tmp_path / "world.db")
     monkeypatch.delenv("MAVERICK_DASHBOARD_TOKEN", raising=False)
     wm = world_model.WorldModel(tmp_path / "world.db")
     gid = wm.create_goal("g", "x")
-    from maverick_dashboard import app as dash_app
+    from lightwork_dashboard import app as dash_app
     dash_app._world_cache.clear()
     client = _client()
     resp = client.get(f"/chat/goal/{gid}")

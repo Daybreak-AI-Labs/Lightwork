@@ -11,7 +11,7 @@ import asyncio
 import contextvars
 import os
 
-from maverick.providers.base import (
+from lightwork.providers.base import (
     reset_sampling_temperature,
     sampling_temperature,
     set_sampling_temperature,

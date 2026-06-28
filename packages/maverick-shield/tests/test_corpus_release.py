@@ -4,7 +4,7 @@ from __future__ import annotations
 import json
 
 import pytest
-from maverick_shield import corpus_release as cr
+from lightwork_shield import corpus_release as cr
 
 
 def test_real_corpus_is_releasable():
@@ -38,7 +38,7 @@ def test_release_refuses_invalid():
 
 
 def test_release_refuses_secret_bearing_rows():
-    pytest.importorskip("maverick.safety.secret_detector")
+    pytest.importorskip("lightwork.safety.secret_detector")
     rows = [{"id": "leak", "category": "inj", "expected": "block",
              "text": "use key AKIAIOSFODNN7EXAMPLE now"}]
     with pytest.raises(ValueError, match="secret/PII-shaped"):

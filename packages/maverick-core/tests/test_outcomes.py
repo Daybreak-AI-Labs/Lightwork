@@ -2,8 +2,8 @@
 from __future__ import annotations
 
 import pytest
-from maverick import outcomes
-from maverick.world_model import WorldModel
+from lightwork import outcomes
+from lightwork.world_model import WorldModel
 
 
 @pytest.fixture()
@@ -43,7 +43,7 @@ def test_worker_cards_sorted_by_delivery_and_top(world):
 
 
 def test_firm_totals_include_approvals_and_human_decisions(world):
-    from maverick.operating_record import assemble
+    from lightwork.operating_record import assemble
     t = outcomes.firm_totals(assemble(world))
     assert t.goals_total == 3 and t.goals_completed == 2
     assert t.approvals == 1 and t.human_decisions == 1

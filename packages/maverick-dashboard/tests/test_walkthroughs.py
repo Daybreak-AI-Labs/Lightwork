@@ -19,7 +19,7 @@ def home(tmp_path, monkeypatch):
 
 @pytest.fixture
 def world(home, tmp_path, monkeypatch):
-    from maverick import world_model
+    from lightwork import world_model
     monkeypatch.setattr(world_model, "DEFAULT_DB", tmp_path / "world.db")
     w = world_model.WorldModel(tmp_path / "world.db")
     yield w
@@ -28,8 +28,8 @@ def world(home, tmp_path, monkeypatch):
 
 @pytest.fixture
 def client(world, monkeypatch):
-    from maverick_dashboard import api as api_mod
-    from maverick_dashboard import app as app_mod
+    from lightwork_dashboard import api as api_mod
+    from lightwork_dashboard import app as app_mod
     monkeypatch.setattr(app_mod, "_world", lambda: world)
     monkeypatch.setattr(api_mod, "_world", lambda: world)
     return TestClient(app_mod.app, headers={"Origin": "http://testserver"})
@@ -91,8 +91,8 @@ def test_media_route_serves_and_guards(client, world, home):
 
 
 def test_walkthroughs_hide_cross_user_artifacts(client, world, home, monkeypatch):
-    import maverick_dashboard.auth as auth
-    from maverick.oidc import VerifiedPrincipal
+    import lightwork_dashboard.auth as auth
+    from lightwork.oidc import VerifiedPrincipal
 
     monkeypatch.setattr(auth, "oidc_enabled", lambda: True)
     monkeypatch.setattr(
@@ -135,8 +135,8 @@ def test_export_without_events_400(client, world):
 
 @pytest.fixture
 def render_stub(monkeypatch):
-    """Stub maverick.replay.video.render (the encode half needs ffmpeg)."""
-    from maverick.replay import video as replay_video
+    """Stub lightwork.replay.video.render (the encode half needs ffmpeg)."""
+    from lightwork.replay import video as replay_video
     calls = []
 
     def fake_render(goal_id, out_path, *, sandbox=None, events=None, fps=25):
@@ -179,7 +179,7 @@ def test_export_writes_video_and_captions(client, world, home, render_stub):
 
 def test_export_reports_unencoded_honestly(client, world, monkeypatch):
     """No Pillow/ffmpeg -> encoded=false, no video name, command included."""
-    from maverick.replay import video as replay_video
+    from lightwork.replay import video as replay_video
     def fake_render(goal_id, out_path, *, sandbox=None, events=None, fps=25):
         return SimpleNamespace(
             frames=len(events or []), frame_dir=out_path.parent,

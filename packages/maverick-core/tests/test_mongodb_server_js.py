@@ -4,7 +4,7 @@ arbitrary JS on the database server (code injection / DoS)."""
 from __future__ import annotations
 
 import pytest
-from maverick.tools.mongodb_tool import _reject_server_side_js, mongodb_tool
+from lightwork.tools.mongodb_tool import _reject_server_side_js, mongodb_tool
 
 
 @pytest.mark.parametrize("flt", [

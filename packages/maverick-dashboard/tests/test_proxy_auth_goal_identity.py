@@ -4,7 +4,7 @@ from fastapi.testclient import TestClient
 
 
 def _enable_proxy_identity(monkeypatch):
-    import maverick_dashboard.auth as auth
+    import lightwork_dashboard.auth as auth
 
     monkeypatch.setattr(auth, "proxy_auth_enabled", lambda: True)
     monkeypatch.setattr(auth, "proxy_trusts", lambda _host: True)
@@ -13,9 +13,9 @@ def _enable_proxy_identity(monkeypatch):
 
 
 def _isolated_app(monkeypatch, tmp_path):
-    from maverick import world_model
-    from maverick_dashboard import api as api_mod
-    from maverick_dashboard import app as app_mod
+    from lightwork import world_model
+    from lightwork_dashboard import api as api_mod
+    from lightwork_dashboard import app as app_mod
 
     monkeypatch.setattr(world_model, "DEFAULT_DB", tmp_path / "world.db")
     app_mod._world_cache.clear()
@@ -29,7 +29,7 @@ def test_api_goal_creation_passes_proxy_user_to_runner(monkeypatch, tmp_path):
     _enable_proxy_identity(monkeypatch)
     app = _isolated_app(monkeypatch, tmp_path)
 
-    from maverick import runner
+    from lightwork import runner
 
     calls: list[tuple[tuple, dict]] = []
     monkeypatch.setattr(runner, "run_goal_in_thread", lambda *a, **kw: calls.append((a, kw)))
@@ -50,7 +50,7 @@ def test_chat_goal_creation_passes_proxy_user_to_runner(monkeypatch, tmp_path):
     _enable_proxy_identity(monkeypatch)
     app = _isolated_app(monkeypatch, tmp_path)
 
-    from maverick import runner
+    from lightwork import runner
 
     calls: list[tuple[tuple, dict]] = []
     monkeypatch.setattr(runner, "run_goal_in_thread", lambda *a, **kw: calls.append((a, kw)))

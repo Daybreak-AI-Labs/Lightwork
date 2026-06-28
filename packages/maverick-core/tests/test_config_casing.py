@@ -16,9 +16,9 @@ from __future__ import annotations
 
 import logging
 
-import maverick.sandbox as sandbox_mod
-from maverick.llm import _parse_spec
-from maverick.sandbox import LocalBackend, build_sandbox
+import lightwork.sandbox as sandbox_mod
+from lightwork.llm import _parse_spec
+from lightwork.sandbox import LocalBackend, build_sandbox
 
 
 class TestSandboxBackendCasing:
@@ -38,7 +38,7 @@ class TestSandboxBackendCasing:
         # Silence the generic local-unsandboxed advisory so the assertion only
         # sees the unrecognized-backend warning my fix adds.
         monkeypatch.setenv("MAVERICK_SUPPRESS_SANDBOX_WARNING", "1")
-        with caplog.at_level(logging.WARNING, logger="maverick.sandbox"):
+        with caplog.at_level(logging.WARNING, logger="lightwork.sandbox"):
             sb = build_sandbox(backend="dokcer")  # typo
         assert isinstance(sb, LocalBackend)
         assert "unrecognized sandbox backend" in caplog.text
@@ -46,7 +46,7 @@ class TestSandboxBackendCasing:
 
     def test_explicit_local_does_not_warn_unrecognized(self, monkeypatch, caplog):
         monkeypatch.setenv("MAVERICK_SUPPRESS_SANDBOX_WARNING", "1")
-        with caplog.at_level(logging.WARNING, logger="maverick.sandbox"):
+        with caplog.at_level(logging.WARNING, logger="lightwork.sandbox"):
             sb = build_sandbox(backend="Local")
         assert isinstance(sb, LocalBackend)
         assert "unrecognized sandbox backend" not in caplog.text
@@ -71,7 +71,7 @@ class TestParseSpecProviderCasing:
 
 class TestNotifyBackendCasing:
     def test_mixed_case_backend_routes_to_handler(self, monkeypatch):
-        import maverick.notifications as notif
+        import lightwork.notifications as notif
         fired: list[str] = []
         monkeypatch.setattr(notif, "_send_discord", lambda *a, **k: fired.append("discord") or True)
         n = notif.notify("agent done", backends=["Discord"], async_dispatch=False)
@@ -79,14 +79,14 @@ class TestNotifyBackendCasing:
         assert n == 1
 
     def test_backend_whitespace_and_case_tolerated(self, monkeypatch):
-        import maverick.notifications as notif
+        import lightwork.notifications as notif
         fired: list[str] = []
         monkeypatch.setattr(notif, "_send_discord", lambda *a, **k: fired.append("discord") or True)
         notif.notify("agent done", backends=["  DISCORD  "], async_dispatch=False)
         assert fired == ["discord"]
 
     def test_none_sentinel_is_case_insensitive(self, monkeypatch):
-        import maverick.notifications as notif
+        import lightwork.notifications as notif
         # "None" must disable just like "none" -- nothing dispatched, returns 0.
         monkeypatch.setattr(notif, "_send_discord", lambda *a, **k: (_ for _ in ()).throw(AssertionError("should not fire")))
         assert notif.notify("x", backends=["None"], async_dispatch=False) == 0
@@ -97,7 +97,7 @@ class TestDiagnosticsSandboxCasing:
     # sandbox backend; they must normalize like build_sandbox or a valid
     # "Docker" config misreports (skips the docker probe / unsupported row).
     def test_health_routes_mixed_case_docker_to_docker_probe(self, monkeypatch):
-        from maverick import health
+        from lightwork import health
         rows: list[str] = []
         monkeypatch.setattr(health, "_row", lambda color, name, msg, **k: rows.append(msg))
         monkeypatch.setattr("shutil.which", lambda name: None)  # docker "absent"
@@ -107,18 +107,18 @@ class TestDiagnosticsSandboxCasing:
         assert "supported in v0.1" not in text        # not the unsupported catch-all
 
     def test_diagnose_sandbox_routes_mixed_case_docker(self, monkeypatch):
-        from maverick import config
-        from maverick.tools import diagnose as d
+        from lightwork import config
+        from lightwork.tools import diagnose as d
         monkeypatch.setattr(config, "get_sandbox", lambda: {"backend": "Docker"})
         monkeypatch.setattr("shutil.which", lambda name: None)  # docker "absent"
         joined = "\n".join(d._check_sandbox())
         assert "docker binary not on PATH" in joined
 
     def test_diagnose_toolchains_treats_mixed_case_local_as_local(self, monkeypatch):
-        from maverick import config
-        from maverick.tools import diagnose as d
+        from lightwork import config
+        from lightwork.tools import diagnose as d
         monkeypatch.setattr(config, "get_sandbox", lambda: {"backend": "LOCAL"})
-        monkeypatch.setattr(d, "_TOOLCHAINS", [("cobol", "maverick-no-such-binary-xyz")])
+        monkeypatch.setattr(d, "_TOOLCHAINS", [("cobol", "lightwork-no-such-binary-xyz")])
         joined = "\n".join(d._check_toolchains())
         assert "can't build/test" in joined           # treated as local despite casing
 
@@ -127,19 +127,19 @@ class TestSandboxTimeoutCoercion:
     # [sandbox] timeout is hand-editable; a bad value must fall back to the
     # default, not crash build_sandbox() (and with it the whole agent startup).
     def test_non_numeric_timeout_falls_back_to_default(self, monkeypatch):
-        from maverick import config
+        from lightwork import config
         monkeypatch.setattr(config, "get_sandbox", lambda: {"backend": "local", "timeout": "fast"})
         sb = build_sandbox()  # must not raise
         assert isinstance(sb, LocalBackend)
         assert sb.timeout == 60.0
 
     def test_non_positive_timeout_falls_back_to_default(self, monkeypatch):
-        from maverick import config
+        from lightwork import config
         for bad in (-5, 0):
             monkeypatch.setattr(config, "get_sandbox", lambda bad=bad: {"backend": "local", "timeout": bad})
             assert build_sandbox().timeout == 60.0
 
     def test_valid_timeout_is_honored(self, monkeypatch):
-        from maverick import config
+        from lightwork import config
         monkeypatch.setattr(config, "get_sandbox", lambda: {"backend": "local", "timeout": 30})
         assert build_sandbox().timeout == 30.0

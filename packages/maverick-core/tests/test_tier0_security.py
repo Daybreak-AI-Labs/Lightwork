@@ -10,7 +10,7 @@ Each test pins a behavior the prior code didn't enforce:
 from __future__ import annotations
 
 import pytest
-from maverick import plugins
+from lightwork import plugins
 
 # ---------- plugin allowlist ----------
 
@@ -33,7 +33,7 @@ def test_plugin_allowlist_empty_by_default(monkeypatch, tmp_path):
     """No env var + no [plugins] config => no plugins load.
 
     This is the security default: an attacker who pip-installs a
-    package declaring `entry_points."maverick.tools"` does NOT get
+    package declaring `entry_points."lightwork.tools"` does NOT get
     automatic code execution on the next maverick run.
     """
     monkeypatch.delenv("MAVERICK_PLUGINS_ALLOW", raising=False)
@@ -46,7 +46,7 @@ def test_plugin_allowlist_empty_by_default(monkeypatch, tmp_path):
         executed.append("ran")
         return "should-not-execute"
 
-    _set_eps(monkeypatch, {"maverick.tools": [_FakeEP("attacker", factory)]})
+    _set_eps(monkeypatch, {"lightwork.tools": [_FakeEP("attacker", factory)]})
     out = plugins.discover_tools()
     assert out == []
     # And the factory was never called -- this is the real safety
@@ -59,7 +59,7 @@ def test_plugin_allowlist_explicit_names(monkeypatch):
     monkeypatch.setenv("MAVERICK_PLUGINS_ALLOW", "weather,calendar")
 
     _set_eps(monkeypatch, {
-        "maverick.tools": [
+        "lightwork.tools": [
             _FakeEP("weather", lambda: "ok-weather"),
             _FakeEP("attacker", lambda: "DANGER"),
             _FakeEP("calendar", lambda: "ok-calendar"),
@@ -73,7 +73,7 @@ def test_plugin_allowlist_wildcard(monkeypatch):
     """`*` reverts to pre-v0.2 behavior (load everything)."""
     monkeypatch.setenv("MAVERICK_PLUGINS_ALLOW", "*")
     _set_eps(monkeypatch, {
-        "maverick.tools": [
+        "lightwork.tools": [
             _FakeEP("a", lambda: "a"),
             _FakeEP("b", lambda: "b"),
         ],
@@ -85,9 +85,9 @@ def test_hook_entry_points_require_plugin_allowlist(monkeypatch, tmp_path):
     """Hook entry points use the same explicit plugin allowlist as tools.
 
     With plugins disabled by default, merely installing a package that
-    declares `entry_points."maverick.hooks"` must not import or execute it.
+    declares `entry_points."lightwork.hooks"` must not import or execute it.
     """
-    from maverick.hooks import clear, load_from_entry_points
+    from lightwork.hooks import clear, load_from_entry_points
 
     monkeypatch.delenv("MAVERICK_PLUGINS_ALLOW", raising=False)
     monkeypatch.setenv("MAVERICK_CONFIG", str(tmp_path / "nonexistent.toml"))
@@ -104,7 +104,7 @@ def test_hook_entry_points_require_plugin_allowlist(monkeypatch, tmp_path):
 
     monkeypatch.setattr(
         "importlib.metadata.entry_points",
-        lambda group=None: [_HookEP()] if group == "maverick.hooks" else [],
+        lambda group=None: [_HookEP()] if group == "lightwork.hooks" else [],
     )
 
     assert load_from_entry_points() == 0
@@ -116,13 +116,13 @@ def test_hook_entry_points_require_plugin_allowlist(monkeypatch, tmp_path):
 @pytest.mark.asyncio
 async def test_tool_output_scan_blocks_injection(tmp_path):
     """A tool returning content the shield flags must not reach the LLM."""
-    from maverick.agent import Agent
-    from maverick.blackboard import Blackboard
-    from maverick.budget import Budget
-    from maverick.sandbox import LocalBackend
-    from maverick.swarm import SwarmContext
-    from maverick.tools import Tool, ToolRegistry
-    from maverick.world_model import WorldModel
+    from lightwork.agent import Agent
+    from lightwork.blackboard import Blackboard
+    from lightwork.budget import Budget
+    from lightwork.sandbox import LocalBackend
+    from lightwork.swarm import SwarmContext
+    from lightwork.tools import Tool, ToolRegistry
+    from lightwork.world_model import WorldModel
 
     class _BlockingShield:
         def scan_tool_call(self, name, args):
@@ -167,13 +167,13 @@ async def test_tool_output_scan_blocks_injection(tmp_path):
 async def test_tool_output_wrapped_when_allowed(tmp_path):
     """Allowed tool output is wrapped in <tool_output> so the agent
     treats it as data rather than instructions."""
-    from maverick.agent import Agent
-    from maverick.blackboard import Blackboard
-    from maverick.budget import Budget
-    from maverick.sandbox import LocalBackend
-    from maverick.swarm import SwarmContext
-    from maverick.tools import Tool, ToolRegistry
-    from maverick.world_model import WorldModel
+    from lightwork.agent import Agent
+    from lightwork.blackboard import Blackboard
+    from lightwork.budget import Budget
+    from lightwork.sandbox import LocalBackend
+    from lightwork.swarm import SwarmContext
+    from lightwork.tools import Tool, ToolRegistry
+    from lightwork.world_model import WorldModel
 
     class _PermissiveShield:
         def scan_tool_call(self, name, args):
@@ -226,13 +226,13 @@ async def test_tool_output_shield_error_fails_open_but_is_observable(tmp_path, c
     bypass is observable rather than a clean hole."""
     import logging
 
-    from maverick.agent import Agent
-    from maverick.blackboard import Blackboard
-    from maverick.budget import Budget
-    from maverick.sandbox import LocalBackend
-    from maverick.swarm import SwarmContext
-    from maverick.tools import Tool, ToolRegistry
-    from maverick.world_model import WorldModel
+    from lightwork.agent import Agent
+    from lightwork.blackboard import Blackboard
+    from lightwork.budget import Budget
+    from lightwork.sandbox import LocalBackend
+    from lightwork.swarm import SwarmContext
+    from lightwork.tools import Tool, ToolRegistry
+    from lightwork.world_model import WorldModel
 
     class _ThrowingShield:
         def scan_tool_call(self, name, args):
@@ -275,7 +275,7 @@ async def test_tool_output_shield_error_fails_open_but_is_observable(tmp_path, c
 
 def test_processed_messages_idempotent(tmp_path):
     """Twilio resend of the same MessageSid must not double-process."""
-    from maverick.world_model import WorldModel
+    from lightwork.world_model import WorldModel
     wm = WorldModel(tmp_path / "w.db")
     gid = wm.create_goal("g", "")
 
@@ -295,7 +295,7 @@ def test_release_processed_message_allows_reclaim(tmp_path):
     retry no-ops instead of double-spending). A failed run must release the
     claim so the retry can re-process -- not be deduped against a run that
     never completed. Issue #473."""
-    from maverick.world_model import WorldModel
+    from lightwork.world_model import WorldModel
     wm = WorldModel(tmp_path / "w.db")
 
     assert wm.mark_message_processed("sms", "SM-x") is True   # claim wins
@@ -316,7 +316,7 @@ def test_reclaim_orphan_goals(tmp_path):
     process aren't yanked out from under it. The test simulates a real
     crashed run by passing max_age_seconds=0 explicitly.
     """
-    from maverick.world_model import WorldModel
+    from lightwork.world_model import WorldModel
     wm = WorldModel(tmp_path / "w.db")
     a = wm.create_goal("a", "")
     b = wm.create_goal("b", "")
@@ -335,7 +335,7 @@ def test_reclaim_orphan_goals(tmp_path):
 
 def test_reclaim_orphan_goals_skips_recent(tmp_path):
     """Default max_age_seconds=60 protects goals from a sibling process."""
-    from maverick.world_model import WorldModel
+    from lightwork.world_model import WorldModel
     wm = WorldModel(tmp_path / "w.db")
     gid = wm.create_goal("live-in-sibling", "")
     wm.set_goal_status(gid, "active")
@@ -351,7 +351,7 @@ def test_reclaim_orphan_goals_skips_recent(tmp_path):
 
 def test_foreign_keys_on(tmp_path):
     """PRAGMA foreign_keys=ON so REFERENCES clauses actually do something."""
-    from maverick.world_model import WorldModel
+    from lightwork.world_model import WorldModel
     wm = WorldModel(tmp_path / "w.db")
     row = wm.conn.execute("PRAGMA foreign_keys").fetchone()
     assert row[0] == 1

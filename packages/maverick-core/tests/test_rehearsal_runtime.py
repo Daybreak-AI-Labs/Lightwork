@@ -4,9 +4,9 @@ fail-open when disabled or data-less.
 """
 from __future__ import annotations
 
-from maverick import rehearsal as rh
-from maverick import rehearsal_runtime as rt
-from maverick.trajectory_store import TrajectoryStep, TrajectoryStore
+from lightwork import rehearsal as rh
+from lightwork import rehearsal_runtime as rt
+from lightwork.trajectory_store import TrajectoryStep, TrajectoryStore
 
 
 def _store(tmp_path, outcome):
@@ -29,7 +29,7 @@ def test_encode_state_is_general_to_specific():
 
 def test_gate_tool_fail_open_when_disabled(tmp_path, monkeypatch):
     monkeypatch.delenv("MAVERICK_REHEARSAL", raising=False)
-    monkeypatch.setattr("maverick.rehearsal._settings", lambda: dict(rh._DEFAULTS))
+    monkeypatch.setattr("lightwork.rehearsal._settings", lambda: dict(rh._DEFAULTS))
     rt.reset_cache()
     v = rt.gate_tool(domain="ops", role="coder", last_tool="", tool_name="shell")
     assert v.decision == rh.PROCEED and "disabled" in v.reason
@@ -37,7 +37,7 @@ def test_gate_tool_fail_open_when_disabled(tmp_path, monkeypatch):
 
 def test_gate_tool_fail_open_when_no_data(tmp_path, monkeypatch):
     monkeypatch.setenv("MAVERICK_REHEARSAL", "1")
-    monkeypatch.setattr("maverick.trajectory_store.shared",
+    monkeypatch.setattr("lightwork.trajectory_store.shared",
                         lambda: TrajectoryStore(path=tmp_path / "empty.ndjson"))
     rt.reset_cache()
     v = rt.gate_tool(domain="ops", role="coder", last_tool="", tool_name="shell")
@@ -46,7 +46,7 @@ def test_gate_tool_fail_open_when_no_data(tmp_path, monkeypatch):
 
 def test_gate_tool_proceeds_on_good_history(tmp_path, monkeypatch):
     monkeypatch.setenv("MAVERICK_REHEARSAL", "1")
-    monkeypatch.setattr("maverick.trajectory_store.shared", lambda: _store(tmp_path, 0.9))
+    monkeypatch.setattr("lightwork.trajectory_store.shared", lambda: _store(tmp_path, 0.9))
     rt.reset_cache()
     v = rt.gate_tool(domain="ops", role="coder", last_tool="", tool_name="shell")
     assert v.decision == rh.PROCEED and v.known
@@ -55,7 +55,7 @@ def test_gate_tool_proceeds_on_good_history(tmp_path, monkeypatch):
 
 def test_gate_tool_holds_on_bad_history(tmp_path, monkeypatch):
     monkeypatch.setenv("MAVERICK_REHEARSAL", "1")
-    monkeypatch.setattr("maverick.trajectory_store.shared", lambda: _store(tmp_path, 0.05))
+    monkeypatch.setattr("lightwork.trajectory_store.shared", lambda: _store(tmp_path, 0.05))
     rt.reset_cache()
     v = rt.gate_tool(domain="ops", role="coder", last_tool="", tool_name="shell")
     assert v.decision == rh.BLOCK and v.predicted_outcome < 0.3
@@ -64,7 +64,7 @@ def test_gate_tool_holds_on_bad_history(tmp_path, monkeypatch):
 def test_build_model_generalises_across_role(tmp_path, monkeypatch):
     # The backoff model lets a NEW role in a known domain still be vouched for
     # (generalises over the trailing feature) rather than escalating blindly.
-    monkeypatch.setattr("maverick.trajectory_store.shared", lambda: _store(tmp_path, 0.9))
+    monkeypatch.setattr("lightwork.trajectory_store.shared", lambda: _store(tmp_path, 0.9))
     rt.reset_cache()
     model = rt._model()
     assert model is not None

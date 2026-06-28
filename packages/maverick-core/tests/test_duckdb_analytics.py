@@ -4,11 +4,11 @@ from __future__ import annotations
 
 import pytest
 from click.testing import CliRunner
-from maverick.cli import main
-from maverick.world_model import WorldModel
+from lightwork.cli import main
+from lightwork.world_model import WorldModel
 
 duckdb = pytest.importorskip("duckdb")
-from maverick.duckdb_analytics import WorldAnalytics  # noqa: E402
+from lightwork.duckdb_analytics import WorldAnalytics  # noqa: E402
 
 
 def _seed(path, goals):

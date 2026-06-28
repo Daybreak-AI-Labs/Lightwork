@@ -10,11 +10,11 @@ import sys
 from types import SimpleNamespace
 
 import pytest
-from maverick.providers.openai_provider import (
+from lightwork.providers.openai_provider import (
     OpenAIClient,
     _extract_tool_result_text,
 )
-from maverick.providers.openrouter_provider import OpenRouterClient
+from lightwork.providers.openrouter_provider import OpenRouterClient
 
 
 class TestExtractToolResultText:
@@ -242,7 +242,7 @@ def test_tool_result_never_follows_a_user_message():
     # tool_calls -- a `user` message between them is an OpenAI 400. Anthropic
     # allows text before/between tool_result blocks; the translator must
     # reorder so all tool messages come first, then trailing text.
-    from maverick.providers.openai_provider import OpenAIClient
+    from lightwork.providers.openai_provider import OpenAIClient
     msgs = [
         {"role": "assistant", "content": [
             {"type": "tool_use", "id": "c1", "name": "x", "input": {}},

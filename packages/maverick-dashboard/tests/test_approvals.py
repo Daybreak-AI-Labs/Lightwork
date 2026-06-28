@@ -5,18 +5,18 @@ from fastapi.testclient import TestClient
 
 
 def _client():
-    from maverick_dashboard.app import app
+    from lightwork_dashboard.app import app
     return TestClient(app)
 
 
 def _isolate(monkeypatch, tmp_path):
-    from maverick import world_model
+    from lightwork import world_model
     monkeypatch.setattr(world_model, "DEFAULT_DB", tmp_path / "world.db")
     monkeypatch.delenv("MAVERICK_DASHBOARD_TOKEN", raising=False)
 
 
 def _world(tmp_path):
-    from maverick.world_model import WorldModel
+    from lightwork.world_model import WorldModel
     return WorldModel(tmp_path / "world.db")
 
 
@@ -98,7 +98,7 @@ def test_decision_is_anchored_in_audit_chain(monkeypatch, tmp_path):
     aid = w.create_approval("wire-funds", risk="high")
 
     recorded = []
-    import maverick.audit as audit
+    import lightwork.audit as audit
     monkeypatch.setattr(audit, "record",
                         lambda kind, **p: recorded.append((kind, p)) or True)
 
@@ -119,7 +119,7 @@ def test_no_audit_event_when_decision_is_a_noop(monkeypatch, tmp_path):
     # A 404 (unknown/already-decided) must NOT emit a decision event.
     _isolate(monkeypatch, tmp_path)
     recorded = []
-    import maverick.audit as audit
+    import lightwork.audit as audit
     monkeypatch.setattr(audit, "record",
                         lambda kind, **p: recorded.append((kind, p)) or True)
     client = _client()

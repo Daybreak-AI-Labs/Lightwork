@@ -222,7 +222,7 @@ def _get_shared_llm():
         return _SHARED_LLM
     with _SHARED_LLM_LOCK:
         if _SHARED_LLM is None:
-            from maverick.llm import LLM
+            from lightwork.llm import LLM
             _SHARED_LLM = LLM()
         return _SHARED_LLM
 
@@ -317,7 +317,7 @@ def _maverick_snapshot_and_set_env(kwargs: dict) -> dict:
     if gold_patch:
         os.environ["MAVERICK_GOLD_PATCH"] = gold_patch
     try:
-        from maverick.coding_mode import reset_gold_patch_cache
+        from lightwork.coding_mode import reset_gold_patch_cache
         reset_gold_patch_cache()
     except Exception:
         pass
@@ -341,7 +341,7 @@ def _maverick_reset_workdir() -> None:
     """Reset the sandbox workdir to a clean state before the run so state
     from instance N-1 doesn't pollute. Best-effort."""
     try:
-        from maverick.sandbox import build_sandbox
+        from lightwork.sandbox import build_sandbox
         sandbox_pre = build_sandbox()
         _reset_workdir(sandbox_pre.workdir, base_commit=os.environ.get("MAVERICK_BASE_COMMIT", ""))
     except Exception:
@@ -354,10 +354,10 @@ def _maverick_failing_test_context(fail_ids: list) -> str:
     if not fail_ids:
         return ""
     try:
-        from maverick.sandbox import build_sandbox
+        from lightwork.sandbox import build_sandbox
         sandbox = build_sandbox()
         sandbox_workdir = Path(sandbox.workdir).resolve()
-        from maverick.tools.fs import _is_opaque_blocked_resolved, _safe_resolve
+        from lightwork.tools.fs import _is_opaque_blocked_resolved, _safe_resolve
         seen: set[str] = set()
         chunks: list[str] = []
         for tid in fail_ids[:5]:  # at most 5 distinct files
@@ -479,7 +479,7 @@ def _maverick_reported_model(llm) -> str:
     """Report the orchestrator role's actual model, not the shared LLM's
     default (which is hardcoded to Sonnet and breaks cost attribution)."""
     try:
-        from maverick.llm import model_for_role
+        from lightwork.llm import model_for_role
         return model_for_role("orchestrator") or getattr(llm, "model", "")
     except Exception:
         return getattr(llm, "model", "")
@@ -495,7 +495,7 @@ def _maverick_run_goal(llm, world, budget, gid, sandbox, best_of_n: int):
     """
     import asyncio
 
-    from maverick.orchestrator import run_goal_best_of_n, run_goal_sync
+    from lightwork.orchestrator import run_goal_best_of_n, run_goal_sync
 
     if best_of_n > 1:
         result = asyncio.run(run_goal_best_of_n(
@@ -532,7 +532,7 @@ def _maverick_build_row(
     """Assemble the final maverick Row from the post-run goal state:
     episode accounting, budget-overrun annotation, diff extraction, tool
     signals, contamination guard, and outcome selection."""
-    from maverick.coding_mode import extract_unified_diff
+    from lightwork.coding_mode import extract_unified_diff
 
     total_cost, total_in, total_out, last_outcome = _maverick_episode_accounting(all_eps)
 
@@ -654,9 +654,9 @@ def run_maverick(instance_id: str, brief: str, **kwargs) -> Row:
     if os.environ.get("MAVERICK_BENCH_DRY_RUN") == "1":
         return _dry_run_row(instance_id, "maverick")
 
-    from maverick.budget import Budget
-    from maverick.sandbox import build_sandbox
-    from maverick.world_model import WorldModel
+    from lightwork.budget import Budget
+    from lightwork.sandbox import build_sandbox
+    from lightwork.world_model import WorldModel
 
     # Default: turn coding mode ON for any SWE-bench-shaped task. Caller
     # can disable by setting MAVERICK_CODING_MODE=0 explicitly.
@@ -761,8 +761,8 @@ def run_sonnet_single(instance_id: str, brief: str, **_kwargs) -> Row:
         return _dry_run_row(instance_id, "sonnet_single")
 
     import anthropic
-    from maverick.budget import Budget
-    from maverick.llm import MODEL_SONNET
+    from lightwork.budget import Budget
+    from lightwork.llm import MODEL_SONNET
 
     start = time.monotonic()
     client = anthropic.Anthropic()
@@ -840,9 +840,9 @@ def run_sonnet_tools(instance_id: str, brief: str, **kwargs) -> Row:
         return _dry_run_row(instance_id, "sonnet_tools")
 
     import anthropic
-    from maverick.budget import Budget
-    from maverick.llm import MODEL_SONNET
-    from maverick.sandbox import build_sandbox
+    from lightwork.budget import Budget
+    from lightwork.llm import MODEL_SONNET
+    from lightwork.sandbox import build_sandbox
 
     start = time.monotonic()
     sandbox = build_sandbox()
@@ -962,8 +962,8 @@ def run_sonnet_self_consistency_n8(instance_id: str, brief: str, **_kwargs) -> R
         return _dry_run_row(instance_id, "sonnet_self_consistency_n8")
 
     import anthropic
-    from maverick.budget import Budget
-    from maverick.llm import MODEL_SONNET
+    from lightwork.budget import Budget
+    from lightwork.llm import MODEL_SONNET
 
     try:
         n = max(1, int(os.environ.get("MAVERICK_BENCH_SC_N", "8") or "8"))

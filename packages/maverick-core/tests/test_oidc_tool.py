@@ -4,7 +4,7 @@ from __future__ import annotations
 from urllib.parse import parse_qs, urlparse
 
 import pytest
-from maverick.tools.oidc_tool import build_authorize_url, exchange_code, oidc_tool
+from lightwork.tools.oidc_tool import build_authorize_url, exchange_code, oidc_tool
 
 
 def test_build_authorize_url():
@@ -71,7 +71,7 @@ def test_tool_authorize_op():
 
 
 def test_tool_exchange_via_monkeypatched_fetch(monkeypatch):
-    import maverick.tools.oidc_tool as mod
+    import lightwork.tools.oidc_tool as mod
     monkeypatch.setattr(mod, "_default_fetch",
                         lambda u, d: {"access_token": "t", "id_token": ""})
     out = oidc_tool().fn({"op": "exchange", "token_url": "https://idp/token",

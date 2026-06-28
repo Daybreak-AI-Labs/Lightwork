@@ -152,12 +152,12 @@ def make_container_solver(
     max_tokens: int = 2048, llm_factory: Callable[[], Any] | None = None,
 ) -> Callable[[ContainerTask, dict], None]:
     """Build a solver that drives a real LLM tool-loop over the container tools."""
-    from maverick.budget import Budget
+    from lightwork.budget import Budget
 
     def _llm():
         if llm_factory is not None:
             return llm_factory()
-        from maverick.llm import LLM
+        from lightwork.llm import LLM
         return LLM()
 
     def solve(task: ContainerTask, tools: dict) -> None:

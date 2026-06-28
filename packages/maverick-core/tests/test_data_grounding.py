@@ -8,13 +8,13 @@ and never widens a host-restricted pack's egress.
 """
 from __future__ import annotations
 
-from maverick.domain import (
+from lightwork.domain import (
     builtin_dir,
     domain_capability,
     load_domains,
     suite_for,
 )
-from maverick.tools.enterprise_connectors import (
+from lightwork.tools.enterprise_connectors import (
     PUBLIC_DATA_CONNECTOR_NAMES,
     SUITE_DATA_CONNECTORS,
     data_connectors_for_suite,
@@ -35,7 +35,7 @@ def _pick(suite: str):
 
 def test_mapping_references_only_real_connectors_and_suites():
     valid = set(PUBLIC_DATA_CONNECTOR_NAMES)
-    from maverick.domain import SUITE_PREFIXES
+    from lightwork.domain import SUITE_PREFIXES
     real_suites = set(SUITE_PREFIXES.values())
     for suite, conns in SUITE_DATA_CONNECTORS.items():
         assert suite in real_suites, f"unknown suite {suite!r}"
@@ -109,7 +109,7 @@ def test_empty_allowlist_pack_is_not_broadened():
 
 def test_config_file_kill_switch_withholds_the_grant(monkeypatch):
     monkeypatch.delenv("MAVERICK_WORKFORCE_DATA_GROUNDING", raising=False)
-    monkeypatch.setattr("maverick.config.load_config",
+    monkeypatch.setattr("lightwork.config.load_config",
                         lambda *a, **k: {"workforce": {"data_grounding": False}})
     name, p = _pick("healthcare")
     cap = domain_capability(p, None, f"agent:{name}-1")

@@ -3,14 +3,14 @@ from __future__ import annotations
 
 import pytest
 from click.testing import CliRunner
-from maverick.cli import main
-from maverick.remediation import (
+from lightwork.cli import main
+from lightwork.remediation import (
     RemediationItem,
     apply_remediation,
     auto_fix_enabled,
     plan,
 )
-from maverick.threat_hunt import ThreatReport
+from lightwork.threat_hunt import ThreatReport
 
 
 @pytest.fixture(autouse=True)
@@ -18,9 +18,9 @@ def _clean(monkeypatch):
     for v in ("MAVERICK_ENTERPRISE", "MAVERICK_SECURITY_AUTOFIX",
               "MAVERICK_AUDIT_SIGN", "MAVERICK_ENCRYPT_AT_REST"):
         monkeypatch.delenv(v, raising=False)
-    monkeypatch.setattr("maverick.config.load_config", lambda *a, **k: {})
+    monkeypatch.setattr("lightwork.config.load_config", lambda *a, **k: {})
     # Don't scan the real audit log during planning.
-    monkeypatch.setattr("maverick.threat_hunt.hunt",
+    monkeypatch.setattr("lightwork.threat_hunt.hunt",
                         lambda **k: ThreatReport([], 0, "clear"))
 
 
@@ -63,7 +63,7 @@ def test_apply_dry_run_writes_nothing(monkeypatch, tmp_path):
     monkeypatch.setenv("MAVERICK_ENTERPRISE", "1")
     monkeypatch.setenv("MAVERICK_SECURITY_AUTOFIX", "1")
     cfg = tmp_path / "config.toml"
-    monkeypatch.setattr("maverick.config.config_path", lambda: cfg)
+    monkeypatch.setattr("lightwork.config.config_path", lambda: cfg)
 
     res = apply_remediation(_auto_item(), dry_run=True)
     assert res.dry_run and res.applied is False
@@ -76,10 +76,10 @@ def test_apply_appends_block_without_clobbering_and_audits(monkeypatch, tmp_path
     monkeypatch.setenv("MAVERICK_SECURITY_AUTOFIX", "1")
     cfg = tmp_path / "config.toml"
     cfg.write_text('[providers]\ndefault = "ollama"\n')
-    monkeypatch.setattr("maverick.config.config_path", lambda: cfg)
+    monkeypatch.setattr("lightwork.config.config_path", lambda: cfg)
 
     recorded = []
-    import maverick.audit as audit
+    import lightwork.audit as audit
     monkeypatch.setattr(audit, "record", lambda kind, **p: recorded.append((kind, p)) or True)
 
     res = apply_remediation(_auto_item(), dry_run=False)
@@ -102,9 +102,9 @@ def test_apply_refuses_unloggable_change_and_rolls_back(monkeypatch, tmp_path,
     monkeypatch.setenv("MAVERICK_SECURITY_AUTOFIX", "1")
     cfg = tmp_path / "config.toml"
     cfg.write_text('[providers]\ndefault = "ollama"\n')
-    monkeypatch.setattr("maverick.config.config_path", lambda: cfg)
+    monkeypatch.setattr("lightwork.config.config_path", lambda: cfg)
 
-    import maverick.audit as audit
+    import lightwork.audit as audit
 
     def _record(kind, **p):
         if isinstance(audit_result, Exception):
@@ -122,11 +122,11 @@ def test_apply_does_not_audit_when_config_write_fails(monkeypatch, tmp_path):
     monkeypatch.setenv("MAVERICK_SECURITY_AUTOFIX", "1")
     cfg = tmp_path / "config.toml"
     cfg.write_text('[providers]\ndefault = "ollama"\n')
-    monkeypatch.setattr("maverick.config.config_path", lambda: cfg)
+    monkeypatch.setattr("lightwork.config.config_path", lambda: cfg)
 
     recorded = []
-    import maverick.audit as audit
-    import maverick.remediation as remediation
+    import lightwork.audit as audit
+    import lightwork.remediation as remediation
 
     monkeypatch.setattr(audit, "record", lambda kind, **p: recorded.append((kind, p)) or True)
 
@@ -145,7 +145,7 @@ def test_apply_refuses_when_result_would_be_invalid_toml(monkeypatch, tmp_path):
     monkeypatch.setenv("MAVERICK_SECURITY_AUTOFIX", "1")
     cfg = tmp_path / "config.toml"
     cfg.write_text("this is = = not valid toml [[[\n")    # already malformed
-    monkeypatch.setattr("maverick.config.config_path", lambda: cfg)
+    monkeypatch.setattr("lightwork.config.config_path", lambda: cfg)
 
     res = apply_remediation(_auto_item(), dry_run=False)
     assert res.applied is False and "invalid" in res.reason
@@ -155,9 +155,9 @@ def test_apply_refuses_when_result_would_be_invalid_toml(monkeypatch, tmp_path):
 def test_apply_refuses_when_section_already_present(monkeypatch, tmp_path):
     monkeypatch.setenv("MAVERICK_ENTERPRISE", "1")
     monkeypatch.setenv("MAVERICK_SECURITY_AUTOFIX", "1")
-    monkeypatch.setattr("maverick.config.load_config",
+    monkeypatch.setattr("lightwork.config.load_config",
                         lambda *a, **k: {"audit": {"other": 1}})
-    monkeypatch.setattr("maverick.config.config_path", lambda: tmp_path / "config.toml")
+    monkeypatch.setattr("lightwork.config.config_path", lambda: tmp_path / "config.toml")
 
     res = apply_remediation(_auto_item(), dry_run=False)
     assert res.applied is False and "already present" in res.reason
@@ -184,9 +184,9 @@ def test_concurrent_applies_do_not_clobber_each_other(monkeypatch, tmp_path):
     monkeypatch.setenv("MAVERICK_SECURITY_AUTOFIX", "1")
     cfg = tmp_path / "config.toml"
     cfg.write_text('[providers]\ndefault = "ollama"\n')
-    monkeypatch.setattr("maverick.config.config_path", lambda: cfg)
+    monkeypatch.setattr("lightwork.config.config_path", lambda: cfg)
 
-    import maverick.audit as audit
+    import lightwork.audit as audit
     monkeypatch.setattr(audit, "record", lambda kind, **p: True)
 
     items = [

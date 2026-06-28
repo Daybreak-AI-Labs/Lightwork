@@ -9,8 +9,8 @@ from unittest.mock import MagicMock
 # ---------- Worker daemon ----------
 
 def test_worker_runs_one_job(tmp_path):
-    from maverick.job_queue import JobQueue
-    from maverick.worker import Worker
+    from lightwork.job_queue import JobQueue
+    from lightwork.worker import Worker
 
     q = JobQueue(db_path=tmp_path / "jobs.db")
     seen: list[int] = []
@@ -29,16 +29,16 @@ def test_worker_runs_one_job(tmp_path):
 
 
 def test_worker_empty_queue_returns_false(tmp_path):
-    from maverick.job_queue import JobQueue
-    from maverick.worker import Worker
+    from lightwork.job_queue import JobQueue
+    from lightwork.worker import Worker
     q = JobQueue(db_path=tmp_path / "jobs.db")
     w = Worker(queue=q)
     assert w.run_once() is False
 
 
 def test_worker_no_handler_terminal(tmp_path):
-    from maverick.job_queue import JobQueue
-    from maverick.worker import Worker
+    from lightwork.job_queue import JobQueue
+    from lightwork.worker import Worker
     q = JobQueue(db_path=tmp_path / "jobs.db")
     w = Worker(queue=q)
     jid = q.enqueue("nonexistent", {})
@@ -49,8 +49,8 @@ def test_worker_no_handler_terminal(tmp_path):
 
 
 def test_worker_handler_exception_reschedules(tmp_path):
-    from maverick.job_queue import JobQueue
-    from maverick.worker import Worker
+    from lightwork.job_queue import JobQueue
+    from lightwork.worker import Worker
     q = JobQueue(db_path=tmp_path / "jobs.db")
     w = Worker(queue=q, retry_after=0.0, max_attempts=3)
 
@@ -67,8 +67,8 @@ def test_worker_handler_exception_reschedules(tmp_path):
 
 
 def test_worker_handler_exception_terminal_after_max(tmp_path):
-    from maverick.job_queue import JobQueue
-    from maverick.worker import Worker
+    from lightwork.job_queue import JobQueue
+    from lightwork.worker import Worker
     q = JobQueue(db_path=tmp_path / "jobs.db")
     w = Worker(queue=q, retry_after=0.0, max_attempts=2)
 
@@ -89,8 +89,8 @@ def test_worker_run_forever_stop_is_clean(tmp_path):
     """run_forever must exit promptly when stop() is called."""
     import threading
 
-    from maverick.job_queue import JobQueue
-    from maverick.worker import Worker
+    from lightwork.job_queue import JobQueue
+    from lightwork.worker import Worker
     q = JobQueue(db_path=tmp_path / "jobs.db")
     w = Worker(queue=q, idle_sleep=0.05)
 
@@ -105,7 +105,7 @@ def test_worker_run_forever_stop_is_clean(tmp_path):
 # ---------- Discord bot tool ----------
 
 def test_discord_bot_requires_op():
-    from maverick.tools.discord_bot import discord_bot
+    from lightwork.tools.discord_bot import discord_bot
     assert "op is required" in discord_bot().fn({})
 
 
@@ -114,7 +114,7 @@ def test_discord_bot_missing_token(monkeypatch):
     fake = types.ModuleType("httpx")
     fake.post = MagicMock()
     monkeypatch.setitem(sys.modules, "httpx", fake)
-    from maverick.tools.discord_bot import discord_bot
+    from lightwork.tools.discord_bot import discord_bot
     out = discord_bot().fn({"op": "post", "channel_id": "123456789012345678", "content": "hi"})
     assert "DISCORD_BOT_TOKEN" in out
 
@@ -127,7 +127,7 @@ def test_discord_bot_post_calls_api(monkeypatch):
     fake_httpx = types.ModuleType("httpx")
     fake_httpx.post = MagicMock(return_value=resp)
     monkeypatch.setitem(sys.modules, "httpx", fake_httpx)
-    from maverick.tools.discord_bot import discord_bot
+    from lightwork.tools.discord_bot import discord_bot
     out = discord_bot().fn({"op": "post", "channel_id": "123456789012345678", "content": "hi"})
     assert "posted to 123456789012345678" in out and "msg_42" in out
 
@@ -143,7 +143,7 @@ def test_discord_bot_history_renders(monkeypatch):
     fake_httpx = types.ModuleType("httpx")
     fake_httpx.get = MagicMock(return_value=resp)
     monkeypatch.setitem(sys.modules, "httpx", fake_httpx)
-    from maverick.tools.discord_bot import discord_bot
+    from lightwork.tools.discord_bot import discord_bot
     out = discord_bot().fn({"op": "history", "channel_id": "123456789012345678", "limit": 10})
     assert "alice: hello" in out and "bob: yo" in out
 
@@ -151,7 +151,7 @@ def test_discord_bot_history_renders(monkeypatch):
 def test_discord_bot_react_validates(monkeypatch):
     fake_httpx = types.ModuleType("httpx")
     monkeypatch.setitem(sys.modules, "httpx", fake_httpx)
-    from maverick.tools.discord_bot import discord_bot
+    from lightwork.tools.discord_bot import discord_bot
     out = discord_bot().fn({"op": "react", "channel_id": "123456789012345678"})
     assert "channel_id, message_id, emoji" in out
 
@@ -161,7 +161,7 @@ def test_discord_bot_rejects_non_snowflake_ids(monkeypatch):
     fake_httpx = types.ModuleType("httpx")
     fake_httpx.get = MagicMock()
     monkeypatch.setitem(sys.modules, "httpx", fake_httpx)
-    from maverick.tools.discord_bot import discord_bot
+    from lightwork.tools.discord_bot import discord_bot
     out = discord_bot().fn({"op": "lookup_channel", "channel_id": "123/../roles"})
     assert "snowflake" in out
     fake_httpx.get.assert_not_called()
@@ -170,7 +170,7 @@ def test_discord_bot_rejects_non_snowflake_ids(monkeypatch):
 # ---------- Hacker News tool ----------
 
 def test_hn_requires_op():
-    from maverick.tools.hackernews import hackernews
+    from lightwork.tools.hackernews import hackernews
     assert "op is required" in hackernews().fn({})
 
 
@@ -198,7 +198,7 @@ def test_hn_top_renders(monkeypatch):
     fake_httpx = types.ModuleType("httpx")
     fake_httpx.get = MagicMock(side_effect=lambda *a, **k: next(seq))
     monkeypatch.setitem(sys.modules, "httpx", fake_httpx)
-    from maverick.tools.hackernews import hackernews
+    from lightwork.tools.hackernews import hackernews
     out = hackernews().fn({"op": "top", "limit": 2})
     assert "Story One" in out and "Story Two" in out
     assert "https://x/1" in out
@@ -215,7 +215,7 @@ def test_hn_get_story(monkeypatch):
     fake_httpx = types.ModuleType("httpx")
     fake_httpx.get = MagicMock(return_value=resp)
     monkeypatch.setitem(sys.modules, "httpx", fake_httpx)
-    from maverick.tools.hackernews import hackernews
+    from lightwork.tools.hackernews import hackernews
     out = hackernews().fn({"op": "get", "item_id": 100})
     assert "[story #100]" in out
     assert "by alice" in out
@@ -231,7 +231,7 @@ def test_hn_search_via_algolia(monkeypatch):
     fake_httpx = types.ModuleType("httpx")
     fake_httpx.get = MagicMock(return_value=resp)
     monkeypatch.setitem(sys.modules, "httpx", fake_httpx)
-    from maverick.tools.hackernews import hackernews
+    from lightwork.tools.hackernews import hackernews
     out = hackernews().fn({"op": "search", "query": "deepseek"})
     assert "DeepSeek release" in out
 
@@ -239,14 +239,14 @@ def test_hn_search_via_algolia(monkeypatch):
 # ---------- DNS lookup tool ----------
 
 def test_dns_requires_op():
-    from maverick.tools.dns_lookup import dns_lookup
+    from lightwork.tools.dns_lookup import dns_lookup
     assert "op is required" in dns_lookup().fn({})
 
 
 def test_dns_socket_fallback_for_a(monkeypatch):
     """Without dnspython, A queries fall back to getaddrinfo."""
     monkeypatch.setattr(
-        "maverick.tools.dns_lookup._have_dnspython", lambda: False,
+        "lightwork.tools.dns_lookup._have_dnspython", lambda: False,
     )
     monkeypatch.setattr(
         "socket.getaddrinfo",
@@ -254,35 +254,35 @@ def test_dns_socket_fallback_for_a(monkeypatch):
             (0, 0, 0, "", ("93.184.216.34", 0)),
         ],
     )
-    from maverick.tools.dns_lookup import dns_lookup
+    from lightwork.tools.dns_lookup import dns_lookup
     out = dns_lookup().fn({"op": "resolve", "host": "example.com", "type": "A"})
     assert "93.184.216.34" in out
 
 
 def test_dns_socket_fallback_refuses_mx(monkeypatch):
     monkeypatch.setattr(
-        "maverick.tools.dns_lookup._have_dnspython", lambda: False,
+        "lightwork.tools.dns_lookup._have_dnspython", lambda: False,
     )
-    from maverick.tools.dns_lookup import dns_lookup
+    from lightwork.tools.dns_lookup import dns_lookup
     out = dns_lookup().fn({"op": "resolve", "host": "example.com", "type": "MX"})
     assert "dnspython" in out
 
 
 def test_dns_reverse_socket_fallback(monkeypatch):
     monkeypatch.setattr(
-        "maverick.tools.dns_lookup._have_dnspython", lambda: False,
+        "lightwork.tools.dns_lookup._have_dnspython", lambda: False,
     )
     monkeypatch.setattr(
         "socket.gethostbyaddr",
         lambda ip: ("a.example.com", [], [ip]),
     )
-    from maverick.tools.dns_lookup import dns_lookup
+    from lightwork.tools.dns_lookup import dns_lookup
     out = dns_lookup().fn({"op": "reverse", "ip": "1.2.3.4"})
     assert "a.example.com" in out
 
 
 def test_dns_reverse_requires_ip():
-    from maverick.tools.dns_lookup import dns_lookup
+    from lightwork.tools.dns_lookup import dns_lookup
     out = dns_lookup().fn({"op": "reverse"})
     assert "requires ip" in out
 
@@ -290,7 +290,7 @@ def test_dns_reverse_requires_ip():
 # ---------- Geocode tool ----------
 
 def test_geocode_requires_op():
-    from maverick.tools.geocode import geocode
+    from lightwork.tools.geocode import geocode
     assert "op is required" in geocode().fn({})
 
 
@@ -302,9 +302,9 @@ def test_geocode_forward_renders(monkeypatch):
         "display_name": "1600 Amphitheatre Parkway, Mountain View, CA",
     }])
     # geocode routes through the SSRF-safe client now; mock that seam.
-    import maverick.tools._ssrf as _ssrf
+    import lightwork.tools._ssrf as _ssrf
     monkeypatch.setattr(_ssrf, "safe_get", lambda url, **kw: resp)
-    from maverick.tools.geocode import geocode
+    from lightwork.tools.geocode import geocode
     out = geocode().fn({"op": "forward", "query": "googleplex"})
     assert "37.4220" in out
     assert "Mountain View" in out
@@ -317,16 +317,16 @@ def test_geocode_reverse_renders(monkeypatch):
         "display_name": "Liberty Island, Manhattan, NYC, NY",
         "address": {"city": "New York", "country": "USA"},
     })
-    import maverick.tools._ssrf as _ssrf
+    import lightwork.tools._ssrf as _ssrf
     monkeypatch.setattr(_ssrf, "safe_get", lambda url, **kw: resp)
-    from maverick.tools.geocode import geocode
+    from lightwork.tools.geocode import geocode
     out = geocode().fn({"op": "reverse", "lat": 40.6892, "lon": -74.0445})
     assert "Liberty Island" in out
     assert "New York" in out
 
 
 def test_geocode_reverse_requires_coords():
-    from maverick.tools.geocode import geocode
+    from lightwork.tools.geocode import geocode
     out = geocode().fn({"op": "reverse"})
     assert "lat and lon" in out
 
@@ -334,8 +334,8 @@ def test_geocode_reverse_requires_coords():
 # ---------- registration smoke ----------
 
 def test_new_tools_register(tmp_path):
-    from maverick.sandbox.local import LocalBackend
-    from maverick.tools import base_registry
+    from lightwork.sandbox.local import LocalBackend
+    from lightwork.tools import base_registry
 
     class _W:
         def open_questions(self, gid):

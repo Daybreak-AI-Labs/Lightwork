@@ -8,7 +8,7 @@ import json
 def test_docker_available_no_binary(monkeypatch):
     import shutil as _shutil
 
-    from maverick_installer import wizard
+    from lightwork_installer import wizard
     monkeypatch.setattr(_shutil, "which", lambda _x: None)
     assert wizard._docker_available() is False
 
@@ -17,7 +17,7 @@ def test_docker_available_binary_but_daemon_down(monkeypatch):
     import shutil as _shutil
     import subprocess as _sp
 
-    from maverick_installer import wizard
+    from lightwork_installer import wizard
     monkeypatch.setattr(_shutil, "which", lambda _x: "/usr/bin/docker")
     def _raise(*a, **kw):
         raise _sp.CalledProcessError(1, ["docker", "version"])
@@ -29,7 +29,7 @@ def test_docker_available_happy_path(monkeypatch):
     import shutil as _shutil
     import subprocess as _sp
 
-    from maverick_installer import wizard
+    from lightwork_installer import wizard
     monkeypatch.setattr(_shutil, "which", lambda _x: "/usr/bin/docker")
     monkeypatch.setattr(
         _sp, "run",
@@ -41,7 +41,7 @@ def test_docker_available_happy_path(monkeypatch):
 # ---------- pick_sandbox default stays on docker ----------
 
 def test_pick_sandbox_defaults_docker_when_unavailable(monkeypatch):
-    from maverick_installer import wizard
+    from lightwork_installer import wizard
     monkeypatch.setattr(wizard, "_docker_available", lambda: False)
     defaults = []
     def fake_select(message, choices, default=None):
@@ -59,7 +59,7 @@ def test_pick_sandbox_defaults_docker_when_unavailable(monkeypatch):
 # ---------- validation cache ----------
 
 def test_validation_cache_round_trip(tmp_path, monkeypatch):
-    from maverick_installer import wizard
+    from lightwork_installer import wizard
     monkeypatch.setattr(wizard, "CONFIG_DIR", tmp_path)
     monkeypatch.setattr(wizard, "VALIDATION_CACHE_PATH", tmp_path / "validation-cache.json")
     wizard._remember_validation("ANTHROPIC_API_KEY", "sk-ant-test", True, "ok")
@@ -68,7 +68,7 @@ def test_validation_cache_round_trip(tmp_path, monkeypatch):
 
 
 def test_validation_cache_miss_for_different_key(tmp_path, monkeypatch):
-    from maverick_installer import wizard
+    from lightwork_installer import wizard
     monkeypatch.setattr(wizard, "CONFIG_DIR", tmp_path)
     monkeypatch.setattr(wizard, "VALIDATION_CACHE_PATH", tmp_path / "validation-cache.json")
     wizard._remember_validation("ANTHROPIC_API_KEY", "sk-ant-a", True, "ok")
@@ -78,7 +78,7 @@ def test_validation_cache_miss_for_different_key(tmp_path, monkeypatch):
 def test_validation_cache_expires_after_ttl(tmp_path, monkeypatch):
     import time as _time
 
-    from maverick_installer import wizard
+    from lightwork_installer import wizard
     monkeypatch.setattr(wizard, "CONFIG_DIR", tmp_path)
     monkeypatch.setattr(wizard, "VALIDATION_CACHE_PATH", tmp_path / "validation-cache.json")
     wizard._remember_validation("OPENAI_API_KEY", "sk-x", True, "ok")
@@ -93,7 +93,7 @@ def test_validation_cache_expires_after_ttl(tmp_path, monkeypatch):
 def test_validation_cache_persists_at_chmod_600(tmp_path, monkeypatch):
     import stat as _stat
 
-    from maverick_installer import wizard
+    from lightwork_installer import wizard
     monkeypatch.setattr(wizard, "CONFIG_DIR", tmp_path)
     monkeypatch.setattr(wizard, "VALIDATION_CACHE_PATH", tmp_path / "validation-cache.json")
     wizard._remember_validation("ANTHROPIC_API_KEY", "sk-perm", True, "ok")
@@ -106,7 +106,7 @@ def test_validation_cache_persists_at_chmod_600(tmp_path, monkeypatch):
 
 
 def test_empty_key_never_caches(tmp_path, monkeypatch):
-    from maverick_installer import wizard
+    from lightwork_installer import wizard
     monkeypatch.setattr(wizard, "CONFIG_DIR", tmp_path)
     monkeypatch.setattr(wizard, "VALIDATION_CACHE_PATH", tmp_path / "validation-cache.json")
     wizard._remember_validation("ANTHROPIC_API_KEY", "", True, "ok")
@@ -117,7 +117,7 @@ def test_empty_key_never_caches(tmp_path, monkeypatch):
 # ---------- error UI panels ----------
 
 def test_error_helpers_dont_crash(capsys):
-    from maverick_installer import wizard
+    from lightwork_installer import wizard
     wizard.show_bad_key_error("ANTHROPIC_API_KEY", "API rejected the key")
     wizard.show_network_error("Anthropic", "ConnectError")
     wizard.show_install_failure(RuntimeError("disk full"))

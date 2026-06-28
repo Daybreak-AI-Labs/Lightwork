@@ -40,7 +40,7 @@ def _clean(monkeypatch):
 
 
 def test_minimax_is_priced_in_model_prices():
-    from maverick.llm import MODEL_PRICES
+    from lightwork.llm import MODEL_PRICES
     assert MINIMAX_ID in MODEL_PRICES
     in_rate, out_rate = MODEL_PRICES[MINIMAX_ID]
     # Cheap near-frontier: well under flagship rates, sane ordering.
@@ -51,8 +51,8 @@ def test_lookup_price_resolves_openrouter_spec():
     # The router emits "openrouter:vendor/model"; budget billing must resolve
     # it (splitting on the FIRST colon) to the MODEL_PRICES rate, not the
     # Sonnet fallback.
-    from maverick.budget import _FALLBACK_PRICE_IN, _lookup_price
-    from maverick.llm import MODEL_PRICES
+    from lightwork.budget import _FALLBACK_PRICE_IN, _lookup_price
+    from lightwork.llm import MODEL_PRICES
 
     priced = _lookup_price(MINIMAX_SPEC)
     assert priced is not None
@@ -61,7 +61,7 @@ def test_lookup_price_resolves_openrouter_spec():
 
 
 def test_minimax_in_router_cheap_tier():
-    from maverick.cost import router as cost_router
+    from lightwork.cost import router as cost_router
     rows = [
         r for r in cost_router._PRICING
         if r[0] == "openrouter" and r[1] == MINIMAX_ID
@@ -75,7 +75,7 @@ def test_router_considers_minimax_when_openrouter_configured(_clean, monkeypatch
     # cheap-tier role, so the router must pick an OpenRouter model.
     monkeypatch.setenv("MAVERICK_COST_ROUTING", "1")
     monkeypatch.setenv("OPENROUTER_API_KEY", "x")
-    from maverick.llm import model_for_role
+    from lightwork.llm import model_for_role
 
     got = model_for_role("summarizer")
     assert got.startswith("openrouter:"), got
@@ -85,6 +85,6 @@ def test_off_by_default_does_not_select_openrouter(_clean, monkeypatch):
     # Routing disabled (default): MiniMax is registered but never selected;
     # the static ROLE_MODELS default wins. Additive change, no behaviour drift.
     monkeypatch.setenv("OPENROUTER_API_KEY", "x")
-    from maverick.llm import ROLE_MODELS, model_for_role
+    from lightwork.llm import ROLE_MODELS, model_for_role
 
     assert model_for_role("summarizer") == ROLE_MODELS["summarizer"]

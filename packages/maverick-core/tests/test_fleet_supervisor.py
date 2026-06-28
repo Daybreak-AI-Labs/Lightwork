@@ -17,14 +17,14 @@ from click.testing import CliRunner
 
 
 def _cfg(monkeypatch, cfg):
-    monkeypatch.setattr("maverick.config.load_config", lambda *a, **k: cfg)
+    monkeypatch.setattr("lightwork.config.load_config", lambda *a, **k: cfg)
 
 
 # --- capability_for_role ---------------------------------------------------
 
 def test_capability_for_role_narrows_by_role(monkeypatch):
     _cfg(monkeypatch, {"roles": {"analyst": {"allow_tools": ["read_file", "search"]}}})
-    from maverick.capability import capability_for_role
+    from lightwork.capability import capability_for_role
     cap = capability_for_role("analyst", principal="agent:acme.bob")
     assert cap.principal == "agent:acme.bob"
     assert cap.permits("read_file") is True
@@ -37,7 +37,7 @@ def test_capability_for_role_cannot_escalate_past_acl(monkeypatch):
         "security": {"denied_tools": ["shell"]},
         "roles": {"power": {"allow_tools": ["shell", "read_file"]}},
     })
-    from maverick.capability import capability_for_role
+    from lightwork.capability import capability_for_role
     cap = capability_for_role("power", principal="agent:acme.p")
     assert cap.permits("shell") is False
     assert cap.permits("read_file") is True
@@ -46,7 +46,7 @@ def test_capability_for_role_cannot_escalate_past_acl(monkeypatch):
 def test_capability_for_role_unknown_role_is_rejected(monkeypatch):
     _cfg(monkeypatch, {"roles": {"analyst": {"allow_tools": ["read_file"]}}})
     import pytest
-    from maverick.capability import UnknownRoleError, capability_for_role
+    from lightwork.capability import UnknownRoleError, capability_for_role
 
     with pytest.raises(UnknownRoleError, match="undefined RBAC role"):
         capability_for_role("ghost", principal="agent:acme.g")
@@ -55,7 +55,7 @@ def test_capability_for_role_unknown_role_is_rejected(monkeypatch):
 def test_capability_for_role_empty_role_is_rejected(monkeypatch):
     _cfg(monkeypatch, {"roles": {"analyst": {"allow_tools": ["read_file"]}}})
     import pytest
-    from maverick.capability import UnknownRoleError, capability_for_role
+    from lightwork.capability import UnknownRoleError, capability_for_role
 
     with pytest.raises(UnknownRoleError, match="undefined RBAC role"):
         capability_for_role("", principal="agent:acme.g")
@@ -63,7 +63,7 @@ def test_capability_for_role_empty_role_is_rejected(monkeypatch):
 
 def test_capability_for_role_default_principal(monkeypatch):
     _cfg(monkeypatch, {"roles": {"analyst": {"allow_tools": ["read_file"]}}})
-    from maverick.capability import capability_for_role
+    from lightwork.capability import capability_for_role
     assert capability_for_role("analyst").principal == "agent"
 
 
@@ -72,12 +72,12 @@ def test_capability_for_role_default_principal(monkeypatch):
 def test_run_goal_in_thread_threads_capability_into_ctx(monkeypatch):
     """The capability handed to the runner reaches SwarmContext.capability,
     so the root agent runs least-privileged under it (no real LLM runs)."""
-    from maverick import budget as budget_mod
-    from maverick import llm as llm_mod
-    from maverick import orchestrator, runner, world_model
-    from maverick import sandbox as sandbox_mod
-    from maverick.capability import Capability
-    from maverick.swarm import SwarmContext
+    from lightwork import budget as budget_mod
+    from lightwork import llm as llm_mod
+    from lightwork import orchestrator, runner, world_model
+    from lightwork import sandbox as sandbox_mod
+    from lightwork.capability import Capability
+    from lightwork.swarm import SwarmContext
 
     captured: dict = {}
 
@@ -121,10 +121,10 @@ def test_run_goal_in_thread_threads_capability_into_ctx(monkeypatch):
 
 
 def test_run_goal_in_thread_closes_sandbox(monkeypatch):
-    from maverick import budget as budget_mod
-    from maverick import llm as llm_mod
-    from maverick import orchestrator, runner, world_model
-    from maverick import sandbox as sandbox_mod
+    from lightwork import budget as budget_mod
+    from lightwork import llm as llm_mod
+    from lightwork import orchestrator, runner, world_model
+    from lightwork import sandbox as sandbox_mod
 
     closed = {"sandbox": False, "world": False}
 
@@ -150,10 +150,10 @@ def test_run_goal_in_thread_closes_sandbox(monkeypatch):
 
 def test_run_goal_in_thread_default_capability_is_none(monkeypatch):
     """Default None == zero behaviour change: no capability reaches the run."""
-    from maverick import budget as budget_mod
-    from maverick import llm as llm_mod
-    from maverick import orchestrator, runner, world_model
-    from maverick import sandbox as sandbox_mod
+    from lightwork import budget as budget_mod
+    from lightwork import llm as llm_mod
+    from lightwork import orchestrator, runner, world_model
+    from lightwork import sandbox as sandbox_mod
 
     captured: dict = {}
 
@@ -189,7 +189,7 @@ def _make_fleet(monkeypatch, tmp_path):
             "engineer": {"allow_tools": ["read_file", "write_file"]},
         },
     })
-    from maverick.fleet import Fleet, FleetAgent, save_fleet
+    from lightwork.fleet import Fleet, FleetAgent, save_fleet
     save_fleet(Fleet(name="acme", owner="user:alice", agents=(
         FleetAgent("researcher", "analyst"),
         FleetAgent("coder", "engineer"),
@@ -208,9 +208,9 @@ def test_fleet_run_creates_goal_and_run_index(monkeypatch, tmp_path):
         seen["user_id"] = k.get("user_id")
         return "done"
 
-    monkeypatch.setattr("maverick.runner.run_goal_in_thread", fake_run)
+    monkeypatch.setattr("lightwork.runner.run_goal_in_thread", fake_run)
 
-    from maverick.cli import main
+    from lightwork.cli import main
     res = CliRunner().invoke(main, [
         "--db", str(db), "fleet", "run", "acme", "researcher",
         "Summarize the Q3 report",
@@ -224,7 +224,7 @@ def test_fleet_run_creates_goal_and_run_index(monkeypatch, tmp_path):
     assert seen["capability"].principal == "agent:acme.researcher"
 
     # A goal was created from the prompt...
-    from maverick.world_model import open_world
+    from lightwork.world_model import open_world
     w = open_world(db)
     try:
         g = w.get_goal(seen["goal_id"])
@@ -233,7 +233,7 @@ def test_fleet_run_creates_goal_and_run_index(monkeypatch, tmp_path):
     assert g is not None and g.title == "Summarize the Q3 report"
 
     # ...and recorded in the per-fleet run index, under the agent.
-    from maverick.fleet import load_runs, runs_path
+    from lightwork.fleet import load_runs, runs_path
     runs = load_runs("acme")
     assert len(runs) == 1
     assert runs[0]["agent"] == "researcher"
@@ -246,7 +246,7 @@ def test_fleet_run_rejects_undefined_role(monkeypatch, tmp_path):
     monkeypatch.delenv("MAVERICK_TENANT", raising=False)
     _cfg(monkeypatch, {"roles": {"analyst": {"allow_tools": ["read_file"]}}})
 
-    from maverick.fleet import Fleet, FleetAgent, save_fleet
+    from lightwork.fleet import Fleet, FleetAgent, save_fleet
     save_fleet(Fleet(name="acme", owner="user:alice", agents=(
         FleetAgent("ghost", "ghost"),
     )))
@@ -258,9 +258,9 @@ def test_fleet_run_rejects_undefined_role(monkeypatch, tmp_path):
         called = True
         return "done"
 
-    monkeypatch.setattr("maverick.runner.run_goal_in_thread", fake_run)
+    monkeypatch.setattr("lightwork.runner.run_goal_in_thread", fake_run)
 
-    from maverick.cli import main
+    from lightwork.cli import main
     res = CliRunner().invoke(main, [
         "--db", str(tmp_path / "w.db"), "fleet", "run", "acme", "ghost", "do it",
     ])
@@ -273,7 +273,7 @@ def test_fleet_create_rejects_undefined_role(monkeypatch, tmp_path):
     monkeypatch.setenv("HOME", str(tmp_path))
     _cfg(monkeypatch, {"roles": {"analyst": {"allow_tools": ["read_file"]}}})
 
-    from maverick.cli import main
+    from lightwork.cli import main
     res = CliRunner().invoke(main, [
         "fleet", "create", "acme", "--owner", "user:alice",
         "--agent", "ghost:ghost",
@@ -284,7 +284,7 @@ def test_fleet_create_rejects_undefined_role(monkeypatch, tmp_path):
 
 def test_fleet_run_missing_fleet(monkeypatch, tmp_path):
     monkeypatch.setenv("HOME", str(tmp_path))
-    from maverick.cli import main
+    from lightwork.cli import main
     res = CliRunner().invoke(main, [
         "--db", str(tmp_path / "w.db"), "fleet", "run", "ghost", "a", "do it",
     ])
@@ -294,9 +294,9 @@ def test_fleet_run_missing_fleet(monkeypatch, tmp_path):
 
 def test_fleet_run_missing_agent(monkeypatch, tmp_path):
     _make_fleet(monkeypatch, tmp_path)
-    monkeypatch.setattr("maverick.runner.run_goal_in_thread",
+    monkeypatch.setattr("lightwork.runner.run_goal_in_thread",
                         lambda *a, **k: "done")
-    from maverick.cli import main
+    from lightwork.cli import main
     res = CliRunner().invoke(main, [
         "--db", str(tmp_path / "w.db"), "fleet", "run", "acme", "nobody", "do it",
     ])
@@ -311,8 +311,8 @@ def test_fleet_status_lists_runs_and_denials(monkeypatch, tmp_path):
     db = tmp_path / "world.db"
 
     # Two recorded runs for the researcher, with real goals in the world DB.
-    from maverick.fleet import record_run
-    from maverick.world_model import open_world
+    from lightwork.fleet import record_run
+    from lightwork.world_model import open_world
     w = open_world(db)
     try:
         g1 = w.create_goal("first task")
@@ -326,11 +326,11 @@ def test_fleet_status_lists_runs_and_denials(monkeypatch, tmp_path):
 
     # One policy denial recorded against the researcher's principal (the tool
     # chokepoint records capability_denied; the status view counts it).
-    from maverick.audit import EventKind, record
+    from lightwork.audit import EventKind, record
     record(EventKind.CAPABILITY_DENIED, agent="researcher", goal_id=g1,
            principal="agent:acme.researcher", tool="shell")
 
-    from maverick.cli import main
+    from lightwork.cli import main
     res = CliRunner().invoke(main, ["--db", str(db), "fleet", "status", "acme"])
     assert res.exit_code == 0, res.output
     assert f"goal #{g1}: done" in res.output
@@ -342,8 +342,8 @@ def test_fleet_status_lists_runs_and_denials(monkeypatch, tmp_path):
 def test_fleet_status_json(monkeypatch, tmp_path):
     _make_fleet(monkeypatch, tmp_path)
     db = tmp_path / "world.db"
-    from maverick.fleet import record_run
-    from maverick.world_model import open_world
+    from lightwork.fleet import record_run
+    from lightwork.world_model import open_world
     w = open_world(db)
     try:
         gid = w.create_goal("task")
@@ -352,7 +352,7 @@ def test_fleet_status_json(monkeypatch, tmp_path):
         w.close()
     record_run("acme", "coder", gid)
 
-    from maverick.cli import main
+    from lightwork.cli import main
     res = CliRunner().invoke(main, [
         "--db", str(db), "fleet", "status", "acme", "--json",
     ])
@@ -367,7 +367,7 @@ def test_fleet_status_json(monkeypatch, tmp_path):
 
 def test_fleet_status_missing_fleet(monkeypatch, tmp_path):
     monkeypatch.setenv("HOME", str(tmp_path))
-    from maverick.cli import main
+    from lightwork.cli import main
     res = CliRunner().invoke(main, [
         "--db", str(tmp_path / "w.db"), "fleet", "status", "ghost",
     ])

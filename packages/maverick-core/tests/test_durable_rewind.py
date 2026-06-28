@@ -5,9 +5,9 @@ Exercises the checkpoint-manipulation mechanics directly against the world model
 """
 from __future__ import annotations
 
-from maverick import checkpoint as ckpt_mod
-from maverick.budget import Budget
-from maverick.world_model import WorldModel
+from lightwork import checkpoint as ckpt_mod
+from lightwork.budget import Budget
+from lightwork.world_model import WorldModel
 
 
 def _seed(world, goal_id, *, agent_id="orchestrator-0", episode_id=0, steps=5):

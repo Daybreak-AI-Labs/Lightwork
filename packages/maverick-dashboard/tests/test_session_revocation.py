@@ -3,7 +3,7 @@ monotonic epoch; any credential whose iat predates it is rejected."""
 from __future__ import annotations
 
 import pytest
-from maverick_dashboard import session_revocation as sr
+from lightwork_dashboard import session_revocation as sr
 
 
 @pytest.fixture(autouse=True)

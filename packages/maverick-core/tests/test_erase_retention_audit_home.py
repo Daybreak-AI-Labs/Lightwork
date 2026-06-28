@@ -10,15 +10,15 @@ reported "no audit dir". These pin that both now resolve the writer's dir.
 """
 from __future__ import annotations
 
-from maverick.audit import erase, retention
-from maverick.audit.writer import AuditLog
-from maverick.paths import data_dir
+from lightwork.audit import erase, retention
+from lightwork.audit.writer import AuditLog
+from lightwork.paths import data_dir
 
 
 def _seed(n_alice: int = 3) -> None:
     """Write a real signed audit chain at the active scope's audit dir."""
     log = AuditLog(data_dir("audit"), sign=True)
-    from maverick.audit.events import AuditEvent
+    from lightwork.audit.events import AuditEvent
     for i in range(n_alice):
         log.record(AuditEvent(ts=1.0 + i, kind="tool_call", agent="a", goal_id=1,
                               payload={"channel": "telegram", "user_id": "alice999",

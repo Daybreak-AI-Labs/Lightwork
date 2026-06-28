@@ -8,14 +8,14 @@ already breaks the whole deployment)."""
 from __future__ import annotations
 
 import pytest
-from maverick.safety import tool_acl
+from lightwork.safety import tool_acl
 
 
 @pytest.fixture
 def _broken_config(monkeypatch):
     def _boom():
         raise OSError("config.toml unreadable")
-    monkeypatch.setattr("maverick.config.load_config", _boom)
+    monkeypatch.setattr("lightwork.config.load_config", _boom)
 
 
 # ---- per-principal loaders -----------------------------------------------
@@ -70,7 +70,7 @@ def test_apply_to_registry_strips_all_when_restricted(_broken_config):
 
 
 def test_max_risk_fails_closed_to_tightest_when_restricted(_broken_config):
-    from maverick.safety.tool_risk import RISK_LEVELS, risk_rank
+    from lightwork.safety.tool_risk import RISK_LEVELS, risk_rank
     tightest = min(RISK_LEVELS, key=risk_rank)
     assert tool_acl.resolve_max_risk(channel="slack") == tightest
     assert tool_acl.resolve_max_risk(user_id="slack:U1") == tightest

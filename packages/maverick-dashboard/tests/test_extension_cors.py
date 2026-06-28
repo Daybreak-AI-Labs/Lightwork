@@ -20,13 +20,13 @@ PREFLIGHT_HEADERS = {
 
 
 def _client():
-    from maverick_dashboard.app import app
+    from lightwork_dashboard.app import app
     return TestClient(app)
 
 
 @pytest.fixture(autouse=True)
 def _isolated(tmp_path, monkeypatch):
-    from maverick import world_model
+    from lightwork import world_model
     monkeypatch.setattr(world_model, "DEFAULT_DB", tmp_path / "world.db")
     monkeypatch.delenv("MAVERICK_DASHBOARD_TOKEN", raising=False)
     monkeypatch.delenv("MAVERICK_DASHBOARD_ALLOW_EXTENSION", raising=False)
@@ -38,7 +38,7 @@ def _isolated(tmp_path, monkeypatch):
 
 def _patch_runner(monkeypatch):
     """Stop goal creation from actually calling a provider."""
-    import maverick.runner as runner_mod
+    import lightwork.runner as runner_mod
     calls = []
     monkeypatch.setattr(
         runner_mod, "run_goal_in_thread",
@@ -99,7 +99,7 @@ def test_gate_on_extension_post_creates_goal(monkeypatch):
 def test_gate_on_events_poll_gets_cors_header(monkeypatch):
     monkeypatch.setenv("MAVERICK_DASHBOARD_ALLOW_EXTENSION", "1")
     monkeypatch.setenv("MAVERICK_DASHBOARD_TOKEN", "sekret")
-    from maverick_dashboard._shared import _world
+    from lightwork_dashboard._shared import _world
     goal_id = _world().create_goal("t", "d")
     resp = _client().get(
         f"/api/v1/goals/{goal_id}/events",

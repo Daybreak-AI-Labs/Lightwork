@@ -6,7 +6,7 @@ path at the C layer in downstream consumers (and other control chars
 enable log/terminal injection).
 """
 import pytest
-from maverick.attachments import AttachmentRejected, store
+from lightwork.attachments import AttachmentRejected, store
 
 
 def test_rejects_null_byte_in_filename():

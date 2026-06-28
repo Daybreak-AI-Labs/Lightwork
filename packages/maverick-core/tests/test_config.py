@@ -4,7 +4,7 @@ from __future__ import annotations
 import tempfile
 from pathlib import Path
 
-from maverick.config import _interp, get_safety, load_config
+from lightwork.config import _interp, get_safety, load_config
 
 
 def test_missing_config_returns_empty_dict():
@@ -40,7 +40,7 @@ def test_unset_env_var_becomes_empty(monkeypatch):
 
 def test_config_cache_avoids_reparse_but_keeps_interp_live(tmp_path, monkeypatch):
     # Uses a benign [models] key so the literal isn't flagged by detect-secrets.
-    import maverick.config as cfg_mod
+    import lightwork.config as cfg_mod
     cfg_mod.reset_config_cache()
     path = tmp_path / "c.toml"
     path.write_text('[models]\nsummarizer = "${MAVERICK_CFG_TEST_VAL}"\n')
@@ -87,14 +87,14 @@ def test_load_config_with_models_section():
 
 
 def test_get_governed_connectors_defaults_off(monkeypatch):
-    import maverick.config as cfg_mod
+    import lightwork.config as cfg_mod
     monkeypatch.setattr(cfg_mod, "load_config", lambda *a, **k: {})
     gc = cfg_mod.get_governed_connectors()
     assert gc == {"enable": False, "connectors": [], "approver": ""}
 
 
 def test_get_governed_connectors_parses_list_and_csv(monkeypatch):
-    import maverick.config as cfg_mod
+    import lightwork.config as cfg_mod
     monkeypatch.setattr(cfg_mod, "load_config", lambda *a, **k: {
         "governed_connectors": {"enable": True, "connectors": ["salesforce", " servicenow "],
                                 "approver": "ops@corp"}})
@@ -139,7 +139,7 @@ def test_get_safety_preserves_constitution_rules(monkeypatch):
 def test_toml_cache_is_bounded(tmp_path, monkeypatch):
     """The parsed-TOML cache must not grow without bound across many distinct
     config paths (e.g. one per tenant). Oldest entries are evicted past the cap."""
-    from maverick import config as cfg
+    from lightwork import config as cfg
     cfg.reset_config_cache()
     monkeypatch.setattr(cfg, "_TOML_CACHE_MAX", 8)
     try:
@@ -153,7 +153,7 @@ def test_toml_cache_is_bounded(tmp_path, monkeypatch):
 
 
 def test_env_flag_tristate(monkeypatch):
-    from maverick.config import env_flag
+    from lightwork.config import env_flag
 
     for val in ("1", "true", "TRUE", "Yes", "on", " on "):
         monkeypatch.setenv("MAVERICK_X", val)

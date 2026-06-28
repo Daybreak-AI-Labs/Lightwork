@@ -27,7 +27,7 @@ def test_newsapi_key_goes_in_header_not_url(monkeypatch):
         return _Resp()
 
     monkeypatch.setattr(httpx, "get", fake_get)
-    from maverick.tools.newsapi_tool import _get
+    from lightwork.tools.newsapi_tool import _get
     _get("/top-headlines", {"country": "us"})
 
     assert "apiKey" not in captured["params"]
@@ -48,7 +48,7 @@ def test_serpapi_key_redacted_from_error_log(monkeypatch, caplog):
         )
 
     monkeypatch.setattr(httpx, "get", boom)
-    from maverick.tools.web_search import _try_serpapi
+    from lightwork.tools.web_search import _try_serpapi
     with caplog.at_level(logging.WARNING):
         out = _try_serpapi("hello", 5)
 

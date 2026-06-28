@@ -1,7 +1,7 @@
 """wal_contention: WAL concurrent-writer contention audit."""
 from __future__ import annotations
 
-from maverick.tools.wal_contention import wal_contention
+from lightwork.tools.wal_contention import wal_contention
 
 
 def _analyze(**kw):

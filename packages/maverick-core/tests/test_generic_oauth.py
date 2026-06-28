@@ -3,7 +3,7 @@ from __future__ import annotations
 
 from urllib.parse import parse_qs, urlsplit
 
-from maverick.tools.generic_oauth import generic_oauth
+from lightwork.tools.generic_oauth import generic_oauth
 
 
 def _run(**kw):

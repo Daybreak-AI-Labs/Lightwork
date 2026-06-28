@@ -39,7 +39,7 @@ import pytest
 
 z3 = pytest.importorskip("z3")
 
-from maverick.capability import _DENY_ALL, _narrow_globs  # noqa: E402
+from lightwork.capability import _DENY_ALL, _narrow_globs  # noqa: E402
 
 _S = z3.StringSort()
 _RE = z3.ReSort(_S)

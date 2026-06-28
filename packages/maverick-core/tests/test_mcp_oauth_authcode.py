@@ -11,8 +11,8 @@ import hashlib
 import urllib.parse
 
 import pytest
-from maverick.mcp_client import MCPServerSpec, StreamableHttpMCPClient
-from maverick.mcp_oauth import (
+from lightwork.mcp_client import MCPServerSpec, StreamableHttpMCPClient
+from lightwork.mcp_oauth import (
     AuthorizationCodeProvider,
     OAuthConfig,
     OAuthTokenProvider,
@@ -157,7 +157,7 @@ def test_client_authcode_flow_uses_authorization_code_provider(monkeypatch):
         calls.append((token_url, data))
         return {"access_token": "AT1", "refresh_token": "RT1", "expires_in": 9999999999}
 
-    monkeypatch.setattr("maverick.mcp_oauth._default_token_post", fake_post)
+    monkeypatch.setattr("lightwork.mcp_oauth._default_token_post", fake_post)
     spec = MCPServerSpec(
         name="s",
         url="https://h/mcp",

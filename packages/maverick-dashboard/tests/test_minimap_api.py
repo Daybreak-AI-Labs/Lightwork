@@ -3,24 +3,24 @@ from __future__ import annotations
 
 import pytest
 from fastapi.testclient import TestClient
-from maverick_dashboard.app import app
+from lightwork_dashboard.app import app
 
 client = TestClient(app)
 
 
 @pytest.fixture(autouse=True)
 def _isolated_world(tmp_path, monkeypatch):
-    from maverick import world_model
+    from lightwork import world_model
     monkeypatch.setattr(world_model, "DEFAULT_DB", tmp_path / "world.db")
-    from maverick_dashboard import api as api_mod
-    from maverick_dashboard import app as app_mod
+    from lightwork_dashboard import api as api_mod
+    from lightwork_dashboard import app as app_mod
     api_mod._world_cache.clear()
     app_mod._world_cache.clear()
     yield
 
 
 def _tree():
-    from maverick_dashboard.app import _world
+    from lightwork_dashboard.app import _world
     w = _world()
     root = w.create_goal("release", "")
     a = w.create_goal("changelog", "", parent_id=root)

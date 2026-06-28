@@ -26,7 +26,7 @@ def _make_git_repo(tmp_path: Path) -> Path:
 
 class TestParseBlocks:
     def test_single_block(self):
-        from maverick.edit_format import parse_blocks
+        from lightwork.edit_format import parse_blocks
         text = (
             "Here's the fix:\n"
             "foo.py\n"
@@ -43,7 +43,7 @@ class TestParseBlocks:
         assert blocks[0].replace == "new\n"
 
     def test_multiple_blocks_different_files(self):
-        from maverick.edit_format import parse_blocks
+        from lightwork.edit_format import parse_blocks
         text = (
             "a.py\n<<<<<<< SEARCH\nx\n=======\ny\n>>>>>>> REPLACE\n"
             "b.py\n<<<<<<< SEARCH\nm\n=======\nn\n>>>>>>> REPLACE\n"
@@ -54,7 +54,7 @@ class TestParseBlocks:
         assert blocks[1].path == "b.py"
 
     def test_empty_search_means_new_file(self):
-        from maverick.edit_format import parse_blocks
+        from lightwork.edit_format import parse_blocks
         text = (
             "new.py\n"
             "<<<<<<< SEARCH\n"
@@ -68,7 +68,7 @@ class TestParseBlocks:
         assert blocks[0].replace == "x = 1\n"
 
     def test_handles_crlf_input(self):
-        from maverick.edit_format import parse_blocks
+        from lightwork.edit_format import parse_blocks
         text = (
             "foo.py\r\n<<<<<<< SEARCH\r\nold\r\n=======\r\nnew\r\n>>>>>>> REPLACE\r\n"
         )
@@ -77,7 +77,7 @@ class TestParseBlocks:
         assert blocks[0].path == "foo.py"
 
     def test_strips_code_fences_before_path(self):
-        from maverick.edit_format import parse_blocks
+        from lightwork.edit_format import parse_blocks
         text = (
             "```python\nfoo.py\n```\n"
             "foo.py\n<<<<<<< SEARCH\nx\n=======\ny\n>>>>>>> REPLACE\n"
@@ -87,12 +87,12 @@ class TestParseBlocks:
         assert blocks[0].path == "foo.py"
 
     def test_no_blocks_returns_empty(self):
-        from maverick.edit_format import parse_blocks
+        from lightwork.edit_format import parse_blocks
         assert parse_blocks("just prose") == []
         assert parse_blocks("") == []
 
     def test_accepts_extra_marker_chars(self):
-        from maverick.edit_format import parse_blocks
+        from lightwork.edit_format import parse_blocks
         text = "foo.py\n<<<<<<<<< SEARCH\nx\n========\ny\n>>>>>>>>> REPLACE\n"
         blocks = parse_blocks(text)
         assert len(blocks) == 1
@@ -102,7 +102,7 @@ class TestParseBlocks:
 
 class TestApplyBlocks:
     def test_exact_match_applies(self, tmp_path):
-        from maverick.edit_format import SearchReplaceBlock, apply_blocks
+        from lightwork.edit_format import SearchReplaceBlock, apply_blocks
         repo = _make_git_repo(tmp_path)
         blk = SearchReplaceBlock(
             path="seed.py",
@@ -115,7 +115,7 @@ class TestApplyBlocks:
         assert (repo / "seed.py").read_text() == "def add(a, b):\n    return a + b + 0\n"
 
     def test_trailing_whitespace_drift_recovered(self, tmp_path):
-        from maverick.edit_format import SearchReplaceBlock, apply_blocks
+        from lightwork.edit_format import SearchReplaceBlock, apply_blocks
         repo = _make_git_repo(tmp_path)
         # File has trailing whitespace; model supplies trimmed.
         (repo / "seed.py").write_text("def add(a, b):   \n    return a + b   \n")
@@ -139,7 +139,7 @@ class TestApplyBlocks:
         # deleting the line *after* the matched block (the `.startswith`
         # verify masked it). The earlier drift test only had the block at
         # EOF, where the extra line is empty -- so the corruption hid.
-        from maverick.edit_format import SearchReplaceBlock, apply_blocks
+        from lightwork.edit_format import SearchReplaceBlock, apply_blocks
         repo = _make_git_repo(tmp_path)
         # Block to edit is followed by an unrelated line that must survive.
         (repo / "seed.py").write_text(
@@ -162,7 +162,7 @@ class TestApplyBlocks:
 
     def test_indent_norm_match_does_not_eat_following_line(self, tmp_path):
         # Same off-by-one shared by the indent-normalised fuzzy path.
-        from maverick.edit_format import SearchReplaceBlock, apply_blocks
+        from lightwork.edit_format import SearchReplaceBlock, apply_blocks
         repo = _make_git_repo(tmp_path)
         # Body indented one level deeper than the model's needle.
         (repo / "seed.py").write_text(
@@ -184,7 +184,7 @@ class TestApplyBlocks:
         assert "b = 3" in (repo / "seed.py").read_text()
 
     def test_no_match_reports_near_miss(self, tmp_path):
-        from maverick.edit_format import SearchReplaceBlock, apply_blocks
+        from lightwork.edit_format import SearchReplaceBlock, apply_blocks
         repo = _make_git_repo(tmp_path)
         blk = SearchReplaceBlock(
             path="seed.py",
@@ -196,7 +196,7 @@ class TestApplyBlocks:
         assert "did not match" in summary.results[0].reason
 
     def test_ambiguous_match_refuses(self, tmp_path):
-        from maverick.edit_format import SearchReplaceBlock, apply_blocks
+        from lightwork.edit_format import SearchReplaceBlock, apply_blocks
         repo = _make_git_repo(tmp_path)
         (repo / "seed.py").write_text("x = 1\nx = 1\n")
         blk = SearchReplaceBlock(path="seed.py", search="x = 1\n", replace="x = 2\n")
@@ -207,7 +207,7 @@ class TestApplyBlocks:
         assert (repo / "seed.py").read_text() == "x = 1\nx = 1\n"
 
     def test_new_file_via_empty_search(self, tmp_path):
-        from maverick.edit_format import SearchReplaceBlock, apply_blocks
+        from lightwork.edit_format import SearchReplaceBlock, apply_blocks
         repo = _make_git_repo(tmp_path)
         blk = SearchReplaceBlock(
             path="new_dir/new_file.py",
@@ -220,7 +220,7 @@ class TestApplyBlocks:
         assert (repo / "new_dir" / "new_file.py").read_text() == "x = 42\n"
 
     def test_atomic_rollback_on_partial_fail(self, tmp_path):
-        from maverick.edit_format import SearchReplaceBlock, apply_blocks
+        from lightwork.edit_format import SearchReplaceBlock, apply_blocks
         repo = _make_git_repo(tmp_path)
         original = (repo / "seed.py").read_text()
         blk_ok = SearchReplaceBlock(
@@ -239,7 +239,7 @@ class TestApplyBlocks:
         assert (repo / "seed.py").read_text() == original
 
     def test_path_traversal_blocked(self, tmp_path):
-        from maverick.edit_format import SearchReplaceBlock, apply_blocks
+        from lightwork.edit_format import SearchReplaceBlock, apply_blocks
         repo = _make_git_repo(tmp_path)
         blk = SearchReplaceBlock(
             path="../escape.py",
@@ -251,7 +251,7 @@ class TestApplyBlocks:
         assert "escape" in summary.results[0].reason
 
     def test_render_diff_after_apply(self, tmp_path):
-        from maverick.edit_format import (
+        from lightwork.edit_format import (
             SearchReplaceBlock,
             apply_blocks,
             render_diff,
@@ -273,7 +273,7 @@ class TestApplyBlocks:
         """Security: when `paths` is supplied, render_diff must not leak
         unrelated untracked files (scratch files, secrets, build artifacts).
         """
-        from maverick.edit_format import (
+        from lightwork.edit_format import (
             SearchReplaceBlock,
             apply_blocks,
             render_diff,
@@ -297,7 +297,7 @@ class TestApplyBlocks:
         """When `paths` includes a new file the caller created, the new
         file must still appear via intent-to-add.
         """
-        from maverick.edit_format import (
+        from lightwork.edit_format import (
             SearchReplaceBlock,
             apply_blocks,
             render_diff,
@@ -323,7 +323,7 @@ class TestApplyBlocks:
         """Security: prevent git pathspec-magic injection from model-supplied
         SEARCH/REPLACE paths such as `:(glob)*`.
         """
-        from maverick.edit_format import (
+        from lightwork.edit_format import (
             SearchReplaceBlock,
             apply_blocks,
             render_diff,
@@ -351,7 +351,7 @@ class TestApplyBlocks:
         """Backward-compat path: no `paths` -> diff tracked-file changes,
         skip untracked entirely (the secure default for salvage paths).
         """
-        from maverick.edit_format import (
+        from lightwork.edit_format import (
             SearchReplaceBlock,
             apply_blocks,
             render_diff,
@@ -375,7 +375,7 @@ class TestApplyBlocks:
 
 class TestRepairPrompt:
     def test_repair_prompt_includes_block_path_and_reason(self, tmp_path):
-        from maverick.edit_format import (
+        from lightwork.edit_format import (
             ApplyResult,
             SearchReplaceBlock,
             repair_prompt_for_failure,
@@ -396,7 +396,7 @@ class TestRepairPrompt:
 
 class TestSensitiveNearMiss:
     def test_sensitive_paths_do_not_include_near_miss_file_content(self, tmp_path):
-        from maverick.edit_format import SearchReplaceBlock, apply_blocks
+        from lightwork.edit_format import SearchReplaceBlock, apply_blocks
 
         repo = _make_git_repo(tmp_path)
         env_path = repo / ".env"
@@ -415,7 +415,7 @@ class TestSensitiveNearMiss:
         assert "sk-live-secret" not in res.near_miss_context
 
     def test_non_sensitive_paths_still_include_near_miss_context(self, tmp_path):
-        from maverick.edit_format import SearchReplaceBlock, apply_blocks
+        from lightwork.edit_format import SearchReplaceBlock, apply_blocks
 
         repo = _make_git_repo(tmp_path)
         (repo / "seed.py").write_text("def add(a, b):\n    return a + b\n", encoding="utf-8")

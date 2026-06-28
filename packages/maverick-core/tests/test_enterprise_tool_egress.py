@@ -2,20 +2,20 @@
 from __future__ import annotations
 
 import pytest
-from maverick.enterprise import egress_permitted, enterprise_egress_denial
+from lightwork.enterprise import egress_permitted, enterprise_egress_denial
 
 
 @pytest.fixture(autouse=True)
 def _clean(monkeypatch):
     monkeypatch.delenv("MAVERICK_ENTERPRISE", raising=False)
-    monkeypatch.setattr("maverick.config.load_config", lambda *a, **k: {})
+    monkeypatch.setattr("lightwork.config.load_config", lambda *a, **k: {})
 
 
 def _enterprise(monkeypatch, allowed=None):
     monkeypatch.setenv("MAVERICK_ENTERPRISE", "1")
     if allowed is not None:
         monkeypatch.setattr(
-            "maverick.config.load_config",
+            "lightwork.config.load_config",
             lambda *a, **k: {"enterprise": {"allowed_hosts": allowed}},
         )
 
@@ -60,7 +60,7 @@ def test_allow_listed_host_permitted_under_enterprise(monkeypatch):
 def test_http_fetch_blocks_egress_under_enterprise(monkeypatch):
     _enterprise(monkeypatch)
     monkeypatch.setenv("MAVERICK_FETCH_ALLOW_PRIVATE", "1")   # skip DNS, isolate the gate
-    from maverick.tools.http_fetch import _run_fetch
+    from lightwork.tools.http_fetch import _run_fetch
     out = _run_fetch({"url": "https://exfil.invalid/steal"})
     assert out.startswith("ERROR:") and "enterprise mode" in out and "boundary" in out
 
@@ -68,7 +68,7 @@ def test_http_fetch_blocks_egress_under_enterprise(monkeypatch):
 def test_http_fetch_enterprise_denial_happens_before_robots(monkeypatch):
     _enterprise(monkeypatch)
     monkeypatch.setenv("MAVERICK_FETCH_RESPECT_ROBOTS", "1")
-    from maverick.tools import http_fetch
+    from lightwork.tools import http_fetch
 
     def fail_if_called(_url):
         raise AssertionError("robots.txt was checked before enterprise denial")
@@ -80,7 +80,7 @@ def test_http_fetch_enterprise_denial_happens_before_robots(monkeypatch):
 
 def test_web_search_disabled_under_enterprise_without_allowlist(monkeypatch):
     _enterprise(monkeypatch)
-    from maverick.tools.web_search import _run_search
+    from lightwork.tools.web_search import _run_search
     out = _run_search({"query": "sensitive patient data"})
     assert "disabled in enterprise mode" in out
 
@@ -90,6 +90,6 @@ def test_web_search_allows_an_allow_listed_backend(monkeypatch):
     # the enterprise gate -- proving the gate permitted it rather than blocking all).
     _enterprise(monkeypatch, allowed=["api.tavily.com"])
     monkeypatch.delenv("TAVILY_API_KEY", raising=False)
-    from maverick.tools.web_search import _run_search
+    from lightwork.tools.web_search import _run_search
     out = _run_search({"query": "x"})
     assert "disabled in enterprise mode" not in out

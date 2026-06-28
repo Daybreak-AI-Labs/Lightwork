@@ -1,7 +1,7 @@
 """retention_check: data-retention / storage-limitation auditing."""
 from __future__ import annotations
 
-from maverick.tools.retention_check import retention_check
+from lightwork.tools.retention_check import retention_check
 
 
 def _c(records, policy, today=None):
@@ -76,7 +76,7 @@ def test_errors():
 
 
 def test_registered():
-    from maverick.tools import base_registry
+    from lightwork.tools import base_registry
 
     class _W:
         pass

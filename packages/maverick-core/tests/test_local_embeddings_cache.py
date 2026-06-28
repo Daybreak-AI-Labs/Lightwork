@@ -4,7 +4,7 @@ from __future__ import annotations
 import hashlib
 import json
 
-from maverick.tools.local_embeddings_cache import local_embeddings_cache
+from lightwork.tools.local_embeddings_cache import local_embeddings_cache
 
 
 def _run(**kw):

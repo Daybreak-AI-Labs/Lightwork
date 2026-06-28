@@ -11,7 +11,7 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 import container_terminal_solver as M  # noqa: E402
-from maverick.llm import LLMResponse, ToolCall  # noqa: E402
+from lightwork.llm import LLMResponse, ToolCall  # noqa: E402
 
 
 class FakeLLM:

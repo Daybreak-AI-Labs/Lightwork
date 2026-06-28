@@ -18,7 +18,7 @@ import concurrent.futures
 import threading
 from pathlib import Path
 
-from maverick.world_model import WorldModel
+from lightwork.world_model import WorldModel
 
 
 def test_create_goal_under_thread_storm(tmp_path: Path):

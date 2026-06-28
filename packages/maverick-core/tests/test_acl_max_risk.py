@@ -13,7 +13,7 @@ def _write_config(tmp_path, body: str) -> None:
     cfg_dir = tmp_path / ".maverick"
     cfg_dir.mkdir(exist_ok=True)
     (cfg_dir / "config.toml").write_text(body)
-    import maverick.config as cfg_mod
+    import lightwork.config as cfg_mod
     importlib.reload(cfg_mod)
 
 
@@ -28,7 +28,7 @@ class _FakeWorld:
 # ---------- risk classification ----------
 
 def test_tool_risk_defaults():
-    from maverick.safety.tool_risk import tool_risk
+    from lightwork.safety.tool_risk import tool_risk
     assert tool_risk("shell") == "high"
     assert tool_risk("code_exec") == "high"
     assert tool_risk("memory") == "high"
@@ -57,13 +57,13 @@ def test_tool_risk_config_override(tmp_path, monkeypatch):
 read_file = "high"
 "mcp_*" = "high"
 ''')
-    from maverick.safety.tool_risk import tool_risk
+    from lightwork.safety.tool_risk import tool_risk
     assert tool_risk("read_file") == "high"            # exact override
     assert tool_risk("mcp_github__list") == "high"     # glob override
 
 
 def test_risk_map_classifies_each_name():
-    from maverick.safety.tool_risk import risk_map
+    from lightwork.safety.tool_risk import risk_map
     m = risk_map(["shell", "read_file", "some_unknown_tool"])
     assert m == {"shell": "high", "read_file": "low", "some_unknown_tool": "medium"}
 
@@ -74,7 +74,7 @@ def test_risk_map_honors_config_override_loaded_once(tmp_path, monkeypatch):
 [security.tool_risk]
 read_file = "high"
 ''')
-    from maverick.safety.tool_risk import risk_map
+    from lightwork.safety.tool_risk import risk_map
     # The override is applied (loaded a single time for the whole sweep).
     assert risk_map(["read_file", "shell"]) == {"read_file": "high", "shell": "high"}
 
@@ -84,7 +84,7 @@ read_file = "high"
 def test_resolve_max_risk_unset_is_none(tmp_path, monkeypatch):
     monkeypatch.setenv("HOME", str(tmp_path))
     _write_config(tmp_path, '[security]\ndenied_tools = ["computer"]\n')
-    from maverick.safety.tool_acl import resolve_max_risk
+    from lightwork.safety.tool_acl import resolve_max_risk
     assert resolve_max_risk(user_id="tg:1") is None
 
 
@@ -97,7 +97,7 @@ max_risk = "high"
 [security.users."tg:42"]
 max_risk = "low"
 ''')
-    from maverick.safety.tool_acl import resolve_max_risk
+    from lightwork.safety.tool_acl import resolve_max_risk
     # Global high + user low -> low (most restrictive).
     assert resolve_max_risk(user_id="tg:42") == "low"
     # Without the user, only the global high applies.
@@ -113,11 +113,11 @@ def test_user_low_ceiling_drops_high_risk_tool(tmp_path, monkeypatch):
 [security.users."tg:42"]
 max_risk = "low"
 ''')
-    from maverick.tools import base_registry
+    from lightwork.tools import base_registry
     reg = base_registry(world=_FakeWorld(), sandbox=_FakeSandbox())
     assert "shell" in {t.name for t in reg.all()}
 
-    from maverick.safety.tool_acl import apply_to_registry
+    from lightwork.safety.tool_acl import apply_to_registry
     apply_to_registry(reg, user_id="tg:42")
     names = {t.name for t in reg.all()}
     assert "shell" not in names         # high-risk dropped
@@ -132,7 +132,7 @@ def test_medium_ceiling_drops_memory_tool(tmp_path, monkeypatch):
 [security]
 max_risk = "medium"
 ''')
-    from maverick.tools import base_registry
+    from lightwork.tools import base_registry
 
     reg = base_registry(world=_FakeWorld(), sandbox=_FakeSandbox())
     names = {t.name for t in reg.all()}
@@ -152,7 +152,7 @@ def test_medium_ceiling_drops_strategic_connectors(tmp_path, monkeypatch):
 [security]
 max_risk = "medium"
 ''')
-    from maverick.tools import base_registry
+    from lightwork.tools import base_registry
 
     reg = base_registry(world=_FakeWorld(), sandbox=_FakeSandbox())
     names = {t.name for t in reg.all()}
@@ -174,10 +174,10 @@ def test_user_high_ceiling_keeps_high_risk_tool(tmp_path, monkeypatch):
 [security.users."tg:42"]
 max_risk = "high"
 ''')
-    from maverick.tools import base_registry
+    from lightwork.tools import base_registry
     reg = base_registry(world=_FakeWorld(), sandbox=_FakeSandbox())
 
-    from maverick.safety.tool_acl import apply_to_registry
+    from lightwork.safety.tool_acl import apply_to_registry
     apply_to_registry(reg, user_id="tg:42")
     names = {t.name for t in reg.all()}
     assert "shell" in names
@@ -188,10 +188,10 @@ def test_no_ceiling_keeps_high_risk_tool(tmp_path, monkeypatch):
     """No max_risk anywhere -> no cap; shell is resolvable."""
     monkeypatch.setenv("HOME", str(tmp_path))
     _write_config(tmp_path, '[security]\ndenied_tools = ["computer"]\n')
-    from maverick.tools import base_registry
+    from lightwork.tools import base_registry
     reg = base_registry(world=_FakeWorld(), sandbox=_FakeSandbox())
 
-    from maverick.safety.tool_acl import apply_to_registry
+    from lightwork.safety.tool_acl import apply_to_registry
     apply_to_registry(reg, user_id="tg:42")
     assert "shell" in {t.name for t in reg.all()}
 
@@ -206,8 +206,8 @@ max_risk = "low"
 [security.tool_risk]
 "mcp_*" = "high"
 ''')
-    from maverick.safety.tool_acl import apply_to_registry
-    from maverick.tools import Tool, ToolRegistry
+    from lightwork.safety.tool_acl import apply_to_registry
+    from lightwork.tools import Tool, ToolRegistry
 
     reg = ToolRegistry()
     reg.register(Tool(
@@ -237,8 +237,8 @@ def test_medium_ceiling_drops_late_code_exec_tool(tmp_path, monkeypatch):
 [security]
 max_risk = "medium"
 ''')
-    from maverick.safety.tool_acl import apply_to_registry
-    from maverick.tools import Tool, ToolRegistry
+    from lightwork.safety.tool_acl import apply_to_registry
+    from lightwork.tools import Tool, ToolRegistry
 
     reg = ToolRegistry()
     apply_to_registry(reg)
@@ -264,8 +264,8 @@ max_risk = "low"
 [security.tool_risk]
 plugin_evil = "high"
 ''')
-    from maverick import plugins
-    from maverick.tools import Tool, base_registry
+    from lightwork import plugins
+    from lightwork.tools import Tool, base_registry
 
     def factory():
         return Tool(

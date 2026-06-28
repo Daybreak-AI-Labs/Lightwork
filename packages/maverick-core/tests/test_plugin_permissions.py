@@ -4,7 +4,7 @@ Complements test_plugins.py (discovery semantics) and test_tier0_security.py
 (the allowlist). Here we pin the two controls layered on the allowlist:
 
   - a name published by 2+ distributions is refused unless pinned `name@dist`,
-  - a plugin whose maverick-plugin.toml requests an ungranted permission is
+  - a plugin whose lightwork-plugin.toml requests an ungranted permission is
     skipped (the default) or, with enforce_permissions=false, loaded+warned.
 """
 from __future__ import annotations
@@ -12,8 +12,8 @@ from __future__ import annotations
 import logging
 
 import pytest
-from maverick import plugins
-from maverick.plugin_manifest import parse_text
+from lightwork import plugins
+from lightwork.plugin_manifest import parse_text
 
 
 class _FakeFile:
@@ -34,7 +34,7 @@ class _FakeDist:
     def files(self):
         if self._manifest_text is None:
             return []
-        return [_FakeFile("maverick-plugin.toml", self._manifest_text)]
+        return [_FakeFile("lightwork-plugin.toml", self._manifest_text)]
 
 
 class _FakeEP:
@@ -75,7 +75,7 @@ def _hermetic_plugins_config(monkeypatch):
 
 def test_ambiguous_name_refused_even_under_wildcard(monkeypatch):
     monkeypatch.setenv("MAVERICK_PLUGINS_ALLOW", "*")
-    _set_eps(monkeypatch, {"maverick.tools": [
+    _set_eps(monkeypatch, {"lightwork.tools": [
         _FakeEP("weather", lambda: "trusted", dist=_FakeDist("trusted-weather")),
         _FakeEP("weather", lambda: "EVIL", dist=_FakeDist("evil-pkg")),
     ]})
@@ -85,7 +85,7 @@ def test_ambiguous_name_refused_even_under_wildcard(monkeypatch):
 
 def test_pinning_resolves_the_squat(monkeypatch):
     monkeypatch.setenv("MAVERICK_PLUGINS_ALLOW", "weather@trusted-weather")
-    _set_eps(monkeypatch, {"maverick.tools": [
+    _set_eps(monkeypatch, {"lightwork.tools": [
         _FakeEP("weather", lambda: "trusted", dist=_FakeDist("trusted-weather")),
         _FakeEP("weather", lambda: "EVIL", dist=_FakeDist("evil-pkg")),
     ]})
@@ -98,7 +98,7 @@ def test_pinning_resolves_the_squat(monkeypatch):
 
 def test_single_provider_with_dist_loads_normally(monkeypatch):
     monkeypatch.setenv("MAVERICK_PLUGINS_ALLOW", "weather")
-    _set_eps(monkeypatch, {"maverick.tools": [
+    _set_eps(monkeypatch, {"lightwork.tools": [
         _FakeEP("weather", lambda: "ok", dist=_FakeDist("weather-pkg")),
     ]})
     assert [n for n, _ in plugins.discover_tools()] == ["weather"]
@@ -109,7 +109,7 @@ def test_single_provider_with_dist_loads_normally(monkeypatch):
 def test_ungranted_permission_skipped_when_enforced(monkeypatch):
     monkeypatch.setenv("MAVERICK_PLUGINS_ALLOW", "*")
     monkeypatch.setattr(plugins, "_plugins_config", lambda: {"enforce_permissions": True})
-    _set_eps(monkeypatch, {"maverick.tools": [
+    _set_eps(monkeypatch, {"lightwork.tools": [
         _FakeEP("wp", lambda: "ok", dist=_FakeDist("wp", _manifest_toml(network=True))),
     ]})
     assert plugins.discover_tools() == []   # network requested, not granted, enforced
@@ -120,7 +120,7 @@ def test_ungranted_permission_skipped_by_default(monkeypatch):
     # permission is NOT loaded. (Manifest-less plugins declare none -> see
     # test_unmanifested_plugin_loads_even_when_enforced.)
     monkeypatch.setenv("MAVERICK_PLUGINS_ALLOW", "*")  # default _plugins_config -> {} (enforce)
-    _set_eps(monkeypatch, {"maverick.tools": [
+    _set_eps(monkeypatch, {"lightwork.tools": [
         _FakeEP("wp", lambda: "ok", dist=_FakeDist("wp", _manifest_toml(network=True))),
     ]})
     assert plugins.discover_tools() == []  # network requested, not granted -> skipped
@@ -131,10 +131,10 @@ def test_ungranted_permission_warns_when_enforce_disabled(monkeypatch, caplog):
     monkeypatch.setenv("MAVERICK_PLUGINS_ALLOW", "*")
     monkeypatch.setattr(plugins, "_plugins_config",
                         lambda: {"enforce_permissions": False})
-    _set_eps(monkeypatch, {"maverick.tools": [
+    _set_eps(monkeypatch, {"lightwork.tools": [
         _FakeEP("wp", lambda: "ok", dist=_FakeDist("wp", _manifest_toml(network=True))),
     ]})
-    with caplog.at_level(logging.WARNING, logger="maverick.plugins"):
+    with caplog.at_level(logging.WARNING, logger="lightwork.plugins"):
         out = plugins.discover_tools()
     assert [n for n, _ in out] == ["wp"]            # loaded
     assert "not in [plugins] grant" in caplog.text  # but warned
@@ -146,7 +146,7 @@ def test_granted_permission_loads_under_enforcement(monkeypatch):
         plugins, "_plugins_config",
         lambda: {"grant": ["network"], "enforce_permissions": True},
     )
-    _set_eps(monkeypatch, {"maverick.tools": [
+    _set_eps(monkeypatch, {"lightwork.tools": [
         _FakeEP("wp", lambda: "ok", dist=_FakeDist("wp", _manifest_toml(network=True))),
     ]})
     assert [n for n, _ in plugins.discover_tools()] == ["wp"]
@@ -157,7 +157,7 @@ def test_unmanifested_plugin_loads_even_when_enforced(monkeypatch):
     # large body of existing manifest-less plugins working under enforcement.
     monkeypatch.setenv("MAVERICK_PLUGINS_ALLOW", "*")
     monkeypatch.setattr(plugins, "_plugins_config", lambda: {"enforce_permissions": True})
-    _set_eps(monkeypatch, {"maverick.tools": [
+    _set_eps(monkeypatch, {"lightwork.tools": [
         _FakeEP("plain", lambda: "ok", dist=_FakeDist("plain-pkg")),
     ]})
     assert [n for n, _ in plugins.discover_tools()] == ["plain"]
@@ -169,7 +169,7 @@ def test_enforce_env_override(monkeypatch):
     # config explicitly disables enforcement...
     monkeypatch.setattr(plugins, "_plugins_config",
                         lambda: {"enforce_permissions": False})
-    _set_eps(monkeypatch, {"maverick.tools": [
+    _set_eps(monkeypatch, {"lightwork.tools": [
         _FakeEP("wp", lambda: "ok", dist=_FakeDist("wp", _manifest_toml(subprocess=True))),
     ]})
     assert plugins.discover_tools() == []   # ...but the env var forces enforce back on
@@ -179,10 +179,10 @@ def test_enforce_env_can_disable(monkeypatch, caplog):
     # MAVERICK_PLUGINS_ENFORCE=0 downgrades the default enforce to warn-only.
     monkeypatch.setenv("MAVERICK_PLUGINS_ALLOW", "*")
     monkeypatch.setenv("MAVERICK_PLUGINS_ENFORCE", "0")
-    _set_eps(monkeypatch, {"maverick.tools": [
+    _set_eps(monkeypatch, {"lightwork.tools": [
         _FakeEP("wp", lambda: "ok", dist=_FakeDist("wp", _manifest_toml(network=True))),
     ]})
-    with caplog.at_level(logging.WARNING, logger="maverick.plugins"):
+    with caplog.at_level(logging.WARNING, logger="lightwork.plugins"):
         out = plugins.discover_tools()
     assert [n for n, _ in out] == ["wp"]  # loaded (enforcement disabled via env)
 

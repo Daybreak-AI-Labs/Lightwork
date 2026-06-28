@@ -9,7 +9,7 @@ from __future__ import annotations
 
 from unittest.mock import patch
 
-from maverick.safety import scan_remote_content
+from lightwork.safety import scan_remote_content
 
 # ---------- scan_remote_content ----------
 
@@ -93,7 +93,7 @@ def _run_fetch_with_body(body: bytes, monkeypatch, content_type="text/html"):
     import httpx
     resp = _FakeResponse(body, content_type=content_type)
     with patch.object(httpx, "Client", lambda *a, **k: _FakeClient(resp)):
-        from maverick.tools.http_fetch import http_fetch
+        from lightwork.tools.http_fetch import http_fetch
         return http_fetch().fn({"url": "https://example.com/", "render": "text"})
 
 
@@ -132,6 +132,6 @@ def test_http_fetch_scan_opt_out(monkeypatch):
     import httpx
     resp = _FakeResponse(malicious)
     with patch.object(httpx, "Client", lambda *a, **k: _FakeClient(resp)):
-        from maverick.tools.http_fetch import http_fetch
+        from lightwork.tools.http_fetch import http_fetch
         out = http_fetch().fn({"url": "https://example.com/", "render": "text"})
     assert "WARNING" not in out

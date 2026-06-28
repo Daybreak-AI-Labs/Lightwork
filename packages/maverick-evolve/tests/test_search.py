@@ -3,8 +3,8 @@ from __future__ import annotations
 import random
 
 import pytest
-from maverick_evolve.archive import Archive
-from maverick_evolve.search import evolve
+from lightwork_evolve.archive import Archive
+from lightwork_evolve.search import evolve
 
 
 @pytest.mark.asyncio

@@ -7,18 +7,18 @@ _ORIGIN = {"origin": "http://testserver"}
 
 
 def _client():
-    from maverick_dashboard.app import app
+    from lightwork_dashboard.app import app
     return TestClient(app)
 
 
 def _prep(monkeypatch, tmp_path):
-    from maverick import world_model
+    from lightwork import world_model
     monkeypatch.setattr(world_model, "DEFAULT_DB", tmp_path / "world.db")
     monkeypatch.delenv("MAVERICK_DASHBOARD_TOKEN", raising=False)
     monkeypatch.delenv("MAVERICK_PLUGINS_ALLOW", raising=False)
-    import maverick.runtime_overrides as ro
+    import lightwork.runtime_overrides as ro
     monkeypatch.setattr(ro, "OVERRIDES_PATH", tmp_path / "runtime-overrides.toml")
-    from maverick_dashboard import app as dash_app
+    from lightwork_dashboard import app as dash_app
     dash_app._world_cache.clear()
 
 
@@ -26,14 +26,14 @@ def test_plugins_page_has_toggle(monkeypatch, tmp_path):
     _prep(monkeypatch, tmp_path)
     # No third-party plugins are installed in the test env, so inject one so the
     # per-row toggle UI renders.
-    import maverick.plugins as plugins
+    import lightwork.plugins as plugins
 
     class _EP:
         name = "weather"
         value = "weather_plugin:tool"
 
     monkeypatch.setattr(plugins, "_entry_points",
-                        lambda group: [_EP()] if group == "maverick.tools" else [])
+                        lambda group: [_EP()] if group == "lightwork.tools" else [])
     r = _client().get("/plugins")
     assert r.status_code == 200
     assert 'action="/plugins/toggle"' in r.text
@@ -43,8 +43,8 @@ def test_plugins_page_has_toggle(monkeypatch, tmp_path):
 def test_enable_disable_reset_plugin(monkeypatch, tmp_path):
     _prep(monkeypatch, tmp_path)
     c = _client()
-    from maverick.plugins import _allowed_plugin_names
-    from maverick.runtime_overrides import plugin_overlay
+    from lightwork.plugins import _allowed_plugin_names
+    from lightwork.runtime_overrides import plugin_overlay
 
     r = c.post("/plugins/toggle", data={"name": "weather", "action": "enable"},
                headers=_ORIGIN, follow_redirects=False)

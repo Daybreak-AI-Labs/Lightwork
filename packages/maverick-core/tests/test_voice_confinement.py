@@ -6,7 +6,7 @@ from __future__ import annotations
 
 from pathlib import Path
 
-from maverick.tools.voice import _next_output_path, _run_speak, _run_transcribe
+from lightwork.tools.voice import _next_output_path, _run_speak, _run_transcribe
 
 
 class _SB:

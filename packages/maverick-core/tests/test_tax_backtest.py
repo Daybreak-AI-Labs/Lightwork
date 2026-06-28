@@ -9,9 +9,9 @@ from __future__ import annotations
 
 import json
 
-from maverick import tax_backtest as bt
-from maverick import tax_prep as t
-from maverick.cli import main
+from lightwork import tax_backtest as bt
+from lightwork import tax_prep as t
+from lightwork.cli import main
 
 
 def _draft(**kw):

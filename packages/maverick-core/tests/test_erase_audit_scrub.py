@@ -10,10 +10,10 @@ import os
 
 def test_erase_calls_audit_scrub_user(tmp_path, monkeypatch):
     os.environ.pop("MAVERICK_DB", None)
-    import maverick.audit as audit_mod
+    import lightwork.audit as audit_mod
     from click.testing import CliRunner
-    from maverick import cli as cli_mod
-    from maverick.world_model import WorldModel
+    from lightwork import cli as cli_mod
+    from lightwork.world_model import WorldModel
 
     scrub_calls: list = []
     monkeypatch.setattr(

@@ -22,9 +22,9 @@ next build. This file proves the trust/fleet layer, which is real today.
 from __future__ import annotations
 
 import pytest
-from maverick.bus_handoff import HandoffAuthority
-from maverick.capability import Capability
-from maverick.domain import builtin_dir, domain_capability, load_domains
+from lightwork.bus_handoff import HandoffAuthority
+from lightwork.capability import Capability
+from lightwork.domain import builtin_dir, domain_capability, load_domains
 
 # Money-movement / system-of-record tools the finance suite gates on a human.
 _MONEY_TOOLS = (

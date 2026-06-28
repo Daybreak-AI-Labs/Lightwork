@@ -1,7 +1,7 @@
 """whats_changed: human-readable before/after digest."""
 from __future__ import annotations
 
-from maverick.tools.whats_changed import whats_changed
+from lightwork.tools.whats_changed import whats_changed
 
 
 def _run(**kw):

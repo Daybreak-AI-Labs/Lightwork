@@ -12,7 +12,7 @@ import os
 import stat
 
 import pytest
-from maverick.skill import stats as skill_stats
+from lightwork.skill import stats as skill_stats
 
 
 @pytest.fixture

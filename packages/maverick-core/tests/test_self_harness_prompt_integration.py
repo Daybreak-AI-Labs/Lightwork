@@ -11,13 +11,13 @@ learned guidance was silently dropped from every prompt.
 from __future__ import annotations
 
 import pytest
-from maverick import self_harness as sh
-from maverick.agent import Agent
-from maverick.blackboard import Blackboard
-from maverick.budget import Budget
-from maverick.sandbox import LocalBackend
-from maverick.swarm import SwarmContext
-from maverick.world_model import WorldModel
+from lightwork import self_harness as sh
+from lightwork.agent import Agent
+from lightwork.blackboard import Blackboard
+from lightwork.budget import Budget
+from lightwork.sandbox import LocalBackend
+from lightwork.swarm import SwarmContext
+from lightwork.world_model import WorldModel
 
 _BLOCK = "Operating guidance learned for this model:\n- ALWAYS verify the export window first"
 _NEEDLE = "verify the export window first"
@@ -72,7 +72,7 @@ def test_cross_model_isolation_in_prompt(ctx, store, monkeypatch):
 
 def test_disabled_keeps_prompt_unchanged(ctx, store, monkeypatch):
     monkeypatch.delenv("MAVERICK_SELF_HARNESS", raising=False)
-    monkeypatch.setattr("maverick.config.load_config", dict)
+    monkeypatch.setattr("lightwork.config.load_config", dict)
     sh._write_addenda({"model-x": _BLOCK}, store)
     assert _NEEDLE not in _agent(ctx, "model-x").system     # off -> not injected
 

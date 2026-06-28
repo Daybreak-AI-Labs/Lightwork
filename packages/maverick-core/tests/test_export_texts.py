@@ -8,8 +8,8 @@ from __future__ import annotations
 
 import json
 
-from maverick.training import export_texts, rlaif
-from maverick.training.ingest import build_trajectory
+from lightwork.training import export_texts, rlaif
+from lightwork.training.ingest import build_trajectory
 
 
 def _record(brief_hash="abc123", ts=1700000000, goal_id=7):
@@ -65,7 +65,7 @@ def test_export_texts_builds_id_to_transcript_map():
 def test_export_texts_emits_rejected_draft_text():
     """The rejected draft text (carried in the record, not goal_events) is
     emitted under ingest's rejected id, so the DPO sidecar has BOTH halves."""
-    from maverick.training.ingest import rejected_trajectory_id
+    from lightwork.training.ingest import rejected_trajectory_id
     rec = _record("h1", 10, 1)
     rec["rejected_attempts"] = [{"text": "the weak first draft", "confidence": 0.6}]
     out = export_texts.export_texts([rec], lambda r: _events())
@@ -83,7 +83,7 @@ def test_export_texts_skips_rejected_without_text():
 def test_export_texts_emits_candidate_patches():
     """Best-of-N candidate patches export under ingest's candidate id, so the DPO
     sidecar carries both halves of a candidate pair."""
-    from maverick.training.ingest import candidate_trajectory_id
+    from lightwork.training.ingest import candidate_trajectory_id
     rec = _record("h1", 10, 1)
     rec["scored_candidates"] = [
         {"text": "PASS patch", "score": 1.0, "all_pass": True},

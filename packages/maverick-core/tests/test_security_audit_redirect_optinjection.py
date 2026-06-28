@@ -18,7 +18,7 @@ import pytest
 # ---------- 1. SSRF redirect revalidation ----------
 
 def test_guarded_urlopen_revalidates_redirect_to_metadata(monkeypatch):
-    from maverick.tools import http_fetch
+    from lightwork.tools import http_fetch
 
     handler = http_fetch._RevalidatingRedirectHandler(allow_http=True)
 
@@ -35,7 +35,7 @@ def test_guarded_urlopen_revalidates_redirect_to_metadata(monkeypatch):
 
 
 def test_guarded_urlopen_allows_redirect_to_public(monkeypatch):
-    from maverick.tools import http_fetch
+    from lightwork.tools import http_fetch
 
     monkeypatch.setattr(http_fetch, "is_blocked_host", lambda _h: False)
     handler = http_fetch._RevalidatingRedirectHandler(allow_http=False)
@@ -80,7 +80,7 @@ class _FakeSandbox:
 @pytest.fixture
 def _git_run(tmp_path):
     (tmp_path / ".git").mkdir()
-    from maverick.tools.git_advanced import _make_run
+    from lightwork.tools.git_advanced import _make_run
     return _make_run(_FakeSandbox(tmp_path))
 
 
@@ -110,7 +110,7 @@ def test_git_advanced_accepts_normal_ref(_git_run):
     "MY_CUSTOM_SECRET=hunter2supersecretvalue",
 ])
 def test_secret_detector_redacts_generic_env_secret(text):
-    from maverick.safety.secret_detector import redact
+    from lightwork.safety.secret_detector import redact
     out, matches = redact(text)
     assert matches and "[REDACTED:env_secret]" in out
     # The raw value must be gone; the var name stays for readability.
@@ -119,7 +119,7 @@ def test_secret_detector_redacts_generic_env_secret(text):
 
 
 def test_secret_detector_ignores_non_secret_assignment():
-    from maverick.safety.secret_detector import redact
+    from lightwork.safety.secret_detector import redact
     out, matches = redact("LOG_LEVEL=debug\nMAX_RETRIES=5")
     assert not matches and out == "LOG_LEVEL=debug\nMAX_RETRIES=5"
 
@@ -128,7 +128,7 @@ def test_secret_detector_ignores_non_secret_assignment():
 
 @pytest.mark.parametrize("cmd", ["rm -rf /", "rm -rf ~", "rm -rf $HOME"])
 def test_shield_scan_tool_call_blocks_destructive_rm(cmd):
-    from maverick_shield.guard import Shield
+    from lightwork_shield.guard import Shield
     sh = Shield(backend=Shield.BACKEND_BUILTIN)
     verdict = sh.scan_tool_call("shell", {"cmd": cmd})
     assert not verdict.allowed
@@ -136,6 +136,6 @@ def test_shield_scan_tool_call_blocks_destructive_rm(cmd):
 
 
 def test_shield_scan_tool_call_allows_benign():
-    from maverick_shield.guard import Shield
+    from lightwork_shield.guard import Shield
     sh = Shield(backend=Shield.BACKEND_BUILTIN)
     assert sh.scan_tool_call("shell", {"cmd": "ls -la /tmp"}).allowed

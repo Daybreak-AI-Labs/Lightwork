@@ -21,8 +21,8 @@ from __future__ import annotations
 
 import inspect
 
-import maverick.config as config
-import maverick.mcp_client as mc
+import lightwork.config as config
+import lightwork.mcp_client as mc
 import pytest
 
 

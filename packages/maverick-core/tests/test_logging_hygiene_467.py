@@ -14,8 +14,8 @@ import logging
 from pathlib import Path
 
 import pytest
-from maverick import health
-from maverick.logging_config import (
+from lightwork import health
+from lightwork.logging_config import (
     JsonFormatter,
     _goal_id_var,
     reset_goal_context,
@@ -121,7 +121,7 @@ def test_reset_tolerates_none_and_partial():
     reset_goal_context(None)
     tok = set_goal_context(conversation_id=7)  # only conversation set
     reset_goal_context(tok)
-    from maverick.logging_config import _conversation_id_var
+    from lightwork.logging_config import _conversation_id_var
     assert _conversation_id_var.get() is None
 
 

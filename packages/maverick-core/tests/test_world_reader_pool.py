@@ -5,7 +5,7 @@ from __future__ import annotations
 
 import threading
 
-from maverick.world_model import WorldModel
+from lightwork.world_model import WorldModel
 
 
 def test_reader_used_for_file_db(tmp_path):

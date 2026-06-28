@@ -1,5 +1,5 @@
 [package]
-name = "maverick-mcp-rust-example"
+name = "lightwork-mcp-rust-example"
 version = "0.1.0"
 edition = "2021"
 publish = false
@@ -14,5 +14,5 @@ tokio = { version = "1", features = ["macros", "rt-multi-thread", "process", "io
 anyhow = "1"
 
 [[bin]]
-name = "maverick-rust-client"
+name = "lightwork-rust-client"
 path = "src/main.rs"

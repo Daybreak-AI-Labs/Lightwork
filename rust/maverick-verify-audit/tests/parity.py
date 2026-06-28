@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
-"""Cross-language parity test: prove `maverick-verify-audit` (Rust) agrees with
-`maverick.audit.signing.verify_chain` (the Python source of truth) on the SAME
+"""Cross-language parity test: prove `lightwork-verify-audit` (Rust) agrees with
+`lightwork.audit.signing.verify_chain` (the Python source of truth) on the SAME
 signed audit file.
 
 It drives the REAL Python writer (`AuditSigner`) to mint a key + sign a
@@ -15,8 +15,8 @@ hash-chained NDJSON log, then:
   5. checks an entirely-unsigned log is reported UNVERIFIABLE (exit 1), matching
      the CLI semantics.
 
-Run directly:  python3 rust/maverick-verify-audit/tests/parity.py
-or via pytest:  python3 -m pytest rust/maverick-verify-audit/tests/parity.py
+Run directly:  python3 rust/lightwork-verify-audit/tests/parity.py
+or via pytest:  python3 -m pytest rust/lightwork-verify-audit/tests/parity.py
 
 The binary path can be pinned with MVK_VERIFY_BIN; otherwise it is built with
 `cargo build` (debug) on demand. If cargo is unavailable AND no prebuilt binary
@@ -35,11 +35,11 @@ from pathlib import Path
 
 # --- locate repo + make maverick importable ---------------------------------
 HERE = Path(__file__).resolve()
-# rust/maverick-verify-audit/tests/parity.py -> repo root is 3 levels up.
+# rust/lightwork-verify-audit/tests/parity.py -> repo root is 3 levels up.
 REPO_ROOT = HERE.parents[3]
 CRATE_DIR = HERE.parents[1]
 RUST_DIR = HERE.parents[2]
-sys.path.insert(0, str(REPO_ROOT / "packages" / "maverick-core"))
+sys.path.insert(0, str(REPO_ROOT / "packages" / "lightwork-core"))
 
 
 def _have_crypto() -> bool:
@@ -52,7 +52,7 @@ def _have_crypto() -> bool:
 
 
 def _build_or_find_binary() -> str | None:
-    """Return a path to the maverick-verify-audit binary, building if needed.
+    """Return a path to the lightwork-verify-audit binary, building if needed.
 
     Resolution order: MVK_VERIFY_BIN env -> existing target/debug artifact ->
     `cargo build`. Returns None if no binary is available (cargo absent and no
@@ -62,7 +62,7 @@ def _build_or_find_binary() -> str | None:
     if env_bin and Path(env_bin).exists():
         return env_bin
 
-    exe = "maverick-verify-audit" + (".exe" if os.name == "nt" else "")
+    exe = "lightwork-verify-audit" + (".exe" if os.name == "nt" else "")
     candidates = [
         RUST_DIR / "target" / "debug" / exe,
         RUST_DIR / "target" / "release" / exe,
@@ -75,7 +75,7 @@ def _build_or_find_binary() -> str | None:
         return None
     try:
         subprocess.run(
-            ["cargo", "build", "-p", "maverick-verify-audit"],
+            ["cargo", "build", "-p", "lightwork-verify-audit"],
             cwd=str(RUST_DIR),
             check=True,
             capture_output=True,
@@ -102,14 +102,14 @@ class ParityTest(unittest.TestCase):
         cls.binary = _build_or_find_binary()
         if cls.binary is None:
             raise unittest.SkipTest(
-                "maverick-verify-audit binary unavailable (no cargo + no prebuilt "
+                "lightwork-verify-audit binary unavailable (no cargo + no prebuilt "
                 "artifact); CI must compile the crate"
             )
 
     def _make_signed_log(self, tmp: Path, n_rows: int = 5):
         """Sign `n_rows` events with the REAL AuditSigner into tmp, isolating the
         key dir there. Returns (day_file, keys_dir, pubkey_hex)."""
-        from maverick.audit import signing
+        from lightwork.audit import signing
 
         keys_dir = tmp / "keys"
         keys_dir.mkdir()
@@ -142,7 +142,7 @@ class ParityTest(unittest.TestCase):
             day_file, keys_dir, pub_hex = self._make_signed_log(tmp)
 
             # Python verdict: intact.
-            from maverick.audit.signing import verify_chain
+            from lightwork.audit.signing import verify_chain
 
             self.assertEqual(verify_chain(day_file, pubkey_hex=pub_hex), [])
 
@@ -173,7 +173,7 @@ class ParityTest(unittest.TestCase):
             day_file.write_text("\n".join(lines) + "\n")
 
             # Python verdict: a break somewhere from this row on.
-            from maverick.audit.signing import verify_chain
+            from lightwork.audit.signing import verify_chain
 
             py_breaks = verify_chain(day_file, pubkey_hex=pub_hex)
             self.assertTrue(py_breaks, "Python should detect the tamper")
@@ -196,7 +196,7 @@ class ParityTest(unittest.TestCase):
             del lines[2]  # remove 3rd row -> row 4's prev_hash no longer matches
             day_file.write_text("\n".join(lines) + "\n")
 
-            from maverick.audit.signing import verify_chain
+            from lightwork.audit.signing import verify_chain
 
             py_breaks = verify_chain(day_file, pubkey_hex=pub_hex)
             self.assertTrue(any(b.reason == "chain_mismatch" for b in py_breaks))

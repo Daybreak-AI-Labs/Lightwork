@@ -1,12 +1,12 @@
-"""Verified agent-to-agent handoffs (maverick.handoff): mint + the verifier's
+"""Verified agent-to-agent handoffs (lightwork.handoff): mint + the verifier's
 trust checks. The verifier is the trust frame over agent_bus (transport) +
 capability (the grant): it must accept an authentic, scoped, fresh handoff and
 reject every tampering, escalation, impersonation, and replay path."""
 from __future__ import annotations
 
 import pytest
-from maverick.capability import Capability
-from maverick.handoff import (
+from lightwork.capability import Capability
+from lightwork.handoff import (
     Envelope,
     NonceCache,
     mint_handoff,
@@ -175,8 +175,8 @@ def test_grant_swap_to_a_different_recipient_is_caught():
     # A validly-signed envelope whose grant is for someone OTHER than the named
     # recipient must be refused (defense in depth behind the signature).
     priv, pub = _keypair()
-    from maverick.capability import sign_capability
-    from maverick.handoff import _sign_ed25519
+    from lightwork.capability import sign_capability
+    from lightwork.handoff import _sign_ed25519
     victim_grant = _grant(principal="agent:victim-9")
     env = Envelope(
         sender="agent:attacker-1", recipient="agent:attacker-1",
@@ -203,7 +203,7 @@ def test_mint_refuses_a_grant_not_minted_for_the_recipient():
 def test_fails_closed_without_cryptography(monkeypatch):
     # No crypto => the verifier cannot establish authenticity, so it must DENY
     # rather than fall open.
-    monkeypatch.setattr("maverick.audit.signing._have_crypto", lambda: False)
+    monkeypatch.setattr("lightwork.audit.signing._have_crypto", lambda: False)
     env = Envelope(
         sender="a", recipient="agent:b-1", task="t", grant=_grant(),
         nonce="n", ts=1000.0, grant_sig="x", issuer_pub="y", sig="z",

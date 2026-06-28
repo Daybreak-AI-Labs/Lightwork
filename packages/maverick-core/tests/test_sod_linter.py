@@ -2,8 +2,8 @@
 from __future__ import annotations
 
 import pytest
-from maverick.domain import DomainProfile
-from maverick.finance.sod_linter import (
+from lightwork.domain import DomainProfile
+from lightwork.finance.sod_linter import (
     SoDViolation,
     assert_no_conflicts,
     classify_duty,

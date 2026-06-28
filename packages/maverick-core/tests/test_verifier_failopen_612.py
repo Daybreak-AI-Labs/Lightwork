@@ -7,12 +7,12 @@ from __future__ import annotations
 from pathlib import Path
 
 import pytest
-from maverick.agent import Agent
-from maverick.blackboard import Blackboard
-from maverick.budget import Budget, BudgetExceeded
-from maverick.sandbox import LocalBackend
-from maverick.swarm import SwarmContext
-from maverick.world_model import WorldModel
+from lightwork.agent import Agent
+from lightwork.blackboard import Blackboard
+from lightwork.budget import Budget, BudgetExceeded
+from lightwork.sandbox import LocalBackend
+from lightwork.swarm import SwarmContext
+from lightwork.world_model import WorldModel
 
 
 @pytest.fixture
@@ -33,7 +33,7 @@ async def test_orchestrator_unverified_on_budget_reports_zero(
     async def _boom(*a, **k):
         raise BudgetExceeded("verifier out of budget")
 
-    monkeypatch.setattr("maverick.verifier.verify_final", _boom)
+    monkeypatch.setattr("lightwork.verifier.verify_final", _boom)
     fake_llm.scripted = [make_llm_response(text="FINAL: the answer")]
     orch = Agent(ctx=ctx, role="orchestrator", brief="do it", depth=0)
     result = await orch.run()
@@ -59,7 +59,7 @@ async def test_non_verifying_role_keeps_default_confidence(
 # --- #612 finding 4: cross-family verifier contract vs behavior ---
 
 def test_cross_family_fallback_requires_explicit_env(monkeypatch):
-    import maverick.verifier as v
+    import lightwork.verifier as v
     monkeypatch.delenv("MAVERICK_CROSS_FAMILY_VERIFIER", raising=False)
     # No implicit provider swap: returns None unless explicitly configured.
     assert v._cross_family_fallback("anthropic:claude-x") is None
@@ -68,7 +68,7 @@ def test_cross_family_fallback_requires_explicit_env(monkeypatch):
 
 
 def test_same_family_verifier_warns_once(monkeypatch, caplog):
-    import maverick.verifier as v
+    import lightwork.verifier as v
     monkeypatch.setattr(v, "_warned_same_family", False)
     with caplog.at_level("WARNING"):
         v._warn_same_family_verifier("anthropic:claude-x")

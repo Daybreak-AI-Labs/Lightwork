@@ -3,8 +3,8 @@ from __future__ import annotations
 
 import json
 
-from maverick.glance import build_glance
-from maverick.world_model import WorldModel
+from lightwork.glance import build_glance
+from lightwork.world_model import WorldModel
 
 
 def test_glance_shape_and_counts(tmp_path, monkeypatch):
@@ -37,7 +37,7 @@ def test_glance_bounded_last_result(tmp_path, monkeypatch):
 
 def test_glance_includes_spend(tmp_path, monkeypatch):
     monkeypatch.setenv("MAVERICK_HOME", str(tmp_path / "home"))
-    from maverick.quotas import UsageLedger
+    from lightwork.quotas import UsageLedger
     UsageLedger().record("user:a", 1.25, 1, 1)
     UsageLedger().record("user:b", 0.75, 1, 1)
     w = WorldModel(tmp_path / "world.db")
@@ -47,7 +47,7 @@ def test_glance_includes_spend(tmp_path, monkeypatch):
 
 def test_glance_scopes_goals_and_spend_by_owner(tmp_path, monkeypatch):
     monkeypatch.setenv("MAVERICK_HOME", str(tmp_path / "home"))
-    from maverick.quotas import UsageLedger
+    from lightwork.quotas import UsageLedger
 
     UsageLedger().record("user:alice", 1.25, 1, 1)
     UsageLedger().record("user:bob", 9.75, 1, 1)

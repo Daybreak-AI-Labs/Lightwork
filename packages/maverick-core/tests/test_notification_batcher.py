@@ -5,7 +5,7 @@ window/threshold policy is exercised without threads or real pushes.
 """
 from __future__ import annotations
 
-from maverick.notification_batcher import (
+from lightwork.notification_batcher import (
     BatchPolicy,
     NotificationBatcher,
     policy_from_config,
@@ -110,15 +110,15 @@ def test_policy_from_config_env(monkeypatch):
 def test_policy_off_by_default(monkeypatch):
     for k in ("MAVERICK_NOTIFY_BATCH_WINDOW", "MAVERICK_NOTIFY_BATCH_MAX"):
         monkeypatch.delenv(k, raising=False)
-    monkeypatch.setattr("maverick.config.load_config", dict)
+    monkeypatch.setattr("lightwork.config.load_config", dict)
     assert policy_from_config().is_active() is False
 
 
 # -- integration with notifications.notify() --------------------------------
 
 def test_notify_routes_to_batcher_when_active(monkeypatch):
-    import maverick.notification_batcher as nb
-    import maverick.notifications as N
+    import lightwork.notification_batcher as nb
+    import lightwork.notifications as N
 
     calls: list = []
 
@@ -133,8 +133,8 @@ def test_notify_routes_to_batcher_when_active(monkeypatch):
 
 
 def test_notify_sync_bypasses_batcher(monkeypatch):
-    import maverick.notification_batcher as nb
-    import maverick.notifications as N
+    import lightwork.notification_batcher as nb
+    import lightwork.notifications as N
 
     monkeypatch.setattr(nb, "shared", lambda: (_ for _ in ()).throw(
         AssertionError("batcher must not be consulted on a sync send")))
@@ -143,8 +143,8 @@ def test_notify_sync_bypasses_batcher(monkeypatch):
 
 
 def test_notify_high_priority_bypasses_batcher(monkeypatch):
-    import maverick.notification_batcher as nb
-    import maverick.notifications as N
+    import lightwork.notification_batcher as nb
+    import lightwork.notifications as N
 
     monkeypatch.setattr(nb, "shared", lambda: (_ for _ in ()).throw(
         AssertionError("high priority must bypass batching")))

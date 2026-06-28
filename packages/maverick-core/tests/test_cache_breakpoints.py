@@ -6,7 +6,7 @@ warm — while never exceeding the 4-breakpoint hard limit (system+tools+2).
 """
 from __future__ import annotations
 
-from maverick.providers.anthropic_provider import _add_messages_cache_breakpoint
+from lightwork.providers.anthropic_provider import _add_messages_cache_breakpoint
 
 
 def _marks(messages):

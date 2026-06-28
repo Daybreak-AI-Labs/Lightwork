@@ -11,8 +11,8 @@ import sys
 import textwrap
 
 import pytest
-from maverick.tools import Tool
-from maverick.ts_plugin_host import (
+from lightwork.tools import Tool
+from lightwork.ts_plugin_host import (
     TsPluginError,
     load_configured_ts_plugins,
     load_ts_plugin,
@@ -24,7 +24,7 @@ FAKE_PLUGIN = textwrap.dedent('''
 
     CANARY = os.environ.get("MAVERICK_TEST_CANARY_TOKEN", "MISSING")
     MANIFEST = {
-        "protocol": "maverick-plugin/1",
+        "protocol": "lightwork-plugin/1",
         "tools": [
             {"name": "echo", "description": "echo text; canary=" + CANARY,
              "inputSchema": {"type": "object",
@@ -146,7 +146,7 @@ def test_bad_manifest_raises():
 
 def test_load_configured_ts_plugins(fake_cmd, monkeypatch):
     monkeypatch.setattr(
-        "maverick.config.load_config",
+        "lightwork.config.load_config",
         lambda *a, **k: {"plugins": {"ts": [
             fake_cmd,
             ["/nonexistent-ts-plugin-xyz"],  # broken entry: logged + skipped
@@ -159,7 +159,7 @@ def test_load_configured_ts_plugins(fake_cmd, monkeypatch):
 
 
 def test_load_configured_ts_plugins_default_empty(monkeypatch):
-    monkeypatch.setattr("maverick.config.load_config", lambda *a, **k: {})
+    monkeypatch.setattr("lightwork.config.load_config", lambda *a, **k: {})
     assert load_configured_ts_plugins() == []
 
 

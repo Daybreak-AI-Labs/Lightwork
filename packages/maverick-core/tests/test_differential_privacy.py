@@ -1,7 +1,7 @@
 """differential_privacy: Laplace mechanism for (epsilon)-DP aggregates."""
 from __future__ import annotations
 
-from maverick.tools.differential_privacy import differential_privacy
+from lightwork.tools.differential_privacy import differential_privacy
 
 
 def _run(**kw):
@@ -55,7 +55,7 @@ def test_laplace_no_domain_error_when_random_returns_zero():
     # The argument must be floored just above 0 so the draw is always defined.
     import math
 
-    from maverick.tools.differential_privacy import _laplace
+    from lightwork.tools.differential_privacy import _laplace
 
     class _ZeroRng:
         def random(self):
@@ -66,7 +66,7 @@ def test_laplace_no_domain_error_when_random_returns_zero():
 
 
 def test_registered():
-    from maverick.tools import base_registry
+    from lightwork.tools import base_registry
 
     class _W:
         pass

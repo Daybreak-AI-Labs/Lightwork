@@ -12,10 +12,10 @@ suite mapping that made a mutator reachable would fail here.
 from __future__ import annotations
 
 import pytest
-from maverick.domain import available_domains, domain_capability, suite_for
-from maverick.domain_audit import _HOST_CONTROL
-from maverick.safety.tool_risk import tool_risk
-from maverick.tools.enterprise_connectors import (
+from lightwork.domain import available_domains, domain_capability, suite_for
+from lightwork.domain_audit import _HOST_CONTROL
+from lightwork.safety.tool_risk import tool_risk
+from lightwork.tools.enterprise_connectors import (
     PUBLIC_DATA_CONNECTOR_NAMES,
     data_connectors_for_suite,
 )

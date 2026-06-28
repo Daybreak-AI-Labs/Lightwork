@@ -3,8 +3,8 @@ extension's runs view consumes. Keep field names stable."""
 import json
 
 from click.testing import CliRunner
-from maverick import cli as cli_mod
-from maverick.world_model import WorldModel
+from lightwork import cli as cli_mod
+from lightwork.world_model import WorldModel
 
 # WorldModel takes a Path; the CLI's --db takes a string (main() wraps it
 # in Path itself). Seed via Path, invoke via str.

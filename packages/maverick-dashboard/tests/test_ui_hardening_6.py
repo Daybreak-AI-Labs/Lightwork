@@ -5,16 +5,16 @@ from fastapi.testclient import TestClient
 
 
 def _client():
-    from maverick_dashboard.app import app
+    from lightwork_dashboard.app import app
     return TestClient(app)
 
 
 def _audit_page(monkeypatch, tmp_path):
     monkeypatch.delenv("MAVERICK_DASHBOARD_TOKEN", raising=False)
     monkeypatch.setattr(
-        "maverick.audit.writer.DEFAULT_AUDIT_DIR", tmp_path / "audit",
+        "lightwork.audit.writer.DEFAULT_AUDIT_DIR", tmp_path / "audit",
     )
-    import maverick.audit.writer as w
+    import lightwork.audit.writer as w
     w._default = None
     return _client().get("/audit")
 

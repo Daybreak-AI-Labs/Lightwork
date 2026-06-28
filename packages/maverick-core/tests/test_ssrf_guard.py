@@ -11,14 +11,14 @@ import pytest
 
 
 def test_guarded_urlopen_blocks_loopback():
-    from maverick.tools.http_fetch import guarded_urlopen
+    from lightwork.tools.http_fetch import guarded_urlopen
     with pytest.raises(ValueError) as ei:
         guarded_urlopen("https://127.0.0.1/x", timeout=1)
     assert "SSRF" in str(ei.value) or "private/loopback" in str(ei.value)
 
 
 def test_guarded_urlopen_rejects_non_https_scheme():
-    from maverick.tools.http_fetch import guarded_urlopen
+    from lightwork.tools.http_fetch import guarded_urlopen
     with pytest.raises(ValueError) as ei:
         guarded_urlopen("http://example.com/x", timeout=1)
     assert "http" in str(ei.value).lower()
@@ -28,7 +28,7 @@ def test_guarded_urlopen_rejects_non_https_scheme():
 
 def test_guarded_urlopen_allow_http_still_blocks_private():
     """allow_http=True relaxes only the scheme gate, not the SSRF host gate."""
-    from maverick.tools.http_fetch import guarded_urlopen
+    from lightwork.tools.http_fetch import guarded_urlopen
     with pytest.raises(ValueError) as ei:
         guarded_urlopen("http://127.0.0.1/x", timeout=1, allow_http=True)
     # The SSRF message, not the "insecure http" one -> scheme gate passed.
@@ -36,7 +36,7 @@ def test_guarded_urlopen_allow_http_still_blocks_private():
 
 
 def test_guarded_urlopen_allows_public_host(monkeypatch):
-    from maverick.tools import http_fetch
+    from lightwork.tools import http_fetch
 
     seen = {}
 
@@ -56,13 +56,13 @@ def test_guarded_urlopen_allows_public_host(monkeypatch):
 
 
 def test_skill_fetch_url_refuses_private_host():
-    from maverick.skills import _fetch_url
+    from lightwork.skills import _fetch_url
     with pytest.raises(ValueError):
         _fetch_url("https://127.0.0.1/SKILL.md")
 
 
 def test_catalog_index_blocked_host_degrades_to_none(tmp_path, monkeypatch):
-    from maverick import catalog
+    from lightwork import catalog
     # Keep any cache lookups/writes off the real ~/.maverick dir.
     monkeypatch.setattr(catalog, "_cache_path", lambda url: tmp_path / "idx.json")
     # A loopback index URL is refused by the guard; the fetch degrades to
@@ -84,13 +84,13 @@ def _gai(*ips):
 
 
 def test_resolve_pinned_returns_ip_for_public(monkeypatch):
-    from maverick.tools import http_fetch
+    from lightwork.tools import http_fetch
     monkeypatch.setattr(http_fetch.socket, "getaddrinfo", _gai("93.184.216.34"))
     assert http_fetch._resolve_pinned("example.com") == "93.184.216.34"
 
 
 def test_resolve_pinned_blocks_loopback(monkeypatch):
-    from maverick.tools import http_fetch
+    from lightwork.tools import http_fetch
     monkeypatch.setattr(http_fetch.socket, "getaddrinfo", _gai("127.0.0.1"))
     with pytest.raises(ValueError, match="blocked address"):
         http_fetch._resolve_pinned("evil.example")
@@ -99,7 +99,7 @@ def test_resolve_pinned_blocks_loopback(monkeypatch):
 def test_resolve_pinned_blocks_if_any_resolved_addr_is_private(monkeypatch):
     """A rebind set where one record is public and another is the metadata IP
     must be refused — every address is validated, not just the first."""
-    from maverick.tools import http_fetch
+    from lightwork.tools import http_fetch
     monkeypatch.setattr(
         http_fetch.socket, "getaddrinfo", _gai("93.184.216.34", "169.254.169.254"),
     )
@@ -110,7 +110,7 @@ def test_resolve_pinned_blocks_if_any_resolved_addr_is_private(monkeypatch):
 def test_resolve_pinned_fails_closed_on_resolution_error(monkeypatch):
     import socket as _s
 
-    from maverick.tools import http_fetch
+    from lightwork.tools import http_fetch
 
     def _boom(*a, **k):
         raise _s.gaierror("name resolution failed")
@@ -121,7 +121,7 @@ def test_resolve_pinned_fails_closed_on_resolution_error(monkeypatch):
 
 
 def test_resolve_pinned_override_returns_host_unchanged(monkeypatch):
-    from maverick.tools import http_fetch
+    from lightwork.tools import http_fetch
     monkeypatch.setenv("MAVERICK_FETCH_ALLOW_PRIVATE", "1")
     # No resolution happens under the override; the hostname passes through.
     assert http_fetch._resolve_pinned("127.0.0.1") == "127.0.0.1"
@@ -131,7 +131,7 @@ def test_resolve_pinned_override_returns_host_unchanged(monkeypatch):
 def test_pinned_connection_opens_socket_to_validated_ip(monkeypatch):
     """The socket is opened to the pinned IP, but self.host (Host header / SNI
     / cert verification) stays the real hostname."""
-    from maverick.tools import http_fetch
+    from lightwork.tools import http_fetch
 
     captured = {}
 

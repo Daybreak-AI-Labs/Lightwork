@@ -32,7 +32,7 @@ def _real_home() -> Path:
 
 
 def test_world_model_default_db_is_isolated():
-    from maverick import world_model
+    from lightwork import world_model
 
     assert not str(world_model.DEFAULT_DB).startswith(str(_real_home())), (
         "world_model.DEFAULT_DB points into the real home -- the root "
@@ -42,8 +42,8 @@ def test_world_model_default_db_is_isolated():
 
 
 def test_import_frozen_path_constants_are_isolated():
-    from maverick import self_learning, skills
-    from maverick.skill import stats as skill_stats
+    from lightwork import self_learning, skills
+    from lightwork.skill import stats as skill_stats
 
     real = str(_real_home())
     frozen = {

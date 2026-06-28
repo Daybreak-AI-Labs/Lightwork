@@ -4,8 +4,8 @@ from __future__ import annotations
 import asyncio
 
 import pytest
-from maverick import tool_reliability
-from maverick.tools import Tool, ToolRegistry
+from lightwork import tool_reliability
+from lightwork.tools import Tool, ToolRegistry
 
 
 @pytest.fixture(autouse=True)

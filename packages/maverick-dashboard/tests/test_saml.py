@@ -9,11 +9,11 @@ live IdP. (A real Okta/Entra round-trip still needs certifying separately.)
 
 from __future__ import annotations
 
-import maverick_dashboard.saml as saml_mod
+import lightwork_dashboard.saml as saml_mod
 import pytest
 from fastapi.testclient import TestClient
-from maverick.web_session import verify_session
-from maverick_dashboard.app import app
+from lightwork.web_session import verify_session
+from lightwork_dashboard.app import app
 
 SECRET = "saml-unit-session-secret"  # pragma: allowlist secret
 
@@ -104,7 +104,7 @@ def test_mint_session_roundtrips_through_shared_verifier():
 
 
 def test_mint_session_after_revocation_has_fresh_iat(monkeypatch, tmp_path):
-    from maverick_dashboard import session_revocation as sr
+    from lightwork_dashboard import session_revocation as sr
 
     monkeypatch.setenv("HOME", str(tmp_path))
     monkeypatch.setenv("MAVERICK_HOME", str(tmp_path))
@@ -238,7 +238,7 @@ def test_acs_records_persistent_nameid_for_scim_revocation(_enabled, monkeypatch
     deprovision can only reach the live SAML session if the ACS recorded the
     NameID against the user's email/UPN in the subject directory. Without that
     recording, ``subs_for([email])`` is empty and the session survives."""
-    from maverick_dashboard import subject_directory as sd
+    from lightwork_dashboard import subject_directory as sd
 
     monkeypatch.setenv("HOME", str(tmp_path))
     monkeypatch.setenv("MAVERICK_HOME", str(tmp_path))
@@ -266,7 +266,7 @@ def test_acs_records_persistent_nameid_for_scim_revocation(_enabled, monkeypatch
 def test_record_session_subject_skips_when_no_email_attr(_enabled, monkeypatch, tmp_path):
     """With no email/UPN attribute the NameID is still recorded under itself
     (covers an email-format NameID that IS the SCIM identifier)."""
-    from maverick_dashboard import subject_directory as sd
+    from lightwork_dashboard import subject_directory as sd
 
     monkeypatch.setenv("HOME", str(tmp_path))
     monkeypatch.setenv("MAVERICK_HOME", str(tmp_path))

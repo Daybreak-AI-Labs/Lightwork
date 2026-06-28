@@ -4,8 +4,8 @@ from __future__ import annotations
 import types
 
 from fastapi.testclient import TestClient
-from maverick_dashboard import app as app_mod
-from maverick_dashboard.app import app
+from lightwork_dashboard import app as app_mod
+from lightwork_dashboard.app import app
 
 client = TestClient(app)
 

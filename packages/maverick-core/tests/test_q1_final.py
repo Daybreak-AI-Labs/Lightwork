@@ -20,8 +20,8 @@ def test_openai_provider_records_cache_read_tokens():
         from openai import OpenAI  # noqa: F401
     except ImportError:
         pytest.skip("openai SDK not installed")
-    from maverick.budget import Budget
-    from maverick.providers.openai_provider import OpenAIClient
+    from lightwork.budget import Budget
+    from lightwork.providers.openai_provider import OpenAIClient
 
     # Build a fake response shape matching the SDK's pydantic model.
     fake_choice = MagicMock()
@@ -56,8 +56,8 @@ def test_openai_provider_records_deepseek_cache_hit_tokens():
         from openai import OpenAI  # noqa: F401
     except ImportError:
         pytest.skip("openai SDK not installed")
-    from maverick.budget import Budget
-    from maverick.providers.openai_provider import OpenAIClient
+    from lightwork.budget import Budget
+    from lightwork.providers.openai_provider import OpenAIClient
 
     fake_choice = MagicMock()
     fake_choice.message.content = "hi"
@@ -89,8 +89,8 @@ def test_openai_provider_no_cache_data_records_full_input():
         from openai import OpenAI  # noqa: F401
     except ImportError:
         pytest.skip("openai SDK not installed")
-    from maverick.budget import Budget
-    from maverick.providers.openai_provider import OpenAIClient
+    from lightwork.budget import Budget
+    from lightwork.providers.openai_provider import OpenAIClient
 
     fake_choice = MagicMock()
     fake_choice.message.content = "hi"
@@ -144,7 +144,7 @@ def small_repo(tmp_path):
 
 
 def test_dep_graph_summary(small_repo):
-    from maverick.tools.dep_graph import dep_graph
+    from lightwork.tools.dep_graph import dep_graph
 
     class _Sandbox:
         workdir = str(small_repo)
@@ -158,7 +158,7 @@ def test_dep_graph_summary(small_repo):
 
 
 def test_dep_graph_import_graph(small_repo):
-    from maverick.tools.dep_graph import dep_graph
+    from lightwork.tools.dep_graph import dep_graph
 
     class _Sandbox:
         workdir = str(small_repo)
@@ -171,7 +171,7 @@ def test_dep_graph_import_graph(small_repo):
 
 
 def test_dep_graph_callers(small_repo):
-    from maverick.tools.dep_graph import dep_graph
+    from lightwork.tools.dep_graph import dep_graph
 
     class _Sandbox:
         workdir = str(small_repo)
@@ -182,7 +182,7 @@ def test_dep_graph_callers(small_repo):
 
 
 def test_dep_graph_unknown_view():
-    from maverick.tools.dep_graph import dep_graph
+    from lightwork.tools.dep_graph import dep_graph
 
     class _Sandbox:
         workdir = "."
@@ -210,7 +210,7 @@ def ast_workdir(tmp_path):
 
 
 def test_ast_edit_info(ast_workdir):
-    from maverick.tools.ast_edit import ast_edit
+    from lightwork.tools.ast_edit import ast_edit
 
     class _Sandbox:
         workdir = str(ast_workdir)
@@ -222,7 +222,7 @@ def test_ast_edit_info(ast_workdir):
 
 
 def test_ast_edit_rename_symbol(ast_workdir):
-    from maverick.tools.ast_edit import ast_edit
+    from lightwork.tools.ast_edit import ast_edit
 
     class _Sandbox:
         workdir = str(ast_workdir)
@@ -240,7 +240,7 @@ def test_ast_edit_rename_symbol(ast_workdir):
 
 
 def test_ast_edit_rename_rejects_invalid_identifier(ast_workdir):
-    from maverick.tools.ast_edit import ast_edit
+    from lightwork.tools.ast_edit import ast_edit
 
     class _Sandbox:
         workdir = str(ast_workdir)
@@ -255,7 +255,7 @@ def test_ast_edit_rename_rejects_invalid_identifier(ast_workdir):
 
 
 def test_ast_edit_add_import_idempotent(ast_workdir):
-    from maverick.tools.ast_edit import ast_edit
+    from lightwork.tools.ast_edit import ast_edit
 
     class _Sandbox:
         workdir = str(ast_workdir)
@@ -274,7 +274,7 @@ def test_ast_edit_add_import_idempotent(ast_workdir):
 
 
 def test_ast_edit_remove_symbol(ast_workdir):
-    from maverick.tools.ast_edit import ast_edit
+    from lightwork.tools.ast_edit import ast_edit
 
     class _Sandbox:
         workdir = str(ast_workdir)
@@ -290,7 +290,7 @@ def test_ast_edit_remove_symbol(ast_workdir):
 
 
 def test_ast_edit_dry_run_does_not_write(ast_workdir):
-    from maverick.tools.ast_edit import ast_edit
+    from lightwork.tools.ast_edit import ast_edit
 
     class _Sandbox:
         workdir = str(ast_workdir)
@@ -307,7 +307,7 @@ def test_ast_edit_dry_run_does_not_write(ast_workdir):
 
 
 def test_ast_edit_rejects_path_traversal(ast_workdir):
-    from maverick.tools.ast_edit import ast_edit
+    from lightwork.tools.ast_edit import ast_edit
 
     class _Sandbox:
         workdir = str(ast_workdir)
@@ -322,7 +322,7 @@ def test_ast_edit_rejects_path_traversal(ast_workdir):
 
 def test_world_model_v8_indices_present(tmp_path):
     """A fresh world model should have all v8 indices."""
-    from maverick.world_model import WorldModel
+    from lightwork.world_model import WorldModel
     wm = WorldModel(tmp_path / "wm.sqlite")
     try:
         names = [
@@ -358,7 +358,7 @@ def test_world_model_indexes_doc_exists():
 
 def test_wizard_resume_loads_partial_state(tmp_path, monkeypatch):
     monkeypatch.setenv("HOME", str(tmp_path))
-    from maverick_installer import wizard
+    from lightwork_installer import wizard
 
     cfg_dir = tmp_path / ".maverick"
     cfg_dir.mkdir()
@@ -387,7 +387,7 @@ def test_wizard_resume_loads_partial_state(tmp_path, monkeypatch):
 def test_wizard_run_accepts_resume_flag():
     import inspect
 
-    from maverick_installer.wizard import run
+    from lightwork_installer.wizard import run
     sig = inspect.signature(run)
     assert "resume" in sig.parameters
     assert sig.parameters["resume"].default is False
@@ -395,7 +395,7 @@ def test_wizard_run_accepts_resume_flag():
 
 def test_wizard_partial_state_round_trip(tmp_path, monkeypatch):
     monkeypatch.setenv("HOME", str(tmp_path))
-    from maverick_installer import wizard
+    from lightwork_installer import wizard
 
     cfg_dir = tmp_path / ".maverick"
     wizard.CONFIG_DIR = cfg_dir
@@ -411,7 +411,7 @@ def test_wizard_partial_state_round_trip(tmp_path, monkeypatch):
 # ---------- dep_graph + ast_edit registered ----------
 
 def test_q1_final_tools_registered():
-    from maverick.tools import base_registry
+    from lightwork.tools import base_registry
 
     class _FakeSandbox:
         workdir = "."

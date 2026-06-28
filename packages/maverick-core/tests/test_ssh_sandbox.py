@@ -7,8 +7,8 @@ import subprocess
 from pathlib import Path
 
 import pytest
-from maverick.sandbox import build_sandbox
-from maverick.sandbox.ssh import SSHBackend
+from lightwork.sandbox import build_sandbox
+from lightwork.sandbox.ssh import SSHBackend
 
 
 def _patch_ssh_ok(monkeypatch, run_recorder=None):
@@ -154,7 +154,7 @@ def test_factory_selects_ssh_backend(monkeypatch):
     calls = []
     _patch_ssh_ok(monkeypatch, calls)
 
-    from maverick import config as config_mod
+    from lightwork import config as config_mod
 
     monkeypatch.setattr(config_mod, "get_sandbox", lambda: {"backend": "ssh", "timeout": 99})
     monkeypatch.setattr(config_mod, "load_config", lambda: {
@@ -176,7 +176,7 @@ def test_factory_selects_ssh_backend(monkeypatch):
 
 
 def test_factory_ssh_without_host_raises(monkeypatch):
-    from maverick import config as config_mod
+    from lightwork import config as config_mod
 
     monkeypatch.setattr(config_mod, "get_sandbox", lambda: {"backend": "ssh"})
     monkeypatch.setattr(config_mod, "load_config", lambda: {"sandbox": {"backend": "ssh"}})

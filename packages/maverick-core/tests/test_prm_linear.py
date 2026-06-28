@@ -7,14 +7,14 @@ and fails OPEN to the heuristic on a missing/mismatched artifact. No torch.
 """
 from __future__ import annotations
 
-from maverick.prm import (
+from lightwork.prm import (
     HeuristicPRM,
     LinearPRM,
     StepContext,
     build_from_env,
     step_features,
 )
-from maverick.training import prm_linear
+from lightwork.training import prm_linear
 
 
 def _final_ctx():
@@ -114,7 +114,7 @@ def test_vocabulary_mismatch_falls_open(tmp_path):
 def test_malformed_weights_fall_open(tmp_path):
     import json
 
-    from maverick.prm import FEATURE_NAMES, ROLE_VOCAB
+    from lightwork.prm import FEATURE_NAMES, ROLE_VOCAB
     bad = tmp_path / "bad.json"
     bad.write_text(json.dumps({
         "feature_names": list(FEATURE_NAMES), "role_vocab": list(ROLE_VOCAB),

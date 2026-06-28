@@ -3,7 +3,7 @@ the sampler."""
 from __future__ import annotations
 
 import pytest
-from maverick.leak_quarantine import LeakVerdict, LeakWatchdog, process_rss_bytes
+from lightwork.leak_quarantine import LeakVerdict, LeakWatchdog, process_rss_bytes
 
 MB = 1024 * 1024
 

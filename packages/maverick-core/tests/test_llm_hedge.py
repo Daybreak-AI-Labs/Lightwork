@@ -9,8 +9,8 @@ from __future__ import annotations
 import asyncio
 
 import pytest
-from maverick import llm as llm_mod
-from maverick.llm import LLM, LLMResponse
+from lightwork import llm as llm_mod
+from lightwork.llm import LLM, LLMResponse
 
 OPUS = "claude-opus-4-8"
 
@@ -23,7 +23,7 @@ def _resp(text: str) -> LLMResponse:
 def _clean(monkeypatch):
     monkeypatch.delenv("MAVERICK_LLM_HEDGE_MS", raising=False)
     # No config -> hedge resolves from env only.
-    monkeypatch.setattr("maverick.config.load_config", lambda *a, **k: {})
+    monkeypatch.setattr("lightwork.config.load_config", lambda *a, **k: {})
 
 
 def test_hedge_off_by_default():
@@ -37,7 +37,7 @@ def test_hedge_reads_env_and_config(monkeypatch):
     assert llm_mod._hedge_ms() is None
     monkeypatch.delenv("MAVERICK_LLM_HEDGE_MS")
     monkeypatch.setattr(
-        "maverick.config.load_config", lambda *a, **k: {"latency": {"hedge_ms": 50}}
+        "lightwork.config.load_config", lambda *a, **k: {"latency": {"hedge_ms": 50}}
     )
     assert llm_mod._hedge_ms() == 50.0
 
@@ -104,7 +104,7 @@ def test_hedge_both_fail_surfaces_provider_error(monkeypatch):
 
 def test_hedge_race_bounded_by_wall_budget(monkeypatch):
     monkeypatch.setenv("MAVERICK_LLM_HEDGE_MS", "10")
-    from maverick.budget import Budget
+    from lightwork.budget import Budget
 
     class FakeClient:
         async def complete_async(self, **kwargs):
@@ -126,7 +126,7 @@ def test_hedge_race_bounded_by_wall_budget(monkeypatch):
 
 def test_hedge_backup_requires_its_own_budget_reservation(monkeypatch):
     monkeypatch.setenv("MAVERICK_LLM_HEDGE_MS", "10")
-    from maverick.budget import Budget
+    from lightwork.budget import Budget
 
     est_cost = llm_mod._estimate_call_cost(
         OPUS, "sys", [{"role": "user", "content": "hi"}], None, 4096

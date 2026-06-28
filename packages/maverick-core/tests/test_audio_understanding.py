@@ -7,7 +7,7 @@ import json
 import sys
 import wave
 
-from maverick.tools.audio_understanding import (
+from lightwork.tools.audio_understanding import (
     audio_understanding,
     cosine,
     decode_wav,
@@ -99,7 +99,7 @@ def test_decode_wav_rejects_oversized_audio(monkeypatch):
     # Without a cap, decode_wav would materialize one Python float per PCM
     # sample -> in-process OOM on attacker-sized audio. The cap must reject
     # before allocating, both on raw byte length and on a lying/huge header.
-    import maverick.tools.audio_understanding as au
+    import lightwork.tools.audio_understanding as au
 
     monkeypatch.setattr(au, "MAX_AUDIO_BYTES", 64)
     big = _wav_bytes(n=1000)  # well over 64 bytes
@@ -116,7 +116,7 @@ def test_decode_wav_rejects_oversized_audio(monkeypatch):
 
 
 def test_tool_rejects_oversized_audio_file(tmp_path, monkeypatch):
-    import maverick.tools.audio_understanding as au
+    import lightwork.tools.audio_understanding as au
 
     monkeypatch.setattr(au, "MAX_AUDIO_BYTES", 64)
     audio = tmp_path / "big.wav"
@@ -193,16 +193,16 @@ def test_default_embedder_reports_actionable_install_hint(tmp_path, monkeypatch)
     # Hide transformers so the default CLAP adapter's lazy import fails.
     monkeypatch.setitem(sys.modules, "transformers", None)
     monkeypatch.setitem(sys.modules, "torch", None)
-    import maverick.tools.audio_understanding as au
+    import lightwork.tools.audio_understanding as au
     monkeypatch.setattr(au, "_clap", None)
     audio = tmp_path / "clip.wav"
     audio.write_bytes(_wav_bytes())
     out = audio_understanding().fn({"audio_path": str(audio), "labels": ["siren"]})
-    assert out.startswith("ERROR") and "maverick-agent[clap]" in out
+    assert out.startswith("ERROR") and "lightwork-agent[clap]" in out
 
 
 def test_factory_registered_in_base_registry():
-    from maverick.tools import base_registry
+    from lightwork.tools import base_registry
 
     class _W:
         pass

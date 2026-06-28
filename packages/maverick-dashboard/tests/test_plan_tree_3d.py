@@ -9,13 +9,13 @@ from fastapi.testclient import TestClient
 def client(tmp_path, monkeypatch):
     monkeypatch.setenv("HOME", str(tmp_path))
     monkeypatch.delenv("MAVERICK_DASHBOARD_TOKEN", raising=False)
-    from maverick import world_model
+    from lightwork import world_model
     monkeypatch.setattr(world_model, "DEFAULT_DB", tmp_path / "world.db")
     w = world_model.WorldModel(tmp_path / "world.db")
     g1 = w.create_goal("3d root", "r")
     w.create_goal("3d child", "c", parent_id=g1)
-    from maverick_dashboard import api as api_mod
-    from maverick_dashboard import app as app_mod
+    from lightwork_dashboard import api as api_mod
+    from lightwork_dashboard import app as app_mod
     monkeypatch.setattr(app_mod, "_world", lambda: w)
     monkeypatch.setattr(api_mod, "_world", lambda: w)
     yield TestClient(app_mod.app)

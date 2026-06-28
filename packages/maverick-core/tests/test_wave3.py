@@ -2,8 +2,8 @@
 from __future__ import annotations
 
 import pytest
-from maverick.cli import _sanitize_progress_content
-from maverick.secrets import scrub
+from lightwork.cli import _sanitize_progress_content
+from lightwork.secrets import scrub
 
 
 class TestSecretScrubbing:
@@ -86,22 +86,22 @@ class TestSwarmFanoutCap:
     @pytest.mark.asyncio
     async def test_fanout_capped_at_max(self, tmp_path, monkeypatch):
         """A spawn_swarm with 50 agents gets trimmed to MAX_SWARM_FANOUT."""
-        import maverick.tools.spawn as spawn_mod
+        import lightwork.tools.spawn as spawn_mod
         monkeypatch.setattr(spawn_mod, "MAX_SWARM_FANOUT", 3)
 
-        from maverick.agent import Agent
-        from maverick.blackboard import Blackboard
-        from maverick.budget import Budget
-        from maverick.sandbox import LocalBackend
-        from maverick.swarm import SwarmContext
-        from maverick.world_model import WorldModel
+        from lightwork.agent import Agent
+        from lightwork.blackboard import Blackboard
+        from lightwork.budget import Budget
+        from lightwork.sandbox import LocalBackend
+        from lightwork.swarm import SwarmContext
+        from lightwork.world_model import WorldModel
 
         class _FakeLLM:
             calls = 0
 
             async def complete_async(self, **_kw):
                 self.calls += 1
-                from maverick.llm import LLMResponse
+                from lightwork.llm import LLMResponse
                 return LLMResponse(text="FINAL: done", thinking=None,
                                    tool_calls=[], stop_reason="end_turn")
 
@@ -135,10 +135,10 @@ class TestErrorMessageVoice:
         self, tmp_path, fake_llm, make_llm_response,
     ):
         """Error path now reads like a sentence with a resume hint."""
-        from maverick.budget import Budget
-        from maverick.orchestrator import run_goal
-        from maverick.sandbox import LocalBackend
-        from maverick.world_model import WorldModel
+        from lightwork.budget import Budget
+        from lightwork.orchestrator import run_goal
+        from lightwork.sandbox import LocalBackend
+        from lightwork.world_model import WorldModel
 
         fake_llm.scripted = [make_llm_response(text="")]  # empty -> error
         world = WorldModel(tmp_path / "w.db")
@@ -162,11 +162,11 @@ class TestErrorMessageVoice:
         self, tmp_path, fake_llm, make_llm_response,
     ):
         """The old 'PAUSED: 0 open question(s)' bug now has a clear msg."""
-        from maverick.budget import Budget
-        from maverick.llm import ToolCall
-        from maverick.orchestrator import run_goal
-        from maverick.sandbox import LocalBackend
-        from maverick.world_model import WorldModel
+        from lightwork.budget import Budget
+        from lightwork.llm import ToolCall
+        from lightwork.orchestrator import run_goal
+        from lightwork.sandbox import LocalBackend
+        from lightwork.world_model import WorldModel
 
         # Mock ask_user to file NO question (the old bug) — we patch by
         # using a tool call to a name that doesn't actually persist.

@@ -1,7 +1,7 @@
 """Governed rollout of learning: staged promotion with auto-rollback."""
 from __future__ import annotations
 
-from maverick.learning_rollout import (
+from lightwork.learning_rollout import (
     DEFAULT_STAGES,
     Stage,
     run_rollout,
@@ -61,18 +61,18 @@ def test_a_constraint_that_errors_is_treated_as_failing():
 def test_promote_skill_live_audits_each_stage_and_completes(monkeypatch):
     # Exercises the previously-untested live wiring: snapshot once, audit a
     # LEARNING_UPDATE per stage (the call that was silently wrong), no rollback.
-    from maverick import learning_rollout as lr
+    from lightwork import learning_rollout as lr
     calls = {"snapshot": 0, "audit": []}
-    monkeypatch.setattr("maverick.dreaming.snapshot_learning_state",
+    monkeypatch.setattr("lightwork.dreaming.snapshot_learning_state",
                         lambda *a, **k: calls.__setitem__("snapshot", calls["snapshot"] + 1))
-    monkeypatch.setattr("maverick.dreaming.rollback_learning_state",
+    monkeypatch.setattr("lightwork.dreaming.rollback_learning_state",
                         lambda *a, **k: (_ for _ in ()).throw(AssertionError("should not roll back")))
-    monkeypatch.setattr("maverick.audit.record",
+    monkeypatch.setattr("lightwork.audit.record",
                         lambda kind, **payload: calls["audit"].append((kind, payload)))
     ok = lr.threshold_constraint("h", lambda c, f: 1.0, floor=0.5)
     res = lr.promote_skill_live("sk", [ok],
                                 stages=[lr.Stage("canary", 0.1), lr.Stage("full", 1.0)])
-    from maverick.audit import EventKind
+    from lightwork.audit import EventKind
     assert res.completed and calls["snapshot"] == 1
     assert len(calls["audit"]) == 2
     assert all(k == EventKind.LEARNING_UPDATE for k, _ in calls["audit"])
@@ -80,11 +80,11 @@ def test_promote_skill_live_audits_each_stage_and_completes(monkeypatch):
 
 
 def test_promote_skill_live_rolls_back_on_failure(monkeypatch):
-    from maverick import learning_rollout as lr
+    from lightwork import learning_rollout as lr
     rolled = []
-    monkeypatch.setattr("maverick.dreaming.snapshot_learning_state", lambda *a, **k: None)
-    monkeypatch.setattr("maverick.dreaming.rollback_learning_state", lambda *a, **k: rolled.append(1))
-    monkeypatch.setattr("maverick.audit.record", lambda *a, **k: None)
+    monkeypatch.setattr("lightwork.dreaming.snapshot_learning_state", lambda *a, **k: None)
+    monkeypatch.setattr("lightwork.dreaming.rollback_learning_state", lambda *a, **k: rolled.append(1))
+    monkeypatch.setattr("lightwork.audit.record", lambda *a, **k: None)
     bad = lr.threshold_constraint("h", lambda c, f: 0.0, floor=0.5)
     res = lr.promote_skill_live("sk", [bad], stages=[lr.Stage("canary", 0.1)])
     assert res.rolled_back and rolled == [1]

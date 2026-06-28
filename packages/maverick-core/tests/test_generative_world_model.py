@@ -4,9 +4,9 @@ unknown" for a wholly novel context.
 """
 from __future__ import annotations
 
-from maverick import rehearsal as rh
-from maverick.counterfactual_rollout import Transition, TransitionModel
-from maverick.generative_world_model import BackoffTransitionModel
+from lightwork import rehearsal as rh
+from lightwork.counterfactual_rollout import Transition, TransitionModel
+from lightwork.generative_world_model import BackoffTransitionModel
 
 # state = (domain, sub_context); backoff drops the trailing (specific) feature.
 FIN_A = ("fin", "ctxA")

@@ -3,7 +3,7 @@ from __future__ import annotations
 
 from types import SimpleNamespace
 
-from maverick import dreaming, hindsight, reflexion
+from lightwork import dreaming, hindsight, reflexion
 
 
 def _make_state(tmp_path, name, *, reflexions=(), insights=(), skills=()):
@@ -130,7 +130,7 @@ class TestReplay:
 class TestLedger:
     def test_ledger_and_audit_row(self, tmp_path, monkeypatch):
         rows = []
-        import maverick.audit as audit_pkg
+        import lightwork.audit as audit_pkg
         monkeypatch.setattr(audit_pkg, "record",
                             lambda kind, **kw: rows.append((kind, kw)) or True)
         report = hindsight.HindsightReport(

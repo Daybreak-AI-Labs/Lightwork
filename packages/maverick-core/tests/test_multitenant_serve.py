@@ -3,10 +3,10 @@ from __future__ import annotations
 
 import asyncio
 
-import maverick.server as server_mod
-from maverick.paths import data_dir
-from maverick.quotas import UsageLedger
-from maverick.tenant.registry import (
+import lightwork.server as server_mod
+from lightwork.paths import data_dir
+from lightwork.quotas import UsageLedger
+from lightwork.tenant.registry import (
     create_tenant,
     set_quota,
     suspend_tenant,
@@ -70,7 +70,7 @@ def _serve_with_tenancy(monkeypatch, tmp_path):
     monkeypatch.setenv("MAVERICK_HOME", str(tmp_path / "home"))
     monkeypatch.setattr(server_mod, "tenant_by_user_enabled", lambda: True,
                         raising=False)
-    import maverick.paths as paths_mod
+    import lightwork.paths as paths_mod
     monkeypatch.setattr(paths_mod, "tenant_by_user_enabled", lambda: True)
     monkeypatch.setattr(server_mod, "world_for_tenant", lambda _t: _World())
     return server_mod.Server(world=_World(), llm=object(), sandbox=object())

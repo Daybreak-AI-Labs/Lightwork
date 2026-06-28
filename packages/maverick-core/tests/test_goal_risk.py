@@ -4,14 +4,14 @@ floor + require-human knobs. Deterministic and offline (no model, no clock).
 from __future__ import annotations
 
 import pytest
-from maverick.safety.goal_risk import (
+from lightwork.safety.goal_risk import (
     HIGH_THRESHOLD,
     MEDIUM_THRESHOLD,
     classify_goal,
     config_floor,
     require_human_for,
 )
-from maverick.safety.tool_risk import risk_rank
+from lightwork.safety.tool_risk import risk_rank
 
 
 @pytest.fixture(autouse=True)

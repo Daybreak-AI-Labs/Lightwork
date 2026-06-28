@@ -8,7 +8,7 @@ from __future__ import annotations
 
 import random
 
-from maverick import emergent_tokens as et
+from lightwork import emergent_tokens as et
 
 ESC = "\x1b"  # reserved escape byte
 

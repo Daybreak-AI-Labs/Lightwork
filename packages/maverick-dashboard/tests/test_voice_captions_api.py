@@ -3,12 +3,12 @@ from __future__ import annotations
 
 import json
 
-import maverick_dashboard.auth as auth
+import lightwork_dashboard.auth as auth
 import pytest
 from fastapi.testclient import TestClient
-from maverick.live_captions import Segment, register_source, unregister_source
-from maverick.oidc import VerifiedPrincipal
-from maverick_dashboard.app import app
+from lightwork.live_captions import Segment, register_source, unregister_source
+from lightwork.oidc import VerifiedPrincipal
+from lightwork_dashboard.app import app
 
 client = TestClient(app)
 
@@ -116,7 +116,7 @@ def test_captions_503_when_sse_capacity_full(scripted_source, monkeypatch):
     already fully held it returns 503 instead of opening an unbounded stream."""
     import asyncio
 
-    import maverick_dashboard.api as api
+    import lightwork_dashboard.api as api
 
     # A zero-permit semaphore is already locked() -> every SSE slot in use ->
     # the route must 503 before opening (acquiring) a new stream. The shared

@@ -1,4 +1,4 @@
-"""Shared cross-process lock + atomic write helper (maverick.file_lock).
+"""Shared cross-process lock + atomic write helper (lightwork.file_lock).
 
 These back the file-race fixes across the state stores: atomic_write_text must
 never leave a torn file for a concurrent reader, and cross_process_lock must
@@ -10,7 +10,7 @@ import json
 import os
 import threading
 
-from maverick.file_lock import atomic_write_text, cross_process_lock
+from lightwork.file_lock import atomic_write_text, cross_process_lock
 
 
 def test_atomic_write_replaces_whole_file(tmp_path):

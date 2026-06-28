@@ -10,7 +10,7 @@ returns a string and never raises.
 """
 from __future__ import annotations
 
-from maverick.tools.enterprise_connectors import enterprise_connectors
+from lightwork.tools.enterprise_connectors import enterprise_connectors
 
 _HOSTILE_ARGS = (
     {},

@@ -8,14 +8,14 @@ from __future__ import annotations
 
 import pytest
 from fastapi.testclient import TestClient
-from maverick_dashboard.app import app
+from lightwork_dashboard.app import app
 
 client = TestClient(app, headers={"Origin": "http://testserver"})
 
 
 @pytest.fixture(autouse=True)
 def _isolated(tmp_path, monkeypatch):
-    from maverick import world_model
+    from lightwork import world_model
     monkeypatch.setattr(world_model, "DEFAULT_DB", tmp_path / "world.db")
     monkeypatch.setenv("MAVERICK_ROLES_FILE", str(tmp_path / "roles.toml"))
     yield
@@ -89,7 +89,7 @@ class TestOverrideLifecycle:
 
 class TestRoleEditingAuthorization:
     def test_authenticated_non_admin_cannot_mutate_roles(self, monkeypatch):
-        import maverick_dashboard.api as api
+        import lightwork_dashboard.api as api
         monkeypatch.setattr(api, "caller_principal", lambda request: "user:alice")
         monkeypatch.setattr(api, "is_dashboard_admin", lambda principal: False)
 
@@ -99,7 +99,7 @@ class TestRoleEditingAuthorization:
         assert client.get("/api/v1/roles/orchestrator").status_code == 200
 
     def test_authenticated_admin_can_mutate_roles(self, monkeypatch):
-        import maverick_dashboard.api as api
+        import lightwork_dashboard.api as api
         monkeypatch.setattr(api, "caller_principal", lambda request: "user:admin")
         monkeypatch.setattr(api, "is_dashboard_admin", lambda principal: principal == "user:admin")
 
@@ -112,7 +112,7 @@ class TestRoleEditingAuthorization:
 
 class TestRoleEditingGate:
     def test_mutations_403_when_disabled(self, monkeypatch):
-        import maverick.config as cfg
+        import lightwork.config as cfg
         monkeypatch.setattr(cfg, "get_features",
                             lambda: {"skills": True, "world_model": True, "streaming": True,
                                      "pack_editing": True, "role_editing": False})

@@ -1,7 +1,7 @@
 """Adaptive thinking-budget controller (ROADMAP Q4 2026, Performance)."""
 from __future__ import annotations
 
-from maverick import thinking_budget as tb
+from lightwork import thinking_budget as tb
 
 
 def test_none_base_stays_none():
@@ -55,7 +55,7 @@ def test_agent_thinking_budget_default_off_unchanged(monkeypatch):
     # With the controller off (default), agent._thinking_budget returns the base
     # picks (8000 for orchestrator/revisor, None otherwise) — no behavior change.
     monkeypatch.setattr(tb, "_enabled", lambda: False)
-    from maverick.agent import Agent
+    from lightwork.agent import Agent
     a = Agent.__new__(Agent)
     a.role = "orchestrator"
     assert a._thinking_budget() == 8000

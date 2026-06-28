@@ -18,7 +18,7 @@ def _invoke(tmp_path, monkeypatch, text: str):
     cfg.write_text(text, encoding="utf-8")
     monkeypatch.setenv("MAVERICK_CONFIG", str(cfg))
     monkeypatch.setenv("HOME", str(tmp_path))
-    from maverick.cli import main
+    from lightwork.cli import main
     return CliRunner().invoke(main, ["config-lint"])
 
 
@@ -39,7 +39,7 @@ def test_valid_config_still_ok(tmp_path, monkeypatch):
 def test_absent_config_is_not_an_error(tmp_path, monkeypatch):
     monkeypatch.setenv("MAVERICK_CONFIG", str(tmp_path / "nope.toml"))
     monkeypatch.setenv("HOME", str(tmp_path))
-    from maverick.cli import main
+    from lightwork.cli import main
     res = CliRunner().invoke(main, ["config-lint"])
     assert res.exit_code == 0, res.output
     # An absent config is a legitimate (built-in defaults) state -- but it must

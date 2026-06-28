@@ -1,8 +1,8 @@
 """Localized money formatting + the format_money tool."""
 from __future__ import annotations
 
-from maverick.money_format import format_money, supported
-from maverick.tools.format_money import format_money_tool
+from lightwork.money_format import format_money, supported
+from lightwork.tools.format_money import format_money_tool
 
 
 def test_en_us_default():
@@ -73,7 +73,7 @@ def test_tool_supported():
 
 
 def test_tool_registered():
-    from maverick.tools import base_registry
+    from lightwork.tools import base_registry
 
     class _W:
         pass

@@ -21,13 +21,13 @@ import pytest
 )
 def test_send_passes_text_via_argv_not_interpolation():
     """The send() path must invoke osascript with text/handle as argv."""
-    from maverick_channels.imessage import iMessageChannel
+    from lightwork_channels.imessage import iMessageChannel
 
     async def _noop(_):
         return ""
 
     # Construct without hitting chat.db. We patch the file-existence check.
-    with patch("maverick_channels.imessage.CHAT_DB") as fake_db:
+    with patch("lightwork_channels.imessage.CHAT_DB") as fake_db:
         fake_db.exists.return_value = True
         fake_db.__fspath__ = lambda: "/tmp/fake_chat.db"
         chan = iMessageChannel(
@@ -35,7 +35,7 @@ def test_send_passes_text_via_argv_not_interpolation():
         )
 
     import asyncio
-    with patch("maverick_channels.imessage.subprocess.run") as run_mock:
+    with patch("lightwork_channels.imessage.subprocess.run") as run_mock:
         asyncio.run(chan.send(
             "+1555",
             'malicious"; tell app "Finder" to delete every file',
@@ -56,7 +56,7 @@ def test_send_passes_text_via_argv_not_interpolation():
 
 def test_send_script_does_not_interpolate_text():
     """Static check on the script constant itself."""
-    from maverick_channels.imessage import _SEND_SCRIPT
+    from lightwork_channels.imessage import _SEND_SCRIPT
     # The script reads argv -- it must not contain `%s` or `{` placeholders
     # that suggest python-side string formatting.
     assert "%s" not in _SEND_SCRIPT
@@ -68,7 +68,7 @@ def test_send_script_does_not_interpolate_text():
 
 def _make_channel():
     """Build an iMessageChannel without hitting the macOS-only __init__ guards."""
-    from maverick_channels.imessage import iMessageChannel
+    from lightwork_channels.imessage import iMessageChannel
 
     chan = iMessageChannel.__new__(iMessageChannel)
     chan.allowed_user_ids = {"+1555"}

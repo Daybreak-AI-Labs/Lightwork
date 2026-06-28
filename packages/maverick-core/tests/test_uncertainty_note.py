@@ -7,7 +7,7 @@ over as if it were confirmed. Coding-mode finals are never wrapped (they
 may be patches). High swarm-disagreement is added only as extra colour
 when we are already flagging uncertainty.
 """
-from maverick.agent import (
+from lightwork.agent import (
     _final_uncertainty_reasons,
     _final_with_uncertainty_note,
 )

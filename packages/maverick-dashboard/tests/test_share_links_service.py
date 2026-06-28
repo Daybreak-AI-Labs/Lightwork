@@ -3,13 +3,13 @@ token), and revoke. A bad/revoked/expired token 404s and leaks nothing."""
 from __future__ import annotations
 
 from fastapi.testclient import TestClient
-from maverick_dashboard.app import app
+from lightwork_dashboard.app import app
 
 client = TestClient(app, headers={"Origin": "http://testserver"})
 
 
 def _world(tmp_path, monkeypatch):
-    from maverick import world_model
+    from lightwork import world_model
     monkeypatch.setattr(world_model, "DEFAULT_DB", tmp_path / "world.db")
     return world_model.WorldModel(tmp_path / "world.db")
 

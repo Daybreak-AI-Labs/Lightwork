@@ -1,7 +1,7 @@
 """capability_leak_fuzzer: detect tools running without required capabilities."""
 from __future__ import annotations
 
-from maverick.tools.capability_leak_fuzzer import capability_leak_fuzzer
+from lightwork.tools.capability_leak_fuzzer import capability_leak_fuzzer
 
 
 def _fuzz(granted, tools):

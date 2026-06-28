@@ -9,7 +9,7 @@ from __future__ import annotations
 from pathlib import Path
 
 import pytest
-from maverick import skills
+from lightwork import skills
 
 ed25519 = pytest.importorskip(
     "cryptography.hazmat.primitives.asymmetric.ed25519"

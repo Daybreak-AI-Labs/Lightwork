@@ -9,7 +9,7 @@ back to string assertions.
 from pathlib import Path
 
 _REPO_ROOT = Path(__file__).resolve().parents[3]
-_TEMPLATE = _REPO_ROOT / "deploy" / "gitlab-ci" / "maverick.gitlab-ci.yml"
+_TEMPLATE = _REPO_ROOT / "deploy" / "gitlab-ci" / "lightwork.gitlab-ci.yml"
 _README = _REPO_ROOT / "deploy" / "gitlab-ci" / "README.md"
 
 
@@ -48,8 +48,8 @@ def test_safety_defaults_present():
     # Default local sandbox scoped to the checkout.
     assert "workdir = \"${CI_PROJECT_DIR}\"" in text
 
-    # It installs maverick-agent and runs a goal.
-    assert "maverick-agent" in text
+    # It installs lightwork-agent and runs a goal.
+    assert "lightwork-agent" in text
     assert "MAVERICK_GOAL" in text
     assert "start" in text
 

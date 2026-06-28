@@ -4,7 +4,7 @@ from __future__ import annotations
 import asyncio
 
 import pytest
-from maverick_channels.glasses import (
+from lightwork_channels.glasses import (
     GlassesChannel,
     ack_message,
     classify_utterance,

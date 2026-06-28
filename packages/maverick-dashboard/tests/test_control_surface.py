@@ -12,7 +12,7 @@ from fastapi.testclient import TestClient
 
 
 def _client():
-    from maverick_dashboard.app import app
+    from lightwork_dashboard.app import app
     return TestClient(app)
 
 
@@ -57,7 +57,7 @@ def test_halt_post_then_status_then_delete(monkeypatch, tmp_path: Path):
 # ---------- cancel goal ----------
 
 def test_cancel_goal_marks_status(monkeypatch, tmp_path: Path):
-    from maverick import world_model
+    from lightwork import world_model
     db = tmp_path / "world.db"
     monkeypatch.setattr(world_model, "DEFAULT_DB", db)
     monkeypatch.delenv("MAVERICK_DASHBOARD_TOKEN", raising=False)
@@ -79,7 +79,7 @@ def test_cancel_goal_marks_status(monkeypatch, tmp_path: Path):
 
 
 def test_cancel_unknown_goal_404(monkeypatch, tmp_path: Path):
-    from maverick import world_model
+    from lightwork import world_model
     monkeypatch.setattr(world_model, "DEFAULT_DB", tmp_path / "world.db")
     monkeypatch.delenv("MAVERICK_DASHBOARD_TOKEN", raising=False)
     client = _client()
@@ -91,7 +91,7 @@ def test_cancel_unknown_goal_404(monkeypatch, tmp_path: Path):
 
 
 def test_cancel_already_done_goal_noop(monkeypatch, tmp_path: Path):
-    from maverick import world_model
+    from lightwork import world_model
     db = tmp_path / "world.db"
     monkeypatch.setattr(world_model, "DEFAULT_DB", db)
     monkeypatch.delenv("MAVERICK_DASHBOARD_TOKEN", raising=False)
@@ -111,7 +111,7 @@ def test_cancel_already_done_goal_noop(monkeypatch, tmp_path: Path):
 # ---------- open questions ----------
 
 def test_open_questions_empty(monkeypatch, tmp_path: Path):
-    from maverick import world_model
+    from lightwork import world_model
     db = tmp_path / "world.db"
     monkeypatch.setattr(world_model, "DEFAULT_DB", db)
     monkeypatch.delenv("MAVERICK_DASHBOARD_TOKEN", raising=False)
@@ -124,7 +124,7 @@ def test_open_questions_empty(monkeypatch, tmp_path: Path):
 
 
 def test_open_questions_returns_unanswered(monkeypatch, tmp_path: Path):
-    from maverick import world_model
+    from lightwork import world_model
     db = tmp_path / "world.db"
     monkeypatch.setattr(world_model, "DEFAULT_DB", db)
     monkeypatch.delenv("MAVERICK_DASHBOARD_TOKEN", raising=False)
@@ -173,7 +173,7 @@ def test_audit_tail_empty(monkeypatch, tmp_path: Path):
     # AuditLog's default arg was bound at class-def time, so patching
     # DEFAULT_AUDIT_DIR on the module is ineffective. Inject a fresh
     # singleton with the explicit tmp dir.
-    import maverick.audit.writer as w
+    import lightwork.audit.writer as w
     w._default = w.AuditLog(audit_dir=tmp_path / "audit")
     client = _client()
     r = client.get("/api/v1/audit/tail")
@@ -186,9 +186,9 @@ def test_audit_tail_empty(monkeypatch, tmp_path: Path):
 def test_audit_page_renders(monkeypatch, tmp_path: Path):
     monkeypatch.delenv("MAVERICK_DASHBOARD_TOKEN", raising=False)
     monkeypatch.setattr(
-        "maverick.audit.writer.DEFAULT_AUDIT_DIR", tmp_path / "audit",
+        "lightwork.audit.writer.DEFAULT_AUDIT_DIR", tmp_path / "audit",
     )
-    import maverick.audit.writer as w
+    import lightwork.audit.writer as w
     w._default = None
     client = _client()
     r = client.get("/audit")
@@ -213,7 +213,7 @@ def test_mcp_page_renders(monkeypatch):
 
 
 def test_tools_page_renders(monkeypatch, tmp_path):
-    from maverick import world_model
+    from lightwork import world_model
     monkeypatch.setattr(world_model, "DEFAULT_DB", tmp_path / "world.db")
     monkeypatch.delenv("MAVERICK_DASHBOARD_TOKEN", raising=False)
     client = _client()
@@ -232,7 +232,7 @@ def test_channels_page_renders(monkeypatch):
 
 def test_channels_page_redacts_sensitive_values(monkeypatch):
     monkeypatch.delenv("MAVERICK_DASHBOARD_TOKEN", raising=False)
-    import maverick.config as _cfg
+    import lightwork.config as _cfg
     monkeypatch.setattr(
         _cfg,
         "load_config",
@@ -261,7 +261,7 @@ def test_channels_page_redacts_sensitive_values(monkeypatch):
 
 def test_base_nav_includes_new_pages(monkeypatch, tmp_path):
     """Every new page is reachable via the header nav."""
-    from maverick import world_model
+    from lightwork import world_model
     monkeypatch.setattr(world_model, "DEFAULT_DB", tmp_path / "world.db")
     monkeypatch.delenv("MAVERICK_DASHBOARD_TOKEN", raising=False)
     client = _client()
@@ -272,7 +272,7 @@ def test_base_nav_includes_new_pages(monkeypatch, tmp_path):
 
 
 def test_base_renders_halt_pill(monkeypatch, tmp_path):
-    from maverick import world_model
+    from lightwork import world_model
     monkeypatch.setattr(world_model, "DEFAULT_DB", tmp_path / "world.db")
     monkeypatch.delenv("MAVERICK_DASHBOARD_TOKEN", raising=False)
     client = _client()
@@ -281,7 +281,7 @@ def test_base_renders_halt_pill(monkeypatch, tmp_path):
 
 
 def test_footer_no_longer_leaks_world_db_path(monkeypatch, tmp_path):
-    from maverick import world_model
+    from lightwork import world_model
     monkeypatch.setattr(world_model, "DEFAULT_DB", tmp_path / "world.db")
     monkeypatch.delenv("MAVERICK_DASHBOARD_TOKEN", raising=False)
     client = _client()
@@ -293,7 +293,7 @@ def test_footer_no_longer_leaks_world_db_path(monkeypatch, tmp_path):
 
 def test_index_empty_state_shows_hero(monkeypatch, tmp_path):
     """The overview shows the hero CTA on a fresh install, not 4 zeros + 3 'No X yet' rows."""
-    from maverick import world_model
+    from lightwork import world_model
     monkeypatch.setattr(world_model, "DEFAULT_DB", tmp_path / "world.db")
     monkeypatch.delenv("MAVERICK_DASHBOARD_TOKEN", raising=False)
     client = _client()

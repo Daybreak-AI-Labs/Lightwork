@@ -2,7 +2,7 @@
 from __future__ import annotations
 
 import pytest
-from maverick import perf_sla
+from lightwork import perf_sla
 
 
 @pytest.fixture(autouse=True)
@@ -11,7 +11,7 @@ def _isolate_latency_profile():
     in-process tool-latency profile; reset it so suite-mates that assert a
     fresh profile (test_tail_latency) aren't polluted."""
     yield
-    from maverick import tool_latency
+    from lightwork import tool_latency
     tool_latency.reset()
 
 

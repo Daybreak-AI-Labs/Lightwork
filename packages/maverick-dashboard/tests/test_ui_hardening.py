@@ -5,17 +5,17 @@ from fastapi.testclient import TestClient
 
 
 def _client():
-    from maverick_dashboard.app import app
+    from lightwork_dashboard.app import app
     return TestClient(app)
 
 
 # ---------- Content-Security-Policy ----------
 
 def test_csp_header_present_and_locked_down(monkeypatch, tmp_path):
-    from maverick import world_model
+    from lightwork import world_model
     monkeypatch.setattr(world_model, "DEFAULT_DB", tmp_path / "world.db")
     monkeypatch.delenv("MAVERICK_DASHBOARD_TOKEN", raising=False)
-    from maverick_dashboard import app as dash_app
+    from lightwork_dashboard import app as dash_app
     dash_app._world_cache.clear()
     csp = _client().get("/").headers.get("Content-Security-Policy", "")
     assert "default-src 'self'" in csp
@@ -45,10 +45,10 @@ def test_csp_on_api_responses_too(monkeypatch, tmp_path):
 
 
 def test_all_baseline_headers_still_present(monkeypatch, tmp_path):
-    from maverick import world_model
+    from lightwork import world_model
     monkeypatch.setattr(world_model, "DEFAULT_DB", tmp_path / "world.db")
     monkeypatch.delenv("MAVERICK_DASHBOARD_TOKEN", raising=False)
-    from maverick_dashboard import app as dash_app
+    from lightwork_dashboard import app as dash_app
     dash_app._world_cache.clear()
     h = _client().get("/").headers
     assert h["X-Frame-Options"] == "DENY"
@@ -62,12 +62,12 @@ def test_all_baseline_headers_still_present(monkeypatch, tmp_path):
 def test_plan_tree_escapes_quotes_in_title(monkeypatch, tmp_path):
     """A goal title with a quote + angle bracket must be escaped in the
     pre-rendered HTML (quote=True closes the attribute-context hole)."""
-    from maverick import world_model
+    from lightwork import world_model
     monkeypatch.setattr(world_model, "DEFAULT_DB", tmp_path / "world.db")
     monkeypatch.delenv("MAVERICK_DASHBOARD_TOKEN", raising=False)
     wm = world_model.WorldModel(tmp_path / "world.db")
     gid = wm.create_goal('"><script>alert(1)</script>', "x")
-    from maverick_dashboard import app as dash_app
+    from lightwork_dashboard import app as dash_app
     dash_app._world_cache.clear()
     r = _client().get(f"/goals/{gid}/plan")
     assert r.status_code == 200
@@ -77,7 +77,7 @@ def test_plan_tree_escapes_quotes_in_title(monkeypatch, tmp_path):
 
 
 def test_render_tree_html_quote_escaping_unit():
-    from maverick_dashboard.app import _render_tree_html
+    from lightwork_dashboard.app import _render_tree_html
     node = {
         "id": 1, "parent_id": None, "status": 'x" onmouseover="alert(1)',
         "title": "t", "dollars": 0, "children": [],
@@ -92,13 +92,13 @@ def test_render_tree_html_quote_escaping_unit():
 # ---------- trajectory a11y ----------
 
 def test_trajectory_controls_have_aria_labels(monkeypatch, tmp_path):
-    from maverick import world_model
+    from lightwork import world_model
     monkeypatch.setattr(world_model, "DEFAULT_DB", tmp_path / "world.db")
     monkeypatch.delenv("MAVERICK_DASHBOARD_TOKEN", raising=False)
     wm = world_model.WorldModel(tmp_path / "world.db")
     gid = wm.create_goal("g", "x")
     wm.append_event(gid, "agent", "plan", "first")
-    from maverick_dashboard import app as dash_app
+    from lightwork_dashboard import app as dash_app
     dash_app._world_cache.clear()
     r = _client().get(f"/goals/{gid}/trajectory")
     assert r.status_code == 200

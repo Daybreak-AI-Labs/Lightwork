@@ -31,7 +31,7 @@ _needs_openai = pytest.mark.skipif(
 def test_vllm_provider_default_url(monkeypatch):
     monkeypatch.delenv("VLLM_BASE_URL", raising=False)
     monkeypatch.delenv("VLLM_API_KEY", raising=False)
-    from maverick.providers.vllm_provider import VLLMClient
+    from lightwork.providers.vllm_provider import VLLMClient
     c = VLLMClient()
     assert c.DEFAULT_MODEL == "vllm"
     assert c.base_url.endswith("/v1")
@@ -41,20 +41,20 @@ def test_vllm_provider_default_url(monkeypatch):
 def test_vllm_provider_env_url(monkeypatch):
     monkeypatch.setenv("VLLM_BASE_URL", "http://gpu-box:8000")
     monkeypatch.setenv("VLLM_API_KEY", "sekret")
-    from maverick.providers.vllm_provider import VLLMClient
+    from lightwork.providers.vllm_provider import VLLMClient
     c = VLLMClient()
     assert c.base_url == "http://gpu-box:8000/v1"
 
 
 def test_vllm_registered_in_provider_registry():
     """Registry membership check works without instantiating."""
-    from maverick.providers import KNOWN_PROVIDERS
+    from lightwork.providers import KNOWN_PROVIDERS
     assert "vllm" in KNOWN_PROVIDERS
 
 
 @_needs_openai
 def test_vllm_provider_instantiates():
-    from maverick.providers import get_provider_client
+    from lightwork.providers import get_provider_client
     c = get_provider_client("vllm")
     assert c.__class__.__name__ == "VLLMClient"
 
@@ -62,7 +62,7 @@ def test_vllm_provider_instantiates():
 # ---------- Stripe tool ----------
 
 def test_stripe_requires_op():
-    from maverick.tools.stripe_tool import stripe_tool
+    from lightwork.tools.stripe_tool import stripe_tool
     assert "op is required" in stripe_tool().fn({})
 
 
@@ -72,7 +72,7 @@ def test_stripe_missing_key(monkeypatch):
     fake.get = MagicMock()
     fake.post = MagicMock()
     monkeypatch.setitem(sys.modules, "httpx", fake)
-    from maverick.tools.stripe_tool import stripe_tool
+    from lightwork.tools.stripe_tool import stripe_tool
     out = stripe_tool().fn({"op": "balance"})
     assert "STRIPE_SECRET_KEY" in out
 
@@ -89,7 +89,7 @@ def test_stripe_balance_renders(monkeypatch):
     fake_httpx = types.ModuleType("httpx")
     fake_httpx.get = MagicMock(return_value=resp)
     monkeypatch.setitem(sys.modules, "httpx", fake_httpx)
-    from maverick.tools.stripe_tool import stripe_tool
+    from lightwork.tools.stripe_tool import stripe_tool
     out = stripe_tool().fn({"op": "balance"})
     assert "available" in out and "123.45" in out
     assert "pending" in out and "67.89" in out
@@ -101,7 +101,7 @@ def test_stripe_refund_dry_run(monkeypatch):
     fake_httpx.get = MagicMock()
     fake_httpx.post = MagicMock()
     monkeypatch.setitem(sys.modules, "httpx", fake_httpx)
-    from maverick.tools.stripe_tool import stripe_tool
+    from lightwork.tools.stripe_tool import stripe_tool
     out = stripe_tool().fn({
         "op": "refund_create", "charge_id": "ch_123",
         "amount_cents": 500,
@@ -122,7 +122,7 @@ def test_stripe_refund_with_confirm(monkeypatch):
     fake_httpx = types.ModuleType("httpx")
     fake_httpx.post = MagicMock(return_value=resp)
     monkeypatch.setitem(sys.modules, "httpx", fake_httpx)
-    from maverick.tools.stripe_tool import stripe_tool
+    from lightwork.tools.stripe_tool import stripe_tool
     out = stripe_tool().fn({
         "op": "refund_create", "charge_id": "ch_123",
         "amount_cents": 500, "confirm": True,
@@ -131,7 +131,7 @@ def test_stripe_refund_with_confirm(monkeypatch):
     fake_httpx.post.assert_called_once()
     # The refund carries an Idempotency-Key so a retry can't double-refund.
     headers = fake_httpx.post.call_args.kwargs["headers"]
-    assert headers.get("Idempotency-Key", "").startswith("maverick-refund-")
+    assert headers.get("Idempotency-Key", "").startswith("lightwork-refund-")
 
 
 def test_stripe_refund_idempotency_key_is_intent_scoped(monkeypatch):
@@ -150,7 +150,7 @@ def test_stripe_refund_idempotency_key_is_intent_scoped(monkeypatch):
         fake_httpx = types.ModuleType("httpx")
         fake_httpx.post = post
         monkeypatch.setitem(sys.modules, "httpx", fake_httpx)
-        from maverick.tools.stripe_tool import stripe_tool
+        from lightwork.tools.stripe_tool import stripe_tool
         stripe_tool().fn({
             "op": "refund_create", "charge_id": "ch_123",
             "amount_cents": amount, "confirm": True,
@@ -177,7 +177,7 @@ def test_stripe_charges_renders(monkeypatch):
     fake_httpx = types.ModuleType("httpx")
     fake_httpx.get = MagicMock(return_value=resp)
     monkeypatch.setitem(sys.modules, "httpx", fake_httpx)
-    from maverick.tools.stripe_tool import stripe_tool
+    from lightwork.tools.stripe_tool import stripe_tool
     out = stripe_tool().fn({"op": "charges"})
     assert "ch_1" in out and "10.00" in out
     assert "REFUNDED" in out  # ch_2 marker
@@ -203,7 +203,7 @@ def test_stripe_charges_follows_cursor(monkeypatch):
     fake_httpx = types.ModuleType("httpx")
     fake_httpx.get = get
     monkeypatch.setitem(sys.modules, "httpx", fake_httpx)
-    from maverick.tools.stripe_tool import stripe_tool
+    from lightwork.tools.stripe_tool import stripe_tool
     out = stripe_tool().fn({"op": "charges", "limit": 50})
     assert "ch_1" in out and "ch_2" in out
     assert get.call_count == 2
@@ -214,7 +214,7 @@ def test_stripe_charges_follows_cursor(monkeypatch):
 # ---------- Currency tool ----------
 
 def test_currency_requires_op():
-    from maverick.tools.currency import currency
+    from lightwork.tools.currency import currency
     assert "op is required" in currency().fn({})
 
 
@@ -227,8 +227,8 @@ def test_currency_convert_exchangerate(monkeypatch):
     })
     # currency now fetches through the SSRF-safe pinned client, so patch
     # _ssrf.safe_get rather than a raw httpx.get.
-    monkeypatch.setattr("maverick.tools._ssrf.safe_get", MagicMock(return_value=resp))
-    from maverick.tools.currency import currency
+    monkeypatch.setattr("lightwork.tools._ssrf.safe_get", MagicMock(return_value=resp))
+    from lightwork.tools.currency import currency
     out = currency().fn({
         "op": "convert", "amount": 100, "from": "USD", "to": "EUR",
     })
@@ -251,8 +251,8 @@ def test_currency_falls_back_to_frankfurter(monkeypatch):
             resp.json = MagicMock(return_value={"rates": {"JPY": 15000.0}})
         return resp
 
-    monkeypatch.setattr("maverick.tools._ssrf.safe_get", _get)
-    from maverick.tools.currency import currency
+    monkeypatch.setattr("lightwork.tools._ssrf.safe_get", _get)
+    from lightwork.tools.currency import currency
     out = currency().fn({
         "op": "convert", "amount": 100, "from": "USD", "to": "JPY",
     })
@@ -266,8 +266,8 @@ def test_currency_rates_renders(monkeypatch):
     resp.json = MagicMock(return_value={"rates": {
         "EUR": 0.92, "JPY": 150.0,
     }})
-    monkeypatch.setattr("maverick.tools._ssrf.safe_get", MagicMock(return_value=resp))
-    from maverick.tools.currency import currency
+    monkeypatch.setattr("lightwork.tools._ssrf.safe_get", MagicMock(return_value=resp))
+    from lightwork.tools.currency import currency
     out = currency().fn({"op": "rates", "base": "USD"})
     assert "USD -> EUR" in out and "USD -> JPY" in out
 
@@ -275,13 +275,13 @@ def test_currency_rates_renders(monkeypatch):
 # ---------- A11y tool ----------
 
 def test_a11y_requires_op():
-    from maverick.tools.a11y import a11y
+    from lightwork.tools.a11y import a11y
     assert "op is required" in a11y().fn({})
 
 
 def test_a11y_missing_runner(monkeypatch):
     monkeypatch.setattr("shutil.which", lambda b: None)
-    from maverick.tools.a11y import a11y
+    from lightwork.tools.a11y import a11y
     out = a11y().fn({"op": "check", "url": "https://example.com"})
     assert "pa11y not found" in out
     assert "npm install" in out
@@ -302,7 +302,7 @@ def test_a11y_pa11y_groups_by_code(monkeypatch):
         return MagicMock(returncode=2, stdout=pa11y_output, stderr="")
 
     monkeypatch.setattr("subprocess.run", _run)
-    from maverick.tools.a11y import a11y
+    from lightwork.tools.a11y import a11y
     out = a11y().fn({"op": "check", "url": "https://example.com"})
     assert "3 a11y issue(s)" in out
     assert "WCAG2AA.Principle1.G18  ×2" in out
@@ -322,7 +322,7 @@ def test_a11y_axe_returns_violations(monkeypatch):
         return MagicMock(returncode=0, stdout=axe_output, stderr="")
 
     monkeypatch.setattr("subprocess.run", _run)
-    from maverick.tools.a11y import a11y
+    from lightwork.tools.a11y import a11y
     out = a11y().fn({"op": "check", "url": "https://example.com",
                      "runner": "axe"})
     assert "1 a11y violation" in out
@@ -332,7 +332,7 @@ def test_a11y_axe_returns_violations(monkeypatch):
 # ---------- Job queue ----------
 
 def test_job_queue_enqueue_claim_complete(tmp_path):
-    from maverick.job_queue import JobQueue
+    from lightwork.job_queue import JobQueue
     q = JobQueue(db_path=tmp_path / "jobs.db")
     jid = q.enqueue("run_goal", {"goal_id": 7})
     assert jid > 0
@@ -351,13 +351,13 @@ def test_job_queue_enqueue_claim_complete(tmp_path):
 
 
 def test_job_queue_claim_returns_none_when_empty(tmp_path):
-    from maverick.job_queue import JobQueue
+    from lightwork.job_queue import JobQueue
     q = JobQueue(db_path=tmp_path / "jobs.db")
     assert q.claim() is None
 
 
 def test_job_queue_respects_run_at(tmp_path):
-    from maverick.job_queue import JobQueue
+    from lightwork.job_queue import JobQueue
     q = JobQueue(db_path=tmp_path / "jobs.db")
     future = time.time() + 60
     jid = q.enqueue("later", {}, run_at=future)
@@ -369,7 +369,7 @@ def test_job_queue_respects_run_at(tmp_path):
 
 
 def test_job_queue_fail_reschedules(tmp_path):
-    from maverick.job_queue import JobQueue
+    from lightwork.job_queue import JobQueue
     q = JobQueue(db_path=tmp_path / "jobs.db")
     jid = q.enqueue("flaky", {})
     job = q.claim()
@@ -388,7 +388,7 @@ def test_job_queue_fail_reschedules(tmp_path):
 
 
 def test_job_queue_fail_terminal_after_max(tmp_path):
-    from maverick.job_queue import JobQueue
+    from lightwork.job_queue import JobQueue
     q = JobQueue(db_path=tmp_path / "jobs.db")
     jid = q.enqueue("doomed", {})
     # Cycle: claim, fail with retry, claim, fail with retry, ... until max.
@@ -404,7 +404,7 @@ def test_job_queue_fail_terminal_after_max(tmp_path):
 
 
 def test_job_queue_list_filters_status(tmp_path):
-    from maverick.job_queue import JobQueue
+    from lightwork.job_queue import JobQueue
     q = JobQueue(db_path=tmp_path / "jobs.db")
     a = q.enqueue("a", {})
     b = q.enqueue("b", {})
@@ -416,7 +416,7 @@ def test_job_queue_list_filters_status(tmp_path):
 
 
 def test_job_queue_purge_removes_done(tmp_path):
-    from maverick.job_queue import JobQueue
+    from lightwork.job_queue import JobQueue
     q = JobQueue(db_path=tmp_path / "jobs.db")
     jid = q.enqueue("ephemeral", {})
     q.claim()
@@ -436,8 +436,8 @@ def test_job_queue_purge_removes_done(tmp_path):
 # ---------- registration smoke ----------
 
 def test_new_tools_register(tmp_path):
-    from maverick.sandbox.local import LocalBackend
-    from maverick.tools import base_registry
+    from lightwork.sandbox.local import LocalBackend
+    from lightwork.tools import base_registry
 
     class _W:
         def open_questions(self, gid):

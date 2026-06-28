@@ -1,7 +1,7 @@
 """chaos_gameday: chaos game-day script generator."""
 from __future__ import annotations
 
-from maverick.tools.chaos_gameday import chaos_gameday
+from lightwork.tools.chaos_gameday import chaos_gameday
 
 _GRAPH = [
     {"name": "web", "deps": ["api"]},

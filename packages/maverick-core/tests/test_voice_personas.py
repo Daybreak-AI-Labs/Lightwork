@@ -1,11 +1,11 @@
 """Voice persona presets + per-language voices, and the speak-tool wiring."""
 from __future__ import annotations
 
-import maverick.voice_personas as vp
+import lightwork.voice_personas as vp
 
 
 def _cfg(monkeypatch, voice_table):
-    import maverick.config as config_mod
+    import lightwork.config as config_mod
     monkeypatch.setattr(config_mod, "load_config", lambda: {"voice": voice_table})
 
 
@@ -45,7 +45,7 @@ def test_resolve_language_fallback_and_unknown(monkeypatch):
 
 
 def test_speak_tool_applies_persona(monkeypatch, tmp_path):
-    import maverick.tools.voice as voice_mod
+    import lightwork.tools.voice as voice_mod
     _cfg(monkeypatch, {"personas": {"ops": {"backend": "openai", "voice": "echo"}}})
     spoken = {}
 

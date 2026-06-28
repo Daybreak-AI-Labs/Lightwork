@@ -20,7 +20,7 @@ def _running_job(q, *, at: float, attempts_via_claim: int = 1) -> int:
 
 
 def test_reclaim_stale_requeues_orphaned_running(tmp_path):
-    from maverick.job_queue import JobQueue
+    from lightwork.job_queue import JobQueue
     q = JobQueue(db_path=tmp_path / "jobs.db")
     jid = _running_job(q, at=1000.0)
 
@@ -39,7 +39,7 @@ def test_reclaim_stale_requeues_orphaned_running(tmp_path):
 
 
 def test_reclaim_stale_leaves_fresh_running_alone(tmp_path):
-    from maverick.job_queue import JobQueue
+    from lightwork.job_queue import JobQueue
     q = JobQueue(db_path=tmp_path / "jobs.db")
     jid = _running_job(q, at=1000.0)
 
@@ -50,7 +50,7 @@ def test_reclaim_stale_leaves_fresh_running_alone(tmp_path):
 
 
 def test_reclaim_stale_fails_poison_job_at_max_attempts(tmp_path):
-    from maverick.job_queue import JobQueue
+    from lightwork.job_queue import JobQueue
     q = JobQueue(db_path=tmp_path / "jobs.db")
     # One claim -> attempts == 1; with max_attempts=1 it's already spent.
     jid = _running_job(q, at=1000.0)
@@ -64,8 +64,8 @@ def test_reclaim_stale_fails_poison_job_at_max_attempts(tmp_path):
 
 def test_worker_reclaims_stale_jobs_on_start(tmp_path):
     """run_forever recovers a prior crash's orphaned job before draining."""
-    from maverick.job_queue import JobQueue
-    from maverick.worker import Worker
+    from lightwork.job_queue import JobQueue
+    from lightwork.worker import Worker
 
     q = JobQueue(db_path=tmp_path / "jobs.db")
     # updated_at is set to this ancient timestamp, so against real wall-clock
@@ -91,8 +91,8 @@ def test_worker_reclaims_peer_orphan_while_running(tmp_path):
     import threading
     import time
 
-    from maverick.job_queue import JobQueue
-    from maverick.worker import Worker
+    from lightwork.job_queue import JobQueue
+    from lightwork.worker import Worker
 
     q = JobQueue(db_path=tmp_path / "jobs.db")
 

@@ -29,7 +29,7 @@ def _seq_llm(text_seq: list[str]):
 
 
 def test_tree_of_thought_picks_critic_winner():
-    from maverick.tree_of_thought import plan_tree_of_thought
+    from lightwork.tree_of_thought import plan_tree_of_thought
 
     critic = json.dumps({
         "scores": [0.2, 0.9, 0.5],
@@ -45,7 +45,7 @@ def test_tree_of_thought_picks_critic_winner():
 
 
 def test_tree_of_thought_falls_back_when_critic_unparseable():
-    from maverick.tree_of_thought import plan_tree_of_thought
+    from lightwork.tree_of_thought import plan_tree_of_thought
     llm, _ = _seq_llm([
         "short",
         "a much longer candidate that should win the heuristic",
@@ -58,7 +58,7 @@ def test_tree_of_thought_falls_back_when_critic_unparseable():
 
 
 def test_tree_of_thought_n_must_be_positive():
-    from maverick.tree_of_thought import plan_tree_of_thought
+    from lightwork.tree_of_thought import plan_tree_of_thought
     llm, _ = _seq_llm([])
     try:
         plan_tree_of_thought(llm, "goal", n=0)
@@ -69,7 +69,7 @@ def test_tree_of_thought_n_must_be_positive():
 
 
 def test_tree_of_thought_single_candidate_skips_critic():
-    from maverick.tree_of_thought import plan_tree_of_thought
+    from lightwork.tree_of_thought import plan_tree_of_thought
     llm, calls = _seq_llm(["only-plan"])
     result = plan_tree_of_thought(llm, "goal", n=1)
     assert result.winning_plan == "only-plan"
@@ -78,8 +78,8 @@ def test_tree_of_thought_single_candidate_skips_critic():
 
 
 def test_tree_of_thought_reraises_budget_exceeded():
-    from maverick.budget import BudgetExceeded
-    from maverick.tree_of_thought import plan_tree_of_thought
+    from lightwork.budget import BudgetExceeded
+    from lightwork.tree_of_thought import plan_tree_of_thought
 
     class _Stub:
         def complete(self, **kwargs):
@@ -95,7 +95,7 @@ def test_tree_of_thought_reraises_budget_exceeded():
 # ---------- debate ----------
 
 def test_debate_runs_rounds_and_picks_winner():
-    from maverick.debate import DebateParticipant, run_debate
+    from lightwork.debate import DebateParticipant, run_debate
 
     def _reply(name):
         def _r(**kwargs):
@@ -125,7 +125,7 @@ def test_debate_runs_rounds_and_picks_winner():
 
 
 def test_debate_judge_unparseable_yields_draw():
-    from maverick.debate import DebateParticipant, run_debate
+    from lightwork.debate import DebateParticipant, run_debate
 
     def _reply(**kwargs):
         return _resp("argument")
@@ -142,7 +142,7 @@ def test_debate_judge_unparseable_yields_draw():
 
 
 def test_debate_requires_two_participants():
-    from maverick.debate import DebateParticipant, run_debate
+    from lightwork.debate import DebateParticipant, run_debate
     try:
         run_debate(
             "q",
@@ -156,8 +156,8 @@ def test_debate_requires_two_participants():
 
 
 def test_debate_reraises_budget_exceeded():
-    from maverick.budget import BudgetExceeded
-    from maverick.debate import DebateParticipant, run_debate
+    from lightwork.budget import BudgetExceeded
+    from lightwork.debate import DebateParticipant, run_debate
 
     def _boom(**kwargs):
         raise BudgetExceeded("$1.00 > $0.50")
@@ -188,7 +188,7 @@ def _crypto_available() -> bool:
 def test_audit_signer_writes_chained_signed_rows(tmp_path, monkeypatch):
     if not _crypto_available():
         return  # extra not installed
-    from maverick.audit import signing
+    from lightwork.audit import signing
     monkeypatch.setattr(signing, "KEY_DIR", tmp_path / "keys")
     path = tmp_path / "audit.ndjson"
     s = signing.AuditSigner(path)
@@ -203,7 +203,7 @@ def test_audit_signer_writes_chained_signed_rows(tmp_path, monkeypatch):
 def test_audit_signer_detects_tamper(tmp_path, monkeypatch):
     if not _crypto_available():
         return
-    from maverick.audit import signing
+    from lightwork.audit import signing
     monkeypatch.setattr(signing, "KEY_DIR", tmp_path / "keys")
     path = tmp_path / "audit.ndjson"
     s = signing.AuditSigner(path)
@@ -225,7 +225,7 @@ def test_audit_signer_detects_tamper(tmp_path, monkeypatch):
 def test_audit_signer_resumes_chain(tmp_path, monkeypatch):
     if not _crypto_available():
         return
-    from maverick.audit import signing
+    from lightwork.audit import signing
     monkeypatch.setattr(signing, "KEY_DIR", tmp_path / "keys")
     path = tmp_path / "audit.ndjson"
     s1 = signing.AuditSigner(path)
@@ -243,7 +243,7 @@ def test_audit_signer_resumes_chain(tmp_path, monkeypatch):
 # ---------- privacy ----------
 
 def test_anon_enabled_from_env(monkeypatch):
-    from maverick import privacy
+    from lightwork import privacy
     monkeypatch.setenv("MAVERICK_ANON", "1")
     assert privacy.anon_enabled() is True
     monkeypatch.setenv("MAVERICK_ANON", "0")
@@ -252,20 +252,20 @@ def test_anon_enabled_from_env(monkeypatch):
 
 
 def test_anonymize_dict_hashes_user_id():
-    from maverick.privacy import anonymize_dict
+    from lightwork.privacy import anonymize_dict
     out = anonymize_dict({"user_id": "alice@example.com", "ok": 1})
     assert out["user_id"].startswith("user_id#")
     assert out["ok"] == 1
 
 
 def test_anonymize_dict_basename_for_path():
-    from maverick.privacy import anonymize_field
+    from lightwork.privacy import anonymize_field
     assert anonymize_field("path", "/etc/passwd") == "passwd"
     assert anonymize_field("filename", "/var/log/x.log") == "x.log"
 
 
 def test_anonymize_hash_is_stable():
-    from maverick.privacy import _hash_id  # type: ignore[attr-defined]
+    from lightwork.privacy import _hash_id  # type: ignore[attr-defined]
     a = _hash_id("alice", prefix="user_id")
     b = _hash_id("alice", prefix="user_id")
     assert a == b
@@ -273,7 +273,7 @@ def test_anonymize_hash_is_stable():
 
 
 def test_anonymize_scrubs_text_keys():
-    from maverick.privacy import anonymize_dict
+    from lightwork.privacy import anonymize_dict
     out = anonymize_dict({"summary": "contact me at a@b.com"})
     # PII detector should redact the email; if not, at minimum the
     # field is still processed and returns a string.
@@ -286,7 +286,7 @@ def test_anonymize_scrubs_nested_message_content_blocks():
     # verbatim. Uses the unconditional home-path rewrite for a deterministic check.
     from pathlib import Path
 
-    from maverick.privacy import anonymize_dict
+    from lightwork.privacy import anonymize_dict
 
     home = str(Path.home())
     payload = {
@@ -305,7 +305,7 @@ def test_anonymize_scrubs_nested_message_content_blocks():
 # ---------- unicode filter ----------
 
 def test_unicode_strips_zero_width():
-    from maverick.safety.unicode_filter import normalize
+    from lightwork.safety.unicode_filter import normalize
     text = "hello​world‍!"
     r = normalize(text)
     assert r.cleaned == "helloworld!"
@@ -314,7 +314,7 @@ def test_unicode_strips_zero_width():
 
 
 def test_unicode_strips_bidi_overrides():
-    from maverick.safety.unicode_filter import normalize
+    from lightwork.safety.unicode_filter import normalize
     # The Trojan Source RLO attack
     r = normalize("safe‮text")
     assert "‮" not in r.cleaned
@@ -322,7 +322,7 @@ def test_unicode_strips_bidi_overrides():
 
 
 def test_unicode_strips_tag_block():
-    from maverick.safety.unicode_filter import normalize
+    from lightwork.safety.unicode_filter import normalize
     # E0041 = TAG LATIN CAPITAL LETTER A — invisible
     r = normalize("a\U000E0041b")
     assert r.cleaned == "ab"
@@ -330,14 +330,14 @@ def test_unicode_strips_tag_block():
 
 
 def test_unicode_nfkc_normalizes_lookalikes():
-    from maverick.safety.unicode_filter import normalize
+    from lightwork.safety.unicode_filter import normalize
     # 'ﬁ' (U+FB01, FI ligature) -> 'fi' after NFKC.
     r = normalize("oﬁce")
     assert r.cleaned == "ofice"
 
 
 def test_unicode_clean_text_is_untouched():
-    from maverick.safety.unicode_filter import normalize
+    from lightwork.safety.unicode_filter import normalize
     r = normalize("plain ascii hello")
     assert r.cleaned == "plain ascii hello"
     assert r.had_dangerous is False
@@ -345,7 +345,7 @@ def test_unicode_clean_text_is_untouched():
 
 
 def test_has_dangerous_unicode_quick_check():
-    from maverick.safety.unicode_filter import has_dangerous_unicode
+    from lightwork.safety.unicode_filter import has_dangerous_unicode
     assert has_dangerous_unicode("ok​nope") is True
     assert has_dangerous_unicode("plain text") is False
     assert has_dangerous_unicode("") is False
@@ -354,12 +354,12 @@ def test_has_dangerous_unicode_quick_check():
 # ---------- linear tool ----------
 
 def test_linear_requires_op():
-    from maverick.tools.linear import linear
+    from lightwork.tools.linear import linear
     assert "op is required" in linear().fn({})
 
 
 def test_linear_unknown_op_returns_validation():
-    from maverick.tools.linear import linear
+    from lightwork.tools.linear import linear
     out = linear().fn({"op": "garbage"})
     assert "unknown op" in out or "ERROR" in out
 
@@ -369,7 +369,7 @@ def test_linear_missing_key(monkeypatch):
     fake = types.ModuleType("httpx")
     fake.post = MagicMock()
     monkeypatch.setitem(sys.modules, "httpx", fake)
-    from maverick.tools.linear import linear
+    from lightwork.tools.linear import linear
     out = linear().fn({"op": "search", "query": "bug"})
     assert "LINEAR_API_KEY" in out
 
@@ -389,7 +389,7 @@ def test_linear_search_calls_graphql(monkeypatch):
     fake_httpx.post = MagicMock(return_value=fake_resp)
     monkeypatch.setitem(sys.modules, "httpx", fake_httpx)
 
-    from maverick.tools.linear import linear
+    from lightwork.tools.linear import linear
     out = linear().fn({"op": "search", "query": "crash"})
     assert "ENG-1" in out
     assert "Crash on load" in out
@@ -417,7 +417,7 @@ def test_linear_search_follows_pageinfo_cursor(monkeypatch):
     fake_httpx.post = post
     monkeypatch.setitem(sys.modules, "httpx", fake_httpx)
 
-    from maverick.tools.linear import linear
+    from lightwork.tools.linear import linear
     out = linear().fn({"op": "search", "query": "crash", "limit": 50})
     assert "ENG-1" in out and "ENG-2" in out
     assert post.call_count == 2
@@ -425,7 +425,7 @@ def test_linear_search_follows_pageinfo_cursor(monkeypatch):
 
 
 def test_linear_create_requires_team():
-    from maverick.tools.linear import linear
+    from lightwork.tools.linear import linear
     out = linear().fn({"op": "create", "title": "x"})
     assert "title and team" in out
 
@@ -433,12 +433,12 @@ def test_linear_create_requires_team():
 # ---------- jira tool ----------
 
 def test_jira_requires_op():
-    from maverick.tools.jira import jira
+    from lightwork.tools.jira import jira
     assert "op is required" in jira().fn({})
 
 
 def test_jira_unknown_op():
-    from maverick.tools.jira import jira
+    from lightwork.tools.jira import jira
     out = jira().fn({"op": "garbage"})
     assert "unknown op" in out or "ERROR" in out
 
@@ -450,13 +450,13 @@ def test_jira_missing_config(monkeypatch):
     fake = types.ModuleType("httpx")
     fake.Client = MagicMock()
     monkeypatch.setitem(sys.modules, "httpx", fake)
-    from maverick.tools.jira import jira
+    from lightwork.tools.jira import jira
     out = jira().fn({"op": "search", "jql": "project = X"})
     assert "JIRA_URL" in out
 
 
 def test_jira_create_requires_summary():
-    from maverick.tools.jira import jira
+    from lightwork.tools.jira import jira
     out = jira().fn({"op": "create", "project": "PROJ"})
     assert "project and summary" in out
 
@@ -487,7 +487,7 @@ def test_jira_search_calls_rest(monkeypatch):
     fake_httpx.Client = MagicMock(return_value=fake_client)
     monkeypatch.setitem(sys.modules, "httpx", fake_httpx)
 
-    from maverick.tools.jira import jira
+    from lightwork.tools.jira import jira
     out = jira().fn({"op": "search", "jql": "assignee = currentUser()"})
     assert "PROJ-1" in out
     assert "fix the thing" in out
@@ -523,7 +523,7 @@ def test_jira_search_follows_next_page_token(monkeypatch):
     fake_httpx.Client = MagicMock(return_value=fake_client)
     monkeypatch.setitem(sys.modules, "httpx", fake_httpx)
 
-    from maverick.tools.jira import jira
+    from lightwork.tools.jira import jira
     out = jira().fn({"op": "search", "jql": "project = PROJ", "limit": 50})
     assert "PROJ-1" in out and "PROJ-2" in out
     assert fake_client.post.call_count == 2
@@ -548,7 +548,7 @@ def test_jira_get_handles_404(monkeypatch):
     fake_httpx.Client = MagicMock(return_value=fake_client)
     monkeypatch.setitem(sys.modules, "httpx", fake_httpx)
 
-    from maverick.tools.jira import jira
+    from lightwork.tools.jira import jira
     out = jira().fn({"op": "get", "issue_key": "PROJ-999"})
     assert "not found" in out
 
@@ -557,8 +557,8 @@ def test_jira_get_handles_404(monkeypatch):
 
 def test_linear_and_jira_register(tmp_path):
     """Both tools register cleanly via base_registry."""
-    from maverick.sandbox.local import LocalBackend
-    from maverick.tools import base_registry
+    from lightwork.sandbox.local import LocalBackend
+    from lightwork.tools import base_registry
 
     class _W:
         def open_questions(self, gid):

@@ -26,7 +26,7 @@ def test_readme_lists_all_four_platforms():
 
 def test_kubernetes_manifest_invariants():
     # PyYAML isn't a core dep; parse with a light regex contract instead.
-    text = (_RA / "kubernetes" / "maverick.yaml").read_text()
+    text = (_RA / "kubernetes" / "lightwork.yaml").read_text()
     docs = [d for d in text.split("\n---\n") if d.strip()]
     assert len(docs) == 3  # PVC + Deployment + Service
     assert "kind: PersistentVolumeClaim" in text
@@ -73,7 +73,7 @@ def test_devcontainer_parses_and_bootstraps():
     assert "post-create.sh" in data["postCreateCommand"]
     script = (dc_dir / "post-create.sh").read_text()
     # Mirrors CI's editable install so tests run out of the box.
-    assert "pip install -e ./packages/maverick-core" in script
+    assert "pip install -e ./packages/lightwork-core" in script
     assert "pytest" in script
 
 

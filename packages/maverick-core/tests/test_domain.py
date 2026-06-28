@@ -1,8 +1,8 @@
 """Domain packs: schema, loader, and capability derivation (agent factory)."""
 from __future__ import annotations
 
-from maverick.capability import Capability
-from maverick.domain import (
+from lightwork.capability import Capability
+from lightwork.domain import (
     DomainProfile,
     WorkflowStep,
     available_domains,
@@ -336,7 +336,7 @@ class TestBuiltinCatalogCache:
     /workflows render). Tenant overrides must still apply live."""
 
     def test_builtin_catalog_is_memoised(self):
-        from maverick import domain as d
+        from lightwork import domain as d
         first = d.builtin_domains()
         second = d.builtin_domains()
         # Same cached dict object: not re-parsed from disk on the second call.

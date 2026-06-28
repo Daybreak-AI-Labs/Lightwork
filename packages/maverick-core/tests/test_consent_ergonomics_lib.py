@@ -1,7 +1,7 @@
 """Consent ergonomics: batching, plain-language, session memory, dry-run, ask."""
 from __future__ import annotations
 
-from maverick.consent_ergonomics import (
+from lightwork.consent_ergonomics import (
     PendingConsent,
     SessionConsentMemory,
     ask,
@@ -223,7 +223,7 @@ def test_dry_run_splits_remembered_from_would_ask():
 def test_default_consent_fn_is_the_real_primitive(monkeypatch):
     # When no consent_fn is injected, ask() must use safety.consent.require_consent
     # (composition, not a bypass). We patch the real symbol and confirm it's hit.
-    import maverick.safety.consent as consent
+    import lightwork.safety.consent as consent
     seen = {}
 
     def fake(action, *, risk="medium", scope=None, detail=None, **kw):

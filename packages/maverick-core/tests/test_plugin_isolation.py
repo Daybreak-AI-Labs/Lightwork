@@ -13,7 +13,7 @@ import textwrap
 import types
 
 import pytest
-from maverick.plugin_isolation import isolation_mode, run_isolated
+from lightwork.plugin_isolation import isolation_mode, run_isolated
 
 _PLUGIN = textwrap.dedent("""
     import sys
@@ -50,7 +50,7 @@ def plugin_on_path(tmp_path, monkeypatch):
 
 def test_mode_default_none(monkeypatch):
     monkeypatch.delenv("MAVERICK_PLUGIN_ISOLATION", raising=False)
-    import maverick.config as config_mod
+    import lightwork.config as config_mod
     monkeypatch.setattr(config_mod, "load_config", dict)
     assert isolation_mode() == "none"
     monkeypatch.setenv("MAVERICK_PLUGIN_ISOLATION", "subprocess")
@@ -112,7 +112,7 @@ def test_subprocess_timeout(plugin_on_path, tmp_path, monkeypatch):
 
 
 @pytest.mark.skipif(
-    not pytest.importorskip("maverick.plugin_isolation")._subinterpreters_available(),
+    not pytest.importorskip("lightwork.plugin_isolation")._subinterpreters_available(),
     reason="subinterpreters unavailable on this Python",
 )
 def test_subinterpreter_isolates_module_state(plugin_on_path):
@@ -138,7 +138,7 @@ def test_discover_tools_wraps_with_isolation(tmp_path, monkeypatch):
     """With [plugins] isolation on, a discovered tool's fn runs isolated."""
     import types
 
-    from maverick import plugins as plugins_mod
+    from lightwork import plugins as plugins_mod
 
     (tmp_path / "iso_tool_plugin.py").write_text(
         "import sys\n"
@@ -163,7 +163,7 @@ def test_discover_tools_wraps_with_isolation(tmp_path, monkeypatch):
             return iso_tool_plugin.factory
 
     monkeypatch.setattr(plugins_mod, "_entry_points",
-                        lambda group: [_EP()] if group == "maverick.tools" else [])
+                        lambda group: [_EP()] if group == "lightwork.tools" else [])
     monkeypatch.setattr(plugins_mod, "_allowed_plugin_names", lambda: None)
     monkeypatch.setattr(plugins_mod, "_permission_policy", lambda: (set(), False))
     monkeypatch.setenv("MAVERICK_PLUGIN_ISOLATION", "subprocess")
@@ -182,7 +182,7 @@ def test_discover_tools_wraps_with_isolation(tmp_path, monkeypatch):
 def test_discover_tools_direct_when_isolation_off(tmp_path, monkeypatch):
     import types
 
-    from maverick import plugins as plugins_mod
+    from lightwork import plugins as plugins_mod
 
     (tmp_path / "direct_tool_plugin.py").write_text(
         "import types\n"
@@ -204,11 +204,11 @@ def test_discover_tools_direct_when_isolation_off(tmp_path, monkeypatch):
             return direct_tool_plugin.factory
 
     monkeypatch.setattr(plugins_mod, "_entry_points",
-                        lambda group: [_EP()] if group == "maverick.tools" else [])
+                        lambda group: [_EP()] if group == "lightwork.tools" else [])
     monkeypatch.setattr(plugins_mod, "_allowed_plugin_names", lambda: None)
     monkeypatch.setattr(plugins_mod, "_permission_policy", lambda: (set(), False))
     monkeypatch.delenv("MAVERICK_PLUGIN_ISOLATION", raising=False)
-    import maverick.config as config_mod
+    import lightwork.config as config_mod
     monkeypatch.setattr(config_mod, "load_config", dict)
 
     tools = plugins_mod.discover_tools()

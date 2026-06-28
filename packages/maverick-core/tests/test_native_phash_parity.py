@@ -9,7 +9,7 @@ the native-parity tests skip and only the pure-Python sanity check runs.
 from __future__ import annotations
 
 import pytest
-from maverick import perceptual_hash as ph
+from lightwork import perceptual_hash as ph
 
 NATIVE = getattr(ph, "_native", None) is not None and hasattr(
     getattr(ph, "_native", None), "average_hash_from_pixels"

@@ -1,7 +1,7 @@
 """Federated audit-log verification: cross-node reciprocity over signed logs."""
 from __future__ import annotations
 
-from maverick.audit import federation as fed
+from lightwork.audit import federation as fed
 
 
 def _sent(node, peer, corr):

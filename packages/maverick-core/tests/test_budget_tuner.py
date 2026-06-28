@@ -2,9 +2,9 @@
 from __future__ import annotations
 
 from click.testing import CliRunner
-from maverick import budget_tuner as bt
-from maverick.cli import main
-from maverick.world_model import WorldModel
+from lightwork import budget_tuner as bt
+from lightwork.cli import main
+from lightwork.world_model import WorldModel
 
 # ---- pure math ----
 

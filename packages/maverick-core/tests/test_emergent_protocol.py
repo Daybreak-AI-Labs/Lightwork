@@ -4,7 +4,7 @@ English so nothing is ever hidden.
 """
 from __future__ import annotations
 
-from maverick import emergent_protocol as ep
+from lightwork import emergent_protocol as ep
 
 CORPUS = [
     "spawning sub-agent for research task",
@@ -65,7 +65,7 @@ def test_store_roundtrip_and_audit(tmp_path):
 
 def test_enabled_off_by_default(monkeypatch):
     monkeypatch.delenv("MAVERICK_EMERGENT_PROTOCOL", raising=False)
-    monkeypatch.setattr("maverick.config.get_emergent_protocol", lambda: {"enable": False})
+    monkeypatch.setattr("lightwork.config.get_emergent_protocol", lambda: {"enable": False})
     assert ep.enabled() is False
     monkeypatch.setenv("MAVERICK_EMERGENT_PROTOCOL", "1")
     assert ep.enabled() is True
@@ -101,7 +101,7 @@ def test_store_concurrent_updates_stay_valid(tmp_path):
     must leave a valid, fully-readable book and no stray temp."""
     import threading
 
-    from maverick import emergent_protocol as ep
+    from lightwork import emergent_protocol as ep
 
     p = tmp_path / "codebook.json"
     n = 12

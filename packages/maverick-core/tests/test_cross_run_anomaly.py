@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import types
 
-from maverick.cross_run_anomaly import (
+from lightwork.cross_run_anomaly import (
     Anomaly,
     baseline,
     detect,

@@ -4,7 +4,7 @@ from __future__ import annotations
 import tarfile
 
 import pytest
-from maverick.workspace_snapshot import (
+from lightwork.workspace_snapshot import (
     create_snapshot,
     list_snapshots,
     restore_snapshot,

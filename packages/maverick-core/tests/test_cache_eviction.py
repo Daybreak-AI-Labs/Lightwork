@@ -1,7 +1,7 @@
 """cache_eviction: LRU / LFU cache eviction simulator."""
 from __future__ import annotations
 
-from maverick.tools.cache_eviction import cache_eviction
+from lightwork.tools.cache_eviction import cache_eviction
 
 
 def _sim(**kw):

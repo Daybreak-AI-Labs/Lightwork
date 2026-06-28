@@ -10,7 +10,7 @@ from __future__ import annotations
 
 class TestExtractUnifiedDiffGitFormat:
     def test_diff_git_prefix_before_minus_plus_passes(self):
-        from maverick.coding_mode import extract_unified_diff
+        from lightwork.coding_mode import extract_unified_diff
         text = (
             "diff --git a/foo.py b/foo.py\n"
             "index abc..def 100644\n"
@@ -22,7 +22,7 @@ class TestExtractUnifiedDiffGitFormat:
         assert "+new" in out
 
     def test_rename_only_diff_returns_diff(self):
-        from maverick.coding_mode import extract_unified_diff
+        from lightwork.coding_mode import extract_unified_diff
         text = (
             "diff --git a/old.py b/new.py\n"
             "similarity index 100%\n"
@@ -36,7 +36,7 @@ class TestExtractUnifiedDiffGitFormat:
         assert "rename from old.py" in out
 
     def test_crlf_input_is_normalised(self):
-        from maverick.coding_mode import extract_unified_diff
+        from lightwork.coding_mode import extract_unified_diff
         text = (
             "--- a/foo.py\r\n+++ b/foo.py\r\n@@ -1 +1 @@\r\n-old\r\n+new\r\n"
         )
@@ -53,7 +53,7 @@ class TestValidatePatchNewFile:
         # Construct a tiny git repo so the function can attempt git apply.
         import subprocess
 
-        from maverick.coding_mode import validate_patch
+        from lightwork.coding_mode import validate_patch
         subprocess.run(["git", "init", "-q", str(tmp_path)], check=True)
         subprocess.run(["git", "-C", str(tmp_path), "config", "commit.gpgsign", "false"], check=True)
         subprocess.run(["git", "-C", str(tmp_path), "config", "user.email", "t@t"], check=True)
@@ -85,7 +85,7 @@ class TestValidatePatchNewFile:
 
 class TestSandboxExecTimeout:
     def test_local_backend_accepts_timeout_kwarg(self, tmp_path):
-        from maverick.sandbox import LocalBackend
+        from lightwork.sandbox import LocalBackend
         sb = LocalBackend(workdir=tmp_path, timeout=1.0)
         # A quick command should succeed even when we hand it a long timeout.
         r = sb.exec("echo hello", timeout=10.0)
@@ -93,7 +93,7 @@ class TestSandboxExecTimeout:
         assert "hello" in r.stdout
 
     def test_local_backend_timeout_kwarg_overrides_self_timeout(self, tmp_path):
-        from maverick.sandbox import LocalBackend
+        from lightwork.sandbox import LocalBackend
         # self.timeout would be 0.1s, but the call passes 5s, so a
         # 0.5s sleep completes successfully (no TIMEOUT).
         # Wave 11: use python -c for cross-platform sleep (Unix `sleep`
@@ -113,7 +113,7 @@ class TestSandboxExecTimeout:
 
 class TestDetectRunnerLanguageHint:
     def test_jest_monorepo_with_pyproject_picks_jest_when_hinted(self, tmp_path):
-        from maverick.coding_mode import detect_test_runner
+        from lightwork.coding_mode import detect_test_runner
         (tmp_path / "pyproject.toml").write_text("[tool.pre-commit]\n")
         (tmp_path / "package.json").write_text('{"scripts": {"test": "jest"}}')
         # No hint: order-based pick (pytest wins, wrong for JS instance).
@@ -122,12 +122,12 @@ class TestDetectRunnerLanguageHint:
         assert detect_test_runner(tmp_path, language="javascript") == "jest"
 
     def test_python_hint_in_pure_python_repo_still_picks_pytest(self, tmp_path):
-        from maverick.coding_mode import detect_test_runner
+        from lightwork.coding_mode import detect_test_runner
         (tmp_path / "pyproject.toml").write_text("[project]\n")
         assert detect_test_runner(tmp_path, language="python") == "pytest"
 
     def test_java_hint_with_gradle_markers_picks_gradle(self, tmp_path):
-        from maverick.coding_mode import detect_test_runner
+        from lightwork.coding_mode import detect_test_runner
         (tmp_path / "build.gradle").write_text("plugins {}\n")
         assert detect_test_runner(tmp_path, language="java") == "gradle"
 
@@ -136,7 +136,7 @@ class TestDetectRunnerLanguageHint:
 
 class TestTemperatureWiredThrough:
     def test_build_request_includes_temperature_when_env_set(self, monkeypatch):
-        from maverick.providers.anthropic_provider import AnthropicClient
+        from lightwork.providers.anthropic_provider import AnthropicClient
         # Avoid touching the real anthropic client constructor.
         monkeypatch.setenv("ANTHROPIC_API_KEY", "test")
         monkeypatch.setenv("MAVERICK_TEMPERATURE", "0.85")
@@ -152,7 +152,7 @@ class TestTemperatureWiredThrough:
         assert kwargs.get("temperature") == 0.85
 
     def test_build_request_no_temperature_when_unset(self, monkeypatch):
-        from maverick.providers.anthropic_provider import AnthropicClient
+        from lightwork.providers.anthropic_provider import AnthropicClient
         monkeypatch.setenv("ANTHROPIC_API_KEY", "test")
         monkeypatch.delenv("MAVERICK_TEMPERATURE", raising=False)
         client = AnthropicClient()
@@ -168,7 +168,7 @@ class TestTemperatureWiredThrough:
 
     def test_build_request_no_temperature_when_thinking_enabled(self, monkeypatch):
         # Thinking models reject explicit temperature; gate must hold.
-        from maverick.providers.anthropic_provider import AnthropicClient
+        from lightwork.providers.anthropic_provider import AnthropicClient
         monkeypatch.setenv("ANTHROPIC_API_KEY", "test")
         monkeypatch.setenv("MAVERICK_TEMPERATURE", "0.9")
         client = AnthropicClient()
@@ -192,7 +192,7 @@ class TestStrReplaceEditor:
         return _Sandbox()
 
     def test_view_file_returns_numbered_lines(self, tmp_path):
-        from maverick.tools.str_edit import str_replace_editor
+        from lightwork.tools.str_edit import str_replace_editor
         (tmp_path / "foo.py").write_text("a\nb\nc\n")
         tool = str_replace_editor(self._make_sandbox(tmp_path))
         out = tool.fn({"command": "view", "path": "foo.py"})
@@ -201,7 +201,7 @@ class TestStrReplaceEditor:
         assert "3: c" in out
 
     def test_str_replace_exact_match_succeeds(self, tmp_path):
-        from maverick.tools.str_edit import str_replace_editor
+        from lightwork.tools.str_edit import str_replace_editor
         (tmp_path / "foo.py").write_text("hello world\n")
         tool = str_replace_editor(self._make_sandbox(tmp_path))
         out = tool.fn({
@@ -212,7 +212,7 @@ class TestStrReplaceEditor:
         assert (tmp_path / "foo.py").read_text() == "hello universe\n"
 
     def test_str_replace_no_match_refuses(self, tmp_path):
-        from maverick.tools.str_edit import str_replace_editor
+        from lightwork.tools.str_edit import str_replace_editor
         (tmp_path / "foo.py").write_text("hello world\n")
         tool = str_replace_editor(self._make_sandbox(tmp_path))
         out = tool.fn({
@@ -225,7 +225,7 @@ class TestStrReplaceEditor:
         assert (tmp_path / "foo.py").read_text() == "hello world\n"
 
     def test_str_replace_ambiguous_refuses(self, tmp_path):
-        from maverick.tools.str_edit import str_replace_editor
+        from lightwork.tools.str_edit import str_replace_editor
         (tmp_path / "foo.py").write_text("x = 1\nx = 1\n")
         tool = str_replace_editor(self._make_sandbox(tmp_path))
         out = tool.fn({
@@ -238,7 +238,7 @@ class TestStrReplaceEditor:
         assert (tmp_path / "foo.py").read_text() == "x = 1\nx = 1\n"
 
     def test_str_replace_whitespace_drift_hint(self, tmp_path):
-        from maverick.tools.str_edit import str_replace_editor
+        from lightwork.tools.str_edit import str_replace_editor
         # File has trailing whitespace on the line; user supplies the
         # trimmed version (does NOT match byte-for-byte, but DOES match
         # after rstrip-per-line normalisation).
@@ -253,7 +253,7 @@ class TestStrReplaceEditor:
         assert "whitespace" in out.lower()
 
     def test_create_new_file(self, tmp_path):
-        from maverick.tools.str_edit import str_replace_editor
+        from lightwork.tools.str_edit import str_replace_editor
         tool = str_replace_editor(self._make_sandbox(tmp_path))
         out = tool.fn({
             "command": "create", "path": "new.py",
@@ -263,7 +263,7 @@ class TestStrReplaceEditor:
         assert (tmp_path / "new.py").read_text() == "x = 42\n"
 
     def test_create_refuses_overwrite(self, tmp_path):
-        from maverick.tools.str_edit import str_replace_editor
+        from lightwork.tools.str_edit import str_replace_editor
         (tmp_path / "existing.py").write_text("old\n")
         tool = str_replace_editor(self._make_sandbox(tmp_path))
         out = tool.fn({
@@ -283,7 +283,7 @@ class TestReadFileOpaqueGuard:
         return _Sandbox()
 
     def test_read_test_file_blocked_when_opaque(self, tmp_path, monkeypatch):
-        from maverick.tools.fs import read_file
+        from lightwork.tools.fs import read_file
         (tmp_path / "tests").mkdir()
         (tmp_path / "tests" / "test_foo.py").write_text("assert x == 42")
         monkeypatch.setenv("MAVERICK_BENCHMARK_OPAQUE", "1")
@@ -294,7 +294,7 @@ class TestReadFileOpaqueGuard:
         assert "x == 42" not in out
 
     def test_read_production_file_still_works(self, tmp_path, monkeypatch):
-        from maverick.tools.fs import read_file
+        from lightwork.tools.fs import read_file
         (tmp_path / "src.py").write_text("def f(): return 42")
         monkeypatch.setenv("MAVERICK_BENCHMARK_OPAQUE", "1")
         monkeypatch.setenv("MAVERICK_CODING_MODE", "1")
@@ -303,7 +303,7 @@ class TestReadFileOpaqueGuard:
         assert "return 42" in out
 
     def test_opaque_off_allows_test_reads(self, tmp_path, monkeypatch):
-        from maverick.tools.fs import read_file
+        from lightwork.tools.fs import read_file
         (tmp_path / "tests").mkdir()
         (tmp_path / "tests" / "test_foo.py").write_text("assert x == 42")
         monkeypatch.setenv("MAVERICK_BENCHMARK_OPAQUE", "0")
@@ -322,12 +322,12 @@ class TestShellOpaqueGuard:
             timeout = 30.0
 
             def exec(self, cmd):
-                from maverick.sandbox.local import ExecResult
+                from lightwork.sandbox.local import ExecResult
                 return ExecResult(stdout="ran: " + cmd, stderr="", exit_code=0)
         return _Sandbox()
 
     def test_git_log_patch_blocked(self, tmp_path, monkeypatch):
-        from maverick.tools.shell import shell
+        from lightwork.tools.shell import shell
         monkeypatch.setenv("MAVERICK_BENCHMARK_OPAQUE", "1")
         monkeypatch.setenv("MAVERICK_CODING_MODE", "1")
         tool = shell(self._make_sandbox(tmp_path))
@@ -336,7 +336,7 @@ class TestShellOpaqueGuard:
         assert "ran:" not in out
 
     def test_git_show_blocked(self, tmp_path, monkeypatch):
-        from maverick.tools.shell import shell
+        from lightwork.tools.shell import shell
         monkeypatch.setenv("MAVERICK_BENCHMARK_OPAQUE", "1")
         monkeypatch.setenv("MAVERICK_CODING_MODE", "1")
         tool = shell(self._make_sandbox(tmp_path))
@@ -344,7 +344,7 @@ class TestShellOpaqueGuard:
         assert "blocked" in out.lower()
 
     def test_normal_git_diff_allowed(self, tmp_path, monkeypatch):
-        from maverick.tools.shell import shell
+        from lightwork.tools.shell import shell
         monkeypatch.setenv("MAVERICK_BENCHMARK_OPAQUE", "1")
         monkeypatch.setenv("MAVERICK_CODING_MODE", "1")
         tool = shell(self._make_sandbox(tmp_path))
@@ -354,7 +354,7 @@ class TestShellOpaqueGuard:
         assert "blocked" not in out.lower()
 
     def test_pytest_allowed(self, tmp_path, monkeypatch):
-        from maverick.tools.shell import shell
+        from lightwork.tools.shell import shell
         monkeypatch.setenv("MAVERICK_BENCHMARK_OPAQUE", "1")
         monkeypatch.setenv("MAVERICK_CODING_MODE", "1")
         tool = shell(self._make_sandbox(tmp_path))
@@ -362,7 +362,7 @@ class TestShellOpaqueGuard:
         assert "ran:" in out
 
     def test_opaque_off_allows_git_log_patch(self, tmp_path, monkeypatch):
-        from maverick.tools.shell import shell
+        from lightwork.tools.shell import shell
         monkeypatch.setenv("MAVERICK_BENCHMARK_OPAQUE", "0")
         monkeypatch.setenv("MAVERICK_CODING_MODE", "1")
         tool = shell(self._make_sandbox(tmp_path))
@@ -379,7 +379,7 @@ class TestLoadInstancesTolerant:
         from pathlib import Path
         # Resolve relative to this test file so the path is correct in any
         # checkout location (local dev, CI runner, etc.).
-        # tests/test_wave10.py → packages/maverick-core/tests → repo root → benchmarks/swe_bench.py
+        # tests/test_wave10.py → packages/lightwork-core/tests → repo root → benchmarks/swe_bench.py
         repo_root = Path(__file__).resolve().parents[3]
         p = repo_root / "benchmarks" / "swe_bench.py"
         assert p.exists(), f"benchmarks/swe_bench.py not found at {p}"
@@ -405,7 +405,7 @@ class TestLoadInstancesTolerant:
 class TestPredictedPatchExtraction:
     def test_extract_unified_diff_used_in_row_construction(self):
         # Smoke: the import works and the function name matches.
-        from maverick.coding_mode import extract_unified_diff
+        from lightwork.coding_mode import extract_unified_diff
         prose = (
             "DONE.\n\nHere's the fix:\n\n```diff\n"
             "--- a/foo.py\n+++ b/foo.py\n@@ -1 +1 @@\n-old\n+new\n"
@@ -421,7 +421,7 @@ class TestPredictedPatchExtraction:
 
 class TestCodingModeTemplate:
     def test_template_mentions_three_phases(self):
-        from maverick.coding_mode import CODER_CODING_MODE_TEMPLATE
+        from lightwork.coding_mode import CODER_CODING_MODE_TEMPLATE
         # Wave 10 (B3): LOCALIZE → EDIT → VERIFY is the canonical
         # OpenHands / Aider playbook. Pinning the template guarantees
         # the orchestrator instructs the model in this order.
@@ -430,5 +430,5 @@ class TestCodingModeTemplate:
         assert "VERIFY" in CODER_CODING_MODE_TEMPLATE
 
     def test_template_recommends_str_replace_editor(self):
-        from maverick.coding_mode import CODER_CODING_MODE_TEMPLATE
+        from lightwork.coding_mode import CODER_CODING_MODE_TEMPLATE
         assert "str_replace_editor" in CODER_CODING_MODE_TEMPLATE

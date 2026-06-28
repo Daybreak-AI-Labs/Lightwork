@@ -13,7 +13,7 @@ from __future__ import annotations
 def _capture_choices(monkeypatch, *, show_experimental: bool) -> list[str]:
     """Drive pick_channels, answer the experimental gate, return the
     channel choices the checkbox was offered (and pick nothing)."""
-    from maverick_installer import wizard
+    from lightwork_installer import wizard
 
     seen: list[str] = []
 
@@ -63,7 +63,7 @@ def test_experimental_channels_shown_and_marked_when_opted_in(monkeypatch):
 
 
 def test_experimental_set_matches_catalog(monkeypatch):
-    from maverick_installer.wizard import CHANNELS, EXPERIMENTAL_CHANNELS
+    from lightwork_installer.wizard import CHANNELS, EXPERIMENTAL_CHANNELS
 
     catalog_ids = {c[0] for c in CHANNELS}
     assert catalog_ids >= EXPERIMENTAL_CHANNELS

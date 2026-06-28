@@ -9,7 +9,7 @@ import os
 import stat
 
 import pytest
-from maverick.channel_federation import (
+from lightwork.channel_federation import (
     MAX_TEXT_CHARS,
     SCHEMA,
     FedMessage,
@@ -21,7 +21,7 @@ from maverick.channel_federation import (
     make_envelope,
     pseudonymize,
 )
-from maverick.federation_envelope import FederationError
+from lightwork.federation_envelope import FederationError
 
 SECRET = "per-pair-secret"
 
@@ -162,7 +162,7 @@ def test_inbound_rejects_without_crypto(monkeypatch):
     handled: list = []
     env = _envelope()
     applier = _applier(handled, env)
-    import maverick.audit.signing as audit_signing
+    import lightwork.audit.signing as audit_signing
     monkeypatch.setattr(audit_signing, "_have_crypto", lambda: False)
     out = applier.apply(env)
     assert not out["applied"] and "cryptography" in out["reason"]

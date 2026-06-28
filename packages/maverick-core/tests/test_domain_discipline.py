@@ -1,13 +1,13 @@
 """Suite operating discipline + department memory at specialist spawn."""
 from __future__ import annotations
 
-from maverick import domain_discipline, dreaming, reflexion
-from maverick.domain import DomainProfile, _department_memory, lint_profile
+from lightwork import domain_discipline, dreaming, reflexion
+from lightwork.domain import DomainProfile, _department_memory, lint_profile
 
 
 class TestDiscipline:
     def test_every_suite_has_a_block(self):
-        from maverick.domain import SUITE_PREFIXES
+        from lightwork.domain import SUITE_PREFIXES
         assert set(domain_discipline.SUITE_DISCIPLINE) == set(
             SUITE_PREFIXES.values(),
         )
@@ -39,11 +39,11 @@ class TestDiscipline:
 
 class TestSpawnIntegration:
     def _ctx(self, tmp_path):
-        from maverick.blackboard import Blackboard
-        from maverick.budget import Budget
-        from maverick.sandbox import LocalBackend
-        from maverick.swarm import SwarmContext
-        from maverick.world_model import WorldModel
+        from lightwork.blackboard import Blackboard
+        from lightwork.budget import Budget
+        from lightwork.sandbox import LocalBackend
+        from lightwork.swarm import SwarmContext
+        from lightwork.world_model import WorldModel
 
         world = WorldModel(tmp_path / "world.db")
         return SwarmContext(
@@ -54,7 +54,7 @@ class TestSpawnIntegration:
 
     def test_spawned_specialist_carries_discipline(self, tmp_path, monkeypatch):
         monkeypatch.delenv("MAVERICK_DOMAIN_DISCIPLINE", raising=False)
-        from maverick.domain import agent_from_profile
+        from lightwork.domain import agent_from_profile
         profile = DomainProfile(
             name="finance_sox", persona="You are a SOX control tester.",
             allow_tools=["read_file"], max_risk="low",
@@ -74,7 +74,7 @@ class TestSpawnIntegration:
             reflection="raise the cap before starting",
             domain="finance_sox",
         )
-        from maverick.domain import agent_from_profile
+        from lightwork.domain import agent_from_profile
         profile = DomainProfile(
             name="finance_sox", persona="You are a SOX control tester.",
             allow_tools=["read_file"], max_risk="low",
@@ -117,7 +117,7 @@ class TestSpawnIntegration:
         ctx.user_id = "victim-user"
         ctx.shield = Shield()
 
-        from maverick.domain import agent_from_profile
+        from lightwork.domain import agent_from_profile
         profile = DomainProfile(
             name="finance_sox", persona="You are a SOX control tester.",
             allow_tools=["read_file"], max_risk="low",
@@ -177,7 +177,7 @@ class TestLintProfile:
         assert "knowledge_sources" in joined
 
     def test_all_builtin_packs_pass_error_level(self):
-        from maverick.domain import builtin_dir, load_domains
+        from lightwork.domain import builtin_dir, load_domains
         for name, prof in load_domains(builtin_dir()).items():
             errors, _ = lint_profile(prof)
             assert errors == [], f"{name}: {errors}"

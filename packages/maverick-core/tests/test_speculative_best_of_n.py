@@ -4,7 +4,7 @@ from __future__ import annotations
 import asyncio
 
 import pytest
-from maverick import speculative_best_of_n as sbn
+from lightwork import speculative_best_of_n as sbn
 
 
 def _attempt(name, partial, result, *, finished: list, cp_fail=False, fin_fail=False):

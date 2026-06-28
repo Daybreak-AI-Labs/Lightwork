@@ -3,7 +3,7 @@ from __future__ import annotations
 
 import asyncio
 
-from maverick_channels.base import Channel, IncomingMessage, Reply, as_reply
+from lightwork_channels.base import Channel, IncomingMessage, Reply, as_reply
 
 
 def test_as_reply_shims_str():
@@ -63,7 +63,7 @@ def test_dispatch_text_returns_text_and_drops_attachments(caplog):
 
     ch = _Chan(handler)
     import logging
-    with caplog.at_level(logging.DEBUG, logger="maverick_channels.base"):
+    with caplog.at_level(logging.DEBUG, logger="lightwork_channels.base"):
         text = asyncio.run(ch.dispatch_text(_msg()))
     assert text == "rich"
     assert any("dropping 1 attachment" in r.message for r in caplog.records)
@@ -72,7 +72,7 @@ def test_dispatch_text_returns_text_and_drops_attachments(caplog):
 def test_v2_handler_works_through_a_migrated_adapter():
     """The in-tree adapters route via dispatch_text, so a Reply-returning
     handler flows end-to-end without the adapter knowing about v2."""
-    from maverick_channels.cli import CLIChannel  # a thin real adapter
+    from lightwork_channels.cli import CLIChannel  # a thin real adapter
 
     async def handler(msg):
         return Reply(text=f"echo:{msg.text}")
@@ -84,5 +84,5 @@ def test_v2_handler_works_through_a_migrated_adapter():
 
 
 def test_exports():
-    import maverick_channels as mc
+    import lightwork_channels as mc
     assert mc.Reply is Reply and mc.as_reply is as_reply

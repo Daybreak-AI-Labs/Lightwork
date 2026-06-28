@@ -9,8 +9,8 @@ from __future__ import annotations
 from pathlib import Path
 
 import pytest
-from maverick.money_format import format_money
-from maverick.skills import Skill
+from lightwork.money_format import format_money
+from lightwork.skills import Skill
 
 # --- Skill.parse: a list item under a scalar key must raise ValueError, not
 #     AttributeError (skill markdown can be untrusted; callers guard with
@@ -36,7 +36,7 @@ def test_skill_parse_valid_list_frontmatter_still_works():
 
 
 def test_all_builtin_skills_still_validate():
-    from maverick.skills import BUILTIN_SKILLS_DIR, validate_skill_file
+    from lightwork.skills import BUILTIN_SKILLS_DIR, validate_skill_file
     bad = [p.name for p in BUILTIN_SKILLS_DIR.glob("*.md")
            if not validate_skill_file(p).ok]
     assert not bad, f"the parse hardening must not reject real skills: {bad[:10]}"

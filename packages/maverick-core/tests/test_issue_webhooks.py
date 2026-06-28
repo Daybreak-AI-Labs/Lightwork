@@ -5,7 +5,7 @@ import hashlib
 import hmac
 import time
 
-from maverick.issue_webhooks import (
+from lightwork.issue_webhooks import (
     build_brief,
     canonical_signature,
     event_timestamp_ms,
@@ -144,7 +144,7 @@ class TestUnknownProvider:
 
 class TestBuildBrief:
     def test_includes_issue_id_title_body(self):
-        from maverick.issue_webhooks import IssueEvent
+        from lightwork.issue_webhooks import IssueEvent
         ev = IssueEvent(
             provider="linear", issue_id="ENG-9", title="Do the thing",
             body="here is how", assignee="bot-1",

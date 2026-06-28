@@ -3,8 +3,8 @@ from __future__ import annotations
 
 import asyncio
 
-from maverick_channels import discord as dmod
-from maverick_channels.irc import IRCChannel, format_privmsg
+from lightwork_channels import discord as dmod
+from lightwork_channels.irc import IRCChannel, format_privmsg
 
 # --- Discord: CRITICAL -- on_message hit AttributeError on every message ------
 

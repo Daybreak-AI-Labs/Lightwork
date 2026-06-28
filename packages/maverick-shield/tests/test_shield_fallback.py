@@ -10,7 +10,7 @@ from __future__ import annotations
 import sys
 import types
 
-from maverick_shield import Shield, ShieldVerdict
+from lightwork_shield import Shield, ShieldVerdict
 
 
 def test_shield_backend_is_builtin_when_sdk_missing():
@@ -176,7 +176,7 @@ def test_falsy_non_string_config_values_keep_defaults():
 
 def test_from_config_tolerates_non_string_safety_values(monkeypatch):
     maverick_module = types.ModuleType("maverick")
-    config_module = types.ModuleType("maverick.config")
+    config_module = types.ModuleType("lightwork.config")
 
     def get_safety():
         return {"profile": True, "block_threshold": 1}
@@ -184,7 +184,7 @@ def test_from_config_tolerates_non_string_safety_values(monkeypatch):
     config_module.get_safety = get_safety
     maverick_module.config = config_module
     monkeypatch.setitem(sys.modules, "maverick", maverick_module)
-    monkeypatch.setitem(sys.modules, "maverick.config", config_module)
+    monkeypatch.setitem(sys.modules, "lightwork.config", config_module)
 
     s = Shield.from_config()
 

@@ -1,7 +1,7 @@
 """k_anonymity: k-anonymity / l-diversity de-identification checks."""
 from __future__ import annotations
 
-from maverick.tools.k_anonymity import k_anonymity
+from lightwork.tools.k_anonymity import k_anonymity
 
 
 def _c(rows, qis, k, sensitive=None, l_min=None):
@@ -96,7 +96,7 @@ def test_errors():
 
 
 def test_registered():
-    from maverick.tools import base_registry
+    from lightwork.tools import base_registry
 
     class _W:
         pass

@@ -9,8 +9,8 @@ from __future__ import annotations
 import base64
 from pathlib import Path
 
-import maverick.tools as tools
-from maverick.tools import computer
+import lightwork.tools as tools
+from lightwork.tools import computer
 
 
 def test_ocr_disabled_by_default(monkeypatch):

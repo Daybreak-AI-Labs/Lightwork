@@ -1,7 +1,7 @@
 """Push v2: device registry, priority floors, quiet hours, delivery ledger."""
 from __future__ import annotations
 
-from maverick.push_v2 import Device, PushRegistry
+from lightwork.push_v2 import Device, PushRegistry
 
 
 def _reg(tmp_path):
@@ -74,7 +74,7 @@ def test_unregister(tmp_path):
 
 
 def test_ledger_bounded(tmp_path):
-    import maverick.push_v2 as pv
+    import lightwork.push_v2 as pv
     reg = _reg(tmp_path)
     reg.register(Device("phone", "ntfy"))
     sent: list = []

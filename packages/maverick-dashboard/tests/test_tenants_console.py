@@ -5,7 +5,7 @@ from fastapi.testclient import TestClient
 
 
 def _client():
-    from maverick_dashboard.app import app
+    from lightwork_dashboard.app import app
     return TestClient(app)
 
 
@@ -31,7 +31,7 @@ def test_empty_state(monkeypatch, tmp_path):
 
 def test_lists_provisioned_tenants(monkeypatch, tmp_path):
     _isolate(monkeypatch, tmp_path)
-    from maverick.tenant import registry as tr
+    from lightwork.tenant import registry as tr
     tr.create_tenant("acme", plan="enterprise", display_name="Acme Inc",
                      max_daily_dollars=100)
     tr.create_tenant("beta")

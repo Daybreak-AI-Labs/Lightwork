@@ -167,7 +167,7 @@ def test_worker_provisions_codebase_into_sandbox_workdir(tmp_path, monkeypatch):
     (src / "pkg" / "mod.py").write_text("x = 1\n")
     monkeypatch.setenv("MOAT_CODEBASE", str(src))
     monkeypatch.setenv("MOAT_ORCH_MODEL", "claude-sonnet-4-6")
-    prologue = MR._WORKER_SRC.split("from maverick.budget import Budget")[0]
+    prologue = MR._WORKER_SRC.split("from lightwork.budget import Budget")[0]
     exec(compile(prologue, "<prologue>", "exec"), {"__name__": "w"})
     cfg = (tmp_path / ".maverick" / "config.toml").read_text()
     assert "[sandbox]" in cfg and "workdir" in cfg

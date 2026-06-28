@@ -21,7 +21,7 @@ def _have_deps() -> bool:
 
 @pytest.mark.skipif(not _have_deps(), reason="fastapi+httpx not installed")
 def test_voice_channel_requires_api_key():
-    from maverick_channels.voice import VoiceChannel
+    from lightwork_channels.voice import VoiceChannel
 
     async def _noop(_):
         return ""
@@ -32,7 +32,7 @@ def test_voice_channel_requires_api_key():
 
 @pytest.mark.skipif(not _have_deps(), reason="fastapi+httpx not installed")
 def test_voice_channel_constructs_with_api_key():
-    from maverick_channels.voice import VoiceChannel
+    from lightwork_channels.voice import VoiceChannel
 
     async def _noop(_):
         return ""
@@ -52,7 +52,7 @@ def test_voice_channel_constructs_with_api_key():
 
 @pytest.mark.skipif(not _have_deps(), reason="fastapi+httpx not installed")
 def test_voice_channel_picks_up_env(monkeypatch):
-    from maverick_channels.voice import VoiceChannel
+    from lightwork_channels.voice import VoiceChannel
 
     async def _noop(_):
         return ""
@@ -65,7 +65,7 @@ def test_voice_channel_picks_up_env(monkeypatch):
 @pytest.mark.skipif(not _have_deps(), reason="fastapi+httpx not installed")
 def test_voice_webhook_requires_bearer_token(monkeypatch):
     from fastapi.testclient import TestClient
-    from maverick_channels.voice import VoiceChannel
+    from lightwork_channels.voice import VoiceChannel
 
     async def _noop(_):
         return "ok"
@@ -81,7 +81,7 @@ def test_voice_webhook_requires_bearer_token(monkeypatch):
 @pytest.mark.skipif(not _have_deps(), reason="fastapi+httpx not installed")
 def test_voice_webhook_accepts_valid_bearer_token(monkeypatch):
     from fastapi.testclient import TestClient
-    from maverick_channels.voice import VoiceChannel
+    from lightwork_channels.voice import VoiceChannel
 
     async def _noop(_):
         return "ok"
@@ -106,7 +106,7 @@ async def _noop(_):
 
 
 def _chan(provider, **kw):
-    from maverick_channels.voice import VoiceChannel
+    from lightwork_channels.voice import VoiceChannel
     kw.setdefault("api_key", "k")
     kw.setdefault("assistant_id", "asst_xyz")
     kw.setdefault("phone_number", "+14155551234")
@@ -131,7 +131,7 @@ def test_outbound_request_per_provider(provider, host, path):
 
 @pytest.mark.skipif(not _have_deps(), reason="fastapi+httpx not installed")
 def test_provider_key_env_resolution(monkeypatch):
-    from maverick_channels.voice import VoiceChannel
+    from lightwork_channels.voice import VoiceChannel
     monkeypatch.delenv("VAPI_API_KEY", raising=False)
     monkeypatch.setenv("RETELL_API_KEY", "retell-secret")
     chan = VoiceChannel(handler=_noop, provider="retell")
@@ -156,7 +156,7 @@ def test_unsupported_provider_send_is_soft_noop():
 def test_send_posts_to_provider_endpoint(monkeypatch):
     import asyncio
 
-    import maverick_channels.voice as voice
+    import lightwork_channels.voice as voice
 
     captured = {}
 

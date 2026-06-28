@@ -9,7 +9,7 @@ from __future__ import annotations
 
 import json
 
-from maverick.training import rlaif
+from lightwork.training import rlaif
 
 
 def _write(path, text):

@@ -2,8 +2,8 @@
 from __future__ import annotations
 
 import pytest
-from maverick.enterprise import enterprise_enabled
-from maverick.profile import (
+from lightwork.enterprise import enterprise_enabled
+from lightwork.profile import (
     ENTERPRISE,
     STANDARD,
     active_profile,
@@ -16,7 +16,7 @@ def _clean_env(monkeypatch):
     """Known-off start: no profile env, empty config."""
     monkeypatch.delenv("MAVERICK_PROFILE", raising=False)
     monkeypatch.delenv("MAVERICK_ENTERPRISE", raising=False)
-    monkeypatch.setattr("maverick.config.load_config", lambda *a, **k: {})
+    monkeypatch.setattr("lightwork.config.load_config", lambda *a, **k: {})
 
 
 def test_default_is_standard():
@@ -45,7 +45,7 @@ def test_standard_aliases(monkeypatch, alias):
 
 def test_config_selects_enterprise(monkeypatch):
     monkeypatch.setattr(
-        "maverick.config.load_config",
+        "lightwork.config.load_config",
         lambda *a, **k: {"profile": {"name": "enterprise"}},
     )
     assert active_profile() == ENTERPRISE
@@ -53,7 +53,7 @@ def test_config_selects_enterprise(monkeypatch):
 
 def test_env_wins_over_config(monkeypatch):
     monkeypatch.setattr(
-        "maverick.config.load_config",
+        "lightwork.config.load_config",
         lambda *a, **k: {"profile": {"name": "enterprise"}},
     )
     monkeypatch.setenv("MAVERICK_PROFILE", "standard")
@@ -76,7 +76,7 @@ def test_explicit_disable_wins_over_enterprise_profile(monkeypatch):
     """An explicit [enterprise] mode=false beats profile=enterprise (knob wins)."""
     monkeypatch.setenv("MAVERICK_PROFILE", "enterprise")
     monkeypatch.setattr(
-        "maverick.config.load_config",
+        "lightwork.config.load_config",
         lambda *a, **k: {"enterprise": {"mode": False}},
     )
     assert enterprise_enabled() is False

@@ -3,7 +3,7 @@ nonce is never evicted early (which would reopen the replay hole under load)."""
 from __future__ import annotations
 
 import pytest
-from maverick import federation
+from lightwork import federation
 
 
 @pytest.fixture(autouse=True)

@@ -1,7 +1,7 @@
 """Extended per-tool latency stats (ROADMAP 2028 H1)."""
 from __future__ import annotations
 
-from maverick import tool_latency
+from lightwork import tool_latency
 
 
 def test_extended_report_moments():

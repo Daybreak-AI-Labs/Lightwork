@@ -19,7 +19,7 @@ import pytest
 
 _REPO_ROOT = Path(__file__).resolve().parents[3]
 _WIDGET = _REPO_ROOT / "extensions" / "widget"
-_JS = _WIDGET / "maverick-widget.js"
+_JS = _WIDGET / "lightwork-widget.js"
 _DEMO = _WIDGET / "demo.html"
 
 
@@ -35,7 +35,7 @@ def test_widget_js_parses():
 
 def test_widget_polls_the_real_goals_endpoint():
     js = _JS.read_text()
-    # /api/v1/goals is the real read endpoint (maverick_dashboard/api.py);
+    # /api/v1/goals is the real read endpoint (lightwork_dashboard/api.py);
     # /api/v1/glance does not exist in the dashboard.
     assert '"/api/v1/goals?limit=100"' in js
     assert "glance" not in js.lower()
@@ -72,6 +72,6 @@ def test_status_buckets_match_world_model_reality():
 
 def test_demo_page_embeds_widget_same_origin():
     html = _DEMO.read_text()
-    assert 'src="./maverick-widget.js"' in html
+    assert 'src="./lightwork-widget.js"' in html
     assert 'data-endpoint=""' in html
     assert "https://" not in html  # no CDN, no hardcoded remote dashboards

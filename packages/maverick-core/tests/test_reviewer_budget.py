@@ -11,8 +11,8 @@ can't wave an unreviewed diff through.
 import asyncio
 
 import pytest
-from maverick.budget import Budget, BudgetExceeded
-from maverick.reviewer import review_diff
+from lightwork.budget import Budget, BudgetExceeded
+from lightwork.reviewer import review_diff
 
 _DIFF = "diff --git a/x.py b/x.py\n--- a/x.py\n+++ b/x.py\n@@ -0,0 +1 @@\n+x = 1\n"
 

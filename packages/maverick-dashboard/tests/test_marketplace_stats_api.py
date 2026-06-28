@@ -3,7 +3,7 @@ from __future__ import annotations
 
 import pytest
 from fastapi.testclient import TestClient
-from maverick_dashboard.app import app
+from lightwork_dashboard.app import app
 
 client = TestClient(app, headers={"Origin": "http://testserver"})
 
@@ -23,7 +23,7 @@ def test_stats_empty():
 
 
 def test_stats_reflects_ledger():
-    from maverick.marketplace.ratings import RatingsLedger
+    from lightwork.marketplace.ratings import RatingsLedger
     led = RatingsLedger()
     led.rate("skills", "alpha", 5)
     led.rate("templates", "beta", 3)

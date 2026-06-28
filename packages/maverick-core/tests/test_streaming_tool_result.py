@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import asyncio
 
-from maverick.tools import Tool, ToolRegistry
+from lightwork.tools import Tool, ToolRegistry
 
 
 def _registry(*tools):

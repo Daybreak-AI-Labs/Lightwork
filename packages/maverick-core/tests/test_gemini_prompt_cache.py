@@ -1,8 +1,8 @@
 """Gemini opts into the write-side prompt-cache ordering (implicit cache)."""
 from __future__ import annotations
 
-from maverick.providers.gemini_provider import GeminiClient
-from maverick.providers.openai_provider import OpenAIClient
+from lightwork.providers.gemini_provider import GeminiClient
+from lightwork.providers.openai_provider import OpenAIClient
 
 
 def test_gemini_models_opt_into_auto_prompt_cache():

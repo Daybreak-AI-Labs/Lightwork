@@ -9,8 +9,8 @@ from __future__ import annotations
 import json
 
 import pytest
-from maverick import automation_import as ai
-from maverick.automation_import import ir, make, power_automate, uipath, workato
+from lightwork import automation_import as ai
+from lightwork.automation_import import ir, make, power_automate, uipath, workato
 
 
 class TestMake:
@@ -189,10 +189,10 @@ class TestRegistry:
         ("uipath", {"Name": "Bot", "ProcessKey": "Bot"}),
     ])
     def test_materialize_round_trip(self, source, raw, tmp_path, monkeypatch):
-        import maverick.templates as t
+        import lightwork.templates as t
         monkeypatch.setattr(t, "USER_TEMPLATES", tmp_path / "templates")
         a = ai.get_importer(source).translate(raw)
         res = ai.materialize(a)
         assert res.created_template is True
-        from maverick.templates import load_template
+        from lightwork.templates import load_template
         assert load_template(res.template_name) is not None

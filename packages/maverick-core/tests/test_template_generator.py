@@ -1,7 +1,7 @@
 """template_generator: skill + channel scaffolds."""
 from __future__ import annotations
 
-from maverick.tools.template_generator import template_generator
+from lightwork.tools.template_generator import template_generator
 
 
 def _gen(**kw):

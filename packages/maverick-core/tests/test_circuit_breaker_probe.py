@@ -10,7 +10,7 @@ import asyncio
 import threading
 
 import pytest
-from maverick.circuit_breaker import CircuitBreaker, CircuitOpen, CircuitState
+from lightwork.circuit_breaker import CircuitBreaker, CircuitOpen, CircuitState
 
 
 def test_half_open_admits_single_probe_then_closes_on_success():

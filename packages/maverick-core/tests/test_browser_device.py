@@ -2,7 +2,7 @@
 from __future__ import annotations
 
 import pytest
-from maverick.browser_device import get_device, list_devices
+from lightwork.browser_device import get_device, list_devices
 
 
 def test_list_has_known_devices():

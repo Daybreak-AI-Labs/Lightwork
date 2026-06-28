@@ -3,13 +3,13 @@ SRE can alert before SQLite slows or the disk fills."""
 from __future__ import annotations
 
 from fastapi.testclient import TestClient
-from maverick_dashboard.app import app
+from lightwork_dashboard.app import app
 
 client = TestClient(app)
 
 
 def test_storage_gauges_present(tmp_path, monkeypatch):
-    from maverick import world_model
+    from lightwork import world_model
     db = tmp_path / "world.db"
     world_model.WorldModel(db).create_goal("t", "d")
     monkeypatch.setattr(world_model, "DEFAULT_DB", db)

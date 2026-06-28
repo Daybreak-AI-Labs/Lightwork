@@ -1,7 +1,7 @@
 """Constitutional Classifier v2 cascaded scan."""
 from __future__ import annotations
 
-from maverick_shield.cascade import (
+from lightwork_shield.cascade import (
     CascadedShield,
     cascade_enabled,
     cheap_probe,
@@ -70,7 +70,7 @@ class TestCascadedShieldWrapper:
         """Security invariant: the base scan ALWAYS runs, even on a clean
         probe. (The old design short-circuited to allow and skipped base,
         which made the cascade weaker than the layer it wraps.)"""
-        from maverick_shield.guard import ShieldVerdict
+        from lightwork_shield.guard import ShieldVerdict
 
         called: list[str] = []
 
@@ -90,7 +90,7 @@ class TestCascadedShieldWrapper:
     def test_cascade_is_never_weaker_than_base(self):
         """Regression for the critical bug: a base BLOCK must survive the
         cascade even when the cheap probe's narrower pattern set misses it."""
-        from maverick_shield.guard import ShieldVerdict
+        from lightwork_shield.guard import ShieldVerdict
 
         class _Base:
             backend = "test"
@@ -118,7 +118,7 @@ class TestCascadedShieldWrapper:
         assert c.scan_tool_call("shell", {"cmd": "rm -rf ~/"}).allowed is False
 
     def test_probe_flagged_falls_through(self):
-        from maverick_shield.guard import ShieldVerdict
+        from lightwork_shield.guard import ShieldVerdict
 
         called: list[str] = []
 
@@ -149,7 +149,7 @@ class TestCascadedShieldWrapper:
         """Regression: tag characters must survive the probe path enough to
         invoke a configured deep scanner when the base scanner allows.
         """
-        from maverick_shield.guard import ShieldVerdict
+        from lightwork_shield.guard import ShieldVerdict
 
         calls: list[tuple[str, str]] = []
         payload = "Hello \U000E0049gnore world"
@@ -188,7 +188,7 @@ class TestCascadedShieldWrapper:
 
     def test_tool_calls_bypass_probe(self):
         """Tool calls don't benefit from probe; go straight to base."""
-        from maverick_shield.guard import ShieldVerdict
+        from lightwork_shield.guard import ShieldVerdict
 
         called: list[str] = []
 
@@ -244,7 +244,7 @@ class TestCascadeScanOutputKnownPrompt:
 
         def scan_output(self, text, known_prompt=None):
             self.calls.append(known_prompt)
-            from maverick_shield.guard import ShieldVerdict
+            from lightwork_shield.guard import ShieldVerdict
             return ShieldVerdict(allowed=True, severity="info", reasons=[])
 
     def test_known_prompt_is_forwarded_to_base(self):

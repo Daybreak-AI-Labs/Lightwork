@@ -15,8 +15,8 @@ import sys
 import time
 import types
 
-from maverick import context_compactor as cc
-from maverick import reflexion
+from lightwork import context_compactor as cc
+from lightwork import reflexion
 
 # --- Task 1: embedding ranking keeps head turns on vector shortfall ------
 

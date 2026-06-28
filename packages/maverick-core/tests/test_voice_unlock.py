@@ -2,7 +2,7 @@
 from __future__ import annotations
 
 import pytest
-from maverick.voice_unlock import DEFAULT_THRESHOLD, VoiceGate
+from lightwork.voice_unlock import DEFAULT_THRESHOLD, VoiceGate
 
 
 def _embedder(profile_vec):
@@ -48,7 +48,7 @@ def test_unenrolled_rejected(gate):
 
 def test_disabled_by_default(tmp_path, monkeypatch):
     monkeypatch.delenv("MAVERICK_VOICE_UNLOCK", raising=False)
-    monkeypatch.setattr("maverick.config.load_config", dict)
+    monkeypatch.setattr("lightwork.config.load_config", dict)
     g = VoiceGate(_embedder([1.0, 0.0]), store_path=tmp_path / "p.json")
     g_enabled_bypass = g  # enrollment works; DECIDE refuses while disabled
     g_enabled_bypass.enroll("alice", [b"a", b"b", b"c"])
@@ -93,7 +93,7 @@ def test_store_created_without_readable_temp_window(tmp_path, monkeypatch):
         seen_tmp_modes.append(oct(src.stat().st_mode)[-3:])
         return real_replace(src, dst)
 
-    monkeypatch.setattr("maverick.voice_unlock.os.replace",
+    monkeypatch.setattr("lightwork.voice_unlock.os.replace",
                         inspect_tmp_before_replace)
 
     gate.enroll("alice", [b"a1", b"a2", b"a3"])

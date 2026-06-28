@@ -8,7 +8,7 @@ import json
 import stat
 
 import pytest
-from maverick import quorum
+from lightwork import quorum
 
 
 @pytest.fixture(autouse=True)

@@ -23,9 +23,9 @@ from __future__ import annotations
 
 from pathlib import Path
 
-from maverick.sandbox import LocalBackend
-from maverick.tools import base_registry
-from maverick.world_model import WorldModel
+from lightwork.sandbox import LocalBackend
+from lightwork.tools import base_registry
+from lightwork.world_model import WorldModel
 
 
 def _draft202012_violations(node: object, path: str):

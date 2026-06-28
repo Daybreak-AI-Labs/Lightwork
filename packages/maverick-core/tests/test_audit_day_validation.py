@@ -21,7 +21,7 @@ from click.testing import CliRunner
 # --- the shared predicate ---------------------------------------------------
 
 def test_is_valid_day():
-    from maverick.audit.events import is_valid_day
+    from lightwork.audit.events import is_valid_day
     assert is_valid_day("2026-05-28")
     # traversal / separators / absolute / NUL / unpadded / empty / non-str
     assert not is_valid_day("../../etc/passwd")
@@ -37,13 +37,13 @@ def test_is_valid_day():
 # --- library backstop: writer ----------------------------------------------
 
 def test_path_for_accepts_valid_day(tmp_path):
-    from maverick.audit.writer import AuditLog
+    from lightwork.audit.writer import AuditLog
     log = AuditLog(tmp_path / "audit")
     assert log._path_for("2026-05-28") == (tmp_path / "audit" / "2026-05-28.ndjson")
 
 
 def test_path_for_rejects_traversal(tmp_path):
-    from maverick.audit.writer import AuditLog
+    from lightwork.audit.writer import AuditLog
     log = AuditLog(tmp_path / "audit")
     with pytest.raises(ValueError, match="YYYY-MM-DD"):
         log._path_for("../secret")
@@ -52,7 +52,7 @@ def test_path_for_rejects_traversal(tmp_path):
 def test_tail_and_grep_refuse_traversal_instead_of_reading_outside(tmp_path):
     # A sentinel file one level above the audit dir: a traversal day would
     # resolve onto it. The guard must raise rather than read it.
-    from maverick.audit.writer import AuditLog
+    from lightwork.audit.writer import AuditLog
     (tmp_path / "secret.ndjson").write_text(
         '{"kind":"tool_call","name":"LEAK"}\n', encoding="utf-8"
     )
@@ -67,8 +67,8 @@ def test_tail_with_valid_or_default_day_still_works(tmp_path):
     # Regression: the guard must not disturb the normal None/today path.
     import time
 
-    from maverick.audit.events import AuditEvent
-    from maverick.audit.writer import AuditLog
+    from lightwork.audit.events import AuditEvent
+    from lightwork.audit.writer import AuditLog
     log = AuditLog(tmp_path / "audit")
     assert log.record(AuditEvent(ts=time.time(), kind="tool_call", payload={"i": 1}))
     assert log.tail(50) != []                 # default (today) unaffected
@@ -80,7 +80,7 @@ def test_tail_with_valid_or_default_day_still_works(tmp_path):
 def test_audit_event_paths_rejects_traversal(monkeypatch, tmp_path):
     monkeypatch.setenv("HOME", str(tmp_path))
     monkeypatch.delenv("MAVERICK_TENANT", raising=False)
-    from maverick.audit.export import audit_event_paths
+    from lightwork.audit.export import audit_event_paths
     with pytest.raises(ValueError, match="YYYY-MM-DD"):
         audit_event_paths(day="../../etc/passwd")
 
@@ -88,7 +88,7 @@ def test_audit_event_paths_rejects_traversal(monkeypatch, tmp_path):
 def test_iter_audit_events_rejects_traversal_when_consumed(monkeypatch, tmp_path):
     monkeypatch.setenv("HOME", str(tmp_path))
     monkeypatch.delenv("MAVERICK_TENANT", raising=False)
-    from maverick.audit.export import iter_audit_events
+    from lightwork.audit.export import iter_audit_events
     with pytest.raises(ValueError):
         list(iter_audit_events(day="../../etc/passwd"))
 
@@ -116,7 +116,7 @@ def _home(monkeypatch, tmp_path):
     ],
 )
 def test_cli_day_traversal_is_rejected(_home, argv):
-    from maverick.cli import main
+    from lightwork.cli import main
     res = CliRunner().invoke(main, argv)
     assert res.exit_code == 2, res.output
     assert "YYYY-MM-DD" in res.output
@@ -125,7 +125,7 @@ def test_cli_day_traversal_is_rejected(_home, argv):
 
 def test_cli_audit_tail_accepts_valid_day(_home):
     # Regression: a well-formed day is accepted (exit 0), even with no events.
-    from maverick.cli import main
+    from lightwork.cli import main
     res = CliRunner().invoke(main, ["audit", "tail", "--day", "2020-01-01"])
     assert res.exit_code == 0, res.output
 
@@ -133,7 +133,7 @@ def test_cli_audit_tail_accepts_valid_day(_home):
 def test_is_valid_day_rejects_impossible_calendar_dates():
     # Shape-valid but not a real date: a typo'd --day used to pass and report a
     # misleading "OK / no entries" instead of a friendly error (UX finding).
-    from maverick.audit.events import is_valid_day
+    from lightwork.audit.events import is_valid_day
     assert not is_valid_day("2026-13-99")  # month 13, day 99
     assert not is_valid_day("2026-00-00")
     assert not is_valid_day("2026-02-30")  # Feb 30
@@ -146,7 +146,7 @@ def test_is_valid_day_rejects_impossible_calendar_dates():
 
 def test_audit_verify_rejects_typo_date(tmp_path, monkeypatch):
     from click.testing import CliRunner
-    from maverick.cli import main
+    from lightwork.cli import main
     monkeypatch.setenv("HOME", str(tmp_path))
     res = CliRunner().invoke(main, ["audit", "verify", "--day", "2026-13-99"])
     assert res.exit_code == 2, res.output

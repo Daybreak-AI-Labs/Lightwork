@@ -1,7 +1,7 @@
 """reflect_loop: plan-execute-reflect control-flow helper."""
 from __future__ import annotations
 
-from maverick.tools.reflect_loop import reflect_loop
+from lightwork.tools.reflect_loop import reflect_loop
 
 
 def _run(**kw):

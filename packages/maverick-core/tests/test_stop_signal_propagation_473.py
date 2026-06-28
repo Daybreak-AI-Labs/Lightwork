@@ -20,17 +20,17 @@ import pytest
 
 @pytest.mark.asyncio
 async def test_spawn_swarm_reraises_budget_exceeded(tmp_path, monkeypatch):
-    import maverick.tools.spawn as spawn_mod
-    from maverick.agent import Agent
-    from maverick.blackboard import Blackboard
-    from maverick.budget import Budget, BudgetExceeded
-    from maverick.sandbox import LocalBackend
-    from maverick.swarm import SwarmContext
-    from maverick.world_model import WorldModel
+    import lightwork.tools.spawn as spawn_mod
+    from lightwork.agent import Agent
+    from lightwork.blackboard import Blackboard
+    from lightwork.budget import Budget, BudgetExceeded
+    from lightwork.sandbox import LocalBackend
+    from lightwork.swarm import SwarmContext
+    from lightwork.world_model import WorldModel
 
     class _FakeLLM:
         async def complete_async(self, **_kw):
-            from maverick.llm import LLMResponse
+            from lightwork.llm import LLMResponse
             return LLMResponse(text="FINAL: done", thinking=None,
                                tool_calls=[], stop_reason="end_turn")
 
@@ -59,18 +59,18 @@ async def test_spawn_swarm_reraises_budget_exceeded(tmp_path, monkeypatch):
 
 @pytest.mark.asyncio
 async def test_spawn_swarm_reraises_halted(tmp_path, monkeypatch):
-    import maverick.tools.spawn as spawn_mod
-    from maverick.agent import Agent
-    from maverick.blackboard import Blackboard
-    from maverick.budget import Budget
-    from maverick.killswitch import Halted
-    from maverick.sandbox import LocalBackend
-    from maverick.swarm import SwarmContext
-    from maverick.world_model import WorldModel
+    import lightwork.tools.spawn as spawn_mod
+    from lightwork.agent import Agent
+    from lightwork.blackboard import Blackboard
+    from lightwork.budget import Budget
+    from lightwork.killswitch import Halted
+    from lightwork.sandbox import LocalBackend
+    from lightwork.swarm import SwarmContext
+    from lightwork.world_model import WorldModel
 
     class _FakeLLM:
         async def complete_async(self, **_kw):
-            from maverick.llm import LLMResponse
+            from lightwork.llm import LLMResponse
             return LLMResponse(text="FINAL: done", thinking=None,
                                tool_calls=[], stop_reason="end_turn")
 
@@ -96,9 +96,9 @@ async def test_spawn_swarm_reraises_halted(tmp_path, monkeypatch):
 
 @pytest.mark.asyncio
 async def test_best_of_n_reraises_budget_exceeded(tmp_path, monkeypatch):
-    import maverick.orchestrator as orch
-    from maverick.budget import Budget, BudgetExceeded
-    from maverick.world_model import WorldModel
+    import lightwork.orchestrator as orch
+    from lightwork.budget import Budget, BudgetExceeded
+    from lightwork.world_model import WorldModel
 
     # Force coding-mode best-of-N on so we exercise the candidate loop rather
     # than the n<=1 single-shot fallback.
@@ -107,7 +107,7 @@ async def test_best_of_n_reraises_budget_exceeded(tmp_path, monkeypatch):
 
     monkeypatch.setattr(orch, "model_for_role", lambda _role: "test-model")
     monkeypatch.setattr(
-        "maverick.coding_mode.from_env", lambda: _Cfg(), raising=False,
+        "lightwork.coding_mode.from_env", lambda: _Cfg(), raising=False,
     )
 
     # The first attempt trips the budget cap: run_goal raises BudgetExceeded.

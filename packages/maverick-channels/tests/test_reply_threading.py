@@ -5,7 +5,7 @@ from __future__ import annotations
 import asyncio
 from unittest.mock import AsyncMock, MagicMock
 
-from maverick_channels.base import Channel, IncomingMessage
+from lightwork_channels.base import Channel, IncomingMessage
 
 
 def test_incoming_message_id_defaults_none():
@@ -36,7 +36,7 @@ def test_base_send_threaded_falls_back_to_send():
 
 
 def _slack_channel(monkeypatch, thread_replies):
-    import maverick_channels.slack as slack_mod
+    import lightwork_channels.slack as slack_mod
     monkeypatch.setattr(slack_mod, "_HAVE_SLACK", True)
     monkeypatch.setattr(slack_mod, "AsyncWebClient", MagicMock())
     monkeypatch.setattr(slack_mod, "SocketModeClient", MagicMock())
@@ -64,7 +64,7 @@ def test_slack_send_threaded_without_ref_is_plain(monkeypatch):
 
 
 def test_slack_inbound_reply_threads_when_enabled(monkeypatch):
-    import maverick_channels.slack as slack_mod
+    import lightwork_channels.slack as slack_mod
     ch = _slack_channel(monkeypatch, thread_replies=True)
     client = MagicMock()
     client.send_socket_mode_response = AsyncMock()
@@ -80,7 +80,7 @@ def test_slack_inbound_reply_threads_when_enabled(monkeypatch):
 
 
 def test_slack_inbound_unthreaded_by_default(monkeypatch):
-    import maverick_channels.slack as slack_mod
+    import lightwork_channels.slack as slack_mod
     monkeypatch.delenv("SLACK_THREAD_REPLIES", raising=False)
     ch = _slack_channel(monkeypatch, thread_replies=None)
     assert ch.thread_replies is False
@@ -97,7 +97,7 @@ def test_slack_inbound_unthreaded_by_default(monkeypatch):
 
 
 def test_telegram_send_threaded(monkeypatch):
-    import maverick_channels.telegram as tg_mod
+    import lightwork_channels.telegram as tg_mod
     ch = tg_mod.TelegramChannel.__new__(tg_mod.TelegramChannel)
     ch._app = MagicMock()
     ch._app.bot.send_message = AsyncMock()

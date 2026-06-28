@@ -13,8 +13,8 @@ from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
 
 _REPO = Path(__file__).resolve().parents[2]
-sys.path.insert(0, str(_REPO / "packages" / "maverick-core"))
-sys.path.insert(0, str(_REPO / "packages" / "maverick-dashboard"))
+sys.path.insert(0, str(_REPO / "packages" / "lightwork-core"))
+sys.path.insert(0, str(_REPO / "packages" / "lightwork-dashboard"))
 os.environ.setdefault("MAVERICK_ENCRYPT_AT_REST", "0")
 
 fails = []
@@ -27,7 +27,7 @@ def section(name):
 def stress_budget_integrity():
     """32 threads × 5k record_tokens, barrier-synced: no lost updates."""
     section("Budget accounting integrity under contention")
-    from maverick.budget import Budget
+    from lightwork.budget import Budget
     b = Budget(max_input_tokens=10**12, max_output_tokens=10**12,
                max_dollars=10**9, max_wall_seconds=10**9, max_tool_calls=10**12)
     n_threads, per = 32, 5000
@@ -51,7 +51,7 @@ def stress_budget_integrity():
 def stress_budget_cap():
     """16 threads racing a small cap: the cap must fire (no silent overshoot)."""
     section("Budget cap fires under concurrency")
-    from maverick.budget import Budget, BudgetExceeded
+    from lightwork.budget import Budget, BudgetExceeded
     cap = 10000
     b = Budget(max_output_tokens=cap, max_input_tokens=10**12,
                max_dollars=10**9, max_wall_seconds=10**9, max_tool_calls=10**12)
@@ -79,8 +79,8 @@ def stress_budget_cap():
 def stress_capability_fuzz(seeds=200, rounds=2000):
     """Hunt for any authorization leak across many seeds at high round counts."""
     section(f"Capability authorization fuzz ({seeds} seeds × {rounds} rounds)")
-    from maverick.capability import Capability
-    from maverick.capability_fuzzer import fuzz
+    from lightwork.capability import Capability
+    from lightwork.capability_fuzzer import fuzz
     granted = {"fs.read", "fs.write", "shell.exec", "web_search", "http_fetch"}
     cap = Capability(principal="fuzzer", allow_tools=frozenset(granted),
                      deny_tools=frozenset({"shell.exec.sudo"}))
@@ -102,7 +102,7 @@ def stress_dashboard(n=3000):
     section(f"Dashboard concurrent load ({n} probes)")
     try:
         from fastapi.testclient import TestClient
-        from maverick_dashboard.app import app
+        from lightwork_dashboard.app import app
     except Exception as e:  # noqa: BLE001
         print(f"  SKIP dashboard ({e!r})")
         return

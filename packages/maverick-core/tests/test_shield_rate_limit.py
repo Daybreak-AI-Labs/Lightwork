@@ -4,7 +4,7 @@ validation, and off-by-default config. No sleeps; the test owns the clock."""
 from __future__ import annotations
 
 import pytest
-from maverick.safety import shield_rate_limit as srl
+from lightwork.safety import shield_rate_limit as srl
 
 
 @pytest.fixture(autouse=True)

@@ -1,7 +1,7 @@
 """Blackboard tests."""
 from __future__ import annotations
 
-from maverick.blackboard import Blackboard
+from lightwork.blackboard import Blackboard
 
 
 def test_post_and_render():

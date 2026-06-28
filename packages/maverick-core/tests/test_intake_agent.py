@@ -1,12 +1,12 @@
 """Conversational intake: the intake tools driving a session, plus assembly of
-the intake agent. Imports maverick.tools, so it runs in CI (full deps)."""
+the intake agent. Imports lightwork.tools, so it runs in CI (full deps)."""
 from __future__ import annotations
 
 import asyncio
 from types import SimpleNamespace
 
-from maverick.intake import IntakeSession
-from maverick.tools.intake_tools import intake_tools
+from lightwork.intake import IntakeSession
+from lightwork.tools.intake_tools import intake_tools
 
 
 class _StubLLM:
@@ -17,7 +17,7 @@ class _StubLLM:
 
 
 def test_intake_tools_drive_session_to_a_draft(tmp_path):
-    from maverick_knowledge import DeterministicEmbedder, KnowledgeBase
+    from lightwork_knowledge import DeterministicEmbedder, KnowledgeBase
 
     doc = tmp_path / "policy.txt"
     doc.write_text("We ship within two business days.")

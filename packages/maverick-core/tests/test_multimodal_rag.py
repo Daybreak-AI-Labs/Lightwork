@@ -1,7 +1,7 @@
 """multimodal_rag: lexical Jaccard ranking of multi-modal chunks."""
 from __future__ import annotations
 
-from maverick.tools.multimodal_rag import multimodal_rag
+from lightwork.tools.multimodal_rag import multimodal_rag
 
 
 def _run(**kw):

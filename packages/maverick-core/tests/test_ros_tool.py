@@ -4,7 +4,7 @@ from __future__ import annotations
 import sys
 import types
 
-from maverick.tools.ros_tool import _parse_url, ros_tool
+from lightwork.tools.ros_tool import _parse_url, ros_tool
 
 
 def _install_fake_roslibpy(monkeypatch, *, connected=True, service_result=None):
@@ -114,7 +114,7 @@ def test_unknown_op(monkeypatch):
 
 
 def test_not_registered_by_default():
-    from maverick.tools import base_registry
+    from lightwork.tools import base_registry
 
     class _W:
         pass
@@ -127,7 +127,7 @@ def test_not_registered_by_default():
 
 
 def test_registered_when_enabled():
-    from maverick.tools import base_registry
+    from lightwork.tools import base_registry
 
     class _W:
         pass

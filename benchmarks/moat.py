@@ -223,11 +223,11 @@ def run_with_maverick(task_text: str, learning_enabled: bool) -> RunMetrics:  # 
     import os
     import time
 
-    from maverick.budget import Budget
-    from maverick.llm import LLM
-    from maverick.orchestrator import run_goal_sync
-    from maverick.sandbox import LocalBackend, build_sandbox
-    from maverick.world_model import WorldModel
+    from lightwork.budget import Budget
+    from lightwork.llm import LLM
+    from lightwork.orchestrator import run_goal_sync
+    from lightwork.sandbox import LocalBackend, build_sandbox
+    from lightwork.world_model import WorldModel
 
     learning_env = {
         "MAVERICK_USE_SKILLS": "1" if learning_enabled else "0",

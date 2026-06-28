@@ -32,10 +32,10 @@ import os
 import random
 
 import pytest
-from maverick import audit
-from maverick import secrets as secrets_mod
-from maverick import self_harness as sh
-from maverick import self_improvement as si
+from lightwork import audit
+from lightwork import secrets as secrets_mod
+from lightwork import self_harness as sh
+from lightwork import self_improvement as si
 
 ORIG = {"M": "Operating guidance learned for this model:\n- seeded line"}
 

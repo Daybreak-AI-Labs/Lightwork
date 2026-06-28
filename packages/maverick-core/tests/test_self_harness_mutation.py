@@ -34,8 +34,8 @@ import threading
 import time
 
 import pytest
-from maverick import self_harness as sh
-from maverick import self_improvement as si
+from lightwork import self_harness as sh
+from lightwork import self_improvement as si
 
 MAX = sh._MAX_LINES_PER_MODEL
 

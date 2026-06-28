@@ -1,7 +1,7 @@
 """Channel base contract tests."""
 from __future__ import annotations
 
-from maverick_channels import Channel, Handler, IncomingMessage
+from lightwork_channels import Channel, Handler, IncomingMessage
 
 
 def test_incoming_message_defaults():
@@ -43,7 +43,7 @@ class _FakeRequest:
 
 
 def test_public_url_for_uses_forwarded_headers():
-    from maverick_channels.base import public_url_for
+    from lightwork_channels.base import public_url_for
 
     # Behind a reverse proxy: request.url is the loopback URL, but Twilio
     # signed the public https URL reconstructed from the X-Forwarded-* headers.
@@ -56,7 +56,7 @@ def test_public_url_for_uses_forwarded_headers():
 
 
 def test_public_url_for_prefers_configured_base(monkeypatch):
-    from maverick_channels.base import public_url_for
+    from lightwork_channels.base import public_url_for
 
     monkeypatch.setenv("MAVERICK_PUBLIC_BASE_URL", "https://configured.example.com/")
     req = _FakeRequest(
@@ -68,7 +68,7 @@ def test_public_url_for_prefers_configured_base(monkeypatch):
 
 
 def test_public_url_for_falls_back_to_raw_url(monkeypatch):
-    from maverick_channels.base import public_url_for
+    from lightwork_channels.base import public_url_for
 
     monkeypatch.delenv("MAVERICK_PUBLIC_BASE_URL", raising=False)
     # Direct bind, no proxy headers: fall back to the raw request URL.
@@ -84,14 +84,14 @@ def test_public_url_for_falls_back_to_raw_url(monkeypatch):
 
 
 def test_backoff_delay_no_errors_is_base_interval():
-    from maverick_channels.base import backoff_delay
+    from lightwork_channels.base import backoff_delay
 
     assert backoff_delay(30.0, 0) == 30.0
     assert backoff_delay(30.0, -1) == 30.0  # defensive: never below base
 
 
 def test_backoff_delay_doubles_per_consecutive_error():
-    from maverick_channels.base import backoff_delay
+    from lightwork_channels.base import backoff_delay
 
     assert backoff_delay(30.0, 1) == 60.0
     assert backoff_delay(30.0, 2) == 120.0
@@ -99,7 +99,7 @@ def test_backoff_delay_doubles_per_consecutive_error():
 
 
 def test_backoff_delay_is_capped():
-    from maverick_channels.base import backoff_delay
+    from lightwork_channels.base import backoff_delay
 
     # A persistently failing upstream tops out at the cap, not 2**n forever.
     assert backoff_delay(30.0, 50) == 300.0

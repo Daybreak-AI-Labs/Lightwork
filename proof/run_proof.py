@@ -12,8 +12,8 @@ The "control plane is the product" claim, made checkable. Five guarantees run
 anywhere; two cryptographic ones (Ed25519) need ``cryptography`` and otherwise
 report ``CI`` (they run in the test matrix).
 
-The guarantees themselves live in :mod:`maverick.proof_guarantees` (the single
-source of truth shared with ``maverick.proof_pack``); this file is the
+The guarantees themselves live in :mod:`lightwork.proof_guarantees` (the single
+source of truth shared with ``lightwork.proof_pack``); this file is the
 standalone scoreboard around them.
 """
 from __future__ import annotations
@@ -22,13 +22,13 @@ import pathlib
 import sys
 
 # Make the shipped package importable however this is launched (repo root, CI, ...).
-sys.path.insert(0, str(pathlib.Path(__file__).resolve().parent.parent / "packages" / "maverick-core"))
+sys.path.insert(0, str(pathlib.Path(__file__).resolve().parent.parent / "packages" / "lightwork-core"))
 
 
 def _check(condition: bool, message: object) -> None:
     """Raise even when Python assertions are disabled with -O/PYTHONOPTIMIZE.
 
-    Retained here (alongside ``maverick.proof_guarantees._check``) so the
+    Retained here (alongside ``lightwork.proof_guarantees._check``) so the
     optimized-Python regression test can import this script and exercise it
     directly."""
     if not condition:
@@ -36,7 +36,7 @@ def _check(condition: bool, message: object) -> None:
 
 
 def main() -> int:
-    from maverick import proof_guarantees as pg
+    from lightwork import proof_guarantees as pg
     crypto = pg._crypto_ok()
     print("=" * 78)
     print("  MAVERICK -- PROOF OF GUARANTEES   (real roster, real enforcement code)")

@@ -5,7 +5,7 @@ from __future__ import annotations
 
 import pathlib
 
-from maverick import llm
+from lightwork import llm
 
 _CORE = pathlib.Path(__file__).resolve().parents[1] / "maverick"
 
@@ -13,7 +13,7 @@ _CORE = pathlib.Path(__file__).resolve().parents[1] / "maverick"
 def test_vision_role_default_is_sonnet(monkeypatch):
     monkeypatch.delenv("MAVERICK_MODEL_OVERRIDE", raising=False)
     monkeypatch.delenv("MAVERICK_MODEL_OVERRIDE_VISION", raising=False)
-    monkeypatch.setattr("maverick.config.get_role_model", lambda role: None)
+    monkeypatch.setattr("lightwork.config.get_role_model", lambda role: None)
     # No config override -> the ROLE_MODELS default, a vision-capable model.
     assert "vision" in llm.ROLE_MODELS
     assert llm.model_for_role("vision") == llm.ROLE_MODELS["vision"] == llm.MODEL_SONNET
@@ -24,7 +24,7 @@ def test_vision_role_honors_config(monkeypatch):
     monkeypatch.delenv("MAVERICK_MODEL_OVERRIDE_VISION", raising=False)
     # A [models].vision config spec wins -- the old hard-coded default ignored it.
     monkeypatch.setattr(
-        "maverick.config.get_role_model",
+        "lightwork.config.get_role_model",
         lambda role: "myprov:vmodel" if role == "vision" else None,
     )
     assert llm.model_for_role("vision") == "myprov:vmodel"
@@ -38,7 +38,7 @@ def test_vision_role_honors_env_override(monkeypatch):
 def test_skill_distiller_resolves_through_role(monkeypatch):
     monkeypatch.delenv("MAVERICK_MODEL_OVERRIDE", raising=False)
     monkeypatch.delenv("MAVERICK_MODEL_OVERRIDE_SKILL_DISTILLER", raising=False)
-    monkeypatch.setattr("maverick.config.get_role_model", lambda role: None)
+    monkeypatch.setattr("lightwork.config.get_role_model", lambda role: None)
     assert llm.model_for_role("skill_distiller") == llm.ROLE_MODELS["skill_distiller"]
 
 

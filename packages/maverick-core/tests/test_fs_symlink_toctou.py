@@ -19,7 +19,7 @@ import tempfile
 from pathlib import Path
 
 import pytest
-from maverick.tools import fs
+from lightwork.tools import fs
 
 pytestmark = pytest.mark.skipif(
     not Path("/proc/self/fd").exists() or os.name == "nt",

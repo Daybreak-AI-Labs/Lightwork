@@ -1,7 +1,7 @@
 """Reverse-proxy SSO wiring in the dashboard's ``require_principal``.
 
-Hermetic: we monkeypatch the ``maverick.proxy_auth`` seams bound into
-``maverick_dashboard.auth`` and drive ``require_principal`` with a fake request,
+Hermetic: we monkeypatch the ``lightwork.proxy_auth`` seams bound into
+``lightwork_dashboard.auth`` and drive ``require_principal`` with a fake request,
 so the tests exercise the dependency wiring (trusted-peer gate -> principal),
 not config/IO.
 """
@@ -9,7 +9,7 @@ from __future__ import annotations
 
 from types import SimpleNamespace
 
-import maverick_dashboard.auth as auth
+import lightwork_dashboard.auth as auth
 
 
 def _req(headers=None, host="127.0.0.1", path="/metrics"):

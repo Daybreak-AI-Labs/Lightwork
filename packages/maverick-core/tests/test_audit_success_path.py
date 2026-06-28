@@ -5,18 +5,18 @@ events. Regression guard for the "tamper-evident log only captured denials" gap.
 from __future__ import annotations
 
 import pytest
-from maverick.budget import Budget
-from maverick.orchestrator import run_goal
-from maverick.sandbox import LocalBackend
-from maverick.world_model import WorldModel
+from lightwork.budget import Budget
+from lightwork.orchestrator import run_goal
+from lightwork.sandbox import LocalBackend
+from lightwork.world_model import WorldModel
 
 
 @pytest.fixture
 def _audit_home(monkeypatch, tmp_path):
     # Point the default audit log at a temp home and drop the cached singleton so
-    # record() rebuilds it against tmp instead of the real ~/.maverick.
-    monkeypatch.setattr("maverick.paths.maverick_home", lambda: tmp_path / "home")
-    monkeypatch.setattr("maverick.audit.writer._default", None, raising=False)
+    # record() rebuilds it against tmp instead of the real ~/.lightwork.
+    monkeypatch.setattr("lightwork.paths.maverick_home", lambda: tmp_path / "home")
+    monkeypatch.setattr("lightwork.audit.writer._default", None, raising=False)
     return tmp_path
 
 
@@ -39,7 +39,7 @@ async def test_run_goal_emits_goal_start_and_end(
         goal_id=gid, sandbox=LocalBackend(workdir=tmp_path), max_depth=1,
     )
 
-    from maverick.audit.reader import iter_events
+    from lightwork.audit.reader import iter_events
 
     events = [e for e in iter_events(all_days=True) if e.get("goal_id") == gid]
     kinds = {e["kind"] for e in events}

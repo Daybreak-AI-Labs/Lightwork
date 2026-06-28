@@ -11,7 +11,7 @@ import pytest
 
 pytest.importorskip("telegram")
 
-from maverick_channels.telegram import TelegramChannel  # noqa: E402
+from lightwork_channels.telegram import TelegramChannel  # noqa: E402
 
 
 def _update(*, user_id: int, chat_id: int, chat_type: str, text: str = "hi"):

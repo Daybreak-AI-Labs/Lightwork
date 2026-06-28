@@ -8,13 +8,13 @@ from fastapi.testclient import TestClient
 
 
 def _client():
-    from maverick_dashboard.app import app
+    from lightwork_dashboard.app import app
     return TestClient(app)
 
 
 def _tmp_audit(monkeypatch, tmp_path):
-    import maverick.audit as audit
-    from maverick.audit.writer import AuditLog
+    import lightwork.audit as audit
+    from lightwork.audit.writer import AuditLog
     monkeypatch.delenv("MAVERICK_DASHBOARD_TOKEN", raising=False)
     log = AuditLog(tmp_path / "audit")
     monkeypatch.setattr(audit, "default_audit_log", lambda: log)
@@ -22,7 +22,7 @@ def _tmp_audit(monkeypatch, tmp_path):
 
 
 def _ev(log, kind, **payload):
-    from maverick.audit.events import AuditEvent
+    from lightwork.audit.events import AuditEvent
     log.record(AuditEvent(ts=time.time(), kind=kind, payload=payload))
 
 

@@ -4,7 +4,7 @@ request (path-traversal / query-injection into another authed endpoint)."""
 from __future__ import annotations
 
 import pytest
-from maverick.tools import jira as jira_mod
+from lightwork.tools import jira as jira_mod
 
 
 @pytest.mark.parametrize("key", ["PROJ-123", "AB-1", "ABC123-9999", "X_Y-7"])

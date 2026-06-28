@@ -2,7 +2,7 @@
 from __future__ import annotations
 
 import pytest
-from maverick.tenant import registry as tr
+from lightwork.tenant import registry as tr
 
 
 @pytest.fixture(autouse=True)

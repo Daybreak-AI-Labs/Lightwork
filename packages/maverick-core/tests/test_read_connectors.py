@@ -4,10 +4,10 @@ gap surfaced in test_fleet_spine, without handing a read-only seat a write-capab
 tool. Reference slice: modern_treasury_read -> finance_treasury / finance_cashflow."""
 from __future__ import annotations
 
-from maverick.capability import Capability
-from maverick.domain import builtin_dir, domain_capability, load_domains
-from maverick.safety.tool_risk import tool_risk
-from maverick.tools.enterprise_connectors import (
+from lightwork.capability import Capability
+from lightwork.domain import builtin_dir, domain_capability, load_domains
+from lightwork.safety.tool_risk import tool_risk
+from lightwork.tools.enterprise_connectors import (
     ENTERPRISE_CONNECTOR_NAMES,
     READ_CONNECTOR_NAMES,
     enterprise_connectors,

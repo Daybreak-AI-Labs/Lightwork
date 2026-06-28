@@ -12,15 +12,15 @@ from __future__ import annotations
 from types import SimpleNamespace
 
 import pytest
-from maverick.blackboard import Blackboard
-from maverick.budget import Budget
-from maverick.domain import enabled_domains
-from maverick.quarantine import QuarantineRegistry
-from maverick.tools.spawn import spawn_specialist_tool
+from lightwork.blackboard import Blackboard
+from lightwork.budget import Budget
+from lightwork.domain import enabled_domains
+from lightwork.quarantine import QuarantineRegistry
+from lightwork.tools.spawn import spawn_specialist_tool
 
 
 def test_scrub_env_strips_passphrase_netrc_cookie_auth():
-    from maverick.sandbox.local import scrub_env
+    from lightwork.sandbox.local import scrub_env
     src = {
         "ANSIBLE_VAULT_PASSPHRASE": "p",
         "NETRC": "/root/.netrc",
@@ -36,8 +36,8 @@ def test_scrub_env_strips_passphrase_netrc_cookie_auth():
 
 
 def test_a2a_task_failure_scrubs_exception_text():
-    from maverick import a2a_tasks
-    from maverick.secrets import scrub
+    from lightwork import a2a_tasks
+    from lightwork.secrets import scrub
     task = a2a_tasks._Task(
         "ctx", {"role": "user", "parts": [], "messageId": "m", "kind": "message"})
     # Mirror the fixed failure path: a connection error carrying a DSN secret.
@@ -83,8 +83,8 @@ async def test_sealed_mid_run_child_final_not_leaked_into_subagent_stop_hook(mon
     async def _capture_hook(event, **kwargs):
         captured["final"] = (kwargs.get("extra") or {}).get("final")
 
-    monkeypatch.setattr("maverick.domain.agent_from_profile", fake_agent_from_profile)
-    monkeypatch.setattr("maverick.hooks.emit", _capture_hook)
+    monkeypatch.setattr("lightwork.domain.agent_from_profile", fake_agent_from_profile)
+    monkeypatch.setattr("lightwork.hooks.emit", _capture_hook)
 
     out = await spawn_specialist_tool(parent).fn({"domain": dom, "task": "do it"})
     assert "SHOULD NOT LEAK" not in out

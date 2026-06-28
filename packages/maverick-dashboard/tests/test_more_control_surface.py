@@ -15,7 +15,7 @@ from fastapi.testclient import TestClient
 
 
 def _client():
-    from maverick_dashboard.app import app
+    from lightwork_dashboard.app import app
     return TestClient(app)
 
 
@@ -79,7 +79,7 @@ def test_cache_purge_endpoint_default_all(monkeypatch, tmp_path):
 def test_cache_purge_targeted_scope(monkeypatch, tmp_path):
     monkeypatch.setenv("HOME", str(tmp_path))
     monkeypatch.delenv("MAVERICK_DASHBOARD_TOKEN", raising=False)
-    from maverick.cache.file import read_cache_stats, read_file_cached
+    from lightwork.cache.file import read_cache_stats, read_file_cached
     f = tmp_path / "x.txt"
     f.write_text("data")
     read_file_cached(f)
@@ -112,7 +112,7 @@ def test_cache_html_page_renders(monkeypatch, tmp_path):
 
 def test_audit_grep_requires_pattern(monkeypatch, tmp_path):
     monkeypatch.delenv("MAVERICK_DASHBOARD_TOKEN", raising=False)
-    import maverick.audit.writer as w
+    import lightwork.audit.writer as w
     w._default = w.AuditLog(audit_dir=tmp_path / "audit")
     client = _client()
     r = client.get("/api/v1/audit/grep?pattern=")
@@ -121,13 +121,13 @@ def test_audit_grep_requires_pattern(monkeypatch, tmp_path):
 
 def test_audit_grep_treats_regex_tokens_as_literal_text(monkeypatch, tmp_path):
     monkeypatch.delenv("MAVERICK_DASHBOARD_TOKEN", raising=False)
-    from maverick.audit.events import AuditEvent, EventKind
-    from maverick.audit.writer import AuditLog
+    from lightwork.audit.events import AuditEvent, EventKind
+    from lightwork.audit.writer import AuditLog
     al = AuditLog(audit_dir=tmp_path / "audit")
     al.record(AuditEvent(
         ts=1.0, kind=EventKind.TOOL_CALL,
         payload={"name": "has-parens", "input_summary": "(unclosed"}))
-    import maverick.audit.writer as w
+    import lightwork.audit.writer as w
     w._default = al
     client = _client()
     # A regex metacharacter that would be an invalid pattern is now matched
@@ -141,8 +141,8 @@ def test_audit_grep_treats_regex_tokens_as_literal_text(monkeypatch, tmp_path):
 
 def test_audit_grep_finds_matching_events(monkeypatch, tmp_path):
     monkeypatch.delenv("MAVERICK_DASHBOARD_TOKEN", raising=False)
-    from maverick.audit.events import AuditEvent, EventKind
-    from maverick.audit.writer import AuditLog
+    from lightwork.audit.events import AuditEvent, EventKind
+    from lightwork.audit.writer import AuditLog
     al = AuditLog(audit_dir=tmp_path / "audit")
     al.record(AuditEvent(
         ts=1.0, kind=EventKind.TOOL_CALL,
@@ -150,7 +150,7 @@ def test_audit_grep_finds_matching_events(monkeypatch, tmp_path):
     al.record(AuditEvent(
         ts=2.0, kind=EventKind.TOOL_CALL,
         payload={"name": "web_search", "input_summary": "x"}))
-    import maverick.audit.writer as w
+    import lightwork.audit.writer as w
     w._default = al
     client = _client()
     r = client.get("/api/v1/audit/grep?pattern=shell")
@@ -163,7 +163,7 @@ def test_audit_grep_finds_matching_events(monkeypatch, tmp_path):
 # ---------- goal resume ----------
 
 def test_resume_404_for_unknown_goal(monkeypatch, tmp_path):
-    from maverick import world_model
+    from lightwork import world_model
     monkeypatch.setattr(world_model, "DEFAULT_DB", tmp_path / "world.db")
     monkeypatch.delenv("MAVERICK_DASHBOARD_TOKEN", raising=False)
     client = _client()
@@ -176,13 +176,13 @@ def test_resume_404_for_unknown_goal(monkeypatch, tmp_path):
 
 def test_resume_400_when_goal_not_paused(monkeypatch, tmp_path):
     """Only blocked / cancelled / failed goals are resumable."""
-    from maverick import world_model
+    from lightwork import world_model
     monkeypatch.setattr(world_model, "DEFAULT_DB", tmp_path / "world.db")
     monkeypatch.delenv("MAVERICK_DASHBOARD_TOKEN", raising=False)
     wm = world_model.WorldModel(tmp_path / "world.db")
     gid = wm.create_goal("g", "x")
     wm.set_goal_status(gid, "active")
-    from maverick_dashboard import app as dash_app
+    from lightwork_dashboard import app as dash_app
     dash_app._world_cache.clear()
     client = _client()
     r = client.post(
@@ -194,16 +194,16 @@ def test_resume_400_when_goal_not_paused(monkeypatch, tmp_path):
 
 
 def test_resume_flips_cancelled_to_pending(monkeypatch, tmp_path):
-    from maverick import world_model
+    from lightwork import world_model
     monkeypatch.setattr(world_model, "DEFAULT_DB", tmp_path / "world.db")
     monkeypatch.delenv("MAVERICK_DASHBOARD_TOKEN", raising=False)
     wm = world_model.WorldModel(tmp_path / "world.db")
     gid = wm.create_goal("g", "x")
     wm.set_goal_status(gid, "cancelled", result="cancelled via dashboard")
-    from maverick_dashboard import app as dash_app
+    from lightwork_dashboard import app as dash_app
     dash_app._world_cache.clear()
     # Stub runner so the background task doesn't actually start the agent.
-    from maverick import runner
+    from lightwork import runner
     captured = []
     monkeypatch.setattr(runner, "run_goal_in_thread",
                         lambda *a, **kw: captured.append(("called", a)))
@@ -221,15 +221,15 @@ def test_resume_flips_cancelled_to_pending(monkeypatch, tmp_path):
 
 
 def test_resume_blocked_goal(monkeypatch, tmp_path):
-    from maverick import world_model
+    from lightwork import world_model
     monkeypatch.setattr(world_model, "DEFAULT_DB", tmp_path / "world.db")
     monkeypatch.delenv("MAVERICK_DASHBOARD_TOKEN", raising=False)
     wm = world_model.WorldModel(tmp_path / "world.db")
     gid = wm.create_goal("g", "x")
     wm.set_goal_status(gid, "blocked")
-    from maverick_dashboard import app as dash_app
+    from lightwork_dashboard import app as dash_app
     dash_app._world_cache.clear()
-    from maverick import runner
+    from lightwork import runner
     monkeypatch.setattr(runner, "run_goal_in_thread", lambda *a, **kw: None)
     client = _client()
     r = client.post(

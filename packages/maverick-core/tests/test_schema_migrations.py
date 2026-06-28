@@ -1,7 +1,7 @@
 """Online schema migrations: statement classification, plan, gate, lint."""
 from __future__ import annotations
 
-from maverick.schema_migrations import (
+from lightwork.schema_migrations import (
     classify,
     online_only,
     plan,
@@ -77,15 +77,15 @@ def test_render():
 
 
 def test_schema_plan_command_registered():
-    from maverick.cli import main
+    from lightwork.cli import main
     assert "schema-plan" in main.commands
 
 
 def test_schema_plan_command_runs(tmp_path, monkeypatch):
     from click.testing import CliRunner
-    from maverick import world_model
+    from lightwork import world_model
     monkeypatch.setattr(world_model, "DEFAULT_DB", tmp_path / "world.db")
-    from maverick import cli as cli_mod
+    from lightwork import cli as cli_mod
     r = CliRunner().invoke(cli_mod.main, ["schema-plan"])
     assert r.exit_code == 0, r.output
     # A fresh DB opens already-current -> nothing pending.
@@ -93,12 +93,12 @@ def test_schema_plan_command_runs(tmp_path, monkeypatch):
 
 
 def test_ci_gate_passes_on_the_shipped_table():
-    from maverick.schema_migrations import main
+    from lightwork.schema_migrations import main
     assert main(["--ci"]) == 0  # the shipped migrations lint clean
 
 
 def test_ci_gate_fails_on_an_unclassifiable_migration(monkeypatch):
-    from maverick import schema_migrations as sm
+    from lightwork import schema_migrations as sm
     monkeypatch.setattr(sm, "_default_migrations",
                         lambda: {1: ["ALTER TABLE t ADD COLUMN a TEXT"], 2: ["PRAGMA foo"]})
     assert sm.main(["--ci"]) == 1

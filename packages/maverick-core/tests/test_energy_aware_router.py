@@ -1,7 +1,7 @@
 """Energy-aware routing (ROADMAP 2028 H2)."""
 from __future__ import annotations
 
-from maverick.energy_aware_router import (
+from lightwork.energy_aware_router import (
     BatteryState,
     pick_model,
     should_downgrade,

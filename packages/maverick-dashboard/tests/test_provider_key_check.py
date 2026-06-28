@@ -11,7 +11,7 @@ from fastapi.testclient import TestClient
 
 
 def _client():
-    from maverick_dashboard.app import app
+    from lightwork_dashboard.app import app
     return TestClient(app)
 
 
@@ -25,11 +25,11 @@ def _strip_provider_env(monkeypatch):
 
 
 def test_chat_send_blocks_when_no_provider_key(monkeypatch, tmp_path):
-    from maverick import world_model
+    from lightwork import world_model
     monkeypatch.setattr(world_model, "DEFAULT_DB", tmp_path / "world.db")
     monkeypatch.delenv("MAVERICK_DASHBOARD_TOKEN", raising=False)
     _strip_provider_env(monkeypatch)
-    from maverick_dashboard import app as dash_app
+    from lightwork_dashboard import app as dash_app
     dash_app._world_cache.clear()
     client = _client()
     resp = client.post(
@@ -46,12 +46,12 @@ def test_chat_send_blocks_when_no_provider_key(monkeypatch, tmp_path):
 
 def test_chat_send_accepts_openai_key(monkeypatch, tmp_path):
     """Previously this would 400 because the check looked only at ANTHROPIC."""
-    from maverick import world_model
+    from lightwork import world_model
     monkeypatch.setattr(world_model, "DEFAULT_DB", tmp_path / "world.db")
     monkeypatch.delenv("MAVERICK_DASHBOARD_TOKEN", raising=False)
     _strip_provider_env(monkeypatch)
     monkeypatch.setenv("OPENAI_API_KEY", "sk-openai-test")
-    from maverick_dashboard import app as dash_app
+    from lightwork_dashboard import app as dash_app
     dash_app._world_cache.clear()
     client = _client()
     resp = client.post(
@@ -64,11 +64,11 @@ def test_chat_send_accepts_openai_key(monkeypatch, tmp_path):
 
 
 def test_api_goals_blocks_when_no_provider_key(monkeypatch, tmp_path):
-    from maverick import world_model
+    from lightwork import world_model
     monkeypatch.setattr(world_model, "DEFAULT_DB", tmp_path / "world.db")
     monkeypatch.delenv("MAVERICK_DASHBOARD_TOKEN", raising=False)
     _strip_provider_env(monkeypatch)
-    from maverick_dashboard import app as dash_app
+    from lightwork_dashboard import app as dash_app
     dash_app._world_cache.clear()
     client = _client()
     resp = client.post(
@@ -85,7 +85,7 @@ def test_goal_create_accepts_config_only_selfhosted_provider(monkeypatch, tmp_pa
     ONLY in config.toml (the Ollama/vLLM path) must pass the dashboard's
     provider gate -- the CLI preflight accepted it while the dashboard 400'd,
     because each component had its own 'provider configured?' predicate."""
-    from maverick import world_model
+    from lightwork import world_model
     monkeypatch.setattr(world_model, "DEFAULT_DB", tmp_path / "world.db")
     monkeypatch.delenv("MAVERICK_DASHBOARD_TOKEN", raising=False)
     _strip_provider_env(monkeypatch)
@@ -99,7 +99,7 @@ def test_goal_create_accepts_config_only_selfhosted_provider(monkeypatch, tmp_pa
     monkeypatch.setenv("MAVERICK_CONFIG", str(cfg))
 
     # Patch the runner so nothing actually executes.
-    import maverick.runner as runner_mod
+    import lightwork.runner as runner_mod
     monkeypatch.setattr(
         runner_mod, "run_goal_in_thread",
         lambda *a, **k: None,

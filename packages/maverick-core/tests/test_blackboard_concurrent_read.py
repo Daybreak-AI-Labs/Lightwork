@@ -12,7 +12,7 @@ from __future__ import annotations
 
 import threading
 
-from maverick.blackboard import Blackboard
+from lightwork.blackboard import Blackboard
 
 
 def test_by_kind_is_safe_under_concurrent_post():

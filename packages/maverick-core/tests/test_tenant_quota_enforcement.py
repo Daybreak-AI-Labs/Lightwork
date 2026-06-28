@@ -11,12 +11,12 @@ import logging
 from pathlib import Path
 
 import pytest
-from maverick.budget import Budget
-from maverick.orchestrator import run_goal
-from maverick.quotas import record_usage
-from maverick.sandbox import LocalBackend
-from maverick.tenant import registry
-from maverick.world_model import WorldModel
+from lightwork.budget import Budget
+from lightwork.orchestrator import run_goal
+from lightwork.quotas import record_usage
+from lightwork.sandbox import LocalBackend
+from lightwork.tenant import registry
+from lightwork.world_model import WorldModel
 
 
 @pytest.fixture(autouse=True)
@@ -94,7 +94,7 @@ def test_plan_cap_fallback_is_opt_in(monkeypatch):
 
 def test_spend_read_warns_on_unreadable_ledger(monkeypatch, caplog):
     registry.create_tenant("gamma", plan="free")
-    from maverick import quotas
+    from lightwork import quotas
 
     def _boom(self):
         raise OSError("corrupt ledger")

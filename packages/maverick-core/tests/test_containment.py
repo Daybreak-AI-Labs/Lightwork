@@ -7,8 +7,8 @@ from __future__ import annotations
 import stat
 
 import pytest
-from maverick import containment
-from maverick.tools import ToolRegistry
+from lightwork import containment
+from lightwork.tools import ToolRegistry
 
 
 @pytest.fixture(autouse=True)
@@ -167,7 +167,7 @@ def test_ephemeral_workdir_created_0700_and_cleanup_removes():
 def test_ephemeral_workdir_is_outside_maverick_home(tmp_path):
     wd = containment.make_ephemeral_workdir()
     try:
-        from maverick.paths import maverick_home
+        from lightwork.paths import maverick_home
         assert maverick_home() not in wd.path.parents
     finally:
         wd.cleanup()

@@ -3,8 +3,8 @@ from __future__ import annotations
 
 import json
 
-from maverick import donation
-from maverick.donation import (
+from lightwork import donation
+from lightwork.donation import (
     TrajectoryRecord,
     clear_outbox,
     hash_brief,
@@ -20,7 +20,7 @@ def _config(monkeypatch, telemetry: dict) -> None:
     ``_donation_thresholds`` does ``from .config import load_config`` at call
     time, so patching the attribute on the config module takes effect.
     """
-    import maverick.config as cfg
+    import lightwork.config as cfg
     monkeypatch.setattr(cfg, "load_config", lambda: {"telemetry": dict(telemetry)})
 
 
@@ -216,7 +216,7 @@ class TestConfigurableThresholds:
         assert donation._donation_thresholds() == (0.0, 0.6)
 
     def test_thresholds_helper_fails_open_to_defaults(self, monkeypatch):
-        import maverick.config as cfg
+        import lightwork.config as cfg
 
         def _boom():
             raise RuntimeError("no config")

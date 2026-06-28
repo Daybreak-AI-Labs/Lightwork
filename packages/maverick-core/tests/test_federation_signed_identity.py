@@ -7,15 +7,15 @@ from __future__ import annotations
 from types import SimpleNamespace
 
 import pytest
-from maverick import agent_trust, federation
-from maverick.agent_trust import TrustedAgent
-from maverick.federation import FederationNode, FederationService, Peer
+from lightwork import agent_trust, federation
+from lightwork.agent_trust import TrustedAgent
+from lightwork.federation import FederationNode, FederationService, Peer
 
 pytest.importorskip("cryptography")
 
 
 def _local_pubkey() -> str:
-    from maverick.audit import signing as asig
+    from lightwork.audit import signing as asig
     _, pub, _ = asig._load_or_create_keypair()
     return pub.hex()
 

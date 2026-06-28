@@ -1,7 +1,7 @@
 """Critic: graded structured critique (re-triage build)."""
 from __future__ import annotations
 
-from maverick.critic import Critic, CriticReview
+from lightwork.critic import Critic, CriticReview
 
 
 def _critic_returning(text):

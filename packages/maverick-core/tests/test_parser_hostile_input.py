@@ -12,7 +12,7 @@ rather than crashing.
 from __future__ import annotations
 
 import pytest
-from maverick.mcp_client import MCPClient, _format_rpc_error
+from lightwork.mcp_client import MCPClient, _format_rpc_error
 
 
 # --- MCP client: a hostile server can send a malformed JSON-RPC `error` ------

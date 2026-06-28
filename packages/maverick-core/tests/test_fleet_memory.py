@@ -2,7 +2,7 @@
 from __future__ import annotations
 
 import pytest
-from maverick import dreaming, fleet_memory, reflexion
+from lightwork import dreaming, fleet_memory, reflexion
 
 
 @pytest.fixture(autouse=True)
@@ -131,7 +131,7 @@ def test_shared_token_caller_refused_under_enforcement(monkeypatch):
     """A shared-bearer caller carries no per-caller identity; once the trust
     plane is engaged it may not bear a specific fleet identity."""
     _register()
-    from maverick import agent_trust
+    from lightwork import agent_trust
     monkeypatch.setattr(agent_trust, "load_trust_state", lambda: (True, {}))
     with fleet_memory.bind_caller(""):
         ok, reason = fleet_memory.ingest({
@@ -148,7 +148,7 @@ def test_shared_token_caller_allowed_when_disengaged(monkeypatch):
     """Default single-tenant deployment (trust plane off): the shared bearer is
     the trusted admin path and is unaffected by the binding."""
     _register()
-    from maverick import agent_trust
+    from lightwork import agent_trust
     monkeypatch.setattr(agent_trust, "load_trust_state", lambda: (False, {}))
     with fleet_memory.bind_caller(""):
         ok, reason = fleet_memory.ingest({

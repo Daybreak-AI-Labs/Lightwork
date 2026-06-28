@@ -2,7 +2,7 @@
 returned once; only its hash is stored."""
 from __future__ import annotations
 
-from maverick.world_model import WorldModel
+from lightwork.world_model import WorldModel
 
 
 def test_mint_and_resolve(tmp_path):

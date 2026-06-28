@@ -1,7 +1,7 @@
 """Per-tenant egress policy plane (ROADMAP platform spine)."""
 from __future__ import annotations
 
-from maverick.tenant import egress as te
+from lightwork.tenant import egress as te
 
 
 def test_no_policy_allows_all():
@@ -24,7 +24,7 @@ def test_nonempty_allow_restricts():
 
 
 def test_per_tenant_override_beats_default(monkeypatch):
-    import maverick.config as cfg
+    import lightwork.config as cfg
     monkeypatch.setattr(cfg, "load_config", lambda: {
         "egress": {"deny": ["metadata.internal"]},
         "tenancy": {"egress": {"acme": {"allow": ["api.acme.com"]}}},
@@ -38,7 +38,7 @@ def test_per_tenant_override_beats_default(monkeypatch):
 
 
 def test_egress_allowed_composes_tenant_and_tool(monkeypatch):
-    import maverick.config as cfg
+    import lightwork.config as cfg
     # Tenant plane allows api.acme.com; tool policy denies it -> blocked (AND).
     monkeypatch.setattr(cfg, "load_config", lambda: {
         "tenancy": {"egress": {"acme": {"allow": ["api.acme.com", "api.ok.com"]}}},
@@ -52,7 +52,7 @@ def test_egress_allowed_composes_tenant_and_tool(monkeypatch):
 
 
 def test_describe(monkeypatch):
-    import maverick.config as cfg
+    import lightwork.config as cfg
     monkeypatch.setattr(cfg, "load_config", lambda: {
         "tenancy": {"egress": {"acme": {"allow": ["api.acme.com"], "deny": ["*"]}}}
     })
@@ -62,18 +62,18 @@ def test_describe(monkeypatch):
 
 def test_http_fetch_uses_tenant_egress(monkeypatch):
     # The http_fetch chokepoint composes the tenant plane: a denied host is refused.
-    import maverick.config as cfg
+    import lightwork.config as cfg
     monkeypatch.setattr(cfg, "load_config", lambda: {
         "egress": {"deny": ["blocked.test"]},
     })
-    from maverick.tools.http_fetch import http_fetch
+    from lightwork.tools.http_fetch import http_fetch
     out = http_fetch().fn({"url": "https://blocked.test/data"})
     assert isinstance(out, str) and "egress policy blocks" in out
 
 
 def test_active_tenant_lookup_uses_raw_tenant_id(monkeypatch):
-    import maverick.config as cfg
-    from maverick.paths import tenant_scope
+    import lightwork.config as cfg
+    from lightwork.paths import tenant_scope
 
     monkeypatch.setenv("MAVERICK_TENANT_BY_USER", "1")
     monkeypatch.delenv("MAVERICK_TENANT", raising=False)
@@ -88,7 +88,7 @@ def test_active_tenant_lookup_uses_raw_tenant_id(monkeypatch):
 
 
 def test_active_tenant_lookup_uses_raw_env_tenant_id(monkeypatch):
-    import maverick.config as cfg
+    import lightwork.config as cfg
 
     monkeypatch.delenv("MAVERICK_TENANT_BY_USER", raising=False)
     monkeypatch.setenv("MAVERICK_TENANT", "slack:U123")

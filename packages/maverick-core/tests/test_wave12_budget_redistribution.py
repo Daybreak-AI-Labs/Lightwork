@@ -8,10 +8,10 @@ so a crashed attempt 0 wasted (N-1)/N of the parent budget.
 from __future__ import annotations
 
 import pytest
-from maverick.budget import Budget
-from maverick.orchestrator import run_goal_best_of_n
-from maverick.sandbox import LocalBackend
-from maverick.world_model import WorldModel
+from lightwork.budget import Budget
+from lightwork.orchestrator import run_goal_best_of_n
+from lightwork.sandbox import LocalBackend
+from lightwork.world_model import WorldModel
 
 
 @pytest.mark.asyncio
@@ -28,7 +28,7 @@ async def test_per_attempt_cap_grows_after_crash(tmp_path, monkeypatch):
         return "FINAL:\n--- a/x.py\n+++ b/x.py\n@@ -1 +1 @@\n-x\n+y\n"
 
     monkeypatch.setattr(
-        "maverick.orchestrator.run_goal", fake_run_goal,
+        "lightwork.orchestrator.run_goal", fake_run_goal,
     )
 
     world = WorldModel(path=tmp_path / "w.db")
@@ -70,7 +70,7 @@ async def test_per_attempt_cap_redistributes_after_cheap_finish(
         return "FINAL:\n--- a/x.py\n+++ b/x.py\n@@ -1 +1 @@\n-x\n+y\n"
 
     monkeypatch.setattr(
-        "maverick.orchestrator.run_goal", fake_run_goal,
+        "lightwork.orchestrator.run_goal", fake_run_goal,
     )
 
     world = WorldModel(path=tmp_path / "w.db")
@@ -114,7 +114,7 @@ async def test_breaks_when_budget_exhausted(tmp_path, monkeypatch):
         return "no patch here"
 
     monkeypatch.setattr(
-        "maverick.orchestrator.run_goal", fake_run_goal,
+        "lightwork.orchestrator.run_goal", fake_run_goal,
     )
 
     world = WorldModel(path=tmp_path / "w.db")

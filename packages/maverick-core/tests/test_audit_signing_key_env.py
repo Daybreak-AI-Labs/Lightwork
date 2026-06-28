@@ -3,7 +3,7 @@ from __future__ import annotations
 
 import os
 
-from maverick.audit import signing
+from lightwork.audit import signing
 
 
 def test_injected_key_env_is_consumed_even_without_crypto(monkeypatch):

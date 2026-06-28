@@ -10,7 +10,7 @@ from fastapi.testclient import TestClient
 
 
 def _client():
-    from maverick_dashboard.app import app
+    from lightwork_dashboard.app import app
     return TestClient(app)
 
 
@@ -19,12 +19,12 @@ def _isolate(monkeypatch, tmp_path):
     monkeypatch.setenv("MAVERICK_HOME", str(tmp_path))
     monkeypatch.delenv("MAVERICK_DASHBOARD_TOKEN", raising=False)
     monkeypatch.delenv("MAVERICK_TENANT", raising=False)
-    from maverick import world_model
+    from lightwork import world_model
     monkeypatch.setattr(world_model, "DEFAULT_DB", tmp_path / "world.db")
 
 
 def _save_fleet(name="acme", owner=""):
-    from maverick.fleet import Fleet, FleetAgent, save_fleet
+    from lightwork.fleet import Fleet, FleetAgent, save_fleet
     fleet = Fleet(
         name=name,
         owner=owner,
@@ -39,8 +39,8 @@ def _save_fleet(name="acme", owner=""):
 def test_recorded_run_shows_up_with_goal_title_and_status(monkeypatch, tmp_path):
     _isolate(monkeypatch, tmp_path)
     _save_fleet()
-    from maverick.fleet import record_run
-    from maverick.world_model import WorldModel
+    from lightwork.fleet import record_run
+    from lightwork.world_model import WorldModel
     w = WorldModel(tmp_path / "world.db")
     gid = w.create_goal("Summarize the Q3 board deck")
     w.set_goal_status(gid, "done")
@@ -68,8 +68,8 @@ def test_empty_state_when_no_runs(monkeypatch, tmp_path):
 def test_runs_are_newest_first_and_capped(monkeypatch, tmp_path):
     _isolate(monkeypatch, tmp_path)
     _save_fleet()
-    from maverick.fleet import record_run
-    from maverick.world_model import WorldModel
+    from lightwork.fleet import record_run
+    from lightwork.world_model import WorldModel
     w = WorldModel(tmp_path / "world.db")
     # Record more than the per-fleet cap (12) so we exercise the trim.
     gids = []
@@ -91,7 +91,7 @@ def test_runs_are_newest_first_and_capped(monkeypatch, tmp_path):
 def test_missing_goal_renders_fail_soft(monkeypatch, tmp_path):
     _isolate(monkeypatch, tmp_path)
     _save_fleet()
-    from maverick.fleet import record_run
+    from lightwork.fleet import record_run
     # A run that points at a goal id that does not exist in the world.
     record_run("acme", "coder", 999999)
     r = _client().get("/fleets")
@@ -103,9 +103,9 @@ def test_missing_goal_renders_fail_soft(monkeypatch, tmp_path):
 
 def test_authenticated_run_history_hides_other_owner_stale_index(monkeypatch, tmp_path):
     _isolate(monkeypatch, tmp_path)
-    import maverick_dashboard.app as dashboard_app
-    from maverick.fleet import Fleet, record_run, remove_fleet, save_fleet
-    from maverick.world_model import WorldModel
+    import lightwork_dashboard.app as dashboard_app
+    from lightwork.fleet import Fleet, record_run, remove_fleet, save_fleet
+    from lightwork.world_model import WorldModel
 
     w = WorldModel(tmp_path / "world.db")
     alice_gid = w.create_goal("Alice private board deck", owner="user:alice")

@@ -13,7 +13,7 @@ from __future__ import annotations
 import threading
 
 import pytest
-from maverick.budget import Budget, BudgetExceeded
+from lightwork.budget import Budget, BudgetExceeded
 
 
 def test_check_projected_refuses_call_that_would_exceed_cap():
@@ -26,7 +26,7 @@ def test_check_projected_refuses_call_that_would_exceed_cap():
 
 
 def test_estimate_call_cost_scales_with_input():
-    from maverick.llm import _estimate_call_cost
+    from lightwork.llm import _estimate_call_cost
     small = _estimate_call_cost(
         "claude-sonnet-4-6", "sys", [{"role": "user", "content": "hi"}], None, 100)
     big = _estimate_call_cost(
@@ -78,7 +78,7 @@ def test_reserve_is_threadsafe_and_bounds_concurrent_holds():
 
 @pytest.mark.asyncio
 async def test_complete_async_refuses_overbudget_before_calling_provider(monkeypatch):
-    from maverick.llm import LLM
+    from lightwork.llm import LLM
     llm = LLM(model="anthropic:claude-sonnet-4-6")
 
     class _Client:

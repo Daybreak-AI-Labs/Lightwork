@@ -1,4 +1,4 @@
-"""Tests for programming-by-demonstration (maverick.demonstration).
+"""Tests for programming-by-demonstration (lightwork.demonstration).
 
 Induction routes through intake.generate_profile -> validate_profile, so a
 demonstrated pack inherits the same envelope clamp as a described one. The
@@ -6,8 +6,8 @@ deterministic path needs no LLM; the LLM path is exercised with a fake.
 """
 from __future__ import annotations
 
-from maverick import demonstration as demo
-from maverick.demonstration import Demonstration, DemoStep
+from lightwork import demonstration as demo
+from lightwork.demonstration import Demonstration, DemoStep
 
 
 # --------------------------------------------------------------------------

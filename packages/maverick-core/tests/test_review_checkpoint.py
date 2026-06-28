@@ -3,7 +3,7 @@ from __future__ import annotations
 
 import types
 
-from maverick.review_checkpoint import (
+from lightwork.review_checkpoint import (
     CheckpointEvent,
     CheckpointPolicy,
     ReviewCheckpoint,
@@ -77,7 +77,7 @@ def test_policy_from_config_env(monkeypatch):
 def test_policy_from_config_off_by_default(monkeypatch):
     for v in ("DOLLARS", "TOOL_CALLS", "WALL_SECONDS"):
         monkeypatch.delenv(f"MAVERICK_REVIEW_CHECKPOINT_{v}", raising=False)
-    import maverick.config as config_mod
+    import lightwork.config as config_mod
     monkeypatch.setattr(config_mod, "load_config", dict)
     assert not policy_from_config().is_active()
 
@@ -89,7 +89,7 @@ def test_consent_review_requires_fresh_explicit_approval(monkeypatch):
         calls.append((args, kwargs))
         return types.SimpleNamespace(granted=True)
 
-    import maverick.safety as safety
+    import lightwork.safety as safety
     monkeypatch.setattr(safety, "require_consent", fake_require_consent)
 
     event = CheckpointEvent("tool_calls", 100, 50)

@@ -5,7 +5,7 @@ SCHEMA (idempotent CREATE) + a SCHEMA_VERSION bump, so a fresh DB just has it.
 """
 from __future__ import annotations
 
-from maverick.world_model import WorldModel
+from lightwork.world_model import WorldModel
 
 
 def test_record_and_query_goal_origins(tmp_path):

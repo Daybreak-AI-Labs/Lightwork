@@ -3,7 +3,7 @@ from __future__ import annotations
 
 import json
 
-from maverick.tools.crewai_adapter import crewai_adapter
+from lightwork.tools.crewai_adapter import crewai_adapter
 
 
 def _run(**kw):

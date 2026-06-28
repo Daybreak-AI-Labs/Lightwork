@@ -3,9 +3,9 @@ from __future__ import annotations
 
 import logging
 
-import maverick.budget as budget_mod
+import lightwork.budget as budget_mod
 import pytest
-from maverick.budget import (
+from lightwork.budget import (
     Budget,
     BudgetExceeded,
     UnpricedModelError,
@@ -65,8 +65,8 @@ def test_known_model_priced_from_table():
 
 def test_unknown_model_warns_once_then_falls_back(monkeypatch, caplog):
     monkeypatch.delenv("MAVERICK_BILLING_STRICT", raising=False)
-    monkeypatch.setattr("maverick.config.get_budget_overrides", dict)
-    with caplog.at_level(logging.WARNING, logger="maverick.budget"):
+    monkeypatch.setattr("lightwork.config.get_budget_overrides", dict)
+    with caplog.at_level(logging.WARNING, logger="lightwork.budget"):
         first = _lookup_price("totally-made-up-model")
         second = _lookup_price("totally-made-up-model")
     assert first == second == (3.0, 15.0)  # documented Sonnet fallback estimate
@@ -76,7 +76,7 @@ def test_unknown_model_warns_once_then_falls_back(monkeypatch, caplog):
 
 def test_none_model_does_not_warn(monkeypatch, caplog):
     monkeypatch.delenv("MAVERICK_BILLING_STRICT", raising=False)
-    with caplog.at_level(logging.WARNING, logger="maverick.budget"):
+    with caplog.at_level(logging.WARNING, logger="lightwork.budget"):
         assert _lookup_price(None) == (3.0, 15.0)
     assert not [r for r in caplog.records if "no verified price" in r.getMessage()]
 
@@ -97,7 +97,7 @@ def test_strict_pricing_allows_known_and_selfhosted(monkeypatch):
 
 def test_strict_pricing_via_config(monkeypatch):
     monkeypatch.delenv("MAVERICK_BILLING_STRICT", raising=False)
-    monkeypatch.setattr("maverick.config.get_budget_overrides",
+    monkeypatch.setattr("lightwork.config.get_budget_overrides",
                         lambda: {"strict_pricing": True})
     with pytest.raises(UnpricedModelError):
         _lookup_price("totally-made-up-model")

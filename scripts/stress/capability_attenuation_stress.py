@@ -10,9 +10,9 @@ import sys
 from pathlib import Path
 
 _REPO = Path(__file__).resolve().parents[2]
-sys.path.insert(0, str(_REPO / "packages" / "maverick-core"))
+sys.path.insert(0, str(_REPO / "packages" / "lightwork-core"))
 
-from maverick.capability import Capability  # noqa: E402
+from lightwork.capability import Capability  # noqa: E402
 
 TOOLS = [
     "read_file", "write_file", "shell", "web_search", "http_fetch", "sql_query",

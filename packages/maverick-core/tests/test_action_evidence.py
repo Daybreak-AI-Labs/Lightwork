@@ -4,15 +4,15 @@ from __future__ import annotations
 import base64
 
 import pytest
-from maverick.safety import action_evidence
-from maverick.safety.action_gate import browser_action_risk, computer_action_risk
+from lightwork.safety import action_evidence
+from lightwork.safety.action_gate import browser_action_risk, computer_action_risk
 
 _FAKE_PNG = base64.b64encode(b"not-a-real-png-but-sealable").decode()
 
 
 @pytest.fixture(autouse=True)
 def _isolated(tmp_path, monkeypatch):
-    from maverick.audit import writer as audit_writer
+    from lightwork.audit import writer as audit_writer
     monkeypatch.setenv("MAVERICK_HOME", str(tmp_path))
     monkeypatch.setattr(audit_writer, "_default", None)
     audit_writer._defaults.clear()
@@ -20,7 +20,7 @@ def _isolated(tmp_path, monkeypatch):
 
 
 def _events():
-    from maverick.audit import iter_events
+    from lightwork.audit import iter_events
     return list(iter_events(all_days=True))
 
 
@@ -98,7 +98,7 @@ def test_seal_bracketed_after_runs_even_on_error(monkeypatch):
 
 def test_evidence_correlates_to_goal_context(monkeypatch):
     _enable_sealing(monkeypatch)
-    from maverick.audit import goal_context
+    from lightwork.audit import goal_context
     with goal_context(55):
         action_evidence.seal_bracketed(lambda: _FAKE_PNG, lambda: "ok", action="computer.key")
     evs = [e for e in _events() if e.get("kind") == "evidence_capture"]

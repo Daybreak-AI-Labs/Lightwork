@@ -4,7 +4,7 @@ Hermetic: no real network and no real JWT. We configure the login flow via
 ``MAVERICK_OIDC_*`` env (so the real ``login_enabled()`` / ``load_oidc_config()``
 gate is exercised), with explicit authorization/token endpoints so discovery is
 never called. The token exchange helper and the ID-token verification
-(``maverick.oidc.verify_oidc_token``, imported into ``oidc_login``) are
+(``lightwork.oidc.verify_oidc_token``, imported into ``oidc_login``) are
 monkeypatched.
 
 Covers the security checklist: login redirects with state + PKCE S256; callback
@@ -16,12 +16,12 @@ from __future__ import annotations
 
 from urllib.parse import parse_qs, urlparse
 
-import maverick_dashboard.oidc_login as ol
+import lightwork_dashboard.oidc_login as ol
 import pytest
 from fastapi.testclient import TestClient
-from maverick.oidc import VerifiedPrincipal
-from maverick.web_session import verify_session
-from maverick_dashboard.app import app
+from lightwork.oidc import VerifiedPrincipal
+from lightwork.web_session import verify_session
+from lightwork_dashboard.app import app
 
 AUTH_ENDPOINT = "https://idp.example.com/authorize"
 TOKEN_ENDPOINT = "https://idp.example.com/token"
@@ -265,7 +265,7 @@ def test_callback_missing_tx_cookie_fails(login_env, client, monkeypatch):
 
 
 def test_callback_verify_failure_sets_no_session(login_env, client, monkeypatch):
-    from maverick.oidc import OIDCError
+    from lightwork.oidc import OIDCError
 
     state, _, _ = _do_login(client)
 
@@ -312,7 +312,7 @@ def test_callback_records_pairwise_sub_in_subject_directory(
         f"/auth/callback?code=c&state={state}", follow_redirects=False)
     assert resp.status_code == 303
 
-    from maverick_dashboard import subject_directory as sd
+    from lightwork_dashboard import subject_directory as sd
     assert sd.subs_for(["dana@example.com"]) == {"pairwise-zzz"}
     assert sd.subs_for(["aad-oid-7"]) == {"pairwise-zzz"}
 
@@ -331,8 +331,8 @@ def test_logout_all_revokes_even_when_session_already_revoked(login_env, client)
     # was already revoked once -- otherwise other (newer) bearers survive.
     import time
 
-    from maverick.web_session import sign_session
-    from maverick_dashboard import session_revocation as sr
+    from lightwork.web_session import sign_session
+    from lightwork_dashboard import session_revocation as sr
 
     now = int(time.time())
     raw = sign_session(
@@ -398,8 +398,8 @@ def test_callback_releases_shared_tx_when_token_exchange_fails(
     login_env, client, monkeypatch
 ):
     """Bogus unauthenticated callbacks must not leave durable HA replay rows."""
-    import maverick_dashboard._shared as shared
-    from maverick import world_model_backends
+    import lightwork_dashboard._shared as shared
+    from lightwork import world_model_backends
 
     monkeypatch.setattr(world_model_backends, "is_postgres_configured", lambda: True)
     fake = _FakeSharedWorld()
@@ -426,7 +426,7 @@ def test_consume_tx_in_process_guard_is_default(monkeypatch):
     in-process dict consumes once and rejects the replay."""
     import asyncio
 
-    from maverick import world_model_backends
+    from lightwork import world_model_backends
     monkeypatch.setattr(world_model_backends, "is_postgres_configured", lambda: False)
     ol._CONSUMED_TX_IDS.clear()
 
@@ -440,8 +440,8 @@ def test_consume_tx_uses_shared_store_under_postgres(monkeypatch):
     across replicas), and the in-process dict is bypassed entirely."""
     import asyncio
 
-    import maverick_dashboard._shared as shared
-    from maverick import world_model_backends
+    import lightwork_dashboard._shared as shared
+    from lightwork import world_model_backends
     monkeypatch.setattr(world_model_backends, "is_postgres_configured", lambda: True)
     fake = _FakeSharedWorld()
     monkeypatch.setattr(shared, "_world", lambda: fake)
@@ -460,8 +460,8 @@ def test_consume_tx_falls_back_when_shared_store_errors(monkeypatch):
     hard-failing every login (defense-in-depth: cookie+PKCE+state still hold)."""
     import asyncio
 
-    import maverick_dashboard._shared as shared
-    from maverick import world_model_backends
+    import lightwork_dashboard._shared as shared
+    from lightwork import world_model_backends
     monkeypatch.setattr(world_model_backends, "is_postgres_configured", lambda: True)
 
     def _boom():

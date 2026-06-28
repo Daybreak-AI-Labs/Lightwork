@@ -2,8 +2,8 @@
 from __future__ import annotations
 
 import pytest
-from maverick.capability import Capability
-from maverick.capability_boot import BootNegotiation, negotiate_boot
+from lightwork.capability import Capability
+from lightwork.capability_boot import BootNegotiation, negotiate_boot
 
 
 def test_enforcement_off_is_unrestricted():
@@ -73,7 +73,7 @@ def test_boot_negotiation_dataclass_defaults():
 # ---- spawn integration ----
 
 def test_child_capability_negotiates(monkeypatch):
-    from maverick.tools.spawn import _child_capability
+    from lightwork.tools.spawn import _child_capability
 
     class _Parent:
         capability = Capability(principal="root")
@@ -85,7 +85,7 @@ def test_child_capability_negotiates(monkeypatch):
 
 
 def test_child_capability_none_when_enforcement_off():
-    from maverick.tools.spawn import _child_capability
+    from lightwork.tools.spawn import _child_capability
 
     class _Parent:
         capability = None
@@ -94,7 +94,7 @@ def test_child_capability_none_when_enforcement_off():
 
 
 def test_child_capability_raises_on_denied_required():
-    from maverick.tools.spawn import CapabilityBootDenied, _child_capability
+    from lightwork.tools.spawn import CapabilityBootDenied, _child_capability
 
     class _Parent:
         capability = Capability(principal="root",

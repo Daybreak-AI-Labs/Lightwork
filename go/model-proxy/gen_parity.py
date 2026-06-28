@@ -1,6 +1,6 @@
 """Generate the cross-language parity fixture for the Go model proxy.
 
-Python's ``maverick.model_proxy`` is the source of truth. This script drives a
+Python's ``lightwork.model_proxy`` is the source of truth. This script drives a
 battery of inputs through the real Python functions and serializes the
 decisions to ``testdata/parity.json``; ``parity_test.go`` then asserts the Go
 port produces byte-identical results. Re-run after changing either side:
@@ -14,7 +14,7 @@ from __future__ import annotations
 import json
 from pathlib import Path
 
-from maverick import model_proxy as mp
+from lightwork import model_proxy as mp
 
 
 def _cfg(**kw) -> mp.ProxyConfig:
@@ -70,9 +70,9 @@ _AUTH_CASES = [
     (_cfg(), {"Authorization": "Bearer <client-token>"}),
     (_cfg(), {"authorization": "Bearer <client-token>"}),
     (_cfg(), {"Authorization": "Bearer WRONG"}),
-    (_cfg(), {"x-maverick-proxy-token": "<client-token>"}),
+    (_cfg(), {"x-lightwork-proxy-token": "<client-token>"}),
     (_cfg(), {"X-Maverick-Proxy-Token": "<client-token>"}),
-    (_cfg(), {"x-maverick-proxy-token": "nope"}),
+    (_cfg(), {"x-lightwork-proxy-token": "nope"}),
     (_cfg(), {}),
     (_cfg(), {"Authorization": "Bearer <client-token> "}),  # trailing space stripped
     (_cfg(client_token=""), {"Authorization": "Bearer "}),  # no token -> deny

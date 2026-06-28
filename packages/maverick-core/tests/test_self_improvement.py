@@ -6,7 +6,7 @@ calibration freeze, human approval, reversibility, audit, and the ledger.
 """
 from __future__ import annotations
 
-from maverick.self_improvement import (
+from lightwork.self_improvement import (
     Candidate,
     PromotionLedger,
     SelfImprovementController,
@@ -191,7 +191,7 @@ def test_rollback_reverses_and_is_idempotent(tmp_path, monkeypatch):
 
 def test_ledger_persists_across_instances(tmp_path):
     p = tmp_path / "si.json"
-    from maverick.self_improvement import PromotionRecord
+    from lightwork.self_improvement import PromotionRecord
     led = PromotionLedger(path=p)
     led.add(PromotionRecord(id="abc", rung="config", summary="x",
                             baseline_score=0.1, candidate_score=0.9, promoted_at=1.0))

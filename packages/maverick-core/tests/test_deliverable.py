@@ -2,7 +2,7 @@
 agents emit (pipe tables) when the shape is structured, else fall back to prose."""
 from __future__ import annotations
 
-from maverick.deliverable import (
+from lightwork.deliverable import (
     RenderedDeliverable,
     parse_pipe_table,
     render_deliverable,

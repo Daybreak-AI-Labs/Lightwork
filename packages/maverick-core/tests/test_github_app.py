@@ -4,7 +4,7 @@ from __future__ import annotations
 import hashlib
 import hmac
 
-from maverick.github_app import (
+from lightwork.github_app import (
     SLASH_TRIGGER,
     _trigger_labels,
     build_brief,
@@ -136,7 +136,7 @@ class TestParseWebhook:
 
 class TestBuildBrief:
     def test_brief_includes_repo_issue_title_body(self):
-        from maverick.github_app import WebhookPayload
+        from lightwork.github_app import WebhookPayload
         p = WebhookPayload(
             event="issues", action="labeled",
             repo_full_name="octocat/spoon",
@@ -171,7 +171,7 @@ class TestProcessIssueGitTimeout:
     """A hung local git call must surface as a clean PRResult, not a hang/crash."""
 
     def _payload(self):
-        from maverick.github_app import WebhookPayload
+        from lightwork.github_app import WebhookPayload
         return WebhookPayload(
             event="issues", action="labeled", repo_full_name="octocat/spoon",
             issue_number=7, issue_title="t", issue_body="b",
@@ -182,7 +182,7 @@ class TestProcessIssueGitTimeout:
         import asyncio
         import subprocess
 
-        from maverick import github_app as ga
+        from lightwork import github_app as ga
 
         monkeypatch.setattr(ga, "clone_repo", lambda *a, **k: tmp_path)
 
@@ -201,7 +201,7 @@ class TestProcessIssueGitTimeout:
         import asyncio
         import subprocess
 
-        from maverick import github_app as ga
+        from lightwork import github_app as ga
 
         monkeypatch.setattr(ga, "clone_repo", lambda *a, **k: tmp_path)
         seen_timeouts = []
@@ -220,9 +220,9 @@ class TestProcessIssueGitTimeout:
             return "did nothing"
 
         monkeypatch.setattr(ga, "run_goal", _fake_run_goal, raising=False)
-        monkeypatch.setattr("maverick.world_model.WorldModel.create_goal",
+        monkeypatch.setattr("lightwork.world_model.WorldModel.create_goal",
                             lambda self, *a, **k: 1, raising=False)
-        monkeypatch.setattr("maverick.llm.LLM.__init__", lambda self, *a, **k: None)
+        monkeypatch.setattr("lightwork.llm.LLM.__init__", lambda self, *a, **k: None)
 
         asyncio.run(ga.process_issue(self._payload(), token="x"))
         # At least the checkout ran, and every observed call carried a timeout.

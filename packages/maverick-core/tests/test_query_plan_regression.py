@@ -1,7 +1,7 @@
 """query_plan_regression: query-plan regression check."""
 from __future__ import annotations
 
-from maverick.tools.query_plan_regression import query_plan_regression
+from lightwork.tools.query_plan_regression import query_plan_regression
 
 
 def _compare(baseline, candidate, **kw):

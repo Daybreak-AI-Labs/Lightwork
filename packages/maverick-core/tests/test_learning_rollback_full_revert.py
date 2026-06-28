@@ -7,7 +7,7 @@ survives a rollback that is supposed to leave state "fully restored or unchanged
 """
 from __future__ import annotations
 
-from maverick import dreaming
+from lightwork import dreaming
 
 
 def _stores(tmp):

@@ -4,8 +4,8 @@ from __future__ import annotations
 import json
 
 import pytest
-from maverick import safety_report
-from maverick.safety_report import collect, generate_report
+from lightwork import safety_report
+from lightwork.safety_report import collect, generate_report
 
 SINCE, UNTIL = "2026-01-01", "2026-12-31"
 TS = 1767225600.0  # 2026-01-01 00:00:00 UTC
@@ -136,7 +136,7 @@ def test_default_event_source_fails_soft(monkeypatch):
     def boom(**kw):
         raise OSError("audit dir unreadable")
 
-    import maverick.audit.export as export
+    import lightwork.audit.export as export
 
     monkeypatch.setattr(export, "iter_audit_events", boom)
     text = generate_report(

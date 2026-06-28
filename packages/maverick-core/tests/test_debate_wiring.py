@@ -12,7 +12,7 @@ from click.testing import CliRunner
 
 
 def test_debate_command_registered():
-    from maverick.cli import main
+    from lightwork.cli import main
     assert "debate" in main.commands
 
 
@@ -20,9 +20,9 @@ def test_debate_command_prints_verdict(monkeypatch):
     # The commands now preflight providers (round-3 fix); the LLM is
     # still mocked -- a dummy key just satisfies the gate.
     monkeypatch.setenv("ANTHROPIC_API_KEY", "sk-ant-fake")
-    import maverick.debate as debate_mod
-    from maverick import cli as cli_mod
-    from maverick.debate import DebateResult, DebateTurn
+    import lightwork.debate as debate_mod
+    from lightwork import cli as cli_mod
+    from lightwork.debate import DebateResult, DebateTurn
 
     class _FakeLLM:
         def __init__(self, model=None):

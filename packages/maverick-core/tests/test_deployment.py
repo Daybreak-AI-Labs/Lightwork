@@ -26,11 +26,11 @@ def _isolate(monkeypatch, tmp_path):
         "MAVERICK_AUDIT_SIGN", "MAVERICK_CONSENT_MODE", "MAVERICK_AI_DISCLOSURE",
     ):
         monkeypatch.delenv(var, raising=False)
-    monkeypatch.setattr("maverick.config.load_config", lambda *a, **k: {})
+    monkeypatch.setattr("lightwork.config.load_config", lambda *a, **k: {})
     # Keep generated at-rest/audit keys and audit probe files off the real home dir.
-    from maverick import crypto_at_rest as car
-    from maverick import paths
-    from maverick.audit import signing
+    from lightwork import crypto_at_rest as car
+    from lightwork import paths
+    from lightwork.audit import signing
 
     monkeypatch.setattr(paths, "maverick_home", lambda: tmp_path / "home")
     monkeypatch.setattr(signing, "KEY_DIR", signing._LEGACY_KEY_DIR)
@@ -38,7 +38,7 @@ def _isolate(monkeypatch, tmp_path):
 
 
 def test_bare_deployment_fails_the_boundary_guarantees():
-    from maverick.deployment import all_passed, verify_deployment
+    from lightwork.deployment import all_passed, verify_deployment
 
     checks = {c.name: c for c in verify_deployment()}
     assert not all_passed(list(checks.values()))
@@ -49,8 +49,8 @@ def test_bare_deployment_fails_the_boundary_guarantees():
 
 @requires_crypto
 def test_verifier_fails_when_audit_signing_key_cannot_initialize(monkeypatch):
-    from maverick.deployment import verify_deployment
-    from maverick.paths import data_dir
+    from lightwork.deployment import verify_deployment
+    from lightwork.paths import data_dir
 
     monkeypatch.setenv("MAVERICK_AUDIT_SIGN", "1")
 
@@ -71,9 +71,9 @@ def test_verifier_fails_when_audit_signing_key_cannot_initialize(monkeypatch):
 
 @requires_crypto
 def test_regulated_profile_passes_seals_data_and_is_compliant(monkeypatch, tmp_path):
-    from maverick.compliance import compliance_report
-    from maverick.deployment import all_passed, verify_deployment
-    from maverick.world_model import WorldModel
+    from lightwork.compliance import compliance_report
+    from lightwork.deployment import all_passed, verify_deployment
+    from lightwork.world_model import WorldModel
 
     # The reference profile, expressed as env (the config-file form is documented
     # in docs/regulated-deployment.md). Enterprise mode implies at-rest encryption;
@@ -88,7 +88,7 @@ def test_regulated_profile_passes_seals_data_and_is_compliant(monkeypatch, tmp_p
     # memory only -- model that here so the audit-chain guarantee can sign.
     monkeypatch.setenv("MAVERICK_AUDIT_SIGNING_KEY", "11" * 32)
     monkeypatch.setattr(
-        "maverick.config.load_config",
+        "lightwork.config.load_config",
         lambda *a, **k: {
             "retention": {"audit_days": 365},
             # A regulated deployment must run agent code in a container, not the
@@ -117,16 +117,16 @@ def test_regulated_profile_passes_seals_data_and_is_compliant(monkeypatch, tmp_p
 
 
 requires_shield = pytest.mark.skipif(
-    importlib.util.find_spec("maverick_shield") is None,
-    reason="maverick-shield is not installed",
+    importlib.util.find_spec("lightwork_shield") is None,
+    reason="lightwork-shield is not installed",
 )
 
 
 @requires_shield
 def test_shield_guarantee_passes_when_installed_and_enforcing():
-    # maverick-shield installed + default profile (balanced) => the threat shield
+    # lightwork-shield installed + default profile (balanced) => the threat shield
     # is enforcing (built-in or SDK backend), so the guarantee holds.
-    from maverick.deployment import verify_deployment
+    from lightwork.deployment import verify_deployment
 
     checks = {c.name: c for c in verify_deployment()}
     assert "Threat shield" in checks
@@ -139,9 +139,9 @@ def test_shield_guarantee_fails_when_profile_off(monkeypatch):
     # guarantee, so a required enterprise deployment refuses to start with the
     # screen disabled.
     monkeypatch.setattr(
-        "maverick.config.load_config", lambda *a, **k: {"safety": {"profile": "off"}}
+        "lightwork.config.load_config", lambda *a, **k: {"safety": {"profile": "off"}}
     )
-    from maverick.deployment import verify_deployment
+    from lightwork.deployment import verify_deployment
 
     checks = {c.name: c for c in verify_deployment()}
     assert checks["Threat shield"].passed is False

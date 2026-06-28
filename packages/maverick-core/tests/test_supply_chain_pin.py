@@ -1,7 +1,7 @@
 """supply_chain_pin: flag unpinned/unhashed/range dependencies."""
 from __future__ import annotations
 
-from maverick.tools.supply_chain_pin import supply_chain_pin
+from lightwork.tools.supply_chain_pin import supply_chain_pin
 
 
 def _run(**kw):

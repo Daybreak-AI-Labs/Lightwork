@@ -1,4 +1,4 @@
-"""Verified handoffs over the cross-agent bus (maverick.bus_handoff): a delegation
+"""Verified handoffs over the cross-agent bus (lightwork.bus_handoff): a delegation
 rides agent_bus as a signed Envelope, minted by the run's HandoffAuthority and
 verified on receipt. The bridge must accept an authentic in-scope handoff (handing
 back the attenuated grant) and reject tamper / replay / forged-issuer / expiry /
@@ -8,10 +8,10 @@ from __future__ import annotations
 import time
 
 import pytest
-from maverick import agent_bus
-from maverick.bus_handoff import HandoffAuthority, receive_handoff, send_handoff
-from maverick.capability import Capability
-from maverick.handoff import Envelope
+from lightwork import agent_bus
+from lightwork.bus_handoff import HandoffAuthority, receive_handoff, send_handoff
+from lightwork.capability import Capability
+from lightwork.handoff import Envelope
 
 
 def _have_crypto() -> bool:
@@ -136,15 +136,15 @@ def test_expired_grant_is_rejected():
 
 def test_recv_verified_handoff_installs_grant_for_tool_enforcement(monkeypatch, tmp_path):
     """A verified handoff must constrain subsequent tools, not just prompt text."""
-    from maverick.agent import Agent
-    from maverick.blackboard import Blackboard
-    from maverick.budget import Budget
-    from maverick.bus_handoff import HandoffDelivery
-    from maverick.handoff import HandoffVerdict
-    from maverick.sandbox import LocalBackend
-    from maverick.swarm import SwarmContext
-    from maverick.tools import Tool
-    from maverick.world_model import WorldModel
+    from lightwork.agent import Agent
+    from lightwork.blackboard import Blackboard
+    from lightwork.budget import Budget
+    from lightwork.bus_handoff import HandoffDelivery
+    from lightwork.handoff import HandoffVerdict
+    from lightwork.sandbox import LocalBackend
+    from lightwork.swarm import SwarmContext
+    from lightwork.tools import Tool
+    from lightwork.world_model import WorldModel
 
     world = WorldModel(tmp_path / "world.db")
     goal_id = world.create_goal("g", "")
@@ -179,8 +179,8 @@ def test_recv_verified_handoff_installs_grant_for_tool_enforcement(monkeypatch, 
             verdict=HandoffVerdict(True, "ok", "handoff verified", grant=delegated),
         )
 
-    monkeypatch.setattr("maverick.bus_handoff.authority_for", lambda ctx: object())
-    monkeypatch.setattr("maverick.bus_handoff.receive_handoff", fake_receive_handoff)
+    monkeypatch.setattr("lightwork.bus_handoff.authority_for", lambda ctx: object())
+    monkeypatch.setattr("lightwork.bus_handoff.receive_handoff", fake_receive_handoff)
 
     import asyncio
 

@@ -4,9 +4,9 @@ once an operator opts in AND a codebook is learned."""
 from __future__ import annotations
 
 import pytest
-from maverick import codec_telemetry as ct
-from maverick import emergent_tokens as et
-from maverick.blackboard import Blackboard
+from lightwork import codec_telemetry as ct
+from lightwork import emergent_tokens as et
+from lightwork.blackboard import Blackboard
 
 
 @pytest.fixture(autouse=True)

@@ -76,12 +76,12 @@ def make_tau2_solver(
     pass scripted FakeLLMs. A shared ``Budget`` plus the turn/step caps bound the
     per-task cost; any LLM/budget error ends the conversation so ``verify`` grades
     whatever was done."""
-    from maverick.budget import Budget
+    from lightwork.budget import Budget
 
     def _mk(factory):
         if factory is not None:
             return factory()
-        from maverick.llm import LLM
+        from lightwork.llm import LLM
         return LLM()
 
     def _agent_reply(agent_llm, budget, specs, tools, agent_msgs) -> str:

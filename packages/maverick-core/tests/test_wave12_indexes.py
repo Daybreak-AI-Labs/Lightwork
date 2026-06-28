@@ -18,19 +18,19 @@ def _index_exists(conn, name: str) -> bool:
 
 class TestIndexesPresent:
     def test_idx_episodes_ended_at(self, tmp_path):
-        from maverick.world_model import WorldModel
+        from lightwork.world_model import WorldModel
         wm = WorldModel(path=tmp_path / "wm.db")
         assert _index_exists(wm.conn, "idx_episodes_ended_at")
 
     def test_idx_goal_events_ts(self, tmp_path):
-        from maverick.world_model import WorldModel
+        from lightwork.world_model import WorldModel
         wm = WorldModel(path=tmp_path / "wm.db")
         assert _index_exists(wm.conn, "idx_goal_events_ts")
 
     def test_existing_indexes_preserved(self, tmp_path):
         """The pre-Wave-12 indexes must still be present (regression
         guard against accidental drops)."""
-        from maverick.world_model import WorldModel
+        from lightwork.world_model import WorldModel
         wm = WorldModel(path=tmp_path / "wm.db")
         for idx in (
             "idx_goals_status",
@@ -47,7 +47,7 @@ class TestMigrationToV7:
     def test_v6_database_migrates_to_v7(self, tmp_path, monkeypatch):
         """A WorldModel opened against an old SCHEMA_VERSION=6 DB must
         run the v7 migration and end up with the new indexes."""
-        from maverick import world_model
+        from lightwork import world_model
 
         db_path = tmp_path / "legacy.db"
 

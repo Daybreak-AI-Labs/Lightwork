@@ -6,8 +6,8 @@
 """
 from __future__ import annotations
 
-import maverick.tools.browser as browser_mod
-from maverick.tools.browser import (
+import lightwork.tools.browser as browser_mod
+from lightwork.tools.browser import (
     _BrowserSession,
     _persist_enabled,
     _restore_state_arg,

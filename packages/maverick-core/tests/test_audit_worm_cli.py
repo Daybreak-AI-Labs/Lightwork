@@ -3,8 +3,8 @@ from __future__ import annotations
 
 import pytest
 from click.testing import CliRunner
-from maverick.audit import worm
-from maverick.cli import main
+from lightwork.audit import worm
+from lightwork.cli import main
 
 
 @pytest.fixture(autouse=True)

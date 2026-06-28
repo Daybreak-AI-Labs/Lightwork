@@ -18,7 +18,7 @@ import pytest
 # --- Task 1: provider-aware cache-read multiplier --------------------------
 
 def test_anthropic_cache_read_default_is_0_1x():
-    from maverick.budget import Budget
+    from lightwork.budget import Budget
     b = Budget(max_dollars=1000.0)
     # Sonnet input rate is $3/Mtok. 1M cached read tokens at the default
     # Anthropic 0.1x => $0.30.
@@ -27,7 +27,7 @@ def test_anthropic_cache_read_default_is_0_1x():
 
 
 def test_openai_cache_read_mult_is_0_5x():
-    from maverick.budget import CACHE_READ_MULT_OPENAI, Budget
+    from lightwork.budget import CACHE_READ_MULT_OPENAI, Budget
     assert CACHE_READ_MULT_OPENAI == 0.5
     b = Budget(max_dollars=1000.0)
     # gpt-5.4 input rate is $3/Mtok. 1M cached read tokens at OpenAI 0.5x
@@ -42,7 +42,7 @@ def test_openai_cache_read_mult_is_0_5x():
 def test_record_tokens_backward_compatible():
     """The legacy positional call (no cache_read_mult) must still bill at the
     Anthropic 0.1x default — many callers rely on it."""
-    from maverick.budget import Budget
+    from lightwork.budget import Budget
     b = Budget(max_dollars=1000.0)
     b.record_tokens(100, 50, model="claude-sonnet-4-6", cache_read_tok=1000)
     expected = (
@@ -57,8 +57,8 @@ def test_openai_provider_passes_openai_cache_mult():
     """End-to-end: the OpenAI provider bills cached reads at 0.5x, not 0.1x."""
     from types import SimpleNamespace
 
-    from maverick.budget import Budget
-    from maverick.providers.openai_provider import OpenAIClient
+    from lightwork.budget import Budget
+    from lightwork.providers.openai_provider import OpenAIClient
 
     usage = SimpleNamespace(
         prompt_tokens=1_000_000,
@@ -80,8 +80,8 @@ def test_openai_provider_passes_openai_cache_mult():
 # --- Task 2: cost_router ids all resolve in MODEL_PRICES -------------------
 
 def test_router_pricing_ids_resolve_in_model_prices():
-    from maverick.cost.router import _PRICING
-    from maverick.llm import MODEL_PRICES
+    from lightwork.cost.router import _PRICING
+    from lightwork.llm import MODEL_PRICES
     for provider, mid, _tier, in_rate, out_rate in _PRICING:
         assert mid in MODEL_PRICES, f"{provider}:{mid} not in MODEL_PRICES"
         # Rates are derived FROM the canonical catalog, so they must match.
@@ -89,8 +89,8 @@ def test_router_pricing_ids_resolve_in_model_prices():
 
 
 def test_price_for_model_matches_canonical_catalog():
-    from maverick.cost.router import _PRICING, price_for_model
-    from maverick.llm import MODEL_PRICES
+    from lightwork.cost.router import _PRICING, price_for_model
+    from lightwork.llm import MODEL_PRICES
     for _provider, mid, *_ in _PRICING:
         assert price_for_model(mid) == MODEL_PRICES[mid]
 
@@ -98,7 +98,7 @@ def test_price_for_model_matches_canonical_catalog():
 # --- Task 3: lifetime budget_dollars metric isn't stomped across goals -----
 
 def test_budget_dollars_metric_accumulates_across_goals(monkeypatch):
-    import maverick.observability as obs
+    import lightwork.observability as obs
 
     recorded: list[tuple[str, float]] = []
 
@@ -107,8 +107,8 @@ def test_budget_dollars_metric_accumulates_across_goals(monkeypatch):
 
     monkeypatch.setattr(obs, "record_metric", _fake_metric, raising=True)
 
-    from maverick.budget import Budget
-    from maverick.llm import LLM, LLMResponse
+    from lightwork.budget import Budget
+    from lightwork.llm import LLM, LLMResponse
 
     def _make_client(spend):
         class _C:
@@ -148,7 +148,7 @@ def _route_env(monkeypatch):
                  "XAI", "GEMINI", "GOOGLE"):
         monkeypatch.delenv(f"{prov}_API_KEY", raising=False)
     monkeypatch.setenv("HOME", "/nonexistent-465-routing-test")
-    from maverick.provider_health import get
+    from lightwork.provider_health import get
     get().reset()
     yield
     get().reset()
@@ -159,8 +159,8 @@ def test_unhealthy_cheap_model_excluded(_route_env, monkeypatch):
     # the premium gpt-5.4-pro which also qualifies for base-tier filtering).
     monkeypatch.setenv("OPENAI_API_KEY", "x")
 
-    from maverick.cost.router import TIER_BASE, CostSignal, pick
-    from maverick.provider_health import get
+    from lightwork.cost.router import TIER_BASE, CostSignal, pick
+    from lightwork.provider_health import get
 
     # The cheapest base-tier openai model (gpt-5.4) is down: 5 errors (100%).
     h = get()
@@ -180,8 +180,8 @@ def test_healthy_cheap_provider_still_wins(_route_env, monkeypatch):
     monkeypatch.setenv("DEEPSEEK_API_KEY", "x")
     monkeypatch.setenv("OPENAI_API_KEY", "x")
 
-    from maverick.cost.router import TIER_BASE, CostSignal, pick
-    from maverick.provider_health import get
+    from lightwork.cost.router import TIER_BASE, CostSignal, pick
+    from lightwork.provider_health import get
 
     # deepseek healthy (errors below threshold) -> still the cheapest pick.
     h = get()
@@ -196,8 +196,8 @@ def test_single_early_error_does_not_exclude(_route_env, monkeypatch):
     monkeypatch.setenv("DEEPSEEK_API_KEY", "x")
     monkeypatch.setenv("OPENAI_API_KEY", "x")
 
-    from maverick.cost.router import TIER_BASE, CostSignal, pick
-    from maverick.provider_health import get
+    from lightwork.cost.router import TIER_BASE, CostSignal, pick
+    from lightwork.provider_health import get
 
     # 1/1 = 100% error rate, but below the min sample count -> not excluded.
     get().record("deepseek", "deepseek-chat", latency_ms=10, error=True)
@@ -211,8 +211,8 @@ def test_error_rate_threshold_config_knob(_route_env, monkeypatch):
     # Tighten the ceiling to 20%; a 40% error rate now excludes deepseek.
     monkeypatch.setenv("MAVERICK_ROUTING_MAX_ERROR_RATE", "0.2")
 
-    from maverick.cost.router import TIER_BASE, CostSignal, pick
-    from maverick.provider_health import get
+    from lightwork.cost.router import TIER_BASE, CostSignal, pick
+    from lightwork.provider_health import get
 
     h = get()
     # Both deepseek base-tier models at 40% error -> both excluded under the

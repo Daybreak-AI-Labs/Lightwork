@@ -8,8 +8,8 @@ except ModuleNotFoundError:  # Python 3.10
     import tomli as tomllib  # type: ignore[no-redef]
 
 import pytest
-from maverick.domain import available_domains, builtin_dir, lint_profile, load_domains
-from maverick.domain_edit import (
+from lightwork.domain import available_domains, builtin_dir, lint_profile, load_domains
+from lightwork.domain_edit import (
     list_agents,
     overlay_toml,
     read_override,

@@ -4,8 +4,8 @@ from __future__ import annotations
 
 from pathlib import Path
 
-from maverick.paths import reset_tenant, set_tenant
-from maverick.workspace import Workspace, _sanitize_tenant
+from lightwork.paths import reset_tenant, set_tenant
+from lightwork.workspace import Workspace, _sanitize_tenant
 
 
 class TestWorkspacePaths:
@@ -54,8 +54,8 @@ class TestTenantSanitization:
 class TestPerTenantDomainIsolation:
     def test_domains_are_walled_off_by_tenant(self, tmp_path, monkeypatch):
         # A domain saved under tenant 'alpha' must not appear for tenant 'beta'.
-        from maverick.domain import DomainProfile, available_domains
-        from maverick.intake import save_profile
+        from lightwork.domain import DomainProfile, available_domains
+        from lightwork.intake import save_profile
 
         monkeypatch.setenv("MAVERICK_HOME", str(tmp_path))
         monkeypatch.delenv("MAVERICK_DOMAINS_DIR", raising=False)
@@ -68,8 +68,8 @@ class TestPerTenantDomainIsolation:
         assert "alpha_only" not in available_domains()  # walled off from another
 
     def test_save_lands_under_the_tenant_root(self, tmp_path, monkeypatch):
-        from maverick.domain import DomainProfile
-        from maverick.intake import save_profile
+        from lightwork.domain import DomainProfile
+        from lightwork.intake import save_profile
 
         monkeypatch.setenv("MAVERICK_HOME", str(tmp_path))
         monkeypatch.delenv("MAVERICK_DOMAINS_DIR", raising=False)
@@ -78,8 +78,8 @@ class TestPerTenantDomainIsolation:
         assert (tmp_path / "tenants" / "gamma" / "domains") in path.parents
 
     def test_domains_follow_context_tenant_scope(self, tmp_path, monkeypatch):
-        from maverick.domain import DomainProfile, available_domains
-        from maverick.intake import save_profile
+        from lightwork.domain import DomainProfile, available_domains
+        from lightwork.intake import save_profile
 
         monkeypatch.setenv("MAVERICK_HOME", str(tmp_path))
         monkeypatch.delenv("MAVERICK_TENANT", raising=False)
@@ -104,15 +104,15 @@ class TestPerTenantKnowledgeIsolation:
         import sys
         import types
 
-        from maverick.orchestrator import _build_knowledge
+        from lightwork.orchestrator import _build_knowledge
 
         monkeypatch.setenv("MAVERICK_HOME", str(tmp_path))
         monkeypatch.delenv("MAVERICK_TENANT", raising=False)
         monkeypatch.setattr(
-            "maverick.config.get_knowledge", lambda: {"enable": True}, raising=False
+            "lightwork.config.get_knowledge", lambda: {"enable": True}, raising=False
         )
 
-        fake_knowledge = types.ModuleType("maverick_knowledge")
+        fake_knowledge = types.ModuleType("lightwork_knowledge")
 
         class FakeKnowledgeBase:
             def __init__(self, *, store, embedder):
@@ -122,7 +122,7 @@ class TestPerTenantKnowledgeIsolation:
         fake_knowledge.KnowledgeBase = FakeKnowledgeBase
         fake_knowledge.build_store = lambda cfg: cfg["path"]
         fake_knowledge.build_embedder = lambda cfg: None
-        monkeypatch.setitem(sys.modules, "maverick_knowledge", fake_knowledge)
+        monkeypatch.setitem(sys.modules, "lightwork_knowledge", fake_knowledge)
 
         token = set_tenant("slack:alice")
         try:

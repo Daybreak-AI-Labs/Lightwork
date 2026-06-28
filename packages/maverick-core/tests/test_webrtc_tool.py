@@ -6,8 +6,8 @@ import sys
 import types
 
 import pytest
-from maverick.tools import webrtc_tool as mod
-from maverick.tools.webrtc_tool import webrtc_tool
+from lightwork.tools import webrtc_tool as mod
+from lightwork.tools.webrtc_tool import webrtc_tool
 
 FAKE_SDP = "v=0\r\no=- 0 0 IN IP4 127.0.0.1\r\ns=fake-offer\r\n"
 
@@ -68,7 +68,7 @@ def _run(args):
 def test_missing_dep_reported(monkeypatch):
     monkeypatch.setitem(sys.modules, "aiortc", None)  # force ImportError
     out = _run({"op": "offer"})
-    assert "ERROR" in out and "maverick-agent[webrtc]" in out
+    assert "ERROR" in out and "lightwork-agent[webrtc]" in out
 
 
 def test_offer_returns_sdp_and_call_shape(monkeypatch):

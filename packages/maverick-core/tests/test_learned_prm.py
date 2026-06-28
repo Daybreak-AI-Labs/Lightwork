@@ -8,7 +8,7 @@ import sys
 import types
 
 import pytest
-from maverick.prm import (
+from lightwork.prm import (
     FEATURE_NAMES,
     MAX_LEARNED_PRM_HIDDEN_DIM,
     ROLE_VOCAB,
@@ -19,7 +19,7 @@ from maverick.prm import (
     build_from_env,
     step_features,
 )
-from maverick.training import prm_train
+from lightwork.training import prm_train
 
 # --- step_features ---------------------------------------------------------
 

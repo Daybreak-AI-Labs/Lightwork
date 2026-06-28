@@ -1,7 +1,7 @@
 """provider_failover_policy: provider failover policy engine."""
 from __future__ import annotations
 
-from maverick.tools.provider_failover_policy import provider_failover_policy
+from lightwork.tools.provider_failover_policy import provider_failover_policy
 
 _POLICY = {"max_error_rate": 0.1, "max_latency_ms": 500}
 

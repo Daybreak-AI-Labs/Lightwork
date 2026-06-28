@@ -16,7 +16,7 @@ from __future__ import annotations
 
 import threading
 
-from maverick_mcp.server import MCPServer
+from lightwork_mcp.server import MCPServer
 
 
 def test_structured_override_isolated_across_concurrent_threads():

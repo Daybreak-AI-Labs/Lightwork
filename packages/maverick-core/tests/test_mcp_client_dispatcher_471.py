@@ -13,7 +13,7 @@ import asyncio
 import json
 
 import pytest
-from maverick.mcp_client import MCPClient, MCPClientError, MCPServerSpec
+from lightwork.mcp_client import MCPClient, MCPClientError, MCPServerSpec
 
 
 class _FakeStdin:

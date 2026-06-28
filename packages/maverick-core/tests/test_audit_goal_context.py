@@ -7,7 +7,7 @@ without one. The run loop binds a ContextVar so those still attribute to the run
 from __future__ import annotations
 
 import pytest
-from maverick.audit import (
+from lightwork.audit import (
     EventKind,
     goal_context,
     iter_events,
@@ -19,7 +19,7 @@ from maverick.audit import (
 
 @pytest.fixture(autouse=True)
 def _isolated(tmp_path, monkeypatch):
-    from maverick.audit import writer as audit_writer
+    from lightwork.audit import writer as audit_writer
     monkeypatch.setenv("MAVERICK_HOME", str(tmp_path))
     monkeypatch.setattr(audit_writer, "_default", None)
     audit_writer._defaults.clear()
@@ -61,7 +61,7 @@ def test_context_resets_after_block():
 def test_run_goal_sync_binds_context(monkeypatch):
     # The orchestrator wrapper must bind the goal context around the run, so an
     # event recorded without goal_id inside run_goal attributes to the goal.
-    import maverick.orchestrator as orch
+    import lightwork.orchestrator as orch
 
     async def fake_run_goal(llm, world, budget, goal_id, **kw):
         record(EventKind.CONSENT_RESULT, action="x", decision="approve")

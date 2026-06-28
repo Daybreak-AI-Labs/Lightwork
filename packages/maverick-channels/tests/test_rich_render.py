@@ -4,7 +4,7 @@ from __future__ import annotations
 import asyncio
 import time
 
-from maverick_channels import rich_render as rr
+from lightwork_channels import rich_render as rr
 
 _MATHY = "energy is $$E = mc^2$$ and inline \\(a+b\\)"
 _DIAGRAM = "flow:\n```mermaid\ngraph TD; A-->B;\n```\ndone"
@@ -108,7 +108,7 @@ def test_wrapper_proxies_inner_attributes(tmp_path):
 
 def test_maybe_wrap_off_by_default(monkeypatch):
     monkeypatch.delenv("MAVERICK_CHANNELS_RICH_RENDER", raising=False)
-    monkeypatch.setattr("maverick.config.load_config", dict)
+    monkeypatch.setattr("lightwork.config.load_config", dict)
     inner = _Chan()
     assert rr.maybe_wrap(inner) is inner
 

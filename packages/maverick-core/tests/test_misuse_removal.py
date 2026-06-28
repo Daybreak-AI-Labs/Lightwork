@@ -1,7 +1,7 @@
 """misuse_removal: flagged-entry removal + re-ranking."""
 from __future__ import annotations
 
-from maverick.tools.misuse_removal import misuse_removal
+from lightwork.tools.misuse_removal import misuse_removal
 
 
 def _run(entries):

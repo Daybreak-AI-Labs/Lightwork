@@ -11,7 +11,7 @@ from __future__ import annotations
 
 import threading
 
-from maverick.world_model import WorldModel
+from lightwork.world_model import WorldModel
 
 
 def test_add_artifact_no_cross_process_version_duplicate(tmp_path):

@@ -8,8 +8,8 @@ tests pin the corrected math.
 """
 from __future__ import annotations
 
-from maverick.budget import Budget
-from maverick.llm import MODEL_HAIKU, MODEL_OPUS, MODEL_SONNET
+from lightwork.budget import Budget
+from lightwork.llm import MODEL_HAIKU, MODEL_OPUS, MODEL_SONNET
 
 
 def test_opus_priced_at_opus_rate():
@@ -57,8 +57,8 @@ def test_router_selectable_models_bill_at_real_rate_not_fallback():
     Budget bills each id at the MODEL_PRICES rate -- catching any future id
     that drifts out of the canonical catalog and silently bills at fallback.
     """
-    from maverick.cost.router import _PRICING
-    from maverick.llm import MODEL_PRICES
+    from lightwork.cost.router import _PRICING
+    from lightwork.llm import MODEL_PRICES
 
     saw_non_fallback = False
     for _provider, model, _tier, _in, _out in _PRICING:
@@ -129,7 +129,7 @@ def test_opus_run_actually_hits_the_dollar_cap():
     """An Opus call past max_dollars must raise — proves Opus is billed at
     the actual Opus rate, not silently downgraded to fallback."""
     import pytest
-    from maverick.budget import BudgetExceeded
+    from lightwork.budget import BudgetExceeded
     b = Budget(max_dollars=3.0)
     # Opus 4.7 @ $5/Mtok input: 1M input = $5.00 > $3 cap → BudgetExceeded.
     with pytest.raises(BudgetExceeded):
@@ -169,7 +169,7 @@ def test_record_tokens_thread_safe():
     silently undercounts (it's a load-then-store, not atomic)."""
     import threading
 
-    from maverick.llm import MODEL_SONNET
+    from lightwork.llm import MODEL_SONNET
 
     b = Budget(
         max_dollars=1000.0,
@@ -239,7 +239,7 @@ def test_absorb_raises_when_aggregate_over_cap():
     """When the rolled-up spend exceeds a parent cap, absorb raises so
     best_of_n stops spawning attempts -- and the spend is still recorded."""
     import pytest
-    from maverick.budget import BudgetExceeded
+    from lightwork.budget import BudgetExceeded
 
     parent = Budget(max_dollars=5.0)
     child = Budget(max_dollars=1000.0, max_input_tokens=10**9, max_output_tokens=10**9)
@@ -261,7 +261,7 @@ def test_cache_read_default_is_anthropic_tenth_rate():
 def test_cache_read_openai_half_rate_is_5x_default():
     # Issue #465: non-Anthropic cache reads are ~0.5x, not 0.1x. Passing the
     # OpenAI multiplier bills 5x the Anthropic-default amount for the same read.
-    from maverick.budget import CACHE_READ_MULT_OPENAI
+    from lightwork.budget import CACHE_READ_MULT_OPENAI
     assert CACHE_READ_MULT_OPENAI == 0.5
     b = Budget(max_dollars=1e9, max_input_tokens=10_000_000)
     b.record_tokens(0, 0, model=MODEL_OPUS, cache_read_tok=1_000_000,

@@ -10,7 +10,7 @@ from fastapi.testclient import TestClient
 
 
 def _client():
-    from maverick_dashboard.app import app
+    from lightwork_dashboard.app import app
     return TestClient(app)
 
 
@@ -31,7 +31,7 @@ def _labeled_issue(label="maverick"):
 @pytest.fixture(autouse=True)
 def _secret(monkeypatch):
     monkeypatch.setenv("MAVERICK_GH_APP_WEBHOOK_SECRET", "shh")  # pragma: allowlist secret
-    from maverick_dashboard import app as app_mod
+    from lightwork_dashboard import app as app_mod
 
     app_mod._issue_webhook_seen.clear()
     app_mod._goal_times.clear()
@@ -52,7 +52,7 @@ def test_accepts_trigger_and_schedules(monkeypatch):
     async def _fake_process(payload, **kw):
         ran["issue"] = payload.issue_number
 
-    monkeypatch.setattr("maverick.github_app.process_issue", _fake_process)
+    monkeypatch.setattr("lightwork.github_app.process_issue", _fake_process)
     body = json.dumps(_labeled_issue()).encode()
     r = _client().post("/webhook/github", content=body,
                        headers={"X-GitHub-Event": "issues",
@@ -76,7 +76,7 @@ def test_ignores_non_trigger_label():
 
 def test_route_is_auth_exempt():
     # The webhook authenticates by HMAC, so it must bypass the bearer gate.
-    from maverick_dashboard.app import _AUTH_EXEMPT
+    from lightwork_dashboard.app import _AUTH_EXEMPT
     assert "/webhook/github" in _AUTH_EXEMPT
 
 
@@ -86,7 +86,7 @@ def test_rejects_missing_delivery_id(monkeypatch):
     async def _fake_process(payload, **kw):
         ran.append(payload.issue_number)
 
-    monkeypatch.setattr("maverick.github_app.process_issue", _fake_process)
+    monkeypatch.setattr("lightwork.github_app.process_issue", _fake_process)
     body = json.dumps(_labeled_issue()).encode()
     r = _client().post("/webhook/github", content=body,
                        headers={"X-GitHub-Event": "issues",
@@ -102,7 +102,7 @@ def test_rejects_replayed_delivery_even_if_delivery_id_changes(monkeypatch):
     async def _fake_process(payload, **kw):
         ran.append(payload.issue_number)
 
-    monkeypatch.setattr("maverick.github_app.process_issue", _fake_process)
+    monkeypatch.setattr("lightwork.github_app.process_issue", _fake_process)
     body = json.dumps(_labeled_issue()).encode()
     headers = {"X-GitHub-Event": "issues",
                "X-GitHub-Delivery": "delivery-1",
@@ -124,7 +124,7 @@ def test_github_webhook_goal_rate_limited(monkeypatch):
 
     monkeypatch.setenv("MAVERICK_DASHBOARD_MAX_GOALS_PER_MIN", "1")
     monkeypatch.setenv("MAVERICK_DASHBOARD_MAX_GOALS_GLOBAL_PER_MIN", "100")
-    monkeypatch.setattr("maverick.github_app.process_issue", _fake_process)
+    monkeypatch.setattr("lightwork.github_app.process_issue", _fake_process)
 
     body1 = json.dumps(_labeled_issue()).encode()
     first = _client().post("/webhook/github", content=body1,

@@ -1,7 +1,7 @@
 """Confidential-compute detection: SEV-SNP / TDX guest indicators."""
 from __future__ import annotations
 
-from maverick.confidential_compute import detect
+from lightwork.confidential_compute import detect
 
 
 def _exists(present):
@@ -46,8 +46,8 @@ def test_firmware_sysfs_tdx():
 
 def test_cli_confidential_compute(monkeypatch):
     from click.testing import CliRunner
-    from maverick.cli import main
-    monkeypatch.setattr("maverick.confidential_compute.detect",
+    from lightwork.cli import main
+    monkeypatch.setattr("lightwork.confidential_compute.detect",
                         lambda: {"tdx": True, "sev_snp": False,
                                  "confidential": True, "indicators": ["/dev/tdx_guest"]})
     res = CliRunner().invoke(main, ["confidential-compute"])
@@ -56,8 +56,8 @@ def test_cli_confidential_compute(monkeypatch):
 
 def test_cli_exits_nonzero_when_not_confidential(monkeypatch):
     from click.testing import CliRunner
-    from maverick.cli import main
-    monkeypatch.setattr("maverick.confidential_compute.detect",
+    from lightwork.cli import main
+    monkeypatch.setattr("lightwork.confidential_compute.detect",
                         lambda: {"tdx": False, "sev_snp": False,
                                  "confidential": False, "indicators": []})
     res = CliRunner().invoke(main, ["confidential-compute"])

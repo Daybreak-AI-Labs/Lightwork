@@ -11,15 +11,15 @@ from __future__ import annotations
 from pathlib import Path
 
 import pytest
-from maverick.tools.clipboard import clipboard
+from lightwork.tools.clipboard import clipboard
 
 
 @pytest.fixture
 def _fake_backends(monkeypatch):
     """Stub the actual clipboard backends so the test never touches a real
     desktop clipboard; we only care about the consent gate around them."""
-    monkeypatch.setattr("maverick.tools.clipboard._read_clipboard", lambda: "SECRET")
-    monkeypatch.setattr("maverick.tools.clipboard._write_clipboard", lambda text: True)
+    monkeypatch.setattr("lightwork.tools.clipboard._read_clipboard", lambda: "SECRET")
+    monkeypatch.setattr("lightwork.tools.clipboard._write_clipboard", lambda text: True)
 
 
 def test_clipboard_read_blocked_under_auto_deny(tmp_path: Path, monkeypatch, _fake_backends):

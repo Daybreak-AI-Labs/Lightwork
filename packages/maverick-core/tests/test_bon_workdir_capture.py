@@ -10,7 +10,7 @@ from __future__ import annotations
 import subprocess
 import tempfile
 
-from maverick.orchestrator import (
+from lightwork.orchestrator import (
     _capture_workdir_diff,
     _reset_workdir_to_head,
     _strip_binary_diff_sections,

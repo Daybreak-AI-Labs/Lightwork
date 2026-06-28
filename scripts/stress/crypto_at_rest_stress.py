@@ -17,7 +17,7 @@ from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
 
 _REPO = Path(__file__).resolve().parents[2]
-sys.path.insert(0, str(_REPO / "packages" / "maverick-core"))
+sys.path.insert(0, str(_REPO / "packages" / "lightwork-core"))
 # Isolate the keystore in a temp dir so we never touch a real one.
 import tempfile  # noqa: E402
 
@@ -26,7 +26,7 @@ os.environ["MAVERICK_DATA_DIR"] = _KEYDIR
 os.environ["MAVERICK_HOME"] = _KEYDIR
 os.environ["MAVERICK_ENCRYPT_AT_REST"] = "1"
 
-from maverick import crypto_at_rest as car  # noqa: E402
+from lightwork import crypto_at_rest as car  # noqa: E402
 
 fails = []
 

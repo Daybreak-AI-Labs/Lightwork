@@ -2,15 +2,15 @@
 from __future__ import annotations
 
 import pytest
-from maverick import billing
-from maverick.billing import (
+from lightwork import billing
+from lightwork.billing import (
     Entitlements,
     RateCard,
     entitled,
     entitlements_for,
     rate_ledger,
 )
-from maverick.quotas import UsageLedger
+from lightwork.quotas import UsageLedger
 
 
 @pytest.fixture(autouse=True)
@@ -87,7 +87,7 @@ def test_default_plans_gate_features():
 
 def test_config_override_plans(monkeypatch):
     # entitlements_for reads [billing.plans] via config.load_config (lazy import).
-    import maverick.config as cfg
+    import lightwork.config as cfg
     monkeypatch.setattr(cfg, "load_config", lambda: {
         "billing": {"plans": {"pro": {"features": ["core", "wow"], "max_daily_dollars": 9}}}
     })
@@ -98,7 +98,7 @@ def test_config_override_plans(monkeypatch):
 
 
 def test_tenant_entitled_reads_registered_plan(tmp_path):
-    from maverick.tenant import registry as tr
+    from lightwork.tenant import registry as tr
     tr.create_tenant("acme", plan="enterprise")
     assert billing.tenant_entitled("acme", "audit_export") is True
     assert billing.tenant_entitled("acme", "nonexistent") is False

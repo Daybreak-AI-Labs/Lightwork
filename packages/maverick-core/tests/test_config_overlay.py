@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from maverick.config import get_sandbox, load_config
+from lightwork.config import get_sandbox, load_config
 
 
 def test_config_overlay_deep_merges_without_replacing_operator_config(monkeypatch, tmp_path):

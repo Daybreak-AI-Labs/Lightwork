@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import pytest
 from fastapi.testclient import TestClient
-from maverick_dashboard.app import app
+from lightwork_dashboard.app import app
 
 client = TestClient(app)
 
@@ -13,14 +13,14 @@ client = TestClient(app)
 def _isolated(tmp_path, monkeypatch):
     monkeypatch.setenv("HOME", str(tmp_path))
     monkeypatch.setenv("MAVERICK_HOME", str(tmp_path))
-    from maverick import world_model
+    from lightwork import world_model
     monkeypatch.setattr(world_model, "DEFAULT_DB", tmp_path / "world.db")
-    from maverick_dashboard import api as api_mod
-    from maverick_dashboard import app as app_mod
+    from lightwork_dashboard import api as api_mod
+    from lightwork_dashboard import app as app_mod
     api_mod._world_cache.clear()
     app_mod._world_cache.clear()
     # Deterministic template catalog: a tmp user dir, no bundled repo templates.
-    import maverick.templates as tpl_mod
+    import lightwork.templates as tpl_mod
     user_dir = tmp_path / "templates"
     user_dir.mkdir()
     monkeypatch.setattr(tpl_mod, "USER_TEMPLATES", user_dir)
@@ -43,7 +43,7 @@ def catalog(_isolated):
 
 
 def test_templates_page_lists_catalog_with_ratings(catalog):
-    from maverick.marketplace.ratings import RatingsLedger
+    from lightwork.marketplace.ratings import RatingsLedger
     RatingsLedger().rate("templates", "trip-plan", 4)
     r = client.get("/templates")
     assert r.status_code == 200
@@ -59,7 +59,7 @@ def test_use_template_links_prefill_chat_not_autostart(catalog):
     assert 'href="/chat?title=Plan%20a%20trip%20to%20%7B%7B%20city%20%7D%7D' in r.text
     assert "description=" in r.text
     # No goal was created by rendering the marketplace.
-    from maverick_dashboard.app import _world
+    from lightwork_dashboard.app import _world
     assert _world().list_goals() == []
 
 
@@ -70,7 +70,7 @@ def test_templates_page_empty_state(_isolated):
 
 
 def test_templates_api(catalog):
-    from maverick.marketplace.ratings import RatingsLedger
+    from lightwork.marketplace.ratings import RatingsLedger
     RatingsLedger().rate("templates", "research-report", 5)
     body = client.get("/api/v1/templates").json()
     by_name = {e["name"]: e for e in body["templates"]}
@@ -81,7 +81,7 @@ def test_templates_api(catalog):
 
 
 def test_suggested_api_ranks_for_this_user(catalog):
-    from maverick_dashboard.app import _world
+    from lightwork_dashboard.app import _world
     w = _world()
     for _ in range(3):
         w.create_goal("research the market", "")

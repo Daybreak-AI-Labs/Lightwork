@@ -32,15 +32,15 @@ def _isolate_keys(monkeypatch, tmp_path):
     autouse HOME fixture doesn't cover it -- patch it here so the test never
     touches the developer's real ~/.maverick/audit/keys.
     """
-    from maverick.audit import signing
+    from lightwork.audit import signing
 
     monkeypatch.setattr(signing, "KEY_DIR", tmp_path / "keys")
 
 
 def _signed_log(tmp_path):
     """Build a signed 4-row audit log: alice, bob, alice, bob."""
-    from maverick.audit.events import AuditEvent, EventKind
-    from maverick.audit.writer import AuditLog
+    from lightwork.audit.events import AuditEvent, EventKind
+    from lightwork.audit.writer import AuditLog
 
     ad = tmp_path / "audit"
     log = AuditLog(audit_dir=ad, sign=True)
@@ -65,8 +65,8 @@ def _signed_log(tmp_path):
 
 
 def test_scrub_user_restores_chain_after_preverified_erase(_isolate_keys, tmp_path):
-    from maverick.audit.erase import scrub_user
-    from maverick.audit.signing import verify_chain
+    from lightwork.audit.erase import scrub_user
+    from lightwork.audit.signing import verify_chain
 
     _log, ad, path = _signed_log(tmp_path)
     assert verify_chain(path) == []  # clean to start
@@ -84,7 +84,7 @@ def test_scrub_user_restores_chain_after_preverified_erase(_isolate_keys, tmp_pa
 def test_reanchor_file_idempotent_on_clean_chain(_isolate_keys, tmp_path):
     """No erase happened: re-anchoring an already-consistent file under the
     same key must NOT rewrite it (deterministic Ed25519 -> identical bytes)."""
-    from maverick.audit.signing import reanchor_file, verify_chain
+    from lightwork.audit.signing import reanchor_file, verify_chain
 
     _log, _ad, path = _signed_log(tmp_path)
     before = path.read_text(encoding="utf-8")
@@ -97,9 +97,9 @@ def test_reanchor_after_erase_keeps_signer_consistent(_isolate_keys, tmp_path):
     """End-to-end via AuditLog: after erase + re-anchor the chain verifies
     clean AND a subsequent record() chains onto the rewritten head, not a
     stale in-memory one."""
-    from maverick.audit.erase import scrub_user
-    from maverick.audit.events import AuditEvent, EventKind
-    from maverick.audit.signing import verify_chain
+    from lightwork.audit.erase import scrub_user
+    from lightwork.audit.events import AuditEvent, EventKind
+    from lightwork.audit.signing import verify_chain
 
     log, ad, path = _signed_log(tmp_path)
     scrub_user("telegram", "alice", audit_dir=ad)
@@ -122,8 +122,8 @@ def test_reanchor_after_erase_keeps_signer_consistent(_isolate_keys, tmp_path):
 def test_reanchor_refuses_to_bless_prior_tampering(_isolate_keys, tmp_path):
     import json
 
-    from maverick.audit.erase import scrub_user
-    from maverick.audit.signing import reanchor_file, verify_chain
+    from lightwork.audit.erase import scrub_user
+    from lightwork.audit.signing import reanchor_file, verify_chain
 
     _log, ad, path = _signed_log(tmp_path)
     rows = [json.loads(line) for line in path.read_text(encoding="utf-8").splitlines()]
@@ -145,8 +145,8 @@ def test_reanchor_refuses_to_bless_prior_tampering(_isolate_keys, tmp_path):
 def test_reanchor_noop_when_signing_disabled(tmp_path):
     """Unsigned log: nothing to re-anchor; the call is a no-op and the file
     is left byte-for-byte unchanged."""
-    from maverick.audit.events import AuditEvent, EventKind
-    from maverick.audit.writer import AuditLog
+    from lightwork.audit.events import AuditEvent, EventKind
+    from lightwork.audit.writer import AuditLog
 
     ad = tmp_path / "audit"
     log = AuditLog(audit_dir=ad, sign=False)

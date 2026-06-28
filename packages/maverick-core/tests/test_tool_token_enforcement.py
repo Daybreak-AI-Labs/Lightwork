@@ -9,17 +9,17 @@ Mirrors ``tests/test_capability_path_enforcement.py``'s ``_agent`` + ``_run_tool
 harness; hermetic (no real LLM, no network).
 """
 import pytest
-from maverick.capability import Capability
-from maverick.tools import Tool
+from lightwork.capability import Capability
+from lightwork.tools import Tool
 
 
 def _agent(tmp_path):
-    from maverick.agent import Agent
-    from maverick.blackboard import Blackboard
-    from maverick.budget import Budget
-    from maverick.sandbox import LocalBackend
-    from maverick.swarm import SwarmContext
-    from maverick.world_model import WorldModel
+    from lightwork.agent import Agent
+    from lightwork.blackboard import Blackboard
+    from lightwork.budget import Budget
+    from lightwork.sandbox import LocalBackend
+    from lightwork.swarm import SwarmContext
+    from lightwork.world_model import WorldModel
 
     world = WorldModel(tmp_path / "world.db")
     goal_id = world.create_goal("g", "")
@@ -65,7 +65,7 @@ async def test_failed_verification_fail_closes(tmp_path, monkeypatch):
     # Force verification to fail (e.g. an out-of-process verifier rejecting the
     # token): the tool must not run and the model gets a non-leaky refusal.
     monkeypatch.setattr(
-        "maverick.tool_token.verify_tool_token", lambda *a, **k: False
+        "lightwork.tool_token.verify_tool_token", lambda *a, **k: False
     )
     out = await agent._run_tool("read_file", {})
     assert "DENIED by capability policy" in out
@@ -76,7 +76,7 @@ async def test_failed_verification_fail_closes(tmp_path, monkeypatch):
 @pytest.mark.asyncio
 async def test_disabled_is_a_noop(tmp_path, monkeypatch):
     monkeypatch.delenv("MAVERICK_TOOL_TOKENS", raising=False)
-    monkeypatch.setattr("maverick.config.load_config", dict)
+    monkeypatch.setattr("lightwork.config.load_config", dict)
     agent = _agent(tmp_path)
     agent.capability = Capability(principal="agent:coder-1")
     calls: list = []
@@ -86,7 +86,7 @@ async def test_disabled_is_a_noop(tmp_path, monkeypatch):
     def _boom(*a, **k):  # pragma: no cover -- must not be reached
         raise AssertionError("token exchange ran while disabled")
 
-    monkeypatch.setattr("maverick.tool_token.mint_tool_token", _boom)
+    monkeypatch.setattr("lightwork.tool_token.mint_tool_token", _boom)
     out = await agent._run_tool("read_file", {})
     assert "ran" in out
     assert "DENIED" not in out

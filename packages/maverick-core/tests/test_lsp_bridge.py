@@ -11,9 +11,9 @@ import importlib
 import sys
 import textwrap
 
-from maverick.tools.lsp_bridge import lsp_bridge
+from lightwork.tools.lsp_bridge import lsp_bridge
 
-lsp_bridge_module = importlib.import_module("maverick.tools.lsp_bridge")
+lsp_bridge_module = importlib.import_module("lightwork.tools.lsp_bridge")
 
 # A minimal LSP server: answers initialize/shutdown, publishes one diagnostic
 # after didOpen, and serves documentSymbol / definition / hover canned.
@@ -183,13 +183,13 @@ def test_file_and_root_must_stay_in_workspace(tmp_path, monkeypatch):
 
 
 def test_lsp_bridge_is_high_risk():
-    from maverick.safety.tool_risk import tool_risk
+    from lightwork.safety.tool_risk import tool_risk
 
     assert tool_risk("lsp_bridge") == "high"
 
 
 def test_registered():
-    from maverick.tools import base_registry
+    from lightwork.tools import base_registry
 
     class _W:
         pass

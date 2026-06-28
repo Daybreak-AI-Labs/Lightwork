@@ -16,7 +16,7 @@ from __future__ import annotations
 
 from pathlib import Path
 
-from maverick.skills import Skill, _relevant_skills_lexical
+from lightwork.skills import Skill, _relevant_skills_lexical
 
 
 def _mk(name: str) -> Skill:
@@ -42,7 +42,7 @@ def test_lexical_tie_break_is_deterministic_by_name():
 
 
 def test_fleet_sanitize_rejects_injection_markers():
-    from maverick import fleet_memory
+    from lightwork import fleet_memory
 
     # A classic prompt-injection marker must be rejected (None) even with no Shield.
     blocked = fleet_memory._sanitize(
@@ -51,7 +51,7 @@ def test_fleet_sanitize_rejects_injection_markers():
 
 
 def test_fleet_sanitize_passes_clean_text():
-    from maverick import fleet_memory
+    from lightwork import fleet_memory
 
     ok = fleet_memory._sanitize(
         "Deployed the billing service; the rollout succeeded.", shield=None)

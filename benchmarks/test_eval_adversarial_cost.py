@@ -54,7 +54,7 @@ def test_tool_loop_pays_at_most_once(suite):
 
 
 def test_tool_loop_leaves_no_residue(suite):
-    from maverick.cache import tool as tool_cache
+    from lightwork.cache import tool as tool_cache
 
     prior_env = os.environ.get("MAVERICK_TOOL_CACHE")
     suite.scenario_tool_loop()
@@ -63,7 +63,7 @@ def test_tool_loop_leaves_no_residue(suite):
 
 
 def test_token_bomb_is_capped(suite):
-    from maverick.agent import _MAX_TOOL_RESULT_BYTES
+    from lightwork.agent import _MAX_TOOL_RESULT_BYTES
 
     result = suite.scenario_token_bomb()
     assert result["clamped"] is True

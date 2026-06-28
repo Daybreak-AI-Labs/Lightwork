@@ -28,8 +28,8 @@ def _resp(status, body):
 
 
 def test_connectors_register(tmp_path):
-    from maverick.sandbox.local import LocalBackend
-    from maverick.tools import base_registry
+    from lightwork.sandbox.local import LocalBackend
+    from lightwork.tools import base_registry
 
     class _W:
         def open_questions(self, gid):
@@ -46,7 +46,7 @@ def test_oracle_requires_config(monkeypatch):
     monkeypatch.delenv("ORACLE_ORDS_URL", raising=False)
     monkeypatch.delenv("ORACLE_ORDS_TOKEN", raising=False)
     _fake_httpx(monkeypatch, post=MagicMock())
-    from maverick.tools.oracle_tool import oracle_tool
+    from lightwork.tools.oracle_tool import oracle_tool
     out = oracle_tool().fn({"op": "sql", "statement": "select 1 from dual"})
     assert "ERROR" in out and "ORACLE" in out
 
@@ -56,7 +56,7 @@ def test_oracle_select_runs(monkeypatch):
     monkeypatch.setenv("ORACLE_ORDS_TOKEN", "t")
     post = MagicMock(return_value=_resp(200, {"items": [{"resultSet": {"items": [{"N": 1}]}}]}))
     _fake_httpx(monkeypatch, post=post)
-    from maverick.tools.oracle_tool import oracle_tool
+    from lightwork.tools.oracle_tool import oracle_tool
     out = oracle_tool().fn({"op": "sql", "statement": "SELECT 1 AS N FROM dual"})
     assert "\"N\"" in out or "N" in out
     assert post.call_args.args[0].endswith("/_/sql")
@@ -68,7 +68,7 @@ def test_oracle_write_needs_confirm(monkeypatch):
     monkeypatch.setenv("ORACLE_ORDS_TOKEN", "t")
     post = MagicMock()
     _fake_httpx(monkeypatch, post=post)
-    from maverick.tools.oracle_tool import oracle_tool
+    from lightwork.tools.oracle_tool import oracle_tool
     out = oracle_tool().fn({"op": "sql", "statement": "DELETE FROM t"})
     assert "DRY RUN" in out
     post.assert_not_called()
@@ -79,7 +79,7 @@ def test_oracle_multistatement_read_needs_confirm(monkeypatch):
     monkeypatch.setenv("ORACLE_ORDS_TOKEN", "t")
     post = MagicMock()
     _fake_httpx(monkeypatch, post=post)
-    from maverick.tools.oracle_tool import oracle_tool
+    from lightwork.tools.oracle_tool import oracle_tool
     out = oracle_tool().fn({
         "op": "sql",
         "statement": "SELECT 1 FROM dual; DELETE FROM t WHERE 1=1",
@@ -93,7 +93,7 @@ def test_oracle_backslash_quote_multistatement_read_needs_confirm(monkeypatch):
     monkeypatch.setenv("ORACLE_ORDS_TOKEN", "t")
     post = MagicMock()
     _fake_httpx(monkeypatch, post=post)
-    from maverick.tools.oracle_tool import oracle_tool
+    from lightwork.tools.oracle_tool import oracle_tool
     out = oracle_tool().fn({
         "op": "sql",
         "statement": "SELECT 'x\\' FROM dual; DELETE FROM t WHERE 1=1; --'",
@@ -108,7 +108,7 @@ def test_sap_requires_config(monkeypatch):
     monkeypatch.delenv("SAP_BASE_URL", raising=False)
     monkeypatch.delenv("SAP_TOKEN", raising=False)
     _fake_httpx(monkeypatch, get=MagicMock())
-    from maverick.tools.sap_tool import sap_tool
+    from lightwork.tools.sap_tool import sap_tool
     out = sap_tool().fn({"op": "get", "path": "/sap/opu/odata/x"})
     assert "ERROR" in out and "SAP" in out
 
@@ -118,7 +118,7 @@ def test_sap_get_adds_json_format(monkeypatch):
     monkeypatch.setenv("SAP_TOKEN", "t")
     get = MagicMock(return_value=_resp(200, {"d": {"results": [{"BusinessPartner": "1"}]}}))
     _fake_httpx(monkeypatch, get=get)
-    from maverick.tools.sap_tool import sap_tool
+    from lightwork.tools.sap_tool import sap_tool
     out = sap_tool().fn({"op": "get", "path": "/sap/opu/odata/sap/SVC/Entity"})
     assert "BusinessPartner" in out
     assert get.call_args.kwargs["params"]["$format"] == "json"
@@ -129,7 +129,7 @@ def test_sap_post_needs_confirm(monkeypatch):
     monkeypatch.setenv("SAP_TOKEN", "t")
     post = MagicMock()
     _fake_httpx(monkeypatch, get=MagicMock(), post=post)
-    from maverick.tools.sap_tool import sap_tool
+    from lightwork.tools.sap_tool import sap_tool
     out = sap_tool().fn({"op": "post", "path": "/sap/opu/odata/x", "body": {"a": 1}})
     assert "DRY RUN" in out
     post.assert_not_called()
@@ -141,7 +141,7 @@ def test_workday_requires_config(monkeypatch):
     monkeypatch.delenv("WORKDAY_BASE_URL", raising=False)
     monkeypatch.delenv("WORKDAY_TOKEN", raising=False)
     _fake_httpx(monkeypatch, get=MagicMock())
-    from maverick.tools.workday_tool import workday_tool
+    from lightwork.tools.workday_tool import workday_tool
     out = workday_tool().fn({"op": "get", "path": "/workers"})
     assert "ERROR" in out and "WORKDAY" in out
 
@@ -151,7 +151,7 @@ def test_workday_get(monkeypatch):
     monkeypatch.setenv("WORKDAY_TOKEN", "t")
     get = MagicMock(return_value=_resp(200, {"data": [{"id": "w1"}]}))
     _fake_httpx(monkeypatch, get=get)
-    from maverick.tools.workday_tool import workday_tool
+    from lightwork.tools.workday_tool import workday_tool
     out = workday_tool().fn({"op": "get", "path": "/workers"})
     assert "w1" in out
     assert get.call_args.args[0].endswith("/workers")
@@ -162,7 +162,7 @@ def test_workday_post_needs_confirm(monkeypatch):
     monkeypatch.setenv("WORKDAY_TOKEN", "t")
     post = MagicMock()
     _fake_httpx(monkeypatch, post=post)
-    from maverick.tools.workday_tool import workday_tool
+    from lightwork.tools.workday_tool import workday_tool
     out = workday_tool().fn({"op": "post", "path": "/workers", "body": {"x": 1}})
     assert "DRY RUN" in out
     post.assert_not_called()
@@ -174,7 +174,7 @@ def test_bigquery_requires_config(monkeypatch):
     monkeypatch.delenv("BIGQUERY_ACCESS_TOKEN", raising=False)
     monkeypatch.delenv("BIGQUERY_PROJECT", raising=False)
     _fake_httpx(monkeypatch, post=MagicMock())
-    from maverick.tools.bigquery_tool import bigquery_tool
+    from lightwork.tools.bigquery_tool import bigquery_tool
     out = bigquery_tool().fn({"op": "query", "sql": "select 1"})
     assert "ERROR" in out and "BIGQUERY" in out
 
@@ -188,7 +188,7 @@ def test_bigquery_select_runs(monkeypatch):
         "totalRows": "1",
     }))
     _fake_httpx(monkeypatch, post=post)
-    from maverick.tools.bigquery_tool import bigquery_tool
+    from lightwork.tools.bigquery_tool import bigquery_tool
     out = bigquery_tool().fn({"op": "query", "sql": "SELECT 42 AS n"})
     assert "42" in out
     assert post.call_args.args[0].endswith("/projects/proj/queries")
@@ -199,7 +199,7 @@ def test_bigquery_write_needs_confirm(monkeypatch):
     monkeypatch.setenv("BIGQUERY_PROJECT", "proj")
     post = MagicMock()
     _fake_httpx(monkeypatch, post=post)
-    from maverick.tools.bigquery_tool import bigquery_tool
+    from lightwork.tools.bigquery_tool import bigquery_tool
     out = bigquery_tool().fn({"op": "query", "sql": "DELETE FROM d.t WHERE 1=1"})
     assert "DRY RUN" in out
     post.assert_not_called()
@@ -210,7 +210,7 @@ def test_bigquery_multistatement_read_needs_confirm(monkeypatch):
     monkeypatch.setenv("BIGQUERY_PROJECT", "proj")
     post = MagicMock()
     _fake_httpx(monkeypatch, post=post)
-    from maverick.tools.bigquery_tool import bigquery_tool
+    from lightwork.tools.bigquery_tool import bigquery_tool
     out = bigquery_tool().fn({
         "op": "query",
         "sql": "SELECT 1; DELETE FROM d.t WHERE 1=1",
@@ -224,7 +224,7 @@ def test_bigquery_trailing_semicolon_read_runs(monkeypatch):
     monkeypatch.setenv("BIGQUERY_PROJECT", "proj")
     post = MagicMock(return_value=_resp(200, {"totalRows": "0"}))
     _fake_httpx(monkeypatch, post=post)
-    from maverick.tools.bigquery_tool import bigquery_tool
+    from lightwork.tools.bigquery_tool import bigquery_tool
     out = bigquery_tool().fn({"op": "query", "sql": "SELECT ';' AS semi;"})
     assert "ok" in out
     assert post.call_args.kwargs["json"]["query"] == "SELECT ';' AS semi;"
@@ -236,7 +236,7 @@ def test_dynamics_requires_config(monkeypatch):
     monkeypatch.delenv("DYNAMICS_RESOURCE_URL", raising=False)
     monkeypatch.delenv("DYNAMICS_TOKEN", raising=False)
     _fake_httpx(monkeypatch, get=MagicMock())
-    from maverick.tools.dynamics_tool import dynamics_tool
+    from lightwork.tools.dynamics_tool import dynamics_tool
     out = dynamics_tool().fn({"op": "query", "entity": "accounts"})
     assert "ERROR" in out and "DYNAMICS" in out
 
@@ -246,7 +246,7 @@ def test_dynamics_query(monkeypatch):
     monkeypatch.setenv("DYNAMICS_TOKEN", "t")
     get = MagicMock(return_value=_resp(200, {"value": [{"name": "Acme"}]}))
     _fake_httpx(monkeypatch, get=get)
-    from maverick.tools.dynamics_tool import dynamics_tool
+    from lightwork.tools.dynamics_tool import dynamics_tool
     out = dynamics_tool().fn({"op": "query", "entity": "accounts", "params": {"$top": 5}})
     assert "Acme" in out
     assert get.call_args.args[0].endswith("/api/data/v9.2/accounts")
@@ -257,7 +257,7 @@ def test_dynamics_create_needs_confirm(monkeypatch):
     monkeypatch.setenv("DYNAMICS_TOKEN", "t")
     post = MagicMock()
     _fake_httpx(monkeypatch, get=MagicMock(), post=post)
-    from maverick.tools.dynamics_tool import dynamics_tool
+    from lightwork.tools.dynamics_tool import dynamics_tool
     out = dynamics_tool().fn({"op": "create", "entity": "accounts", "fields": {"name": "x"}})
     assert "DRY RUN" in out
     post.assert_not_called()

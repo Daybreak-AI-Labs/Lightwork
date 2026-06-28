@@ -3,7 +3,7 @@ without editing TOML) and the CLI surface that drives it."""
 from __future__ import annotations
 
 import pytest
-from maverick import agent_trust, client
+from lightwork import agent_trust, client
 
 
 @pytest.fixture(autouse=True)
@@ -83,7 +83,7 @@ def test_local_pubkey():
 
 def _run(*args):
     from click.testing import CliRunner
-    from maverick.cli import main
+    from lightwork.cli import main
     return CliRunner().invoke(main, list(args))
 
 

@@ -15,7 +15,7 @@ from __future__ import annotations
 import os
 import random as R
 
-from maverick import self_harness as sh
+from lightwork import self_harness as sh
 
 _CLASSES = ["timeout", "auth", "tool_error", "shield", "parse", "network"]
 _FAMILIES = ["export the ledger report", "reconcile partner invoices",

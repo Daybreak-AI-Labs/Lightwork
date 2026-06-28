@@ -6,7 +6,7 @@ import importlib.util
 import sqlite3
 
 import pytest
-from maverick import crypto_at_rest as car
+from lightwork import crypto_at_rest as car
 
 requires_crypto = pytest.mark.skipif(
     importlib.util.find_spec("cryptography") is None,
@@ -19,14 +19,14 @@ def _isolate(monkeypatch, tmp_path):
     for v in ("MAVERICK_ENCRYPT_AT_REST", "MAVERICK_ENCRYPTION_KEY",
               "MAVERICK_ENTERPRISE", "MAVERICK_ENCRYPT_STRICT"):
         monkeypatch.delenv(v, raising=False)
-    monkeypatch.setattr("maverick.config.load_config", lambda *a, **k: {})
+    monkeypatch.setattr("lightwork.config.load_config", lambda *a, **k: {})
     monkeypatch.setattr(car, "_KEY_PATH", tmp_path / "keys" / "at_rest.key")
 
 
 @requires_crypto
 def test_goal_content_sealed_on_disk_and_round_trips(monkeypatch, tmp_path):
     monkeypatch.setenv("MAVERICK_ENCRYPT_AT_REST", "1")
-    from maverick.world_model import WorldModel
+    from lightwork.world_model import WorldModel
     db = tmp_path / "world.db"
     wm = WorldModel(db)
     gid = wm.create_goal("exfil the SSN 123-45-6789", "sensitive description")
@@ -56,7 +56,7 @@ def test_goal_content_sealed_on_disk_and_round_trips(monkeypatch, tmp_path):
 
 @requires_crypto
 def test_goal_content_plaintext_when_encryption_off(tmp_path):
-    from maverick.world_model import WorldModel
+    from lightwork.world_model import WorldModel
     db = tmp_path / "world.db"
     wm = WorldModel(db)
     gid = wm.create_goal("plain title", "plain desc")
@@ -71,7 +71,7 @@ def test_goal_content_plaintext_when_encryption_off(tmp_path):
 def test_strict_mode_withholds_unsealed_value_in_a_sealed_column(monkeypatch, tmp_path):
     # Plaintext in a sealed column (tampering, or un-migrated legacy) must not be
     # served as trusted plaintext once strict is on.
-    from maverick.world_model import _UNSEALED_WITHHELD, WorldModel
+    from lightwork.world_model import _UNSEALED_WITHHELD, WorldModel
     db = tmp_path / "world.db"
     wm = WorldModel(db)
     gid = wm.create_goal("unsealed injected title", "d")   # written plaintext
@@ -83,7 +83,7 @@ def test_strict_mode_withholds_unsealed_value_in_a_sealed_column(monkeypatch, tm
 
 @requires_crypto
 def test_non_strict_passes_through_legacy_plaintext(monkeypatch, tmp_path):
-    from maverick.world_model import WorldModel
+    from lightwork.world_model import WorldModel
     db = tmp_path / "world.db"
     wm = WorldModel(db)
     gid = wm.create_goal("legacy title", "d")      # plaintext, pre-migration
@@ -94,7 +94,7 @@ def test_non_strict_passes_through_legacy_plaintext(monkeypatch, tmp_path):
 
 @requires_crypto
 def test_strict_mode_withholds_malformed_prefixed_goal_values(monkeypatch, tmp_path):
-    from maverick.world_model import _UNSEALED_WITHHELD, WorldModel
+    from lightwork.world_model import _UNSEALED_WITHHELD, WorldModel
     db = tmp_path / "world.db"
     wm = WorldModel(db)
     gid = wm.create_goal("safe title", "safe description")
@@ -125,7 +125,7 @@ def test_strict_mode_withholds_malformed_prefixed_goal_values(monkeypatch, tmp_p
 @requires_crypto
 def test_episode_outcome_sealed_and_round_trips(monkeypatch, tmp_path):
     monkeypatch.setenv("MAVERICK_ENCRYPT_AT_REST", "1")
-    from maverick.world_model import WorldModel
+    from lightwork.world_model import WorldModel
     db = tmp_path / "world.db"
     wm = WorldModel(db)
     gid = wm.create_goal("g", "d")
@@ -144,7 +144,7 @@ def test_episode_outcome_sealed_and_round_trips(monkeypatch, tmp_path):
 @requires_crypto
 def test_approval_fields_sealed_and_round_trip(monkeypatch, tmp_path):
     monkeypatch.setenv("MAVERICK_ENCRYPT_AT_REST", "1")
-    from maverick.world_model import WorldModel
+    from lightwork.world_model import WorldModel
     db = tmp_path / "world.db"
     wm = WorldModel(db)
     aid = wm.create_approval("rm -rf /data", risk="high",
@@ -171,7 +171,7 @@ def test_search_facts_matches_value_under_encryption(monkeypatch, tmp_path):
     Under encryption the match has to happen after decryption.
     """
     monkeypatch.setenv("MAVERICK_ENCRYPT_AT_REST", "1")
-    from maverick.world_model import WorldModel
+    from lightwork.world_model import WorldModel
     wm = WorldModel(tmp_path / "world.db")
     wm.upsert_fact("user:bob:note", "the launch code is hunter2")
     wm.upsert_fact("user:bob:other", "unrelated value")

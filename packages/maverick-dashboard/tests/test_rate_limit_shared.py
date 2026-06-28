@@ -1,7 +1,7 @@
 """Cross-replica goal-creation rate limit via the shared store (audit H16)."""
 from __future__ import annotations
 
-import maverick_dashboard.app as app_mod
+import lightwork_dashboard.app as app_mod
 import pytest
 
 fastapi = pytest.importorskip("fastapi")
@@ -22,7 +22,7 @@ class _FakeRateWorld:
 
 
 def test_in_process_when_no_postgres(monkeypatch):
-    from maverick import world_model_backends
+    from lightwork import world_model_backends
     monkeypatch.setattr(world_model_backends, "is_postgres_configured", lambda: False)
     # No shared backend -> the shared check defers (returns False).
     assert app_mod._shared_rate_limit_check("ip:1.2.3.4", 5, 50) is False
@@ -30,7 +30,7 @@ def test_in_process_when_no_postgres(monkeypatch):
 
 def test_shared_admits_then_429s_per_client(monkeypatch):
     from fastapi import HTTPException
-    from maverick import world_model_backends
+    from lightwork import world_model_backends
     monkeypatch.setattr(world_model_backends, "is_postgres_configured", lambda: True)
     fake = _FakeRateWorld()
     monkeypatch.setattr(app_mod, "_world", lambda: fake)
@@ -50,7 +50,7 @@ def test_shared_admits_then_429s_per_client(monkeypatch):
 
 def test_shared_enforces_global_ceiling(monkeypatch):
     from fastapi import HTTPException
-    from maverick import world_model_backends
+    from lightwork import world_model_backends
     monkeypatch.setattr(world_model_backends, "is_postgres_configured", lambda: True)
     fake = _FakeRateWorld()
     monkeypatch.setattr(app_mod, "_world", lambda: fake)
@@ -65,7 +65,7 @@ def test_shared_enforces_global_ceiling(monkeypatch):
 
 
 def test_falls_back_when_store_errors(monkeypatch):
-    from maverick import world_model_backends
+    from lightwork import world_model_backends
     monkeypatch.setattr(world_model_backends, "is_postgres_configured", lambda: True)
 
     def _boom():

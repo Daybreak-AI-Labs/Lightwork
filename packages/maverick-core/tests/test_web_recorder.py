@@ -1,7 +1,7 @@
 """web_recorder: deterministic Playwright codegen from a step list."""
 from __future__ import annotations
 
-from maverick.tools.web_recorder import web_recorder
+from lightwork.tools.web_recorder import web_recorder
 
 
 def test_codegen_emits_runnable_script():
@@ -50,7 +50,7 @@ def test_errors():
 
 
 def test_registered():
-    from maverick.tools import base_registry
+    from lightwork.tools import base_registry
 
     class _W:
         pass

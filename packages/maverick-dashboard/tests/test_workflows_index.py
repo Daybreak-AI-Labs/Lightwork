@@ -8,7 +8,7 @@ from fastapi.testclient import TestClient
 
 
 def _client():
-    from maverick_dashboard.app import app
+    from lightwork_dashboard.app import app
     return TestClient(app, headers={"Origin": "http://testserver"})
 
 
@@ -16,7 +16,7 @@ def _isolate(monkeypatch, tmp_path):
     monkeypatch.setenv("HOME", str(tmp_path))
     monkeypatch.setenv("MAVERICK_HOME", str(tmp_path))
     monkeypatch.delenv("MAVERICK_DASHBOARD_TOKEN", raising=False)
-    import maverick.templates as tpl
+    import lightwork.templates as tpl
     monkeypatch.setattr(tpl, "USER_TEMPLATES", tmp_path / ".maverick" / "templates")
 
 
@@ -26,7 +26,7 @@ def test_index_lists_user_templates_and_playbooks(monkeypatch, tmp_path):
     tdir.mkdir(parents=True, exist_ok=True)
     (tdir / "weekly-report.md").write_text(
         "---\ntitle: Weekly report\nparams:\n  - topic\n---\nbody\n", encoding="utf-8")
-    import maverick.domain_edit as de
+    import lightwork.domain_edit as de
     monkeypatch.setattr(de, "list_agents", lambda: [
         {"name": "invoice-clerk", "suite": "finance", "description": "pays invoices",
          "is_override": True, "has_workflow": True},
@@ -45,7 +45,7 @@ def test_index_lists_user_templates_and_playbooks(monkeypatch, tmp_path):
 
 def test_index_empty_states(monkeypatch, tmp_path):
     _isolate(monkeypatch, tmp_path)
-    import maverick.domain_edit as de
+    import lightwork.domain_edit as de
     monkeypatch.setattr(de, "list_agents", list)
     t = _client().get("/workflows").text
     # shared .mv-empty component now backs these
@@ -55,7 +55,7 @@ def test_index_empty_states(monkeypatch, tmp_path):
 
 def test_nav_workflows_points_to_index(monkeypatch, tmp_path):
     _isolate(monkeypatch, tmp_path)
-    import maverick.domain_edit as de
+    import lightwork.domain_edit as de
     monkeypatch.setattr(de, "list_agents", list)
     t = _client().get("/workflows").text
     # the nav "Workflows" entry now links to the index (was the blank builder)

@@ -3,8 +3,8 @@ from __future__ import annotations
 
 import json
 
-from maverick_dashboard import i18n
-from maverick_dashboard import i18n_portal as p
+from lightwork_dashboard import i18n
+from lightwork_dashboard import i18n_portal as p
 
 
 def test_scaffold_covers_every_reference_key():
@@ -73,7 +73,7 @@ def test_merged_messages_adds_external_language(tmp_path):
     # built-in languages untouched
     assert merged["nav.goals"]["en"] == i18n.MESSAGES["nav.goals"]["en"]
     # i18n.t reads the same {key: {lang: text}} shape merged_messages produces
-    from maverick_dashboard.i18n import t
+    from lightwork_dashboard.i18n import t
     assert t("nav.goals", "fr") == i18n.MESSAGES["nav.goals"]["fr"]
 
 
@@ -88,6 +88,6 @@ def test_available_languages(tmp_path):
 
 def test_no_portal_dir_is_empty(monkeypatch):
     monkeypatch.delenv("MAVERICK_I18N_DIR", raising=False)
-    monkeypatch.setattr("maverick.config.load_config", dict)
+    monkeypatch.setattr("lightwork.config.load_config", dict)
     assert p.load_external_catalogs() == {}
     assert p.available_languages() == sorted(i18n.LANGS)

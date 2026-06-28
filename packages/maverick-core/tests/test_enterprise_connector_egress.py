@@ -11,13 +11,13 @@ import pytest
 def _clean(monkeypatch):
     for v in ("MAVERICK_ENTERPRISE", "ACME_URL", "ACME_TOKEN"):
         monkeypatch.delenv(v, raising=False)
-    monkeypatch.setattr("maverick.config.load_config", lambda *a, **k: {})
+    monkeypatch.setattr("lightwork.config.load_config", lambda *a, **k: {})
 
 
 def _acme_tool(monkeypatch, base):
     monkeypatch.setenv("ACME_URL", base)
     monkeypatch.setenv("ACME_TOKEN", "tok")
-    from maverick.tools._rest_connector import make_rest_tool
+    from lightwork.tools._rest_connector import make_rest_tool
     return make_rest_tool(name="acme", base_url_env="ACME_URL",
                           token_env="ACME_TOKEN", description="x")
 
@@ -33,7 +33,7 @@ def test_connector_egress_blocked_under_enterprise(monkeypatch):
 def test_connector_allowed_when_host_allow_listed(monkeypatch):
     monkeypatch.setenv("MAVERICK_ENTERPRISE", "1")
     monkeypatch.setattr(
-        "maverick.config.load_config",
+        "lightwork.config.load_config",
         lambda *a, **k: {"enterprise": {"allowed_hosts": ["acme.invalid"]}},
     )
     tool = _acme_tool(monkeypatch, "https://acme.invalid")
@@ -51,7 +51,7 @@ def test_connector_egress_noop_when_enterprise_off(monkeypatch):
 
 def test_mcp_http_egress_blocked_under_enterprise(monkeypatch):
     monkeypatch.setenv("MAVERICK_ENTERPRISE", "1")
-    from maverick.mcp_client import (
+    from lightwork.mcp_client import (
         MCPClientError,
         MCPServerSpec,
         StreamableHttpMCPClient,
@@ -66,10 +66,10 @@ def test_mcp_http_egress_blocked_under_enterprise(monkeypatch):
 def test_mcp_http_allowed_host_passes_the_egress_gate(monkeypatch):
     monkeypatch.setenv("MAVERICK_ENTERPRISE", "1")
     monkeypatch.setattr(
-        "maverick.config.load_config",
+        "lightwork.config.load_config",
         lambda *a, **k: {"enterprise": {"allowed_hosts": ["mcp.invalid"]}},
     )
-    from maverick.mcp_client import MCPServerSpec, StreamableHttpMCPClient
+    from lightwork.mcp_client import MCPServerSpec, StreamableHttpMCPClient
     client = StreamableHttpMCPClient(
         MCPServerSpec(name="remote", url="https://mcp.invalid/rpc"))
     # Allow-listed: past the gate, so any failure is a connection error, not the

@@ -1,7 +1,7 @@
 """rbac_check: role-based access-control authorization decisions."""
 from __future__ import annotations
 
-from maverick.tools.rbac_check import rbac_check
+from lightwork.tools.rbac_check import rbac_check
 
 
 def _c(roles, assignments, user, permission, inherits=None):
@@ -96,7 +96,7 @@ def test_rejects_malformed_policy_values():
 
 
 def test_registered():
-    from maverick.tools import base_registry
+    from lightwork.tools import base_registry
 
     class _W:
         pass

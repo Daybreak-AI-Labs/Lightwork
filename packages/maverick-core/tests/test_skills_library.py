@@ -4,7 +4,7 @@ The agent roster shipped 1,000+ domain packs while the SKILL.md library was a
 single example -- the gap the expansion council flagged as highest-leverage.
 This pins the library (``maverick/skills_builtin/*.md``) to the same
 publish-readiness bar the install/distill paths enforce
-(``maverick.skills.validate_skill_file``) AND proves it is actually loaded at
+(``lightwork.skills.validate_skill_file``) AND proves it is actually loaded at
 runtime via ``available_skills`` (the agent recall path), with the env opt-out
 honored.
 """
@@ -13,7 +13,7 @@ from __future__ import annotations
 import re
 
 import pytest
-from maverick.skills import (
+from lightwork.skills import (
     available_skills,
     builtin_skills_dir,
     load_builtin_skills,

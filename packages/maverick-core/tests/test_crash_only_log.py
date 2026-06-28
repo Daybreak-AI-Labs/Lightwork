@@ -10,7 +10,7 @@ import json
 import os
 import stat
 
-from maverick import crash_only_log as col
+from lightwork import crash_only_log as col
 
 
 def _log(tmp_path, **kw):

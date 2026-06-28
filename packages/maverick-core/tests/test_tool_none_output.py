@@ -10,8 +10,8 @@ from __future__ import annotations
 
 import asyncio
 
-from maverick.agent import _cap_tool_output
-from maverick.tools import _execute_tool_fn
+from lightwork.agent import _cap_tool_output
+from lightwork.tools import _execute_tool_fn
 
 
 def test_cap_tool_output_tolerates_non_str():

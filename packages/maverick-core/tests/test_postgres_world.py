@@ -20,7 +20,7 @@ pytestmark = pytest.mark.skipif(
 
 @pytest.fixture
 def world():
-    from maverick.world_model_backends.postgres import PostgresWorldModel
+    from lightwork.world_model_backends.postgres import PostgresWorldModel
     w = PostgresWorldModel(dsn=_DSN)
     try:
         yield w
@@ -218,7 +218,7 @@ def test_child_writes_are_tenant_scoped(world):
     enforce it via a JOIN. The WRITES must too: a tenant must not inject a child
     row onto another tenant's goal/conversation by id. Regression for the
     unscoped PG child-write methods."""
-    from maverick.paths import reset_tenant, set_tenant
+    from lightwork.paths import reset_tenant, set_tenant
 
     tok = set_tenant("acme")
     try:
@@ -262,7 +262,7 @@ def test_decide_approval_is_tenant_scoped(world):
     The approve/deny dashboard endpoints pass a raw id with no ownership gate,
     so decide_approval itself has to scope to the active tenant (like
     get_approval / pending_approvals do)."""
-    from maverick.paths import reset_tenant, set_tenant
+    from lightwork.paths import reset_tenant, set_tenant
 
     tok = set_tenant("acme")
     try:
@@ -462,7 +462,7 @@ def test_erase_conversations_fact_scrub_is_tenant_scoped(world):
     erasing acme's "alice on sms" must NOT delete globex's identically-keyed fact.
     Regression for the cross-tenant over-deletion in erase_conversations (the same
     class delete_facts_matching guards, in a sibling path that missed it)."""
-    from maverick.paths import reset_tenant, set_tenant
+    from lightwork.paths import reset_tenant, set_tenant
 
     key = "user:sms:alice:preference"
     # globex holds the same-key fact for ITS own alice.
@@ -497,7 +497,7 @@ def test_pooled_backend_crud_and_pool_object(monkeypatch):
     CRUD still works and self._pool is wired (self.conn is None)."""
     pytest.importorskip("psycopg_pool")
     monkeypatch.setenv("MAVERICK_PG_POOL_SIZE", "3")
-    from maverick.world_model_backends.postgres import PostgresWorldModel
+    from lightwork.world_model_backends.postgres import PostgresWorldModel
     w = PostgresWorldModel(dsn=_DSN)
     try:
         assert w._pool is not None and w.conn is None
@@ -516,7 +516,7 @@ def _disable_rls(dsn):
     """Tear down RLS so the opt-in test doesn't leak FORCE RLS into other
     tests sharing the database."""
     import psycopg
-    from maverick.world_model_backends.postgres import _TENANT_TABLES
+    from lightwork.world_model_backends.postgres import _TENANT_TABLES
     with psycopg.connect(dsn, autocommit=True) as c, c.cursor() as cur:
         for t in _TENANT_TABLES:
             cur.execute(f"DROP POLICY IF EXISTS mvk_tenant_isolation ON {t}")
@@ -535,8 +535,8 @@ def test_rls_enforces_tenant_isolation_at_db_level(monkeypatch):
     (the CI/test DSN role is a superuser). The owner applies the policy; the
     app role only enforces it."""
     import psycopg
-    from maverick.paths import reset_tenant, set_tenant
-    from maverick.world_model_backends.postgres import PostgresWorldModel
+    from lightwork.paths import reset_tenant, set_tenant
+    from lightwork.world_model_backends.postgres import PostgresWorldModel
     from psycopg.conninfo import make_conninfo
 
     monkeypatch.setenv("MAVERICK_PG_RLS", "1")
@@ -590,7 +590,7 @@ def test_rls_enforces_tenant_isolation_at_db_level(monkeypatch):
 # --- Backend parity (SQLite v13 -> v20 catch-up) -----------------------------
 
 def test_set_goal_domain_and_v14_schema(world):
-    from maverick.world_model_backends.postgres import _PG_SCHEMA_VERSION
+    from lightwork.world_model_backends.postgres import _PG_SCHEMA_VERSION
     assert _PG_SCHEMA_VERSION >= 14
     gid = world.create_goal("domain-tagged goal")
     world.set_goal_domain(gid, "finance")  # v14 goals.domain column
@@ -741,7 +741,7 @@ def test_at_rest_encryption_seals_columns_and_round_trips(world, monkeypatch, tm
     """With encryption on, sensitive columns are AES-256-GCM ciphertext on disk
     yet read back as plaintext (audit C4: Postgres at-rest sealing)."""
     import psycopg
-    from maverick import crypto_at_rest as car
+    from lightwork import crypto_at_rest as car
 
     # Enable at-rest with an isolated key under tmp.
     monkeypatch.setenv("MAVERICK_ENCRYPT_AT_REST", "1")
@@ -804,7 +804,7 @@ def test_concurrent_migrate_does_not_race(world):
     # (its own connection) and runs migration on construction.
     import threading
 
-    from maverick.world_model_backends.postgres import (
+    from lightwork.world_model_backends.postgres import (
         _PG_SCHEMA_VERSION,
         PostgresWorldModel,
     )
@@ -840,7 +840,7 @@ def test_reclaim_orphan_goals_preserves_sealed_result(world, monkeypatch, tmp_pa
     concatenated plaintext onto ciphertext, corrupting the sealed result so it
     no longer decrypts -- the deliverable was permanently lost on crash
     recovery. (Mirrors the SQLite backend's at-rest branch.)"""
-    from maverick import crypto_at_rest as car
+    from lightwork import crypto_at_rest as car
 
     monkeypatch.setenv("MAVERICK_ENCRYPT_AT_REST", "1")
     monkeypatch.setattr(car, "_KEY_PATH", tmp_path / "at_rest.key")
@@ -864,7 +864,7 @@ def test_delete_facts_matching_is_tenant_scoped(world):
     fact that happens to share the same key. The DELETE keyed only on `key` (no
     tenant predicate) over-deleted across tenants; the read side was already
     scoped, so the write side has to match."""
-    from maverick.paths import reset_tenant, set_tenant
+    from lightwork.paths import reset_tenant, set_tenant
 
     key = "user:telegram:alice:preference"
     tok = set_tenant("acme")
@@ -902,7 +902,7 @@ def test_search_facts_matches_value_under_encryption(world, monkeypatch, tmp_pat
     """With encryption on, `value` is ciphertext, so a SQL LIKE over it can never
     match the plaintext query. search_facts must scan by key prefix then decrypt
     + substring-match in Python, and return PLAINTEXT (not ciphertext)."""
-    from maverick import crypto_at_rest as car
+    from lightwork import crypto_at_rest as car
 
     monkeypatch.setenv("MAVERICK_ENCRYPT_AT_REST", "1")
     monkeypatch.setattr(car, "_KEY_PATH", tmp_path / "at_rest.key")
@@ -918,7 +918,7 @@ def test_concurrent_add_artifact_no_duplicate_versions(world):
     # N distinct, gapless versions -- not duplicates from a MAX(version)+1 race.
     import threading
 
-    from maverick.world_model_backends.postgres import PostgresWorldModel
+    from lightwork.world_model_backends.postgres import PostgresWorldModel
 
     gid = world.create_goal("artifact-race")
     n = 12
@@ -951,8 +951,8 @@ def test_concurrent_upsert_fact_single_open_window(world, monkeypatch):
     # exactly ONE open history window (valid_to IS NULL), not several.
     import threading
 
-    from maverick import world_model as wm
-    from maverick.world_model_backends.postgres import PostgresWorldModel
+    from lightwork import world_model as wm
+    from lightwork.world_model_backends.postgres import PostgresWorldModel
 
     monkeypatch.setattr(wm, "_temporal_memory_enabled", lambda: True)
 
@@ -989,7 +989,7 @@ def test_concurrent_upsert_fact_single_open_window(world, monkeypatch):
 def test_answer_cannot_cross_tenant(world, monkeypatch):
     # A tenant must not answer (overwrite) another tenant's question by id.
     # RLS defaults off, so app-level _tenant_scope is the only guard.
-    from maverick.world_model_backends import postgres as pg
+    from lightwork.world_model_backends import postgres as pg
 
     monkeypatch.setattr(pg, "_active_tenant", lambda: "tA")
     gid_a = world.create_goal("a-goal")
@@ -1004,7 +1004,7 @@ def test_answer_cannot_cross_tenant(world, monkeypatch):
 
 
 def test_recent_event_contents_is_tenant_scoped(world, monkeypatch):
-    from maverick.world_model_backends import postgres as pg
+    from lightwork.world_model_backends import postgres as pg
 
     monkeypatch.setattr(pg, "_active_tenant", lambda: "evA")
     ga = world.create_goal("evt-a")
@@ -1019,7 +1019,7 @@ def test_recent_event_contents_is_tenant_scoped(world, monkeypatch):
 
 
 def test_erase_conversations_cannot_cross_tenant(world, monkeypatch):
-    from maverick.world_model_backends import postgres as pg
+    from lightwork.world_model_backends import postgres as pg
 
     monkeypatch.setattr(pg, "_active_tenant", lambda: "erA")
     conv_a = world.get_or_create_conversation("chan", "userA").id
@@ -1035,7 +1035,7 @@ def test_erase_conversations_cannot_cross_tenant(world, monkeypatch):
 def test_fk_readers_are_tenant_scoped(world, monkeypatch):
     # Defense-in-depth: artifact/share-link/signoff/origin readers must not
     # return another tenant's rows even if handed a foreign goal_id directly.
-    from maverick.world_model_backends import postgres as pg
+    from lightwork.world_model_backends import postgres as pg
 
     monkeypatch.setattr(pg, "_active_tenant", lambda: "fkA")
     ga = world.create_goal("a")

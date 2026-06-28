@@ -1,19 +1,19 @@
 """Run-events firehose (WS), inline cost preview, cost breakdown, anomalies."""
 from __future__ import annotations
 
-import maverick_dashboard.auth as auth
+import lightwork_dashboard.auth as auth
 import pytest
 from fastapi.testclient import TestClient
-from maverick.oidc import VerifiedPrincipal
-from maverick_dashboard import app as app_mod
-from maverick_dashboard.app import app
+from lightwork.oidc import VerifiedPrincipal
+from lightwork_dashboard import app as app_mod
+from lightwork_dashboard.app import app
 
 client = TestClient(app, headers={"Origin": "http://testserver"})
 
 
 @pytest.fixture(autouse=True)
 def _isolated(tmp_path, monkeypatch):
-    from maverick import world_model
+    from lightwork import world_model
     monkeypatch.setattr(world_model, "DEFAULT_DB", tmp_path / "world.db")
     app_mod._world_cache.clear()
     monkeypatch.delenv("MAVERICK_DASHBOARD_TOKEN", raising=False)

@@ -7,7 +7,7 @@ unavailable. Opt-out semantics: absent/true = enabled, so the default behaviour
 """
 from __future__ import annotations
 
-from maverick.domain import available_domains, enabled_domains, suite_for
+from lightwork.domain import available_domains, enabled_domains, suite_for
 
 
 def test_suite_for_prefix_mapping():

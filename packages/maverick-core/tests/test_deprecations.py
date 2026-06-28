@@ -4,7 +4,7 @@ from __future__ import annotations
 import warnings
 
 import pytest
-from maverick import deprecations as dep
+from lightwork import deprecations as dep
 
 
 @pytest.fixture(autouse=True)
@@ -72,7 +72,7 @@ def test_render_no_past_due_at_current(monkeypatch):
 
 
 def test_plugin_manifest_v1_warns_via_registry():
-    from maverick.plugin_manifest import parse_dict
+    from lightwork.plugin_manifest import parse_dict
     with warnings.catch_warnings(record=True) as caught:
         warnings.simplefilter("always")
         parse_dict({"plugin": {"name": "p", "version": "1", "api_version": "1"}})
@@ -81,9 +81,9 @@ def test_plugin_manifest_v1_warns_via_registry():
 
 def test_channel_str_shim_warns_via_registry():
     import importlib.util
-    if importlib.util.find_spec("maverick_channels") is None:
-        pytest.skip("maverick-channels not installed")
-    from maverick_channels.base import as_reply
+    if importlib.util.find_spec("lightwork_channels") is None:
+        pytest.skip("lightwork-channels not installed")
+    from lightwork_channels.base import as_reply
     with warnings.catch_warnings(record=True) as caught:
         warnings.simplefilter("always")
         as_reply("bare string")

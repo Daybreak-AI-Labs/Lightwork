@@ -2,9 +2,9 @@
 from __future__ import annotations
 
 import pytest
-from maverick import mcp_oauth
-from maverick.mcp_client import MCPServerSpec, StreamableHttpMCPClient
-from maverick.mcp_oauth import OAuthConfig, OAuthTokenProvider
+from lightwork import mcp_oauth
+from lightwork.mcp_client import MCPServerSpec, StreamableHttpMCPClient
+from lightwork.mcp_oauth import OAuthConfig, OAuthTokenProvider
 
 # ---- config validation ------------------------------------------------------
 

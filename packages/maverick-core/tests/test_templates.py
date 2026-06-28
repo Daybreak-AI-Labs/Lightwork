@@ -2,7 +2,7 @@
 from __future__ import annotations
 
 import pytest
-from maverick.templates import (
+from lightwork.templates import (
     Template,
     _substitute,
     list_templates,

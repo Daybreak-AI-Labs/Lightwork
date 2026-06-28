@@ -3,7 +3,7 @@ from __future__ import annotations
 
 import hashlib
 
-from maverick.tools.provenance_chain import provenance_chain
+from lightwork.tools.provenance_chain import provenance_chain
 
 _GENESIS = "0" * 64
 

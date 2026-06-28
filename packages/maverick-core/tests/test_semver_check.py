@@ -1,7 +1,7 @@
 """semver_check: version-constraint satisfaction."""
 from __future__ import annotations
 
-from maverick.tools.semver_check import semver_check
+from lightwork.tools.semver_check import semver_check
 
 
 def _c(version, constraint):
@@ -73,7 +73,7 @@ def test_errors():
 
 
 def test_registered():
-    from maverick.tools import base_registry
+    from lightwork.tools import base_registry
 
     class _W:
         pass

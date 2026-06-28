@@ -5,10 +5,10 @@ from types import SimpleNamespace
 
 def test_run_goal_in_thread_propagates_execution_identity(monkeypatch):
     """HTTP adapters can pass an authenticated user through the runner."""
-    from maverick import budget as budget_mod
-    from maverick import llm as llm_mod
-    from maverick import orchestrator, runner, world_model
-    from maverick import sandbox as sandbox_mod
+    from lightwork import budget as budget_mod
+    from lightwork import llm as llm_mod
+    from lightwork import orchestrator, runner, world_model
+    from lightwork import sandbox as sandbox_mod
 
     captured: dict = {}
 
@@ -37,10 +37,10 @@ def test_run_goal_in_thread_propagates_execution_identity(monkeypatch):
 
 def test_run_goal_in_thread_can_schedule_by_caller_principal(monkeypatch):
     """Fleet runs keep agent audit identity but share the caller's fair lane."""
-    from maverick import budget as budget_mod
-    from maverick import llm as llm_mod
-    from maverick import orchestrator, runner, world_model
-    from maverick import sandbox as sandbox_mod
+    from lightwork import budget as budget_mod
+    from lightwork import llm as llm_mod
+    from lightwork import orchestrator, runner, world_model
+    from lightwork import sandbox as sandbox_mod
 
     captured: dict = {}
     lanes: list[str | None] = []

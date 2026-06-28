@@ -6,7 +6,7 @@ from pathlib import Path
 
 
 def _point_overlay(monkeypatch, tmp_path: Path):
-    from maverick import runtime_overrides
+    from lightwork import runtime_overrides
     monkeypatch.setattr(runtime_overrides, "OVERRIDES_PATH", tmp_path / "runtime-overrides.toml")
     return runtime_overrides
 
@@ -80,8 +80,8 @@ def test_disable_rejects_invalid_tool_name(monkeypatch, tmp_path):
 
 def test_acl_unions_overlay_into_deny(monkeypatch, tmp_path):
     """resolve_lists must add the overlay's denied tools to the deny-set."""
-    from maverick import runtime_overrides
-    from maverick.safety import tool_acl
+    from lightwork import runtime_overrides
+    from lightwork.safety import tool_acl
     monkeypatch.setattr(runtime_overrides, "OVERRIDES_PATH", tmp_path / "ro.toml")
     # No config ACL; empty config path.
     monkeypatch.setenv("MAVERICK_CONFIG", str(tmp_path / "config.toml"))
@@ -92,14 +92,14 @@ def test_acl_unions_overlay_into_deny(monkeypatch, tmp_path):
 
 def test_acl_overlay_filters_registry(monkeypatch, tmp_path):
     """End-to-end: a disabled tool is actually dropped from the registry."""
-    from maverick import runtime_overrides
+    from lightwork import runtime_overrides
     monkeypatch.setattr(runtime_overrides, "OVERRIDES_PATH", tmp_path / "ro.toml")
     monkeypatch.setenv("MAVERICK_CONFIG", str(tmp_path / "config.toml"))
     runtime_overrides.disable_tool("shell")
 
     from unittest.mock import MagicMock
 
-    from maverick.tools import base_registry
+    from lightwork.tools import base_registry
     reg = base_registry(world=MagicMock(), sandbox=MagicMock(__class__=type("Local", (), {})))
     names = {t.name for t in reg.all()}
     assert "shell" not in names, "overlay-denied tool still in registry"

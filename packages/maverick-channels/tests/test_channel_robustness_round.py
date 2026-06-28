@@ -37,7 +37,7 @@ class _FakeProc:
 
 
 def test_signal_send_failure_does_not_kill_loop(monkeypatch):
-    from maverick_channels.signal import SignalChannel
+    from lightwork_channels.signal import SignalChannel
 
     async def _noop(_):
         return "reply"
@@ -85,7 +85,7 @@ def test_signal_send_failure_does_not_kill_loop(monkeypatch):
 
 def test_voice_handler_error_is_generic_not_leaked(monkeypatch):
     from fastapi.testclient import TestClient
-    from maverick_channels.voice import VoiceChannel
+    from lightwork_channels.voice import VoiceChannel
 
     secret = "sk-do-not-leak-9876"  # pragma: allowlist secret
 
@@ -109,7 +109,7 @@ def test_voice_handler_error_is_generic_not_leaked(monkeypatch):
 # --- fix 3: outbound egress hygiene (mentions / empty / self-loop) ---------
 
 def _signal_chan(monkeypatch, line: bytes):
-    from maverick_channels.signal import SignalChannel
+    from lightwork_channels.signal import SignalChannel
 
     async def _noop(_):
         return "reply"
@@ -162,7 +162,7 @@ def test_signal_empty_reply_is_not_sent(monkeypatch):
 
 
 def test_matrix_empty_reply_is_not_sent(monkeypatch):
-    from maverick_channels.matrix import MatrixChannel
+    from lightwork_channels.matrix import MatrixChannel
 
     chan = MatrixChannel.__new__(MatrixChannel)  # bypass __init__ (needs nio)
     chan.user_id = "@bot:hs"

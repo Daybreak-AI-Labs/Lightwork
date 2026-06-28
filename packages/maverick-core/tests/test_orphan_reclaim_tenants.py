@@ -13,9 +13,9 @@ qualify immediately (the production default only reclaims goals >=60s stale).
 from __future__ import annotations
 
 import pytest
-from maverick import server as server_mod
-from maverick.paths import maverick_home
-from maverick.world_model import world_for_tenant
+from lightwork import server as server_mod
+from lightwork.paths import maverick_home
+from lightwork.world_model import world_for_tenant
 
 
 @pytest.fixture(autouse=True)
@@ -26,7 +26,7 @@ def _clear_world_cache():
     differ, but clearing (and closing) keeps SQLite FDs from leaking across the
     suite and makes the reclaim re-open the on-disk DBs fresh.
     """
-    import maverick.world_model as wm
+    import lightwork.world_model as wm
 
     def _drain():
         for w in list(wm._tenant_worlds.values()):
@@ -72,7 +72,7 @@ def test_reclaims_orphans_across_all_tenant_worlds(monkeypatch):
 
     # Drop the cache so the reclaim re-discovers the tenants from disk and
     # opens their world.db files itself (mirrors a fresh `maverick serve`).
-    import maverick.world_model as wm
+    import lightwork.world_model as wm
     for w in list(wm._tenant_worlds.values()):
         w.close()
     wm._tenant_worlds.clear()
@@ -93,7 +93,7 @@ def test_reclaim_does_not_populate_tenant_world_cache(monkeypatch):
     tenants = [f"tenant-{idx}" for idx in range(3)]
     goals = {tenant: _stranded_tenant(tenant) for tenant in tenants}
 
-    import maverick.world_model as wm
+    import lightwork.world_model as wm
     for w in list(wm._tenant_worlds.values()):
         w.close()
     wm._tenant_worlds.clear()
@@ -119,7 +119,7 @@ def test_reclaim_skips_unreadable_tenant_dir_fail_soft(monkeypatch):
     # sweep -- entry.is_dir() is False so it's skipped.
     (maverick_home() / "tenants" / "stray.txt").write_text("not a tenant")
 
-    import maverick.world_model as wm
+    import lightwork.world_model as wm
     for w in list(wm._tenant_worlds.values()):
         w.close()
     wm._tenant_worlds.clear()
@@ -146,11 +146,11 @@ def test_disabled_does_not_sweep_tenant_worlds(monkeypatch):
     monkeypatch.delenv("MAVERICK_TENANT", raising=False)
     monkeypatch.setenv("MAVERICK_ORPHAN_RECLAIM_SECONDS", "0")
     # Tenancy resolution also consults config; force it off there too.
-    monkeypatch.setattr("maverick.config.load_config", dict)
+    monkeypatch.setattr("lightwork.config.load_config", dict)
 
     a_goals = _stranded_tenant("a")
 
-    import maverick.world_model as wm
+    import lightwork.world_model as wm
     for w in list(wm._tenant_worlds.values()):
         w.close()
     wm._tenant_worlds.clear()

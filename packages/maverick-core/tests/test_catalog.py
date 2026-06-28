@@ -5,7 +5,7 @@ import hashlib
 import json
 
 import pytest
-from maverick import catalog
+from lightwork import catalog
 
 _SKILL_BODY = """---
 name: summarize-url
@@ -39,7 +39,7 @@ def _entry(**over) -> dict:
 
 @pytest.fixture(autouse=True)
 def _fresh_cache(monkeypatch, tmp_path):
-    # Point the catalog cache at a tmp dir so tests don't read ~/.maverick.
+    # Point the catalog cache at a tmp dir so tests don't read ~/.lightwork.
     monkeypatch.setattr(catalog, "_CACHE_DIR", tmp_path / "catalog-cache")
 
 
@@ -137,13 +137,13 @@ def test_fetch_index_caches(monkeypatch, tmp_path):
         calls["n"] += 1
         return _Resp()
 
-    # catalog now fetches through maverick.tools.http_fetch.guarded_urlopen
+    # catalog now fetches through lightwork.tools.http_fetch.guarded_urlopen
     # (shared SSRF guard), which uses a custom opener that revalidates every
     # redirect hop; patch the opener's open() and neutralize the host check so
     # the test stays hermetic.
     import urllib.request
 
-    from maverick.tools import http_fetch
+    from lightwork.tools import http_fetch
     monkeypatch.setattr(http_fetch, "is_blocked_host", lambda _h: False)
     monkeypatch.setattr(urllib.request.OpenerDirector, "open", _open)
     url = "https://a/skills/index.json"

@@ -16,8 +16,8 @@ import threading
 import time
 
 import pytest
-from maverick_mcp.server import TOOLS, MCPServer, _ProtocolError
-from maverick_mcp.tasks import RELATED_TASK_META, McpTask, TaskError, TaskStore
+from lightwork_mcp.server import TOOLS, MCPServer, _ProtocolError
+from lightwork_mcp.tasks import RELATED_TASK_META, McpTask, TaskError, TaskStore
 
 
 def _ok(text: str) -> dict:

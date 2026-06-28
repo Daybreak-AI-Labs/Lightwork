@@ -10,9 +10,9 @@ from __future__ import annotations
 import logging
 
 import pytest
-from maverick.budget import Budget, BudgetExceeded
-from maverick.providers.ollama_provider import OllamaClient
-from maverick.providers.openai_provider import OpenAIClient
+from lightwork.budget import Budget, BudgetExceeded
+from lightwork.providers.ollama_provider import OllamaClient
+from lightwork.providers.openai_provider import OpenAIClient
 
 
 class _Msg:
@@ -66,7 +66,7 @@ class _BadArgsToolCall:
 
 def test_unparseable_tool_args_warns_and_uses_empty(caplog):
     msg = _Msg(tool_calls=[_BadArgsToolCall()])
-    with caplog.at_level(logging.WARNING, logger="maverick.providers.openai_provider"):
+    with caplog.at_level(logging.WARNING, logger="lightwork.providers.openai_provider"):
         r = OpenAIClient._from_response(_Resp(msg), None)
     assert r.tool_calls and r.tool_calls[0].input == {}
     assert any("unparseable arguments" in rec.message for rec in caplog.records)
@@ -81,7 +81,7 @@ class _SecretBadArgsToolCall:
 
 def test_unparseable_tool_args_warning_scrubs_raw_arguments(caplog):
     msg = _Msg(tool_calls=[_SecretBadArgsToolCall()])
-    with caplog.at_level(logging.WARNING, logger="maverick.providers.openai_provider"):
+    with caplog.at_level(logging.WARNING, logger="lightwork.providers.openai_provider"):
         r = OpenAIClient._from_response(_Resp(msg), None)
     assert r.tool_calls and r.tool_calls[0].input == {}
     messages = "\n".join(rec.message for rec in caplog.records)

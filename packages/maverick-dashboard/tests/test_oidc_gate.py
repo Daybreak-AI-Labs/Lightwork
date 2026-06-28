@@ -1,8 +1,8 @@
 """OIDC bearer-auth gate tests for the dashboard.
 
 Hermetic: no real crypto/JWT/network. We monkeypatch the OIDC seam
-(``maverick_dashboard.auth.oidc_enabled`` and
-``maverick_dashboard.auth.verify_oidc_token``) so the tests exercise the
+(``lightwork_dashboard.auth.oidc_enabled`` and
+``lightwork_dashboard.auth.verify_oidc_token``) so the tests exercise the
 FastAPI dependency wiring, not PyJWT.
 
 The route under test is ``/metrics``: it is gated (not in the OIDC exempt
@@ -11,10 +11,10 @@ status code change is attributable purely to the auth gate.
 """
 from __future__ import annotations
 
-import maverick_dashboard.auth as auth
+import lightwork_dashboard.auth as auth
 from fastapi.testclient import TestClient
-from maverick.oidc import VerifiedPrincipal
-from maverick_dashboard.app import app
+from lightwork.oidc import VerifiedPrincipal
+from lightwork_dashboard.app import app
 
 client = TestClient(app)
 
@@ -48,7 +48,7 @@ def test_enabled_no_token_returns_401(monkeypatch):
 
 def test_enabled_invalid_token_returns_401(monkeypatch):
     """OIDC on + a token the verifier rejects: 401 (opaque detail)."""
-    from maverick.oidc import OIDCError
+    from lightwork.oidc import OIDCError
 
     monkeypatch.setattr(auth, "oidc_enabled", lambda: True)
 

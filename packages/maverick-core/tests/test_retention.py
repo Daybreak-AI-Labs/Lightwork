@@ -16,19 +16,19 @@ def _make_audit_file(audit_dir: Path, day: str, body: str = '{"v": 1}\n') -> Pat
 
 
 def test_purge_audit_files_disabled():
-    from maverick.audit.retention import purge_audit_files
+    from lightwork.audit.retention import purge_audit_files
     res = purge_audit_files(days=0, audit_dir=Path("/nonexistent"))
     assert res["reason"] == "disabled"
 
 
 def test_purge_audit_files_no_dir(tmp_path: Path):
-    from maverick.audit.retention import purge_audit_files
+    from lightwork.audit.retention import purge_audit_files
     res = purge_audit_files(days=30, audit_dir=tmp_path / "nope")
     assert res["reason"] == "no audit dir"
 
 
 def test_purge_audit_files_removes_old_keeps_recent(tmp_path: Path):
-    from maverick.audit.retention import purge_audit_files
+    from lightwork.audit.retention import purge_audit_files
     audit_dir = tmp_path / "audit"
     _make_audit_file(audit_dir, "2025-01-01")
     _make_audit_file(audit_dir, "2025-06-15")
@@ -48,7 +48,7 @@ def test_purge_audit_files_removes_old_keeps_recent(tmp_path: Path):
 
 
 def test_purge_audit_files_dry_run(tmp_path: Path):
-    from maverick.audit.retention import purge_audit_files
+    from lightwork.audit.retention import purge_audit_files
     audit_dir = tmp_path / "audit"
     _make_audit_file(audit_dir, "2024-01-01")
     fixed_now = time.mktime(time.strptime("2025-01-01", "%Y-%m-%d"))
@@ -97,7 +97,7 @@ def _insert_event(db: Path, ts: float) -> None:
 
 
 def test_purge_world_episodes_removes_old(tmp_path: Path):
-    from maverick.audit.retention import purge_world_episodes
+    from lightwork.audit.retention import purge_world_episodes
     db = tmp_path / "world.db"
     _seed_world_db(db)
     now = 1_700_000_000.0
@@ -115,7 +115,7 @@ def test_purge_world_episodes_removes_old(tmp_path: Path):
 
 
 def test_purge_world_episodes_dry_run(tmp_path: Path):
-    from maverick.audit.retention import purge_world_episodes
+    from lightwork.audit.retention import purge_world_episodes
     db = tmp_path / "world.db"
     _seed_world_db(db)
     now = 1_700_000_000.0
@@ -130,7 +130,7 @@ def test_purge_world_episodes_dry_run(tmp_path: Path):
 
 
 def test_purge_world_events_removes_old(tmp_path: Path):
-    from maverick.audit.retention import purge_world_events
+    from lightwork.audit.retention import purge_world_events
     db = tmp_path / "world.db"
     _seed_world_db(db)
     now = 1_700_000_000.0
@@ -142,13 +142,13 @@ def test_purge_world_events_removes_old(tmp_path: Path):
 
 
 def test_enforce_no_config_returns_disabled():
-    from maverick.audit.retention import enforce
+    from lightwork.audit.retention import enforce
     res = enforce(config={})
     assert res["status"] == "disabled"
 
 
 def test_enforce_full_config(tmp_path: Path):
-    from maverick.audit.retention import enforce
+    from lightwork.audit.retention import enforce
     audit_dir = tmp_path / "audit"
     db = tmp_path / "world.db"
     _seed_world_db(db)
@@ -168,7 +168,7 @@ def test_enforce_full_config(tmp_path: Path):
 
 @pytest.mark.parametrize("days", [None, 0, -5])
 def test_purge_helpers_disabled_with_bad_days(tmp_path: Path, days):
-    from maverick.audit.retention import (
+    from lightwork.audit.retention import (
         purge_audit_files,
         purge_world_episodes,
         purge_world_events,
@@ -182,7 +182,7 @@ def test_purge_helpers_disabled_with_bad_days(tmp_path: Path, days):
 
 def test_purge_missing_db_safe(tmp_path: Path):
     """No DB file -> no rows deleted, no exception."""
-    from maverick.audit.retention import purge_world_episodes
+    from lightwork.audit.retention import purge_world_episodes
     res = purge_world_episodes(days=30, db_path=tmp_path / "absent.db")
     assert res["deleted"] == 0
 
@@ -195,7 +195,7 @@ _NOW_2025_06_30 = datetime(2025, 6, 30, tzinfo=timezone.utc).timestamp()
 
 
 def _ledger(tmp_path: Path):
-    from maverick.quotas import UsageLedger
+    from lightwork.quotas import UsageLedger
     return UsageLedger(tmp_path / "usage_ledger.json")
 
 
@@ -243,7 +243,7 @@ def test_usage_ledger_prune_dry_run(tmp_path: Path):
 
 
 def test_purge_usage_ledger_wires_to_prune(tmp_path: Path):
-    from maverick.audit.retention import purge_usage_ledger
+    from lightwork.audit.retention import purge_usage_ledger
     led = _ledger(tmp_path)
     led.record("alice", 1.0, 1, 1, day="2025-01-01")
     res = purge_usage_ledger(days=10, ledger_path=tmp_path / "usage_ledger.json",
@@ -253,15 +253,15 @@ def test_purge_usage_ledger_wires_to_prune(tmp_path: Path):
 
 
 def test_purge_usage_ledger_disabled(tmp_path: Path):
-    from maverick.audit.retention import purge_usage_ledger
+    from lightwork.audit.retention import purge_usage_ledger
     assert purge_usage_ledger(days=0)["reason"] == "disabled"
 
 
 def test_enforce_includes_usage_ledger(tmp_path: Path, monkeypatch):
     monkeypatch.setenv("MAVERICK_HOME", str(tmp_path / "home"))
     monkeypatch.delenv("MAVERICK_TENANT", raising=False)
-    from maverick.audit.retention import enforce
-    from maverick.quotas import UsageLedger
+    from lightwork.audit.retention import enforce
+    from lightwork.quotas import UsageLedger
     UsageLedger().record("alice", 1.0, 1, 1, day="2020-01-01")
     res = enforce(config={"usage_days": 30}, now=_NOW_2025_06_30)
     assert res["usage_ledger"]["removed_buckets"] == 1
@@ -288,7 +288,7 @@ def _read_marker_rows(audit_dir: Path) -> list[dict]:
 
 
 def test_enforce_writes_retention_marker(tmp_path: Path):
-    from maverick.audit.retention import enforce
+    from lightwork.audit.retention import enforce
     audit_dir = tmp_path / "audit"
     db = tmp_path / "world.db"
     _seed_world_db(db)
@@ -311,7 +311,7 @@ def test_enforce_writes_retention_marker(tmp_path: Path):
 
 
 def test_dry_run_writes_no_marker(tmp_path: Path):
-    from maverick.audit.retention import enforce
+    from lightwork.audit.retention import enforce
     audit_dir = tmp_path / "audit"
     _make_audit_file(audit_dir, "2024-01-01")
     now = time.mktime(time.strptime("2025-06-30", "%Y-%m-%d"))
@@ -325,7 +325,7 @@ def test_dry_run_writes_no_marker(tmp_path: Path):
 
 def test_no_purge_writes_no_marker(tmp_path: Path):
     # Nothing old enough to purge -> no marker noise.
-    from maverick.audit.retention import enforce
+    from lightwork.audit.retention import enforce
     audit_dir = tmp_path / "audit"
     _make_audit_file(audit_dir, "2025-06-29")
     now = time.mktime(time.strptime("2025-06-30", "%Y-%m-%d"))
@@ -336,9 +336,9 @@ def test_no_purge_writes_no_marker(tmp_path: Path):
 
 def test_retention_marker_is_signed_and_verifies(tmp_path: Path, monkeypatch):
     pytest.importorskip("cryptography")
-    from maverick.audit import signing
-    from maverick.audit.retention import enforce
-    from maverick.audit.signing import verify_chain
+    from lightwork.audit import signing
+    from lightwork.audit.retention import enforce
+    from lightwork.audit.signing import verify_chain
     monkeypatch.setattr(signing, "KEY_DIR", tmp_path / "keys")
     monkeypatch.setenv("MAVERICK_AUDIT_SIGN", "1")
 

@@ -3,8 +3,8 @@ persist + consult them, and drop a rule when re-triage shows the harm is gone.
 """
 from __future__ import annotations
 
-from maverick import negative_knowledge as nk
-from maverick.data_engine import FailureClass
+from lightwork import negative_knowledge as nk
+from lightwork.data_engine import FailureClass
 
 
 def _fc(action, effect, ci_high, trustworthy=True):

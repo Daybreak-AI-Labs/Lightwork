@@ -10,7 +10,7 @@ import pytest
 @pytest.fixture
 def _client(monkeypatch):
     monkeypatch.setenv("ANTHROPIC_API_KEY", "sk-test")
-    from maverick.providers.anthropic_provider import AnthropicClient
+    from lightwork.providers.anthropic_provider import AnthropicClient
     return AnthropicClient()
 
 
@@ -29,7 +29,7 @@ def _resp(*, input_tokens, output_tokens, cache_read, cache_creation):
 def test_parse_response_records_token_and_cache_metrics(_client, monkeypatch):
     calls: list[tuple[str, float, dict]] = []
 
-    import maverick.observability as obs
+    import lightwork.observability as obs
     monkeypatch.setattr(obs, "record_metric",
                         lambda name, value=1.0, *, labels=None: calls.append((name, value, labels or {})))
 
@@ -51,7 +51,7 @@ def test_parse_response_records_token_and_cache_metrics(_client, monkeypatch):
 
 
 def test_metrics_are_failsoft(_client, monkeypatch):
-    import maverick.observability as obs
+    import lightwork.observability as obs
 
     def _boom(*a, **k):
         raise RuntimeError("metrics backend down")
@@ -67,6 +67,6 @@ def test_metrics_are_failsoft(_client, monkeypatch):
 
 def test_cache_metric_registered():
     # The counter is wired into the exporter's metric registry definition.
-    import maverick.observability as obs
+    import lightwork.observability as obs
     src = open(obs.__file__, encoding="utf-8").read() if os.path.exists(obs.__file__) else ""
     assert "maverick_llm_cache_tokens_total" in src

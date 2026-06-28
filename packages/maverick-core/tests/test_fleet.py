@@ -8,7 +8,7 @@ from click.testing import CliRunner
 
 
 def test_valid_name():
-    from maverick.fleet import valid_name
+    from lightwork.fleet import valid_name
     assert valid_name("acme") and valid_name("acme_ops-1")
     assert not valid_name("../evil")
     assert not valid_name("a/b")
@@ -18,7 +18,7 @@ def test_valid_name():
 def test_save_load_roundtrip(monkeypatch, tmp_path):
     monkeypatch.setenv("HOME", str(tmp_path))
     monkeypatch.delenv("MAVERICK_TENANT", raising=False)
-    from maverick.fleet import Fleet, FleetAgent, load_fleet, save_fleet
+    from lightwork.fleet import Fleet, FleetAgent, load_fleet, save_fleet
     fl = Fleet(name="acme", owner="user:alice", agents=(
         FleetAgent("researcher", "analyst", "does research"),
         FleetAgent("coder", "engineer"),
@@ -35,14 +35,14 @@ def test_save_load_roundtrip(monkeypatch, tmp_path):
 def test_saved_file_is_0600(monkeypatch, tmp_path):
     monkeypatch.setenv("HOME", str(tmp_path))
     monkeypatch.delenv("MAVERICK_TENANT", raising=False)
-    from maverick.fleet import Fleet, save_fleet
+    from lightwork.fleet import Fleet, save_fleet
     path = save_fleet(Fleet(name="f1", owner="user:x"))
     assert stat.S_IMODE(path.stat().st_mode) == 0o600
 
 
 def test_save_rejects_bad_name(monkeypatch, tmp_path):
     monkeypatch.setenv("HOME", str(tmp_path))
-    from maverick.fleet import Fleet, save_fleet
+    from lightwork.fleet import Fleet, save_fleet
     with pytest.raises(ValueError):
         save_fleet(Fleet(name="../evil", owner="x"))
 
@@ -50,7 +50,7 @@ def test_save_rejects_bad_name(monkeypatch, tmp_path):
 def test_list_and_remove(monkeypatch, tmp_path):
     monkeypatch.setenv("HOME", str(tmp_path))
     monkeypatch.delenv("MAVERICK_TENANT", raising=False)
-    from maverick.fleet import Fleet, list_fleets, remove_fleet, save_fleet
+    from lightwork.fleet import Fleet, list_fleets, remove_fleet, save_fleet
     save_fleet(Fleet(name="a", owner="x"))
     save_fleet(Fleet(name="b", owner="y"))
     assert {f.name for f in list_fleets()} == {"a", "b"}
@@ -62,7 +62,7 @@ def test_list_and_remove(monkeypatch, tmp_path):
 def test_load_rejects_malformed_fleet_json(monkeypatch, tmp_path):
     monkeypatch.setenv("HOME", str(tmp_path))
     monkeypatch.delenv("MAVERICK_TENANT", raising=False)
-    from maverick.fleet import fleets_dir, list_fleets, load_fleet
+    from lightwork.fleet import fleets_dir, list_fleets, load_fleet
 
     d = fleets_dir()
     d.mkdir(parents=True)
@@ -89,11 +89,11 @@ def test_cli_create_list_show_rm(monkeypatch, tmp_path):
     monkeypatch.delenv("MAVERICK_TENANT", raising=False)
     # `fleet create` validates roles against config (undefined roles are
     # rejected), so the roles this fleet declares must be configured.
-    monkeypatch.setattr("maverick.config.load_config", lambda *a, **k: {
+    monkeypatch.setattr("lightwork.config.load_config", lambda *a, **k: {
         "roles": {"analyst": {"allow_tools": ["read_file"]},
                   "engineer": {"allow_tools": ["read_file", "write_file"]}},
     })
-    from maverick.cli import main
+    from lightwork.cli import main
     r = CliRunner()
     c = r.invoke(main, ["fleet", "create", "acme", "--owner", "user:alice",
                         "--agent", "researcher:analyst", "--agent", "coder:engineer"])
@@ -113,7 +113,7 @@ def test_cli_create_list_show_rm(monkeypatch, tmp_path):
 
 def test_cli_create_rejects_bad_agent(monkeypatch, tmp_path):
     monkeypatch.setenv("HOME", str(tmp_path))
-    from maverick.cli import main
+    from lightwork.cli import main
     res = CliRunner().invoke(main, ["fleet", "create", "f", "--owner", "x",
                                     "--agent", "noRole"])
     assert res.exit_code == 2
@@ -122,14 +122,14 @@ def test_cli_create_rejects_bad_agent(monkeypatch, tmp_path):
 
 def test_cli_show_missing(monkeypatch, tmp_path):
     monkeypatch.setenv("HOME", str(tmp_path))
-    from maverick.cli import main
+    from lightwork.cli import main
     assert CliRunner().invoke(main, ["fleet", "show", "ghost"]).exit_code == 1
 
 
 def test_remove_fleet_deletes_run_index(monkeypatch, tmp_path):
     monkeypatch.setenv("HOME", str(tmp_path))
     monkeypatch.delenv("MAVERICK_TENANT", raising=False)
-    from maverick.fleet import Fleet, load_runs, record_run, remove_fleet, runs_path, save_fleet
+    from lightwork.fleet import Fleet, load_runs, record_run, remove_fleet, runs_path, save_fleet
 
     save_fleet(Fleet(name="a", owner="x"))
     record_run("a", "agent", 123)
@@ -147,7 +147,7 @@ def test_record_run_is_atomic_under_concurrency(monkeypatch, tmp_path):
     monkeypatch.delenv("MAVERICK_TENANT", raising=False)
     import threading
 
-    from maverick.fleet import load_runs, record_run
+    from lightwork.fleet import load_runs, record_run
 
     n = 50
     barrier = threading.Barrier(n)

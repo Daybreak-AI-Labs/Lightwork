@@ -2,8 +2,8 @@
 from __future__ import annotations
 
 import pytest
-from maverick.safety import action_gate
-from maverick.safety.consent import ConsentDecision
+from lightwork.safety import action_gate
+from lightwork.safety.consent import ConsentDecision
 
 
 @pytest.fixture(autouse=True)

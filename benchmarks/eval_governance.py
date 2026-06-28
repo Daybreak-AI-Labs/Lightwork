@@ -71,7 +71,7 @@ def _scoped_env(**values: str):
 def scenario_approval_gate() -> dict:
     """A high-risk browser actuation routes through the approval gate and is
     denied under a gating consent mode; a read action is never gated."""
-    from maverick.safety.action_gate import gate_browser_action
+    from lightwork.safety.action_gate import gate_browser_action
 
     # Empty HOME keeps the consent ledger from auto-approving a prior grant.
     home = tempfile.mkdtemp(prefix="mvk-gov-gate-")
@@ -95,7 +95,7 @@ def scenario_approval_gate() -> dict:
 def scenario_egress_lock() -> dict:
     """Enterprise mode must refuse a cloud LLM provider and admit a self-hosted
     one -- the data-boundary guarantee at the LLM chokepoint."""
-    from maverick.enterprise import enterprise_enabled, is_local_provider
+    from lightwork.enterprise import enterprise_enabled, is_local_provider
 
     with _scoped_env(MAVERICK_ENTERPRISE="1"):
         ent = enterprise_enabled()
@@ -116,7 +116,7 @@ def scenario_egress_lock() -> dict:
 def scenario_capability_ceiling() -> dict:
     """An attenuating capability scoped to read/search must deny ``shell`` while
     still permitting a granted tool."""
-    from maverick.capability import Capability
+    from lightwork.capability import Capability
 
     cap = Capability(
         principal="agent:bench",
@@ -140,7 +140,7 @@ def scenario_capability_ceiling() -> dict:
 def scenario_agent_trust() -> dict:
     """An inbound-only trusted agent must be refused an outbound dial while
     inbound interactions remain allowed."""
-    from maverick.agent_trust import TrustedAgent
+    from lightwork.agent_trust import TrustedAgent
 
     agent = TrustedAgent(id="vega", direction="inbound")
     contained = not agent.permits_outbound()
@@ -162,9 +162,9 @@ def scenario_signed_evidence() -> dict:
     one-byte tamper to the recorded content is detected by ``verify_chain``."""
     import datetime
 
-    from maverick.audit import EventKind, iter_events, record, verify_chain
-    from maverick.audit import writer as _w
-    from maverick.paths import data_dir
+    from lightwork.audit import EventKind, iter_events, record, verify_chain
+    from lightwork.audit import writer as _w
+    from lightwork.paths import data_dir
 
     home = tempfile.mkdtemp(prefix="mvk-gov-evidence-")
     recorded = clean_ok = tamper_detected = False

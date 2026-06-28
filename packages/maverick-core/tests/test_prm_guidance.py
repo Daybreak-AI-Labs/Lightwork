@@ -1,7 +1,7 @@
 """Tests for PRM-in-loop guidance (Phase 0: make the reward model steer)."""
 from __future__ import annotations
 
-from maverick.prm_guidance import PromiseWindow, maybe_nudge, should_nudge
+from lightwork.prm_guidance import PromiseWindow, maybe_nudge, should_nudge
 
 
 def test_should_nudge_on_low_streak():

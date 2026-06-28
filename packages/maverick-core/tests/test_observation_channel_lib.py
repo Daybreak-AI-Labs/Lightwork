@@ -1,8 +1,8 @@
 """Multi-agent observation channel: broadcast pub/sub + blackboard tee."""
 from __future__ import annotations
 
-from maverick import observation_channel as oc
-from maverick.blackboard import Blackboard
+from lightwork import observation_channel as oc
+from lightwork.blackboard import Blackboard
 
 
 def _fresh():

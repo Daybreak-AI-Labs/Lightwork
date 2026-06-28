@@ -3,7 +3,7 @@ pa11y and axe drive a real headless browser, so the target URL is attacker-
 reachable just like an http_fetch."""
 from __future__ import annotations
 
-from maverick.tools.a11y import _check_url, a11y
+from lightwork.tools.a11y import _check_url, a11y
 
 
 def test_rejects_file_scheme():

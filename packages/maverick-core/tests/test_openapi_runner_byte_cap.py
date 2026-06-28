@@ -13,7 +13,7 @@ import contextlib
 import json
 
 import pytest
-from maverick.tools import openapi_runner as oar
+from lightwork.tools import openapi_runner as oar
 
 
 class _FakeStream:
@@ -69,7 +69,7 @@ def _patch_safe_client(monkeypatch, chunk, total_chunks, counter):
 
     # _load_spec / _op_call import safe_client locally from ._ssrf, so patch
     # it at the source.
-    from maverick.tools import _ssrf
+    from lightwork.tools import _ssrf
     monkeypatch.setattr(_ssrf, "safe_client", fake_safe_client)
 
 

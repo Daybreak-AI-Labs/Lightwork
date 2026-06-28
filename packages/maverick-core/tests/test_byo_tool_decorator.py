@@ -2,8 +2,8 @@
 from __future__ import annotations
 
 import pytest
-from maverick.tools import Tool
-from maverick.tools.decorator import clear_registered, registered_tools, tool
+from lightwork.tools import Tool
+from lightwork.tools.decorator import clear_registered, registered_tools, tool
 
 
 @pytest.fixture(autouse=True)

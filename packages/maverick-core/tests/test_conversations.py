@@ -9,7 +9,7 @@ from __future__ import annotations
 
 import time
 
-from maverick.world_model import SCHEMA_VERSION, WorldModel
+from lightwork.world_model import SCHEMA_VERSION, WorldModel
 
 
 def test_get_or_create_is_idempotent(tmp_path):

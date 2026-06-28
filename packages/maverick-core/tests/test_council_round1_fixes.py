@@ -17,9 +17,9 @@ import pytest
 # genuine crash (retryable) and 'blocked' for a deliberate stop (terminal). ---
 
 def test_worker_marks_crashed_goal_as_failed_job(tmp_path, monkeypatch):
-    import maverick.runner as runner
-    from maverick.job_queue import JobQueue
-    from maverick.worker import Worker
+    import lightwork.runner as runner
+    from lightwork.job_queue import JobQueue
+    from lightwork.worker import Worker
 
     monkeypatch.setattr(runner, "run_goal_in_thread", lambda gid: "error")
     q = JobQueue(db_path=tmp_path / "jobs.db")
@@ -31,9 +31,9 @@ def test_worker_marks_crashed_goal_as_failed_job(tmp_path, monkeypatch):
 
 
 def test_worker_does_not_retry_deliberately_blocked_goal(tmp_path, monkeypatch):
-    import maverick.runner as runner
-    from maverick.job_queue import JobQueue
-    from maverick.worker import Worker
+    import lightwork.runner as runner
+    from lightwork.job_queue import JobQueue
+    from lightwork.worker import Worker
 
     # 'blocked' = budget cap / killswitch / awaiting user -- a deliberate stop.
     monkeypatch.setattr(runner, "run_goal_in_thread", lambda gid: "blocked")
@@ -46,9 +46,9 @@ def test_worker_does_not_retry_deliberately_blocked_goal(tmp_path, monkeypatch):
 
 
 def test_worker_retries_when_goal_could_not_start(tmp_path, monkeypatch):
-    import maverick.runner as runner
-    from maverick.job_queue import JobQueue
-    from maverick.worker import Worker
+    import lightwork.runner as runner
+    from lightwork.job_queue import JobQueue
+    from lightwork.worker import Worker
 
     monkeypatch.setattr(runner, "run_goal_in_thread", lambda gid: None)
     q = JobQueue(db_path=tmp_path / "jobs.db")
@@ -60,9 +60,9 @@ def test_worker_retries_when_goal_could_not_start(tmp_path, monkeypatch):
 
 
 def test_worker_completes_when_goal_done(tmp_path, monkeypatch):
-    import maverick.runner as runner
-    from maverick.job_queue import JobQueue
-    from maverick.worker import Worker
+    import lightwork.runner as runner
+    from lightwork.job_queue import JobQueue
+    from lightwork.worker import Worker
 
     monkeypatch.setattr(runner, "run_goal_in_thread", lambda gid: "done")
     q = JobQueue(db_path=tmp_path / "jobs.db")
@@ -77,7 +77,7 @@ def test_worker_completes_when_goal_done(tmp_path, monkeypatch):
 def test_runner_refuses_when_no_concurrency_slot(monkeypatch):
     import threading
 
-    import maverick.runner as runner
+    import lightwork.runner as runner
 
     drained = threading.BoundedSemaphore(1)
     drained.acquire()  # 0 permits left
@@ -90,7 +90,7 @@ def test_runner_refuses_when_no_concurrency_slot(monkeypatch):
 # --- SEC-3: the local shell backend must scrub secrets, not just 5 names ---
 
 def test_scrub_env_strips_secrets_keeps_benign():
-    from maverick.sandbox.local import scrub_env
+    from lightwork.sandbox.local import scrub_env
 
     src = {
         "PATH": "/usr/bin",
@@ -118,12 +118,12 @@ def test_scrub_env_strips_secrets_keeps_benign():
      "0.0.0.0", "224.0.0.1", "::1"],
 )
 def test_is_private_ip_blocks_unsafe_ranges(host):
-    from maverick.tools.http_fetch import _is_private_ip
+    from lightwork.tools.http_fetch import _is_private_ip
     assert _is_private_ip(host) is True
 
 
 def test_is_private_ip_allows_public_literal():
-    from maverick.tools.http_fetch import _is_private_ip
+    from lightwork.tools.http_fetch import _is_private_ip
     # Literal public IP -> resolves to itself, no DNS needed.
     assert _is_private_ip("93.184.216.34") is False
 
@@ -133,9 +133,9 @@ def test_is_private_ip_allows_public_literal():
 def test_run_goal_scans_initial_goal_text(tmp_path, monkeypatch):
     import asyncio
 
-    import maverick.orchestrator as orch
-    from maverick.budget import Budget
-    from maverick.world_model import WorldModel
+    import lightwork.orchestrator as orch
+    from lightwork.budget import Budget
+    from lightwork.world_model import WorldModel
 
     class _Verdict:
         allowed = False
@@ -161,10 +161,10 @@ def test_run_goal_scans_initial_goal_text(tmp_path, monkeypatch):
 def test_run_goal_rescans_routed_description_before_agent_brief(tmp_path, monkeypatch):
     import asyncio
 
-    import maverick.long_context_router as lcr
-    import maverick.orchestrator as orch
-    from maverick.budget import Budget
-    from maverick.world_model import WorldModel
+    import lightwork.long_context_router as lcr
+    import lightwork.orchestrator as orch
+    from lightwork.budget import Budget
+    from lightwork.world_model import WorldModel
 
     class _Shield:
         def __init__(self):
@@ -208,7 +208,7 @@ def test_run_goal_rescans_routed_description_before_agent_brief(tmp_path, monkey
 # --- REL-8: the LLM cache must not evict the row it just stored ---
 
 def test_llm_cache_keeps_just_stored_entry(tmp_path):
-    from maverick.cache.llm import LLMCache
+    from lightwork.cache.llm import LLMCache
 
     c = LLMCache(tmp_path / "c.db", max_rows=3)
     for i in range(3):
@@ -223,7 +223,7 @@ def test_llm_cache_keeps_just_stored_entry(tmp_path):
 # --- REL-13: provider_health must cap distinct keys ---
 
 def test_provider_health_caps_keys():
-    from maverick.provider_health import ProviderHealth
+    from lightwork.provider_health import ProviderHealth
 
     ph = ProviderHealth()
     ph._MAX_KEYS = 5
@@ -235,7 +235,7 @@ def test_provider_health_caps_keys():
 # --- REL-6: docker timeout cleanup must not mask the TIMEOUT result ---
 
 def test_docker_timeout_cleanup_is_guarded(monkeypatch):
-    from maverick.sandbox.docker import DockerBackend
+    from lightwork.sandbox.docker import DockerBackend
 
     b = DockerBackend.__new__(DockerBackend)
     b.workdir = pathlib.Path(".")
@@ -276,12 +276,12 @@ def test_audit_log_signing_roundtrip_and_tamper(tmp_path, monkeypatch):
 
     if not _crypto_works():
         pytest.skip("cryptography backend unavailable")
-    import maverick.audit.signing as signing
-    from maverick.audit import verify_chain
-    from maverick.audit.events import AuditEvent
-    from maverick.audit.writer import AuditLog
+    import lightwork.audit.signing as signing
+    from lightwork.audit import verify_chain
+    from lightwork.audit.events import AuditEvent
+    from lightwork.audit.writer import AuditLog
 
-    # Keep generated keys out of the real ~/.maverick.
+    # Keep generated keys out of the real ~/.lightwork.
     monkeypatch.setattr(signing, "KEY_DIR", tmp_path / "keys")
     adir = tmp_path / "audit"
     alog = AuditLog(adir, sign=True)
@@ -305,8 +305,8 @@ def test_audit_log_signing_roundtrip_and_tamper(tmp_path, monkeypatch):
 def test_audit_log_unsigned_by_default(tmp_path):
     import json
 
-    from maverick.audit.events import AuditEvent
-    from maverick.audit.writer import AuditLog
+    from lightwork.audit.events import AuditEvent
+    from lightwork.audit.writer import AuditLog
 
     adir = tmp_path / "audit"
     alog = AuditLog(adir, sign=False)
@@ -318,7 +318,7 @@ def test_audit_log_unsigned_by_default(tmp_path):
 # --- SEC-7: dashboard serves loopback-only when no token is configured ---
 
 def test_dashboard_loopback_helper():
-    app = pytest.importorskip("maverick_dashboard.app")
+    app = pytest.importorskip("lightwork_dashboard.app")
     f = app._is_loopback_client
     assert f("127.0.0.1") is True
     assert f("::1") is True

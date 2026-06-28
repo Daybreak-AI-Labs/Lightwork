@@ -6,12 +6,12 @@ from fastapi.testclient import TestClient
 
 
 def _client():
-    from maverick_dashboard.app import app
+    from lightwork_dashboard.app import app
     return TestClient(app)
 
 
 def _reset_rate_limit():
-    from maverick_dashboard import app as dash_app
+    from lightwork_dashboard import app as dash_app
     with dash_app._goal_rl_lock:
         dash_app._goal_times.clear()
 
@@ -20,10 +20,10 @@ def _reset_rate_limit():
 
 def test_panel_has_horizontal_overflow(monkeypatch, tmp_path):
     """Wide tables scroll within the panel instead of breaking layout on mobile."""
-    from maverick import world_model
+    from lightwork import world_model
     monkeypatch.setattr(world_model, "DEFAULT_DB", tmp_path / "world.db")
     monkeypatch.delenv("MAVERICK_DASHBOARD_TOKEN", raising=False)
-    from maverick_dashboard import app as dash_app
+    from lightwork_dashboard import app as dash_app
     dash_app._world_cache.clear()
     r = _client().get("/")
     assert ".panel" in r.text
@@ -44,10 +44,10 @@ def test_panel_has_horizontal_overflow(monkeypatch, tmp_path):
     ("/mcp", "MCP servers · Lightwork"),
 ])
 def test_page_titles_carry_app_name(monkeypatch, tmp_path, path, fragment):
-    from maverick import world_model
+    from lightwork import world_model
     monkeypatch.setattr(world_model, "DEFAULT_DB", tmp_path / "world.db")
     monkeypatch.delenv("MAVERICK_DASHBOARD_TOKEN", raising=False)
-    from maverick_dashboard import app as dash_app
+    from lightwork_dashboard import app as dash_app
     dash_app._world_cache.clear()
     r = _client().get(path)
     assert f"<title>{fragment}</title>" in r.text
@@ -56,14 +56,14 @@ def test_page_titles_carry_app_name(monkeypatch, tmp_path, path, fragment):
 # ---------- goal-creation rate limit ----------
 
 def test_chat_send_rate_limited(monkeypatch, tmp_path):
-    from maverick import world_model
+    from lightwork import world_model
     monkeypatch.setattr(world_model, "DEFAULT_DB", tmp_path / "world.db")
     monkeypatch.delenv("MAVERICK_DASHBOARD_TOKEN", raising=False)
     monkeypatch.setenv("ANTHROPIC_API_KEY", "sk-ant-x")
     monkeypatch.setenv("MAVERICK_DASHBOARD_MAX_GOALS_PER_MIN", "2")
-    from maverick import runner
+    from lightwork import runner
     monkeypatch.setattr(runner, "run_goal_in_thread", lambda *a, **kw: None)
-    from maverick_dashboard import app as dash_app
+    from lightwork_dashboard import app as dash_app
     dash_app._world_cache.clear()
     _reset_rate_limit()
 
@@ -82,14 +82,14 @@ def test_chat_send_rate_limited(monkeypatch, tmp_path):
 
 def test_api_goals_shares_the_same_cap(monkeypatch, tmp_path):
     """The cap is global across /chat/send + /api/v1/goals."""
-    from maverick import world_model
+    from lightwork import world_model
     monkeypatch.setattr(world_model, "DEFAULT_DB", tmp_path / "world.db")
     monkeypatch.delenv("MAVERICK_DASHBOARD_TOKEN", raising=False)
     monkeypatch.setenv("ANTHROPIC_API_KEY", "sk-ant-x")
     monkeypatch.setenv("MAVERICK_DASHBOARD_MAX_GOALS_PER_MIN", "1")
-    from maverick import runner
+    from lightwork import runner
     monkeypatch.setattr(runner, "run_goal_in_thread", lambda *a, **kw: None)
-    from maverick_dashboard import app as dash_app
+    from lightwork_dashboard import app as dash_app
     dash_app._world_cache.clear()
     _reset_rate_limit()
 
@@ -105,12 +105,12 @@ def test_api_goals_shares_the_same_cap(monkeypatch, tmp_path):
 
 
 def test_chat_send_empty_title_rejected(monkeypatch, tmp_path):
-    from maverick import world_model
+    from lightwork import world_model
     monkeypatch.setattr(world_model, "DEFAULT_DB", tmp_path / "world.db")
     monkeypatch.delenv("MAVERICK_DASHBOARD_TOKEN", raising=False)
     monkeypatch.setenv("ANTHROPIC_API_KEY", "sk-ant-x")
     monkeypatch.setenv("MAVERICK_DASHBOARD_MAX_GOALS_PER_MIN", "30")
-    from maverick_dashboard import app as dash_app
+    from lightwork_dashboard import app as dash_app
     dash_app._world_cache.clear()
     _reset_rate_limit()
     r = _client().post("/chat/send", data={"title": "   "},
@@ -120,7 +120,7 @@ def test_chat_send_empty_title_rejected(monkeypatch, tmp_path):
 
 def test_rate_limit_default_is_generous(monkeypatch):
     """Default cap is 30/min; a malformed env value falls back to 30."""
-    from maverick_dashboard import app as dash_app
+    from lightwork_dashboard import app as dash_app
     monkeypatch.delenv("MAVERICK_DASHBOARD_MAX_GOALS_PER_MIN", raising=False)
     assert dash_app._max_goals_per_min() == 30
     monkeypatch.setenv("MAVERICK_DASHBOARD_MAX_GOALS_PER_MIN", "not-a-number")

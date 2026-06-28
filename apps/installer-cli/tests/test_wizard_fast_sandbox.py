@@ -16,7 +16,7 @@ except ModuleNotFoundError:  # Python 3.10
 
 
 def _stub_fast(monkeypatch, tmp_path: Path, *, docker: bool):
-    from maverick_installer import wizard
+    from lightwork_installer import wizard
 
     monkeypatch.setattr(wizard, "CONFIG_DIR", tmp_path / ".maverick")
     monkeypatch.setattr(wizard, "CONFIG_FILE", tmp_path / ".maverick" / "config.toml")

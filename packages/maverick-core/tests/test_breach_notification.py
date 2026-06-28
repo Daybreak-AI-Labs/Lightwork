@@ -1,7 +1,7 @@
 """breach_notification: GDPR Art. 33/34 72h notification timer."""
 from __future__ import annotations
 
-from maverick.tools.breach_notification import breach_notification
+from lightwork.tools.breach_notification import breach_notification
 
 
 def _s(**kw):
@@ -61,7 +61,7 @@ def test_errors():
 
 
 def test_registered():
-    from maverick.tools import base_registry
+    from lightwork.tools import base_registry
 
     class _W:
         pass

@@ -1,13 +1,13 @@
 """Agent compartments: swarm-shared threat ledger + ImmunizingShield (Rung 0)."""
 from __future__ import annotations
 
-from maverick_shield.compartment import (
+from lightwork_shield.compartment import (
     ImmunizingShield,
     ThreatLedger,
     compartments_enabled,
     fingerprint,
 )
-from maverick_shield.guard import ShieldVerdict
+from lightwork_shield.guard import ShieldVerdict
 
 
 class TestFingerprint:

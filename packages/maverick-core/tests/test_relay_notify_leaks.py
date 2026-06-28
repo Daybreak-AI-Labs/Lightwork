@@ -4,8 +4,8 @@ from __future__ import annotations
 import logging
 import sys
 
-from maverick import notifications
-from maverick.relay_reference import Relay, RelayConfig
+from lightwork import notifications
+from lightwork.relay_reference import Relay, RelayConfig
 
 # --- relay: inbound context must not override deliver_to / goal --------------
 
@@ -51,7 +51,7 @@ def test_slack_failure_does_not_log_webhook_url(monkeypatch, caplog):
             raise RuntimeError(f"ConnectError to {url}")
 
     monkeypatch.setitem(sys.modules, "httpx", _FakeHTTPX)
-    with caplog.at_level(logging.WARNING, logger="maverick.notifications"):
+    with caplog.at_level(logging.WARNING, logger="lightwork.notifications"):
         ok = notifications._send_slack("title", "body", secret_url)
     assert ok is False
     blob = " ".join(r.getMessage() for r in caplog.records)

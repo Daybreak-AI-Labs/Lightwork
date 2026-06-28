@@ -1,7 +1,7 @@
 """data_minimization: purpose-limitation / field-allowlist checks."""
 from __future__ import annotations
 
-from maverick.tools.data_minimization import data_minimization
+from lightwork.tools.data_minimization import data_minimization
 
 
 def _c(collected, allowed, required=None, purpose=None):
@@ -51,7 +51,7 @@ def test_errors():
 
 
 def test_registered():
-    from maverick.tools import base_registry
+    from lightwork.tools import base_registry
 
     class _W:
         pass

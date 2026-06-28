@@ -1,7 +1,7 @@
 """migration_cost: provider migration cost calculator."""
 from __future__ import annotations
 
-from maverick.tools.migration_cost import migration_cost
+from lightwork.tools.migration_cost import migration_cost
 
 
 def _compare(**kw):

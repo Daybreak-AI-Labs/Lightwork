@@ -9,7 +9,7 @@ import pytest
 
 def _rows(monkeypatch):
     """Capture _row(marker, label, detail, fix) calls from a check."""
-    import maverick.health as health
+    import lightwork.health as health
     captured = []
     monkeypatch.setattr(health, "_row",
                         lambda marker, label, detail="", fix="": captured.append(
@@ -21,7 +21,7 @@ def test_agent_trust_expiry_horizon_warns(monkeypatch):
     health, captured = _rows(monkeypatch)
     soon = time.time() + 3 * 86400  # 3 days out -> within the 14-day horizon
     monkeypatch.setattr(
-        "maverick.agent_trust.status",
+        "lightwork.agent_trust.status",
         lambda: {"enforced": True, "count": 1, "agents": [
             {"id": "vega", "active": True, "expires_at": soon}]})
     health._check_agent_trust()
@@ -33,7 +33,7 @@ def test_agent_trust_no_warning_when_far_off(monkeypatch):
     health, captured = _rows(monkeypatch)
     far = time.time() + 365 * 86400
     monkeypatch.setattr(
-        "maverick.agent_trust.status",
+        "lightwork.agent_trust.status",
         lambda: {"enforced": True, "count": 1, "agents": [
             {"id": "vega", "active": True, "expires_at": far}]})
     health._check_agent_trust()
@@ -65,9 +65,9 @@ def test_tls_cert_expiry_warns(tmp_path, monkeypatch):
 
     health, captured = _rows(monkeypatch)
     monkeypatch.setattr(
-        "maverick.config.load_config",
+        "lightwork.config.load_config",
         lambda: {"grpc": {"tls": True, "tls_cert": str(cert_path)}})
-    monkeypatch.setattr("maverick.grpc_tls.tls_enabled",
+    monkeypatch.setattr("lightwork.grpc_tls.tls_enabled",
                         lambda section, cfg=None: section == "grpc")
     health._check_tls_cert_expiry()
     msgs = [(label, d) for (label, d) in captured]

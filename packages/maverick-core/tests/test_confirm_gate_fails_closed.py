@@ -11,7 +11,7 @@ from __future__ import annotations
 import pathlib
 
 import pytest
-from maverick.tools import as_bool
+from lightwork.tools import as_bool
 
 _TOOLS_DIR = pathlib.Path(__file__).resolve().parents[1] / "maverick" / "tools"
 
@@ -64,7 +64,7 @@ def test_no_tool_anywhere_uses_unsafe_confirm_gate():
 # ---- end-to-end on a dependency-free tool: stringy confirm -> dry run ----
 def test_cloudflare_stringy_confirm_dry_runs(monkeypatch):
     monkeypatch.setenv("CLOUDFLARE_API_TOKEN", "t")
-    from maverick.tools.cloudflare_tool import cloudflare_tool
+    from lightwork.tools.cloudflare_tool import cloudflare_tool
     out = cloudflare_tool().fn({
         "op": "dns_create", "zone_id": "z", "type": "A",
         "name": "x.example.com", "content": "1.2.3.4", "confirm": "false",

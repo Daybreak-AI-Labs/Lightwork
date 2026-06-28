@@ -3,7 +3,7 @@ from __future__ import annotations
 
 import json
 
-from maverick.tools.observation_channel import observation_channel
+from lightwork.tools.observation_channel import observation_channel
 
 
 def _run(**kw):

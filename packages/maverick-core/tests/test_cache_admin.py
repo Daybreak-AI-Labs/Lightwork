@@ -2,8 +2,8 @@
 from __future__ import annotations
 
 import pytest
-from maverick.cache import tool as tool_cache
-from maverick.tools.cache_admin import cache_admin
+from lightwork.cache import tool as tool_cache
+from lightwork.tools.cache_admin import cache_admin
 
 
 class _CacheableTool:
@@ -61,7 +61,7 @@ def test_tool_unknown_op():
 
 
 def test_registered():
-    from maverick.tools import base_registry
+    from lightwork.tools import base_registry
 
     class _W:
         pass

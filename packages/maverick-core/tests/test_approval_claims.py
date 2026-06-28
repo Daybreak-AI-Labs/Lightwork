@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 import pytest
-from maverick.world_model import open_world
+from lightwork.world_model import open_world
 
 
 def _world(tmp_path):
@@ -74,7 +74,7 @@ def test_migration_on_existing_v12_db(tmp_path):
     """A pre-claiming DB upgrades in place: v13 columns appear, rows intact."""
     import sqlite3
 
-    import maverick.world_model as wm
+    import lightwork.world_model as wm
     db = tmp_path / "old.db"
     w = open_world(db)
     aid = _park(w)

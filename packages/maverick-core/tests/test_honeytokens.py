@@ -9,7 +9,7 @@ import re
 import stat
 
 import pytest
-from maverick.safety import honeytokens as ht
+from lightwork.safety import honeytokens as ht
 
 # Assembled from parts -- never a full key-shaped literal in source.
 _AWS_RE = re.compile("AK" + "IA" + r"[A-Z0-9]{16}")

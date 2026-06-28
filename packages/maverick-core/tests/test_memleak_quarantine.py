@@ -1,7 +1,7 @@
 """memleak_quarantine: RSS leak detection via least-squares slope + R^2."""
 from __future__ import annotations
 
-from maverick.tools.memleak_quarantine import memleak_quarantine
+from lightwork.tools.memleak_quarantine import memleak_quarantine
 
 
 def _scan(**kw):

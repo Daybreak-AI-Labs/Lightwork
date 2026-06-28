@@ -17,7 +17,7 @@ import sys
 from pathlib import Path
 
 # Repo-root import of the kernel (installed editable); benchmarks/ is flat.
-from maverick.skills import Skill, _relevant_skills_lexical  # noqa: E402
+from lightwork.skills import Skill, _relevant_skills_lexical  # noqa: E402
 
 # Each class = one stored skill (its triggers); queries are held-out paraphrases.
 CLASSES = {

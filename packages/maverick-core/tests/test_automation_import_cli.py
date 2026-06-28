@@ -4,7 +4,7 @@ from __future__ import annotations
 import json
 
 from click.testing import CliRunner
-from maverick.cli import main
+from lightwork.cli import main
 
 
 def _run(args, env=None):

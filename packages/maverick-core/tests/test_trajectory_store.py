@@ -1,7 +1,7 @@
 """Tests for governed trajectory capture (Phase 0 data foundation)."""
 from __future__ import annotations
 
-from maverick.trajectory_store import (
+from lightwork.trajectory_store import (
     TrajectoryStep,
     TrajectoryStore,
     capture_step,

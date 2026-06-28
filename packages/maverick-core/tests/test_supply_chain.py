@@ -13,7 +13,7 @@ from datetime import datetime, timezone
 from types import SimpleNamespace
 
 import pytest
-from maverick import supply_chain as sc
+from lightwork import supply_chain as sc
 
 
 def _dist(name: str, version: str):
@@ -117,7 +117,7 @@ def test_write_pins_atomic_and_0600(monkeypatch, tmp_path):
 
 
 def test_default_path_under_data_dir(monkeypatch, tmp_path):
-    # conftest pins HOME to tmp_path, so data_dir() == tmp_path/.maverick.
+    # conftest pins HOME to tmp_path, so data_dir() == tmp_path/.lightwork.
     _fake_env(monkeypatch, [_dist("alpha", "1.0")])
     path = sc.write_pins()
     assert path == tmp_path / ".maverick" / "supply_chain_pins.json"
@@ -137,7 +137,7 @@ def test_check_or_warn_env_enables_and_warns_on_fail(monkeypatch, tmp_path, capl
     _fake_env(monkeypatch, [_dist("alpha", "6.6.6")])
     monkeypatch.setenv("MAVERICK_SUPPLY_CHAIN_PINNING", "1")
 
-    with caplog.at_level(logging.WARNING, logger="maverick.supply_chain"):
+    with caplog.at_level(logging.WARNING, logger="lightwork.supply_chain"):
         report = sc.check_or_warn(pins)
     assert report is not None and report.ok is False
     assert any("FAILED" in r.message for r in caplog.records)
@@ -148,7 +148,7 @@ def test_check_or_warn_pass_returns_report_without_warning(monkeypatch, tmp_path
     pins = sc.write_pins(tmp_path / "pins.json")
     monkeypatch.setenv("MAVERICK_SUPPLY_CHAIN_PINNING", "true")
 
-    with caplog.at_level(logging.WARNING, logger="maverick.supply_chain"):
+    with caplog.at_level(logging.WARNING, logger="lightwork.supply_chain"):
         report = sc.check_or_warn(pins)
     assert report is not None and report.ok is True
     assert not any("FAILED" in r.message for r in caplog.records)
@@ -163,7 +163,7 @@ def test_check_or_warn_never_raises_on_corrupt_pins(monkeypatch, tmp_path, caplo
     monkeypatch.setenv("MAVERICK_SUPPLY_CHAIN_PINNING", "1")
     bad = tmp_path / "pins.json"
     bad.write_text("{ not json")
-    with caplog.at_level(logging.WARNING, logger="maverick.supply_chain"):
+    with caplog.at_level(logging.WARNING, logger="lightwork.supply_chain"):
         assert sc.check_or_warn(bad) is None  # fail-open, logged
     assert any("skipped" in r.message for r in caplog.records)
 

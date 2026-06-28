@@ -3,9 +3,9 @@ a learned guardrail flags as causally harmful -- and stays a no-op when off.
 """
 from __future__ import annotations
 
-from maverick import negative_knowledge as nk
-from maverick.agent import Agent
-from maverick.data_engine import FailureClass
+from lightwork import negative_knowledge as nk
+from lightwork.agent import Agent
+from lightwork.data_engine import FailureClass
 
 
 class _Ctx:
@@ -28,7 +28,7 @@ def _registry_flagging(tmp_path, action):
 
 def test_guardrail_holds_a_flagged_action(tmp_path, monkeypatch):
     monkeypatch.setenv("MAVERICK_DATA_ENGINE", "1")
-    monkeypatch.setattr("maverick.negative_knowledge.shared",
+    monkeypatch.setattr("lightwork.negative_knowledge.shared",
                         lambda: _registry_flagging(tmp_path, "shell"))
     held = Agent._guardrail_denial(_StubAgent(), "shell")
     assert held is not None and "guardrail" in held.lower()
@@ -38,8 +38,8 @@ def test_guardrail_holds_a_flagged_action(tmp_path, monkeypatch):
 
 def test_guardrail_is_noop_when_data_engine_off(tmp_path, monkeypatch):
     monkeypatch.delenv("MAVERICK_DATA_ENGINE", raising=False)
-    monkeypatch.setattr("maverick.config.get_data_engine", lambda: {"enable": False})
-    monkeypatch.setattr("maverick.negative_knowledge.shared",
+    monkeypatch.setattr("lightwork.config.get_data_engine", lambda: {"enable": False})
+    monkeypatch.setattr("lightwork.negative_knowledge.shared",
                         lambda: _registry_flagging(tmp_path, "shell"))
     # even a flagged action runs when the engine is off (fail-open default)
     assert Agent._guardrail_denial(_StubAgent(), "shell") is None

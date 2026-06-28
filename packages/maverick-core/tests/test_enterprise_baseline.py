@@ -14,7 +14,7 @@ from pathlib import Path
 
 import pytest
 
-# packages/maverick-core/tests/<this> -> repo root is parents[3].
+# packages/lightwork-core/tests/<this> -> repo root is parents[3].
 _DOC = Path(__file__).resolve().parents[3] / "docs" / "security-hardening.md"
 
 
@@ -49,13 +49,13 @@ def test_documented_enterprise_baseline_enables_every_control(tmp_path, monkeypa
     (cfg_dir / "config.toml").write_text(_baseline_toml(), encoding="utf-8")
 
     # Each reader resolves the control independently from the same config file.
-    from maverick.audit.writer import _resolve_signing
-    from maverick.capability import capability_enforced
-    from maverick.crypto_at_rest import at_rest_enabled
-    from maverick.enterprise import enterprise_enabled
-    from maverick.oidc import oidc_enabled
-    from maverick.paths import tenant_by_user_enabled
-    from maverick.quotas import quotas_enforced
+    from lightwork.audit.writer import _resolve_signing
+    from lightwork.capability import capability_enforced
+    from lightwork.crypto_at_rest import at_rest_enabled
+    from lightwork.enterprise import enterprise_enabled
+    from lightwork.oidc import oidc_enabled
+    from lightwork.paths import tenant_by_user_enabled
+    from lightwork.quotas import quotas_enforced
 
     assert enterprise_enabled() is True          # [enterprise] mode
     assert capability_enforced() is True         # [capabilities] enforce

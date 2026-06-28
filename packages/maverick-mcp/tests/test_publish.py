@@ -1,8 +1,8 @@
 """MCP server publishing manifest: build + validate + tools summary."""
 from __future__ import annotations
 
-from maverick_mcp import publish
-from maverick_mcp.server import SERVER_VERSION
+from lightwork_mcp import publish
+from lightwork_mcp.server import SERVER_VERSION
 
 
 def test_manifest_name_is_reverse_dns():
@@ -18,7 +18,7 @@ def test_build_manifest_shape():
     assert m["$schema"] == publish.SCHEMA_URL
     assert m["repository"]["source"] == "github"
     pkg = m["packages"][0]
-    assert pkg["identifier"] == "maverick-mcp-server"
+    assert pkg["identifier"] == "lightwork-mcp-server"
     assert pkg["registryType"] == "pypi"
     assert pkg["transport"]["type"] == "stdio"
     assert pkg["version"] == m["version"]

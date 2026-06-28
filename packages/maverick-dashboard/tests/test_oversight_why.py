@@ -12,7 +12,7 @@ from fastapi.testclient import TestClient
 
 
 def _client():
-    from maverick_dashboard.app import app
+    from lightwork_dashboard.app import app
     return TestClient(app)
 
 
@@ -21,12 +21,12 @@ def _isolate(monkeypatch, tmp_path):
     monkeypatch.setenv("MAVERICK_HOME", str(tmp_path))
     monkeypatch.delenv("MAVERICK_DASHBOARD_TOKEN", raising=False)
     monkeypatch.delenv("MAVERICK_TENANT", raising=False)
-    from maverick import world_model
+    from lightwork import world_model
     monkeypatch.setattr(world_model, "DEFAULT_DB", tmp_path / "world.db")
 
 
 def _seed_goal_with_chain(tmp_path):
-    from maverick.world_model import WorldModel
+    from lightwork.world_model import WorldModel
     w = WorldModel(tmp_path / "world.db")
     gid = w.create_goal("Refactor billing module", "split the invoice service")
     w.append_event(gid, "orchestrator", "plan", "decompose into 3 subtasks")
@@ -57,7 +57,7 @@ def test_why_returns_status_cost_summary_and_chain(monkeypatch, tmp_path):
 
 def test_why_returns_most_recent_events_for_long_running_goal(monkeypatch, tmp_path):
     _isolate(monkeypatch, tmp_path)
-    from maverick.world_model import WorldModel
+    from lightwork.world_model import WorldModel
 
     w = WorldModel(tmp_path / "world.db")
     gid = w.create_goal("long run", "many events")
@@ -79,7 +79,7 @@ def test_why_404_for_unknown_goal(monkeypatch, tmp_path):
 
 def test_why_empty_chain_is_graceful(monkeypatch, tmp_path):
     _isolate(monkeypatch, tmp_path)
-    from maverick.world_model import WorldModel
+    from lightwork.world_model import WorldModel
     w = WorldModel(tmp_path / "world.db")
     gid = w.create_goal("fresh goal", "no events yet")
     d = _client().get(f"/api/v1/oversight/why/{gid}").json()

@@ -9,7 +9,7 @@ from __future__ import annotations
 
 import pytest
 from fastapi.testclient import TestClient
-from maverick_dashboard.app import app
+from lightwork_dashboard.app import app
 
 client = TestClient(app, headers={"Origin": "http://testserver"})
 
@@ -22,7 +22,7 @@ def _isolated(tmp_path, monkeypatch):
     # files), which ignore MAVERICK_HOME -- so without redirecting them, a test
     # that sets a global/tenant role (e.g. user:alice -> viewer) would leak into
     # the shared session home and make later suites see that principal demoted.
-    import maverick_dashboard.rbac as rbac
+    import lightwork_dashboard.rbac as rbac
     roles_dir = tmp_path / "home" / ".maverick"
     monkeypatch.setattr(rbac, "store_path", lambda: roles_dir / "dashboard-users.json")
     monkeypatch.setattr(
@@ -86,7 +86,7 @@ def test_delete_removes_tenant():
 
 def test_admin_required_when_caller_is_viewer(monkeypatch):
     """A non-admin authenticated caller is forbidden (403)."""
-    import maverick_dashboard.auth as auth
+    import lightwork_dashboard.auth as auth
     # Simulate an authenticated, non-admin principal: has_permission consults
     # the caller's role, and "view" lacks "admin".
     monkeypatch.setattr(auth, "caller_principal", lambda request: "user:viewer")
@@ -98,8 +98,8 @@ def test_admin_required_when_caller_is_viewer(monkeypatch):
 
 def test_tenant_admin_cannot_manage_other_tenant_roles(monkeypatch):
     """Tenant-scoped admin must not satisfy global tenant-admin APIs."""
-    from maverick.paths import reset_tenant, set_tenant
-    from maverick_dashboard import auth, rbac
+    from lightwork.paths import reset_tenant, set_tenant
+    from lightwork_dashboard import auth, rbac
 
     assert client.post("/api/v1/admin/tenants", json={"id": "acme"}).status_code == 201
     assert client.post("/api/v1/admin/tenants", json={"id": "globex"}).status_code == 201

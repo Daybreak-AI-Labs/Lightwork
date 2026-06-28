@@ -1,7 +1,7 @@
 """privacy_budget: stateless cumulative epsilon calculator."""
 from __future__ import annotations
 
-from maverick.tools.privacy_budget import privacy_budget
+from lightwork.tools.privacy_budget import privacy_budget
 
 
 def _check(**kw):
@@ -45,7 +45,7 @@ def test_errors():
 
 
 def test_registered():
-    from maverick.tools import base_registry
+    from lightwork.tools import base_registry
 
     class _W:
         pass

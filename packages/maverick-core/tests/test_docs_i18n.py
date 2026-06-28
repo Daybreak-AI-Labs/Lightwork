@@ -4,7 +4,7 @@ from __future__ import annotations
 from pathlib import Path
 
 import pytest
-from maverick import docs_i18n
+from lightwork import docs_i18n
 
 _DOC = """# Title
 

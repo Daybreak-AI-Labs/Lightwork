@@ -1,7 +1,7 @@
 """consent_check: consent-record validity evaluation."""
 from __future__ import annotations
 
-from maverick.tools.consent_check import consent_check
+from lightwork.tools.consent_check import consent_check
 
 
 def _c(consents, now=None, purpose=None):
@@ -60,7 +60,7 @@ def test_errors():
 
 
 def test_registered():
-    from maverick.tools import base_registry
+    from lightwork.tools import base_registry
 
     class _W:
         pass

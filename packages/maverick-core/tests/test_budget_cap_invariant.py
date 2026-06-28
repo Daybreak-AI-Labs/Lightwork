@@ -10,7 +10,7 @@ pairs: usage over a cap MUST raise, usage under it MUST NOT.
 from __future__ import annotations
 
 import pytest
-from maverick.budget import Budget, BudgetExceeded
+from lightwork.budget import Budget, BudgetExceeded
 
 
 def _budget(**caps) -> Budget:

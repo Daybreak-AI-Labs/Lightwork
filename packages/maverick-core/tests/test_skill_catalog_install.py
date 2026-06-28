@@ -5,7 +5,7 @@ import hashlib
 from pathlib import Path
 
 import pytest
-from maverick import catalog, skills
+from lightwork import catalog, skills
 
 _BODY = """---
 name: summarize-url

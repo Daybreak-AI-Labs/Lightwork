@@ -6,9 +6,9 @@ import types
 from unittest.mock import MagicMock
 
 import pytest
-from maverick.capability import Capability
-from maverick.grpc_api.service import GoalService
-from maverick.grpc_dispatcher import GrpcDispatcher, configured_target, install_from_config
+from lightwork.capability import Capability
+from lightwork.grpc_api.service import GoalService
+from lightwork.grpc_dispatcher import GrpcDispatcher, configured_target, install_from_config
 
 
 class _FakeWorld:
@@ -117,7 +117,7 @@ def test_dispatcher_default_port_and_validation():
 # ---- config install ----
 
 def test_install_from_config(monkeypatch):
-    import maverick.runner as runner_mod
+    import lightwork.runner as runner_mod
     monkeypatch.setenv("MAVERICK_GRPC_DISPATCH_TARGET", "w:50051")
     installed = {}
     monkeypatch.setattr(runner_mod, "set_dispatcher",
@@ -125,7 +125,7 @@ def test_install_from_config(monkeypatch):
     assert install_from_config() is True
     assert isinstance(installed["d"], GrpcDispatcher)
     monkeypatch.delenv("MAVERICK_GRPC_DISPATCH_TARGET")
-    import maverick.config as config_mod
+    import lightwork.config as config_mod
     monkeypatch.setattr(config_mod, "load_config", dict)
     assert configured_target() == ""
     assert install_from_config() is False

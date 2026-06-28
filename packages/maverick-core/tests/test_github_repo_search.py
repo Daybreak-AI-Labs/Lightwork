@@ -1,7 +1,7 @@
 """Tests for the github_repo_search tool. No network calls."""
 from __future__ import annotations
 
-from maverick.tools import github_repo_search as ghs
+from lightwork.tools import github_repo_search as ghs
 
 
 def test_missing_query_errors():
@@ -103,7 +103,7 @@ def test_run_uses_token_header(monkeypatch):
 import http.server  # noqa: E402
 import threading  # noqa: E402
 
-from maverick.tools import github_repo_search as _ghs_redir  # noqa: E402
+from lightwork.tools import github_repo_search as _ghs_redir  # noqa: E402
 
 
 class _GhsRecordingHandler(http.server.BaseHTTPRequestHandler):

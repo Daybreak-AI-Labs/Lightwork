@@ -7,7 +7,7 @@ tmp_path stores — no LLM, no real ~/.maverick state.
 from __future__ import annotations
 
 import pytest
-from maverick import dreaming, reflexion
+from lightwork import dreaming, reflexion
 
 
 class _Profile:
@@ -408,7 +408,7 @@ class TestBenchmarkCanary:
         assert not list(store.glob("*.md"))  # nothing learned on red
 
     def test_no_history_reads_as_green(self, monkeypatch):
-        import maverick.continuous_benchmark as cb
+        import lightwork.continuous_benchmark as cb
         monkeypatch.setattr(cb, "load_history", lambda p: [])
         assert dreaming.benchmark_regressed() is False
 
@@ -494,7 +494,7 @@ class TestRehearsal:
         self, tmp_path, monkeypatch,
     ):
         # The interlock: a drifted judge must not grade practice runs.
-        monkeypatch.setattr("maverick.calibration.learning_frozen",
+        monkeypatch.setattr("lightwork.calibration.learning_frozen",
                             lambda **kw: True)
         path = tmp_path / "rehearsals.ndjson"
         dreaming.save_rehearsals(
@@ -760,7 +760,7 @@ class TestLearningGovernance:
             rows.append({"kind": kind, **kw})
             return True
 
-        import maverick.audit as audit_pkg
+        import lightwork.audit as audit_pkg
         monkeypatch.setattr(audit_pkg, "record", _capture)
         rpath = tmp_path / "reflexions.ndjson"
         for goal in ("reconcile the quarterly ledger totals",
@@ -793,7 +793,7 @@ class TestLearningGovernance:
             rows.append({"kind": kind, **kw})
             return True
 
-        import maverick.audit as audit_pkg
+        import lightwork.audit as audit_pkg
         monkeypatch.setattr(audit_pkg, "record", _capture)
         dreaming.dream_cycle(
             None, profiles=PROFILES, reflexion_path=tmp_path / "r.ndjson",

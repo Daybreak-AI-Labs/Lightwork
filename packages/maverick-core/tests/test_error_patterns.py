@@ -1,7 +1,7 @@
 """error_patterns: normalize + cluster error lines by signature."""
 from __future__ import annotations
 
-from maverick.tools.error_patterns import error_patterns
+from lightwork.tools.error_patterns import error_patterns
 
 
 def test_clusters_near_identical_errors():
@@ -46,7 +46,7 @@ def test_errors_and_empty():
 
 
 def test_registered():
-    from maverick.tools import base_registry
+    from lightwork.tools import base_registry
 
     class _W:
         pass

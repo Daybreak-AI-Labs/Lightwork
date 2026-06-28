@@ -1,7 +1,7 @@
 """risk_tier: operational LOW/MEDIUM/HIGH goal-risk scoring."""
 from __future__ import annotations
 
-from maverick.tools.risk_tier import risk_tier
+from lightwork.tools.risk_tier import risk_tier
 
 
 def _s(signals, spend_usd=None):
@@ -62,7 +62,7 @@ def test_errors():
 
 
 def test_registered():
-    from maverick.tools import base_registry
+    from lightwork.tools import base_registry
 
     class _W:
         pass

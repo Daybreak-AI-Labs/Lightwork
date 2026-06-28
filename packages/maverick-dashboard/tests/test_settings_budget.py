@@ -7,18 +7,18 @@ _ORIGIN = {"origin": "http://testserver"}
 
 
 def _client():
-    from maverick_dashboard.app import app
+    from lightwork_dashboard.app import app
     return TestClient(app)
 
 
 def _prep(monkeypatch, tmp_path):
-    from maverick import world_model
+    from lightwork import world_model
     monkeypatch.setattr(world_model, "DEFAULT_DB", tmp_path / "world.db")
     monkeypatch.delenv("MAVERICK_DASHBOARD_TOKEN", raising=False)
     monkeypatch.delenv("MAVERICK_BUDGET_DOLLARS", raising=False)
-    import maverick.runtime_overrides as ro
+    import lightwork.runtime_overrides as ro
     monkeypatch.setattr(ro, "OVERRIDES_PATH", tmp_path / "runtime-overrides.toml")
-    from maverick_dashboard import app as dash_app
+    from lightwork_dashboard import app as dash_app
     dash_app._world_cache.clear()
 
 
@@ -37,10 +37,10 @@ def test_set_and_clear_budget(monkeypatch, tmp_path):
                headers=_ORIGIN, follow_redirects=False)
     assert r.status_code == 303
 
-    from maverick.runtime_overrides import budget_override
+    from lightwork.runtime_overrides import budget_override
     assert budget_override() == 1.5
     # the cap flows through budget resolution
-    from maverick.budget import budget_from_config
+    from lightwork.budget import budget_from_config
     assert budget_from_config().max_dollars == 1.5
 
     r = c.post("/settings/budget", data={"max_dollars": ""},

@@ -3,7 +3,7 @@ from __future__ import annotations
 
 from types import SimpleNamespace
 
-from maverick import workforce_value
+from lightwork import workforce_value
 
 
 class _World:
@@ -77,7 +77,7 @@ class TestEconomics:
 
 class TestCompounding:
     def test_improvement_from_hindsight_ledger(self, tmp_path, monkeypatch):
-        import maverick.dreaming as dreaming
+        import lightwork.dreaming as dreaming
         ledger = tmp_path / "hindsight.ndjson"
         ledger.write_text(
             '{"ts": 1000.0, "covered_now": 3}\n'
@@ -120,7 +120,7 @@ class TestRender:
 
 class TestGovernance:
     def test_governance_does_not_claim_unsigned_audit_chain(self, tmp_path, monkeypatch):
-        from maverick.audit import signing
+        from lightwork.audit import signing
 
         monkeypatch.setenv("MAVERICK_HOME", str(tmp_path))
         monkeypatch.setattr(signing, "_have_crypto", lambda: True)
@@ -143,7 +143,7 @@ class TestGovernance:
         )
 
     def test_governance_claims_chain_only_after_verifier_passes(self, tmp_path, monkeypatch):
-        from maverick.audit import signing
+        from lightwork.audit import signing
 
         monkeypatch.setenv("MAVERICK_HOME", str(tmp_path))
         monkeypatch.setattr(signing, "_have_crypto", lambda: True)

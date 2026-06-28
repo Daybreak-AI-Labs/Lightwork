@@ -3,7 +3,7 @@ from __future__ import annotations
 
 import json
 
-from maverick_evolve.rehearsal_bridge import cases_from_rehearsals
+from lightwork_evolve.rehearsal_bridge import cases_from_rehearsals
 
 
 def _write_queue(path, rows):

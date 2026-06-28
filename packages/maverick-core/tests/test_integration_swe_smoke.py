@@ -12,7 +12,7 @@ smoke run actually surfaced:
     `[tokens ...]` metadata
   - `outcome="success"` reported when `predicted_patch` is empty
 
-Run with: `pytest packages/maverick-core/tests/test_integration_swe_smoke.py`
+Run with: `pytest packages/lightwork-core/tests/test_integration_swe_smoke.py`
 
 The LLM is mocked; no network calls. The recorded response mirrors what
 Sonnet 4.6 / Opus 4.7 actually emitted for psf__requests-1142 in our
@@ -89,7 +89,7 @@ def _load_swe_bench():
 
 
 class _MockLLMResponse:
-    """Mimics the maverick.llm.LLMResponse contract."""
+    """Mimics the lightwork.llm.LLMResponse contract."""
 
     def __init__(self, text: str, in_tok: int = 1000, out_tok: int = 200):
         self.text = text
@@ -104,7 +104,7 @@ class _MockLLMResponse:
 
 
 class _MockLLM:
-    """Drop-in for maverick.llm.LLM. The agent's first response is the
+    """Drop-in for lightwork.llm.LLM. The agent's first response is the
     recorded FINAL; subsequent calls (verifier, skill distill) return
     a generic FINAL too so the loop terminates cleanly."""
 

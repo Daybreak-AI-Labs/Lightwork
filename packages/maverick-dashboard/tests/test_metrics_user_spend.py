@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import pytest
 from fastapi.testclient import TestClient
-from maverick_dashboard.app import app
+from lightwork_dashboard.app import app
 
 client = TestClient(app)
 
@@ -18,7 +18,7 @@ def _isolated(tmp_path, monkeypatch):
 
 
 def test_per_user_spend_gauge_present():
-    from maverick.quotas import UsageLedger
+    from lightwork.quotas import UsageLedger
     UsageLedger().record("user:alice", 3.25, 100, 50)
 
     text = client.get("/metrics").text

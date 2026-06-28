@@ -18,7 +18,7 @@ def _no_fchmod(monkeypatch):
 
 def test_sealing_atomic_write_survives_no_fchmod(_no_fchmod, tmp_path):
     pytest.importorskip("cryptography")
-    from maverick.audit import sealing
+    from lightwork.audit import sealing
     p = tmp_path / "seal.bin"
     sealing._atomic_write_bytes(p, b"hello-bytes")
     assert p.read_bytes() == b"hello-bytes"
@@ -26,14 +26,14 @@ def test_sealing_atomic_write_survives_no_fchmod(_no_fchmod, tmp_path):
 
 def test_learning_cache_save_survives_no_fchmod(_no_fchmod, tmp_path, monkeypatch):
     monkeypatch.setenv("HOME", str(tmp_path))
-    from maverick.cache.learning import LearningCache
+    from lightwork.cache.learning import LearningCache
     cache = LearningCache(path=tmp_path / "lc.json")
     cache.put("task-x", "result-y", verified_by="verifier:t-1")
     assert (tmp_path / "lc.json").exists()
 
 
 def test_remediation_config_write_survives_no_fchmod(_no_fchmod, tmp_path):
-    from maverick.remediation import _write_config_atomic
+    from lightwork.remediation import _write_config_atomic
     p = tmp_path / "config.toml"
     _write_config_atomic(p, "key = 1\n", prior="")
     assert p.read_text() == "key = 1\n"

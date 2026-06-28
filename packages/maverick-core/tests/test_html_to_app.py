@@ -1,7 +1,7 @@
 """HTML-to-app scaffolder (ROADMAP 2027 H2)."""
 from __future__ import annotations
 
-from maverick.html_to_app import analyze_html, html_to_app, scaffold
+from lightwork.html_to_app import analyze_html, html_to_app, scaffold
 
 
 class _SB:

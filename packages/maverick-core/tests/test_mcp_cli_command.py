@@ -1,6 +1,6 @@
 """`maverick mcp` must launch the stdio MCP server, not re-parse argv.
 
-Regression: the command delegated to maverick_mcp.server.main(), which
+Regression: the command delegated to lightwork_mcp.server.main(), which
 argparse-parses sys.argv and rejected the `mcp` subcommand token -- so
 `maverick mcp` (the command every client quickstart and IDE integration uses)
 exited with "unrecognized arguments: mcp" before serving a single byte. It now
@@ -11,11 +11,11 @@ from click.testing import CliRunner
 
 
 def test_maverick_mcp_launches_stdio_server(monkeypatch):
-    import maverick_mcp.server as server
+    import lightwork_mcp.server as server
     calls = {"run": 0}
     monkeypatch.setattr(server.MCPServer, "run", lambda self: calls.__setitem__("run", calls["run"] + 1))
 
-    from maverick.cli import main
+    from lightwork.cli import main
     result = CliRunner().invoke(main, ["mcp"])
 
     assert result.exit_code == 0, result.output
@@ -24,7 +24,7 @@ def test_maverick_mcp_launches_stdio_server(monkeypatch):
 
 def test_maverick_mcp_help_still_advertises_cross_language():
     # The council surface contract: --help must not regress when we add options.
-    from maverick.cli import main
+    from lightwork.cli import main
     result = CliRunner().invoke(main, ["mcp", "--help"])
     assert result.exit_code == 0
     low = result.output.lower()
@@ -34,8 +34,8 @@ def test_maverick_mcp_help_still_advertises_cross_language():
 
 
 def test_maverick_mcp_runs_enterprise_preflight_before_stdio(monkeypatch):
-    import maverick.deployment as deployment
-    import maverick_mcp.server as server
+    import lightwork.deployment as deployment
+    import lightwork_mcp.server as server
 
     calls = {"gate": 0, "run": 0}
 
@@ -46,7 +46,7 @@ def test_maverick_mcp_runs_enterprise_preflight_before_stdio(monkeypatch):
     monkeypatch.setattr(deployment, "require_enterprise_or_die", _gate)
     monkeypatch.setattr(server.MCPServer, "run", lambda self: calls.__setitem__("run", calls["run"] + 1))
 
-    from maverick.cli import main
+    from lightwork.cli import main
     result = CliRunner().invoke(main, ["mcp"])
 
     assert result.exit_code != 0

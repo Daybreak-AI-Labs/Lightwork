@@ -4,7 +4,7 @@ Pure functions -- no platform SDK needed.
 """
 from __future__ import annotations
 
-from maverick_channels.formatting import (
+from lightwork_channels.formatting import (
     DISCORD_LIMIT,
     split_for_discord,
     to_slack_mrkdwn,

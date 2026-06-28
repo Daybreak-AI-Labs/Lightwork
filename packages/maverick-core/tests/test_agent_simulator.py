@@ -1,7 +1,7 @@
 """agent_simulator: deterministic scripted-replay harness."""
 from __future__ import annotations
 
-from maverick.tools.agent_simulator import agent_simulator
+from lightwork.tools.agent_simulator import agent_simulator
 
 
 def _run(**kw):

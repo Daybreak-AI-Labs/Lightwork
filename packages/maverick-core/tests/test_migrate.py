@@ -2,7 +2,7 @@
 from __future__ import annotations
 
 from click.testing import CliRunner
-from maverick.migrate import KNOWN_SECTIONS, migrate, render
+from lightwork.migrate import KNOWN_SECTIONS, migrate, render
 
 
 def _cfg(tmp_path, text):
@@ -26,7 +26,7 @@ def test_apply_rewrites_renames_key(monkeypatch):
     # The rewrite machinery ships with REWRITES empty (no key renamed yet), so
     # its apply path was untested. Exercise it directly with a temporary rename
     # so a future 2.0 rename lands on validated code, not shipped-blind.
-    import maverick.migrate as m
+    import lightwork.migrate as m
     monkeypatch.setattr(m, "REWRITES", [("old_section.key", "new_section.key")])
     cfg = {"old_section": {"key": "v", "other": 1}}
     findings = m._apply_rewrites(cfg)
@@ -35,7 +35,7 @@ def test_apply_rewrites_renames_key(monkeypatch):
 
 
 def test_apply_rewrites_noop_when_key_absent(monkeypatch):
-    import maverick.migrate as m
+    import lightwork.migrate as m
     monkeypatch.setattr(m, "REWRITES", [("a.b", "c.d")])
     cfg = {"unrelated": {"x": 1}}
     assert m._apply_rewrites(cfg) == []
@@ -129,7 +129,7 @@ def test_missing_and_unparseable_config(tmp_path):
 
 
 def test_cli(tmp_path):
-    from maverick import cli as cli_mod
+    from lightwork import cli as cli_mod
     p = _cfg(tmp_path, "[channels.whatsapp]\nenabled = true\n")
     r = CliRunner().invoke(cli_mod.main, ["migrate", "--config", str(p)])
     assert r.exit_code == 0, r.output

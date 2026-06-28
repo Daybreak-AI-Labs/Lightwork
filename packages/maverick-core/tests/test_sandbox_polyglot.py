@@ -7,7 +7,7 @@ resolves the image from the MAVERICK_LANGUAGE hint (the same signal coding_mode
 threads into the test runner). An explicit [sandbox] image always wins; an
 unknown language falls back to Python so existing setups are unchanged.
 """
-from maverick.sandbox import _DEFAULT_IMAGE, _resolve_image
+from lightwork.sandbox import _DEFAULT_IMAGE, _resolve_image
 
 
 def test_explicit_image_always_wins(monkeypatch):
@@ -52,7 +52,7 @@ def test_non_string_config_language_falls_back_to_python(monkeypatch):
 def test_local_backend_unaffected_by_language(monkeypatch, tmp_path):
     """The default (local) backend uses the host toolchain, so the language
     hint must not change which backend you get."""
-    from maverick.sandbox import LocalBackend, build_sandbox
+    from lightwork.sandbox import LocalBackend, build_sandbox
     monkeypatch.setenv("MAVERICK_LANGUAGE", "rust")
     sb = build_sandbox(workdir=tmp_path, backend="local")
     assert isinstance(sb, LocalBackend)

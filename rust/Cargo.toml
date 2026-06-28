@@ -9,17 +9,17 @@
 #
 # Pilot module: the unicode safety scanner (pure, security-critical, runs on
 # every input/output). It's a faithful port of
-# maverick.safety.unicode_filter, with the Python kept as a fallback shim so a
+# lightwork.safety.unicode_filter, with the Python kept as a fallback shim so a
 # build without the native module is byte-identical to today.
 #
-# Second crate (`maverick-verify-audit`): a standalone, dependency-light binary
+# Second crate (`lightwork-verify-audit`): a standalone, dependency-light binary
 # that independently verifies the Ed25519 hash-chained audit log — the SAME
 # chain `maverick audit verify` checks — so an external auditor can prove a log
 # is intact with one binary and NO Python. It is a byte-exact port of
-# maverick.audit.signing.verify_chain (canonical JSON + SHA-256 + Ed25519).
+# lightwork.audit.signing.verify_chain (canonical JSON + SHA-256 + Ed25519).
 [workspace]
 resolver = "2"
-members = ["mvk-scan", "mvk-scan-py", "mvk-scan-wasm", "maverick-verify-audit"]
+members = ["mvk-scan", "mvk-scan-py", "mvk-scan-wasm", "lightwork-verify-audit"]
 
 [workspace.package]
 version = "0.1.0"

@@ -19,7 +19,7 @@ import pytest
 # --- fix 1: gold patch stripped from the non-opaque sandbox shell ----------
 
 def test_scrub_env_strips_gold_patch_outside_opaque_mode():
-    from maverick.sandbox.local import scrub_env
+    from lightwork.sandbox.local import scrub_env
     # No MAVERICK_BENCHMARK_OPAQUE here: the shell tool only pops the var for
     # opaque runs, so without scrub_env covering it a normal-mode `printenv`
     # in the agent's shell would echo the SWE-bench gold patch.
@@ -33,7 +33,7 @@ def test_scrub_env_strips_gold_patch_outside_opaque_mode():
 
 
 def test_gold_patch_in_always_strip_list():
-    from maverick.sandbox import local
+    from lightwork.sandbox import local
     # GOLD_PATCH matches no keyword in _SECRET_ENV_RE, so it must be named
     # explicitly -- guard the regression in case the tuple is refactored.
     assert "MAVERICK_GOLD_PATCH" in local._ALWAYS_STRIP_ENV
@@ -50,7 +50,7 @@ def _no_allow_private(monkeypatch):
 
 
 def test_rest_connector_blocks_private_host(monkeypatch):
-    from maverick.tools._rest_connector import make_rest_tool
+    from lightwork.tools._rest_connector import make_rest_tool
     # A literal link-local IP avoids any DNS lookup: getaddrinfo returns it
     # verbatim and the guard rejects it as non-public (cloud metadata range).
     monkeypatch.setenv("RB_BASE", "http://169.254.169.254")
@@ -66,7 +66,7 @@ def test_rest_connector_blocks_private_host(monkeypatch):
 
 
 def test_graphql_connector_blocks_private_host(monkeypatch):
-    from maverick.tools._rest_connector import make_graphql_tool
+    from lightwork.tools._rest_connector import make_graphql_tool
     monkeypatch.setenv("GB_BASE", "http://169.254.169.254/graphql")
     monkeypatch.setenv("GB_TOKEN", "secret-bearer")  # pragma: allowlist secret
     tool = make_graphql_tool(
@@ -83,7 +83,7 @@ def test_graphql_connector_blocks_private_host(monkeypatch):
 def test_web_archive_routes_through_guarded_urlopen(monkeypatch):
     import json as _json
 
-    from maverick.tools import http_fetch, web_archive
+    from lightwork.tools import http_fetch, web_archive
 
     called = {}
 

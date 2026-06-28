@@ -5,18 +5,18 @@ import json
 
 import pytest
 from click.testing import CliRunner
-from maverick.cli import main
+from lightwork.cli import main
 
 
 @pytest.fixture(autouse=True)
 def _isolate(monkeypatch, tmp_path):
-    # Keep saved assessments off the real ~/.maverick.
-    from maverick import paths
+    # Keep saved assessments off the real ~/.lightwork.
+    from lightwork import paths
     monkeypatch.setattr(paths, "maverick_home", lambda: tmp_path / "home")
 
 
 def test_templates_registered_and_looked_up():
-    from maverick.assessment import get_template, list_templates
+    from lightwork.assessment import get_template, list_templates
 
     types = {t.type for t in list_templates()}
     # Core compliance templates + the finance suite (finance-agent-suite §6).
@@ -30,7 +30,7 @@ def test_templates_registered_and_looked_up():
 
 
 def test_clean_answers_are_minimal_risk():
-    from maverick.assessment import AssessmentSession, get_template
+    from lightwork.assessment import AssessmentSession, get_template
 
     tpl = get_template("pia")
     s = AssessmentSession(type="pia", subject="Marketing emails")
@@ -43,7 +43,7 @@ def test_clean_answers_are_minimal_risk():
 
 
 def test_risky_answers_score_findings_and_roll_up():
-    from maverick.assessment import AssessmentSession
+    from lightwork.assessment import AssessmentSession
 
     s = AssessmentSession(type="vendor_risk", subject="Acme Corp")
     s.record("vr_dpa", "no")                  # high (risk answer)
@@ -62,7 +62,7 @@ def test_risky_answers_score_findings_and_roll_up():
 
 
 def test_record_rejects_bad_answer_and_unknown_question():
-    from maverick.assessment import AssessmentSession
+    from lightwork.assessment import AssessmentSession
 
     s = AssessmentSession(type="aira", subject="Resume screener")
     with pytest.raises(ValueError):
@@ -72,7 +72,7 @@ def test_record_rejects_bad_answer_and_unknown_question():
 
 
 def test_assessment_session_ids_are_unique_for_rapid_creation():
-    from maverick.assessment import AssessmentSession
+    from lightwork.assessment import AssessmentSession
 
     ids = {AssessmentSession(type="pia", subject=f"Subject {i}").id for i in range(1000)}
 
@@ -80,7 +80,7 @@ def test_assessment_session_ids_are_unique_for_rapid_creation():
 
 
 def test_persistence_round_trip():
-    from maverick.assessment import (
+    from lightwork.assessment import (
         AssessmentSession,
         list_saved,
         load_saved,
@@ -103,7 +103,7 @@ def test_persistence_round_trip():
 
 
 def test_cli_assess_flow(tmp_path):
-    from maverick.assessment import list_saved
+    from lightwork.assessment import list_saved
 
     runner = CliRunner()
     assert runner.invoke(main, ["assess", "templates"]).exit_code == 0
@@ -128,7 +128,7 @@ def test_cli_assess_flow(tmp_path):
 
 
 def test_load_saved_rejects_path_traversal():
-    from maverick.assessment import load_saved
+    from lightwork.assessment import load_saved
     # `assess show ../../etc/passwd` must not read outside the assessments dir.
     assert load_saved("../../etc/passwd") is None
     assert load_saved("../secret") is None
@@ -136,6 +136,6 @@ def test_load_saved_rejects_path_traversal():
 
 
 def test_save_session_is_written_private_0600():
-    from maverick.assessment import AssessmentSession, save_session
+    from lightwork.assessment import AssessmentSession, save_session
     path = save_session(AssessmentSession(type="pia", subject="Acme"))
     assert oct(path.stat().st_mode)[-3:] == "600"

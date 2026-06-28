@@ -7,8 +7,8 @@ nothing to block, so they stay fail-open.
 import sys
 
 import pytest
-from maverick import hooks
-from maverick.hooks import HookContext, HookEvent
+from lightwork import hooks
+from lightwork.hooks import HookContext, HookEvent
 
 
 @pytest.fixture(autouse=True)

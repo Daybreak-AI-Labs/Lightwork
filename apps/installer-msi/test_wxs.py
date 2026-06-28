@@ -64,17 +64,17 @@ def test_path_component_edits_user_path_only():
 def test_no_hardcoded_user_paths():
     # Sources must be relative or come from -d preprocessor vars, never a
     # developer's machine layout.
-    for name in ("Package.wxs", "maverick.cmd", "build.ps1"):
+    for name in ("Package.wxs", "lightwork.cmd", "build.ps1"):
         text = (_HERE / name).read_text()
         assert not re.search(r"[A-Za-z]:\\Users\\|/home/|/Users/", text), name
 
 
 def test_launcher_uses_console_script_entry_point():
     # There is no maverick/__main__.py, so `py -m maverick` cannot work; the
-    # launcher must go through maverick.cli:main and locate the bundled wheel
+    # launcher must go through lightwork.cli:main and locate the bundled wheel
     # relative to itself.
-    cmd = (_HERE / "maverick.cmd").read_text()
-    assert "from maverick.cli import main" in cmd
+    cmd = (_HERE / "lightwork.cmd").read_text()
+    assert "from lightwork.cli import main" in cmd
     assert "%~dp0" in cmd
     assert re.search(r"py -3? -m maverick\b", cmd) is None
 

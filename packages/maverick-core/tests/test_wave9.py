@@ -9,12 +9,12 @@ class TestOrchestratorGetsCodingModeTemplate:
     def test_orchestrator_in_coding_mode_uses_coder_template(
         self, tmp_path, monkeypatch,
     ):
-        from maverick.agent import Agent
-        from maverick.blackboard import Blackboard
-        from maverick.budget import Budget
-        from maverick.sandbox import LocalBackend
-        from maverick.swarm import SwarmContext
-        from maverick.world_model import WorldModel
+        from lightwork.agent import Agent
+        from lightwork.blackboard import Blackboard
+        from lightwork.budget import Budget
+        from lightwork.sandbox import LocalBackend
+        from lightwork.swarm import SwarmContext
+        from lightwork.world_model import WorldModel
 
         monkeypatch.setenv("MAVERICK_CODING_MODE", "1")
         world = WorldModel(tmp_path / "w.db")
@@ -37,12 +37,12 @@ class TestOrchestratorGetsCodingModeTemplate:
     def test_orchestrator_off_coding_mode_still_prose(
         self, tmp_path, monkeypatch,
     ):
-        from maverick.agent import Agent
-        from maverick.blackboard import Blackboard
-        from maverick.budget import Budget
-        from maverick.sandbox import LocalBackend
-        from maverick.swarm import SwarmContext
-        from maverick.world_model import WorldModel
+        from lightwork.agent import Agent
+        from lightwork.blackboard import Blackboard
+        from lightwork.budget import Budget
+        from lightwork.sandbox import LocalBackend
+        from lightwork.swarm import SwarmContext
+        from lightwork.world_model import WorldModel
 
         monkeypatch.delenv("MAVERICK_CODING_MODE", raising=False)
         world = WorldModel(tmp_path / "w.db")
@@ -62,20 +62,20 @@ class TestOrchestratorGetsCodingModeTemplate:
 
 class TestExtractUnifiedDiffStrict:
     def test_prose_with_dash_dash_a_returns_none(self):
-        from maverick.coding_mode import extract_unified_diff
+        from lightwork.coding_mode import extract_unified_diff
         # No `+++ b/`, no `@@` → not a real diff. Prior version
         # accepted this and fed prose to git apply.
         text = "I think we should edit --- a/foo.py for clarity."
         assert extract_unified_diff(text) is None
 
     def test_diff_requires_at_at(self):
-        from maverick.coding_mode import extract_unified_diff
+        from lightwork.coding_mode import extract_unified_diff
         # Header-only without @@ hunk → not a diff.
         text = "--- a/foo.py\n+++ b/foo.py\n"
         assert extract_unified_diff(text) is None
 
     def test_valid_minimal_diff_passes(self):
-        from maverick.coding_mode import extract_unified_diff
+        from lightwork.coding_mode import extract_unified_diff
         text = (
             "--- a/foo.py\n+++ b/foo.py\n"
             "@@ -1 +1 @@\n-old\n+new\n"
@@ -83,7 +83,7 @@ class TestExtractUnifiedDiffStrict:
         assert "+++ b/foo.py" in (extract_unified_diff(text) or "")
 
     def test_strips_markdown_fences(self):
-        from maverick.coding_mode import extract_unified_diff
+        from lightwork.coding_mode import extract_unified_diff
         text = (
             "Here's the patch:\n"
             "```diff\n"
@@ -95,7 +95,7 @@ class TestExtractUnifiedDiffStrict:
         assert "```" not in out
 
     def test_multi_file_diff_kept_together(self):
-        from maverick.coding_mode import extract_unified_diff
+        from lightwork.coding_mode import extract_unified_diff
         text = (
             "--- a/x.py\n+++ b/x.py\n@@ -1 +1 @@\n-1\n+2\n"
             "--- a/y.py\n+++ b/y.py\n@@ -1 +1 @@\n-3\n+4\n"
@@ -109,36 +109,36 @@ class TestExtractUnifiedDiffStrict:
 
 class TestPolyglotRunner:
     def test_detect_pytest(self, tmp_path):
-        from maverick.coding_mode import detect_test_runner
+        from lightwork.coding_mode import detect_test_runner
         (tmp_path / "pyproject.toml").write_text("[project]\nname='x'\n")
         assert detect_test_runner(tmp_path) == "pytest"
 
     def test_detect_jest(self, tmp_path):
-        from maverick.coding_mode import detect_test_runner
+        from lightwork.coding_mode import detect_test_runner
         (tmp_path / "package.json").write_text('{"scripts": {"test": "jest"}}')
         assert detect_test_runner(tmp_path) == "jest"
 
     def test_detect_vitest(self, tmp_path):
-        from maverick.coding_mode import detect_test_runner
+        from lightwork.coding_mode import detect_test_runner
         (tmp_path / "package.json").write_text('{"scripts": {"test": "vitest run"}}')
         assert detect_test_runner(tmp_path) == "vitest"
 
     def test_detect_cargo(self, tmp_path):
-        from maverick.coding_mode import detect_test_runner
+        from lightwork.coding_mode import detect_test_runner
         (tmp_path / "Cargo.toml").write_text("[package]\nname='x'\n")
         assert detect_test_runner(tmp_path) == "cargo"
 
     def test_detect_gotest(self, tmp_path):
-        from maverick.coding_mode import detect_test_runner
+        from lightwork.coding_mode import detect_test_runner
         (tmp_path / "go.mod").write_text("module x\n")
         assert detect_test_runner(tmp_path) == "gotest"
 
     def test_detect_unsupported(self, tmp_path):
-        from maverick.coding_mode import detect_test_runner
+        from lightwork.coding_mode import detect_test_runner
         assert detect_test_runner(tmp_path) == "unsupported"
 
     def test_run_failing_tests_skips_unsupported(self, tmp_path):
-        from maverick.coding_mode import run_failing_tests
+        from lightwork.coding_mode import run_failing_tests
 
         class _Sandbox:
             workdir = tmp_path
@@ -157,7 +157,7 @@ class TestPolyglotRunner:
 
 class TestPytestSummaryAnchored:
     def test_summary_at_end_wins(self):
-        from maverick.coding_mode import _parse_pytest
+        from lightwork.coding_mode import _parse_pytest
         # Test prints "3 passed" in its own stdout, then summary at end.
         out = (
             "stdout: my test says '3 passed' which is great\n"
@@ -169,7 +169,7 @@ class TestPytestSummaryAnchored:
         assert f == 1
 
     def test_all_passed_summary(self):
-        from maverick.coding_mode import _parse_pytest
+        from lightwork.coding_mode import _parse_pytest
         out = "============= 5 passed in 0.2s =============\n"
         p, f, ok = _parse_pytest(out)
         assert ok is True
@@ -177,7 +177,7 @@ class TestPytestSummaryAnchored:
         assert f == 0
 
     def test_errors_count_with_failures(self):
-        from maverick.coding_mode import _parse_pytest
+        from lightwork.coding_mode import _parse_pytest
         out = "===== 1 failed, 1 errors, 3 passed in 0.5s =====\n"
         p, f, ok = _parse_pytest(out)
         assert ok is True
@@ -189,7 +189,7 @@ class TestPytestSummaryAnchored:
 
 class TestNonPytestParsers:
     def test_jest_summary(self):
-        from maverick.coding_mode import _parse_jest
+        from lightwork.coding_mode import _parse_jest
         out = "Tests:       1 failed, 4 passed, 5 total\n"
         p, f, ok = _parse_jest(out)
         assert ok is True
@@ -197,7 +197,7 @@ class TestNonPytestParsers:
         assert f == 1
 
     def test_cargo_summary(self):
-        from maverick.coding_mode import _parse_cargo
+        from lightwork.coding_mode import _parse_cargo
         out = "test result: FAILED. 3 passed; 2 failed; 0 ignored;\n"
         p, f, ok = _parse_cargo(out)
         assert ok is True
@@ -205,7 +205,7 @@ class TestNonPytestParsers:
         assert f == 2
 
     def test_gotest_pass_fail_lines(self):
-        from maverick.coding_mode import _parse_gotest
+        from lightwork.coding_mode import _parse_gotest
         out = "--- PASS: TestOne\n--- FAIL: TestTwo\n--- PASS: TestThree\n"
         p, f, ok = _parse_gotest(out)
         assert ok is True
@@ -213,7 +213,7 @@ class TestNonPytestParsers:
         assert f == 1
 
     def test_maven_tests_run(self):
-        from maverick.coding_mode import _parse_maven
+        from lightwork.coding_mode import _parse_maven
         out = "Tests run: 10, Failures: 2, Errors: 1, Skipped: 0\n"
         p, f, ok = _parse_maven(out)
         assert ok is True
@@ -223,7 +223,7 @@ class TestNonPytestParsers:
 
 class TestCommandBuilding:
     def test_gotest_quotes_manifest_package_paths(self):
-        from maverick.coding_mode import _cmd_for
+        from lightwork.coding_mode import _cmd_for
         cmd = _cmd_for(
             "gotest",
             ["./...; touch /tmp/pwned #::TestFoo"],
@@ -236,7 +236,7 @@ class TestCommandBuilding:
 
 class TestRepoMapCache:
     def test_cached_on_second_call(self, tmp_path, monkeypatch):
-        from maverick.tools.repo_map import _CACHE, repo_map
+        from lightwork.tools.repo_map import _CACHE, repo_map
         _CACHE.clear()
         (tmp_path / "x.py").write_text("")
 
@@ -250,7 +250,7 @@ class TestRepoMapCache:
         assert out1 in out2
 
     def test_huge_repo_capped(self, tmp_path):
-        from maverick.tools.repo_map import _CACHE, repo_map
+        from lightwork.tools.repo_map import _CACHE, repo_map
         _CACHE.clear()
         # Create many top-level entries.
         for i in range(200):
@@ -267,7 +267,7 @@ class TestRepoMapCache:
 
 class TestWorldModelClose:
     def test_close_closes_connection(self, tmp_path):
-        from maverick.world_model import WorldModel
+        from lightwork.world_model import WorldModel
         wm = WorldModel(tmp_path / "w.db")
         wm.close()
         # After close, queries raise sqlite3.ProgrammingError.
@@ -276,7 +276,7 @@ class TestWorldModelClose:
             wm.conn.execute("SELECT 1")
 
     def test_context_manager_closes(self, tmp_path):
-        from maverick.world_model import WorldModel
+        from lightwork.world_model import WorldModel
         with WorldModel(tmp_path / "w.db") as wm:
             wm.create_goal("x", "")
         import sqlite3

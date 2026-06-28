@@ -5,12 +5,12 @@ from fastapi.testclient import TestClient
 
 
 def _client():
-    from maverick_dashboard.app import app
+    from lightwork_dashboard.app import app
     return TestClient(app)
 
 
 def _isolate(monkeypatch, tmp_path):
-    from maverick import runtime_overrides, world_model
+    from lightwork import runtime_overrides, world_model
     monkeypatch.setattr(world_model, "DEFAULT_DB", tmp_path / "world.db")
     monkeypatch.setattr(runtime_overrides, "OVERRIDES_PATH", tmp_path / "ro.toml")
     monkeypatch.setenv("MAVERICK_CONFIG", str(tmp_path / "config.toml"))

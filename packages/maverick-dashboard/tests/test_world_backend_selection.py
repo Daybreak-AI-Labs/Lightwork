@@ -6,7 +6,7 @@ channel server / gRPC API wrote Postgres.
 """
 from __future__ import annotations
 
-import maverick_dashboard._shared as shared
+import lightwork_dashboard._shared as shared
 
 
 def test_world_returns_postgres_when_configured(monkeypatch):
@@ -18,9 +18,9 @@ def test_world_returns_postgres_when_configured(monkeypatch):
         return sentinel
 
     monkeypatch.setattr(
-        "maverick.world_model_backends.is_postgres_configured", lambda: True
+        "lightwork.world_model_backends.is_postgres_configured", lambda: True
     )
-    monkeypatch.setattr("maverick.world_model.open_world", fake_open_world)
+    monkeypatch.setattr("lightwork.world_model.open_world", fake_open_world)
     shared._world_cache.clear()
 
     assert shared._world() is sentinel
@@ -31,10 +31,10 @@ def test_world_returns_postgres_when_configured(monkeypatch):
 
 def test_world_uses_sqlite_when_postgres_not_configured(monkeypatch, tmp_path):
     monkeypatch.setattr(
-        "maverick.world_model_backends.is_postgres_configured", lambda: False
+        "lightwork.world_model_backends.is_postgres_configured", lambda: False
     )
-    monkeypatch.setattr("maverick.world_model.DEFAULT_DB", tmp_path / "w.db")
-    monkeypatch.setattr("maverick.paths.current_tenant_id", lambda: None)
+    monkeypatch.setattr("lightwork.world_model.DEFAULT_DB", tmp_path / "w.db")
+    monkeypatch.setattr("lightwork.paths.current_tenant_id", lambda: None)
     shared._world_cache.clear()
-    from maverick.world_model import WorldModel
+    from lightwork.world_model import WorldModel
     assert isinstance(shared._world(), WorldModel)

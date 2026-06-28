@@ -26,8 +26,8 @@ import os
 import random
 
 import pytest
-from maverick import self_harness as sh
-from maverick import self_improvement as si
+from lightwork import self_harness as sh
+from lightwork import self_improvement as si
 
 HEADER = "Operating guidance learned for this model:"
 MAXL = sh._MAX_LINES_PER_MODEL

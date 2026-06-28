@@ -9,7 +9,7 @@ from __future__ import annotations
 from pathlib import Path
 
 from click.testing import CliRunner
-from maverick.cli import main
+from lightwork.cli import main
 
 
 def test_facts_empty_prints_hint(tmp_path: Path):

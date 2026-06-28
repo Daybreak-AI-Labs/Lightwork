@@ -1,7 +1,7 @@
 """async_compaction: history compaction scheduler."""
 from __future__ import annotations
 
-from maverick.tools.async_compaction import async_compaction
+from lightwork.tools.async_compaction import async_compaction
 
 
 def _plan(**kw):

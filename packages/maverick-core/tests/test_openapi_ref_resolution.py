@@ -6,7 +6,7 @@ level parameters; call() couldn't substitute a $ref'd/path-level path param.
 """
 from __future__ import annotations
 
-from maverick.tools import openapi_runner as oar
+from lightwork.tools import openapi_runner as oar
 
 SPEC = {
     "openapi": "3.0.0",

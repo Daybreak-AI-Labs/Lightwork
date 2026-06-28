@@ -71,7 +71,7 @@ class TestManifests:
 class TestCostTracker:
     def test_writes_row_on_exit(self, cost_tracker_mod, tmp_path):
         out = tmp_path / "r.jsonl"
-        from maverick.budget import Budget
+        from lightwork.budget import Budget
         with cost_tracker_mod.cost_tracker(
             "task-1", "maverick", results_path=out,
         ) as t:

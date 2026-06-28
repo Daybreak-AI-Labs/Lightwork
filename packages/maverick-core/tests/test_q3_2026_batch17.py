@@ -5,8 +5,8 @@
 """
 from __future__ import annotations
 
-import maverick.tools.browser as browser_mod
-from maverick.tools.browser import browser
+import lightwork.tools.browser as browser_mod
+from lightwork.tools.browser import browser
 
 
 class _FakePage:

@@ -2,7 +2,7 @@
 
 Plausible / Mixpanel / Calendly / Zoom / Spotify / HomeAssistant /
 Reddit / Bitbucket / SES / SNS / ffmpeg / pandoc / ImageMagick /
-GA4 / Plaid + maverick.workflow.
+GA4 / Plaid + lightwork.workflow.
 """
 from __future__ import annotations
 
@@ -34,14 +34,14 @@ def _resp(status, body):
 # ---------- Plausible ----------
 
 def test_plausible_requires_op():
-    from maverick.tools.plausible_tool import plausible_tool
+    from lightwork.tools.plausible_tool import plausible_tool
     assert "op is required" in plausible_tool().fn({})
 
 
 def test_plausible_event_no_key(monkeypatch):
     monkeypatch.delenv("PLAUSIBLE_API_KEY", raising=False)
     _fake_httpx(monkeypatch, post=MagicMock(return_value=_resp(202, "")))
-    from maverick.tools.plausible_tool import plausible_tool
+    from lightwork.tools.plausible_tool import plausible_tool
     out = plausible_tool().fn({
         "op": "event", "site_id": "example.com", "name": "signup",
     })
@@ -51,7 +51,7 @@ def test_plausible_event_no_key(monkeypatch):
 def test_plausible_aggregate_requires_key(monkeypatch):
     monkeypatch.delenv("PLAUSIBLE_API_KEY", raising=False)
     _fake_httpx(monkeypatch, get=MagicMock())
-    from maverick.tools.plausible_tool import plausible_tool
+    from lightwork.tools.plausible_tool import plausible_tool
     out = plausible_tool().fn({"op": "aggregate", "site_id": "x.com"})
     assert "PLAUSIBLE_API_KEY" in out
 
@@ -61,7 +61,7 @@ def test_plausible_aggregate_renders(monkeypatch):
     body = {"results": {"visitors": {"value": 42},
                          "pageviews": {"value": 100}}}
     _fake_httpx(monkeypatch, get=MagicMock(return_value=_resp(200, body)))
-    from maverick.tools.plausible_tool import plausible_tool
+    from lightwork.tools.plausible_tool import plausible_tool
     out = plausible_tool().fn({"op": "aggregate", "site_id": "x.com"})
     assert "visitors: 42" in out and "pageviews: 100" in out
 
@@ -69,14 +69,14 @@ def test_plausible_aggregate_renders(monkeypatch):
 # ---------- Mixpanel ----------
 
 def test_mixpanel_requires_op():
-    from maverick.tools.mixpanel_tool import mixpanel_tool
+    from lightwork.tools.mixpanel_tool import mixpanel_tool
     assert "op is required" in mixpanel_tool().fn({})
 
 
 def test_mixpanel_track_missing_token(monkeypatch):
     monkeypatch.delenv("MIXPANEL_PROJECT_TOKEN", raising=False)
     _fake_httpx(monkeypatch, post=MagicMock())
-    from maverick.tools.mixpanel_tool import mixpanel_tool
+    from lightwork.tools.mixpanel_tool import mixpanel_tool
     out = mixpanel_tool().fn({"op": "track", "event": "x", "distinct_id": "u"})
     assert "MIXPANEL_PROJECT_TOKEN" in out
 
@@ -89,7 +89,7 @@ def test_mixpanel_track_posts(monkeypatch):
     fake_httpx = types.ModuleType("httpx")
     fake_httpx.post = MagicMock(return_value=resp)
     monkeypatch.setitem(sys.modules, "httpx", fake_httpx)
-    from maverick.tools.mixpanel_tool import mixpanel_tool
+    from lightwork.tools.mixpanel_tool import mixpanel_tool
     out = mixpanel_tool().fn({
         "op": "track", "event": "signup", "distinct_id": "user-1",
         "properties": {"plan": "pro"},
@@ -100,14 +100,14 @@ def test_mixpanel_track_posts(monkeypatch):
 # ---------- Calendly ----------
 
 def test_calendly_requires_op():
-    from maverick.tools.calendly_tool import calendly_tool
+    from lightwork.tools.calendly_tool import calendly_tool
     assert "op is required" in calendly_tool().fn({})
 
 
 def test_calendly_me_missing_token(monkeypatch):
     monkeypatch.delenv("CALENDLY_TOKEN", raising=False)
     _fake_httpx(monkeypatch, get=MagicMock())
-    from maverick.tools.calendly_tool import calendly_tool
+    from lightwork.tools.calendly_tool import calendly_tool
     out = calendly_tool().fn({"op": "me"})
     assert "CALENDLY_TOKEN" in out
 
@@ -115,7 +115,7 @@ def test_calendly_me_missing_token(monkeypatch):
 def test_calendly_cancel_dry_run(monkeypatch):
     monkeypatch.setenv("CALENDLY_TOKEN", "tok")
     _fake_httpx(monkeypatch, post=MagicMock())
-    from maverick.tools.calendly_tool import calendly_tool
+    from lightwork.tools.calendly_tool import calendly_tool
     out = calendly_tool().fn({"op": "cancel", "event_uuid": "abc"})
     assert "DRY RUN" in out
 
@@ -129,7 +129,7 @@ def test_calendly_events_renders(monkeypatch):
          "name": "Intro chat"},
     ]}
     _fake_httpx(monkeypatch, get=MagicMock(return_value=_resp(200, body)))
-    from maverick.tools.calendly_tool import calendly_tool
+    from lightwork.tools.calendly_tool import calendly_tool
     out = calendly_tool().fn({"op": "events"})
     assert "Intro chat" in out and "active" in out
 
@@ -137,14 +137,14 @@ def test_calendly_events_renders(monkeypatch):
 # ---------- Zoom ----------
 
 def test_zoom_requires_op():
-    from maverick.tools.zoom_tool import zoom_tool
+    from lightwork.tools.zoom_tool import zoom_tool
     assert "op is required" in zoom_tool().fn({})
 
 
 def test_zoom_missing_token(monkeypatch):
     monkeypatch.delenv("ZOOM_OAUTH_TOKEN", raising=False)
     _fake_httpx(monkeypatch, get=MagicMock())
-    from maverick.tools.zoom_tool import zoom_tool
+    from lightwork.tools.zoom_tool import zoom_tool
     out = zoom_tool().fn({"op": "meetings"})
     assert "ZOOM_OAUTH_TOKEN" in out
 
@@ -152,7 +152,7 @@ def test_zoom_missing_token(monkeypatch):
 def test_zoom_meeting_create_dry_run(monkeypatch):
     monkeypatch.setenv("ZOOM_OAUTH_TOKEN", "tok")
     _fake_httpx(monkeypatch, post=MagicMock())
-    from maverick.tools.zoom_tool import zoom_tool
+    from lightwork.tools.zoom_tool import zoom_tool
     out = zoom_tool().fn({
         "op": "meeting_create", "topic": "demo",
         "start_time": "2026-06-01T10:00:00Z",
@@ -167,7 +167,7 @@ def test_zoom_meetings_renders(monkeypatch):
         "topic": "Standup",
     }]}
     _fake_httpx(monkeypatch, get=MagicMock(return_value=_resp(200, body)))
-    from maverick.tools.zoom_tool import zoom_tool
+    from lightwork.tools.zoom_tool import zoom_tool
     out = zoom_tool().fn({"op": "meetings"})
     assert "Standup" in out
 
@@ -175,14 +175,14 @@ def test_zoom_meetings_renders(monkeypatch):
 # ---------- Spotify ----------
 
 def test_spotify_requires_op():
-    from maverick.tools.spotify_tool import spotify_tool
+    from lightwork.tools.spotify_tool import spotify_tool
     assert "op is required" in spotify_tool().fn({})
 
 
 def test_spotify_missing_token(monkeypatch):
     monkeypatch.delenv("SPOTIFY_ACCESS_TOKEN", raising=False)
     _fake_httpx(monkeypatch, get=MagicMock())
-    from maverick.tools.spotify_tool import spotify_tool
+    from lightwork.tools.spotify_tool import spotify_tool
     out = spotify_tool().fn({"op": "search", "q": "x"})
     assert "SPOTIFY_ACCESS_TOKEN" in out
 
@@ -190,7 +190,7 @@ def test_spotify_missing_token(monkeypatch):
 def test_spotify_pause_dry_run(monkeypatch):
     monkeypatch.setenv("SPOTIFY_ACCESS_TOKEN", "tok")
     _fake_httpx(monkeypatch, put=MagicMock())
-    from maverick.tools.spotify_tool import spotify_tool
+    from lightwork.tools.spotify_tool import spotify_tool
     out = spotify_tool().fn({"op": "pause"})
     assert "DRY RUN" in out
 
@@ -202,7 +202,7 @@ def test_spotify_search_renders(monkeypatch):
          "artists": [{"name": "Queen"}]},
     ]}}
     _fake_httpx(monkeypatch, get=MagicMock(return_value=_resp(200, body)))
-    from maverick.tools.spotify_tool import spotify_tool
+    from lightwork.tools.spotify_tool import spotify_tool
     out = spotify_tool().fn({"op": "search", "q": "queen"})
     assert "Bohemian Rhapsody" in out and "Queen" in out
 
@@ -210,7 +210,7 @@ def test_spotify_search_renders(monkeypatch):
 # ---------- Home Assistant ----------
 
 def test_hass_requires_op():
-    from maverick.tools.home_assistant_tool import home_assistant_tool
+    from lightwork.tools.home_assistant_tool import home_assistant_tool
     assert "op is required" in home_assistant_tool().fn({})
 
 
@@ -218,7 +218,7 @@ def test_hass_missing_config(monkeypatch):
     monkeypatch.delenv("HASS_URL", raising=False)
     monkeypatch.delenv("HASS_TOKEN", raising=False)
     _fake_httpx(monkeypatch, get=MagicMock())
-    from maverick.tools.home_assistant_tool import home_assistant_tool
+    from lightwork.tools.home_assistant_tool import home_assistant_tool
     out = home_assistant_tool().fn({"op": "states"})
     assert "HASS_URL" in out
 
@@ -227,7 +227,7 @@ def test_hass_call_service_dry_run(monkeypatch):
     monkeypatch.setenv("HASS_URL", "http://hass.local:8123")
     monkeypatch.setenv("HASS_TOKEN", "tok")
     _fake_httpx(monkeypatch, post=MagicMock())
-    from maverick.tools.home_assistant_tool import home_assistant_tool
+    from lightwork.tools.home_assistant_tool import home_assistant_tool
     out = home_assistant_tool().fn({
         "op": "call_service", "domain": "light", "service": "turn_on",
         "data": {"entity_id": "light.living"},
@@ -245,7 +245,7 @@ def test_hass_states_filters_by_domain(monkeypatch):
          "attributes": {"friendly_name": "Fan"}},
     ]
     _fake_httpx(monkeypatch, get=MagicMock(return_value=_resp(200, body)))
-    from maverick.tools.home_assistant_tool import home_assistant_tool
+    from lightwork.tools.home_assistant_tool import home_assistant_tool
     out = home_assistant_tool().fn({"op": "states", "domain": "light"})
     assert "light.living" in out and "switch.fan" not in out
 
@@ -253,7 +253,7 @@ def test_hass_states_filters_by_domain(monkeypatch):
 # ---------- Reddit ----------
 
 def test_reddit_requires_op():
-    from maverick.tools.reddit_tool import reddit_tool
+    from lightwork.tools.reddit_tool import reddit_tool
     assert "op is required" in reddit_tool().fn({})
 
 
@@ -263,7 +263,7 @@ def test_reddit_subreddit_renders(monkeypatch):
                   "num_comments": 30, "title": "PEP 800 dropped"}},
     ]}}
     _fake_httpx(monkeypatch, get=MagicMock(return_value=_resp(200, body)))
-    from maverick.tools.reddit_tool import reddit_tool
+    from lightwork.tools.reddit_tool import reddit_tool
     out = reddit_tool().fn({"op": "subreddit", "name": "python"})
     assert "PEP 800 dropped" in out and "python" in out
 
@@ -275,7 +275,7 @@ def test_reddit_post_renders(monkeypatch):
         "permalink": "/r/x/c/abc/",
     }}]}}]
     _fake_httpx(monkeypatch, get=MagicMock(return_value=_resp(200, body)))
-    from maverick.tools.reddit_tool import reddit_tool
+    from lightwork.tools.reddit_tool import reddit_tool
     out = reddit_tool().fn({"op": "post", "post_id": "abc"})
     assert "TIL" in out and "alice" in out
 
@@ -283,7 +283,7 @@ def test_reddit_post_renders(monkeypatch):
 # ---------- Bitbucket ----------
 
 def test_bitbucket_requires_op():
-    from maverick.tools.bitbucket_tool import bitbucket_tool
+    from lightwork.tools.bitbucket_tool import bitbucket_tool
     assert "op is required" in bitbucket_tool().fn({})
 
 
@@ -292,7 +292,7 @@ def test_bitbucket_missing_credentials(monkeypatch):
     monkeypatch.delenv("BITBUCKET_USERNAME", raising=False)
     monkeypatch.delenv("BITBUCKET_APP_PASSWORD", raising=False)
     _fake_httpx(monkeypatch, get=MagicMock())
-    from maverick.tools.bitbucket_tool import bitbucket_tool
+    from lightwork.tools.bitbucket_tool import bitbucket_tool
     out = bitbucket_tool().fn({"op": "issues", "workspace": "ws", "repo_slug": "r"})
     assert "BITBUCKET" in out
 
@@ -303,7 +303,7 @@ def test_bitbucket_issues_renders(monkeypatch):
         {"id": 1, "state": "new", "title": "Fix bug"},
     ]}
     _fake_httpx(monkeypatch, get=MagicMock(return_value=_resp(200, body)))
-    from maverick.tools.bitbucket_tool import bitbucket_tool
+    from lightwork.tools.bitbucket_tool import bitbucket_tool
     out = bitbucket_tool().fn({"op": "issues", "workspace": "ws", "repo_slug": "r"})
     assert "Fix bug" in out
 
@@ -330,20 +330,20 @@ def _install_fake_boto3_ses(monkeypatch, *, send_id="msg-1",
 
 
 def test_ses_requires_op():
-    from maverick.tools.ses_tool import ses_tool
+    from lightwork.tools.ses_tool import ses_tool
     assert "op is required" in ses_tool().fn({})
 
 
 def test_ses_missing_boto3(monkeypatch):
     monkeypatch.setitem(sys.modules, "boto3", None)
-    from maverick.tools.ses_tool import ses_tool
+    from lightwork.tools.ses_tool import ses_tool
     out = ses_tool().fn({"op": "quota"})
     assert "boto3 not installed" in out
 
 
 def test_ses_send_dry_run(monkeypatch):
     _install_fake_boto3_ses(monkeypatch)
-    from maverick.tools.ses_tool import ses_tool
+    from lightwork.tools.ses_tool import ses_tool
     out = ses_tool().fn({
         "op": "send", "from_": "no-reply@x", "to": ["a@x"],
         "subject": "hi", "body": "yo",
@@ -353,7 +353,7 @@ def test_ses_send_dry_run(monkeypatch):
 
 def test_ses_send_confirmed(monkeypatch):
     _install_fake_boto3_ses(monkeypatch, send_id="abc-123")
-    from maverick.tools.ses_tool import ses_tool
+    from lightwork.tools.ses_tool import ses_tool
     out = ses_tool().fn({
         "op": "send", "from_": "no-reply@x", "to": ["a@x"],
         "subject": "hi", "body": "yo", "confirm": True,
@@ -363,7 +363,7 @@ def test_ses_send_confirmed(monkeypatch):
 
 def test_ses_quota_renders(monkeypatch):
     _install_fake_boto3_ses(monkeypatch)
-    from maverick.tools.ses_tool import ses_tool
+    from lightwork.tools.ses_tool import ses_tool
     out = ses_tool().fn({"op": "quota"})
     assert "max_24h" in out and "100" in out
 
@@ -391,13 +391,13 @@ def _install_fake_boto3_sns(monkeypatch, *, topics=None, message_id="m-1"):
 
 
 def test_sns_requires_op():
-    from maverick.tools.sns_tool import sns_tool
+    from lightwork.tools.sns_tool import sns_tool
     assert "op is required" in sns_tool().fn({})
 
 
 def test_sns_publish_dry_run(monkeypatch):
     _install_fake_boto3_sns(monkeypatch)
-    from maverick.tools.sns_tool import sns_tool
+    from lightwork.tools.sns_tool import sns_tool
     out = sns_tool().fn({"op": "publish",
                           "topic_arn": "arn:sns:t1", "message": "hi"})
     assert "DRY RUN" in out
@@ -405,7 +405,7 @@ def test_sns_publish_dry_run(monkeypatch):
 
 def test_sns_publish_confirmed(monkeypatch):
     _install_fake_boto3_sns(monkeypatch, message_id="abc")
-    from maverick.tools.sns_tool import sns_tool
+    from lightwork.tools.sns_tool import sns_tool
     out = sns_tool().fn({
         "op": "publish", "topic_arn": "arn:sns:t1",
         "message": "hi", "confirm": True,
@@ -416,13 +416,13 @@ def test_sns_publish_confirmed(monkeypatch):
 # ---------- ffmpeg ----------
 
 def test_ffmpeg_requires_op():
-    from maverick.tools.ffmpeg_tool import ffmpeg_tool
+    from lightwork.tools.ffmpeg_tool import ffmpeg_tool
     assert "op is required" in ffmpeg_tool().fn({})
 
 
 def test_ffmpeg_missing(monkeypatch):
     monkeypatch.setattr("shutil.which", lambda b: None)
-    from maverick.tools.ffmpeg_tool import ffmpeg_tool
+    from lightwork.tools.ffmpeg_tool import ffmpeg_tool
     out = ffmpeg_tool().fn({"op": "convert",
                               "input_path": "/tmp/a.mp4",
                               "output_path": "/tmp/b.mp4"})
@@ -438,7 +438,7 @@ def test_ffmpeg_convert_calls_binary(monkeypatch):
         return MagicMock(returncode=0, stdout="", stderr="")
 
     monkeypatch.setattr("subprocess.run", _run)
-    from maverick.tools.ffmpeg_tool import ffmpeg_tool
+    from lightwork.tools.ffmpeg_tool import ffmpeg_tool
     out = ffmpeg_tool().fn({
         "op": "convert", "input_path": "/tmp/a.mp4",
         "output_path": "/tmp/b.mp4",
@@ -463,7 +463,7 @@ def test_ffmpeg_info_parses_ffprobe(monkeypatch):
             stderr="",
         ),
     )
-    from maverick.tools.ffmpeg_tool import ffmpeg_tool
+    from lightwork.tools.ffmpeg_tool import ffmpeg_tool
     out = ffmpeg_tool().fn({"op": "info", "input_path": "/tmp/a.mp4"})
     assert "mov,mp4" in out and "1920x1080" in out
 
@@ -471,13 +471,13 @@ def test_ffmpeg_info_parses_ffprobe(monkeypatch):
 # ---------- pandoc ----------
 
 def test_pandoc_requires_op():
-    from maverick.tools.pandoc_tool import pandoc_tool
+    from lightwork.tools.pandoc_tool import pandoc_tool
     assert "op is required" in pandoc_tool().fn({})
 
 
 def test_pandoc_missing(monkeypatch):
     monkeypatch.setattr("shutil.which", lambda b: None)
-    from maverick.tools.pandoc_tool import pandoc_tool
+    from lightwork.tools.pandoc_tool import pandoc_tool
     out = pandoc_tool().fn({"op": "convert",
                               "input_path": "/x", "output_path": "/y"})
     assert "pandoc" in out and "PATH" in out
@@ -491,7 +491,7 @@ def test_pandoc_markdown_to_html(monkeypatch):
             returncode=0, stdout="<p>Hello</p>\n", stderr="",
         ),
     )
-    from maverick.tools.pandoc_tool import pandoc_tool
+    from lightwork.tools.pandoc_tool import pandoc_tool
     out = pandoc_tool().fn({"op": "markdown_to_html", "text": "Hello"})
     assert "<p>Hello</p>" in out
 
@@ -499,13 +499,13 @@ def test_pandoc_markdown_to_html(monkeypatch):
 # ---------- ImageMagick ----------
 
 def test_imagemagick_requires_op():
-    from maverick.tools.imagemagick_tool import imagemagick_tool
+    from lightwork.tools.imagemagick_tool import imagemagick_tool
     assert "op is required" in imagemagick_tool().fn({})
 
 
 def test_imagemagick_missing(monkeypatch):
     monkeypatch.setattr("shutil.which", lambda b: None)
-    from maverick.tools.imagemagick_tool import imagemagick_tool
+    from lightwork.tools.imagemagick_tool import imagemagick_tool
     out = imagemagick_tool().fn({"op": "resize",
                                    "input_path": "a.png",
                                    "output_path": "b.png"})
@@ -519,7 +519,7 @@ def test_imagemagick_resize(monkeypatch):
         "subprocess.run",
         lambda *a, **k: MagicMock(returncode=0, stdout="", stderr=""),
     )
-    from maverick.tools.imagemagick_tool import imagemagick_tool
+    from lightwork.tools.imagemagick_tool import imagemagick_tool
     out = imagemagick_tool().fn({
         "op": "resize", "input_path": "/tmp/a.png",
         "output_path": "/tmp/b.png", "width": 800,
@@ -536,7 +536,7 @@ def test_imagemagick_identify_parses(monkeypatch):
             returncode=0, stdout="1024 768 PNG 200KB image.png\n", stderr="",
         ),
     )
-    from maverick.tools.imagemagick_tool import imagemagick_tool
+    from lightwork.tools.imagemagick_tool import imagemagick_tool
     out = imagemagick_tool().fn({"op": "identify", "input_path": "/tmp/a.png"})
     assert "1024x768" in out and "PNG" in out
 
@@ -544,7 +544,7 @@ def test_imagemagick_identify_parses(monkeypatch):
 # ---------- GA4 ----------
 
 def test_ga4_requires_op():
-    from maverick.tools.ga4_tool import ga4_tool
+    from lightwork.tools.ga4_tool import ga4_tool
     assert "op is required" in ga4_tool().fn({})
 
 
@@ -552,7 +552,7 @@ def test_ga4_send_event_requires_keys(monkeypatch):
     monkeypatch.delenv("GA4_MEASUREMENT_ID", raising=False)
     monkeypatch.delenv("GA4_API_SECRET", raising=False)
     _fake_httpx(monkeypatch, post=MagicMock())
-    from maverick.tools.ga4_tool import ga4_tool
+    from lightwork.tools.ga4_tool import ga4_tool
     out = ga4_tool().fn({"op": "send_event",
                           "client_id": "u", "name": "signup"})
     assert "GA4_MEASUREMENT_ID" in out
@@ -563,7 +563,7 @@ def test_ga4_send_event_posts(monkeypatch):
     monkeypatch.setenv("GA4_API_SECRET", "sec")
     _fake_httpx(monkeypatch,
                 post=MagicMock(return_value=_resp(204, "")))
-    from maverick.tools.ga4_tool import ga4_tool
+    from lightwork.tools.ga4_tool import ga4_tool
     out = ga4_tool().fn({
         "op": "send_event", "client_id": "u", "name": "signup",
         "params": {"value": 1},
@@ -575,7 +575,7 @@ def test_ga4_run_report_requires_keys(monkeypatch):
     monkeypatch.delenv("GA4_ACCESS_TOKEN", raising=False)
     monkeypatch.delenv("GA4_PROPERTY_ID", raising=False)
     _fake_httpx(monkeypatch, post=MagicMock())
-    from maverick.tools.ga4_tool import ga4_tool
+    from lightwork.tools.ga4_tool import ga4_tool
     out = ga4_tool().fn({"op": "run_report"})
     assert "GA4_ACCESS_TOKEN" in out
 
@@ -583,12 +583,12 @@ def test_ga4_run_report_requires_keys(monkeypatch):
 # ---------- Plaid ----------
 
 def test_plaid_requires_op():
-    from maverick.tools.plaid_tool import plaid_tool
+    from lightwork.tools.plaid_tool import plaid_tool
     assert "op is required" in plaid_tool().fn({})
 
 
 def test_plaid_requires_access_token():
-    from maverick.tools.plaid_tool import plaid_tool
+    from lightwork.tools.plaid_tool import plaid_tool
     out = plaid_tool().fn({"op": "accounts"})
     assert "access_token" in out
 
@@ -597,7 +597,7 @@ def test_plaid_missing_secrets(monkeypatch):
     monkeypatch.delenv("PLAID_CLIENT_ID", raising=False)
     monkeypatch.delenv("PLAID_SECRET", raising=False)
     _fake_httpx(monkeypatch, post=MagicMock())
-    from maverick.tools.plaid_tool import plaid_tool
+    from lightwork.tools.plaid_tool import plaid_tool
     out = plaid_tool().fn({"op": "accounts", "access_token": "tok"})
     assert "PLAID_CLIENT_ID" in out
 
@@ -612,7 +612,7 @@ def test_plaid_accounts_renders(monkeypatch):
     }]}
     _fake_httpx(monkeypatch,
                 post=MagicMock(return_value=_resp(200, body)))
-    from maverick.tools.plaid_tool import plaid_tool
+    from lightwork.tools.plaid_tool import plaid_tool
     out = plaid_tool().fn({"op": "accounts", "access_token": "tok"})
     assert "Checking" in out and "1,234.56" in out
 
@@ -622,7 +622,7 @@ def test_plaid_accounts_renders(monkeypatch):
 def test_workflow_runs_simple_dag():
     from unittest.mock import MagicMock
 
-    from maverick.workflow import Step, Workflow
+    from lightwork.workflow import Step, Workflow
 
     reg = MagicMock()
     outputs = iter(["A-out", "B-out", "C-out"])
@@ -645,7 +645,7 @@ def test_workflow_runs_simple_dag():
 
 
 def test_workflow_stops_on_error():
-    from maverick.workflow import Step, Workflow
+    from lightwork.workflow import Step, Workflow
 
     class _Reg:
         async def run(self, name, args):
@@ -665,7 +665,7 @@ def test_workflow_stops_on_error():
 
 
 def test_workflow_rejects_cycle():
-    from maverick.workflow import Step, Workflow, WorkflowCycle
+    from lightwork.workflow import Step, Workflow, WorkflowCycle
     try:
         Workflow(steps=[
             Step("a", "x", depends_on=["b"]),
@@ -677,7 +677,7 @@ def test_workflow_rejects_cycle():
 
 
 def test_workflow_rejects_self_dep():
-    from maverick.workflow import Step, Workflow, WorkflowCycle
+    from lightwork.workflow import Step, Workflow, WorkflowCycle
     try:
         Workflow(steps=[Step("a", "x", depends_on=["a"])])
     except WorkflowCycle:
@@ -686,7 +686,7 @@ def test_workflow_rejects_self_dep():
 
 
 def test_workflow_rejects_unknown_dep():
-    from maverick.workflow import Step, Workflow
+    from lightwork.workflow import Step, Workflow
     try:
         Workflow(steps=[Step("a", "x", {"y": "${nope.out}"})])
     except ValueError as e:
@@ -696,7 +696,7 @@ def test_workflow_rejects_unknown_dep():
 
 
 def test_workflow_resolves_string_placeholders():
-    from maverick.workflow import Step, Workflow
+    from lightwork.workflow import Step, Workflow
 
     seen: list[dict] = []
 
@@ -718,8 +718,8 @@ def test_workflow_resolves_string_placeholders():
 # ---------- registration smoke ----------
 
 def test_new_tools_register(tmp_path):
-    from maverick.sandbox.local import LocalBackend
-    from maverick.tools import base_registry
+    from lightwork.sandbox.local import LocalBackend
+    from lightwork.tools import base_registry
 
     class _W:
         def open_questions(self, gid):

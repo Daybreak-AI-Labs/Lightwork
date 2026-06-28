@@ -17,9 +17,9 @@ from __future__ import annotations
 import importlib.util
 
 import pytest
-from maverick import crypto_at_rest as car
-from maverick.audit import signing
-from maverick.audit.signing import AuditSigner
+from lightwork import crypto_at_rest as car
+from lightwork.audit import signing
+from lightwork.audit.signing import AuditSigner
 
 requires_crypto = pytest.mark.skipif(
     importlib.util.find_spec("cryptography") is None,
@@ -31,7 +31,7 @@ requires_crypto = pytest.mark.skipif(
 def _isolate(monkeypatch, tmp_path):
     for v in ("MAVERICK_ENCRYPT_AT_REST", "MAVERICK_ENCRYPTION_KEY", "MAVERICK_ENTERPRISE"):
         monkeypatch.delenv(v, raising=False)
-    monkeypatch.setattr("maverick.config.load_config", lambda *a, **k: {})
+    monkeypatch.setattr("lightwork.config.load_config", lambda *a, **k: {})
     monkeypatch.setattr(car, "_KEY_PATH", tmp_path / "atrest.key")
     monkeypatch.setattr(signing, "KEY_DIR", tmp_path / "keys")
 
@@ -43,14 +43,14 @@ def _signed_day(audit_dir, day, events):
 
 
 def _seal(audit_dir, monkeypatch, today="2099-12-31"):
-    from maverick.audit.sealing import seal_closed_segments
+    from lightwork.audit.sealing import seal_closed_segments
     monkeypatch.setenv("MAVERICK_ENCRYPT_AT_REST", "1")
     return seal_closed_segments(audit_dir, today=today)
 
 
 @requires_crypto
 def test_tail_reads_sealed_past_day(monkeypatch, tmp_path):
-    from maverick.audit.writer import AuditLog
+    from lightwork.audit.writer import AuditLog
     audit_dir = tmp_path / "audit"
     audit_dir.mkdir()
     _signed_day(audit_dir, "2020-01-01",
@@ -64,7 +64,7 @@ def test_tail_reads_sealed_past_day(monkeypatch, tmp_path):
 
 @requires_crypto
 def test_grep_reads_sealed_past_day(monkeypatch, tmp_path):
-    from maverick.audit.writer import AuditLog
+    from lightwork.audit.writer import AuditLog
     audit_dir = tmp_path / "audit"
     audit_dir.mkdir()
     _signed_day(audit_dir, "2020-01-01",
@@ -78,9 +78,9 @@ def test_grep_reads_sealed_past_day(monkeypatch, tmp_path):
 
 @requires_crypto
 def test_scrub_user_handles_sealed_segment_and_keeps_it_sealed(monkeypatch, tmp_path):
-    from maverick.audit.erase import scrub_user
-    from maverick.audit.sealing import segment_text
-    from maverick.crypto_at_rest import is_sealed
+    from lightwork.audit.erase import scrub_user
+    from lightwork.audit.sealing import segment_text
+    from lightwork.crypto_at_rest import is_sealed
 
     audit_dir = tmp_path / "audit"
     audit_dir.mkdir()
@@ -108,9 +108,9 @@ def test_scrub_user_handles_sealed_segment_and_keeps_it_sealed(monkeypatch, tmp_
 
 @requires_crypto
 def test_delete_user_handles_sealed_segment(monkeypatch, tmp_path):
-    from maverick.audit.erase import delete_user
-    from maverick.audit.sealing import segment_text
-    from maverick.crypto_at_rest import is_sealed
+    from lightwork.audit.erase import delete_user
+    from lightwork.audit.sealing import segment_text
+    from lightwork.crypto_at_rest import is_sealed
 
     audit_dir = tmp_path / "audit"
     audit_dir.mkdir()

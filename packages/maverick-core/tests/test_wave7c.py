@@ -7,28 +7,28 @@ import pytest
 
 class TestFirecrackerBackend:
     def test_local_provider_requires_firecracker_binary(self, monkeypatch):
-        from maverick.sandbox.firecracker import FirecrackerBackend
+        from lightwork.sandbox.firecracker import FirecrackerBackend
         monkeypatch.setattr("shutil.which", lambda c: None)
         from pathlib import Path
         with pytest.raises(NotImplementedError, match="firecracker"):
             FirecrackerBackend(workdir=Path.cwd(), provider="local")
 
     def test_e2b_provider_requires_api_key(self, monkeypatch):
-        from maverick.sandbox.firecracker import FirecrackerBackend
+        from lightwork.sandbox.firecracker import FirecrackerBackend
         monkeypatch.delenv("E2B_API_KEY", raising=False)
         from pathlib import Path
         with pytest.raises(ValueError, match="E2B_API_KEY"):
             FirecrackerBackend(workdir=Path.cwd(), provider="e2b")
 
     def test_e2b_picks_up_env_key(self, monkeypatch):
-        from maverick.sandbox.firecracker import FirecrackerBackend
+        from lightwork.sandbox.firecracker import FirecrackerBackend
         monkeypatch.setenv("E2B_API_KEY", "test-key")
         from pathlib import Path
         b = FirecrackerBackend(workdir=Path.cwd(), provider="e2b")
         assert b.api_key == "test-key"
 
     def test_unknown_provider_raises(self, monkeypatch):
-        from maverick.sandbox.firecracker import FirecrackerBackend
+        from lightwork.sandbox.firecracker import FirecrackerBackend
         monkeypatch.setattr("shutil.which", lambda c: "/usr/bin/firecracker")
         from pathlib import Path
         with pytest.raises(ValueError, match="provider"):
@@ -40,7 +40,7 @@ class TestFirecrackerBackend:
         We force the e2b provider so __post_init__'s `firecracker` binary
         check doesn't run (E2B path only needs an API key).
         """
-        from maverick.sandbox import FirecrackerBackend
+        from lightwork.sandbox import FirecrackerBackend
         monkeypatch.setenv("E2B_API_KEY", "test-key")
         # Direct construction; the factory tests are covered by build_sandbox
         # itself but they require the config layer to set provider=e2b.
@@ -55,7 +55,7 @@ class TestFirecrackerBackend:
 
 class TestNullPRM:
     def test_returns_neutral(self):
-        from maverick.prm import NullPRM, StepContext
+        from lightwork.prm import NullPRM, StepContext
         prm = NullPRM()
         out = prm.score(StepContext(goal_id=1, step_index=0, role="researcher"))
         assert out.promise == 0.5
@@ -65,7 +65,7 @@ class TestNullPRM:
 
 class TestHeuristicPRM:
     def test_error_strongly_negative(self):
-        from maverick.prm import HeuristicPRM, StepContext
+        from lightwork.prm import HeuristicPRM, StepContext
         out = HeuristicPRM().score(StepContext(
             goal_id=1, step_index=0, role="coder", error="something broke",
         ))
@@ -73,7 +73,7 @@ class TestHeuristicPRM:
         assert out.progress <= 0
 
     def test_final_strongly_positive(self):
-        from maverick.prm import HeuristicPRM, StepContext
+        from lightwork.prm import HeuristicPRM, StepContext
         out = HeuristicPRM().score(StepContext(
             goal_id=1, step_index=5, role="orchestrator", is_final=True,
         ))
@@ -81,7 +81,7 @@ class TestHeuristicPRM:
         assert out.progress > 0
 
     def test_tool_success_positive_progress(self):
-        from maverick.prm import HeuristicPRM, StepContext
+        from lightwork.prm import HeuristicPRM, StepContext
         out = HeuristicPRM().score(StepContext(
             goal_id=1, step_index=2, role="researcher",
             tool_name="read_file", tool_succeeded=True,
@@ -90,7 +90,7 @@ class TestHeuristicPRM:
         assert out.progress > 0
 
     def test_tool_failure_negative_progress(self):
-        from maverick.prm import HeuristicPRM, StepContext
+        from lightwork.prm import HeuristicPRM, StepContext
         out = HeuristicPRM().score(StepContext(
             goal_id=1, step_index=2, role="researcher",
             tool_name="shell", tool_succeeded=False,
@@ -99,7 +99,7 @@ class TestHeuristicPRM:
         assert out.progress < 0
 
     def test_thinking_decays(self):
-        from maverick.prm import HeuristicPRM, StepContext
+        from lightwork.prm import HeuristicPRM, StepContext
         out = HeuristicPRM().score(StepContext(
             goal_id=1, step_index=10, role="researcher", prior_step_score=0.8,
         ))
@@ -113,7 +113,7 @@ class TestRemotePRMFallback:
         # Force ImportError on httpx.
         import sys
 
-        from maverick.prm import RemotePRM, StepContext
+        from lightwork.prm import RemotePRM, StepContext
         monkeypatch.setitem(sys.modules, "httpx", None)
         prm = RemotePRM(endpoint="http://localhost:8888")
         out = prm.score(StepContext(
@@ -125,19 +125,19 @@ class TestRemotePRMFallback:
 
 class TestBuildFromEnv:
     def test_default_is_null(self, monkeypatch):
-        from maverick.prm import NullPRM, build_from_env
+        from lightwork.prm import NullPRM, build_from_env
         monkeypatch.delenv("MAVERICK_PRM", raising=False)
         prm = build_from_env()
         assert isinstance(prm, NullPRM)
 
     def test_heuristic_via_env(self, monkeypatch):
-        from maverick.prm import HeuristicPRM, build_from_env
+        from lightwork.prm import HeuristicPRM, build_from_env
         monkeypatch.setenv("MAVERICK_PRM", "heuristic")
         prm = build_from_env()
         assert isinstance(prm, HeuristicPRM)
 
     def test_remote_without_endpoint_falls_back(self, monkeypatch):
-        from maverick.prm import HeuristicPRM, build_from_env
+        from lightwork.prm import HeuristicPRM, build_from_env
         monkeypatch.setenv("MAVERICK_PRM", "remote")
         monkeypatch.delenv("MAVERICK_PRM_ENDPOINT", raising=False)
         prm = build_from_env()
@@ -149,7 +149,7 @@ class TestBuildFromEnv:
 
 class TestTrainingSchema:
     def test_klear_format_shape(self):
-        from maverick.training.schema import (
+        from lightwork.training.schema import (
             TrainingStep,
             TrainingTrajectory,
             to_klear_jsonl,
@@ -188,7 +188,7 @@ class TestTrainingSchema:
 
 class TestIngest:
     def test_build_trajectory_labels_steps(self):
-        from maverick.training.ingest import build_trajectory
+        from lightwork.training.ingest import build_trajectory
         record = {
             "task_brief_hash": "abc",
             "ts": 1717000000,
@@ -222,16 +222,16 @@ class TestIngest:
         task_brief_hash (repeated attempts at one task share that hash). It used
         to be left None, so build_preference_pairs skipped every row -> 0 pairs.
         """
-        from maverick.training.ingest import build_trajectory
+        from lightwork.training.ingest import build_trajectory
         traj = build_trajectory({"task_brief_hash": "abc", "ts": 1}, [])
         assert traj.task_family == "abc"
 
     def test_ingested_rows_pair_when_rewards_differ(self):
         """End-to-end: two attempts at the SAME task with a reward gap produce a
         DPO pair once task_family is populated (regression for 0-pairs bug)."""
-        from maverick.training.ingest import build_trajectory
-        from maverick.training.rlaif import build_preference_pairs
-        from maverick.training.schema import to_klear_jsonl
+        from lightwork.training.ingest import build_trajectory
+        from lightwork.training.rlaif import build_preference_pairs
+        from lightwork.training.schema import to_klear_jsonl
         good = to_klear_jsonl(build_trajectory(
             {"task_brief_hash": "fam", "ts": 1, "outcome": "success",
              "reward": 1.0, "verifier_confidence": 0.95}, []))
@@ -247,7 +247,7 @@ class TestIngest:
         """A rejected pre-revision draft ingests as a low-reward row in the SAME
         task_family as the accepted run, so DPO pairs the two (chosen=accepted
         ~1.0, rejected=draft confidence). Drafts without text are skipped."""
-        from maverick.training.ingest import (
+        from lightwork.training.ingest import (
             build_rejected_trajectories,
             rejected_trajectory_id,
         )
@@ -266,12 +266,12 @@ class TestIngest:
         assert r.trajectory_id == rejected_trajectory_id(rec, 0)
 
     def test_rejected_draft_forms_a_dpo_pair_end_to_end(self):
-        from maverick.training.ingest import (
+        from lightwork.training.ingest import (
             build_rejected_trajectories,
             build_trajectory,
         )
-        from maverick.training.rlaif import build_preference_pairs
-        from maverick.training.schema import to_klear_jsonl
+        from lightwork.training.rlaif import build_preference_pairs
+        from lightwork.training.schema import to_klear_jsonl
         rec = {
             "task_brief_hash": "fam", "ts": 7, "outcome": "success", "reward": 1.0,
             "verifier_confidence": 0.92,
@@ -287,7 +287,7 @@ class TestIngest:
         """Best-of-N candidates ingest as rows rewarded by their OBJECTIVE test
         score (not the LLM verifier), all in the same task_family. Text-less
         candidates are skipped."""
-        from maverick.training.ingest import (
+        from lightwork.training.ingest import (
             build_candidate_trajectories,
             candidate_trajectory_id,
         )
@@ -307,9 +307,9 @@ class TestIngest:
         assert cands[0].outcome == "candidate"
 
     def test_bestofn_candidates_form_a_dpo_pair_end_to_end(self):
-        from maverick.training.ingest import build_candidate_trajectories
-        from maverick.training.rlaif import build_preference_pairs
-        from maverick.training.schema import to_klear_jsonl
+        from lightwork.training.ingest import build_candidate_trajectories
+        from lightwork.training.rlaif import build_preference_pairs
+        from lightwork.training.schema import to_klear_jsonl
         rec = {
             "task_brief_hash": "fam", "ts": 7,
             "scored_candidates": [
@@ -324,14 +324,14 @@ class TestIngest:
         assert pairs[0]["margin"] == 1.0
 
     def test_load_donations_empty_dir(self, tmp_path):
-        from maverick.training.ingest import load_donations
+        from lightwork.training.ingest import load_donations
         out = list(load_donations(tmp_path))
         assert out == []
 
     def test_load_donations_reads_json(self, tmp_path):
         import json
 
-        from maverick.training.ingest import load_donations
+        from lightwork.training.ingest import load_donations
         (tmp_path / "a.json").write_text(json.dumps({"x": 1}))
         (tmp_path / "b.json").write_text(json.dumps({"x": 2}))
         records = list(load_donations(tmp_path))
@@ -339,7 +339,7 @@ class TestIngest:
         assert {r["x"] for r in records} == {1, 2}
 
     def test_load_donations_skips_bad_json(self, tmp_path):
-        from maverick.training.ingest import load_donations
+        from lightwork.training.ingest import load_donations
         (tmp_path / "bad.json").write_text("not valid json")
         (tmp_path / "good.json").write_text('{"x": 1}')
         records = list(load_donations(tmp_path))
@@ -355,7 +355,7 @@ class TestFirecrackerStrictDefault:
         import shutil
         from pathlib import Path
 
-        from maverick.sandbox.firecracker import FirecrackerBackend
+        from lightwork.sandbox.firecracker import FirecrackerBackend
         # Construct successfully (firecracker binary 'present').
         monkeypatch.setattr(shutil, "which", lambda c: "/usr/bin/firecracker")
         return FirecrackerBackend(workdir=Path(tmp_path), provider="local")

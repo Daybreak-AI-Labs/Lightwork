@@ -25,14 +25,14 @@ def _seed_repo(tmp_path):
 
 
 def test_test_impact_requires_op():
-    from maverick.tools.test_impact import test_impact
+    from lightwork.tools.test_impact import test_impact
     assert "op is required" in test_impact().fn({})
 
 
 def test_test_impact_analyze_files(tmp_path, monkeypatch):
     _seed_repo(tmp_path)
     monkeypatch.chdir(tmp_path)
-    from maverick.tools.test_impact import test_impact
+    from lightwork.tools.test_impact import test_impact
     out = test_impact().fn({
         "op": "analyze_files",
         "paths": ["src/pkg/foo.py"],
@@ -52,7 +52,7 @@ def test_test_impact_parses_unified_diff(tmp_path, monkeypatch):
 -def bar(): pass
 +def bar(): return 1
 """
-    from maverick.tools.test_impact import test_impact
+    from lightwork.tools.test_impact import test_impact
     out = test_impact().fn({
         "op": "analyze",
         "diff": diff,
@@ -64,7 +64,7 @@ def test_test_impact_parses_unified_diff(tmp_path, monkeypatch):
 def test_test_impact_empty_diff(tmp_path, monkeypatch):
     _seed_repo(tmp_path)
     monkeypatch.chdir(tmp_path)
-    from maverick.tools.test_impact import test_impact
+    from lightwork.tools.test_impact import test_impact
     out = test_impact().fn({
         "op": "analyze", "diff": "",
     })
@@ -74,7 +74,7 @@ def test_test_impact_empty_diff(tmp_path, monkeypatch):
 def test_test_impact_no_test_dir(tmp_path, monkeypatch):
     (tmp_path / "src").mkdir()
     monkeypatch.chdir(tmp_path)
-    from maverick.tools.test_impact import test_impact
+    from lightwork.tools.test_impact import test_impact
     out = test_impact().fn({
         "op": "analyze_files",
         "paths": ["src/x.py"],
@@ -85,19 +85,19 @@ def test_test_impact_no_test_dir(tmp_path, monkeypatch):
 # ---------- YouTube tool ----------
 
 def test_youtube_requires_op():
-    from maverick.tools.youtube import youtube
+    from lightwork.tools.youtube import youtube
     assert "op is required" in youtube().fn({})
 
 
 def test_youtube_missing_lib(monkeypatch):
     monkeypatch.setitem(sys.modules, "youtube_transcript_api", None)
-    from maverick.tools.youtube import youtube
+    from lightwork.tools.youtube import youtube
     out = youtube().fn({"op": "transcript", "video_id": "dQw4w9WgXcQ"})
     assert "youtube-transcript-api not installed" in out
 
 
 def test_youtube_normalize_id():
-    from maverick.tools.youtube import _normalize_id
+    from lightwork.tools.youtube import _normalize_id
     assert _normalize_id("dQw4w9WgXcQ") == "dQw4w9WgXcQ"
     assert _normalize_id("https://youtu.be/dQw4w9WgXcQ") == "dQw4w9WgXcQ"
     assert _normalize_id("https://www.youtube.com/watch?v=dQw4w9WgXcQ&t=42") == "dQw4w9WgXcQ"
@@ -116,7 +116,7 @@ def test_youtube_transcript_renders(monkeypatch):
 
     fake.YouTubeTranscriptApi = _API
     monkeypatch.setitem(sys.modules, "youtube_transcript_api", fake)
-    from maverick.tools.youtube import youtube
+    from lightwork.tools.youtube import youtube
     out = youtube().fn({"op": "transcript", "video_id": "abc"})
     assert "Never gonna give you up" in out
 
@@ -135,7 +135,7 @@ def test_youtube_chapters_includes_timestamps(monkeypatch):
 
     fake.YouTubeTranscriptApi = _API
     monkeypatch.setitem(sys.modules, "youtube_transcript_api", fake)
-    from maverick.tools.youtube import youtube
+    from lightwork.tools.youtube import youtube
     out = youtube().fn({"op": "chapters", "video_id": "abc"})
     assert "[00:00:00]" in out
     assert "[00:00:11]" in out
@@ -144,7 +144,7 @@ def test_youtube_chapters_includes_timestamps(monkeypatch):
 # ---------- Notion tool ----------
 
 def test_notion_requires_op():
-    from maverick.tools.notion import notion
+    from lightwork.tools.notion import notion
     assert "op is required" in notion().fn({})
 
 
@@ -153,7 +153,7 @@ def test_notion_missing_token(monkeypatch):
     fake = types.ModuleType("httpx")
     fake.Client = MagicMock()
     monkeypatch.setitem(sys.modules, "httpx", fake)
-    from maverick.tools.notion import notion
+    from lightwork.tools.notion import notion
     out = notion().fn({"op": "search", "query": "x"})
     assert "NOTION_TOKEN" in out
 
@@ -178,7 +178,7 @@ def test_notion_search_renders(monkeypatch):
     fake_httpx.Client = MagicMock(return_value=fake_client)
     monkeypatch.setitem(sys.modules, "httpx", fake_httpx)
 
-    from maverick.tools.notion import notion
+    from lightwork.tools.notion import notion
     out = notion().fn({"op": "search", "query": "page"})
     assert "My Page" in out
 
@@ -212,7 +212,7 @@ def test_notion_search_follows_cursor_pagination(monkeypatch):
     fake_httpx.Client = MagicMock(return_value=fake_client)
     monkeypatch.setitem(sys.modules, "httpx", fake_httpx)
 
-    from maverick.tools.notion import notion
+    from lightwork.tools.notion import notion
     out = notion().fn({"op": "search", "query": "x", "limit": 50})
     assert "Alpha" in out and "Beta" in out
     assert fake_client.post.call_count == 2
@@ -221,7 +221,7 @@ def test_notion_search_follows_cursor_pagination(monkeypatch):
 
 
 def test_notion_page_create_requires_args():
-    from maverick.tools.notion import notion
+    from lightwork.tools.notion import notion
     out = notion().fn({"op": "page_create"})
     assert "parent_id and title" in out
 
@@ -229,7 +229,7 @@ def test_notion_page_create_requires_args():
 # ---------- Translate tool ----------
 
 def test_translate_requires_text():
-    from maverick.tools.translate import translate
+    from lightwork.tools.translate import translate
     out = translate().fn({"op": "translate", "target": "es"})
     assert "text is required" in out
 
@@ -246,7 +246,7 @@ def test_translate_deepl_path(monkeypatch):
     fake_httpx.post = MagicMock(return_value=resp)
     monkeypatch.setitem(sys.modules, "httpx", fake_httpx)
 
-    from maverick.tools.translate import translate
+    from lightwork.tools.translate import translate
     out = translate().fn({"op": "translate", "text": "hello world",
                           "target": "es"})
     assert "Hola mundo" in out
@@ -265,7 +265,7 @@ def test_translate_libre_fallback(monkeypatch):
     fake_httpx.post = MagicMock(return_value=resp)
     monkeypatch.setitem(sys.modules, "httpx", fake_httpx)
 
-    from maverick.tools.translate import translate
+    from lightwork.tools.translate import translate
     out = translate().fn({"op": "translate", "text": "hello", "target": "fr"})
     assert "Bonjour" in out
 
@@ -285,7 +285,7 @@ def test_translate_backend_arg_is_case_insensitive(monkeypatch):
     fake_httpx.post = MagicMock(return_value=resp)
     monkeypatch.setitem(sys.modules, "httpx", fake_httpx)
 
-    from maverick.tools.translate import translate
+    from lightwork.tools.translate import translate
     out = translate().fn({"op": "translate", "text": "hi", "target": "es",
                           "backend": "  DeepL  "})
     assert "Hola" in out
@@ -303,7 +303,7 @@ def test_translate_detect_libre(monkeypatch):
     fake_httpx = types.ModuleType("httpx")
     fake_httpx.post = MagicMock(return_value=resp)
     monkeypatch.setitem(sys.modules, "httpx", fake_httpx)
-    from maverick.tools.translate import translate
+    from lightwork.tools.translate import translate
     out = translate().fn({"op": "detect", "text": "こんにちは"})
     assert "ja" in out
 
@@ -311,7 +311,7 @@ def test_translate_detect_libre(monkeypatch):
 # ---------- Slack bot tool ----------
 
 def test_slack_bot_requires_op():
-    from maverick.tools.slack_bot import slack_bot
+    from lightwork.tools.slack_bot import slack_bot
     assert "op is required" in slack_bot().fn({})
 
 
@@ -320,7 +320,7 @@ def test_slack_bot_missing_token(monkeypatch):
     fake = types.ModuleType("httpx")
     fake.post = MagicMock()
     monkeypatch.setitem(sys.modules, "httpx", fake)
-    from maverick.tools.slack_bot import slack_bot
+    from lightwork.tools.slack_bot import slack_bot
     out = slack_bot().fn({"op": "post", "channel": "#x", "text": "hi"})
     assert "SLACK_BOT_TOKEN" in out
 
@@ -336,7 +336,7 @@ def test_slack_bot_post_calls_api(monkeypatch):
     fake_httpx.post = MagicMock(return_value=resp)
     monkeypatch.setitem(sys.modules, "httpx", fake_httpx)
 
-    from maverick.tools.slack_bot import slack_bot
+    from lightwork.tools.slack_bot import slack_bot
     out = slack_bot().fn({"op": "post", "channel": "C12345", "text": "hello"})
     assert "posted to C12345" in out
     # Verify auth header was set.
@@ -345,7 +345,7 @@ def test_slack_bot_post_calls_api(monkeypatch):
 
 
 def test_slack_bot_post_validates_args():
-    from maverick.tools.slack_bot import slack_bot
+    from lightwork.tools.slack_bot import slack_bot
     out = slack_bot().fn({"op": "post"})
     assert "post requires channel and text" in out
 
@@ -360,7 +360,7 @@ def test_slack_bot_history_renders(monkeypatch):
     fake_httpx = types.ModuleType("httpx")
     fake_httpx.get = MagicMock(return_value=resp)
     monkeypatch.setitem(sys.modules, "httpx", fake_httpx)
-    from maverick.tools.slack_bot import slack_bot
+    from lightwork.tools.slack_bot import slack_bot
     out = slack_bot().fn({"op": "history", "channel": "C1"})
     assert "U1" in out and "hi" in out
 
@@ -383,7 +383,7 @@ def test_slack_bot_history_follows_cursor(monkeypatch):
     fake_httpx = types.ModuleType("httpx")
     fake_httpx.get = get
     monkeypatch.setitem(sys.modules, "httpx", fake_httpx)
-    from maverick.tools.slack_bot import slack_bot
+    from lightwork.tools.slack_bot import slack_bot
     out = slack_bot().fn({"op": "history", "channel": "C1", "limit": 100})
     assert "page-one" in out and "page-two" in out
     assert get.call_count == 2
@@ -393,8 +393,8 @@ def test_slack_bot_history_follows_cursor(monkeypatch):
 # ---------- registration smoke ----------
 
 def test_new_tools_register(tmp_path):
-    from maverick.sandbox.local import LocalBackend
-    from maverick.tools import base_registry
+    from lightwork.sandbox.local import LocalBackend
+    from lightwork.tools import base_registry
 
     class _W:
         def open_questions(self, gid):

@@ -7,8 +7,8 @@ from __future__ import annotations
 
 from pathlib import Path
 
-import maverick.tools.view_video as vv
-from maverick.tools.view_video import _evenly_spaced, view_video
+import lightwork.tools.view_video as vv
+from lightwork.tools.view_video import _evenly_spaced, view_video
 
 # ---------- pure helpers ----------
 
@@ -84,7 +84,7 @@ def _prep(monkeypatch, tmp_path, *, frames):
     monkeypatch.setattr(vv, "_need", lambda b: None)
     monkeypatch.setattr(vv, "_probe_duration", lambda src, sandbox: 12.0)
     monkeypatch.setattr(vv, "_extract_frames", lambda src, ts, tmp, sandbox: frames)
-    monkeypatch.setattr("maverick.llm.LLM", _FakeLLM)
+    monkeypatch.setattr("lightwork.llm.LLM", _FakeLLM)
     return vid
 
 
@@ -105,7 +105,7 @@ def test_view_video_full_flow_builds_vision_blocks(monkeypatch, tmp_path):
 
 
 def test_view_video_passes_bound_budget_to_vision_call(monkeypatch, tmp_path):
-    from maverick.budget import Budget
+    from lightwork.budget import Budget
 
     budget = Budget(max_dollars=1.0)
     frames = [(2.0, b"\xff\xd8a")]
@@ -129,7 +129,7 @@ def test_view_video_clamps_num_frames(monkeypatch, tmp_path):
     monkeypatch.setattr(vv, "_need", lambda b: None)
     monkeypatch.setattr(vv, "_probe_duration", lambda src, sandbox: 60.0)
     monkeypatch.setattr(vv, "_extract_frames", _capture)
-    monkeypatch.setattr("maverick.llm.LLM", _FakeLLM)
+    monkeypatch.setattr("lightwork.llm.LLM", _FakeLLM)
     view_video().fn({"source": str(vid), "num_frames": 100})
     assert seen["n"] == 20  # capped at _MAX_FRAMES
 
@@ -159,7 +159,7 @@ def test_view_video_skips_transcript_by_default(monkeypatch, tmp_path):
 # ---------- registry ----------
 
 def test_view_video_registered_by_default():
-    from maverick.tools import base_registry
+    from lightwork.tools import base_registry
 
     class _FakeSandbox:
         pass
@@ -196,7 +196,7 @@ def test_view_video_passes_sandbox_to_run_cmd(monkeypatch, tmp_path):
 
     monkeypatch.setattr(vv, "_need", lambda b: None)
     monkeypatch.setattr(vv, "_run_cmd", _fake_run_cmd)
-    monkeypatch.setattr("maverick.llm.LLM", _FakeLLM)
+    monkeypatch.setattr("lightwork.llm.LLM", _FakeLLM)
 
     class _SB:
         workdir = str(tmp_path)

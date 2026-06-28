@@ -12,25 +12,25 @@ from fastapi.testclient import TestClient
 
 
 def _client():
-    from maverick_dashboard.app import app
+    from lightwork_dashboard.app import app
     return TestClient(app)
 
 
 def _env(monkeypatch, tmp_path):
-    from maverick import world_model
+    from lightwork import world_model
     monkeypatch.setattr(world_model, "DEFAULT_DB", tmp_path / "world.db")
     monkeypatch.setattr(
-        "maverick.audit.writer.DEFAULT_AUDIT_DIR", tmp_path / "audit",
+        "lightwork.audit.writer.DEFAULT_AUDIT_DIR", tmp_path / "audit",
     )
     monkeypatch.delenv("MAVERICK_DASHBOARD_TOKEN", raising=False)
-    import maverick.audit.writer as aw
+    import lightwork.audit.writer as aw
     aw._default = None
-    from maverick_dashboard import app as dash_app
+    from lightwork_dashboard import app as dash_app
     dash_app._world_cache.clear()
 
 
 def test_safe_audit_day_validation():
-    from maverick_dashboard.app import safe_audit_day
+    from lightwork_dashboard.app import safe_audit_day
     assert safe_audit_day("2026-05-28") == "2026-05-28"
     assert safe_audit_day("../../etc/passwd") is None
     assert safe_audit_day("../secret") is None
@@ -65,7 +65,7 @@ def test_audit_grep_api_neutralizes_day_traversal(monkeypatch, tmp_path):
 
 def test_goal_events_endpoint_caps_limit(monkeypatch, tmp_path):
     _env(monkeypatch, tmp_path)
-    from maverick import world_model
+    from lightwork import world_model
     gid = world_model.WorldModel(tmp_path / "world.db").create_goal("g", "d")
     r = _client().get(f"/api/v1/goals/{gid}/events?limit=999999999")
     assert r.status_code == 200
@@ -76,7 +76,7 @@ def test_wrong_content_type_returns_422_not_500(monkeypatch, tmp_path):
     # RequestValidationError whose 'input' was raw bytes; json.dumps couldn't
     # serialize it, turning the 422 into an opaque 500 (user-testing finding).
     _env(monkeypatch, tmp_path)
-    from maverick_dashboard.app import app
+    from lightwork_dashboard.app import app
     c = TestClient(app, headers={"Origin": "http://testserver"},
                    raise_server_exceptions=False)
     r = c.post("/api/v1/goals", content=b"hello world",
@@ -88,7 +88,7 @@ def test_overflow_goal_id_returns_404_not_500(monkeypatch, tmp_path):
     # A goal_id beyond SQLite's signed-64-bit range raised OverflowError ->
     # uncaught -> 500. It can't be a real row, so it must be 404.
     _env(monkeypatch, tmp_path)
-    from maverick_dashboard.app import app
+    from lightwork_dashboard.app import app
     c = TestClient(app, raise_server_exceptions=False)
     big = 2 ** 63 + 1
     for path in (f"/api/v1/goals/{big}", f"/api/v1/goals/{big}/events"):

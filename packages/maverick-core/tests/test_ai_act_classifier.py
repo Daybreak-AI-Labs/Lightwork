@@ -1,7 +1,7 @@
 """ai_act_classifier: EU AI Act risk-tier screening."""
 from __future__ import annotations
 
-from maverick.tools.ai_act_classifier import ai_act_classifier
+from lightwork.tools.ai_act_classifier import ai_act_classifier
 
 
 def _classify(text):
@@ -50,7 +50,7 @@ def test_errors():
 
 
 def test_registered():
-    from maverick.tools import base_registry
+    from lightwork.tools import base_registry
 
     class _W:
         pass

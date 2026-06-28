@@ -10,7 +10,7 @@ import types
 from unittest.mock import AsyncMock, MagicMock
 
 import pytest
-from maverick_channels.threads import ThreadsChannel
+from lightwork_channels.threads import ThreadsChannel
 
 SELF_ID = "17841400000000000"
 OWNER = "ownerhandle"
@@ -103,7 +103,7 @@ def _fake_wm(monkeypatch):
     wm.release_processed_message.side_effect = (
         lambda channel, ext_id: claimed.discard((channel, ext_id))
     )
-    monkeypatch.setattr("maverick.world_model.WorldModel", MagicMock(return_value=wm))
+    monkeypatch.setattr("lightwork.world_model.WorldModel", MagicMock(return_value=wm))
     return wm
 
 
@@ -187,7 +187,7 @@ def test_claim_infra_failure_skips_fail_closed(monkeypatch):
     ch = _channel()
     ch.send = AsyncMock()
     monkeypatch.setattr(
-        "maverick.world_model.WorldModel",
+        "lightwork.world_model.WorldModel",
         MagicMock(side_effect=RuntimeError("no db")),
     )
     _install_httpx(monkeypatch, [], _responder_with([_reply()]))

@@ -1,7 +1,7 @@
 """decision_explainer: per-factor contribution breakdown for additive decisions."""
 from __future__ import annotations
 
-from maverick.tools.decision_explainer import decision_explainer
+from lightwork.tools.decision_explainer import decision_explainer
 
 
 def _e(factors, intercept=None, threshold=None):
@@ -61,7 +61,7 @@ def test_errors():
 
 
 def test_registered():
-    from maverick.tools import base_registry
+    from lightwork.tools import base_registry
 
     class _W:
         pass

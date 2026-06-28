@@ -17,7 +17,7 @@ import pytest
 def opaque_mode(monkeypatch):
     monkeypatch.setenv("MAVERICK_BENCHMARK_OPAQUE", "1")
     monkeypatch.setenv("MAVERICK_CODING_MODE", "1")
-    from maverick.coding_mode import reset_gold_patch_cache
+    from lightwork.coding_mode import reset_gold_patch_cache
     reset_gold_patch_cache()
     yield
     reset_gold_patch_cache()
@@ -25,7 +25,7 @@ def opaque_mode(monkeypatch):
 
 class TestGoldPatchPopped:
     def test_first_read_pops_env_var(self, monkeypatch):
-        from maverick.coding_mode import (
+        from lightwork.coding_mode import (
             get_gold_patch,
             reset_gold_patch_cache,
         )
@@ -39,7 +39,7 @@ class TestGoldPatchPopped:
         reset_gold_patch_cache()
 
     def test_subsequent_reads_return_cached(self, monkeypatch):
-        from maverick.coding_mode import (
+        from lightwork.coding_mode import (
             get_gold_patch,
             reset_gold_patch_cache,
         )
@@ -52,7 +52,7 @@ class TestGoldPatchPopped:
         reset_gold_patch_cache()
 
     def test_new_instance_overwrites_cache(self, monkeypatch):
-        from maverick.coding_mode import (
+        from lightwork.coding_mode import (
             get_gold_patch,
             reset_gold_patch_cache,
         )
@@ -65,7 +65,7 @@ class TestGoldPatchPopped:
         reset_gold_patch_cache()
 
     def test_no_env_returns_empty(self, monkeypatch):
-        from maverick.coding_mode import (
+        from lightwork.coding_mode import (
             get_gold_patch,
             reset_gold_patch_cache,
         )
@@ -76,7 +76,7 @@ class TestGoldPatchPopped:
 
 class TestDotGitBlocked:
     def test_read_file_blocks_dotgit(self, tmp_path, opaque_mode):
-        from maverick.tools.fs import read_file
+        from lightwork.tools.fs import read_file
         (tmp_path / ".git").mkdir()
         (tmp_path / ".git" / "HEAD").write_text("ref: refs/heads/main\n")
 
@@ -89,7 +89,7 @@ class TestDotGitBlocked:
         assert "blocked" in out.lower()
 
     def test_read_file_blocks_nested_dotgit(self, tmp_path, opaque_mode):
-        from maverick.tools.fs import read_file
+        from lightwork.tools.fs import read_file
         (tmp_path / "sub" / ".git").mkdir(parents=True)
         (tmp_path / "sub" / ".git" / "config").write_text("[core]\n")
 
@@ -101,7 +101,7 @@ class TestDotGitBlocked:
         assert "ERROR" in out
 
     def test_read_file_allows_dotgit_in_non_opaque(self, tmp_path, monkeypatch):
-        from maverick.tools.fs import read_file
+        from lightwork.tools.fs import read_file
         monkeypatch.setenv("MAVERICK_BENCHMARK_OPAQUE", "0")
         monkeypatch.setenv("MAVERICK_CODING_MODE", "1")
         (tmp_path / ".git").mkdir()
@@ -121,7 +121,7 @@ class TestStrReplaceEditorOpacity:
     file gating as read_file must apply."""
 
     def test_view_blocks_test_file_in_opaque(self, tmp_path, opaque_mode):
-        from maverick.tools.str_edit import str_replace_editor
+        from lightwork.tools.str_edit import str_replace_editor
         (tmp_path / "tests").mkdir()
         (tmp_path / "tests" / "test_foo.py").write_text(
             "assert expected_value == 42\n"
@@ -138,7 +138,7 @@ class TestStrReplaceEditorOpacity:
         )
 
     def test_view_blocks_dotgit(self, tmp_path, opaque_mode):
-        from maverick.tools.str_edit import str_replace_editor
+        from lightwork.tools.str_edit import str_replace_editor
         (tmp_path / ".git").mkdir()
         (tmp_path / ".git" / "HEAD").write_text("ref: refs/heads/main\n")
 
@@ -151,7 +151,7 @@ class TestStrReplaceEditorOpacity:
         assert "ref:" not in out
 
     def test_view_production_file_allowed(self, tmp_path, opaque_mode):
-        from maverick.tools.str_edit import str_replace_editor
+        from lightwork.tools.str_edit import str_replace_editor
         (tmp_path / "src").mkdir()
         (tmp_path / "src" / "app.py").write_text("def f():\n    return 1\n")
 
@@ -175,7 +175,7 @@ class TestSymlinkBypass:
     def test_symlink_to_dotgit_blocked_in_read_file(self, tmp_path, opaque_mode):
         import os as _os
 
-        from maverick.tools.fs import read_file
+        from lightwork.tools.fs import read_file
         (tmp_path / ".git").mkdir()
         (tmp_path / ".git" / "HEAD").write_text("ref: refs/heads/main\n")
         # Create symlink: safe_dir -> .git
@@ -198,7 +198,7 @@ class TestSymlinkBypass:
     def test_symlink_to_tests_blocked_in_view(self, tmp_path, opaque_mode):
         import os as _os
 
-        from maverick.tools.str_edit import str_replace_editor
+        from lightwork.tools.str_edit import str_replace_editor
         (tmp_path / "tests").mkdir()
         (tmp_path / "tests" / "test_foo.py").write_text(
             "assert expected_value == 42\n"
@@ -219,7 +219,7 @@ class TestTestsDirAllFiles:
     just files matching the test_*.py heuristic."""
 
     def test_conftest_under_tests_blocked(self, tmp_path, opaque_mode):
-        from maverick.tools.fs import read_file
+        from lightwork.tools.fs import read_file
         (tmp_path / "tests").mkdir()
         (tmp_path / "tests" / "conftest.py").write_text("# expected_value = 42")
 
@@ -232,7 +232,7 @@ class TestTestsDirAllFiles:
         assert "expected_value" not in out
 
     def test_init_under_tests_blocked(self, tmp_path, opaque_mode):
-        from maverick.tools.fs import read_file
+        from lightwork.tools.fs import read_file
         (tmp_path / "tests").mkdir()
         (tmp_path / "tests" / "__init__.py").write_text("EXPECTED = 'gold'")
 
@@ -250,14 +250,14 @@ class TestShellGitFlagsBypass:
     when preceded by `-P`, `--git-dir=...`, `-c k=v`, etc."""
 
     def _shell(self, tmp_path):
-        from maverick.tools.shell import shell
+        from lightwork.tools.shell import shell
 
         class _Sandbox:
             workdir = tmp_path
             timeout = 5.0
 
             def exec(self, cmd, timeout=None):
-                from maverick.sandbox.local import ExecResult
+                from lightwork.sandbox.local import ExecResult
                 return ExecResult(stdout="ok", stderr="", exit_code=0)
 
         return shell(_Sandbox())
@@ -299,14 +299,14 @@ class TestShellAnyUtilityReadsDotGit:
     cp, mv, tar all bypass the prior cat-blocker."""
 
     def _shell(self, tmp_path):
-        from maverick.tools.shell import shell
+        from lightwork.tools.shell import shell
 
         class _Sandbox:
             workdir = tmp_path
             timeout = 5.0
 
             def exec(self, cmd, timeout=None):
-                from maverick.sandbox.local import ExecResult
+                from lightwork.sandbox.local import ExecResult
                 return ExecResult(stdout="ok", stderr="", exit_code=0)
 
         return shell(_Sandbox())
@@ -346,7 +346,7 @@ class TestGoldPatchEmptyEnvSentinel:
     def test_empty_env_is_popped_and_cached(self, monkeypatch):
         import os as _os
 
-        from maverick.coding_mode import (
+        from lightwork.coding_mode import (
             get_gold_patch,
             reset_gold_patch_cache,
         )
@@ -357,7 +357,7 @@ class TestGoldPatchEmptyEnvSentinel:
         # Env var must still be popped.
         assert "MAVERICK_GOLD_PATCH" not in _os.environ
         # The cache is now "" (empty), but explicitly POPPED.
-        from maverick import coding_mode
+        from lightwork import coding_mode
         assert coding_mode._GOLD_PATCH_POPPED is True
         reset_gold_patch_cache()
 
@@ -366,14 +366,14 @@ class TestShellGitInternalsBlocked:
     """F9d: shell-level git plumbing + raw .git filesystem access."""
 
     def _shell(self, tmp_path):
-        from maverick.tools.shell import shell
+        from lightwork.tools.shell import shell
 
         class _Sandbox:
             workdir = tmp_path
             timeout = 5.0
 
             def exec(self, cmd, timeout=None):
-                from maverick.sandbox.local import ExecResult
+                from lightwork.sandbox.local import ExecResult
                 return ExecResult(stdout="ok", stderr="", exit_code=0)
 
         return shell(_Sandbox())
@@ -410,8 +410,8 @@ class TestShellPopsGoldPatch:
     tool defensively pops the env var before forwarding to sandbox."""
 
     def test_shell_pops_gold_patch_in_opaque(self, tmp_path, monkeypatch):
-        from maverick.coding_mode import reset_gold_patch_cache
-        from maverick.tools.shell import shell
+        from lightwork.coding_mode import reset_gold_patch_cache
+        from lightwork.tools.shell import shell
         reset_gold_patch_cache()
         monkeypatch.setenv("MAVERICK_BENCHMARK_OPAQUE", "1")
         monkeypatch.setenv("MAVERICK_GOLD_PATCH", "the gold")
@@ -423,7 +423,7 @@ class TestShellPopsGoldPatch:
             timeout = 5.0
 
             def exec(self, cmd, timeout=None):
-                from maverick.sandbox.local import ExecResult
+                from lightwork.sandbox.local import ExecResult
                 captured_env["MAVERICK_GOLD_PATCH"] = os.environ.get(
                     "MAVERICK_GOLD_PATCH"
                 )
@@ -449,14 +449,14 @@ class TestOpaqueGoldLeakGaps474:
     """
 
     def _shell(self, tmp_path):
-        from maverick.tools.shell import shell
+        from lightwork.tools.shell import shell
 
         class _Sandbox:
             workdir = tmp_path
             timeout = 5.0
 
             def exec(self, cmd, timeout=None):
-                from maverick.sandbox.local import ExecResult
+                from lightwork.sandbox.local import ExecResult
                 return ExecResult(stdout="ok", stderr="", exit_code=0)
 
         return shell(_Sandbox())

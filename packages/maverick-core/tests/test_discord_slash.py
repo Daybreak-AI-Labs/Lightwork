@@ -3,7 +3,7 @@ from __future__ import annotations
 
 import json
 
-from maverick.tools.discord_slash import discord_slash
+from lightwork.tools.discord_slash import discord_slash
 
 
 def _run(**kw):

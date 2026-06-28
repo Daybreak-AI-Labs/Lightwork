@@ -1,7 +1,7 @@
 """outline_writer: long-form writing pipeline (outline->draft->polish)."""
 from __future__ import annotations
 
-from maverick.tools.outline_writer import outline_writer
+from lightwork.tools.outline_writer import outline_writer
 
 
 def _run(**kw):

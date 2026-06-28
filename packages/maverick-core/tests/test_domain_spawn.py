@@ -1,21 +1,21 @@
 """spawn-from-profile: a DomainProfile -> a live Agent.
 
-Constructs a real Agent, so it needs the full maverick-core install (run in CI,
+Constructs a real Agent, so it needs the full lightwork-core install (run in CI,
 not in the lightweight local subset).
 """
 from __future__ import annotations
 
-from maverick.agent_autonomy import AutonomyLevel, AutonomyProfile
-from maverick.capability import Capability
-from maverick.domain import DomainProfile, agent_from_profile
+from lightwork.agent_autonomy import AutonomyLevel, AutonomyProfile
+from lightwork.capability import Capability
+from lightwork.domain import DomainProfile, agent_from_profile
 
 
 def _ctx(tmp_path):
-    from maverick.blackboard import Blackboard
-    from maverick.budget import Budget
-    from maverick.sandbox import LocalBackend
-    from maverick.swarm import SwarmContext
-    from maverick.world_model import WorldModel
+    from lightwork.blackboard import Blackboard
+    from lightwork.budget import Budget
+    from lightwork.sandbox import LocalBackend
+    from lightwork.swarm import SwarmContext
+    from lightwork.world_model import WorldModel
 
     world = WorldModel(tmp_path / "world.db")
     goal_id = world.create_goal("g", "")
@@ -95,7 +95,7 @@ def test_agent_from_profile_no_autonomy_block_uses_own_suite_default(tmp_path):
 
 
 def test_children_inherit_parent_domain(tmp_path):
-    from maverick.agent import Agent
+    from lightwork.agent import Agent
 
     ctx = _ctx(tmp_path)
     profile = DomainProfile(name="finance", compartment="finance",
@@ -116,7 +116,7 @@ def test_agent_from_profile_sets_knowledge_sources(tmp_path):
 
 
 def test_build_intake_agent_assembles_interviewer(tmp_path):
-    from maverick.intake import build_intake_agent
+    from lightwork.intake import build_intake_agent
     ctx = _ctx(tmp_path)
     agent, session = build_intake_agent(ctx)
     tool_names = {tool.name for tool in agent.tools.all()}
@@ -134,7 +134,7 @@ def _one_pack_per_suite():
     # A representative built-in pack from each suite -- enough to exercise the
     # spawn path (persona + discipline + workflow render + capability) for every
     # suite without constructing 1,118 Agents.
-    from maverick.domain import builtin_dir, load_domains, suite_for
+    from lightwork.domain import builtin_dir, load_domains, suite_for
     packs = load_domains(builtin_dir())
     sample = {}
     for name, p in sorted(packs.items()):
@@ -164,7 +164,7 @@ def test_every_suite_spawns_with_workflow_and_envelope(tmp_path):
 def test_pack_effort_tier_flows_to_agent(tmp_path, monkeypatch):
     # A pack's authored effort tier reaches the live agent -- but only when the
     # effort feature is enabled (off by default, so no behaviour change).
-    from maverick import effort as effort_mod
+    from lightwork import effort as effort_mod
     ctx = _ctx(tmp_path)
     profile = DomainProfile(
         name="finance_sox", persona="You audit SOX controls. Cite evidence.",

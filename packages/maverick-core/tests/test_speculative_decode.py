@@ -4,7 +4,7 @@ from __future__ import annotations
 import json
 
 import pytest
-from maverick.speculative_decode import (
+from lightwork.speculative_decode import (
     AcceptanceLedger,
     build_verify_prompt,
     draft_accepted,

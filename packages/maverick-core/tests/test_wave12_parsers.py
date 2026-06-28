@@ -9,7 +9,7 @@ Covers council findings F7a-F7e:
 """
 from __future__ import annotations
 
-from maverick.coding_mode import (
+from lightwork.coding_mode import (
     _parse_cargo,
     _parse_gotest,
     _parse_jest,

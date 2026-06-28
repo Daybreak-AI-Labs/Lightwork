@@ -1,7 +1,7 @@
 """Per-role credit tracking — the routing consumer of CSCA."""
 from __future__ import annotations
 
-from maverick import role_stats
+from lightwork import role_stats
 
 
 def test_record_and_average(tmp_path):
@@ -37,7 +37,7 @@ def test_guidance_requires_credit_enabled(tmp_path, monkeypatch):
     role_stats.record("researcher", 0.7, path=p)
     # Off by default -> no guidance even with positive history.
     monkeypatch.delenv("MAVERICK_CREDIT", raising=False)
-    monkeypatch.setattr("maverick.credit._settings", lambda: dict(__import__("maverick").credit._DEFAULTS))
+    monkeypatch.setattr("lightwork.credit._settings", lambda: dict(__import__("maverick").credit._DEFAULTS))
     assert role_stats.guidance(path=p) is None
     # Enabled -> guidance names the high-credit role.
     monkeypatch.setenv("MAVERICK_CREDIT", "1")
@@ -146,5 +146,5 @@ def test_record_is_concurrency_safe(tmp_path):
     by_role = dict(top)
     # runs is reflected in the average: total credit == runs, avg == 1.0
     assert abs(by_role["researcher"] - 1.0) < 1e-9
-    from maverick.role_stats import _load
+    from lightwork.role_stats import _load
     assert _load(p)["researcher"].runs == n * per

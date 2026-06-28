@@ -10,7 +10,7 @@ from __future__ import annotations
 from pathlib import Path
 
 import pytest
-from maverick.skills import install_skill
+from lightwork.skills import install_skill
 
 
 def _write(tmp: Path, fname: str, name: str, body: str) -> str:

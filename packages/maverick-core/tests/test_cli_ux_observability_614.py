@@ -14,8 +14,8 @@ import logging
 from pathlib import Path
 
 from click.testing import CliRunner
-from maverick.cli import _configure_cli_logging, _humanize_run_error, main
-from maverick.world_model import WorldModel
+from lightwork.cli import _configure_cli_logging, _humanize_run_error, main
+from lightwork.world_model import WorldModel
 
 # ---------- task 1: live mid-run spend ----------
 
@@ -121,7 +121,7 @@ def test_model_404_by_message_text():
 # ---------- task 4: library logs don't bleed onto the terminal ----------
 
 def _reset_logging():
-    import maverick.logging_config as lc
+    import lightwork.logging_config as lc
     lc._configured = False
     root = logging.getLogger()
     for h in list(root.handlers):
@@ -157,7 +157,7 @@ def test_sandbox_security_warning_surfaced_by_default(monkeypatch, capsys):
     monkeypatch.delenv("MAVERICK_LOG_LEVEL", raising=False)
     _reset_logging()
     _configure_cli_logging()
-    logging.getLogger("maverick.sandbox").warning(
+    logging.getLogger("lightwork.sandbox").warning(
         "sandbox backend is 'local': model-generated shell runs directly on this host"
     )
     err = capsys.readouterr().err
@@ -170,9 +170,9 @@ def test_shield_security_warning_surfaced_by_default(monkeypatch, capsys):
     monkeypatch.delenv("MAVERICK_LOG_LEVEL", raising=False)
     _reset_logging()
     _configure_cli_logging()
-    logging.getLogger("maverick.orchestrator").warning(
-        "maverick-shield not installed; tool-call scans disabled"
+    logging.getLogger("lightwork.orchestrator").warning(
+        "lightwork-shield not installed; tool-call scans disabled"
     )
     err = capsys.readouterr().err
-    assert "maverick-shield not installed" in err
+    assert "lightwork-shield not installed" in err
     _reset_logging()

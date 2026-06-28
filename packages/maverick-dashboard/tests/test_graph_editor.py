@@ -1,6 +1,6 @@
 """Visual graph editor: layered layout (pure), forest API, structural edits.
 
-The layout is computed server-side (maverick_dashboard.goal_tree) so the
+The layout is computed server-side (lightwork_dashboard.goal_tree) so the
 page JS stays a thin renderer; edits go through POST endpoints that mutate
 the goals table via the world model.
 """
@@ -8,7 +8,7 @@ from __future__ import annotations
 
 import pytest
 from fastapi.testclient import TestClient
-from maverick_dashboard.goal_tree import (
+from lightwork_dashboard.goal_tree import (
     descendant_ids,
     forest_html,
     forest_view,
@@ -84,7 +84,7 @@ def test_forest_html_empty():
 def world(tmp_path, monkeypatch):
     monkeypatch.setenv("HOME", str(tmp_path))
     monkeypatch.delenv("MAVERICK_DASHBOARD_TOKEN", raising=False)
-    from maverick import world_model
+    from lightwork import world_model
     monkeypatch.setattr(world_model, "DEFAULT_DB", tmp_path / "world.db")
     w = world_model.WorldModel(tmp_path / "world.db")
     yield w
@@ -93,8 +93,8 @@ def world(tmp_path, monkeypatch):
 
 @pytest.fixture
 def client(world, monkeypatch):
-    from maverick_dashboard import api as api_mod
-    from maverick_dashboard import app as app_mod
+    from lightwork_dashboard import api as api_mod
+    from lightwork_dashboard import app as app_mod
     monkeypatch.setattr(app_mod, "_world", lambda: world)
     monkeypatch.setattr(api_mod, "_world", lambda: world)
     return TestClient(app_mod.app, headers={"Origin": "http://testserver"})

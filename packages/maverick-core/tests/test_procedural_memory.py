@@ -3,8 +3,8 @@ keep proving themselves, and FORGET ones that stop -- without losing the good.
 """
 from __future__ import annotations
 
-from maverick import procedural_memory as pm
-from maverick.trajectory_store import TrajectoryStep
+from lightwork import procedural_memory as pm
+from lightwork.trajectory_store import TrajectoryStep
 
 
 def _ep(eid, domain, tool, outcome):

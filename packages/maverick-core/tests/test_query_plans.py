@@ -12,7 +12,7 @@ stable "USING INDEX" / "SEARCH" shape rather than a version-fragile exact plan.
 """
 from __future__ import annotations
 
-from maverick.world_model import open_world
+from lightwork.world_model import open_world
 
 # (label, sql, table-that-must-not-be-full-scanned)
 _HOT_QUERIES = [

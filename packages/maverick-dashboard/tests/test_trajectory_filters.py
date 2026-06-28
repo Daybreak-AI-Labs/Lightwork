@@ -12,7 +12,7 @@ TestClient = pytest.importorskip("fastapi.testclient").TestClient
 def world_with_events(tmp_path, monkeypatch):
     """A WorldModel with one goal carrying events of distinct kinds."""
     monkeypatch.setenv("HOME", str(tmp_path))
-    from maverick.world_model import WorldModel
+    from lightwork.world_model import WorldModel
     w = WorldModel(tmp_path / "world.db")
     g1 = w.create_goal("root task", "high-level")
     w.append_event(g1, "orchestrator", "tool", "called shell: ls")
@@ -26,7 +26,7 @@ def world_with_events(tmp_path, monkeypatch):
 @pytest.fixture
 def client(world_with_events, monkeypatch):
     """Wired-up TestClient sharing the same world db as the fixture."""
-    from maverick_dashboard import app as app_mod
+    from lightwork_dashboard import app as app_mod
     w, _g1 = world_with_events
     monkeypatch.setattr(app_mod, "_world", lambda: w)
     return TestClient(app_mod.app)

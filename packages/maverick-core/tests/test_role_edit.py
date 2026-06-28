@@ -3,7 +3,7 @@ validation, persistence, and the merged view the dashboard renders."""
 from __future__ import annotations
 
 import pytest
-from maverick.role_edit import (
+from lightwork.role_edit import (
     ROLES,
     list_roles,
     override_effort,
@@ -107,13 +107,13 @@ class TestModelEffortOverride:
         cfg = tmp_path / "config.toml"
         cfg.write_text('[models]\ncoder = "global:sonnet"\n')
         monkeypatch.setenv("MAVERICK_CONFIG", str(cfg))
-        from maverick.config import get_role_model
+        from lightwork.config import get_role_model
         assert get_role_model("coder") == "global:sonnet"      # global config default
         write_role_override("coder", {"model": "tenant:opus"})
         assert get_role_model("coder") == "tenant:opus"        # per-tenant override wins
 
     def test_effort_for_role_prefers_override(self, monkeypatch):
-        from maverick.effort import effort_for_role
+        from lightwork.effort import effort_for_role
         for v in ("MAVERICK_EFFORT", "MAVERICK_EFFORT_WRITER", "MAVERICK_EFFORT_ENABLED"):
             monkeypatch.delenv(v, raising=False)
         # Effort is off by default (no config), so writer resolves to None...

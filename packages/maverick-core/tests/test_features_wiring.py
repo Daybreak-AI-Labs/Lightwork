@@ -20,7 +20,7 @@ def test_get_features_defaults_all_on(monkeypatch, tmp_path):
     cfg = tmp_path / "config.toml"
     cfg.write_text("")  # no [features] section at all
     monkeypatch.setenv("MAVERICK_CONFIG", str(cfg))
-    from maverick.config import get_features
+    from lightwork.config import get_features
     assert get_features() == {
         "skills": True, "world_model": True, "streaming": True,
         "pack_editing": True, "role_editing": True, "scheduling": True,
@@ -36,7 +36,7 @@ def test_get_features_reads_overrides(monkeypatch, tmp_path):
         "triggers = false\n"
     )
     monkeypatch.setenv("MAVERICK_CONFIG", str(cfg))
-    from maverick.config import get_features
+    from lightwork.config import get_features
     assert get_features() == {
         "skills": False, "world_model": False, "streaming": False,
         "pack_editing": False, "role_editing": False, "scheduling": False,
@@ -50,7 +50,7 @@ def test_use_skills_env_wins_over_config(monkeypatch, tmp_path):
     cfg = tmp_path / "config.toml"
     cfg.write_text("[features]\nskills = false\n")
     monkeypatch.setenv("MAVERICK_CONFIG", str(cfg))
-    from maverick.swarm import _default_use_skills
+    from lightwork.swarm import _default_use_skills
     # env explicitly on -> on, despite config saying off
     monkeypatch.setenv("MAVERICK_USE_SKILLS", "1")
     assert _default_use_skills() is True
@@ -64,7 +64,7 @@ def test_use_skills_falls_back_to_config_when_env_unset(monkeypatch, tmp_path):
     cfg.write_text("[features]\nskills = false\n")
     monkeypatch.setenv("MAVERICK_CONFIG", str(cfg))
     monkeypatch.delenv("MAVERICK_USE_SKILLS", raising=False)
-    from maverick.swarm import _default_use_skills
+    from lightwork.swarm import _default_use_skills
     assert _default_use_skills() is False
 
 
@@ -73,22 +73,22 @@ def test_use_skills_default_on_when_nothing_set(monkeypatch, tmp_path):
     cfg.write_text("")
     monkeypatch.setenv("MAVERICK_CONFIG", str(cfg))
     monkeypatch.delenv("MAVERICK_USE_SKILLS", raising=False)
-    from maverick.swarm import _default_use_skills
+    from lightwork.swarm import _default_use_skills
     assert _default_use_skills() is True
 
 
 # ---------- world_model gates persisted-fact injection ----------
 
 async def _run_capturing_brief(tmp_path, fake_llm, monkeypatch, *, world_model: bool):
-    from maverick.budget import Budget
-    from maverick.orchestrator import run_goal
-    from maverick.sandbox import LocalBackend
-    from maverick.world_model import WorldModel
+    from lightwork.budget import Budget
+    from lightwork.orchestrator import run_goal
+    from lightwork.sandbox import LocalBackend
+    from lightwork.world_model import WorldModel
 
     # Isolate from the shield (the fact loop would otherwise scan each fact).
-    monkeypatch.setattr("maverick.orchestrator._build_shield", lambda: None)
+    monkeypatch.setattr("lightwork.orchestrator._build_shield", lambda: None)
     monkeypatch.setattr(
-        "maverick.config.get_features",
+        "lightwork.config.get_features",
         lambda: {"skills": True, "world_model": world_model, "streaming": True},
     )
     world = WorldModel(path=tmp_path / "world.db")

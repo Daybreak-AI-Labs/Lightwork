@@ -3,7 +3,7 @@ file backend reads mounted vault/Docker/k8s secret files with env fallback."""
 from __future__ import annotations
 
 import pytest
-from maverick import secret_provider as sp
+from lightwork import secret_provider as sp
 
 
 @pytest.fixture(autouse=True)
@@ -11,7 +11,7 @@ def _clean_env(monkeypatch):
     for var in ("MAVERICK_SECRETS_BACKEND", "MAVERICK_SECRETS_DIR"):
         monkeypatch.delenv(var, raising=False)
     # No config in the way; tests opt in explicitly.
-    monkeypatch.setattr("maverick.config.load_config", lambda *a, **k: {})
+    monkeypatch.setattr("lightwork.config.load_config", lambda *a, **k: {})
 
 
 def test_default_backend_is_env(monkeypatch):
@@ -81,7 +81,7 @@ def test_known_backends_do_not_warn(monkeypatch, caplog):
 def test_backend_from_config_when_env_absent(monkeypatch, tmp_path):
     (tmp_path / "CFG_SECRET").write_text("cfg")
     monkeypatch.setattr(
-        "maverick.config.load_config",
+        "lightwork.config.load_config",
         lambda *a, **k: {"secrets": {"backend": "file", "dir": str(tmp_path)}},
     )
     assert sp.get_secret("CFG_SECRET") == "cfg"

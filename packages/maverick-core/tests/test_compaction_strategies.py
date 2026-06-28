@@ -8,10 +8,10 @@ from __future__ import annotations
 import base64
 from types import SimpleNamespace
 
-import maverick.config as cfg
-from maverick.compaction import compact_messages
-from maverick.compaction.plugins import compact_with
-from maverick.compaction.strategies import (
+import lightwork.config as cfg
+from lightwork.compaction import compact_messages
+from lightwork.compaction.plugins import compact_with
+from lightwork.compaction.strategies import (
     STRATEGIES,
     compact_with_strategy,
     configured_strategy,
@@ -133,7 +133,7 @@ class TestDispatch:
         def boom(*a, **kw):
             raise RuntimeError("strategy exploded")
 
-        monkeypatch.setattr("maverick.compaction.graph.compact_graph", boom)
+        monkeypatch.setattr("lightwork.compaction.graph.compact_graph", boom)
         msgs = _traj()
         assert compact_with_strategy(msgs) == compact_messages(msgs)
 

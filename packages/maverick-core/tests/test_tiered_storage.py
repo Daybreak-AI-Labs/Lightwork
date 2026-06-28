@@ -1,7 +1,7 @@
 """tiered_storage: hot/cold tiering planner."""
 from __future__ import annotations
 
-from maverick.tools.tiered_storage import tiered_storage
+from lightwork.tools.tiered_storage import tiered_storage
 
 
 def _plan(**kw):

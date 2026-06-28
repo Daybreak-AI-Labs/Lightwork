@@ -6,7 +6,7 @@ verified-passing bypasses in the red-team audit of the shield engine.
 from __future__ import annotations
 
 import pytest
-from maverick_shield.builtin_rules import scan
+from lightwork_shield.builtin_rules import scan
 
 
 @pytest.mark.parametrize("text", [

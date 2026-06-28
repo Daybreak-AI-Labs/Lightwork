@@ -2,12 +2,12 @@
 -- every engine turning together."""
 from __future__ import annotations
 
-from maverick import consequence as cq
-from maverick import flywheel
-from maverick import negative_knowledge as nk
-from maverick import procedural_memory as pm
-from maverick.counterfactual_rollout import Transition, TransitionModel
-from maverick.trajectory_store import TrajectoryStep
+from lightwork import consequence as cq
+from lightwork import flywheel
+from lightwork import negative_knowledge as nk
+from lightwork import procedural_memory as pm
+from lightwork.counterfactual_rollout import Transition, TransitionModel
+from lightwork.trajectory_store import TrajectoryStep
 
 
 def _ep(eid, domain, tool, outcome):
@@ -64,7 +64,7 @@ def test_run_once_simulates_when_world_model_supplied(tmp_path):
 def test_grounded_outcome_prefers_reality(tmp_path, monkeypatch):
     store = cq.ConsequenceStore(path=tmp_path / "c.ndjson")
     store.record(1, 7, 1.0)  # reality: this episode actually succeeded
-    monkeypatch.setattr("maverick.consequence.shared", lambda: store)
+    monkeypatch.setattr("lightwork.consequence.shared", lambda: store)
     monkeypatch.setenv("MAVERICK_CONSEQUENCE", "1")
 
     of = flywheel.grounded_outcome_fn()
@@ -74,6 +74,6 @@ def test_grounded_outcome_prefers_reality(tmp_path, monkeypatch):
 
 def test_maybe_run_noop_when_disabled(monkeypatch):
     monkeypatch.delenv("MAVERICK_DATA_ENGINE", raising=False)
-    monkeypatch.setattr("maverick.config.get_data_engine", lambda: {"enable": False})
+    monkeypatch.setattr("lightwork.config.get_data_engine", lambda: {"enable": False})
     rep = flywheel.maybe_run()
     assert rep.n_episodes == 0 and not rep.acted

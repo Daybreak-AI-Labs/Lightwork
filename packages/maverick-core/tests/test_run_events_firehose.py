@@ -3,7 +3,7 @@ from __future__ import annotations
 
 import json
 
-from maverick.tools.run_events_firehose import run_events_firehose
+from lightwork.tools.run_events_firehose import run_events_firehose
 
 
 def _run(**kw):

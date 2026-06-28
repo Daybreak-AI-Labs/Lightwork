@@ -8,13 +8,13 @@ from unittest.mock import MagicMock
 # ---------- MongoDB ----------
 
 def test_mongodb_requires_op():
-    from maverick.tools.mongodb_tool import mongodb_tool
+    from lightwork.tools.mongodb_tool import mongodb_tool
     assert "op is required" in mongodb_tool().fn({})
 
 
 def test_mongodb_missing_pymongo(monkeypatch):
     monkeypatch.setitem(sys.modules, "pymongo", None)
-    from maverick.tools.mongodb_tool import mongodb_tool
+    from lightwork.tools.mongodb_tool import mongodb_tool
     out = mongodb_tool().fn({"op": "collections"})
     assert "pymongo not installed" in out
 
@@ -86,7 +86,7 @@ def test_mongodb_collections(monkeypatch):
     monkeypatch.setenv("MONGODB_URI", "mongodb://x")
     monkeypatch.setenv("MONGODB_DB", "test")
     _install_fake_mongo(monkeypatch, collections=["users", "orders"])
-    from maverick.tools.mongodb_tool import mongodb_tool
+    from lightwork.tools.mongodb_tool import mongodb_tool
     out = mongodb_tool().fn({"op": "collections"})
     assert "users" in out and "orders" in out
 
@@ -98,7 +98,7 @@ def test_mongodb_find(monkeypatch):
         monkeypatch,
         find_docs=[{"_id": 1, "name": "alice"}, {"_id": 2, "name": "bob"}],
     )
-    from maverick.tools.mongodb_tool import mongodb_tool
+    from lightwork.tools.mongodb_tool import mongodb_tool
     out = mongodb_tool().fn({"op": "find", "collection": "users", "filter": {}})
     assert "alice" in out and "bob" in out
 
@@ -107,7 +107,7 @@ def test_mongodb_count(monkeypatch):
     monkeypatch.setenv("MONGODB_URI", "mongodb://x")
     monkeypatch.setenv("MONGODB_DB", "test")
     _install_fake_mongo(monkeypatch, count=42)
-    from maverick.tools.mongodb_tool import mongodb_tool
+    from lightwork.tools.mongodb_tool import mongodb_tool
     out = mongodb_tool().fn({"op": "count", "collection": "users",
                               "filter": {"active": True}})
     assert "42" in out
@@ -117,7 +117,7 @@ def test_mongodb_insert_dry_run(monkeypatch):
     monkeypatch.setenv("MONGODB_URI", "mongodb://x")
     monkeypatch.setenv("MONGODB_DB", "test")
     _install_fake_mongo(monkeypatch)
-    from maverick.tools.mongodb_tool import mongodb_tool
+    from lightwork.tools.mongodb_tool import mongodb_tool
     out = mongodb_tool().fn({
         "op": "insert", "collection": "users", "doc": {"name": "x"},
     })
@@ -128,7 +128,7 @@ def test_mongodb_insert_confirmed(monkeypatch):
     monkeypatch.setenv("MONGODB_URI", "mongodb://x")
     monkeypatch.setenv("MONGODB_DB", "test")
     _install_fake_mongo(monkeypatch, insert_id="newid")
-    from maverick.tools.mongodb_tool import mongodb_tool
+    from lightwork.tools.mongodb_tool import mongodb_tool
     out = mongodb_tool().fn({
         "op": "insert", "collection": "users", "doc": {"name": "x"},
         "confirm": True,
@@ -140,7 +140,7 @@ def test_mongodb_update_dry_run(monkeypatch):
     monkeypatch.setenv("MONGODB_URI", "mongodb://x")
     monkeypatch.setenv("MONGODB_DB", "test")
     _install_fake_mongo(monkeypatch)
-    from maverick.tools.mongodb_tool import mongodb_tool
+    from lightwork.tools.mongodb_tool import mongodb_tool
     out = mongodb_tool().fn({
         "op": "update", "collection": "u", "filter": {"id": 1},
         "set_": {"name": "y"},
@@ -152,7 +152,7 @@ def test_mongodb_delete_dry_run(monkeypatch):
     monkeypatch.setenv("MONGODB_URI", "mongodb://x")
     monkeypatch.setenv("MONGODB_DB", "test")
     _install_fake_mongo(monkeypatch)
-    from maverick.tools.mongodb_tool import mongodb_tool
+    from lightwork.tools.mongodb_tool import mongodb_tool
     out = mongodb_tool().fn({
         "op": "delete", "collection": "u", "filter": {"id": 1},
     })
@@ -162,13 +162,13 @@ def test_mongodb_delete_dry_run(monkeypatch):
 # ---------- Redis ----------
 
 def test_redis_requires_op():
-    from maverick.tools.redis_tool import redis_tool
+    from lightwork.tools.redis_tool import redis_tool
     assert "op is required" in redis_tool().fn({})
 
 
 def test_redis_missing_lib(monkeypatch):
     monkeypatch.setitem(sys.modules, "redis", None)
-    from maverick.tools.redis_tool import redis_tool
+    from lightwork.tools.redis_tool import redis_tool
     out = redis_tool().fn({"op": "get", "key": "x"})
     assert "redis not installed" in out
 
@@ -191,7 +191,7 @@ def _install_fake_redis(monkeypatch, **overrides):
 def test_redis_get_returns_value(monkeypatch):
     _install_fake_redis(monkeypatch, get="hello")
     monkeypatch.setenv("REDIS_URL", "redis://localhost")
-    from maverick.tools.redis_tool import redis_tool
+    from lightwork.tools.redis_tool import redis_tool
     out = redis_tool().fn({"op": "get", "key": "greeting"})
     assert "hello" in out
 
@@ -199,7 +199,7 @@ def test_redis_get_returns_value(monkeypatch):
 def test_redis_get_nil(monkeypatch):
     _install_fake_redis(monkeypatch, get=None)
     monkeypatch.setenv("REDIS_URL", "redis://localhost")
-    from maverick.tools.redis_tool import redis_tool
+    from lightwork.tools.redis_tool import redis_tool
     out = redis_tool().fn({"op": "get", "key": "missing"})
     assert "(nil)" in out
 
@@ -207,7 +207,7 @@ def test_redis_get_nil(monkeypatch):
 def test_redis_set_with_ttl(monkeypatch):
     _install_fake_redis(monkeypatch, set=True)
     monkeypatch.setenv("REDIS_URL", "redis://localhost")
-    from maverick.tools.redis_tool import redis_tool
+    from lightwork.tools.redis_tool import redis_tool
     out = redis_tool().fn({
         "op": "set", "key": "k", "value": "v", "ttl_seconds": 60, "confirm": True,
     })
@@ -233,7 +233,7 @@ def test_redis_keys_scan(monkeypatch):
     redis_mod.Redis = _Redis
     monkeypatch.setitem(sys.modules, "redis", redis_mod)
     monkeypatch.setenv("REDIS_URL", "redis://localhost")
-    from maverick.tools.redis_tool import redis_tool
+    from lightwork.tools.redis_tool import redis_tool
     out = redis_tool().fn({"op": "keys", "pattern": "*"})
     assert "a" in out and "b" in out
 
@@ -241,7 +241,7 @@ def test_redis_keys_scan(monkeypatch):
 def test_redis_publish(monkeypatch):
     _install_fake_redis(monkeypatch, publish=3)
     monkeypatch.setenv("REDIS_URL", "redis://localhost")
-    from maverick.tools.redis_tool import redis_tool
+    from lightwork.tools.redis_tool import redis_tool
     out = redis_tool().fn({
         "op": "publish", "channel": "alerts", "message": "x", "confirm": True,
     })
@@ -251,7 +251,7 @@ def test_redis_publish(monkeypatch):
 def test_redis_mutations_require_confirm(monkeypatch):
     _install_fake_redis(monkeypatch, set=True)
     monkeypatch.setenv("REDIS_URL", "redis://localhost")
-    from maverick.tools.redis_tool import redis_tool
+    from lightwork.tools.redis_tool import redis_tool
     out = redis_tool().fn({"op": "set", "key": "k", "value": "v"})
     assert "DRY RUN" in out
 
@@ -260,7 +260,7 @@ def test_redis_requires_explicit_connection(monkeypatch):
     _install_fake_redis(monkeypatch, get="hello")
     monkeypatch.delenv("REDIS_URL", raising=False)
     monkeypatch.delenv("REDIS_HOST", raising=False)
-    from maverick.tools.redis_tool import redis_tool
+    from lightwork.tools.redis_tool import redis_tool
     out = redis_tool().fn({"op": "get", "key": "greeting"})
     assert "must be set explicitly" in out
 
@@ -268,7 +268,7 @@ def test_redis_requires_explicit_connection(monkeypatch):
 # ---------- Sentry ----------
 
 def test_sentry_requires_op():
-    from maverick.tools.sentry_tool import sentry_tool
+    from lightwork.tools.sentry_tool import sentry_tool
     assert "op is required" in sentry_tool().fn({})
 
 
@@ -277,7 +277,7 @@ def test_sentry_missing_token(monkeypatch):
     fake = types.ModuleType("httpx")
     fake.get = MagicMock()
     monkeypatch.setitem(sys.modules, "httpx", fake)
-    from maverick.tools.sentry_tool import sentry_tool
+    from lightwork.tools.sentry_tool import sentry_tool
     out = sentry_tool().fn({"op": "issues"})
     assert "SENTRY_AUTH_TOKEN" in out
 
@@ -289,7 +289,7 @@ def test_sentry_issues_requires_project(monkeypatch):
     fake = types.ModuleType("httpx")
     fake.get = MagicMock()
     monkeypatch.setitem(sys.modules, "httpx", fake)
-    from maverick.tools.sentry_tool import sentry_tool
+    from lightwork.tools.sentry_tool import sentry_tool
     out = sentry_tool().fn({"op": "issues"})
     assert "SENTRY_ORG" in out and "SENTRY_PROJECT" in out
 
@@ -307,7 +307,7 @@ def test_sentry_issues_renders(monkeypatch):
     fake_httpx = types.ModuleType("httpx")
     fake_httpx.get = MagicMock(return_value=resp)
     monkeypatch.setitem(sys.modules, "httpx", fake_httpx)
-    from maverick.tools.sentry_tool import sentry_tool
+    from lightwork.tools.sentry_tool import sentry_tool
     out = sentry_tool().fn({"op": "issues"})
     assert "PROJ-1" in out and "NullPointer" in out
 
@@ -317,7 +317,7 @@ def test_sentry_resolve_dry_run(monkeypatch):
     fake_httpx = types.ModuleType("httpx")
     fake_httpx.put = MagicMock()
     monkeypatch.setitem(sys.modules, "httpx", fake_httpx)
-    from maverick.tools.sentry_tool import sentry_tool
+    from lightwork.tools.sentry_tool import sentry_tool
     out = sentry_tool().fn({"op": "resolve", "issue_id": "123"})
     assert "DRY RUN" in out
     fake_httpx.put.assert_not_called()
@@ -331,7 +331,7 @@ def test_sentry_resolve_confirmed(monkeypatch):
     fake_httpx = types.ModuleType("httpx")
     fake_httpx.put = MagicMock(return_value=resp)
     monkeypatch.setitem(sys.modules, "httpx", fake_httpx)
-    from maverick.tools.sentry_tool import sentry_tool
+    from lightwork.tools.sentry_tool import sentry_tool
     out = sentry_tool().fn({"op": "resolve", "issue_id": "123", "confirm": True})
     assert "resolved 123" in out
 
@@ -339,8 +339,8 @@ def test_sentry_resolve_confirmed(monkeypatch):
 # ---------- registration smoke ----------
 
 def test_new_tools_register(tmp_path):
-    from maverick.sandbox.local import LocalBackend
-    from maverick.tools import base_registry
+    from lightwork.sandbox.local import LocalBackend
+    from lightwork.tools import base_registry
 
     class _W:
         def open_questions(self, gid):

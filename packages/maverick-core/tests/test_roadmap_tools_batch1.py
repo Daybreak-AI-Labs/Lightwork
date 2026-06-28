@@ -4,10 +4,10 @@ from __future__ import annotations
 
 import textwrap
 
-from maverick.tools.citation_verifier import citation_verifier
-from maverick.tools.cross_repo_deps import cross_repo_deps
-from maverick.tools.knowledge_graph import knowledge_graph
-from maverick.tools.test_gen import test_gen as make_test_gen
+from lightwork.tools.citation_verifier import citation_verifier
+from lightwork.tools.cross_repo_deps import cross_repo_deps
+from lightwork.tools.knowledge_graph import knowledge_graph
+from lightwork.tools.test_gen import test_gen as make_test_gen
 
 
 class _FakeSandbox:
@@ -145,7 +145,7 @@ def test_test_gen_errors():
 # ---- registration ----
 
 def test_batch1_tools_registered(tmp_path):
-    from maverick.tools import base_registry
+    from lightwork.tools import base_registry
 
     class _FakeWorld:
         pass

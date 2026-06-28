@@ -20,13 +20,13 @@ from __future__ import annotations
 
 from dataclasses import replace
 
-from maverick.agent_autonomy import (
+from lightwork.agent_autonomy import (
     AutonomyLevel,
     AutonomyProfile,
     default_profile_for,
     resolve,
 )
-from maverick.domain import available_domains
+from lightwork.domain import available_domains
 
 _DOMAINS = available_domains()
 _NAMES = sorted(_DOMAINS)

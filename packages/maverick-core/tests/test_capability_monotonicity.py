@@ -27,7 +27,7 @@ from __future__ import annotations
 
 import random
 
-from maverick.capability import Capability
+from lightwork.capability import Capability
 
 # Probe + generator universes (no NUL — see module docstring).
 _TOOLS = ["read_file", "write_file", "shell", "http_fetch", "memory", "search",

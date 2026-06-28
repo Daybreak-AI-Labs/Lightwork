@@ -8,8 +8,8 @@ import fnmatch
 import sys
 import types
 
-from maverick.cache import redis_tool as rtc
-from maverick.cache.tool import _key as local_key
+from lightwork.cache import redis_tool as rtc
+from lightwork.cache.tool import _key as local_key
 
 
 class FakeRedisClient:
@@ -142,7 +142,7 @@ def test_missing_redis_package_fails_open(monkeypatch):
 def test_off_by_default_and_env_wiring(monkeypatch):
     monkeypatch.delenv("MAVERICK_TOOL_CACHE_BACKEND", raising=False)
     monkeypatch.delenv("MAVERICK_TOOL_CACHE_REDIS_URL", raising=False)
-    import maverick.config as config_mod
+    import lightwork.config as config_mod
     monkeypatch.setattr(config_mod, "load_config", lambda *a, **k: {})
     assert rtc.enabled() is False
     assert rtc.from_config() is None
@@ -156,7 +156,7 @@ def test_off_by_default_and_env_wiring(monkeypatch):
 def test_config_table_wiring(monkeypatch):
     monkeypatch.delenv("MAVERICK_TOOL_CACHE_BACKEND", raising=False)
     monkeypatch.delenv("MAVERICK_TOOL_CACHE_REDIS_URL", raising=False)
-    import maverick.config as config_mod
+    import lightwork.config as config_mod
     monkeypatch.setattr(
         config_mod, "load_config",
         lambda *a, **k: {"tools": {

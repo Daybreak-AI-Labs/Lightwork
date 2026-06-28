@@ -47,9 +47,9 @@ class _StreamClient:
 def _fetch(resp, monkeypatch, **args):
     monkeypatch.setenv("MAVERICK_FETCH_ALLOW_PRIVATE", "1")  # offline: no DNS
     monkeypatch.setenv("MAVERICK_FETCH_NO_SCAN", "1")  # deterministic output
-    import maverick.tools._ssrf as _ssrf
+    import lightwork.tools._ssrf as _ssrf
     monkeypatch.setattr(_ssrf, "safe_client", lambda url, **kw: _StreamClient(resp))
-    from maverick.tools.http_fetch import http_fetch
+    from lightwork.tools.http_fetch import http_fetch
     return http_fetch().fn({"url": "https://example.com/", "render": "raw", **args})
 
 

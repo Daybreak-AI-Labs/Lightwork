@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from maverick.backport_tool import (
+from lightwork.backport_tool import (
     check,
     eligible_commits,
     is_security_fix,

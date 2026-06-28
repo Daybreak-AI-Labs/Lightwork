@@ -7,7 +7,7 @@ $4 and never trip the cap (CLAUDE.md rule 3: budget.check() is not
 optional). absorb() rolls up atomically AND calls check().
 """
 import pytest
-from maverick.budget import Budget, BudgetExceeded
+from lightwork.budget import Budget, BudgetExceeded
 
 
 def test_absorb_accumulates_counters():

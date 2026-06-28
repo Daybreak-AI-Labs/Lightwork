@@ -22,7 +22,7 @@ import json
 from pathlib import Path
 
 from click.testing import CliRunner
-from maverick.audit.signing import verify_chain
+from lightwork.audit.signing import verify_chain
 
 
 def _write_rows(path: Path, rows: list[dict]) -> None:
@@ -56,7 +56,7 @@ def test_cli_unsigned_day_is_one_actionable_line(tmp_path, monkeypatch):
     _write_rows(audit_dir / f"{day}.ndjson",
                 [{"kind": "consent_prompt"}, {"kind": "consent_result"}])
 
-    from maverick.cli import main
+    from lightwork.cli import main
     res = CliRunner().invoke(main, ["audit", "verify"])
 
     assert res.exit_code == 1  # unverifiable evidence must not pass as clean
@@ -68,14 +68,14 @@ def test_cli_unsigned_day_is_one_actionable_line(tmp_path, monkeypatch):
 
 
 def test_pubkey_expectation_makes_fully_stripped_rows_malformed(tmp_path, monkeypatch):
-    from maverick.audit import signing
+    from lightwork.audit import signing
 
     if not signing._have_crypto():
         import pytest
         pytest.skip("cryptography not installed")
 
-    from maverick.audit.events import AuditEvent
-    from maverick.audit.writer import AuditLog
+    from lightwork.audit.events import AuditEvent
+    from lightwork.audit.writer import AuditLog
 
     monkeypatch.setattr(signing, "KEY_DIR", tmp_path / "keys")
     audit_dir = tmp_path / "audit"

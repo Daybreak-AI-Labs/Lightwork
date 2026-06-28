@@ -6,7 +6,7 @@ network peer is the trusted upstream.
 """
 from __future__ import annotations
 
-from maverick.proxy_auth import (
+from lightwork.proxy_auth import (
     principal_from_proxy,
     proxy_auth_enabled,
     proxy_header_name,
@@ -15,7 +15,7 @@ from maverick.proxy_auth import (
 
 
 def _cfg(monkeypatch, cfg):
-    monkeypatch.setattr("maverick.config.load_config", lambda *a, **k: cfg)
+    monkeypatch.setattr("lightwork.config.load_config", lambda *a, **k: cfg)
 
 
 def test_disabled_by_default(monkeypatch):

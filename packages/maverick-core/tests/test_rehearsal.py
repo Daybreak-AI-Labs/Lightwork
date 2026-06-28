@@ -4,8 +4,8 @@ and stay fail-open while disabled.
 """
 from __future__ import annotations
 
-from maverick import rehearsal as rh
-from maverick.counterfactual_rollout import Transition, TransitionModel
+from lightwork import rehearsal as rh
+from lightwork.counterfactual_rollout import Transition, TransitionModel
 
 START, MID, GOOD, BAD = ("start",), ("mid",), ("good",), ("bad",)
 
@@ -84,7 +84,7 @@ def test_gate_action_blocks_bad_plan_when_enabled(monkeypatch):
 
 def test_enabled_off_by_default(monkeypatch):
     monkeypatch.delenv("MAVERICK_REHEARSAL", raising=False)
-    monkeypatch.setattr("maverick.config.get_rehearsal", lambda: {"enable": False})
+    monkeypatch.setattr("lightwork.config.get_rehearsal", lambda: {"enable": False})
     assert rh.enabled() is False
     monkeypatch.setenv("MAVERICK_REHEARSAL", "1")
     assert rh.enabled() is True

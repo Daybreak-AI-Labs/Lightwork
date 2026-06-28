@@ -20,15 +20,15 @@ omission, and erasure-verify false-clean on an unresolved channel.
 """
 from __future__ import annotations
 
-from maverick import erasure_verify
-from maverick.dsar import export_subject_data
-from maverick.governance import Decision, Policy, evaluate
-from maverick.world_model import WorldModel
+from lightwork import erasure_verify
+from lightwork.dsar import export_subject_data
+from lightwork.governance import Decision, Policy, evaluate
+from lightwork.world_model import WorldModel
 
 # --- fix 1: governance risk floor never silently disabled ------------------
 
 def test_critical_risk_floor_denies_high_risk_action():
-    from maverick.governance import _risk_floor
+    from lightwork.governance import _risk_floor
     # "critical" used to resolve to None -> no deny floor at all. As a config
     # value it must now behave as the top tier and deny a high-risk tool. This
     # is exactly what Policy.from_config does with cfg["deny_min_risk"].
@@ -40,7 +40,7 @@ def test_critical_risk_floor_denies_high_risk_action():
 
 
 def test_unknown_risk_floor_clamps_high_not_disabled():
-    from maverick.governance import _risk_floor
+    from lightwork.governance import _risk_floor
     assert _risk_floor("critical") == "high"
     assert _risk_floor("severe") == "high"
     assert _risk_floor("bogus-typo") == "high"   # fail-closed, not None
@@ -49,7 +49,7 @@ def test_unknown_risk_floor_clamps_high_not_disabled():
 
 
 def test_explicit_disable_sentinel_clears_floor():
-    from maverick.governance import _risk_floor
+    from lightwork.governance import _risk_floor
     # An operator can still intentionally clear a floor.
     assert _risk_floor("none") is None
     assert _risk_floor("off") is None
@@ -60,7 +60,7 @@ def test_explicit_disable_sentinel_clears_floor():
 def test_risk_override_still_falls_through_to_classifier():
     # The caller-supplied risk= override keeps its strict semantics: an
     # unrecognized value falls back to the tool classifier, NOT clamped to high.
-    from maverick.governance import _risk_level
+    from lightwork.governance import _risk_level
     assert _risk_level("bogus") is None
     assert _risk_level("critical") is None  # not a known level; override path
 

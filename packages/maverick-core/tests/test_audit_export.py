@@ -11,9 +11,9 @@ from datetime import datetime, timezone
 from pathlib import Path
 
 from click.testing import CliRunner
-from maverick.audit.events import AuditEvent, EventKind
-from maverick.audit.export import iter_audit_events, to_cef, to_jsonl
-from maverick.audit.writer import AuditLog
+from lightwork.audit.events import AuditEvent, EventKind
+from lightwork.audit.export import iter_audit_events, to_cef, to_jsonl
+from lightwork.audit.writer import AuditLog
 
 
 def test_cef_header_escapes_pipe_in_kind():
@@ -21,7 +21,7 @@ def test_cef_header_escapes_pipe_in_kind():
     # header field (e.g. a future/plugin-supplied kind) must be escaped so it
     # can't shift the header columns and corrupt the record.
     line = to_cef({"kind": "policy|halt", "agent": "x"})
-    assert line.startswith("CEF:0|Maverick|maverick-agent|")
+    assert line.startswith("CEF:0|Maverick|lightwork-agent|")
     # both kind header slots carry the escaped form, not a raw delimiter
     assert "policy\\|halt|policy\\|halt|" in line
 
@@ -75,7 +75,7 @@ def test_to_jsonl_roundtrips():
 def test_to_cef_header_and_extensions():
     ev = {"v": 1, "kind": "tool_call", "agent": "system", "name": "read_file"}
     cef = to_cef(ev)
-    assert cef.startswith("CEF:0|Maverick|maverick-agent|")
+    assert cef.startswith("CEF:0|Maverick|lightwork-agent|")
     assert "|tool_call|tool_call|" in cef
     assert "name=read_file" in cef
     assert "kind=tool_call" in cef
@@ -180,7 +180,7 @@ def test_iter_tenant_reads_tenant_dir(monkeypatch, tmp_path):
 # --- CLI: maverick audit export --------------------------------------------
 
 def test_cli_registers_export():
-    from maverick.cli import main
+    from lightwork.cli import main
     assert "export" in main.commands["audit"].commands
 
 
@@ -190,7 +190,7 @@ def test_cli_export_json_roundtrips(monkeypatch, tmp_path):
     audit_dir = tmp_path / ".maverick" / "audit"
     _write_today(audit_dir, name="read_file", input_summary="hello")
 
-    from maverick.cli import main
+    from lightwork.cli import main
     res = CliRunner().invoke(main, ["audit", "export"])
     assert res.exit_code == 0, res.output
     rows = [json.loads(line) for line in res.output.splitlines() if line.strip()]
@@ -205,11 +205,11 @@ def test_cli_export_cef(monkeypatch, tmp_path):
     audit_dir = tmp_path / ".maverick" / "audit"
     _write_today(audit_dir, name="read_file")
 
-    from maverick.cli import main
+    from lightwork.cli import main
     res = CliRunner().invoke(main, ["audit", "export", "--format", "cef"])
     assert res.exit_code == 0, res.output
     line = res.output.strip().splitlines()[0]
-    assert line.startswith("CEF:0|Maverick|maverick-agent|")
+    assert line.startswith("CEF:0|Maverick|lightwork-agent|")
     assert "name=read_file" in line
 
 
@@ -220,7 +220,7 @@ def test_cli_export_all_spans_two_days(monkeypatch, tmp_path):
     _write_today(audit_dir, name="today_tool")
     _write_day(audit_dir, "2020-01-01", name="old_tool")
 
-    from maverick.cli import main
+    from lightwork.cli import main
     res = CliRunner().invoke(main, ["audit", "export", "--all"])
     assert res.exit_code == 0, res.output
     names = {json.loads(line)["name"]
@@ -234,7 +234,7 @@ def test_cli_export_tenant(monkeypatch, tmp_path):
     tenant_dir = tmp_path / ".maverick" / "tenants" / "acme" / "audit"
     _write_today(tenant_dir, name="tenant_tool")
 
-    from maverick.cli import main
+    from lightwork.cli import main
     res = CliRunner().invoke(main, ["audit", "export", "--tenant", "acme"])
     assert res.exit_code == 0, res.output
     rows = [json.loads(line) for line in res.output.splitlines() if line.strip()]
@@ -248,7 +248,7 @@ def test_cli_export_output_file_is_0600(monkeypatch, tmp_path):
     _write_today(audit_dir, name="read_file")
 
     out = tmp_path / "export.jsonl"
-    from maverick.cli import main
+    from lightwork.cli import main
     res = CliRunner().invoke(main, ["audit", "export", "-o", str(out)])
     assert res.exit_code == 0, res.output
     assert out.exists()
@@ -265,7 +265,7 @@ def test_cli_export_rejects_output_over_selected_day_file(monkeypatch, tmp_path)
     day_file = audit_dir / f"{_today()}.ndjson"
     before = day_file.read_text(encoding="utf-8")
 
-    from maverick.cli import main
+    from lightwork.cli import main
     res = CliRunner().invoke(
         main, ["audit", "export", "--day", _today(), "-o", str(day_file)]
     )
@@ -283,7 +283,7 @@ def test_cli_export_all_rejects_output_over_included_day_file(monkeypatch, tmp_p
     old_file = audit_dir / "2020-01-01.ndjson"
     before = old_file.read_text(encoding="utf-8")
 
-    from maverick.cli import main
+    from lightwork.cli import main
     res = CliRunner().invoke(main, ["audit", "export", "--all", "-o", str(old_file)])
     assert res.exit_code != 0
     assert "refusing to write audit export over a source audit log file" in res.output
@@ -294,7 +294,7 @@ def test_cli_export_empty_log_exits_zero(monkeypatch, tmp_path):
     monkeypatch.setenv("HOME", str(tmp_path))
     monkeypatch.delenv("MAVERICK_TENANT", raising=False)
 
-    from maverick.cli import main
+    from lightwork.cli import main
     res = CliRunner().invoke(main, ["audit", "export"])
     assert res.exit_code == 0, res.output
 
@@ -334,7 +334,7 @@ def test_cli_export_since_until(monkeypatch, tmp_path):
     _write_day(audit_dir, "2020-06-15", name="jun")
     _write_day(audit_dir, "2020-12-31", name="dec")
 
-    from maverick.cli import main
+    from lightwork.cli import main
     res = CliRunner().invoke(
         main, ["audit", "export", "--since", "2020-06-01", "--until", "2020-07-01"]
     )
@@ -347,7 +347,7 @@ def test_cli_export_since_until(monkeypatch, tmp_path):
 def test_cli_export_rejects_bad_date(monkeypatch, tmp_path):
     monkeypatch.setenv("HOME", str(tmp_path))
     monkeypatch.delenv("MAVERICK_TENANT", raising=False)
-    from maverick.cli import main
+    from lightwork.cli import main
     res = CliRunner().invoke(main, ["audit", "export", "--since", "nope"])
     assert res.exit_code == 2
     assert "YYYY-MM-DD" in res.output
@@ -356,7 +356,7 @@ def test_cli_export_rejects_bad_date(monkeypatch, tmp_path):
 def test_cli_export_rejects_unpadded_window_date(monkeypatch, tmp_path):
     monkeypatch.setenv("HOME", str(tmp_path))
     monkeypatch.delenv("MAVERICK_TENANT", raising=False)
-    from maverick.cli import main
+    from lightwork.cli import main
     res = CliRunner().invoke(main, ["audit", "export", "--since", "2020-1-1"])
     assert res.exit_code == 2
     assert "YYYY-MM-DD" in res.output

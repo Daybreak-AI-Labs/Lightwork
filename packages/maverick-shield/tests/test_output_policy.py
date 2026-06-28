@@ -6,8 +6,8 @@ Shield.scan_output: verbatim system-prompt regurgitation and refusal-then-leak.
 """
 from __future__ import annotations
 
-from maverick_shield import Shield, ShieldVerdict
-from maverick_shield.output_policy import (
+from lightwork_shield import Shield, ShieldVerdict
+from lightwork_shield.output_policy import (
     detect_refusal_leak,
     detect_system_prompt_regurgitation,
     scan_output,

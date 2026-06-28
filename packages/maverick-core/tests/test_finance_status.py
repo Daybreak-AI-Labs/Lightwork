@@ -4,7 +4,7 @@ from __future__ import annotations
 import json
 
 import pytest
-from maverick.finance.status import (
+from lightwork.finance.status import (
     finance_status,
     render_status_json,
     render_status_text,

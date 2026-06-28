@@ -9,14 +9,14 @@ import os
 import stat
 
 import pytest
-from maverick.catalog import CatalogEntry
-from maverick.federation_envelope import (
+from lightwork.catalog import CatalogEntry
+from lightwork.federation_envelope import (
     FederationError,
     peer_allowlist,
     sign_envelope,
     verify_envelope,
 )
-from maverick.marketplace.federation import (
+from lightwork.marketplace.federation import (
     MAX_LISTINGS_PER_ENVELOPE,
     SCHEMA,
     export_listings,
@@ -29,7 +29,7 @@ LISTING = {
     "version": "1.0.0",
     "kind": "skills",
     "summary": "Fetch a URL and summarise it cleanly.",
-    "source": "gh:cdayAI/awesome-maverick-skills:summarize-url/SKILL.md",
+    "source": "gh:cdayAI/awesome-lightwork-skills:summarize-url/SKILL.md",
     "sha256": "ab" * 32,
     "author": "cday",
 }
@@ -81,7 +81,7 @@ def test_export_skips_malformed_entries():
 
 
 def test_export_refuses_unsigned(monkeypatch):
-    import maverick.audit.signing as audit_signing
+    import lightwork.audit.signing as audit_signing
     monkeypatch.setattr(audit_signing, "_have_crypto", lambda: False)
     with pytest.raises(FederationError):
         _export()
@@ -168,7 +168,7 @@ def test_verify_envelope_rejects_recursion_bomb():
     digest (json.dumps) with a RecursionError. The pubkey here matches the pinned
     key, so without the guard verification would reach _digest and blow the stack
     — an unauthenticated DoS (the pinned pubkey is public)."""
-    from maverick.federation_envelope import verify_envelope
+    from lightwork.federation_envelope import verify_envelope
     deep: dict = {}
     cur = deep
     for _ in range(5000):
@@ -230,7 +230,7 @@ def test_import_rejects_pinned_key_mismatch(tmp_path):
 
 def test_import_rejects_wrong_schema_and_garbage(tmp_path):
     env = _export()
-    env["schema"] = "maverick-marketplace-fed/2"
+    env["schema"] = "lightwork-marketplace-fed/2"
     assert not import_listings(env, peers=_peers_for(env),
                                store_path=tmp_path / "i.json")["ok"]
     assert not import_listings("junk", peers={}, store_path=tmp_path / "i.json")["ok"]
@@ -240,7 +240,7 @@ def test_import_rejects_wrong_schema_and_garbage(tmp_path):
 def test_import_rejects_without_crypto(monkeypatch, tmp_path):
     env = _export()
     peers = _peers_for(env)
-    import maverick.audit.signing as audit_signing
+    import lightwork.audit.signing as audit_signing
     monkeypatch.setattr(audit_signing, "_have_crypto", lambda: False)
     report = import_listings(env, peers=peers, store_path=tmp_path / "i.json")
     assert not report["ok"]
@@ -301,7 +301,7 @@ def test_peer_allowlist_parses_tables_and_strings():
 
 
 def test_module_states_ratings_do_not_federate():
-    import maverick.marketplace.federation as mod
+    import lightwork.marketplace.federation as mod
     assert "Ratings do NOT federate" in (mod.__doc__ or "")
 
 
@@ -310,7 +310,7 @@ def test_listing_name_charset_is_validated():
     # _listing_for_export (the export AND import normalizer) must drop names with
     # a `/` (key injection), a leading `..`/`.` (traversal/hidden), or whitespace/
     # control chars, while keeping ordinary kebab/identifier/dotted/scoped names.
-    from maverick.marketplace.federation import _listing_for_export
+    from lightwork.marketplace.federation import _listing_for_export
 
     base = {"kind": "skills", "summary": "s",
             "source": "gh:a:b", "sha256": "ab" * 32}
@@ -328,7 +328,7 @@ def test_concurrent_imports_from_different_origins_do_not_clobber(tmp_path):
     the replay window."""
     import threading
 
-    from maverick.marketplace.federation import _WATERMARK_KEY, _load_store
+    from lightwork.marketplace.federation import _WATERMARK_KEY, _load_store
 
     store = tmp_path / "fed_store.json"
     env_a = _export(origin="peer-a", now=1_750_000_000.0)

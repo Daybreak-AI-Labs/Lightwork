@@ -10,7 +10,7 @@ This measures per-scan wall-clock (p50/p95/p99/max) for each offline scanner
 over an adversarial corpus -- long single-character runs, big base64 /
 non-ASCII blobs, and quantifier bait -- the exact surface where a regex can
 go super-linear. The pass/fail CI gate lives separately in
-``packages/maverick-shield/tests/test_scan_latency_gate.py``.
+``packages/lightwork-shield/tests/test_scan_latency_gate.py``.
 
 Run:  python benchmarks/security/latency_bench.py
 """
@@ -23,12 +23,12 @@ import time
 from pathlib import Path
 
 _ROOT = Path(__file__).resolve().parents[2]
-for _p in (_ROOT / "packages" / "maverick-shield", _ROOT / "packages" / "maverick-core"):
+for _p in (_ROOT / "packages" / "lightwork-shield", _ROOT / "packages" / "lightwork-core"):
     if str(_p) not in sys.path:
         sys.path.insert(0, str(_p))
 
-from maverick.safety.remote_scan import scan_remote_content  # noqa: E402
-from maverick_shield import builtin_rules, cascade  # noqa: E402
+from lightwork.safety.remote_scan import scan_remote_content  # noqa: E402
+from lightwork_shield import builtin_rules, cascade  # noqa: E402
 
 _BIG = 200_000
 

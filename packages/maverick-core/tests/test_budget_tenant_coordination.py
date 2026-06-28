@@ -6,9 +6,9 @@ builder clamps max_dollars to the tenant's remaining daily allowance."""
 from __future__ import annotations
 
 import pytest
-from maverick.budget import budget_from_config
-from maverick.quotas import record_usage
-from maverick.tenant import registry
+from lightwork.budget import budget_from_config
+from lightwork.quotas import record_usage
+from lightwork.tenant import registry
 
 
 @pytest.fixture(autouse=True)
@@ -73,7 +73,7 @@ def test_exhausted_tenant_clamps_to_zero(monkeypatch):
 def test_clamp_never_raises_an_unset_cap_above_the_default(monkeypatch):
     # No explicit max_dollars + a tenant with a LARGE remainder must NOT raise
     # the per-run cap above Budget's default -- the clamp only ever lowers.
-    from maverick.budget import Budget
+    from lightwork.budget import Budget
     default = Budget.__dataclass_fields__["max_dollars"].default
     monkeypatch.setenv("MAVERICK_TENANT", "acme")
     registry.create_tenant("acme", plan="free")

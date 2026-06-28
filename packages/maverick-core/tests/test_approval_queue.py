@@ -3,7 +3,7 @@ from __future__ import annotations
 
 import threading
 
-from maverick.world_model import SCHEMA_VERSION, WorldModel
+from lightwork.world_model import SCHEMA_VERSION, WorldModel
 
 
 def test_schema_has_approvals_table(tmp_path):
@@ -62,10 +62,10 @@ def test_consent_dashboard_mode_blocks_until_decided(tmp_path, monkeypatch):
     monkeypatch.setenv("MAVERICK_CONSENT_DASHBOARD_TIMEOUT", "10")
 
     db = tmp_path / ".maverick" / "world.db"
-    from maverick import world_model
+    from lightwork import world_model
     monkeypatch.setattr(world_model, "DEFAULT_DB", db)
 
-    from maverick.safety.consent import require_consent
+    from lightwork.safety.consent import require_consent
 
     # A background thread approves the (only) pending approval shortly after.
     def _approver():
@@ -92,10 +92,10 @@ def test_consent_dashboard_mode_denied(tmp_path, monkeypatch):
     monkeypatch.setenv("MAVERICK_CONSENT_MODE", "dashboard")
     monkeypatch.setenv("MAVERICK_CONSENT_DASHBOARD_TIMEOUT", "10")
     db = tmp_path / ".maverick" / "world.db"
-    from maverick import world_model
+    from lightwork import world_model
     monkeypatch.setattr(world_model, "DEFAULT_DB", db)
 
-    from maverick.safety.consent import ConsentDenied, require_consent
+    from lightwork.safety.consent import ConsentDenied, require_consent
 
     def _denier():
         wm = WorldModel(path=db)

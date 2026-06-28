@@ -1,8 +1,8 @@
 """Learned planning-topology selection ([planning] mode = "auto")."""
 from __future__ import annotations
 
-from maverick import planning_stats
-from maverick.orchestrator import _budget_task_class
+from lightwork import planning_stats
+from lightwork.orchestrator import _budget_task_class
 
 
 class TestRecordAndPrefer:

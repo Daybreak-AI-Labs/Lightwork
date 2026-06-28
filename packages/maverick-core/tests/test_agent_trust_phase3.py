@@ -7,8 +7,8 @@ from __future__ import annotations
 from types import SimpleNamespace
 
 import pytest
-from maverick import agent_trust
-from maverick.agent_trust import TrustedAgent
+from lightwork import agent_trust
+from lightwork.agent_trust import TrustedAgent
 
 # ---- per-caller A2A token resolution --------------------------------------
 
@@ -51,7 +51,7 @@ def _patch(monkeypatch, registry, *, enforced=True):
 
 
 def test_a2a_auth_accepts_per_caller_token(monkeypatch):
-    from maverick.a2a_tasks import TaskEngine
+    from lightwork.a2a_tasks import TaskEngine
     monkeypatch.delenv("MAVERICK_A2A_TOKEN", raising=False)
     reg = {"vega": TrustedAgent(id="vega", a2a_token="s3cret")}
     _patch(monkeypatch, reg)
@@ -62,7 +62,7 @@ def test_a2a_auth_accepts_per_caller_token(monkeypatch):
 
 
 def test_a2a_auth_rejects_revoked_per_caller_token(monkeypatch):
-    from maverick.a2a_tasks import TaskEngine
+    from lightwork.a2a_tasks import TaskEngine
     monkeypatch.delenv("MAVERICK_A2A_TOKEN", raising=False)
     reg = {"vega": TrustedAgent(id="vega", a2a_token="s3cret", revoked=True)}
     _patch(monkeypatch, reg)
@@ -72,7 +72,7 @@ def test_a2a_auth_rejects_revoked_per_caller_token(monkeypatch):
 
 
 def test_a2a_trust_block_per_caller(monkeypatch):
-    from maverick.a2a_tasks import _a2a_trust_block
+    from lightwork.a2a_tasks import _a2a_trust_block
     reg = {"vega": TrustedAgent(id="vega", direction="both"),
            "inbound_only": TrustedAgent(id="inbound_only", direction="outbound")}
     _patch(monkeypatch, reg)
@@ -83,7 +83,7 @@ def test_a2a_trust_block_per_caller(monkeypatch):
 
 
 def test_a2a_capability_uses_caller_ceiling(monkeypatch):
-    from maverick.a2a_tasks import _a2a_capability, _caller_agent
+    from lightwork.a2a_tasks import _a2a_capability, _caller_agent
     reg = {"vega": TrustedAgent(id="vega", allow_tools=frozenset({"read_file"}))}
     _patch(monkeypatch, reg)
     cv = _caller_agent.set("vega")
@@ -106,8 +106,8 @@ class _Goals:
 
 
 def _fed(monkeypatch, registry):
-    from maverick import federation
-    from maverick.federation import FederationService, Peer
+    from lightwork import federation
+    from lightwork.federation import FederationService, Peer
     monkeypatch.setattr(agent_trust, "load_trust_state", lambda: (True, registry))
     monkeypatch.setattr(agent_trust, "agent_trust_enforced", lambda cfg=None: True)
     monkeypatch.setattr(agent_trust, "load_registry", lambda cfg=None: registry)
@@ -125,7 +125,7 @@ def _delegate(svc, **over):
 
 
 def test_federation_governance_deny(monkeypatch):
-    import maverick.governance as gov
+    import lightwork.governance as gov
     reg = {"a": TrustedAgent(id="a", allow_tools=frozenset({"read_file"}))}
     federation, svc = _fed(monkeypatch, reg)
     monkeypatch.setattr(gov, "evaluate", lambda *a, **k: gov.Verdict(
@@ -135,7 +135,7 @@ def test_federation_governance_deny(monkeypatch):
 
 
 def test_federation_governance_require_human_fail_closed(monkeypatch):
-    import maverick.governance as gov
+    import lightwork.governance as gov
     reg = {"a": TrustedAgent(id="a", allow_tools=frozenset({"read_file"}))}
     federation, svc = _fed(monkeypatch, reg)
     monkeypatch.setattr(gov, "evaluate", lambda *a, **k: gov.Verdict(
@@ -156,12 +156,12 @@ def test_federation_governance_allow_is_noop(monkeypatch):
 
 
 def test_channel_federation_gated_by_registry(monkeypatch):
-    from maverick import channel_federation as cf
+    from lightwork import channel_federation as cf
     # Bypass signature crypto; we're testing the trust-origin gate that follows.
     monkeypatch.setattr(cf, "verify_envelope", lambda *a, **k: (True, "ok"))
     _patch(monkeypatch, {})  # engaged, empty registry -> origin not registered
     applier = cf.InboundApplier(handler=lambda m: None, peers={}, local="me")
-    env = {"schema": "maverick-channel-fed/1", "origin": "ghost", "to": "me",
+    env = {"schema": "lightwork-channel-fed/1", "origin": "ghost", "to": "me",
            "channel": "slack", "user_id": "u", "text": "hi",
            "pubkey": "x", "key_id": "k", "sig": "s"}
     res = applier.apply(env)
@@ -169,10 +169,10 @@ def test_channel_federation_gated_by_registry(monkeypatch):
 
 
 def test_marketplace_federation_gated_by_registry(monkeypatch):
-    from maverick.marketplace import federation as mf
+    from lightwork.marketplace import federation as mf
     monkeypatch.setattr(mf, "verify_envelope", lambda *a, **k: (True, "ok"))
     _patch(monkeypatch, {})
-    env = {"schema": "maverick-marketplace-fed/1", "origin": "ghost",
+    env = {"schema": "lightwork-marketplace-fed/1", "origin": "ghost",
            "listings": [], "pubkey": "x", "key_id": "k", "sig": "s"}
     report = mf.import_listings(env, peers={"ghost": {"origin": "ghost", "pubkey": "x"}})
     assert "trust registry" in (report.get("reason") or "")
@@ -201,7 +201,7 @@ class _Ctx:
 
 def test_grpc_trust_capability_denies_unregistered(monkeypatch):
     pytest.importorskip("grpc")
-    from maverick.grpc_api import server
+    from lightwork.grpc_api import server
     _patch(monkeypatch, {})  # engaged, no surface-wide "grpc" entry
     with pytest.raises(PermissionError):
         server._trust_capability(_Ctx(), None)
@@ -209,7 +209,7 @@ def test_grpc_trust_capability_denies_unregistered(monkeypatch):
 
 def test_grpc_trust_capability_allows_registered(monkeypatch):
     pytest.importorskip("grpc")
-    from maverick.grpc_api import server
+    from lightwork.grpc_api import server
     reg = {"grpc": TrustedAgent(id="grpc", allow_tools=frozenset({"read_file"}))}
     _patch(monkeypatch, reg)
     cap = server._trust_capability(_Ctx(), None)
@@ -218,7 +218,7 @@ def test_grpc_trust_capability_allows_registered(monkeypatch):
 
 def test_grpc_trust_capability_noop_when_disengaged(monkeypatch):
     pytest.importorskip("grpc")
-    from maverick.grpc_api import server
+    from lightwork.grpc_api import server
     _patch(monkeypatch, {}, enforced=False)
     assert server._trust_capability(_Ctx(), None) is None
 
@@ -227,7 +227,7 @@ def test_grpc_trust_capability_noop_when_disengaged(monkeypatch):
 
 
 def test_mcp_admits_registered_shared_token(monkeypatch):
-    from maverick_mcp import http_transport as ht
+    from lightwork_mcp import http_transport as ht
     monkeypatch.setenv("MAVERICK_MCP_TOKEN", "shared")
     _patch(monkeypatch, {"mcp": TrustedAgent(id="mcp", direction="both")})
     # Shared bearer -> authed with NO per-caller identity (empty string).
@@ -235,14 +235,14 @@ def test_mcp_admits_registered_shared_token(monkeypatch):
 
 
 def test_mcp_denies_when_engaged_no_entry(monkeypatch):
-    from maverick_mcp import http_transport as ht
+    from lightwork_mcp import http_transport as ht
     monkeypatch.setenv("MAVERICK_MCP_TOKEN", "shared")
     _patch(monkeypatch, {})  # engaged, no "mcp" surface entry
     assert ht._check_bearer("Bearer shared") == (False, "")
 
 
 def test_mcp_per_caller_token(monkeypatch):
-    from maverick_mcp import http_transport as ht
+    from lightwork_mcp import http_transport as ht
     monkeypatch.delenv("MAVERICK_MCP_TOKEN", raising=False)
     reg = {"vega": TrustedAgent(id="vega", mcp_token="v-tok", direction="both")}
     _patch(monkeypatch, reg)
@@ -252,7 +252,7 @@ def test_mcp_per_caller_token(monkeypatch):
 
 
 def test_mcp_disengaged_auth_only(monkeypatch):
-    from maverick_mcp import http_transport as ht
+    from lightwork_mcp import http_transport as ht
     monkeypatch.setenv("MAVERICK_MCP_TOKEN", "shared")
     _patch(monkeypatch, {}, enforced=False)
     assert ht._check_bearer("Bearer shared") == (True, "")

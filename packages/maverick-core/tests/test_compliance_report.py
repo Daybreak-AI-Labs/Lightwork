@@ -4,7 +4,7 @@ from __future__ import annotations
 import json
 
 import pytest
-from maverick.compliance import (
+from lightwork.compliance import (
     compliance_report,
     render_report_json,
     render_report_text,
@@ -18,7 +18,7 @@ def _clean(monkeypatch):
         "MAVERICK_ANON", "MAVERICK_AI_DISCLOSURE",
     ):
         monkeypatch.delenv(var, raising=False)
-    monkeypatch.setattr("maverick.config.load_config", lambda *a, **k: {})
+    monkeypatch.setattr("lightwork.config.load_config", lambda *a, **k: {})
 
 
 def _by_control(checks):
@@ -49,7 +49,7 @@ def test_egress_control_reflects_enterprise(monkeypatch):
 
 def test_audit_signing_requires_crypto_backend(monkeypatch):
     monkeypatch.setenv("MAVERICK_AUDIT_SIGN", "1")
-    monkeypatch.setattr("maverick.audit.signing._have_crypto", lambda: False)
+    monkeypatch.setattr("lightwork.audit.signing._have_crypto", lambda: False)
 
     check = _by_control(compliance_report())["Tamper-evident audit"]
 
@@ -60,7 +60,7 @@ def test_audit_signing_requires_crypto_backend(monkeypatch):
 
 def test_audit_signing_active_when_requested_and_crypto_available(monkeypatch):
     monkeypatch.setenv("MAVERICK_AUDIT_SIGN", "1")
-    monkeypatch.setattr("maverick.audit.signing._have_crypto", lambda: True)
+    monkeypatch.setattr("lightwork.audit.signing._have_crypto", lambda: True)
 
     check = _by_control(compliance_report())["Tamper-evident audit"]
 
@@ -74,9 +74,9 @@ def test_audit_signing_not_active_when_the_signed_write_fails(monkeypatch):
     # read "active" here; the probe-backed check reports the real state -- a
     # signer that can't actually produce a verifiable signed row is NOT
     # tamper-evident, so this must be action_needed, not a false PASS.
-    from maverick.deployment import GuaranteeCheck
+    from lightwork.deployment import GuaranteeCheck
     monkeypatch.setattr(
-        "maverick.deployment._verify_audit_signing",
+        "lightwork.deployment._verify_audit_signing",
         lambda: GuaranteeCheck("Tamper-evident audit", False,
                                "audit signing probe failed to write or verify"),
     )
@@ -93,7 +93,7 @@ def test_oversight_reflects_consent_mode(monkeypatch):
 
 def test_retention_reflects_config(monkeypatch):
     monkeypatch.setattr(
-        "maverick.config.load_config", lambda *a, **k: {"retention": {"audit_days": 90}}
+        "lightwork.config.load_config", lambda *a, **k: {"retention": {"audit_days": 90}}
     )
     assert _by_control(compliance_report())["Storage limitation (retention)"].status == "active"
 

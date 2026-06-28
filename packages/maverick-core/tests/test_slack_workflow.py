@@ -3,7 +3,7 @@ from __future__ import annotations
 
 import json
 
-from maverick.tools.slack_workflow import slack_workflow
+from lightwork.tools.slack_workflow import slack_workflow
 
 
 def _run(**kw):

@@ -11,7 +11,7 @@ from __future__ import annotations
 import email
 
 import pytest
-from maverick_channels.email import _authentication_verdict
+from lightwork_channels.email import _authentication_verdict
 
 
 def _msg(*auth_results: str):

@@ -3,8 +3,8 @@ from __future__ import annotations
 from contextlib import contextmanager
 
 import pytest
-from maverick.world_model_backends import postgres
-from maverick.world_model_backends.postgres import PostgresWorldModel
+from lightwork.world_model_backends import postgres
+from lightwork.world_model_backends.postgres import PostgresWorldModel
 
 
 class RecordingCursor:
@@ -24,14 +24,14 @@ def test_rls_sets_fail_closed_sentinel_without_active_tenant(monkeypatch):
     world._set_tenant_guc(cur)
 
     assert cur.calls == [
-        ("SELECT set_config('maverick.tenant', %s, true)", ("__maverick_no_tenant__",))
+        ("SELECT set_config('lightwork.tenant', %s, true)", ("__maverick_no_tenant__",))
     ]
 
 
 def test_rls_policy_does_not_allow_unset_tenant_bypass():
     sql = PostgresWorldModel._rls_policy_sql("goals").lower()
 
-    assert "current_setting('maverick.tenant'" in sql
+    assert "current_setting('lightwork.tenant'" in sql
     assert "tenant_id = nullif" in sql
     assert " with check " in f" {sql} "
     assert " or " not in sql
@@ -72,8 +72,8 @@ def _clean_toggle_env(monkeypatch):
     for var in ("MAVERICK_STRICT_TENANT_ISOLATION", "MAVERICK_PG_RLS"):
         monkeypatch.delenv(var, raising=False)
     # No config and not enterprise unless a test opts in.
-    monkeypatch.setattr("maverick.config.load_config", lambda *a, **k: {})
-    monkeypatch.setattr("maverick.enterprise.enterprise_enabled", lambda: False)
+    monkeypatch.setattr("lightwork.config.load_config", lambda *a, **k: {})
+    monkeypatch.setattr("lightwork.enterprise.enterprise_enabled", lambda: False)
 
 
 def test_toggles_default_off_without_enterprise(_clean_toggle_env):
@@ -83,7 +83,7 @@ def test_toggles_default_off_without_enterprise(_clean_toggle_env):
 
 
 def test_toggles_auto_on_under_enterprise(_clean_toggle_env, monkeypatch):
-    monkeypatch.setattr("maverick.enterprise.enterprise_enabled", lambda: True)
+    monkeypatch.setattr("lightwork.enterprise.enterprise_enabled", lambda: True)
     assert postgres._strict_tenant_isolation() is True
     assert postgres._rls_enabled() is True
     # Auto-on is NOT an explicit operator choice -> the boot preflight applies.
@@ -91,7 +91,7 @@ def test_toggles_auto_on_under_enterprise(_clean_toggle_env, monkeypatch):
 
 
 def test_explicit_env_off_overrides_enterprise(_clean_toggle_env, monkeypatch):
-    monkeypatch.setattr("maverick.enterprise.enterprise_enabled", lambda: True)
+    monkeypatch.setattr("lightwork.enterprise.enterprise_enabled", lambda: True)
     monkeypatch.setenv("MAVERICK_PG_RLS", "0")
     monkeypatch.setenv("MAVERICK_STRICT_TENANT_ISOLATION", "off")
     assert postgres._rls_enabled() is False
@@ -107,7 +107,7 @@ def test_explicit_env_on_is_explicit(_clean_toggle_env, monkeypatch):
 
 def test_config_toggle_resolves_when_env_absent(_clean_toggle_env, monkeypatch):
     monkeypatch.setattr(
-        "maverick.config.load_config",
+        "lightwork.config.load_config",
         lambda *a, **k: {"world_model": {"rls": True, "strict_tenant_isolation": "yes"}},
     )
     assert postgres._rls_enabled() is True
@@ -119,7 +119,7 @@ def test_preflight_refuses_boot_on_legacy_null_rows_when_auto_on(monkeypatch):
     # Enterprise auto-on (not explicit) + a table with NULL-tenant rows -> refuse.
     monkeypatch.setattr(postgres, "_rls_explicitly_set", lambda: False)
     monkeypatch.setattr(
-        "maverick.world_model_backends.pg_rls.preflight",
+        "lightwork.world_model_backends.pg_rls.preflight",
         lambda conn: {"role": "app", "ready": False, "tables": {
             "goals": {"null_tenant_rows": 3, "owned_by_current_role": True},
             "facts": {"null_tenant_rows": 0, "owned_by_current_role": True},
@@ -135,7 +135,7 @@ def test_preflight_refuses_boot_on_legacy_null_rows_when_auto_on(monkeypatch):
 def test_preflight_passes_when_no_null_rows(monkeypatch):
     monkeypatch.setattr(postgres, "_rls_explicitly_set", lambda: False)
     monkeypatch.setattr(
-        "maverick.world_model_backends.pg_rls.preflight",
+        "lightwork.world_model_backends.pg_rls.preflight",
         lambda conn: {"role": "app", "ready": True, "tables": {
             "goals": {"null_tenant_rows": 0, "owned_by_current_role": True},
         }},
@@ -157,7 +157,7 @@ def test_preflight_skipped_when_explicitly_opted_in(monkeypatch):
         return {"tables": {}}
 
     monkeypatch.setattr(
-        "maverick.world_model_backends.pg_rls.preflight", _should_not_run)
+        "lightwork.world_model_backends.pg_rls.preflight", _should_not_run)
     world = PostgresWorldModel.__new__(PostgresWorldModel)
     world._pool = None
     world.conn = object()

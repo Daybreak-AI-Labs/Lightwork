@@ -14,8 +14,8 @@ persisted/displayed record is redacted).
 """
 from __future__ import annotations
 
-from maverick.blackboard import Blackboard
-from maverick.world_model import WorldModel
+from lightwork.blackboard import Blackboard
+from lightwork.world_model import WorldModel
 
 _SECRET = "sk-ant-api03-LEAKED1234567890abcdefABCDEFGHIJKLMNOP"  # pragma: allowlist secret
 

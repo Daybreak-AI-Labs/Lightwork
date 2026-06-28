@@ -10,8 +10,8 @@ from __future__ import annotations
 
 from pathlib import Path
 
-from maverick.blackboard import Blackboard
-from maverick.skills import distill
+from lightwork.blackboard import Blackboard
+from lightwork.skills import distill
 
 _VALID = (
     "---\n"
@@ -48,7 +48,7 @@ def test_distill_rejects_shield_blocked_body(
 
     # Force a deterministic block regardless of which shield ruleset is
     # installed (built-in vs full SDK).
-    import maverick_shield
+    import lightwork_shield
 
     class _Verdict:
         allowed = False
@@ -60,7 +60,7 @@ def test_distill_rejects_shield_blocked_body(
             return _Verdict()
 
     monkeypatch.setattr(
-        maverick_shield.Shield, "from_config", staticmethod(lambda: _Blocking())
+        lightwork_shield.Shield, "from_config", staticmethod(lambda: _Blocking())
     )
 
     out = distill("goal", "summary", Blackboard(), fake_llm, skills_dir=tmp_path)

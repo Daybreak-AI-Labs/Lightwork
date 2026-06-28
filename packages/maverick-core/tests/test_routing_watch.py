@@ -4,22 +4,22 @@ from __future__ import annotations
 import types
 from pathlib import Path
 
-from maverick.cli import _watch_goal_allowed
-from maverick.llm import MODEL_HAIKU, MODEL_OPUS, MODEL_SONNET
-from maverick.routing import RouteSignal, pick
-from maverick.watch_mode import scan_dir, scan_file, scan_text
+from lightwork.cli import _watch_goal_allowed
+from lightwork.llm import MODEL_HAIKU, MODEL_OPUS, MODEL_SONNET
+from lightwork.routing import RouteSignal, pick
+from lightwork.watch_mode import scan_dir, scan_file, scan_text
 
 
 def _patch_no_user_config(monkeypatch):
     """The picker's first step calls `from .config import get_role_model`
     inside the function. Patch the config module so it returns None for
     every role -> cascade defaults take over."""
-    from maverick import config as _cfg
+    from lightwork import config as _cfg
     monkeypatch.setattr(_cfg, "get_role_model", lambda role: None)
 
 
 def _patch_user_config(monkeypatch, mapping):
-    from maverick import config as _cfg
+    from lightwork import config as _cfg
     monkeypatch.setattr(_cfg, "get_role_model", lambda role: mapping.get(role))
 
 
@@ -129,7 +129,7 @@ class TestWatchModeShieldScan:
         orig_import = builtins.__import__
 
         def fake_import(name, *args, **kwargs):
-            if name == "maverick_shield":
+            if name == "lightwork_shield":
                 raise ImportError
             return orig_import(name, *args, **kwargs)
 
@@ -149,7 +149,7 @@ class TestWatchModeShieldScan:
                     allowed=False, severity="high", reasons=["prompt injection"]
                 )
 
-        monkeypatch.setattr("maverick.cli.Shield", _Shield, raising=False)
+        monkeypatch.setattr("lightwork.cli.Shield", _Shield, raising=False)
         import sys
         # monkeypatch.setitem restores the original (or removes) on
         # teardown. Direct mutation of `sys.modules` leaked the fake
@@ -158,7 +158,7 @@ class TestWatchModeShieldScan:
         # test ran first in the session.
         monkeypatch.setitem(
             sys.modules,
-            "maverick_shield",
+            "lightwork_shield",
             types.SimpleNamespace(Shield=_Shield),
         )
         allowed, reason = _watch_goal_allowed("malicious goal")

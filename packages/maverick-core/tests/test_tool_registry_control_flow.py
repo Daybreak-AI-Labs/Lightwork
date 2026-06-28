@@ -19,9 +19,9 @@ from __future__ import annotations
 import asyncio
 
 import pytest
-from maverick import killswitch
-from maverick.budget import BudgetExceeded
-from maverick.tools import Tool, ToolRegistry
+from lightwork import killswitch
+from lightwork.budget import BudgetExceeded
+from lightwork.tools import Tool, ToolRegistry
 
 
 def _registry_with(name: str, fn) -> ToolRegistry:

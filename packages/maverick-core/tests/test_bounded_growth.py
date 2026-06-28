@@ -8,7 +8,7 @@ import asyncio
 
 
 def test_blackboard_caps_entries(monkeypatch):
-    from maverick.blackboard import Blackboard
+    from lightwork.blackboard import Blackboard
     monkeypatch.setattr(Blackboard, "_MAX_ENTRIES", 5)
     b = Blackboard()
     for i in range(20):
@@ -20,7 +20,7 @@ def test_blackboard_caps_entries(monkeypatch):
 
 
 def test_a2a_task_store_is_bounded(monkeypatch):
-    import maverick.a2a_tasks as a2a
+    import lightwork.a2a_tasks as a2a
     monkeypatch.setattr(a2a, "_MAX_TASKS", 3)
 
     def _runner(text, *, max_dollars, max_wall, max_depth):
@@ -40,7 +40,7 @@ def test_a2a_task_store_is_bounded(monkeypatch):
 
 
 def test_runtime_overrides_revalidates_names(tmp_path, monkeypatch):
-    import maverick.runtime_overrides as ro
+    import lightwork.runtime_overrides as ro
     override = tmp_path / "runtime-overrides.toml"
     override.write_text(
         '[security]\n'

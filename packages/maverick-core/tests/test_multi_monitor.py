@@ -6,7 +6,7 @@ import sys
 import types
 
 import pytest
-from maverick.multi_monitor import Monitor, VirtualDesktop, list_monitors, pinned_monitor
+from lightwork.multi_monitor import Monitor, VirtualDesktop, list_monitors, pinned_monitor
 
 # Primary 1920x1080 at the origin; a 1280x1024 display LEFT of it (negative x)
 # whose top sits 200px above the primary's.
@@ -46,7 +46,7 @@ def test_list_monitors_single_virtual_entry(monkeypatch):
 
 def test_list_monitors_missing_mss_actionable_error(monkeypatch):
     monkeypatch.setitem(sys.modules, "mss", None)
-    with pytest.raises(ImportError, match=r"maverick-agent\[computer-use\]"):
+    with pytest.raises(ImportError, match=r"lightwork-agent\[computer-use\]"):
         list_monitors()
 
 

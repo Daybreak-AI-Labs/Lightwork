@@ -1,7 +1,7 @@
 """Tests for compliance mode profiles (HIPAA). Pure data + pure functions."""
 from __future__ import annotations
 
-from maverick import compliance_profiles as cp
+from lightwork import compliance_profiles as cp
 
 
 def test_hipaa_profile_present_and_shaped():
@@ -52,7 +52,7 @@ def test_posture_report():
 
 
 def test_configured_profiles_reads_config(monkeypatch, tmp_path):
-    import maverick.config as config_mod
+    import lightwork.config as config_mod
 
     def _fake_load():
         return {"compliance": {"profiles": ["HIPAA", " ", "hipaa"]}}
@@ -68,8 +68,8 @@ def test_list_profiles():
 
 def test_from_config_unchanged_when_no_profiles(monkeypatch):
     """Default behavior is identical when [compliance] is unset."""
-    import maverick.compliance_profiles as cpmod
-    from maverick.governance import Policy
+    import lightwork.compliance_profiles as cpmod
+    from lightwork.governance import Policy
 
     monkeypatch.setattr(cpmod, "configured_profiles", list)
     pol = Policy.from_config()
@@ -79,8 +79,8 @@ def test_from_config_unchanged_when_no_profiles(monkeypatch):
 
 def test_from_config_hipaa_tightens_live_policy(monkeypatch):
     """[compliance] profiles=['hipaa'] folds require-human-on-high into the live policy."""
-    import maverick.compliance_profiles as cpmod
-    from maverick.governance import Decision, Policy, evaluate
+    import lightwork.compliance_profiles as cpmod
+    from lightwork.governance import Decision, Policy, evaluate
 
     monkeypatch.setattr(cpmod, "configured_profiles", lambda: ["hipaa"])
     pol = Policy.from_config()
@@ -93,17 +93,17 @@ def test_from_config_hipaa_tightens_live_policy(monkeypatch):
 def test_no_import_cycle():
     # Importing governance then compliance_profiles (and vice versa) must not cycle.
     import importlib
-    importlib.import_module("maverick.governance")
-    importlib.import_module("maverick.compliance_profiles")
+    importlib.import_module("lightwork.governance")
+    importlib.import_module("lightwork.compliance_profiles")
 
 
 def test_hipaa_required_floors_are_runtime_enforced(monkeypatch):
     """HIPAA-only config must fail closed instead of merely documenting floors."""
-    import maverick.compliance_profiles as cpmod
-    from maverick.audit.writer import _resolve_signing
-    from maverick.crypto_at_rest import at_rest_enabled
-    from maverick.enterprise import EgressBlocked, assert_provider_allowed, enterprise_enabled
-    from maverick.privacy import anon_enabled
+    import lightwork.compliance_profiles as cpmod
+    from lightwork.audit.writer import _resolve_signing
+    from lightwork.crypto_at_rest import at_rest_enabled
+    from lightwork.enterprise import EgressBlocked, assert_provider_allowed, enterprise_enabled
+    from lightwork.privacy import anon_enabled
 
     monkeypatch.setattr(cpmod, "configured_profiles", lambda: ["hipaa"])
     for env in (

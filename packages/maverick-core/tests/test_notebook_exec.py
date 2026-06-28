@@ -3,7 +3,7 @@ from __future__ import annotations
 
 import json
 
-from maverick.tools.notebook_exec import _extract_code, notebook_exec
+from lightwork.tools.notebook_exec import _extract_code, notebook_exec
 
 
 class _FakeSandbox:

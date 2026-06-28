@@ -6,9 +6,9 @@ whether or not signing is enabled.
 """
 from __future__ import annotations
 
-from maverick.audit import writer as W
-from maverick.audit.events import AuditEvent
-from maverick.audit.writer import AuditLog
+from lightwork.audit import writer as W
+from lightwork.audit.events import AuditEvent
+from lightwork.audit.writer import AuditLog
 
 
 def test_unsigned_record_fsyncs_the_row(tmp_path, monkeypatch):

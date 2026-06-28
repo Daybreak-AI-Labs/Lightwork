@@ -6,7 +6,7 @@ and asserts the verdict + findings. No network, no install, no code execution.
 from __future__ import annotations
 
 import pytest
-from maverick.marketplace.moderation import (
+from lightwork.marketplace.moderation import (
     Severity,
     Verdict,
     moderate,
@@ -40,7 +40,7 @@ api_version = "1"
 description = "Weather lookups"
 author = "Jane Dev <jane@example.com>"
 license = "MIT"
-repo = "https://github.com/jane/maverick-weather"
+repo = "https://github.com/jane/lightwork-weather"
 
 [plugin.capabilities]
 tools = ["weather"]
@@ -51,7 +51,7 @@ network = true
 
 
 def _write_plugin(dir_, *, manifest=_GOOD_MANIFEST, source="x = 1\n", src_name="weather.py"):
-    (dir_ / "maverick-plugin.toml").write_text(manifest, encoding="utf-8")
+    (dir_ / "lightwork-plugin.toml").write_text(manifest, encoding="utf-8")
     (dir_ / src_name).write_text(source, encoding="utf-8")
     return dir_
 
@@ -155,21 +155,21 @@ class TestModeratePlugin:
         # declares network, uses httpx -> declared+used is a FLAG (human review),
         # not a rejection.
         _write_plugin(tmp_path, source="import httpx\nhttpx.get('https://api')\n")
-        report = moderate_plugin(tmp_path / "maverick-plugin.toml")
+        report = moderate_plugin(tmp_path / "lightwork-plugin.toml")
         assert report.verdict is Verdict.FLAG
         assert any(f.code == "perm_network" for f in report.findings)
 
     def test_plugin_undeclared_subprocess_rejects(self, tmp_path):
         manifest = _GOOD_MANIFEST.replace("network = true", "network = true\nsubprocess = false")
         _write_plugin(tmp_path, manifest=manifest, source="import subprocess\nsubprocess.run(['ls'])\n")
-        report = moderate_plugin(tmp_path / "maverick-plugin.toml")
+        report = moderate_plugin(tmp_path / "lightwork-plugin.toml")
         assert report.verdict is Verdict.REJECT
         assert any(f.code == "undeclared_subprocess" for f in report.findings)
 
     def test_plugin_undeclared_network_rejects(self, tmp_path):
         manifest = _GOOD_MANIFEST.replace("network = true", "network = false")
         _write_plugin(tmp_path, manifest=manifest, source="import requests\nrequests.get('http://x')\n")
-        report = moderate_plugin(tmp_path / "maverick-plugin.toml")
+        report = moderate_plugin(tmp_path / "lightwork-plugin.toml")
         assert report.verdict is Verdict.REJECT
         assert any(f.code == "undeclared_network" for f in report.findings)
 
@@ -177,7 +177,7 @@ class TestModeratePlugin:
         manifest = _GOOD_MANIFEST.replace("network = true", "network = false")
         _write_plugin(tmp_path, manifest=manifest,
                       source="import os\napi = os.environ['SECRET_API_TOKEN']\n")
-        report = moderate_plugin(tmp_path / "maverick-plugin.toml")
+        report = moderate_plugin(tmp_path / "lightwork-plugin.toml")
         assert any(f.code == "undeclared_sensitive_env" for f in report.findings)
         # an undeclared sensitive env is a FLAG at minimum
         assert report.verdict in (Verdict.FLAG, Verdict.REJECT)
@@ -185,19 +185,19 @@ class TestModeratePlugin:
     def test_plugin_missing_license_flags(self, tmp_path):
         manifest = _GOOD_MANIFEST.replace('license = "MIT"\n', "")
         _write_plugin(tmp_path, manifest=manifest, source="x = 1\n")
-        report = moderate_plugin(tmp_path / "maverick-plugin.toml")
+        report = moderate_plugin(tmp_path / "lightwork-plugin.toml")
         assert any(f.code == "license_missing" for f in report.findings)
 
     def test_plugin_invalid_manifest_rejects(self, tmp_path):
-        (tmp_path / "maverick-plugin.toml").write_text("[plugin]\nname = \"x\"\n", encoding="utf-8")
-        report = moderate_plugin(tmp_path / "maverick-plugin.toml")
+        (tmp_path / "lightwork-plugin.toml").write_text("[plugin]\nname = \"x\"\n", encoding="utf-8")
+        report = moderate_plugin(tmp_path / "lightwork-plugin.toml")
         assert report.verdict is Verdict.REJECT
         assert any(f.code == "manifest" for f in report.findings)
 
     def test_plugin_with_embedded_secret_in_source_rejects(self, tmp_path):
         src = "KEY = 'sk-proj-abcdefghijklmnopqrstuvwxyz0123456789'\n"
         _write_plugin(tmp_path, source=src)
-        report = moderate_plugin(tmp_path / "maverick-plugin.toml")
+        report = moderate_plugin(tmp_path / "lightwork-plugin.toml")
         assert report.verdict is Verdict.REJECT
         assert any(f.code == "embedded_secret" for f in report.findings)
 
@@ -232,7 +232,7 @@ class TestDispatch:
         assert report.verdict is Verdict.REJECT
 
     def test_cli_exit_codes(self, tmp_path, capsys):
-        from maverick.marketplace.moderation import main
+        from lightwork.marketplace.moderation import main
         # approve -> 0
         p = _write_skill(tmp_path, extra_front="license: MIT\n")
         assert main([str(p)]) == 0
@@ -245,7 +245,7 @@ class TestDispatch:
     def test_cli_emits_json(self, tmp_path, capsys):
         import json
 
-        from maverick.marketplace.moderation import main
+        from lightwork.marketplace.moderation import main
         p = _write_skill(tmp_path, extra_front="license: MIT\n")
         main([str(p)])
         out = json.loads(capsys.readouterr().out)

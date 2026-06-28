@@ -8,7 +8,7 @@ from __future__ import annotations
 
 from pathlib import Path
 
-from maverick.health import _check_config
+from lightwork.health import _check_config
 
 
 def test_doctor_flags_corrupt_config(tmp_path: Path, capsys):
@@ -43,7 +43,7 @@ def test_doctor_anthropic_yellow_when_other_provider_configured(tmp_path, monkey
                    encoding="utf-8")
     monkeypatch.setenv("MAVERICK_CONFIG", str(cfg))
 
-    from maverick.health import _check_anthropic
+    from lightwork.health import _check_anthropic
     _check_anthropic()
     out = capsys.readouterr().out
     assert "another provider is configured" in out
@@ -58,7 +58,7 @@ def test_doctor_anthropic_red_when_nothing_configured(tmp_path, monkeypatch, cap
         monkeypatch.delenv(v, raising=False)
     monkeypatch.setenv("MAVERICK_CONFIG", str(tmp_path / "absent.toml"))
 
-    from maverick.health import _check_anthropic
+    from lightwork.health import _check_anthropic
     _check_anthropic()
     out = capsys.readouterr().out
     assert "ANTHROPIC_API_KEY not set" in out

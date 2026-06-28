@@ -9,8 +9,8 @@ from __future__ import annotations
 from unittest.mock import MagicMock
 
 import pytest
-from maverick import config, health
-from maverick.tools import diagnose as d
+from lightwork import config, health
+from lightwork.tools import diagnose as d
 
 
 def _health_details(cfg, monkeypatch, *, which=True, run_ok=True) -> str:
@@ -83,7 +83,7 @@ class TestE2BSandboxTeardown:
 
     def test_sandbox_deleted_even_when_process_raises(self, tmp_path, monkeypatch):
         httpx = pytest.importorskip("httpx")
-        from maverick.sandbox.firecracker import FirecrackerBackend
+        from lightwork.sandbox.firecracker import FirecrackerBackend
 
         created = []
 
@@ -140,7 +140,7 @@ class TestContainerResourceCaps:
         return cap["args"]
 
     def test_docker_memory_capped_by_default_cpu_optin(self, tmp_path, monkeypatch):
-        from maverick.sandbox.docker import DockerBackend
+        from lightwork.sandbox.docker import DockerBackend
         args = self._argv(monkeypatch, DockerBackend, "_verify_docker", tmp_path)
         assert args[args.index("--memory") + 1] == "4g"
         assert "--cpus" not in args  # opt-in
@@ -148,31 +148,31 @@ class TestContainerResourceCaps:
         assert "--cap-drop" in args and "no-new-privileges" in args
 
     def test_docker_cpu_cap_applied_when_configured(self, tmp_path, monkeypatch):
-        from maverick.sandbox.docker import DockerBackend
+        from lightwork.sandbox.docker import DockerBackend
         args = self._argv(monkeypatch, DockerBackend, "_verify_docker", tmp_path,
                           cpus="2", memory="1g")
         assert args[args.index("--cpus") + 1] == "2"
         assert args[args.index("--memory") + 1] == "1g"
 
     def test_memory_cap_disengageable_with_falsy(self, tmp_path, monkeypatch):
-        from maverick.sandbox.docker import DockerBackend
+        from lightwork.sandbox.docker import DockerBackend
         args = self._argv(monkeypatch, DockerBackend, "_verify_docker", tmp_path,
                           memory="")
         assert "--memory" not in args
 
     def test_podman_memory_capped_by_default(self, tmp_path, monkeypatch):
-        from maverick.sandbox.podman import PodmanBackend
+        from lightwork.sandbox.podman import PodmanBackend
         args = self._argv(monkeypatch, PodmanBackend, "_verify_podman", tmp_path)
         assert args[args.index("--memory") + 1] == "4g"
 
     def test_build_sandbox_passes_memory_from_config(self, tmp_path, monkeypatch):
         # The [sandbox] memory/cpus knobs reach the backend.
-        from maverick import sandbox
+        from lightwork import sandbox
         monkeypatch.setattr(sandbox.DockerBackend, "_verify_docker", lambda self: None)
         monkeypatch.setattr(config, "get_sandbox",
                             lambda: {"backend": "docker", "workdir": str(tmp_path)})
         monkeypatch.setattr(
-            "maverick.config.load_config",
+            "lightwork.config.load_config",
             lambda: {"sandbox": {"backend": "docker", "memory": "8g", "cpus": "4"}},
         )
         be = sandbox.build_sandbox()

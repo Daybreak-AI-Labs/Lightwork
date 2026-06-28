@@ -1,7 +1,7 @@
 """reliability_harness: reliability harness 2.0 reporting."""
 from __future__ import annotations
 
-from maverick.tools.reliability_harness import reliability_harness
+from lightwork.tools.reliability_harness import reliability_harness
 
 
 def _report(runs):

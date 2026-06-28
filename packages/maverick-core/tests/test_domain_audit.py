@@ -8,8 +8,8 @@ state-mutator) and the report shape.
 from __future__ import annotations
 
 from click.testing import CliRunner
-from maverick.domain import DomainProfile, builtin_dir, load_domains
-from maverick.domain_audit import (
+from lightwork.domain import DomainProfile, builtin_dir, load_domains
+from lightwork.domain_audit import (
     audit_profile,
     audit_roster,
     summarize,
@@ -41,7 +41,7 @@ def test_roster_has_no_drafting_agent_reaching_a_mutator():
 
 
 def test_human_gate_prefers_approval_over_review():
-    from maverick.domain import OutputContract, WorkflowStep
+    from lightwork.domain import OutputContract, WorkflowStep
     p = DomainProfile(
         name="x", allow_tools=["read_file"], deny_tools=["shell", "write_file"],
         max_risk="low",
@@ -106,7 +106,7 @@ def test_json_export_is_well_formed():
 
 
 def test_cli_reports_and_exits_clean():
-    from maverick.cli import main
+    from lightwork.cli import main
     res = CliRunner().invoke(main, ["domains-audit"])
     assert res.exit_code == 0, res.output
     assert "must be 0" in res.output
@@ -116,7 +116,7 @@ def test_cli_reports_and_exits_clean():
 def test_cli_json_export(tmp_path):
     import json
 
-    from maverick.cli import main
+    from lightwork.cli import main
     out = tmp_path / "audit.json"
     res = CliRunner().invoke(main, ["domains-audit", "--json", str(out)])
     assert res.exit_code == 0, res.output

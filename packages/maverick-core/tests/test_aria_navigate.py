@@ -2,8 +2,8 @@
 from __future__ import annotations
 
 import pytest
-from maverick.tools import aria_navigate as mod
-from maverick.tools.aria_navigate import aria_navigate
+from lightwork.tools import aria_navigate as mod
+from lightwork.tools.aria_navigate import aria_navigate
 
 TREE = {
     "role": "WebArea", "name": "Login — Example",
@@ -161,7 +161,7 @@ def test_disabled_env_short_circuits(monkeypatch):
 
 def test_missing_playwright_reported(monkeypatch):
     def raise_import():
-        raise ImportError("playwright not installed. Run: pip install 'maverick-agent[browser]'")
+        raise ImportError("playwright not installed. Run: pip install 'lightwork-agent[browser]'")
 
     monkeypatch.setattr(mod, "_page", raise_import)
     out = aria_navigate().fn({"op": "snapshot"})

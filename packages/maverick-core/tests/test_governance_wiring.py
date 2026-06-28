@@ -8,16 +8,16 @@ policy => unchanged behaviour.
 from __future__ import annotations
 
 import pytest
-from maverick.tools import Tool
+from lightwork.tools import Tool
 
 
 def _agent(tmp_path):
-    from maverick.agent import Agent
-    from maverick.blackboard import Blackboard
-    from maverick.budget import Budget
-    from maverick.sandbox import LocalBackend
-    from maverick.swarm import SwarmContext
-    from maverick.world_model import WorldModel
+    from lightwork.agent import Agent
+    from lightwork.blackboard import Blackboard
+    from lightwork.budget import Budget
+    from lightwork.sandbox import LocalBackend
+    from lightwork.swarm import SwarmContext
+    from lightwork.world_model import WorldModel
 
     world = WorldModel(tmp_path / "world.db")
     goal_id = world.create_goal("g", "")
@@ -36,7 +36,7 @@ def _agent(tmp_path):
 
 
 def _gov(monkeypatch, policy: dict):
-    monkeypatch.setattr("maverick.config.load_config", lambda *a, **k: {"governance": policy})
+    monkeypatch.setattr("lightwork.config.load_config", lambda *a, **k: {"governance": policy})
 
 
 @pytest.mark.asyncio
@@ -68,8 +68,8 @@ async def test_require_human_blocks_without_a_human(monkeypatch, tmp_path):
 async def test_require_human_runs_with_grant(monkeypatch, tmp_path):
     # A real human approval (here, a granted consent decision) lets the
     # require-human action proceed.
-    import maverick.safety.consent as consent
-    from maverick.safety.consent import ConsentDecision
+    import lightwork.safety.consent as consent
+    from lightwork.safety.consent import ConsentDecision
     monkeypatch.setattr(
         consent, "require_consent",
         lambda *a, **k: ConsentDecision(True, "test", "high", 0.0),
@@ -83,7 +83,7 @@ async def test_require_human_runs_with_grant(monkeypatch, tmp_path):
 async def test_deny_is_audited(monkeypatch, tmp_path):
     _gov(monkeypatch, {"deny_actions": ["ping"]})
     seen = []
-    import maverick.audit as audit
+    import lightwork.audit as audit
     monkeypatch.setattr(audit, "record",
                         lambda kind, **kw: seen.append((kind, kw)))
     await _agent(tmp_path)._run_tool("ping", {})
@@ -95,7 +95,7 @@ async def test_deny_is_audited(monkeypatch, tmp_path):
 async def test_eval_error_fails_closed_when_policy_configured(monkeypatch, tmp_path):
     # Hardening: a CONFIGURED policy + an evaluation bug must FAIL CLOSED (deny
     # this action), never silently bypass the oversight gate.
-    import maverick.governance as gov
+    import lightwork.governance as gov
     _gov(monkeypatch, {"deny_actions": ["other"]})  # non-empty policy
 
     def _boom(*a, **k):
@@ -111,7 +111,7 @@ async def test_eval_error_fails_closed_when_policy_configured(monkeypatch, tmp_p
 async def test_eval_error_open_when_no_policy(monkeypatch, tmp_path):
     # No policy configured -> evaluate is never consulted, so an (irrelevant)
     # eval bug can't block: the tool still runs (non-enterprise unaffected).
-    import maverick.governance as gov
+    import lightwork.governance as gov
     _gov(monkeypatch, {})  # empty policy
 
     def _boom(*a, **k):
@@ -127,7 +127,7 @@ async def test_require_fresh_human_approval_bypasses_ledger(monkeypatch, tmp_pat
     # Opt-in per-action oversight: a prior persistent ledger grant must NOT
     # satisfy the Art-14 gate -- a fresh decision is required, so an
     # auto-approve env (no human) is a denial.
-    import maverick.safety.consent as consent
+    import lightwork.safety.consent as consent
     monkeypatch.setattr(consent, "CONSENT_LEDGER_PATH", tmp_path / "consent.ledger")
     consent.grant_persistent("ping")  # a standing grant exists
     monkeypatch.setenv("MAVERICK_CONSENT_MODE", "auto-approve")
@@ -141,7 +141,7 @@ async def test_require_fresh_human_approval_bypasses_ledger(monkeypatch, tmp_pat
 async def test_ledger_grant_satisfies_gate_by_default(monkeypatch, tmp_path):
     # Default (flag off): a persistent ledger grant satisfies the gate, the
     # documented backwards-compatible behavior.
-    import maverick.safety.consent as consent
+    import lightwork.safety.consent as consent
     monkeypatch.setattr(consent, "CONSENT_LEDGER_PATH", tmp_path / "consent.ledger")
     consent.grant_persistent("ping")
     monkeypatch.setenv("MAVERICK_CONSENT_MODE", "auto-approve")
@@ -152,7 +152,7 @@ async def test_ledger_grant_satisfies_gate_by_default(monkeypatch, tmp_path):
 
 def test_consult_ledger_false_ignores_prior_grant(monkeypatch, tmp_path):
     # Unit: require_consent(consult_ledger=False) does not honor the ledger.
-    import maverick.safety.consent as consent
+    import lightwork.safety.consent as consent
     monkeypatch.setattr(consent, "CONSENT_LEDGER_PATH", tmp_path / "consent.ledger")
     monkeypatch.setenv("MAVERICK_CONSENT_MODE", "auto-approve")
     consent.grant_persistent("rm-rf", scope="/tmp")
@@ -167,7 +167,7 @@ def test_consult_ledger_false_ignores_prior_grant(monkeypatch, tmp_path):
 def test_scopeless_persistent_grant_is_honored(monkeypatch, tmp_path):
     # Regression: a scope-less grant_persistent(action) must be matched by the
     # ledger (a trailing-tab strip used to drop it, re-prompting forever).
-    import maverick.safety.consent as consent
+    import lightwork.safety.consent as consent
     monkeypatch.setattr(consent, "CONSENT_LEDGER_PATH", tmp_path / "consent.ledger")
     monkeypatch.setenv("MAVERICK_CONSENT_MODE", "auto-deny")  # only a real grant can pass
     consent.grant_persistent("mass-dm")
@@ -179,7 +179,7 @@ def test_scopeless_persistent_grant_can_be_revoked(monkeypatch, tmp_path):
     # Regression: revoke() must compare ledger records verbatim too. Scope-less
     # grants keep a significant trailing tab (``grant\taction\t``), so stripping
     # the record made those grants impossible to remove.
-    import maverick.safety.consent as consent
+    import lightwork.safety.consent as consent
     monkeypatch.setattr(consent, "CONSENT_LEDGER_PATH", tmp_path / "consent.ledger")
     monkeypatch.setenv("MAVERICK_CONSENT_MODE", "auto-deny")
     consent.grant_persistent("mass-dm")

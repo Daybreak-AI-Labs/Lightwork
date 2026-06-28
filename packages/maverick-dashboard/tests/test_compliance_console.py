@@ -11,7 +11,7 @@ from fastapi.testclient import TestClient
 
 
 def _client():
-    from maverick_dashboard.app import app
+    from lightwork_dashboard.app import app
     return TestClient(app)
 
 
@@ -19,18 +19,18 @@ def _isolate(monkeypatch, tmp_path):
     monkeypatch.setenv("HOME", str(tmp_path))
     monkeypatch.setenv("MAVERICK_HOME", str(tmp_path))
     monkeypatch.delenv("MAVERICK_DASHBOARD_TOKEN", raising=False)
-    from maverick import world_model
+    from lightwork import world_model
     monkeypatch.setattr(world_model, "DEFAULT_DB", tmp_path / "world.db")
 
 
 def _stub_report(monkeypatch):
     """Pin compliance_report() to a fixed EU + US control set.
 
-    Patched on maverick.compliance (the app + api import it from there inside
+    Patched on lightwork.compliance (the app + api import it from there inside
     the request handlers), so both the page and the export see the same data.
     """
-    import maverick.compliance as compliance
-    from maverick.compliance import ControlCheck
+    import lightwork.compliance as compliance
+    from lightwork.compliance import ControlCheck
 
     checks = [
         ControlCheck(
@@ -92,7 +92,7 @@ def test_compliance_page_filter_changes_output(monkeypatch, tmp_path):
 
 def test_compliance_page_empty_state_when_core_unavailable(monkeypatch, tmp_path):
     _isolate(monkeypatch, tmp_path)
-    import maverick.compliance as compliance
+    import lightwork.compliance as compliance
 
     def _boom():
         raise RuntimeError("core unavailable")
@@ -120,7 +120,7 @@ def test_compliance_export_md_is_attachment(monkeypatch, tmp_path):
     assert r.status_code == 200
     cd = r.headers["content-disposition"]
     assert "attachment" in cd
-    assert "maverick-compliance-all.md" in cd
+    assert "lightwork-compliance-all.md" in cd
     assert r.headers["content-type"].startswith("text/markdown")
     # The report body carries the control text.
     assert "AI transparency disclosure" in r.text
@@ -134,7 +134,7 @@ def test_compliance_export_csv_is_attachment(monkeypatch, tmp_path):
     assert r.status_code == 200
     cd = r.headers["content-disposition"]
     assert "attachment" in cd
-    assert "maverick-compliance-all.csv" in cd
+    assert "lightwork-compliance-all.csv" in cd
     assert r.headers["content-type"].startswith("text/csv")
     body = r.text
     assert "framework,control,regulation,status,detail" in body
@@ -148,7 +148,7 @@ def test_compliance_export_filter_changes_output(monkeypatch, tmp_path):
 
     eu = c.get("/api/v1/compliance/report.md?framework=eu")
     assert eu.status_code == 200
-    assert "maverick-compliance-eu.md" in eu.headers["content-disposition"]
+    assert "lightwork-compliance-eu.md" in eu.headers["content-disposition"]
     assert "AI transparency disclosure" in eu.text
     assert "Consumer notice of AI" not in eu.text
 

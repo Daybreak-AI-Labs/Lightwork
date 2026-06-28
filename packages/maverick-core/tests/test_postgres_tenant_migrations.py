@@ -6,7 +6,7 @@ The full round-trip lives in test_postgres_world.py (skipped without a DSN).
 """
 from __future__ import annotations
 
-import maverick.world_model_backends.postgres as pg
+import lightwork.world_model_backends.postgres as pg
 
 
 def test_pending_from_fresh_db_applies_everything():

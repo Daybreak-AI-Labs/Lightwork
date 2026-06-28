@@ -16,9 +16,9 @@ from __future__ import annotations
 import contextlib
 
 import pytest
-from maverick.safety.tool_risk import tool_risk
-from maverick.tools._rest_connector import make_rest_tool
-from maverick.tools.enterprise_connectors import (
+from lightwork.safety.tool_risk import tool_risk
+from lightwork.tools._rest_connector import make_rest_tool
+from lightwork.tools.enterprise_connectors import (
     ENTERPRISE_CONNECTOR_NAMES,
     PUBLIC_DATA_CONNECTOR_NAMES,
     READ_CONNECTOR_NAMES,
@@ -64,8 +64,8 @@ def capture(monkeypatch):
     def _safe_client(url, timeout=30.0):
         yield _Client()
 
-    import maverick.enterprise as ent
-    import maverick.tools._ssrf as ssrf
+    import lightwork.enterprise as ent
+    import lightwork.tools._ssrf as ssrf
     monkeypatch.setattr(ssrf, "safe_client", _safe_client)
     monkeypatch.setattr(ent, "enterprise_egress_denial", lambda url, tool=None: None)
     return seen

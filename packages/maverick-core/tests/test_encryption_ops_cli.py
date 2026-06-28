@@ -5,8 +5,8 @@ import importlib.util
 
 import pytest
 from click.testing import CliRunner
-from maverick import crypto_at_rest as car
-from maverick.cli import main
+from lightwork import crypto_at_rest as car
+from lightwork.cli import main
 
 requires_crypto = pytest.mark.skipif(
     importlib.util.find_spec("cryptography") is None,
@@ -18,7 +18,7 @@ requires_crypto = pytest.mark.skipif(
 def _isolate(monkeypatch, tmp_path):
     monkeypatch.delenv("MAVERICK_ENCRYPTION_KEY", raising=False)
     monkeypatch.delenv("MAVERICK_ENCRYPT_STRICT", raising=False)
-    monkeypatch.setattr("maverick.config.load_config", lambda *a, **k: {})
+    monkeypatch.setattr("lightwork.config.load_config", lambda *a, **k: {})
     monkeypatch.setattr(car, "_KEY_PATH", tmp_path / "keys" / "at_rest.key")
 
 
@@ -42,8 +42,8 @@ def test_backup_key_errors_without_key(monkeypatch, tmp_path):
 
 @requires_crypto
 def test_migrate_nudges_strict_mode(monkeypatch, tmp_path):
-    from maverick.world_model import WorldModel
-    monkeypatch.setattr("maverick.world_model.DEFAULT_DB", tmp_path / "world.db")
+    from lightwork.world_model import WorldModel
+    monkeypatch.setattr("lightwork.world_model.DEFAULT_DB", tmp_path / "world.db")
 
     db = tmp_path / "world.db"
     wm = WorldModel(db)
@@ -58,7 +58,7 @@ def test_migrate_nudges_strict_mode(monkeypatch, tmp_path):
 
 @requires_crypto
 def test_migrate_dry_run_does_not_nudge_strict(monkeypatch, tmp_path):
-    from maverick.world_model import WorldModel
+    from lightwork.world_model import WorldModel
 
     db = tmp_path / "world.db"
     wm = WorldModel(db)

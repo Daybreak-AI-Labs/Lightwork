@@ -6,8 +6,8 @@ from __future__ import annotations
 from dataclasses import dataclass
 
 from fastapi.testclient import TestClient
-from maverick_dashboard.app import app
-from maverick_dashboard.deliverables import build_inbox, persona_roles_for
+from lightwork_dashboard.app import app
+from lightwork_dashboard.deliverables import build_inbox, persona_roles_for
 
 client = TestClient(app, headers={"Origin": "http://testserver"})
 
@@ -84,7 +84,7 @@ class TestBuildInbox:
 
 class TestPersonaRoles:
     def _cfg(self, monkeypatch, cfg):
-        monkeypatch.setattr("maverick.config.load_config", lambda *a, **k: cfg)
+        monkeypatch.setattr("lightwork.config.load_config", lambda *a, **k: cfg)
 
     def test_principal_mapping_wins(self, monkeypatch):
         self._cfg(monkeypatch, {"personas": {"user:alice": ["fpa_analyst", "treasurer"],
@@ -107,7 +107,7 @@ class TestPersonaRoles:
 
 class TestDeliverablesPage:
     def _world(self, tmp_path, monkeypatch):
-        from maverick import world_model
+        from lightwork import world_model
         monkeypatch.setattr(world_model, "DEFAULT_DB", tmp_path / "world.db")
         return world_model.WorldModel(tmp_path / "world.db")
 
@@ -140,7 +140,7 @@ class TestDeliverablesPage:
     def test_persona_identity_defaults_inbox_to_my_roles(self, tmp_path, monkeypatch):
         self._world(tmp_path, monkeypatch)
         # No-auth single user bound to a persona role -> inbox defaults to "mine".
-        monkeypatch.setattr("maverick.config.load_config",
+        monkeypatch.setattr("lightwork.config.load_config",
                             lambda *a, **k: {"personas": {"default": ["tax_analyst"]}})
         t = client.get("/deliverables").text
         assert "Showing deliverables for your role" in t

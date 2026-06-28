@@ -1,7 +1,7 @@
 """collusion_detector: voting-collusion bloc detection across agents."""
 from __future__ import annotations
 
-from maverick.tools.collusion_detector import collusion_detector
+from lightwork.tools.collusion_detector import collusion_detector
 
 
 def _d(votes, threshold=None, quorum=None):
@@ -91,7 +91,7 @@ def test_errors():
 
 
 def test_registered():
-    from maverick.tools import base_registry
+    from lightwork.tools import base_registry
 
     class _W:
         pass

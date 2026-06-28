@@ -7,24 +7,24 @@ import pytest
 
 pytest.importorskip("fastapi")
 
-import maverick.world_model as world_model  # noqa: E402
+import lightwork.world_model as world_model  # noqa: E402
 from fastapi.testclient import TestClient  # noqa: E402
-from maverick_dashboard import api as api_mod  # noqa: E402
-from maverick_dashboard.app import app  # noqa: E402
+from lightwork_dashboard import api as api_mod  # noqa: E402
+from lightwork_dashboard.app import app  # noqa: E402
 
 
 @pytest.fixture
 def client(monkeypatch, tmp_path):
     monkeypatch.setenv("MAVERICK_HOME", str(tmp_path / "home"))
     monkeypatch.delenv("MAVERICK_DASHBOARD_TOKEN", raising=False)
-    import maverick_dashboard.api as api
+    import lightwork_dashboard.api as api
     monkeypatch.setattr(api, "_PERF_SLA_CACHE", None)
     return TestClient(app, headers={"Origin": "http://testserver"})
 
 
 def test_perf_api_shape(client, monkeypatch, tmp_path):
     # seed a benchmark history file where continuous_benchmark looks
-    import maverick.continuous_benchmark as cb
+    import lightwork.continuous_benchmark as cb
     store = tmp_path / "bench"
     store.mkdir()
     rows = [{"name": "gaia", "score": 0.5, "commit": "a", "t": 1_700_000_000.0},
@@ -45,16 +45,16 @@ def test_perf_api_shape(client, monkeypatch, tmp_path):
 
 
 def test_perf_api_empty_history(client, monkeypatch, tmp_path):
-    import maverick.continuous_benchmark as cb
+    import lightwork.continuous_benchmark as cb
     monkeypatch.setattr(cb, "_store_path", lambda: tmp_path / "nope")
     d = client.get("/api/v1/perf").json()
     assert d["benchmarks"] == {} and d["retrospective"] is None
 
 
 def test_perf_api_caches_live_sla(client, monkeypatch, tmp_path):
-    import maverick.continuous_benchmark as cb
-    import maverick.perf_sla as perf_sla
-    from maverick.perf_sla import SLAResult
+    import lightwork.continuous_benchmark as cb
+    import lightwork.perf_sla as perf_sla
+    from lightwork.perf_sla import SLAResult
 
     calls = 0
 

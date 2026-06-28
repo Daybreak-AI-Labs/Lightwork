@@ -1,8 +1,8 @@
 """Self-edit tool: propose-only, path-confined diffs (ROADMAP 2027 H2)."""
 from __future__ import annotations
 
-import maverick.tools.self_edit as se
-from maverick.tools.self_edit import _apply_edit, self_edit
+import lightwork.tools.self_edit as se
+from lightwork.tools.self_edit import _apply_edit, self_edit
 
 
 def _confine_to(monkeypatch, root):
@@ -35,7 +35,7 @@ def test_propose_does_not_write(tmp_path, monkeypatch):
 
 
 def test_self_edit_not_registered_by_default():
-    from maverick.tools import base_registry
+    from lightwork.tools import base_registry
 
     class _World:
         pass

@@ -5,18 +5,18 @@ import json
 
 import pytest
 from click.testing import CliRunner
-from maverick.cli import main
+from lightwork.cli import main
 
 
 @pytest.fixture(autouse=True)
 def _clean(monkeypatch):
     for var in ("MAVERICK_ENTERPRISE", "MAVERICK_ENCRYPT_AT_REST", "MAVERICK_AUDIT_SIGN"):
         monkeypatch.delenv(var, raising=False)
-    monkeypatch.setattr("maverick.config.load_config", lambda *a, **k: {})
+    monkeypatch.setattr("lightwork.config.load_config", lambda *a, **k: {})
 
 
 def test_generate_ropa_shape_and_never_raises():
-    from maverick.ropa import generate_ropa
+    from lightwork.ropa import generate_ropa
 
     rec = generate_ropa()
     assert rec["record_type"].startswith("GDPR Article 30")
@@ -29,7 +29,7 @@ def test_generate_ropa_shape_and_never_raises():
 
 
 def test_bare_deployment_flags_cloud_recipient_and_indefinite_retention():
-    from maverick.ropa import generate_ropa
+    from lightwork.ropa import generate_ropa
 
     rec = generate_ropa()
     assert "third-party" in rec["recipients"][0]
@@ -38,11 +38,11 @@ def test_bare_deployment_flags_cloud_recipient_and_indefinite_retention():
 
 
 def test_enterprise_profile_reports_local_only_and_no_transfer(monkeypatch):
-    from maverick.ropa import generate_ropa
+    from lightwork.ropa import generate_ropa
 
     monkeypatch.setenv("MAVERICK_ENTERPRISE", "1")
     monkeypatch.setattr(
-        "maverick.config.load_config",
+        "lightwork.config.load_config",
         lambda *a, **k: {"retention": {"audit_days": 365}},
     )
     rec = generate_ropa()
@@ -54,10 +54,10 @@ def test_enterprise_profile_reports_local_only_and_no_transfer(monkeypatch):
 
 
 def test_mistyped_retention_config_falls_back_to_indefinite(monkeypatch):
-    from maverick.ropa import generate_ropa
+    from lightwork.ropa import generate_ropa
 
     monkeypatch.setattr(
-        "maverick.config.load_config",
+        "lightwork.config.load_config",
         lambda *a, **k: {"retention": "30 days"},
     )
 

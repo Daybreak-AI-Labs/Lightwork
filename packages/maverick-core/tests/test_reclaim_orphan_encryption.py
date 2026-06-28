@@ -13,7 +13,7 @@ import importlib.util
 import sqlite3
 
 import pytest
-from maverick import crypto_at_rest as car
+from lightwork import crypto_at_rest as car
 
 requires_crypto = pytest.mark.skipif(
     importlib.util.find_spec("cryptography") is None,
@@ -28,14 +28,14 @@ def _isolate(monkeypatch, tmp_path):
     for v in ("MAVERICK_ENCRYPT_AT_REST", "MAVERICK_ENCRYPTION_KEY",
               "MAVERICK_ENTERPRISE", "MAVERICK_ENCRYPT_STRICT"):
         monkeypatch.delenv(v, raising=False)
-    monkeypatch.setattr("maverick.config.load_config", lambda *a, **k: {})
+    monkeypatch.setattr("lightwork.config.load_config", lambda *a, **k: {})
     monkeypatch.setattr(car, "_KEY_PATH", tmp_path / "keys" / "at_rest.key")
 
 
 @requires_crypto
 def test_reclaim_preserves_sealed_nonnull_result(monkeypatch, tmp_path):
     monkeypatch.setenv("MAVERICK_ENCRYPT_AT_REST", "1")
-    from maverick.world_model import WorldModel
+    from lightwork.world_model import WorldModel
     db = tmp_path / "world.db"
     wm = WorldModel(db)
     gid = wm.create_goal("g", "")
@@ -61,7 +61,7 @@ def test_reclaim_preserves_sealed_nonnull_result(monkeypatch, tmp_path):
 @requires_crypto
 def test_reclaim_seals_marker_for_null_result(monkeypatch, tmp_path):
     monkeypatch.setenv("MAVERICK_ENCRYPT_AT_REST", "1")
-    from maverick.world_model import WorldModel
+    from lightwork.world_model import WorldModel
     db = tmp_path / "world.db"
     wm = WorldModel(db)
     gid = wm.create_goal("g", "")  # stays 'pending', result is NULL
@@ -80,7 +80,7 @@ def test_reclaim_seals_marker_for_null_result(monkeypatch, tmp_path):
 
 def test_reclaim_plaintext_concat_unchanged_without_encryption(tmp_path):
     """Encryption off: the fast SQL-concat path is preserved (marker appended)."""
-    from maverick.world_model import WorldModel
+    from lightwork.world_model import WorldModel
     wm = WorldModel(tmp_path / "world.db")
     gid = wm.create_goal("g", "")
     wm.set_goal_status(gid, "active", result="prior")

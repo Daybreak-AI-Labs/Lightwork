@@ -2,14 +2,14 @@
 from __future__ import annotations
 
 import pytest
-from maverick.sandbox import sdk
-from maverick.sandbox.devcontainer import DevcontainerBackend
-from maverick.sandbox.docker import DockerBackend
-from maverick.sandbox.firecracker import FirecrackerBackend
-from maverick.sandbox.kubernetes import KubernetesBackend
-from maverick.sandbox.local import ExecResult, LocalBackend
-from maverick.sandbox.podman import PodmanBackend
-from maverick.sandbox.ssh import SSHBackend
+from lightwork.sandbox import sdk
+from lightwork.sandbox.devcontainer import DevcontainerBackend
+from lightwork.sandbox.docker import DockerBackend
+from lightwork.sandbox.firecracker import FirecrackerBackend
+from lightwork.sandbox.kubernetes import KubernetesBackend
+from lightwork.sandbox.local import ExecResult, LocalBackend
+from lightwork.sandbox.podman import PodmanBackend
+from lightwork.sandbox.ssh import SSHBackend
 
 _IN_TREE = [LocalBackend, DockerBackend, PodmanBackend, DevcontainerBackend,
             KubernetesBackend, FirecrackerBackend, SSHBackend]
@@ -107,7 +107,7 @@ class _FakeEP:
 def _install_eps(monkeypatch, *eps):
     class _EPs:
         def select(self, group):
-            return list(eps) if group == "maverick.sandboxes" else []
+            return list(eps) if group == "lightwork.sandboxes" else []
 
     import importlib.metadata as md
     monkeypatch.setattr(md, "entry_points", lambda: _EPs())
@@ -135,12 +135,12 @@ def test_entry_point_nonconformant_refused(monkeypatch, tmp_path):
 
 def test_build_sandbox_ep_prefix_routes_to_loader(monkeypatch, tmp_path):
     _install_eps(monkeypatch, _FakeEP("warm", _GoodExternal))
-    from maverick.sandbox import build_sandbox
+    from lightwork.sandbox import build_sandbox
     sb = build_sandbox(workdir=tmp_path, backend="ep:warm")
     assert isinstance(sb, _GoodExternal)
 
 
 def test_sdk_exports():
-    import maverick.sandbox as s
+    import lightwork.sandbox as s
     assert s.SDK_VERSION == 2
     assert s.SandboxV2 is sdk.SandboxV2

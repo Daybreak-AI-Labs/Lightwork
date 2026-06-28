@@ -2,8 +2,8 @@
 FULL for regulated deployments that treat the world DB as the Operating Record."""
 from __future__ import annotations
 
-import maverick.world_model as wm
-from maverick.world_model import WorldModel, _synchronous_mode
+import lightwork.world_model as wm
+from lightwork.world_model import WorldModel, _synchronous_mode
 
 
 def _pragma(db) -> int:
@@ -16,7 +16,7 @@ def _pragma(db) -> int:
 
 def test_default_is_normal(tmp_path, monkeypatch):
     monkeypatch.delenv("MAVERICK_WORLD_SYNCHRONOUS", raising=False)
-    monkeypatch.setattr("maverick.config.load_config", dict)
+    monkeypatch.setattr("lightwork.config.load_config", dict)
     assert _synchronous_mode() == "NORMAL"
     assert _pragma(tmp_path / "w.db") == 1  # 1 == NORMAL
 
@@ -29,7 +29,7 @@ def test_env_full(tmp_path, monkeypatch):
 
 def test_config_full(tmp_path, monkeypatch):
     monkeypatch.delenv("MAVERICK_WORLD_SYNCHRONOUS", raising=False)
-    monkeypatch.setattr("maverick.config.load_config",
+    monkeypatch.setattr("lightwork.config.load_config",
                         lambda: {"world_model": {"synchronous": "FULL"}})
     assert _synchronous_mode() == "FULL"
     assert _pragma(tmp_path / "w.db") == 2

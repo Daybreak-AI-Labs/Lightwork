@@ -18,7 +18,7 @@ from __future__ import annotations
 
 import json
 
-from maverick.compaction import (
+from lightwork.compaction import (
     KEEP_RECENT_TURNS,
     MAX_TOOL_OUTPUT_BYTES,
     compact_messages,

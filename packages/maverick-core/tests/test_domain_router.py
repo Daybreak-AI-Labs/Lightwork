@@ -10,8 +10,8 @@ silently degrade routing.
 """
 from __future__ import annotations
 
-from maverick.domain import builtin_dir, load_domains, suite_for
-from maverick.domain_router import DomainRouter, rank_specialists
+from lightwork.domain import builtin_dir, load_domains, suite_for
+from lightwork.domain_router import DomainRouter, rank_specialists
 
 _PACKS = load_domains(builtin_dir())
 _ROUTER = DomainRouter(_PACKS)
@@ -117,8 +117,8 @@ def test_module_level_cache_matches_fresh_index():
 #     fastembed is optional and absent in CI's lightweight subset) -----------
 import re as _re  # noqa: E402
 
-from maverick.domain import DomainProfile  # noqa: E402
-from maverick.domain_router import EmbeddingRouter, _blend  # noqa: E402
+from lightwork.domain import DomainProfile  # noqa: E402
+from lightwork.domain_router import EmbeddingRouter, _blend  # noqa: E402
 
 # A controllable "semantic" embedder: maps synonym sets to shared concept dims,
 # so paraphrases that share no surface tokens still embed close (what a real
@@ -183,7 +183,7 @@ def test_blend_with_no_semantic_is_lexical_unchanged():
 def test_rank_specialists_falls_back_to_lexical_when_no_embedder(monkeypatch):
     # With the embedder forced unavailable, hybrid == the lexical ranking, so
     # the benchmark still holds (no regression from adding the embedding path).
-    import maverick.domain_router as dr
+    import lightwork.domain_router as dr
     monkeypatch.setattr(dr, "EmbeddingRouter",
                         lambda *a, **k: (_ for _ in ()).throw(RuntimeError("no model")))
     hybrid = [n for n, _ in rank_specialists("review an NDA", k=5, domains=_PACKS)]
@@ -194,7 +194,7 @@ def test_rank_specialists_falls_back_to_lexical_when_no_embedder(monkeypatch):
 def test_rank_specialists_caches_explicit_domain_embedding_index(monkeypatch):
     # list_specialists passes an explicit enabled-domain roster; that path must
     # reuse the module cache so repeated user queries do not re-embed every pack.
-    import maverick.domain_router as dr
+    import lightwork.domain_router as dr
 
     calls = []
 

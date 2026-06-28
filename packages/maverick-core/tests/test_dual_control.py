@@ -2,8 +2,8 @@
 from __future__ import annotations
 
 import pytest
-from maverick.safety import dual_control
-from maverick.world_model import WorldModel
+from lightwork.safety import dual_control
+from lightwork.world_model import WorldModel
 
 
 @pytest.fixture
@@ -131,8 +131,8 @@ def test_approval_state_unknown_is_none(wm):
 # goal's owner (same namespace as the dashboard approver).
 
 def test_consent_requester_resolves_goal_owner(wm):
-    from maverick.logging_config import reset_goal_context, set_goal_context
-    from maverick.safety import consent
+    from lightwork.logging_config import reset_goal_context, set_goal_context
+    from lightwork.safety import consent
 
     gid = wm.create_goal("ship", "d", owner="u:alice")
     assert consent._consent_requester(wm) is None          # outside any goal
@@ -145,8 +145,8 @@ def test_consent_requester_resolves_goal_owner(wm):
 
 
 def test_consent_requester_unowned_goal_is_none(wm):
-    from maverick.logging_config import reset_goal_context, set_goal_context
-    from maverick.safety import consent
+    from lightwork.logging_config import reset_goal_context, set_goal_context
+    from lightwork.safety import consent
 
     gid = wm.create_goal("ship", "d", owner="")             # single-user / no-auth
     tokens = set_goal_context(goal_id=gid)
@@ -157,9 +157,9 @@ def test_consent_requester_unowned_goal_is_none(wm):
 
 
 def test_dashboard_consent_attributes_requester(wm, monkeypatch):
-    import maverick.world_model as world_model
-    from maverick.logging_config import reset_goal_context, set_goal_context
-    from maverick.safety import consent
+    import lightwork.world_model as world_model
+    from lightwork.logging_config import reset_goal_context, set_goal_context
+    from lightwork.safety import consent
 
     monkeypatch.setattr(world_model, "open_world", lambda *a, **k: wm)
     monkeypatch.setenv("MAVERICK_CONSENT_DASHBOARD_TIMEOUT", "0")  # queue then time out

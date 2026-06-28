@@ -11,13 +11,13 @@ _OPUS = "claude-opus-4-8"
 
 
 def _client():
-    from maverick_dashboard.app import app
+    from lightwork_dashboard.app import app
     return TestClient(app)
 
 
 def _iso(monkeypatch, tmp_path):
     """Isolate the overlay file and clear the env overrides that outrank it."""
-    import maverick.runtime_overrides as ro
+    import lightwork.runtime_overrides as ro
     monkeypatch.setattr(ro, "OVERRIDES_PATH", tmp_path / "runtime-overrides.toml")
     monkeypatch.delenv("MAVERICK_MODEL_OVERRIDE", raising=False)
     for r in ("ORCHESTRATOR", "CODER", "WRITER", "SUMMARIZER", "RESEARCHER",
@@ -27,18 +27,18 @@ def _iso(monkeypatch, tmp_path):
 
 def _prep(monkeypatch, tmp_path):
     """Full dashboard isolation (world DB + overlay + caches)."""
-    from maverick import world_model
+    from lightwork import world_model
     monkeypatch.setattr(world_model, "DEFAULT_DB", tmp_path / "world.db")
     monkeypatch.delenv("MAVERICK_DASHBOARD_TOKEN", raising=False)
     _iso(monkeypatch, tmp_path)
-    from maverick_dashboard import app as dash_app
+    from lightwork_dashboard import app as dash_app
     dash_app._world_cache.clear()
 
 
 def test_allowlist_caps_role_resolution(monkeypatch, tmp_path):
     _iso(monkeypatch, tmp_path)
-    from maverick.llm import model_for_role
-    from maverick.runtime_overrides import allowed_models, set_allowed_models
+    from lightwork.llm import model_for_role
+    from lightwork.runtime_overrides import allowed_models, set_allowed_models
     # Baseline: no allow-list, the orchestrator keeps its Opus default.
     assert allowed_models() == set()
     assert model_for_role("orchestrator") == _OPUS
@@ -51,8 +51,8 @@ def test_allowlist_caps_role_resolution(monkeypatch, tmp_path):
 
 def test_allowlist_lets_an_allowed_default_through(monkeypatch, tmp_path):
     _iso(monkeypatch, tmp_path)
-    from maverick.llm import model_for_role
-    from maverick.runtime_overrides import set_allowed_models
+    from lightwork.llm import model_for_role
+    from lightwork.runtime_overrides import set_allowed_models
     # Opus is allowed, so the orchestrator's Opus default is untouched, while a
     # role defaulting to a disallowed model is capped to the lone allowed one.
     set_allowed_models([_OPUS])
@@ -77,7 +77,7 @@ def test_post_allowlist_restricts_pickers(monkeypatch, tmp_path):
                data={"models": [_SONNET, _OPUS]},
                headers=_ORIGIN, follow_redirects=False)
     assert r.status_code == 303
-    from maverick.runtime_overrides import allowed_models
+    from lightwork.runtime_overrides import allowed_models
     assert allowed_models() == {_SONNET, _OPUS}
     page = c.get("/settings").text
     # the datalist now offers only the two approved models, not the rest
@@ -89,7 +89,7 @@ def test_post_allowlist_restricts_pickers(monkeypatch, tmp_path):
 
 def test_pin_disallowed_default_is_rejected(monkeypatch, tmp_path):
     _prep(monkeypatch, tmp_path)
-    from maverick.runtime_overrides import set_allowed_models
+    from lightwork.runtime_overrides import set_allowed_models
     set_allowed_models([_SONNET])
     r = _client().post("/settings/models", data={"model": _OPUS},
                        headers=_ORIGIN, follow_redirects=False)
@@ -98,18 +98,18 @@ def test_pin_disallowed_default_is_rejected(monkeypatch, tmp_path):
 
 def test_pin_allowed_default_succeeds(monkeypatch, tmp_path):
     _prep(monkeypatch, tmp_path)
-    from maverick.runtime_overrides import set_allowed_models
+    from lightwork.runtime_overrides import set_allowed_models
     set_allowed_models([_SONNET])
     r = _client().post("/settings/models", data={"model": _SONNET},
                        headers=_ORIGIN, follow_redirects=False)
     assert r.status_code == 303
-    from maverick.runtime_overrides import default_model_override
+    from lightwork.runtime_overrides import default_model_override
     assert default_model_override() == _SONNET
 
 
 def test_role_pin_disallowed_is_rejected(monkeypatch, tmp_path):
     _prep(monkeypatch, tmp_path)
-    from maverick.runtime_overrides import set_allowed_models
+    from lightwork.runtime_overrides import set_allowed_models
     set_allowed_models([_SONNET])
     r = _client().post("/settings/models/roles", data={"coder": _OPUS},
                        headers=_ORIGIN, follow_redirects=False)
@@ -118,7 +118,7 @@ def test_role_pin_disallowed_is_rejected(monkeypatch, tmp_path):
 
 def test_clearing_allowlist_removes_the_restriction(monkeypatch, tmp_path):
     _prep(monkeypatch, tmp_path)
-    from maverick.runtime_overrides import allowed_models, set_allowed_models
+    from lightwork.runtime_overrides import allowed_models, set_allowed_models
     set_allowed_models([_SONNET])
     assert allowed_models() == {_SONNET}
     # posting with no boxes checked clears it -> every model allowed again
@@ -136,7 +136,7 @@ def test_allowlist_coexists_with_other_overlays(monkeypatch, tmp_path):
     """Setting the allow-list must not clobber a denied tool, a budget, or a
     pinned model already in the overlay (one file, full-state writes)."""
     _iso(monkeypatch, tmp_path)
-    from maverick.runtime_overrides import (
+    from lightwork.runtime_overrides import (
         allowed_models,
         budget_override,
         denied_tools,

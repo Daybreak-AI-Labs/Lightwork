@@ -10,7 +10,7 @@ from __future__ import annotations
 
 import base64
 
-from maverick_shield.guard import Shield
+from lightwork_shield.guard import Shield
 
 
 class _AllowAllSDK:

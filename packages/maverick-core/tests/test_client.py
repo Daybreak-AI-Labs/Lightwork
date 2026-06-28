@@ -4,7 +4,7 @@ tenants/<client>/ and a client-bound surface refuses to serve unbound."""
 from __future__ import annotations
 
 import pytest
-from maverick import client
+from lightwork import client
 
 
 @pytest.fixture(autouse=True)
@@ -103,7 +103,7 @@ def test_require_binding_noop_when_not_enforced(monkeypatch):
 
 
 def test_client_id_is_the_tenant_floor(monkeypatch):
-    from maverick import paths
+    from lightwork import paths
     monkeypatch.delenv("MAVERICK_TENANT", raising=False)
     monkeypatch.setenv("MAVERICK_CLIENT_ID", "acme")
     client.reset_client_cache()
@@ -111,7 +111,7 @@ def test_client_id_is_the_tenant_floor(monkeypatch):
 
 
 def test_data_paths_rehome_under_client(monkeypatch, tmp_path):
-    from maverick import paths
+    from lightwork import paths
     monkeypatch.setenv("MAVERICK_HOME", str(tmp_path))
     monkeypatch.delenv("MAVERICK_TENANT", raising=False)
     monkeypatch.setenv("MAVERICK_CLIENT_ID", "acme")
@@ -122,7 +122,7 @@ def test_data_paths_rehome_under_client(monkeypatch, tmp_path):
 
 
 def test_explicit_tenant_scope_overrides_client(monkeypatch):
-    from maverick import paths
+    from lightwork import paths
     monkeypatch.setenv("MAVERICK_CLIENT_ID", "acme")
     client.reset_client_cache()
     token = paths.set_tenant("explicit")
@@ -133,7 +133,7 @@ def test_explicit_tenant_scope_overrides_client(monkeypatch):
 
 
 def test_unbound_keeps_legacy_root(monkeypatch):
-    from maverick import paths
+    from lightwork import paths
     monkeypatch.delenv("MAVERICK_CLIENT_ID", raising=False)
     monkeypatch.delenv("MAVERICK_TENANT", raising=False)
     monkeypatch.setattr(client, "_resolve", lambda: None)

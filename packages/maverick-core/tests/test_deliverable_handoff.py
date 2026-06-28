@@ -2,11 +2,11 @@
 system-of-record endpoint, reusing the signed webhook delivery."""
 from __future__ import annotations
 
-import maverick.webhooks as webhooks
+import lightwork.webhooks as webhooks
 
 
 def _set_config(monkeypatch, cfg):
-    monkeypatch.setattr("maverick.config.load_config", lambda *a, **k: cfg)
+    monkeypatch.setattr("lightwork.config.load_config", lambda *a, **k: cfg)
 
 
 def test_no_endpoint_is_a_silent_noop(monkeypatch):

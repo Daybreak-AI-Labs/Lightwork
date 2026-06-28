@@ -16,7 +16,7 @@ import pytest
 def _answers(monkeypatch, backend_choice: str, language_choice: str | None):
     """Stub the interactive prompts: first _q_select is the backend, the
     second (if reached) is the language. _q_text is the workspace dir."""
-    from maverick_installer import wizard
+    from lightwork_installer import wizard
 
     picks = [backend_choice]
     if language_choice is not None:
@@ -67,6 +67,6 @@ def test_offered_languages_are_real_sandbox_keys(monkeypatch):
     # Contract: every language the wizard offers must resolve to a real image in
     # sandbox._IMAGE_BY_LANGUAGE, or the user picks a toolchain that silently
     # falls back to python:3.12-slim.
-    sandbox = pytest.importorskip("maverick.sandbox")
+    sandbox = pytest.importorskip("lightwork.sandbox")
     for key in ("python", "javascript", "go", "rust", "java", "ruby"):
         assert key in sandbox._IMAGE_BY_LANGUAGE

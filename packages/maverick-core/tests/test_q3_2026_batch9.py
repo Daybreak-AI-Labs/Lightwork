@@ -49,7 +49,7 @@ _TINY_OAS = {
 
 
 def _write_spec(tmp_path, name="spec.json"):
-    import maverick.tools.openapi_runner as oas
+    import lightwork.tools.openapi_runner as oas
     oas._spec_cache.clear()  # noqa: SLF001 - test reset
     p = tmp_path / name
     p.write_text(json.dumps(_TINY_OAS))
@@ -63,14 +63,14 @@ def _sb(tmp_path):
 
 
 def test_openapi_list_ops(tmp_path):
-    from maverick.tools.openapi_runner import openapi_runner
+    from lightwork.tools.openapi_runner import openapi_runner
     out = openapi_runner(_sb(tmp_path)).fn({"op": "list_ops", "spec": _write_spec(tmp_path)})
     assert "getPet" in out and "createPet" in out and "deletePet" in out
     assert "GET" in out and "POST" in out
 
 
 def test_openapi_describe(tmp_path):
-    from maverick.tools.openapi_runner import openapi_runner
+    from lightwork.tools.openapi_runner import openapi_runner
     out = openapi_runner(_sb(tmp_path)).fn({
         "op": "describe", "spec": _write_spec(tmp_path), "op_id": "getPet",
     })
@@ -79,7 +79,7 @@ def test_openapi_describe(tmp_path):
 
 
 def test_openapi_describe_unknown(tmp_path):
-    from maverick.tools.openapi_runner import openapi_runner
+    from lightwork.tools.openapi_runner import openapi_runner
     out = openapi_runner(_sb(tmp_path)).fn({
         "op": "describe", "spec": _write_spec(tmp_path), "op_id": "bogus",
     })
@@ -87,7 +87,7 @@ def test_openapi_describe_unknown(tmp_path):
 
 
 def _patch_safe_client(monkeypatch, response, captured):
-    """Stand in for maverick.tools._ssrf.safe_client (which pins the
+    """Stand in for lightwork.tools._ssrf.safe_client (which pins the
     connection to a validated public IP). Captures the request and returns
     ``response`` so the offline unit tests don't do real DNS / sockets.
 
@@ -137,7 +137,7 @@ def _patch_safe_client(monkeypatch, response, captured):
             captured["kw"] = kw
             return response
 
-    import maverick.tools._ssrf as _ssrf
+    import lightwork.tools._ssrf as _ssrf
     monkeypatch.setattr(_ssrf, "safe_client", lambda url, **kw: _Client())
 
 
@@ -147,7 +147,7 @@ def test_openapi_call_substitutes_path_param(tmp_path, monkeypatch):
     resp.status_code = 200
     resp.text = '{"id": 7, "name": "Fido"}'
     _patch_safe_client(monkeypatch, resp, captured)
-    from maverick.tools.openapi_runner import openapi_runner
+    from lightwork.tools.openapi_runner import openapi_runner
     out = openapi_runner(_sb(tmp_path)).fn({
         "op": "call", "spec": _write_spec(tmp_path),
         "op_id": "getPet", "params": {"petId": 7},
@@ -159,7 +159,7 @@ def test_openapi_call_substitutes_path_param(tmp_path, monkeypatch):
 
 def test_openapi_call_missing_required_path_param(tmp_path, monkeypatch):
     # Missing path param is rejected before any fetch, so no client needed.
-    from maverick.tools.openapi_runner import openapi_runner
+    from lightwork.tools.openapi_runner import openapi_runner
     out = openapi_runner(_sb(tmp_path)).fn({
         "op": "call", "spec": _write_spec(tmp_path),
         "op_id": "getPet", "params": {},
@@ -173,7 +173,7 @@ def test_openapi_call_sends_body(tmp_path, monkeypatch):
     resp.status_code = 201
     resp.text = "{}"
     _patch_safe_client(monkeypatch, resp, captured)
-    from maverick.tools.openapi_runner import openapi_runner
+    from lightwork.tools.openapi_runner import openapi_runner
     out = openapi_runner(_sb(tmp_path)).fn({
         "op": "call", "spec": _write_spec(tmp_path),
         "op_id": "createPet", "body": {"name": "Rex"},
@@ -185,7 +185,7 @@ def test_openapi_call_sends_body(tmp_path, monkeypatch):
 def test_openapi_call_blocks_private_base_url(tmp_path, monkeypatch):
     # No client patch: safe_client must resolve 127.0.0.1, see it's
     # non-public, and refuse before any connection (works offline).
-    from maverick.tools.openapi_runner import openapi_runner
+    from lightwork.tools.openapi_runner import openapi_runner
     out = openapi_runner(_sb(tmp_path)).fn({
         "op": "call", "spec": _write_spec(tmp_path),
         "op_id": "getPet", "params": {"petId": 7},
@@ -197,8 +197,8 @@ def test_openapi_call_blocks_private_base_url(tmp_path, monkeypatch):
 def test_openapi_blocks_spec_path_escape(tmp_path):
     # #612: a local spec path outside the sandbox workdir is refused, so the
     # agent can't read /etc/passwd or ~/.ssh/id_rsa via the spec arg.
-    import maverick.tools.openapi_runner as oas
-    from maverick.tools.openapi_runner import openapi_runner
+    import lightwork.tools.openapi_runner as oas
+    from lightwork.tools.openapi_runner import openapi_runner
     oas._spec_cache.clear()  # noqa: SLF001 - test reset
     # Write a real spec OUTSIDE the workdir; confinement must still refuse it.
     outside = tmp_path.parent / "outside_spec.json"
@@ -212,8 +212,8 @@ def test_openapi_blocks_spec_path_escape(tmp_path):
 def test_openapi_cache_is_scoped_to_resolved_local_path(tmp_path):
     # Local specs are process-cached, but relative names must not collide
     # across sandbox workdirs.
-    import maverick.tools.openapi_runner as oas
-    from maverick.tools.openapi_runner import openapi_runner
+    import lightwork.tools.openapi_runner as oas
+    from lightwork.tools.openapi_runner import openapi_runner
 
     oas._spec_cache.clear()  # noqa: SLF001 - test reset
     work_a = tmp_path / "a"
@@ -238,7 +238,7 @@ def test_openapi_cache_is_scoped_to_resolved_local_path(tmp_path):
 
 def test_openapi_blocks_absolute_etc_passwd(tmp_path):
     # An absolute system path is refused regardless of contents.
-    from maverick.tools.openapi_runner import openapi_runner
+    from lightwork.tools.openapi_runner import openapi_runner
     (tmp_path / "work").mkdir()
     out = openapi_runner(_sb(tmp_path / "work")).fn(
         {"op": "list_ops", "spec": "/etc/passwd"}
@@ -249,12 +249,12 @@ def test_openapi_blocks_absolute_etc_passwd(tmp_path):
 # ---------- OCR tool ----------
 
 def test_ocr_requires_op():
-    from maverick.tools.ocr import ocr
+    from lightwork.tools.ocr import ocr
     assert "op is required" in ocr().fn({})
 
 
 def test_ocr_extract_validates_path():
-    from maverick.tools.ocr import ocr
+    from lightwork.tools.ocr import ocr
     out = ocr().fn({"op": "extract"})
     assert "requires path" in out
 
@@ -264,7 +264,7 @@ def test_ocr_missing_tesseract(tmp_path, monkeypatch):
     img.write_bytes(b"\x89PNG\r\n\x1a\n")
     monkeypatch.chdir(tmp_path)
     monkeypatch.setattr("shutil.which", lambda b: None)
-    from maverick.tools.ocr import ocr
+    from lightwork.tools.ocr import ocr
     out = ocr().fn({"op": "extract", "path": str(img)})
     assert "tesseract not on PATH" in out
 
@@ -278,7 +278,7 @@ def test_ocr_extract_runs_tesseract(tmp_path, monkeypatch):
         "subprocess.run",
         lambda *a, **k: MagicMock(returncode=0, stdout="Hello world\n", stderr=""),
     )
-    from maverick.tools.ocr import ocr
+    from lightwork.tools.ocr import ocr
     out = ocr().fn({"op": "extract", "path": str(img)})
     assert "Hello world" in out
 
@@ -290,20 +290,20 @@ def test_ocr_hf_backend_requires_token(tmp_path, monkeypatch):
     monkeypatch.delenv("HUGGINGFACE_API_TOKEN", raising=False)
     fake_httpx = types.ModuleType("httpx")
     monkeypatch.setitem(sys.modules, "httpx", fake_httpx)
-    from maverick.tools.ocr import ocr
+    from lightwork.tools.ocr import ocr
     out = ocr().fn({"op": "extract", "path": str(img), "backend": "hf"})
     assert "HUGGINGFACE_API_TOKEN" in out
 
 
 def test_ocr_extract_blocks_path_escape():
-    from maverick.tools.ocr import ocr
+    from lightwork.tools.ocr import ocr
     out = ocr().fn({"op": "extract", "path": "/etc/hosts"})
     assert "path escapes workspace" in out
 
 
 def test_ocr_extract_url_blocks_private():
     # safe_get resolves 127.0.0.1, sees it's non-public, and refuses (offline).
-    from maverick.tools.ocr import ocr
+    from lightwork.tools.ocr import ocr
     out = ocr().fn({"op": "extract_url", "url": "http://127.0.0.1:8000/a.png"})
     assert "refusing to fetch" in out and "127.0.0.1" in out
 
@@ -311,7 +311,7 @@ def test_ocr_extract_url_blocks_private():
 def test_ocr_extract_url_uses_workspace_tempfile(tmp_path, monkeypatch):
     monkeypatch.chdir(tmp_path)
     monkeypatch.setattr("shutil.which", lambda b: "/usr/bin/tesseract")
-    monkeypatch.setattr("maverick.tools.ocr._run_tesseract", lambda *_a, **_k: "ok")
+    monkeypatch.setattr("lightwork.tools.ocr._run_tesseract", lambda *_a, **_k: "ok")
 
     class _Resp:
         status_code = 200
@@ -319,10 +319,10 @@ def test_ocr_extract_url_uses_workspace_tempfile(tmp_path, monkeypatch):
         content = b"\x89PNG\r\n\x1a\n"
 
     # Patch the SSRF-safe fetcher (pins the connection) rather than httpx.
-    import maverick.tools._ssrf as _ssrf
+    import lightwork.tools._ssrf as _ssrf
     monkeypatch.setattr(_ssrf, "safe_get", lambda url, **kw: _Resp())
 
-    from maverick.tools.ocr import ocr
+    from lightwork.tools.ocr import ocr
     out = ocr().fn({"op": "extract_url", "url": "http://example.com/a.png"})
     assert out == "ok"
 
@@ -330,7 +330,7 @@ def test_ocr_extract_url_uses_workspace_tempfile(tmp_path, monkeypatch):
 # ---------- PostHog tool ----------
 
 def test_posthog_requires_op():
-    from maverick.tools.posthog_tool import posthog_tool
+    from lightwork.tools.posthog_tool import posthog_tool
     assert "op is required" in posthog_tool().fn({})
 
 
@@ -338,7 +338,7 @@ def test_posthog_capture_missing_key(monkeypatch):
     monkeypatch.delenv("POSTHOG_API_KEY", raising=False)
     fake_httpx = types.ModuleType("httpx")
     monkeypatch.setitem(sys.modules, "httpx", fake_httpx)
-    from maverick.tools.posthog_tool import posthog_tool
+    from lightwork.tools.posthog_tool import posthog_tool
     out = posthog_tool().fn({
         "op": "capture", "event": "x", "distinct_id": "u",
     })
@@ -362,7 +362,7 @@ def _posthog_capture_url(monkeypatch, env):
     fake_httpx = types.ModuleType("httpx")
     fake_httpx.post = _post
     monkeypatch.setitem(sys.modules, "httpx", fake_httpx)
-    from maverick.tools.posthog_tool import posthog_tool
+    from lightwork.tools.posthog_tool import posthog_tool
     out = posthog_tool().fn({
         "op": "capture", "event": "goal_done",
         "distinct_id": "user-1", "properties": {"cost": 0.42},
@@ -409,7 +409,7 @@ def test_posthog_insights_requires_keys(monkeypatch):
     monkeypatch.delenv("POSTHOG_PROJECT_ID", raising=False)
     fake_httpx = types.ModuleType("httpx")
     monkeypatch.setitem(sys.modules, "httpx", fake_httpx)
-    from maverick.tools.posthog_tool import posthog_tool
+    from lightwork.tools.posthog_tool import posthog_tool
     out = posthog_tool().fn({"op": "insights"})
     assert "POSTHOG_PERSONAL_API_KEY" in out
 
@@ -417,7 +417,7 @@ def test_posthog_insights_requires_keys(monkeypatch):
 # ---------- Shopify tool ----------
 
 def test_shopify_requires_op():
-    from maverick.tools.shopify_tool import shopify_tool
+    from lightwork.tools.shopify_tool import shopify_tool
     assert "op is required" in shopify_tool().fn({})
 
 
@@ -427,7 +427,7 @@ def test_shopify_missing_config(monkeypatch):
     fake = types.ModuleType("httpx")
     fake.Client = MagicMock()
     monkeypatch.setitem(sys.modules, "httpx", fake)
-    from maverick.tools.shopify_tool import shopify_tool
+    from lightwork.tools.shopify_tool import shopify_tool
     out = shopify_tool().fn({"op": "orders"})
     assert "SHOPIFY_STORE" in out and "SHOPIFY_ACCESS_TOKEN" in out
 
@@ -450,7 +450,7 @@ def test_shopify_orders_renders(monkeypatch):
     fake_httpx = types.ModuleType("httpx")
     fake_httpx.Client = MagicMock(return_value=client)
     monkeypatch.setitem(sys.modules, "httpx", fake_httpx)
-    from maverick.tools.shopify_tool import shopify_tool
+    from lightwork.tools.shopify_tool import shopify_tool
     out = shopify_tool().fn({"op": "orders"})
     assert "#1001" in out and "49.99 USD" in out
     assert "alice@x" in out
@@ -484,7 +484,7 @@ def test_shopify_orders_follows_link_header(monkeypatch):
     fake_httpx = types.ModuleType("httpx")
     fake_httpx.Client = MagicMock(return_value=client)
     monkeypatch.setitem(sys.modules, "httpx", fake_httpx)
-    from maverick.tools.shopify_tool import shopify_tool
+    from lightwork.tools.shopify_tool import shopify_tool
     out = shopify_tool().fn({"op": "orders", "limit": 50})
     assert "#1" in out and "#2" in out
     assert get.call_count == 2
@@ -498,7 +498,7 @@ def test_shopify_refund_dry_run(monkeypatch):
     fake_httpx = types.ModuleType("httpx")
     fake_httpx.Client = MagicMock()
     monkeypatch.setitem(sys.modules, "httpx", fake_httpx)
-    from maverick.tools.shopify_tool import shopify_tool
+    from lightwork.tools.shopify_tool import shopify_tool
     out = shopify_tool().fn({
         "op": "refund_create", "order_id": 555, "amount_cents": 1000,
         "currency": "USD",
@@ -510,7 +510,7 @@ def test_shopify_refund_dry_run(monkeypatch):
 # ---------- LLM cache ----------
 
 def test_llm_cache_key_stable():
-    from maverick.cache.llm import cache_key
+    from lightwork.cache.llm import cache_key
     a = cache_key(provider="anthropic", model="m", system="s",
                   messages=[{"role": "user", "content": "hi"}],
                   tools=[], max_tokens=100)
@@ -525,7 +525,7 @@ def test_llm_cache_key_stable():
 
 
 def test_llm_cache_lookup_miss_then_hit(tmp_path):
-    from maverick.cache.llm import LLMCache
+    from lightwork.cache.llm import LLMCache
     cache = LLMCache(db_path=tmp_path / "c.db")
     key = "abc"
     assert cache.lookup(key) is None
@@ -542,7 +542,7 @@ def test_llm_cache_lookup_miss_then_hit(tmp_path):
 
 
 def test_llm_cache_ttl_expires(tmp_path):
-    from maverick.cache.llm import LLMCache
+    from lightwork.cache.llm import LLMCache
     cache = LLMCache(db_path=tmp_path / "c.db", ttl_seconds=1)
     cache.store("k", provider="p", model="m", text="x")
     assert cache.lookup("k") is not None
@@ -552,7 +552,7 @@ def test_llm_cache_ttl_expires(tmp_path):
 
 
 def test_llm_cache_stats(tmp_path):
-    from maverick.cache.llm import LLMCache
+    from lightwork.cache.llm import LLMCache
     cache = LLMCache(db_path=tmp_path / "c.db")
     cache.store("a", provider="p", model="m", text="1")
     cache.store("b", provider="p", model="m", text="2")
@@ -563,7 +563,7 @@ def test_llm_cache_stats(tmp_path):
 
 
 def test_llm_cache_purge_expired(tmp_path):
-    from maverick.cache.llm import LLMCache
+    from lightwork.cache.llm import LLMCache
     cache = LLMCache(db_path=tmp_path / "c.db", ttl_seconds=10)
     cache.store("k", provider="p", model="m", text="x")
     # Force expiration window.
@@ -573,7 +573,7 @@ def test_llm_cache_purge_expired(tmp_path):
 
 
 def test_llm_cache_clear(tmp_path):
-    from maverick.cache.llm import LLMCache
+    from lightwork.cache.llm import LLMCache
     cache = LLMCache(db_path=tmp_path / "c.db")
     cache.store("a", provider="p", model="m", text="x")
     cache.clear()
@@ -581,7 +581,7 @@ def test_llm_cache_clear(tmp_path):
 
 
 def test_llm_cache_enabled_via_env(monkeypatch):
-    from maverick.cache import llm as llm_cache
+    from lightwork.cache import llm as llm_cache
     monkeypatch.setenv("MAVERICK_LLM_CACHE", "1")
     assert llm_cache.enabled() is True
     monkeypatch.setenv("MAVERICK_LLM_CACHE", "0")
@@ -591,8 +591,8 @@ def test_llm_cache_enabled_via_env(monkeypatch):
 # ---------- registration smoke ----------
 
 def test_new_tools_register(tmp_path):
-    from maverick.sandbox.local import LocalBackend
-    from maverick.tools import base_registry
+    from lightwork.sandbox.local import LocalBackend
+    from lightwork.tools import base_registry
 
     class _W:
         def open_questions(self, gid):

@@ -5,9 +5,9 @@ from __future__ import annotations
 import json
 
 import pytest
-from maverick.computer_calibration import CalibrationTransform, save_calibration
-from maverick.tools.gui_element_memory import gui_element_memory
-from maverick.vision_click import LowConfidenceError, resolve_click
+from lightwork.computer_calibration import CalibrationTransform, save_calibration
+from lightwork.tools.gui_element_memory import gui_element_memory
+from lightwork.vision_click import LowConfidenceError, resolve_click
 
 IDENTITY = CalibrationTransform()
 

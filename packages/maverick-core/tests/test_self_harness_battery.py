@@ -12,8 +12,8 @@ import json
 import threading
 
 import pytest
-from maverick import self_harness as sh
-from maverick import self_improvement as si
+from lightwork import self_harness as sh
+from lightwork import self_improvement as si
 
 # --------------------------------------------------------------------------
 # helpers
@@ -363,7 +363,7 @@ def test_recall_appends_only_when_enabled(monkeypatch, tmp_path):
     monkeypatch.setattr(sh, "_store_path", lambda: store)
     # disabled -> empty
     monkeypatch.delenv("MAVERICK_SELF_HARNESS", raising=False)
-    monkeypatch.setattr("maverick.config.load_config", dict)
+    monkeypatch.setattr("lightwork.config.load_config", dict)
     assert sh.recall_addendum("M") == ""
     # enabled -> the block
     monkeypatch.setenv("MAVERICK_SELF_HARNESS", "1")
@@ -372,7 +372,7 @@ def test_recall_appends_only_when_enabled(monkeypatch, tmp_path):
 
 
 def test_runner_pass_end_to_end(monkeypatch, tmp_path):
-    from maverick import self_improvement_runner as runner
+    from lightwork import self_improvement_runner as runner
     store = tmp_path / "s.json"
     monkeypatch.setattr(sh, "_store_path", lambda: store)
     ctrl = _enable_si(monkeypatch)

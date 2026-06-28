@@ -1,7 +1,7 @@
 """data_residency: per-jurisdiction data residency routing."""
 from __future__ import annotations
 
-from maverick.tools.data_residency import data_residency
+from lightwork.tools.data_residency import data_residency
 
 
 def _run(**kw):

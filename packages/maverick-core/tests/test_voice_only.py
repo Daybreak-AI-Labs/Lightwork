@@ -1,8 +1,8 @@
 """Voice-only mode — speech shaping, config knob, session loop seams."""
 from __future__ import annotations
 
-import maverick.tools.voice as voice_tool
-from maverick.voice_only import (
+import lightwork.tools.voice as voice_tool
+from lightwork.voice_only import (
     VoiceOnlySession,
     default_speak,
     run_voice_only,

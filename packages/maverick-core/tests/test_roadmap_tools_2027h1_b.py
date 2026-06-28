@@ -4,10 +4,10 @@ from __future__ import annotations
 
 import json
 
-from maverick.tools.adversarial_eval import adversarial_eval
-from maverick.tools.gui_element_memory import gui_element_memory
-from maverick.tools.voice_command_grammar import voice_command_grammar
-from maverick.tools.what_changed_digest import what_changed_digest
+from lightwork.tools.adversarial_eval import adversarial_eval
+from lightwork.tools.gui_element_memory import gui_element_memory
+from lightwork.tools.voice_command_grammar import voice_command_grammar
+from lightwork.tools.what_changed_digest import what_changed_digest
 
 _GRAMMAR = [
     {"intent": "pause", "pattern": "pause goal {id}"},
@@ -137,7 +137,7 @@ def test_adv_eval_validation():
 
 
 def test_batch_registered():
-    from maverick.tools import base_registry
+    from lightwork.tools import base_registry
 
     class _W:
         pass

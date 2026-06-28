@@ -6,7 +6,7 @@ import asyncio
 import pytest
 from fastapi import HTTPException
 from fastapi.testclient import TestClient
-from maverick_dashboard.app import app
+from lightwork_dashboard.app import app
 
 client = TestClient(app, headers={"Origin": "http://testserver"})
 
@@ -49,7 +49,7 @@ def test_empty_and_oversize_rejected():
 
 
 def test_oversize_content_length_rejected_before_streaming():
-    from maverick_dashboard import app as app_mod
+    from lightwork_dashboard import app as app_mod
 
     class OversizedRequest:
         headers = {
@@ -69,7 +69,7 @@ def test_oversize_content_length_rejected_before_streaming():
 
 
 def test_lengthless_skill_validator_body_stream_is_bounded():
-    from maverick_dashboard import app as app_mod
+    from lightwork_dashboard import app as app_mod
 
     class ChunkedRequest:
         headers = {}

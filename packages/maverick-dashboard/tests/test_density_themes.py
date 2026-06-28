@@ -2,8 +2,8 @@
 from __future__ import annotations
 
 from fastapi.testclient import TestClient
-from maverick_dashboard import themes as themes_mod
-from maverick_dashboard.app import app, resolve_density
+from lightwork_dashboard import themes as themes_mod
+from lightwork_dashboard.app import app, resolve_density
 
 client = TestClient(app)
 
@@ -26,7 +26,7 @@ def test_resolve_density_param_cookie_default():
 
 
 def test_resolve_density_config_fallback(monkeypatch):
-    import maverick.config as cfg
+    import lightwork.config as cfg
     monkeypatch.setattr(cfg, "load_config", lambda: {"dashboard": {"density": "compact"}})
     assert resolve_density(_Req()) == "compact"
 
@@ -55,7 +55,7 @@ _GOOD = {"bg": "#101020", "panel": "#181830", "text": "#e0e0f0", "accent": "#7aa
 
 
 def _with_themes(monkeypatch, themes: dict):
-    import maverick.config as cfg
+    import lightwork.config as cfg
     monkeypatch.setattr(cfg, "load_config", lambda: {"dashboard": {"themes": themes}})
 
 
@@ -99,7 +99,7 @@ def test_unknown_theme_still_falls_back_to_dark(monkeypatch):
 
 
 def test_no_config_themes_is_default_off(monkeypatch):
-    import maverick.config as cfg
+    import lightwork.config as cfg
     monkeypatch.setattr(cfg, "load_config", dict)
     assert themes_mod.custom_themes() == {}
     fresh = TestClient(app)

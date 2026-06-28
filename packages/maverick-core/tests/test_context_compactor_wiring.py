@@ -10,14 +10,14 @@ from __future__ import annotations
 
 from pathlib import Path
 
-import maverick.config as cfg
+import lightwork.config as cfg
 import pytest
-from maverick import context_compactor as cc
-from maverick.budget import Budget
-from maverick.llm import LLMResponse
-from maverick.orchestrator import run_goal
-from maverick.sandbox import LocalBackend
-from maverick.world_model import WorldModel
+from lightwork import context_compactor as cc
+from lightwork.budget import Budget
+from lightwork.llm import LLMResponse
+from lightwork.orchestrator import run_goal
+from lightwork.sandbox import LocalBackend
+from lightwork.world_model import WorldModel
 
 # ---------- token counting ----------
 

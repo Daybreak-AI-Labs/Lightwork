@@ -9,7 +9,7 @@ from __future__ import annotations
 from pathlib import Path
 
 import pytest
-from maverick.skills import install_skill
+from lightwork.skills import install_skill
 
 _NAMELESS = "---\ntriggers:\n  - x\n---\nbody only, no name\n"
 _NAMED = "---\nname: greety\ntriggers:\n  - hi\n---\nbe warm\n"

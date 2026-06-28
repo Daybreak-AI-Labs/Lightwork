@@ -8,8 +8,8 @@ https-only, fail-soft). No network: httpx is monkeypatched.
 from __future__ import annotations
 
 import pytest
-from maverick import oidc
-from maverick.oidc import (
+from lightwork import oidc
+from lightwork.oidc import (
     OIDCConfig,
     OIDCError,
     load_oidc_config,

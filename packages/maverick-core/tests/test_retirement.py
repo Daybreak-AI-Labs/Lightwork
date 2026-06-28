@@ -3,7 +3,7 @@ flow, the safe-default disposition coercion, fail-safe degradation when a
 side-effect raises, and the injected clock."""
 from __future__ import annotations
 
-from maverick import retirement as rt
+from lightwork import retirement as rt
 
 
 def _recorder():

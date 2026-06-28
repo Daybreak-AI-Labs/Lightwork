@@ -8,9 +8,9 @@ ids are never denied -- so only an explicitly provisioned, limited plan bites.
 from __future__ import annotations
 
 import pytest
-from maverick import billing
-from maverick.paths import reset_tenant, set_tenant
-from maverick.tenant import registry as tr
+from lightwork import billing
+from lightwork.paths import reset_tenant, set_tenant
+from lightwork.tenant import registry as tr
 
 
 @pytest.fixture(autouse=True)

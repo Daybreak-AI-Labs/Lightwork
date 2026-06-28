@@ -15,8 +15,8 @@ import eval_tau2 as T  # noqa: E402
 import eval_terminal_bench as H  # noqa: E402
 import tau2_solver  # noqa: E402
 import terminal_solver  # noqa: E402
-from maverick.budget import BudgetExceeded  # noqa: E402
-from maverick.llm import LLMResponse, ToolCall  # noqa: E402
+from lightwork.budget import BudgetExceeded  # noqa: E402
+from lightwork.llm import LLMResponse, ToolCall  # noqa: E402
 
 
 class FakeLLM:

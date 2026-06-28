@@ -3,8 +3,8 @@ from __future__ import annotations
 
 import asyncio
 
-from maverick.tools import Tool, ToolRegistry
-from maverick.tools.find_tools import find_tools
+from lightwork.tools import Tool, ToolRegistry
+from lightwork.tools.find_tools import find_tools
 
 
 def _tool(name: str, desc: str = "d") -> Tool:
@@ -121,13 +121,13 @@ class TestFindTools:
 
 class TestEnvKnob:
     def test_env_enables(self, monkeypatch):
-        from maverick.tools import _deferred_loading_enabled
+        from lightwork.tools import _deferred_loading_enabled
         monkeypatch.setenv("MAVERICK_DEFERRED_TOOLS", "1")
         assert _deferred_loading_enabled() is True
 
     def test_off_by_default(self, monkeypatch):
-        import maverick.config as config
-        from maverick.tools import _deferred_loading_enabled
+        import lightwork.config as config
+        from lightwork.tools import _deferred_loading_enabled
         monkeypatch.delenv("MAVERICK_DEFERRED_TOOLS", raising=False)
         monkeypatch.setattr(config, "load_config", dict)
         assert _deferred_loading_enabled() is False
@@ -135,9 +135,9 @@ class TestEnvKnob:
 
 class TestBaseRegistryWiring:
     def test_env_shrinks_catalog_and_adds_find_tools(self, tmp_path, monkeypatch):
-        from maverick.sandbox import LocalBackend
-        from maverick.tools import base_registry
-        from maverick.world_model import WorldModel
+        from lightwork.sandbox import LocalBackend
+        from lightwork.tools import base_registry
+        from lightwork.world_model import WorldModel
 
         world = WorldModel(path=tmp_path / "w.db")
         sandbox = LocalBackend(workdir=tmp_path)

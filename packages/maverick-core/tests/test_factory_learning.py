@@ -1,4 +1,4 @@
-"""Tests for the self-improving factory (maverick.factory_learning).
+"""Tests for the self-improving factory (lightwork.factory_learning).
 
 Recording/mining/promotion all route through tmp ledgers and a fake gate, so
 nothing touches the real ~/.maverick state or the live controller. The whole
@@ -7,8 +7,8 @@ loop is gated off by default; we flip MAVERICK_FACTORY_LEARNING per test.
 from __future__ import annotations
 
 import pytest
-from maverick import factory_learning as fl
-from maverick.factory_learning import (
+from lightwork import factory_learning as fl
+from lightwork.factory_learning import (
     SIGNAL_SKILL_GAP,
     SIGNAL_TOOL_MISSING,
     ProposerCorrection,
@@ -31,7 +31,7 @@ def on(monkeypatch, tmp_path):
 # --------------------------------------------------------------------------
 def test_disabled_by_default(monkeypatch):
     monkeypatch.delenv("MAVERICK_FACTORY_LEARNING", raising=False)
-    monkeypatch.setattr("maverick.self_improvement.enabled", lambda: False)
+    monkeypatch.setattr("lightwork.self_improvement.enabled", lambda: False)
     assert fl.enabled() is False
     # Recording is a no-op while off.
     assert fl.record_outcome("finance_x", SIGNAL_TOOL_MISSING, detail="web_search") is False

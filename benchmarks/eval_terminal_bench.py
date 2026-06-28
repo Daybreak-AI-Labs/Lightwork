@@ -14,7 +14,7 @@ domain's shell tools (name -> callable) and drives them to satisfy the request,
 mutating the virtual FS. The verifier then checks the FS + the command log.
 
 The real-environment seam is the solver: a production run injects a solver that
-executes commands in a container (via ``maverick.sandbox`` / ``swe_bench.py``'s
+executes commands in a container (via ``lightwork.sandbox`` / ``swe_bench.py``'s
 backend) and reflects the resulting filesystem back into ``TerminalEnv`` for
 verification. That container wiring + a Maverick-driving solver (+ user
 simulator) is the documented follow-up; the env + verifier + task format are the

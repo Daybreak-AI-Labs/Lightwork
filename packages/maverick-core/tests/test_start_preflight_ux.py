@@ -16,7 +16,7 @@ Platform-test findings, round 2 fixes:
 from __future__ import annotations
 
 from click.testing import CliRunner
-from maverick.budget import Budget
+from lightwork.budget import Budget
 
 
 def _goal_count(home) -> int:
@@ -35,7 +35,7 @@ def _isolate(monkeypatch, tmp_path):
     # Bust the killswitch's 1s stat-throttle so each test sees ITS home's
     # HALT state, not the previous test's cached answer (established
     # pattern, see test_q1_2026.py).
-    from maverick import killswitch as ks
+    from lightwork import killswitch as ks
     ks._last_file_check_ts = 0.0
     ks.clear()
 
@@ -46,7 +46,7 @@ def test_halted_start_exits_3_and_creates_no_goal(tmp_path, monkeypatch):
     halt.parent.mkdir(parents=True, exist_ok=True)
     halt.write_text("operator\n", encoding="utf-8")
 
-    from maverick.cli import main
+    from lightwork.cli import main
     res = CliRunner().invoke(main, ["start", "blocked goal"])
 
     assert res.exit_code == 3, res.output
@@ -56,13 +56,13 @@ def test_halted_start_exits_3_and_creates_no_goal(tmp_path, monkeypatch):
 
 def test_missing_sdk_exits_2_and_creates_no_goal(tmp_path, monkeypatch):
     _isolate(monkeypatch, tmp_path)
-    import maverick.providers as providers
+    import lightwork.providers as providers
     monkeypatch.setattr(
         providers, "missing_sdks",
-        lambda specs: ["openai SDK not installed. Run: pip install 'maverick-agent[openai]'"],
+        lambda specs: ["openai SDK not installed. Run: pip install 'lightwork-agent[openai]'"],
     )
 
-    from maverick.cli import main
+    from lightwork.cli import main
     res = CliRunner().invoke(main, ["start", "sdk-less goal"])
 
     assert res.exit_code == 2, res.output
@@ -73,7 +73,7 @@ def test_missing_sdk_exits_2_and_creates_no_goal(tmp_path, monkeypatch):
 def test_missing_sdks_helper_detects_absent_module(monkeypatch):
     import importlib.util
 
-    from maverick import providers
+    from lightwork import providers
 
     real_find_spec = importlib.util.find_spec
 
@@ -90,7 +90,7 @@ def test_missing_sdks_helper_detects_absent_module(monkeypatch):
 
 
 def test_missing_sdks_helper_quiet_when_all_present():
-    from maverick import providers
+    from lightwork import providers
     assert providers.missing_sdks(["claude-opus-4-8"]) == []
 
 
@@ -129,7 +129,7 @@ def test_debate_and_plan_reflect_refuse_cleanly_when_unconfigured(tmp_path, monk
     monkeypatch.delenv("ANTHROPIC_API_KEY", raising=False)
     monkeypatch.setenv("MAVERICK_CONFIG", str(tmp_path / "none.toml"))
 
-    from maverick.cli import main
+    from lightwork.cli import main
     for argv in (["debate", "tabs or spaces?"], ["plan-reflect", "make tea"]):
         res = CliRunner().invoke(main, argv)
         assert res.exit_code == 2, (argv, res.output)

@@ -1,7 +1,7 @@
 """risk_tier_classifier: general goal-risk LOW/MEDIUM/HIGH scorer."""
 from __future__ import annotations
 
-from maverick.tools.risk_tier_classifier import risk_tier_classifier
+from lightwork.tools.risk_tier_classifier import risk_tier_classifier
 
 
 def _score(signals):

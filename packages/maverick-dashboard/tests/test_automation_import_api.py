@@ -11,7 +11,7 @@ from starlette.testclient import TestClient
 
 
 def _client():
-    from maverick_dashboard.app import app
+    from lightwork_dashboard.app import app
     return TestClient(app, headers={"Origin": "http://testserver"})
 
 
@@ -21,9 +21,9 @@ def _isolate(monkeypatch, tmp_path):
     monkeypatch.setenv("MAVERICK_HOME", str(tmp_path))
     monkeypatch.delenv("MAVERICK_DASHBOARD_TOKEN", raising=False)
     monkeypatch.setenv("MAVERICK_AUTOMATION_IMPORT", "1")
-    from maverick import world_model
+    from lightwork import world_model
     monkeypatch.setattr(world_model, "DEFAULT_DB", tmp_path / "world.db")
-    import maverick.templates as tpl
+    import lightwork.templates as tpl
     monkeypatch.setattr(tpl, "USER_TEMPLATES", tmp_path / ".maverick" / "templates")
 
 
@@ -84,7 +84,7 @@ def test_run_creates_template_from_definitions():
     assert item["created"] is True
     assert item["trigger"] == "webhook"
     # The template now exists.
-    from maverick.templates import load_template
+    from lightwork.templates import load_template
     assert load_template(item["template"]) is not None
 
 
@@ -95,7 +95,7 @@ def test_dry_run_writes_nothing():
     assert r.status_code == 200
     item = r.json()["imported"][0]
     assert item["created"] is False
-    from maverick.templates import load_template
+    from lightwork.templates import load_template
     with pytest.raises(FileNotFoundError):
         load_template(item["template"])
 
@@ -107,14 +107,14 @@ def test_create_webhook_trigger_wires_it():
     assert r.status_code == 200
     item = r.json()["imported"][0]
     assert item["webhook_trigger"] == item["template"]
-    from maverick_dashboard import triggers_store
+    from lightwork_dashboard import triggers_store
     assert triggers_store.get_trigger(item["template"]) is not None
 
 
 def test_webhook_trigger_respects_features_gate(monkeypatch):
     # When [features] triggers is off, the import must NOT create webhook
     # triggers (it would bypass the operator's deliberate decision).
-    import maverick.config as cfg
+    import lightwork.config as cfg
     real = cfg.get_features
     monkeypatch.setattr(cfg, "get_features", lambda: {**real(), "triggers": False})
     r = _client().post("/api/v1/import/run", json={
@@ -127,8 +127,8 @@ def test_webhook_trigger_respects_features_gate(monkeypatch):
 
 
 def test_activate_schedules_preserves_request_identity(monkeypatch):
-    import maverick.job_queue as job_queue
-    import maverick_dashboard.api as api
+    import lightwork.job_queue as job_queue
+    import lightwork_dashboard.api as api
 
     _FakeQueue.last = None
     monkeypatch.setattr(job_queue, "JobQueue", _FakeQueue)

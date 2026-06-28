@@ -1,7 +1,7 @@
 """Long-context compaction."""
 from __future__ import annotations
 
-from maverick.compaction import (
+from lightwork.compaction import (
     compact_messages,
     make_heuristic_digest,
     should_digest,

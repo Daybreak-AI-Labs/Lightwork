@@ -2,7 +2,7 @@
 from __future__ import annotations
 
 import pytest
-from maverick.tools import obsidian as obs
+from lightwork.tools import obsidian as obs
 
 
 def test_create_read_append_list_search(tmp_path):

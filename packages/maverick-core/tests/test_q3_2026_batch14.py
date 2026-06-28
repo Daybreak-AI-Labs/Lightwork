@@ -1,7 +1,7 @@
 """Q3 2026 batch 14 — Azure/Bedrock providers, 8 SaaS tools, cron scheduler.
 
 Trello / Replicate / NewsAPI / Wolfram / Dropbox / MS Graph /
-Confluence / Gmail + maverick.scheduler.
+Confluence / Gmail + lightwork.scheduler.
 """
 from __future__ import annotations
 
@@ -48,7 +48,7 @@ _needs_openai = pytest.mark.skipif(
 # ---------- Providers ----------
 
 def test_providers_registered():
-    from maverick.providers import KNOWN_PROVIDERS
+    from lightwork.providers import KNOWN_PROVIDERS
     assert "azure" in KNOWN_PROVIDERS
     assert "bedrock" in KNOWN_PROVIDERS
 
@@ -57,7 +57,7 @@ def test_providers_registered():
 def test_azure_requires_config(monkeypatch):
     monkeypatch.delenv("AZURE_OPENAI_ENDPOINT", raising=False)
     monkeypatch.delenv("AZURE_OPENAI_DEPLOYMENT", raising=False)
-    from maverick.providers.azure_openai_provider import AzureOpenAIClient
+    from lightwork.providers.azure_openai_provider import AzureOpenAIClient
     try:
         AzureOpenAIClient()
     except RuntimeError as e:
@@ -76,7 +76,7 @@ def test_azure_uses_dedicated_client(monkeypatch):
     monkeypatch.setenv("AZURE_OPENAI_DEPLOYMENT", "gpt5")
     monkeypatch.setenv("AZURE_OPENAI_API_VERSION", "2024-10-21")
     monkeypatch.setenv("AZURE_OPENAI_API_KEY", "k")
-    from maverick.providers.azure_openai_provider import AzureOpenAIClient
+    from lightwork.providers.azure_openai_provider import AzureOpenAIClient
     c = AzureOpenAIClient()
     assert isinstance(c._sync, AzureOpenAI)
     assert c.deployment == "gpt5"
@@ -88,7 +88,7 @@ def test_azure_uses_dedicated_client(monkeypatch):
 @_needs_openai
 def test_bedrock_requires_region(monkeypatch):
     monkeypatch.delenv("AWS_REGION", raising=False)
-    from maverick.providers.bedrock_provider import BedrockClient
+    from lightwork.providers.bedrock_provider import BedrockClient
     try:
         BedrockClient()
     except RuntimeError as e:
@@ -101,7 +101,7 @@ def test_bedrock_requires_region(monkeypatch):
 def test_bedrock_builds_url(monkeypatch):
     monkeypatch.setenv("AWS_REGION", "us-east-1")
     monkeypatch.setenv("BEDROCK_API_KEY", "k")
-    from maverick.providers.bedrock_provider import BedrockClient
+    from lightwork.providers.bedrock_provider import BedrockClient
     c = BedrockClient()
     assert "bedrock-runtime.us-east-1.amazonaws.com" in c.base_url
 
@@ -109,7 +109,7 @@ def test_bedrock_builds_url(monkeypatch):
 # ---------- Trello ----------
 
 def test_trello_requires_op():
-    from maverick.tools.trello_tool import trello_tool
+    from lightwork.tools.trello_tool import trello_tool
     assert "op is required" in trello_tool().fn({})
 
 
@@ -117,7 +117,7 @@ def test_trello_missing_auth(monkeypatch):
     monkeypatch.delenv("TRELLO_KEY", raising=False)
     monkeypatch.delenv("TRELLO_TOKEN", raising=False)
     _fake_httpx(monkeypatch, get=MagicMock())
-    from maverick.tools.trello_tool import trello_tool
+    from lightwork.tools.trello_tool import trello_tool
     out = trello_tool().fn({"op": "boards"})
     assert "TRELLO_KEY" in out
 
@@ -127,7 +127,7 @@ def test_trello_boards_renders(monkeypatch):
     monkeypatch.setenv("TRELLO_TOKEN", "t")
     body = [{"id": "b1", "name": "Roadmap", "closed": False}]
     _fake_httpx(monkeypatch, get=MagicMock(return_value=_resp(200, body)))
-    from maverick.tools.trello_tool import trello_tool
+    from lightwork.tools.trello_tool import trello_tool
     out = trello_tool().fn({"op": "boards"})
     assert "Roadmap" in out
 
@@ -136,7 +136,7 @@ def test_trello_card_create_dry_run(monkeypatch):
     monkeypatch.setenv("TRELLO_KEY", "k")
     monkeypatch.setenv("TRELLO_TOKEN", "t")
     _fake_httpx(monkeypatch, post=MagicMock())
-    from maverick.tools.trello_tool import trello_tool
+    from lightwork.tools.trello_tool import trello_tool
     out = trello_tool().fn({"op": "card_create", "list_id": "L", "name": "Do it"})
     assert "DRY RUN" in out
 
@@ -144,14 +144,14 @@ def test_trello_card_create_dry_run(monkeypatch):
 # ---------- Replicate ----------
 
 def test_replicate_requires_op():
-    from maverick.tools.replicate_tool import replicate_tool
+    from lightwork.tools.replicate_tool import replicate_tool
     assert "op is required" in replicate_tool().fn({})
 
 
 def test_replicate_missing_token(monkeypatch):
     monkeypatch.delenv("REPLICATE_API_TOKEN", raising=False)
     _fake_httpx(monkeypatch, get=MagicMock(), post=MagicMock())
-    from maverick.tools.replicate_tool import replicate_tool
+    from lightwork.tools.replicate_tool import replicate_tool
     out = replicate_tool().fn({"op": "predict_get", "prediction_id": "p1"})
     assert "REPLICATE_API_TOKEN" in out
 
@@ -164,7 +164,7 @@ def test_replicate_run_creates_prediction(monkeypatch):
     _fake_httpx(monkeypatch,
                 get=MagicMock(return_value=get_resp),
                 post=MagicMock(return_value=post_resp))
-    from maverick.tools.replicate_tool import replicate_tool
+    from lightwork.tools.replicate_tool import replicate_tool
     out = replicate_tool().fn({
         "op": "run", "model": "stability-ai/sdxl", "input": {"prompt": "cat"},
     })
@@ -174,7 +174,7 @@ def test_replicate_run_creates_prediction(monkeypatch):
 def test_replicate_cancel_dry_run(monkeypatch):
     monkeypatch.setenv("REPLICATE_API_TOKEN", "r8_xx")
     _fake_httpx(monkeypatch, post=MagicMock())
-    from maverick.tools.replicate_tool import replicate_tool
+    from lightwork.tools.replicate_tool import replicate_tool
     out = replicate_tool().fn({"op": "cancel", "prediction_id": "p1"})
     assert "DRY RUN" in out
 
@@ -182,14 +182,14 @@ def test_replicate_cancel_dry_run(monkeypatch):
 # ---------- NewsAPI ----------
 
 def test_newsapi_requires_op():
-    from maverick.tools.newsapi_tool import newsapi_tool
+    from lightwork.tools.newsapi_tool import newsapi_tool
     assert "op is required" in newsapi_tool().fn({})
 
 
 def test_newsapi_missing_key(monkeypatch):
     monkeypatch.delenv("NEWSAPI_KEY", raising=False)
     _fake_httpx(monkeypatch, get=MagicMock())
-    from maverick.tools.newsapi_tool import newsapi_tool
+    from lightwork.tools.newsapi_tool import newsapi_tool
     out = newsapi_tool().fn({"op": "top_headlines"})
     assert "NEWSAPI_KEY" in out
 
@@ -201,7 +201,7 @@ def test_newsapi_search_renders(monkeypatch):
          "url": "https://tc/1"},
     ]}
     _fake_httpx(monkeypatch, get=MagicMock(return_value=_resp(200, body)))
-    from maverick.tools.newsapi_tool import newsapi_tool
+    from lightwork.tools.newsapi_tool import newsapi_tool
     out = newsapi_tool().fn({"op": "search", "query": "ai"})
     assert "AI breakthrough" in out and "TechCrunch" in out
 
@@ -209,7 +209,7 @@ def test_newsapi_search_renders(monkeypatch):
 # ---------- Wolfram ----------
 
 def test_wolfram_requires_query():
-    from maverick.tools.wolfram_tool import wolfram_tool
+    from lightwork.tools.wolfram_tool import wolfram_tool
     out = wolfram_tool().fn({"op": "short"})
     assert "query is required" in out
 
@@ -217,7 +217,7 @@ def test_wolfram_requires_query():
 def test_wolfram_missing_appid(monkeypatch):
     monkeypatch.delenv("WOLFRAM_APP_ID", raising=False)
     _fake_httpx(monkeypatch, get=MagicMock())
-    from maverick.tools.wolfram_tool import wolfram_tool
+    from lightwork.tools.wolfram_tool import wolfram_tool
     out = wolfram_tool().fn({"op": "short", "query": "2+2"})
     assert "WOLFRAM_APP_ID" in out
 
@@ -225,7 +225,7 @@ def test_wolfram_missing_appid(monkeypatch):
 def test_wolfram_short_renders(monkeypatch):
     monkeypatch.setenv("WOLFRAM_APP_ID", "app")
     _fake_httpx(monkeypatch, get=MagicMock(return_value=_resp(200, "4", text="4")))
-    from maverick.tools.wolfram_tool import wolfram_tool
+    from lightwork.tools.wolfram_tool import wolfram_tool
     out = wolfram_tool().fn({"op": "short", "query": "2+2"})
     assert out == "4"
 
@@ -233,14 +233,14 @@ def test_wolfram_short_renders(monkeypatch):
 # ---------- Dropbox ----------
 
 def test_dropbox_requires_op():
-    from maverick.tools.dropbox_tool import dropbox_tool
+    from lightwork.tools.dropbox_tool import dropbox_tool
     assert "op is required" in dropbox_tool().fn({})
 
 
 def test_dropbox_missing_token(monkeypatch):
     monkeypatch.delenv("DROPBOX_ACCESS_TOKEN", raising=False)
     _fake_httpx(monkeypatch, post=MagicMock())
-    from maverick.tools.dropbox_tool import dropbox_tool
+    from lightwork.tools.dropbox_tool import dropbox_tool
     out = dropbox_tool().fn({"op": "list", "path": "/"})
     assert "DROPBOX_ACCESS_TOKEN" in out
 
@@ -248,7 +248,7 @@ def test_dropbox_missing_token(monkeypatch):
 def test_dropbox_upload_dry_run(monkeypatch):
     monkeypatch.setenv("DROPBOX_ACCESS_TOKEN", "tok")
     _fake_httpx(monkeypatch, post=MagicMock())
-    from maverick.tools.dropbox_tool import dropbox_tool
+    from lightwork.tools.dropbox_tool import dropbox_tool
     out = dropbox_tool().fn({"op": "upload", "path": "/x.txt", "content": "hi"})
     assert "DRY RUN" in out
 
@@ -259,7 +259,7 @@ def test_dropbox_share_dry_run(monkeypatch):
     monkeypatch.setenv("DROPBOX_ACCESS_TOKEN", "tok")
     post = MagicMock()
     _fake_httpx(monkeypatch, post=post)
-    from maverick.tools.dropbox_tool import dropbox_tool
+    from lightwork.tools.dropbox_tool import dropbox_tool
     out = dropbox_tool().fn({"op": "share", "path": "/x.txt"})
     assert "DRY RUN" in out
     post.assert_not_called()
@@ -269,7 +269,7 @@ def test_dropbox_list_renders(monkeypatch):
         {".tag": "file", "name": "a.txt", "size": 10, "path_display": "/a.txt"},
     ]}
     _fake_httpx(monkeypatch, post=MagicMock(return_value=_resp(200, body)))
-    from maverick.tools.dropbox_tool import dropbox_tool
+    from lightwork.tools.dropbox_tool import dropbox_tool
     out = dropbox_tool().fn({"op": "list", "path": ""})
     assert "/a.txt" in out
 
@@ -277,14 +277,14 @@ def test_dropbox_list_renders(monkeypatch):
 # ---------- MS Graph ----------
 
 def test_msgraph_requires_op():
-    from maverick.tools.msgraph_tool import msgraph_tool
+    from lightwork.tools.msgraph_tool import msgraph_tool
     assert "op is required" in msgraph_tool().fn({})
 
 
 def test_msgraph_missing_token(monkeypatch):
     monkeypatch.delenv("MSGRAPH_ACCESS_TOKEN", raising=False)
     _fake_httpx(monkeypatch, get=MagicMock())
-    from maverick.tools.msgraph_tool import msgraph_tool
+    from lightwork.tools.msgraph_tool import msgraph_tool
     out = msgraph_tool().fn({"op": "me"})
     assert "MSGRAPH_ACCESS_TOKEN" in out
 
@@ -292,7 +292,7 @@ def test_msgraph_missing_token(monkeypatch):
 def test_msgraph_send_mail_dry_run(monkeypatch):
     monkeypatch.setenv("MSGRAPH_ACCESS_TOKEN", "tok")
     _fake_httpx(monkeypatch, post=MagicMock())
-    from maverick.tools.msgraph_tool import msgraph_tool
+    from lightwork.tools.msgraph_tool import msgraph_tool
     out = msgraph_tool().fn({
         "op": "send_mail", "to": ["a@x"], "subject": "hi", "body": "yo",
     })
@@ -306,7 +306,7 @@ def test_msgraph_messages_renders(monkeypatch):
         "from": {"emailAddress": {"address": "boss@x"}},
     }]}
     _fake_httpx(monkeypatch, get=MagicMock(return_value=_resp(200, body)))
-    from maverick.tools.msgraph_tool import msgraph_tool
+    from lightwork.tools.msgraph_tool import msgraph_tool
     out = msgraph_tool().fn({"op": "messages"})
     assert "Standup" in out and "boss@x" in out
 
@@ -314,7 +314,7 @@ def test_msgraph_messages_renders(monkeypatch):
 # ---------- Confluence ----------
 
 def test_confluence_requires_op():
-    from maverick.tools.confluence_tool import confluence_tool
+    from lightwork.tools.confluence_tool import confluence_tool
     assert "op is required" in confluence_tool().fn({})
 
 
@@ -322,7 +322,7 @@ def test_confluence_missing_config(monkeypatch):
     for k in ("CONFLUENCE_URL", "CONFLUENCE_USER", "CONFLUENCE_API_TOKEN"):
         monkeypatch.delenv(k, raising=False)
     _fake_httpx(monkeypatch, get=MagicMock())
-    from maverick.tools.confluence_tool import confluence_tool
+    from lightwork.tools.confluence_tool import confluence_tool
     out = confluence_tool().fn({"op": "search", "cql": "text ~ 'x'"})
     assert "CONFLUENCE_URL" in out
 
@@ -337,7 +337,7 @@ def test_confluence_page_get_strips_html(monkeypatch):
         "body": {"storage": {"value": "<p>Hello <b>world</b></p>"}},
     }
     _fake_httpx(monkeypatch, get=MagicMock(return_value=_resp(200, body)))
-    from maverick.tools.confluence_tool import confluence_tool
+    from lightwork.tools.confluence_tool import confluence_tool
     out = confluence_tool().fn({"op": "page_get", "page_id": "123"})
     assert "Hello world" in out and "<p>" not in out
 
@@ -347,7 +347,7 @@ def test_confluence_page_create_dry_run(monkeypatch):
     monkeypatch.setenv("CONFLUENCE_USER", "u@x")
     monkeypatch.setenv("CONFLUENCE_API_TOKEN", "tok")
     _fake_httpx(monkeypatch, post=MagicMock())
-    from maverick.tools.confluence_tool import confluence_tool
+    from lightwork.tools.confluence_tool import confluence_tool
     out = confluence_tool().fn({
         "op": "page_create", "space_key": "ENG", "title": "New",
     })
@@ -366,7 +366,7 @@ def test_confluence_page_create_sends_space_key(monkeypatch):
     _confluence_env(monkeypatch)
     post = MagicMock(return_value=_resp(200, {"id": "999", "title": "New"}))
     _fake_httpx(monkeypatch, post=post)
-    from maverick.tools.confluence_tool import confluence_tool
+    from lightwork.tools.confluence_tool import confluence_tool
     confluence_tool().fn({
         "op": "page_create", "space_key": "ENG", "title": "New",
         "body": "<p>hi</p>", "confirm": True,
@@ -380,7 +380,7 @@ def test_confluence_page_create_accepts_legacy_space_id(monkeypatch):
     _confluence_env(monkeypatch)
     post = MagicMock(return_value=_resp(200, {"id": "999", "title": "New"}))
     _fake_httpx(monkeypatch, post=post)
-    from maverick.tools.confluence_tool import confluence_tool
+    from lightwork.tools.confluence_tool import confluence_tool
     confluence_tool().fn({
         "op": "page_create", "space_id": "ENG", "title": "New", "confirm": True,
     })
@@ -390,14 +390,14 @@ def test_confluence_page_create_accepts_legacy_space_id(monkeypatch):
 # ---------- Gmail ----------
 
 def test_gmail_requires_op():
-    from maverick.tools.gmail_tool import gmail_tool
+    from lightwork.tools.gmail_tool import gmail_tool
     assert "op is required" in gmail_tool().fn({})
 
 
 def test_gmail_missing_token(monkeypatch):
     monkeypatch.delenv("GMAIL_ACCESS_TOKEN", raising=False)
     _fake_httpx(monkeypatch, get=MagicMock())
-    from maverick.tools.gmail_tool import gmail_tool
+    from lightwork.tools.gmail_tool import gmail_tool
     out = gmail_tool().fn({"op": "labels"})
     assert "GMAIL_ACCESS_TOKEN" in out
 
@@ -405,7 +405,7 @@ def test_gmail_missing_token(monkeypatch):
 def test_gmail_send_dry_run(monkeypatch):
     monkeypatch.setenv("GMAIL_ACCESS_TOKEN", "tok")
     _fake_httpx(monkeypatch, post=MagicMock())
-    from maverick.tools.gmail_tool import gmail_tool
+    from lightwork.tools.gmail_tool import gmail_tool
     out = gmail_tool().fn({
         "op": "send", "to": "a@x", "subject": "hi", "body": "yo",
     })
@@ -416,7 +416,7 @@ def test_gmail_send_confirmed(monkeypatch):
     monkeypatch.setenv("GMAIL_ACCESS_TOKEN", "tok")
     _fake_httpx(monkeypatch,
                 post=MagicMock(return_value=_resp(200, {"id": "m1"})))
-    from maverick.tools.gmail_tool import gmail_tool
+    from lightwork.tools.gmail_tool import gmail_tool
     out = gmail_tool().fn({
         "op": "send", "to": "a@x", "subject": "hi", "body": "yo",
         "confirm": True,
@@ -430,7 +430,7 @@ def test_gmail_extract_plain_malformed_base64_never_raises():
     # `+ "==="`). It must reject cleanly (return "") instead.
     import base64
 
-    from maverick.tools.gmail_tool import _decode_b64url, _extract_plain
+    from lightwork.tools.gmail_tool import _decode_b64url, _extract_plain
 
     bad = {"mimeType": "text/plain", "body": {"data": "AAAAA"}}  # len%4 == 1
     assert _extract_plain(bad) == ""
@@ -445,7 +445,7 @@ def test_gmail_extract_plain_malformed_base64_never_raises():
 # ---------- Scheduler ----------
 
 def test_scheduler_parse_basic():
-    from maverick.scheduler import parse_cron
+    from lightwork.scheduler import parse_cron
     minute, hour, dom, mon, dow = parse_cron("0 9 * * 1-5")
     assert minute == {0}
     assert hour == {9}
@@ -453,7 +453,7 @@ def test_scheduler_parse_basic():
 
 
 def test_scheduler_rejects_bad_field_count():
-    from maverick.scheduler import CronError, parse_cron
+    from lightwork.scheduler import CronError, parse_cron
     try:
         parse_cron("0 9 * *")
     except CronError as e:
@@ -463,21 +463,21 @@ def test_scheduler_rejects_bad_field_count():
 
 
 def test_scheduler_step_syntax():
-    from maverick.scheduler import parse_cron
+    from lightwork.scheduler import parse_cron
     minute, *_ = parse_cron("*/15 * * * *")
     assert minute == {0, 15, 30, 45}
 
 
 def test_scheduler_single_value_step_expands():
     """'5/15' means 5,20,35,50 — not just {5}."""
-    from maverick.scheduler import parse_cron
+    from lightwork.scheduler import parse_cron
     minute, *_ = parse_cron("5/15 * * * *")
     assert minute == {5, 20, 35, 50}
 
 
 def test_scheduler_sunday_as_7_accepted():
     """'7' and ranges containing 7 are Sunday, folded to 0 — not rejected."""
-    from maverick.scheduler import parse_cron
+    from lightwork.scheduler import parse_cron
     *_, dow = parse_cron("0 9 * * 7")
     assert dow == {0}
     *_, dow2 = parse_cron("0 9 * * 5-7")
@@ -487,7 +487,7 @@ def test_scheduler_sunday_as_7_accepted():
 def test_scheduler_next_run_daily_9am_utc():
     import datetime as _dt
 
-    from maverick.scheduler import next_run
+    from lightwork.scheduler import next_run
     # Monday 2026-06-01 08:00 UTC -> next "0 9 * * *" is same day 09:00 UTC.
     base = _dt.datetime(2026, 6, 1, 8, 0, tzinfo=_dt.timezone.utc).timestamp()
     ts = next_run("0 9 * * *", after=base)
@@ -499,7 +499,7 @@ def test_scheduler_next_run_daily_9am_utc():
 def test_scheduler_next_run_weekday_only_utc():
     import datetime as _dt
 
-    from maverick.scheduler import next_run
+    from lightwork.scheduler import next_run
     # Friday 2026-06-05 10:00 UTC, "0 9 * * 1-5" -> Monday 2026-06-08 09:00.
     base = _dt.datetime(2026, 6, 5, 10, 0, tzinfo=_dt.timezone.utc).timestamp()
     ts = next_run("0 9 * * 1-5", after=base)
@@ -512,7 +512,7 @@ def test_scheduler_next_run_is_utc():
     """Fields match UTC regardless of host TZ — '0 0 * * *' is 00:00 UTC."""
     import datetime as _dt
 
-    from maverick.scheduler import next_run
+    from lightwork.scheduler import next_run
     base = _dt.datetime(2026, 6, 1, 12, 0, tzinfo=_dt.timezone.utc).timestamp()
     ts = next_run("0 0 * * *", after=base)
     got = _dt.datetime.fromtimestamp(ts, tz=_dt.timezone.utc)
@@ -523,8 +523,8 @@ def test_scheduler_next_run_is_utc():
 def test_scheduler_schedule_cron_enqueues(tmp_path):
     import datetime as _dt
 
-    from maverick.job_queue import JobQueue
-    from maverick.scheduler import schedule_cron
+    from lightwork.job_queue import JobQueue
+    from lightwork.scheduler import schedule_cron
     q = JobQueue(db_path=tmp_path / "jobs.db")
     base = _dt.datetime(2026, 6, 1, 8, 0, 0).timestamp()
     job_id, run_at = schedule_cron(q, "0 9 * * *", "run_goal",
@@ -543,8 +543,8 @@ def test_scheduler_schedule_cron_enqueues(tmp_path):
 # ---------- registration smoke ----------
 
 def test_new_tools_register(tmp_path):
-    from maverick.sandbox.local import LocalBackend
-    from maverick.tools import base_registry
+    from lightwork.sandbox.local import LocalBackend
+    from lightwork.tools import base_registry
 
     class _W:
         def open_questions(self, gid):

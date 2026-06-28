@@ -11,19 +11,19 @@ from fastapi.testclient import TestClient
 
 
 def _client():
-    from maverick_dashboard.app import app
+    from lightwork_dashboard.app import app
     return TestClient(app)
 
 
 def _prep(monkeypatch, tmp_path):
-    from maverick import world_model
+    from lightwork import world_model
     monkeypatch.setattr(world_model, "DEFAULT_DB", tmp_path / "world.db")
     monkeypatch.delenv("MAVERICK_DASHBOARD_TOKEN", raising=False)
     monkeypatch.setenv("ANTHROPIC_API_KEY", "sk-ant-x")
     monkeypatch.setenv("MAVERICK_DASHBOARD_MAX_GOALS_PER_MIN", "30")
-    from maverick import runner
+    from lightwork import runner
     monkeypatch.setattr(runner, "run_goal_in_thread", lambda *a, **kw: None)
-    from maverick_dashboard import app as dash_app
+    from lightwork_dashboard import app as dash_app
     dash_app._world_cache.clear()
     with dash_app._goal_rl_lock:
         dash_app._goal_times.clear()
@@ -41,7 +41,7 @@ def test_api_create_goal_rejects_empty_title(monkeypatch, tmp_path, title):
 
 def test_api_answer_rejects_empty_answer(monkeypatch, tmp_path):
     _prep(monkeypatch, tmp_path)
-    from maverick import world_model
+    from lightwork import world_model
     gid = world_model.WorldModel(tmp_path / "world.db").create_goal("g", "d")
     r = _client().post(
         f"/api/v1/goals/{gid}/answer",
@@ -53,7 +53,7 @@ def test_api_answer_rejects_empty_answer(monkeypatch, tmp_path):
 
 def test_polling_fallback_stops_on_deleted_goal(monkeypatch, tmp_path):
     _prep(monkeypatch, tmp_path)
-    from maverick import world_model
+    from lightwork import world_model
     gid = world_model.WorldModel(tmp_path / "world.db").create_goal("g", "d")
     r = _client().get(f"/chat/goal/{gid}")
     assert "resp.status === 404" in r.text

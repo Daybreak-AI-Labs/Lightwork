@@ -4,7 +4,7 @@ from __future__ import annotations
 import json
 
 import pytest
-from maverick.tools.capability_query import capability_query
+from lightwork.tools.capability_query import capability_query
 
 
 @pytest.fixture(autouse=True)

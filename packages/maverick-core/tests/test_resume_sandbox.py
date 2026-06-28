@@ -20,15 +20,15 @@ def test_resume_passes_sandbox_override_to_build_sandbox(tmp_path, monkeypatch):
     monkeypatch.delenv("MAVERICK_TENANT", raising=False)
 
     # A resumable goal in the same isolated world the CLI opens.
-    from maverick.workspace import Workspace
-    from maverick.world_model import WorldModel
+    from lightwork.workspace import Workspace
+    from lightwork.world_model import WorldModel
     w = WorldModel(Workspace.current().db_path)
     gid = w.create_goal("resumable", "")
     w.set_goal_status(gid, "blocked")
     w.close()
 
     captured: dict = {}
-    import maverick.cli as cli_mod
+    import lightwork.cli as cli_mod
 
     def fake_kernel():
         ns = types.SimpleNamespace()
@@ -59,15 +59,15 @@ def test_resume_without_sandbox_flag_uses_config_default(tmp_path, monkeypatch):
     monkeypatch.delenv("MAVERICK_CONFIG", raising=False)
     monkeypatch.delenv("MAVERICK_TENANT", raising=False)
 
-    from maverick.workspace import Workspace
-    from maverick.world_model import WorldModel
+    from lightwork.workspace import Workspace
+    from lightwork.world_model import WorldModel
     w = WorldModel(Workspace.current().db_path)
     gid = w.create_goal("resumable", "")
     w.set_goal_status(gid, "blocked")
     w.close()
 
     captured: dict = {}
-    import maverick.cli as cli_mod
+    import lightwork.cli as cli_mod
 
     def fake_kernel():
         ns = types.SimpleNamespace()

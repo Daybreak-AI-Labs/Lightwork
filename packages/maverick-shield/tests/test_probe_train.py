@@ -10,13 +10,13 @@ from __future__ import annotations
 
 import json
 
-from maverick_shield.cascade import cheap_probe
-from maverick_shield.probe_model import (
+from lightwork_shield.cascade import cheap_probe
+from lightwork_shield.probe_model import (
     LinearProbeModel,
     load_probe_model,
     probe_features,
 )
-from maverick_shield.probe_train import (
+from lightwork_shield.probe_train import (
     TrainConfig,
     featurize,
     select_threshold,
@@ -132,7 +132,7 @@ def test_in_repo_corpus_produces_loadable_artifact(tmp_path):
     # pipeline must still produce a valid, loadable artifact end-to-end.
     from pathlib import Path
     corpus = (Path(__file__).resolve().parents[1]
-              / "maverick_shield" / "redteam_corpus.jsonl")
+              / "lightwork_shield" / "redteam_corpus.jsonl")
     out = tmp_path / "m.json"
     train_and_export(corpus, out, TrainConfig(ngram_buckets=64, epochs=20))
     assert load_probe_model(out) is not None

@@ -16,7 +16,7 @@ capability.py:capability_enforced). The deferred_tools knob was missing too.
 """
 from __future__ import annotations
 
-from maverick.config_lint import lint_config
+from lightwork.config_lint import lint_config
 
 
 def _unknown(findings, section):

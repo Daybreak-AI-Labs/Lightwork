@@ -2,9 +2,9 @@
 into another, validating each item on the way in."""
 from __future__ import annotations
 
-from maverick.domain import available_domains
-from maverick.overrides_bundle import export_overrides, load_overrides
-from maverick.role_edit import role_addendum, write_role_override
+from lightwork.domain import available_domains
+from lightwork.overrides_bundle import export_overrides, load_overrides
+from lightwork.role_edit import role_addendum, write_role_override
 
 VALID_PACK = (
     'name = "client_fin"\n'

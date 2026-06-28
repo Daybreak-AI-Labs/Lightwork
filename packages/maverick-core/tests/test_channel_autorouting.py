@@ -1,7 +1,7 @@
 """Channel auto-routing: rule matching, passthrough default, classifier, explain."""
 from __future__ import annotations
 
-from maverick.channel_autorouting import (
+from lightwork.channel_autorouting import (
     MessageSignals,
     RouteRule,
     explain,

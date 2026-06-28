@@ -45,35 +45,35 @@ def _init_repo(tmp_path: Path, files: dict[str, str]) -> Path:
 class TestMarkerVariations:
     def test_5_char_markers_minimum(self):
         """Exactly 5 markers should match (the regex minimum)."""
-        from maverick.edit_format import parse_blocks
+        from lightwork.edit_format import parse_blocks
         text = "foo.py\n<<<<< SEARCH\nold\n=====\nnew\n>>>>> REPLACE\n"
         blocks = parse_blocks(text)
         assert len(blocks) == 1
 
     def test_6_char_markers(self):
         """Model emits 6-char markers (between 5 minimum and 7 standard)."""
-        from maverick.edit_format import parse_blocks
+        from lightwork.edit_format import parse_blocks
         text = "foo.py\n<<<<<< SEARCH\nold\n======\nnew\n>>>>>> REPLACE\n"
         blocks = parse_blocks(text)
         assert len(blocks) == 1
 
     def test_excessive_markers(self):
         """Models sometimes over-emphasize with 10+ markers."""
-        from maverick.edit_format import parse_blocks
+        from lightwork.edit_format import parse_blocks
         text = "foo.py\n<<<<<<<<<<<< SEARCH\nold\n============\nnew\n>>>>>>>>>>>> REPLACE\n"
         blocks = parse_blocks(text)
         assert len(blocks) == 1
 
     def test_4_char_markers_rejected(self):
         """4-char markers are below the regex minimum; should NOT parse."""
-        from maverick.edit_format import parse_blocks
+        from lightwork.edit_format import parse_blocks
         text = "foo.py\n<<<< SEARCH\nold\n====\nnew\n>>>> REPLACE\n"
         blocks = parse_blocks(text)
         assert blocks == []
 
     def test_mixed_marker_widths(self):
         """Opening 7-char, divider 5-char, closing 9-char: still parses."""
-        from maverick.edit_format import parse_blocks
+        from lightwork.edit_format import parse_blocks
         text = "foo.py\n<<<<<<< SEARCH\nold\n=====\nnew\n>>>>>>>>> REPLACE\n"
         blocks = parse_blocks(text)
         assert len(blocks) == 1
@@ -86,7 +86,7 @@ class TestSelfReferentialMarkers:
     def test_search_contains_literal_marker_text_in_words(self):
         """A SEARCH body that mentions 'SEARCH' as a word (not as a
         marker line) must still parse."""
-        from maverick.edit_format import parse_blocks
+        from lightwork.edit_format import parse_blocks
         text = (
             "foo.py\n"
             "<<<<<<< SEARCH\n"
@@ -106,7 +106,7 @@ class TestSelfReferentialMarkers:
         """An indented `<<<<<<< SEARCH` line is RARE but the regex is
         anchored to start-of-line. Documented behaviour: only lines
         that START with the marker count as marker lines."""
-        from maverick.edit_format import parse_blocks
+        from lightwork.edit_format import parse_blocks
         # Indented marker — should NOT be treated as a block boundary.
         text = (
             "foo.py\n"
@@ -131,7 +131,7 @@ class TestSelfReferentialMarkers:
 class TestEmptyBodies:
     def test_empty_replace_deletes_block(self, tmp_path):
         """Empty REPLACE section means "remove these lines"."""
-        from maverick.edit_format import (
+        from lightwork.edit_format import (
             SearchReplaceBlock,
             apply_blocks,
         )
@@ -150,7 +150,7 @@ class TestEmptyBodies:
     def test_empty_search_and_empty_replace_on_existing_file(self, tmp_path):
         """Empty SEARCH on an EXISTING file is the create-new-file
         signal -- but the file already exists. Should refuse cleanly."""
-        from maverick.edit_format import (
+        from lightwork.edit_format import (
             SearchReplaceBlock,
             apply_blocks,
         )
@@ -170,7 +170,7 @@ class TestMultipleBlocksSameFile:
     def test_two_blocks_same_file_apply_in_order(self, tmp_path):
         """Two SR blocks on the same file should each apply in order.
         This is critical for multi-hunk patches on a single file."""
-        from maverick.edit_format import (
+        from lightwork.edit_format import (
             SearchReplaceBlock,
             apply_blocks,
         )
@@ -189,7 +189,7 @@ class TestMultipleBlocksSameFile:
         """Block 2's SEARCH should match the POST-block-1 file content,
         not the original. This is how multi-edit pipelines must behave
         — block 2 can reference text introduced by block 1."""
-        from maverick.edit_format import (
+        from lightwork.edit_format import (
             SearchReplaceBlock,
             apply_blocks,
         )
@@ -211,7 +211,7 @@ class TestMultipleBlocksSameFile:
     def test_overlapping_blocks_atomic_rollback(self, tmp_path):
         """If block 1 mutates the file such that block 2's SEARCH no
         longer matches, atomic=True should roll the whole thing back."""
-        from maverick.edit_format import (
+        from lightwork.edit_format import (
             SearchReplaceBlock,
             apply_blocks,
         )
@@ -237,7 +237,7 @@ class TestMultipleBlocksSameFile:
 class TestFuzzyMatchAmbiguity:
     def test_exact_match_wins_over_fuzzy(self, tmp_path):
         """If exact match succeeds, the fuzzy ladder shouldn't fire."""
-        from maverick.edit_format import (
+        from lightwork.edit_format import (
             SearchReplaceBlock,
             apply_blocks,
         )
@@ -257,7 +257,7 @@ class TestFuzzyMatchAmbiguity:
 
     def test_fuzzy_rstrip_when_exact_fails(self, tmp_path):
         """File has trailing whitespace; model trimmed -> rstrip ladder."""
-        from maverick.edit_format import (
+        from lightwork.edit_format import (
             SearchReplaceBlock,
             apply_blocks,
         )
@@ -275,7 +275,7 @@ class TestFuzzyMatchAmbiguity:
 
 class TestPathEdgeCases:
     def test_path_with_subdirs(self, tmp_path):
-        from maverick.edit_format import (
+        from lightwork.edit_format import (
             SearchReplaceBlock,
             apply_blocks,
         )
@@ -289,7 +289,7 @@ class TestPathEdgeCases:
 
     def test_path_with_dot_prefix(self, tmp_path):
         """Path like `./foo.py` should resolve same as `foo.py`."""
-        from maverick.edit_format import (
+        from lightwork.edit_format import (
             SearchReplaceBlock,
             apply_blocks,
         )
@@ -308,7 +308,7 @@ class TestPathEdgeCases:
 class TestContentEdgeCases:
     def test_unicode_content(self, tmp_path):
         """Non-ASCII content must be preserved byte-perfectly."""
-        from maverick.edit_format import (
+        from lightwork.edit_format import (
             SearchReplaceBlock,
             apply_blocks,
         )
@@ -324,7 +324,7 @@ class TestContentEdgeCases:
 
     def test_very_long_line(self, tmp_path):
         """A single ~5kb line should apply without issue."""
-        from maverick.edit_format import (
+        from lightwork.edit_format import (
             SearchReplaceBlock,
             apply_blocks,
         )
@@ -340,7 +340,7 @@ class TestContentEdgeCases:
 
     def test_trailing_no_newline_preserved(self, tmp_path):
         """File without trailing newline -> we don't accidentally add one."""
-        from maverick.edit_format import (
+        from lightwork.edit_format import (
             SearchReplaceBlock,
             apply_blocks,
         )
@@ -364,19 +364,19 @@ class TestContentEdgeCases:
 class TestParseRobustness:
     def test_only_close_marker_returns_empty(self):
         """A floating REPLACE marker with no SEARCH should yield nothing."""
-        from maverick.edit_format import parse_blocks
+        from lightwork.edit_format import parse_blocks
         text = "foo.py\n>>>>>>> REPLACE\n"
         assert parse_blocks(text) == []
 
     def test_unfinished_block_returns_empty(self):
         """SEARCH + ======= without REPLACE marker."""
-        from maverick.edit_format import parse_blocks
+        from lightwork.edit_format import parse_blocks
         text = "foo.py\n<<<<<<< SEARCH\nold\n=======\nnew\n"
         assert parse_blocks(text) == []
 
     def test_path_with_strikethrough_or_decorations(self):
         """Model wraps path in backticks or angle brackets."""
-        from maverick.edit_format import parse_blocks
+        from lightwork.edit_format import parse_blocks
         text = (
             "`foo.py`\n"
             "<<<<<<< SEARCH\nold\n=======\nnew\n>>>>>>> REPLACE\n"
@@ -388,7 +388,7 @@ class TestParseRobustness:
 
     def test_blocks_across_huge_prose_gap(self):
         """Model writes 5kb of explanation between blocks."""
-        from maverick.edit_format import parse_blocks
+        from lightwork.edit_format import parse_blocks
         prose = "Some long explanation. " * 200
         text = (
             "a.py\n<<<<<<< SEARCH\nx\n=======\ny\n>>>>>>> REPLACE\n"
@@ -401,7 +401,7 @@ class TestParseRobustness:
 
     def test_path_with_diff_prefix_stripped(self):
         """Some models prepend `diff` to the path line."""
-        from maverick.edit_format import parse_blocks
+        from lightwork.edit_format import parse_blocks
         text = (
             "diff foo.py\n<<<<<<< SEARCH\nold\n=======\nnew\n>>>>>>> REPLACE\n"
         )

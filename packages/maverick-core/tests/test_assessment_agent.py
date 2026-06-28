@@ -1,17 +1,17 @@
 """The compliance assessor agent's tools driving a session to scored findings.
-Imports maverick.tools, so it runs in CI (full deps)."""
+Imports lightwork.tools, so it runs in CI (full deps)."""
 from __future__ import annotations
 
 import asyncio
 
 import pytest
-from maverick.assessment import AssessmentSession, list_saved
-from maverick.tools.assessment_tools import assessment_tools
+from lightwork.assessment import AssessmentSession, list_saved
+from lightwork.tools.assessment_tools import assessment_tools
 
 
 @pytest.fixture(autouse=True)
 def _isolate(monkeypatch, tmp_path):
-    from maverick import paths
+    from lightwork import paths
     monkeypatch.setattr(paths, "maverick_home", lambda: tmp_path / "home")
 
 
@@ -90,7 +90,7 @@ def test_bad_answers_are_surfaced_as_errors_not_raised():
 
 
 def test_build_assessment_agent_is_importable_with_persona():
-    from maverick.assessment import ASSESSMENT_PERSONA, build_assessment_agent
+    from lightwork.assessment import ASSESSMENT_PERSONA, build_assessment_agent
     assert callable(build_assessment_agent)
     # The persona instructs the honest-'unknown' + human-sign-off behaviour.
     assert "unknown" in ASSESSMENT_PERSONA and "never approve" in ASSESSMENT_PERSONA

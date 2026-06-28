@@ -3,7 +3,7 @@ from __future__ import annotations
 
 from random import Random
 
-from maverick.cost.router_v3 import ContextualBandit, context_key, pick
+from lightwork.cost.router_v3 import ContextualBandit, context_key, pick
 
 
 def _bandit(seed=0, epsilon=0.0, path=None):
@@ -74,7 +74,7 @@ def test_persistence_roundtrip(tmp_path):
 
 def test_pick_defers_to_fallback_when_off(monkeypatch):
     monkeypatch.delenv("MAVERICK_ROUTING_BANDIT", raising=False)
-    import maverick.config as config_mod
+    import lightwork.config as config_mod
     monkeypatch.setattr(config_mod, "load_config", dict)
     assert pick("coder", 1, ["a", "b"], fallback=lambda: "v2pick") == "v2pick"
 

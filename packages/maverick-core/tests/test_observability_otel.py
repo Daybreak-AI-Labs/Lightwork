@@ -17,7 +17,7 @@ from __future__ import annotations
 import importlib
 
 import pytest
-from maverick import observability as obs
+from lightwork import observability as obs
 
 
 @pytest.fixture(autouse=True)

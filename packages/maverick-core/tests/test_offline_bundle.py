@@ -9,13 +9,13 @@ import json
 from dataclasses import dataclass, field
 from types import SimpleNamespace
 
-from maverick.offline_bundle import (
+from lightwork.offline_bundle import (
     EVENT_FIELDS,
     GOAL_FIELDS,
     SCHEMA,
     build_bundle,
 )
-from maverick.offline_bundle import (
+from lightwork.offline_bundle import (
     build_offline_glance as build_glance,
 )
 
@@ -109,7 +109,7 @@ def test_bundle_schema_and_determinism():
     a = build_bundle(w, now=1000.0)
     b = build_bundle(w, now=1000.0)
     assert a == b  # deterministic for a fixed world + now
-    assert a["schema"] == SCHEMA == "maverick-offline/1"
+    assert a["schema"] == SCHEMA == "lightwork-offline/1"
     assert a["as_of"] == 1000.0
     assert a["glance"]["as_of"] == 1000.0
     assert set(a) == {"schema", "as_of", "glance", "goals", "recent_events"}
@@ -200,4 +200,4 @@ def test_bundle_contains_no_secrets(monkeypatch):
 
 def test_bundle_json_serialisable():
     blob = json.dumps(build_bundle(make_world(), now=1.0))
-    assert json.loads(blob)["schema"] == "maverick-offline/1"
+    assert json.loads(blob)["schema"] == "lightwork-offline/1"

@@ -2,8 +2,8 @@
 from __future__ import annotations
 
 from click.testing import CliRunner
-from maverick import catalog, mcp_client, mcp_registry
-from maverick.cli import main
+from lightwork import catalog, mcp_client, mcp_registry
+from lightwork.cli import main
 
 
 def test_browse_lists_entries(monkeypatch):

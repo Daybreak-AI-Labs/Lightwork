@@ -13,7 +13,7 @@ response as cache_read_tokens, so that path is unaffected.)
 from __future__ import annotations
 
 import pytest
-from maverick.llm import _response_call_cost
+from lightwork.llm import _response_call_cost
 
 
 class _Details:

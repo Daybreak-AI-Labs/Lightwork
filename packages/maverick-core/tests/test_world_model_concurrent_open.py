@@ -13,8 +13,8 @@ import sqlite3
 import threading
 
 import pytest
-from maverick import world_model as world_model_module
-from maverick.world_model import SCHEMA_VERSION, WorldModel
+from lightwork import world_model as world_model_module
+from lightwork.world_model import SCHEMA_VERSION, WorldModel
 
 
 def _hammer_opens(db, n: int) -> list[Exception]:

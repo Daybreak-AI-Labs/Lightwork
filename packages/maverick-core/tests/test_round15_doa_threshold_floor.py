@@ -10,7 +10,7 @@ composed (union) policy, matching the documented "lowest threshold wins" rule.
 """
 from __future__ import annotations
 
-from maverick.governance import Decision, Policy, evaluate
+from lightwork.governance import Decision, Policy, evaluate
 
 
 def test_wildcard_deny_ceiling_binds_below_higher_per_action():
@@ -25,7 +25,7 @@ def test_wildcard_deny_ceiling_binds_below_higher_per_action():
 def test_union_preserves_the_wildcard_floor():
     # A base org floor composed with a regime that sets a HIGHER per-action
     # threshold must not open a hole: the $5k floor still gates a $20k wire.
-    from maverick.finance.regimes import union_policies
+    from lightwork.finance.regimes import union_policies
 
     base = Policy(require_human_above={"*": 5_000})
     regime = Policy(require_human_above={"wire_transfer": 50_000})

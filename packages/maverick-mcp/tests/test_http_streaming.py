@@ -9,9 +9,9 @@ import pytest
 
 pytest.importorskip("fastapi")
 
-import maverick_mcp.http_transport as ht  # noqa: E402
+import lightwork_mcp.http_transport as ht  # noqa: E402
 from fastapi.testclient import TestClient  # noqa: E402
-from maverick_mcp.server import MCPServer  # noqa: E402
+from lightwork_mcp.server import MCPServer  # noqa: E402
 
 
 def _client(monkeypatch):
@@ -143,7 +143,7 @@ def test_dispatch_binds_caller_identity_for_fleet_ops(monkeypatch):
     # The authenticated caller identity must reach fleet_memory's ContextVar so
     # a fleet tool cannot act AS another rostered agent. Capture what the handler
     # sees mid-dispatch.
-    from maverick import fleet_memory
+    from lightwork import fleet_memory
 
     seen = {}
 

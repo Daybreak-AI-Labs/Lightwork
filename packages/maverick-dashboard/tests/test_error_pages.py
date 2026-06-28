@@ -5,13 +5,13 @@ from fastapi.testclient import TestClient
 
 
 def _client():
-    from maverick_dashboard.app import app
+    from lightwork_dashboard.app import app
     return TestClient(app)
 
 
 def test_404_html_for_browser(monkeypatch, tmp_path):
     """Browser navigation to a missing path gets the branded 404 page."""
-    from maverick import world_model
+    from lightwork import world_model
     monkeypatch.setattr(world_model, "DEFAULT_DB", tmp_path / "world.db")
     monkeypatch.delenv("MAVERICK_DASHBOARD_TOKEN", raising=False)
     client = _client()
@@ -25,7 +25,7 @@ def test_404_html_for_browser(monkeypatch, tmp_path):
 
 def test_404_json_for_api(monkeypatch, tmp_path):
     """API path keeps JSON so SDKs / curl don't get an HTML surprise."""
-    from maverick import world_model
+    from lightwork import world_model
     monkeypatch.setattr(world_model, "DEFAULT_DB", tmp_path / "world.db")
     monkeypatch.delenv("MAVERICK_DASHBOARD_TOKEN", raising=False)
     client = _client()
@@ -36,7 +36,7 @@ def test_404_json_for_api(monkeypatch, tmp_path):
 
 def test_unhandled_exception_renders_500(monkeypatch, tmp_path):
     """A route blowing up renders the branded 500 page for browsers."""
-    from maverick_dashboard import app as dash_app
+    from lightwork_dashboard import app as dash_app
 
     @dash_app.app.get("/__boom")
     async def boom():
@@ -59,8 +59,8 @@ def test_validation_error_page_does_not_echo_detail(monkeypatch, tmp_path):
     detail. validation_exception_handler renders 500.html, so the page
     must not template {{ detail }} — otherwise crafted input could leak
     into the HTML response (reflected-XSS / info-leak surface)."""
-    from maverick import world_model
-    from maverick_dashboard import app as dash_app
+    from lightwork import world_model
+    from lightwork_dashboard import app as dash_app
 
     @dash_app.app.get("/__needs_param")
     async def needs_param(marker_xyzzy: int):  # required query param

@@ -9,8 +9,8 @@ import os
 import stat
 
 import pytest
-from maverick import continuous_benchmark as cb
-from maverick.benchmark_reproducibility import (
+from lightwork import continuous_benchmark as cb
+from lightwork.benchmark_reproducibility import (
     SCHEMA,
     audit_report,
     build_manifest,

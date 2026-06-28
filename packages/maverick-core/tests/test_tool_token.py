@@ -9,8 +9,8 @@ unsigned tokens, and the off-by-default enable gate.
 import time
 
 import pytest
-from maverick.capability import Capability
-from maverick.tool_token import (
+from lightwork.capability import Capability
+from lightwork.tool_token import (
     ToolToken,
     _ReplayCache,
     mint_tool_token,
@@ -22,7 +22,7 @@ from maverick.tool_token import (
 def _crypto_keypair():
     """A real Ed25519 keypair, or skip when cryptography is unavailable/broken."""
     try:
-        from maverick.audit.signing import _generate_keypair, _have_crypto
+        from lightwork.audit.signing import _generate_keypair, _have_crypto
         if not _have_crypto():
             pytest.skip("cryptography not installed")
         priv, pub, _ = _generate_keypair()
@@ -143,7 +143,7 @@ def test_replay_cache_evicts_expired():
 def test_unsigned_token_requires_explicit_unsigned_mode(monkeypatch):
     # Force the no-key path (as if cryptography were absent) so the token is
     # genuinely unsigned -- otherwise mint falls back to the deployment key.
-    monkeypatch.setattr("maverick.tool_token._deployment_keypair", lambda: None)
+    monkeypatch.setattr("lightwork.tool_token._deployment_keypair", lambda: None)
     cap = Capability(principal="p")
     token = mint_tool_token(cap, "read_file", private_key_hex=None)
     assert token.signature is None
@@ -174,13 +174,13 @@ def test_forged_unsigned_token_rejected_by_default():
 # --- enable gate -----------------------------------------------------------
 
 def test_disabled_by_default(monkeypatch):
-    monkeypatch.setattr("maverick.config.load_config", dict)
+    monkeypatch.setattr("lightwork.config.load_config", dict)
     monkeypatch.delenv("MAVERICK_TOOL_TOKENS", raising=False)
     assert tool_tokens_enabled() is False
 
 
 def test_enabled_via_env(monkeypatch):
-    monkeypatch.setattr("maverick.config.load_config", dict)
+    monkeypatch.setattr("lightwork.config.load_config", dict)
     monkeypatch.setenv("MAVERICK_TOOL_TOKENS", "1")
     assert tool_tokens_enabled() is True
 
@@ -188,7 +188,7 @@ def test_enabled_via_env(monkeypatch):
 def test_enabled_via_config(monkeypatch):
     monkeypatch.delenv("MAVERICK_TOOL_TOKENS", raising=False)
     monkeypatch.setattr(
-        "maverick.config.load_config",
+        "lightwork.config.load_config",
         lambda: {"capabilities": {"per_call_tokens": True}},
     )
     assert tool_tokens_enabled() is True

@@ -4,7 +4,7 @@ from __future__ import annotations
 import json
 
 import pytest
-from maverick.tools import spreadsheet as ss
+from lightwork.tools import spreadsheet as ss
 
 # ---- CSV (stdlib, always available) -----------------------------------------
 
@@ -97,10 +97,10 @@ def test_xlsx_graceful_without_openpyxl(tmp_path, monkeypatch):
     # rather than a raw ImportError.
     def _boom():
         raise RuntimeError("openpyxl not installed; .xlsx support needs it. "
-                           "Run: pip install 'maverick-agent[spreadsheet]'")
+                           "Run: pip install 'lightwork-agent[spreadsheet]'")
     monkeypatch.setattr(ss, "_openpyxl", _boom)
     out = ss._run({"op": "write", "path": str(tmp_path / "x.xlsx"), "rows": [["a"]]})
-    assert out.startswith("ERROR") and "maverick-agent[spreadsheet]" in out
+    assert out.startswith("ERROR") and "lightwork-agent[spreadsheet]" in out
 
 
 def test_factory_shape():

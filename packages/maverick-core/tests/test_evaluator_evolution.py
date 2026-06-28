@@ -1,4 +1,4 @@
-"""Tests for anchor-gated evaluator co-evolution (maverick.evaluator_evolution).
+"""Tests for anchor-gated evaluator co-evolution (lightwork.evaluator_evolution).
 
 Deterministic and offline: no LLM, no network. We exercise the epsilon-best-belief
 math, the anchor + its immutability governance, selective erasure, the
@@ -8,8 +8,8 @@ self-improvement governance spine.
 from __future__ import annotations
 
 import pytest
-from maverick import evaluator_evolution as ee
-from maverick.self_improvement import SelfImprovementController
+from lightwork import evaluator_evolution as ee
+from lightwork.self_improvement import SelfImprovementController
 
 # -- epsilon-best-belief --------------------------------------------------------
 

@@ -30,8 +30,8 @@ def _resp(status, body):
 # --------------------------- registration smoke ---------------------------
 
 def test_connectors_register(tmp_path):
-    from maverick.sandbox.local import LocalBackend
-    from maverick.tools import base_registry
+    from lightwork.sandbox.local import LocalBackend
+    from lightwork.tools import base_registry
 
     class _W:
         def open_questions(self, gid):
@@ -48,7 +48,7 @@ def test_servicenow_requires_config(monkeypatch):
     monkeypatch.delenv("SERVICENOW_INSTANCE_URL", raising=False)
     monkeypatch.delenv("SERVICENOW_TOKEN", raising=False)
     _fake_httpx(monkeypatch, request=MagicMock())
-    from maverick.tools.servicenow_tool import servicenow_tool
+    from lightwork.tools.servicenow_tool import servicenow_tool
     out = servicenow_tool().fn({"op": "query", "table": "incident"})
     assert "ERROR" in out and "SERVICENOW" in out
 
@@ -58,7 +58,7 @@ def test_servicenow_query_hits_table_api(monkeypatch):
     monkeypatch.setenv("SERVICENOW_TOKEN", "t")
     req = MagicMock(return_value=_resp(200, {"result": [{"number": "INC001"}]}))
     _fake_httpx(monkeypatch, request=req)
-    from maverick.tools.servicenow_tool import servicenow_tool
+    from lightwork.tools.servicenow_tool import servicenow_tool
     out = servicenow_tool().fn({"op": "query", "table": "incident", "query": "active=true"})
     assert "INC001" in out
     assert req.call_args.args[0] == "GET"
@@ -70,7 +70,7 @@ def test_servicenow_create_needs_confirm(monkeypatch):
     monkeypatch.setenv("SERVICENOW_TOKEN", "t")
     req = MagicMock()
     _fake_httpx(monkeypatch, request=req)
-    from maverick.tools.servicenow_tool import servicenow_tool
+    from lightwork.tools.servicenow_tool import servicenow_tool
     out = servicenow_tool().fn({"op": "create", "table": "incident",
                                 "fields": {"short_description": "x"}})
     assert "DRY RUN" in out
@@ -83,7 +83,7 @@ def test_snowflake_requires_config(monkeypatch):
     monkeypatch.delenv("SNOWFLAKE_ACCOUNT", raising=False)
     monkeypatch.delenv("SNOWFLAKE_TOKEN", raising=False)
     _fake_httpx(monkeypatch)
-    from maverick.tools.snowflake_tool import snowflake_tool
+    from lightwork.tools.snowflake_tool import snowflake_tool
     out = snowflake_tool().fn({"op": "query", "statement": "select 1"})
     assert "ERROR" in out and "SNOWFLAKE" in out
 
@@ -96,7 +96,7 @@ def test_snowflake_select_runs(monkeypatch):
         "data": [["42"]],
     }))
     _fake_httpx(monkeypatch, post=post)
-    from maverick.tools.snowflake_tool import snowflake_tool
+    from lightwork.tools.snowflake_tool import snowflake_tool
     out = snowflake_tool().fn({"op": "query", "statement": "SELECT 42 AS N"})
     assert "42" in out and "N" in out
     assert post.call_args.args[0].endswith("/api/v2/statements")
@@ -107,7 +107,7 @@ def test_snowflake_write_needs_confirm(monkeypatch):
     monkeypatch.setenv("SNOWFLAKE_TOKEN", "t")
     post = MagicMock()
     _fake_httpx(monkeypatch, post=post)
-    from maverick.tools.snowflake_tool import snowflake_tool
+    from lightwork.tools.snowflake_tool import snowflake_tool
     out = snowflake_tool().fn({"op": "query", "statement": "INSERT INTO t VALUES (1)"})
     assert "DRY RUN" in out
     post.assert_not_called()
@@ -119,7 +119,7 @@ def test_databricks_requires_config(monkeypatch):
     monkeypatch.delenv("DATABRICKS_HOST", raising=False)
     monkeypatch.delenv("DATABRICKS_TOKEN", raising=False)
     _fake_httpx(monkeypatch, request=MagicMock())
-    from maverick.tools.databricks_tool import databricks_tool
+    from lightwork.tools.databricks_tool import databricks_tool
     out = databricks_tool().fn({"op": "jobs_list"})
     assert "ERROR" in out and "DATABRICKS" in out
 
@@ -129,7 +129,7 @@ def test_databricks_jobs_list(monkeypatch):
     monkeypatch.setenv("DATABRICKS_TOKEN", "t")
     req = MagicMock(return_value=_resp(200, {"jobs": [{"job_id": 7, "settings": {"name": "etl"}}]}))
     _fake_httpx(monkeypatch, request=req)
-    from maverick.tools.databricks_tool import databricks_tool
+    from lightwork.tools.databricks_tool import databricks_tool
     out = databricks_tool().fn({"op": "jobs_list"})
     assert "7" in out and "etl" in out
 
@@ -139,7 +139,7 @@ def test_databricks_job_run_needs_confirm(monkeypatch):
     monkeypatch.setenv("DATABRICKS_TOKEN", "t")
     req = MagicMock()
     _fake_httpx(monkeypatch, request=req)
-    from maverick.tools.databricks_tool import databricks_tool
+    from lightwork.tools.databricks_tool import databricks_tool
     out = databricks_tool().fn({"op": "job_run", "job_id": 7})
     assert "DRY RUN" in out
     req.assert_not_called()
@@ -151,7 +151,7 @@ def test_onetrust_requires_config(monkeypatch):
     monkeypatch.delenv("ONETRUST_HOSTNAME", raising=False)
     monkeypatch.delenv("ONETRUST_TOKEN", raising=False)
     _fake_httpx(monkeypatch)
-    from maverick.tools.onetrust_tool import onetrust_tool
+    from lightwork.tools.onetrust_tool import onetrust_tool
     out = onetrust_tool().fn({"op": "get", "path": "/api/assessment/v2/assessments"})
     assert "ERROR" in out and "ONETRUST" in out
 
@@ -161,7 +161,7 @@ def test_onetrust_get(monkeypatch):
     monkeypatch.setenv("ONETRUST_TOKEN", "t")
     get = MagicMock(return_value=_resp(200, {"content": [{"name": "DPIA"}]}))
     _fake_httpx(monkeypatch, get=get)
-    from maverick.tools.onetrust_tool import onetrust_tool
+    from lightwork.tools.onetrust_tool import onetrust_tool
     out = onetrust_tool().fn({"op": "get", "path": "/api/assessment/v2/assessments"})
     assert "DPIA" in out
     assert get.call_args.args[0].endswith("/api/assessment/v2/assessments")
@@ -172,7 +172,7 @@ def test_onetrust_post_needs_confirm(monkeypatch):
     monkeypatch.setenv("ONETRUST_TOKEN", "t")
     post = MagicMock()
     _fake_httpx(monkeypatch, post=post)
-    from maverick.tools.onetrust_tool import onetrust_tool
+    from lightwork.tools.onetrust_tool import onetrust_tool
     out = onetrust_tool().fn({"op": "post", "path": "/api/x", "body": {"a": 1}})
     assert "DRY RUN" in out
     post.assert_not_called()
@@ -184,7 +184,7 @@ def test_vertex_requires_config(monkeypatch):
     monkeypatch.delenv("VERTEX_ACCESS_TOKEN", raising=False)
     monkeypatch.delenv("VERTEX_PROJECT", raising=False)
     _fake_httpx(monkeypatch)
-    from maverick.tools.vertex_tool import vertex_tool
+    from lightwork.tools.vertex_tool import vertex_tool
     out = vertex_tool().fn({"op": "generate", "prompt": "hi"})
     assert "ERROR" in out and "VERTEX" in out
 
@@ -196,7 +196,7 @@ def test_vertex_generate(monkeypatch):
         "candidates": [{"content": {"parts": [{"text": "hello from vertex"}]}}]
     }))
     _fake_httpx(monkeypatch, post=post)
-    from maverick.tools.vertex_tool import vertex_tool
+    from lightwork.tools.vertex_tool import vertex_tool
     out = vertex_tool().fn({"op": "generate", "model": "gemini-2.5-pro", "prompt": "hi"})
     assert out == "hello from vertex"
     assert ":generateContent" in post.call_args.args[0]

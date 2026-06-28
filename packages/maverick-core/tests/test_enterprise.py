@@ -2,14 +2,14 @@
 from __future__ import annotations
 
 import pytest
-from maverick import capability
-from maverick.enterprise import (
+from lightwork import capability
+from lightwork.enterprise import (
     EgressBlocked,
     assert_provider_allowed,
     enterprise_enabled,
     is_local_provider,
 )
-from maverick.safety import consent
+from lightwork.safety import consent
 
 
 @pytest.fixture(autouse=True)
@@ -19,7 +19,7 @@ def _clean_env(monkeypatch):
     monkeypatch.delenv("MAVERICK_PROFILE", raising=False)
     monkeypatch.delenv("MAVERICK_CONSENT_MODE", raising=False)
     monkeypatch.delenv("MAVERICK_ENFORCE_CAPABILITIES", raising=False)
-    monkeypatch.setattr("maverick.config.load_config", lambda *a, **k: {})
+    monkeypatch.setattr("lightwork.config.load_config", lambda *a, **k: {})
 
 
 def test_off_by_default():
@@ -36,7 +36,7 @@ def test_env_enables_and_disables(monkeypatch):
 
 def test_config_enables(monkeypatch):
     monkeypatch.setattr(
-        "maverick.config.load_config", lambda *a, **k: {"enterprise": {"mode": True}}
+        "lightwork.config.load_config", lambda *a, **k: {"enterprise": {"mode": True}}
     )
     assert enterprise_enabled() is True
 
@@ -69,7 +69,7 @@ def test_egress_guard_blocks_cloud_when_on(monkeypatch):
 def test_extra_local_providers_allow_listed(monkeypatch):
     monkeypatch.setenv("MAVERICK_ENTERPRISE", "1")
     monkeypatch.setattr(
-        "maverick.config.load_config",
+        "lightwork.config.load_config",
         lambda *a, **k: {"enterprise": {"local_providers": ["myvllm"]}},
     )
     assert is_local_provider("myvllm")
@@ -82,7 +82,7 @@ def test_extra_local_providers_allow_listed(monkeypatch):
 def test_extra_local_providers_cannot_allow_list_cloud_names(monkeypatch):
     monkeypatch.setenv("MAVERICK_ENTERPRISE", "1")
     monkeypatch.setattr(
-        "maverick.config.load_config",
+        "lightwork.config.load_config",
         lambda *a, **k: {"enterprise": {"local_providers": ["openai", "claude"]}},
     )
     assert not is_local_provider("openai")
@@ -95,7 +95,7 @@ def test_extra_local_providers_cannot_allow_list_cloud_names(monkeypatch):
 def test_openai_compatible_requires_local_endpoint_when_allow_listed(monkeypatch):
     monkeypatch.setenv("MAVERICK_ENTERPRISE", "1")
     monkeypatch.setattr(
-        "maverick.config.load_config",
+        "lightwork.config.load_config",
         lambda *a, **k: {
             "enterprise": {"local_providers": ["custom"]},
             "providers": {
@@ -112,7 +112,7 @@ def test_openai_compatible_requires_local_endpoint_when_allow_listed(monkeypatch
 def test_openai_compatible_local_endpoint_can_be_allow_listed(monkeypatch):
     monkeypatch.setenv("MAVERICK_ENTERPRISE", "1")
     monkeypatch.setattr(
-        "maverick.config.load_config",
+        "lightwork.config.load_config",
         lambda *a, **k: {
             "enterprise": {"local_providers": ["custom"]},
             "providers": {
@@ -154,7 +154,7 @@ def test_local_provider_redirected_off_box_via_env_is_blocked(monkeypatch):
 def test_local_provider_redirected_off_box_via_config_is_blocked(monkeypatch):
     monkeypatch.setenv("MAVERICK_ENTERPRISE", "1")
     monkeypatch.setattr(
-        "maverick.config.load_config",
+        "lightwork.config.load_config",
         lambda *a, **k: {"providers": {"ollama": {"base_url": "https://1.2.3.4/v1"}}},
     )
     assert not is_local_provider("ollama")
@@ -166,7 +166,7 @@ def test_vllm_env_public_endpoint_cannot_be_masked_by_local_config(monkeypatch):
     monkeypatch.setenv("MAVERICK_ENTERPRISE", "1")
     monkeypatch.setenv("VLLM_BASE_URL", "https://exfil.attacker.example.com/v1")
     monkeypatch.setattr(
-        "maverick.config.load_config",
+        "lightwork.config.load_config",
         lambda *a, **k: {
             "providers": {"vllm": {"base_url": "http://localhost:8000/v1"}}
         },
@@ -180,7 +180,7 @@ def test_tgi_env_public_endpoint_cannot_be_masked_by_local_config(monkeypatch):
     monkeypatch.setenv("MAVERICK_ENTERPRISE", "1")
     monkeypatch.setenv("TGI_BASE_URL", "https://exfil.attacker.example.com/v1")
     monkeypatch.setattr(
-        "maverick.config.load_config",
+        "lightwork.config.load_config",
         lambda *a, **k: {
             "providers": {"tgi": {"base_url": "http://localhost:8080/v1"}}
         },
@@ -194,7 +194,7 @@ def test_vllm_config_public_endpoint_cannot_be_masked_by_local_env(monkeypatch):
     monkeypatch.setenv("MAVERICK_ENTERPRISE", "1")
     monkeypatch.setenv("VLLM_BASE_URL", "http://127.0.0.1:8000/v1")
     monkeypatch.setattr(
-        "maverick.config.load_config",
+        "lightwork.config.load_config",
         lambda *a, **k: {
             "providers": {"vllm": {"base_url": "https://exfil.attacker.example/v1"}}
         },
@@ -208,7 +208,7 @@ def test_tgi_config_public_endpoint_cannot_be_masked_by_local_env(monkeypatch):
     monkeypatch.setenv("MAVERICK_ENTERPRISE", "1")
     monkeypatch.setenv("TGI_BASE_URL", "http://127.0.0.1:8080/v1")
     monkeypatch.setattr(
-        "maverick.config.load_config",
+        "lightwork.config.load_config",
         lambda *a, **k: {
             "providers": {"tgi": {"base_url": "https://exfil.attacker.example/v1"}}
         },
@@ -229,7 +229,7 @@ def test_local_provider_with_local_or_default_endpoint_still_passes(monkeypatch)
 def test_allow_listed_custom_provider_pointed_off_box_is_blocked(monkeypatch):
     monkeypatch.setenv("MAVERICK_ENTERPRISE", "1")
     monkeypatch.setattr(
-        "maverick.config.load_config",
+        "lightwork.config.load_config",
         lambda *a, **k: {
             "enterprise": {"local_providers": ["myvllm"]},
             "providers": {"myvllm": {"base_url": "https://gateway.public.example/v1"}},

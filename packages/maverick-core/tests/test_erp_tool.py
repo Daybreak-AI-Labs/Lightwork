@@ -1,9 +1,9 @@
 """ERP read connector: configured, read-only, and SSRF-safe on the model path."""
 from __future__ import annotations
 
-import maverick.config as _config_mod
-from maverick.safety.tool_risk import tool_risk
-from maverick.tools.erp_tool import erp_tool
+import lightwork.config as _config_mod
+from lightwork.safety.tool_risk import tool_risk
+from lightwork.tools.erp_tool import erp_tool
 
 
 class _Resp:

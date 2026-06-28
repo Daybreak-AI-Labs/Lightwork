@@ -1,7 +1,7 @@
 """tool_call_inspector: per-tool aggregation of a tool-call log."""
 from __future__ import annotations
 
-from maverick.tools.tool_call_inspector import tool_call_inspector
+from lightwork.tools.tool_call_inspector import tool_call_inspector
 
 
 def _run(calls, op="summarize"):

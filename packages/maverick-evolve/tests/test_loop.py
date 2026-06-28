@@ -3,9 +3,9 @@ from __future__ import annotations
 import random
 
 import pytest
-from maverick_evolve import EvalCase
-from maverick_evolve.archive import Archive, Candidate
-from maverick_evolve.loop import evolve_continuous
+from lightwork_evolve import EvalCase
+from lightwork_evolve.archive import Archive, Candidate
+from lightwork_evolve.loop import evolve_continuous
 
 
 # ---- archive persistence (Stage 2: accumulate across rounds/runs) ----
@@ -52,7 +52,7 @@ def _graded_factory():
 
 @pytest.mark.asyncio
 async def test_continuous_accumulates_and_climbs(tmp_path, monkeypatch):
-    monkeypatch.setattr("maverick_evolve.loop.calibration_frozen", lambda: False)
+    monkeypatch.setattr("lightwork_evolve.loop.calibration_frozen", lambda: False)
     space = {"n": ("int", 1, 16)}
     archive_path = tmp_path / "arch.json"
     best, history = await evolve_continuous(
@@ -71,7 +71,7 @@ async def test_continuous_accumulates_and_climbs(tmp_path, monkeypatch):
 
 @pytest.mark.asyncio
 async def test_continuous_resumes_from_saved_archive(tmp_path, monkeypatch):
-    monkeypatch.setattr("maverick_evolve.loop.calibration_frozen", lambda: False)
+    monkeypatch.setattr("lightwork_evolve.loop.calibration_frozen", lambda: False)
     space = {"n": ("int", 1, 16)}
     p = tmp_path / "arch.json"
     # seed a prior run's archive with a strong candidate
@@ -88,7 +88,7 @@ async def test_continuous_resumes_from_saved_archive(tmp_path, monkeypatch):
 
 @pytest.mark.asyncio
 async def test_continuous_skips_rounds_when_frozen(monkeypatch):
-    monkeypatch.setattr("maverick_evolve.loop.calibration_frozen", lambda: True)
+    monkeypatch.setattr("lightwork_evolve.loop.calibration_frozen", lambda: True)
     best, history = await evolve_continuous(
         {"n": 4}, _graded_cases(), _graded_factory(),
         rounds=3, generations_per_round=10, rng=random.Random(0),
@@ -104,7 +104,7 @@ async def test_continuous_skips_rounds_when_frozen(monkeypatch):
 
 # ---- demo CLI ----
 def test_cli_demo_runs(capsys):
-    from maverick_evolve.cli import main
+    from lightwork_evolve.cli import main
     rc = main(["--demo", "--rounds", "2", "--generations", "25"])
     out = capsys.readouterr().out
     assert rc == 0
@@ -112,7 +112,7 @@ def test_cli_demo_runs(capsys):
 
 
 def test_cli_no_args_prints_help(capsys):
-    from maverick_evolve.cli import main
+    from lightwork_evolve.cli import main
     rc = main([])
     assert rc == 0
-    assert "maverick-evolve" in capsys.readouterr().out
+    assert "lightwork-evolve" in capsys.readouterr().out

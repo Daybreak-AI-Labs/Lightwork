@@ -3,7 +3,7 @@ from __future__ import annotations
 
 import json
 
-from maverick.tools.marketplace_ratings import marketplace_ratings
+from lightwork.tools.marketplace_ratings import marketplace_ratings
 
 
 def _run(**kw):

@@ -4,7 +4,7 @@ runner so these never touch an LLM or sandbox."""
 import asyncio
 
 import pytest
-from maverick.a2a_tasks import (
+from lightwork.a2a_tasks import (
     _AUTH_REQUIRED,
     TaskEngine,
     _RpcError,
@@ -273,8 +273,8 @@ def test_push_allows_public_host(monkeypatch):
 
 def test_http_endpoint_send_and_card(monkeypatch):
     pytest.importorskip("fastapi")
-    import maverick.a2a as a2a
-    import maverick.a2a_tasks as a2at
+    import lightwork.a2a as a2a
+    import lightwork.a2a_tasks as a2at
     from fastapi import FastAPI
     from fastapi.testclient import TestClient
 
@@ -308,8 +308,8 @@ def test_http_endpoint_send_and_card(monkeypatch):
 
 def test_http_stream_emits_sse(monkeypatch):
     pytest.importorskip("fastapi")
-    import maverick.a2a as a2a
-    import maverick.a2a_tasks as a2at
+    import lightwork.a2a as a2a
+    import lightwork.a2a_tasks as a2at
     from fastapi import FastAPI
     from fastapi.testclient import TestClient
 
@@ -336,8 +336,8 @@ def test_a2a_rejects_cross_origin_browser_request(monkeypatch):
     the same gate /mcp has. This is the ONLY browser defense when the bearer is
     waived via MAVERICK_A2A_ALLOW_UNAUTHENTICATED."""
     pytest.importorskip("fastapi")
-    import maverick.a2a as a2a
-    import maverick.a2a_tasks as a2at
+    import lightwork.a2a as a2a
+    import lightwork.a2a_tasks as a2at
     from fastapi import FastAPI
     from fastapi.testclient import TestClient
 

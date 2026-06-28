@@ -4,7 +4,7 @@ from __future__ import annotations
 from types import SimpleNamespace
 from urllib.parse import unquote
 
-from maverick.issue_report import DEFAULT_REPO, build_issue_url, build_report
+from lightwork.issue_report import DEFAULT_REPO, build_issue_url, build_report
 
 # A realistic-looking Anthropic key (matches the secret detector pattern).
 _FAKE_KEY = "sk-ant-api03-AbCdEf1234567890abcdefghijklmno_PQRST"

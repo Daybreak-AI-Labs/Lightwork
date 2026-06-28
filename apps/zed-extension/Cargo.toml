@@ -1,5 +1,5 @@
 [package]
-name = "maverick-zed-extension"
+name = "lightwork-zed-extension"
 version = "0.1.6"
 edition = "2021"
 description = "Zed editor extension for the Maverick agent runtime"

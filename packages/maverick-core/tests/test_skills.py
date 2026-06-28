@@ -5,7 +5,7 @@ from pathlib import Path
 from unittest.mock import patch
 
 import pytest
-from maverick.skills import (
+from lightwork.skills import (
     Skill,
     _safe_name,
     build_skill_md,
@@ -179,7 +179,7 @@ class TestRelevantSkills:
         # These exercise the LEXICAL scorer specifically, so force it -- the
         # result must not depend on whether fastembed happens to be installed
         # (the embedding path has its own cosine gate).
-        monkeypatch.setattr("maverick.skill.embeddings._have_fastembed", lambda: False)
+        monkeypatch.setattr("lightwork.skill.embeddings._have_fastembed", lambda: False)
 
     def _make_skill(self, name: str, triggers: list[str]) -> Skill:
         return Skill(
@@ -195,7 +195,7 @@ class TestRelevantSkills:
         assert strong in out and weak not in out
 
     def test_gate_is_configurable(self):
-        from maverick.skills import _relevant_skills_lexical
+        from lightwork.skills import _relevant_skills_lexical
         weak = self._make_skill("weak", ["the weather"])  # shares only "the"
         assert weak in _relevant_skills_lexical("the price", [weak], min_score=0.0)
         assert weak not in _relevant_skills_lexical("the price", [weak], min_score=4.0)
@@ -223,7 +223,7 @@ class TestRelevantSkills:
 class TestPurposeScopedRecall:
     @pytest.fixture(autouse=True)
     def _force_lexical(self, monkeypatch):
-        monkeypatch.setattr("maverick.skill.embeddings._have_fastembed", lambda: False)
+        monkeypatch.setattr("lightwork.skill.embeddings._have_fastembed", lambda: False)
 
     def _skill(self, purposes=()):
         return Skill(name="s", triggers=["reconcile the general ledger"],
@@ -240,13 +240,13 @@ class TestPurposeScopedRecall:
         assert relevant_skills("reconcile the general ledger now", [s]) == []
 
     def test_purpose_scoped_recalled_within_matching_purpose(self):
-        from maverick.access_policy import purpose_scope
+        from lightwork.access_policy import purpose_scope
         s = self._skill(purposes=("audit",))
         with purpose_scope("audit"):
             assert s in relevant_skills("reconcile the general ledger now", [s])
 
     def test_purpose_scoped_hidden_under_wrong_purpose(self):
-        from maverick.access_policy import purpose_scope
+        from lightwork.access_policy import purpose_scope
         s = self._skill(purposes=("audit",))
         with purpose_scope("marketing"):
             assert relevant_skills("reconcile the general ledger now", [s]) == []

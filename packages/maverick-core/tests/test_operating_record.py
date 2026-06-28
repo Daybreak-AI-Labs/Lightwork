@@ -5,8 +5,8 @@ import os
 import stat
 
 import pytest
-from maverick import operating_record as orec
-from maverick.world_model import WorldModel
+from lightwork import operating_record as orec
+from lightwork.world_model import WorldModel
 
 
 @pytest.fixture()
@@ -44,7 +44,7 @@ def test_query_finds_every_decision_that_touched_x(world):
 
 def test_capsule_roundtrip_and_tamper_detection(world, tmp_path, monkeypatch):
     pytest.importorskip("cryptography")
-    import maverick.audit.signing as signing
+    import lightwork.audit.signing as signing
     monkeypatch.setattr(signing, "KEY_DIR", tmp_path / "keys")
     out_path = tmp_path / "mind.capsule.json"
     out_path.write_text("old private capsule", encoding="utf-8")

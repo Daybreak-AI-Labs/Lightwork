@@ -1,7 +1,7 @@
 """latency_heatmap: text heatmap of latency percentiles per bucket."""
 from __future__ import annotations
 
-from maverick.tools.latency_heatmap import latency_heatmap
+from lightwork.tools.latency_heatmap import latency_heatmap
 
 
 def _run(**kw):

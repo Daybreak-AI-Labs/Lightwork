@@ -65,7 +65,7 @@ def _wilson(k: int, n: int, z: float = 1.96) -> tuple[float, float]:
 
 
 def _build_shield():
-    from maverick_shield import Shield
+    from lightwork_shield import Shield
     return Shield.from_config(warn_if_missing=False)
 
 

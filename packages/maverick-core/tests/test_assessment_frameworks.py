@@ -4,8 +4,8 @@ from __future__ import annotations
 import asyncio
 
 import pytest
-from maverick.assessment import AssessmentSession, get_template
-from maverick.tools.assessment_tools import assessment_tools
+from lightwork.assessment import AssessmentSession, get_template
+from lightwork.tools.assessment_tools import assessment_tools
 
 NEW = ["hipaa", "soc2", "pci_dss"]
 

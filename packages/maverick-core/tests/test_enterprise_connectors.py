@@ -23,7 +23,7 @@ def _fake_httpx(monkeypatch, **methods):
     def _fake_safe_client(url, **kwargs):
         yield client
 
-    from maverick.tools import _ssrf
+    from lightwork.tools import _ssrf
     monkeypatch.setattr(_ssrf, "safe_client", _fake_safe_client)
     return client
 
@@ -37,7 +37,7 @@ def _resp(status, body):
 
 
 def _tool(**kw):
-    from maverick.tools._rest_connector import make_rest_tool
+    from lightwork.tools._rest_connector import make_rest_tool
     spec = dict(name="acme", base_url_env="ACME_BASE_URL", token_env="ACME_TOKEN",
                 description="Acme test connector")
     spec.update(kw)
@@ -120,9 +120,9 @@ def test_custom_header_raw_token(monkeypatch):
 
 
 def test_all_enterprise_connectors_register(tmp_path):
-    from maverick.sandbox.local import LocalBackend
-    from maverick.tools import base_registry
-    from maverick.tools.enterprise_connectors import ENTERPRISE_CONNECTOR_NAMES
+    from lightwork.sandbox.local import LocalBackend
+    from lightwork.tools import base_registry
+    from lightwork.tools.enterprise_connectors import ENTERPRISE_CONNECTOR_NAMES
 
     class _W:
         def open_questions(self, gid):
@@ -137,7 +137,7 @@ def test_all_enterprise_connectors_register(tmp_path):
 
 
 def _gql(**kw):
-    from maverick.tools._rest_connector import make_graphql_tool
+    from lightwork.tools._rest_connector import make_graphql_tool
     spec = dict(name="acmegql", base_url_env="ACMEGQL_URL", token_env="ACMEGQL_TOKEN",
                 description="Acme GraphQL")
     spec.update(kw)

@@ -1,7 +1,7 @@
 """capability_negotiation: capability negotiation protocol."""
 from __future__ import annotations
 
-from maverick.tools.capability_negotiation import capability_negotiation
+from lightwork.tools.capability_negotiation import capability_negotiation
 
 
 def _run(**kw):

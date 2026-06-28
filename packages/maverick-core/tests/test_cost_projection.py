@@ -4,8 +4,8 @@ unknown-model fallback, and render contents. Fully offline."""
 from __future__ import annotations
 
 import pytest
-from maverick import llm as llm_mod
-from maverick.cost import projection as cp
+from lightwork import llm as llm_mod
+from lightwork.cost import projection as cp
 
 PRICES = {
     "m-coder":  (2.0, 10.0),
@@ -30,7 +30,7 @@ def pinned(monkeypatch):
         "MAVERICK_MODEL_OVERRIDE_MYSTERY",
     ):
         monkeypatch.delenv(var, raising=False)
-    import maverick.config as config_mod
+    import lightwork.config as config_mod
     monkeypatch.setattr(config_mod, "load_config", lambda *a, **k: {})
     monkeypatch.setattr(llm_mod, "MODEL_PRICES", dict(PRICES))
     monkeypatch.setattr(llm_mod, "ROLE_MODELS", dict(ROLES))
@@ -116,7 +116,7 @@ def test_budget_verdicts(pinned):
 def test_unknown_model_falls_back_to_documented_rate(pinned, monkeypatch):
     monkeypatch.setattr(llm_mod, "MODEL_PRICES", {})
     monkeypatch.setattr(llm_mod, "ROLE_MODELS", {"mystery": "model-nobody-prices-xyz"})
-    from maverick.budget import _FALLBACK_PRICE_IN, _FALLBACK_PRICE_OUT
+    from lightwork.budget import _FALLBACK_PRICE_IN, _FALLBACK_PRICE_OUT
     est = cp.estimate_step("mystery", "x" * 4000, expected_output_tokens=1000)
     expected = (est.in_tokens / 1e6) * _FALLBACK_PRICE_IN + (1000 / 1e6) * _FALLBACK_PRICE_OUT
     assert est.model == "model-nobody-prices-xyz"

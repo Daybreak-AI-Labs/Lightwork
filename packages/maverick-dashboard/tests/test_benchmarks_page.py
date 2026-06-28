@@ -9,7 +9,7 @@ import json
 
 import pytest
 from fastapi.testclient import TestClient
-from maverick_dashboard.app import app
+from lightwork_dashboard.app import app
 
 client = TestClient(app)
 
@@ -17,7 +17,7 @@ client = TestClient(app)
 @pytest.fixture
 def store(tmp_path, monkeypatch):
     """Point the continuous-benchmark store at a temp dir."""
-    from maverick import continuous_benchmark as cb
+    from lightwork import continuous_benchmark as cb
     monkeypatch.setattr(cb, "_STORE", tmp_path / "benchmarks")
     return cb
 

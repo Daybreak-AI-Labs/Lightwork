@@ -9,15 +9,15 @@ from __future__ import annotations
 
 from pathlib import Path
 
-import maverick.config as cfg
+import lightwork.config as cfg
 import pytest
-from maverick import tree_of_thought
-from maverick.budget import Budget
-from maverick.llm import LLMResponse
-from maverick.orchestrator import run_goal
-from maverick.sandbox import LocalBackend
-from maverick.tree_of_thought import ToTResult
-from maverick.world_model import WorldModel
+from lightwork import tree_of_thought
+from lightwork.budget import Budget
+from lightwork.llm import LLMResponse
+from lightwork.orchestrator import run_goal
+from lightwork.sandbox import LocalBackend
+from lightwork.tree_of_thought import ToTResult
+from lightwork.world_model import WorldModel
 
 # ---------- config helpers ----------
 
@@ -146,7 +146,7 @@ async def test_winning_plan_is_scanned_and_redacted_when_blocked(
             )()
 
     shield = _Shield()
-    monkeypatch.setattr("maverick.orchestrator._build_shield", lambda: shield)
+    monkeypatch.setattr("lightwork.orchestrator._build_shield", lambda: shield)
 
     def _fake_plan(llm, goal_text, *, n=3, budget=None, **kw):
         return ToTResult(

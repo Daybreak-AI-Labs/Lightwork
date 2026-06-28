@@ -20,7 +20,7 @@ import pytest
 
 @pytest.mark.parametrize("bad_url", [123, 1.5, True, ["x"], {"a": 1}])
 def test_websocket_nonstring_url(bad_url):
-    from maverick.tools.websocket_tool import websocket_tool
+    from lightwork.tools.websocket_tool import websocket_tool
 
     out = asyncio.run(websocket_tool().fn({"url": bad_url}))
     assert isinstance(out, str) and out.startswith("ERROR")
@@ -30,7 +30,7 @@ def test_websocket_nonstring_url(bad_url):
 
 @pytest.mark.parametrize("bad", [123, 1.5, ["x"], {"a": 1}, True])
 def test_send_to_agent_nonstring_to_id(bad):
-    from maverick.tools.agent_bus_tool import send_to_agent
+    from lightwork.tools.agent_bus_tool import send_to_agent
 
     # Invariant: a string back, never an AttributeError on .strip().
     out = send_to_agent("me").fn({"to_id": bad, "payload": "p"})
@@ -41,7 +41,7 @@ def test_send_to_agent_nonstring_to_id(bad):
 
 @pytest.mark.parametrize("bad", ["not-a-number", "  ", ["x"], {"a": 1}])
 def test_recv_from_agent_bad_timeout(bad):
-    from maverick.tools.agent_bus_tool import recv_from_agent
+    from lightwork.tools.agent_bus_tool import recv_from_agent
 
     out = asyncio.run(recv_from_agent("me").fn({"timeout": bad}))
     assert isinstance(out, str) and out.startswith("ERROR")
@@ -55,7 +55,7 @@ def test_recv_from_agent_bad_timeout(bad):
     {"to_id": {"a": 1}, "task": "t"},
 ])
 def test_delegate_to_agent_nonstring(args):
-    from maverick.tools.agent_bus_tool import delegate_to_agent
+    from lightwork.tools.agent_bus_tool import delegate_to_agent
 
     class _Agent:
         name = "me"
@@ -107,7 +107,7 @@ class _Parent:
 
 
 def test_spawn_subagent_missing_keys():
-    from maverick.tools import spawn
+    from lightwork.tools import spawn
 
     out = asyncio.run(spawn.spawn_subagent_tool(_Parent()).fn({}))
     assert isinstance(out, str) and out.startswith("ERROR")
@@ -116,14 +116,14 @@ def test_spawn_subagent_missing_keys():
 
 
 def test_spawn_swarm_missing_agents():
-    from maverick.tools import spawn
+    from lightwork.tools import spawn
 
     out = asyncio.run(spawn.spawn_swarm_tool(_Parent()).fn({}))
     assert isinstance(out, str) and out.startswith("ERROR")
 
 
 def test_spawn_swarm_spec_missing_role_or_task():
-    from maverick.tools import spawn
+    from lightwork.tools import spawn
 
     # A spec dict that is well-formed JSON but lacks the required keys must be
     # rejected with a string, not crash at Agent(role=spec["role"]).
@@ -138,7 +138,7 @@ def test_spawn_swarm_spec_missing_role_or_task():
 
 
 def test_spawn_specialist_missing_keys_and_unhashable_domain():
-    from maverick.tools import spawn
+    from lightwork.tools import spawn
 
     out = asyncio.run(spawn.spawn_specialist_tool(_Parent()).fn({}))
     assert isinstance(out, str) and out.startswith("ERROR")

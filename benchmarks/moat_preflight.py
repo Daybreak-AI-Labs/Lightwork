@@ -7,7 +7,7 @@ codifies "verify before you pay" as three checks, each fully offline:
 
   1. **sandbox-can-read** -- provision the codebase into a workspace, build the
      sandbox exactly as a run does, and confirm the agent's shell can actually
-     READ a real source file. Catches the empty-``~/maverick-workspace`` bug
+     READ a real source file. Catches the empty-``~/lightwork-workspace`` bug
      directly (not just "files exist on disk").
   2. **grader-self-test** -- feed the citation grader a known-CORRECT answer
      (cites the real file) and a known-WRONG one; it must score them right, or
@@ -29,7 +29,7 @@ import tempfile
 from pathlib import Path
 
 DEFAULT_CODEBASE = str(Path(__file__).resolve().parents[1]
-                       / "packages" / "maverick-core" / "maverick")
+                       / "packages" / "lightwork-core" / "maverick")
 
 
 def sandbox_can_read(codebase: str | Path) -> tuple[bool, str]:
@@ -48,7 +48,7 @@ def sandbox_can_read(codebase: str | Path) -> tuple[bool, str]:
         dst = ws / src.name
         shutil.copytree(src, dst, ignore=shutil.ignore_patterns("__pycache__", "*.pyc"))
         rel = dst.relative_to(ws) / pys[0].relative_to(src)
-        from maverick.sandbox import build_sandbox
+        from lightwork.sandbox import build_sandbox
         sb = build_sandbox(workdir=ws, backend="local")
         res = sb.exec(f"cat {rel}")
         out = str(getattr(res, "stdout", res) or "")
@@ -88,7 +88,7 @@ def grader_self_test() -> tuple[bool, str]:
 def distill_mechanism_ok() -> tuple[bool, str]:
     """Two synthetic successful trajectories must produce a saved skill, so the
     populate phase will distill given >=2 successes."""
-    from maverick.skill import distillation_v2 as v2
+    from lightwork.skill import distillation_v2 as v2
     trajs = [{"goal": "reconcile the general ledger to the bank statement",
               "success": True, "tools": ["read_file"], "t": 2},
              {"goal": "reconcile the quarterly ledger against bank records",

@@ -10,7 +10,7 @@ from __future__ import annotations
 from types import SimpleNamespace
 
 import pytest
-from maverick.tools.code_exec import code_exec_tool
+from lightwork.tools.code_exec import code_exec_tool
 
 
 class _Budget:
@@ -44,7 +44,7 @@ def _patch_sandbox(monkeypatch, *, rc=0, out="OUT", err=""):
         captured["stdin"] = stdin
         return rc, out, err
 
-    import maverick.tools.code_exec as ce
+    import lightwork.tools.code_exec as ce
     monkeypatch.setattr(ce, "sandbox_run", fake_sandbox_run)
     return captured
 
@@ -103,7 +103,7 @@ async def test_script_error_surfaces_stderr(monkeypatch):
 @pytest.mark.asyncio
 async def test_budget_exhaustion_stops_before_running(monkeypatch):
     _patch_sandbox(monkeypatch)
-    from maverick.budget import BudgetExceeded
+    from lightwork.budget import BudgetExceeded
     agent = _FakeAgent()
 
     def boom():
@@ -126,7 +126,7 @@ async def test_empty_stdout_gives_a_hint(monkeypatch):
 # ---- unframe_tool_output ----------------------------------------------------
 
 def test_unframe_tool_output():
-    from maverick.agent import unframe_tool_output
+    from lightwork.agent import unframe_tool_output
     framed = "<tool_output tool='shell' id=ab>\nhello\nworld\n</tool_output ab>"
     assert unframe_tool_output(framed) == "hello\nworld"
     # A loop-guard note appended after the close tag is excluded.

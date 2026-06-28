@@ -1,7 +1,7 @@
 """compaction_classifier: compaction v6 hybrid strategy picker."""
 from __future__ import annotations
 
-from maverick.tools.compaction_classifier import compaction_classifier
+from lightwork.tools.compaction_classifier import compaction_classifier
 
 
 def _pick(**features):

@@ -2,9 +2,9 @@
 
 from __future__ import annotations
 
-import maverick.queue_dispatcher as qd
-import maverick.runner as runner
-from maverick.capability import Capability
+import lightwork.queue_dispatcher as qd
+import lightwork.runner as runner
+from lightwork.capability import Capability
 
 
 def test_submit_enqueues_payload_and_returns_none():
@@ -108,10 +108,10 @@ def test_run_queued_goal_attenuates_capability_by_worker_policy(monkeypatch):
     monkeypatch.setenv("MAVERICK_ENFORCE_CAPABILITIES", "1")
     # Worker-local policy: deny shell, ceiling at low risk.
     monkeypatch.setattr(
-        "maverick.safety.tool_acl.resolve_lists",
+        "lightwork.safety.tool_acl.resolve_lists",
         lambda **_kw: (set(), {"shell"}))
     monkeypatch.setattr(
-        "maverick.safety.tool_acl.resolve_max_risk", lambda **_kw: "low")
+        "lightwork.safety.tool_acl.resolve_max_risk", lambda **_kw: "low")
 
     out = qd.run_queued_goal({
         "goal_id": 9,
@@ -160,7 +160,7 @@ def test_queue_dispatcher_plugs_into_the_runner_seam(monkeypatch):
 
 
 def test_install_from_config_noop_without_backend(monkeypatch):
-    import maverick.config as cfg
+    import lightwork.config as cfg
 
     monkeypatch.setattr(cfg, "load_config", dict)
     original = runner.get_dispatcher()

@@ -8,7 +8,7 @@ material in the world model and displayed output with only the header redacted.
 """
 from __future__ import annotations
 
-from maverick.safety.secret_detector import redact
+from lightwork.safety.secret_detector import redact
 
 # Synthetic non-secret fixture body (the PEM regex matches the BEGIN..END
 # structure, not the body content) -- detect-secrets entropy plugin flags it.
@@ -66,7 +66,7 @@ def test_pem_body_without_end_marker_is_fully_redacted():
 def test_redact_proven_does_not_falsely_certify_truncated_pem():
     # provable_redaction composes this detector; the leak made it issue a
     # PROVEN-clean certificate over text that still held key material.
-    from maverick.provable_redaction import redact_proven
+    from lightwork.provable_redaction import redact_proven
     proof = redact_proven(f"-----BEGIN PRIVATE KEY-----\n{_KEY_BODY}")  # pragma: allowlist secret
     assert "MIIEpAIBAAKCAQEA" not in proof.redacted
     assert proof.proven  # genuinely clean, not a false certificate
@@ -76,7 +76,7 @@ def test_redact_proven_does_not_falsely_certify_truncated_pem():
 def test_audit_event_redacts_truncated_pem_in_tool_payload():
     # The audit writer truncates summaries, which can strip a key's END marker;
     # _redact_event composes the same detector, so the body must not reach disk.
-    from maverick.audit.writer import _redact_event
+    from lightwork.audit.writer import _redact_event
     out = _redact_event({
         "kind": "tool_result",
         "output_summary": f"-----BEGIN PRIVATE KEY-----\n{_KEY_BODY}",  # pragma: allowlist secret

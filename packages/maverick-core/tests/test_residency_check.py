@@ -4,7 +4,7 @@ from __future__ import annotations
 
 
 def _rows(monkeypatch):
-    import maverick.health as health
+    import lightwork.health as health
     captured = []
     monkeypatch.setattr(health, "_row",
                         lambda m, label, detail="", fix="": captured.append((label, detail)))

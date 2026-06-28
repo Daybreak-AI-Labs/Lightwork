@@ -8,7 +8,7 @@ from __future__ import annotations
 from pathlib import Path
 
 from click.testing import CliRunner
-from maverick.cli import main
+from lightwork.cli import main
 
 
 def test_resume_nonexistent_goal_exits_nonzero(tmp_path: Path):

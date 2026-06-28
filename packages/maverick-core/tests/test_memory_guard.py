@@ -5,8 +5,8 @@ the env override (not a config file) decides, and monkeypatch reverts it.
 """
 from __future__ import annotations
 
-from maverick import memory_guard as mg
-from maverick.memory_guard import Provenance, TrustTier
+from lightwork import memory_guard as mg
+from lightwork.memory_guard import Provenance, TrustTier
 
 
 def test_trust_tiers_are_ordered():
@@ -100,8 +100,8 @@ def test_kv_memory_tool_blocks_poisoned_write(tmp_path, monkeypatch):
     """End-to-end through the agent-facing tool: a poisoned fact is quarantined,
     a clean fact is stored at TOOL trust and filtered from high-trust recall."""
     monkeypatch.setenv("MAVERICK_MEMORY_GUARD", "1")
-    from maverick.tools.kv_memory import kv_memory
-    from maverick.world_model import WorldModel
+    from lightwork.tools.kv_memory import kv_memory
+    from lightwork.world_model import WorldModel
 
     w = WorldModel(tmp_path / "world.db")
     gid = w.create_goal("t")
@@ -164,7 +164,7 @@ def test_filter_facts_reads_config_once_not_per_fact(monkeypatch):
     # Trust-aware retrieval runs on the brief-assembly hot path; the config
     # (uncached file I/O) must be read O(1), not once per fact.
     monkeypatch.setenv("MAVERICK_MEMORY_GUARD", "1")
-    import maverick.config as cfg
+    import lightwork.config as cfg
     n = {"reads": 0}
     real = cfg.load_config
 
@@ -180,7 +180,7 @@ def test_filter_facts_reads_config_once_not_per_fact(monkeypatch):
 
 def test_audit_write_is_noop_when_guard_disabled(monkeypatch):
     monkeypatch.delenv("MAVERICK_MEMORY_GUARD", raising=False)
-    import maverick.audit as audit
+    import lightwork.audit as audit
     calls = []
     monkeypatch.setattr(audit, "record", lambda *a, **k: calls.append((a, k)))
     # A user-scoped key would otherwise be logged on every write even with the
@@ -192,7 +192,7 @@ def test_audit_write_is_noop_when_guard_disabled(monkeypatch):
 
 def test_audit_write_logs_when_guard_enabled(monkeypatch):
     monkeypatch.setenv("MAVERICK_MEMORY_GUARD", "1")
-    import maverick.audit as audit
+    import lightwork.audit as audit
     calls = []
     monkeypatch.setattr(audit, "record", lambda kind, **k: calls.append((kind, k)))
     mg.audit_write("k", Provenance(source="s", trust=TrustTier.TOOL),

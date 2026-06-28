@@ -1,8 +1,8 @@
 """Tests for the per-rung self-improvement producers (Phases 1-6 -> one gate)."""
 from __future__ import annotations
 
-from maverick.self_improvement import PromotionLedger, SelfImprovementController
-from maverick.si_producers import (
+from lightwork.self_improvement import PromotionLedger, SelfImprovementController
+from lightwork.si_producers import (
     ToolOutcomeTracker,
     propose_code,
     propose_policy,
@@ -103,7 +103,7 @@ def test_propose_weights_is_human_gated(tmp_path, monkeypatch):
 
 def test_disabled_engine_blocks_all_producers(tmp_path, monkeypatch):
     monkeypatch.delenv("MAVERICK_SELF_IMPROVEMENT", raising=False)
-    from maverick.self_improvement import reset_shared
+    from lightwork.self_improvement import reset_shared
     reset_shared()
     v = propose_policy("x", baseline=0.1, candidate=0.9, samples=20, rollback="r")
     assert not v.ok

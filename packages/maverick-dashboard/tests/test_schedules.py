@@ -12,7 +12,7 @@ from fastapi.testclient import TestClient
 
 def _client():
     # Mutating /api/v1 requests in no-token mode must pass the same-origin CSRF check.
-    from maverick_dashboard.app import app
+    from lightwork_dashboard.app import app
     return TestClient(app, headers={"Origin": "http://testserver"})
 
 
@@ -20,7 +20,7 @@ def _isolate(monkeypatch, tmp_path):
     monkeypatch.setenv("HOME", str(tmp_path))
     monkeypatch.setenv("MAVERICK_HOME", str(tmp_path))
     monkeypatch.delenv("MAVERICK_DASHBOARD_TOKEN", raising=False)
-    import maverick.templates as tpl
+    import lightwork.templates as tpl
     monkeypatch.setattr(tpl, "USER_TEMPLATES", tmp_path / ".maverick" / "templates")
 
 
@@ -45,7 +45,7 @@ def test_create_list_cancel_text_schedule(monkeypatch, tmp_path):
 
 def test_create_schedule_preserves_proxy_identity(monkeypatch, tmp_path):
     _isolate(monkeypatch, tmp_path)
-    import maverick_dashboard.auth as auth
+    import lightwork_dashboard.auth as auth
 
     monkeypatch.setattr(auth, "proxy_auth_enabled", lambda: True)
     monkeypatch.setattr(auth, "proxy_trusts", lambda _host: True)
@@ -60,7 +60,7 @@ def test_create_schedule_preserves_proxy_identity(monkeypatch, tmp_path):
     )
     assert r.status_code == 201, r.text
 
-    from maverick.job_queue import JobQueue
+    from lightwork.job_queue import JobQueue
 
     job = JobQueue().get(r.json()["id"])
     assert job is not None
@@ -78,7 +78,7 @@ def test_create_schedule_returns_stable_schedule_id(monkeypatch, tmp_path):
     assert r.status_code == 201, r.text
     sid = r.json()["schedule_id"]
     assert sid
-    from maverick.job_queue import JobQueue
+    from lightwork.job_queue import JobQueue
     assert JobQueue().get(r.json()["id"]).payload["schedule_id"] == sid
     listed = c.get("/api/v1/schedules").json()["schedules"]
     assert any(s["schedule_id"] == sid for s in listed)
@@ -116,7 +116,7 @@ def test_bad_cron_and_empty_body_are_400(monkeypatch, tmp_path):
 
 def test_scheduling_feature_off_403(monkeypatch, tmp_path):
     _isolate(monkeypatch, tmp_path)
-    from maverick import config
+    from lightwork import config
     real = config.get_features
     monkeypatch.setattr(config, "get_features", lambda: {**real(), "scheduling": False})
     c = _client()

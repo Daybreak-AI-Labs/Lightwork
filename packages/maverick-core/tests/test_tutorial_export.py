@@ -3,7 +3,7 @@ from __future__ import annotations
 
 import types
 
-from maverick.tutorial_export import tutorial_markdown
+from lightwork.tutorial_export import tutorial_markdown
 
 
 def _goal(**kw):

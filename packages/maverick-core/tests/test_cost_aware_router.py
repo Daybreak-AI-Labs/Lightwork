@@ -1,7 +1,7 @@
 """cost_aware_router: cost-aware router v2 with per-role policies."""
 from __future__ import annotations
 
-from maverick.tools.cost_aware_router import cost_aware_router
+from lightwork.tools.cost_aware_router import cost_aware_router
 
 _MODELS = [
     {"model": "cheap", "in_cost": 1.0, "out_cost": 2.0, "quality": 0.6},

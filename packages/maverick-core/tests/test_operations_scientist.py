@@ -5,9 +5,9 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 
-from maverick import operations_scientist as ops
-from maverick.counterfactual_rollout import Transition, TransitionModel
-from maverick.data_engine import FailureClass
+from lightwork import operations_scientist as ops
+from lightwork.counterfactual_rollout import Transition, TransitionModel
+from lightwork.data_engine import FailureClass
 
 START, GOOD, BAD = ("start",), ("good",), ("bad",)
 
@@ -74,7 +74,7 @@ def test_simulate_untrustworthy_model_is_not_worth_experimenting():
 
 def test_enabled_off_by_default(monkeypatch):
     monkeypatch.delenv("MAVERICK_OPERATIONS_SCIENTIST", raising=False)
-    monkeypatch.setattr("maverick.config.get_operations_scientist", lambda: {"enable": False})
+    monkeypatch.setattr("lightwork.config.get_operations_scientist", lambda: {"enable": False})
     assert ops.enabled() is False
     monkeypatch.setenv("MAVERICK_OPERATIONS_SCIENTIST", "1")
     assert ops.enabled() is True

@@ -1,7 +1,7 @@
 """container_build: sandbox-mediated, workspace-confined docker build."""
 from __future__ import annotations
 
-from maverick.tools.container_build import container_build
+from lightwork.tools.container_build import container_build
 
 
 class _Res:
@@ -97,7 +97,7 @@ def test_missing_dockerfile(tmp_path):
 
 
 def test_container_build_is_high_risk():
-    from maverick.safety.tool_risk import tool_risk
+    from lightwork.safety.tool_risk import tool_risk
 
     assert tool_risk("container_build") == "high"
 
@@ -120,7 +120,7 @@ def test_medium_risk_ceiling_drops_container_build(tmp_path, monkeypatch):
     cfg_dir.mkdir()
     (cfg_dir / "config.toml").write_text('[security]\nmax_risk = "medium"\n')
 
-    from maverick.tools import base_registry
+    from lightwork.tools import base_registry
 
     class _W:
         pass
@@ -134,7 +134,7 @@ def test_medium_risk_ceiling_drops_container_build(tmp_path, monkeypatch):
 
 
 def test_registered(tmp_path):
-    from maverick.tools import base_registry
+    from lightwork.tools import base_registry
 
     class _W:
         pass

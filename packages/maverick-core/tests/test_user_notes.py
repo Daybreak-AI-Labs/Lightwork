@@ -3,7 +3,7 @@ from __future__ import annotations
 
 from types import SimpleNamespace
 
-from maverick import user_notes
+from lightwork import user_notes
 
 
 class TestExtractPreferences:

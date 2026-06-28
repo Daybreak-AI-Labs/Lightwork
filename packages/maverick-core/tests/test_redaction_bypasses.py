@@ -8,8 +8,8 @@ logs / model context:
 """
 from __future__ import annotations
 
-from maverick.safety import pii_detector as pii
-from maverick.safety import secret_detector as sec
+from lightwork.safety import pii_detector as pii
+from lightwork.safety import secret_detector as sec
 
 
 def _kinds(text):

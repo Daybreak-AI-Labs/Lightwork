@@ -17,8 +17,8 @@ import random
 import string
 
 import pytest
-from maverick.safety import pii_detector as pd
-from maverick.safety import secret_detector as sd
+from lightwork.safety import pii_detector as pd
+from lightwork.safety import secret_detector as sd
 
 try:
     import maverick_native as _native

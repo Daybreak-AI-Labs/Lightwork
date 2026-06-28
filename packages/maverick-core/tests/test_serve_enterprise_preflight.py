@@ -3,8 +3,8 @@ from click.testing import CliRunner
 
 
 def test_channel_serve_runs_enterprise_preflight_before_start(monkeypatch):
-    import maverick.deployment as deployment
-    import maverick.server as server_mod
+    import lightwork.deployment as deployment
+    import lightwork.server as server_mod
 
     calls = {"gate": 0, "build": 0}
 
@@ -19,7 +19,7 @@ def test_channel_serve_runs_enterprise_preflight_before_start(monkeypatch):
     monkeypatch.setattr(deployment, "require_enterprise_or_die", _gate)
     monkeypatch.setattr(server_mod, "build_from_config", _build)
 
-    from maverick.cli import main
+    from lightwork.cli import main
     result = CliRunner().invoke(main, ["serve"])
 
     assert result.exit_code != 0

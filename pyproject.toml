@@ -4,10 +4,10 @@
 
 [tool.uv.workspace]
 members = [
-    "packages/maverick-core",
-    "packages/maverick-shield",
-    "packages/maverick-channels",
-    "packages/maverick-evolve",
+    "packages/lightwork-core",
+    "packages/lightwork-shield",
+    "packages/lightwork-channels",
+    "packages/lightwork-evolve",
     "apps/installer-cli",
 ]
 
@@ -89,6 +89,6 @@ python_files = "test_*.py"
 addopts = "--import-mode=importlib"
 # Put the repo root (rootdir) on sys.path so cross-package test imports like
 # `from benchmarks.swe_bench import ...` resolve regardless of the invocation
-# cwd. Without this the maverick-core suite only collected from the repo root
-# and ModuleNotFound'd when run from inside packages/maverick-core (#599).
+# cwd. Without this the lightwork-core suite only collected from the repo root
+# and ModuleNotFound'd when run from inside packages/lightwork-core (#599).
 pythonpath = ["."]

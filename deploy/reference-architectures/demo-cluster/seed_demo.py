@@ -18,7 +18,7 @@ public /demo page and must not suppress seeding the public sample data.
 """
 from __future__ import annotations
 
-from maverick.world_model import DEFAULT_DB, WorldModel
+from lightwork.world_model import DEFAULT_DB, WorldModel
 
 # (title, description, status, result)
 DEMO_GOALS = [

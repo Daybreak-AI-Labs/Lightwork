@@ -16,10 +16,10 @@ import types
 from pathlib import Path
 
 import pytest
-from maverick.budget import Budget
-from maverick.orchestrator import run_goal
-from maverick.sandbox import LocalBackend
-from maverick.world_model import WorldModel
+from lightwork.budget import Budget
+from lightwork.orchestrator import run_goal
+from lightwork.sandbox import LocalBackend
+from lightwork.world_model import WorldModel
 
 
 def _verdict(allowed: bool, reasons):
@@ -46,7 +46,7 @@ async def test_run_goal_blocks_flagged_final_answer(
     tmp_path: Path, fake_llm, make_llm_response, monkeypatch,
 ):
     monkeypatch.setattr(
-        "maverick.orchestrator._build_shield", lambda: _SentinelShield(),
+        "lightwork.orchestrator._build_shield", lambda: _SentinelShield(),
     )
     fake_llm.scripted = [
         make_llm_response(text="FINAL: the answer is 42 BLOCKME"),
@@ -75,7 +75,7 @@ async def test_run_goal_returns_clean_answer_unblocked(
 ):
     # Same shield, but the FINAL has no sentinel -> normal answer flows.
     monkeypatch.setattr(
-        "maverick.orchestrator._build_shield", lambda: _SentinelShield(),
+        "lightwork.orchestrator._build_shield", lambda: _SentinelShield(),
     )
     fake_llm.scripted = [
         make_llm_response(text="FINAL: the answer is 42"),

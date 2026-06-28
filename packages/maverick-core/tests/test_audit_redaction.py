@@ -10,8 +10,8 @@ def _read_first(path: Path) -> dict:
 
 
 def test_anthropic_key_redacted(tmp_path: Path):
-    from maverick.audit.events import AuditEvent, EventKind
-    from maverick.audit.writer import AuditLog
+    from lightwork.audit.events import AuditEvent, EventKind
+    from lightwork.audit.writer import AuditLog
 
     al = AuditLog(audit_dir=tmp_path)
     al.record(AuditEvent(
@@ -27,8 +27,8 @@ def test_anthropic_key_redacted(tmp_path: Path):
 
 
 def test_openai_key_redacted(tmp_path: Path):
-    from maverick.audit.events import AuditEvent, EventKind
-    from maverick.audit.writer import AuditLog
+    from lightwork.audit.events import AuditEvent, EventKind
+    from lightwork.audit.writer import AuditLog
 
     al = AuditLog(audit_dir=tmp_path)
     al.record(AuditEvent(
@@ -43,8 +43,8 @@ def test_openai_key_redacted(tmp_path: Path):
 
 
 def test_redaction_walks_nested_lists_and_dicts(tmp_path: Path):
-    from maverick.audit.events import AuditEvent, EventKind
-    from maverick.audit.writer import AuditLog
+    from lightwork.audit.events import AuditEvent, EventKind
+    from lightwork.audit.writer import AuditLog
 
     al = AuditLog(audit_dir=tmp_path)
     al.record(AuditEvent(
@@ -62,8 +62,8 @@ def test_redaction_walks_nested_lists_and_dicts(tmp_path: Path):
 
 
 def test_redaction_no_secrets_passes_through_unchanged(tmp_path: Path):
-    from maverick.audit.events import AuditEvent, EventKind
-    from maverick.audit.writer import AuditLog
+    from lightwork.audit.events import AuditEvent, EventKind
+    from lightwork.audit.writer import AuditLog
 
     al = AuditLog(audit_dir=tmp_path)
     al.record(AuditEvent(
@@ -76,8 +76,8 @@ def test_redaction_no_secrets_passes_through_unchanged(tmp_path: Path):
 
 
 def test_anonymous_mode_anonymizes_audit_payload(monkeypatch, tmp_path: Path):
-    from maverick.audit.events import AuditEvent, EventKind
-    from maverick.audit.writer import AuditLog
+    from lightwork.audit.events import AuditEvent, EventKind
+    from lightwork.audit.writer import AuditLog
 
     monkeypatch.setenv("MAVERICK_ANON", "1")
     home_path = str(Path.home() / "case_notes.txt")
@@ -111,8 +111,8 @@ def test_anonymous_mode_anonymizes_audit_payload(monkeypatch, tmp_path: Path):
 
 
 def test_anonymous_mode_hashes_principal_bearing_audit_fields(monkeypatch, tmp_path: Path):
-    from maverick.audit.events import AuditEvent, EventKind
-    from maverick.audit.writer import AuditLog
+    from lightwork.audit.events import AuditEvent, EventKind
+    from lightwork.audit.writer import AuditLog
 
     monkeypatch.setenv("MAVERICK_ANON", "1")
 

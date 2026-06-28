@@ -3,7 +3,7 @@ the MAVERICK_ALLOW_SKILL_INSTALL opt-in with install; writes to the skills dir."
 from __future__ import annotations
 
 from fastapi.testclient import TestClient
-from maverick_dashboard.app import app
+from lightwork_dashboard.app import app
 
 client = TestClient(app, headers={"Origin": "http://testserver"})
 
@@ -16,7 +16,7 @@ _GOOD = {
 
 
 def _skills_dir(tmp_path, monkeypatch):
-    from maverick import skills
+    from lightwork import skills
     monkeypatch.setattr(skills, "SKILLS_DIR", tmp_path / "skills")
 
 

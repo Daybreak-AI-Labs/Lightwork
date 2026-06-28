@@ -5,8 +5,8 @@ from __future__ import annotations
 import types
 
 import pytest
-from maverick.plain_language import explain
-from maverick.ux_store import MAX_VIEW_PARAMS, MAX_VIEWS, UxStore
+from lightwork.plain_language import explain
+from lightwork.ux_store import MAX_VIEW_PARAMS, MAX_VIEWS, UxStore
 
 
 def _store(tmp_path):
@@ -152,7 +152,7 @@ def test_gallery_add_list_remove(tmp_path):
 
 
 def test_gallery_validation_and_cap(tmp_path):
-    from maverick.ux_store import MAX_GALLERY
+    from lightwork.ux_store import MAX_GALLERY
     s = _store(tmp_path)
     with pytest.raises(ValueError):
         s.gallery_add(1, blurb="x" * 600)

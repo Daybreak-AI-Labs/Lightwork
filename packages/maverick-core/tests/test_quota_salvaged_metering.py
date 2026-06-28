@@ -25,10 +25,10 @@ from __future__ import annotations
 from pathlib import Path
 
 import pytest
-from maverick.budget import Budget
-from maverick.orchestrator import run_goal
-from maverick.sandbox import LocalBackend
-from maverick.world_model import WorldModel
+from lightwork.budget import Budget
+from lightwork.orchestrator import run_goal
+from lightwork.sandbox import LocalBackend
+from lightwork.world_model import WorldModel
 
 # A minimal-but-valid unified diff: contains both ``diff --git`` and ``--- a/``
 # so it satisfies the salvage branch's ``result.final_patch and (...)`` guard.
@@ -61,7 +61,7 @@ def _spy_record_usage(monkeypatch) -> list[tuple]:
     so patch the function on the module it resolves (matches
     test_quota_enforcement.py::test_quotas_off_run_proceeds_and_records_usage).
     """
-    import maverick.quotas as q
+    import lightwork.quotas as q
     recorded: list[tuple] = []
     real = q.record_usage
     monkeypatch.setattr(
@@ -79,7 +79,7 @@ async def test_salvaged_patch_path_records_usage(
     # returns an error result that nonetheless carries a usable diff. The
     # orchestrator marks the goal done, returns the patch -- and must charge
     # that spend to the ledger so it doesn't escape the quota accounting.
-    from maverick.agent import Agent, AgentResult
+    from lightwork.agent import Agent, AgentResult
 
     calls = 0
 
@@ -131,8 +131,8 @@ async def test_salvaged_patch_spend_advances_ledger_and_gates_next_run(
     # land in the real ledger so a second run is refused by the quota gate
     # instead of spending again. This is the user-visible point of metering the
     # salvaged path -- a "success" that errored still counts against the cap.
-    from maverick.agent import Agent, AgentResult
-    from maverick.quotas import UsageLedger, over_quota
+    from lightwork.agent import Agent, AgentResult
+    from lightwork.quotas import UsageLedger, over_quota
 
     monkeypatch.setenv("MAVERICK_QUOTA_ENFORCE", "1")
     monkeypatch.setenv("MAVERICK_QUOTA_MAX_TOKENS_PER_DAY", "100")

@@ -2,9 +2,9 @@
 from __future__ import annotations
 
 import pytest
-from maverick.capability import Capability
-from maverick.revocation import RevocationRegistry
-from maverick.tools import Tool
+from lightwork.capability import Capability
+from lightwork.revocation import RevocationRegistry
+from lightwork.tools import Tool
 
 # ---- registry ----
 
@@ -76,7 +76,7 @@ def test_revoke_subtree_leaf_only(tmp_path):
 
 
 def test_module_is_revoked_fails_open(monkeypatch):
-    import maverick.revocation as R
+    import lightwork.revocation as R
 
     def _boom():
         raise RuntimeError("registry unavailable")
@@ -88,12 +88,12 @@ def test_module_is_revoked_fails_open(monkeypatch):
 # ---- tool-chokepoint gate (mirrors test_capability_path_enforcement) ----
 
 def _agent(tmp_path):
-    from maverick.agent import Agent
-    from maverick.blackboard import Blackboard
-    from maverick.budget import Budget
-    from maverick.sandbox import LocalBackend
-    from maverick.swarm import SwarmContext
-    from maverick.world_model import WorldModel
+    from lightwork.agent import Agent
+    from lightwork.blackboard import Blackboard
+    from lightwork.budget import Budget
+    from lightwork.sandbox import LocalBackend
+    from lightwork.swarm import SwarmContext
+    from lightwork.world_model import WorldModel
 
     world = WorldModel(tmp_path / "world.db")
     goal_id = world.create_goal("g", "")
@@ -114,7 +114,7 @@ def _spy_tool(name, calls):
 
 
 def _point_shared_at(monkeypatch, tmp_path):
-    import maverick.revocation as R
+    import lightwork.revocation as R
     reg = RevocationRegistry(tmp_path / "rev.json")
     monkeypatch.setattr(R, "_shared", reg)
     return reg
@@ -167,12 +167,12 @@ async def test_non_revoked_principal_not_denied(tmp_path, monkeypatch):
 
 @pytest.mark.asyncio
 async def test_revocation_denial_is_audited(tmp_path, monkeypatch):
-    import maverick.audit
-    from maverick.audit import EventKind
+    import lightwork.audit
+    from lightwork.audit import EventKind
     reg = _point_shared_at(monkeypatch, tmp_path)
     reg.revoke("agent:coder-1")
     calls: list = []
-    monkeypatch.setattr(maverick.audit, "record",
+    monkeypatch.setattr(lightwork.audit, "record",
                         lambda kind, **kw: calls.append((kind, kw)))
     agent = _agent(tmp_path)
     agent.capability = Capability(principal="agent:coder-1")

@@ -9,16 +9,16 @@ import pickle
 
 class TestCacheTtlNormalization:
     def test_trailing_space_normalized(self):
-        from maverick.budget import _cache_write_mult_from_ttl
+        from lightwork.budget import _cache_write_mult_from_ttl
         assert _cache_write_mult_from_ttl("1h ") == 2.0
         assert _cache_write_mult_from_ttl(" 1h") == 2.0
 
     def test_uppercase_normalized(self):
-        from maverick.budget import _cache_write_mult_from_ttl
+        from lightwork.budget import _cache_write_mult_from_ttl
         assert _cache_write_mult_from_ttl("1H") == 2.0
 
     def test_duration_parsing_handles_unknown_strings(self):
-        from maverick.budget import _cache_write_mult_from_ttl
+        from lightwork.budget import _cache_write_mult_from_ttl
         # 30 minutes > 5m → 1h rate
         assert _cache_write_mult_from_ttl("30m") == 2.0
         # 2h > 1h → 1h rate (the upper tier)
@@ -30,7 +30,7 @@ class TestCacheTtlNormalization:
         assert _cache_write_mult_from_ttl("1m") == 1.25
 
     def test_unknown_garbage_defaults_to_5m(self):
-        from maverick.budget import _cache_write_mult_from_ttl
+        from lightwork.budget import _cache_write_mult_from_ttl
         assert _cache_write_mult_from_ttl("forever") == 1.25
         assert _cache_write_mult_from_ttl("") == 1.25
         assert _cache_write_mult_from_ttl(None) == 1.25
@@ -38,8 +38,8 @@ class TestCacheTtlNormalization:
 
 class TestBudgetPickling:
     def test_round_trip_preserves_counters(self):
-        from maverick.budget import Budget
-        from maverick.llm import MODEL_SONNET
+        from lightwork.budget import Budget
+        from lightwork.llm import MODEL_SONNET
 
         b = Budget(max_dollars=100.0)
         b.record_tokens(10_000, 1000, model=MODEL_SONNET)
@@ -59,7 +59,7 @@ class TestBudgetPickling:
 
 
     def test_round_trip_preserves_elapsed_for_wall_cap(self):
-        from maverick.budget import Budget, BudgetExceeded
+        from lightwork.budget import Budget, BudgetExceeded
 
         b = Budget(max_wall_seconds=0.01)
         # Exhaust wall-time budget before serialization.
@@ -87,7 +87,7 @@ class TestGotestPassInPackageName:
         """Package paths like github.com/PASSport/foo contain `PASS`;
         the old `'PASS' not in out` check incorrectly silenced build
         failures from such repos."""
-        from maverick.coding_mode import _parse_gotest
+        from lightwork.coding_mode import _parse_gotest
         out = (
             "# github.com/PASSport/foo\n"
             "./foo.go:10:5: undefined: bar\n"
@@ -109,7 +109,7 @@ class TestTokenOverlapNoisePrefixBypass:
         new "longest contiguous block / gold length" metric is
         immune to noise dilution as long as the gold body is preserved
         as a contiguous run."""
-        from maverick.coding_mode import defensive_validate
+        from lightwork.coding_mode import defensive_validate
         # ~150 lines of noise prose (< 10K tokens so sampling doesn't kick
         # in and the verbatim gold block stays contiguous in the matcher).
         noise = "\n".join(
@@ -145,7 +145,7 @@ class TestTokenOverlapNoisePrefixBypass:
         one-line fixes. The boundary test uses a 30+-token gold so
         the detector engages, and constructs ours with ~50% longest
         contiguous match to verify the boundary behavior."""
-        from maverick.coding_mode import defensive_validate
+        from lightwork.coding_mode import defensive_validate
         # 60+ tokens in gold so the detector engages.
         gold_body = " ".join([f"identifier_{i}" for i in range(60)])
         gold = f"diff --git a/x.py b/x.py\n@@ -1 +1 @@\n+{gold_body}\n"
@@ -161,8 +161,8 @@ class TestTokenOverlapNoisePrefixBypass:
 
 class TestAnthropicProviderRobust:
     def test_resp_usage_none_does_not_crash(self):
-        from maverick.budget import Budget
-        from maverick.providers.anthropic_provider import AnthropicClient
+        from lightwork.budget import Budget
+        from lightwork.providers.anthropic_provider import AnthropicClient
 
         client = AnthropicClient.__new__(AnthropicClient)
 
@@ -178,8 +178,8 @@ class TestAnthropicProviderRobust:
         assert budget.dollars == 0.0
 
     def test_string_usage_values_dont_crash(self):
-        from maverick.budget import Budget
-        from maverick.providers.anthropic_provider import AnthropicClient
+        from lightwork.budget import Budget
+        from lightwork.providers.anthropic_provider import AnthropicClient
 
         client = AnthropicClient.__new__(AnthropicClient)
 
@@ -200,8 +200,8 @@ class TestAnthropicProviderRobust:
         assert budget.input_tokens == 100
 
     def test_string_usage_garbage_does_not_crash(self):
-        from maverick.budget import Budget
-        from maverick.providers.anthropic_provider import AnthropicClient
+        from lightwork.budget import Budget
+        from lightwork.providers.anthropic_provider import AnthropicClient
 
         client = AnthropicClient.__new__(AnthropicClient)
 
@@ -221,7 +221,7 @@ class TestAnthropicProviderRobust:
         assert budget.output_tokens == 50
 
     def test_duplicate_tool_names_no_crash(self):
-        from maverick.providers.anthropic_provider import _cached_tools
+        from lightwork.providers.anthropic_provider import _cached_tools
         tools = [
             {"name": "shell", "input_schema": {}},
             {"name": "shell", "input_schema": {}},  # duplicate
@@ -269,7 +269,7 @@ class TestSwebenchSigtermReset:
         """Wave 12 hardening: main() must reset _TERMINATE_REQUESTED so
         a previously-flagged process can re-enter without immediate exit."""
         from pathlib import Path
-        # parents[3] = repo root (tests → maverick-core → packages → root).
+        # parents[3] = repo root (tests → lightwork-core → packages → root).
         p = Path(__file__).resolve().parents[3] / "benchmarks" / "swe_bench.py"
         assert p.exists(), f"could not locate swe_bench.py at {p}"
         src = p.read_text(encoding="utf-8")

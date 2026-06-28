@@ -14,7 +14,7 @@ import pytest
 
 cryptography = pytest.importorskip("cryptography")
 
-from maverick import plugin_ca, plugins  # noqa: E402
+from lightwork import plugin_ca, plugins  # noqa: E402
 
 
 class _FakeDist:

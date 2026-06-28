@@ -3,7 +3,7 @@ from __future__ import annotations
 
 import json
 
-from maverick.tools.smart_nl_filter import smart_nl_filter
+from lightwork.tools.smart_nl_filter import smart_nl_filter
 
 
 def _parse(query):

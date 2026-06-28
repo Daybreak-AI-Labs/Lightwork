@@ -9,8 +9,8 @@ from __future__ import annotations
 
 from pathlib import Path
 
-from maverick.sandbox import LocalBackend
-from maverick.tools.shell import shell
+from lightwork.sandbox import LocalBackend
+from lightwork.tools.shell import shell
 
 
 def test_shell_runs_by_default(tmp_path: Path, monkeypatch):

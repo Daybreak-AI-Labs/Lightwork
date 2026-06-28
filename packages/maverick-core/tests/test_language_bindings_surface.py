@@ -21,7 +21,7 @@ _REPO_ROOT = Path(__file__).resolve().parents[3]
 
 def test_mcp_cli_advertises_cross_language():
     from click.testing import CliRunner
-    from maverick.cli import main
+    from lightwork.cli import main
 
     runner = CliRunner()
     result = runner.invoke(main, ["mcp", "--help"])

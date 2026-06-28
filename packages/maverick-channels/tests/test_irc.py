@@ -4,7 +4,7 @@ from __future__ import annotations
 import asyncio
 
 import pytest
-from maverick_channels.irc import (
+from lightwork_channels.irc import (
     IRCChannel,
     format_privmsg,
     is_ping,

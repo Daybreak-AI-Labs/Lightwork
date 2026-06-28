@@ -1,7 +1,7 @@
 """Disagreement entropy."""
 from __future__ import annotations
 
-from maverick.disagreement import answer_entropy
+from lightwork.disagreement import answer_entropy
 
 
 class TestAnswerEntropy:

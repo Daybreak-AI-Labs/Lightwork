@@ -1,7 +1,7 @@
 """plugin_lockfile: deterministic plugin pinning lockfile. No network."""
 from __future__ import annotations
 
-from maverick.tools.plugin_lockfile import plugin_lockfile
+from lightwork.tools.plugin_lockfile import plugin_lockfile
 
 
 def _run(**kw):

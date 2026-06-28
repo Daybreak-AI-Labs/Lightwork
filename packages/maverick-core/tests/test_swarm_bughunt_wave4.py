@@ -12,7 +12,7 @@ def _docker_ok(args, **kwargs):
 
 class TestSandboxHardening:
     def test_devcontainer_drops_caps_and_privilege_escalation(self, monkeypatch, tmp_path):
-        from maverick.sandbox.devcontainer import DevcontainerBackend, DevcontainerSpec
+        from lightwork.sandbox.devcontainer import DevcontainerBackend, DevcontainerSpec
         captured = []
 
         def fake_run(args, **kwargs):
@@ -30,7 +30,7 @@ class TestSandboxHardening:
         assert "no-new-privileges" in run_args
 
     def test_firecracker_docker_fallback_drops_caps(self, monkeypatch, tmp_path):
-        from maverick.sandbox import firecracker
+        from lightwork.sandbox import firecracker
         monkeypatch.setattr(firecracker.shutil, "which",
                             lambda _x: "/usr/bin/firecracker")
         captured = []
@@ -55,7 +55,7 @@ class TestCalendarAllDayEvent:
         # date and return a real slot, not raise / report ERROR.
         import datetime as _dt
 
-        from maverick.tools import calendar_tool
+        from lightwork.tools import calendar_tool
 
         class _DT:
             def __init__(self, v):

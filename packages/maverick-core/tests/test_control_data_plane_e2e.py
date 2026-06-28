@@ -5,7 +5,7 @@ agent execution is stubbed at the LLM boundary."""
 from __future__ import annotations
 
 import pytest
-from maverick import control_data_plane_e2e as e2e
+from lightwork import control_data_plane_e2e as e2e
 
 
 @pytest.fixture(autouse=True)
@@ -32,8 +32,8 @@ def test_real_worker_builtin_handler_path(tmp_path, monkeypatch):
     # stub only run_goal_in_thread (the LLM boundary), and have it mutate the
     # shared world the way a real run would, so the default (un-registered)
     # execute path is exercised end-to-end.
-    from maverick import runner
-    from maverick.world_model import WorldModel
+    from lightwork import runner
+    from lightwork.world_model import WorldModel
 
     seen = {}
 

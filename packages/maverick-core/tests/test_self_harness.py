@@ -10,8 +10,8 @@ from __future__ import annotations
 import json
 
 import pytest
-from maverick import self_harness as sh
-from maverick import self_improvement as si
+from lightwork import self_harness as sh
+from lightwork import self_improvement as si
 
 
 def _refl(model_id, fclass, goal, msg="boom"):
@@ -28,7 +28,7 @@ def store(tmp_path):
 
 def test_disabled_by_default(monkeypatch, store):
     monkeypatch.delenv("MAVERICK_SELF_HARNESS", raising=False)
-    monkeypatch.setattr("maverick.config.load_config", dict)
+    monkeypatch.setattr("lightwork.config.load_config", dict)
     assert sh.enabled() is False
     assert sh.recall_addendum("m", store) == ""           # disabled -> no prompt change
     rep = sh.run_self_harness([], model_id="m", path=store)
@@ -193,17 +193,17 @@ def test_count_eligible_matches_mining_filter():
 
 def test_cli_requires_enable(monkeypatch):
     from click.testing import CliRunner
-    from maverick.cli import main
+    from lightwork.cli import main
     monkeypatch.delenv("MAVERICK_SELF_HARNESS", raising=False)
-    monkeypatch.setattr("maverick.config.load_config", dict)
+    monkeypatch.setattr("lightwork.config.load_config", dict)
     res = CliRunner().invoke(main, ["self-harness", "preview", "--model", "m"])
     assert res.exit_code != 0 and "self-harness is off" in res.output
 
 
 def test_cli_reports_mined_weaknesses(monkeypatch, tmp_path):
     from click.testing import CliRunner
-    from maverick import reflexion
-    from maverick.cli import main
+    from lightwork import reflexion
+    from lightwork.cli import main
     monkeypatch.setenv("MAVERICK_SELF_HARNESS", "1")
     p = tmp_path / "r.ndjson"
     for goal in ("export the nightly ledger", "export the ledger again",
@@ -264,15 +264,15 @@ def test_gate_reason_is_surfaced(monkeypatch, store):
 
 
 def test_runner_pass_disabled(monkeypatch):
-    from maverick import self_improvement_runner as runner
+    from lightwork import self_improvement_runner as runner
     monkeypatch.setenv("MAVERICK_SELF_HARNESS", "0")
-    monkeypatch.setattr("maverick.config.load_config", dict)
+    monkeypatch.setattr("lightwork.config.load_config", dict)
     rep = runner.run_self_harness_pass(_three(), model_id="M")
     assert rep.promoted == 0 and rep.mined == 0      # no-op, never raises
 
 
 def test_runner_pass_driven_delegates_to_loop(monkeypatch):
-    from maverick import self_improvement_runner as runner
+    from lightwork import self_improvement_runner as runner
     ctrl = _enable(monkeypatch)                       # sets SELF_HARNESS=1 + SI on
     rep = runner.run_self_harness_pass(
         _three(), model_id="M", controller=ctrl,
@@ -380,7 +380,7 @@ def test_stress_50_rounds_invariants(monkeypatch, tmp_path):
 # ---------- improvements: grounded proposer / LLM proposer / delta-merge / provenance ----------
 
 class _FakeLLM:
-    """Sync stand-in for maverick.llm.LLM.complete (the reflective proposer seam)."""
+    """Sync stand-in for lightwork.llm.LLM.complete (the reflective proposer seam)."""
 
     def __init__(self, text="", raises=False):
         self._text, self._raises = text, raises
@@ -454,7 +454,7 @@ def test_promotion_records_provenance_in_audit(monkeypatch, store):
     # (signature/rationale) and the unseen-split evidence (held_out_delta/samples).
     ctrl = _enable(monkeypatch)
     captured: list = []
-    import maverick.audit as audit
+    import lightwork.audit as audit
     monkeypatch.setattr(audit, "record", lambda kind, **kw: captured.append(kw) or True)
     refl = [_refl("M", "timeout", "export the nightly ledger") for _ in range(3)]
     rep = sh.run_self_harness(

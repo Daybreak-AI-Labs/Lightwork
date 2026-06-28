@@ -12,8 +12,8 @@ import io
 import sys
 
 import pytest
-from maverick_channels import IncomingMessage
-from maverick_channels.cli import CLIChannel
+from lightwork_channels import IncomingMessage
+from lightwork_channels.cli import CLIChannel
 
 
 class _StdinOneShot(io.StringIO):

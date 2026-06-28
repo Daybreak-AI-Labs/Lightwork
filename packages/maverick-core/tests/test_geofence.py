@@ -1,7 +1,7 @@
 """geofence: region allow/deny policy checks."""
 from __future__ import annotations
 
-from maverick.tools.geofence import geofence
+from lightwork.tools.geofence import geofence
 
 
 def _check(region, policy):
@@ -47,7 +47,7 @@ def test_errors():
 
 
 def test_registered():
-    from maverick.tools import base_registry
+    from lightwork.tools import base_registry
 
     class _W:
         pass

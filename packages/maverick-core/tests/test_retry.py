@@ -2,7 +2,7 @@
 from __future__ import annotations
 
 import pytest
-from maverick import retry
+from lightwork import retry
 
 
 def test_max_attempts_clamped_to_at_least_one(monkeypatch):

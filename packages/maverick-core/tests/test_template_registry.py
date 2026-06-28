@@ -7,8 +7,8 @@ from types import SimpleNamespace
 
 import pytest
 from click.testing import CliRunner
-from maverick import catalog, config, skills, templates
-from maverick.cli import main
+from lightwork import catalog, config, skills, templates
+from lightwork.cli import main
 
 _BODY = "---\ntitle: Plan a trip\nparams:\n  - city\n---\nPlan a trip to {{ city }}.\n"
 _SHA = hashlib.sha256(_BODY.encode()).hexdigest()
@@ -136,7 +136,7 @@ def test_catalog_install_shield_rejection_writes_nothing(tmp_path, fake_registry
             assert "Plan a trip" in text
             return _Verdict()
 
-    monkeypatch.setitem(sys.modules, "maverick_shield", SimpleNamespace(Shield=_Shield))
+    monkeypatch.setitem(sys.modules, "lightwork_shield", SimpleNamespace(Shield=_Shield))
 
     with pytest.raises(ValueError, match="template rejected by Shield"):
         templates.install_template_from_catalog(

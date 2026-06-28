@@ -6,7 +6,7 @@ from __future__ import annotations
 import sys
 
 import pytest
-from maverick import behavioral_diff as bd
+from lightwork import behavioral_diff as bd
 
 REFUSAL = "I'm sorry, but I can't help with that request."
 ANSWER = "Sure -- here is a step-by-step plan you can follow."
@@ -98,10 +98,10 @@ class TestFlips:
         assert diff.classifications["p"] == bd.REFUSAL_FLIP
 
     def test_fallback_detector_when_safety_import_fails(self, monkeypatch):
-        # None in sys.modules makes `from maverick.safety.refusal_calibration
+        # None in sys.modules makes `from lightwork.safety.refusal_calibration
         # import is_refusal` raise ImportError -> internal fallback kicks in.
         monkeypatch.setitem(
-            sys.modules, "maverick.safety.refusal_calibration", None)
+            sys.modules, "lightwork.safety.refusal_calibration", None)
         detector = bd._default_refusal_detector()
         assert detector is bd._fallback_is_refusal
         assert detector("I cannot assist with that.")

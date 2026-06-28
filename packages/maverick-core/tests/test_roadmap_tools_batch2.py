@@ -4,9 +4,9 @@ from __future__ import annotations
 
 import textwrap
 
-from maverick.tools.constrained_output import constrained_output
-from maverick.tools.mutation_test import mutation_test
-from maverick.tools.semantic_code_search import semantic_code_search
+from lightwork.tools.constrained_output import constrained_output
+from lightwork.tools.mutation_test import mutation_test
+from lightwork.tools.semantic_code_search import semantic_code_search
 
 # ---- semantic_code_search ----
 
@@ -100,7 +100,7 @@ def test_constrained_non_finite_integer_fails_cleanly():
     # float("inf")/float("-inf") raise OverflowError (not ValueError) from
     # int(); _coerce must catch it and FAIL cleanly rather than leak an
     # exception traceback through the broad _run guard.
-    from maverick.tools.constrained_output import _coerce
+    from lightwork.tools.constrained_output import _coerce
 
     t = constrained_output()
     for v in (float("inf"), float("-inf")):
@@ -133,7 +133,7 @@ def test_constrained_length_and_errors():
 # ---- registration ----
 
 def test_batch2_tools_registered():
-    from maverick.tools import base_registry
+    from lightwork.tools import base_registry
 
     class _W:
         pass

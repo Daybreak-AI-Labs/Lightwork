@@ -1,4 +1,4 @@
-"""Unit tests for the stdlib signed-session cookie (maverick.web_session).
+"""Unit tests for the stdlib signed-session cookie (lightwork.web_session).
 
 These pin the security properties the dashboard browser-login flow relies on:
 a correctly-signed, unexpired cookie round-trips; ANY tampering, expiry, or
@@ -10,7 +10,7 @@ from __future__ import annotations
 import json
 import time
 
-from maverick.web_session import sign_session, verify_session
+from lightwork.web_session import sign_session, verify_session
 
 SECRET = "test-session-secret-0123456789"  # pragma: allowlist secret
 

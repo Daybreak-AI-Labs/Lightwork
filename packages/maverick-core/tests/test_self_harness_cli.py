@@ -15,8 +15,8 @@ import re
 
 import pytest
 from click.testing import CliRunner
-from maverick import self_harness as sh
-from maverick.cli import main
+from lightwork import self_harness as sh
+from lightwork.cli import main
 
 
 @pytest.fixture
@@ -121,7 +121,7 @@ def test_preview_explains_scoped_exclusion(_home):
     # All-scoped failures are excluded by the trace-poisoning guard, so preview
     # must say "0 eligible" + explain why, not a bare "no weaknesses" that reads
     # as "this model never fails".
-    from maverick import reflexion
+    from lightwork import reflexion
     for i in range(4):
         reflexion.record(goal_text=f"export ledger {i}", failure_class="timeout",
                          failure_msg="timed out", reflection="x",
@@ -135,7 +135,7 @@ def test_preview_explains_scoped_exclusion(_home):
 def test_preview_counts_eligible_unscoped(_home):
     # Unscoped failures ARE eligible; if they just don't meet min-support, the
     # count reflects that (and no scoped-exclusion note is shown).
-    from maverick import reflexion
+    from lightwork import reflexion
     for i in range(4):
         reflexion.record(goal_text=f"export ledger {i}", failure_class="timeout",
                          failure_msg="timed out", reflection="x", model_id="claude-x")

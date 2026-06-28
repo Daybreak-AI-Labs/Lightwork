@@ -1,7 +1,7 @@
 """Out-of-process model proxy: key injection, header scrubbing, SSRF guard."""
 from __future__ import annotations
 
-from maverick import model_proxy as mp
+from lightwork import model_proxy as mp
 
 
 class _FakeResp:
@@ -144,7 +144,7 @@ def test_custom_allowed_routes_can_enable_provider_specific_path():
     cfg = _cfg(allowed_routes=frozenset({"GET /v1/models"}))
     status, _, _ = mp.handle(
         cfg, "GET", "/v1/models",
-        {"x-maverick-proxy-token": "CLIENT-TOKEN"}, b"", client=client)
+        {"x-lightwork-proxy-token": "CLIENT-TOKEN"}, b"", client=client)
     assert status == 200
     assert client.calls[0]["url"] == "https://api.anthropic.com/v1/models"
 

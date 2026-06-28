@@ -1,6 +1,6 @@
 """REST API endpoint tests.
 
-v0.1.6: the BackgroundTask runner is now `maverick.runner.run_goal_in_thread`
+v0.1.6: the BackgroundTask runner is now `lightwork.runner.run_goal_in_thread`
 with signature ``(goal_id, max_dollars, max_wall_seconds, max_depth)``,
 so the create_returns_pending monkeypatch takes 4 positional args (was 1).
 """
@@ -8,7 +8,7 @@ from __future__ import annotations
 
 import pytest
 from fastapi.testclient import TestClient
-from maverick_dashboard.app import app
+from lightwork_dashboard.app import app
 
 # Same-origin default: mutating /api/v1 requests in no-token (loopback) mode
 # must carry a matching Origin, the CSRF contract the dashboard enforces
@@ -21,7 +21,7 @@ client = TestClient(app, headers={"Origin": "http://testserver"})
 
 @pytest.fixture(autouse=True)
 def _isolated_world(tmp_path, monkeypatch):
-    from maverick import world_model
+    from lightwork import world_model
     monkeypatch.setattr(world_model, "DEFAULT_DB", tmp_path / "world.db")
     yield
 
@@ -37,7 +37,7 @@ class TestGoals:
         monkeypatch.setenv("ANTHROPIC_API_KEY", "sk-ant-fake")
         # Patch the shared runner so we don't actually call Anthropic.
         # The new signature is (goal_id, max_dollars, max_wall_seconds, max_depth).
-        import maverick.runner as runner_mod
+        import lightwork.runner as runner_mod
         called = []
         def fake_run(goal_id, max_dollars=2.0, max_wall_seconds=1800.0, max_depth=3):
             called.append((goal_id, max_dollars, max_wall_seconds, max_depth))
@@ -60,7 +60,7 @@ class TestGoals:
         # A retried POST carrying the same Idempotency-Key must return the
         # ORIGINAL goal and dispatch only one run (no double-create/double-bill).
         monkeypatch.setenv("ANTHROPIC_API_KEY", "sk-ant-fake")
-        import maverick.runner as runner_mod
+        import lightwork.runner as runner_mod
         called = []
         monkeypatch.setattr(
             runner_mod, "run_goal_in_thread",
@@ -75,7 +75,7 @@ class TestGoals:
 
     def test_distinct_idempotency_keys_create_distinct_goals(self, monkeypatch):
         monkeypatch.setenv("ANTHROPIC_API_KEY", "sk-ant-fake")
-        import maverick.runner as runner_mod
+        import lightwork.runner as runner_mod
         monkeypatch.setattr(runner_mod, "run_goal_in_thread", lambda *a, **k: None)
         r1 = client.post("/api/v1/goals", json={"title": "g"}, headers={"Idempotency-Key": "k1"})
         r2 = client.post("/api/v1/goals", json={"title": "g"}, headers={"Idempotency-Key": "k2"})
@@ -139,7 +139,7 @@ class TestAnswer:
     """POST /api/v1/goals/{id}/answer now takes a JSON body (v0.1.6)."""
 
     def test_answer_unknown_question_404(self, tmp_path, monkeypatch):
-        from maverick import world_model
+        from lightwork import world_model
         monkeypatch.setattr(world_model, "DEFAULT_DB", tmp_path / "world.db")
         w = world_model.WorldModel(tmp_path / "world.db")
         gid = w.create_goal("test", "")
@@ -150,7 +150,7 @@ class TestAnswer:
         assert resp.status_code == 404
 
     def test_answer_missing_body_422(self, tmp_path, monkeypatch):
-        from maverick import world_model
+        from lightwork import world_model
         monkeypatch.setattr(world_model, "DEFAULT_DB", tmp_path / "world.db")
         w = world_model.WorldModel(tmp_path / "world.db")
         gid = w.create_goal("test", "")
@@ -163,11 +163,11 @@ class TestAttachments:
     def test_upload_text_then_list(self, tmp_path, monkeypatch):
         monkeypatch.setenv("MAVERICK_ATTACH_MAX_FILE_BYTES", "1000000")
         # Attachment bytes land on disk; route to tmp_path so tests don't
-        # litter ~/.maverick.
-        import maverick.attachments as att_mod
+        # litter ~/.lightwork.
+        import lightwork.attachments as att_mod
         monkeypatch.setattr(att_mod, "DEFAULT_ROOT", tmp_path / "att")
 
-        from maverick.world_model import DEFAULT_DB, WorldModel
+        from lightwork.world_model import DEFAULT_DB, WorldModel
         wm = WorldModel(DEFAULT_DB)
         gid = wm.create_goal("attach", "")
 
@@ -189,9 +189,9 @@ class TestAttachments:
         assert items[0]["filename"] == "hello.txt"
 
     def test_upload_rejects_disallowed_mime(self, tmp_path, monkeypatch):
-        import maverick.attachments as att_mod
+        import lightwork.attachments as att_mod
         monkeypatch.setattr(att_mod, "DEFAULT_ROOT", tmp_path / "att")
-        from maverick.world_model import DEFAULT_DB, WorldModel
+        from lightwork.world_model import DEFAULT_DB, WorldModel
         wm = WorldModel(DEFAULT_DB)
         gid = wm.create_goal("attach", "")
 
@@ -207,7 +207,7 @@ class TestAttachments:
     def test_upload_reads_with_size_cap(self, monkeypatch):
         import asyncio
 
-        from maverick_dashboard import api as api_mod
+        from lightwork_dashboard import api as api_mod
 
         class _World:
             def get_goal(self, goal_id):
@@ -245,8 +245,8 @@ class TestAttachments:
             called["data"] = data
             return _Stored()
 
-        monkeypatch.setattr("maverick.attachments.store", _store)
-        monkeypatch.setattr("maverick.attachments.MAX_FILE_BYTES", 7)
+        monkeypatch.setattr("lightwork.attachments.store", _store)
+        monkeypatch.setattr("lightwork.attachments.MAX_FILE_BYTES", 7)
 
         f = _File()
         # upload_attachment now takes the Request first (for owner scoping); a
@@ -330,7 +330,7 @@ class TestSpend:
 class TestSecurityRegister:
     @pytest.fixture(autouse=True)
     def _clear_security_cache(self):
-        from maverick_dashboard import api
+        from lightwork_dashboard import api
         api._security_register_cache = None
 
     def test_returns_posture_hunt_and_remediation(self):
@@ -344,7 +344,7 @@ class TestSecurityRegister:
         assert isinstance(data["remediation"]["gaps"], list)
 
     def test_security_register_bounds_hunt_and_avoids_second_scan(self, monkeypatch):
-        from maverick.threat_hunt import ThreatReport
+        from lightwork.threat_hunt import ThreatReport
 
         hunt_calls = []
         plan_calls = []
@@ -361,8 +361,8 @@ class TestSecurityRegister:
                 gaps = []
             return P()
 
-        monkeypatch.setattr("maverick.threat_hunt.hunt", fake_hunt)
-        monkeypatch.setattr("maverick.remediation.plan", fake_plan)
+        monkeypatch.setattr("lightwork.threat_hunt.hunt", fake_hunt)
+        monkeypatch.setattr("lightwork.remediation.plan", fake_plan)
 
         resp = client.get("/api/v1/security")
         assert resp.status_code == 200
@@ -475,7 +475,7 @@ class TestMetrics:
         """
         monkeypatch.setenv("MAVERICK_DASHBOARD_TOKEN", "s3cr3t")
         # Point DEFAULT_DB at an unwritable path so the DB check fails.
-        from maverick import world_model
+        from lightwork import world_model
         bad_path = tmp_path / "subdir-that-does-not-exist" / "world.db"
         monkeypatch.setattr(world_model, "DEFAULT_DB", bad_path)
 

@@ -4,8 +4,8 @@ from __future__ import annotations
 import asyncio
 
 from click.testing import CliRunner
-from maverick.cli import main
-from maverick.controls import CONTROLS, find_controls, render_control
+from lightwork.cli import main
+from lightwork.controls import CONTROLS, find_controls, render_control
 
 
 def test_find_controls_matches_by_keyword():
@@ -33,7 +33,7 @@ def test_render_control_cites_multiple_frameworks():
 
 
 def test_find_controls_tool_runs():
-    from maverick.tools.control_tools import find_controls_tool
+    from lightwork.tools.control_tools import find_controls_tool
 
     tool = find_controls_tool()
     assert tool.name == "find_controls"
@@ -44,14 +44,14 @@ def test_find_controls_tool_runs():
 
 def test_find_controls_is_low_risk():
     # Low risk so it survives the privacy analyst pack's max_risk = "low" clamp.
-    from maverick.safety.tool_risk import tool_risk
+    from lightwork.safety.tool_risk import tool_risk
     assert tool_risk("find_controls") == "low"
 
 
 def test_privacy_analyst_pack_grants_find_controls():
     from pathlib import Path
 
-    from maverick import domain as dom
+    from lightwork import domain as dom
 
     pack = dom.load_domain(
         Path(dom.__file__).parent / "domains" / "privacy_compliance.toml"
@@ -67,6 +67,6 @@ def test_cli_controls():
 def test_find_controls_tool_tolerates_a_non_integer_limit():
     import asyncio
 
-    from maverick.tools.control_tools import find_controls_tool
+    from lightwork.tools.control_tools import find_controls_tool
     out = asyncio.run(find_controls_tool().fn({"query": "dpa", "limit": "abc"}))
     assert "VN-1" in out          # bad limit -> default, not a crash

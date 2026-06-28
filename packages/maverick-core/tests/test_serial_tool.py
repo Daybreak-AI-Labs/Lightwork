@@ -4,7 +4,7 @@ from __future__ import annotations
 import sys
 import types
 
-from maverick.tools.serial_tool import _valid_port, serial_tool
+from lightwork.tools.serial_tool import _valid_port, serial_tool
 
 
 def _install_fake_serial(monkeypatch, *, read_data=b"", ports=()):
@@ -126,7 +126,7 @@ def test_unknown_op(monkeypatch):
 
 
 def test_registered():
-    from maverick.tools import base_registry
+    from lightwork.tools import base_registry
 
     class _W:
         pass

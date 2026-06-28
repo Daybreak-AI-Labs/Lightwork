@@ -6,8 +6,8 @@ import pytest
 
 pytest.importorskip("cryptography")
 
-from maverick import plugins  # noqa: E402
-from maverick.plugin_ca import PluginCA  # noqa: E402
+from lightwork import plugins  # noqa: E402
+from lightwork.plugin_ca import PluginCA  # noqa: E402
 
 
 @pytest.fixture
@@ -26,7 +26,7 @@ def _ca_at_home() -> PluginCA:
 
 def _config(root_pub: str, monkeypatch):
     monkeypatch.setattr(
-        "maverick.config.load_config",
+        "lightwork.config.load_config",
         lambda *a, **k: {"plugins": {"ca_root_pubkey": root_pub,
                                      "require_signing": True}})
 

@@ -1,13 +1,13 @@
 """Local skill distillation (ROADMAP 2028 H2)."""
 from __future__ import annotations
 
-from maverick.skill.distillation_local import (
+from lightwork.skill.distillation_local import (
     distill,
     distill_and_save,
     save_skill,
     to_skill_markdown,
 )
-from maverick.skills import validate_skill_file
+from lightwork.skills import validate_skill_file
 
 _TRAJ = [
     {"goal": "Research competitor pricing and summarize findings", "success": True,
@@ -65,7 +65,7 @@ def test_to_markdown_carries_provenance():
 
 def test_provenance_round_trips_and_validates(tmp_path):
     # Provenance frontmatter must break neither the validator nor the parser.
-    from maverick.skills import Skill
+    from lightwork.skills import Skill
     skill = {**distill(_TRAJ), "distilled_at": "2026-01-02T03:04:05Z"}
     path = save_skill(skill, tmp_path)
     assert validate_skill_file(path).ok

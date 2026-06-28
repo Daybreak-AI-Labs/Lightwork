@@ -22,7 +22,7 @@ pytestmark = pytest.mark.skipif(
 @pytest.fixture
 def temporal_world(monkeypatch):
     monkeypatch.setenv("MAVERICK_TEMPORAL_MEMORY", "1")
-    from maverick.world_model_backends.postgres import PostgresWorldModel
+    from lightwork.world_model_backends.postgres import PostgresWorldModel
     w = PostgresWorldModel(dsn=_DSN)
     # Isolate each test under a unique key prefix (the DB is shared/persistent).
     w._kp = f"th-{int(time.time()*1e6)}-"

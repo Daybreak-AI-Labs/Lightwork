@@ -11,7 +11,7 @@ import time
 from types import SimpleNamespace
 
 import pytest
-from maverick import proof_pack
+from lightwork import proof_pack
 
 
 class _FakeWorld:
@@ -38,14 +38,14 @@ class _FakeWorld:
 
 def test_build_runs_hard_sections_and_is_honest(monkeypatch, tmp_path):
     # Deterministic: no provider key -> benchmarks NOT_RUN.
-    monkeypatch.setattr("maverick.config.any_provider_configured", lambda: False)
+    monkeypatch.setattr("lightwork.config.any_provider_configured", lambda: False)
 
-    from maverick.world_model import WorldModel
+    from lightwork.world_model import WorldModel
     world = WorldModel(tmp_path / "world.db")  # empty -> learning INSUFFICIENT_DATA
     manifest = proof_pack.build(world=world)
     world.close()
 
-    assert manifest["kind"] == "maverick-proof-pack"
+    assert manifest["kind"] == "lightwork-proof-pack"
     secs = manifest["sections"]
     assert set(secs) == {"governance", "reliability", "perf_sla", "shield_asr",
                          "learning_curve", "benchmarks"}
@@ -93,7 +93,7 @@ def test_signature_is_tamper_evident():
     from cryptography.exceptions import InvalidSignature
     from cryptography.hazmat.primitives.asymmetric import ed25519
 
-    manifest = {"kind": "maverick-proof-pack", "version": 1, "passed": True,
+    manifest = {"kind": "lightwork-proof-pack", "version": 1, "passed": True,
                 "sections": {}, "issued_at": 0.0}
     signed = proof_pack.sign(dict(manifest))
     sig = signed.get("signature")
@@ -129,7 +129,7 @@ def test_render_markdown_is_executive_readable():
 
 def test_ci_gate_fails_on_hard_failure(monkeypatch, tmp_path):
     base = {
-        "kind": "maverick-proof-pack", "version": 1, "issued_at": 0.0,
+        "kind": "lightwork-proof-pack", "version": 1, "issued_at": 0.0,
         "environment": {}, "hard_sections": ["governance"],
         "sections": {"governance": {"status": "FAIL", "summary": "broke",
                                     "hard": True, "data": {}}},
@@ -151,7 +151,7 @@ class TestVerify:
     """Council H6: the proof manifest must have a shipped, fail-closed verifier."""
 
     def _signed(self):
-        m = {"kind": "maverick-proof-pack", "version": 1, "issued_at": 1.0,
+        m = {"kind": "lightwork-proof-pack", "version": 1, "issued_at": 1.0,
              "sections": {}, "hard_sections": [], "passed": True}
         return proof_pack.sign(m)
 

@@ -1,7 +1,7 @@
 """Live-DOM diff (ROADMAP 2028 H1)."""
 from __future__ import annotations
 
-from maverick.dom_diff import diff_html, render_diff
+from lightwork.dom_diff import diff_html, render_diff
 
 
 def test_no_change():

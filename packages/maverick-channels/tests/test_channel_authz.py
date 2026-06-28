@@ -14,7 +14,7 @@ is dependency-free and always exercised.
 from __future__ import annotations
 
 import pytest
-from maverick_channels.base import is_allowed, normalize_allowlist
+from lightwork_channels.base import is_allowed, normalize_allowlist
 
 
 async def _noop(_):
@@ -49,7 +49,7 @@ def test_normalize_allowlist_from_arg_and_env(monkeypatch):
 # --- per-channel: construction is fail-closed ------------------------------
 
 def test_signal_requires_allowlist():
-    from maverick_channels.signal import SignalChannel
+    from lightwork_channels.signal import SignalChannel
     with pytest.raises(ValueError, match="SIGNAL_ALLOWED_USER_IDS"):
         SignalChannel(
             handler=_noop, phone_number="+12345550199", allowed_user_ids=set(),
@@ -57,7 +57,7 @@ def test_signal_requires_allowlist():
 
 
 def test_signal_stores_allowlist_and_denies_non_member():
-    from maverick_channels.signal import SignalChannel
+    from lightwork_channels.signal import SignalChannel
     # Pass an existing path so construction gets past the signal-cli probe.
     chan = SignalChannel(
         handler=_noop,
@@ -70,7 +70,7 @@ def test_signal_stores_allowlist_and_denies_non_member():
 
 
 def test_slack_requires_allowlist():
-    slack = pytest.importorskip("maverick_channels.slack")
+    slack = pytest.importorskip("lightwork_channels.slack")
     if not slack._HAVE_SLACK:
         pytest.skip("slack_sdk not installed")
     with pytest.raises(ValueError, match="SLACK_ALLOWED_USER_IDS"):
@@ -81,7 +81,7 @@ def test_slack_requires_allowlist():
 
 
 def test_matrix_requires_allowlist():
-    matrix = pytest.importorskip("maverick_channels.matrix")
+    matrix = pytest.importorskip("lightwork_channels.matrix")
     if not matrix._HAVE_MATRIX:
         pytest.skip("matrix-nio not installed")
     with pytest.raises(ValueError, match="MATRIX_ALLOWED_USER_IDS"):
@@ -110,7 +110,7 @@ def _have_twilio() -> bool:
 
 @pytest.mark.skipif(not _have_twilio(), reason="fastapi+twilio not installed")
 def test_sms_requires_allowlist():
-    from maverick_channels.sms import SMSChannel
+    from lightwork_channels.sms import SMSChannel
     with pytest.raises(ValueError, match="SMS_ALLOWED_USER_IDS"):
         SMSChannel(
             handler=_noop, account_sid="ACx", auth_token="tok",
@@ -120,7 +120,7 @@ def test_sms_requires_allowlist():
 
 @pytest.mark.skipif(not _have_twilio(), reason="fastapi+twilio not installed")
 def test_whatsapp_requires_allowlist():
-    from maverick_channels.whatsapp import WhatsAppChannel
+    from lightwork_channels.whatsapp import WhatsAppChannel
     with pytest.raises(ValueError, match="WHATSAPP_ALLOWED_USER_IDS"):
         WhatsAppChannel(
             handler=_noop, account_sid="ACx", auth_token="tok",
@@ -133,7 +133,7 @@ def test_sms_webhook_rejects_unauthorized_sender():
     """End-to-end: a signature-valid POST from a non-allowlisted number is
     refused (403) and never reaches the handler; an allowlisted number runs."""
     from fastapi.testclient import TestClient
-    from maverick_channels.sms import SMSChannel
+    from lightwork_channels.sms import SMSChannel
 
     seen = []
 
@@ -172,7 +172,7 @@ def test_sms_webhook_rejects_unauthorized_sender():
 @pytest.mark.skipif(not _have_twilio(), reason="fastapi+twilio not installed")
 def test_whatsapp_webhook_rejects_unauthorized_sender():
     from fastapi.testclient import TestClient
-    from maverick_channels.whatsapp import WhatsAppChannel
+    from lightwork_channels.whatsapp import WhatsAppChannel
 
     seen = []
 
@@ -252,9 +252,9 @@ class _FakeWorldModel:
 
 @pytest.mark.skipif(not _have_twilio(), reason="fastapi+twilio not installed")
 def test_sms_marks_processed_before_send_and_survives_send_failure(monkeypatch):
-    import maverick.world_model as _wm
+    import lightwork.world_model as _wm
     from fastapi.testclient import TestClient
-    from maverick_channels.sms import SMSChannel
+    from lightwork_channels.sms import SMSChannel
 
     _FakeWorldModel.instances = []
     monkeypatch.setattr(_wm, "WorldModel", _FakeWorldModel)
@@ -291,9 +291,9 @@ def test_sms_marks_processed_before_send_and_survives_send_failure(monkeypatch):
 
 @pytest.mark.skipif(not _have_twilio(), reason="fastapi+twilio not installed")
 def test_sms_does_not_mark_processed_on_handler_failure(monkeypatch):
-    import maverick.world_model as _wm
+    import lightwork.world_model as _wm
     from fastapi.testclient import TestClient
-    from maverick_channels.sms import SMSChannel
+    from lightwork_channels.sms import SMSChannel
 
     _FakeWorldModel.instances = []
     monkeypatch.setattr(_wm, "WorldModel", _FakeWorldModel)
@@ -326,9 +326,9 @@ def test_sms_does_not_mark_processed_on_handler_failure(monkeypatch):
 
 @pytest.mark.skipif(not _have_twilio(), reason="fastapi+twilio not installed")
 def test_whatsapp_marks_processed_before_send_and_survives_send_failure(monkeypatch):
-    import maverick.world_model as _wm
+    import lightwork.world_model as _wm
     from fastapi.testclient import TestClient
-    from maverick_channels.whatsapp import WhatsAppChannel
+    from lightwork_channels.whatsapp import WhatsAppChannel
 
     _FakeWorldModel.instances = []
     monkeypatch.setattr(_wm, "WorldModel", _FakeWorldModel)
@@ -392,7 +392,7 @@ class _FakeUpdate:
 
 @pytest.mark.skipif(not _have_telegram(), reason="python-telegram-bot not installed")
 def test_telegram_group_requires_allowlisted_sender():
-    from maverick_channels.telegram import TelegramChannel
+    from lightwork_channels.telegram import TelegramChannel
 
     chan = TelegramChannel(
         handler=_noop,
@@ -412,7 +412,7 @@ def test_telegram_group_requires_allowlisted_sender():
 
 @pytest.mark.skipif(not _have_telegram(), reason="python-telegram-bot not installed")
 def test_telegram_private_chat_allowlist_authorizes():
-    from maverick_channels.telegram import TelegramChannel
+    from lightwork_channels.telegram import TelegramChannel
 
     # Chat-only allowlist for a PRIVATE chat is fine: one sender == one chat.
     chan = TelegramChannel(
@@ -437,7 +437,7 @@ def _have_voice_deps() -> bool:
 @pytest.mark.skipif(not _have_voice_deps(), reason="fastapi+httpx not installed")
 def test_voice_allowlist_blocks_unauthorized_caller(monkeypatch):
     from fastapi.testclient import TestClient
-    from maverick_channels.voice import VoiceChannel
+    from lightwork_channels.voice import VoiceChannel
 
     seen = []
 
@@ -474,7 +474,7 @@ def test_voice_allowlist_blocks_unauthorized_caller(monkeypatch):
 def test_voice_without_allowlist_allows_any_authenticated_caller(monkeypatch):
     """Back-compat: with no allowlist, the bearer is the gate (any caller)."""
     from fastapi.testclient import TestClient
-    from maverick_channels.voice import VoiceChannel
+    from lightwork_channels.voice import VoiceChannel
 
     async def _handler(_):
         return "ran"

@@ -5,9 +5,9 @@ from __future__ import annotations
 import importlib.util
 
 import pytest
-from maverick import crypto_at_rest as car
-from maverick.audit import signing
-from maverick.audit.signing import AuditSigner
+from lightwork import crypto_at_rest as car
+from lightwork.audit import signing
+from lightwork.audit.signing import AuditSigner
 
 requires_crypto = pytest.mark.skipif(
     importlib.util.find_spec("cryptography") is None,
@@ -19,7 +19,7 @@ requires_crypto = pytest.mark.skipif(
 def _isolate(monkeypatch, tmp_path):
     for v in ("MAVERICK_ENCRYPT_AT_REST", "MAVERICK_ENCRYPTION_KEY", "MAVERICK_ENTERPRISE"):
         monkeypatch.delenv(v, raising=False)
-    monkeypatch.setattr("maverick.config.load_config", lambda *a, **k: {})
+    monkeypatch.setattr("lightwork.config.load_config", lambda *a, **k: {})
     monkeypatch.setattr(car, "_KEY_PATH", tmp_path / "atrest.key")
     monkeypatch.setattr(signing, "KEY_DIR", tmp_path / "keys")
 
@@ -32,9 +32,9 @@ def _signed_day(audit_dir, day, events):
 
 @requires_crypto
 def test_seal_reads_and_verify_stay_transparent(monkeypatch, tmp_path):
-    from maverick.audit.export import iter_audit_events
-    from maverick.audit.sealing import seal_closed_segments, segment_text
-    from maverick.crypto_at_rest import is_sealed
+    from lightwork.audit.export import iter_audit_events
+    from lightwork.audit.sealing import seal_closed_segments, segment_text
+    from lightwork.crypto_at_rest import is_sealed
 
     audit_dir = tmp_path / "audit"
     audit_dir.mkdir()
@@ -59,7 +59,7 @@ def test_seal_reads_and_verify_stay_transparent(monkeypatch, tmp_path):
 
     # Reads decrypt transparently.
     assert "SECRET-PAYLOAD-x" in segment_text(closed)
-    monkeypatch.setattr("maverick.paths.data_dir", lambda *a, **k: audit_dir)
+    monkeypatch.setattr("lightwork.paths.data_dir", lambda *a, **k: audit_dir)
     kinds = {e["kind"] for e in iter_audit_events(all_days=True)}
     assert {"egress_blocked", "tool_call"} <= kinds
 
@@ -70,8 +70,8 @@ def test_seal_reads_and_verify_stay_transparent(monkeypatch, tmp_path):
 
 @requires_crypto
 def test_seal_is_idempotent_and_refuses_without_at_rest(monkeypatch, tmp_path):
-    from maverick.audit.sealing import seal_closed_segments
-    from maverick.crypto_at_rest import EncryptionUnavailable
+    from lightwork.audit.sealing import seal_closed_segments
+    from lightwork.crypto_at_rest import EncryptionUnavailable
 
     audit_dir = tmp_path / "audit"
     audit_dir.mkdir()
@@ -89,8 +89,8 @@ def test_seal_is_idempotent_and_refuses_without_at_rest(monkeypatch, tmp_path):
 
 @requires_crypto
 def test_dry_run_writes_nothing(monkeypatch, tmp_path):
-    from maverick.audit.sealing import seal_closed_segments
-    from maverick.crypto_at_rest import is_sealed
+    from lightwork.audit.sealing import seal_closed_segments
+    from lightwork.crypto_at_rest import is_sealed
 
     audit_dir = tmp_path / "audit"
     audit_dir.mkdir()
@@ -104,7 +104,7 @@ def test_dry_run_writes_nothing(monkeypatch, tmp_path):
 
 @requires_crypto
 def test_verify_chain_fails_closed_on_corrupt_sealed_segment(monkeypatch, tmp_path):
-    from maverick.audit.sealing import SegmentReadError, seal_closed_segments, segment_text
+    from lightwork.audit.sealing import SegmentReadError, seal_closed_segments, segment_text
 
     audit_dir = tmp_path / "audit"
     audit_dir.mkdir()

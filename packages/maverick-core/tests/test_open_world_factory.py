@@ -18,7 +18,7 @@ def test_open_world_defaults_to_sqlite(tmp_path, monkeypatch):
     monkeypatch.delenv("MAVERICK_WORLD_BACKEND", raising=False)
     monkeypatch.setenv("HOME", str(tmp_path))  # no config.toml here
 
-    from maverick.world_model import WorldModel, open_world
+    from lightwork.world_model import WorldModel, open_world
 
     db = tmp_path / "world.db"
     world = open_world(db)
@@ -32,13 +32,13 @@ def test_open_world_defaults_to_sqlite(tmp_path, monkeypatch):
 def test_open_world_selects_postgres_when_configured(monkeypatch):
     """backend=postgres -> PostgresWorldModel, via the lazily-imported
     factory, without opening SQLite or a real PG connection."""
-    import maverick.world_model_backends as backends
+    import lightwork.world_model_backends as backends
 
     sentinel = object()
     monkeypatch.setattr(backends, "is_postgres_configured", lambda: True)
     monkeypatch.setattr(backends, "open_postgres_world", lambda: sentinel)
 
-    from maverick.world_model import open_world
+    from lightwork.world_model import open_world
 
     # path is ignored for the postgres branch.
     assert open_world() is sentinel
@@ -53,8 +53,8 @@ def test_open_world_no_path_floors_to_client(tmp_path, monkeypatch):
     monkeypatch.setenv("MAVERICK_CLIENT_ID", "acme")
     monkeypatch.delenv("MAVERICK_TENANT", raising=False)
 
-    from maverick import client
-    from maverick.world_model import DEFAULT_DB, open_world, world_for_tenant
+    from lightwork import client
+    from lightwork.world_model import DEFAULT_DB, open_world, world_for_tenant
 
     client.reset_client_cache()
     try:
@@ -73,8 +73,8 @@ def test_open_world_no_path_unbound_uses_default(tmp_path, monkeypatch):
     monkeypatch.delenv("MAVERICK_CLIENT_ID", raising=False)
     monkeypatch.delenv("MAVERICK_TENANT", raising=False)
 
-    import maverick.world_model as wm
-    from maverick import client
+    import lightwork.world_model as wm
+    from lightwork import client
 
     default_db = tmp_path / "world.db"
     monkeypatch.setattr(wm, "DEFAULT_DB", default_db)
@@ -96,13 +96,13 @@ def test_open_world_returns_real_postgres_model(monkeypatch):
     monkeypatch.setenv("MAVERICK_WORLD_BACKEND", "postgres")
     monkeypatch.setenv("MAVERICK_PG_DSN", "postgres://test")
 
-    from maverick.world_model_backends import PostgresWorldModel
+    from lightwork.world_model_backends import PostgresWorldModel
 
     monkeypatch.setattr(PostgresWorldModel, "_migrate", lambda self: None)
     import psycopg
     monkeypatch.setattr(psycopg, "connect", lambda *a, **k: object())
 
-    from maverick.world_model import open_world
+    from lightwork.world_model import open_world
 
     world = open_world()
     assert isinstance(world, PostgresWorldModel)

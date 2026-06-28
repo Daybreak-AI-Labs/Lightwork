@@ -3,7 +3,7 @@ from __future__ import annotations
 
 import json
 
-from maverick.tools.autogen_adapter import autogen_adapter
+from lightwork.tools.autogen_adapter import autogen_adapter
 
 
 def _run(**kw):

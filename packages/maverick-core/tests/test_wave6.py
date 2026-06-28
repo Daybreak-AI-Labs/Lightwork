@@ -8,7 +8,7 @@ import pytest
 
 class TestCrossFamilyVerifier:
     def test_provider_extraction(self):
-        from maverick.verifier import _provider
+        from lightwork.verifier import _provider
         assert _provider("claude-opus-4-7") == "anthropic"
         assert _provider("anthropic:claude-opus-4-7") == "anthropic"
         assert _provider("openai:gpt-5.4") == "openai"
@@ -19,19 +19,19 @@ class TestCrossFamilyVerifier:
         assert _provider("grok-4.3") == "xai"
 
     def test_same_family_detection(self):
-        from maverick.verifier import _same_family
+        from lightwork.verifier import _same_family
         assert _same_family("claude-opus-4-7", "claude-sonnet-4-6") is True
         assert _same_family("anthropic:claude-opus-4-7", "claude-sonnet-4-6") is True
         assert _same_family("claude-opus-4-7", "gpt-5.4") is False
 
     def test_cross_family_fallback_default_is_none(self):
         """No implicit cross-provider swap without explicit operator opt-in."""
-        from maverick.verifier import _cross_family_fallback
+        from lightwork.verifier import _cross_family_fallback
         assert _cross_family_fallback("claude-opus-4-7") is None
         assert _cross_family_fallback("gpt-5.4") is None
 
     def test_cross_family_env_override(self, monkeypatch):
-        from maverick.verifier import _cross_family_fallback
+        from lightwork.verifier import _cross_family_fallback
         monkeypatch.setenv("MAVERICK_CROSS_FAMILY_VERIFIER", "deepseek:deepseek-v4-pro")
         assert _cross_family_fallback("claude-opus-4-7") == "deepseek:deepseek-v4-pro"
 
@@ -39,8 +39,8 @@ class TestCrossFamilyVerifier:
     async def test_verifier_swaps_family_when_proposer_passed(
         self, fake_llm, make_llm_response,
     ):
-        from maverick.budget import Budget
-        from maverick.verifier import verify_proposal
+        from lightwork.budget import Budget
+        from lightwork.verifier import verify_proposal
         fake_llm.scripted = [make_llm_response(
             text='{"confidence": 0.9, "accepts": true, "critique": "", "issues": []}',
         )]
@@ -62,12 +62,12 @@ class TestCrossFamilyVerifier:
 
 class TestMCPInputSanitization:
     def test_rejects_newline_in_command(self):
-        from maverick.mcp_client import MCPServerSpec
+        from lightwork.mcp_client import MCPServerSpec
         with pytest.raises(ValueError, match="illegal char"):
             MCPServerSpec(name="x", command="evil\nrm -rf /")
 
     def test_rejects_shell_meta_in_command(self):
-        from maverick.mcp_client import MCPServerSpec
+        from lightwork.mcp_client import MCPServerSpec
         with pytest.raises(ValueError, match="shell metacharacter"):
             MCPServerSpec(name="x", command="legit; curl evil.com")
         with pytest.raises(ValueError, match="shell metacharacter"):
@@ -76,12 +76,12 @@ class TestMCPInputSanitization:
             MCPServerSpec(name="x", command="$(curl evil.com)")
 
     def test_rejects_newline_in_arg(self):
-        from maverick.mcp_client import MCPServerSpec
+        from lightwork.mcp_client import MCPServerSpec
         with pytest.raises(ValueError, match="arg #0"):
             MCPServerSpec(name="x", command="npx", args=["--foo\nbar"])
 
     def test_rejects_bad_env_key(self):
-        from maverick.mcp_client import MCPServerSpec
+        from lightwork.mcp_client import MCPServerSpec
         with pytest.raises(ValueError, match="env key"):
             MCPServerSpec(name="x", command="npx",
                           env={"BAD KEY": "value"})
@@ -90,13 +90,13 @@ class TestMCPInputSanitization:
                           env={"1FOO": "v"})  # starts with digit
 
     def test_rejects_newline_in_env_value(self):
-        from maverick.mcp_client import MCPServerSpec
+        from lightwork.mcp_client import MCPServerSpec
         with pytest.raises(ValueError, match=r"env\[FOO\]"):
             MCPServerSpec(name="x", command="npx",
                           env={"FOO": "value\ninjected"})
 
     def test_allows_well_formed_spec(self):
-        from maverick.mcp_client import MCPServerSpec
+        from lightwork.mcp_client import MCPServerSpec
         spec = MCPServerSpec(
             name="filesystem",
             command="npx",
@@ -106,7 +106,7 @@ class TestMCPInputSanitization:
         assert spec.name == "filesystem"
 
     def test_absolute_path_command_allowed(self):
-        from maverick.mcp_client import MCPServerSpec
+        from lightwork.mcp_client import MCPServerSpec
         spec = MCPServerSpec(name="x", command="/usr/local/bin/mcp-tool")
         assert spec.command == "/usr/local/bin/mcp-tool"
 
@@ -116,7 +116,7 @@ class TestMCPPinSha256:
         """When the pin hash matches the actual executable, start proceeds."""
         import hashlib
 
-        from maverick.mcp_client import MCPServerSpec, _verify_command_pin
+        from lightwork.mcp_client import MCPServerSpec, _verify_command_pin
         exe = tmp_path / "mcp-tool"
         exe.write_bytes(b"#!/bin/sh\necho 'ok'\n")
         exe.chmod(0o755)
@@ -128,7 +128,7 @@ class TestMCPPinSha256:
         _verify_command_pin(spec)
 
     def test_pin_mismatch_raises(self, tmp_path):
-        from maverick.mcp_client import (
+        from lightwork.mcp_client import (
             MCPClientError,
             MCPServerSpec,
             _verify_command_pin,
@@ -144,7 +144,7 @@ class TestMCPPinSha256:
             _verify_command_pin(spec)
 
     def test_pin_none_skips_check(self, tmp_path):
-        from maverick.mcp_client import MCPServerSpec, _verify_command_pin
+        from lightwork.mcp_client import MCPServerSpec, _verify_command_pin
         # No pin set -> _verify_command_pin returns without touching disk.
         spec = MCPServerSpec(name="x", command="any-command-here")
         assert _verify_command_pin(spec) is None  # no pin -> None, no raise
@@ -154,7 +154,7 @@ class TestMCPPinSha256:
         # was hashed, closing the verify-then-re-resolve PATH TOCTOU.
         import hashlib
 
-        from maverick.mcp_client import MCPServerSpec, _verify_command_pin
+        from lightwork.mcp_client import MCPServerSpec, _verify_command_pin
         exe = tmp_path / "mcp-tool"
         exe.write_bytes(b"#!/bin/sh\necho ok\n")
         exe.chmod(0o755)
@@ -168,7 +168,7 @@ class TestMCPPinSha256:
         # let the OS re-resolve PATH to a swapped binary after the hash check.
         import hashlib
 
-        from maverick import mcp_client as mc
+        from lightwork import mcp_client as mc
         exe = tmp_path / "mcp-tool"
         exe.write_bytes(b"#!/bin/sh\necho ok\n")
         exe.chmod(0o755)
@@ -195,7 +195,7 @@ class TestMCPPinSha256:
         resolution must go through PATH lookup semantics."""
         import hashlib
 
-        from maverick.mcp_client import MCPServerSpec, _verify_command_pin
+        from lightwork.mcp_client import MCPServerSpec, _verify_command_pin
 
         exe = tmp_path / "resolved-tool"
         exe.write_bytes(b"#!/bin/sh\necho ok\n")
@@ -222,7 +222,7 @@ class TestMCPPinSha256:
         so flipping it on a Linux test runner breaks subsequent
         Path() calls until teardown).
         """
-        from maverick.mcp_client import _command_looks_like_path
+        from lightwork.mcp_client import _command_looks_like_path
         # Forward slash: always a path on both platforms.
         assert _command_looks_like_path("/usr/bin/mcp-tool", on_windows=False)
         assert _command_looks_like_path("/usr/bin/mcp-tool", on_windows=True)
@@ -238,8 +238,8 @@ class TestMCPPinSha256:
 
 class TestArticle50Disclosure:
     def test_first_turn_returns_disclosure(self, tmp_path):
-        from maverick.compliance import first_turn_disclosure
-        from maverick.world_model import WorldModel
+        from lightwork.compliance import first_turn_disclosure
+        from lightwork.world_model import WorldModel
         wm = WorldModel(tmp_path / "w.db")
         msg = first_turn_disclosure(wm, "telegram", "user-42")
         assert msg is not None
@@ -247,8 +247,8 @@ class TestArticle50Disclosure:
         assert "AI" in msg
 
     def test_after_assistant_turn_returns_none(self, tmp_path):
-        from maverick.compliance import first_turn_disclosure
-        from maverick.world_model import WorldModel
+        from lightwork.compliance import first_turn_disclosure
+        from lightwork.world_model import WorldModel
         wm = WorldModel(tmp_path / "w.db")
         conv = wm.get_or_create_conversation("telegram", "user-42")
         wm.append_turn(conv.id, "user", "hello")
@@ -258,23 +258,23 @@ class TestArticle50Disclosure:
     def test_only_user_turn_still_returns_disclosure(self, tmp_path):
         """User turn without assistant turn = still first interaction
         from the user's perspective (they haven't gotten a reply yet)."""
-        from maverick.compliance import first_turn_disclosure
-        from maverick.world_model import WorldModel
+        from lightwork.compliance import first_turn_disclosure
+        from lightwork.world_model import WorldModel
         wm = WorldModel(tmp_path / "w.db")
         conv = wm.get_or_create_conversation("telegram", "user-42")
         wm.append_turn(conv.id, "user", "hello")
         assert first_turn_disclosure(wm, "telegram", "user-42") is not None
 
     def test_empty_disclosure_text_opts_out(self, tmp_path, monkeypatch):
-        from maverick.compliance import first_turn_disclosure
-        from maverick.world_model import WorldModel
+        from lightwork.compliance import first_turn_disclosure
+        from lightwork.world_model import WorldModel
         monkeypatch.setenv("MAVERICK_AI_DISCLOSURE", "")
         wm = WorldModel(tmp_path / "w.db")
         assert first_turn_disclosure(wm, "telegram", "user-42") is None
 
     def test_custom_disclosure_text(self, tmp_path, monkeypatch):
-        from maverick.compliance import first_turn_disclosure
-        from maverick.world_model import WorldModel
+        from lightwork.compliance import first_turn_disclosure
+        from lightwork.world_model import WorldModel
         monkeypatch.setenv("MAVERICK_AI_DISCLOSURE", "Howdy, I am the AI.")
         wm = WorldModel(tmp_path / "w.db")
         msg = first_turn_disclosure(wm, "telegram", "user-42")
@@ -285,13 +285,13 @@ class TestArticle50Disclosure:
 
 class TestHooks:
     def teardown_method(self):
-        from maverick import hooks
+        from lightwork import hooks
         hooks.clear()
 
     @pytest.mark.asyncio
     async def test_pre_tool_use_callable_can_block(self):
-        from maverick import hooks
-        from maverick.hooks import HookContext, HookEvent
+        from lightwork import hooks
+        from lightwork.hooks import HookContext, HookEvent
         hooks.register(
             HookEvent.PRE_TOOL_USE,
             lambda ctx: False,  # block everything
@@ -304,8 +304,8 @@ class TestHooks:
     @pytest.mark.asyncio
     async def test_post_tool_use_cannot_block(self):
         """Post* hooks observe; they never block."""
-        from maverick import hooks
-        from maverick.hooks import HookContext, HookEvent
+        from lightwork import hooks
+        from lightwork.hooks import HookContext, HookEvent
         hooks.register(HookEvent.POST_TOOL_USE, lambda ctx: False)
         ctx = HookContext(event=HookEvent.POST_TOOL_USE, tool_name="shell",
                           tool_result="ok")
@@ -314,8 +314,8 @@ class TestHooks:
 
     @pytest.mark.asyncio
     async def test_matcher_glob(self):
-        from maverick import hooks
-        from maverick.hooks import HookContext, HookEvent
+        from lightwork import hooks
+        from lightwork.hooks import HookContext, HookEvent
         seen: list[str] = []
         hooks.register(
             HookEvent.PRE_TOOL_USE,
@@ -333,8 +333,8 @@ class TestHooks:
     @pytest.mark.asyncio
     async def test_hook_exception_is_isolated(self):
         """A buggy hook must not take down the agent (no exception propagates)."""
-        from maverick import hooks
-        from maverick.hooks import HookContext, HookEvent
+        from lightwork import hooks
+        from lightwork.hooks import HookContext, HookEvent
 
         def bad(ctx):
             raise RuntimeError("oops")
@@ -350,8 +350,8 @@ class TestHooks:
 
     @pytest.mark.asyncio
     async def test_async_callable_hook(self):
-        from maverick import hooks
-        from maverick.hooks import HookContext, HookEvent
+        from lightwork import hooks
+        from lightwork.hooks import HookContext, HookEvent
 
         async def async_hook(ctx):
             return True
@@ -372,8 +372,8 @@ class TestHooks:
         """
         import sys
 
-        from maverick import hooks
-        from maverick.hooks import HookContext, HookEvent
+        from lightwork import hooks
+        from lightwork.hooks import HookContext, HookEvent
         py = sys.executable
         hooks.register(
             HookEvent.PRE_TOOL_USE,

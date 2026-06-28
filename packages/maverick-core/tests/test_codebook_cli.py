@@ -4,9 +4,9 @@ audit contract holds on whatever the corpus produces)."""
 from __future__ import annotations
 
 from click.testing import CliRunner
-from maverick import emergent_protocol as ep
-from maverick.cli import main
-from maverick.world_model import open_world
+from lightwork import emergent_protocol as ep
+from lightwork.cli import main
+from lightwork.world_model import open_world
 
 
 class _World:
@@ -27,9 +27,9 @@ _CORPUS = (
 
 
 def test_codebook_learns_and_round_trips(tmp_path, monkeypatch):
-    monkeypatch.setattr("maverick.cli.open_world", lambda db: _World(_CORPUS))
+    monkeypatch.setattr("lightwork.cli.open_world", lambda db: _World(_CORPUS))
     store = ep.CodebookStore(path=tmp_path / "cb.json")
-    monkeypatch.setattr("maverick.emergent_protocol.shared", lambda: store)
+    monkeypatch.setattr("lightwork.emergent_protocol.shared", lambda: store)
 
     res = CliRunner().invoke(main, ["--db", str(tmp_path / "w.db"), "codebook"])
     assert res.exit_code == 0, res.output
@@ -47,12 +47,12 @@ def test_codebook_show_without_relearning(tmp_path, monkeypatch):
     store = ep.CodebookStore(path=tmp_path / "cb.json")
     store.update(ep.learn(_CORPUS))
     seeded = store.book().size
-    monkeypatch.setattr("maverick.emergent_protocol.shared", lambda: store)
+    monkeypatch.setattr("lightwork.emergent_protocol.shared", lambda: store)
 
     def _boom(db):  # --show must not open the world
         raise AssertionError("--show should not read the world")
 
-    monkeypatch.setattr("maverick.cli.open_world", _boom)
+    monkeypatch.setattr("lightwork.cli.open_world", _boom)
 
     res = CliRunner().invoke(main, ["--db", str(tmp_path / "w.db"), "codebook", "--show"])
     assert res.exit_code == 0, res.output
@@ -74,9 +74,9 @@ def test_recent_event_contents_accessor(tmp_path):
 
 
 def test_codebook_empty_corpus(tmp_path, monkeypatch):
-    monkeypatch.setattr("maverick.cli.open_world", lambda db: _World([]))
+    monkeypatch.setattr("lightwork.cli.open_world", lambda db: _World([]))
     store = ep.CodebookStore(path=tmp_path / "cb.json")
-    monkeypatch.setattr("maverick.emergent_protocol.shared", lambda: store)
+    monkeypatch.setattr("lightwork.emergent_protocol.shared", lambda: store)
 
     res = CliRunner().invoke(main, ["--db", str(tmp_path / "w.db"), "codebook"])
     assert res.exit_code == 0, res.output

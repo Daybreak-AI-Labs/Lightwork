@@ -113,9 +113,9 @@ def check_model_ids() -> bool:
     are consistent with the price table; mis-spelled model IDs would
     cause every API call to 404."""
     try:
-        from maverick.llm import MODEL_PRICES, ROLE_MODELS
+        from lightwork.llm import MODEL_PRICES, ROLE_MODELS
     except ImportError:
-        _fail("Cannot import maverick.llm — did you run `pip install -e ./packages/maverick-core`?")
+        _fail("Cannot import lightwork.llm — did you run `pip install -e ./packages/lightwork-core`?")
         return False
     role_specific_envs = {
         role: os.environ.get(f"MAVERICK_MODEL_OVERRIDE_{role.upper()}")

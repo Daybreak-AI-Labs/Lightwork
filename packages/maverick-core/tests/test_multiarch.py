@@ -67,7 +67,7 @@ def test_riscv64_fallback_is_gated_not_assumed():
 
 def test_image_stays_pure_python_by_default():
     text = _DOCKERFILE.read_text()
-    assert "pip install ./packages/maverick-core" in text
+    assert "pip install ./packages/lightwork-core" in text
     # Dashboard (pydantic-core, compiled Rust) is opt-in.
     assert "ARG INSTALL_DASHBOARD=0" in text
     # No native-wheel extras may sneak into the default install.

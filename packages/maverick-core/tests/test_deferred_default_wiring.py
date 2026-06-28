@@ -15,11 +15,11 @@ from __future__ import annotations
 from pathlib import Path
 
 import pytest
-from maverick.blackboard import Blackboard
-from maverick.budget import Budget
-from maverick.sandbox import LocalBackend
-from maverick.swarm import SwarmContext
-from maverick.world_model import WorldModel
+from lightwork.blackboard import Blackboard
+from lightwork.budget import Budget
+from lightwork.sandbox import LocalBackend
+from lightwork.swarm import SwarmContext
+from lightwork.world_model import WorldModel
 
 
 @pytest.fixture
@@ -39,7 +39,7 @@ def ctx(tmp_path: Path, fake_llm):
 
 
 def _agent(ctx):
-    from maverick.agent import Agent
+    from lightwork.agent import Agent
     return Agent(ctx, role="orchestrator", brief="b")
 
 

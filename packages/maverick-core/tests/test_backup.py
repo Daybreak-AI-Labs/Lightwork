@@ -7,7 +7,7 @@ import sqlite3
 import tarfile
 
 import pytest
-from maverick import backup, client
+from lightwork import backup, client
 
 
 @pytest.fixture(autouse=True)
@@ -34,7 +34,7 @@ def _seed(root):
 
 
 def test_create_and_restore_round_trip():
-    from maverick.paths import data_dir
+    from lightwork.paths import data_dir
     root = data_dir()
     _seed(root)
     tar = backup.create_backup()
@@ -52,7 +52,7 @@ def test_create_and_restore_round_trip():
 
 
 def test_manifest_records_client():
-    from maverick.paths import data_dir
+    from lightwork.paths import data_dir
     _seed(data_dir())
     tar = backup.create_backup()
     m = backup.read_manifest(tar)
@@ -61,7 +61,7 @@ def test_manifest_records_client():
 
 
 def test_restore_refuses_cross_client(monkeypatch):
-    from maverick.paths import data_dir
+    from lightwork.paths import data_dir
     _seed(data_dir())
     tar = backup.create_backup()  # client_id = acme
     # Now this deployment is a DIFFERENT client.
@@ -78,7 +78,7 @@ def test_restore_rejects_file_not_in_manifest(tmp_path):
     # entry (and thus no recorded SHA-256) is a corrupt/tampered archive trying
     # to write an unverified file into the live root; restore must reject it,
     # not silently pass it through (the old `want is not None` guard skipped it).
-    from maverick.paths import data_dir
+    from lightwork.paths import data_dir
     _seed(data_dir())
     tar = backup.create_backup()
 
@@ -114,7 +114,7 @@ def test_backup_excludes_prior_backups(monkeypatch):
     """The backups/ subtree lives under the client root; it must NOT be swept
     into a new backup, or each backup would contain every earlier one and grow
     quadratically."""
-    from maverick.paths import data_dir
+    from lightwork.paths import data_dir
     _seed(data_dir())
     first = backup.create_backup()
     assert first.exists()
@@ -151,8 +151,8 @@ def _repack(src_tar, dst_tar, *, mutate_manifest=None, mutate_data=None):
 
 
 def test_restore_refuses_forward_schema(tmp_path, monkeypatch):
-    from maverick.paths import data_dir
-    from maverick.world_model import SCHEMA_VERSION
+    from lightwork.paths import data_dir
+    from lightwork.world_model import SCHEMA_VERSION
     _seed(data_dir())
     tar = backup.create_backup()
     forward = tmp_path / "forward.tgz"
@@ -166,7 +166,7 @@ def test_restore_refuses_forward_schema(tmp_path, monkeypatch):
 
 
 def test_restore_detects_corruption(tmp_path):
-    from maverick.paths import data_dir
+    from lightwork.paths import data_dir
     _seed(data_dir())
     tar = backup.create_backup()
     corrupt = tmp_path / "corrupt.tgz"
@@ -185,7 +185,7 @@ def test_restore_clears_stale_wal_sidecar():
     restored DB. Backups exclude the -wal/-shm sidecars on purpose (the
     consistent .db copy already folds them in), so restore is responsible for
     removing any pre-existing ones in the live root."""
-    from maverick.paths import data_dir
+    from lightwork.paths import data_dir
     root = data_dir()
 
     # Baseline world.db (WAL mode, fully checkpointed) holding only the content
@@ -242,8 +242,8 @@ def test_create_errors_when_no_data(monkeypatch, tmp_path):
 
 def test_cli_backup_create_info_restore():
     from click.testing import CliRunner
-    from maverick.cli import main
-    from maverick.paths import data_dir
+    from lightwork.cli import main
+    from lightwork.paths import data_dir
     _seed(data_dir())
     runner = CliRunner()
 

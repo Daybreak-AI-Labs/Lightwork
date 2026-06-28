@@ -8,7 +8,7 @@ import pytest
 
 def test_provider_prewarm_sends_max_tokens_zero(monkeypatch):
     monkeypatch.setenv("ANTHROPIC_API_KEY", "sk-test")
-    from maverick.providers.anthropic_provider import AnthropicClient
+    from lightwork.providers.anthropic_provider import AnthropicClient
     p = AnthropicClient()
 
     sent: list[dict] = []
@@ -34,8 +34,8 @@ def test_provider_prewarm_sends_max_tokens_zero(monkeypatch):
 
 def test_provider_prewarm_records_budget_usage(monkeypatch):
     monkeypatch.setenv("ANTHROPIC_API_KEY", "sk-test")
-    from maverick.budget import Budget
-    from maverick.providers.anthropic_provider import AnthropicClient
+    from lightwork.budget import Budget
+    from lightwork.providers.anthropic_provider import AnthropicClient
 
     p = AnthropicClient()
 
@@ -64,7 +64,7 @@ def test_provider_prewarm_records_budget_usage(monkeypatch):
 
 def test_provider_prewarm_failsoft(monkeypatch):
     monkeypatch.setenv("ANTHROPIC_API_KEY", "sk-test")
-    from maverick.providers.anthropic_provider import AnthropicClient
+    from lightwork.providers.anthropic_provider import AnthropicClient
     p = AnthropicClient()
 
     class _Boom:
@@ -76,7 +76,7 @@ def test_provider_prewarm_failsoft(monkeypatch):
 
 
 def test_llm_prewarm_dispatches_to_anthropic_only(monkeypatch):
-    from maverick.llm import LLM
+    from lightwork.llm import LLM
     llm = LLM(model="claude-opus-4-8")
     called = {}
 
@@ -86,7 +86,7 @@ def test_llm_prewarm_dispatches_to_anthropic_only(monkeypatch):
             return True
 
     monkeypatch.setattr(llm, "_get_client", lambda provider: _Fake())
-    monkeypatch.setattr("maverick.enterprise.assert_provider_allowed", lambda p: None)
+    monkeypatch.setattr("lightwork.enterprise.assert_provider_allowed", lambda p: None)
     assert llm.prewarm("sys", [{"name": "x"}]) is True
     assert called["args"][2] == "claude-opus-4-8"
 
@@ -96,17 +96,17 @@ def test_llm_prewarm_dispatches_to_anthropic_only(monkeypatch):
 
 
 def test_prewarm_disabled_when_caching_off(monkeypatch):
-    from maverick.llm import LLM
+    from lightwork.llm import LLM
     monkeypatch.setenv("MAVERICK_CACHE_MESSAGES", "0")
     llm = LLM(model="claude-opus-4-8")
     assert llm.prewarm("sys") is False
 
 
 def test_cache_prewarm_enabled_flag(monkeypatch):
-    import maverick.llm as llm_mod
+    import lightwork.llm as llm_mod
     monkeypatch.delenv("MAVERICK_CACHE_PREWARM", raising=False)
     monkeypatch.setattr(llm_mod, "load_config", dict, raising=False)
-    import maverick.config as cfg
+    import lightwork.config as cfg
     monkeypatch.setattr(cfg, "load_config", dict)
     assert llm_mod.cache_prewarm_enabled() is False
     monkeypatch.setenv("MAVERICK_CACHE_PREWARM", "1")
@@ -114,8 +114,8 @@ def test_cache_prewarm_enabled_flag(monkeypatch):
 
 
 def test_llm_prewarm_reserves_budget_before_provider_call(monkeypatch):
-    from maverick.budget import Budget
-    from maverick.llm import LLM
+    from lightwork.budget import Budget
+    from lightwork.llm import LLM
 
     llm = LLM(model="claude-opus-4-8")
 
@@ -124,7 +124,7 @@ def test_llm_prewarm_reserves_budget_before_provider_call(monkeypatch):
             raise AssertionError("provider prewarm must not run after reserve failure")
 
     monkeypatch.setattr(llm, "_get_client", lambda provider: _Fake())
-    monkeypatch.setattr("maverick.enterprise.assert_provider_allowed", lambda p: None)
+    monkeypatch.setattr("lightwork.enterprise.assert_provider_allowed", lambda p: None)
 
     budget = Budget(max_dollars=0.0)
     assert llm.prewarm("billable system prompt", budget=budget) is False

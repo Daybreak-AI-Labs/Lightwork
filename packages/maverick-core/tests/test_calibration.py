@@ -6,8 +6,8 @@ persisted-verdict freeze gate, and the interlock wired into donation.write_recor
 """
 from __future__ import annotations
 
-from maverick import calibration
-from maverick.calibration import CalibrationSample, assess
+from lightwork import calibration
+from lightwork.calibration import CalibrationSample, assess
 
 
 def _samples(pairs):
@@ -149,13 +149,13 @@ class TestCollectFromCoding:
 class TestDonationInterlock:
     def test_frozen_learning_blocks_gold_trajectory(self, tmp_path, monkeypatch):
         """A trajectory that WOULD donate is refused when calibration is frozen."""
-        from maverick import donation
-        from maverick.donation import TrajectoryRecord
+        from lightwork import donation
+        from lightwork.donation import TrajectoryRecord
 
         monkeypatch.setattr(donation, "_donations_enabled", lambda: True)
         monkeypatch.setattr(donation, "_text_donations_enabled", lambda: False)
         # Drifted verifier -> learning frozen.
-        monkeypatch.setattr("maverick.calibration.learning_frozen", lambda: True)
+        monkeypatch.setattr("lightwork.calibration.learning_frozen", lambda: True)
 
         rec = TrajectoryRecord(
             task_brief_hash="abc", outcome="success",
@@ -165,12 +165,12 @@ class TestDonationInterlock:
         assert out is None  # gold trajectory, but frozen -> not written
 
     def test_unfrozen_learning_allows_gold_trajectory(self, tmp_path, monkeypatch):
-        from maverick import donation
-        from maverick.donation import TrajectoryRecord
+        from lightwork import donation
+        from lightwork.donation import TrajectoryRecord
 
         monkeypatch.setattr(donation, "_donations_enabled", lambda: True)
         monkeypatch.setattr(donation, "_text_donations_enabled", lambda: False)
-        monkeypatch.setattr("maverick.calibration.learning_frozen", lambda: False)
+        monkeypatch.setattr("lightwork.calibration.learning_frozen", lambda: False)
 
         rec = TrajectoryRecord(
             task_brief_hash="abc", outcome="success",

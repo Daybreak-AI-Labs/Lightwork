@@ -39,8 +39,8 @@ import random
 import unicodedata
 
 import pytest
-from maverick import self_harness as sh
-from maverick import self_improvement as si
+from lightwork import self_harness as sh
+from lightwork import self_improvement as si
 
 # --------------------------------------------------------------------------
 # helpers (mirrors test_self_harness_battery.py)

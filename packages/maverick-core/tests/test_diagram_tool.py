@@ -4,7 +4,7 @@ from __future__ import annotations
 import shlex
 from pathlib import Path
 
-from maverick.tools.diagram_tool import _argv, diagram_tool
+from lightwork.tools.diagram_tool import _argv, diagram_tool
 
 
 class _FakeSandbox:

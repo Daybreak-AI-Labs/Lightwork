@@ -120,7 +120,7 @@ def _run(name, fn, *, allowed: tuple = (), seed: int = 1):
 # ---- federation signed envelopes (the recursion-bomb regression) -------------
 
 def test_fuzz_verify_envelope():
-    from maverick import federation_envelope as fe
+    from lightwork import federation_envelope as fe
     peers = {"o": {"origin": "o", "pubkey": "ab" * 32}}
     _run("verify_envelope",
          lambda v: fe.verify_envelope(v, expected_schema="x", peers=peers))
@@ -129,7 +129,7 @@ def test_fuzz_verify_envelope():
 def test_fuzz_verify_envelope_pubkey_matches():
     """With the pinned pubkey matching, fuzzing reaches the digest path — this is
     exactly where the RecursionError lived. A bomb must reject, never raise."""
-    from maverick import federation_envelope as fe
+    from lightwork import federation_envelope as fe
     peers = {"o": {"origin": "o", "pubkey": "ab" * 32}}
 
     def call(v):
@@ -141,7 +141,7 @@ def test_fuzz_verify_envelope_pubkey_matches():
 
 
 def test_fuzz_load_peers():
-    from maverick import federation
+    from lightwork import federation
     _run("load_peers",
          lambda v: federation.load_peers(v if isinstance(v, dict)
                                          else {"federation": {"peers": v}}))
@@ -150,7 +150,7 @@ def test_fuzz_load_peers():
 # ---- channel + marketplace inbound (consume verify_envelope) -----------------
 
 def test_fuzz_channel_federation_apply():
-    from maverick.channel_federation import InboundApplier, TokenBucket
+    from lightwork.channel_federation import InboundApplier, TokenBucket
     ap = InboundApplier(
         lambda m: "ok",
         peers={"peer-a": {"origin": "peer-a", "pubkey": "ab" * 32, "secret": "s"}},
@@ -159,7 +159,7 @@ def test_fuzz_channel_federation_apply():
 
 
 def test_fuzz_marketplace_import(tmp_path):
-    from maverick.marketplace import federation as mf
+    from lightwork.marketplace import federation as mf
     store = tmp_path / "imports.json"
     _run("marketplace.import_listings",
          lambda v: mf.import_listings(
@@ -170,7 +170,7 @@ def test_fuzz_marketplace_import(tmp_path):
 # ---- A2A discovery + task lifecycle ------------------------------------------
 
 def test_fuzz_a2a_card():
-    from maverick.a2a import parse_remote_card, validate_agent_card
+    from lightwork.a2a import parse_remote_card, validate_agent_card
     _run("validate_agent_card", validate_agent_card)
     _run("parse_remote_card",
          lambda v: parse_remote_card(v) if isinstance(v, dict) else None,
@@ -178,7 +178,7 @@ def test_fuzz_a2a_card():
 
 
 def test_fuzz_a2a_task_engine():
-    from maverick.a2a_tasks import TaskEngine, _RpcError
+    from lightwork.a2a_tasks import TaskEngine, _RpcError
     te = TaskEngine(runner=lambda *a, **k: "r")
     for method in ("get", "cancel", "get_push_config", "set_push_config"):
         fn = getattr(te, method)
@@ -191,7 +191,7 @@ def test_fuzz_a2a_task_engine():
 def test_fuzz_a2a_message_text():
     """A hostile client controls message.parts (any JSON value); extracting the
     text must never raise — it runs on the first step of every send/stream."""
-    from maverick.a2a_tasks import _message_text
+    from lightwork.a2a_tasks import _message_text
     _run("a2a._message_text",
          lambda v: _message_text(v if isinstance(v, dict) else {"parts": v}))
 
@@ -201,7 +201,7 @@ def test_fuzz_a2a_send_malformed_message():
     (rejected/failed), never raise out of the runner to a 500."""
     import asyncio
 
-    from maverick.a2a_tasks import TaskEngine
+    from lightwork.a2a_tasks import TaskEngine
     te = TaskEngine(runner=lambda *a, **k: "ok")
     for parts in ("not-a-list", 5, [1, 2], [{"kind": "text"}], None, {"x": 1}):
         out = asyncio.run(te.send({"message": {"parts": parts}}, "anon"))
@@ -211,14 +211,14 @@ def test_fuzz_a2a_send_malformed_message():
 # ---- tokens + signatures -----------------------------------------------------
 
 def test_fuzz_web_session():
-    from maverick.web_session import verify_session
+    from lightwork.web_session import verify_session
     _run("verify_session", lambda v: verify_session(v, "secret"))
     _run("verify_session(bytes-secret-guard)",
          lambda v: verify_session("a.b", v if isinstance(v, str) else "s"))
 
 
 def test_fuzz_webhook_signature():
-    from maverick.webhooks import verify_signature
+    from lightwork.webhooks import verify_signature
     _run("verify_signature",
          lambda v: verify_signature(
              b"body",
@@ -229,7 +229,7 @@ def test_fuzz_webhook_signature():
 
 def test_fuzz_share_link(monkeypatch):
     monkeypatch.setenv("MAVERICK_SHARE_SECRET", "s3cr3t")
-    from maverick import share_link
+    from lightwork import share_link
     _run("verify_share_link",
          lambda v: share_link.verify_share_link(v if isinstance(v, str) else "a.b.c"),
          allowed=(ValueError,))
@@ -237,7 +237,7 @@ def test_fuzz_share_link(monkeypatch):
 
 def test_fuzz_claim_handoff(monkeypatch, tmp_path):
     monkeypatch.setenv("MAVERICK_SHARE_SECRET", "s3cr3t")
-    from maverick import share_link
+    from lightwork import share_link
     nonces = tmp_path / "nonces.json"
     _run("claim_handoff",
          lambda v: share_link.claim_handoff(
@@ -248,7 +248,7 @@ def test_fuzz_claim_handoff(monkeypatch, tmp_path):
 # ---- OIDC + the math evaluator -----------------------------------------------
 
 def test_fuzz_oidc_verify():
-    from maverick.oidc import OIDCConfig, OIDCError, verify_oidc_token
+    from lightwork.oidc import OIDCConfig, OIDCError, verify_oidc_token
     cfg = OIDCConfig(enabled=True, issuer="https://i", audience="aud",
                      jwks_uri="https://j", algorithms=["RS256"])
     _run("verify_oidc_token",
@@ -259,7 +259,7 @@ def test_fuzz_oidc_verify():
 
 
 def test_fuzz_compute_evaluator():
-    from maverick.tools.compute import _run as compute_run
+    from lightwork.tools.compute import _run as compute_run
     # Must always return a string (never raise / never hang); the AST guards +
     # exponent bound keep even pathological expressions bounded.
     rng = random.Random(9)

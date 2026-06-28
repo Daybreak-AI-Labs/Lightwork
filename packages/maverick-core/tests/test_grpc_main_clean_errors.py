@@ -1,4 +1,4 @@
-"""`python -m maverick.grpc_api` must fail cleanly on operator-config errors.
+"""`python -m lightwork.grpc_api` must fail cleanly on operator-config errors.
 
 Platform-test finding (round 4): the gRPC entrypoint's main() called serve()
 with no error handling, so the two expected, actionable startup errors --
@@ -9,7 +9,7 @@ a non-zero exit with the message on stderr.
 """
 from __future__ import annotations
 
-import maverick.grpc_api.server as srv
+import lightwork.grpc_api.server as srv
 
 
 def test_main_missing_token_is_clean(monkeypatch, capsys):
@@ -25,7 +25,7 @@ def test_main_missing_grpc_is_clean(monkeypatch, capsys):
     monkeypatch.setenv("MAVERICK_GRPC_BEARER_TOKEN", "tok")
 
     def _boom():
-        raise ImportError("grpc not installed. Run: pip install 'maverick-agent[grpc]'")
+        raise ImportError("grpc not installed. Run: pip install 'lightwork-agent[grpc]'")
 
     monkeypatch.setattr(srv, "_require_grpc", _boom)
     rc = srv.main(["--address", "127.0.0.1:0"])

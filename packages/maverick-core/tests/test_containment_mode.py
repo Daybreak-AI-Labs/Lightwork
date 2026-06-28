@@ -1,7 +1,7 @@
 """containment_mode: level -> restrictions resolver + per-action policy check."""
 from __future__ import annotations
 
-from maverick.tools.containment_mode import containment_mode
+from lightwork.tools.containment_mode import containment_mode
 
 
 def _plan(level):

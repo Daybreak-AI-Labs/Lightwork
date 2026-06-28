@@ -6,7 +6,7 @@ from __future__ import annotations
 
 import sqlite3
 
-from maverick.world_model import SCHEMA_VERSION, WorldModel
+from lightwork.world_model import SCHEMA_VERSION, WorldModel
 
 
 def test_schema_version_is_current(tmp_path):

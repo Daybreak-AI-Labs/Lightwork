@@ -1,7 +1,7 @@
 """Provider cache analytics: hit rate, savings math, per-role, recommendations."""
 from __future__ import annotations
 
-from maverick.provider_cache_analytics import analyze, render
+from lightwork.provider_cache_analytics import analyze, render
 
 
 def _row(kind, tokens, role="default", model=None):

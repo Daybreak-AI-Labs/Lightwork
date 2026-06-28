@@ -14,7 +14,7 @@ import pytest
 
 def test_weaviate_missing_import_raises(monkeypatch):
     monkeypatch.setitem(sys.modules, "weaviate", None)
-    from maverick.vector_store.weaviate_store import WeaviateStore
+    from lightwork.vector_store.weaviate_store import WeaviateStore
     with pytest.raises(ImportError, match="weaviate-client not installed"):
         WeaviateStore()
 
@@ -39,7 +39,7 @@ def test_weaviate_embedded_init_creates_collection(monkeypatch):
     monkeypatch.delenv("MAVERICK_WEAVIATE_URL", raising=False)
     monkeypatch.delenv("MAVERICK_WEAVIATE_VECTORIZER", raising=False)
     fake = _install_fake_weaviate(monkeypatch)
-    from maverick.vector_store.weaviate_store import WeaviateStore
+    from lightwork.vector_store.weaviate_store import WeaviateStore
     WeaviateStore(collection="goals")
     # Capitalized class name, created because exists()==False, AND with a
     # server-side vectorizer configured (without it near_text cannot embed).
@@ -52,14 +52,14 @@ def test_weaviate_embedded_init_creates_collection(monkeypatch):
 def test_weaviate_vectorizer_none_skips_config(monkeypatch):
     monkeypatch.delenv("MAVERICK_WEAVIATE_URL", raising=False)
     fake = _install_fake_weaviate(monkeypatch)
-    from maverick.vector_store.weaviate_store import WeaviateStore
+    from lightwork.vector_store.weaviate_store import WeaviateStore
     WeaviateStore(collection="goals", vectorizer="none")
     # Explicit opt-out: created with no vectorizer_config.
     fake.collections.create.assert_called_once_with("Goals")
 
 
 def test_weaviate_uuid_for_is_stable():
-    from maverick.vector_store.weaviate_store import _uuid_for
+    from lightwork.vector_store.weaviate_store import _uuid_for
     assert _uuid_for("abc") == _uuid_for("abc")
     assert _uuid_for("abc") != _uuid_for("def")
 
@@ -71,7 +71,7 @@ def test_weaviate_add_batches(monkeypatch):
     batch = MagicMock()
     batch_cm.__enter__.return_value = batch
     fake.collections.get.return_value.batch.dynamic.return_value = batch_cm
-    from maverick.vector_store.weaviate_store import WeaviateStore
+    from lightwork.vector_store.weaviate_store import WeaviateStore
     store = WeaviateStore()
     store.add(["d1", "d2"], ids=["a", "b"])
     assert batch.add_object.call_count == 2
@@ -80,7 +80,7 @@ def test_weaviate_add_batches(monkeypatch):
 def test_weaviate_add_empty_noop(monkeypatch):
     monkeypatch.delenv("MAVERICK_WEAVIATE_URL", raising=False)
     _install_fake_weaviate(monkeypatch)
-    from maverick.vector_store.weaviate_store import WeaviateStore
+    from lightwork.vector_store.weaviate_store import WeaviateStore
     store = WeaviateStore()
     store.add([])  # no raise, no batch
 
@@ -95,7 +95,7 @@ def test_weaviate_query_shape(monkeypatch):
     )
     fake.collections.get.return_value.query.near_text.return_value = \
         SimpleNamespace(objects=[obj])
-    from maverick.vector_store.weaviate_store import WeaviateStore
+    from lightwork.vector_store.weaviate_store import WeaviateStore
     out = WeaviateStore().query("hi", top_k=3)
     assert out[0]["document"] == "hello"
     assert out[0]["distance"] == pytest.approx(0.25)
@@ -106,7 +106,7 @@ def test_weaviate_query_shape(monkeypatch):
 def test_weaviate_query_empty_text(monkeypatch):
     monkeypatch.delenv("MAVERICK_WEAVIATE_URL", raising=False)
     _install_fake_weaviate(monkeypatch)
-    from maverick.vector_store.weaviate_store import WeaviateStore
+    from lightwork.vector_store.weaviate_store import WeaviateStore
     assert WeaviateStore().query("") == []
 
 
@@ -115,11 +115,11 @@ def test_weaviate_count(monkeypatch):
     fake = _install_fake_weaviate(monkeypatch)
     fake.collections.get.return_value.aggregate.over_all.return_value = \
         SimpleNamespace(total_count=7)
-    from maverick.vector_store.weaviate_store import WeaviateStore
+    from lightwork.vector_store.weaviate_store import WeaviateStore
     assert WeaviateStore().count() == 7
 
 
 def test_semantic_recall_recognizes_weaviate(monkeypatch):
     monkeypatch.setenv("MAVERICK_VECTOR_STORE", "weaviate")
-    from maverick import semantic_recall
+    from lightwork import semantic_recall
     assert semantic_recall.backend_name() == "weaviate"

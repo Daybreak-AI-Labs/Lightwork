@@ -5,17 +5,17 @@ from fastapi.testclient import TestClient
 
 
 def _client():
-    from maverick_dashboard.app import app
+    from lightwork_dashboard.app import app
     return TestClient(app)
 
 
 def _stub_catalog(monkeypatch, entries):
-    import maverick.catalog as cat
+    import lightwork.catalog as cat
     monkeypatch.setattr(cat, "load_catalog", lambda kind, indexes=None: entries)
 
 
 def _entry(name="summarize-url", **over):
-    import maverick.catalog as cat
+    import lightwork.catalog as cat
     d = {
         "name": name, "version": "1.0.0", "summary": "x",
         "source": "gh:org/repo:SKILL.md", "sha256": "abc",
@@ -63,8 +63,8 @@ def test_catalog_install_requires_opt_in(monkeypatch):
 
     from pathlib import Path
 
-    import maverick.skills as sk
-    from maverick.skills import Skill
+    import lightwork.skills as sk
+    from lightwork.skills import Skill
     called = {}
 
     def _fake_install(name, *a, **kw):
@@ -85,7 +85,7 @@ def test_catalog_install_requires_opt_in(monkeypatch):
 def test_catalog_install_hash_mismatch_400(monkeypatch):
     monkeypatch.setenv("MAVERICK_ALLOW_SKILL_INSTALL", "1")
     monkeypatch.delenv("MAVERICK_DASHBOARD_TOKEN", raising=False)
-    import maverick.skills as sk
+    import lightwork.skills as sk
 
     def _raise(name, *a, **kw):
         raise ValueError("content hash mismatch for 'x'")
@@ -117,7 +117,7 @@ def test_free_text_skill_install_still_gated(monkeypatch):
 # ---------- store page ----------
 
 def test_store_page_renders_entries(monkeypatch, tmp_path):
-    from maverick import world_model
+    from lightwork import world_model
     monkeypatch.setattr(world_model, "DEFAULT_DB", tmp_path / "world.db")
     monkeypatch.delenv("MAVERICK_DASHBOARD_TOKEN", raising=False)
     _stub_catalog(monkeypatch, [_entry(summary="Summarise any URL")])
@@ -131,7 +131,7 @@ def test_store_page_renders_entries(monkeypatch, tmp_path):
 
 
 def test_store_page_empty_state(monkeypatch, tmp_path):
-    from maverick import world_model
+    from lightwork import world_model
     monkeypatch.setattr(world_model, "DEFAULT_DB", tmp_path / "world.db")
     monkeypatch.delenv("MAVERICK_DASHBOARD_TOKEN", raising=False)
     _stub_catalog(monkeypatch, [])

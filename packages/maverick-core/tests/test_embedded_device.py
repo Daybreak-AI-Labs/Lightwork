@@ -11,7 +11,7 @@ import shlex
 from types import SimpleNamespace
 
 import pytest
-from maverick.tools.embedded_device import embedded_device, parse_dump
+from lightwork.tools.embedded_device import embedded_device, parse_dump
 
 
 class RecordingSandbox:
@@ -30,7 +30,7 @@ class RecordingSandbox:
 @pytest.fixture
 def have_openocd(monkeypatch):
     monkeypatch.setattr(
-        "maverick.tools.embedded_device.shutil.which",
+        "lightwork.tools.embedded_device.shutil.which",
         lambda name: "/usr/bin/openocd" if name == "openocd" else None,
     )
 
@@ -51,7 +51,7 @@ def flash_enabled(monkeypatch, tmp_path):
 
 
 def test_openocd_missing(monkeypatch, no_config):
-    monkeypatch.setattr("maverick.tools.embedded_device.shutil.which", lambda name: None)
+    monkeypatch.setattr("lightwork.tools.embedded_device.shutil.which", lambda name: None)
     t = embedded_device()
     out = t.fn({"op": "jtag_halt", "target": "target/stm32f4x.cfg"})
     assert out == "ERROR: openocd not found — install OpenOCD and connect a probe"
@@ -254,7 +254,7 @@ def test_i2c_missing_smbus2_is_actionable(no_config, monkeypatch):
     t = embedded_device()  # no injected bus -> tries the smbus2 adapter
     out = t.fn({"op": "i2c_read", "addr": "0x68", "length": 1})
     assert out.startswith("ERROR") and "smbus2 not installed" in out
-    assert "maverick-agent[i2c]" in out
+    assert "lightwork-agent[i2c]" in out
 
 
 def test_i2c_bus_failure_is_error_string(no_config):

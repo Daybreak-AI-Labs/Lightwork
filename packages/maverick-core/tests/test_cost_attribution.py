@@ -1,7 +1,7 @@
 """cost_attribution: spend breakdown across dimensions."""
 from __future__ import annotations
 
-from maverick.tools.cost_attribution import cost_attribution
+from lightwork.tools.cost_attribution import cost_attribution
 
 
 def _report(items, **kw):

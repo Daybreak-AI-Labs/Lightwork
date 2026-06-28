@@ -1,7 +1,7 @@
 """cidr_check: ordered CIDR access-control evaluation."""
 from __future__ import annotations
 
-from maverick.tools.cidr_check import cidr_check
+from lightwork.tools.cidr_check import cidr_check
 
 
 def _c(ip, rules, default=None):
@@ -57,7 +57,7 @@ def test_errors():
 
 
 def test_registered():
-    from maverick.tools import base_registry
+    from lightwork.tools import base_registry
 
     class _W:
         pass

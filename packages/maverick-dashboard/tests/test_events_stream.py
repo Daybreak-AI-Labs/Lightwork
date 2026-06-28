@@ -5,20 +5,20 @@ import json
 
 import pytest
 from fastapi.testclient import TestClient
-from maverick_dashboard.app import app
+from lightwork_dashboard.app import app
 
 client = TestClient(app, headers={"Origin": "http://testserver"})
 
 
 @pytest.fixture(autouse=True)
 def _isolated_world(tmp_path, monkeypatch):
-    from maverick import world_model
+    from lightwork import world_model
     monkeypatch.setattr(world_model, "DEFAULT_DB", tmp_path / "world.db")
     yield
 
 
 def _goal_with_events(tmp_path, n, *, status=None):
-    from maverick import world_model
+    from lightwork import world_model
     w = world_model.WorldModel(world_model.DEFAULT_DB)
     gid = w.create_goal("stream me", "")
     for i in range(n):
@@ -29,7 +29,7 @@ def _goal_with_events(tmp_path, n, *, status=None):
 
 
 def test_sse_event_format():
-    from maverick_dashboard.api import _sse_event
+    from lightwork_dashboard.api import _sse_event
     e = type("E", (), {"id": 7, "agent": "coder", "kind": "tool",
                        "content": "ran x", "ts": 1.0})()
     frame = _sse_event(e)
@@ -77,7 +77,7 @@ def test_stream_since_skips_old(tmp_path):
 
 
 def test_stream_rejects_when_concurrency_cap_is_full(monkeypatch, tmp_path):
-    from maverick_dashboard import api
+    from lightwork_dashboard import api
 
     gid = _goal_with_events(tmp_path, 1)
 
@@ -95,7 +95,7 @@ def test_stream_rejects_when_concurrency_cap_is_full(monkeypatch, tmp_path):
 
 
 def test_stream_poll_parameter_does_not_control_sleep(monkeypatch, tmp_path):
-    from maverick_dashboard import api
+    from lightwork_dashboard import api
 
     gid = _goal_with_events(tmp_path, 0, status="done")
     sleeps = []

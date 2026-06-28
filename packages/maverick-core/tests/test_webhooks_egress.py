@@ -1,8 +1,8 @@
 """Outbound webhooks honor the enterprise egress lock (audit H27)."""
 from __future__ import annotations
 
-import maverick.enterprise as ent
-from maverick import webhooks
+import lightwork.enterprise as ent
+from lightwork import webhooks
 
 
 def _capture_submits(monkeypatch):

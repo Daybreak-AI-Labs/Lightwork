@@ -1,7 +1,7 @@
-"""Shared test fixtures for maverick-core.
+"""Shared test fixtures for lightwork-core.
 
 Provides:
-  - ``fake_llm``: a scripted ``FakeLLM`` instance that replaces ``maverick.llm.LLM``
+  - ``fake_llm``: a scripted ``FakeLLM`` instance that replaces ``lightwork.llm.LLM``
     in tests. Push ``LLMResponse`` objects to ``scripted`` and the agent loop
     pops them in order. Recorded calls available on ``.calls`` for assertions.
   - ``make_llm_response``: helper to build LLMResponse fixtures quickly.
@@ -14,7 +14,7 @@ from __future__ import annotations
 from dataclasses import dataclass, field
 
 import pytest
-from maverick.llm import LLMResponse, ToolCall  # noqa: F401 - re-exported for tests
+from lightwork.llm import LLMResponse, ToolCall  # noqa: F401 - re-exported for tests
 
 
 @pytest.fixture(autouse=True)
@@ -56,10 +56,10 @@ def _isolate_maverick_home(tmp_path, monkeypatch):
     # (observed: worker_review saw a foreign finance lesson). Re-resolve them
     # under the per-test HOME; monkeypatch restores the originals at teardown.
     try:
-        import maverick.dreaming as _dream
-        import maverick.reflexion as _refl
-        import maverick.skill.distillation_local as _distill
-        from maverick.paths import data_dir as _dd
+        import lightwork.dreaming as _dream
+        import lightwork.reflexion as _refl
+        import lightwork.skill.distillation_local as _distill
+        from lightwork.paths import data_dir as _dd
         monkeypatch.setattr(_refl, "DEFAULT_PATH", _dd("reflexions.ndjson"), raising=False)
         monkeypatch.setattr(_dream, "DEFAULT_DIR", _dd("dreams"), raising=False)
         monkeypatch.setattr(_dream, "DEFAULT_INSIGHTS", _dd("dreams") / "insights.ndjson",
@@ -74,7 +74,7 @@ def _isolate_maverick_home(tmp_path, monkeypatch):
 def _isolate_root_logging():
     """Snapshot + restore the root logger around every test.
 
-    ``maverick.cli`` configures process-global logging on every command run
+    ``lightwork.cli`` configures process-global logging on every command run
     (the group callback calls ``_configure_cli_logging`` -> ``configure_logging``,
     which is idempotent and *replaces* the root handlers, optionally attaching a
     warning filter). Any ``CliRunner(main)`` test therefore mutates the root
@@ -85,7 +85,7 @@ def _isolate_root_logging():
     """
     import logging
 
-    import maverick.logging_config as lc
+    import lightwork.logging_config as lc
     root = logging.getLogger()
     saved_handlers = root.handlers[:]
     saved_level = root.level
@@ -114,17 +114,17 @@ def _reset_client_binding_cache():
     """
     def _reset():
         try:
-            from maverick import client
+            from lightwork import client
             client.reset_client_cache()
         except Exception:
             pass
         try:
-            from maverick.tenant import kms as tenant_kms
+            from lightwork.tenant import kms as tenant_kms
             tenant_kms._clear_cache()
         except Exception:
             pass
         try:
-            from maverick import config
+            from lightwork import config
             config.reset_config_cache()
         except Exception:
             pass
@@ -133,7 +133,7 @@ def _reset_client_binding_cache():
             # (the env var is popped for security), so a test that runs audit
             # signing without a key caches a miss that shadows a later test which
             # sets MAVERICK_AUDIT_SIGNING_KEY. Clear it in lockstep.
-            from maverick.audit import signing as _audit_signing
+            from lightwork.audit import signing as _audit_signing
             _audit_signing._reset_injected_keypair_cache()
         except Exception:
             pass
@@ -145,7 +145,7 @@ def _reset_client_binding_cache():
 
 @dataclass
 class FakeLLM:
-    """Drop-in replacement for ``maverick.llm.LLM`` driven by a script."""
+    """Drop-in replacement for ``lightwork.llm.LLM`` driven by a script."""
 
     scripted: list[LLMResponse] = field(default_factory=list)
     calls: list[dict] = field(default_factory=list)

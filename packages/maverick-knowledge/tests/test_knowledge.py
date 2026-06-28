@@ -7,7 +7,7 @@ import types
 from types import SimpleNamespace
 
 import pytest
-from maverick_knowledge import (
+from lightwork_knowledge import (
     DeterministicEmbedder,
     KnowledgeBase,
     SqliteVectorStore,
@@ -32,28 +32,28 @@ class TestStoreGuards:
 
 class TestBuildStore:
     def test_default_is_sqlite(self):
-        from maverick_knowledge.store import SqliteVectorStore as S
-        from maverick_knowledge.store import build_store
+        from lightwork_knowledge.store import SqliteVectorStore as S
+        from lightwork_knowledge.store import build_store
         assert isinstance(build_store({}), S)
 
     def test_pgvector_no_longer_not_implemented(self):
         # Regression: build_store used to raise NotImplementedError for pgvector.
         # It now constructs PgVectorStore, which fails on a real precondition
         # (psycopg missing, or no DSN) -- never NotImplementedError.
-        from maverick_knowledge.store import build_store
+        from lightwork_knowledge.store import build_store
         with pytest.raises((ImportError, RuntimeError)) as ei:
             build_store({"store": "pgvector", "dsn": ""})
         assert not isinstance(ei.value, NotImplementedError)
 
     def test_pgvector_literal_format(self):
-        from maverick_knowledge.store import _to_pgvector
+        from lightwork_knowledge.store import _to_pgvector
         assert _to_pgvector([1, 2.5, 0]) == "[1.0,2.5,0.0]"
 
     def test_pgvector_rejects_non_finite_components(self):
         # repr(nan)/repr(inf) are bare 'nan'/'inf' tokens pgvector's literal
         # parser rejects; a non-finite component must fail with a domain message
         # rather than emitting '[1.0,nan,inf]' and aborting the DB call mid-batch.
-        from maverick_knowledge.store import _to_pgvector
+        from lightwork_knowledge.store import _to_pgvector
         for bad in (float("nan"), float("inf"), float("-inf")):
             with pytest.raises(ValueError, match="non-finite"):
                 _to_pgvector([1.0, bad])
@@ -61,7 +61,7 @@ class TestBuildStore:
         assert _to_pgvector([1.0, -0.5]) == "[1.0,-0.5]"
 
     def test_pgvector_uses_workspace_namespace(self):
-        from maverick_knowledge.store import _namespace_from_cfg
+        from lightwork_knowledge.store import _namespace_from_cfg
 
         tenant_a = _namespace_from_cfg({"path": "/tenants/a/knowledge.db"})
         tenant_b = _namespace_from_cfg({"path": "/tenants/b/knowledge.db"})
@@ -107,7 +107,7 @@ class TestBuildStore:
         )
         monkeypatch.setitem(sys.modules, "psycopg", fake_psycopg)
 
-        from maverick_knowledge.store import build_store
+        from lightwork_knowledge.store import build_store
 
         store = build_store(
             {
@@ -192,7 +192,7 @@ class TestBuildStore:
             types.SimpleNamespace(connect=lambda *a, **k: _Conn()),
         )
 
-        from maverick_knowledge.store import PgVectorStore
+        from lightwork_knowledge.store import PgVectorStore
         PgVectorStore("postgresql://shared", dim=2, table="knowledge_chunks")
 
         sqls = [sql for sql, _ in calls]
@@ -226,7 +226,7 @@ class TestPgVectorLive:
             pytest.skip("no MAVERICK_PG_DSN / MAVERICK_KNOWLEDGE_DSN")
         if importlib.util.find_spec("psycopg") is None:
             pytest.skip("psycopg not installed")
-        from maverick_knowledge.store import PgVectorStore
+        from lightwork_knowledge.store import PgVectorStore
         # Unique table per run so concurrent CI jobs don't collide.
         return PgVectorStore(dsn=dsn, dim=3, table=f"kn_test_{uuid.uuid4().hex[:8]}")
 
@@ -265,7 +265,7 @@ class TestPgVectorLive:
 
 class TestHostedEmbedderOrdering:
     def test_reorders_response_by_index(self, monkeypatch):
-        from maverick_knowledge.embed import HostedEmbedder
+        from lightwork_knowledge.embed import HostedEmbedder
 
         class _Resp:
             def raise_for_status(self):
@@ -290,7 +290,7 @@ class TestLocalEmbedder:
     def test_module_provides_lazy_local_embedder(self):
         # Guards the bug where build_embedder imported a non-existent module, so
         # `embedder = "local"` always silently degraded to the hash fallback.
-        from maverick_knowledge.local_embed import LocalEmbedder
+        from lightwork_knowledge.local_embed import LocalEmbedder
 
         e = LocalEmbedder("some-model")
         assert e.model_name == "some-model"
@@ -299,7 +299,7 @@ class TestLocalEmbedder:
     def test_local_fails_loud_when_extra_missing(self):
         import importlib.util
 
-        from maverick_knowledge.embed import build_embedder
+        from lightwork_knowledge.embed import build_embedder
 
         if importlib.util.find_spec("sentence_transformers") is None:
             # A missing extra must surface, not silently degrade to the hash
@@ -317,14 +317,14 @@ class TestBuildEmbedderFailLoud:
     embedder -- a misconfigured provider raises; deterministic is opt-in only."""
 
     def test_deterministic_is_explicit_opt_in(self):
-        from maverick_knowledge.embed import DeterministicEmbedder, build_embedder
+        from lightwork_knowledge.embed import DeterministicEmbedder, build_embedder
 
         e = build_embedder({"embedder": "deterministic", "dim": 64})
         assert isinstance(e, DeterministicEmbedder)
         assert e.dim == 64
 
     def test_hosted_without_key_raises(self, monkeypatch):
-        from maverick_knowledge.embed import build_embedder
+        from lightwork_knowledge.embed import build_embedder
 
         monkeypatch.delenv("MAVERICK_EMBED_PROVIDER", raising=False)
         monkeypatch.delenv("MAVERICK_EMBED_API_KEY", raising=False)
@@ -334,21 +334,21 @@ class TestBuildEmbedderFailLoud:
             build_embedder({})
 
     def test_hosted_with_key_builds_hosted(self, monkeypatch):
-        from maverick_knowledge.embed import HostedEmbedder, build_embedder
+        from lightwork_knowledge.embed import HostedEmbedder, build_embedder
 
         monkeypatch.delenv("MAVERICK_EMBED_PROVIDER", raising=False)
         e = build_embedder({"embedder": "hosted", "api_key": "k", "dim": 8})
         assert isinstance(e, HostedEmbedder) and e.dim == 8
 
     def test_unknown_provider_raises(self, monkeypatch):
-        from maverick_knowledge.embed import build_embedder
+        from lightwork_knowledge.embed import build_embedder
 
         monkeypatch.delenv("MAVERICK_EMBED_PROVIDER", raising=False)
         with pytest.raises(ValueError, match="unknown embedder"):
             build_embedder({"embedder": "banana"})
 
     def test_env_overrides_cfg_to_deterministic(self, monkeypatch):
-        from maverick_knowledge.embed import DeterministicEmbedder, build_embedder
+        from lightwork_knowledge.embed import DeterministicEmbedder, build_embedder
 
         # Operator escape hatch: force deterministic even if config says hosted.
         monkeypatch.setenv("MAVERICK_EMBED_PROVIDER", "deterministic")
@@ -473,7 +473,7 @@ class TestSearchFormatted:
 
 class TestImageIngestion:
     def test_is_image(self):
-        from maverick_knowledge.parse import is_image
+        from lightwork_knowledge.parse import is_image
         assert is_image("flow.png") is True
         assert is_image("diagram.JPG") is True
         assert is_image("notes.txt") is False
@@ -508,7 +508,7 @@ class TestImageIngestion:
         assert kb.ingest_path("ops", img) == 0  # failure swallowed, ingestion continues
 
     def test_ocr_describer_bounds_pixels_before_ocr(self, tmp_path, monkeypatch):
-        from maverick_knowledge.image import build_ocr_describer
+        from lightwork_knowledge.image import build_ocr_describer
 
         img = tmp_path / "huge.png"
         img.write_bytes(b"fake-image")
@@ -543,7 +543,7 @@ class TestImageIngestion:
         assert ocr_calls == []
 
     def test_ocr_describer_passes_timeout_to_tesseract(self, tmp_path, monkeypatch):
-        from maverick_knowledge.image import build_ocr_describer
+        from lightwork_knowledge.image import build_ocr_describer
 
         img = tmp_path / "flow.png"
         img.write_bytes(b"fake-image")
@@ -583,7 +583,7 @@ class TestImageIngestion:
 
 class TestStorePersistence:
     def test_store_creates_parent_dir_and_persists(self, tmp_path):
-        from maverick_knowledge.store import SqliteVectorStore
+        from lightwork_knowledge.store import SqliteVectorStore
 
         e = DeterministicEmbedder(dim=32)
         path = tmp_path / "nested" / "deep" / "knowledge.db"
@@ -598,7 +598,7 @@ class TestStorePersistence:
 
 class TestCohereEmbedder:
     def test_cohere_v2_float_shape(self, monkeypatch):
-        from maverick_knowledge.embed import CohereEmbedder
+        from lightwork_knowledge.embed import CohereEmbedder
 
         captured = {}
 
@@ -623,7 +623,7 @@ class TestCohereEmbedder:
         assert captured["json"]["embedding_types"] == ["float"]
 
     def test_cohere_v1_list_shape_fallback(self, monkeypatch):
-        from maverick_knowledge.embed import CohereEmbedder
+        from lightwork_knowledge.embed import CohereEmbedder
 
         class _Resp:
             def raise_for_status(self):
@@ -637,14 +637,14 @@ class TestCohereEmbedder:
         assert e.embed(["a", "b"]) == [[5.0], [6.0]]
 
     def test_build_cohere_with_key(self, monkeypatch):
-        from maverick_knowledge.embed import CohereEmbedder, build_embedder
+        from lightwork_knowledge.embed import CohereEmbedder, build_embedder
 
         monkeypatch.delenv("MAVERICK_EMBED_PROVIDER", raising=False)
         e = build_embedder({"embedder": "cohere", "api_key": "k", "dim": 1024})
         assert isinstance(e, CohereEmbedder) and e.dim == 1024
 
     def test_build_cohere_without_key_raises(self, monkeypatch):
-        from maverick_knowledge.embed import build_embedder
+        from lightwork_knowledge.embed import build_embedder
 
         monkeypatch.delenv("MAVERICK_EMBED_PROVIDER", raising=False)
         monkeypatch.delenv("MAVERICK_EMBED_API_KEY", raising=False)
@@ -653,7 +653,7 @@ class TestCohereEmbedder:
             build_embedder({"embedder": "cohere"})
 
     def test_build_cohere_reads_cohere_api_key_env(self, monkeypatch):
-        from maverick_knowledge.embed import CohereEmbedder, build_embedder
+        from lightwork_knowledge.embed import CohereEmbedder, build_embedder
 
         monkeypatch.delenv("MAVERICK_EMBED_PROVIDER", raising=False)
         monkeypatch.delenv("MAVERICK_EMBED_API_KEY", raising=False)

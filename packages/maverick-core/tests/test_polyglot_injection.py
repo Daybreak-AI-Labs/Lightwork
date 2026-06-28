@@ -1,7 +1,7 @@
 """polyglot_injection: polyglot injection defense scan."""
 from __future__ import annotations
 
-from maverick.tools.polyglot_injection import polyglot_injection
+from lightwork.tools.polyglot_injection import polyglot_injection
 
 
 def _run(text):

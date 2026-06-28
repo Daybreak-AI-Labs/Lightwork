@@ -3,8 +3,8 @@ from __future__ import annotations
 import random
 
 import pytest
-from maverick_evolve import EvalCase, evolve_live, make_agent_factory
-from maverick_evolve.agent_adapter import (
+from lightwork_evolve import EvalCase, evolve_live, make_agent_factory
+from lightwork_evolve.agent_adapter import (
     env_for,
     overlay_for,
     subprocess_run_one,
@@ -63,14 +63,14 @@ def test_subprocess_run_one_uses_overlay_without_replacing_operator_config(monke
     operator_config = tmp_path / "operator.toml"
     operator_config.write_text('[sandbox]\nbackend = "docker"\n', encoding="utf-8")
     monkeypatch.setenv("MAVERICK_CONFIG", str(operator_config))
-    monkeypatch.setattr("maverick_evolve.agent_adapter.subprocess.run", fake_run)
+    monkeypatch.setattr("lightwork_evolve.agent_adapter.subprocess.run", fake_run)
 
     out = subprocess_run_one(
         "hello", {"search.n": 5, "max_swarm_fanout": 3}, workdir=str(tmp_path), python="py"
     )
 
     assert out == "ok"
-    assert seen["args"] == ["py", "-m", "maverick.cli", "start", "hello"]
+    assert seen["args"] == ["py", "-m", "lightwork.cli", "start", "hello"]
     assert seen["cwd"] == str(tmp_path)
     assert seen["env"]["MAVERICK_CONFIG"] == str(operator_config)
     assert seen["env"]["MAVERICK_CONFIG_OVERLAY"] != str(operator_config)
@@ -82,7 +82,7 @@ async def test_full_wiring_with_fake_run_one(monkeypatch):
     """The end-to-end proof: a fake run_one that reads a config knob drives the
     real factory -> eval harness -> continuous-evolution loop, and it climbs.
     This is the same wiring the live subprocess runner uses."""
-    monkeypatch.setattr("maverick_evolve.loop.calibration_frozen", lambda: False)
+    monkeypatch.setattr("lightwork_evolve.loop.calibration_frozen", lambda: False)
 
     async def fake_run_one(prompt: str, config: dict) -> str:
         # The "agent" is better when the fanout knob is higher; the eval case's
@@ -115,7 +115,7 @@ async def test_make_agent_factory_produces_runnable_agent():
 def test_cli_load_cases(tmp_path):
     import json
 
-    from maverick_evolve.cli import _load_cases
+    from lightwork_evolve.cli import _load_cases
     p = tmp_path / "cases.json"
     p.write_text(json.dumps([
         {"prompt": "capital of France?", "reference": "Paris"},
@@ -128,7 +128,7 @@ def test_cli_load_cases(tmp_path):
 
 
 def test_cli_live_requires_cases(capsys):
-    from maverick_evolve.cli import main
+    from lightwork_evolve.cli import main
     rc = main(["--live"])
     assert rc == 2
     assert "requires --cases" in capsys.readouterr().out

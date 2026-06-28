@@ -2,8 +2,8 @@
 from __future__ import annotations
 
 from click.testing import CliRunner
-from maverick import release_canary as rc
-from maverick.cli import main
+from lightwork import release_canary as rc
+from lightwork.cli import main
 
 # ---- compare (pure, direction-aware) ----
 

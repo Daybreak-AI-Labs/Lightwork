@@ -34,14 +34,14 @@ def _resp(status: int, body: object):
 # ---------- PagerDuty ----------
 
 def test_pagerduty_requires_op():
-    from maverick.tools.pagerduty_tool import pagerduty_tool
+    from lightwork.tools.pagerduty_tool import pagerduty_tool
     assert "op is required" in pagerduty_tool().fn({})
 
 
 def test_pagerduty_missing_token(monkeypatch):
     monkeypatch.delenv("PAGERDUTY_API_TOKEN", raising=False)
     _fake_httpx(monkeypatch, get=MagicMock())
-    from maverick.tools.pagerduty_tool import pagerduty_tool
+    from lightwork.tools.pagerduty_tool import pagerduty_tool
     out = pagerduty_tool().fn({"op": "incidents"})
     assert "PAGERDUTY_API_TOKEN" in out
 
@@ -53,7 +53,7 @@ def test_pagerduty_incidents_renders(monkeypatch):
          "title": "DB down"},
     ]}
     _fake_httpx(monkeypatch, get=MagicMock(return_value=_resp(200, body)))
-    from maverick.tools.pagerduty_tool import pagerduty_tool
+    from lightwork.tools.pagerduty_tool import pagerduty_tool
     out = pagerduty_tool().fn({"op": "incidents"})
     assert "PQ1" in out and "DB down" in out
 
@@ -61,7 +61,7 @@ def test_pagerduty_incidents_renders(monkeypatch):
 def test_pagerduty_acknowledge_dry_run(monkeypatch):
     monkeypatch.setenv("PAGERDUTY_API_TOKEN", "tok")
     _fake_httpx(monkeypatch, get=MagicMock(), put=MagicMock())
-    from maverick.tools.pagerduty_tool import pagerduty_tool
+    from lightwork.tools.pagerduty_tool import pagerduty_tool
     out = pagerduty_tool().fn({"op": "acknowledge", "id": "PQ1"})
     assert "DRY RUN" in out
 
@@ -70,7 +70,7 @@ def test_pagerduty_trigger_dry_run(monkeypatch):
     monkeypatch.setenv("PAGERDUTY_API_TOKEN", "tok")
     monkeypatch.setenv("PAGERDUTY_EVENTS_KEY", "rk")
     _fake_httpx(monkeypatch, post=MagicMock())
-    from maverick.tools.pagerduty_tool import pagerduty_tool
+    from lightwork.tools.pagerduty_tool import pagerduty_tool
     out = pagerduty_tool().fn({"op": "trigger", "summary": "db down"})
     assert "DRY RUN" in out
 
@@ -82,7 +82,7 @@ def test_pagerduty_acknowledge_sends_from_header(monkeypatch):
     monkeypatch.setenv("PAGERDUTY_FROM", "oncall@example.com")
     put = MagicMock(return_value=_resp(200, {"incident": {"status": "acknowledged"}}))
     _fake_httpx(monkeypatch, put=put)
-    from maverick.tools.pagerduty_tool import pagerduty_tool
+    from lightwork.tools.pagerduty_tool import pagerduty_tool
     out = pagerduty_tool().fn({"op": "acknowledge", "id": "PQ1", "confirm": True})
     assert "acknowledged" in out
     # The From header was sent on the PUT.
@@ -96,7 +96,7 @@ def test_pagerduty_acknowledge_errors_without_from(monkeypatch):
     monkeypatch.setenv("PAGERDUTY_API_TOKEN", "tok")
     put = MagicMock()
     _fake_httpx(monkeypatch, put=put)
-    from maverick.tools.pagerduty_tool import pagerduty_tool
+    from lightwork.tools.pagerduty_tool import pagerduty_tool
     out = pagerduty_tool().fn({"op": "acknowledge", "id": "PQ1", "confirm": True})
     assert "requester email" in out.lower()
     put.assert_not_called()  # no doomed request fired
@@ -105,7 +105,7 @@ def test_pagerduty_acknowledge_errors_without_from(monkeypatch):
 # ---------- Salesforce ----------
 
 def test_salesforce_requires_op():
-    from maverick.tools.salesforce_tool import salesforce_tool
+    from lightwork.tools.salesforce_tool import salesforce_tool
     assert "op is required" in salesforce_tool().fn({})
 
 
@@ -113,7 +113,7 @@ def test_salesforce_missing_config(monkeypatch):
     monkeypatch.delenv("SALESFORCE_INSTANCE_URL", raising=False)
     monkeypatch.delenv("SALESFORCE_ACCESS_TOKEN", raising=False)
     _fake_httpx(monkeypatch, get=MagicMock())
-    from maverick.tools.salesforce_tool import salesforce_tool
+    from lightwork.tools.salesforce_tool import salesforce_tool
     out = salesforce_tool().fn({"op": "soql", "query": "SELECT Id FROM Account LIMIT 1"})
     assert "SALESFORCE_INSTANCE_URL" in out
 
@@ -124,7 +124,7 @@ def test_salesforce_soql_renders(monkeypatch):
     body = {"totalSize": 1, "done": True,
             "records": [{"attributes": {"type": "Account"}, "Id": "001x", "Name": "Acme"}]}
     _fake_httpx(monkeypatch, get=MagicMock(return_value=_resp(200, body)))
-    from maverick.tools.salesforce_tool import salesforce_tool
+    from lightwork.tools.salesforce_tool import salesforce_tool
     out = salesforce_tool().fn({"op": "soql", "query": "SELECT Id FROM Account"})
     assert "totalSize=1" in out and "001x" in out and "Acme" in out
 
@@ -133,7 +133,7 @@ def test_salesforce_record_create_dry_run(monkeypatch):
     monkeypatch.setenv("SALESFORCE_INSTANCE_URL", "https://x")
     monkeypatch.setenv("SALESFORCE_ACCESS_TOKEN", "tok")
     _fake_httpx(monkeypatch, post=MagicMock())
-    from maverick.tools.salesforce_tool import salesforce_tool
+    from lightwork.tools.salesforce_tool import salesforce_tool
     out = salesforce_tool().fn({
         "op": "record_create", "sobject": "Account",
         "fields": {"Name": "Acme"},
@@ -144,14 +144,14 @@ def test_salesforce_record_create_dry_run(monkeypatch):
 # ---------- Cloudflare ----------
 
 def test_cloudflare_requires_op():
-    from maverick.tools.cloudflare_tool import cloudflare_tool
+    from lightwork.tools.cloudflare_tool import cloudflare_tool
     assert "op is required" in cloudflare_tool().fn({})
 
 
 def test_cloudflare_missing_token(monkeypatch):
     monkeypatch.delenv("CLOUDFLARE_API_TOKEN", raising=False)
     _fake_httpx(monkeypatch, get=MagicMock())
-    from maverick.tools.cloudflare_tool import cloudflare_tool
+    from lightwork.tools.cloudflare_tool import cloudflare_tool
     out = cloudflare_tool().fn({"op": "dns_list", "zone_id": "z"})
     assert "CLOUDFLARE_API_TOKEN" in out
 
@@ -162,7 +162,7 @@ def test_cloudflare_dns_list(monkeypatch):
         {"id": "r1", "type": "A", "name": "x.example.com", "content": "1.2.3.4"},
     ]}
     _fake_httpx(monkeypatch, get=MagicMock(return_value=_resp(200, body)))
-    from maverick.tools.cloudflare_tool import cloudflare_tool
+    from lightwork.tools.cloudflare_tool import cloudflare_tool
     out = cloudflare_tool().fn({"op": "dns_list", "zone_id": "z"})
     assert "x.example.com" in out and "1.2.3.4" in out
 
@@ -170,7 +170,7 @@ def test_cloudflare_dns_list(monkeypatch):
 def test_cloudflare_purge_dry_run(monkeypatch):
     monkeypatch.setenv("CLOUDFLARE_API_TOKEN", "tok")
     _fake_httpx(monkeypatch, post=MagicMock())
-    from maverick.tools.cloudflare_tool import cloudflare_tool
+    from lightwork.tools.cloudflare_tool import cloudflare_tool
     out = cloudflare_tool().fn({"op": "purge", "zone_id": "z"})
     assert "DRY RUN" in out and "EVERYTHING" in out
 
@@ -178,14 +178,14 @@ def test_cloudflare_purge_dry_run(monkeypatch):
 # ---------- Datadog ----------
 
 def test_datadog_requires_op():
-    from maverick.tools.datadog_tool import datadog_tool
+    from lightwork.tools.datadog_tool import datadog_tool
     assert "op is required" in datadog_tool().fn({})
 
 
 def test_datadog_submit_event_validation(monkeypatch):
     monkeypatch.setenv("DATADOG_API_KEY", "k")
     _fake_httpx(monkeypatch, post=MagicMock())
-    from maverick.tools.datadog_tool import datadog_tool
+    from lightwork.tools.datadog_tool import datadog_tool
     out = datadog_tool().fn({"op": "submit_event"})
     assert "requires title" in out
 
@@ -196,7 +196,7 @@ def test_datadog_submit_event_dry_run(monkeypatch):
         monkeypatch,
         post=MagicMock(return_value=_resp(200, {"event": {"id": 99}})),
     )
-    from maverick.tools.datadog_tool import datadog_tool
+    from lightwork.tools.datadog_tool import datadog_tool
     out = datadog_tool().fn({
         "op": "submit_event", "title": "deploy", "text": "v1.2 shipped",
     })
@@ -209,7 +209,7 @@ def test_datadog_submit_event_posts_with_confirm(monkeypatch):
         monkeypatch,
         post=MagicMock(return_value=_resp(200, {"event": {"id": 99}})),
     )
-    from maverick.tools.datadog_tool import datadog_tool
+    from lightwork.tools.datadog_tool import datadog_tool
     out = datadog_tool().fn({
         "op": "submit_event", "title": "deploy", "text": "v1.2 shipped", "confirm": True,
     })
@@ -220,7 +220,7 @@ def test_datadog_monitors_requires_app_key(monkeypatch):
     monkeypatch.setenv("DATADOG_API_KEY", "k")
     monkeypatch.delenv("DATADOG_APP_KEY", raising=False)
     _fake_httpx(monkeypatch, get=MagicMock())
-    from maverick.tools.datadog_tool import datadog_tool
+    from lightwork.tools.datadog_tool import datadog_tool
     out = datadog_tool().fn({"op": "monitors"})
     assert "DATADOG_APP_KEY" in out
 
@@ -228,14 +228,14 @@ def test_datadog_monitors_requires_app_key(monkeypatch):
 # ---------- HubSpot ----------
 
 def test_hubspot_requires_op():
-    from maverick.tools.hubspot_tool import hubspot_tool
+    from lightwork.tools.hubspot_tool import hubspot_tool
     assert "op is required" in hubspot_tool().fn({})
 
 
 def test_hubspot_missing_token(monkeypatch):
     monkeypatch.delenv("HUBSPOT_TOKEN", raising=False)
     _fake_httpx(monkeypatch, get=MagicMock(), post=MagicMock())
-    from maverick.tools.hubspot_tool import hubspot_tool
+    from lightwork.tools.hubspot_tool import hubspot_tool
     out = hubspot_tool().fn({"op": "contacts"})
     assert "HUBSPOT_TOKEN" in out
 
@@ -247,7 +247,7 @@ def test_hubspot_contacts_list(monkeypatch):
                                     "firstname": "A", "lastname": "B"}},
     ]}
     _fake_httpx(monkeypatch, get=MagicMock(return_value=_resp(200, body)))
-    from maverick.tools.hubspot_tool import hubspot_tool
+    from lightwork.tools.hubspot_tool import hubspot_tool
     out = hubspot_tool().fn({"op": "contacts"})
     assert "a@x.com" in out
 
@@ -259,7 +259,7 @@ def test_hubspot_contacts_follows_paging_after(monkeypatch):
     page2 = {"results": [{"id": "2", "properties": {"email": "two@x"}}]}
     get = MagicMock(side_effect=[_resp(200, page1), _resp(200, page2)])
     _fake_httpx(monkeypatch, get=get)
-    from maverick.tools.hubspot_tool import hubspot_tool
+    from lightwork.tools.hubspot_tool import hubspot_tool
     out = hubspot_tool().fn({"op": "contacts", "limit": 50})
     assert "one@x" in out and "two@x" in out
     assert get.call_count == 2
@@ -269,7 +269,7 @@ def test_hubspot_contacts_follows_paging_after(monkeypatch):
 def test_hubspot_contact_create_dry_run(monkeypatch):
     monkeypatch.setenv("HUBSPOT_TOKEN", "tok")
     _fake_httpx(monkeypatch, post=MagicMock())
-    from maverick.tools.hubspot_tool import hubspot_tool
+    from lightwork.tools.hubspot_tool import hubspot_tool
     out = hubspot_tool().fn({"op": "contact_create", "email": "x@y"})
     assert "DRY RUN" in out
 
@@ -277,7 +277,7 @@ def test_hubspot_contact_create_dry_run(monkeypatch):
 # ---------- Twilio ----------
 
 def test_twilio_requires_op():
-    from maverick.tools.twilio_tool import twilio_tool
+    from lightwork.tools.twilio_tool import twilio_tool
     assert "op is required" in twilio_tool().fn({})
 
 
@@ -287,7 +287,7 @@ def test_twilio_missing_credentials(monkeypatch):
     # Provide from_ explicitly so the auth check (not the from-required
     # check) fires when sending the request.
     _fake_httpx(monkeypatch, post=MagicMock())
-    from maverick.tools.twilio_tool import twilio_tool
+    from lightwork.tools.twilio_tool import twilio_tool
     out = twilio_tool().fn({
         "op": "sms_send", "to": "+1", "body": "x", "from_": "+15550000", "confirm": True,
     })
@@ -300,7 +300,7 @@ def test_twilio_sms_send_dry_run(monkeypatch):
     monkeypatch.setenv("TWILIO_FROM_NUMBER", "+15551234567")
     body = {"sid": "SM999", "status": "queued"}
     _fake_httpx(monkeypatch, post=MagicMock(return_value=_resp(200, body)))
-    from maverick.tools.twilio_tool import twilio_tool
+    from lightwork.tools.twilio_tool import twilio_tool
     out = twilio_tool().fn({
         "op": "sms_send", "to": "+15555550000", "body": "hello",
     })
@@ -313,7 +313,7 @@ def test_twilio_sms_send_posts_with_confirm(monkeypatch):
     monkeypatch.setenv("TWILIO_FROM_NUMBER", "+15551234567")
     body = {"sid": "SM999", "status": "queued"}
     _fake_httpx(monkeypatch, post=MagicMock(return_value=_resp(200, body)))
-    from maverick.tools.twilio_tool import twilio_tool
+    from lightwork.tools.twilio_tool import twilio_tool
     out = twilio_tool().fn({
         "op": "sms_send", "to": "+15555550000", "body": "hello", "confirm": True,
     })
@@ -325,7 +325,7 @@ def test_twilio_sms_send_requires_from(monkeypatch):
     monkeypatch.setenv("TWILIO_AUTH_TOKEN", "tok")
     monkeypatch.delenv("TWILIO_FROM_NUMBER", raising=False)
     _fake_httpx(monkeypatch, post=MagicMock())
-    from maverick.tools.twilio_tool import twilio_tool
+    from lightwork.tools.twilio_tool import twilio_tool
     out = twilio_tool().fn({"op": "sms_send", "to": "+1", "body": "x"})
     assert "from_" in out
 
@@ -333,13 +333,13 @@ def test_twilio_sms_send_requires_from(monkeypatch):
 # ---------- S3 ----------
 
 def test_s3_requires_op():
-    from maverick.tools.s3_tool import s3_tool
+    from lightwork.tools.s3_tool import s3_tool
     assert "op is required" in s3_tool().fn({})
 
 
 def test_s3_missing_boto3(monkeypatch):
     monkeypatch.setitem(sys.modules, "boto3", None)
-    from maverick.tools.s3_tool import s3_tool
+    from lightwork.tools.s3_tool import s3_tool
     out = s3_tool().fn({"op": "list_buckets"})
     assert "boto3 not installed" in out
 
@@ -387,14 +387,14 @@ def test_s3_list_buckets(monkeypatch):
     _install_fake_boto3(monkeypatch, buckets=[
         {"Name": "b1", "CreationDate": _dt.datetime(2026, 1, 1)},
     ])
-    from maverick.tools.s3_tool import s3_tool
+    from lightwork.tools.s3_tool import s3_tool
     out = s3_tool().fn({"op": "list_buckets"})
     assert "b1" in out
 
 
 def test_s3_put_dry_run(monkeypatch):
     _install_fake_boto3(monkeypatch)
-    from maverick.tools.s3_tool import s3_tool
+    from lightwork.tools.s3_tool import s3_tool
     out = s3_tool().fn({
         "op": "put", "bucket": "b", "key": "k", "body": "hi",
     })
@@ -403,7 +403,7 @@ def test_s3_put_dry_run(monkeypatch):
 
 def test_s3_put_confirmed(monkeypatch):
     _install_fake_boto3(monkeypatch)
-    from maverick.tools.s3_tool import s3_tool
+    from lightwork.tools.s3_tool import s3_tool
     out = s3_tool().fn({
         "op": "put", "bucket": "b", "key": "k", "body": "hi",
         "confirm": True,
@@ -413,7 +413,7 @@ def test_s3_put_confirmed(monkeypatch):
 
 def test_s3_presign_returns_url(monkeypatch):
     _install_fake_boto3(monkeypatch, presigned_url="https://x.example/k?sig=abc")
-    from maverick.tools.s3_tool import s3_tool
+    from lightwork.tools.s3_tool import s3_tool
     out = s3_tool().fn({"op": "presign", "bucket": "b", "key": "k"})
     assert "https://x.example/k?sig=abc" in out
 
@@ -421,14 +421,14 @@ def test_s3_presign_returns_url(monkeypatch):
 # ---------- Elasticsearch ----------
 
 def test_elasticsearch_requires_op():
-    from maverick.tools.elasticsearch_tool import elasticsearch_tool
+    from lightwork.tools.elasticsearch_tool import elasticsearch_tool
     assert "op is required" in elasticsearch_tool().fn({})
 
 
 def test_elasticsearch_missing_url(monkeypatch):
     monkeypatch.delenv("ES_URL", raising=False)
     _fake_httpx(monkeypatch, post=MagicMock())
-    from maverick.tools.elasticsearch_tool import elasticsearch_tool
+    from lightwork.tools.elasticsearch_tool import elasticsearch_tool
     out = elasticsearch_tool().fn({"op": "search", "index": "x"})
     assert "ES_URL" in out
 
@@ -442,7 +442,7 @@ def test_elasticsearch_search_renders(monkeypatch):
         ]},
     }
     _fake_httpx(monkeypatch, post=MagicMock(return_value=_resp(200, body)))
-    from maverick.tools.elasticsearch_tool import elasticsearch_tool
+    from lightwork.tools.elasticsearch_tool import elasticsearch_tool
     out = elasticsearch_tool().fn({"op": "search", "index": "users"})
     assert "total=1" in out and "alice" in out
 
@@ -450,7 +450,7 @@ def test_elasticsearch_search_renders(monkeypatch):
 def test_elasticsearch_index_dry_run(monkeypatch):
     monkeypatch.setenv("ES_URL", "http://es")
     _fake_httpx(monkeypatch, put=MagicMock())
-    from maverick.tools.elasticsearch_tool import elasticsearch_tool
+    from lightwork.tools.elasticsearch_tool import elasticsearch_tool
     out = elasticsearch_tool().fn({
         "op": "index", "index": "u", "doc_id": "1", "body": {"a": 1},
     })
@@ -460,7 +460,7 @@ def test_elasticsearch_index_dry_run(monkeypatch):
 # ---------- GitHub Actions ----------
 
 def test_gha_requires_op():
-    from maverick.tools.github_actions import github_actions
+    from lightwork.tools.github_actions import github_actions
     assert "op is required" in github_actions().fn({})
 
 
@@ -468,7 +468,7 @@ def test_gha_missing_token(monkeypatch):
     monkeypatch.delenv("GITHUB_TOKEN", raising=False)
     monkeypatch.delenv("GH_TOKEN", raising=False)
     _fake_httpx(monkeypatch, get=MagicMock())
-    from maverick.tools.github_actions import github_actions
+    from lightwork.tools.github_actions import github_actions
     out = github_actions().fn({"op": "runs", "owner": "o", "repo": "r"})
     assert "GITHUB_TOKEN" in out
 
@@ -480,7 +480,7 @@ def test_gha_runs_list(monkeypatch):
          "conclusion": "success", "head_branch": "main", "event": "push"},
     ]}
     _fake_httpx(monkeypatch, get=MagicMock(return_value=_resp(200, body)))
-    from maverick.tools.github_actions import github_actions
+    from lightwork.tools.github_actions import github_actions
     out = github_actions().fn({"op": "runs", "owner": "o", "repo": "r"})
     assert "111" in out and "success" in out
 
@@ -488,7 +488,7 @@ def test_gha_runs_list(monkeypatch):
 def test_gha_dispatch_dry_run(monkeypatch):
     monkeypatch.setenv("GITHUB_TOKEN", "tok")
     _fake_httpx(monkeypatch, post=MagicMock())
-    from maverick.tools.github_actions import github_actions
+    from lightwork.tools.github_actions import github_actions
     out = github_actions().fn({
         "op": "dispatch", "owner": "o", "repo": "r",
         "workflow": "ci.yml", "ref": "main",
@@ -499,7 +499,7 @@ def test_gha_dispatch_dry_run(monkeypatch):
 def test_gha_cancel_confirmed(monkeypatch):
     monkeypatch.setenv("GITHUB_TOKEN", "tok")
     _fake_httpx(monkeypatch, post=MagicMock(return_value=_resp(202, {})))
-    from maverick.tools.github_actions import github_actions
+    from lightwork.tools.github_actions import github_actions
     out = github_actions().fn({
         "op": "cancel", "owner": "o", "repo": "r", "run_id": 42,
         "confirm": True,
@@ -510,8 +510,8 @@ def test_gha_cancel_confirmed(monkeypatch):
 # ---------- registration smoke (all 8 tools land) ----------
 
 def test_all_eight_tools_register(tmp_path):
-    from maverick.sandbox.local import LocalBackend
-    from maverick.tools import base_registry
+    from lightwork.sandbox.local import LocalBackend
+    from lightwork.tools import base_registry
 
     class _W:
         def open_questions(self, gid):

@@ -6,8 +6,8 @@ from warnings (fine to pilot).
 """
 from __future__ import annotations
 
-from maverick import tax_onboarding as ob
-from maverick.cli import main
+from lightwork import tax_onboarding as ob
+from lightwork.cli import main
 
 
 class TestResolveDocType:

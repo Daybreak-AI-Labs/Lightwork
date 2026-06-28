@@ -1,7 +1,7 @@
 """anomaly_scan: MAD-based cross-run outlier detection."""
 from __future__ import annotations
 
-from maverick.tools.anomaly_scan import anomaly_scan
+from lightwork.tools.anomaly_scan import anomaly_scan
 
 
 def _s(series, labels=None, threshold=None):
@@ -58,7 +58,7 @@ def test_errors():
 
 
 def test_registered():
-    from maverick.tools import base_registry
+    from lightwork.tools import base_registry
 
     class _W:
         pass

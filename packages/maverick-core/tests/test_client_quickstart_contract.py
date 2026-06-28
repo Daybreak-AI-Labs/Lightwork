@@ -3,7 +3,7 @@
 docs/clients/{typescript,go,rust}-quickstart.md are the cross-language examples
 for driving Maverick over MCP. They're only "runnable" if the tools they call
 actually exist with the documented names/args. If anyone renames, removes, or
-adds a tool in maverick_mcp.server.TOOLS, these fail so the docs get updated
+adds a tool in lightwork_mcp.server.TOOLS, these fail so the docs get updated
 instead of silently shipping a copy-paste example that calls a missing tool.
 
 This is the language-agnostic "tested" half of the client bindings: it runs in
@@ -14,7 +14,7 @@ from __future__ import annotations
 import re
 from pathlib import Path
 
-from maverick_mcp.server import TOOLS
+from lightwork_mcp.server import TOOLS
 
 _REPO_ROOT = Path(__file__).resolve().parents[3]
 _TOOL_NAMES = {t["name"] for t in TOOLS}

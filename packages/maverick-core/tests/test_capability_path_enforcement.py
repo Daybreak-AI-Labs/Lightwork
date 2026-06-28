@@ -12,17 +12,17 @@ setup; hermetic (no real LLM, no network).
 """
 
 import pytest
-from maverick.capability import Capability
-from maverick.tools import Tool
+from lightwork.capability import Capability
+from lightwork.tools import Tool
 
 
 def _agent(tmp_path):
-    from maverick.agent import Agent
-    from maverick.blackboard import Blackboard
-    from maverick.budget import Budget
-    from maverick.sandbox import LocalBackend
-    from maverick.swarm import SwarmContext
-    from maverick.world_model import WorldModel
+    from lightwork.agent import Agent
+    from lightwork.blackboard import Blackboard
+    from lightwork.budget import Budget
+    from lightwork.sandbox import LocalBackend
+    from lightwork.swarm import SwarmContext
+    from lightwork.world_model import WorldModel
 
     world = WorldModel(tmp_path / "world.db")
     goal_id = world.create_goal("g", "")
@@ -152,10 +152,10 @@ async def test_missing_path_arg_fails_soft(tmp_path):
 
 @pytest.mark.asyncio
 async def test_path_denial_is_audited(tmp_path, monkeypatch):
-    import maverick.audit
-    from maverick.audit import EventKind
+    import lightwork.audit
+    from lightwork.audit import EventKind
     calls = []
-    monkeypatch.setattr(maverick.audit, "record",
+    monkeypatch.setattr(lightwork.audit, "record",
                         lambda kind, **kw: calls.append((kind, kw)) or True)
     agent = _agent(tmp_path)
     agent.capability = Capability(principal="agent:coder-1",

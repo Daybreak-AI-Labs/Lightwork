@@ -4,8 +4,8 @@ from __future__ import annotations
 import time
 
 from click.testing import CliRunner
-from maverick.cli import main
-from maverick.world_model import WorldModel
+from lightwork.cli import main
+from lightwork.world_model import WorldModel
 
 
 def test_demo_runs_token_free_and_shows_the_arc(tmp_path):

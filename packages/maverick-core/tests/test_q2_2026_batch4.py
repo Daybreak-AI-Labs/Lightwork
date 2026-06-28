@@ -9,32 +9,32 @@ import pytest
 # ---------- semantic_scholar tool ----------
 
 def test_semantic_scholar_requires_op():
-    from maverick.tools.semantic_scholar import semantic_scholar
+    from lightwork.tools.semantic_scholar import semantic_scholar
     out = semantic_scholar().fn({})
     assert "ERROR" in out
     assert "op is required" in out
 
 
 def test_semantic_scholar_unknown_op():
-    from maverick.tools.semantic_scholar import semantic_scholar
+    from lightwork.tools.semantic_scholar import semantic_scholar
     out = semantic_scholar().fn({"op": "garbage"})
     assert "unknown op" in out
 
 
 def test_semantic_scholar_search_requires_query():
-    from maverick.tools.semantic_scholar import semantic_scholar
+    from lightwork.tools.semantic_scholar import semantic_scholar
     out = semantic_scholar().fn({"op": "search", "query": ""})
     assert "requires query" in out
 
 
 def test_semantic_scholar_paper_requires_id():
-    from maverick.tools.semantic_scholar import semantic_scholar
+    from lightwork.tools.semantic_scholar import semantic_scholar
     out = semantic_scholar().fn({"op": "paper", "paper_id": ""})
     assert "requires paper_id" in out
 
 
 def test_semantic_scholar_search_hits_api(monkeypatch):
-    from maverick.tools.semantic_scholar import semantic_scholar
+    from lightwork.tools.semantic_scholar import semantic_scholar
     fake_resp = MagicMock()
     fake_resp.status_code = 200
     fake_resp.raise_for_status = MagicMock()
@@ -61,7 +61,7 @@ def test_semantic_scholar_search_hits_api(monkeypatch):
 
 
 def test_semantic_scholar_paper_by_doi(monkeypatch):
-    from maverick.tools.semantic_scholar import semantic_scholar
+    from lightwork.tools.semantic_scholar import semantic_scholar
     fake_resp = MagicMock()
     fake_resp.status_code = 200
     fake_resp.raise_for_status = MagicMock()
@@ -82,7 +82,7 @@ def test_semantic_scholar_paper_by_doi(monkeypatch):
 
 
 def test_semantic_scholar_404_actionable():
-    from maverick.tools.semantic_scholar import semantic_scholar
+    from lightwork.tools.semantic_scholar import semantic_scholar
     fake_resp = MagicMock()
     fake_resp.status_code = 404
     fake_resp.raise_for_status = MagicMock()
@@ -94,7 +94,7 @@ def test_semantic_scholar_404_actionable():
 
 
 def test_semantic_scholar_in_registry():
-    from maverick.tools import base_registry
+    from lightwork.tools import base_registry
 
     class _FakeSandbox:
         workdir = "."
@@ -115,14 +115,14 @@ _HAS_PSYCOPG = importlib.util.find_spec("psycopg") is not None
 def test_postgres_is_configured_default_false(monkeypatch):
     monkeypatch.delenv("MAVERICK_WORLD_BACKEND", raising=False)
     monkeypatch.setenv("HOME", "/nonexistent-for-this-test")
-    from maverick.world_model_backends import is_postgres_configured
+    from lightwork.world_model_backends import is_postgres_configured
     # No env, no config -> False.
     assert is_postgres_configured() is False
 
 
 def test_postgres_is_configured_via_env(monkeypatch):
     monkeypatch.setenv("MAVERICK_WORLD_BACKEND", "postgres")
-    from maverick.world_model_backends import is_postgres_configured
+    from lightwork.world_model_backends import is_postgres_configured
     assert is_postgres_configured() is True
 
 
@@ -134,7 +134,7 @@ def test_postgres_is_configured_via_config(tmp_path, monkeypatch):
     (cfg_dir / "config.toml").write_text(
         '[world_model]\nbackend = "postgres"\n'
     )
-    from maverick.world_model_backends import is_postgres_configured
+    from lightwork.world_model_backends import is_postgres_configured
     assert is_postgres_configured() is True
 
 
@@ -142,8 +142,8 @@ def test_postgres_without_dep_raises_actionable():
     """If psycopg isn't installed, instantiation raises a clear error."""
     if _HAS_PSYCOPG:
         pytest.skip("psycopg IS installed; can't test the missing-dep path")
-    from maverick.world_model_backends import PostgresWorldModel
-    with pytest.raises(ImportError, match="maverick-agent\\[postgres\\]"):
+    from lightwork.world_model_backends import PostgresWorldModel
+    with pytest.raises(ImportError, match="lightwork-agent\\[postgres\\]"):
         PostgresWorldModel(dsn="postgres://test")
 
 
@@ -163,14 +163,14 @@ def test_postgres_requires_dsn(monkeypatch):
         fake.connect = _connect
         monkeypatch.setitem(sys.modules, "psycopg", fake)
 
-    from maverick.world_model_backends import PostgresWorldModel
+    from lightwork.world_model_backends import PostgresWorldModel
     with pytest.raises(RuntimeError, match="MAVERICK_PG_DSN"):
         PostgresWorldModel(dsn=None)
 
 
 def test_postgres_schema_constants_exist():
     """The migration SQL list is present and has the expected tables."""
-    from maverick.world_model_backends.postgres import SCHEMA
+    from lightwork.world_model_backends.postgres import SCHEMA
     joined = " ".join(SCHEMA)
     for tbl in ("goals", "episodes", "goal_events", "facts"):
         assert f"CREATE TABLE IF NOT EXISTS {tbl}" in joined
@@ -185,10 +185,10 @@ TestClient = pytest.importorskip("fastapi.testclient").TestClient
 @pytest.fixture
 def dashboard_client(tmp_path, monkeypatch):
     monkeypatch.setenv("HOME", str(tmp_path))
-    from maverick.world_model import WorldModel
+    from lightwork.world_model import WorldModel
     w = WorldModel(tmp_path / "world.db")
     w.create_goal("hello", "")
-    from maverick_dashboard import app as app_mod
+    from lightwork_dashboard import app as app_mod
     monkeypatch.setattr(app_mod, "_world", lambda: w)
     yield TestClient(app_mod.app)
     w.close()
@@ -265,7 +265,7 @@ class _CursorTx:
 
 
 def _postgres_model_with_cursor(cursor):
-    from maverick.world_model_backends import PostgresWorldModel
+    from lightwork.world_model_backends import PostgresWorldModel
 
     world = PostgresWorldModel.__new__(PostgresWorldModel)
     world._tx = lambda: _CursorTx(cursor)
@@ -273,7 +273,7 @@ def _postgres_model_with_cursor(cursor):
 
 
 def test_postgres_recall_candidates_are_tenant_scoped(monkeypatch):
-    from maverick.paths import reset_tenant, set_tenant
+    from lightwork.paths import reset_tenant, set_tenant
 
     monkeypatch.setenv("MAVERICK_STRICT_TENANT_ISOLATION", "1")
     token = set_tenant("tenant-a")
@@ -290,7 +290,7 @@ def test_postgres_recall_candidates_are_tenant_scoped(monkeypatch):
 
 
 def test_postgres_spend_reads_join_tenant_scoped_goals(monkeypatch):
-    from maverick.paths import reset_tenant, set_tenant
+    from lightwork.paths import reset_tenant, set_tenant
 
     monkeypatch.setenv("MAVERICK_STRICT_TENANT_ISOLATION", "1")
     token = set_tenant("tenant-a")
@@ -313,7 +313,7 @@ def test_postgres_spend_reads_join_tenant_scoped_goals(monkeypatch):
 
 
 def test_postgres_goal_child_reads_join_tenant_scoped_goals(monkeypatch):
-    from maverick.paths import reset_tenant, set_tenant
+    from lightwork.paths import reset_tenant, set_tenant
 
     monkeypatch.setenv("MAVERICK_STRICT_TENANT_ISOLATION", "1")
     token = set_tenant("tenant-a")

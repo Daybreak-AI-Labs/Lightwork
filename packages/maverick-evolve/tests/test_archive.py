@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import random
 
-from maverick_evolve.archive import Archive, Candidate
+from lightwork_evolve.archive import Archive, Candidate
 
 
 def test_add_and_best():
@@ -65,7 +65,7 @@ def test_sample_empty_returns_none():
 def test_save_is_atomic_no_temp_residue(tmp_path):
     """save() must write atomically (temp + rename) so a crash mid-write can't
     leave a half-written, unloadable archive. Verify round-trip + no .tmp left."""
-    from maverick_evolve.archive import Archive, Candidate
+    from lightwork_evolve.archive import Archive, Candidate
 
     path = tmp_path / "archive.json"
     arc = Archive()
@@ -85,7 +85,7 @@ def test_concurrent_saves_leave_a_valid_archive(tmp_path):
     each writer's temp private so the file is always a valid, loadable archive."""
     import threading
 
-    from maverick_evolve.archive import Archive, Candidate
+    from lightwork_evolve.archive import Archive, Candidate
 
     path = tmp_path / "archive.json"
     n = 12

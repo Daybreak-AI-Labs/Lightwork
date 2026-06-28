@@ -1,7 +1,7 @@
 """audit_mirror: verify a primary audit log against an independent mirror."""
 from __future__ import annotations
 
-from maverick.tools.audit_mirror import audit_mirror
+from lightwork.tools.audit_mirror import audit_mirror
 
 
 def _verify(primary, mirror):

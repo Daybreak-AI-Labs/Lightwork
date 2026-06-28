@@ -8,8 +8,8 @@ effect-size + CI. No live LLM/GPU -- run/score are injected.
 from __future__ import annotations
 
 import pytest
-from maverick import calibration
-from maverick.learning_proof import (
+from lightwork import calibration
+from lightwork.learning_proof import (
     FROZEN_ENV,
     forced_freeze,
     measure_lift,
@@ -151,7 +151,7 @@ def _scores_file(tmp_path, baseline, treatment):
 
 def test_cli_prove_learning_reports_improvement(tmp_path):
     from click.testing import CliRunner
-    from maverick.cli import main
+    from lightwork.cli import main
     p = _scores_file(tmp_path, [0.0] * 8, [1.0] * 8)
     res = CliRunner().invoke(main, ["prove-learning", "--scores", str(p)])
     assert res.exit_code == 0, res.output
@@ -160,7 +160,7 @@ def test_cli_prove_learning_reports_improvement(tmp_path):
 
 def test_cli_prove_learning_strict_gate_fails_without_lift(tmp_path):
     from click.testing import CliRunner
-    from maverick.cli import main
+    from lightwork.cli import main
     p = _scores_file(tmp_path, [0.5] * 8, [0.5] * 8)
     res = CliRunner().invoke(
         main, ["prove-learning", "--scores", str(p), "--strict"])
@@ -171,7 +171,7 @@ def test_cli_prove_learning_json_output(tmp_path):
     import json
 
     from click.testing import CliRunner
-    from maverick.cli import main
+    from lightwork.cli import main
     p = _scores_file(tmp_path, [0.0, 1.0, 0.0, 1.0], [1.0, 1.0, 1.0, 1.0])
     res = CliRunner().invoke(
         main, ["prove-learning", "--scores", str(p), "--json"])
@@ -182,7 +182,7 @@ def test_cli_prove_learning_json_output(tmp_path):
 
 def test_cli_prove_learning_rejects_mismatched_lengths(tmp_path):
     from click.testing import CliRunner
-    from maverick.cli import main
+    from lightwork.cli import main
     p = _scores_file(tmp_path, [1.0, 0.0], [1.0])
     res = CliRunner().invoke(main, ["prove-learning", "--scores", str(p)])
     assert res.exit_code != 0

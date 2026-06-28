@@ -14,7 +14,7 @@ REPO_ROOT = Path(__file__).resolve().parents[3]
 # ---------- cross-agent bus ----------
 
 def test_agent_bus_send_and_recv():
-    from maverick import agent_bus
+    from lightwork import agent_bus
     agent_bus.clear()
     ok = agent_bus.send("alice", "bob", {"hello": 1})
     assert ok
@@ -27,7 +27,7 @@ def test_agent_bus_send_and_recv():
 
 
 def test_agent_bus_recv_with_timeout():
-    from maverick import agent_bus
+    from lightwork import agent_bus
     agent_bus.clear()
     import threading
     import time
@@ -43,7 +43,7 @@ def test_agent_bus_recv_with_timeout():
 
 
 def test_agent_bus_correlation_id_filter():
-    from maverick import agent_bus
+    from lightwork import agent_bus
     agent_bus.clear()
     agent_bus.send("alice", "bob", "wrong", correlation_id="x1")
     agent_bus.send("alice", "bob", "right", correlation_id="x2")
@@ -55,7 +55,7 @@ def test_agent_bus_correlation_id_filter():
 def test_agent_bus_correlation_filter_preserves_nonmatching_in_order():
     # Issue #480: a correlated recv must not DROP or REORDER the non-matching
     # messages it skips over. The match sits behind two non-matching ones.
-    from maverick import agent_bus
+    from lightwork import agent_bus
     agent_bus.clear()
     agent_bus.send("a", "bob", "n1", correlation_id="other")
     agent_bus.send("a", "bob", "hit", correlation_id="want")
@@ -72,7 +72,7 @@ def test_agent_bus_correlation_filter_preserves_nonmatching_in_order():
 
 def test_agent_bus_correlation_no_match_keeps_all():
     # No message matches -> recv returns None and nothing is lost/reordered.
-    from maverick import agent_bus
+    from lightwork import agent_bus
     agent_bus.clear()
     for i in range(3):
         agent_bus.send("a", "bob", f"m{i}", correlation_id="nope")
@@ -87,7 +87,7 @@ def test_agent_bus_correlation_filter_no_drop_when_inbox_full():
     # plus one match; the held-buffer restore must not lose any.
     import queue
 
-    from maverick import agent_bus
+    from lightwork import agent_bus
     agent_bus.clear()
     cap = 4
     agent_bus._inboxes["bob"] = queue.Queue(maxsize=cap)
@@ -113,7 +113,7 @@ def test_agent_bus_correlation_timeout_not_extended_by_nonmatching_flood():
     import threading
     import time
 
-    from maverick import agent_bus
+    from lightwork import agent_bus
 
     agent_bus.clear()
     cap = 16
@@ -144,7 +144,7 @@ def test_agent_bus_correlation_timeout_not_extended_by_nonmatching_flood():
 
 
 def test_agent_bus_peek():
-    from maverick import agent_bus
+    from lightwork import agent_bus
     agent_bus.clear()
     assert agent_bus.peek("bob") == 0
     agent_bus.send("a", "bob", 1)
@@ -160,7 +160,7 @@ def test_agent_bus_inboxes_bounded_under_unique_recipient_flood(monkeypatch):
     forever. Empty inboxes carry no undelivered messages, so they may be evicted
     once over the cap.
     """
-    from maverick import agent_bus
+    from lightwork import agent_bus
     agent_bus.clear()
     monkeypatch.setattr(agent_bus, "_MAX_INBOXES", 64)
     # Each send is to a unique never-recurring recipient that nobody drains, but
@@ -175,7 +175,7 @@ def test_agent_bus_inboxes_bounded_under_unique_recipient_flood(monkeypatch):
 
 def test_agent_bus_eviction_keeps_nonempty_inboxes(monkeypatch):
     """A pending (non-empty) inbox is never silently dropped by eviction."""
-    from maverick import agent_bus
+    from lightwork import agent_bus
     agent_bus.clear()
     monkeypatch.setattr(agent_bus, "_MAX_INBOXES", 8)
     agent_bus.send("a", "keepme", {"important": True})  # non-empty inbox
@@ -191,9 +191,9 @@ def test_agent_bus_tools_round_trip():
     the payload; both tools register in a ToolRegistry."""
     import asyncio
 
-    from maverick import agent_bus
-    from maverick.tools import ToolRegistry
-    from maverick.tools.agent_bus_tool import recv_from_agent, send_to_agent
+    from lightwork import agent_bus
+    from lightwork.tools import ToolRegistry
+    from lightwork.tools.agent_bus_tool import recv_from_agent, send_to_agent
 
     agent_bus.clear()
     reg = ToolRegistry()
@@ -213,7 +213,7 @@ def test_agent_bus_tools_round_trip():
 
 
 def test_agent_bus_send_tool_requires_args():
-    from maverick.tools.agent_bus_tool import send_to_agent
+    from lightwork.tools.agent_bus_tool import send_to_agent
     tool = send_to_agent("alice")
     assert "to_id is required" in tool.fn({"payload": "x"})
     assert "payload is required" in tool.fn({"to_id": "bob"})
@@ -222,7 +222,7 @@ def test_agent_bus_send_tool_requires_args():
 def test_agent_bus_recv_tool_bounds_timeout(monkeypatch):
     import asyncio
 
-    from maverick.tools.agent_bus_tool import MAX_RECV_TIMEOUT_SECONDS, recv_from_agent
+    from lightwork.tools.agent_bus_tool import MAX_RECV_TIMEOUT_SECONDS, recv_from_agent
 
     observed: dict[str, float] = {}
 
@@ -231,7 +231,7 @@ def test_agent_bus_recv_tool_bounds_timeout(monkeypatch):
         observed["timeout"] = timeout
         return None
 
-    monkeypatch.setattr("maverick.tools.agent_bus_tool.agent_bus.recv", fake_recv)
+    monkeypatch.setattr("lightwork.tools.agent_bus_tool.agent_bus.recv", fake_recv)
     tool = recv_from_agent("bob")
 
     assert tool.input_schema["properties"]["timeout"]["maximum"] == MAX_RECV_TIMEOUT_SECONDS
@@ -242,10 +242,10 @@ def test_agent_bus_recv_tool_bounds_timeout(monkeypatch):
 def test_agent_bus_recv_tool_rejects_non_finite_timeout(monkeypatch):
     import asyncio
 
-    from maverick.tools.agent_bus_tool import recv_from_agent
+    from lightwork.tools.agent_bus_tool import recv_from_agent
 
     recv = MagicMock(return_value=None)
-    monkeypatch.setattr("maverick.tools.agent_bus_tool.agent_bus.recv", recv)
+    monkeypatch.setattr("lightwork.tools.agent_bus_tool.agent_bus.recv", recv)
 
     assert "timeout must be a finite number" in asyncio.run(
         recv_from_agent("bob").fn({"timeout": "inf"})
@@ -263,8 +263,8 @@ def test_agent_bus_recv_tool_does_not_block_event_loop():
     import asyncio
     import time
 
-    from maverick import agent_bus
-    from maverick.tools.agent_bus_tool import recv_from_agent
+    from lightwork import agent_bus
+    from lightwork.tools.agent_bus_tool import recv_from_agent
 
     agent_bus.clear()
     tool = recv_from_agent("bob")
@@ -297,7 +297,7 @@ def test_agent_bus_recv_tool_does_not_block_event_loop():
 
 @pytest.fixture
 def world_with_goal(tmp_path):
-    from maverick.world_model import WorldModel
+    from lightwork.world_model import WorldModel
     w = WorldModel(Path(tmp_path) / "wm.sqlite")
     gid = w.create_goal("test goal", "for kv_memory tests")
     yield w, gid
@@ -305,7 +305,7 @@ def world_with_goal(tmp_path):
 
 
 def test_kv_memory_set_get_round_trip(world_with_goal):
-    from maverick.tools.kv_memory import kv_memory
+    from lightwork.tools.kv_memory import kv_memory
     world, gid = world_with_goal
     tool = kv_memory(world, gid)
     assert "set 'key1'" in tool.fn({"op": "set", "key": "key1", "value": "v1"})
@@ -313,14 +313,14 @@ def test_kv_memory_set_get_round_trip(world_with_goal):
 
 
 def test_kv_memory_missing_key_returns_sentinel(world_with_goal):
-    from maverick.tools.kv_memory import kv_memory
+    from lightwork.tools.kv_memory import kv_memory
     world, gid = world_with_goal
     out = kv_memory(world, gid).fn({"op": "get", "key": "nope"})
     assert "no fact stored" in out
 
 
 def test_kv_memory_upsert(world_with_goal):
-    from maverick.tools.kv_memory import kv_memory
+    from lightwork.tools.kv_memory import kv_memory
     world, gid = world_with_goal
     tool = kv_memory(world, gid)
     tool.fn({"op": "set", "key": "k", "value": "first"})
@@ -329,7 +329,7 @@ def test_kv_memory_upsert(world_with_goal):
 
 
 def test_kv_memory_list(world_with_goal):
-    from maverick.tools.kv_memory import kv_memory
+    from lightwork.tools.kv_memory import kv_memory
     world, gid = world_with_goal
     tool = kv_memory(world, gid)
     tool.fn({"op": "set", "key": "a", "value": "1"})
@@ -339,7 +339,7 @@ def test_kv_memory_list(world_with_goal):
 
 
 def test_kv_memory_search(world_with_goal):
-    from maverick.tools.kv_memory import kv_memory
+    from lightwork.tools.kv_memory import kv_memory
     world, gid = world_with_goal
     tool = kv_memory(world, gid)
     tool.fn({"op": "set", "key": "auth.password", "value": "secret"})
@@ -352,7 +352,7 @@ def test_kv_memory_search(world_with_goal):
 
 
 def test_kv_memory_delete(world_with_goal):
-    from maverick.tools.kv_memory import kv_memory
+    from lightwork.tools.kv_memory import kv_memory
     world, gid = world_with_goal
     tool = kv_memory(world, gid)
     tool.fn({"op": "set", "key": "k", "value": "v"})
@@ -362,7 +362,7 @@ def test_kv_memory_delete(world_with_goal):
 
 
 def test_kv_memory_requires_active_goal():
-    from maverick.tools.kv_memory import kv_memory
+    from lightwork.tools.kv_memory import kv_memory
     out = kv_memory(world=None, goal_id=None).fn({"op": "get", "key": "x"})
     assert "ERROR" in out and "active goal" in out
 
@@ -371,7 +371,7 @@ def test_kv_memory_requires_active_goal():
 
 def test_clipboard_kill_switch(monkeypatch):
     monkeypatch.setenv("MAVERICK_CLIPBOARD_DISABLE", "1")
-    from maverick.tools.clipboard import clipboard
+    from lightwork.tools.clipboard import clipboard
     assert "disabled" in clipboard().fn({"op": "read"}).lower()
 
 
@@ -383,21 +383,21 @@ def test_clipboard_read_via_pyperclip(monkeypatch):
         # Force reload to pick up the mock.
         import importlib
 
-        import maverick.tools.clipboard as _clip_mod
+        import lightwork.tools.clipboard as _clip_mod
         importlib.reload(_clip_mod)
         out = _clip_mod.clipboard().fn({"op": "read"})
     assert out == "from clipboard"
 
 
 def test_clipboard_unknown_op():
-    from maverick.tools.clipboard import clipboard
+    from lightwork.tools.clipboard import clipboard
     assert "unknown op" in clipboard().fn({"op": "explode"}).lower()
 
 
 # ---------- preview_diff ----------
 
 def test_preview_diff_not_a_git_repo(tmp_path):
-    from maverick.tools.preview_diff import preview_diff
+    from lightwork.tools.preview_diff import preview_diff
 
     class _Sandbox:
         workdir = str(tmp_path)
@@ -423,7 +423,7 @@ def test_preview_diff_no_changes(tmp_path):
         check=True,
     )
 
-    from maverick.tools.preview_diff import preview_diff
+    from lightwork.tools.preview_diff import preview_diff
 
     class _Sandbox:
         workdir = str(tmp_path)
@@ -449,7 +449,7 @@ def test_preview_diff_shows_unstaged_changes(tmp_path):
     )
     # Modify file in worktree (unstaged).
     (tmp_path / "a.txt").write_text("line1\nline2\n")
-    from maverick.tools.preview_diff import preview_diff
+    from lightwork.tools.preview_diff import preview_diff
 
     class _Sandbox:
         workdir = str(tmp_path)
@@ -459,7 +459,7 @@ def test_preview_diff_shows_unstaged_changes(tmp_path):
 
 
 def test_preview_diff_disables_ext_diff_and_textconv(tmp_path):
-    from maverick.tools.preview_diff import preview_diff
+    from lightwork.tools.preview_diff import preview_diff
 
     class _Sandbox:
         workdir = str(tmp_path)
@@ -493,7 +493,7 @@ def _git_available() -> bool:
     ("street_address", "Mail to 123 Main Street."),
 ])
 def test_pii_detector_finds(name, sample):
-    from maverick.safety.pii_detector import scan
+    from lightwork.safety.pii_detector import scan
     found = [m.kind for m in scan(sample)]
     assert name in found, f"expected {name} in {found}"
 
@@ -510,7 +510,7 @@ def test_pii_detector_redacts_compressed_ipv6_in_full(compressed):
     # The IPV6 alternation must redact the WHOLE address; a leftmost-match
     # ordering bug left the final hextet(s) in cleartext (2001:db8::1 ->
     # "[REDACTED:ipv6]1"). No hex fragment of the address may survive.
-    from maverick.safety.pii_detector import redact
+    from lightwork.safety.pii_detector import redact
     out, matches = redact(f"addr={compressed} end")
     assert matches and "[REDACTED:ipv6]" in out
     for hextet in compressed.replace("::", ":").split(":"):
@@ -520,7 +520,7 @@ def test_pii_detector_redacts_compressed_ipv6_in_full(compressed):
 
 
 def test_pii_detector_luhn_validates_credit_cards():
-    from maverick.safety.pii_detector import scan
+    from lightwork.safety.pii_detector import scan
     # Real Luhn-valid Visa test number.
     valid = "Card: 4532-0151-1283-0366"
     matches = [m.kind for m in scan(valid)]
@@ -532,7 +532,7 @@ def test_pii_detector_luhn_validates_credit_cards():
 
 
 def test_pii_detector_redact_replaces():
-    from maverick.safety.pii_detector import redact
+    from lightwork.safety.pii_detector import redact
     text = "Hello alice@example.com, your SSN 123-45-6789 is on file."
     out, matches = redact(text)
     assert "alice@example.com" not in out
@@ -543,7 +543,7 @@ def test_pii_detector_redact_replaces():
 
 
 def test_pii_detector_empty():
-    from maverick.safety.pii_detector import redact, scan
+    from lightwork.safety.pii_detector import redact, scan
     assert scan("") == []
     assert redact("") == ("", [])
 
@@ -551,7 +551,7 @@ def test_pii_detector_empty():
 def test_pii_value_preview_never_embeds_raw_pii():
     # Previews are persisted to the audit log, so they must not leak raw PII
     # (the old code stored the first 4 chars -> SSN area number, partial phone).
-    from maverick.safety.pii_detector import scan
+    from lightwork.safety.pii_detector import scan
     matches = scan("SSN 123-45-6789, phone (415) 555-2671, ip 192.168.1.100")
     assert matches
     for m in matches:
@@ -564,7 +564,7 @@ def test_pii_long_card_redacts_cleanly_without_phone_subrun():
     # A 16-digit card must not also match a 10-digit phone sub-run: overlapping
     # spans produced corrupt redactions ([REDACTED:credit_card]hone_us]) and
     # leaked leading digits. Coalescing + the phone anchor keep it one clean span.
-    from maverick.safety.pii_detector import redact
+    from lightwork.safety.pii_detector import redact
     out, matches = redact("pay 4532015112830366 now")
     assert {m.kind for m in matches} == {"credit_card"}
     assert "[REDACTED:credit_card]" in out
@@ -575,7 +575,7 @@ def test_pii_long_card_redacts_cleanly_without_phone_subrun():
 def test_pii_long_nonluhn_number_not_partially_redacted():
     # A 13-digit non-card, non-phone run must not be PARTIALLY redacted (which
     # leaked its leading digits). It is left intact rather than half-masked.
-    from maverick.safety.pii_detector import redact
+    from lightwork.safety.pii_detector import redact
     out, _ = redact("ref 4111111111111 end")
     assert "[REDACTED" not in out
 
@@ -583,7 +583,7 @@ def test_pii_long_nonluhn_number_not_partially_redacted():
 def test_pii_overlap_cluster_redacts_later_tail():
     # The Luhn-valid prefix overlaps a standalone phone beginning after a hyphen;
     # coalescing must redact the whole overlap cluster, not drop the phone tail.
-    from maverick.safety.pii_detector import redact
+    from lightwork.safety.pii_detector import redact
 
     out, matches = redact("9444260960-415-555-2671")
 
@@ -596,19 +596,19 @@ def test_pii_overlap_cluster_redacts_later_tail():
 # ---------- arxiv tool ----------
 
 def test_arxiv_search_requires_query():
-    from maverick.tools.arxiv import arxiv
+    from lightwork.tools.arxiv import arxiv
     out = arxiv().fn({"op": "search", "query": ""})
     assert "requires query" in out
 
 
 def test_arxiv_fetch_requires_id():
-    from maverick.tools.arxiv import arxiv
+    from lightwork.tools.arxiv import arxiv
     out = arxiv().fn({"op": "fetch", "arxiv_id": ""})
     assert "requires arxiv_id" in out
 
 
 def test_arxiv_parser_handles_real_atom():
-    from maverick.tools.arxiv import _parse_atom
+    from lightwork.tools.arxiv import _parse_atom
     # A trimmed-down arxiv-shaped response.
     xml = """
     <feed>
@@ -633,25 +633,25 @@ def test_arxiv_parser_handles_real_atom():
 # ---------- voice tools ----------
 
 def test_voice_transcribe_requires_source():
-    from maverick.tools.voice import transcribe_audio
+    from lightwork.tools.voice import transcribe_audio
     out = transcribe_audio().fn({"source": ""})
     assert "source is required" in out
 
 
 def test_voice_transcribe_missing_file():
-    from maverick.tools.voice import transcribe_audio
+    from lightwork.tools.voice import transcribe_audio
     out = transcribe_audio().fn({"source": "/no/such/audio.mp3"})
     assert "not found" in out
 
 
 def test_voice_speak_requires_text():
-    from maverick.tools.voice import speak
+    from lightwork.tools.voice import speak
     out = speak().fn({"text": ""})
     assert "text is required" in out
 
 
 def test_voice_speak_caps_text_length():
-    from maverick.tools.voice import speak
+    from lightwork.tools.voice import speak
     out = speak().fn({"text": "x" * 5000})
     assert "too long" in out
 
@@ -659,12 +659,12 @@ def test_voice_speak_caps_text_length():
 # ---------- notifications ----------
 
 def test_notifications_no_backends_no_op():
-    from maverick.notifications import notify
+    from lightwork.notifications import notify
     assert notify("hi", backends=["none"]) == 0
 
 
 def test_notifications_unknown_backend_logs(monkeypatch):
-    from maverick.notifications import notify
+    from lightwork.notifications import notify
     fired = notify("hi", backends=["garbage"], async_dispatch=False)
     assert fired == 0  # nothing succeeded
 
@@ -672,7 +672,7 @@ def test_notifications_unknown_backend_logs(monkeypatch):
 def test_notifications_dispatch_with_ntfy_topic_env(monkeypatch):
     """With MAVERICK_NTFY_TOPIC + no SDK, dispatch attempts the call."""
     monkeypatch.setenv("MAVERICK_NTFY_TOPIC", "test-topic")
-    from maverick import notifications
+    from lightwork import notifications
 
     posted: list[tuple[str, str]] = []
 
@@ -741,7 +741,7 @@ def test_failure_modes_doc_exists():
 
 def test_q2_tools_registered():
     """All Q2 batch tools must appear in the default registry."""
-    from maverick.tools import base_registry
+    from lightwork.tools import base_registry
 
     class _FakeSandbox:
         workdir = "."

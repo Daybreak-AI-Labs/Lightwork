@@ -4,14 +4,14 @@ from __future__ import annotations
 import json
 
 import pytest
-from maverick import dreaming, insight_exchange
+from lightwork import dreaming, insight_exchange
 
 pytest.importorskip("cryptography", reason="exchange requires Ed25519 signing")
 
 
 @pytest.fixture()
 def keys(tmp_path, monkeypatch):
-    import maverick.audit.signing as signing
+    import lightwork.audit.signing as signing
     monkeypatch.setattr(signing, "KEY_DIR", tmp_path / "keys")
     return signing
 

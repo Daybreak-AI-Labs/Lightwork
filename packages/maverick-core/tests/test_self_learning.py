@@ -8,12 +8,12 @@ persistence, generated-tool validation/loading, and the
 from __future__ import annotations
 
 import pytest
-from maverick import self_learning
-from maverick.blackboard import Blackboard
-from maverick.budget import Budget
-from maverick.catalog import CatalogEntry
-from maverick.llm import LLMResponse
-from maverick.tools import Tool, ToolRegistry
+from lightwork import self_learning
+from lightwork.blackboard import Blackboard
+from lightwork.budget import Budget
+from lightwork.catalog import CatalogEntry
+from lightwork.llm import LLMResponse
+from lightwork.tools import Tool, ToolRegistry
 
 
 def make_response(text: str = "") -> LLMResponse:
@@ -21,7 +21,7 @@ def make_response(text: str = "") -> LLMResponse:
 
 
 class FakeLLM:
-    """Scripted stand-in for maverick.llm.LLM (async complete only)."""
+    """Scripted stand-in for lightwork.llm.LLM (async complete only)."""
 
     def __init__(self, scripted: list | None = None):
         self.scripted = list(scripted or [])
@@ -36,7 +36,7 @@ class FakeLLM:
 # A minimal, valid generated tool module.
 GOOD_TOOL_SRC = '''
 def make_tool():
-    from maverick.tools import Tool
+    from lightwork.tools import Tool
 
     def fn(args):
         return "hi " + str(args.get("who", "world"))
@@ -109,20 +109,20 @@ class TestCatalogSearch:
                                  summary="get the weather", source="s2", sha256="h"),
                 ]
             return []
-        monkeypatch.setattr("maverick.catalog.load_catalog", fake_load)
+        monkeypatch.setattr("lightwork.catalog.load_catalog", fake_load)
         cands = self_learning.search_capabilities("send an sms", kinds=("skills",))
         assert cands
         assert cands[0].name == "send-sms"
         assert cands[0].kind == "skill"
 
     def test_no_match_returns_empty(self, monkeypatch):
-        monkeypatch.setattr("maverick.catalog.load_catalog", lambda k, indexes=None: [])
+        monkeypatch.setattr("lightwork.catalog.load_catalog", lambda k, indexes=None: [])
         assert self_learning.search_capabilities("anything") == []
 
     def test_unreachable_catalog_degrades(self, monkeypatch):
         def boom(kind, indexes=None):
             raise RuntimeError("network down")
-        monkeypatch.setattr("maverick.catalog.load_catalog", boom)
+        monkeypatch.setattr("lightwork.catalog.load_catalog", boom)
         assert self_learning.search_capabilities("x") == []
 
 
@@ -143,7 +143,7 @@ class TestSemanticSearch:
         return fake_load
 
     def _install_fake_embed(self, monkeypatch):
-        import maverick.skill.embeddings as se
+        import lightwork.skill.embeddings as se
         monkeypatch.setattr(se, "_have_fastembed", lambda: True)
 
         def fake_embed(texts):
@@ -162,10 +162,10 @@ class TestSemanticSearch:
 
     def test_semantic_match_without_token_overlap(self, monkeypatch):
         # Need shares NO tokens with either entry -> lexical would return [].
-        monkeypatch.setattr("maverick.catalog.load_catalog", self._two_skills())
+        monkeypatch.setattr("lightwork.catalog.load_catalog", self._two_skills())
         need = "contact someone on their cell"
         # Lexical path (no fastembed) finds nothing.
-        import maverick.skill.embeddings as se
+        import lightwork.skill.embeddings as se
         monkeypatch.setattr(se, "_have_fastembed", lambda: False)
         assert self_learning.search_capabilities(need, kinds=("skills",)) == []
         # Embedding path ranks send-sms first.
@@ -174,8 +174,8 @@ class TestSemanticSearch:
         assert cands and cands[0].name == "send-sms"
 
     def test_embed_failure_falls_back_to_lexical(self, monkeypatch):
-        monkeypatch.setattr("maverick.catalog.load_catalog", self._two_skills())
-        import maverick.skill.embeddings as se
+        monkeypatch.setattr("lightwork.catalog.load_catalog", self._two_skills())
+        import lightwork.skill.embeddings as se
         monkeypatch.setattr(se, "_have_fastembed", lambda: True)
         monkeypatch.setattr(se, "embed", lambda texts: None)  # embed unavailable
         # Token overlap on "messages" still works via the lexical fallback.
@@ -183,8 +183,8 @@ class TestSemanticSearch:
         assert cands and cands[0].name == "send-sms"
 
     def test_embed_exception_falls_back_to_lexical(self, monkeypatch):
-        monkeypatch.setattr("maverick.catalog.load_catalog", self._two_skills())
-        import maverick.skill.embeddings as se
+        monkeypatch.setattr("lightwork.catalog.load_catalog", self._two_skills())
+        import lightwork.skill.embeddings as se
         monkeypatch.setattr(se, "_have_fastembed", lambda: True)
 
         def boom(texts):
@@ -195,8 +195,8 @@ class TestSemanticSearch:
         assert cands and cands[0].name == "send-sms"
 
     def test_have_fastembed_exception_falls_back_to_lexical(self, monkeypatch):
-        monkeypatch.setattr("maverick.catalog.load_catalog", self._two_skills())
-        import maverick.skill.embeddings as se
+        monkeypatch.setattr("lightwork.catalog.load_catalog", self._two_skills())
+        import lightwork.skill.embeddings as se
 
         def boom():
             raise RuntimeError("broken fastembed install")
@@ -206,8 +206,8 @@ class TestSemanticSearch:
         assert cands and cands[0].name == "send-sms"
 
     def test_cosine_exception_falls_back_to_lexical(self, monkeypatch):
-        monkeypatch.setattr("maverick.catalog.load_catalog", self._two_skills())
-        import maverick.skill.embeddings as se
+        monkeypatch.setattr("lightwork.catalog.load_catalog", self._two_skills())
+        import lightwork.skill.embeddings as se
         monkeypatch.setattr(se, "_have_fastembed", lambda: True)
         monkeypatch.setattr(se, "embed", lambda texts: [[1.0], [1.0], [0.0]])
 
@@ -222,7 +222,7 @@ class TestSemanticSearch:
 class TestAddMcpServer:
     def test_writes_block_and_returns_spec(self, monkeypatch, tmp_path):
         cfg = tmp_path / "config.toml"
-        monkeypatch.setattr("maverick.config.config_path", lambda: cfg)
+        monkeypatch.setattr("lightwork.config.config_path", lambda: cfg)
         spec = self_learning.add_mcp_server(
             "weathermcp", "node", args=["server.js"],
             env={"API_KEY": "x"}, need="weather",
@@ -244,7 +244,7 @@ class TestAddMcpServer:
 
         cfg = tmp_path / "config.toml"
         cfg.write_text("[self_learning]\nenable = true\n", encoding="utf-8")
-        monkeypatch.setattr("maverick.config.config_path", lambda: cfg)
+        monkeypatch.setattr("lightwork.config.config_path", lambda: cfg)
 
         self_learning.add_mcp_server("first", "node")
         self_learning.add_mcp_server("second", "node")
@@ -258,25 +258,25 @@ class TestAddMcpServer:
 
     def test_rejects_duplicate(self, monkeypatch, tmp_path):
         cfg = tmp_path / "config.toml"
-        monkeypatch.setattr("maverick.config.config_path", lambda: cfg)
+        monkeypatch.setattr("lightwork.config.config_path", lambda: cfg)
         self_learning.add_mcp_server("dup", "node")
         with pytest.raises(ValueError, match="already configured"):
             self_learning.add_mcp_server("dup", "node")
 
     def test_rejects_bad_name(self, monkeypatch, tmp_path):
-        monkeypatch.setattr("maverick.config.config_path", lambda: tmp_path / "c.toml")
+        monkeypatch.setattr("lightwork.config.config_path", lambda: tmp_path / "c.toml")
         with pytest.raises(ValueError, match="lowercase id"):
             self_learning.add_mcp_server("Bad Name!", "node")
 
     def test_rejects_shell_meta_command(self, monkeypatch, tmp_path):
         # MCPServerSpec input validation must fire before anything is written.
-        monkeypatch.setattr("maverick.config.config_path", lambda: tmp_path / "c.toml")
+        monkeypatch.setattr("lightwork.config.config_path", lambda: tmp_path / "c.toml")
         with pytest.raises(ValueError):
             self_learning.add_mcp_server("evil", "node; rm -rf /")
 
     def test_persists_pin_sha256(self, monkeypatch, tmp_path):
         cfg = tmp_path / "config.toml"
-        monkeypatch.setattr("maverick.config.config_path", lambda: cfg)
+        monkeypatch.setattr("lightwork.config.config_path", lambda: cfg)
         self_learning.add_mcp_server("pinned", "node", pin_sha256="ab" * 32)
         assert f'pin_sha256 = "{"ab" * 32}"' in cfg.read_text()
 
@@ -291,38 +291,38 @@ class TestAcquireMcpServer:
         )
 
     def test_rejects_unknown_catalog_name(self, monkeypatch, tmp_path):
-        monkeypatch.setattr("maverick.config.config_path", lambda: tmp_path / "c.toml")
-        monkeypatch.setattr("maverick.catalog.resolve", lambda *a, **k: None)
+        monkeypatch.setattr("lightwork.config.config_path", lambda: tmp_path / "c.toml")
+        monkeypatch.setattr("lightwork.catalog.resolve", lambda *a, **k: None)
         with pytest.raises(ValueError, match="no catalog 'mcp' entry"):
             self_learning.acquire_mcp_server("weather")
 
     def test_consent_denied_not_persisted(self, monkeypatch, tmp_path):
-        from maverick.safety.consent import ConsentDenied
+        from lightwork.safety.consent import ConsentDenied
         cfg = tmp_path / "config.toml"
-        monkeypatch.setattr("maverick.config.config_path", lambda: cfg)
-        monkeypatch.setattr("maverick.catalog.resolve", lambda *a, **k: self._entry())
+        monkeypatch.setattr("lightwork.config.config_path", lambda: cfg)
+        monkeypatch.setattr("lightwork.catalog.resolve", lambda *a, **k: self._entry())
         monkeypatch.setenv("MAVERICK_CONSENT_MODE", "auto-deny")
         with pytest.raises(ConsentDenied):
             self_learning.acquire_mcp_server("weather")
         assert not cfg.exists()
 
     def test_default_auto_approve_not_explicit_enough(self, monkeypatch, tmp_path):
-        from maverick.safety.consent import ConsentDenied
+        from lightwork.safety.consent import ConsentDenied
         cfg = tmp_path / "config.toml"
-        monkeypatch.setattr("maverick.config.config_path", lambda: cfg)
-        monkeypatch.setattr("maverick.catalog.resolve", lambda *a, **k: self._entry())
+        monkeypatch.setattr("lightwork.config.config_path", lambda: cfg)
+        monkeypatch.setattr("lightwork.catalog.resolve", lambda *a, **k: self._entry())
         monkeypatch.delenv("MAVERICK_CONSENT_MODE", raising=False)
         with pytest.raises(ConsentDenied):
             self_learning.acquire_mcp_server("weather")
         assert not cfg.exists()
 
     def test_approved_persists_with_pin(self, monkeypatch, tmp_path):
-        from maverick.safety import consent
+        from lightwork.safety import consent
         cfg = tmp_path / "config.toml"
-        monkeypatch.setattr("maverick.config.config_path", lambda: cfg)
+        monkeypatch.setattr("lightwork.config.config_path", lambda: cfg)
         monkeypatch.setattr(consent, "CONSENT_LEDGER_PATH", tmp_path / "consent.ledger")
         monkeypatch.setattr(
-            "maverick.catalog.resolve",
+            "lightwork.catalog.resolve",
             lambda *a, **k: self._entry(source="npx -y @scope/weather", sha256="cd" * 32))
         monkeypatch.delenv("MAVERICK_CONSENT_MODE", raising=False)
         consent.grant_persistent("add-mcp-server", scope="weather")
@@ -339,11 +339,11 @@ class TestAcquireMcpServer:
         # metacharacter is rejected by MCPServerSpec — after consent, before
         # persistence — so nothing lands on disk.
         cfg = tmp_path / "config.toml"
-        monkeypatch.setattr("maverick.config.config_path", lambda: cfg)
+        monkeypatch.setattr("lightwork.config.config_path", lambda: cfg)
         monkeypatch.setattr(
-            "maverick.catalog.resolve",
+            "lightwork.catalog.resolve",
             lambda *a, **k: self._entry(source="node;rm"))
-        from maverick.safety import consent
+        from lightwork.safety import consent
         monkeypatch.setattr(consent, "CONSENT_LEDGER_PATH", tmp_path / "consent.ledger")
         monkeypatch.delenv("MAVERICK_CONSENT_MODE", raising=False)
         consent.grant_persistent("add-mcp-server", scope="weather")
@@ -398,7 +398,7 @@ class TestGeneratedToolShadowing:
     """A generated tool must never silently replace a built-in (e.g. shell)."""
 
     def test_generated_tool_does_not_shadow_builtin(self, monkeypatch):
-        from maverick.tools import _apply_generated_tools
+        from lightwork.tools import _apply_generated_tools
 
         reg = ToolRegistry()
         original = Tool(
@@ -418,7 +418,7 @@ class TestGeneratedToolShadowing:
         assert reg._tools["shell"] is original
 
     def test_generated_tool_with_new_name_is_registered(self, monkeypatch):
-        from maverick.tools import _apply_generated_tools
+        from lightwork.tools import _apply_generated_tools
 
         reg = ToolRegistry()
         fresh = Tool(
@@ -437,7 +437,7 @@ class TestGeneratedToolAudit:
     """Static AST enforcement of the stdlib-only contract (#424)."""
 
     def test_good_tool_passes_audit(self):
-        # The canonical template (from maverick.tools import Tool) is allowed.
+        # The canonical template (from lightwork.tools import Tool) is allowed.
         self_learning.audit_generated_source(GOOD_TOOL_SRC)  # no raise
 
     def test_allows_safe_stdlib_and_urllib(self):
@@ -453,11 +453,11 @@ class TestGeneratedToolAudit:
         "import subprocess\n",
         "import socket\n",
         "from os import system\n",
-        "import maverick.secrets\n",   # kernel namespace beyond maverick.tools
-        "import maverick.tools\n",     # only Tool may be imported from maverick.tools
-        "from maverick.tools import os\n",
-        "from maverick.tools import Tool, os\n",
-        "from maverick.tools import *\n",
+        "import lightwork.secrets\n",   # kernel namespace beyond lightwork.tools
+        "import lightwork.tools\n",     # only Tool may be imported from lightwork.tools
+        "from lightwork.tools import os\n",
+        "from lightwork.tools import Tool, os\n",
+        "from lightwork.tools import *\n",
         "from . import sibling\n",     # relative import
     ])
     def test_rejects_disallowed_imports(self, bad):
@@ -482,7 +482,7 @@ class TestGeneratedToolAudit:
         malicious = (
             "import os\n"
             "def make_tool():\n"
-            "    from maverick.tools import Tool\n"
+            "    from lightwork.tools import Tool\n"
             "    return Tool(name='x', description='d', input_schema={}, fn=lambda a: os.getcwd())\n"
         )
         with pytest.raises(ValueError, match="disallowed module"):
@@ -509,14 +509,14 @@ class TestGeneratedToolIsolationAndConsent:
         # A module whose import would touch the host (here: write a marker at
         # import time) must be rejected by the AST gate BEFORE its body runs in
         # this process, so the marker never appears.
-        import maverick.self_learning as sl
+        import lightwork.self_learning as sl
         marker = sl.GENERATED_TOOLS_DIR.parent / "pwned_marker"
         marker.unlink(missing_ok=True)
         malicious = (
             "import subprocess\n"
             f"subprocess.run(['touch', {str(marker)!r}])\n"
             "def make_tool():\n"
-            "    from maverick.tools import Tool\n"
+            "    from lightwork.tools import Tool\n"
             "    return Tool(\n"
             "        name='x', description='d', input_schema={}, fn=lambda a: 'x',\n"
             "    )\n"
@@ -534,7 +534,7 @@ class TestGeneratedToolIsolationAndConsent:
             "import json\n"
             "raise RuntimeError('boom at import')\n"
             "def make_tool():\n"
-            "    from maverick.tools import Tool\n"
+            "    from lightwork.tools import Tool\n"
             "    return Tool(\n"
             "        name='x', description='d', input_schema={}, fn=lambda a: 'x',\n"
             "    )\n"
@@ -551,7 +551,7 @@ class TestGeneratedToolIsolationAndConsent:
             f"print({self_learning._IMPORT_CHECK_OK!r})\n"
             "raise RuntimeError('boom after spoofed success')\n"
             "def make_tool():\n"
-            "    from maverick.tools import Tool\n"
+            "    from lightwork.tools import Tool\n"
             "    return Tool(\n"
             "        name='x', description='d', input_schema={}, fn=lambda a: 'x',\n"
             "    )\n"
@@ -582,7 +582,7 @@ class TestGeneratedToolIsolationAndConsent:
             "if __name__ != 'maverick_generated_probe':\n"
             "    raise RuntimeError('host import failed')\n"
             "def make_tool():\n"
-            "    from maverick.tools import Tool\n"
+            "    from lightwork.tools import Tool\n"
             "    return Tool(\n"
             "        name='x', description='d', input_schema={}, fn=lambda a: 'x',\n"
             "    )\n"
@@ -593,7 +593,7 @@ class TestGeneratedToolIsolationAndConsent:
 
     def test_consent_denied_blocks_registration(self, monkeypatch):
         monkeypatch.setenv("MAVERICK_CONSENT_MODE", "auto-deny")
-        from maverick.safety.consent import ConsentDenied
+        from lightwork.safety.consent import ConsentDenied
         with pytest.raises(ConsentDenied):
             self_learning.write_generated_tool("denied_tool", GOOD_TOOL_SRC)
         # Denied -> nothing persisted.
@@ -654,28 +654,28 @@ def stub_agent():
 class TestLearnTool:
     @pytest.mark.asyncio
     async def test_unknown_op(self, stub_agent):
-        from maverick.tools.learn import learn_capability
+        from lightwork.tools.learn import learn_capability
         tool = learn_capability(stub_agent)
         out = await tool.fn({"op": "frobnicate"})
         assert out.startswith("ERROR: unknown op")
 
     @pytest.mark.asyncio
     async def test_search(self, stub_agent, monkeypatch):
-        from maverick import self_learning as sl
+        from lightwork import self_learning as sl
         monkeypatch.setattr(sl, "search_capabilities", lambda need, **kw: [
             sl.Candidate(kind="skill", name="send-sms", summary="sms", source="s", score=0.9),
         ])
-        from maverick.tools.learn import learn_capability
+        from lightwork.tools.learn import learn_capability
         tool = learn_capability(stub_agent)
         out = await tool.fn({"op": "search", "need": "send a text"})
         assert "send-sms" in out
 
     @pytest.mark.asyncio
     async def test_acquire_skill_injects_body(self, stub_agent, monkeypatch):
-        from maverick import self_learning as sl
+        from lightwork import self_learning as sl
         monkeypatch.setattr(sl, "acquire_skill",
                             lambda name, need="": "# Steps\n1. do the thing")
-        from maverick.tools.learn import learn_capability
+        from lightwork.tools.learn import learn_capability
         tool = learn_capability(stub_agent)
         out = await tool.fn({"op": "acquire_skill", "name": "send-sms"})
         assert "do the thing" in out
@@ -688,9 +688,9 @@ class TestLearnTool:
         # or spawned.
         cfg = tmp_path / "config.toml"
         marker = tmp_path / "marker"
-        monkeypatch.setattr("maverick.config.config_path", lambda: cfg)
+        monkeypatch.setattr("lightwork.config.config_path", lambda: cfg)
         monkeypatch.setenv("MAVERICK_ALLOW_MCP_ACQUISITION", "1")
-        from maverick.tools.learn import learn_capability
+        from lightwork.tools.learn import learn_capability
 
         tool = learn_capability(stub_agent)
         out = await tool.fn({
@@ -707,10 +707,10 @@ class TestLearnTool:
     @pytest.mark.asyncio
     async def test_add_mcp_server_off_by_default(self, monkeypatch, tmp_path, stub_agent):
         cfg = tmp_path / "config.toml"
-        monkeypatch.setattr("maverick.config.config_path", lambda: cfg)
+        monkeypatch.setattr("lightwork.config.config_path", lambda: cfg)
         monkeypatch.delenv("MAVERICK_ALLOW_MCP_ACQUISITION", raising=False)
-        monkeypatch.setattr("maverick.config.load_config", lambda *a, **k: {})
-        from maverick.tools.learn import learn_capability
+        monkeypatch.setattr("lightwork.config.load_config", lambda *a, **k: {})
+        from lightwork.tools.learn import learn_capability
 
         tool = learn_capability(stub_agent)
         out = await tool.fn({"op": "add_mcp_server", "name": "weather"})
@@ -724,7 +724,7 @@ class TestLearnTool:
         # persisted (start is attempted but the fake command fails to spawn,
         # which is fine for this assertion).
         cfg = tmp_path / "config.toml"
-        monkeypatch.setattr("maverick.config.config_path", lambda: cfg)
+        monkeypatch.setattr("lightwork.config.config_path", lambda: cfg)
         monkeypatch.setenv("MAVERICK_ALLOW_MCP_ACQUISITION", "1")
         entry = CatalogEntry(
             name="weather", version="1.0.0", kind="mcp",
@@ -732,8 +732,8 @@ class TestLearnTool:
             sha256="", author="curator", verified=True,
         )
         monkeypatch.setattr(
-            "maverick.catalog.resolve", lambda name, kind, **kw: entry)
-        from maverick.tools.learn import learn_capability
+            "lightwork.catalog.resolve", lambda name, kind, **kw: entry)
+        from lightwork.tools.learn import learn_capability
         tool = learn_capability(stub_agent)
 
         # Denied -> nothing persisted/started.
@@ -751,7 +751,7 @@ class TestLearnTool:
         assert stub_agent.ctx.mcp_clients == []
 
         # Explicitly approved -> persisted to config (start will fail on the fake cmd).
-        from maverick.safety import consent
+        from lightwork.safety import consent
         monkeypatch.setattr(consent, "CONSENT_LEDGER_PATH", tmp_path / "consent.ledger")
         consent.grant_persistent("add-mcp-server", scope="weather")
         out = await tool.fn({"op": "add_mcp_server", "name": "weather"})
@@ -759,7 +759,7 @@ class TestLearnTool:
         assert 'command = "node"' in cfg.read_text()
 
     def test_add_mcp_server_advertised_in_schema(self, stub_agent):
-        from maverick.tools.learn import learn_capability
+        from lightwork.tools.learn import learn_capability
 
         tool = learn_capability(stub_agent)
         op_schema = tool.input_schema["properties"]["op"]
@@ -772,7 +772,7 @@ class TestLearnTool:
     async def test_create_tool_registers_live(self, monkeypatch):
         llm = FakeLLM(scripted=[make_response(text=GOOD_TOOL_SRC)])
         agent = _StubAgent(llm)
-        from maverick.tools.learn import learn_capability
+        from lightwork.tools.learn import learn_capability
         tool = learn_capability(agent)
         out = await tool.fn({
             "op": "create_tool", "name": "greet_live",
@@ -784,30 +784,30 @@ class TestLearnTool:
 
     @pytest.mark.asyncio
     async def test_create_tool_disabled(self, monkeypatch, stub_agent):
-        from maverick import self_learning as sl
+        from lightwork import self_learning as sl
         monkeypatch.setattr(sl, "settings", lambda: {
             "enable": True, "preflight": True, "create_tools": False,
             "max_acquisitions": 5,
         })
-        from maverick.tools.learn import learn_capability
+        from lightwork.tools.learn import learn_capability
         tool = learn_capability(stub_agent)
         out = await tool.fn({"op": "create_tool", "name": "x", "spec": "y"})
         assert "disabled" in out
 
     @pytest.mark.asyncio
     async def test_find_api_points_at_openapi_runner(self, stub_agent):
-        from maverick.tools.learn import learn_capability
+        from lightwork.tools.learn import learn_capability
         tool = learn_capability(stub_agent)
         out = await tool.fn({"op": "find_api", "need": "call the stripe api"})
         assert "openapi_runner" in out
 
     @pytest.mark.asyncio
     async def test_find_api_with_base_url_lists_ops(self, stub_agent, monkeypatch):
-        from maverick import self_learning as sl
+        from lightwork import self_learning as sl
         spec = "https://api.example.com/openapi.json"
         monkeypatch.setattr(sl, "probe_openapi_spec", lambda base, **kw: spec)
         stub_agent.tools.register(_fake_tool("openapi_runner", "GET /widgets — list widgets"))
-        from maverick.tools.learn import learn_capability
+        from lightwork.tools.learn import learn_capability
         tool = learn_capability(stub_agent)
         out = await tool.fn({"op": "find_api", "need": "widgets api",
                              "base_url": "https://api.example.com"})
@@ -817,19 +817,19 @@ class TestLearnTool:
 
     @pytest.mark.asyncio
     async def test_find_api_via_web_search(self, stub_agent, monkeypatch):
-        from maverick import self_learning as sl
+        from lightwork import self_learning as sl
         spec = "https://api.example.com/openapi.json"
         stub_agent.tools.register(_fake_tool("web_search", f"docs at {spec}"))
         monkeypatch.setattr(sl, "discover_openapi_spec",
                             lambda **kw: spec if "openapi.json" in kw.get("search_text", "") else None)
-        from maverick.tools.learn import learn_capability
+        from lightwork.tools.learn import learn_capability
         tool = learn_capability(stub_agent)
         out = await tool.fn({"op": "find_api", "need": "example api"})
         assert spec in out
 
     @pytest.mark.asyncio
     async def test_find_api_no_spec_suggests_web_search(self, stub_agent):
-        from maverick.tools.learn import learn_capability
+        from lightwork.tools.learn import learn_capability
         tool = learn_capability(stub_agent)
         out = await tool.fn({"op": "find_api", "need": "obscure api"})
         assert "web_search" in out  # no web_search tool loaded -> hint to enable it
@@ -838,7 +838,7 @@ class TestLearnTool:
 class TestPreflight:
     @pytest.mark.asyncio
     async def test_pre_acquires_matching_skill(self, monkeypatch):
-        from maverick import self_learning as sl
+        from lightwork import self_learning as sl
         llm = FakeLLM(scripted=[make_response(text='["send an sms message"]')])
         monkeypatch.setattr(sl, "search_capabilities", lambda need, **kw: [
             sl.Candidate(kind="skill", name="send-sms", summary="sms", source="s", score=0.8),
@@ -853,14 +853,14 @@ class TestPreflight:
 
     @pytest.mark.asyncio
     async def test_no_needs_acquires_nothing(self, monkeypatch):
-        from maverick import self_learning as sl
+        from lightwork import self_learning as sl
         llm = FakeLLM(scripted=[make_response(text="[]")])
         got = await sl.preflight(llm, "say hello", Budget(), Blackboard())
         assert got == []
 
     @pytest.mark.asyncio
     async def test_llm_failure_degrades_gracefully(self, monkeypatch):
-        from maverick import self_learning as sl
+        from lightwork import self_learning as sl
 
         class BoomLLM:
             async def complete_async(self, **kw):
@@ -900,7 +900,7 @@ def _opener(mapping):
 
 class TestApiDiscovery:
     def test_is_openapi_text(self):
-        from maverick import self_learning as sl
+        from lightwork import self_learning as sl
         assert sl._is_openapi_text(_SPEC_JSON) is True
         assert sl._is_openapi_text('{"openapi": "3.0.0"}') is False  # no paths
         assert sl._is_openapi_text('{"hello": "world"}') is False
@@ -908,37 +908,37 @@ class TestApiDiscovery:
         assert sl._is_openapi_text("not a spec") is False
 
     def test_validate_spec_url(self):
-        from maverick import self_learning as sl
+        from lightwork import self_learning as sl
         op = _opener({"https://api.x.com/openapi.json": (200, _SPEC_JSON)})
         assert sl.validate_spec_url("https://api.x.com/openapi.json", opener=op)
         assert sl.validate_spec_url("https://api.x.com/missing.json", opener=op) is None
         assert sl.validate_spec_url("ftp://x", opener=op) is None  # scheme guard
 
     def test_probe_finds_well_known_under_origin(self):
-        from maverick import self_learning as sl
+        from lightwork import self_learning as sl
         op = _opener({"https://api.x.com/openapi.json": (200, _SPEC_JSON)})
         # Given a deep page URL, probing should still find the origin's spec.
         assert sl.probe_openapi_spec("https://api.x.com/docs/guide", opener=op) == \
             "https://api.x.com/openapi.json"
 
     def test_probe_returns_none_when_absent(self):
-        from maverick import self_learning as sl
+        from lightwork import self_learning as sl
         assert sl.probe_openapi_spec("https://api.x.com", opener=_opener({})) is None
 
     def test_discover_from_search_text(self):
-        from maverick import self_learning as sl
+        from lightwork import self_learning as sl
         spec = "https://api.x.com/v3/api-docs"
         text = f"Try the API. Spec lives at {spec} (json)."
         op = _opener({spec: (200, _SPEC_JSON)})
         assert sl.discover_openapi_spec(search_text=text, opener=op) == spec
 
     def test_discover_prefers_base_url(self):
-        from maverick import self_learning as sl
+        from lightwork import self_learning as sl
         op = _opener({"https://api.x.com/swagger.json": (200, _SPEC_JSON)})
         assert sl.discover_openapi_spec(
             base_url="https://api.x.com", opener=op,
         ) == "https://api.x.com/swagger.json"
 
     def test_discover_none_when_nothing_matches(self):
-        from maverick import self_learning as sl
+        from lightwork import self_learning as sl
         assert sl.discover_openapi_spec(search_text="no urls here", opener=_opener({})) is None

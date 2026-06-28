@@ -38,7 +38,7 @@ def _resp(status, body):
 # ---------- Airtable ----------
 
 def test_airtable_requires_op():
-    from maverick.tools.airtable_tool import airtable_tool
+    from lightwork.tools.airtable_tool import airtable_tool
     assert "op is required" in airtable_tool().fn({})
 
 
@@ -46,7 +46,7 @@ def test_airtable_missing_key(monkeypatch):
     monkeypatch.delenv("AIRTABLE_API_KEY", raising=False)
     monkeypatch.delenv("AIRTABLE_BASE_ID", raising=False)
     _fake_httpx(monkeypatch, get=MagicMock())
-    from maverick.tools.airtable_tool import airtable_tool
+    from lightwork.tools.airtable_tool import airtable_tool
     out = airtable_tool().fn({"op": "list", "table": "Tasks"})
     assert "AIRTABLE_API_KEY" in out
 
@@ -58,7 +58,7 @@ def test_airtable_list_renders(monkeypatch):
         {"id": "rec1", "fields": {"Name": "Alice", "Score": 99}},
     ]}
     _fake_httpx(monkeypatch, get=MagicMock(return_value=_resp(200, body)))
-    from maverick.tools.airtable_tool import airtable_tool
+    from lightwork.tools.airtable_tool import airtable_tool
     out = airtable_tool().fn({"op": "list", "table": "People"})
     assert "rec1" in out and "Alice" in out
 
@@ -67,7 +67,7 @@ def test_airtable_create_dry_run(monkeypatch):
     monkeypatch.setenv("AIRTABLE_API_KEY", "key")
     monkeypatch.setenv("AIRTABLE_BASE_ID", "appB")
     _fake_httpx(monkeypatch, post=MagicMock())
-    from maverick.tools.airtable_tool import airtable_tool
+    from lightwork.tools.airtable_tool import airtable_tool
     out = airtable_tool().fn({
         "op": "create", "table": "T", "fields": {"Name": "X"},
     })
@@ -77,14 +77,14 @@ def test_airtable_create_dry_run(monkeypatch):
 # ---------- Asana ----------
 
 def test_asana_requires_op():
-    from maverick.tools.asana_tool import asana_tool
+    from lightwork.tools.asana_tool import asana_tool
     assert "op is required" in asana_tool().fn({})
 
 
 def test_asana_missing_token(monkeypatch):
     monkeypatch.delenv("ASANA_TOKEN", raising=False)
     _fake_httpx(monkeypatch, get=MagicMock())
-    from maverick.tools.asana_tool import asana_tool
+    from lightwork.tools.asana_tool import asana_tool
     out = asana_tool().fn({"op": "workspaces"})
     assert "ASANA_TOKEN" in out
 
@@ -93,7 +93,7 @@ def test_asana_workspaces(monkeypatch):
     monkeypatch.setenv("ASANA_TOKEN", "tok")
     body = {"data": [{"gid": "1", "name": "Acme"}]}
     _fake_httpx(monkeypatch, get=MagicMock(return_value=_resp(200, body)))
-    from maverick.tools.asana_tool import asana_tool
+    from lightwork.tools.asana_tool import asana_tool
     out = asana_tool().fn({"op": "workspaces"})
     assert "Acme" in out
 
@@ -101,7 +101,7 @@ def test_asana_workspaces(monkeypatch):
 def test_asana_task_complete_dry_run(monkeypatch):
     monkeypatch.setenv("ASANA_TOKEN", "tok")
     _fake_httpx(monkeypatch, put=MagicMock())
-    from maverick.tools.asana_tool import asana_tool
+    from lightwork.tools.asana_tool import asana_tool
     out = asana_tool().fn({"op": "task_complete", "task_gid": "1"})
     assert "DRY RUN" in out
 
@@ -114,7 +114,7 @@ def test_asana_tasks_follows_offset(monkeypatch):
              "next_page": None}
     get = MagicMock(side_effect=[_resp(200, page1), _resp(200, page2)])
     _fake_httpx(monkeypatch, get=get)
-    from maverick.tools.asana_tool import asana_tool
+    from lightwork.tools.asana_tool import asana_tool
     out = asana_tool().fn({"op": "tasks", "project_gid": "P1", "limit": 50})
     assert "t1" in out and "t2" in out
     assert get.call_count == 2
@@ -124,14 +124,14 @@ def test_asana_tasks_follows_offset(monkeypatch):
 # ---------- ClickUp ----------
 
 def test_clickup_requires_op():
-    from maverick.tools.clickup_tool import clickup_tool
+    from lightwork.tools.clickup_tool import clickup_tool
     assert "op is required" in clickup_tool().fn({})
 
 
 def test_clickup_missing_token(monkeypatch):
     monkeypatch.delenv("CLICKUP_API_TOKEN", raising=False)
     _fake_httpx(monkeypatch, get=MagicMock())
-    from maverick.tools.clickup_tool import clickup_tool
+    from lightwork.tools.clickup_tool import clickup_tool
     out = clickup_tool().fn({"op": "teams"})
     assert "CLICKUP_API_TOKEN" in out
 
@@ -140,7 +140,7 @@ def test_clickup_teams(monkeypatch):
     monkeypatch.setenv("CLICKUP_API_TOKEN", "tok")
     body = {"teams": [{"id": "1", "name": "Team Alpha"}]}
     _fake_httpx(monkeypatch, get=MagicMock(return_value=_resp(200, body)))
-    from maverick.tools.clickup_tool import clickup_tool
+    from lightwork.tools.clickup_tool import clickup_tool
     out = clickup_tool().fn({"op": "teams"})
     assert "Team Alpha" in out
 
@@ -148,7 +148,7 @@ def test_clickup_teams(monkeypatch):
 def test_clickup_task_create_dry_run(monkeypatch):
     monkeypatch.setenv("CLICKUP_API_TOKEN", "tok")
     _fake_httpx(monkeypatch, post=MagicMock())
-    from maverick.tools.clickup_tool import clickup_tool
+    from lightwork.tools.clickup_tool import clickup_tool
     out = clickup_tool().fn({
         "op": "task_create", "list_id": "L1", "name": "Do it",
     })
@@ -161,7 +161,7 @@ def test_clickup_tasks_follows_pagination(monkeypatch):
     page1 = {"tasks": [{"id": "t2", "name": "second"}], "last_page": True}
     get = MagicMock(side_effect=[_resp(200, page0), _resp(200, page1)])
     _fake_httpx(monkeypatch, get=get)
-    from maverick.tools.clickup_tool import clickup_tool
+    from lightwork.tools.clickup_tool import clickup_tool
     out = clickup_tool().fn({"op": "tasks", "list_id": "L1", "limit": 50})
     # Both pages' tasks appear; the loop stopped at last_page.
     assert "first" in out and "second" in out
@@ -176,7 +176,7 @@ def test_clickup_tasks_stops_at_limit(monkeypatch):
     page = {"tasks": [{"id": "t1", "name": "only"}], "last_page": False}
     get = MagicMock(return_value=_resp(200, page))
     _fake_httpx(monkeypatch, get=get)
-    from maverick.tools.clickup_tool import clickup_tool
+    from lightwork.tools.clickup_tool import clickup_tool
     out = clickup_tool().fn({"op": "tasks", "list_id": "L1", "limit": 1})
     assert "only" in out
     assert get.call_count == 1
@@ -218,13 +218,13 @@ def _install_fake_boto3_lambda(monkeypatch, *, functions=None,
 
 
 def test_lambda_requires_op():
-    from maverick.tools.lambda_tool import lambda_tool
+    from lightwork.tools.lambda_tool import lambda_tool
     assert "op is required" in lambda_tool().fn({})
 
 
 def test_lambda_missing_boto3(monkeypatch):
     monkeypatch.setitem(sys.modules, "boto3", None)
-    from maverick.tools.lambda_tool import lambda_tool
+    from lightwork.tools.lambda_tool import lambda_tool
     out = lambda_tool().fn({"op": "list_functions"})
     assert "boto3 not installed" in out
 
@@ -234,14 +234,14 @@ def test_lambda_list_functions(monkeypatch):
         {"FunctionName": "my-fn", "Runtime": "python3.12",
          "MemorySize": 512, "Timeout": 30},
     ])
-    from maverick.tools.lambda_tool import lambda_tool
+    from lightwork.tools.lambda_tool import lambda_tool
     out = lambda_tool().fn({"op": "list_functions"})
     assert "my-fn" in out and "python3.12" in out
 
 
 def test_lambda_invoke_dry_run(monkeypatch):
     _install_fake_boto3_lambda(monkeypatch)
-    from maverick.tools.lambda_tool import lambda_tool
+    from lightwork.tools.lambda_tool import lambda_tool
     out = lambda_tool().fn({
         "op": "invoke", "function_name": "my-fn",
         "payload": {"x": 1}, "invocation_type": "RequestResponse",
@@ -251,7 +251,7 @@ def test_lambda_invoke_dry_run(monkeypatch):
 
 def test_lambda_invoke_confirmed(monkeypatch):
     _install_fake_boto3_lambda(monkeypatch, invoke_payload=b'{"ok": true}')
-    from maverick.tools.lambda_tool import lambda_tool
+    from lightwork.tools.lambda_tool import lambda_tool
     out = lambda_tool().fn({
         "op": "invoke", "function_name": "my-fn",
         "payload": {}, "confirm": True,
@@ -306,20 +306,20 @@ def _install_fake_boto3_ddb(monkeypatch, *, tables=None, item=None,
 
 
 def test_dynamodb_requires_op():
-    from maverick.tools.dynamodb_tool import dynamodb_tool
+    from lightwork.tools.dynamodb_tool import dynamodb_tool
     assert "op is required" in dynamodb_tool().fn({})
 
 
 def test_dynamodb_tables(monkeypatch):
     _install_fake_boto3_ddb(monkeypatch, tables=["Users", "Orders"])
-    from maverick.tools.dynamodb_tool import dynamodb_tool
+    from lightwork.tools.dynamodb_tool import dynamodb_tool
     out = dynamodb_tool().fn({"op": "tables"})
     assert "Users" in out and "Orders" in out
 
 
 def test_dynamodb_get(monkeypatch):
     _install_fake_boto3_ddb(monkeypatch, item={"id": "1", "name": "alice"})
-    from maverick.tools.dynamodb_tool import dynamodb_tool
+    from lightwork.tools.dynamodb_tool import dynamodb_tool
     out = dynamodb_tool().fn({
         "op": "get", "table": "Users", "key": {"id": "1"},
     })
@@ -328,7 +328,7 @@ def test_dynamodb_get(monkeypatch):
 
 def test_dynamodb_put_dry_run(monkeypatch):
     _install_fake_boto3_ddb(monkeypatch)
-    from maverick.tools.dynamodb_tool import dynamodb_tool
+    from lightwork.tools.dynamodb_tool import dynamodb_tool
     out = dynamodb_tool().fn({
         "op": "put", "table": "Users", "item": {"id": "1"},
     })
@@ -339,7 +339,7 @@ def test_dynamodb_query(monkeypatch):
     _install_fake_boto3_ddb(monkeypatch, query_items=[
         {"id": "1", "name": "alice"},
     ])
-    from maverick.tools.dynamodb_tool import dynamodb_tool
+    from lightwork.tools.dynamodb_tool import dynamodb_tool
     out = dynamodb_tool().fn({
         "op": "query", "table": "Users",
         "key_cond_expression": "id = :id",
@@ -371,7 +371,7 @@ def test_dynamodb_query_follows_last_evaluated_key(monkeypatch):
     boto3.client = lambda *a, **k: None
     monkeypatch.setitem(sys.modules, "boto3", boto3)
 
-    from maverick.tools.dynamodb_tool import dynamodb_tool
+    from lightwork.tools.dynamodb_tool import dynamodb_tool
     out = dynamodb_tool().fn({
         "op": "query", "table": "Users",
         "key_cond_expression": "id = :id",
@@ -405,7 +405,7 @@ def test_dynamodb_scan_pagination_obeys_total_read_budget(monkeypatch):
     boto3.client = lambda *a, **k: None
     monkeypatch.setitem(sys.modules, "boto3", boto3)
 
-    from maverick.tools.dynamodb_tool import dynamodb_tool
+    from lightwork.tools.dynamodb_tool import dynamodb_tool
     out = dynamodb_tool().fn({
         "op": "scan", "table": "Users",
         "filter_expression": "kind = :kind",
@@ -435,7 +435,7 @@ def test_dynamodb_scan_pagination_missing_scanned_count_fails_closed(monkeypatch
     boto3.client = lambda *a, **k: None
     monkeypatch.setitem(sys.modules, "boto3", boto3)
 
-    from maverick.tools.dynamodb_tool import dynamodb_tool
+    from lightwork.tools.dynamodb_tool import dynamodb_tool
     out = dynamodb_tool().fn({"op": "scan", "table": "Users", "limit": 1000})
     assert out == "no items"
     assert len(calls["scan"]) == 1
@@ -445,14 +445,14 @@ def test_dynamodb_scan_pagination_missing_scanned_count_fails_closed(monkeypatch
 # ---------- Vercel ----------
 
 def test_vercel_requires_op():
-    from maverick.tools.vercel_tool import vercel_tool
+    from lightwork.tools.vercel_tool import vercel_tool
     assert "op is required" in vercel_tool().fn({})
 
 
 def test_vercel_missing_token(monkeypatch):
     monkeypatch.delenv("VERCEL_TOKEN", raising=False)
     _fake_httpx(monkeypatch, get=MagicMock())
-    from maverick.tools.vercel_tool import vercel_tool
+    from lightwork.tools.vercel_tool import vercel_tool
     out = vercel_tool().fn({"op": "projects"})
     assert "VERCEL_TOKEN" in out
 
@@ -464,7 +464,7 @@ def test_vercel_projects(monkeypatch):
          "latestDeployments": [{"readyState": "READY"}]},
     ]}
     _fake_httpx(monkeypatch, get=MagicMock(return_value=_resp(200, body)))
-    from maverick.tools.vercel_tool import vercel_tool
+    from lightwork.tools.vercel_tool import vercel_tool
     out = vercel_tool().fn({"op": "projects"})
     assert "my-app" in out and "READY" in out
 
@@ -472,7 +472,7 @@ def test_vercel_projects(monkeypatch):
 def test_vercel_cancel_dry_run(monkeypatch):
     monkeypatch.setenv("VERCEL_TOKEN", "tok")
     _fake_httpx(monkeypatch, patch=MagicMock())
-    from maverick.tools.vercel_tool import vercel_tool
+    from lightwork.tools.vercel_tool import vercel_tool
     out = vercel_tool().fn({"op": "cancel", "deployment_id": "d1"})
     assert "DRY RUN" in out
 
@@ -480,14 +480,14 @@ def test_vercel_cancel_dry_run(monkeypatch):
 # ---------- Google Drive ----------
 
 def test_gdrive_requires_op():
-    from maverick.tools.gdrive_tool import gdrive_tool
+    from lightwork.tools.gdrive_tool import gdrive_tool
     assert "op is required" in gdrive_tool().fn({})
 
 
 def test_gdrive_missing_token(monkeypatch):
     monkeypatch.delenv("GDRIVE_ACCESS_TOKEN", raising=False)
     _fake_httpx(monkeypatch, get=MagicMock())
-    from maverick.tools.gdrive_tool import gdrive_tool
+    from lightwork.tools.gdrive_tool import gdrive_tool
     out = gdrive_tool().fn({"op": "list"})
     assert "GDRIVE_ACCESS_TOKEN" in out
 
@@ -498,7 +498,7 @@ def test_gdrive_list_renders(monkeypatch):
         {"id": "f1", "name": "Notes", "mimeType": "text/plain"},
     ]}
     _fake_httpx(monkeypatch, get=MagicMock(return_value=_resp(200, body)))
-    from maverick.tools.gdrive_tool import gdrive_tool
+    from lightwork.tools.gdrive_tool import gdrive_tool
     out = gdrive_tool().fn({"op": "list"})
     assert "f1" in out and "Notes" in out
 
@@ -510,7 +510,7 @@ def test_gdrive_list_follows_next_page_token(monkeypatch):
     page2 = {"files": [{"id": "f2", "name": "two", "mimeType": "text/plain"}]}
     get = MagicMock(side_effect=[_resp(200, page1), _resp(200, page2)])
     _fake_httpx(monkeypatch, get=get)
-    from maverick.tools.gdrive_tool import gdrive_tool
+    from lightwork.tools.gdrive_tool import gdrive_tool
     out = gdrive_tool().fn({"op": "list", "page_size": 50})
     assert "f1" in out and "f2" in out
     assert get.call_count == 2
@@ -520,7 +520,7 @@ def test_gdrive_list_follows_next_page_token(monkeypatch):
 def test_gdrive_create_dry_run(monkeypatch):
     monkeypatch.setenv("GDRIVE_ACCESS_TOKEN", "tok")
     _fake_httpx(monkeypatch, post=MagicMock())
-    from maverick.tools.gdrive_tool import gdrive_tool
+    from lightwork.tools.gdrive_tool import gdrive_tool
     out = gdrive_tool().fn({
         "op": "create", "name": "test.txt", "content": "hi",
     })
@@ -530,7 +530,7 @@ def test_gdrive_create_dry_run(monkeypatch):
 # ---------- Circuit breaker ----------
 
 def test_circuit_breaker_starts_closed():
-    from maverick.circuit_breaker import CircuitBreaker, CircuitState
+    from lightwork.circuit_breaker import CircuitBreaker, CircuitState
     br = CircuitBreaker("test1", failure_threshold=3, cooldown_seconds=1)
     assert br.state is CircuitState.CLOSED
     br.call(lambda: 42)
@@ -538,7 +538,7 @@ def test_circuit_breaker_starts_closed():
 
 
 def test_circuit_breaker_opens_after_failures():
-    from maverick.circuit_breaker import (
+    from lightwork.circuit_breaker import (
         CircuitBreaker,
         CircuitOpen,
         CircuitState,
@@ -562,7 +562,7 @@ def test_circuit_breaker_opens_after_failures():
 
 
 def test_circuit_breaker_half_open_after_cooldown():
-    from maverick.circuit_breaker import CircuitBreaker, CircuitState
+    from lightwork.circuit_breaker import CircuitBreaker, CircuitState
     br = CircuitBreaker("test3", failure_threshold=1, cooldown_seconds=0.01)
     try:
         br.call(lambda: (_ for _ in ()).throw(RuntimeError("x")))
@@ -577,7 +577,7 @@ def test_circuit_breaker_half_open_after_cooldown():
 
 
 def test_circuit_breaker_half_open_failure_reopens():
-    from maverick.circuit_breaker import CircuitBreaker, CircuitState
+    from lightwork.circuit_breaker import CircuitBreaker, CircuitState
     br = CircuitBreaker("test4", failure_threshold=1, cooldown_seconds=0.01)
     try:
         br.call(lambda: (_ for _ in ()).throw(RuntimeError("x")))
@@ -593,7 +593,7 @@ def test_circuit_breaker_half_open_failure_reopens():
 
 
 def test_circuit_breaker_registry_singleton():
-    from maverick.circuit_breaker import get, reset_all
+    from lightwork.circuit_breaker import get, reset_all
     reset_all()
     a = get("shared-key")
     b = get("shared-key")
@@ -601,7 +601,7 @@ def test_circuit_breaker_registry_singleton():
 
 
 def test_circuit_breaker_snapshot():
-    from maverick.circuit_breaker import get, reset_all, snapshot
+    from lightwork.circuit_breaker import get, reset_all, snapshot
     reset_all()
     br = get("snap-key", failure_threshold=2)
     br.record_success()
@@ -612,8 +612,8 @@ def test_circuit_breaker_snapshot():
 # ---------- registration smoke ----------
 
 def test_new_tools_not_registered_by_default(tmp_path):
-    from maverick.sandbox.local import LocalBackend
-    from maverick.tools import base_registry
+    from lightwork.sandbox.local import LocalBackend
+    from lightwork.tools import base_registry
 
     class _W:
         def open_questions(self, gid):
@@ -627,8 +627,8 @@ def test_new_tools_not_registered_by_default(tmp_path):
 
 
 def test_new_tools_register_when_enabled(tmp_path, monkeypatch):
-    from maverick.sandbox.local import LocalBackend
-    from maverick.tools import base_registry
+    from lightwork.sandbox.local import LocalBackend
+    from lightwork.tools import base_registry
 
     class _W:
         def open_questions(self, gid):

@@ -9,8 +9,8 @@ from __future__ import annotations
 from pathlib import Path
 
 from click.testing import CliRunner
-from maverick.cli import main
-from maverick.world_model import open_world
+from lightwork.cli import main
+from lightwork.world_model import open_world
 
 
 def test_answer_nonexistent_question_errors(tmp_path: Path):

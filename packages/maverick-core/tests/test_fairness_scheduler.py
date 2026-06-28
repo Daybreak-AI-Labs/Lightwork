@@ -1,7 +1,7 @@
 """fairness_scheduler: weighted largest-remainder slot allocation."""
 from __future__ import annotations
 
-from maverick.tools.fairness_scheduler import fairness_scheduler
+from lightwork.tools.fairness_scheduler import fairness_scheduler
 
 
 def _run(**kw):

@@ -11,9 +11,9 @@ pinned to a tmp HOME so ``enterprise_enabled()`` can't read a real config.
 """
 from __future__ import annotations
 
-import maverick.tools.computer as computer
+import lightwork.tools.computer as computer
 import pytest
-from maverick.tools.computer import _host_safety_error, _run_computer_action
+from lightwork.tools.computer import _host_safety_error, _run_computer_action
 
 
 @pytest.fixture(autouse=True)

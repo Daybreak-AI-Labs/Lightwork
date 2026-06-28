@@ -4,7 +4,7 @@ to the schema, so a pack without an ``[output]`` block behaves exactly as
 before (a prose result with no declared consumer)."""
 from __future__ import annotations
 
-from maverick.domain import (
+from lightwork.domain import (
     DomainProfile,
     OutputContract,
     _coerce_output,

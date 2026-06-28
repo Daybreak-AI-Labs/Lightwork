@@ -2,9 +2,9 @@
 from __future__ import annotations
 
 from click.testing import CliRunner
-from maverick.cli import main
-from maverick.cost import retrospective as cr
-from maverick.world_model import WorldModel
+from lightwork.cli import main
+from lightwork.cost import retrospective as cr
+from lightwork.world_model import WorldModel
 
 
 def _seed(path, goals):

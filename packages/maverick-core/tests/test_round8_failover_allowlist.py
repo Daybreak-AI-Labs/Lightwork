@@ -18,14 +18,14 @@ import pytest
 # --- fix 1: failover cannot dispatch a model outside the admin allow-list ---
 
 def _point_overlay(monkeypatch, tmp_path):
-    from maverick import runtime_overrides
+    from lightwork import runtime_overrides
     monkeypatch.setattr(
         runtime_overrides, "OVERRIDES_PATH", tmp_path / "runtime-overrides.toml")
     return runtime_overrides
 
 
 def test_allowlist_filter_drops_disallowed_fallbacks(monkeypatch, tmp_path):
-    from maverick.llm import _allowlist_filter_fallbacks
+    from lightwork.llm import _allowlist_filter_fallbacks
     ro = _point_overlay(monkeypatch, tmp_path)
     ro.set_allowed_models(["anthropic:claude-sonnet-4-6"])
 
@@ -34,7 +34,7 @@ def test_allowlist_filter_drops_disallowed_fallbacks(monkeypatch, tmp_path):
 
 
 def test_allowlist_filter_noop_without_allowlist(monkeypatch, tmp_path):
-    from maverick.llm import _allowlist_filter_fallbacks
+    from lightwork.llm import _allowlist_filter_fallbacks
     _point_overlay(monkeypatch, tmp_path)  # no allow-list set -> unrestricted
     chain = ["anthropic:claude-opus-4-8", "openai:gpt-4.1"]
     assert _allowlist_filter_fallbacks(chain) == chain
@@ -43,7 +43,7 @@ def test_allowlist_filter_noop_without_allowlist(monkeypatch, tmp_path):
 def test_allowlist_filter_can_empty_the_chain(monkeypatch, tmp_path):
     # Every fallback disallowed -> empty chain -> the wiring skips failover and
     # runs only the (unchanged) primary, never a forbidden fallback.
-    from maverick.llm import _allowlist_filter_fallbacks
+    from lightwork.llm import _allowlist_filter_fallbacks
     ro = _point_overlay(monkeypatch, tmp_path)
     ro.set_allowed_models(["anthropic:claude-sonnet-4-6"])
     assert _allowlist_filter_fallbacks(["openai:gpt-4.1", "gemini:g"]) == []
@@ -53,7 +53,7 @@ def test_allowlist_filter_can_empty_the_chain(monkeypatch, tmp_path):
 
 @pytest.fixture
 def _policy_window(monkeypatch):
-    from maverick import failover_policy as fp
+    from lightwork import failover_policy as fp
     monkeypatch.setattr(fp, "_policy_cfg",
                         lambda: {"cooldown_s": 100, "cooldown_after": 1})
     fp.reset_shared_ledger()
@@ -62,7 +62,7 @@ def _policy_window(monkeypatch):
 
 
 def test_failover_records_failure_into_cooldown_ledger(_policy_window):
-    from maverick.provider_failover import failover
+    from lightwork.provider_failover import failover
 
     def bad():
         raise RuntimeError("provider down")
@@ -79,7 +79,7 @@ def test_failover_records_failure_into_cooldown_ledger(_policy_window):
 
 
 def test_failover_control_signal_does_not_cool(_policy_window):
-    from maverick.provider_failover import failover
+    from lightwork.provider_failover import failover
 
     def control_denied():
         raise ValueError("budget exceeded")
@@ -94,7 +94,7 @@ def test_failover_control_signal_does_not_cool(_policy_window):
 def test_afailover_records_failure_into_cooldown_ledger(_policy_window):
     import asyncio
 
-    from maverick.provider_failover import afailover
+    from lightwork.provider_failover import afailover
 
     async def bad():
         raise RuntimeError("provider down")

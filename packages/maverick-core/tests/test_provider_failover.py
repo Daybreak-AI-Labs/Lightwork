@@ -4,8 +4,8 @@ from __future__ import annotations
 import asyncio
 
 import pytest
-from maverick import provider_failover as pf
-from maverick.llm import LLM
+from lightwork import provider_failover as pf
+from lightwork.llm import LLM
 
 # ---- pure helpers -----------------------------------------------------------
 
@@ -44,9 +44,9 @@ def test_failover_empty_raises():
 
 
 def test_llm_retry_policy_rejects_control_exceptions():
-    from maverick.budget import BudgetExceeded
-    from maverick.enterprise import EgressBlocked
-    from maverick.preflight import PreflightFailed
+    from lightwork.budget import BudgetExceeded
+    from lightwork.enterprise import EgressBlocked
+    from lightwork.preflight import PreflightFailed
 
     assert pf.should_retry_llm_error(RuntimeError("provider down")) is True
     assert pf.should_retry_llm_error(BudgetExceeded("over budget")) is False
@@ -69,7 +69,7 @@ def test_afailover_returns_first_success():
 
 def test_fallback_models_reads_config(monkeypatch):
     monkeypatch.setattr(
-        "maverick.config.load_config",
+        "lightwork.config.load_config",
         lambda: {"provider_failover": {"chains": {"a:m1": ["b:m2", "a:m1", "c:m3"]}}})
     # the primary is filtered out of its own chain
     assert pf.fallback_models("a:m1") == ["b:m2", "c:m3"]
@@ -77,7 +77,7 @@ def test_fallback_models_reads_config(monkeypatch):
 
 
 def test_fallback_models_off_by_default(monkeypatch):
-    monkeypatch.setattr("maverick.config.load_config", dict)
+    monkeypatch.setattr("lightwork.config.load_config", dict)
     assert pf.fallback_models("a:m1") == []
 
 
@@ -108,7 +108,7 @@ def test_complete_skips_failover_when_no_chain(monkeypatch):
     sentinel = object()
     monkeypatch.setattr(LLM, "_get_client",
                         lambda self, provider: type("C", (), {"complete": lambda *a, **k: sentinel})())
-    monkeypatch.setattr("maverick.llm._run_preflight", lambda *a, **k: None)
+    monkeypatch.setattr("lightwork.llm._run_preflight", lambda *a, **k: None)
     out = LLM(model="anthropic:claude-x").complete("sys", [{"role": "user", "content": "hi"}])
     assert out is sentinel
 
@@ -126,10 +126,10 @@ def test_complete_async_routes_through_afailover_when_chain_set(monkeypatch):
 
 
 def test_llm_failover_does_not_retry_budget_exceeded(monkeypatch):
-    from maverick.budget import BudgetExceeded
+    from lightwork.budget import BudgetExceeded
 
     monkeypatch.setattr(pf, "fallback_models", lambda primary: ["openai:m2"])
-    monkeypatch.setattr("maverick.llm._run_preflight", lambda *a, **k: None)
+    monkeypatch.setattr("lightwork.llm._run_preflight", lambda *a, **k: None)
     calls = []
 
     class _Client:
@@ -150,10 +150,10 @@ def test_llm_failover_does_not_retry_budget_exceeded(monkeypatch):
 
 
 def test_llm_failover_does_not_retry_budget_exceeded_async(monkeypatch):
-    from maverick.budget import Budget, BudgetExceeded
+    from lightwork.budget import Budget, BudgetExceeded
 
     monkeypatch.setattr(pf, "fallback_models", lambda primary: ["openai:m2"])
-    monkeypatch.setattr("maverick.llm._run_preflight", lambda *a, **k: None)
+    monkeypatch.setattr("lightwork.llm._run_preflight", lambda *a, **k: None)
     calls = []
 
     class _Client:

@@ -11,8 +11,8 @@ from __future__ import annotations
 
 import inspect
 
-from maverick import llm as llm_mod
-from maverick import observability as obs
+from lightwork import llm as llm_mod
+from lightwork import observability as obs
 
 
 def test_span_name_is_operation_space_model():
@@ -112,7 +112,7 @@ def test_agent_attributes_redact_model_controlled_role_text():
 
 
 def test_agent_run_redacts_role_from_invoke_agent_span(monkeypatch):
-    import maverick.agent as agent_mod
+    import lightwork.agent as agent_mod
 
     spans: list = []
 
@@ -148,7 +148,7 @@ def test_agent_run_redacts_role_from_invoke_agent_span(monkeypatch):
 
 def test_agent_run_opens_invoke_agent_span(monkeypatch):
     """Agent.run wraps the loop in an invoke_agent span (semconv leg 3)."""
-    import maverick.agent as agent_mod
+    import lightwork.agent as agent_mod
 
     spans: list = []
 

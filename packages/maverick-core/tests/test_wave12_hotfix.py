@@ -6,8 +6,8 @@ from __future__ import annotations
 
 import logging
 
-from maverick.budget import Budget
-from maverick.llm import MODEL_OPUS
+from lightwork.budget import Budget
+from lightwork.llm import MODEL_OPUS
 
 
 class TestOpusPricingHotfix:
@@ -40,7 +40,7 @@ class TestOpus47AdaptiveThinking:
     Must use `adaptive`. Verified at platform.claude.com/docs/.../adaptive-thinking."""
 
     def test_opus_47_with_budget_uses_adaptive(self):
-        from maverick.providers.anthropic_provider import AnthropicClient
+        from lightwork.providers.anthropic_provider import AnthropicClient
         client = AnthropicClient.__new__(AnthropicClient)
         kwargs = client._build_request(
             system="sys",
@@ -55,7 +55,7 @@ class TestOpus47AdaptiveThinking:
         assert "budget_tokens" not in kwargs.get("thinking", {})
 
     def test_opus_47_without_budget_still_adaptive(self):
-        from maverick.providers.anthropic_provider import AnthropicClient
+        from lightwork.providers.anthropic_provider import AnthropicClient
         client = AnthropicClient.__new__(AnthropicClient)
         kwargs = client._build_request(
             system="sys",
@@ -71,7 +71,7 @@ class TestOpus47AdaptiveThinking:
         """Sonnet 4.6 supports both 'enabled' and 'adaptive'; we use
         explicit 'enabled' with budget_tokens for callsites that pass
         thinking_budget."""
-        from maverick.providers.anthropic_provider import AnthropicClient
+        from lightwork.providers.anthropic_provider import AnthropicClient
         client = AnthropicClient.__new__(AnthropicClient)
         kwargs = client._build_request(
             system="sys",
@@ -92,7 +92,7 @@ class TestLowCacheWarning:
     cache. Operators need to see this in logs."""
 
     def test_min_cache_tokens_for_modern_models(self):
-        from maverick.providers.anthropic_provider import _min_cache_tokens
+        from lightwork.providers.anthropic_provider import _min_cache_tokens
         assert _min_cache_tokens("claude-opus-4-7") == 4096
         assert _min_cache_tokens("claude-opus-4-6") == 4096
         assert _min_cache_tokens("claude-opus-4-5") == 4096
@@ -101,12 +101,12 @@ class TestLowCacheWarning:
         assert _min_cache_tokens("claude-haiku-4-5") == 4096
 
     def test_min_cache_tokens_for_legacy_models(self):
-        from maverick.providers.anthropic_provider import _min_cache_tokens
+        from lightwork.providers.anthropic_provider import _min_cache_tokens
         assert _min_cache_tokens("claude-3-5-sonnet-20241022") == 1024
         assert _min_cache_tokens("claude-opus-4-1") == 1024
 
     def test_warning_emitted_for_small_prompt(self, caplog):
-        from maverick.providers import anthropic_provider as ap
+        from lightwork.providers import anthropic_provider as ap
         # Reset the once-per-process flag for this test.
         ap._LOW_CACHE_WARNING_EMITTED.clear()
         client = ap.AnthropicClient.__new__(ap.AnthropicClient)
@@ -127,7 +127,7 @@ class TestLowCacheWarning:
         ap._LOW_CACHE_WARNING_EMITTED.clear()
 
     def test_warning_emitted_only_once_per_model(self, caplog):
-        from maverick.providers import anthropic_provider as ap
+        from lightwork.providers import anthropic_provider as ap
         ap._LOW_CACHE_WARNING_EMITTED.clear()
         client = ap.AnthropicClient.__new__(ap.AnthropicClient)
         with caplog.at_level(logging.DEBUG, logger=ap.__name__):

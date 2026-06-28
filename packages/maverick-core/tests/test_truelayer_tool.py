@@ -8,7 +8,7 @@ from __future__ import annotations
 import sys
 import types
 
-from maverick.tools.truelayer_tool import truelayer_tool
+from lightwork.tools.truelayer_tool import truelayer_tool
 
 
 def _resp(status, body):
@@ -128,7 +128,7 @@ def test_unknown_op(monkeypatch):
 
 
 def test_registered():
-    from maverick.tools import base_registry
+    from lightwork.tools import base_registry
 
     class _W:
         pass

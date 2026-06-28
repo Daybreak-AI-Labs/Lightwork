@@ -4,8 +4,8 @@ from __future__ import annotations
 from pathlib import Path
 
 from click.testing import CliRunner
-from maverick.cli import main
-from maverick.skills import validate_skill_file
+from lightwork.cli import main
+from lightwork.skills import validate_skill_file
 
 _VALID = """---
 name: summarize-url

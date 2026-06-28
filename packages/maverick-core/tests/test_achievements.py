@@ -1,8 +1,8 @@
 """Achievements: derived from recorded history, unlock-once, local-only."""
 from __future__ import annotations
 
-from maverick.achievements import CATALOG, evaluate, render, unlocked
-from maverick.world_model import WorldModel
+from lightwork.achievements import CATALOG, evaluate, render, unlocked
+from lightwork.world_model import WorldModel
 
 
 def _world(tmp_path):

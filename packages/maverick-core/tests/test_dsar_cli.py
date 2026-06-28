@@ -1,6 +1,6 @@
 """`maverick dsar export` -- print a subject-data bundle as JSON.
 
-The exporter (`maverick.dsar.export_subject_data`) is already tested in
+The exporter (`lightwork.dsar.export_subject_data`) is already tested in
 `test_dsar.py`; these cover the thin CLI wrapper: it serializes the bundle for a
 seeded subject, emits valid JSON whose ``counts``/``world`` reflect the seeded
 data, exits 0, and honors ``--output`` (write to file) and ``--json`` (compact).
@@ -16,15 +16,15 @@ from pathlib import Path
 
 import pytest
 from click.testing import CliRunner
-from maverick.cli import main
-from maverick.paths import data_dir
-from maverick.world_model import WorldModel
+from lightwork.cli import main
+from lightwork.paths import data_dir
+from lightwork.world_model import WorldModel
 
 
 @pytest.fixture(autouse=True)
 def _clear_world_cache():
     """Close cached tenant world handles between CLI tests."""
-    import maverick.world_model as wm
+    import lightwork.world_model as wm
 
     def _drain():
         for world in list(wm._tenant_worlds.values()):

@@ -7,7 +7,7 @@ import pytest
 # skip cleanly if it ever isn't, since the vault is gated behind that extra.
 pytest.importorskip("cryptography")
 
-from maverick.browser_auth_vault import (  # noqa: E402
+from lightwork.browser_auth_vault import (  # noqa: E402
     Vault,
     decrypt_entry,
     encrypt_entry,

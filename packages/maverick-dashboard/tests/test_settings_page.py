@@ -5,18 +5,18 @@ from fastapi.testclient import TestClient
 
 
 def _client():
-    from maverick_dashboard.app import app
+    from lightwork_dashboard.app import app
     return TestClient(app)
 
 
 def _prep(monkeypatch, tmp_path):
-    from maverick import world_model
+    from lightwork import world_model
     monkeypatch.setattr(world_model, "DEFAULT_DB", tmp_path / "world.db")
     monkeypatch.delenv("MAVERICK_DASHBOARD_TOKEN", raising=False)
     # Keep the model pin in tmp so the real ~/.maverick is never touched.
-    import maverick.runtime_overrides as ro
+    import lightwork.runtime_overrides as ro
     monkeypatch.setattr(ro, "OVERRIDES_PATH", tmp_path / "runtime-overrides.toml")
-    from maverick_dashboard import app as dash_app
+    from lightwork_dashboard import app as dash_app
     dash_app._world_cache.clear()
 
 
@@ -40,10 +40,10 @@ def test_set_and_clear_default_model(monkeypatch, tmp_path):
                headers=hdr, follow_redirects=False)
     assert r.status_code == 303
 
-    from maverick.runtime_overrides import default_model_override
+    from lightwork.runtime_overrides import default_model_override
     assert default_model_override() == "claude-opus-4-8"
     # The pin flows through model resolution (no per-role config in this test).
-    from maverick.llm import model_for_role
+    from lightwork.llm import model_for_role
     assert model_for_role("writer") == "claude-opus-4-8"
 
     # Clearing reverts to defaults.
@@ -72,7 +72,7 @@ def test_set_model_blocks_cross_origin(monkeypatch, tmp_path):
 def test_denied_tools_preserved_when_pinning_model(monkeypatch, tmp_path):
     """Writing a model must not wipe the [security] tool-deny overlay."""
     _prep(monkeypatch, tmp_path)
-    from maverick import runtime_overrides as ro
+    from lightwork import runtime_overrides as ro
     ro.disable_tool("browser")
     ro.set_default_model("claude-sonnet-4-6")
     assert "browser" in ro.denied_tools()

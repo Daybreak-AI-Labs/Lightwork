@@ -1,7 +1,7 @@
 """cost_guardrail: long-context cost guardrail."""
 from __future__ import annotations
 
-from maverick.tools.cost_guardrail import cost_guardrail
+from lightwork.tools.cost_guardrail import cost_guardrail
 
 
 def _check(**kw):

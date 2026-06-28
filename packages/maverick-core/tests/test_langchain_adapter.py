@@ -6,7 +6,7 @@ import sys
 import types
 
 import pytest
-from maverick.langchain_adapter import (
+from lightwork.langchain_adapter import (
     maverick_langchain_tool,
     run_maverick_goal,
     wrap_langchain_tool,
@@ -106,7 +106,7 @@ def test_langchain_tool_binds_security_context_outside_model_schema(monkeypatch)
     fake_tools.StructuredTool = FakeStructuredTool
     monkeypatch.setitem(sys.modules, "langchain_core.tools", fake_tools)
     monkeypatch.setattr(
-        "maverick.langchain_adapter.run_maverick_goal",
+        "lightwork.langchain_adapter.run_maverick_goal",
         lambda *args, **kw: calls.append((args, kw)) or "ok",
     )
 

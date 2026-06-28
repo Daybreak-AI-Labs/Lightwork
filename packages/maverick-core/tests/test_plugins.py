@@ -1,7 +1,7 @@
 """Plugin SDK discovery tests.
 
 Uses a stub entry_points iterator monkey-patched into
-`maverick.plugins._entry_points` so we don't need to actually install a
+`lightwork.plugins._entry_points` so we don't need to actually install a
 sibling plugin package in CI.
 
 v0.2 (council Tier 0 fix): plugin discovery now requires an explicit
@@ -15,7 +15,7 @@ from __future__ import annotations
 from dataclasses import dataclass
 
 import pytest
-from maverick import plugins
+from lightwork import plugins
 
 
 @pytest.fixture(autouse=True)
@@ -44,7 +44,7 @@ def test_discover_tools_returns_factories(monkeypatch):
     def factory():
         return "fake-tool-instance"
 
-    _set_eps(monkeypatch, {"maverick.tools": [_FakeEP("weather", factory)]})
+    _set_eps(monkeypatch, {"lightwork.tools": [_FakeEP("weather", factory)]})
     out = plugins.discover_tools()
     assert len(out) == 1
     name, fac = out[0]
@@ -58,7 +58,7 @@ def test_discover_skips_failing_plugin(monkeypatch):
         return "ok"
 
     _set_eps(monkeypatch, {
-        "maverick.tools": [
+        "lightwork.tools": [
             _FakeEP("bad", RuntimeError("import boom")),
             _FakeEP("good", factory),
         ],
@@ -69,7 +69,7 @@ def test_discover_skips_failing_plugin(monkeypatch):
 
 def test_discover_skips_non_callable_tool(monkeypatch):
     _set_eps(monkeypatch, {
-        "maverick.tools": [_FakeEP("notcallable", "just a string")],
+        "lightwork.tools": [_FakeEP("notcallable", "just a string")],
     })
     assert plugins.discover_tools() == []
 
@@ -77,7 +77,7 @@ def test_discover_skips_non_callable_tool(monkeypatch):
 def test_discover_channels_returns_classes(monkeypatch):
     class FakeChannel: ...
     _set_eps(monkeypatch, {
-        "maverick.channels": [_FakeEP("custom", FakeChannel)],
+        "lightwork.channels": [_FakeEP("custom", FakeChannel)],
     })
     out = plugins.discover_channels()
     assert out == [("custom", FakeChannel)]
@@ -85,7 +85,7 @@ def test_discover_channels_returns_classes(monkeypatch):
 
 def test_discover_channels_rejects_string(monkeypatch):
     _set_eps(monkeypatch, {
-        "maverick.channels": [_FakeEP("oops", "telegram.foo")],
+        "lightwork.channels": [_FakeEP("oops", "telegram.foo")],
     })
     assert plugins.discover_channels() == []
 
@@ -94,14 +94,14 @@ def test_discover_skills_passes_through(monkeypatch):
     class Skill:
         name = "weather"
     inst = Skill()
-    _set_eps(monkeypatch, {"maverick.skills": [_FakeEP("weather", inst)]})
+    _set_eps(monkeypatch, {"lightwork.skills": [_FakeEP("weather", inst)]})
     assert plugins.discover_skills() == [inst]
 
 
 def test_discover_personas_returns_renderers(monkeypatch):
     def render():
         return "\nYou are a pirate."
-    _set_eps(monkeypatch, {"maverick.personas": [_FakeEP("pirate", render)]})
+    _set_eps(monkeypatch, {"lightwork.personas": [_FakeEP("pirate", render)]})
     out = plugins.discover_personas()
     assert "pirate" in out
     assert out["pirate"]() == "\nYou are a pirate."
@@ -120,10 +120,10 @@ def test_installed_plugins_snapshot(monkeypatch):
         return ""
 
     _set_eps(monkeypatch, {
-        "maverick.tools":    [_FakeEP("t1", make_tool)],
-        "maverick.channels": [_FakeEP("c1", ChanX)],
-        "maverick.skills":   [_FakeEP("s1", SkillObj())],
-        "maverick.personas": [_FakeEP("p1", persona)],
+        "lightwork.tools":    [_FakeEP("t1", make_tool)],
+        "lightwork.channels": [_FakeEP("c1", ChanX)],
+        "lightwork.skills":   [_FakeEP("s1", SkillObj())],
+        "lightwork.personas": [_FakeEP("p1", persona)],
     })
     snap = plugins.installed_plugins()
     assert snap == {
@@ -136,9 +136,9 @@ def test_installed_plugins_snapshot(monkeypatch):
 
 def test_base_registry_loads_plugin_tools(monkeypatch, tmp_path):
     """Plugin tool factories are invoked when building the agent registry."""
-    from maverick.sandbox import LocalBackend
-    from maverick.tools import Tool, base_registry
-    from maverick.world_model import WorldModel
+    from lightwork.sandbox import LocalBackend
+    from lightwork.tools import Tool, base_registry
+    from lightwork.world_model import WorldModel
 
     sentinel = Tool(
         name="weather",
@@ -150,7 +150,7 @@ def test_base_registry_loads_plugin_tools(monkeypatch, tmp_path):
     def factory():
         return sentinel
 
-    _set_eps(monkeypatch, {"maverick.tools": [_FakeEP("weather", factory)]})
+    _set_eps(monkeypatch, {"lightwork.tools": [_FakeEP("weather", factory)]})
 
     wm = WorldModel(path=tmp_path / "w.db")
     reg = base_registry(wm, LocalBackend(workdir=tmp_path))

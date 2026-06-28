@@ -1,7 +1,7 @@
 """Approval delegation rules (re-triage build)."""
 from __future__ import annotations
 
-from maverick.approval_delegation import DelegationRule, parse_rules, route
+from lightwork.approval_delegation import DelegationRule, parse_rules, route
 
 
 def test_parse_skips_malformed():

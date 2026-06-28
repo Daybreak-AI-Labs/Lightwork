@@ -10,7 +10,7 @@ import threading
 import time
 
 import pytest
-from maverick import runner
+from lightwork import runner
 
 
 @pytest.fixture(autouse=True)
@@ -49,18 +49,18 @@ def _stub_run(monkeypatch, *, gate: threading.Event, started: dict):
         def close(self):
             pass
 
-    monkeypatch.setattr("maverick.world_model.open_world", lambda *a, **k: _World())
-    monkeypatch.setattr("maverick.llm.LLM", lambda *a, **k: object())
-    monkeypatch.setattr("maverick.sandbox.build_sandbox", lambda *a, **k: _Sandbox())
-    monkeypatch.setattr("maverick.budget.budget_from_config",
+    monkeypatch.setattr("lightwork.world_model.open_world", lambda *a, **k: _World())
+    monkeypatch.setattr("lightwork.llm.LLM", lambda *a, **k: object())
+    monkeypatch.setattr("lightwork.sandbox.build_sandbox", lambda *a, **k: _Sandbox())
+    monkeypatch.setattr("lightwork.budget.budget_from_config",
                         lambda *a, **k: object())
-    monkeypatch.setattr("maverick.trace_pin.pin_trace", lambda *a, **k: None)
+    monkeypatch.setattr("lightwork.trace_pin.pin_trace", lambda *a, **k: None)
 
     def _blocking_run(llm, world, budget, goal_id, **kw):
         started.setdefault(kw.get("user_id"), []).append(goal_id)
         gate.wait(timeout=5.0)
 
-    monkeypatch.setattr("maverick.orchestrator.run_goal_sync", _blocking_run)
+    monkeypatch.setattr("lightwork.orchestrator.run_goal_sync", _blocking_run)
 
 
 def test_one_user_full_lane_does_not_block_another(monkeypatch):

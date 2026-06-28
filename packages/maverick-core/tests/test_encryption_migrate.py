@@ -5,7 +5,7 @@ import importlib.util
 import sqlite3
 
 import pytest
-from maverick import crypto_at_rest as car
+from lightwork import crypto_at_rest as car
 
 requires_crypto = pytest.mark.skipif(
     importlib.util.find_spec("cryptography") is None,
@@ -18,13 +18,13 @@ def _isolate(monkeypatch, tmp_path):
     monkeypatch.delenv("MAVERICK_ENCRYPT_AT_REST", raising=False)
     monkeypatch.delenv("MAVERICK_ENCRYPTION_KEY", raising=False)
     monkeypatch.delenv("MAVERICK_ENTERPRISE", raising=False)
-    monkeypatch.setattr("maverick.config.load_config", lambda *a, **k: {})
+    monkeypatch.setattr("lightwork.config.load_config", lambda *a, **k: {})
     monkeypatch.setattr(car, "_KEY_PATH", tmp_path / "keys" / "at_rest.key")
 
 
 def test_migrate_requires_encryption_enabled(tmp_path):
-    from maverick.crypto_at_rest import EncryptionUnavailable
-    from maverick.encryption_migrate import migrate_world_db
+    from lightwork.crypto_at_rest import EncryptionUnavailable
+    from lightwork.encryption_migrate import migrate_world_db
 
     with pytest.raises(EncryptionUnavailable):
         migrate_world_db(tmp_path / "world.db")  # at_rest off -> refuse, never plaintext
@@ -32,8 +32,8 @@ def test_migrate_requires_encryption_enabled(tmp_path):
 
 @requires_crypto
 def test_migrate_seals_existing_plaintext(monkeypatch, tmp_path):
-    from maverick.encryption_migrate import migrate_world_db
-    from maverick.world_model import WorldModel
+    from lightwork.encryption_migrate import migrate_world_db
+    from lightwork.world_model import WorldModel
 
     db = tmp_path / "world.db"
     # Write everything as plaintext (encryption off).
@@ -83,8 +83,8 @@ def test_migrate_seals_existing_plaintext(monkeypatch, tmp_path):
 
 @requires_crypto
 def test_migrate_seals_malformed_prefixed_plaintext(monkeypatch, tmp_path):
-    from maverick.encryption_migrate import migrate_world_db
-    from maverick.world_model import WorldModel
+    from lightwork.encryption_migrate import migrate_world_db
+    from lightwork.world_model import WorldModel
 
     db = tmp_path / "world.db"
     wm = WorldModel(db)
@@ -111,8 +111,8 @@ def test_migrate_seals_malformed_prefixed_plaintext(monkeypatch, tmp_path):
 
 @requires_crypto
 def test_migrate_dry_run_writes_nothing(monkeypatch, tmp_path):
-    from maverick.encryption_migrate import migrate_world_db
-    from maverick.world_model import WorldModel
+    from lightwork.encryption_migrate import migrate_world_db
+    from lightwork.world_model import WorldModel
 
     db = tmp_path / "world.db"
     wm = WorldModel(db)
@@ -140,8 +140,8 @@ def _all_db_bytes(db):
 def test_migrate_backup_true_writes_backup_before_resealing(monkeypatch, tmp_path):
     import stat as _stat
 
-    from maverick.encryption_migrate import migrate_world_db
-    from maverick.world_model import WorldModel
+    from lightwork.encryption_migrate import migrate_world_db
+    from lightwork.world_model import WorldModel
 
     db = tmp_path / "world.db"
     wm = WorldModel(db)
@@ -168,8 +168,8 @@ def test_migrate_backup_true_writes_backup_before_resealing(monkeypatch, tmp_pat
 
 @requires_crypto
 def test_migrate_default_writes_no_backup(monkeypatch, tmp_path):
-    from maverick.encryption_migrate import migrate_world_db
-    from maverick.world_model import WorldModel
+    from lightwork.encryption_migrate import migrate_world_db
+    from lightwork.world_model import WorldModel
 
     db = tmp_path / "world.db"
     wm = WorldModel(db)
@@ -185,8 +185,8 @@ def test_migrate_default_writes_no_backup(monkeypatch, tmp_path):
 
 @requires_crypto
 def test_migrate_backup_true_when_nothing_to_seal_skips_backup(monkeypatch, tmp_path):
-    from maverick.encryption_migrate import migrate_world_db
-    from maverick.world_model import WorldModel
+    from lightwork.encryption_migrate import migrate_world_db
+    from lightwork.world_model import WorldModel
 
     db = tmp_path / "world.db"
     wm = WorldModel(db)
@@ -201,8 +201,8 @@ def test_migrate_backup_true_when_nothing_to_seal_skips_backup(monkeypatch, tmp_
 
 @requires_crypto
 def test_migrate_dry_run_makes_no_backup(monkeypatch, tmp_path):
-    from maverick.encryption_migrate import migrate_world_db
-    from maverick.world_model import WorldModel
+    from lightwork.encryption_migrate import migrate_world_db
+    from lightwork.world_model import WorldModel
 
     db = tmp_path / "world.db"
     wm = WorldModel(db)
@@ -216,8 +216,8 @@ def test_migrate_dry_run_makes_no_backup(monkeypatch, tmp_path):
 
 @requires_crypto
 def test_migrate_leaves_no_plaintext_residue_in_the_db_file(monkeypatch, tmp_path):
-    from maverick.encryption_migrate import migrate_world_db
-    from maverick.world_model import WorldModel
+    from lightwork.encryption_migrate import migrate_world_db
+    from lightwork.world_model import WorldModel
 
     db = tmp_path / "world.db"
     wm = WorldModel(db)

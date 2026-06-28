@@ -1,7 +1,7 @@
 """Compaction RAG path: embed + similarity-retrieve episode digests."""
 from __future__ import annotations
 
-from maverick.compaction import (
+from lightwork.compaction import (
     DigestEntry,
     DigestIndex,
     _cosine,

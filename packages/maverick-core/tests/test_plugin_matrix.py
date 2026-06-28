@@ -1,9 +1,9 @@
 """Plugin compatibility matrix: rows, rendering, and the CI gate."""
 from __future__ import annotations
 
-import maverick.plugins as plugins_mod
-from maverick import plugin_matrix as pmx
-from maverick.plugin_manifest import parse_dict
+import lightwork.plugins as plugins_mod
+from lightwork import plugin_matrix as pmx
+from lightwork.plugin_manifest import parse_dict
 
 
 class _EP:
@@ -47,7 +47,7 @@ def _manifest(api="2", *, network=False):
 
 def test_matrix_rows_cover_groups_and_compat(monkeypatch):
     _wire(monkeypatch,
-          {"maverick.tools": [_EP("alpha")], "maverick.skills": [_EP("beta")]},
+          {"lightwork.tools": [_EP("alpha")], "lightwork.skills": [_EP("beta")]},
           {"alpha": _manifest("2"), "beta": _manifest("1")},
           cfg={"enabled": ["alpha", "beta"]})
     rows = {r.name: r for r in pmx.build_matrix()}
@@ -57,7 +57,7 @@ def test_matrix_rows_cover_groups_and_compat(monkeypatch):
 
 
 def test_matrix_no_manifest_is_v1_era(monkeypatch):
-    _wire(monkeypatch, {"maverick.tools": [_EP("bare")]}, {}, cfg={})
+    _wire(monkeypatch, {"lightwork.tools": [_EP("bare")]}, {}, cfg={})
     (row,) = pmx.build_matrix()
     assert row.api_version == "?" and row.compatible
     assert "no manifest" in row.notes
@@ -65,7 +65,7 @@ def test_matrix_no_manifest_is_v1_era(monkeypatch):
 
 
 def test_matrix_flags_ungranted_permissions(monkeypatch):
-    _wire(monkeypatch, {"maverick.tools": [_EP("net")]},
+    _wire(monkeypatch, {"lightwork.tools": [_EP("net")]},
           {"net": _manifest("2", network=True)},
           cfg={"enabled": ["net"]}, granted=[])
     (row,) = pmx.build_matrix()
@@ -73,7 +73,7 @@ def test_matrix_flags_ungranted_permissions(monkeypatch):
 
 
 def test_problems_gate_only_enabled(monkeypatch):
-    _wire(monkeypatch, {"maverick.tools": [_EP("old"), _EP("future")]},
+    _wire(monkeypatch, {"lightwork.tools": [_EP("old"), _EP("future")]},
           {"old": _manifest("1"), "future": _manifest("3")},
           cfg={"enabled": ["future"]})
     rows = pmx.build_matrix()
@@ -83,7 +83,7 @@ def test_problems_gate_only_enabled(monkeypatch):
 
 
 def test_problems_empty_when_all_loadable(monkeypatch):
-    _wire(monkeypatch, {"maverick.tools": [_EP("alpha")]},
+    _wire(monkeypatch, {"lightwork.tools": [_EP("alpha")]},
           {"alpha": _manifest("2")}, cfg={"enabled": ["*"]})
     assert pmx.problems(pmx.build_matrix()) == []
 
@@ -93,14 +93,14 @@ def test_render_empty_and_populated(monkeypatch):
     out = pmx.render(pmx.build_matrix())
     assert "no maverick plugins installed" in out
 
-    _wire(monkeypatch, {"maverick.tools": [_EP("alpha")]},
+    _wire(monkeypatch, {"lightwork.tools": [_EP("alpha")]},
           {"alpha": _manifest("1")}, cfg={"enabled": ["alpha"]})
     out = pmx.render(pmx.build_matrix())
     assert "alpha" in out and "DEPRECATED" in out and "kernel API v2" in out
 
 
 def test_matrix_uses_runtime_allowlist_semantics(monkeypatch):
-    _wire(monkeypatch, {"maverick.tools": [_EP("future")]},
+    _wire(monkeypatch, {"lightwork.tools": [_EP("future")]},
           {"future": _manifest("3")}, cfg={})
     monkeypatch.setattr(plugins_mod, "_allowed_plugin_names", lambda: {"future"})
 
@@ -111,7 +111,7 @@ def test_matrix_uses_runtime_allowlist_semantics(monkeypatch):
 
 
 def test_matrix_enables_all_when_runtime_allowlist_is_wildcard(monkeypatch):
-    _wire(monkeypatch, {"maverick.tools": [_EP("future")]},
+    _wire(monkeypatch, {"lightwork.tools": [_EP("future")]},
           {"future": _manifest("3")}, cfg={})
     monkeypatch.setattr(plugins_mod, "_allowed_plugin_names", lambda: None)
 
@@ -121,7 +121,7 @@ def test_matrix_enables_all_when_runtime_allowlist_is_wildcard(monkeypatch):
 
 
 def test_matrix_supports_string_enabled_config(monkeypatch):
-    _wire(monkeypatch, {"maverick.tools": [_EP("future")]},
+    _wire(monkeypatch, {"lightwork.tools": [_EP("future")]},
           {"future": _manifest("3")}, cfg={"enabled": "future"})
 
     (row,) = pmx.build_matrix()

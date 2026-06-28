@@ -6,7 +6,7 @@ Python-exception-only; these pin the new toolchain classes and -- critically --
 that adding them did NOT shadow the existing Python classification (the Python
 exception patterns are listed first and win on Python output).
 """
-from maverick.coding_mode import classify_failure
+from lightwork.coding_mode import classify_failure
 
 # ---------- Rust ----------
 

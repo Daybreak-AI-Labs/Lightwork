@@ -4,13 +4,13 @@ from __future__ import annotations
 
 import asyncio
 
-from maverick import assessment
-from maverick.assessment import (
+from lightwork import assessment
+from lightwork.assessment import (
     AssessmentSession,
     _compliance_auditor_tools,
     build_compliance_auditor_agent,
 )
-from maverick.tools import Tool, ToolRegistry
+from lightwork.tools import Tool, ToolRegistry
 
 
 async def _noop(args):
@@ -38,7 +38,7 @@ def test_auditor_envelope_keeps_evidence_drops_mutating():
 def test_deployment_posture_reports_live_control_state(monkeypatch):
     from dataclasses import dataclass
 
-    from maverick.tools.posture_tools import posture_tools
+    from lightwork.tools.posture_tools import posture_tools
 
     @dataclass
     class _C:
@@ -49,7 +49,7 @@ def test_deployment_posture_reports_live_control_state(monkeypatch):
         framework: str = "eu"
 
     monkeypatch.setattr(
-        "maverick.compliance.compliance_report",
+        "lightwork.compliance.compliance_report",
         lambda: [_C("Encryption at rest", "GDPR Art. 32", "active", "AES-256-GCM")],
     )
     out = asyncio.run(posture_tools()[0].fn({}))
@@ -68,11 +68,11 @@ def test_pii_redaction_control_reflects_real_posture(monkeypatch):
     # User-testing finding: the report hardcoded "Secret/PII redaction" as
     # active, but PII (email/SSN/phone) is redacted only under anon mode. At-rest
     # encryption is reported separately and must not satisfy live log redaction.
-    from maverick.compliance import compliance_report
+    from lightwork.compliance import compliance_report
 
     def _status(anon, enc):
-        monkeypatch.setattr("maverick.privacy.anon_enabled", lambda: anon)
-        monkeypatch.setattr("maverick.crypto_at_rest.at_rest_enabled", lambda: enc)
+        monkeypatch.setattr("lightwork.privacy.anon_enabled", lambda: anon)
+        monkeypatch.setattr("lightwork.crypto_at_rest.at_rest_enabled", lambda: enc)
         checks = {c.control: c for c in compliance_report()}
         assert checks["Secret redaction in logs"].status == "active"
         return checks["PII redaction in logs"].status

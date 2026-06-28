@@ -23,9 +23,9 @@ def _have_twilio() -> bool:
 
 @pytest.mark.skipif(not _have_twilio(), reason="fastapi+twilio not installed")
 @pytest.mark.parametrize("channel,module,path,frm,sid", [
-    ("sms", "maverick_channels.sms", "/webhook/sms",
+    ("sms", "lightwork_channels.sms", "/webhook/sms",
      "+12025550111", "SMdup"),
-    ("whatsapp", "maverick_channels.whatsapp", "/webhook/whatsapp",
+    ("whatsapp", "lightwork_channels.whatsapp", "/webhook/whatsapp",
      "whatsapp:+12025550111", "WAdup"),
 ])
 def test_webhook_claims_sid_before_running_handler(
@@ -37,7 +37,7 @@ def test_webhook_claims_sid_before_running_handler(
     (the double-spend window)."""
     import importlib
 
-    import maverick.world_model as wm_mod
+    import lightwork.world_model as wm_mod
     from fastapi.testclient import TestClient
     monkeypatch.setattr(wm_mod, "DEFAULT_DB", tmp_path / "world.db")
 

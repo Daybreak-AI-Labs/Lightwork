@@ -28,7 +28,7 @@ class _FakeHttpxResponse:
 
 
 def test_web_search_empty_query():
-    from maverick.tools.web_search import web_search
+    from lightwork.tools.web_search import web_search
     tool = web_search()
     assert "query is required" in tool.fn({"query": ""}).lower()
 
@@ -48,7 +48,7 @@ def test_web_search_tavily_path(monkeypatch):
 
     import httpx
     with patch.object(httpx, "post", return_value=fake_resp):
-        from maverick.tools.web_search import web_search
+        from lightwork.tools.web_search import web_search
         out = web_search().fn({"query": "hello world", "num_results": 5})
     assert "[backend: tavily]" in out
     assert "Result 1" in out
@@ -70,7 +70,7 @@ def test_web_search_falls_through_to_ddg_when_no_keys(monkeypatch):
 
     import httpx
     with patch.object(httpx, "get", return_value=fake):
-        from maverick.tools.web_search import web_search
+        from lightwork.tools.web_search import web_search
         out = web_search().fn({"query": "test", "num_results": 3})
 
     assert "[backend: ddg]" in out
@@ -82,7 +82,7 @@ def test_web_search_forced_backend_skipped_if_no_creds(monkeypatch):
     """MAVERICK_SEARCH_BACKEND=tavily but no key -> no fallthrough."""
     monkeypatch.setenv("MAVERICK_SEARCH_BACKEND", "tavily")
     monkeypatch.delenv("TAVILY_API_KEY", raising=False)
-    from maverick.tools.web_search import web_search
+    from lightwork.tools.web_search import web_search
     out = web_search().fn({"query": "test"})
     assert "ERROR" in out
 
@@ -99,13 +99,13 @@ def test_web_search_site_filter(monkeypatch):
 
     import httpx
     with patch.object(httpx, "post", side_effect=fake_post):
-        from maverick.tools.web_search import web_search
+        from lightwork.tools.web_search import web_search
         web_search().fn({"query": "react hooks", "site": "github.com"})
     assert captured_payload["q"].startswith("site:github.com ")
 
 
 def test_web_search_caps_num_results():
-    from maverick.tools.web_search import _SEARCH_INPUT_SCHEMA
+    from lightwork.tools.web_search import _SEARCH_INPUT_SCHEMA
     # Schema doesn't enforce cap, but runner does (cap is internal logic).
     # Just ensure schema lists the field.
     assert "num_results" in _SEARCH_INPUT_SCHEMA["properties"]
@@ -116,7 +116,7 @@ def test_web_search_caps_num_results():
 @pytest.fixture
 def world_with_history(tmp_path):
     """A WorldModel with a few finished goals to recall against."""
-    from maverick.world_model import WorldModel
+    from lightwork.world_model import WorldModel
     world = WorldModel(tmp_path / "wm.sqlite")
     # Insert via direct SQL (we control the schema fields).
     # Statuses use the vocabulary the orchestrator actually writes
@@ -141,7 +141,7 @@ def world_with_history(tmp_path):
 
 
 def test_recall_excludes_running_by_default(world_with_history):
-    from maverick.tools.recall import recall_past_goals
+    from lightwork.tools.recall import recall_past_goals
     matches = recall_past_goals(
         "refactor auth",
         world=world_with_history,
@@ -154,7 +154,7 @@ def test_recall_excludes_running_by_default(world_with_history):
 
 def test_recall_finds_relevant_by_jaccard(world_with_history):
     """Without fastembed, jaccard should still rank refactor-auth as top."""
-    from maverick.tools.recall import recall_past_goals
+    from lightwork.tools.recall import recall_past_goals
     matches = recall_past_goals(
         "auth refactor session",
         world=world_with_history,
@@ -167,8 +167,8 @@ def test_recall_finds_relevant_by_jaccard(world_with_history):
 
 
 def test_recall_returns_empty_on_empty_world(tmp_path):
-    from maverick.tools.recall import recall_past_goals
-    from maverick.world_model import WorldModel
+    from lightwork.tools.recall import recall_past_goals
+    from lightwork.world_model import WorldModel
     world = WorldModel(tmp_path / "empty.sqlite")
     try:
         out = recall_past_goals("anything", world=world)
@@ -178,19 +178,19 @@ def test_recall_returns_empty_on_empty_world(tmp_path):
 
 
 def test_recall_tool_factory():
-    from maverick.tools.recall import recall
+    from lightwork.tools.recall import recall
     tool = recall()
     assert tool.name == "recall_past_goals"
     assert "query" in tool.input_schema["properties"]
 
 
 def test_recall_tool_runner_empty_query():
-    from maverick.tools.recall import _run_recall
+    from lightwork.tools.recall import _run_recall
     assert "query is required" in _run_recall({"query": ""}).lower()
 
 
 def test_recall_includes_running_when_asked(world_with_history):
-    from maverick.tools.recall import recall_past_goals
+    from lightwork.tools.recall import recall_past_goals
     matches = recall_past_goals(
         "database",
         world=world_with_history,
@@ -204,8 +204,8 @@ def test_recall_includes_running_when_asked(world_with_history):
 # ---------- monitor ----------
 
 def test_monitor_snapshot_empty_db(tmp_path):
-    from maverick.monitor import snapshot
-    from maverick.world_model import WorldModel
+    from lightwork.monitor import snapshot
+    from lightwork.world_model import WorldModel
     world = WorldModel(tmp_path / "wm.sqlite")
     try:
         assert snapshot(world) is None
@@ -215,7 +215,7 @@ def test_monitor_snapshot_empty_db(tmp_path):
 
 def test_monitor_snapshot_resolves_active_goal(world_with_history):
     """Without explicit goal_id, picks the most-recent active goal."""
-    from maverick.monitor import snapshot
+    from lightwork.monitor import snapshot
     state = snapshot(world_with_history)
     assert state is not None
     # Goal #5 is the only active one.
@@ -224,8 +224,8 @@ def test_monitor_snapshot_resolves_active_goal(world_with_history):
 
 def test_monitor_snapshot_fallback_uses_updated_at_not_id(tmp_path):
     """Without an in-flight goal, picks the most-recently-touched terminal goal."""
-    from maverick.monitor import snapshot
-    from maverick.world_model import WorldModel
+    from lightwork.monitor import snapshot
+    from lightwork.world_model import WorldModel
 
     world = WorldModel(tmp_path / "wm.sqlite")
     try:
@@ -243,14 +243,14 @@ def test_monitor_snapshot_fallback_uses_updated_at_not_id(tmp_path):
 
 
 def test_monitor_snapshot_explicit_goal(world_with_history):
-    from maverick.monitor import snapshot
+    from lightwork.monitor import snapshot
     state = snapshot(world_with_history, goal_id=1)
     assert state is not None
     assert state.goal.id == 1
 
 
 def test_monitor_render_contains_key_fields(world_with_history):
-    from maverick.monitor import render, snapshot
+    from lightwork.monitor import render, snapshot
     state = snapshot(world_with_history, goal_id=2)
     text = render(state)
     assert "Goal #2" in text
@@ -260,7 +260,7 @@ def test_monitor_render_contains_key_fields(world_with_history):
 
 def test_monitor_render_shows_children(world_with_history):
     """If a goal has subgoals, the plan tree appears."""
-    from maverick.monitor import render, snapshot
+    from lightwork.monitor import render, snapshot
     # Add a child of goal 5.
     world_with_history.conn.execute(
         "INSERT INTO goals(id, parent_id, title, description, status, "
@@ -281,7 +281,7 @@ def test_monitor_render_shows_children(world_with_history):
 
 def test_base_registry_excludes_web_search_by_default_but_keeps_recall():
     """web_search is opt-in; recall remains enabled by default."""
-    from maverick.tools import base_registry
+    from lightwork.tools import base_registry
 
     class _FakeSandbox:
         pass
@@ -296,7 +296,7 @@ def test_base_registry_excludes_web_search_by_default_but_keeps_recall():
 
 
 def test_base_registry_can_enable_web_search_explicitly():
-    from maverick.tools import base_registry
+    from lightwork.tools import base_registry
 
     class _FakeSandbox:
         pass

@@ -1,7 +1,7 @@
 """Cache-aware prompt assembly DSL: stable-first ordering + breakpoint + lint."""
 from __future__ import annotations
 
-from maverick.prompt_dsl import (
+from lightwork.prompt_dsl import (
     PromptBuilder,
     Segment,
     Stability,

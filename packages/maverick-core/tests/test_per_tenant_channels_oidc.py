@@ -14,8 +14,8 @@ user -- which is why distinct per-tenant identities require separate instances.)
 from __future__ import annotations
 
 import pytest
-from maverick import config
-from maverick.oidc import load_oidc_config
+from lightwork import config
+from lightwork.oidc import load_oidc_config
 
 
 @pytest.fixture(autouse=True)
@@ -28,7 +28,7 @@ def _isolate(monkeypatch, tmp_path):
 
 
 def _write_tenant_overlay(tenant: str, body: str):
-    from maverick.paths import data_dir
+    from lightwork.paths import data_dir
     d = data_dir(tenant=tenant)
     d.mkdir(parents=True, exist_ok=True)
     (d / "config.toml").write_text(body, encoding="utf-8")
@@ -54,12 +54,12 @@ def test_oidc_issuer_is_per_tenant(monkeypatch):
     _write_tenant_overlay(
         "acme",
         '[auth.oidc]\nissuer = "https://acme.example.com"\n'
-        'audience = "maverick-acme"\njwks_uri = "https://acme.example.com/jwks"\n',
+        'audience = "lightwork-acme"\njwks_uri = "https://acme.example.com/jwks"\n',
     )
     monkeypatch.setenv("MAVERICK_TENANT", "acme")
     cfg = load_oidc_config()
     assert cfg.issuer == "https://acme.example.com"
-    assert cfg.audience == "maverick-acme"
+    assert cfg.audience == "lightwork-acme"
 
     # Another tenant without an overlay gets no issuer (not acme's).
     monkeypatch.setenv("MAVERICK_TENANT", "globex")

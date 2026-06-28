@@ -2,7 +2,7 @@
 
 A structured, labelled corpus of injection / jailbreak / obfuscation /
 tool-abuse payloads run against the shield's *built-in fallback*
-(`maverick_shield.builtin_rules`) -- the always-present detector that
+(`lightwork_shield.builtin_rules`) -- the always-present detector that
 guards the agent when the full ``agent-shield`` SDK isn't installed
 (CLAUDE.md rule 1: the kernel runs without the shield, fail-open). The
 corpus pins three things so they can't silently regress:
@@ -10,7 +10,7 @@ corpus pins three things so they can't silently regress:
   * attacks the fallback blocks (by category + obfuscation variant),
   * benign text the fallback must NOT block (false-positive floor), and
   * the defense-in-depth seam: softer phrasings the regex fallback misses
-    but the `maverick.safety.jailbreak_heuristics` scorer (wired into
+    but the `lightwork.safety.jailbreak_heuristics` scorer (wired into
     `safety.remote_scan`) catches.
 
 Payloads that NO layer reliably catches yet are listed in ``KNOWN_GAPS``
@@ -25,7 +25,7 @@ from __future__ import annotations
 import base64
 
 import pytest
-from maverick_shield import builtin_rules
+from lightwork_shield import builtin_rules
 
 _ZW = "​"  # zero-width space
 
@@ -133,7 +133,7 @@ DEFENSE_IN_DEPTH: list[tuple[str, str]] = [
 
 @pytest.mark.parametrize("label,payload", DEFENSE_IN_DEPTH, ids=[c[0] for c in DEFENSE_IN_DEPTH])
 def test_jailbreak_heuristics_catches_what_fallback_misses(label, payload):
-    jh = pytest.importorskip("maverick.safety.jailbreak_heuristics")
+    jh = pytest.importorskip("lightwork.safety.jailbreak_heuristics")
     # These are NOT caught by the cheap regex fallback...
     assert not _blocked(payload, "high"), (
         f"{label}: now caught by the fallback -- promote it into BLOCK_AT_HIGH"
@@ -151,5 +151,5 @@ KNOWN_GAPS: list[tuple[str, str]] = [
 @pytest.mark.parametrize("label,payload", KNOWN_GAPS, ids=[c[0] for c in KNOWN_GAPS])
 @pytest.mark.xfail(reason="known detection gap -- no layer catches this phrasing yet", strict=True)
 def test_known_gaps(label, payload):
-    jh = pytest.importorskip("maverick.safety.jailbreak_heuristics")
+    jh = pytest.importorskip("lightwork.safety.jailbreak_heuristics")
     assert _blocked(payload, "high") or jh.looks_like_jailbreak(payload)

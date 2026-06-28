@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import random
 
-from maverick_evolve import config_space
+from lightwork_evolve import config_space
 
 
 def test_default_config_in_bounds():

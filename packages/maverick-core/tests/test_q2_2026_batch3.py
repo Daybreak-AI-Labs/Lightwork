@@ -28,7 +28,7 @@ def test_tgi_provider_default_url(monkeypatch):
     _install_fake_openai(monkeypatch)
     monkeypatch.delenv("TGI_BASE_URL", raising=False)
     monkeypatch.delenv("TGI_API_KEY", raising=False)
-    from maverick.providers.tgi_provider import TGIClient
+    from lightwork.providers.tgi_provider import TGIClient
     client = TGIClient()
     assert "8080" in client._sync.base_url
     assert client._sync.base_url.endswith("/v1")
@@ -38,7 +38,7 @@ def test_tgi_provider_env_overrides(monkeypatch):
     _install_fake_openai(monkeypatch)
     monkeypatch.setenv("TGI_BASE_URL", "http://my-tgi.example.com:9999")
     monkeypatch.setenv("TGI_API_KEY", "secret-token")
-    from maverick.providers.tgi_provider import TGIClient
+    from lightwork.providers.tgi_provider import TGIClient
     client = TGIClient()
     # /v1 suffix appended automatically when missing.
     assert client._sync.base_url == "http://my-tgi.example.com:9999/v1"
@@ -48,14 +48,14 @@ def test_tgi_provider_env_overrides(monkeypatch):
 def test_tgi_provider_v1_suffix_idempotent(monkeypatch):
     _install_fake_openai(monkeypatch)
     monkeypatch.setenv("TGI_BASE_URL", "http://my-tgi.example.com/v1")
-    from maverick.providers.tgi_provider import TGIClient
+    from lightwork.providers.tgi_provider import TGIClient
     client = TGIClient()
     # Already had /v1; don't double-suffix.
     assert client._sync.base_url == "http://my-tgi.example.com/v1"
 
 
 def test_tgi_provider_in_registry():
-    from maverick.providers import KNOWN_PROVIDERS, _canonical
+    from lightwork.providers import KNOWN_PROVIDERS, _canonical
     assert "tgi" in KNOWN_PROVIDERS
     assert _canonical("hf-tgi") == "tgi"
     assert _canonical("huggingface-tgi") == "tgi"
@@ -64,8 +64,8 @@ def test_tgi_provider_in_registry():
 def test_tgi_provider_dispatches(monkeypatch):
     _install_fake_openai(monkeypatch)
     monkeypatch.delenv("TGI_BASE_URL", raising=False)
-    from maverick.providers import get_provider_client
-    from maverick.providers.tgi_provider import TGIClient
+    from lightwork.providers import get_provider_client
+    from lightwork.providers.tgi_provider import TGIClient
     client = get_provider_client("tgi")
     assert isinstance(client, TGIClient)
     # Alias also dispatches.
@@ -80,7 +80,7 @@ _HAS_CHROMA = importlib.util.find_spec("chromadb") is not None
 
 @pytest.mark.skipif(not _HAS_CHROMA, reason="chromadb not installed")
 def test_chroma_store_round_trip(tmp_path):
-    from maverick.vector_store import ChromaStore
+    from lightwork.vector_store import ChromaStore
     store = ChromaStore(collection="t1", path=tmp_path / "vs")
     store.add(
         ["the user prefers dark mode", "morning is best for cold calls"],
@@ -95,7 +95,7 @@ def test_chroma_store_round_trip(tmp_path):
 
 @pytest.mark.skipif(not _HAS_CHROMA, reason="chromadb not installed")
 def test_chroma_store_delete_and_reset(tmp_path):
-    from maverick.vector_store import ChromaStore
+    from lightwork.vector_store import ChromaStore
     store = ChromaStore(collection="t2", path=tmp_path / "vs")
     store.add(["a", "b", "c"], ids=["i1", "i2", "i3"])
     store.delete(["i2"])
@@ -110,16 +110,16 @@ def test_chroma_store_missing_dep_raises_importable_error(tmp_path, monkeypatch)
         # Hide it.
         monkeypatch.setitem(sys.modules, "chromadb", None)
     # Force reimport so the lazy check trips.
-    import maverick.vector_store.chroma_store as cs
+    import lightwork.vector_store.chroma_store as cs
     importlib.reload(cs)
     if _HAS_CHROMA:
         # If chromadb is really installed, setting sys.modules to None
         # turns `import chromadb` into ImportError. So our error path
         # should still fire.
-        with pytest.raises(ImportError, match="maverick-agent\\[chroma\\]"):
+        with pytest.raises(ImportError, match="lightwork-agent\\[chroma\\]"):
             cs.ChromaStore(path=tmp_path)
     else:
-        with pytest.raises(ImportError, match="maverick-agent\\[chroma\\]"):
+        with pytest.raises(ImportError, match="lightwork-agent\\[chroma\\]"):
             cs.ChromaStore(path=tmp_path)
 
 
@@ -127,7 +127,7 @@ def test_chroma_store_missing_dep_raises_importable_error(tmp_path, monkeypatch)
 
 @pytest.mark.asyncio
 async def test_bluesky_start_requires_credentials():
-    from maverick_channels.bluesky import BlueskyChannel
+    from lightwork_channels.bluesky import BlueskyChannel
 
     async def handler(msg):
         return ""
@@ -139,7 +139,7 @@ async def test_bluesky_start_requires_credentials():
 
 @pytest.mark.asyncio
 async def test_bluesky_session_created_and_cached():
-    from maverick_channels.bluesky import BlueskyChannel
+    from lightwork_channels.bluesky import BlueskyChannel
 
     fake_resp = MagicMock()
     fake_resp.json = MagicMock(return_value={
@@ -175,7 +175,7 @@ async def test_bluesky_session_created_and_cached():
 
 @pytest.mark.asyncio
 async def test_mastodon_requires_token():
-    from maverick_channels.mastodon import MastodonChannel
+    from lightwork_channels.mastodon import MastodonChannel
 
     async def handler(msg):
         return ""
@@ -186,14 +186,14 @@ async def test_mastodon_requires_token():
 
 
 def test_mastodon_strip_html():
-    from maverick_channels.mastodon import _strip_html
+    from lightwork_channels.mastodon import _strip_html
     html = "<p>Hello <a href='x'>world</a>!</p>"
     assert _strip_html(html) == "Hello world!"
 
 
 @pytest.mark.asyncio
 async def test_mastodon_poll_uses_since_id():
-    from maverick_channels.mastodon import MastodonChannel
+    from lightwork_channels.mastodon import MastodonChannel
 
     fake_resp = MagicMock()
     fake_resp.status_code = 200
@@ -243,13 +243,13 @@ async def test_mastodon_poll_uses_since_id():
 # ---------- Wizard catalog ----------
 
 def test_wizard_catalog_includes_tgi():
-    from maverick_installer import models
+    from lightwork_installer import models
     assert "tgi" in models.PROVIDERS
     assert models.PROVIDERS["tgi"]["status"] == "ready"
 
 
 def test_bluesky_requires_allowlist():
-    from maverick_channels.bluesky import BlueskyChannel
+    from lightwork_channels.bluesky import BlueskyChannel
 
     async def handler(msg):
         return ""
@@ -259,7 +259,7 @@ def test_bluesky_requires_allowlist():
 
 
 def test_mastodon_requires_allowlist():
-    from maverick_channels.mastodon import MastodonChannel
+    from lightwork_channels.mastodon import MastodonChannel
 
     async def handler(msg):
         return ""

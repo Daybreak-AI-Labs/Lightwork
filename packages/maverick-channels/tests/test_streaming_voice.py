@@ -1,7 +1,7 @@
 """Streaming voice session — endpointing, barge-in, scripted offline replay."""
 from __future__ import annotations
 
-from maverick_channels.streaming_voice import (
+from lightwork_channels.streaming_voice import (
     MAX_REPLY_HISTORY,
     MAX_UTTERANCE_CHARS,
     PlaybackSeams,

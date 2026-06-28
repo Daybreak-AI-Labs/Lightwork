@@ -3,8 +3,8 @@ with no trusted_proxies pin and the loopback fallback still active (#59).
 Advisory -- a warning, never a failure; off-by-default/pinned configs are silent."""
 from __future__ import annotations
 
-import maverick.health as h
-import maverick.proxy_auth as pa
+import lightwork.health as h
+import lightwork.proxy_auth as pa
 
 
 def test_proxy_auth_off_is_silent(monkeypatch, capsys):

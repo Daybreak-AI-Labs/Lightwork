@@ -8,8 +8,8 @@ from __future__ import annotations
 import json
 
 import pytest
-from maverick_shield import cascade
-from maverick_shield.probe_model import (
+from lightwork_shield import cascade
+from lightwork_shield.probe_model import (
     LinearProbeModel,
     configured_probe_model,
     load_probe_model,
@@ -72,7 +72,7 @@ class TestLoad:
 
 class TestConfigured:
     def test_env_path_loads_and_caches(self, tmp_path, monkeypatch):
-        from maverick_shield import probe_model
+        from lightwork_shield import probe_model
         probe_model._reset_cache()
         p = tmp_path / "m.json"
         p.write_text(json.dumps({"bias": 2.0, "weights": {}}))
@@ -85,7 +85,7 @@ class TestConfigured:
         probe_model._reset_cache()
 
     def test_unset_is_none(self, monkeypatch):
-        from maverick_shield import probe_model
+        from lightwork_shield import probe_model
         probe_model._reset_cache()
         monkeypatch.delenv("MAVERICK_SHIELD_PROBE_MODEL", raising=False)
         # core's load_config returns no [shield] probe_model in a fresh env.

@@ -8,10 +8,10 @@ tax_ packs to the same read-only safety envelope as every other suite.
 from __future__ import annotations
 
 from click.testing import CliRunner
-from maverick import tax_prep
-from maverick.cli import main
-from maverick.domain import builtin_dir, load_domains
-from maverick.tax_prep import (
+from lightwork import tax_prep
+from lightwork.cli import main
+from lightwork.domain import builtin_dir, load_domains
+from lightwork.tax_prep import (
     SourceDoc,
     Workpaper,
     classify,
@@ -403,7 +403,7 @@ class TestFirstPassComputation:
 
 class TestStateFirstPass:
     def _wp(self, state="", wages=85000.0, state_wh=2609.50, status="single"):
-        from maverick.tax_prep import Workpaper as WP
+        from lightwork.tax_prep import Workpaper as WP
         return WP(filing_status=status, state=state, docs=[
             SourceDoc("W-2", "W-2 — Acme", wages=wages,
                       state="PA" if not state else state,
@@ -413,7 +413,7 @@ class TestStateFirstPass:
     def test_pa_flat_hand_computed(self):
         # PA: flat 3.07% on income, no standard deduction.
         # 85,000 * .0307 = 2,609.50 -- exactly the withholding: zero balance.
-        from maverick.tax_prep import compute_state_first_pass, infer_state
+        from lightwork.tax_prep import compute_state_first_pass, infer_state
         wp = self._wp()
         assert infer_state(wp) == "PA"      # auto-detected from W-2 box 15
         sd = compute_state_first_pass(wp, "PA")
@@ -422,24 +422,24 @@ class TestStateFirstPass:
     def test_az_flat_with_federal_matching_deduction(self):
         # AZ: 2.5% after the federal-matching std deduction.
         # (85,000 - 15,750) * .025 = 1,731.25.
-        from maverick.tax_prep import compute_state_first_pass
+        from lightwork.tax_prep import compute_state_first_pass
         sd = compute_state_first_pass(self._wp(state="AZ"), "AZ")
         assert sd.computed and sd.state_taxable == 69250.0
         assert sd.tax == 1731.25
 
     def test_co_taxes_federal_taxable_income(self):
         # CO: 4.4% of federal taxable income: 69,250 * .044 = 3,047.00.
-        from maverick.tax_prep import compute_state_first_pass
+        from lightwork.tax_prep import compute_state_first_pass
         sd = compute_state_first_pass(self._wp(state="CO"), "CO")
         assert sd.computed and sd.tax == 3047.00
 
     def test_no_tax_state_refunds_any_withholding(self):
-        from maverick.tax_prep import compute_state_first_pass
+        from lightwork.tax_prep import compute_state_first_pass
         sd = compute_state_first_pass(self._wp(state="TX", state_wh=100.0), "TX")
         assert sd.computed and sd.tax == 0.0 and sd.balance == -100.0
 
     def test_graduated_state_is_an_explicit_handoff_not_a_guess(self):
-        from maverick.tax_prep import compute_state_first_pass
+        from lightwork.tax_prep import compute_state_first_pass
         sd = compute_state_first_pass(self._wp(state="CA"), "CA")
         assert sd.computed is False
         assert sd.withholding == 2609.50    # the known figure still tallied
@@ -452,7 +452,7 @@ class TestStateFirstPass:
         # computes marginal state tax; with no table the state hands off.
         import copy
 
-        from maverick.tax_prep import compute_state_first_pass
+        from lightwork.tax_prep import compute_state_first_pass
         const = copy.deepcopy(tax_prep.STATE_TY2025)
         const["graduated"] = {"NY": {"basis": "agi",
             "brackets": [(20000, 0.04), (None, 0.06)],
@@ -471,8 +471,8 @@ class TestStateFirstPass:
         assert compute_state_first_pass(wp, "NY").computed is False
 
     def test_multi_state_withholding_flagged(self):
-        from maverick.tax_prep import Workpaper as WP
-        from maverick.tax_prep import compute_state_first_pass
+        from lightwork.tax_prep import Workpaper as WP
+        from lightwork.tax_prep import compute_state_first_pass
         wp = WP(filing_status="single", docs=[
             SourceDoc("W-2", "W-2 — A", wages=50000.0, state="PA",
                       state_withholding=1535.0),
@@ -484,7 +484,7 @@ class TestStateFirstPass:
         assert any("NJ" in i and "multi-state" in i for i in sd.open_items)
 
     def test_unknown_state_asks_for_it(self):
-        from maverick.tax_prep import compute_state_first_pass
+        from lightwork.tax_prep import compute_state_first_pass
         wp = self._wp()
         wp.docs[0].state = ""
         sd = compute_state_first_pass(wp, "")
@@ -629,8 +629,8 @@ class TestTaxSuitePacks:
         assert "constants" in p.persona and "signed" in p.persona
 
     def test_suite_registered_with_discipline(self):
-        from maverick.domain import suite_for
-        from maverick.domain_discipline import discipline_for
+        from lightwork.domain import suite_for
+        from lightwork.domain_discipline import discipline_for
         assert suite_for("tax_workpaper_assembler") == "tax"
         block = discipline_for("tax_workpaper_assembler")
         assert "Tax preparation discipline" in block
@@ -643,11 +643,11 @@ class TestTaxEngineConnectors:
     packs get GET-only LOW read seats for return/e-file status."""
 
     def _tools(self):
-        from maverick.tools.enterprise_connectors import enterprise_connectors
+        from lightwork.tools.enterprise_connectors import enterprise_connectors
         return {t.name: t for t in enterprise_connectors()}
 
     def test_registered_with_read_seats(self):
-        from maverick.tools.enterprise_connectors import (
+        from lightwork.tools.enterprise_connectors import (
             ENTERPRISE_CONNECTOR_NAMES,
             READ_CONNECTOR_NAMES,
             READ_CONNECTOR_RISKS,
@@ -658,7 +658,7 @@ class TestTaxEngineConnectors:
             assert READ_CONNECTOR_RISKS[f"{vendor}_read"] == "low"
 
     def test_read_seats_are_get_only_low_risk_and_path_limited(self):
-        from maverick.safety.tool_risk import tool_risk
+        from lightwork.safety.tool_risk import tool_risk
         tools = self._tools()
         blocked_paths = {
             "cch_axcess": "/api/DocumentService/v1.0/clients/123/documents",
@@ -684,7 +684,7 @@ class TestTaxEngineConnectors:
         assert "CCH_AXCESS_BASE_URL" in out and "CCH_AXCESS_TOKEN" in out
 
     def test_cch_subscription_key_prompted_by_the_wizard_catalog(self):
-        from maverick.tools.enterprise_connectors import connector_catalog
+        from lightwork.tools.enterprise_connectors import connector_catalog
         entry = next(e for e in connector_catalog() if e["name"] == "cch_axcess")
         assert ("CCH_AXCESS_SUBSCRIPTION_KEY", True) in entry["env"]
 
@@ -705,7 +705,7 @@ class TestJsonOutput:
                        docs=[SourceDoc("W-2", "a", wages=80000.0,
                                        federal_withholding=9000.0)])
         draft = compute_first_pass(wp)
-        from maverick.tax_prep import compute_state_first_pass, review_package_dict
+        from lightwork.tax_prep import compute_state_first_pass, review_package_dict
         state = compute_state_first_pass(wp, "PA")
         data = review_package_dict(draft, state)
         import json
@@ -743,7 +743,7 @@ class TestJsonOutput:
     def test_cli_json_format_keeps_update_status_off_stdout(
             self, tmp_path, monkeypatch):
         (tmp_path / "w2.txt").write_text(W2_TEXT, encoding="utf-8")
-        from maverick import tax_constants
+        from lightwork import tax_constants
         monkeypatch.setattr(tax_constants, "check_for_update",
                             lambda: ("applied", "test constants updated"))
         res = CliRunner().invoke(main, [

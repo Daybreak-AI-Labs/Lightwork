@@ -11,7 +11,7 @@ from __future__ import annotations
 import json
 
 import pytest
-from maverick.quotas import (
+from lightwork.quotas import (
     UsageLedger,
     over_quota,
     quotas_enforced,
@@ -98,19 +98,19 @@ def test_blank_principal_ignored():
 
 
 def test_ledger_is_tenant_scoped(monkeypatch):
-    from maverick.paths import set_tenant
+    from lightwork.paths import set_tenant
     tok = set_tenant("team-a")
     try:
         UsageLedger().record("alice", 9.0, 0, 0)
     finally:
-        from maverick.paths import reset_tenant
+        from lightwork.paths import reset_tenant
         reset_tenant(tok)
     # Different tenant -> different ledger file -> no spend visible.
     tok2 = set_tenant("team-b")
     try:
         assert UsageLedger().usage("alice")["dollars"] == pytest.approx(0.0)
     finally:
-        from maverick.paths import reset_tenant
+        from lightwork.paths import reset_tenant
         reset_tenant(tok2)
 
 
@@ -126,7 +126,7 @@ def test_corrupt_ledger_is_fail_soft(tmp_path):
 
 def test_record_usage_fail_soft_on_bad_path(monkeypatch, caplog):
     # An unwritable ledger path must not raise out of record_usage.
-    import maverick.quotas as q
+    import lightwork.quotas as q
 
     class _Boom:
         def record(self, *a, **k):

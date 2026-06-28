@@ -5,9 +5,9 @@ from dataclasses import dataclass
 from types import SimpleNamespace
 
 import pytest
-from maverick.capability import Capability
-from maverick.grpc_api import server as grpc_server
-from maverick.grpc_api.service import EventDTO, GoalStatusDTO
+from lightwork.capability import Capability
+from lightwork.grpc_api import server as grpc_server
+from lightwork.grpc_api.service import EventDTO, GoalStatusDTO
 
 
 class _Codes:
@@ -140,8 +140,8 @@ def test_authorized_calls_reach_all_rpc_methods(monkeypatch):
 
 @pytest.mark.parametrize("method_name", ["StreamEpisode", "Cancel", "GetStatus"])
 def test_read_and_control_rpcs_enforce_trust_plane(monkeypatch, method_name):
-    from maverick import agent_trust
-    from maverick.agent_trust import TrustedAgent
+    from lightwork import agent_trust
+    from lightwork.agent_trust import TrustedAgent
 
     monkeypatch.setattr(grpc_server, "_grpc_code", lambda: _Codes)
     registry = {
@@ -174,7 +174,7 @@ def test_read_and_control_rpcs_enforce_trust_plane(monkeypatch, method_name):
 
 def test_run_goal_intersects_rpc_capability_with_local_policy(monkeypatch):
     monkeypatch.setattr(grpc_server, "_grpc_code", lambda: _Codes)
-    import maverick.capability as capability_mod
+    import lightwork.capability as capability_mod
 
     local = Capability(
         principal="user:victim",

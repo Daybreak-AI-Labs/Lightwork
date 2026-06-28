@@ -15,7 +15,7 @@ import os
 from types import SimpleNamespace
 
 import pytest
-from maverick.budget import Budget, BudgetExceeded, _coerce_count
+from lightwork.budget import Budget, BudgetExceeded, _coerce_count
 
 
 def test_coerce_count_handles_none_and_valid_counts() -> None:
@@ -72,7 +72,7 @@ def _openai_response_with_usage(**usage_fields):
 
 
 def test_openai_provider_fails_closed_on_malformed_usage() -> None:
-    from maverick.providers.openai_provider import OpenAIClient
+    from lightwork.providers.openai_provider import OpenAIClient
 
     b = Budget(max_dollars=1.0)
     resp = _openai_response_with_usage(
@@ -91,7 +91,7 @@ def test_openai_provider_fails_closed_on_malformed_usage() -> None:
 
 
 def test_openai_provider_fails_closed_when_usage_missing() -> None:
-    from maverick.providers.openai_provider import OpenAIClient
+    from lightwork.providers.openai_provider import OpenAIClient
 
     b = Budget(max_dollars=1.0)
     resp = SimpleNamespace(
@@ -109,7 +109,7 @@ def test_openai_provider_fails_closed_when_usage_missing() -> None:
 
 
 def _client():
-    from maverick.providers.anthropic_provider import AnthropicClient
+    from lightwork.providers.anthropic_provider import AnthropicClient
     return AnthropicClient.__new__(AnthropicClient)
 
 def _kwargs(model: str, *, thinking_budget, temp: str):
@@ -139,7 +139,7 @@ def test_temperature_applied_without_thinking() -> None:
 
 
 def _kwargs_ctx(model: str, *, thinking_budget, temp):
-    from maverick.providers.base import (
+    from lightwork.providers.base import (
         reset_sampling_temperature,
         set_sampling_temperature,
     )
@@ -163,7 +163,7 @@ def test_temperature_from_contextvar_applied_without_thinking() -> None:
 
 def test_contextvar_temperature_takes_precedence_over_env(monkeypatch) -> None:
     monkeypatch.setenv("MAVERICK_TEMPERATURE", "0.1")
-    from maverick.providers.base import (
+    from lightwork.providers.base import (
         reset_sampling_temperature,
         set_sampling_temperature,
     )

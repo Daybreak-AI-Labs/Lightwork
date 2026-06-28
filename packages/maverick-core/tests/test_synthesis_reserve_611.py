@@ -11,19 +11,19 @@ from pathlib import Path
 from types import SimpleNamespace
 
 import pytest
-from maverick.agent import WORKER_SYSTEM_TEMPLATE, Agent, _last_assistant_text
-from maverick.blackboard import Blackboard
-from maverick.budget import Budget
-from maverick.sandbox import LocalBackend
-from maverick.swarm import SwarmContext
-from maverick.tools.spawn import (
+from lightwork.agent import WORKER_SYSTEM_TEMPLATE, Agent, _last_assistant_text
+from lightwork.blackboard import Blackboard
+from lightwork.budget import Budget
+from lightwork.sandbox import LocalBackend
+from lightwork.swarm import SwarmContext
+from lightwork.tools.spawn import (
     MAX_SWARM_FANOUT,
     _fanout_cap_for_depth,
     _synthesis_reserve_block,
     spawn_subagent_tool,
     spawn_swarm_tool,
 )
-from maverick.world_model import WorldModel
+from lightwork.world_model import WorldModel
 
 
 def test_fanout_cap_decays_with_depth():

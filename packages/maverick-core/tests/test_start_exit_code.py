@@ -21,7 +21,7 @@ def _isolate(monkeypatch, tmp_path):
     # A present (not necessarily valid) key passes start's provider preflight;
     # the fake kernel never makes a real call.
     monkeypatch.setenv("ANTHROPIC_API_KEY", "sk-ant-dummy")
-    from maverick import killswitch as ks
+    from lightwork import killswitch as ks
     ks._last_file_check_ts = 0.0
     ks.clear()
 
@@ -44,7 +44,7 @@ def _fake_kernel(final_status: str, message: str):
 
 def test_start_exits_2_when_goal_is_blocked(tmp_path, monkeypatch):
     _isolate(monkeypatch, tmp_path)
-    import maverick.cli as cli_mod
+    import lightwork.cli as cli_mod
     monkeypatch.setattr(
         cli_mod, "_kernel",
         lambda: _fake_kernel("blocked", "Paused: waiting for you to answer 1 question."),
@@ -56,7 +56,7 @@ def test_start_exits_2_when_goal_is_blocked(tmp_path, monkeypatch):
 
 def test_start_exits_0_when_goal_is_done(tmp_path, monkeypatch):
     _isolate(monkeypatch, tmp_path)
-    import maverick.cli as cli_mod
+    import lightwork.cli as cli_mod
     monkeypatch.setattr(
         cli_mod, "_kernel",
         lambda: _fake_kernel("done", "FINAL: task complete."),
@@ -70,7 +70,7 @@ def test_start_repeat_runs_goal_n_times(tmp_path, monkeypatch):
     """--repeat N runs the SAME task N times (DPO needs repeated attempts at one
     task to form preference pairs). Each run creates its own goal row."""
     _isolate(monkeypatch, tmp_path)
-    import maverick.cli as cli_mod
+    import lightwork.cli as cli_mod
     monkeypatch.setattr(
         cli_mod, "_kernel",
         lambda: _fake_kernel("done", "FINAL: ok"),
@@ -88,7 +88,7 @@ def test_start_repeat_does_not_exit_2_on_blocked(tmp_path, monkeypatch):
     """In repeat mode a non-clean run is EXPECTED (it's the worse half of a
     preference pair), so a blocked outcome must NOT abort the batch with exit 2."""
     _isolate(monkeypatch, tmp_path)
-    import maverick.cli as cli_mod
+    import lightwork.cli as cli_mod
     monkeypatch.setattr(
         cli_mod, "_kernel",
         lambda: _fake_kernel("blocked", "Paused: needs input."),
@@ -103,7 +103,7 @@ def test_start_repeat_does_not_exit_2_on_blocked(tmp_path, monkeypatch):
 def test_start_single_run_keeps_exit_2_contract(tmp_path, monkeypatch):
     """--repeat 1 (the default) preserves the exit-2-on-blocked contract."""
     _isolate(monkeypatch, tmp_path)
-    import maverick.cli as cli_mod
+    import lightwork.cli as cli_mod
     monkeypatch.setattr(
         cli_mod, "_kernel",
         lambda: _fake_kernel("blocked", "Paused: needs input."),

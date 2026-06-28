@@ -1,7 +1,7 @@
 """capability_revocation: transitive revocation propagation."""
 from __future__ import annotations
 
-from maverick.tools.capability_revocation import capability_revocation
+from lightwork.tools.capability_revocation import capability_revocation
 
 
 def _run(**kw):

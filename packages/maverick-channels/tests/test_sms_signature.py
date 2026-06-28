@@ -26,7 +26,7 @@ def _have_deps() -> bool:
 
 @pytest.mark.skipif(not _have_deps(), reason="fastapi+twilio not installed")
 def test_sms_channel_constructs_validator():
-    from maverick_channels.sms import SMSChannel
+    from lightwork_channels.sms import SMSChannel
 
     async def _noop(_):
         return ""
@@ -49,7 +49,7 @@ def test_sms_channel_constructs_validator():
 def test_sms_channel_rejects_missing_creds():
     """Constructing without creds must raise so a half-configured channel
     can't accidentally accept webhooks."""
-    from maverick_channels.sms import SMSChannel
+    from lightwork_channels.sms import SMSChannel
 
     async def _noop(_):
         return ""

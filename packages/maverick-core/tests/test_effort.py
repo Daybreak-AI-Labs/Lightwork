@@ -2,8 +2,8 @@
 from __future__ import annotations
 
 import pytest
-from maverick import effort
-from maverick.effort import effort_for_model, effort_for_role, effort_supported
+from lightwork import effort
+from lightwork.effort import effort_for_model, effort_for_role, effort_supported
 
 OPUS = "claude-opus-4-8"
 SONNET = "claude-sonnet-4-6"
@@ -107,7 +107,7 @@ def test_preselected_effort_clamps_for_actual_model():
 
 def test_effort_lands_in_anthropic_output_config(monkeypatch):
     monkeypatch.setenv("ANTHROPIC_API_KEY", "sk-test")
-    from maverick.providers.anthropic_provider import AnthropicClient
+    from lightwork.providers.anthropic_provider import AnthropicClient
     p = AnthropicClient()
     msgs = [{"role": "user", "content": "a"}, {"role": "user", "content": "b"}]
     # Supported model -> effort threads into output_config.
@@ -123,8 +123,8 @@ def test_effort_lands_in_anthropic_output_config(monkeypatch):
 
 
 def test_sync_failover_reclamps_effort_for_fallback(monkeypatch):
-    from maverick import provider_failover
-    from maverick.llm import LLM, LLMResponse
+    from lightwork import provider_failover
+    from lightwork.llm import LLM, LLMResponse
 
     calls = []
 
@@ -148,8 +148,8 @@ def test_sync_failover_reclamps_effort_for_fallback(monkeypatch):
 
 
 def test_async_failover_reclamps_effort_for_fallback(monkeypatch):
-    from maverick import provider_failover
-    from maverick.llm import LLM, LLMResponse
+    from lightwork import provider_failover
+    from lightwork.llm import LLM, LLMResponse
 
     calls = []
 

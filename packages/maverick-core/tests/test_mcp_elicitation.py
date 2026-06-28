@@ -18,7 +18,7 @@ import sys
 import threading
 
 import pytest
-from maverick.mcp_client import MCPClient, MCPServerSpec
+from lightwork.mcp_client import MCPClient, MCPServerSpec
 
 
 class _FakeStdin:

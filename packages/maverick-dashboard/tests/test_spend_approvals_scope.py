@@ -9,17 +9,17 @@ from __future__ import annotations
 
 import pytest
 from fastapi.testclient import TestClient
-from maverick.oidc import VerifiedPrincipal
-from maverick_dashboard.app import app
+from lightwork.oidc import VerifiedPrincipal
+from lightwork_dashboard.app import app
 
 client = TestClient(app, headers={"Origin": "http://testserver"})
 
 
 @pytest.fixture(autouse=True)
 def _isolated(tmp_path, monkeypatch):
-    from maverick import world_model
-    from maverick_dashboard import api as api_mod
-    from maverick_dashboard import app as app_mod
+    from lightwork import world_model
+    from lightwork_dashboard import api as api_mod
+    from lightwork_dashboard import app as app_mod
 
     monkeypatch.setattr(world_model, "DEFAULT_DB", tmp_path / "world.db")
     api_mod._world_cache.clear()
@@ -29,8 +29,8 @@ def _isolated(tmp_path, monkeypatch):
 
 
 def _enable_oidc(monkeypatch, *, default_role: str = "operator") -> None:
-    import maverick_dashboard.auth as auth
-    import maverick_dashboard.rbac as rbac
+    import lightwork_dashboard.auth as auth
+    import lightwork_dashboard.rbac as rbac
 
     monkeypatch.setattr(auth, "oidc_enabled", lambda: True)
     monkeypatch.setattr(rbac, "default_role", lambda: default_role)
@@ -50,7 +50,7 @@ def _as(user: str) -> dict[str, str]:
 
 def _spend_goal(owner: str, cost: float) -> int:
     """A completed goal+episode owned by ``owner`` with a known cost."""
-    from maverick_dashboard.app import _world
+    from lightwork_dashboard.app import _world
     w = _world()
     gid = w.create_goal("g", "d", owner=owner)
     eid = w.start_episode(gid)
@@ -98,7 +98,7 @@ def test_spend_auth_off_unchanged():
 
 def test_approvals_list_requires_operate(monkeypatch):
     _enable_oidc(monkeypatch, default_role="viewer")
-    from maverick_dashboard.app import _world
+    from lightwork_dashboard.app import _world
     _world().create_approval("rm -rf /", risk="high", detail="bob's secret action")
     r = client.get("/api/v1/approvals", headers=_as("viewer-vic"))
     assert r.status_code == 403
@@ -106,7 +106,7 @@ def test_approvals_list_requires_operate(monkeypatch):
 
 def test_approvals_list_allows_operator(monkeypatch):
     _enable_oidc(monkeypatch, default_role="operator")
-    from maverick_dashboard.app import _world
+    from lightwork_dashboard.app import _world
     _world().create_approval("rm -rf /", risk="high", detail="x")
     r = client.get("/api/v1/approvals", headers=_as("op-olivia"))
     assert r.status_code == 200

@@ -9,8 +9,8 @@ sliding 60s window. MAVERICK_FEDERATION_RATE_LIMIT=0 disables it.
 from __future__ import annotations
 
 import pytest
-from maverick import federation as fed
-from maverick.federation import FederationService, Peer
+from lightwork import federation as fed
+from lightwork.federation import FederationService, Peer
 
 
 @pytest.fixture(autouse=True)

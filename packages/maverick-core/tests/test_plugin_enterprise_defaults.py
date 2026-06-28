@@ -7,8 +7,8 @@ wins, and dev (non-enterprise) keeps today's behavior.
 from __future__ import annotations
 
 import pytest
-from maverick.plugin_isolation import isolation_mode
-from maverick.plugin_lock import lock_policy
+from lightwork.plugin_isolation import isolation_mode
+from lightwork.plugin_lock import lock_policy
 
 
 @pytest.fixture(autouse=True)
@@ -17,7 +17,7 @@ def _clean(monkeypatch):
     monkeypatch.delenv("MAVERICK_PLUGIN_LOCK_POLICY", raising=False)
     monkeypatch.delenv("MAVERICK_ENTERPRISE", raising=False)
     monkeypatch.delenv("MAVERICK_PROFILE", raising=False)
-    monkeypatch.setattr("maverick.config.load_config", lambda *a, **k: {})
+    monkeypatch.setattr("lightwork.config.load_config", lambda *a, **k: {})
 
 
 def test_isolation_defaults_none_in_dev():
@@ -37,7 +37,7 @@ def test_isolation_via_enterprise_profile(monkeypatch):
 def test_explicit_isolation_wins_over_enterprise(monkeypatch):
     monkeypatch.setenv("MAVERICK_ENTERPRISE", "1")
     monkeypatch.setattr(
-        "maverick.config.load_config",
+        "lightwork.config.load_config",
         lambda *a, **k: {"plugins": {"isolation": "none"}},
     )
     assert isolation_mode() == "none"
@@ -55,7 +55,7 @@ def test_lock_policy_defaults_enforce_under_enterprise(monkeypatch):
 def test_explicit_lock_policy_wins_over_enterprise(monkeypatch):
     monkeypatch.setenv("MAVERICK_ENTERPRISE", "1")
     monkeypatch.setattr(
-        "maverick.config.load_config",
+        "lightwork.config.load_config",
         lambda *a, **k: {"plugins": {"lock_policy": "warn"}},
     )
     assert lock_policy() == "warn"

@@ -9,13 +9,13 @@ override so best-of-N still works).
 from __future__ import annotations
 
 from click.testing import CliRunner
-from maverick import llm
-from maverick.cli import main
+from lightwork import llm
+from lightwork.cli import main
 
 
 def test_global_override_beats_config(monkeypatch):
     monkeypatch.delenv("MAVERICK_MODEL_OVERRIDE_ORCHESTRATOR", raising=False)
-    monkeypatch.setattr("maverick.config.get_role_model", lambda role: "config:model")
+    monkeypatch.setattr("lightwork.config.get_role_model", lambda role: "config:model")
 
     monkeypatch.delenv("MAVERICK_MODEL_OVERRIDE", raising=False)
     assert llm.model_for_role("orchestrator") == "config:model"

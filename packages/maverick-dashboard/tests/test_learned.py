@@ -8,13 +8,13 @@ from fastapi.testclient import TestClient
 
 
 def _client():
-    from maverick_dashboard.app import app
+    from lightwork_dashboard.app import app
     return TestClient(app)
 
 
 def _isolate(monkeypatch, tmp_path):
     """Point the self-learning ledger + generated-tools dir at tmp_path."""
-    from maverick import self_learning
+    from lightwork import self_learning
     ledger = tmp_path / "learned.ndjson"
     gen = tmp_path / "generated_tools"
     gen.mkdir()
@@ -56,14 +56,14 @@ def test_learned_page_renders_empty(monkeypatch, tmp_path):
 
 def _seed_harness(monkeypatch, tmp_path, *, enabled=True):
     """Point the self-harness store at tmp_path and seed one model's guidance."""
-    from maverick import self_harness as sh
+    from lightwork import self_harness as sh
     store = tmp_path / "addenda.json"
     monkeypatch.setattr(sh, "_store_path", lambda: store)
     if enabled:
         monkeypatch.setenv("MAVERICK_SELF_HARNESS", "1")
     else:
         monkeypatch.delenv("MAVERICK_SELF_HARNESS", raising=False)
-        monkeypatch.setattr("maverick.config.load_config", dict)
+        monkeypatch.setattr("lightwork.config.load_config", dict)
     sh._write_addenda(
         {"claude-x": "Operating guidance learned for this model:\n"
                      "- verify the export precondition before acting"}, store)

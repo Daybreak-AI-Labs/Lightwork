@@ -2,7 +2,7 @@
 from __future__ import annotations
 
 import pytest
-from maverick import credit
+from lightwork import credit
 
 
 class TestCounterfactualCredit:
@@ -100,12 +100,12 @@ class TestCreditIsSignal:
 class TestDonationCarriesCredit:
     @pytest.mark.asyncio
     async def test_agent_credit_persisted_in_record(self, tmp_path, monkeypatch):
-        from maverick import donation
-        from maverick.donation import TrajectoryRecord
+        from lightwork import donation
+        from lightwork.donation import TrajectoryRecord
 
         monkeypatch.setattr(donation, "_donations_enabled", lambda: True)
         monkeypatch.setattr(donation, "_text_donations_enabled", lambda: False)
-        monkeypatch.setattr("maverick.calibration.learning_frozen", lambda: False)
+        monkeypatch.setattr("lightwork.calibration.learning_frozen", lambda: False)
         rec = TrajectoryRecord(
             task_brief_hash="h", outcome="success",
             verifier_confidence=0.95, disagreement_entropy=0.9,
@@ -147,12 +147,12 @@ class TestSubTrajectories:
 
     @pytest.mark.asyncio
     async def test_agent_records_action_sequence(self, tmp_path, fake_llm):
-        from maverick.agent import Agent
-        from maverick.blackboard import Blackboard
-        from maverick.budget import Budget
-        from maverick.sandbox import LocalBackend
-        from maverick.swarm import SwarmContext
-        from maverick.world_model import WorldModel
+        from lightwork.agent import Agent
+        from lightwork.blackboard import Blackboard
+        from lightwork.budget import Budget
+        from lightwork.sandbox import LocalBackend
+        from lightwork.swarm import SwarmContext
+        from lightwork.world_model import WorldModel
 
         world = WorldModel(tmp_path / "w.db")
         gid = world.create_goal("t", "")

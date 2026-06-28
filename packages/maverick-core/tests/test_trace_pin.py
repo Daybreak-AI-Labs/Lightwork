@@ -3,8 +3,8 @@ from __future__ import annotations
 
 import subprocess
 
-from maverick.trace_pin import TRACE_META_KIND, pin_trace, trace_commit, workspace_git_state
-from maverick.world_model import open_world
+from lightwork.trace_pin import TRACE_META_KIND, pin_trace, trace_commit, workspace_git_state
+from lightwork.world_model import open_world
 
 
 def _git_repo(tmp_path):
@@ -75,6 +75,6 @@ def test_pin_never_raises(tmp_path):
 
 def test_runner_stamps_trace(monkeypatch):
     """run_goal_in_thread pins the trace before dispatching the swarm."""
-    import maverick.runner as runner_mod
+    import lightwork.runner as runner_mod
     src = open(runner_mod.__file__).read()
     assert "pin_trace(world, goal_id)" in src

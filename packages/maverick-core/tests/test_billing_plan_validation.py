@@ -8,8 +8,8 @@ from __future__ import annotations
 
 import logging
 
-from maverick import billing
-from maverick.tenant import registry
+from lightwork import billing
+from lightwork.tenant import registry
 
 
 def test_known_plan_names_includes_builtins():
@@ -18,9 +18,9 @@ def test_known_plan_names_includes_builtins():
 
 
 def test_known_plan_names_picks_up_config_plans(monkeypatch):
-    # known_plan_names imports load_config lazily from maverick.config; patch it
+    # known_plan_names imports load_config lazily from lightwork.config; patch it
     # there so a config-defined plan is recognized alongside the built-ins.
-    import maverick.config as cfg
+    import lightwork.config as cfg
     monkeypatch.setattr(
         cfg, "load_config",
         lambda *a, **k: {"billing": {"plans": {"gold": {"features": ["core"]}}}},

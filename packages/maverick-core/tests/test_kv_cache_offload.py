@@ -1,7 +1,7 @@
 """kv_cache_offload: KV-cache offload-to-disk planner (LRU under budget)."""
 from __future__ import annotations
 
-from maverick.tools.kv_cache_offload import kv_cache_offload
+from lightwork.tools.kv_cache_offload import kv_cache_offload
 
 
 def _plan(**kw):

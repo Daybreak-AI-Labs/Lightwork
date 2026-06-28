@@ -9,8 +9,8 @@ from __future__ import annotations
 import base64
 
 import pytest
-from maverick_shield.deobfuscate import decoded_variants
-from maverick_shield.guard import Shield
+from lightwork_shield.deobfuscate import decoded_variants
+from lightwork_shield.guard import Shield
 
 # --- pure de-obfuscator ---------------------------------------------------
 

@@ -3,7 +3,7 @@ from __future__ import annotations
 
 from urllib.parse import parse_qs, urlsplit
 
-from maverick.tools.apple_shortcuts import apple_shortcuts
+from lightwork.tools.apple_shortcuts import apple_shortcuts
 
 
 def _run(**kw):

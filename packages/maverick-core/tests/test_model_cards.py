@@ -5,8 +5,8 @@ from __future__ import annotations
 
 from types import SimpleNamespace
 
-from maverick import model_cards as mc
-from maverick.llm import MODEL_PRICES, ROLE_MODELS
+from lightwork import model_cards as mc
+from lightwork.llm import MODEL_PRICES, ROLE_MODELS
 
 
 def _row(model, **kw):

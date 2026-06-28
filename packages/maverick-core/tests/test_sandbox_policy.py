@@ -8,7 +8,7 @@ host. Off by default, so single-tenant/dev keeps the (warned) local backend.
 from __future__ import annotations
 
 import pytest
-from maverick.sandbox import SandboxPolicyError, build_sandbox
+from lightwork.sandbox import SandboxPolicyError, build_sandbox
 
 
 @pytest.fixture(autouse=True)
@@ -29,14 +29,14 @@ def test_local_refused_when_require_container_and_no_runtime(monkeypatch):
     # require-container active AND no docker/podman on PATH -> fail closed
     # (never silently run on the host).
     monkeypatch.setenv("MAVERICK_REQUIRE_CONTAINER_BACKEND", "1")
-    monkeypatch.setattr("maverick.sandbox._default_container_backend", lambda: None)
+    monkeypatch.setattr("lightwork.sandbox._default_container_backend", lambda: None)
     with pytest.raises(SandboxPolicyError):
         build_sandbox(backend="local")
 
 
 def test_local_refused_under_enterprise_mode_and_no_runtime(monkeypatch):
     monkeypatch.setenv("MAVERICK_ENTERPRISE", "1")
-    monkeypatch.setattr("maverick.sandbox._default_container_backend", lambda: None)
+    monkeypatch.setattr("lightwork.sandbox._default_container_backend", lambda: None)
     with pytest.raises(SandboxPolicyError):
         build_sandbox(backend="local")
 
@@ -47,7 +47,7 @@ def test_local_autoselects_container_when_runtime_available(monkeypatch):
     # raise the policy error (a missing docker *daemon* may raise a different
     # error at construct time -- that's fine, just not SandboxPolicyError).
     monkeypatch.setenv("MAVERICK_ENTERPRISE", "1")
-    monkeypatch.setattr("maverick.sandbox._default_container_backend", lambda: "docker")
+    monkeypatch.setattr("lightwork.sandbox._default_container_backend", lambda: "docker")
     try:
         sb = build_sandbox(backend="local")
         assert sb is not None

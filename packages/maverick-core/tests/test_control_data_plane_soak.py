@@ -3,7 +3,7 @@ exactly-once under contention, clean drain."""
 from __future__ import annotations
 
 import pytest
-from maverick import control_data_plane_soak as soak
+from lightwork import control_data_plane_soak as soak
 
 
 @pytest.fixture(autouse=True)

@@ -1,7 +1,7 @@
 """Latency-budget propagation across spans (ROADMAP 2028 H2)."""
 from __future__ import annotations
 
-from maverick.latency_span_budget import SpanBudget
+from lightwork.latency_span_budget import SpanBudget
 
 
 def test_consume_and_remaining():

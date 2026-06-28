@@ -3,9 +3,9 @@ from __future__ import annotations
 
 import pytest
 from fastapi.testclient import TestClient
-from maverick.ux_store import MAX_VIEW_PARAMS
-from maverick_dashboard import app as app_mod
-from maverick_dashboard.app import app
+from lightwork.ux_store import MAX_VIEW_PARAMS
+from lightwork_dashboard import app as app_mod
+from lightwork_dashboard.app import app
 
 # Mutating requests must carry a matching Origin (the dashboard CSRF contract).
 client = TestClient(app, headers={"Origin": "http://testserver"})
@@ -13,11 +13,11 @@ client = TestClient(app, headers={"Origin": "http://testserver"})
 
 @pytest.fixture(autouse=True)
 def _isolated(tmp_path, monkeypatch):
-    from maverick import world_model
+    from lightwork import world_model
     monkeypatch.setattr(world_model, "DEFAULT_DB", tmp_path / "world.db")
     app_mod._world_cache.clear()
     # Point the UX store at a temp file and reset the shared instance.
-    import maverick.ux_store as ux
+    import lightwork.ux_store as ux
     monkeypatch.setattr(ux, "_shared", None)
     real = ux.UxStore
 

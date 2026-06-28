@@ -1,7 +1,7 @@
 """BackgroundCompactor: the precompute pending-queue stays bounded under a burst."""
 from __future__ import annotations
 
-from maverick import async_compaction as ac
+from lightwork import async_compaction as ac
 
 
 def test_pending_queue_is_bounded(monkeypatch):

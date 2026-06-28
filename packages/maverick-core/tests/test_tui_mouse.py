@@ -3,7 +3,7 @@ from __future__ import annotations
 
 import io
 
-from maverick import tui_mouse as tm
+from lightwork import tui_mouse as tm
 
 
 def test_parse_left_click_press():
@@ -92,7 +92,7 @@ def test_write_never_raises_on_bad_stream():
 
 def test_enabled_off_by_default(monkeypatch):
     monkeypatch.delenv("MAVERICK_TUI_MOUSE", raising=False)
-    monkeypatch.setattr("maverick.config.load_config", dict)
+    monkeypatch.setattr("lightwork.config.load_config", dict)
     assert tm.enabled() is False
 
 

@@ -8,14 +8,14 @@ import json
 from dataclasses import dataclass
 
 import pytest
-from maverick import budget_receipts as br
+from lightwork import budget_receipts as br
 
 KEY = "test-receipt-key"
 
 
 @dataclass
 class FakeEpisode:
-    """Mirrors maverick.world_model.EpisodeSpend's spend fields."""
+    """Mirrors lightwork.world_model.EpisodeSpend's spend fields."""
 
     id: int
     goal_id: int

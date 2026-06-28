@@ -1,7 +1,7 @@
 """Job-queue backlog + dead-letter visibility: counts() and the `queue` CLI."""
 from __future__ import annotations
 
-from maverick.job_queue import JobQueue
+from lightwork.job_queue import JobQueue
 
 
 def _queue(tmp_path) -> JobQueue:
@@ -23,9 +23,9 @@ def test_counts_groups_by_status(tmp_path):
 
 
 def test_cli_queue_status_and_failed(tmp_path, monkeypatch):
-    import maverick.job_queue as jq
+    import lightwork.job_queue as jq
     from click.testing import CliRunner
-    from maverick.cli import main
+    from lightwork.cli import main
 
     # The CLI's JobQueue() uses the module DEFAULT_DB; point it at a tmp DB so
     # our seeded queue and the CLI share the same file.

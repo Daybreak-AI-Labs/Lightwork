@@ -7,11 +7,11 @@ from __future__ import annotations
 from types import SimpleNamespace
 
 import pytest
-from maverick.blackboard import Blackboard
-from maverick.budget import Budget
-from maverick.domain import builtin_dir, enabled_domains, load_domains, suite_for
-from maverick.quarantine import QuarantineRegistry
-from maverick.tools.spawn import list_specialists_tool, spawn_specialist_tool
+from lightwork.blackboard import Blackboard
+from lightwork.budget import Budget
+from lightwork.domain import builtin_dir, enabled_domains, load_domains, suite_for
+from lightwork.quarantine import QuarantineRegistry
+from lightwork.tools.spawn import list_specialists_tool, spawn_specialist_tool
 
 
 def _fake_parent(depth: int = 0, budget: Budget | None = None, cap=None):
@@ -87,8 +87,8 @@ async def test_spawn_specialist_deploys_pack_and_inherits_max_steps(monkeypatch)
     async def _noop(*a, **k):
         return None
 
-    monkeypatch.setattr("maverick.domain.agent_from_profile", fake_agent_from_profile)
-    monkeypatch.setattr("maverick.hooks.emit", _noop)
+    monkeypatch.setattr("lightwork.domain.agent_from_profile", fake_agent_from_profile)
+    monkeypatch.setattr("lightwork.hooks.emit", _noop)
 
     parent = _fake_parent(depth=0)
     out = await spawn_specialist_tool(parent).fn({"domain": dom, "task": "do it"})
@@ -131,7 +131,7 @@ async def test_spawn_specialist_withholds_already_sealed_domain_without_running(
     parent = _fake_parent(depth=0)
     parent.ctx.quarantine = quarantine
 
-    monkeypatch.setattr("maverick.domain.agent_from_profile", fake_agent_from_profile)
+    monkeypatch.setattr("lightwork.domain.agent_from_profile", fake_agent_from_profile)
 
     out = await spawn_specialist_tool(parent).fn({"domain": dom, "task": "do it"})
 

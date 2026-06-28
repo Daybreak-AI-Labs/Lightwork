@@ -41,7 +41,7 @@ def _write_plain(path, events):
 
 
 def test_erase_matches_structured_user_not_substring(tmp_path):
-    from maverick.audit.erase import delete_user
+    from lightwork.audit.erase import delete_user
 
     ad = tmp_path / "audit"
     path = ad / "2026-01-01.ndjson"
@@ -64,7 +64,7 @@ def test_erase_matches_structured_user_not_substring(tmp_path):
 def test_erase_matches_structured_even_with_slashed_serialization(tmp_path):
     """A row whose serialized form would read ``slack/42`` (never ``slack:42``)
     must STILL match, because matching is on the structured fields."""
-    from maverick.audit.erase import delete_user
+    from lightwork.audit.erase import delete_user
 
     ad = tmp_path / "audit"
     path = ad / "2026-01-02.ndjson"
@@ -84,7 +84,7 @@ def test_erase_matches_structured_even_with_slashed_serialization(tmp_path):
 def test_erase_does_not_match_substring_only_rows(tmp_path):
     """A row that merely *mentions* ``slack:42`` in a free-text field but has no
     structured channel/user_id must NOT be erased (no substring fallback)."""
-    from maverick.audit.erase import delete_user
+    from lightwork.audit.erase import delete_user
 
     ad = tmp_path / "audit"
     path = ad / "2026-01-03.ndjson"
@@ -107,7 +107,7 @@ def test_erase_scrubs_capability_denial_with_structured_subject(tmp_path):
     tombstone the row and remove that principal instead of leaving it in audit
     tail/search output.
     """
-    from maverick.audit.erase import scrub_user
+    from lightwork.audit.erase import scrub_user
 
     ad = tmp_path / "audit"
     path = ad / "2026-01-04.ndjson"
@@ -142,9 +142,9 @@ def test_erase_scrubs_capability_denial_with_structured_subject(tmp_path):
 
 
 def test_unsigned_record_fsyncs(tmp_path, monkeypatch):
-    from maverick.audit import writer as W
-    from maverick.audit.events import AuditEvent
-    from maverick.audit.writer import AuditLog
+    from lightwork.audit import writer as W
+    from lightwork.audit.events import AuditEvent
+    from lightwork.audit.writer import AuditLog
 
     monkeypatch.delenv("MAVERICK_AUDIT_SIGN", raising=False)
     fsynced: list[int] = []
@@ -163,8 +163,8 @@ def test_unsigned_record_fsyncs(tmp_path, monkeypatch):
 def test_unsigned_record_acquires_flock(tmp_path, monkeypatch):
     """The unsigned append takes an exclusive advisory flock and releases it."""
     fcntl = pytest.importorskip("fcntl")
-    from maverick.audit.events import AuditEvent
-    from maverick.audit.writer import AuditLog
+    from lightwork.audit.events import AuditEvent
+    from lightwork.audit.writer import AuditLog
 
     calls: list[int] = []
     real_flock = fcntl.flock
@@ -188,8 +188,8 @@ def test_concurrent_unsigned_appends_do_not_interleave(tmp_path):
     ad.mkdir(parents=True)
 
     def _worker(audit_dir, tag, n):
-        from maverick.audit.events import AuditEvent
-        from maverick.audit.writer import AuditLog
+        from lightwork.audit.events import AuditEvent
+        from lightwork.audit.writer import AuditLog
 
         log = AuditLog(audit_dir=audit_dir, sign=False)
         big = tag * 8000  # well above PIPE_BUF so single-write atomicity fails
@@ -219,7 +219,7 @@ def test_concurrent_unsigned_appends_do_not_interleave(tmp_path):
 
 @pytest.fixture
 def _isolate_keys(monkeypatch, tmp_path):
-    from maverick.audit import signing
+    from lightwork.audit import signing
 
     monkeypatch.setattr(signing, "KEY_DIR", tmp_path / "keys")
 
@@ -228,10 +228,10 @@ def _isolate_keys(monkeypatch, tmp_path):
 def test_same_process_erase_then_record_verifies_clean(_isolate_keys, tmp_path):
     """erase resets the live signer so a later record() in the SAME process
     chains onto the re-anchored tail -- no explicit reanchor_after_erase()."""
-    from maverick.audit.erase import scrub_user
-    from maverick.audit.events import AuditEvent, EventKind
-    from maverick.audit.signing import verify_chain
-    from maverick.audit.writer import AuditLog
+    from lightwork.audit.erase import scrub_user
+    from lightwork.audit.events import AuditEvent, EventKind
+    from lightwork.audit.signing import verify_chain
+    from lightwork.audit.writer import AuditLog
 
     ad = tmp_path / "audit"
     log = AuditLog(audit_dir=ad, sign=True)

@@ -6,7 +6,7 @@ import contextlib
 import sys
 from unittest.mock import MagicMock
 
-import maverick.observability as obs
+import lightwork.observability as obs
 
 
 def _reset(monkeypatch):
@@ -43,7 +43,7 @@ def _fake_sentry(monkeypatch, *, active_transaction=None):
 def test_off_by_default(monkeypatch):
     _reset(monkeypatch)
     monkeypatch.delenv("MAVERICK_SENTRY_DSN", raising=False)
-    import maverick.config as config_mod
+    import lightwork.config as config_mod
     monkeypatch.setattr(config_mod, "load_config", dict)
     with obs.trace_span("episode") as span:
         assert span is None

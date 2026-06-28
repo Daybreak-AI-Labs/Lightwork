@@ -1,7 +1,7 @@
 """Long-context retrieval router (ROADMAP near-term: >200k auto-shard)."""
 from __future__ import annotations
 
-from maverick.long_context_router import (
+from lightwork.long_context_router import (
     RouteResult,
     rank,
     route_text,

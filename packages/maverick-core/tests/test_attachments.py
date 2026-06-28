@@ -2,14 +2,14 @@
 from __future__ import annotations
 
 import pytest
-from maverick.attachments import (
+from lightwork.attachments import (
     MAX_FILE_BYTES,
     MAX_GOAL_BYTES,
     AttachmentRejected,
     content_blocks_for_goal,
     store,
 )
-from maverick.world_model import WorldModel
+from lightwork.world_model import WorldModel
 
 
 def test_store_text_writes_to_disk(tmp_path):
@@ -171,7 +171,7 @@ def test_text_attachment_is_not_vision_block(tmp_path):
 
 
 def test_list_attachments_tool_returns_metadata(tmp_path):
-    from maverick.tools.attachments import list_attachments_tool
+    from lightwork.tools.attachments import list_attachments_tool
 
     wm = WorldModel(path=tmp_path / "w.db")
     gid = wm.create_goal("attached", "")
@@ -191,7 +191,7 @@ def test_list_attachments_tool_returns_metadata(tmp_path):
 
 def test_list_attachments_tool_no_goal(tmp_path):
     """The tool returns a friendly stub when there's no goal context."""
-    from maverick.tools.attachments import list_attachments_tool
+    from lightwork.tools.attachments import list_attachments_tool
     wm = WorldModel(path=tmp_path / "w.db")
     tool = list_attachments_tool(wm, None)
     assert "no goal context" in tool.fn({})

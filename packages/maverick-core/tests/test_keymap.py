@@ -1,7 +1,7 @@
 """TUI keymap: validation rails, config merge, key->action mapping."""
 from __future__ import annotations
 
-from maverick import keymap as km
+from lightwork import keymap as km
 
 
 def test_defaults_cover_every_action():
@@ -36,7 +36,7 @@ def test_resolve_drops_bad_override_set(monkeypatch):
 
 def test_handle_key_maps_to_action(monkeypatch):
     monkeypatch.delenv("MAVERICK_TUI_KEYS", raising=False)
-    monkeypatch.setattr("maverick.config.load_config", dict)
+    monkeypatch.setattr("lightwork.config.load_config", dict)
     assert km.handle_key("q") == "quit"
     assert km.handle_key("DOWN") == "focus_next"
     assert km.handle_key("z") is None

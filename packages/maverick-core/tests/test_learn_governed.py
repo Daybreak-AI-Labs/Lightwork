@@ -6,16 +6,16 @@ drive web_search / openapi_runner ungoverned.
 from __future__ import annotations
 
 import pytest
-from maverick.tools import Tool
+from lightwork.tools import Tool
 
 
 def _agent(tmp_path):
-    from maverick.agent import Agent
-    from maverick.blackboard import Blackboard
-    from maverick.budget import Budget
-    from maverick.sandbox import LocalBackend
-    from maverick.swarm import SwarmContext
-    from maverick.world_model import WorldModel
+    from lightwork.agent import Agent
+    from lightwork.blackboard import Blackboard
+    from lightwork.budget import Budget
+    from lightwork.sandbox import LocalBackend
+    from lightwork.swarm import SwarmContext
+    from lightwork.world_model import WorldModel
     world = WorldModel(tmp_path / "world.db")
     gid = world.create_goal("g", "")
     ctx = SwarmContext(
@@ -28,8 +28,8 @@ def _agent(tmp_path):
 
 @pytest.mark.asyncio
 async def test_find_api_web_search_routes_through_run_tool(monkeypatch, tmp_path):
-    from maverick import self_learning
-    from maverick.tools.learn import learn_capability
+    from lightwork import self_learning
+    from lightwork.tools.learn import learn_capability
 
     agent = _agent(tmp_path)
     agent.tools.register(Tool(
@@ -55,9 +55,9 @@ async def test_find_api_web_search_routes_through_run_tool(monkeypatch, tmp_path
 
 @pytest.mark.asyncio
 async def test_find_api_web_search_blocked_by_capability(monkeypatch, tmp_path):
-    from maverick import self_learning
-    from maverick.capability import Capability
-    from maverick.tools.learn import learn_capability
+    from lightwork import self_learning
+    from lightwork.capability import Capability
+    from lightwork.tools.learn import learn_capability
 
     agent = _agent(tmp_path)
     ran = {"web_search": False}

@@ -17,7 +17,7 @@ def _write_config(tmp_path, body: str) -> None:
     cfg_dir = tmp_path / ".maverick"
     cfg_dir.mkdir(exist_ok=True)
     (cfg_dir / "config.toml").write_text(body)
-    import maverick.config as cfg_mod
+    import lightwork.config as cfg_mod
     importlib.reload(cfg_mod)
 
 
@@ -27,7 +27,7 @@ def test_tool_acl_per_channel_deny(tmp_path, monkeypatch):
 [security.channels.telegram]
 denied_tools = ["computer", "shell"]
 ''')
-    from maverick.safety.tool_acl import resolve_lists
+    from lightwork.safety.tool_acl import resolve_lists
     allowed, denied = resolve_lists(channel="telegram")
     assert "computer" in denied
     assert "shell" in denied
@@ -43,7 +43,7 @@ allowed_tools = ["shell", "read_file", "write_file", "web_search"]
 [security.users."tg:42"]
 allowed_tools = ["read_file", "web_search"]
 ''')
-    from maverick.safety.tool_acl import resolve_lists
+    from lightwork.safety.tool_acl import resolve_lists
     allowed, _ = resolve_lists(user_id="tg:42")
     # Intersection of global + user allow lists.
     assert allowed == {"read_file", "web_search"}
@@ -62,7 +62,7 @@ denied_tools = ["browser"]
 [security.users."slack:U1"]
 denied_tools = ["shell"]
 ''')
-    from maverick.safety.tool_acl import resolve_lists
+    from lightwork.safety.tool_acl import resolve_lists
     _, denied = resolve_lists(channel="slack", user_id="slack:U1")
     assert denied == {"computer", "browser", "shell"}
 
@@ -76,7 +76,7 @@ denied_tools = ["x"]
 [security.channels.telegram]
 denied_tools = ["y"]
 ''')
-    from maverick.safety.tool_acl import resolve_lists
+    from lightwork.safety.tool_acl import resolve_lists
     _, denied = resolve_lists()
     assert "x" in denied
     # Channel-scoped y NOT applied when channel is None.
@@ -89,7 +89,7 @@ def test_tool_acl_apply_to_registry_with_channel(tmp_path, monkeypatch):
 [security.channels.telegram]
 denied_tools = ["computer", "browser"]
 ''')
-    from maverick.tools import base_registry
+    from lightwork.tools import base_registry
 
     class _FakeSandbox:
         workdir = "."
@@ -107,7 +107,7 @@ denied_tools = ["computer", "browser"]
     assert "computer" in names_before
     assert "browser" in names_before
 
-    from maverick.safety.tool_acl import apply_to_registry
+    from lightwork.safety.tool_acl import apply_to_registry
     apply_to_registry(reg, channel="telegram")
     names_after = {t.name for t in reg.all()}
     assert "computer" not in names_after
@@ -117,7 +117,7 @@ denied_tools = ["computer", "browser"]
 
 
 def test_server_passes_channel_user_to_run_goal(monkeypatch):
-    import maverick.server as server_mod
+    import lightwork.server as server_mod
 
     class _World:
         def __init__(self):
@@ -143,7 +143,7 @@ def test_server_passes_channel_user_to_run_goal(monkeypatch):
 
     monkeypatch.setattr(server_mod, "run_goal", _fake_run_goal)
     monkeypatch.setattr(server_mod, "build_sandbox", lambda: object())
-    monkeypatch.setattr("maverick.compliance.first_turn_disclosure", lambda *a, **k: None)
+    monkeypatch.setattr("lightwork.compliance.first_turn_disclosure", lambda *a, **k: None)
 
     srv = server_mod.Server(world=_World(), llm=object(), sandbox=object())
 
@@ -161,7 +161,7 @@ def test_server_passes_channel_user_to_run_goal(monkeypatch):
 # ---------- file_cache ----------
 
 def test_file_cache_read_round_trip(tmp_path):
-    from maverick.cache.file import (
+    from lightwork.cache.file import (
         clear_read_cache,
         read_cache_stats,
         read_file_cached,
@@ -182,7 +182,7 @@ def test_file_cache_read_round_trip(tmp_path):
 def test_file_cache_invalidates_on_mtime_change(tmp_path):
     import time as _time
 
-    from maverick.cache.file import clear_read_cache, read_file_cached
+    from lightwork.cache.file import clear_read_cache, read_file_cached
     clear_read_cache()
     f = tmp_path / "f.txt"
     f.write_text("v1")
@@ -195,12 +195,12 @@ def test_file_cache_invalidates_on_mtime_change(tmp_path):
 
 
 def test_file_cache_missing_file_returns_none(tmp_path):
-    from maverick.cache.file import read_file_cached
+    from lightwork.cache.file import read_file_cached
     assert read_file_cached(tmp_path / "nope") is None
 
 
 def test_repo_map_cache_invalidates_on_workdir_change(tmp_path):
-    from maverick.cache.file import clear_repo_cache, repo_map_cached
+    from lightwork.cache.file import clear_repo_cache, repo_map_cached
     clear_repo_cache()
     workdir = tmp_path / "wd"
     workdir.mkdir()
@@ -226,7 +226,7 @@ def test_repo_map_cache_invalidates_on_workdir_change(tmp_path):
 def test_observability_no_op_when_disabled(monkeypatch):
     monkeypatch.delenv("MAVERICK_OTEL_EXPORTER", raising=False)
     monkeypatch.delenv("MAVERICK_PROMETHEUS_PORT", raising=False)
-    from maverick.observability import is_enabled, record_metric, trace_span
+    from lightwork.observability import is_enabled, record_metric, trace_span
     assert not is_enabled()
     # trace_span and record_metric should be no-ops, not raise.
     with trace_span("test", attributes={"x": 1}) as span:
@@ -236,14 +236,14 @@ def test_observability_no_op_when_disabled(monkeypatch):
 
 def test_observability_is_enabled_flag(monkeypatch):
     monkeypatch.setenv("MAVERICK_PROMETHEUS_PORT", "9999")
-    from maverick.observability import is_enabled
+    from lightwork.observability import is_enabled
     assert is_enabled()
 
 
 # ---------- sandbox canaries ----------
 
 def test_canaries_register_check(tmp_path):
-    from maverick.safety.canaries import (
+    from lightwork.safety.canaries import (
         SandboxCanaryFired,
         check,
         clear,
@@ -260,14 +260,14 @@ def test_canaries_register_check(tmp_path):
 
 
 def test_canaries_no_op_when_unregistered(tmp_path):
-    from maverick.safety.canaries import check, clear
+    from lightwork.safety.canaries import check, clear
     clear()
     # No canaries registered -> check() is a no-op.
     check(tmp_path / "file.txt")
 
 
 def test_canaries_plant_and_verify(tmp_path):
-    from maverick.safety.canaries import (
+    from lightwork.safety.canaries import (
         clear,
         plant_session_canaries,
         verify_canaries,
@@ -288,7 +288,7 @@ def test_canaries_plant_and_verify(tmp_path):
 
 
 def test_canaries_unregister(tmp_path):
-    from maverick.safety.canaries import clear, register, unregister
+    from lightwork.safety.canaries import clear, register, unregister
     clear()
     p = tmp_path / "c"
     register(p)
@@ -299,8 +299,8 @@ def test_canaries_unregister(tmp_path):
 # ---------- audit erase ----------
 
 def test_audit_erase_scrubs_matching(tmp_path):
-    from maverick.audit import AuditEvent, AuditLog, EventKind
-    from maverick.audit.erase import scrub_user
+    from lightwork.audit import AuditEvent, AuditLog, EventKind
+    from lightwork.audit.erase import scrub_user
     audit_dir = tmp_path / "audit"
     al = AuditLog(audit_dir=audit_dir)
     import time as _time
@@ -329,8 +329,8 @@ def test_audit_erase_scrubs_matching(tmp_path):
 
 
 def test_audit_erase_delete_user(tmp_path):
-    from maverick.audit import AuditEvent, AuditLog, EventKind
-    from maverick.audit.erase import delete_user
+    from lightwork.audit import AuditEvent, AuditLog, EventKind
+    from lightwork.audit.erase import delete_user
     audit_dir = tmp_path / "audit"
     al = AuditLog(audit_dir=audit_dir)
     import time as _time
@@ -351,7 +351,7 @@ def test_audit_erase_delete_user(tmp_path):
 
 
 def test_audit_erase_missing_dir_no_crash(tmp_path):
-    from maverick.audit.erase import scrub_user
+    from lightwork.audit.erase import scrub_user
     # Audit dir doesn't exist -> 0, 0; no exception.
     matched, scanned = scrub_user("tg", "alice", audit_dir=tmp_path / "nope")
     assert (matched, scanned) == (0, 0)
@@ -361,8 +361,8 @@ def test_audit_erase_logs_only_redacted_subject(tmp_path, caplog):
     import logging
     import time as _time
 
-    from maverick.audit import AuditEvent, AuditLog, EventKind
-    from maverick.audit.erase import delete_user, scrub_user
+    from lightwork.audit import AuditEvent, AuditLog, EventKind
+    from lightwork.audit.erase import delete_user, scrub_user
 
     audit_dir = tmp_path / "audit"
     al = AuditLog(audit_dir=audit_dir)
@@ -371,7 +371,7 @@ def test_audit_erase_logs_only_redacted_subject(tmp_path, caplog):
                           agent="orch", goal_id=1,
                           payload={"channel": "tg", "user_id": secret_user}))
 
-    with caplog.at_level(logging.INFO, logger="maverick.audit.erase"):
+    with caplog.at_level(logging.INFO, logger="lightwork.audit.erase"):
         scrub_user("tg", secret_user, audit_dir=audit_dir)
         delete_user("tg", secret_user, audit_dir=audit_dir)
 

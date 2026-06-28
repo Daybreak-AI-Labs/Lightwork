@@ -4,15 +4,15 @@ when the simulator hasn't earned trust.
 """
 from __future__ import annotations
 
-from maverick import promotion_effect as pe
-from maverick.counterfactual_rollout import (
+from lightwork import promotion_effect as pe
+from lightwork.counterfactual_rollout import (
     Transition,
     TransitionModel,
     estimate_effect_via_rollout,
     transitions_from_trajectories,
 )
-from maverick.si_producers import propose_with_effect
-from maverick.trajectory_store import TrajectoryStep
+from lightwork.si_producers import propose_with_effect
+from lightwork.trajectory_store import TrajectoryStep
 
 START = ("start",)
 GOOD = ("good",)

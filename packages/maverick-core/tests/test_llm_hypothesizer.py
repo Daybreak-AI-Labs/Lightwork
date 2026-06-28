@@ -3,8 +3,8 @@ action names, and survive a flaky model -- all without a provider key.
 """
 from __future__ import annotations
 
-from maverick import llm_hypothesizer as lh
-from maverick.data_engine import FailureClass
+from lightwork import llm_hypothesizer as lh
+from lightwork.data_engine import FailureClass
 
 
 def _fc(action="shell", effect=-0.5):

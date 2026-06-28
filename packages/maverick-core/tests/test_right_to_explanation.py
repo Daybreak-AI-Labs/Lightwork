@@ -1,7 +1,7 @@
 """right_to_explanation: ranked decision explanation + rectification audit."""
 from __future__ import annotations
 
-from maverick.tools.right_to_explanation import right_to_explanation
+from lightwork.tools.right_to_explanation import right_to_explanation
 
 
 def _explain(decision, factors):

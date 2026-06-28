@@ -16,14 +16,14 @@ def _write_config(tmp_path, body: str = "") -> None:
     cfg_dir = tmp_path / ".maverick"
     cfg_dir.mkdir(exist_ok=True)
     (cfg_dir / "config.toml").write_text(body)
-    import maverick.config as cfg_mod
+    import lightwork.config as cfg_mod
     importlib.reload(cfg_mod)
 
 
 def test_unclassified_mcp_tool_defaults_high(tmp_path, monkeypatch):
     monkeypatch.setenv("HOME", str(tmp_path))
     _write_config(tmp_path)  # no overrides
-    from maverick.safety.tool_risk import tool_risk
+    from lightwork.safety.tool_risk import tool_risk
     assert tool_risk("mcp_github__create_issue") == "high"
     assert tool_risk("mcp_anything__do") == "high"
 
@@ -31,7 +31,7 @@ def test_unclassified_mcp_tool_defaults_high(tmp_path, monkeypatch):
 def test_non_mcp_unknown_stays_medium(tmp_path, monkeypatch):
     monkeypatch.setenv("HOME", str(tmp_path))
     _write_config(tmp_path)
-    from maverick.safety.tool_risk import tool_risk
+    from lightwork.safety.tool_risk import tool_risk
     # The generic fallback is unchanged; only the `mcp_` *prefix* triggers the
     # high default (a name that merely contains "mcp" does not).
     assert tool_risk("some_unknown_tool") == "medium"
@@ -41,7 +41,7 @@ def test_non_mcp_unknown_stays_medium(tmp_path, monkeypatch):
 def test_builtin_classifications_unaffected(tmp_path, monkeypatch):
     monkeypatch.setenv("HOME", str(tmp_path))
     _write_config(tmp_path)
-    from maverick.safety.tool_risk import tool_risk
+    from lightwork.safety.tool_risk import tool_risk
     assert tool_risk("shell") == "high"
     assert tool_risk("read_file") == "low"
 
@@ -53,7 +53,7 @@ def test_config_override_relaxes_mcp(tmp_path, monkeypatch):
         '"mcp_*" = "medium"',
         '"mcp_trusted__read" = "low"',
     ]))
-    from maverick.safety.tool_risk import tool_risk
+    from lightwork.safety.tool_risk import tool_risk
     assert tool_risk("mcp_other__write") == "medium"   # glob relaxation wins
     assert tool_risk("mcp_trusted__read") == "low"     # exact override wins
 
@@ -64,7 +64,7 @@ def test_mcp_dropped_under_medium_ceiling_by_default(tmp_path, monkeypatch):
     # whole point of the fail-safe default.
     monkeypatch.setenv("HOME", str(tmp_path))
     _write_config(tmp_path)
-    from maverick.safety.tool_risk import tools_exceeding
+    from lightwork.safety.tool_risk import tools_exceeding
     over = tools_exceeding(["mcp_evil__shell", "read_file"], "medium")
     assert over == {"mcp_evil__shell"}
 
@@ -73,7 +73,7 @@ def test_network_and_credentialed_search_tools_are_high_risk(tmp_path, monkeypat
     """Egress and credentialed SaaS search must not pass medium ceilings."""
     monkeypatch.setenv("HOME", str(tmp_path))
     _write_config(tmp_path)
-    from maverick.safety.tool_risk import tool_risk, tools_exceeding
+    from lightwork.safety.tool_risk import tool_risk, tools_exceeding
 
     assert tool_risk("web_archive") == "high"
     assert tool_risk("github_search") == "high"

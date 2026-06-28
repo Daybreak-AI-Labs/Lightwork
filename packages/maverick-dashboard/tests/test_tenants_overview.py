@@ -1,14 +1,14 @@
 """Multi-tenant view (/tenants/overview + /api/v1/tenants/overview)."""
 from __future__ import annotations
 
-import maverick_dashboard.auth as auth
+import lightwork_dashboard.auth as auth
 import pytest
 from fastapi.testclient import TestClient
-from maverick.oidc import VerifiedPrincipal
+from lightwork.oidc import VerifiedPrincipal
 
 
 def _client():
-    from maverick_dashboard.app import app
+    from lightwork_dashboard.app import app
     return TestClient(app)
 
 
@@ -23,11 +23,11 @@ def _isolate(monkeypatch, tmp_path):
 
 def _seed_tenant_with_runs_and_spend():
     """Provision 'acme' with two goals (one done, one active) + $1.25 today."""
-    from maverick.paths import data_dir
-    from maverick.quotas import UsageLedger
-    from maverick.tenant import registry as tr
-    from maverick.workspace import Workspace
-    from maverick.world_model import WorldModel
+    from lightwork.paths import data_dir
+    from lightwork.quotas import UsageLedger
+    from lightwork.tenant import registry as tr
+    from lightwork.workspace import Workspace
+    from lightwork.world_model import WorldModel
     tr.create_tenant("acme", plan="enterprise", display_name="Acme Inc",
                      max_daily_dollars=100)
     w = WorldModel(Workspace("acme").db_path)
@@ -47,7 +47,7 @@ def test_overview_page_empty_state(monkeypatch, tmp_path):
 
 def test_overview_page_rollup(monkeypatch, tmp_path):
     _seed_tenant_with_runs_and_spend()
-    from maverick.tenant import registry as tr
+    from lightwork.tenant import registry as tr
     tr.create_tenant("beta")
     tr.suspend_tenant("beta")
     text = _client().get("/tenants/overview").text

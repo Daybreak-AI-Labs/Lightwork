@@ -9,7 +9,7 @@ from __future__ import annotations
 
 from pathlib import Path
 
-from maverick.world_model import SCHEMA_VERSION, WorldModel
+from lightwork.world_model import SCHEMA_VERSION, WorldModel
 
 
 def test_fts_index_is_rebuilt_on_upgrade(tmp_path: Path) -> None:

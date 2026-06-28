@@ -1,7 +1,7 @@
 """Email channel v2: threading + IMAP IDLE (ROADMAP 2028 H2)."""
 from __future__ import annotations
 
-from maverick_channels.email_v2 import (
+from lightwork_channels.email_v2 import (
     IdleSession,
     build_thread_tree,
     flatten_thread,

@@ -6,13 +6,13 @@ is the single funnel; precedence is defaults < [budget] config < explicit
 override, with None treated as "unset" and malformed config skipped.
 """
 import pytest
-from maverick.budget import Budget, budget_from_config
+from lightwork.budget import Budget, budget_from_config
 
 
 @pytest.fixture
 def set_budget_cfg(monkeypatch):
     def _set(cfg: dict):
-        monkeypatch.setattr("maverick.config.get_budget_overrides", lambda: cfg)
+        monkeypatch.setattr("lightwork.config.get_budget_overrides", lambda: cfg)
     return _set
 
 

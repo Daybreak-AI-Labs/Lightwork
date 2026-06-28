@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import asyncio
 
-from maverick_channels.discord_stages import StageSeam, StageSession
+from lightwork_channels.discord_stages import StageSeam, StageSession
 
 
 def _seam(speaker=False):
@@ -201,7 +201,7 @@ def test_tts_failure_falls_back_to_text():
 
 
 def test_utterance_bounded():
-    import maverick_channels.discord_stages as ds
+    import lightwork_channels.discord_stages as ds
 
     state, seam = _seam(speaker=True)
     s = _session(seam)

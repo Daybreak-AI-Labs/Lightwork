@@ -1,7 +1,7 @@
 """Regression tests for pdf_reader._parse_pages page-range clamping."""
 import time
 
-from maverick.tools.pdf_reader import _parse_pages
+from lightwork.tools.pdf_reader import _parse_pages
 
 
 def test_huge_end_is_clamped_to_total_and_fast():

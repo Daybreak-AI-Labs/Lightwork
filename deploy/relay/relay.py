@@ -7,7 +7,7 @@ forwards it as a properly HMAC-signed request to a Maverick dashboard's
 (e.g. the glasses/wearable adapter): run it on your own box/VPS/edge instead of
 depending on someone's cloud function.
 
-It signs exactly the way ``maverick.webhooks`` verifies:
+It signs exactly the way ``lightwork.webhooks`` verifies:
     material   = f"{timestamp}.".encode() + body
     signature  = "sha256=" + hmac_sha256(secret, material).hexdigest()
 sent as ``X-Maverick-Signature`` + ``X-Maverick-Timestamp``.

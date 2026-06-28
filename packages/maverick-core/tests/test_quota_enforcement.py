@@ -17,11 +17,11 @@ from __future__ import annotations
 from pathlib import Path
 
 import pytest
-from maverick.budget import Budget
-from maverick.orchestrator import run_goal
-from maverick.quotas import record_usage
-from maverick.sandbox import LocalBackend
-from maverick.world_model import WorldModel
+from lightwork.budget import Budget
+from lightwork.orchestrator import run_goal
+from lightwork.quotas import record_usage
+from lightwork.sandbox import LocalBackend
+from lightwork.world_model import WorldModel
 
 
 @pytest.fixture(autouse=True)
@@ -122,7 +122,7 @@ async def test_quotas_off_run_proceeds_and_records_usage(
     # Spy on record_usage so the assertion holds regardless of FakeLLM's $0
     # cost: orchestrator does ``from . import quotas; quotas.record_usage(...)``,
     # so patch the function on the module it resolves.
-    import maverick.quotas as q
+    import lightwork.quotas as q
     recorded: list[tuple] = []
     real_record_usage = q.record_usage
     monkeypatch.setattr(
@@ -161,8 +161,8 @@ async def test_budget_exceeded_run_records_usage_before_return(
     # BudgetExceeded can be raised after a provider response has already added
     # tokens/dollars to the Budget. That spend must advance the daily ledger so
     # a second run is refused by the quota gate instead of spending again.
-    from maverick.agent import Agent
-    from maverick.quotas import UsageLedger, over_quota
+    from lightwork.agent import Agent
+    from lightwork.quotas import UsageLedger, over_quota
 
     monkeypatch.setenv("MAVERICK_QUOTA_ENFORCE", "1")
     monkeypatch.setenv("MAVERICK_QUOTA_MAX_TOKENS_PER_DAY", "100")
@@ -215,8 +215,8 @@ async def test_agent_error_run_records_usage_before_return(
 ):
     # Agent errors/max-steps can occur after paid LLM activity. Charge that
     # spend before returning the friendly error so the next run sees the cap.
-    from maverick.agent import Agent, AgentResult
-    from maverick.quotas import UsageLedger, over_quota
+    from lightwork.agent import Agent, AgentResult
+    from lightwork.quotas import UsageLedger, over_quota
 
     monkeypatch.setenv("MAVERICK_QUOTA_ENFORCE", "1")
     monkeypatch.setenv("MAVERICK_QUOTA_MAX_TOKENS_PER_DAY", "100")

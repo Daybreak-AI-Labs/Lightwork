@@ -2,7 +2,7 @@
 from __future__ import annotations
 
 import pytest
-from maverick import latency_budget as lb
+from lightwork import latency_budget as lb
 
 
 @pytest.fixture(autouse=True)

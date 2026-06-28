@@ -8,7 +8,7 @@ import pytest
 def test_consent_auto_approve_mode(tmp_path, monkeypatch):
     monkeypatch.setenv("HOME", str(tmp_path))
     monkeypatch.setenv("MAVERICK_CONSENT_MODE", "auto-approve")
-    from maverick.safety.consent import require_consent
+    from lightwork.safety.consent import require_consent
     d = require_consent("test-action", risk="high")
     assert d.granted is True
     assert d.source == "auto"
@@ -17,7 +17,7 @@ def test_consent_auto_approve_mode(tmp_path, monkeypatch):
 def test_consent_auto_deny_mode(tmp_path, monkeypatch):
     monkeypatch.setenv("HOME", str(tmp_path))
     monkeypatch.setenv("MAVERICK_CONSENT_MODE", "auto-deny")
-    from maverick.safety.consent import require_consent
+    from lightwork.safety.consent import require_consent
     d = require_consent("test-action")
     assert d.granted is False
     assert d.source == "auto"
@@ -27,7 +27,7 @@ def test_consent_ask_mode_non_tty_denies(tmp_path, monkeypatch):
     monkeypatch.setenv("HOME", str(tmp_path))
     # 'ask' mode in a non-tty context (pytest captures stdin) denies.
     monkeypatch.setenv("MAVERICK_CONSENT_MODE", "ask")
-    from maverick.safety.consent import require_consent
+    from lightwork.safety.consent import require_consent
     d = require_consent("test-action")
     assert d.granted is False
     assert d.source == "non-tty-deny"
@@ -38,7 +38,7 @@ def test_consent_default_is_opt_in_auto_approve(tmp_path, monkeypatch):
     # require_consent into tools doesn't change out-of-the-box behavior.
     monkeypatch.setenv("HOME", str(tmp_path))
     monkeypatch.delenv("MAVERICK_CONSENT_MODE", raising=False)
-    from maverick.safety.consent import require_consent
+    from lightwork.safety.consent import require_consent
     d = require_consent("test-action")
     assert d.granted is True
     assert d.source == "auto"
@@ -47,7 +47,7 @@ def test_consent_default_is_opt_in_auto_approve(tmp_path, monkeypatch):
 def test_consent_raise_on_deny(tmp_path, monkeypatch):
     monkeypatch.setenv("HOME", str(tmp_path))
     monkeypatch.setenv("MAVERICK_CONSENT_MODE", "auto-deny")
-    from maverick.safety.consent import ConsentDenied, require_consent
+    from lightwork.safety.consent import ConsentDenied, require_consent
     with pytest.raises(ConsentDenied):
         require_consent("rm-rf", raise_on_deny=True)
 
@@ -55,7 +55,7 @@ def test_consent_raise_on_deny(tmp_path, monkeypatch):
 def test_consent_ledger_grant_then_check(tmp_path, monkeypatch):
     monkeypatch.setenv("HOME", str(tmp_path))
     monkeypatch.delenv("MAVERICK_CONSENT_MODE", raising=False)
-    from maverick.safety.consent import grant_persistent, list_grants, require_consent
+    from lightwork.safety.consent import grant_persistent, list_grants, require_consent
     grant_persistent("force-push", scope="main")
     grants = list_grants()
     assert ("force-push", "main") in grants
@@ -66,7 +66,7 @@ def test_consent_ledger_grant_then_check(tmp_path, monkeypatch):
 
 def test_consent_revoke(tmp_path, monkeypatch):
     monkeypatch.setenv("HOME", str(tmp_path))
-    from maverick.safety.consent import grant_persistent, list_grants, revoke
+    from lightwork.safety.consent import grant_persistent, list_grants, revoke
     grant_persistent("rm-rf", scope="/tmp/test")
     assert ("rm-rf", "/tmp/test") in list_grants()
     assert revoke("rm-rf", scope="/tmp/test") is True
@@ -78,26 +78,26 @@ def test_consent_revoke(tmp_path, monkeypatch):
 # ---------- tool_acl ----------
 
 def test_tool_acl_no_lists_keeps_all():
-    from maverick.safety.tool_acl import filter_tools
+    from lightwork.safety.tool_acl import filter_tools
     out = filter_tools({"a", "b", "c"}, allowed=set(), denied=set())
     assert out == {"a", "b", "c"}
 
 
 def test_tool_acl_allow_list_filters():
-    from maverick.safety.tool_acl import filter_tools
+    from lightwork.safety.tool_acl import filter_tools
     out = filter_tools({"a", "b", "c"}, allowed={"a", "b"})
     assert out == {"a", "b"}
 
 
 def test_tool_acl_deny_list_drops():
-    from maverick.safety.tool_acl import filter_tools
+    from lightwork.safety.tool_acl import filter_tools
     out = filter_tools({"a", "b", "c"}, denied={"b"})
     assert out == {"a", "c"}
 
 
 def test_tool_acl_allow_then_deny():
     """When both lists set, allow filters first, then deny drops further."""
-    from maverick.safety.tool_acl import filter_tools
+    from lightwork.safety.tool_acl import filter_tools
     out = filter_tools({"a", "b", "c", "d"}, allowed={"a", "b", "c"}, denied={"b"})
     assert out == {"a", "c"}
 
@@ -114,10 +114,10 @@ def test_tool_acl_apply_to_registry(tmp_path, monkeypatch):
     # Force reload of the cached default config path.
     import importlib
 
-    import maverick.config as cfg_mod
+    import lightwork.config as cfg_mod
     importlib.reload(cfg_mod)
 
-    from maverick.tools import base_registry
+    from lightwork.tools import base_registry
 
     class _FakeSandbox:
         pass
@@ -147,10 +147,10 @@ def test_tool_acl_blocks_late_registered_tools(tmp_path, monkeypatch):
     )
     import importlib
 
-    import maverick.config as cfg_mod
+    import lightwork.config as cfg_mod
     importlib.reload(cfg_mod)
 
-    from maverick.tools import Tool, base_registry
+    from lightwork.tools import Tool, base_registry
 
     class _FakeSandbox:
         pass
@@ -168,15 +168,15 @@ def test_tool_acl_blocks_late_registered_tools(tmp_path, monkeypatch):
 # ---------- budget_status ----------
 
 def test_budget_status_no_budget():
-    from maverick.tools.budget_status import budget_status
+    from lightwork.tools.budget_status import budget_status
     tool = budget_status(budget=None)
     out = tool.fn({})
     assert "no Budget bound" in out
 
 
 def test_budget_status_with_budget():
-    from maverick.budget import Budget
-    from maverick.tools.budget_status import budget_status
+    from lightwork.budget import Budget
+    from lightwork.tools.budget_status import budget_status
     b = Budget(max_dollars=10.0)
     b.record_tokens(1000, 500, model="claude-opus-4-7")
     tool = budget_status(budget=b)
@@ -190,8 +190,8 @@ def test_budget_status_with_budget():
 
 
 def test_budget_status_warns_at_90pct():
-    from maverick.budget import Budget
-    from maverick.tools.budget_status import budget_status
+    from lightwork.budget import Budget
+    from lightwork.tools.budget_status import budget_status
     b = Budget(max_dollars=1.0)
     # Use atomic update to push spend high without tripping check().
     with b._lock:
@@ -203,7 +203,7 @@ def test_budget_status_warns_at_90pct():
 # ---------- plugin_manifest ----------
 
 def test_plugin_manifest_parse_minimal_valid():
-    from maverick.plugin_manifest import MAVERICK_API_VERSION, parse_dict
+    from lightwork.plugin_manifest import MAVERICK_API_VERSION, parse_dict
     m = parse_dict({
         "plugin": {
             "name": "x",
@@ -217,13 +217,13 @@ def test_plugin_manifest_parse_minimal_valid():
 
 
 def test_plugin_manifest_missing_required_field():
-    from maverick.plugin_manifest import parse_dict
+    from lightwork.plugin_manifest import parse_dict
     m = parse_dict({"plugin": {"name": "x", "version": "0.1.0"}})  # no api_version
     assert m is None
 
 
 def test_plugin_manifest_incompatible_version_warns():
-    from maverick.plugin_manifest import parse_dict
+    from lightwork.plugin_manifest import parse_dict
     m = parse_dict({
         "plugin": {
             "name": "x", "version": "0.1.0",
@@ -240,7 +240,7 @@ def test_plugin_manifest_compatible_by_major(api_version):
     # Kernel is v2 with a v1 deprecation window; any plugin with major 1
     # stays compatible (loaded with a deprecation warning) regardless of how
     # its api_version string is spelled.
-    from maverick.plugin_manifest import parse_dict
+    from lightwork.plugin_manifest import parse_dict
     m = parse_dict({
         "plugin": {"name": "x", "version": "0.1.0", "api_version": api_version}
     })
@@ -252,7 +252,7 @@ def test_plugin_manifest_compatible_by_major(api_version):
 
 @pytest.mark.parametrize("api_version", ["3", "0", "abc", "v1"])
 def test_plugin_manifest_incompatible_by_major(api_version):
-    from maverick.plugin_manifest import parse_dict
+    from lightwork.plugin_manifest import parse_dict
     m = parse_dict({
         "plugin": {"name": "x", "version": "0.1.0", "api_version": api_version}
     })
@@ -262,7 +262,7 @@ def test_plugin_manifest_incompatible_by_major(api_version):
 
 
 def test_plugin_manifest_loads_capabilities_permissions():
-    from maverick.plugin_manifest import MAVERICK_API_VERSION, parse_dict
+    from lightwork.plugin_manifest import MAVERICK_API_VERSION, parse_dict
     m = parse_dict({
         "plugin": {
             "name": "x", "version": "0.1.0",
@@ -286,8 +286,8 @@ def test_plugin_manifest_loads_capabilities_permissions():
 
 
 def test_plugin_manifest_parse_file(tmp_path):
-    from maverick.plugin_manifest import MAVERICK_API_VERSION, parse
-    f = tmp_path / "maverick-plugin.toml"
+    from lightwork.plugin_manifest import MAVERICK_API_VERSION, parse
+    f = tmp_path / "lightwork-plugin.toml"
     f.write_text(
         f'[plugin]\nname = "x"\nversion = "0.1.0"\n'
         f'api_version = "{MAVERICK_API_VERSION}"\n'
@@ -298,14 +298,14 @@ def test_plugin_manifest_parse_file(tmp_path):
 
 
 def test_plugin_manifest_parse_missing_file(tmp_path):
-    from maverick.plugin_manifest import parse
+    from lightwork.plugin_manifest import parse
     assert parse(tmp_path / "nope.toml") is None
 
 
 # ---------- webhooks ----------
 
 def test_webhooks_no_urls_no_op():
-    from maverick.webhooks import fire
+    from lightwork.webhooks import fire
     # Pass empty urls explicitly to bypass config lookup.
     n = fire("test_event", {"x": 1}, urls=[], secret=None)
     assert n == 0
@@ -313,7 +313,7 @@ def test_webhooks_no_urls_no_op():
 
 def test_webhooks_signature_round_trip():
     """verify_signature accepts the signature fire() would produce."""
-    from maverick.webhooks import _sign, verify_signature
+    from lightwork.webhooks import _sign, verify_signature
     body = b'{"hello": "world"}'
     sig = _sign(body, "secret-key")
     assert sig.startswith("sha256=")
@@ -324,7 +324,7 @@ def test_webhooks_signature_round_trip():
 
 def test_webhooks_fires_per_url(monkeypatch):
     """fire() submits one POST per URL configured."""
-    from maverick import webhooks
+    from lightwork import webhooks
     posted: list[str] = []
 
     def _fake_post(url, body, headers, timeout):
@@ -352,7 +352,7 @@ def test_webhooks_timestamped_signature_replay_window():
     max-age window (replay defence) but accepted while fresh."""
     import time
 
-    from maverick.webhooks import _sign, verify_signature
+    from lightwork.webhooks import _sign, verify_signature
     body = b'{"event": "x"}'
     fresh = str(int(time.time()))
     sig = _sign(body, "k", timestamp=fresh)
@@ -370,7 +370,7 @@ def test_webhooks_outbound_post_blocks_ssrf(monkeypatch):
     """_post routes through the SSRF guard: a loopback/metadata target makes no
     outbound request."""
     import httpx
-    from maverick import webhooks
+    from lightwork import webhooks
     posted: list[str] = []
 
     def _spy(self, url, **kw):  # pragma: no cover - must not run for blocked host
@@ -395,7 +395,7 @@ def test_webhooks_outbound_post_blocks_ssrf(monkeypatch):
 def test_webhooks_outbound_post_allows_public(monkeypatch):
     """A public outbound target still fires through the guard."""
     import httpx
-    from maverick import webhooks
+    from lightwork import webhooks
     posted: list[str] = []
 
     def _spy(self, url, **kw):

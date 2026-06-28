@@ -21,7 +21,7 @@ def _isolated(tmp_path, monkeypatch):
 
 
 def test_tenant_membership_store_roundtrip():
-    from maverick_dashboard import rbac
+    from lightwork_dashboard import rbac
     assert rbac.list_tenant_roles("acme") == {}
     rbac.set_tenant_role("acme", "user:alice", "admin")
     rbac.set_tenant_role("acme", "user:bob", "viewer")
@@ -34,14 +34,14 @@ def test_tenant_membership_store_roundtrip():
 
 
 def test_bad_role_rejected():
-    from maverick_dashboard import rbac
+    from lightwork_dashboard import rbac
     with pytest.raises(ValueError):
         rbac.set_tenant_role("acme", "user:x", "superuser")
 
 
 def test_role_for_principal_uses_tenant_membership(monkeypatch):
-    from maverick.paths import reset_tenant, set_tenant
-    from maverick_dashboard import auth, rbac
+    from lightwork.paths import reset_tenant, set_tenant
+    from lightwork_dashboard import auth, rbac
 
     # Global role for alice is viewer; in acme she is an operator.
     rbac.set_role("user:alice", "viewer")
@@ -66,8 +66,8 @@ def test_role_for_principal_uses_tenant_membership(monkeypatch):
 
 
 def test_bootstrap_admin_stays_admin_in_every_tenant(monkeypatch):
-    from maverick.paths import reset_tenant, set_tenant
-    from maverick_dashboard import auth, rbac
+    from lightwork.paths import reset_tenant, set_tenant
+    from lightwork_dashboard import auth, rbac
 
     monkeypatch.setenv("MAVERICK_DASHBOARD_ADMINS", "user:root")
     # Even if someone tries to demote root within a tenant, bootstrap wins.
@@ -86,8 +86,8 @@ def test_bootstrap_admin_stays_admin_in_every_tenant(monkeypatch):
 # now rejected, and the read path keeps the global role.
 
 def test_named_tenant_role_does_not_apply_under_per_user_pin():
-    from maverick.paths import reset_tenant, set_tenant
-    from maverick_dashboard import auth, rbac
+    from lightwork.paths import reset_tenant, set_tenant
+    from lightwork_dashboard import auth, rbac
 
     rbac.set_role("user:alice", "operator")
     rbac.set_tenant_role("acme", "user:alice", "viewer")  # named-tenant assignment
@@ -102,7 +102,7 @@ def test_named_tenant_role_does_not_apply_under_per_user_pin():
 
 def test_tenant_role_assignment_rejected_under_per_user_tenancy(monkeypatch):
     from fastapi import HTTPException
-    from maverick_dashboard.api import (
+    from lightwork_dashboard.api import (
         _reject_tenant_role_assignment_under_per_user_tenancy as guard,
     )
 
@@ -121,8 +121,8 @@ def test_tenant_role_assignment_rejected_under_per_user_tenancy(monkeypatch):
 def test_remove_active_per_user_tenant_role_allowed_under_per_user_tenancy(
     monkeypatch,
 ):
-    from maverick.paths import reset_tenant, set_tenant
-    from maverick_dashboard import api, auth, rbac
+    from lightwork.paths import reset_tenant, set_tenant
+    from lightwork_dashboard import api, auth, rbac
 
     monkeypatch.setenv("MAVERICK_TENANT_BY_USER", "1")
     monkeypatch.setattr(api, "require_permission", lambda request, permission: None)

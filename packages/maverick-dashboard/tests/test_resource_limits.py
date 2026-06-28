@@ -15,16 +15,16 @@ from fastapi.testclient import TestClient
 
 
 def _client():
-    from maverick_dashboard.app import app
+    from lightwork_dashboard.app import app
     return TestClient(app)
 
 
 def _setup(monkeypatch, tmp_path):
-    from maverick import world_model
+    from lightwork import world_model
     db = tmp_path / "world.db"
     monkeypatch.setattr(world_model, "DEFAULT_DB", db)
     monkeypatch.delenv("MAVERICK_DASHBOARD_TOKEN", raising=False)
-    from maverick_dashboard import app as dash_app
+    from lightwork_dashboard import app as dash_app
     dash_app._world_cache.clear()
     return world_model.WorldModel(db)
 
@@ -36,7 +36,7 @@ def test_sse_stream_returns_503_when_cap_exhausted(monkeypatch, tmp_path):
     gid = w.create_goal("g", "d")
     w.set_goal_status(gid, "done")
 
-    from maverick_dashboard import app as dash_app
+    from lightwork_dashboard import app as dash_app
 
     # Simulate the cap being fully consumed by other live streams: the route
     # checks ``sem.locked()`` and returns 503 before ever acquiring, so a stub
@@ -58,7 +58,7 @@ def test_sse_stream_serves_when_capacity_available(monkeypatch, tmp_path):
     w.append_event(gid, "planner", "plan", "hi")
     w.set_goal_status(gid, "done")
 
-    from maverick_dashboard import app as dash_app
+    from lightwork_dashboard import app as dash_app
     # Fresh, fully-available semaphore.
     monkeypatch.setattr(dash_app, "_get_sse_semaphore", lambda: asyncio.Semaphore(4))
 
@@ -70,7 +70,7 @@ def test_sse_stream_serves_when_capacity_available(monkeypatch, tmp_path):
 # ---------- task 2: per-client goal rate limiting ----------
 
 def _reset_rl():
-    from maverick_dashboard import app as dash_app
+    from lightwork_dashboard import app as dash_app
     dash_app._goal_times.clear()
     dash_app._goal_times_global.clear()
 
@@ -83,7 +83,7 @@ def test_rate_limit_is_per_client(monkeypatch, tmp_path):
     monkeypatch.setenv("MAVERICK_DASHBOARD_MAX_GOALS_GLOBAL_PER_MIN", "100")
 
     from fastapi import HTTPException
-    from maverick_dashboard import app as dash_app
+    from lightwork_dashboard import app as dash_app
 
     class _Req:
         def __init__(self, host):
@@ -111,7 +111,7 @@ def test_rate_limit_global_ceiling(monkeypatch, tmp_path):
     monkeypatch.setenv("MAVERICK_DASHBOARD_MAX_GOALS_GLOBAL_PER_MIN", "3")
 
     from fastapi import HTTPException
-    from maverick_dashboard import app as dash_app
+    from lightwork_dashboard import app as dash_app
 
     class _Req:
         def __init__(self, host):
@@ -131,7 +131,7 @@ def test_rate_limit_global_ceiling(monkeypatch, tmp_path):
 
 def test_a2a_oversized_body_rejected(monkeypatch):
     pytest.importorskip("fastapi")
-    import maverick.a2a as a2a
+    import lightwork.a2a as a2a
     from fastapi import FastAPI
 
     monkeypatch.setenv("MAVERICK_A2A_ENABLED", "1")
@@ -160,7 +160,7 @@ def test_a2a_oversized_body_rejected(monkeypatch):
 # ---------- task 4: /healthz minimal payload under a token ----------
 
 def test_healthz_minimal_payload_when_token_set(monkeypatch, tmp_path):
-    from maverick import world_model
+    from lightwork import world_model
     monkeypatch.setattr(world_model, "DEFAULT_DB", tmp_path / "world.db")
     monkeypatch.setenv("MAVERICK_DASHBOARD_TOKEN", "sekret")
     monkeypatch.setenv("ANTHROPIC_API_KEY", "sk-ant-fake")
@@ -174,7 +174,7 @@ def test_healthz_minimal_payload_when_token_set(monkeypatch, tmp_path):
 
 
 def test_healthz_full_payload_without_token(monkeypatch, tmp_path):
-    from maverick import world_model
+    from lightwork import world_model
     monkeypatch.setattr(world_model, "DEFAULT_DB", tmp_path / "world.db")
     monkeypatch.delenv("MAVERICK_DASHBOARD_TOKEN", raising=False)
     monkeypatch.setenv("ANTHROPIC_API_KEY", "sk-ant-fake")
@@ -194,7 +194,7 @@ def test_rate_limit_dict_does_not_grow_unbounded(monkeypatch, tmp_path):
     _reset_rl()
     monkeypatch.setenv("MAVERICK_DASHBOARD_MAX_GOALS_PER_MIN", "100")
     monkeypatch.setenv("MAVERICK_DASHBOARD_MAX_GOALS_GLOBAL_PER_MIN", "100000")
-    from maverick_dashboard import app as dash_app
+    from lightwork_dashboard import app as dash_app
 
     clock = [1000.0]
     monkeypatch.setattr(dash_app.time, "monotonic", lambda: clock[0])

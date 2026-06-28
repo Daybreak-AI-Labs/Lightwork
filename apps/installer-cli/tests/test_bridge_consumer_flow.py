@@ -15,7 +15,7 @@ except ModuleNotFoundError:  # Python 3.10
 
 def _drive(monkeypatch, tmp_path, answers, *, key="sk-ant-test"):
     """Run bridge.run() feeding `answers` in order; capture emitted steps."""
-    from maverick_installer import bridge, wizard
+    from lightwork_installer import bridge, wizard
 
     monkeypatch.setattr(wizard, "CONFIG_DIR", tmp_path / ".maverick")
     monkeypatch.setattr(wizard, "CONFIG_FILE", tmp_path / ".maverick" / "config.toml")

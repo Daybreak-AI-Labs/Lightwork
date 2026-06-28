@@ -23,13 +23,13 @@ class _FakeHttpxResponse:
 
 
 def test_wikipedia_search_empty_query():
-    from maverick.tools.wikipedia import wikipedia
+    from lightwork.tools.wikipedia import wikipedia
     out = wikipedia().fn({"op": "search", "query": ""})
     assert "query" in out.lower()
 
 
 def test_wikipedia_search_returns_hits():
-    from maverick.tools.wikipedia import wikipedia
+    from lightwork.tools.wikipedia import wikipedia
     fake = _FakeHttpxResponse(200, json_data={
         "query": {
             "search": [
@@ -55,7 +55,7 @@ def test_wikipedia_search_returns_hits():
 
 
 def test_wikipedia_search_no_results():
-    from maverick.tools.wikipedia import wikipedia
+    from lightwork.tools.wikipedia import wikipedia
     fake = _FakeHttpxResponse(200, json_data={"query": {"search": []}})
     import httpx
     with patch.object(httpx, "get", return_value=fake):
@@ -64,7 +64,7 @@ def test_wikipedia_search_no_results():
 
 
 def test_wikipedia_fetch_returns_extract():
-    from maverick.tools.wikipedia import wikipedia
+    from lightwork.tools.wikipedia import wikipedia
     fake = _FakeHttpxResponse(200, json_data={
         "query": {
             "pages": [
@@ -86,7 +86,7 @@ def test_wikipedia_fetch_returns_extract():
 
 
 def test_wikipedia_fetch_missing_page():
-    from maverick.tools.wikipedia import wikipedia
+    from lightwork.tools.wikipedia import wikipedia
     fake = _FakeHttpxResponse(200, json_data={
         "query": {"pages": [{"title": "Nope", "missing": True}]}
     })
@@ -97,14 +97,14 @@ def test_wikipedia_fetch_missing_page():
 
 
 def test_wikipedia_unknown_op():
-    from maverick.tools.wikipedia import wikipedia
+    from lightwork.tools.wikipedia import wikipedia
     out = wikipedia().fn({"op": "delete"})
     assert "unknown op" in out
 
 
 def test_wikipedia_lang_sanitised():
     """Junk in lang shouldn't escape into the URL — fall back to 'en'."""
-    from maverick.tools.wikipedia import wikipedia
+    from lightwork.tools.wikipedia import wikipedia
     fake = _FakeHttpxResponse(200, json_data={"query": {"search": []}})
     import httpx
     with patch.object(httpx, "get", return_value=fake) as mock_get:

@@ -8,7 +8,7 @@ exercised without constructing a real client.
 from __future__ import annotations
 
 import pytest
-from maverick.providers.openai_provider import OpenAIClient
+from lightwork.providers.openai_provider import OpenAIClient
 
 
 class _EmptyResp:

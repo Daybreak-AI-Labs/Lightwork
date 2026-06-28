@@ -4,8 +4,8 @@ from __future__ import annotations
 from pathlib import Path
 
 import pytest
-from maverick_evolve.adopt import adopt_best, plan_adoption, render_pack
-from maverick_evolve.archive import Archive, Candidate
+from lightwork_evolve.adopt import adopt_best, plan_adoption, render_pack
+from lightwork_evolve.archive import Archive, Candidate
 
 try:
     import tomllib
@@ -137,9 +137,9 @@ def test_render_pack_roundtrips_workflow_array_of_tables():
 def test_adopt_best_roundtrips_real_shipped_pack(tmp_path):
     # End-to-end on an ACTUAL shipped pack (not the [[workflow]]-free fixture):
     # overlaying an adoptable key must not lose the workflow/output blocks.
-    import maverick
+    import lightwork
 
-    src = Path(maverick.__file__).parent / "domains" / "itgrc_sod_it.toml"
+    src = Path(lightwork.__file__).parent / "domains" / "itgrc_sod_it.toml"
     with open(src, "rb") as f:
         original = tomllib.load(f)
     assert original.get("workflow"), "fixture pack must carry [[workflow]]"

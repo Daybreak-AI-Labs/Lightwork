@@ -1,7 +1,7 @@
 """Amount-aware authorization in governance (finance-agent-suite §2.3)."""
 from __future__ import annotations
 
-from maverick.governance import Decision, Policy, _amount_table, evaluate
+from lightwork.governance import Decision, Policy, _amount_table, evaluate
 
 
 def test_require_human_above_threshold():
@@ -78,7 +78,7 @@ def test_empty_policy_with_thresholds_not_empty():
 
 
 def test_threshold_composes_with_capability_deny():
-    from maverick.capability import Capability
+    from lightwork.capability import Capability
     cap = Capability(principal="p", deny_tools=frozenset({"release_payment"}))
     pol = Policy(require_human_above={"release_payment": 5000})
     # capability deny wins over the (lower-precedence) amount gate

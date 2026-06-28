@@ -3,7 +3,7 @@ requires = ["setuptools>=68"]
 build-backend = "setuptools.build_meta"
 
 [project]
-name = "maverick-shield"
+name = "lightwork-shield"
 version = "0.1.6"
 description = "Agent Shield integration + builtin fallback rules for Maverick"
 requires-python = ">=3.10"
@@ -21,8 +21,8 @@ Homepage = "https://github.com/Day-AI-Labs/maverick"
 
 [tool.setuptools.packages.find]
 where = ["."]
-include = ["maverick_shield*"]
+include = ["lightwork_shield*"]
 
 [tool.setuptools.package-data]
 # Ship the red-team corpus inside wheels (editable installs read it from disk).
-maverick_shield = ["redteam_corpus.jsonl"]
+lightwork_shield = ["redteam_corpus.jsonl"]

@@ -6,11 +6,11 @@ from __future__ import annotations
 
 import logging
 
-import maverick.audit.signing as signing
-import maverick.audit.writer as writer
-import maverick.compliance_profiles as compliance_profiles
+import lightwork.audit.signing as signing
+import lightwork.audit.writer as writer
+import lightwork.compliance_profiles as compliance_profiles
 import pytest
-from maverick.audit.events import AuditEvent
+from lightwork.audit.events import AuditEvent
 
 
 def _force_missing_crypto(monkeypatch):

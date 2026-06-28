@@ -1,7 +1,7 @@
 """memory_safe_parse: bounded parsing of untrusted JSON/CSV."""
 from __future__ import annotations
 
-from maverick.tools.memory_safe_parse import memory_safe_parse
+from lightwork.tools.memory_safe_parse import memory_safe_parse
 
 
 def _run(**kw):

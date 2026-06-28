@@ -6,7 +6,7 @@ max_risk ceilings and the governance risk gate.
 """
 from __future__ import annotations
 
-from maverick.safety.tool_risk import tool_risk
+from lightwork.safety.tool_risk import tool_risk
 
 
 def test_glob_cannot_lower_builtin_high():

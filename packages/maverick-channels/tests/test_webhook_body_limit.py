@@ -10,7 +10,7 @@ from __future__ import annotations
 
 import asyncio
 
-from maverick_channels.base import BodySizeLimitMiddleware
+from lightwork_channels.base import BodySizeLimitMiddleware
 
 
 def _run(mw, *, body: bytes, content_length: int | None):

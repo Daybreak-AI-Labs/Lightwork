@@ -4,7 +4,7 @@ from __future__ import annotations
 import asyncio
 
 import pytest
-from maverick.speculative import Speculation, run_independent, speculate
+from lightwork.speculative import Speculation, run_independent, speculate
 
 
 class TestSpeculation:

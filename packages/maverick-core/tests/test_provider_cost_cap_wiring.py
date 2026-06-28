@@ -3,7 +3,7 @@ ENFORCED on the LLM dispatch path -- it was a configured-but-inert control."""
 from __future__ import annotations
 
 import pytest
-from maverick.llm import LLM, LLMResponse
+from lightwork.llm import LLM, LLMResponse
 
 
 def _resp(text: str) -> LLMResponse:
@@ -17,8 +17,8 @@ def _home(tmp_path, monkeypatch):
 
 
 def test_call_blocked_when_provider_over_cap(monkeypatch):
-    from maverick import provider_cost_cap as pcc
-    from maverick.provider_cost_cap import ProviderCapExceeded
+    from lightwork import provider_cost_cap as pcc
+    from lightwork.provider_cost_cap import ProviderCapExceeded
     monkeypatch.setattr(pcc, "caps_from_config", lambda: {"anthropic": 1.0})
     pcc.record("anthropic", 2.0)  # seed the period ledger OVER the $1 cap
 
@@ -37,7 +37,7 @@ def test_call_blocked_when_provider_over_cap(monkeypatch):
 
 
 def test_spend_recorded_to_the_cap_ledger_after_a_call(monkeypatch):
-    from maverick import provider_cost_cap as pcc
+    from lightwork import provider_cost_cap as pcc
     recorded = []
     monkeypatch.setattr(pcc, "caps_from_config", dict)  # no cap -> never blocks
     monkeypatch.setattr(
@@ -56,7 +56,7 @@ def test_spend_recorded_to_the_cap_ledger_after_a_call(monkeypatch):
 
 def test_no_cap_configured_is_a_noop(monkeypatch):
     # Default install (no provider_caps) must be unaffected: a call goes through.
-    from maverick import provider_cost_cap as pcc
+    from lightwork import provider_cost_cap as pcc
     monkeypatch.setattr(pcc, "caps_from_config", dict)
 
     class FakeClient:

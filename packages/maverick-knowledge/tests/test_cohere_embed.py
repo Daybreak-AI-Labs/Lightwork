@@ -5,7 +5,7 @@ import sys
 import types
 
 import pytest
-from maverick_knowledge.embed import CohereEmbedder, build_embedder
+from lightwork_knowledge.embed import CohereEmbedder, build_embedder
 
 
 def _fake_httpx(capture: dict, payload: dict):

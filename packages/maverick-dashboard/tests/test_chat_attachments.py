@@ -7,20 +7,20 @@ _ORIGIN = {"origin": "http://testserver"}
 
 
 def _client():
-    from maverick_dashboard.app import app
+    from lightwork_dashboard.app import app
     return TestClient(app)
 
 
 def _prep(monkeypatch, tmp_path):
-    from maverick import world_model
+    from lightwork import world_model
     monkeypatch.setattr(world_model, "DEFAULT_DB", tmp_path / "world.db")
     monkeypatch.delenv("MAVERICK_DASHBOARD_TOKEN", raising=False)
     monkeypatch.setenv("ANTHROPIC_API_KEY", "sk-ant-test")  # a provider is configured
     # Keep attachment bytes + the goal run inside the test sandbox.
-    import maverick.attachments as att
+    import lightwork.attachments as att
     monkeypatch.setattr(att, "DEFAULT_ROOT", tmp_path / "attachments")
-    monkeypatch.setattr("maverick.runner.run_goal_in_thread", lambda *a, **k: None)
-    from maverick_dashboard import app as dash_app
+    monkeypatch.setattr("lightwork.runner.run_goal_in_thread", lambda *a, **k: None)
+    from lightwork_dashboard import app as dash_app
     dash_app._world_cache.clear()
 
 
@@ -33,7 +33,7 @@ def test_chat_send_stores_attachment(monkeypatch, tmp_path):
         headers=_ORIGIN, follow_redirects=False,
     )
     assert r.status_code == 303
-    from maverick_dashboard import app as dash
+    from lightwork_dashboard import app as dash
     g = dash._world().list_goals()[-1]
     atts = dash._world().list_attachments(g.id)
     assert [a.filename for a in atts] == ["notes.txt"]
@@ -57,7 +57,7 @@ def test_chat_send_empty_file_input_still_works(monkeypatch, tmp_path):
                  "content-type": f"multipart/form-data; boundary={b}"},
     )
     assert r.status_code == 303
-    from maverick_dashboard import app as dash
+    from lightwork_dashboard import app as dash
     g = dash._world().list_goals()[-1]
     assert dash._world().list_attachments(g.id) == []
 

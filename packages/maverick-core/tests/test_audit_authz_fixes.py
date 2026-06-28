@@ -5,7 +5,7 @@ so an agent whose name is a substring of other agents graduated to unsupervised
 autonomy on THEIR approval history -- e.g. ``analyst`` graduating on
 ``agent:data_analyst-0``'s record. Now matched by exact agent identity.
 """
-from maverick.agent_autonomy import graduation_status
+from lightwork.agent_autonomy import graduation_status
 
 
 def _approved(principal, n):

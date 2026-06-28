@@ -19,7 +19,7 @@ def _run(tmp_path, monkeypatch, args):
     monkeypatch.setenv("HOME", str(tmp_path))
     monkeypatch.setenv("USERPROFILE", str(tmp_path))
     monkeypatch.delenv("MAVERICK_TENANT", raising=False)
-    from maverick.cli import main
+    from lightwork.cli import main
     return CliRunner().invoke(main, ["audit", "verify", *args])
 
 
@@ -39,8 +39,8 @@ def test_explicit_missing_file_still_fails(tmp_path, monkeypatch):
 
 
 def test_missing_day_with_audit_artifacts_still_fails(tmp_path, monkeypatch):
-    from maverick import audit
-    from maverick.audit import signing
+    from lightwork import audit
+    from lightwork.audit import signing
 
     monkeypatch.setattr(signing, "_have_crypto", lambda: True)
     monkeypatch.setattr(

@@ -2,8 +2,8 @@
 from __future__ import annotations
 
 import pytest
-from maverick import ebpf_monitor
-from maverick.ebpf_monitor import (
+from lightwork import ebpf_monitor
+from lightwork.ebpf_monitor import (
     DEFAULT_WATCHLIST,
     BpftraceUnavailable,
     EbpfMonitor,

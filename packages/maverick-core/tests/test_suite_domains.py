@@ -13,7 +13,7 @@ granting a dangerous tool.
 """
 from __future__ import annotations
 
-from maverick.domain import (
+from lightwork.domain import (
     builtin_dir,
     lint_profile,
     load_domains,
@@ -201,7 +201,7 @@ def test_every_workflow_step_tool_is_in_allowlist():
 def test_every_pack_renders_a_persona_and_playbook():
     # Every pack must produce a non-empty persona and, where it has a workflow,
     # render every step into the system prompt -- the spawn path depends on this.
-    from maverick.domain_discipline import augment_persona
+    from lightwork.domain_discipline import augment_persona
     for name, p in _BUILTIN.items():
         persona = augment_persona(p.name, p.persona)
         assert persona.strip(), f"{name}: empty persona after augmentation"
@@ -277,7 +277,7 @@ def test_vendor_connector_packs_scope_their_egress_hosts():
 def test_every_hr_pack_refuses_eu_ai_act_art5():
     # Every HR specialist carries the workplace emotion-inference + biometric
     # prohibitions (EU AI Act Art. 5) -- the suite with refused, not gated, uses.
-    from maverick.domain_refusals import refusals_for
+    from lightwork.domain_refusals import refusals_for
     hr = {n: p for n, p in _BUILTIN.items() if n.startswith("hr_")}
     assert hr
     for name in hr:
@@ -287,7 +287,7 @@ def test_every_hr_pack_refuses_eu_ai_act_art5():
 
 
 def test_physical_world_packs_refuse_safety_actuation():
-    from maverick.domain_refusals import refusals_for
+    from lightwork.domain_refusals import refusals_for
     for pre in ("ops_", "mfg_", "util_"):
         packs = {n: p for n, p in _BUILTIN.items() if n.startswith(pre)}
         assert packs, pre

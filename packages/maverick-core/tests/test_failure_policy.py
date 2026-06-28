@@ -1,4 +1,4 @@
-"""Tests for the failure-policy classification lint (maverick.failure_policy).
+"""Tests for the failure-policy classification lint (lightwork.failure_policy).
 
 The lint requires every broad exception handler in the scoped audit-integrity
 subsystem to declare its failure mode via a `# failure-policy: <class>` marker.
@@ -7,7 +7,7 @@ from __future__ import annotations
 
 from pathlib import Path
 
-from maverick import failure_policy as fp
+from lightwork import failure_policy as fp
 
 
 def test_real_audit_tree_is_fully_classified():

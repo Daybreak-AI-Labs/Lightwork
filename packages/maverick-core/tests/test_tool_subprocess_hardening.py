@@ -12,7 +12,7 @@ ffmpeg -i /etc/passwd = arbitrary file read). PR3 adds:
 from __future__ import annotations
 
 import pytest
-from maverick.tools import safe_media_args, scrub_child_env
+from lightwork.tools import safe_media_args, scrub_child_env
 
 
 def test_scrub_child_env_strips_secrets(monkeypatch):
@@ -88,7 +88,7 @@ def test_subprocess_tools_import_scrub_helper():
     reintroduce raw ``os.environ`` inheritance."""
     import pathlib
 
-    import maverick.tools as T
+    import lightwork.tools as T
     tdir = pathlib.Path(T.__file__).parent
     for name in ["git_advanced", "preview_diff", "apply_patch", "ffmpeg_tool",
                  "imagemagick_tool", "pandoc_tool", "ocr", "a11y", "android", "ios_sim"]:
@@ -112,7 +112,7 @@ class _RecordingSandbox:
         self._exit = exit_code
 
     def exec(self, cmd, timeout=None):
-        from maverick.sandbox.local import ExecResult
+        from lightwork.sandbox.local import ExecResult
         self.commands.append(cmd)
         return ExecResult(stdout=self._stdout, stderr="", exit_code=self._exit)
 
@@ -125,7 +125,7 @@ def test_imagemagick_routes_command_through_sandbox_exec(tmp_path, monkeypatch):
         raise AssertionError("subprocess.run must not be called when a sandbox is wired in")
 
     monkeypatch.setattr("subprocess.run", _boom)
-    from maverick.tools.imagemagick_tool import imagemagick_tool
+    from lightwork.tools.imagemagick_tool import imagemagick_tool
 
     sb = _RecordingSandbox(tmp_path)
     out = imagemagick_tool(sb).fn({
@@ -141,7 +141,7 @@ def test_pandoc_string_op_feeds_stdin_through_sandbox(tmp_path, monkeypatch):
     monkeypatch.setattr("shutil.which", lambda b: "/usr/bin/pandoc")
     monkeypatch.setattr("subprocess.run", lambda *a, **k: (_ for _ in ()).throw(
         AssertionError("must route through sandbox.exec")))
-    from maverick.tools.pandoc_tool import pandoc_tool
+    from lightwork.tools.pandoc_tool import pandoc_tool
 
     sb = _RecordingSandbox(tmp_path, stdout="<p>Hello</p>\n")
     out = pandoc_tool(sb).fn({"op": "markdown_to_html", "text": "Hello"})
@@ -156,7 +156,7 @@ def test_media_tools_route_through_sandbox_chokepoint():
     host-only resources and cannot run inside the sandbox."""
     import pathlib
 
-    import maverick.tools as T
+    import lightwork.tools as T
     tdir = pathlib.Path(T.__file__).parent
     for name in ["ffmpeg_tool", "imagemagick_tool", "pandoc_tool", "ocr", "a11y"]:
         src = (tdir / f"{name}.py").read_text()
@@ -175,7 +175,7 @@ def test_media_tools_route_through_sandbox_chokepoint():
 def test_host_exec_scrubs_env(monkeypatch):
     import sys
 
-    from maverick.tools import host_exec
+    from lightwork.tools import host_exec
     monkeypatch.setenv("ANTHROPIC_API_KEY", "sk-secret")
     monkeypatch.setenv("PATH", "/usr/bin:/bin")
     # Print whether the secret leaked into the child env.
@@ -191,7 +191,7 @@ def test_host_exec_scrubs_env(monkeypatch):
 def test_host_exec_timeout_returns_124():
     import sys
 
-    from maverick.tools import host_exec
+    from lightwork.tools import host_exec
     code, out, err = host_exec(
         [sys.executable, "-c", "import time; time.sleep(5)"], timeout=0.5,
     )
@@ -202,7 +202,7 @@ def test_host_exec_timeout_returns_124():
 def test_host_exec_binary_mode_returns_bytes():
     import sys
 
-    from maverick.tools import host_exec
+    from lightwork.tools import host_exec
     code, out, err = host_exec(
         [sys.executable, "-c", "import sys; sys.stdout.buffer.write(b'\\x89PNG')"],
         timeout=15, text=False,
@@ -214,8 +214,8 @@ def test_host_exec_binary_mode_returns_bytes():
 def test_android_adb_routes_through_host_exec(monkeypatch):
     """android._adb must dispatch via host_exec (the auditable host-bound path),
     not a bare subprocess.run."""
-    import maverick.tools as tools_pkg
-    from maverick.tools import android
+    import lightwork.tools as tools_pkg
+    from lightwork.tools import android
     calls = {}
 
     def fake_host_exec(argv, *, timeout=60.0, text=True):
@@ -229,8 +229,8 @@ def test_android_adb_routes_through_host_exec(monkeypatch):
 
 
 def test_ios_simctl_routes_through_host_exec(monkeypatch):
-    import maverick.tools as tools_pkg
-    from maverick.tools import ios_sim
+    import lightwork.tools as tools_pkg
+    from lightwork.tools import ios_sim
     calls = {}
 
     def fake_host_exec(argv, *, timeout=60.0, text=True):
@@ -253,7 +253,7 @@ def test_safe_path_blocks_leading_dash_without_sandbox(mod):
     """When sandbox is None, _safe_path returned the path verbatim -- so
     input_path="-i" / "-write ..." became a flag to ffmpeg/convert/pandoc.
     A leading-dash path must now be rejected; benign paths still pass."""
-    m = importlib.import_module(f"maverick.tools.{mod}")
+    m = importlib.import_module(f"lightwork.tools.{mod}")
     with pytest.raises(ValueError, match="may not begin with '-'"):
         m._safe_path(None, "-i")
     assert m._safe_path(None, "in.png") == "in.png"
@@ -261,7 +261,7 @@ def test_safe_path_blocks_leading_dash_without_sandbox(mod):
 
 def _capture_sandbox_run(monkeypatch, *, ret=(0, "", "")):
     """Patch the tools.sandbox_run chokepoint and capture the argv it's given."""
-    import maverick.tools as T
+    import lightwork.tools as T
     captured: dict = {}
 
     def _rec(sandbox, cmd, **kw):
@@ -278,7 +278,7 @@ def test_axe_target_protected_by_double_dash(monkeypatch):
     fixed). `--` must end option parsing with the target as the sole
     positional after it."""
     captured = _capture_sandbox_run(monkeypatch, ret=(0, "[]", ""))
-    from maverick.tools.a11y import _run_axe
+    from lightwork.tools.a11y import _run_axe
     _run_axe("--config=/tmp/evil.js", None)
     cmd = captured["cmd"]
     assert "--" in cmd
@@ -287,7 +287,7 @@ def test_axe_target_protected_by_double_dash(monkeypatch):
 
 
 def test_a11y_check_html_confines_path(tmp_path):
-    from maverick.tools.a11y import _confine_path
+    from lightwork.tools.a11y import _confine_path
     sb = _RecordingSandbox(tmp_path)
     with pytest.raises(ValueError, match="may not begin with '-'"):
         _confine_path(sb, "-x.html")
@@ -302,7 +302,7 @@ def test_imagemagick_composite_uses_magick_on_im7(tmp_path, monkeypatch):
     monkeypatch.setattr("shutil.which",
                         lambda b: f"/usr/bin/{b}" if b == "magick" else None)
     captured = _capture_sandbox_run(monkeypatch)
-    from maverick.tools.imagemagick_tool import imagemagick_tool
+    from lightwork.tools.imagemagick_tool import imagemagick_tool
     out = imagemagick_tool(_RecordingSandbox(tmp_path)).fn({
         "op": "composite", "base_path": "b.png",
         "overlay_path": "o.png", "output_path": "out.png",
@@ -318,7 +318,7 @@ def test_imagemagick_composite_uses_im6_composite_binary(tmp_path, monkeypatch):
     monkeypatch.setattr("shutil.which",
                         lambda b: f"/usr/bin/{b}" if b in present else None)
     captured = _capture_sandbox_run(monkeypatch)
-    from maverick.tools.imagemagick_tool import imagemagick_tool
+    from lightwork.tools.imagemagick_tool import imagemagick_tool
     out = imagemagick_tool(_RecordingSandbox(tmp_path)).fn({
         "op": "composite", "base_path": "b.png",
         "overlay_path": "o.png", "output_path": "out.png",

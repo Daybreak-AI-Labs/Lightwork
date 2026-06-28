@@ -11,7 +11,7 @@ from __future__ import annotations
 
 import base64
 
-from maverick_shield import builtin_rules as br
+from lightwork_shield import builtin_rules as br
 
 
 def test_short_hidden_instruction_in_b64_still_caught():

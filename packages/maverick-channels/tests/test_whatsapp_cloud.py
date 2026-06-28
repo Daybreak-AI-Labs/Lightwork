@@ -11,7 +11,7 @@ import pytest
 
 fastapi = pytest.importorskip("fastapi")
 from fastapi.testclient import TestClient  # noqa: E402
-from maverick_channels.whatsapp_cloud import WhatsAppCloudChannel  # noqa: E402
+from lightwork_channels.whatsapp_cloud import WhatsAppCloudChannel  # noqa: E402
 
 APP_SECRET = "app-secret"
 VERIFY_TOKEN = "verify-me"
@@ -62,7 +62,7 @@ def test_signed_message_drives_handler_and_replies(monkeypatch):
     ch.send = AsyncMock()
     # No dedup DB in tests: claim path is exercised separately.
     monkeypatch.setattr(
-        "maverick.world_model.WorldModel",
+        "lightwork.world_model.WorldModel",
         MagicMock(side_effect=RuntimeError("no db")),
     )
     client = TestClient(ch._app)
@@ -85,7 +85,7 @@ def test_handler_exception_reply_is_redacted(monkeypatch):
     ch = _channel(handler=AsyncMock(side_effect=RuntimeError(secret)))
     ch.send = AsyncMock()
     monkeypatch.setattr(
-        "maverick.world_model.WorldModel",
+        "lightwork.world_model.WorldModel",
         MagicMock(side_effect=RuntimeError("no db")),
     )
     client = TestClient(ch._app)
@@ -140,7 +140,7 @@ def test_dedup_claim_skips_redelivery(monkeypatch):
     ch.send = AsyncMock()
     wm = MagicMock()
     wm.mark_message_processed.return_value = False  # already claimed
-    monkeypatch.setattr("maverick.world_model.WorldModel", MagicMock(return_value=wm))
+    monkeypatch.setattr("lightwork.world_model.WorldModel", MagicMock(return_value=wm))
     client = TestClient(ch._app)
     body = json.dumps(_event()).encode()
     r = client.post("/webhook/whatsapp-cloud", content=body,
@@ -266,7 +266,7 @@ def test_handler_exception_returns_generic_reply(monkeypatch):
     ch.send = AsyncMock()
     ch.handler = AsyncMock(side_effect=RuntimeError("/srv/secret/path leaked!"))
     monkeypatch.setattr(
-        "maverick.world_model.WorldModel",
+        "lightwork.world_model.WorldModel",
         MagicMock(side_effect=RuntimeError("no db")),
     )
     client = TestClient(ch._app)

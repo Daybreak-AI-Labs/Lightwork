@@ -71,25 +71,25 @@ def _install_fake_maverick(monkeypatch, sandbox):
 
     maverick_pkg = types.ModuleType("maverick")
     maverick_pkg.__path__ = []
-    budget_mod = types.ModuleType("maverick.budget")
+    budget_mod = types.ModuleType("lightwork.budget")
     budget_mod.Budget = FakeBudget
-    llm_mod = types.ModuleType("maverick.llm")
+    llm_mod = types.ModuleType("lightwork.llm")
     llm_mod.LLM = FakeLLM
-    orchestrator_mod = types.ModuleType("maverick.orchestrator")
+    orchestrator_mod = types.ModuleType("lightwork.orchestrator")
     orchestrator_mod.run_goal_sync = fake_run_goal_sync
-    sandbox_mod = types.ModuleType("maverick.sandbox")
+    sandbox_mod = types.ModuleType("lightwork.sandbox")
     sandbox_mod.LocalBackend = FakeLocalBackend
     sandbox_mod.build_sandbox = fake_build_sandbox
-    world_model_mod = types.ModuleType("maverick.world_model")
+    world_model_mod = types.ModuleType("lightwork.world_model")
     world_model_mod.WorldModel = FakeWorldModel
 
     for name, module in {
         "maverick": maverick_pkg,
-        "maverick.budget": budget_mod,
-        "maverick.llm": llm_mod,
-        "maverick.orchestrator": orchestrator_mod,
-        "maverick.sandbox": sandbox_mod,
-        "maverick.world_model": world_model_mod,
+        "lightwork.budget": budget_mod,
+        "lightwork.llm": llm_mod,
+        "lightwork.orchestrator": orchestrator_mod,
+        "lightwork.sandbox": sandbox_mod,
+        "lightwork.world_model": world_model_mod,
     }.items():
         monkeypatch.setitem(sys.modules, name, module)
 
@@ -219,7 +219,7 @@ class TestLiveRunnerSandbox:
     def test_live_runner_refuses_local_sandbox_without_explicit_opt_in(self, monkeypatch):
         calls, LocalBackend = _install_fake_maverick(monkeypatch, None)
         local_sandbox = LocalBackend()
-        sys.modules["maverick.sandbox"].build_sandbox = lambda: local_sandbox
+        sys.modules["lightwork.sandbox"].build_sandbox = lambda: local_sandbox
         monkeypatch.setenv("MAVERICK_REFLEXION", "previous")
         monkeypatch.delenv("MAVERICK_MOAT_ALLOW_LOCAL_SANDBOX", raising=False)
 
@@ -232,7 +232,7 @@ class TestLiveRunnerSandbox:
     def test_live_runner_allows_local_sandbox_with_explicit_opt_in(self, monkeypatch):
         calls, LocalBackend = _install_fake_maverick(monkeypatch, None)
         local_sandbox = LocalBackend()
-        sys.modules["maverick.sandbox"].build_sandbox = lambda: local_sandbox
+        sys.modules["lightwork.sandbox"].build_sandbox = lambda: local_sandbox
         monkeypatch.setenv("MAVERICK_MOAT_ALLOW_LOCAL_SANDBOX", "1")
 
         run_with_maverick("inspect the repo", learning_enabled=False)

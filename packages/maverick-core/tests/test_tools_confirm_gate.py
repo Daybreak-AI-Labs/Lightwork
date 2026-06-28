@@ -10,9 +10,9 @@ import asyncio
 import inspect
 
 import pytest
-from maverick.tools import as_bool
-from maverick.tools.s3_tool import s3_tool
-from maverick.tools.shopify_tool import shopify_tool
+from lightwork.tools import as_bool
+from lightwork.tools.s3_tool import s3_tool
+from lightwork.tools.shopify_tool import shopify_tool
 
 
 def test_as_bool_only_real_true_passes():

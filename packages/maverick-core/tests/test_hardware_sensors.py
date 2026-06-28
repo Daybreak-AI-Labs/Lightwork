@@ -5,8 +5,8 @@ from __future__ import annotations
 import sys
 import types
 
-from maverick.tools import hardware_sensors as hs_mod
-from maverick.tools.hardware_sensors import hardware_sensors
+from lightwork.tools import hardware_sensors as hs_mod
+from lightwork.tools.hardware_sensors import hardware_sensors
 
 
 def _entry(**kw):
@@ -90,7 +90,7 @@ def test_no_psutil_sysfs_thermal_fallback(tmp_path, monkeypatch):
     # Fans/battery need psutil: labeled unavailable with the install hint.
     assert "fans: unavailable on this host (psutil not installed" in out
     assert "battery: unavailable on this host (psutil not installed" in out
-    assert "maverick-agent[sensors]" in out
+    assert "lightwork-agent[sensors]" in out
 
 
 def test_sysfs_fallback_when_psutil_has_no_temps(tmp_path, monkeypatch):
@@ -140,7 +140,7 @@ def test_psutil_platform_without_sensor_apis(monkeypatch):
     assert "temperatures: unavailable on this host" in out
     assert "fans: unavailable on this host" in out
     # psutil IS installed: no misleading install hint.
-    assert "maverick-agent[sensors]" not in out
+    assert "lightwork-agent[sensors]" not in out
     assert "battery: 55% (on battery)" in out
 
 
@@ -158,7 +158,7 @@ def _registry_names(tmp_path, monkeypatch, config: str = ""):
         config_path.write_text(config, encoding="utf-8")
     monkeypatch.setenv("MAVERICK_CONFIG", str(config_path))
 
-    from maverick.tools import base_registry
+    from lightwork.tools import base_registry
 
     class _W:
         pass

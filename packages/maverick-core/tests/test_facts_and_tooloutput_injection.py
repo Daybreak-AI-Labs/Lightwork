@@ -16,7 +16,7 @@ secret scanner doesn't (correctly) flag the test file itself.
 from __future__ import annotations
 
 import pytest
-from maverick.safety.secret_detector import redact, scan
+from lightwork.safety.secret_detector import redact, scan
 
 # Fake credentials built from fragments -- never a literal secret in source.
 _FAKE_GITLAB = "glpat-" + ("A1b2C3d4" * 3)
@@ -57,11 +57,11 @@ def test_run_tool_redacts_secret_in_output():
     import tempfile
     from pathlib import Path
 
-    from maverick.agent import Agent
-    from maverick.blackboard import Blackboard
-    from maverick.budget import Budget
-    from maverick.swarm import SwarmContext
-    from maverick.world_model import WorldModel
+    from lightwork.agent import Agent
+    from lightwork.blackboard import Blackboard
+    from lightwork.budget import Budget
+    from lightwork.swarm import SwarmContext
+    from lightwork.world_model import WorldModel
 
     leak = f"STRIPE_KEY={_FAKE_STRIPE} and a jwt eyJabc.def.ghi"
 
@@ -96,8 +96,8 @@ def test_facts_block_value_collapses_newlines():
     import tempfile
     from pathlib import Path
 
-    from maverick.orchestrator import _brief_facts_block
-    from maverick.world_model import WorldModel
+    from lightwork.orchestrator import _brief_facts_block
+    from lightwork.world_model import WorldModel
 
     w = WorldModel(Path(tempfile.mkdtemp()) / "w.db")
     # An attacker-writable fact whose value tries to inject a forged section.
@@ -121,10 +121,10 @@ async def test_orchestrator_brief_frames_facts_as_untrusted_data(tmp_path):
     """The assembled brief must label the known-facts block as user-provided
     DATA (not new instructions) -- the same caveat every sibling recall block
     carries. This block was the only one missing it."""
-    from maverick.blackboard import Blackboard
-    from maverick.budget import Budget
-    from maverick.orchestrator import _build_orchestrator_brief
-    from maverick.world_model import WorldModel
+    from lightwork.blackboard import Blackboard
+    from lightwork.budget import Budget
+    from lightwork.orchestrator import _build_orchestrator_brief
+    from lightwork.world_model import WorldModel
 
     w = WorldModel(path=tmp_path / "w.db")
     gid = w.create_goal("do a thing", "describe it")

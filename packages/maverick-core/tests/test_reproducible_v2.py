@@ -9,7 +9,7 @@ from __future__ import annotations
 import json
 
 import pytest
-from maverick.benchmarks.reproducible_v2 import (
+from lightwork.benchmarks.reproducible_v2 import (
     MANIFEST_VERSION,
     RunConditions,
     Task,

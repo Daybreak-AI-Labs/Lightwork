@@ -3,7 +3,7 @@ requires = ["setuptools>=68"]
 build-backend = "setuptools.build_meta"
 
 [project]
-name = "maverick-channels"
+name = "lightwork-channels"
 version = "0.1.6"
 description = "Channel adapters for Maverick (Telegram, Discord, Slack, Signal, ...)"
 requires-python = ">=3.10"
@@ -11,7 +11,7 @@ license = { text = "LicenseRef-Proprietary" }
 authors = [{ name = "cdayAI" }]
 readme = "README.md"
 dependencies = [
-    "maverick-agent>=0.1.6",
+    "lightwork-agent>=0.1.6",
 ]
 
 [project.optional-dependencies]
@@ -50,4 +50,4 @@ Homepage = "https://github.com/Day-AI-Labs/maverick"
 
 [tool.setuptools.packages.find]
 where = ["."]
-include = ["maverick_channels*"]
+include = ["lightwork_channels*"]

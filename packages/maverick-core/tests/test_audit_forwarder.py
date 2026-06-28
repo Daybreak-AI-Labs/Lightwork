@@ -5,7 +5,7 @@ import socket
 import threading
 
 import pytest
-from maverick.audit import forwarder
+from lightwork.audit import forwarder
 
 
 def test_parse_dest_schemes():
