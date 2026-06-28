@@ -223,8 +223,10 @@ def test_run_cli_requires_enable(_home, monkeypatch):
     assert r.exit_code != 0 and "self-harness is off" in r.output
 
 
-def test_run_cli_dry_pass(_home):
+def test_run_cli_dry_pass(_home, monkeypatch):
     from maverick import reflexion
+    from maverick import self_improvement as si
+    monkeypatch.setattr(si, "enabled", lambda: True)         # gate ON, so "dry" is the reason
     for i in range(3):
         reflexion.record(goal_text=f"export the nightly ledger {i}", failure_class="timeout",
                          failure_msg="timed out", reflection="r", model_id="claude-x")
@@ -253,3 +255,21 @@ def test_run_cli_retires_stale(_home, monkeypatch):
     assert r.exit_code == 0, r.output
     assert "retired=1" in r.output
     assert sh.recall_addendum("claude-x", sh._store_path()) == ""
+
+
+def test_run_cli_warns_when_frozen(_home, monkeypatch):
+    import maverick.calibration as calibration
+    monkeypatch.setattr(calibration, "learning_frozen", lambda: True)
+    r = CliRunner().invoke(main, ["self-harness", "run", "--model", "claude-x"])
+    assert r.exit_code == 0, r.output
+    assert "FROZEN" in r.output and "verifier drift" in r.output
+
+
+def test_run_cli_warns_when_gate_off(_home, monkeypatch):
+    import maverick.calibration as calibration
+    from maverick import self_improvement as si
+    monkeypatch.setattr(calibration, "learning_frozen", lambda: False)
+    monkeypatch.setattr(si, "enabled", lambda: False)        # promotion gate OFF
+    r = CliRunner().invoke(main, ["self-harness", "run", "--model", "claude-x"])
+    assert r.exit_code == 0, r.output
+    assert "promotion gate is OFF" in r.output

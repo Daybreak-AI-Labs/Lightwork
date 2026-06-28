@@ -150,7 +150,11 @@ safety model as skills and insights.
   Without a live A/B scorer (a real model + eval harness, injected
   programmatically) it is a **dry** pass that writes no new guidance; stale-line
   retirement still runs — so a cron'd `run` keeps guidance fresh before live
-  scoring is wired. Promotion still requires `[self_improvement] enable`.
+  scoring is wired. Promotion still requires `[self_improvement] enable`. The
+  command also surfaces **governance readiness** — if a pass promoted nothing it
+  says *why*: learning is frozen (verifier drift), the promotion gate is off, or
+  it was a dry pass — so a paused loop is explained, not mistaken for broken
+  (`SelfHarnessReport.frozen` / `.gate_enabled`).
 - `maverick self-harness show [--verbose]` — what was learned per model;
   `--verbose` adds each line's provenance (signature, held-out delta, samples,
   learned/updated dates) so an operator can judge the evidence behind it.
