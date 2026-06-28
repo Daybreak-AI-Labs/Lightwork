@@ -116,6 +116,30 @@ def test_facts_block_value_collapses_newlines():
         assert ln.startswith("  ") or ln == "", ln
 
 
+def test_multiline_fact_env_secret_is_redacted_before_newline_collapse():
+    """Redaction must see original line boundaries before facts are flattened.
+
+    env_secret intentionally requires an assignment to start a string or line;
+    flattening first would turn `note\nAPI_TOKEN=...` into an inline assignment
+    and leak the token into the orchestrator brief.
+    """
+    import tempfile
+    from pathlib import Path
+
+    from maverick.orchestrator import _brief_facts_block
+    from maverick.world_model import WorldModel
+
+    env_token = "abcdefghijklmnopqrstuvwxyz1234567890"
+    w = WorldModel(Path(tempfile.mkdtemp()) / "w.db")
+    w.upsert_fact("note", f"remember this\nAPI_TOKEN={env_token}")
+
+    block = _brief_facts_block(w, goal_id=1, shield=None)
+
+    assert env_token not in block
+    assert "API_TOKEN=[REDACTED:env_secret]" in block
+    assert len([ln for ln in block.splitlines() if ln.strip()]) == 1
+
+
 @pytest.mark.asyncio
 async def test_orchestrator_brief_frames_facts_as_untrusted_data(tmp_path):
     """The assembled brief must label the known-facts block as user-provided
