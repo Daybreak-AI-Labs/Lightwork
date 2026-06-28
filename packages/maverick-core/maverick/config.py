@@ -580,12 +580,33 @@ def get_self_harness() -> dict:
         except (TypeError, ValueError):
             return default
 
+    raw_by_class = cfg.get("min_support_by_class", {})
+    by_class = {}
+    if isinstance(raw_by_class, dict):
+        for k, v in raw_by_class.items():
+            try:
+                by_class[str(k)] = max(1, int(v))
+            except (TypeError, ValueError):
+                continue
+
+    def _factor(key):
+        v = cfg.get(key)
+        try:
+            return float(v) if v is not None else None
+        except (TypeError, ValueError):
+            return None
+
     return {
         "enable": bool(cfg.get("enable", False)),
         "min_support": max(1, _num("min_support", 3, int)),
+        "min_support_by_class": by_class,
         "require_held_out": bool(cfg.get("require_held_out", False)),
         "min_held_out": max(0, _num("min_held_out", 0, int)),
         "min_delta": max(0.0, _num("min_delta", 0.0, float)),
+        "confidence_z": max(0.0, _num("confidence_z", 0.0, float)),
+        "max_cost_factor": _factor("max_cost_factor"),
+        "max_latency_factor": _factor("max_latency_factor"),
+        "max_tool_calls_factor": _factor("max_tool_calls_factor"),
         "semantic_mining": bool(cfg.get("semantic_mining", False)),
         "retire_after_days": max(0.0, _num("retire_after_days", 0.0, float)),
     }

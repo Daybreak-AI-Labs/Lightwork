@@ -87,8 +87,12 @@ safety model as skills and insights.
   rejected. A live caller can tighten the evidence bar with opt-in floors
   (default off, back-compatible): `require_held_out` (never promote on only the
   mined examples), `min_held_out` (an unseen-sample floor — a 1-of-1 "win" is not
-  evidence), and `min_delta` (an effect-size floor — sub-threshold lift on noisy
-  agent eval scores is not a durable improvement).
+  evidence), `min_delta` (an effect-size floor), `confidence_z` (the candidate's
+  held-out **Wilson lower bound** must clear the baseline — statistically-confident
+  generalization, not luck), and `max_cost_factor`/`max_latency_factor`/
+  `max_tool_calls_factor` (reject a line that lifts pass-rate while regressing
+  **cost/latency/tool-churn** — a scorer may return `{success, cost, latency,
+  tool_calls}`). Mining support is per-class-adaptable (`min_support_by_class`).
 - **Reversible + audited:** every applied line has a rollback handle and a signed
   `LEARNING_UPDATE` audit row.
 - **Bounded + non-eroding:** an addendum is capped (`_MAX_LINES_PER_MODEL`,
