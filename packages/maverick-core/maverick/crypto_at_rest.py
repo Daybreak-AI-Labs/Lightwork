@@ -399,6 +399,7 @@ def rotate_at_rest_key() -> str:
         raise EncryptionUnavailable(
             "at-rest encryption needs the 'cryptography' package."
         )
+    _secure_key_dir()
     d = _keyring_dir()
     try:
         d.mkdir(mode=0o700, parents=True, exist_ok=True)
