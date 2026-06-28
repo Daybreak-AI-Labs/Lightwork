@@ -1392,3 +1392,59 @@ def test_run_all_models_disabled_is_empty(monkeypatch):
     monkeypatch.setattr("maverick.config.load_config", dict)
     from maverick import self_improvement_runner as runner
     assert runner.run_self_harness_all_models() == {}
+
+
+# ---------- wave 17: outcome-correlated efficacy ----------
+
+def test_note_outcome_counters_and_efficacy(monkeypatch, store):
+    ctrl = _enable(monkeypatch)
+    _promote_line(store, "M", "c0", "the learned line", ctrl)
+    assert sh.line_efficacy("M", store)[0]["rate"] is None       # no outcomes yet
+    sh.note_outcome("M", True, path=store)
+    sh.note_outcome("M", True, path=store)
+    sh.note_outcome("M", False, path=store)
+    eff = sh.line_efficacy("M", store)[0]
+    assert eff["success"] == 2 and eff["failure"] == 1 and eff["total"] == 3
+    assert abs(eff["rate"] - 2 / 3) < 1e-9
+
+
+def test_note_outcome_attributes_to_all_or_one(monkeypatch, store):
+    ctrl = _enable(monkeypatch)
+    _promote_line(store, "M", "c0", "line one here", ctrl)
+    _promote_line(store, "M", "c1", "line two here", ctrl)
+    sh.note_outcome("M", True, path=store)                       # all co-present lines
+    assert all(e["success"] == 1 for e in sh.line_efficacy("M", store))
+    sh.note_outcome("M", False, line="line one here", path=store)   # one targeted line
+    by_text = {e["text"]: e for e in sh.line_efficacy("M", store)}
+    assert by_text["line one here"]["failure"] == 1 and by_text["line two here"]["failure"] == 0
+
+
+def test_note_outcome_counters_survive_repromote(monkeypatch, store):
+    ctrl = _enable(monkeypatch)
+    _promote_line(store, "M", "c0", "durable line", ctrl)
+    sh.note_outcome("M", True, path=store)
+    _promote_line(store, "M", "c0", "durable line", ctrl)        # re-promote keeps counters
+    assert sh.line_efficacy("M", store)[0]["success"] == 1
+
+
+def test_review_efficacy_demotes_dead_weight(monkeypatch, store):
+    ctrl = _enable(monkeypatch)
+    _promote_line(store, "M", "c0", "good guidance line", ctrl)
+    _promote_line(store, "M", "c1", "dead guidance line", ctrl)
+    # live A/B: "good" still lifts; "dead" no longer helps (lift 0)
+    def sw(ln, cases):
+        return 0.9 if ln == "good guidance line" else 0.4
+    demoted = sh.review_efficacy("M", ["c1", "c2"], score_with=sw,
+                                 score_without=lambda _ln, c: 0.4,
+                                 min_lift=0.0, min_samples=2, path=store)
+    assert demoted == ["dead guidance line"]
+    recalled = sh.recall_addendum("M", store)
+    assert "good guidance line" in recalled and "dead guidance line" not in recalled
+
+
+def test_review_efficacy_no_cases_is_noop(monkeypatch, store):
+    ctrl = _enable(monkeypatch)
+    _promote_line(store, "M", "c0", "kept line", ctrl)
+    assert sh.review_efficacy("M", [], score_with=lambda _ln, c: 0.0,
+                              score_without=lambda _ln, c: 0.9, path=store) == []
+    assert "kept line" in sh.recall_addendum("M", store)         # nothing demoted

@@ -1245,6 +1245,94 @@ def note_recall(model_id: str | None, *, now: float | None = None,
         log.debug("self_harness: note_recall failed", exc_info=True)
 
 
+# ---- OUTCOME-CORRELATED EFFICACY ------------------------------------------
+# Recall tracks *that* guidance was used; efficacy tracks whether using it
+# correlated with SUCCESS. Two complementary signals: cheap recall->outcome
+# counters in the sidecar (a coarse aggregate -- all of a model's lines co-occur
+# in its prompt, so an outcome is attributed to all current lines), and a
+# causal A/B re-review (`review_efficacy`) that re-measures a line's lift with a
+# live scorer and demotes dead weight. Demotion is the REVERSIBLE direction
+# (removing a line is always safe -- it's the rollback handle), so it goes through
+# the audited `forget` path, not the promotion gate.
+
+def note_outcome(model_id: str | None, success: bool, *, line: str | None = None,
+                 path: Path | None = None) -> None:
+    """Record that a run using ``model_id``'s guidance succeeded or failed,
+    incrementing per-line ``recall_success``/``recall_failure`` counters in the
+    sidecar. Attributed to ``line`` if given, else to ALL of the model's current
+    lines (they all rode the same prompt). Best-effort; never raises."""
+    if not model_id:
+        return
+    mid = str(model_id)
+    field_name = "recall_success" if success else "recall_failure"
+    try:
+        p = path if path is not None else _store_path()
+        from .file_lock import cross_process_lock
+        with _lock, cross_process_lock(p):
+            meta = load_line_meta(p)
+            lines = [line] if line is not None else _bullets(load_addenda(p).get(mid, ""))
+            changed = False
+            for ln in lines:
+                rec = meta.get(_line_id(mid, ln))
+                if rec is not None:
+                    rec[field_name] = int(rec.get(field_name) or 0) + 1
+                    changed = True
+            if changed:
+                _write_line_meta(meta, p)
+    except Exception:  # pragma: no cover -- efficacy tracking never perturbs a run
+        log.debug("self_harness: note_outcome failed", exc_info=True)
+
+
+def line_efficacy(model_id: str, path: Path | None = None) -> list[dict]:
+    """Per-line outcome counters for ``model_id`` (recalled-block order): each
+    ``{text, success, failure, total, rate}`` where ``rate`` is success/total
+    (``None`` until there is at least one recorded outcome). Read-only."""
+    block = load_addenda(path).get(str(model_id), "")
+    meta = load_line_meta(path)
+    out = []
+    for ln in _bullets(block):
+        rec = meta.get(_line_id(str(model_id), ln)) or {}
+        s = int(rec.get("recall_success") or 0)
+        f = int(rec.get("recall_failure") or 0)
+        total = s + f
+        out.append({"text": ln, "success": s, "failure": f, "total": total,
+                    "rate": (s / total) if total else None})
+    return out
+
+
+def review_efficacy(model_id: str, cases: list[str], *,
+                    score_with: ScoreFn, score_without: ScoreFn,
+                    min_lift: float = 0.0, min_samples: int = 1,
+                    path: Path | None = None) -> list[str]:
+    """Re-measure each current line's CAUSAL lift with a live A/B and DEMOTE the
+    dead weight -- a line whose lift has fallen to ``<= min_lift`` over at least
+    ``min_samples`` cases no longer earns its place in every prompt (the model,
+    tools, or APIs moved on). Returns the demoted lines.
+
+    Demotion uses the audited `forget` path (reversible), NOT the promotion gate.
+    Scorers are injected (a real eval needs a real model); without ``cases`` it is
+    a no-op. Never raises -- a maintenance review must not perturb anything."""
+    demoted: list[str] = []
+    if not cases:
+        return demoted
+    try:
+        for ln in _bullets(load_addenda(path).get(str(model_id), "")):
+            try:
+                w, *_ = _score_parts(score_with(ln, cases))
+                wo, *_ = _score_parts(score_without(ln, cases))
+            except Exception:  # a bad scorer can't drop a line
+                continue
+            if not (isinstance(w, (int, float)) and isinstance(wo, (int, float))
+                    and math.isfinite(w) and math.isfinite(wo)):
+                continue
+            if len(cases) >= min_samples and (w - wo) <= min_lift:
+                if forget_addendum(model_id, line=ln, path=path):
+                    demoted.append(ln)
+    except Exception:  # pragma: no cover -- review never perturbs a run
+        log.debug("self_harness: review_efficacy failed", exc_info=True)
+    return demoted
+
+
 # ---- DRIVE (mine -> propose -> validate -> gate) --------------------------
 
 @dataclass
@@ -1505,6 +1593,7 @@ __all__ = [
     "enabled", "recall_addendum", "load_addenda",
     "list_learned", "forget_addendum", "retire_stale",
     "load_line_meta", "line_provenance", "note_recall",
+    "note_outcome", "line_efficacy", "review_efficacy",
     "find_conflicts", "detect_store_conflicts",
     "FailureSignature", "mine_failures", "count_eligible", "semantic_similarity",
     "HarnessProposal", "ProposeFn", "propose_addendum", "llm_proposer",
