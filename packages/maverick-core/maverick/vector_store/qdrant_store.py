@@ -25,7 +25,12 @@ from ..paths import data_dir
 log = logging.getLogger(__name__)
 
 
-DEFAULT_PATH = data_dir("qdrant")
+DEFAULT_PATH = data_dir("qdrant", tenant=None)
+
+
+def _default_path() -> Path:
+    """Resolve the default local Qdrant path for the active tenant."""
+    return data_dir("qdrant")
 
 
 def _active_tenant() -> str | None:
@@ -74,9 +79,7 @@ class QdrantStore:
         if url:
             self._client = QdrantClient(url=url, api_key=api_key)
         else:
-            store_path = Path(
-                path or os.environ.get("MAVERICK_QDRANT_PATH", str(DEFAULT_PATH))
-            )
+            store_path = Path(path or os.environ.get("MAVERICK_QDRANT_PATH") or _default_path())
             store_path.mkdir(parents=True, exist_ok=True)
             try:
                 os.chmod(store_path, 0o700)

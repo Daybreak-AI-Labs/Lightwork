@@ -266,3 +266,47 @@ def test_server_tenant_scope_uses_authenticated_principal(monkeypatch):
     assert world.conversation_key == ("slack", "UALICE")
     assert captured["kwargs"]["user_id"] == "slack:UALICE"
     assert captured["tenant"] == "slack%3AUALICE"
+
+
+def test_lazy_default_paths_follow_active_tenant(monkeypatch, tmp_path):
+    monkeypatch.setenv("MAVERICK_HOME", str(tmp_path))
+    monkeypatch.delenv("MAVERICK_CHROMA_PATH", raising=False)
+    monkeypatch.delenv("MAVERICK_QDRANT_PATH", raising=False)
+
+    from maverick.paths import tenant_scope
+    from maverick.vector_store import chroma_store, qdrant_store
+
+    with tenant_scope(tenant="tenant-a"):
+        # Simulate a lazy import/use while tenant-a is active.
+        assert chroma_store._default_path() == tmp_path / "tenants" / "tenant-a" / "vector_store"
+        assert qdrant_store._default_path() == tmp_path / "tenants" / "tenant-a" / "qdrant"
+
+    with tenant_scope(tenant="tenant-b"):
+        assert chroma_store._default_path() == tmp_path / "tenants" / "tenant-b" / "vector_store"
+        assert qdrant_store._default_path() == tmp_path / "tenants" / "tenant-b" / "qdrant"
+
+
+def test_lazy_skill_distillation_store_follows_active_tenant(monkeypatch, tmp_path):
+    monkeypatch.setenv("MAVERICK_HOME", str(tmp_path))
+
+    from maverick.paths import tenant_scope
+    from maverick.skill import distillation_local, distillation_v2
+
+    skill = {
+        "name": "tenant-skill",
+        "triggers": ["tenant skill"],
+        "tools_needed": [],
+        "summary": "tenant skill",
+        "n_examples": 1,
+    }
+
+    with tenant_scope(tenant="tenant-a"):
+        path_a = distillation_local.save_skill(skill)
+        assert path_a.parent == tmp_path / "tenants" / "tenant-a" / "learned-skills"
+        assert distillation_v2.signatures_from_store()
+
+    with tenant_scope(tenant="tenant-b"):
+        path_b = distillation_local.save_skill(skill)
+        assert path_b.parent == tmp_path / "tenants" / "tenant-b" / "learned-skills"
+        assert distillation_v2.signatures_from_store()
+        assert not (tmp_path / "tenants" / "tenant-b" / "learned-skills" / "missing.md").exists()
