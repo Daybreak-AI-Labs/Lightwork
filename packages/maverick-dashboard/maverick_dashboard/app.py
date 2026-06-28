@@ -4822,7 +4822,7 @@ async def readyz() -> JSONResponse:
 
 
 @app.get("/metrics", response_class=PlainTextResponse)
-async def metrics() -> PlainTextResponse:
+async def metrics(request: Request) -> PlainTextResponse:
     """Prometheus text format. Gated by the same bearer as /api/v1."""
     from maverick.runner import MAX_CONCURRENT_GOALS, _run_semaphore
     try:
@@ -4872,14 +4872,16 @@ async def metrics() -> PlainTextResponse:
     for qstatus, qn in sorted(qcounts.items()):
         lines.append(f'maverick_queue_jobs{{status="{qstatus}"}} {qn}')
 
-    # Per-principal spend today — answers "which user is burning budget?", which
-    # the deployment-wide cost gauges can't. Populated by the quota ledger
-    # (recorded per run); empty when quotas aren't being recorded.
-    try:
-        from maverick.quotas import UsageLedger
-        user_spend = UsageLedger().spend_by_principal()
-    except Exception:
-        user_spend = {}
+    # Per-principal spend today is cross-user control-plane data. Keep it
+    # visible to the local single-user/no-auth operator and dashboard admins,
+    # but do not leak raw principal identifiers or spend to ordinary callers.
+    user_spend: dict[str, float] = {}
+    if goal_owner_filter(request) is None:
+        try:
+            from maverick.quotas import UsageLedger
+            user_spend = UsageLedger().spend_by_principal()
+        except Exception:
+            user_spend = {}
     if user_spend:
         lines += [
             "# HELP maverick_user_spend_dollars_today Per-principal spend for the current UTC day",
