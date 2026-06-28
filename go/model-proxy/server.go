@@ -30,7 +30,12 @@ type HTTPUpstream struct {
 // NewHTTPUpstream builds an upstream caller with the given per-request timeout
 // (the Python default is 600s).
 func NewHTTPUpstream(timeout time.Duration) *HTTPUpstream {
-	return &HTTPUpstream{Client: &http.Client{Timeout: timeout}}
+	return &HTTPUpstream{Client: &http.Client{
+		Timeout: timeout,
+		CheckRedirect: func(_ *http.Request, _ []*http.Request) error {
+			return http.ErrUseLastResponse
+		},
+	}}
 }
 
 // Do issues the upstream request and buffers the response.
