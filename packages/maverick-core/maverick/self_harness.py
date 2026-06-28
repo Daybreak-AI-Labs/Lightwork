@@ -89,7 +89,7 @@ def settings() -> dict:
                 "confidence_z": 0.0, "max_cost_factor": None,
                 "max_latency_factor": None, "max_tool_calls_factor": None,
                 "semantic_mining": False, "retire_after_days": 0.0,
-                "candidates_per_signature": 1}
+                "candidates_per_signature": 1, "mine_bucket_by": ()}
 
 
 def _store_path() -> Path:
@@ -433,6 +433,9 @@ class FailureSignature:
     signature: str              # short human description of the recurring failure
     support: int                # how many traces back it
     examples: tuple[str, ...]   # representative (sanitized) goal texts
+    context: str = ""           # optional mining scope (e.g. "domain=finance")
+                                # when failures were bucketed by a finer dimension;
+                                # "" = model-wide (the default, backward compatible)
 
 
 def _tokens(text: str) -> set[str]:
@@ -494,10 +497,31 @@ def count_eligible(reflexions: list[dict], *, model_id: str) -> int:
     return sum(1 for r in (reflexions or []) if _is_minable(r, model_id))
 
 
+# Dimensions a caller may bucket mining by (per-domain etc.), beyond the always-on
+# (model, failure_class). Allowlisted so a caller can't bucket by a high-cardinality
+# free-text field (e.g. goal_text) and shatter every trace into its own group.
+# ``domain`` is the grounded one -- the department pack a run executed as, already
+# tracked on the reflexion and used by dreaming for per-department consolidation.
+_BUCKET_DIMS = ("domain",)
+
+
+def _bucket_key(r: dict, bucket_by: tuple[str, ...]) -> tuple[str, ...]:
+    """The extra group key for one reflexion under ``bucket_by`` (a tuple of
+    allowlisted scalar reflexion fields). Missing/None -> "" so untagged traces
+    still cluster together rather than each forming a singleton bucket."""
+    return tuple("" if r.get(k) is None else str(r.get(k)) for k in bucket_by)
+
+
+def _context_str(bucket_by: tuple[str, ...], values: tuple[str, ...]) -> str:
+    """Human "domain=finance" scope string from a bucket key (empty parts dropped)."""
+    return ", ".join(f"{k}={v}" for k, v in zip(bucket_by, values, strict=False) if v)
+
+
 def mine_failures(
     reflexions: list[dict], *, model_id: str, min_support: int = 3,
     similarity: float = 0.3, min_support_by_class: dict[str, int] | None = None,
     similarity_fn: Callable[[str, str], float] | None = None,
+    bucket_by: tuple[str, ...] = (),
 ) -> list[FailureSignature]:
     """Cluster ONE model's failure traces into recurring signatures.
 
@@ -515,6 +539,13 @@ def mine_failures(
     determinism guarantee to hold; :func:`semantic_similarity` is the built-in
     deterministic default the ``semantic_mining`` flag selects. A raising/garbage
     fn degrades to "no match" (a fresh cluster), never crashing the pass.
+
+    ``bucket_by`` mines at a FINER granularity than model-wide: an allowlisted
+    tuple of scalar reflexion fields (``("domain",)``) sub-groups failures so a
+    department-specific weakness yields a *department-scoped* signature (its
+    ``context`` records the bucket and the proposed guidance is scoped to it).
+    Unknown/high-cardinality dims are rejected by the caller (see ``_BUCKET_DIMS``);
+    the always-on (model, failure_class) grouping is unchanged when empty.
 
     SCOPE GUARD (trace-poisoning defense): only UNSCOPED failures -- ones with
     no ``channel`` and no ``user_id`` -- are mined. A scoped reflexion came from
@@ -545,12 +576,20 @@ def mine_failures(
     mine.sort(key=lambda r: (str(r.get("failure_class") or "error"),
                              str(r.get("goal_text") or ""),
                              str(r.get("failure_msg") or "")))
-    by_class: dict[str, list[dict]] = {}
+    # Group by (failure_class, bucket-key). With the default empty ``bucket_by``
+    # the bucket-key is ``()`` for every record -> one group per class, identical
+    # to the historical by-class grouping (the determinism proof relies on this).
+    bucket_by = tuple(bucket_by or ())
+    by_group: dict[tuple[str, tuple[str, ...]], list[dict]] = {}
     for r in mine:
-        by_class.setdefault(str(r.get("failure_class") or "error"), []).append(r)
+        key = (str(r.get("failure_class") or "error"), _bucket_key(r, bucket_by))
+        by_group.setdefault(key, []).append(r)
 
     out: list[FailureSignature] = []
-    for fclass, recs in by_class.items():
+    # sorted() so group iteration order is deterministic regardless of dict
+    # insertion order (matters once a class splits into several buckets).
+    for (fclass, bucket_vals), recs in sorted(by_group.items()):
+        context = _context_str(bucket_by, bucket_vals)
         # Adaptive support: some failure classes warrant a lower (or higher)
         # evidence bar -- two identical auth failures against the same connector
         # are plenty; two unrelated timeouts may not be. Per-class override falls
@@ -599,10 +638,16 @@ def mine_failures(
                     for c in cluster if str(c.get("goal_text", "")).strip()
                 )
             )[:3]
+            sig_text = _summarize_signature(cluster)
+            # Fold the bucket scope into the signature TEXT too (when present) so
+            # it shows up in `show`, the audit, and conflict detection for free,
+            # and so two domains' same-class clusters are distinct signatures.
+            if context:
+                sig_text = f"{sig_text} [{context}]"
             out.append(FailureSignature(
                 model_id=str(model_id), failure_class=fclass,
-                signature=_summarize_signature(cluster),
-                support=len(cluster), examples=examples,
+                signature=sig_text, support=len(cluster), examples=examples,
+                context=context,
             ))
     # Strongest weaknesses first.
     out.sort(key=lambda s: s.support, reverse=True)
@@ -748,11 +793,15 @@ def _default_propose(sig: FailureSignature) -> str:
     """Deterministic fallback proposer (no LLM): a failure-class-grounded
     guidance line, templated so the loop runs and is testable without a
     provider. Specific by class; falls back to a generic (sanitized) line for an
-    unknown class."""
+    unknown class. A bucket ``context`` (e.g. domain-scoped mining) is folded in
+    so the guidance names the scope it was learned in."""
+    # ``sig.context`` is "domain=finance"-style (derived from allowlisted scalar
+    # fields), so it carries no trace-derived free text into the prompt.
+    scope = f" (seen in {sig.context})" if sig.context else ""
     specific = _CLASS_GUIDANCE.get(sig.failure_class)
     if specific:
-        return f"When a goal resembles your past {sig.failure_class} failures, {specific}"
-    return (f"When a goal resembles your past {sig.failure_class} failures "
+        return f"When a goal resembles your past {sig.failure_class} failures{scope}, {specific}"
+    return (f"When a goal resembles your past {sig.failure_class} failures{scope} "
             f"({sig.signature}), slow down and verify the precondition that "
             f"tripped you before acting.")
 
@@ -1217,6 +1266,7 @@ def run_self_harness(
     candidates_per_signature: int = 1,
     semantic_mining: bool = False,
     similarity_fn: Callable[[str, str], float] | None = None,
+    bucket_by: tuple[str, ...] = (),
 ) -> SelfHarnessReport:
     """One self-harness pass for ``model_id``: mine weaknesses, propose minimal
     edits, validate on held-in/held-out, and GATE each survivor through the
@@ -1226,7 +1276,9 @@ def run_self_harness(
     validation is skipped and the pass is a dry inspection (nothing is applied).
     ``semantic_mining`` (or an explicit ``similarity_fn``) clusters failures by
     meaning rather than strict token overlap -- an injected fn wins, else the flag
-    selects the deterministic built-in :func:`semantic_similarity`.
+    selects the deterministic built-in :func:`semantic_similarity`. ``bucket_by``
+    mines at a finer granularity (e.g. ``("domain",)`` for department-scoped
+    weaknesses + guidance).
     Returns a :class:`SelfHarnessReport`. Never raises -- a learning pass must
     not perturb anything."""
     report = SelfHarnessReport(model_id=str(model_id))
@@ -1237,7 +1289,7 @@ def run_self_harness(
         sim_fn = similarity_fn or (semantic_similarity if semantic_mining else None)
         sigs = mine_failures(reflexions, model_id=model_id, min_support=min_support,
                              min_support_by_class=min_support_by_class,
-                             similarity_fn=sim_fn)
+                             similarity_fn=sim_fn, bucket_by=bucket_by)
         report.mined = len(sigs)
         for sig in sigs:
             # The addendum block holds at most _MAX_LINES_PER_MODEL lines. Stop

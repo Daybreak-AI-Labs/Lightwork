@@ -1053,3 +1053,99 @@ def test_runner_pass_applies_semantic_config(monkeypatch, store):
         rs, model_id="M", held_in=["a", "b"], held_out=["c", "d", "e"], controller=ctrl,
         score_with=lambda a, c: 0.95, score_without=lambda a, c: 0.4)
     assert rep.mined == 1 and rep.promoted == 1     # config flag drove semantic clustering
+
+
+# ---------- wave 9: per-domain mining granularity (bucket_by) ----------
+
+def _refl_d(model, fclass, goal, domain):
+    return {"model_id": model, "failure_class": fclass, "goal_text": goal,
+            "failure_msg": "x", "channel": None, "user_id": None, "domain": domain}
+
+
+def test_mine_bucket_by_domain_splits_signatures():
+    # Same class + same goal text across two departments.
+    rs = ([_refl_d("M", "timeout", "process the report", "finance") for _ in range(3)]
+          + [_refl_d("M", "timeout", "process the report", "sales") for _ in range(3)])
+    # Model-wide (default): one signature backed by all six.
+    flat = sh.mine_failures(rs, model_id="M", min_support=3)
+    assert len(flat) == 1 and flat[0].support == 6 and flat[0].context == ""
+    # Bucketed by domain: two scoped signatures, three each.
+    scoped = sh.mine_failures(rs, model_id="M", min_support=3, bucket_by=("domain",))
+    assert len(scoped) == 2
+    assert {s.context for s in scoped} == {"domain=finance", "domain=sales"}
+    assert all(s.support == 3 for s in scoped)
+    # The scope is folded into the signature text too (shown in show/audit).
+    assert all(s.context in s.signature for s in scoped)
+
+
+def test_mine_bucket_by_untagged_groups_together():
+    # domain=None records bucket under "" (one group), not singletons.
+    rs = [_refl_d("M", "timeout", "process the report", None) for _ in range(3)]
+    scoped = sh.mine_failures(rs, model_id="M", min_support=3, bucket_by=("domain",))
+    assert len(scoped) == 1 and scoped[0].context == ""
+
+
+def test_default_propose_scopes_to_context():
+    sig = sh.FailureSignature("M", "timeout", "timeout: boom", 3,
+                              ("process the report",), context="domain=finance")
+    line = sh._default_propose(sig)
+    assert "seen in domain=finance" in line
+    # no context -> unchanged phrasing (back-compat)
+    plain = sh._default_propose(sh.FailureSignature("M", "timeout", "timeout: boom", 3, ()))
+    assert "seen in" not in plain
+
+
+def test_mine_bucket_by_is_deterministic_under_permutation():
+    rs = ([_refl_d("M", "timeout", "process the report", "finance") for _ in range(3)]
+          + [_refl_d("M", "timeout", "process the report", "sales") for _ in range(2)])
+    a = sh.mine_failures(rs, model_id="M", min_support=2, bucket_by=("domain",))
+    b = sh.mine_failures(list(reversed(rs)), model_id="M", min_support=2, bucket_by=("domain",))
+    assert [(s.context, s.signature, s.support) for s in a] == \
+           [(s.context, s.signature, s.support) for s in b]
+
+
+def test_run_self_harness_bucket_by_domain(monkeypatch, store):
+    ctrl = _enable(monkeypatch)
+    rs = ([_refl_d("M", "timeout", "process the report", "finance") for _ in range(3)]
+          + [_refl_d("M", "timeout", "process the report", "sales") for _ in range(3)])
+    rep = sh.run_self_harness(
+        rs, model_id="M", controller=ctrl, min_support=3, path=store,
+        held_in=["a", "b"], held_out=["c", "d", "e", "f", "g"],
+        score_with=lambda a, c: 0.9, score_without=lambda a, c: 0.4,
+        bucket_by=("domain",))
+    assert rep.mined == 2 and rep.promoted == 2     # one scoped line per department
+    recalled = sh.recall_addendum("M", store)
+    assert "domain=finance" in recalled and "domain=sales" in recalled
+
+
+def test_config_mine_bucket_by_allowlist(monkeypatch):
+    from maverick import config
+    monkeypatch.setattr(config, "load_config", lambda *a, **k: {
+        "self_harness": {"mine_bucket_by": ["domain"]}})
+    assert config.get_self_harness()["mine_bucket_by"] == ("domain",)
+    # a bare string is accepted
+    monkeypatch.setattr(config, "load_config", lambda *a, **k: {
+        "self_harness": {"mine_bucket_by": "domain"}})
+    assert config.get_self_harness()["mine_bucket_by"] == ("domain",)
+    # unknown / high-cardinality dims are dropped (anti-shatter guard)
+    monkeypatch.setattr(config, "load_config", lambda *a, **k: {
+        "self_harness": {"mine_bucket_by": ["goal_text", "domain", "domain"]}})
+    assert config.get_self_harness()["mine_bucket_by"] == ("domain",)
+    monkeypatch.setattr(config, "load_config", lambda *a, **k: {"self_harness": {}})
+    assert config.get_self_harness()["mine_bucket_by"] == ()
+    assert sh.settings()["mine_bucket_by"] == ()
+
+
+def test_runner_pass_applies_bucket_by_config(monkeypatch, store):
+    from maverick import config
+    from maverick import self_improvement_runner as runner
+    ctrl = _enable(monkeypatch)
+    monkeypatch.setattr(config, "load_config", lambda *a, **k: {
+        "self_harness": {"enable": True, "mine_bucket_by": ["domain"]}})
+    monkeypatch.setattr(sh, "_store_path", lambda: store)
+    rs = ([_refl_d("M", "timeout", "process the report", "finance") for _ in range(3)]
+          + [_refl_d("M", "timeout", "process the report", "sales") for _ in range(3)])
+    rep = runner.run_self_harness_pass(
+        rs, model_id="M", held_in=["a", "b"], held_out=["c", "d", "e", "f", "g"],
+        controller=ctrl, score_with=lambda a, c: 0.9, score_without=lambda a, c: 0.4)
+    assert rep.mined == 2 and rep.promoted == 2     # config drove per-domain mining
