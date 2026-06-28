@@ -142,24 +142,36 @@ def run_self_harness_pass(
     reflexions=None, *, model_id: str | None = None,
     held_in=None, held_out=None,
     score_with=None, score_without=None, propose_fn=None, controller=None,
-    min_support: int = 3, limit: int = 500,
-    require_held_out: bool = False, min_delta: float = 0.0, min_held_out: int = 0,
+    min_support: int | None = None, limit: int = 500,
+    require_held_out: bool | None = None, min_delta: float | None = None,
+    min_held_out: int | None = None,
 ):
     """The automatic entry point for the self-harness loop (mine -> propose ->
     validate -> gate), to be called by a scheduler / the self-improvement loop.
 
     Resolves ``model_id`` to the configured orchestrator model and loads recent
-    model-tagged reflexions when not supplied. ``score_with``/``score_without``
-    are the LIVE held-in/held-out A/B over the candidate prompt -- injected by
-    the caller because a real evaluation needs a real model; without them the
-    pass is a dry inspection that writes nothing (mirrors the rest of this
-    module: deterministic, offline-testable, no-op unless explicitly driven).
-    Never raises -- a learning pass must not perturb anything.
+    model-tagged reflexions when not supplied. The tuning knobs
+    (``min_support``/``require_held_out``/``min_delta``/``min_held_out``) default
+    to ``None`` and are then filled from ``[self_harness]`` config, so an
+    operator's settings take effect automatically; an explicit argument overrides
+    config. ``score_with``/``score_without`` are the LIVE held-in/held-out A/B
+    over the candidate prompt -- injected by the caller because a real evaluation
+    needs a real model; without them the pass is a dry inspection that writes
+    nothing. Never raises -- a learning pass must not perturb anything.
     """
     try:
         from . import self_harness
         if not self_harness.enabled():
             return self_harness.SelfHarnessReport(model_id=str(model_id or ""))
+        st = self_harness.settings()
+        if min_support is None:
+            min_support = st["min_support"]
+        if require_held_out is None:
+            require_held_out = st["require_held_out"]
+        if min_delta is None:
+            min_delta = st["min_delta"]
+        if min_held_out is None:
+            min_held_out = st["min_held_out"]
         if not model_id:
             from .llm import model_for_role
             model_id = model_for_role("orchestrator")

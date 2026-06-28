@@ -128,6 +128,14 @@ safety model as skills and insights.
 - `maverick self-harness retire --older-than-days N` — prune stale guidance.
 - `maverick self-harness conflicts` — flag contradictory lines for review.
 - `maverick self-harness log` / `forget` — the audit trail and the undo handle.
+
+Config (`[self_harness]`, resolved by `config.get_self_harness` / `settings()`):
+`enable`, `min_support`, the validation floors (`require_held_out`, `min_held_out`,
+`min_delta`), `semantic_mining`, and `retire_after_days`. Defaults preserve the
+loop's historical behavior; the installer wizard ships production-safe floors
+when self-harness is enabled. `run_self_harness_pass` reads these automatically,
+and the dashboard `/learned` page surfaces per-line provenance + conflict
+warnings (parity with `show --verbose` / `conflicts`).
 - Automatic operation: an operator/scheduler calls `run_self_harness(...)` with a
   live held-in/held-out scorer (the A/B over the candidate prompt) and the
   self-improvement controller engaged.

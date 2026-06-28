@@ -2833,6 +2833,13 @@ def _cfg_advanced(  # noqa: C901 - flat sequence of independent opt-in toggles
         lines.append("")
         lines.append("[self_harness]")
         lines.append("enable = true")
+        # Ship production-safe validation floors by default (an operator can
+        # relax them): never promote on only the mined examples, require an
+        # unseen-sample floor, and an effect-size floor so noisy lifts don't
+        # promote. No effect until a promotion pass actually runs.
+        lines.append("require_held_out = true")
+        lines.append("min_held_out = 5")
+        lines.append("min_delta = 0.02")
     if advanced.get("fleet_memory"):
         lines.append("")
         lines.append("[fleet_memory]")
