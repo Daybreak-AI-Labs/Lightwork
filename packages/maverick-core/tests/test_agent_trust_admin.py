@@ -66,6 +66,12 @@ def test_put_invalid_raises():
         agent_trust.put_agent({"id": "BAD ID"})
 
 
+def test_put_rejects_malformed_pubkey():
+    with pytest.raises(agent_trust.AgentTrustError, match="invalid pubkey"):
+        agent_trust.put_agent({"id": "vega", "pubkey": "not-a-hex-key"})
+    assert "vega" not in agent_trust.load_registry({})
+
+
 def test_managed_path_is_client_scoped(monkeypatch):
     monkeypatch.setenv("MAVERICK_CLIENT_ID", "acme")
     client.reset_client_cache()
@@ -112,6 +118,13 @@ def test_cli_add_list_show_verify_revoke_rm():
 
     r = _run("trust", "rm", "vega")
     assert r.exit_code == 0 and "removed" in r.output
+
+
+def test_cli_rejects_malformed_pubkey():
+    r = _run("trust", "add", "vega", "--pubkey", "not-a-hex-key")
+    assert r.exit_code != 0
+    assert "invalid pubkey" in r.output
+    assert "vega" not in agent_trust.load_registry({})
 
 
 def test_cli_show_unknown_errors():
