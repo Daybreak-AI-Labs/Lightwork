@@ -5,15 +5,28 @@
 #
 # Run as root (or via sudo): populating the ext4 image needs a loopback mount.
 #
-#   sudo deploy/firecracker/build-rootfs.sh
-#   IMAGE=python:3.12-slim ROOTFS_MB=2048 sudo -E deploy/firecracker/build-rootfs.sh
+#   IMAGE=ubuntu@sha256:<digest> sudo -E deploy/firecracker/build-rootfs.sh
+#   IMAGE=python@sha256:<digest> ROOTFS_MB=2048 sudo -E deploy/firecracker/build-rootfs.sh
 set -euo pipefail
 
-IMAGE="${IMAGE:-ubuntu:24.04}"
+IMAGE="${IMAGE:-}"
 ROOTFS_MB="${ROOTFS_MB:-1024}"
+
+if [ -z "$IMAGE" ]; then
+  cat >&2 <<EOF
+IMAGE is required and must be pinned by immutable digest, for example:
+  IMAGE=ubuntu@sha256:<64-hex-digest> sudo -E deploy/firecracker/build-rootfs.sh
+EOF
+  exit 2
+fi
+if [[ ! "$IMAGE" =~ @sha256:[[:xdigit:]]{64}$ ]]; then
+  echo "IMAGE must be pinned by immutable sha256 digest (example: ubuntu@sha256:<64-hex-digest>)" >&2
+  exit 2
+fi
+
 # Resolve the invoking user's home even under sudo so the artifact lands in the
 # operator's ~/.maverick, not root's.
-USER_HOME="${USER_HOME:-$(eval echo "~${SUDO_USER:-$USER}")}"
+USER_HOME="${USER_HOME:-$(eval echo "~${SUDO_USER:-${USER:-root}}")}"
 DEST="${DEST:-$USER_HOME/.maverick/firecracker/rootfs.img}"
 
 for bin in docker mkfs.ext4; do
@@ -55,6 +68,6 @@ umount "$MNT"
 
 echo "[4/4] Installing -> $DEST"
 mv "$WORK/rootfs.img" "$DEST"
-chown "${SUDO_USER:-$USER}" "$DEST" 2>/dev/null || true
+chown "${SUDO_USER:-${USER:-root}}" "$DEST" 2>/dev/null || true
 chmod 0644 "$DEST"
 echo "Rootfs installed: $DEST  (image=$IMAGE, ${ROOTFS_MB}MiB)"
