@@ -3106,6 +3106,58 @@ class PostgresWorldModel:
             row = cur.fetchone()
         return int(row[0]) if row else 0
 
+    def reserve_rate_events(
+        self,
+        key: str,
+        cap: int,
+        global_key: str,
+        global_cap: int,
+        ts: float | None = None,
+    ) -> str | None:
+        """Atomically reserve shared goal-rate capacity for one admitted event.
+
+        Returns ``None`` after inserting both the global and per-client events,
+        ``"global"`` when the global bucket is already full, or ``"key"``
+        when the per-client bucket is already full. Transaction-scoped advisory
+        locks serialize the read-modify-write for the two buckets across
+        replicas so concurrent goal creations cannot all observe stale counts
+        before recording their reservations.
+        """
+        now = ts if ts is not None else time.time()
+        cutoff = now - 60.0
+        with self._tx() as cur:
+            cur.execute(
+                "SELECT pg_advisory_xact_lock(hashtext(%s))",
+                (f"rate:{global_key}",),
+            )
+            if key != global_key:
+                cur.execute(
+                    "SELECT pg_advisory_xact_lock(hashtext(%s))",
+                    (f"rate:{key}",),
+                )
+            cur.execute(
+                "SELECT COUNT(*) FROM rate_events WHERE rl_key = %s AND ts >= %s",
+                (global_key, cutoff),
+            )
+            row = cur.fetchone()
+            global_count = int(row[0]) if row else 0
+            if global_count >= global_cap:
+                return "global"
+            cur.execute(
+                "SELECT COUNT(*) FROM rate_events WHERE rl_key = %s AND ts >= %s",
+                (key, cutoff),
+            )
+            row = cur.fetchone()
+            key_count = int(row[0]) if row else 0
+            if key_count >= cap:
+                return "key"
+            cur.execute(
+                "INSERT INTO rate_events(rl_key, ts) VALUES(%s, %s), (%s, %s)",
+                (global_key, now, key, now),
+            )
+            cur.execute("DELETE FROM rate_events WHERE ts < %s", (now - 120.0,))
+        return None
+
     @property
     def schema_version(self) -> int:
         """Schema version, for parity with SQLite WorldModel.schema_version
