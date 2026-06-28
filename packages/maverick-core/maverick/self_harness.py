@@ -41,6 +41,7 @@ from collections.abc import Callable
 from dataclasses import dataclass, field
 from pathlib import Path
 
+from . import catalog_trust
 from .paths import data_dir
 
 log = logging.getLogger(__name__)
@@ -459,6 +460,22 @@ def llm_proposer(llm, *, budget=None, model: str | None = None,
     return _propose
 
 
+def _passes_shield_scan(line: str) -> bool:
+    """Return whether Shield accepts a prompt-bound learned addendum line.
+
+    Self-harness addenda are later appended to system prompts, so LLM-generated
+    and trace-influenced proposals need the same semantic Shield pass used for
+    other prompt-surface content. The shared scanner fails open when Shield is
+    unavailable or broken; a ValueError means an actual Shield block.
+    """
+    try:
+        catalog_trust.shield_scan(line, label="self-harness addendum")
+    except ValueError as exc:
+        log.warning("self_harness: proposal rejected by Shield (%s)", exc)
+        return False
+    return True
+
+
 def propose_addendum(sig: FailureSignature, *, propose_fn: ProposeFn | None = None,
                      ) -> HarnessProposal | None:
     """Produce a MINIMAL guidance line for ``sig`` via the injected proposer
@@ -472,6 +489,8 @@ def propose_addendum(sig: FailureSignature, *, propose_fn: ProposeFn | None = No
         return None
     line = _sanitize_line(line)  # control chars + multi-line + secrets neutralized
     if not line or len(line) > 280:
+        return None
+    if not _passes_shield_scan(line):
         return None
     return HarnessProposal(
         model_id=sig.model_id, signature=sig.signature,
