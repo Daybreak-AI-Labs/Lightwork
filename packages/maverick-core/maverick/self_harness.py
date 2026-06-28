@@ -1210,6 +1210,33 @@ class SelfHarnessReport:
     applied_lines: list[str] = field(default_factory=list)
     # Advisory: (new_line, existing_line) pairs the promoted line may contradict.
     conflicts: list[tuple[str, str]] = field(default_factory=list)
+    # Governance readiness at pass time -- so an operator can tell WHY a pass
+    # promoted nothing: the verifier-drift freeze is armed (no learning while the
+    # judge is unreliable) and/or the promotion gate is disabled. Both are
+    # best-effort reads; neither changes the pass's behavior (the gate still
+    # enforces them), they only EXPLAIN it.
+    frozen: bool = False
+    gate_enabled: bool = True
+
+
+def _governance_readiness() -> tuple[bool, bool]:
+    """(frozen, gate_enabled) -- whether verifier-drift has frozen learning and
+    whether the promotion controller is enabled. Best-effort: any error reads as
+    'not frozen, enabled' so readiness reporting never blocks or misleads a pass
+    that would otherwise run."""
+    frozen = False
+    gate_enabled = True
+    try:
+        from . import calibration
+        frozen = bool(calibration.learning_frozen())
+    except Exception:  # pragma: no cover -- readiness read never blocks a pass
+        pass
+    try:
+        from . import self_improvement as si
+        gate_enabled = bool(si.enabled())
+    except Exception:  # pragma: no cover
+        pass
+    return frozen, gate_enabled
 
 
 def _best_validated_candidate(
@@ -1285,6 +1312,9 @@ def run_self_harness(
     if not enabled():
         report.skipped.append("disabled")
         return report
+    # Record governance readiness so a pass that promotes nothing can be EXPLAINED
+    # (verifier-drift freeze armed / promotion gate off), not just observed.
+    report.frozen, report.gate_enabled = _governance_readiness()
     try:
         sim_fn = similarity_fn or (semantic_similarity if semantic_mining else None)
         sigs = mine_failures(reflexions, model_id=model_id, min_support=min_support,

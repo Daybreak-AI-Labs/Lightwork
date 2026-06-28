@@ -1209,3 +1209,63 @@ def test_cycle_no_retire_when_days_zero(monkeypatch, store):
     # retire_after_days defaults to config (0 here) -> retirement is off
     _, retired = runner.run_self_harness_cycle(reflexions=[], model_id="M")
     assert retired == 0 and "old line" in sh.recall_addendum("M", store)
+
+
+# ---------- wave 11: governance-readiness visibility ----------
+
+def test_governance_readiness_helper(monkeypatch):
+    # default: not frozen, gate state from si.enabled()
+    import maverick.calibration as calibration
+    monkeypatch.setattr(calibration, "learning_frozen", lambda: False)
+    monkeypatch.setattr(si, "enabled", lambda: True)
+    assert sh._governance_readiness() == (False, True)
+    monkeypatch.setattr(calibration, "learning_frozen", lambda: True)
+    monkeypatch.setattr(si, "enabled", lambda: False)
+    assert sh._governance_readiness() == (True, False)
+    # robust to a raising calibration -> reads as (not frozen, enabled)
+    monkeypatch.setattr(calibration, "learning_frozen",
+                        lambda: (_ for _ in ()).throw(RuntimeError("boom")))
+    monkeypatch.setattr(si, "enabled", lambda: True)
+    assert sh._governance_readiness() == (False, True)
+
+
+def test_report_records_readiness_healthy(monkeypatch, store):
+    ctrl = _enable(monkeypatch)
+    import maverick.calibration as calibration
+    monkeypatch.setattr(calibration, "learning_frozen", lambda: False)
+    refl = [_refl("M", "timeout", "export the nightly ledger") for _ in range(3)]
+    rep = sh.run_self_harness(
+        refl, model_id="M", controller=ctrl, min_support=3, path=store,
+        held_in=["a", "b"], held_out=["c", "d", "e"],
+        score_with=lambda a, c: 0.9, score_without=lambda a, c: 0.4)
+    assert rep.frozen is False and rep.gate_enabled is True and rep.promoted == 1
+
+
+def test_report_frozen_blocks_promotion_and_is_surfaced(monkeypatch, store):
+    # Verifier drift freezes learning: the gate refuses AND the report says so.
+    # (frozen=True makes the injected controller refuse; the global calibration
+    # monkeypatch is what the report's readiness read reflects -- in production
+    # the controller's frozen_fn IS calibration.learning_frozen, so they align.)
+    ctrl = _enable(monkeypatch, frozen=True)
+    import maverick.calibration as calibration
+    monkeypatch.setattr(calibration, "learning_frozen", lambda: True)
+    refl = [_refl("M", "timeout", "export the nightly ledger") for _ in range(3)]
+    rep = sh.run_self_harness(
+        refl, model_id="M", controller=ctrl, min_support=3, path=store,
+        held_in=["a", "b"], held_out=["c", "d", "e"],
+        score_with=lambda a, c: 0.9, score_without=lambda a, c: 0.4)
+    assert rep.frozen is True and rep.promoted == 0
+
+
+def test_report_gate_disabled_is_recorded(monkeypatch, store):
+    # self-harness ON (env) but the promotion controller is OFF.
+    monkeypatch.setenv("MAVERICK_SELF_HARNESS", "1")
+    monkeypatch.setattr(si, "enabled", lambda: False)
+    import maverick.calibration as calibration
+    monkeypatch.setattr(calibration, "learning_frozen", lambda: False)
+    refl = [_refl("M", "timeout", "export the nightly ledger") for _ in range(3)]
+    rep = sh.run_self_harness(
+        refl, model_id="M", min_support=3, path=store,
+        held_in=["a", "b"], held_out=["c", "d", "e"],
+        score_with=lambda a, c: 0.9, score_without=lambda a, c: 0.4)
+    assert rep.gate_enabled is False and rep.promoted == 0

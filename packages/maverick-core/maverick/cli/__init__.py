@@ -1592,7 +1592,15 @@ def harness_run(model: str | None, limit: int, retire: bool) -> None:
     click.echo(f"model: {report.model_id or '(unresolved)'}")
     click.echo(f"  mined={report.mined} proposed={report.proposed} "
                f"validated={report.validated} promoted={report.promoted} retired={retired}")
-    if report.promoted == 0 and report.proposed > 0:
+    # Explain WHY a pass promoted nothing, in priority order, so the operator
+    # isn't left guessing whether the loop is broken or just gated.
+    if report.frozen:
+        click.echo("  ⚠ learning is FROZEN (verifier drift) — promotions are paused "
+                   "until calibration recovers")
+    elif not report.gate_enabled:
+        click.echo("  ⚠ promotion gate is OFF — set [self_improvement] enable = true "
+                   "to allow promotions")
+    elif report.promoted == 0 and report.proposed > 0:
         click.echo("  (dry pass — inject a live A/B scorer and enable "
                    "[self_improvement] to promote)")
     for s in report.skipped[:10]:
