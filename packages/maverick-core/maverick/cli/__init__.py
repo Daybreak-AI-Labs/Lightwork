@@ -5581,18 +5581,20 @@ def audit_export(
                 click.echo(f"ERROR: {_label} must be YYYY-MM-DD", err=True)
                 sys.exit(2)
 
-    # Plan feature gating: SIEM audit export is a paid-tier entitlement. Only
-    # denied when an explicit --tenant names a provisioned tenant whose plan
-    # omits "audit_export"; unscoped/self-host export is unaffected.
-    if tenant:
-        from ..billing import feature_allowed
-        if not feature_allowed("audit_export", tenant=tenant):
-            click.echo(
-                f"ERROR: tenant '{tenant}' plan does not include SIEM audit "
-                "export (audit_export entitlement). Upgrade the tenant's plan.",
-                err=True,
-            )
-            sys.exit(2)
+    # Plan feature gating: SIEM audit export is a paid-tier entitlement. Deny
+    # either an explicit --tenant or the active deployment tenant when it names
+    # a provisioned tenant whose plan omits "audit_export"; unscoped/self-host
+    # export is unaffected because feature_allowed fails open at the edges.
+    from ..billing import feature_allowed
+    if not feature_allowed("audit_export", tenant=tenant):
+        from ..paths import current_tenant_id
+        denied_tenant = tenant or current_tenant_id() or "active tenant"
+        click.echo(
+            f"ERROR: tenant '{denied_tenant}' plan does not include SIEM audit "
+            "export (audit_export entitlement). Upgrade the tenant's plan.",
+            err=True,
+        )
+        sys.exit(2)
 
     from ..audit.export import audit_event_paths, iter_audit_events, to_cef, to_jsonl
 
@@ -5697,16 +5699,18 @@ def audit_forward(
         )
         sys.exit(2)
 
-    # Same paid-tier entitlement gate as export when a tenant is named.
-    if tenant:
-        from ..billing import feature_allowed
-        if not feature_allowed("audit_export", tenant=tenant):
-            click.echo(
-                f"ERROR: tenant '{tenant}' plan does not include SIEM audit "
-                "export (audit_export entitlement). Upgrade the tenant's plan.",
-                err=True,
-            )
-            sys.exit(2)
+    # Same paid-tier entitlement gate as export, including active deployment
+    # tenants resolved by feature_allowed when --tenant is omitted.
+    from ..billing import feature_allowed
+    if not feature_allowed("audit_export", tenant=tenant):
+        from ..paths import current_tenant_id
+        denied_tenant = tenant or current_tenant_id() or "active tenant"
+        click.echo(
+            f"ERROR: tenant '{denied_tenant}' plan does not include SIEM audit "
+            "export (audit_export entitlement). Upgrade the tenant's plan.",
+            err=True,
+        )
+        sys.exit(2)
 
     from ..audit import forwarder
     from ..audit.export import iter_audit_events, to_cef, to_jsonl

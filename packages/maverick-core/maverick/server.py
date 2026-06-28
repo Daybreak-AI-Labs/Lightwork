@@ -97,13 +97,16 @@ class Server:
         except ImportError:
             log.warning("maverick-shield not installed; running without safety scans")
 
-    def _tenant_door_refusal(self, tenant: str) -> str | None:
+    def _tenant_door_refusal(self, tenant: str | None) -> str | None:
         """Read-only admission check for a per-tenant message at the channel door.
 
         Returns a user-facing refusal string, or None to admit. Covers the
         roster (suspended), the provisioned daily-spend cap, and plan feature
         gating (the ``channels`` entitlement). Registry read errors fail soft
         (admit); a suspension/over-quota/plan denial is a deliberate refusal.
+
+        ``tenant`` is None for legacy serve mode, but ``feature_allowed`` can
+        still resolve an active tenant from MAVERICK_TENANT/client binding.
         """
         try:
             from .tenant.registry import (
@@ -113,7 +116,7 @@ class Server:
             )
         except Exception:  # pragma: no cover -- registry module optional
             TenantSuspended = None  # type: ignore[assignment]
-        if TenantSuspended is not None:
+        if tenant is not None and TenantSuspended is not None:
             try:
                 assert_tenant_active(tenant)
             except TenantSuspended:
@@ -133,6 +136,8 @@ class Server:
         # "channels" entitlement may not drive the agent over a channel. No-op
         # for unprovisioned per-user tenant ids (feature_allowed admits anything
         # not in the registry), so the default tenant_by_user path is unaffected.
+        # When tenant is None, feature_allowed resolves the active deployment
+        # tenant (MAVERICK_TENANT/client binding) before deciding.
         from .billing import feature_allowed
         if not feature_allowed("channels", tenant=tenant):
             log.warning("message refused: tenant %s plan lacks channel access", tenant)
@@ -191,10 +196,9 @@ class Server:
         # door BEFORE any goal is created. No-op until an operator provisions
         # tenants. Read-only refusal reasons (suspended / over daily-spend cap /
         # plan lacks channel access) are returned as a message; None = admit.
-        if tenant is not None:
-            refusal = self._tenant_door_refusal(tenant)
-            if refusal:
-                return refusal
+        refusal = self._tenant_door_refusal(tenant)
+        if refusal:
+            return refusal
 
         # Per-tenant concurrency ceiling (noisy-neighbor protection). Derived
         # from the tenant's plan entitlement; no-op when tenant is None or the
