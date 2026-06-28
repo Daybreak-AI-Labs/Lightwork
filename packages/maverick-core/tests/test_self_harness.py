@@ -1149,3 +1149,63 @@ def test_runner_pass_applies_bucket_by_config(monkeypatch, store):
         rs, model_id="M", held_in=["a", "b"], held_out=["c", "d", "e", "f", "g"],
         controller=ctrl, score_with=lambda a, c: 0.9, score_without=lambda a, c: 0.4)
     assert rep.mined == 2 and rep.promoted == 2     # config drove per-domain mining
+
+
+# ---------- wave 10: driver cycle (mine -> gate -> retire) ----------
+
+def test_cycle_dry_pass_no_scorer(monkeypatch, store):
+    _enable(monkeypatch)
+    monkeypatch.setattr(sh, "_store_path", lambda: store)
+    from maverick import self_improvement_runner as runner
+    refl = [_refl("M", "timeout", "export the nightly ledger") for _ in range(3)]
+    report, retired = runner.run_self_harness_cycle(
+        reflexions=refl, model_id="M", retire=False)
+    assert report.mined == 1 and report.promoted == 0    # dry: no live scorer
+    assert retired == 0
+
+
+def test_cycle_promotes_with_scorer(monkeypatch, store):
+    ctrl = _enable(monkeypatch)
+    monkeypatch.setattr(sh, "_store_path", lambda: store)
+    from maverick import self_improvement_runner as runner
+    refl = [_refl("M", "timeout", "export the nightly ledger") for _ in range(3)]
+    report, retired = runner.run_self_harness_cycle(
+        reflexions=refl, model_id="M", controller=ctrl,
+        held_in=["a", "b"], held_out=["c", "d", "e", "f", "g"],
+        score_with=lambda a, c: 0.9, score_without=lambda a, c: 0.4)
+    assert report.promoted == 1 and retired == 0         # fresh line -> nothing retired
+    assert "timeout" in sh.recall_addendum("M", store).lower()
+
+
+def test_cycle_retires_stale_after_dry_pass(monkeypatch, store):
+    import time
+    ctrl = _enable(monkeypatch)
+    monkeypatch.setattr(sh, "_store_path", lambda: store)
+    from maverick import self_improvement_runner as runner
+    _promote_line(store, "M", "c0", "old stale line", ctrl)
+    # backdate so the line is stale (promoted long ago, never recalled)
+    meta = sh.load_line_meta(store)
+    for r in meta.values():
+        r["learned_at"] = r["updated_at"] = time.time() - 100 * 86400
+        r.pop("last_recalled_at", None)
+    sh._write_line_meta(meta, store)
+    # a dry pass (no scorer, empty reflexions) then retirement (arg overrides config)
+    report, retired = runner.run_self_harness_cycle(
+        reflexions=[], model_id="M", retire_after_days=30)
+    assert report.promoted == 0 and retired == 1
+    assert sh.recall_addendum("M", store) == ""
+
+
+def test_cycle_no_retire_when_days_zero(monkeypatch, store):
+    import time
+    ctrl = _enable(monkeypatch)
+    monkeypatch.setattr(sh, "_store_path", lambda: store)
+    from maverick import self_improvement_runner as runner
+    _promote_line(store, "M", "c0", "old line", ctrl)
+    meta = sh.load_line_meta(store)
+    for r in meta.values():
+        r["learned_at"] = r["updated_at"] = time.time() - 100 * 86400
+    sh._write_line_meta(meta, store)
+    # retire_after_days defaults to config (0 here) -> retirement is off
+    _, retired = runner.run_self_harness_cycle(reflexions=[], model_id="M")
+    assert retired == 0 and "old line" in sh.recall_addendum("M", store)

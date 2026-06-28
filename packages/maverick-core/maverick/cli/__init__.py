@@ -1566,6 +1566,43 @@ def harness_retire(older_than_days: float, model: str | None, yes: bool) -> None
     click.echo(f"retired {n} line{'' if n == 1 else 's'}.")
 
 
+@harness.command("run")
+@click.option("--model", default=None, help="Model to run for (default: orchestrator).")
+@click.option("--limit", type=int, default=500,
+              help="Max recent reflexions to scan for weaknesses.")
+@click.option("--retire/--no-retire", default=True,
+              help="Also retire stale lines (per [self_harness] retire_after_days).")
+def harness_run(model: str | None, limit: int, retire: bool) -> None:
+    """Run one governed self-harness cycle: mine → propose → validate → gate,
+    then retire stale guidance. The on-demand / scheduled entry point.
+
+    Without a live A/B scorer (a real model + eval harness, injected
+    programmatically via run_self_harness_cycle — a real evaluation needs a real
+    model) this is a DRY pass that writes no NEW guidance; stale-line retirement
+    still runs. Promotion also requires [self_improvement] enable (the shared
+    governed gate). Safe to schedule: it never perturbs a run.
+    """
+    from .. import self_harness
+    from .. import self_improvement_runner as runner
+    if not self_harness.enabled():
+        raise click.ClickException(
+            "self-harness is off. Set [self_harness] enable = true or "
+            "MAVERICK_SELF_HARNESS=1.")
+    report, retired = runner.run_self_harness_cycle(model_id=model, limit=limit, retire=retire)
+    click.echo(f"model: {report.model_id or '(unresolved)'}")
+    click.echo(f"  mined={report.mined} proposed={report.proposed} "
+               f"validated={report.validated} promoted={report.promoted} retired={retired}")
+    if report.promoted == 0 and report.proposed > 0:
+        click.echo("  (dry pass — inject a live A/B scorer and enable "
+                   "[self_improvement] to promote)")
+    for s in report.skipped[:10]:
+        click.echo(f"  - skipped: {s}")
+    if report.applied_lines:
+        click.echo("  promoted lines:")
+        for ln in report.applied_lines:
+            click.echo(f"    + {ln}")
+
+
 @harness.command("conflicts")
 @click.option("--model", default=None, help="Only check this model's guidance.")
 def harness_conflicts(model: str | None) -> None:

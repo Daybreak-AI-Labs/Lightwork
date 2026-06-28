@@ -144,6 +144,13 @@ safety model as skills and insights.
 
 - `maverick self-harness preview [--model M] [--min-support N]` — read-only dry
   run: shows the weaknesses and the lines it *would* propose, writes nothing.
+- `maverick self-harness run [--model M] [--retire/--no-retire]` — run one
+  governed **cycle**: mine → propose → validate → gate, then retire stale
+  guidance. The on-demand / scheduled entry point (`run_self_harness_cycle`).
+  Without a live A/B scorer (a real model + eval harness, injected
+  programmatically) it is a **dry** pass that writes no new guidance; stale-line
+  retirement still runs — so a cron'd `run` keeps guidance fresh before live
+  scoring is wired. Promotion still requires `[self_improvement] enable`.
 - `maverick self-harness show [--verbose]` — what was learned per model;
   `--verbose` adds each line's provenance (signature, held-out delta, samples,
   learned/updated dates) so an operator can judge the evidence behind it.
@@ -155,14 +162,19 @@ Config (`[self_harness]`, resolved by `config.get_self_harness` / `settings()`):
 `enable`, `min_support`, the validation floors (`require_held_out`, `min_held_out`,
 `min_delta`, `confidence_z`, `max_cost_factor`/`max_latency_factor`/
 `max_tool_calls_factor`, `min_support_by_class`), `candidates_per_signature`
-(best-of-N proposing), `semantic_mining`, and `retire_after_days`. Defaults preserve the
+(best-of-N proposing), `semantic_mining`, `mine_bucket_by` (per-domain mining),
+and `retire_after_days`. Defaults preserve the
 loop's historical behavior; the installer wizard ships production-safe floors
 when self-harness is enabled. `run_self_harness_pass` reads these automatically,
 and the dashboard `/learned` page surfaces per-line provenance + conflict
 warnings (parity with `show --verbose` / `conflicts`).
-- Automatic operation: an operator/scheduler calls `run_self_harness(...)` with a
-  live held-in/held-out scorer (the A/B over the candidate prompt) and the
-  self-improvement controller engaged.
+- Automatic operation: a scheduler runs `maverick self-harness run` (or calls
+  `run_self_harness_cycle(...)`), which executes one governed pass then prunes
+  stale guidance. For live promotion the caller injects a held-in/held-out scorer
+  (the A/B over the candidate prompt — a real evaluation needs a real model) and
+  engages the self-improvement controller; without it the cycle is a safe dry
+  pass that still retires. The scorer + controller are the only seams between the
+  offline-testable loop and a fully-autonomous, live one.
 
 ## Addresses paper #2's "hidden design choices"
 
