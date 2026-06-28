@@ -4,22 +4,22 @@
 <h2>embeddable analytics component</h2>
 <div class="panel">
   <p>
-    <code>&lt;maverick-analytics&gt;</code> is a self-contained web component
+    <code>&lt;lightwork-analytics&gt;</code> is a self-contained web component
     (no framework, no CDN) served by this dashboard at
-    <a href="/static/maverick-analytics.js"><code>/static/maverick-analytics.js</code></a>.
+    <a href="/static/lightwork-analytics.js"><code>/static/lightwork-analytics.js</code></a>.
     It reads the existing <code>/api/v1/spend</code> and
     <code>/api/v1/goals</code> endpoints and draws its charts as inline SVG.
     Below is a live instance running against this deployment:
   </p>
-  <maverick-analytics></maverick-analytics>
+  <lightwork-analytics></lightwork-analytics>
 </div>
 
 <h2>using it on another page</h2>
 <div class="panel">
-  <pre style="overflow-x: auto;">&lt;script src="http://YOUR-DASHBOARD:8765/static/maverick-analytics.js"&gt;&lt;/script&gt;
-&lt;maverick-analytics
+  <pre style="overflow-x: auto;">&lt;script src="http://YOUR-DASHBOARD:8765/static/lightwork-analytics.js"&gt;&lt;/script&gt;
+&lt;lightwork-analytics
     endpoint="http://YOUR-DASHBOARD:8765"
-    token="YOUR-MAVERICK_DASHBOARD_TOKEN"&gt;&lt;/maverick-analytics&gt;</pre>
+    token="YOUR-MAVERICK_DASHBOARD_TOKEN"&gt;&lt;/lightwork-analytics&gt;</pre>
   <h3 style="font-size: 0.78rem; color: var(--muted); text-transform: uppercase; letter-spacing: 0.08em;">Honest limits</h3>
   <ul class="muted" style="font-size: 0.9rem;">
     <li><strong>Same-origin requirement.</strong> The dashboard sends no CORS
@@ -36,5 +36,5 @@
       shows the HTTP error when a fetch fails.</li>
   </ul>
 </div>
-<script src="/static/maverick-analytics.js"></script>
+<script src="/static/lightwork-analytics.js"></script>
 {% endblock %}

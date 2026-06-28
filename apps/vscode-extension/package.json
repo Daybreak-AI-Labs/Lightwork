@@ -31,42 +31,42 @@
   },
   "main": "./dist/extension.js",
   "activationEvents": [
-    "onView:maverick.runs",
-    "onCommand:maverick.start"
+    "onView:lightwork.runs",
+    "onCommand:lightwork.start"
   ],
   "contributes": {
     "commands": [
       {
-        "command": "maverick.start",
+        "command": "lightwork.start",
         "title": "Maverick: Start goal..."
       },
       {
-        "command": "maverick.status",
+        "command": "lightwork.status",
         "title": "Maverick: Show status"
       },
       {
-        "command": "maverick.halt",
+        "command": "lightwork.halt",
         "title": "Maverick: Halt all running goals"
       },
       {
-        "command": "maverick.unhalt",
+        "command": "lightwork.unhalt",
         "title": "Maverick: Clear HALT flag"
       },
       {
-        "command": "maverick.refreshRuns",
+        "command": "lightwork.refreshRuns",
         "title": "Maverick: Refresh runs",
         "icon": "$(refresh)"
       },
       {
-        "command": "maverick.openExport",
+        "command": "lightwork.openExport",
         "title": "Maverick: Export run as JSON..."
       },
       {
-        "command": "maverick.watchRun",
+        "command": "lightwork.watchRun",
         "title": "Maverick: Watch run live"
       },
       {
-        "command": "maverick.stopWatch",
+        "command": "lightwork.stopWatch",
         "title": "Maverick: Stop live watch"
       }
     ],
@@ -82,7 +82,7 @@
     "views": {
       "maverick": [
         {
-          "id": "maverick.runs",
+          "id": "lightwork.runs",
           "name": "Recent runs",
           "contextualTitle": "Maverick runs"
         }
@@ -91,8 +91,8 @@
     "menus": {
       "view/title": [
         {
-          "command": "maverick.refreshRuns",
-          "when": "view == maverick.runs",
+          "command": "lightwork.refreshRuns",
+          "when": "view == lightwork.runs",
           "group": "navigation"
         }
       ]
@@ -101,24 +101,24 @@
       "type": "object",
       "title": "Maverick",
       "properties": {
-        "maverick.cliPath": {
+        "lightwork.cliPath": {
           "type": "string",
           "default": "maverick",
           "scope": "machine",
           "description": "Path to the `maverick` CLI executable. Machine-scoped so a checked-in .vscode/settings.json in an untrusted repo cannot point it at an arbitrary executable."
         },
-        "maverick.workspaceCwd": {
+        "lightwork.workspaceCwd": {
           "type": "boolean",
           "default": true,
           "description": "Use the current workspace as cwd when invoking maverick."
         },
-        "maverick.dashboardUrl": {
+        "lightwork.dashboardUrl": {
           "type": "string",
           "default": "http://127.0.0.1:8765",
           "scope": "machine",
           "description": "Local Maverick dashboard URL for live-run streaming. Machine-scoped so an untrusted workspace cannot redirect bearer tokens to another host."
         },
-        "maverick.dashboardToken": {
+        "lightwork.dashboardToken": {
           "type": "string",
           "default": "",
           "scope": "machine",

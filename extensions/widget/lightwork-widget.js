@@ -1,10 +1,10 @@
 /*
- * maverick-widget.js — embeddable Maverick status widget.
+ * lightwork-widget.js — embeddable Maverick status widget.
  *
  * Single self-contained file: no framework, no CDN, no external CSS.
  * Embed:
  *
- *   <script src="/widget/maverick-widget.js"
+ *   <script src="/widget/lightwork-widget.js"
  *           data-endpoint=""                 (default: same origin)
  *           data-token=""                    (optional bearer token — read
  *                                             the README before setting one)
@@ -47,7 +47,7 @@
 
   // --- DOM (Shadow DOM so host page CSS can't bleed in) -------------------
   var host = document.createElement("div");
-  host.setAttribute("data-maverick-widget", "");
+  host.setAttribute("data-lightwork-widget", "");
   var root = host.attachShadow ? host.attachShadow({ mode: "open" }) : host;
 
   var style = document.createElement("style");

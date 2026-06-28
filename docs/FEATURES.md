@@ -2231,8 +2231,8 @@ tested without spawning py-spy.
   budget block is enforced as the runner's real `max_dollars` (clamped to
   the server cap); channel/priority ride in the brief and say so.
 - **Embedded analytics web component**
-  (`/static/maverick-analytics.js` + `/embed-demo`): a self-contained
-  `<maverick-analytics>` custom element (Shadow DOM, no framework, no CDN)
+  (`/static/lightwork-analytics.js` + `/embed-demo`): a self-contained
+  `<lightwork-analytics>` custom element (Shadow DOM, no framework, no CDN)
   fetching the real spend + goals endpoints and hand-drawing SVG
   sparklines/bars; same-origin/token limits documented in the JS header and
   on the demo page; errors render as HTTP status, never fake data.
@@ -2340,7 +2340,7 @@ tested without spawning py-spy.
   for a public read-only demo — the dashboard has no global read-only flag,
   so an nginx deny-proxy (`limit_except GET HEAD`) fronts it with the
   bearer injected upstream; a seeder creates finished demo goals through
-  the real world model; DNS/TLS/operating demo.maverick.dev is a
+  the real world model; DNS/TLS/operating demo.lightwork.dev is a
   maintainer act. Contract-tested like the other reference architectures.
 - **Mobile skill execution scaffolds** (`apps/mobile-skills/`): a Pyodide
   runner page (vendored-only Pyodide, no CDN; pinned release + fill-on-

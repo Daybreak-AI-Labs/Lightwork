@@ -8,7 +8,7 @@ from the [Zed](https://zed.dev) editor. Two surfaces:
    (`packages/lightwork-mcp`, stdio transport) — as a Zed context server, so
    Zed's assistant can start goals, check status, and read results through
    MCP tools.
-2. **Terminal tasks.** `tasks/maverick.json` ships ready-made Zed tasks for
+2. **Terminal tasks.** `tasks/lightwork.json` ships ready-made Zed tasks for
    the CLI verbs that actually exist in `maverick/cli.py`: `status`,
    `monitor`, `runs`, `budget`, `doctor`, `start`, `halt`, `unhalt`. Copy
    them into `.zed/tasks.json` (project) or `~/.config/zed/tasks.json`

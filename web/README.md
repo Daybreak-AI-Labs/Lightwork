@@ -1,6 +1,6 @@
 # `web/` — static landing page
 
-Single self-contained `index.html` (one HTML file, inline CSS + JS, no build step). Once `maverick.dev` is registered, deploy via GitHub Pages with this directory as the source.
+Single self-contained `index.html` (one HTML file, inline CSS + JS, no build step). Once `lightwork.dev` is registered, deploy via GitHub Pages with this directory as the source.
 
 ## Why it's not the README
 
@@ -15,14 +15,14 @@ python -m http.server -d web 8000
 
 ## Deploy
 
-Until `maverick.dev` is registered:
+Until `lightwork.dev` is registered:
 
 1. In repo Settings → Pages, set source to `main` branch / `/web` folder
 2. The site appears at `https://day-ai-labs.github.io/maverick/`
 
-After `maverick.dev` is registered:
+After `lightwork.dev` is registered:
 
-3. Add a `web/CNAME` file containing `maverick.dev`
+3. Add a `web/CNAME` file containing `lightwork.dev`
 4. Point an A record at the four GitHub Pages IPs (185.199.108-111.153)
 5. Enable "Enforce HTTPS" in Pages settings
 

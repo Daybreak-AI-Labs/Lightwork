@@ -10,7 +10,7 @@
 //!
 //! Terminal-style CLI verbs (`maverick status` / `monitor` / `halt` / ...)
 //! cannot be exec'd from sandboxed extension code, so they ship as Zed
-//! *tasks* instead: see tasks/maverick.json and the README.
+//! *tasks* instead: see tasks/lightwork.json and the README.
 
 use zed_extension_api::{self as zed, Command, ContextServerId, Project, Result};
 

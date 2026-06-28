@@ -223,7 +223,7 @@ async function exportCommand() {
 
 // --- live-run streaming (SSE from the local dashboard) -------------------
 //
-// `maverick.watchRun` tails a run's events live into an output channel via
+// `lightwork.watchRun` tails a run's events live into an output channel via
 // the dashboard's SSE endpoint (GET /api/v1/goals/{id}/events/stream). Plain
 // Node http (no deps), manual SSE parse, exponential backoff reconnect, and
 // a stop command. The dashboard URL/token come from machine-scoped settings.
@@ -330,10 +330,10 @@ export function activate(context: vscode.ExtensionContext): void {
     // Push the provider (disposes its EventEmitter) and the tree-view
     // registration so a reload/deactivate tears them down instead of leaking.
     runs,
-    vscode.window.registerTreeDataProvider("maverick.runs", runs),
-    vscode.commands.registerCommand("maverick.start", startGoalCommand),
-    vscode.commands.registerCommand("maverick.status", statusCommand),
-    vscode.commands.registerCommand("maverick.halt", async () => {
+    vscode.window.registerTreeDataProvider("lightwork.runs", runs),
+    vscode.commands.registerCommand("lightwork.start", startGoalCommand),
+    vscode.commands.registerCommand("lightwork.status", statusCommand),
+    vscode.commands.registerCommand("lightwork.halt", async () => {
       try {
         await runCliCapture(["halt"]);
         vscode.window.showInformationMessage("Maverick halted.");
@@ -343,7 +343,7 @@ export function activate(context: vscode.ExtensionContext): void {
         vscode.window.showErrorMessage(`Maverick halt failed: ${(e as Error).message}`);
       }
     }),
-    vscode.commands.registerCommand("maverick.unhalt", async () => {
+    vscode.commands.registerCommand("lightwork.unhalt", async () => {
       try {
         await runCliCapture(["unhalt"]);
         vscode.window.showInformationMessage("Maverick resumed.");
@@ -351,10 +351,10 @@ export function activate(context: vscode.ExtensionContext): void {
         vscode.window.showErrorMessage(`Maverick unhalt failed: ${(e as Error).message}`);
       }
     }),
-    vscode.commands.registerCommand("maverick.openExport", exportCommand),
-    vscode.commands.registerCommand("maverick.refreshRuns", () => runs.refresh()),
-    vscode.commands.registerCommand("maverick.watchRun", watchRunCommand),
-    vscode.commands.registerCommand("maverick.stopWatch", () => {
+    vscode.commands.registerCommand("lightwork.openExport", exportCommand),
+    vscode.commands.registerCommand("lightwork.refreshRuns", () => runs.refresh()),
+    vscode.commands.registerCommand("lightwork.watchRun", watchRunCommand),
+    vscode.commands.registerCommand("lightwork.stopWatch", () => {
       if (liveAbort) {
         liveAbort();
         liveAbort = null;

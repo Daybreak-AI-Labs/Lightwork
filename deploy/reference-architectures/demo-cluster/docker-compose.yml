@@ -1,4 +1,4 @@
-# Maverick public read-only demo (demo.maverick.dev) — compose blueprint.
+# Maverick public read-only demo (demo.lightwork.dev) — compose blueprint.
 #
 #   MAVERICK_DASHBOARD_TOKEN=$(openssl rand -hex 32) docker compose up -d
 #

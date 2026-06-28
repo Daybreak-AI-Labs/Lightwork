@@ -5,7 +5,7 @@ from lightwork.grpc_api import contract
 
 _PROTO = """
 syntax = "proto3";
-package lightwork.v1;
+package maverick.v1;
 service Maverick {
   rpc StartGoal(StartGoalRequest) returns (StartGoalResponse);
   rpc StreamEpisode(StreamEpisodeRequest) returns (stream Event);
@@ -23,7 +23,7 @@ message Event {
 
 def test_parser_inventory_shape():
     inv = contract.parse_inventory(_PROTO)
-    assert inv["package"] == "lightwork.v1"
+    assert inv["package"] == "maverick.v1"
     assert inv["services"]["Maverick"]["StreamEpisode"]["response_stream"] is True
     assert inv["services"]["Maverick"]["StartGoal"]["response_stream"] is False
     f = inv["messages"]["StartGoalRequest"]["tags"]
@@ -38,7 +38,7 @@ def test_real_proto_matches_committed_golden():
 
 def test_golden_pins_the_known_v1_surface():
     g = contract.load_golden()
-    assert g["package"] == "lightwork.v1"
+    assert g["package"] == "maverick.v1"
     assert "StartGoal" in g["services"]["Maverick"]
     assert "RunGoal" in g["services"]["Maverick"]
     assert g["messages"]["StartGoalRequest"]["title"]["number"] == 1
@@ -96,7 +96,7 @@ def test_field_number_reuse_breaks():
 
 
 def test_package_change_breaks():
-    v2 = _PROTO.replace("package lightwork.v1;", "package lightwork.v2;")
+    v2 = _PROTO.replace("package maverick.v1;", "package lightwork.v2;")
     assert any("package changed" in p for p in _mutate(proto=v2))
 
 

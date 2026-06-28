@@ -6,7 +6,7 @@
  * dashboard origin, not a hosted service.
  *
  * Usage:
- *   <script src="/widget/maverick-widget.js"
+ *   <script src="/widget/lightwork-widget.js"
  *           data-maverick-url="https://your-dashboard.example.com"
  *           data-maverick-title="Ask Maverick"></script>
  *

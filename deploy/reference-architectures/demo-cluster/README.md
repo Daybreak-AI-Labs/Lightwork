@@ -1,4 +1,4 @@
-# demo-cluster — public read-only demo (demo.maverick.dev)
+# demo-cluster — public read-only demo (demo.lightwork.dev)
 
 Blueprint for a public, **read-only** Lightwork demo: seeded finished runs,
 the real dashboard process, and an nginx path-allowlist proxy as the only
@@ -95,7 +95,7 @@ key is needed or configured.
 
 ## Operations — maintainer acts
 
-- **DNS + TLS for demo.maverick.dev are not in this blueprint.** Point the
+- **DNS + TLS for demo.lightwork.dev are not in this blueprint.** Point the
   record at your host/LoadBalancer and terminate TLS at your edge (compose:
   a TLS proxy in front of :8080; k8s: Ingress/Gateway + cert-manager). Do
   not serve the demo over plain HTTP to the public internet.

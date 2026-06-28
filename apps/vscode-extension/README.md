@@ -23,8 +23,8 @@ This is an MVP (v0.1):
 
 | Setting               | Default     | Description                                      |
 |-----------------------|-------------|--------------------------------------------------|
-| `maverick.cliPath`    | `maverick`  | Path to the `maverick` CLI executable.           |
-| `maverick.workspaceCwd` | `true`    | Use the current workspace as cwd when running.   |
+| `lightwork.cliPath`    | `maverick`  | Path to the `maverick` CLI executable.           |
+| `lightwork.workspaceCwd` | `true`    | Use the current workspace as cwd when running.   |
 
 ## Roadmap
 

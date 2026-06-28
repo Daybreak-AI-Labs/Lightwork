@@ -7,7 +7,7 @@
 # authenticated GET endpoints cannot disclose operator state.
 server {
     listen 8080;
-    server_name demo.maverick.dev;
+    server_name demo.lightwork.dev;
 
     location = / {
         return 302 /demo;

@@ -1,4 +1,4 @@
-# Maverick public read-only demo (demo.maverick.dev) — Kubernetes blueprint.
+# Maverick public read-only demo (demo.lightwork.dev) — Kubernetes blueprint.
 #
 # Mirrors the compose stack in this directory: seed (init container) ->
 # dashboard (loopback-bound, token-protected) -> nginx path-allowlist proxy
@@ -12,7 +12,7 @@
 #   kubectl apply -f deploy/reference-architectures/demo-cluster/k8s.yaml
 #
 # Replace REGISTRY/maverick:demo with your built image (deploy/docker/
-# Dockerfile). DNS for demo.maverick.dev + TLS (Ingress/Gateway + certs) are
+# Dockerfile). DNS for demo.lightwork.dev + TLS (Ingress/Gateway + certs) are
 # a maintainer act — see README.md.
 apiVersion: v1
 kind: PersistentVolumeClaim
@@ -35,7 +35,7 @@ data:
   default.conf.template: |
     server {
         listen 8080;
-        server_name demo.maverick.dev;
+        server_name demo.lightwork.dev;
         location = / {
             return 302 /demo;
         }
@@ -190,5 +190,5 @@ spec:
     - port: 80
       targetPort: 8080
       name: http
-  # ClusterIP: front with your Ingress/Gateway + TLS for demo.maverick.dev.
+  # ClusterIP: front with your Ingress/Gateway + TLS for demo.lightwork.dev.
   type: ClusterIP

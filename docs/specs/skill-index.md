@@ -1,6 +1,6 @@
 # Skill marketplace index (spec)
 
-A static JSON manifest hosted at `https://skills.maverick.dev/index.json`
+A static JSON manifest hosted at `https://skills.lightwork.dev/index.json`
 that the `maverick skills search` / `maverick skills install` flow
 reads. Federated: users can configure additional index URLs in
 `~/.maverick/config.toml` under `[skills.indexes]`.
@@ -73,7 +73,7 @@ Each skill entry MUST have:
 
 `maverick skills search <q>`:
 
-1. Fetch each configured index URL (default: `skills.maverick.dev/index.json`).
+1. Fetch each configured index URL (default: `skills.lightwork.dev/index.json`).
 2. Filter by substring match on `name`, `summary`, `tags`, `triggers`.
 3. Sort: trusted publisher first, then by stars desc, then install_count desc.
 4. Display: `name  v<version>  ✓<trusted-badge>  <summary>  (<stars>★)`
@@ -95,7 +95,7 @@ Users add custom indexes:
 ```toml
 [skills]
 indexes = [
-  "https://skills.maverick.dev/index.json",
+  "https://skills.lightwork.dev/index.json",
   "https://my-internal-index.corp/skills.json",
 ]
 require_signed = false

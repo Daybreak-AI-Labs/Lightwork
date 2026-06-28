@@ -1,4 +1,4 @@
-/* <maverick-analytics> — embeddable Maverick analytics web component.
+/* <lightwork-analytics> — embeddable Maverick analytics web component.
  *
  * Self-contained (Web Components API, no framework, no dependencies).
  * Renders total spend, an episode-cost sparkline, and a goals-by-status bar
@@ -22,7 +22,7 @@
  */
 (function () {
   "use strict";
-  if (typeof customElements === "undefined" || customElements.get("maverick-analytics")) return;
+  if (typeof customElements === "undefined" || customElements.get("lightwork-analytics")) return;
 
   function esc(s) {
     return String(s == null ? "" : s).replace(/[&<>"']/g, (c) => ({
@@ -62,7 +62,7 @@
       labels.map((k) => esc(k) + " " + counts[k]).join(", ") + '">' + rows + "</svg>";
   }
 
-  class MaverickAnalytics extends HTMLElement {
+  class LightworkAnalytics extends HTMLElement {
     connectedCallback() {
       const root = this.attachShadow({ mode: "open" });
       root.innerHTML =
@@ -125,5 +125,5 @@
     }
   }
 
-  customElements.define("maverick-analytics", MaverickAnalytics);
+  customElements.define("lightwork-analytics", LightworkAnalytics);
 })();
