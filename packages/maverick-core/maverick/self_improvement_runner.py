@@ -146,6 +146,7 @@ def run_self_harness_pass(
     require_held_out: bool | None = None, min_delta: float | None = None,
     min_held_out: int | None = None, candidates_per_signature: int | None = None,
     semantic_mining: bool | None = None, similarity_fn=None,
+    bucket_by: tuple[str, ...] | None = None,
 ):
     """The automatic entry point for the self-harness loop (mine -> propose ->
     validate -> gate), to be called by a scheduler / the self-improvement loop.
@@ -153,11 +154,11 @@ def run_self_harness_pass(
     Resolves ``model_id`` to the configured orchestrator model and loads recent
     model-tagged reflexions when not supplied. The tuning knobs
     (``min_support``/``require_held_out``/``min_delta``/``min_held_out``/
-    ``candidates_per_signature``/``semantic_mining``) default to ``None`` and are
-    then filled from ``[self_harness]`` config, so an operator's settings take
-    effect automatically; an explicit argument overrides config. An embedding-
-    backed ``similarity_fn`` may be injected for true semantic clustering;
-    otherwise ``semantic_mining`` selects the deterministic built-in. ``score_with``/``score_without`` are the LIVE held-in/held-out A/B
+    ``candidates_per_signature``/``semantic_mining``/``bucket_by``) default to
+    ``None`` and are then filled from ``[self_harness]`` config, so an operator's
+    settings take effect automatically; an explicit argument overrides config. An
+    embedding-backed ``similarity_fn`` may be injected for true semantic
+    clustering; otherwise ``semantic_mining`` selects the deterministic built-in. ``score_with``/``score_without`` are the LIVE held-in/held-out A/B
     over the candidate prompt -- injected by the caller because a real evaluation
     needs a real model; without them the pass is a dry inspection that writes
     nothing. Never raises -- a learning pass must not perturb anything.
@@ -179,6 +180,8 @@ def run_self_harness_pass(
             candidates_per_signature = st["candidates_per_signature"]
         if semantic_mining is None:
             semantic_mining = st["semantic_mining"]
+        if bucket_by is None:
+            bucket_by = st["mine_bucket_by"]
         if not model_id:
             from .llm import model_for_role
             model_id = model_for_role("orchestrator")
@@ -196,7 +199,8 @@ def run_self_harness_pass(
             max_tool_calls_factor=st["max_tool_calls_factor"],
             min_support_by_class=st["min_support_by_class"],
             candidates_per_signature=candidates_per_signature,
-            semantic_mining=semantic_mining, similarity_fn=similarity_fn)
+            semantic_mining=semantic_mining, similarity_fn=similarity_fn,
+            bucket_by=bucket_by)
     except Exception:  # pragma: no cover -- learning never perturbs a run
         log.debug("self-harness pass failed", exc_info=True)
         from . import self_harness

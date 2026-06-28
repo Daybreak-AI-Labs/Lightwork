@@ -573,6 +573,10 @@ def get_self_harness() -> dict:
       candidate lines per weakness and promote the strongest validated one
       (>=1; default 1 = single candidate, only matters with a stochastic
       proposer, a deterministic one collapses to 1).
+    - ``mine_bucket_by``: extra dimensions to bucket mining by, beyond the
+      always-on (model, failure_class). Allowlisted (``domain``) so a weakness
+      can be mined -- and its guidance scoped -- per department; default empty
+      (model-wide). Unknown dims are dropped.
     - ``retire_after_days``: auto-retire lines not active within this many days
       (0 = never; only acted on when a driver/CLI runs retirement).
     """
@@ -592,6 +596,15 @@ def get_self_harness() -> dict:
                 by_class[str(k)] = max(1, int(v))
             except (TypeError, ValueError):
                 continue
+
+    # Mining bucket dimensions: keep only allowlisted scalar reflexion fields
+    # (mirrors self_harness._BUCKET_DIMS) and de-dupe, preserving order.
+    _allowed_dims = ("domain",)
+    raw_dims = cfg.get("mine_bucket_by", [])
+    if isinstance(raw_dims, str):
+        raw_dims = [raw_dims]
+    bucket_by = tuple(dict.fromkeys(
+        d for d in (raw_dims or []) if isinstance(d, str) and d in _allowed_dims))
 
     def _factor(key):
         v = cfg.get(key)
@@ -613,6 +626,7 @@ def get_self_harness() -> dict:
         "max_tool_calls_factor": _factor("max_tool_calls_factor"),
         "semantic_mining": bool(cfg.get("semantic_mining", False)),
         "candidates_per_signature": max(1, _num("candidates_per_signature", 1, int)),
+        "mine_bucket_by": bucket_by,
         "retire_after_days": max(0.0, _num("retire_after_days", 0.0, float)),
     }
 
