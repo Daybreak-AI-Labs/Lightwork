@@ -219,9 +219,24 @@ def test_compliance_packet_shape():
     assert "soc2" in pkt and "controls" in pkt and "audit_chain" in pkt
 
 
-def test_compliance_packet_download():
+def test_compliance_packet_download(monkeypatch):
+    from maverick_dashboard import api
+
+    calls = 0
+
+    def fake_body():
+        nonlocal calls
+        calls += 1
+        return '{"artifact":"maverick.compliance_packet"}'
+
+    monkeypatch.setattr(api, "_COMPLIANCE_PACKET_CACHE", None)
+    monkeypatch.setattr(api, "_build_compliance_packet_body", fake_body)
     r = client.get("/api/v1/compliance/packet")
     assert r.status_code == 200
     cd = r.headers.get("content-disposition", "")
     assert "attachment" in cd and "maverick-compliance-packet.json" in cd
     assert r.json()["artifact"] == "maverick.compliance_packet"
+
+    cached = client.get("/api/v1/compliance/packet")
+    assert cached.status_code == 200
+    assert calls == 1
