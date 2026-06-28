@@ -204,6 +204,10 @@ def _upsert_line_meta(meta: dict[str, dict], model_id: str, line: str,
         "learned_at": rec.get("learned_at", now),
         "updated_at": now,
     })
+    # Canary is only touched when the caller passes it (a non-canary re-promote
+    # must not clear a probation flag, nor stamp canary=False on every record).
+    if "canary" in provenance:
+        rec["canary"] = bool(provenance.get("canary"))
     meta[lid] = rec
 
 
@@ -1333,6 +1337,69 @@ def review_efficacy(model_id: str, cases: list[str], *,
     return demoted
 
 
+# ---- CANARY / STAGED ROLLOUT ----------------------------------------------
+# A freshly-promoted line can ride as a CANARY (on probation): still recalled,
+# but watched. `review_canaries` reads the recall->outcome counters and advances
+# the lifecycle -- GRADUATE a line that proves out (clear the flag -> permanent),
+# DEMOTE one that correlates with failures (audited forget), leave the rest on
+# probation. A slow-rollout valve on top of the gate; failures win ties (safe).
+
+def mark_canary(model_id: str, line: str, *, canary: bool = True,
+                path: Path | None = None) -> bool:
+    """Mark/unmark a learned line as a canary. Returns True if the flag changed
+    (False if the line has no sidecar record or already had this state). Atomic;
+    never raises."""
+    if not model_id or line is None:
+        return False
+    try:
+        p = path if path is not None else _store_path()
+        from .file_lock import cross_process_lock
+        with _lock, cross_process_lock(p):
+            meta = load_line_meta(p)
+            rec = meta.get(_line_id(str(model_id), str(line)))
+            if rec is None or bool(rec.get("canary")) == bool(canary):
+                return False
+            rec["canary"] = bool(canary)
+            _write_line_meta(meta, p)
+            return True
+    except Exception:  # pragma: no cover -- canary state never perturbs a run
+        log.debug("self_harness: mark_canary failed", exc_info=True)
+        return False
+
+
+def list_canaries(model_id: str, path: Path | None = None) -> list[str]:
+    """The model's lines currently on canary probation (recalled-block order)."""
+    meta = load_line_meta(path)
+    return [ln for ln in _bullets(load_addenda(path).get(str(model_id), ""))
+            if (meta.get(_line_id(str(model_id), ln)) or {}).get("canary")]
+
+
+def review_canaries(model_id: str, *, graduate_after: int = 3,
+                    demote_after: int = 2, path: Path | None = None) -> dict:
+    """Advance the canary lifecycle from the recall->outcome counters:
+    DEMOTE (audited forget) a canary with ``>= demote_after`` failures; else
+    GRADUATE (clear the flag -> permanent) one with ``>= graduate_after``
+    successes; else leave it on probation. Failures take precedence (a flaky line
+    is pulled even if it also has wins). Returns
+    ``{"graduated": [...], "demoted": [...]}``. Never raises."""
+    graduated: list[str] = []
+    demoted: list[str] = []
+    try:
+        for ln in list_canaries(model_id, path):
+            rec = load_line_meta(path).get(_line_id(str(model_id), ln)) or {}
+            s = int(rec.get("recall_success") or 0)
+            f = int(rec.get("recall_failure") or 0)
+            if f >= demote_after:
+                if forget_addendum(model_id, line=ln, path=path):
+                    demoted.append(ln)
+            elif s >= graduate_after:
+                if mark_canary(model_id, ln, canary=False, path=path):
+                    graduated.append(ln)
+    except Exception:  # pragma: no cover -- review never perturbs a run
+        log.debug("self_harness: review_canaries failed", exc_info=True)
+    return {"graduated": graduated, "demoted": demoted}
+
+
 # ---- DRIVE (mine -> propose -> validate -> gate) --------------------------
 
 @dataclass
@@ -1432,6 +1499,7 @@ def run_self_harness(
     bucket_by: tuple[str, ...] = (),
     metamorphic_fn: Callable[[list[str]], list[str]] | None = None,
     metamorphic_tolerance: float = 0.0,
+    canary: bool = False,
 ) -> SelfHarnessReport:
     """One self-harness pass for ``model_id``: mine weaknesses, propose minimal
     edits, validate on held-in/held-out, and GATE each survivor through the
@@ -1513,7 +1581,8 @@ def run_self_harness(
                     continue
             report.validated += 1
 
-            ok, why = _gate_and_apply(proposal, vr, controller=controller, path=path)
+            ok, why = _gate_and_apply(proposal, vr, controller=controller,
+                                      path=path, canary=canary)
             if not ok:
                 # Surface WHY the gate refused (e.g. "too few samples (3 < 5)",
                 # frozen verifier, disabled controller) so an operator with a
@@ -1538,7 +1607,8 @@ def run_self_harness(
 
 
 def _gate_and_apply(proposal: HarnessProposal, vr: ValidationResult, *,
-                    controller=None, path: Path | None = None) -> tuple[bool, str]:
+                    controller=None, path: Path | None = None,
+                    canary: bool = False) -> tuple[bool, str]:
     """Judge the validated proposal through ``self_improvement.consider()`` on
     the ``prompt`` rung and apply it ONLY on a promoting verdict. Returns
     ``(ok, reason)`` -- ``reason`` names the blocking gate when refused.
@@ -1566,10 +1636,13 @@ def _gate_and_apply(proposal: HarnessProposal, vr: ValidationResult, *,
     if not getattr(verdict, "ok", False):
         reason = getattr(verdict, "blocking_reason", "") or "refused"
         return False, reason  # gate refused -> nothing written
-    _apply_addendum(proposal, path=path, provenance={
+    apply_prov = {
         "signature": proposal.signature, "rationale": proposal.rationale,
         "hypothesis": proposal.hypothesis or None,
-        "held_out_delta": round(vr.held_out_delta, 4), "samples": vr.samples})
+        "held_out_delta": round(vr.held_out_delta, 4), "samples": vr.samples}
+    if canary:  # only stamp the flag when staging -- non-canary leaves meta clean
+        apply_prov["canary"] = True
+    _apply_addendum(proposal, path=path, provenance=apply_prov)
     try:
         from .audit import EventKind, record
         # Record the DIAGNOSTIC PROVENANCE alongside the line: which weakness it
@@ -1594,6 +1667,7 @@ __all__ = [
     "list_learned", "forget_addendum", "retire_stale",
     "load_line_meta", "line_provenance", "note_recall",
     "note_outcome", "line_efficacy", "review_efficacy",
+    "mark_canary", "list_canaries", "review_canaries",
     "find_conflicts", "detect_store_conflicts",
     "FailureSignature", "mine_failures", "count_eligible", "semantic_similarity",
     "HarnessProposal", "ProposeFn", "propose_addendum", "llm_proposer",

@@ -1448,3 +1448,79 @@ def test_review_efficacy_no_cases_is_noop(monkeypatch, store):
     assert sh.review_efficacy("M", [], score_with=lambda _ln, c: 0.0,
                               score_without=lambda _ln, c: 0.9, path=store) == []
     assert "kept line" in sh.recall_addendum("M", store)         # nothing demoted
+
+
+# ---------- wave 18: canary / staged rollout ----------
+
+def test_run_self_harness_canary_marks_promoted_line(monkeypatch, store):
+    ctrl = _enable(monkeypatch)
+    refl = [_refl("M", "timeout", "export the nightly ledger") for _ in range(3)]
+    rep = sh.run_self_harness(
+        refl, model_id="M", controller=ctrl, min_support=3, path=store,
+        held_in=["a", "b"], held_out=["c", "d", "e"],
+        score_with=lambda a, c: 0.9, score_without=lambda a, c: 0.4, canary=True)
+    assert rep.promoted == 1 and len(sh.list_canaries("M", store)) == 1
+    # a canary is still recalled (active, just on probation)
+    assert "timeout" in sh.recall_addendum("M", store).lower()
+
+
+def test_default_promotion_is_not_canary(monkeypatch, store):
+    ctrl = _enable(monkeypatch)
+    _promote_line(store, "M", "c0", "permanent line", ctrl)
+    assert sh.list_canaries("M", store) == []
+
+
+def test_mark_canary_toggle(monkeypatch, store):
+    ctrl = _enable(monkeypatch)
+    _promote_line(store, "M", "c0", "toggled line", ctrl)
+    assert sh.mark_canary("M", "toggled line", path=store) is True
+    assert sh.list_canaries("M", store) == ["toggled line"]
+    assert sh.mark_canary("M", "toggled line", path=store) is False   # already canary
+    assert sh.mark_canary("M", "toggled line", canary=False, path=store) is True
+    assert sh.list_canaries("M", store) == []
+    assert sh.mark_canary("M", "ghost line", path=store) is False      # no such record
+
+
+def test_review_canaries_graduates_proven(monkeypatch, store):
+    ctrl = _enable(monkeypatch)
+    _promote_line(store, "M", "c0", "proven line", ctrl)
+    sh.mark_canary("M", "proven line", path=store)
+    for _ in range(3):
+        sh.note_outcome("M", True, line="proven line", path=store)
+    res = sh.review_canaries("M", graduate_after=3, demote_after=2, path=store)
+    assert res == {"graduated": ["proven line"], "demoted": []}
+    assert sh.list_canaries("M", store) == []                          # promoted to permanent
+    assert "proven line" in sh.recall_addendum("M", store)             # still recalled
+
+
+def test_review_canaries_demotes_failing(monkeypatch, store):
+    ctrl = _enable(monkeypatch)
+    _promote_line(store, "M", "c0", "flaky line", ctrl)
+    sh.mark_canary("M", "flaky line", path=store)
+    for _ in range(2):
+        sh.note_outcome("M", False, line="flaky line", path=store)
+    res = sh.review_canaries("M", graduate_after=3, demote_after=2, path=store)
+    assert res == {"graduated": [], "demoted": ["flaky line"]}
+    assert "flaky line" not in sh.recall_addendum("M", store)          # pulled
+
+
+def test_review_canaries_failures_win_ties(monkeypatch, store):
+    ctrl = _enable(monkeypatch)
+    _promote_line(store, "M", "c0", "mixed line", ctrl)
+    sh.mark_canary("M", "mixed line", path=store)
+    for _ in range(5):
+        sh.note_outcome("M", True, line="mixed line", path=store)
+    for _ in range(2):
+        sh.note_outcome("M", False, line="mixed line", path=store)
+    res = sh.review_canaries("M", graduate_after=3, demote_after=2, path=store)
+    assert res["demoted"] == ["mixed line"] and res["graduated"] == []  # failures win
+
+
+def test_review_canaries_leaves_young_on_probation(monkeypatch, store):
+    ctrl = _enable(monkeypatch)
+    _promote_line(store, "M", "c0", "young line", ctrl)
+    sh.mark_canary("M", "young line", path=store)
+    sh.note_outcome("M", True, line="young line", path=store)          # 1 success, not enough
+    assert sh.review_canaries("M", graduate_after=3, demote_after=2, path=store) == \
+        {"graduated": [], "demoted": []}
+    assert sh.list_canaries("M", store) == ["young line"]              # still on probation
