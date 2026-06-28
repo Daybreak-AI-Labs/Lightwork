@@ -64,7 +64,7 @@ STRATEGIES = ("truncate", "structural", "retrieval", "summarize")
 # structural references) — the terminal fail-open answer.
 FALLBACK_STRATEGY = "structural"
 
-WEIGHTS_SCHEMA = "lightwork-compaction-hybrid-weights/1"
+WEIGHTS_SCHEMA = "maverick-compaction-hybrid-weights/1"
 FEATURE_NAMES = ("messages", "tool_ratio", "code_density", "distinct_tools", "age_span")
 DEFAULT_EPSILON = 0.1
 

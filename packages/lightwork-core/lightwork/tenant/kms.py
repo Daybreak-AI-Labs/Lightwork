@@ -99,7 +99,7 @@ def _tenant_context(tenant_id: str | None, purpose: bytes) -> bytes:
     """Canonical AEAD/KMS context for tenant-bound envelopes."""
     tenant = (tenant_id or "__default__").encode("utf-8")
     return (
-        b"lightwork-tenant-kms/v1\x00"
+        b"maverick-tenant-kms/v1\x00"
         + purpose
         + b"\x00"
         + str(len(tenant)).encode("ascii")
@@ -123,7 +123,7 @@ def _resolve_local_kek() -> bytes:
     from ..crypto_at_rest import _load_or_create_key
     master = _load_or_create_key()
     # Domain-separated derivation so the KEK is distinct from the at-rest data key.
-    return hashlib.sha256(b"lightwork-kms-kek/v1\x00" + master).digest()
+    return hashlib.sha256(b"maverick-kms-kek/v1\x00" + master).digest()
 
 
 class LocalKMS:

@@ -436,7 +436,7 @@ def _kms_wrapped_keypair() -> tuple[bytes, bytes, str] | None:
         from ..kms_backends import build_cloud_kms
         provider = str(((load_config() or {}).get("kms") or {}).get("provider") or "").strip()
         kek = build_cloud_kms(provider)
-        priv_bytes = kek.unwrap(wrapped, context=b"lightwork-audit-signing")
+        priv_bytes = kek.unwrap(wrapped, context=b"maverick-audit-signing")
     # failure-policy: fail_soft_with_audit
     except Exception as e:
         log.warning("audit signing KMS unwrap failed (%s); falling back", e)
