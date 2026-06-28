@@ -30,6 +30,13 @@ than adding a new ungoverned optimizer:
    construction: a weakness mined for one model can never leak into another's
    harness (the paper's key lever). A `model_id` was added to the reflexion
    record to enable this; older lines load as `None` (backward compatible).
+   Clustering is token-overlap by default; `semantic_mining` (or an injected
+   `similarity_fn`) groups failures by *meaning* instead — an embedding-cosine
+   seam for the live path, or the deterministic built-in `semantic_similarity`
+   (token + character-trigram overlap) offline, so morphological/reworded
+   variants cluster. The seam must be deterministic (it is, by default), so the
+   determinism guarantee holds with the flag on; a raising seam degrades to "no
+   match", never crashing the pass.
 2. **PROPOSE** — `propose_addendum(sig, propose_fn=…)` produces a single
    *minimal* operating-guidance line targeting the signature. The LLM proposer
    is an injected seam: `llm_proposer(llm)` ships a reflective proposer in the

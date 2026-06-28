@@ -445,6 +445,32 @@ def _jaccard(a: set[str], b: set[str]) -> float:
     return len(a & b) / len(a | b)
 
 
+def _char_ngrams(text: str, n: int = 3) -> set[str]:
+    """Character n-grams of the whitespace-normalized lowercase text. Catches
+    morphological overlap that whole-token Jaccard misses (authenticate vs
+    authentication share trigrams; share no whole token)."""
+    s = " ".join((text or "").lower().split())
+    if len(s) < n:
+        return {s} if s else set()
+    return {s[i:i + n] for i in range(len(s) - n + 1)}
+
+
+def semantic_similarity(a: str, b: str) -> float:
+    """Deterministic, offline, dictionary-free similarity for *semantic-ish*
+    mining: the max of token-Jaccard and character-trigram-Jaccard, so
+    morphological / reworded variants (authenticate vs authentication, "timeout"
+    vs "timed out") cluster even when whole-token overlap is low.
+
+    This is NOT true embedding semantics -- inject a ``similarity_fn`` into
+    :func:`mine_failures` for that (the live, model-backed path). It is the
+    deterministic default the ``semantic_mining`` flag turns on so enabling the
+    feature is a real, reproducible improvement over strict token overlap without
+    requiring a provider, and it stays inside the determinism guarantee."""
+    tok = _jaccard(_tokens(a), _tokens(b))
+    ng = _jaccard(_char_ngrams(a), _char_ngrams(b))
+    return max(tok, ng)
+
+
 def _is_minable(r: object, model_id: str) -> bool:
     """Whether a single reflexion is eligible to be mined for ``model_id``:
     a dict, tagged with this exact model, and UNSCOPED (no channel/user_id).
@@ -471,15 +497,24 @@ def count_eligible(reflexions: list[dict], *, model_id: str) -> int:
 def mine_failures(
     reflexions: list[dict], *, model_id: str, min_support: int = 3,
     similarity: float = 0.3, min_support_by_class: dict[str, int] | None = None,
+    similarity_fn: Callable[[str, str], float] | None = None,
 ) -> list[FailureSignature]:
     """Cluster ONE model's failure traces into recurring signatures.
 
     Model-specific by design (the paper's key lever): only traces whose
     ``model_id`` matches are considered, so a weakness mined for one model never
     leaks into another's harness. Within a model, traces are grouped by
-    ``failure_class`` then greedily clustered by goal-text Jaccard overlap; only
-    clusters with ``>= min_support`` members survive (a one-off is noise, not a
-    pattern). ``min_support < 1`` disables mining (returns nothing).
+    ``failure_class`` then greedily clustered by goal-text overlap; only clusters
+    with ``>= min_support`` members survive (a one-off is noise, not a pattern).
+    ``min_support < 1`` disables mining (returns nothing).
+
+    ``similarity_fn`` is the SEMANTIC-MINING seam: an injected
+    ``(text_a, text_b) -> [0,1]`` similarity (e.g. embedding cosine) used in place
+    of the default token-Jaccard, so failures that mean the same thing in
+    different words cluster together. It must be DETERMINISTIC for the loop's
+    determinism guarantee to hold; :func:`semantic_similarity` is the built-in
+    deterministic default the ``semantic_mining`` flag selects. A raising/garbage
+    fn degrades to "no match" (a fresh cluster), never crashing the pass.
 
     SCOPE GUARD (trace-poisoning defense): only UNSCOPED failures -- ones with
     no ``channel`` and no ``user_id`` -- are mined. A scoped reflexion came from
@@ -536,15 +571,25 @@ def mine_failures(
         # first member, exactly what the old code recomputed. (Found by the
         # algorithmic-complexity battery.)
         heads: list[set[str]] = []
+        head_texts: list[str] = []      # parallel head goal-texts for similarity_fn
         for r in recs:
-            rt = _tokens(str(r.get("goal_text", "")))
+            rtext = str(r.get("goal_text", ""))
+            rt = _tokens(rtext)
             for i, htok in enumerate(heads):
-                if _jaccard(rt, htok) >= similarity:
+                if similarity_fn is not None:
+                    try:
+                        sim = float(similarity_fn(head_texts[i], rtext))
+                    except Exception:  # a bad seam can't crash mining -> no match
+                        sim = 0.0
+                else:
+                    sim = _jaccard(rt, htok)
+                if sim >= similarity:
                     clusters[i].append(r)
                     break
             else:
                 clusters.append([r])
                 heads.append(rt)
+                head_texts.append(rtext)
         for cluster in clusters:
             if len(cluster) < eff_support:
                 continue
@@ -1170,6 +1215,8 @@ def run_self_harness(
     max_latency_factor: float | None = None, max_tool_calls_factor: float | None = None,
     min_support_by_class: dict[str, int] | None = None,
     candidates_per_signature: int = 1,
+    semantic_mining: bool = False,
+    similarity_fn: Callable[[str, str], float] | None = None,
 ) -> SelfHarnessReport:
     """One self-harness pass for ``model_id``: mine weaknesses, propose minimal
     edits, validate on held-in/held-out, and GATE each survivor through the
@@ -1177,6 +1224,9 @@ def run_self_harness(
 
     ``score_with``/``score_without`` (the live A/B) are injected; without them
     validation is skipped and the pass is a dry inspection (nothing is applied).
+    ``semantic_mining`` (or an explicit ``similarity_fn``) clusters failures by
+    meaning rather than strict token overlap -- an injected fn wins, else the flag
+    selects the deterministic built-in :func:`semantic_similarity`.
     Returns a :class:`SelfHarnessReport`. Never raises -- a learning pass must
     not perturb anything."""
     report = SelfHarnessReport(model_id=str(model_id))
@@ -1184,8 +1234,10 @@ def run_self_harness(
         report.skipped.append("disabled")
         return report
     try:
+        sim_fn = similarity_fn or (semantic_similarity if semantic_mining else None)
         sigs = mine_failures(reflexions, model_id=model_id, min_support=min_support,
-                             min_support_by_class=min_support_by_class)
+                             min_support_by_class=min_support_by_class,
+                             similarity_fn=sim_fn)
         report.mined = len(sigs)
         for sig in sigs:
             # The addendum block holds at most _MAX_LINES_PER_MODEL lines. Stop
@@ -1320,7 +1372,7 @@ __all__ = [
     "list_learned", "forget_addendum", "retire_stale",
     "load_line_meta", "line_provenance", "note_recall",
     "find_conflicts", "detect_store_conflicts",
-    "FailureSignature", "mine_failures", "count_eligible",
+    "FailureSignature", "mine_failures", "count_eligible", "semantic_similarity",
     "HarnessProposal", "ProposeFn", "propose_addendum", "llm_proposer",
     "ValidationResult", "ScoreFn", "validate_proposal",
     "SelfHarnessReport", "run_self_harness",
