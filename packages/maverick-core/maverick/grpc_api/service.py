@@ -222,12 +222,12 @@ class GoalService:
 
 
 def _close(world: object) -> None:
-    close = getattr(world, "close", None)
-    if callable(close):
-        try:
-            close()
-        except Exception:  # pragma: no cover -- close must never raise to caller
-            pass
+    from ..world_model import close_world_if_owned
+
+    try:
+        close_world_if_owned(world)
+    except Exception:  # pragma: no cover -- close must never raise to caller
+        pass
 
 
 __all__ = [

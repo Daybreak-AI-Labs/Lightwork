@@ -2667,6 +2667,25 @@ def world_for_tenant(tenant: str | None = None) -> WorldModel:
         return world
 
 
+def world_is_cached(world: object) -> bool:
+    """Return True when ``world`` is owned by the per-tenant cache.
+
+    Cached tenant worlds are process-wide singletons shared by dashboard/API and
+    canonical goal-entry paths, so short-lived callers must not close them.
+    """
+    with _tenant_worlds_lock:
+        return any(cached is world for cached in _tenant_worlds.values())
+
+
+def close_world_if_owned(world: object) -> None:
+    """Close ``world`` unless it is a process-cached tenant world."""
+    if world_is_cached(world):
+        return
+    close = getattr(world, "close", None)
+    if callable(close):
+        close()
+
+
 def _evict_lru_tenant_world(shared_key: str) -> None:
     """Drop the least-recently-used TENANT world from the cache (never the
     shared ``None`` world). Caller holds ``_tenant_worlds_lock``."""
