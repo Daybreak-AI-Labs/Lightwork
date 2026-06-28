@@ -85,13 +85,13 @@ development performed on behalf of the Organization.
 
 | Control | Implementation (file/module) | Status |
 | --- | --- | --- |
-| Sandboxed execution (8 isolation backends; enterprise `require_container` deny-local) | `packages/maverick-core/maverick/sandbox/` | Implemented |
-| Docker hardening (`--network=none`, `--cap-drop=ALL`, `--no-new-privileges`, `--pids-limit`, `--memory`) | `packages/maverick-core/maverick/sandbox/docker.py` | Implemented |
-| All shell routed through `sandbox.exec()`; `shell=True` outside sandbox blocked | CI grep gate (per CLAUDE.md) + `packages/maverick-core/maverick/sandbox/` | Implemented |
+| Sandboxed execution (8 isolation backends; enterprise `require_container` deny-local) | `packages/maverick-core/lightwork/sandbox/` | Implemented |
+| Docker hardening (`--network=none`, `--cap-drop=ALL`, `--no-new-privileges`, `--pids-limit`, `--memory`) | `packages/maverick-core/lightwork/sandbox/docker.py` | Implemented |
+| All shell routed through `sandbox.exec()`; `shell=True` outside sandbox blocked | CI grep gate (per CLAUDE.md) + `packages/maverick-core/lightwork/sandbox/` | Implemented |
 | Secrets handling | detect-secrets + `.secrets.baseline` gate in `.github/workflows/ci.yml` | Implemented |
-| Test-driven verification (anti-cheat) | `packages/maverick-core/maverick/verifier.py` | Implemented |
-| Chaos / fault-injection testing | `packages/maverick-core/maverick/chaos.py` | Implemented |
-| Preflight environment/config validation | `packages/maverick-core/maverick/preflight.py` | Implemented |
+| Test-driven verification (anti-cheat) | `packages/maverick-core/lightwork/verifier.py` | Implemented |
+| Chaos / fault-injection testing | `packages/maverick-core/lightwork/chaos.py` | Implemented |
+| Preflight environment/config validation | `packages/maverick-core/lightwork/preflight.py` | Implemented |
 | Dependency updates (pip/npm/cargo, weekly) | `.github/dependabot.yml` | Implemented |
 | Threat model (STRIDE) | `docs/security/threat-model.md` | Implemented |
 | Pen-test scope / audit readiness | `docs/security/audit-readiness.md` | Implemented |

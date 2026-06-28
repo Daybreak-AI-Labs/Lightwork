@@ -88,7 +88,7 @@ churn/health models, partner/PRM, and win-loss. These are §9 connectors + new p
 ## 2. How a GTM agent maps onto Lightwork
 
 Same as the other suites: each agent is one
-[`DomainProfile`](../../packages/maverick-core/maverick/domain.py) pack (compartment
+[`DomainProfile`](../../packages/maverick-core/lightwork/domain.py) pack (compartment
 + persona + attenuating capability + tools + knowledge), governed by Layer A
 (`governance.py`), the consent gate, and the signed audit chain. Two GTM specifics:
 
@@ -319,7 +319,7 @@ capability + governance policy + consent config + enabled regimes + brand guardr
 - **Status:** **Partial** (engagement substrate shipped; enrichment/sales-engagement to build).
 
 ```toml
-# packages/maverick-core/maverick/domains/gtm_sdr.toml
+# packages/maverick-core/lightwork/domains/gtm_sdr.toml
 name = "gtm_sdr"
 compartment = "gtm_sales"
 description = "Outbound sales development: account research and compliant outreach."
@@ -398,7 +398,7 @@ authoring = "manual"
 - **Status:** **Partial** (governance gate shipped; amount-aware policy is the shared build).
 
 ```toml
-# packages/maverick-core/maverick/domains/gtm_dealdesk.toml
+# packages/maverick-core/lightwork/domains/gtm_dealdesk.toml
 name = "gtm_dealdesk"
 compartment = "gtm_revops"
 description = "Deal desk: discount/term approval, margin protection, quote integrity."
@@ -546,7 +546,7 @@ authoring = "manual"
 - **Status:** **Partial** (channels + disclosure + intake shipped; support platform to build).
 
 ```toml
-# packages/maverick-core/maverick/domains/gtm_support.toml
+# packages/maverick-core/lightwork/domains/gtm_support.toml
 name = "gtm_support"
 compartment = "gtm_service"
 description = "Tier-1 customer support: triage, KB answers, deflection, escalation."

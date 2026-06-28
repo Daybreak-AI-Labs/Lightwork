@@ -51,7 +51,7 @@ service Maverick {
   and the worker share the world DB.
 
 The full message definitions are in
-[`maverick.proto`](https://github.com/Day-AI-Labs/maverick/blob/main/packages/maverick-core/maverick/grpc_api/maverick.proto).
+[`maverick.proto`](https://github.com/Day-AI-Labs/maverick/blob/main/packages/maverick-core/lightwork/grpc_api/maverick.proto).
 
 ## Authentication
 

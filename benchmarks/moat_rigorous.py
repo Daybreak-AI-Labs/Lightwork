@@ -71,7 +71,7 @@ except Exception:  # pragma: no cover -- benchmark falls back to a sane default
 # available" -- the bug that invalidated the first graded run. Default: this
 # repo's kernel source.
 DEFAULT_CODEBASE = str(Path(__file__).resolve().parents[1]
-                       / "packages" / "lightwork-core" / "maverick")
+                       / "packages" / "lightwork-core" / "lightwork")
 
 # A per-run cap below this guarantees truncation: the budget reserves ~$0.20
 # per Sonnet call pre-flight, so a sub-$1 cap leaves too little usable spend for

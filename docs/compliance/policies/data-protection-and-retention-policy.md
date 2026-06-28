@@ -48,16 +48,16 @@ This policy applies to all data created, ingested, derived, stored, or transmitt
 
 | Control | Implementation (file/module) | Status |
 | --- | --- | --- |
-| DSAR access & portability bundle (GDPR Art. 15/20) — export of world + audit data | `packages/maverick-core/maverick/dsar.py` | Implemented |
-| TTL retention enforcement + Art. 17 erasure scheduling | `packages/maverick-core/maverick/audit/retention.py` | Implemented |
-| Subject deletion: scrub world DB + audit, re-sign chain | `packages/maverick-core/maverick/audit/erase.py` | Implemented |
-| Erasure completeness verification | `packages/maverick-core/maverick/erasure_verify.py` | Implemented |
-| Anonymous mode — strip identifying fields (data minimization) | `packages/maverick-core/maverick/privacy.py` | Implemented |
-| Per-column at-rest encryption, tenant isolation, per-user owner scoping; share-link tokens stored as SHA-256 only | `packages/maverick-core/maverick/world_model.py` | Implemented |
-| PII detection & redaction | `packages/maverick-core/maverick/safety/pii_detector.py` | Implemented |
-| Secret detection & redaction | `packages/maverick-core/maverick/safety/secret_detector.py` | Implemented |
-| Per-tenant data directory isolation | `packages/maverick-core/maverick/paths.py` | Implemented |
-| Retention check tooling | `packages/maverick-core/maverick/tools/retention_check.py` | Implemented |
+| DSAR access & portability bundle (GDPR Art. 15/20) — export of world + audit data | `packages/maverick-core/lightwork/dsar.py` | Implemented |
+| TTL retention enforcement + Art. 17 erasure scheduling | `packages/maverick-core/lightwork/audit/retention.py` | Implemented |
+| Subject deletion: scrub world DB + audit, re-sign chain | `packages/maverick-core/lightwork/audit/erase.py` | Implemented |
+| Erasure completeness verification | `packages/maverick-core/lightwork/erasure_verify.py` | Implemented |
+| Anonymous mode — strip identifying fields (data minimization) | `packages/maverick-core/lightwork/privacy.py` | Implemented |
+| Per-column at-rest encryption, tenant isolation, per-user owner scoping; share-link tokens stored as SHA-256 only | `packages/maverick-core/lightwork/world_model.py` | Implemented |
+| PII detection & redaction | `packages/maverick-core/lightwork/safety/pii_detector.py` | Implemented |
+| Secret detection & redaction | `packages/maverick-core/lightwork/safety/secret_detector.py` | Implemented |
+| Per-tenant data directory isolation | `packages/maverick-core/lightwork/paths.py` | Implemented |
+| Retention check tooling | `packages/maverick-core/lightwork/tools/retention_check.py` | Implemented |
 | Regulated-deployment guidance | `docs/regulated-deployment.md` | Reference |
 | Retention schedule (per-category periods & legal bases) | — | **[Process — Organization to operationalize]** |
 | DSAR intake / identity-verification / SLA workflow | — | **[Process — Organization to operationalize]** |

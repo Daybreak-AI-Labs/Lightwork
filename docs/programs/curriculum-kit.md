@@ -12,7 +12,7 @@ upper-division/graduate students, taught over the real codebase: ~680 test
 files, CI on Python 3.10-3.12, and the architecture documented in
 [`docs/architecture.md`](../architecture.md). Lectures teach the concept;
 labs read and extend the shipped implementation of it. Module paths are
-relative to `packages/maverick-core/maverick/`; tests are under
+relative to `packages/maverick-core/lightwork/`; tests are under
 `packages/maverick-core/tests/`.
 
 **Course-wide setup (week 1, keep it working all term):** the CONTRIBUTING

@@ -5,7 +5,7 @@
 #
 #   pip install buildozer cython
 #   cd apps/mobile-skills/kivy-shell
-#   cp ../../../packages/maverick-core/maverick/disagreement.py .   # bundle the skill
+#   cp ../../../packages/maverick-core/lightwork/disagreement.py .   # bundle the skill
 #   buildozer android debug
 #
 # buildozer packages source.dir only, which is why the pure skill module is

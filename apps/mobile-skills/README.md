@@ -11,7 +11,7 @@ from `maverick-core`:
 
 ## The skill module — chosen, not hypothetical
 
-Both paths run `packages/maverick-core/maverick/disagreement.py`
+Both paths run `packages/maverick-core/lightwork/disagreement.py`
 (`answer_entropy`: the proposer-disagreement signal the swarm posts to the
 blackboard). It was picked by reading the candidates: **zero intra-package
 imports, stdlib only** (`math`, `re`, `collections`), so it loads by file

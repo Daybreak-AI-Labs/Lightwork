@@ -28,7 +28,7 @@ long-horizon design shows up on a 30-second device.
 
 ## What the reference gives you
 
-`packages/maverick-core/maverick/relay_reference.py` is pure logic with injected
+`packages/maverick-core/lightwork/relay_reference.py` is pure logic with injected
 transport, so it unit-tests with no server and no network:
 
 | Piece | Role |

@@ -127,21 +127,21 @@ In-repo "file added" dates (`git log --diff-filter=A --follow`). All on the
 public `main`-lineage history.
 
 **Invention 1 — signed staged-learning audit**
-- `packages/maverick-core/maverick/learning_rollout.py` — 2026-06-18
-- `packages/maverick-core/maverick/audit/signing.py` — 2026-06-18
+- `packages/maverick-core/lightwork/learning_rollout.py` — 2026-06-18
+- `packages/maverick-core/lightwork/audit/signing.py` — 2026-06-18
 - `rust/maverick-verify-audit/src/canonical.rs` — 2026-06-18
 - `rust/maverick-verify-audit/src/lib.rs` — 2026-06-18
 
 **Invention 2 — calibration-gated evolution + hindsight**
-- `packages/maverick-core/maverick/calibration.py` — 2026-06-18
-- `packages/maverick-core/maverick/hindsight.py` — 2026-06-18
-- `packages/maverick-core/maverick/dreaming.py` — 2026-06-18
+- `packages/maverick-core/lightwork/calibration.py` — 2026-06-18
+- `packages/maverick-core/lightwork/hindsight.py` — 2026-06-18
+- `packages/maverick-core/lightwork/dreaming.py` — 2026-06-18
 - `packages/maverick-evolve/maverick_evolve/loop.py` — 2026-06-18
 - `packages/maverick-evolve/maverick_evolve/archive.py` — 2026-06-18
 
 **Invention 3 — governed fleet memory**
-- `packages/maverick-core/maverick/fleet_memory.py` — 2026-06-18
-- `packages/maverick-core/maverick/agent_trust.py` — 2026-06-18
+- `packages/maverick-core/lightwork/fleet_memory.py` — 2026-06-18
+- `packages/maverick-core/lightwork/agent_trust.py` — 2026-06-18
 
 > Counsel: confirm whether these in-repo dates equal the first *public push*
 > date. If history was imported/squashed on 2026-06-18, the true public

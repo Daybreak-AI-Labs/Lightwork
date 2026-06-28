@@ -8,7 +8,7 @@ from pathlib import Path
 
 _REPO = Path(__file__).resolve().parents[3]
 _EMACS = _REPO / "apps" / "emacs" / "lightwork.el"
-_NVIM_INIT = _REPO / "apps" / "nvim" / "lua" / "maverick" / "init.lua"
+_NVIM_INIT = _REPO / "apps" / "nvim" / "lua" / "lightwork" / "init.lua"
 _NVIM_PLUGIN = _REPO / "apps" / "nvim" / "plugin" / "lightwork.lua"
 
 

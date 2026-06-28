@@ -305,5 +305,5 @@ they register only when `MAVERICK_ENABLE_CRED_TOOLS=1`. See
 
 Most enterprise SaaS exposes a token-authed JSON REST or GraphQL API, which
 means a new connector is usually a one-line spec in
-`packages/maverick-core/maverick/tools/enterprise_connectors.py` — no new
+`packages/maverick-core/lightwork/tools/enterprise_connectors.py` — no new
 module. Open a request or add the spec and it registers automatically.

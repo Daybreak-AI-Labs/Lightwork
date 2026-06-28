@@ -1,5 +1,5 @@
 /* Perceptual 8x8 average-hash — the JavaScript twin of
- * packages/maverick-core/maverick/perceptual_hash.py.
+ * packages/maverick-core/lightwork/perceptual_hash.py.
  *
  * The algorithm is integer-only (BigInt for the wide compares/packing) so
  * JS and Python produce BIT-IDENTICAL hashes:

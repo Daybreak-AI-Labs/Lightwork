@@ -85,7 +85,7 @@ pack** and the **bias-evaluation** engine (shared with AI-Gov).
 
 ## 2. How an HR agent maps onto Lightwork
 
-Each agent is one [`DomainProfile`](../../packages/maverick-core/maverick/domain.py)
+Each agent is one [`DomainProfile`](../../packages/maverick-core/lightwork/domain.py)
 pack, governed by Layer A + consent + the signed audit chain. Three HR specifics:
 
 - **The employee/candidate is the data subject.** Reuse the privacy suite's PII,
@@ -244,7 +244,7 @@ The highest AI-governance exposure (Annex III + NYC LL144).
 - **Status:** **Gap**, behind the employment-decision pack + bias eval (the keystone builds).
 
 ```toml
-# packages/maverick-core/maverick/domains/hr_screening.toml
+# packages/maverick-core/lightwork/domains/hr_screening.toml
 name = "hr_screening"
 compartment = "hr_recruiting"
 description = "Job-related resume screening and ranking (EU AI Act Annex III high-risk)."
@@ -352,7 +352,7 @@ authoring = "manual"
 - **Status:** **Partial** (channels + intake + disclosure shipped).
 
 ```toml
-# packages/maverick-core/maverick/domains/hr_helpdesk.toml
+# packages/maverick-core/lightwork/domains/hr_helpdesk.toml
 name = "hr_helpdesk"
 compartment = "hr_operations"
 description = "Tier-1 HR helpdesk: policy Q&A, case triage, escalation."
@@ -466,7 +466,7 @@ Consequential decisions — **L1 ceiling**, bias-aware throughout.
 - **Status:** **Gap** (behind the employment-decision pack).
 
 ```toml
-# packages/maverick-core/maverick/domains/hr_performance.toml
+# packages/maverick-core/lightwork/domains/hr_performance.toml
 name = "hr_performance"
 compartment = "hr_talent"
 description = "Performance-review support (consequential — drafts only, human decides)."
@@ -562,7 +562,7 @@ The independent, confidential tower — **strictest access segregation**.
 - **Status:** **Gap**.
 
 ```toml
-# packages/maverick-core/maverick/domains/hr_investigations.toml
+# packages/maverick-core/lightwork/domains/hr_investigations.toml
 name = "hr_investigations"
 compartment = "hr_investigations"      # isolated seal — no cross-access
 description = "Workplace-investigation support (independent, confidential, human-led)."

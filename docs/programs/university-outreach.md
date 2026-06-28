@@ -93,7 +93,7 @@ would be just as welcome.
 Each project is sized for a 2-4 student team over one semester, has a
 testable definition of done, and names the real modules it touches. Paths
 are relative to the repo root; `maverick/` means
-`packages/maverick-core/maverick/`.
+`packages/maverick-core/lightwork/`.
 
 | # | Project | Repo area (verified) | Definition of done |
 |---|---|---|---|

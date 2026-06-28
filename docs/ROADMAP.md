@@ -241,7 +241,7 @@ sitting on seams that already exist:
 - **Transport** — the bridge fronts the existing inbound `POST /webhook/start`
   (Q3 2026 "Generic inbound webhook"); no new server surface.
 - **Long-task delivery** — results ride the existing **outbound webhooks**
-  (`packages/maverick-core/maverick/webhooks.py`) + push bridge into a secondary
+  (`packages/maverick-core/lightwork/webhooks.py`) + push bridge into a secondary
   channel, exactly as OpenClaw routes to Telegram.
 - **Voice tools optional** — `transcribe_audio` / `speak`
   (`maverick/tools/voice.py`) are *not* needed for G2 (on-device STT, HUD out), but

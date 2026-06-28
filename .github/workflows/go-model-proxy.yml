@@ -17,7 +17,7 @@ on:
   pull_request:
     paths:
       - "go/model-proxy/**"
-      - "packages/maverick-core/maverick/model_proxy.py"
+      - "packages/maverick-core/lightwork/model_proxy.py"
       - ".github/workflows/go-model-proxy.yml"
 
 permissions:

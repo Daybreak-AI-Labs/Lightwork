@@ -13,7 +13,7 @@
 
 The council's strongest, unanimous observation: **the roster is the part that is
 done; the skills library is the part that is empty.** There are **1,022 agent
-TOML packs** under `packages/maverick-core/maverick/domains/` and **exactly one
+TOML packs** under `packages/maverick-core/lightwork/domains/` and **exactly one
 `SKILL.md` in the whole repository** (the `summarize-url` toy under
 `docs/specs/catalog-example/`). The machinery to load, rank, distill, validate,
 sign, and install skills (`maverick/skills.py`) is fully built — and is being fed

@@ -58,11 +58,11 @@ This policy applies to:
 | Bearer-token auth gate (OIDC, alg-confusion hardened) | `packages/maverick-dashboard/maverick_dashboard/auth.py` | **Opt-in — default OFF; must enable** |
 | Browser OIDC login + session cookies | `packages/maverick-dashboard/maverick_dashboard/oidc_login.py` | Opt-in — configure IdP |
 | SAML SSO | `packages/maverick-dashboard/maverick_dashboard/saml.py` | Opt-in — configure IdP |
-| ID-token verification | `packages/maverick-core/maverick/oidc.py` | **Opt-in — default OFF; must enable** |
-| Reverse-proxy authentication | `packages/maverick-core/maverick/proxy_auth.py` | Opt-in — configure proxy |
-| Signed attenuating capabilities (tool/path/host scopes, max_risk ceiling, expiry; least privilege by construction) | `packages/maverick-core/maverick/capability.py` | **Opt-in — default OFF; must enable** |
-| Per-channel / per-user tool ACLs | `packages/maverick-core/maverick/safety/tool_acl.py` | Operational |
-| OAuth for MCP | `packages/maverick-core/maverick/mcp_oauth.py` | Opt-in — configure |
+| ID-token verification | `packages/maverick-core/lightwork/oidc.py` | **Opt-in — default OFF; must enable** |
+| Reverse-proxy authentication | `packages/maverick-core/lightwork/proxy_auth.py` | Opt-in — configure proxy |
+| Signed attenuating capabilities (tool/path/host scopes, max_risk ceiling, expiry; least privilege by construction) | `packages/maverick-core/lightwork/capability.py` | **Opt-in — default OFF; must enable** |
+| Per-channel / per-user tool ACLs | `packages/maverick-core/lightwork/safety/tool_acl.py` | Operational |
+| OAuth for MCP | `packages/maverick-core/lightwork/mcp_oauth.py` | Opt-in — configure |
 
 ## 6. Framework control mapping
 

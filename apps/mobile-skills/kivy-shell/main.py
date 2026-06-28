@@ -22,7 +22,7 @@ from pathlib import Path
 _HERE = Path(__file__).resolve().parent
 _BUNDLED_MODULE = _HERE / "disagreement.py"                      # APK layout
 _REPO_MODULE = (                                                  # checkout layout
-    _HERE.parents[2] / "packages" / "lightwork-core" / "maverick" / "disagreement.py"
+    _HERE.parents[2] / "packages" / "lightwork-core" / "lightwork" / "disagreement.py"
 )
 
 SAMPLES = {

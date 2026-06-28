@@ -1,6 +1,6 @@
 """Maverick gRPC API — StartGoal / StreamEpisode / Cancel / GetStatus.
 
-The contract lives in ``lightwork.proto``; the behaviour lives in
+The contract lives in ``maverick.proto``; the behaviour lives in
 :class:`~lightwork.grpc_api.service.GoalService` (transport-agnostic, no grpc
 needed). ``server.serve`` binds the two behind the ``[grpc]`` extra.
 

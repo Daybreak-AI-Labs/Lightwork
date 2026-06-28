@@ -6,7 +6,7 @@ yet) lives in [`ROADMAP.md`](./ROADMAP.md). When a roadmap item ships, it moves
 here.
 
 > Conventions: capabilities are grouped by concern. Module paths are relative to
-> `packages/maverick-core/maverick/` unless noted. CLI verbs are shown as
+> `packages/maverick-core/lightwork/` unless noted. CLI verbs are shown as
 > `maverick <verb>`.
 
 ## Agent kernel & orchestration

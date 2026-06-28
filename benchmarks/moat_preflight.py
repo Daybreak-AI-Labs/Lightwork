@@ -29,7 +29,7 @@ import tempfile
 from pathlib import Path
 
 DEFAULT_CODEBASE = str(Path(__file__).resolve().parents[1]
-                       / "packages" / "lightwork-core" / "maverick")
+                       / "packages" / "lightwork-core" / "lightwork")
 
 
 def sandbox_can_read(codebase: str | Path) -> tuple[bool, str]:

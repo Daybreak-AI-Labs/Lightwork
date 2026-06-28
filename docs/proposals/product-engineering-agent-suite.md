@@ -92,7 +92,7 @@ ML model registry / MLOps depth, and **DORA / engineering-metrics**.
 
 ## 2. How a P&E agent maps onto Lightwork
 
-Each agent is one [`DomainProfile`](../../packages/maverick-core/maverick/domain.py)
+Each agent is one [`DomainProfile`](../../packages/maverick-core/lightwork/domain.py)
 pack — but here the pack is mostly **tool selection + persona over a shipped toolset**,
 not new infrastructure. The Software Engineering tower (T3) is essentially the existing
 coding agent with role-scoped capabilities; the other towers bind the already-shipped
@@ -218,7 +218,7 @@ Tools shipped; personas are the gap.
 - **Status:** **Partial**.
 
 ```toml
-# packages/maverick-core/maverick/domains/pe_product_manager.toml
+# packages/maverick-core/lightwork/domains/pe_product_manager.toml
 name = "pe_product_manager"
 compartment = "product_management"
 description = "Product management: discovery, specs, roadmap support, analytics."
@@ -313,7 +313,7 @@ capabilities over the shipped kernel, not new builds.
 - **Status:** **Shipped** (the kernel).
 
 ```toml
-# packages/maverick-core/maverick/domains/pe_software_engineer.toml
+# packages/maverick-core/lightwork/domains/pe_software_engineer.toml
 name = "pe_software_engineer"
 compartment = "software_engineering"
 description = "Feature implementation on a scoped repo (sandboxed, verifier-gated)."

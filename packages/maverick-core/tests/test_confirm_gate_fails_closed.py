@@ -13,7 +13,7 @@ import pathlib
 import pytest
 from lightwork.tools import as_bool
 
-_TOOLS_DIR = pathlib.Path(__file__).resolve().parents[1] / "maverick" / "tools"
+_TOOLS_DIR = pathlib.Path(__file__).resolve().parents[1] / "lightwork" / "tools"
 
 # The 23 tools the council flagged (every file that gated on the unsafe form).
 _FIXED_TOOLS = [

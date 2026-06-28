@@ -7,7 +7,7 @@ work. **Survey window dates: founder-set.**
 
 One survey a year, ≤10 minutes, results published. Its analysis is designed
 to pair with the shipped **UX retrospective generator**
-(`packages/maverick-core/maverick/ux_retrospective.py`, run as
+(`packages/maverick-core/lightwork/ux_retrospective.py`, run as
 `python -m maverick.ux_retrospective --since --until`): the survey captures
 what deployments *say*, the retrospective captures what a deployment's
 world model *recorded* (goal volume/outcomes, top task verbs, channel mix,

@@ -2,7 +2,7 @@
  * @maverick/plugin-sdk — author Maverick agent tools in TypeScript.
  *
  * A plugin is a Node script that ends with `servePlugin([...tools])`. The
- * Maverick host (packages/maverick-core/maverick/ts_plugin_host.py) speaks
+ * Maverick host (packages/maverick-core/lightwork/ts_plugin_host.py) speaks
  * NDJSON to it, one JSON object per line:
  *
  *   plugin --describe              -> one-line manifest JSON, then exit

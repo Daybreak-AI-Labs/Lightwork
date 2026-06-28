@@ -101,7 +101,7 @@ def test_default_config_uses_active_runtime_path(tmp_path, monkeypatch):
     default_dir.mkdir(parents=True)
     (default_dir / "config.toml").write_text("[budget]\nmax_dollars = 5.0\n", encoding="utf-8")
 
-    active = tmp_path / "etc" / "maverick" / "config.toml"
+    active = tmp_path / "etc" / "lightwork" / "config.toml"
     active.parent.mkdir(parents=True)
     active.write_text("[channels.whatsapp]\nenabled = true\n", encoding="utf-8")
 

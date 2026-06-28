@@ -1,6 +1,6 @@
 """gRPC API v1 stability contract (roadmap: 2028 H2 ecosystem).
 
-``lightwork.proto`` (package ``lightwork.v1``) is the external contract other
+``maverick.proto`` (package ``maverick.v1``) is the external contract other
 languages build against. "v1 stable" is a *guarantee*, and a guarantee needs
 an enforcement mechanism: this module parses the proto into a structural
 **inventory** — services, rpcs (with streaming-ness), messages, and every
@@ -26,7 +26,7 @@ import json
 import re
 from pathlib import Path
 
-PROTO_PATH = Path(__file__).with_name("lightwork.proto")
+PROTO_PATH = Path(__file__).with_name("maverick.proto")
 GOLDEN_PATH = Path(__file__).with_name("maverick_v1_contract.json")
 
 _SERVICE = re.compile(r"^\s*service\s+(\w+)\s*\{")

@@ -103,7 +103,7 @@ evidences a human/org process rather than performing it (flagged per entry).
 ## 2. How an IT/GRC agent maps onto Lightwork
 
 Identical to the finance suite: each agent is one
-[`DomainProfile`](../../packages/maverick-core/maverick/domain.py) pack
+[`DomainProfile`](../../packages/maverick-core/lightwork/domain.py) pack
 (`compartment` seal + `persona` + attenuating `allow_tools`/`deny_tools` +
 `max_risk` + `allow_hosts` + `mcp_servers` + `knowledge_sources`), governed at
 runtime by Layer A (`governance.py` → allow/deny/require_human), consent/HITL, and
@@ -250,7 +250,7 @@ the platform already emits most of the evidence.
   `maverick ai-act`); the conformity/technical-documentation pack is the gap.
 
 ```toml
-# packages/maverick-core/maverick/domains/aigov_oversight.toml
+# packages/maverick-core/lightwork/domains/aigov_oversight.toml
 name = "aigov_oversight"
 compartment = "ai_governance"
 description = "AI governance: inventory, risk tiering, EU AI Act + NIST RMF posture."
@@ -337,7 +337,7 @@ The most complete tower today — mostly persona wrappers over shipped engines.
 - **Status:** **Shipped** — `dsar.py`, `audit/erase.py` (`maverick dsar`/`erase`/`export-user`).
 
 ```toml
-# packages/maverick-core/maverick/domains/privacy_dpo.toml  (extends privacy_compliance)
+# packages/maverick-core/lightwork/domains/privacy_dpo.toml  (extends privacy_compliance)
 name = "privacy_dpo"
 compartment = "privacy_compliance"
 description = "Data-protection officer: DPIA/ROPA/DSAR, transfers, retention, breach."
@@ -411,7 +411,7 @@ authoring = "manual"
   (`soc2.py`, `compliance.py`); ISO 27001 / HIPAA / PCI packs are the gap (§7).
 
 ```toml
-# packages/maverick-core/maverick/domains/grc_compliance.toml
+# packages/maverick-core/lightwork/domains/grc_compliance.toml
 name = "grc_compliance"
 compartment = "grc_assurance"
 description = "Multi-framework compliance posture, control mapping, and evidence."
@@ -555,7 +555,7 @@ The independent (third-line) tower — **read-only over everything, remediates n
   killswitch, circuit breakers); the IR workflow/severity/PIR is the gap.
 
 ```toml
-# packages/maverick-core/maverick/domains/secops_ir.toml
+# packages/maverick-core/lightwork/domains/secops_ir.toml
 name = "secops_ir"
 compartment = "security_operations"
 description = "Security incident response: triage, containment, forensics, PIR."

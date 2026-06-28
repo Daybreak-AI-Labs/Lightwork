@@ -76,7 +76,7 @@ walls, the decision gate, the audit trail) are shipped.
 
 ## 2. How a strategy/exec agent maps onto Lightwork
 
-Each agent is a [`DomainProfile`](../../packages/maverick-core/maverick/domain.py) pack —
+Each agent is a [`DomainProfile`](../../packages/maverick-core/lightwork/domain.py) pack —
 but here the **compartment seal is the point**, not an afterthought. A deal or board agent
 is spawned into an **isolated compartment** (`quarantine`-sealable, capability-scoped) so
 its MNPI never reaches the rest of the fleet, and it cannot reach back out. The research
@@ -211,7 +211,7 @@ The MNPI tower — **every agent runs in a sealed deal compartment**.
 - **Status:** **Gap** (workflow) on shipped seal + assessors.
 
 ```toml
-# packages/maverick-core/maverick/domains/corpdev_diligence.toml
+# packages/maverick-core/lightwork/domains/corpdev_diligence.toml
 name = "corpdev_diligence"
 compartment = "deal_room"          # sealed, quarantine-able — MNPI must not cross
 description = "M&A due-diligence support inside a sealed deal compartment."
@@ -337,7 +337,7 @@ authoring = "manual"
 - **Status:** **Gap** (workflow) on shipped seal.
 
 ```toml
-# packages/maverick-core/maverick/domains/exec_board.toml
+# packages/maverick-core/lightwork/domains/exec_board.toml
 name = "exec_board"
 compartment = "board_confidential"   # sealed — board/officers only
 description = "Board & governance support (confidential, sealed compartment)."

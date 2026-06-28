@@ -3,7 +3,7 @@
 **Purpose.** Decision-support for the *breadth-vs-depth* question raised in
 [`ROADMAP.md`](../ROADMAP.md) → "Current state & gap analysis" (thesis: "the
 highest-value additions are not more breadth"). This audit buckets the **286** tool modules in
-`packages/maverick-core/maverick/tools/` by **what they cost to maintain** and
+`packages/maverick-core/lightwork/tools/` by **what they cost to maintain** and
 **how much capability/risk they carry**, so the team can decide what stays in the
 core and what should move to the community **plugin** tier.
 

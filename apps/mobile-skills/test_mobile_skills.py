@@ -14,7 +14,7 @@ from pathlib import Path
 
 _HERE = Path(__file__).resolve().parent
 _REPO_ROOT = _HERE.parents[1]
-_MODULE = _REPO_ROOT / "packages" / "lightwork-core" / "maverick" / "disagreement.py"
+_MODULE = _REPO_ROOT / "packages" / "lightwork-core" / "lightwork" / "disagreement.py"
 _HTML = _HERE / "pyodide-runner" / "index.html"
 
 _ISOLATION_PROBE = """

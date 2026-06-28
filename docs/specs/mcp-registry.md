@@ -85,7 +85,7 @@ leave it empty and keep fetching `source`.
 
 ## 5. Code
 
-`packages/maverick-core/maverick/mcp_registry.py`:
+`packages/maverick-core/lightwork/mcp_registry.py`:
 
 - `load_mcp_registry()` / `resolve_mcp(name)` → `catalog.load_catalog("mcp", …)`
   with the `[mcp_registries] indexes`.

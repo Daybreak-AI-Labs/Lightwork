@@ -7,7 +7,7 @@ import pathlib
 
 from lightwork import llm
 
-_CORE = pathlib.Path(__file__).resolve().parents[1] / "maverick"
+_CORE = pathlib.Path(__file__).resolve().parents[1] / "lightwork"
 
 
 def test_vision_role_default_is_sonnet(monkeypatch):

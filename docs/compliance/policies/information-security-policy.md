@@ -106,10 +106,10 @@ the shield in governed production deployments.
 
 | Control | Implementation (file/module) | Status |
 | --- | --- | --- |
-| Secure-by-default posture (hardened but functional defaults) | `packages/maverick-core/maverick/security_defaults.py` | Implemented |
-| Startup configuration validation (reject/warn on insecure config) | `packages/maverick-core/maverick/preflight.py` | Implemented |
-| Policy engine / runtime governance enforcement | `packages/maverick-core/maverick/governance.py` | Implemented |
-| Tamper-evident audit / Operating Record | `packages/maverick-core/maverick/audit/` | Implemented |
+| Secure-by-default posture (hardened but functional defaults) | `packages/maverick-core/lightwork/security_defaults.py` | Implemented |
+| Startup configuration validation (reject/warn on insecure config) | `packages/maverick-core/lightwork/preflight.py` | Implemented |
+| Policy engine / runtime governance enforcement | `packages/maverick-core/lightwork/governance.py` | Implemented |
+| Tamper-evident audit / Operating Record | `packages/maverick-core/lightwork/audit/` | Implemented |
 | Documented security hardening guidance | `docs/security-hardening.md` | Implemented |
 | Enterprise security posture overview | `docs/enterprise/security-overview.md` | Implemented |
 | ISMS scope, SoA, asset inventory, management review records | ISMS register (organizational) | Process |

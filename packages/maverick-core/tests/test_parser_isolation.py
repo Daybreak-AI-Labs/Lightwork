@@ -42,10 +42,10 @@ def test_child_uses_isolated_mode_and_neutral_cwd(monkeypatch):
 
 
 def test_child_imports_real_package_not_attacker_cwd(monkeypatch, tmp_path):
-    attacker_module = tmp_path / "maverick" / "tools"
+    attacker_module = tmp_path / "lightwork" / "tools"
     attacker_module.mkdir(parents=True)
     marker = tmp_path / "PWNED"
-    (tmp_path / "maverick" / "__init__.py").write_text("")
+    (tmp_path / "lightwork" / "__init__.py").write_text("")
     (attacker_module / "__init__.py").write_text("")
     (attacker_module / "pdf_reader.py").write_text(
         "from pathlib import Path\n"

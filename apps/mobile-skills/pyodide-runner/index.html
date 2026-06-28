@@ -9,7 +9,7 @@
   done.
 
   The executed skill module is REAL, fetched from this repo at runtime:
-  packages/maverick-core/maverick/disagreement.py — chosen because it has
+  packages/maverick-core/lightwork/disagreement.py — chosen because it has
   zero intra-package imports (stdlib only: math, re, collections), verified
   by reading it. Serve from the REPO ROOT so the relative path resolves:
 
@@ -35,7 +35,7 @@
     <h1>Maverick skill on mobile: <code>disagreement.answer_entropy</code></h1>
     <p class="muted">
       Runs the real pure-Python skill module
-      <code>packages/maverick-core/maverick/disagreement.py</code> in a
+      <code>packages/maverick-core/lightwork/disagreement.py</code> in a
       Pyodide (CPython-in-WASM) runtime, entirely in this browser.
     </p>
     <button id="run" disabled>Loading Pyodide&hellip;</button>
@@ -44,7 +44,7 @@
     <!-- Locally vendored Pyodide only; committing a CDN hot-link is banned. -->
     <script src="./vendor/pyodide/pyodide.js"></script>
     <script>
-      var SKILL_MODULE = "../../../packages/maverick-core/maverick/disagreement.py";
+      var SKILL_MODULE = "../../../packages/maverick-core/lightwork/disagreement.py";
       var out = document.getElementById("out");
       var btn = document.getElementById("run");
 

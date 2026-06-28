@@ -37,7 +37,7 @@ onto LLMs and tools under the same kinds of controls. (A lens, not a brand
 ## 2. The mental model — five primitives
 
 Everything in the runtime hangs off five ideas. Module paths are relative
-to `packages/maverick-core/maverick/` unless noted.
+to `packages/maverick-core/lightwork/` unless noted.
 
 ### The swarm
 

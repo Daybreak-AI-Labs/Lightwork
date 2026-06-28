@@ -23,7 +23,7 @@ Design notes:
   Never change it: `MajorUpgrade` uses it to find and replace older versions.
   `test_wxs.py` pins the exact value so a drive-by edit fails CI.
 - **The launcher uses the console-script entry point.** `py -m maverick`
-  does not work — `packages/maverick-core/maverick/` has no `__main__.py` —
+  does not work — `packages/maverick-core/lightwork/` has no `__main__.py` —
   so `maverick.cmd` runs `python -c "from maverick.cli import main; main()"`
   (the same target as the `maverick` console script in
   `packages/maverick-core/pyproject.toml`).

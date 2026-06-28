@@ -9,7 +9,7 @@
   `packages/` + `apps/installer-cli`), FastAPI dashboard, Tauri desktop apps,
   one TypeScript SDK (`sdks/plugin-ts`, Node 22). pip editable installs; npm
   only for the TS SDK.
-- **Entry points:** `maverick` CLI (`packages/maverick-core/maverick/cli.py`),
+- **Entry points:** `maverick` CLI (`packages/maverick-core/lightwork/cli.py`),
   dashboard app (`maverick_dashboard.app:app`), MCP server (`maverick mcp`).
 
 ## Commands (verified working)

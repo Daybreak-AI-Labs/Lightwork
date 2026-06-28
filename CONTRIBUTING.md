@@ -110,10 +110,10 @@ prefix must start with a letter** -- not a digit, quote, or backtick
 
 ## Adding a provider
 
-1. Create `packages/maverick-core/maverick/providers/<name>_provider.py`
+1. Create `packages/maverick-core/lightwork/providers/<name>_provider.py`
    with a class implementing `complete()` and `complete_async()` that
    accept Anthropic-format messages/tools and return `LLMResponse`.
-2. Register in `packages/maverick-core/maverick/providers/__init__.py`
+2. Register in `packages/maverick-core/lightwork/providers/__init__.py`
    under `get_provider_client` and `KNOWN_PROVIDERS`.
 3. Add to the wizard catalog at
    `apps/installer-cli/maverick_installer/models.py`.

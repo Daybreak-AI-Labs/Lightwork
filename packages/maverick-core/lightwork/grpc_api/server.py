@@ -5,7 +5,7 @@ transport-agnostic service and back. Everything here is behind the ``[grpc]``
 extra (``grpcio`` + ``grpcio-tools``) and lazy — importing this module never
 requires grpc; only :func:`serve` and :func:`_servicer` do.
 
-Stubs are generated on demand from the bundled ``lightwork.proto`` into this
+Stubs are generated on demand from the bundled ``maverick.proto`` into this
 package (``maverick_pb2`` / ``maverick_pb2_grpc``) so no generated code is
 checked in. With the ``[grpc]`` extra installed, ``serve()`` just works.
 """
@@ -24,7 +24,7 @@ from pathlib import Path
 
 log = logging.getLogger(__name__)
 
-_PROTO = Path(__file__).with_name("lightwork.proto")
+_PROTO = Path(__file__).with_name("maverick.proto")
 _DEFAULT_ADDR = "127.0.0.1:50051"
 _TOKEN_ENV = "MAVERICK_GRPC_BEARER_TOKEN"
 _AUTH_HEADER = "authorization"
@@ -48,14 +48,14 @@ def _load_stubs():
         return maverick_pb2, maverick_pb2_grpc
     except ImportError:
         from ..grpc_stubs import guard_runtime_generation
-        guard_runtime_generation("lightwork.proto")
+        guard_runtime_generation("maverick.proto")
         _generate_stubs()
         from . import maverick_pb2, maverick_pb2_grpc  # type: ignore
         return maverick_pb2, maverick_pb2_grpc
 
 
 def _generate_stubs() -> None:
-    """Compile lightwork.proto into this package using grpc_tools.protoc."""
+    """Compile maverick.proto into this package using grpc_tools.protoc."""
     try:
         from grpc_tools import protoc
     except ImportError as e:

@@ -101,7 +101,7 @@ the secret filter dropped any member, drop them all so git cleanly falls back to
 file config instead of choking on a dangling `COUNT`. This is also the *more*
 secure outcome — a secret-bearing `GIT_CONFIG_VALUE_*` (e.g. an
 `http.extraheader` auth blob, which the old regex did **not** catch) can no
-longer survive into the child shell either. `packages/maverick-core/maverick/
+longer survive into the child shell either. `packages/maverick-core/lightwork/
 sandbox/local.py`, with a regression test in `test_security_invariants.py`.
 
 After the fix all 8 tests pass; the 81 existing secret-scrub / hardening tests

@@ -15,12 +15,12 @@ on:
   pull_request:
     paths:
       - "rust/**"
-      - "packages/maverick-core/maverick/safety/unicode_filter.py"
-      - "packages/maverick-core/maverick/safety/secret_detector.py"
-      - "packages/maverick-core/maverick/safety/pii_detector.py"
+      - "packages/maverick-core/lightwork/safety/unicode_filter.py"
+      - "packages/maverick-core/lightwork/safety/secret_detector.py"
+      - "packages/maverick-core/lightwork/safety/pii_detector.py"
       # The audit verifier is a byte-exact port of verify_chain; rerun its
       # cross-language parity job whenever the signing source of truth changes.
-      - "packages/maverick-core/maverick/audit/signing.py"
+      - "packages/maverick-core/lightwork/audit/signing.py"
       - "packages/maverick-core/tests/test_native_unicode_parity.py"
       - "packages/maverick-core/tests/test_native_detect_parity.py"
       - ".github/workflows/native.yml"
