@@ -569,6 +569,10 @@ def get_self_harness() -> dict:
       examples, an unseen-sample floor, an effect-size floor.
     - ``semantic_mining``: cluster failure diagnoses by embedding similarity
       when embeddings are available (default off -> deterministic Jaccard).
+    - ``candidates_per_signature``: best-of-N proposing -- generate this many
+      candidate lines per weakness and promote the strongest validated one
+      (>=1; default 1 = single candidate, only matters with a stochastic
+      proposer, a deterministic one collapses to 1).
     - ``retire_after_days``: auto-retire lines not active within this many days
       (0 = never; only acted on when a driver/CLI runs retirement).
     """
@@ -608,6 +612,7 @@ def get_self_harness() -> dict:
         "max_latency_factor": _factor("max_latency_factor"),
         "max_tool_calls_factor": _factor("max_tool_calls_factor"),
         "semantic_mining": bool(cfg.get("semantic_mining", False)),
+        "candidates_per_signature": max(1, _num("candidates_per_signature", 1, int)),
         "retire_after_days": max(0.0, _num("retire_after_days", 0.0, float)),
     }
 

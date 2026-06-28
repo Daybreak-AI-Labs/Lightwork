@@ -572,7 +572,8 @@ def test_line_provenance_handles_legacy_line(store):
                       store)
     assert sh.line_provenance("M", store) == [{
         "text": "legacy line", "signature": None, "rationale": None,
-        "held_out_delta": None, "samples": None, "learned_at": None, "updated_at": None,
+        "hypothesis": None, "held_out_delta": None, "samples": None,
+        "learned_at": None, "updated_at": None,
         "last_recalled_at": None, "recall_notes": None}]
 
 
@@ -778,3 +779,195 @@ def test_runner_pass_applies_config_floors(monkeypatch, store):
         refl, model_id="M", held_in=["a", "b"], held_out=[], controller=ctrl,
         score_with=lambda a, c: 0.95, score_without=lambda a, c: 0.4)
     assert rep.promoted == 0 and any("no held-out cases" in s for s in rep.skipped)
+
+
+# ---------- wave 7: structured proposer + best-of-N (Pareto) selection ----------
+
+def test_proposal_parts_str_and_mapping():
+    assert sh._proposal_parts("just a line") == ("just a line", "")
+    assert sh._proposal_parts({"line": "L", "hypothesis": "H"}) == ("L", "H")
+    assert sh._proposal_parts({"addendum_line": "L"}) == ("L", "")   # legacy key
+    assert sh._proposal_parts({}) == ("", "")
+    assert sh._proposal_parts(None) == ("", "")
+    # a malformed (non-str/non-mapping) return degrades, never raises
+    assert sh._proposal_parts(123)[0] == "123"
+
+
+def test_propose_addendum_carries_hypothesis():
+    fn = lambda s: {"line": "Verify the export window first.",            # noqa: E731
+                    "hypothesis": "Timeouts cluster on unbounded exports."}
+    p = sh.propose_addendum(_sig("timeout"), propose_fn=fn)
+    assert p is not None
+    assert p.addendum_line == "Verify the export window first."
+    assert p.hypothesis == "Timeouts cluster on unbounded exports."
+    # a bare-string proposer leaves the hypothesis empty (back-compat)
+    p2 = sh.propose_addendum(_sig("timeout"), propose_fn=lambda s: "Verify the window.")
+    assert p2 is not None and p2.hypothesis == ""
+
+
+def test_propose_addendum_sanitizes_hypothesis():
+    # The hypothesis rides into the audit + provenance a human reads, so it gets
+    # the same scrub as the line: secrets + control chars stripped, length bounded.
+    secret = "sk-ant-" + "abcdefghij1234567890XYZ"
+    fn = lambda s: {"line": "Verify the window first.",                   # noqa: E731
+                    "hypothesis": f"leak {secret} ctrl\x00\x1b\n" + "x" * 400}
+    p = sh.propose_addendum(_sig("timeout"), propose_fn=fn)
+    assert p is not None
+    assert secret not in p.hypothesis
+    assert "\n" not in p.hypothesis and not any(ord(c) < 32 for c in p.hypothesis)
+    assert len(p.hypothesis) <= 280
+    # a policy-eroding HYPOTHESIS is allowed (it never enters a prompt); only the
+    # LINE is policy-screened.
+    p2 = sh.propose_addendum(_sig("timeout"), propose_fn=lambda s: {
+        "line": "Verify the window first.", "hypothesis": "bypass the validator"})
+    assert p2 is not None and "bypass the validator" in p2.hypothesis
+
+
+def test_parse_structured_proposal():
+    assert sh._parse_structured_proposal('{"line": "L", "hypothesis": "H"}') == {
+        "line": "L", "hypothesis": "H"}
+    # tolerates a fenced ```json block / surrounding prose
+    fenced = 'Here you go:\n```json\n{"line": "L2", "hypothesis": "H2"}\n```'
+    assert sh._parse_structured_proposal(fenced) == {"line": "L2", "hypothesis": "H2"}
+    # missing hypothesis -> empty string
+    assert sh._parse_structured_proposal('{"line": "L3"}') == {"line": "L3", "hypothesis": ""}
+    # no JSON / no string line / not an object -> None (caller falls back to plain)
+    assert sh._parse_structured_proposal("not json at all") is None
+    assert sh._parse_structured_proposal('{"line": 5}') is None
+    assert sh._parse_structured_proposal('{"hypothesis": "only"}') is None
+    assert sh._parse_structured_proposal('[1, 2, 3]') is None
+
+
+def test_llm_proposer_structured_json():
+    raw = '{"line": "Validate the response shape before parsing.", ' \
+          '"hypothesis": "Parse failures come from unchecked partial responses."}'
+    fn = sh.llm_proposer(_FakeLLM(text=raw))      # structured=True by default
+    out = fn(_sig("parse"))
+    assert isinstance(out, dict)
+    assert out["line"] == "Validate the response shape before parsing."
+    assert out["hypothesis"].startswith("Parse failures")
+    # and it threads through propose_addendum into the proposal
+    p = sh.propose_addendum(_sig("parse"), propose_fn=fn)
+    assert p.addendum_line == "Validate the response shape before parsing."
+    assert p.hypothesis.startswith("Parse failures")
+
+
+def test_llm_proposer_structured_falls_back_to_plain_line():
+    # A model that ignores the JSON instruction and returns a bare line still works.
+    fn = sh.llm_proposer(_FakeLLM(text="Just a plain guidance line."))
+    out = fn(_sig("timeout"))
+    assert out == "Just a plain guidance line."     # plain str, not a dict
+    # structured=False keeps the old single-line prompt path too
+    fn2 = sh.llm_proposer(_FakeLLM(text="Old-style line."), structured=False)
+    assert fn2(_sig("timeout")) == "Old-style line."
+
+
+def test_structured_hypothesis_in_provenance_and_audit(monkeypatch, store):
+    ctrl = _enable(monkeypatch)
+    captured: list = []
+    import maverick.audit as audit
+    monkeypatch.setattr(audit, "record", lambda kind, **kw: captured.append(kw) or True)
+    fn = lambda s: {"line": "Bound the export window before starting.",   # noqa: E731
+                    "hypothesis": "Unbounded exports are what time out."}
+    refl = [_refl("M", "timeout", "export the nightly ledger") for _ in range(3)]
+    rep = sh.run_self_harness(
+        refl, model_id="M", controller=ctrl, min_support=3, path=store,
+        held_in=["a", "b"], held_out=["c", "d", "e"], propose_fn=fn,
+        score_with=lambda a, c: 0.95, score_without=lambda a, c: 0.4)
+    assert rep.promoted == 1
+    # provenance sidecar carries the hypothesis
+    prov = sh.line_provenance("M", store)
+    assert prov[0]["hypothesis"] == "Unbounded exports are what time out."
+    # and the signed audit row does too
+    applies = [kw for kw in captured if kw.get("phase") == "apply"]
+    assert applies and applies[-1].get("hypothesis") == "Unbounded exports are what time out."
+
+
+def _stateful(lines):
+    """A stochastic-proposer stand-in: returns a different line on each call."""
+    it = iter(lines)
+    last = lines[-1]
+    def _fn(sig):
+        nonlocal last
+        try:
+            last = next(it)
+        except StopIteration:
+            pass
+        return last
+    return _fn
+
+
+def test_best_of_n_promotes_strongest_candidate(monkeypatch, store):
+    ctrl = _enable(monkeypatch)
+    cands = ["weak guidance line here", "strong guidance line here", "mid guidance line here"]
+    # held-out lift keys on WHICH candidate line is in the prompt.
+    def sw(add, cases):
+        return {"strong guidance line here": 0.95, "mid guidance line here": 0.7}.get(add, 0.5)
+    refl = [_refl("M", "timeout", "export the nightly ledger") for _ in range(3)]
+    rep = sh.run_self_harness(
+        refl, model_id="M", controller=ctrl, min_support=3, path=store,
+        held_in=["a", "b"], held_out=["c", "d", "e"], propose_fn=_stateful(cands),
+        score_with=sw, score_without=lambda a, c: 0.4, candidates_per_signature=3)
+    assert rep.promoted == 1
+    recalled = sh.recall_addendum("M", store)
+    assert "strong guidance line here" in recalled            # best held-out delta won
+    assert "weak guidance line here" not in recalled
+    assert "mid guidance line here" not in recalled
+
+
+def test_best_of_n_deterministic_collapses_to_single(monkeypatch, store):
+    # k>1 with a DETERMINISTIC proposer must behave exactly like k==1: one line.
+    ctrl = _enable(monkeypatch)
+    refl = [_refl("M", "timeout", "export the nightly ledger") for _ in range(3)]
+    rep = sh.run_self_harness(
+        refl, model_id="M", controller=ctrl, min_support=3, path=store,
+        held_in=["a", "b"], held_out=["c", "d", "e"],
+        propose_fn=lambda s: "One fixed guidance line.",
+        score_with=lambda a, c: 0.95, score_without=lambda a, c: 0.4,
+        candidates_per_signature=5)
+    assert rep.promoted == 1
+    bullets = [ln for ln in sh.recall_addendum("M", store).splitlines() if ln.startswith("- ")]
+    assert bullets == ["- One fixed guidance line."]
+
+
+def test_best_of_n_skips_when_no_candidate_passes(monkeypatch, store):
+    ctrl = _enable(monkeypatch)
+    refl = [_refl("M", "timeout", "export the nightly ledger") for _ in range(3)]
+    rep = sh.run_self_harness(
+        refl, model_id="M", controller=ctrl, min_support=3, path=store,
+        held_in=["a", "b"], held_out=["c", "d", "e"],
+        propose_fn=_stateful(["alpha line one", "beta line two"]),
+        score_with=lambda a, c: 0.4, score_without=lambda a, c: 0.4,  # no lift
+        candidates_per_signature=2)
+    assert rep.promoted == 0 and rep.validated == 0
+    assert any("no candidate passed" in s for s in rep.skipped)
+    assert sh.recall_addendum("M", store) == ""
+
+
+def test_best_validated_candidate_unit():
+    sig = _sig("timeout")
+    # `first` comes from the SAME proposer the helper draws the rest from (exactly
+    # how run_self_harness calls it), so the stateful iterator advances correctly.
+    fn = _stateful(["low delta line", "high delta line"])
+    first = sh.propose_addendum(sig, propose_fn=fn)        # consumes "low delta line"
+    def sw(add, cases):
+        return 0.9 if add == "high delta line" else 0.55
+    proposal, vr = sh._best_validated_candidate(
+        sig, first=first, propose_fn=fn, k=2, held_in=["a"], held_out=["b", "c"],
+        score_with=sw, score_without=lambda a, c: 0.4, validate_kwargs={})
+    assert proposal.addendum_line == "high delta line"
+    assert vr.accepted and round(vr.held_out_delta, 2) == 0.5
+
+
+def test_candidates_per_signature_config(monkeypatch):
+    from maverick import config
+    monkeypatch.setattr(config, "load_config", lambda *a, **k: {
+        "self_harness": {"candidates_per_signature": 4}})
+    assert config.get_self_harness()["candidates_per_signature"] == 4
+    # clamped to >=1; non-int falls back to the default
+    monkeypatch.setattr(config, "load_config", lambda *a, **k: {
+        "self_harness": {"candidates_per_signature": 0}})
+    assert config.get_self_harness()["candidates_per_signature"] == 1
+    monkeypatch.setattr(config, "load_config", lambda *a, **k: {"self_harness": {}})
+    assert config.get_self_harness()["candidates_per_signature"] == 1
+    assert sh.settings()["candidates_per_signature"] == 1
