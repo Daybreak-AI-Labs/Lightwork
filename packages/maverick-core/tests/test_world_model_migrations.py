@@ -15,7 +15,9 @@ idempotent (no double-applies, no errors).
 """
 from __future__ import annotations
 
+import os
 import sqlite3
+import stat
 import time
 
 from maverick.world_model import SCHEMA_VERSION, WorldModel
@@ -104,11 +106,16 @@ def test_pre_migration_backup_written_for_existing_db(tmp_path):
     db = tmp_path / "world.db"
     _build_legacy_db(db)  # real data at schema v1
 
-    wm = WorldModel(path=db)
+    old_umask = os.umask(0o022)
+    try:
+        wm = WorldModel(path=db)
+    finally:
+        os.umask(old_umask)
     assert wm.schema_version == SCHEMA_VERSION
 
     bak = tmp_path / "world.db.pre-migration-v1.bak"
     assert bak.exists(), "expected a pre-migration backup of the v1 DB"
+    assert stat.S_IMODE(bak.stat().st_mode) == 0o600
     # The snapshot captured the PRE-migration state (v1), not the upgraded one.
     bconn = sqlite3.connect(str(bak))
     try:
