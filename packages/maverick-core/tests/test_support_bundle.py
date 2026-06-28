@@ -53,6 +53,49 @@ def test_cli_support_writes_redacted_file(tmp_path, monkeypatch):
     assert json.loads(text)["versions"]  # parseable + populated
 
 
+def test_collect_redacts_failed_job_errors(tmp_path, monkeypatch):
+    from maverick import job_queue
+
+    monkeypatch.setattr(job_queue, "DEFAULT_DB", tmp_path / "jobs.db")
+    q = job_queue.JobQueue()
+    job_id = q.enqueue("demo", {})
+    claimed = q.claim()
+    assert claimed and claimed.id == job_id
+    q.fail(
+        job_id,
+        "RuntimeError: Authorization: Bearer sk-live-POCSECRET1234567890 "
+        "and https://user:SuperSecretPass@example.test/cb?api_key=AKIAABCDEFGHIJKLMNOP",
+        retry_after=None,
+    )
+
+    bundle = support_bundle.collect()
+    text = json.dumps(bundle, default=str)
+    assert "sk-live-POCSECRET1234567890" not in text
+    assert "SuperSecretPass" not in text
+    assert "AKIAABCDEFGHIJKLMNOP" not in text
+    last_error = bundle["recent_failures"]["failed_jobs"][0]["last_error"]
+    assert "[REDACTED:openai_key]" in last_error
+    assert "[REDACTED:url_credentials]" in last_error
+
+
+def test_cli_support_tightens_existing_output_file_permissions(tmp_path, monkeypatch):
+    from click.testing import CliRunner
+    from maverick.cli import main
+
+    monkeypatch.setattr(
+        "maverick.config.load_config",
+        lambda: {"providers": {"openai": {"api_key": "sk-LEAKME"}}})  # pragma: allowlist secret
+    out = tmp_path / "bundle.json"
+    out.write_text("old")
+    out.chmod(0o644)
+
+    r = CliRunner().invoke(main, ["support", "-o", str(out)])
+
+    assert r.exit_code == 0, r.output
+    assert out.stat().st_mode & 0o777 == 0o600
+    assert "sk-LEAKME" not in out.read_text()
+
+
 def test_cli_support_stdout():
     from click.testing import CliRunner
     from maverick.cli import main

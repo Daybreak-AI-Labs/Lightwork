@@ -141,7 +141,7 @@ def _recent_failures() -> dict:
         failed = JobQueue().list(status="failed", limit=20)
         out["failed_jobs"] = [
             {"id": getattr(j, "id", None), "kind": getattr(j, "kind", None),
-             "last_error": (getattr(j, "last_error", "") or "")[:200]}
+             "last_error": _redact((getattr(j, "last_error", "") or "")[:200])}
             for j in failed
         ]
     except Exception:
