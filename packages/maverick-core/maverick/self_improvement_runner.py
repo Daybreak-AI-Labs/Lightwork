@@ -207,7 +207,49 @@ def run_self_harness_pass(
         return self_harness.SelfHarnessReport(model_id=str(model_id or ""))
 
 
+def run_self_harness_cycle(
+    reflexions=None, *, model_id: str | None = None, limit: int = 500,
+    retire: bool = True, retire_after_days: float | None = None,
+    held_in=None, held_out=None, score_with=None, score_without=None,
+    propose_fn=None, controller=None, **pass_kwargs,
+):
+    """One full DRIVER cycle -- a governed learning pass THEN stale-line
+    retirement -- the unit a scheduler (cron / the self-improvement loop) invokes
+    to operate the harness end-to-end. Returns ``(report, retired_count)``.
+
+    The pass is :func:`run_self_harness_pass` (mine -> propose -> validate ->
+    gate); without injected ``score_with``/``score_without`` (a live A/B needs a
+    real model + eval harness) it is a DRY inspection that writes no NEW guidance,
+    but retirement still runs -- so a scheduled ``maverick self-harness run`` keeps
+    guidance fresh even before live scoring is wired. Retirement uses
+    ``retire_after_days`` (arg overrides ``[self_harness]`` config; 0/None = off)
+    and is scoped to the pass's resolved model. Never raises -- a maintenance
+    cycle must not perturb anything."""
+    try:
+        from . import self_harness
+        report = run_self_harness_pass(
+            reflexions, model_id=model_id, limit=limit,
+            held_in=held_in, held_out=held_out, score_with=score_with,
+            score_without=score_without, propose_fn=propose_fn,
+            controller=controller, **pass_kwargs)
+        retired = 0
+        if retire and self_harness.enabled():
+            days = retire_after_days
+            if days is None:
+                days = self_harness.settings().get("retire_after_days", 0.0)
+            if days and float(days) > 0:
+                retired = self_harness.retire_stale(
+                    older_than_days=float(days),
+                    model_id=(report.model_id or model_id) or None)
+        return report, retired
+    except Exception:  # pragma: no cover -- a maintenance cycle never perturbs a run
+        log.debug("self-harness cycle failed", exc_info=True)
+        from . import self_harness
+        return self_harness.SelfHarnessReport(model_id=str(model_id or "")), 0
+
+
 __all__ = [
     "collect_calibration", "should_retire", "review_generated_tools",
     "build_prm_examples", "emit_strategy_candidate", "run_self_harness_pass",
+    "run_self_harness_cycle",
 ]

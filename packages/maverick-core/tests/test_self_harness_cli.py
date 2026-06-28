@@ -215,3 +215,41 @@ def test_conflicts_cli_clean(_home):
         sh._store_path())
     r = CliRunner().invoke(main, ["self-harness", "conflicts"])
     assert r.exit_code == 0 and "no conflicting guidance" in r.output
+
+
+def test_run_cli_requires_enable(_home, monkeypatch):
+    monkeypatch.delenv("MAVERICK_SELF_HARNESS")            # feature OFF
+    r = CliRunner().invoke(main, ["self-harness", "run", "--model", "m"])
+    assert r.exit_code != 0 and "self-harness is off" in r.output
+
+
+def test_run_cli_dry_pass(_home):
+    from maverick import reflexion
+    for i in range(3):
+        reflexion.record(goal_text=f"export the nightly ledger {i}", failure_class="timeout",
+                         failure_msg="timed out", reflection="r", model_id="claude-x")
+    r = CliRunner().invoke(
+        main, ["self-harness", "run", "--model", "claude-x", "--no-retire"])
+    assert r.exit_code == 0, r.output
+    # a weakness is mined but, with no live scorer, nothing is promoted (dry)
+    assert "mined=1" in r.output and "promoted=0" in r.output
+    assert "dry pass" in r.output
+    assert sh.recall_addendum("claude-x", sh._store_path()) == ""
+
+
+def test_run_cli_retires_stale(_home, monkeypatch):
+    import time
+
+    from maverick import config
+    # config turns retirement on; the stale line is older than the TTL
+    monkeypatch.setattr(config, "load_config", lambda *a, **k: {
+        "self_harness": {"enable": True, "retire_after_days": 30}})
+    block = "Operating guidance learned for this model:\n- ancient line"
+    sh._write_addenda({"claude-x": block}, sh._store_path())
+    rec = {"model_id": "claude-x", "text": "ancient line",
+           "learned_at": time.time() - 100 * 86400, "updated_at": time.time() - 100 * 86400}
+    sh._write_line_meta({sh._line_id("claude-x", "ancient line"): rec}, sh._store_path())
+    r = CliRunner().invoke(main, ["self-harness", "run", "--model", "claude-x"])
+    assert r.exit_code == 0, r.output
+    assert "retired=1" in r.output
+    assert sh.recall_addendum("claude-x", sh._store_path()) == ""
