@@ -662,6 +662,39 @@ def test_run_reports_conflict_without_blocking(monkeypatch, store):
     assert len(pairs) == 1 and pairs[0][0] == "M"
 
 
+def test_find_conflicts_classifier_overrides_heuristic():
+    # The classifier catches a semantic conflict with NO token overlap (the
+    # heuristic would miss it) and suppresses a heuristic candidate it deems fine.
+    new = "Prefer streaming for large ledger exports."
+    existing = ["Batch everything; never stream.",                 # no overlap, real conflict
+                "Avoid streaming large ledger exports."]           # heuristic would flag this
+    # classifier: only the FIRST is a real contradiction
+    clf = lambda a, b: b == "Batch everything; never stream."      # noqa: E731
+    assert sh.find_conflicts(new, existing, classifier_fn=clf) == \
+        ["Batch everything; never stream."]
+
+
+def test_find_conflicts_classifier_error_falls_back_to_heuristic():
+    new = "Prefer streaming for large ledger exports."
+    existing = ["Avoid streaming large ledger exports; batch them first."]
+    def boom(a, b):
+        raise RuntimeError("judge down")
+    # classifier raises -> per-pair fallback to the lexical heuristic still flags it
+    assert sh.find_conflicts(new, existing, classifier_fn=boom) == existing
+
+
+def test_detect_store_conflicts_threads_classifier(monkeypatch, store):
+    ctrl = _enable(monkeypatch)
+    _promote_line(store, "M", "c0", "alpha guidance one", ctrl)
+    _promote_line(store, "M", "c1", "beta guidance two", ctrl)
+    # these don't conflict lexically; a classifier that says "always conflict"
+    # proves the seam is threaded end-to-end
+    pairs = sh.detect_store_conflicts(path=store, classifier_fn=lambda a, b: True)
+    assert len(pairs) == 1 and pairs[0][0] == "M"
+    # without the classifier the heuristic finds nothing here
+    assert sh.detect_store_conflicts(path=store) == []
+
+
 # ---------- recall-usage tracking ----------
 
 def test_note_recall_records_last_used_and_keeps_line_fresh(monkeypatch, store):

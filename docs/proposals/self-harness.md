@@ -141,6 +141,9 @@ safety model as skills and insights.
   oppose an earlier one. `find_conflicts` / `detect_store_conflicts` flag
   suspected contradictions (shared topic, opposite polarity) into the
   `SelfHarnessReport` and `maverick self-harness conflicts` for operator review.
+  An optional injected `classifier_fn` (a semantic judge, e.g. an LLM) refines
+  the lexical heuristic — catching reworded conflicts it misses and suppressing
+  its false positives, falling back to the heuristic per-pair on any judge error.
   Advisory only — a false positive must never silently drop real guidance.
 
 ## Operating it

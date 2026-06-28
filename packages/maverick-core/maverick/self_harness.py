@@ -266,25 +266,45 @@ def _is_negative(line: str) -> bool:
 
 
 def find_conflicts(new_line: str, existing_lines: list[str], *,
-                   min_overlap: float = 0.5) -> list[str]:
+                   min_overlap: float = 0.5,
+                   classifier_fn: Callable[[str, str], bool] | None = None) -> list[str]:
     """Existing lines that appear to CONTRADICT ``new_line``: high content-token
     overlap (same topic) but OPPOSITE polarity (one prohibits what the other
     prefers). Advisory and deliberately conservative (high overlap threshold) --
-    the caller surfaces these for review, never auto-drops on them."""
+    the caller surfaces these for review, never auto-drops on them.
+
+    ``classifier_fn`` is the SEMANTIC seam: an injected ``(a, b) -> bool`` judge
+    (e.g. an LLM) that decides contradiction by MEANING -- it catches conflicts
+    the lexical heuristic misses (reworded, no token overlap) and suppresses its
+    false positives. When present it is authoritative per pair; a classifier that
+    RAISES falls back to the heuristic for that pair, so a flaky judge never drops
+    a real flag. Addenda are bounded (<= _MAX_LINES_PER_MODEL), so the O(n^2)
+    pairwise calls stay tiny. Still advisory -- the gate never blocks on it."""
     nt, neg = _content_tokens(new_line), _is_negative(new_line)
     out = []
     for ex in existing_lines or []:
         if _norm_line(ex) == _norm_line(new_line):
             continue
+        if classifier_fn is not None:
+            try:
+                if bool(classifier_fn(new_line, ex)):
+                    out.append(ex)
+                continue  # classifier is authoritative for this pair
+            except Exception:  # a bad judge can't drop a real conflict -> heuristic
+                pass
         if _jaccard(nt, _content_tokens(ex)) >= min_overlap and _is_negative(ex) != neg:
             out.append(ex)
     return out
 
 
 def detect_store_conflicts(model_id: str | None = None,
-                           path: Path | None = None) -> list[tuple[str, str, str]]:
+                           path: Path | None = None, *,
+                           classifier_fn: Callable[[str, str], bool] | None = None,
+                           ) -> list[tuple[str, str, str]]:
     """Suspected contradictory pairs in the CURRENT store as ``(model, a, b)``,
-    de-duplicated (each unordered pair once). Powers ``self-harness conflicts``."""
+    de-duplicated (each unordered pair once). Powers ``self-harness conflicts``.
+    An optional ``classifier_fn`` (see :func:`find_conflicts`) refines the lexical
+    heuristic with a semantic judge."""
     out: list[tuple[str, str, str]] = []
     for m, block in load_addenda(path).items():
         if model_id is not None and m != model_id:
@@ -292,7 +312,7 @@ def detect_store_conflicts(model_id: str | None = None,
         lines = _bullets(block)
         seen: set[frozenset] = set()
         for i, ln in enumerate(lines):
-            for other in find_conflicts(ln, lines[i + 1:]):
+            for other in find_conflicts(ln, lines[i + 1:], classifier_fn=classifier_fn):
                 key = frozenset((_norm_line(ln), _norm_line(other)))
                 if key not in seen:
                     seen.add(key)
