@@ -1495,6 +1495,76 @@ async def spend_page(request: Request) -> HTMLResponse:
     )
 
 
+@app.get("/billing")
+async def billing_page(request: Request, format: str = "", period: str = ""):
+    """Tenant billing statement: accrued charges for the current period, a
+    period-over-period trend, and an itemized CSV invoice.
+
+    Charges are the priced runs (episodes) bucketed by month. The active
+    tenant / client id labels the statement (the world is tenant-scoped).
+    ``?format=csv&period=YYYY-MM`` downloads the itemized invoice for a month.
+    """
+    from datetime import datetime, timezone
+
+    w = _world()
+    episodes = w.list_episodes(limit=10_000)
+    months: dict[str, dict] = {}
+    for e in episodes:
+        if not e.ended_at:
+            continue
+        m = datetime.fromtimestamp(e.started_at, timezone.utc).strftime("%Y-%m")
+        b = months.setdefault(m, {"period": m, "cost": 0.0, "input_tokens": 0,
+                                  "output_tokens": 0, "runs": 0})
+        b["cost"] += e.cost_dollars
+        b["input_tokens"] += e.input_tokens
+        b["output_tokens"] += e.output_tokens
+        b["runs"] += 1
+    for b in months.values():
+        b["cost"] = round(b["cost"], 6)
+
+    try:
+        from maverick.client import client_id
+        from maverick.paths import current_tenant
+        tenant = current_tenant() or client_id() or "default"
+    except Exception:
+        tenant = "default"
+
+    if format == "csv":
+        sel = period or datetime.now(timezone.utc).strftime("%Y-%m")
+        rows = ["episode_id,goal_id,started_at,ended_at,outcome,"
+                "cost_dollars,input_tokens,output_tokens,tool_calls"]
+        for e in episodes:
+            if not e.ended_at:
+                continue
+            started = datetime.fromtimestamp(e.started_at, timezone.utc)
+            if started.strftime("%Y-%m") != sel:
+                continue
+            ended = datetime.fromtimestamp(e.ended_at, timezone.utc).isoformat()
+            rows.append(
+                f"{e.id},{e.goal_id},{started.isoformat()},{ended},"
+                f"{e.outcome or ''},{e.cost_dollars:.6f},"
+                f"{e.input_tokens},{e.output_tokens},{e.tool_calls}")
+        return PlainTextResponse(
+            "\n".join(rows) + "\n", media_type="text/csv",
+            headers={"Content-Disposition":
+                     f'attachment; filename="invoice-{tenant}-{sel}.csv"'})
+
+    cur = datetime.now(timezone.utc).strftime("%Y-%m")
+    current = months.get(cur, {"period": cur, "cost": 0.0, "input_tokens": 0,
+                               "output_tokens": 0, "runs": 0})
+    prev_keys = sorted([m for m in months if m < cur], reverse=True)
+    previous = months.get(prev_keys[0]) if prev_keys else None
+    delta_pct = None
+    if previous and previous["cost"] > 0:
+        delta_pct = round(
+            (current["cost"] - previous["cost"]) / previous["cost"] * 100, 1)
+    series = [months[k] for k in sorted(months, reverse=True)][:12]
+    return templates.TemplateResponse(request, "billing.html", {
+        "tenant": tenant, "current": current, "previous": previous,
+        "delta_pct": delta_pct, "series": series,
+    })
+
+
 @app.get("/providers", response_class=HTMLResponse)
 async def providers_page(request: Request) -> HTMLResponse:
     from maverick.provider_health import get as _health
