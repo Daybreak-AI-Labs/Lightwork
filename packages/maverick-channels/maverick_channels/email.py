@@ -174,7 +174,7 @@ class EmailChannel(Channel):
                     # logged above, not emailed back to the sender.
                     log.exception("handler error")
                     reply = "⚠ An internal error occurred."
-                reply_subject = f"Re: {subject}" if subject else "Maverick"
+                reply_subject = f"Re: {subject}" if subject else "Lightwork"
                 # A single SMTP send failure must not abort the batch —
                 # otherwise already-handled messages get reprocessed (and
                 # re-run the swarm) on the next poll.
@@ -239,7 +239,7 @@ class EmailChannel(Channel):
             return payload.decode(errors="replace").strip()
         return str(payload or "").strip()
 
-    async def send(self, user_id: str, text: str, subject: str = "Maverick") -> None:
+    async def send(self, user_id: str, text: str, subject: str = "Lightwork") -> None:
         await asyncio.to_thread(self._send_sync, user_id, text, subject)
 
     def _send_sync(self, to_addr: str, text: str, subject: str) -> None:

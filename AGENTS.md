@@ -1,6 +1,6 @@
 # AGENTS.md
 
-Maverick: proprietary Python 3.10-3.12 uv-workspace monorepo. 8 pip packages
+Lightwork: proprietary Python 3.10-3.12 uv-workspace monorepo. 8 pip packages
 (`packages/*`, `apps/installer-cli`) + a TypeScript SDK (`sdks/plugin-ts`).
 
 ## Setup (verified)

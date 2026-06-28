@@ -1,10 +1,10 @@
-# Contributing to Maverick
+# Contributing to Lightwork
 
-Thanks for being here. Maverick is built by accretion -- every commit
+Thanks for being here. Lightwork is built by accretion -- every commit
 should make the foundation stronger without forcing a rewrite. Read
 these guidelines before opening your first PR.
 
-> **Note:** Maverick is now proprietary, commercially licensed software (see
+> **Note:** Lightwork is now proprietary, commercially licensed software (see
 > [`LICENSE`](./LICENSE)). External contributions require a signed CLA — see
 > "License & contributions" below.
 
@@ -148,7 +148,7 @@ redacted).
 
 ## License & contributions
 
-Maverick is **proprietary** software (see [`LICENSE`](./LICENSE)). External
+Lightwork is **proprietary** software (see [`LICENSE`](./LICENSE)). External
 contributions are accepted only under the signed Contributor License Agreement in
 [`CLA.md`](./CLA.md), which assigns the Licensor the rights needed to relicense the
 contribution; contact the maintainers before opening a PR. By contributing, you agree your

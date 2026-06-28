@@ -11,13 +11,13 @@
 | Frameworks | ISO 27001 A.5.19–A.5.23; ISO 42001 A.10.2/A.10.3; SOC 2 CC9.2; GDPR Art. 28/30 |
 
 The live inventory of every third party that processes Organization/customer data
-for a Maverick deployment. It backs the customer-facing
+for a Lightwork deployment. It backs the customer-facing
 [sub-processor disclosure](../../enterprise/legal/subprocessors.md) and the
 [Vendor Management Procedure](../procedures/vendor-management-procedure.md)
 (PROC-07). **Maintain it per deployment** and notify customers **before** adding a
 sub-processor, per the DPA change-notification clause.
 
-> Maverick's footprint is **deployment-dependent**. A self-hosted, egress-locked
+> Lightwork's footprint is **deployment-dependent**. A self-hosted, egress-locked
 > (`[enterprise] mode = true`) deployment using a self-hosted model has a *near-
 > empty* list — inference and data stay on the customer's infrastructure. A SaaS
 > deployment calling a hosted LLM must disclose that provider. Fill the columns

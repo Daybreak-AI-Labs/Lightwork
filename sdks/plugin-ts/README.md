@@ -67,7 +67,7 @@ same way; this SDK is just the TypeScript implementation.
 
 ## Structured page context
 
-The Maverick browser extension (`extensions/browser/`) can attach a bounded,
+The Lightwork browser extension (`extensions/browser/`) can attach a bounded,
 observe-only accessibility/DOM snapshot of the active page to a goal. This SDK
 exports types and a safe parser for consuming that snapshot in a plugin:
 

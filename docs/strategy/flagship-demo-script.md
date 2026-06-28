@@ -7,7 +7,7 @@
 ## The story (one breath)
 
 An AI agent runs a **vendor-payment workflow** in a browser. It does the safe
-parts autonomously, then reaches a **"Pay $48,200" button**. Maverick **pauses**
+parts autonomously, then reaches a **"Pay $48,200" button**. Lightwork **pauses**
 that single action, routes it to a **human approver**, seals **before/after
 screenshots**, and writes a **tamper-evident, signed record**. Then we **replay**
 the whole run, **export a one-click evidence packet**, and let the audience
@@ -66,7 +66,7 @@ don't burn time typing.
    fill fields** autonomously — narrate that these low-risk steps just run.
 2. It reaches **"Pay $48,200."** The run **stops**. Switch to **/approvals**: the
    action is parked — **`browser.click` · risk HIGH · "Pay $48,200"** — with who/what/why.
-   *"Maverick gated exactly one action — the consequential one — and routed it to
+   *"Lightwork gated exactly one action — the consequential one — and routed it to
    a human. The agent is blocked, waiting."*
 3. **Approve** it in the console. The action executes. Note for the room:
    **before and after screenshots were just sealed** into a tamper-evident ledger,
@@ -88,7 +88,7 @@ don't burn time typing.
    maverick-verify-audit ~/.maverick/audit/<today>.ndjson --keys-dir ~/.maverick/audit/keys
    # OK: N rows verified   (exit 0)
    ```
-   *"That's a standalone binary — no Python, no Maverick, no trust in us. Your
+   *"That's a standalone binary — no Python, no Lightwork, no trust in us. Your
    auditor runs it themselves. If anyone had altered one byte of that record, it
    exits non-zero and names the row."* (Optional: flip a byte live, re-run, show
    the failure + the same verdict from `maverick audit verify`.)
@@ -101,7 +101,7 @@ don't burn time typing.
 
 > *"Every enterprise is deploying agents. Nobody can answer: who owns them, what
 > can they reach, what did they do, why, and can you prove it. You just watched
-> Maverick discover the surface, simulate the risk, gate the one action that
+> Lightwork discover the surface, simulate the risk, gate the one action that
 > mattered, get a human approval, and produce evidence an auditor can verify
 > without trusting us — all self-hosted in your environment."*
 

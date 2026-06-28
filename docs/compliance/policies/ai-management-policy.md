@@ -13,11 +13,11 @@
 
 ## 1. Purpose
 
-This is the top-level AI Management Policy of the Organization, establishing the AI Management System (AIMS) mandated by ISO/IEC 42001:2023 Clause 5.2. It is the AIMS analogue of the Information Security Policy. It states the Organization's commitment to responsible and trustworthy AI and sets the governing principles for the AI system lifecycle, human oversight, transparency to affected parties, AI risk and impact assessment, fairness, model selection and management, and the governed continuous-learning loop. It directs and supports all subordinate AI controls and procedures across Maverick.
+This is the top-level AI Management Policy of the Organization, establishing the AI Management System (AIMS) mandated by ISO/IEC 42001:2023 Clause 5.2. It is the AIMS analogue of the Information Security Policy. It states the Organization's commitment to responsible and trustworthy AI and sets the governing principles for the AI system lifecycle, human oversight, transparency to affected parties, AI risk and impact assessment, fairness, model selection and management, and the governed continuous-learning loop. It directs and supports all subordinate AI controls and procedures across Lightwork.
 
 ## 2. Scope
 
-This policy applies to all AI systems designed, developed, deployed, operated, or retired by the Organization through Maverick — including the specialist packs, the learning lifecycle, fleet/shared memory, and all model invocations. It covers the full lifecycle (design → data → deploy → monitor → retire), all personnel and automated agents, all tenants, and all environments. It binds the use of third-party foundation models accessed through Maverick's role-based model layer.
+This policy applies to all AI systems designed, developed, deployed, operated, or retired by the Organization through Lightwork — including the specialist packs, the learning lifecycle, fleet/shared memory, and all model invocations. It covers the full lifecycle (design → data → deploy → monitor → retire), all personnel and automated agents, all tenants, and all environments. It binds the use of third-party foundation models accessed through Lightwork's role-based model layer.
 
 ## 3. Policy statements
 
@@ -45,7 +45,7 @@ This policy applies to all AI systems designed, developed, deployed, operated, o
 
 **[Process — Organization to operationalize]** named individuals/teams and the AI governance forum cadence.
 
-## 5. Technical implementation in Maverick
+## 5. Technical implementation in Lightwork
 
 | Control | Implementation (file/module) | Status |
 | --- | --- | --- |

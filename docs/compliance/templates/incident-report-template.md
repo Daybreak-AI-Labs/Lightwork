@@ -53,7 +53,7 @@ Key durations: **Time to detect:** ___  **Time to contain:** ___
 
 | Field | Value |
 | --- | --- |
-| Maverick components affected | ☐ kernel/core ☐ shield ☐ channels ☐ dashboard ☐ MCP ☐ evolve ☐ knowledge ☐ other: ___ |
+| Lightwork components affected | ☐ kernel/core ☐ shield ☐ channels ☐ dashboard ☐ MCP ☐ evolve ☐ knowledge ☐ other: ___ |
 | Agents / models involved | _____ |
 | Tenants affected | _____ |
 | Capabilities involved | _____ |

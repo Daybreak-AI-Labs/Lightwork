@@ -1043,7 +1043,7 @@
 - **US-0915** *(Operator — P2)* — As an Operator, I want to test a channel connection from `/channels` with a synthetic ping before going live, so that I can confirm credentials and routing work.
 - **US-0916** *(SRE — P2)* — As an SRE, I want channel connectors to reconnect with backoff after a provider outage, so that requests are not lost during transient failures.
 - **US-0917** *(Operator — P3)* — As an Operator, I want to disable or pause a single channel without affecting others, so that I can take one integration offline for maintenance.
-- **US-0918** *(Agent Author — P0)* — As an Agent Author, I want my external agent to connect to the Maverick MCP server via `maverick mcp`, so that it can call governed tools and read resources.
+- **US-0918** *(Agent Author — P0)* — As an Agent Author, I want my external agent to connect to the Lightwork MCP server via `maverick mcp`, so that it can call governed tools and read resources.
 - **US-0919** *(Developer/Integrator — P0)* — As a Developer/Integrator, I want the MCP server to negotiate protocol `2025-11-25` and fall back to `2024-11-05`, so that both new and older MCP clients can connect.
 - **US-0920** *(Agent Author — P1)* — As an Agent Author, I want to list available MCP tools with their JSON schemas, so that my agent can discover and call capabilities correctly.
 - **US-0921** *(Agent Author — P1)* — As an Agent Author, I want to read MCP resources exposed by the platform (e.g. world-model facts), so that my agent has grounded context.

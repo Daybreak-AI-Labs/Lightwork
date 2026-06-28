@@ -11,7 +11,7 @@
 | Frameworks | ISO/IEC 27001:2022 Cl. 6.1, 8.2, 8.3, 9.1, 10.1; ISO/IEC 42001:2023 Cl. 6.1, 8.2–8.4, 10.1; SOC 2 CC3.1–CC3.4, CC4.1–CC4.2 |
 
 This procedure defines the **operating cadence** by which the Organization
-(Maverick) keeps its risk picture current. It operationalizes the
+(Lightwork) keeps its risk picture current. It operationalizes the
 [Risk Management Methodology](../risk-management-methodology.md) (RM-METH-01) and
 the [Risk Management Policy](../policies/risk-management-policy.md) (POL-02), and
 keeps the [Risk Register](../risk-register.md) (RM-REG-01) live. Its outputs feed

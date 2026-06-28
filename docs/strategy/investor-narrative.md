@@ -1,4 +1,4 @@
-# Maverick — Investor Narrative
+# Lightwork — Investor Narrative
 
 > Draft v1. Status-honest: claims about the product are grounded in code that is
 > merged in `main` today (see [Proof](#5-proof-its-already-real)). Claims about
@@ -10,7 +10,7 @@
 
 ## The one sentence
 
-**Maverick is the governed execution and evidence layer for autonomous AI agents in regulated enterprises** — a **self-hostable, integrated agent runtime + control plane** that runs the agents *and* discovers, constrains, simulates, audits, and *proves* what every agent did, across every model and tool, inside the customer's own boundary.
+**Lightwork is the governed execution and evidence layer for autonomous AI agents in regulated enterprises** — a **self-hostable, integrated agent runtime + control plane** that runs the agents *and* discovers, constrains, simulates, audits, and *proves* what every agent did, across every model and tool, inside the customer's own boundary.
 
 We win on **governance, provable behavior, and self-host** — with the runtime and the governance *integrated*, not bolted together. We don't enter the runtime popularity contest; we win where regulated enterprises actually block: control and evidence. (Companion docs: [`competitive-landscape.md`](./competitive-landscape.md), [`moat-and-acquisition.md`](./moat-and-acquisition.md), [`design-partner-scorecard.md`](./design-partner-scorecard.md).)
 
@@ -18,7 +18,7 @@ We win on **governance, provable behavior, and self-host** — with the runtime 
 
 ## 1. Category
 
-**Self-hostable governed agent runtime + control plane — integrated.** Maverick runs its own governed agents *and* extends that governance to heterogeneous agents (open-source, third-party, MCP, internal). Model-agnostic, tool-agnostic, deployed inside the customer's boundary. Most of the market does *either* runtime *or* governance, hosted; Maverick does both, self-hosted — the system of record and control for autonomous workers.
+**Self-hostable governed agent runtime + control plane — integrated.** Lightwork runs its own governed agents *and* extends that governance to heterogeneous agents (open-source, third-party, MCP, internal). Model-agnostic, tool-agnostic, deployed inside the customer's boundary. Most of the market does *either* runtime *or* governance, hosted; Lightwork does both, self-hosted — the system of record and control for autonomous workers.
 
 If the last decade gave enterprises IAM for humans and CI/CD for code, the next gives them a **control plane for autonomous workers**. That is the category, and it is forming now.
 
@@ -49,11 +49,11 @@ These are *governance* problems, and they are unsolved by the runtime vendors wh
 - **AI gateways / LLM security** (Palo Alto/Portkey, Lakera, Prompt Security) sit on model traffic. Necessary, but they stop at the prompt/response — not the *agent's identity, capabilities, approvals, and replayable actions across tools*.
 - **GRC/compliance** (Vanta, Drata, OneTrust) automate *company* controls, not the runtime behavior of an autonomous agent.
 
-Maverick is the layer that spans these: identity + capabilities + policy + telemetry + audit + replay + simulation + evidence, for any agent, inside the customer's boundary.
+Lightwork is the layer that spans these: identity + capabilities + policy + telemetry + audit + replay + simulation + evidence, for any agent, inside the customer's boundary.
 
 ## 5. Proof: it's already real
 
-This is the differentiator. Most agent startups at this stage have a demo. Maverick has a **governed, auditable runtime with a cryptographic flight recorder**, ~9,300 tests, and a standalone verifier — all in `main`:
+This is the differentiator. Most agent startups at this stage have a demo. Lightwork has a **governed, auditable runtime with a cryptographic flight recorder**, ~9,300 tests, and a standalone verifier — all in `main`:
 
 - **Tamper-evident audit** — Ed25519 hash-chained, append-only event log with cross-file anchoring; a **standalone Rust binary (`maverick-verify-audit`)** lets an external auditor prove a log is intact with no Python and no trust in us (byte-exact, cross-language parity-tested).
 - **Signed run replay + evidence packets** — reconstruct any run's full action timeline (tool calls, approvals, blocks), verify the chain, and export a one-click JSON evidence bundle for a CISO/auditor. High-risk actions are bracketed with **sealed before/after screenshots**.

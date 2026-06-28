@@ -1,4 +1,4 @@
-# Maverick — Fix Backlog (status board)
+# Lightwork — Fix Backlog (status board)
 
 > Compiled from a full read-through of the codebase (June 2026). Prioritized for
 > two goals: (1) survive technical/security/commercial diligence, (2) convert the

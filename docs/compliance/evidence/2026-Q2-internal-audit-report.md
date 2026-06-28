@@ -11,7 +11,7 @@
 | Procedure | [PROC-05 Internal Audit Plan](../procedures/internal-audit-plan.md) |
 
 > **Nature of this record.** This is the **first internal audit** (ISO 27001 /
-> ISO 42001 Clause 9.2) for the Maverick ISMS/AIMS. It was conducted by
+> ISO 42001 Clause 9.2) for the Lightwork ISMS/AIMS. It was conducted by
 > inspecting the codebase and configuration against the
 > [Statement of Applicability](../iso-27001/statement-of-applicability.md) and
 > capturing the live technical posture. Findings feed the

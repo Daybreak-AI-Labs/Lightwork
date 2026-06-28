@@ -6,13 +6,13 @@ structurally parallel to ISO 27001) plus the AI-specific Annex A controls
 (A.2–A.10). It is designed to **stack on a certified ISO 27001 ISMS**, reusing
 the same management-system backbone at ~30–50% lower marginal cost.
 
-This is the standard where Maverick is most differentiated: the governed
+This is the standard where Lightwork is most differentiated: the governed
 learning loop, signed learning audit, fleet-memory provenance, and human-oversight
 engine are AI-governance controls most platforms do not ship.
 
 ## 1. AIMS scope (Clause 4.3)
 
-**In scope:** Maverick as an AI system and platform — the agent kernel and
+**In scope:** Lightwork as an AI system and platform — the agent kernel and
 orchestration, model selection/routing, the Agent Shield, the governed
 self-improvement ("evolve") loop, fleet memory, and the human-oversight and
 transparency surfaces. The Organization acts as both **AI developer** and **AI

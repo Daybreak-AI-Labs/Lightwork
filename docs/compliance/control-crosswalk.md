@@ -1,7 +1,7 @@
 # Control Crosswalk: SOC 2 ↔ ISO 27001 ↔ ISO 42001
 
-This is the master mapping for Maverick's compliance program. Each row is a
-control theme mapped across the three frameworks, to the concrete Maverick
+This is the master mapping for Lightwork's compliance program. Each row is a
+control theme mapped across the three frameworks, to the concrete Lightwork
 control(s) that satisfy it, and to the codebase evidence. It lets one body of
 work serve all three audits and lets an auditor cross-reference frameworks.
 
@@ -24,7 +24,7 @@ Annex A (AI controls A.2–A.10).
 
 ## 1. Governance, policy & control environment
 
-| Theme | SOC 2 | ISO 27001 | ISO 42001 | Maverick control | Status | Evidence |
+| Theme | SOC 2 | ISO 27001 | ISO 42001 | Lightwork control | Status | Evidence |
 | --- | --- | --- | --- | --- | --- | --- |
 | Security/AI policy mandate | CC1.1, CC2.2 | A.5.1, Cl.5.2 | A.2.2, A.2.3, Cl.5.2 | Documented policy set (POL-01, POL-12) | Process (docs drafted) | [`policies/`](policies/) |
 | Org structure, roles, accountability | CC1.2–1.5 | A.5.2, A.5.3, A.5.4 | A.3.2, A.3.3 | Role definitions, governance bodies | Process | `MAINTAINERS.md`; company org chart |
@@ -33,7 +33,7 @@ Annex A (AI controls A.2–A.10).
 
 ## 2. Risk management
 
-| Theme | SOC 2 | ISO 27001 | ISO 42001 | Maverick control | Status | Evidence |
+| Theme | SOC 2 | ISO 27001 | ISO 42001 | Lightwork control | Status | Evidence |
 | --- | --- | --- | --- | --- | --- | --- |
 | Risk assessment process | CC3.1–3.4 | Cl.6.1, 8.2; A.5.x | Cl.6.1; A.5.2 | Methodology + register; structured assessment engine | Process + Implemented | [`risk-management-methodology.md`](risk-management-methodology.md); `maverick/assessment.py` |
 | AI risk & impact assessment | — | — | A.5.2, A.5.3, A.5.4, A.5.5 | EU AI Act classifier; AIRA persona | Implemented | `maverick/ai_act.py`; `maverick/tools/ai_act_classifier.py`; `maverick/domains/itgrc_aira.toml` |
@@ -43,7 +43,7 @@ Annex A (AI controls A.2–A.10).
 
 ## 3. Identity & access control
 
-| Theme | SOC 2 | ISO 27001 | ISO 42001 | Maverick control | Status | Evidence |
+| Theme | SOC 2 | ISO 27001 | ISO 42001 | Lightwork control | Status | Evidence |
 | --- | --- | --- | --- | --- | --- | --- |
 | Authentication | CC6.1 | A.5.16, A.5.17, A.8.5 | A.4.x | OIDC ID-token verifier (asymmetric-only, alg-confusion hardened); SAML SSO; reverse-proxy auth | Implemented (opt-in) | `maverick/oidc.py`; dashboard `auth.py`, `oidc_login.py`, `saml.py`; `maverick/proxy_auth.py` |
 | Authorization / least privilege | CC6.1, CC6.3 | A.5.15, A.5.18, A.8.2, A.8.3 | A.4.x | Signed attenuating capabilities (tool/path/host scope, max_risk, expiry); least-privilege on spawn | Implemented (opt-in) | `maverick/capability.py` |
@@ -53,7 +53,7 @@ Annex A (AI controls A.2–A.10).
 
 ## 4. Cryptography & data protection in transit/at rest
 
-| Theme | SOC 2 | ISO 27001 | ISO 42001 | Maverick control | Status | Evidence |
+| Theme | SOC 2 | ISO 27001 | ISO 42001 | Lightwork control | Status | Evidence |
 | --- | --- | --- | --- | --- | --- | --- |
 | Encryption at rest | CC6.7, C1.1 | A.8.24 | A.7.x | AES-256-GCM on world DB + memory stores | Implemented (opt-in) | `maverick/crypto_at_rest.py` |
 | Key management / KMS | CC6.1 | A.8.24 | — | Per-tenant envelope encryption (DEK+KEK); AWS/GCP/Vault wrapper | Implemented | `maverick/tenant/kms.py` |
@@ -63,7 +63,7 @@ Annex A (AI controls A.2–A.10).
 
 ## 5. Data governance, privacy & retention
 
-| Theme | SOC 2 | ISO 27001 | ISO 42001 | Maverick control | Status | Evidence |
+| Theme | SOC 2 | ISO 27001 | ISO 42001 | Lightwork control | Status | Evidence |
 | --- | --- | --- | --- | --- | --- | --- |
 | PII protection / privacy | P1–P8, C1.1 | A.5.34 | A.7.4, A.7.5 | PII/secret detectors; anonymous mode | Implemented | `maverick/safety/pii_detector.py`, `secret_detector.py`; `maverick/privacy.py` |
 | Subject access / portability | P5 | A.5.34 | A.7.x | DSAR export (GDPR Art.15/20) | Implemented | `maverick/dsar.py` |
@@ -74,7 +74,7 @@ Annex A (AI controls A.2–A.10).
 
 ## 6. System operations, logging & monitoring
 
-| Theme | SOC 2 | ISO 27001 | ISO 42001 | Maverick control | Status | Evidence |
+| Theme | SOC 2 | ISO 27001 | ISO 42001 | Lightwork control | Status | Evidence |
 | --- | --- | --- | --- | --- | --- | --- |
 | Audit logging | CC2.1, PI1.5 | A.8.15 | A.6.2, A.9.x | Append-only NDJSON audit log; signed, chained, WORM | Implemented | `maverick/audit/` |
 | Monitoring / anomaly detection | CC4.1, CC7.2 | A.8.16 | A.9.x | OpenTelemetry; health checks; circuit breakers; `capability_denied` events | Implemented | `maverick/observability.py`; `maverick/circuit_breaker.py` |
@@ -84,7 +84,7 @@ Annex A (AI controls A.2–A.10).
 
 ## 7. Threat protection & secure development
 
-| Theme | SOC 2 | ISO 27001 | ISO 42001 | Maverick control | Status | Evidence |
+| Theme | SOC 2 | ISO 27001 | ISO 42001 | Lightwork control | Status | Evidence |
 | --- | --- | --- | --- | --- | --- | --- |
 | Boundary protection / threat detection | CC6.6 | A.8.16, A.8.23 | A.9.x | Agent Shield (prompt-injection/exfil/jailbreak); host-scope capabilities; SSRF guards | Implemented | `packages/maverick-shield/`; `maverick/capability.py` |
 | Secure development lifecycle | CC8.1 | A.8.25–A.8.30 | A.6.2 | Secure coding rules; verifier; threat model | Partial / Process | `maverick/verifier.py`; `docs/security/threat-model.md` |
@@ -94,7 +94,7 @@ Annex A (AI controls A.2–A.10).
 
 ## 8. Change & configuration management
 
-| Theme | SOC 2 | ISO 27001 | ISO 42001 | Maverick control | Status | Evidence |
+| Theme | SOC 2 | ISO 27001 | ISO 42001 | Lightwork control | Status | Evidence |
 | --- | --- | --- | --- | --- | --- | --- |
 | Change authorization & testing | CC8.1 | A.8.32 | A.6.2 | Eval-gated CI; PR review; conventional-commits gate; custom CI gates | Partial | `.github/workflows/` (`ci.yml`, `conventional-commits.yml`) |
 | Config change/vuln detection | CC7.1 | A.8.9, A.8.8 | — | Preflight checks; eval-gated CI | Partial | `maverick/preflight.py` |
@@ -102,7 +102,7 @@ Annex A (AI controls A.2–A.10).
 
 ## 9. Incident management & resilience
 
-| Theme | SOC 2 | ISO 27001 | ISO 42001 | Maverick control | Status | Evidence |
+| Theme | SOC 2 | ISO 27001 | ISO 42001 | Lightwork control | Status | Evidence |
 | --- | --- | --- | --- | --- | --- | --- |
 | Incident containment | CC7.4 | A.5.26 | A.10.x | Killswitch (file + in-process, cluster-wide); circuit breakers | Implemented | `maverick/killswitch.py`; `maverick/circuit_breaker.py` |
 | Evidence collection / forensics | CC7.3 | A.5.28 | A.10.x | Tamper-evident audit log; chain verification | Implemented | `maverick/audit/` |
@@ -112,7 +112,7 @@ Annex A (AI controls A.2–A.10).
 
 ## 10. Supplier & people controls (predominantly Process)
 
-| Theme | SOC 2 | ISO 27001 | ISO 42001 | Maverick control | Status | Evidence |
+| Theme | SOC 2 | ISO 27001 | ISO 42001 | Lightwork control | Status | Evidence |
 | --- | --- | --- | --- | --- | --- | --- |
 | Supplier/sub-processor management | CC9.2 | A.5.19–A.5.23 | A.10.2, A.10.3 | Vendor reviews, DPAs, sub-processor inventory | Process | `docs/enterprise/legal/`; [`policies/supplier-security-policy.md`](policies/supplier-security-policy.md) |
 | HR security (screening, training, NDAs) | CC1.4 | A.6.1–A.6.6 | A.3.2, A.4.6 | Background checks, training, offboarding | Process | [`policies/human-resources-security-policy.md`](policies/human-resources-security-policy.md) |
@@ -120,7 +120,7 @@ Annex A (AI controls A.2–A.10).
 
 ## 11. AI-specific governance (ISO 42001 / EU AI Act)
 
-| Theme | SOC 2 | ISO 27001 | ISO 42001 | Maverick control | Status | Evidence |
+| Theme | SOC 2 | ISO 27001 | ISO 42001 | Lightwork control | Status | Evidence |
 | --- | --- | --- | --- | --- | --- | --- |
 | Human oversight | PI1.3 | — | A.9.2 | Governance engine ALLOW/DENY/REQUIRE_HUMAN; consent gates; two-person approval | Implemented | `maverick/governance.py`; `maverick/safety/consent.py`; `maverick/approval_delegation.py` |
 | Transparency to affected parties | CC2.3 | — | A.8.2, A.8.3 | Art.50 first-turn AI disclosure; right-to-explanation | Implemented | `maverick/compliance.py`; `maverick/tools/right_to_explanation.py` |

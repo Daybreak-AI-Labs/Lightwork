@@ -2,13 +2,13 @@
 
 This is the ISO 27001 workstream entry point. ISO 27001 certifies an
 **Information Security Management System (ISMS)**: the management system
-(Clauses 4–10) plus the Annex A controls. Maverick's technical controls cover a
+(Clauses 4–10) plus the Annex A controls. Lightwork's technical controls cover a
 large share of Annex A; the remaining work is the management-system
 documentation and the organizational (Process) controls.
 
 ## 1. ISMS scope (Clause 4.3)
 
-**In scope:** the Maverick agentic platform (kernel, shield, channels,
+**In scope:** the Lightwork agentic platform (kernel, shield, channels,
 dashboard, MCP server, evolve, knowledge), its audit and world-model data
 stores, the build/release pipeline, and the company processes that operate and
 support it.
@@ -69,7 +69,7 @@ of the 93 Annex A:2022 controls:
 | A.5 Organizational (37) | 37 | Mixed — strong on access/audit; supplier & IR are Process |
 | A.6 People (8) | 8 | **Process** (HR security — see POL-10) |
 | A.7 Physical (14) | 14 | **Process** — inherited from cloud provider |
-| A.8 Technological (34) | 34 | **Strong** — Maverick's core strength |
+| A.8 Technological (34) | 34 | **Strong** — Lightwork's core strength |
 
 ## 5. Gap analysis
 

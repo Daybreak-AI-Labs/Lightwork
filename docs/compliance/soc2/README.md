@@ -5,7 +5,7 @@ This is the SOC 2 workstream entry point. The detailed control mapping lives in
 posture**, the **Type I → Type II path**, and the **control turn-on guide** that
 a compliant deployment must follow.
 
-> SOC 1 is out of scope — Maverick is not a financial-reporting system for
+> SOC 1 is out of scope — Lightwork is not a financial-reporting system for
 > customers (no ICFR relevance). See the program [README](../README.md).
 
 ## 1. Type I vs Type II
@@ -21,7 +21,7 @@ run the observation window collecting evidence → **Type II**.
 
 ## 2. Trust Services Categories in scope
 
-- **Security (Common Criteria, CC)** — mandatory; Maverick's strongest area.
+- **Security (Common Criteria, CC)** — mandatory; Lightwork's strongest area.
 - **Availability (A)** — budget/quota caps, checkpoint/resume, circuit breakers.
 - **Processing Integrity (PI)** — verifier gates, signed audit, output shield.
 - **Confidentiality (C)** — tenant isolation, encryption at rest, redaction.
@@ -51,7 +51,7 @@ the enterprise deployment profile turns these on as a group. See
 
 ## 4. Verifying posture (evidence collection)
 
-Maverick ships a machine-readable evidence collector:
+Lightwork ships a machine-readable evidence collector:
 
 ```bash
 python -c "import json; from maverick.soc2 import collect_soc2_evidence; \

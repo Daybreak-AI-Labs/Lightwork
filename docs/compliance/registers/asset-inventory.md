@@ -27,7 +27,7 @@ to. Classification scale: **Restricted** > **Confidential** > **Internal** > **P
 | Customer data processed by agents | Prompts, tool I/O, attachments, channel messages | Confidential / Restricted (PII) | Christopher Day | world DB / channels / vector store | PII/secret redaction, tenant isolation, DSAR/erase, retention TTL |
 | Model-selection & deployment config | `config.toml` (controls, providers, governance) | Confidential | Christopher Day | `~/.maverick/config.toml` | Access control, change management (PROC-03), preflight validation |
 | Learning state / snapshots | Distilled skills, insights, calibration state | Confidential | Christopher Day | `maverick/dreaming.py` snapshots | Signed learning audit, snapshot+rollback, staged rollout |
-| Source code | The Maverick platform itself | Internal (proprietary) | Christopher Day | Git repo | Branch protection, CODEOWNERS, CI gates, signed commits |
+| Source code | The Lightwork platform itself | Internal (proprietary) | Christopher Day | Git repo | Branch protection, CODEOWNERS, CI gates, signed commits |
 | Capability / signing keys (audit, skills) | Ed25519 keys anchoring audit + skill signatures | Restricted | Christopher Day | `~/.maverick/.../keys/` | Filesystem perms, rotation support, separate trust store |
 | Dashboard user store | Dashboard identities + RBAC role assignments | Confidential | Christopher Day | `dashboard-users.json` | OIDC/SAML, RBAC, MAVERICK_DASHBOARD_ADMINS bootstrap |
 | Backups / evidence snapshots | `maverick soc2` snapshots, audit exports | Confidential | Christopher Day | deployment-defined | Same handling as the source asset; access-controlled |
