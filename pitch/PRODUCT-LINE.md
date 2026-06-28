@@ -215,7 +215,7 @@ unit; everything else time-and-materials.
 | Thing | Name |
 |---|---|
 | The company | Daybreak Labs |
-| The platform | **Lightwork** *(was Maverick)* |
+| The platform | **Lightwork** *(was Lightwork)* |
 | Tier 1 / 2 / 3 | Basic / Gold / Platinum |
 | The agent-pack line | **Second Shift** — Specialized Agent Packs |
 | Flagship: finance | Office of the CFO |

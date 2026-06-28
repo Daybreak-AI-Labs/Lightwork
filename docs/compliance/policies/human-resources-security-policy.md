@@ -15,7 +15,7 @@
 
 This policy establishes the information-security requirements that apply to the
 people lifecycle at the Organization — before, during, and after employment or
-engagement — for everyone who works on or has access to Maverick, the
+engagement — for everyone who works on or has access to Lightwork, the
 Organization's governed agentic enterprise AI platform, and its supporting
 systems and data. It exists to ensure that personnel are suitable for their
 roles, understand their security and AI-governance responsibilities, are
@@ -26,7 +26,7 @@ ISO/IEC 27001:2022, and ISO/IEC 42001:2023 audits.
 > **Note:** This policy is **almost entirely an Organization process** rather
 > than a set of platform controls. Human-resources security is a classic SOC 2
 > and ISO/IEC 27001 process area: the controls live in HR procedures, records,
-> and agreements, not in the Maverick codebase. Section 5 is therefore
+> and agreements, not in the Lightwork codebase. Section 5 is therefore
 > dominated by **[Process — Organization to operationalize]** items, with only
 > a small number of repository artifacts (conduct, contribution, and governance
 > documents) providing partial, code-adjacent support.
@@ -37,16 +37,16 @@ This policy applies to:
 
 - All employees, contractors, contributors, interns, and third-party personnel
   who are engaged by the Organization and who have, or may have, access to
-  Maverick, its source code, its infrastructure, or Organization or customer
+  Lightwork, its source code, its infrastructure, or Organization or customer
   data.
 - All phases of the engagement lifecycle: screening, terms of engagement,
   awareness and training, conduct and discipline, role change, and termination.
-- Acceptable use of Maverick and supporting systems, and confidentiality
+- Acceptable use of Lightwork and supporting systems, and confidentiality
   obligations governing Organization and customer information.
 
 ## 3. Policy statements
 
-1. **Screening.** Candidates for roles with access to Maverick or to
+1. **Screening.** Candidates for roles with access to Lightwork or to
    Organization/customer data shall undergo background verification
    proportionate to the role's risk and to applicable law, completed and
    recorded before access is granted. **[Process — Organization to
@@ -61,7 +61,7 @@ This policy applies to:
    Organization to operationalize]**
 4. **Security awareness, education, and training.** All personnel shall complete
    security-awareness training at onboarding and periodically thereafter, and
-   personnel involved in the development, operation, or governance of Maverick's
+   personnel involved in the development, operation, or governance of Lightwork's
    AI capabilities shall receive role-appropriate AI-governance and competence
    training, with completion recorded. **[Process — Organization to
    operationalize]**
@@ -101,7 +101,7 @@ This policy applies to:
 - **All personnel and contributors** — meet their security, confidentiality,
   acceptable-use, conduct, and event-reporting obligations.
 
-## 5. Technical implementation in Maverick
+## 5. Technical implementation in Lightwork
 
 | Control | Implementation (file/module) | Status |
 | --- | --- | --- |
@@ -120,7 +120,7 @@ This policy applies to:
 | Security event/weakness reporting | Incident-reporting procedure | **[Process — Organization to operationalize]** |
 
 As stated in the Purpose note, the overwhelming majority of these controls are
-**Organization processes** operated outside the Maverick codebase. The only
+**Organization processes** operated outside the Lightwork codebase. The only
 code-adjacent artifacts are `CODE_OF_CONDUCT.md`, `CONTRIBUTING.md`, and
 `MAINTAINERS.md`, which provide partial support for the conduct, acceptable-use,
 and roles statements but do not substitute for HR screening, training records,

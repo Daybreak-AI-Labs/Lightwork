@@ -15,13 +15,13 @@
 
 This policy establishes the requirements for identifying, assessing,
 contracting with, monitoring, and offboarding suppliers, vendors, and
-sub-processors that support Maverick — the Organization's governed agentic
+sub-processors that support Lightwork — the Organization's governed agentic
 enterprise AI platform — and for maintaining the integrity of the software
 supply chain that feeds the platform. It exists to ensure that third parties
 who process the Organization's or its customers' data, or who supply software,
-infrastructure, models, or services into Maverick, do so under appropriate
+infrastructure, models, or services into Lightwork, do so under appropriate
 security and privacy controls, and that supply-chain risk is managed across the
-relationship lifecycle. Maverick processes data through external Large Language
+relationship lifecycle. Lightwork processes data through external Large Language
 Model (LLM) providers and infrastructure vendors; these dependencies are a
 material source of third-party risk and are addressed directly here. The policy
 provides assurance for SOC 2, ISO/IEC 27001:2022, and ISO/IEC 42001:2023
@@ -33,25 +33,25 @@ This policy applies to:
 
 - All suppliers and vendors that provide software, hardware, cloud
   infrastructure, AI/LLM model services, professional services, or support to
-  the Organization in connection with Maverick.
+  the Organization in connection with Lightwork.
 - All sub-processors that process customer or personal data on the
   Organization's behalf, including LLM providers and infrastructure/hosting
   providers.
 - The Information and Communication Technology (ICT) supply chain that supplies
   code, dependencies, plugins, packs, Model Context Protocol (MCP) tools, and
-  external agent contributions into the Maverick monorepo and runtime.
+  external agent contributions into the Lightwork monorepo and runtime.
 - All personnel who select, onboard, contract with, integrate, or monitor
   suppliers.
 
 It covers both the **process** controls that the Organization operates
 (assessments, contracts, inventories, monitoring) and the **technical**
-supply-chain integrity controls that exist in the Maverick codebase.
+supply-chain integrity controls that exist in the Lightwork codebase.
 
 ## 3. Policy statements
 
 1. **Risk-based assessment before onboarding.** No supplier or sub-processor
    that will process Organization or customer data, or supply software or
-   services into Maverick, shall be onboarded before a security and privacy
+   services into Lightwork, shall be onboarded before a security and privacy
    risk assessment proportionate to the data sensitivity and criticality of the
    service has been completed and recorded. **[Process — Organization to
    operationalize]**
@@ -74,7 +74,7 @@ supply-chain integrity controls that exist in the Maverick codebase.
    monitoring requirements, with attention to data residency, training-data
    use, retention, and tenant isolation.
 6. **ICT supply-chain integrity.** Code, dependencies, plugins, packs, MCP
-   tools, and external agent contributions entering Maverick shall be subject
+   tools, and external agent contributions entering Lightwork shall be subject
    to the platform's integrity controls — allowlisting, hash-pinning, content
    scanning, provenance tagging, and automated dependency monitoring — so that
    untrusted or tampered supply-chain inputs are denied or flagged by default.
@@ -103,7 +103,7 @@ supply-chain integrity controls that exist in the Maverick codebase.
 - **All personnel** — engage suppliers only through the approved process and do
   not introduce unassessed third-party services or supply-chain inputs.
 
-## 5. Technical implementation in Maverick
+## 5. Technical implementation in Lightwork
 
 | Control | Implementation (file/module) | Status |
 | --- | --- | --- |

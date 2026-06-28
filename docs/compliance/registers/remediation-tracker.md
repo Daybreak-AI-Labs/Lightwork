@@ -13,7 +13,7 @@
 ## How to use
 
 This is the single register of technical vulnerabilities and security findings
-for Maverick, operated under the
+for Lightwork, operated under the
 [Vulnerability Management Procedure (`PROC-02`)](../procedures/vulnerability-management-procedure.md).
 
 - **One row per finding.** Add a row at intake from any source (Dependabot, CI,

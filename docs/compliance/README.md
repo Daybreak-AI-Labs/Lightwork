@@ -1,6 +1,6 @@
-# Maverick Compliance Program
+# Lightwork Compliance Program
 
-This directory is the home of Maverick's compliance documentation. It supports
+This directory is the home of Lightwork's compliance documentation. It supports
 three audit/certification tracks that share one backbone of organizational
 controls:
 
@@ -8,16 +8,16 @@ controls:
 - **ISO/IEC 27001:2022** — Information Security Management System (ISMS).
 - **ISO/IEC 42001:2023** — Artificial Intelligence Management System (AIMS).
 
-> **Honesty note.** None of these is a code audit. Maverick's engineering
+> **Honesty note.** None of these is a code audit. Lightwork's engineering
 > controls satisfy a large share of each framework's *technical* requirements,
 > but every framework also requires *organizational* controls (governance,
 > management review, HR, vendor management, incident-response programs) that
 > live with the company, not the repository. Throughout these docs those items
 > are marked **Process** and must be owned and operated by the Organization.
 
-SOC 1 is intentionally **out of scope** — Maverick is not a system of record
+SOC 1 is intentionally **out of scope** — Lightwork is not a system of record
 for customers' financial statements (ICFR), so a SOC 1 report does not apply
-unless a customer pushes Maverick into their financial-reporting chain.
+unless a customer pushes Lightwork into their financial-reporting chain.
 
 > **Ownership.** All ISMS/AIMS roles and document owners currently resolve to a
 > single accountable individual, **Christopher Day**, who is the named Owner and

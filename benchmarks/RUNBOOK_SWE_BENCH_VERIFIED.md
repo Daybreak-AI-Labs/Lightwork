@@ -51,7 +51,7 @@ export ANTHROPIC_API_KEY=sk-ant-...
 ## Step 1: stage instances
 
 Use the included fetcher (Wave 12 hotfix companion) to download the
-HF dataset, convert to Maverick manifest format, and (optionally)
+HF dataset, convert to Lightwork manifest format, and (optionally)
 clone each instance's repo:
 
 ```bash
@@ -105,7 +105,7 @@ The harness will:
    defensive_validate cheating-detector plumbing that was previously
    half-wired)
 3. Reset the workdir to `base_commit` for each instance
-4. Invoke Maverick with Opus as the orchestrator role + Sonnet sub-agents
+4. Invoke Lightwork with Opus as the orchestrator role + Sonnet sub-agents
 
 ## Step 3: run smoke (50 instances first)
 
@@ -206,14 +206,14 @@ These together let you reproduce the run and defend the score.
 
 From prior Wave 11/12 council reviews + Princeton's SWE-bench issues:
 
-1. **Prompt caching no-op on small prompts.** Maverick's system+tools
+1. **Prompt caching no-op on small prompts.** Lightwork's system+tools
    total ~1,800 tokens; the 4,096-token min for Sonnet 4.6 / Opus 4.7
    means cache_control on system/tools is silently ignored. The
    messages cache breakpoint still works once history grows past 4k.
    The provider logs a one-time warning surfacing this.
 
 2. **`pip install -e` inside the worktree** silently imports unpatched
-   code from the original tree. Maverick's shell tool blocks this in
+   code from the original tree. Lightwork's shell tool blocks this in
    opaque mode. If you see "tests still failing despite correct patch"
    in traces, this is usually it.
 
@@ -221,7 +221,7 @@ From prior Wave 11/12 council reviews + Princeton's SWE-bench issues:
    include `environment_setup_commit` for a working pre-bug environment.
    The current fetcher records but doesn't act on it — running specific
    instance env setup is left to upstream `swebench` for grading. For
-   inference, Maverick reads the workdir as-is.
+   inference, Lightwork reads the workdir as-is.
 
 4. **Defensive validator's cheating detector** requires `gold_patch`
    in env. The Wave 12 hotfix (commit `305ae5f`) wires this from the

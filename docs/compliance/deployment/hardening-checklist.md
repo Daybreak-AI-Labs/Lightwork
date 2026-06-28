@@ -11,7 +11,7 @@
 | Frameworks | SOC 2 CC5/CC6/CC7; ISO 27001 A.8.*; ISO 42001 A.6/A.9 |
 
 This operationalizes the "enable the opt-in controls" step of the
-[compliance program](../README.md). Maverick ships several strong controls
+[compliance program](../README.md). Lightwork ships several strong controls
 **off-by-default** so single-tenant local use is unchanged; a SOC 2 / ISO 27001
 deployment must turn them **on and show them on**. Apply
 [`compliant-config.toml`](compliant-config.toml), then verify.
@@ -37,7 +37,7 @@ deployment must turn them **on and show them on**. Apply
 - [ ] `compliant-config.toml` applied to `~/.maverick/config.toml`; placeholders filled.
 - [ ] OIDC issuer/audience point at the real IdP; a test login succeeds.
 - [ ] Encryption key is **externally managed** (`MAVERICK_ENCRYPTION_KEY` / KMS), not just the auto-generated on-disk key.
-- [ ] **Off-host audit signing key** set via `MAVERICK_AUDIT_SIGNING_KEY` (or `..._WRAPPED`) from your KMS/secrets manager — **required** under `[enterprise] mode = true` (Maverick refuses a local-disk key). Without it the chain writes unsigned and `audit_log != ok`. Back up the key in a separate trust store.
+- [ ] **Off-host audit signing key** set via `MAVERICK_AUDIT_SIGNING_KEY` (or `..._WRAPPED`) from your KMS/secrets manager — **required** under `[enterprise] mode = true` (Lightwork refuses a local-disk key). Without it the chain writes unsigned and `audit_log != ok`. Back up the key in a separate trust store.
 - [ ] A provider API key is present (so `/healthz` is not degraded), or self-hosted inference configured.
 - [ ] Postgres backend + `maverick tenant rls-preflight` + `backfill` run if using DB-enforced isolation (`[world_model] rls = true`).
 - [ ] Cloud provider attestations (SOC 2 / ISO) collected for inherited physical controls (A.7).

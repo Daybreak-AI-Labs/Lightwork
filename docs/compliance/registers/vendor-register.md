@@ -18,7 +18,7 @@ and suppliers, maintained under the Vendor & Supplier Management Procedure
 at least annually and on material change.
 
 - **One row per vendor** that processes Organization/customer data or feeds the
-  Maverick software supply chain (see PROC-07 §1 for scope).
+  Lightwork software supply chain (see PROC-07 §1 for scope).
 - **Add a vendor** at onboarding Step 5 (PROC-07 §2) once risk-tiered, reviewed
   (TPL-04), and contracted. Vendors that process **customer data** must **also**
   appear in `docs/compliance/registers/subprocessor-register.md` and the
@@ -37,7 +37,7 @@ at least annually and on material change.
 | Column | Meaning |
 | --- | --- |
 | Vendor | Legal/trading name of the third party |
-| Service | What they provide to Maverick |
+| Service | What they provide to Lightwork |
 | Data exposed | Categories of Organization/customer data processed or accessible |
 | Risk tier | Critical / High / Medium / Low (PROC-07 §3) |
 | SOC2 / ISO status | Independent assurance held and its currency/expiry |

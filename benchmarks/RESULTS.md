@@ -1,4 +1,4 @@
-# Maverick benchmark results
+# Lightwork benchmark results
 
 This file is **append-only**, written by `benchmarks/harness.py` and
 hand-edited only for comparator rows from external agents.
@@ -11,7 +11,7 @@ Each row is one run of one benchmark. Columns:
 - `tag`: release tag the run was at (e.g. `v0.1.0`)
 - `agent`: `maverick`, `openclaw`, `hermes`, `autogen`, or a single-shot baseline
 - `source`: `measured` (auto-written by this harness) or `manual` (hand-added
-  comparator row). The harness only measures Maverick; any other-agent row is
+  comparator row). The harness only measures Lightwork; any other-agent row is
   hand-added and **must** be marked `manual` so measured and typed-in numbers
   are never confused.
 - `wall_seconds`: end-to-end clock time
@@ -37,7 +37,7 @@ MAVERICK_BENCH_DRY_RUN=1 python benchmarks/harness.py \
 
 ## Comparator notes
 
-Maverick's wedge is **long-horizon work** — multi-day plans, recursive
+Lightwork's wedge is **long-horizon work** — multi-day plans, recursive
 decomposition, persistent learning. The fair comparison is against
 agents that ALSO target multi-step work:
 
@@ -50,7 +50,7 @@ agents that ALSO target multi-step work:
 
 Comparator rows are filled by hand after running each system's
 out-of-the-box configuration on the same benchmark spec. The harness
-writes only Maverick's row.
+writes only Lightwork's row.
 
 ## Results table
 

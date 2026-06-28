@@ -14,7 +14,7 @@
 ## 1. Purpose
 
 This policy establishes the requirements for authorizing, designing, testing,
-reviewing, approving, and deploying changes to Maverick and its supporting
+reviewing, approving, and deploying changes to Lightwork and its supporting
 infrastructure. It exists to ensure that changes are made in a controlled,
 traceable, and authorized manner so that the confidentiality, integrity, and
 availability of the platform — and the governance properties it provides to
@@ -26,7 +26,7 @@ the change lifecycle. The policy provides assurance for SOC 2, ISO/IEC
 
 This policy applies to all changes to:
 
-- Source code in the Maverick monorepo (the eight `packages/` pip packages,
+- Source code in the Lightwork monorepo (the eight `packages/` pip packages,
   `apps/installer-cli`, the FastAPI dashboard, the Tauri desktop apps, and the
   `sdks/plugin-ts` TypeScript SDK).
 - Specialist packs, suites, and AI system configuration that affect the
@@ -76,7 +76,7 @@ review, approve, or deploy changes.
 | Head of Engineering (Owner) | Owns this policy; maintains CI gates and branch protection. |
 | Management (Approver) | Approves this policy and material exceptions. |
 
-## 5. Technical implementation in Maverick
+## 5. Technical implementation in Lightwork
 
 | Control | Implementation (file/module) | Status |
 | --- | --- | --- |

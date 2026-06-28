@@ -13,13 +13,13 @@
 
 ## 1. Purpose
 
-This policy defines how the Organization maintains the availability and resilience of Maverick during disruption, and how it backs up, recovers, and tests the platform and its data. It covers availability, resilience, backup and recovery, ICT readiness for business continuity, capacity management, and recovery testing, so that Maverick can withstand and recover from disruptive events within acceptable limits.
+This policy defines how the Organization maintains the availability and resilience of Lightwork during disruption, and how it backs up, recovers, and tests the platform and its data. It covers availability, resilience, backup and recovery, ICT readiness for business continuity, capacity management, and recovery testing, so that Lightwork can withstand and recover from disruptive events within acceptable limits.
 
 ## 2. Scope
 
 This policy applies to:
 
-- The Maverick platform (kernel `maverick-core`, shield, channels, dashboard, MCP, evolve, knowledge) and its production deployments.
+- The Lightwork platform (kernel `maverick-core`, shield, channels, dashboard, MCP, evolve, knowledge) and its production deployments.
 - The mechanisms that provide durability, resilience, capacity control, and health observability within the platform.
 - The personnel responsible for operating, recovering, and testing the platform.
 
@@ -27,7 +27,7 @@ Infrastructure- and disaster-recovery-site controls — data-center/hosting DR, 
 
 ## 3. Policy statements
 
-1. **Availability & resilience.** Maverick shall be designed and operated to degrade gracefully and remain available under partial failure, using durable state, concurrency control, and fault isolation so that disruptions are contained rather than cascading.
+1. **Availability & resilience.** Lightwork shall be designed and operated to degrade gracefully and remain available under partial failure, using durable state, concurrency control, and fault isolation so that disruptions are contained rather than cascading.
 2. **Durable checkpoint & resume.** Long-running work shall be checkpointed durably so it can resume after interruption without loss of in-flight progress.
 3. **Fault isolation.** Failing dependencies and capabilities shall be isolated via circuit breakers to prevent cascading failure and to preserve overall service availability.
 4. **Capacity management.** Resource consumption shall be bounded by budgets, quotas, and concurrency limits to protect capacity and prevent resource-exhaustion outages.
@@ -46,7 +46,7 @@ Infrastructure- and disaster-recovery-site controls — data-center/hosting DR, 
 | Cloud / Infrastructure provider | Provides inherited DR-site, environment backup, and infrastructure redundancy. **[Process — Organization to operationalize]** |
 | Management (Approver) | Approves this policy and accepts residual continuity risk. |
 
-## 5. Technical implementation in Maverick
+## 5. Technical implementation in Lightwork
 
 | Control | Implementation (file/module) | Status |
 | --- | --- | --- |

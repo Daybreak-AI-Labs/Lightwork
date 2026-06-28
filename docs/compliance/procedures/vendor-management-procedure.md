@@ -14,14 +14,14 @@
 
 This procedure operationalizes the Supplier Security Policy (POL-09). It defines
 how the Organization identifies, risk-tiers, assesses, contracts with, monitors,
-and offboards third parties that support **Maverick** — the Organization's
+and offboards third parties that support **Lightwork** — the Organization's
 governed agentic enterprise AI platform.
 
 It applies to **any third party** that:
 
 - **Processes Organization or customer data** on the Organization's behalf
   (a sub-processor under the Data Processing Agreement), **or**
-- **Forms part of the Maverick software supply chain** — i.e. supplies code,
+- **Forms part of the Lightwork software supply chain** — i.e. supplies code,
   models, infrastructure, or services into the platform or its runtime.
 
 In scope, non-exhaustively:
@@ -36,13 +36,13 @@ In scope, non-exhaustively:
 | Developer supply chain | Package registries, plugin/pack authors, MCP tool publishers, external agents | Code, dependencies, executable tool definitions |
 
 Out of scope: purchases that neither touch Organization/customer data nor feed
-software/services into Maverick (e.g. office supplies). When in doubt, treat the
+software/services into Lightwork (e.g. office supplies). When in doubt, treat the
 vendor as in scope and let the risk-tiering step (Section 2, step 2) decide the
 depth of diligence.
 
 This procedure is operated by the Organization outside the codebase; steps that
 require real-world execution are marked **[Org action]**. The software
-supply-chain *integrity* controls in Section 5 exist in the Maverick codebase.
+supply-chain *integrity* controls in Section 5 exist in the Lightwork codebase.
 
 ## 2. Vendor onboarding workflow
 
@@ -88,7 +88,7 @@ recorded. Work the checklist top to bottom.
 
 Tier is the higher of (a) data sensitivity exposed and (b) criticality to
 service continuity. A vendor processing customer personal data, or whose outage
-takes Maverick down, is at least **High**.
+takes Lightwork down, is at least **High**.
 
 | Tier | When it applies | Independent assurance required | Contract | Re-review cadence | Approver |
 | --- | --- | --- | --- | --- | --- |
@@ -120,9 +120,9 @@ Vendor risk is managed across the whole relationship, not just at onboarding.
   introduced by the vendor, or a change in how the vendor uses data (e.g. an LLM
   provider changing training-data or retention terms).
 
-## 5. Software supply-chain integrity controls (existing in Maverick)
+## 5. Software supply-chain integrity controls (existing in Lightwork)
 
-For the developer/executable supply chain, Maverick enforces integrity controls
+For the developer/executable supply chain, Lightwork enforces integrity controls
 in code. These are **implemented** and operate independently of the process
 controls above:
 

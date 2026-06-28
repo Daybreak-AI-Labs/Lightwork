@@ -1,7 +1,7 @@
 # Editions
 
 Lightwork is **proprietary, commercially licensed** software ([`../../LICENSE`](../../LICENSE)).
-Production use requires a license — [contact us](https://github.com/Day-AI-Labs/Maverick).
+Production use requires a license — [contact us](https://github.com/Day-AI-Labs/Lightwork).
 
 > Editions are the **distribution** split (open-core). The commercial **pricing
 > tiers** within Enterprise — Basic / Gold / Platinum — and the canonical SKU list

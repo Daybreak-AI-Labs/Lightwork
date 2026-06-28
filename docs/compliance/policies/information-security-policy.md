@@ -16,7 +16,7 @@
 This is the top-level Information Security Policy of the Organization. It establishes the
 Organization's overarching commitment to protecting the confidentiality, integrity, and
 availability of information assets — its own and those entrusted to it by customers — across
-the design, development, operation, and support of the Maverick platform.
+the design, development, operation, and support of the Lightwork platform.
 
 This policy constitutes the Information Security Management System (ISMS) mandate required by
 ISO/IEC 27001:2022 Clause 5.2 and the Artificial Intelligence Management System (AIMS) mandate
@@ -32,13 +32,13 @@ This policy applies to:
 - All information assets owned, processed, stored, or transmitted by the Organization,
   including source code, customer data, learning artifacts, audit records, and the Operating
   Record.
-- All components of the Maverick platform: the `maverick-core` kernel, agent shield, channels,
+- All components of the Lightwork platform: the `maverick-core` kernel, agent shield, channels,
   dashboard, MCP server, evolve/learning subsystem, and knowledge subsystem.
 - All employees, contractors, and third parties acting on behalf of the Organization.
 - All environments (development, build/CI, and production) and all supporting infrastructure.
 
 The ISMS scope boundary is the people, processes, and technology involved in delivering and
-operating Maverick as a governed agentic enterprise platform. Detailed scope boundaries,
+operating Lightwork as a governed agentic enterprise platform. Detailed scope boundaries,
 asset inventories, and interfaces are maintained in the Statement of Applicability and risk
 register. **[Process — Organization to operationalize]**
 
@@ -51,7 +51,7 @@ applicable legal, regulatory, contractual, and customer requirements.
 3.2 The Organization adopts and maintains a documented ISMS aligned to ISO/IEC 27001:2022 and
 an AIMS aligned to ISO/IEC 42001:2023, and supports SOC 2 Trust Services Criteria.
 
-3.3 Security is governed by a secure-by-default posture. Maverick ships hardened-but-functional
+3.3 Security is governed by a secure-by-default posture. Lightwork ships hardened-but-functional
 defaults; insecure configurations are rejected or warned at startup rather than silently
 permitted.
 
@@ -74,7 +74,7 @@ elaborates the relevant control domain:
 - AI Management Policy
 - Risk Management Policy (POL-02)
 
-3.6 All policy enforcement that can be technically encoded is implemented through Maverick's
+3.6 All policy enforcement that can be technically encoded is implemented through Lightwork's
 governance and policy engine rather than left to discretion, so that controls are evaluated
 consistently and auditably at runtime.
 
@@ -98,11 +98,11 @@ the shield in governed production deployments.
 | --- | --- |
 | Management / CEO | Approves this policy; owns the ISMS/AIMS mandate; allocates resources; chairs management review. **[Process — Organization to operationalize]** |
 | CISO / Security Lead | Owns and maintains this policy and the ISMS; oversees risk treatment, control implementation, and subordinate policies. |
-| Engineering | Implements and maintains technical controls within Maverick (governance engine, secure defaults, preflight, audit). |
+| Engineering | Implements and maintains technical controls within Lightwork (governance engine, secure defaults, preflight, audit). |
 | All personnel | Comply with this policy and subordinate policies; report security events and weaknesses. **[Process — Organization to operationalize]** |
 | Third parties / suppliers | Comply with applicable security obligations per the Supplier Security Policy. |
 
-## 5. Technical implementation in Maverick
+## 5. Technical implementation in Lightwork
 
 | Control | Implementation (file/module) | Status |
 | --- | --- | --- |
@@ -135,7 +135,7 @@ Incident Response Policy where they constitute a security event.
 ## 8. Review & maintenance
 
 This policy is reviewed at least annually, and upon any significant change to the Organization,
-the Maverick platform, the threat landscape, or applicable regulatory obligations. Review and
+the Lightwork platform, the threat landscape, or applicable regulatory obligations. Review and
 approval are conducted as part of management review. The Owner maintains version history and
 ensures subordinate policies remain consistent with this umbrella policy.
 **[Process — Organization to operationalize]**
