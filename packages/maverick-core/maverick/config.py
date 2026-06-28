@@ -556,6 +556,41 @@ def get_self_learning() -> dict:
     }
 
 
+def get_self_harness() -> dict:
+    """Return the ``[self_harness]`` section with defaults filled in.
+
+    OFF by default (kernel rule 1). The tuning knobs default to the loop's
+    historical behavior so enabling the feature changes nothing until an
+    operator opts into the stricter/optional paths:
+
+    - ``min_support``: recurring failures before a weakness is mined (>=1).
+    - ``require_held_out`` / ``min_held_out`` / ``min_delta``: the validation
+      evidence floors (default off / 0 / 0.0) -- never promote on only the mined
+      examples, an unseen-sample floor, an effect-size floor.
+    - ``semantic_mining``: cluster failure diagnoses by embedding similarity
+      when embeddings are available (default off -> deterministic Jaccard).
+    - ``retire_after_days``: auto-retire lines not active within this many days
+      (0 = never; only acted on when a driver/CLI runs retirement).
+    """
+    cfg = load_config().get("self_harness", {})
+
+    def _num(key, default, cast):
+        try:
+            return cast(cfg.get(key, default))
+        except (TypeError, ValueError):
+            return default
+
+    return {
+        "enable": bool(cfg.get("enable", False)),
+        "min_support": max(1, _num("min_support", 3, int)),
+        "require_held_out": bool(cfg.get("require_held_out", False)),
+        "min_held_out": max(0, _num("min_held_out", 0, int)),
+        "min_delta": max(0.0, _num("min_delta", 0.0, float)),
+        "semantic_mining": bool(cfg.get("semantic_mining", False)),
+        "retire_after_days": max(0.0, _num("retire_after_days", 0.0, float)),
+    }
+
+
 def get_autonomy() -> dict:
     """Return the ``[autonomy]`` section with defaults filled in.
 

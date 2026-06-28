@@ -692,3 +692,37 @@ def test_note_recall_throttle_is_in_process(monkeypatch, store):
     first = sh.line_provenance("M", store)[0]["recall_notes"]
     sh.note_recall("M", path=store)            # throttled -> no second write
     assert sh.line_provenance("M", store)[0]["recall_notes"] == first
+
+
+# ---------- config-driven tuning ----------
+
+def test_settings_reads_and_clamps_config(monkeypatch):
+    from maverick import config
+    monkeypatch.setattr(config, "load_config", lambda *a, **k: {"self_harness": {
+        "enable": True, "min_support": 7, "require_held_out": True,
+        "min_held_out": 5, "min_delta": 0.05, "semantic_mining": True,
+        "retire_after_days": 30}})
+    st = sh.settings()
+    assert st == {"enable": True, "min_support": 7, "require_held_out": True,
+                  "min_held_out": 5, "min_delta": 0.05, "semantic_mining": True,
+                  "retire_after_days": 30.0}
+    # bad/negative values clamp to safe defaults
+    monkeypatch.setattr(config, "load_config", lambda *a, **k: {"self_harness": {
+        "min_support": 0, "min_held_out": -3, "min_delta": "x"}})
+    st2 = sh.settings()
+    assert st2["min_support"] == 1 and st2["min_held_out"] == 0 and st2["min_delta"] == 0.0
+
+
+def test_runner_pass_applies_config_floors(monkeypatch, store):
+    from maverick import config
+    from maverick import self_improvement_runner as runner
+    ctrl = _enable(monkeypatch)
+    monkeypatch.setattr(config, "load_config", lambda *a, **k: {
+        "self_harness": {"enable": True, "require_held_out": True}})
+    monkeypatch.setattr(sh, "_store_path", lambda: store)
+    refl = [_refl("M", "timeout", "export the ledger") for _ in range(3)]
+    # config require_held_out=True + empty held_out -> skipped, nothing promoted
+    rep = runner.run_self_harness_pass(
+        refl, model_id="M", held_in=["a", "b"], held_out=[], controller=ctrl,
+        score_with=lambda a, c: 0.95, score_without=lambda a, c: 0.4)
+    assert rep.promoted == 0 and any("no held-out cases" in s for s in rep.skipped)

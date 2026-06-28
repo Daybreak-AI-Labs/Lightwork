@@ -76,6 +76,19 @@ def enabled() -> bool:
         return False
 
 
+def settings() -> dict:
+    """Resolved ``[self_harness]`` settings (tuning knobs) with defaults filled
+    in. Defaults preserve the loop's historical behavior; an operator opts into
+    the stricter floors / optional paths via config or the wizard."""
+    try:
+        from .config import get_self_harness
+        return get_self_harness()
+    except Exception:  # pragma: no cover -- config never blocks a run
+        return {"enable": False, "min_support": 3, "require_held_out": False,
+                "min_held_out": 0, "min_delta": 0.0, "semantic_mining": False,
+                "retire_after_days": 0.0}
+
+
 def _store_path() -> Path:
     return data_dir("harness") / "addenda.json"
 

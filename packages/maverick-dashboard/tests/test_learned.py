@@ -84,6 +84,28 @@ def test_harness_guidance_renders_on_page_and_api(monkeypatch, tmp_path):
     assert "verify the export precondition before acting" in body["harness"][0]["lines"]
 
 
+def test_harness_view_shows_provenance_and_conflicts(monkeypatch, tmp_path):
+    _isolate(monkeypatch, tmp_path)
+    from maverick import self_harness as sh
+    store = tmp_path / "addenda.json"
+    monkeypatch.setattr(sh, "_store_path", lambda: store)
+    monkeypatch.setenv("MAVERICK_SELF_HARNESS", "1")
+    sh._write_addenda({"claude-x":
+                       "Operating guidance learned for this model:\n"
+                       "- Prefer streaming for large exports\n"
+                       "- Avoid streaming for large exports"}, store)
+    sh._write_line_meta({sh._line_id("claude-x", "Prefer streaming for large exports"): {
+        "model_id": "claude-x", "text": "Prefer streaming for large exports",
+        "signature": "timeout: slow export", "held_out_delta": 0.2, "samples": 8,
+        "learned_at": 1700000000.0, "updated_at": 1700000000.0}}, store)
+    text = _client().get("/learned").text
+    assert "timeout: slow export" in text          # per-line provenance rendered
+    assert "possible conflict" in text             # conflict badge rendered
+    body = _client().get("/api/v1/learned").json()
+    h = body["harness"][0]
+    assert h["provenance"] and h["conflicts"]
+
+
 def test_harness_guidance_shows_off_note_when_disabled(monkeypatch, tmp_path):
     # Stored-but-paused guidance is still shown, with a clear "not recalled" note
     # (matches `maverick self-harness show`).

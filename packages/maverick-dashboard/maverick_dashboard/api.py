@@ -1043,8 +1043,21 @@ def _harness_guidance() -> tuple[list[dict], bool]:
     the feature is on. Kept in its own try so a self-harness failure never
     blanks the capability ledger, and vice versa."""
     try:
-        from maverick.self_harness import enabled, list_learned
-        rows = [{"model_id": m, "lines": lines}
+        from maverick.self_harness import (
+            detect_store_conflicts,
+            enabled,
+            line_provenance,
+            list_learned,
+        )
+        conflicts_by_model: dict[str, list] = {}
+        try:
+            for m, a, b in detect_store_conflicts():
+                conflicts_by_model.setdefault(m, []).append([a, b])
+        except Exception:  # pragma: no cover -- conflicts are advisory
+            pass
+        rows = [{"model_id": m, "lines": lines,
+                 "provenance": line_provenance(m),
+                 "conflicts": conflicts_by_model.get(m, [])}
                 for m, lines in sorted(list_learned().items())]
         return rows, bool(enabled())
     except Exception as e:  # pragma: no cover -- never block the page
