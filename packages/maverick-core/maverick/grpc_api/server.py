@@ -123,13 +123,38 @@ def _grpc_rate_limit_per_min() -> int:
         return 600
 
 
+def _grpc_peer_caller(peer: str) -> str:
+    """Return a stable caller key from a gRPC peer string.
+
+    TCP peer strings include the client's ephemeral source port
+    (for example ``ipv4:10.0.0.7:50001``), so hashing the full peer lets the
+    same caller receive a fresh rate-limit bucket on every reconnect. Strip the
+    port for IP transports while preserving the transport prefix. Non-IP peers
+    (for example Unix sockets) are left unchanged.
+    """
+    if peer.startswith("ipv4:"):
+        host, sep, _port = peer[5:].rpartition(":")
+        if sep and host:
+            return "ipv4:" + host
+    if peer.startswith("ipv6:"):
+        rest = peer[5:]
+        if rest.startswith("["):
+            end = rest.find("]")
+            if end > 0:
+                return "ipv6:" + rest[: end + 1]
+        host, sep, _port = rest.rpartition(":")
+        if sep and host:
+            return "ipv6:" + host
+    return peer
+
+
 def _grpc_rate_key(context, agent) -> str:
-    """Bucket by per-caller agent id when present, else by hashed peer."""
+    """Bucket by per-caller agent id when present, else by hashed peer address."""
     if agent is not None and getattr(agent, "id", None):
         return "agent:" + str(agent.id)
     peer = ""
     try:
-        peer = context.peer() or ""
+        peer = _grpc_peer_caller(context.peer() or "")
     except Exception:  # pragma: no cover - context always has peer() in practice
         peer = ""
     return "peer:" + hashlib.sha256(peer.encode("utf-8")).hexdigest()[:16]
