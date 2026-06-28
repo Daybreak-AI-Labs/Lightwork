@@ -971,6 +971,8 @@ def validate_proposal(
     min_delta: float = 0.0, min_held_out: int = 0, confidence_z: float = 0.0,
     max_cost_factor: float | None = None, max_latency_factor: float | None = None,
     max_tool_calls_factor: float | None = None,
+    metamorphic_fn: Callable[[list[str]], list[str]] | None = None,
+    metamorphic_tolerance: float = 0.0,
 ) -> ValidationResult:
     """The Self-Harness acceptance test: a harness edit must not regress EITHER
     split and must help at least one (reject pure trades).
@@ -988,7 +990,11 @@ def validate_proposal(
     bound to clear the baseline rate -- statistically-confident generalization,
     not luck. ``max_*_factor`` reject a candidate that regresses cost/latency/
     tool-calls on the held-out split beyond the factor (a line in every prompt
-    must not quietly make the model slower or pricier)."""
+    must not quietly make the model slower or pricier). ``metamorphic_fn`` (a
+    meaning-preserving paraphraser; injected because a real one needs a model)
+    rejects a line whose held-out improvement does NOT survive paraphrasing the
+    unseen cases -- catching a line overfit to surface wording rather than the
+    underlying weakness (``metamorphic_tolerance`` allows a small slip)."""
     add = proposal.addendum_line
     in_with, in_ci, in_li, in_ti = _score_parts(score_with(add, held_in))
     in_without, *_ = _score_parts(score_without(add, held_in))
@@ -1048,6 +1054,28 @@ def validate_proposal(
                 False, in_delta, out_delta,
                 f"{label} regressed on held-out ({cand:.3g} > {basel:.3g} x {factor})",
                 **base)
+    # Metamorphic robustness: a line that helps only the EXACT held-out wording is
+    # overfit to surface form, not the underlying weakness. If an injected
+    # ``metamorphic_fn`` (a meaning-preserving paraphraser -- a real one needs a
+    # model, so it is injected) can transform the unseen cases, the improvement
+    # must SURVIVE the transform (held-out delta stays >= -tolerance on the
+    # paraphrases). A line that flips to hurting paraphrased cases is rejected.
+    if metamorphic_fn is not None and held_out:
+        try:
+            mcases = [str(c) for c in (metamorphic_fn(list(held_out)) or [])]
+        except Exception:  # a bad transform can't fail a candidate -> skip the check
+            mcases = []
+        if mcases:
+            m_with, *_ = _score_parts(score_with(add, mcases))
+            m_without, *_ = _score_parts(score_without(add, mcases))
+            if (isinstance(m_with, (int, float)) and isinstance(m_without, (int, float))
+                    and math.isfinite(m_with) and math.isfinite(m_without)):
+                m_delta = m_with - m_without
+                if m_delta < -metamorphic_tolerance:
+                    return ValidationResult(
+                        False, in_delta, out_delta,
+                        f"failed metamorphic check (overfit to wording; "
+                        f"paraphrase delta {m_delta:.3g})", **base)
     return ValidationResult(True, in_delta, out_delta, "validated", **base)
 
 
@@ -1294,6 +1322,8 @@ def run_self_harness(
     semantic_mining: bool = False,
     similarity_fn: Callable[[str, str], float] | None = None,
     bucket_by: tuple[str, ...] = (),
+    metamorphic_fn: Callable[[list[str]], list[str]] | None = None,
+    metamorphic_tolerance: float = 0.0,
 ) -> SelfHarnessReport:
     """One self-harness pass for ``model_id``: mine weaknesses, propose minimal
     edits, validate on held-in/held-out, and GATE each survivor through the
@@ -1350,7 +1380,9 @@ def run_self_harness(
                 min_delta=min_delta, min_held_out=min_held_out,
                 confidence_z=confidence_z, max_cost_factor=max_cost_factor,
                 max_latency_factor=max_latency_factor,
-                max_tool_calls_factor=max_tool_calls_factor)
+                max_tool_calls_factor=max_tool_calls_factor,
+                metamorphic_fn=metamorphic_fn,
+                metamorphic_tolerance=metamorphic_tolerance)
             hi, ho = held_in or list(sig.examples), held_out or []
             if candidates_per_signature and candidates_per_signature > 1:
                 # Best-of-N: keep the strongest of several candidate lines for this

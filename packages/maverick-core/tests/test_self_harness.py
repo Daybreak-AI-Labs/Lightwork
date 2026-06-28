@@ -755,6 +755,57 @@ def test_validate_rejects_cost_regression():
     assert vr2.accepted
 
 
+# a scorer that helps the EXACT held-out wording but hurts paraphrased ("para") cases
+def _meta_sw(add, cases):
+    return 0.3 if (cases and str(cases[0]).startswith("para")) else 0.9
+
+
+def test_validate_metamorphic_rejects_overfit():
+    vr = sh.validate_proposal(
+        _sig_proposal(), held_in=["a", "b"], held_out=["orig1", "orig2"],
+        score_with=_meta_sw, score_without=lambda a, c: 0.4,
+        metamorphic_fn=lambda cases: ["para1", "para2"])
+    assert not vr.accepted and "metamorphic" in vr.reason
+
+
+def test_validate_metamorphic_passes_when_robust():
+    # the line helps paraphrases too -> survives the check
+    vr = sh.validate_proposal(
+        _sig_proposal(), held_in=["a", "b"], held_out=["orig1", "orig2"],
+        score_with=lambda a, c: 0.9, score_without=lambda a, c: 0.4,
+        metamorphic_fn=lambda cases: ["para1", "para2"])
+    assert vr.accepted
+
+
+def test_validate_metamorphic_off_by_default():
+    # without the seam the overfit line is NOT caught (back-compat)
+    vr = sh.validate_proposal(
+        _sig_proposal(), held_in=["a", "b"], held_out=["orig1", "orig2"],
+        score_with=_meta_sw, score_without=lambda a, c: 0.4)
+    assert vr.accepted
+
+
+def test_validate_metamorphic_bad_fn_is_skipped():
+    # a raising transform can't fail a candidate -> the check is skipped
+    vr = sh.validate_proposal(
+        _sig_proposal(), held_in=["a", "b"], held_out=["orig1", "orig2"],
+        score_with=lambda a, c: 0.9, score_without=lambda a, c: 0.4,
+        metamorphic_fn=lambda cases: (_ for _ in ()).throw(RuntimeError("boom")))
+    assert vr.accepted
+
+
+def test_run_self_harness_metamorphic_blocks_overfit(monkeypatch, store):
+    ctrl = _enable(monkeypatch)
+    refl = [_refl("M", "timeout", "export the nightly ledger") for _ in range(3)]
+    rep = sh.run_self_harness(
+        refl, model_id="M", controller=ctrl, min_support=3, path=store,
+        held_in=["a", "b"], held_out=["orig1", "orig2", "orig3"],
+        score_with=_meta_sw, score_without=lambda a, c: 0.4,
+        metamorphic_fn=lambda cases: [f"para{i}" for i in range(len(cases))])
+    assert rep.promoted == 0 and any("metamorphic" in s for s in rep.skipped)
+    assert sh.recall_addendum("M", store) == ""
+
+
 def test_mine_adaptive_min_support_per_class():
     def recs(fclass, goal, n):
         return [{"model_id": "M", "failure_class": fclass, "goal_text": f"{goal} {i}",

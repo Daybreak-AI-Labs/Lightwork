@@ -109,7 +109,10 @@ safety model as skills and insights.
   generalization, not luck), and `max_cost_factor`/`max_latency_factor`/
   `max_tool_calls_factor` (reject a line that lifts pass-rate while regressing
   **cost/latency/tool-churn** — a scorer may return `{success, cost, latency,
-  tool_calls}`). Mining support is per-class-adaptable (`min_support_by_class`).
+  tool_calls}`), and `metamorphic_fn` (a meaning-preserving paraphraser — the
+  held-out improvement must **survive paraphrasing** the unseen cases, catching a
+  line overfit to surface wording, not the weakness). Mining support is
+  per-class-adaptable (`min_support_by_class`).
 - **Reversible + audited:** every applied line has a rollback handle and a signed
   `LEARNING_UPDATE` audit row.
 - **Bounded + non-eroding:** an addendum is capped (`_MAX_LINES_PER_MODEL`,

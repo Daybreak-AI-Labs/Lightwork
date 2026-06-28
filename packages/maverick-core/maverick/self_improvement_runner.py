@@ -147,6 +147,7 @@ def run_self_harness_pass(
     min_held_out: int | None = None, candidates_per_signature: int | None = None,
     semantic_mining: bool | None = None, similarity_fn=None,
     bucket_by: tuple[str, ...] | None = None,
+    metamorphic_fn=None, metamorphic_tolerance: float = 0.0,
 ):
     """The automatic entry point for the self-harness loop (mine -> propose ->
     validate -> gate), to be called by a scheduler / the self-improvement loop.
@@ -200,7 +201,8 @@ def run_self_harness_pass(
             min_support_by_class=st["min_support_by_class"],
             candidates_per_signature=candidates_per_signature,
             semantic_mining=semantic_mining, similarity_fn=similarity_fn,
-            bucket_by=bucket_by)
+            bucket_by=bucket_by, metamorphic_fn=metamorphic_fn,
+            metamorphic_tolerance=metamorphic_tolerance)
     except Exception:  # pragma: no cover -- learning never perturbs a run
         log.debug("self-harness pass failed", exc_info=True)
         from . import self_harness
