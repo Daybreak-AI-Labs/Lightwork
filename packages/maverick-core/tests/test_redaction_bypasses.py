@@ -43,6 +43,41 @@ def test_non_card_digit_runs_not_redacted():
     assert "credit_card" not in _kinds("4111 1111 1111 1112")
 
 
+def test_long_non_card_digit_run_uses_linear_credit_card_scan(monkeypatch):
+    calls = 0
+    original = pii._luhn_valid
+
+    def counting_luhn(digits):
+        nonlocal calls
+        calls += 1
+        return original(digits)
+
+    monkeypatch.setattr(pii, "_luhn_valid", counting_luhn)
+    assert "credit_card" not in _kinds("1" * 100_000)
+    assert calls == 0
+
+
+def test_long_credit_card_scan_matches_bruteforce_for_windows():
+    def brute(run):
+        digits = "".join(c for c in run if c.isdigit())
+        if len(digits) <= 19:
+            return pii._luhn_valid(digits)
+        return any(
+            pii._luhn_valid(digits[i:i + length])
+            for length in range(13, 20)
+            for i in range(len(digits) - length + 1)
+        )
+
+    samples = [
+        "1" * 64,
+        "0000" + "4242424242424242" + "9999",
+        "9" * 23 + "4111-1111-1111-1111" + "8" * 21,
+        "123456789012345678901234567890",
+    ]
+    for sample in samples:
+        assert pii._cc_run_has_card(sample) is brute(sample)
+
+
 # --- #5 quoted secret value --------------------------------------------------
 
 def test_quoted_secret_value_fully_redacted():
