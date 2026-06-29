@@ -133,6 +133,8 @@ maverick version                         # installed package versions
 | `maverick learn-demo FILE [--name --no-llm --source --industry --yes]` | Build an agent from a recorded demonstration (parse → induce → approve → save → provision) |
 | `maverick factory-learn [--min-support N] [--dry-run]` | Self-improving factory: mine provisioning/approval gaps into proposer guidance (opt-in `[self_improvement]`) |
 | `maverick budget` | Total + per-run cost history |
+| `maverick spend [--json --tag-field --top]` | FinOps export: total + per-goal + per-tag run cost (CLI face of `/spend`) |
+| `maverick safety [--json]` | Safety posture: shield / sandbox backend / egress policy (assert in CI) |
 | `maverick flywheel` | Cognitive Data Engine: causal failure triage → guardrails → habits (opt-in `[data_engine]`) |
 | `maverick record-outcome GOAL EP VALUE` | Feed a real downstream outcome to a past episode (Consequence Engine) |
 | `maverick codebook / codec-learn` | Learn the swarm's auditable coordination shorthand from real messages |
