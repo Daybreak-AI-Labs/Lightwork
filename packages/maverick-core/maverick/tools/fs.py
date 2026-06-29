@@ -50,8 +50,12 @@ def _fd_real_path(fd: int) -> Path | None:
         link = os.readlink(f"/proc/self/fd/{fd}")
     except (OSError, ValueError):
         return None
-    # A file unlinked after open shows up as "<path> (deleted)".
-    link = link.removesuffix(" (deleted)")
+    # Do not strip Linux's optional " (deleted)" marker here. That suffix is
+    # also legal in live filenames, and removing it can transform an outside
+    # sibling such as "<workdir> (deleted)" into "<workdir>" before the
+    # containment check. Treat the kernel-reported path literally: deleted
+    # descriptors will either be rejected by containment or fall back to the
+    # existing resolve-time guard on platforms that do not expose /proc.
     if not link.startswith("/"):
         return None  # e.g. "pipe:[...]", "anon_inode:..." — not a real path
     return Path(link)
