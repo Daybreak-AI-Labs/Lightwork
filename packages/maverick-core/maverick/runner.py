@@ -156,7 +156,7 @@ def run_goal_in_thread(
         from .llm import LLM
         from .orchestrator import run_goal_sync
         from .sandbox import build_sandbox
-        from .world_model import open_world
+        from .world_model import close_world_if_owned, open_world
         world = open_world()  # client/tenant-floored canonical world
         llm = LLM()
         sandbox = build_sandbox()
@@ -216,9 +216,9 @@ def run_goal_in_thread(
                     log.debug("run_goal_in_thread: sandbox.close() failed", exc_info=True)
         if world is not None:
             try:
-                world.close()
+                close_world_if_owned(world)
             except Exception:  # pragma: no cover
-                log.debug("run_goal_in_thread: world.close() failed", exc_info=True)
+                log.debug("run_goal_in_thread: world close failed", exc_info=True)
         # Release in reverse acquire order: global ceiling, then the user lane.
         _run_semaphore.release()
         principal_sem.release()

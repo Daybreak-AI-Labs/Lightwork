@@ -106,3 +106,29 @@ def test_open_world_returns_real_postgres_model(monkeypatch):
 
     world = open_world()
     assert isinstance(world, PostgresWorldModel)
+
+
+def test_closing_no_path_tenant_world_is_ignored(tmp_path, monkeypatch):
+    """Canonical no-path callers must not poison the shared tenant cache."""
+    monkeypatch.delenv("MAVERICK_WORLD_BACKEND", raising=False)
+    monkeypatch.setenv("MAVERICK_HOME", str(tmp_path))
+    monkeypatch.setenv("MAVERICK_CLIENT_ID", "acme")
+    monkeypatch.delenv("MAVERICK_TENANT", raising=False)
+
+    import maverick.world_model as wm
+    from maverick import client
+
+    client.reset_client_cache()
+    wm._tenant_worlds.clear()
+    try:
+        world = wm.open_world()
+        assert world is wm.world_for_tenant("acme")
+        wm.close_world_if_owned(world)
+
+        reused = wm.open_world()
+        assert reused is world
+        goal_id = reused.create_goal("still open", "tenant cache survived close")
+        assert reused.get_goal(goal_id) is not None
+    finally:
+        client.reset_client_cache()
+        wm._tenant_worlds.clear()
