@@ -597,9 +597,9 @@ def get_self_harness() -> dict:
             except (TypeError, ValueError):
                 continue
 
-    # Mining bucket dimensions: keep only allowlisted scalar reflexion fields
+    # Mining bucket dimensions: keep only allowlisted reflexion dims
     # (mirrors self_harness._BUCKET_DIMS) and de-dupe, preserving order.
-    _allowed_dims = ("domain",)
+    _allowed_dims = ("domain", "tool")
     raw_dims = cfg.get("mine_bucket_by", [])
     if isinstance(raw_dims, str):
         raw_dims = [raw_dims]
@@ -626,8 +626,20 @@ def get_self_harness() -> dict:
         "max_tool_calls_factor": _factor("max_tool_calls_factor"),
         "semantic_mining": bool(cfg.get("semantic_mining", False)),
         "candidates_per_signature": max(1, _num("candidates_per_signature", 1, int)),
+        # Cross-validate a candidate across this many holdout-fold rotations
+        # before promoting (1 = single fixed split, the historical behavior; >1
+        # requires the lift to generalize across every rotation).
+        "holdout_rotations": max(1, _num("holdout_rotations", 1, int)),
+        # Self-consistency for the LLM-as-judge in the auto-built evaluator: ask
+        # the judge this many times (diverse framings) and take the majority vote
+        # (1 = single call, the historical behavior).
+        "judge_samples": max(1, _num("judge_samples", 1, int)),
         "mine_bucket_by": bucket_by,
         "retire_after_days": max(0.0, _num("retire_after_days", 0.0, float)),
+        # Re-measure each existing line's live A/B lift each cycle and DEMOTE
+        # dead weight (default off -- a general corpus can under-credit a line
+        # that helps only its own failure class, so this is operator opt-in).
+        "efficacy_review": bool(cfg.get("efficacy_review", False)),
         # Path to an eval corpus ({model|domain: [{goal, expected}]}) JSON. When
         # set, the driver auto-builds the LIVE A/B (model generates, verifier
         # judges) so a scheduled pass can actually PROMOTE; unset -> dry pass.

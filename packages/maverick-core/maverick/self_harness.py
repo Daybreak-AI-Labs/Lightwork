@@ -96,7 +96,8 @@ def settings() -> dict:
                 "max_latency_factor": None, "max_tool_calls_factor": None,
                 "semantic_mining": False, "retire_after_days": 0.0,
                 "candidates_per_signature": 1, "mine_bucket_by": (),
-                "eval_corpus": None}
+                "holdout_rotations": 1, "judge_samples": 1,
+                "efficacy_review": False, "eval_corpus": None}
 
 
 def _store_path() -> Path:
@@ -144,21 +145,39 @@ def _scoped_key(model_id: str, context: str) -> str:
     return f"{model_id}\x00{context}" if context else str(model_id)
 
 
+def _scope_contexts(domain: str | None = None,
+                    tools: list[str] | tuple[str, ...] | None = None) -> list[str]:
+    """The ordered, deduped list of mining-scope context strings for a run:
+    ``domain=<d>`` first (one department per run), then ``tool=<t>`` for each tool
+    the run had on hand, SORTED so the recalled block is deterministic regardless
+    of the agent's tool-registry iteration order. Empty entries are dropped. The
+    shared basis for recall / usage / outcome scoping so all three stay in step."""
+    out: list[str] = []
+    if domain:
+        out.append(f"domain={domain}")
+    for t in sorted({str(t) for t in (tools or []) if t}):
+        out.append(f"tool={t}")
+    return out
+
+
 def recall_addendum(model_id: str | None, path: Path | None = None, *,
-                    domain: str | None = None) -> str:
+                    domain: str | None = None,
+                    tools: list[str] | tuple[str, ...] | None = None) -> str:
     """The learned operating-guidance block for ``model_id`` (``""`` if none /
     disabled). Recalled into the system prompt by the agent at build time.
 
-    When ``domain`` is given, any guidance mined SCOPED to that domain (under the
-    composite key) is appended after the model-wide block -- so a finance-specific
-    lesson rides only finance-domain runs, not every prompt for the model. With no
-    ``domain`` (the default) this is exactly the model-wide block, unchanged."""
+    The model-wide block is always included. When ``domain`` is given, guidance
+    mined SCOPED to that department is appended (so a finance lesson rides only
+    finance runs); when ``tools`` are given, guidance mined scoped to each tool the
+    run has on hand is appended (so a ``web_fetch`` lesson rides only runs that can
+    call ``web_fetch`` -- #7 component profiles). With neither (the default) this is
+    exactly the model-wide block, byte-for-byte unchanged."""
     if not model_id or not enabled():
         return ""
     store = load_addenda(path)
     block = store.get(str(model_id), "")
-    if domain:
-        scoped = store.get(_scoped_key(str(model_id), f"domain={domain}"), "")
+    for ctx in _scope_contexts(domain, tools):
+        scoped = store.get(_scoped_key(str(model_id), ctx), "")
         if scoped:
             block = (block + "\n" + scoped) if block else scoped
     return block
@@ -414,13 +433,15 @@ def list_learned(path: Path | None = None) -> dict[str, list[str]]:
 
 
 def forget_addendum(model_id: str, *, line: str | None = None,
-                    path: Path | None = None) -> bool:
+                    domain: str | None = None, path: Path | None = None) -> bool:
     """Operator rollback: remove a model's learned addendum, or a single line.
 
-    The user-facing undo handle for self-harness learning. The removal is
-    serialized + atomic like every other store write, and is itself audited so
-    the rollback leaves a trail. Returns ``True`` if something was removed,
-    ``False`` if there was nothing matching to remove."""
+    The user-facing undo handle for self-harness learning. By default it spans ALL
+    the model's scopes (so a full rollback can't orphan a domain block); pass
+    ``domain`` to scope the removal to just that department's block. The removal is
+    serialized + atomic like every other store write, and is itself audited so the
+    rollback leaves a trail. Returns ``True`` if something was removed, ``False``
+    if there was nothing matching to remove."""
     p = path if path is not None else _store_path()
     from .file_lock import cross_process_lock
     removed = False
@@ -428,8 +449,13 @@ def forget_addendum(model_id: str, *, line: str | None = None,
         before = load_addenda(p)
         # Span ALL of the model's scopes (bare + composite "<model>\x00domain=...")
         # so a full rollback can't ORPHAN a domain-scoped block that recall still
-        # injects, and a single-line forget can target a line in any scope.
-        keys = _model_store_keys(before, model_id)
+        # injects, and a single-line forget can target a line in any scope. With an
+        # explicit domain, operate ONLY on that scope's composite key.
+        if domain:
+            sk = _scoped_key(str(model_id), f"domain={domain}")
+            keys = [sk] if sk in before else []
+        else:
+            keys = _model_store_keys(before, model_id)
         if not keys:
             return False
         after = dict(before)
@@ -628,14 +654,31 @@ def count_eligible(reflexions: list[dict], *, model_id: str) -> int:
 # free-text field (e.g. goal_text) and shatter every trace into its own group.
 # ``domain`` is the grounded one -- the department pack a run executed as, already
 # tracked on the reflexion and used by dreaming for per-department consolidation.
-_BUCKET_DIMS = ("domain",)
+# ``tool`` is the component the failure occurred in -- the tool in play when the
+# run failed (the last of ``tools_used``) -- so a weakness can be mined PER TOOL
+# and its guidance recalled only when that tool is on hand (#7 component profiles).
+_BUCKET_DIMS = ("domain", "tool")
+
+
+def _bucket_value(r: dict, dim: str) -> str:
+    """The scalar bucket value for one reflexion on one allowlisted ``dim``.
+
+    Most dims are plain scalar fields (``domain``). ``tool`` is DERIVED: the trace
+    carries a ``tools_used`` LIST, and the component a failure belongs to is the
+    tool in play when it failed -- the LAST entry. Missing/empty -> "" so untagged
+    traces cluster together rather than each forming a singleton bucket."""
+    if dim == "tool":
+        used = r.get("tools_used") or []
+        return str(used[-1]) if isinstance(used, (list, tuple)) and used else ""
+    v = r.get(dim)
+    return "" if v is None else str(v)
 
 
 def _bucket_key(r: dict, bucket_by: tuple[str, ...]) -> tuple[str, ...]:
     """The extra group key for one reflexion under ``bucket_by`` (a tuple of
-    allowlisted scalar reflexion fields). Missing/None -> "" so untagged traces
-    still cluster together rather than each forming a singleton bucket."""
-    return tuple("" if r.get(k) is None else str(r.get(k)) for k in bucket_by)
+    allowlisted reflexion dims). Missing/None -> "" so untagged traces still
+    cluster together rather than each forming a singleton bucket."""
+    return tuple(_bucket_value(r, k) for k in bucket_by)
 
 
 def _context_str(bucket_by: tuple[str, ...], values: tuple[str, ...]) -> str:
@@ -1215,6 +1258,54 @@ def validate_proposal(
     return ValidationResult(True, in_delta, out_delta, "validated", **base)
 
 
+def _validate_rotated(
+    proposal: HarnessProposal, *, pool: list[str], rotations: int,
+    score_with: ScoreFn, score_without: ScoreFn, validate_kwargs: dict,
+) -> ValidationResult:
+    """Cross-validate a candidate across ``rotations`` holdout folds and accept
+    only if it GENERALIZES, not just if one lucky 30%% slice liked it.
+
+    The combined ``pool`` of held-in + held-out goals is partitioned into K
+    deterministic folds (:func:`corpus_kfold_splits`); the candidate is validated
+    once per fold and the verdicts are aggregated with an ALL-folds rule: every
+    fold must accept (so a line that regresses or fails the floors in ANY fold is
+    rejected -- the strict, low-variance generalization test). The reported deltas
+    are the per-fold means and the evidence numbers sum the folds' samples, so the
+    downstream gate still sees honest aggregate numbers. Falls back to a single
+    :func:`validate_proposal` when the pool is too small to fold (< 2 goals) or
+    ``rotations <= 1``."""
+    from .self_harness_eval import corpus_kfold_splits
+    splits = corpus_kfold_splits([{"goal": g} for g in pool], k=rotations)
+    # Too small to fold (one rotation with empty held-out): defer to the single
+    # split the caller would otherwise have used (held_in=pool, held_out=[]).
+    if len(splits) < 2:
+        hi, ho = (splits[0] if splits else (list(pool), []))
+        return validate_proposal(proposal, held_in=hi, held_out=ho,
+                                 score_with=score_with, score_without=score_without,
+                                 **validate_kwargs)
+    results = [validate_proposal(proposal, held_in=hi, held_out=ho,
+                                 score_with=score_with, score_without=score_without,
+                                 **validate_kwargs)
+               for hi, ho in splits]
+    k = len(results)
+    n_pass = sum(1 for r in results if r.accepted)
+    in_delta = sum(r.held_in_delta for r in results) / k
+    out_delta = sum(r.held_out_delta for r in results) / k
+    base = dict(
+        baseline_score=sum(r.baseline_score for r in results) / k,
+        candidate_score=sum(r.candidate_score for r in results) / k,
+        samples=sum(r.samples for r in results))
+    if n_pass == k:
+        return ValidationResult(True, in_delta, out_delta,
+                                f"validated across {k} rotations", **base)
+    # Surface the first failing fold's reason so an operator sees WHY it didn't
+    # generalize, not just that it didn't.
+    first_fail = next((r for r in results if not r.accepted), None)
+    why = first_fail.reason if first_fail is not None else "rotation"
+    return ValidationResult(False, in_delta, out_delta,
+                            f"failed rotation ({n_pass}/{k} folds passed: {why})", **base)
+
+
 # ---- APPLY / ROLLBACK (the reversible handle the gate requires) -----------
 
 def _compose_addendum(model_id: str, existing: str, line: str) -> str:
@@ -1332,17 +1423,20 @@ _recall_noted_monotonic: dict[str, float] = {}
 
 def note_recall(model_id: str | None, *, now: float | None = None,
                 path: Path | None = None, min_interval_s: float = 3600.0,
-                domain: str | None = None) -> None:
+                domain: str | None = None,
+                tools: list[str] | tuple[str, ...] | None = None) -> None:
     """Best-effort: record that ``model_id``'s guidance was just recalled, so
     staleness can be judged by USE, not only by promotion. In-process throttled
     (``min_interval_s``; 0 disables the throttle, for tests) so the hot recall
     path does at most one cheap write per model per interval. Tracks the
-    model-wide block AND, when ``domain`` is given, the domain-scoped block (so a
-    recalled domain line isn't wrongly retired). Never raises."""
+    model-wide block AND every scope ``recall_addendum`` injected for this run
+    (the ``domain`` block and each ``tool`` block), so a recalled scoped line isn't
+    wrongly retired. Never raises."""
     if not model_id:
         return
     mid = str(model_id)
-    throttle_key = f"{mid}\x00{domain or ''}"
+    contexts = _scope_contexts(domain, tools)
+    throttle_key = mid + "\x00" + "\x00".join(contexts)
     if min_interval_s:
         mono = time.monotonic()
         with _recall_note_lock:
@@ -1353,9 +1447,7 @@ def note_recall(model_id: str | None, *, now: float | None = None,
     try:
         p = path if path is not None else _store_path()
         ts = now if now is not None else time.time()
-        keys = [mid]
-        if domain:
-            keys.append(_scoped_key(mid, f"domain={domain}"))
+        keys = [mid] + [_scoped_key(mid, ctx) for ctx in contexts]
         from .file_lock import cross_process_lock
         with _lock, cross_process_lock(p):
             meta = load_line_meta(p)
@@ -1385,14 +1477,18 @@ def note_recall(model_id: str | None, *, now: float | None = None,
 # the audited `forget` path, not the promotion gate.
 
 def note_outcome(model_id: str | None, success: bool, *, line: str | None = None,
+                 domain: str | None = None,
+                 tools: list[str] | tuple[str, ...] | None = None,
                  path: Path | None = None) -> None:
     """Record that a run using ``model_id``'s guidance succeeded or failed,
     incrementing per-line ``recall_success``/``recall_failure`` counters in the
-    sidecar. Attributed to ``line`` if given, else to ALL of the model's current
-    lines (they all rode the same prompt). Spans every scope (model-wide AND
-    domain-scoped composite keys), keying each record under the store key the line
-    actually lives in -- so a domain-scoped line is not invisible to efficacy.
-    Best-effort; never raises."""
+    sidecar -- the signal :func:`review_efficacy`/:func:`review_canaries` act on.
+
+    A specific ``line`` is targeted wherever it lives (any scope). Otherwise the
+    outcome is attributed to the lines THIS run actually recalled: the model-wide
+    block PLUS the ``domain`` block and each ``tool`` block -- mirroring
+    :func:`recall_addendum`/:func:`note_recall`, so a finance run credits finance
+    + model-wide guidance, not every other domain's. Best-effort; never raises."""
     if not model_id:
         return
     mid = str(model_id)
@@ -1404,9 +1500,13 @@ def note_outcome(model_id: str | None, success: bool, *, line: str | None = None
             store = load_addenda(p)
             meta = load_line_meta(p)
             changed = False
-            for k, ln in _iter_model_lines(store, mid):
-                if line is not None and ln != line:
-                    continue
+            if line is not None:
+                pairs = [(k, ln) for k, ln in _iter_model_lines(store, mid) if ln == line]
+            else:
+                keys = [mid] + [_scoped_key(mid, ctx)
+                                for ctx in _scope_contexts(domain, tools)]
+                pairs = [(k, ln) for k in keys for ln in _bullets(store.get(k, ""))]
+            for k, ln in pairs:
                 rec = meta.get(_line_id(k, ln))
                 if rec is not None:
                     rec[field_name] = int(rec.get(field_name) or 0) + 1
@@ -1571,6 +1671,11 @@ class SelfHarnessReport:
     # enforces them), they only EXPLAIN it.
     frozen: bool = False
     gate_enabled: bool = True
+    # Outcome-driven lifecycle results, populated by the driver cycle from the
+    # accumulated recall->outcome counters: canaries that graduated to permanent
+    # and lines demoted (canary pulled, or efficacy dead-weight).
+    graduated: list[str] = field(default_factory=list)
+    demoted: list[str] = field(default_factory=list)
 
 
 def _governance_readiness() -> tuple[bool, bool]:
@@ -1650,6 +1755,7 @@ def run_self_harness(
     bucket_by: tuple[str, ...] = (),
     metamorphic_fn: Callable[[list[str]], list[str]] | None = None,
     metamorphic_tolerance: float = 0.0,
+    holdout_rotations: int = 1,
     canary: bool = False,
 ) -> SelfHarnessReport:
     """One self-harness pass for ``model_id``: mine weaknesses, propose minimal
@@ -1722,6 +1828,17 @@ def run_self_harness(
                     validate_kwargs=validate_kwargs)
                 if proposal is None or vr is None:
                     report.skipped.append(f"rejected (no candidate passed): {sig.signature}")
+                    continue
+            elif holdout_rotations and holdout_rotations > 1 and ho:
+                # Holdout rotation: cross-validate across K folds of the combined
+                # held-in+held-out pool and accept only if the lift generalizes
+                # across ALL folds, not just one fixed slice.
+                vr = _validate_rotated(
+                    proposal, pool=list(hi) + list(ho), rotations=holdout_rotations,
+                    score_with=score_with, score_without=score_without,
+                    validate_kwargs=validate_kwargs)
+                if not vr.accepted:
+                    report.skipped.append(f"rejected ({vr.reason}): {proposal.addendum_line}")
                     continue
             else:
                 vr = validate_proposal(

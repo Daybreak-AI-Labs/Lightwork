@@ -25,7 +25,11 @@ wiring.
 | Drive | cycle (mine→gate→retire) + `self-harness run` + fleet sweep | `run_self_harness_cycle` / `--all-models` |
 | Efficacy | recall→outcome counters + causal A/B demotion | `note_outcome` / `line_efficacy` / `review_efficacy` |
 | Rollout | canary / staged rollout (graduate / demote) | `run_self_harness(canary=)` / `review_canaries` |
-| Recall | per-domain scoped recall (composite key + agent wiring) | `recall_addendum(domain=)` |
+| Recall | per-domain AND per-tool scoped recall (composite key + agent wiring) | `recall_addendum(domain=, tools=)` |
+| Mine | per-tool component profiles (bucket by the failing tool) | `mine_bucket_by=("tool",)` |
+| Validate | holdout rotation — cross-validate across K folds, accept only if it generalizes | `holdout_rotations` |
+| Evaluate | self-consistency judge (majority vote over diverse framings) | `llm_judge(samples=)` / `judge_samples` |
+| Operate | efficacy / canary / domain on the CLI + dashboard; wizard writes the knobs | `harness efficacy` / `harness canary` / `forget --domain` |
 | Observe | governance-readiness (frozen / gate-off) on report + CLI | `SelfHarnessReport.frozen` / `.gate_enabled` |
 | Conflicts | semantic-judge seam over the lexical heuristic | `find_conflicts(classifier_fn=)` |
 
@@ -33,10 +37,12 @@ Every wave is opt-in, leaves default behavior **byte-identical**, keeps the
 determinism proof at **7/7**, and routes any promotion through the one governed
 gate. Backlog item map: #1 driver (`run_self_harness_cycle`), #2/#4 reference-free
 evaluator (`self_harness_eval`), #3 eval corpus (`load_eval_corpus`/`corpus_split`),
-#5 best-of-N, #6 semantic mining, #7 component profiles (per-domain shipped; see
-below), #8 per-domain mining, #9 conflict detection, #13 metamorphic, #14
-judge-drift visibility, #16 canary, #17 efficacy, #18 scheduled retirement,
-#19 LLM conflict classifier, #22 scoped recall, #23 worker-model learning.
+#5 best-of-N, #6 semantic mining, #7 component profiles (per-domain AND per-tool
+shipped; see below), #8 per-domain mining, #9 conflict detection, #13 metamorphic,
+#14 judge-drift visibility, #16 canary, #17 efficacy, #18 scheduled retirement,
+#19 LLM conflict classifier, #22 scoped recall, #23 worker-model learning. Later
+robustness adds: holdout rotation (`holdout_rotations`) and self-consistency
+judging (`judge_samples`).
 
 ## Remaining — operator data + one provider binding, not harness code
 
@@ -54,16 +60,33 @@ with a fake provider). What's left is operator-supplied:
   `collect_calibration` consumes). `review_efficacy`/`review_canaries` then act on
   real correlations rather than test fixtures.
 
-## Component-level profiles (#7) — partial, with a clear extension
+## Component-level profiles (#7) — built (per-domain AND per-tool)
 
-Per-**domain** mine + scoped recall is shipped (composite key
-`"<model>\x00domain=<d>"`, recalled only for matching-domain runs). The remaining
-half — per-**tool/component** scope — reuses the *same* mechanism: add `tool` to
-`_BUCKET_DIMS` and key recall by `"<model>\x00tool=<t>"`. It is held back only
-because tool attribution on a reflexion is a list (`tools_used`), not a single
-attributed component; once a primary tool is recorded, the scoping is a one-line
-allowlist change plus the agent passing the active tool to `recall_addendum`
-(mirroring how it now passes `domain`).
+Per-**domain** and per-**tool** mine + scoped recall are both shipped, on one
+mechanism: a weakness is mined under a composite key `"<model>\x00domain=<d>"` or
+`"<model>\x00tool=<t>"` and recalled only for matching runs. `tool` is an
+allowlisted bucket dim (`_BUCKET_DIMS`); the "component" a failure belongs to is
+derived from the reflexion's `tools_used` list as the tool **in play at failure**
+(its last entry, via `_bucket_value`). The agent passes its available tools to
+`recall_addendum(tools=…)` (sorted, so the recalled block stays byte-identical
+regardless of registry order), so a `web_fetch` lesson rides only runs that can
+call `web_fetch`. `note_recall`/`note_outcome` credit the same scopes, keeping
+usage-retirement and efficacy in step.
+
+## Robustness — holdout rotation (#C7) and self-consistency (#C8)
+
+Two later additions harden the evaluation without touching the gate:
+
+- **Holdout rotation** (`holdout_rotations`, default 1): instead of one fixed 30%
+  unseen slice, `_validate_rotated` partitions the held-in+held-out pool into K
+  deterministic folds (`corpus_kfold_splits`) and accepts only if the lift holds
+  on **every** fold — a lower-variance generalization test that a single lucky
+  split can't pass by accident. Default 1 = the historical single split.
+- **Self-consistency judge** (`judge_samples` → `llm_judge(samples=)`, default 1):
+  the LLM-as-judge is asked N times with different meaning-preserving framings
+  (diverse reasoning paths, since the seam exposes no temperature) and the
+  **majority** yes/no vote wins; a tie or all-indeterminate samples fall open to
+  the deterministic heuristic. Default 1 = the single call, unchanged.
 
 ## Principle (unchanged across every wave)
 

@@ -1049,7 +1049,9 @@ def _harness_guidance() -> tuple[list[dict], bool]:
         from maverick.self_harness import (
             detect_store_conflicts,
             enabled,
+            line_efficacy,
             line_provenance,
+            list_canaries,
             list_learned,
         )
         conflicts_by_model: dict[str, list] = {}
@@ -1058,8 +1060,31 @@ def _harness_guidance() -> tuple[list[dict], bool]:
                 conflicts_by_model.setdefault(m, []).append([a, b])
         except Exception:  # pragma: no cover -- conflicts are advisory
             pass
+
+        def _enriched_provenance(m: str) -> list[dict]:
+            # Fold the per-line outcome record (efficacy counters) and canary
+            # flag into each provenance entry, keyed by (domain, text) so a line
+            # that lives in two scopes isn't cross-attributed. Both are advisory
+            # reads -- a failure here must not blank the guidance list.
+            prov = line_provenance(m)
+            try:
+                eff = {(r.get("domain"), r["text"]): r for r in line_efficacy(m)}
+            except Exception:  # pragma: no cover -- efficacy is advisory
+                eff = {}
+            try:
+                canaries = set(list_canaries(m))
+            except Exception:  # pragma: no cover -- canary state is advisory
+                canaries = set()
+            for rec in prov:
+                e = eff.get((rec.get("domain"), rec["text"]))
+                if e:
+                    rec["success"], rec["failure"] = e["success"], e["failure"]
+                    rec["rate"] = e["rate"]
+                rec["canary"] = rec["text"] in canaries
+            return prov
+
         rows = [{"model_id": m, "lines": lines,
-                 "provenance": line_provenance(m),
+                 "provenance": _enriched_provenance(m),
                  "conflicts": conflicts_by_model.get(m, [])}
                 for m, lines in sorted(list_learned().items())]
         return rows, bool(enabled())

@@ -1678,6 +1678,34 @@ def pick_advanced() -> dict[str, Any]:
         )
         advanced["insight_pubkeys"] = [k.strip() for k in raw.split(",")
                                        if k.strip()]
+    # Self-harness has a handful of optional paths beyond the validation floors
+    # written by default. Only worth asking once the loop itself is on; each
+    # stays at its historical default unless the operator opts in here.
+    if advanced.get("self_harness") and _q_confirm(
+        "  Tune self-harness advanced paths? (eval corpus, per-department "
+        "scoping, semantic mining, best-of-N, efficacy review, auto-retire)",
+        default=False,
+    ):
+        corpus = _q_text(
+            "  Eval-corpus path for the live A/B (lets a scheduled pass actually "
+            "promote; blank = dry pass)", default="").strip()
+        if corpus:
+            advanced["self_harness_eval_corpus"] = corpus
+        if _q_confirm(
+            "    Mine and scope guidance per department (domain)?", default=False):
+            advanced["self_harness_bucket_domain"] = True
+        advanced["self_harness_semantic_mining"] = _q_confirm(
+            "    Semantic mining? Cluster failures by embedding similarity when "
+            "embeddings are available (else deterministic Jaccard).", default=False)
+        advanced["self_harness_efficacy_review"] = _q_confirm(
+            "    Efficacy review? Re-measure each line's live A/B lift every cycle "
+            "and demote dead weight (needs the eval corpus above).", default=False)
+        advanced["self_harness_candidates"] = max(1, _safe_int(_q_text(
+            "    Candidate lines per weakness (best-of-N; 1 = single)",
+            default="1"), default=1))
+        advanced["self_harness_retire_days"] = max(0, _safe_int(_q_text(
+            "    Auto-retire lines unused this many days (0 = never)",
+            default="0"), default=0))
     # Tax-constants content channel: law changes ship as SIGNED bundles
     # (fail-closed against the publisher keys), auto-applied by
     # `maverick tax prepare` / `maverick tax update`.
@@ -2840,6 +2868,24 @@ def _cfg_advanced(  # noqa: C901 - flat sequence of independent opt-in toggles
         lines.append("require_held_out = true")
         lines.append("min_held_out = 5")
         lines.append("min_delta = 0.02")
+        # Optional advanced paths, written only when the operator opted in above;
+        # each is at its historical default otherwise, so the block stays minimal.
+        if advanced.get("self_harness_eval_corpus"):
+            # Free-text path: escape via _toml_str so a path with a backslash or
+            # quote can't corrupt the config the wizard writes.
+            _emit_kv(lines, "eval_corpus", advanced["self_harness_eval_corpus"])
+        if advanced.get("self_harness_bucket_domain"):
+            lines.append('mine_bucket_by = ["domain"]')
+        if advanced.get("self_harness_semantic_mining"):
+            lines.append("semantic_mining = true")
+        if advanced.get("self_harness_efficacy_review"):
+            lines.append("efficacy_review = true")
+        cands = advanced.get("self_harness_candidates")
+        if cands and cands > 1:
+            lines.append(f"candidates_per_signature = {int(cands)}")
+        retire_days = advanced.get("self_harness_retire_days")
+        if retire_days and retire_days > 0:
+            lines.append(f"retire_after_days = {int(retire_days)}")
     if advanced.get("fleet_memory"):
         lines.append("")
         lines.append("[fleet_memory]")

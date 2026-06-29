@@ -282,3 +282,105 @@ def test_run_cli_all_models(_home, monkeypatch):
     r = CliRunner().invoke(main, ["self-harness", "run", "--all-models", "--no-retire"])
     assert r.exit_code == 0, r.output
     assert "model: model-a" in r.output and "model: model-b" in r.output
+
+
+# ---- efficacy / canary / domain-scoped forget -----------------------------
+
+def _seed_scoped(model, domain, line, **meta):
+    """Seed a single line under a domain-scoped composite key, with sidecar meta."""
+    key = sh._scoped_key(model, f"domain={domain}")
+    block = "Operating guidance learned for this model:\n- " + line
+    store = sh.load_addenda(sh._store_path())
+    store[key] = block
+    sh._write_addenda(store, sh._store_path())
+    if meta:
+        rec = {"model_id": model, "text": line, "learned_at": 1700000000.0,
+               "updated_at": 1700000000.0, **meta}
+        m = sh.load_line_meta(sh._store_path())
+        m[sh._line_id(key, line)] = rec
+        sh._write_line_meta(m, sh._store_path())
+
+
+def test_efficacy_shows_outcome_record(_home):
+    _seed_with_meta("claude-x", "verify the token first",
+                    recall_success=3, recall_failure=1)
+    r = CliRunner().invoke(main, ["self-harness", "efficacy", "--model", "claude-x"])
+    assert r.exit_code == 0, r.output
+    assert "verify the token first" in r.output
+    assert "3✓" in r.output and "1✗" in r.output
+    assert "75%" in r.output                                 # 3/(3+1)
+
+
+def test_efficacy_renders_domain_tag_and_no_rate(_home):
+    # a domain-scoped line with no outcomes yet: tagged by department, rate "—".
+    _seed_scoped("claude-x", "finance", "reconcile before posting")
+    r = CliRunner().invoke(main, ["self-harness", "efficacy", "--model", "claude-x"])
+    assert r.exit_code == 0, r.output
+    assert "reconcile before posting" in r.output
+    assert "domain=finance" in r.output
+    assert "—" in r.output                                   # no outcomes -> no rate
+
+
+def test_efficacy_empty(_home):
+    r = CliRunner().invoke(main, ["self-harness", "efficacy", "--model", "ghost"])
+    assert r.exit_code == 0 and "no learned guidance" in r.output
+
+
+def test_canary_lists_probation_lines(_home):
+    _seed_with_meta("claude-x", "stream large exports", canary=True)
+    r = CliRunner().invoke(main, ["self-harness", "canary", "--model", "claude-x"])
+    assert r.exit_code == 0, r.output
+    assert "1 line(s) on canary probation" in r.output
+    assert "stream large exports" in r.output
+
+
+def test_canary_none_on_probation(_home):
+    _seed_with_meta("claude-x", "permanent line")            # not a canary
+    r = CliRunner().invoke(main, ["self-harness", "canary", "--model", "claude-x"])
+    assert r.exit_code == 0 and "no lines on canary probation" in r.output
+
+
+def test_canary_review_graduates_and_demotes(_home):
+    # a proven canary graduates (flag cleared, line kept); a failing one is pulled.
+    _seed_with_meta("claude-x", "proven line", canary=True,
+                    recall_success=3, recall_failure=0)
+    sh._write_addenda(
+        {**sh.load_addenda(sh._store_path()),
+         "claude-x": ("Operating guidance learned for this model:\n"
+                      "- proven line\n- failing line")},
+        sh._store_path())
+    m = sh.load_line_meta(sh._store_path())
+    m[sh._line_id("claude-x", "failing line")] = {
+        "model_id": "claude-x", "text": "failing line", "canary": True,
+        "recall_success": 0, "recall_failure": 2}
+    sh._write_line_meta(m, sh._store_path())
+    r = CliRunner().invoke(main, ["self-harness", "canary", "--model", "claude-x", "--review"])
+    assert r.exit_code == 0, r.output
+    assert "graduated: proven line" in r.output
+    assert "demoted:   failing line" in r.output
+    # graduated stays (no longer a canary); demoted is gone.
+    assert sh.list_canaries("claude-x") == []
+    assert "proven line" in sh.recall_addendum("claude-x", sh._store_path())
+    assert "failing line" not in sh.recall_addendum("claude-x", sh._store_path())
+
+
+def test_forget_domain_scopes_removal(_home):
+    # model-wide + a finance block; forget --domain finance leaves model-wide intact.
+    _seed("claude-x", ["check inputs first"])
+    _seed_scoped("claude-x", "finance", "reconcile before posting")
+    r = CliRunner().invoke(
+        main, ["self-harness", "forget", "--model", "claude-x",
+               "--domain", "finance", "--yes"])
+    assert r.exit_code == 0 and "removed" in r.output
+    assert "reconcile before posting" not in sh.recall_addendum(
+        "claude-x", sh._store_path(), domain="finance")
+    assert "check inputs first" in sh.recall_addendum("claude-x", sh._store_path())
+
+
+def test_forget_domain_nothing_to_remove(_home):
+    _seed("claude-x", ["check inputs first"])               # no finance block
+    r = CliRunner().invoke(
+        main, ["self-harness", "forget", "--model", "claude-x",
+               "--domain", "finance", "--yes"])
+    assert r.exit_code == 0 and "nothing to remove" in r.output
+    assert "check inputs first" in sh.recall_addendum("claude-x", sh._store_path())

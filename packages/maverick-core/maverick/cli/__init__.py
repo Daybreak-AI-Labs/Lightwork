@@ -1526,22 +1526,72 @@ def harness_log(limit: int) -> None:
 @click.option("--model", required=True, help="Model whose guidance to remove.")
 @click.option("--line", default=None,
               help="Remove just this one line (default: all guidance for the model).")
+@click.option("--domain", default=None,
+              help="Scope the removal to this department's block only.")
 @click.option("--yes", is_flag=True, help="Skip the confirmation prompt.")
-def harness_forget(model: str, line: str | None, yes: bool) -> None:
+def harness_forget(model: str, line: str | None, domain: str | None, yes: bool) -> None:
     """Roll back learned guidance for a model — the operator undo handle.
 
-    Removes the whole block for MODEL, or a single --line. The removal is atomic
-    and audited.
+    Removes the whole block for MODEL (all scopes), or a single --line, or one
+    department's block with --domain. The removal is atomic and audited.
     """
     from ..self_harness import forget_addendum
     what = f"the line {line!r}" if line else "ALL learned guidance"
-    if not yes and not click.confirm(f"Remove {what} for {model}?"):
+    scope = f" (domain={domain})" if domain else ""
+    if not yes and not click.confirm(f"Remove {what} for {model}{scope}?"):
         click.echo("aborted.")
         return
-    if forget_addendum(model, line=line):
+    if forget_addendum(model, line=line, domain=domain):
         click.echo("removed.")
     else:
         click.echo("nothing to remove.")
+
+
+@harness.command("efficacy")
+@click.option("--model", required=True, help="Model whose per-line efficacy to show.")
+def harness_efficacy(model: str) -> None:
+    """Show each learned line's outcome record — how often a run that recalled it
+    succeeded vs failed, and the success rate. Populated from real runs (the
+    orchestrator records the outcome). Use it to spot dead-weight guidance before
+    pruning it with `forget` or letting the efficacy review demote it. Read-only.
+    """
+    from ..self_harness import line_efficacy
+    rows = line_efficacy(model)
+    if not rows:
+        click.echo(f"no learned guidance for {model!r}.")
+        return
+    for r in rows:
+        tag = f" [domain={r['domain']}]" if r.get("domain") else ""
+        rate = "—" if r["rate"] is None else f"{r['rate']:.0%}"
+        click.echo(f"  - {r['text']}{tag}")
+        click.echo(f"      outcomes: {r['success']}✓ / {r['failure']}✗  ·  rate {rate}")
+
+
+@harness.command("canary")
+@click.option("--model", required=True, help="Model whose canaries to inspect/advance.")
+@click.option("--review", is_flag=True,
+              help="Advance the lifecycle now: graduate proven canaries, demote failing ones.")
+@click.option("--graduate-after", type=int, default=3, show_default=True,
+              help="Successes before a canary graduates to permanent.")
+@click.option("--demote-after", type=int, default=2, show_default=True,
+              help="Failures before a canary is pulled.")
+def harness_canary(model: str, review: bool, graduate_after: int, demote_after: int) -> None:
+    """Inspect or advance the canary (staged-rollout) lifecycle. A canary line is
+    recalled but on probation; `--review` graduates the proven ones and pulls the
+    failing ones from the accumulated recall→outcome counters (audited)."""
+    from ..self_harness import list_canaries, review_canaries
+    if review:
+        res = review_canaries(model, graduate_after=graduate_after, demote_after=demote_after)
+        click.echo(f"graduated: {', '.join(res['graduated']) or '(none)'}")
+        click.echo(f"demoted:   {', '.join(res['demoted']) or '(none)'}")
+        return
+    cans = list_canaries(model)
+    if not cans:
+        click.echo(f"no lines on canary probation for {model!r}.")
+        return
+    click.echo(f"{len(cans)} line(s) on canary probation:")
+    for ln in cans:
+        click.echo(f"  - {ln}")
 
 
 @harness.command("retire")

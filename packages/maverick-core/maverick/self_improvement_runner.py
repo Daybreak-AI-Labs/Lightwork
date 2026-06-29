@@ -148,6 +148,7 @@ def run_self_harness_pass(
     semantic_mining: bool | None = None, similarity_fn=None,
     bucket_by: tuple[str, ...] | None = None,
     metamorphic_fn=None, metamorphic_tolerance: float = 0.0,
+    holdout_rotations: int | None = None,
 ):
     """The automatic entry point for the self-harness loop (mine -> propose ->
     validate -> gate), to be called by a scheduler / the self-improvement loop.
@@ -183,6 +184,8 @@ def run_self_harness_pass(
             semantic_mining = st["semantic_mining"]
         if bucket_by is None:
             bucket_by = st["mine_bucket_by"]
+        if holdout_rotations is None:
+            holdout_rotations = st.get("holdout_rotations", 1)
         if not model_id:
             from .llm import model_for_role
             model_id = model_for_role("orchestrator")
@@ -202,7 +205,8 @@ def run_self_harness_pass(
             candidates_per_signature=candidates_per_signature,
             semantic_mining=semantic_mining, similarity_fn=similarity_fn,
             bucket_by=bucket_by, metamorphic_fn=metamorphic_fn,
-            metamorphic_tolerance=metamorphic_tolerance)
+            metamorphic_tolerance=metamorphic_tolerance,
+            holdout_rotations=holdout_rotations)
     except Exception:  # pragma: no cover -- learning never perturbs a run
         log.debug("self-harness pass failed", exc_info=True)
         from . import self_harness
@@ -210,14 +214,15 @@ def run_self_harness_pass(
 
 
 def _auto_evaluator(model_id: str, *, corpus_path: str, held_out_frac: float = 0.3,
-                    budget=None):
+                    budget=None, judge_samples: int = 1):
     """Build ``(held_in, held_out, score_with, score_without)`` -- the LIVE A/B --
     from a configured eval corpus + the model's own LLM client, so the driver can
     actually PROMOTE rather than only dry-inspect. The candidate ``model_id``
     GENERATES; a verifier-role model JUDGES (cross-model, to avoid self-grading;
-    neither is hard-coded -- :func:`model_for_role`, kernel rule 2). Returns
-    ``None`` (caller stays dry) when there is no corpus, no cases for the model, or
-    no usable held-out split. Never raises."""
+    neither is hard-coded -- :func:`model_for_role`, kernel rule 2). ``judge_samples``
+    > 1 turns on self-consistency judging (majority vote over diverse framings).
+    Returns ``None`` (caller stays dry) when there is no corpus, no cases for the
+    model, or no usable held-out split. Never raises."""
     try:
         from . import self_harness_eval as ev
         from .llm import LLM, model_for_role
@@ -230,7 +235,8 @@ def _auto_evaluator(model_id: str, *, corpus_path: str, held_out_frac: float = 0
         score_with, score_without = ev.corpus_ab_scorers(
             cases,
             run_fn=ev.llm_runner(LLM(model_id), budget=budget),
-            judge_fn=ev.llm_judge(LLM(model_for_role("verifier")), budget=budget))
+            judge_fn=ev.llm_judge(LLM(model_for_role("verifier")), budget=budget,
+                                  samples=judge_samples))
         return held_in, held_out, score_with, score_without
     except Exception:  # pragma: no cover -- a missing provider/corpus stays dry
         log.debug("self-harness auto-evaluator construction failed", exc_info=True)
@@ -278,6 +284,27 @@ def run_self_harness_cycle(
             held_in=held_in, held_out=held_out, score_with=score_with,
             score_without=score_without, propose_fn=propose_fn,
             controller=controller, **pass_kwargs)
+        resolved = (report.model_id or model_id) or None
+        # OUTCOME-DRIVEN LIFECYCLE: graduate/demote canaries from the accumulated
+        # recall->outcome counters (safe -- only touches canary-flagged lines), and
+        # optionally re-measure each line's live A/B lift to demote dead weight
+        # (opt-in: a general corpus can under-credit a narrow line).
+        if resolved and self_harness.enabled():
+            try:
+                res = self_harness.review_canaries(resolved)
+                report.graduated = list(res.get("graduated", []))
+                report.demoted = list(res.get("demoted", []))
+            except Exception:  # pragma: no cover -- lifecycle never perturbs a run
+                log.debug("self-harness canary review failed", exc_info=True)
+            if (self_harness.settings().get("efficacy_review")
+                    and score_with is not None and score_without is not None):
+                try:
+                    cases = list(held_out or []) + list(held_in or [])
+                    report.demoted += self_harness.review_efficacy(
+                        resolved, cases, score_with=score_with,
+                        score_without=score_without)
+                except Exception:  # pragma: no cover
+                    log.debug("self-harness efficacy review failed", exc_info=True)
         retired = 0
         if retire and self_harness.enabled():
             days = retire_after_days
@@ -285,8 +312,7 @@ def run_self_harness_cycle(
                 days = self_harness.settings().get("retire_after_days", 0.0)
             if days and float(days) > 0:
                 retired = self_harness.retire_stale(
-                    older_than_days=float(days),
-                    model_id=(report.model_id or model_id) or None)
+                    older_than_days=float(days), model_id=resolved)
         return report, retired
     except Exception:  # pragma: no cover -- a maintenance cycle never perturbs a run
         log.debug("self-harness cycle failed", exc_info=True)
