@@ -1355,6 +1355,15 @@ def pick_advanced() -> dict[str, Any]:
             "your labeled set, so the system never learns from a drifted evaluator.",
             default=False,
         ),
+        "donate_trajectories": _q_confirm(
+            "Donate run trajectories for training? Write scrubbed records of your "
+            "runs to ~/.maverick/outbox/ so you can train the self-learning loop "
+            "(PRM + DPO) on your OWN data -- nothing is uploaded, the records stay "
+            "on this machine until you choose to ingest/train. Metadata-only by "
+            "default; raw text stays local unless you also set [telemetry] "
+            "donate_text. Off by default. See docs/self-learning-runbook.md.",
+            default=False,
+        ),
         "adaptive_compute": _q_confirm(
             "Adaptive test-time compute? Concentrate effort on uncertain sub-tasks "
             "and spend less when the swarm agrees (cheaper, focused).",
@@ -2599,6 +2608,13 @@ def _cfg_advanced(  # noqa: C901 - flat sequence of independent opt-in toggles
         lines.append("")
         lines.append("[calibration]")
         lines.append("enforce = true")
+    if advanced.get("donate_trajectories"):
+        lines.append("")
+        lines.append("[telemetry]")
+        lines.append("donate_trajectories = true")
+        # Metadata-only by default. For DPO, add donate_text + the
+        # donate_min_entropy/donate_min_confidence knobs by hand;
+        # see docs/self-learning-runbook.md.
     if advanced.get("adaptive_compute"):
         lines.append("")
         lines.append("[adaptive_compute]")
