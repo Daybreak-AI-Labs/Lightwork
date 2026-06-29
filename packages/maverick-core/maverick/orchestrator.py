@@ -471,16 +471,18 @@ def _brief_facts_block(world: WorldModel, goal_id: int, shield: Any | None) -> s
             facts = world.get_facts()
     fact_lines: list[str] = []
     for k, v in facts.items():
-        # Collapse newlines so a fact VALUE can't break out of its indented
-        # "  key: value" line and inject a forged unindented heading/instruction
-        # into the brief (the block is attacker-writable; see the assembly-site
-        # framing). Done before redact/shield so a multiline value is one line.
-        val = str(v).replace("\r", " ").replace("\n", " ")
+        val = str(v)
         try:
             from .safety.secret_detector import redact as _redact
+            # Redact before newline normalization so line-anchored patterns
+            # (for example env-style SECRET=... assignments) still see the
+            # original line boundaries. Normalize the redacted output after,
+            # so a fact VALUE cannot break out of its indented `key: value`
+            # line and inject a forged heading/instruction into the brief.
             val, _ = _redact(val)
         except Exception:  # pragma: no cover
             pass
+        val = val.replace("\r", " ").replace("\n", " ")
         if shield is not None:
             try:
                 fv = shield.scan_input(f"{k}: {val}")
