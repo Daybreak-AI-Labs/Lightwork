@@ -37,6 +37,13 @@ repriced to **reward defensible IP and punish thin AI wrappers.**
 - **Self-host or air-gap** — runs in the customer's VPC or fully offline; no required egress.
 - **2,020 least-privilege specialist packs across 53 suites** —
   `maverick domains-lint` → **0 errors, 0 warnings.**
+- **Governance proven, not asserted:** six load-bearing invariants — no drafting
+  agent reaches a state-mutator, no child out-scopes its parent, hard refusals
+  are unstrippable, budget caps are never silently exceeded — machine-checked
+  across all 2,020 packs and fault-injected at **1,000,000 iterations**.
+- **Grounded in primary sources:** **37 read-only public-data connectors**
+  (SEC EDGAR, FRED, Treasury, CourtListener, openFDA, PubMed, …) auto-granted by
+  suite, so analysts cite authoritative sources instead of model recall.
 - **The product proves its own guarantees:** `maverick proof-pack` emits an
   **Ed25519-signed evidence bundle** (governance guarantees + reliability cert +
   performance SLA + shield results), verifiable offline.
@@ -51,8 +58,10 @@ repriced to **reward defensible IP and punish thin AI wrappers.**
 **The moat (three reinforcing layers, all audited):** (1) governance bound to
 every action — attenuate-only capability tokens, policy engine, egress lock, a
 signed hash-chained audit log with offline verification; (2) a snapshot-/
-rollback-able **provable-learning loop** where every causal guardrail must
-survive a **placebo test** before it changes behavior; (3) the **2,020-pack
+rollback-able **provable-learning loop** where the harness rewrites itself, every
+causal guardrail must survive a **placebo test** before it changes behavior, each
+learned change ships as a watched canary, and even the evaluator only improves
+against an immutable, checksum-locked anchor; (3) the **2,020-pack
 governed library.** None of it is a prompt over an API — it's deep
 infrastructure a competitor doesn't replicate in a quarter and an incumbent's
 hosted product can't air-gap into a bank.

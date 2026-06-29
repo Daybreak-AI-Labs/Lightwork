@@ -64,15 +64,39 @@
       <thead><tr><th>What your reviewers require</th><th>The mechanism</th></tr></thead>
       <tbody>
         <tr><td class="ctrl">Data never leaves your environment</td><td class="mech"><b>Self-host or air-gap</b>: your VPC or fully offline, on your data.</td></tr>
-        <tr><td class="ctrl">No data exfiltration</td><td class="mech"><b>Egress lock</b>: a successful prompt injection still can't move data out.</td></tr>
+        <tr><td class="ctrl">No data exfiltration</td><td class="mech"><b>Egress lock</b> (Enterprise mode): the agent's outbound paths, model calls and HTTP tools alike, are blocked at the gate, so a prompt-injected agent can't exfiltrate through them. Pair with a network egress firewall to also cover raw-shell paths.</td></tr>
         <tr><td class="ctrl">Least privilege, per action</td><td class="mech"><b>Capability tokens</b> (attenuate-only): an agent narrows its rights, never widens.</td></tr>
+        <tr><td class="ctrl">Separation of duties</td><td class="mech"><b>Dual control</b>: the person who initiates an action can never be the one who approves it. N-of-M sign-off, enforced.</td></tr>
         <tr><td class="ctrl">Bounded blast radius</td><td class="mech"><b>Sandbox, network-off by default</b> &middot; hard budget caps on tokens, dollars, wall-clock, and tools.</td></tr>
         <tr><td class="ctrl">A human stays in control</td><td class="mech"><b>Policy on every action</b>: allow, deny, or require a human.</td></tr>
         <tr><td class="ctrl">A provable, immutable record</td><td class="mech"><b>Signed, hash-chained audit</b> (the Operating Record): tamper-evident, verifiable offline.</td></tr>
         <tr><td class="ctrl">Evidence on demand</td><td class="mech"><b>Proof Pack</b>: an Ed25519-signed bundle that verifies offline and refuses to fabricate.</td></tr>
+        <tr><td class="ctrl">Provable safety posture in CI</td><td class="mech"><b><span style="font-family:var(--mono);font-size:.9em">lightwork safety --json</span></b>: shield, sandbox isolation, and egress policy as a machine-readable assertion your pipeline can gate on.</td></tr>
         <tr><td class="ctrl">Your data trains no one's model</td><td class="mech"><b>It runs on your infrastructure</b>: nothing leaves to be trained on.</td></tr>
       </tbody>
     </table>
+  </div>
+</section>
+
+<!-- MACHINE-PROVEN GOVERNANCE (dark) -->
+<section class="on-navy">
+  <div class="wrap">
+    <div class="sec-head">
+      <span class="eyebrow">Governance, machine-proven</span>
+      <h2>Safety you audit, not safety you trust.</h2>
+      <p>Six load-bearing governance invariants are checked across every one of the 2,020 specialist packs, then fault-injected at a million iterations with a non-vacuity control, so a passing result can't be vacuously true.</p>
+    </div>
+    <div class="term" style="margin-top:44px">
+      <div class="bar"><span class="chip">lightwork roster-invariants</span><span style="font-size:12px;color:var(--mint)">&#9679; 1,000,000 iterations</span></div>
+      <div class="body">
+        <div class="row"><span>no drafting agent reaches a state-mutating tool</span><span class="ok">&#10003; HELD</span></div>
+        <div class="row"><span>no child agent out-scopes its parent</span><span class="ok">&#10003; HELD</span></div>
+        <div class="row"><span>a quarantine seal never bleeds across compartments</span><span class="ok">&#10003; HELD</span></div>
+        <div class="row"><span>hard refusals can't be stripped</span><span class="ok">&#10003; HELD</span></div>
+        <div class="row"><span>budget caps can't be silently exceeded</span><span class="ok">&#10003; HELD</span></div>
+        <div class="row"><span>onboarding &amp; high-risk actions are never autonomous</span><span class="ok">&#10003; HELD</span></div>
+      </div>
+    </div>
   </div>
 </section>
 
