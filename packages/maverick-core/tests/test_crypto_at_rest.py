@@ -336,6 +336,37 @@ def test_per_tenant_seal_uses_tenant_envelope(monkeypatch, tmp_path):
 
 
 @requires_crypto
+def test_per_tenant_seal_uses_raw_tenant_id_for_kms(monkeypatch, tmp_path):
+    _per_tenant_env(monkeypatch, tmp_path, tenant="slack:alice")
+    seen = {}
+
+    def fake_seal_for_tenant(tenant_id, plaintext):
+        seen["tenant_id"] = tenant_id
+        seen["plaintext"] = plaintext
+        return car._TENANT_MAGIC + b"fake"
+
+    monkeypatch.setattr("maverick.tenant.kms.seal_for_tenant", fake_seal_for_tenant)
+    assert car.seal(b"secret") == car._TENANT_MAGIC + b"fake"
+    assert seen == {"tenant_id": "slack:alice", "plaintext": b"secret"}
+
+
+@requires_crypto
+def test_per_tenant_unseal_uses_raw_tenant_id_for_kms(monkeypatch, tmp_path):
+    _per_tenant_env(monkeypatch, tmp_path, tenant="slack:alice")
+    seen = {}
+
+    def fake_unseal_for_tenant(tenant_id, blob):
+        seen["tenant_id"] = tenant_id
+        seen["blob"] = blob
+        return b"secret"
+
+    monkeypatch.setattr("maverick.tenant.kms.unseal_for_tenant", fake_unseal_for_tenant)
+    blob = car._TENANT_MAGIC + b"fake"
+    assert car.unseal(blob) == b"secret"
+    assert seen == {"tenant_id": "slack:alice", "blob": blob}
+
+
+@requires_crypto
 def test_per_tenant_text_column_helpers(monkeypatch, tmp_path):
     _per_tenant_env(monkeypatch, tmp_path, tenant="acme")
     tok = car.seal_to_str("invoice total")

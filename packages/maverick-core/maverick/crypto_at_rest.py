@@ -458,9 +458,9 @@ def seal(plaintext: bytes) -> bytes:
     # tenant magic header, so unseal()/is_sealed() handle it transparently and
     # globally-sealed data written before the switch still opens.
     if per_tenant_at_rest():
-        from .paths import current_tenant
+        from .paths import current_tenant_id
         from .tenant.kms import seal_for_tenant
-        return seal_for_tenant(current_tenant(), plaintext)
+        return seal_for_tenant(current_tenant_id(), plaintext)
     if not _have_crypto():
         raise EncryptionUnavailable(
             "at-rest encryption enabled but 'cryptography' is not installed "
@@ -492,9 +492,9 @@ def unseal(blob: bytes) -> bytes:
     # mode is toggled). The current tenant must match the one it was sealed under
     # — GCM authentication fails otherwise, which is the cross-tenant guarantee.
     if blob[: len(_TENANT_MAGIC)] == _TENANT_MAGIC:
-        from .paths import current_tenant
+        from .paths import current_tenant_id
         from .tenant.kms import unseal_for_tenant
-        return unseal_for_tenant(current_tenant(), blob)
+        return unseal_for_tenant(current_tenant_id(), blob)
     if not is_sealed(blob):
         return blob
     if not _have_crypto():

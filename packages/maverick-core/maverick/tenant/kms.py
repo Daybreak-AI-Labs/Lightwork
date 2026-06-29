@@ -151,12 +151,27 @@ def _kms_config_for(tenant_id: str | None) -> dict:
     set) would read the wrong ``[kms]``. This merges the named tenant's overlay
     explicitly over the global config, independent of the ambient context.
     """
-    from ..config import _deep_merge_config, _load_config_file, config_path, load_config
+    from pathlib import Path
+
+    from ..config import (
+        CONFIG_OVERLAY_ENV,
+        _deep_merge_config,
+        _load_config_file,
+        config_path,
+        dashboard_overrides_path,
+        load_config,
+    )
     if tenant_id is None:
         return dict((load_config() or {}).get("kms") or {})
     base: dict = {}
     try:
         base = _load_config_file(config_path()) or {}
+        dash = dashboard_overrides_path()
+        if dash.exists():
+            base = _deep_merge_config(base, _load_config_file(dash))
+        overlay = os.environ.get(CONFIG_OVERLAY_ENV)
+        if overlay:
+            base = _deep_merge_config(base, _load_config_file(Path(overlay).expanduser()))
     except Exception:  # pragma: no cover -- global config unreadable
         base = {}
     try:
