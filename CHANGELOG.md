@@ -1,6 +1,6 @@
 # Changelog
 
-All notable changes to Maverick. The format follows
+All notable changes to Lightwork. The format follows
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) and the
 project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
@@ -143,14 +143,14 @@ project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 ## [0.1.6] -- 2026-05-31
 
 Post-0.1.4 hardening, plus the cross-language MCP client surface (the
-council's "drive Maverick from any language over MCP" decision) and the
+council's "drive Lightwork from any language over MCP" decision) and the
 polyglot sandbox / coding-mode work.
 
 ### Added
 - **Cross-language MCP clients.** Runnable example clients and quickstarts for
   **TypeScript / JavaScript, Go, Rust, C# / .NET, and Java / JVM** -- each one
   exercised in CI against a live `maverick mcp` (initialize -> tools/list -> a
-  no-LLM tool call). Maverick stays a single Python kernel; any MCP-speaking
+  no-LLM tool call). Lightwork stays a single Python kernel; any MCP-speaking
   language drives it over stdio JSON-RPC. See `docs/clients/*-quickstart.md`.
 - **Per-language sandbox toolchains.** Container backends now pick their image
   from `[sandbox] language` (rust -> rust:1, go -> golang:1, JS/TS -> node:22,
@@ -277,7 +277,7 @@ The launch-hardening pass that landed just after the 0.1.3 tag was cut.
 
 ## [Unreleased] -- v0.1.0-alpha
 
-First public release. Maverick combines [Maverick Agent](https://github.com/cdayAI/research/tree/main/maverick) (recursive multi-agent swarm)
+First public release. Lightwork combines [Lightwork Agent](https://github.com/cdayAI/research/tree/main/maverick) (recursive multi-agent swarm)
 and [Agent Shield](https://github.com/cdayAI/agent-shield) (safety detection)
 into a single safest-by-default agent that anyone can install in one
 command.
@@ -330,7 +330,7 @@ command.
 - Dark monospace theme, no JS framework, htmx for the live bits
 
 **MCP server** (`maverick-mcp-server`)
-- Maverick exposed as a Model Context Protocol server over stdio
+- Lightwork exposed as a Model Context Protocol server over stdio
 - Drives the swarm from Claude Code / Cursor / Claude Desktop / any MCP client
 - 8 tools: start / status / resume / answer / skill_install / skills_list / fact_set / facts_get
 

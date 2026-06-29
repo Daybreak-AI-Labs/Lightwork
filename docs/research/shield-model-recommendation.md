@@ -201,7 +201,7 @@ linear model plateaus on novel/obfuscated attacks.
 
 ## 4. Licensing / commercial-use caveats
 
-Maverick is proprietary/commercial, so non-commercial and unlicensed assets are
+Lightwork is proprietary/commercial, so non-commercial and unlicensed assets are
 disqualified for the *bundled, ship-by-default* model.
 
 - **❌ `rogue-security/prompt-injections-benchmark` (ex-Qualifire) — CC-BY-NC-4.0,
@@ -226,7 +226,7 @@ disqualified for the *bundled, ship-by-default* model.
 
 Even with permissive licenses, retain provenance (dataset name + license +
 commit) alongside the artifact so the bundled model's training data is auditable
-— consistent with Maverick's "signed learning audit" posture.
+— consistent with Lightwork's "signed learning audit" posture.
 
 ---
 
