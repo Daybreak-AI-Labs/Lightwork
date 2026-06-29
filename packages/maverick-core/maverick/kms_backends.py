@@ -92,6 +92,7 @@ class AwsKmsKEK:
     def unwrap(self, wrapped: bytes, *, context: bytes | None = None) -> bytes:
         ct = _split_magic(_AWS_MAGIC, wrapped)
         resp = self._kms().decrypt(
+            KeyId=self.key_id,
             CiphertextBlob=ct,
             EncryptionContext={"maverick": _ctx_b64(context)})
         return resp["Plaintext"]

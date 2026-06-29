@@ -32,11 +32,15 @@ def _dec(blob: bytes, aad: bytes) -> bytes:
 
 
 class _FakeAws:
+    def __init__(self):
+        self.decrypt_key_ids = []
+
     def encrypt(self, KeyId, Plaintext, EncryptionContext):  # noqa: N803
         aad = json.dumps(EncryptionContext, sort_keys=True).encode()
         return {"CiphertextBlob": _enc(Plaintext, aad)}
 
-    def decrypt(self, CiphertextBlob, EncryptionContext):  # noqa: N803
+    def decrypt(self, KeyId, CiphertextBlob, EncryptionContext):  # noqa: N803
+        self.decrypt_key_ids.append(KeyId)
         aad = json.dumps(EncryptionContext, sort_keys=True).encode()
         return {"Plaintext": _dec(CiphertextBlob, aad)}
 
@@ -92,6 +96,16 @@ def test_context_binding_enforced(make):
     wrapped = kms.wrap(b"\x42" * 32, context=b"tenant:acme")
     with pytest.raises(InvalidTag):  # wrong context -> AEAD auth failure
         kms.unwrap(wrapped, context=b"tenant:evil")
+
+
+def test_aws_unwrap_enforces_configured_key_id():
+    client = _FakeAws()
+    kms = kms_backends.AwsKmsKEK(key_id="tenant-key", client=client)
+
+    wrapped = kms.wrap(b"\x42" * 32, context=b"tenant:acme")
+
+    assert kms.unwrap(wrapped, context=b"tenant:acme") == b"\x42" * 32
+    assert client.decrypt_key_ids == ["tenant-key"]
 
 
 @pytest.mark.parametrize("make", _BACKENDS)
