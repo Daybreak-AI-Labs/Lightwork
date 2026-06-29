@@ -297,6 +297,12 @@ here.
   roster), which irreversible actions it denies (segregation of duties), its
   refusals, and the human sign-off on its deliverable. Flags + exits non-zero if
   a drafting pack could reach a mutator; `--json` exports for a GRC system.
+- **Safety-posture & FinOps export** — `maverick safety [--json]` prints the
+  live posture (shield status, sandbox backend + container isolation, egress
+  policy) to assert deployment safety in CI; `maverick spend [--json]` exports
+  total + per-goal + per-tag run cost for BI/chargeback; and the dashboard
+  `/billing` view shows a tenant's accrued charges, period-over-period trend,
+  and an itemized CSV invoice.
 - **Per-pack behavioral evals** — `maverick domains-eval [--check]`
 - **Roster-wide governance invariant suite** (verified across ALL 2,020 packs,
   fault-injected with a non-vacuous control) — six invariants proven non-vacuously

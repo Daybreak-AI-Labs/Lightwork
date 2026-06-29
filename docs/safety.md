@@ -48,6 +48,17 @@ The **full Agent Shield SDK** (`pip install agent-shield`, ~115 patterns, F1 0.9
 > built-in rules even without the full SDK. The SDK still adds breadth (ROT13,
 > leetspeak, the wider pattern set); the *decoding* layer is now always present.
 
+## Checking your posture
+
+`maverick safety` prints the live safety posture — shield status (installed +
+backend, or the fail-open fallback), the sandbox backend and whether it is
+container-isolated, and the egress policy (locked vs cloud-capable) — so you can
+**assert deployment safety in CI** without the dashboard. Use `maverick safety
+--json` and gate a pipeline on the fields (e.g. fail the build if
+`sandbox.isolated` is false in production, or if `egress.locked` is false on a
+regulated deployment). The dashboard's `/safety` page shows the same posture
+interactively.
+
 ## When the shield is missing
 
 Two layers can be missing, and they degrade differently:
