@@ -47,6 +47,34 @@ def test_bare_deployment_fails_the_boundary_guarantees():
     assert checks["At-rest encryption"].passed is False
 
 
+def test_sandbox_isolation_rejects_unknown_backend(monkeypatch):
+    from maverick.deployment import verify_deployment
+
+    monkeypatch.setattr(
+        "maverick.config.load_config",
+        lambda *a, **k: {"sandbox": {"backend": "dcoker"}},
+    )
+
+    checks = {c.name: c for c in verify_deployment()}
+
+    assert checks["Sandbox isolation"].passed is False
+    assert "unsupported [sandbox] backend" in checks["Sandbox isolation"].detail
+
+
+def test_sandbox_isolation_accepts_supported_backend(monkeypatch):
+    from maverick.deployment import verify_deployment
+
+    monkeypatch.setattr(
+        "maverick.config.load_config",
+        lambda *a, **k: {"sandbox": {"backend": "gvisor"}},
+    )
+
+    checks = {c.name: c for c in verify_deployment()}
+
+    assert checks["Sandbox isolation"].passed is True
+    assert checks["Sandbox isolation"].detail == "backend = gvisor"
+
+
 @requires_crypto
 def test_verifier_fails_when_audit_signing_key_cannot_initialize(monkeypatch):
     from maverick.deployment import verify_deployment
