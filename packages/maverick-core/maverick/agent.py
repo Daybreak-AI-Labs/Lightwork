@@ -986,11 +986,15 @@ class Agent:
         exists. Fully fail-safe."""
         try:
             from .self_harness import note_recall, recall_addendum
-            addendum = recall_addendum(self.model)
+            # Pass this run's domain so guidance mined SCOPED to a department is
+            # recalled only for that department's runs (model-wide guidance always
+            # is). Defaults to the model-wide block when the agent has no domain.
+            _dom = getattr(self, "domain", None)
+            addendum = recall_addendum(self.model, domain=_dom)
             if addendum:
                 # Track that this guidance was USED (throttled, best-effort) so
                 # retirement keeps actively-recalled lines and prunes dormant ones.
-                note_recall(self.model)
+                note_recall(self.model, domain=_dom)
                 return base + "\n\n" + addendum
         except Exception:  # pragma: no cover -- never block a run
             pass

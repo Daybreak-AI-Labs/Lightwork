@@ -273,3 +273,12 @@ def test_run_cli_warns_when_gate_off(_home, monkeypatch):
     r = CliRunner().invoke(main, ["self-harness", "run", "--model", "claude-x"])
     assert r.exit_code == 0, r.output
     assert "promotion gate is OFF" in r.output
+
+
+def test_run_cli_all_models(_home, monkeypatch):
+    # the fleet sweep runs a cycle per distinct configured model
+    from maverick import self_improvement_runner as runner
+    monkeypatch.setattr(runner, "harness_fleet_models", lambda: ["model-a", "model-b"])
+    r = CliRunner().invoke(main, ["self-harness", "run", "--all-models", "--no-retire"])
+    assert r.exit_code == 0, r.output
+    assert "model: model-a" in r.output and "model: model-b" in r.output

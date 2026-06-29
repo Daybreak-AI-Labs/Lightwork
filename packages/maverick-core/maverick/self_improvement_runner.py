@@ -147,6 +147,7 @@ def run_self_harness_pass(
     min_held_out: int | None = None, candidates_per_signature: int | None = None,
     semantic_mining: bool | None = None, similarity_fn=None,
     bucket_by: tuple[str, ...] | None = None,
+    metamorphic_fn=None, metamorphic_tolerance: float = 0.0,
 ):
     """The automatic entry point for the self-harness loop (mine -> propose ->
     validate -> gate), to be called by a scheduler / the self-improvement loop.
@@ -200,7 +201,8 @@ def run_self_harness_pass(
             min_support_by_class=st["min_support_by_class"],
             candidates_per_signature=candidates_per_signature,
             semantic_mining=semantic_mining, similarity_fn=similarity_fn,
-            bucket_by=bucket_by)
+            bucket_by=bucket_by, metamorphic_fn=metamorphic_fn,
+            metamorphic_tolerance=metamorphic_tolerance)
     except Exception:  # pragma: no cover -- learning never perturbs a run
         log.debug("self-harness pass failed", exc_info=True)
         from . import self_harness
@@ -248,8 +250,53 @@ def run_self_harness_cycle(
         return self_harness.SelfHarnessReport(model_id=str(model_id or "")), 0
 
 
+def harness_fleet_models() -> list[str]:
+    """The DISTINCT set of models the fleet runs, resolved across every role in
+    ``llm.ROLE_MODELS`` (each via ``model_for_role``, deduped, sorted for a
+    deterministic order). The harness is model-specific, so a worker model
+    accumulates its OWN guidance -- this is the fleet the driver should cover, not
+    just the orchestrator. Empty on any error (never raises)."""
+    try:
+        from .llm import ROLE_MODELS, model_for_role
+    except Exception:  # pragma: no cover
+        return []
+    models: list[str] = []
+    for role in ROLE_MODELS:
+        try:
+            m = model_for_role(role)
+        except Exception:  # pragma: no cover -- one bad role can't drop the rest
+            continue
+        if m and m not in models:
+            models.append(m)
+    return sorted(models)
+
+
+def run_self_harness_all_models(*, limit: int = 500, retire: bool = True, **cycle_kwargs):
+    """Run a self-harness cycle for EVERY distinct configured role model, so
+    WORKER models learn their own harness, not just the orchestrator -- the
+    harness is model-specific and a real fleet runs several models. Returns
+    ``{model_id: (report, retired)}``.
+
+    Each model's pass mines only ITS OWN traces (mining is per-model), so a
+    worker's lesson never bleeds into the orchestrator's. Without injected
+    scorers it is a fleet-wide DRY inspection + stale-line retirement; live
+    per-model A/B scoring is the operator's to wire (a real evaluation needs a
+    real model). Never raises."""
+    out: dict[str, tuple] = {}
+    try:
+        from . import self_harness
+        if not self_harness.enabled():
+            return out
+        for m in harness_fleet_models():
+            out[m] = run_self_harness_cycle(
+                model_id=m, limit=limit, retire=retire, **cycle_kwargs)
+    except Exception:  # pragma: no cover -- a fleet sweep never perturbs a run
+        log.debug("self-harness all-models cycle failed", exc_info=True)
+    return out
+
+
 __all__ = [
     "collect_calibration", "should_retire", "review_generated_tools",
     "build_prm_examples", "emit_strategy_candidate", "run_self_harness_pass",
-    "run_self_harness_cycle",
+    "run_self_harness_cycle", "run_self_harness_all_models", "harness_fleet_models",
 ]

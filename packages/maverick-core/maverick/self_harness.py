@@ -128,12 +128,33 @@ def _write_addenda(addenda: dict[str, str], path: Path | None = None) -> None:
     atomic_write_text(p, json.dumps(addenda, indent=2, sort_keys=True), mode=0o600)
 
 
-def recall_addendum(model_id: str | None, path: Path | None = None) -> str:
+def _scoped_key(model_id: str, context: str) -> str:
+    """The store key for a (model, mining-scope). Model-wide guidance (no context)
+    lives under the bare ``model_id`` -- so the default store is byte-identical to
+    before scoping existed. A domain-scoped line lives under a COMPOSITE key
+    ``"<model_id>\\x00<context>"`` (e.g. ``"<model>\\x00domain=finance"``); the NUL
+    can't appear in a model id, so the two namespaces never collide."""
+    return f"{model_id}\x00{context}" if context else str(model_id)
+
+
+def recall_addendum(model_id: str | None, path: Path | None = None, *,
+                    domain: str | None = None) -> str:
     """The learned operating-guidance block for ``model_id`` (``""`` if none /
-    disabled). Recalled into the system prompt by the agent at build time."""
+    disabled). Recalled into the system prompt by the agent at build time.
+
+    When ``domain`` is given, any guidance mined SCOPED to that domain (under the
+    composite key) is appended after the model-wide block -- so a finance-specific
+    lesson rides only finance-domain runs, not every prompt for the model. With no
+    ``domain`` (the default) this is exactly the model-wide block, unchanged."""
     if not model_id or not enabled():
         return ""
-    return load_addenda(path).get(str(model_id), "")
+    store = load_addenda(path)
+    block = store.get(str(model_id), "")
+    if domain:
+        scoped = store.get(_scoped_key(str(model_id), f"domain={domain}"), "")
+        if scoped:
+            block = (block + "\n" + scoped) if block else scoped
+    return block
 
 
 # ---- sidecar: structured per-line provenance ------------------------------
@@ -204,6 +225,10 @@ def _upsert_line_meta(meta: dict[str, dict], model_id: str, line: str,
         "learned_at": rec.get("learned_at", now),
         "updated_at": now,
     })
+    # Canary is only touched when the caller passes it (a non-canary re-promote
+    # must not clear a probation flag, nor stamp canary=False on every record).
+    if "canary" in provenance:
+        rec["canary"] = bool(provenance.get("canary"))
     meta[lid] = rec
 
 
@@ -266,25 +291,45 @@ def _is_negative(line: str) -> bool:
 
 
 def find_conflicts(new_line: str, existing_lines: list[str], *,
-                   min_overlap: float = 0.5) -> list[str]:
+                   min_overlap: float = 0.5,
+                   classifier_fn: Callable[[str, str], bool] | None = None) -> list[str]:
     """Existing lines that appear to CONTRADICT ``new_line``: high content-token
     overlap (same topic) but OPPOSITE polarity (one prohibits what the other
     prefers). Advisory and deliberately conservative (high overlap threshold) --
-    the caller surfaces these for review, never auto-drops on them."""
+    the caller surfaces these for review, never auto-drops on them.
+
+    ``classifier_fn`` is the SEMANTIC seam: an injected ``(a, b) -> bool`` judge
+    (e.g. an LLM) that decides contradiction by MEANING -- it catches conflicts
+    the lexical heuristic misses (reworded, no token overlap) and suppresses its
+    false positives. When present it is authoritative per pair; a classifier that
+    RAISES falls back to the heuristic for that pair, so a flaky judge never drops
+    a real flag. Addenda are bounded (<= _MAX_LINES_PER_MODEL), so the O(n^2)
+    pairwise calls stay tiny. Still advisory -- the gate never blocks on it."""
     nt, neg = _content_tokens(new_line), _is_negative(new_line)
     out = []
     for ex in existing_lines or []:
         if _norm_line(ex) == _norm_line(new_line):
             continue
+        if classifier_fn is not None:
+            try:
+                if bool(classifier_fn(new_line, ex)):
+                    out.append(ex)
+                continue  # classifier is authoritative for this pair
+            except Exception:  # a bad judge can't drop a real conflict -> heuristic
+                pass
         if _jaccard(nt, _content_tokens(ex)) >= min_overlap and _is_negative(ex) != neg:
             out.append(ex)
     return out
 
 
 def detect_store_conflicts(model_id: str | None = None,
-                           path: Path | None = None) -> list[tuple[str, str, str]]:
+                           path: Path | None = None, *,
+                           classifier_fn: Callable[[str, str], bool] | None = None,
+                           ) -> list[tuple[str, str, str]]:
     """Suspected contradictory pairs in the CURRENT store as ``(model, a, b)``,
-    de-duplicated (each unordered pair once). Powers ``self-harness conflicts``."""
+    de-duplicated (each unordered pair once). Powers ``self-harness conflicts``.
+    An optional ``classifier_fn`` (see :func:`find_conflicts`) refines the lexical
+    heuristic with a semantic judge."""
     out: list[tuple[str, str, str]] = []
     for m, block in load_addenda(path).items():
         if model_id is not None and m != model_id:
@@ -292,7 +337,7 @@ def detect_store_conflicts(model_id: str | None = None,
         lines = _bullets(block)
         seen: set[frozenset] = set()
         for i, ln in enumerate(lines):
-            for other in find_conflicts(ln, lines[i + 1:]):
+            for other in find_conflicts(ln, lines[i + 1:], classifier_fn=classifier_fn):
                 key = frozenset((_norm_line(ln), _norm_line(other)))
                 if key not in seen:
                     seen.add(key)
@@ -680,6 +725,9 @@ class HarnessProposal:
                                  # supplied by a structured proposer. METADATA
                                  # ONLY -- it rides into the audit + provenance
                                  # sidecar, never into the recalled prompt.
+    context: str = ""            # mining scope carried from the signature (e.g.
+                                 # "domain=finance"); routes the line to a
+                                 # scoped store key so recall can target it.
 
 
 # An injected proposer: given a signature, return EITHER a single short guidance
@@ -915,7 +963,7 @@ def propose_addendum(sig: FailureSignature, *, propose_fn: ProposeFn | None = No
     hypothesis = _sanitize_line(hypothesis)[:280]
     return HarnessProposal(
         model_id=sig.model_id, signature=sig.signature,
-        addendum_line=line, hypothesis=hypothesis,
+        addendum_line=line, hypothesis=hypothesis, context=sig.context,
         rationale=f"targets {sig.support} '{sig.failure_class}' failures",
     )
 
@@ -971,6 +1019,8 @@ def validate_proposal(
     min_delta: float = 0.0, min_held_out: int = 0, confidence_z: float = 0.0,
     max_cost_factor: float | None = None, max_latency_factor: float | None = None,
     max_tool_calls_factor: float | None = None,
+    metamorphic_fn: Callable[[list[str]], list[str]] | None = None,
+    metamorphic_tolerance: float = 0.0,
 ) -> ValidationResult:
     """The Self-Harness acceptance test: a harness edit must not regress EITHER
     split and must help at least one (reject pure trades).
@@ -988,7 +1038,11 @@ def validate_proposal(
     bound to clear the baseline rate -- statistically-confident generalization,
     not luck. ``max_*_factor`` reject a candidate that regresses cost/latency/
     tool-calls on the held-out split beyond the factor (a line in every prompt
-    must not quietly make the model slower or pricier)."""
+    must not quietly make the model slower or pricier). ``metamorphic_fn`` (a
+    meaning-preserving paraphraser; injected because a real one needs a model)
+    rejects a line whose held-out improvement does NOT survive paraphrasing the
+    unseen cases -- catching a line overfit to surface wording rather than the
+    underlying weakness (``metamorphic_tolerance`` allows a small slip)."""
     add = proposal.addendum_line
     in_with, in_ci, in_li, in_ti = _score_parts(score_with(add, held_in))
     in_without, *_ = _score_parts(score_without(add, held_in))
@@ -1048,6 +1102,28 @@ def validate_proposal(
                 False, in_delta, out_delta,
                 f"{label} regressed on held-out ({cand:.3g} > {basel:.3g} x {factor})",
                 **base)
+    # Metamorphic robustness: a line that helps only the EXACT held-out wording is
+    # overfit to surface form, not the underlying weakness. If an injected
+    # ``metamorphic_fn`` (a meaning-preserving paraphraser -- a real one needs a
+    # model, so it is injected) can transform the unseen cases, the improvement
+    # must SURVIVE the transform (held-out delta stays >= -tolerance on the
+    # paraphrases). A line that flips to hurting paraphrased cases is rejected.
+    if metamorphic_fn is not None and held_out:
+        try:
+            mcases = [str(c) for c in (metamorphic_fn(list(held_out)) or [])]
+        except Exception:  # a bad transform can't fail a candidate -> skip the check
+            mcases = []
+        if mcases:
+            m_with, *_ = _score_parts(score_with(add, mcases))
+            m_without, *_ = _score_parts(score_without(add, mcases))
+            if (isinstance(m_with, (int, float)) and isinstance(m_without, (int, float))
+                    and math.isfinite(m_with) and math.isfinite(m_without)):
+                m_delta = m_with - m_without
+                if m_delta < -metamorphic_tolerance:
+                    return ValidationResult(
+                        False, in_delta, out_delta,
+                        f"failed metamorphic check (overfit to wording; "
+                        f"paraphrase delta {m_delta:.3g})", **base)
     return ValidationResult(True, in_delta, out_delta, "validated", **base)
 
 
@@ -1132,20 +1208,24 @@ def _apply_addendum(proposal: HarnessProposal, path: Path | None = None, *,
     written. The sidecar update is best-effort: a failure there never perturbs
     the addenda store (the source of truth)."""
     p = path if path is not None else _store_path()
+    # A domain-scoped line lands under a composite store key; a model-wide line
+    # under the bare model id (byte-identical to the pre-scoping store). The meta
+    # line-id and reconciliation use the SAME key, so the sidecar stays consistent
+    # with whichever block the line actually lives in.
+    store_key = _scoped_key(proposal.model_id, proposal.context)
     from .file_lock import cross_process_lock
     with _lock, cross_process_lock(p):
         before = load_addenda(p)
         after = dict(before)
         new_block = _compose_addendum(
-            proposal.model_id, before.get(proposal.model_id, ""),
-            proposal.addendum_line)
-        after[proposal.model_id] = new_block
+            store_key, before.get(store_key, ""), proposal.addendum_line)
+        after[store_key] = new_block
         _write_addenda(after, p)
         try:
             meta = load_line_meta(p)
-            _upsert_line_meta(meta, proposal.model_id, proposal.addendum_line,
+            _upsert_line_meta(meta, store_key, proposal.addendum_line,
                               provenance or {}, now=time.time())
-            _reconcile_meta(meta, proposal.model_id, _bullets(new_block))
+            _reconcile_meta(meta, store_key, _bullets(new_block))
             _write_line_meta(meta, p)
         except Exception:  # pragma: no cover -- sidecar is best-effort
             log.debug("self_harness: line-meta update failed", exc_info=True)
@@ -1163,38 +1243,198 @@ _recall_noted_monotonic: dict[str, float] = {}
 
 
 def note_recall(model_id: str | None, *, now: float | None = None,
-                path: Path | None = None, min_interval_s: float = 3600.0) -> None:
+                path: Path | None = None, min_interval_s: float = 3600.0,
+                domain: str | None = None) -> None:
     """Best-effort: record that ``model_id``'s guidance was just recalled, so
     staleness can be judged by USE, not only by promotion. In-process throttled
     (``min_interval_s``; 0 disables the throttle, for tests) so the hot recall
-    path does at most one cheap write per model per interval. Never raises."""
+    path does at most one cheap write per model per interval. Tracks the
+    model-wide block AND, when ``domain`` is given, the domain-scoped block (so a
+    recalled domain line isn't wrongly retired). Never raises."""
     if not model_id:
         return
     mid = str(model_id)
+    throttle_key = f"{mid}\x00{domain or ''}"
     if min_interval_s:
         mono = time.monotonic()
         with _recall_note_lock:
-            last = _recall_noted_monotonic.get(mid)
+            last = _recall_noted_monotonic.get(throttle_key)
             if last is not None and (mono - last) < min_interval_s:
                 return  # throttled -- pure in-memory, no I/O
-            _recall_noted_monotonic[mid] = mono
+            _recall_noted_monotonic[throttle_key] = mono
     try:
         p = path if path is not None else _store_path()
         ts = now if now is not None else time.time()
+        keys = [mid]
+        if domain:
+            keys.append(_scoped_key(mid, f"domain={domain}"))
         from .file_lock import cross_process_lock
         with _lock, cross_process_lock(p):
             meta = load_line_meta(p)
+            store = load_addenda(p)
             changed = False
-            for ln in _bullets(load_addenda(p).get(mid, "")):
-                rec = meta.get(_line_id(mid, ln))
-                if rec is not None:
-                    rec["last_recalled_at"] = ts
-                    rec["recall_notes"] = (rec.get("recall_notes") or 0) + 1
-                    changed = True
+            for key in keys:
+                for ln in _bullets(store.get(key, "")):
+                    rec = meta.get(_line_id(key, ln))
+                    if rec is not None:
+                        rec["last_recalled_at"] = ts
+                        rec["recall_notes"] = (rec.get("recall_notes") or 0) + 1
+                        changed = True
             if changed:
                 _write_line_meta(meta, p)
     except Exception:  # pragma: no cover -- usage tracking never perturbs a run
         log.debug("self_harness: note_recall failed", exc_info=True)
+
+
+# ---- OUTCOME-CORRELATED EFFICACY ------------------------------------------
+# Recall tracks *that* guidance was used; efficacy tracks whether using it
+# correlated with SUCCESS. Two complementary signals: cheap recall->outcome
+# counters in the sidecar (a coarse aggregate -- all of a model's lines co-occur
+# in its prompt, so an outcome is attributed to all current lines), and a
+# causal A/B re-review (`review_efficacy`) that re-measures a line's lift with a
+# live scorer and demotes dead weight. Demotion is the REVERSIBLE direction
+# (removing a line is always safe -- it's the rollback handle), so it goes through
+# the audited `forget` path, not the promotion gate.
+
+def note_outcome(model_id: str | None, success: bool, *, line: str | None = None,
+                 path: Path | None = None) -> None:
+    """Record that a run using ``model_id``'s guidance succeeded or failed,
+    incrementing per-line ``recall_success``/``recall_failure`` counters in the
+    sidecar. Attributed to ``line`` if given, else to ALL of the model's current
+    lines (they all rode the same prompt). Best-effort; never raises."""
+    if not model_id:
+        return
+    mid = str(model_id)
+    field_name = "recall_success" if success else "recall_failure"
+    try:
+        p = path if path is not None else _store_path()
+        from .file_lock import cross_process_lock
+        with _lock, cross_process_lock(p):
+            meta = load_line_meta(p)
+            lines = [line] if line is not None else _bullets(load_addenda(p).get(mid, ""))
+            changed = False
+            for ln in lines:
+                rec = meta.get(_line_id(mid, ln))
+                if rec is not None:
+                    rec[field_name] = int(rec.get(field_name) or 0) + 1
+                    changed = True
+            if changed:
+                _write_line_meta(meta, p)
+    except Exception:  # pragma: no cover -- efficacy tracking never perturbs a run
+        log.debug("self_harness: note_outcome failed", exc_info=True)
+
+
+def line_efficacy(model_id: str, path: Path | None = None) -> list[dict]:
+    """Per-line outcome counters for ``model_id`` (recalled-block order): each
+    ``{text, success, failure, total, rate}`` where ``rate`` is success/total
+    (``None`` until there is at least one recorded outcome). Read-only."""
+    block = load_addenda(path).get(str(model_id), "")
+    meta = load_line_meta(path)
+    out = []
+    for ln in _bullets(block):
+        rec = meta.get(_line_id(str(model_id), ln)) or {}
+        s = int(rec.get("recall_success") or 0)
+        f = int(rec.get("recall_failure") or 0)
+        total = s + f
+        out.append({"text": ln, "success": s, "failure": f, "total": total,
+                    "rate": (s / total) if total else None})
+    return out
+
+
+def review_efficacy(model_id: str, cases: list[str], *,
+                    score_with: ScoreFn, score_without: ScoreFn,
+                    min_lift: float = 0.0, min_samples: int = 1,
+                    path: Path | None = None) -> list[str]:
+    """Re-measure each current line's CAUSAL lift with a live A/B and DEMOTE the
+    dead weight -- a line whose lift has fallen to ``<= min_lift`` over at least
+    ``min_samples`` cases no longer earns its place in every prompt (the model,
+    tools, or APIs moved on). Returns the demoted lines.
+
+    Demotion uses the audited `forget` path (reversible), NOT the promotion gate.
+    Scorers are injected (a real eval needs a real model); without ``cases`` it is
+    a no-op. Never raises -- a maintenance review must not perturb anything."""
+    demoted: list[str] = []
+    if not cases:
+        return demoted
+    try:
+        for ln in _bullets(load_addenda(path).get(str(model_id), "")):
+            try:
+                w, *_ = _score_parts(score_with(ln, cases))
+                wo, *_ = _score_parts(score_without(ln, cases))
+            except Exception:  # a bad scorer can't drop a line
+                continue
+            if not (isinstance(w, (int, float)) and isinstance(wo, (int, float))
+                    and math.isfinite(w) and math.isfinite(wo)):
+                continue
+            if len(cases) >= min_samples and (w - wo) <= min_lift:
+                if forget_addendum(model_id, line=ln, path=path):
+                    demoted.append(ln)
+    except Exception:  # pragma: no cover -- review never perturbs a run
+        log.debug("self_harness: review_efficacy failed", exc_info=True)
+    return demoted
+
+
+# ---- CANARY / STAGED ROLLOUT ----------------------------------------------
+# A freshly-promoted line can ride as a CANARY (on probation): still recalled,
+# but watched. `review_canaries` reads the recall->outcome counters and advances
+# the lifecycle -- GRADUATE a line that proves out (clear the flag -> permanent),
+# DEMOTE one that correlates with failures (audited forget), leave the rest on
+# probation. A slow-rollout valve on top of the gate; failures win ties (safe).
+
+def mark_canary(model_id: str, line: str, *, canary: bool = True,
+                path: Path | None = None) -> bool:
+    """Mark/unmark a learned line as a canary. Returns True if the flag changed
+    (False if the line has no sidecar record or already had this state). Atomic;
+    never raises."""
+    if not model_id or line is None:
+        return False
+    try:
+        p = path if path is not None else _store_path()
+        from .file_lock import cross_process_lock
+        with _lock, cross_process_lock(p):
+            meta = load_line_meta(p)
+            rec = meta.get(_line_id(str(model_id), str(line)))
+            if rec is None or bool(rec.get("canary")) == bool(canary):
+                return False
+            rec["canary"] = bool(canary)
+            _write_line_meta(meta, p)
+            return True
+    except Exception:  # pragma: no cover -- canary state never perturbs a run
+        log.debug("self_harness: mark_canary failed", exc_info=True)
+        return False
+
+
+def list_canaries(model_id: str, path: Path | None = None) -> list[str]:
+    """The model's lines currently on canary probation (recalled-block order)."""
+    meta = load_line_meta(path)
+    return [ln for ln in _bullets(load_addenda(path).get(str(model_id), ""))
+            if (meta.get(_line_id(str(model_id), ln)) or {}).get("canary")]
+
+
+def review_canaries(model_id: str, *, graduate_after: int = 3,
+                    demote_after: int = 2, path: Path | None = None) -> dict:
+    """Advance the canary lifecycle from the recall->outcome counters:
+    DEMOTE (audited forget) a canary with ``>= demote_after`` failures; else
+    GRADUATE (clear the flag -> permanent) one with ``>= graduate_after``
+    successes; else leave it on probation. Failures take precedence (a flaky line
+    is pulled even if it also has wins). Returns
+    ``{"graduated": [...], "demoted": [...]}``. Never raises."""
+    graduated: list[str] = []
+    demoted: list[str] = []
+    try:
+        for ln in list_canaries(model_id, path):
+            rec = load_line_meta(path).get(_line_id(str(model_id), ln)) or {}
+            s = int(rec.get("recall_success") or 0)
+            f = int(rec.get("recall_failure") or 0)
+            if f >= demote_after:
+                if forget_addendum(model_id, line=ln, path=path):
+                    demoted.append(ln)
+            elif s >= graduate_after:
+                if mark_canary(model_id, ln, canary=False, path=path):
+                    graduated.append(ln)
+    except Exception:  # pragma: no cover -- review never perturbs a run
+        log.debug("self_harness: review_canaries failed", exc_info=True)
+    return {"graduated": graduated, "demoted": demoted}
 
 
 # ---- DRIVE (mine -> propose -> validate -> gate) --------------------------
@@ -1294,6 +1534,9 @@ def run_self_harness(
     semantic_mining: bool = False,
     similarity_fn: Callable[[str, str], float] | None = None,
     bucket_by: tuple[str, ...] = (),
+    metamorphic_fn: Callable[[list[str]], list[str]] | None = None,
+    metamorphic_tolerance: float = 0.0,
+    canary: bool = False,
 ) -> SelfHarnessReport:
     """One self-harness pass for ``model_id``: mine weaknesses, propose minimal
     edits, validate on held-in/held-out, and GATE each survivor through the
@@ -1350,7 +1593,9 @@ def run_self_harness(
                 min_delta=min_delta, min_held_out=min_held_out,
                 confidence_z=confidence_z, max_cost_factor=max_cost_factor,
                 max_latency_factor=max_latency_factor,
-                max_tool_calls_factor=max_tool_calls_factor)
+                max_tool_calls_factor=max_tool_calls_factor,
+                metamorphic_fn=metamorphic_fn,
+                metamorphic_tolerance=metamorphic_tolerance)
             hi, ho = held_in or list(sig.examples), held_out or []
             if candidates_per_signature and candidates_per_signature > 1:
                 # Best-of-N: keep the strongest of several candidate lines for this
@@ -1373,7 +1618,8 @@ def run_self_harness(
                     continue
             report.validated += 1
 
-            ok, why = _gate_and_apply(proposal, vr, controller=controller, path=path)
+            ok, why = _gate_and_apply(proposal, vr, controller=controller,
+                                      path=path, canary=canary)
             if not ok:
                 # Surface WHY the gate refused (e.g. "too few samples (3 < 5)",
                 # frozen verifier, disabled controller) so an operator with a
@@ -1382,9 +1628,11 @@ def run_self_harness(
                 continue
             report.promoted += 1
             report.applied_lines.append(proposal.addendum_line)
-            # Advisory conflict check: the new line is now in the block; flag any
-            # EXISTING line it appears to contradict (operator review, not a block).
-            existing = [ln for ln in _bullets(load_addenda(path).get(str(model_id), ""))
+            # Advisory conflict check within the block the line actually landed in
+            # (the scoped key for a domain line); flag any EXISTING line it appears
+            # to contradict (operator review, not a block).
+            block_key = _scoped_key(str(model_id), proposal.context)
+            existing = [ln for ln in _bullets(load_addenda(path).get(block_key, ""))
                         if _norm_line(ln) != _norm_line(proposal.addendum_line)]
             for c in find_conflicts(proposal.addendum_line, existing):
                 report.conflicts.append((proposal.addendum_line, c))
@@ -1398,7 +1646,8 @@ def run_self_harness(
 
 
 def _gate_and_apply(proposal: HarnessProposal, vr: ValidationResult, *,
-                    controller=None, path: Path | None = None) -> tuple[bool, str]:
+                    controller=None, path: Path | None = None,
+                    canary: bool = False) -> tuple[bool, str]:
     """Judge the validated proposal through ``self_improvement.consider()`` on
     the ``prompt`` rung and apply it ONLY on a promoting verdict. Returns
     ``(ok, reason)`` -- ``reason`` names the blocking gate when refused.
@@ -1426,10 +1675,13 @@ def _gate_and_apply(proposal: HarnessProposal, vr: ValidationResult, *,
     if not getattr(verdict, "ok", False):
         reason = getattr(verdict, "blocking_reason", "") or "refused"
         return False, reason  # gate refused -> nothing written
-    _apply_addendum(proposal, path=path, provenance={
+    apply_prov = {
         "signature": proposal.signature, "rationale": proposal.rationale,
         "hypothesis": proposal.hypothesis or None,
-        "held_out_delta": round(vr.held_out_delta, 4), "samples": vr.samples})
+        "held_out_delta": round(vr.held_out_delta, 4), "samples": vr.samples}
+    if canary:  # only stamp the flag when staging -- non-canary leaves meta clean
+        apply_prov["canary"] = True
+    _apply_addendum(proposal, path=path, provenance=apply_prov)
     try:
         from .audit import EventKind, record
         # Record the DIAGNOSTIC PROVENANCE alongside the line: which weakness it
@@ -1453,6 +1705,8 @@ __all__ = [
     "enabled", "recall_addendum", "load_addenda",
     "list_learned", "forget_addendum", "retire_stale",
     "load_line_meta", "line_provenance", "note_recall",
+    "note_outcome", "line_efficacy", "review_efficacy",
+    "mark_canary", "list_canaries", "review_canaries",
     "find_conflicts", "detect_store_conflicts",
     "FailureSignature", "mine_failures", "count_eligible", "semantic_similarity",
     "HarnessProposal", "ProposeFn", "propose_addendum", "llm_proposer",

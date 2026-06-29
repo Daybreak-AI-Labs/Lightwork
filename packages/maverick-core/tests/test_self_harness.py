@@ -662,6 +662,39 @@ def test_run_reports_conflict_without_blocking(monkeypatch, store):
     assert len(pairs) == 1 and pairs[0][0] == "M"
 
 
+def test_find_conflicts_classifier_overrides_heuristic():
+    # The classifier catches a semantic conflict with NO token overlap (the
+    # heuristic would miss it) and suppresses a heuristic candidate it deems fine.
+    new = "Prefer streaming for large ledger exports."
+    existing = ["Batch everything; never stream.",                 # no overlap, real conflict
+                "Avoid streaming large ledger exports."]           # heuristic would flag this
+    # classifier: only the FIRST is a real contradiction
+    clf = lambda a, b: b == "Batch everything; never stream."      # noqa: E731
+    assert sh.find_conflicts(new, existing, classifier_fn=clf) == \
+        ["Batch everything; never stream."]
+
+
+def test_find_conflicts_classifier_error_falls_back_to_heuristic():
+    new = "Prefer streaming for large ledger exports."
+    existing = ["Avoid streaming large ledger exports; batch them first."]
+    def boom(a, b):
+        raise RuntimeError("judge down")
+    # classifier raises -> per-pair fallback to the lexical heuristic still flags it
+    assert sh.find_conflicts(new, existing, classifier_fn=boom) == existing
+
+
+def test_detect_store_conflicts_threads_classifier(monkeypatch, store):
+    ctrl = _enable(monkeypatch)
+    _promote_line(store, "M", "c0", "alpha guidance one", ctrl)
+    _promote_line(store, "M", "c1", "beta guidance two", ctrl)
+    # these don't conflict lexically; a classifier that says "always conflict"
+    # proves the seam is threaded end-to-end
+    pairs = sh.detect_store_conflicts(path=store, classifier_fn=lambda a, b: True)
+    assert len(pairs) == 1 and pairs[0][0] == "M"
+    # without the classifier the heuristic finds nothing here
+    assert sh.detect_store_conflicts(path=store) == []
+
+
 # ---------- recall-usage tracking ----------
 
 def test_note_recall_records_last_used_and_keeps_line_fresh(monkeypatch, store):
@@ -753,6 +786,57 @@ def test_validate_rejects_cost_regression():
     vr2 = sh.validate_proposal(p, held_in=["a"], held_out=["b", "c"],
                                score_with=sw, score_without=wo, max_cost_factor=3.0)
     assert vr2.accepted
+
+
+# a scorer that helps the EXACT held-out wording but hurts paraphrased ("para") cases
+def _meta_sw(add, cases):
+    return 0.3 if (cases and str(cases[0]).startswith("para")) else 0.9
+
+
+def test_validate_metamorphic_rejects_overfit():
+    vr = sh.validate_proposal(
+        _sig_proposal(), held_in=["a", "b"], held_out=["orig1", "orig2"],
+        score_with=_meta_sw, score_without=lambda a, c: 0.4,
+        metamorphic_fn=lambda cases: ["para1", "para2"])
+    assert not vr.accepted and "metamorphic" in vr.reason
+
+
+def test_validate_metamorphic_passes_when_robust():
+    # the line helps paraphrases too -> survives the check
+    vr = sh.validate_proposal(
+        _sig_proposal(), held_in=["a", "b"], held_out=["orig1", "orig2"],
+        score_with=lambda a, c: 0.9, score_without=lambda a, c: 0.4,
+        metamorphic_fn=lambda cases: ["para1", "para2"])
+    assert vr.accepted
+
+
+def test_validate_metamorphic_off_by_default():
+    # without the seam the overfit line is NOT caught (back-compat)
+    vr = sh.validate_proposal(
+        _sig_proposal(), held_in=["a", "b"], held_out=["orig1", "orig2"],
+        score_with=_meta_sw, score_without=lambda a, c: 0.4)
+    assert vr.accepted
+
+
+def test_validate_metamorphic_bad_fn_is_skipped():
+    # a raising transform can't fail a candidate -> the check is skipped
+    vr = sh.validate_proposal(
+        _sig_proposal(), held_in=["a", "b"], held_out=["orig1", "orig2"],
+        score_with=lambda a, c: 0.9, score_without=lambda a, c: 0.4,
+        metamorphic_fn=lambda cases: (_ for _ in ()).throw(RuntimeError("boom")))
+    assert vr.accepted
+
+
+def test_run_self_harness_metamorphic_blocks_overfit(monkeypatch, store):
+    ctrl = _enable(monkeypatch)
+    refl = [_refl("M", "timeout", "export the nightly ledger") for _ in range(3)]
+    rep = sh.run_self_harness(
+        refl, model_id="M", controller=ctrl, min_support=3, path=store,
+        held_in=["a", "b"], held_out=["orig1", "orig2", "orig3"],
+        score_with=_meta_sw, score_without=lambda a, c: 0.4,
+        metamorphic_fn=lambda cases: [f"para{i}" for i in range(len(cases))])
+    assert rep.promoted == 0 and any("metamorphic" in s for s in rep.skipped)
+    assert sh.recall_addendum("M", store) == ""
 
 
 def test_mine_adaptive_min_support_per_class():
@@ -1114,8 +1198,13 @@ def test_run_self_harness_bucket_by_domain(monkeypatch, store):
         score_with=lambda a, c: 0.9, score_without=lambda a, c: 0.4,
         bucket_by=("domain",))
     assert rep.mined == 2 and rep.promoted == 2     # one scoped line per department
-    recalled = sh.recall_addendum("M", store)
-    assert "domain=finance" in recalled and "domain=sales" in recalled
+    # scoped lines are NOT in the model-wide block...
+    assert sh.recall_addendum("M", store) == ""
+    # ...they recall only for their own department (wave 19 scoped recall)
+    fin = sh.recall_addendum("M", store, domain="finance")
+    sal = sh.recall_addendum("M", store, domain="sales")
+    assert "domain=finance" in fin and "domain=sales" not in fin
+    assert "domain=sales" in sal and "domain=finance" not in sal
 
 
 def test_config_mine_bucket_by_allowlist(monkeypatch):
@@ -1269,3 +1358,217 @@ def test_report_gate_disabled_is_recorded(monkeypatch, store):
         held_in=["a", "b"], held_out=["c", "d", "e"],
         score_with=lambda a, c: 0.9, score_without=lambda a, c: 0.4)
     assert rep.gate_enabled is False and rep.promoted == 0
+
+
+# ---------- wave 12: worker-model learning (fleet sweep) ----------
+
+def test_harness_fleet_models_distinct_sorted(monkeypatch):
+    from maverick import llm
+    from maverick import self_improvement_runner as runner
+    monkeypatch.setattr(llm, "ROLE_MODELS",
+                        {"orchestrator": "opus", "coder": "sonnet", "writer": "sonnet"})
+    monkeypatch.setattr(llm, "model_for_role", lambda role: llm.ROLE_MODELS[role])
+    # distinct + sorted (sonnet appears once though two roles use it)
+    assert runner.harness_fleet_models() == ["opus", "sonnet"]
+
+
+def test_run_all_models_learns_per_model(monkeypatch, store):
+    ctrl = _enable(monkeypatch)
+    monkeypatch.setattr(sh, "_store_path", lambda: store)
+    from maverick import self_improvement_runner as runner
+    monkeypatch.setattr(runner, "harness_fleet_models", lambda: ["A", "B"])
+    # one weakness for each model; each pass mines only its own traces
+    combined = ([_refl("A", "timeout", "export the nightly ledger") for _ in range(3)]
+                + [_refl("B", "auth", "log into the partner portal") for _ in range(3)])
+    results = runner.run_self_harness_all_models(
+        reflexions=combined, controller=ctrl,
+        held_in=["a", "b"], held_out=["c", "d", "e"],
+        score_with=lambda a, c: 0.9, score_without=lambda a, c: 0.4)
+    assert set(results) == {"A", "B"}
+    assert results["A"][0].promoted == 1 and results["B"][0].promoted == 1
+    # each model got its OWN guidance, no cross-bleed
+    assert "timeout" in sh.recall_addendum("A", store).lower()
+    assert "auth" in sh.recall_addendum("B", store).lower()
+    assert sh.recall_addendum("A", store) != sh.recall_addendum("B", store)
+
+
+def test_run_all_models_disabled_is_empty(monkeypatch):
+    monkeypatch.setenv("MAVERICK_SELF_HARNESS", "0")
+    monkeypatch.setattr("maverick.config.load_config", dict)
+    from maverick import self_improvement_runner as runner
+    assert runner.run_self_harness_all_models() == {}
+
+
+# ---------- wave 17: outcome-correlated efficacy ----------
+
+def test_note_outcome_counters_and_efficacy(monkeypatch, store):
+    ctrl = _enable(monkeypatch)
+    _promote_line(store, "M", "c0", "the learned line", ctrl)
+    assert sh.line_efficacy("M", store)[0]["rate"] is None       # no outcomes yet
+    sh.note_outcome("M", True, path=store)
+    sh.note_outcome("M", True, path=store)
+    sh.note_outcome("M", False, path=store)
+    eff = sh.line_efficacy("M", store)[0]
+    assert eff["success"] == 2 and eff["failure"] == 1 and eff["total"] == 3
+    assert abs(eff["rate"] - 2 / 3) < 1e-9
+
+
+def test_note_outcome_attributes_to_all_or_one(monkeypatch, store):
+    ctrl = _enable(monkeypatch)
+    _promote_line(store, "M", "c0", "line one here", ctrl)
+    _promote_line(store, "M", "c1", "line two here", ctrl)
+    sh.note_outcome("M", True, path=store)                       # all co-present lines
+    assert all(e["success"] == 1 for e in sh.line_efficacy("M", store))
+    sh.note_outcome("M", False, line="line one here", path=store)   # one targeted line
+    by_text = {e["text"]: e for e in sh.line_efficacy("M", store)}
+    assert by_text["line one here"]["failure"] == 1 and by_text["line two here"]["failure"] == 0
+
+
+def test_note_outcome_counters_survive_repromote(monkeypatch, store):
+    ctrl = _enable(monkeypatch)
+    _promote_line(store, "M", "c0", "durable line", ctrl)
+    sh.note_outcome("M", True, path=store)
+    _promote_line(store, "M", "c0", "durable line", ctrl)        # re-promote keeps counters
+    assert sh.line_efficacy("M", store)[0]["success"] == 1
+
+
+def test_review_efficacy_demotes_dead_weight(monkeypatch, store):
+    ctrl = _enable(monkeypatch)
+    _promote_line(store, "M", "c0", "good guidance line", ctrl)
+    _promote_line(store, "M", "c1", "dead guidance line", ctrl)
+    # live A/B: "good" still lifts; "dead" no longer helps (lift 0)
+    def sw(ln, cases):
+        return 0.9 if ln == "good guidance line" else 0.4
+    demoted = sh.review_efficacy("M", ["c1", "c2"], score_with=sw,
+                                 score_without=lambda _ln, c: 0.4,
+                                 min_lift=0.0, min_samples=2, path=store)
+    assert demoted == ["dead guidance line"]
+    recalled = sh.recall_addendum("M", store)
+    assert "good guidance line" in recalled and "dead guidance line" not in recalled
+
+
+def test_review_efficacy_no_cases_is_noop(monkeypatch, store):
+    ctrl = _enable(monkeypatch)
+    _promote_line(store, "M", "c0", "kept line", ctrl)
+    assert sh.review_efficacy("M", [], score_with=lambda _ln, c: 0.0,
+                              score_without=lambda _ln, c: 0.9, path=store) == []
+    assert "kept line" in sh.recall_addendum("M", store)         # nothing demoted
+
+
+# ---------- wave 18: canary / staged rollout ----------
+
+def test_run_self_harness_canary_marks_promoted_line(monkeypatch, store):
+    ctrl = _enable(monkeypatch)
+    refl = [_refl("M", "timeout", "export the nightly ledger") for _ in range(3)]
+    rep = sh.run_self_harness(
+        refl, model_id="M", controller=ctrl, min_support=3, path=store,
+        held_in=["a", "b"], held_out=["c", "d", "e"],
+        score_with=lambda a, c: 0.9, score_without=lambda a, c: 0.4, canary=True)
+    assert rep.promoted == 1 and len(sh.list_canaries("M", store)) == 1
+    # a canary is still recalled (active, just on probation)
+    assert "timeout" in sh.recall_addendum("M", store).lower()
+
+
+def test_default_promotion_is_not_canary(monkeypatch, store):
+    ctrl = _enable(monkeypatch)
+    _promote_line(store, "M", "c0", "permanent line", ctrl)
+    assert sh.list_canaries("M", store) == []
+
+
+def test_mark_canary_toggle(monkeypatch, store):
+    ctrl = _enable(monkeypatch)
+    _promote_line(store, "M", "c0", "toggled line", ctrl)
+    assert sh.mark_canary("M", "toggled line", path=store) is True
+    assert sh.list_canaries("M", store) == ["toggled line"]
+    assert sh.mark_canary("M", "toggled line", path=store) is False   # already canary
+    assert sh.mark_canary("M", "toggled line", canary=False, path=store) is True
+    assert sh.list_canaries("M", store) == []
+    assert sh.mark_canary("M", "ghost line", path=store) is False      # no such record
+
+
+def test_review_canaries_graduates_proven(monkeypatch, store):
+    ctrl = _enable(monkeypatch)
+    _promote_line(store, "M", "c0", "proven line", ctrl)
+    sh.mark_canary("M", "proven line", path=store)
+    for _ in range(3):
+        sh.note_outcome("M", True, line="proven line", path=store)
+    res = sh.review_canaries("M", graduate_after=3, demote_after=2, path=store)
+    assert res == {"graduated": ["proven line"], "demoted": []}
+    assert sh.list_canaries("M", store) == []                          # promoted to permanent
+    assert "proven line" in sh.recall_addendum("M", store)             # still recalled
+
+
+def test_review_canaries_demotes_failing(monkeypatch, store):
+    ctrl = _enable(monkeypatch)
+    _promote_line(store, "M", "c0", "flaky line", ctrl)
+    sh.mark_canary("M", "flaky line", path=store)
+    for _ in range(2):
+        sh.note_outcome("M", False, line="flaky line", path=store)
+    res = sh.review_canaries("M", graduate_after=3, demote_after=2, path=store)
+    assert res == {"graduated": [], "demoted": ["flaky line"]}
+    assert "flaky line" not in sh.recall_addendum("M", store)          # pulled
+
+
+def test_review_canaries_failures_win_ties(monkeypatch, store):
+    ctrl = _enable(monkeypatch)
+    _promote_line(store, "M", "c0", "mixed line", ctrl)
+    sh.mark_canary("M", "mixed line", path=store)
+    for _ in range(5):
+        sh.note_outcome("M", True, line="mixed line", path=store)
+    for _ in range(2):
+        sh.note_outcome("M", False, line="mixed line", path=store)
+    res = sh.review_canaries("M", graduate_after=3, demote_after=2, path=store)
+    assert res["demoted"] == ["mixed line"] and res["graduated"] == []  # failures win
+
+
+# ---------- wave 19: per-domain scoped recall ----------
+
+def test_scoped_key_namespaces():
+    assert sh._scoped_key("M", "") == "M"                        # model-wide unchanged
+    assert sh._scoped_key("M", "domain=finance") == "M\x00domain=finance"
+
+
+def test_scoped_recall_targets_domain(monkeypatch, store):
+    ctrl = _enable(monkeypatch)
+    rs = ([_refl_d("M", "timeout", "process the report", "finance") for _ in range(3)]
+          + [_refl_d("M", "timeout", "process the report", "sales") for _ in range(3)])
+    sh.run_self_harness(rs, model_id="M", controller=ctrl, min_support=3, path=store,
+                        held_in=["a", "b"], held_out=["c", "d", "e", "f", "g"],
+                        score_with=lambda a, c: 0.9, score_without=lambda a, c: 0.4,
+                        bucket_by=("domain",))
+    assert sh.recall_addendum("M", store) == ""                 # model-wide is empty
+    assert "domain=finance" in sh.recall_addendum("M", store, domain="finance")
+    assert "domain=finance" not in sh.recall_addendum("M", store, domain="sales")
+    assert sh.recall_addendum("M", store, domain="hr") == ""     # unknown domain -> nothing
+
+
+def test_scoped_recall_merges_model_wide_and_domain(monkeypatch, store):
+    ctrl = _enable(monkeypatch)
+    # a model-wide line AND a finance-scoped line
+    _promote_line(store, "M", "c0", "model wide line", ctrl)
+    rs = [_refl_d("M", "auth", "log into the partner portal", "finance") for _ in range(3)]
+    sh.run_self_harness(rs, model_id="M", controller=ctrl, min_support=3, path=store,
+                        held_in=["a", "b"], held_out=["c", "d", "e", "f", "g"],
+                        score_with=lambda a, c: 0.9, score_without=lambda a, c: 0.4,
+                        bucket_by=("domain",))
+    fin = sh.recall_addendum("M", store, domain="finance")
+    assert "model wide line" in fin and "domain=finance" in fin   # both ride a finance run
+    # a non-finance run gets ONLY the model-wide line
+    assert sh.recall_addendum("M", store) == "" or "model wide line" in sh.recall_addendum("M", store)
+    assert "domain=finance" not in sh.recall_addendum("M", store)
+
+
+def test_scoped_recall_disabled_returns_empty(monkeypatch, store):
+    monkeypatch.delenv("MAVERICK_SELF_HARNESS", raising=False)
+    monkeypatch.setattr("maverick.config.load_config", dict)
+    assert sh.recall_addendum("M", store, domain="finance") == ""
+
+
+def test_review_canaries_leaves_young_on_probation(monkeypatch, store):
+    ctrl = _enable(monkeypatch)
+    _promote_line(store, "M", "c0", "young line", ctrl)
+    sh.mark_canary("M", "young line", path=store)
+    sh.note_outcome("M", True, line="young line", path=store)          # 1 success, not enough
+    assert sh.review_canaries("M", graduate_after=3, demote_after=2, path=store) == \
+        {"graduated": [], "demoted": []}
+    assert sh.list_canaries("M", store) == ["young line"]              # still on probation

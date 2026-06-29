@@ -109,7 +109,10 @@ safety model as skills and insights.
   generalization, not luck), and `max_cost_factor`/`max_latency_factor`/
   `max_tool_calls_factor` (reject a line that lifts pass-rate while regressing
   **cost/latency/tool-churn** — a scorer may return `{success, cost, latency,
-  tool_calls}`). Mining support is per-class-adaptable (`min_support_by_class`).
+  tool_calls}`), and `metamorphic_fn` (a meaning-preserving paraphraser — the
+  held-out improvement must **survive paraphrasing** the unseen cases, catching a
+  line overfit to surface wording, not the weakness). Mining support is
+  per-class-adaptable (`min_support_by_class`).
 - **Reversible + audited:** every applied line has a rollback handle and a signed
   `LEARNING_UPDATE` audit row.
 - **Bounded + non-eroding:** an addendum is capped (`_MAX_LINES_PER_MODEL`,
@@ -138,15 +141,35 @@ safety model as skills and insights.
   oppose an earlier one. `find_conflicts` / `detect_store_conflicts` flag
   suspected contradictions (shared topic, opposite polarity) into the
   `SelfHarnessReport` and `maverick self-harness conflicts` for operator review.
+  An optional injected `classifier_fn` (a semantic judge, e.g. an LLM) refines
+  the lexical heuristic — catching reworded conflicts it misses and suppressing
+  its false positives, falling back to the heuristic per-pair on any judge error.
   Advisory only — a false positive must never silently drop real guidance.
+- **Domain-scoped recall:** a line mined scoped to a department (wave-9
+  `mine_bucket_by`) is stored under a composite key (`"<model>\x00domain=<d>"`,
+  NUL-separated so it can't collide with a model id) and recalled **only for that
+  department's runs** via `recall_addendum(model_id, domain=…)` — wired into
+  `Agent._with_harness_addendum` from the run's `self.domain`. Model-wide lines
+  stay under the bare model id, so the default store is **byte-identical** and the
+  determinism proof is unaffected.
+- **Outcome-aware lifecycle:** `note_outcome` records per-line recall→success/
+  failure counters; `review_efficacy` re-measures a line's causal lift with the
+  live A/B and **demotes dead weight** (audited `forget`, the reversible
+  direction — never the promotion gate); and a `canary` line graduates or is
+  pulled by `review_canaries` from those counters (a staged-rollout valve). The
+  live A/B itself is the injected `score_with`/`score_without` seam, built out by
+  `self_harness_eval.corpus_ab_scorers` (corpus + `run_fn`/`judge_fn`).
 
 ## Operating it
 
 - `maverick self-harness preview [--model M] [--min-support N]` — read-only dry
   run: shows the weaknesses and the lines it *would* propose, writes nothing.
-- `maverick self-harness run [--model M] [--retire/--no-retire]` — run one
-  governed **cycle**: mine → propose → validate → gate, then retire stale
+- `maverick self-harness run [--model M] [--all-models] [--retire/--no-retire]` —
+  run one governed **cycle**: mine → propose → validate → gate, then retire stale
   guidance. The on-demand / scheduled entry point (`run_self_harness_cycle`).
+  `--all-models` runs the cycle for **every distinct configured role model** (the
+  fleet, `run_self_harness_all_models`), so worker models learn their own
+  harness, not just the orchestrator — each mines only its own traces.
   Without a live A/B scorer (a real model + eval harness, injected
   programmatically) it is a **dry** pass that writes no new guidance; stale-line
   retirement still runs — so a cron'd `run` keeps guidance fresh before live
