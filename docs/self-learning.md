@@ -186,6 +186,39 @@ pack's envelope. Mine and preview the corrections without applying them:
 maverick factory-learn --dry-run
 ```
 
+## Evaluator co-evolution
+
+The verifier-calibration interlock (above) keeps learning honest by **freezing**
+when the judge stops discriminating. That is the conservative half. The other
+half — after *The Red Queen Gödel Machine: Co-Evolving Agents and Their
+Evaluators* (arXiv 2606.26294) — is that a *fixed* evaluator eventually stops
+giving an informative signal even when it isn't broken: agents saturate it and
+the search plateaus. `evaluator_evolution.py` turns freeze-on-drift into
+**promote-on-drift**.
+
+A challenger evaluator replaces the incumbent only when its **agreement with a
+fixed ground-truth anchor** — measured by the conservative eps-best-belief lower
+bound (the eps-quantile of a `Beta(1+S,1+F)` posterior, the same statistic the
+paper uses) — beats it. The swap is routed through the **same
+`SelfImprovementController`** on a dedicated `evaluator` rung, so it inherits the
+evidence floor, the calibration freeze, reversibility, human approval, and the
+signed audit. An evaluator only *scores*, so it carries no capability-escalation
+surface; but because a swap re-ranks everything it judged, the rung sits above
+the default `max_auto_rung` (so a swap needs human approval until an operator
+raises the ceiling to `evaluator`). Each promotion advances the slot's **epoch**
+and applies **selective erasure** — only the displaced judge's learning records
+are discarded, keeping the within-epoch signal stationary.
+
+**The anchor is the guardrail, so the anchor is governed.** A weak, mutable, or
+poisoned anchor would launder drift, so released anchors are *immutable*:
+checksum-pinned in `evaluator_anchors.lock.json` and enforced by `python -m
+maverick.evaluator_evolution --ci` (regenerate after an intentional anchor
+addition with `--regen`), exactly as released world-model migrations are.
+
+Off by default and a no-op while off: it runs only under `[self_improvement]
+enable` **and** the `evaluator_evolution` sub-knob. Full design in
+[`docs/proposals/evaluator-co-evolution.md`](./proposals/evaluator-co-evolution.md).
+
 ## MCP-server acquisition
 
 PR #378 once let the agent add and hot-start an MCP server from a

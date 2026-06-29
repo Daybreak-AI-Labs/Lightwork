@@ -81,6 +81,11 @@ All verified locally green; each is a build-failer:
   editing a released version, removing one, a new DROP/RENAME, or a backend
   head mismatch all fail. `schema_migrations --ci` still gates online/offline
   hot-deploy safety; this is the integrity ratchet on top.
+- `python -m maverick.evaluator_evolution --ci`: evaluator ground-truth anchors
+  are immutable once released (the guardrail for evaluator co-evolution — a weak
+  or mutable anchor launders drift). Editing a released anchor's labels or
+  dropping one fails; a new anchor must be locked (`--regen` rewrites
+  `evaluator_anchors.lock.json`). No anchors committed = clean no-op.
 - `python -m maverick.control_data_plane_e2e --ci` and `python -m
   maverick.control_data_plane_soak --ci`: prove goals run out-of-process
   (QueueDispatcher → SQLite JobQueue → Worker → shared world). The e2e gate is
