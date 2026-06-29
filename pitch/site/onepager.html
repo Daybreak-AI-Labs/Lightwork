@@ -1,0 +1,176 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Lightwork — One-Pager | Daybreak Labs</title>
+<meta name="description" content="Lightwork by Daybreak Labs: the governed AI agent workforce a regulated enterprise can actually deploy. Self-hosted, egress-locked, tamper-evident, provably improving.">
+<style>
+/* Lightwork one-pager — print-first, single Letter page. Site design system. */
+@font-face{font-family:'Newsreader';font-style:normal;font-weight:400;font-display:swap;src:url(fonts/ns-400.woff2) format('woff2')}
+@font-face{font-family:'Newsreader';font-style:normal;font-weight:500;font-display:swap;src:url(fonts/ns-500.woff2) format('woff2')}
+@font-face{font-family:'Newsreader';font-style:normal;font-weight:600;font-display:swap;src:url(fonts/ns-600.woff2) format('woff2')}
+@font-face{font-family:'Newsreader';font-style:italic;font-weight:400;font-display:swap;src:url(fonts/ns-400i.woff2) format('woff2')}
+@font-face{font-family:'Inter';font-style:normal;font-weight:400;font-display:swap;src:url(fonts/inter-400.woff2) format('woff2')}
+@font-face{font-family:'Inter';font-style:normal;font-weight:500;font-display:swap;src:url(fonts/inter-500.woff2) format('woff2')}
+@font-face{font-family:'Inter';font-style:normal;font-weight:600;font-display:swap;src:url(fonts/inter-600.woff2) format('woff2')}
+@font-face{font-family:'Inter';font-style:normal;font-weight:700;font-display:swap;src:url(fonts/inter-700.woff2) format('woff2')}
+@font-face{font-family:'JetBrains Mono';font-style:normal;font-weight:400;font-display:swap;src:url(fonts/jbm-400.woff2) format('woff2')}
+@font-face{font-family:'JetBrains Mono';font-style:normal;font-weight:500;font-display:swap;src:url(fonts/jbm-500.woff2) format('woff2')}
+
+:root{
+  --paper:#FAF8F3; --card:#FFFFFF; --lav:#EEF0FB;
+  --ink:#17191E; --ink-2:#3C424C; --muted:#6B7079;
+  --line:#E5E0D4; --line-2:#D8D2C4;
+  --accent:#2E50E0; --navy:#0D1119; --navy-line:#232C3C; --on-navy:#ECEEF3; --on-navy-muted:#9AA6BC; --accent-bright:#7C9BFF; --mint:#2FA37A;
+  --serif:'Newsreader',Georgia,serif;
+  --sans:'Inter',-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,Helvetica,Arial,sans-serif;
+  --mono:'JetBrains Mono',ui-monospace,Menlo,Consolas,monospace;
+}
+@page{size:Letter;margin:0}
+*{box-sizing:border-box;margin:0;padding:0}
+html,body{background:#fff}
+body{font-family:var(--sans);color:var(--ink);font-size:9.6pt;line-height:1.45;-webkit-font-smoothing:antialiased;text-rendering:optimizeLegibility;-webkit-print-color-adjust:exact;print-color-adjust:exact}
+.page{width:8.5in;height:11in;background:var(--paper);padding:0.34in 0.5in 0;margin:0 auto;display:flex;flex-direction:column;overflow:hidden}
+.eyebrow{font-size:7.6pt;font-weight:600;letter-spacing:.13em;text-transform:uppercase;color:var(--muted)}
+.accent{color:var(--accent)}
+b,strong{font-weight:600;color:var(--ink)}
+
+/* header */
+.top{display:flex;align-items:center;justify-content:space-between;padding-bottom:13px;border-bottom:1px solid var(--line)}
+.brand{display:flex;align-items:center;gap:9px}
+.mark{width:26px;height:20px;background:#0A0E15;border:1px solid var(--navy-line);border-radius:6px;display:flex;align-items:center;justify-content:center}
+.mark span{width:12px;height:12px;border-radius:3px;background:var(--accent);display:block}
+.brand .w{font-size:17pt;font-weight:600;letter-spacing:-.02em}
+.brand .by{font-size:8.5pt;color:var(--muted);font-weight:500}
+.top .url{font-size:9pt;font-weight:600;color:var(--accent)}
+
+/* headline */
+.hl{margin-top:12px}
+.hl .eyebrow{color:var(--accent)}
+h1{font-family:var(--serif);font-weight:500;font-size:25pt;line-height:1.0;letter-spacing:-.02em;margin-top:5px}
+h1 i{font-style:italic;color:var(--accent);font-weight:400}
+
+/* question columns */
+.qs{display:grid;grid-template-columns:repeat(3,1fr);gap:16px;margin-top:13px}
+.q{border-left:2px solid var(--accent);padding-left:11px}
+.q .ask{font-family:var(--serif);font-style:italic;font-size:11pt;color:var(--ink)}
+.q .tag{font-size:7pt;font-weight:600;letter-spacing:.1em;text-transform:uppercase;color:var(--muted);margin-top:4px}
+
+.intro{margin-top:11px;font-size:9.4pt;color:var(--ink-2);line-height:1.44;max-width:97%}
+
+/* gate bar */
+.gate{margin-top:11px;background:var(--navy);color:var(--on-navy);border-radius:9px;padding:11px 15px;font-size:9pt;line-height:1.46}
+.gate .mono{font-family:var(--mono);font-size:8.4pt;color:var(--accent-bright)}
+
+/* section label */
+.slabel{font-size:8pt;font-weight:600;letter-spacing:.13em;text-transform:uppercase;color:var(--muted);margin:13px 0 8px}
+
+/* three things */
+.three{display:grid;grid-template-columns:repeat(3,1fr);gap:16px}
+.three .idx{font-family:var(--mono);font-size:8.5pt;color:var(--accent);font-weight:500}
+.three h3{font-size:10.5pt;font-weight:600;letter-spacing:-.01em;margin-top:3px}
+.three p{font-size:8.4pt;color:var(--muted);margin-top:5px;line-height:1.4}
+
+/* four ways */
+.four{display:grid;grid-template-columns:1fr 1fr;gap:7px 24px}
+.fw{display:flex;gap:9px}
+.fw .dot{width:6px;height:6px;border-radius:50%;background:var(--accent);margin-top:5px;flex:none}
+.fw h4{font-size:9.6pt;font-weight:600}
+.fw p{font-size:8.3pt;color:var(--muted);margin-top:1px;line-height:1.36}
+
+/* won't find box */
+.box{margin-top:11px;background:var(--lav);border:1px solid #DCE0F5;border-radius:11px;padding:13px 16px 14px}
+.box .slabel{color:var(--accent);margin:0 0 9px}
+.wf{display:grid;grid-template-columns:1fr 1fr;gap:9px 24px}
+.wf h4{font-size:9.6pt;font-weight:600}
+.wf h4 .accent{font-weight:600}
+.wf p{font-size:8.2pt;color:var(--ink-2);margin-top:1px;line-height:1.36}
+
+/* footer */
+.foot{margin:auto -0.5in 0;background:var(--navy);color:var(--on-navy-muted);padding:13px 0.5in;display:flex;justify-content:space-between;align-items:flex-end;gap:18px}
+.foot .big{font-family:var(--serif);font-size:14pt;font-weight:500;color:var(--on-navy);letter-spacing:-.01em}
+.foot .sub{font-size:8pt;margin-top:4px}
+.foot .contact{font-size:8.6pt;text-align:right;line-height:1.7;color:var(--on-navy)}
+.foot .contact a{color:var(--accent-bright);text-decoration:none}
+</style>
+</head>
+<body>
+<div class="page">
+
+  <div class="top">
+    <div class="brand">
+      <span class="mark"><span></span></span>
+      <span class="w">Lightwork</span>
+      <span class="by">by Daybreak Labs</span>
+    </div>
+    <span class="url">daybreakailabs.com</span>
+  </div>
+
+  <div class="hl">
+    <div class="eyebrow">The AI agent workforce a regulated enterprise can actually deploy</div>
+    <h1>Agents pass the demo. <i>They fail the diligence review.</i></h1>
+  </div>
+
+  <div class="qs">
+    <div class="q"><div class="ask">&ldquo;What did it do?&rdquo;</div><div class="tag">Audit / accountability</div></div>
+    <div class="q"><div class="ask">&ldquo;Could it exfiltrate our data?&rdquo;</div><div class="tag">Security / data boundary</div></div>
+    <div class="q"><div class="ask">&ldquo;Will it get worse?&rdquo;</div><div class="tag">Drift / assurance</div></div>
+  </div>
+
+  <p class="intro">Every AI-agent project in a regulated org hits the same three questions &mdash; and can't answer them. <b>Lightwork is the governed runtime that answers all three, on every action, before it runs</b> &mdash; self-hosted inside your environment, egress-locked, built to clear your security review.</p>
+
+  <div class="gate">Not a chatbot. Not a framework. A governed runtime &mdash; every action clears one gate before it happens: <span class="mono">capability &rarr; policy &rarr; shield &rarr; budget &rarr; audit</span>, on every tool call, payment, and write.</div>
+
+  <div class="slabel">Three things no one else ships</div>
+  <div class="three">
+    <div>
+      <div class="idx">01</div>
+      <h3>Governance on every action</h3>
+      <p>A hard gate plus maker-checker on every action, with EU AI Act Article&nbsp;14 holds &mdash; and every step on a signed, tamper-evident Operating Record. Prove what happened, to an auditor or a regulator.</p>
+    </div>
+    <div>
+      <div class="idx">02</div>
+      <h3>Provable improvement</h3>
+      <p>A closed, audited learning loop: the harness rewrites itself, proves each change lifts results on held-out work before it ships, and even the evaluator only improves against an immutable anchor. Signed, snapshotted, one command from rollback.</p>
+    </div>
+    <div>
+      <div class="idx">03</div>
+      <h3>2,020 specialists, built in</h3>
+      <p>A real workforce &mdash; 2,020 governed packs across 53 suites, each with a fixed job, a least-privilege tool set, a risk ceiling, and a human who signs off. Not a blank prompt box.</p>
+    </div>
+  </div>
+
+  <div class="slabel">Four ways to put governed agents to work</div>
+  <div class="four">
+    <div class="fw"><span class="dot"></span><div><h4>Lightwork Platform</h4><p>The governed runtime and the Operating Record &mdash; the gate, the audit, the budget caps, the kill switch.</p></div></div>
+    <div class="fw"><span class="dot"></span><div><h4>Second Shift</h4><p>Turnkey departments you switch on &mdash; Finance, Tax, Legal, +50 more. You don't prompt them; you turn them on.</p></div></div>
+    <div class="fw"><span class="dot"></span><div><h4>Fleet Governance &amp; Memory</h4><p>Govern the agents you didn't build &mdash; one oversight and memory plane for Agentforce, Copilot, in-house, and open-source agents.</p></div></div>
+    <div class="fw"><span class="dot"></span><div><h4>Daybreak Forge</h4><p>We author the bespoke department &mdash; custom packs, system-of-record connectors, validated fail-closed for regulated and air-gapped deployment.</p></div></div>
+  </div>
+
+  <div class="box">
+    <div class="slabel">What you won't find anywhere else</div>
+    <div class="wf">
+      <div><h4>It <span class="accent">rewrites its own harness.</span></h4><p>It mines its own failure traces into one minimal guidance line per weakness, regression-tests it on a held-out corpus, and only then promotes it &mdash; consolidating LLM-free, so it can't be prompt-steered.</p></div>
+      <div><h4>It <span class="accent">can't silently get worse.</span></h4><p>Each learned change ships as a watched canary, graded on real outcomes and pulled automatically if it stops paying off. A hindsight engine catches regressions before they ship; every change is signed and one command from rollback.</p></div>
+      <div><h4>It <span class="accent">grounds itself in primary sources.</span></h4><p>Analyst packs are auto-granted 37 read-only public-data connectors &mdash; SEC EDGAR, FRED, Treasury, CourtListener, openFDA, PubMed &mdash; so work cites an authoritative source, not model memory.</p></div>
+      <div><h4>Your other agents <span class="accent">answer to it.</span></h4><p>One signed memory-and-oversight plane that Agentforce, Copilot, in-house, and open-source agents all deposit into, recall from, and are audited against &mdash; with value broken out per vendor.</p></div>
+    </div>
+  </div>
+
+  <div class="foot">
+    <div>
+      <div class="big">We don't say it's governed. We show it.</div>
+      <div class="sub">Daybreak Labs &middot; Lightwork &middot; Private alpha &mdash; accepting a small number of design partners.</div>
+    </div>
+    <div class="contact">
+      <a href="mailto:info@daybreakailabs.com">info@daybreakailabs.com</a><br>
+      (423)&nbsp;322-9722<br>
+      <a href="https://daybreakailabs.com">daybreakailabs.com</a>
+    </div>
+  </div>
+
+</div>
+</body>
+</html>
