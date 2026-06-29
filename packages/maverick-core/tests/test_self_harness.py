@@ -1660,3 +1660,66 @@ def test_model_keys_no_prefix_collision(monkeypatch, store):
     sh.forget_addendum("M", path=store)
     assert "m2 line" in sh.recall_addendum("M2", store)
     assert sh.list_learned(store).get("M2") == ["m2 line"]
+
+
+# ---------- the capstone: driver auto-builds the live A/B from config ----------
+
+def test_cycle_auto_evaluates_and_promotes_from_corpus(monkeypatch, tmp_path, store):
+    import json as _json
+
+    from maverick import config, llm
+    from maverick import self_improvement_runner as runner
+    ctrl = _enable(monkeypatch)
+    monkeypatch.setattr(sh, "_store_path", lambda: store)
+    # a tiny eval corpus for model M, and config pointing the driver at it
+    corpus = {"M": [{"goal": f"g{i}", "expected": "WIN"} for i in range(6)]}
+    cpath = tmp_path / "corpus.json"
+    cpath.write_text(_json.dumps(corpus))
+    monkeypatch.setattr(config, "load_config", lambda *a, **k: {
+        "self_harness": {"enable": True, "eval_corpus": str(cpath)}})
+
+    class _FakeLLM:
+        def __init__(self, model="x", **kw):
+            self.model = model
+
+        def complete(self, system, messages, **kw):
+            if "evaluator" in (system or "").lower():        # the judge
+                content = messages[0]["content"]
+                out = content.split("OUTPUT:\n", 1)[1].split("\n\nExpected")[0]
+                return type("R", (), {"text": "yes" if out == "WIN" else "no"})()
+            helped = "MAGIC-LINE" in (system or "")           # runner: candidate present?
+            return type("R", (), {"text": "WIN" if helped else "LOSE"})()
+
+    monkeypatch.setattr(llm, "LLM", _FakeLLM)
+    monkeypatch.setattr(llm, "model_for_role", lambda role: "verifier-model")
+
+    refl = [_refl("M", "timeout", "export the nightly ledger") for _ in range(3)]
+    # NO scorers injected -> the driver auto-builds the live A/B from the corpus
+    report, _ = runner.run_self_harness_cycle(
+        reflexions=refl, model_id="M", retire=False, controller=ctrl,
+        propose_fn=lambda s: "MAGIC-LINE bound the export window")
+    assert report.promoted == 1                               # promoted FOR REAL, end to end
+    assert "MAGIC-LINE" in sh.recall_addendum("M", store)
+
+
+def test_cycle_stays_dry_without_corpus(monkeypatch, store):
+    from maverick import config
+    from maverick import self_improvement_runner as runner
+    _enable(monkeypatch)
+    monkeypatch.setattr(sh, "_store_path", lambda: store)
+    monkeypatch.setattr(config, "load_config", lambda *a, **k: {
+        "self_harness": {"enable": True}})                    # no eval_corpus
+    refl = [_refl("M", "timeout", "export the nightly ledger") for _ in range(3)]
+    report, _ = runner.run_self_harness_cycle(reflexions=refl, model_id="M", retire=False)
+    assert report.mined == 1 and report.promoted == 0         # dry, unchanged behavior
+
+
+def test_auto_evaluator_none_without_cases(monkeypatch, tmp_path):
+    import json as _json
+
+    from maverick import self_improvement_runner as runner
+    cpath = tmp_path / "c.json"
+    cpath.write_text(_json.dumps({"OTHER": [{"goal": "g", "expected": "x"}]}))
+    # no cases for model M -> None (caller stays dry)
+    assert runner._auto_evaluator("M", corpus_path=str(cpath)) is None
+    assert runner._auto_evaluator("M", corpus_path=str(tmp_path / "missing.json")) is None

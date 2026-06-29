@@ -209,6 +209,34 @@ def run_self_harness_pass(
         return self_harness.SelfHarnessReport(model_id=str(model_id or ""))
 
 
+def _auto_evaluator(model_id: str, *, corpus_path: str, held_out_frac: float = 0.3,
+                    budget=None):
+    """Build ``(held_in, held_out, score_with, score_without)`` -- the LIVE A/B --
+    from a configured eval corpus + the model's own LLM client, so the driver can
+    actually PROMOTE rather than only dry-inspect. The candidate ``model_id``
+    GENERATES; a verifier-role model JUDGES (cross-model, to avoid self-grading;
+    neither is hard-coded -- :func:`model_for_role`, kernel rule 2). Returns
+    ``None`` (caller stays dry) when there is no corpus, no cases for the model, or
+    no usable held-out split. Never raises."""
+    try:
+        from . import self_harness_eval as ev
+        from .llm import LLM, model_for_role
+        cases = ev.corpus_cases(ev.load_eval_corpus(corpus_path), model_id)
+        if not cases:
+            return None
+        held_in, held_out = ev.corpus_split(cases, held_out_frac=held_out_frac)
+        if not held_out:
+            return None
+        score_with, score_without = ev.corpus_ab_scorers(
+            cases,
+            run_fn=ev.llm_runner(LLM(model_id), budget=budget),
+            judge_fn=ev.llm_judge(LLM(model_for_role("verifier")), budget=budget))
+        return held_in, held_out, score_with, score_without
+    except Exception:  # pragma: no cover -- a missing provider/corpus stays dry
+        log.debug("self-harness auto-evaluator construction failed", exc_info=True)
+        return None
+
+
 def run_self_harness_cycle(
     reflexions=None, *, model_id: str | None = None, limit: int = 500,
     retire: bool = True, retire_after_days: float | None = None,
@@ -220,15 +248,31 @@ def run_self_harness_cycle(
     to operate the harness end-to-end. Returns ``(report, retired_count)``.
 
     The pass is :func:`run_self_harness_pass` (mine -> propose -> validate ->
-    gate); without injected ``score_with``/``score_without`` (a live A/B needs a
-    real model + eval harness) it is a DRY inspection that writes no NEW guidance,
-    but retirement still runs -- so a scheduled ``maverick self-harness run`` keeps
-    guidance fresh even before live scoring is wired. Retirement uses
+    gate). The live A/B (``score_with``/``score_without``) is injected, OR -- when
+    the caller injects none and ``[self_harness] eval_corpus`` is configured --
+    AUTO-BUILT by :func:`_auto_evaluator` (the model generates, a verifier judges)
+    so a scheduled ``maverick self-harness run`` actually PROMOTES. With no scorer
+    and no corpus it is a DRY inspection that writes no NEW guidance, but
+    retirement still runs -- so the cycle keeps guidance fresh either way.
+    Retirement uses
     ``retire_after_days`` (arg overrides ``[self_harness]`` config; 0/None = off)
     and is scoped to the pass's resolved model. Never raises -- a maintenance
     cycle must not perturb anything."""
     try:
         from . import self_harness
+        # AUTO-WIRE the live A/B from config so a scheduled cycle can actually
+        # PROMOTE, not just dry-inspect: if the caller injected no scorers and
+        # [self_harness] eval_corpus is set, build the model-generates /
+        # verifier-judges evaluator. Unset corpus (the default) -> stays dry, so
+        # behavior is unchanged out of the box.
+        if (score_with is None and score_without is None and self_harness.enabled()):
+            corpus_path = self_harness.settings().get("eval_corpus")
+            if corpus_path:
+                from .llm import model_for_role
+                model_id = model_id or model_for_role("orchestrator")
+                built = _auto_evaluator(model_id, corpus_path=corpus_path)
+                if built is not None:
+                    held_in, held_out, score_with, score_without = built
         report = run_self_harness_pass(
             reflexions, model_id=model_id, limit=limit,
             held_in=held_in, held_out=held_out, score_with=score_with,
