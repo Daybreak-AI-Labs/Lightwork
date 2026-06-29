@@ -56,7 +56,7 @@ that can substantiate it.
 
 Run the **whole agent** through AgentDojo with the shield ON vs OFF and report
 the attack-success-rate delta plus the benign task-completion delta (the
-over-refusal cost). This is the headline "Maverick blocks N% of AgentDojo
+over-refusal cost). This is the headline "Lightwork blocks N% of AgentDojo
 injections" claim.
 
 ```bash

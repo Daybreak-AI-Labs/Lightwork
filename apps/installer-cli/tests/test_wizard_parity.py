@@ -192,6 +192,16 @@ def test_write_config_emits_plugins(tmp_path: Path, monkeypatch):
     assert parsed["plugins"]["enabled"] == ["weather", "github-issues"]
 
 
+def test_write_config_self_harness_ships_production_floors(tmp_path: Path, monkeypatch):
+    # Enabling self-harness writes the validation floors so a wizard-built config
+    # is production-safe by default (an operator can relax them).
+    parsed = _write_full_config(tmp_path, monkeypatch, advanced={"self_harness": True})
+    assert parsed["self_harness"]["enable"] is True
+    assert parsed["self_harness"]["require_held_out"] is True
+    assert parsed["self_harness"]["min_held_out"] == 5
+    assert parsed["self_harness"]["min_delta"] == 0.02
+
+
 def test_write_config_emits_self_learning(tmp_path: Path, monkeypatch):
     parsed = _write_full_config(
         tmp_path, monkeypatch,

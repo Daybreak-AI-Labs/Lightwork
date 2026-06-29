@@ -12,7 +12,7 @@
 
 ## How to use this template
 
-This is the Acceptable Use Policy (AUP) that every person with access to Maverick
+This is the Acceptable Use Policy (AUP) that every person with access to Lightwork
 systems or data signs. It is issued as a pre-employment and onboarding step under
 HR Security Procedures (PROC-06, sections 2.4 and 3). Issue it as a standalone
 document, have the person read it, and collect the signature block in section 11.
@@ -21,9 +21,9 @@ bracketed fields in section 11 at signing time.
 
 ## 1. Purpose & scope
 
-This policy defines the acceptable use of the Organization's systems, the Maverick
+This policy defines the acceptable use of the Organization's systems, the Lightwork
 platform, and the data it processes. It applies to all employees, contractors,
-interns, and temporary staff ("you") and to all devices used to access Maverick —
+interns, and temporary staff ("you") and to all devices used to access Lightwork —
 company-issued or personal. By signing, you agree to use these systems only for
 authorized business purposes and in line with this policy, the HR Security Policy
 (POL-10), the Responsible AI Policy (POL-12), and the Code of Conduct
@@ -31,7 +31,7 @@ authorized business purposes and in line with this policy, the HR Security Polic
 
 ## 2. Acceptable use of systems & data
 
-- Use Organization systems and Maverick only for authorized business purposes and
+- Use Organization systems and Lightwork only for authorized business purposes and
   only at the access level granted to you (your dashboard RBAC role and kernel
   capabilities). Do not attempt to access systems, data, tools, or environments
   you have not been granted.
@@ -60,7 +60,7 @@ authorized business purposes and in line with this policy, the HR Security Polic
   extent needed (data minimization).
 - Do not copy, export, screenshot, email, or upload customer data to any tool,
   device, or location not explicitly approved for it.
-- Keep customer data within approved Maverick environments; do not paste customer
+- Keep customer data within approved Lightwork environments; do not paste customer
   data into unapproved third-party AI tools or services.
 - Handle customer data per its classification and applicable contractual and
   regulatory obligations. When in doubt, ask the Security Lead before acting.
@@ -69,7 +69,7 @@ authorized business purposes and in line with this policy, the HR Security Polic
 
 - Keep devices used for work patched and running current OS and security updates.
 - Ensure full-disk encryption, a screen lock with short timeout, and endpoint
-  protection are enabled on any device that accesses Maverick.
+  protection are enabled on any device that accesses Lightwork.
 - Work over trusted networks; use the Organization's VPN / approved access path
   for remote work. Avoid untrusted public networks for sensitive work.
 - Do not leave devices unlocked or unattended in public. Report lost or stolen
@@ -79,7 +79,7 @@ authorized business purposes and in line with this policy, the HR Security Polic
 
 ## 6. AI-system use (ISO 42001 A.3.2; Responsible AI — POL-12)
 
-Maverick is a governed agentic platform. When using it or operating agents:
+Lightwork is a governed agentic platform. When using it or operating agents:
 
 - **Do not bypass governance or consent gates.** Approval, consent, and
   human-in-the-loop checkpoints exist by design; do not circumvent, auto-approve,
@@ -112,7 +112,7 @@ You must not:
 - Bypass, disable, or tamper with security or governance controls (auth, MFA,
   RBAC, capabilities, budget caps, sandbox, audit log).
 - Install unapproved software, or connect unapproved tools/integrations to
-  Maverick or customer data.
+  Lightwork or customer data.
 - Use Organization systems for unlawful activity, harassment, or any purpose
   prohibited by `CODE_OF_CONDUCT.md`.
 - Commit secrets to source control or attempt to defeat the secret-scanning gate.

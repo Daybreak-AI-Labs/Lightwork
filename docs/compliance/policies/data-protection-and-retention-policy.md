@@ -13,16 +13,16 @@
 
 ## 1. Purpose
 
-This policy establishes how the Organization classifies, handles, retains, and disposes of data processed by Maverick, and how it protects personal data (PII) and the rights of data subjects. It defines the controls that ensure data is held only as long as necessary, protected against leakage and unauthorized exposure, and erasable on demand. It supports the Organization's obligations under the EU General Data Protection Regulation (GDPR), ISO/IEC 27001:2022, ISO/IEC 42001:2023, and the SOC 2 Confidentiality and Privacy criteria.
+This policy establishes how the Organization classifies, handles, retains, and disposes of data processed by Lightwork, and how it protects personal data (PII) and the rights of data subjects. It defines the controls that ensure data is held only as long as necessary, protected against leakage and unauthorized exposure, and erasable on demand. It supports the Organization's obligations under the EU General Data Protection Regulation (GDPR), ISO/IEC 27001:2022, ISO/IEC 42001:2023, and the SOC 2 Confidentiality and Privacy criteria.
 
 ## 2. Scope
 
-This policy applies to all data created, ingested, derived, stored, or transmitted by Maverick — including the world model (operational state), the signed audit chain, fleet/shared memory, share-link artifacts, and any data used for or produced by AI systems. It covers all tenants, all environments (development, staging, production), all personnel and automated agents acting on the Organization's behalf, and all data classifications from public through restricted/personal data. It applies to data at rest, in transit, and in use.
+This policy applies to all data created, ingested, derived, stored, or transmitted by Lightwork — including the world model (operational state), the signed audit chain, fleet/shared memory, share-link artifacts, and any data used for or produced by AI systems. It covers all tenants, all environments (development, staging, production), all personnel and automated agents acting on the Organization's behalf, and all data classifications from public through restricted/personal data. It applies to data at rest, in transit, and in use.
 
 ## 3. Policy statements
 
-1. **Data classification.** All data handled by Maverick shall be classified (e.g. Public, Internal, Confidential, Restricted/Personal) and handled according to its classification. Personal data and secrets are treated as the highest-sensitivity classes. **[Process — Organization to operationalize]** the formal classification scheme, labelling convention, and the mapping of Maverick data stores to classes.
-2. **Data minimization.** Maverick shall collect and retain only the personal data necessary for its stated purpose. Identifying fields shall be minimized, redacted, or anonymized wherever the processing purpose does not require them.
+1. **Data classification.** All data handled by Lightwork shall be classified (e.g. Public, Internal, Confidential, Restricted/Personal) and handled according to its classification. Personal data and secrets are treated as the highest-sensitivity classes. **[Process — Organization to operationalize]** the formal classification scheme, labelling convention, and the mapping of Lightwork data stores to classes.
+2. **Data minimization.** Lightwork shall collect and retain only the personal data necessary for its stated purpose. Identifying fields shall be minimized, redacted, or anonymized wherever the processing purpose does not require them.
 3. **Data handling.** Personal and confidential data shall be encrypted at rest, isolated per tenant and per owner, and protected against accidental or malicious leakage. Sensitive tokens shall never be stored in recoverable plaintext.
 4. **Retention limitation (GDPR Art. 5(1)(e)).** Data shall be retained only for as long as required by its purpose or by a documented legal/contractual obligation. Time-to-live (TTL) retention windows shall be enforced and expired data scheduled for deletion. **[Process — Organization to operationalize]** the retention schedule (per data category, with retention periods and legal bases).
 5. **Disposal & deletion (Art. 17).** Expired data and data subject to an erasure request shall be securely deleted from all stores, including derived and audit data, and the integrity of remaining records preserved.
@@ -44,7 +44,7 @@ This policy applies to all data created, ingested, derived, stored, or transmitt
 
 **[Process — Organization to operationalize]** named individuals/teams for each role.
 
-## 5. Technical implementation in Maverick
+## 5. Technical implementation in Lightwork
 
 | Control | Implementation (file/module) | Status |
 | --- | --- | --- |

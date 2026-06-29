@@ -991,22 +991,19 @@ def _shared_rate_limit_check(key: str, cap: int, global_cap: int) -> bool:
         if not is_postgres_configured():
             return False
         w = _world()
-        now = time.time()
-        cutoff = now - 60.0
-        if w.count_rate_events(_RL_GLOBAL_KEY, cutoff) >= global_cap:
+        result = w.reserve_rate_events(key, cap, _RL_GLOBAL_KEY, global_cap, time.time())
+        if result == "global":
             raise HTTPException(
                 status_code=429,
                 detail=f"goal rate limit reached ({global_cap}/min total). Try again shortly.",
                 headers={"Retry-After": "60"},
             )
-        if w.count_rate_events(key, cutoff) >= cap:
+        if result == "key":
             raise HTTPException(
                 status_code=429,
                 detail=f"goal rate limit reached ({cap}/min). Try again shortly.",
                 headers={"Retry-After": "60"},
             )
-        w.record_rate_event(_RL_GLOBAL_KEY, now)
-        w.record_rate_event(key, now)
         return True
     except HTTPException:
         raise
@@ -1493,6 +1490,76 @@ async def spend_page(request: Request) -> HTMLResponse:
         request, "spend.html",
         {"episodes": w.list_episodes(limit=50), "total": w.total_spend()},
     )
+
+
+@app.get("/billing")
+async def billing_page(request: Request, format: str = "", period: str = ""):
+    """Tenant billing statement: accrued charges for the current period, a
+    period-over-period trend, and an itemized CSV invoice.
+
+    Charges are the priced runs (episodes) bucketed by month. The active
+    tenant / client id labels the statement (the world is tenant-scoped).
+    ``?format=csv&period=YYYY-MM`` downloads the itemized invoice for a month.
+    """
+    from datetime import datetime, timezone
+
+    w = _world()
+    episodes = w.list_episodes(limit=10_000)
+    months: dict[str, dict] = {}
+    for e in episodes:
+        if not e.ended_at:
+            continue
+        m = datetime.fromtimestamp(e.started_at, timezone.utc).strftime("%Y-%m")
+        b = months.setdefault(m, {"period": m, "cost": 0.0, "input_tokens": 0,
+                                  "output_tokens": 0, "runs": 0})
+        b["cost"] += e.cost_dollars
+        b["input_tokens"] += e.input_tokens
+        b["output_tokens"] += e.output_tokens
+        b["runs"] += 1
+    for b in months.values():
+        b["cost"] = round(b["cost"], 6)
+
+    try:
+        from maverick.client import client_id
+        from maverick.paths import current_tenant
+        tenant = current_tenant() or client_id() or "default"
+    except Exception:
+        tenant = "default"
+
+    if format == "csv":
+        sel = period or datetime.now(timezone.utc).strftime("%Y-%m")
+        rows = ["episode_id,goal_id,started_at,ended_at,outcome,"
+                "cost_dollars,input_tokens,output_tokens,tool_calls"]
+        for e in episodes:
+            if not e.ended_at:
+                continue
+            started = datetime.fromtimestamp(e.started_at, timezone.utc)
+            if started.strftime("%Y-%m") != sel:
+                continue
+            ended = datetime.fromtimestamp(e.ended_at, timezone.utc).isoformat()
+            rows.append(
+                f"{e.id},{e.goal_id},{started.isoformat()},{ended},"
+                f"{e.outcome or ''},{e.cost_dollars:.6f},"
+                f"{e.input_tokens},{e.output_tokens},{e.tool_calls}")
+        return PlainTextResponse(
+            "\n".join(rows) + "\n", media_type="text/csv",
+            headers={"Content-Disposition":
+                     f'attachment; filename="invoice-{tenant}-{sel}.csv"'})
+
+    cur = datetime.now(timezone.utc).strftime("%Y-%m")
+    current = months.get(cur, {"period": cur, "cost": 0.0, "input_tokens": 0,
+                               "output_tokens": 0, "runs": 0})
+    prev_keys = sorted([m for m in months if m < cur], reverse=True)
+    previous = months.get(prev_keys[0]) if prev_keys else None
+    delta_pct = None
+    if previous and previous["cost"] > 0:
+        delta_pct = round(
+            (current["cost"] - previous["cost"]) / previous["cost"] * 100, 1)
+    series = [months[k] for k in sorted(months, reverse=True)][:12]
+    return templates.TemplateResponse(request, "billing.html", {
+        "tenant": tenant, "current": current, "previous": previous,
+        "delta_pct": delta_pct, "series": series,
+    })
 
 
 @app.get("/providers", response_class=HTMLResponse)
@@ -4823,7 +4890,7 @@ async def readyz() -> JSONResponse:
 
 
 @app.get("/metrics", response_class=PlainTextResponse)
-async def metrics() -> PlainTextResponse:
+async def metrics(request: Request) -> PlainTextResponse:
     """Prometheus text format. Gated by the same bearer as /api/v1."""
     from maverick.runner import MAX_CONCURRENT_GOALS, _run_semaphore
     try:
@@ -4873,14 +4940,16 @@ async def metrics() -> PlainTextResponse:
     for qstatus, qn in sorted(qcounts.items()):
         lines.append(f'maverick_queue_jobs{{status="{qstatus}"}} {qn}')
 
-    # Per-principal spend today — answers "which user is burning budget?", which
-    # the deployment-wide cost gauges can't. Populated by the quota ledger
-    # (recorded per run); empty when quotas aren't being recorded.
-    try:
-        from maverick.quotas import UsageLedger
-        user_spend = UsageLedger().spend_by_principal()
-    except Exception:
-        user_spend = {}
+    # Per-principal spend today is cross-user control-plane data. Keep it
+    # visible to the local single-user/no-auth operator and dashboard admins,
+    # but do not leak raw principal identifiers or spend to ordinary callers.
+    user_spend: dict[str, float] = {}
+    if goal_owner_filter(request) is None:
+        try:
+            from maverick.quotas import UsageLedger
+            user_spend = UsageLedger().spend_by_principal()
+        except Exception:
+            user_spend = {}
     if user_spend:
         lines += [
             "# HELP maverick_user_spend_dollars_today Per-principal spend for the current UTC day",

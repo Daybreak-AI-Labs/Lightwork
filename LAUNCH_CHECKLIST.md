@@ -1,4 +1,4 @@
-# Maverick Launch Checklist
+# Lightwork Launch Checklist
 
 This public checklist is intentionally limited to non-sensitive release gates.
 Operational details that identify unfinished security fixes, affected

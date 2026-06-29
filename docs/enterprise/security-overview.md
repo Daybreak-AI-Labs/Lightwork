@@ -35,7 +35,7 @@ fail-closed (`maverick/enterprise.py`):
   configured isolation backend, and plugin distributions can be checked against
   a **content-hash lockfile** when lock enforcement is enabled. Plugin discovery,
   imports, tool factories, channel plugins, skill plugins, and persona plugins
-  still run in the Maverick process; install only trusted plugins, and generate a
+  still run in the Lightwork process; install only trusted plugins, and generate a
   lockfile before relying on drift enforcement (`plugins.py`,
   `plugin_isolation.py`, `plugin_lock.py`).
 

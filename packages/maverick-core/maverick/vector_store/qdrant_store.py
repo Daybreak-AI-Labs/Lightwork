@@ -25,7 +25,12 @@ from ..paths import data_dir
 log = logging.getLogger(__name__)
 
 
-DEFAULT_PATH = data_dir("qdrant")
+DEFAULT_PATH = data_dir("qdrant", tenant=None)
+
+
+def _default_path() -> Path:
+    """Resolve the default local Qdrant path for the active tenant."""
+    return data_dir("qdrant")
 
 
 def _active_tenant() -> str | None:
@@ -74,9 +79,7 @@ class QdrantStore:
         if url:
             self._client = QdrantClient(url=url, api_key=api_key)
         else:
-            store_path = Path(
-                path or os.environ.get("MAVERICK_QDRANT_PATH", str(DEFAULT_PATH))
-            )
+            store_path = Path(path or os.environ.get("MAVERICK_QDRANT_PATH") or _default_path())
             store_path.mkdir(parents=True, exist_ok=True)
             try:
                 os.chmod(store_path, 0o700)
@@ -145,23 +148,41 @@ class QdrantStore:
         """
         if not text:
             return []
+        tenant_id = _active_tenant()
+        want = max(1, min(top_k, 100))
+        prefix = f"tenant:{tenant_id}:" if tenant_id is not None else None
+        # The similarity search spans the whole collection, but writes are
+        # namespaced by `_stored_id` (the same isolation boundary delete() uses).
+        # Without scoping the read, query() returned OTHER tenants' vectors.
+        # Over-fetch and drop hits outside this tenant's prefix; strip the prefix
+        # so the caller gets back its original doc id. (Best-effort top_k: a tenant
+        # whose vectors are sparse among many may get < top_k -- a server-side
+        # payload filter would be exact, but this matches the id-namespacing design.)
+        fetch = want if prefix is None else min(100, want * 10)
         results = self._client.query(
             collection_name=self._collection,
             query_text=text,
-            limit=max(1, min(top_k, 100)),
+            limit=fetch,
         )
         out: list[dict] = []
         for r in results:
+            rid = str(getattr(r, "id", ""))
+            if prefix is not None:
+                if not rid.startswith(prefix):
+                    continue
+                rid = rid[len(prefix):]
             score = getattr(r, "score", None)
             score_f = float(score) if isinstance(score, (int, float)) else None
             distance = (1.0 - score_f) if score_f is not None else None
             out.append({
-                "id": str(getattr(r, "id", "")),
+                "id": rid,
                 "document": getattr(r, "document", "") or "",
                 "score": score_f,
                 "distance": distance,
                 "metadata": getattr(r, "metadata", None) or None,
             })
+            if len(out) >= want:
+                break
         return out
 
     def delete(self, ids: list[str]) -> None:
@@ -179,7 +200,9 @@ class QdrantStore:
         try:
             res = self._client.count(collection_name=self._collection, exact=True)
             return int(getattr(res, "count", 0))
-        except Exception:
+        except Exception as e:
+            # Log so a backend outage isn't silently reported as an empty store.
+            log.warning("qdrant: count failed (%s); reporting 0", e)
             return 0
 
     def reset(self) -> None:

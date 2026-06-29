@@ -288,8 +288,8 @@ _GOAL_DOMAIN_MIGRATION: list[str] = [
 
 # --- Projects (migration v15) ------------------------------------------------
 # Parity with the SQLite ``projects`` table + ``goals.project_id``: a goal can be
-# filed under one project (nullable). name/description are plaintext here (the PG
-# backend stores plaintext today, unlike SQLite's at-rest encryption); owner/
+# filed under one project (nullable). name/description are sealed at rest via
+# ``_seal()`` (encrypted when at-rest encryption is on, same as SQLite); owner/
 # domain/status are plaintext for listing + scoping. ``tenant_id`` mirrors the
 # v10 tenancy seam so projects isolate per tenant like goals/facts.
 _PROJECTS_MIGRATION: list[str] = [
@@ -313,9 +313,10 @@ _PROJECTS_MIGRATION: list[str] = [
 
 # --- Artifacts (migration v16) -----------------------------------------------
 # Parity with the SQLite ``artifacts`` table: deliverables a goal produced
-# (markdown/code/table/text), versioned per (goal_id, title). content is
-# plaintext under PG (SQLite encrypts at rest). Scoped through goal_id's tenant
-# like other child tables, so no tenant_id column of its own.
+# (markdown/code/table/text), versioned per (goal_id, title). content is sealed
+# at rest via ``_seal()`` (encrypted when at-rest encryption is on, same as
+# SQLite). Scoped through goal_id's tenant like other child tables, so no
+# tenant_id column of its own.
 _ARTIFACTS_MIGRATION: list[str] = [
     """
     CREATE TABLE IF NOT EXISTS artifacts (
@@ -336,8 +337,8 @@ _ARTIFACTS_MIGRATION: list[str] = [
 # Parity with the SQLite tables: a revocable expiring read-only share link to a
 # goal (only the token's SHA-256 is stored); a human's certify/reject sign-off on
 # a deliverable (one row per goal); and which automation spawned a goal. All are
-# child tables keyed by goal_id, scoped through the goal's tenant. note is
-# plaintext under PG (SQLite encrypts at rest).
+# child tables keyed by goal_id, scoped through the goal's tenant. note is sealed
+# at rest via ``_seal()`` (encrypted when at-rest encryption is on, same as SQLite).
 _SHARE_SIGNOFF_ORIGIN_MIGRATION: list[str] = [
     """
     CREATE TABLE IF NOT EXISTS share_links (
@@ -459,6 +460,18 @@ _PROVIDER_SPEND_MIGRATION = [
     " PRIMARY KEY (period_key, provider))",
 ]
 
+# v24 facts provenance columns: persist source / trust_tier / sensitivity on the
+# live `facts` table (same defaults as fact_history) so memory_guard reads the
+# real recall-trust tier directly from `facts` -- closing the non-temporal
+# fallback that defaulted every fact to tier 3. SQLite already carries these in
+# its base CREATE (backfilled by its own v17); Postgres adds them here. Additive
+# ADD COLUMN IF NOT EXISTS -- passes the migration-governance additive-only gate.
+_FACTS_TRUST_MIGRATION: list[str] = [
+    "ALTER TABLE facts ADD COLUMN IF NOT EXISTS source TEXT NOT NULL DEFAULT '';",
+    "ALTER TABLE facts ADD COLUMN IF NOT EXISTS trust_tier INTEGER NOT NULL DEFAULT 3;",
+    "ALTER TABLE facts ADD COLUMN IF NOT EXISTS sensitivity TEXT NOT NULL DEFAULT 'internal';",
+]
+
 MIGRATIONS: list[tuple[int, list[str]]] = [
     (1, SCHEMA),
     (10, _TENANT_MIGRATION),
@@ -473,6 +486,7 @@ MIGRATIONS: list[tuple[int, list[str]]] = [
     (21, _DUAL_CONTROL_MIGRATION),
     (22, _HALT_MIGRATION),
     (23, _PROVIDER_SPEND_MIGRATION),
+    (24, _FACTS_TRUST_MIGRATION),
 ]
 
 # Highest migration version = the reported schema version.
@@ -1015,6 +1029,42 @@ class PostgresWorldModel:
         with self._tx() as cur:
             cur.execute(sql, tuple(params))
 
+    def set_goal_title(self, goal_id: int, title: str) -> None:
+        """Rename a goal, sealing the title column like ``create_goal`` does."""
+        now = time.time()
+        frag, fparams = _tenant_scope()
+        sql = "UPDATE goals SET title=%s, updated_at=%s WHERE id=%s"
+        params: list = [_seal(title), now, goal_id]
+        if frag:
+            sql += " AND " + frag
+            params += fparams
+        with self._tx() as cur:
+            cur.execute(sql, tuple(params))
+
+    def set_goal_parent(self, goal_id: int, parent_id: int | None) -> None:
+        """Move a goal under a new parent (or to the root with ``None``)."""
+        now = time.time()
+        frag, fparams = _tenant_scope()
+        sql = "UPDATE goals SET parent_id=%s, updated_at=%s WHERE id=%s"
+        params: list = [
+            int(parent_id) if parent_id is not None else None, now, goal_id]
+        if frag:
+            sql += " AND " + frag
+            params += fparams
+        with self._tx() as cur:
+            cur.execute(sql, tuple(params))
+
+    def goal_parent_pairs(self) -> list[tuple[int, int | None]]:
+        """``(id, parent_id)`` for every goal (tenant-scoped) -- the edge list."""
+        frag, params = _tenant_scope()
+        sql = "SELECT id, parent_id FROM goals"
+        if frag:
+            sql += " WHERE " + frag
+        with self._tx() as cur:
+            cur.execute(sql, tuple(params))
+            rows = cur.fetchall()
+        return [(int(r[0]), r[1]) for r in rows]
+
     def search_goals(
         self, query: str, *, owner: str | None = None,
         limit: int = 50, scan: int = 1000,
@@ -1193,23 +1243,36 @@ class PostgresWorldModel:
     def list_projects(self, *, owner: str | None = None) -> list[dict]:
         """All projects newest first; each carries a ``goal_count``.
 
-        ``owner`` is accepted for signature parity; PG isolates by tenant
-        (applied below)."""
+        When supplied, ``owner`` scopes project metadata to that principal,
+        matching the SQLite backend contract used by the dashboard RBAC layer.
+        Tenant scoping is still applied independently.
+        """
         sql = f"SELECT {self._PROJECT_COLS} FROM projects"
         params: list = []
+        clauses: list[str] = []
+        if owner is not None:
+            clauses.append("owner=%s")
+            params.append(owner)
         frag, fparams = _tenant_scope()
         if frag:
-            sql += " WHERE " + frag
+            clauses.append(frag)
             params += fparams
+        if clauses:
+            sql += " WHERE " + " AND ".join(clauses)
         sql += " ORDER BY id DESC"
+        goal_count_sql = "SELECT COUNT(*) FROM goals WHERE project_id=%s"
+        goal_count_params: list = []
+        goal_frag, goal_fparams = _tenant_scope()
+        if goal_frag:
+            goal_count_sql += " AND " + goal_frag
+            goal_count_params += goal_fparams
         with self._tx() as cur:
             cur.execute(sql, tuple(params))
             rows = cur.fetchall()
             out: list[dict] = []
             for r in rows:
                 proj = self._project_from_row(r)
-                cur.execute(
-                    "SELECT COUNT(*) FROM goals WHERE project_id=%s", (proj["id"],))
+                cur.execute(goal_count_sql, tuple([proj["id"], *goal_count_params]))
                 c = cur.fetchone()
                 proj["goal_count"] = int(c[0]) if c else 0
                 out.append(proj)
@@ -1781,12 +1844,25 @@ class PostgresWorldModel:
         with self._tx() as cur:
             cur.execute(sel, tuple(sparams))
             rows = cur.fetchall()
+            from ..crypto_at_rest import EncryptionUnavailable
             for row in rows:
-                prior = _unseal(row[1]) or ""
+                try:
+                    new_result = _seal((_unseal(row[1]) or "") + marker)
+                except EncryptionUnavailable:
+                    # One orphan whose sealed result can't be opened (rotated or
+                    # foreign at-rest key) must not abort crash-recovery for every
+                    # other stuck goal. Reclaim the status; leave the unreadable
+                    # result intact rather than corrupting or dropping it.
+                    cur.execute(
+                        "UPDATE goals SET status = 'blocked', updated_at = %s "
+                        "WHERE id = %s",
+                        (now, row[0]),
+                    )
+                    continue
                 cur.execute(
                     "UPDATE goals SET status = 'blocked', result = %s, "
                     "updated_at = %s WHERE id = %s",
-                    (_seal(prior + marker), now, row[0]),
+                    (new_result, now, row[0]),
                 )
             return len(rows)
 
@@ -2073,13 +2149,18 @@ class PostgresWorldModel:
                          int(trust_tier), sensitivity, tenant),
                     )
             cur.execute(
-                "INSERT INTO facts(key, value, source_episode_id, updated_at, tenant_id) "
-                "VALUES(%s, %s, %s, %s, %s) "
+                "INSERT INTO facts(key, value, source_episode_id, updated_at, "
+                "source, trust_tier, sensitivity, tenant_id) "
+                "VALUES(%s, %s, %s, %s, %s, %s, %s, %s) "
                 "ON CONFLICT ((COALESCE(tenant_id, '')), key) DO UPDATE SET "
                 "value = EXCLUDED.value, "
                 "source_episode_id = EXCLUDED.source_episode_id, "
-                "updated_at = EXCLUDED.updated_at",
-                (key, _seal(value), episode_id, now, tenant),
+                "updated_at = EXCLUDED.updated_at, "
+                "source = EXCLUDED.source, "
+                "trust_tier = EXCLUDED.trust_tier, "
+                "sensitivity = EXCLUDED.sensitivity",
+                (key, _seal(value), episode_id, now, source,
+                 int(trust_tier), sensitivity, tenant),
             )
 
     def get_facts(self) -> dict[str, str]:
@@ -2094,10 +2175,32 @@ class PostgresWorldModel:
         return {r[0]: _unseal(r[1]) for r in rows}
 
     def get_facts_with_trust(self) -> dict[str, tuple[str, int]]:
-        # Provenance columns are sqlite-first; treat every Postgres fact as
-        # first-party (3) so the Memory Guard fail-opens (keeps them) rather
-        # than silently dropping memory it can't tier.
-        return {k: (v, 3) for k, v in self.get_facts().items()}
+        """Return each fact with its Memory-Guard recall-trust tier.
+
+        ``upsert_fact`` persists the provenance trust_tier directly on the
+        ``facts`` table (schema v24), so the Memory Guard (orchestrator ->
+        memory_guard.filter_facts) can drop poisoned/external memory below
+        ``min_recall_trust`` on this backend whether or not temporal history is
+        on -- closing the old non-temporal fallback. A pre-migration row with no
+        explicit tier reads as 3 (first-party) via the column DEFAULT, so the
+        guard keeps rather than drops memory it cannot tier. Read is
+        tenant-scoped identically to ``get_facts``.
+        """
+        facts = self.get_facts()
+        if not facts:
+            return {}
+        frag, params = _tenant_scope()
+        sql = "SELECT key, trust_tier FROM facts"
+        if frag:
+            sql += " WHERE " + frag
+        tiers: dict[str, int] = {}
+        try:
+            with self._tx() as cur:
+                cur.execute(sql, tuple(params))
+                tiers = {r[0]: int(r[1]) for r in cur.fetchall()}
+        except Exception:  # pragma: no cover -- never block recall on tiering
+            tiers = {}
+        return {k: (v, tiers.get(k, 3)) for k, v in facts.items()}
 
     def facts_matching(self, token: str) -> dict[str, str]:
         """Facts explicitly scoped to ``token`` by ``user:<token>:`` key prefix.
@@ -3105,6 +3208,58 @@ class PostgresWorldModel:
             )
             row = cur.fetchone()
         return int(row[0]) if row else 0
+
+    def reserve_rate_events(
+        self,
+        key: str,
+        cap: int,
+        global_key: str,
+        global_cap: int,
+        ts: float | None = None,
+    ) -> str | None:
+        """Atomically reserve shared goal-rate capacity for one admitted event.
+
+        Returns ``None`` after inserting both the global and per-client events,
+        ``"global"`` when the global bucket is already full, or ``"key"``
+        when the per-client bucket is already full. Transaction-scoped advisory
+        locks serialize the read-modify-write for the two buckets across
+        replicas so concurrent goal creations cannot all observe stale counts
+        before recording their reservations.
+        """
+        now = ts if ts is not None else time.time()
+        cutoff = now - 60.0
+        with self._tx() as cur:
+            cur.execute(
+                "SELECT pg_advisory_xact_lock(hashtext(%s))",
+                (f"rate:{global_key}",),
+            )
+            if key != global_key:
+                cur.execute(
+                    "SELECT pg_advisory_xact_lock(hashtext(%s))",
+                    (f"rate:{key}",),
+                )
+            cur.execute(
+                "SELECT COUNT(*) FROM rate_events WHERE rl_key = %s AND ts >= %s",
+                (global_key, cutoff),
+            )
+            row = cur.fetchone()
+            global_count = int(row[0]) if row else 0
+            if global_count >= global_cap:
+                return "global"
+            cur.execute(
+                "SELECT COUNT(*) FROM rate_events WHERE rl_key = %s AND ts >= %s",
+                (key, cutoff),
+            )
+            row = cur.fetchone()
+            key_count = int(row[0]) if row else 0
+            if key_count >= cap:
+                return "key"
+            cur.execute(
+                "INSERT INTO rate_events(rl_key, ts) VALUES(%s, %s), (%s, %s)",
+                (global_key, now, key, now),
+            )
+            cur.execute("DELETE FROM rate_events WHERE ts < %s", (now - 120.0,))
+        return None
 
     @property
     def schema_version(self) -> int:

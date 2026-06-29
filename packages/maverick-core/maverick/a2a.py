@@ -94,7 +94,7 @@ _SKILLS: list[dict[str, Any]] = [
 
 
 def build_agent_card(base_url: str | None = None) -> dict[str, Any]:
-    """Return an A2A v1.0-shaped Agent Card for this Maverick instance.
+    """Return an A2A v1.0-shaped Agent Card for this Lightwork instance.
 
     Pure function -- no I/O beyond reading the version/base-url config -- so
     it can be unit-tested and embedded wherever needed.
@@ -102,7 +102,7 @@ def build_agent_card(base_url: str | None = None) -> dict[str, Any]:
     url = _base_url(base_url)
     return {
         "protocolVersion": A2A_PROTOCOL_VERSION,
-        "name": "Maverick",
+        "name": "Lightwork",
         "description": (
             "An open-source recursive multi-agent swarm that runs long-horizon "
             "work locally -- your models, a hard budget cap, safety baked in."
@@ -110,8 +110,8 @@ def build_agent_card(base_url: str | None = None) -> dict[str, Any]:
         "url": f"{url}/a2a/v1",
         "version": _version(),
         "provider": {
-            "organization": "Maverick",
-            "url": "https://github.com/Day-AI-Labs/Maverick",
+            "organization": "Lightwork",
+            "url": "https://github.com/Day-AI-Labs/Lightwork",
         },
         "capabilities": {
             # Backed by the task endpoint (a2a_tasks): message/stream over

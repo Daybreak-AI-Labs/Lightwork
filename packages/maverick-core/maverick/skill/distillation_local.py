@@ -21,7 +21,7 @@ from pathlib import Path
 
 from ..paths import data_dir
 
-_STORE = data_dir("learned-skills")
+_STORE = data_dir("learned-skills", tenant=None)
 _STOPWORDS = {
     "the", "a", "an", "and", "or", "to", "of", "in", "on", "for", "with", "from",
     "by", "at", "as", "is", "are", "be", "this", "that", "it", "your", "my",
@@ -136,9 +136,14 @@ def to_skill_markdown(skill: dict) -> str:
     return "\n".join(lines) + "\n"
 
 
-def save_skill(skill: dict, store: Path | str = _STORE) -> Path:
+def _default_store() -> Path:
+    """Resolve the learned-skills store for the currently active tenant."""
+    return data_dir("learned-skills")
+
+
+def save_skill(skill: dict, store: Path | str | None = None) -> Path:
     """Write the distilled skill to ``<store>/<name>.md`` and return the path."""
-    store = Path(store)
+    store = Path(store) if store is not None else _default_store()
     store.mkdir(parents=True, exist_ok=True)
     path = store / f"{skill['name']}.md"
     path.write_text(to_skill_markdown(skill), encoding="utf-8")
@@ -146,7 +151,7 @@ def save_skill(skill: dict, store: Path | str = _STORE) -> Path:
 
 
 def distill_and_save(trajectories: list[dict], *, top_k: int = 3,
-                     store: Path | str = _STORE) -> Path | None:
+                     store: Path | str | None = None) -> Path | None:
     """Distill + persist in one call (opt-in caller checks ``enabled()``)."""
     skill = distill(trajectories, top_k=top_k)
     return save_skill(skill, store) if skill else None

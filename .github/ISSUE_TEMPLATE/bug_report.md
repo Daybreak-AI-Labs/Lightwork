@@ -22,7 +22,7 @@ A clear description of the expected behavior.
 
 ## Environment
 
-- Maverick version: `maverick version`
+- Lightwork version: `maverick version`
 - Python version: `python --version`
 - OS: (Linux / macOS / Windows)
 - Provider(s) in use: (Anthropic / OpenAI / Ollama / session-* / ...)

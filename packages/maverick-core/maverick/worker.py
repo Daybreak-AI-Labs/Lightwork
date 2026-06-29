@@ -130,7 +130,7 @@ class Worker:
             goal_id = job.payload.get("goal_id")
             if not goal_id:
                 title = (job.payload.get("title") or text).strip()[:80]
-                from .world_model import open_world
+                from .world_model import close_world_if_owned, open_world
                 world = open_world()  # client/tenant-floored canonical world
                 try:
                     owner = str(job.payload.get("owner") or "")
@@ -142,7 +142,7 @@ class Worker:
                     if schedule_id:
                         world.record_goal_origin(goal_id, "schedule", str(schedule_id))
                 finally:
-                    world.close()
+                    close_world_if_owned(world)
                 job.payload["goal_id"] = goal_id
                 self.queue.set_payload(job.id, job.payload)
             # Same retry contract as run_goal: only transient outcomes requeue.

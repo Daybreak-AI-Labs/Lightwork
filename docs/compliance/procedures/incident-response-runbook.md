@@ -20,7 +20,7 @@ relative to `packages/maverick-core/` unless absolute.
 
 **Purpose.** Provide on-call responders with concrete, ready-to-run procedures
 to detect, classify, contain, eradicate, recover from, and review incidents
-affecting Maverick.
+affecting Lightwork.
 
 **Scope — covers both:**
 
@@ -126,11 +126,11 @@ SEV1/SEV2 require distinct IC and Scribe at minimum.
 
 ---
 
-## 5. Technical containment controls (exist in Maverick)
+## 5. Technical containment controls (exist in Lightwork)
 
 All operator actions below are **[Org action]** in that a human must authorize
 them, but the mechanism is pre-built. Commands assume a shell on a host with
-the Maverick environment and `MAVERICK_DATA_DIR` / `MAVERICK_HALT_FILE` set as
+the Lightwork environment and `MAVERICK_DATA_DIR` / `MAVERICK_HALT_FILE` set as
 in production.
 
 ### 5.1 Killswitch — global halt

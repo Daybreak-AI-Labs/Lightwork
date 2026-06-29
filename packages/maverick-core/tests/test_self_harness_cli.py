@@ -153,3 +153,132 @@ def test_preview_rejects_nonpositive_min_support(_home):
         r = CliRunner().invoke(main, ["self-harness", "preview", "--min-support", bad])
         assert r.exit_code != 0, r.output
         assert "min-support" in r.output.lower(), r.output
+
+
+def _seed_with_meta(model, line, **prov):
+    block = "Operating guidance learned for this model:\n- " + line
+    sh._write_addenda({model: block}, sh._store_path())
+    rec = {"model_id": model, "text": line, "learned_at": 1700000000.0,
+           "updated_at": 1700000000.0, **prov}
+    sh._write_line_meta({sh._line_id(model, line): rec}, sh._store_path())
+
+
+def test_show_verbose_renders_provenance(_home):
+    _seed_with_meta("claude-x", "verify the token first", signature="auth: 401 expired",
+                    rationale="targets 4 'auth' failures", held_out_delta=0.2, samples=8)
+    r = CliRunner().invoke(main, ["self-harness", "show", "--verbose"])
+    assert r.exit_code == 0, r.output
+    assert "auth: 401 expired" in r.output
+    assert "held-out +0.2 over 8 samples" in r.output
+    assert "2023-11" in r.output                         # learned date rendered
+
+
+def test_retire_cli_removes_stale_line(_home):
+    _seed_with_meta("claude-x", "stale line")             # dated 2023 -> stale
+    r = CliRunner().invoke(
+        main, ["self-harness", "retire", "--older-than-days", "1", "--yes"])
+    assert r.exit_code == 0, r.output
+    assert "retired 1 line" in r.output
+    assert sh.recall_addendum("claude-x", sh._store_path()) == ""
+
+
+def test_retire_cli_aborts_without_confirmation(_home):
+    _seed_with_meta("claude-x", "stale line")
+    r = CliRunner().invoke(
+        main, ["self-harness", "retire", "--older-than-days", "1"], input="n\n")
+    assert "aborted" in r.output
+    assert "stale line" in sh.recall_addendum("claude-x", sh._store_path())
+
+
+def test_show_verbose_renders_usage(_home):
+    _seed_with_meta("claude-x", "verify the token first", signature="auth: 401",
+                    held_out_delta=0.2, samples=8, last_recalled_at=1700500000.0)
+    r = CliRunner().invoke(main, ["self-harness", "show", "--verbose"])
+    assert r.exit_code == 0, r.output
+    assert "last recalled" in r.output
+
+
+def test_conflicts_cli_flags_contradictions(_home):
+    block = ("Operating guidance learned for this model:\n"
+             "- Prefer streaming for large exports\n"
+             "- Avoid streaming for large exports")
+    sh._write_addenda({"claude-x": block}, sh._store_path())
+    r = CliRunner().invoke(main, ["self-harness", "conflicts"])
+    assert r.exit_code == 0, r.output
+    assert "possible conflict" in r.output
+    assert "Prefer streaming" in r.output and "Avoid streaming" in r.output
+
+
+def test_conflicts_cli_clean(_home):
+    sh._write_addenda(
+        {"claude-x": "Operating guidance learned for this model:\n- Verify the token first"},
+        sh._store_path())
+    r = CliRunner().invoke(main, ["self-harness", "conflicts"])
+    assert r.exit_code == 0 and "no conflicting guidance" in r.output
+
+
+def test_run_cli_requires_enable(_home, monkeypatch):
+    monkeypatch.delenv("MAVERICK_SELF_HARNESS")            # feature OFF
+    r = CliRunner().invoke(main, ["self-harness", "run", "--model", "m"])
+    assert r.exit_code != 0 and "self-harness is off" in r.output
+
+
+def test_run_cli_dry_pass(_home, monkeypatch):
+    from maverick import reflexion
+    from maverick import self_improvement as si
+    monkeypatch.setattr(si, "enabled", lambda: True)         # gate ON, so "dry" is the reason
+    for i in range(3):
+        reflexion.record(goal_text=f"export the nightly ledger {i}", failure_class="timeout",
+                         failure_msg="timed out", reflection="r", model_id="claude-x")
+    r = CliRunner().invoke(
+        main, ["self-harness", "run", "--model", "claude-x", "--no-retire"])
+    assert r.exit_code == 0, r.output
+    # a weakness is mined but, with no live scorer, nothing is promoted (dry)
+    assert "mined=1" in r.output and "promoted=0" in r.output
+    assert "dry pass" in r.output
+    assert sh.recall_addendum("claude-x", sh._store_path()) == ""
+
+
+def test_run_cli_retires_stale(_home, monkeypatch):
+    import time
+
+    from maverick import config
+    # config turns retirement on; the stale line is older than the TTL
+    monkeypatch.setattr(config, "load_config", lambda *a, **k: {
+        "self_harness": {"enable": True, "retire_after_days": 30}})
+    block = "Operating guidance learned for this model:\n- ancient line"
+    sh._write_addenda({"claude-x": block}, sh._store_path())
+    rec = {"model_id": "claude-x", "text": "ancient line",
+           "learned_at": time.time() - 100 * 86400, "updated_at": time.time() - 100 * 86400}
+    sh._write_line_meta({sh._line_id("claude-x", "ancient line"): rec}, sh._store_path())
+    r = CliRunner().invoke(main, ["self-harness", "run", "--model", "claude-x"])
+    assert r.exit_code == 0, r.output
+    assert "retired=1" in r.output
+    assert sh.recall_addendum("claude-x", sh._store_path()) == ""
+
+
+def test_run_cli_warns_when_frozen(_home, monkeypatch):
+    import maverick.calibration as calibration
+    monkeypatch.setattr(calibration, "learning_frozen", lambda: True)
+    r = CliRunner().invoke(main, ["self-harness", "run", "--model", "claude-x"])
+    assert r.exit_code == 0, r.output
+    assert "FROZEN" in r.output and "verifier drift" in r.output
+
+
+def test_run_cli_warns_when_gate_off(_home, monkeypatch):
+    import maverick.calibration as calibration
+    from maverick import self_improvement as si
+    monkeypatch.setattr(calibration, "learning_frozen", lambda: False)
+    monkeypatch.setattr(si, "enabled", lambda: False)        # promotion gate OFF
+    r = CliRunner().invoke(main, ["self-harness", "run", "--model", "claude-x"])
+    assert r.exit_code == 0, r.output
+    assert "promotion gate is OFF" in r.output
+
+
+def test_run_cli_all_models(_home, monkeypatch):
+    # the fleet sweep runs a cycle per distinct configured model
+    from maverick import self_improvement_runner as runner
+    monkeypatch.setattr(runner, "harness_fleet_models", lambda: ["model-a", "model-b"])
+    r = CliRunner().invoke(main, ["self-harness", "run", "--all-models", "--no-retire"])
+    assert r.exit_code == 0, r.output
+    assert "model: model-a" in r.output and "model: model-b" in r.output

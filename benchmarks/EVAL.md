@@ -73,7 +73,7 @@ Its loop + grading are unit-tested free (in-memory fake container); a live run
 needs a Docker daemon.
 
 **τ²-bench** is **dual-control** (agent↔user): the live solver (`tau2_solver.py`)
-runs a Maverick agent in a tool-loop talking to a **user-simulator** LLM that
+runs a Lightwork agent in a tool-loop talking to a **user-simulator** LLM that
 holds the scenario, until the customer's goal is resolved; `verify` grades the
 final DB state **and** the required tool actions. Validated for free with
 scripted FakeLLMs for *both* sides (`test_tau2_solver.py`).

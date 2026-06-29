@@ -13,7 +13,7 @@
 
 ## 1. Purpose
 
-This policy establishes how the Organization detects, reports, classifies, responds to, contains, eradicates, and recovers from information security and AI incidents affecting Maverick, and how it learns from them. It defines the lifecycle from event detection through post-incident review and external/customer notification, so that incidents are handled consistently, evidence is preserved in a tamper-evident manner, and obligations (including breach-notification commitments) are met.
+This policy establishes how the Organization detects, reports, classifies, responds to, contains, eradicates, and recovers from information security and AI incidents affecting Lightwork, and how it learns from them. It defines the lifecycle from event detection through post-incident review and external/customer notification, so that incidents are handled consistently, evidence is preserved in a tamper-evident manner, and obligations (including breach-notification commitments) are met.
 
 The policy explicitly covers AI-specific incidents as required by ISO/IEC 42001:2023 — for example, a model or agent behaving unsafely, exceeding its authorized scope, a prompt-injection compromise, or a governance/guardrail bypass — in addition to conventional security events.
 
@@ -21,7 +21,7 @@ The policy explicitly covers AI-specific incidents as required by ISO/IEC 42001:
 
 This policy applies to:
 
-- The Maverick platform (kernel `maverick-core`, shield, channels, dashboard, MCP, evolve, knowledge) and all production deployments operated by or on behalf of the Organization.
+- The Lightwork platform (kernel `maverick-core`, shield, channels, dashboard, MCP, evolve, knowledge) and all production deployments operated by or on behalf of the Organization.
 - All personnel, contractors, and on-call responders involved in detecting, reporting, or responding to incidents.
 - All categories of incident: confidentiality/integrity/availability events, AI/agent safety and governance incidents, and externally reported vulnerabilities.
 - The audit, telemetry, and containment subsystems used to detect and evidence incidents.
@@ -30,16 +30,16 @@ Infrastructure- and hosting-provider incident handling (e.g. cloud control-plane
 
 ## 3. Policy statements
 
-1. **Detection.** Maverick shall continuously emit security- and governance-relevant events (shield blocks, consent decisions, capability denials) and integrity signals (audit-chain verification) that can surface anomalous or unsafe behavior. Monitoring of these signals and alert routing is an Organization process. **[Process — Organization to operationalize]**
+1. **Detection.** Lightwork shall continuously emit security- and governance-relevant events (shield blocks, consent decisions, capability denials) and integrity signals (audit-chain verification) that can surface anomalous or unsafe behavior. Monitoring of these signals and alert routing is an Organization process. **[Process — Organization to operationalize]**
 2. **Reporting.** Any person who observes a suspected security or AI incident shall report it without delay through the designated reporting channel. Externally reported vulnerabilities follow the coordinated disclosure process in `SECURITY.md` (90-day coordinated disclosure window, defined reward tiers).
 3. **Triage & classification.** Every reported event shall be assessed and classified by severity and type (security vs. AI-safety vs. availability), and a decision recorded on whether it constitutes an incident. Classification criteria, severity tiers, and ownership assignment are an Organization process. **[Process — Organization to operationalize]**
-4. **Containment.** Confirmed incidents shall be contained using Maverick's halt and isolation primitives — the global killswitch and per-capability circuit breakers — to stop unsafe agent action at tool boundaries before eradication begins.
+4. **Containment.** Confirmed incidents shall be contained using Lightwork's halt and isolation primitives — the global killswitch and per-capability circuit breakers — to stop unsafe agent action at tool boundaries before eradication begins.
 5. **AI-incident handling.** Where an incident involves a model or agent acting unsafely, an apparent prompt-injection compromise, or a guardrail/governance bypass, responders shall immediately invoke containment (halt and/or relevant circuit breakers), preserve the governance event trail, and classify the AI impact in line with ISO/IEC 42001 incident-reporting expectations.
 6. **Eradication & recovery.** Root cause shall be removed and affected components restored to a known-good state before normal operation resumes. Recovery is coordinated with the Business Continuity Policy (POL-08).
 7. **Evidence preservation.** The tamper-evident audit log shall be preserved as the primary forensic evidence for every incident; chain and anchor integrity shall be verified, and evidence handled to maintain its admissibility and integrity.
 8. **Post-incident review.** Every significant incident shall undergo a documented review to capture root cause, response effectiveness, and corrective/preventive actions, feeding lessons back into controls and runbooks.
 9. **External & customer notification.** Where an incident triggers contractual, regulatory, or breach-notification obligations, affected customers and authorities shall be notified within the applicable SLAs. The notification matrix, SLAs, and templates are an Organization process. **[Process — Organization to operationalize]**
-10. **Program operationalization.** The technical halt/containment and evidence primitives are provided by Maverick; the surrounding IR program — on-call rotation, escalation paths, runbooks, and notification SLAs — shall be established and maintained by the Organization. **[Process — Organization to operationalize]**
+10. **Program operationalization.** The technical halt/containment and evidence primitives are provided by Lightwork; the surrounding IR program — on-call rotation, escalation paths, runbooks, and notification SLAs — shall be established and maintained by the Organization. **[Process — Organization to operationalize]**
 
 ## 4. Roles & responsibilities
 
@@ -52,7 +52,7 @@ Infrastructure- and hosting-provider incident handling (e.g. cloud control-plane
 | Management (Approver) | Approves this policy; authorizes external/customer/regulator notification. |
 | All personnel | Promptly report suspected security or AI incidents. |
 
-## 5. Technical implementation in Maverick
+## 5. Technical implementation in Lightwork
 
 | Control | Implementation (file/module) | Status |
 | --- | --- | --- |

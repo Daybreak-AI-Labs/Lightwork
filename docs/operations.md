@@ -125,7 +125,7 @@ Recommended, in order of RPO:
 
 1. **Managed Postgres point-in-time recovery (PITR).** If you run RDS / Cloud
    SQL / Aurora / a managed PG, enable automated backups + PITR. This is the
-   lowest-RPO option (seconds–minutes) and needs no Maverick-specific steps.
+   lowest-RPO option (seconds–minutes) and needs no Lightwork-specific steps.
 
 2. **Continuous archiving (self-managed).** Enable WAL archiving
    (`archive_mode = on`) + base backups (`pg_basebackup`) for PITR on a
@@ -135,10 +135,19 @@ Recommended, in order of RPO:
    simplest portable backup:
 
    ```sh
+   # Keep dump contents owner-only, and keep DB credentials out of argv.
+   umask 077
+   install -d -m 700 "$HOME/.maverick/backups/postgres"
+
+   # Configure connection secrets with PGSERVICE, ~/.pgpass, peer auth, or your
+   # secret manager instead of embedding passwords in the command line.
    pg_dump --format=custom --no-owner \
-     "$MAVERICK_PG_DSN" > "maverick-pg-$(date +%Y%m%d).dump"
-   # restore into a fresh database:
-   pg_restore --no-owner --dbname "$MAVERICK_PG_DSN_RESTORE" maverick-pg-*.dump
+     --dbname=service=maverick \
+     --file="$HOME/.maverick/backups/postgres/maverick-pg-$(date +%Y%m%d).dump"
+
+   # restore into a fresh database/service target:
+   pg_restore --no-owner --dbname=service=maverick_restore \
+     "$HOME/.maverick/backups/postgres/maverick-pg-YYYYMMDD.dump"
    ```
 
 Notes:
@@ -149,10 +158,10 @@ Notes:
   (`~/.maverick/keys/at_rest.key`). Back up that key separately and securely;
   losing it makes sealed columns unrecoverable.
 - **Schema migrations are forward-only and idempotent**, applied on first
-  connect. Restoring an older dump and starting a newer Maverick re-applies any
+  connect. Restoring an older dump and starting a newer Lightwork re-applies any
   pending migrations automatically (see `world_model_backends/postgres.py`).
 - **HA:** the world model on Postgres is shared across replicas, so failover is
-  a Postgres concern (a standby / managed failover), not a Maverick one. The
+  a Postgres concern (a standby / managed failover), not a Lightwork one. The
   single-node `maverick backup` cold-standby model is for the SQLite default.
 
 ## Learning-state operations

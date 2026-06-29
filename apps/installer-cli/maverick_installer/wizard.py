@@ -373,6 +373,17 @@ def _validate_gemini_key(key: str) -> tuple[bool, str]:
     )
 
 
+def _validation_marker(ok: bool, msg: str) -> str:
+    """Status marker for a key-validation result. A SKIPPED check (SDK missing /
+    couldn't reach the API) is NOT a confirmed key -- render it distinctly so a
+    green "ok" never appears next to "validation skipped"."""
+    if not ok:
+        return "[red]x[/red]"
+    if "skipped" in msg.lower():
+        return "[yellow]?[/yellow]"
+    return "[green]ok[/green]"
+
+
 _VALIDATORS = {
     "ANTHROPIC_API_KEY": _validate_anthropic_key,
     "OPENAI_API_KEY":    _validate_openai_key,
@@ -839,10 +850,10 @@ def pick_signed_skills() -> dict[str, Any]:
     }
 
 
-def pick_budget() -> dict[str, float]:
+def pick_budget() -> dict[str, Any]:
     console.print()
     console.print("[dim]Per-run caps. Edit later in ~/.maverick/config.toml.[/dim]")
-    return {
+    budget: dict[str, Any] = {
         "max_dollars": _safe_float(
             _q_text("  Max $ per run", default="5.0"), default=5.0,
         ),
@@ -854,6 +865,16 @@ def pick_budget() -> dict[str, float]:
             _q_text("  Max tool calls per run", default="500"), default=500,
         ),
     }
+    # Billing-grade accounting: refuse to meter a model with no verified price
+    # instead of silently estimating it at the Sonnet fallback rate. Default off
+    # (soft internal caps); enable when the meter feeds an invoice/chargeback.
+    if _q_confirm(
+        "  Strict pricing? Fail closed if a model has no verified price "
+        "(billing-grade; default off estimates instead)",
+        default=False,
+    ):
+        budget["strict_pricing"] = True
+    return budget
 
 
 def pick_capabilities() -> dict[str, bool]:
@@ -1405,6 +1426,16 @@ def pick_advanced() -> dict[str, Any]:
             "packs are drafted better. Guidance text only -- never widens an envelope. "
             "Requires self-improvement enabled.",
             default=True,
+        ),
+        "evaluator_evolution": _q_confirm(
+            "Evaluator co-evolution? When the learned judge stops discriminating, don't "
+            "just FREEZE learning -- promote a better judge: a challenger evaluator "
+            "replaces the incumbent only when its agreement with a fixed, checksum-locked "
+            "ground-truth ANCHOR beats it (on the dedicated 'evaluator' rung). The anchor "
+            "is immutable so a weak judge can't launder drift. Requires self-improvement "
+            "enabled; an evaluator swap needs human approval until you raise max_auto_rung "
+            "to 'evaluator'.",
+            default=False,
         ),
         "rehearsal": _q_confirm(
             "Pre-execution rehearsal? Before a risky plan runs, simulate it against the "
@@ -1994,7 +2025,7 @@ def pick_persona() -> dict[str, str]:
         default=False,
     ):
         return {}
-    name = _q_text("  Agent name", default="Maverick").strip() or "Maverick"
+    name = _q_text("  Agent name", default="Lightwork").strip() or "Lightwork"
     style_pick = _q_select(
         "  Style:",
         [
@@ -2212,12 +2243,10 @@ def collect_api_keys(providers: list[str], channel_envs: set[str]) -> dict[str, 
             cached = _cached_validation(env_name, val)
             if cached is not None:
                 ok, msg = cached
-                marker = "[green]ok[/green]" if ok else "[red]x[/red]"
-                console.print(f"    {marker} {msg} (cached)")
+                console.print(f"    {_validation_marker(ok, msg)} {msg} (cached)")
             else:
                 ok, msg = validator(val)
-                marker = "[green]ok[/green]" if ok else "[red]x[/red]"
-                console.print(f"    {marker} {msg}")
+                console.print(f"    {_validation_marker(ok, msg)} {msg}")
                 _remember_validation(env_name, val, ok, msg)
             if not ok and not _q_confirm("Save anyway?", default=False):
                 continue
@@ -2412,7 +2441,7 @@ def _cfg_channels(channels: dict[str, dict[str, Any]]) -> list[str]:
 
 
 def _cfg_core(
-    budget: dict[str, float],
+    budget: dict[str, Any],
     safety: dict[str, Any],
     sandbox: dict[str, Any],
 ) -> list[str]:
@@ -2639,7 +2668,7 @@ def _cfg_advanced(  # noqa: C901 - flat sequence of independent opt-in toggles
     # diverges from its default (causal_promotion defaults off, factory_learning
     # defaults on -- so we only write factory_learning when the user opts out).
     declined_factory = "factory_learning" in advanced and not advanced.get("factory_learning")
-    if advanced.get("causal_promotion") or declined_factory:
+    if advanced.get("causal_promotion") or declined_factory or advanced.get("evaluator_evolution"):
         lines.append("")
         lines.append("[self_improvement]")
         if advanced.get("causal_promotion"):
@@ -2651,6 +2680,12 @@ def _cfg_advanced(  # noqa: C901 - flat sequence of independent opt-in toggles
             lines.append("# Keep the agent factory's generator static (do not mine")
             lines.append("# pack-generation gaps into proposer corrections).")
             lines.append("factory_learning = false")
+        if advanced.get("evaluator_evolution"):
+            lines.append("# Promote a better judge instead of only freezing when the")
+            lines.append("# evaluator drifts: a challenger replaces the incumbent only when")
+            lines.append("# its agreement with a checksum-locked ground-truth anchor beats")
+            lines.append("# it (maverick.evaluator_evolution, 'evaluator' rung).")
+            lines.append("evaluator_evolution = true")
     if advanced.get("rehearsal"):
         lines.append("")
         lines.append("[rehearsal]")
@@ -2814,6 +2849,13 @@ def _cfg_advanced(  # noqa: C901 - flat sequence of independent opt-in toggles
         lines.append("")
         lines.append("[self_harness]")
         lines.append("enable = true")
+        # Ship production-safe validation floors by default (an operator can
+        # relax them): never promote on only the mined examples, require an
+        # unseen-sample floor, and an effect-size floor so noisy lifts don't
+        # promote. No effect until a promotion pass actually runs.
+        lines.append("require_held_out = true")
+        lines.append("min_held_out = 5")
+        lines.append("min_delta = 0.02")
     if advanced.get("fleet_memory"):
         lines.append("")
         lines.append("[fleet_memory]")
@@ -3430,7 +3472,7 @@ def _consumer_api_key() -> dict[str, str]:
         ok, msg = _validate_anthropic_key(val)
         _remember_validation("ANTHROPIC_API_KEY", val, ok, msg)
     if ok:
-        console.print(f"  [green]ok[/green] {msg}")
+        console.print(f"  {_validation_marker(ok, msg)} {msg}")
         return {"ANTHROPIC_API_KEY": val}
     # On failure, surface the branded error and let the user decide.
     show_bad_key_error("ANTHROPIC_API_KEY", msg)
@@ -3491,7 +3533,7 @@ def write_consumer_config(
             "mcp_*": "20/60",
         },
         retention={"audit_days": 30, "episodes_days": 90, "events_days": 30},
-        persona={"name": "Maverick", "style": "balanced", "user_name": user_name},
+        persona={"name": "Lightwork", "style": "balanced", "user_name": user_name},
         web_search_enabled=True,
     )
 

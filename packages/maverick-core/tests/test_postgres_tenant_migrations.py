@@ -23,31 +23,34 @@ def test_pending_skips_already_applied():
     # A DB at v1 still needs the tenant migrations (v10 columns, v11 uniques),
     # approval-claims (v13), goal-domain (v14), projects (v15), artifacts (v16),
     # share/signoff/origin (v17), temporal fact_history (v18), rate_events (v19),
-    # N-of-M dual control (v21), cluster-wide halt (v22), provider spend (v23).
+    # N-of-M dual control (v21), cluster-wide halt (v22), provider spend (v23),
+    # facts provenance columns (v24).
     pending = pg.pending_migrations(1)
-    assert [v for v, _ in pending] == [10, 11, 13, 14, 15, 16, 17, 18, 19, 21, 22, 23]
+    assert [v for v, _ in pending] == [10, 11, 13, 14, 15, 16, 17, 18, 19, 21, 22, 23, 24]
     # A DB at v10 still needs the remaining upgrades.
-    assert [v for v, _ in pg.pending_migrations(10)] == [11, 13, 14, 15, 16, 17, 18, 19, 21, 22, 23]
+    assert [v for v, _ in pg.pending_migrations(10)] == [11, 13, 14, 15, 16, 17, 18, 19, 21, 22, 23, 24]
     # A DB at v11 still needs the rest of the ladder.
-    assert [v for v, _ in pg.pending_migrations(11)] == [13, 14, 15, 16, 17, 18, 19, 21, 22, 23]
+    assert [v for v, _ in pg.pending_migrations(11)] == [13, 14, 15, 16, 17, 18, 19, 21, 22, 23, 24]
     # A DB at v13 still needs goal-domain + projects + artifacts + share/etc.
-    assert [v for v, _ in pg.pending_migrations(13)] == [14, 15, 16, 17, 18, 19, 21, 22, 23]
+    assert [v for v, _ in pg.pending_migrations(13)] == [14, 15, 16, 17, 18, 19, 21, 22, 23, 24]
     # A DB at v14 still needs projects + artifacts + share/signoff/origin.
-    assert [v for v, _ in pg.pending_migrations(14)] == [15, 16, 17, 18, 19, 21, 22, 23]
+    assert [v for v, _ in pg.pending_migrations(14)] == [15, 16, 17, 18, 19, 21, 22, 23, 24]
     # A DB at v15 still needs artifacts + share/signoff/origin + fact_history.
-    assert [v for v, _ in pg.pending_migrations(15)] == [16, 17, 18, 19, 21, 22, 23]
+    assert [v for v, _ in pg.pending_migrations(15)] == [16, 17, 18, 19, 21, 22, 23, 24]
     # A DB at v16 still needs the share/signoff/origin + fact_history migrations.
-    assert [v for v, _ in pg.pending_migrations(16)] == [17, 18, 19, 21, 22, 23]
+    assert [v for v, _ in pg.pending_migrations(16)] == [17, 18, 19, 21, 22, 23, 24]
     # A DB at v17 still needs fact_history + rate_events.
-    assert [v for v, _ in pg.pending_migrations(17)] == [18, 19, 21, 22, 23]
+    assert [v for v, _ in pg.pending_migrations(17)] == [18, 19, 21, 22, 23, 24]
     # A DB at v18 still needs the rate_events migration.
-    assert [v for v, _ in pg.pending_migrations(18)] == [19, 21, 22, 23]
-    # A DB at v19 still needs dual-control + halt + provider-spend.
-    assert [v for v, _ in pg.pending_migrations(19)] == [21, 22, 23]
-    # A DB at v21 still needs halt + provider-spend.
-    assert [v for v, _ in pg.pending_migrations(21)] == [22, 23]
-    # A DB at v22 still needs the provider-spend migration.
-    assert [v for v, _ in pg.pending_migrations(22)] == [23]
+    assert [v for v, _ in pg.pending_migrations(18)] == [19, 21, 22, 23, 24]
+    # A DB at v19 still needs dual-control + halt + provider-spend + facts trust.
+    assert [v for v, _ in pg.pending_migrations(19)] == [21, 22, 23, 24]
+    # A DB at v21 still needs halt + provider-spend + facts trust.
+    assert [v for v, _ in pg.pending_migrations(21)] == [22, 23, 24]
+    # A DB at v22 still needs provider-spend + facts trust.
+    assert [v for v, _ in pg.pending_migrations(22)] == [23, 24]
+    # A DB at v23 still needs the facts provenance migration.
+    assert [v for v, _ in pg.pending_migrations(23)] == [24]
 
 
 def test_pending_is_ordered_with_custom_ladder():
@@ -85,7 +88,7 @@ def test_approval_claims_migration_adds_collaboration_columns():
 
 
 def test_schema_version_is_latest_migration():
-    assert pg._PG_SCHEMA_VERSION == 23
+    assert pg._PG_SCHEMA_VERSION == 24
     assert max(v for v, _ in pg.MIGRATIONS) == pg._PG_SCHEMA_VERSION
 
 
@@ -154,3 +157,50 @@ def test_tenant_scope_custom_column(monkeypatch):
     monkeypatch.setattr(pg, "_active_tenant", lambda: "acme")
     frag, _ = pg._tenant_scope("goals.tenant_id")
     assert frag == "(goals.tenant_id = %s OR goals.tenant_id IS NULL)"
+
+
+def test_list_projects_applies_owner_and_tenant_scope(monkeypatch):
+    monkeypatch.setattr(pg, "_active_tenant", lambda: "tenant-a")
+    monkeypatch.setattr(pg, "_strict_tenant_isolation", lambda: False)
+
+    class FakeCursor:
+        def __init__(self):
+            self.calls = []
+            self._rows = [(7, "name", "desc", "alice", "eng", "active", 123.0)]
+
+        def execute(self, sql, params=()):
+            self.calls.append((sql, params))
+
+        def fetchall(self):
+            return self._rows
+
+        def fetchone(self):
+            return (2,)
+
+    class FakeTx:
+        def __init__(self, cursor):
+            self.cursor = cursor
+
+        def __enter__(self):
+            return self.cursor
+
+        def __exit__(self, exc_type, exc, tb):
+            return False
+
+    cursor = FakeCursor()
+    model = pg.PostgresWorldModel.__new__(pg.PostgresWorldModel)
+    monkeypatch.setattr(model, "_tx", lambda: FakeTx(cursor))
+
+    projects = model.list_projects(owner="alice")
+
+    assert projects[0]["owner"] == "alice"
+    assert projects[0]["goal_count"] == 2
+    project_sql, project_params = cursor.calls[0]
+    assert "WHERE owner=%s AND (tenant_id = %s OR tenant_id IS NULL)" in project_sql
+    assert project_params == ("alice", "tenant-a")
+    goal_count_sql, goal_count_params = cursor.calls[1]
+    assert goal_count_sql == (
+        "SELECT COUNT(*) FROM goals WHERE project_id=%s "
+        "AND (tenant_id = %s OR tenant_id IS NULL)"
+    )
+    assert goal_count_params == (7, "tenant-a")

@@ -16,10 +16,23 @@ project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   (`--fail-to-pass`/`--pass-to-pass`) and donates the pass-vs-fail spread as a
   preference pair with a ~1.0 reward margin, no verifier rejection needed. New
   `maverick start --repeat N` re-runs the same task N times so its attempts
-  share a `task_family`. Configurable donation thresholds under `[telemetry]`
-  (`donate_min_entropy`, `donate_min_confidence`, `donate_text`) let a normal
-  single-agent run be captured (the old swarm-only bar donated nothing from
-  typical usage). End-to-end recipe in `docs/self-learning-runbook.md`.
+  share a `task_family`. Trajectory donation is now reachable from the installer
+  wizard (Advanced reasoning step, default off, metadata-only), and its
+  thresholds are configurable under `[telemetry]` (`donate_min_entropy`,
+  `donate_min_confidence`, `donate_text`) so a normal single-agent run is
+  captured (the old swarm-only bar donated nothing from typical usage).
+  End-to-end recipe in `docs/self-learning-runbook.md`.
+- **FinOps & safety CLI + billing view** — `maverick spend` (`--json`) exports
+  total + per-goal + per-tag run cost for BI/chargeback scripts; `maverick
+  safety` (`--json`) prints the shield / sandbox-backend / egress posture to
+  assert deployment safety in CI; and a dashboard `/billing` view shows the
+  active tenant's accrued charges, a period-over-period trend, and an itemized
+  CSV invoice (`/billing?format=csv&period=YYYY-MM`).
+- **Obsidian-style goal graph** — `/graph-editor` now renders a force-directed
+  constellation: circular nodes sized by connection count, hover spotlighting a
+  node's neighbourhood, drag/pan/zoom, with the layered text tree as the
+  accessible fallback. Edits (retitle / reparent / add child) and the cycle
+  guard are unchanged.
 - Roster & library growth: the specialist roster now stands at **2,020 packs
   across 53 suites**, with a **514-skill** reusable `SKILL.md` library any pack
   can activate by trigger.
@@ -123,6 +136,13 @@ project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 
 ### Fixed
+- **Dashboard `/agents` and `/workflows` latency** — the built-in pack catalog
+  (2,000+ packs) was re-parsed from disk on every request, making those pages
+  ~75× slower than the rest of the dashboard. The built-in catalog is now
+  memoised per process (keyed by its directory mtime; tenant overrides still
+  load live), cutting both pages from ~700ms to ~10–20ms.
+- Goal-graph links at `/graph-editor` now render as a clearly visible
+  soft-grey (the previous near-invisible tone read as unconnected nodes).
 - Robustness defects surfaced by the 1M-iteration stress sweep (each with a
   regression test): connectors no longer raise on a non-string `op`/`path`/
   `query` — a malformed value now returns an `ERROR:` string instead of an

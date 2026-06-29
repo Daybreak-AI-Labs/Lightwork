@@ -21,7 +21,18 @@ from ..paths import data_dir
 log = logging.getLogger(__name__)
 
 
-DEFAULT_PATH = data_dir("vector_store")
+DEFAULT_PATH = data_dir("vector_store", tenant=None)
+
+
+def _default_path() -> Path:
+    """Resolve the default Chroma path for the currently active tenant.
+
+    ``DEFAULT_PATH`` remains the legacy/shared location for callers that import
+    or monkeypatch it, but default construction must resolve at instantiation
+    time so lazy imports inside one tenant do not pin every later tenant to that
+    first tenant's directory.
+    """
+    return data_dir("vector_store")
 
 
 class ChromaStore:
@@ -48,10 +59,7 @@ class ChromaStore:
             ) from e
         from chromadb import PersistentClient
 
-        store_path = Path(
-            path
-            or os.environ.get("MAVERICK_CHROMA_PATH", str(DEFAULT_PATH))
-        )
+        store_path = Path(path or os.environ.get("MAVERICK_CHROMA_PATH") or _default_path())
         store_path.mkdir(parents=True, exist_ok=True)
         try:
             os.chmod(store_path, 0o700)

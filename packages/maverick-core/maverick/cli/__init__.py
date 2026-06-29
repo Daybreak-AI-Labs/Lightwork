@@ -1,4 +1,4 @@
-"""Maverick CLI."""
+"""Lightwork CLI."""
 from __future__ import annotations
 
 import asyncio
@@ -88,7 +88,7 @@ def _require_llm_key() -> str:
     if _has_configured_provider():
         return "config"
     click.echo(
-        "Maverick can't reach an LLM. No provider key is set.\n"
+        "Lightwork can't reach an LLM. No provider key is set.\n"
         "\n"
         "Set one up with:  maverick init\n"
         "Or export an existing key, for example:\n"
@@ -303,7 +303,7 @@ def _configure_cli_logging() -> None:
 @click.option("--model", default=None, help="LLM model id (default: from config).")
 @click.pass_context
 def main(ctx: click.Context, db: str | None, model: str | None) -> None:
-    """Maverick: multi-agent swarm for long-horizon work."""
+    """Lightwork: multi-agent swarm for long-horizon work."""
     _configure_cli_logging()
     ctx.ensure_object(dict)
     # Default the world DB to the ACTIVE TENANT's world.db (selected via
@@ -413,13 +413,13 @@ def init(fast: bool, resume: bool, from_file: str | None) -> None:
         # `maverick-installer` into its own pipx venv (the previous
         # message's advice) creates an isolated env where the kernel
         # can't import it. The correct path is to inject the extra into
-        # the same env Maverick already lives in.
+        # the same env Lightwork already lives in.
         click.echo(
             "Install: pipx install 'maverick-agent[installer]'",
             err=True,
         )
         click.echo(
-            "Or, if Maverick is already installed:  "
+            "Or, if Lightwork is already installed:  "
             "pipx inject maverick-agent maverick-installer",
             err=True,
         )
@@ -429,7 +429,7 @@ def init(fast: bool, resume: bool, from_file: str | None) -> None:
 
 @main.command()
 def doctor() -> None:
-    """Diagnose your Maverick installation."""
+    """Diagnose your Lightwork installation."""
     from ..health import diagnose
     if diagnose():
         # At least one ✗ check: exit nonzero so `maverick doctor && ...` and CI
@@ -442,7 +442,7 @@ def version() -> None:
     """Show installed package versions + runtime info."""
     import importlib.metadata
 
-    click.echo(click.style("Maverick installed packages", bold=True))
+    click.echo(click.style("Lightwork installed packages", bold=True))
     # PyPI distribution name for the core is `maverick-agent` (the
     # `maverick` name was squatted). Fall back to `maverick` if the
     # squatter ever releases the original name.
@@ -502,6 +502,146 @@ def version() -> None:
 
 
 @main.command()
+@click.option("--json", "as_json", is_flag=True,
+              help="Machine-readable output for FinOps/BI scripts.")
+@click.option("--tag-field", "tag_field", default="tag", show_default=True,
+              help="Episode/goal field to attribute spend by (team / project / cost-center).")
+@click.option("--limit", default=500, show_default=True,
+              help="Max recent priced episodes to scan.")
+@click.option("--top", default=15, show_default=True,
+              help="Show the top N goals by cost.")
+def spend(as_json: bool, tag_field: str, limit: int, top: int) -> None:
+    """Print spend — total, per-goal, and per-tag run costs.
+
+    The CLI face of the /spend dashboard: pull FinOps data into scripts and
+    chargeback exports without the dashboard. Use --json for a stable shape.
+    """
+    import json as _json
+
+    from ..cost.by_tag import gather, render, split_by_tag
+    from ..world_model import DEFAULT_DB, WorldModel
+    w = WorldModel(DEFAULT_DB)
+    total = w.total_spend()
+
+    by_goal: dict[int, dict] = {}
+    for e in w.list_episodes(limit=max(limit, top * 8)):
+        b = by_goal.setdefault(e.goal_id, {
+            "goal_id": e.goal_id, "cost": 0.0,
+            "input_tokens": 0, "output_tokens": 0, "runs": 0})
+        b["cost"] += e.cost_dollars
+        b["input_tokens"] += e.input_tokens
+        b["output_tokens"] += e.output_tokens
+        b["runs"] += 1
+    goals = sorted(by_goal.values(), key=lambda x: x["cost"], reverse=True)[:top]
+    for g in goals:
+        try:
+            go = w.get_goal(g["goal_id"])
+        except Exception:
+            go = None
+        g["cost"] = round(g["cost"], 6)
+        g["title"] = (go.title if go else "") or ""
+
+    tags = split_by_tag(gather(w, tag_field=tag_field, limit=limit))
+
+    if as_json:
+        click.echo(_json.dumps(
+            {"total": total, "by_goal": goals, "by_tag": tags,
+             "tag_field": tag_field}, indent=2))
+        return
+
+    click.echo(click.style("Total spend", bold=True))
+    click.echo(
+        f"  ${total['dollars']:.4f}   "
+        f"{int(total['input_tokens']):,} in / {int(total['output_tokens']):,} out tok   "
+        f"{int(total['runs'])} runs")
+    click.echo("")
+    click.echo(click.style(f"Top {len(goals)} goals by cost", bold=True))
+    if not goals:
+        click.echo("  (no priced episodes yet)")
+    for g in goals:
+        title = g["title"]
+        if len(title) > 44:
+            title = title[:43] + "…"
+        click.echo(f"  ${g['cost']:>9.4f}  #{g['goal_id']:<5} {title}  ({g['runs']} runs)")
+    click.echo("")
+    click.echo(click.style(f"Spend by {tag_field}", bold=True))
+    click.echo("  " + render(tags).replace("\n", "\n  "))
+
+
+@main.command()
+@click.option("--json", "as_json", is_flag=True,
+              help="Machine-readable posture for CI assertions.")
+def safety(as_json: bool) -> None:
+    """Print the safety posture — shield, sandbox backend, egress policy.
+
+    Assert deployment safety in CI without the dashboard (e.g. fail a pipeline
+    if the sandbox is unisolated). Exits 0; gate on the --json fields.
+    """
+    import json as _json
+
+    from ..config import get_sandbox
+    try:
+        from maverick_shield import Shield
+        shield = {"installed": True,
+                  "backend": Shield.from_config(warn_if_missing=False).backend}
+    except ImportError:
+        shield = {"installed": False, "backend": None}
+    except Exception:
+        shield = {"installed": True, "backend": None}
+
+    sb = get_sandbox()
+    backend = str(sb.get("backend", "local") or "local").strip().lower()
+    isolated = backend not in ("local", "")
+
+    try:
+        from ..enterprise import enterprise_enabled
+        locked = bool(enterprise_enabled())
+    except Exception:
+        locked = False
+    try:
+        from ..enterprise import _allowed_egress_hosts
+        hosts = sorted(_allowed_egress_hosts())
+    except Exception:
+        hosts = []
+    try:
+        from ..profile import active_profile
+        profile = active_profile()
+    except Exception:
+        profile = "standard"
+
+    posture = {
+        "profile": profile,
+        "shield": shield,
+        "sandbox": {"backend": backend, "isolated": isolated,
+                    "workdir": sb.get("workdir")},
+        "egress": {"locked": locked, "allowed_hosts": hosts},
+    }
+    if as_json:
+        click.echo(_json.dumps(posture, indent=2))
+        return
+
+    def mark(ok: bool) -> str:
+        return click.style("✔", fg="green") if ok else click.style("•", fg="yellow")
+
+    click.echo(click.style(f"Safety posture  (profile = {profile})", bold=True))
+    if shield["installed"]:
+        click.echo(f"  {mark(True)} shield   installed (backend = {shield['backend']})")
+    else:
+        click.echo(f"  {mark(False)} shield   not installed — kernel fails open "
+                   "(built-in fallback rules screen tool calls)")
+    if isolated:
+        click.echo(f"  {mark(True)} sandbox  {backend} (container-isolated)")
+    else:
+        click.echo(f"  {mark(False)} sandbox  {backend} — model-generated shell runs "
+                   "on this host with NO container isolation")
+    if locked:
+        click.echo(f"  {mark(True)} egress   LOCKED (enterprise boundary)"
+                   + (f" — allowed hosts: {', '.join(hosts)}" if hosts else ""))
+    else:
+        click.echo(f"  {mark(False)} egress   open (cloud-capable; not locked)")
+
+
+@main.command()
 @click.option("--output", "-o", "output", default=None,
               help="Write the bundle to this file (chmod 600) instead of stdout.")
 def support(output: str | None) -> None:
@@ -519,6 +659,7 @@ def support(output: str | None) -> None:
         from pathlib import Path as _P
         path = _P(output).expanduser()
         fd = os.open(str(path), os.O_WRONLY | os.O_CREAT | os.O_TRUNC, 0o600)
+        os.fchmod(fd, 0o600)
         with os.fdopen(fd, "w", encoding="utf-8") as f:
             f.write(text + "\n")
         click.echo(f"support bundle written: {path}")
@@ -1070,7 +1211,7 @@ def trust_verify_cmd(agent_id, tools, risk, direction) -> None:
 
 @main.group("client")
 def client_group() -> None:
-    """Inspect / export / erase THIS deployment's bound client (one per Maverick).
+    """Inspect / export / erase THIS deployment's bound client (one per Lightwork).
 
     Since one deployment serves exactly one client, the client's whole data set
     lives under one root — so export and right-to-erasure are provably complete."""
@@ -1289,20 +1430,29 @@ def harness() -> None:
 @harness.command("show")
 @click.option("--model", default=None, help="Only show this model's guidance.")
 @click.option("--json", "as_json", is_flag=True, help="Emit JSON.")
-def harness_show(model: str | None, as_json: bool) -> None:
+@click.option("--verbose", "-v", is_flag=True,
+              help="Show each line's provenance: why it was learned, the "
+                   "held-out evidence, and when.")
+def harness_show(model: str | None, as_json: bool, verbose: bool) -> None:
     """Show the operating-guidance the self-harness loop has learned, per model.
 
     This is the operator's window into what gets recalled into each model's
-    system prompt. Read-only.
+    system prompt. ``--verbose`` adds per-line provenance (signature, held-out
+    delta, samples, learned date) so an operator can judge whether the evidence
+    behind each line is strong. Read-only.
     """
     import json as _json
 
-    from ..self_harness import enabled, list_learned
+    from ..self_harness import enabled, line_provenance, list_learned
     learned = list_learned()
     if model:
         learned = {k: v for k, v in learned.items() if k == model}
     if as_json:
-        click.echo(_json.dumps(learned, indent=2, sort_keys=True))
+        if verbose:
+            click.echo(_json.dumps({m: line_provenance(m) for m in learned},
+                                   indent=2, sort_keys=True))
+        else:
+            click.echo(_json.dumps(learned, indent=2, sort_keys=True))
         return
     if not enabled():
         click.echo("note: self-harness is OFF ([self_harness] enable=false) — "
@@ -1310,10 +1460,32 @@ def harness_show(model: str | None, as_json: bool) -> None:
     if not learned:
         click.echo("no learned guidance yet.")
         return
+    import datetime as _dt
+
+    def _date(ts):
+        if not isinstance(ts, (int, float)):
+            return "?"
+        return _dt.datetime.fromtimestamp(ts, _dt.timezone.utc).strftime("%Y-%m-%d")
+
     for m, lines in sorted(learned.items()):
         click.echo(f"\n{m}  ({len(lines)} line{'s' if len(lines) != 1 else ''}):")
-        for ln in lines:
-            click.echo(f"  - {ln}")
+        if not verbose:
+            for ln in lines:
+                click.echo(f"  - {ln}")
+            continue
+        for rec in line_provenance(m):
+            _dom = rec.get("domain")
+            click.echo(f"  - {rec['text']}" + (f"  [domain={_dom}]" if _dom else ""))
+            sig = rec.get("signature") or "(no provenance — learned before tracking)"
+            d, n = rec.get("held_out_delta"), rec.get("samples")
+            ev = (f"held-out {d:+.3g} over {n} samples"
+                  if isinstance(d, (int, float)) and n else "no recorded evidence")
+            click.echo(f"      why: {sig}")
+            click.echo(f"      evidence: {ev} · learned {_date(rec.get('learned_at'))}"
+                       f" · updated {_date(rec.get('updated_at'))}")
+            used = rec.get("last_recalled_at")
+            if isinstance(used, (int, float)):
+                click.echo(f"      used: last recalled {_date(used)}")
 
 
 @harness.command("log")
@@ -1370,6 +1542,116 @@ def harness_forget(model: str, line: str | None, yes: bool) -> None:
         click.echo("removed.")
     else:
         click.echo("nothing to remove.")
+
+
+@harness.command("retire")
+@click.option("--older-than-days", type=float, required=True,
+              help="Retire lines not refreshed (re-promoted) within this many days.")
+@click.option("--model", default=None, help="Only retire this model's lines.")
+@click.option("--yes", is_flag=True, help="Skip the confirmation prompt.")
+def harness_retire(older_than_days: float, model: str | None, yes: bool) -> None:
+    """Retire stale learned guidance — lines not refreshed within --older-than-days.
+
+    Prompt guidance goes stale as models, tools, and APIs change. A line that
+    keeps proving useful is re-promoted (refreshing its age) and survives; one
+    that hasn't been seen in a while is removed. Lines with no provenance record
+    (learned before tracking) are left alone — their age is unknown. Atomic and
+    audited.
+    """
+    from ..self_harness import retire_stale
+    scope = f"{model!r}" if model else "all models"
+    if not yes and not click.confirm(
+            f"Retire guidance older than {older_than_days} days for {scope}?"):
+        click.echo("aborted.")
+        return
+    n = retire_stale(older_than_days=older_than_days, model_id=model)
+    click.echo(f"retired {n} line{'' if n == 1 else 's'}.")
+
+
+def _echo_harness_cycle(report, retired: int) -> None:
+    """Render one cycle's report + retirement count for the operator."""
+    click.echo(f"model: {report.model_id or '(unresolved)'}")
+    click.echo(f"  mined={report.mined} proposed={report.proposed} "
+               f"validated={report.validated} promoted={report.promoted} retired={retired}")
+    # Explain WHY a pass promoted nothing, in priority order, so the operator
+    # isn't left guessing whether the loop is broken or just gated.
+    if report.frozen:
+        click.echo("  ⚠ learning is FROZEN (verifier drift) — promotions are paused "
+                   "until calibration recovers")
+    elif not report.gate_enabled:
+        click.echo("  ⚠ promotion gate is OFF — set [self_improvement] enable = true "
+                   "to allow promotions")
+    elif report.promoted == 0 and report.proposed > 0:
+        click.echo("  (dry pass — inject a live A/B scorer and enable "
+                   "[self_improvement] to promote)")
+    for s in report.skipped[:10]:
+        click.echo(f"  - skipped: {s}")
+    if report.applied_lines:
+        click.echo("  promoted lines:")
+        for ln in report.applied_lines:
+            click.echo(f"    + {ln}")
+
+
+@harness.command("run")
+@click.option("--model", default=None, help="Model to run for (default: orchestrator).")
+@click.option("--all-models", is_flag=True,
+              help="Run for every configured role model (the whole fleet), not just one.")
+@click.option("--limit", type=int, default=500,
+              help="Max recent reflexions to scan for weaknesses.")
+@click.option("--retire/--no-retire", default=True,
+              help="Also retire stale lines (per [self_harness] retire_after_days).")
+def harness_run(model: str | None, all_models: bool, limit: int, retire: bool) -> None:
+    """Run one governed self-harness cycle: mine → propose → validate → gate,
+    then retire stale guidance. The on-demand / scheduled entry point.
+
+    Without a live A/B scorer (a real model + eval harness, injected
+    programmatically via run_self_harness_cycle — a real evaluation needs a real
+    model) this is a DRY pass that writes no NEW guidance; stale-line retirement
+    still runs. Promotion also requires [self_improvement] enable (the shared
+    governed gate). Safe to schedule: it never perturbs a run.
+
+    --all-models runs the cycle for EVERY distinct configured role model so worker
+    models learn their own harness, not just the orchestrator.
+    """
+    from .. import self_harness
+    from .. import self_improvement_runner as runner
+    if not self_harness.enabled():
+        raise click.ClickException(
+            "self-harness is off. Set [self_harness] enable = true or "
+            "MAVERICK_SELF_HARNESS=1.")
+    if all_models:
+        results = runner.run_self_harness_all_models(limit=limit, retire=retire)
+        if not results:
+            click.echo("no configured role models to run.")
+            return
+        for _mid, (report, retired) in sorted(results.items()):
+            _echo_harness_cycle(report, retired)
+        return
+    report, retired = runner.run_self_harness_cycle(model_id=model, limit=limit, retire=retire)
+    _echo_harness_cycle(report, retired)
+
+
+@harness.command("conflicts")
+@click.option("--model", default=None, help="Only check this model's guidance.")
+def harness_conflicts(model: str | None) -> None:
+    """Flag learned lines that appear to CONTRADICT each other, per model.
+
+    Addenda are cumulative, so a later lesson can quietly oppose an earlier one
+    ("prefer streaming large exports" vs "avoid streaming; batch first"),
+    degrading the prompt. This is an advisory heuristic (shared topic, opposite
+    polarity) for an operator to review and `forget` the wrong side — it never
+    auto-removes anything. Read-only.
+    """
+    from ..self_harness import detect_store_conflicts
+    pairs = detect_store_conflicts(model_id=model)
+    if not pairs:
+        click.echo("no conflicting guidance detected.")
+        return
+    click.echo(f"{len(pairs)} possible conflict(s):")
+    for m, a, b in pairs:
+        click.echo(f"\n  [{m}]")
+        click.echo(f"    - {a}")
+        click.echo(f"    ⚔ {b}")
 
 
 @main.group()
@@ -1670,7 +1952,7 @@ def airgap_cmd(action: str, as_json: bool) -> None:
     Audits for a remote model provider, a non-deny-all egress policy, and
     sandbox network access. Exits non-zero on any finding so it can gate a
     deployment. (OS-level air-gapping is the operator's job; this checks
-    Maverick's own config.)
+    Lightwork's own config.)
     """
     import json as _json
 
@@ -2297,7 +2579,7 @@ def dashboard(host: str, port: int, token) -> None:
         click.echo("Install: pip install maverick-dashboard", err=True)
         sys.exit(2)
     import uvicorn
-    click.echo(f"Maverick dashboard: http://{host}:{port}")
+    click.echo(f"Lightwork dashboard: http://{host}:{port}")
     click.echo(f"REST API docs:      http://{host}:{port}/docs")
     uvicorn.run(fastapi_app, host=host, port=port, log_level="info")
 
@@ -2312,7 +2594,7 @@ def dashboard(host: str, port: int, token) -> None:
 def mcp(use_http: bool, host: str, port: int) -> None:
     """Start the MCP server on stdio (or --http).
 
-    This is Maverick's official cross-language surface. Any MCP-speaking
+    This is Lightwork's official cross-language surface. Any MCP-speaking
     client (TypeScript, Go, Rust, .NET, JVM, plus every IDE-side MCP
     client like Claude Code / Cursor / Continue / Zed) can drive the
     swarm from outside Python via this command. See
@@ -2790,8 +3072,8 @@ def mcp_registry_group() -> None:
     A registry is a self-hostable `<base>/mcp/index.json` (point
     `[mcp_registries] indexes` at your own). `add` writes the chosen server into
     `[mcp_servers.<name>]` in ~/.maverick/config.toml; the kernel loads it on the
-    next run. (`maverick mcp` — without `-registry` — starts Maverick's own MCP
-    server; this group manages the servers Maverick *consumes*.)
+    next run. (`maverick mcp` — without `-registry` — starts Lightwork's own MCP
+    server; this group manages the servers Lightwork *consumes*.)
     """
 
 
@@ -2976,7 +3258,7 @@ def start(
         _ks.check()
     except _ks.Halted:
         click.echo(
-            "Stopped: Maverick is halted (a HALT file is present).\n"
+            "Stopped: Lightwork is halted (a HALT file is present).\n"
             "Run `maverick unhalt` to clear it, then try again.",
             err=True,
         )
@@ -3082,7 +3364,7 @@ def start(
 @main.command("report-issue")
 @click.argument("goal_id", type=int)
 @click.option("--repo", default=None,
-              help="GitHub repo owner/name to file against (default: Maverick).")
+              help="GitHub repo owner/name to file against (default: Lightwork).")
 @click.pass_context
 def report_issue(ctx, goal_id: int, repo: str | None) -> None:
     """Build a pre-filled GitHub bug-report URL from a failed goal run.
@@ -3198,7 +3480,7 @@ def chat(ctx, max_depth: int, max_dollars: float, workdir) -> None:
     # unrelated future prompts.
     session_user_id = f"local:{uuid.uuid4().hex}"
     conversation = world.get_or_create_conversation("cli", session_user_id)
-    click.echo(click.style("Maverick chat. Type 'exit' to leave.", fg="cyan"))
+    click.echo(click.style("Lightwork chat. Type 'exit' to leave.", fg="cyan"))
     click.echo(click.style(
         "Multi-line: end a line with \\ or wrap a block in \"\"\".",
         fg="bright_black",
@@ -3463,13 +3745,13 @@ def config_lint_cmd() -> None:
     # hard lint failure, not invisible.
     p = config_path()
     if not p.exists():
-        # No config at all is a legitimate state (Maverick runs on built-in
+        # No config at all is a legitimate state (Lightwork runs on built-in
         # defaults), but the file-less path used to fall through to
         # load_config() == {} and print "config OK" -- as if a real config had
         # been validated. Say plainly there's nothing to lint instead of
         # blessing a non-existent file (user-testing finding).
         click.echo(
-            f"no config file at {p}; Maverick is using built-in defaults. "
+            f"no config file at {p}; Lightwork is using built-in defaults. "
             "Create one with `maverick init` (nothing to lint yet)."
         )
         return
@@ -3757,7 +4039,7 @@ def schedule_goal(cron_expr: str, text: str, title: str | None) -> None:
 @click.option("--verbose", "-v", is_flag=True)
 def serve(max_depth: int, verbose: bool) -> None:
     """Start the channel server."""
-    # Use Maverick's shared logging config (JSON via MAVERICK_LOG_FORMAT=json,
+    # Use Lightwork's shared logging config (JSON via MAVERICK_LOG_FORMAT=json,
     # correlation-id context filter, secret scrubbing) for parity with the
     # dashboard server entrypoint -- `serve` is the other network-exposed
     # process and otherwise inherited a raw basicConfig with none of that
@@ -3806,7 +4088,7 @@ def serve(max_depth: int, verbose: bool) -> None:
         click.echo(f"ERROR: {e}", err=True)
         sys.exit(2)
     server.max_depth = max_depth
-    click.echo("Maverick serve running. Ctrl-C to stop.")
+    click.echo("Lightwork serve running. Ctrl-C to stop.")
     try:
         asyncio.run(server.run())
     except KeyboardInterrupt:
@@ -4187,7 +4469,7 @@ def learned(limit: int) -> None:
 
 @main.group()
 def plugin() -> None:
-    """Scaffold + manage Maverick plugins."""
+    """Scaffold + manage Lightwork plugins."""
 
 
 @plugin.command("list")
@@ -4449,7 +4731,7 @@ def _conversation_user_matches(conv_user_id: str, requested: str, channel: str) 
     room ids naturally contain colons, so treating any ``<prefix>:`` as the
     requested user can disclose or erase unrelated conversations.
 
-    The only family match Maverick currently needs is the local CLI chat
+    The only family match Lightwork currently needs is the local CLI chat
     namespace: each REPL session is stored as ``local:<uuid>``, while the
     documented GDPR subject is ``--channel cli --user local``.
     """
@@ -4464,7 +4746,7 @@ def _conversation_user_matches(conv_user_id: str, requested: str, channel: str) 
 @click.option("--yes", is_flag=True, help="Skip confirmation.")
 @click.pass_context
 def erase(ctx, channel: str, user: str, yes: bool) -> None:
-    """Erase everything Maverick knows about a (channel, user_id) pair.
+    """Erase everything Lightwork knows about a (channel, user_id) pair.
 
     GDPR Art. 17 right-to-erasure: removes conversations, turns,
     attachments on disk, and the conversation row itself. (First line kept
@@ -5144,7 +5426,7 @@ def insights_import(bundle: str) -> None:
               help="Write JSON to file (default stdout).")
 @click.pass_context
 def export_user(ctx, channel: str, user: str, output) -> None:
-    """Export everything Maverick knows about a (channel, user_id) as JSON.
+    """Export everything Lightwork knows about a (channel, user_id) as JSON.
 
     GDPR Art. 15 right-of-access. Registered as ``export-user`` so it does
     not collide with ``export`` (the goal-trajectory bundle below); a
@@ -5637,18 +5919,20 @@ def audit_export(
                 click.echo(f"ERROR: {_label} must be YYYY-MM-DD", err=True)
                 sys.exit(2)
 
-    # Plan feature gating: SIEM audit export is a paid-tier entitlement. Only
-    # denied when an explicit --tenant names a provisioned tenant whose plan
-    # omits "audit_export"; unscoped/self-host export is unaffected.
-    if tenant:
-        from ..billing import feature_allowed
-        if not feature_allowed("audit_export", tenant=tenant):
-            click.echo(
-                f"ERROR: tenant '{tenant}' plan does not include SIEM audit "
-                "export (audit_export entitlement). Upgrade the tenant's plan.",
-                err=True,
-            )
-            sys.exit(2)
+    # Plan feature gating: SIEM audit export is a paid-tier entitlement. Deny
+    # either an explicit --tenant or the active deployment tenant when it names
+    # a provisioned tenant whose plan omits "audit_export"; unscoped/self-host
+    # export is unaffected because feature_allowed fails open at the edges.
+    from ..billing import feature_allowed
+    if not feature_allowed("audit_export", tenant=tenant):
+        from ..paths import current_tenant_id
+        denied_tenant = tenant or current_tenant_id() or "active tenant"
+        click.echo(
+            f"ERROR: tenant '{denied_tenant}' plan does not include SIEM audit "
+            "export (audit_export entitlement). Upgrade the tenant's plan.",
+            err=True,
+        )
+        sys.exit(2)
 
     from ..audit.export import audit_event_paths, iter_audit_events, to_cef, to_jsonl
 
@@ -5753,16 +6037,18 @@ def audit_forward(
         )
         sys.exit(2)
 
-    # Same paid-tier entitlement gate as export when a tenant is named.
-    if tenant:
-        from ..billing import feature_allowed
-        if not feature_allowed("audit_export", tenant=tenant):
-            click.echo(
-                f"ERROR: tenant '{tenant}' plan does not include SIEM audit "
-                "export (audit_export entitlement). Upgrade the tenant's plan.",
-                err=True,
-            )
-            sys.exit(2)
+    # Same paid-tier entitlement gate as export, including active deployment
+    # tenants resolved by feature_allowed when --tenant is omitted.
+    from ..billing import feature_allowed
+    if not feature_allowed("audit_export", tenant=tenant):
+        from ..paths import current_tenant_id
+        denied_tenant = tenant or current_tenant_id() or "active tenant"
+        click.echo(
+            f"ERROR: tenant '{denied_tenant}' plan does not include SIEM audit "
+            "export (audit_export entitlement). Upgrade the tenant's plan.",
+            err=True,
+        )
+        sys.exit(2)
 
     from ..audit import forwarder
     from ..audit.export import iter_audit_events, to_cef, to_jsonl
@@ -5902,8 +6188,13 @@ def cost(ctx, month: str | None, model: str | None, csv_out: bool) -> None:
             if start <= (e.started_at or 0) < end
         ]
     if model:
-        # Outcome strings carry model id in the format "model=X ...".
-        episodes = [e for e in episodes if model in (e.outcome or "")]
+        # Episode rows don't record a model id (EpisodeSpend has no model column
+        # and outcomes don't carry "model=X"), so this filter silently matched
+        # nothing. Fail honestly rather than return a misleading empty result.
+        raise click.ClickException(
+            "--model filtering is not available: episode rows record goal, time, "
+            "cost, and tokens, but not a model id. Use per-role cost projection "
+            "for model-level spend.")
 
     if csv_out:
         import csv as _csv

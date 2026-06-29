@@ -7,7 +7,7 @@
 ---
 
 **1 · Title**
-Maverick — *the self-hostable, governed agent runtime + control plane.*
+Lightwork — *the self-hostable, governed agent runtime + control plane.*
 Sub: "Run autonomous agents on regulated work — and prove what they did."
 **[FILL IN]** logo, one-line tagline, contact.
 
@@ -30,7 +30,7 @@ plane (every action flows through it) → fleets → compliance engine, in the
 customer's boundary.
 
 **5 · Demo (the heart)**
-Live or 90-sec video: agent runs a vendor payment → hits "Pay $48,200" → Maverick
+Live or 90-sec video: agent runs a vendor payment → hits "Pay $48,200" → Lightwork
 **gates that one action** → human **approves** → **sealed before/after evidence**
 → **/replay** with "chain verified ✓" → **export evidence packet** → **`maverick-verify-audit`**
 proves it with no trust in us. *End on the verified evidence, not a chat box.*
@@ -39,7 +39,7 @@ proves it with no trust in us. *End on the verified evidence, not a chat box.*
 **6 · Why incumbents don't cover it**
 Four-cluster map (1 slide): frameworks *build* agents · hyperscaler platforms
 govern *their* walled garden, can't self-host/air-gap · AI gateways stop at model
-traffic · GRC tools govern *company* controls, not runtime behavior. Maverick spans
+traffic · GRC tools govern *company* controls, not runtime behavior. Lightwork spans
 them, in-boundary. (Detail: [`competitive-landscape.md`](./competitive-landscape.md).)
 
 **7 · It's already real (proof)**

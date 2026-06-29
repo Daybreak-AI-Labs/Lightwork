@@ -30,7 +30,7 @@ from .paths import data_dir
 log = logging.getLogger(__name__)
 
 DEFAULT_DB = data_dir("world.db")
-SCHEMA_VERSION = 23
+SCHEMA_VERSION = 24
 DEFAULT_BUSY_TIMEOUT_MS = 5000
 WAL_SWITCH_BUSY_TIMEOUT_MS = 50
 WAL_SWITCH_RETRY_SECONDS = 5.0
@@ -489,6 +489,11 @@ MIGRATIONS: dict[int, list[str]] = {
     # v23 cluster-wide provider spend ledger: the provider_spend table is in
     # SCHEMA (idempotent CREATE); listed here so existing DBs bump the version.
     23: [],
+    # v24 facts provenance columns (source/trust_tier/sensitivity): SQLite's base
+    # CREATE and the v17 migration already carry these, so this is empty -- it
+    # exists only to keep the SQLite head at v24 to match the Postgres ladder
+    # (which adds the columns at v24). See migration_governance head-parity gate.
+    24: [],
 }
 
 
@@ -1035,12 +1040,25 @@ class WorldModel:
                 "WHERE status IN ('active', 'pending') AND updated_at < ?",
                 (cutoff,),
             ).fetchall()
+            from .crypto_at_rest import EncryptionUnavailable
             for row in rows:
-                prior = _dec_field(row["result"]) or ""
+                try:
+                    new_result = _enc_field((_dec_field(row["result"]) or "") + marker)
+                except EncryptionUnavailable:
+                    # One orphan whose sealed result can't be opened (rotated or
+                    # foreign at-rest key) must not abort crash-recovery for every
+                    # other stuck goal. Reclaim the status; leave the unreadable
+                    # result intact rather than corrupting or dropping it.
+                    conn.execute(
+                        "UPDATE goals SET status = 'blocked', updated_at = ? "
+                        "WHERE id = ?",
+                        (now, row["id"]),
+                    )
+                    continue
                 conn.execute(
                     "UPDATE goals SET status = 'blocked', result = ?, "
                     "updated_at = ? WHERE id = ?",
-                    (_enc_field(prior + marker), now, row["id"]),
+                    (new_result, now, row["id"]),
                 )
             return len(rows)
 
@@ -1112,6 +1130,15 @@ class WorldModel:
                 self.conn.commit()
             except sqlite3.Error:  # pragma: no cover -- best-effort quiesce
                 pass
+            # Pre-create the sensitive backup with private permissions before
+            # SQLite opens it. sqlite3.connect() would otherwise create the file
+            # at the process umask (often 0644), briefly exposing a full world.db
+            # snapshot before the chmod below (or forever if interrupted).
+            flags = os.O_WRONLY | os.O_CREAT | os.O_EXCL
+            if hasattr(os, "O_NOFOLLOW"):
+                flags |= os.O_NOFOLLOW
+            fd = os.open(str(dest), flags, 0o600)
+            os.close(fd)
             bdst = sqlite3.connect(str(dest))
             try:
                 self.conn.backup(bdst)
@@ -1463,6 +1490,28 @@ class WorldModel:
                 "UPDATE goals SET domain = ? WHERE id = ?",
                 (domain or "", goal_id),
             )
+
+    def set_goal_title(self, goal_id: int, title: str) -> None:
+        """Rename a goal, sealing the title column like ``create_goal`` does."""
+        with self._writing() as conn:
+            conn.execute(
+                "UPDATE goals SET title = ?, updated_at = ? WHERE id = ?",
+                (_enc_field(title), time.time(), int(goal_id)),
+            )
+
+    def set_goal_parent(self, goal_id: int, parent_id: int | None) -> None:
+        """Move a goal under a new parent (or to the root with ``None``)."""
+        with self._writing() as conn:
+            conn.execute(
+                "UPDATE goals SET parent_id = ?, updated_at = ? WHERE id = ?",
+                (int(parent_id) if parent_id is not None else None,
+                 time.time(), int(goal_id)),
+            )
+
+    def goal_parent_pairs(self) -> list[tuple[int, int | None]]:
+        """``(id, parent_id)`` for every goal -- the edge list for tree/cycle checks."""
+        rows = self._read_all("SELECT id, parent_id FROM goals")
+        return [(int(r["id"]), r["parent_id"]) for r in rows]
 
     def set_goal_status(self, goal_id: int, status: str, result: str | None = None) -> None:
         with self._writing() as conn:
@@ -2665,6 +2714,25 @@ def world_for_tenant(tenant: str | None = None) -> WorldModel:
         _tenant_worlds[key] = world
         _tenant_worlds.move_to_end(key)
         return world
+
+
+def world_is_cached(world: object) -> bool:
+    """Return True when ``world`` is owned by the per-tenant cache.
+
+    Cached tenant worlds are process-wide singletons shared by dashboard/API and
+    canonical goal-entry paths, so short-lived callers must not close them.
+    """
+    with _tenant_worlds_lock:
+        return any(cached is world for cached in _tenant_worlds.values())
+
+
+def close_world_if_owned(world: object) -> None:
+    """Close ``world`` unless it is a process-cached tenant world."""
+    if world_is_cached(world):
+        return
+    close = getattr(world, "close", None)
+    if callable(close):
+        close()
 
 
 def _evict_lru_tenant_world(shared_key: str) -> None:

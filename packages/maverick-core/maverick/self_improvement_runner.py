@@ -142,23 +142,47 @@ def run_self_harness_pass(
     reflexions=None, *, model_id: str | None = None,
     held_in=None, held_out=None,
     score_with=None, score_without=None, propose_fn=None, controller=None,
-    min_support: int = 3, limit: int = 500,
+    min_support: int | None = None, limit: int = 500,
+    require_held_out: bool | None = None, min_delta: float | None = None,
+    min_held_out: int | None = None, candidates_per_signature: int | None = None,
+    semantic_mining: bool | None = None, similarity_fn=None,
+    bucket_by: tuple[str, ...] | None = None,
+    metamorphic_fn=None, metamorphic_tolerance: float = 0.0,
 ):
     """The automatic entry point for the self-harness loop (mine -> propose ->
     validate -> gate), to be called by a scheduler / the self-improvement loop.
 
     Resolves ``model_id`` to the configured orchestrator model and loads recent
-    model-tagged reflexions when not supplied. ``score_with``/``score_without``
-    are the LIVE held-in/held-out A/B over the candidate prompt -- injected by
-    the caller because a real evaluation needs a real model; without them the
-    pass is a dry inspection that writes nothing (mirrors the rest of this
-    module: deterministic, offline-testable, no-op unless explicitly driven).
-    Never raises -- a learning pass must not perturb anything.
+    model-tagged reflexions when not supplied. The tuning knobs
+    (``min_support``/``require_held_out``/``min_delta``/``min_held_out``/
+    ``candidates_per_signature``/``semantic_mining``/``bucket_by``) default to
+    ``None`` and are then filled from ``[self_harness]`` config, so an operator's
+    settings take effect automatically; an explicit argument overrides config. An
+    embedding-backed ``similarity_fn`` may be injected for true semantic
+    clustering; otherwise ``semantic_mining`` selects the deterministic built-in. ``score_with``/``score_without`` are the LIVE held-in/held-out A/B
+    over the candidate prompt -- injected by the caller because a real evaluation
+    needs a real model; without them the pass is a dry inspection that writes
+    nothing. Never raises -- a learning pass must not perturb anything.
     """
     try:
         from . import self_harness
         if not self_harness.enabled():
             return self_harness.SelfHarnessReport(model_id=str(model_id or ""))
+        st = self_harness.settings()
+        if min_support is None:
+            min_support = st["min_support"]
+        if require_held_out is None:
+            require_held_out = st["require_held_out"]
+        if min_delta is None:
+            min_delta = st["min_delta"]
+        if min_held_out is None:
+            min_held_out = st["min_held_out"]
+        if candidates_per_signature is None:
+            candidates_per_signature = st["candidates_per_signature"]
+        if semantic_mining is None:
+            semantic_mining = st["semantic_mining"]
+        if bucket_by is None:
+            bucket_by = st["mine_bucket_by"]
         if not model_id:
             from .llm import model_for_role
             model_id = model_for_role("orchestrator")
@@ -168,14 +192,155 @@ def run_self_harness_pass(
         return self_harness.run_self_harness(
             reflexions, model_id=model_id, held_in=held_in, held_out=held_out,
             score_with=score_with, score_without=score_without,
-            propose_fn=propose_fn, controller=controller, min_support=min_support)
+            propose_fn=propose_fn, controller=controller, min_support=min_support,
+            require_held_out=require_held_out, min_delta=min_delta,
+            min_held_out=min_held_out, confidence_z=st["confidence_z"],
+            max_cost_factor=st["max_cost_factor"],
+            max_latency_factor=st["max_latency_factor"],
+            max_tool_calls_factor=st["max_tool_calls_factor"],
+            min_support_by_class=st["min_support_by_class"],
+            candidates_per_signature=candidates_per_signature,
+            semantic_mining=semantic_mining, similarity_fn=similarity_fn,
+            bucket_by=bucket_by, metamorphic_fn=metamorphic_fn,
+            metamorphic_tolerance=metamorphic_tolerance)
     except Exception:  # pragma: no cover -- learning never perturbs a run
         log.debug("self-harness pass failed", exc_info=True)
         from . import self_harness
         return self_harness.SelfHarnessReport(model_id=str(model_id or ""))
 
 
+def _auto_evaluator(model_id: str, *, corpus_path: str, held_out_frac: float = 0.3,
+                    budget=None):
+    """Build ``(held_in, held_out, score_with, score_without)`` -- the LIVE A/B --
+    from a configured eval corpus + the model's own LLM client, so the driver can
+    actually PROMOTE rather than only dry-inspect. The candidate ``model_id``
+    GENERATES; a verifier-role model JUDGES (cross-model, to avoid self-grading;
+    neither is hard-coded -- :func:`model_for_role`, kernel rule 2). Returns
+    ``None`` (caller stays dry) when there is no corpus, no cases for the model, or
+    no usable held-out split. Never raises."""
+    try:
+        from . import self_harness_eval as ev
+        from .llm import LLM, model_for_role
+        cases = ev.corpus_cases(ev.load_eval_corpus(corpus_path), model_id)
+        if not cases:
+            return None
+        held_in, held_out = ev.corpus_split(cases, held_out_frac=held_out_frac)
+        if not held_out:
+            return None
+        score_with, score_without = ev.corpus_ab_scorers(
+            cases,
+            run_fn=ev.llm_runner(LLM(model_id), budget=budget),
+            judge_fn=ev.llm_judge(LLM(model_for_role("verifier")), budget=budget))
+        return held_in, held_out, score_with, score_without
+    except Exception:  # pragma: no cover -- a missing provider/corpus stays dry
+        log.debug("self-harness auto-evaluator construction failed", exc_info=True)
+        return None
+
+
+def run_self_harness_cycle(
+    reflexions=None, *, model_id: str | None = None, limit: int = 500,
+    retire: bool = True, retire_after_days: float | None = None,
+    held_in=None, held_out=None, score_with=None, score_without=None,
+    propose_fn=None, controller=None, **pass_kwargs,
+):
+    """One full DRIVER cycle -- a governed learning pass THEN stale-line
+    retirement -- the unit a scheduler (cron / the self-improvement loop) invokes
+    to operate the harness end-to-end. Returns ``(report, retired_count)``.
+
+    The pass is :func:`run_self_harness_pass` (mine -> propose -> validate ->
+    gate). The live A/B (``score_with``/``score_without``) is injected, OR -- when
+    the caller injects none and ``[self_harness] eval_corpus`` is configured --
+    AUTO-BUILT by :func:`_auto_evaluator` (the model generates, a verifier judges)
+    so a scheduled ``maverick self-harness run`` actually PROMOTES. With no scorer
+    and no corpus it is a DRY inspection that writes no NEW guidance, but
+    retirement still runs -- so the cycle keeps guidance fresh either way.
+    Retirement uses
+    ``retire_after_days`` (arg overrides ``[self_harness]`` config; 0/None = off)
+    and is scoped to the pass's resolved model. Never raises -- a maintenance
+    cycle must not perturb anything."""
+    try:
+        from . import self_harness
+        # AUTO-WIRE the live A/B from config so a scheduled cycle can actually
+        # PROMOTE, not just dry-inspect: if the caller injected no scorers and
+        # [self_harness] eval_corpus is set, build the model-generates /
+        # verifier-judges evaluator. Unset corpus (the default) -> stays dry, so
+        # behavior is unchanged out of the box.
+        if (score_with is None and score_without is None and self_harness.enabled()):
+            corpus_path = self_harness.settings().get("eval_corpus")
+            if corpus_path:
+                from .llm import model_for_role
+                model_id = model_id or model_for_role("orchestrator")
+                built = _auto_evaluator(model_id, corpus_path=corpus_path)
+                if built is not None:
+                    held_in, held_out, score_with, score_without = built
+        report = run_self_harness_pass(
+            reflexions, model_id=model_id, limit=limit,
+            held_in=held_in, held_out=held_out, score_with=score_with,
+            score_without=score_without, propose_fn=propose_fn,
+            controller=controller, **pass_kwargs)
+        retired = 0
+        if retire and self_harness.enabled():
+            days = retire_after_days
+            if days is None:
+                days = self_harness.settings().get("retire_after_days", 0.0)
+            if days and float(days) > 0:
+                retired = self_harness.retire_stale(
+                    older_than_days=float(days),
+                    model_id=(report.model_id or model_id) or None)
+        return report, retired
+    except Exception:  # pragma: no cover -- a maintenance cycle never perturbs a run
+        log.debug("self-harness cycle failed", exc_info=True)
+        from . import self_harness
+        return self_harness.SelfHarnessReport(model_id=str(model_id or "")), 0
+
+
+def harness_fleet_models() -> list[str]:
+    """The DISTINCT set of models the fleet runs, resolved across every role in
+    ``llm.ROLE_MODELS`` (each via ``model_for_role``, deduped, sorted for a
+    deterministic order). The harness is model-specific, so a worker model
+    accumulates its OWN guidance -- this is the fleet the driver should cover, not
+    just the orchestrator. Empty on any error (never raises)."""
+    try:
+        from .llm import ROLE_MODELS, model_for_role
+    except Exception:  # pragma: no cover
+        return []
+    models: list[str] = []
+    for role in ROLE_MODELS:
+        try:
+            m = model_for_role(role)
+        except Exception:  # pragma: no cover -- one bad role can't drop the rest
+            continue
+        if m and m not in models:
+            models.append(m)
+    return sorted(models)
+
+
+def run_self_harness_all_models(*, limit: int = 500, retire: bool = True, **cycle_kwargs):
+    """Run a self-harness cycle for EVERY distinct configured role model, so
+    WORKER models learn their own harness, not just the orchestrator -- the
+    harness is model-specific and a real fleet runs several models. Returns
+    ``{model_id: (report, retired)}``.
+
+    Each model's pass mines only ITS OWN traces (mining is per-model), so a
+    worker's lesson never bleeds into the orchestrator's. Without injected
+    scorers it is a fleet-wide DRY inspection + stale-line retirement; live
+    per-model A/B scoring is the operator's to wire (a real evaluation needs a
+    real model). Never raises."""
+    out: dict[str, tuple] = {}
+    try:
+        from . import self_harness
+        if not self_harness.enabled():
+            return out
+        for m in harness_fleet_models():
+            out[m] = run_self_harness_cycle(
+                model_id=m, limit=limit, retire=retire, **cycle_kwargs)
+    except Exception:  # pragma: no cover -- a fleet sweep never perturbs a run
+        log.debug("self-harness all-models cycle failed", exc_info=True)
+    return out
+
+
 __all__ = [
     "collect_calibration", "should_retire", "review_generated_tools",
     "build_prm_examples", "emit_strategy_candidate", "run_self_harness_pass",
+    "run_self_harness_cycle", "run_self_harness_all_models", "harness_fleet_models",
 ]

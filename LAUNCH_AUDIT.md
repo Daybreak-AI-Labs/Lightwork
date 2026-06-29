@@ -1,4 +1,4 @@
-# Maverick Launch Audit
+# Lightwork Launch Audit
 
 This public file intentionally omits detailed launch-hardening findings and
 component-level remediation notes. Those details can expose an actionable roadmap

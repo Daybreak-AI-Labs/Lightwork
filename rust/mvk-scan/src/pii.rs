@@ -90,10 +90,20 @@ fn luhn_over(digits: &[u8]) -> bool {
     total.is_multiple_of(10) // Python: total % 10 == 0
 }
 
+fn luhn_contribution(digit: u8) -> u32 {
+    let doubled = (digit as u32) * 2;
+    if doubled > 9 {
+        doubled - 9
+    } else {
+        doubled
+    }
+}
+
 /// Mirror of `pii_detector._cc_run_has_card`: a normal-length run (<=19 digits)
 /// is Luhn-checked whole; a longer run (>=20, the concatenation bypass) is
-/// scanned with a sliding 13-19 digit window. `Err` on a non-ASCII Unicode digit
-/// so the caller falls back to pure Python (Rust can't fold those like `int()`).
+/// scanned with rolling Luhn sums for every 13-19 digit window. `Err` on a
+/// non-ASCII Unicode digit so the caller falls back to pure Python (Rust can't
+/// fold those like `int()`).
 fn cc_run_has_card(run: &str) -> Result<bool, String> {
     let mut digits: Vec<u8> = Vec::with_capacity(run.len());
     for c in run.chars() {
@@ -109,11 +119,34 @@ fn cc_run_has_card(run: &str) -> Result<bool, String> {
     if n <= 19 {
         return Ok(luhn_over(&digits));
     }
+
+    let doubled: Vec<u32> = digits.iter().map(|&d| luhn_contribution(d)).collect();
     for length in 13..=19usize {
-        for i in 0..=(n - length) {
-            if luhn_over(&digits[i..i + length]) {
+        let mut raw_sums = [0u32, 0u32];
+        let mut doubled_sums = [0u32, 0u32];
+        for (idx, &digit) in digits.iter().take(length).enumerate() {
+            let parity = idx % 2;
+            raw_sums[parity] += digit as u32;
+            doubled_sums[parity] += doubled[idx];
+        }
+
+        for start in 0..=(n - length) {
+            let doubled_parity = (start + (length % 2)) % 2;
+            let total = doubled_sums[doubled_parity] + raw_sums[1 - doubled_parity];
+            if total.is_multiple_of(10) {
                 return Ok(true);
             }
+
+            if start == n - length {
+                break;
+            }
+            let out_parity = start % 2;
+            raw_sums[out_parity] -= digits[start] as u32;
+            doubled_sums[out_parity] -= doubled[start];
+            let in_idx = start + length;
+            let in_parity = in_idx % 2;
+            raw_sums[in_parity] += digits[in_idx] as u32;
+            doubled_sums[in_parity] += doubled[in_idx];
         }
     }
     Ok(false)

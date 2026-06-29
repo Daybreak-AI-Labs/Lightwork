@@ -29,11 +29,11 @@ downgrading isolation.
 
 ```bash
 # 1. Fetch a Firecracker-compatible uncompressed kernel -> ~/.maverick/firecracker/kernel.img
-deploy/firecracker/fetch-kernel.sh
+#    KERNEL_SHA256 is mandatory; set it to the digest for the exact KERNEL_URL bytes.
+KERNEL_SHA256=<64-hex-digest> deploy/firecracker/fetch-kernel.sh
 
-# 2. Build an ext4 rootfs from a container image -> ~/.maverick/firecracker/rootfs.img
-#    Defaults to the maverick sandbox image; override with IMAGE=...
-sudo deploy/firecracker/build-rootfs.sh
+# 2. Build an ext4 rootfs from a digest-pinned container image -> ~/.maverick/firecracker/rootfs.img
+IMAGE=ubuntu@sha256:<64-hex-digest> sudo -E deploy/firecracker/build-rootfs.sh
 ```
 
 Then point the agent at it:
@@ -56,5 +56,8 @@ network  = "egress-deny"  # egress-deny | egress-allow | bridge=<tap-name>
 - **Hosted alternative.** If you don't want to operate Firecracker yourself,
   set `provider = "e2b"` and `E2B_API_KEY` — same `.exec()` interface, no
   kernel/rootfs to build.
-- **Reproducibility.** Pin `KERNEL_URL` (in `fetch-kernel.sh`) and the source
-  `IMAGE` digest so every host builds the same guest.
+- **Artifact integrity.** `fetch-kernel.sh` refuses to install a kernel unless
+  `KERNEL_SHA256` matches the downloaded bytes, and `build-rootfs.sh` requires
+  `IMAGE` to be pinned with an immutable `@sha256:` digest. These checks keep
+  mutable URLs and registry tags from silently changing the guest that the
+  sandbox boots.

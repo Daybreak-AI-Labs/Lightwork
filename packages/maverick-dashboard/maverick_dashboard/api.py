@@ -123,6 +123,9 @@ _PERF_SLA_CACHE_TTL_SECONDS = 60.0
 _PERF_SLA_LOCK = asyncio.Lock()
 _PERF_SLA_CACHE: tuple[float, list[dict], str | None] | None = None
 _PERF_HISTORY_MAX_FILES = 128
+_COMPLIANCE_PACKET_CACHE_TTL_SECONDS = 60.0
+_COMPLIANCE_PACKET_LOCK = asyncio.Lock()
+_COMPLIANCE_PACKET_CACHE: tuple[float, str] | None = None
 
 
 
@@ -1043,8 +1046,21 @@ def _harness_guidance() -> tuple[list[dict], bool]:
     the feature is on. Kept in its own try so a self-harness failure never
     blanks the capability ledger, and vice versa."""
     try:
-        from maverick.self_harness import enabled, list_learned
-        rows = [{"model_id": m, "lines": lines}
+        from maverick.self_harness import (
+            detect_store_conflicts,
+            enabled,
+            line_provenance,
+            list_learned,
+        )
+        conflicts_by_model: dict[str, list] = {}
+        try:
+            for m, a, b in detect_store_conflicts():
+                conflicts_by_model.setdefault(m, []).append([a, b])
+        except Exception:  # pragma: no cover -- conflicts are advisory
+            pass
+        rows = [{"model_id": m, "lines": lines,
+                 "provenance": line_provenance(m),
+                 "conflicts": conflicts_by_model.get(m, [])}
                 for m, lines in sorted(list_learned().items())]
         return rows, bool(enabled())
     except Exception as e:  # pragma: no cover -- never block the page
@@ -2262,12 +2278,35 @@ async def simulate(request: Request, surface: str, action: str, target: str = ""
     return simulate_action(surface, action, target)
 
 
+def _build_compliance_packet_body() -> str:
+    from .control_plane import compliance_packet
+
+    return json.dumps(compliance_packet(), indent=2, ensure_ascii=False, default=str)
+
+
 @router.get("/compliance/packet")
 async def compliance_packet_download(request: Request) -> Response:
     """Download a one-click compliance evidence bundle (SOC 2 control snapshot +
     GDPR/EU-AI-Act control report + audit-chain verdict) as a JSON artifact."""
-    from .control_plane import compliance_packet
-    body = json.dumps(compliance_packet(), indent=2, ensure_ascii=False, default=str)
+    require_permission(request, "audit")
+    global _COMPLIANCE_PACKET_CACHE
+    now = time.monotonic()
+    if (
+        _COMPLIANCE_PACKET_CACHE is not None
+        and now - _COMPLIANCE_PACKET_CACHE[0] < _COMPLIANCE_PACKET_CACHE_TTL_SECONDS
+    ):
+        body = _COMPLIANCE_PACKET_CACHE[1]
+    else:
+        async with _COMPLIANCE_PACKET_LOCK:
+            now = time.monotonic()
+            if (
+                _COMPLIANCE_PACKET_CACHE is not None
+                and now - _COMPLIANCE_PACKET_CACHE[0] < _COMPLIANCE_PACKET_CACHE_TTL_SECONDS
+            ):
+                body = _COMPLIANCE_PACKET_CACHE[1]
+            else:
+                body = await run_in_threadpool(_build_compliance_packet_body)
+                _COMPLIANCE_PACKET_CACHE = (time.monotonic(), body)
     return Response(
         content=body,
         media_type="application/json",
@@ -2456,7 +2495,6 @@ async def oversight_active(request: Request) -> dict:
     fleet work without a full-page reload. Fail-soft per goal: a goal whose
     event tail can't be read still lists with an empty activity.
     """
-    from maverick.world_model import _dec_field
     w = _world()
     goals = w.list_goals(
         status="active", owner=goal_owner_filter(request), limit=50, order="desc",
@@ -2466,17 +2504,15 @@ async def oversight_active(request: Request) -> dict:
         activity = ""
         updated_at = g.updated_at
         try:
-            row = w.conn.execute(
-                "SELECT kind, content, ts FROM goal_events WHERE goal_id = ? "
-                "ORDER BY id DESC LIMIT 1",
-                (g.id,),
-            ).fetchone()
-            if row:
-                # content is sealed at rest -> decode (no-op when encryption off);
-                # kind is stored plain.
-                content = (_dec_field(row[1]) or "")[:120]
-                activity = f"{row[0] or ''}: {content}".strip(": ").strip()
-                updated_at = row[2]
+            # Public method (works on SQLite AND Postgres) instead of a raw
+            # `w.conn` query with `?` placeholders, which silently blanked every
+            # activity under the Postgres backend. content is already decoded.
+            events = w.recent_goal_events(g.id, limit=1)
+            if events:
+                ev = events[-1]  # newest (chronological order)
+                content = (ev.content or "")[:120]
+                activity = f"{ev.kind or ''}: {content}".strip(": ").strip()
+                updated_at = ev.ts
         except Exception:
             activity = ""
             updated_at = g.updated_at
@@ -3017,9 +3053,9 @@ async def goal_tree_api(request: Request, limit: int = 300) -> dict:
 async def retitle_goal(request: Request, goal_id: int, payload: RetitleIn) -> None:
     """Rename a goal (graph editor).
 
-    The world model has no title-update method (``create_goal`` /
-    ``set_goal_status`` only), so this updates the row through the world's
-    write lock, sealing the column the same way ``create_goal`` does.
+    Uses the world model's public ``set_goal_title`` so it works identically on
+    the SQLite and Postgres backends (the earlier raw-SQL path used SQLite-only
+    internals and 500'd under Postgres).
     """
     w = _world()
     g = w.get_goal(goal_id)
@@ -3030,12 +3066,7 @@ async def retitle_goal(request: Request, goal_id: int, payload: RetitleIn) -> No
     title = (payload.title or "").strip()
     if not title:
         raise HTTPException(status_code=400, detail="title is required")
-    from maverick.world_model import _enc_field
-    with w._writing() as conn:
-        conn.execute(
-            "UPDATE goals SET title = ?, updated_at = ? WHERE id = ?",
-            (_enc_field(title[:200]), time.time(), goal_id),
-        )
+    w.set_goal_title(goal_id, title[:200])
 
 
 
@@ -3062,20 +3093,12 @@ async def reparent_goal(request: Request, goal_id: int, payload: ReparentIn) -> 
             raise HTTPException(status_code=404, detail="no such parent goal")
         assert_goal_access(request, p)
         from .goal_tree import descendant_ids
-        pairs = [
-            (r["id"], r["parent_id"])
-            for r in w._read_all("SELECT id, parent_id FROM goals")
-        ]
-        if new_parent in descendant_ids(pairs, goal_id):
+        if new_parent in descendant_ids(w.goal_parent_pairs(), goal_id):
             raise HTTPException(
                 status_code=400,
                 detail="cannot re-parent a goal under its own descendant",
             )
-    with w._writing() as conn:
-        conn.execute(
-            "UPDATE goals SET parent_id = ?, updated_at = ? WHERE id = ?",
-            (new_parent, time.time(), goal_id),
-        )
+    w.set_goal_parent(goal_id, new_parent)
 
 
 

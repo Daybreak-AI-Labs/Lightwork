@@ -11,7 +11,7 @@
 | Frameworks | ISO/IEC 27001:2022 Cl. 10.1, 10.2; ISO/IEC 42001:2023 Cl. 10.1, 10.2; SOC 2 CC4.2 |
 
 This is the consolidated corrective-action (CAPA) register of the Organization
-(Maverick), satisfying ISO 27001 / ISO 42001 **Clause 10.1** (nonconformity and
+(Lightwork), satisfying ISO 27001 / ISO 42001 **Clause 10.1** (nonconformity and
 corrective action). It is the single destination for nonconformities raised by
 internal audit ([PROC-05](../procedures/internal-audit-plan.md)), incidents
 (POL-07), the risk process ([PROC-04](../procedures/risk-assessment-and-review-procedure.md)),

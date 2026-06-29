@@ -14,7 +14,7 @@ them.
 ## 0. Prerequisite: produce training data (the real gate)
 
 Neither your laptop nor the cloud can manufacture this — it comes from **real
-runs**. Turn on donation, then use Maverick normally:
+runs**. Turn on donation, then use Lightwork normally:
 
 ```toml
 # ~/.maverick/config.toml

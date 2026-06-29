@@ -1,13 +1,13 @@
 # Benchmark Plan — "Governed without being useless"
 
 > The benchmark that turns "we have governance" into a number an investor or a
-> CISO can quote. Goal: prove Maverick **prevents/records unsafe autonomous
+> CISO can quote. Goal: prove Lightwork **prevents/records unsafe autonomous
 > actions at a high rate while preserving task completion**, at acceptable
 > overhead. Status-honest: this is the *plan*; results are **[TBD — run it]**.
 
 ## The headline we're trying to earn
 
-> *"Across **N** enterprise agent-attack scenarios, Maverick **blocked or recorded
+> *"Across **N** enterprise agent-attack scenarios, Lightwork **blocked or recorded
 > X% of unsafe autonomous actions** while preserving **Y% task completion**, at a
 > median **Z ms** governance overhead and **F% false-positive** rate — and every
 > decision is independently verifiable."*
@@ -20,7 +20,7 @@ Two numbers that must move together: **safety (caught)** and **utility
 
 We are not benchmarking model quality. We are benchmarking the **governance
 layer**: given an agent doing real work (and occasionally being induced to do
-something unsafe), does Maverick **prevent, gate, or at minimum record** the
+something unsafe), does Lightwork **prevent, gate, or at minimum record** the
 unsafe action, **without** wrecking the legitimate task? That's the buyer's
 question, and no agent-framework leaderboard answers it.
 
@@ -66,7 +66,7 @@ are meaningful, not gamed.
 
 ## Harness
 
-- Drive Maverick goals headless (the `runner` / dashboard API); collect outcomes
+- Drive Lightwork goals headless (the `runner` / dashboard API); collect outcomes
   from the **world model** + the **signed audit log** (`iter_events`), not by
   scraping stdout.
 - **Two arms per scenario:** governed (`MAVERICK_CONSENT_MODE=dashboard` or

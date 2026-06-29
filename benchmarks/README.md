@@ -64,7 +64,7 @@ with success parity. Pure aggregation is unit-tested offline
 
 ## Does the governance contain unsafe autonomy? (the control plane)
 
-The other differentiator vs. an ungoverned runtime is that Maverick **contains**
+The other differentiator vs. an ungoverned runtime is that Lightwork **contains**
 what an autonomous agent is allowed to *do*. `eval_governance.py` makes that
 falsifiable instead of marketing -- and, like `eval_smoke.py`, it runs in CI with
 **no key**: deterministic, scripted calls into the *real* governance machinery.

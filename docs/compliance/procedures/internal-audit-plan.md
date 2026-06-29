@@ -11,7 +11,7 @@
 | Frameworks | ISO/IEC 27001:2022 Cl. 9.2; ISO/IEC 42001:2023 Cl. 9.2; SOC 2 CC4.1 |
 
 This document defines the internal audit programme of the Organization
-(Maverick) required by ISO 27001 / ISO 42001 **Clause 9.2**. It establishes the
+(Lightwork) required by ISO 27001 / ISO 42001 **Clause 9.2**. It establishes the
 annual plan, audit scope, auditor independence, the audit checklist, the
 classification of findings, and how findings flow into corrective action. It
 audits the management system against the two Statements of Applicability

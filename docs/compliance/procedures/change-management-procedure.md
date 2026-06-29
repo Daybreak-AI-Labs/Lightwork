@@ -13,7 +13,7 @@
 > This procedure operationalizes the Change Management Policy (POL-05). Where
 > POL-05 sets the intent, this document is the step-by-step operating
 > instruction the Organization follows to make, review, approve, deploy, and
-> record changes to Maverick.
+> record changes to Lightwork.
 
 ---
 
@@ -21,7 +21,7 @@
 
 ### 1.1 Purpose
 
-To ensure every change to Maverick is authorized, reviewed by someone other than
+To ensure every change to Lightwork is authorized, reviewed by someone other than
 the author, tested by automated controls, traceable to an approver, and
 reversible. This is how the Organization satisfies SOC 2 CC8.1 (the entity
 authorizes, designs, develops, tests, approves, and implements changes),
@@ -32,7 +32,7 @@ test and production), and ISO 42001 A.6.2 (the AI system change lifecycle).
 
 This procedure applies to all changes to:
 
-- **Code** — anything tracked in the `Maverick` git repository: the kernel
+- **Code** — anything tracked in the `Lightwork` git repository: the kernel
   (`packages/maverick-core/`), shield, channels, dashboard, MCP, the installer
   apps under `apps/`, the TypeScript SDK under `sdks/plugin-ts/`, specialist
   packs/domains, and CI workflows under `.github/workflows/`.
@@ -270,7 +270,7 @@ Every change must be reconstructable after the fact from durable records.
 - **Signed commits** — commits are GPG/SSH-signed (and required by branch
   protection, §5), tying each change to an identity. Squash-merge yields one
   signed, attributable commit per change on a linear `main` history.
-- **Audit log** — Maverick's signed, append-only audit chain records the
+- **Audit log** — Lightwork's signed, append-only audit chain records the
   deployment/posture events (`maverick enterprise verify` writes a signed probe;
   `maverick soc2` reads the audit chain). This provides tamper-evident evidence
   independent of GitHub.

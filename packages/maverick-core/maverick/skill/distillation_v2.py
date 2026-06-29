@@ -28,7 +28,7 @@ from __future__ import annotations
 import re
 from pathlib import Path
 
-from .distillation_local import _STORE, distill, save_skill
+from .distillation_local import _default_store, distill, save_skill
 
 # A small stop-list so the signature is content words, not glue.
 _STOP = frozenset({
@@ -75,9 +75,9 @@ def is_duplicate(signature: frozenset[str], existing: list[frozenset[str]], *,
     return any(_overlap(signature, e) >= threshold for e in existing)
 
 
-def signatures_from_store(store: Path | str = _STORE) -> list[frozenset[str]]:
+def signatures_from_store(store: Path | str | None = None) -> list[frozenset[str]]:
     """Content signatures of every already-learned skill in ``store``."""
-    p = Path(store)
+    p = Path(store) if store is not None else _default_store()
     if not p.exists():
         return []
     out: list[frozenset[str]] = []
@@ -125,7 +125,7 @@ def distill_gated(trajectories: list[dict], *,
     return skill, "ok"
 
 
-def distill_and_save_gated(trajectories: list[dict], *, store: Path | str = _STORE,
+def distill_and_save_gated(trajectories: list[dict], *, store: Path | str | None = None,
                            top_k: int = 3, min_examples: int = DEFAULT_MIN_EXAMPLES,
                            dedup_threshold: float = DEFAULT_DEDUP_THRESHOLD,
                            min_signal: int = DEFAULT_MIN_SIGNAL_TOKENS) -> tuple[Path | None, str]:

@@ -69,9 +69,10 @@ wall-clock, tokens, and tool calls, checked in the loop — not advisory
 logging after the fact. Set per run (`maverick start --max-dollars 2.0`),
 per provider per day/month (`[budget.provider_caps]`), and per principal
 (`quotas.py`). `maverick budget` shows total and per-run history;
-`maverick cost` breaks down spend; `maverick budget-tune` *recommends* a
-cap from your history (a human sets it). A house rule: no code path
-bypasses `budget.check()`.
+`maverick cost` and `maverick spend` (`--json` for FinOps/BI scripts) break
+down spend by tag/goal; `maverick budget-tune` *recommends* a cap from your
+history (a human sets it). A house rule: no code path bypasses
+`budget.check()`.
 
 ### The shield
 
@@ -234,7 +235,8 @@ buckets per `[retention]` policy; `maverick gc` collects old goal data.
 
 [`operations.md`](./operations.md) is the runbook (hung service, crashed
 process, runaway spend, backup/restore of `world.db`). Quick diagnostics:
-`maverick doctor`, `maverick ps` (unified process table), `maverick diag
+`maverick doctor`, `maverick safety` (shield / sandbox / egress posture,
+`--json` for CI), `maverick ps` (unified process table), `maverick diag
 circuits / ratelimits / health / cost-by-tag`, `maverick failures` (the
 distribution of *why* runs fail), `maverick analytics` (DuckDB OLAP over
 your history), `maverick cost-retro` (where the money went). Observability

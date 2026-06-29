@@ -1,6 +1,6 @@
 # Contributor License Agreement (CLA)
 
-Maverick is proprietary, commercially licensed software (see [`LICENSE`](./LICENSE)).
+Lightwork is proprietary, commercially licensed software (see [`LICENSE`](./LICENSE)).
 Because the project is dual-license-capable (a future Community edition may be
 released under a separate license), all external contributions must be made under
 this Contributor License Agreement so the Licensor retains the rights needed to

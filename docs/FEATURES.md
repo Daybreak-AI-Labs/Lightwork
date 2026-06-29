@@ -118,6 +118,24 @@ here.
   kernel-template mutation. Reflexions now carry a `model_id` for the per-model
   mining. After *Self-Harness: Harnesses That Improve Themselves* (arXiv
   2606.09498); design in [`docs/proposals/self-harness.md`](./proposals/self-harness.md).
+- **Evaluator co-evolution (promote a better judge, don't just freeze)** —
+  `maverick.evaluator_evolution` (opt-in `[self_improvement] evaluator_evolution`)
+  extends the calibration interlock from *freeze-on-drift* to *promote-on-drift*:
+  a challenger evaluator replaces the incumbent only when its agreement with a
+  fixed ground-truth **anchor**, measured by the conservative epsilon-best-belief
+  lower bound (the eps-quantile of a `Beta(1+S,1+F)` posterior), beats it. Routed
+  through the self-improvement ladder on a dedicated `evaluator` rung, so a swap
+  inherits the evidence floor, the calibration freeze, reversibility, human
+  approval (it sits above the default `max_auto_rung`), and the signed audit; an
+  evaluator only scores, so it carries no capability-escalation surface. Each
+  swap advances the slot's *epoch* and applies **selective erasure** — only the
+  displaced judge's learning records are discarded, keeping the within-epoch
+  signal stationary. The anchor is the guardrail, so released anchors are
+  **immutable**: checksum-pinned in `evaluator_anchors.lock.json` and enforced by
+  `python -m maverick.evaluator_evolution --ci` (a weak or mutable anchor would
+  launder drift). OFF by default. After *The Red Queen Gödel Machine:
+  Co-Evolving Agents and Their Evaluators* (arXiv 2606.26294); design in
+  [`docs/proposals/evaluator-co-evolution.md`](./proposals/evaluator-co-evolution.md).
 - **Shared generic insight promotion** — when explicitly enabled with
   `[dreaming] promote_shared`, only recurring *unscoped* failures can become
   shared insights. Department-scoped failures remain compartment-local and are
@@ -298,9 +316,15 @@ here.
   roster), which irreversible actions it denies (segregation of duties), its
   refusals, and the human sign-off on its deliverable. Flags + exits non-zero if
   a drafting pack could reach a mutator; `--json` exports for a GRC system.
+- **Safety-posture & FinOps export** — `maverick safety [--json]` prints the
+  live posture (shield status, sandbox backend + container isolation, egress
+  policy) to assert deployment safety in CI; `maverick spend [--json]` exports
+  total + per-goal + per-tag run cost for BI/chargeback; and the dashboard
+  `/billing` view shows a tenant's accrued charges, period-over-period trend,
+  and an itemized CSV invoice.
 - **Per-pack behavioral evals** — `maverick domains-eval [--check]`
 - **Roster-wide governance invariant suite** (verified across ALL 2,020 packs,
-  fault-injected at 1,000,000 iterations) — six invariants proven non-vacuously
+  fault-injected with a non-vacuous control) — six invariants proven non-vacuously
   (each carries a fault-injection control that fails when the guarantee is
   removed): (1) **tool-reachability** — no drafting/non-builder agent can reach
   a state-mutating tool; (2) **autonomy dial** — an onboarding agent is never
@@ -2178,7 +2202,8 @@ tested without spawning py-spy.
   exactly which digests differ and calls runs "comparable" only when
   config+inputs match; `audit_report()` sweeps the stored history. Two
   runs with differing digests are never claimed comparable.
-- **Compaction v6 hybrid** (`compaction/hybrid.py`): the strategy picker
+- **Compaction v6 hybrid** (`compaction/hybrid.py`, *experimental — opt-in,
+  not yet wired into the live compaction path*): the strategy picker
   learned from this deployment's own outcomes — deterministic features
   over the message window, a per-(feature-bucket, strategy) outcome ledger
   (atomic 0600), epsilon-greedy with an injected PRNG, and an optional
@@ -2186,7 +2211,9 @@ tested without spawning py-spy.
   picker consults when present. Cold start = the existing default
   strategy; every failure falls open like all compaction paths. An
   online-learning heuristic, not a pretrained model — stated in the
-  docstring.
+  docstring. The picker (`pick_strategy`) is implemented and unit-tested
+  but the live agent compaction path still uses the rule ladder; enabling
+  `[compaction] hybrid` is a no-op until it is wired in.
 - **Sandbox pool: Firecracker-warm + cross-run pooling**
   (`sandbox/firecracker.py` + `sandbox/pool.py`, `[sandbox]
   cross_run_pool` default OFF): Firecracker warm mode keeps one e2b
@@ -2290,8 +2317,9 @@ tested without spawning py-spy.
 
 ## Distribution & install
 
-- **Packaging** — 8 packages on PyPI, GHCR Docker image, PyInstaller binaries,
-  native double-click installers (Tauri; `.exe` / `.dmg` / `.AppImage`).
+- **Packaging** — 8 packages (PyPI publish wired via OIDC, pending first tagged
+  release), GHCR Docker image, PyInstaller binaries, native double-click
+  installers (Tauri; `.exe` / `.dmg` / `.AppImage`).
 - **Backwards-compat tooling** — `maverick migrate` (`migrate.py`): walks an
   existing config forward — real migration advisories (Twilio WhatsApp → the
   first-party Cloud API adapter), unknown-section lint with did-you-mean

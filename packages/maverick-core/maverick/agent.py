@@ -80,6 +80,149 @@ Available roles for children: researcher, coder, writer, analyst, summarizer, re
 External MCP tools (if any) appear as `mcp_<server>__<tool>`."""
 
 
+def select_base_template(
+    *, role: str, depth: int, max_depth: int, coding_enabled: bool,
+) -> str:
+    """Pick the base system template for an agent. Pure: no env/config reads.
+
+    Coding mode, when enabled, overrides role: the orchestrator emits the FINAL
+    and must speak unified diffs, not prose, or the patch validator and
+    test-driven verifier operate on prose and reject every output (Wave 9). With
+    coding mode off it is the orchestrator template for the planner and the
+    worker template for every other role. First side-effect-free seam extracted
+    from ``Agent._build_system`` (god-module decomposition: PromptBuilder).
+    """
+    if coding_enabled:
+        from .coding_mode import CODER_CODING_MODE_TEMPLATE
+        return CODER_CODING_MODE_TEMPLATE.format(
+            role=role, depth=depth, max_depth=max_depth,
+        )
+    if role == "orchestrator":
+        return ORCHESTRATOR_SYSTEM_TEMPLATE.format(max_depth=max_depth)
+    return WORKER_SYSTEM_TEMPLATE.format(role=role, depth=depth, max_depth=max_depth)
+
+
+def apply_global_overlays(base: str) -> str:
+    """Append the swarm-wide additive prompt overlays to ``base``.
+
+    Persona, output style, and the learned-habits prior are global (config /
+    data-engine state, not agent-specific), each optional and fail-open. Order
+    is preserved from the original inline assembly. Second PromptBuilder
+    collaborator extracted from ``Agent._build_system``; self-independent, so it
+    is a free function rather than a method.
+    """
+    # Persona (optional, additive).
+    try:
+        from .persona import render_persona_prompt
+        persona = render_persona_prompt()
+        if persona:
+            base = base + persona
+    except Exception:
+        pass
+
+    # Output style (optional, additive): the user-selected response style
+    # (dashboard runtime overlay). Tone/format only, like the persona block.
+    try:
+        from .styles import render_active_style_prompt
+        style = render_active_style_prompt()
+        if style:
+            base = base + style
+    except Exception:
+        pass
+
+    # Learned-habits prior (the Hippocampus, additive): when the data engine
+    # is on, surface the strongest causally-beneficial habits it has
+    # consolidated so the agent prefers what has worked. No-op unless
+    # [data_engine] is enabled and procedural memory exists; fail-open.
+    try:
+        from . import data_engine
+        if data_engine.enabled():
+            from .procedural_memory import recall_prompt
+            base = base + recall_prompt()
+    except Exception:
+        pass
+
+    return base
+
+
+def apply_role_overlays(base: str, *, role: str, domain_persona: str | None) -> str:
+    """Append the per-agent role overlays to ``base``.
+
+    The tenant's per-role client addendum (dashboard roles editor; empty unless
+    customized, fail-open) and the domain-pack persona (factory spawn-from-
+    profile). Both are additive and blank-line separated, matching the original
+    inline assembly. Third PromptBuilder collaborator extracted from
+    ``Agent._build_system``; depends only on the role name and the resolved
+    domain persona, so it is a free function.
+    """
+    # Per-role client addendum (optional, additive): a tenant's custom
+    # instructions for this role, edited via the dashboard roles editor.
+    # Empty for any role the client hasn't customized, so behavior is
+    # unchanged by default. Specialist roles (domain-pack names) never
+    # match a known role, so this is a no-op for them.
+    try:
+        from .role_edit import role_addendum
+        addendum = role_addendum(role)
+        if addendum:
+            base = base + "\n\n" + addendum
+    except Exception:
+        pass
+
+    # Domain-pack persona (factory spawn-from-profile): specialist
+    # instructions for this agent's domain, additive to the base template.
+    if domain_persona:
+        base = base + "\n\n" + domain_persona
+
+    return base
+
+
+def apply_skill_overlays(
+    base: str, *, brief: str, use_skills: bool,
+) -> tuple[str, list]:
+    """Append relevant prior-run skills to ``base``; return ``(base, skills)``.
+
+    Returns the recalled skill objects so the caller can record their use and
+    attribute this run's outcome to them — the stats + ``skills_used``
+    bookkeeping stays in the caller to preserve the original all-or-nothing
+    semantics (names are read inside the caller's fail-safe block). No-op when
+    skills are disabled or none are relevant; fail-open on a missing/invalid
+    skill store. Fourth PromptBuilder collaborator from ``Agent._build_system``.
+    """
+    if not use_skills:
+        return base, []
+    try:
+        from .skills import available_skills, relevant_skills, render_for_prompt
+        skills = relevant_skills(brief, available_skills())
+        if skills:
+            base = base + "\n\n" + render_for_prompt(skills)
+            return base, list(skills)
+    except (ImportError, FileNotFoundError, ValueError):
+        pass
+    return base, []
+
+
+def apply_memory_brief(base: str, *, depth: int) -> str:
+    """Append the cross-session memory presence hint (root agent only).
+
+    Depth-gated to the root agent (``depth == 0``) so deep workers keep lean,
+    focused context (they can still use the ``memory`` tool directly). Surfaces
+    only a safe presence hint — memory filenames/contents are model-writable and
+    re-enter through the tool's scanned, redacted path, never directly here.
+    Empty memory -> no change; fail-open. Fifth PromptBuilder collaborator from
+    ``Agent._build_system``.
+    """
+    if depth != 0:
+        return base
+    try:
+        from .tools.memory import memory_brief
+        brief = memory_brief()
+        if brief:
+            base = base + "\n\n" + brief
+    except Exception:  # pragma: no cover -- never block a run
+        pass
+    return base
+
+
 # #611: fraction of the budget reserved for the TOP-level goal's synthesis /
 # write step. A deeper worker (depth > 0) stops once cumulative spend crosses
 # (1 - this) of the cap, so a recursive research swarm can't burn the budget
@@ -793,106 +936,43 @@ class Agent:
         # rejects -> Wave 8 contributes negative value. (council code
         # reviewer finding #1)
         try:
-            from .coding_mode import CODER_CODING_MODE_TEMPLATE
             from .coding_mode import from_env as _cm_from_env
             _coding_cfg = _cm_from_env()
         except Exception:
             _coding_cfg = None
 
-        if _coding_cfg is not None and _coding_cfg.enabled:
-            base = CODER_CODING_MODE_TEMPLATE.format(
-                role=self.role, depth=self.depth, max_depth=self.ctx.max_depth,
-            )
-        elif self.role == "orchestrator":
-            base = ORCHESTRATOR_SYSTEM_TEMPLATE.format(max_depth=self.ctx.max_depth)
-        else:
-            base = WORKER_SYSTEM_TEMPLATE.format(
-                role=self.role, depth=self.depth, max_depth=self.ctx.max_depth
-            )
+        base = select_base_template(
+            role=self.role, depth=self.depth, max_depth=self.ctx.max_depth,
+            coding_enabled=bool(_coding_cfg is not None and _coding_cfg.enabled),
+        )
 
-        # Persona (optional, additive).
-        try:
-            from .persona import render_persona_prompt
-            persona = render_persona_prompt()
-            if persona:
-                base = base + persona
-        except Exception:
-            pass
+        # Swarm-wide additive overlays (persona, output style, learned-habits
+        # prior) — global state, not agent-specific. Extracted as the second
+        # PromptBuilder collaborator.
+        base = apply_global_overlays(base)
 
-        # Output style (optional, additive): the user-selected response style
-        # (dashboard runtime overlay). Tone/format only, like the persona block.
-        try:
-            from .styles import render_active_style_prompt
-            style = render_active_style_prompt()
-            if style:
-                base = base + style
-        except Exception:
-            pass
+        # Per-agent role overlays (client role-addendum + domain-pack persona).
+        # Third PromptBuilder collaborator.
+        base = apply_role_overlays(
+            base, role=self.role, domain_persona=self._domain_persona)
 
-        # Learned-habits prior (the Hippocampus, additive): when the data engine
-        # is on, surface the strongest causally-beneficial habits it has
-        # consolidated so the agent prefers what has worked. No-op unless
-        # [data_engine] is enabled and procedural memory exists; fail-open.
-        try:
-            from . import data_engine
-            if data_engine.enabled():
-                from .procedural_memory import recall_prompt
-                base = base + recall_prompt()
-        except Exception:
-            pass
-
-        # Per-role client addendum (optional, additive): a tenant's custom
-        # instructions for this role, edited via the dashboard roles editor.
-        # Empty for any role the client hasn't customized, so behavior is
-        # unchanged by default. Specialist roles (domain-pack names) never
-        # match a known role, so this is a no-op for them.
-        try:
-            from .role_edit import role_addendum
-            addendum = role_addendum(self.role)
-            if addendum:
-                base = base + "\n\n" + addendum
-        except Exception:
-            pass
-
-        # Domain-pack persona (factory spawn-from-profile): specialist
-        # instructions for this agent's domain, additive to the base template.
-        if self._domain_persona:
-            base = base + "\n\n" + self._domain_persona
-
-        # Skills from prior runs (existing logic).
-        if self.ctx.use_skills:
+        # Skills from prior runs (fourth PromptBuilder collaborator). The seam
+        # renders + returns the recalled skills; the stats/ctx bookkeeping stays
+        # here, all-or-nothing inside one fail-safe block, exactly as before.
+        base, _skills = apply_skill_overlays(
+            base, brief=self.brief, use_skills=self.ctx.use_skills)
+        if _skills:
             try:
-                from .skills import available_skills, relevant_skills, render_for_prompt
-                skills = relevant_skills(self.brief, available_skills())
-                if skills:
-                    base = base + "\n\n" + render_for_prompt(skills)
-                    # Record the recall and remember the names so the
-                    # orchestrator can attribute this run's outcome to them
-                    # at finalize. Fully fail-safe: stats are an optimization.
-                    try:
-                        from .skill import stats as skill_stats
-                        names = [s.name for s in skills]
-                        skill_stats.record_use(names)
-                        self.ctx.skills_used.update(names)
-                    except Exception:
-                        pass
-            except (ImportError, FileNotFoundError, ValueError):
+                from .skill import stats as skill_stats
+                names = [s.name for s in _skills]
+                skill_stats.record_use(names)
+                self.ctx.skills_used.update(names)
+            except Exception:
                 pass
 
-        # Cross-session memory (root agent only): surface only a safe presence
-        # hint so each run knows durable memory exists. Memory filenames and
-        # contents are model-writable/untrusted and must re-enter through the
-        # `memory` tool's normal scanned, redacted, framed output path. Empty
-        # memory -> "" -> no change. Depth-gated so deep workers keep lean,
-        # focused context (they can still use the tool directly).
-        if self.depth == 0:
-            try:
-                from .tools.memory import memory_brief
-                brief = memory_brief()
-                if brief:
-                    base = base + "\n\n" + brief
-            except Exception:  # pragma: no cover -- never block a run
-                pass
+        # Cross-session memory presence hint (fifth PromptBuilder collaborator,
+        # root agent only).
+        base = apply_memory_brief(base, depth=self.depth)
 
         base = self._with_harness_addendum(base)
         return base
@@ -905,9 +985,16 @@ class Agent:
         Empty (no change) unless [self_harness] is enabled and an addendum
         exists. Fully fail-safe."""
         try:
-            from .self_harness import recall_addendum
-            addendum = recall_addendum(self.model)
+            from .self_harness import note_recall, recall_addendum
+            # Pass this run's domain so guidance mined SCOPED to a department is
+            # recalled only for that department's runs (model-wide guidance always
+            # is). Defaults to the model-wide block when the agent has no domain.
+            _dom = getattr(self, "domain", None)
+            addendum = recall_addendum(self.model, domain=_dom)
             if addendum:
+                # Track that this guidance was USED (throttled, best-effort) so
+                # retirement keeps actively-recalled lines and prunes dormant ones.
+                note_recall(self.model, domain=_dom)
                 return base + "\n\n" + addendum
         except Exception:  # pragma: no cover -- never block a run
             pass
@@ -2088,6 +2175,55 @@ class Agent:
         ):
             return await self._run_inner()
 
+    def _resume_from_checkpoint(self, messages: list[dict], bb, ep_id: int):
+        """Resume durable loop state for a depth-0 run (opt-in, fail-open).
+
+        Returns ``(ckpt, start_step, messages)``. When durable checkpointing is
+        disabled, there is no goal id, this is not the root agent, or anything
+        raises, returns ``(None, 0, messages)`` unchanged — today's warm-restart
+        behavior. Restores ``self.ctx.budget`` from the snapshot as a side effect
+        when one is present. Extracted from ``_run_inner`` (CheckpointManager).
+        """
+        start_step = 0
+        ckpt = None
+        if self.depth == 0 and self.ctx.goal_id is not None:
+            try:
+                from . import checkpoint as _ckpt_mod
+                if _ckpt_mod.enabled():
+                    ckpt = _ckpt_mod.Checkpointer(self.ctx.world)
+                    # Resume keys on a STABLE id, not self.name (a per-process
+                    # random uuid that never matched on a fresh-process resume).
+                    saved = ckpt.latest(
+                        self.ctx.goal_id, self.checkpoint_id, episode_id=ep_id,
+                    )
+                    if saved is not None and saved.messages:
+                        messages = saved.messages
+                        start_step = saved.step_seq
+                        try:
+                            self.ctx.budget = _ckpt_mod.restore_budget(saved.budget)
+                        except Exception:
+                            pass
+                        bb.post(self.name, "plan",
+                                f"resumed from checkpoint at step {start_step}")
+            except Exception as e:  # pragma: no cover -- never block a run
+                log.debug("checkpoint resume skipped: %s", e)
+        return ckpt, start_step, messages
+
+    def _save_checkpoint(self, ckpt, *, step: int, messages: list[dict],
+                         ep_id: int) -> None:
+        """Persist resumable loop state at a turn boundary. Fail-open no-op when
+        checkpointing is off (``ckpt is None``) or the store errors. Extracted
+        from ``_run_inner`` (CheckpointManager)."""
+        if ckpt is not None:
+            try:
+                ckpt.save(
+                    goal_id=self.ctx.goal_id, agent_id=self.checkpoint_id,
+                    episode_id=ep_id, step_seq=step, messages=messages,
+                    budget=self.ctx.budget, meta={"role": self.role},
+                )
+            except Exception as e:  # pragma: no cover
+                log.debug("checkpoint save skipped: %s", e)
+
     async def _run_inner(self) -> AgentResult:  # noqa: C901  -- core agent turn loop; decompose only under dedicated review (see below)
         bb = self.ctx.blackboard
         bb.post(self.name, "plan", f"role={self.role} depth={self.depth} brief={self.brief}")
@@ -2134,50 +2270,17 @@ class Agent:
             first_content = brief_text
         messages: list[dict] = [{"role": "user", "content": first_content}]
 
-        # Durable execution (Phase 1): resume a crashed single-agent run from
-        # its last committed step instead of re-running from step 0. Off by
-        # default, fail-open — any error here leaves `messages`/`start_step`
-        # untouched, i.e. today's warm-restart behavior. Scoped to depth-0
-        # (the swarm-tree case is Phase 2; see docs/specs/durable-execution.md).
-        start_step = 0
-        ckpt = None
+        # Durable execution (Phase 1): resume a crashed single-agent run from its
+        # last committed step. Extracted to _resume_from_checkpoint; off by
+        # default, fail-open (leaves messages/start_step untouched on any error).
         ep_id = getattr(self.ctx, "episode_id", 0) or 0
-        if self.depth == 0 and self.ctx.goal_id is not None:
-            try:
-                from . import checkpoint as _ckpt_mod
-                if _ckpt_mod.enabled():
-                    ckpt = _ckpt_mod.Checkpointer(self.ctx.world)
-                    # Resume keys on a STABLE id, not self.name (a per-process
-                    # random uuid that never matched on a fresh-process resume).
-                    saved = ckpt.latest(
-                        self.ctx.goal_id, self.checkpoint_id, episode_id=ep_id,
-                    )
-                    if saved is not None and saved.messages:
-                        messages = saved.messages
-                        start_step = saved.step_seq
-                        try:
-                            self.ctx.budget = _ckpt_mod.restore_budget(saved.budget)
-                        except Exception:
-                            pass
-                        bb.post(self.name, "plan",
-                                f"resumed from checkpoint at step {start_step}")
-            except Exception as e:  # pragma: no cover -- never block a run
-                log.debug("checkpoint resume skipped: %s", e)
+        ckpt, start_step, messages = self._resume_from_checkpoint(messages, bb, ep_id)
 
         for step in range(start_step, self.max_steps):
-            # Durable checkpoint at the turn boundary: commit the resumable
-            # loop state (step index, messages, budget snapshot) BEFORE the
-            # next LLM call, so a crash mid-step loses at most one step's work.
-            # Fail-open: a store error never stops the run.
-            if ckpt is not None:
-                try:
-                    ckpt.save(
-                        goal_id=self.ctx.goal_id, agent_id=self.checkpoint_id,
-                        episode_id=ep_id, step_seq=step, messages=messages,
-                        budget=self.ctx.budget, meta={"role": self.role},
-                    )
-                except Exception as e:  # pragma: no cover
-                    log.debug("checkpoint save skipped: %s", e)
+            # Durable checkpoint at the turn boundary: commit the resumable loop
+            # state BEFORE the next LLM call, so a crash mid-step loses at most
+            # one step's work. Extracted to _save_checkpoint; fail-open.
+            self._save_checkpoint(ckpt, step=step, messages=messages, ep_id=ep_id)
 
             # Turn-boundary safety gate. Evaluate the global killswitch
             # (`maverick halt`, the dashboard Halt button, or the HALT

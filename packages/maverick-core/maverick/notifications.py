@@ -163,7 +163,7 @@ def _send_slack(title: str, body: str, url: str) -> bool:
 def notify(
     body: str,
     *,
-    title: str = "Maverick",
+    title: str = "Lightwork",
     priority: str = "default",
     category: str | None = None,
     backends: list[str] | None = None,

@@ -26,6 +26,17 @@ an invoice, not a Stripe "Buy now" button.
 - **Per-tenant spend caps.** `maverick tenant quota <id> <usd/day>` enforces a
   daily ceiling at the channel door (a tenant over its cap is refused), and
   per-tenant plans gate features (`maverick billing entitlements <id>`).
+- **Operator statement (`/billing`).** The dashboard's billing view shows the
+  active tenant's accrued charges for the current period, a period-over-period
+  spend trend, and a one-click **itemized CSV invoice**
+  (`/billing?format=csv&period=YYYY-MM`) for reconciliation against contracts.
+  This is the visual statement built from priced runs; the rated, idempotent
+  `Invoice` above (`maverick billing invoice`) remains the source of truth for
+  AR/ERP export.
+- **Quick FinOps export (`maverick spend`).** For a scriptable pull without the
+  dashboard, `maverick spend` (`--json`) prints total, top-goals-by-cost, and a
+  per-tag split (`--tag-field` for team/project/cost-center) — the CLI face of
+  the `/spend` page, for BI and chargeback pipelines.
 
 ## How money is actually collected
 

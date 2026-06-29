@@ -13,22 +13,22 @@
 
 ## 1. Purpose
 
-This policy establishes the requirements governing identity, authentication, and authorization for access to the Maverick platform, its administrative interfaces, its data stores, and the tools and capabilities it exposes to agents and operators. Its objective is to ensure that access is granted on the basis of verified identity, least privilege, and business need, and that access is reviewed and revoked in a timely manner. The policy supports the Organization's obligations under ISO/IEC 27001:2022, ISO/IEC 42001:2023, and SOC 2.
+This policy establishes the requirements governing identity, authentication, and authorization for access to the Lightwork platform, its administrative interfaces, its data stores, and the tools and capabilities it exposes to agents and operators. Its objective is to ensure that access is granted on the basis of verified identity, least privilege, and business need, and that access is reviewed and revoked in a timely manner. The policy supports the Organization's obligations under ISO/IEC 27001:2022, ISO/IEC 42001:2023, and SOC 2.
 
 ## 2. Scope
 
 This policy applies to:
 
-- All human users (administrators, operators, auditors, and viewers) of the Maverick dashboard, CLI, and MCP interfaces.
+- All human users (administrators, operators, auditors, and viewers) of the Lightwork dashboard, CLI, and MCP interfaces.
 - All non-human / agent identities and the capabilities, tools, and resources they may invoke.
 - All authentication and authorization components of the platform, including OIDC, SAML, reverse-proxy authentication, signed capabilities, and tool access-control lists.
-- All deployments of Maverick operated by or on behalf of the Organization, across development, staging, and production environments.
+- All deployments of Lightwork operated by or on behalf of the Organization, across development, staging, and production environments.
 
-**Critical deployment note:** Several access-control enforcement mechanisms in Maverick are opt-in and ship **off by default** (notably OIDC bearer enforcement and signed capability enforcement). A deployment is **not compliant** with this policy until these controls are explicitly enabled. See the Organization's SOC 2 turn-on guidance under `docs/compliance/soc2/`.
+**Critical deployment note:** Several access-control enforcement mechanisms in Lightwork are opt-in and ship **off by default** (notably OIDC bearer enforcement and signed capability enforcement). A deployment is **not compliant** with this policy until these controls are explicitly enabled. See the Organization's SOC 2 turn-on guidance under `docs/compliance/soc2/`.
 
 ## 3. Policy statements
 
-1. **Identity.** Every human user and every agent identity that accesses Maverick shall be uniquely identifiable. Shared or generic accounts are prohibited for administrative access.
+1. **Identity.** Every human user and every agent identity that accesses Lightwork shall be uniquely identifiable. Shared or generic accounts are prohibited for administrative access.
 2. **Authentication.** Interactive and programmatic access shall be authenticated. Where federated identity is available, the Organization shall use OIDC or SAML against the corporate identity provider. Bearer-token and capability enforcement shall be enabled in all production deployments.
 3. **Authorization & least privilege.** Access shall be granted at the minimum level required to perform an assigned function. Agent tool/path/host access shall be constrained by signed, attenuating capabilities scoped to the narrowest necessary set and bounded by a maximum-risk ceiling and an expiry.
 4. **Role-based access.** Human access shall be assigned through the platform's four defined roles — admin, operator, auditor, viewer — and not through ad-hoc privilege grants.
@@ -46,11 +46,11 @@ This policy applies to:
 | Management / Approver | Approves this policy; owns accountability for the access-control program. |
 | Security Lead / CISO (Owner) | Maintains the policy; ensures enforcement controls are enabled; oversees reviews. |
 | Platform / Operations | Configures OIDC/SAML, enables capability and bearer enforcement, manages role assignments. |
-| Maverick admin role | Manages platform configuration and access within the dashboard. |
-| Maverick auditor role | Read-only review of platform state and audit records; independent of operations. |
+| Lightwork admin role | Manages platform configuration and access within the dashboard. |
+| Lightwork auditor role | Read-only review of platform state and audit records; independent of operations. |
 | All users | Comply with least-privilege and authentication requirements. |
 
-## 5. Technical implementation in Maverick
+## 5. Technical implementation in Lightwork
 
 | Control | Implementation (file/module) | Status |
 | --- | --- | --- |
@@ -78,4 +78,4 @@ Any deployment that does not enable OIDC bearer enforcement and signed capabilit
 
 ## 8. Review & maintenance
 
-This policy shall be reviewed at least annually and upon any significant change to Maverick's authentication or authorization architecture, to the identity provider, or to the threat environment. The Owner is responsible for initiating review and recording approval.
+This policy shall be reviewed at least annually and upon any significant change to Lightwork's authentication or authorization architecture, to the identity provider, or to the threat environment. The Owner is responsible for initiating review and recording approval.

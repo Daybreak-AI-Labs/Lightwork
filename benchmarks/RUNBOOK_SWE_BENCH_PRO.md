@@ -14,7 +14,7 @@ df -h .
 # Docker 24+
 docker --version
 
-# Python deps (in the same venv as Maverick)
+# Python deps (in the same venv as Lightwork)
 pip install datasets swebench>=2.0
 ```
 
@@ -30,7 +30,7 @@ GITHUB_TOKEN=ghp_...              # SWE-bench Pro pulls from gh
 ## Step 1: download the dataset
 
 SWE-bench Pro is published on HF as `Scale/swe-bench-pro`. Convert it
-into Maverick's manifest format:
+into Lightwork's manifest format:
 
 ```bash
 mkdir -p ~/.maverick/swebench-pro
@@ -65,7 +65,7 @@ on a busted pipeline is no fun.
 mkdir -p ~/.maverick/swebench-pro
 head -10 ~/.maverick/swebench-pro/manifest.jsonl > ~/.maverick/swebench-pro/smoke.jsonl
 
-# Run Maverick + 3 baselines, with a HARD CAP via the budget args.
+# Run Lightwork + 3 baselines, with a HARD CAP via the budget args.
 # Per-task: $5 cap × 4 pipelines × 10 tasks = $200 worst-case.
 python benchmarks/swe_bench.py \
     --instances ~/.maverick/swebench-pro/smoke.jsonl \
@@ -128,7 +128,7 @@ where `resolved == true`.
 Once smoke is green:
 
 ```bash
-# Full Pareto — Maverick + 3 baselines × 1865 instances.
+# Full Pareto — Lightwork + 3 baselines × 1865 instances.
 # Budget: at least $5k unless you've pre-paid OpenRouter for DeepSeek.
 # Cap per-instance at $5; the harness will skip past tasks that
 # would blow the cap rather than burn through.
@@ -395,7 +395,7 @@ for ex in ds:
 - **`docker pull` rate-limited**: log into Docker Hub or use a mirror.
 - **`gh: not found`** during PR fallback: not needed for SWE-bench;
   irrelevant.
-- **Maverick produces no patch**: check the agent's `FINAL` is a
+- **Lightwork produces no patch**: check the agent's `FINAL` is a
   unified diff. If it's prose, add a worker-system-prompt hint that
   SWE-bench expects `--- a/... +++ b/...` format. Open an issue and
   I'll wire a `--coding-mode` flag.

@@ -13,17 +13,17 @@
 
 ## 1. Purpose
 
-This policy defines the Organization's requirements for the use of cryptography within the Maverick platform to protect the confidentiality, integrity, and tamper-evidence of information. It establishes approved algorithms, key management practices, and the application of cryptography to data at rest, data in transit, and audit integrity. The policy supports the Organization's obligations under ISO/IEC 27001:2022 and SOC 2.
+This policy defines the Organization's requirements for the use of cryptography within the Lightwork platform to protect the confidentiality, integrity, and tamper-evidence of information. It establishes approved algorithms, key management practices, and the application of cryptography to data at rest, data in transit, and audit integrity. The policy supports the Organization's obligations under ISO/IEC 27001:2022 and SOC 2.
 
 ## 2. Scope
 
 This policy applies to:
 
 - Encryption of data at rest, including the world database and agent memory.
-- Encryption of data in transit between Maverick components and external services.
+- Encryption of data in transit between Lightwork components and external services.
 - Cryptographic key generation, storage, rotation, and destruction, including local keys and externally managed (KMS) keys.
 - Use of cryptography for integrity and tamper-evidence, including the audit hash-chain and sealing of closed audit files.
-- All deployments of Maverick operated by or on behalf of the Organization.
+- All deployments of Lightwork operated by or on behalf of the Organization.
 
 **Critical deployment note:** At-rest encryption and audit signing are **on by default** under the secure-by-default profile (`security_defaults.py`). A deployment is **not compliant** with this policy if they are explicitly disabled (`MAVERICK_SECURE_DEFAULT=0`, or the per-control knobs `[encryption] at_rest = false` / `[audit] sign = false`). The Organization shall deploy with the hardened defaults or equivalent explicit configuration.
 
@@ -49,7 +49,7 @@ This policy applies to:
 | Audit / Compliance | Verifies tamper-evidence of audit records and evidence of key controls. |
 | All users / developers | Avoid handling raw keys; never embed secrets in source. |
 
-## 5. Technical implementation in Maverick
+## 5. Technical implementation in Lightwork
 
 | Control | Implementation (file/module) | Status |
 | --- | --- | --- |
@@ -73,4 +73,4 @@ Any deployment that does not enable at-rest encryption and audit signing is non-
 
 ## 8. Review & maintenance
 
-This policy shall be reviewed at least annually and upon any significant change to Maverick's cryptographic implementation, key-management architecture, KMS provider, or the cryptographic threat environment (including algorithm deprecation guidance). The Owner is responsible for initiating review and recording approval.
+This policy shall be reviewed at least annually and upon any significant change to Lightwork's cryptographic implementation, key-management architecture, KMS provider, or the cryptographic threat environment (including algorithm deprecation guidance). The Owner is responsible for initiating review and recording approval.

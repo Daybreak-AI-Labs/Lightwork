@@ -107,6 +107,30 @@ def test_fill_form_values_scanned_for_risk(monkeypatch):
 
 # --- privacy: typed values never appear in the audit scope/detail ------------
 
+def test_browser_navigate_url_strips_query_fragment_and_userinfo(monkeypatch):
+    calls = _capture(monkeypatch)
+    raw = (
+        "https://alice:secret@example.com/reset/path"
+        "?email=alice%40example.com&reset_token=not-redacted#access_token=frag"
+    )
+    action_gate.gate_browser_action("navigate", {"url": raw})
+    assert calls[0]["scope"] == "https://example.com/reset/path"
+    assert calls[0]["detail"] == "https://example.com/reset/path"
+    blob = f"{calls[0]['detail']} {calls[0]['scope']}"
+    assert "alice:secret" not in blob
+    assert "reset_token" not in blob
+    assert "not-redacted" not in blob
+    assert "access_token" not in blob
+    assert "alice%40example.com" not in blob
+
+
+def test_browser_navigate_relative_url_strips_query_fragment(monkeypatch):
+    calls = _capture(monkeypatch)
+    action_gate.gate_browser_action("navigate", {"url": "/reset?token=abc#frag"})
+    assert calls[0]["scope"] == "/reset"
+    assert calls[0]["detail"] == "/reset"
+
+
 def test_browser_typed_value_not_in_detail(monkeypatch):
     calls = _capture(monkeypatch)
     secret = "hunter2-SECRET"  # pragma: allowlist secret

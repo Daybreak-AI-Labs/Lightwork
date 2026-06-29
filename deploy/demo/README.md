@@ -1,6 +1,6 @@
-# Maverick browser demo
+# Lightwork browser demo
 
-Run Maverick as a **website** — the dashboard (web UI + REST API) in a browser
+Run Lightwork as a **website** — the dashboard (web UI + REST API) in a browser
 — instead of the terminal, for live and sales demos. All three options below
 serve the **same** hardened image (`deploy/docker/Dockerfile`, unprivileged
 uid 1000) running `maverick dashboard`; they differ only in *where* it runs and

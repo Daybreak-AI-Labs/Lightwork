@@ -14,7 +14,7 @@
 
 This procedure operationalizes the HR Security Policy (POL-10) across the full
 employment lifecycle — pre-employment, onboarding, role change, and offboarding
-— for everyone with logical or physical access to Maverick systems or customer
+— for everyone with logical or physical access to Lightwork systems or customer
 data: employees, contractors, interns, and temporary staff. It is the runnable
 companion to POL-10: where POL-10 states the requirement, this procedure states
 the steps, owners, evidence, and timing.
@@ -27,7 +27,7 @@ Roles referenced below:
 - **Hiring Manager** — defines the least-privilege role and confirms business
   need for each access grant.
 - **IT / Platform** — executes provisioning and de-provisioning in the identity
-  provider (OIDC/SSO), the Maverick dashboard, and the kernel.
+  provider (OIDC/SSO), the Lightwork dashboard, and the kernel.
 
 Every step that requires acting on a real person, vendor, or live system is
 marked **[Org action]** with the exact action to take. Each lifecycle event must
@@ -56,7 +56,7 @@ and recorded.
    responsibilities and the consequences of non-compliance (cross-reference
    POL-10 and CODE_OF_CONDUCT.md). Collect a signed copy.
 3. **NDA / confidentiality agreement** **[Org action]** — Have the person sign
-   the confidentiality agreement covering Maverick IP, the specialist packs,
+   the confidentiality agreement covering Lightwork IP, the specialist packs,
    customer data, and the Operating Record. Record the signature date; this
    obligation survives termination (see section 6 and the offboarding
    reminder).

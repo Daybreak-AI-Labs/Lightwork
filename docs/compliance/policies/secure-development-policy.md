@@ -14,9 +14,9 @@
 ## 1. Purpose
 
 This policy defines the secure software development lifecycle (SDLC)
-requirements for Maverick, covering secure coding standards, dependency
+requirements for Lightwork, covering secure coding standards, dependency
 management, secrets handling, security testing, sandboxed execution, and
-separation of environments. Because Maverick is a governed agentic enterprise
+separation of environments. Because Lightwork is a governed agentic enterprise
 AI platform, the policy also covers AI/ML system development practices across
 the AI system lifecycle (ISO/IEC 42001). Its purpose is to ensure that security
 and processing-integrity requirements are designed and built into the platform
@@ -25,7 +25,7 @@ rather than added afterward, supporting SOC 2, ISO/IEC 27001:2022, and ISO/IEC
 
 ## 2. Scope
 
-This policy applies to all development activity on Maverick: the kernel
+This policy applies to all development activity on Lightwork: the kernel
 (`maverick-core`), shield, channels, dashboard, MCP server, evolve, and
 knowledge components; the specialist packs and suites that constitute the
 governed AI workforce; the installer CLI; the desktop apps; and the TypeScript
@@ -81,7 +81,7 @@ development performed on behalf of the Organization.
 | Head of Engineering (Owner) | Owns this policy; maintains CI security gates, sandbox hardening, and threat model. |
 | Management (Approver) | Approves this policy and material exceptions. |
 
-## 5. Technical implementation in Maverick
+## 5. Technical implementation in Lightwork
 
 | Control | Implementation (file/module) | Status |
 | --- | --- | --- |

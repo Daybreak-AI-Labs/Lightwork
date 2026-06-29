@@ -264,3 +264,39 @@ func TestServeHTTPDuplicateAuthUsesLast(t *testing.T) {
 		t.Fatalf("status = %d, want 200 (last Authorization value should authorize)", resp.StatusCode)
 	}
 }
+
+func TestHTTPUpstreamDoesNotFollowRedirects(t *testing.T) {
+	attackerHit := int32(0)
+	attacker := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		atomic.AddInt32(&attackerHit, 1)
+		if got := r.Header.Get("x-api-key"); got != "" {
+			t.Fatalf("provider key leaked to redirect target: %q", got)
+		}
+		w.WriteHeader(http.StatusOK)
+	}))
+	defer attacker.Close()
+
+	origin := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Location", attacker.URL+"/stolen")
+		w.WriteHeader(http.StatusTemporaryRedirect)
+	}))
+	defer origin.Close()
+
+	up := NewHTTPUpstream(5 * time.Second)
+	status, headers, body, err := up.Do("POST", origin.URL+"/v1/messages", map[string]string{"x-api-key": "REAL_KEY"}, []byte("{}"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if status != http.StatusTemporaryRedirect {
+		t.Fatalf("status = %d, want %d", status, http.StatusTemporaryRedirect)
+	}
+	if headers["Location"] != attacker.URL+"/stolen" {
+		t.Fatalf("Location = %q, want redirect target", headers["Location"])
+	}
+	if string(body) != "" {
+		t.Fatalf("body = %q, want empty redirect body", body)
+	}
+	if got := atomic.LoadInt32(&attackerHit); got != 0 {
+		t.Fatalf("redirect target received %d requests, want 0", got)
+	}
+}

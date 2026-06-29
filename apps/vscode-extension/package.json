@@ -1,17 +1,17 @@
 {
   "name": "maverick",
-  "displayName": "Maverick Agent",
-  "description": "Sidebar view + commands for Maverick from inside VS Code.",
+  "displayName": "Lightwork Agent",
+  "description": "Sidebar view + commands for Lightwork from inside VS Code.",
   "version": "0.1.0",
   "publisher": "cdayAI",
   "license": "MIT",
-  "homepage": "https://github.com/Day-AI-Labs/Maverick",
+  "homepage": "https://github.com/Day-AI-Labs/Lightwork",
   "bugs": {
-    "url": "https://github.com/Day-AI-Labs/Maverick/issues"
+    "url": "https://github.com/Day-AI-Labs/Lightwork/issues"
   },
   "repository": {
     "type": "git",
-    "url": "https://github.com/Day-AI-Labs/Maverick.git",
+    "url": "https://github.com/Day-AI-Labs/Lightwork.git",
     "directory": "apps/vscode-extension"
   },
   "categories": [
@@ -38,43 +38,43 @@
     "commands": [
       {
         "command": "maverick.start",
-        "title": "Maverick: Start goal..."
+        "title": "Lightwork: Start goal..."
       },
       {
         "command": "maverick.status",
-        "title": "Maverick: Show status"
+        "title": "Lightwork: Show status"
       },
       {
         "command": "maverick.halt",
-        "title": "Maverick: Halt all running goals"
+        "title": "Lightwork: Halt all running goals"
       },
       {
         "command": "maverick.unhalt",
-        "title": "Maverick: Clear HALT flag"
+        "title": "Lightwork: Clear HALT flag"
       },
       {
         "command": "maverick.refreshRuns",
-        "title": "Maverick: Refresh runs",
+        "title": "Lightwork: Refresh runs",
         "icon": "$(refresh)"
       },
       {
         "command": "maverick.openExport",
-        "title": "Maverick: Export run as JSON..."
+        "title": "Lightwork: Export run as JSON..."
       },
       {
         "command": "maverick.watchRun",
-        "title": "Maverick: Watch run live"
+        "title": "Lightwork: Watch run live"
       },
       {
         "command": "maverick.stopWatch",
-        "title": "Maverick: Stop live watch"
+        "title": "Lightwork: Stop live watch"
       }
     ],
     "viewsContainers": {
       "activitybar": [
         {
           "id": "maverick",
-          "title": "Maverick",
+          "title": "Lightwork",
           "icon": "$(rocket)"
         }
       ]
@@ -84,7 +84,7 @@
         {
           "id": "maverick.runs",
           "name": "Recent runs",
-          "contextualTitle": "Maverick runs"
+          "contextualTitle": "Lightwork runs"
         }
       ]
     },
@@ -99,7 +99,7 @@
     },
     "configuration": {
       "type": "object",
-      "title": "Maverick",
+      "title": "Lightwork",
       "properties": {
         "maverick.cliPath": {
           "type": "string",
@@ -116,7 +116,7 @@
           "type": "string",
           "default": "http://127.0.0.1:8765",
           "scope": "machine",
-          "description": "Local Maverick dashboard URL for live-run streaming. Machine-scoped so an untrusted workspace cannot redirect bearer tokens to another host."
+          "description": "Local Lightwork dashboard URL for live-run streaming. Machine-scoped so an untrusted workspace cannot redirect bearer tokens to another host."
         },
         "maverick.dashboardToken": {
           "type": "string",

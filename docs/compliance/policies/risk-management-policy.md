@@ -15,7 +15,7 @@
 
 This policy defines how the Organization identifies, assesses, treats, and monitors information
 security risk and artificial-intelligence (AI) risk arising from the design, development,
-operation, and use of the Maverick platform. It establishes a consistent, repeatable
+operation, and use of the Lightwork platform. It establishes a consistent, repeatable
 methodology so that risk decisions are comparable, defensible, and traceable to control
 selection in the Statement of Applicability (SoA).
 
@@ -30,7 +30,7 @@ This policy applies to all information security and AI risks within the ISMS/AIM
 in POL-01, including:
 
 - Risks to confidentiality, integrity, and availability of information assets.
-- Risks introduced by Maverick acting as an autonomous/agentic system — including risks from
+- Risks introduced by Lightwork acting as an autonomous/agentic system — including risks from
   tool execution, capability escalation, and emergent agent behavior.
 - AI-specific risks: harms to individuals or groups, fairness and bias, transparency,
   robustness, and regulatory classification (e.g. EU AI Act risk tiers).
@@ -66,7 +66,7 @@ For AI systems and material capability changes, an AI system impact assessment i
 ISO/IEC 42001:2023 Clause 6.1 and controls A.5.2/A.5.3, covering impacts on individuals, society,
 fairness, and regulatory classification.
 
-3.7 Maverick capabilities carry a risk classification, and tool execution is bounded by maximum
+3.7 Lightwork capabilities carry a risk classification, and tool execution is bounded by maximum
 risk ceilings so that the platform cannot exceed an approved risk tolerance at runtime. Tools are
 classified low/medium/high and gated accordingly.
 
@@ -90,7 +90,7 @@ recorded in the risk register.
 | Engineering | Implements and maintains technical risk controls (capability ceilings, tool-risk gating, assessment engine). |
 | Risk owners | Own assigned risks, execute treatment, and report status. **[Process — Organization to operationalize]** |
 
-## 5. Technical implementation in Maverick
+## 5. Technical implementation in Lightwork
 
 | Control | Implementation (file/module) | Status |
 | --- | --- | --- |
@@ -125,7 +125,7 @@ security event, the Incident Response Policy.
 ## 8. Review & maintenance
 
 This policy, the risk methodology, and the risk register are reviewed at least annually and upon
-significant change to the Organization, the Maverick platform, the threat or AI-harm landscape,
+significant change to the Organization, the Lightwork platform, the threat or AI-harm landscape,
 or applicable regulation (including EU AI Act developments). Review outcomes feed management
 review under POL-01. The Owner maintains version history and SoA consistency.
 **[Process — Organization to operationalize]**

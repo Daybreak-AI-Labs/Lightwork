@@ -1,6 +1,6 @@
 # Security policy
 
-Maverick is an AI agent that executes shell commands, reads files, and
+Lightwork is an AI agent that executes shell commands, reads files, and
 calls external APIs. Vulnerabilities here can affect any host running it.
 We take that seriously.
 
@@ -9,7 +9,7 @@ We take that seriously.
 **Do not file public GitHub issues for vulnerabilities.** Use one of:
 
 1. **GitHub Security Advisories** (preferred):
-   https://github.com/Day-AI-Labs/Maverick/security/advisories/new
+   https://github.com/Day-AI-Labs/Lightwork/security/advisories/new
 2. **Email**: `security@` the project's domain (or the maintainer's
    public email on their GitHub profile if no domain is set up).
 
@@ -76,7 +76,7 @@ Reports in scope (above) qualify for recognition and rewards.
 | Low | hardening gaps, missing defense-in-depth, doc-level issues | 10 days | next minor |
 
 **Rewards.** Monetary reward amounts per tier are published on the
-[security advisories page](https://github.com/Day-AI-Labs/Maverick/security/advisories)
+[security advisories page](https://github.com/Day-AI-Labs/Lightwork/security/advisories)
 and may change between program cycles; every valid report receives credit in
 the advisory (unless anonymity is requested) and a hall-of-fame entry below.
 Duplicates go to the first reporter; severity is judged by maintainers
@@ -100,12 +100,12 @@ here (none yet — be the first).
 - Use `sandbox.backend = "docker"` for goals that run user-provided
   shell. Docker isolation is much stronger than the local subprocess
   backend.
-- Rotate `ANTHROPIC_API_KEY` etc. on a schedule. Maverick reads from
+- Rotate `ANTHROPIC_API_KEY` etc. on a schedule. Lightwork reads from
   `~/.maverick/.env` (chmod 600).
 
 ## Execution posture (read this first)
 
-The single most important thing to understand about Maverick's security:
+The single most important thing to understand about Lightwork's security:
 
 > **By default, the agent executes model-generated shell commands. With the
 > default `local` sandbox backend, those commands run directly on the host,
