@@ -233,24 +233,59 @@ def _upsert_line_meta(meta: dict[str, dict], model_id: str, line: str,
 
 
 def line_provenance(model_id: str, path: Path | None = None) -> list[dict]:
-    """Per-line provenance for ``model_id``, ordered to match the recalled block
-    (newest last). Each entry is ``{text, signature, rationale, held_out_delta,
-    samples, learned_at, updated_at}``; fields are ``None`` for a legacy line
-    with no record. Read-only; powers ``self-harness show --verbose``."""
-    block = load_addenda(path).get(str(model_id), "")
+    """Per-line provenance for ``model_id`` across ALL its scopes, ordered to match
+    the recalled blocks (newest last). Each entry is ``{text, domain, signature,
+    rationale, held_out_delta, samples, learned_at, updated_at}``; fields are
+    ``None`` for a legacy line with no record, and ``domain`` is ``None`` for a
+    model-wide line. Includes domain-scoped lines (which the pre-fix version
+    missed). Read-only; powers ``self-harness show --verbose``."""
+    store = load_addenda(path)
     meta = load_line_meta(path)
     fields = ("signature", "rationale", "hypothesis", "held_out_delta", "samples",
               "learned_at", "updated_at", "last_recalled_at", "recall_notes")
     out = []
-    for ln in _bullets(block):
-        rec = meta.get(_line_id(model_id, ln)) or {}
-        out.append({"text": ln, **{f: rec.get(f) for f in fields}})
+    for k, ln in _iter_model_lines(store, str(model_id)):
+        rec = meta.get(_line_id(k, ln)) or {}
+        _, ctx = _split_key(k)
+        domain = ctx[len("domain="):] if ctx.startswith("domain=") else None
+        out.append({"text": ln, "domain": domain, **{f: rec.get(f) for f in fields}})
     return out
 
 
 def _bullets(block: str) -> list[str]:
     return [ln[2:].strip() for ln in (block or "").splitlines()
             if ln.startswith("- ")]
+
+
+def _split_key(store_key: str) -> tuple[str, str]:
+    """Decompose a store key into ``(model_id, context)`` -- the inverse of
+    :func:`_scoped_key`. A bare model key yields ``(model_id, "")``; a composite
+    ``"<model>\\x00domain=finance"`` yields ``("<model>", "domain=finance")``. Used
+    wherever a store key is SURFACED to an operator/audit/dashboard so the raw NUL
+    never leaks."""
+    mid, _, ctx = str(store_key).partition("\x00")
+    return mid, ctx
+
+
+def _model_store_keys(store: dict, model_id: str) -> list[str]:
+    """Every store key belonging to ``model_id``: the bare key (if present) plus
+    every composite ``"<model_id>\\x00..."`` scope key, in deterministic order. The
+    management surface (forget/retire/efficacy/canary) walks this so a model's
+    DOMAIN-scoped lines are never invisible to it -- with no composite keys the
+    list is just ``[model_id]``, so the default store behaves exactly as before."""
+    mid = str(model_id)
+    keys = [mid] if mid in store else []
+    keys += sorted(k for k in store if isinstance(k, str) and k.startswith(mid + "\x00"))
+    return keys
+
+
+def _iter_model_lines(store: dict, model_id: str):
+    """Yield ``(store_key, line)`` over every line in every scope of ``model_id``,
+    so a reader can compute the right ``_line_id(store_key, line)`` for the sidecar
+    record actually written by :func:`_apply_addendum`."""
+    for k in _model_store_keys(store, model_id):
+        for ln in _bullets(store.get(k, "")):
+            yield k, ln
 
 
 def _norm_line(s: str) -> str:
@@ -331,9 +366,13 @@ def detect_store_conflicts(model_id: str | None = None,
     An optional ``classifier_fn`` (see :func:`find_conflicts`) refines the lexical
     heuristic with a semantic judge."""
     out: list[tuple[str, str, str]] = []
-    for m, block in load_addenda(path).items():
-        if model_id is not None and m != model_id:
+    for store_key, block in load_addenda(path).items():
+        mid, ctx = _split_key(store_key)
+        if model_id is not None and mid != model_id:
             continue
+        # Surface a READABLE label, never the raw NUL composite key: "M" for
+        # model-wide, "M [domain=finance]" for a scoped block.
+        label = mid if not ctx else f"{mid} [{ctx}]"
         lines = _bullets(block)
         seen: set[frozenset] = set()
         for i, ln in enumerate(lines):
@@ -341,7 +380,7 @@ def detect_store_conflicts(model_id: str | None = None,
                 key = frozenset((_norm_line(ln), _norm_line(other)))
                 if key not in seen:
                     seen.add(key)
-                    out.append((m, ln, other))
+                    out.append((label, ln, other))
     return out
 
 
@@ -349,15 +388,21 @@ def list_learned(path: Path | None = None) -> dict[str, list[str]]:
     """The learned guidance lines per model, for operator inspection.
 
     Returns ``{model_id: [line, ...]}`` parsed from the stored addenda -- the
-    same lines :func:`recall_addendum` injects, minus the framing header. Note
-    this reads the STORE regardless of :func:`enabled`; the recall path is what
-    gates on the toggle, so an operator can still inspect/roll back what was
-    learned while the feature is paused."""
+    same lines :func:`recall_addendum` injects, minus the framing header. Keys are
+    the BARE model id (never the raw NUL composite key); a domain-scoped line is
+    listed under its model with a ``"  [domain=…]"`` tag so an operator/dashboard
+    sees the scope without the store's internal key layout. Note this reads the
+    STORE regardless of :func:`enabled`; the recall path is what gates on the
+    toggle, so an operator can still inspect/roll back what was learned while the
+    feature is paused."""
     out: dict[str, list[str]] = {}
-    for model_id, block in load_addenda(path).items():
+    for store_key, block in load_addenda(path).items():
         lines = _bullets(block)
-        if lines:
-            out[model_id] = lines
+        if not lines:
+            continue
+        mid, ctx = _split_key(store_key)
+        tagged = lines if not ctx else [f"{ln}  [{ctx}]" for ln in lines]
+        out.setdefault(mid, []).extend(tagged)
     return out
 
 
@@ -374,27 +419,38 @@ def forget_addendum(model_id: str, *, line: str | None = None,
     removed = False
     with _lock, cross_process_lock(p):
         before = load_addenda(p)
-        if model_id not in before:
+        # Span ALL of the model's scopes (bare + composite "<model>\x00domain=...")
+        # so a full rollback can't ORPHAN a domain-scoped block that recall still
+        # injects, and a single-line forget can target a line in any scope.
+        keys = _model_store_keys(before, model_id)
+        if not keys:
             return False
         after = dict(before)
-        if line is None:
-            del after[model_id]
-            removed = True
-        else:
-            existing = _bullets(before[model_id])
-            kept = [ln for ln in existing if ln != line]
-            removed = len(kept) != len(existing)
-            if not removed:
-                return False
-            if kept:
-                header = "Operating guidance learned for this model:"
-                after[model_id] = header + "\n" + "\n".join(f"- {ln}" for ln in kept)
+        touched: list[str] = []
+        for k in keys:
+            if line is None:
+                del after[k]
+                touched.append(k)
+                removed = True
             else:
-                del after[model_id]
+                existing = _bullets(before[k])
+                kept = [ln for ln in existing if ln != line]
+                if len(kept) == len(existing):
+                    continue  # the line isn't in this scope's block
+                removed = True
+                touched.append(k)
+                if kept:
+                    header = "Operating guidance learned for this model:"
+                    after[k] = header + "\n" + "\n".join(f"- {ln}" for ln in kept)
+                else:
+                    del after[k]
+        if not removed:
+            return False
         _write_addenda(after, p)
         try:  # keep the provenance sidecar in step (best-effort)
             meta = load_line_meta(p)
-            _reconcile_meta(meta, model_id, _bullets(after.get(model_id, "")))
+            for k in touched:
+                _reconcile_meta(meta, k, _bullets(after.get(k, "")))
             _write_line_meta(meta, p)
         except Exception:  # pragma: no cover -- sidecar is best-effort
             log.debug("self_harness: line-meta prune failed", exc_info=True)
@@ -428,7 +484,10 @@ def retire_stale(*, older_than_days: float, model_id: str | None = None,
             meta = load_line_meta(p)
             after = dict(add)
             for m, block in list(add.items()):
-                if model_id is not None and m != model_id:
+                # Match the BARE model so a per-model retire also covers that
+                # model's domain-scoped blocks (composite keys); ``m`` stays the
+                # store key for meta/line-id ops (which are keyed by it).
+                if model_id is not None and _split_key(m)[0] != model_id:
                     continue
                 bullets = _bullets(block)
                 kept = []
@@ -461,8 +520,10 @@ def retire_stale(*, older_than_days: float, model_id: str | None = None,
     for m, ln in removed:
         try:
             from .audit import EventKind, record
-            record(EventKind.LEARNING_UPDATE, agent="self_harness", model_id=m,
-                   rung="prompt", line=ln, phase="retire")
+            # Audit with the BARE model id (+ scope), never the raw NUL key.
+            mid, ctx = _split_key(m)
+            record(EventKind.LEARNING_UPDATE, agent="self_harness", model_id=mid,
+                   scope=(ctx or None), rung="prompt", line=ln, phase="retire")
         except Exception:  # pragma: no cover -- audit best-effort
             pass
     return len(removed)
@@ -1301,7 +1362,10 @@ def note_outcome(model_id: str | None, success: bool, *, line: str | None = None
     """Record that a run using ``model_id``'s guidance succeeded or failed,
     incrementing per-line ``recall_success``/``recall_failure`` counters in the
     sidecar. Attributed to ``line`` if given, else to ALL of the model's current
-    lines (they all rode the same prompt). Best-effort; never raises."""
+    lines (they all rode the same prompt). Spans every scope (model-wide AND
+    domain-scoped composite keys), keying each record under the store key the line
+    actually lives in -- so a domain-scoped line is not invisible to efficacy.
+    Best-effort; never raises."""
     if not model_id:
         return
     mid = str(model_id)
@@ -1310,11 +1374,13 @@ def note_outcome(model_id: str | None, success: bool, *, line: str | None = None
         p = path if path is not None else _store_path()
         from .file_lock import cross_process_lock
         with _lock, cross_process_lock(p):
+            store = load_addenda(p)
             meta = load_line_meta(p)
-            lines = [line] if line is not None else _bullets(load_addenda(p).get(mid, ""))
             changed = False
-            for ln in lines:
-                rec = meta.get(_line_id(mid, ln))
+            for k, ln in _iter_model_lines(store, mid):
+                if line is not None and ln != line:
+                    continue
+                rec = meta.get(_line_id(k, ln))
                 if rec is not None:
                     rec[field_name] = int(rec.get(field_name) or 0) + 1
                     changed = True
@@ -1325,19 +1391,23 @@ def note_outcome(model_id: str | None, success: bool, *, line: str | None = None
 
 
 def line_efficacy(model_id: str, path: Path | None = None) -> list[dict]:
-    """Per-line outcome counters for ``model_id`` (recalled-block order): each
-    ``{text, success, failure, total, rate}`` where ``rate`` is success/total
-    (``None`` until there is at least one recorded outcome). Read-only."""
-    block = load_addenda(path).get(str(model_id), "")
+    """Per-line outcome counters for ``model_id`` across ALL its scopes: each
+    ``{text, domain, success, failure, total, rate}`` where ``rate`` is
+    success/total (``None`` until an outcome lands) and ``domain`` is the scope
+    (``None`` for model-wide). Read-only. Includes domain-scoped lines, which the
+    pre-fix version was blind to."""
+    store = load_addenda(path)
     meta = load_line_meta(path)
     out = []
-    for ln in _bullets(block):
-        rec = meta.get(_line_id(str(model_id), ln)) or {}
+    for k, ln in _iter_model_lines(store, str(model_id)):
+        rec = meta.get(_line_id(k, ln)) or {}
         s = int(rec.get("recall_success") or 0)
         f = int(rec.get("recall_failure") or 0)
         total = s + f
-        out.append({"text": ln, "success": s, "failure": f, "total": total,
-                    "rate": (s / total) if total else None})
+        _, ctx = _split_key(k)
+        domain = ctx[len("domain="):] if ctx.startswith("domain=") else None
+        out.append({"text": ln, "domain": domain, "success": s, "failure": f,
+                    "total": total, "rate": (s / total) if total else None})
     return out
 
 
@@ -1357,7 +1427,9 @@ def review_efficacy(model_id: str, cases: list[str], *,
     if not cases:
         return demoted
     try:
-        for ln in _bullets(load_addenda(path).get(str(model_id), "")):
+        # Snapshot the (key, line) pairs first: forget_addendum mutates the store
+        # mid-loop, so iterating a live view would skip lines. Spans every scope.
+        for _k, ln in list(_iter_model_lines(load_addenda(path), str(model_id))):
             try:
                 w, *_ = _score_parts(score_with(ln, cases))
                 wo, *_ = _score_parts(score_without(ln, cases))
@@ -1392,23 +1464,32 @@ def mark_canary(model_id: str, line: str, *, canary: bool = True,
         p = path if path is not None else _store_path()
         from .file_lock import cross_process_lock
         with _lock, cross_process_lock(p):
+            store = load_addenda(p)
             meta = load_line_meta(p)
-            rec = meta.get(_line_id(str(model_id), str(line)))
-            if rec is None or bool(rec.get("canary")) == bool(canary):
-                return False
-            rec["canary"] = bool(canary)
-            _write_line_meta(meta, p)
-            return True
+            changed = False
+            for k, ln in _iter_model_lines(store, str(model_id)):
+                if ln != line:
+                    continue
+                rec = meta.get(_line_id(k, ln))
+                if rec is not None and bool(rec.get("canary")) != bool(canary):
+                    rec["canary"] = bool(canary)
+                    changed = True
+            if changed:
+                _write_line_meta(meta, p)
+            return changed
     except Exception:  # pragma: no cover -- canary state never perturbs a run
         log.debug("self_harness: mark_canary failed", exc_info=True)
         return False
 
 
 def list_canaries(model_id: str, path: Path | None = None) -> list[str]:
-    """The model's lines currently on canary probation (recalled-block order)."""
+    """The model's lines currently on canary probation, across ALL scopes
+    (model-wide + domain). Includes domain-scoped canaries, which the pre-fix
+    version was blind to."""
+    store = load_addenda(path)
     meta = load_line_meta(path)
-    return [ln for ln in _bullets(load_addenda(path).get(str(model_id), ""))
-            if (meta.get(_line_id(str(model_id), ln)) or {}).get("canary")]
+    return [ln for k, ln in _iter_model_lines(store, str(model_id))
+            if (meta.get(_line_id(k, ln)) or {}).get("canary")]
 
 
 def review_canaries(model_id: str, *, graduate_after: int = 3,
@@ -1417,13 +1498,19 @@ def review_canaries(model_id: str, *, graduate_after: int = 3,
     DEMOTE (audited forget) a canary with ``>= demote_after`` failures; else
     GRADUATE (clear the flag -> permanent) one with ``>= graduate_after``
     successes; else leave it on probation. Failures take precedence (a flaky line
-    is pulled even if it also has wins). Returns
-    ``{"graduated": [...], "demoted": [...]}``. Never raises."""
+    is pulled even if it also has wins). Spans every scope, so domain-scoped
+    canaries are reviewed too. Returns ``{"graduated": [...], "demoted": [...]}``.
+    Never raises."""
     graduated: list[str] = []
     demoted: list[str] = []
     try:
-        for ln in list_canaries(model_id, path):
-            rec = load_line_meta(path).get(_line_id(str(model_id), ln)) or {}
+        store = load_addenda(path)
+        meta = load_line_meta(path)
+        # Snapshot pairs first -- forget/mark mutate the store/meta mid-loop.
+        for k, ln in list(_iter_model_lines(store, str(model_id))):
+            rec = meta.get(_line_id(k, ln)) or {}
+            if not rec.get("canary"):
+                continue
             s = int(rec.get("recall_success") or 0)
             f = int(rec.get("recall_failure") or 0)
             if f >= demote_after:

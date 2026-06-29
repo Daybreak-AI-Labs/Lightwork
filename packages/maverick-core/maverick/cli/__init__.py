@@ -1473,7 +1473,8 @@ def harness_show(model: str | None, as_json: bool, verbose: bool) -> None:
                 click.echo(f"  - {ln}")
             continue
         for rec in line_provenance(m):
-            click.echo(f"  - {rec['text']}")
+            _dom = rec.get("domain")
+            click.echo(f"  - {rec['text']}" + (f"  [domain={_dom}]" if _dom else ""))
             sig = rec.get("signature") or "(no provenance — learned before tracking)"
             d, n = rec.get("held_out_delta"), rec.get("samples")
             ev = (f"held-out {d:+.3g} over {n} samples"
