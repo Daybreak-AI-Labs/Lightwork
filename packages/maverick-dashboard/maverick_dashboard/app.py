@@ -991,22 +991,19 @@ def _shared_rate_limit_check(key: str, cap: int, global_cap: int) -> bool:
         if not is_postgres_configured():
             return False
         w = _world()
-        now = time.time()
-        cutoff = now - 60.0
-        if w.count_rate_events(_RL_GLOBAL_KEY, cutoff) >= global_cap:
+        result = w.reserve_rate_events(key, cap, _RL_GLOBAL_KEY, global_cap, time.time())
+        if result == "global":
             raise HTTPException(
                 status_code=429,
                 detail=f"goal rate limit reached ({global_cap}/min total). Try again shortly.",
                 headers={"Retry-After": "60"},
             )
-        if w.count_rate_events(key, cutoff) >= cap:
+        if result == "key":
             raise HTTPException(
                 status_code=429,
                 detail=f"goal rate limit reached ({cap}/min). Try again shortly.",
                 headers={"Retry-After": "60"},
             )
-        w.record_rate_event(_RL_GLOBAL_KEY, now)
-        w.record_rate_event(key, now)
         return True
     except HTTPException:
         raise

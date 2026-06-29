@@ -20,6 +20,18 @@ class _FakeRateWorld:
     def count_rate_events(self, rl_key, since):
         return sum(1 for k, t in self.events if k == rl_key and t >= since)
 
+    def reserve_rate_events(self, key, cap, global_key, global_cap, ts=None):
+        import time
+        now = ts if ts is not None else time.time()
+        cutoff = now - 60.0
+        if self.count_rate_events(global_key, cutoff) >= global_cap:
+            return "global"
+        if self.count_rate_events(key, cutoff) >= cap:
+            return "key"
+        self.record_rate_event(global_key, now)
+        self.record_rate_event(key, now)
+        return None
+
 
 def test_in_process_when_no_postgres(monkeypatch):
     from maverick import world_model_backends
