@@ -1,5 +1,5 @@
 /**
- * Runnable TypeScript MCP client for Maverick.
+ * Runnable TypeScript MCP client for Lightwork.
  *
  * This is the executable version of docs/clients/typescript-quickstart.md and
  * the CI smoke test for the cross-language surface. It spawns `maverick mcp`
@@ -27,7 +27,7 @@ await client.connect(transport);
 
 const { tools } = await client.listTools();
 const names = tools.map((t) => t.name).sort();
-console.log(`Maverick exposes ${tools.length} tools: ${names.join(", ")}`);
+console.log(`Lightwork exposes ${tools.length} tools: ${names.join(", ")}`);
 for (const expected of ["maverick_start", "maverick_status", "maverick_facts_get"]) {
   assert.ok(names.includes(expected), `MCP server is missing tool '${expected}'`);
 }
@@ -37,7 +37,7 @@ const res = await client.callTool({ name: "maverick_facts_get", arguments: {} })
 assert.ok(res.content, "maverick_facts_get returned no content");
 console.log("maverick_facts_get round-trip OK");
 
-// Every Maverick tool also returns structuredContent: typed JSON matching the
+// Every Lightwork tool also returns structuredContent: typed JSON matching the
 // tool's outputSchema, so a typed client reads parsed fields instead of
 // re-parsing the human-readable text block. facts_get -> { facts: {...} }.
 assert.ok(res.structuredContent, "maverick_facts_get returned no structuredContent");
@@ -48,4 +48,4 @@ assert.ok(
 console.log("maverick_facts_get structuredContent OK:", JSON.stringify(res.structuredContent));
 
 await client.close();
-console.log("OK: TypeScript client drove Maverick over MCP end-to-end");
+console.log("OK: TypeScript client drove Lightwork over MCP end-to-end");

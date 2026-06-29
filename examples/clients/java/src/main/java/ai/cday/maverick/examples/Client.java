@@ -1,4 +1,4 @@
-// Runnable Java/JVM MCP client for Maverick.
+// Runnable Java/JVM MCP client for Lightwork.
 //
 // The executable version of docs/clients/java-quickstart.md and the CI smoke
 // for the JVM cross-language surface. It spawns `maverick mcp` (stdio JSON-RPC)
@@ -57,7 +57,7 @@ public final class Client {
             ListToolsResult tools = client.listTools();
             List<String> names = tools.tools().stream().map(Tool::name).sorted()
                     .collect(Collectors.toList());
-            System.out.printf("Maverick exposes %d tools: %s%n",
+            System.out.printf("Lightwork exposes %d tools: %s%n",
                     names.size(), String.join(", ", names));
 
             List<String> missing = new ArrayList<>();
@@ -77,7 +77,7 @@ public final class Client {
             }
             System.out.println("maverick_facts_get round-trip OK");
 
-            // Every Maverick tool also returns structuredContent: typed JSON
+            // Every Lightwork tool also returns structuredContent: typed JSON
             // matching the tool's outputSchema, so a typed client reads parsed
             // fields instead of re-parsing the text block. facts_get -> { facts: {...} }.
             if (!(res.structuredContent() instanceof Map<?, ?> structured)
@@ -90,7 +90,7 @@ public final class Client {
             client.closeGracefully();
         }
 
-        System.out.println("OK: Java client drove Maverick over MCP end-to-end");
+        System.out.println("OK: Java client drove Lightwork over MCP end-to-end");
     }
 
     private Client() {

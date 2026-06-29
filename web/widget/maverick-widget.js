@@ -1,14 +1,14 @@
 /*
- * Maverick embeddable widget (roadmap: 2028 H1 distribution — "embeddable widget").
+ * Lightwork embeddable widget (roadmap: 2028 H1 distribution — "embeddable widget").
  *
  * A dependency-free floating chat button that drops onto any page and talks to
- * a Maverick dashboard's chat endpoint. Self-hostable: it posts to YOUR
+ * a Lightwork dashboard's chat endpoint. Self-hostable: it posts to YOUR
  * dashboard origin, not a hosted service.
  *
  * Usage:
  *   <script src="/widget/maverick-widget.js"
  *           data-maverick-url="https://your-dashboard.example.com"
- *           data-maverick-title="Ask Maverick"></script>
+ *           data-maverick-title="Ask Lightwork"></script>
  *
  * The dashboard must allow the embedding origin (CORS / same-origin policy).
  */
@@ -17,7 +17,7 @@
 
   var script = document.currentScript;
   var BASE = (script && script.getAttribute("data-maverick-url")) || "";
-  var TITLE = (script && script.getAttribute("data-maverick-title")) || "Maverick";
+  var TITLE = (script && script.getAttribute("data-maverick-title")) || "Lightwork";
   BASE = BASE.replace(/\/+$/, "");
 
   function el(tag, props, css) {
@@ -94,9 +94,9 @@
     })
       .then(function (r) { return r.ok ? r.json() : Promise.reject(r.status); })
       .then(function (data) {
-        line("Maverick", (data && (data.reply || data.result)) || "Started.");
+        line("Lightwork", (data && (data.reply || data.result)) || "Started.");
       })
-      .catch(function (err) { line("Maverick", "Error: " + err); })
+      .catch(function (err) { line("Lightwork", "Error: " + err); })
       .finally(function () { send.disabled = false; });
   });
 

@@ -1,4 +1,4 @@
-"""Scored detector benchmark for Maverick's shield (offline, no LLM).
+"""Scored detector benchmark for Lightwork's shield (offline, no LLM).
 
 Runs the labelled corpus (``corpus.py``) through every shield backend that
 works without the agent-shield SDK or an API key, and reports TPR / FPR / F1

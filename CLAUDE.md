@@ -132,7 +132,7 @@ All verified locally green; each is a build-failer:
 
 ## Kernel rules (pre-existing, still enforced)
 
-Maverick = proprietary AGENTIC ENTERPRISE PLATFORM (kernel `maverick-core` +
+Lightwork = proprietary AGENTIC ENTERPRISE PLATFORM (kernel `maverick-core` +
 shield + channels + dashboard + mcp + evolve + knowledge): a governed,
 self-improving AI workforce — 2,020 lint-clean specialist packs across 53
 suites, a closed learning lifecycle (dreaming/hindsight/proof, snapshot +

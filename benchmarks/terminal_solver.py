@@ -1,11 +1,11 @@
-"""Live Maverick solver for the terminal-bench harness.
+"""Live Lightwork solver for the terminal-bench harness.
 
 ``eval_terminal_bench.py`` is a Docker-free virtual-filesystem domain: a task
 gives a request + starting files, and a ``TerminalSolver`` drives the env's
 shell tools (read/write/append/delete/move/mkdir/ls/run_command) until the
 filesystem matches ``expected_files``/``absent_files`` and the required commands
 were issued. The harness shipped only a no-op stub; this is the missing live
-seam -- a real Maverick LLM driven in a tool-calling loop over those tools.
+seam -- a real Lightwork LLM driven in a tool-calling loop over those tools.
 
 Injected like any solver, so it is validated for FREE with a scripted FakeLLM
 (``test_terminal_solver.py``: tool_calls -> env mutation -> verify, no key/

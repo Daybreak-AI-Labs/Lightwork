@@ -1,7 +1,7 @@
 """Client quickstarts must match the MCP server's real tool surface.
 
 docs/clients/{typescript,go,rust}-quickstart.md are the cross-language examples
-for driving Maverick over MCP. They're only "runnable" if the tools they call
+for driving Lightwork over MCP. They're only "runnable" if the tools they call
 actually exist with the documented names/args. If anyone renames, removes, or
 adds a tool in maverick_mcp.server.TOOLS, these fail so the docs get updated
 instead of silently shipping a copy-paste example that calls a missing tool.

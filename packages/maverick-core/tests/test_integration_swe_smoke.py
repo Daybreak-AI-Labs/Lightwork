@@ -146,7 +146,7 @@ class TestEndToEndSmoke:
     def test_full_pipeline_produces_valid_patch(
         self, repo_workdir, tmp_path, monkeypatch,
     ):
-        # Point Maverick at the temp git repo via MAVERICK_CONFIG so
+        # Point Lightwork at the temp git repo via MAVERICK_CONFIG so
         # test isolation doesn't depend on the runtime HOME (which
         # Python's Path.home() caches in various places).
         config = tmp_path / "config.toml"

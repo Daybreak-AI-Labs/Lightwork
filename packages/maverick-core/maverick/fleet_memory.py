@@ -1,6 +1,6 @@
 """Fleet memory: the agent-agnostic learning plane (Learning System of Record).
 
-Maverick's learning loops were built for Maverick agents; this opens them to
+Lightwork's learning loops were built for Lightwork agents; this opens them to
 ANY agent — Agentforce, Copilot, custom, open-source runtimes — so the
 enterprise gets ONE governed memory across its whole fleet. Two operations:
 

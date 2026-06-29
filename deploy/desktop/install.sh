@@ -1,8 +1,8 @@
 #!/usr/bin/env bash
-# Maverick desktop bootstrap (macOS / Linux).
+# Lightwork desktop bootstrap (macOS / Linux).
 #
 # Zero prerequisites. It installs Python 3 if missing, installs the
-# published Maverick package from PyPI into an isolated pipx environment,
+# published Lightwork package from PyPI into an isolated pipx environment,
 # and launches the wizard (`maverick init`).
 #
 # Advanced source installs must pin MAVERICK_REF to a full 40-character
@@ -11,14 +11,14 @@
 
 set -euo pipefail
 
-REPO="${MAVERICK_REPO:-Day-AI-Labs/Maverick}"
+REPO="${MAVERICK_REPO:-Day-AI-Labs/Lightwork}"
 REF="${MAVERICK_REF:-}"
 SRC_DIR="${XDG_DATA_HOME:-$HOME/.local/share}/maverick/src"
 ALLOW_UNPINNED="${MAVERICK_ALLOW_UNPINNED:-}"
 
 log()  { printf '==> %s\n' "$*" >&2; }
 warn() { printf '!!  %s\n' "$*" >&2; }
-die()  { printf 'Maverick install failed: %s\n' "$*" >&2; exit 1; }
+die()  { printf 'Lightwork install failed: %s\n' "$*" >&2; exit 1; }
 
 have() { command -v "$1" >/dev/null 2>&1; }
 
@@ -96,12 +96,12 @@ fetch_source() {
   validate_repo
   validate_source_pin
   if [ -d "$SRC_DIR/.git" ]; then
-    log "Updating Maverick source ($REPO@$REF) ..."
+    log "Updating Lightwork source ($REPO@$REF) ..."
     git -C "$SRC_DIR" remote set-url origin "https://github.com/$REPO"
     git -C "$SRC_DIR" fetch --depth 1 origin "$REF"
     git -C "$SRC_DIR" checkout --detach FETCH_HEAD >/dev/null 2>&1
   else
-    log "Downloading Maverick ($REPO@$REF) ..."
+    log "Downloading Lightwork ($REPO@$REF) ..."
     rm -rf "$SRC_DIR"
     mkdir -p "$(dirname "$SRC_DIR")"
     git clone --no-checkout --depth 1 "https://github.com/$REPO" "$SRC_DIR"

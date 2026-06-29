@@ -16,7 +16,7 @@ mutating the virtual FS. The verifier then checks the FS + the command log.
 The real-environment seam is the solver: a production run injects a solver that
 executes commands in a container (via ``maverick.sandbox`` / ``swe_bench.py``'s
 backend) and reflects the resulting filesystem back into ``TerminalEnv`` for
-verification. That container wiring + a Maverick-driving solver (+ user
+verification. That container wiring + a Lightwork-driving solver (+ user
 simulator) is the documented follow-up; the env + verifier + task format are the
 harness, and they are Docker-free by construction so CI can exercise both grading
 legs without a daemon.
@@ -265,7 +265,7 @@ def _load_terminal_solver():
 
 
 def main() -> int:
-    """Run the terminal-bench harness. By default the LIVE Maverick solver drives
+    """Run the terminal-bench harness. By default the LIVE Lightwork solver drives
     each task with a tool-calling loop over the virtual-FS tools (needs a provider
     key); ``MAVERICK_EVAL_DRY_RUN=1`` swaps in the no-op stub for CI / smoke."""
     import argparse

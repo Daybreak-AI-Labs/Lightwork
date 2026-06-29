@@ -32,7 +32,7 @@ def _metadata_summary() -> str:
         return _FALLBACK_DESC
 
 
-_FALLBACK_DESC = ("Model Context Protocol server for Maverick "
+_FALLBACK_DESC = ("Model Context Protocol server for Lightwork "
                   "(exposes the swarm to MCP clients)")
 
 

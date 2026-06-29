@@ -1,4 +1,4 @@
-# Lightwork / Maverick — Exhaustive Code-Quality Audit
+# Lightwork / Lightwork — Exhaustive Code-Quality Audit
 
 **"Vibe-coded slop" vs. true enterprise code — a full-codebase review.**  
 Prepared 2026-06-27 · ahead of the Grant Thornton partner meeting.
@@ -326,7 +326,7 @@ THE QDRANT ANALOGY IS FALSE, which is the load-bearing misdirection. QdrantStore
 
 > **Verifier (skeptic):** Read worker_review.py:116-137 directly. review() composes a dict whose 'governance_note' is a hardcoded constant: "Every action counted here passed the shield's input/tool/output checks and is recorded in the signed, tamper-evident audit log." The function inspects NOTHING about shield backend, the audit-signing extra, or per-row signature state before emitting it — it only assembles department/delivery/authority/learning and appends the string unconditionally. The render claim is confirmed: workforce.html:114 outputs `esc(r.governance_note)` verbatim into the per-department performance-review modal shown to buyers.
 
-I tried hard to refute the auditor's "reality" claim and instead corroborated both halves from the repo itself: (1) Shield absence/fail-open — ARCHITECTURE.md:66 ("If agent-shield is not installed, Maverick falls back to ~20 high-impact built-in rules") and benchmarks/security/corpus.py:123 ("The shield fails open: if a backend errors, the scan returns allow and logs at ERROR"), plus CLAUDE.md kernel rule 1 / AGENTS.md:29 ("Kernel must run without agent-shield — fail open with a warning"). So an action can be counted without passing the full shield, or any check at all. (2) Audit signing degrades to unsigned — wizard.py:1532 ("Needs the [audit-signing] extra; falls back to unsigned if absent") and control_plane.py:151,191-192 which has a first-class status branch returning {"status": "unsigned", ..., "signed": False} when "every row flagged unsigned." Thus the lo
+I tried hard to refute the auditor's "reality" claim and instead corroborated both halves from the repo itself: (1) Shield absence/fail-open — ARCHITECTURE.md:66 ("If agent-shield is not installed, Lightwork falls back to ~20 high-impact built-in rules") and benchmarks/security/corpus.py:123 ("The shield fails open: if a backend errors, the scan returns allow and logs at ERROR"), plus CLAUDE.md kernel rule 1 / AGENTS.md:29 ("Kernel must run without agent-shield — fail open with a warning"). So an action can be counted without passing the full shield, or any check at all. (2) Audit signing degrades to unsigned — wizard.py:1532 ("Needs the [audit-signing] extra; falls back to unsigned if absent") and control_plane.py:151,191-192 which has a first-class status branch returning {"status": "unsigned", ..., "signed": False} when "every row flagged unsigned." Thus the lo
 
 
 ### Memory Guard trust-tiering (OWASP ASI06) is silently defeated on the Postgres backend

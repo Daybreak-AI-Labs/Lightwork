@@ -4,7 +4,7 @@ Every learning signal in production AI is a proxy: a human saying "looks good"
 (RLHF), an LLM judge (RLAIF), or a hardcoded checker (RLVR). None is the *actual
 consequence* of the action in the world -- because no one else operates a
 governed workforce that acts on real business systems and can observe the
-result. Maverick can: weeks later, the invoice gets paid or it doesn't, the
+result. Lightwork can: weeks later, the invoice gets paid or it doesn't, the
 contract renews or it doesn't, the ticket stays closed or it reopens. That
 downstream fact is **ground truth** -- the one signal that can't be gamed,
 because a policy that fools an LLM judge still fails reality.

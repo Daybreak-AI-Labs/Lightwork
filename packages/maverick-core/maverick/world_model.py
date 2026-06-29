@@ -257,7 +257,7 @@ CREATE INDEX IF NOT EXISTS idx_goal_events_ts          ON goal_events(ts);
 
 -- v0.2 multi-turn: per-channel-user conversation threads.
 -- (channel, user_id) is the natural key so the same iMessage user
--- across separate Maverick goals lands in a single conversation.
+-- across separate Lightwork goals lands in a single conversation.
 CREATE TABLE IF NOT EXISTS conversations (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
     channel TEXT NOT NULL,

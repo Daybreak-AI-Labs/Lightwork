@@ -8,7 +8,7 @@ from maverick import docs_i18n
 
 _DOC = """# Title
 
-Install Maverick with pip install and set ANTHROPIC_API_KEY.
+Install Lightwork with pip install and set ANTHROPIC_API_KEY.
 
 ```bash
 maverick init

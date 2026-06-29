@@ -1,6 +1,6 @@
 """Federated swarm protocol (roadmap: 2028 H2 capabilities + ecosystem).
 
-Two Maverick swarms peer and delegate goals to each other. The wire contract
+Two Lightwork swarms peer and delegate goals to each other. The wire contract
 is ``grpc_api/federation.proto`` (Hello / DelegateGoal / GoalStatus); this
 module is the protocol layer behind it:
 
@@ -1139,7 +1139,7 @@ def serve(
     from .grpc_tls import bind_port
     secure = bind_port(server, address, "federation")
     server.start()
-    log.info("Maverick federation listening on %s (node=%s, %s)", address,
+    log.info("Lightwork federation listening on %s (node=%s, %s)", address,
              service.node, "TLS" if secure else "plaintext")
     return server
 

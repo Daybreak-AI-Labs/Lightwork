@@ -1,6 +1,6 @@
-"""Client binding — one Maverick deployment, exactly one enterprise client.
+"""Client binding — one Lightwork deployment, exactly one enterprise client.
 
-Maverick is deployed **one instance per enterprise client** (never a shared,
+Lightwork is deployed **one instance per enterprise client** (never a shared,
 hosted multi-tenant service). This module makes that binding explicit and
 **fail-closed** so client data can never land in an ambiguous, un-scoped
 location:

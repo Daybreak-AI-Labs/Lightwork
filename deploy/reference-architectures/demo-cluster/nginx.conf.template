@@ -1,4 +1,4 @@
-# Public Maverick demo proxy.
+# Public Lightwork demo proxy.
 #
 # The dashboard has NO global read-only/public-demo flag. The public surface is
 # therefore a tiny path allowlist, not a method-only proxy for the authenticated

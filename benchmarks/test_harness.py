@@ -57,7 +57,7 @@ def test_append_results_creates_table(harness, tmp_path):
     harness.append_results(row, out)
 
     content = out.read_text()
-    assert "Maverick benchmark results" in content
+    assert "Lightwork benchmark results" in content
     assert "| benchmark |" in content
     assert "| source |" in content
     assert "| x.md | v0.1 | maverick | measured | 0.5 |" in content
@@ -84,7 +84,7 @@ def test_append_is_idempotent_per_table_creation(harness, tmp_path):
 def test_append_results_migrates_existing_table_for_source(harness, tmp_path):
     out = tmp_path / "RESULTS.md"
     out.write_text(
-        "# Maverick benchmark results\n\n"
+        "# Lightwork benchmark results\n\n"
         "| benchmark | tag | agent | wall_seconds | cost_dollars | "
         "input_tokens | output_tokens | tool_calls | outcome |\n"
         "|---|---|---|---|---|---|---|---|---|\n"

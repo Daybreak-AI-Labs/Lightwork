@@ -44,7 +44,7 @@ else
     PIPELINES="maverick,sonnet_single"
 fi
 
-# Cascaded routing makes Maverick affordable; force it on for smoke
+# Cascaded routing makes Lightwork affordable; force it on for smoke
 # so the cost numbers are representative of a real Pareto run.
 export MAVERICK_CASCADE_ROUTING=1
 

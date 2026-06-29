@@ -250,7 +250,7 @@ jobs:
           import sys
           from maverick.license_scan import scan_distributions, policy_check
           # OS/distro Python packages (Ubuntu base image) are not part of the
-          # shipped Maverick tree; their licenses create no obligation for us.
+          # shipped Lightwork tree; their licenses create no obligation for us.
           SYSTEM_PKGS = {
               "python-apt", "launchpadlib", "lazr.restfulclient", "lazr.uri",
               "wadllib", "pygobject", "dbus-python", "command-not-found",

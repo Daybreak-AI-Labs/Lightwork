@@ -79,7 +79,7 @@ def _resolve_bearer_token(bearer_token: str | None = None) -> str:
     token = (bearer_token if bearer_token is not None else os.getenv(_TOKEN_ENV, "")).strip()
     if not token:
         raise ValueError(
-            "Maverick gRPC requires a bearer token. Set "
+            "Lightwork gRPC requires a bearer token. Set "
             f"{_TOKEN_ENV} or pass --bearer-token, and send it as "
             "metadata: authorization: Bearer <token>."
         )
@@ -443,7 +443,7 @@ def serve(
     from ..grpc_tls import bind_port
     secure = bind_port(server, address, "grpc")
     server.start()
-    log.info("Maverick gRPC API listening on %s (%s)", address,
+    log.info("Lightwork gRPC API listening on %s (%s)", address,
              "TLS" if secure else "plaintext")
     return server
 
@@ -452,7 +452,7 @@ def main(argv: list[str] | None = None) -> int:
     import argparse
     import sys
 
-    ap = argparse.ArgumentParser("maverick-grpc", description="Maverick gRPC API server")
+    ap = argparse.ArgumentParser("maverick-grpc", description="Lightwork gRPC API server")
     ap.add_argument("--address", default=_DEFAULT_ADDR, help="host:port to bind")
     ap.add_argument("--max-workers", type=int, default=None,
                     help="thread pool size (default: MAVERICK_GRPC_MAX_WORKERS "

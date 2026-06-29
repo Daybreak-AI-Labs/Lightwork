@@ -2,7 +2,7 @@
 
 A run's audit trail rendered as a watchable video: one captioned frame per
 recorded step, timed by the gaps between events, encoded to an MP4 a reviewer
-can scrub through without a Maverick install.
+can scrub through without a Lightwork install.
 
 The work splits cleanly so the deterministic part is fully testable offline:
 

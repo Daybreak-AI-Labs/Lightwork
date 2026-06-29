@@ -4,7 +4,7 @@
 > **Method:** 8 parallel audits across the marketing site, pricing/packaging docs,
 > commercialization research, enterprise legal/compliance surface, billing/licensing
 > code, engineering-readiness code, deployment/onboarding, and branding.
-> **Lightwork** = the commercial name for the **Maverick** codebase, by **Daybreak Labs**.
+> **Lightwork** = the commercial name for the **Lightwork** codebase, by **Daybreak Labs**.
 >
 > This document is now a **living resolution log**. Each issue carries a status:
 >
@@ -187,9 +187,9 @@ trademark / insurance / positioning (#22–#31), GA status & signing & maintaine
 
 ## I. Branding (customer-facing)
 
-98. ✅ **Installer said "Maverick"** — wizard now "Lightwork installer" (#1798).
-99. ✅ **Desktop app shipped as "Maverick"** — Tauri productName/title/desc + Svelte UI now Lightwork (#1798).
-100. ✅ **Broken `/Lightwork` repo URLs** — pointed at the real `Day-AI-Labs/Maverick` (#1798).
+98. ✅ **Installer said "Lightwork"** — wizard now "Lightwork installer" (#1798).
+99. ✅ **Desktop app shipped as "Lightwork"** — Tauri productName/title/desc + Svelte UI now Lightwork (#1798).
+100. ✅ **Broken `/Lightwork` repo URLs** — pointed at the real `Day-AI-Labs/Lightwork` (#1798).
 101. ◐ **MCP server slug `maverick`** — intentional machine identifier (like the PyPI `maverick-agent` name); not a buyer-facing display string.
 102. ✅ **Dashboard branding** — already "Lightwork," footer co-branded "Lightwork by Daybreak Labs" (verified, #1798).
 103. 👤 **"Daybreak Labs" placeholder company name** — the product-portfolio naming worksheet owns final naming. (founder)

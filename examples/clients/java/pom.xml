@@ -8,8 +8,8 @@
   <artifactId>maverick-mcp-java-example</artifactId>
   <version>0.1.0</version>
   <packaging>jar</packaging>
-  <name>Maverick MCP Java example</name>
-  <description>Runnable example + CI smoke: drive Maverick over MCP from Java/JVM.</description>
+  <name>Lightwork MCP Java example</name>
+  <description>Runnable example + CI smoke: drive Lightwork over MCP from Java/JVM.</description>
 
   <properties>
     <maven.compiler.release>21</maven.compiler.release>

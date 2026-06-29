@@ -40,7 +40,7 @@ jobs:
       - uses: actions/setup-dotnet@v5
         with:
           dotnet-version: "8.0.x"
-      - name: Install Maverick (kernel + MCP server)
+      - name: Install Lightwork (kernel + MCP server)
         run: |
           pip install -e ./packages/maverick-core
           pip install --no-deps -e ./packages/maverick-mcp

@@ -1,4 +1,4 @@
-# Homebrew formula for Maverick (source of truth lives in the monorepo).
+# Homebrew formula for Lightwork (source of truth lives in the monorepo).
 #
 # To make it installable, this file is mirrored into a Homebrew *tap* repo
 # named `homebrew-tap` under the project's account, so users run:
@@ -13,11 +13,11 @@
 # It installs the checksum-verified `maverick-agent` source plus the installer
 # wizard dependencies into an isolated virtualenv, then links the `maverick` CLI
 # onto the PATH.
-class Maverick < Formula
+class Lightwork < Formula
   include Language::Python::Virtualenv
 
   desc "AI agent swarm that runs locally, works for hours, under a budget cap"
-  homepage "https://github.com/Day-AI-Labs/Maverick"
+  homepage "https://github.com/Day-AI-Labs/Lightwork"
   url "https://files.pythonhosted.org/packages/source/m/maverick-agent/maverick_agent-0.1.6.tar.gz"
   sha256 "0000000000000000000000000000000000000000000000000000000000000000" # set by homebrew-bump.yml
   license :cannot_represent

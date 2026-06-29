@@ -1,15 +1,15 @@
 /**
- * @maverick/plugin-sdk — author Maverick agent tools in TypeScript.
+ * @maverick/plugin-sdk — author Lightwork agent tools in TypeScript.
  *
  * A plugin is a Node script that ends with `servePlugin([...tools])`. The
- * Maverick host (packages/maverick-core/maverick/ts_plugin_host.py) speaks
+ * Lightwork host (packages/maverick-core/maverick/ts_plugin_host.py) speaks
  * NDJSON to it, one JSON object per line:
  *
  *   plugin --describe              -> one-line manifest JSON, then exit
  *   {"id", "tool", "args"} on stdin -> {"id", "result"} | {"id", "error"} on stdout
  *
  * Handler exceptions become "ERROR: ..." result strings, matching the
- * convention of Maverick's built-in Python tools. Anything you log must go to
+ * convention of Lightwork's built-in Python tools. Anything you log must go to
  * stderr (console.error) — stdout belongs to the protocol.
  */
 import { createInterface } from "node:readline";
@@ -89,7 +89,7 @@ async function answer(byName: Map<string, ToolDef>, line: string): Promise<WireR
     const result = await tool.handler(args);
     return { id, result: typeof result === "string" ? result : JSON.stringify(result) };
   } catch (e) {
-    // Same convention as Maverick's Python tools: a failure is an
+    // Same convention as Lightwork's Python tools: a failure is an
     // "ERROR: ..." result string the model can read, not a protocol error.
     return { id, result: `ERROR: ${tool.name} failed: ${errorMessage(e)}` };
   }
@@ -131,7 +131,7 @@ export async function servePlugin(tools: ToolDef[], opts: ServeOptions = {}): Pr
 // --------------------------------------------------------------------------
 // Structured page context (browser extension <-> agent).
 //
-// The Maverick browser extension (extensions/browser/) can attach a bounded,
+// The Lightwork browser extension (extensions/browser/) can attach a bounded,
 // OBSERVE-ONLY accessibility/DOM snapshot of the active page to a goal. These
 // types + parser let a TypeScript plugin consume that snapshot safely: parse
 // validates/normalizes untrusted JSON and re-applies the same bounds the

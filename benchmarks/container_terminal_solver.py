@@ -1,4 +1,4 @@
-"""Containerized terminal solver: a Maverick LLM driving a REAL isolated shell.
+"""Containerized terminal solver: a Lightwork LLM driving a REAL isolated shell.
 
 The virtual-FS ``eval_terminal_bench.py`` can only manipulate file *contents* --
 ``run_command`` just logs. The documented gap is tasks that need **real command

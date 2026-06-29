@@ -1,6 +1,6 @@
 # Lightwork — Novel Feature Research: Fleet Memory/Interop & Provable Learning
 
-> Deep-research report. Date: 2026-06-21. Repo: `Day-AI-Labs/Maverick`.
+> Deep-research report. Date: 2026-06-21. Repo: `Day-AI-Labs/Lightwork`.
 > Method: 6 parallel agents — 1 codebase audit + 5 external angles (enterprise
 > competitor teardown, agent-interop standards, agent-memory research frontier,
 > verifiable-learning frontier, AI-governance regulatory drivers) — followed by a

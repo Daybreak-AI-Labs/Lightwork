@@ -1,4 +1,4 @@
-"""Configuration loader for Maverick.
+"""Configuration loader for Lightwork.
 
 Reads ``~/.maverick/config.toml`` (or the path set by ``$MAVERICK_CONFIG``).
 Supports environment variable interpolation in string values: ``${VAR_NAME}``

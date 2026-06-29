@@ -1,6 +1,6 @@
 """Tenant-aware data paths — the P1 multi-tenancy primitive.
 
-Maverick keeps its state under ``~/.maverick``. For multi-tenant deployments,
+Lightwork keeps its state under ``~/.maverick``. For multi-tenant deployments,
 a *tenant* namespaces that state so one tenant's data (cross-session memory,
 history, ...) is isolated from another's on disk.
 

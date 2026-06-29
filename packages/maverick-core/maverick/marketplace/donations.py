@@ -4,7 +4,7 @@ Skill authors may declare a ``donation_url`` in their raw listing JSON (the
 catalog index entry). This module validates it against a strict allowlist and
 surfaces it for display. Scope, stated plainly:
 
-  - **Links only. No payment processing.** Maverick never touches money,
+  - **Links only. No payment processing.** Lightwork never touches money,
     never proxies a checkout, never adds query parameters or referral codes.
     The validated URL is shown to the user; clicking it is between the user,
     their browser, and the platform.

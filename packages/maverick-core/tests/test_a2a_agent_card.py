@@ -1,6 +1,6 @@
 """A2A Agent Card discovery.
 
-Maverick advertises itself as an A2A (Agent2Agent) agent by serving a
+Lightwork advertises itself as an A2A (Agent2Agent) agent by serving a
 standards-shaped Agent Card at /.well-known/agent-card.json -- the
 discovery primitive that lets other agents find and describe it. Off by
 default (outward-facing surface); opt in via MAVERICK_A2A_ENABLED=1.

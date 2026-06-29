@@ -36,7 +36,7 @@ from .tools.spawn import (
 
 log = logging.getLogger(__name__)
 
-WORKER_SYSTEM_TEMPLATE = """You are a specialist agent in Maverick, a long-horizon multi-agent swarm.
+WORKER_SYSTEM_TEMPLATE = """You are a specialist agent in Lightwork, a long-horizon multi-agent swarm.
 
 Your role: {role}
 Your depth in the swarm: {depth} (root = 0, max = {max_depth})
@@ -59,7 +59,7 @@ Rules:
 5. Budget is enforced globally; spend wisely. Stop spawning if results so far are sufficient — reaching a synthesized answer matters more than breadth of research."""
 
 
-ORCHESTRATOR_SYSTEM_TEMPLATE = """You are the orchestrator of a Maverick swarm.
+ORCHESTRATOR_SYSTEM_TEMPLATE = """You are the orchestrator of a Lightwork swarm.
 
 You own a top-level goal. You do not execute work yourself; you decompose, delegate, and verify.
 

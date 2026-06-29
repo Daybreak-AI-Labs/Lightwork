@@ -5,15 +5,15 @@ people actually run multi-agent stacks on. The delegation core is shared —
 :func:`maverick.langchain_adapter.run_maverick_goal` (transport-agnostic,
 already unit-tested) — so this module is wrappers only:
 
-  - **Maverick as an AutoGen tool** — :func:`maverick_autogen_tool` returns a
+  - **Lightwork as an AutoGen tool** — :func:`maverick_autogen_tool` returns a
     plain typed function (AutoGen 0.4 ``FunctionTool``-compatible; AutoGen
     registers ordinary callables with docstrings), optionally wrapped in
     ``autogen_core.tools.FunctionTool`` when the package is installed.
-  - **Maverick as a CrewAI tool** — :func:`maverick_crewai_tool` returns a
+  - **Lightwork as a CrewAI tool** — :func:`maverick_crewai_tool` returns a
     CrewAI ``BaseTool`` subclass instance (lazy import, clear install hint).
-  - **Their tools as Maverick tools** — :func:`wrap_autogen_tool` /
+  - **Their tools as Lightwork tools** — :func:`wrap_autogen_tool` /
     :func:`wrap_crewai_tool` adapt an AutoGen ``FunctionTool`` / CrewAI
-    ``BaseTool`` into a Maverick :class:`~maverick.tools.Tool`, so the swarm
+    ``BaseTool`` into a Lightwork :class:`~maverick.tools.Tool`, so the swarm
     can call into either ecosystem's tools.
 
 Nothing here imports ``autogen``/``crewai`` at module import time; each
@@ -36,7 +36,7 @@ from .tools import Tool
 log = logging.getLogger(__name__)
 
 _GOAL_DESCRIPTION = (
-    "Delegate a goal to the Maverick agent swarm (planning, tools, "
+    "Delegate a goal to the Lightwork agent swarm (planning, tools, "
     "verification) and return its result text. Use for multi-step work "
     "that needs real tools rather than a single completion."
 )
@@ -49,7 +49,7 @@ _DEFAULT_SCHEMA = {
 }
 
 
-# ---- Maverick as an AutoGen tool -------------------------------------------
+# ---- Lightwork as an AutoGen tool -------------------------------------------
 
 def maverick_autogen_callable(*, max_dollars: float = 2.0, **binds: Any):
     """The plain typed callable AutoGen registers as a tool.
@@ -59,14 +59,14 @@ def maverick_autogen_callable(*, max_dollars: float = 2.0, **binds: Any):
     so the core adapter is dependency-free and the FunctionTool wrapper below
     is optional sugar."""
     def run_maverick(goal: str, description: str = "") -> str:
-        """Delegate a goal to the Maverick agent swarm and return its result."""
+        """Delegate a goal to the Lightwork agent swarm and return its result."""
         return run_maverick_goal(goal, description, max_dollars=max_dollars, **binds)
 
     return run_maverick
 
 
 def maverick_autogen_tool(*, max_dollars: float = 2.0, **binds: Any):
-    """Maverick as an AutoGen ``FunctionTool`` (needs ``autogen-core``)."""
+    """Lightwork as an AutoGen ``FunctionTool`` (needs ``autogen-core``)."""
     try:
         from autogen_core.tools import FunctionTool
     except ImportError as e:
@@ -81,10 +81,10 @@ def maverick_autogen_tool(*, max_dollars: float = 2.0, **binds: Any):
     )
 
 
-# ---- Maverick as a CrewAI tool ----------------------------------------------
+# ---- Lightwork as a CrewAI tool ----------------------------------------------
 
 def maverick_crewai_tool(*, max_dollars: float = 2.0, **binds: Any):
-    """Maverick as a CrewAI tool (needs ``crewai``).
+    """Lightwork as a CrewAI tool (needs ``crewai``).
 
     Returns an instance of a ``crewai.tools.BaseTool`` subclass whose ``_run``
     delegates to the swarm."""
@@ -106,7 +106,7 @@ def maverick_crewai_tool(*, max_dollars: float = 2.0, **binds: Any):
     return MaverickTool()
 
 
-# ---- Their tools as Maverick tools ------------------------------------------
+# ---- Their tools as Lightwork tools ------------------------------------------
 
 def _schema_or_default(obj: Any) -> dict:
     """Best-effort JSON schema from a framework tool's args model."""
@@ -244,7 +244,7 @@ def _result_text(out: Any) -> str:
 
 
 def wrap_autogen_tool(autogen_tool: Any) -> Tool:
-    """Adapt an AutoGen ``FunctionTool``-shaped object into a Maverick Tool.
+    """Adapt an AutoGen ``FunctionTool``-shaped object into a Lightwork Tool.
 
     Duck-typed: needs ``name``, ``description``, and either ``run`` (async,
     AutoGen 0.4: ``run(args, cancellation_token)``) or a plain callable
@@ -284,7 +284,7 @@ def wrap_autogen_tool(autogen_tool: Any) -> Tool:
 
 
 def wrap_crewai_tool(crewai_tool: Any) -> Tool:
-    """Adapt a CrewAI ``BaseTool``-shaped object into a Maverick Tool.
+    """Adapt a CrewAI ``BaseTool``-shaped object into a Lightwork Tool.
 
     Duck-typed: needs ``name``, ``description``, and ``_run`` (CrewAI's
     execution method) or ``run``.

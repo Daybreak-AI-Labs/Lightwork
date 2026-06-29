@@ -1,4 +1,4 @@
-"""Manifest definitions for Maverick's benchmark suite (May 2026).
+"""Manifest definitions for Lightwork's benchmark suite (May 2026).
 
 Per Karpathy: SWE-bench Verified is contaminated; SWE-bench Pro is the
 new credible coding benchmark. GAIA Level 3 and OSWorld are where the
@@ -52,7 +52,7 @@ MANIFESTS: dict[str, Manifest] = {
         threshold_sota=0.65,
         scoring="pytest",
         notes=(
-            "Maverick headline benchmark for coding. Run with three baselines "
+            "Lightwork headline benchmark for coding. Run with three baselines "
             "(single_shot, single_shot_tools, self_consistency_n8) on identical "
             "infrastructure to defend the swarm number."
         ),
@@ -74,7 +74,7 @@ MANIFESTS: dict[str, Manifest] = {
         threshold_sota=0.70,
         scoring="exact-match",
         notes=(
-            "Maverick's strongest wedge: long-horizon decomposable tasks where "
+            "Lightwork's strongest wedge: long-horizon decomposable tasks where "
             "verifier-driven swarms outperform single-shot. Filter HF GAIA "
             "validation split to Level==3."
         ),

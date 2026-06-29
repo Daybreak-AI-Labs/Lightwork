@@ -1,4 +1,4 @@
-# Build the Maverick CLI MSI with WiX Toolset v4.
+# Build the Lightwork CLI MSI with WiX Toolset v4.
 #
 # Requires (Windows host):
 #   * .NET SDK + WiX v4 CLI:  dotnet tool install --global wix

@@ -1,4 +1,4 @@
-"""Agent Shield integration for Maverick."""
+"""Agent Shield integration for Lightwork."""
 from .compartment import ImmunizingShield, ThreatLedger, compartments_enabled
 from .guard import Shield, ShieldVerdict
 

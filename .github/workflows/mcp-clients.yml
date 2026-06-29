@@ -37,7 +37,7 @@ jobs:
       - uses: actions/setup-node@v6
         with:
           node-version: "22"
-      - name: Install Maverick (kernel + MCP server)
+      - name: Install Lightwork (kernel + MCP server)
         run: |
           pip install -e ./packages/maverick-core
           pip install --no-deps -e ./packages/maverick-mcp
@@ -57,7 +57,7 @@ jobs:
       - uses: actions/setup-go@v6
         with:
           go-version: "stable"
-      - name: Install Maverick (kernel + MCP server)
+      - name: Install Lightwork (kernel + MCP server)
         run: |
           pip install -e ./packages/maverick-core
           pip install --no-deps -e ./packages/maverick-mcp

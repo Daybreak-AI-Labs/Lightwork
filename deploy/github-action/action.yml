@@ -148,7 +148,7 @@ runs:
         status=${PIPESTATUS[0]}
 
         # Multiline-safe step output (heredoc form). The delimiter must be
-        # unpredictable and absent from the untrusted Maverick output so the
+        # unpredictable and absent from the untrusted Lightwork output so the
         # output cannot terminate the heredoc and inject additional outputs.
         result_delimiter=""
         for _ in {1..10}; do

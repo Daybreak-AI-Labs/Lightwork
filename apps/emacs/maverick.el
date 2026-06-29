@@ -1,4 +1,4 @@
-;;; maverick.el --- Drive the Maverick agent runtime from Emacs -*- lexical-binding: t; -*-
+;;; maverick.el --- Drive the Lightwork agent runtime from Emacs -*- lexical-binding: t; -*-
 
 ;; Copyright (C) 2027 Day AI Labs
 
@@ -25,7 +25,7 @@
 ;;; Code:
 
 (defgroup maverick nil
-  "Drive the Maverick agent runtime."
+  "Drive the Lightwork agent runtime."
   :group 'tools
   :prefix "maverick-")
 
@@ -47,8 +47,8 @@
 
 ;;;###autoload
 (defun maverick-start (goal)
-  "Start the Maverick swarm on GOAL (asynchronously)."
-  (interactive "sGoal for Maverick: ")
+  "Start the Lightwork swarm on GOAL (asynchronously)."
+  (interactive "sGoal for Lightwork: ")
   (let ((cmd (if maverick-default-max-dollars
                  (maverick--command "start" goal "--max-dollars"
                                     (number-to-string maverick-default-max-dollars))
@@ -57,7 +57,7 @@
 
 ;;;###autoload
 (defun maverick-status ()
-  "Show Maverick runtime status, including cost."
+  "Show Lightwork runtime status, including cost."
   (interactive)
   (let ((buf (get-buffer-create "*maverick-status*")))
     (with-current-buffer buf
@@ -78,24 +78,24 @@
 
 ;;;###autoload
 (defun maverick-logs ()
-  "Show recent Maverick run logs."
+  "Show recent Lightwork run logs."
   (interactive)
   (compilation-start (maverick--command "logs") nil (lambda (_) "*maverick-logs*")))
 
 ;;;###autoload
 (defun maverick-halt ()
-  "Arm the Maverick killswitch (aborts all running goals)."
+  "Arm the Lightwork killswitch (aborts all running goals)."
   (interactive)
   (when (yes-or-no-p "Arm the killswitch and abort ALL running goals? ")
     (shell-command (maverick--command "halt"))
-    (message "Maverick killswitch armed.")))
+    (message "Lightwork killswitch armed.")))
 
 ;;;###autoload
 (defun maverick-unhalt ()
-  "Clear the Maverick killswitch."
+  "Clear the Lightwork killswitch."
   (interactive)
   (shell-command (maverick--command "unhalt"))
-  (message "Maverick killswitch cleared."))
+  (message "Lightwork killswitch cleared."))
 
 (provide 'maverick)
 

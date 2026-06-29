@@ -18,7 +18,7 @@ HONEST FRAMING (read benchmarks/security/README.md):
   - This runs the BUILT-IN fallback shield (no SDK, no LLM judge). The full
     agent-shield SDK (~115 patterns) and the LLM cascade are UNAVAILABLE here
     and would score higher; they are reported as such, never silently dropped.
-  - It measures DETECTION at the chokepoints. Maverick's primary defense is
+  - It measures DETECTION at the chokepoints. Lightwork's primary defense is
     CONTAINMENT (capabilities/least-privilege), proven separately in
     proof/run_proof.py; a missed detection is not an executed attack when the
     capability layer denies the tool anyway.

@@ -2,7 +2,7 @@
 name = "maverick-desktop"
 version = "0.1.6"
 edition = "2021"
-description = "Tauri shell that embeds the local Maverick dashboard"
+description = "Tauri shell that embeds the local Lightwork dashboard"
 authors = ["cdayAI"]
 license = "LicenseRef-Proprietary"
 repository = "https://github.com/Day-AI-Labs/maverick"

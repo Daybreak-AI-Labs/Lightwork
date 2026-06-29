@@ -1,4 +1,4 @@
-/* Maverick mobile companion — read-only oversight from a phone.
+/* Lightwork mobile companion — read-only oversight from a phone.
  *
  * Three tabs (Runs, Glance, Settings) plus a run-detail drill-down. Plain
  * state-based navigation: no navigation library, so the dependency surface

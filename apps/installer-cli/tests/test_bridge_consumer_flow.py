@@ -99,7 +99,7 @@ def test_bridge_default_workdir_when_blank(monkeypatch, tmp_path):
         "", "Sam", "sk-ant-x", "", "$5",
     ])
     config = tomllib.loads((tmp_path / ".maverick" / "config.toml").read_text())
-    # Falls back to ~/Documents/Maverick.
+    # Falls back to ~/Documents/Lightwork.
     assert config["sandbox"]["workdir"].endswith("Maverick")
 
 

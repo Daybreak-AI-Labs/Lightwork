@@ -1,6 +1,6 @@
-"""Maverick interactive installer.
+"""Lightwork interactive installer.
 
-Configures Maverick for a fresh install. Sets up:
+Configures Lightwork for a fresh install. Sets up:
   - AI providers and per-role models
   - channels (Telegram, Discord, Slack, Signal, WhatsApp, SMS, Email,
     Matrix, iMessage)
@@ -1263,7 +1263,7 @@ def pick_advanced() -> dict[str, Any]:
         ),
         "fleet_memory": _q_confirm(
             "Fleet memory? Let EXTERNAL agents (Agentforce, Copilot, custom) "
-            "deposit experience into and recall from Maverick's governed "
+            "deposit experience into and recall from Lightwork's governed "
             "memory -- Shield-scanned, provenance-tagged, audited reads. "
             "An explicit trust decision; OFF by default.",
             default=False,
@@ -1505,7 +1505,7 @@ def pick_advanced() -> dict[str, Any]:
             default=False,
         ),
         "client_id": _q_text(
-            "Client/tenant id for THIS deployment (one Maverick per enterprise "
+            "Client/tenant id for THIS deployment (one Lightwork per enterprise "
             "client). All data (world DB, audit, memory, fleet) is isolated under "
             "this id — leave blank only for a personal/single-user install. "
             "Letters/digits/._- e.g. \"acme-corp\".",
@@ -1874,7 +1874,7 @@ def pick_ts_plugins() -> list[list[str]]:
     """TypeScript (NDJSON stdio) plugin commands — writes ``[plugins].ts``.
 
     Each entry is the argv that serves the plugin (e.g.
-    ``node /path/to/plugin.js``); Maverick discovers its tools via
+    ``node /path/to/plugin.js``); Lightwork discovers its tools via
     ``--describe`` at boot. Skipped by default — most setups have none.
     """
     if not _q_confirm(
@@ -2161,7 +2161,7 @@ def pick_connectors() -> dict[str, str]:
         return {}
     console.print()
     console.print(
-        f"[dim]Maverick ships {len(entries)} enterprise connectors "
+        f"[dim]Lightwork ships {len(entries)} enterprise connectors "
         "(ServiceNow, Salesforce, Snowflake, SAP, Workday, Datadog, ...). "
         "Full list: docs/connectors.md. Connect any now, or add them later in "
         "~/.maverick/.env.[/dim]"
@@ -2274,7 +2274,7 @@ def _emit_kv(lines: list[str], k: str, v: Any) -> None:
 
 
 def pick_a2a() -> tuple[dict[str, Any], list[str]]:
-    """Expose Maverick to other agents over A2A. Returns (config, envs).
+    """Expose Lightwork to other agents over A2A. Returns (config, envs).
 
     Off by default: A2A is an outward-facing surface (other agents can
     discover this instance and delegate budget-spending goals to it). When
@@ -3166,7 +3166,7 @@ def write_config(
                 pass
 
     lines = [
-        "# Maverick config. Regenerate with:  maverick init",
+        "# Lightwork config. Regenerate with:  maverick init",
         "",
     ]
     lines += _cfg_deployment(deployment)
@@ -3260,7 +3260,7 @@ def smoke_test() -> bool:
 
     try:
         import maverick_shield  # noqa: F401
-        console.print("[green]✓[/green] Maverick Shield available")
+        console.print("[green]✓[/green] Lightwork Shield available")
     except ImportError:
         console.print("[yellow]⚠[/yellow] maverick-shield not installed (safety will be disabled)")
 
@@ -3437,7 +3437,7 @@ def _consumer_api_key() -> dict[str, str]:
     """
     console.print()
     console.print(
-        "Maverick needs an account with Claude (Anthropic). "
+        "Lightwork needs an account with Claude (Anthropic). "
         "Get a key at: [cyan]https://console.anthropic.com/settings/keys[/cyan]\n"
         "[dim]It looks like 'sk-ant-...' and is about 100 characters long.[/dim]",
     )
@@ -3527,7 +3527,7 @@ def run_consumer() -> int:
     consumer-grade safe defaults, then prints a one-line demo command."""
     console.print()
     console.print(Panel.fit(
-        "[bold]Maverick setup[/bold]\n\n"
+        "[bold]Lightwork setup[/bold]\n\n"
         "Four questions. About a minute. You can change anything later\n"
         "by running [bold]maverick init[/bold] again.",
         border_style="cyan",
@@ -3547,7 +3547,7 @@ def run_consumer() -> int:
     keys = _consumer_api_key()
 
     workdir = _q_text(
-        "Where can Maverick work?",
+        "Where can Lightwork work?",
         default=str(Path.home() / "Documents" / "Maverick"),
     ).strip() or str(Path.home() / "Documents" / "Maverick")
 
@@ -3868,7 +3868,7 @@ def run(fast: bool = False, resume: bool = False) -> int:
         # Aborting on empty selection forced the user to restart the
         # whole wizard (UX seat finding). Re-ask instead.
         console.print(
-            "[yellow]Pick at least one provider; Maverick needs an LLM.[/yellow]"
+            "[yellow]Pick at least one provider; Lightwork needs an LLM.[/yellow]"
         )
         providers = pick_providers()
     state["providers"] = providers

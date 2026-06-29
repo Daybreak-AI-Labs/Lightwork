@@ -1,6 +1,6 @@
 """Reproducible benchmark harness.
 
-Runs a benchmark .md file as a Maverick goal, captures wall-clock /
+Runs a benchmark .md file as a Lightwork goal, captures wall-clock /
 cost / token / tool-call metrics from the world model, and writes a row
 into RESULTS.md.
 
@@ -15,7 +15,7 @@ it exercises the same code path as a real user; it then reads the world
 model to pull metrics for the just-finished goal.
 
 Comparative numbers vs. other agents (OpenClaw, Hermes) require those
-systems to be installed; harness writes Maverick's row unconditionally
+systems to be installed; harness writes Lightwork's row unconditionally
 and leaves placeholders for hand-filled comparator rows.
 """
 from __future__ import annotations
@@ -84,7 +84,7 @@ def run_one(
         "benchmark": str(benchmark_path),
         "tag": tag,
         "agent": "maverick",
-        # Provenance: this harness can only measure Maverick (it shells out
+        # Provenance: this harness can only measure Lightwork (it shells out
         # to `maverick start`). Comparator rows for other agents are hand-
         # added, so they MUST be marked source=manual to stay honest -- a
         # reader can't otherwise tell a measured row from a typed-in one.
@@ -111,7 +111,7 @@ def _ensure_results_table(results_path: Path, cols: list[str]) -> None:
         header = _markdown_row(cols)
         divider = "|" + "|".join(["---"] * len(cols)) + "|\n"
         results_path.write_text(
-            "# Maverick benchmark results\n\n"
+            "# Lightwork benchmark results\n\n"
             "Auto-appended by `benchmarks/harness.py`. Each row is one run.\n\n"
             + header + divider,
             encoding="utf-8",

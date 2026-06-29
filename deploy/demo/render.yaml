@@ -1,4 +1,4 @@
-# Maverick hosted demo — Render blueprint (Model 3: one-click cloud).
+# Lightwork hosted demo — Render blueprint (Model 3: one-click cloud).
 #
 # Push this repo to GitHub, then in Render: New > Blueprint and point it at the
 # repo. Render builds the single image from deploy/docker/Dockerfile and runs
@@ -17,7 +17,7 @@ services:
   - type: web
     name: maverick-demo
     runtime: docker
-    repo: https://github.com/Day-AI-Labs/Maverick
+    repo: https://github.com/Day-AI-Labs/Lightwork
     dockerfilePath: ./deploy/docker/Dockerfile
     dockerContext: .
     # The image ENTRYPOINT is `maverick`; this is the CMD appended to it, so the

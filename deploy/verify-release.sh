@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Verify a Maverick release artifact's Sigstore (cosign keyless) signature.
+# Verify a Lightwork release artifact's Sigstore (cosign keyless) signature.
 #
 # Every release binary and the SBOM ship with a detached `.sig` (signature) and
 # `.pem` (signing certificate). The signature is keyless: it was produced by the

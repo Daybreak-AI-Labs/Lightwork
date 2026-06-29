@@ -1,4 +1,4 @@
-"""SWE-bench Verified harness for Maverick + baselines.
+"""SWE-bench Verified harness for Lightwork + baselines.
 
 Karpathy SOTA-review item: real SWE-bench numbers with three baselines.
 Without these the "swarm" column is undefendable.
@@ -628,7 +628,7 @@ def _maverick_build_row(
 
 
 def run_maverick(instance_id: str, brief: str, **kwargs) -> Row:
-    """Spin up a Maverick swarm against the instance brief.
+    """Spin up a Lightwork swarm against the instance brief.
 
     Wave 8: coding-mode + best-of-N support. The harness sets
     MAVERICK_CODING_MODE=1 + MAVERICK_BEST_OF_N + MAVERICK_FAIL_TO_PASS /
@@ -753,7 +753,7 @@ def run_maverick(instance_id: str, brief: str, **kwargs) -> Row:
 def run_sonnet_single(instance_id: str, brief: str, **_kwargs) -> Row:
     """Baseline #1: single Anthropic call, no tools.
 
-    The simplest possible baseline. If Maverick can't beat this on
+    The simplest possible baseline. If Lightwork can't beat this on
     cost/wall and match-or-exceed on accuracy, the swarm isn't
     earning its complexity.
     """
@@ -831,7 +831,7 @@ def run_sonnet_tools(instance_id: str, brief: str, **kwargs) -> Row:
     Closer to Devin / Cursor: one flat agent loop -- the model explores and
     edits the checked-out repo via bash, and its edits to the working tree
     (captured as ``git diff``) are the predicted patch. Same worker model as
-    Maverick but flat: no orchestrator, no spawn, no verifier, no skills.
+    Lightwork but flat: no orchestrator, no spawn, no verifier, no skills.
 
     Turn ceiling is MAVERICK_BENCH_TOOLS_MAX_TURNS (default 20); the run also
     stops if the per-instance dollar cap is hit.
@@ -953,7 +953,7 @@ def run_sonnet_self_consistency_n8(instance_id: str, brief: str, **_kwargs) -> R
     """Baseline #3: N single-shot calls; pick the most common patch.
 
     Tests test-time compute (the cheap version) without any agent
-    structure. If self-consistency-N=8 beats Maverick at the same
+    structure. If self-consistency-N=8 beats Lightwork at the same
     dollar budget, the swarm machinery is pure overhead. N is overridable
     via MAVERICK_BENCH_SC_N (default 8); samples use temperature 1.0 for
     diversity.
@@ -1164,7 +1164,7 @@ def _write_run_meta(out_dir: Path, args, manifest_path: Path) -> Path:
     """Wave 12 (council F16): emit run_meta.json next to the results CSV.
 
     Captures everything needed to reproduce or audit a run:
-      - Maverick git rev (HEAD sha)
+      - Lightwork git rev (HEAD sha)
       - manifest SHA-256
       - pip freeze
       - Anthropic API client version
@@ -1178,7 +1178,7 @@ def _write_run_meta(out_dir: Path, args, manifest_path: Path) -> Path:
     out_dir.mkdir(parents=True, exist_ok=True)
     meta_path = out_dir / "run_meta.json"
 
-    # Maverick git rev — best-effort.
+    # Lightwork git rev — best-effort.
     try:
         rev = _sp.run(
             ["git", "rev-parse", "HEAD"],

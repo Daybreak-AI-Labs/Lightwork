@@ -4,15 +4,15 @@
 > Method: fan-out web search → fetch 22 sources → extract 109 claims → 3-vote
 > adversarial verification → 21 confirmed / 4 refuted. Sources are primary
 > (arXiv / official repos) unless noted. Confidence tags reflect source quality
-> and vote margins, not certainty about Maverick-specific transfer.
+> and vote margins, not certainty about Lightwork-specific transfer.
 
 ## Executive summary
 
-The most direct precedent for Maverick's `self_harness` is **Self-Harness**
+The most direct precedent for Lightwork's `self_harness` is **Self-Harness**
 (arXiv 2606.09498), which validates the core bet: harness-only, model-specific
 edits lifted held-out Terminal-Bench-2.0 pass rates by **+14 to +21 points**
 across three models, using exactly the mine→propose→validate loop the platform
-mirrors. The literature then closes Maverick's named gaps with concrete,
+mirrors. The literature then closes Lightwork's named gaps with concrete,
 mostly primary-sourced techniques: for **proposer quality**, reflective/
 textual-gradient optimizers (GEPA, TextGrad, RPT, ACE) replace generic
 deterministic template lines with failure-trace-grounded edits and are
@@ -36,7 +36,7 @@ driver/evaluator* is the hardest, least-solved part.
 
 **Confidence: high** · **Stages: mine / propose / validate**
 
-Self-Harness (arXiv 2606.09498) is operationalized as exactly the loop Maverick
+Self-Harness (arXiv 2606.09498) is operationalized as exactly the loop Lightwork
 implements: **Weakness Mining** (model-specific failure patterns from execution
 traces), **Harness Proposal** (diverse yet minimal modifications tied to
 failures), and **Proposal Validation** (accept edits only after regression
@@ -47,7 +47,7 @@ held-out Terminal-Bench-2.0 (traces never used as inputs): MiniMax M2.5
 
 **Implication:** the architecture is well-founded. One structural difference:
 the paper has **no separate GATE stage** — its acceptance rule *is* validation.
-Maverick's gate (evidence floor, calibration-freeze, capability non-escalation,
+Lightwork's gate (evidence floor, calibration-freeze, capability non-escalation,
 reversibility, signed audit) is a governance layer *on top of* the published
 method, so it must be justified from the safety literature (Finding 6), not
 from this paper.
@@ -93,7 +93,7 @@ produces response-level critiques across the whole set, then **ClusterFusion
 groups semantically similar diagnoses into recurring failure topics** before the
 optimizer conditions on the report. The paper explicitly critiques per-example
 updates as "sensitive to local rather than recurring failures" — exactly
-Maverick's risk with greedy goal-text clustering. ACE corroborates by distilling
+Lightwork's risk with greedy goal-text clustering. ACE corroborates by distilling
 Reflector "lessons" into curated strategy bullets rather than raw traces.
 — https://arxiv.org/abs/2605.21781 · https://arxiv.org/abs/2510.04618
 
@@ -114,7 +114,7 @@ button-press cost vs a minimalist baseline and **recovered a majority of the gap
 to a hand-engineered expert harness, with capability-dependent gains**. The
 **self-evolving-agents survey** (arXiv 2508.07407) gives the taxonomy:
 single-agent optimization splits into per-prompt, per-memory, per-tool, unified;
-multi-agent covers per-role/per-worker — the axis Maverick is missing.
+multi-agent covers per-role/per-worker — the axis Lightwork is missing.
 — https://arxiv.org/abs/2605.09998 · https://github.com/sethkarten/continual-harness
 · https://arxiv.org/pdf/2508.07407
 
@@ -140,7 +140,7 @@ mine/propose/validate/gate.
 - **Delta-style updates (ACE)** prevent **"context collapse"** (full rewrites
   erode detail) and **"brevity bias"** (dropping insights for concision) via
   structured incremental updates merged deterministically with non-LLM logic —
-  the concrete mechanism to stop Maverick's bounded ≤8-line/1500-char addendum
+  the concrete mechanism to stop Lightwork's bounded ≤8-line/1500-char addendum
   from eroding across promotions. — https://arxiv.org/abs/2510.04618
 - **Reward-hacking is real and measurable:** fine-tuning on high-scoring-but-
   biased responses degrades downstream performance (GPT-Judge 8.86 clean vs 8.46
@@ -161,7 +161,7 @@ The self-evolving-agents survey devotes a **dedicated section to evaluation,
 safety, and ethical considerations**, framed as prerequisites "critical to
 ensuring their effectiveness and reliability" — i.e., auditability/evaluation-
 robustness are prerequisites, not afterthoughts. This *underpins* (doesn't
-prescribe in detail) Maverick's gate interlocks. The reward-hacking evidence is
+prescribe in detail) Lightwork's gate interlocks. The reward-hacking evidence is
 the empirical justification for the **calibration-freeze interlock** (don't
 learn while the verifier is drifting) and the **evidence floor**.
 — https://arxiv.org/pdf/2508.07407 · https://arxiv.org/html/2510.12462v3
@@ -179,7 +179,7 @@ optimization** — these loops "remain brittle" — and three under-specified
 "hidden" design choices must be made explicit: **the starting artifact, the
 credit horizon for execution traces, and how trials/errors are batched into
 learning evidence**. The starting artifact *materially bounds reachable
-solutions* (MLAgentBench), implying Maverick's generic deterministic-fallback
+solutions* (MLAgentBench), implying Lightwork's generic deterministic-fallback
 line constrains what PROPOSE can ever discover — a reason to seed the addendum
 well. Two paths toward cheap evaluators: GEPA's **reference-free reflective
 scoring** (35× more rollout-efficient than RL), and **ACE adapts effectively
@@ -219,7 +219,7 @@ onto a *regression gate* (vs search-time selection) is the loosest here.
 
 - **"Effective harness design is *inherently* model-specific"** (1-2 refuted,
   2606.09498). → The per-model keying choice should be justified empirically on
-  Maverick's own traces, not assumed.
+  Lightwork's own traces, not assumed.
 - **"Continual Harness is reset-free / fully removes the human from the loop"**
   (1-2 refuted, 2605.09998). → Don't cite it as a no-human-in-loop precedent.
 - **"LLM judges suffer 5+ point bias swings from authoritative-but-wrong
@@ -249,7 +249,7 @@ onto a *regression gate* (vs search-time selection) is the loosest here.
    enterprise harness without exploding the governance surface — and how should
    the capability-non-escalation interlock scope per-role edits? (2605.09998,
    2508.07407)
-3. What is the right credit horizon and batching for Maverick's traces? They
+3. What is the right credit horizon and batching for Lightwork's traces? They
    silently determine loop behavior; no universal setting exists. (2603.23994)
 4. How should the calibration-freeze interlock detect verifier/judge drift in
    production (what metric, what threshold) so the loop pauses before absorbing
