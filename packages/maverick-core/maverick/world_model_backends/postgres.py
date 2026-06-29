@@ -1243,23 +1243,36 @@ class PostgresWorldModel:
     def list_projects(self, *, owner: str | None = None) -> list[dict]:
         """All projects newest first; each carries a ``goal_count``.
 
-        ``owner`` is accepted for signature parity; PG isolates by tenant
-        (applied below)."""
+        When supplied, ``owner`` scopes project metadata to that principal,
+        matching the SQLite backend contract used by the dashboard RBAC layer.
+        Tenant scoping is still applied independently.
+        """
         sql = f"SELECT {self._PROJECT_COLS} FROM projects"
         params: list = []
+        clauses: list[str] = []
+        if owner is not None:
+            clauses.append("owner=%s")
+            params.append(owner)
         frag, fparams = _tenant_scope()
         if frag:
-            sql += " WHERE " + frag
+            clauses.append(frag)
             params += fparams
+        if clauses:
+            sql += " WHERE " + " AND ".join(clauses)
         sql += " ORDER BY id DESC"
+        goal_count_sql = "SELECT COUNT(*) FROM goals WHERE project_id=%s"
+        goal_count_params: list = []
+        goal_frag, goal_fparams = _tenant_scope()
+        if goal_frag:
+            goal_count_sql += " AND " + goal_frag
+            goal_count_params += goal_fparams
         with self._tx() as cur:
             cur.execute(sql, tuple(params))
             rows = cur.fetchall()
             out: list[dict] = []
             for r in rows:
                 proj = self._project_from_row(r)
-                cur.execute(
-                    "SELECT COUNT(*) FROM goals WHERE project_id=%s", (proj["id"],))
+                cur.execute(goal_count_sql, tuple([proj["id"], *goal_count_params]))
                 c = cur.fetchone()
                 proj["goal_count"] = int(c[0]) if c else 0
                 out.append(proj)
