@@ -544,6 +544,33 @@ def test_rotated_key_file_is_private(monkeypatch):
         assert mode & 0o077 == 0, f"{p} is group/world accessible ({oct(mode)})"
 
 
+@requires_crypto
+def test_rotation_secures_keyring_parent_with_permissive_umask():
+    import stat as _stat
+
+    old_umask = car.os.umask(0)
+    try:
+        car.rotate_at_rest_key()
+    finally:
+        car.os.umask(old_umask)
+
+    assert _stat.S_IMODE(car._KEY_PATH.parent.stat().st_mode) == 0o700
+    assert _stat.S_IMODE(car._keyring_dir().stat().st_mode) == 0o700
+
+
+@requires_crypto
+def test_rotation_repairs_existing_writable_keyring_parent():
+    import stat as _stat
+
+    car._KEY_PATH.parent.mkdir(parents=True)
+    car._KEY_PATH.parent.chmod(0o777)
+
+    car.rotate_at_rest_key()
+
+    assert _stat.S_IMODE(car._KEY_PATH.parent.stat().st_mode) == 0o700
+    assert _stat.S_IMODE(car._keyring_dir().stat().st_mode) == 0o700
+
+
 # --- key durability: generation warning + escrow backup -----------------------
 
 def test_keygen_logs_backup_warning(monkeypatch, caplog):
