@@ -1130,6 +1130,15 @@ class WorldModel:
                 self.conn.commit()
             except sqlite3.Error:  # pragma: no cover -- best-effort quiesce
                 pass
+            # Pre-create the sensitive backup with private permissions before
+            # SQLite opens it. sqlite3.connect() would otherwise create the file
+            # at the process umask (often 0644), briefly exposing a full world.db
+            # snapshot before the chmod below (or forever if interrupted).
+            flags = os.O_WRONLY | os.O_CREAT | os.O_EXCL
+            if hasattr(os, "O_NOFOLLOW"):
+                flags |= os.O_NOFOLLOW
+            fd = os.open(str(dest), flags, 0o600)
+            os.close(fd)
             bdst = sqlite3.connect(str(dest))
             try:
                 self.conn.backup(bdst)
