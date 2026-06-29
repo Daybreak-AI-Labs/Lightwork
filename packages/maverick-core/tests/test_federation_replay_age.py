@@ -39,6 +39,31 @@ def test_fresh_nonces_survive_high_volume():
         assert federation._replay_seen(s, now=base + 1.0 + i * 0.001) is True
 
 
+def test_future_dated_signature_retained_until_envelope_expires():
+    w = federation._SIGN_FRESHNESS_S
+    first_seen = 1000.0
+    created_at = first_seen + w - 1
+
+    assert (
+        federation._replay_seen("future", created_at=created_at, now=first_seen)
+        is False
+    )
+    # The signature is older than one window from first receipt, but the signed
+    # envelope is still fresh because its created_at was accepted in the future.
+    assert federation._fresh(created_at, now=first_seen + w + 1) is True
+    assert (
+        federation._replay_seen(
+            "future", created_at=created_at, now=first_seen + w + 1,
+        )
+        is True
+    )
+
+    # Once the envelope can no longer pass freshness, the cache may prune it.
+    assert federation._fresh(created_at, now=created_at + w + 1) is False
+    assert federation._replay_seen("replacement", now=created_at + w + 1) is False
+    assert "future" not in federation._seen_sigs
+
+
 def test_concurrent_same_sig_admits_exactly_one():
     """The federation server is multithreaded, so _replay_seen must be atomic:
     when many threads race the SAME fresh signature, exactly one sees it as
