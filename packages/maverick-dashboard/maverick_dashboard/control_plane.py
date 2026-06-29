@@ -4,8 +4,9 @@ Two read-only surfaces over primitives that already exist in the kernel:
 
 * :func:`build_replay` -- reconstructs a run's action timeline from the signed
   audit log (:func:`maverick.audit.iter_events`), classifies each event, and
-  reports whether the tamper-evident hash chain covering the run verifies
-  (:func:`maverick.audit.verify_chain`). This is the "flight recorder" view, and
+  reports whether the tamper-evident hash chain and cross-file tip ledger
+  covering the run verify (:func:`maverick.audit.verify_chain`,
+  :func:`maverick.audit.verify_anchors`). This is the "flight recorder" view, and
   :func:`evidence_packet` wraps it into a one-click, exportable evidence bundle.
 * :func:`trust_overview` -- enumerates the configured external agents from the
   Agent Trust Plane (:func:`maverick.agent_trust.load_trust_state`) with their
@@ -146,12 +147,12 @@ def _entry(ev: dict[str, Any]) -> dict[str, Any]:
 def _verify_days(days: list[str]) -> dict[str, Any]:
     """Verify the signed hash chain for each day-file the run touched.
 
-    Mirrors ``maverick audit verify``: a clean signed chain is ``verified``; any
-    structural/signature break is ``broken``; a chain that was simply never
-    signed (every row flagged ``unsigned``) reports ``unsigned`` (not tamper);
-    no day-file present is ``no_log``.
+    Mirrors ``maverick audit verify``: a clean signed chain and tip ledger is
+    ``verified``; any structural/signature/anchor break is ``broken``; a chain
+    that was simply never signed (every row flagged ``unsigned``) reports
+    ``unsigned`` (not tamper); no day-file present is ``no_log``.
     """
-    from maverick.audit import verify_chain
+    from maverick.audit import verify_anchors, verify_chain
     from maverick.paths import data_dir
 
     audit_dir = data_dir("audit")
@@ -174,7 +175,13 @@ def _verify_days(days: list[str]) -> dict[str, Any]:
             else:
                 real_breaks.append(b)
 
-    if not present:
+    try:
+        anchor_breaks = verify_anchors(audit_dir)
+    except Exception:  # unreadable/locked anchor ledger -- treat as a break
+        anchor_breaks = [type("B", (), {"line_no": 0, "reason": "anchors_unreadable", "detail": str(audit_dir)})()]
+    real_breaks.extend(anchor_breaks)
+
+    if not present and not real_breaks:
         return {"status": "no_log", "break_count": 0, "days": [], "signed": False, "breaks": []}
     if real_breaks:
         return {
