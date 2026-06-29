@@ -1644,3 +1644,19 @@ def test_list_learned_and_conflicts_never_leak_raw_nul(monkeypatch, store):
     # conflict labels are readable, never the raw NUL key
     for label, _a, _b in sh.detect_store_conflicts(path=store):
         assert "\x00" not in label
+
+
+def test_model_keys_no_prefix_collision(monkeypatch, store):
+    # "M2" / "M-x" must NOT be treated as scopes of "M": the NUL separator is the
+    # unambiguous boundary (a model id can't contain NUL), so startswith("M\x00")
+    # never matches another model's bare key.
+    ctrl = _enable(monkeypatch)
+    _promote_line(store, "M", "c0", "m line", ctrl)
+    _promote_line(store, "M2", "c0", "m2 line", ctrl)
+    _promote_domain_line(store, ctrl)                       # M's finance-scoped line
+    keys = sh._model_store_keys(sh.load_addenda(store), "M")
+    assert "M2" not in keys and all(k == "M" or k.startswith("M\x00") for k in keys)
+    # forgetting M leaves M2 entirely intact
+    sh.forget_addendum("M", path=store)
+    assert "m2 line" in sh.recall_addendum("M2", store)
+    assert sh.list_learned(store).get("M2") == ["m2 line"]
