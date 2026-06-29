@@ -45,3 +45,90 @@ class TestMissingKernelGuidance:
         assert res.exit_code == 127
         assert "fetch-kernel.sh" in res.stderr
         assert "build-rootfs.sh" in res.stderr
+
+
+class TestFirecrackerArtifactIntegrity:
+    def test_fetch_kernel_requires_sha256(self, tmp_path):
+        import subprocess
+
+        source = tmp_path / "kernel.bin"
+        dest = tmp_path / "kernel.img"
+        source.write_bytes(b"kernel")
+        result = subprocess.run(
+            [str(_DEPLOY / "fetch-kernel.sh")],
+            env={
+                **os.environ,
+                "KERNEL_URL": source.as_uri(),
+                "DEST": str(dest),
+            },
+            text=True,
+            capture_output=True,
+            check=False,
+        )
+        assert result.returncode == 2
+        assert "KERNEL_SHA256 is required" in result.stderr
+        assert not dest.exists()
+
+    def test_fetch_kernel_rejects_sha256_mismatch(self, tmp_path):
+        import subprocess
+
+        source = tmp_path / "kernel.bin"
+        dest = tmp_path / "kernel.img"
+        source.write_bytes(b"kernel")
+        result = subprocess.run(
+            [str(_DEPLOY / "fetch-kernel.sh")],
+            env={
+                **os.environ,
+                "KERNEL_URL": source.as_uri(),
+                "KERNEL_SHA256": "0" * 64,
+                "DEST": str(dest),
+            },
+            text=True,
+            capture_output=True,
+            check=False,
+        )
+        assert result.returncode == 1
+        assert "kernel SHA-256 mismatch" in result.stderr
+        assert not dest.exists()
+
+    def test_fetch_kernel_installs_matching_sha256(self, tmp_path):
+        import hashlib
+        import subprocess
+
+        source = tmp_path / "kernel.bin"
+        dest = tmp_path / "kernel.img"
+        source.write_bytes(b"kernel")
+        digest = hashlib.sha256(source.read_bytes()).hexdigest()
+        result = subprocess.run(
+            [str(_DEPLOY / "fetch-kernel.sh")],
+            env={
+                **os.environ,
+                "KERNEL_URL": source.as_uri(),
+                "KERNEL_SHA256": digest,
+                "DEST": str(dest),
+            },
+            text=True,
+            capture_output=True,
+            check=False,
+        )
+        assert result.returncode == 0, result.stderr
+        assert dest.read_bytes() == source.read_bytes()
+
+    @pytest.mark.parametrize("image", ["", "ubuntu:24.04", "ubuntu@sha256:not-hex"])
+    def test_build_rootfs_requires_digest_pinned_image(self, image):
+        import subprocess
+
+        env = {**os.environ}
+        if image:
+            env["IMAGE"] = image
+        else:
+            env.pop("IMAGE", None)
+        result = subprocess.run(
+            [str(_DEPLOY / "build-rootfs.sh")],
+            env=env,
+            text=True,
+            capture_output=True,
+            check=False,
+        )
+        assert result.returncode == 2
+        assert "IMAGE" in result.stderr
