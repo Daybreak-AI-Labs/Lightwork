@@ -1,7 +1,7 @@
-"""Stage SWE-bench Verified for a Maverick harness run.
+"""Stage SWE-bench Verified for a Lightwork harness run.
 
 Pulls `princeton-nlp/SWE-bench_Verified` from HuggingFace, converts each
-instance to Maverick's manifest line format (JSONL), and (optionally)
+instance to Lightwork's manifest line format (JSONL), and (optionally)
 shallow-clones each instance's repo at its `base_commit` into a workdir
 tree the harness can run against.
 
@@ -63,7 +63,7 @@ def _load_dataset(split: str = "test"):
 
 
 def _row_to_manifest(row: dict) -> dict:
-    """Convert one HF row to a Maverick manifest line.
+    """Convert one HF row to a Lightwork manifest line.
 
     The harness's load_instances expects native types for fail_to_pass /
     pass_to_pass (lists, not JSON strings). It also reads `brief` as the

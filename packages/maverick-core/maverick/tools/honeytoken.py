@@ -18,7 +18,7 @@ from typing import Any
 
 from . import Tool
 
-_PREFIX = "MAVHT"  # Maverick HoneyToken — the recognizable, never-valid marker.
+_PREFIX = "MAVHT"  # Lightwork HoneyToken — the recognizable, never-valid marker.
 _KINDS = {"aws", "api", "pat", "generic"}
 
 

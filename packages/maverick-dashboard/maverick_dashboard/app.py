@@ -1,4 +1,4 @@
-"""FastAPI dashboard for Maverick.
+"""FastAPI dashboard for Lightwork.
 
 v0.1.6: BackgroundTask runner moved to maverick.runner; this file just
 imports it. Eliminates the duplicate that lived in app.py + api.py +
@@ -520,7 +520,7 @@ async def _read_limited_skill_validator_body(request: Request) -> bytes:
 
 
 async def _verify_maverick_webhook(request: Request) -> dict:
-    """Verify a Maverick-format inbound webhook (HMAC over body+timestamp) and
+    """Verify a Lightwork-format inbound webhook (HMAC over body+timestamp) and
     return the parsed JSON object. Shared by /webhook/start and /webhook/run,
     which had byte-identical preambles. Raises HTTPException (401 unconfigured,
     403 bad signature, 400 bad body) and enforces a configured LLM provider."""
@@ -3148,7 +3148,7 @@ async def chat_send(
 @app.get("/settings", response_class=HTMLResponse)
 async def settings_page(request: Request, saved: str = "") -> HTMLResponse:
     """Operator settings: appearance (theme/density/font/language) + which model
-    Maverick uses by default. Appearance is applied via the existing
+    Lightwork uses by default. Appearance is applied via the existing
     persist_theme middleware (the form GETs back here with the params); the
     model choice is saved to the dashboard-owned runtime overlay."""
     require_permission(request, "admin")
@@ -3439,7 +3439,7 @@ async def webhook_start(request: Request, bg: BackgroundTasks) -> JSONResponse:
     middleware (see ``_AUTH_EXEMPT``); the HMAC signature is the only
     credential. We fail closed -- a missing/empty secret yields 401.
 
-    Replay defence (Maverick-CONTROLLED format): the signature binds the
+    Replay defence (Lightwork-CONTROLLED format): the signature binds the
     ``X-Maverick-Timestamp``; a request whose timestamp is outside the
     configured freshness window (``[webhooks] max_age_seconds``) is rejected,
     so a captured signed request can't be replayed to re-spend budget.
@@ -4938,7 +4938,7 @@ def main() -> None:
             "MAVERICK_DASHBOARD_TOKEN set."
         )
 
-    # Apply Maverick's shared logging config (JSON via MAVERICK_LOG_FORMAT=json,
+    # Apply Lightwork's shared logging config (JSON via MAVERICK_LOG_FORMAT=json,
     # correlation-id context filter, secret scrubbing) at the real process
     # entrypoint — not in the lifespan, so the in-process TestClient never
     # reconfigures global logging. The most network-exposed process otherwise

@@ -1,6 +1,6 @@
 <?xml version="1.0" encoding="utf-8"?>
 <!--
-  Maverick CLI - WiX Toolset v4 authoring.
+  Lightwork CLI - WiX Toolset v4 authoring.
 
   Build (Windows host with WiX v4, see build.ps1):
     .\build.ps1 -Wheel ..\..\dist\maverick_agent-0.1.6-py3-none-any.whl
@@ -33,7 +33,7 @@
     end up with side-by-side installs. test_wxs.py pins this exact value.
   -->
   <Package
-      Name="Maverick CLI"
+      Name="Lightwork CLI"
       Manufacturer="cdayAI"
       Version="$(var.ProductVersion)"
       UpgradeCode="9E2B7C41-6A8D-4F3B-8E5A-2C90D17B4F6E"
@@ -43,7 +43,7 @@
 
     <MajorUpgrade
         AllowSameVersionUpgrades="no"
-        DowngradeErrorMessage="A newer version of Maverick CLI is already installed." />
+        DowngradeErrorMessage="A newer version of Lightwork CLI is already installed." />
 
     <MediaTemplate EmbedCab="yes" />
 
@@ -94,7 +94,7 @@
 
     </ComponentGroup>
 
-    <Feature Id="Cli" Title="Maverick CLI" Level="1">
+    <Feature Id="Cli" Title="Lightwork CLI" Level="1">
       <ComponentGroupRef Id="CliComponents" />
     </Feature>
 

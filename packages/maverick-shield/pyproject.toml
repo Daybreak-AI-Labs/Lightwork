@@ -5,7 +5,7 @@ build-backend = "setuptools.build_meta"
 [project]
 name = "maverick-shield"
 version = "0.1.6"
-description = "Agent Shield integration + builtin fallback rules for Maverick"
+description = "Agent Shield integration + builtin fallback rules for Lightwork"
 requires-python = ">=3.10"
 license = { text = "LicenseRef-Proprietary" }
 authors = [{ name = "cdayAI" }]

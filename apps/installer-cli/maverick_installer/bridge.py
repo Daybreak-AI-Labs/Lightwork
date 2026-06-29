@@ -79,7 +79,7 @@ def run() -> None:
     # Q3: working directory
     _send(_step(
         "workdir",
-        "Where can Maverick work? (a folder it can create files in)",
+        "Where can Lightwork work? (a folder it can create files in)",
         [],
         kind="text",
     ))
@@ -107,7 +107,7 @@ def run() -> None:
     )
 
     if keys:
-        msg = f"Setup complete, {user_name}. Maverick is ready."
+        msg = f"Setup complete, {user_name}. Lightwork is ready."
     else:
         msg = (
             f"Setup saved, {user_name}. Add an API key later from Settings "

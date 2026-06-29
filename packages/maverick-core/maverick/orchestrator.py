@@ -841,7 +841,7 @@ async def run_goal(  # noqa: C901  -- core goal-execution loop
     except killswitch.Halted:
         world.set_goal_status(goal_id, "blocked", result="halted")
         return (
-            "Stopped: Maverick is halted (a HALT file is present).\n"
+            "Stopped: Lightwork is halted (a HALT file is present).\n"
             "Run `maverick unhalt` to clear it, then try again."
         )
 
@@ -1259,7 +1259,7 @@ async def run_goal(  # noqa: C901  -- core goal-execution loop
                     "goal_id": goal_id, "status": "blocked", "result": "halted",
                 })
                 return (
-                    "Stopped: Maverick was halted mid-run (a HALT file is present).\n"
+                    "Stopped: Lightwork was halted mid-run (a HALT file is present).\n"
                     f"Run `maverick unhalt` to clear it, then `maverick resume {goal_id}`."
                 )
             _end_episode_with_spend(world, episode_id, result.error, "failure", budget, goal_id)

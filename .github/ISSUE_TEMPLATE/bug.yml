@@ -15,7 +15,7 @@ body:
       label: maverick doctor output
       description: Paste the full output of `maverick doctor`
       placeholder: |
-        Maverick health check
+        Lightwork health check
         ✓ config  (~/.maverick/config.toml)
         ✓ anthropic  (key validated)
         ...

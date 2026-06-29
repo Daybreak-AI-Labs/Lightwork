@@ -1,8 +1,8 @@
 #!/usr/bin/env bash
-# Maverick VPS bootstrap script.
+# Lightwork VPS bootstrap script.
 #
 # Usage (defaults to the latest published release for a reproducible install):
-#   curl -sSL https://raw.githubusercontent.com/Day-AI-Labs/Maverick/main/deploy/vps/install.sh | sudo bash
+#   curl -sSL https://raw.githubusercontent.com/Day-AI-Labs/Lightwork/main/deploy/vps/install.sh | sudo bash
 #
 # Or pin to a specific tag / full commit SHA:
 #   curl -sSL ...install.sh | sudo MAVERICK_VERSION=v0.1.0 bash
@@ -23,7 +23,7 @@ set -euo pipefail
 # (offline, or none published yet) we fall back to `main` with a loud warning.
 resolve_default_version() {
   local tag
-  tag="$(curl -fsSL https://api.github.com/repos/Day-AI-Labs/Maverick/releases/latest 2>/dev/null \
+  tag="$(curl -fsSL https://api.github.com/repos/Day-AI-Labs/Lightwork/releases/latest 2>/dev/null \
          | grep -m1 '"tag_name"' \
          | sed -E 's/.*"tag_name"[[:space:]]*:[[:space:]]*"([^"]+)".*/\1/' || true)"
   if [[ -n "${tag}" ]]; then printf '%s' "${tag}"; else printf 'main'; fi
@@ -60,15 +60,15 @@ require_root() {
 
 ensure_target_user() {
   if [[ "$TARGET_USER" == "root" ]]; then
-    echo "Refusing to install Maverick as root; choose a non-root sudo user or set MAVERICK_SERVICE_USER." >&2
+    echo "Refusing to install Lightwork as root; choose a non-root sudo user or set MAVERICK_SERVICE_USER." >&2
     exit 1
   fi
 
   if ! id -u "$TARGET_USER" >/dev/null 2>&1; then
-    log "Creating dedicated Maverick service user ${TARGET_USER} (${TARGET_HOME})..."
+    log "Creating dedicated Lightwork service user ${TARGET_USER} (${TARGET_HOME})..."
     useradd --system --create-home --home-dir "$TARGET_HOME" --shell /usr/sbin/nologin "$TARGET_USER"
   else
-    log "Using existing Maverick install user ${TARGET_USER} (${TARGET_HOME})..."
+    log "Using existing Lightwork install user ${TARGET_USER} (${TARGET_HOME})..."
     if [[ ! -d "$TARGET_HOME" ]]; then
       primary_group="$(id -gn "$TARGET_USER")"
       install -d -o "$TARGET_USER" -g "$primary_group" "$TARGET_HOME"
@@ -100,8 +100,8 @@ install_maverick() {
   log "Installing maverick @ ${MAVERICK_VERSION} for user ${TARGET_USER}..."
   if [[ ! -d /opt/maverick ]]; then
     git clone --branch "${MAVERICK_VERSION}" --depth 1 \
-        https://github.com/Day-AI-Labs/Maverick /opt/maverick \
-      || git clone https://github.com/Day-AI-Labs/Maverick /opt/maverick
+        https://github.com/Day-AI-Labs/Lightwork /opt/maverick \
+      || git clone https://github.com/Day-AI-Labs/Lightwork /opt/maverick
   else
     git -C /opt/maverick fetch --depth 1 origin "${MAVERICK_VERSION}" 2>/dev/null || true
     git -C /opt/maverick checkout "${MAVERICK_VERSION}" 2>/dev/null \

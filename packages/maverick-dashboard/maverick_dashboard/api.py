@@ -1,4 +1,4 @@
-"""REST API for Maverick (mounted at /api/v1).
+"""REST API for Lightwork (mounted at /api/v1).
 
 v0.1.6: BackgroundTask runner moved to maverick.runner.
 """

@@ -1,4 +1,4 @@
-//! Runnable Rust MCP client for Maverick.
+//! Runnable Rust MCP client for Lightwork.
 //!
 //! The executable version of `docs/clients/rust-quickstart.md` and the CI smoke
 //! for the Rust cross-language surface. It spawns `maverick mcp` (stdio
@@ -33,7 +33,7 @@ async fn main() -> Result<()> {
 
     let tools = client.list_all_tools().await?;
     let names: Vec<&str> = tools.iter().map(|t| t.name.as_ref()).collect();
-    println!("Maverick exposes {} tools: {}", tools.len(), names.join(", "));
+    println!("Lightwork exposes {} tools: {}", tools.len(), names.join(", "));
     for expected in ["maverick_start", "maverick_status", "maverick_facts_get"] {
         if !names.contains(&expected) {
             bail!("MCP server is missing tool '{expected}'");
@@ -49,7 +49,7 @@ async fn main() -> Result<()> {
     }
     println!("maverick_facts_get round-trip OK");
 
-    // Every Maverick tool also returns structuredContent: typed JSON matching
+    // Every Lightwork tool also returns structuredContent: typed JSON matching
     // the tool's outputSchema, so a typed client reads parsed fields instead of
     // re-parsing the text block. facts_get -> { facts: {...} }.
     let structured = res
@@ -62,6 +62,6 @@ async fn main() -> Result<()> {
     println!("maverick_facts_get structuredContent OK");
 
     client.cancel().await?;
-    println!("OK: Rust client drove Maverick over MCP end-to-end");
+    println!("OK: Rust client drove Lightwork over MCP end-to-end");
     Ok(())
 }

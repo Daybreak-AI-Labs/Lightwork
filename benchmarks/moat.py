@@ -1,7 +1,7 @@
-"""Compounding-moat benchmark: does Maverick get better at a task the
+"""Compounding-moat benchmark: does Lightwork get better at a task the
 SECOND time it sees it?
 
-This is the benchmark for Maverick's core differentiator vs. stateless
+This is the benchmark for Lightwork's core differentiator vs. stateless
 agents (OpenAI/Google assistants): a persistent world model + skill
 auto-distillation + reflexion. The claim is that a warm agent — one that
 has already done a similar task and retained what it learned — solves the

@@ -1,4 +1,4 @@
-# Maverick — single-container image.
+# Lightwork — single-container image.
 #
 # Build:   docker build -f deploy/docker/Dockerfile -t maverick:latest .
 # Run:     docker run -it --rm \

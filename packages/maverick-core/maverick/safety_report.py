@@ -238,7 +238,7 @@ def generate_report(
     )
 
     lines = [
-        "# Maverick safety report",
+        "# Lightwork safety report",
         "",
         "## Reporting period",
         "",

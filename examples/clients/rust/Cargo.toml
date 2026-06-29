@@ -3,7 +3,7 @@ name = "maverick-mcp-rust-example"
 version = "0.1.0"
 edition = "2021"
 publish = false
-description = "Runnable example + CI smoke: drive Maverick over MCP from Rust."
+description = "Runnable example + CI smoke: drive Lightwork over MCP from Rust."
 
 [dependencies]
 # Official Rust MCP SDK (github.com/modelcontextprotocol/rust-sdk). Pinned for

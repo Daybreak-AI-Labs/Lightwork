@@ -1,13 +1,13 @@
-name: Maverick agent on PR (reusable)
+name: Lightwork agent on PR (reusable)
 
-# Reusable workflow for downstream projects: invoke a Maverick goal on
+# Reusable workflow for downstream projects: invoke a Lightwork goal on
 # every pull request. Comment the agent's findings as a PR review.
 #
 # Usage in a consumer repo's `.github/workflows/code-review.yml`:
 #
 #     jobs:
 #       review:
-#         uses: Day-AI-Labs/Maverick/.github/workflows/agent-on-pr.yml@main
+#         uses: Day-AI-Labs/Lightwork/.github/workflows/agent-on-pr.yml@main
 #         with:
 #           goal: "Review this PR for logic bugs and missing edge cases."
 #           max_dollars: 0.50
@@ -42,7 +42,7 @@ on:
         type: number
       overrides_path:
         description: >-
-          Optional path (relative to the calling repo) to a Maverick override
+          Optional path (relative to the calling repo) to a Lightwork override
           bundle: a directory with domains/*.toml and/or roles.toml, applied
           before the run so the review uses this client's customized agents.
         required: false
@@ -72,7 +72,7 @@ jobs:
         with:
           python-version: "3.12"
 
-      - name: Install Maverick
+      - name: Install Lightwork
         run: |
           python -m pip install --upgrade pip
           pip install 'maverick-agent[all]'
@@ -106,7 +106,7 @@ jobs:
           max_dollars = float(os.environ["AGENT_MAX_DOLLARS"])
           max_wall_seconds = int(float(os.environ["AGENT_TIMEOUT_MINUTES"]) * 60)
 
-          # The provider API key is NOT written into this config: Maverick reads
+          # The provider API key is NOT written into this config: Lightwork reads
           # it straight from the environment (ANTHROPIC_API_KEY / OPENAI_API_KEY,
           # exported above from secrets) via maverick.llm. That avoids both a
           # GitHub Actions expression in the run block (a bare name fails to
@@ -161,7 +161,7 @@ jobs:
         with:
           script: |
             const fs = require('fs');
-            let body = "🤖 **Maverick agent review**\n\n";
+            let body = "🤖 **Lightwork agent review**\n\n";
             try {
               const out = fs.readFileSync("/tmp/agent-output.txt", "utf8");
               let redacted = out

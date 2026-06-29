@@ -1,4 +1,4 @@
-//! Tauri shell for the Maverick graphical installer.
+//! Tauri shell for the Lightwork graphical installer.
 //!
 //! The window hosts a one-button Svelte UI. Pressing "Install" runs the
 //! same bootstrap the CLI one-liners use
@@ -22,7 +22,7 @@ use tokio::process::Command;
 
 // Source the installer pulls from. The desktop installer always pins
 // the checkout to the commit captured when the signed app was built.
-const REPO: &str = "Day-AI-Labs/Maverick";
+const REPO: &str = "Day-AI-Labs/Lightwork";
 const GIT_REF: &str = env!("MAVERICK_INSTALL_REF");
 
 #[cfg(windows)]

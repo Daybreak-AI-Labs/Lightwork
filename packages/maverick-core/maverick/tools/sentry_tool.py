@@ -1,7 +1,7 @@
 """Sentry tool — error tracking + release management.
 
 Read-mostly access to a Sentry project so the agent can answer
-"what's blowing up?" without leaving Maverick.
+"what's blowing up?" without leaving Lightwork.
 
 Auth: ``SENTRY_AUTH_TOKEN`` (internal/integration token with at
 least ``event:read`` and ``project:read`` scopes). ``SENTRY_ORG`` +

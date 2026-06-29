@@ -1,14 +1,14 @@
 name: Desktop bundle
 
-# Builds the native Maverick installer (Tauri) for macOS, Windows, and
+# Builds the native Lightwork installer (Tauri) for macOS, Windows, and
 # Linux. For a product release, release.yml owns the `v*` tag and
 # dispatches this workflow for it; the installers are then attached to
 # that GitHub Release, so end users can download and double-click them
 # without a GitHub login.
 #
-# The app needs no prerequisites: pressing "Install Maverick" runs the
+# The app needs no prerequisites: pressing "Install Lightwork" runs the
 # same bootstrap as the one-line installers (it installs Python +
-# Maverick for the user).
+# Lightwork for the user).
 #
 # Status: UNSIGNED. First launch trips SmartScreen (Windows) / Gatekeeper
 # (macOS) with an "unknown developer" prompt. Code signing + notarization

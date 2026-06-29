@@ -1,4 +1,4 @@
-// Runnable C# / .NET MCP client for Maverick.
+// Runnable C# / .NET MCP client for Lightwork.
 //
 // The executable version of docs/clients/csharp-quickstart.md and the CI smoke
 // for the .NET cross-language surface. It spawns `maverick mcp` (stdio JSON-RPC)
@@ -25,7 +25,7 @@ await using var client = await McpClient.CreateAsync(transport);
 
 var tools = await client.ListToolsAsync();
 var names = tools.Select(t => t.Name).OrderBy(n => n).ToArray();
-Console.WriteLine($"Maverick exposes {tools.Count} tools: {string.Join(", ", names)}");
+Console.WriteLine($"Lightwork exposes {tools.Count} tools: {string.Join(", ", names)}");
 foreach (var expected in new[] { "maverick_start", "maverick_status", "maverick_facts_get" })
 {
     if (!names.Contains(expected))
@@ -44,5 +44,5 @@ if (res.Content.Count == 0)
 }
 Console.WriteLine("maverick_facts_get round-trip OK");
 
-Console.WriteLine("OK: C# client drove Maverick over MCP end-to-end");
+Console.WriteLine("OK: C# client drove Lightwork over MCP end-to-end");
 return 0;

@@ -222,9 +222,9 @@ class LearnedPRM:
     def _artifact_dims(meta: Mapping[str, object]) -> tuple[int, int]:
         """Validate head.json and return the expected network dimensions."""
         if meta.get("feature_names") != FEATURE_NAMES:
-            raise ValueError("head.json feature_names do not match this Maverick build")
+            raise ValueError("head.json feature_names do not match this Lightwork build")
         if meta.get("role_vocab") != ROLE_VOCAB:
-            raise ValueError("head.json role_vocab does not match this Maverick build")
+            raise ValueError("head.json role_vocab does not match this Lightwork build")
 
         input_dim = int(meta.get("input_dim", len(FEATURE_NAMES)))
         if input_dim != len(FEATURE_NAMES):
@@ -360,9 +360,9 @@ class LinearPRM:
         if not isinstance(meta, Mapping):
             raise ValueError("artifact did not contain an object")
         if meta.get("feature_names") != FEATURE_NAMES:
-            raise ValueError("feature_names do not match this Maverick build")
+            raise ValueError("feature_names do not match this Lightwork build")
         if meta.get("role_vocab") != ROLE_VOCAB:
-            raise ValueError("role_vocab does not match this Maverick build")
+            raise ValueError("role_vocab does not match this Lightwork build")
 
         def _vec(head_name: str):
             head = meta.get(head_name)

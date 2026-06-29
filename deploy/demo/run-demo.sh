@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# One-command Maverick browser demo (Model 1: local).
+# One-command Lightwork browser demo (Model 1: local).
 #
 # Generates a dashboard token if none is set, boots the dashboard container,
 # waits for it to answer, prints the tokenized URL, and opens your browser.
@@ -36,7 +36,7 @@ else
 fi
 export MAVERICK_DASHBOARD_TOKEN="$TOKEN"
 
-echo "Building and starting the Maverick demo dashboard..."
+echo "Building and starting the Lightwork demo dashboard..."
 docker compose -f "$COMPOSE_FILE" --env-file "$ENV_FILE" up -d --build
 
 URL="http://localhost:${PORT}/?token=${TOKEN}"
@@ -51,7 +51,7 @@ done
 echo
 
 echo
-echo "Maverick demo is live:"
+echo "Lightwork demo is live:"
 echo "  $URL"
 echo
 echo "Stop it with:   docker compose -f deploy/demo/$COMPOSE_FILE down"

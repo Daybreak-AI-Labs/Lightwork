@@ -1,8 +1,8 @@
-site_name: Maverick
+site_name: Lightwork
 site_description: Recursive multi-agent swarm. Drives Claude / GPT / Kimi / Grok / Gemini / Ollama from one kernel.
-site_url: https://day-ai-labs.github.io/Maverick/
-repo_url: https://github.com/Day-AI-Labs/Maverick
-repo_name: Day-AI-Labs/Maverick
+site_url: https://day-ai-labs.github.io/Lightwork/
+repo_url: https://github.com/Day-AI-Labs/Lightwork
+repo_name: Day-AI-Labs/Lightwork
 edit_uri: edit/main/docs/
 copyright: Proprietary, commercially licensed (see LICENSE). Built for everyone, not just the technical few.
 
@@ -89,7 +89,7 @@ nav:
       - API: api.md
       - gRPC API: grpc.md
       - A2A (Agent2Agent): a2a.md
-      - How Maverick compares: comparison.md
+      - How Lightwork compares: comparison.md
   - Performance:
       - Streaming parity: performance/streaming-parity.md
   - Security:
@@ -106,14 +106,14 @@ nav:
       - Architecture: enterprise/architecture.md
       - Diligence data room: enterprise/diligence.md
   - Strategy:
-      - Maverick vs the field: comparison.md
+      - Lightwork vs the field: comparison.md
       - Competitive landscape: strategy/competitive-landscape.md
       - Moat & acquisition: strategy/moat-and-acquisition.md
       - Design-partner scorecard: strategy/design-partner-scorecard.md
       - Oversight experience: ux/oversight-experience.md
   - Roadmap:
       - 36-month plan: ROADMAP.md
-      - "RFC 0001: Maverick 2.0": rfcs/0001-maverick-2.0.md
+      - "RFC 0001: Lightwork 2.0": rfcs/0001-maverick-2.0.md
       - "RFC 0002: Plugin API v2": rfcs/0002-plugin-api-v2.md
   - Community:
       - Showcase: showcase.md
@@ -126,7 +126,7 @@ nav:
 extra:
   social:
     - icon: fontawesome/brands/github
-      link: https://github.com/Day-AI-Labs/Maverick
+      link: https://github.com/Day-AI-Labs/Lightwork
     - icon: fontawesome/brands/python
       link: https://pypi.org/project/maverick-agent/
   generator: false

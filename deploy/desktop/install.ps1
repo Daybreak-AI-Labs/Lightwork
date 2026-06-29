@@ -1,8 +1,8 @@
 <#
-  Maverick desktop bootstrap (Windows).
+  Lightwork desktop bootstrap (Windows).
 
   Zero prerequisites. It installs Python 3.12 if missing, installs the
-  published Maverick package from PyPI into an isolated pipx environment,
+  published Lightwork package from PyPI into an isolated pipx environment,
   and launches the wizard (`maverick init`).
 
   Advanced source installs must pin $env:MAVERICK_REF to a full
@@ -15,9 +15,9 @@
 
 $ErrorActionPreference = 'Stop'
 
-$Repo   = if ($env:MAVERICK_REPO) { $env:MAVERICK_REPO } else { 'Day-AI-Labs/Maverick' }
+$Repo   = if ($env:MAVERICK_REPO) { $env:MAVERICK_REPO } else { 'Day-AI-Labs/Lightwork' }
 $Ref    = if ($env:MAVERICK_REF)  { $env:MAVERICK_REF }  else { '' }
-$SrcDir = Join-Path $env:LOCALAPPDATA 'Maverick\src'
+$SrcDir = Join-Path $env:LOCALAPPDATA 'Lightwork\src'
 $AllowUnpinned = if ($env:MAVERICK_ALLOW_UNPINNED) { $env:MAVERICK_ALLOW_UNPINNED } else { '' }
 
 # How to call the resolved Python: $PyExe + $PyPre (e.g. 'py' + '-3').
@@ -26,7 +26,7 @@ $script:PyPre = @()
 
 function Write-Step($m) { Write-Host "==> $m" -ForegroundColor Cyan }
 function Write-Warn($m) { Write-Host "!!  $m" -ForegroundColor Yellow }
-function Die($m) { throw "Maverick install failed: $m" }
+function Die($m) { throw "Lightwork install failed: $m" }
 function Have($cmd) { [bool](Get-Command $cmd -ErrorAction SilentlyContinue) }
 function Py { & $script:PyExe @($script:PyPre + $args) }
 
@@ -168,7 +168,7 @@ function Resolve-Python {
 }
 
 Write-Host ""
-Write-Host "Maverick desktop installer (Windows)" -ForegroundColor Green
+Write-Host "Lightwork desktop installer (Windows)" -ForegroundColor Green
 Write-Host ""
 Ensure-SourcePin
 
@@ -203,12 +203,12 @@ function Fetch-Source {
   Ensure-RepoSlug
   Ensure-GitForSource
   if (Test-Path (Join-Path $SrcDir '.git')) {
-    Write-Step "Updating Maverick source ($Repo@$Ref) ..."
+    Write-Step "Updating Lightwork source ($Repo@$Ref) ..."
     git -C $SrcDir remote set-url origin "https://github.com/$Repo"
     git -C $SrcDir fetch --depth 1 origin $Ref
     git -C $SrcDir checkout --detach FETCH_HEAD | Out-Null
   } else {
-    Write-Step "Downloading Maverick ($Repo@$Ref) ..."
+    Write-Step "Downloading Lightwork ($Repo@$Ref) ..."
     Remove-Item -Recurse -Force $SrcDir -ErrorAction SilentlyContinue
     New-Item -ItemType Directory -Force -Path (Split-Path $SrcDir) | Out-Null
     git clone --no-checkout --depth 1 "https://github.com/$Repo" $SrcDir
@@ -238,9 +238,9 @@ Write-Host ""
 # The desktop GUI installer sets MAVERICK_NO_WIZARD: install but skip the
 # interactive wizard (the app then points the user at `maverick init`).
 if ($env:MAVERICK_NO_WIZARD) {
-  Write-Host "Maverick installed. Run 'maverick init' to configure it." -ForegroundColor Green
+  Write-Host "Lightwork installed. Run 'maverick init' to configure it." -ForegroundColor Green
 } else {
-  Write-Host "Maverick installed." -ForegroundColor Green
+  Write-Host "Lightwork installed." -ForegroundColor Green
   Write-Host "Launching the setup wizard..." -ForegroundColor Green
   Write-Host ""
   if (Have maverick) {

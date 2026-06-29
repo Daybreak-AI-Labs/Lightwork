@@ -115,7 +115,7 @@ jobs:
       - uses: actions/setup-python@v6
         with:
           python-version: "3.12"
-      - name: Install Maverick + deps
+      - name: Install Lightwork + deps
         shell: bash
         run: |
           # NOT editable (-e): PyInstaller can't collect editable installs,

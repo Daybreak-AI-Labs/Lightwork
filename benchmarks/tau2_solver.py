@@ -1,4 +1,4 @@
-"""Live tau2-bench solver: a Maverick agent <-> user-simulator conversation.
+"""Live tau2-bench solver: a Lightwork agent <-> user-simulator conversation.
 
 ``eval_tau2.py`` is a stateful tool domain (a retail DB) graded on the final
 state AND the required tool actions. Unlike a one-shot task, tau2-bench is

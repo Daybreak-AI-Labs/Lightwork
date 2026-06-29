@@ -275,7 +275,7 @@ def check_wave11_env() -> bool:
 
 
 def check_python_version() -> bool:
-    """Maverick targets 3.10+. 3.13 isn't officially tested but works."""
+    """Lightwork targets 3.10+. 3.13 isn't officially tested but works."""
     if sys.version_info < (3, 10):
         _fail(
             f"Python {sys.version_info.major}.{sys.version_info.minor} is "

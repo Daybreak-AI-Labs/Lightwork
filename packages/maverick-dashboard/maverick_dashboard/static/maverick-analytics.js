@@ -1,4 +1,4 @@
-/* <maverick-analytics> — embeddable Maverick analytics web component.
+/* <maverick-analytics> — embeddable Lightwork analytics web component.
  *
  * Self-contained (Web Components API, no framework, no dependencies).
  * Renders total spend, an episode-cost sparkline, and a goals-by-status bar

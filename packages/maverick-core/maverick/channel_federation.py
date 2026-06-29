@@ -1,4 +1,4 @@
-"""Channel federation — forward channel messages between Maverick instances.
+"""Channel federation — forward channel messages between Lightwork instances.
 
 Reuses the signed-envelope primitives from :mod:`maverick.federation_envelope`
 (one implementation; nothing duplicated). A forwarded message travels as::

@@ -2,7 +2,7 @@
 
 A right-to-erasure (GDPR Art. 17) run that *says* it deleted a subject's data
 is not the same as proving it. This verifies the claim: after an erase, the
-subject must have **zero** residual records across every store Maverick holds.
+subject must have **zero** residual records across every store Lightwork holds.
 
 It reuses the DSAR export (:func:`maverick.dsar.export_subject_data`), whose
 subject-matching is guaranteed by design to agree with the erase path ("a row

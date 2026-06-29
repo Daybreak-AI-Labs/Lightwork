@@ -1,3 +1,3 @@
-"""Maverick web dashboard."""
+"""Lightwork web dashboard."""
 
 __version__ = "0.1.6"

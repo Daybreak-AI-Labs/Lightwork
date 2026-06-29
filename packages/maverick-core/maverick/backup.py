@@ -1,6 +1,6 @@
 """Backup / restore / DR for a single-client deployment.
 
-One Maverick per enterprise client (single-node + HA failover), so disaster
+One Lightwork per enterprise client (single-node + HA failover), so disaster
 recovery is "snapshot this client's whole state, ship it, restore it on a
 standby." This module snapshots the **client-scoped data root** (``data_dir()``
 — under ``tenants/<client>/`` when bound), so a backup contains exactly one
@@ -220,7 +220,7 @@ def restore_backup(tarball: str | Path, *, force: bool = False) -> Path:
         raise BackupError(
             f"backup world schema v{backup_schema_v} is newer than this "
             f"binary's v{SCHEMA_VERSION}; restoring it would corrupt the world "
-            f"DB. Upgrade Maverick first, or pass force=True to override."
+            f"DB. Upgrade Lightwork first, or pass force=True to override."
         )
     expected = manifest.get("files") or {}
     root = _client_root()

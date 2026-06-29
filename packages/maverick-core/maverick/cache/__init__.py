@@ -1,6 +1,6 @@
 """Unified cache-purge surface.
 
-Maverick keeps a few process-local caches (file reads, repo-map
+Lightwork keeps a few process-local caches (file reads, repo-map
 snapshots) and one on-disk cache (skill embeddings). This module
 centralises clearing them so the CLI doesn't need to know each
 backend's invalidation API.

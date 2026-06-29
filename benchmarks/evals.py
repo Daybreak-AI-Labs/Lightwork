@@ -3,7 +3,7 @@
 ``harness.py`` measures the cost / latency / token use of a goal run; it
 does NOT score whether the agent produced the *right* answer. This module
 adds per-benchmark **correctness** scoring (pass@1) over a small pluggable
-``Benchmark`` interface, so Maverick can report GAIA / terminal-bench /
+``Benchmark`` interface, so Lightwork can report GAIA / terminal-bench /
 tau2 the same way regardless of how each benchmark shapes its tasks.
 
 Two seams keep it testable without API keys or installed datasets:
@@ -135,7 +135,7 @@ def append_scores(summary: dict, scores_path: Path, *, tag: str = "local") -> No
         header = "| " + " | ".join(_SCORE_COLS) + " |\n"
         divider = "|" + "|".join(["---"] * len(_SCORE_COLS)) + "|\n"
         scores_path.write_text(
-            "# Maverick eval scores\n\n"
+            "# Lightwork eval scores\n\n"
             "Auto-appended by `benchmarks/evals.py`. Each row is one "
             "benchmark run (pass@1 = fraction of tasks fully solved).\n\n"
             + header + divider,

@@ -124,7 +124,7 @@ def run_scenario(audit_path: Path, *, key_dir: Path) -> Scenario:
 
 def render(scenario: Scenario, audit_path: Path) -> str:
     lines = [
-        "# Maverick — Golden Path (the receipts)",
+        "# Lightwork — Golden Path (the receipts)",
         "",
         "One seeded run of a finance specialist under governance. No model is "
         "called; every verdict below is the **real** enforcement code, and every "

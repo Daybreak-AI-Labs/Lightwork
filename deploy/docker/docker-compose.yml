@@ -1,4 +1,4 @@
-# Maverick — docker compose stack.
+# Lightwork — docker compose stack.
 #
 # Spins up the agent in a container with persistent state mounted from
 # the host. Useful for VPS deployments and for users who want isolation.

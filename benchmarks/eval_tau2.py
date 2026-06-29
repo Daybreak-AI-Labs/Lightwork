@@ -12,7 +12,7 @@ Like ``evals.py``, the **solver is injected** so the whole thing runs with a
 deterministic stub (no LLM / network): a solver receives a task + the domain's
 tools (name -> callable) and drives them to satisfy the request, mutating the
 env. The verifier then checks the env. A real run wires a solver that registers
-these tools into a Maverick agent + a user simulator -- that integration is the
+these tools into a Lightwork agent + a user simulator -- that integration is the
 documented follow-up; the env + verifier + task format are the harness.
 """
 from __future__ import annotations

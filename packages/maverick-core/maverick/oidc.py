@@ -60,7 +60,7 @@ class OIDCError(Exception):
 
 @dataclass(frozen=True)
 class VerifiedPrincipal:
-    """A successfully verified OIDC subject, mapped to Maverick's identity.
+    """A successfully verified OIDC subject, mapped to Lightwork's identity.
 
     ``principal`` is ``f"user:{sub}"`` so it slots straight into the
     capability/tenant conventions; ``claims`` is the raw verified claim set

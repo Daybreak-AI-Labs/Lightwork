@@ -1,4 +1,4 @@
-"""Training pipeline scaffold for Maverick RL fine-tuning.
+"""Training pipeline scaffold for Lightwork RL fine-tuning.
 
 Karpathy: "the only piece that earns ML complexity" is the
 trajectory donation flywheel + a learned what-to-keep gate +

@@ -3,7 +3,7 @@ name = "mvk-scan-wasm"
 version.workspace = true
 edition.workspace = true
 license.workspace = true
-description = "wasm-bindgen binding for the Maverick native safety scanners (TypeScript / edge)."
+description = "wasm-bindgen binding for the Lightwork native safety scanners (TypeScript / edge)."
 
 [lib]
 crate-type = ["cdylib"]

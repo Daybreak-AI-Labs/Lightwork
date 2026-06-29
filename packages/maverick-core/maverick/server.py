@@ -154,7 +154,7 @@ class Server:
         # conversation key, and run_goal's user_id must ALL agree on it -- else a
         # user's world.db lands under a different tenant than their memory/audit.
         # When OIDC is enabled, do not trust the channel-provided principal:
-        # fail closed unless a verified ID token supplies the Maverick principal.
+        # fail closed unless a verified ID token supplies the Lightwork principal.
         if oidc_enabled():
             try:
                 principal_id = verify_oidc_token(_extract_oidc_token(msg)).principal
@@ -552,7 +552,7 @@ def _advise_channel_tenancy(server) -> None:
     Slack/Telegram/email bot identity per process. Inbound replies still route
     back to the originating channel (no cross-tenant reply leak), but every
     tenant shares that one bot identity and its allow-lists. When distinct
-    per-tenant bot identities are required, run one Maverick instance per tenant
+    per-tenant bot identities are required, run one Lightwork instance per tenant
     (the Helm chart + per-tenant ``tenants/<id>/config.toml`` overlay make this
     cheap) rather than many tenants behind one process. Advisory only; never
     blocks boot.

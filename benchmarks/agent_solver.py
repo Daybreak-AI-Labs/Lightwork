@@ -1,4 +1,4 @@
-"""In-process live solver: run an eval task as a real Maverick goal.
+"""In-process live solver: run an eval task as a real Lightwork goal.
 
 The eval framework (``evals.py``) injects a ``Solver = Callable[[EvalTask], str]``.
 ``run_eval.py`` shipped only a brittle one that shells out to ``maverick start``

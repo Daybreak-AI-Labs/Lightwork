@@ -1,5 +1,5 @@
 @echo off
-rem Maverick CLI launcher, installed by the Maverick MSI (apps/installer-msi).
+rem Lightwork CLI launcher, installed by the Lightwork MSI (apps/installer-msi).
 rem
 rem Why this exists: the MSI cannot pip-install at install time without
 rem custom actions, so it ships the wheel next to this script and bootstraps

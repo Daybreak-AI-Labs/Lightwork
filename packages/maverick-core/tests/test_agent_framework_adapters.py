@@ -27,7 +27,7 @@ def _fake_delegation(monkeypatch, result="swarm did it"):
     return calls
 
 
-# ---- Maverick -> AutoGen ----
+# ---- Lightwork -> AutoGen ----
 
 def test_autogen_callable_delegates(monkeypatch):
     calls = _fake_delegation(monkeypatch)
@@ -65,7 +65,7 @@ def test_autogen_tool_missing_package(monkeypatch):
         maverick_autogen_tool()
 
 
-# ---- Maverick -> CrewAI ----
+# ---- Lightwork -> CrewAI ----
 
 def test_crewai_tool_delegates(monkeypatch):
     _fake_delegation(monkeypatch)
@@ -89,7 +89,7 @@ def test_crewai_missing_package(monkeypatch):
         maverick_crewai_tool()
 
 
-# ---- AutoGen tool -> Maverick ----
+# ---- AutoGen tool -> Lightwork ----
 
 def test_wrap_autogen_run_style():
     class _Args:
@@ -134,7 +134,7 @@ def test_wrap_autogen_no_callable():
     assert t.fn({}).startswith("ERROR")
 
 
-# ---- CrewAI tool -> Maverick ----
+# ---- CrewAI tool -> Lightwork ----
 
 def test_wrap_crewai_tool():
     tool = types.SimpleNamespace(

@@ -38,7 +38,7 @@ jobs:
           distribution: "temurin"
           java-version: "21"
           cache: "maven"
-      - name: Install Maverick (kernel + MCP server)
+      - name: Install Lightwork (kernel + MCP server)
         run: |
           pip install -e ./packages/maverick-core
           pip install --no-deps -e ./packages/maverick-mcp

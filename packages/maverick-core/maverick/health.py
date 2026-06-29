@@ -332,7 +332,7 @@ def _check_channels(cfg: dict) -> None:
         elif name == "imessage":
             if sys.platform != "darwin":
                 _row(RED, "channel:imessage", f"requires macOS (you're on {sys.platform})",
-                     fix="disable in config or run Maverick from a Mac")
+                     fix="disable in config or run Lightwork from a Mac")
                 continue
             _row(GREEN, "channel:imessage", "macOS")
         elif name == "email":
@@ -457,7 +457,7 @@ def _check_config_perms() -> None:
 
 
 def _check_client_binding() -> None:
-    """One Maverick per enterprise client — surface the binding and fail loudly
+    """One Lightwork per enterprise client — surface the binding and fail loudly
     when it's enforced but unset (the deployment would otherwise serve from the
     shared root)."""
     try:
@@ -605,7 +605,7 @@ def diagnose() -> int:
     failed (✗) checks. 0 == healthy. The CLI exits nonzero when this is
     nonzero so a deploy gate or CI can detect a broken install."""
     _FAILURES.clear()
-    click.echo(click.style("Maverick health check\n", bold=True))
+    click.echo(click.style("Lightwork health check\n", bold=True))
     cfg = _check_config()
     _check_config_lint(cfg)
     _check_config_perms()

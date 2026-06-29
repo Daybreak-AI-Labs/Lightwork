@@ -32,7 +32,7 @@ from pathlib import Path
 # Terms that must come through translation byte-identical. Deliberately
 # conservative: identifiers and proper nouns only, never common words.
 GLOSSARY: tuple[str, ...] = (
-    "Maverick", "maverick", "MAVERICK_", "config.toml", "pip install",
+    "Maverick", "Lightwork", "maverick", "MAVERICK_", "config.toml", "pip install",
     "ANTHROPIC_API_KEY", "OPENAI_API_KEY",
 )
 

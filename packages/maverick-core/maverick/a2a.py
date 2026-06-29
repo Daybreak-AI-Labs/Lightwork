@@ -6,7 +6,7 @@ foundational primitive is the **Agent Card**, a JSON document served at
 ``/.well-known/agent-card.json`` describing who the agent is and what it
 can do.
 
-This module makes Maverick *discoverable* as an A2A agent: a pure
+This module makes Lightwork *discoverable* as an A2A agent: a pure
 ``build_agent_card()`` (fully unit-testable, no server) plus a ``mount()``
 that registers the well-known route on the FastAPI app.
 
@@ -72,7 +72,7 @@ _SKILLS: list[dict[str, Any]] = [
         "id": "execute-goal",
         "name": "Execute a long-horizon goal",
         "description": (
-            "Give Maverick a goal; a swarm of specialist sub-agents plans, "
+            "Give Lightwork a goal; a swarm of specialist sub-agents plans, "
             "runs in parallel, and verifies the result -- under a hard "
             "budget cap, with every step screened by a safety layer."
         ),

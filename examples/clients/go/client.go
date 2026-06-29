@@ -1,4 +1,4 @@
-// Runnable Go MCP client for Maverick.
+// Runnable Go MCP client for Lightwork.
 //
 // The executable version of docs/clients/go-quickstart.md and the CI smoke for
 // the Go cross-language surface. It spawns `maverick mcp` (stdio JSON-RPC) and
@@ -40,7 +40,7 @@ func main() {
 	for _, t := range tools.Tools {
 		names[t.Name] = true
 	}
-	log.Printf("Maverick exposes %d tools", len(tools.Tools))
+	log.Printf("Lightwork exposes %d tools", len(tools.Tools))
 	for _, want := range []string{"maverick_start", "maverick_status", "maverick_facts_get"} {
 		if !names[want] {
 			log.Fatalf("MCP server is missing tool %q", want)
@@ -60,7 +60,7 @@ func main() {
 	}
 	log.Println("maverick_facts_get round-trip OK")
 
-	// Every Maverick tool also returns structuredContent: typed JSON matching
+	// Every Lightwork tool also returns structuredContent: typed JSON matching
 	// the tool's outputSchema, so a typed client reads parsed fields instead of
 	// re-parsing the text block. facts_get -> { facts: {...} }.
 	structured, ok := res.StructuredContent.(map[string]any)
@@ -72,5 +72,5 @@ func main() {
 	}
 	log.Println("maverick_facts_get structuredContent OK")
 
-	log.Println("OK: Go client drove Maverick over MCP end-to-end")
+	log.Println("OK: Go client drove Lightwork over MCP end-to-end")
 }

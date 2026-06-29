@@ -4,7 +4,7 @@ GAIA (arxiv:2311.12983) tasks are factual questions with a single
 ground-truth ``Final answer``; scoring is GAIA's official *normalized
 exact match* (numbers compared as floats; strings lower-cased with
 whitespace + punctuation stripped; comma/semicolon lists compared
-element-wise). We reproduce that scorer here so a Maverick GAIA run is
+element-wise). We reproduce that scorer here so a Lightwork GAIA run is
 directly comparable to published numbers.
 
 Dataset: a JSONL export with ``{task_id, Question, Final answer}`` rows

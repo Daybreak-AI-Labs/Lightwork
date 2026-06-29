@@ -73,7 +73,7 @@ say() { printf '\n\033[1m== %s ==\033[0m\n' "$*"; }
 run() { printf '+ %s\n' "$*"; [ "$DRY_RUN" = "1" ] || eval "$*"; }
 die() { printf '\033[31mERROR:\033[0m %s\n' "$*" >&2; exit 1; }
 
-say "Maverick self-learning training run"
+say "Lightwork self-learning training run"
 printf 'base_model=%s\nout_dir=%s\nskip_dpo=%s dry_run=%s\n' \
   "$BASE_MODEL" "$OUT_DIR" "$SKIP_DPO" "$DRY_RUN"
 run "mkdir -p '$OUT_DIR'"

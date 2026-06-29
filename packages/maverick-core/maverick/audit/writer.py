@@ -248,7 +248,7 @@ class AuditLog:
         ``secret_detector.redact`` so API keys, OAuth tokens, JWTs, and
         ``.env`` fragments that leak via tool output never land on disk
         in plaintext. When anonymous mode is enabled, the already-secret-
-        redacted payload is additionally passed through Maverick's privacy
+        redacted payload is additionally passed through Lightwork's privacy
         anonymizer before it is serialized or signed. Redaction failure is
         non-fatal: the event still writes, but a warning logs.
         """
