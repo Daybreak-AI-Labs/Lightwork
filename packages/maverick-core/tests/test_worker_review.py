@@ -7,6 +7,33 @@ from maverick.departments import get_department
 from maverick.world_model import WorldModel
 
 
+@pytest.fixture(autouse=True)
+def _isolate_live_learned_store(tmp_path, monkeypatch):
+    """Pin the LIVE learned store to an empty per-test dir.
+
+    ``worker_review.review`` measures learning coverage with
+    ``hindsight.coverage_under(..., None)`` against the process-global live
+    store. A reflexion/insight/skill written by an earlier test in the full
+    suite would otherwise leak in and make the "fresh world -> 0 covered"
+    assertion order-dependent (it has). Isolating the live-store paths makes
+    coverage hermetic without touching the snapshot-directory path behaviour.
+    """
+    from maverick import hindsight
+    empty = tmp_path / "live-learned"
+    real = hindsight._store_paths
+
+    def _patched(directory):
+        if directory is None:
+            return {
+                "reflexions": empty / "reflexions.ndjson",
+                "insights": empty / "insights.ndjson",
+                "skills": empty / "learned-skills",
+            }
+        return real(directory)
+
+    monkeypatch.setattr(hindsight, "_store_paths", _patched)
+
+
 @pytest.fixture()
 def world(tmp_path):
     w = WorldModel(tmp_path / "w.db")
