@@ -95,7 +95,8 @@ def settings() -> dict:
                 "confidence_z": 0.0, "max_cost_factor": None,
                 "max_latency_factor": None, "max_tool_calls_factor": None,
                 "semantic_mining": False, "retire_after_days": 0.0,
-                "candidates_per_signature": 1, "mine_bucket_by": ()}
+                "candidates_per_signature": 1, "mine_bucket_by": (),
+                "eval_corpus": None}
 
 
 def _store_path() -> Path:

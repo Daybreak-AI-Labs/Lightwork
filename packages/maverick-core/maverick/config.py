@@ -628,6 +628,10 @@ def get_self_harness() -> dict:
         "candidates_per_signature": max(1, _num("candidates_per_signature", 1, int)),
         "mine_bucket_by": bucket_by,
         "retire_after_days": max(0.0, _num("retire_after_days", 0.0, float)),
+        # Path to an eval corpus ({model|domain: [{goal, expected}]}) JSON. When
+        # set, the driver auto-builds the LIVE A/B (model generates, verifier
+        # judges) so a scheduled pass can actually PROMOTE; unset -> dry pass.
+        "eval_corpus": (str(cfg["eval_corpus"]) if cfg.get("eval_corpus") else None),
     }
 
 
