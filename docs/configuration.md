@@ -213,6 +213,18 @@ factory_learning = true    # close the loop onto generation quality: attribute
                            #   Default on once self-improvement is enabled; the
                            #   wizard sets it. Force-enable via MAVERICK_FACTORY_LEARNING.
                            #   `maverick factory-learn [--dry-run]`. See FEATURES.md.
+evaluator_evolution = false # promote a BETTER judge instead of only freezing when
+                           #   the evaluator drifts: a challenger evaluator replaces
+                           #   the incumbent only when its agreement with a fixed,
+                           #   checksum-locked ground-truth ANCHOR (by the eps-best-
+                           #   belief lower bound) beats it, on a dedicated `evaluator`
+                           #   rung. The anchor is immutable (governed by `python -m
+                           #   maverick.evaluator_evolution --ci`) so a weak judge
+                           #   can't launder drift. Off by default; an evaluator swap
+                           #   needs human approval until max_auto_rung = "evaluator".
+                           #   Override via MAVERICK_EVALUATOR_EVOLUTION. See FEATURES.md.
+evaluator_eps = 0.05       # confidence level of the eps-best-belief lower bound used
+                           #   for evaluator promotion (lower = more conservative).
 
 [domains]                  # specialist-pack behavior (defaults shown)
 discipline = true          # suite operating-discipline appended at spawn
