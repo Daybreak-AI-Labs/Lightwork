@@ -146,3 +146,36 @@ def test_llm_backed_evaluator_end_to_end():
     goals = [c["goal"] for c in cases]
     assert sw("Bound the window first.", goals) == 1.0          # line -> success
     assert wo("Bound the window first.", goals) == 0.0          # baseline -> fail
+
+
+# ---- review fixes: _rate indeterminate + metamorphic skip ----
+
+def test_rate_nan_on_all_indeterminate_but_zero_on_empty():
+    import math
+    def boom(g):
+        raise RuntimeError("indeterminate")
+    assert ev._rate([], boom) == 0.0                  # empty split -> 0.0 (unchanged)
+    assert math.isnan(ev._rate(["a", "b"], boom))     # all raised -> NaN (not false 0%)
+    assert ev._rate(["a"], lambda g: True) == 1.0     # normal path unchanged
+
+
+def test_corpus_scorer_indeterminate_for_unknown_goal():
+    import math
+    cases = [{"goal": "g0", "expected": "ok"}]
+    sw, _wo = ev.corpus_ab_scorers(cases, run_fn=lambda line, g: "ok")
+    assert sw("line", ["g0"]) == 1.0                  # corpus goal judged
+    assert math.isnan(sw("line", ["not-in-corpus"]))  # unknown -> indeterminate -> NaN
+
+
+def test_metamorphic_skips_cleanly_with_corpus_heuristic_scorer():
+    from maverick import self_harness as sh
+    cases = [{"goal": f"g{i}", "expected": "ok"} for i in range(6)]
+    held_in, held_out = ev.corpus_split(cases, held_out_frac=0.5)
+    sw, wo = ev.corpus_ab_scorers(cases, run_fn=lambda line, g: "ok" if line else "no")
+    p = sh.HarnessProposal("M", "sig", "Bound the window.", "r")
+    # paraphrased goals aren't corpus members -> metamorphic scoring is NaN -> the
+    # metamorphic branch cleanly skips (no silent pass-with-zeros, no false reject)
+    vr = sh.validate_proposal(
+        p, held_in=held_in, held_out=held_out, score_with=sw, score_without=wo,
+        metamorphic_fn=lambda goals: [f"PARA::{g}" for g in goals])
+    assert vr.accepted

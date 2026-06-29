@@ -571,7 +571,7 @@ def test_line_provenance_handles_legacy_line(store):
     sh._write_addenda({"M": "Operating guidance learned for this model:\n- legacy line"},
                       store)
     assert sh.line_provenance("M", store) == [{
-        "text": "legacy line", "signature": None, "rationale": None,
+        "text": "legacy line", "domain": None, "signature": None, "rationale": None,
         "hypothesis": None, "held_out_delta": None, "samples": None,
         "learned_at": None, "updated_at": None,
         "last_recalled_at": None, "recall_notes": None}]
@@ -1572,3 +1572,91 @@ def test_review_canaries_leaves_young_on_probation(monkeypatch, store):
     assert sh.review_canaries("M", graduate_after=3, demote_after=2, path=store) == \
         {"graduated": [], "demoted": []}
     assert sh.list_canaries("M", store) == ["young line"]              # still on probation
+
+
+# ---------- review fixes: composite-key consistency across the management surface ----------
+
+def _promote_domain_line(store, ctrl, *, canary=False):
+    """Promote one finance-domain-scoped line; return its applied text."""
+    rs = [_refl_d("M", "auth", "log into the partner portal", "finance") for _ in range(3)]
+    rep = sh.run_self_harness(
+        rs, model_id="M", controller=ctrl, min_support=3, path=store,
+        held_in=["a", "b"], held_out=["c", "d", "e", "f", "g"],
+        score_with=lambda a, c: 0.9, score_without=lambda a, c: 0.4,
+        bucket_by=("domain",), canary=canary)
+    assert rep.promoted == 1
+    return rep.applied_lines[0]
+
+
+def test_forget_model_spans_domain_scoped_blocks(monkeypatch, store):
+    ctrl = _enable(monkeypatch)
+    _promote_line(store, "M", "c0", "model wide line", ctrl)
+    _promote_domain_line(store, ctrl)
+    assert sh.recall_addendum("M", store, domain="finance")          # both ride finance
+    # a full rollback removes the model-wide AND the domain block (no orphan)
+    assert sh.forget_addendum("M", path=store) is True
+    assert sh.recall_addendum("M", store) == ""
+    assert sh.recall_addendum("M", store, domain="finance") == ""    # orphan gone
+
+
+def test_forget_line_removes_domain_scoped_line(monkeypatch, store):
+    ctrl = _enable(monkeypatch)
+    _promote_line(store, "M", "c0", "keep me", ctrl)
+    dline = _promote_domain_line(store, ctrl)
+    assert sh.forget_addendum("M", line=dline, path=store) is True
+    assert dline not in sh.recall_addendum("M", store, domain="finance")
+    assert "keep me" in sh.recall_addendum("M", store)               # model-wide untouched
+
+
+def test_efficacy_and_canary_cover_domain_scoped_lines(monkeypatch, store):
+    ctrl = _enable(monkeypatch)
+    line = _promote_domain_line(store, ctrl, canary=True)
+    # the domain-scoped canary is now VISIBLE to the lifecycle (was invisible pre-fix)
+    assert sh.list_canaries("M", store) == [line]
+    sh.note_outcome("M", False, line=line, path=store)
+    sh.note_outcome("M", False, line=line, path=store)
+    eff = {e["text"]: e for e in sh.line_efficacy("M", store)}
+    assert eff[line]["failure"] == 2 and eff[line]["domain"] == "finance"
+    # review demotes the failing domain canary (audited forget on the composite key)
+    assert sh.review_canaries("M", graduate_after=3, demote_after=2, path=store) == \
+        {"graduated": [], "demoted": [line]}
+    assert sh.recall_addendum("M", store, domain="finance") == ""    # pulled
+
+
+def test_review_efficacy_demotes_domain_scoped_dead_weight(monkeypatch, store):
+    ctrl = _enable(monkeypatch)
+    line = _promote_domain_line(store, ctrl)
+    demoted = sh.review_efficacy("M", ["c1", "c2"],
+                                 score_with=lambda ln, c: 0.4, score_without=lambda ln, c: 0.4,
+                                 min_lift=0.0, min_samples=2, path=store)
+    assert demoted == [line]                                         # spans the domain scope
+    assert sh.recall_addendum("M", store, domain="finance") == ""
+
+
+def test_list_learned_and_conflicts_never_leak_raw_nul(monkeypatch, store):
+    ctrl = _enable(monkeypatch)
+    _promote_line(store, "M", "c0", "model wide line", ctrl)
+    _promote_domain_line(store, ctrl)
+    learned = sh.list_learned(store)
+    assert set(learned) == {"M"}                                     # bare model only
+    assert not any("\x00" in k for k in learned)
+    assert any("[domain=finance]" in ln for ln in learned["M"])      # scope tagged inline
+    # conflict labels are readable, never the raw NUL key
+    for label, _a, _b in sh.detect_store_conflicts(path=store):
+        assert "\x00" not in label
+
+
+def test_model_keys_no_prefix_collision(monkeypatch, store):
+    # "M2" / "M-x" must NOT be treated as scopes of "M": the NUL separator is the
+    # unambiguous boundary (a model id can't contain NUL), so startswith("M\x00")
+    # never matches another model's bare key.
+    ctrl = _enable(monkeypatch)
+    _promote_line(store, "M", "c0", "m line", ctrl)
+    _promote_line(store, "M2", "c0", "m2 line", ctrl)
+    _promote_domain_line(store, ctrl)                       # M's finance-scoped line
+    keys = sh._model_store_keys(sh.load_addenda(store), "M")
+    assert "M2" not in keys and all(k == "M" or k.startswith("M\x00") for k in keys)
+    # forgetting M leaves M2 entirely intact
+    sh.forget_addendum("M", path=store)
+    assert "m2 line" in sh.recall_addendum("M2", store)
+    assert sh.list_learned(store).get("M2") == ["m2 line"]

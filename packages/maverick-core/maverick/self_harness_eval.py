@@ -103,13 +103,23 @@ def _heuristic_judge(goal: str, output: str, expected: str) -> bool:
 
 
 def _rate(goals: list[str], success_of: Callable[[str], bool]) -> float:
+    """Mean success over ``goals``. A case that RAISES is INDETERMINATE and is
+    excluded (not counted as a failure). If goals were given but EVERY one was
+    indeterminate, return NaN -- not 0.0 -- so the caller's ``math.isfinite`` guard
+    (validate_proposal) rejects the run instead of treating an all-error arm as a
+    0% pass rate, which would otherwise inflate the measured lift of the other arm.
+    An empty ``goals`` list is a legitimately empty split -> 0.0 (unchanged)."""
     vals = []
+    attempted = 0
     for g in goals or []:
+        attempted += 1
         try:
             vals.append(1.0 if success_of(g) else 0.0)
-        except Exception:  # one bad case can't break the whole score
+        except Exception:  # one bad case is indeterminate, excluded (not a failure)
             log.debug("eval: scoring case failed", exc_info=True)
-    return sum(vals) / len(vals) if vals else 0.0
+    if vals:
+        return sum(vals) / len(vals)
+    return float("nan") if attempted else 0.0
 
 
 def corpus_ab_scorers(
@@ -123,15 +133,22 @@ def corpus_ab_scorers(
     output, expected) -> bool`` decides success (defaults to the heuristic judge).
     ``score_with`` runs WITH the line, ``score_without`` runs the baseline -- so
     their delta is exactly the line's causal lift on the corpus. Both are pure
-    means over the passed goals, matching the ``ScoreFn`` contract."""
+    means over the passed goals, matching the ``ScoreFn`` contract.
+
+    A goal NOT in the corpus is INDETERMINATE (the scorer raises ``KeyError``,
+    which ``_rate`` excludes) rather than a silent failure -- so metamorphic
+    validation, whose paraphrased goals are not corpus members, cleanly SKIPS (an
+    all-indeterminate arm is NaN and ``validate_proposal``'s finite-check no-ops
+    the metamorphic branch) with the deterministic heuristic judge instead of
+    being a silent pass. Inject an ``llm_judge`` to actually judge paraphrases."""
     judge = judge_fn or _heuristic_judge
     expected = {str(c.get("goal") or ""): str(c.get("expected") or "") for c in cases}
 
     def score_with(line: str, goals: list[str]) -> float:
-        return _rate(goals, lambda g: judge(g, run_fn(line, g), expected.get(g, "")))
+        return _rate(goals, lambda g: judge(g, run_fn(line, g), expected[g]))
 
     def score_without(_line: str, goals: list[str]) -> float:
-        return _rate(goals, lambda g: judge(g, run_fn("", g), expected.get(g, "")))
+        return _rate(goals, lambda g: judge(g, run_fn("", g), expected[g]))
 
     return score_with, score_without
 
