@@ -1,7 +1,7 @@
 """Per-caller request rate limiting on the gRPC API.
 
 Complements maximum_concurrent_rpcs (in-flight cap) with a per-caller
-request-rate cap, bucketed by Agent Trust agent id (else hashed peer), applied
+request-rate cap, bucketed by Agent Trust agent id (else hashed peer address), applied
 at the auth chokepoint. MAVERICK_GRPC_RATE_LIMIT=0 disables it.
 """
 from __future__ import annotations
@@ -50,12 +50,21 @@ def test_buckets_independent(monkeypatch):
     assert gs._grpc_rate_ok("agent:b") is True
 
 
-def test_key_prefers_agent_then_peer():
+def test_key_prefers_agent_then_peer_address():
     assert gs._grpc_rate_key(_Ctx(), _Agent()) == "agent:vega"
     key = gs._grpc_rate_key(_Ctx("ipv4:10.0.0.7:5"), None)
     assert key.startswith("peer:")
-    # Distinct peers get distinct buckets.
+    # Distinct peer addresses get distinct buckets.
     assert key != gs._grpc_rate_key(_Ctx("ipv4:10.0.0.8:5"), None)
+
+
+def test_peer_key_ignores_tcp_source_port():
+    assert gs._grpc_rate_key(_Ctx("ipv4:10.0.0.7:50001"), None) == gs._grpc_rate_key(
+        _Ctx("ipv4:10.0.0.7:50002"), None
+    )
+    assert gs._grpc_rate_key(_Ctx("ipv6:[2001:db8::1]:50001"), None) == gs._grpc_rate_key(
+        _Ctx("ipv6:[2001:db8::1]:50002"), None
+    )
 
 
 def test_idle_buckets_are_swept(monkeypatch):

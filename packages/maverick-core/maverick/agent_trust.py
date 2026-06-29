@@ -451,6 +451,11 @@ def put_agent(entry: dict) -> TrustedAgent:
     Validates via :func:`_agent_from_entry`; raises :class:`AgentTrustError` on a
     malformed entry so the CLI surfaces a clear error instead of silently
     dropping it."""
+    raw_pubkey = str(entry.get("pubkey") or "").strip()
+    if raw_pubkey and not _PUBKEY_RE.fullmatch(raw_pubkey):
+        raise AgentTrustError(
+            "invalid pubkey: expected a 64-character hex Ed25519 public key"
+        )
     agent = _agent_from_entry(entry)
     if agent is None:
         raise AgentTrustError(f"invalid agent entry: {entry!r}")

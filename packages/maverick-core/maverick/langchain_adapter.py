@@ -74,12 +74,12 @@ def run_maverick_goal(
 
 
 def _close(world: Any) -> None:
-    close = getattr(world, "close", None)
-    if callable(close):
-        try:
-            close()
-        except Exception:  # pragma: no cover
-            pass
+    from .world_model import close_world_if_owned
+
+    try:
+        close_world_if_owned(world)
+    except Exception:  # pragma: no cover
+        pass
 
 
 def maverick_langchain_tool(

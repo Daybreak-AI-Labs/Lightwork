@@ -1130,6 +1130,15 @@ class WorldModel:
                 self.conn.commit()
             except sqlite3.Error:  # pragma: no cover -- best-effort quiesce
                 pass
+            # Pre-create the sensitive backup with private permissions before
+            # SQLite opens it. sqlite3.connect() would otherwise create the file
+            # at the process umask (often 0644), briefly exposing a full world.db
+            # snapshot before the chmod below (or forever if interrupted).
+            flags = os.O_WRONLY | os.O_CREAT | os.O_EXCL
+            if hasattr(os, "O_NOFOLLOW"):
+                flags |= os.O_NOFOLLOW
+            fd = os.open(str(dest), flags, 0o600)
+            os.close(fd)
             bdst = sqlite3.connect(str(dest))
             try:
                 self.conn.backup(bdst)
@@ -2705,6 +2714,25 @@ def world_for_tenant(tenant: str | None = None) -> WorldModel:
         _tenant_worlds[key] = world
         _tenant_worlds.move_to_end(key)
         return world
+
+
+def world_is_cached(world: object) -> bool:
+    """Return True when ``world`` is owned by the per-tenant cache.
+
+    Cached tenant worlds are process-wide singletons shared by dashboard/API and
+    canonical goal-entry paths, so short-lived callers must not close them.
+    """
+    with _tenant_worlds_lock:
+        return any(cached is world for cached in _tenant_worlds.values())
+
+
+def close_world_if_owned(world: object) -> None:
+    """Close ``world`` unless it is a process-cached tenant world."""
+    if world_is_cached(world):
+        return
+    close = getattr(world, "close", None)
+    if callable(close):
+        close()
 
 
 def _evict_lru_tenant_world(shared_key: str) -> None:

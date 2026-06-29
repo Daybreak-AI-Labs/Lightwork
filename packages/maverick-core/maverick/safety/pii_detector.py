@@ -110,6 +110,11 @@ def _luhn_valid(digits: str) -> bool:
     return total % 10 == 0
 
 
+def _luhn_contribution(digit: int) -> int:
+    doubled = digit * 2
+    return doubled - 9 if doubled > 9 else doubled
+
+
 def _cc_run_has_card(run: str) -> bool:
     """True if a digit run contains a Luhn-valid 13-19 digit card.
 
@@ -118,15 +123,40 @@ def _cc_run_has_card(run: str) -> bool:
     a LONGER run (>=20 digits -- the concatenation bypass) we slide a 13-19 digit
     window so an embedded card is still caught. Redaction covers the whole run
     (over-redaction is the safe direction -- the module errs toward redaction).
+
+    The long-run scan keeps rolling raw/doubled sums by absolute digit parity.
+    That avoids allocating every candidate substring and bounds work to a small,
+    linear number of arithmetic operations even for dashboard-sized inputs.
     """
-    digits = "".join(c for c in run if c.isdigit())
+    digits = [int(c) for c in run if c.isdigit()]
     n = len(digits)
     if n <= 19:
-        return _luhn_valid(digits)
+        return _luhn_valid("".join(str(d) for d in digits))
+
+    doubled = [_luhn_contribution(d) for d in digits]
     for length in range(13, 20):
-        for i in range(n - length + 1):
-            if _luhn_valid(digits[i:i + length]):
+        raw_sums = [0, 0]
+        doubled_sums = [0, 0]
+        for idx, digit in enumerate(digits[:length]):
+            parity = idx % 2
+            raw_sums[parity] += digit
+            doubled_sums[parity] += doubled[idx]
+
+        for start in range(n - length + 1):
+            doubled_parity = (start + (length % 2)) % 2
+            total = doubled_sums[doubled_parity] + raw_sums[1 - doubled_parity]
+            if total % 10 == 0:
                 return True
+
+            if start == n - length:
+                break
+            out_parity = start % 2
+            raw_sums[out_parity] -= digits[start]
+            doubled_sums[out_parity] -= doubled[start]
+            in_idx = start + length
+            in_parity = in_idx % 2
+            raw_sums[in_parity] += digits[in_idx]
+            doubled_sums[in_parity] += doubled[in_idx]
     return False
 
 

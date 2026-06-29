@@ -56,9 +56,18 @@
     {% if harness %}
       {% for h in harness %}
         <h3><code>{{ h.model_id }}</code> <span class="muted">({{ h.lines | length }} line{{ '' if h.lines | length == 1 else 's' }})</span></h3>
+        {% if h.conflicts %}
+          <p class="badge blocked" style="display:inline-block">⚔ {{ h.conflicts | length }} possible conflict{{ '' if h.conflicts | length == 1 else 's' }} — review with <code>maverick self-harness conflicts</code></p>
+        {% endif %}
         <ul>
-        {% for ln in h.lines %}
-          <li>{{ ln }}</li>
+        {% for rec in h.provenance %}
+          <li>{{ rec.text }}
+            {% if rec.signature %}
+              <br><span class="muted">why: {{ rec.signature }}{% if rec.held_out_delta is not none and rec.samples %} · held-out {{ '%+.3g' | format(rec.held_out_delta) }} over {{ rec.samples }} samples{% endif %}{% if rec.last_recalled_at %} · in use{% endif %}</span>
+            {% endif %}
+          </li>
+        {% else %}
+          {% for ln in h.lines %}<li>{{ ln }}</li>{% endfor %}
         {% endfor %}
         </ul>
       {% endfor %}

@@ -135,10 +135,19 @@ Recommended, in order of RPO:
    simplest portable backup:
 
    ```sh
+   # Keep dump contents owner-only, and keep DB credentials out of argv.
+   umask 077
+   install -d -m 700 "$HOME/.maverick/backups/postgres"
+
+   # Configure connection secrets with PGSERVICE, ~/.pgpass, peer auth, or your
+   # secret manager instead of embedding passwords in the command line.
    pg_dump --format=custom --no-owner \
-     "$MAVERICK_PG_DSN" > "maverick-pg-$(date +%Y%m%d).dump"
-   # restore into a fresh database:
-   pg_restore --no-owner --dbname "$MAVERICK_PG_DSN_RESTORE" maverick-pg-*.dump
+     --dbname=service=maverick \
+     --file="$HOME/.maverick/backups/postgres/maverick-pg-$(date +%Y%m%d).dump"
+
+   # restore into a fresh database/service target:
+   pg_restore --no-owner --dbname=service=maverick_restore \
+     "$HOME/.maverick/backups/postgres/maverick-pg-YYYYMMDD.dump"
    ```
 
 Notes:

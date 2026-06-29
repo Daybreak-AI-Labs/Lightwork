@@ -556,6 +556,85 @@ def get_self_learning() -> dict:
     }
 
 
+def get_self_harness() -> dict:
+    """Return the ``[self_harness]`` section with defaults filled in.
+
+    OFF by default (kernel rule 1). The tuning knobs default to the loop's
+    historical behavior so enabling the feature changes nothing until an
+    operator opts into the stricter/optional paths:
+
+    - ``min_support``: recurring failures before a weakness is mined (>=1).
+    - ``require_held_out`` / ``min_held_out`` / ``min_delta``: the validation
+      evidence floors (default off / 0 / 0.0) -- never promote on only the mined
+      examples, an unseen-sample floor, an effect-size floor.
+    - ``semantic_mining``: cluster failure diagnoses by embedding similarity
+      when embeddings are available (default off -> deterministic Jaccard).
+    - ``candidates_per_signature``: best-of-N proposing -- generate this many
+      candidate lines per weakness and promote the strongest validated one
+      (>=1; default 1 = single candidate, only matters with a stochastic
+      proposer, a deterministic one collapses to 1).
+    - ``mine_bucket_by``: extra dimensions to bucket mining by, beyond the
+      always-on (model, failure_class). Allowlisted (``domain``) so a weakness
+      can be mined -- and its guidance scoped -- per department; default empty
+      (model-wide). Unknown dims are dropped.
+    - ``retire_after_days``: auto-retire lines not active within this many days
+      (0 = never; only acted on when a driver/CLI runs retirement).
+    """
+    cfg = load_config().get("self_harness", {})
+
+    def _num(key, default, cast):
+        try:
+            return cast(cfg.get(key, default))
+        except (TypeError, ValueError):
+            return default
+
+    raw_by_class = cfg.get("min_support_by_class", {})
+    by_class = {}
+    if isinstance(raw_by_class, dict):
+        for k, v in raw_by_class.items():
+            try:
+                by_class[str(k)] = max(1, int(v))
+            except (TypeError, ValueError):
+                continue
+
+    # Mining bucket dimensions: keep only allowlisted scalar reflexion fields
+    # (mirrors self_harness._BUCKET_DIMS) and de-dupe, preserving order.
+    _allowed_dims = ("domain",)
+    raw_dims = cfg.get("mine_bucket_by", [])
+    if isinstance(raw_dims, str):
+        raw_dims = [raw_dims]
+    bucket_by = tuple(dict.fromkeys(
+        d for d in (raw_dims or []) if isinstance(d, str) and d in _allowed_dims))
+
+    def _factor(key):
+        v = cfg.get(key)
+        try:
+            return float(v) if v is not None else None
+        except (TypeError, ValueError):
+            return None
+
+    return {
+        "enable": bool(cfg.get("enable", False)),
+        "min_support": max(1, _num("min_support", 3, int)),
+        "min_support_by_class": by_class,
+        "require_held_out": bool(cfg.get("require_held_out", False)),
+        "min_held_out": max(0, _num("min_held_out", 0, int)),
+        "min_delta": max(0.0, _num("min_delta", 0.0, float)),
+        "confidence_z": max(0.0, _num("confidence_z", 0.0, float)),
+        "max_cost_factor": _factor("max_cost_factor"),
+        "max_latency_factor": _factor("max_latency_factor"),
+        "max_tool_calls_factor": _factor("max_tool_calls_factor"),
+        "semantic_mining": bool(cfg.get("semantic_mining", False)),
+        "candidates_per_signature": max(1, _num("candidates_per_signature", 1, int)),
+        "mine_bucket_by": bucket_by,
+        "retire_after_days": max(0.0, _num("retire_after_days", 0.0, float)),
+        # Path to an eval corpus ({model|domain: [{goal, expected}]}) JSON. When
+        # set, the driver auto-builds the LIVE A/B (model generates, verifier
+        # judges) so a scheduled pass can actually PROMOTE; unset -> dry pass.
+        "eval_corpus": (str(cfg["eval_corpus"]) if cfg.get("eval_corpus") else None),
+    }
+
+
 def get_autonomy() -> dict:
     """Return the ``[autonomy]`` section with defaults filled in.
 

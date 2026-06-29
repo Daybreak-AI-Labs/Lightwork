@@ -327,6 +327,23 @@ def _generate_keypair() -> tuple[bytes, bytes, str]:
     return priv_bytes, pub_bytes, key_id
 
 
+# Filename of the explicit active-key pointer inside the key dir (see
+# _save_keypair). Not a ``*.key``/``*.pub`` so it never matches the key globs.
+_ACTIVE_POINTER = "active"
+
+
+def _active_key_id(key_dir: Path) -> str | None:
+    """The explicitly-recorded active key id, or None if the pointer is absent,
+    unreadable, or names a key whose files no longer exist (corrupt/legacy)."""
+    try:
+        kid = (key_dir / _ACTIVE_POINTER).read_text(encoding="utf-8").strip()
+    except OSError:
+        return None
+    if kid and (key_dir / f"{kid}.key").exists() and (key_dir / f"{kid}.pub").exists():
+        return kid
+    return None
+
+
 def _save_keypair(priv: bytes, pub: bytes, key_id: str) -> Path:
     key_dir = _key_dir()
     key_dir.mkdir(parents=True, exist_ok=True)
@@ -350,6 +367,17 @@ def _save_keypair(priv: bytes, pub: bytes, key_id: str) -> Path:
         os.chmod(priv_path, 0o600)
         os.chmod(pub_path, 0o644)
     except OSError:
+        pass
+    # Record the active key explicitly. Selection must NOT depend on mtime
+    # ordering: two keys minted within the same filesystem mtime tick (coarse
+    # FS, or a fast rotate) tie, and ``max(..., key=mtime)`` over a sorted list
+    # then keeps the alphabetically-FIRST key -- which may be the OLD one,
+    # silently defeating rotation. ``_save_keypair`` always runs for the
+    # newest-minted key (initial generate + rotate), so this pointer always
+    # names the key that should be active.
+    try:
+        (key_dir / _ACTIVE_POINTER).write_text(key_id, encoding="utf-8")
+    except OSError:  # best-effort; selection falls back to newest-mtime
         pass
     return priv_path
 
@@ -488,9 +516,20 @@ def _load_or_create_keypair() -> tuple[bytes, bytes, str]:
 
     key_dir = _key_dir()
     if key_dir.exists():
+        # Prefer the explicit active-key pointer (deterministic -- immune to the
+        # mtime tie that would otherwise let a rotation silently keep the old
+        # key). Fall back to newest-mtime for legacy key dirs written before the
+        # pointer existed; use st_mtime_ns there for finer tie resolution.
+        active = _active_key_id(key_dir)
+        if active is not None:
+            return (
+                (key_dir / f"{active}.key").read_bytes(),
+                (key_dir / f"{active}.pub").read_bytes(),
+                active,
+            )
         priv_files = sorted(key_dir.glob("*.key"))
         if priv_files:
-            latest = max(priv_files, key=lambda p: p.stat().st_mtime)
+            latest = max(priv_files, key=lambda p: p.stat().st_mtime_ns)
             key_id = latest.stem
             pub_path = key_dir / f"{key_id}.pub"
             if pub_path.exists():

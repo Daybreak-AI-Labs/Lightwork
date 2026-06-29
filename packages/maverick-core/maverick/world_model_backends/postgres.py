@@ -1243,23 +1243,36 @@ class PostgresWorldModel:
     def list_projects(self, *, owner: str | None = None) -> list[dict]:
         """All projects newest first; each carries a ``goal_count``.
 
-        ``owner`` is accepted for signature parity; PG isolates by tenant
-        (applied below)."""
+        When supplied, ``owner`` scopes project metadata to that principal,
+        matching the SQLite backend contract used by the dashboard RBAC layer.
+        Tenant scoping is still applied independently.
+        """
         sql = f"SELECT {self._PROJECT_COLS} FROM projects"
         params: list = []
+        clauses: list[str] = []
+        if owner is not None:
+            clauses.append("owner=%s")
+            params.append(owner)
         frag, fparams = _tenant_scope()
         if frag:
-            sql += " WHERE " + frag
+            clauses.append(frag)
             params += fparams
+        if clauses:
+            sql += " WHERE " + " AND ".join(clauses)
         sql += " ORDER BY id DESC"
+        goal_count_sql = "SELECT COUNT(*) FROM goals WHERE project_id=%s"
+        goal_count_params: list = []
+        goal_frag, goal_fparams = _tenant_scope()
+        if goal_frag:
+            goal_count_sql += " AND " + goal_frag
+            goal_count_params += goal_fparams
         with self._tx() as cur:
             cur.execute(sql, tuple(params))
             rows = cur.fetchall()
             out: list[dict] = []
             for r in rows:
                 proj = self._project_from_row(r)
-                cur.execute(
-                    "SELECT COUNT(*) FROM goals WHERE project_id=%s", (proj["id"],))
+                cur.execute(goal_count_sql, tuple([proj["id"], *goal_count_params]))
                 c = cur.fetchone()
                 proj["goal_count"] = int(c[0]) if c else 0
                 out.append(proj)
@@ -3195,6 +3208,58 @@ class PostgresWorldModel:
             )
             row = cur.fetchone()
         return int(row[0]) if row else 0
+
+    def reserve_rate_events(
+        self,
+        key: str,
+        cap: int,
+        global_key: str,
+        global_cap: int,
+        ts: float | None = None,
+    ) -> str | None:
+        """Atomically reserve shared goal-rate capacity for one admitted event.
+
+        Returns ``None`` after inserting both the global and per-client events,
+        ``"global"`` when the global bucket is already full, or ``"key"``
+        when the per-client bucket is already full. Transaction-scoped advisory
+        locks serialize the read-modify-write for the two buckets across
+        replicas so concurrent goal creations cannot all observe stale counts
+        before recording their reservations.
+        """
+        now = ts if ts is not None else time.time()
+        cutoff = now - 60.0
+        with self._tx() as cur:
+            cur.execute(
+                "SELECT pg_advisory_xact_lock(hashtext(%s))",
+                (f"rate:{global_key}",),
+            )
+            if key != global_key:
+                cur.execute(
+                    "SELECT pg_advisory_xact_lock(hashtext(%s))",
+                    (f"rate:{key}",),
+                )
+            cur.execute(
+                "SELECT COUNT(*) FROM rate_events WHERE rl_key = %s AND ts >= %s",
+                (global_key, cutoff),
+            )
+            row = cur.fetchone()
+            global_count = int(row[0]) if row else 0
+            if global_count >= global_cap:
+                return "global"
+            cur.execute(
+                "SELECT COUNT(*) FROM rate_events WHERE rl_key = %s AND ts >= %s",
+                (key, cutoff),
+            )
+            row = cur.fetchone()
+            key_count = int(row[0]) if row else 0
+            if key_count >= cap:
+                return "key"
+            cur.execute(
+                "INSERT INTO rate_events(rl_key, ts) VALUES(%s, %s), (%s, %s)",
+                (global_key, now, key, now),
+            )
+            cur.execute("DELETE FROM rate_events WHERE ts < %s", (now - 120.0,))
+        return None
 
     @property
     def schema_version(self) -> int:

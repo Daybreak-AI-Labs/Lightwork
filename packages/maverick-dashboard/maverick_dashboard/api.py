@@ -123,6 +123,9 @@ _PERF_SLA_CACHE_TTL_SECONDS = 60.0
 _PERF_SLA_LOCK = asyncio.Lock()
 _PERF_SLA_CACHE: tuple[float, list[dict], str | None] | None = None
 _PERF_HISTORY_MAX_FILES = 128
+_COMPLIANCE_PACKET_CACHE_TTL_SECONDS = 60.0
+_COMPLIANCE_PACKET_LOCK = asyncio.Lock()
+_COMPLIANCE_PACKET_CACHE: tuple[float, str] | None = None
 
 
 
@@ -1043,8 +1046,21 @@ def _harness_guidance() -> tuple[list[dict], bool]:
     the feature is on. Kept in its own try so a self-harness failure never
     blanks the capability ledger, and vice versa."""
     try:
-        from maverick.self_harness import enabled, list_learned
-        rows = [{"model_id": m, "lines": lines}
+        from maverick.self_harness import (
+            detect_store_conflicts,
+            enabled,
+            line_provenance,
+            list_learned,
+        )
+        conflicts_by_model: dict[str, list] = {}
+        try:
+            for m, a, b in detect_store_conflicts():
+                conflicts_by_model.setdefault(m, []).append([a, b])
+        except Exception:  # pragma: no cover -- conflicts are advisory
+            pass
+        rows = [{"model_id": m, "lines": lines,
+                 "provenance": line_provenance(m),
+                 "conflicts": conflicts_by_model.get(m, [])}
                 for m, lines in sorted(list_learned().items())]
         return rows, bool(enabled())
     except Exception as e:  # pragma: no cover -- never block the page
@@ -2262,12 +2278,35 @@ async def simulate(request: Request, surface: str, action: str, target: str = ""
     return simulate_action(surface, action, target)
 
 
+def _build_compliance_packet_body() -> str:
+    from .control_plane import compliance_packet
+
+    return json.dumps(compliance_packet(), indent=2, ensure_ascii=False, default=str)
+
+
 @router.get("/compliance/packet")
 async def compliance_packet_download(request: Request) -> Response:
     """Download a one-click compliance evidence bundle (SOC 2 control snapshot +
     GDPR/EU-AI-Act control report + audit-chain verdict) as a JSON artifact."""
-    from .control_plane import compliance_packet
-    body = json.dumps(compliance_packet(), indent=2, ensure_ascii=False, default=str)
+    require_permission(request, "audit")
+    global _COMPLIANCE_PACKET_CACHE
+    now = time.monotonic()
+    if (
+        _COMPLIANCE_PACKET_CACHE is not None
+        and now - _COMPLIANCE_PACKET_CACHE[0] < _COMPLIANCE_PACKET_CACHE_TTL_SECONDS
+    ):
+        body = _COMPLIANCE_PACKET_CACHE[1]
+    else:
+        async with _COMPLIANCE_PACKET_LOCK:
+            now = time.monotonic()
+            if (
+                _COMPLIANCE_PACKET_CACHE is not None
+                and now - _COMPLIANCE_PACKET_CACHE[0] < _COMPLIANCE_PACKET_CACHE_TTL_SECONDS
+            ):
+                body = _COMPLIANCE_PACKET_CACHE[1]
+            else:
+                body = await run_in_threadpool(_build_compliance_packet_body)
+                _COMPLIANCE_PACKET_CACHE = (time.monotonic(), body)
     return Response(
         content=body,
         media_type="application/json",

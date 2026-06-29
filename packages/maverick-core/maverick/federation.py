@@ -296,31 +296,32 @@ def _fresh(created_at: float, *, now: float | None = None) -> bool:
     return abs(now - created_at) <= _SIGN_FRESHNESS_S
 
 
-def _replay_seen(sig: str, *, now: float | None = None) -> bool:
+def _replay_seen(
+    sig: str, *, created_at: float | None = None, now: float | None = None,
+) -> bool:
     """Check-and-remember a verified signature; True if already seen (replay).
 
-    Prunes by AGE (the stored timestamp), not by a count cap. An entry older
-    than the freshness window can never be replayed successfully — the
-    envelope's ``created_at`` would fail :func:`_fresh` — so evicting it is
-    safe. The old count cap (4096) evicted STILL-FRESH nonces above ~13.6
-    verified delegations/sec over the 300s window, reopening the replay hole;
-    age-pruning never drops an in-window nonce. Only verified signatures from
-    configured peers reach here, so the live set is self-bounded by legitimate
-    peer throughput within the window.
+    Retain each signature until the signed envelope can no longer pass
+    :func:`_fresh`. Since freshness accepts small positive clock skew, pruning
+    by first-seen time can evict a future-dated signature while it is still
+    acceptable. Store the last acceptable timestamp (``created_at`` plus the
+    freshness window) instead, so an in-window nonce is never dropped.
     """
     if not sig:
         return False
     now = time.time() if now is None else now
-    cutoff = now - _SIGN_FRESHNESS_S
+    retain_until = (
+        created_at if created_at and created_at > 0 else now
+    ) + _SIGN_FRESHNESS_S
     with _seen_sigs_lock:
         while _seen_sigs:
-            _oldest, ts = next(iter(_seen_sigs.items()))
-            if ts >= cutoff:
+            _oldest, expires_at = next(iter(_seen_sigs.items()))
+            if expires_at >= now:
                 break
             _seen_sigs.popitem(last=False)
         if sig in _seen_sigs:
             return True
-        _seen_sigs[sig] = now
+        _seen_sigs[sig] = retain_until
         return False
 
 
@@ -651,7 +652,8 @@ class FederationService:
         sig = str(payload.get("sig") or "")
         if not sig:
             return "signed delegation required: no signature present"
-        if not _fresh(float(payload.get("created_at") or 0)):
+        created_at = float(payload.get("created_at") or 0)
+        if not _fresh(created_at):
             return "delegation signature is stale or future-dated"
         env = _delegate_envelope(
             peer.name, self.node, str(payload.get("correlation_id") or ""),
@@ -660,7 +662,7 @@ class FederationService:
             payload.get("requested_tools") or [],
             str(payload.get("max_risk") or "") or None,
             _to_int(payload.get("deadline_ms")),
-            float(payload.get("created_at") or 0),
+            created_at,
         )
         env["pubkey"] = str(payload.get("pubkey") or "")
         env["key_id"] = str(payload.get("key_id") or "")
@@ -670,7 +672,7 @@ class FederationService:
             peer.name, env, expected_schema=DELEGATE_SCHEMA, registry=registry)
         if not ok:
             return f"delegation signature rejected: {reason}"
-        if _replay_seen(sig):
+        if _replay_seen(sig, created_at=created_at):
             return "replayed delegation signature"
         return None
 
@@ -732,11 +734,6 @@ class FederationService:
             return self._refuse("unauthorized: missing or invalid token")
         if not corr:
             return self._refuse_recorded(peer, corr, "correlation_id is required")
-
-        # Per-peer request-rate cap (post-auth): each accepted delegation spawns
-        # a goal run, so throttle a flooding peer before we do any of that work.
-        if not _fed_rate_ok(f"peer:{peer.name}"):
-            return self._refuse_recorded(peer, corr, "rate limit exceeded")
 
         requested = {str(t) for t in (payload.get("requested_tools") or [])
                      if str(t).strip()}
@@ -814,6 +811,13 @@ class FederationService:
         )
         if not negotiation.ok:
             return self._refuse_recorded(peer, corr, negotiation.reason)
+
+        # Per-peer accepted-delegation rate cap: each admitted delegation spawns
+        # a goal run, so charge the peer only after trust-plane and signed-
+        # identity checks succeed. Token-only/invalid signatures must not be
+        # able to consume the legitimate signed delegation quota.
+        if not _fed_rate_ok(f"peer:{peer.name}"):
+            return self._refuse_recorded(peer, corr, "rate limit exceeded")
 
         deadline_ms = _to_int(payload.get("deadline_ms"))
         # Clamp the run's budget to the peer's registry ceiling (down only):

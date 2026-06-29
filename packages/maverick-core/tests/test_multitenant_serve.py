@@ -103,3 +103,17 @@ def test_unprovisioned_tenant_with_roster_refused(monkeypatch, tmp_path):
     create_tenant("someone-else")
     out = asyncio.run(srv._handle_message(_Msg()))
     assert "suspended" in out
+
+
+def test_active_tenant_without_per_user_is_refused_for_missing_channels(monkeypatch, tmp_path):
+    monkeypatch.setenv("MAVERICK_HOME", str(tmp_path / "home"))
+    monkeypatch.setenv("MAVERICK_TENANT", "freeco")
+    monkeypatch.setattr(server_mod, "tenant_by_user_enabled", lambda: False,
+                        raising=False)
+    import maverick.paths as paths_mod
+    monkeypatch.setattr(paths_mod, "tenant_by_user_enabled", lambda: False)
+    create_tenant("freeco", plan="free")
+
+    srv = server_mod.Server(world=_World(), llm=object(), sandbox=object())
+    out = asyncio.run(srv._handle_message(_Msg()))
+    assert "plan does not include channel access" in out

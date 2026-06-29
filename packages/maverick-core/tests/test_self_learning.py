@@ -236,7 +236,8 @@ class TestAddMcpServer:
     def test_atomic_write_preserves_existing_and_leaves_no_temp(self, monkeypatch, tmp_path):
         # The block is written via temp + os.replace, not appended to the live
         # file: pre-existing config survives, the result is always valid TOML
-        # (a truncated append would corrupt the whole file), and no .tmp leaks.
+        # (a truncated append would corrupt the whole file), permissions stay
+        # private for config secrets, and no .tmp leaks.
         try:
             import tomllib
         except ModuleNotFoundError:  # Python 3.10
@@ -244,17 +245,40 @@ class TestAddMcpServer:
 
         cfg = tmp_path / "config.toml"
         cfg.write_text("[self_learning]\nenable = true\n", encoding="utf-8")
+        cfg.chmod(0o600)
         monkeypatch.setattr("maverick.config.config_path", lambda: cfg)
 
         self_learning.add_mcp_server("first", "node")
         self_learning.add_mcp_server("second", "node")
 
         text = cfg.read_text()
+        assert (cfg.stat().st_mode & 0o777) == 0o600
         assert not cfg.with_name(cfg.name + ".tmp").exists()  # no temp leak
         parsed = tomllib.loads(text)  # valid TOML, not a truncated append
         assert parsed["self_learning"]["enable"] is True       # prior content kept
         assert "first" in parsed["mcp_servers"]
         assert "second" in parsed["mcp_servers"]
+
+    def test_atomic_write_uses_private_temp_on_replace_failure(self, monkeypatch, tmp_path):
+        cfg = tmp_path / "config.toml"
+        cfg.write_text('[providers.test]\napi_key = "SECRET"\n', encoding="utf-8")
+        cfg.chmod(0o600)
+        monkeypatch.setattr("maverick.config.config_path", lambda: cfg)
+
+        def fail_replace(src, dst):
+            assert (src.stat().st_mode & 0o777) == 0o600
+            assert 'api_key = "SECRET"' in src.read_text(encoding="utf-8")
+            raise OSError("simulated replace failure")
+
+        monkeypatch.setattr(self_learning.os, "replace", fail_replace)
+
+        with pytest.raises(OSError, match="simulated replace failure"):
+            self_learning.add_mcp_server("private", "node")
+
+        tmp = cfg.with_name(cfg.name + ".tmp")
+        assert not tmp.exists()
+        assert (cfg.stat().st_mode & 0o777) == 0o600
+        assert 'api_key = "SECRET"' in cfg.read_text(encoding="utf-8")
 
     def test_rejects_duplicate(self, monkeypatch, tmp_path):
         cfg = tmp_path / "config.toml"

@@ -94,3 +94,47 @@ def test_idle_buckets_are_swept(monkeypatch):
     assert fed._fed_rate_ok("peer:active") is True
     assert len(fed._fed_rate_hits) < 50
     assert "peer:active" in fed._fed_rate_hits
+
+
+def test_invalid_signed_identity_does_not_consume_delegate_quota(monkeypatch):
+    """Token-only requests must not spend the quota for signed delegations."""
+    pytest.importorskip("cryptography")
+    from maverick import agent_trust
+    from maverick.agent_trust import TrustedAgent
+    from maverick.audit import signing as asig
+    _, pub, _ = asig._load_or_create_keypair()
+    registry = {
+        "a": TrustedAgent(
+            id="a", pubkey=pub.hex(), allow_tools=frozenset({"read_file"})
+        )
+    }
+    monkeypatch.setattr(agent_trust, "load_trust_state", lambda: (True, registry))
+    fed._seen_sigs.clear()
+    monkeypatch.setenv("MAVERICK_FEDERATION_RATE_LIMIT", "1")
+
+    goals = _Goals()
+    svc = FederationService(
+        node="b", peers=[Peer("a", "a:1", "tok")],
+        local_grant=None, goal_service=goals, record=lambda *a, **k: None,
+    )
+
+    unsigned = svc.delegate_goal({
+        "auth_token": "tok", "correlation_id": "poison",
+        "goal_title": "do it", "requested_tools": ["read_file"],
+    })
+    assert unsigned["accepted"] is False
+    assert "signature" in unsigned["reason"].lower()
+    assert len(fed._fed_rate_hits.get("peer:a", ())) == 0
+
+    corr = "legit"
+    signed = fed._sign_delegation(
+        "a", "b", corr, "do it", "", ["read_file"], None, 1000
+    )
+    accepted = svc.delegate_goal({
+        "auth_token": "tok", "correlation_id": corr, "goal_title": "do it",
+        "goal_description": "", "requested_tools": ["read_file"],
+        "max_risk": "", "deadline_ms": 1000, **signed,
+    })
+    assert accepted["accepted"] is True
+    assert goals.started == 1
+    assert len(fed._fed_rate_hits["peer:a"]) == 1

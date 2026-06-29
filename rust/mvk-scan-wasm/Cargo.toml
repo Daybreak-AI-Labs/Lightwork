@@ -2,7 +2,12 @@
 name = "mvk-scan-wasm"
 version.workspace = true
 edition.workspace = true
-license.workspace = true
+# Literal (not `license.workspace = true`): wasm-pack reads this manifest with
+# its own parser, which does NOT resolve Cargo workspace inheritance and errors
+# "invalid type: map, expected a string for key package.license". Cargo itself
+# (the other Rust jobs) resolves the inherited value fine; only wasm-pack needs
+# the literal. Must stay in sync with [workspace.package] license in rust/Cargo.toml.
+license = "LicenseRef-Proprietary"
 description = "wasm-bindgen binding for the Lightwork native safety scanners (TypeScript / edge)."
 
 [lib]

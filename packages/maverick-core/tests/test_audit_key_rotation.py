@@ -37,6 +37,20 @@ def test_rotation_mints_new_active_key_and_keeps_old():
     assert active == kid_b
 
 
+def test_rotation_wins_even_when_mtimes_tie():
+    # On a coarse-mtime filesystem (or a fast rotate) the old and new key files
+    # can share an mtime. Selection must still activate the ROTATED key, not the
+    # alphabetically-first one. Regression for the mtime-tie active-key bug.
+    _, _, kid_a = signing._load_or_create_keypair()
+    kid_b = signing.rotate_audit_keypair()
+    key_dir = signing._key_dir()
+    ts = 1_000_000_000.0
+    os.utime(key_dir / f"{kid_a}.key", (ts, ts))
+    os.utime(key_dir / f"{kid_b}.key", (ts, ts))  # identical mtime
+    _, _, active = signing._load_or_create_keypair()
+    assert active == kid_b
+
+
 def test_chain_verifies_across_rotation(tmp_path):
     # Sign a couple of rows, rotate, sign more, and verify the whole file.
     audit = tmp_path / "2026-06-18.ndjson"

@@ -157,3 +157,50 @@ def test_tenant_scope_custom_column(monkeypatch):
     monkeypatch.setattr(pg, "_active_tenant", lambda: "acme")
     frag, _ = pg._tenant_scope("goals.tenant_id")
     assert frag == "(goals.tenant_id = %s OR goals.tenant_id IS NULL)"
+
+
+def test_list_projects_applies_owner_and_tenant_scope(monkeypatch):
+    monkeypatch.setattr(pg, "_active_tenant", lambda: "tenant-a")
+    monkeypatch.setattr(pg, "_strict_tenant_isolation", lambda: False)
+
+    class FakeCursor:
+        def __init__(self):
+            self.calls = []
+            self._rows = [(7, "name", "desc", "alice", "eng", "active", 123.0)]
+
+        def execute(self, sql, params=()):
+            self.calls.append((sql, params))
+
+        def fetchall(self):
+            return self._rows
+
+        def fetchone(self):
+            return (2,)
+
+    class FakeTx:
+        def __init__(self, cursor):
+            self.cursor = cursor
+
+        def __enter__(self):
+            return self.cursor
+
+        def __exit__(self, exc_type, exc, tb):
+            return False
+
+    cursor = FakeCursor()
+    model = pg.PostgresWorldModel.__new__(pg.PostgresWorldModel)
+    monkeypatch.setattr(model, "_tx", lambda: FakeTx(cursor))
+
+    projects = model.list_projects(owner="alice")
+
+    assert projects[0]["owner"] == "alice"
+    assert projects[0]["goal_count"] == 2
+    project_sql, project_params = cursor.calls[0]
+    assert "WHERE owner=%s AND (tenant_id = %s OR tenant_id IS NULL)" in project_sql
+    assert project_params == ("alice", "tenant-a")
+    goal_count_sql, goal_count_params = cursor.calls[1]
+    assert goal_count_sql == (
+        "SELECT COUNT(*) FROM goals WHERE project_id=%s "
+        "AND (tenant_id = %s OR tenant_id IS NULL)"
+    )
+    assert goal_count_params == (7, "tenant-a")

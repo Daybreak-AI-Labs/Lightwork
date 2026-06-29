@@ -502,6 +502,146 @@ def version() -> None:
 
 
 @main.command()
+@click.option("--json", "as_json", is_flag=True,
+              help="Machine-readable output for FinOps/BI scripts.")
+@click.option("--tag-field", "tag_field", default="tag", show_default=True,
+              help="Episode/goal field to attribute spend by (team / project / cost-center).")
+@click.option("--limit", default=500, show_default=True,
+              help="Max recent priced episodes to scan.")
+@click.option("--top", default=15, show_default=True,
+              help="Show the top N goals by cost.")
+def spend(as_json: bool, tag_field: str, limit: int, top: int) -> None:
+    """Print spend — total, per-goal, and per-tag run costs.
+
+    The CLI face of the /spend dashboard: pull FinOps data into scripts and
+    chargeback exports without the dashboard. Use --json for a stable shape.
+    """
+    import json as _json
+
+    from ..cost.by_tag import gather, render, split_by_tag
+    from ..world_model import DEFAULT_DB, WorldModel
+    w = WorldModel(DEFAULT_DB)
+    total = w.total_spend()
+
+    by_goal: dict[int, dict] = {}
+    for e in w.list_episodes(limit=max(limit, top * 8)):
+        b = by_goal.setdefault(e.goal_id, {
+            "goal_id": e.goal_id, "cost": 0.0,
+            "input_tokens": 0, "output_tokens": 0, "runs": 0})
+        b["cost"] += e.cost_dollars
+        b["input_tokens"] += e.input_tokens
+        b["output_tokens"] += e.output_tokens
+        b["runs"] += 1
+    goals = sorted(by_goal.values(), key=lambda x: x["cost"], reverse=True)[:top]
+    for g in goals:
+        try:
+            go = w.get_goal(g["goal_id"])
+        except Exception:
+            go = None
+        g["cost"] = round(g["cost"], 6)
+        g["title"] = (go.title if go else "") or ""
+
+    tags = split_by_tag(gather(w, tag_field=tag_field, limit=limit))
+
+    if as_json:
+        click.echo(_json.dumps(
+            {"total": total, "by_goal": goals, "by_tag": tags,
+             "tag_field": tag_field}, indent=2))
+        return
+
+    click.echo(click.style("Total spend", bold=True))
+    click.echo(
+        f"  ${total['dollars']:.4f}   "
+        f"{int(total['input_tokens']):,} in / {int(total['output_tokens']):,} out tok   "
+        f"{int(total['runs'])} runs")
+    click.echo("")
+    click.echo(click.style(f"Top {len(goals)} goals by cost", bold=True))
+    if not goals:
+        click.echo("  (no priced episodes yet)")
+    for g in goals:
+        title = g["title"]
+        if len(title) > 44:
+            title = title[:43] + "…"
+        click.echo(f"  ${g['cost']:>9.4f}  #{g['goal_id']:<5} {title}  ({g['runs']} runs)")
+    click.echo("")
+    click.echo(click.style(f"Spend by {tag_field}", bold=True))
+    click.echo("  " + render(tags).replace("\n", "\n  "))
+
+
+@main.command()
+@click.option("--json", "as_json", is_flag=True,
+              help="Machine-readable posture for CI assertions.")
+def safety(as_json: bool) -> None:
+    """Print the safety posture — shield, sandbox backend, egress policy.
+
+    Assert deployment safety in CI without the dashboard (e.g. fail a pipeline
+    if the sandbox is unisolated). Exits 0; gate on the --json fields.
+    """
+    import json as _json
+
+    from ..config import get_sandbox
+    try:
+        from maverick_shield import Shield
+        shield = {"installed": True,
+                  "backend": Shield.from_config(warn_if_missing=False).backend}
+    except ImportError:
+        shield = {"installed": False, "backend": None}
+    except Exception:
+        shield = {"installed": True, "backend": None}
+
+    sb = get_sandbox()
+    backend = str(sb.get("backend", "local") or "local").strip().lower()
+    isolated = backend not in ("local", "")
+
+    try:
+        from ..enterprise import enterprise_enabled
+        locked = bool(enterprise_enabled())
+    except Exception:
+        locked = False
+    try:
+        from ..enterprise import _allowed_egress_hosts
+        hosts = sorted(_allowed_egress_hosts())
+    except Exception:
+        hosts = []
+    try:
+        from ..profile import active_profile
+        profile = active_profile()
+    except Exception:
+        profile = "standard"
+
+    posture = {
+        "profile": profile,
+        "shield": shield,
+        "sandbox": {"backend": backend, "isolated": isolated,
+                    "workdir": sb.get("workdir")},
+        "egress": {"locked": locked, "allowed_hosts": hosts},
+    }
+    if as_json:
+        click.echo(_json.dumps(posture, indent=2))
+        return
+
+    def mark(ok: bool) -> str:
+        return click.style("✔", fg="green") if ok else click.style("•", fg="yellow")
+
+    click.echo(click.style(f"Safety posture  (profile = {profile})", bold=True))
+    if shield["installed"]:
+        click.echo(f"  {mark(True)} shield   installed (backend = {shield['backend']})")
+    else:
+        click.echo(f"  {mark(False)} shield   not installed — kernel fails open "
+                   "(built-in fallback rules screen tool calls)")
+    if isolated:
+        click.echo(f"  {mark(True)} sandbox  {backend} (container-isolated)")
+    else:
+        click.echo(f"  {mark(False)} sandbox  {backend} — model-generated shell runs "
+                   "on this host with NO container isolation")
+    if locked:
+        click.echo(f"  {mark(True)} egress   LOCKED (enterprise boundary)"
+                   + (f" — allowed hosts: {', '.join(hosts)}" if hosts else ""))
+    else:
+        click.echo(f"  {mark(False)} egress   open (cloud-capable; not locked)")
+
+
+@main.command()
 @click.option("--output", "-o", "output", default=None,
               help="Write the bundle to this file (chmod 600) instead of stdout.")
 def support(output: str | None) -> None:
@@ -519,6 +659,7 @@ def support(output: str | None) -> None:
         from pathlib import Path as _P
         path = _P(output).expanduser()
         fd = os.open(str(path), os.O_WRONLY | os.O_CREAT | os.O_TRUNC, 0o600)
+        os.fchmod(fd, 0o600)
         with os.fdopen(fd, "w", encoding="utf-8") as f:
             f.write(text + "\n")
         click.echo(f"support bundle written: {path}")
@@ -1333,7 +1474,8 @@ def harness_show(model: str | None, as_json: bool, verbose: bool) -> None:
                 click.echo(f"  - {ln}")
             continue
         for rec in line_provenance(m):
-            click.echo(f"  - {rec['text']}")
+            _dom = rec.get("domain")
+            click.echo(f"  - {rec['text']}" + (f"  [domain={_dom}]" if _dom else ""))
             sig = rec.get("signature") or "(no provenance — learned before tracking)"
             d, n = rec.get("held_out_delta"), rec.get("samples")
             ev = (f"held-out {d:+.3g} over {n} samples"
@@ -1424,6 +1566,69 @@ def harness_retire(older_than_days: float, model: str | None, yes: bool) -> None
         return
     n = retire_stale(older_than_days=older_than_days, model_id=model)
     click.echo(f"retired {n} line{'' if n == 1 else 's'}.")
+
+
+def _echo_harness_cycle(report, retired: int) -> None:
+    """Render one cycle's report + retirement count for the operator."""
+    click.echo(f"model: {report.model_id or '(unresolved)'}")
+    click.echo(f"  mined={report.mined} proposed={report.proposed} "
+               f"validated={report.validated} promoted={report.promoted} retired={retired}")
+    # Explain WHY a pass promoted nothing, in priority order, so the operator
+    # isn't left guessing whether the loop is broken or just gated.
+    if report.frozen:
+        click.echo("  ⚠ learning is FROZEN (verifier drift) — promotions are paused "
+                   "until calibration recovers")
+    elif not report.gate_enabled:
+        click.echo("  ⚠ promotion gate is OFF — set [self_improvement] enable = true "
+                   "to allow promotions")
+    elif report.promoted == 0 and report.proposed > 0:
+        click.echo("  (dry pass — inject a live A/B scorer and enable "
+                   "[self_improvement] to promote)")
+    for s in report.skipped[:10]:
+        click.echo(f"  - skipped: {s}")
+    if report.applied_lines:
+        click.echo("  promoted lines:")
+        for ln in report.applied_lines:
+            click.echo(f"    + {ln}")
+
+
+@harness.command("run")
+@click.option("--model", default=None, help="Model to run for (default: orchestrator).")
+@click.option("--all-models", is_flag=True,
+              help="Run for every configured role model (the whole fleet), not just one.")
+@click.option("--limit", type=int, default=500,
+              help="Max recent reflexions to scan for weaknesses.")
+@click.option("--retire/--no-retire", default=True,
+              help="Also retire stale lines (per [self_harness] retire_after_days).")
+def harness_run(model: str | None, all_models: bool, limit: int, retire: bool) -> None:
+    """Run one governed self-harness cycle: mine → propose → validate → gate,
+    then retire stale guidance. The on-demand / scheduled entry point.
+
+    Without a live A/B scorer (a real model + eval harness, injected
+    programmatically via run_self_harness_cycle — a real evaluation needs a real
+    model) this is a DRY pass that writes no NEW guidance; stale-line retirement
+    still runs. Promotion also requires [self_improvement] enable (the shared
+    governed gate). Safe to schedule: it never perturbs a run.
+
+    --all-models runs the cycle for EVERY distinct configured role model so worker
+    models learn their own harness, not just the orchestrator.
+    """
+    from .. import self_harness
+    from .. import self_improvement_runner as runner
+    if not self_harness.enabled():
+        raise click.ClickException(
+            "self-harness is off. Set [self_harness] enable = true or "
+            "MAVERICK_SELF_HARNESS=1.")
+    if all_models:
+        results = runner.run_self_harness_all_models(limit=limit, retire=retire)
+        if not results:
+            click.echo("no configured role models to run.")
+            return
+        for _mid, (report, retired) in sorted(results.items()):
+            _echo_harness_cycle(report, retired)
+        return
+    report, retired = runner.run_self_harness_cycle(model_id=model, limit=limit, retire=retire)
+    _echo_harness_cycle(report, retired)
 
 
 @harness.command("conflicts")
@@ -5714,18 +5919,20 @@ def audit_export(
                 click.echo(f"ERROR: {_label} must be YYYY-MM-DD", err=True)
                 sys.exit(2)
 
-    # Plan feature gating: SIEM audit export is a paid-tier entitlement. Only
-    # denied when an explicit --tenant names a provisioned tenant whose plan
-    # omits "audit_export"; unscoped/self-host export is unaffected.
-    if tenant:
-        from ..billing import feature_allowed
-        if not feature_allowed("audit_export", tenant=tenant):
-            click.echo(
-                f"ERROR: tenant '{tenant}' plan does not include SIEM audit "
-                "export (audit_export entitlement). Upgrade the tenant's plan.",
-                err=True,
-            )
-            sys.exit(2)
+    # Plan feature gating: SIEM audit export is a paid-tier entitlement. Deny
+    # either an explicit --tenant or the active deployment tenant when it names
+    # a provisioned tenant whose plan omits "audit_export"; unscoped/self-host
+    # export is unaffected because feature_allowed fails open at the edges.
+    from ..billing import feature_allowed
+    if not feature_allowed("audit_export", tenant=tenant):
+        from ..paths import current_tenant_id
+        denied_tenant = tenant or current_tenant_id() or "active tenant"
+        click.echo(
+            f"ERROR: tenant '{denied_tenant}' plan does not include SIEM audit "
+            "export (audit_export entitlement). Upgrade the tenant's plan.",
+            err=True,
+        )
+        sys.exit(2)
 
     from ..audit.export import audit_event_paths, iter_audit_events, to_cef, to_jsonl
 
@@ -5830,16 +6037,18 @@ def audit_forward(
         )
         sys.exit(2)
 
-    # Same paid-tier entitlement gate as export when a tenant is named.
-    if tenant:
-        from ..billing import feature_allowed
-        if not feature_allowed("audit_export", tenant=tenant):
-            click.echo(
-                f"ERROR: tenant '{tenant}' plan does not include SIEM audit "
-                "export (audit_export entitlement). Upgrade the tenant's plan.",
-                err=True,
-            )
-            sys.exit(2)
+    # Same paid-tier entitlement gate as export, including active deployment
+    # tenants resolved by feature_allowed when --tenant is omitted.
+    from ..billing import feature_allowed
+    if not feature_allowed("audit_export", tenant=tenant):
+        from ..paths import current_tenant_id
+        denied_tenant = tenant or current_tenant_id() or "active tenant"
+        click.echo(
+            f"ERROR: tenant '{denied_tenant}' plan does not include SIEM audit "
+            "export (audit_export entitlement). Upgrade the tenant's plan.",
+            err=True,
+        )
+        sys.exit(2)
 
     from ..audit import forwarder
     from ..audit.export import iter_audit_events, to_cef, to_jsonl

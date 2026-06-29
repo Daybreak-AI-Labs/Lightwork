@@ -61,6 +61,48 @@ def test_build_replay_timeline_and_chain():
     assert prompts and prompts[0]["risk"] == "high"
 
 
+def test_replay_chain_includes_anchor_ledger_breaks(monkeypatch):
+    import maverick.audit as audit
+    from maverick.audit import ChainBreak
+    from maverick.paths import data_dir
+    from maverick_dashboard.control_plane import _verify_days
+
+    day = "2026-06-16"
+    audit_dir = data_dir("audit")
+    audit_dir.mkdir(parents=True)
+    (audit_dir / f"{day}.ndjson").write_text("{}\n", encoding="utf-8")
+    monkeypatch.setattr(audit, "verify_chain", lambda path: [])
+    monkeypatch.setattr(
+        audit,
+        "verify_anchors",
+        lambda path: [ChainBreak(0, "anchor_tip_mismatch", "2026-06-16 tip mismatch")],
+    )
+
+    chain = _verify_days([day])
+
+    assert chain["status"] == "broken"
+    assert chain["break_count"] == 1
+    assert chain["breaks"][0]["reason"] == "anchor_tip_mismatch"
+
+
+def test_replay_chain_flags_deleted_anchored_day(monkeypatch):
+    import maverick.audit as audit
+    from maverick.audit import ChainBreak
+    from maverick_dashboard.control_plane import _verify_days
+
+    day = "2026-06-16"
+    monkeypatch.setattr(
+        audit,
+        "verify_anchors",
+        lambda path: [ChainBreak(0, "anchored_file_deleted", f"{day}.ndjson is anchored but missing")],
+    )
+
+    chain = _verify_days([day])
+
+    assert chain["status"] == "broken"
+    assert chain["break_count"] == 1
+    assert chain["breaks"][0]["reason"] == "anchored_file_deleted"
+
 def test_replay_filters_to_one_goal():
     gid = _seed_run()
     other = _seed_run()
@@ -219,9 +261,24 @@ def test_compliance_packet_shape():
     assert "soc2" in pkt and "controls" in pkt and "audit_chain" in pkt
 
 
-def test_compliance_packet_download():
+def test_compliance_packet_download(monkeypatch):
+    from maverick_dashboard import api
+
+    calls = 0
+
+    def fake_body():
+        nonlocal calls
+        calls += 1
+        return '{"artifact":"maverick.compliance_packet"}'
+
+    monkeypatch.setattr(api, "_COMPLIANCE_PACKET_CACHE", None)
+    monkeypatch.setattr(api, "_build_compliance_packet_body", fake_body)
     r = client.get("/api/v1/compliance/packet")
     assert r.status_code == 200
     cd = r.headers.get("content-disposition", "")
     assert "attachment" in cd and "maverick-compliance-packet.json" in cd
     assert r.json()["artifact"] == "maverick.compliance_packet"
+
+    cached = client.get("/api/v1/compliance/packet")
+    assert cached.status_code == 200
+    assert calls == 1

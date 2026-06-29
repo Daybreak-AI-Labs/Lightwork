@@ -57,6 +57,46 @@ def test_open_contained_rejects_outside_symlink(workdir):
         fs._open_contained(workdir, workdir / "escape", os.O_RDONLY)
 
 
+def test_open_contained_rejects_outside_path_with_deleted_suffix(workdir):
+    """A live outside path may legitimately end in " (deleted)".
+
+    Linux appends the same text to /proc fd links for unlinked files, but the
+    containment guard must not strip it blindly: doing so can turn an outside
+    sibling named like "<workdir> (deleted)" into the workspace path.
+    """
+    outside = workdir.parent / f"{workdir.name} (deleted)"
+    outside.write_text("SECRET")
+    swapped = workdir / "escape"
+    swapped.symlink_to(outside)
+
+    with pytest.raises(ValueError, match="outside the workspace"):
+        fs._open_contained(workdir, swapped, os.O_RDONLY)
+
+
+def test_read_file_rejects_swapped_symlink_to_deleted_suffix_sibling(workdir, monkeypatch):
+    outside = workdir.parent / f"{workdir.name} (deleted)"
+    outside.write_text("SECRET_OUTSIDE_READ")
+    swapped = workdir / "looks-fine.txt"
+    swapped.symlink_to(outside)
+    monkeypatch.setattr(fs, "_safe_resolve", lambda _sb, _p: swapped)
+
+    out = fs.read_file(_SB(workdir)).fn({"path": "looks-fine.txt"})
+    assert "symlink race" in out
+    assert "SECRET_OUTSIDE_READ" not in out
+
+
+def test_write_file_rejects_swapped_symlink_to_deleted_suffix_sibling(workdir, monkeypatch):
+    outside = workdir.parent / f"{workdir.name} (deleted)"
+    outside.write_text("ORIGINAL-MUST-SURVIVE")
+    swapped = workdir / "out.txt"
+    swapped.symlink_to(outside)
+    monkeypatch.setattr(fs, "_safe_resolve", lambda _sb, _p: swapped)
+
+    out = fs.write_file(_SB(workdir)).fn({"path": "out.txt", "content": "HACKED"})
+    assert "symlink race" in out
+    assert outside.read_text() == "ORIGINAL-MUST-SURVIVE"
+
+
 # ---- read_file: post-check swap can't leak ----------------------------------
 
 def test_read_file_toctou_guard_blocks_swapped_symlink(workdir, monkeypatch):

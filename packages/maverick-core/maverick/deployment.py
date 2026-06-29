@@ -41,6 +41,36 @@ _CLOUD_PROBE = "anthropic"
 _LOCAL_PROBE = "ollama"
 _SEAL_PROBE = "maverick-at-rest-probe"
 
+_ISOLATED_SANDBOX_BACKENDS = {
+    "devcontainer",
+    "docker",
+    "firecracker",
+    "gvisor",
+    "kubernetes",
+    "modal",
+    "podman",
+}
+
+
+def _sandbox_isolated(backend: str) -> bool:
+    """Return whether ``backend`` names a supported isolated sandbox backend."""
+    return backend in _ISOLATED_SANDBOX_BACKENDS or backend.startswith("ep:")
+
+
+def _sandbox_isolation_detail(backend: str, sandboxed: bool) -> str:
+    if sandboxed:
+        return f"backend = {backend}"
+    if backend in ("", "local"):
+        return (
+            "set [sandbox] backend = \"docker\" (or podman/gvisor/kubernetes/"
+            "firecracker); 'local' runs agent code on the host unsandboxed"
+        )
+    known = ", ".join(sorted(_ISOLATED_SANDBOX_BACKENDS))
+    return (
+        f"unsupported [sandbox] backend = {backend!r}; use one of: {known}, "
+        "or an ep:<name> Sandbox SDK backend"
+    )
+
 
 @dataclass(frozen=True)
 class GuaranteeCheck:
@@ -145,13 +175,11 @@ def verify_deployment() -> list[GuaranteeCheck]:
         ).strip().lower()
     except Exception:
         pass
-    sandboxed = backend not in ("", "local")
+    sandboxed = _sandbox_isolated(backend)
     checks.append(GuaranteeCheck(
         "Sandbox isolation",
         sandboxed,
-        f"backend = {backend}" if sandboxed
-        else "set [sandbox] backend = \"docker\" (or podman/gvisor/kubernetes/"
-             "firecracker); 'local' runs agent code on the host unsandboxed",
+        _sandbox_isolation_detail(backend, sandboxed),
     ))
 
     # 7. Threat shield -- the input/tool/output screen must be installed and
@@ -171,8 +199,13 @@ def verify_deployment() -> list[GuaranteeCheck]:
     return checks
 
 
+def _shield_sink_enabled(shield: object, attr: str) -> bool:
+    """Return whether a Shield scan sink is configured to enforce."""
+    return bool(getattr(shield, attr, True))
+
+
 def _verify_shield() -> GuaranteeCheck:
-    """Verify the threat shield is installed and enforcing (profile != off).
+    """Verify the threat shield is installed and fully enforcing.
 
     Optional import: maverick-shield is not a hard dependency (kernel rule 1).
     A required enterprise deployment, however, must not run with the screen off
@@ -196,6 +229,19 @@ def _verify_shield() -> GuaranteeCheck:
             name, False,
             "shield installed but disabled ([safety] profile = off); set a "
             "profile (strict/balanced) so screening is enforced",
+        )
+    sinks = {
+        "scan_input": _shield_sink_enabled(shield, "_scan_input_enabled"),
+        "scan_tool_calls": _shield_sink_enabled(shield, "_scan_tool_calls_enabled"),
+        "scan_output": _shield_sink_enabled(shield, "_scan_output_enabled"),
+    }
+    disabled = [key for key, enabled in sinks.items() if not enabled]
+    if disabled:
+        flags = ", ".join(f"{key} = true" for key in disabled)
+        return GuaranteeCheck(
+            name, False,
+            "shield installed but not fully enforcing; enable [safety] "
+            f"{flags}",
         )
     backend = getattr(shield, "backend", "?")
     full = backend == getattr(Shield, "BACKEND_SDK", "agent-shield")
