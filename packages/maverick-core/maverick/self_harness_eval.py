@@ -90,6 +90,45 @@ def corpus_split(cases: list[dict], *, held_out_frac: float = 0.3,
     return goals[:n - n_out], goals[n - n_out:]
 
 
+def corpus_kfold_splits(cases: list[dict], *, k: int = 5,
+                        ) -> list[tuple[list[str], list[str]]]:
+    """Partition corpus cases into ``k`` DETERMINISTIC ``(held_in, held_out)``
+    rotations -- the holdout-rotation basis for cross-validating a candidate line.
+
+    Goals are ordered by the same stable content hash :func:`corpus_split` uses,
+    then split into ``k`` near-equal contiguous folds; rotation ``i`` holds OUT
+    fold ``i`` and holds IN the rest, so every case is unseen in exactly one fold.
+    A single fixed 30%% holdout can flatter (or punish) a line by luck; requiring
+    the lift to hold across rotations is the lower-variance generalization test.
+
+    ``k`` is clamped to ``[1, n]``. With ``< 2`` distinct goals there is no usable
+    holdout, so a single ``(goals, [])`` rotation is returned (the caller then
+    falls back to the in-sample check, exactly like :func:`corpus_split`). Pure
+    function -- no RNG, no I/O -- so a re-run cross-validates against the same folds."""
+    goals = [str(c.get("goal") or "") for c in cases if str(c.get("goal") or "").strip()]
+    goals = sorted(set(goals), key=_goal_rank)
+    n = len(goals)
+    if n < 2:
+        return [(goals, [])]
+    k = max(1, min(int(k), n))
+    if k == 1:
+        return [(goals, [])]
+    # Near-equal contiguous folds: the first (n % k) folds get one extra goal, so
+    # fold sizes differ by at most one and every goal lands in exactly one fold.
+    base, extra = divmod(n, k)
+    bounds, start = [], 0
+    for i in range(k):
+        size = base + (1 if i < extra else 0)
+        bounds.append((start, start + size))
+        start += size
+    out: list[tuple[list[str], list[str]]] = []
+    for lo, hi in bounds:
+        held_out = goals[lo:hi]
+        held_in = goals[:lo] + goals[hi:]
+        out.append((held_in, held_out))
+    return out
+
+
 # ---- reference-free A/B scorers (the injected seam, built) ---------------
 
 def _heuristic_judge(goal: str, output: str, expected: str) -> bool:
@@ -159,27 +198,58 @@ def corpus_ab_scorers(
 # absent model degrades to a safe default (judge -> heuristic, run -> "") so the
 # evaluation never crashes a learning pass. Offline-tested with a fake LLM.
 
+# Self-consistency framings: meaning-PRESERVING rephrasings of the same yes/no
+# question. Sampling the judge across diverse reasoning paths and taking the
+# majority vote is more robust than one call (Wang et al., self-consistency) --
+# and because the seam exposes no temperature knob, varying the FRAMING is what
+# diversifies the paths, so it works even with a near-deterministic judge.
+_JUDGE_FRAMINGS = (
+    "You are a strict evaluator. Answer ONLY 'yes' or 'no': did the OUTPUT "
+    "correctly accomplish the GOAL?",
+    "Grade the OUTPUT against the GOAL. Reply with a single word -- 'yes' if it "
+    "fully accomplishes the goal, 'no' otherwise.",
+    "As a careful judge, decide whether the OUTPUT satisfies the GOAL. Respond "
+    "'yes' or 'no' only.",
+)
+
+
 def llm_judge(llm, *, budget=None, model: str | None = None, max_tokens: int = 8,
-              ) -> Callable[[str, str, str], bool]:
+              samples: int = 1) -> Callable[[str, str, str], bool]:
     """An LLM-as-judge ``judge_fn`` for :func:`corpus_ab_scorers`: ask the model
     whether the OUTPUT accomplished the GOAL (yes/no). The model is NOT hard-coded
     (kernel rule 2). Falls open to :func:`_heuristic_judge` on any provider error
-    or an unparseable answer, so evaluation is robust to a flaky judge."""
+    or an unparseable answer, so evaluation is robust to a flaky judge.
+
+    ``samples`` > 1 enables SELF-CONSISTENCY: the judge is asked ``samples`` times,
+    each with a different meaning-preserving framing of the question (diverse
+    reasoning paths, since the seam has no temperature knob), and the MAJORITY
+    yes/no vote wins. A tie or all-indeterminate samples fall open to the
+    heuristic. ``samples == 1`` (the default) is the single-call behavior,
+    unchanged."""
+    n = max(1, int(samples))
+
     def _judge(goal: str, output: str, expected: str) -> bool:
-        try:
-            system = ("You are a strict evaluator. Answer ONLY 'yes' or 'no': did "
-                      "the OUTPUT correctly accomplish the GOAL?")
-            user = (f"GOAL:\n{goal}\n\nOUTPUT:\n{output}\n\n"
-                    f"Expected (hint): {expected}\n\nyes/no:")
-            resp = llm.complete(system, [{"role": "user", "content": user}],
-                                budget=budget, max_tokens=max_tokens, model=model)
-            text = (getattr(resp, "text", "") or "").strip().lower()
-            if text.startswith("yes"):
-                return True
-            if text.startswith("no"):
-                return False
-        except Exception as e:  # pragma: no cover -- fail open to heuristic
-            log.warning("eval: llm judge failed (%s); using heuristic", e)
+        yes = no = 0
+        for i in range(n):
+            try:
+                system = _JUDGE_FRAMINGS[i % len(_JUDGE_FRAMINGS)]
+                user = (f"GOAL:\n{goal}\n\nOUTPUT:\n{output}\n\n"
+                        f"Expected (hint): {expected}\n\nyes/no:")
+                resp = llm.complete(system, [{"role": "user", "content": user}],
+                                    budget=budget, max_tokens=max_tokens, model=model)
+                text = (getattr(resp, "text", "") or "").strip().lower()
+                if text.startswith("yes"):
+                    yes += 1
+                elif text.startswith("no"):
+                    no += 1
+                # an unparseable sample is INDETERMINATE -- it abstains, it doesn't vote
+            except Exception as e:  # pragma: no cover -- one bad sample abstains
+                log.warning("eval: llm judge sample failed (%s)", e)
+        if yes > no:
+            return True
+        if no > yes:
+            return False
+        # tie (incl. zero usable votes) -> deterministic heuristic tie-break
         return _heuristic_judge(goal, output, expected)
     return _judge
 
@@ -207,6 +277,6 @@ def llm_runner(llm, *, system_prefix: str = "", budget=None, model: str | None =
 
 
 __all__ = [
-    "load_eval_corpus", "corpus_cases", "corpus_split", "corpus_ab_scorers",
-    "llm_judge", "llm_runner",
+    "load_eval_corpus", "corpus_cases", "corpus_split", "corpus_kfold_splits",
+    "corpus_ab_scorers", "llm_judge", "llm_runner",
 ]

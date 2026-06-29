@@ -986,19 +986,31 @@ class Agent:
         exists. Fully fail-safe."""
         try:
             from .self_harness import note_recall, recall_addendum
-            # Pass this run's domain so guidance mined SCOPED to a department is
-            # recalled only for that department's runs (model-wide guidance always
-            # is). Defaults to the model-wide block when the agent has no domain.
+            # Pass this run's domain AND its available tools so guidance mined
+            # SCOPED to a department or a tool is recalled only when it applies
+            # (model-wide guidance always is): a finance lesson on finance runs, a
+            # `web_fetch` lesson only when `web_fetch` is on hand (#7). Defaults to
+            # the model-wide block when the agent has no domain and no scoped tools.
             _dom = getattr(self, "domain", None)
-            addendum = recall_addendum(self.model, domain=_dom)
+            _tools = self._harness_tool_names()
+            addendum = recall_addendum(self.model, domain=_dom, tools=_tools)
             if addendum:
                 # Track that this guidance was USED (throttled, best-effort) so
                 # retirement keeps actively-recalled lines and prunes dormant ones.
-                note_recall(self.model, domain=_dom)
+                note_recall(self.model, domain=_dom, tools=_tools)
                 return base + "\n\n" + addendum
         except Exception:  # pragma: no cover -- never block a run
             pass
         return base
+
+    def _harness_tool_names(self) -> list[str]:
+        """The names of the tools this agent has on hand, for per-tool guidance
+        recall. Best-effort: a registry that can't be enumerated yields no tool
+        scopes (recall falls back to model-wide + domain), never an error."""
+        try:
+            return [t.name for t in self.tools.all()]
+        except Exception:  # pragma: no cover -- recall must never break a run
+            return []
 
     def _thinking_budget(self) -> int | None:
         base = 8000 if self.role in ("orchestrator", "revisor") else None

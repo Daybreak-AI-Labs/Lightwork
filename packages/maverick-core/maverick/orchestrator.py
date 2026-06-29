@@ -356,6 +356,23 @@ def _record_skill_outcome(ctx: Any, *, success: bool) -> None:
         pass
 
 
+def _record_harness_outcome(domain: str | None, *, success: bool) -> None:
+    """Attribute this run's outcome to the self-harness guidance it recalled, so
+    the efficacy + canary lifecycle (note_outcome -> review_efficacy /
+    review_canaries) actually fires from REAL runs -- the counters were otherwise
+    never populated. Scoped to the run's model + domain (the same guidance
+    recall_addendum injected). Fully fail-safe -- stats never block a run."""
+    try:
+        from . import self_harness
+        if not self_harness.enabled():
+            return
+        from .llm import model_for_role
+        self_harness.note_outcome(model_for_role("orchestrator"), bool(success),
+                                  domain=domain)
+    except Exception:  # pragma: no cover -- stats never block a run
+        pass
+
+
 def _record_deliverable_artifact(world: Any, goal_id: int, result_text: str | None) -> None:
     """If this goal's pack declares a structured deliverable, persist the result
     as a versioned artifact -- so re-runs accumulate history and the goal page's
@@ -1282,6 +1299,7 @@ async def run_goal(  # noqa: C901  -- core goal-execution loop
             if not (result.error or "").startswith("budget exceeded:"):
                 _record_skill_outcome(ctx, success=False)
                 _record_planning_outcome(goal, domain, _planning_mode, success=False)
+                _record_harness_outcome(domain, success=False)
             _fire_webhook("goal_finished", {
                 "goal_id": goal_id, "status": "blocked", "result": result.error,
             })
@@ -1363,6 +1381,7 @@ async def run_goal(  # noqa: C901  -- core goal-execution loop
         _record_deliverable_artifact(world, goal_id, summary)
         _record_skill_outcome(ctx, success=True)
         _record_planning_outcome(goal, domain, _planning_mode, success=True)
+        _record_harness_outcome(domain, success=True)
         _fire_webhook("final_emitted", {
             "goal_id": goal_id,
             "patch_size_bytes": len(summary.encode("utf-8")),

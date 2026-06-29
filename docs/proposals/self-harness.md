@@ -145,20 +145,32 @@ safety model as skills and insights.
   the lexical heuristic — catching reworded conflicts it misses and suppressing
   its false positives, falling back to the heuristic per-pair on any judge error.
   Advisory only — a false positive must never silently drop real guidance.
-- **Domain-scoped recall:** a line mined scoped to a department (wave-9
-  `mine_bucket_by`) is stored under a composite key (`"<model>\x00domain=<d>"`,
-  NUL-separated so it can't collide with a model id) and recalled **only for that
-  department's runs** via `recall_addendum(model_id, domain=…)` — wired into
-  `Agent._with_harness_addendum` from the run's `self.domain`. Model-wide lines
-  stay under the bare model id, so the default store is **byte-identical** and the
-  determinism proof is unaffected.
+- **Scoped recall (per-domain AND per-tool):** a line mined scoped to a
+  department or a tool (`mine_bucket_by=("domain","tool")`) is stored under a
+  composite key (`"<model>\x00domain=<d>"` or `"<model>\x00tool=<t>"`,
+  NUL-separated so it can't collide with a model id) and recalled **only for
+  matching runs** via `recall_addendum(model_id, domain=…, tools=…)` — wired into
+  `Agent._with_harness_addendum` from the run's `self.domain` and its available
+  tools. The "tool" a failure belongs to is the tool in play at failure (the last
+  of the reflexion's `tools_used`); tool scopes are sorted so the recalled block
+  is byte-identical regardless of registry order. Model-wide lines stay under the
+  bare model id, so the default store is **byte-identical** and the determinism
+  proof is unaffected.
 - **Outcome-aware lifecycle:** `note_outcome` records per-line recall→success/
-  failure counters; `review_efficacy` re-measures a line's causal lift with the
-  live A/B and **demotes dead weight** (audited `forget`, the reversible
-  direction — never the promotion gate); and a `canary` line graduates or is
-  pulled by `review_canaries` from those counters (a staged-rollout valve). The
+  failure counters (crediting the same model-wide + domain + tool scopes recall
+  injected); `review_efficacy` re-measures a line's causal lift with the live A/B
+  and **demotes dead weight** (audited `forget`, the reversible direction — never
+  the promotion gate); and a `canary` line graduates or is pulled by
+  `review_canaries` from those counters (a staged-rollout valve). The
   live A/B itself is the injected `score_with`/`score_without` seam, built out by
   `self_harness_eval.corpus_ab_scorers` (corpus + `run_fn`/`judge_fn`).
+- **Robust validation:** `holdout_rotations` cross-validates a candidate across K
+  deterministic holdout folds (`corpus_kfold_splits`) and promotes only if the
+  lift holds on **every** fold — a lucky single split can't carry it. The LLM
+  judge supports **self-consistency** (`judge_samples` → `llm_judge(samples=)`):
+  ask N times with diverse meaning-preserving framings, take the majority vote,
+  fall open to the deterministic heuristic on a tie. Both default to the
+  single-split / single-call historical behavior.
 
 ## Operating it
 
@@ -181,20 +193,33 @@ safety model as skills and insights.
 - `maverick self-harness show [--verbose]` — what was learned per model;
   `--verbose` adds each line's provenance (signature, held-out delta, samples,
   learned/updated dates) so an operator can judge the evidence behind it.
+- `maverick self-harness efficacy --model M` — each line's recall→outcome record
+  (successes / failures / rate, with the department tag) so dead weight is visible
+  before it's pruned.
+- `maverick self-harness canary --model M [--review]` — inspect lines on canary
+  probation, or `--review` to advance the lifecycle (graduate the proven, pull the
+  failing) from the accumulated counters.
 - `maverick self-harness retire --older-than-days N` — prune stale guidance.
 - `maverick self-harness conflicts` — flag contradictory lines for review.
-- `maverick self-harness log` / `forget` — the audit trail and the undo handle.
+- `maverick self-harness log` / `forget [--domain D]` — the audit trail and the
+  undo handle (`--domain` scopes the rollback to one department's block).
 
 Config (`[self_harness]`, resolved by `config.get_self_harness` / `settings()`):
 `enable`, `min_support`, the validation floors (`require_held_out`, `min_held_out`,
 `min_delta`, `confidence_z`, `max_cost_factor`/`max_latency_factor`/
 `max_tool_calls_factor`, `min_support_by_class`), `candidates_per_signature`
-(best-of-N proposing), `semantic_mining`, `mine_bucket_by` (per-domain mining),
-and `retire_after_days`. Defaults preserve the
+(best-of-N proposing), `semantic_mining`, `mine_bucket_by` (per-domain/per-tool
+mining), `holdout_rotations` (K-fold cross-validation), `judge_samples`
+(self-consistency judging), `efficacy_review`, `eval_corpus`, and
+`retire_after_days`. Defaults preserve the
 loop's historical behavior; the installer wizard ships production-safe floors
-when self-harness is enabled. `run_self_harness_pass` reads these automatically,
-and the dashboard `/learned` page surfaces per-line provenance + conflict
-warnings (parity with `show --verbose` / `conflicts`).
+when self-harness is enabled and writes the advanced knobs (eval corpus,
+per-department scoping, semantic mining, best-of-N, efficacy review, auto-retire)
+when an operator opts into the advanced follow-up. `run_self_harness_pass` reads
+these automatically, and the dashboard `/learned` page surfaces per-line
+provenance, recall→outcome counters, canary state, the department tag, and
+conflict warnings (parity with `show --verbose` / `efficacy` / `canary` /
+`conflicts`).
 - Automatic operation: a scheduler runs `maverick self-harness run` (or calls
   `run_self_harness_cycle(...)`), which executes one governed pass then prunes
   stale guidance. For live promotion the caller injects a held-in/held-out scorer

@@ -46,6 +46,37 @@ def test_corpus_split_is_deterministic():
     assert hi and ho
 
 
+def test_corpus_kfold_splits_partition_every_case_once():
+    cases = [{"goal": f"goal number {i}", "expected": "ok"} for i in range(10)]
+    folds = ev.corpus_kfold_splits(cases, k=5)
+    assert len(folds) == 5
+    all_goals = {c["goal"] for c in cases}
+    seen_out: list[str] = []
+    for held_in, held_out in folds:
+        assert held_out                                   # every fold holds something out
+        assert set(held_in).isdisjoint(held_out)          # no leakage within a fold
+        assert set(held_in) | set(held_out) == all_goals  # together they cover the corpus
+        seen_out.extend(held_out)
+    # Every case is unseen in EXACTLY one fold (a true K-fold partition).
+    assert sorted(seen_out) == sorted(all_goals)
+
+
+def test_corpus_kfold_splits_is_deterministic():
+    cases = [{"goal": f"g{i}", "expected": "ok"} for i in range(7)]
+    assert ev.corpus_kfold_splits(cases, k=3) == ev.corpus_kfold_splits(cases, k=3)
+    # order-independent: shuffling the corpus yields the same folds
+    assert ev.corpus_kfold_splits(cases, k=3) == ev.corpus_kfold_splits(
+        list(reversed(cases)), k=3)
+
+
+def test_corpus_kfold_splits_clamps_and_degrades():
+    # k clamped to n; < 2 goals -> a single (goals, []) rotation (no usable holdout)
+    folds = ev.corpus_kfold_splits([{"goal": "a"}, {"goal": "b"}], k=9)
+    assert len(folds) == 2 and all(ho for _hi, ho in folds)
+    assert ev.corpus_kfold_splits([{"goal": "solo"}], k=5) == [(["solo"], [])]
+    assert ev.corpus_kfold_splits([], k=5) == [([], [])]
+
+
 def test_heuristic_judge():
     assert ev._heuristic_judge("g", "the answer is DONE here", "done") is True
     assert ev._heuristic_judge("g", "no match", "done") is False
@@ -105,6 +136,47 @@ class _FakeLLM:
 def test_llm_judge_parses_yes_no():
     assert ev.llm_judge(_FakeLLM(text="Yes, it did."))("g", "out", "exp") is True
     assert ev.llm_judge(_FakeLLM(text="no"))("g", "out", "exp") is False
+
+
+class _SeqLLM:
+    """Returns a scripted sequence of texts across successive complete() calls --
+    so a self-consistency judge sees diverse votes."""
+
+    def __init__(self, texts):
+        self._texts = list(texts)
+        self.model = "fake:seq"
+        self.calls = []
+
+    def complete(self, system, messages, **kw):
+        self.calls.append((system, messages, kw))
+        i = min(len(self.calls) - 1, len(self._texts) - 1)
+        return type("R", (), {"text": self._texts[i]})()
+
+
+def test_llm_judge_self_consistency_majority_vote():
+    # 2 "yes" vs 1 "no" -> majority yes; uses a DIFFERENT framing per sample.
+    llm = _SeqLLM(["yes", "no", "yes"])
+    j = ev.llm_judge(llm, samples=3)
+    assert j("g", "out", "exp") is True
+    assert len(llm.calls) == 3
+    framings = {c[0] for c in llm.calls}
+    assert len(framings) == 3                         # three distinct reasoning paths
+    # 2 "no" vs 1 "yes" -> majority no.
+    assert ev.llm_judge(_SeqLLM(["no", "yes", "no"]), samples=3)("g", "o", "e") is False
+
+
+def test_llm_judge_self_consistency_tie_breaks_to_heuristic():
+    # 1 yes / 1 no tie with samples=2 -> heuristic decides (expected substring).
+    j = ev.llm_judge(_SeqLLM(["yes", "no"]), samples=2)
+    assert j("g", "the answer is DONE", "done") is True   # heuristic: present
+    assert j("g", "mismatch", "done") is False            # heuristic: absent
+
+
+def test_llm_judge_single_sample_is_unchanged():
+    # Default samples=1 keeps the single-call behavior (exactly one judge call).
+    llm = _SeqLLM(["yes"])
+    assert ev.llm_judge(llm)("g", "o", "e") is True
+    assert len(llm.calls) == 1
 
 
 def test_llm_judge_fails_open_to_heuristic():

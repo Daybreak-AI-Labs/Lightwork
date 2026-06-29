@@ -1248,6 +1248,186 @@ def test_config_mine_bucket_by_allowlist(monkeypatch):
     assert sh.settings()["mine_bucket_by"] == ()
 
 
+# ---------- per-tool component profiles (#7): bucket_by=("tool",) ----------
+
+def _refl_t(model, fclass, goal, tools):
+    return {"model_id": model, "failure_class": fclass, "goal_text": goal,
+            "failure_msg": "x", "channel": None, "user_id": None,
+            "tools_used": tools}
+
+
+def test_bucket_value_tool_is_the_failing_tool():
+    # The component a failure belongs to is the tool in play when it failed --
+    # the LAST of tools_used. Empty/missing -> "" (untagged, clusters together).
+    assert sh._bucket_value({"tools_used": ["plan", "web_fetch"]}, "tool") == "web_fetch"
+    assert sh._bucket_value({"tools_used": []}, "tool") == ""
+    assert sh._bucket_value({}, "tool") == ""
+    # a plain scalar dim is still a straight field read
+    assert sh._bucket_value({"domain": "finance"}, "domain") == "finance"
+
+
+def test_mine_bucket_by_tool_splits_signatures():
+    # Same class + same goal text, but the failure surfaced in different tools.
+    rs = ([_refl_t("M", "timeout", "process the report", ["plan", "web_fetch"])
+           for _ in range(3)]
+          + [_refl_t("M", "timeout", "process the report", ["plan", "sql_query"])
+             for _ in range(3)])
+    # Model-wide (default): one signature backed by all six.
+    flat = sh.mine_failures(rs, model_id="M", min_support=3)
+    assert len(flat) == 1 and flat[0].support == 6 and flat[0].context == ""
+    # Bucketed by tool: two scoped signatures, three each.
+    scoped = sh.mine_failures(rs, model_id="M", min_support=3, bucket_by=("tool",))
+    assert {s.context for s in scoped} == {"tool=web_fetch", "tool=sql_query"}
+    assert all(s.support == 3 for s in scoped)
+
+
+def test_recall_addendum_scopes_to_tool(monkeypatch, store):
+    # A tool-scoped line recalls only when the agent has that tool on hand.
+    ctrl = _enable(monkeypatch)
+    rs = [_refl_t("M", "timeout", "process the report", ["plan", "web_fetch"])
+          for _ in range(3)]
+    rep = sh.run_self_harness(
+        rs, model_id="M", controller=ctrl, min_support=3, path=store,
+        held_in=["a", "b"], held_out=["c", "d", "e", "f", "g"],
+        score_with=lambda a, c: 0.9, score_without=lambda a, c: 0.4,
+        bucket_by=("tool",))
+    assert rep.mined == 1 and rep.promoted == 1
+    # Not in the model-wide block, and not recalled for an unrelated tool...
+    assert sh.recall_addendum("M", store) == ""
+    assert sh.recall_addendum("M", store, tools=["sql_query"]) == ""
+    # ...but recalled when web_fetch is available.
+    got = sh.recall_addendum("M", store, tools=["plan", "web_fetch"])
+    assert "tool=web_fetch" in got
+
+
+def test_recall_addendum_tool_scope_is_order_independent(monkeypatch, store):
+    # The recalled block must be byte-identical regardless of tool-list order
+    # (the determinism guarantee extends to tool scoping).
+    monkeypatch.setenv("MAVERICK_SELF_HARNESS", "1")
+    sh._write_addenda({
+        sh._scoped_key("M", "tool=a"): "Operating guidance learned for this model:\n- line a",
+        sh._scoped_key("M", "tool=b"): "Operating guidance learned for this model:\n- line b",
+    }, store)
+    one = sh.recall_addendum("M", store, tools=["a", "b"])
+    two = sh.recall_addendum("M", store, tools=["b", "a"])
+    assert one == two and "line a" in one and "line b" in one
+
+
+def test_note_outcome_credits_tool_scope(monkeypatch, store):
+    # An outcome on a run that recalled a tool-scoped line credits that scope.
+    monkeypatch.setenv("MAVERICK_SELF_HARNESS", "1")
+    key = sh._scoped_key("M", "tool=web_fetch")
+    sh._write_addenda(
+        {key: "Operating guidance learned for this model:\n- verify the fetched payload"},
+        store)
+    sh._write_line_meta({sh._line_id(key, "verify the fetched payload"): {
+        "model_id": "M", "text": "verify the fetched payload"}}, store)
+    sh.note_outcome("M", True, tools=["web_fetch"], path=store)
+    sh.note_outcome("M", False, tools=["web_fetch"], path=store)
+    # an unrelated tool's outcome does NOT touch this line
+    sh.note_outcome("M", True, tools=["sql_query"], path=store)
+    eff = {r["text"]: r for r in sh.line_efficacy("M", store)}
+    assert eff["verify the fetched payload"]["success"] == 1
+    assert eff["verify the fetched payload"]["failure"] == 1
+
+
+def test_config_mine_bucket_by_allows_tool(monkeypatch):
+    from maverick import config
+    monkeypatch.setattr(config, "load_config", lambda *a, **k: {
+        "self_harness": {"mine_bucket_by": ["domain", "tool"]}})
+    assert config.get_self_harness()["mine_bucket_by"] == ("domain", "tool")
+
+
+# ---------- holdout rotation (#C7): cross-validate across K folds ----------
+
+def _scorers_with_bad_goal(bad):
+    """A live A/B where the line helps every goal EXCEPT ``bad`` (which it hurts):
+    overall it looks good, but a fold that holds out ``bad`` sees a regression."""
+    def sw(_line, goals):
+        return (sum(0.1 if g == bad else 0.9 for g in goals) / len(goals)
+                if goals else 0.0)
+
+    def wo(_line, goals):
+        return 0.5 if goals else 0.0
+    return sw, wo
+
+
+def test_validate_rotated_accepts_line_that_generalizes():
+    p = sh.HarnessProposal("M", "sig", "the line", "r")
+    vr = sh._validate_rotated(
+        p, pool=[f"g{i}" for i in range(5)], rotations=5,
+        score_with=lambda a, c: 0.9, score_without=lambda a, c: 0.4,
+        validate_kwargs={})
+    assert vr.accepted and "rotation" in vr.reason
+
+
+def test_validate_rotated_rejects_line_that_regresses_one_fold():
+    p = sh.HarnessProposal("M", "sig", "the line", "r")
+    sw, wo = _scorers_with_bad_goal("g2")
+    vr = sh._validate_rotated(
+        p, pool=[f"g{i}" for i in range(5)], rotations=5,
+        score_with=sw, score_without=wo, validate_kwargs={})
+    assert not vr.accepted and "failed rotation" in vr.reason
+
+
+def test_validate_rotated_small_pool_falls_back_to_single_split():
+    # < 2 goals can't be folded -> defers to a single validate_proposal (held_out
+    # empty), so rotation never crashes on a tiny corpus.
+    p = sh.HarnessProposal("M", "sig", "the line", "r")
+    vr = sh._validate_rotated(
+        p, pool=["only"], rotations=5,
+        score_with=lambda a, c: 0.9, score_without=lambda a, c: 0.4,
+        validate_kwargs={})
+    assert vr.accepted                                  # in-sample lift, no holdout
+
+
+def test_run_self_harness_rotation_rejects_nongeneralizing(monkeypatch, store):
+    # A line that wins on one fixed split but regresses on a held-out fold is
+    # PROMOTED by the single-split gate yet REJECTED once holdout rotation is on.
+    ctrl = _enable(monkeypatch)
+    rs = [_refl("M", "timeout", "process the nightly report") for _ in range(3)]
+    sw, wo = _scorers_with_bad_goal("a")                # "a" lands in held_in below
+    kw = dict(model_id="M", controller=ctrl, min_support=3, path=store,
+              held_in=["a", "b"], held_out=["c", "d", "e"],
+              score_with=sw, score_without=wo)
+    # Rotation ON (leave-one-out): the fold holding out "a" regresses -> rejected.
+    rep_rot = sh.run_self_harness(rs, holdout_rotations=5, **kw)
+    assert rep_rot.promoted == 0
+    assert any("failed rotation" in s for s in rep_rot.skipped)
+    assert sh.recall_addendum("M", store) == ""
+    # Same evidence, single split (default): the bad goal sits in held_in (delta 0)
+    # while held_out is all-good, so the legacy gate promotes it.
+    rep_one = sh.run_self_harness(rs, **kw)
+    assert rep_one.promoted == 1
+
+
+def test_config_holdout_rotations(monkeypatch):
+    from maverick import config
+    monkeypatch.setattr(config, "load_config", lambda *a, **k: {
+        "self_harness": {"holdout_rotations": 4}})
+    assert config.get_self_harness()["holdout_rotations"] == 4
+    # floor of 1 (a non-positive value can't disable validation)
+    monkeypatch.setattr(config, "load_config", lambda *a, **k: {
+        "self_harness": {"holdout_rotations": 0}})
+    assert config.get_self_harness()["holdout_rotations"] == 1
+    monkeypatch.setattr(config, "load_config", lambda *a, **k: {"self_harness": {}})
+    assert config.get_self_harness()["holdout_rotations"] == 1
+    assert sh.settings()["holdout_rotations"] == 1
+
+
+def test_config_judge_samples(monkeypatch):
+    from maverick import config
+    monkeypatch.setattr(config, "load_config", lambda *a, **k: {
+        "self_harness": {"judge_samples": 5}})
+    assert config.get_self_harness()["judge_samples"] == 5
+    monkeypatch.setattr(config, "load_config", lambda *a, **k: {
+        "self_harness": {"judge_samples": 0}})        # floor of 1
+    assert config.get_self_harness()["judge_samples"] == 1
+    monkeypatch.setattr(config, "load_config", lambda *a, **k: {"self_harness": {}})
+    assert config.get_self_harness()["judge_samples"] == 1
+    assert sh.settings()["judge_samples"] == 1
+
+
 def test_runner_pass_applies_bucket_by_config(monkeypatch, store):
     from maverick import config
     from maverick import self_improvement_runner as runner
@@ -1746,3 +1926,34 @@ def test_auto_evaluator_none_without_cases(monkeypatch, tmp_path):
     # no cases for model M -> None (caller stays dry)
     assert runner._auto_evaluator("M", corpus_path=str(cpath)) is None
     assert runner._auto_evaluator("M", corpus_path=str(tmp_path / "missing.json")) is None
+
+
+# ---------- A1/A2: outcome attribution scoping + cycle drives the lifecycle ----------
+
+def test_note_outcome_domain_attribution_is_scoped(monkeypatch, store):
+    ctrl = _enable(monkeypatch)
+    _promote_line(store, "M", "c0", "model wide line", ctrl)
+    fin = _promote_domain_line(store, ctrl)                 # finance-scoped line
+    # a finance run credits model-wide + finance, NOT other domains
+    sh.note_outcome("M", True, domain="finance", path=store)
+    eff = {e["text"]: e for e in sh.line_efficacy("M", store)}
+    assert eff["model wide line"]["success"] == 1
+    assert eff[fin]["success"] == 1 and eff[fin]["domain"] == "finance"
+    # a domain-less run credits ONLY the model-wide block (not finance)
+    sh.note_outcome("M", True, path=store)
+    eff2 = {e["text"]: e for e in sh.line_efficacy("M", store)}
+    assert eff2["model wide line"]["success"] == 2 and eff2[fin]["success"] == 1
+
+
+def test_cycle_drives_canary_lifecycle(monkeypatch, store):
+    ctrl = _enable(monkeypatch)
+    monkeypatch.setattr(sh, "_store_path", lambda: store)
+    from maverick import self_improvement_runner as runner
+    _promote_line(store, "M", "c0", "flaky canary", ctrl)
+    sh.mark_canary("M", "flaky canary", path=store)
+    sh.note_outcome("M", False, line="flaky canary", path=store)
+    sh.note_outcome("M", False, line="flaky canary", path=store)
+    # a dry cycle (no scorer) still runs the counter-driven canary review
+    report, _ = runner.run_self_harness_cycle(reflexions=[], model_id="M", retire=False)
+    assert report.demoted == ["flaky canary"]
+    assert "flaky canary" not in sh.recall_addendum("M", store)

@@ -106,6 +106,43 @@ def test_harness_view_shows_provenance_and_conflicts(monkeypatch, tmp_path):
     assert h["provenance"] and h["conflicts"]
 
 
+def test_harness_view_shows_efficacy_canary_and_domain(monkeypatch, tmp_path):
+    # The /learned page surfaces the outcome-driven lifecycle the CLI exposes:
+    # per-line success/failure counters, the canary probation badge, and the
+    # department tag for domain-scoped guidance.
+    _isolate(monkeypatch, tmp_path)
+    from maverick import self_harness as sh
+    store = tmp_path / "addenda.json"
+    monkeypatch.setattr(sh, "_store_path", lambda: store)
+    monkeypatch.setenv("MAVERICK_SELF_HARNESS", "1")
+    finance_key = sh._scoped_key("claude-x", "domain=finance")
+    sh._write_addenda({
+        "claude-x": "Operating guidance learned for this model:\n- check inputs first",
+        finance_key: "Operating guidance learned for this model:\n- reconcile before posting",
+    }, store)
+    sh._write_line_meta({
+        sh._line_id("claude-x", "check inputs first"): {
+            "model_id": "claude-x", "text": "check inputs first",
+            "recall_success": 3, "recall_failure": 1, "canary": True,
+            "learned_at": 1700000000.0, "updated_at": 1700000000.0},
+        sh._line_id(finance_key, "reconcile before posting"): {
+            "model_id": "claude-x", "text": "reconcile before posting",
+            "learned_at": 1700000000.0, "updated_at": 1700000000.0},
+    }, store)
+    body = _client().get("/api/v1/learned").json()
+    prov = body["harness"][0]["provenance"]
+    by_text = {r["text"]: r for r in prov}
+    assert by_text["check inputs first"]["success"] == 3
+    assert by_text["check inputs first"]["failure"] == 1
+    assert by_text["check inputs first"]["rate"] == 0.75
+    assert by_text["check inputs first"]["canary"] is True
+    assert by_text["reconcile before posting"]["domain"] == "finance"
+    text = _client().get("/learned").text
+    assert "canary" in text                          # probation badge rendered
+    assert "75% success" in text                     # outcome counters rendered
+    assert "finance" in text                          # department tag rendered
+
+
 def test_harness_guidance_shows_off_note_when_disabled(monkeypatch, tmp_path):
     # Stored-but-paused guidance is still shown, with a clear "not recalled" note
     # (matches `maverick self-harness show`).

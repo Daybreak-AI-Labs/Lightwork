@@ -200,6 +200,54 @@ def test_write_config_self_harness_ships_production_floors(tmp_path: Path, monke
     assert parsed["self_harness"]["require_held_out"] is True
     assert parsed["self_harness"]["min_held_out"] == 5
     assert parsed["self_harness"]["min_delta"] == 0.02
+    # The optional advanced knobs are NOT written unless opted into, so the
+    # default block stays minimal and each knob keeps its historical default.
+    for k in ("eval_corpus", "mine_bucket_by", "semantic_mining",
+              "efficacy_review", "candidates_per_signature", "retire_after_days"):
+        assert k not in parsed["self_harness"]
+
+
+def test_write_config_self_harness_advanced_knobs(tmp_path: Path, monkeypatch):
+    # The advanced-paths follow-up surfaces the newer knobs; the writer emits each
+    # one only when opted into, and they round-trip through config.get_self_harness.
+    parsed = _write_full_config(tmp_path, monkeypatch, advanced={
+        "self_harness": True,
+        "self_harness_eval_corpus": "/etc/maverick/corpus.json",
+        "self_harness_bucket_domain": True,
+        "self_harness_semantic_mining": True,
+        "self_harness_efficacy_review": True,
+        "self_harness_candidates": 3,
+        "self_harness_retire_days": 45,
+    })
+    sh = parsed["self_harness"]
+    assert sh["eval_corpus"] == "/etc/maverick/corpus.json"
+    assert sh["mine_bucket_by"] == ["domain"]
+    assert sh["semantic_mining"] is True
+    assert sh["efficacy_review"] is True
+    assert sh["candidates_per_signature"] == 3
+    assert sh["retire_after_days"] == 45
+    # The kernel actually reads what the wizard wrote.
+    from maverick import config
+    monkeypatch.setattr(config, "load_config", lambda *a, **k: parsed)
+    resolved = config.get_self_harness()
+    assert resolved["eval_corpus"] == "/etc/maverick/corpus.json"
+    assert resolved["mine_bucket_by"] == ("domain",)
+    assert resolved["semantic_mining"] is True
+    assert resolved["efficacy_review"] is True
+    assert resolved["candidates_per_signature"] == 3
+    assert resolved["retire_after_days"] == 45.0
+
+
+def test_write_config_self_harness_default_candidate_count_omitted(tmp_path: Path, monkeypatch):
+    # Opting into the advanced follow-up but leaving best-of-N / retire at their
+    # defaults must NOT write the knob (default 1 / 0 == historical behavior).
+    parsed = _write_full_config(tmp_path, monkeypatch, advanced={
+        "self_harness": True,
+        "self_harness_candidates": 1,
+        "self_harness_retire_days": 0,
+    })
+    assert "candidates_per_signature" not in parsed["self_harness"]
+    assert "retire_after_days" not in parsed["self_harness"]
 
 
 def test_write_config_emits_self_learning(tmp_path: Path, monkeypatch):
