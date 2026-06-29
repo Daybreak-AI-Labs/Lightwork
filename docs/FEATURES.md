@@ -74,6 +74,25 @@ here.
   success is noise), and it dedups a candidate against the learned-skills store
   by lexical containment so near-duplicate lessons don't accumulate — the
   orchestrator uses the gated path.
+- **DPO preference-pair mining from real runs** — the offline DPO fine-tune
+  (`maverick.training.rlaif`, the L3 rung) is trained on preference pairs built
+  from donated run records, not hand-labels. Two objective gradient sources:
+  (1) a verifier-**rejected draft** paired against the accepted final within one
+  `task_family`, and (2) **best-of-N candidate mining** — `run_goal_best_of_n`
+  scores each of N coding attempts by whether the task's real tests pass
+  (`--fail-to-pass`/`--pass-to-pass`) and donates the pass-vs-fail spread as a
+  pair with a ~1.0 reward margin (no verifier rejection needed; a strong
+  proposer + strong verifier rarely rejects, so the objective signal is the
+  robust one). A pair is written only when the attempts *diverge*; an all-tie
+  run logs `best-of-N: no DPO pair donated` and writes nothing. Candidate
+  patches an agent applied via tools (no diff in the final answer) are recovered
+  from the workdir (`_capture_workdir_diff`, `__pycache__`/binary noise
+  excluded) and each attempt is isolated by a reset to clean HEAD. Donation is
+  opt-in and metadata-only unless `donate_text` is set (`[telemetry]
+  donate_trajectories` / `donate_text`, thresholds `donate_min_entropy` /
+  `donate_min_confidence`); `maverick start --repeat N` re-runs one task N times
+  so its attempts share a `task_family`. End-to-end recipe in
+  [`self-learning-runbook.md`](./self-learning-runbook.md).
 - **Dreaming (offline consolidation)** — `maverick dream` (`dreaming.py`,
   opt-in `[dreaming] enable`) replays recent successes + failure reflexions
   while the swarm is idle, attributes them to departments (domain packs),

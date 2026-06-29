@@ -7,6 +7,21 @@ project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 ## [Unreleased]
 
 ### Added
+- **DPO preference-pair mining from real runs** — the offline DPO fine-tune
+  (`maverick.training.rlaif`) now has two objective sources of a quality
+  gradient, both built from donated run records (no hand-labels): a
+  verifier-**rejected draft** paired against the accepted final within one
+  `task_family`, and **best-of-N candidate mining** — `run_goal_best_of_n`
+  scores each of N coding attempts by whether the task's real tests pass
+  (`--fail-to-pass`/`--pass-to-pass`) and donates the pass-vs-fail spread as a
+  preference pair with a ~1.0 reward margin, no verifier rejection needed. New
+  `maverick start --repeat N` re-runs the same task N times so its attempts
+  share a `task_family`. Trajectory donation is now reachable from the installer
+  wizard (Advanced reasoning step, default off, metadata-only), and its
+  thresholds are configurable under `[telemetry]` (`donate_min_entropy`,
+  `donate_min_confidence`, `donate_text`) so a normal single-agent run is
+  captured (the old swarm-only bar donated nothing from typical usage).
+  End-to-end recipe in `docs/self-learning-runbook.md`.
 - **FinOps & safety CLI + billing view** — `maverick spend` (`--json`) exports
   total + per-goal + per-tag run cost for BI/chargeback scripts; `maverick
   safety` (`--json`) prints the shield / sandbox-backend / egress posture to
@@ -157,6 +172,20 @@ project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   upgrade (schema v10). The FTS triggers only index future writes, so a
   database whose messages predated the index carried unindexed history that
   message search silently missed; v10 rebuilds it once.
+- Self-learning data pipeline (donation → ingest → DPO) closed several gaps that
+  left the training corpus empty: trajectory records now carry a `goal_id` (so
+  `ingest`/`export_texts` can join the world DB for transcripts) and a
+  `task_family` derived from the task-brief hash (without it `rlaif` grouped
+  everything into one family and mined zero pairs); the swarm-disagreement
+  donation gate is now configurable so single-agent runs are no longer silently
+  dropped.
+- Best-of-N candidate capture now recovers patches an agent applied via tools
+  (no diff in its final answer) by diffing the workdir, excludes `__pycache__`/
+  `*.pyc` and binary sections (which made `git apply` reject the whole patch and
+  scored every candidate 0), and resets the shared workdir to clean HEAD between
+  attempts so one attempt's edits can't leak into the next. New
+  `MAVERICK_BON_EARLY_EXIT=0` runs all N attempts (instead of stopping at the
+  first pass) so a failing candidate is also captured for the preference pair.
 
 ## [0.1.6] -- 2026-05-31
 
