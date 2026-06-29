@@ -733,11 +733,6 @@ class FederationService:
         if not corr:
             return self._refuse_recorded(peer, corr, "correlation_id is required")
 
-        # Per-peer request-rate cap (post-auth): each accepted delegation spawns
-        # a goal run, so throttle a flooding peer before we do any of that work.
-        if not _fed_rate_ok(f"peer:{peer.name}"):
-            return self._refuse_recorded(peer, corr, "rate limit exceeded")
-
         requested = {str(t) for t in (payload.get("requested_tools") or [])
                      if str(t).strip()}
         req_risk = str(payload.get("max_risk") or "") or None
@@ -814,6 +809,13 @@ class FederationService:
         )
         if not negotiation.ok:
             return self._refuse_recorded(peer, corr, negotiation.reason)
+
+        # Per-peer accepted-delegation rate cap: each admitted delegation spawns
+        # a goal run, so charge the peer only after trust-plane and signed-
+        # identity checks succeed. Token-only/invalid signatures must not be
+        # able to consume the legitimate signed delegation quota.
+        if not _fed_rate_ok(f"peer:{peer.name}"):
+            return self._refuse_recorded(peer, corr, "rate limit exceeded")
 
         deadline_ms = _to_int(payload.get("deadline_ms"))
         # Clamp the run's budget to the peer's registry ceiling (down only):
