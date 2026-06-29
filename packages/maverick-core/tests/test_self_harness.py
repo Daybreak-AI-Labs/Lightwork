@@ -1092,6 +1092,29 @@ def test_mine_semantic_default_clusters_morphological_variants():
     assert len(sigs) == 1 and sigs[0].support == 3
 
 
+def test_mine_semantic_default_caches_bounded_features(monkeypatch):
+    # Built-in semantic mining should extract bounded trigram features once per
+    # record, not once per record-to-cluster-head comparison. With distinct long
+    # goals this would otherwise amplify attacker-controlled reflexion text.
+    calls = 0
+    real_char_ngrams = sh._char_ngrams
+
+    def counted(text, n=3):
+        nonlocal calls
+        calls += 1
+        grams = real_char_ngrams(text, n)
+        assert len(grams) <= sh._MAX_SEMANTIC_TEXT_CHARS
+        return grams
+
+    monkeypatch.setattr(sh, "_char_ngrams", counted)
+    rs = [_refl("M", "auth", chr(97 + i) * (sh._MAX_SEMANTIC_TEXT_CHARS * 2))
+          for i in range(6)]
+
+    assert sh.mine_failures(rs, model_id="M", min_support=2,
+                            similarity_fn=sh.semantic_similarity) == []
+    assert calls == len(rs)
+
+
 def test_semantic_mining_is_deterministic_under_permutation():
     # Determinism crown-jewel: semantic mining must be permutation-invariant too.
     goals = ["authenticating", "authentication", "authenticate", "reauthenticate"]

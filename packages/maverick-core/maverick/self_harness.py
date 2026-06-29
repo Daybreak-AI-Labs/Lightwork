@@ -57,6 +57,12 @@ _MAX_LINES_PER_MODEL = 8
 # ``limit`` (500) recent traces, so this never trips in normal use; it only
 # bounds a pathological direct caller. See mine_failures.
 _MAX_MINE_TRACES = 4000
+# Bound per-text semantic feature extraction. Goal descriptions can be long and
+# semantic mining compares each record against cluster heads; capping the
+# offline trigram input and caching extracted features below prevents long
+# attacker-controlled failure texts from turning maintenance mining into a CPU
+# and memory churn amplifier while preserving short/normal goal behavior.
+_MAX_SEMANTIC_TEXT_CHARS = 4096
 _TOKEN_RE = re.compile(r"[A-Za-z0-9_]+")
 
 
@@ -557,11 +563,26 @@ def _jaccard(a: set[str], b: set[str]) -> float:
 def _char_ngrams(text: str, n: int = 3) -> set[str]:
     """Character n-grams of the whitespace-normalized lowercase text. Catches
     morphological overlap that whole-token Jaccard misses (authenticate vs
-    authentication share trigrams; share no whole token)."""
-    s = " ".join((text or "").lower().split())
+    authentication share trigrams; share no whole token). Long texts are clipped
+    to keep semantic mining's pairwise comparisons bounded."""
+    s = " ".join((text or "").lower().split())[:_MAX_SEMANTIC_TEXT_CHARS]
     if len(s) < n:
         return {s} if s else set()
     return {s[i:i + n] for i in range(len(s) - n + 1)}
+
+
+def _semantic_features(text: str) -> tuple[set[str], set[str]]:
+    """Precomputed features for the built-in semantic similarity."""
+    return _tokens((text or "")[:_MAX_SEMANTIC_TEXT_CHARS]), _char_ngrams(text)
+
+
+def _semantic_similarity_from_features(
+    a: tuple[set[str], set[str]], b: tuple[set[str], set[str]],
+) -> float:
+    """Built-in semantic similarity over precomputed token/trigram sets."""
+    tok = _jaccard(a[0], b[0])
+    ng = _jaccard(a[1], b[1])
+    return max(tok, ng)
 
 
 def semantic_similarity(a: str, b: str) -> float:
@@ -575,9 +596,7 @@ def semantic_similarity(a: str, b: str) -> float:
     deterministic default the ``semantic_mining`` flag turns on so enabling the
     feature is a real, reproducible improvement over strict token overlap without
     requiring a provider, and it stays inside the determinism guarantee."""
-    tok = _jaccard(_tokens(a), _tokens(b))
-    ng = _jaccard(_char_ngrams(a), _char_ngrams(b))
-    return max(tok, ng)
+    return _semantic_similarity_from_features(_semantic_features(a), _semantic_features(b))
 
 
 def _is_minable(r: object, model_id: str) -> bool:
@@ -717,11 +736,16 @@ def mine_failures(
         # algorithmic-complexity battery.)
         heads: list[set[str]] = []
         head_texts: list[str] = []      # parallel head goal-texts for similarity_fn
+        builtin_semantic = similarity_fn is semantic_similarity
+        head_semantic: list[tuple[set[str], set[str]]] = []
         for r in recs:
             rtext = str(r.get("goal_text", ""))
-            rt = _tokens(rtext)
+            rsem = _semantic_features(rtext) if builtin_semantic else None
+            rt = rsem[0] if rsem is not None else _tokens(rtext)
             for i, htok in enumerate(heads):
-                if similarity_fn is not None:
+                if builtin_semantic and rsem is not None:
+                    sim = _semantic_similarity_from_features(head_semantic[i], rsem)
+                elif similarity_fn is not None:
                     try:
                         sim = float(similarity_fn(head_texts[i], rtext))
                     except Exception:  # a bad seam can't crash mining -> no match
@@ -735,6 +759,8 @@ def mine_failures(
                 clusters.append([r])
                 heads.append(rt)
                 head_texts.append(rtext)
+                if builtin_semantic and rsem is not None:
+                    head_semantic.append(rsem)
         for cluster in clusters:
             if len(cluster) < eff_support:
                 continue
