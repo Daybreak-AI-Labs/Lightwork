@@ -157,6 +157,16 @@ stripped before any cloud call with `[privacy] redact_egress = true`.
 ## Learning & workforce sections
 
 ```toml
+[telemetry]                # trajectory donation -> the training corpus (default off)
+donate_trajectories = true # write scrubbed run records to ~/.maverick/outbox/
+donate_text = false        # ALSO keep raw draft/candidate text -- DPO needs it,
+                           #   but it's an egress decision (off => metadata only)
+donate_min_entropy = 0.5   # swarm-disagreement floor; a single-agent run has
+                           #   entropy 0, so set 0 to capture EVERY successful run
+donate_min_confidence = 0.75  # verifier-confidence floor to donate a run
+# Feeds `maverick.training.ingest` / `export_texts` -> PRM/DPO. Full recipe
+# (incl. best-of-N pair mining) in docs/self-learning-runbook.md.
+
 [dreaming]                 # offline experience consolidation (default off)
 enable = true
 # min_cluster / insight_ttl_days / retire_skills / rehearse / prune_facts /

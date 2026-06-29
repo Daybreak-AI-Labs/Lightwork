@@ -71,6 +71,7 @@ for false unless noted otherwise.
 | --- | --- | --- |
 | `MAVERICK_BEST_OF_N` | `1` | Generate N candidate solutions and pick the best. |
 | `MAVERICK_BON_LADDER` | built-in ladder | Comma-separated best-of-N sample ladder for adaptive escalation. |
+| `MAVERICK_BON_EARLY_EXIT` | `1` (on) | Best-of-N stops the ladder after the first candidate whose tests all pass. Set `0` to run all N attempts, so a *failing* candidate is also captured — needed to mine a DPO preference pair (pass vs fail) from one coding task. |
 | `MAVERICK_TREE_OF_THOUGHT` | unset (off) | Enable tree-of-thought planning: fork candidate plans, critic selects. |
 | `MAVERICK_TOT_CANDIDATES` | built-in | Number of candidate plans tree-of-thought forks. |
 | `MAVERICK_REFLEXION` | config `[reflexion] enable` (off) | Enable the reflexion self-critique loop. |
