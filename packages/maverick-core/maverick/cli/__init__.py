@@ -659,6 +659,7 @@ def support(output: str | None) -> None:
         from pathlib import Path as _P
         path = _P(output).expanduser()
         fd = os.open(str(path), os.O_WRONLY | os.O_CREAT | os.O_TRUNC, 0o600)
+        os.fchmod(fd, 0o600)
         with os.fdopen(fd, "w", encoding="utf-8") as f:
             f.write(text + "\n")
         click.echo(f"support bundle written: {path}")
