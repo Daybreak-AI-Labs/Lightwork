@@ -101,8 +101,22 @@ echo "[smoke] inspect with:  csvtool col 1,2,9,11 ${PREDS_CSV} | head"
 echo
 
 # ---- producer-only sanity ----
-PATCH_COUNT=$(awk -F, 'NR>1 && $9 ~ /^---/ {n++} END {print n+0}' "${PREDS_CSV}")
-TOTAL_ROWS=$(($(wc -l < "${PREDS_CSV}") - 1))
+# Count rows whose predicted_patch looks like a unified diff. Must use a real
+# CSV parser keyed by FIELD NAME: `awk -F,` split on the wrong column ($9 is
+# verifier_confidence, not the patch) and also mis-split the quoted patch field,
+# which csv.DictWriter wraps because it embeds commas and newlines -- so the old
+# check counted 0 every time and falsely FAILED even when every row had a patch.
+read -r PATCH_COUNT TOTAL_ROWS < <(python3 - "${PREDS_CSV}" <<'PY'
+import csv, sys
+patches = total = 0
+with open(sys.argv[1], newline="") as f:
+    for row in csv.DictReader(f):
+        total += 1
+        if (row.get("predicted_patch") or "").startswith("---"):
+            patches += 1
+print(patches, total)
+PY
+)
 echo "[smoke] ${PATCH_COUNT}/${TOTAL_ROWS} rows have a unified-diff-shaped patch"
 
 if [[ "${PATCH_COUNT}" -eq 0 ]]; then
