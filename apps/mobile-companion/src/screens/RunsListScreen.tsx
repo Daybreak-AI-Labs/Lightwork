@@ -26,8 +26,8 @@ export function RunsListScreen(props: {
   const [cached, setCached] = useState<CachedBundle | null>(null);
 
   useEffect(() => {
-    if (error && !data) loadBundle().then(setCached);
-  }, [error, data]);
+    if (error && !data) loadBundle(settings.baseUrl).then(setCached);
+  }, [error, data, settings.baseUrl]);
 
   const offline = !data && cached;
   const rows: Goal[] = data

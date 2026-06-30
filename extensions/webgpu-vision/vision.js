@@ -91,36 +91,42 @@ async function runOp(gpu, entryPoint, rgba, width, height) {
     size: bytes, usage: GPUBufferUsage.MAP_READ | GPUBufferUsage.COPY_DST,
   });
 
-  const pipeline = device.createComputePipeline({
-    layout: "auto", compute: { module, entryPoint },
-  });
-  const bind = device.createBindGroup({
-    layout: pipeline.getBindGroupLayout(0),
-    entries: [
-      { binding: 0, resource: { buffer: dimsBuf } },
-      { binding: 1, resource: { buffer: srcBuf } },
-      { binding: 2, resource: { buffer: dstBuf } },
-    ],
-  });
+  // Destroy all four buffers in a finally: if mapAsync() (or any step up to it)
+  // rejects, the unconditional destroy below would be skipped, leaking GPU
+  // memory on every failed op.
+  try {
+    const pipeline = device.createComputePipeline({
+      layout: "auto", compute: { module, entryPoint },
+    });
+    const bind = device.createBindGroup({
+      layout: pipeline.getBindGroupLayout(0),
+      entries: [
+        { binding: 0, resource: { buffer: dimsBuf } },
+        { binding: 1, resource: { buffer: srcBuf } },
+        { binding: 2, resource: { buffer: dstBuf } },
+      ],
+    });
 
-  const enc = device.createCommandEncoder();
-  const pass = enc.beginComputePass();
-  pass.setPipeline(pipeline);
-  pass.setBindGroup(0, bind);
-  if (entryPoint === "grayscale") {
-    pass.dispatchWorkgroups(Math.ceil(n / 64));
-  } else {
-    pass.dispatchWorkgroups(Math.ceil(width / 8), Math.ceil(height / 8));
+    const enc = device.createCommandEncoder();
+    const pass = enc.beginComputePass();
+    pass.setPipeline(pipeline);
+    pass.setBindGroup(0, bind);
+    if (entryPoint === "grayscale") {
+      pass.dispatchWorkgroups(Math.ceil(n / 64));
+    } else {
+      pass.dispatchWorkgroups(Math.ceil(width / 8), Math.ceil(height / 8));
+    }
+    pass.end();
+    enc.copyBufferToBuffer(dstBuf, 0, readBuf, 0, bytes);
+    device.queue.submit([enc.finish()]);
+
+    await readBuf.mapAsync(GPUMapMode.READ);
+    const out = new Uint8ClampedArray(readBuf.getMappedRange().slice(0));
+    readBuf.unmap();
+    return out;
+  } finally {
+    [dimsBuf, srcBuf, dstBuf, readBuf].forEach((b) => b.destroy());
   }
-  pass.end();
-  enc.copyBufferToBuffer(dstBuf, 0, readBuf, 0, bytes);
-  device.queue.submit([enc.finish()]);
-
-  await readBuf.mapAsync(GPUMapMode.READ);
-  const out = new Uint8ClampedArray(readBuf.getMappedRange().slice(0));
-  readBuf.unmap();
-  [dimsBuf, srcBuf, dstBuf, readBuf].forEach((b) => b.destroy());
-  return out;
 }
 
 globalThis.Vision = { initWebGPU, runOp };

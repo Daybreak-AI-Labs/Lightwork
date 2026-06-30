@@ -87,7 +87,19 @@ async function answer(byName: Map<string, ToolDef>, line: string): Promise<WireR
     : {}) as Record<string, unknown>;
   try {
     const result = await tool.handler(args);
-    return { id, result: typeof result === "string" ? result : JSON.stringify(result) };
+    if (typeof result === "string") {
+      return { id, result };
+    }
+    const serialized = JSON.stringify(result);
+    if (serialized === undefined) {
+      // undefined / a function / a Symbol all make JSON.stringify return the
+      // JS value undefined, which would drop the "result" key off the wire
+      // entirely (the message carries neither result nor error, and the host
+      // reads that as a bogus null). Surface it as a readable error instead --
+      // most often a handler that falls through without an explicit return.
+      return { id, result: `ERROR: ${tool.name} returned a non-serializable value (${typeof result})` };
+    }
+    return { id, result: serialized };
   } catch (e) {
     // Same convention as Lightwork's Python tools: a failure is an
     // "ERROR: ..." result string the model can read, not a protocol error.
