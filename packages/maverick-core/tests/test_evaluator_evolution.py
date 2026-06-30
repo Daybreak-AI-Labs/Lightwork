@@ -155,6 +155,54 @@ def test_committed_baseline_lock_is_valid_json():
     assert isinstance(lock, dict) and "checksums" in lock
 
 
+# -- CLI: --regen must not launder an edited released anchor --------------------
+
+def _cli_env(tmp_path, monkeypatch):
+    """Isolate --regen's anchor dir + lock path so the test never touches the
+    real committed evaluator_anchors/evaluator_anchors.lock.json."""
+    anchor_dir = tmp_path / "anchors"
+    anchor_dir.mkdir()
+    monkeypatch.setenv("MAVERICK_EVALUATOR_ANCHOR_DIR", str(anchor_dir))
+    lock_path = tmp_path / "evaluator_anchors.lock.json"
+    monkeypatch.setattr(ee, "anchor_lock_path", lambda: lock_path)
+    return anchor_dir, lock_path
+
+
+def test_regen_refuses_to_launder_an_edited_released_anchor(tmp_path, monkeypatch):
+    anchor_dir, lock_path = _cli_env(tmp_path, monkeypatch)
+    f = anchor_dir / "reviewer.ndjson"
+    f.write_text('{"id": "case1", "label": true}\n')
+    assert ee.main(["--regen"]) == 0
+    original = lock_path.read_text()
+
+    f.write_text('{"id": "case1", "label": false}\n')  # edit a released anchor
+    assert ee.main(["--regen"]) == 1                    # refuses, not silently rewritten
+    assert lock_path.read_text() == original
+
+
+def test_regen_force_explicitly_relocks_an_edited_anchor(tmp_path, monkeypatch):
+    anchor_dir, lock_path = _cli_env(tmp_path, monkeypatch)
+    f = anchor_dir / "reviewer.ndjson"
+    f.write_text('{"id": "case1", "label": true}\n')
+    assert ee.main(["--regen"]) == 0
+    original = lock_path.read_text()
+
+    f.write_text('{"id": "case1", "label": false}\n')
+    assert ee.main(["--regen", "--force"]) == 0
+    assert lock_path.read_text() != original
+
+
+def test_regen_without_prior_lock_is_unaffected(tmp_path, monkeypatch):
+    # A brand-new anchor (nothing committed yet) must still regen cleanly
+    # without needing --force -- only an edit to an *already-locked* role
+    # should be refused.
+    anchor_dir, lock_path = _cli_env(tmp_path, monkeypatch)
+    f = anchor_dir / "reviewer.ndjson"
+    f.write_text('{"id": "case1", "label": true}\n')
+    assert ee.main(["--regen"]) == 0
+    assert lock_path.exists()
+
+
 # -- end-to-end promotion through the governance spine --------------------------
 
 def _ctrl(frozen=False, **kw):

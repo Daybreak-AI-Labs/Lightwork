@@ -71,6 +71,44 @@ def test_narrow_except_needs_no_marker(tmp_path):
     assert fp.scan_file(p) == []
 
 
+def test_sibling_handlers_trailing_comment_not_misattributed(tmp_path):
+    # A `# failure-policy:` comment trailing a PRIOR sibling handler's body
+    # must not be credited to the NEXT handler just because it's the
+    # physically preceding line -- that would let an unmarked broad handler
+    # slip through unflagged.
+    p = _write(
+        tmp_path,
+        "try:\n"
+        "    risky_a()\n"
+        "except ValueError:\n"
+        "    pass\n"
+        "    # failure-policy: best_effort\n"
+        "except Exception:\n"
+        "    swallow_silently()\n",
+    )
+    probs = fp.scan_file(p)
+    assert len(probs) == 1
+    assert probs[0][0] == 6  # the `except Exception:` line
+    assert "without a # failure-policy" in probs[0][1]
+
+
+def test_standalone_comment_between_sibling_handlers_passes(tmp_path):
+    # Unlike the previous case, a marker indented to match the `except`
+    # clauses themselves (not nested inside the previous handler's body) is a
+    # legitimate, unambiguous annotation of the next handler.
+    p = _write(
+        tmp_path,
+        "try:\n"
+        "    risky_a()\n"
+        "except ValueError:\n"
+        "    pass\n"
+        "# failure-policy: fail_soft_with_audit\n"
+        "except Exception:\n"
+        "    log_and_continue()\n",
+    )
+    assert fp.scan_file(p) == []
+
+
 def test_all_classes_accepted(tmp_path):
     for cls in fp.CLASSES:
         p = _write(

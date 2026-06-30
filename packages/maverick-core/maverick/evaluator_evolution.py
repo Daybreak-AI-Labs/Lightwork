@@ -596,9 +596,24 @@ def main(argv: list[str] | None = None) -> int:  # pragma: no cover -- CLI shell
                    help="exit 1 on any anchor governance violation")
     p.add_argument("--regen", action="store_true",
                    help="rewrite evaluator_anchors.lock.json from the current anchors")
+    p.add_argument("--force", action="store_true",
+                   help="with --regen, also re-lock anchor(s) whose checksum changed "
+                        "since the committed lock (DANGEROUS: only for an intentional, "
+                        "reviewed edit to a released anchor -- never for routine regen)")
     args = p.parse_args(argv)
 
     if args.regen:
+        changed = [prob for prob in lock_problems(load_lock())
+                   if "checksum changed" in prob]
+        if changed and not args.force:
+            print("evaluator-anchor governance: refusing to --regen")
+            for prob in changed:
+                print(f"  - {prob}")
+            print("  a released anchor was edited on disk; regenerating the lock "
+                  "now would silently launder that edit. Add a new anchor/version "
+                  "instead, or re-run with --force if this edit was an intentional, "
+                  "reviewed change to the released anchor.")
+            return 1
         path = write_lock()
         print(f"wrote {path}")
         return 0

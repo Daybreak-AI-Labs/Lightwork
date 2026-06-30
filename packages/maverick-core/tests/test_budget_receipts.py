@@ -202,6 +202,55 @@ def test_chain_break_on_truncated_tail(tmp_path):
     assert "truncated" in report.reason
 
 
+def test_truncation_plus_deleted_head_is_audited_not_silently_healed(tmp_path, monkeypatch):
+    # The cheapest tamper: drop the newest (priciest) receipts AND delete the
+    # high-water anchor sidecar so the truncation becomes invisible. mint()
+    # can't recover the true prior floor from a deleted file, but it must no
+    # longer be a silent no-op rebaseline -- it has to leave a trace.
+    import maverick.audit
+    from maverick.audit import EventKind
+    calls = []
+    monkeypatch.setattr(maverick.audit, "record",
+                        lambda kind, **kw: calls.append((kind, kw)) or True)
+
+    path = tmp_path / "receipts.jsonl"
+    for goal in (7, 9, 7, 9, 7):
+        br.mint(_world(), goal, KEY, path=path)
+    head_path = tmp_path / "receipts.jsonl.head"
+    assert head_path.exists()
+    lines = path.read_text(encoding="utf-8").splitlines()
+    path.write_text("\n".join(lines[:3]) + "\n", encoding="utf-8")
+    head_path.unlink()
+
+    br.mint(_world(), 7, KEY, path=path)
+
+    remediated = [kw for k, kw in calls if k == EventKind.CONFIG_REMEDIATED]
+    assert remediated, "missing head anchor on a non-empty chain went unaudited"
+    assert remediated[0]["field"] == "receipt_head_anchor"
+
+
+def test_forged_head_anchor_refuses_to_mint(tmp_path):
+    # A head file that exists but fails its own HMAC is unambiguous tamper
+    # evidence (this code only ever writes a correctly-signed head) -- mint()
+    # must refuse rather than silently overwrite it with a fresh, lower floor.
+    path = tmp_path / "receipts.jsonl"
+    br.mint(_world(), 7, KEY, path=path)
+    head_path = tmp_path / "receipts.jsonl.head"
+    head_path.write_text(json.dumps({"count": 999, "sig": "deadbeef"}))
+    with pytest.raises(br.ReceiptChainTampered):
+        br.mint(_world(), 7, KEY, path=path)
+
+
+def test_forged_head_anchor_flagged_by_verify_chain(tmp_path):
+    path = tmp_path / "receipts.jsonl"
+    br.mint(_world(), 7, KEY, path=path)
+    head_path = tmp_path / "receipts.jsonl.head"
+    head_path.write_text(json.dumps({"count": 999, "sig": "deadbeef"}))
+    report = br.verify_chain(path, KEY)
+    assert not report.ok
+    assert "signature" in report.reason
+
+
 def test_concurrent_mint_keeps_chain_intact(tmp_path):
     # Many minters racing on one chain must not fork the hash links: the
     # read-prev -> append sequence is serialized, so verify_chain stays ok.
