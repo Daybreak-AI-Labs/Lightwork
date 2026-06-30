@@ -478,6 +478,19 @@
       "method": "POST",
       "path": "/",
       "result": false
+    },
+    {
+      "config": {
+        "allow_hosts": [],
+        "allowed_routes": [],
+        "api_key": "<upstream-key>",
+        "auth_style": "bearer",
+        "client_token": "<client-token>",
+        "upstream": "https://api.anthropic.com"
+      },
+      "method": "POST",
+      "path": "/%76%31/messages",
+      "result": false
     }
   ]
 }
