@@ -793,7 +793,11 @@ def run_sonnet_single(instance_id: str, brief: str, **_kwargs) -> Row:
         cost_dollars=budget.dollars,
         tokens_in=budget.input_tokens,
         tokens_out=budget.output_tokens,
-        predicted_patch=_sanitize_patch_for_csv(text[:50_000]),
+        # No [:50_000] truncation: the SWE-bench Pro grader has no patch-size
+        # cap, and the slice cut mid-hunk on large multi-file patches. Match
+        # the maverick pipeline (which dropped it); _sanitize_patch_for_csv
+        # already handles CSV safety with no length cap.
+        predicted_patch=_sanitize_patch_for_csv(text),
         outcome="success" if text else "empty",
     )
 
@@ -840,7 +844,7 @@ def run_sonnet_tools(instance_id: str, brief: str, **kwargs) -> Row:
         return _dry_run_row(instance_id, "sonnet_tools")
 
     import anthropic
-    from maverick.budget import Budget
+    from maverick.budget import Budget, BudgetExceeded
     from maverick.llm import MODEL_SONNET
     from maverick.sandbox import build_sandbox
 
@@ -889,9 +893,16 @@ def run_sonnet_tools(instance_id: str, brief: str, **kwargs) -> Row:
             model=MODEL_SONNET, max_tokens=4096, system=system,
             tools=tools, messages=messages,
         )
-        budget.record_tokens(
-            resp.usage.input_tokens, resp.usage.output_tokens, model=MODEL_SONNET,
-        )
+        try:
+            budget.record_tokens(
+                resp.usage.input_tokens, resp.usage.output_tokens, model=MODEL_SONNET,
+            )
+        except BudgetExceeded:
+            # A single turn can push spend over the cap (e.g. a large tool
+            # result fed back as input). Stop the loop but keep the work done
+            # so far: fall through to _git_diff + Row instead of aborting the
+            # whole instance with no recorded patch.
+            break
         messages.append({"role": "assistant", "content": resp.content})
         tool_uses = [b for b in resp.content if getattr(b, "type", None) == "tool_use"]
         if not tool_uses:
@@ -922,7 +933,7 @@ def run_sonnet_tools(instance_id: str, brief: str, **kwargs) -> Row:
         cost_dollars=budget.dollars,
         tokens_in=budget.input_tokens,
         tokens_out=budget.output_tokens,
-        predicted_patch=_sanitize_patch_for_csv(diff[:50_000]),
+        predicted_patch=_sanitize_patch_for_csv(diff),
         outcome="success" if diff.strip() else "empty",
     )
 
@@ -1004,7 +1015,7 @@ def run_sonnet_self_consistency_n8(instance_id: str, brief: str, **_kwargs) -> R
         cost_dollars=budget.dollars,
         tokens_in=budget.input_tokens,
         tokens_out=budget.output_tokens,
-        predicted_patch=_sanitize_patch_for_csv(chosen[:50_000]),
+        predicted_patch=_sanitize_patch_for_csv(chosen),
         outcome="success" if chosen else "empty",
     )
 

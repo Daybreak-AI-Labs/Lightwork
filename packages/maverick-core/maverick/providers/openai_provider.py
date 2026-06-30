@@ -136,6 +136,12 @@ class OpenAIClient:
     # LM Studio, older vLLM) omit ``usage`` on non-streaming completions, so
     # aborting there breaks a free, correct run for no benefit.
     USAGE_REQUIRED = True
+    # Cache-read billing multiplier: cached input tokens are billed at this
+    # fraction of the full input rate. OpenAI/o-series/gpt-5 auto-cache reads
+    # discount ~0.5x (vs Anthropic's 0.1x budget default). Provider subclasses
+    # whose cache discount differs override this so a cache hit on DeepSeek /
+    # Gemini isn't over-billed at OpenAI's shallower rate.
+    CACHE_READ_MULT = 0.5
 
     def __init__(
         self,
@@ -324,8 +330,9 @@ class OpenAIClient:
             for t in anthropic_tools
         ]
 
-    @staticmethod
+    @classmethod
     def _from_response(
+        cls,
         resp: Any,
         budget: Budget | None,
         model: str | None = None,
@@ -407,15 +414,17 @@ class OpenAIClient:
             # checks. Fail closed instead.
             full_in = _strict_usage_count(getattr(usage, "prompt_tokens", 0), "prompt_tokens")
             billable_in = max(full_in - cache_read_tok, 0)
-            # OpenAI/o-series/gpt-5 auto-cache discounts reads ~0.5x, not
-            # Anthropic's 0.1x (the budget default) — bill the right rate.
-            from ..budget import CACHE_READ_MULT_OPENAI
+            # Bill cache reads at the provider's real discount, not Anthropic's
+            # 0.1x budget default. OpenAI/o-series/gpt-5 auto-cache reads are
+            # ~0.5x; DeepSeek (~0.1x) and Gemini (~0.25x implicit cache) are
+            # steeper and override CACHE_READ_MULT so their hits aren't
+            # over-billed at OpenAI's shallower rate.
             budget.record_tokens(
                 billable_in,
                 _strict_usage_count(getattr(usage, "completion_tokens", 0), "completion_tokens"),
                 model=(price_model_prefix + model) if model else model,
                 cache_read_tok=cache_read_tok,
-                cache_read_mult=CACHE_READ_MULT_OPENAI,
+                cache_read_mult=cls.CACHE_READ_MULT,
             )
         # Map finish_reason to Anthropic stop_reason vocab so consumers that
         # check Anthropic values (e.g., 'tool_use', 'end_turn') branch correctly.

@@ -54,8 +54,12 @@ class SSHBackend:
     host_key_checking: str = "accept-new"
 
     def __post_init__(self) -> None:
-        if isinstance(self.workdir, str):
-            self.workdir = PurePosixPath(self.workdir)
+        # Coerce unconditionally, not just for str: build_sandbox passes a
+        # platform ``pathlib.Path``, which on a Windows client is a WindowsPath
+        # (a PurePath, NOT a str), so a str-only guard would let the backslash
+        # path the class docstring warns about reach the Linux remote.
+        if not isinstance(self.workdir, PurePosixPath):
+            self.workdir = PurePosixPath(str(self.workdir))
         policy = (self.host_key_checking or "accept-new").strip().lower()
         if policy not in _VALID_HOST_KEY_POLICIES:
             policy = "accept-new"
@@ -86,12 +90,31 @@ class SSHBackend:
                 "Check your SSH config / keys."
             )
 
+    def _quote_workdir(self) -> str:
+        """Shell-quote the remote workdir, but leave a leading ``~/`` (or bare
+        ``~``) UNQUOTED so the remote shell expands it to ``$HOME``.
+
+        ``shlex.quote("~/maverick-workspace")`` yields ``'~/maverick-workspace'``,
+        and the surrounding single quotes suppress the remote shell's tilde
+        expansion -- so the default workdir would be created as a literal ``~``
+        directory under the session cwd instead of under ``$HOME``. Quoting only
+        the part after the tilde keeps the injection-safety guarantee (the path
+        body is still quoted) while restoring expansion.
+        """
+        s = str(self.workdir)
+        if s == "~":
+            return "~"
+        if s.startswith("~/"):
+            rest = s[2:]
+            return "~/" + shlex.quote(rest) if rest else "~/"
+        return shlex.quote(s)
+
     def exec(self, cmd: str, timeout: float | None = None) -> ExecResult:
         effective = self.timeout if timeout is None else timeout
         # Run cmd as a single quoted argument inside ``sh -c`` so a leading
         # ``;`` / ``&&`` / ``||`` / unbalanced quote can't escape the ``cd``
         # guard and run outside the workspace. The workdir itself is quoted too.
-        wd = shlex.quote(str(self.workdir))
+        wd = self._quote_workdir()
         remote = (
             f"mkdir -p {wd} && cd {wd} && sh -c {shlex.quote(cmd)}"
         )

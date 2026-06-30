@@ -187,8 +187,22 @@ class DockerBackend:
         args = ["docker", "run", "-d", "--name", name,
                 *self._container_flags(),
                 self.image, "sleep", "infinity"]
-        subprocess.run(args, capture_output=True, text=True,
-                       timeout=self.timeout, env=scrub_env())
+        # A failed `docker run -d` (bad image/tag, registry-auth failure, daemon
+        # error) must not leave _warm_name set: _ensure_warm short-circuits on it,
+        # so a swallowed failure here would permanently wedge the backend, with
+        # every later `docker exec` failing with a confusing "No such container".
+        # Fail loudly with the daemon's stderr instead. A timed-out start is the
+        # same: don't record a half-started container as ready.
+        try:
+            proc = subprocess.run(args, capture_output=True, text=True,
+                                  timeout=self.timeout, env=scrub_env())
+        except subprocess.TimeoutExpired as e:
+            raise RuntimeError(
+                f"warm container start timed out after {self.timeout}s") from e
+        if proc.returncode != 0:
+            raise RuntimeError(
+                f"warm container start failed (exit {proc.returncode}): "
+                f"{(proc.stderr or '').strip()[-500:]}")
         self._warm_name = name
 
     def _exec_warm(self, cmd: str, effective: float) -> ExecResult:
