@@ -25,9 +25,12 @@
 }
 
 maverick.example.com {
-    # Health check passthrough.
+    # Health check passthrough: proxy to the dashboard's own /healthz so its
+    # real status reaches any upstream LB. A hardcoded `respond "ok" 200` here
+    # would mask the dashboard's deliberate 503 (DB unreachable / no provider
+    # key), defeating the point of a health probe.
     handle /healthz {
-        respond "ok" 200
+        reverse_proxy localhost:8765
     }
 
     # Dashboard (when shipped).

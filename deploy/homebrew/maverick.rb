@@ -13,7 +13,7 @@
 # It installs the checksum-verified `maverick-agent` source plus the installer
 # wizard dependencies into an isolated virtualenv, then links the `maverick` CLI
 # onto the PATH.
-class Lightwork < Formula
+class Maverick < Formula
   include Language::Python::Virtualenv
 
   desc "AI agent swarm that runs locally, works for hours, under a budget cap"

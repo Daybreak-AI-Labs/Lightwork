@@ -14,6 +14,11 @@ primary_region = "iad"
   dockerfile = "../../docker/Dockerfile"
 
 [env]
+  # MAVERICK_CONFIG only controls config.toml's location. The world-model DB,
+  # vector store, audit signing keys, learned skills and snapshots live under
+  # MAVERICK_HOME (default ~/.maverick), which is NOT on the mounted volume --
+  # so without this they'd be lost on every restart/redeploy. Pin it to /state.
+  MAVERICK_HOME = "/state"
   MAVERICK_CONFIG = "/state/config.toml"
 
 [experimental]

@@ -20,8 +20,14 @@ if [ ! -f "$ENV_FILE" ]; then
 fi
 
 # Read MAVERICK_DEMO_PORT from the env file too, so the URL matches the publish.
-PORT="$(grep -E '^MAVERICK_DEMO_PORT=' "$ENV_FILE" 2>/dev/null | tail -1 | cut -d= -f2 || true)"
-PORT="${PORT:-8765}"
+# But a shell-exported MAVERICK_DEMO_PORT wins (docker compose interpolates the
+# shell value into the port publish), so only fall back to demo.env when the
+# shell didn't set it -- otherwise the printed/opened URL would disagree with
+# the actually-published port.
+if [ -z "${MAVERICK_DEMO_PORT:-}" ]; then
+  PORT="$(grep -E '^MAVERICK_DEMO_PORT=' "$ENV_FILE" 2>/dev/null | tail -1 | cut -d= -f2 || true)"
+  PORT="${PORT:-8765}"
+fi
 
 # A stable token per machine, so the demo URL keeps working across restarts.
 # Stored beside this script and never committed (see .gitignore).
@@ -32,7 +38,9 @@ elif [ -f "$TOKEN_FILE" ]; then
 else
   TOKEN="$(python3 -c 'import secrets; print(secrets.token_urlsafe(24))' 2>/dev/null \
            || openssl rand -hex 24)"
-  printf '%s' "$TOKEN" > "$TOKEN_FILE"
+  # Create 0600 (umask 077 in a subshell) so the dashboard bearer isn't
+  # world/group-readable on a multi-user host.
+  ( umask 077; printf '%s' "$TOKEN" > "$TOKEN_FILE" )
 fi
 export MAVERICK_DASHBOARD_TOKEN="$TOKEN"
 

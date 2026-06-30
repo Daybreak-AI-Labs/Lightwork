@@ -45,6 +45,14 @@ cleanup() {
 }
 trap cleanup EXIT
 mkdir -p "$MNT" "$(dirname "$DEST")"
+# This script runs as root (sudo), so the just-created ~/.maverick/firecracker
+# dir would be root-owned 0755 -- a later NON-root `fetch-kernel.sh` could then
+# not write the kernel into it. Hand the dir (and its .maverick parent) back to
+# the invoking user. Best-effort: a pre-existing dir or odd ownership is fine.
+_INVOKER="${SUDO_USER:-${USER:-root}}"
+if [ "$_INVOKER" != "root" ]; then
+  chown "$_INVOKER" "$(dirname "$DEST")" "$(dirname "$(dirname "$DEST")")" 2>/dev/null || true
+fi
 
 echo "[1/4] Exporting $IMAGE filesystem ..."
 CID="$(docker create "$IMAGE" /bin/true)"

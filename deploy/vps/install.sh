@@ -99,13 +99,24 @@ install_maverick() {
   fi
   log "Installing maverick @ ${MAVERICK_VERSION} for user ${TARGET_USER}..."
   if [[ ! -d /opt/maverick ]]; then
+    # A shallow --branch clone is the fast path for a tag/branch. It can't
+    # name a commit SHA, so on failure fall back to a full clone + checkout of
+    # the exact ref -- which still FAILS CLOSED: an invalid/typo'd ref makes
+    # `git checkout` abort under `set -e` rather than silently installing the
+    # mutable default branch (the old `|| git clone <repo>` did exactly that,
+    # defeating the supply-chain pinning this script documents).
     git clone --branch "${MAVERICK_VERSION}" --depth 1 \
-        https://github.com/Day-AI-Labs/Lightwork /opt/maverick \
-      || git clone https://github.com/Day-AI-Labs/Lightwork /opt/maverick
+        https://github.com/Day-AI-Labs/Lightwork /opt/maverick 2>/dev/null \
+      || {
+        git clone https://github.com/Day-AI-Labs/Lightwork /opt/maverick
+        git -C /opt/maverick checkout "${MAVERICK_VERSION}"
+      }
   else
-    git -C /opt/maverick fetch --depth 1 origin "${MAVERICK_VERSION}" 2>/dev/null || true
-    git -C /opt/maverick checkout "${MAVERICK_VERSION}" 2>/dev/null \
-      || git -C /opt/maverick pull --ff-only
+    git -C /opt/maverick fetch --depth 1 origin "${MAVERICK_VERSION}" 2>/dev/null \
+      || git -C /opt/maverick fetch origin
+    # Hard-fail (no `|| git pull` fallback) so a bad ref aborts instead of
+    # silently advancing the checkout to the tracking branch's tip.
+    git -C /opt/maverick checkout "${MAVERICK_VERSION}"
   fi
   # pipx names the venv after the distribution Name, which is
   # `maverick-agent` (packages/maverick-core/pyproject.toml), NOT the

@@ -58,6 +58,17 @@ data:
             proxy_set_header Host $http_host;
             proxy_set_header X-Forwarded-For $remote_addr;
         }
+        # Liveness passthrough for the proxy pod's own readiness probe: /healthz
+        # is a deep check that 503s without a provider key (this demo has none),
+        # so the gateway probes /livez (process-up) instead to become Ready.
+        location = /livez {
+            limit_except GET HEAD {
+                deny all;
+            }
+            proxy_pass http://127.0.0.1:8765;
+            proxy_set_header Host $http_host;
+            proxy_set_header X-Forwarded-For $remote_addr;
+        }
         location / {
             return 404;
         }
@@ -130,14 +141,17 @@ spec:
               mountPath: /home/maverick/.maverick
           # Exec probe: an httpGet probe targets the pod IP, which the
           # loopback-bound dashboard deliberately does not answer.
+          # /livez (process-up liveness), NOT /healthz: this demo runs without a
+          # provider key and /healthz returns 503 by design when no key is set,
+          # so a /healthz probe would keep the pod permanently NotReady.
           readinessProbe:
             exec:
-              command: ["python", "-c", "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8765/healthz', timeout=3)"]
+              command: ["python", "-c", "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8765/livez', timeout=3)"]
             initialDelaySeconds: 5
             periodSeconds: 10
           livenessProbe:
             exec:
-              command: ["python", "-c", "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8765/healthz', timeout=3)"]
+              command: ["python", "-c", "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8765/livez', timeout=3)"]
             initialDelaySeconds: 15
             periodSeconds: 30
           resources:
@@ -162,7 +176,7 @@ spec:
             - name: nginx-template
               mountPath: /etc/nginx/templates
           readinessProbe:
-            httpGet: {path: "/healthz", port: 8080}
+            httpGet: {path: "/livez", port: 8080}
             initialDelaySeconds: 5
             periodSeconds: 10
           resources:

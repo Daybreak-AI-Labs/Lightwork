@@ -10,9 +10,11 @@ spec:
   replicas: {{ .Values.replicaCount }}
   {{- end }}
   strategy:
-    {{- if .Values.persistence.enabled }}
-    type: Recreate          # RWO volume: tear down before re-attach
+    {{- if and .Values.persistence.enabled (not .Values.autoscaling.enabled) }}
+    type: Recreate          # single-replica RWO volume: tear down before re-attach
     {{- else }}
+    # Autoscaling (multi-replica, Postgres-backed per maverick.validate/hpa.yaml)
+    # or no local volume -> roll without taking the whole fleet down.
     type: RollingUpdate
     {{- end }}
   selector:
@@ -85,7 +87,7 @@ spec:
                 command: ["sleep", "5"]   # let the LB deregister before SIGTERM
           resources:
             {{- toYaml .Values.resources | nindent 12 }}
-          {{- if .Values.persistence.enabled }}
+          {{- if and .Values.persistence.enabled (not .Values.autoscaling.enabled) }}
           volumeMounts:
             - name: state
               mountPath: {{ .Values.persistence.mountPath }}
@@ -102,8 +104,11 @@ spec:
       tolerations:
         {{- toYaml . | nindent 8 }}
       {{- end }}
-      {{- if .Values.persistence.enabled }}
+      {{- if and .Values.persistence.enabled (not .Values.autoscaling.enabled) }}
       volumes:
+        # A single ReadWriteOnce PVC can only attach to one node, so it is NOT
+        # mounted on the autoscaling path (multiple replicas would fail to
+        # schedule). Scale-out state lives in Postgres (enforced by hpa.yaml).
         - name: state
           persistentVolumeClaim:
             claimName: {{ include "maverick.fullname" . }}-state
