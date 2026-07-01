@@ -17,9 +17,14 @@ from __future__ import annotations
 import json
 import os
 import stat
+import threading
 from pathlib import Path
 
 from .paths import data_dir
+
+# Serializes the read-modify-write in store()/delete() so concurrent writers to
+# the shared vault file can't clobber each other's entries (last os.replace won).
+_VAULT_LOCK = threading.Lock()
 
 _STORE = data_dir("vault")
 _KEY_FILE = _STORE / "key"
@@ -72,8 +77,15 @@ class Vault:
         try:
             data = json.loads(self.path.read_text(encoding="utf-8"))
             return data if isinstance(data, dict) else {}
-        except json.JSONDecodeError:
-            return {}
+        except json.JSONDecodeError as e:
+            # Do NOT silently return {}: a single corrupt/truncated byte would
+            # drop the entire encrypted entry map, and the next store() would
+            # overwrite the file with only the new entry -- destroying every
+            # other credential. Surface the corruption instead.
+            raise RuntimeError(
+                f"vault file {self.path} is corrupt (invalid JSON); "
+                "refusing to read (would risk overwriting all entries)"
+            ) from e
 
     def _write(self, blob: dict[str, str]) -> None:
         self.path.parent.mkdir(parents=True, exist_ok=True)
@@ -92,9 +104,10 @@ class Vault:
         os.replace(tmp, self.path)
 
     def store(self, name: str, data: dict) -> None:
-        blob = self._read()
-        blob[name] = encrypt_entry(self.key, data)
-        self._write(blob)
+        with _VAULT_LOCK:
+            blob = self._read()
+            blob[name] = encrypt_entry(self.key, data)
+            self._write(blob)
 
     def load(self, name: str) -> dict:
         blob = self._read()
@@ -106,12 +119,13 @@ class Vault:
         return sorted(self._read())
 
     def delete(self, name: str) -> bool:
-        blob = self._read()
-        if name not in blob:
-            return False
-        del blob[name]
-        self._write(blob)
-        return True
+        with _VAULT_LOCK:
+            blob = self._read()
+            if name not in blob:
+                return False
+            del blob[name]
+            self._write(blob)
+            return True
 
 
 def resolve_key(key_file: Path = _KEY_FILE) -> bytes:
