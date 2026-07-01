@@ -79,9 +79,13 @@ def distill(trajectories: list[dict], *, top_k: int = 3) -> dict | None:
             if tool not in tools:
                 tools.append(tool)
 
+    # Collapse ALL whitespace (incl. embedded newlines) before slicing: goal
+    # text is written into the learned SKILL.md's YAML frontmatter, so a goal
+    # containing a newline could otherwise inject frontmatter keys / break the
+    # document structure (str.strip only trims the edges).
     triggers = []
     for g in goals:
-        trg = g.lower()[:80].strip()
+        trg = " ".join(g.split()).lower()[:80]
         if trg and trg not in triggers:
             triggers.append(trg)
 
@@ -89,7 +93,7 @@ def distill(trajectories: list[dict], *, top_k: int = 3) -> dict | None:
         "name": name,
         "triggers": triggers,
         "tools_needed": tools,
-        "summary": goals[0],
+        "summary": " ".join(goals[0].split()),
         "n_examples": len(chosen),
     }
 

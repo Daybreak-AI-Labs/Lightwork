@@ -124,7 +124,11 @@ def build_trajectory(
             action_type=action_type,
             action_name=tool_name,
             observation_hash=obs_hash,
-            error=error,
+            # Export the HASH, not raw error text: for kind=="error" the error
+            # IS the raw content, so storing it verbatim leaked content into
+            # exported training data, defeating the observation-hash privacy
+            # protection. (ctx.error above stays raw -- local scoring only.)
+            error=(obs_hash if kind == "error" else None),
             promise_label=reward.promise,
             progress_label=reward.progress,
         ))
