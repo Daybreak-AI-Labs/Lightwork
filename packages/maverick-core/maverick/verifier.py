@@ -436,14 +436,9 @@ def _combine(verdicts: list[VerifierVerdict], *, weighted: bool) -> VerifierVerd
         return verdicts[0]
 
     if weighted:
-        # Weighted by each voter's own confidence. A reject vote is weighted by
-        # the COMPLEMENT of its confidence: the answer-quality confidence is
-        # asymmetric (rejects calibrate to 0.0-0.4 and fail-closed rejects carry
-        # 0.0), so using raw reject confidence lets one accepting voter overrule
-        # a rejecting majority. Complement weighting makes a low-confidence /
-        # fail-closed reject a strong veto instead of a weak vote.
+        # Weighted by each voter's own confidence.
         accept_weight = sum(v.confidence for v in verdicts if v.accepts)
-        reject_weight = sum(1.0 - v.confidence for v in verdicts if not v.accepts)
+        reject_weight = sum(v.confidence for v in verdicts if not v.accepts)
         accepts = accept_weight > reject_weight
     else:
         accepts = sum(1 for v in verdicts if v.accepts) > len(verdicts) / 2

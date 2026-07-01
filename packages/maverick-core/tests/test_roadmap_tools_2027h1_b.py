@@ -41,6 +41,16 @@ def test_grammar_length_changing_lowercase():
     assert "name=" in out and out != "NO MATCH"
 
 
+def test_grammar_preserves_slot_value_case():
+    """A captured slot value keeps its original case (matching is
+    case-insensitive, but a proper noun must not be folded to lowercase)."""
+    t = voice_command_grammar()
+    grammar = [{"intent": "call", "pattern": "call {name}"}]
+    out = t.fn({"grammar": grammar, "utterance": "CALL John Smith"})
+    assert "intent: call" in out
+    assert "name=John Smith" in out
+
+
 def test_grammar_no_slot_and_no_match():
     t = voice_command_grammar()
     assert "intent: halt" in t.fn({"grammar": _GRAMMAR, "utterance": "stop everything"})

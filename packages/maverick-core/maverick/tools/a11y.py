@@ -106,6 +106,18 @@ def _pin_url(url: str) -> str:
         if not host:
             return url
         ip = resolve_pinned_ip(host)
+        if parsed.scheme == "https":
+            # Do NOT rewrite the host to a literal IP for HTTPS: the browser
+            # validates the presented TLS certificate against the netloc, and an
+            # IP literal won't match the cert's CN/SAN, so every real HTTPS
+            # target would fail cert validation. TLS itself defeats DNS-rebind
+            # here -- an internal/metadata IP can't present a valid cert for the
+            # requested hostname -- so the re-validated public-IP check above
+            # (resolve_pinned_ip raises BlockedHost otherwise) is the guard, and
+            # we hand the browser the original hostname untouched.
+            return url
+        # http:// has no certificate to bind the name to the host, so pin the
+        # connection target to the vetted public IP to close the rebind window.
         # Preserve the port (and userinfo, if any) while swapping only the host.
         netloc = ip
         if parsed.port:

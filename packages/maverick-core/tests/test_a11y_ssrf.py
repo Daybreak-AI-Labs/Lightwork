@@ -58,6 +58,31 @@ def test_pin_url_refuses_rebind_to_private_ip(monkeypatch):
         _pin_url("http://evil.example/")
 
 
+def test_pin_url_keeps_hostname_for_https(monkeypatch):
+    # For HTTPS the host must NOT be rewritten to an IP literal: the browser
+    # validates the TLS cert against the netloc, and an IP won't match the
+    # cert's SAN, so every real HTTPS target would fail. resolve_pinned_ip still
+    # runs (re-validates the host is public), but the URL is handed back intact.
+    import maverick.tools._ssrf as _ssrf
+    calls = []
+    monkeypatch.setattr(_ssrf, "resolve_pinned_ip",
+                        lambda host: calls.append(host) or "93.184.216.34")
+    assert _pin_url("https://example.com/x") == "https://example.com/x"
+    assert calls == ["example.com"]  # the public-IP re-validation still happened
+
+
+def test_pin_url_refuses_https_rebind_to_private_ip(monkeypatch):
+    # HTTPS still fails closed when re-resolution now returns a private IP.
+    import maverick.tools._ssrf as _ssrf
+
+    def _rebind(host):
+        raise _ssrf.BlockedHost("rebound to 169.254.169.254")
+
+    monkeypatch.setattr(_ssrf, "resolve_pinned_ip", _rebind)
+    with pytest.raises(_ssrf.BlockedHost):
+        _pin_url("https://evil.example/")
+
+
 def test_check_html_path_still_allowed_without_url_guard(monkeypatch):
     # check_html takes a confined local path, not a URL -- the url guard must
     # not interfere with it. With no sandbox and no binary, we just get the
