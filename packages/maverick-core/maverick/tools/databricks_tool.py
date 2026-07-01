@@ -19,6 +19,7 @@ from __future__ import annotations
 import json
 import logging
 import os
+import re
 from typing import Any
 
 from . import Tool, as_bool
@@ -43,6 +44,25 @@ _SCHEMA: dict[str, Any] = {
 }
 
 _READ_PREFIXES = ("select", "with", "show", "describe", "desc", "explain", "list")
+# A CTE (WITH ...) can prefix a MUTATING main statement:
+#   WITH t AS (SELECT ...) INSERT INTO target SELECT * FROM t
+#   WITH t AS (...) DELETE/UPDATE/MERGE ...
+# so the "with" read-prefix alone doesn't prove read-only. Scan a CTE for any
+# DML/DDL keyword and, if present, treat it as a write (require confirm). Safe
+# direction: a false positive only asks for confirm=true.
+_MUTATING_KEYWORDS_RE = re.compile(
+    r"\b(insert|update|delete|merge|create|drop|alter|truncate|replace|copy|grant|revoke)\b",
+    re.IGNORECASE,
+)
+
+
+def _is_read_only(statement: str) -> bool:
+    s = statement.strip().lstrip("(").lower()
+    if not s.startswith(_READ_PREFIXES):
+        return False
+    if s.startswith("with") and _MUTATING_KEYWORDS_RE.search(statement):
+        return False
+    return True
 
 
 def _config() -> tuple[str, str]:
@@ -77,7 +97,7 @@ def _op_sql(statement: str, warehouse_id: str, catalog: str, schema: str,
     wh = warehouse_id or os.environ.get("DATABRICKS_WAREHOUSE_ID", "").strip()
     if not wh:
         return "ERROR: sql requires warehouse_id (or DATABRICKS_WAREHOUSE_ID)"
-    is_read = statement.strip().lstrip("(").lower().startswith(_READ_PREFIXES)
+    is_read = _is_read_only(statement)
     if not is_read and not confirm:
         return "DRY RUN: non-read SQL. Re-run with confirm=true."
     body: dict[str, Any] = {"statement": statement, "warehouse_id": wh,

@@ -17,6 +17,7 @@ from __future__ import annotations
 
 import logging
 import os
+import re
 from typing import Any
 
 from . import Tool
@@ -47,6 +48,20 @@ _NOTION_SCHEMA: dict[str, Any] = {
 
 _API_BASE = "https://api.notion.com/v1"
 _API_VERSION = "2022-06-28"
+
+_NOTION_ID_RE = re.compile(r"[0-9a-fA-F]{32}")
+
+
+def _require_id(value: str, field: str) -> str:
+    """Return ``value`` if it is a literal Notion id (32 hex, dashes optional),
+    else raise. The id is interpolated straight into the REST path, so without
+    this a model-supplied ``../users/me`` or ``<id>?filter=...`` would let httpx
+    normalize ``..`` / append a query and reach other authenticated Notion
+    endpoints (path traversal / endpoint confusion). Mirrors jira._require_key.
+    """
+    if not _NOTION_ID_RE.fullmatch(value.replace("-", "")):
+        raise ValueError(f"invalid {field} {value!r} (expected a 32-hex Notion id)")
+    return value
 
 
 def _config() -> str:
@@ -260,7 +275,7 @@ def _run(args: dict[str, Any]) -> str:
             pid = (args.get("page_id") or "").strip()
             if not pid:
                 return "ERROR: page_get requires page_id"
-            return _op_page_get(pid)
+            return _op_page_get(_require_id(pid, "page_id"))
         if op == "page_create":
             parent = (args.get("parent_id") or "").strip()
             title = (args.get("title") or "").strip()
@@ -272,13 +287,14 @@ def _run(args: dict[str, Any]) -> str:
             text = args.get("text") or ""
             if not pid or not text:
                 return "ERROR: page_append requires page_id and text"
-            return _op_page_append(pid, text)
+            return _op_page_append(_require_id(pid, "page_id"), text)
         if op == "db_query":
             did = (args.get("database_id") or "").strip()
             if not did:
                 return "ERROR: db_query requires database_id"
             return _op_db_query(
-                did, max(1, min(int(args.get("limit") or 25), 100)),
+                _require_id(did, "database_id"),
+                max(1, min(int(args.get("limit") or 25), 100)),
             )
     except RuntimeError as e:
         return f"ERROR: {e}"

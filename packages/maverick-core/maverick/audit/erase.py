@@ -169,7 +169,12 @@ def _process_file(
     from ..crypto_at_rest import is_sealed
     from .sealing import segment_text
     was_sealed = is_sealed(raw)
-    original = segment_text(path)
+    # fail_soft=False: an authorized Art.17 erasure must FAIL CLOSED on a sealed
+    # segment it can't decrypt (rotated/absent key, corruption). The default
+    # fail-soft returns "" -> matched=0 -> we'd report a clean erase while the
+    # subject's events remain intact inside the still-sealed file. Raising lets
+    # the CLI surface the failure so the operator re-runs after fixing the key.
+    original = segment_text(path, fail_soft=False)
 
     rows, matched, any_signed = _scan_rows(original, channel, user_id)
 
