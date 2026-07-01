@@ -81,20 +81,25 @@ def _match(template: _Template, text: str) -> dict[str, str] | None:
 
     for idx, slot in enumerate(slots):
         next_lit = literals[idx + 1]
+        # Slot values are captured from ``folded`` (not the original ``text``):
+        # all indices here are computed against the lowercased string, and
+        # str.lower() can change length (e.g. Turkish 'İ' -> 2 codepoints), so
+        # slicing ``text`` with a folded index misaligns and corrupts the value
+        # or trips a spurious NO MATCH on the trailing length check.
         if next_lit:
             end = folded.find(next_lit, pos)
             if end < 0:
                 return None
-            value = text[pos:end].strip()
+            value = folded[pos:end].strip()
             pos = end + len(next_lit)
         else:
-            value = text[pos:].strip()
-            pos = len(text)
+            value = folded[pos:].strip()
+            pos = len(folded)
         if not value:
             return None
         captures[slot] = value
 
-    return captures if pos == len(text) else None
+    return captures if pos == len(folded) else None
 
 
 def _parse(args: dict[str, Any]) -> str:

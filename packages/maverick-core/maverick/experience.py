@@ -100,7 +100,9 @@ def summarize_experience(
         return None
     scored.sort(key=lambda x: -x[0])
     top = scored[:k]
-    succ = sum(1 for _, _, o in top if any(w in o for w in _SUCCESS))
+    # Match whole tokens, not substrings: a failure outcome like "broken"
+    # contains "ok" as a substring and would otherwise be miscounted a success.
+    succ = sum(1 for _, _, o in top if _tokens(o) & _SUCCESS)
     fail = len(top) - succ
     lines = [
         f"Experience: {len(top)} similar prior task(s) — {succ} succeeded, {fail} did not."

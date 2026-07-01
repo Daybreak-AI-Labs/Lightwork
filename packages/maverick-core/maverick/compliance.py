@@ -65,9 +65,12 @@ def first_turn_disclosure(
     this idempotent across retries.
     """
     conv = world.get_or_create_conversation(channel=channel, user_id=user_id)
-    # If any prior assistant turn exists, the user has already seen
-    # the disclosure (or the operator opted out via empty text). Skip.
-    prior = world.recent_turns(conv.id, limit=1)
+    # If ANY prior assistant turn exists, the user has already seen the
+    # disclosure (or the operator opted out via empty text). Skip. We must scan
+    # a window, not just the single newest row: a failed/blocked goal leaves the
+    # conversation's last row as a 'user' turn (no assistant reply is written),
+    # and a limit=1 check would then re-show the disclosure on the next message.
+    prior = world.recent_turns(conv.id, limit=50)
     for t in prior:
         if t.role == "assistant":
             return None

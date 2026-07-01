@@ -257,6 +257,11 @@ def write_record(
     # Strip text fields unless the user opted into that too.
     if not _text_donations_enabled():
         record.task_brief_text = None
+        # verifier_critique is raw model-generated free text (from verdict.critique
+        # / test_result.summary()) that can quote proprietary task/answer content
+        # and is NOT caught by secret/PII scrubbing. Drop it in metadata-only mode
+        # so the "no raw text unless donate_text=true" contract actually holds.
+        record.verifier_critique = ""
         # Drop the rejected-draft text (keep confidence/critique metadata) so the
         # default metadata-only contract holds. DPO needs this text, so the
         # self-learning runbook sets donate_text = true.

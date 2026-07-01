@@ -52,6 +52,8 @@ class TestParseLinear:
     def _payload(self, assignee_id="bot-1"):
         return {
             "type": "Issue", "action": "update",
+            # An assignment transition carries the prior assignee in updatedFrom.
+            "updatedFrom": {"assigneeId": None},
             "data": {
                 "identifier": "ENG-123", "title": "Fix it",
                 "description": "broken", "assigneeId": assignee_id,
@@ -86,11 +88,30 @@ class TestParseLinear:
         payload = {"type": "Comment", "action": "create", "data": {"id": "c1"}}
         assert parse_issue_event("linear", payload) is None
 
+    def test_update_without_assignee_change_returns_none(self, monkeypatch):
+        # Regression: an edit (priority/state/description) while the bot stays
+        # the assignee, but with no assignee in updatedFrom, must NOT fire a
+        # goal — only the assign transition should.
+        monkeypatch.setenv("MAVERICK_BOT_LINEAR_ID", "bot-1")
+        payload = self._payload("bot-1")
+        payload["updatedFrom"] = {"priority": 1}  # priority changed, not assignee
+        assert parse_issue_event("linear", payload) is None
+
+    def test_create_needs_no_updated_from(self, monkeypatch):
+        # A create is the initial assignment; it has no updatedFrom.
+        monkeypatch.setenv("MAVERICK_BOT_LINEAR_ID", "bot-1")
+        payload = self._payload("bot-1")
+        payload["action"] = "create"
+        payload.pop("updatedFrom", None)
+        assert parse_issue_event("linear", payload) is not None
+
 
 class TestParseJira:
     def _payload(self, account_id="acct-1"):
         return {
             "webhookEvent": "jira:issue_updated",
+            # An assignment transition lists the assignee in changelog.items.
+            "changelog": {"items": [{"field": "assignee", "to": account_id}]},
             "issue": {
                 "key": "PROJ-7",
                 "fields": {
@@ -135,6 +156,22 @@ class TestParseJira:
         payload = self._payload("acct-1")
         payload["webhookEvent"] = "comment_created"
         assert parse_issue_event("jira", payload) is None
+
+    def test_update_without_assignee_change_returns_none(self, monkeypatch):
+        # Regression: an issue_updated that didn't touch the assignee (e.g. a
+        # priority change) while the bot stays assigned must NOT fire a goal.
+        monkeypatch.setenv("MAVERICK_BOT_JIRA_ACCOUNT_ID", "acct-1")
+        payload = self._payload("acct-1")
+        payload["changelog"] = {"items": [{"field": "priority", "to": "High"}]}
+        assert parse_issue_event("jira", payload) is None
+
+    def test_issue_created_needs_no_changelog(self, monkeypatch):
+        # issue_created is the initial assignment; no changelog required.
+        monkeypatch.setenv("MAVERICK_BOT_JIRA_ACCOUNT_ID", "acct-1")
+        payload = self._payload("acct-1")
+        payload["webhookEvent"] = "jira:issue_created"
+        payload.pop("changelog", None)
+        assert parse_issue_event("jira", payload) is not None
 
 
 class TestUnknownProvider:

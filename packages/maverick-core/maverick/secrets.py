@@ -25,15 +25,17 @@ _PATTERNS: list[tuple[str, re.Pattern[str]]] = [
         r"-----BEGIN (?:[A-Z0-9 ]+ )?PRIVATE KEY-----"
         r"(?:"
         # Preferred: the whole block when an END marker is present. Bounded
-        # body ({0,8192}, > RSA-4096) so many BEGIN markers with no END can't
-        # scan to EOF per marker (ReDoS guard); a real key's END is in-window.
-        r".{0,8192}?-----END (?:[A-Z0-9 ]+ )?PRIVATE KEY-----"
+        # body ({0,65536}) so many BEGIN markers with no END can't scan to EOF
+        # per marker (ReDoS guard); the 64KB bound covers real key formats so a
+        # key whose body exceeds 8192 chars no longer leaks its trailing
+        # material + END line (mirrors the secret_detector fix).
+        r".{0,65536}?-----END (?:[A-Z0-9 ]+ )?PRIVATE KEY-----"
         r"|"
         # Fallback: a BEGIN header + base64 body but NO END marker (a key
         # truncated by a buffer/summary boundary). Without this the pattern
         # required END and leaked the truncated key body to logs / support
         # bundles. Mirrors safety.secret_detector.private_key_pem.
-        r"[A-Za-z0-9+/=\s]{0,8192}"
+        r"[A-Za-z0-9+/=\s]{0,65536}"
         r")",
         re.DOTALL,
     )),

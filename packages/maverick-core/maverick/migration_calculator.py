@@ -69,8 +69,11 @@ def _bare(model: str) -> str:
 def _field(row, *names: str, default=None):
     """Duck-typed row read: dict keys first, then attributes."""
     if isinstance(row, dict):
+        # Skip None-valued keys just like the attribute branch below, so a row
+        # like {"in_tokens": None, "input_tokens": 500} falls through to the real
+        # value instead of short-circuiting on the present-but-None first key.
         for name in names:
-            if name in row:
+            if name in row and row[name] is not None:
                 return row[name]
         return default
     for name in names:

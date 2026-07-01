@@ -66,6 +66,28 @@ def test_apply_or_and_contains():
     assert names == ["deploy prod", "run tests"]
 
 
+def test_numeric_string_equality_agrees_with_ordering():
+    # A numeric value arriving as a JSON string ("5.00") must compare equal to 5
+    # under "=", consistent with ">=" / "<=" which already coerce numerics.
+    rows = [{"cost": "5.00"}]
+    assert _apply(rows, "cost = 5") == rows
+    assert _apply(rows, "cost >= 5") == rows
+    assert _apply(rows, "cost <= 5") == rows
+    # "!=" inherits the corrected equality: an equal value is dropped.
+    assert _apply(rows, "cost != 5") == []
+
+
+def test_value_containing_connector_word_not_split():
+    # Regression: a value that contains the standalone word 'or'/'and' must not
+    # be split — the connector only separates two clauses.
+    p = _predicate("city = New York or LA")
+    assert p["clauses"] == [{"field": "city", "op": "=", "value": "New York or LA"}]
+    p2 = _predicate("note contains hand and foot")
+    assert p2["clauses"] == [
+        {"field": "note", "op": "contains", "value": "hand and foot"},
+    ]
+
+
 def test_errors_mixed_connector_and_bad_clause():
     assert _parse("a > 1 and b = 2 or c = 3").startswith("ERROR")
     assert _parse("not a real filter").startswith("ERROR")

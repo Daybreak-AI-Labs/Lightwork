@@ -23,11 +23,23 @@ from __future__ import annotations
 import json
 import logging
 import os
+import re
 from typing import Any
 
 from . import Tool, as_bool
 
 log = logging.getLogger(__name__)
+
+
+# Salesforce sobject names and record ids are alphanumeric (with '_' for custom
+# objects). Reject anything else — a value containing '?' or '../' would escape
+# the intended endpoint into a different API resource (httpx doesn't encode
+# f-string path segments). Mirrors spotify_tool's `_safe_id` guard.
+_SF_ID_RE = re.compile(r"[A-Za-z0-9_]+")
+
+
+def _safe_sf(value: str) -> bool:
+    return bool(value) and _SF_ID_RE.fullmatch(value) is not None
 
 
 _SF_SCHEMA: dict[str, Any] = {
@@ -133,6 +145,8 @@ def _op_soql(query: str, version: str) -> str:
 def _op_record_get(sobject: str, rid: str, version: str) -> str:
     if not sobject or not rid:
         return "ERROR: record_get requires sobject and id"
+    if not _safe_sf(sobject) or not _safe_sf(rid):
+        return "ERROR: record_get requires an alphanumeric sobject and id"
     code, data = _get(f"/sobjects/{sobject}/{rid}", version)
     if code == 404:
         return f"{sobject}/{rid} not found"
@@ -145,6 +159,8 @@ def _op_record_get(sobject: str, rid: str, version: str) -> str:
 def _op_record_create(sobject: str, fields: dict, confirm: bool, version: str) -> str:
     if not sobject or not isinstance(fields, dict) or not fields:
         return "ERROR: record_create requires sobject and fields"
+    if not _safe_sf(sobject):
+        return "ERROR: record_create requires an alphanumeric sobject"
     if not confirm:
         return f"DRY RUN: would create {sobject}. Re-run with confirm=true."
     code, data = _post(f"/sobjects/{sobject}", fields, version)
@@ -157,6 +173,8 @@ def _op_record_update(sobject: str, rid: str, fields: dict, confirm: bool,
                       version: str) -> str:
     if not sobject or not rid or not isinstance(fields, dict) or not fields:
         return "ERROR: record_update requires sobject, id, fields"
+    if not _safe_sf(sobject) or not _safe_sf(rid):
+        return "ERROR: record_update requires an alphanumeric sobject and id"
     if not confirm:
         return f"DRY RUN: would update {sobject}/{rid}. Re-run with confirm=true."
     code = _patch(f"/sobjects/{sobject}/{rid}", fields, version)
@@ -168,6 +186,8 @@ def _op_record_update(sobject: str, rid: str, fields: dict, confirm: bool,
 def _op_record_delete(sobject: str, rid: str, confirm: bool, version: str) -> str:
     if not sobject or not rid:
         return "ERROR: record_delete requires sobject and id"
+    if not _safe_sf(sobject) or not _safe_sf(rid):
+        return "ERROR: record_delete requires an alphanumeric sobject and id"
     if not confirm:
         return f"DRY RUN: would delete {sobject}/{rid}. Re-run with confirm=true."
     code = _delete(f"/sobjects/{sobject}/{rid}", version)

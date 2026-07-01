@@ -191,6 +191,27 @@ def test_pgvector_scopes_operations_to_active_tenant(monkeypatch):
     assert delete_params[-1] == ["tenant:tenant-a:goal:1"]
 
 
+def test_pgvector_query_strips_tenant_prefix_from_returned_id(monkeypatch):
+    # Regression: query() returned the tenant-namespaced stored id
+    # ('tenant:t:x') instead of the caller's original doc id, so a
+    # query->delete round-trip re-prefixed and deleted nothing. The prefix
+    # must be stripped (mirroring qdrant_store).
+    conn = _install_fake_psycopg(monkeypatch)
+    conn.query_rows = [("tenant:tenant-a:x", "doc", {"k": 1}, 0.1)]
+    from maverick.paths import reset_tenant, set_tenant
+    from maverick.vector_store.pgvector_store import PgVectorStore
+
+    token = set_tenant("tenant-a")
+    try:
+        store = PgVectorStore(dsn="postgresql://x", collection="goals",
+                              embedder=_embedder())
+        out = store.query("hi", top_k=3)
+    finally:
+        reset_tenant(token)
+    assert out == [{"id": "x", "document": "doc",
+                    "distance": 0.1, "metadata": {"k": 1}}]
+
+
 def test_pgvector_query_empty_text(monkeypatch):
     _install_fake_psycopg(monkeypatch)
     from maverick.vector_store.pgvector_store import PgVectorStore

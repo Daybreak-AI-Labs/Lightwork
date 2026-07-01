@@ -218,6 +218,12 @@ class MeetingListener:
         out_dir = data_dir("meetings")
         out_dir.mkdir(parents=True, exist_ok=True)
         path = out_dir / f"{self.session_id}.json"
-        path.write_text(json.dumps(payload, indent=2), encoding="utf-8")
-        os.chmod(path, 0o600)  # minutes can contain anything said in the room
+        # Create the file 0600 ATOMICALLY (minutes can contain anything said in
+        # the room). write_text() would create it with the process umask (often
+        # 0644) and only the later chmod would tighten it, leaving a window in
+        # which another local user could read the transcript. Mirror
+        # trajectory_store's os.open(..., 0o600) fd creation to close that window.
+        fd = os.open(path, os.O_CREAT | os.O_WRONLY | os.O_TRUNC, 0o600)
+        with os.fdopen(fd, "w", encoding="utf-8") as fh:
+            fh.write(json.dumps(payload, indent=2))
         return path

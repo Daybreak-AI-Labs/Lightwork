@@ -3,7 +3,8 @@ pa11y and axe drive a real headless browser, so the target URL is attacker-
 reachable just like an http_fetch."""
 from __future__ import annotations
 
-from maverick.tools.a11y import _check_url, a11y
+import pytest
+from maverick.tools.a11y import _check_url, _pin_url, a11y
 
 
 def test_rejects_file_scheme():
@@ -33,6 +34,28 @@ def test_check_op_blocks_file_url_before_runner():
     # with the SSRF error even when no pa11y/axe binary is installed.
     out = a11y().fn({"op": "check", "url": "file:///etc/passwd"})
     assert out.startswith("ERROR") and "http(s)" in out
+
+
+def test_pin_url_rewrites_host_to_pinned_ip(monkeypatch):
+    # _pin_url must swap the hostname for a single validated public IP so the
+    # headless browser cannot re-resolve and DNS-rebind after the guard passes.
+    import maverick.tools._ssrf as _ssrf
+    monkeypatch.setattr(_ssrf, "resolve_pinned_ip", lambda host: "93.184.216.34")
+    assert _pin_url("http://evil.example:8080/x") == "http://93.184.216.34:8080/x"
+
+
+def test_pin_url_refuses_rebind_to_private_ip(monkeypatch):
+    # If the second resolution now returns a private/metadata IP, resolve_pinned_ip
+    # raises BlockedHost; _pin_url propagates it so the caller fails closed rather
+    # than handing the browser a fetchable rebound URL.
+    import maverick.tools._ssrf as _ssrf
+
+    def _rebind(host):
+        raise _ssrf.BlockedHost("rebound to 169.254.169.254")
+
+    monkeypatch.setattr(_ssrf, "resolve_pinned_ip", _rebind)
+    with pytest.raises(_ssrf.BlockedHost):
+        _pin_url("http://evil.example/")
 
 
 def test_check_html_path_still_allowed_without_url_guard(monkeypatch):

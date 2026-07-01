@@ -33,9 +33,10 @@ def _key(args: dict[str, Any]) -> str:
     if not isinstance(model, str) or not model.strip():
         return "ERROR: model is required"
     # Namespace by model so the same text under a different model gets its own
-    # slot. A NUL separator can't appear in either field, so the (model, text)
-    # pair maps to the digest unambiguously (no boundary-collision games).
-    payload = f"{model.strip()}\x00{text}".encode()
+    # slot. JSON-encode both fields so field boundaries are unambiguous — an
+    # in-band separator (e.g. an embedded NUL) can't be forged to collide two
+    # distinct (model, text) pairs onto the same slot.
+    payload = json.dumps([model.strip(), text]).encode()
     return hashlib.sha256(payload).hexdigest()
 
 

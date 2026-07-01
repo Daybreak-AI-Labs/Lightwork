@@ -172,22 +172,27 @@ def _bfs(root: str, edges: dict[str, object]) -> list[str]:
     return order
 
 
-_shared: RevocationRegistry | None = None
+# Key the shared registries by resolved data-dir path so each tenant gets its
+# own _cache/_mtime (a single instance's mtime cache could otherwise serve one
+# tenant's revocation set to another — mirrors trajectory_store.shared).
+_shared: dict[Path, RevocationRegistry] = {}
 _shared_lock = threading.Lock()
 
 
 def shared() -> RevocationRegistry:
-    global _shared
+    from .paths import data_dir
+    path = data_dir("capability_revocations.json")
     with _shared_lock:
-        if _shared is None:
-            _shared = RevocationRegistry()
-        return _shared
+        reg = _shared.get(path)
+        if reg is None:
+            reg = RevocationRegistry(path=path)
+            _shared[path] = reg
+        return reg
 
 
 def reset_shared() -> None:
-    global _shared
     with _shared_lock:
-        _shared = None
+        _shared.clear()
 
 
 def is_revoked(principal: str) -> bool:

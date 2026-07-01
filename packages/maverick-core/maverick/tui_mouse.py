@@ -50,7 +50,12 @@ class MouseEvent:
 
     @property
     def is_left_click(self) -> bool:
-        return self.pressed and (self.button & 0b11) == 0
+        # Reject wheel (0x40) and motion (0x20) events before checking the
+        # button number is 0 — otherwise a scroll (button 64) or drag (32)
+        # masks to 0 on the low 2 bits and is misread as a left click.
+        return (self.pressed
+                and (self.button & 0b01100000) == 0
+                and (self.button & 0b11) == 0)
 
 
 def parse_mouse_event(data: str) -> MouseEvent | None:

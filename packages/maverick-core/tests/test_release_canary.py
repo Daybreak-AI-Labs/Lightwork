@@ -40,6 +40,17 @@ def test_new_metric_is_informational_not_regression():
     assert res.passed and res.verdicts[0].verdict == "new"
 
 
+def test_zero_baseline_negative_candidate_signs_the_sentinel():
+    # Zero baseline with a negative candidate is a downward move; for a
+    # lower-is-better metric that's an improvement, not a regression (the
+    # unsigned +inf sentinel used to flag it 'regressed').
+    res = rc.compare({"net_margin": 0.0}, {"net_margin": -5.0}, tolerance=0.1)
+    assert res.verdicts[0].verdict == "improved"
+    # Symmetrically, a higher-is-better metric moving 0 -> negative regresses.
+    res2 = rc.compare({"success_rate": 0.0}, {"success_rate": -5.0}, tolerance=0.1)
+    assert res2.verdicts[0].verdict == "regressed"
+
+
 def test_non_numeric_metrics_skipped():
     res = rc.compare({"cost_usd": 1.0}, {"cost_usd": 1.0, "note": "x"})
     assert [v.metric for v in res.verdicts] == ["cost_usd"]

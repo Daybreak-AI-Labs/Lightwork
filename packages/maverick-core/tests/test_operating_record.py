@@ -42,6 +42,44 @@ def test_query_finds_every_decision_that_touched_x(world):
     assert orec.query(records, department="legal_x") == []
 
 
+def test_owner_scoped_approvals_overfetch_past_global_limit():
+    """list_approvals has no owner SQL filter, so an owner-scoped assemble must
+    over-fetch: alice's older approvals must not be dropped just because newer
+    approvals by others fill the global top-``limit``."""
+    class _Approval:
+        def __init__(self, i, who):
+            self.decided_at = float(i)
+            self.requested_by = who
+            self.claimed_by = None
+            self.decided_by = who
+            self.action = f"act-{i}"
+            self.status = "approved"
+            self.provenance = None
+
+    class _FakeWorld:
+        def __init__(self):
+            # alice's one approval is the OLDEST; then 1000 by others (newest).
+            self._rows = [_Approval(0, "alice")] + [
+                _Approval(i, "bob") for i in range(1, 1001)
+            ]
+
+        def list_goals(self, **kw):
+            return []
+
+        def list_episodes(self, **kw):
+            return []
+
+        def list_approvals(self, *, limit):
+            # Newest first, truncated to limit -- exactly the SQL behavior.
+            return list(reversed(self._rows))[:limit]
+
+    world = _FakeWorld()
+    records = orec.assemble(world, limit=100, owner="alice")
+    # Pre-fix: alice's lone (oldest) approval falls outside the newest-100 and
+    # is dropped. Post-fix: the over-fetch recovers it.
+    assert any(r.decided_by == "alice" for r in records)
+
+
 def test_capsule_roundtrip_and_tamper_detection(world, tmp_path, monkeypatch):
     pytest.importorskip("cryptography")
     import maverick.audit.signing as signing

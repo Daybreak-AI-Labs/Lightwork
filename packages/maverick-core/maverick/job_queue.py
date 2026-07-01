@@ -175,9 +175,13 @@ class JobQueue:
                     (time.time(), job_id),
                 )
             else:
+                # Also fence on status='running': reclaim_stale requeues a
+                # stale lease to 'pending' WITHOUT bumping attempts, so an
+                # attempts-only guard would still match the now-pending row and
+                # wrongly flip a job that must be re-executed to 'done'.
                 cur = c.execute(
                     "UPDATE jobs SET status='done', updated_at=? "
-                    "WHERE id=? AND attempts=?",
+                    "WHERE id=? AND attempts=? AND status='running'",
                     (time.time(), job_id, expected_attempts),
                 )
             return cur.rowcount == 1
@@ -216,17 +220,24 @@ class JobQueue:
             attempts = int(row[0])
             if expected_attempts is not None and attempts != expected_attempts:
                 return False  # lease lost to a re-claim; the current owner owns it
+            # Fence out a self-reclaimed row: reclaim_stale requeues a stale
+            # 'running' lease back to 'pending' WITHOUT bumping attempts, so an
+            # attempts-only guard would clobber a job another worker is about to
+            # own -- rescheduling/killing the wrong occurrence. Guarding on
+            # ``status != 'pending'`` blocks that while still allowing a fail()
+            # to finalize/annotate a job that is already terminal.
             if retry_after is not None and attempts < max_attempts:
                 next_run = now + float(retry_after)
                 cur = c.execute(
                     "UPDATE jobs SET status='pending', run_at=?, "
-                    "last_error=?, updated_at=? WHERE id=? AND attempts=?",
+                    "last_error=?, updated_at=? "
+                    "WHERE id=? AND attempts=? AND status != 'pending'",
                     (next_run, error[:1000], now, job_id, attempts),
                 )
             else:
                 cur = c.execute(
                     "UPDATE jobs SET status='failed', last_error=?, "
-                    "updated_at=? WHERE id=? AND attempts=?",
+                    "updated_at=? WHERE id=? AND attempts=? AND status != 'pending'",
                     (error[:1000], now, job_id, attempts),
                 )
             return cur.rowcount == 1

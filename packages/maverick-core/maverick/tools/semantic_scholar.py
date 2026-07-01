@@ -125,7 +125,12 @@ def _run(args: dict[str, Any]) -> str:
         #   arXiv:2106.09685       (or 2106.09685)
         if pid.lower().startswith(("doi:", "arxiv:", "mag:", "acl:")):
             paper_path = pid
-        elif "/" in pid:  # bare DOI
+        elif pid.startswith("10."):
+            # Bare DOI. Old-style arXiv ids ALSO contain a slash (e.g.
+            # "math/0211159"), so gate the DOI branch on the "10." DOI prefix
+            # rather than a bare "/" -- otherwise a legacy arXiv id becomes
+            # "DOI:math/0211159" and never resolves. Non-DOI slash ids fall
+            # through to the arXiv branch below.
             paper_path = f"DOI:{pid}"
         elif len(pid) >= 36 and all(c in "0123456789abcdef" for c in pid.lower()):
             paper_path = pid  # ssid

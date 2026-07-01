@@ -108,3 +108,41 @@ def test_s3_fetch_enforces_file_size_limit(monkeypatch, tmp_path):
 
     body.read.assert_called_once_with(5)
     assert not (tmp_path / "9" / "abcd1234-zz.txt").exists()
+
+
+def test_s3_fetch_denies_executable_bytes(monkeypatch, tmp_path):
+    """A shared/poisoned bucket object with executable/archive bytes must be
+    rejected on fetch (same magic-byte deny store() enforces on upload), not
+    silently written to the local store."""
+    monkeypatch.setenv("MAVERICK_ATTACH_S3_BUCKET", "b")
+    client = _fake_boto3(monkeypatch)
+    body = MagicMock()
+    body.read.return_value = b"PK\x03\x04rest-of-a-zip"  # ZIP magic
+    client.get_object.return_value = {"Body": body}
+
+    try:
+        att.s3_fetch(9, "abcd1234-evil.txt", root=tmp_path)
+    except att.AttachmentRejected:
+        pass
+    else:  # pragma: no cover
+        raise AssertionError("accepted archive bytes from S3")
+    assert not (tmp_path / "9" / "abcd1234-evil.txt").exists()
+
+
+def test_s3_fetch_denies_disallowed_content_type(monkeypatch, tmp_path):
+    """When the object carries a ContentType, the mime allowlist applies too."""
+    monkeypatch.setenv("MAVERICK_ATTACH_S3_BUCKET", "b")
+    client = _fake_boto3(monkeypatch)
+    body = MagicMock()
+    body.read.return_value = b"harmless-looking bytes"
+    client.get_object.return_value = {
+        "Body": body, "ContentType": "application/octet-stream",
+    }
+
+    try:
+        att.s3_fetch(9, "abcd1234-blob.txt", root=tmp_path)
+    except att.AttachmentRejected:
+        pass
+    else:  # pragma: no cover
+        raise AssertionError("accepted disallowed ContentType from S3")
+    assert not (tmp_path / "9" / "abcd1234-blob.txt").exists()

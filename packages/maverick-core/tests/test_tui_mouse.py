@@ -28,6 +28,15 @@ def test_parse_non_mouse_returns_none():
     assert tm.parse_mouse_event("\033[A") is None  # arrow key
 
 
+def test_scroll_and_motion_are_not_left_clicks():
+    # Scroll-wheel-up (button 64) and motion-with-left-held (button 32) have
+    # zero low-2 bits and used to be misread as left clicks.
+    scroll = tm.parse_mouse_event("\033[<64;10;3M")
+    assert scroll.button == 64 and scroll.is_left_click is False
+    motion = tm.parse_mouse_event("\033[<32;10;3M")
+    assert motion.button == 32 and motion.is_left_click is False
+
+
 def test_hitmap_maps_rows_to_nodes():
     hm = tm.NodeHitMap()
     hm.register(3, "goal:1")

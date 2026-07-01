@@ -91,6 +91,10 @@ def test_code_search_with_token_scopes_repo_and_formats(monkeypatch):
     assert get.call_args.args[0].endswith("/search/code")
     assert get.call_args.kwargs["params"]["q"] == "def check repo:acme/maverick"
     assert get.call_args.kwargs["headers"]["Authorization"] == "Bearer ghp_test"
+    # Code search must opt into the text-match media type or GitHub never
+    # populates text_matches and the fragment preview is permanently dead.
+    assert get.call_args.kwargs["headers"]["Accept"] == \
+        "application/vnd.github.text-match+json"
 
 
 def test_code_search_token_from_config(monkeypatch, tmp_path):

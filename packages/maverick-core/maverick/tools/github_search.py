@@ -94,9 +94,12 @@ def _clamp(limit: Any) -> int:
     return max(1, min(n, MAX_LIMIT))
 
 
-def _get(path: str, params: dict) -> tuple[int, Any, Any]:
+def _get(path: str, params: dict, *, accept: str | None = None) -> tuple[int, Any, Any]:
     import httpx
-    r = httpx.get(f"{_API}{path}", headers=_headers(), params=params, timeout=30.0)
+    headers = _headers()
+    if accept:
+        headers["Accept"] = accept
+    r = httpx.get(f"{_API}{path}", headers=headers, params=params, timeout=30.0)
     try:
         data = r.json()
     except ValueError:
@@ -164,7 +167,13 @@ def _op_code(args: dict) -> str:
     if scoped is None:
         return f"ERROR: repo must look like 'owner/name' (got {args.get('repo')!r})"
     limit = _clamp(args.get("limit"))
-    code, data, headers = _get("/search/code", {"q": scoped, "per_page": limit})
+    # GitHub only populates each item's text_matches (used for the fragment
+    # preview below) when the request opts in via the text-match media type;
+    # the default vnd.github+json Accept never returns fragments.
+    code, data, headers = _get(
+        "/search/code", {"q": scoped, "per_page": limit},
+        accept="application/vnd.github.text-match+json",
+    )
     if code >= 400 or not isinstance(data, dict):
         return _shape_error("code", code, data, headers)
     items = (data.get("items") or [])[:limit]

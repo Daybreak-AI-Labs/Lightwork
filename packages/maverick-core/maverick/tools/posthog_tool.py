@@ -140,7 +140,9 @@ def _op_insights(limit: int) -> str:
     if not rows:
         return "no insights"
     return "\n".join(
-        f"  {it.get('id'):>6}  {it.get('name', '')[:80]}  "
+        # Coerce present-but-null id/name (dict.get default only applies to
+        # missing keys) so a JSON null doesn't crash the whole listing.
+        f"  {it.get('id') or '':>6}  {(it.get('name') or '')[:80]}  "
         f"({it.get('filters', {}).get('insight', '?')})"
         for it in rows
     )

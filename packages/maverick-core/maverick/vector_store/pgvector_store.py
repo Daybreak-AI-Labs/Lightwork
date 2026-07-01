@@ -183,7 +183,7 @@ class PgVectorStore:
         else:
             return []
         qvec = "[" + ",".join(repr(float(x)) for x in vec) + "]"
-        tenant_sql, tenant_params, _ = self._tenant_predicate()
+        tenant_sql, tenant_params, tenant_id = self._tenant_predicate()
         with self._lock, self._conn.cursor() as cur:
             cur.execute(
                 f"SELECT id, document, metadata, embedding <=> %s AS distance "
@@ -191,8 +191,15 @@ class PgVectorStore:
                 "ORDER BY embedding <=> %s LIMIT %s",
                 (qvec, self._collection, *tenant_params, qvec, max(1, min(top_k, 100))))
             rows = cur.fetchall()
+        # Strip the tenant namespace prefix so the caller gets back its ORIGINAL
+        # doc id (mirroring qdrant_store.query). Without this a query->delete
+        # round-trip re-prefixes ('tenant:t:tenant:t:x') and silently deletes
+        # nothing, leaving stale vectors.
+        prefix = f"tenant:{tenant_id}:" if tenant_id is not None else None
         out = []
         for rid, doc, meta, dist in rows:
+            if prefix is not None and rid.startswith(prefix):
+                rid = rid[len(prefix):]
             out.append({"id": rid, "document": doc,
                         "distance": float(dist) if dist is not None else None,
                         "metadata": meta})

@@ -79,6 +79,21 @@ class TestParse:
         assert v.accepts is True
 
 
+class TestCombineWeighted:
+    def test_rejecting_majority_not_overruled_by_one_accept(self):
+        # Reject confidence is asymmetric (rejects calibrate low, fail-closed
+        # rejects are 0.0). A single confident accept must NOT outweigh a
+        # rejecting majority: reject votes veto by their complement.
+        from maverick.verifier import VerifierVerdict, _combine
+        verdicts = [
+            VerifierVerdict(confidence=0.75, accepts=True, critique="ok"),
+            VerifierVerdict(confidence=0.30, accepts=False, critique="wrong dir"),
+            VerifierVerdict.reject("crashed"),  # confidence 0.0
+        ]
+        combined = _combine(verdicts, weighted=True)
+        assert combined.accepts is False
+
+
 class TestVerifyProposal:
     @pytest.mark.asyncio
     async def test_empty_proposal_rejected_without_llm_call(self):

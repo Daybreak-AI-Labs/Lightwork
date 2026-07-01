@@ -30,6 +30,17 @@ def test_grammar_loose_whitespace_and_case():
     assert "intent: set_budget" in out and "amount=5" in out
 
 
+def test_grammar_length_changing_lowercase():
+    """A slot value whose str.lower() changes length (Turkish 'İ' -> 2 chars)
+    must still match: indices live in the folded coordinate space, so slicing
+    and the trailing length check stay aligned instead of tripping NO MATCH."""
+    t = voice_command_grammar()
+    grammar = [{"intent": "set_name", "pattern": "set name to {name} now"}]
+    out = t.fn({"grammar": grammar, "utterance": "set name to İvan now"})
+    assert "intent: set_name" in out
+    assert "name=" in out and out != "NO MATCH"
+
+
 def test_grammar_no_slot_and_no_match():
     t = voice_command_grammar()
     assert "intent: halt" in t.fn({"grammar": _GRAMMAR, "utterance": "stop everything"})

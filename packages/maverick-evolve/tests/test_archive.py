@@ -46,6 +46,20 @@ def test_capacity_eviction_preserves_best():
     assert a.best().config == {"id": 0}
 
 
+def test_eviction_breaks_distance_ties_by_score():
+    """When candidates are mutually equidistant (no shared config keys), the
+    greedy diversity pick must break ties by score so eviction never drops a
+    stronger candidate for a weaker one."""
+    a = Archive(capacity=3)
+    a.add(Candidate(config={"a": 1}, score=0.1))
+    a.add(Candidate(config={"b": 1}, score=0.9))
+    a.add(Candidate(config={"c": 1}, score=0.8))
+    a.add(Candidate(config={"d": 1}, score=0.7))  # triggers eviction
+    kept = sorted(c.score for c in a.candidates)
+    # The stronger 0.7 must survive; the weakest 0.1 is evicted.
+    assert kept == [0.7, 0.8, 0.9]
+
+
 def test_sample_favors_higher_score():
     a = Archive()
     a.add(Candidate(config={"x": 1}, score=1.0))

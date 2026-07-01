@@ -84,6 +84,46 @@ def _check_url(url: str) -> str | None:
     return None
 
 
+def _pin_url(url: str) -> str:
+    """Rewrite the URL's host to a single pinned public IP so the headless
+    browser (pa11y/axe) cannot re-resolve and DNS-rebind to a private/metadata
+    address after ``_check_url`` validated the name.
+
+    ``_check_url`` only does a pre-flight resolution; the browser re-resolves
+    the hostname on its own, reopening the exact TOCTOU ``_ssrf.py`` closes for
+    the httpx path. Pin the connection target to one IP that ``resolve_pinned_ip``
+    has verified public (it raises otherwise, honoring MAVERICK_FETCH_ALLOW_PRIVATE),
+    mirroring the pinned-connection design. On any resolution/parse issue we return
+    the original URL unchanged -- the browser fetch then fails closed rather than
+    silently bypassing the pin.
+    """
+    from urllib.parse import urlparse, urlunparse
+
+    from ._ssrf import BlockedHost, resolve_pinned_ip
+    try:
+        parsed = urlparse(url)
+        host = parsed.hostname
+        if not host:
+            return url
+        ip = resolve_pinned_ip(host)
+        # Preserve the port (and userinfo, if any) while swapping only the host.
+        netloc = ip
+        if parsed.port:
+            netloc = f"{ip}:{parsed.port}"
+        if parsed.username:
+            cred = parsed.username
+            if parsed.password:
+                cred += f":{parsed.password}"
+            netloc = f"{cred}@{netloc}"
+        return urlunparse(parsed._replace(netloc=netloc))
+    except BlockedHost:
+        # Re-resolution now says the host is non-public -- refuse by returning a
+        # sentinel the caller rejects rather than a fetchable URL.
+        raise
+    except Exception:
+        return url
+
+
 def _confine_path(sandbox, user_path: str) -> str:
     """Confine a check_html file path to the sandbox workspace and block
     option-injection (a leading '-' would be parsed as a runner flag).
@@ -209,7 +249,17 @@ def _run(args: dict[str, Any], sandbox) -> str:
             bad = _check_url(url)
             if bad:
                 return bad
-            return _op_check(url, runner, max_issues, sandbox)
+            # Pin the host to a validated public IP so the headless browser
+            # cannot re-resolve/rebind between the guard and the fetch.
+            from ._ssrf import BlockedHost
+            try:
+                target = _pin_url(url)
+            except BlockedHost as e:
+                return (
+                    f"ERROR: refusing to check {url!r}: {e} (SSRF guard; "
+                    "re-resolution returned a non-public address)."
+                )
+            return _op_check(target, runner, max_issues, sandbox)
         if op == "check_html":
             path = (args.get("path") or "").strip()
             if not path:

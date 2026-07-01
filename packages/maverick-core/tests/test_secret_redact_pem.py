@@ -37,6 +37,23 @@ def test_full_pem_block_is_fully_redacted():
     assert "my key is:" in red and "thanks" in red
 
 
+def test_large_pem_beyond_8192_chars_is_fully_redacted():
+    # Regression: the 8192-char bound meant a PEM whose body+whitespace between
+    # BEGIN and END exceeded 8192 chars left its TRAILING key material and the
+    # END line in cleartext -- the leak got worse on the largest keys. Build a
+    # body well over 8192 chars ending in a unique marker that must not survive.
+    big_body = ("A" * 9000) + "\nTRAILINGSECRET=="  # > 8192 chars before END
+    text = (
+        "-----BEGIN RSA PRIVATE KEY-----\n"  # pragma: allowlist secret
+        f"{big_body}\n"
+        "-----END RSA PRIVATE KEY-----"  # pragma: allowlist secret
+    )
+    red, matches = redact(text)
+    assert matches
+    assert "TRAILINGSECRET==" not in red
+    assert "-----END RSA PRIVATE KEY-----" not in red  # pragma: allowlist secret
+
+
 def test_openssh_and_ec_keys_fully_redacted():
     for kind in ("OPENSSH ", "EC ", ""):
         red, _ = redact(_pem(kind))

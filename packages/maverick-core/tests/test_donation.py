@@ -75,6 +75,24 @@ class TestWriteRecord:
         assert payload["task_brief_hash"] == "abc123"
         assert payload["outcome"] == "success"
 
+    def test_verifier_critique_stripped_when_text_off(self, tmp_path, monkeypatch):
+        # verifier_critique is raw model free-text; the metadata-only contract
+        # must clear it unless donate_text is on (regression: it leaked through).
+        monkeypatch.setattr(donation, "_donations_enabled", lambda: True)
+        monkeypatch.setattr(donation, "_text_donations_enabled", lambda: False)
+        rec = TrajectoryRecord(
+            task_brief_hash="abc123",
+            task_brief_text="plan a trip to Lisbon",
+            verifier_critique="the proprietary Project Falcon strategy is wrong",
+            outcome="success",
+            verifier_confidence=0.9,
+            disagreement_entropy=0.7,
+            reward=1.0,
+        )
+        path = write_record(rec, outbox=tmp_path)
+        payload = json.loads(path.read_text())
+        assert payload["verifier_critique"] == ""
+
     def test_text_included_when_double_opt_in(self, tmp_path, monkeypatch):
         monkeypatch.setattr(donation, "_donations_enabled", lambda: True)
         monkeypatch.setattr(donation, "_text_donations_enabled", lambda: True)

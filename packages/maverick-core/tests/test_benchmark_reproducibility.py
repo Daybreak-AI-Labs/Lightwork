@@ -95,6 +95,19 @@ def test_record_never_rewrites_existing_history(tmp_path):
     assert len(manifests) == 1 and manifests[0].name.startswith("new-")
 
 
+def test_same_suite_same_millisecond_runs_do_not_collide(tmp_path):
+    # Two runs of the same suite at the identical timestamp must not overwrite
+    # each other's manifest (the filename now carries a pid+random suffix).
+    history = tmp_path / "history.json"
+    ts = 1_750_000_000.0
+    a = record_with_manifest("s", 0.1, history_path=history, now=ts)
+    b = record_with_manifest("s", 0.2, history_path=history, now=ts)
+    assert a is not None and b is not None
+    assert a != b
+    manifests = list((tmp_path / "manifests").glob("*.json"))
+    assert len(manifests) == 2
+
+
 def test_manifest_hook_opt_out(tmp_path, monkeypatch):
     history = tmp_path / "history.json"
     out = record_with_manifest("s", 0.5, history_path=history, write_manifest=False)
