@@ -67,6 +67,11 @@ def _render_labels(labels: Any) -> str | None:
 
 def _render(metrics: list) -> str:
     lines: list[str] = []
+    # OpenMetrics/Prometheus require exactly one # TYPE (and at most one # HELP)
+    # per metric FAMILY, not per sample. Emitting them for every sample produced
+    # invalid, parser-rejected exposition whenever a metric name recurred with a
+    # different label set. Emit metadata only the first time each name is seen.
+    seen: set[str] = set()
     for m in metrics:
         if not isinstance(m, dict):
             return "ERROR: each metric must be an object"
@@ -83,10 +88,12 @@ def _render(metrics: list) -> str:
         if labels is None:
             return f"ERROR: metric {name!r} has invalid labels"
 
-        help_text = m.get("help")
-        if help_text is not None:
-            lines.append(f"# HELP {name} {_esc_help(str(help_text))}")
-        lines.append(f"# TYPE {name} {mtype}")
+        if name not in seen:
+            help_text = m.get("help")
+            if help_text is not None:
+                lines.append(f"# HELP {name} {_esc_help(str(help_text))}")
+            lines.append(f"# TYPE {name} {mtype}")
+            seen.add(name)
         lines.append(f"{name}{labels} {value}")
 
     lines.append("# EOF")

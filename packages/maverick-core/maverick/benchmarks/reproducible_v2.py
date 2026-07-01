@@ -174,13 +174,24 @@ def run_suite(
 
     Returns a manifest *body* (no signature yet); ``build_manifest`` signs it.
     """
+    # Decide ONCE whether the solver accepts a seed, via signature inspection --
+    # not by catching TypeError from the call. Catching TypeError conflated "no
+    # seed kwarg" with "solver body raised TypeError": the latter retried the
+    # solver (double-executing a stochastic solver, breaking reproducibility) and
+    # the retry's own TypeError escaped the sibling `except Exception`, killing
+    # the whole suite.
+    import inspect
+    try:
+        _params = inspect.signature(solver).parameters
+        _accepts_seed = "seed" in _params or any(
+            p.kind == inspect.Parameter.VAR_KEYWORD for p in _params.values())
+    except (TypeError, ValueError):
+        _accepts_seed = True
     results: list[TaskResult] = []
     for task in suite:
         try:
-            out = solver(task, seed=conditions.seed)
-        except TypeError:
-            # Tolerate a solver that doesn't accept a seed kwarg.
-            out = solver(task)
+            out = (solver(task, seed=conditions.seed) if _accepts_seed
+                   else solver(task))
         except Exception as e:  # one bad task != a dead suite
             out = f"ERROR: {type(e).__name__}: {e}"
         sc = max(0.0, min(1.0, float(scorer(task, out))))
