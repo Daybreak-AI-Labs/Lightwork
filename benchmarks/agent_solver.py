@@ -15,6 +15,7 @@ provider key is configured.
 from __future__ import annotations
 
 import re
+import shutil
 import tempfile
 from collections.abc import Callable
 from pathlib import Path
@@ -69,22 +70,31 @@ def make_agent_solver(
         prompt = str(task.prompt)
         if append_answer_instruction:
             prompt += ANSWER_INSTRUCTION
+        # Per-task temp dir (one SQLite world DB each). Clean it up in a
+        # finally so a long benchmark run doesn't leak a directory per task.
         tmp = Path(tempfile.mkdtemp(prefix="mav-eval-"))
         world = WorldModel(path=tmp / "world.db")
-        gid = world.create_goal(str(task.prompt)[:80], prompt)
-        budget = Budget(max_dollars=max_dollars, max_wall_seconds=max_wall_seconds)
-        out = run_goal_sync(
-            llm=_llm(), world=world, budget=budget, goal_id=gid,
-            sandbox=_sandbox(), max_depth=max_depth,
-        )
-        if out and str(out).strip():
-            return _strip_run_meta(str(out))
-        # Fallback: the agent may have recorded its answer on the goal row.
         try:
-            g = world.get_goal(gid)
-            return str(getattr(g, "result", None) or getattr(g, "answer", None) or "")
-        except Exception:
-            return ""
+            gid = world.create_goal(str(task.prompt)[:80], prompt)
+            budget = Budget(max_dollars=max_dollars, max_wall_seconds=max_wall_seconds)
+            out = run_goal_sync(
+                llm=_llm(), world=world, budget=budget, goal_id=gid,
+                sandbox=_sandbox(), max_depth=max_depth,
+            )
+            if out and str(out).strip():
+                return _strip_run_meta(str(out))
+            # Fallback: the agent may have recorded its answer on the goal row.
+            try:
+                g = world.get_goal(gid)
+                return str(getattr(g, "result", None) or getattr(g, "answer", None) or "")
+            except Exception:
+                return ""
+        finally:
+            try:
+                world.close()
+            except Exception:
+                pass
+            shutil.rmtree(tmp, ignore_errors=True)
 
     return solve
 

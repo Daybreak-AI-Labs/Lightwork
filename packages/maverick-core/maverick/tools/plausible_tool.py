@@ -147,8 +147,13 @@ def _op_breakdown(args: dict) -> str:
     rows = data.get("results") or []
     if not rows:
         return "no data"
+    # Plausible v1 breakdown keys each row by the SHORT property name
+    # (e.g. 'page', 'source'), not the full 'event:page' / 'visit:source'
+    # passed in the request. Look up the short name or the dimension column
+    # is always '?'.
+    dim = prop.split(":", 1)[-1]
     return "\n".join(
-        f"  visitors={r.get('visitors', '?')!s:>8}  {str(r.get(prop) or '?')[:80]}"
+        f"  visitors={r.get('visitors', '?')!s:>8}  {str(r.get(dim) or '?')[:80]}"
         for r in rows
     )
 

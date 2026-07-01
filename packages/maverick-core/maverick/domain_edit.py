@@ -130,6 +130,20 @@ def _envelope_errors(base: DomainProfile | None, merged: DomainProfile) -> list[
         )
     if merged.compartment != base.compartment:
         errors.append("compartment cannot differ from the built-in pack")
+    # allow_paths / allow_hosts / mcp_servers are equally capability-broadening:
+    # an override adding a path, host, or MCP server the built-in pack never
+    # granted escalates the envelope just like adding a tool. Reject additions.
+    for field, label in (
+        ("allow_paths", "allow_paths"),
+        ("allow_hosts", "allow_hosts"),
+        ("mcp_servers", "mcp_servers"),
+    ):
+        added = sorted(set(getattr(merged, field) or ()) - set(getattr(base, field) or ()))
+        if added:
+            errors.append(
+                f"{label} cannot add entries beyond the built-in pack: "
+                + ", ".join(str(a) for a in added)
+            )
     return errors
 
 

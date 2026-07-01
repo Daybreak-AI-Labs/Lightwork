@@ -138,6 +138,22 @@ def test_replay_cache_evicts_expired():
     assert cache.check_and_add("old", expires_at=now + 100, now=now + 50) is True
 
 
+def test_overflow_evicts_soonest_to_expire_not_oldest_inserted():
+    # A still-live nonce must survive capacity pressure while later-expiring
+    # entries exist, so a captured token cannot be replayed within its TTL by
+    # flooding the cache (regression: oldest-inserted eviction dropped it).
+    cache = _ReplayCache(maxsize=2)
+    now = time.time()
+    # "captured" expires last -> should never be evicted while shorter-lived
+    # entries remain, even though it was inserted first.
+    assert cache.check_and_add("captured", expires_at=now + 100, now=now) is True
+    assert cache.check_and_add("filler1", expires_at=now + 10, now=now) is True
+    assert cache.check_and_add("filler2", expires_at=now + 20, now=now) is True
+    # Cache is over capacity; the soonest-to-expire filler was evicted, not the
+    # live captured nonce. Replaying it is still rejected.
+    assert cache.check_and_add("captured", expires_at=now + 100, now=now) is False
+
+
 # --- unsigned fallback -----------------------------------------------------
 
 def test_unsigned_token_requires_explicit_unsigned_mode(monkeypatch):

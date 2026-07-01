@@ -16,6 +16,7 @@ from __future__ import annotations
 
 import json
 import logging
+import math
 import os
 from dataclasses import dataclass
 
@@ -54,7 +55,10 @@ class CanaryResult:
 def _classify(metric: str, base: float, cand: float, tol: float) -> MetricVerdict:
     higher_better = metric in HIGHER_IS_BETTER
     denom = abs(base) if base else 0.0
-    rel = (cand - base) / denom if denom else (0.0 if cand == base else float("inf"))
+    # Zero baseline: sign the infinite sentinel by the direction of the move so
+    # a negative candidate isn't judged as a large positive move (and vice versa).
+    rel = ((cand - base) / denom if denom
+           else (0.0 if cand == base else math.copysign(float("inf"), cand - base)))
     # Worse-direction movement beyond tolerance is a regression.
     if higher_better:
         verdict = "regressed" if rel < -tol else ("improved" if rel > tol else "ok")

@@ -72,9 +72,13 @@ _PATTERNS: list[tuple[str, re.Pattern]] = [
         r"-----BEGIN (?:RSA |EC |DSA |OPENSSH |PGP )?PRIVATE KEY-----"
         r"(?:"
         # Preferred: the WHOLE block when an END marker is present. Bounded
-        # body (even RSA-4096 < 4KB) so many BEGIN markers with no END can't
-        # scan to EOF per marker (ReDoS guard); a real key's END is in-window.
-        r".{0,8192}?-----END (?:RSA |EC |DSA |OPENSSH |PGP )?PRIVATE KEY-----"
+        # body so many BEGIN markers with no END can't scan to EOF per marker
+        # (ReDoS guard); the bound (64KB) covers real key formats -- an RSA-8192
+        # PEM, an OPENSSH key, or a concatenated key bundle whose body+whitespace
+        # exceeds 8192 chars would otherwise leave the trailing key material +
+        # END line un-redacted (adversarial finding: the leak got WORSE on the
+        # largest keys).
+        r".{0,65536}?-----END (?:RSA |EC |DSA |OPENSSH |PGP )?PRIVATE KEY-----"
         r"|"
         # Fallback: a header WITH a body but NO END marker (a key truncated by
         # a buffer/summary boundary -- e.g. the audit writer's own truncation).
@@ -83,8 +87,8 @@ _PATTERNS: list[tuple[str, re.Pattern]] = [
         # through redact()/redact_proven()/the audit log. When END is absent,
         # consume the trailing base64+whitespace run wholesale (fail-safe: a
         # PRIVATE KEY header means err toward over-redaction; the restricted
-        # charset and {0,8192} bound keep it linear / ReDoS-safe).
-        r"[A-Za-z0-9+/=\s]{0,8192}"
+        # charset and {0,65536} bound keep it linear / ReDoS-safe).
+        r"[A-Za-z0-9+/=\s]{0,65536}"
         r")",
         re.DOTALL)),
     # Council finding #14: coverage gaps that fed the tool-output exfil class.

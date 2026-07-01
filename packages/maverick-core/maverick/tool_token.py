@@ -114,7 +114,11 @@ class _ReplayCache:
             self._seen[jti] = expires_at
             self._seen.move_to_end(jti)
             while len(self._seen) > self._max:
-                self._seen.popitem(last=False)
+                # Evict the soonest-to-expire entry, not the oldest-inserted, so
+                # a still-live nonce is never dropped (and replayable within its
+                # TTL) while a later-expiring one survives.
+                soonest = min(self._seen, key=self._seen.__getitem__)
+                self._seen.pop(soonest, None)
             return True
 
 

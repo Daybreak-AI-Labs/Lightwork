@@ -192,8 +192,18 @@ def _parse_linear(payload: dict) -> IssueEvent | None:
     # type=="Issue" update carrying an assignee object/id on data.
     if payload.get("type") != "Issue":
         return None
-    if payload.get("action") not in ("create", "update"):
+    action = payload.get("action")
+    if action not in ("create", "update"):
         return None
+    # Gate on the assignment TRANSITION, not merely the bot being the current
+    # assignee: an ``update`` that didn't change the assignee (priority/state/
+    # description edit) must not re-fire a paid goal. Linear reports the prior
+    # values in ``updatedFrom``; require the assignee field there. ``create``
+    # is always the initial assignment, so it needs no such gate.
+    if action == "update":
+        updated_from = payload.get("updatedFrom") or {}
+        if not any(k in updated_from for k in ("assigneeId", "assignee")):
+            return None
     data = payload.get("data") or {}
     assignee = data.get("assignee") or {}
     candidates = [
@@ -230,10 +240,19 @@ def _flatten_adf(desc) -> str:
 def _parse_jira(payload: dict) -> IssueEvent | None:
     # Jira fires {webhookEvent, issue:{key, fields}}. An assignment is an
     # issue_updated whose fields.assignee is the bot.
-    if payload.get("webhookEvent") not in (
-        "jira:issue_updated", "jira:issue_created",
-    ):
+    event = payload.get("webhookEvent")
+    if event not in ("jira:issue_updated", "jira:issue_created"):
         return None
+    # Gate on the assignment TRANSITION, not merely the bot being the current
+    # assignee: an ``issue_updated`` that didn't touch the assignee must not
+    # re-fire a paid goal. Jira reports changed fields in ``changelog.items``;
+    # require an "assignee" item. ``issue_created`` is the initial assignment.
+    if event == "jira:issue_updated":
+        items = (payload.get("changelog") or {}).get("items") or []
+        if not any(
+            isinstance(it, dict) and it.get("field") == "assignee" for it in items
+        ):
+            return None
     issue = payload.get("issue") or {}
     fields = issue.get("fields") or {}
     assignee = fields.get("assignee") or {}

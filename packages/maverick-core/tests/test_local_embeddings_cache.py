@@ -16,7 +16,8 @@ def test_key_is_deterministic_sha256():
     k2 = _run(op="key", text="hello world", model="text-embed-3")
     assert k1 == k2
     assert len(k1) == 64 and all(c in "0123456789abcdef" for c in k1)
-    expected = hashlib.sha256(b"text-embed-3\x00hello world").hexdigest()
+    expected = hashlib.sha256(
+        json.dumps(["text-embed-3", "hello world"]).encode()).hexdigest()
     assert k1 == expected
 
 
@@ -24,6 +25,14 @@ def test_key_namespaced_by_model():
     a = _run(op="key", text="same", model="model-a")
     b = _run(op="key", text="same", model="model-b")
     assert a != b  # different model -> different slot, no collision
+
+
+def test_key_no_boundary_collision_with_nul_in_model():
+    # An in-band NUL separator used to let two distinct (model, text) pairs
+    # collide onto the same slot; the JSON-encoded payload prevents that.
+    a = _run(op="key", text="b", model="a\x00")
+    b = _run(op="key", text="\x00b", model="a")
+    assert a != b
 
 
 def test_stats_hit_miss_summary():

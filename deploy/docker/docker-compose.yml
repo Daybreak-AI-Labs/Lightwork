@@ -23,7 +23,11 @@ services:
       - ${HOME}/.maverick:/home/maverick/.maverick
       - ${HOME}/maverick-workspace:/workspace
     env_file:
-      - ${HOME}/.maverick/.env
+      # required:false so the documented first run (`... run --rm maverick init`,
+      # which CREATES ~/.maverick/.env) doesn't fail on the not-yet-existent
+      # file. Compose errors on a missing env_file unless it's marked optional.
+      - path: ${HOME}/.maverick/.env
+        required: false
     environment:
       MAVERICK_CONFIG: /home/maverick/.maverick/config.toml
     stdin_open: true

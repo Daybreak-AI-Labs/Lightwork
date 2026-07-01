@@ -564,7 +564,11 @@ def _verify_skill_signature(parsed: Skill, *, require_signature: bool = False) -
         canonical_bytes_fn=lambda: _canonical_signed_bytes(parsed),
         trusted=cfg["trusted_pubkeys"],
         must_verify=bool(cfg["require_signed"]) or require_signature,
-        require_anchor=require_signature,
+        # require_anchor must also honor require_signed: otherwise
+        # require_signed=True with an empty trusted_pubkeys silently downgrades a
+        # signed skill to trust-on-first-use (accepting any self-signed skill).
+        # Mirror must_verify so require_signed hard-rejects an unanchored signature.
+        require_anchor=bool(cfg["require_signed"]) or require_signature,
         fields="name/triggers/tools_needed/purposes/body",
     )
 

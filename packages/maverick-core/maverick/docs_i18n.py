@@ -195,7 +195,11 @@ def status(docs_root: Path, langs: list[str],
         lang_root = _lang_dir(i18n_root, lang)
         for rel in files:
             src = _resolve_under(docs_root, rel)
-            dst = lang_root / Path(rel).name
+            # Preserve the source subdirectory structure. Using only the
+            # basename collapsed two docs with the same filename in different
+            # subdirs onto one destination (one silently overwrote / shadowed
+            # the other in status + run).
+            dst = _resolve_under(lang_root, rel)
             if not dst.exists():
                 out.append(DocStatus(lang, rel, "missing"))
                 continue
@@ -225,7 +229,11 @@ def run(docs_root: Path, langs: list[str], files: list[str], llm) -> list[Path]:
             src = _resolve_under(docs_root, rel)
             source = src.read_text(encoding="utf-8")
             translated = translate_document(source, lang, llm)
-            dst = lang_root / Path(rel).name
+            # Preserve the source subdirectory structure. Using only the
+            # basename collapsed two docs with the same filename in different
+            # subdirs onto one destination (one silently overwrote / shadowed
+            # the other in status + run).
+            dst = _resolve_under(lang_root, rel)
             dst.parent.mkdir(parents=True, exist_ok=True)
             dst.write_text(header_for(rel, source) + translated,
                            encoding="utf-8")

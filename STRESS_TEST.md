@@ -27,6 +27,39 @@ real defect surfaced was an environment-interaction bug in the git sandbox.
 
 ---
 
+## Refresh — 2026-06-30 (post-bug-audit, reproducible numbers)
+
+The sections below are **point-in-time snapshots from 2026-06-26/27**. ~150
+commits landed since the 06-27 refresh (self-harness lifecycle, evaluator
+co-evolution, DPO donation pipeline, the rebrand sweep, a wave of `codex/`
+security-fix PRs). Re-run with `python3 -m pytest -q` from the repo root to
+reproduce; numbers below supersede everything older.
+
+| Axis | Result (2026-06-30) |
+|------|--------|
+| Full suite (`python3 -m pytest -q`) | **14,096 passed, 189 skipped, 3 xfailed** (~400-520s depending on load) |
+| `ruff check .` (repo-wide) | **clean** |
+| Custom CI gates (`migration_governance`, `schema_migrations`, `plugin_matrix`, `deprecations`, `control_data_plane` e2e/soak, `a11y_audit`, `failure_policy`, `evaluator_evolution`, `grpc_api.contract --check`) | **green** |
+| The 06-27 refresh's "6 failures" | **all resolved** — `test_session_clear_alias.py` (the 3 stale `session clear` CLI cases) no longer exists; `test_kms_fleet_rotation.py::test_cli_kms_rotate_rejects_raw_kek_argv`, `test_deployment.py::test_regulated_profile_passes_seals_data_and_is_compliant`, and `test_worker_review.py::test_learning_is_honest_when_no_learned_state` now pass cleanly both in isolation and inside the full-suite run |
+
+**One residual flake, characterized (not rounded away):**
+`test_llm_hedge.py::test_hedge_race_bounded_by_wall_budget` failed once inside
+a full-suite run taken under heavy parallel load, but passes consistently in
+isolation and in a clean full-suite run — a wall-clock-budget assertion that's
+timing-sensitive under contention, not a product defect. Worth tightening the
+margin or mocking the clock if it recurs, but not actionable as-is.
+
+A fresh audit pass (12 reviewer agents across two rounds targeting every file
+with substantial new logic since the 06-27 audit, see PR #2058) found and
+fixed 6 additional bugs: `evaluator_evolution.py` anchor-laundering via
+`--regen`, a `failure_policy.py` marker-misattribution gap, a
+`grpc_api/contract.py` `oneof`-field-drop, two `budget_receipts.py`
+tamper-evidence gaps, a `self_harness.py` k-fold sample-count inflation, and
+an inaccurate `agent_adapter.py` docstring — all with regression tests, all
+green per the gates above. A broader 100-agent re-verification + periphery
+discovery sweep was in progress at the time of this refresh; see PR #2058 for
+its outcome once complete.
+
 ## Refresh — 2026-06-27 (post-audit-remediation, reproducible numbers)
 
 The TL;DR above is a **point-in-time snapshot from 2026-06-26**. The exact

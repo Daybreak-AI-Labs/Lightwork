@@ -65,6 +65,18 @@ def test_continue_without_revision_stalls():
     assert res.status == "stalled" and res.iterations == 1
 
 
+def test_malformed_reflector_stalls_not_done():
+    # A reflector whose output can't be parsed as JSON must NOT be read as
+    # "goal met": the run should surface as stalled, not a false success.
+    res = run_plan_execute_reflect(
+        "do a thing",
+        planner_complete=_planner(["step"]),
+        executor_complete=lambda **kw: _resp("x"),
+        reflector_complete=_const("I refuse to answer (not JSON)"),
+    )
+    assert res.status == "stalled" and res.iterations == 1
+
+
 def test_max_iterations_cap():
     res = run_plan_execute_reflect(
         "endless",

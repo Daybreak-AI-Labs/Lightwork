@@ -189,6 +189,16 @@ def _to_runtime(payload: dict) -> tuple[dict, dict]:
         "ctc_phaseout_start": {s: float(fed["ctc_phaseout_start"][s])
                                for s in FILING_STATUSES},
     }
+    # Carry the 65+/blind additional standard deduction from the bundle when it
+    # supplies a full table. Previously this was dropped, so an applied signed
+    # bundle could never update it -- tax_prep silently fell back to the
+    # hardcoded TY2025 default regardless of the bundle. Omitted (not partial)
+    # bundles still fall back to that default, matching prior behavior.
+    add = fed.get("additional_standard_deduction")
+    if isinstance(add, dict) and all(add.get(s) is not None for s in FILING_STATUSES):
+        federal["additional_standard_deduction"] = {
+            s: float(add[s]) for s in FILING_STATUSES
+        }
     st = payload.get("state") or {}
     state = {
         "year": int(payload["year"]),

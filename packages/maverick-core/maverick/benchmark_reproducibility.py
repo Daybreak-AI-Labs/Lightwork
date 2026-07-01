@@ -34,6 +34,7 @@ import logging
 import os
 import platform
 import re
+import secrets
 import time
 from datetime import datetime, timezone
 from pathlib import Path
@@ -203,7 +204,10 @@ def record_with_manifest(
         input_paths=input_paths,
         started=ts,
     )
-    out = _manifest_dir(path) / f"{_safe_name(name)}-{int(ts * 1000)}.json"
+    # Add a pid+random suffix so two runs of the same suite within one
+    # millisecond don't collide and silently overwrite each other's manifest.
+    out = (_manifest_dir(path)
+           / f"{_safe_name(name)}-{int(ts * 1000)}-{os.getpid()}-{secrets.token_hex(3)}.json")
     _write_json_0600(out, manifest)
     return out
 

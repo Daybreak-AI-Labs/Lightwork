@@ -24,6 +24,10 @@ def test_classify_copyleft_ordering():
     # SSPL (MongoDB) is strong-copyleft and toxic to enterprise procurement.
     assert classify_license("Server Side Public License v1") == "strong-copyleft"
     assert classify_license("SSPL") == "strong-copyleft"
+    # LGPL-2.0's historical official title must not fall through to the GPL
+    # rule (it lacks 'lgpl' and 'lesser', so it was over-flagged as strong).
+    assert classify_license(
+        "GNU Library General Public License") == "weak-copyleft"
 
 
 def test_classify_public_domain_and_unknown():

@@ -75,6 +75,23 @@ class ReceiptKeyMissing(RuntimeError):
         )
 
 
+class ReceiptChainTampered(RuntimeError):
+    """The high-water head anchor exists but fails to verify.
+
+    A forged/corrupted head is unambiguous tamper evidence (this process only
+    ever writes a correctly-signed head); silently overwriting it with a
+    fresh, lower anchor would launder the tamper instead of surfacing it.
+    """
+
+    def __init__(self, chain_path: Path) -> None:
+        super().__init__(
+            f"budget receipt head anchor at {chain_path}.head failed signature "
+            "verification — it is corrupted or was tampered with. Refusing to "
+            "mint (which would silently re-baseline the anchor and erase the "
+            "evidence); investigate before deleting the .head file."
+        )
+
+
 @dataclass(frozen=True)
 class ChainReport:
     """Outcome of :func:`verify_chain`. ``broken_at`` is the 0-based line
@@ -219,6 +236,31 @@ def mint(
     # alarm in verify_chain on otherwise valid receipts). Serialize within the
     # process and across the sibling processes sharing this data dir.
     with _MINT_LOCK, file_lock.cross_process_lock(chain_path):
+        pre_mint_count = _line_count(chain_path)
+        prev_count = _read_head(chain_path, real_key)
+        if prev_count is not None and prev_count < 0:
+            # A head file exists but fails its own signature: it was forged or
+            # corrupted on disk (this process only ever writes a correctly
+            # signed head). Refuse rather than silently re-baselining it.
+            raise ReceiptChainTampered(chain_path)
+        if prev_count is None and pre_mint_count > 0:
+            # No head anchor, but the chain already has receipts -- either a
+            # first run after upgrading to this anchor feature (benign), or
+            # the anchor was deleted to launder a tail truncation (the exact
+            # tamper this anchor exists to catch). Either way it can't be
+            # silently invisible: record it so a missing anchor for an
+            # existing chain shows up in the signed audit log even though the
+            # prior floor itself can't be recovered from the deleted file.
+            try:
+                from .audit import EventKind, record
+                record(EventKind.CONFIG_REMEDIATED, agent="budget_receipts",
+                       resource=str(chain_path), field="receipt_head_anchor",
+                       detail=f"head anchor absent for a non-empty chain "
+                              f"({pre_mint_count} existing receipt(s)); "
+                              "(re)bootstrapping -- verify this was an upgrade, "
+                              "not a deleted anchor")
+            except Exception:
+                pass  # failure-policy: best_effort
         prev_line = _last_line(chain_path)
         payload = {
             "goal_id": int(goal_id),
@@ -236,7 +278,6 @@ def mint(
         receipt = {"alg": _ALG, "payload": payload, "sig": _sign(payload, real_key)}
         line = json.dumps(receipt, sort_keys=True, separators=(",", ":"),
                           ensure_ascii=False)
-        prev_count = _read_head(chain_path, real_key)
         # Append-only, created 0600: the chain is the tamper-evidence, the mode
         # keeps other local users from reading spend data.
         fd = os.open(chain_path, os.O_WRONLY | os.O_CREAT | os.O_APPEND, 0o600)
@@ -246,7 +287,9 @@ def mint(
             os.close(fd)
         # Advance the high-water anchor. A pre-existing (legitimately longer)
         # head is never rewound — only ever advanced — so it stays a floor.
-        floor = prev_count if (prev_count is not None and prev_count >= 0) else 0
+        # (A tampered head was already rejected above, so prev_count here is
+        # either a genuine prior anchor or None.)
+        floor = prev_count if prev_count is not None else 0
         _write_head(chain_path, max(floor + 1, _line_count(chain_path)), real_key)
     return line
 
@@ -298,6 +341,14 @@ def verify_chain(path: str | Path | None = None, key: str | None = None) -> Chai
                                       "(deleted/reordered predecessor?)")
         prev_hash = _receipt_hash(line)
     head = _read_head(chain_path, real_key)
+    if head is not None and head < 0:
+        # _read_head signals a present-but-unverifiable (forged/corrupted)
+        # head as -1. A negative head is never >= any real chain length, so
+        # the truncation check below would never trip on it -- check it
+        # explicitly instead of silently treating it as "no anchor."
+        return ChainReport(count=len(lines), broken_at=len(lines),
+                           reason="head anchor present but fails signature "
+                                  "verification (forged or corrupted)")
     if head is not None and len(lines) < head:
         # The internal links all held, but the anchor recorded more receipts
         # than survive — the cheapest tamper: shave the newest costly tail.

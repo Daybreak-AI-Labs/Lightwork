@@ -34,15 +34,15 @@ export function GlanceScreen(props: { settings: Settings }): React.JSX.Element {
       getSpend(settings).catch(() => null),
     ]);
     // Best-effort cache refresh; endpoint may not exist on older dashboards.
-    getOfflineBundle(settings).then(saveBundle).catch(() => undefined);
+    getOfflineBundle(settings).then((b) => saveBundle(b, settings.baseUrl)).catch(() => undefined);
     return { active: activeRes.goals, spend: spendRes ? spendRes.total : null };
   }, [settings]);
 
   const { data, error } = usePolling<GlanceData>(fetcher, 15_000);
 
   useEffect(() => {
-    if (error && !data) loadBundle().then(setCached);
-  }, [error, data]);
+    if (error && !data) loadBundle(settings.baseUrl).then(setCached);
+  }, [error, data, settings.baseUrl]);
 
   if (!data && cached) {
     const g = cached.bundle.glance;

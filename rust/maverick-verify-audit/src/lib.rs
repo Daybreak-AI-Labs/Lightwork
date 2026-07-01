@@ -240,6 +240,21 @@ fn load_key_from_dir(dir: &Path, key_id: &str) -> Option<VerifyingKey> {
         return None;
     }
     let pub_path = dir.join(format!("{key_id}.pub"));
+    if !pub_path.exists() {
+        return None;
+    }
+    // Mirror Python's _load_pubkey: trust a local <id>.pub ONLY when its private
+    // <id>.key sibling exists (this host generated the keypair) OR an
+    // <id>.injected marker exists (provisioned out-of-band from a KMS, private
+    // half deliberately absent). Without this, an attacker who can drop a lone
+    // forged <id>.pub into the keys dir could re-sign tampered rows and have
+    // them verify -- the exact forged-pubkey vector the Python source rejects.
+    // (--pubkey/Pinned mode is the path for true third-party tamper-evidence.)
+    let priv_path = dir.join(format!("{key_id}.key"));
+    let injected_path = dir.join(format!("{key_id}.injected"));
+    if !priv_path.exists() && !injected_path.exists() {
+        return None;
+    }
     let bytes = std::fs::read(pub_path).ok()?;
     load_verifying_key(&bytes)
 }
@@ -339,5 +354,32 @@ mod tests {
         let breaks = verify_chain_text(text, &KeySource::KeysDir(PathBuf::from("/x")));
         assert_eq!(breaks.len(), 1);
         assert_eq!(breaks[0].reason, "malformed");
+    }
+
+    #[test]
+    fn lone_pubkey_is_not_trusted() {
+        // A forged <id>.pub with no sibling .key and no .injected marker must
+        // NOT be trusted (mirrors Python _load_pubkey's anti-forgery check).
+        let dir = tempfile::tempdir().unwrap();
+        let key_id = "0123456789abcdef";
+        std::fs::write(dir.path().join(format!("{key_id}.pub")), [0u8; 32]).unwrap();
+        assert!(load_key_from_dir(dir.path(), key_id).is_none());
+
+        // With a sibling .key present, the .pub becomes trustworthy (a valid
+        // 32-byte Ed25519 point loads; the all-zero point is itself valid).
+        std::fs::write(dir.path().join(format!("{key_id}.key")), [0u8; 32]).unwrap();
+        assert!(load_key_from_dir(dir.path(), key_id).is_some());
+    }
+
+    #[test]
+    fn injected_marker_makes_pubkey_trusted() {
+        // An out-of-band (KMS-provisioned) key has only <id>.pub + <id>.injected
+        // (no private half on disk); that combination must be trusted.
+        let dir = tempfile::tempdir().unwrap();
+        let key_id = "fedcba9876543210";
+        std::fs::write(dir.path().join(format!("{key_id}.pub")), [0u8; 32]).unwrap();
+        assert!(load_key_from_dir(dir.path(), key_id).is_none());
+        std::fs::write(dir.path().join(format!("{key_id}.injected")), b"").unwrap();
+        assert!(load_key_from_dir(dir.path(), key_id).is_some());
     }
 }

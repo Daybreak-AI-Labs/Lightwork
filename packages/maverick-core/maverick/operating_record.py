@@ -99,12 +99,20 @@ def _approval_records(
     world: Any, *, limit: int, owner: str | None = None,
 ) -> list[DecisionRecord]:
     out: list[DecisionRecord] = []
+    # list_approvals has no owner column filter in SQL, so an owner-scoped call
+    # must over-fetch: a plain limit=limit truncates to the newest rows across
+    # ALL principals before the Python owner filter runs, silently dropping
+    # alice's older approvals when total volume exceeds the limit. Over-fetch a
+    # wide cap when scoped, then filter + truncate to limit in Python below.
+    fetch = limit if owner is None else max(limit * 10, 5000)
     try:
-        approvals = world.list_approvals(limit=limit)
+        approvals = world.list_approvals(limit=fetch)
     except Exception as e:  # pragma: no cover -- older DBs lack the API
         log.debug("operating_record: approval read failed: %s", e)
         return out
     for a in approvals:
+        if owner is not None and len(out) >= limit:
+            break
         if owner is not None and owner not in {
             getattr(a, "requested_by", None),
             getattr(a, "claimed_by", None),

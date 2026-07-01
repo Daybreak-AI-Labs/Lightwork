@@ -154,6 +154,21 @@ def test_finalize_writes_0600_artifact_with_minutes(tmp_path, monkeypatch):
     assert "Alice: Alice will send the deck" in payload["transcript"]
 
 
+def test_finalize_creates_file_0600_even_under_permissive_umask(tmp_path, monkeypatch):
+    # Regression: finalize() must create the minutes 0600 from the start, not
+    # write_text()-with-umask-then-chmod (which leaves a world/group-readable
+    # window). Under a permissive umask the file must still land 0600.
+    monkeypatch.setenv("MAVERICK_HOME", str(tmp_path / "mhome"))
+    old = os.umask(0o022)
+    try:
+        m = MeetingListener(session_id="s1", clock=_clock())
+        m.feed("Alice will send the deck", speaker="Alice")
+        path = m.finalize()
+    finally:
+        os.umask(old)
+    assert stat.S_IMODE(os.stat(path).st_mode) == 0o600
+
+
 def test_injected_clock_drives_started_and_duration(tmp_path, monkeypatch):
     monkeypatch.setenv("MAVERICK_HOME", str(tmp_path / "mhome"))
     m = MeetingListener(clock=_clock(start=50.0, step=5.0))

@@ -63,32 +63,40 @@ def find_tools(registry) -> Tool:
             return "Provide a 'query' describing the capability you need."
         scored = [(_score(qt, t), t) for t in registry.deferred_tools()]
         scored = [(s, t) for s, t in scored if s > 0]
-        # Tool-failure taxonomy, recall side: demote tools the loop guard has
-        # repeatedly caught failing the same way (persisted ``tool_flaky``
-        # reflexions) so a known-flaky connector loses ties to a healthy one.
-        # Demotion, never exclusion -- it may still be the only match.
-        try:
-            from .. import reflexion as _reflexion
-            if _reflexion.enabled():
-                _flaky = _reflexion.flaky_tools()
-                if _flaky:
-                    scored = [
-                        ((s * 0.5 if t.name in _flaky else s), t)
-                        for s, t in scored
-                    ]
-        except Exception:  # pragma: no cover -- never blocks tool discovery
-            pass
         if not scored:
             return (
                 f"No additional tools matched {query!r}. The tools already "
                 "available to you cover the rest -- proceed with those."
             )
+        # Tool-failure taxonomy, recall side: demote tools the loop guard has
+        # repeatedly caught failing the same way (persisted ``tool_flaky``
+        # reflexions) so a known-flaky connector loses ties to a healthy one.
+        # Demotion, never exclusion -- it may still be the only match. So the
+        # near-best threshold filter runs on the BASE (pre-demotion) scores;
+        # the 0.5 factor only weakens the sort/tie-break, never fully excludes a
+        # sole viable match below the threshold.
+        _flaky: frozenset[str] | set[str] = frozenset()
+        try:
+            from .. import reflexion as _reflexion
+            if _reflexion.enabled():
+                _flaky = _reflexion.flaky_tools() or frozenset()
+        except Exception:  # pragma: no cover -- never blocks tool discovery
+            _flaky = frozenset()
+
         # Keep only matches near the best hit, so a weak coincidental overlap
         # doesn't activate (and pollute the catalog with) an unrelated tool.
         top_score = max(s for s, _ in scored)
         threshold = max(1.0, top_score / 2)
         scored = [(s, t) for s, t in scored if s >= threshold]
-        scored.sort(key=lambda x: (-x[0], x[1].name))
+        # Sort on the demoted score so flaky tools lose ties to healthy ones,
+        # while the threshold filter above (on base scores) has already kept a
+        # sole flaky match viable.
+        def _sort_key(item: tuple[int, Tool]) -> tuple[float, str]:
+            s, t = item
+            eff = s * 0.5 if t.name in _flaky else float(s)
+            return (-eff, t.name)
+
+        scored.sort(key=_sort_key)
         top = [t for _, t in scored[:max_results]]
         registry.activate([t.name for t in top])
         lines = [f"Activated {len(top)} tool(s); you can call them now:"]

@@ -51,12 +51,12 @@ def get_provider_client(
     """Lazy-import and instantiate the named provider client.
 
     ``base_url`` reaches the self-hosted / OpenAI-compatible clients (vllm,
-    tgi, ollama, openai, openai_compatible) AND anthropic (for a proxy /
-    gateway endpoint) so a ``[providers.<name>] base_url`` in config actually
-    configures the endpoint — previously only the CLI preflight read that key
-    and the client silently fell back to its env var / localhost default.
-    Providers with fixed or scheme-specific endpoints (azure, bedrock, ...)
-    ignore it.
+    tgi, ollama, openai, openai_compatible), anthropic (for a proxy /
+    gateway endpoint), AND azure / bedrock (whose clients use it as the
+    endpoint, falling back to their env var / regional default when unset) so
+    a ``[providers.<name>] base_url`` in config actually configures the
+    endpoint — previously only the CLI preflight read that key and the client
+    silently fell back to its env var / localhost default.
 
     ``default_headers`` (from ``[providers.<name>] default_headers``) is a
     data-residency / ZDR control: extra HTTP headers attached to every request
@@ -98,10 +98,10 @@ def get_provider_client(
         return VLLMClient(api_key=api_key, base_url=base_url)
     if canon == "azure":
         from .azure_openai_provider import AzureOpenAIClient
-        return AzureOpenAIClient(api_key=api_key)
+        return AzureOpenAIClient(api_key=api_key, base_url=base_url)
     if canon == "bedrock":
         from .bedrock_provider import BedrockClient
-        return BedrockClient(api_key=api_key)
+        return BedrockClient(api_key=api_key, base_url=base_url)
     if canon == "openai_compatible":
         from .openai_compatible_provider import OpenAICompatibleClient
         return OpenAICompatibleClient(api_key=api_key, base_url=base_url)

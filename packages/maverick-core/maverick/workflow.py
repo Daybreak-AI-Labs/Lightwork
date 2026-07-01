@@ -83,12 +83,26 @@ class Workflow:
         # Validate dependency graph + detect cycles.
         self._topo_order = self._topo_sort()
 
+    @staticmethod
+    def _scan_placeholders(value: Any, into: set[str]) -> None:
+        """Collect ``${step.out}`` refs anywhere in a nested arg value, mirroring
+        _interpolate's recursion. Scanning only top-level strings missed a
+        placeholder inside a dict/list arg, so the step could be ordered BEFORE
+        its dependency and interpolate to an empty/stale value at run time."""
+        if isinstance(value, str):
+            into |= {m.group(1) for m in _PLACEHOLDER.finditer(value)}
+        elif isinstance(value, dict):
+            for v in value.values():
+                Workflow._scan_placeholders(v, into)
+        elif isinstance(value, list):
+            for v in value:
+                Workflow._scan_placeholders(v, into)
+
     def _all_deps(self, step: Step, known: set[str]) -> list[str]:
-        # Explicit deps + implicit string-template deps.
+        # Explicit deps + implicit template deps (nested-aware).
         deps = set(step.depends_on)
         for v in step.args.values():
-            if isinstance(v, str):
-                deps |= {m.group(1) for m in _PLACEHOLDER.finditer(v)}
+            self._scan_placeholders(v, deps)
         unknown = [d for d in deps if d not in known]
         if unknown:
             raise ValueError(

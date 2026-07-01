@@ -93,6 +93,11 @@ class Handler(BaseHTTPRequestHandler):
             data = json.loads(self.rfile.read(length) or b"{}")
         except json.JSONDecodeError:
             return self._send(400, b'{"error":"invalid json"}')
+        # A valid-JSON body that isn't an object (e.g. `[1,2,3]`, `"x"`, `42`)
+        # would make the .get() calls below raise AttributeError -> 500. Return
+        # the same clean 4xx every other bad-input path returns.
+        if not isinstance(data, dict):
+            return self._send(400, b'{"error":"body must be a json object"}')
         title = (data.get("title") or "").strip()
         if not title:
             return self._send(400, b'{"error":"title is required"}')

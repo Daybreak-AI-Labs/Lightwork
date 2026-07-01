@@ -85,6 +85,39 @@ def test_module_is_revoked_fails_open(monkeypatch):
     assert R.is_revoked("agent:x") is False
 
 
+def test_shared_is_keyed_per_tenant(tmp_path, monkeypatch):
+    # shared() must give each tenant (data-dir) its own registry so one
+    # tenant's mtime-cached revocation set can't be served to another — even
+    # when two tenants' files share the same st_mtime tick.
+    import maverick.paths as P
+    import maverick.revocation as R
+
+    tenant_a = tmp_path / "a"
+    tenant_b = tmp_path / "b"
+    current = {"dir": tenant_a}
+
+    def _data_dir(name):
+        d = current["dir"]
+        d.mkdir(parents=True, exist_ok=True)
+        return d / name
+
+    monkeypatch.setattr(P, "data_dir", _data_dir)
+    R.reset_shared()
+
+    reg_a = R.shared()
+    assert reg_a is R.shared()  # same tenant -> same instance
+    current["dir"] = tenant_b
+    reg_b = R.shared()
+    assert reg_b is not reg_a  # different tenant -> independent instance
+
+    # A cross-tenant call must consult the right file: revoke only in A.
+    current["dir"] = tenant_a
+    R.shared().revoke("evil")
+    current["dir"] = tenant_b
+    assert R.shared().is_revoked("evil") is False
+    R.reset_shared()
+
+
 # ---- tool-chokepoint gate (mirrors test_capability_path_enforcement) ----
 
 def _agent(tmp_path):
@@ -116,7 +149,9 @@ def _spy_tool(name, calls):
 def _point_shared_at(monkeypatch, tmp_path):
     import maverick.revocation as R
     reg = RevocationRegistry(tmp_path / "rev.json")
-    monkeypatch.setattr(R, "_shared", reg)
+    # shared() is now a dict keyed by data-dir path (per-tenant isolation);
+    # point it at our temp registry by overriding the accessor.
+    monkeypatch.setattr(R, "shared", lambda: reg)
     return reg
 
 

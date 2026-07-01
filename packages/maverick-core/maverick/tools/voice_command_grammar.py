@@ -63,9 +63,30 @@ def _compile(pattern: str) -> _Template | None:
     return _Template(literals=literals, slots=slots)
 
 
+def _fold(text: str) -> tuple[str, list[int]]:
+    """Lowercase ``text`` while tracking, for every folded-char index, the index
+    of the source char in the original ``text``.
+
+    ``str.lower()`` can change length (e.g. Turkish 'İ' -> 2 codepoints), so a
+    folded index does not map 1:1 onto ``text``. Matching runs on ``folded`` (so
+    indices stay aligned to the lowercased string), but slot VALUES are sliced
+    from ``text`` via this map so a proper noun like "John Smith" is returned
+    with its original case instead of case-folded to "john smith". The map has a
+    trailing sentinel == ``len(text)`` so an end-of-string slice maps cleanly.
+    """
+    folded_parts: list[str] = []
+    fold_map: list[int] = []
+    for i, ch in enumerate(text):
+        low = ch.lower()
+        folded_parts.append(low)
+        fold_map.extend([i] * len(low))
+    fold_map.append(len(text))
+    return "".join(folded_parts), fold_map
+
+
 def _match(template: _Template, text: str) -> dict[str, str] | None:
     """Match a normalized utterance against a template in linear-ish time."""
-    folded = text.lower()
+    folded, fold_map = _fold(text)
     literals = template.literals
     slots = template.slots
     if not slots:
@@ -81,20 +102,23 @@ def _match(template: _Template, text: str) -> dict[str, str] | None:
 
     for idx, slot in enumerate(slots):
         next_lit = literals[idx + 1]
+        # Indices are computed on ``folded`` (length-safe), but the captured
+        # value is sliced from ``text`` via ``fold_map`` so its original case is
+        # preserved; surrounding whitespace folds 1:1 so ``strip()`` is equivalent.
         if next_lit:
             end = folded.find(next_lit, pos)
             if end < 0:
                 return None
-            value = text[pos:end].strip()
+            value = text[fold_map[pos]:fold_map[end]].strip()
             pos = end + len(next_lit)
         else:
-            value = text[pos:].strip()
-            pos = len(text)
+            value = text[fold_map[pos]:].strip()
+            pos = len(folded)
         if not value:
             return None
         captures[slot] = value
 
-    return captures if pos == len(text) else None
+    return captures if pos == len(folded) else None
 
 
 def _parse(args: dict[str, Any]) -> str:

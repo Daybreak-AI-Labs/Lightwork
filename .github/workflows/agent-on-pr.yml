@@ -156,7 +156,10 @@ jobs:
           echo "exit=$?" >> "$GITHUB_OUTPUT"
 
       - name: Post review comment
-        if: github.event_name == 'pull_request'
+        # always() so the comment still posts when the agent step exits non-zero
+        # (GHA's default bash -eo pipefail fails the step) -- a failed run is
+        # exactly when the reviewer most needs to see the captured output.
+        if: always() && github.event_name == 'pull_request'
         uses: actions/github-script@v9
         with:
           script: |

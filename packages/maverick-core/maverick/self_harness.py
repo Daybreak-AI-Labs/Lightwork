@@ -1270,8 +1270,11 @@ def _validate_rotated(
     once per fold and the verdicts are aggregated with an ALL-folds rule: every
     fold must accept (so a line that regresses or fails the floors in ANY fold is
     rejected -- the strict, low-variance generalization test). The reported deltas
-    are the per-fold means and the evidence numbers sum the folds' samples, so the
-    downstream gate still sees honest aggregate numbers. Falls back to a single
+    are the per-fold means; ``samples`` is the distinct pool size, not the folds'
+    samples summed -- every goal in ``pool`` appears in every fold (k-fold, not a
+    disjoint split), so summing would inflate the evidence count by ~k and let
+    rotation under-clear the downstream gate's ``min_samples`` floor. Falls back
+    to a single
     :func:`validate_proposal` when the pool is too small to fold (< 2 goals) or
     ``rotations <= 1``."""
     from .self_harness_eval import corpus_kfold_splits
@@ -1294,7 +1297,7 @@ def _validate_rotated(
     base = dict(
         baseline_score=sum(r.baseline_score for r in results) / k,
         candidate_score=sum(r.candidate_score for r in results) / k,
-        samples=sum(r.samples for r in results))
+        samples=len(pool))
     if n_pass == k:
         return ValidationResult(True, in_delta, out_delta,
                                 f"validated across {k} rotations", **base)

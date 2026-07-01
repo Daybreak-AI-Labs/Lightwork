@@ -54,15 +54,31 @@ def _is_broad(handler: ast.ExceptHandler) -> bool:
     return "Exception" in names or "BaseException" in names
 
 
-def _marker_class(lines: list[str], lineno: int) -> str | None:
+def _marker_class(lines: list[str], lineno: int, *, first: bool) -> str | None:
     """The declared class for a handler at 1-based ``lineno``, or None.
 
-    Accepts the marker on the ``except`` line itself or the line directly above.
+    Accepts the marker on the ``except`` line itself, or on the line directly
+    above it. For the *first* handler in a ``try``, the line above is always
+    part of the ``try`` block's own body (unambiguous), so any indentation is
+    accepted. For a later sibling handler, the line above is the trailing
+    line of the *previous* handler's body — accepting it there would let a
+    comment meant for (or merely left over from) that earlier handler get
+    credited to this one, so it's only accepted when indented to match the
+    ``except`` itself (a standalone comment between two handlers), not the
+    deeper indentation of the previous handler's body.
     """
-    for ln in (lineno, lineno - 1):
-        if 1 <= ln <= len(lines) and MARKER in lines[ln - 1]:
-            after = lines[ln - 1].split(MARKER, 1)[1].strip()
-            return after.split()[0] if after else ""
+    if 1 <= lineno <= len(lines) and MARKER in lines[lineno - 1]:
+        after = lines[lineno - 1].split(MARKER, 1)[1].strip()
+        return after.split()[0] if after else ""
+    above = lineno - 1
+    if 1 <= above <= len(lines) and MARKER in lines[above - 1]:
+        if not first:
+            except_indent = len(lines[lineno - 1]) - len(lines[lineno - 1].lstrip())
+            above_indent = len(lines[above - 1]) - len(lines[above - 1].lstrip())
+            if above_indent != except_indent:
+                return None
+        after = lines[above - 1].split(MARKER, 1)[1].strip()
+        return after.split()[0] if after else ""
     return None
 
 
@@ -76,14 +92,19 @@ def scan_file(path: Path) -> list[tuple[int, str]]:
         return [(getattr(e, "lineno", 0) or 0, f"syntax error: {e}")]
     problems: list[tuple[int, str]] = []
     for node in ast.walk(tree):
-        if isinstance(node, ast.ExceptHandler) and _is_broad(node):
-            cls = _marker_class(lines, node.lineno)
+        handlers = getattr(node, "handlers", None)
+        if not handlers:
+            continue
+        for i, handler in enumerate(handlers):
+            if not _is_broad(handler):
+                continue
+            cls = _marker_class(lines, handler.lineno, first=(i == 0))
             if cls is None:
                 problems.append(
-                    (node.lineno, "broad except without a # failure-policy: marker"))
+                    (handler.lineno, "broad except without a # failure-policy: marker"))
             elif cls not in CLASSES:
                 problems.append(
-                    (node.lineno,
+                    (handler.lineno,
                      f"invalid failure-policy class {cls!r} (want one of {CLASSES})"))
     return problems
 

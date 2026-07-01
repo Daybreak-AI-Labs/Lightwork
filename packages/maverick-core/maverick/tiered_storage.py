@@ -59,12 +59,17 @@ log = logging.getLogger(__name__)
 # goal_events stamps ``ts``.
 _TS_COLUMNS = {"episodes": "started_at", "goal_events": "ts"}
 
-# Rows that live tables still reference must stay hot: facts.source_episode_id
-# REFERENCES episodes(id) and the connection runs with foreign_keys=ON, so
-# deleting a referenced episode would raise IntegrityError mid-archive.
+# Rows that live tables still reference must stay hot: both facts.source_episode_id
+# AND fact_history.source_episode_id REFERENCE episodes(id) and the connection
+# runs with foreign_keys=ON, so deleting an episode referenced by EITHER table
+# raises IntegrityError mid-archive. Under [memory] temporal, an old episode can
+# be referenced only by fact_history (facts' UNIQUE row moved to a newer
+# episode) -- pinning facts alone left those unprotected and broke archival.
 _PIN_FILTERS = {
     "episodes": (
         " AND id NOT IN (SELECT source_episode_id FROM facts"
+        " WHERE source_episode_id IS NOT NULL)"
+        " AND id NOT IN (SELECT source_episode_id FROM fact_history"
         " WHERE source_episode_id IS NOT NULL)"
     ),
 }

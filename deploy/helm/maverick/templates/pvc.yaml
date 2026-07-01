@@ -1,4 +1,7 @@
-{{- if .Values.persistence.enabled }}
+{{- /* The single RWO state PVC is only used on the single-replica path; the
+       autoscaling path is Postgres-backed and never mounts it, so don't create
+       an orphan claim there (matches deployment.yaml's volume gating). */ -}}
+{{- if and .Values.persistence.enabled (not .Values.autoscaling.enabled) }}
 apiVersion: v1
 kind: PersistentVolumeClaim
 metadata:

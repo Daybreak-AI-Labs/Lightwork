@@ -68,7 +68,11 @@ def _cost(ep) -> float:
 
 
 def _ts(ep) -> float:
-    for attr in ("finished_at", "created_at", "ts"):
+    # WorldModel.list_episodes() returns EpisodeSpend dataclasses whose time
+    # fields are ended_at / started_at -- NOT finished_at/created_at/ts. Probe
+    # the real fields first (else every episode's timestamp read as 0.0, so any
+    # time-window filtering / ordering in the report silently broke).
+    for attr in ("ended_at", "started_at", "finished_at", "created_at", "ts"):
         try:
             v = getattr(ep, attr, None)
             if v:
@@ -76,7 +80,10 @@ def _ts(ep) -> float:
         except Exception:
             continue
     try:
-        return float(ep.get("finished_at") or ep.get("created_at") or 0)
+        return float(
+            ep.get("ended_at") or ep.get("started_at")
+            or ep.get("finished_at") or ep.get("created_at") or 0
+        )
     except Exception:
         return 0.0
 

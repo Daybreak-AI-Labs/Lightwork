@@ -6,11 +6,15 @@ rem custom actions, so it ships the wheel next to this script and bootstraps
 rem lazily on first run. There is no maverick/__main__.py, so `py -m maverick`
 rem does not work; the real entry point is the console script maverick.cli:main
 rem (see packages/maverick-core/pyproject.toml [project.scripts]).
-setlocal
+rem Delayed expansion so !ERRORLEVEL! inside the parenthesized fast-path block
+rem below reads maverick.exe's ACTUAL exit code. With plain %ERRORLEVEL% the
+rem whole `( ... )` block is expanded at parse time, capturing the value from
+rem BEFORE maverick.exe ran -- so every failure was reported as success.
+setlocal enabledelayedexpansion
 
 rem Fast path: pip already put the console script on PATH (e.g. pipx or a
 rem previous bootstrap whose Scripts dir is on PATH).
-where maverick.exe >nul 2>nul && ( maverick.exe %* & exit /b %ERRORLEVEL% )
+where maverick.exe >nul 2>nul && ( maverick.exe %* & exit /b !ERRORLEVEL! )
 
 rem Resolve a Python 3 interpreter: the py launcher first, plain python second.
 set "PYCMD=py -3"

@@ -89,6 +89,11 @@ _ROUTE_CASES = [
     (_cfg(allowed_routes=["GET /healthz", "POST /v1/foo"]), "GET", "/healthz"),
     (_cfg(allowed_routes=["GET /healthz"]), "POST", "/v1/messages"),
     (_cfg(), "POST", "/"),
+    # Percent-encoded path must NOT match the decoded route: Python's
+    # urlparse(path).path never decodes, so "/%76%31/messages" stays literal
+    # and is rejected. Pins the Go port to EscapedPath() (not the decoded
+    # u.Path), closing an allow-list divergence.
+    (_cfg(), "POST", "/%76%31/messages"),
 ]
 
 _PARSE_CASES = [

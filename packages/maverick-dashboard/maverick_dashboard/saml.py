@@ -274,8 +274,16 @@ def mint_session_cookie(name_id: str, *, secret: str | None = None) -> str:
 
 
 def _safe_relay_state(value: str | None, default: str) -> str:
-    """Only allow same-site relative paths as the post-login redirect target."""
-    if not value or not value.startswith("/") or value.startswith("//"):
+    """Only allow same-site relative paths as the post-login redirect target.
+
+    Matches the OIDC sibling's open-redirect filter: besides the ``/`` prefix /
+    ``//`` protocol-relative checks, also reject a backslash (``/\\evil.com`` is
+    treated as ``//`` by some browsers) and any control character (CR/LF/NUL
+    header-splitting), which the old check let through.
+    """
+    if (not value or not value.startswith("/") or value.startswith("//")
+            or "\\" in value
+            or not all(ord(c) >= 0x20 and c != "\x7f" for c in value)):
         return default
     return value
 

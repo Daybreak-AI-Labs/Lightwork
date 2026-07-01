@@ -78,7 +78,16 @@ class Archive:
         chosen = [self.best()]
         pool = [c for c in self.candidates if c.id != chosen[0].id]
         while pool and len(chosen) < k:
-            nxt = max(pool, key=lambda c: min(self.config_distance(c.config, s.config) for s in chosen))
+            # Break config-distance ties by score so eviction can't drop a
+            # stronger candidate in favour of a weaker equidistant one
+            # (preserving the "keeps the best performers" guarantee).
+            nxt = max(
+                pool,
+                key=lambda c: (
+                    min(self.config_distance(c.config, s.config) for s in chosen),
+                    c.score,
+                ),
+            )
             chosen.append(nxt)
             pool.remove(nxt)
         return chosen

@@ -136,6 +136,27 @@ message A {
     assert contract.parse_inventory(proto)["messages"]["A"]["x"]["number"] == 1
 
 
+def test_parser_keeps_fields_inside_oneof():
+    """A `oneof` block is an unkeyed nested scope like an rpc option body, but
+    its fields must still attribute to the enclosing message -- not vanish
+    into the untracked scope, which would let a later proto3 `oneof` field
+    removal/renumber silently bypass the breaking-change CI gate."""
+    proto = """
+message M {
+  oneof kind {
+    int64 a = 1;
+    string b = 2;
+  }
+  int64 c = 3;
+}
+"""
+    fields = contract.parse_inventory(proto)["messages"]["M"]
+    assert set(fields) == {"a", "b", "c"}
+    assert fields["a"]["number"] == 1
+    assert fields["b"]["number"] == 2
+    assert fields["c"]["number"] == 3
+
+
 def test_parser_handles_rpc_option_body():
     """An rpc with an option body must not desync the service scope, and a
     following single-line message must still be parsed."""

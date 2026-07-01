@@ -10,20 +10,27 @@ import AsyncStorage from "@react-native-async-storage/async-storage";
 
 import type { OfflineBundle } from "./api";
 
-const CACHE_KEY = "maverick.offlineBundle.v1";
+const CACHE_KEY_PREFIX = "maverick.offlineBundle.v1.";
 const SCHEMA = "maverick-offline/1";
 
 export type CachedBundle = { savedAt: number; bundle: OfflineBundle };
 
-export async function saveBundle(bundle: OfflineBundle): Promise<void> {
-  if (bundle.schema !== SCHEMA) return; // refuse shapes we don't understand
-  const entry: CachedBundle = { savedAt: Date.now(), bundle };
-  await AsyncStorage.setItem(CACHE_KEY, JSON.stringify(entry));
+// Scope the cache key by dashboard identity. A single fixed key would let the
+// offline fallback show a PREVIOUS dashboard's data (labeled "offline") after
+// the user points the app at a different dashboard in Settings.
+function cacheKey(baseUrl: string): string {
+  return CACHE_KEY_PREFIX + encodeURIComponent(baseUrl.trim().replace(/\/+$/, ""));
 }
 
-export async function loadBundle(): Promise<CachedBundle | null> {
+export async function saveBundle(bundle: OfflineBundle, baseUrl: string): Promise<void> {
+  if (bundle.schema !== SCHEMA) return; // refuse shapes we don't understand
+  const entry: CachedBundle = { savedAt: Date.now(), bundle };
+  await AsyncStorage.setItem(cacheKey(baseUrl), JSON.stringify(entry));
+}
+
+export async function loadBundle(baseUrl: string): Promise<CachedBundle | null> {
   try {
-    const raw = await AsyncStorage.getItem(CACHE_KEY);
+    const raw = await AsyncStorage.getItem(cacheKey(baseUrl));
     if (!raw) return null;
     const entry = JSON.parse(raw) as CachedBundle;
     if (!entry?.bundle || entry.bundle.schema !== SCHEMA) return null;

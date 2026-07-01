@@ -20,6 +20,7 @@ from __future__ import annotations
 import json
 import logging
 import os
+import re
 from typing import Any
 
 from . import Tool, as_bool
@@ -42,6 +43,14 @@ _SCHEMA: dict[str, Any] = {
 }
 
 _READ_PREFIXES = ("select", "with", "show", "describe", "desc", "explain", "list")
+# A CTE (WITH ...) can prefix a MUTATING main statement (WITH t AS (...) INSERT/
+# UPDATE/DELETE/MERGE ...), so the "with" read-prefix alone doesn't prove
+# read-only. Treat a CTE containing a DML/DDL keyword as a write (require
+# confirm). Safe direction: a false positive only asks for confirm=true.
+_MUTATING_KEYWORDS_RE = re.compile(
+    r"\b(insert|update|delete|merge|create|drop|alter|truncate|replace|copy|grant|revoke)\b",
+    re.IGNORECASE,
+)
 
 
 def _config() -> tuple[str, str]:
@@ -53,7 +62,12 @@ def _config() -> tuple[str, str]:
 
 
 def _is_read(statement: str) -> bool:
-    return statement.strip().lstrip("(").lower().startswith(_READ_PREFIXES)
+    s = statement.strip().lstrip("(").lower()
+    if not s.startswith(_READ_PREFIXES):
+        return False
+    if s.startswith("with") and _MUTATING_KEYWORDS_RE.search(statement):
+        return False
+    return True
 
 
 def _op_query(statement: str, ctx: dict, limit: int, confirm: bool) -> str:

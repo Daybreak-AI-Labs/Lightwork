@@ -13,6 +13,7 @@ ops:
 from __future__ import annotations
 
 import hashlib
+import re
 import secrets
 from typing import Any
 
@@ -20,6 +21,7 @@ from . import Tool
 
 _PREFIX = "MAVHT"  # Lightwork HoneyToken — the recognizable, never-valid marker.
 _KINDS = {"aws", "api", "pat", "generic"}
+_TOKEN_RE = re.compile(re.escape(_PREFIX) + r"_[A-Za-z0-9_]+")
 
 
 def _mint(label: str, kind: str) -> str:
@@ -31,11 +33,12 @@ def _mint(label: str, kind: str) -> str:
 
 
 def _scan(text: str) -> str:
-    hits = []
-    for word in text.replace("\n", " ").split():
-        cleaned = word.strip("\"',;()[]{}<>")
-        if cleaned.startswith(_PREFIX + "_"):
-            hits.append(cleaned)
+    # Match the token prefix ANYWHERE, not just as a whitespace-delimited word
+    # after edge-trimming: a honeytoken embedded in structured text (JSON
+    # "k":"MAVHT_...", key=MAVHT_..., Bearer MAVHT_..., ?q=MAVHT_...) is a word
+    # whose interior separators str.split()/strip() left attached, so the
+    # tripwire silently failed to fire for the most common exfil shapes.
+    hits = _TOKEN_RE.findall(text)
     if not hits:
         return "CLEAN: no honeytokens present"
     uniq = sorted(set(hits))

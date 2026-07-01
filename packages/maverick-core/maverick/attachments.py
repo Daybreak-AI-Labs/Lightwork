@@ -222,6 +222,19 @@ def s3_fetch(goal_id: int, name: str, *, root: Path | None = None) -> Path | Non
             raise AttachmentRejected(
                 f"file too large: {len(data)} bytes (limit {MAX_FILE_BYTES})"
             )
+        # S3-sourced bytes get the same magic-byte deny store() enforces on the
+        # upload path -- a shared/poisoned bucket must not be able to land an
+        # ELF/ZIP archive on local disk that store() would have rejected. If the
+        # object carries a ContentType, honour the mime allowlist too.
+        if _looks_executable_or_archive(data):
+            raise AttachmentRejected(
+                "executable or archive content is not allowed"
+            )
+        content_type = str(obj.get("ContentType") or "").split(";", 1)[0].strip()
+        if content_type and not any(
+            content_type.startswith(p) for p in ALLOWED_MIME_PREFIXES
+        ):
+            raise AttachmentRejected(f"mime type not allowed: {content_type}")
     except AttachmentRejected:
         raise
     except Exception as e:  # noqa: BLE001 -- absent object / S3 down -> None

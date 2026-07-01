@@ -78,6 +78,22 @@ test("handler exceptions map to ERROR result strings", async () => {
   assert.deepEqual(lines[0], { id: 7, result: "ERROR: boom failed: kaboom" });
 });
 
+test("non-serializable handler result becomes an ERROR, not a dropped key", async () => {
+  // A handler that falls through with no explicit return yields undefined;
+  // JSON.stringify(undefined) is undefined, which would drop the result key off
+  // the wire (neither result nor error). It must surface as a readable error.
+  const dropper = defineTool({
+    name: "dropper",
+    description: "Returns undefined.",
+    inputSchema: { type: "object" },
+    handler: () => undefined as never,
+  });
+  const lines = await run([dropper], [JSON.stringify({ id: 9, tool: "dropper", args: {} })]);
+  assert.equal(lines[0].id, 9);
+  assert.equal(lines[0].error, undefined);
+  assert.match(String(lines[0].result), /^ERROR: dropper returned a non-serializable value/);
+});
+
 test("malformed lines get an error response, not a crash", async () => {
   const lines = await run([echo], ["{not json", JSON.stringify({ id: 3, args: {} })]);
   assert.equal(lines[0].id, null);

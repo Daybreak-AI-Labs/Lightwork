@@ -87,9 +87,11 @@ def parse_inventory(proto_text: str) -> dict:
                 scope.append(pending)
                 pending = None
             else:
-                # An unkeyed block (e.g. an rpc option body) — push a no-op
-                # scope so its closing `}` doesn't pop a real one.
-                scope.append((None, None))
+                # An unkeyed block (e.g. a `oneof` or an rpc option body) —
+                # inherit the enclosing scope so statements inside (like a
+                # oneof's fields) still resolve to the right message/service
+                # instead of vanishing into an untracked (None, None) scope.
+                scope.append(scope[-1] if scope else (None, None))
             continue
         if stmt == "}":
             if scope:

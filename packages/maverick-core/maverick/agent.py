@@ -1452,14 +1452,19 @@ class Agent:
 
     @staticmethod
     def _with_capability_host_scope(name: str, args: dict, cap) -> dict:
-        """Attach active host scope for tools that enforce it internally."""
+        """Attach active host scope for tools that enforce it internally.
+
+        Always FORCE-overwrite ``_capability_allow_hosts`` from the grant --
+        never ``setdefault``. It is a kernel-injected arg, never a legitimate
+        model-supplied one; honoring a model-provided value would let a tool
+        call widen its own host allowlist past the capability grant (a scope
+        escalation). The ``browser`` path already did this; every other tool
+        must too.
+        """
         if cap is None or not cap.allow_hosts or not isinstance(args, dict):
             return args
         scoped = dict(args)
-        if name == "browser":
-            scoped["_capability_allow_hosts"] = tuple(cap.allow_hosts)
-        else:
-            scoped.setdefault("_capability_allow_hosts", tuple(cap.allow_hosts))
+        scoped["_capability_allow_hosts"] = tuple(cap.allow_hosts)
         return scoped
 
     def _autonomy_denial(self, name: str, cap) -> str | None:

@@ -45,6 +45,13 @@ _SCHEMA: dict[str, Any] = {
 }
 
 
+def _safe_seg(s: str) -> bool:
+    """ServiceNow table names / sys_ids are [A-Za-z0-9_.-]; reject empty, '..',
+    and any char outside that set so a model-supplied value can't reshape the
+    REST path or inject query params (mirrors home_assistant_tool._safe_seg)."""
+    return bool(s) and ".." not in s and all(c.isalnum() or c in "_.-" for c in s)
+
+
 def _config() -> tuple[str, str]:
     url = os.environ.get("SERVICENOW_INSTANCE_URL", "").strip().rstrip("/")
     tok = os.environ.get("SERVICENOW_TOKEN", "").strip()
@@ -85,8 +92,8 @@ def _result(data: Any) -> Any:
 
 
 def _op_query(table: str, query: str, limit: int) -> str:
-    if not table:
-        return "ERROR: query requires table"
+    if not _safe_seg(table):
+        return "ERROR: query requires a valid table"
     params = {"sysparm_limit": max(1, min(limit or 20, 100)),
               "sysparm_display_value": "true"}
     if query:
@@ -104,8 +111,8 @@ def _op_query(table: str, query: str, limit: int) -> str:
 
 
 def _op_get(table: str, sys_id: str) -> str:
-    if not table or not sys_id:
-        return "ERROR: get requires table and sys_id"
+    if not _safe_seg(table) or not _safe_seg(sys_id):
+        return "ERROR: get requires a valid table and sys_id"
     code, data = _req("GET", f"/table/{table}/{sys_id}")
     if code == 404:
         return f"{table}/{sys_id} not found"
@@ -115,8 +122,8 @@ def _op_get(table: str, sys_id: str) -> str:
 
 
 def _op_create(table: str, fields: dict, confirm: bool) -> str:
-    if not table or not fields:
-        return "ERROR: create requires table and fields"
+    if not _safe_seg(table) or not fields:
+        return "ERROR: create requires a valid table and fields"
     if not confirm:
         return f"DRY RUN: would create a {table} record. Re-run with confirm=true."
     code, data = _req("POST", f"/table/{table}", body=fields)
@@ -127,8 +134,8 @@ def _op_create(table: str, fields: dict, confirm: bool) -> str:
 
 
 def _op_update(table: str, sys_id: str, fields: dict, confirm: bool) -> str:
-    if not table or not sys_id or not fields:
-        return "ERROR: update requires table, sys_id, fields"
+    if not _safe_seg(table) or not _safe_seg(sys_id) or not fields:
+        return "ERROR: update requires a valid table, sys_id, fields"
     if not confirm:
         return f"DRY RUN: would update {table}/{sys_id}. Re-run with confirm=true."
     code, data = _req("PATCH", f"/table/{table}/{sys_id}", body=fields)
@@ -138,8 +145,8 @@ def _op_update(table: str, sys_id: str, fields: dict, confirm: bool) -> str:
 
 
 def _op_delete(table: str, sys_id: str, confirm: bool) -> str:
-    if not table or not sys_id:
-        return "ERROR: delete requires table and sys_id"
+    if not _safe_seg(table) or not _safe_seg(sys_id):
+        return "ERROR: delete requires a valid table and sys_id"
     if not confirm:
         return f"DRY RUN: would delete {table}/{sys_id}. Re-run with confirm=true."
     code, _data = _req("DELETE", f"/table/{table}/{sys_id}")

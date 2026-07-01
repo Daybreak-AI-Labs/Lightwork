@@ -70,6 +70,12 @@ def _build_step(args: dict[str, Any]) -> str:
     if not callback_id:
         # Derive a stable callback_id from the name.
         callback_id = re.sub(r"[^a-z0-9_]+", "_", name.lower()).strip("_") or "step"
+        # A derived id must satisfy the same ^[a-z][a-z0-9_]* rule enforced on
+        # an explicit callback_id: a name like "2027 report" would otherwise
+        # yield "2027_report" (starts with a digit), which Slack's Workflow
+        # Builder rejects. Prefix a letter so derived ids are always valid.
+        if not _KEY_RE.match(callback_id):
+            callback_id = "s_" + callback_id
 
     input_props = _input_props(args.get("inputs"))
     if isinstance(input_props, str):

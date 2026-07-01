@@ -85,7 +85,16 @@ def _expand_env(val: object) -> str | None:
     if not isinstance(val, str):
         return str(val) if val is not None else None
     if val.startswith("${") and val.endswith("}"):
-        return os.environ.get(val[2:-1]) or None
+        resolved = os.environ.get(val[2:-1]) or None
+        if resolved is None:
+            # Fail-open to unsigned webhooks must not be silent: warn the
+            # operator that a configured secret env var is unset so signing
+            # isn't disabled without a trace.
+            log.warning(
+                "webhooks: env var %s referenced by [webhooks] secret is unset; "
+                "outbound webhooks will be sent UNSIGNED", val[2:-1],
+            )
+        return resolved
     return val or None
 
 

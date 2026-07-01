@@ -18,6 +18,10 @@ class GeminiClient(OpenAIClient):
     # default was absent from MODEL_PRICES, so billing fell through to the
     # cost_router's 2.5 row and charged ~2x the real Gemini 3.5 rate.
     DEFAULT_MODEL = "gemini-3.5-pro"
+    # Gemini's implicit context cache discounts cached tokens ~75% (billed at
+    # ~0.25x the input rate), steeper than OpenAI's 0.5x. Inheriting 0.5x would
+    # over-charge cached input ~2x.
+    CACHE_READ_MULT = 0.25
 
     def __init__(self, api_key: str | None = None, base_url: str | None = None):
         key = api_key or os.environ.get("GEMINI_API_KEY") or os.environ.get("GOOGLE_API_KEY")

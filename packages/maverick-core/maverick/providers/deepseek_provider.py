@@ -16,6 +16,10 @@ from .openai_provider import OpenAIClient
 
 class DeepSeekClient(OpenAIClient):
     DEFAULT_MODEL = "deepseek-chat"
+    # DeepSeek bills cache hits (prompt_cache_hit_tokens) at ~10% of the
+    # cache-miss input rate (a ~90% discount), far steeper than OpenAI's 0.5x.
+    # Inheriting 0.5x would over-charge cached input ~5x.
+    CACHE_READ_MULT = 0.1
 
     def __init__(self, api_key: str | None = None, base_url: str | None = None):
         key = api_key or os.environ.get("DEEPSEEK_API_KEY")

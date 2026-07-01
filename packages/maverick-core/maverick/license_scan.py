@@ -20,7 +20,9 @@ import re
 _RULES: list[tuple[str, str]] = [
     (r"\bagpl|affero", "strong-copyleft"),
     (r"\bsspl\b|server[\s-]?side\s+public", "strong-copyleft"),
-    (r"\blgpl|lesser general public", "weak-copyleft"),
+    # "library general public" is LGPL-2.0's historical official title; without
+    # it, that string falls through to the GPL rule and is over-flagged.
+    (r"\blgpl|lesser general public|library general public", "weak-copyleft"),
     (r"\bgpl|general public license|gplv", "strong-copyleft"),
     (r"\bmpl|mozilla public|epl|eclipse public|cddl|cpl ", "weak-copyleft"),
     (r"public domain|unlicense|\bcc0\b|wtfpl|0bsd", "public-domain"),

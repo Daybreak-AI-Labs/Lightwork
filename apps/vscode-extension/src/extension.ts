@@ -280,7 +280,16 @@ async function watchRunCommand(): Promise<void> {
       { headers: token ? { Authorization: `Bearer ${token}` } : {} },
       (res) => {
         if ((res.statusCode ?? 0) >= 400) {
-          channel.appendLine(`[stream error: HTTP ${res.statusCode}]`);
+          // Drain the body so the socket frees, then retry with backoff like
+          // the end/error paths -- otherwise watching a goal id that doesn't
+          // exist yet (404 until the goal is created) dies permanently on the
+          // first response instead of reconnecting once it appears.
+          res.resume();
+          if (!stopped) {
+            channel.appendLine(`[stream error: HTTP ${res.statusCode}; retrying in ${backoffMs / 1000}s]`);
+            setTimeout(connect, backoffMs);
+            backoffMs = Math.min(backoffMs * 2, 30000);
+          }
           return;
         }
         backoffMs = 1000; // healthy connection resets the backoff

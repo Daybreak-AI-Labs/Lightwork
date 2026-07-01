@@ -48,8 +48,14 @@ async function poll() {
   // concurrent poll: both would read the same sinceId and append the same
   // events twice. Serialize ticks with an in-flight guard.
   polling = true;
+  // Capture the goal this tick is for: if the user starts a NEW goal while this
+  // request is in flight, the response that comes back is stale and must not be
+  // applied to the new goal (it would append the old goal's events, rewind the
+  // shared sinceId, and clearInterval() the NEW goal's timer).
+  const myGoal = goalId;
   try {
-    const resp = await ask({ type: "events", goalId: goalId, since: sinceId });
+    const resp = await ask({ type: "events", goalId: myGoal, since: sinceId });
+    if (myGoal !== goalId) return; // a new goal started mid-flight; drop this
     if (!resp.ok) {
       setStatus(resp.error, true);
       return; // transient: keep the timer running and retry

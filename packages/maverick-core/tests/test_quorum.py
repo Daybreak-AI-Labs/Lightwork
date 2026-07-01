@@ -115,6 +115,35 @@ def test_duplicate_change_id_refused(store):
         _propose(store)
 
 
+def test_concurrent_approvals_accumulate(store):
+    """Two approvals racing on the same proposal must both land, not
+    last-writer-wins clobber each other (the store's stated guarantee)."""
+    import threading
+
+    _propose(store, proposer="alice")
+    barrier = threading.Barrier(2)
+    errors: list[Exception] = []
+
+    def _approve(who):
+        try:
+            barrier.wait()  # maximize the load-modify-save overlap
+            quorum.approve("chg-1", who, store=store)
+        except Exception as e:  # noqa: BLE001 -- surfaced via the list below
+            errors.append(e)
+
+    threads = [threading.Thread(target=_approve, args=(w,))
+               for w in ("bob", "carol")]
+    for t in threads:
+        t.start()
+    for t in threads:
+        t.join()
+
+    assert not errors, errors
+    approvers = {a for a, _ in store.get("chg-1").approvals}
+    assert approvers == {"bob", "carol"}  # both accumulated
+    assert quorum.status("chg-1", store=store) == quorum.APPROVED
+
+
 def test_required_snapshotted_at_propose_time(store):
     policy3 = quorum.QuorumPolicy(required=3)
     _propose(store, policy=policy3)

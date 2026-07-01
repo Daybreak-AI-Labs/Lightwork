@@ -70,16 +70,40 @@ def _parse_clause(text: str) -> dict | None:
     return {"field": field, "op": op, "value": _coerce(value)}
 
 
+def _split_on(query: str, word: str) -> list[str]:
+    """Split ``query`` on ``\\bword\\b``, but only where the connector actually
+    separates two clauses — i.e. the fragment that FOLLOWS the connector begins
+    a new ``field op value`` clause. This prevents splitting on the word 'and'/
+    'or' that merely appears inside a value (``city = New York or LA``).
+
+    Fragments that don't start a new clause are re-joined to the preceding one.
+    """
+    raw = re.split(rf"\b{word}\b", query, flags=re.IGNORECASE)
+    if len(raw) == 1:
+        return raw
+    merged: list[str] = [raw[0]]
+    for frag in raw[1:]:
+        # A real connector is followed by a new clause (has an operator). If not,
+        # the split fell inside a value — stitch the word back in.
+        if _OP_RE.search(frag):
+            merged.append(frag)
+        else:
+            merged[-1] = f"{merged[-1]}{word}{frag}"
+    return merged
+
+
 def _split_connector(query: str) -> tuple[list[str], str | None, str | None]:
     """Split on the connector. Returns (parts, connector, error)."""
-    has_and = re.search(r"\band\b", query, re.IGNORECASE) is not None
-    has_or = re.search(r"\bor\b", query, re.IGNORECASE) is not None
+    and_parts = _split_on(query, "and")
+    or_parts = _split_on(query, "or")
+    has_and = len(and_parts) > 1
+    has_or = len(or_parts) > 1
     if has_and and has_or:
         return [], None, "mixed AND/OR is not supported"
     if has_and:
-        return re.split(r"\band\b", query, flags=re.IGNORECASE), "AND", None
+        return and_parts, "AND", None
     if has_or:
-        return re.split(r"\bor\b", query, flags=re.IGNORECASE), "OR", None
+        return or_parts, "OR", None
     return [query], "AND", None
 
 
@@ -105,8 +129,12 @@ def _cmp(left: Any, op: str, right: Any) -> bool:
     if op == "contains":
         return str(right).lower() in str(left).lower()
     if op == "=":
-        if isinstance(left, (int, float)) and isinstance(right, (int, float)):
-            return left == right
+        # Coerce numeric strings first (mirrors the ordering operators below) so
+        # that e.g. "5.00" = 5 agrees with "5.00" >= 5 / <= 5 instead of
+        # contradicting them.
+        ln, rn = _num(left), _num(right)
+        if ln is not None and rn is not None:
+            return ln == rn
         return str(left).strip().lower() == str(right).strip().lower()
     if op == "!=":
         return not _cmp(left, "=", right)

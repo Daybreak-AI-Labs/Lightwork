@@ -146,7 +146,11 @@ func RouteAllowed(c *Config, method, path string) bool {
 }
 
 // pathOnly returns urlparse(path).path: the path component with any query or
-// fragment removed.
+// fragment removed. It returns the ESCAPED (still percent-encoded) path to
+// match Python's urlparse(path).path, which never decodes. Using the decoded
+// u.Path instead would let `/%76%31/messages` match the `/v1/messages` route
+// here while the Python source of truth (which compares the literal, undecoded
+// path) rejects it -- a behavioral divergence in the route allow-list.
 func pathOnly(path string) string {
 	u, err := url.Parse(path)
 	if err != nil {
@@ -156,7 +160,7 @@ func pathOnly(path string) string {
 		}
 		return path
 	}
-	return u.Path
+	return u.EscapedPath()
 }
 
 // Authenticate mirrors model_proxy.authenticate: a constant-time check that the

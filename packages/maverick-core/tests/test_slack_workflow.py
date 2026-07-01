@@ -25,6 +25,22 @@ def test_build_step_definition():
     assert obj["output_parameters"]["properties"]["summary"] == {"type": "string"}
 
 
+def test_build_step_derived_callback_id_from_digit_leading_name():
+    # Regression: a name starting with a digit derived a callback_id like
+    # "2027_report" that violates Slack's ^[a-z][a-z0-9_]* rule (the same rule
+    # rejected if supplied explicitly). The derived id must be prefixed to stay
+    # valid.
+    out = _run(
+        op="build_step",
+        name="2027 report",
+        inputs={"x": {"type": "string"}},
+    )
+    obj = json.loads(out)
+    cb = obj["callback_id"]
+    assert cb[0].isalpha(), cb
+    assert cb == "s_2027_report"
+
+
 def test_build_step_explicit_callback_id():
     out = _run(
         op="build_step",

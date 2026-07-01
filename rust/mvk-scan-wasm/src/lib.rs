@@ -31,10 +31,15 @@ pub fn average_hash_from_pixels(
     width: usize,
     height: usize,
 ) -> Result<String, JsValue> {
-    if rgb.len() != width.saturating_mul(height).saturating_mul(3) {
+    // Compute once with saturating mul and reuse: the guard already uses
+    // saturating_mul, but the error path recomputing `width * height * 3` with
+    // plain mul could overflow (panic in debug / wrap in release) on the 32-bit
+    // wasm target precisely when dimensions are large.
+    let expected = width.saturating_mul(height).saturating_mul(3);
+    if rgb.len() != expected {
         return Err(JsValue::from_str(&format!(
             "expected {} rgb components, got {}",
-            width * height * 3,
+            expected,
             rgb.len()
         )));
     }

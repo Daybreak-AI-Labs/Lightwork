@@ -68,6 +68,9 @@ def _linear_assigned(assignee_id=LINEAR_BOT):
         "action": "update",
         # Linear stamps each delivery; the receiver age-checks it (anti-replay).
         "webhookTimestamp": int(time.time() * 1000),
+        # An assignment transition carries the prior assignee in updatedFrom;
+        # the receiver requires it so a non-assignment edit can't re-fire a goal.
+        "updatedFrom": {"assigneeId": None},
         "data": {
             "id": "uuid-1",
             "identifier": "ENG-123",
@@ -84,6 +87,9 @@ def _jira_assigned(account_id=JIRA_BOT):
         "webhookEvent": "jira:issue_updated",
         # Jira stamps each delivery; the receiver age-checks it (anti-replay).
         "timestamp": int(time.time() * 1000),
+        # An assignment transition lists the assignee in changelog.items; the
+        # receiver requires it so a non-assignment edit can't re-fire a goal.
+        "changelog": {"items": [{"field": "assignee", "to": account_id}]},
         "issue": {
             "key": "PROJ-7",
             "fields": {

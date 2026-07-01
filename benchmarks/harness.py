@@ -54,8 +54,11 @@ def run_one(
         tool_calls = 0
     else:
         env = os.environ.copy()
+        # `maverick start` runs synchronously (it blocks until the goal
+        # finishes); there is no --no-wait option, and passing one aborts the
+        # run with a Click usage error before any work happens.
         cmd = [
-            "maverick", "start", "--no-wait", "--max-dollars", str(max_dollars),
+            "maverick", "start", "--max-dollars", str(max_dollars),
             spec,
         ]
         if db_path is not None:

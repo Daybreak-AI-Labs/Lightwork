@@ -110,7 +110,10 @@ def _reflect(reflector: Callable[..., Any], goal: str, results: list[StepResult]
         return Reflection(status=status, notes=str(data.get("notes") or ""), revised_plan=revised)
     except (ValueError, TypeError, AttributeError) as e:
         log.warning("reflector returned malformed JSON: %s", e)
-        return Reflection(status="done", notes="reflector JSON parse failed")
+        # Fail SAFE, not SUCCESS: a reflector we can't parse must not be read as
+        # "goal met". Return 'continue' with no revised plan so the loop's
+        # fail-safe (below) marks the run "stalled" rather than "done".
+        return Reflection(status="continue", notes="reflector JSON parse failed")
 
 
 def run_plan_execute_reflect(

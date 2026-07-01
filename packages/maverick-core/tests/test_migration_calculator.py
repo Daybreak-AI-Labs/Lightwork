@@ -47,6 +47,16 @@ def test_provider_prefix_and_object_rows(pinned):
     assert est.target_dollars == pytest.approx(10.0 + 10.0)
 
 
+def test_field_skips_none_valued_dict_key():
+    # A dict row with a present-but-None primary key must fall through to the
+    # next alias, matching the attribute-object branch (regression: dicts used
+    # to short-circuit on key presence and return None).
+    assert mc._field({"in_tokens": None, "input_tokens": 500},
+                     "in_tokens", "input_tokens") == 500
+    assert mc._field(SimpleNamespace(in_tokens=None, input_tokens=500),
+                     "in_tokens", "input_tokens") == 500
+
+
 def test_unknown_target_raises_listing_known_ids(pinned):
     with pytest.raises(ValueError) as exc:
         mc.reprice(ROWS, "no-such-model")

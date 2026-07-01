@@ -98,10 +98,16 @@ def subprocess_run_one(
     """Run one goal in a fresh ``maverick start`` subprocess under ``config``.
 
     Writes a temp config overlay, sets ``MAVERICK_CONFIG_OVERLAY`` + env
-    knobs, and returns the run's raw stdout (the agent's printed final answer,
-    verbatim -- not parsed into any fixed ``DONE.``/summary shape). Process
-    isolation guarantees import-time knobs (fan-out) take effect. Requires a
-    configured provider/API key in the environment to actually produce answers.
+    knobs, and returns the run's raw stdout verbatim -- NOT just the agent's
+    final answer. The CLI's ``start`` command prints a ``goal #N created:
+    <title>`` line, then a blank line, then the orchestrator's result, which
+    is itself wrapped in a fixed ``DONE.\\n\\n<summary>...\\n\\n[<budget
+    summary>]`` envelope (see ``maverick.orchestrator.run_goal``/
+    ``run_goal_best_of_n``). Callers scoring this output (e.g.
+    ``eval_harness._contains_scorer``'s substring match) should expect that
+    surrounding text, not a bare answer. Process isolation guarantees
+    import-time knobs (fan-out) take effect. Requires a configured
+    provider/API key in the environment to actually produce answers.
     """
     python = python or sys.executable
     with tempfile.TemporaryDirectory() as td:

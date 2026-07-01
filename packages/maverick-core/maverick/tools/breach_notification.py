@@ -54,6 +54,12 @@ def _status(discovered: datetime, now: datetime, notified: datetime | None,
         else:
             late = _hours((notified - deadline).total_seconds())
             head = f"LATE: notified {notified.isoformat()}, {elapsed}h after discovery (late {late}h past the {deadline_hours}h deadline)"
+        # Notifying the supervisory authority does not discharge the Art. 34
+        # duty to also notify affected individuals when the breach is high risk.
+        # This reminder was silently dropped once a 'notified' timestamp existed.
+        if high_risk:
+            head += ("\nHIGH RISK: affected individuals must also be notified "
+                     "without undue delay (GDPR Art. 34).")
         return head
 
     remaining = _hours((deadline - now).total_seconds())

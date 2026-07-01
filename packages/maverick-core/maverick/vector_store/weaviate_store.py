@@ -155,16 +155,35 @@ class WeaviateStore:
                 props = {"document": doc}
                 if metadatas:
                     props.update(metadatas[i] or {})
+                # Stamp the tenant so query()/count() can filter by it. The
+                # tenant-namespaced UUID alone only protects delete-by-id;
+                # near_text semantic search ignores the id namespace, so
+                # without this property one tenant's query would return
+                # another tenant's documents.
+                if tenant_id is not None:
+                    props["_tenant"] = tenant_id
                 batch.add_object(
                     properties=props,
                     uuid=_uuid_for(_stored_id(ids[i], tenant_id)),
                 )
 
+    @staticmethod
+    def _tenant_filter(tenant_id: str | None):
+        """A Weaviate v4 ``Filter`` scoping to this tenant, or None (single-tenant)."""
+        if tenant_id is None:
+            return None
+        from weaviate.classes.query import Filter
+        return Filter.by_property("_tenant").equal(tenant_id)
+
     def query(self, text: str, *, top_k: int = 5) -> list[dict]:
         if not text:
             return []
         coll = self._client.collections.get(self._collection)
-        res = coll.query.near_text(query=text, limit=max(1, min(top_k, 100)))
+        near_kwargs: dict = {"query": text, "limit": max(1, min(top_k, 100))}
+        tfilter = self._tenant_filter(_active_tenant())
+        if tfilter is not None:
+            near_kwargs["filters"] = tfilter
+        res = coll.query.near_text(**near_kwargs)
         out: list[dict] = []
         for obj in getattr(res, "objects", []) or []:
             props = dict(getattr(obj, "properties", {}) or {})
@@ -196,7 +215,13 @@ class WeaviateStore:
     def count(self) -> int:
         try:
             coll = self._client.collections.get(self._collection)
-            res = coll.aggregate.over_all(total_count=True)
+            # Scope the count to the active tenant (matches pgvector) so one
+            # tenant can't read another's document count through the aggregate.
+            tfilter = self._tenant_filter(_active_tenant())
+            if tfilter is not None:
+                res = coll.aggregate.over_all(total_count=True, filters=tfilter)
+            else:
+                res = coll.aggregate.over_all(total_count=True)
             return int(getattr(res, "total_count", 0) or 0)
         except Exception:
             return 0

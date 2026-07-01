@@ -280,6 +280,12 @@ def default_limiter(clock: Callable[[], float] = time.monotonic) -> TokenBucket:
     return TokenBucket(rate_per_min=rate, clock=clock)
 
 
+# How far into the future a signed envelope's created_at may be (clock skew
+# between peers). Larger future-dating is rejected so the replay-nonce cache
+# (pruned by arrival time) can't be outlived by a still-"fresh" envelope.
+_CLOCK_SKEW_TOL = 60.0
+
+
 def _default_max_age() -> float:
     """Inbound freshness window from env / ``[federation] channel_max_age_seconds``."""
     raw = os.environ.get("MAVERICK_FEDERATION_CHANNEL_MAX_AGE")
@@ -423,7 +429,13 @@ class InboundApplier:
         # bound how long a captured one stays replayable.
         created = _parse_iso_epoch(envelope.get("created_at"))
         now = self._wall()
-        if created is None or abs(now - created) > self.max_age:
+        # One-sided window, not abs(): the replay-nonce cache prunes by ARRIVAL
+        # time (now), so a future-dated envelope (created in the future but
+        # within max_age of now) would have its nonce pruned while it is still
+        # "fresh", reopening a replay window. Allow only a small clock-skew
+        # tolerance into the future; otherwise created must be in the past.
+        delta = None if created is None else now - created
+        if delta is None or delta > self.max_age or delta < -_CLOCK_SKEW_TOL:
             return {"applied": False,
                     "reason": "envelope is stale or future-dated", "result": None}
         if not self.limiter.allow(origin):

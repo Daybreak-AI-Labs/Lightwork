@@ -62,6 +62,30 @@ def test_reclaim_stale_fails_poison_job_at_max_attempts(tmp_path):
     assert "lease expired" in job.last_error
 
 
+def test_complete_does_not_clobber_self_reclaimed_job(tmp_path):
+    """A slow worker's own reclaim_stale requeues its 'running' job to 'pending'
+    WITHOUT bumping attempts. A late complete() with the original attempt count
+    must NOT flip that requeued (pending) row to 'done' -- it has to be
+    re-executed. Fenced on status='running', so the stale completion is a no-op.
+    """
+    from maverick.job_queue import JobQueue
+    q = JobQueue(db_path=tmp_path / "jobs.db")
+    jid = _running_job(q, at=1000.0)  # running, attempts == 1
+
+    # The worker's periodic reclaim requeues its own long-running job.
+    moved = q.reclaim_stale(100.0, now=1200.0)
+    assert moved == 1
+    assert q.get(jid).status == "pending" and q.get(jid).attempts == 1
+
+    # The slow handler finally returns and completes at the attempt it claimed.
+    assert q.complete(jid, expected_attempts=1) is False  # no-op, still pending
+    assert q.get(jid).status == "pending"
+
+    # And fail() on the stale lease must not reschedule/kill it either.
+    assert q.fail(jid, "late failure", expected_attempts=1) is False
+    assert q.get(jid).status == "pending"
+
+
 def test_worker_reclaims_stale_jobs_on_start(tmp_path):
     """run_forever recovers a prior crash's orphaned job before draining."""
     from maverick.job_queue import JobQueue

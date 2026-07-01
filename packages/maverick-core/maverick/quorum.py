@@ -232,6 +232,25 @@ class ProposalStore:
             data[proposal.change_id] = self._to_record(proposal)
             self._save(data)
 
+    def modify(
+        self, change_id: str, mutate: Callable[[Proposal], Proposal],
+    ) -> Proposal:
+        """Atomic read-modify-write of one proposal under ``_STORE_LOCK``.
+
+        ``mutate`` receives the freshly-loaded proposal and returns the updated
+        one; both the load and the save happen inside the lock so two concurrent
+        approvals accumulate instead of last-writer-wins clobbering each other.
+        """
+        with _STORE_LOCK:
+            data = self._load()
+            rec = data.get(change_id)
+            if not isinstance(rec, dict):
+                raise QuorumError(f"unknown proposal {change_id!r}")
+            updated = mutate(self._to_proposal(rec))
+            data[updated.change_id] = self._to_record(updated)
+            self._save(data)
+            return updated
+
     def all(self) -> list[Proposal]:
         return [self._to_proposal(r) for r in self._load().values()
                 if isinstance(r, dict)]
@@ -303,24 +322,28 @@ def approve(
     who = str(approver or "").strip()
     if not who:
         raise QuorumError("an approval needs a named approver")
-    proposal = store.get(change_id)
-    if proposal is None:
-        raise QuorumError(f"unknown proposal {change_id!r}")
-    if _is_expired(proposal, policy, float(store.clock())):
-        raise QuorumError(f"proposal {change_id!r} has expired; re-propose it")
-    if who.lower() == proposal.proposer.lower():
-        raise QuorumError("separation of duties: the proposer cannot approve "
-                          "their own change")
-    if any(a.lower() == who.lower() for a, _ in proposal.approvals):
-        raise QuorumError(f"{who!r} has already approved {change_id!r}")
-    updated = Proposal(
-        change_id=proposal.change_id, key=proposal.key, old=proposal.old,
-        new=proposal.new, proposer=proposal.proposer,
-        proposed_at=proposal.proposed_at, required=proposal.required,
-        approvals=proposal.approvals + ((who, float(store.clock())),),
-    )
-    store.put(updated)
-    return updated
+
+    # The whole load-validate-rebuild-save must be atomic: reading the proposal
+    # outside the lock and rebuilding it with only our own approval lets two
+    # concurrent approves last-writer-wins and lose an approval. Run the get +
+    # duplicate/self checks + append inside ProposalStore.modify's lock so the
+    # approvals accumulate as the store docstring promises.
+    def _add_approval(proposal: Proposal) -> Proposal:
+        if _is_expired(proposal, policy, float(store.clock())):
+            raise QuorumError(f"proposal {change_id!r} has expired; re-propose it")
+        if who.lower() == proposal.proposer.lower():
+            raise QuorumError("separation of duties: the proposer cannot approve "
+                              "their own change")
+        if any(a.lower() == who.lower() for a, _ in proposal.approvals):
+            raise QuorumError(f"{who!r} has already approved {change_id!r}")
+        return Proposal(
+            change_id=proposal.change_id, key=proposal.key, old=proposal.old,
+            new=proposal.new, proposer=proposal.proposer,
+            proposed_at=proposal.proposed_at, required=proposal.required,
+            approvals=proposal.approvals + ((who, float(store.clock())),),
+        )
+
+    return store.modify(change_id, _add_approval)
 
 
 def status(
