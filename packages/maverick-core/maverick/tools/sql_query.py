@@ -116,6 +116,20 @@ def _read_only_authorizer(action: int, _arg1: str | None, _arg2: str | None,
     return sqlite3.SQLITE_OK
 
 
+# Even in WRITE mode the tool is confined to the workspace-checked `database`
+# path. ATTACH/DETACH would let a statement reach an arbitrary filesystem path
+# (`ATTACH DATABASE '/etc/passwd' AS x`) and read/write outside that confinement,
+# so deny them while still permitting normal DML/DDL on the main database.
+_WRITE_DENIED_ACTIONS = frozenset({sqlite3.SQLITE_ATTACH, sqlite3.SQLITE_DETACH})
+
+
+def _write_authorizer(action: int, _arg1: str | None, _arg2: str | None,
+                      _db_name: str | None, _trigger: str | None) -> int:
+    if action in _WRITE_DENIED_ACTIONS:
+        return sqlite3.SQLITE_DENY
+    return sqlite3.SQLITE_OK
+
+
 def _format_rows(cols: list[str], rows: list[tuple]) -> str:
     header = " | ".join(cols)
     sep = "-+-".join("-" * len(c) for c in cols)
@@ -165,6 +179,9 @@ def _run_sql_query(args: dict[str, Any], sandbox) -> str:
             conn.set_authorizer(_read_only_authorizer)
         else:
             conn = sqlite3.connect(str(p), timeout=10)
+            # Confine writes to the checked database path: deny ATTACH/DETACH so
+            # a statement can't reach an arbitrary filesystem path.
+            conn.set_authorizer(_write_authorizer)
         cur = conn.execute(query, params)
         if cur.description is None:
             conn.commit()
