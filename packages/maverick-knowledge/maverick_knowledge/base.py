@@ -114,10 +114,11 @@ class KnowledgeBase:
         chunks = [c for c in raw_chunks if self._safe(c)]
         # Boundary-split evasion guard: an attacker can straddle an injection
         # tripwire across a chunk edge (or pick a small chunk_size) so no single
-        # chunk matches the marker even though the full document does. If every
-        # chunk passed yet the FULL text trips the screen, the payload was split
-        # -- drop the whole document rather than ingest the poison.
-        if len(chunks) == len(raw_chunks) and not self._safe(text):
+        # chunk matches the marker even though the full document does. Screen the
+        # FULL text unconditionally -- the old `len(chunks) == len(raw_chunks)`
+        # guard skipped this whenever any one chunk was also independently
+        # dropped, letting a straddled payload's remaining chunks through.
+        if not self._safe(text):
             log.warning("knowledge: dropping document with boundary-split "
                         "injection marker on ingest")
             return 0
