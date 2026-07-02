@@ -81,8 +81,11 @@ def test_qdrant_add_passes_metadata(monkeypatch, tmp_path):
     store = QdrantStore(path=tmp_path / "qd")
     store.add(["doc"], ids=["x"], metadatas=[{"src": "test"}])
     kwargs = fake_client.add.call_args.kwargs
-    assert kwargs["metadata"] == [{"src": "test"}]
-    assert kwargs["ids"] == ["x"]
+    # Point ids are deterministic UUIDs (Qdrant rejects arbitrary strings); the
+    # caller's logical id rides in the payload under __nsid__.
+    from maverick.vector_store.qdrant_store import _point_id
+    assert kwargs["ids"] == [_point_id("x", None)]
+    assert kwargs["metadata"] == [{"src": "test", "__nsid__": "x"}]
 
 
 def test_qdrant_add_empty_noop(monkeypatch, tmp_path):
@@ -144,10 +147,12 @@ def test_qdrant_delete(monkeypatch, tmp_path):
     store = QdrantStore(path=tmp_path / "qd")
     store.delete(["a", "b"])
     fake_client.delete.assert_called_once()
-    # PointIdsList stub carries the points list:
+    # PointIdsList stub carries the points list -- deterministic UUIDs, not the
+    # raw ids (Qdrant only accepts uint/UUID point ids).
+    from maverick.vector_store.qdrant_store import _point_id
     kwargs = fake_client.delete.call_args.kwargs
     assert kwargs["collection_name"] == "maverick"
-    assert kwargs["points_selector"].points == ["a", "b"]
+    assert kwargs["points_selector"].points == [_point_id("a", None), _point_id("b", None)]
 
 
 def test_qdrant_count(monkeypatch, tmp_path):

@@ -123,3 +123,34 @@ def test_semantic_recall_recognizes_weaviate(monkeypatch):
     monkeypatch.setenv("MAVERICK_VECTOR_STORE", "weaviate")
     from maverick import semantic_recall
     assert semantic_recall.backend_name() == "weaviate"
+
+
+def test_weaviate_reset_single_tenant_drops_whole_collection(monkeypatch):
+    monkeypatch.delenv("MAVERICK_WEAVIATE_URL", raising=False)
+    fake = _install_fake_weaviate(monkeypatch)
+    import maverick.vector_store.weaviate_store as ws
+    monkeypatch.setattr(ws, "_active_tenant", lambda: None)
+    store = ws.WeaviateStore(collection="goals", vectorizer="none")
+    fake.collections.delete.reset_mock()
+    store.reset()
+    # Single-tenant: dropping the whole collection is fine.
+    fake.collections.delete.assert_called_once_with("Goals")
+
+
+def test_weaviate_reset_multitenant_deletes_only_tenant_objects(monkeypatch):
+    # A tenant's reset() must NOT drop the shared collection -- that would wipe
+    # every OTHER tenant's vectors. It deletes only this tenant's objects.
+    monkeypatch.delenv("MAVERICK_WEAVIATE_URL", raising=False)
+    fake = _install_fake_weaviate(monkeypatch)
+    import maverick.vector_store.weaviate_store as ws
+    monkeypatch.setattr(ws, "_active_tenant", lambda: "t1")
+    marker = object()
+    monkeypatch.setattr(ws.WeaviateStore, "_tenant_filter",
+                        staticmethod(lambda tenant_id: marker))
+    store = ws.WeaviateStore(collection="goals", vectorizer="none")
+    fake.collections.delete.reset_mock()
+    coll = fake.collections.get.return_value
+    coll.data.delete_many.reset_mock()
+    store.reset()
+    fake.collections.delete.assert_not_called()          # collection preserved
+    coll.data.delete_many.assert_called_once_with(where=marker)  # only this tenant

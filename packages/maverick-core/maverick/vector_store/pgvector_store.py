@@ -111,13 +111,30 @@ class PgVectorStore:
             # shell so count()/reset() work on an empty collection.
             cur.execute(
                 f"CREATE TABLE IF NOT EXISTS {_TABLE} ("
-                "  id text PRIMARY KEY,"
+                "  id text NOT NULL,"
                 "  collection text NOT NULL,"
                 "  tenant_id text,"
                 "  document text,"
-                "  metadata jsonb"
+                "  metadata jsonb,"
+                "  PRIMARY KEY (collection, id)"
                 ")")
             cur.execute(f"ALTER TABLE {_TABLE} ADD COLUMN IF NOT EXISTS tenant_id text")
+            # Migrate legacy tables whose PRIMARY KEY is (id) alone: that made an
+            # add() in one collection overwrite a same-id row in ANOTHER via the
+            # ON CONFLICT (id) upsert below (cross-collection/-tenant data loss).
+            # Rebuild the key as (collection, id). Safe -- the old sole-id key
+            # made cross-collection duplicate ids impossible, so no existing row
+            # pair can collide on the wider key.
+            cur.execute(
+                "SELECT a.attname FROM pg_index i "
+                "JOIN pg_attribute a ON a.attrelid = i.indrelid "
+                "  AND a.attnum = ANY(i.indkey) "
+                "WHERE i.indrelid = %s::regclass AND i.indisprimary",
+                (_TABLE,))
+            pk_cols = sorted(r[0] for r in cur.fetchall())
+            if pk_cols == ["id"]:
+                cur.execute(f"ALTER TABLE {_TABLE} DROP CONSTRAINT IF EXISTS {_TABLE}_pkey")
+                cur.execute(f"ALTER TABLE {_TABLE} ADD PRIMARY KEY (collection, id)")
             cur.execute(
                 f"CREATE INDEX IF NOT EXISTS idx_{_TABLE}_collection_tenant "
                 f"ON {_TABLE} (collection, tenant_id)")
@@ -167,7 +184,7 @@ class PgVectorStore:
                     f"INSERT INTO {_TABLE} "
                     "(id, collection, tenant_id, document, metadata, embedding) "
                     "VALUES (%s, %s, %s, %s, %s, %s) "
-                    "ON CONFLICT (id) DO UPDATE SET collection = EXCLUDED.collection, "
+                    "ON CONFLICT (collection, id) DO UPDATE SET "
                     "tenant_id = EXCLUDED.tenant_id, document = EXCLUDED.document, "
                     "metadata = EXCLUDED.metadata, embedding = EXCLUDED.embedding",
                     (self._stored_id(ids[i], tenant_id), self._collection, tenant_id, doc, meta, vec))

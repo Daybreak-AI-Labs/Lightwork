@@ -81,11 +81,16 @@ class OAuthVault:
         return data_dir("oauth", "tokens.sealed", tenant=self._tenant_id)
 
     def _seal_tenant(self) -> str | None:
-        # seal_for_tenant takes a concrete tenant id (None = single-tenant /
-        # default DEK); resolve the active tenant the same way data_dir does.
+        # seal_text_for_tenant takes the RAW tenant id: it path-encodes it itself
+        # (_kms_config_for -> _tenant_segment) to find the tenant's [kms] overlay
+        # and binds it into the AEAD context. Passing the already path-encoded
+        # current_tenant() double-encodes -- so a non-slug tenant misses its own
+        # BYOK [kms] key (silently sealing under the default DEK) and seals under
+        # a different AEAD context than every other tenant-KMS caller. Use the
+        # raw id, like current_tenant_id()'s "natural tenant keys" contract.
         if self._tenant_id == "__active__":
-            from .paths import current_tenant
-            return current_tenant()
+            from .paths import current_tenant_id
+            return current_tenant_id()
         return self._tenant_id
 
     def _load(self) -> dict[str, dict]:

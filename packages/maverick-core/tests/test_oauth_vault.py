@@ -144,3 +144,40 @@ class TestToggles:
         monkeypatch.setenv("MAVERICK_OAUTH_VAULT", "1")
         from maverick.oauth_vault import enabled
         assert enabled() is True
+
+
+class TestActiveTenantSealContext:
+    def test_active_seal_uses_raw_tenant_id_not_path_encoded(self):
+        # The active-tenant vault must seal under the RAW tenant id: the KMS
+        # path-encodes it itself (to find the [kms] BYOK overlay and bind the
+        # AEAD context). Passing the already path-encoded current_tenant()
+        # double-encodes -- so a non-slug tenant misses its BYOK key and seals
+        # under a different context than every other tenant-KMS caller.
+        import json
+
+        from maverick.oauth_vault import OAuthVault
+        from maverick.paths import (
+            current_tenant,
+            current_tenant_id,
+            reset_tenant,
+            set_tenant,
+        )
+        from maverick.tenant import kms
+        from maverick.tenant.kms import unseal_text_for_tenant
+
+        tid = "Acme Corp"  # non-slug: path-encoding changes it
+        token = set_tenant(tid)
+        try:
+            assert current_tenant() != current_tenant_id()  # sanity: it encodes
+            v = OAuthVault("__active__")
+            assert v._seal_tenant() == current_tenant_id() == tid  # raw, not encoded
+            v.put("notion", {"access_token": "secret-at"})
+            blob = v._path().read_bytes()
+            kms._clear_cache()
+            # Readable with the canonical RAW-id KMS context -> oauth seals the
+            # same way as everything else. Before the fix (encoded id) this
+            # raised on the AEAD tag mismatch.
+            raw = unseal_text_for_tenant(tid, blob)
+            assert json.loads(raw)["notion"]["access_token"] == "secret-at"
+        finally:
+            reset_tenant(token)
