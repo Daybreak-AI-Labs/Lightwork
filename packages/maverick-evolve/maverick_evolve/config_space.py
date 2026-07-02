@@ -80,4 +80,31 @@ def in_bounds(config: dict, space: dict[str, tuple] | None = None) -> bool:
     return True
 
 
-__all__ = ["SPACE", "default_config", "mutate", "in_bounds"]
+def clamp_config(config: dict, space: dict[str, tuple] | None = None) -> dict:
+    """Return a copy of ``config`` with every KNOWN knob clamped into range.
+
+    Defense in depth for the resume-from-archive path: ``mutate`` clamps, but a
+    hand-edited or legacy archive entry (or a swapped ``space``) can carry an
+    out-of-bounds value straight through sampling into the run sinks
+    (``env_for``/``overlay_for``). ``max_swarm_fanout`` maps to
+    ``MAVERICK_MAX_SWARM_FANOUT``, the kernel's fan-out anomaly cap, so an
+    out-of-bounds evolve config must never raise a safety limit on a live run.
+    Unknown / non-numeric knobs pass through untouched.
+    """
+    space = space or SPACE
+    out = dict(config)
+    for knob, spec in space.items():
+        if knob not in out:
+            continue
+        lo, hi = spec[1], spec[2]
+        try:
+            if spec[0] == "int":
+                out[knob] = _clamp(int(out[knob]), lo, hi)
+            else:
+                out[knob] = round(_clamp(float(out[knob]), lo, hi), 4)
+        except (TypeError, ValueError):
+            continue  # non-numeric junk -> leave for the caller to reject
+    return out
+
+
+__all__ = ["SPACE", "default_config", "mutate", "in_bounds", "clamp_config"]

@@ -148,6 +148,32 @@ class TestSpawnIntegration:
         memory = _department_memory(profile, "prepare the walkthrough memo")
         assert "Consolidated lessons" in memory
 
+    def test_dream_insight_recall_is_shield_scanned(self, tmp_path, monkeypatch):
+        """A specialist spawn recalls dream insights; an injection-bearing
+        insight must be Shield-scanned at recall (the write path persists raw
+        reflection text, so recall is the sole enforcement point). Regression:
+        _department_memory dropped shield= on the dreaming recall while the
+        sibling reflexion recall passed it."""
+        monkeypatch.setenv("MAVERICK_DREAMING", "1")
+        ipath = tmp_path / "insights.ndjson"
+        dreaming.append_insights([dreaming.DreamInsight(
+            ts=1.0, kind="failure_pattern", domain="finance_sox",
+            text="INJECT_IGNORE_PRIOR_INSTRUCTIONS on ledger goals.",
+            evidence=3,
+        )], path=ipath)
+        monkeypatch.setattr(dreaming, "insights_path", lambda: ipath)
+
+        class Shield:
+            def scan_input(self, text):
+                blocked = "INJECT_IGNORE_PRIOR_INSTRUCTIONS" in text
+                return type("V", (), {"allowed": not blocked})()
+
+        profile = DomainProfile(name="finance_sox")
+        memory = _department_memory(
+            profile, "prepare the walkthrough memo", shield=Shield())
+        assert "INJECT_IGNORE_PRIOR_INSTRUCTIONS" not in memory
+        assert "[redacted by Shield]" in memory
+
 
 class TestLintProfile:
     def test_clean_pack_is_clean(self):

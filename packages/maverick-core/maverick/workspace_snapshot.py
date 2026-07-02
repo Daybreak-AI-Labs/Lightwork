@@ -9,6 +9,7 @@ they're unit-testable against a tmpdir.
 """
 from __future__ import annotations
 
+import logging
 import os
 import re
 import tarfile
@@ -16,6 +17,8 @@ import time
 from pathlib import Path
 
 from .paths import data_dir
+
+log = logging.getLogger(__name__)
 
 _DEFAULT_STORE = data_dir("snapshots")
 _ID_RE = re.compile(r"^snap-(\d{4})(?:-.*)?$")
@@ -67,7 +70,10 @@ def create_snapshot(src: Path, store: Path, label: str = "") -> dict:
     files = 0
     total = 0
     for p in src.rglob("*"):
-        if p.is_file():
+        # Count only what restore can actually recreate: restore_snapshot skips
+        # link members, so a symlink counted here (``is_file`` follows the link)
+        # would inflate the manifest above the number restore reports back.
+        if p.is_file() and not p.is_symlink():
             files += 1
             try:
                 total += p.stat().st_size
@@ -147,9 +153,16 @@ def _resolve_archive(store: Path, snap_id: str) -> Path:
 
 
 def _is_within(base: Path, target: Path) -> bool:
-    base = base.resolve()
-    target = target.resolve()
-    return base == target or base in target.parents
+    # Lexical containment: normalize away any ``..`` in the archive member name
+    # WITHOUT resolving symlinks. ``target.resolve()`` followed a pre-existing
+    # symlink already living in ``dest`` (the common rollback-into-the-same-
+    # workspace case) out to its target, so an outward-pointing symlink tripped
+    # a false "escapes destination" and aborted the restore partway. The actual
+    # threat here is a ``../`` traversal in the member name, which normpath
+    # collapses on its own.
+    base_s = os.path.normpath(str(base))
+    target_s = os.path.normpath(str(target))
+    return target_s == base_s or target_s.startswith(base_s + os.sep)
 
 
 def restore_snapshot(store: Path, snap_id: str, dest: Path) -> dict:
@@ -158,16 +171,22 @@ def restore_snapshot(store: Path, snap_id: str, dest: Path) -> dict:
     dest = Path(dest)
     dest.mkdir(parents=True, exist_ok=True)
     restored = 0
+    skipped_links = 0
     with tarfile.open(archive, "r:gz") as tar:
         for member in tar.getmembers():
+            if member.issym() or member.islnk():
+                # Refuse links — a symlink member could later redirect a write
+                # outside dest even though the link file itself is "within".
+                # Skip BEFORE the containment check: a link is never extracted,
+                # so there is nothing to confine, and an outward-pointing
+                # symlink already present in dest would otherwise abort the
+                # whole in-place rollback and leave later members unrestored.
+                skipped_links += 1
+                continue
             out_path = dest / member.name
             if not _is_within(dest, out_path):
                 raise ValueError(
                     f"unsafe archive member escapes destination: {member.name!r}")
-            if member.issym() or member.islnk():
-                # Refuse links — a symlink member could later redirect a write
-                # outside dest even though the link file itself is "within".
-                continue
             # ``filter="data"`` is the safe extraction policy (rejects absolute
             # paths / traversal / device files) and the future default; the
             # kwarg only exists on 3.12+, so fall back on 3.10/3.11 where our
@@ -178,7 +197,12 @@ def restore_snapshot(store: Path, snap_id: str, dest: Path) -> dict:
                 tar.extract(member, path=dest)
             if member.isfile():
                 restored += 1
-    return {"id": f"snap-{archive.name[5:9]}", "restored": restored, "dest": str(dest)}
+    if skipped_links:
+        log.warning(
+            "restore_snapshot: skipped %d link member(s) not recreated in %s",
+            skipped_links, dest)
+    return {"id": f"snap-{archive.name[5:9]}", "restored": restored,
+            "skipped_links": skipped_links, "dest": str(dest)}
 
 
 # --- tool surface ----------------------------------------------------------

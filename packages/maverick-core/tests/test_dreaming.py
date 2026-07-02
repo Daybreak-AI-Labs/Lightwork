@@ -691,6 +691,36 @@ class TestLearningGovernance:
         assert not (stores["learned-skills"] / "post-snap.md").exists()
         assert (stores["learned-skills"] / "a-skill.md").exists()
 
+    def test_failed_snapshot_leaves_no_poisoned_latest(self, tmp_path,
+                                                        monkeypatch):
+        # A snapshot that fails partway (e.g. ENOSPC after copying 1 of 2
+        # stores) must NOT leave a partial dir behind: it would be the newest
+        # entry, and rollback("latest") would restore only that store and DELETE
+        # the others (via _remove_post_snapshot_stores) -- destroying learned
+        # state from a snapshot that never completed.
+        import shutil as _shutil
+        stores = self._stores(tmp_path)
+        snapdir = tmp_path / "snaps"
+        # The file store (insights.ndjson) copies first and succeeds, creating
+        # the snapshot dir; the dir store (learned-skills) then fails mid-copy.
+        # shutil.Error subclasses OSError, so the function's handler catches it.
+        def boom_copytree(*a, **k):
+            raise OSError("No space left on device")
+
+        monkeypatch.setattr(_shutil, "copytree", boom_copytree)
+        snap = dreaming.snapshot_learning_state(
+            directory=snapdir, stores=stores, now=1000.0)
+        assert snap is None
+        # No poisoned snapshot survived the failure.
+        assert dreaming.list_snapshots(snapdir) == []
+        # And a rollback finds nothing to do -- the live stores are untouched.
+        monkeypatch.undo()
+        restored = dreaming.rollback_learning_state(
+            "latest", directory=snapdir, stores=stores)
+        assert restored == []
+        assert stores["insights.ndjson"].exists()
+        assert (stores["learned-skills"] / "a-skill.md").exists()
+
     def test_snapshot_retention_caps_history(self, tmp_path):
         stores = self._stores(tmp_path)
         snapdir = tmp_path / "snaps"
