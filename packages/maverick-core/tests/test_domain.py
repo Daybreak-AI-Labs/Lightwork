@@ -208,6 +208,25 @@ class TestOverlay:
         merged = overlay_profile(base, {"workflow": [{"name": "step1"}]})
         assert [s.name for s in merged.workflow] == ["step1"]
 
+    def test_overlay_inherits_base_autonomy(self):
+        # An overlay that doesn't set [autonomy] must inherit the base pack's
+        # autonomy, not silently drop it to the default (None).
+        from maverick.agent_autonomy import AutonomyProfile
+        base = DomainProfile(name="x", allow_tools=["read_file"],
+                             autonomy=AutonomyProfile.from_toml({"default": "auto"}))
+        merged = overlay_profile(base, {"description": "d"})
+        assert merged.autonomy == base.autonomy
+        assert merged.autonomy is not None
+
+    def test_overlay_coerces_autonomy_patch(self):
+        # A patched [autonomy] table must be coerced to an AutonomyProfile the
+        # same way the load path does -- not stored as a raw dict.
+        from maverick.agent_autonomy import AutonomyProfile, parse_level
+        base = DomainProfile(name="x", allow_tools=["read_file"])
+        merged = overlay_profile(base, {"autonomy": {"default": "auto"}})
+        assert isinstance(merged.autonomy, AutonomyProfile)
+        assert merged.autonomy.default == parse_level("auto")
+
     def test_overridden_fields_reports_patched_keys(self):
         assert overridden_fields(
             {"name": "x", "persona": "p", "allow_tools": ["read_file"]}
