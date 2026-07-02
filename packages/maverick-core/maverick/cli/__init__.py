@@ -3221,7 +3221,7 @@ def _propagate_coding_flags(coding_mode: bool, best_of_n: int) -> None:
                                  "kubernetes", "ssh", "firecracker"]))
 @click.option("--domain", default=None,
               help="Run as a specific domain agent's specialist (see "
-                   "`maverick compartments` for available domains).")
+                   "`maverick domains-audit` for available domains).")
 @click.option("--coding-mode", is_flag=True,
               help="Strict diff-only worker prompts + git apply --check "
                    "self-validation. Use for SWE-bench-style runs.")

@@ -50,6 +50,16 @@ def test_checklist_is_fixed_list():
     assert "Thesis" in out
 
 
+def test_outline_rejects_unbounded_section_count():
+    # A model-supplied huge integer must not hang/OOM the in-process agent:
+    # _outline is O(sections) in CPU and memory (mirrors synthetic_data's cap).
+    assert _run(op="outline", topic="x", sections=50_000_000).startswith("ERROR")
+    assert _run(op="outline", topic="x", sections=101).startswith("ERROR")
+    ok = _run(op="outline", topic="x", sections=100)  # cap itself still works
+    assert ok.startswith("Outline:")
+    assert len([ln for ln in ok.splitlines() if ln[:1].isdigit()]) == 100
+
+
 def test_errors():
     assert _run(op="outline").startswith("ERROR")  # missing topic
     assert _run(op="outline", topic="x", sections=0).startswith("ERROR")

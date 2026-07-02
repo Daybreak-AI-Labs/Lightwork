@@ -32,6 +32,11 @@ _SECTION_ROLES = [
     "Conclusion",
 ]
 
+# Upper bound on the model-supplied section count (mirrors synthetic_data's
+# _MAX_ROWS): _outline is O(sections) in CPU and memory in-process, so an
+# unbounded integer would stall the goal / exhaust kernel memory.
+_MAX_SECTIONS = 100
+
 
 def _clean_topic(topic: Any) -> str:
     if topic is None:
@@ -105,8 +110,8 @@ def _run(args: dict[str, Any]) -> str:
             sections = int(args.get("sections", 5))
         except (TypeError, ValueError):
             return "ERROR: sections must be an integer"
-        if sections < 1:
-            return "ERROR: sections must be >= 1"
+        if sections < 1 or sections > _MAX_SECTIONS:
+            return f"ERROR: sections must be 1..{_MAX_SECTIONS}"
         return _outline(topic, sections)
     if op == "expand":
         outline = args.get("outline")
@@ -129,7 +134,10 @@ _SCHEMA: dict[str, Any] = {
     "properties": {
         "op": {"type": "string", "enum": ["outline", "expand", "checklist"]},
         "topic": {"type": "string", "description": "subject for op=outline"},
-        "sections": {"type": "integer", "description": "section count (default 5)"},
+        "sections": {
+            "type": "integer",
+            "description": f"section count (default 5, max {_MAX_SECTIONS})",
+        },
         "outline": {
             "type": "array",
             "items": {"type": "string"},

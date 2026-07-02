@@ -194,7 +194,12 @@ const PCTX_MAX_SELECTOR = 120;
 const PCTX_MAX_VALUE = 80;
 
 function pctxStr(v: unknown, max: number): string {
-  return typeof v === "string" ? v.slice(0, max) : "";
+  // slice() counts UTF-16 code units, so the cap can land mid-surrogate-pair
+  // (and crafted JSON can smuggle lone surrogates outright). toWellFormed()
+  // (Node >= 20) swaps any unpaired surrogate for U+FFFD so the output never
+  // breaks downstream UTF-8 encoders (the host's JSON wire, sqlite, the LLM
+  // request body).
+  return typeof v === "string" ? v.slice(0, max).toWellFormed() : "";
 }
 
 function pctxElement(raw: unknown): PageElement {
@@ -205,8 +210,8 @@ function pctxElement(raw: unknown): PageElement {
     name: pctxStr(o.name, PCTX_MAX_NAME),
     selector: pctxStr(o.selector, PCTX_MAX_SELECTOR),
   };
-  if (typeof o.type === "string") el.type = o.type.slice(0, 24);
-  if (typeof o.value === "string") el.value = o.value.slice(0, PCTX_MAX_VALUE);
+  if (typeof o.type === "string") el.type = pctxStr(o.type, 24);
+  if (typeof o.value === "string") el.value = pctxStr(o.value, PCTX_MAX_VALUE);
   if (o.disabled === true) el.disabled = true;
   return el;
 }

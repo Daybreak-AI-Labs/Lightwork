@@ -52,11 +52,13 @@ def get_provider_client(
 
     ``base_url`` reaches the self-hosted / OpenAI-compatible clients (vllm,
     tgi, ollama, openai, openai_compatible), anthropic (for a proxy /
-    gateway endpoint), AND azure / bedrock (whose clients use it as the
-    endpoint, falling back to their env var / regional default when unset) so
-    a ``[providers.<name>] base_url`` in config actually configures the
+    gateway endpoint), azure / bedrock (whose clients use it as the
+    endpoint, falling back to their env var / regional default when unset),
+    AND the OpenAI-translated cloud vendors (openrouter, gemini, moonshot,
+    deepseek, xai — each defaults to its vendor endpoint when unset) so a
+    ``[providers.<name>] base_url`` in config actually configures the
     endpoint — previously only the CLI preflight read that key and the client
-    silently fell back to its env var / localhost default.
+    silently fell back to its env var / vendor / localhost default.
 
     ``default_headers`` (from ``[providers.<name>] default_headers``) is a
     data-residency / ZDR control: extra HTTP headers attached to every request
@@ -74,22 +76,22 @@ def get_provider_client(
                             default_headers=default_headers)
     if canon == "openrouter":
         from .openrouter_provider import OpenRouterClient
-        return OpenRouterClient(api_key=api_key)
+        return OpenRouterClient(api_key=api_key, base_url=base_url)
     if canon == "ollama":
         from .ollama_provider import OllamaClient
         return OllamaClient(api_key=api_key, base_url=base_url)
     if canon == "gemini":
         from .gemini_provider import GeminiClient
-        return GeminiClient(api_key=api_key)
+        return GeminiClient(api_key=api_key, base_url=base_url)
     if canon == "moonshot":
         from .moonshot_provider import MoonshotClient
-        return MoonshotClient(api_key=api_key)
+        return MoonshotClient(api_key=api_key, base_url=base_url)
     if canon == "deepseek":
         from .deepseek_provider import DeepSeekClient
-        return DeepSeekClient(api_key=api_key)
+        return DeepSeekClient(api_key=api_key, base_url=base_url)
     if canon == "xai":
         from .xai_provider import XaiClient
-        return XaiClient(api_key=api_key)
+        return XaiClient(api_key=api_key, base_url=base_url)
     if canon == "tgi":
         from .tgi_provider import TGIClient
         return TGIClient(api_key=api_key, base_url=base_url)

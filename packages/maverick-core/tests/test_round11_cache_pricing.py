@@ -67,10 +67,52 @@ def test_openai_cache_hit_is_discounted_not_full_rate():
 
 def test_deepseek_prompt_cache_hit_tokens_discounted():
     # deepseek-chat = (0.27, 1.10). prompt_cache_hit_tokens path (no details obj).
+    # DeepSeek bills cache hits at 0.1x (see DeepSeekClient.CACHE_READ_MULT, the
+    # multiplier the authoritative record_tokens path uses); hard-coding
+    # OpenAI's 0.5x here overcounted DeepSeek cached input 5x in the
+    # provider-cap ledger and budget_dollars metric.
+    from maverick.providers.deepseek_provider import DeepSeekClient
     resp = _Resp(_UsageDeepSeek(prompt=50_000, completion=500, cache_hit=40_000))
-    cost = _response_call_cost("deepseek-chat", resp)
-    expected = (10_000 / 1e6) * 0.27 + (40_000 / 1e6) * 0.27 * 0.5 + (500 / 1e6) * 1.10
+    cost = _response_call_cost("deepseek-chat", resp, DeepSeekClient.CACHE_READ_MULT)
+    expected = (10_000 / 1e6) * 0.27 + (40_000 / 1e6) * 0.27 * 0.1 + (500 / 1e6) * 1.10
     assert cost == pytest.approx(expected, rel=1e-9)
+
+
+def test_gemini_cached_tokens_billed_at_provider_mult():
+    # gemini-3.5-flash = (0.15, 0.60); Gemini implicit cache reads bill 0.25x.
+    from maverick.providers.gemini_provider import GeminiClient
+    resp = _Resp(_UsageOpenAI(prompt=100_000, completion=1_000, cached=80_000))
+    cost = _response_call_cost("gemini-3.5-flash", resp, GeminiClient.CACHE_READ_MULT)
+    expected = (
+        (20_000 / 1e6) * 0.15
+        + (80_000 / 1e6) * 0.15 * 0.25
+        + (1_000 / 1e6) * 0.60
+    )
+    assert cost == pytest.approx(expected, rel=1e-9)
+
+
+def test_complete_threads_client_cache_mult_into_ledger_spend(monkeypatch):
+    # complete() must price the ledger/metrics spend with the dispatching
+    # client's CACHE_READ_MULT, not OpenAI's 0.5x (the record_tokens billing
+    # path is already per-provider; this keeps the two consistent).
+    import maverick.llm as llm_mod
+    from maverick.budget import Budget
+
+    class _DeepSeekish:
+        CACHE_READ_MULT = 0.1
+
+        def complete(self, **kw):
+            return _Resp(_UsageDeepSeek(prompt=50_000, completion=500, cache_hit=40_000))
+
+    recorded = {}
+    monkeypatch.setattr(llm_mod, "_record_provider_spend",
+                        lambda provider, dollars: recorded.update({provider: dollars}))
+    llm = llm_mod.LLM(model="deepseek:deepseek-chat")
+    monkeypatch.setattr(llm, "_get_client", lambda provider: _DeepSeekish())
+    llm.complete(system="s", messages=[{"role": "user", "content": "hi"}],
+                 budget=Budget())
+    expected = (10_000 / 1e6) * 0.27 + (40_000 / 1e6) * 0.27 * 0.1 + (500 / 1e6) * 1.10
+    assert recorded["deepseek"] == pytest.approx(expected, rel=1e-9)
 
 
 def test_no_cache_is_plain_full_rate():

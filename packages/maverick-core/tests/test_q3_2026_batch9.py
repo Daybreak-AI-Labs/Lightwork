@@ -302,7 +302,7 @@ def test_ocr_extract_blocks_path_escape():
 
 
 def test_ocr_extract_url_blocks_private():
-    # safe_get resolves 127.0.0.1, sees it's non-public, and refuses (offline).
+    # safe_client resolves 127.0.0.1, sees it's non-public, and refuses (offline).
     from maverick.tools.ocr import ocr
     out = ocr().fn({"op": "extract_url", "url": "http://127.0.0.1:8000/a.png"})
     assert "refusing to fetch" in out and "127.0.0.1" in out
@@ -316,11 +316,29 @@ def test_ocr_extract_url_uses_workspace_tempfile(tmp_path, monkeypatch):
     class _Resp:
         status_code = 200
         headers = {"content-type": "image/png"}
-        content = b"\x89PNG\r\n\x1a\n"
 
-    # Patch the SSRF-safe fetcher (pins the connection) rather than httpx.
+        def iter_bytes(self):
+            yield b"\x89PNG\r\n\x1a\n"
+
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *a):
+            return False
+
+    class _Client:
+        def stream(self, method, url):
+            return _Resp()
+
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *a):
+            return False
+
+    # Patch the SSRF-safe client (pins the connection) rather than httpx.
     import maverick.tools._ssrf as _ssrf
-    monkeypatch.setattr(_ssrf, "safe_get", lambda url, **kw: _Resp())
+    monkeypatch.setattr(_ssrf, "safe_client", lambda url, **kw: _Client())
 
     from maverick.tools.ocr import ocr
     out = ocr().fn({"op": "extract_url", "url": "http://example.com/a.png"})

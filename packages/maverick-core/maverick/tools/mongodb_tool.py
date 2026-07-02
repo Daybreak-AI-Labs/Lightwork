@@ -147,7 +147,13 @@ def _op_find(args: dict[str, Any]) -> str:
         try:
             cursor = cursor.sort([(s[0], int(s[1])) for s in sort_pairs])
         except (TypeError, ValueError, IndexError):
-            pass
+            # A bad sort must fail loudly: sort decides WHICH documents
+            # survive the limit below, so silently dropping it would return
+            # the wrong documents labeled as a successful sorted query.
+            return (
+                "ERROR: sort must be a list of [field, direction] pairs "
+                f"with direction 1 or -1 (got {sort_pairs!r})"
+            )
     docs = list(cursor.limit(limit))
     if not docs:
         return "no docs"

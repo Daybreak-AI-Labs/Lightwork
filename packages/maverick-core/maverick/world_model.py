@@ -1043,12 +1043,24 @@ class WorldModel:
             from .crypto_at_rest import EncryptionUnavailable
             for row in rows:
                 try:
-                    new_result = _enc_field((_dec_field(row["result"]) or "") + marker)
+                    dec = _dec_field(row["result"])
+                    # Strict mode withholds a not-yet-migrated plaintext result
+                    # (_dec_field returns the sentinel, never the real value);
+                    # re-sealing the sentinel here would overwrite -- and
+                    # permanently destroy -- the original. Fall through to the
+                    # status-only reclaim below instead.
+                    new_result = (
+                        None if dec == _UNSEALED_WITHHELD
+                        else _enc_field((dec or "") + marker)
+                    )
                 except EncryptionUnavailable:
-                    # One orphan whose sealed result can't be opened (rotated or
-                    # foreign at-rest key) must not abort crash-recovery for every
-                    # other stuck goal. Reclaim the status; leave the unreadable
-                    # result intact rather than corrupting or dropping it.
+                    new_result = None
+                if new_result is None:
+                    # One orphan whose result can't be recovered -- sealed under
+                    # a rotated or foreign at-rest key, or withheld under strict
+                    # mode -- must not abort crash-recovery for every other
+                    # stuck goal. Reclaim the status; leave the result intact
+                    # rather than corrupting or dropping it.
                     conn.execute(
                         "UPDATE goals SET status = 'blocked', updated_at = ? "
                         "WHERE id = ?",
@@ -1828,7 +1840,7 @@ class WorldModel:
         the emergent-protocol codebook learns from. Read-only."""
         rows = self._read_all(
             "SELECT content FROM goal_events ORDER BY id DESC LIMIT ?", (int(limit),))
-        return [r[0] for r in rows if r and r[0]]
+        return [_dec_field(r[0]) for r in rows if r and r[0]]
 
     def prune_goal_events(self, older_than_seconds: float = 30 * 24 * 3600) -> int:
         """Delete goal_events rows older than N seconds. Returns rows removed."""

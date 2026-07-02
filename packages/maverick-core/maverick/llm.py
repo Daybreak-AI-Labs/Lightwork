@@ -531,7 +531,7 @@ def _openai_cached_tokens(usage) -> int:
         return 0
 
 
-def _response_call_cost(model_id, resp) -> float | None:
+def _response_call_cost(model_id, resp, cache_read_mult: float | None = None) -> float | None:
     """Per-call $ derived from THIS response's own token usage, or ``None`` when
     the response carries no usage to price from.
 
@@ -542,6 +542,11 @@ def _response_call_cost(model_id, resp) -> float | None:
     parallel fan-out records each call's real cost. Returns ``None`` when no
     usage is exposed so the caller can fall back to the (sequentially-correct)
     budget diff rather than recording a phantom $0.
+
+    ``cache_read_mult`` is the OpenAI-family cached-prompt discount to bill at
+    -- the dispatching client's ``CACHE_READ_MULT`` (DeepSeek 0.1x, Gemini
+    0.25x, OpenAI 0.5x); ``None`` falls back to OpenAI's 0.5x. Anthropic cache
+    reads always bill 0.1x (they arrive via ``cache_read_tokens`` instead).
     """
     if resp is None:
         return None
@@ -596,23 +601,31 @@ def _response_call_cost(model_id, resp) -> float | None:
         write_mult = _cache_write_mult_from_ttl(_default_cache_ttl())
     else:
         write_mult = _cache_write_mult_from_ttl(None)
+    # Per-provider cached-prompt discount, mirroring the authoritative
+    # Budget.record_tokens path (openai_provider passes its class
+    # CACHE_READ_MULT -- DeepSeek 0.1x, Gemini 0.25x). Hard-coding OpenAI's
+    # 0.5x here overcounted DeepSeek cached input 5x (Gemini 2x) in the
+    # provider-cap ledger, provider_health, and the budget_dollars metric.
+    openai_mult = CACHE_READ_MULT_OPENAI if cache_read_mult is None else float(cache_read_mult)
     cost = (in_tok / 1_000_000) * in_rate
-    cost += (cache_read / 1_000_000) * in_rate * _CACHE_READ_MULT          # Anthropic 0.1x
-    cost += (openai_cached / 1_000_000) * in_rate * CACHE_READ_MULT_OPENAI  # OpenAI-family 0.5x
+    cost += (cache_read / 1_000_000) * in_rate * _CACHE_READ_MULT   # Anthropic 0.1x
+    cost += (openai_cached / 1_000_000) * in_rate * openai_mult
     cost += (cache_write / 1_000_000) * in_rate * write_mult
     cost += (out_tok / 1_000_000) * out_rate
     return cost
 
 
-def _call_spend(model_id, resp, budget, dollars_baseline) -> float:
+def _call_spend(model_id, resp, budget, dollars_baseline, cache_read_mult=None) -> float:
     """Dollars to attribute to one LLM call for provider-health/metrics.
 
     Prefers the response's own usage (call-local, race-free under a shared
     budget); falls back to the budget diff when the response exposes no usage.
+    ``cache_read_mult`` is threaded to ``_response_call_cost`` (the dispatching
+    client's per-provider OpenAI-family cache discount).
     """
     if not budget:
         return 0.0
-    call_cost = _response_call_cost(model_id, resp)
+    call_cost = _response_call_cost(model_id, resp, cache_read_mult)
     return call_cost if call_cost is not None else (budget.dollars - dollars_baseline)
 
 
@@ -719,6 +732,14 @@ class LLM:
                     for m in order_chain([model or self.model, *_chain])
                 ], should_retry=policy_should_retry)
         provider, model_id = _parse_spec(model or self.model)
+        # Provider-qualified spec for the pricing/ledger paths
+        # (_estimate_call_cost / _call_spend): _lookup_price's self-hosted $0
+        # rule keys off the "ollama:"/"vllm:"/"tgi:" prefix that _parse_spec
+        # strips, so pricing the bare id billed free local models at the
+        # Sonnet fallback (and strict pricing refused them before dispatch).
+        # Known table ids resolve identically -- _lookup_price strips a
+        # "provider:" prefix for table lookups.
+        _price_spec = f"{provider}:{model_id}"
         # Egress lock (no-op unless enterprise mode is on): refuse to send data to a
         # non-local provider so sensitive data never leaves the boundary. Raises
         # EgressBlocked before any prompt is dispatched.
@@ -780,7 +801,7 @@ class LLM:
         # check() and then collectively overshoot -- the same defense the async
         # path uses. reserve() raises BudgetExceeded if the call won't fit;
         # released in `finally` once the actual spend lands.
-        _est_cost = _estimate_call_cost(model_id, system, messages, tools, max_tokens)
+        _est_cost = _estimate_call_cost(_price_spec, system, messages, tools, max_tokens)
         _held = budget.reserve(_est_cost) if budget is not None else 0.0
         try:
             with _trace_span(
@@ -801,7 +822,10 @@ class LLM:
             _dt_ms = (_time.monotonic() - _t0) * 1000.0
             # Price THIS call's own usage rather than diffing the shared
             # budget.dollars counter, which races concurrent sub-agents.
-            _spent = _call_spend(model_id, _resp, budget, _d0)
+            # The dispatching client's CACHE_READ_MULT keeps the OpenAI-family
+            # cached-prompt discount per-provider (DeepSeek 0.1x, Gemini 0.25x).
+            _spent = _call_spend(_price_spec, _resp, budget, _d0,
+                                 getattr(client, "CACHE_READ_MULT", None))
             _record_provider_spend(provider, _spent)  # feed the $ ceiling ledger
             try:
                 from .provider_health import get as _h
@@ -850,6 +874,8 @@ class LLM:
                     for m in order_chain([model or self.model, *_chain])
                 ], should_retry=policy_should_retry)
         provider, model_id = _parse_spec(model or self.model)
+        # Provider-qualified spec for the pricing/ledger paths -- see complete().
+        _price_spec = f"{provider}:{model_id}"
         # Egress lock (no-op unless enterprise mode is on): see complete().
         from .enterprise import assert_provider_allowed
         assert_provider_allowed(provider)
@@ -899,7 +925,7 @@ class LLM:
         # check and then collectively overshoot (a $2.50 cap reached $6+ with a
         # wide parallel fan-out). reserve() raises BudgetExceeded here if the
         # call won't fit; released in `finally` once the actual spend lands.
-        _est_cost = _estimate_call_cost(model_id, system, messages, tools, max_tokens)
+        _est_cost = _estimate_call_cost(_price_spec, system, messages, tools, max_tokens)
         _held = budget.reserve(_est_cost) if budget is not None else 0.0
         try:
             with _trace_span(
@@ -975,7 +1001,10 @@ class LLM:
             _dt_ms = (_time.monotonic() - _t0) * 1000.0
             # Price THIS call's own usage rather than diffing the shared
             # budget.dollars counter, which races concurrent sub-agents.
-            _spent = _call_spend(model_id, _resp, budget, _d0)
+            # The dispatching client's CACHE_READ_MULT keeps the OpenAI-family
+            # cached-prompt discount per-provider (DeepSeek 0.1x, Gemini 0.25x).
+            _spent = _call_spend(_price_spec, _resp, budget, _d0,
+                                 getattr(client, "CACHE_READ_MULT", None))
             _record_provider_spend(provider, _spent)  # feed the $ ceiling ledger
             try:
                 from .provider_health import get as _h
@@ -1028,8 +1057,9 @@ class LLM:
             # max_tokens=0. Reserve the worst-case Anthropic cache-write input
             # multiplier before dispatch so zero/low dollar caps cannot be
             # bypassed by opt-in prewarming. The provider records exact usage.
+            # Estimate on the provider-qualified spec -- see complete().
             _held = budget.reserve(
-                _estimate_call_cost(model_id, system, messages, tools, 0)
+                _estimate_call_cost(f"{provider}:{model_id}", system, messages, tools, 0)
                 * _cache_write_mult_from_ttl("1h")
             ) if budget is not None else 0.0
             try:

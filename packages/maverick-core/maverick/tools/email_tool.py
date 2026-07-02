@@ -131,15 +131,21 @@ def _list_inbox(args: dict[str, Any]) -> str:
         with imaplib.IMAP4_SSL(host) as m:
             m.login(user, pw)
             m.select(folder)
-            status, data = m.search(None, criterion)
+            # UID commands, never m.search()/m.fetch(): plain SEARCH/FETCH
+            # use volatile message SEQUENCE numbers, renumbered by any
+            # EXPUNGE. The ids listed here are consumed by a later `fetch`
+            # op in a separate IMAP session, so only UIDs stay valid.
+            status, data = m.uid("search", None, criterion)
             if status != "OK":
                 return f"ERROR: imap search failed: {status}"
             ids = (data[0] or b"").split()[-limit:]
             ids.reverse()  # newest first
             rows: list[str] = []
             for uid in ids:
-                status, data = m.fetch(uid, "(BODY.PEEK[HEADER.FIELDS (FROM SUBJECT DATE)])")
-                if status != "OK" or not data:
+                status, data = m.uid(
+                    "fetch", uid, "(BODY.PEEK[HEADER.FIELDS (FROM SUBJECT DATE)])"
+                )
+                if status != "OK" or not data or not data[0]:
                     continue
                 raw = data[0][1] if isinstance(data[0], tuple) else data[0]
                 msg = message_from_bytes(raw)
@@ -152,6 +158,21 @@ def _list_inbox(args: dict[str, Any]) -> str:
     if not rows:
         return f"(no messages in {folder} matching {criterion})"
     return "\n".join(rows)
+
+
+def _decode_body(part: Any) -> str:
+    """Decode a message part honoring its declared charset.
+
+    Hard-coding utf-8 turned windows-1252 / ISO-8859-1 / ISO-2022-JP etc.
+    mail into mojibake returned as a successful fetch. Unknown or misspelled
+    charsets fall back to utf-8; errors="replace" keeps decoding total.
+    """
+    payload = part.get_payload(decode=True)
+    charset = part.get_content_charset() or "utf-8"
+    try:
+        return payload.decode(charset, errors="replace")
+    except LookupError:
+        return payload.decode("utf-8", errors="replace")
 
 
 def _fetch(args: dict[str, Any]) -> str:
@@ -174,8 +195,12 @@ def _fetch(args: dict[str, Any]) -> str:
         with imaplib.IMAP4_SSL(host) as m:
             m.login(user, pw)
             m.select(folder)
-            status, data = m.fetch(uid.encode(), "(BODY.PEEK[])")
-            if status != "OK" or not data:
+            # UID FETCH, not m.fetch(): the uid came from list_inbox's UID
+            # SEARCH in an earlier session. A sequence-number FETCH after any
+            # EXPUNGE would silently return a different message. UID FETCH of
+            # an expunged UID answers OK with empty data — treat as an error.
+            status, data = m.uid("fetch", uid, "(BODY.PEEK[])")
+            if status != "OK" or not data or not data[0]:
                 return f"ERROR: fetch failed: {status}"
             raw = data[0][1] if isinstance(data[0], tuple) else data[0]
             msg = message_from_bytes(raw)
@@ -187,16 +212,12 @@ def _fetch(args: dict[str, Any]) -> str:
         for part in msg.walk():
             if part.get_content_type() == "text/plain":
                 try:
-                    body_parts.append(
-                        part.get_payload(decode=True).decode("utf-8", errors="replace")
-                    )
+                    body_parts.append(_decode_body(part))
                 except Exception:
                     pass
     else:
         try:
-            body_parts.append(
-                msg.get_payload(decode=True).decode("utf-8", errors="replace")
-            )
+            body_parts.append(_decode_body(msg))
         except Exception:
             pass
     body = "\n".join(body_parts).strip()

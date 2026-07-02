@@ -4297,6 +4297,9 @@ async def api_goal_events_legacy(
     }
 
 
+_SSE_MAX_BATCH = 200  # events per poll read (module-level so tests can shrink it)
+
+
 @app.get("/api/goal/{goal_id}/events/stream")
 async def api_goal_events_stream(request: Request, goal_id: int, since: int = 0) -> StreamingResponse:
     """Server-Sent Events stream of new goal events.
@@ -4339,7 +4342,7 @@ async def api_goal_events_stream(request: Request, goal_id: int, since: int = 0)
     MAX_POLL_INTERVAL = 5.0        # cap idle backoff to reduce DB churn
     IDLE_HEARTBEAT_EVERY = 30      # send a comment line so proxies don't time out
     MAX_STREAM_SECONDS = 300       # lifetime cap per SSE stream
-    MAX_BATCH = 200
+    MAX_BATCH = _SSE_MAX_BATCH
 
     # EventSource reconnects on its own (a network blip, a proxy timeout,
     # or our MAX_STREAM_SECONDS cap). Without resume support it would
@@ -4400,15 +4403,19 @@ async def api_goal_events_stream(request: Request, goal_id: int, since: int = 0)
                         idle_ticks = 0
                     poll_interval = min(MAX_POLL_INTERVAL, poll_interval * 1.5)
                 if g.status in TERMINAL:
-                    payload = {
-                        "status": g.status,
-                        "result": g.result or "",
-                        "next_id": sid,
-                        "events": [],
-                        "terminal": True,
-                    }
-                    yield f"id: {sid}\nevent: terminal\ndata: {_json.dumps(payload)}\n\n"
-                    return
+                    if len(events) < MAX_BATCH:
+                        payload = {
+                            "status": g.status,
+                            "result": g.result or "",
+                            "next_id": sid,
+                            "events": [],
+                            "terminal": True,
+                        }
+                        yield f"id: {sid}\nevent: terminal\ndata: {_json.dumps(payload)}\n\n"
+                        return
+                    # A full batch means more backlog may remain: keep draining
+                    # (without sleeping) and end only once a read comes up short.
+                    continue
                 await _asyncio.sleep(poll_interval)
         except _asyncio.CancelledError:
             return

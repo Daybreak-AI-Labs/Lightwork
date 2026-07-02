@@ -114,6 +114,72 @@ def test_bad_cron_and_empty_body_are_400(monkeypatch, tmp_path):
                   json={"cron": "0 9 * * *"}).status_code == 400
 
 
+def _enable_oidc_principal_map(monkeypatch):
+    """OIDC on; the bearer token string *is* the subject (no real JWT).
+
+    ``Bearer alice`` -> principal ``user:alice`` — the same seam
+    ``test_authz_owner_scoping.py`` uses.
+    """
+    import maverick_dashboard.auth as auth
+    from maverick.oidc import VerifiedPrincipal
+
+    monkeypatch.setattr(auth, "oidc_enabled", lambda: True)
+
+    def _verify(token, **_kw):
+        return VerifiedPrincipal(
+            sub=token, issuer="https://issuer.example", audience="maverick",
+            claims={"sub": token},
+        )
+
+    monkeypatch.setattr(auth, "verify_oidc_token", _verify)
+
+
+def test_delete_schedule_cross_user_404(monkeypatch, tmp_path):
+    """An authenticated non-admin cannot cancel another user's schedule (IDOR)."""
+    _isolate(monkeypatch, tmp_path)
+    import maverick.job_queue as jq
+    monkeypatch.setattr(jq, "DEFAULT_DB", tmp_path / "jobs.db")
+    _enable_oidc_principal_map(monkeypatch)
+    c = _client()
+    r = c.post("/api/v1/schedules",
+               headers={"Authorization": "Bearer alice"},
+               json={"cron": "0 9 * * *", "text": "alice's digest", "title": "AM"})
+    assert r.status_code == 201, r.text
+    sid = r.json()["id"]
+    # mallory (default operator role, owns nothing) may not cancel alice's schedule
+    denied = c.delete(f"/api/v1/schedules/{sid}",
+                      headers={"Authorization": "Bearer mallory"})
+    assert denied.status_code == 404
+    job = jq.JobQueue().get(sid)
+    assert job is not None and job.status == "pending"  # still armed
+    # a legacy unowned pending job is likewise not cancellable by a non-admin
+    legacy = jq.JobQueue().enqueue("start_goal", {"text": "legacy", "__cron__": "0 9 * * *"})
+    assert c.delete(f"/api/v1/schedules/{legacy}",
+                    headers={"Authorization": "Bearer mallory"}).status_code == 404
+    assert jq.JobQueue().get(legacy).status == "pending"
+    # the owner can cancel their own
+    assert c.delete(f"/api/v1/schedules/{sid}",
+                    headers={"Authorization": "Bearer alice"}).status_code == 200
+    assert jq.JobQueue().get(sid) is None
+
+
+def test_delete_schedule_admin_can_cancel_any(monkeypatch, tmp_path):
+    _isolate(monkeypatch, tmp_path)
+    import maverick.job_queue as jq
+    monkeypatch.setattr(jq, "DEFAULT_DB", tmp_path / "jobs.db")
+    _enable_oidc_principal_map(monkeypatch)
+    monkeypatch.setenv("MAVERICK_DASHBOARD_ADMINS", "user:root")
+    c = _client()
+    r = c.post("/api/v1/schedules",
+               headers={"Authorization": "Bearer alice"},
+               json={"cron": "0 9 * * *", "text": "x", "title": "t"})
+    assert r.status_code == 201, r.text
+    sid = r.json()["id"]
+    assert c.delete(f"/api/v1/schedules/{sid}",
+                    headers={"Authorization": "Bearer root"}).status_code == 200
+    assert jq.JobQueue().get(sid) is None
+
+
 def test_scheduling_feature_off_403(monkeypatch, tmp_path):
     _isolate(monkeypatch, tmp_path)
     from maverick import config

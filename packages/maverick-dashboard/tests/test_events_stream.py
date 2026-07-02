@@ -76,6 +76,22 @@ def test_stream_since_skips_old(tmp_path):
     assert "event: end" in resp.text
 
 
+def test_stream_drains_full_backlog_before_end(monkeypatch, tmp_path):
+    """A terminal goal with more events than one poll batch must stream the
+    WHOLE backlog before the end frame — not just the first batch."""
+    from maverick_dashboard import api
+
+    monkeypatch.setattr(api, "_SSE_MAX_BATCH", 5)
+    gid = _goal_with_events(tmp_path, 12, status="done")
+    resp = client.get(f"/api/v1/goals/{gid}/events/stream?poll=0")
+    assert resp.status_code == 200
+    body = resp.text
+    assert body.count("event: status") == 12
+    assert body.count("event: end") == 1
+    # the end frame comes after the last backlog event, never before
+    assert body.rfind("step 11") < body.rfind("event: end")
+
+
 def test_stream_rejects_when_concurrency_cap_is_full(monkeypatch, tmp_path):
     from maverick_dashboard import api
 

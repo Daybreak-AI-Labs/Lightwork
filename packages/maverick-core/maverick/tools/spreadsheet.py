@@ -130,10 +130,19 @@ def _xlsx_write(path: Path, rows: list[list], sheet: str | None) -> None:
 
 def _xlsx_set_cell(path: Path, cell: str, value: Any, sheet: str | None) -> None:
     op = _openpyxl()
-    wb = op.load_workbook(path) if path.exists() else op.Workbook()
-    ws = wb[sheet] if (sheet and sheet in wb.sheetnames) else wb.active
-    if sheet and ws.title != sheet:
-        ws.title = sheet
+    existing = path.exists()
+    wb = op.load_workbook(path) if existing else op.Workbook()
+    if sheet and sheet in wb.sheetnames:
+        ws = wb[sheet]
+    elif sheet and existing:
+        # Missing sheet in an existing workbook: create it. Renaming the
+        # active sheet instead would silently corrupt its data and break
+        # cross-sheet formula references to the old name.
+        ws = wb.create_sheet(sheet)
+    else:
+        ws = wb.active
+        if sheet:
+            ws.title = sheet  # fresh Workbook(): name its default sheet
     ws[cell] = _neutralize_formula(value)
     path.parent.mkdir(parents=True, exist_ok=True)
     wb.save(path)

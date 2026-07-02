@@ -16,5 +16,6 @@ export ANTHROPIC_API_KEY=sk-ant-...
 maverick start "your goal"
 ```
 
-But you probably want `pipx install maverick` + `maverick init` instead,
-which also pulls in the safety layer and configures per-role model choice.
+But you probably want `pipx install maverick-agent` (once published) +
+`maverick init` instead, which also pulls in the safety layer and configures
+per-role model choice.

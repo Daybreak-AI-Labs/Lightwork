@@ -166,3 +166,108 @@ def test_env_flag_tristate(monkeypatch):
         assert env_flag("MAVERICK_X") is None, val
     monkeypatch.delenv("MAVERICK_X", raising=False)
     assert env_flag("MAVERICK_X") is None
+
+
+def _write_wizard_files(home, env_line: str):
+    """A wizard-shaped install: config.toml referencing ${VAR} + secrets in .env."""
+    mav = home / ".maverick"
+    mav.mkdir(exist_ok=True)
+    (mav / "config.toml").write_text(
+        '[providers.anthropic]\napi_key = "${MAVERICK_ENVFILE_TEST_KEY}"\n',
+        encoding="utf-8",
+    )
+    (mav / ".env").write_text(f"# wizard-written secrets\n{env_line}\n", encoding="utf-8")
+
+
+def test_wizard_env_file_is_loaded_for_interpolation(tmp_path, monkeypatch):
+    """The installer persists every collected secret ONLY to ~/.maverick/.env
+    and writes config values as "${VAR}". Compose/systemd inject that file, but
+    a bare pip/CLI install had NO injector, so a freshly validated key
+    interpolated to "" and `maverick start` exited 2 right after `maverick
+    init` said "Setup complete". load_config() must export the file itself."""
+    import os
+
+    import maverick.config as cfg_mod
+
+    cfg_mod.reset_config_cache()
+    _write_wizard_files(tmp_path, "MAVERICK_ENVFILE_TEST_KEY=tok-123")  # pragma: allowlist secret
+    monkeypatch.setenv("HOME", str(tmp_path))
+    monkeypatch.setenv("USERPROFILE", str(tmp_path))  # Windows Path.home()
+    monkeypatch.delenv("MAVERICK_CONFIG", raising=False)
+    monkeypatch.delenv("MAVERICK_ENVFILE_TEST_KEY", raising=False)
+    try:
+        cfg = cfg_mod.load_config()
+        assert cfg["providers"]["anthropic"]["api_key"] == "tok-123"  # pragma: allowlist secret
+        # ...and direct env readers (llm._provider_api_key) see it too.
+        assert os.environ["MAVERICK_ENVFILE_TEST_KEY"] == "tok-123"
+    finally:
+        os.environ.pop("MAVERICK_ENVFILE_TEST_KEY", None)
+        cfg_mod.reset_config_cache()
+
+
+def test_env_file_never_overrides_exported_var(tmp_path, monkeypatch):
+    """An explicitly exported variable wins over a stale ~/.maverick/.env value
+    (setdefault semantics, matching compose env_file / systemd EnvironmentFile)."""
+    import os
+
+    import maverick.config as cfg_mod
+
+    cfg_mod.reset_config_cache()
+    _write_wizard_files(tmp_path, "MAVERICK_ENVFILE_TEST_KEY=stale-file-value")  # pragma: allowlist secret
+    monkeypatch.setenv("HOME", str(tmp_path))
+    monkeypatch.setenv("USERPROFILE", str(tmp_path))
+    monkeypatch.delenv("MAVERICK_CONFIG", raising=False)
+    monkeypatch.setenv("MAVERICK_ENVFILE_TEST_KEY", "from-shell")
+    try:
+        cfg = cfg_mod.load_config()
+        assert cfg["providers"]["anthropic"]["api_key"] == "from-shell"  # pragma: allowlist secret
+        assert os.environ["MAVERICK_ENVFILE_TEST_KEY"] == "from-shell"
+    finally:
+        cfg_mod.reset_config_cache()
+
+
+def test_env_file_key_satisfies_any_provider_configured(tmp_path, monkeypatch):
+    """The CLI preflight path: with the key present ONLY in ~/.maverick/.env,
+    any_provider_configured() must be True (was False -> exit 2)."""
+    import os
+
+    import maverick.config as cfg_mod
+
+    cfg_mod.reset_config_cache()
+    mav = tmp_path / ".maverick"
+    mav.mkdir()
+    (mav / "config.toml").write_text(
+        '[providers.anthropic]\napi_key = "${ANTHROPIC_API_KEY}"\n', encoding="utf-8",
+    )
+    (mav / ".env").write_text("ANTHROPIC_API_KEY=tok-e2e\n", encoding="utf-8")  # pragma: allowlist secret
+    monkeypatch.setenv("HOME", str(tmp_path))
+    monkeypatch.setenv("USERPROFILE", str(tmp_path))
+    monkeypatch.delenv("MAVERICK_CONFIG", raising=False)
+    for var in cfg_mod.PROVIDER_KEY_ENV_VARS + cfg_mod.PROVIDER_BASE_URL_ENV_VARS:
+        monkeypatch.delenv(var, raising=False)
+    try:
+        assert cfg_mod.any_provider_configured() is True
+    finally:
+        os.environ.pop("ANTHROPIC_API_KEY", None)
+        cfg_mod.reset_config_cache()
+
+
+def test_env_file_recheck_is_throttled(monkeypatch):
+    """load_config() sits on per-row hot paths (_dec_field on every sealed
+    column read); the .env freshness re-check must NOT stat the file on every
+    call or the world_read perf SLA breaches. One check per throttle window."""
+    import maverick.config as cfg_mod
+
+    cfg_mod.reset_config_cache()
+    calls = []
+    monkeypatch.setattr(cfg_mod, "_load_env_file", lambda p: calls.append(p))
+    try:
+        for _ in range(100):
+            cfg_mod.load_config()
+        assert len(calls) == 1
+        # reset_config_cache (the test hook) re-arms an immediate re-check.
+        cfg_mod.reset_config_cache()
+        cfg_mod.load_config()
+        assert len(calls) == 2
+    finally:
+        cfg_mod.reset_config_cache()

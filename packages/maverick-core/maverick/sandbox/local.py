@@ -7,6 +7,7 @@ from __future__ import annotations
 
 import os
 import re
+import signal
 import subprocess
 from dataclasses import dataclass
 from pathlib import Path
@@ -145,30 +146,58 @@ class LocalBackend:
         effective = self.timeout if timeout is None else timeout
         child_env = scrub_env()
 
+        proc = subprocess.Popen(
+            cmd,
+            # LocalBackend is the intentional unsandboxed host-exec path
+            # (CLAUDE.md rule 4 allowlists shell only under sandbox/); env is
+            # scrubbed and operators are warned to use a container backend.
+            shell=True,  # nosec B602
+            cwd=str(self.workdir),
+            stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE,
+            text=True,
+            env=child_env,
+            # Own session (= new process group) so a timeout can reap the WHOLE
+            # tree. subprocess's own timeout SIGKILLs only the direct /bin/sh
+            # child; grandchildren (a backgrounded `cmd &`, or even foreground
+            # children of a compound list) reparent to init and keep consuming
+            # the host after exec() returns 124. Every container backend reaps
+            # on timeout; the default local backend must bound the host too.
+            # POSIX-only semantics, ignored on Windows (matching the os.killpg
+            # fallback below).
+            start_new_session=True,
+        )
         try:
-            result = subprocess.run(
-                cmd,
-                # LocalBackend is the intentional unsandboxed host-exec path
-                # (CLAUDE.md rule 4 allowlists shell only under sandbox/); env is
-                # scrubbed and operators are warned to use a container backend.
-                shell=True,  # nosec B602
-                cwd=str(self.workdir),
-                capture_output=True,
-                text=True,
-                timeout=effective,
-                env=child_env,
-            )
+            out, err = proc.communicate(timeout=effective)
             return ExecResult(
-                stdout=(result.stdout or "")[-8000:],
-                stderr=(result.stderr or "")[-2000:],
-                exit_code=result.returncode,
+                stdout=(out or "")[-8000:],
+                stderr=(err or "")[-2000:],
+                exit_code=proc.returncode,
             )
         except subprocess.TimeoutExpired as e:
-            raw_out = e.stdout or b""
+            # Kill the whole process group, not just the shell:
+            # start_new_session made the child the group leader, so its pid IS
+            # the pgid. Fall back to killing the direct child where process
+            # groups don't exist (Windows) or the group is already gone.
+            killpg = getattr(os, "killpg", None)
+            try:
+                if killpg is not None:
+                    killpg(proc.pid, signal.SIGKILL)
+                else:  # pragma: no cover -- Windows: no process groups
+                    proc.kill()
+            except OSError:
+                proc.kill()
+            try:
+                # Reap + drain what the (now dead) tree wrote before the kill;
+                # a retried communicate() loses no output. Bounded in case the
+                # group kill failed and a survivor holds the pipes open.
+                raw_out, _ = proc.communicate(timeout=5)
+            except (subprocess.TimeoutExpired, OSError, ValueError):
+                raw_out = e.stdout or ""
             if isinstance(raw_out, bytes):
                 raw_out = raw_out.decode("utf-8", errors="replace")
             return ExecResult(
-                stdout=raw_out[-8000:],
+                stdout=(raw_out or "")[-8000:],
                 stderr=f"TIMEOUT after {effective}s",
                 exit_code=124,
             )
