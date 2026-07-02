@@ -27,7 +27,9 @@ def _stub_config(monkeypatch, cfg, *, exists=True):
         "maverick.config.config_path",
         lambda: _ExistingPath() if exists else _MissingPath(),
     )
-    monkeypatch.setattr("maverick.config.load_config", lambda *a, **k: cfg)
+    # Startup lint reads the RAW (uninterpolated) TOML so a "${VAR}" reference
+    # isn't mistaken for an inline secret after env expansion.
+    monkeypatch.setattr("maverick.config._read_toml_raw", lambda p: cfg)
 
 
 # 'max_dollarss' is an unknown key in [budget] -> a (warning-level) finding.
@@ -61,3 +63,24 @@ def test_no_config_file_is_a_noop(monkeypatch):
     monkeypatch.setenv("MAVERICK_CONFIG_STRICT", "1")
     _stub_config(monkeypatch, {}, exists=False)
     assert config_lint.warn_config_at_startup() == []
+
+
+def test_strict_does_not_flag_env_ref_api_key(monkeypatch, tmp_path):
+    # Regression: the DOCUMENTED `api_key = "${ANTHROPIC_API_KEY}"` pattern must
+    # not be flagged as an inline secret at startup even when the env var is set
+    # (which expands it to the literal key) -- otherwise strict mode refuses to
+    # start a correctly-configured deployment. Uses a real file so the raw-read
+    # path is exercised end to end.
+    from maverick.config import _toml_cache
+    _toml_cache.clear()
+    cfg_file = tmp_path / "config.toml"
+    cfg_file.write_text(
+        '[providers.anthropic]\napi_key = "${ANTHROPIC_API_KEY}"\n',
+        encoding="utf-8",
+    )
+    monkeypatch.setattr("maverick.config.config_path", lambda: cfg_file)
+    monkeypatch.setenv("ANTHROPIC_API_KEY", "sk-ant-secret-value")
+    monkeypatch.setenv("MAVERICK_CONFIG_STRICT", "1")
+    # Must NOT raise SystemExit and must report no inline-secret finding.
+    findings = config_lint.warn_config_at_startup()
+    assert not any("inline secret" in f.message for f in findings)

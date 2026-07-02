@@ -82,6 +82,41 @@ def test_calendar_create_event_calls_caldav(monkeypatch):
     assert "DTSTART:20260601T100000Z" in ical_arg
 
 
+def test_calendar_create_event_converts_offset_to_utc(monkeypatch):
+    # A start/end carrying a non-UTC offset must be converted to UTC before the
+    # literal 'Z' is appended -- otherwise 10:00+02:00 is mislabelled as 10:00Z
+    # and the event lands two hours off.
+    monkeypatch.setenv("CALDAV_URL", "https://cal.test")
+    monkeypatch.setenv("CALDAV_USER", "me@test")
+    monkeypatch.setenv("CALDAV_PASSWORD", "pw")
+
+    import sys
+    import types
+    fake_caldav = types.ModuleType("caldav")
+    fake_calendar = MagicMock()
+    fake_saved = MagicMock()
+    fake_saved.url = "https://cal.test/event/789"
+    fake_calendar.save_event = MagicMock(return_value=fake_saved)
+    fake_principal = MagicMock()
+    fake_principal.calendars = MagicMock(return_value=[fake_calendar])
+    fake_client = MagicMock()
+    fake_client.principal = MagicMock(return_value=fake_principal)
+    fake_caldav.DAVClient = MagicMock(return_value=fake_client)
+    monkeypatch.setitem(sys.modules, "caldav", fake_caldav)
+
+    from maverick.tools.calendar_tool import calendar_tool
+    calendar_tool().fn({
+        "op": "create_event",
+        "title": "Sync",
+        "start": "2026-06-01T10:00:00+02:00",
+        "end": "2026-06-01T11:30:00+02:00",
+        "description": "x",
+    })
+    ical_arg = fake_calendar.save_event.call_args.args[0]
+    assert "DTSTART:20260601T080000Z" in ical_arg
+    assert "DTEND:20260601T093000Z" in ical_arg
+
+
 def test_calendar_create_event_escapes_text_fields(monkeypatch):
     monkeypatch.setenv("CALDAV_URL", "https://cal.test")
     monkeypatch.setenv("CALDAV_USER", "me@test")
