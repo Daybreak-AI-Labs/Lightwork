@@ -43,3 +43,54 @@ def test_dream_skips_the_flywheel_when_data_engine_off(tmp_path, monkeypatch):
     res = CliRunner().invoke(main, ["--db", str(tmp_path / "w.db"), "dream"])
     assert res.exit_code == 0, res.output
     assert "[flywheel]" not in res.output
+
+
+# `maverick dream` also operates the self-harness on the same nightly beat when
+# [self_harness] auto_run is on -- and doesn't when it's off or the loop is
+# disabled (the flywheel pattern: opt-in, never breaks dreaming).
+
+def test_dream_runs_the_self_harness_when_auto_run(tmp_path, monkeypatch):
+    from maverick.self_harness import SelfHarnessReport
+    _stub_dreaming(monkeypatch)
+    monkeypatch.setenv("MAVERICK_SELF_HARNESS", "1")
+    monkeypatch.setattr("maverick.config.load_config", lambda *a, **k: {
+        "self_harness": {"enable": True, "auto_run": True}})
+    rep = SelfHarnessReport(model_id="model-a")
+    rep.mined, rep.promoted = 2, 1
+    monkeypatch.setattr(
+        "maverick.self_improvement_runner.run_self_harness_all_models",
+        lambda **k: {"model-a": (rep, 3)})
+
+    res = CliRunner().invoke(main, ["--db", str(tmp_path / "w.db"), "dream"])
+    assert res.exit_code == 0, res.output
+    assert "[self-harness] model-a: mined=2 promoted=1 demoted=0 retired=3" in res.output
+
+
+def test_dream_skips_the_self_harness_without_auto_run(tmp_path, monkeypatch):
+    _stub_dreaming(monkeypatch)
+    monkeypatch.setenv("MAVERICK_SELF_HARNESS", "1")   # loop ON, auto_run OFF
+    monkeypatch.setattr("maverick.config.load_config", lambda *a, **k: {
+        "self_harness": {"enable": True}})
+
+    def _boom(**k):
+        raise AssertionError("self-harness should not run without auto_run")
+    monkeypatch.setattr(
+        "maverick.self_improvement_runner.run_self_harness_all_models", _boom)
+    res = CliRunner().invoke(main, ["--db", str(tmp_path / "w.db"), "dream"])
+    assert res.exit_code == 0, res.output
+    assert "[self-harness]" not in res.output
+
+
+def test_dream_skips_the_self_harness_when_disabled(tmp_path, monkeypatch):
+    _stub_dreaming(monkeypatch)
+    monkeypatch.delenv("MAVERICK_SELF_HARNESS", raising=False)
+    monkeypatch.setattr("maverick.config.load_config", lambda *a, **k: {
+        "self_harness": {"auto_run": True}})           # auto_run on but loop OFF
+
+    def _boom(**k):
+        raise AssertionError("self-harness should not run while disabled")
+    monkeypatch.setattr(
+        "maverick.self_improvement_runner.run_self_harness_all_models", _boom)
+    res = CliRunner().invoke(main, ["--db", str(tmp_path / "w.db"), "dream"])
+    assert res.exit_code == 0, res.output
+    assert "[self-harness]" not in res.output

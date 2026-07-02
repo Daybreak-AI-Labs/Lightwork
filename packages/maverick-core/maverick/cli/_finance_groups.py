@@ -66,6 +66,27 @@ def finance_lint_sod_cmd() -> None:
     raise click.ClickException(f"{len(conflicts)} SoD conflict(s)")
 
 
+def _run_self_harness_nightly() -> None:
+    """Operate the self-harness on the dream beat (opt-in, ``[self_harness]
+    auto_run``): the governed mine -> propose -> validate -> gate cycle for
+    every configured role model, so the loop runs without a second cron entry.
+    Each model's pass auto-builds its live A/B from ``[self_harness]
+    eval_corpus`` when configured (else it is a dry inspection + stale-line
+    retirement + canary review). Never breaks dreaming."""
+    try:
+        from .. import self_harness
+        if not (self_harness.enabled() and self_harness.settings().get("auto_run")):
+            return
+        from .. import self_improvement_runner as si_runner
+        for mid, (rep, retired) in sorted(si_runner.run_self_harness_all_models().items()):
+            click.echo(
+                f"[self-harness] {mid}: mined={rep.mined} "
+                f"promoted={rep.promoted} demoted={len(rep.demoted)} "
+                f"retired={retired}")
+    except Exception:  # pragma: no cover -- the harness must never break dreaming
+        pass
+
+
 @main.command()
 @click.option("--max-goals", default=50, show_default=True,
               help="How many recent finished goals to replay.")
@@ -184,6 +205,7 @@ def dream(ctx, max_goals: int, rehearse: bool, rehearse_budget: float,
                     f"(recoverable lift ~{fw.predicted_lift:.2f})")
     except Exception:  # pragma: no cover -- the flywheel must never break dreaming
         pass
+    _run_self_harness_nightly()
     if not rehearse:
         return
     cases = dreaming.load_rehearsals()

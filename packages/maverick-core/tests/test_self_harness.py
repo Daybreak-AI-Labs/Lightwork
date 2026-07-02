@@ -2045,6 +2045,16 @@ def test_config_promote_as_canary(monkeypatch):
     assert sh.settings()["promote_as_canary"] is False
 
 
+def test_config_auto_run(monkeypatch):
+    from maverick import config
+    monkeypatch.setattr(config, "load_config", lambda *a, **k: {
+        "self_harness": {"auto_run": True}})
+    assert config.get_self_harness()["auto_run"] is True
+    monkeypatch.setattr(config, "load_config", lambda *a, **k: {"self_harness": {}})
+    assert config.get_self_harness()["auto_run"] is False
+    assert sh.settings()["auto_run"] is False
+
+
 def test_config_eval_budget_dollars(monkeypatch):
     from maverick import config
     monkeypatch.setattr(config, "load_config", lambda *a, **k: {

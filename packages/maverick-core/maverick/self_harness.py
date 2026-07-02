@@ -90,7 +90,8 @@ def settings() -> dict:
         from .config import get_self_harness
         return get_self_harness()
     except Exception:  # pragma: no cover -- config never blocks a run
-        return {"enable": False, "min_support": 3, "min_support_by_class": {},
+        return {"enable": False, "auto_run": False,
+                "min_support": 3, "min_support_by_class": {},
                 "require_held_out": False, "min_held_out": 0, "min_delta": 0.0,
                 "confidence_z": 0.0, "max_cost_factor": None,
                 "max_latency_factor": None, "max_tool_calls_factor": None,
