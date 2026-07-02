@@ -231,6 +231,49 @@ def test_rate_nan_on_all_indeterminate_but_zero_on_empty():
     assert ev._rate(["a"], lambda g: True) == 1.0     # normal path unchanged
 
 
+# ---- budget exhaustion fails the evaluation CLOSED, never open ----
+
+class _BrokeLLM:
+    """A provider whose budget is exhausted: every call raises BudgetExceeded."""
+
+    model = "fake:broke"
+
+    def complete(self, system, messages, **kw):
+        from maverick.budget import BudgetExceeded
+        raise BudgetExceeded("$5.01 > $5.00")
+
+
+def test_llm_runner_reraises_budget_exceeded():
+    # An exhausted budget must NOT score as a failed generation ("") -- that
+    # would deflate whichever arm runs after exhaustion and skew the A/B.
+    import pytest
+    from maverick.budget import BudgetExceeded
+    with pytest.raises(BudgetExceeded):
+        ev.llm_runner(_BrokeLLM())("line", "goal")
+    # any other provider error still fails open (unchanged)
+    assert ev.llm_runner(_FakeLLM(raises=True))("line", "goal") == ""
+
+
+def test_llm_judge_reraises_budget_exceeded():
+    # ...and must NOT fall to the heuristic: post-exhaustion heuristic verdicts
+    # for one arm only would bias the delta. Non-budget errors keep failing open.
+    import pytest
+    from maverick.budget import BudgetExceeded
+    with pytest.raises(BudgetExceeded):
+        ev.llm_judge(_BrokeLLM())("g", "the answer is DONE", "done")
+    assert ev.llm_judge(_FakeLLM(raises=True))("g", "the answer is DONE", "done") is True
+
+
+def test_exhausted_budget_is_indeterminate_through_the_scorers():
+    # Through corpus_ab_scorers + _rate the raised case is EXCLUDED, and an arm
+    # exhausted entirely goes NaN -- which validate_proposal's finite-check
+    # rejects. The evaluation fails closed end to end.
+    import math
+    sw, _wo = ev.corpus_ab_scorers(
+        [{"goal": "g", "expected": "x"}], run_fn=ev.llm_runner(_BrokeLLM()))
+    assert math.isnan(sw("candidate line", ["g"]))
+
+
 def test_corpus_scorer_indeterminate_for_unknown_goal():
     import math
     cases = [{"goal": "g0", "expected": "ok"}]

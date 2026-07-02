@@ -111,6 +111,16 @@ drive them; this wave wires them, changing no default behavior:
   graduate or be demoted by the counter-driven review. Credit is deliberately
   the *used* subset of the *available* tool scopes recall injected: an
   available-but-unused tool's guidance didn't shape the outcome.
+- **Eval spend is budgeted** (kernel rule 3): `[self_harness]
+  eval_budget_dollars` caps one auto-evaluated cycle's LLM calls (runner +
+  judge share one `Budget`; corpus cases × A/B arms × rotations × judge
+  samples multiplies fast, and the pass runs unattended). Exhaustion fails the
+  evaluation **closed**: `llm_runner`/`llm_judge` re-raise `BudgetExceeded`
+  (instead of degrading to `""`/heuristic, which would hit the arms
+  asymmetrically and skew the measured delta), the case lands indeterminate in
+  `_rate`, a fully-exhausted arm goes NaN, and the validator's finite-check
+  rejects the candidate. Unset (default) = uncapped, the historical behavior;
+  the wizard defaults the cap to $5 when an eval corpus is configured.
 
 ## Principle (unchanged across every wave)
 

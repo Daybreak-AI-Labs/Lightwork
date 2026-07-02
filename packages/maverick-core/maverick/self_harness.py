@@ -98,7 +98,8 @@ def settings() -> dict:
                 "candidates_per_signature": 1, "mine_bucket_by": (),
                 "holdout_rotations": 1, "judge_samples": 1,
                 "promote_as_canary": False,
-                "efficacy_review": False, "eval_corpus": None}
+                "efficacy_review": False, "eval_corpus": None,
+                "eval_budget_dollars": None}
 
 
 def _store_path() -> Path:

@@ -250,6 +250,29 @@ def _auto_evaluator(model_id: str, *, corpus_path: str, held_out_frac: float = 0
         return None
 
 
+def _eval_budget(settings: dict):
+    """A ``Budget`` capping ONE auto-evaluated cycle's LLM spend, from
+    ``[self_harness] eval_budget_dollars`` -- or ``None`` (uncapped, the
+    historical behavior) when the knob is unset/<=0. The runner and judge share
+    the pot (kernel rule 3: an unattended evaluation must not have unbounded
+    spend). Dollars is the BINDING cap: the token/tool ceilings are raised far
+    above any eval pass so the operator's dollar figure is what trips (``Budget``
+    enforces every cap at record time, so its defaults -- sized for one agent
+    run -- would otherwise trip first); the default 1h wall clock stays as a hang
+    backstop. Never raises."""
+    try:
+        dollars = settings.get("eval_budget_dollars")
+        if not dollars or float(dollars) <= 0:
+            return None
+        from .budget import Budget
+        big = 10**9
+        return Budget(max_dollars=float(dollars), max_input_tokens=big,
+                      max_output_tokens=big, max_tool_calls=big)
+    except Exception:  # pragma: no cover -- a bad knob can't block the cycle
+        log.debug("self-harness eval budget construction failed", exc_info=True)
+        return None
+
+
 def run_self_harness_cycle(
     reflexions=None, *, model_id: str | None = None, limit: int = 500,
     retire: bool = True, retire_after_days: float | None = None,
@@ -285,7 +308,8 @@ def run_self_harness_cycle(
                 from .llm import model_for_role
                 model_id = model_id or model_for_role("orchestrator")
                 built = _auto_evaluator(model_id, corpus_path=corpus_path,
-                                        judge_samples=st.get("judge_samples", 1))
+                                        judge_samples=st.get("judge_samples", 1),
+                                        budget=_eval_budget(st))
                 if built is not None:
                     held_in, held_out, score_with, score_without = built
         report = run_self_harness_pass(
