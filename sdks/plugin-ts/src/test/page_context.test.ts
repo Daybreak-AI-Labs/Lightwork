@@ -66,6 +66,38 @@ test("re-applies caps on oversized / malformed untrusted input", () => {
   assert.equal(ctx.counts.elements, 60);
 });
 
+test("never emits lone surrogates (caps split pairs, crafted input smuggles them)", () => {
+  // Every cap boundary lands mid-surrogate-pair (emoji = 2 UTF-16 code units).
+  const ctx = parseStructuredPageContext({
+    lang: "\uD800", // lone high surrogate passed through outright
+    elements: [
+      {
+        role: "button",
+        tag: "button",
+        name: "x".repeat(119) + "\u{1F600}more",
+        selector: "s".repeat(119) + "\u{1F600}",
+        type: "t".repeat(23) + "\u{1F600}",
+        value: "v".repeat(79) + "\u{1F600}",
+      },
+    ],
+    landmarks: [{ role: "navigation", tag: "nav", name: "orphan low \uDC00" }],
+  });
+  assert.ok(ctx);
+  const el = ctx.elements[0];
+  assert.equal(el.name.length, 120); // still capped, U+FFFD in place of the split pair
+  for (const s of [ctx.lang, el.name, el.selector, el.type ?? "", el.value ?? "", ctx.landmarks[0].name]) {
+    assert.ok(s.isWellFormed(), `ill-formed output: ${JSON.stringify(s)}`);
+  }
+  // The rendered tool-result text must survive UTF-8 encoding end-to-end.
+  assert.ok(summarizePageContext(ctx).isWellFormed());
+});
+
+test("sanitizes lone-surrogate escapes in crafted JSON string input", () => {
+  const ctx = parseStructuredPageContext('{"lang": "\\ud800en", "elements": [], "landmarks": []}');
+  assert.ok(ctx);
+  assert.equal(ctx.lang, "�en");
+});
+
 test("drops non-string/garbage fields safely", () => {
   const ctx = parseStructuredPageContext({
     lang: 123,

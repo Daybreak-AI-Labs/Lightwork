@@ -1845,14 +1845,27 @@ class PostgresWorldModel:
             cur.execute(sel, tuple(sparams))
             rows = cur.fetchall()
             from ..crypto_at_rest import EncryptionUnavailable
+            from ..world_model import _UNSEALED_WITHHELD
             for row in rows:
                 try:
-                    new_result = _seal((_unseal(row[1]) or "") + marker)
+                    dec = _unseal(row[1])
+                    # Strict mode withholds a not-yet-migrated plaintext result
+                    # (_unseal returns the sentinel, never the real value);
+                    # re-sealing the sentinel here would overwrite -- and
+                    # permanently destroy -- the original. Fall through to the
+                    # status-only reclaim below instead.
+                    new_result = (
+                        None if dec == _UNSEALED_WITHHELD
+                        else _seal((dec or "") + marker)
+                    )
                 except EncryptionUnavailable:
-                    # One orphan whose sealed result can't be opened (rotated or
-                    # foreign at-rest key) must not abort crash-recovery for every
-                    # other stuck goal. Reclaim the status; leave the unreadable
-                    # result intact rather than corrupting or dropping it.
+                    new_result = None
+                if new_result is None:
+                    # One orphan whose result can't be recovered -- sealed under
+                    # a rotated or foreign at-rest key, or withheld under strict
+                    # mode -- must not abort crash-recovery for every other
+                    # stuck goal. Reclaim the status; leave the result intact
+                    # rather than corrupting or dropping it.
                     cur.execute(
                         "UPDATE goals SET status = 'blocked', updated_at = %s "
                         "WHERE id = %s",

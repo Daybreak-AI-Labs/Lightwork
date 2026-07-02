@@ -78,6 +78,33 @@ def test_reclaim_seals_marker_for_null_result(monkeypatch, tmp_path):
     assert raw.startswith("MVKAR1:")
 
 
+@requires_crypto
+def test_reclaim_under_strict_mode_preserves_legacy_plaintext_result(monkeypatch, tmp_path):
+    """Regression: with strict mode on and a not-yet-migrated plaintext result,
+    _dec_field returns the withheld sentinel and reclaim wrote it back sealed --
+    permanently destroying the original. It must reclaim the status only and
+    leave the stored result untouched."""
+    from maverick.world_model import WorldModel
+    db = tmp_path / "world.db"
+    wm = WorldModel(db)                     # encryption off: result is plaintext
+    gid = wm.create_goal("g", "")
+    wm.set_goal_status(gid, "active", result="IMPORTANT pre-encryption result")
+
+    monkeypatch.setenv("MAVERICK_ENCRYPT_AT_REST", "1")
+    monkeypatch.setenv("MAVERICK_ENCRYPT_STRICT", "1")
+    n = wm.reclaim_orphan_goals(max_age_seconds=0)
+    assert n == 1
+    assert wm.get_goal(gid).status == "blocked"
+
+    # The stored value is the untouched legacy plaintext -- recoverable via
+    # `maverick encryption migrate` (or by lifting strict) -- not the sealed
+    # withheld sentinel.
+    raw = sqlite3.connect(str(db)).execute(
+        "SELECT result FROM goals WHERE id=?", (gid,)
+    ).fetchone()[0]
+    assert raw == "IMPORTANT pre-encryption result"
+
+
 def test_reclaim_plaintext_concat_unchanged_without_encryption(tmp_path):
     """Encryption off: the fast SQL-concat path is preserved (marker appended)."""
     from maverick.world_model import WorldModel

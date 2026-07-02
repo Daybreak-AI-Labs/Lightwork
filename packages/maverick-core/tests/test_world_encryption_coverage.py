@@ -55,6 +55,27 @@ def test_goal_content_sealed_on_disk_and_round_trips(monkeypatch, tmp_path):
 
 
 @requires_crypto
+def test_recent_event_contents_decrypts_sealed_events(monkeypatch, tmp_path):
+    """Regression: the emergent-codec corpus reader returned the raw sealed
+    column (no _dec_field), feeding ciphertext to the codebook learner while
+    every other goal_events reader decrypts."""
+    monkeypatch.setenv("MAVERICK_ENCRYPT_AT_REST", "1")
+    from maverick.world_model import WorldModel
+    db = tmp_path / "world.db"
+    wm = WorldModel(db)
+    gid = wm.create_goal("g", "d")
+    wm.append_event(gid, "agent-1", "note", "coordination message secret")
+
+    # Stored sealed on disk...
+    raw = sqlite3.connect(str(db)).execute(
+        "SELECT content FROM goal_events WHERE goal_id=?", (gid,)
+    ).fetchone()[0]
+    assert raw.startswith("MVKAR1:")
+    # ...but the corpus reader returns plaintext (parity with goal_events()).
+    assert wm.recent_event_contents() == ["coordination message secret"]
+
+
+@requires_crypto
 def test_goal_content_plaintext_when_encryption_off(tmp_path):
     from maverick.world_model import WorldModel
     db = tmp_path / "world.db"

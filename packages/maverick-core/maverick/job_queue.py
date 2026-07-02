@@ -162,6 +162,40 @@ class JobQueue:
             ).fetchone()
         return self._row_to_job(row)
 
+    def heartbeat(
+        self,
+        job_id: int,
+        *,
+        now: float | None = None,
+        expected_attempts: int | None = None,
+    ) -> bool:
+        """Refresh a running job's lease (bump ``updated_at``) mid-run.
+
+        ``claim()`` writes ``updated_at`` exactly once, so without periodic
+        refreshes any handler that outlives ``reclaim_stale``'s lease looks
+        crashed to a peer worker and its job is stolen -- requeued and
+        re-executed WHILE still running. The worker heartbeats from a small
+        thread during dispatch; a real crash stops the heartbeat with the
+        process, so orphan recovery is unaffected. Fenced on
+        ``status='running'`` (and, when given, the attempt the caller claimed
+        at) so a stale heartbeat can't refresh a reclaimed/re-claimed or
+        terminal row it no longer owns. Returns True if the lease was extended.
+        """
+        n = now if now is not None else time.time()
+        with self._lock, self._conn() as c:
+            if expected_attempts is None:
+                cur = c.execute(
+                    "UPDATE jobs SET updated_at=? WHERE id=? AND status='running'",
+                    (n, job_id),
+                )
+            else:
+                cur = c.execute(
+                    "UPDATE jobs SET updated_at=? "
+                    "WHERE id=? AND attempts=? AND status='running'",
+                    (n, job_id, expected_attempts),
+                )
+            return cur.rowcount == 1
+
     def complete(self, job_id: int, *, expected_attempts: int | None = None) -> bool:
         """Mark a job 'done'. ``expected_attempts`` fences a stolen lease: a slow
         worker can have its 'running' job reclaimed (``reclaim_stale``) and

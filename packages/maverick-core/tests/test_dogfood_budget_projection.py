@@ -76,6 +76,81 @@ def test_reserve_is_threadsafe_and_bounds_concurrent_holds():
     assert b._reserved == pytest.approx(10.0)
 
 
+class _SelfHostedClient:
+    """Fake client returning a usage-bearing response (100k in / 1k out)."""
+
+    @staticmethod
+    def _resp():
+        from types import SimpleNamespace
+        usage = SimpleNamespace(prompt_tokens=100_000, completion_tokens=1_000)
+        return SimpleNamespace(raw=SimpleNamespace(usage=usage), text="ok",
+                               cache_read_tokens=0, cache_creation_tokens=0)
+
+    def complete(self, **kw):
+        return self._resp()
+
+    async def complete_async(self, **kw):
+        return self._resp()
+
+
+def test_selfhosted_model_priced_zero_through_complete(monkeypatch):
+    """_parse_spec strips the 'ollama:' prefix, and pricing the BARE id
+    defeated budget._lookup_price's self-hosted $0 rule: a free local model
+    reserved a phantom Sonnet-rate hold (refusing calls near the cap) and
+    recorded phantom dollars into the provider-cap ledger. The estimate and
+    ledger paths must price the provider-qualified spec."""
+    import maverick.llm as llm_mod
+
+    monkeypatch.delenv("MAVERICK_BILLING_STRICT", raising=False)
+    recorded = {}
+    monkeypatch.setattr(llm_mod, "_record_provider_spend",
+                        lambda provider, dollars: recorded.update({provider: dollars}))
+    llm = llm_mod.LLM(model="ollama:my-custom-model")
+    monkeypatch.setattr(llm, "_get_client", lambda provider: _SelfHostedClient())
+    # Cap far below the phantom Sonnet-rate estimate for an ~800k-char prompt
+    # (~$0.60): reserve() must NOT refuse a $0 self-hosted call.
+    b = Budget(max_dollars=0.01)
+    llm.complete(system="s", messages=[{"role": "user", "content": "x" * 800_000}],
+                 budget=b, max_tokens=100)
+    assert recorded["ollama"] == 0.0   # ledger spend, not phantom Sonnet dollars
+    assert b.dollars == 0.0
+
+
+def test_strict_pricing_allows_selfhosted_model_through_complete(monkeypatch):
+    """[budget] strict_pricing must not refuse an unlisted self-hosted model:
+    Budget.record_tokens prices 'ollama:<anything>' at $0 by design, but the
+    bare id passed to _estimate_call_cost raised UnpricedModelError before
+    dispatch."""
+    import maverick.llm as llm_mod
+
+    monkeypatch.setenv("MAVERICK_BILLING_STRICT", "1")
+    llm = llm_mod.LLM(model="ollama:my-custom-model")
+    monkeypatch.setattr(llm, "_get_client", lambda provider: _SelfHostedClient())
+    out = llm.complete(system="s", messages=[{"role": "user", "content": "hi"}],
+                       budget=Budget(), max_tokens=100)
+    assert out.text == "ok"
+
+
+@pytest.mark.asyncio
+async def test_complete_async_selfhosted_model_priced_zero(monkeypatch):
+    """Async twin of the $0 self-hosted pricing pin (same estimate/ledger
+    paths in complete_async)."""
+    import maverick.llm as llm_mod
+
+    monkeypatch.delenv("MAVERICK_BILLING_STRICT", raising=False)
+    recorded = {}
+    monkeypatch.setattr(llm_mod, "_record_provider_spend",
+                        lambda provider, dollars: recorded.update({provider: dollars}))
+    llm = llm_mod.LLM(model="ollama:my-custom-model")
+    monkeypatch.setattr(llm, "_get_client", lambda provider: _SelfHostedClient())
+    b = Budget(max_dollars=0.01)
+    await llm.complete_async(
+        system="s", messages=[{"role": "user", "content": "x" * 800_000}],
+        budget=b, max_tokens=100)
+    assert recorded["ollama"] == 0.0
+    assert b.dollars == 0.0
+
+
 @pytest.mark.asyncio
 async def test_complete_async_refuses_overbudget_before_calling_provider(monkeypatch):
     from maverick.llm import LLM

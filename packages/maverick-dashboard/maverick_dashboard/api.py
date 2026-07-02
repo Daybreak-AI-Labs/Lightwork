@@ -587,8 +587,12 @@ async def goal_events_stream(
                         idle_for = 0.0
                     poll_interval = min(_SSE_MAX_POLL_INTERVAL, poll_interval * 1.5)
                 if cur is not None and cur.status in _TERMINAL_STATUSES:
-                    yield f"event: end\ndata: {json.dumps({'status': cur.status})}\n\n"
-                    return
+                    if len(events) < _SSE_MAX_BATCH:
+                        yield f"event: end\ndata: {json.dumps({'status': cur.status})}\n\n"
+                        return
+                    # A full batch means more backlog may remain: keep draining
+                    # (without sleeping) and end only once a read comes up short.
+                    continue
                 await asyncio.sleep(poll_interval)
         except asyncio.CancelledError:
             return
@@ -1768,7 +1772,18 @@ async def delete_schedule(request: Request, job_id: int) -> dict:
     require_permission(request, "operate")
     _require_scheduling()
     from maverick.job_queue import JobQueue
-    if not JobQueue().cancel(job_id):
+    q = JobQueue()
+    # Owner scoping, mirroring the goal routes: an authenticated non-admin may
+    # cancel only schedules stamped with their own principal (create_schedule
+    # records it in payload["owner"]). 404, not 403, so a cross-user probe
+    # can't distinguish "exists but not yours" from "does not exist".
+    owner = goal_owner_filter(request)
+    if owner is not None:
+        job = q.get(job_id)
+        if job is None or (job.payload or {}).get("owner") != owner:
+            raise HTTPException(
+                status_code=404, detail="no pending schedule with that id")
+    if not q.cancel(job_id):
         raise HTTPException(
             status_code=404, detail="no pending schedule with that id")
     return {"cancelled": job_id}
@@ -2944,10 +2959,11 @@ async def perf_dashboard() -> dict:
         import json as _json
 
         from maverick.benchmark_retrospective import analyze, coverage
-        from maverick.continuous_benchmark import _store_path, detect_regression
+        from maverick.continuous_benchmark import _store_path, detect_regression, load_history
         store = _store_path()
         history: list[dict] = []
         if store.is_dir():
+            # Legacy layout: a directory of per-suite *.json files.
             files = sorted(
                 store.glob("*.json"),
                 key=lambda p: p.stat().st_mtime if p.exists() else 0.0,
@@ -2960,6 +2976,10 @@ async def perf_dashboard() -> dict:
                         history.extend(r for r in rows if isinstance(r, dict))
                 except (OSError, ValueError):
                     continue
+        else:
+            # Production layout: the single history.json FILE the bench_track
+            # tool writes via save_history -- the same store /benchmarks reads.
+            history.extend(r for r in load_history(store) if isinstance(r, dict))
         names = sorted({r.get("name") for r in history if r.get("name")})
         for name in names:
             scores = [r["score"] for r in history if r.get("name") == name]

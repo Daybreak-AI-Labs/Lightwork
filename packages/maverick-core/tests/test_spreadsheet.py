@@ -92,6 +92,37 @@ def test_xlsx_write_read_setcell_info(tmp_path):
     assert "xlsx sheets" in ss._run({"op": "info", "path": str(p)})
 
 
+def test_set_cell_creates_missing_sheet_instead_of_renaming(tmp_path):
+    # Regression: set_cell on an existing workbook used to RENAME the active
+    # sheet to the requested name (silently corrupting the original sheet and
+    # breaking cross-sheet formula references) instead of creating it.
+    pytest.importorskip("openpyxl")
+    import openpyxl
+    p = tmp_path / "book.xlsx"
+    ss._run({"op": "write", "path": str(p),
+             "rows": [["h1"], [1]], "sheet": "Data"})
+    out = ss._run({"op": "set_cell", "path": str(p), "cell": "B2",
+                   "value": 42, "sheet": "Summary"})
+    assert out.startswith("set B2")
+    wb = openpyxl.load_workbook(p)
+    assert wb.sheetnames == ["Data", "Summary"]   # Data survives, Summary created
+    assert wb["Summary"]["B2"].value == 42
+    assert wb["Data"]["A2"].value == 1            # original data untouched
+    assert wb["Data"]["B2"].value is None         # not written into Data's grid
+
+
+def test_set_cell_names_sheet_on_fresh_workbook(tmp_path):
+    # Brand-new workbook: the default "Sheet" is still renamed to the request.
+    pytest.importorskip("openpyxl")
+    import openpyxl
+    p = tmp_path / "new.xlsx"
+    assert ss._run({"op": "set_cell", "path": str(p), "cell": "A1",
+                    "value": 7, "sheet": "Only"}).startswith("set A1")
+    wb = openpyxl.load_workbook(p)
+    assert wb.sheetnames == ["Only"]
+    assert wb["Only"]["A1"].value == 7
+
+
 def test_xlsx_graceful_without_openpyxl(tmp_path, monkeypatch):
     # If openpyxl is unavailable, xlsx ops fail with an actionable install hint
     # rather than a raw ImportError.

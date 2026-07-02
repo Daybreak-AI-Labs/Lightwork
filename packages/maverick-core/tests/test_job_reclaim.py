@@ -148,3 +148,78 @@ def test_worker_reclaims_peer_orphan_while_running(tmp_path):
     while q.get(jid).status not in ("done", "failed") and time.monotonic() < deadline:
         time.sleep(0.02)
     assert q.get(jid).status == "done"
+
+
+def test_heartbeat_extends_lease_and_is_fenced(tmp_path):
+    """heartbeat() refreshes updated_at so reclaim_stale never steals a live
+    job -- but a stopped heartbeat (crash) still expires, and a stale
+    heartbeat can't refresh a row it no longer owns."""
+    from maverick.job_queue import JobQueue
+    q = JobQueue(db_path=tmp_path / "jobs.db")
+    jid = _running_job(q, at=1000.0)
+
+    # The live worker heartbeats at t=1150 -> a reclaim at t=1200 (lease 100)
+    # no longer sees a stale row.
+    assert q.heartbeat(jid, now=1150.0, expected_attempts=1) is True
+    assert q.reclaim_stale(100.0, now=1200.0) == 0
+    assert q.get(jid).status == "running"
+
+    # ...but without further heartbeats the lease still expires (crash safety).
+    assert q.reclaim_stale(100.0, now=1300.0) == 1
+    assert q.get(jid).status == "pending"
+
+    # Fenced: the requeued (pending) row is no longer the old owner's to renew.
+    assert q.heartbeat(jid, now=1310.0, expected_attempts=1) is False
+    assert q.get(jid).status == "pending"
+
+    # A peer re-claims (attempts=2); the old owner's attempt-1 heartbeat no-ops.
+    assert q.claim(now=1320.0).id == jid
+    assert q.heartbeat(jid, now=1330.0, expected_attempts=1) is False
+    assert q.heartbeat(jid, now=1330.0, expected_attempts=2) is True
+
+
+def test_live_worker_heartbeat_prevents_lease_steal(tmp_path):
+    """A handler that outlives reclaim_lease must NOT have its job stolen and
+    re-executed. Regression: updated_at was written only at claim (no
+    heartbeat), so a peer daemon's periodic reclaim_stale requeued the live
+    job and a second swarm drove the same goal concurrently (double spend,
+    double side effects)."""
+    import threading
+    import time
+
+    from maverick.job_queue import JobQueue
+    from maverick.worker import Worker
+
+    q = JobQueue(db_path=tmp_path / "jobs.db")
+    runs: list[int] = []
+
+    def slow_handler(job):
+        runs.append(job.attempts)
+        time.sleep(2.0)  # several leases long
+
+    # Lease 1.0s -> heartbeat every 0.25s, so updated_at is never > ~0.5s
+    # stale while the 2s handler runs.
+    w = Worker(queue=q, reclaim_lease=1.0, idle_sleep=0.01)
+    w.register("slow", slow_handler)
+    jid = q.enqueue("slow", {})
+
+    stolen = []
+    peer_stop = threading.Event()
+
+    def peer_reclaims():  # a peer daemon's periodic reclaim, every 0.1s
+        while not peer_stop.wait(0.1):
+            stolen.append(q.reclaim_stale(1.0, max_attempts=5))
+
+    t = threading.Thread(target=peer_reclaims, daemon=True)
+    t.start()
+    try:
+        assert w.run_once() is True
+    finally:
+        peer_stop.set()
+        t.join(timeout=5.0)
+
+    assert sum(stolen) == 0, "live job's lease was stolen despite heartbeats"
+    job = q.get(jid)
+    assert job.status == "done"
+    assert job.attempts == 1
+    assert runs == [1]  # executed exactly once

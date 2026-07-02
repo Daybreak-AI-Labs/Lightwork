@@ -28,9 +28,10 @@ with no flag-day re-encrypt.
 Coverage (what is actually sealed today):
   - the cross-session **memory** store (files), and
   - the **world-DB content columns** sealed via ``encryption_migrate._SEALED_COLUMNS``
-    — facts, conversation turns/messages, open questions, goal content
-    (titles/descriptions/results) + per-agent goal events, episode
-    summaries/outcomes, and parked-approval action/scope/detail.
+    — facts (+ fact history values), conversation turns/messages, open
+    questions, goal content (titles/descriptions/results) + per-agent goal
+    events, episode summaries/outcomes, parked-approval action/scope/detail,
+    artifact content, project names/descriptions, and sign-off notes.
   The audit log's **closed day-files** can be sealed via ``maverick audit seal``
   (``audit/sealing.py``); the *current* day-file stays plaintext for the live
   append + signing path, and reads/``audit verify`` decrypt sealed segments

@@ -136,10 +136,26 @@ def _op_extract_url(url: str, lang: str, backend: str, hf_model: str, sandbox) -
     parsed = urlparse(url)
     if parsed.scheme not in ("http", "https") or not parsed.hostname:
         return f"ERROR: invalid URL: {url!r}"
-    from ._ssrf import BlockedHost, safe_get
+    from ._ssrf import BlockedHost, safe_client
+    # safe_client pins the connection to the validated public IP (no rebinding
+    # window), AND we stream with a hard byte ceiling so a model-supplied URL
+    # to a multi-GB / endless body can't be fully buffered into memory before
+    # any size check runs (the old safe_get materialized resp.content first).
+    _MAX = 50 * 1024 * 1024  # 50 MiB
     try:
-        # Pins the connection to the validated public IP (no rebinding window).
-        r = safe_get(url, timeout=30.0)
+        with safe_client(url, timeout=30.0) as client:
+            with client.stream("GET", url) as resp:
+                if resp.status_code >= 400:
+                    return f"ERROR: image fetch {resp.status_code}: {url}"
+                clen = resp.headers.get("content-length")
+                if clen is not None and clen.isdigit() and int(clen) > _MAX:
+                    return f"ERROR: image fetch refused: {clen} bytes > 50 MiB cap: {url}"
+                buf = bytearray()
+                for chunk in resp.iter_bytes():
+                    buf += chunk
+                    if len(buf) > _MAX:
+                        return f"ERROR: image fetch refused: body exceeded 50 MiB cap: {url}"
+                ct = resp.headers.get("content-type", "").split(";")[0].strip().lower()
     except BlockedHost as e:
         return (
             f"ERROR: refusing to fetch {parsed.hostname!r}: {e}. "
@@ -147,10 +163,7 @@ def _op_extract_url(url: str, lang: str, backend: str, hf_model: str, sandbox) -
         )
     except Exception as e:
         return f"ERROR: fetch failed: {type(e).__name__}: {e}"
-    if r.status_code >= 400:
-        return f"ERROR: image fetch {r.status_code}: {url}"
     # Pick a sensible extension from content-type for tesseract.
-    ct = r.headers.get("content-type", "").split(";")[0].strip().lower()
     ext = {
         "image/png": ".png", "image/jpeg": ".jpg",
         "image/jpg": ".jpg", "image/tiff": ".tiff",
@@ -158,7 +171,7 @@ def _op_extract_url(url: str, lang: str, backend: str, hf_model: str, sandbox) -
     }.get(ct, ".png")
     tmp_dir = Path(sandbox.workdir) if sandbox is not None else Path.cwd()
     with tempfile.NamedTemporaryFile(suffix=ext, delete=False, dir=tmp_dir) as f:
-        f.write(r.content)
+        f.write(bytes(buf))
         tmp = f.name
     try:
         return _op_extract(tmp, lang, backend, hf_model, sandbox)

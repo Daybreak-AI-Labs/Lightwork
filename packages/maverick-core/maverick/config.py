@@ -115,8 +115,54 @@ _TOML_CACHE_MAX = 512
 
 
 def reset_config_cache() -> None:
-    """Drop the parsed-TOML cache (test hook; prod files rarely change)."""
+    """Drop the parsed-TOML and .env-file caches (test hook; prod files rarely
+    change)."""
     _toml_cache.clear()
+    _env_file_cache.clear()
+
+
+# Wizard-persisted secrets: the installer writes every collected key to
+# ``~/.maverick/.env`` (next to config.toml) and references it from config
+# values as ``${VAR}``. Docker-compose (``env_file``) and the systemd unit
+# (``EnvironmentFile=``) inject that file, but a bare pip/CLI install had no
+# injector at all, so ``${VAR}`` interpolated to "" and a freshly validated
+# key could never reach the runtime (`maverick start` exited 2 right after
+# `maverick init` said "Setup complete"). load_config() exports the file
+# itself -- ``setdefault`` only, so an explicitly exported variable always
+# wins -- memoized by mtime+size so the hot path pays one stat, not a re-read.
+_ENV_FILE_BASENAME = ".env"
+_ENV_NAME_RE = re.compile(r"[A-Za-z_][A-Za-z0-9_]*\Z")
+_env_file_cache: dict[str, tuple[int, int]] = {}
+
+
+def _load_env_file(path: Path) -> None:
+    """Export ``KEY=value`` lines from ``path`` into ``os.environ`` without
+    overriding variables that are already set."""
+    try:
+        st = path.stat()
+    except OSError:
+        return  # no .env (or unreadable) -> nothing to load
+    key = str(path)
+    if _env_file_cache.get(key) == (st.st_mtime_ns, st.st_size):
+        return
+    try:
+        text = path.read_text(encoding="utf-8")
+    except (OSError, UnicodeDecodeError):
+        return
+    _env_file_cache[key] = (st.st_mtime_ns, st.st_size)
+    for line in text.splitlines():
+        line = line.strip()
+        if not line or line.startswith("#"):
+            continue
+        name, sep, value = line.partition("=")
+        name = name.strip()
+        if not sep or not _ENV_NAME_RE.match(name):
+            continue
+        value = value.strip()
+        # Tolerate hand-edited quoting (systemd EnvironmentFile strips it too).
+        if len(value) >= 2 and value[0] == value[-1] and value[0] in ("'", '"'):
+            value = value[1:-1]
+        os.environ.setdefault(name, value)
 
 
 def _read_toml_raw(path: Path) -> dict:
@@ -217,6 +263,10 @@ def load_config(path: Path | None = None) -> dict:
     if path is not None:
         return _load_config_file(path)
 
+    # Wizard-persisted secrets must be in the environment BEFORE interpolation,
+    # or every "${ANTHROPIC_API_KEY}" the wizard wrote resolves to "" on a bare
+    # pip/CLI install. setdefault semantics: a real export always wins.
+    _load_env_file(config_path().parent / _ENV_FILE_BASENAME)
     cfg = _load_config_file(config_path())
     # Dashboard Settings overlay (always-on, fixed path): UI-edited provider
     # keys / capability+feature toggles merge over config.toml without touching it.
@@ -299,11 +349,15 @@ def any_provider_configured() -> bool:
     keyless self-hosted setup was accepted by one component and rejected by
     the next. Use this helper instead of growing a fourth variant.
     """
+    # Read config FIRST: load_config() also exports the wizard-persisted
+    # ~/.maverick/.env into the environment (setdefault), so the env-var checks
+    # below see installer-collected keys even when config.toml carries no
+    # [providers] table.
+    providers = load_config().get("providers") or {}
     if any(os.environ.get(v) for v in PROVIDER_KEY_ENV_VARS):
         return True
     if any(os.environ.get(v) for v in PROVIDER_BASE_URL_ENV_VARS):
         return True
-    providers = load_config().get("providers") or {}
     for pcfg in providers.values():
         if not isinstance(pcfg, dict):
             continue

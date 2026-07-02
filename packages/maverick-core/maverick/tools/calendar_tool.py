@@ -156,6 +156,12 @@ def _create_event(args: dict[str, Any]) -> str:
         end = _parse_iso(end_s)
     except ValueError as e:
         return f"ERROR: bad ISO timestamp: {e}"
+    # strftime ignores tzinfo, so formatting a tz-aware datetime with a
+    # literal 'Z' mislabels local wall-clock time as UTC: an event given
+    # as 10:00-05:00 was saved as 10:00 UTC — five hours early — while
+    # the tool reported success. Normalize to UTC before formatting.
+    start = start.astimezone(timezone.utc)
+    end = end.astimezone(timezone.utc)
     try:
         cal = _get_caldav_calendar()
         ical = (

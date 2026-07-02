@@ -137,3 +137,33 @@ def test_chat_goal_template_uses_eventsource(monkeypatch, tmp_path):
     assert "/events/stream?since=" in resp.text
     # The polling fallback for old browsers / blocked SSE is still there.
     assert "openPollingFallback" in resp.text
+
+
+def test_sse_terminal_goal_drains_full_backlog(monkeypatch, tmp_path):
+    """A terminal goal with more events than one poll batch must stream the
+    WHOLE backlog before the terminal event — not just the first batch."""
+    from maverick import world_model
+    monkeypatch.setattr(world_model, "DEFAULT_DB", tmp_path / "world.db")
+    monkeypatch.delenv("MAVERICK_DASHBOARD_TOKEN", raising=False)
+    wm = world_model.WorldModel(tmp_path / "world.db")
+    gid = wm.create_goal("backlog-goal", "x")
+    for i in range(12):
+        wm.append_event(gid, "agent", "plan", f"step {i}")
+    wm.set_goal_status(gid, "done", result="ok")
+    from maverick_dashboard import app as dash_app
+    dash_app._world_cache.clear()
+    monkeypatch.setattr(dash_app, "_SSE_MAX_BATCH", 5)
+
+    client = _client()
+    body = ""
+    with client.stream("GET", f"/api/goal/{gid}/events/stream") as resp:
+        assert resp.status_code == 200
+        for chunk in resp.iter_text():
+            body += chunk
+            if "event: terminal" in body:
+                break
+
+    for i in range(12):
+        assert f"step {i}" in body
+    # The terminal frame comes after the last backlog event, never before.
+    assert body.rfind("step 11") < body.rfind("event: terminal")

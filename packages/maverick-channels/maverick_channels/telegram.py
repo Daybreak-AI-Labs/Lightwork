@@ -17,6 +17,12 @@ from .base import Channel, IncomingMessage, normalize_allowlist
 
 log = logging.getLogger(__name__)
 
+# Telegram's Bot API hard-rejects text messages over 4096 chars with a 400
+# "message is too long", which (like the empty-reply case below) raises out of
+# the handler and the user gets NOTHING despite the completed run. Chunk long
+# outbound text on line boundaries instead, like the discord/whatsapp adapters.
+TELEGRAM_LIMIT = 4096
+
 try:
     from telegram import Update
     from telegram.ext import Application, ContextTypes, MessageHandler, filters
@@ -119,7 +125,9 @@ class TelegramChannel(Channel):
         # "message text is empty", which raises out of the handler. Guard with
         # `if reply:`, matching bluesky/whatsapp/mastodon and the other channels.
         if reply:
-            await update.message.reply_text(reply)
+            from .formatting import split_for_discord
+            for chunk in split_for_discord(reply, limit=TELEGRAM_LIMIT):
+                await update.message.reply_text(chunk)
 
     async def start(self) -> None:
         self._app = Application.builder().token(self.token).build()
@@ -132,20 +140,26 @@ class TelegramChannel(Channel):
     async def send(self, user_id: str, text: str) -> None:
         if self._app is None:
             raise RuntimeError("channel not started")
-        await self._app.bot.send_message(chat_id=int(user_id), text=text)
+        from .formatting import split_for_discord
+        for chunk in split_for_discord(text, limit=TELEGRAM_LIMIT):
+            await self._app.bot.send_message(chat_id=int(user_id), text=chunk)
 
     async def send_threaded(
         self, user_id: str, text: str, *, reply_to: str | None = None,
     ) -> None:
         if self._app is None:
             raise RuntimeError("channel not started")
-        kwargs = {"chat_id": int(user_id), "text": text}
+        kwargs = {"chat_id": int(user_id)}
         if reply_to:
             try:
                 kwargs["reply_to_message_id"] = int(reply_to)
             except (TypeError, ValueError):
                 pass  # un-threadable id -> plain send
-        await self._app.bot.send_message(**kwargs)
+        from .formatting import split_for_discord
+        for chunk in split_for_discord(text, limit=TELEGRAM_LIMIT):
+            # Every chunk carries the thread anchor so the whole reply stays
+            # attached to the message that asked for it.
+            await self._app.bot.send_message(text=chunk, **kwargs)
 
     async def stop(self) -> None:
         if self._app is None:

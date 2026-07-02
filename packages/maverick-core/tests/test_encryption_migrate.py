@@ -55,6 +55,9 @@ def test_migrate_seals_existing_plaintext(monkeypatch, tmp_path):
         "goal_events.content": 0,
         "episodes.summary": 0, "episodes.outcome": 0,
         "approvals.action": 0, "approvals.scope": 0, "approvals.detail": 0,
+        "signoffs.note": 0, "artifacts.content": 0,
+        "projects.name": 0, "projects.description": 0,
+        "fact_history.value": 0,
     }
 
     # On disk the columns are now sealed (ciphertext, no plaintext).
@@ -78,7 +81,59 @@ def test_migrate_seals_existing_plaintext(monkeypatch, tmp_path):
         "goal_events.content": 0,
         "episodes.summary": 0, "episodes.outcome": 0,
         "approvals.action": 0, "approvals.scope": 0, "approvals.detail": 0,
+        "signoffs.note": 0, "artifacts.content": 0,
+        "projects.name": 0, "projects.description": 0,
+        "fact_history.value": 0,
     }
+
+
+@requires_crypto
+def test_migrate_seals_artifacts_projects_signoffs_and_fact_history(monkeypatch, tmp_path):
+    """Regression: _SEALED_COLUMNS omitted artifacts.content, projects.name/
+    description, signoffs.note and fact_history.value, so legacy plaintext in
+    them survived `maverick encryption migrate` (and strict mode then withheld
+    it forever)."""
+    from maverick.encryption_migrate import migrate_world_db
+    from maverick.world_model import WorldModel
+
+    db = tmp_path / "world.db"
+    monkeypatch.setenv("MAVERICK_TEMPORAL_MEMORY", "1")   # populate fact_history
+    # Write everything as plaintext (encryption off).
+    wm = WorldModel(db)
+    gid = wm.create_goal("g", "d")
+    wm.add_artifact(gid, "text", "t", "artifact body secret")
+    pid = wm.create_project("project name secret", description="project desc secret")
+    wm.record_signoff(gid, "approved", note="signoff note secret")
+    wm.upsert_fact("k", "fact history secret")
+    wm.conn.close()
+
+    # Enable encryption and seal the existing rows.
+    monkeypatch.setenv("MAVERICK_ENCRYPT_AT_REST", "1")
+    report = migrate_world_db(db)
+    assert report["artifacts.content"] == 1
+    assert report["projects.name"] == 1
+    assert report["projects.description"] == 1
+    assert report["signoffs.note"] == 1
+    assert report["fact_history.value"] == 1
+
+    # On disk the columns are now sealed ciphertext (no plaintext residue).
+    c = sqlite3.connect(str(db))
+    content = c.execute("SELECT content FROM artifacts").fetchone()[0]
+    assert car.is_sealed_str(content) and "secret" not in content
+    name, desc = c.execute("SELECT name, description FROM projects").fetchone()
+    assert car.is_sealed_str(name) and car.is_sealed_str(desc)
+    assert car.is_sealed_str(c.execute("SELECT note FROM signoffs").fetchone()[0])
+    assert car.is_sealed_str(c.execute("SELECT value FROM fact_history").fetchone()[0])
+    c.close()
+
+    # Reads still return plaintext.
+    wm2 = WorldModel(db)
+    assert wm2.artifacts_for_goal(gid)[0]["content"] == "artifact body secret"
+    p = wm2.get_project(pid)
+    assert p["name"] == "project name secret"
+    assert p["description"] == "project desc secret"
+    assert wm2.signoff_for(gid)["note"] == "signoff note secret"
+    assert wm2.fact_history("k")[0].value == "fact history secret"
 
 
 @requires_crypto

@@ -81,9 +81,11 @@ class Worker:
         self.idle_sleep = float(idle_sleep)
         self.max_attempts = int(max_attempts)
         self.retry_after = float(retry_after)
-        # Jobs stuck 'running' longer than this (a prior worker crashed
-        # mid-job) are requeued on start. Keep it above the longest expected
-        # job runtime so a live worker's in-flight job is never stolen.
+        # Jobs stuck 'running' longer than this with no lease heartbeat (a
+        # prior worker crashed mid-job) are requeued on start. A live worker
+        # renews its claimed job's lease while the handler runs (run_once),
+        # so a job may outlast the lease without being stolen; only a dead
+        # worker stops renewing.
         self.reclaim_lease = float(reclaim_lease)
         self._handlers: dict[str, Handler] = {}
         self._stop = threading.Event()
@@ -200,6 +202,18 @@ class Worker:
         self._maybe_rearm(job)
         log.info("worker: claimed job %d kind=%s (attempt %d)",
                  job.id, job.kind, job.attempts)
+        # Renew the lease while the handler runs: claim() writes updated_at
+        # once, so without a heartbeat any job outliving reclaim_lease looked
+        # crashed to a peer daemon's periodic reclaim_stale and was requeued +
+        # re-executed WHILE still running here (double LLM spend, double side
+        # effects). A real crash kills this thread with the process, so
+        # orphan recovery is unaffected.
+        hb_stop = threading.Event()
+        hb = threading.Thread(
+            target=self._heartbeat_lease, args=(job, hb_stop),
+            name=f"maverick-job-{job.id}-lease", daemon=True,
+        )
+        hb.start()
         try:
             self._dispatch(job)
             # Fence the terminal write with the attempt we claimed at: if our
@@ -223,7 +237,23 @@ class Worker:
             )
             log.warning("worker: job %d failed, requeued: %s",
                         job.id, err.splitlines()[-1])
+        finally:
+            hb_stop.set()
+            hb.join(timeout=5.0)
         return True
+
+    def _heartbeat_lease(self, job: Job, stop: threading.Event) -> None:
+        """Bump the claimed job's ``updated_at`` every ``reclaim_lease/4``
+        until ``stop`` is set (dispatch finished). Fenced to the attempt we
+        claimed at: a False return means the lease was lost anyway (reclaimed
+        and re-claimed by a peer), so stop renewing a row we no longer own."""
+        interval = max(self.reclaim_lease / 4.0, 0.05)
+        while not stop.wait(interval):
+            try:
+                if not self.queue.heartbeat(job.id, expected_attempts=job.attempts):
+                    return
+            except Exception:  # transient DB contention must not kill the run
+                log.exception("worker: lease heartbeat failed for job %d", job.id)
 
     def _reclaim_stale(self) -> None:
         """Requeue 'running' jobs orphaned by a crashed worker; log if any."""

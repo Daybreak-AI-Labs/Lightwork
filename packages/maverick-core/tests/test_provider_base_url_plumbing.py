@@ -62,6 +62,29 @@ def test_dispatch_forwards_base_url_to_ollama(monkeypatch):
     assert _Recorder.last_kwargs["base_url"] == "http://h:2/v1"
 
 
+@pytest.mark.parametrize("provider, module, cls", [
+    ("deepseek", "deepseek_provider", "DeepSeekClient"),
+    ("gemini", "gemini_provider", "GeminiClient"),
+    ("moonshot", "moonshot_provider", "MoonshotClient"),
+    ("xai", "xai_provider", "XaiClient"),
+    ("openrouter", "openrouter_provider", "OpenRouterClient"),
+])
+def test_dispatch_forwards_base_url_to_cloud_vendors(monkeypatch, provider, module, cls):
+    """A configured ``[providers.<name>] base_url`` was silently dropped for
+    the OpenAI-translated cloud vendors: the registry constructed them with
+    ``api_key`` only, so a gateway / regional endpoint (e.g. moonshot's China
+    endpoint, a compliance proxy for deepseek/xai) was ignored and every
+    request went to the vendor default."""
+    import importlib
+
+    from maverick.providers import get_provider_client
+
+    mod = importlib.import_module(f"maverick.providers.{module}")
+    monkeypatch.setattr(mod, cls, _Recorder)
+    get_provider_client(provider, api_key="k", base_url="https://gw.corp/v1")
+    assert _Recorder.last_kwargs == {"api_key": "k", "base_url": "https://gw.corp/v1"}
+
+
 def test_llm_facade_passes_config_base_url(clean_provider_env, monkeypatch):
     clean_provider_env.write_text(
         '[providers.vllm]\nbase_url = "http://cfg-host:9/v1"\n', encoding="utf-8"
