@@ -18,6 +18,7 @@ from __future__ import annotations
 
 import logging
 import os
+import uuid as _uuid
 from pathlib import Path
 
 from ..paths import data_dir
@@ -40,6 +41,22 @@ def _active_tenant() -> str | None:
         return current_tenant()
     except Exception:  # pragma: no cover -- tenancy never blocks vector ops
         return None
+
+
+# Stable namespace so a given logical id always maps to the same point id.
+_POINT_NS = _uuid.UUID("6f9b8c1e-3a2d-5e4f-8b7a-0c1d2e3f4a5b")
+# Payload key holding the logical (tenant-namespaced) id -- see _point_id.
+_NSID_KEY = "__nsid__"
+
+
+def _point_id(doc_id: str, tenant_id: str | None) -> str:
+    """A valid Qdrant point id (UUID) derived deterministically from the logical
+    (tenant-namespaced) id. Qdrant only accepts unsigned-int or UUID point ids,
+    so the raw ``tenant:<t>:<doc>`` string (or an arbitrary caller id) can't be
+    used directly -- it's rejected with a 400. The logical id itself is stored
+    in the payload under ``_NSID_KEY`` so query()/delete() can still scope by
+    tenant and recover the caller's original id."""
+    return str(_uuid.uuid5(_POINT_NS, _stored_id(doc_id, tenant_id)))
 
 
 def _stored_id(doc_id: str, tenant_id: str | None) -> str:
@@ -125,14 +142,20 @@ class QdrantStore:
                 f"metadatas length {len(metadatas)} != documents length {len(documents)}"
             )
         tenant_id = _active_tenant()
-        kwargs: dict = {
-            "collection_name": self._collection,
-            "documents": documents,
-            "ids": [_stored_id(i, tenant_id) for i in ids],
-        }
-        if metadatas:
-            kwargs["metadata"] = metadatas
-        self._client.add(**kwargs)
+        # Point ids are deterministic UUIDs (Qdrant rejects arbitrary strings);
+        # the logical tenant-namespaced id rides in the payload so query()/delete()
+        # can scope by tenant and recover the caller's original id.
+        metas: list[dict] = []
+        for i in range(len(documents)):
+            m = dict(metadatas[i]) if metadatas else {}
+            m[_NSID_KEY] = _stored_id(ids[i], tenant_id)
+            metas.append(m)
+        self._client.add(
+            collection_name=self._collection,
+            documents=documents,
+            ids=[_point_id(i, tenant_id) for i in ids],
+            metadata=metas,
+        )
 
     def query(self, text: str, *, top_k: int = 5) -> list[dict]:
         """Top-k similarity search. Returns list of
@@ -166,11 +189,16 @@ class QdrantStore:
         )
         out: list[dict] = []
         for r in results:
-            rid = str(getattr(r, "id", ""))
+            meta = dict(getattr(r, "metadata", None) or {})
+            # The caller's id lives in the payload (point ids are opaque UUIDs);
+            # fall back to the point id for legacy rows written before that.
+            nsid = str(meta.pop(_NSID_KEY, None) or getattr(r, "id", ""))
             if prefix is not None:
-                if not rid.startswith(prefix):
+                if not nsid.startswith(prefix):
                     continue
-                rid = rid[len(prefix):]
+                rid = nsid[len(prefix):]
+            else:
+                rid = nsid
             score = getattr(r, "score", None)
             score_f = float(score) if isinstance(score, (int, float)) else None
             distance = (1.0 - score_f) if score_f is not None else None
@@ -179,7 +207,7 @@ class QdrantStore:
                 "document": getattr(r, "document", "") or "",
                 "score": score_f,
                 "distance": distance,
-                "metadata": getattr(r, "metadata", None) or None,
+                "metadata": meta or None,
             })
             if len(out) >= want:
                 break
@@ -193,7 +221,7 @@ class QdrantStore:
         self._client.delete(
             collection_name=self._collection,
             points_selector=PointIdsList(
-                points=[_stored_id(i, tenant_id) for i in ids]),
+                points=[_point_id(i, tenant_id) for i in ids]),
         )
 
     def count(self) -> int:
