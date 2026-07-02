@@ -98,6 +98,7 @@ def settings() -> dict:
                 "semantic_mining": False, "retire_after_days": 0.0,
                 "candidates_per_signature": 1, "mine_bucket_by": (),
                 "holdout_rotations": 1, "judge_samples": 1,
+                "metamorphic": False, "metamorphic_tolerance": 0.0,
                 "promote_as_canary": False,
                 "efficacy_review": False, "eval_corpus": None,
                 "eval_budget_dollars": None}
@@ -1069,6 +1070,33 @@ def llm_proposer(llm, *, budget=None, model: str | None = None,
     return _propose
 
 
+def llm_conflict_classifier(llm, *, budget=None, model: str | None = None,
+                            max_tokens: int = 8) -> Callable[[str, str], bool]:
+    """An LLM-backed ``classifier_fn`` for :func:`find_conflicts` /
+    :func:`detect_store_conflicts`: judge by MEANING whether two guidance lines
+    contradict each other -- catching reworded conflicts the lexical heuristic
+    misses and suppressing its false positives. The model is NOT hard-coded
+    (kernel rule 2); the CLI wires the verifier role.
+
+    Deliberately RAISES on a provider error or an unparseable verdict:
+    ``find_conflicts`` treats a raising classifier as "fall back to the lexical
+    heuristic for this pair", so a flaky judge never drops a real flag."""
+    def _classify(a: str, b: str) -> bool:
+        resp = llm.complete(
+            "Two lines of operating guidance for the same agent follow. Answer "
+            "ONLY 'yes' or 'no': do they CONTRADICT each other (following both "
+            "at once would be impossible or incoherent)?",
+            [{"role": "user", "content": f"A: {a}\nB: {b}\n\nyes/no:"}],
+            budget=budget, max_tokens=max_tokens, model=model)
+        text = (getattr(resp, "text", "") or "").strip().lower()
+        if text.startswith("yes"):
+            return True
+        if text.startswith("no"):
+            return False
+        raise ValueError(f"unparseable conflict verdict: {text[:40]!r}")
+    return _classify
+
+
 def propose_addendum(sig: FailureSignature, *, propose_fn: ProposeFn | None = None,
                      ) -> HarnessProposal | None:
     """Produce a MINIMAL guidance line for ``sig`` via the injected proposer
@@ -1968,7 +1996,7 @@ __all__ = [
     "load_line_meta", "line_provenance", "note_recall",
     "note_outcome", "line_efficacy", "review_efficacy",
     "mark_canary", "list_canaries", "review_canaries",
-    "find_conflicts", "detect_store_conflicts",
+    "find_conflicts", "detect_store_conflicts", "llm_conflict_classifier",
     "FailureSignature", "mine_failures", "count_eligible", "semantic_similarity",
     "HarnessProposal", "ProposeFn", "propose_addendum", "llm_proposer",
     "ValidationResult", "ScoreFn", "validate_proposal",

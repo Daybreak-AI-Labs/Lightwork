@@ -2317,6 +2317,153 @@ def test_context_evaluator_serves_and_caches_domain_quads(monkeypatch, tmp_path)
     assert built["n"] == 0
 
 
+def test_config_metamorphic_knobs(monkeypatch):
+    from maverick import config
+    monkeypatch.setattr(config, "load_config", lambda *a, **k: {
+        "self_harness": {"metamorphic": True, "metamorphic_tolerance": 0.1}})
+    st = config.get_self_harness()
+    assert st["metamorphic"] is True and st["metamorphic_tolerance"] == 0.1
+    monkeypatch.setattr(config, "load_config", lambda *a, **k: {
+        "self_harness": {"metamorphic_tolerance": -1}})           # clamped
+    st = config.get_self_harness()
+    assert st["metamorphic"] is False and st["metamorphic_tolerance"] == 0.0
+    assert sh.settings()["metamorphic"] is False
+
+
+def test_llm_conflict_classifier_parses_and_raises():
+    class _L:
+        def __init__(self, text):
+            self._t = text
+
+        def complete(self, *a, **k):
+            return type("R", (), {"text": self._t})()
+
+    assert sh.llm_conflict_classifier(_L("Yes."))("a", "b") is True
+    assert sh.llm_conflict_classifier(_L("no"))("a", "b") is False
+    with pytest.raises(ValueError):                    # unparseable -> raise, so
+        sh.llm_conflict_classifier(_L("maybe"))("a", "b")   # find_conflicts falls back
+
+
+def test_semantic_classifier_catches_reworded_conflict():
+    # No shared content tokens -> the lexical heuristic is blind; the semantic
+    # judge flags the contradiction (and find_conflicts trusts it per pair).
+    a, b = "prefer streaming large exports", "batch everything without exception"
+    assert sh.find_conflicts(a, [b]) == []                        # lexical: blind
+    assert sh.find_conflicts(a, [b], classifier_fn=lambda x, y: True) == [b]
+
+
+def test_cycle_wires_paraphraser_when_metamorphic_on(monkeypatch, tmp_path, store):
+    from maverick import config, llm
+    from maverick import self_improvement_runner as runner
+    _enable(monkeypatch)
+    monkeypatch.setattr(sh, "_store_path", lambda: store)
+    cpath = tmp_path / "corpus.json"
+    cpath.write_text(json.dumps(
+        {"M": [{"goal": f"g{i}", "expected": "x"} for i in range(4)]}))
+
+    class _FakeLLM:
+        def __init__(self, model="x", **kw):
+            self.model = model
+
+        def complete(self, *a, **k):
+            return type("R", (), {"text": "yes"})()
+
+    monkeypatch.setattr(llm, "LLM", _FakeLLM)
+    monkeypatch.setattr(llm, "model_for_role", lambda role: "role-model")
+    seen = {}
+
+    def _spy(reflexions, **kw):
+        seen.update(kw)
+        return sh.SelfHarnessReport(model_id="M")
+
+    monkeypatch.setattr(runner, "run_self_harness_pass", _spy)
+    monkeypatch.setattr(config, "load_config", lambda *a, **k: {
+        "self_harness": {"enable": True, "eval_corpus": str(cpath),
+                         "metamorphic": True}})
+    runner.run_self_harness_cycle(reflexions=[], model_id="M", retire=False)
+    assert seen.get("metamorphic_fn") is not None                 # wired
+    seen.clear()
+    monkeypatch.setattr(config, "load_config", lambda *a, **k: {
+        "self_harness": {"enable": True, "eval_corpus": str(cpath)}})
+    runner.run_self_harness_cycle(reflexions=[], model_id="M", retire=False)
+    assert seen.get("metamorphic_fn") is None                     # knob off -> not wired
+
+
+def test_pass_fills_metamorphic_tolerance_from_config(monkeypatch, store):
+    from maverick import config
+    from maverick import self_improvement_runner as runner
+    _enable(monkeypatch)
+    monkeypatch.setattr(config, "load_config", lambda *a, **k: {
+        "self_harness": {"enable": True, "metamorphic_tolerance": 0.1}})
+    seen = {}
+
+    def _spy(refl, **kw):
+        seen.update(kw)
+        return sh.SelfHarnessReport(model_id="M")
+
+    monkeypatch.setattr(sh, "run_self_harness", _spy)
+    runner.run_self_harness_pass([], model_id="M")
+    assert seen["metamorphic_tolerance"] == 0.1
+    seen.clear()
+    runner.run_self_harness_pass([], model_id="M", metamorphic_tolerance=0.3)
+    assert seen["metamorphic_tolerance"] == 0.3                   # explicit arg wins
+
+
+def test_cycle_metamorphic_rejects_wording_overfit_line(monkeypatch, tmp_path, store):
+    # End to end on the auto path: the candidate helps on the ORIGINAL corpus
+    # wording but HURTS on the paraphrases -> rejected. Same line, knob off ->
+    # promotes. Proves the paraphrase check is real, not a silent no-op.
+    import json as _json
+
+    from maverick import config, llm
+    from maverick import self_improvement_runner as runner
+    ctrl = _enable(monkeypatch)
+    monkeypatch.setattr(sh, "_store_path", lambda: store)
+    corpus = {"M": [{"goal": f"g{i}", "expected": "WIN"} for i in range(6)]}
+    cpath = tmp_path / "corpus.json"
+    cpath.write_text(_json.dumps(corpus))
+
+    class _FakeLLM:
+        def __init__(self, model="x", **kw):
+            self.model = model
+
+        def complete(self, system, messages, **kw):
+            sys_text = system or ""
+            if sys_text.startswith("Rewrite the task"):          # paraphraser
+                return type("R", (), {"text": "PARA " + messages[0]["content"]})()
+            if "evaluator" in sys_text.lower():                  # judge
+                content = messages[0]["content"]
+                out = content.split("OUTPUT:\n", 1)[1].split("\n\nExpected")[0]
+                return type("R", (), {"text": "yes" if out == "WIN" else "no"})()
+            helped = "MAGIC-LINE" in sys_text                    # runner arm
+            goal = messages[0]["content"]
+            if goal.startswith("PARA "):                         # overfit to wording:
+                win = not helped                                 # the line HURTS here
+            else:
+                win = helped
+            return type("R", (), {"text": "WIN" if win else "LOSE"})()
+
+    monkeypatch.setattr(llm, "LLM", _FakeLLM)
+    monkeypatch.setattr(llm, "model_for_role", lambda role: "role-model")
+    refl = [_refl("M", "timeout", "export the nightly ledger") for _ in range(3)]
+    monkeypatch.setattr(config, "load_config", lambda *a, **k: {
+        "self_harness": {"enable": True, "eval_corpus": str(cpath),
+                         "metamorphic": True}})
+    report, _ = runner.run_self_harness_cycle(
+        reflexions=refl, model_id="M", retire=False, controller=ctrl,
+        propose_fn=lambda s: "MAGIC-LINE bound the export window")
+    assert report.promoted == 0
+    assert any("metamorphic" in s for s in report.skipped)
+    assert sh.recall_addendum("M", store) == ""
+    # knob off: the exact same overfit line sails through (the historical gap)
+    monkeypatch.setattr(config, "load_config", lambda *a, **k: {
+        "self_harness": {"enable": True, "eval_corpus": str(cpath)}})
+    report2, _ = runner.run_self_harness_cycle(
+        reflexions=refl, model_id="M", retire=False, controller=ctrl,
+        propose_fn=lambda s: "MAGIC-LINE bound the export window")
+    assert report2.promoted == 1
+
+
 def test_cycle_promotes_domain_scoped_line_from_domain_corpus(monkeypatch, tmp_path, store):
     # End to end: a domain-keyed-ONLY corpus + per-domain mining. The model-wide
     # A/B cannot build (no model key), yet the finance-scoped weakness is

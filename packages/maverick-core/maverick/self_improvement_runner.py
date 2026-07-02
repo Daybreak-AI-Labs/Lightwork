@@ -147,7 +147,7 @@ def run_self_harness_pass(
     min_held_out: int | None = None, candidates_per_signature: int | None = None,
     semantic_mining: bool | None = None, similarity_fn=None,
     bucket_by: tuple[str, ...] | None = None,
-    metamorphic_fn=None, metamorphic_tolerance: float = 0.0,
+    metamorphic_fn=None, metamorphic_tolerance: float | None = None,
     holdout_rotations: int | None = None,
     canary: bool | None = None,
     eval_for_context=None,
@@ -194,6 +194,8 @@ def run_self_harness_pass(
             holdout_rotations = st.get("holdout_rotations", 1)
         if canary is None:
             canary = st.get("promote_as_canary", False)
+        if metamorphic_tolerance is None:
+            metamorphic_tolerance = st.get("metamorphic_tolerance", 0.0)
         if not model_id:
             from .llm import model_for_role
             model_id = model_for_role("orchestrator")
@@ -223,7 +225,8 @@ def run_self_harness_pass(
 
 
 def _auto_evaluator(model_id: str, *, corpus_path: str, held_out_frac: float = 0.3,
-                    budget=None, judge_samples: int = 1):
+                    budget=None, judge_samples: int = 1,
+                    judge_unknown: bool = False):
     """Build ``(held_in, held_out, score_with, score_without)`` -- the LIVE A/B --
     from a configured eval corpus + the model's own LLM client, so the driver can
     actually PROMOTE rather than only dry-inspect. The candidate ``model_id``
@@ -245,7 +248,8 @@ def _auto_evaluator(model_id: str, *, corpus_path: str, held_out_frac: float = 0
             cases,
             run_fn=ev.llm_runner(LLM(model_id), budget=budget),
             judge_fn=ev.llm_judge(LLM(model_for_role("verifier")), budget=budget,
-                                  samples=judge_samples))
+                                  samples=judge_samples),
+            judge_unknown=judge_unknown)
         return held_in, held_out, score_with, score_without
     except Exception:  # pragma: no cover -- a missing provider/corpus stays dry
         log.debug("self-harness auto-evaluator construction failed", exc_info=True)
@@ -264,7 +268,8 @@ def _domain_of_context(context: str) -> str:
 
 
 def _context_evaluator(model_id: str, *, corpus_path: str, budget=None,
-                       judge_samples: int = 1, held_out_frac: float = 0.3):
+                       judge_samples: int = 1, held_out_frac: float = 0.3,
+                       judge_unknown: bool = False):
     """Build the ``eval_for_context`` seam from the corpus: a domain-scoped
     signature (``"domain=finance"``) is validated against the corpus's
     ``finance``-keyed cases -- its own department's ground truth -- instead of
@@ -302,7 +307,8 @@ def _context_evaluator(model_id: str, *, corpus_path: str, budget=None,
                     cache[d] = None
                 else:
                     sw, swo = ev.corpus_ab_scorers(
-                        ev.corpus_cases(corpus, d), run_fn=run_fn, judge_fn=judge_fn)
+                        ev.corpus_cases(corpus, d), run_fn=run_fn,
+                        judge_fn=judge_fn, judge_unknown=judge_unknown)
                     cache[d] = (held_in, held_out, sw, swo)
             return cache[d]
 
@@ -358,24 +364,30 @@ def run_self_harness_cycle(
     cycle must not perturb anything."""
     try:
         from . import self_harness
+        st = self_harness.settings() if self_harness.enabled() else None
+        # ONE budget pot for everything this cycle evaluates -- the model-wide
+        # A/B, the domain-scoped quads, and the metamorphic paraphraser
+        # together, so the operator's cap bounds the whole cycle, not each
+        # evaluator.
+        eval_budget = _eval_budget(st) if st is not None else None
         # AUTO-WIRE the live A/B from config so a scheduled cycle can actually
         # PROMOTE, not just dry-inspect: if the caller injected no scorers and
         # [self_harness] eval_corpus is set, build the model-generates /
         # verifier-judges evaluator. Unset corpus (the default) -> stays dry, so
         # behavior is unchanged out of the box.
-        if (score_with is None and score_without is None and self_harness.enabled()):
-            st = self_harness.settings()
+        if score_with is None and score_without is None and st is not None:
             corpus_path = st.get("eval_corpus")
             if corpus_path:
                 from .llm import model_for_role
                 model_id = model_id or model_for_role("orchestrator")
-                # ONE budget pot for everything this cycle evaluates -- the
-                # model-wide A/B and the domain-scoped quads together, so the
-                # operator's cap bounds the whole cycle, not each evaluator.
-                eval_budget = _eval_budget(st)
+                # With metamorphic validation on, paraphrased (non-corpus)
+                # goals must be JUDGEABLE, not indeterminate -- the LLM judge
+                # doesn't need the expected hint.
+                judge_unknown = bool(st.get("metamorphic"))
                 built = _auto_evaluator(model_id, corpus_path=corpus_path,
                                         judge_samples=st.get("judge_samples", 1),
-                                        budget=eval_budget)
+                                        budget=eval_budget,
+                                        judge_unknown=judge_unknown)
                 if built is not None:
                     held_in, held_out, score_with, score_without = built
                 # Scoped evaluation: the corpus's domain keys validate matching
@@ -385,9 +397,24 @@ def run_self_harness_cycle(
                 if pass_kwargs.get("eval_for_context") is None:
                     efc = _context_evaluator(model_id, corpus_path=corpus_path,
                                              judge_samples=st.get("judge_samples", 1),
-                                             budget=eval_budget)
+                                             budget=eval_budget,
+                                             judge_unknown=judge_unknown)
                     if efc is not None:
                         pass_kwargs["eval_for_context"] = efc
+        # Metamorphic validation (opt-in, [self_harness] metamorphic): reject a
+        # candidate whose lift does not survive PARAPHRASING the held-out cases
+        # (overfit to exact wording). Built only when something will actually
+        # validate (a scorer exists) and the caller injected no paraphraser.
+        if (st is not None and st.get("metamorphic") and score_with is not None
+                and pass_kwargs.get("metamorphic_fn") is None):
+            try:
+                from . import self_harness_eval as ev
+                from .llm import LLM, model_for_role
+                pass_kwargs["metamorphic_fn"] = ev.llm_paraphraser(
+                    LLM(model_for_role("summarizer")), budget=eval_budget)
+            except Exception:  # pragma: no cover -- no paraphraser = check off
+                log.debug("self-harness paraphraser construction failed",
+                          exc_info=True)
         report = run_self_harness_pass(
             reflexions, model_id=model_id, limit=limit,
             held_in=held_in, held_out=held_out, score_with=score_with,

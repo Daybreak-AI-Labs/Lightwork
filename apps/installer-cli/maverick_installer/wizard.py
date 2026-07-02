@@ -1720,6 +1720,10 @@ def pick_advanced() -> dict[str, Any]:
         advanced["self_harness_auto_run"] = _q_confirm(
             "    Auto-run? Run the governed learning cycle for every role model "
             "as part of `maverick dream` (no second cron entry).", default=False)
+        advanced["self_harness_metamorphic"] = _q_confirm(
+            "    Metamorphic validation? Paraphrase held-out cases and require a "
+            "candidate's lift to survive the rewording (needs the live A/B).",
+            default=False)
         advanced["self_harness_candidates"] = max(1, _safe_int(_q_text(
             "    Candidate lines per weakness (best-of-N; 1 = single)",
             default="1"), default=1))
@@ -2914,6 +2918,8 @@ def _cfg_advanced(  # noqa: C901 - flat sequence of independent opt-in toggles
             lines.append("promote_as_canary = true")
         if advanced.get("self_harness_auto_run"):
             lines.append("auto_run = true")
+        if advanced.get("self_harness_metamorphic"):
+            lines.append("metamorphic = true")
         cands = advanced.get("self_harness_candidates")
         if cands and cands > 1:
             lines.append(f"candidates_per_signature = {int(cands)}")

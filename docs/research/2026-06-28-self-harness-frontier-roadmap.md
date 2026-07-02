@@ -128,6 +128,16 @@ drive them; this wave wires them, changing no default behavior:
   domain + invoked tools. Before this, worker models' lines earned recalls but
   never outcomes, so a worker canary promoted by `run --all-models` could
   never graduate or be demoted by the counter-driven review.
+- **LLM-backed metamorphic + conflict seams, shipped**: `metamorphic_fn` and
+  `classifier_fn` existed as injected seams with no built-in builder and no
+  reachability. `llm_paraphraser` (summarizer role) now backs the paraphrase
+  check behind `[self_harness] metamorphic` (+`metamorphic_tolerance`), and
+  `corpus_ab_scorers` gains `judge_unknown` so the LLM judge can actually
+  score paraphrased (non-corpus) goals — without it the metamorphic branch
+  silently no-oped on the whole auto path (non-corpus goals were always
+  indeterminate). `llm_conflict_classifier` (verifier role) backs
+  `self-harness conflicts --semantic`. Both share the cycle's eval-budget pot
+  / fall back safely.
 - **Self-scheduled operation** (`[self_harness] auto_run`, default off):
   `maverick dream` — the platform's existing nightly learning beat — also runs
   the fleet-wide harness cycle (`run_self_harness_all_models`) when the knob is

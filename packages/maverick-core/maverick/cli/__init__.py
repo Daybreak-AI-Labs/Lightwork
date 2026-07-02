@@ -1693,17 +1693,31 @@ def harness_run(model: str | None, all_models: bool, limit: int, retire: bool,
 
 @harness.command("conflicts")
 @click.option("--model", default=None, help="Only check this model's guidance.")
-def harness_conflicts(model: str | None) -> None:
+@click.option("--semantic", is_flag=True,
+              help="Also judge contradiction by MEANING with the verifier-role "
+                   "model (catches reworded conflicts the lexical heuristic "
+                   "misses).")
+def harness_conflicts(model: str | None, semantic: bool) -> None:
     """Flag learned lines that appear to CONTRADICT each other, per model.
 
     Addenda are cumulative, so a later lesson can quietly oppose an earlier one
     ("prefer streaming large exports" vs "avoid streaming; batch first"),
     degrading the prompt. This is an advisory heuristic (shared topic, opposite
     polarity) for an operator to review and `forget` the wrong side — it never
-    auto-removes anything. Read-only.
+    auto-removes anything. Read-only. With --semantic the verifier-role model
+    judges each candidate pair by meaning (per-pair fallback to the heuristic
+    if the judge fails), catching conflicts that share no wording.
     """
-    from ..self_harness import detect_store_conflicts
-    pairs = detect_store_conflicts(model_id=model)
+    from ..self_harness import detect_store_conflicts, llm_conflict_classifier
+    classifier = None
+    if semantic:
+        try:
+            from ..llm import LLM, model_for_role
+            classifier = llm_conflict_classifier(LLM(model_for_role("verifier")))
+        except Exception:  # no provider -> the lexical heuristic still works
+            click.echo("note: semantic judge unavailable — using the lexical "
+                       "heuristic only.")
+    pairs = detect_store_conflicts(model_id=model, classifier_fn=classifier)
     if not pairs:
         click.echo("no conflicting guidance detected.")
         return
