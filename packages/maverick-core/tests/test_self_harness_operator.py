@@ -78,6 +78,22 @@ def test_no_cost_when_nothing_learned(ctx, store, monkeypatch):
     assert "Operating guidance learned for this model" not in _agent(ctx, "model-x").system
 
 
+def test_recall_registers_model_for_outcome_credit(ctx, store, monkeypatch):
+    # Building a prompt that recalls guidance registers the agent's model on
+    # ctx.harness_models -- the set the orchestrator credits at run end, so a
+    # WORKER model's guidance accumulates outcome counters too.
+    monkeypatch.setenv("MAVERICK_SELF_HARNESS", "1")
+    sh._apply_addendum(sh.HarnessProposal(
+        model_id="model-w", signature="s",
+        addendum_line="verify the export window", rationale="r"), path=store)
+    assert "verify the export window" in _agent(ctx, "model-w").system
+    assert ctx.harness_models == {"model-w"}
+    # a model with nothing learned registers nothing
+    fresh = _agent(ctx, "model-fresh").system
+    assert "verify the export window" not in fresh
+    assert ctx.harness_models == {"model-w"}
+
+
 # ---- rollback reaches the live prompt --------------------------------------
 
 def test_forget_removes_guidance_from_the_next_prompt(ctx, store, monkeypatch):

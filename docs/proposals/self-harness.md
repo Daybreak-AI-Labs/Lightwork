@@ -161,7 +161,10 @@ safety model as skills and insights.
   injected); `review_efficacy` re-measures a line's causal lift with the live A/B
   and **demotes dead weight** (audited `forget`, the reversible direction — never
   the promotion gate); and a `canary` line graduates or is pulled by
-  `review_canaries` from those counters (a staged-rollout valve). The
+  `review_canaries` from those counters (a staged-rollout valve). Outcomes
+  credit **every model whose guidance the run recalled** — each agent registers
+  its resolved model on `ctx.harness_models` at recall time, so worker models'
+  lines accumulate counters too, not just the orchestrator's. The
   live A/B itself is the injected `score_with`/`score_without` seam, built out by
   `self_harness_eval.corpus_ab_scorers` (corpus + `run_fn`/`judge_fn`).
 - **Robust validation:** `holdout_rotations` cross-validates a candidate across K
