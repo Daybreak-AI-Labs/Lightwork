@@ -78,3 +78,33 @@ def test_max_risk_fails_closed_to_tightest_when_restricted(_broken_config):
 
 def test_max_risk_unrestricted_stays_none(_broken_config):
     assert tool_acl.resolve_max_risk() is None
+
+
+# ---- disjoint allow-lists compose to deny-all, not allow-all --------------
+
+
+def test_disjoint_allow_lists_deny_all_not_allow_all(monkeypatch):
+    # Global allow={read_file}, channel allow={shell}: the two allow-lists share
+    # no tool. Most-restrictive composition must allow NOTHING -- an empty
+    # intersection must NOT be read downstream as "no allow-list -> allow all".
+    monkeypatch.setattr(tool_acl, "_load_lists", lambda: ({"read_file"}, set()))
+    monkeypatch.setattr(tool_acl, "_load_lists_for_channel",
+                        lambda ch: ({"shell"}, set()))
+    allowed, denied = tool_acl.resolve_lists(channel="slack")
+    assert allowed == set(tool_acl._FAIL_CLOSED)
+    kept = tool_acl.filter_tools({"read_file", "shell", "http_fetch"},
+                                 allowed=allowed, denied=denied)
+    assert kept == set()  # disjoint allow-lists deny every tool
+
+
+def test_overlapping_allow_lists_keep_intersection(monkeypatch):
+    # Sanity: when the allow-lists DO overlap, the intersection is kept (the fix
+    # only changes the empty-intersection case).
+    monkeypatch.setattr(tool_acl, "_load_lists",
+                        lambda: ({"read_file", "shell"}, set()))
+    monkeypatch.setattr(tool_acl, "_load_lists_for_channel",
+                        lambda ch: ({"shell"}, set()))
+    allowed, denied = tool_acl.resolve_lists(channel="slack")
+    kept = tool_acl.filter_tools({"read_file", "shell", "http_fetch"},
+                                 allowed=allowed, denied=denied)
+    assert kept == {"shell"}

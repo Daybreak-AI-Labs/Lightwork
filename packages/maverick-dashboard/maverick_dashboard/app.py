@@ -1595,6 +1595,10 @@ def safe_audit_day(day: str | None) -> str | None:
 @app.get("/audit", response_class=HTMLResponse)
 async def audit_page(request: Request) -> HTMLResponse:
     """Tail of the local audit log."""
+    # Gate on ``audit`` to match the ``/api/v1/audit/tail`` twin -- otherwise a
+    # view-only caller reads the full audit log via the HTML page despite the
+    # API denying them.
+    require_permission(request, "audit")
     from maverick.audit import default_audit_log
     try:
         n = max(1, min(int(request.query_params.get("n") or 200), 1000))
@@ -2349,7 +2353,12 @@ async def approvals_page(request: Request) -> HTMLResponse:
     holds (EU AI Act Art 14) arrive with trusted provenance metadata;
     ``_approval_source`` labels them so an operator can distinguish a policy
     hold from a plain consent one without trusting free-form detail text.
+
+    Gated on ``operate`` to match the ``/api/v1/approvals`` twin: the queue has
+    no per-user owner and may carry another user's goal content in ``detail``,
+    so a view-only caller must not read it via the HTML page either.
     """
+    require_permission(request, "operate")
     approvals = _world().pending_approvals()
     sources = {a.id: _approval_source(a.provenance) for a in approvals}
     return templates.TemplateResponse(

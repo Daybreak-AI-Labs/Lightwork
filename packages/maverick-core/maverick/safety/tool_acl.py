@@ -203,6 +203,15 @@ def resolve_lists(
         merged_allow: set[str] = set()
     else:
         merged_allow = set.intersection(*layers_allow)
+        if not merged_allow:
+            # Allow-lists WERE configured (only non-empty layers are appended
+            # above) but they share no tool. The most-restrictive composition is
+            # "allow nothing" -- yet an empty allow set is read downstream (both
+            # filter_tools' `if allowed:` and Capability.allow_tools) as "no
+            # allow-list -> allow ALL", inverting the restriction into a bypass.
+            # Emit the fail-closed sentinel (an unmatchable name) so disjoint
+            # per-scope allow-lists deny every tool instead.
+            merged_allow = set(_FAIL_CLOSED)
     merged_deny = set.union(*layers_deny) if layers_deny else set()
     return merged_allow, merged_deny
 

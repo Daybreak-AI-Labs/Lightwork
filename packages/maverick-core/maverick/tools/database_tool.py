@@ -166,6 +166,11 @@ def _op_query(sql: str, url: str, limit: int, confirm: bool,
                 rows = result.fetchmany(limit)
                 out = [f"columns: {cols}", f"{len(rows)} row(s):"]
                 out += ["  " + json.dumps(list(r), default=str)[:300] for r in rows]
+                # A confirmed write with a RETURNING clause reports returns_rows,
+                # so commit here too -- SQLAlchemy 2.0 is commit-as-you-go and the
+                # connection would otherwise roll the write back on block exit.
+                # A plain SELECT opened no transaction, so this is a no-op for reads.
+                conn.commit()
                 return "\n".join(out)
             conn.commit()
             return f"ok: {result.rowcount} row(s) affected"

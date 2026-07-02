@@ -70,6 +70,30 @@ def test_comment_prefixed_write_needs_confirm(monkeypatch):
         assert "DRY RUN" in out
 
 
+def test_returning_write_is_committed(monkeypatch, tmp_path):
+    # A confirmed write with a RETURNING clause reports returns_rows, so it took
+    # the row path -- SQLAlchemy 2.0 is commit-as-you-go, so without an explicit
+    # commit the connection rolls the write back on block exit and the mutation
+    # is silently lost. Use a file-backed sqlite URL (no driver/network needed).
+    import pytest
+    pytest.importorskip("sqlalchemy")
+    db = tmp_path / "d.db"
+    url = f"sqlite:///{db}"
+    monkeypatch.setenv("DATABASE_URL", url)
+    from maverick.tools.database_tool import database_tool
+    t = database_tool()
+    assert "ok" in t.fn({"op": "query",
+                         "sql": "CREATE TABLE t(id INTEGER PRIMARY KEY, v TEXT)",
+                         "confirm": True}).lower()
+    out = t.fn({"op": "query",
+                "sql": "INSERT INTO t(id, v) VALUES(1, 'x') RETURNING id",
+                "confirm": True})
+    assert "1" in out
+    # A fresh read (new engine/connection) must see the committed row.
+    check = t.fn({"op": "query", "sql": "SELECT v FROM t WHERE id = 1"})
+    assert "x" in check
+
+
 def test_mysql_executable_comment_needs_confirm(monkeypatch):
     monkeypatch.setenv("DATABASE_URL", "mysql+pymysql://u:p@localhost/db")
     from maverick.tools.database_tool import database_tool

@@ -189,6 +189,13 @@ def _run_sql_query(args: dict[str, Any], sandbox) -> str:
         cols = [d[0] for d in cur.description]
         rows = cur.fetchmany(max_rows)
         truncated = cur.fetchone() is not None
+        # A write with a RETURNING clause (INSERT/UPDATE/DELETE ... RETURNING)
+        # produces a cursor description, so it lands here rather than the branch
+        # above -- but it still opened an implicit transaction that sqlite rolls
+        # back on close unless we commit. In read-only mode nothing mutated, so
+        # committing is a harmless no-op; do it for writes to persist RETURNING.
+        if not read_only:
+            conn.commit()
         out = _format_rows(cols, rows)
         summary = f"\n({len(rows)} row(s)" + (f", truncated at {max_rows}" if truncated else "") + ")"
         return (out + summary)[:_MAX_OUTPUT]

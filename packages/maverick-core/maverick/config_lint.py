@@ -409,10 +409,18 @@ def warn_config_at_startup(*, strict: bool | None = None) -> list[Finding]:
 
     _log = logging.getLogger("maverick.config")
     try:
-        from .config import config_path, load_config
-        if not config_path().exists():
+        from .config import _read_toml_raw, config_path
+        p = config_path()
+        if not p.exists():
             return []
-        cfg = load_config() or {}
+        # Lint the RAW (uninterpolated) TOML, not load_config()'s env-expanded
+        # output: the documented `api_key = "${ANTHROPIC_API_KEY}"` pattern
+        # expands to the literal secret once the env var is set, which
+        # _lint_inline_secrets would then flag as an inline secret -- and in
+        # strict mode that false positive refuses to start the server. The raw
+        # value keeps the "$..." form _looks_like_env_ref recognizes, and the
+        # unknown-key checks still see the operator's literal keys.
+        cfg = _read_toml_raw(p) or {}
         findings = lint_config(cfg)
     except Exception:  # pragma: no cover -- linting never blocks startup
         return []

@@ -137,6 +137,19 @@ def _primary_email(resource: dict) -> str:
     return ""
 
 
+def _coerce_active(value: Any) -> bool:
+    """Coerce a SCIM ``active`` value to bool, matching the PATCH path.
+
+    Some IdPs (notably Azure AD) send ``active`` as the STRING ``"False"``.
+    ``bool("False")`` is True, so a plain ``bool()`` here would leave a user
+    active on a string-boolean PUT/POST deprovision -- a deprovisioning bypass.
+    Treat only a real bool True or the string "true" (any case) as active.
+    """
+    if isinstance(value, bool):
+        return value
+    return str(value).strip().lower() == "true"
+
+
 def _record_from_resource(resource: dict, *, uid: str, created: float | None = None) -> dict:
     """Normalize an incoming SCIM User into our stored record."""
     name = resource.get("name") if isinstance(resource.get("name"), dict) else {}
@@ -152,7 +165,7 @@ def _record_from_resource(resource: dict, *, uid: str, created: float | None = N
         "givenName": str(name.get("givenName") or "").strip(),
         "familyName": str(name.get("familyName") or "").strip(),
         "email": _primary_email(resource),
-        "active": bool(resource.get("active", True)),
+        "active": _coerce_active(resource.get("active", True)),
         "created_at": float(created if created is not None else now),
         "updated_at": now,
     }

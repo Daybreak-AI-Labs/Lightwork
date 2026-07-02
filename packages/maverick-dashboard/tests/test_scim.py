@@ -112,6 +112,21 @@ class TestAuth:
         # The pairwise sub -- the actual session key -- is now revoked.
         assert sr.revocation_epoch("pairwise-AAA") > 0.0
 
+    def test_put_string_active_false_deprovisions(self, client):
+        # Azure AD sends `active` as the STRING "False". bool("False") is True,
+        # so a plain bool() on the PUT path would leave the user ACTIVE -- a
+        # deprovisioning bypass. The string must be coerced to False.
+        uid = _make_user(client, username="sf@example.com").json()["id"]
+        r = client.put(f"/scim/v2/Users/{uid}", headers=_auth(), json={
+            "schemas": ["urn:ietf:params:scim:schemas:core:2.0:User"],
+            "userName": "sf@example.com",
+            "active": "False",
+        })
+        assert r.status_code == 200
+        assert r.json()["active"] is False
+        assert client.get(f"/scim/v2/Users/{uid}",
+                          headers=_auth()).json()["active"] is False
+
     def test_hard_delete_forgets_directory_entry(self, client):
         from maverick_dashboard import subject_directory as sd
         sd.record_login("pairwise-BBB", ["carol@example.com"])
