@@ -174,6 +174,13 @@ safety model as skills and insights.
   ask N times with diverse meaning-preserving framings, take the majority vote,
   fall open to the deterministic heuristic on a tie. Both default to the
   single-split / single-call historical behavior.
+- **Scoped validation:** a domain-scoped candidate is judged on its own
+  department's ground truth. The corpus's domain keys (the loader's documented
+  `{model|domain: [...]}` shape) become per-domain evaluation quads via the
+  `eval_for_context` seam on `run_self_harness` — the driver auto-builds it
+  (`_context_evaluator`) alongside the model-wide A/B, sharing the same
+  eval-budget pot. A general corpus under-credits a narrow line; its own
+  domain's cases don't.
 
 ## Operating it
 

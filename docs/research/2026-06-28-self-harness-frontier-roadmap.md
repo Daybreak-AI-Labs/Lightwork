@@ -128,6 +128,16 @@ drive them; this wave wires them, changing no default behavior:
   domain + invoked tools. Before this, worker models' lines earned recalls but
   never outcomes, so a worker canary promoted by `run --all-models` could
   never graduate or be demoted by the counter-driven review.
+- **Domain-keyed corpus validation**: the corpus loader always documented
+  `{model|domain: [...]}` keys, but only the model key ever reached
+  validation. `run_self_harness` gains an `eval_for_context` seam (default
+  `None` = unchanged): given a signature's mining context it returns the
+  `(held_in, held_out, score_with, score_without)` quad to judge that
+  signature by. The driver builds it from the corpus's domain keys
+  (`_context_evaluator`, sharing the cycle's one eval-budget pot), so a
+  `domain=finance` weakness is validated against the finance cases instead of
+  the general pool — and a domain-keyed-only corpus now promotes its
+  departments' lines even when the model-wide A/B can't build.
 
 ## Principle (unchanged across every wave)
 
