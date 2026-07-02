@@ -142,13 +142,17 @@ _ENV_NAME_RE = re.compile(r"[A-Za-z_][A-Za-z0-9_]*\Z")
 _ENV_RECHECK_SECONDS = 1.0
 _env_file_cache: dict[str, tuple[int, int]] = {}
 _env_last_check: float | None = None
+# Bound at import: tests that monkeypatch time.monotonic (a process-global
+# patch) to drive their OWN timeout logic must not have the values consumed
+# by this unrelated guard on every load_config() call.
+_monotonic = time.monotonic
 
 
 def _load_wizard_env() -> None:
     """Throttled wrapper: re-check ``~/.maverick/.env`` at most once per
     :data:`_ENV_RECHECK_SECONDS` (first call always loads)."""
     global _env_last_check
-    now = time.monotonic()
+    now = _monotonic()
     if _env_last_check is not None and now - _env_last_check < _ENV_RECHECK_SECONDS:
         return
     _env_last_check = now
