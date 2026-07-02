@@ -150,6 +150,7 @@ def run_self_harness_pass(
     metamorphic_fn=None, metamorphic_tolerance: float = 0.0,
     holdout_rotations: int | None = None,
     canary: bool | None = None,
+    eval_for_context=None,
 ):
     """The automatic entry point for the self-harness loop (mine -> propose ->
     validate -> gate), to be called by a scheduler / the self-improvement loop.
@@ -213,7 +214,8 @@ def run_self_harness_pass(
             semantic_mining=semantic_mining, similarity_fn=similarity_fn,
             bucket_by=bucket_by, metamorphic_fn=metamorphic_fn,
             metamorphic_tolerance=metamorphic_tolerance,
-            holdout_rotations=holdout_rotations, canary=bool(canary))
+            holdout_rotations=holdout_rotations, canary=bool(canary),
+            eval_for_context=eval_for_context)
     except Exception:  # pragma: no cover -- learning never perturbs a run
         log.debug("self-harness pass failed", exc_info=True)
         from . import self_harness
@@ -247,6 +249,66 @@ def _auto_evaluator(model_id: str, *, corpus_path: str, held_out_frac: float = 0
         return held_in, held_out, score_with, score_without
     except Exception:  # pragma: no cover -- a missing provider/corpus stays dry
         log.debug("self-harness auto-evaluator construction failed", exc_info=True)
+        return None
+
+
+def _domain_of_context(context: str) -> str:
+    """The ``domain=<d>`` value inside a mining-context string (e.g.
+    ``"domain=finance"`` or ``"domain=finance, tool=web_fetch"``), or ``""``
+    when the context carries no domain part."""
+    for part in (context or "").split(","):
+        k, _, v = part.strip().partition("=")
+        if k == "domain" and v:
+            return v
+    return ""
+
+
+def _context_evaluator(model_id: str, *, corpus_path: str, budget=None,
+                       judge_samples: int = 1, held_out_frac: float = 0.3):
+    """Build the ``eval_for_context`` seam from the corpus: a domain-scoped
+    signature (``"domain=finance"``) is validated against the corpus's
+    ``finance``-keyed cases -- its own department's ground truth -- instead of
+    the model-wide pool, which under-credits a narrow line. The corpus loader
+    has always documented ``{model|domain: [...]}`` keys; this makes the domain
+    keys actually reach validation.
+
+    Returns ``None`` when the corpus has no keys beyond the model's (nothing
+    scoped to serve -- no LLM clients are built in that case). Otherwise the
+    candidate model generates and a verifier-role model judges exactly as in
+    :func:`_auto_evaluator`, sharing the same ``budget`` pot; per-domain quads
+    are cached so repeated signatures don't rebuild them. A domain with no
+    usable held-out split yields ``None`` for that domain (the pass keeps its
+    defaults). Never raises."""
+    try:
+        from . import self_harness_eval as ev
+        from .llm import LLM, model_for_role
+        corpus = ev.load_eval_corpus(corpus_path)
+        domain_keys = {k for k in corpus if k != str(model_id)}
+        if not domain_keys:
+            return None
+        run_fn = ev.llm_runner(LLM(model_id), budget=budget)
+        judge_fn = ev.llm_judge(LLM(model_for_role("verifier")), budget=budget,
+                                samples=judge_samples)
+        cache: dict[str, tuple | None] = {}
+
+        def _for_context(context: str):
+            d = _domain_of_context(context)
+            if not d or d not in domain_keys:
+                return None
+            if d not in cache:
+                held_in, held_out = ev.corpus_split(
+                    ev.corpus_cases(corpus, d), held_out_frac=held_out_frac)
+                if not held_out:
+                    cache[d] = None
+                else:
+                    sw, swo = ev.corpus_ab_scorers(
+                        ev.corpus_cases(corpus, d), run_fn=run_fn, judge_fn=judge_fn)
+                    cache[d] = (held_in, held_out, sw, swo)
+            return cache[d]
+
+        return _for_context
+    except Exception:  # pragma: no cover -- a missing provider/corpus stays dry
+        log.debug("self-harness context-evaluator construction failed", exc_info=True)
         return None
 
 
@@ -307,11 +369,25 @@ def run_self_harness_cycle(
             if corpus_path:
                 from .llm import model_for_role
                 model_id = model_id or model_for_role("orchestrator")
+                # ONE budget pot for everything this cycle evaluates -- the
+                # model-wide A/B and the domain-scoped quads together, so the
+                # operator's cap bounds the whole cycle, not each evaluator.
+                eval_budget = _eval_budget(st)
                 built = _auto_evaluator(model_id, corpus_path=corpus_path,
                                         judge_samples=st.get("judge_samples", 1),
-                                        budget=_eval_budget(st))
+                                        budget=eval_budget)
                 if built is not None:
                     held_in, held_out, score_with, score_without = built
+                # Scoped evaluation: the corpus's domain keys validate matching
+                # domain-scoped candidates -- independent of whether the
+                # model-wide quad built, so a domain-keyed-only corpus still
+                # promotes its departments' lines.
+                if pass_kwargs.get("eval_for_context") is None:
+                    efc = _context_evaluator(model_id, corpus_path=corpus_path,
+                                             judge_samples=st.get("judge_samples", 1),
+                                             budget=eval_budget)
+                    if efc is not None:
+                        pass_kwargs["eval_for_context"] = efc
         report = run_self_harness_pass(
             reflexions, model_id=model_id, limit=limit,
             held_in=held_in, held_out=held_out, score_with=score_with,

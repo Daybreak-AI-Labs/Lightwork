@@ -1762,6 +1762,7 @@ def run_self_harness(
     metamorphic_tolerance: float = 0.0,
     holdout_rotations: int = 1,
     canary: bool = False,
+    eval_for_context: Callable[[str], tuple | None] | None = None,
 ) -> SelfHarnessReport:
     """One self-harness pass for ``model_id``: mine weaknesses, propose minimal
     edits, validate on held-in/held-out, and GATE each survivor through the
@@ -1774,6 +1775,15 @@ def run_self_harness(
     selects the deterministic built-in :func:`semantic_similarity`. ``bucket_by``
     mines at a finer granularity (e.g. ``("domain",)`` for department-scoped
     weaknesses + guidance).
+
+    ``eval_for_context`` is the SCOPED-EVALUATION seam: given a signature's
+    mining context (e.g. ``"domain=finance"``), return a ``(held_in, held_out,
+    score_with, score_without)`` quad to validate THAT signature's candidates
+    against, or ``None`` to keep the pass-level defaults. A department-scoped
+    weakness is then judged on its own department's cases rather than the
+    general pool (which under-credits a narrow line). It may also supply
+    scorers a dry pass lacks, so a domain-keyed-only corpus still validates its
+    scoped candidates. Default ``None`` = the historical single evaluation.
     Returns a :class:`SelfHarnessReport`. Never raises -- a learning pass must
     not perturb anything."""
     report = SelfHarnessReport(model_id=str(model_id))
@@ -1805,13 +1815,28 @@ def run_self_harness(
                 continue
             report.proposed += 1
 
-            if score_with is None or score_without is None:
+            # Resolve THIS signature's evaluation: the pass-level splits/scorers,
+            # unless the scoped seam supplies a quad for its mining context (a
+            # finance-scoped candidate judged on finance cases). Resolution comes
+            # FIRST so the seam can also supply scorers a dry pass lacks.
+            sw, swo = score_with, score_without
+            hi, ho = held_in or list(sig.examples), held_out or []
+            if eval_for_context is not None and sig.context:
+                try:
+                    quad = eval_for_context(sig.context)
+                except Exception:  # a bad seam keeps the defaults, never crashes
+                    log.debug("self_harness: eval_for_context failed", exc_info=True)
+                    quad = None
+                if quad is not None:
+                    hi, ho, sw, swo = quad
+                    hi, ho = list(hi or []), list(ho or [])
+            if sw is None or swo is None:
                 report.skipped.append(f"no scorer (dry): {proposal.addendum_line}")
                 continue
             # Held-out is the overfitting guard the docs call mandatory; with a
             # live scorer, `require_held_out` makes that explicit -- never promote
             # on only the mined examples (default off for back-compat).
-            if require_held_out and not held_out:
+            if require_held_out and not ho:
                 report.skipped.append(f"no held-out cases: {proposal.addendum_line}")
                 continue
             validate_kwargs = dict(
@@ -1821,7 +1846,6 @@ def run_self_harness(
                 max_tool_calls_factor=max_tool_calls_factor,
                 metamorphic_fn=metamorphic_fn,
                 metamorphic_tolerance=metamorphic_tolerance)
-            hi, ho = held_in or list(sig.examples), held_out or []
             if candidates_per_signature and candidates_per_signature > 1:
                 # Best-of-N: keep the strongest of several candidate lines for this
                 # signature (only meaningful with a stochastic proposer; a
@@ -1829,7 +1853,7 @@ def run_self_harness(
                 proposal, vr = _best_validated_candidate(
                     sig, first=proposal, propose_fn=propose_fn,
                     k=candidates_per_signature, held_in=hi, held_out=ho,
-                    score_with=score_with, score_without=score_without,
+                    score_with=sw, score_without=swo,
                     validate_kwargs=validate_kwargs)
                 if proposal is None or vr is None:
                     report.skipped.append(f"rejected (no candidate passed): {sig.signature}")
@@ -1840,15 +1864,15 @@ def run_self_harness(
                 # across ALL folds, not just one fixed slice.
                 vr = _validate_rotated(
                     proposal, pool=list(hi) + list(ho), rotations=holdout_rotations,
-                    score_with=score_with, score_without=score_without,
+                    score_with=sw, score_without=swo,
                     validate_kwargs=validate_kwargs)
                 if not vr.accepted:
                     report.skipped.append(f"rejected ({vr.reason}): {proposal.addendum_line}")
                     continue
             else:
                 vr = validate_proposal(
-                    proposal, held_in=hi, held_out=ho, score_with=score_with,
-                    score_without=score_without, **validate_kwargs)
+                    proposal, held_in=hi, held_out=ho, score_with=sw,
+                    score_without=swo, **validate_kwargs)
                 if not vr.accepted:
                     report.skipped.append(f"rejected ({vr.reason}): {proposal.addendum_line}")
                     continue

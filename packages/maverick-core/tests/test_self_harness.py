@@ -2200,3 +2200,149 @@ def test_harness_outcome_credits_worker_models(monkeypatch, store):
     _record_harness_outcome(None, success=True)
     assert eff("ORCH")["orch line"]["success"] == 3
     assert eff("W1")["worker line"]["success"] == 1
+
+
+# ---------- scoped evaluation: eval_for_context + domain-keyed corpus ----------
+
+def test_scoped_signature_validated_against_domain_quad(monkeypatch, store):
+    # A finance-scoped signature is judged on the quad the seam supplies for
+    # "domain=finance", not the pass-level scorers -- here the global A/B shows
+    # NO lift, so only the scoped quad can promote the line.
+    ctrl = _enable(monkeypatch)
+    rs = [_refl_d("M", "auth", "log into the partner portal", "finance")
+          for _ in range(3)]
+    seen = []
+
+    def efc(context):
+        seen.append(context)
+        return (["a", "b"], ["c", "d", "e"],
+                lambda a, c: 0.95, lambda a, c: 0.4)
+
+    rep = sh.run_self_harness(
+        rs, model_id="M", controller=ctrl, min_support=3, path=store,
+        held_in=["a"], held_out=["b"],
+        score_with=lambda a, c: 0.5, score_without=lambda a, c: 0.5,  # flat globally
+        bucket_by=("domain",), eval_for_context=efc)
+    assert rep.promoted == 1 and seen == ["domain=finance"]
+    assert sh.recall_addendum("M", store, domain="finance")   # scoped block got it
+    assert sh.recall_addendum("M", store) == ""               # model-wide untouched
+
+
+def test_eval_for_context_supplies_scorers_to_dry_pass(monkeypatch, store):
+    # No pass-level scorers at all (dry for model-wide work), but the seam
+    # serves a quad for the scoped signature -- it validates and promotes.
+    ctrl = _enable(monkeypatch)
+    rs = [_refl_d("M", "auth", "log into the partner portal", "finance")
+          for _ in range(3)]
+    rep = sh.run_self_harness(
+        rs, model_id="M", controller=ctrl, min_support=3, path=store,
+        bucket_by=("domain",),
+        eval_for_context=lambda c: (["a", "b"], ["c", "d", "e"],
+                                    lambda a, cs: 0.95, lambda a, cs: 0.4))
+    assert rep.promoted == 1
+    assert sh.recall_addendum("M", store, domain="finance")
+
+
+def test_eval_for_context_failure_keeps_defaults(monkeypatch, store):
+    # A raising seam can't fail the pass -- the signature falls back to the
+    # pass-level scorers, which show a lift here.
+    ctrl = _enable(monkeypatch)
+    rs = [_refl_d("M", "auth", "log into the partner portal", "finance")
+          for _ in range(3)]
+    rep = sh.run_self_harness(
+        rs, model_id="M", controller=ctrl, min_support=3, path=store,
+        held_in=["a", "b"], held_out=["c", "d", "e"],
+        score_with=lambda a, c: 0.95, score_without=lambda a, c: 0.4,
+        bucket_by=("domain",), eval_for_context=lambda c: 1 / 0)
+    assert rep.promoted == 1                                  # defaults carried it
+
+
+def test_domain_of_context_parsing():
+    from maverick import self_improvement_runner as runner
+    assert runner._domain_of_context("domain=finance") == "finance"
+    assert runner._domain_of_context("domain=finance, tool=web_fetch") == "finance"
+    assert runner._domain_of_context("tool=web_fetch") == ""
+    assert runner._domain_of_context("") == ""
+
+
+def test_context_evaluator_serves_and_caches_domain_quads(monkeypatch, tmp_path):
+    import json as _json
+
+    from maverick import llm
+    from maverick import self_improvement_runner as runner
+    built = {"n": 0}
+
+    class _FakeLLM:
+        def __init__(self, model="x", **kw):
+            built["n"] += 1
+            self.model = model
+
+        def complete(self, system, messages, **kw):
+            return type("R", (), {"text": "yes"})()
+
+    monkeypatch.setattr(llm, "LLM", _FakeLLM)
+    monkeypatch.setattr(llm, "model_for_role", lambda role: "verifier-model")
+    cpath = tmp_path / "corpus.json"
+    cpath.write_text(_json.dumps({
+        "M": [{"goal": "m-goal", "expected": "x"}],
+        "finance": [{"goal": f"f{i}", "expected": "x"} for i in range(6)],
+    }))
+    efc = runner._context_evaluator("M", corpus_path=str(cpath))
+    assert efc is not None
+    quad = efc("domain=finance")
+    assert quad is not None
+    hi, ho, sw, swo = quad
+    assert set(hi) | set(ho) == {f"f{i}" for i in range(6)} and hi and ho
+    assert efc("domain=finance") is quad                  # cached, not rebuilt
+    assert efc("domain=absent") is None                   # no such corpus key
+    assert efc("") is None
+    # the MODEL key is never served as a domain (it belongs to _auto_evaluator)
+    assert efc("domain=M") is None
+
+    # a corpus with ONLY the model key builds nothing -- not even LLM clients
+    built["n"] = 0
+    only_model = tmp_path / "only-model.json"
+    only_model.write_text(_json.dumps({"M": [{"goal": "g", "expected": "x"}]}))
+    assert runner._context_evaluator("M", corpus_path=str(only_model)) is None
+    assert built["n"] == 0
+
+
+def test_cycle_promotes_domain_scoped_line_from_domain_corpus(monkeypatch, tmp_path, store):
+    # End to end: a domain-keyed-ONLY corpus + per-domain mining. The model-wide
+    # A/B cannot build (no model key), yet the finance-scoped weakness is
+    # validated against the finance cases and promoted into the scoped block.
+    import json as _json
+
+    from maverick import config, llm
+    from maverick import self_improvement_runner as runner
+    ctrl = _enable(monkeypatch)
+    monkeypatch.setattr(sh, "_store_path", lambda: store)
+    corpus = {"finance": [{"goal": f"g{i}", "expected": "WIN"} for i in range(6)]}
+    cpath = tmp_path / "corpus.json"
+    cpath.write_text(_json.dumps(corpus))
+    monkeypatch.setattr(config, "load_config", lambda *a, **k: {
+        "self_harness": {"enable": True, "eval_corpus": str(cpath),
+                         "mine_bucket_by": ["domain"]}})
+
+    class _FakeLLM:
+        def __init__(self, model="x", **kw):
+            self.model = model
+
+        def complete(self, system, messages, **kw):
+            if "evaluator" in (system or "").lower():        # the judge
+                content = messages[0]["content"]
+                out = content.split("OUTPUT:\n", 1)[1].split("\n\nExpected")[0]
+                return type("R", (), {"text": "yes" if out == "WIN" else "no"})()
+            helped = "MAGIC-LINE" in (system or "")           # runner arm
+            return type("R", (), {"text": "WIN" if helped else "LOSE"})()
+
+    monkeypatch.setattr(llm, "LLM", _FakeLLM)
+    monkeypatch.setattr(llm, "model_for_role", lambda role: "verifier-model")
+    refl = [_refl_d("M", "timeout", "export the nightly ledger", "finance")
+            for _ in range(3)]
+    report, _ = runner.run_self_harness_cycle(
+        reflexions=refl, model_id="M", retire=False, controller=ctrl,
+        propose_fn=lambda s: "MAGIC-LINE bound the export window")
+    assert report.promoted == 1
+    assert "MAGIC-LINE" in sh.recall_addendum("M", store, domain="finance")
+    assert sh.recall_addendum("M", store) == ""               # nothing model-wide
