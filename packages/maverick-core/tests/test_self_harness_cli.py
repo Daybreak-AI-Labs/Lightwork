@@ -217,6 +217,43 @@ def test_conflicts_cli_clean(_home):
     assert r.exit_code == 0 and "no conflicting guidance" in r.output
 
 
+def test_conflicts_semantic_flags_reworded_pair(_home, monkeypatch):
+    # Two lines that share no content tokens: the lexical heuristic is blind;
+    # --semantic wires the verifier-role judge and flags the contradiction.
+    from maverick import llm as llm_mod
+    _seed("claude-x", ("prefer streaming large exports",
+                       "batch everything without exception"))
+    r = CliRunner().invoke(main, ["self-harness", "conflicts"])
+    assert r.exit_code == 0 and "no conflicting guidance" in r.output
+
+    class _Judge:
+        def __init__(self, *a, **k):
+            self.model = "fake"
+
+        def complete(self, *a, **k):
+            return type("R", (), {"text": "yes"})()
+
+    monkeypatch.setattr(llm_mod, "LLM", _Judge)
+    monkeypatch.setattr(llm_mod, "model_for_role", lambda role: "verifier-model")
+    r = CliRunner().invoke(main, ["self-harness", "conflicts", "--semantic"])
+    assert r.exit_code == 0, r.output
+    assert "1 possible conflict(s)" in r.output
+
+
+def test_conflicts_semantic_falls_back_without_provider(_home, monkeypatch):
+    from maverick import llm as llm_mod
+    _seed("claude-x", ("line one here", "another thing entirely"))
+
+    def _boom(*a, **k):
+        raise RuntimeError("no provider configured")
+
+    monkeypatch.setattr(llm_mod, "LLM", _boom)
+    r = CliRunner().invoke(main, ["self-harness", "conflicts", "--semantic"])
+    assert r.exit_code == 0, r.output
+    assert "semantic judge unavailable" in r.output
+    assert "no conflicting guidance" in r.output      # lexical heuristic still ran
+
+
 def test_run_cli_requires_enable(_home, monkeypatch):
     monkeypatch.delenv("MAVERICK_SELF_HARNESS")            # feature OFF
     r = CliRunner().invoke(main, ["self-harness", "run", "--model", "m"])

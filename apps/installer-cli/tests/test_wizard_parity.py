@@ -204,7 +204,8 @@ def test_write_config_self_harness_ships_production_floors(tmp_path: Path, monke
     # default block stays minimal and each knob keeps its historical default.
     for k in ("eval_corpus", "eval_budget_dollars", "mine_bucket_by",
               "semantic_mining", "efficacy_review", "promote_as_canary",
-              "auto_run", "candidates_per_signature", "retire_after_days"):
+              "auto_run", "metamorphic", "candidates_per_signature",
+              "retire_after_days"):
         assert k not in parsed["self_harness"]
 
 
@@ -220,6 +221,7 @@ def test_write_config_self_harness_advanced_knobs(tmp_path: Path, monkeypatch):
         "self_harness_efficacy_review": True,
         "self_harness_canary": True,
         "self_harness_auto_run": True,
+        "self_harness_metamorphic": True,
         "self_harness_candidates": 3,
         "self_harness_retire_days": 45,
     })
@@ -231,6 +233,7 @@ def test_write_config_self_harness_advanced_knobs(tmp_path: Path, monkeypatch):
     assert sh["efficacy_review"] is True
     assert sh["promote_as_canary"] is True
     assert sh["auto_run"] is True
+    assert sh["metamorphic"] is True
     assert sh["candidates_per_signature"] == 3
     assert sh["retire_after_days"] == 45
     # The kernel actually reads what the wizard wrote.
@@ -244,6 +247,7 @@ def test_write_config_self_harness_advanced_knobs(tmp_path: Path, monkeypatch):
     assert resolved["efficacy_review"] is True
     assert resolved["promote_as_canary"] is True
     assert resolved["auto_run"] is True
+    assert resolved["metamorphic"] is True
     assert resolved["candidates_per_signature"] == 3
     assert resolved["retire_after_days"] == 45.0
 

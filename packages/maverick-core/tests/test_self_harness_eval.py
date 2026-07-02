@@ -274,6 +274,64 @@ def test_exhausted_budget_is_indeterminate_through_the_scorers():
     assert math.isnan(sw("candidate line", ["g"]))
 
 
+# ---- llm_paraphraser (the metamorphic seam, built) + judge_unknown --------
+
+class _ParaLLM:
+    """Scripted paraphraser: per-call behavior "ok" | "echo" | "empty" | "raise"."""
+
+    def __init__(self, behaviors):
+        self._b = list(behaviors)
+        self.model = "fake:para"
+        self.calls = 0
+
+    def complete(self, system, messages, **kw):
+        mode = self._b[min(self.calls, len(self._b) - 1)]
+        self.calls += 1
+        if mode == "raise":
+            raise RuntimeError("provider down")
+        goal = messages[0]["content"]
+        text = {"ok": "REWORDED " + goal, "echo": goal, "empty": ""}[mode]
+        return type("R", (), {"text": text})()
+
+
+def test_llm_paraphraser_rewrites_and_drops_bad_outputs():
+    # A failed, empty, or UNCHANGED paraphrase is dropped -- an identical
+    # "paraphrase" would let an overfit line pass the very check this builds.
+    p = ev.llm_paraphraser(_ParaLLM(["ok", "echo", "empty", "raise", "ok"]))
+    assert p(["g1", "g2", "g3", "g4", "g5"]) == ["REWORDED g1", "REWORDED g5"]
+    assert ev.llm_paraphraser(_ParaLLM(["raise"]))(["g"]) == []   # none usable
+    assert ev.llm_paraphraser(_ParaLLM(["ok"]))([]) == []
+
+
+def test_llm_paraphraser_reraises_budget_exceeded():
+    import pytest
+    from maverick.budget import BudgetExceeded
+    with pytest.raises(BudgetExceeded):
+        ev.llm_paraphraser(_BrokeLLM())(["g"])
+
+
+def test_corpus_scorers_judge_unknown_scores_paraphrases():
+    # Default: a non-corpus goal is indeterminate (NaN arm) -- so the
+    # metamorphic branch no-ops. judge_unknown lets a hint-free judge score
+    # paraphrases with an empty expected hint, making the check real.
+    import math
+
+    def judge(goal, output, expected):
+        return "OK" in output
+
+    def run(line, goal):
+        return "OK" if line else "no"
+
+    cases = [{"goal": "g", "expected": "x"}]
+    sw, _ = ev.corpus_ab_scorers(cases, run_fn=run, judge_fn=judge)
+    assert math.isnan(sw("line", ["not-in-corpus"]))              # unchanged default
+    sw2, swo2 = ev.corpus_ab_scorers(cases, run_fn=run, judge_fn=judge,
+                                     judge_unknown=True)
+    assert sw2("line", ["not-in-corpus"]) == 1.0                  # actually scored
+    assert swo2("line", ["not-in-corpus"]) == 0.0
+    assert sw2("line", ["g"]) == 1.0                              # corpus goals unchanged
+
+
 def test_corpus_scorer_indeterminate_for_unknown_goal():
     import math
     cases = [{"goal": "g0", "expected": "ok"}]

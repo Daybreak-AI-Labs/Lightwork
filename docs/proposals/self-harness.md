@@ -181,6 +181,17 @@ safety model as skills and insights.
   (`_context_evaluator`) alongside the model-wide A/B, sharing the same
   eval-budget pot. A general corpus under-credits a narrow line; its own
   domain's cases don't.
+- **Metamorphic validation, live:** `[self_harness] metamorphic` wires an
+  LLM-backed paraphraser (`llm_paraphraser`, summarizer role, same budget pot)
+  into the pass's `metamorphic_fn` seam and switches the corpus scorers to
+  `judge_unknown` mode so the LLM judge actually scores the paraphrases (by
+  default a non-corpus goal is indeterminate, which silently no-ops the check).
+  A candidate whose lift doesn't survive rewording is rejected as overfit to
+  surface form; `metamorphic_tolerance` allows a small slip.
+- **Semantic conflict detection, live:** `maverick self-harness conflicts
+  --semantic` wires `llm_conflict_classifier` (verifier role) over the lexical
+  heuristic — catching contradictions that share no wording, with per-pair
+  fallback to the heuristic if the judge fails.
 
 ## Operating it
 

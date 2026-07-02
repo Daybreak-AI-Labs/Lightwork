@@ -717,6 +717,12 @@ def get_self_harness() -> dict:
         # the judge this many times (diverse framings) and take the majority vote
         # (1 = single call, the historical behavior).
         "judge_samples": max(1, _num("judge_samples", 1, int)),
+        # Metamorphic validation on the auto path: paraphrase the held-out cases
+        # (summarizer-role model) and require the candidate's lift to survive
+        # the rewording -- rejects lines overfit to exact phrasing. Default off;
+        # tolerance allows a small slip on the paraphrases.
+        "metamorphic": bool(cfg.get("metamorphic", False)),
+        "metamorphic_tolerance": max(0.0, _num("metamorphic_tolerance", 0.0, float)),
         "mine_bucket_by": bucket_by,
         # Stage every promotion as a CANARY (on probation): still recalled, but
         # graduated to permanent / demoted from real run outcomes by the cycle's

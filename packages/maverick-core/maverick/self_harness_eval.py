@@ -166,6 +166,7 @@ def _rate(goals: list[str], success_of: Callable[[str], bool]) -> float:
 def corpus_ab_scorers(
     cases: list[dict], *, run_fn: Callable[[str, str], str],
     judge_fn: Callable[[str, str, str], bool] | None = None,
+    judge_unknown: bool = False,
 ) -> tuple[Callable[[str, list[str]], float], Callable[[str, list[str]], float]]:
     """Build the ``(score_with, score_without)`` pair ``validate_proposal`` needs.
 
@@ -176,20 +177,24 @@ def corpus_ab_scorers(
     their delta is exactly the line's causal lift on the corpus. Both are pure
     means over the passed goals, matching the ``ScoreFn`` contract.
 
-    A goal NOT in the corpus is INDETERMINATE (the scorer raises ``KeyError``,
-    which ``_rate`` excludes) rather than a silent failure -- so metamorphic
-    validation, whose paraphrased goals are not corpus members, cleanly SKIPS (an
-    all-indeterminate arm is NaN and ``validate_proposal``'s finite-check no-ops
-    the metamorphic branch) with the deterministic heuristic judge instead of
-    being a silent pass. Inject an ``llm_judge`` to actually judge paraphrases."""
+    By default a goal NOT in the corpus is INDETERMINATE (the scorer raises
+    ``KeyError``, which ``_rate`` excludes) rather than a silent failure -- so
+    metamorphic validation, whose paraphrased goals are not corpus members,
+    cleanly SKIPS (an all-indeterminate arm is NaN and ``validate_proposal``'s
+    finite-check no-ops the metamorphic branch). That is the right behavior for
+    the hint-dependent heuristic judge, but it also silently no-ops the
+    metamorphic check for ANY judge. ``judge_unknown`` opts a hint-free judge
+    (an ``llm_judge``) into scoring unknown goals with an empty expected hint,
+    which is what makes paraphrase-robustness validation real on this seam."""
     judge = judge_fn or _heuristic_judge
     expected = {str(c.get("goal") or ""): str(c.get("expected") or "") for c in cases}
+    expected_of = expected.get if judge_unknown else expected.__getitem__
 
     def score_with(line: str, goals: list[str]) -> float:
-        return _rate(goals, lambda g: judge(g, run_fn(line, g), expected[g]))
+        return _rate(goals, lambda g: judge(g, run_fn(line, g), expected_of(g) or ""))
 
     def score_without(_line: str, goals: list[str]) -> float:
-        return _rate(goals, lambda g: judge(g, run_fn("", g), expected[g]))
+        return _rate(goals, lambda g: judge(g, run_fn("", g), expected_of(g) or ""))
 
     return score_with, score_without
 
@@ -291,7 +296,42 @@ def llm_runner(llm, *, system_prefix: str = "", budget=None, model: str | None =
     return _run
 
 
+def llm_paraphraser(llm, *, budget=None, model: str | None = None,
+                    max_tokens: int = 256) -> Callable[[list[str]], list[str]]:
+    """An LLM-backed ``metamorphic_fn`` for ``validate_proposal``: rewrite each
+    held-out goal in different words, preserving its meaning, so a candidate
+    line's lift is tested against wording it was never validated on -- a line
+    that only helps the exact phrasing is overfit to surface form. The model is
+    NOT hard-coded (kernel rule 2); the driver wires the summarizer role.
+
+    One call per goal. A goal whose paraphrase fails, comes back empty, or
+    comes back UNCHANGED is DROPPED -- an identical "paraphrase" would let an
+    overfit line sail through the very check this builds. Returns the surviving
+    paraphrases; ``[]`` (no usable transform) makes the validator skip the
+    metamorphic branch, exactly like every other degraded transform."""
+    def _paraphrase(goals: list[str]) -> list[str]:
+        out: list[str] = []
+        for g in goals or []:
+            try:
+                resp = llm.complete(
+                    "Rewrite the task below in different words, preserving its "
+                    "meaning exactly. Return ONLY the rewritten task -- no "
+                    "preamble, no quotes, no markdown.",
+                    [{"role": "user", "content": str(g)}],
+                    budget=budget, max_tokens=max_tokens, model=model)
+                text = (getattr(resp, "text", "") or "")
+                line = next((s.strip() for s in text.splitlines() if s.strip()), "")
+                if line and line != str(g):
+                    out.append(line)
+            except BudgetExceeded:
+                raise  # the validator catches this and skips the check whole
+            except Exception as e:  # pragma: no cover -- one bad paraphrase drops
+                log.warning("eval: llm paraphraser failed (%s)", e)
+        return out
+    return _paraphrase
+
+
 __all__ = [
     "load_eval_corpus", "corpus_cases", "corpus_split", "corpus_kfold_splits",
-    "corpus_ab_scorers", "llm_judge", "llm_runner",
+    "corpus_ab_scorers", "llm_judge", "llm_runner", "llm_paraphraser",
 ]
