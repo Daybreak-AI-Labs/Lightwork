@@ -202,6 +202,35 @@ def test_audit_endpoints_require_audit_permission(monkeypatch, tmp_path):
     assert c.get("/api/v1/audit/tail").status_code == 200
 
 
+def test_audit_html_page_requires_audit_permission(monkeypatch, tmp_path):
+    # The /audit HTML page serves the same audit-log tail as /api/v1/audit/tail,
+    # so it must enforce the same "audit" gate -- otherwise a view-only caller
+    # reads the trail via HTML despite the API denying them.
+    monkeypatch.setenv("MAVERICK_DASHBOARD_ADMINS", "")
+    c = _client(monkeypatch, tmp_path)
+    from maverick_dashboard import rbac
+    rbac.set_role("user:vw3", "viewer")
+    _as(monkeypatch, "user:vw3")
+    assert c.get("/audit").status_code == 403
+    # auth-off (local single-user) still renders the page.
+    _as(monkeypatch, None)
+    assert c.get("/audit").status_code == 200
+
+
+def test_approvals_html_page_requires_operate_permission(monkeypatch, tmp_path):
+    # The /approvals HTML page lists the shared supervision queue (no per-user
+    # owner, may carry another user's goal detail), matching /api/v1/approvals,
+    # so a view-only caller must be 403'd here too.
+    monkeypatch.setenv("MAVERICK_DASHBOARD_ADMINS", "")
+    c = _client(monkeypatch, tmp_path)
+    from maverick_dashboard import rbac
+    rbac.set_role("user:vw4", "viewer")
+    _as(monkeypatch, "user:vw4")
+    assert c.get("/approvals").status_code == 403
+    _as(monkeypatch, None)
+    assert c.get("/approvals").status_code == 200
+
+
 def test_auditor_reads_audit_but_nothing_operational(monkeypatch, tmp_path):
     # Separation of duties: the auditor role reaches the audit trail (read-only)
     # but is 403'd from every operate/admin surface -- it can review the

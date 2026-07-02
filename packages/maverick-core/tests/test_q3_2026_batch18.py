@@ -87,6 +87,34 @@ def test_write_allowed_when_read_only_false(tmp_path):
     c.close()
 
 
+def test_write_with_returning_is_committed(tmp_path):
+    # A write with a RETURNING clause produces a cursor description, so it takes
+    # the row-formatting path -- it must still be committed, or sqlite rolls the
+    # mutation back on connection close and the "success" is silently lost.
+    db = _mkdb(tmp_path)
+    out = sql_query().fn({
+        "database": str(db),
+        "query": "INSERT INTO users(id, name) VALUES(4, 'dave') RETURNING id",
+        "read_only": False,
+    })
+    assert "4" in out  # the RETURNING row is echoed
+    c = sqlite3.connect(db)
+    assert c.execute("SELECT name FROM users WHERE id = 4").fetchone() == ("dave",)
+    c.close()
+
+
+def test_delete_with_returning_is_committed(tmp_path):
+    db = _mkdb(tmp_path)
+    sql_query().fn({
+        "database": str(db),
+        "query": "DELETE FROM users WHERE id = 1 RETURNING name",
+        "read_only": False,
+    })
+    c = sqlite3.connect(db)
+    assert c.execute("SELECT COUNT(*) FROM users").fetchone()[0] == 2
+    c.close()
+
+
 def test_params_binding(tmp_path):
     db = _mkdb(tmp_path)
     out = sql_query().fn({
