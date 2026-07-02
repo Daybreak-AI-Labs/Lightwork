@@ -562,7 +562,12 @@ def apply_blocks(blocks: list[SearchReplaceBlock], workdir: Path,
             try:
                 snapshots[target] = target.read_bytes()
             except OSError:
-                snapshots[target] = b""
+                # Can't read the original, so we can't snapshot it for rollback.
+                # Storing b"" here would make an atomic rollback TRUNCATE this
+                # file to zero bytes. _apply_one can't read it either (same
+                # OSError) so it won't have modified it -- leave it unsnapshotted
+                # so rollback never rewrites it to empty.
+                continue
         if not target.exists():
             created.add(target)
 

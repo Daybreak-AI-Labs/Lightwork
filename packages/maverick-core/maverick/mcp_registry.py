@@ -122,8 +122,21 @@ def _validate_registry_spec(spec: MCPServerSpec) -> None:
         if not eval_flags:
             continue
         lowered_flags = {flag.lower() for flag in eval_flags}
+        # Single-char short eval flags (``-c``, ``-e``) can be CLUSTERED by the
+        # shell/interpreter: ``sh -ec`` is exactly ``sh -e -c`` and ``python -Bc``
+        # is ``python -B -c``. An exact-token check misses those, so also treat a
+        # single-dash cluster that contains such a flag's letter as inline eval.
+        short_flag_letters = {
+            f[1] for f in lowered_flags if len(f) == 2 and f[0] == "-"
+        }
         for arg in argv[i + 1:]:
-            if arg.split("=", 1)[0].lower() in lowered_flags:
+            key = arg.split("=", 1)[0].lower()
+            clustered = (
+                key.startswith("-")
+                and not key.startswith("--")
+                and any(letter in key[1:] for letter in short_flag_letters)
+            )
+            if key in lowered_flags or clustered:
                 raise ValueError(
                     f"MCP registry entry {spec.name!r} reaches interpreter "
                     f"{token!r} with inline execution flag {arg!r}; registry "

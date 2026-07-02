@@ -183,6 +183,38 @@ class TestApplyBlocks:
         assert (repo / "seed.py").read_text().endswith("TAIL = 9\n")
         assert "b = 3" in (repo / "seed.py").read_text()
 
+    def test_unreadable_snapshot_not_truncated_on_rollback(self, tmp_path, monkeypatch):
+        # If the pre-apply snapshot read raises OSError, the file must NOT be
+        # recorded as an empty snapshot -- otherwise an atomic rollback rewrites
+        # it to zero bytes, destroying the original. A second failing block
+        # forces the rollback; the unreadable-snapshot file must survive non-empty.
+        from pathlib import Path as _P
+
+        from maverick.edit_format import SearchReplaceBlock, apply_blocks
+        repo = _make_git_repo(tmp_path)
+        a = repo / "a.txt"
+        a.write_text("original-A\n")
+        (repo / "b.txt").write_text("original-B\n")
+
+        real_read_bytes = _P.read_bytes
+
+        def fake_read_bytes(self):
+            if self == a:
+                raise OSError("snapshot read blocked")
+            return real_read_bytes(self)
+
+        monkeypatch.setattr(_P, "read_bytes", fake_read_bytes)
+
+        blocks = [
+            SearchReplaceBlock(path="a.txt", search="original-A\n", replace="patched-A\n"),
+            # This block fails to match -> atomic rollback of the whole apply.
+            SearchReplaceBlock(path="b.txt", search="NO-SUCH-CONTENT\n", replace="x\n"),
+        ]
+        summary = apply_blocks(blocks, repo, atomic=True)
+        assert not summary.ok  # the second block failed
+        # The file whose snapshot couldn't be read must NOT be truncated to empty.
+        assert a.read_text() != ""
+
     def test_no_match_reports_near_miss(self, tmp_path):
         from maverick.edit_format import SearchReplaceBlock, apply_blocks
         repo = _make_git_repo(tmp_path)
