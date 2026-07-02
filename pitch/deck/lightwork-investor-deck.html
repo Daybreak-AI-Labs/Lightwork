@@ -8,6 +8,7 @@
 @font-face{font-family:'Inter';font-weight:600;src:url(file:///home/user/Lightwork/pitch/site/fonts/inter-600.woff2)}
 @font-face{font-family:'Inter';font-weight:700;src:url(file:///home/user/Lightwork/pitch/site/fonts/inter-700.woff2)}
 @font-face{font-family:'JBM';font-weight:500;src:url(file:///home/user/Lightwork/pitch/site/fonts/jbm-500.woff2)}
+@page{size:13.333in 7.5in;margin:0}
 :root{
  --paper:#FAF8F3;--paper2:#F1EEE6;--card:#FFF;--ink:#14161B;--ink2:#3C424C;--muted:#6B7079;--faint:#9A9387;
  --line:#E5E0D4;--line2:#D5CFC1;--accent:#2E50E0;--accent2:#5B78FF;--accentink:#22409f;
@@ -140,20 +141,20 @@ em{font-style:italic}.serif-accent{color:var(--accent)}
 
 <!-- 1 COVER -->
 <section class="s dkbg">
- <div class="glow" style="width:520px;height:520px;background:#2E50E0;right:-120px;top:-140px;opacity:.4"></div>
- <div class="L" style="padding:0.7in 0.7in">
+ <div class="glow" style="width:560px;height:560px;background:#2E50E0;right:-130px;top:-160px;opacity:.42"></div>
+ <div class="glow" style="width:420px;height:420px;background:#3a5bff;right:6%;bottom:-6%;opacity:.14"></div>
+ <div class="L" style="padding:0.62in 0.7in 0;flex:1.1;z-index:2">
   <div class="wm" style="color:var(--on)"><span class="mark"><span></span></span> Lightwork <span style="font-size:14px;color:var(--onmut);font-weight:500">by Daybreak Labs</span></div>
-  <div class="grow">
-   <h1 style="font-size:66px;max-width:15ch;color:var(--on)">The governed AI workforce for regulated enterprises.</h1>
-   <p class="lead" style="margin-top:24px;font-size:22px;max-width:40ch;color:var(--onmut)">The agent platform a bank, insurer, or CPA firm can <em>actually deploy</em> — governed on every action, provable, self-hosted, and always improving.</p>
+  <div class="grow" style="justify-content:center;padding-bottom:1.1in">
+   <h1 style="font-size:66px;max-width:14ch;color:var(--on)">The governed AI workforce for regulated enterprises.</h1>
+   <p class="lead" style="margin-top:22px;font-size:22px;max-width:38ch;color:var(--onmut)">The agent platform a bank, insurer, or CPA firm can <em>actually deploy</em> — governed on every action, provable, self-hosted, and always improving.</p>
   </div>
-  <div style="display:flex;gap:14px;color:var(--onmut);font-size:13px"><span>info@daybreakailabs.com</span><span>·</span><span>daybreakailabs.com</span></div>
  </div>
- <div class="R" style="width:44%">
-  <div class="vpanel" style="display:flex;align-items:center;justify-content:center;padding-right:.6in">
-   <div class="term" style="width:400px;transform:rotate(-2deg)">
-    <div class="bar"><i style="background:#E97A75"></i><i style="background:#E0A93B"></i><i style="background:#46C08F"></i><span class="ttl">lightwork · golden-path</span></div>
-    <div class="bd">
+ <div class="R" style="width:42%;z-index:2">
+  <div class="vpanel" style="display:flex;align-items:center;justify-content:center;padding:0 .7in 1.5in .1in">
+   <div class="term" style="width:100%;max-width:470px;transform:rotate(-1.5deg)">
+    <div class="bar"><i style="background:#E97A75"></i><i style="background:#E0A93B"></i><i style="background:#46C08F"></i><span class="ttl">lightwork · golden-path</span><span style="margin-left:auto;font-size:11px;color:var(--mint)">&#9679; chain verified</span></div>
+    <div class="bd" style="font-size:15px;line-height:2.35">
      <div class="row"><span>boot finance specialist</span><span class="badge seal">SEALED</span></div>
      <div class="row"><span>$60,000 wire</span><span class="badge deny">DENY</span></div>
      <div class="row"><span>$6,000 release</span><span class="badge human">REQUIRE_HUMAN</span></div>
@@ -163,7 +164,12 @@ em{font-style:italic}.serif-accent{color:var(--accent)}
    </div>
   </div>
  </div>
- <div class="bl"><b>Lightwork</b> · Daybreak Labs · confidential</div><div class="pg">01</div>
+ <!-- bottom band -->
+ <div style="position:absolute;left:0.7in;right:0.7in;bottom:0.86in;z-index:4;border-top:1px solid var(--navyline);padding-top:16px;display:flex;justify-content:space-between;align-items:center;gap:24px">
+  <div style="font-size:13.5px;color:var(--onmut)"><span style="color:var(--faint);font-weight:700;letter-spacing:.11em;text-transform:uppercase;font-size:11px;margin-right:14px">Built for</span>Finance · Healthcare · Insurance · Banking · Legal · GRC</div>
+  <div style="font-size:13.5px;color:var(--onmut);white-space:nowrap"><b style="color:var(--on)">Self-hosted</b> or air-gapped &nbsp;·&nbsp; <b style="color:var(--on)">Signed</b> audit &nbsp;·&nbsp; <b style="color:var(--on)">Provably</b> improving</div>
+ </div>
+ <div class="bl">info@daybreakailabs.com &nbsp;·&nbsp; daybreakailabs.com &nbsp;·&nbsp; <b>confidential</b></div><div class="pg">01</div>
 </section>
 
 <!-- 2 THESIS -->
