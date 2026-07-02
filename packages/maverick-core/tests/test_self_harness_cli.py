@@ -284,6 +284,24 @@ def test_run_cli_all_models(_home, monkeypatch):
     assert "model: model-a" in r.output and "model: model-b" in r.output
 
 
+def test_run_cli_canary_flag_stages_promotions(_home, monkeypatch):
+    # --canary forwards a staging override; without it the cycle gets None so
+    # [self_harness] promote_as_canary keeps deciding.
+    from maverick import self_improvement_runner as runner
+    seen = []
+
+    def _spy(**kw):
+        seen.append(kw.get("canary"))
+        return sh.SelfHarnessReport(model_id="claude-x"), 0
+
+    monkeypatch.setattr(runner, "run_self_harness_cycle", _spy)
+    r = CliRunner().invoke(main, ["self-harness", "run", "--model", "claude-x", "--canary"])
+    assert r.exit_code == 0, r.output
+    r = CliRunner().invoke(main, ["self-harness", "run", "--model", "claude-x"])
+    assert r.exit_code == 0, r.output
+    assert seen == [True, None]
+
+
 # ---- efficacy / canary / domain-scoped forget -----------------------------
 
 def _seed_scoped(model, domain, line, **meta):

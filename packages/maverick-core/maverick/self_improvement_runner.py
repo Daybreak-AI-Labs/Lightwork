@@ -149,6 +149,7 @@ def run_self_harness_pass(
     bucket_by: tuple[str, ...] | None = None,
     metamorphic_fn=None, metamorphic_tolerance: float = 0.0,
     holdout_rotations: int | None = None,
+    canary: bool | None = None,
 ):
     """The automatic entry point for the self-harness loop (mine -> propose ->
     validate -> gate), to be called by a scheduler / the self-improvement loop.
@@ -156,9 +157,13 @@ def run_self_harness_pass(
     Resolves ``model_id`` to the configured orchestrator model and loads recent
     model-tagged reflexions when not supplied. The tuning knobs
     (``min_support``/``require_held_out``/``min_delta``/``min_held_out``/
-    ``candidates_per_signature``/``semantic_mining``/``bucket_by``) default to
-    ``None`` and are then filled from ``[self_harness]`` config, so an operator's
-    settings take effect automatically; an explicit argument overrides config. An
+    ``candidates_per_signature``/``semantic_mining``/``bucket_by``/``canary``)
+    default to ``None`` and are then filled from ``[self_harness]`` config, so an
+    operator's settings take effect automatically; an explicit argument overrides
+    config. ``canary`` stages this pass's promotions on probation
+    (``promote_as_canary`` in config): still recalled, but graduated/demoted from
+    real run outcomes by the cycle's canary review instead of being permanent
+    on arrival. An
     embedding-backed ``similarity_fn`` may be injected for true semantic
     clustering; otherwise ``semantic_mining`` selects the deterministic built-in. ``score_with``/``score_without`` are the LIVE held-in/held-out A/B
     over the candidate prompt -- injected by the caller because a real evaluation
@@ -186,6 +191,8 @@ def run_self_harness_pass(
             bucket_by = st["mine_bucket_by"]
         if holdout_rotations is None:
             holdout_rotations = st.get("holdout_rotations", 1)
+        if canary is None:
+            canary = st.get("promote_as_canary", False)
         if not model_id:
             from .llm import model_for_role
             model_id = model_for_role("orchestrator")
@@ -206,7 +213,7 @@ def run_self_harness_pass(
             semantic_mining=semantic_mining, similarity_fn=similarity_fn,
             bucket_by=bucket_by, metamorphic_fn=metamorphic_fn,
             metamorphic_tolerance=metamorphic_tolerance,
-            holdout_rotations=holdout_rotations)
+            holdout_rotations=holdout_rotations, canary=bool(canary))
     except Exception:  # pragma: no cover -- learning never perturbs a run
         log.debug("self-harness pass failed", exc_info=True)
         from . import self_harness
@@ -272,11 +279,13 @@ def run_self_harness_cycle(
         # verifier-judges evaluator. Unset corpus (the default) -> stays dry, so
         # behavior is unchanged out of the box.
         if (score_with is None and score_without is None and self_harness.enabled()):
-            corpus_path = self_harness.settings().get("eval_corpus")
+            st = self_harness.settings()
+            corpus_path = st.get("eval_corpus")
             if corpus_path:
                 from .llm import model_for_role
                 model_id = model_id or model_for_role("orchestrator")
-                built = _auto_evaluator(model_id, corpus_path=corpus_path)
+                built = _auto_evaluator(model_id, corpus_path=corpus_path,
+                                        judge_samples=st.get("judge_samples", 1))
                 if built is not None:
                     held_in, held_out, score_with, score_without = built
         report = run_self_harness_pass(

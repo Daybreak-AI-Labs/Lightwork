@@ -1971,3 +1971,107 @@ def test_cycle_drives_canary_lifecycle(monkeypatch, store):
     report, _ = runner.run_self_harness_cycle(reflexions=[], model_id="M", retire=False)
     assert report.demoted == ["flaky canary"]
     assert "flaky canary" not in sh.recall_addendum("M", store)
+
+
+# ---------- driver reachability: judge wiring, canary staging, tool credit ----------
+
+def test_cycle_forwards_judge_samples_to_auto_evaluator(monkeypatch, tmp_path, store):
+    # [self_harness] judge_samples must reach the auto-built LLM judge -- the
+    # knob's only consumer is _auto_evaluator on this path.
+    from maverick import config
+    from maverick import self_improvement_runner as runner
+    _enable(monkeypatch)
+    monkeypatch.setattr(sh, "_store_path", lambda: store)
+    cpath = tmp_path / "corpus.json"
+    cpath.write_text(json.dumps({"M": [{"goal": "g", "expected": "x"}]}))
+    monkeypatch.setattr(config, "load_config", lambda *a, **k: {
+        "self_harness": {"enable": True, "eval_corpus": str(cpath),
+                         "judge_samples": 4}})
+    seen = {}
+
+    def _spy(model_id, *, corpus_path, judge_samples=1, **kw):
+        seen.update(model_id=model_id, judge_samples=judge_samples)
+        return None                                       # stay dry
+
+    monkeypatch.setattr(runner, "_auto_evaluator", _spy)
+    runner.run_self_harness_cycle(reflexions=[], model_id="M", retire=False)
+    assert seen == {"model_id": "M", "judge_samples": 4}
+
+
+def test_pass_stages_canary_from_config(monkeypatch, store):
+    # [self_harness] promote_as_canary stages a scheduled pass's promotions on
+    # probation -- the staged-rollout valve is reachable without code.
+    from maverick import config
+    from maverick import self_improvement_runner as runner
+    ctrl = _enable(monkeypatch)
+    monkeypatch.setattr(sh, "_store_path", lambda: store)
+    monkeypatch.setattr(config, "load_config", lambda *a, **k: {
+        "self_harness": {"enable": True, "promote_as_canary": True}})
+    refl = [_refl("M", "timeout", "export the nightly ledger") for _ in range(3)]
+    rep = runner.run_self_harness_pass(
+        refl, model_id="M", controller=ctrl,
+        held_in=["a", "b"], held_out=["c", "d", "e"],
+        propose_fn=lambda s: "staged line",
+        score_with=lambda a, c: 0.95, score_without=lambda a, c: 0.4)
+    assert rep.promoted == 1
+    assert sh.list_canaries("M", store) == ["staged line"]
+    assert "staged line" in sh.recall_addendum("M", store)   # probation still recalls
+
+
+def test_pass_canary_arg_overrides_config(monkeypatch, store):
+    from maverick import config
+    from maverick import self_improvement_runner as runner
+    ctrl = _enable(monkeypatch)
+    monkeypatch.setattr(sh, "_store_path", lambda: store)
+    monkeypatch.setattr(config, "load_config", lambda *a, **k: {
+        "self_harness": {"enable": True, "promote_as_canary": True}})
+    refl = [_refl("M", "timeout", "export the nightly ledger") for _ in range(3)]
+    rep = runner.run_self_harness_pass(
+        refl, model_id="M", controller=ctrl, canary=False,
+        held_in=["a", "b"], held_out=["c", "d", "e"],
+        propose_fn=lambda s: "permanent line",
+        score_with=lambda a, c: 0.95, score_without=lambda a, c: 0.4)
+    assert rep.promoted == 1
+    assert sh.list_canaries("M", store) == []                # explicit arg wins
+
+
+def test_config_promote_as_canary(monkeypatch):
+    from maverick import config
+    monkeypatch.setattr(config, "load_config", lambda *a, **k: {
+        "self_harness": {"promote_as_canary": True}})
+    assert config.get_self_harness()["promote_as_canary"] is True
+    monkeypatch.setattr(config, "load_config", lambda *a, **k: {"self_harness": {}})
+    assert config.get_self_harness()["promote_as_canary"] is False
+    assert sh.settings()["promote_as_canary"] is False
+
+
+def test_harness_outcome_credits_only_tools_actually_used(monkeypatch, store):
+    # The orchestrator's outcome hook credits tool-scoped guidance by the tools
+    # the run INVOKED (blackboard observations), so a tool-scoped canary can
+    # graduate/demote from real runs -- and an unused tool's line is untouched.
+    from types import SimpleNamespace
+
+    from maverick import llm
+    from maverick.orchestrator import _record_harness_outcome
+    ctrl = _enable(monkeypatch)
+    monkeypatch.setattr(sh, "_store_path", lambda: store)
+    monkeypatch.setattr(llm, "model_for_role", lambda role: "M")
+    for tool, line in (("web_fetch", "verify the fetched payload"),
+                       ("sql_query", "bound the query first")):
+        rs = [_refl_t("M", "timeout", f"use {tool} on the report", ["plan", tool])
+              for _ in range(3)]
+        rep = sh.run_self_harness(
+            rs, model_id="M", controller=ctrl, min_support=3, path=store,
+            held_in=["a", "b"], held_out=["c", "d", "e"],
+            propose_fn=lambda s, _l=line: _l,
+            score_with=lambda a, c: 0.95, score_without=lambda a, c: 0.4,
+            bucket_by=("tool",))
+        assert rep.promoted == 1
+    bb = SimpleNamespace(entries=[
+        SimpleNamespace(kind="observation", content="tool=web_fetch -> ok"),
+        SimpleNamespace(kind="plan", content="tool=sql_query -> never ran"),
+    ])
+    _record_harness_outcome(None, success=True, blackboard=bb)
+    eff = {r["text"]: r for r in sh.line_efficacy("M", store)}
+    assert eff["verify the fetched payload"]["success"] == 1   # used -> credited
+    assert eff["bound the query first"]["total"] == 0          # unused -> untouched
