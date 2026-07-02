@@ -693,6 +693,11 @@ def get_self_harness() -> dict:
 
     return {
         "enable": bool(cfg.get("enable", False)),
+        # Run the governed cycle for every configured role model as part of
+        # `maverick dream` (the nightly learning beat), so the harness operates
+        # itself without a second cron entry. Default off -- `dream` behaves
+        # exactly as before.
+        "auto_run": bool(cfg.get("auto_run", False)),
         "min_support": max(1, _num("min_support", 3, int)),
         "min_support_by_class": by_class,
         "require_held_out": bool(cfg.get("require_held_out", False)),

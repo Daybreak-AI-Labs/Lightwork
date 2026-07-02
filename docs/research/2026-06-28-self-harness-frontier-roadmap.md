@@ -128,6 +128,13 @@ drive them; this wave wires them, changing no default behavior:
   domain + invoked tools. Before this, worker models' lines earned recalls but
   never outcomes, so a worker canary promoted by `run --all-models` could
   never graduate or be demoted by the counter-driven review.
+- **Self-scheduled operation** (`[self_harness] auto_run`, default off):
+  `maverick dream` — the platform's existing nightly learning beat — also runs
+  the fleet-wide harness cycle (`run_self_harness_all_models`) when the knob is
+  on, following the data-engine flywheel's opt-in/never-breaks-dreaming
+  pattern. `run_self_harness_cycle` was documented as "to be called by a
+  scheduler" but nothing in the platform scheduled it; now the loop operates
+  itself off the cron entry operators already have.
 - **Domain-keyed corpus validation**: the corpus loader always documented
   `{model|domain: [...]}` keys, but only the model key ever reached
   validation. `run_self_harness` gains an `eval_for_context` seam (default

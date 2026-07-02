@@ -238,13 +238,16 @@ these automatically, and the dashboard `/learned` page surfaces per-line
 provenance, recall→outcome counters, canary state, the department tag, and
 conflict warnings (parity with `show --verbose` / `efficacy` / `canary` /
 `conflicts`).
-- Automatic operation: a scheduler runs `maverick self-harness run` (or calls
-  `run_self_harness_cycle(...)`), which executes one governed pass then prunes
-  stale guidance. For live promotion the caller injects a held-in/held-out scorer
-  (the A/B over the candidate prompt — a real evaluation needs a real model) and
-  engages the self-improvement controller; without it the cycle is a safe dry
-  pass that still retires. The scorer + controller are the only seams between the
-  offline-testable loop and a fully-autonomous, live one.
+- Automatic operation: set `[self_harness] auto_run = true` and the fleet-wide
+  cycle (`run_self_harness_all_models`) runs as part of `maverick dream` — the
+  same nightly beat that consolidates insights and turns the data-engine
+  flywheel — so the harness operates itself with no second cron entry.
+  Alternatively a scheduler runs `maverick self-harness run` (or calls
+  `run_self_harness_cycle(...)`) directly, which executes one governed pass then
+  prunes stale guidance. For live promotion the pass auto-builds its A/B from
+  `[self_harness] eval_corpus` (or the caller injects a held-in/held-out scorer)
+  and engages the self-improvement controller; without either the cycle is a
+  safe dry pass that still retires and reviews canaries.
 
 ## Addresses paper #2's "hidden design choices"
 
