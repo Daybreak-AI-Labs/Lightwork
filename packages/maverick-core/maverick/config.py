@@ -717,6 +717,13 @@ def get_self_harness() -> dict:
         # the judge this many times (diverse framings) and take the majority vote
         # (1 = single call, the historical behavior).
         "judge_samples": max(1, _num("judge_samples", 1, int)),
+        # Relapse recency guard: re-probate (back to canary) a graduated line
+        # whose recent-outcomes window carries at least this failing share
+        # (0 = off, the default; clamped to (0, 1]). relapse_min_outcomes is
+        # the evidence floor before the window is judged at all.
+        "relapse_failure_share": (lambda v: v if v is not None and 0 < v <= 1 else 0.0)(
+            _factor("relapse_failure_share")),
+        "relapse_min_outcomes": max(1, _num("relapse_min_outcomes", 5, int)),
         # Metamorphic validation on the auto path: paraphrase the held-out cases
         # (summarizer-role model) and require the candidate's lift to survive
         # the rewording -- rejects lines overfit to exact phrasing. Default off;

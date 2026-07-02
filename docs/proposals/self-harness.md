@@ -157,16 +157,25 @@ safety model as skills and insights.
   bare model id, so the default store is **byte-identical** and the determinism
   proof is unaffected.
 - **Outcome-aware lifecycle:** `note_outcome` records per-line recall→success/
-  failure counters (crediting the same model-wide + domain + tool scopes recall
-  injected); `review_efficacy` re-measures a line's causal lift with the live A/B
+  failure counters plus a bounded **recent-outcomes window** (crediting the same
+  model-wide + domain + tool scopes recall injected); `review_efficacy`
+  re-measures a line's causal lift with the live A/B
   and **demotes dead weight** (audited `forget`, the reversible direction — never
   the promotion gate); and a `canary` line graduates or is pulled by
-  `review_canaries` from those counters (a staged-rollout valve). Outcomes
+  `review_canaries` judging the **recent window** (legacy records with no window
+  keep the lifetime-counter behavior). Outcomes
   credit **every model whose guidance the run recalled** — each agent registers
   its resolved model on `ctx.harness_models` at recall time, so worker models'
   lines accumulate counters too, not just the orchestrator's. The
   live A/B itself is the injected `score_with`/`score_without` seam, built out by
   `self_harness_eval.corpus_ab_scorers` (corpus + `run_fn`/`judge_fn`).
+- **Relapse recency guard** (`[self_harness] relapse_failure_share`, 0 = off):
+  lifetime counters shield a veteran line forever — a few ancient successes and
+  nothing counter-driven ever re-examines it. `review_relapses` puts a graduated
+  line whose recent window carries the configured failing share **back on
+  canary probation** (reversible and audited, phase `relapse`; nothing removed),
+  and the next cycle's canary review adjudicates it on fresh evidence.
+  `relapse_min_outcomes` is the evidence floor before a window is judged.
 - **Robust validation:** `holdout_rotations` cross-validates a candidate across K
   deterministic holdout folds (`corpus_kfold_splits`) and promotes only if the
   lift holds on **every** fold — a lucky single split can't carry it. The LLM

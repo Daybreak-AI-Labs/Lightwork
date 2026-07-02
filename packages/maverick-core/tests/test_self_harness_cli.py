@@ -321,6 +321,16 @@ def test_run_cli_all_models(_home, monkeypatch):
     assert "model: model-a" in r.output and "model: model-b" in r.output
 
 
+def test_run_cli_echoes_relapsed_lines(_home, monkeypatch):
+    from maverick import self_improvement_runner as runner
+    rep = sh.SelfHarnessReport(model_id="claude-x")
+    rep.relapsed = ["shaky line"]
+    monkeypatch.setattr(runner, "run_self_harness_cycle", lambda **k: (rep, 0))
+    r = CliRunner().invoke(main, ["self-harness", "run", "--model", "claude-x"])
+    assert r.exit_code == 0, r.output
+    assert "back on canary probation" in r.output and "~ shaky line" in r.output
+
+
 def test_run_cli_canary_flag_stages_promotions(_home, monkeypatch):
     # --canary forwards a staging override; without it the cycle gets None so
     # [self_harness] promote_as_canary keeps deciding.

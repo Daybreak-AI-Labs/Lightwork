@@ -82,7 +82,7 @@ def _run_self_harness_nightly() -> None:
             click.echo(
                 f"[self-harness] {mid}: mined={rep.mined} "
                 f"promoted={rep.promoted} demoted={len(rep.demoted)} "
-                f"retired={retired}")
+                f"retired={retired} relapsed={len(rep.relapsed)}")
     except Exception:  # pragma: no cover -- the harness must never break dreaming
         pass
 

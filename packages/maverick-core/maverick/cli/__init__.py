@@ -1640,6 +1640,10 @@ def _echo_harness_cycle(report, retired: int) -> None:
         click.echo("  promoted lines:")
         for ln in report.applied_lines:
             click.echo(f"    + {ln}")
+    if getattr(report, "relapsed", None):
+        click.echo("  relapsed (back on canary probation — recent outcomes turned bad):")
+        for ln in report.relapsed:
+            click.echo(f"    ~ {ln}")
 
 
 @harness.command("run")

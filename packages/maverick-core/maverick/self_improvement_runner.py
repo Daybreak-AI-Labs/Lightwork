@@ -432,6 +432,17 @@ def run_self_harness_cycle(
                 report.demoted = list(res.get("demoted", []))
             except Exception:  # pragma: no cover -- lifecycle never perturbs a run
                 log.debug("self-harness canary review failed", exc_info=True)
+            # Relapse recency guard (opt-in): AFTER the canary review, so a
+            # line re-probated now gets adjudicated on the NEXT cycle's
+            # evidence rather than instantly demoted in the same pass.
+            try:
+                share = float((st or {}).get("relapse_failure_share") or 0.0)
+                if share > 0:
+                    report.relapsed = self_harness.review_relapses(
+                        resolved, failure_share=share,
+                        min_outcomes=int((st or {}).get("relapse_min_outcomes", 5)))
+            except Exception:  # pragma: no cover -- lifecycle never perturbs a run
+                log.debug("self-harness relapse review failed", exc_info=True)
             if (self_harness.settings().get("efficacy_review")
                     and score_with is not None and score_without is not None):
                 try:

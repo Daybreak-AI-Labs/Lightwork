@@ -1724,6 +1724,9 @@ def pick_advanced() -> dict[str, Any]:
             "    Metamorphic validation? Paraphrase held-out cases and require a "
             "candidate's lift to survive the rewording (needs the live A/B).",
             default=False)
+        advanced["self_harness_relapse"] = _q_confirm(
+            "    Relapse watch? Put a learned line back on probation when half "
+            "or more of its recent run outcomes are failures.", default=False)
         advanced["self_harness_candidates"] = max(1, _safe_int(_q_text(
             "    Candidate lines per weakness (best-of-N; 1 = single)",
             default="1"), default=1))
@@ -2920,6 +2923,8 @@ def _cfg_advanced(  # noqa: C901 - flat sequence of independent opt-in toggles
             lines.append("auto_run = true")
         if advanced.get("self_harness_metamorphic"):
             lines.append("metamorphic = true")
+        if advanced.get("self_harness_relapse"):
+            lines.append("relapse_failure_share = 0.5")
         cands = advanced.get("self_harness_candidates")
         if cands and cands > 1:
             lines.append(f"candidates_per_signature = {int(cands)}")

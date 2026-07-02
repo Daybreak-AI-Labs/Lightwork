@@ -2317,6 +2317,100 @@ def test_context_evaluator_serves_and_caches_domain_quads(monkeypatch, tmp_path)
     assert built["n"] == 0
 
 
+# ---------- recency: recent-outcomes window + relapse re-probation ----------
+
+def test_note_outcome_builds_and_caps_recent_window(monkeypatch, store):
+    ctrl = _enable(monkeypatch)
+    _promote_line(store, "M", "c0", "windowed line", ctrl)
+    for i in range(25):                              # 20 failures then 5 successes
+        sh.note_outcome("M", i >= 20, line="windowed line", path=store)
+    store_map = sh.load_addenda(store)
+    rec = sh.load_line_meta(store)[sh._line_id("M", "windowed line")]
+    assert store_map and len(rec["recent_outcomes"]) == sh._OUTCOME_WINDOW
+    assert rec["recent_outcomes"][-5:] == [1, 1, 1, 1, 1]         # newest last
+    assert rec["recall_failure"] == 20 and rec["recall_success"] == 5  # lifetime kept
+    eff = {r["text"]: r for r in sh.line_efficacy("M", store)}["windowed line"]
+    assert eff["recent_success"] == 5 and eff["recent_failure"] == 15
+    assert eff["recent_rate"] == 0.25 and eff["total"] == 25
+
+
+def test_review_canaries_judges_recent_window_not_lifetime(monkeypatch, store):
+    # A canary with a rich lifetime record but all-failing RECENT outcomes is
+    # pulled; a legacy record with no window keeps the lifetime behavior.
+    ctrl = _enable(monkeypatch)
+    _promote_line(store, "M", "c0", "was good once", ctrl)
+    _promote_line(store, "M", "c1", "legacy proven", ctrl)
+    sh.mark_canary("M", "was good once", path=store)
+    sh.mark_canary("M", "legacy proven", path=store)
+    meta = sh.load_line_meta(store)
+    rec = meta[sh._line_id("M", "was good once")]
+    rec["recall_success"], rec["recent_outcomes"] = 10, [0, 0, 0]   # shielded no more
+    meta[sh._line_id("M", "legacy proven")]["recall_success"] = 3   # no window
+    sh._write_line_meta(meta, store)
+    res = sh.review_canaries("M", graduate_after=3, demote_after=2, path=store)
+    assert res == {"graduated": ["legacy proven"], "demoted": ["was good once"]}
+    assert "was good once" not in sh.recall_addendum("M", store)
+
+
+def test_review_relapses_reprobates_only_bad_recent_lines(monkeypatch, store):
+    ctrl = _enable(monkeypatch)
+    for key, line in (("c0", "gone bad"), ("c1", "still good"), ("c2", "too few")):
+        _promote_line(store, "M", key, line, ctrl)
+    meta = sh.load_line_meta(store)
+    meta[sh._line_id("M", "gone bad")]["recent_outcomes"] = [0, 0, 0, 1, 0]
+    meta[sh._line_id("M", "still good")]["recent_outcomes"] = [1, 1, 1, 1, 0]
+    meta[sh._line_id("M", "too few")]["recent_outcomes"] = [0, 0]   # below the floor
+    sh._write_line_meta(meta, store)
+    relapsed = sh.review_relapses("M", failure_share=0.5, min_outcomes=5, path=store)
+    assert relapsed == ["gone bad"]
+    assert sh.list_canaries("M", store) == ["gone bad"]             # back on probation
+    assert "gone bad" in sh.recall_addendum("M", store)             # NOT removed
+    # a line already on probation is skipped; share<=0 is a no-op
+    assert sh.review_relapses("M", failure_share=0.5, min_outcomes=5, path=store) == []
+    assert sh.review_relapses("M", failure_share=0.0, path=store) == []
+
+
+def test_cycle_runs_relapse_review_when_configured(monkeypatch, store):
+    from maverick import config
+    from maverick import self_improvement_runner as runner
+    ctrl = _enable(monkeypatch)
+    monkeypatch.setattr(sh, "_store_path", lambda: store)
+    _promote_line(store, "M", "c0", "shaky line", ctrl)
+    for _ in range(5):
+        sh.note_outcome("M", False, line="shaky line", path=store)
+    # default config: no relapse review, the line stays permanent
+    monkeypatch.setattr(config, "load_config", lambda *a, **k: {
+        "self_harness": {"enable": True}})
+    report, _ = runner.run_self_harness_cycle(reflexions=[], model_id="M", retire=False)
+    assert report.relapsed == [] and sh.list_canaries("M", store) == []
+    # knob on: the cycle re-probates it (after the canary review, so it is
+    # adjudicated on the NEXT cycle, not instantly demoted in this one)
+    monkeypatch.setattr(config, "load_config", lambda *a, **k: {
+        "self_harness": {"enable": True, "relapse_failure_share": 0.5}})
+    report, _ = runner.run_self_harness_cycle(reflexions=[], model_id="M", retire=False)
+    assert report.relapsed == ["shaky line"]
+    assert sh.list_canaries("M", store) == ["shaky line"]
+    assert "shaky line" in sh.recall_addendum("M", store)           # still recalled
+
+
+def test_config_relapse_knobs(monkeypatch):
+    from maverick import config
+    monkeypatch.setattr(config, "load_config", lambda *a, **k: {
+        "self_harness": {"relapse_failure_share": 0.5, "relapse_min_outcomes": 8}})
+    st = config.get_self_harness()
+    assert st["relapse_failure_share"] == 0.5 and st["relapse_min_outcomes"] == 8
+    for bad in (0, -0.5, 1.5, "abc", None):                        # off / clamped
+        monkeypatch.setattr(config, "load_config", lambda *a, _b=bad, **k: {
+            "self_harness": {"relapse_failure_share": _b}})
+        assert config.get_self_harness()["relapse_failure_share"] == 0.0
+    monkeypatch.setattr(config, "load_config", lambda *a, **k: {
+        "self_harness": {"relapse_min_outcomes": 0}})               # floor of 1
+    assert config.get_self_harness()["relapse_min_outcomes"] == 1
+    monkeypatch.setattr(config, "load_config", lambda *a, **k: {"self_harness": {}})
+    assert config.get_self_harness()["relapse_failure_share"] == 0.0
+    assert sh.settings()["relapse_failure_share"] == 0.0
+
+
 def test_config_metamorphic_knobs(monkeypatch):
     from maverick import config
     monkeypatch.setattr(config, "load_config", lambda *a, **k: {

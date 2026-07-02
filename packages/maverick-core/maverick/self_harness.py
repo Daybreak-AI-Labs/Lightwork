@@ -99,6 +99,7 @@ def settings() -> dict:
                 "candidates_per_signature": 1, "mine_bucket_by": (),
                 "holdout_rotations": 1, "judge_samples": 1,
                 "metamorphic": False, "metamorphic_tolerance": 0.0,
+                "relapse_failure_share": 0.0, "relapse_min_outcomes": 5,
                 "promote_as_canary": False,
                 "efficacy_review": False, "eval_corpus": None,
                 "eval_budget_dollars": None}
@@ -1510,13 +1511,34 @@ def note_recall(model_id: str | None, *, now: float | None = None,
 # (removing a line is always safe -- it's the rollback handle), so it goes through
 # the audited `forget` path, not the promotion gate.
 
+# Bounded per-line window of the most RECENT outcomes (1 = success, 0 =
+# failure), newest last. Lifetime counters only ever grow, so a line with a few
+# ancient successes would be shielded forever; the window is the recency signal
+# the counter-driven reviews judge instead. Small on purpose: it rides the
+# sidecar record and 20 outcomes is plenty to see a relapse.
+_OUTCOME_WINDOW = 20
+
+
+def _recent_counts(rec: Mapping) -> tuple[int, int]:
+    """(successes, failures) from a record's recent-outcomes window; a legacy
+    record with no window falls back to the lifetime counters, so pre-window
+    sidecars keep their historical behavior."""
+    window = rec.get("recent_outcomes")
+    if isinstance(window, list) and window:
+        s = sum(1 for o in window if o)
+        return s, len(window) - s
+    return int(rec.get("recall_success") or 0), int(rec.get("recall_failure") or 0)
+
+
 def note_outcome(model_id: str | None, success: bool, *, line: str | None = None,
                  domain: str | None = None,
                  tools: list[str] | tuple[str, ...] | None = None,
                  path: Path | None = None) -> None:
     """Record that a run using ``model_id``'s guidance succeeded or failed,
-    incrementing per-line ``recall_success``/``recall_failure`` counters in the
-    sidecar -- the signal :func:`review_efficacy`/:func:`review_canaries` act on.
+    incrementing per-line ``recall_success``/``recall_failure`` counters AND
+    appending to the bounded ``recent_outcomes`` window in the sidecar -- the
+    signals :func:`review_efficacy`/:func:`review_canaries`/
+    :func:`review_relapses` act on.
 
     A specific ``line`` is targeted wherever it lives (any scope). Otherwise the
     outcome is attributed to the lines THIS run actually recalled: the model-wide
@@ -1544,6 +1566,10 @@ def note_outcome(model_id: str | None, success: bool, *, line: str | None = None
                 rec = meta.get(_line_id(k, ln))
                 if rec is not None:
                     rec[field_name] = int(rec.get(field_name) or 0) + 1
+                    window = rec.get("recent_outcomes")
+                    window = list(window) if isinstance(window, list) else []
+                    window.append(1 if success else 0)
+                    rec["recent_outcomes"] = window[-_OUTCOME_WINDOW:]
                     changed = True
             if changed:
                 _write_line_meta(meta, p)
@@ -1565,10 +1591,14 @@ def line_efficacy(model_id: str, path: Path | None = None) -> list[dict]:
         s = int(rec.get("recall_success") or 0)
         f = int(rec.get("recall_failure") or 0)
         total = s + f
+        rs, rf = _recent_counts(rec)
+        recent = rs + rf
         _, ctx = _split_key(k)
         domain = ctx[len("domain="):] if ctx.startswith("domain=") else None
         out.append({"text": ln, "domain": domain, "success": s, "failure": f,
-                    "total": total, "rate": (s / total) if total else None})
+                    "total": total, "rate": (s / total) if total else None,
+                    "recent_success": rs, "recent_failure": rf,
+                    "recent_rate": (rs / recent) if recent else None})
     return out
 
 
@@ -1659,7 +1689,10 @@ def review_canaries(model_id: str, *, graduate_after: int = 3,
     DEMOTE (audited forget) a canary with ``>= demote_after`` failures; else
     GRADUATE (clear the flag -> permanent) one with ``>= graduate_after``
     successes; else leave it on probation. Failures take precedence (a flaky line
-    is pulled even if it also has wins). Spans every scope, so domain-scoped
+    is pulled even if it also has wins). Counts come from the RECENT-outcomes
+    window when one exists (so a RE-probated veteran is judged on fresh evidence,
+    not shielded by its lifetime successes); a legacy record with no window keeps
+    the lifetime-counter behavior. Spans every scope, so domain-scoped
     canaries are reviewed too. Returns ``{"graduated": [...], "demoted": [...]}``.
     Never raises."""
     graduated: list[str] = []
@@ -1672,8 +1705,7 @@ def review_canaries(model_id: str, *, graduate_after: int = 3,
             rec = meta.get(_line_id(k, ln)) or {}
             if not rec.get("canary"):
                 continue
-            s = int(rec.get("recall_success") or 0)
-            f = int(rec.get("recall_failure") or 0)
+            s, f = _recent_counts(rec)
             if f >= demote_after:
                 if forget_addendum(model_id, line=ln, path=path):
                     demoted.append(ln)
@@ -1683,6 +1715,53 @@ def review_canaries(model_id: str, *, graduate_after: int = 3,
     except Exception:  # pragma: no cover -- review never perturbs a run
         log.debug("self_harness: review_canaries failed", exc_info=True)
     return {"graduated": graduated, "demoted": demoted}
+
+
+def review_relapses(model_id: str, *, failure_share: float,
+                    min_outcomes: int = 5, path: Path | None = None) -> list[str]:
+    """Put a GRADUATED (non-canary) line whose recent outcomes have gone bad
+    BACK on canary probation -- the recency guard the lifetime counters lack: a
+    line with a few ancient successes is otherwise immune to the counter-driven
+    lifecycle forever, however it performs today.
+
+    A line relapses when its recent-outcomes window holds ``>= min_outcomes``
+    outcomes and the failing share is ``>= failure_share``. Re-probation is the
+    REVERSIBLE, advisory-first direction: nothing is removed here -- the line is
+    just watched again, and :func:`review_canaries` (judging the same recent
+    window) graduates it back or pulls it via the audited ``forget`` path as
+    fresh evidence arrives. Lines already on probation and legacy records with
+    no window are skipped. Each re-probation is audited (phase ``relapse``).
+    Returns the re-probated lines. Never raises."""
+    relapsed: list[str] = []
+    try:
+        if not failure_share or failure_share <= 0:
+            return relapsed
+        store = load_addenda(path)
+        meta = load_line_meta(path)
+        for k, ln in list(_iter_model_lines(store, str(model_id))):
+            rec = meta.get(_line_id(k, ln)) or {}
+            if rec.get("canary"):
+                continue  # already on probation, already watched
+            window = rec.get("recent_outcomes")
+            if not isinstance(window, list) or len(window) < max(1, int(min_outcomes)):
+                continue
+            fails = sum(1 for o in window if not o)
+            if fails / len(window) < failure_share:
+                continue
+            if mark_canary(model_id, ln, canary=True, path=path):
+                relapsed.append(ln)
+                try:
+                    from .audit import EventKind, record
+                    mid, ctx = _split_key(k)
+                    record(EventKind.LEARNING_UPDATE, agent="self_harness",
+                           model_id=mid, scope=(ctx or None), rung="prompt",
+                           line=ln, phase="relapse",
+                           recent_failures=fails, recent_total=len(window))
+                except Exception:  # pragma: no cover -- audit best-effort
+                    pass
+    except Exception:  # pragma: no cover -- review never perturbs a run
+        log.debug("self_harness: review_relapses failed", exc_info=True)
+    return relapsed
 
 
 # ---- DRIVE (mine -> propose -> validate -> gate) --------------------------
@@ -1710,6 +1789,9 @@ class SelfHarnessReport:
     # and lines demoted (canary pulled, or efficacy dead-weight).
     graduated: list[str] = field(default_factory=list)
     demoted: list[str] = field(default_factory=list)
+    # Graduated lines put BACK on canary probation because their recent
+    # outcomes turned bad (the relapse recency guard).
+    relapsed: list[str] = field(default_factory=list)
 
 
 def _governance_readiness() -> tuple[bool, bool]:
@@ -1995,7 +2077,7 @@ __all__ = [
     "list_learned", "forget_addendum", "retire_stale",
     "load_line_meta", "line_provenance", "note_recall",
     "note_outcome", "line_efficacy", "review_efficacy",
-    "mark_canary", "list_canaries", "review_canaries",
+    "mark_canary", "list_canaries", "review_canaries", "review_relapses",
     "find_conflicts", "detect_store_conflicts", "llm_conflict_classifier",
     "FailureSignature", "mine_failures", "count_eligible", "semantic_similarity",
     "HarnessProposal", "ProposeFn", "propose_addendum", "llm_proposer",
