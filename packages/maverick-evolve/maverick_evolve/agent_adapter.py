@@ -43,6 +43,11 @@ def env_for(config: dict) -> dict[str, str]:
     Only the import-time / env-read knobs go here; section knobs go in the
     config overlay (``overlay_for``). Unknown knobs are ignored.
     """
+    from .config_space import clamp_config
+    # Clamp at the sink: a loaded/hand-edited archive config can carry an
+    # out-of-bounds value that never passed through mutate's clamp, and
+    # max_swarm_fanout is a kernel safety cap -- it must not be exceeded.
+    config = clamp_config(config)
     env: dict[str, str] = {}
     if "max_swarm_fanout" in config:
         env["MAVERICK_MAX_SWARM_FANOUT"] = str(int(config["max_swarm_fanout"]))
@@ -54,6 +59,8 @@ def env_for(config: dict) -> dict[str, str]:
 def overlay_for(config: dict) -> dict:
     """Map section knobs to a config.toml overlay (also enabling the features
     so the evolved values actually take effect)."""
+    from .config_space import clamp_config
+    config = clamp_config(config)  # sink clamp -- see env_for
     overlay: dict = {}
     if "adaptive_compute.low_uncertainty" in config:
         overlay["adaptive_compute"] = {
@@ -87,6 +94,36 @@ def write_overlay(config: dict, path: str | Path) -> Path:
     return p
 
 
+_DONE_MARKER = "DONE.\n\n"
+
+
+def _extract_answer(stdout: str) -> str:
+    """Pull the agent's result out of the ``maverick start`` stdout envelope.
+
+    stdout is ``goal #N created: <title>\\n\\n`` + the orchestrator result,
+    itself ``DONE.\\n\\n<result>\\n\\n[<budget summary>]``. Scoring the whole
+    envelope leaked the prompt (echoed verbatim in the ``<title>`` line) into
+    substring scorers, so a wrong answer whose case reference appeared in the
+    prompt scored 1.0, and the rehearsal grader's ``Stopped``/``ERROR`` prefix
+    check never fired (the envelope starts with ``goal #N created``). Return
+    only ``<result>``.
+
+    Raises ``ValueError`` when no ``DONE.`` marker is present (a blocked/errored
+    run printed something else) so the caller scores it a failure, not an
+    answer.
+    """
+    idx = stdout.rfind(_DONE_MARKER)
+    if idx < 0:
+        raise ValueError("no DONE marker in run output")
+    body = stdout[idx + len(_DONE_MARKER):]
+    # Strip the trailing "\n\n[<budget summary>]" block the orchestrator appends
+    # (rpartition from the right so a "[...]" inside the result is left alone).
+    head, sep, tail = body.rpartition("\n\n[")
+    if sep and tail.rstrip().endswith("]"):
+        body = head
+    return body.strip()
+
+
 def subprocess_run_one(
     prompt: str,
     config: dict,
@@ -97,17 +134,15 @@ def subprocess_run_one(
 ) -> str:
     """Run one goal in a fresh ``maverick start`` subprocess under ``config``.
 
-    Writes a temp config overlay, sets ``MAVERICK_CONFIG_OVERLAY`` + env
-    knobs, and returns the run's raw stdout verbatim -- NOT just the agent's
-    final answer. The CLI's ``start`` command prints a ``goal #N created:
-    <title>`` line, then a blank line, then the orchestrator's result, which
-    is itself wrapped in a fixed ``DONE.\\n\\n<summary>...\\n\\n[<budget
-    summary>]`` envelope (see ``maverick.orchestrator.run_goal``/
-    ``run_goal_best_of_n``). Callers scoring this output (e.g.
-    ``eval_harness._contains_scorer``'s substring match) should expect that
-    surrounding text, not a bare answer. Process isolation guarantees
-    import-time knobs (fan-out) take effect. Requires a configured
-    provider/API key in the environment to actually produce answers.
+    Writes a temp config overlay, sets ``MAVERICK_CONFIG_OVERLAY`` + env knobs,
+    runs the goal, and returns the agent's result extracted from the CLI
+    envelope (see :func:`_extract_answer`) -- NOT the raw stdout, which prefixes
+    a ``goal #N created: <title>`` line that echoes the prompt and would leak
+    into substring scorers. Raises ``RuntimeError`` on a timeout, non-zero exit,
+    or output with no parseable result, so the eval harness scores those 0.0
+    instead of scoring garbage. Process isolation guarantees import-time knobs
+    (fan-out) take effect. Requires a configured provider/API key in the
+    environment to actually produce answers.
     """
     python = python or sys.executable
     with tempfile.TemporaryDirectory() as td:
@@ -130,7 +165,12 @@ def subprocess_run_one(
             raise RuntimeError(
                 f"run exited with code {proc.returncode}: {stderr}"
             )
-        return proc.stdout or ""
+        try:
+            return _extract_answer(proc.stdout or "")
+        except ValueError as e:
+            # returncode 0 but no parseable result envelope (e.g. a run blocked
+            # before the orchestrator returned): a failure, not an answer.
+            raise RuntimeError(f"run produced no answer: {e}") from None
 
 
 def make_agent_factory(run_one: RunOne | None = None, **run_kwargs):

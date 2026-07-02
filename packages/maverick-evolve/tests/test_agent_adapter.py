@@ -5,6 +5,7 @@ import random
 import pytest
 from maverick_evolve import EvalCase, evolve_live, make_agent_factory
 from maverick_evolve.agent_adapter import (
+    _extract_answer,
     env_for,
     overlay_for,
     subprocess_run_one,
@@ -46,6 +47,49 @@ def test_unknown_knobs_ignored():
     assert overlay_for({"mystery": 1}) == {}
 
 
+def test_env_for_clamps_out_of_bounds_safety_cap():
+    # A loaded/hand-edited archive config with an out-of-bounds fan-out (never
+    # produced by mutate's clamp) must NOT raise the kernel's fan-out safety cap
+    # on a live run: env_for clamps it to the declared max (16).
+    env = env_for({"max_swarm_fanout": 4096})
+    assert env["MAVERICK_MAX_SWARM_FANOUT"] == "16"
+    # low end clamps too, and a below-floor verifier confidence is lifted.
+    assert env_for({"max_swarm_fanout": 0})["MAVERICK_MAX_SWARM_FANOUT"] == "1"
+    assert env_for({"verifier_confidence": 2.0})["MAVERICK_VERIFIER_CONFIDENCE"] == "0.95"
+
+
+def test_overlay_for_clamps_out_of_bounds():
+    ov = overlay_for({"search.n": 999})
+    assert ov["search"]["n"] == 5  # declared max
+
+
+def test_extract_answer_strips_prompt_echo_and_budget():
+    # The title line echoes the prompt verbatim; scoring the whole envelope let
+    # a wrong answer whose reference appears in the prompt score 1.0.
+    envelope = ("goal #4 created: Is the capital of France Paris or Lyon?\n\n"
+                "DONE.\n\nThe capital of France is Lyon.\n\n[$0.02 spent]")
+    answer = _extract_answer(envelope)
+    assert answer == "The capital of France is Lyon."
+    # "Paris" (a substring scorer's reference, echoed in the prompt) is gone,
+    # so the wrong answer no longer scores as a match.
+    assert "Paris" not in answer
+    assert "goal #4 created" not in answer and "spent" not in answer
+
+
+def test_extract_answer_exposes_failure_prefix_for_rehearsal_grader():
+    # A blocked/errored run is wrapped in DONE too; extraction must surface the
+    # "Stopped"/"ERROR" prefix so rehearsal_completed can grade it incomplete
+    # (the raw envelope always starts with "goal #N created", hiding it).
+    envelope = ("goal #9 created: reconcile ledger\n\n"
+                "DONE.\n\nStopped: the assistant ran into an error.\n\n[$0.10 spent]")
+    assert _extract_answer(envelope).startswith("Stopped")
+
+
+def test_extract_answer_raises_without_done_marker():
+    with pytest.raises(ValueError):
+        _extract_answer("goal #1 created: hi\n\n(no result envelope)")
+
+
 def test_subprocess_run_one_uses_overlay_without_replacing_operator_config(monkeypatch, tmp_path):
     seen = {}
 
@@ -55,7 +99,8 @@ def test_subprocess_run_one_uses_overlay_without_replacing_operator_config(monke
         seen["cwd"] = kwargs["cwd"]
 
         class Proc:
-            stdout = "ok"
+            # realistic CLI envelope: title line (echoes prompt) + DONE result.
+            stdout = "goal #7 created: hello\n\nDONE.\n\nok\n\n[$0.01 spent]"
             returncode = 0
 
         return Proc()
@@ -69,7 +114,7 @@ def test_subprocess_run_one_uses_overlay_without_replacing_operator_config(monke
         "hello", {"search.n": 5, "max_swarm_fanout": 3}, workdir=str(tmp_path), python="py"
     )
 
-    assert out == "ok"
+    assert out == "ok"  # extracted from the envelope, not the whole stdout
     assert seen["args"] == ["py", "-m", "maverick.cli", "start", "hello"]
     assert seen["cwd"] == str(tmp_path)
     assert seen["env"]["MAVERICK_CONFIG"] == str(operator_config)

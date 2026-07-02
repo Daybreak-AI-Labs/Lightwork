@@ -108,6 +108,42 @@ def test_restore_blocks_path_traversal(tmp_path):
     assert not (tmp_path / "escape.txt").exists()
 
 
+def test_rollback_in_place_with_outward_symlink_completes(tmp_path):
+    """A workspace containing an outward-pointing symlink must still roll back
+    fully. Regression: the containment check .resolve()'d the pre-existing
+    symlink out of dest and raised, aborting the restore and leaving members
+    that sorted after the symlink (the very file being rolled back) unrestored."""
+    src = tmp_path / "work"
+    src.mkdir()
+    (src / "z_important.txt").write_text("ORIGINAL", encoding="utf-8")
+    (src / "00_current").symlink_to("/etc/hostname")  # outward, sorts first
+    store = tmp_path / "snaps"
+    man = create_snapshot(src, store, label="cp")
+    # symlink is not restorable, so it must not be counted in the manifest
+    assert man["files"] == 1
+
+    (src / "z_important.txt").write_text("CORRUPTED", encoding="utf-8")
+    res = restore_snapshot(store, man["id"], src)  # rollback in place
+    assert res["restored"] == 1
+    assert res["skipped_links"] == 1
+    assert (src / "z_important.txt").read_text(encoding="utf-8") == "ORIGINAL"
+
+
+def test_restore_still_blocks_traversal_through_symlinked_subdir(tmp_path):
+    """Skipping link members and lexical containment must not weaken the
+    traversal guard: a regular-file member with ../ still escapes-> rejected."""
+    store = tmp_path / "snaps"
+    store.mkdir()
+    evil = store / "snap-0001-evil.tar.gz"
+    payload = tmp_path / "payload"
+    payload.write_text("pwned", encoding="utf-8")
+    with tarfile.open(evil, "w:gz") as tar:
+        tar.add(payload, arcname="../escape.txt")
+    with pytest.raises(ValueError):
+        restore_snapshot(store, "snap-0001", tmp_path / "dest")
+    assert not (tmp_path / "escape.txt").exists()
+
+
 def test_tool_snapshot_confined_to_workspace(tmp_path):
     # HOME is isolated by the autouse conftest, so the store lands under tmp.
     work = tmp_path / "work"

@@ -699,7 +699,7 @@ def _department_memory(profile: DomainProfile, task: str, *,
         from . import dreaming
         if dreaming.enabled():
             insights = dreaming.recall_insights(task, domain=profile.name)
-            block = dreaming.format_context(insights)
+            block = dreaming.format_context(insights, shield=shield)
             if block:
                 blocks.append(block)
     except Exception:  # pragma: no cover -- recall never blocks a spawn

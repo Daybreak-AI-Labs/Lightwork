@@ -984,10 +984,15 @@ def _maintenance_phases(
     # RECONCILE the insight store with reality: retire insights contradicted
     # by newer successes, then age out insights whose pattern stopped
     # recurring (confirmation refreshes ts, so live lessons never expire).
-    report.insights_retired = resolve_contradictions(
-        successes, insights_path,
-        min_successes=int(cfg.get("contradiction_successes", 2)),
-    )
+    # Contradiction-retirement keys off verifier-labeled successes, so it is
+    # gated by the calibration interlock (a frozen verifier must not delete
+    # insights on labels we don't trust); TTL expiry is time-based, not
+    # verifier-driven, so it runs regardless.
+    if not report.learning_frozen:
+        report.insights_retired = resolve_contradictions(
+            successes, insights_path,
+            min_successes=int(cfg.get("contradiction_successes", 2)),
+        )
     report.insights_expired = expire_insights(
         insights_path, ttl_days=int(cfg.get("insight_ttl_days", 90)), now=now,
     )
@@ -1344,8 +1349,11 @@ def dream_cycle(
         )
 
     # FORGET: retire learned skills whose recall track record decayed —
-    # learning loops without forgetting loops accumulate noise.
-    if bool(cfg.get("retire_skills", True)):
+    # learning loops without forgetting loops accumulate noise. Gated by the
+    # calibration interlock: skill win-rates are derived from verifier outcomes,
+    # so a frozen (distrusted) verifier must not drive DELETIONS either — the
+    # same reasoning that stops _consolidate_learning from ADDING learned state.
+    if bool(cfg.get("retire_skills", True)) and not report.learning_frozen:
         report.skills_retired = len(retire_stale_skills(
             skill_store, min_uses=int(cfg.get("retire_min_uses", 5)),
             below=float(cfg.get("retire_below", 0.25)),
@@ -1457,6 +1465,17 @@ def snapshot_learning_state(
         return dest
     except OSError as e:
         log.warning("dreaming: snapshot failed: %s", e)
+        # A partially-written snapshot must NOT survive. It would be the newest
+        # entry in list_snapshots, so rollback_learning_state("latest") would
+        # restore only the stores it managed to copy and DELETE every live store
+        # absent from it (via _remove_post_snapshot_stores, which treats absence
+        # as "created this cycle") -- destroying learned state on a snapshot that
+        # never completed. Remove the partial dir so None means "no snapshot".
+        try:
+            if dest.exists():
+                shutil.rmtree(dest, ignore_errors=True)
+        except OSError:  # pragma: no cover -- best-effort cleanup
+            pass
         return None
 
 

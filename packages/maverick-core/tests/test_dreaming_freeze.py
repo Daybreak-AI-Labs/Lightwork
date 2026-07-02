@@ -53,6 +53,38 @@ def test_frozen_verifier_blocks_consolidation(tmp_path, monkeypatch):
     assert dreaming.load_insights(tmp_path / "insights.ndjson") == []  # nothing written
 
 
+def test_frozen_verifier_does_not_retire_insights(tmp_path):
+    # The interlock is two-sided: a frozen (distrusted) verifier must not DELETE
+    # learned state either. resolve_contradictions retires insights on verifier-
+    # labeled successes, so it must be gated the same way consolidation is.
+    ipath = tmp_path / "insights.ndjson"
+    dreaming.append_insights([dreaming.DreamInsight(
+        ts=100.0, kind="failure_pattern", domain="finance_sox",
+        text="erp export timeout batch reconciliation failed repeatedly",
+        evidence=3,
+    )], path=ipath)
+    # Two successes NEWER than the insight whose tokens it fully covers -> the
+    # unfrozen path retires it (min_successes=2).
+    successes = [{"t": 200.0, "goal": "erp export"},
+                 {"t": 200.0, "goal": "erp export"}]
+    cfg = {"contradiction_successes": 2, "prune": False, "user_notes": False}
+
+    def run(frozen):
+        rep = dreaming.DreamReport()
+        rep.learning_frozen = frozen
+        dreaming._maintenance_phases(
+            rep, cfg, successes, None, insights_path=ipath,
+            reflexion_path=None, user_notes_path=None, now=300.0)
+        return rep.insights_retired
+
+    # Frozen: the contradicted insight survives (retirement skipped).
+    assert run(True) == 0
+    assert dreaming.load_insights(ipath) != []
+    # Unfrozen baseline: the identical inputs DO retire it.
+    assert run(False) >= 1
+    assert dreaming.load_insights(ipath) == []
+
+
 def test_rollout_aborts_when_snapshot_raises(monkeypatch):
     # A pre-promotion snapshot failure must ABORT (no reliable rollback), not
     # proceed into a promotion that can't be cleanly undone.
