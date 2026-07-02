@@ -1058,3 +1058,29 @@ def test_fk_readers_are_tenant_scoped(world, monkeypatch):
     assert len(world.share_links_for_goal(ga)) == 1
     assert world.signoffs_for_goals([ga]) == {ga: "approved"}
     assert world.origin_status_counts("schedule", "shared-ref")  # non-empty
+
+
+def test_erase_conversations_deletes_all_goal_child_rows(world):
+    # GDPR erase of a goal that carries a row in EVERY child table referencing
+    # goals(id). Postgres enforces FKs per statement (no ON DELETE CASCADE), so
+    # DELETE FROM goals fails unless artifacts/share_links/signoffs/goal_origins
+    # are deleted first -- the erase used to raise ForeignKeyViolation and roll
+    # the whole subject deletion back, leaving all their data intact.
+    import time
+    conv = world.get_or_create_conversation("slack", f"erase-{time.time()}")
+    gid = world.create_goal("secret goal")
+    world.append_turn(conv.id, "user", "please remember this", goal_id=gid)
+    world.add_artifact(gid, "text", "report", "secret content")
+    world.create_share_link(gid, created_by="x")
+    world.record_signoff(gid, "approved", decided_by="x")
+    world.record_goal_origin(gid, "webhook", "ext-ref")
+
+    goals, _paths, removed_turns = world.erase_conversations([conv.id])
+
+    assert gid in goals
+    assert removed_turns >= 1
+    # The goal and every one of its child rows must be gone.
+    assert world.get_goal(gid) is None
+    assert world.artifacts_for_goal(gid) == []
+    assert world.share_links_for_goal(gid) == []
+    assert world.signoffs_for_goals([gid]) == {}

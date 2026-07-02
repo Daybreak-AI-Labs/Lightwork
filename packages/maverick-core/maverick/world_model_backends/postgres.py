@@ -2903,6 +2903,14 @@ class PostgresWorldModel:
                 cur.execute("DELETE FROM attachments WHERE goal_id = ANY(%s)", (gids,))
                 cur.execute("DELETE FROM episodes WHERE goal_id = ANY(%s)", (gids,))
                 cur.execute("DELETE FROM processed_messages WHERE goal_id = ANY(%s)", (gids,))
+                # share_links/signoffs/goal_origins also REFERENCE goals(id) with
+                # no ON DELETE CASCADE; Postgres checks FKs per statement, so the
+                # DELETE FROM goals below raises a ForeignKeyViolation and rolls
+                # the whole GDPR erase back unless these children go first too.
+                cur.execute("DELETE FROM artifacts WHERE goal_id = ANY(%s)", (gids,))
+                cur.execute("DELETE FROM share_links WHERE goal_id = ANY(%s)", (gids,))
+                cur.execute("DELETE FROM signoffs WHERE goal_id = ANY(%s)", (gids,))
+                cur.execute("DELETE FROM goal_origins WHERE goal_id = ANY(%s)", (gids,))
                 # Postgres self-referential FKs are checked per statement by
                 # default, unlike the SQLite path that defers FK checks for the
                 # transaction. Break edges inside the soon-to-be-deleted tree so
