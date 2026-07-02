@@ -95,6 +95,13 @@ class SwarmContext:
     # across the swarm; mutated only on the single event loop, so a plain set
     # is safe.
     skills_used: set[str] = field(default_factory=set)
+    # Models whose learned self-harness guidance was recalled into any agent's
+    # prompt during this run (stamped by Agent._with_harness_addendum). The
+    # orchestrator attributes the run's final outcome to each at finalize
+    # (self_harness.note_outcome) so a WORKER model's guidance accumulates
+    # outcome counters too, not just the orchestrator's. Same sharing/mutation
+    # pattern as ``skills_used``.
+    harness_models: set[str] = field(default_factory=set)
     # Live trust signals consumed by the autonomy gate (maverick.autonomy) and
     # the trajectory-donation selector. ``last_disagreement`` is the normalized
     # answer entropy of the most recent swarm fan-out (0 == consensus); it is

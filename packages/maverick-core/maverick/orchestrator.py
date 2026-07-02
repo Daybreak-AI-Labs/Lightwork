@@ -357,15 +357,20 @@ def _record_skill_outcome(ctx: Any, *, success: bool) -> None:
 
 
 def _record_harness_outcome(domain: str | None, *, success: bool,
-                            blackboard: Any = None) -> None:
+                            blackboard: Any = None, ctx: Any = None) -> None:
     """Attribute this run's outcome to the self-harness guidance it recalled, so
     the efficacy + canary lifecycle (note_outcome -> review_efficacy /
     review_canaries) actually fires from REAL runs -- the counters were otherwise
-    never populated. Scoped to the run's model + domain + the tools the run
-    actually INVOKED (from the blackboard's observation posts): a tool-scoped
-    line is credited only when its tool was used, the causal subset of the
-    tool scopes recall injected -- an available-but-unused tool's guidance
-    didn't shape this outcome. Fully fail-safe -- stats never block a run."""
+    never populated. Credits EVERY model whose guidance this run recalled: the
+    orchestrator's plus each WORKER model an agent registered on
+    ``ctx.harness_models`` at recall time -- the harness is model-specific, so a
+    worker's canary must graduate/demote from real runs too, not sit on
+    probation forever. Each credit is scoped to the run's domain + the tools
+    the run actually INVOKED (from the blackboard's observation posts): a
+    tool-scoped line is credited only when its tool was used, the causal subset
+    of the tool scopes recall injected -- an available-but-unused tool's
+    guidance didn't shape this outcome. Fully fail-safe -- stats never block a
+    run."""
     try:
         from . import self_harness
         if not self_harness.enabled():
@@ -375,8 +380,10 @@ def _record_harness_outcome(domain: str | None, *, success: bool,
         if blackboard is not None:
             from . import reflexion
             tools = reflexion.tools_from_blackboard(blackboard)
-        self_harness.note_outcome(model_for_role("orchestrator"), bool(success),
-                                  domain=domain, tools=tools)
+        models = {str(m) for m in (getattr(ctx, "harness_models", None) or ())}
+        models.add(model_for_role("orchestrator"))
+        for m in sorted(models):
+            self_harness.note_outcome(m, bool(success), domain=domain, tools=tools)
     except Exception:  # pragma: no cover -- stats never block a run
         pass
 
@@ -1307,7 +1314,8 @@ async def run_goal(  # noqa: C901  -- core goal-execution loop
             if not (result.error or "").startswith("budget exceeded:"):
                 _record_skill_outcome(ctx, success=False)
                 _record_planning_outcome(goal, domain, _planning_mode, success=False)
-                _record_harness_outcome(domain, success=False, blackboard=blackboard)
+                _record_harness_outcome(domain, success=False, blackboard=blackboard,
+                                        ctx=ctx)
             _fire_webhook("goal_finished", {
                 "goal_id": goal_id, "status": "blocked", "result": result.error,
             })
@@ -1389,7 +1397,7 @@ async def run_goal(  # noqa: C901  -- core goal-execution loop
         _record_deliverable_artifact(world, goal_id, summary)
         _record_skill_outcome(ctx, success=True)
         _record_planning_outcome(goal, domain, _planning_mode, success=True)
-        _record_harness_outcome(domain, success=True, blackboard=blackboard)
+        _record_harness_outcome(domain, success=True, blackboard=blackboard, ctx=ctx)
         _fire_webhook("final_emitted", {
             "goal_id": goal_id,
             "patch_size_bytes": len(summary.encode("utf-8")),

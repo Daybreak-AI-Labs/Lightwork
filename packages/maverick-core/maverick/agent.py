@@ -998,6 +998,12 @@ class Agent:
                 # Track that this guidance was USED (throttled, best-effort) so
                 # retirement keeps actively-recalled lines and prunes dormant ones.
                 note_recall(self.model, domain=_dom, tools=_tools)
+                # Register this model for run-end outcome attribution (mirrors
+                # ctx.skills_used): a WORKER's recalled guidance earns outcome
+                # credit too, not only the orchestrator's.
+                models = getattr(getattr(self, "ctx", None), "harness_models", None)
+                if isinstance(models, set):
+                    models.add(str(self.model))
                 return base + "\n\n" + addendum
         except Exception:  # pragma: no cover -- never block a run
             pass

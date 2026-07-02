@@ -121,6 +121,13 @@ drive them; this wave wires them, changing no default behavior:
   `_rate`, a fully-exhausted arm goes NaN, and the validator's finite-check
   rejects the candidate. Unset (default) = uncapped, the historical behavior;
   the wizard defaults the cap to $5 when an eval corpus is configured.
+- **Worker-model outcome credit**: `Agent._with_harness_addendum` registers its
+  resolved model on `ctx.harness_models` whenever guidance is recalled (the
+  `ctx.skills_used` pattern), and `_record_harness_outcome` credits **every**
+  registered model — not only the orchestrator's — each scoped to the run's
+  domain + invoked tools. Before this, worker models' lines earned recalls but
+  never outcomes, so a worker canary promoted by `run --all-models` could
+  never graduate or be demoted by the counter-driven review.
 
 ## Principle (unchanged across every wave)
 

@@ -2169,3 +2169,34 @@ def test_harness_outcome_credits_only_tools_actually_used(monkeypatch, store):
     eff = {r["text"]: r for r in sh.line_efficacy("M", store)}
     assert eff["verify the fetched payload"]["success"] == 1   # used -> credited
     assert eff["bound the query first"]["total"] == 0          # unused -> untouched
+
+
+def test_harness_outcome_credits_worker_models(monkeypatch, store):
+    # A worker model registered on ctx.harness_models at recall time gets
+    # outcome credit alongside the orchestrator -- without it a worker's canary
+    # sits on probation forever (its counters never move). An unrecalled
+    # model's lines stay untouched.
+    from types import SimpleNamespace
+
+    from maverick import llm
+    from maverick.orchestrator import _record_harness_outcome
+    ctrl = _enable(monkeypatch)
+    monkeypatch.setattr(sh, "_store_path", lambda: store)
+    monkeypatch.setattr(llm, "model_for_role", lambda role: "ORCH")
+    _promote_line(store, "ORCH", "c0", "orch line", ctrl)
+    _promote_line(store, "W1", "c0", "worker line", ctrl)
+    _promote_line(store, "W2", "c0", "unrecalled line", ctrl)
+    ctx = SimpleNamespace(harness_models={"W1"})
+    _record_harness_outcome(None, success=True, ctx=ctx)
+
+    def eff(model):
+        return {r["text"]: r for r in sh.line_efficacy(model, store)}
+
+    assert eff("ORCH")["orch line"]["success"] == 1        # orchestrator still credited
+    assert eff("W1")["worker line"]["success"] == 1        # recalled worker credited
+    assert eff("W2")["unrecalled line"]["total"] == 0      # unrecalled -> untouched
+    # a ctx without the field (or none at all) keeps the historical behavior
+    _record_harness_outcome(None, success=True, ctx=SimpleNamespace())
+    _record_harness_outcome(None, success=True)
+    assert eff("ORCH")["orch line"]["success"] == 3
+    assert eff("W1")["worker line"]["success"] == 1
