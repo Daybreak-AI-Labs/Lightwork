@@ -190,4 +190,20 @@ def collect() -> dict:
     return bundle
 
 
-__all__ = ["collect"]
+def export(path: str | None = None) -> tuple:
+    """Assemble the redacted bundle and write it to ``path`` (default
+    ``support-<correlation_id>.json`` in the cwd). Returns ``(Path, bundle)``.
+
+    The customer controls and can inspect the file before sending it — the
+    air-gap-safe, regulator-safe support channel (no silent telemetry). Wiring
+    an audit-trail record of the export belongs in the CLI wrapper so ``collect``
+    stays side-effect free (see docs/enterprise/product-operations.md)."""
+    import json
+    from pathlib import Path
+    bundle = collect()
+    out = Path(path) if path else Path.cwd() / f"support-{bundle['correlation_id']}.json"
+    out.write_text(json.dumps(bundle, indent=2, default=str), encoding="utf-8")
+    return out, bundle
+
+
+__all__ = ["collect", "export"]

@@ -52,10 +52,15 @@ python -m maverick.entitlements issue --customer "Cedar Valley Bank" \
 python -m maverick.entitlements show --file license.json --pubkey <pub>
 ```
 
-**To build next:** a `[license]` config section + installer-wizard step (kernel
-rules 5–6); a connected **entitlement API** for instant flips + usage metering;
-wiring `.allows()` into the pack loader + the specific paid chokepoints; embed
-Daybreak's publisher pubkey in the release build.
+**Built (this PR):** the `[license]` config knob (`enforce` / `publisher_pubkeys`
+/ `license_file`), the **opt-in enforcement gate** (`enforcing()` / `require()`
+/ `require_suite()`, **default off** so no dev/test box changes behavior), and a
+first real chokepoint — `fleet_memory.enabled()` gates off under enforcement
+without a Gold+fleet entitlement.
+
+**To build next:** the installer-wizard step (kernel rule 6); a connected
+**entitlement API** for instant flips + usage metering; wiring `require()` into
+the remaining paid chokepoints; embed Daybreak's publisher pubkey in the build.
 
 ## 2. Updates — every size, every regulatory posture
 
@@ -86,9 +91,11 @@ offline hot-deploy safety) and **Sigstore** signing on release binaries.
 - **Air-gapped:** hand a signed bundle out-of-band → `verify_bundle()` offline
   → apply under change control.
 
-**To build next:** the `maverick upgrade` apply/rollback command (swap
-binary/container, run migrations, blue-green using the existing snapshot+rollback
-mechanism); the release-feed publisher; channel config.
+**Built (this PR):** the offline verify + plan CLI —
+`python -m maverick.release_update verify-bundle <dir>` and `… plan --current
+<v> --manifest <f>`. **To build next:** the `maverick upgrade` **apply/rollback**
+(swap binary/container, run migrations, blue-green using the existing
+snapshot+rollback mechanism); the release-feed publisher; channel config.
 
 ## 3. Support — see what broke, fix it, push the fix
 
@@ -109,10 +116,11 @@ secret-scrubbed config).
   redacted and customer-approved. Tell a CISO: *"our support literally cannot
   siphon your data — it's on your audit log and you approve it."*
 
-**To build next:** emit an audit event on bundle export (keep `collect()` pure;
-do it in the CLI wrapper); a lightweight **intake** (portal or email→ticket)
-keyed by `correlation_id` + version + entitlement; the round-trip to a hotfix
-release (feeds §2).
+**Built (this PR):** `support_bundle.export()` writes the redacted, customer-
+controlled bundle to a file (keyed by `correlation_id`). **To build next:** emit
+an audit event on export (in the CLI wrapper, keeping `collect()` pure); a
+lightweight **intake** (portal or email→ticket) keyed by `correlation_id` +
+version + entitlement; the round-trip to a hotfix release (feeds §2).
 
 ---
 

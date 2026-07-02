@@ -87,10 +87,22 @@ def _parse_dt(s: str | None) -> datetime | None:
     return dt if dt.tzinfo else dt.replace(tzinfo=timezone.utc)
 
 
+def _license_cfg() -> dict:
+    """The ``[license]`` config section (config knob — kernel rule 5)."""
+    try:
+        from .config import load_config
+        return dict(load_config().get("license") or {})
+    except Exception:  # pragma: no cover - config unavailable => env/embedded only
+        return {}
+
+
 def _default_license_path() -> Path:
     env = os.environ.get("MAVERICK_LICENSE_FILE")
     if env:
         return Path(env).expanduser()
+    cfg_file = _license_cfg().get("license_file")
+    if cfg_file:
+        return Path(str(cfg_file)).expanduser()
     from . import paths
     return paths.maverick_home() / "license.json"
 
@@ -101,6 +113,10 @@ def _trusted_pubkeys(explicit: list[str] | None = None) -> list[str]:
     keys: list[str] = []
     env = os.environ.get("MAVERICK_LICENSE_PUBKEYS", "")
     keys += [k.strip().lower() for k in env.split(",") if k.strip()]
+    cfg_keys = _license_cfg().get("publisher_pubkeys") or []
+    if isinstance(cfg_keys, str):
+        cfg_keys = cfg_keys.split(",")
+    keys += [str(k).strip().lower() for k in cfg_keys if str(k).strip()]
     keys += [k.lower() for k in _EMBEDDED_PUBKEYS]
     return keys
 
@@ -253,6 +269,35 @@ def current(refresh: bool = False) -> Entitlements:
 def reset_cache() -> None:
     global _CACHE
     _CACHE = None
+
+
+# ---- chokepoint API (what paid features call) ------------------------------
+
+def enforcing() -> bool:
+    """True iff paid-feature enforcement is ON for this deployment. **Default
+    OFF** — a dev/community box runs everything; enforcement is a deliberate
+    production posture (``[license] enforce = true`` or
+    ``MAVERICK_LICENSE_ENFORCE=1``). This is what keeps the fail-open promise:
+    the gate never activates unless an operator turns it on."""
+    v = os.environ.get("MAVERICK_LICENSE_ENFORCE")
+    if v is not None:
+        return v.strip().lower() in ("1", "true", "yes", "on")
+    return bool(_license_cfg().get("enforce", False))
+
+
+def require(feature: str) -> bool:
+    """Chokepoint gate for a paid *feature*: allowed unless enforcement is on
+    **and** the license doesn't grant it. Fail-open when not enforcing."""
+    if not enforcing():
+        return True
+    return current().allows(feature)
+
+
+def require_suite(suite: str) -> bool:
+    """Chokepoint gate for a paid add-on *suite* (e.g. ``fleet``)."""
+    if not enforcing():
+        return True
+    return current().suite_enabled(suite)
 
 
 # ---- CLI: python -m maverick.entitlements {keygen,issue,verify,show} -------

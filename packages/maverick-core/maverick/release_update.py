@@ -136,3 +136,43 @@ def plan_upgrade(current_version: str, manifest: dict) -> UpgradePlan:
             f"{manifest.get('min_from')} — upgrade to an intermediate release first",
             current_version, manifest.get("version", ""), migs)
     return UpgradePlan(True, "ok", current_version, manifest.get("version", ""), migs)
+
+
+# ---- CLI: python -m maverick.release_update {verify-bundle,plan} ------------
+
+def main(argv: list[str] | None = None) -> int:  # pragma: no cover -- CLI shell
+    import argparse
+
+    p = argparse.ArgumentParser(prog="maverick.release_update",
+                                description="Verify + plan Lightwork updates offline.")
+    sub = p.add_subparsers(dest="cmd", required=True)
+
+    vb = sub.add_parser("verify-bundle", help="verify an offline update bundle dir")
+    vb.add_argument("dir")
+    vb.add_argument("--pubkey", default=None, help="comma-separated trusted pubkey hex")
+
+    pl = sub.add_parser("plan", help="plan an upgrade from the running version")
+    pl.add_argument("--current", required=True, help="running version, e.g. v0.1.6")
+    pl.add_argument("--manifest", required=True, help="path to a manifest.json")
+
+    args = p.parse_args(argv)
+
+    if args.cmd == "verify-bundle":
+        trust = [k.strip() for k in args.pubkey.split(",")] if args.pubkey else None
+        res = verify_bundle(args.dir, trusted_pubkeys=trust)
+        print(f"{'OK' if res.ok else 'FAIL'}: {res.reason}  (version {res.version or '?'})")
+        for issue in res.issues:
+            print("  -", issue)
+        return 0 if res.ok else 1
+
+    manifest = json.loads(Path(args.manifest).read_text("utf-8"))
+    plan = plan_upgrade(args.current, manifest)
+    print(f"{'OK' if plan.ok else 'BLOCKED'}: {plan.reason}")
+    if plan.ok:
+        print(f"  {plan.from_version} → {plan.to_version}")
+        print(f"  migrations: {', '.join(plan.migrations) or 'none'}")
+    return 0 if plan.ok else 1
+
+
+if __name__ == "__main__":  # pragma: no cover
+    raise SystemExit(main())
