@@ -292,6 +292,7 @@ def overlay_profile(base: DomainProfile, patch: dict) -> DomainProfile:
         "refuse": list(base.refuse),
         "workflow": list(base.workflow),
         "output": base.output,
+        "autonomy": base.autonomy,
     }
     for k in overridden_fields(patch):
         data[k] = patch[k]
@@ -299,6 +300,13 @@ def overlay_profile(base: DomainProfile, patch: dict) -> DomainProfile:
         data["workflow"] = _coerce_workflow(patch["workflow"])
     if "output" in patch:
         data["output"] = _coerce_output(patch["output"])
+    # autonomy is a structured field, so coerce the raw TOML table the same way
+    # _coerce does on the load path. Without this the override loop above stored
+    # patch["autonomy"] as a bare dict, so downstream code expecting an
+    # AutonomyProfile broke; and without seeding it from base above, an overlay
+    # that didn't set [autonomy] silently dropped the base pack's autonomy.
+    if "autonomy" in patch:
+        data["autonomy"] = AutonomyProfile.from_toml(patch["autonomy"])
     return DomainProfile(name=base.name, **data)
 
 
