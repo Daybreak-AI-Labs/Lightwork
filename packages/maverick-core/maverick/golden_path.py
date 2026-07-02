@@ -36,6 +36,7 @@ class Scenario:
     steps: list[Step]
     chain_clean: bool
     break_reason: str
+    pubkey_hex: str = ""
 
 
 def run_scenario(audit_path: Path, *, key_dir: Path) -> Scenario:
@@ -117,7 +118,8 @@ def run_scenario(audit_path: Path, *, key_dir: Path) -> Scenario:
             f"the authentic chain verifies clean ({not clean_breaks}); "
             f"silently changing $60,000 to $60 is caught ({reason})"))
 
-        return Scenario(steps=steps, chain_clean=not clean_breaks, break_reason=reason)
+        return Scenario(steps=steps, chain_clean=not clean_breaks, break_reason=reason,
+                        pubkey_hex=signer.public_key_hex)
     finally:
         signing.KEY_DIR = saved_key_dir
 
@@ -136,6 +138,9 @@ def render(scenario: Scenario, audit_path: Path) -> str:
     for i, s in enumerate(scenario.steps, 1):
         ev = s.evidence.replace("|", "\\|")
         lines.append(f"| {i} | {s.scene} | {s.request} | **{s.verdict}** | {ev} |")
+    verify_cmd = f"maverick audit verify --file {audit_path.name}"
+    if scenario.pubkey_hex:
+        verify_cmd += f" --pubkey {scenario.pubkey_hex}"
     lines += [
         "",
         "## What just happened",
@@ -147,8 +152,8 @@ def render(scenario: Scenario, audit_path: Path) -> str:
         "- Every decision is a row in a **signed hash-chain**: altering one amount "
         f"is caught (`{scenario.break_reason}`).",
         "",
-        f"Verify it yourself: `maverick audit verify --file {audit_path.name}` "
-        "(or check the `sig`/`hash` fields in the file directly).",
+        f"Verify it yourself — from `{audit_path.parent.name}/`, a third party needs "
+        f"only the public key (no access to Lightwork):\n\n    {verify_cmd}\n",
         "",
     ]
     return "\n".join(lines)
