@@ -149,10 +149,28 @@ def _recent_failures() -> dict:
     return out
 
 
+def _entitlement() -> dict:
+    """The deployment's licensed edition/tier — so a support ticket is keyed to
+    the exact SKU the customer runs (no secrets; the summary is safe to share)."""
+    try:
+        from .entitlements import current
+        ent = current()
+        return {"customer": ent.customer, "tier": ent.tier, "status": ent.status,
+                "suites": list(ent.suites),
+                "expires_at": ent.expires_at.date().isoformat() if ent.expires_at else None}
+    except Exception:  # pragma: no cover - never let this block the bundle
+        return {"status": "unavailable"}
+
+
 def collect() -> dict:
     """Assemble the full redacted diagnostics bundle."""
+    import secrets
     bundle: dict[str, Any] = {
+        # A ticket key: correlate the bundle a customer sends to their ticket,
+        # their entitlement, and the exact build — without any customer data.
+        "correlation_id": "sup_" + secrets.token_hex(6),
         "generated_at": time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime()),
+        "entitlement": _entitlement(),
         "versions": _versions(),
         "runtime": _runtime(),
         "readiness": _readiness(),
