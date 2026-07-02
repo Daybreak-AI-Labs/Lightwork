@@ -227,11 +227,23 @@ class WeaviateStore:
             return 0
 
     def reset(self) -> None:
+        tenant_id = _active_tenant()
+        if tenant_id is None:
+            # Single-tenant: drop and recreate the whole collection (fast).
+            try:
+                self._client.collections.delete(self._collection)
+            except Exception:
+                pass
+            self._ensure_collection()
+            return
+        # Multi-tenant: delete ONLY this tenant's objects. Dropping the shared
+        # collection here would wipe EVERY other tenant's vectors too -- the same
+        # isolation add()/query()/delete()/count() already enforce via _tenant.
         try:
-            self._client.collections.delete(self._collection)
-        except Exception:
-            pass
-        self._ensure_collection()
+            coll = self._client.collections.get(self._collection)
+            coll.data.delete_many(where=self._tenant_filter(tenant_id))
+        except Exception as e:  # pragma: no cover -- backend-specific
+            log.debug("weaviate: tenant-scoped reset failed: %s", e)
 
 
 __all__ = ["WeaviateStore"]
