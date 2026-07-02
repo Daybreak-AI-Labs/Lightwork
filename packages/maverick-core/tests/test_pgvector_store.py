@@ -91,6 +91,9 @@ def test_pgvector_init_creates_schema(monkeypatch):
     assert "CREATE TABLE IF NOT EXISTS mvk_vectors" in sql
     assert "tenant_id text" in sql
     assert "idx_mvk_vectors_collection_tenant" in sql
+    # The row key is (collection, id), not id alone -- a sole-id key let an add()
+    # in one collection overwrite a same-id row in another (see the upsert test).
+    assert "PRIMARY KEY (collection, id)" in sql
 
 
 def test_pgvector_add_upserts_with_vectors(monkeypatch):
@@ -103,7 +106,10 @@ def test_pgvector_add_upserts_with_vectors(monkeypatch):
                for s, _ in conn.executed)
     inserts = [(s, p) for s, p in conn.executed if s.lstrip().startswith("INSERT")]
     assert len(inserts) == 2
-    assert "ON CONFLICT (id) DO UPDATE" in inserts[0][0]
+    # Conflict target is (collection, id) so an add() in one collection can't
+    # overwrite a same-id row that belongs to another collection/tenant.
+    assert "ON CONFLICT (collection, id) DO UPDATE" in inserts[0][0]
+    assert "ON CONFLICT (id) DO UPDATE" not in inserts[0][0]
     # the embedded vector is the last bound param, serialized as a pgvector literal
     assert inserts[0][1][-1].startswith("[") and inserts[0][1][-1].endswith("]")
 
