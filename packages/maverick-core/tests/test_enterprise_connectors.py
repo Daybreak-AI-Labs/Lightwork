@@ -201,6 +201,34 @@ def test_graphql_requires_config(monkeypatch):
     assert "ERROR" in out and "ACMEGQL_URL" in out
 
 
+def test_automation_platform_connectors_present():
+    from maverick.tools.enterprise_connectors import ENTERPRISE_CONNECTOR_NAMES, connector_catalog
+
+    for name in ("zapier", "n8n", "power_automate", "make", "workato"):
+        assert name in ENTERPRISE_CONNECTOR_NAMES
+
+    catalog = {e["name"]: e for e in connector_catalog()}
+    assert catalog["n8n"]["env"] == [("N8N_BASE_URL", False), ("N8N_TOKEN", True)]
+    assert catalog["power_automate"]["env"] == [
+        ("POWER_AUTOMATE_BASE_URL", False), ("POWER_AUTOMATE_TOKEN", True),
+    ]
+
+
+def test_slack_and_google_calendar_connectors_present():
+    from maverick.tools.enterprise_connectors import ENTERPRISE_CONNECTOR_NAMES, connector_catalog
+
+    for name in ("slack_api", "google_calendar"):
+        assert name in ENTERPRISE_CONNECTOR_NAMES
+
+    catalog = {e["name"]: e for e in connector_catalog()}
+    assert catalog["slack_api"]["env"] == [
+        ("SLACK_API_BASE_URL", False), ("SLACK_API_TOKEN", True),
+    ]
+    assert catalog["google_calendar"]["env"] == [
+        ("GOOGLE_CALENDAR_BASE_URL", False), ("GOOGLE_CALENDAR_TOKEN", True),
+    ]
+
+
 def test_graphql_errors_field_is_error(monkeypatch):
     monkeypatch.setenv("ACMEGQL_URL", "https://gql.example.com")
     monkeypatch.setenv("ACMEGQL_TOKEN", "tok")

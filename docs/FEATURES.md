@@ -553,9 +553,10 @@ here.
   Twilio, Zoom, S3, DynamoDB, MongoDB, Redis, Elasticsearch, Datadog, Sentry,
   PagerDuty, Mixpanel, PostHog, Plausible, GA4, Home Assistant, Cloudflare,
   Vercel, AWS Lambda/SES/SNS, Microsoft Graph, and more — plus a long-tail of
-  214 write-capable token-authed REST/GraphQL connectors
+  219 write-capable token-authed REST/GraphQL connectors
   (`enterprise_connectors.py`, built on `make_rest_tool`) covering CRM, ERP,
-  ITSM, HRIS, security, and data systems.
+  ITSM, HRIS, security, data systems, and automation/iPaaS platforms (Zapier,
+  n8n, Power Automate, Make, Workato).
 - **Primary-source data connectors (37, read-only, low-risk)** — authoritative
   government and public data APIs that ground the analyst-style packs in
   primary sources instead of model memory: SEC EDGAR, FRED, U.S. Treasury,
