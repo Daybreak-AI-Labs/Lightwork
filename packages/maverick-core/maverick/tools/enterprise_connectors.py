@@ -441,6 +441,21 @@ _SPECS: list[dict] = [
     dict(name="zapier",
          description="Zapier NLA / REST. ops get/post (writes need confirm). Auth: "
          "ZAPIER_BASE_URL + ZAPIER_TOKEN."),
+    dict(name="n8n", token_header="X-N8N-API-KEY", scheme="",
+         description="n8n workflow-automation REST. ops get/post/put/delete (writes "
+         "need confirm). e.g. GET /api/v1/workflows, POST /api/v1/workflows/{id}/"
+         "activate, POST /webhook/{path} to fire a workflow. Auth: N8N_BASE_URL "
+         "(your n8n instance, e.g. https://{host}/api/v1) + N8N_TOKEN (X-N8N-API-KEY)."),
+    dict(name="power_automate",
+         description="Microsoft Power Automate management REST. ops get/post/patch/"
+         "delete (writes need confirm). e.g. GET /providers/Microsoft.ProcessSimple/"
+         "environments/{env}/flows, POST {env}/flows/{flow}/triggers/manual/run to "
+         "fire a flow. Auth: POWER_AUTOMATE_BASE_URL (https://api.flow.microsoft.com) "
+         "+ POWER_AUTOMATE_TOKEN (Entra ID OAuth bearer)."),
+    dict(name="make",
+         description="Make (Integromat) REST. ops get/post (writes need confirm). e.g. "
+         "GET /api/v2/scenarios, POST /api/v2/scenarios/{id}/run. Auth: MAKE_BASE_URL "
+         "(https://{zone}.make.com) + MAKE_TOKEN."),
 
     # --- Cloud platforms / orchestration (control-plane REST) ---
     dict(name="kubernetes",
@@ -498,6 +513,16 @@ _SPECS: list[dict] = [
          description="Cisco Webex REST. ops get/post/put/delete (writes need confirm). "
          "e.g. /v1/messages, /v1/rooms. Auth: WEBEX_BASE_URL (https://webexapis.com) + "
          "WEBEX_TOKEN."),
+    dict(name="slack_api",
+         description="Slack Web API. ops get/post (writes need confirm). e.g. POST "
+         "/api/chat.postMessage, GET /api/conversations.list, GET /api/users.list. "
+         "Auth: SLACK_API_BASE_URL (https://slack.com) + SLACK_API_TOKEN (bot/user "
+         "OAuth bearer, xoxb-.../xoxp-...)."),
+    dict(name="google_calendar",
+         description="Google Calendar REST v3. ops get/post/put/delete (writes need "
+         "confirm). e.g. /calendars/primary/events, /calendars/primary/events/quickAdd. "
+         "Auth: GOOGLE_CALENDAR_BASE_URL (https://www.googleapis.com/calendar/v3) + "
+         "GOOGLE_CALENDAR_TOKEN (OAuth2 bearer, refreshed externally)."),
 
     # --- Databases / BI over REST ---
     dict(name="neo4j", basic=True,

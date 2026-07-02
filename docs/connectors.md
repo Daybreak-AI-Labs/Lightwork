@@ -11,13 +11,22 @@ connector follows the same house rules:
 - **Fail closed, fail loud.** Missing config or an API error returns an
   `ERROR:`-prefixed message; it never silently half-succeeds.
 
-There are **214 write-capable long-tail enterprise connectors** in the catalog
+There are **219 write-capable long-tail enterprise connectors** in the catalog
 below, plus dedicated-module connectors (Salesforce, HubSpot, Stripe,
-ServiceNow, Snowflake, ...), part of **286 built-in tool modules** in the
-kernel. They span ITSM/ESM, CRM & sales, ERP & finance, HCM &
+ServiceNow, Snowflake, Notion, Gmail, Microsoft Graph (Outlook/Teams/
+OneDrive), Google Drive, Jira, Confluence, ...), part of **286 built-in tool
+modules** in the kernel. They span ITSM/ESM, CRM & sales, ERP & finance, HCM &
 payroll, observability & APM, security/IAM/GRC, cloud & infra, DevOps/CI/CD,
 data/BI/ETL, collaboration & content, marketing/commerce/CX, contact center,
 and more.
+
+Automation/iPaaS platforms are first-class: **Zapier**, **n8n**, **Microsoft
+Power Automate**, **Make (Integromat)**, and **Workato** all have their own
+connector for driving the platform's REST API directly (list/run/activate
+workflows), on top of the automation-import pipeline (`maverick.automation_import`)
+that turns an *existing* Zap/n8n workflow/Flow/Make scenario/Workato recipe
+definition into a runnable Lightwork template — see the Workflow Builder's
+"Import" flow in the dashboard.
 
 Alongside these write-capable systems, the kernel ships **37 read-only
 primary-source / public-data connectors** (SEC EDGAR, FRED, Treasury, World
@@ -145,6 +154,7 @@ operations.
 | Genesys Cloud | `genesys` | `GENESYS_BASE_URL` *(url)*, `GENESYS_TOKEN` |
 | Gladly | `gladly` | `GLADLY_BASE_URL` *(url)*, `GLADLY_TOKEN` |
 | Gong revenue-intelligence | `gong` | `GONG_BASE_URL` *(url)*, `GONG_TOKEN` |
+| Google Calendar | `google_calendar` | `GOOGLE_CALENDAR_BASE_URL` *(url)*, `GOOGLE_CALENDAR_TOKEN` |
 | Thomson Reuters GoSystem Tax RS | `gosystem_tax` | `GOSYSTEM_TAX_BASE_URL` *(url)*, `GOSYSTEM_TAX_TOKEN` |
 | Grafana | `grafana` | `GRAFANA_BASE_URL` *(url)*, `GRAFANA_TOKEN` |
 | Greenhouse Harvest | `greenhouse` | `GREENHOUSE_BASE_URL` *(url)*, `GREENHOUSE_TOKEN` |
@@ -173,6 +183,7 @@ operations.
 | Lucid (Lucidchart) | `lucid` | `LUCID_BASE_URL` *(url)*, `LUCID_TOKEN` |
 | Adobe Commerce (Magento) | `magento` | `MAGENTO_BASE_URL` *(url)*, `MAGENTO_TOKEN` |
 | Mailchimp Marketing | `mailchimp` | `MAILCHIMP_BASE_URL` *(url)*, `MAILCHIMP_TOKEN` |
+| Make (Integromat) | `make` | `MAKE_BASE_URL` *(url)*, `MAKE_TOKEN` |
 | ManageEngine ServiceDesk Plus | `manageengine` | `MANAGEENGINE_BASE_URL` *(url)*, `MANAGEENGINE_TOKEN` |
 | Adobe Marketo Engage | `marketo` | `MARKETO_BASE_URL` *(url)*, `MARKETO_TOKEN` |
 | Matillion | `matillion` | `MATILLION_BASE_URL` *(url)*, `MATILLION_TOKEN` |
@@ -183,6 +194,7 @@ operations.
 | Mode Analytics | `mode` | `MODE_BASE_URL` *(url)*, `MODE_TOKEN` |
 | monday.com | `monday` | `MONDAY_BASE_URL` *(url)*, `MONDAY_TOKEN` |
 | MuleSoft Anypoint | `mulesoft` | `MULESOFT_BASE_URL` *(url)*, `MULESOFT_TOKEN` |
+| n8n workflow-automation | `n8n` | `N8N_BASE_URL` *(url)*, `N8N_TOKEN` |
 | Neo4j HTTP API (Cypher) | `neo4j` | `NEO4J_BASE_URL` *(url)*, `NEO4J_TOKEN` |
 | Netskope | `netskope` | `NETSKOPE_BASE_URL` *(url)*, `NETSKOPE_TOKEN` |
 | Oracle NetSuite SuiteTalk | `netsuite` | `NETSUITE_BASE_URL` *(url)*, `NETSUITE_TOKEN` |
@@ -209,6 +221,7 @@ operations.
 | Planview | `planview` | `PLANVIEW_BASE_URL` *(url)*, `PLANVIEW_TOKEN` |
 | Plausible | `plausible` | `PLAUSIBLE_HOST` *(url)*, `PLAUSIBLE_SITE_ID` *(url)*, `PLAUSIBLE_API_KEY` |
 | PostHog | `posthog` | `POSTHOG_HOST` *(url)*, `POSTHOG_PROJECT_ID` *(url)*, `POSTHOG_API_KEY`, `POSTHOG_PERSONAL_API_KEY` |
+| Microsoft Power Automate | `power_automate` | `POWER_AUTOMATE_BASE_URL` *(url)*, `POWER_AUTOMATE_TOKEN` |
 | Microsoft Power BI | `powerbi` | `POWERBI_BASE_URL` *(url)*, `POWERBI_TOKEN` |
 | Proofpoint | `proofpoint` | `PROOFPOINT_BASE_URL` *(url)*, `PROOFPOINT_TOKEN` |
 | Qlik Cloud | `qlik` | `QLIK_BASE_URL` *(url)*, `QLIK_TOKEN` |
@@ -236,6 +249,7 @@ operations.
 | Salesforce Marketing Cloud | `sfmc` | `SFMC_BASE_URL` *(url)*, `SFMC_TOKEN` |
 | Shopify | `shopify` | `SHOPIFY_STORE` *(url)*, `SHOPIFY_ACCESS_TOKEN` |
 | Sisense | `sisense` | `SISENSE_BASE_URL` *(url)*, `SISENSE_TOKEN` |
+| Slack Web API | `slack_api` | `SLACK_API_BASE_URL` *(url)*, `SLACK_API_TOKEN` |
 | SmartRecruiters | `smartrecruiters` | `SMARTRECRUITERS_BASE_URL` *(url)*, `SMARTRECRUITERS_TOKEN` |
 | Smartsheet | `smartsheet` | `SMARTSHEET_BASE_URL` *(url)*, `SMARTSHEET_TOKEN` |
 | Snowflake | `snowflake` | `SNOWFLAKE_ACCOUNT` *(url)*, `SNOWFLAKE_TOKEN` |
