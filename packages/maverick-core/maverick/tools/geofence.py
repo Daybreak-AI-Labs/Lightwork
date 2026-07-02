@@ -55,10 +55,18 @@ def _check(region: str, policy: dict) -> str:
     if default not in ("allow", "deny"):
         default = "deny"
 
-    if code in deny:
+    # The region may itself be a GROUP name (e.g. "EU"), which the docstring
+    # supports. Expand it and match by membership: a bare country code expands
+    # to itself (unchanged behaviour), while a group region matches a list entry
+    # only when EVERY country it covers is on that list. Without this a group
+    # region never matched the expanded lists, so a `deny: ["EU"]` was silently
+    # bypassed (fail-open) and an `allow: ["EU"]` wrongly denied.
+    region_codes = _expand([code])
+
+    if region_codes and region_codes <= deny:
         return f"DENY {code}: in deny-list"
     if allow:
-        if code in allow:
+        if region_codes and region_codes <= allow:
             return f"ALLOW {code}: in allow-list"
         return f"DENY {code}: not in allow-list"
     # No allow-list -> anything not explicitly denied falls to the default.

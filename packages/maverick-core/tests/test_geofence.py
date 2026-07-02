@@ -28,6 +28,17 @@ def test_named_group_expansion():
     assert _check("FR", {"deny": ["EU"]}).startswith("DENY FR")
 
 
+def test_group_region_matches_group_policy():
+    # A region that is itself a GROUP name must be matched by membership, not
+    # dropped. Previously "EU" never matched the expanded lists, so a group deny
+    # was silently bypassed (fail-open) and a group allow wrongly denied.
+    assert _check("EU", {"deny": ["EU"]}).startswith("DENY EU")
+    assert _check("EU", {"allow": ["EU"]}).startswith("ALLOW EU")
+    # A group region is only allowed when the whole group is covered.
+    assert _check("EEA", {"allow": ["EU"]}).startswith("DENY EEA")  # NO/IS/LI missing
+    assert _check("EU", {"allow": ["EEA"]}).startswith("ALLOW EU")  # EU subset of EEA
+
+
 def test_default_when_no_allow_list():
     assert _check("BR", {"deny": ["CN"], "default": "allow"}).startswith("ALLOW BR")
     assert _check("BR", {"deny": ["CN"], "default": "deny"}).startswith("DENY BR")
