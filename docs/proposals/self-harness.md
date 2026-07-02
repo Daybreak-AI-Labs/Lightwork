@@ -215,7 +215,10 @@ Config (`[self_harness]`, resolved by `config.get_self_harness` / `settings()`):
 (best-of-N proposing), `semantic_mining`, `mine_bucket_by` (per-domain/per-tool
 mining), `holdout_rotations` (K-fold cross-validation), `judge_samples`
 (self-consistency judging), `promote_as_canary` (stage every promotion on canary
-probation), `efficacy_review`, `eval_corpus`, and
+probation), `efficacy_review`, `eval_corpus`, `eval_budget_dollars` (spend
+ceiling for one auto-evaluated cycle's LLM calls — the runner and judge share
+the pot, and an exhausted budget fails the evaluation *closed*: candidates are
+rejected, never promoted on partial scores), and
 `retire_after_days`. Defaults preserve the
 loop's historical behavior; the installer wizard ships production-safe floors
 when self-harness is enabled and writes the advanced knobs (eval corpus,

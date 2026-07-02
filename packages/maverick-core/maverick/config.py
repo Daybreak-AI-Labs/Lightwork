@@ -727,6 +727,12 @@ def get_self_harness() -> dict:
         # set, the driver auto-builds the LIVE A/B (model generates, verifier
         # judges) so a scheduled pass can actually PROMOTE; unset -> dry pass.
         "eval_corpus": (str(cfg["eval_corpus"]) if cfg.get("eval_corpus") else None),
+        # Spend ceiling (in dollars) for ONE auto-evaluated cycle's LLM calls
+        # (runner + judge share the pot; kernel rule 3). None/<=0 = uncapped,
+        # the historical behavior. An exhausted budget fails the evaluation
+        # CLOSED -- candidates are rejected, never promoted on partial scores.
+        "eval_budget_dollars": (lambda v: v if v is not None and v > 0 else None)(
+            _factor("eval_budget_dollars")),
     }
 
 

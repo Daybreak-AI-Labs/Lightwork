@@ -2045,6 +2045,100 @@ def test_config_promote_as_canary(monkeypatch):
     assert sh.settings()["promote_as_canary"] is False
 
 
+def test_config_eval_budget_dollars(monkeypatch):
+    from maverick import config
+    monkeypatch.setattr(config, "load_config", lambda *a, **k: {
+        "self_harness": {"eval_budget_dollars": 2.5}})
+    assert config.get_self_harness()["eval_budget_dollars"] == 2.5
+    # 0, negative, or garbage all mean UNCAPPED (the historical behavior)
+    for bad in (0, -3, "abc", None):
+        monkeypatch.setattr(config, "load_config", lambda *a, _b=bad, **k: {
+            "self_harness": {"eval_budget_dollars": _b}})
+        assert config.get_self_harness()["eval_budget_dollars"] is None
+    monkeypatch.setattr(config, "load_config", lambda *a, **k: {"self_harness": {}})
+    assert config.get_self_harness()["eval_budget_dollars"] is None
+    assert sh.settings()["eval_budget_dollars"] is None
+
+
+def test_eval_budget_builder_dollars_is_the_binding_cap():
+    from maverick import self_improvement_runner as runner
+    assert runner._eval_budget({}) is None
+    assert runner._eval_budget({"eval_budget_dollars": None}) is None
+    b = runner._eval_budget({"eval_budget_dollars": 2.5})
+    assert b is not None and b.max_dollars == 2.5
+    # the per-agent-run default token/tool ceilings are lifted so the operator's
+    # dollar figure is what actually trips
+    assert b.max_output_tokens > 200_000
+    assert b.max_input_tokens > 1_000_000
+    assert b.max_tool_calls > 500
+
+
+def test_cycle_passes_eval_budget_to_auto_evaluator(monkeypatch, tmp_path, store):
+    from maverick import config
+    from maverick import self_improvement_runner as runner
+    _enable(monkeypatch)
+    monkeypatch.setattr(sh, "_store_path", lambda: store)
+    cpath = tmp_path / "corpus.json"
+    cpath.write_text(json.dumps({"M": [{"goal": "g", "expected": "x"}]}))
+    monkeypatch.setattr(config, "load_config", lambda *a, **k: {
+        "self_harness": {"enable": True, "eval_corpus": str(cpath),
+                         "eval_budget_dollars": 1.5}})
+    seen = {}
+
+    def _spy(model_id, *, corpus_path, judge_samples=1, budget=None, **kw):
+        seen["budget"] = budget
+        return None
+
+    monkeypatch.setattr(runner, "_auto_evaluator", _spy)
+    runner.run_self_harness_cycle(reflexions=[], model_id="M", retire=False)
+    assert seen["budget"] is not None and seen["budget"].max_dollars == 1.5
+
+
+def test_exhausted_eval_budget_fails_the_cycle_closed(monkeypatch, tmp_path, store):
+    # The auto-evaluated cycle hits its spend cap mid-validation: the candidate
+    # must be REJECTED (not promoted on partial scores), nothing written, and
+    # the cycle must exit cleanly.
+    import json as _json
+
+    from maverick import config, llm
+    from maverick import self_improvement_runner as runner
+    from maverick.budget import BudgetExceeded
+    ctrl = _enable(monkeypatch)
+    monkeypatch.setattr(sh, "_store_path", lambda: store)
+    corpus = {"M": [{"goal": f"g{i}", "expected": "WIN"} for i in range(6)]}
+    cpath = tmp_path / "corpus.json"
+    cpath.write_text(_json.dumps(corpus))
+    monkeypatch.setattr(config, "load_config", lambda *a, **k: {
+        "self_harness": {"enable": True, "eval_corpus": str(cpath),
+                         "eval_budget_dollars": 0.01}})
+    calls = {"n": 0}
+
+    class _ExhaustingLLM:
+        def __init__(self, model="x", **kw):
+            self.model = model
+
+        def complete(self, system, messages, **kw):
+            calls["n"] += 1
+            if calls["n"] > 4:                        # the cap trips mid-pass
+                raise BudgetExceeded("$0.02 > $0.01")
+            helped = "MAGIC-LINE" in (system or "")
+            if "evaluator" in (system or "").lower():
+                content = messages[0]["content"]
+                out = content.split("OUTPUT:\n", 1)[1].split("\n\nExpected")[0]
+                return type("R", (), {"text": "yes" if out == "WIN" else "no"})()
+            return type("R", (), {"text": "WIN" if helped else "LOSE"})()
+
+    monkeypatch.setattr(llm, "LLM", _ExhaustingLLM)
+    monkeypatch.setattr(llm, "model_for_role", lambda role: "verifier-model")
+    refl = [_refl("M", "timeout", "export the nightly ledger") for _ in range(3)]
+    report, _ = runner.run_self_harness_cycle(
+        reflexions=refl, model_id="M", retire=False, controller=ctrl,
+        propose_fn=lambda s: "MAGIC-LINE bound the export window")
+    assert report.promoted == 0                       # fails closed, no promotion
+    assert sh.recall_addendum("M", store) == ""       # nothing written
+    assert any("rejected" in s for s in report.skipped)
+
+
 def test_harness_outcome_credits_only_tools_actually_used(monkeypatch, store):
     # The orchestrator's outcome hook credits tool-scoped guidance by the tools
     # the run INVOKED (blackboard observations), so a tool-scoped canary can

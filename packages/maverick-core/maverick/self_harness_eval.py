@@ -27,6 +27,8 @@ import logging
 from collections.abc import Callable, Mapping
 from pathlib import Path
 
+from .budget import BudgetExceeded
+
 log = logging.getLogger(__name__)
 
 
@@ -197,6 +199,15 @@ def corpus_ab_scorers(
 # provider -- same shape as llm_proposer (an injected LLM, fail-open). A flaky or
 # absent model degrades to a safe default (judge -> heuristic, run -> "") so the
 # evaluation never crashes a learning pass. Offline-tested with a fake LLM.
+#
+# The ONE exception is an exhausted Budget: BudgetExceeded re-raises instead of
+# degrading, so the case lands INDETERMINATE in ``_rate`` (excluded) rather than
+# scored. Failing open here would poison the A/B -- exhaustion mid-pass hits the
+# arms asymmetrically (the baseline arm runs after the candidate arm), so a
+# runner returning "" or a judge falling to the heuristic for just one arm would
+# skew the measured delta and could promote on garbage. Raised cases are
+# excluded per-case; an arm exhausted entirely goes NaN and the validator's
+# finite-check rejects the candidate -- the evaluation fails CLOSED.
 
 # Self-consistency framings: meaning-PRESERVING rephrasings of the same yes/no
 # question. Sampling the judge across diverse reasoning paths and taking the
@@ -243,6 +254,8 @@ def llm_judge(llm, *, budget=None, model: str | None = None, max_tokens: int = 8
                 elif text.startswith("no"):
                     no += 1
                 # an unparseable sample is INDETERMINATE -- it abstains, it doesn't vote
+            except BudgetExceeded:
+                raise  # exhausted budget fails the CASE closed, never the heuristic
             except Exception as e:  # pragma: no cover -- one bad sample abstains
                 log.warning("eval: llm judge sample failed (%s)", e)
         if yes > no:
@@ -270,6 +283,8 @@ def llm_runner(llm, *, system_prefix: str = "", budget=None, model: str | None =
                                 [{"role": "user", "content": goal}],
                                 budget=budget, max_tokens=max_tokens, model=model)
             return getattr(resp, "text", "") or ""
+        except BudgetExceeded:
+            raise  # exhausted budget is indeterminate, not a scored failure
         except Exception as e:  # pragma: no cover -- a failed generation isn't a success
             log.warning("eval: llm runner failed (%s)", e)
             return ""

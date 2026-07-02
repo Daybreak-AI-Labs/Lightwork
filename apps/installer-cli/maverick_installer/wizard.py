@@ -1700,6 +1700,11 @@ def pick_advanced() -> dict[str, Any]:
             "promote; blank = dry pass)", default="").strip()
         if corpus:
             advanced["self_harness_eval_corpus"] = corpus
+            # A live A/B spends real provider dollars unattended, so cap it by
+            # default; explicit 0 opts out.
+            advanced["self_harness_eval_budget"] = max(0.0, _safe_float(_q_text(
+                "    Spend cap per auto-evaluated cycle, in dollars (0 = uncapped)",
+                default="5"), default=5.0))
         if _q_confirm(
             "    Mine and scope guidance per department (domain)?", default=False):
             advanced["self_harness_bucket_domain"] = True
@@ -2893,6 +2898,9 @@ def _cfg_advanced(  # noqa: C901 - flat sequence of independent opt-in toggles
             # Free-text path: escape via _toml_str so a path with a backslash or
             # quote can't corrupt the config the wizard writes.
             _emit_kv(lines, "eval_corpus", advanced["self_harness_eval_corpus"])
+            eval_budget = advanced.get("self_harness_eval_budget")
+            if eval_budget and eval_budget > 0:
+                lines.append(f"eval_budget_dollars = {float(eval_budget)}")
         if advanced.get("self_harness_bucket_domain"):
             lines.append('mine_bucket_by = ["domain"]')
         if advanced.get("self_harness_semantic_mining"):
