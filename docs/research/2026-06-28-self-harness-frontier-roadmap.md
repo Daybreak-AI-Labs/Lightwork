@@ -128,6 +128,15 @@ drive them; this wave wires them, changing no default behavior:
   domain + invoked tools. Before this, worker models' lines earned recalls but
   never outcomes, so a worker canary promoted by `run --all-models` could
   never graduate or be demoted by the counter-driven review.
+- **Outcome recency + relapse re-probation**: `note_outcome` now also keeps a
+  bounded (20-entry) per-line `recent_outcomes` window; `review_canaries`
+  judges the window when present (a re-probated veteran can't hide behind
+  lifetime successes; legacy no-window records keep the old behavior); and
+  `review_relapses` (behind `[self_harness] relapse_failure_share`, default
+  off) puts a graduated line whose recent failing share crosses the threshold
+  back on canary probation — advisory-first (nothing removed, audited as
+  phase `relapse`), with the *next* cycle's canary review adjudicating on
+  fresh evidence. `line_efficacy`/`harness efficacy` expose the recent rate.
 - **LLM-backed metamorphic + conflict seams, shipped**: `metamorphic_fn` and
   `classifier_fn` existed as injected seams with no built-in builder and no
   reachability. `llm_paraphraser` (summarizer role) now backs the paraphrase
