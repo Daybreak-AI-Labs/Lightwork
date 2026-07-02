@@ -250,3 +250,24 @@ def test_env_file_key_satisfies_any_provider_configured(tmp_path, monkeypatch):
     finally:
         os.environ.pop("ANTHROPIC_API_KEY", None)
         cfg_mod.reset_config_cache()
+
+
+def test_env_file_recheck_is_throttled(monkeypatch):
+    """load_config() sits on per-row hot paths (_dec_field on every sealed
+    column read); the .env freshness re-check must NOT stat the file on every
+    call or the world_read perf SLA breaches. One check per throttle window."""
+    import maverick.config as cfg_mod
+
+    cfg_mod.reset_config_cache()
+    calls = []
+    monkeypatch.setattr(cfg_mod, "_load_env_file", lambda p: calls.append(p))
+    try:
+        for _ in range(100):
+            cfg_mod.load_config()
+        assert len(calls) == 1
+        # reset_config_cache (the test hook) re-arms an immediate re-check.
+        cfg_mod.reset_config_cache()
+        cfg_mod.load_config()
+        assert len(calls) == 2
+    finally:
+        cfg_mod.reset_config_cache()

@@ -32,6 +32,7 @@ from __future__ import annotations
 import logging
 import os
 import re
+import time
 from pathlib import Path
 from typing import Any
 
@@ -117,8 +118,10 @@ _TOML_CACHE_MAX = 512
 def reset_config_cache() -> None:
     """Drop the parsed-TOML and .env-file caches (test hook; prod files rarely
     change)."""
+    global _env_last_check
     _toml_cache.clear()
     _env_file_cache.clear()
+    _env_last_check = None
 
 
 # Wizard-persisted secrets: the installer writes every collected key to
@@ -129,10 +132,27 @@ def reset_config_cache() -> None:
 # key could never reach the runtime (`maverick start` exited 2 right after
 # `maverick init` said "Setup complete"). load_config() exports the file
 # itself -- ``setdefault`` only, so an explicitly exported variable always
-# wins -- memoized by mtime+size so the hot path pays one stat, not a re-read.
+# wins -- memoized by mtime+size so a change is a re-read, not a re-load.
+# The freshness re-check itself is throttled to once per second: load_config()
+# sits on per-row hot paths (e.g. _dec_field on every sealed column read), and
+# an unconditional config_path()+stat() per call measurably breached the
+# world_read perf SLA. A wizard-written key still lands within a second.
 _ENV_FILE_BASENAME = ".env"
 _ENV_NAME_RE = re.compile(r"[A-Za-z_][A-Za-z0-9_]*\Z")
+_ENV_RECHECK_SECONDS = 1.0
 _env_file_cache: dict[str, tuple[int, int]] = {}
+_env_last_check: float | None = None
+
+
+def _load_wizard_env() -> None:
+    """Throttled wrapper: re-check ``~/.maverick/.env`` at most once per
+    :data:`_ENV_RECHECK_SECONDS` (first call always loads)."""
+    global _env_last_check
+    now = time.monotonic()
+    if _env_last_check is not None and now - _env_last_check < _ENV_RECHECK_SECONDS:
+        return
+    _env_last_check = now
+    _load_env_file(config_path().parent / _ENV_FILE_BASENAME)
 
 
 def _load_env_file(path: Path) -> None:
@@ -266,7 +286,7 @@ def load_config(path: Path | None = None) -> dict:
     # Wizard-persisted secrets must be in the environment BEFORE interpolation,
     # or every "${ANTHROPIC_API_KEY}" the wizard wrote resolves to "" on a bare
     # pip/CLI install. setdefault semantics: a real export always wins.
-    _load_env_file(config_path().parent / _ENV_FILE_BASENAME)
+    _load_wizard_env()
     cfg = _load_config_file(config_path())
     # Dashboard Settings overlay (always-on, fixed path): UI-edited provider
     # keys / capability+feature toggles merge over config.toml without touching it.
