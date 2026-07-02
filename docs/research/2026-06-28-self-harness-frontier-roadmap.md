@@ -88,6 +88,30 @@ Two later additions harden the evaluation without touching the gate:
   **majority** yes/no vote wins; a tie or all-indeterminate samples fall open to
   the deterministic heuristic. Default 1 = the single call, unchanged.
 
+## Reachability wave (2026-07) — the built lifecycle, operable end-to-end
+
+Three shipped mechanisms were built but not reachable from the surfaces that
+drive them; this wave wires them, changing no default behavior:
+
+- **`judge_samples` now reaches the auto-built judge**: `run_self_harness_cycle`
+  forwards the config knob to `_auto_evaluator`, so self-consistency judging
+  actually turns on for a scheduled `self-harness run` (it was previously only
+  reachable by calling `llm_judge(samples=)` by hand).
+- **Canary staging is driver-reachable**: `[self_harness] promote_as_canary`
+  (default false) and `self-harness run --canary` route through a new
+  `run_self_harness_pass(canary=)` parameter to `run_self_harness(canary=)`.
+  Before this, passing `canary=` through the cycle raised a swallowed TypeError
+  and silently returned an empty report — the staged-rollout valve existed but
+  no scheduler or operator command could open it. The wizard's advanced
+  follow-up writes the knob on opt-in.
+- **Tool-scoped outcome credit**: the orchestrator's `_record_harness_outcome`
+  now passes the tools the run actually **invoked** (from the blackboard's
+  observation posts) to `note_outcome`, so a `tool=`-scoped line accumulates
+  outcomes, not just recalls — without this, a tool-scoped canary could never
+  graduate or be demoted by the counter-driven review. Credit is deliberately
+  the *used* subset of the *available* tool scopes recall injected: an
+  available-but-unused tool's guidance didn't shape the outcome.
+
 ## Principle (unchanged across every wave)
 
 **Off-by-default / byte-identical default**, **determinism proof 7/7**, and **the

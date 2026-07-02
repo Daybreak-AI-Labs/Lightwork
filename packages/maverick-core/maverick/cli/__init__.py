@@ -1650,7 +1650,12 @@ def _echo_harness_cycle(report, retired: int) -> None:
               help="Max recent reflexions to scan for weaknesses.")
 @click.option("--retire/--no-retire", default=True,
               help="Also retire stale lines (per [self_harness] retire_after_days).")
-def harness_run(model: str | None, all_models: bool, limit: int, retire: bool) -> None:
+@click.option("--canary", is_flag=True,
+              help="Stage this run's promotions as canaries: recalled on probation, "
+                   "graduated/demoted from real run outcomes "
+                   "(default: [self_harness] promote_as_canary).")
+def harness_run(model: str | None, all_models: bool, limit: int, retire: bool,
+                canary: bool) -> None:
     """Run one governed self-harness cycle: mine → propose → validate → gate,
     then retire stale guidance. The on-demand / scheduled entry point.
 
@@ -1669,15 +1674,20 @@ def harness_run(model: str | None, all_models: bool, limit: int, retire: bool) -
         raise click.ClickException(
             "self-harness is off. Set [self_harness] enable = true or "
             "MAVERICK_SELF_HARNESS=1.")
+    # The flag STAGES; leaving it off defers to [self_harness] promote_as_canary
+    # (None = config decides), so a scheduled `run` keeps the operator's default.
+    stage = True if canary else None
     if all_models:
-        results = runner.run_self_harness_all_models(limit=limit, retire=retire)
+        results = runner.run_self_harness_all_models(limit=limit, retire=retire,
+                                                     canary=stage)
         if not results:
             click.echo("no configured role models to run.")
             return
         for _mid, (report, retired) in sorted(results.items()):
             _echo_harness_cycle(report, retired)
         return
-    report, retired = runner.run_self_harness_cycle(model_id=model, limit=limit, retire=retire)
+    report, retired = runner.run_self_harness_cycle(model_id=model, limit=limit,
+                                                    retire=retire, canary=stage)
     _echo_harness_cycle(report, retired)
 
 

@@ -356,19 +356,27 @@ def _record_skill_outcome(ctx: Any, *, success: bool) -> None:
         pass
 
 
-def _record_harness_outcome(domain: str | None, *, success: bool) -> None:
+def _record_harness_outcome(domain: str | None, *, success: bool,
+                            blackboard: Any = None) -> None:
     """Attribute this run's outcome to the self-harness guidance it recalled, so
     the efficacy + canary lifecycle (note_outcome -> review_efficacy /
     review_canaries) actually fires from REAL runs -- the counters were otherwise
-    never populated. Scoped to the run's model + domain (the same guidance
-    recall_addendum injected). Fully fail-safe -- stats never block a run."""
+    never populated. Scoped to the run's model + domain + the tools the run
+    actually INVOKED (from the blackboard's observation posts): a tool-scoped
+    line is credited only when its tool was used, the causal subset of the
+    tool scopes recall injected -- an available-but-unused tool's guidance
+    didn't shape this outcome. Fully fail-safe -- stats never block a run."""
     try:
         from . import self_harness
         if not self_harness.enabled():
             return
         from .llm import model_for_role
+        tools = None
+        if blackboard is not None:
+            from . import reflexion
+            tools = reflexion.tools_from_blackboard(blackboard)
         self_harness.note_outcome(model_for_role("orchestrator"), bool(success),
-                                  domain=domain)
+                                  domain=domain, tools=tools)
     except Exception:  # pragma: no cover -- stats never block a run
         pass
 
@@ -1299,7 +1307,7 @@ async def run_goal(  # noqa: C901  -- core goal-execution loop
             if not (result.error or "").startswith("budget exceeded:"):
                 _record_skill_outcome(ctx, success=False)
                 _record_planning_outcome(goal, domain, _planning_mode, success=False)
-                _record_harness_outcome(domain, success=False)
+                _record_harness_outcome(domain, success=False, blackboard=blackboard)
             _fire_webhook("goal_finished", {
                 "goal_id": goal_id, "status": "blocked", "result": result.error,
             })
@@ -1381,7 +1389,7 @@ async def run_goal(  # noqa: C901  -- core goal-execution loop
         _record_deliverable_artifact(world, goal_id, summary)
         _record_skill_outcome(ctx, success=True)
         _record_planning_outcome(goal, domain, _planning_mode, success=True)
-        _record_harness_outcome(domain, success=True)
+        _record_harness_outcome(domain, success=True, blackboard=blackboard)
         _fire_webhook("final_emitted", {
             "goal_id": goal_id,
             "patch_size_bytes": len(summary.encode("utf-8")),

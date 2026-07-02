@@ -713,6 +713,11 @@ def get_self_harness() -> dict:
         # (1 = single call, the historical behavior).
         "judge_samples": max(1, _num("judge_samples", 1, int)),
         "mine_bucket_by": bucket_by,
+        # Stage every promotion as a CANARY (on probation): still recalled, but
+        # graduated to permanent / demoted from real run outcomes by the cycle's
+        # canary review, rather than permanent on arrival (default off -- a
+        # promotion lands permanent, the historical behavior).
+        "promote_as_canary": bool(cfg.get("promote_as_canary", False)),
         "retire_after_days": max(0.0, _num("retire_after_days", 0.0, float)),
         # Re-measure each existing line's live A/B lift each cycle and DEMOTE
         # dead weight (default off -- a general corpus can under-credit a line

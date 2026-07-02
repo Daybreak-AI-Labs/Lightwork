@@ -1709,6 +1709,9 @@ def pick_advanced() -> dict[str, Any]:
         advanced["self_harness_efficacy_review"] = _q_confirm(
             "    Efficacy review? Re-measure each line's live A/B lift every cycle "
             "and demote dead weight (needs the eval corpus above).", default=False)
+        advanced["self_harness_canary"] = _q_confirm(
+            "    Canary rollout? Stage each newly learned line on probation and "
+            "graduate or pull it from real run outcomes.", default=False)
         advanced["self_harness_candidates"] = max(1, _safe_int(_q_text(
             "    Candidate lines per weakness (best-of-N; 1 = single)",
             default="1"), default=1))
@@ -2896,6 +2899,8 @@ def _cfg_advanced(  # noqa: C901 - flat sequence of independent opt-in toggles
             lines.append("semantic_mining = true")
         if advanced.get("self_harness_efficacy_review"):
             lines.append("efficacy_review = true")
+        if advanced.get("self_harness_canary"):
+            lines.append("promote_as_canary = true")
         cands = advanced.get("self_harness_candidates")
         if cands and cands > 1:
             lines.append(f"candidates_per_signature = {int(cands)}")

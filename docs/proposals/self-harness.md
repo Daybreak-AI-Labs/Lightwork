@@ -176,9 +176,13 @@ safety model as skills and insights.
 
 - `maverick self-harness preview [--model M] [--min-support N]` — read-only dry
   run: shows the weaknesses and the lines it *would* propose, writes nothing.
-- `maverick self-harness run [--model M] [--all-models] [--retire/--no-retire]` —
+- `maverick self-harness run [--model M] [--all-models] [--retire/--no-retire]
+  [--canary]` —
   run one governed **cycle**: mine → propose → validate → gate, then retire stale
   guidance. The on-demand / scheduled entry point (`run_self_harness_cycle`).
+  `--canary` stages this run's promotions on probation (recalled, but graduated
+  or pulled from real run outcomes by the canary review); leaving it off defers
+  to `[self_harness] promote_as_canary`.
   `--all-models` runs the cycle for **every distinct configured role model** (the
   fleet, `run_self_harness_all_models`), so worker models learn their own
   harness, not just the orchestrator — each mines only its own traces.
@@ -210,7 +214,8 @@ Config (`[self_harness]`, resolved by `config.get_self_harness` / `settings()`):
 `max_tool_calls_factor`, `min_support_by_class`), `candidates_per_signature`
 (best-of-N proposing), `semantic_mining`, `mine_bucket_by` (per-domain/per-tool
 mining), `holdout_rotations` (K-fold cross-validation), `judge_samples`
-(self-consistency judging), `efficacy_review`, `eval_corpus`, and
+(self-consistency judging), `promote_as_canary` (stage every promotion on canary
+probation), `efficacy_review`, `eval_corpus`, and
 `retire_after_days`. Defaults preserve the
 loop's historical behavior; the installer wizard ships production-safe floors
 when self-harness is enabled and writes the advanced knobs (eval corpus,

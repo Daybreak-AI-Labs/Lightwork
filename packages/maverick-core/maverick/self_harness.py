@@ -97,6 +97,7 @@ def settings() -> dict:
                 "semantic_mining": False, "retire_after_days": 0.0,
                 "candidates_per_signature": 1, "mine_bucket_by": (),
                 "holdout_rotations": 1, "judge_samples": 1,
+                "promote_as_canary": False,
                 "efficacy_review": False, "eval_corpus": None}
 
 
