@@ -1703,10 +1703,18 @@ def _schedule_out(job) -> ScheduleOut:
 
 
 @router.get("/schedules")
-async def list_schedules() -> dict:
-    """Armed recurring schedules: pending cron jobs in the worker queue."""
+async def list_schedules(request: Request) -> dict:
+    """Armed recurring schedules: pending cron jobs in the worker queue.
+
+    Owner-scoped like ``delete_schedule``: an authenticated non-admin sees only
+    the schedules stamped with their own principal (``create_schedule`` records
+    it in ``payload['owner']``), so one tenant can't enumerate another's
+    schedule titles. Admin / auth-off callers see all."""
     from maverick.job_queue import JobQueue
+    owner = goal_owner_filter(request)
     jobs = [j for j in JobQueue().list(status="pending") if (j.payload or {}).get("__cron__")]
+    if owner is not None:
+        jobs = [j for j in jobs if (j.payload or {}).get("owner") == owner]
     jobs.sort(key=lambda j: j.run_at)
     return {"schedules": [_schedule_out(j).model_dump() for j in jobs]}
 
@@ -1856,11 +1864,19 @@ def _inbound_secret_set() -> bool:
 
 
 @router.get("/triggers")
-async def list_triggers_endpoint() -> dict:
-    """Registered inbound webhook triggers (read-only; always available)."""
+async def list_triggers_endpoint(request: Request) -> dict:
+    """Registered inbound webhook triggers (read-only; always available).
+
+    Owner-scoped: an authenticated non-admin sees only the triggers it
+    registered, so one tenant can't enumerate another's trigger names, bound
+    templates, and default param values. Admin / auth-off callers see all."""
     from maverick_dashboard import triggers_store
+    triggers = triggers_store.list_triggers()
+    owner = goal_owner_filter(request)
+    if owner is not None:
+        triggers = [t for t in triggers if t.get("owner", "") == owner]
     return {
-        "triggers": triggers_store.list_triggers(),
+        "triggers": triggers,
         "webhook_url": _WEBHOOK_RUN_PATH,
         "secret_configured": _inbound_secret_set(),
     }
@@ -1884,9 +1900,21 @@ async def create_trigger(request: Request, payload: TriggerIn) -> TriggerOut:
             status_code=404, detail=f"template not found: {payload.template!r}"
         ) from e
     from maverick_dashboard import triggers_store
+    # Owner-scope the write like list/delete: a non-admin must not overwrite
+    # (hijack) a trigger registered by another tenant just by reusing its slug.
+    # set_trigger keys by slugify(name), so check the same slug for a foreign
+    # owner before replacing it.
+    owner_filter = goal_owner_filter(request)
+    if owner_filter is not None:
+        existing = triggers_store.get_trigger(
+            triggers_store.slugify(payload.name or payload.template))
+        if existing is not None and existing.get("owner", "") != owner_filter:
+            raise HTTPException(
+                status_code=409, detail="a trigger with that name already exists")
     try:
         rec = triggers_store.set_trigger(
-            payload.name or payload.template, payload.template, payload.params or {})
+            payload.name or payload.template, payload.template, payload.params or {},
+            owner=caller_principal(request) or "")
     except ValueError as e:
         raise HTTPException(status_code=400, detail=str(e)) from e
     return TriggerOut(
@@ -1900,7 +1928,11 @@ async def delete_trigger_endpoint(request: Request, name: str) -> dict:
     require_permission(request, "operate")
     _require_triggers()
     from maverick_dashboard import triggers_store
-    if not triggers_store.delete_trigger(name):
+    # Owner-scope like schedules: a non-admin may delete only its own triggers.
+    # The ownership check happens atomically inside delete_trigger (one locked
+    # read, no TOCTOU). 404 (not 403) so a cross-tenant probe can't distinguish
+    # "exists but not yours" from "does not exist".
+    if not triggers_store.delete_trigger(name, owner=goal_owner_filter(request)):
         raise HTTPException(status_code=404, detail="no trigger with that name")
     return {"deleted": name}
 
@@ -1964,8 +1996,15 @@ async def import_run_endpoint(request: Request, payload: ImportRunIn) -> ImportR
             detail=f"no importable automations found from {payload.source!r}",
         )
 
+    # Resolve schedule activation: an explicit request field wins; when the UI
+    # omits it (None), fall back to the [automation_import] create_schedules
+    # config knob (previously a dead setting -- nothing read it). Off by default.
+    activate = payload.activate_schedules
+    if activate is None:
+        from maverick.config import get_automation_import
+        activate = bool(get_automation_import().get("create_schedules", False))
     queue = None
-    if payload.activate_schedules and not payload.dry_run:
+    if activate and not payload.dry_run:
         from maverick.job_queue import JobQueue
         queue = JobQueue()
 
@@ -2000,11 +2039,27 @@ async def import_run_endpoint(request: Request, payload: ImportRunIn) -> ImportR
         if want_webhook and not triggers_on:
             res.notes.append("webhook trigger not created: [features] triggers is off")
         elif want_webhook:
+            # Default params for the trigger come from the recovered automation
+            # (sug["params"]); validate the template renders with them before
+            # arming so we don't create a trigger that always 400s at fire time
+            # on a required param the import couldn't supply.
+            sug_params = sug.get("params")
+            if not isinstance(sug_params, dict):
+                sug_params = {}
+            from maverick.templates import load_template
             try:
-                rec = triggers_store.set_trigger(res.template_name, res.template_name)
-                webhook_trigger = rec["name"]
-            except ValueError as e:
-                res.notes.append(f"could not create webhook trigger: {e}")
+                load_template(res.template_name).render(**sug_params)
+            except (ValueError, FileNotFoundError) as e:
+                res.notes.append(
+                    f"webhook trigger not created: template needs param values "
+                    f"the import can't supply ({e}); create it in the builder")
+            else:
+                try:
+                    rec = triggers_store.set_trigger(
+                        res.template_name, res.template_name, sug_params, owner=owner)
+                    webhook_trigger = rec["name"]
+                except ValueError as e:
+                    res.notes.append(f"could not create webhook trigger: {e}")
         results.append({
             "source": a.source, "name": a.name, "template": res.template_name,
             "created": res.created_template, "trigger": a.trigger.kind,
@@ -2067,17 +2122,26 @@ async def automation_runs(request: Request, kind: str, ref: str, limit: int = 8)
 # *merged* result fails lint, so editing can never weaken the safety envelope.
 
 
-def _require_pack_editing(request: Request) -> None:
-    from maverick.config import get_features
+def pack_editing_denial(request: Request) -> str | None:
+    """Why this caller may NOT edit domain packs (agent playbooks), or ``None``
+    if it may. One predicate for both consumers -- the enforce path
+    (:func:`_require_pack_editing`) raises it as a 403 detail, and the builder
+    page reads ``is None`` to decide whether to offer playbook mode -- so the two
+    can't drift. Mirrors the ``*_denial`` pattern used for enterprise egress."""
     principal = caller_principal(request)
     if principal is not None and not is_dashboard_admin(principal):
-        raise HTTPException(status_code=403, detail="pack editing requires a dashboard admin")
+        return "pack editing requires a dashboard admin"
+    from maverick.config import get_features
     if not get_features().get("pack_editing", True):
-        raise HTTPException(
-            status_code=403,
-            detail=("pack editing is disabled ([features] pack_editing = false). "
-                    "Edit override TOML on the host, or re-enable it in config."),
-        )
+        return ("pack editing is disabled ([features] pack_editing = false). "
+                "Edit override TOML on the host, or re-enable it in config.")
+    return None
+
+
+def _require_pack_editing(request: Request) -> None:
+    denial = pack_editing_denial(request)
+    if denial is not None:
+        raise HTTPException(status_code=403, detail=denial)
 
 
 @router.get("/agents")
@@ -3295,6 +3359,10 @@ async def draft_workflow_from_brief(request: Request, payload: WorkflowDraftIn) 
     (per ``form``; not saved)."""
     require_permission(request, "operate")
     _require_provider_for_drafting()
+    # Drafting is a paid LLM call; throttle it under the same ceiling as goal
+    # creation so it can't be spammed into a cost amplifier.
+    from maverick_dashboard.app import check_goal_rate_limit
+    check_goal_rate_limit(request, source="workflow-draft")
     brief = (payload.description or "").strip()
     if not brief:
         raise HTTPException(status_code=400, detail="describe the workflow you want")
@@ -3303,7 +3371,10 @@ async def draft_workflow_from_brief(request: Request, payload: WorkflowDraftIn) 
         # event loop isn't frozen for the multi-second round-trip (which would
         # stall every other user's requests, SSE and health probes).
         return await run_in_threadpool(_drafter_for(payload.form), brief)
-    except ValueError as e:
+    except Exception as e:
+        # ValueError is a parse failure; BudgetExceeded / provider / network
+        # errors are NOT ValueError -- surface any of them as an upstream 502
+        # rather than an unhandled 500.
         raise HTTPException(status_code=502, detail=f"workflow drafting failed: {e}") from e
 
 
@@ -3317,6 +3388,8 @@ async def draft_workflow_from_upload(
     text / markdown / JSON document."""
     require_permission(request, "operate")
     _require_provider_for_drafting()
+    from maverick_dashboard.app import check_goal_rate_limit
+    check_goal_rate_limit(request, source="workflow-draft")
     raw = await file.read(_WORKFLOW_DOC_MAX_BYTES + 1)
     if len(raw) > _WORKFLOW_DOC_MAX_BYTES:
         raise HTTPException(
@@ -3336,7 +3409,8 @@ async def draft_workflow_from_upload(
     try:
         drafter = _drafter_for(form)
         return await run_in_threadpool(lambda: drafter("", source_text=text))
-    except ValueError as e:
+    except Exception as e:
+        # See draft_workflow_from_brief: non-ValueError LLM/budget errors -> 502.
         raise HTTPException(status_code=502, detail=f"workflow drafting failed: {e}") from e
 
 
@@ -3346,6 +3420,8 @@ async def refine_workflow_draft(request: Request, payload: WorkflowRefineIn) -> 
     natural-language follow-up — the iterative loop in the builder."""
     require_permission(request, "operate")
     _require_provider_for_drafting()
+    from maverick_dashboard.app import check_goal_rate_limit
+    check_goal_rate_limit(request, source="workflow-draft")
     instruction = (payload.instruction or "").strip()
     if not instruction:
         raise HTTPException(status_code=400, detail="describe the change you want")
@@ -3353,7 +3429,8 @@ async def refine_workflow_draft(request: Request, payload: WorkflowRefineIn) -> 
     refiner = refine_playbook if payload.form == "playbook" else refine_workflow
     try:
         return await run_in_threadpool(refiner, payload.current or {}, instruction)
-    except ValueError as e:
+    except Exception as e:
+        # See draft_workflow_from_brief: non-ValueError LLM/budget errors -> 502.
         raise HTTPException(status_code=502, detail=f"refining the draft failed: {e}") from e
 
 
@@ -3370,8 +3447,13 @@ async def save_workflow(request: Request, payload: WorkflowSaveIn) -> dict:
             params=payload.params,
             budget_dollars=payload.budget_dollars,
             budget_wall_seconds=payload.budget_wall_seconds,
+            overwrite=payload.overwrite,
         )
-    except (ValueError, FileExistsError) as e:
+    except FileExistsError as e:
+        # A fresh save (overwrite=false) colliding with an existing template is a
+        # 409 conflict, not a silent clobber. The ?edit= flow sets overwrite=true.
+        raise HTTPException(status_code=409, detail=str(e)) from e
+    except ValueError as e:
         raise HTTPException(status_code=400, detail=str(e)) from e
     return {"name": tpl.name, "title": tpl.title, "params": tpl.params, "saved": True}
 

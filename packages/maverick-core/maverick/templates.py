@@ -229,15 +229,30 @@ def save_user_template(
     body = (body or "").strip()
     if not body:
         raise ValueError("template body must not be empty")
-    clean_params = [
-        p for p in (str(p).strip() for p in (params or []))
-        if re.match(r"^[A-Za-z_]\w*$", p)
-    ]
+    clean_params: list[str] = []
+    for p in (str(p).strip() for p in (params or [])):
+        if re.match(r"^[A-Za-z_]\w*$", p) and p not in clean_params:
+            clean_params.append(p)
+    # Reconcile declared params with the {{placeholders}} the title/body actually
+    # use: an undeclared placeholder would render as a literal "{{x}}" in the
+    # goal, and the scheduler/trigger UI (which prompts from tpl.params) would
+    # never ask the operator to fill it. Fold any used-but-undeclared placeholder
+    # into params so every slot is fillable.
+    for m in _VAR.finditer(f"{title}\n{body}"):
+        placeholder = m.group(1)
+        if placeholder not in clean_params:
+            clean_params.append(placeholder)
     try:
         bd = float(budget_dollars)
         bw = float(budget_wall_seconds)
     except (TypeError, ValueError):
         raise ValueError("budget_dollars and budget_wall_seconds must be numbers") from None
+    # Clamp to the same bounds the REST layer enforces (WorkflowSaveIn / GoalIn):
+    # the drafting prompt only suggests 0.5-20, but a hand-edited value must still
+    # land in a sane, bounded per-run range rather than 0 (never runs) or an
+    # arbitrarily large spend.
+    bd = min(max(bd, 0.5), 100.0)
+    bw = min(max(bw, 1.0), 86400.0)
 
     USER_TEMPLATES.mkdir(parents=True, exist_ok=True)
     dest = USER_TEMPLATES / f"{name}.md"

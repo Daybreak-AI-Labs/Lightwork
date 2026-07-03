@@ -154,6 +154,34 @@ def test_gate_blocks_when_disabled(monkeypatch):
     assert r.status_code == 403
 
 
+def test_activate_schedules_falls_back_to_config_knob(monkeypatch):
+    # With activate_schedules omitted (None), the [automation_import]
+    # create_schedules knob decides -- previously a dead setting nothing read.
+    import maverick.config as cfg
+    import maverick.job_queue as job_queue
+    _FakeQueue.last = None
+    monkeypatch.setattr(job_queue, "JobQueue", _FakeQueue)
+    monkeypatch.setattr(cfg, "get_automation_import",
+                        lambda: {"enable": True, "create_schedules": True})
+    r = _client().post("/api/v1/import/run", json={
+        "source": "n8n", "definitions": [N8N_CRON_WF],   # no activate_schedules field
+    })
+    assert r.status_code == 200, r.text
+    assert _FakeQueue.last is not None   # the config knob armed the schedule
+
+
+def test_activate_schedules_off_by_default(monkeypatch):
+    # Neither the request field nor the config knob set -> no schedule armed.
+    import maverick.job_queue as job_queue
+    _FakeQueue.last = None
+    monkeypatch.setattr(job_queue, "JobQueue", _FakeQueue)
+    r = _client().post("/api/v1/import/run", json={
+        "source": "n8n", "definitions": [N8N_CRON_WF],
+    })
+    assert r.status_code == 200
+    assert _FakeQueue.last is None
+
+
 def test_unknown_source_400():
     r = _client().post("/api/v1/import/run", json={"source": "nope", "definitions": [{}]})
     assert r.status_code == 400

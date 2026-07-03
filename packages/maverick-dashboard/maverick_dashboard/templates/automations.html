@@ -66,6 +66,7 @@
       <div class="field">
         <label for="auto-import-source">Platform</label>
         <select id="auto-import-source" name="source"></select>
+        <p class="auto__hint" id="auto-import-mode-hint" hidden></p>
       </div>
       <div class="field">
         <label for="auto-import-defs">Exported definitions JSON (optional — leave blank to fetch live)</label>
@@ -73,6 +74,9 @@
       </div>
       <div class="field">
         <label><input type="checkbox" id="auto-import-webhooks"> Wire inbound webhook triggers for webhook automations</label>
+      </div>
+      <div class="field">
+        <label><input type="checkbox" id="auto-import-schedules"> Activate recovered schedules (arm a cron for scheduled automations)</label>
       </div>
       <div class="field">
         <label><input type="checkbox" id="auto-import-dry"> Preview only (dry run)</label>
@@ -226,15 +230,32 @@
   var importForm = document.getElementById('auto-import-form');
   if (importForm) {
     var sourceSel = document.getElementById('auto-import-source');
+    var modeHint = document.getElementById('auto-import-mode-hint');
+    var sourceModes = {};
+    function updateModeHint() {
+      if (!modeHint) return;
+      var mode = sourceModes[sourceSel.value];
+      if (mode === 'connect-and-trigger') {
+        modeHint.textContent = 'This platform doesn’t expose its automation definitions, '
+          + 'so there’s nothing to fetch. Paste the automation as IR JSON above, or have '
+          + 'it call an inbound webhook trigger instead — importing with a blank box will report that.';
+        modeHint.hidden = false;
+      } else {
+        modeHint.hidden = true;
+      }
+    }
+    sourceSel.addEventListener('change', updateModeHint);
     (async function () {
       var data;
       try { data = await (await fetch('/api/v1/import/sources')).json(); } catch (e) { return; }
       (data.sources || []).forEach(function (s) {
+        sourceModes[s.source] = s.mode;
         var opt = document.createElement('option');
         opt.value = s.source;
         opt.textContent = s.source + ' (' + s.mode + ')';
         sourceSel.appendChild(opt);
       });
+      updateModeHint();
     })();
     importForm.addEventListener('submit', async function (ev) {
       ev.preventDefault();
@@ -244,6 +265,7 @@
         source: sourceSel.value,
         dry_run: document.getElementById('auto-import-dry').checked,
         create_webhook_triggers: document.getElementById('auto-import-webhooks').checked,
+        activate_schedules: document.getElementById('auto-import-schedules').checked,
       };
       var raw = document.getElementById('auto-import-defs').value.trim();
       if (raw) {
@@ -269,7 +291,16 @@
         var verb = out.dry_run ? 'would import' : (it.created ? 'imported' : 'skipped');
         li.appendChild(document.createTextNode(it.name + ' — ' + verb + ' as template ‘' + it.template + '’ (trigger: ' + it.trigger + ')'));
         if (it.webhook_trigger) li.appendChild(document.createTextNode(' · webhook trigger wired'));
-        if (it.schedule) li.appendChild(document.createTextNode(' · schedule created'));
+        if (it.schedule) li.appendChild(document.createTextNode(' · schedule ' + (out.dry_run ? 'recoverable' : 'armed')));
+        // Surface the importer's own diagnostics (e.g. "schedule recovered — tick
+        // Activate to arm it", "event trigger has no Lightwork equivalent"): these
+        // explain why an import that looks done won't actually run on its own.
+        (it.notes || []).forEach(function (n) {
+          var note = el('div', 'auto__runs'); note.textContent = '↳ ' + n; li.appendChild(note);
+        });
+        if (it.tools && it.tools.length) {
+          var tools = el('div', 'auto__runs'); tools.textContent = 'tools: ' + it.tools.join(', '); li.appendChild(tools);
+        }
         results.appendChild(li);
       });
       if (!out.dry_run) { loadSchedules(); loadTriggers(); }

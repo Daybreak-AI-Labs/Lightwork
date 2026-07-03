@@ -307,6 +307,66 @@ def test_save_endpoint_rejects_bad_name(monkeypatch, tmp_path):
     assert r.status_code == 400
 
 
+def test_save_endpoint_conflicts_without_overwrite(monkeypatch, tmp_path):
+    # A fresh save colliding with an existing template is a 409, not a silent
+    # clobber; overwrite=true (the edit flow) replaces it.
+    _isolate(monkeypatch, tmp_path)
+    c = _client()
+    base = {"name": "dup", "title": "First", "body": "## Steps\n1. a"}
+    assert c.post("/api/v1/workflows", json=base).status_code == 201
+    r2 = c.post("/api/v1/workflows", json={**base, "title": "Second"})
+    assert r2.status_code == 409
+    from maverick.templates import load_template
+    assert load_template("dup").title == "First"       # untouched
+    r3 = c.post("/api/v1/workflows", json={**base, "title": "Second", "overwrite": True})
+    assert r3.status_code == 201
+    assert load_template("dup").title == "Second"
+
+
+def test_save_user_template_clamps_budget_and_folds_placeholders(monkeypatch, tmp_path):
+    # Budgets clamp into the schema range; every {{placeholder}} used in the
+    # title/body becomes a fillable param so none renders as a literal.
+    _isolate(monkeypatch, tmp_path)
+    from maverick.templates import load_template, save_user_template
+    save_user_template(
+        "clamp", title="Email {{recipient}}",
+        body="## Steps\n1. write to {{recipient}} about {{topic}}",
+        params=["topic"], budget_dollars=999.0, budget_wall_seconds=0.0,
+    )
+    t = load_template("clamp")
+    assert t.budget_dollars == 100.0        # clamped down from 999
+    assert t.budget_wall_seconds == 1.0     # clamped up from 0
+    assert set(t.params) == {"topic", "recipient"}
+
+
+def test_draft_endpoint_wraps_llm_error_as_502(monkeypatch, tmp_path):
+    # A non-ValueError from the drafter (budget overrun / provider error) must
+    # surface as an upstream 502, never an unhandled 500.
+    _isolate(monkeypatch, tmp_path)
+    _provider(monkeypatch, True)
+    from maverick.budget import BudgetExceeded
+    from maverick_dashboard import workflow_ai
+
+    def boom(*a, **k):
+        raise BudgetExceeded("drafting cap hit")
+
+    monkeypatch.setattr(workflow_ai, "draft_workflow", boom)
+    r = _client().post("/api/v1/workflows/draft", json={"description": "x"})
+    assert r.status_code == 502
+
+
+def test_builder_page_disables_playbook_when_pack_editing_off(monkeypatch, tmp_path):
+    # When pack editing is off, the builder disables playbook mode up front
+    # rather than leading a non-admin to a 403 at Save.
+    _isolate(monkeypatch, tmp_path)
+    import maverick.config as cfg
+    real = cfg.get_features
+    monkeypatch.setattr(cfg, "get_features", lambda: {**real(), "pack_editing": False})
+    html = _client().get("/workflow-builder").text
+    assert "var PACK_EDITING = false" in html
+    assert "requires a dashboard admin" in html
+
+
 def _stub_playbook(monkeypatch, draft):
     from maverick_dashboard import workflow_ai
     monkeypatch.setattr(workflow_ai, "draft_playbook", lambda *a, **k: draft)

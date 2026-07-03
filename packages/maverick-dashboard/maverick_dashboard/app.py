@@ -543,6 +543,14 @@ async def _verify_maverick_webhook(request: Request) -> dict:
     if not verify_signature(body, signature, secret, timestamp=timestamp):
         raise HTTPException(status_code=403, detail="bad webhook signature")
 
+    # NOTE: replay beyond a single byte-identical capture is bounded by the
+    # freshness window (verify_signature enforces max_age on the signed
+    # timestamp). We deliberately do NOT add signature-level dedup here: an HMAC
+    # over (timestamp, body) can't distinguish an attacker's byte replay from a
+    # legitimate rapid identical fire (same trigger, same second, no `data`), so
+    # dedup would drop valid duplicate fires. Tightening this further needs a
+    # client-supplied delivery id to dedup on (as the GitHub/GitLab routes do),
+    # which is a webhook-format change, not a drop-in here.
     require_provider_or_400()
     try:
         payload = json.loads(body or b"{}")
@@ -3570,11 +3578,15 @@ async def webhook_run(request: Request, bg: BackgroundTasks) -> JSONResponse:
 
     Gated by ``[features] triggers``; 404s when triggers are disabled.
     """
+    # Verify the HMAC signature BEFORE consulting the feature flag: checking the
+    # flag first lets an unauthenticated caller distinguish "triggers disabled"
+    # (404) from "triggers on" (401/403) as a config probe. Auth first, then gate.
+    payload = await _verify_maverick_webhook(request)
+
     from maverick.config import get_features
     if not get_features().get("triggers", True):
         raise HTTPException(status_code=404, detail="triggers are disabled")
 
-    payload = await _verify_maverick_webhook(request)
     name = str(payload.get("trigger") or "").strip()
     if not name:
         raise HTTPException(status_code=400, detail="trigger is required")
@@ -3615,7 +3627,19 @@ async def webhook_run(request: Request, bg: BackgroundTasks) -> JSONResponse:
     # Provenance: link this run to its trigger for the Automations run history.
     w.record_goal_origin(goal_id, "trigger", name)
     from maverick.runner import run_goal_in_thread
-    bg.add_task(run_goal_in_thread, goal_id)
+    # Honour the template's own budget/wall caps on every fire -- an operator who
+    # baked budget_dollars/budget_wall_seconds into the template expects them to
+    # hold when a trigger runs it, exactly as the CLI template-run path does
+    # (kernel rule 3: budget caps are not optional). Still bound them: a template
+    # from a catalog install or a hand-edited on-disk file is NOT clamped by
+    # save_user_template (that runs only on save), so cap at the same ceiling the
+    # save layer enforces (WorkflowSaveIn: <=100 $, <=86400 s) -- otherwise an
+    # HMAC-signed burst against such a trigger could amplify per-fire spend far
+    # past what any builder-authored template could set. Peer route /webhook/start
+    # likewise clamps its externally-influenced budget.
+    max_dollars = min(float(tpl.budget_dollars), 100.0)
+    max_wall = min(float(tpl.budget_wall_seconds), 86400.0)
+    bg.add_task(run_goal_in_thread, goal_id, max_dollars, max_wall)
     return JSONResponse({"goal_id": goal_id, "trigger": name}, status_code=201)
 
 
@@ -4531,7 +4555,10 @@ async def workflow_builder_page(request: Request, template: str | None = None,
         try:
             t = load_template(edit)
             edit_prefill = {"name": t.name, "title": t.title, "body": t.body,
-                            "params": list(t.params), "budget_dollars": t.budget_dollars}
+                            "params": list(t.params), "budget_dollars": t.budget_dollars,
+                            # Carry the wall-seconds cap so a save round-trip can't
+                            # silently reset it to the schema default (3600).
+                            "budget_wall_seconds": t.budget_wall_seconds}
         except (ValueError, FileNotFoundError):
             edit_prefill = None
     elif template:
@@ -4541,11 +4568,20 @@ async def workflow_builder_page(request: Request, template: str | None = None,
             prefill = {"name": tpl.name, "params": list(tpl.params), "title": tpl.title}
         except (ValueError, FileNotFoundError):
             prefill = None
+    # Whether this caller can actually save an Agent Playbook. Playbook save +
+    # live governance lint go through the admin-gated pack-editing path, while
+    # drafting only needs "operate" -- so a non-admin could previously build a
+    # whole playbook and only hit a 403 at Save. Reuse the SAME predicate the
+    # enforce path uses (so the two can't drift) to disable playbook mode up
+    # front with an explanation instead.
+    from .api import pack_editing_denial
+    pack_editing_allowed = pack_editing_denial(request) is None
     return templates.TemplateResponse(
         request, "workflow_builder.html",
         {
             "scheduling_enabled": feats.get("scheduling", True),
             "triggers_enabled": feats.get("triggers", True),
+            "pack_editing_allowed": pack_editing_allowed,
             "prefill": prefill,
             "edit_prefill": edit_prefill,
             "edit_agent_prefill": edit_agent_prefill,

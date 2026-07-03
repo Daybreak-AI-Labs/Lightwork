@@ -100,13 +100,15 @@ class ImportRunIn(BaseModel):
     ``definitions`` (exported definition JSON objects) for an offline/connect
     import, or omit it to live-fetch from the platform's API (server env creds).
     ``dry_run`` previews without writing; ``activate_schedules`` auto-creates
-    schedules for recovered cron triggers; ``create_webhook_triggers`` wires an
-    inbound webhook trigger for each webhook-triggered automation.
+    schedules for recovered cron triggers (``None`` = fall back to the
+    ``[automation_import] create_schedules`` config default);
+    ``create_webhook_triggers`` wires an inbound webhook trigger for each
+    webhook-triggered automation.
     """
     source: str = Field(..., max_length=40)
     definitions: list[dict] | None = Field(default=None, max_length=25)
     dry_run: bool = False
-    activate_schedules: bool = False
+    activate_schedules: bool | None = None
     create_webhook_triggers: bool = False
 
 
@@ -278,13 +280,18 @@ class WorkflowRefineIn(BaseModel):
 
 
 class WorkflowSaveIn(BaseModel):
-    """Persist an (AI-drafted, possibly edited) workflow as a user template."""
+    """Persist an (AI-drafted, possibly edited) workflow as a user template.
+
+    ``overwrite`` must be true to replace an existing template of the same name
+    (the ``?edit=`` flow); a fresh save leaves it false so an accidental name
+    collision returns 400 instead of silently clobbering another template."""
     name: str = Field(..., max_length=48)
     title: str = Field(..., max_length=200)
     body: str = Field(..., max_length=20000)
     params: list[str] = Field(default_factory=list)
     budget_dollars: float = Field(5.0, ge=0.0, le=100.0)
     budget_wall_seconds: float = Field(3600.0, ge=1.0, le=86400.0)
+    overwrite: bool = False
 
 
 class TenantCreateIn(BaseModel):
