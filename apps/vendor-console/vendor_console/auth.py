@@ -75,3 +75,12 @@ def require_write(request: Request) -> Staff:
         raise HTTPException(status_code=403,
                             detail="requires owner or admin role")
     return st
+
+
+def require_support(request: Request) -> Staff:
+    """Owner/admin/support may work the support desk; viewer is read-only."""
+    from .models import SUPPORT_ROLES
+    st = require_staff(request)
+    if st.role not in SUPPORT_ROLES:
+        raise HTTPException(status_code=403, detail="requires a support role")
+    return st
