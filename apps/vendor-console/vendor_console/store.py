@@ -7,7 +7,7 @@ import json
 import sqlite3
 import time
 
-from .models import Customer, License, Staff
+from .models import Customer, License, Release, Staff, Ticket, TicketComment
 
 # ---- staff -----------------------------------------------------------------
 
@@ -111,7 +111,7 @@ def list_customers(conn: sqlite3.Connection, *, search: str = "") -> list[Custom
 
 def update_customer(conn: sqlite3.Connection, customer_id: int, **fields) -> None:
     allowed = {"primary_contact", "contact_email", "posture", "status", "notes",
-               "serve_token_hash"}
+               "serve_token_hash", "channel"}
     sets = {k: v for k, v in fields.items() if k in allowed}
     if not sets:
         return
@@ -202,3 +202,132 @@ def latest_checkin_for(conn: sqlite3.Connection, customer_id: int) -> dict | Non
         "SELECT * FROM checkins WHERE customer_id = ? ORDER BY id DESC LIMIT 1",
         (customer_id,)).fetchone()
     return dict(r) if r else None
+
+
+# ---- releases --------------------------------------------------------------
+
+def add_release(conn: sqlite3.Connection, *, version: str, channel: str, min_from: str,
+                notes: str, migrations: list[str], artifacts: list[dict], manifest: dict,
+                key_id: str, published_by: str, at: float | None = None) -> int:
+    cur = conn.execute(
+        "INSERT INTO releases(version, channel, min_from, notes, migrations_json, "
+        "artifacts_json, manifest_json, key_id, published_by, created_at) "
+        "VALUES (?,?,?,?,?,?,?,?,?,?)",
+        (version, channel, min_from, notes, json.dumps(migrations),
+         json.dumps(artifacts), json.dumps(manifest), key_id, published_by,
+         at if at is not None else time.time()))
+    conn.commit()
+    return cur.lastrowid
+
+
+def get_release(conn: sqlite3.Connection, release_id: int) -> Release | None:
+    r = conn.execute("SELECT * FROM releases WHERE id = ?", (release_id,)).fetchone()
+    return Release.from_row(r) if r else None
+
+
+def list_releases(conn: sqlite3.Connection, *, channel: str = "") -> list[Release]:
+    if channel:
+        rows = conn.execute("SELECT * FROM releases WHERE channel = ? ORDER BY id DESC",
+                            (channel,)).fetchall()
+    else:
+        rows = conn.execute("SELECT * FROM releases ORDER BY id DESC").fetchall()
+    return [Release.from_row(r) for r in rows]
+
+
+def newest_release(conn: sqlite3.Connection, channel: str) -> Release | None:
+    """The most recently published, non-yanked release on ``channel``."""
+    r = conn.execute(
+        "SELECT * FROM releases WHERE channel = ? AND yanked_at IS NULL "
+        "ORDER BY id DESC LIMIT 1", (channel,)).fetchone()
+    return Release.from_row(r) if r else None
+
+
+def yank_release(conn: sqlite3.Connection, release_id: int, *,
+                 at: float | None = None) -> bool:
+    cur = conn.execute(
+        "UPDATE releases SET yanked_at = ? WHERE id = ? AND yanked_at IS NULL",
+        (at if at is not None else time.time(), release_id))
+    conn.commit()
+    return cur.rowcount > 0
+
+
+# ---- support tickets -------------------------------------------------------
+
+def create_ticket(conn: sqlite3.Connection, *, customer_id: int | None,
+                  correlation_id: str, subject: str, priority: str = "normal",
+                  tier: str = "", agent_version: str = "", summary: dict | None = None,
+                  bundle: dict | None = None, at: float | None = None) -> int:
+    now = at if at is not None else time.time()
+    cur = conn.execute(
+        "INSERT INTO tickets(customer_id, correlation_id, subject, status, priority, "
+        "tier, agent_version, summary_json, bundle_json, created_at, updated_at) "
+        "VALUES (?,?,?,'open',?,?,?,?,?,?,?)",
+        (customer_id, correlation_id, subject, priority, tier, agent_version,
+         json.dumps(summary or {}), json.dumps(bundle or {}), now, now))
+    conn.commit()
+    return cur.lastrowid
+
+
+def get_ticket(conn: sqlite3.Connection, ticket_id: int) -> Ticket | None:
+    r = conn.execute("SELECT * FROM tickets WHERE id = ?", (ticket_id,)).fetchone()
+    return Ticket.from_row(r) if r else None
+
+
+def ticket_by_correlation(conn: sqlite3.Connection, correlation_id: str) -> Ticket | None:
+    if not correlation_id:
+        return None
+    r = conn.execute(
+        "SELECT * FROM tickets WHERE correlation_id = ? ORDER BY id DESC LIMIT 1",
+        (correlation_id,)).fetchone()
+    return Ticket.from_row(r) if r else None
+
+
+def list_tickets(conn: sqlite3.Connection, *, status: str = "",
+                 customer_id: int | None = None) -> list[Ticket]:
+    clauses, params = [], []
+    if status:
+        clauses.append("status = ?")
+        params.append(status)
+    if customer_id is not None:
+        clauses.append("customer_id = ?")
+        params.append(customer_id)
+    where = (" WHERE " + " AND ".join(clauses)) if clauses else ""
+    rows = conn.execute(
+        f"SELECT * FROM tickets{where} ORDER BY id DESC", params).fetchall()
+    return [Ticket.from_row(r) for r in rows]
+
+
+def update_ticket(conn: sqlite3.Connection, ticket_id: int, **fields) -> None:
+    allowed = {"status", "priority", "assignee", "subject"}
+    sets = {k: v for k, v in fields.items() if k in allowed}
+    if not sets:
+        return
+    cols = ", ".join(f"{k} = ?" for k in sets)
+    conn.execute(f"UPDATE tickets SET {cols}, updated_at = ? WHERE id = ?",
+                 (*sets.values(), time.time(), ticket_id))
+    conn.commit()
+
+
+def add_comment(conn: sqlite3.Connection, *, ticket_id: int, author: str, body: str,
+                kind: str = "note", at: float | None = None) -> int:
+    cur = conn.execute(
+        "INSERT INTO ticket_comments(ticket_id, author, body, kind, created_at) "
+        "VALUES (?,?,?,?,?)",
+        (ticket_id, author, body, kind, at if at is not None else time.time()))
+    conn.execute("UPDATE tickets SET updated_at = ? WHERE id = ?",
+                 (at if at is not None else time.time(), ticket_id))
+    conn.commit()
+    return cur.lastrowid
+
+
+def list_comments(conn: sqlite3.Connection, ticket_id: int) -> list[TicketComment]:
+    rows = conn.execute(
+        "SELECT * FROM ticket_comments WHERE ticket_id = ? ORDER BY id ASC",
+        (ticket_id,)).fetchall()
+    return [TicketComment.from_row(r) for r in rows]
+
+
+def ticket_status_counts(conn: sqlite3.Connection) -> dict:
+    rows = conn.execute(
+        "SELECT status, COUNT(*) AS n FROM tickets GROUP BY status").fetchall()
+    return {r["status"]: r["n"] for r in rows}

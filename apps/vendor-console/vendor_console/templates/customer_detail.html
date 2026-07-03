@@ -82,6 +82,17 @@
       <p class="muted" style="margin:0">No check-ins yet — this deployment hasn't
         polled the serve API, or it's air-gapped.</p>
       {% endif %}
+      {% if staff.can_write %}
+      <form method="post" action="/customers/{{ customer.id }}/channel" style="margin-top:12px">
+        <label>Release channel</label>
+        <select name="channel" onchange="this.form.submit()">
+          <option value="stable" {% if customer.channel=='stable' %}selected{% endif %}>stable</option>
+          <option value="edge" {% if customer.channel=='edge' %}selected{% endif %}>edge</option>
+        </select>
+      </form>
+      {% else %}
+      <div class="muted" style="font-size:12px;margin-top:10px">Channel: {{ customer.channel }}</div>
+      {% endif %}
     </div>
     <h2>Trust anchor</h2>
     <div class="card">

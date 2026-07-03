@@ -67,9 +67,25 @@ private key is never stored in the DB or returned by any route.
 `owner` / `admin` can mint + revoke licenses and manage customers; `support` /
 `viewer` are read-only (support gains the ticket desk in a later drop).
 
+## Releases & support (serve/intake APIs)
+
+A connected deployment authenticates every machine call with its **serve token**
+(Bearer header):
+
+- `GET /api/v1/license` → current signed license (`refresh_from_server`)
+- `GET /api/v1/release?channel=…&version=…` → the latest **signed release
+  manifest** for the customer's channel (the deployment runs
+  `release_update.plan_upgrade` to decide). Publish releases under **Releases**
+  (signed with the same publisher key as licenses; artifacts by `name sha256
+  size`); assign a customer to `stable`/`edge` on their page.
+- `POST /api/v1/support` with a redacted support bundle → files a **ticket**
+  (deduped by `correlation_id`, priority raised when readiness checks fail).
+  Work them under **Support desk** (status workflow, assignment, internal notes).
+
 ## Status
 
-**Built:** license-lifecycle vertical (customers → issue/upsell/revoke → serve),
-local + TOTP auth with RBAC, fleet check-in board, hash-chained vendor audit.
-**Next:** release publishing + version tracking, support-ticket desk, billing/
-usage, SSO.
+**Built:** license lifecycle (customers → issue/upsell/revoke → serve), **release
+publishing** (signed manifests + channels + serve API), **support desk** (bundle
+intake → triaged tickets), fleet check-in board, local + TOTP auth with RBAC, and
+a hash-chained vendor audit trail over every action. **Next:** billing/usage
+(invoices via `billing.py`), SSO, and the concrete per-deployment update hooks.

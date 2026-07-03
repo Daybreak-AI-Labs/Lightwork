@@ -9,13 +9,30 @@ from fastapi import APIRouter, Depends, Form, Request
 from fastapi.responses import RedirectResponse, Response
 from starlette.exceptions import HTTPException
 
-from . import audit, licensing, store
-from .auth import require_staff, require_write
+from . import audit, licensing, releases, store, support
+from .auth import require_staff, require_support, require_write
 from .models import Staff
 from .render import render
 from .util import hash_token
 
 router = APIRouter()
+
+
+def _parse_artifacts(raw: str) -> list[dict]:
+    """Parse a textarea of ``name  sha256  size`` lines into artifact dicts.
+    Blank lines and a leading header line are ignored; size defaults to 0."""
+    out: list[dict] = []
+    for line in (raw or "").splitlines():
+        parts = line.replace(",", " ").split()
+        if len(parts) < 2 or parts[0].lower() in ("name", "artifact"):
+            continue
+        size = int(parts[2]) if len(parts) > 2 and parts[2].isdigit() else 0
+        out.append({"name": parts[0], "sha256": parts[1], "size": size})
+    return out
+
+
+def _csv(raw: str) -> list[str]:
+    return [x.strip() for x in (raw or "").replace(",", "\n").splitlines() if x.strip()]
 
 
 @router.get("/")
@@ -63,6 +80,18 @@ def customer_detail(request: Request, customer_id: int,
                   {"staff": staff, "customer": cust, "licenses": rows,
                    "checkin": store.latest_checkin_for(conn, customer_id),
                    "pubkey": licensing.public_key_hex(), "section": "customers"})
+
+
+@router.post("/customers/{customer_id}/channel")
+def set_customer_channel(request: Request, customer_id: int, channel: str = Form(...),
+                         staff: Staff = Depends(require_write)):
+    conn = request.app.state.conn
+    from .models import CHANNELS
+    if channel in CHANNELS:
+        store.update_customer(conn, customer_id, channel=channel)
+        audit.record(conn, actor=staff.email, action="customer.channel",
+                     target=str(customer_id), detail={"channel": channel})
+    return RedirectResponse(f"/customers/{customer_id}", status_code=303)
 
 
 @router.post("/customers/{customer_id}/licenses")
@@ -124,3 +153,108 @@ def audit_view(request: Request, staff: Staff = Depends(require_write)):
     return render(request, "audit.html",
                   {"staff": staff, "events": audit.recent(conn),
                    "chain_ok": ok, "broken": broken, "section": "audit"})
+
+
+# ---- releases --------------------------------------------------------------
+
+@router.get("/releases")
+def releases_list(request: Request, staff: Staff = Depends(require_staff)):
+    conn = request.app.state.conn
+    return render(request, "releases.html",
+                  {"staff": staff, "releases": store.list_releases(conn),
+                   "section": "releases"})
+
+
+@router.post("/releases")
+def releases_publish(request: Request, version: str = Form(...),
+                     channel: str = Form("stable"), min_from: str = Form(""),
+                     notes: str = Form(""), migrations: str = Form(""),
+                     artifacts: str = Form(""), staff: Staff = Depends(require_write)):
+    conn = request.app.state.conn
+    try:
+        releases.publish_release(
+            conn, version=version.strip(), channel=channel, min_from=min_from.strip(),
+            notes=notes, migrations=_csv(migrations),
+            artifacts=_parse_artifacts(artifacts), actor=staff.email)
+    except Exception as e:  # noqa: BLE001 - bad version/sha/etc → surface a 400
+        raise HTTPException(status_code=400, detail=f"publish failed: {e}") from e
+    return RedirectResponse("/releases", status_code=303)
+
+
+@router.post("/releases/{release_id}/yank")
+def releases_yank(request: Request, release_id: int, reason: str = Form(""),
+                  staff: Staff = Depends(require_write)):
+    conn = request.app.state.conn
+    releases.yank_release(conn, release_id, actor=staff.email, reason=reason)
+    return RedirectResponse("/releases", status_code=303)
+
+
+@router.get("/releases/{release_id}/manifest")
+def releases_manifest(request: Request, release_id: int,
+                      _staff: Staff = Depends(require_staff)):
+    conn = request.app.state.conn
+    rel = store.get_release(conn, release_id)
+    if rel is None:
+        raise HTTPException(status_code=404, detail="no such release")
+    body = json.dumps(rel.manifest, indent=2) + "\n"
+    safe = re.sub(r"[^A-Za-z0-9_.-]", "", rel.version)[:40]
+    return Response(body, media_type="application/json", headers={
+        "Content-Disposition": f'attachment; filename="manifest-{safe}.json"'})
+
+
+# ---- support desk ----------------------------------------------------------
+
+@router.get("/support")
+def tickets_list(request: Request, status: str = "",
+                 staff: Staff = Depends(require_staff)):
+    conn = request.app.state.conn
+    return render(request, "tickets.html",
+                  {"staff": staff, "tickets": store.list_tickets(conn, status=status),
+                   "counts": store.ticket_status_counts(conn), "status": status,
+                   "section": "support"})
+
+
+@router.get("/support/{ticket_id}")
+def ticket_detail(request: Request, ticket_id: int,
+                  staff: Staff = Depends(require_staff)):
+    conn = request.app.state.conn
+    tkt = store.get_ticket(conn, ticket_id)
+    if tkt is None:
+        raise HTTPException(status_code=404, detail="no such ticket")
+    cust = store.get_customer(conn, tkt.customer_id) if tkt.customer_id else None
+    return render(request, "ticket_detail.html",
+                  {"staff": staff, "ticket": tkt, "customer": cust,
+                   "comments": store.list_comments(conn, ticket_id),
+                   "section": "support"})
+
+
+@router.post("/support/{ticket_id}/comment")
+def ticket_comment(request: Request, ticket_id: int, body: str = Form(...),
+                   staff: Staff = Depends(require_support)):
+    conn = request.app.state.conn
+    if body.strip():
+        store.add_comment(conn, ticket_id=ticket_id, author=staff.email,
+                          body=body.strip())
+    return RedirectResponse(f"/support/{ticket_id}", status_code=303)
+
+
+@router.post("/support/{ticket_id}/status")
+def ticket_set_status(request: Request, ticket_id: int, status: str = Form(...),
+                      note: str = Form(""), staff: Staff = Depends(require_support)):
+    conn = request.app.state.conn
+    from .models import TICKET_STATUSES
+    if status not in TICKET_STATUSES:
+        raise HTTPException(status_code=400, detail="invalid status")
+    support.set_status(conn, ticket_id, status, actor=staff.email, note=note)
+    return RedirectResponse(f"/support/{ticket_id}", status_code=303)
+
+
+@router.post("/support/{ticket_id}/assign")
+def ticket_assign(request: Request, ticket_id: int, assignee: str = Form(""),
+                  priority: str = Form(""), staff: Staff = Depends(require_support)):
+    conn = request.app.state.conn
+    fields: dict = {"assignee": assignee.strip()}   # blank clears the assignee
+    if priority.strip():
+        fields["priority"] = priority.strip()
+    store.update_ticket(conn, ticket_id, **fields)
+    return RedirectResponse(f"/support/{ticket_id}", status_code=303)
