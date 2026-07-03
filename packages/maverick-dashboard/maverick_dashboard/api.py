@@ -1918,14 +1918,10 @@ async def delete_trigger_endpoint(request: Request, name: str) -> dict:
     _require_triggers()
     from maverick_dashboard import triggers_store
     # Owner-scope like schedules: a non-admin may delete only its own triggers.
-    # 404 (not 403) so a cross-tenant probe can't distinguish "exists but not
-    # yours" from "does not exist".
-    owner = goal_owner_filter(request)
-    if owner is not None:
-        trig = triggers_store.get_trigger(name)
-        if trig is None or trig.get("owner", "") != owner:
-            raise HTTPException(status_code=404, detail="no trigger with that name")
-    if not triggers_store.delete_trigger(name):
+    # The ownership check happens atomically inside delete_trigger (one locked
+    # read, no TOCTOU). 404 (not 403) so a cross-tenant probe can't distinguish
+    # "exists but not yours" from "does not exist".
+    if not triggers_store.delete_trigger(name, owner=goal_owner_filter(request)):
         raise HTTPException(status_code=404, detail="no trigger with that name")
     return {"deleted": name}
 
@@ -2036,7 +2032,9 @@ async def import_run_endpoint(request: Request, payload: ImportRunIn) -> ImportR
             # (sug["params"]); validate the template renders with them before
             # arming so we don't create a trigger that always 400s at fire time
             # on a required param the import couldn't supply.
-            sug_params = sug.get("params") if isinstance(sug.get("params"), dict) else {}
+            sug_params = sug.get("params")
+            if not isinstance(sug_params, dict):
+                sug_params = {}
             from maverick.templates import load_template
             try:
                 load_template(res.template_name).render(**sug_params)
@@ -2113,17 +2111,26 @@ async def automation_runs(request: Request, kind: str, ref: str, limit: int = 8)
 # *merged* result fails lint, so editing can never weaken the safety envelope.
 
 
-def _require_pack_editing(request: Request) -> None:
-    from maverick.config import get_features
+def pack_editing_denial(request: Request) -> str | None:
+    """Why this caller may NOT edit domain packs (agent playbooks), or ``None``
+    if it may. One predicate for both consumers -- the enforce path
+    (:func:`_require_pack_editing`) raises it as a 403 detail, and the builder
+    page reads ``is None`` to decide whether to offer playbook mode -- so the two
+    can't drift. Mirrors the ``*_denial`` pattern used for enterprise egress."""
     principal = caller_principal(request)
     if principal is not None and not is_dashboard_admin(principal):
-        raise HTTPException(status_code=403, detail="pack editing requires a dashboard admin")
+        return "pack editing requires a dashboard admin"
+    from maverick.config import get_features
     if not get_features().get("pack_editing", True):
-        raise HTTPException(
-            status_code=403,
-            detail=("pack editing is disabled ([features] pack_editing = false). "
-                    "Edit override TOML on the host, or re-enable it in config."),
-        )
+        return ("pack editing is disabled ([features] pack_editing = false). "
+                "Edit override TOML on the host, or re-enable it in config.")
+    return None
+
+
+def _require_pack_editing(request: Request) -> None:
+    denial = pack_editing_denial(request)
+    if denial is not None:
+        raise HTTPException(status_code=403, detail=denial)
 
 
 @router.get("/agents")

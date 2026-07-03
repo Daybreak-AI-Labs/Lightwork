@@ -4564,14 +4564,11 @@ async def workflow_builder_page(request: Request, template: str | None = None,
     # Whether this caller can actually save an Agent Playbook. Playbook save +
     # live governance lint go through the admin-gated pack-editing path, while
     # drafting only needs "operate" -- so a non-admin could previously build a
-    # whole playbook and only hit a 403 at Save. Surface the capability up front
-    # so the builder can disable playbook mode with an explanation instead.
-    from .auth import is_dashboard_admin
-    principal = caller_principal(request)
-    pack_editing_allowed = (
-        bool(feats.get("pack_editing", True))
-        and (principal is None or is_dashboard_admin(principal))
-    )
+    # whole playbook and only hit a 403 at Save. Reuse the SAME predicate the
+    # enforce path uses (so the two can't drift) to disable playbook mode up
+    # front with an explanation instead.
+    from .api import pack_editing_denial
+    pack_editing_allowed = pack_editing_denial(request) is None
     return templates.TemplateResponse(
         request, "workflow_builder.html",
         {

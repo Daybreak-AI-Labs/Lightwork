@@ -143,11 +143,16 @@ def set_trigger(
     return rec
 
 
-def delete_trigger(name: str) -> bool:
+def delete_trigger(name: str, owner: str | None = None) -> bool:
+    """Remove a trigger by name. When ``owner`` is given, delete only if the
+    trigger belongs to that owner (returns False otherwise) -- the ownership
+    check and removal happen under one lock, so there is no read-then-delete
+    race and only a single file read. ``owner=None`` (admin / auth-off) deletes
+    regardless of owner."""
     with _locked():
         triggers = list_triggers()
-        kept = [t for t in triggers if t["name"] != name]
-        if len(kept) == len(triggers):
+        match = next((t for t in triggers if t["name"] == name), None)
+        if match is None or (owner is not None and match.get("owner", "") != owner):
             return False
-        _write(kept)
+        _write([t for t in triggers if t["name"] != name])
     return True
