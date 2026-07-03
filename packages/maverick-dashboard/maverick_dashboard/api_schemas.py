@@ -129,6 +129,10 @@ class ImportRunOut(BaseModel):
     dry_run: bool
     webhook_url: str
     secret_configured: bool
+    # How many supplied definitions could not be translated (malformed / an
+    # unsupported shape) and were dropped. Surfaced so a partial import doesn't
+    # look like a clean success.
+    skipped: int = 0
 
 
 class TriggerIn(BaseModel):

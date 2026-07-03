@@ -182,6 +182,19 @@ def test_activate_schedules_off_by_default(monkeypatch):
     assert _FakeQueue.last is None
 
 
+def test_partial_import_reports_skipped():
+    # One good + one malformed definition: the good one imports, the malformed
+    # one is dropped and surfaced via `skipped` (not silently lost).
+    r = _client().post("/api/v1/import/run", json={
+        "source": "n8n",
+        "definitions": [N8N_WF, {"name": "broken", "nodes": "not-a-list"}],
+    })
+    assert r.status_code == 200, r.text
+    body = r.json()
+    assert len(body["imported"]) == 1
+    assert body["skipped"] == 1
+
+
 def test_unknown_source_400():
     r = _client().post("/api/v1/import/run", json={"source": "nope", "definitions": [{}]})
     assert r.status_code == 400

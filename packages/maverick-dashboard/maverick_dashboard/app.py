@@ -560,6 +560,20 @@ async def _verify_maverick_webhook(request: Request) -> dict:
         raise HTTPException(status_code=400, detail="body must be a JSON object")
     return payload
 
+
+def _webhook_duplicate_delivery(route: str, payload: dict) -> bool:
+    """True if this signed webhook carries a delivery ``id`` we've already
+    processed within the freshness window (an at-most-once guard the caller
+    opts into by stamping ``{"id": "..."}``). Returns False when no id is
+    given, so id-less callers keep the current at-least-once behaviour. The id
+    is namespaced per ``route`` so a /webhook/start id can't mask a /webhook/run
+    one. Never raises -- a degraded dedup store must not drop a webhook."""
+    delivery_id = str(payload.get("id") or "").strip()[:200]
+    if not delivery_id:
+        return False
+    from maverick.webhooks import _default_max_age
+    return _issue_webhook_replay_seen(f"webhook-{route}:{delivery_id}", _default_max_age())
+
 # Safe methods skip the CSRF check (browsers send Origin/Referer
 # inconsistently on GETs from address bars and bookmarks).
 _CSRF_SAFE_METHODS = frozenset({"GET", "HEAD", "OPTIONS"})
@@ -3513,7 +3527,9 @@ async def users_remove(request: Request, principal: str = Form(...)) -> Redirect
 async def webhook_start(request: Request, bg: BackgroundTasks) -> JSONResponse:
     """Generic inbound webhook: create a goal from an HMAC-signed POST.
 
-    Body is JSON ``{title, description?, budget?}``. The request must carry
+    Body is JSON ``{title, description?, budget?, id?}`` (an optional ``id``
+    gives at-most-once delivery: a repeat within the freshness window 409s).
+    The request must carry
     an ``X-Maverick-Signature: sha256=<hex>`` header computed over the
     timestamp + raw body with the configured ``[webhooks] secret`` (see
     ``maverick.webhooks``), plus an ``X-Maverick-Timestamp`` header. Returns
@@ -3534,6 +3550,10 @@ async def webhook_start(request: Request, bg: BackgroundTasks) -> JSONResponse:
     if not title:
         raise HTTPException(status_code=400, detail="title is required")
     description = str(payload.get("description") or "")
+
+    # Opt-in exactly-once via a caller-stamped delivery id (see webhook_run).
+    if _webhook_duplicate_delivery("start", payload):
+        raise HTTPException(status_code=409, detail="duplicate delivery id (already processed)")
 
     check_goal_rate_limit(request, source="webhook")
     w = _world()
@@ -3565,10 +3585,12 @@ async def webhook_start(request: Request, bg: BackgroundTasks) -> JSONResponse:
 async def webhook_run(request: Request, bg: BackgroundTasks) -> JSONResponse:
     """Fire a registered trigger: render its saved template and run it as a goal.
 
-    Body is JSON ``{"trigger": "<name>", "data"?: {...}}``. Authenticated by the
-    same HMAC signature as ``/webhook/start`` (``X-Maverick-Signature`` over the
-    ``X-Maverick-Timestamp`` + raw body, with the ``[webhooks]`` secret) and the
-    same replay-freshness window. We fail closed -- a missing secret yields 401.
+    Body is JSON ``{"trigger": "<name>", "data"?: {...}, "id"?: "<delivery-id>"}``.
+    Authenticated by the same HMAC signature as ``/webhook/start``
+    (``X-Maverick-Signature`` over the ``X-Maverick-Timestamp`` + raw body, with
+    the ``[webhooks]`` secret) and the same replay-freshness window. We fail
+    closed -- a missing secret yields 401. An optional ``id`` gives at-most-once
+    delivery: a repeat of that id within the window is rejected (409).
 
     This is deliberately NARROWER than ``/webhook/start``: it runs only a
     template an operator registered via the dashboard (with operator-set default
@@ -3590,6 +3612,13 @@ async def webhook_run(request: Request, bg: BackgroundTasks) -> JSONResponse:
     name = str(payload.get("trigger") or "").strip()
     if not name:
         raise HTTPException(status_code=400, detail="trigger is required")
+
+    # Optional exactly-once: when the caller stamps a delivery ``id``, reject a
+    # replay of that id within the freshness window (409). Unlike byte-level
+    # signature dedup this does NOT penalise a legitimate rapid identical fire --
+    # those carry distinct ids (or none, in which case no dedup applies).
+    if _webhook_duplicate_delivery("run", payload):
+        raise HTTPException(status_code=409, detail="duplicate delivery id (already processed)")
 
     from maverick_dashboard import triggers_store
     trig = triggers_store.get_trigger(name)

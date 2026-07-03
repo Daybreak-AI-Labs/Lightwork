@@ -303,6 +303,12 @@
         }
         results.appendChild(li);
       });
+      if (out.skipped) {
+        results.appendChild(el('li', 'auto__warn',
+          out.skipped + ' definition' + (out.skipped === 1 ? '' : 's')
+          + ' could not be read and ' + (out.skipped === 1 ? 'was' : 'were')
+          + ' skipped (malformed or an unsupported shape).'));
+      }
       if (!out.dry_run) { loadSchedules(); loadTriggers(); }
     });
   }

@@ -10,7 +10,7 @@ import json
 
 import pytest
 from maverick import automation_import as ai
-from maverick.automation_import import ir, make, power_automate, uipath, workato
+from maverick.automation_import import ir, make, n8n, power_automate, uipath, workato
 
 
 class TestMake:
@@ -174,6 +174,43 @@ class TestUiPath:
     def test_bad_input_raises(self):
         with pytest.raises(ai.ImporterError):
             uipath.translate([1, 2, 3])  # type: ignore[arg-type]
+
+
+class TestN8nSchedule:
+    """The modern scheduleTrigger encodes schedules as interval RULES, not a raw
+    cron; we should still recover a 5-field cron so a schedule can be armed."""
+
+    def _wf(self, interval: dict) -> dict:
+        return {
+            "id": "s", "name": "Digest", "active": True,
+            "nodes": [
+                {"name": "Every", "type": "n8n-nodes-base.scheduleTrigger",
+                 "parameters": {"rule": {"interval": [interval]}}},
+                {"name": "Send", "type": "n8n-nodes-base.emailSend",
+                 "parameters": {"operation": "send"}},
+            ],
+            "connections": {"Every": {"main": [[{"node": "Send"}]]}},
+        }
+
+    def test_explicit_cron_still_wins(self):
+        a = n8n.translate(self._wf({"field": "cronExpression", "expression": "0 9 * * 1"}))
+        assert a.trigger.kind == ir.TRIGGER_SCHEDULE and a.trigger.cron == "0 9 * * 1"
+
+    @pytest.mark.parametrize("interval,expected", [
+        ({"field": "minutes", "minutesInterval": 15}, "*/15 * * * *"),
+        ({"field": "hours", "hoursInterval": 2, "triggerAtMinute": 30}, "30 */2 * * *"),
+        ({"field": "hours", "hoursInterval": 1}, "0 * * * *"),
+        ({"field": "days", "triggerAtHour": 9, "triggerAtMinute": 5}, "5 9 * * *"),
+        ({"field": "weeks", "triggerAtDay": [1, 3], "triggerAtHour": 9}, "0 9 * * 1,3"),
+        ({"field": "months", "triggerAtDayOfMonth": 1, "triggerAtHour": 8}, "0 8 1 * *"),
+    ])
+    def test_interval_rules_recover_cron(self, interval, expected):
+        a = n8n.translate(self._wf(interval))
+        assert a.trigger.cron == expected
+
+    def test_subminute_leaves_no_cron(self):
+        a = n8n.translate(self._wf({"field": "seconds", "secondsInterval": 30}))
+        assert a.trigger.kind == ir.TRIGGER_SCHEDULE and a.trigger.cron is None
 
 
 class TestRegistry:
