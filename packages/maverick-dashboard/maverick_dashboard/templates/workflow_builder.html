@@ -622,7 +622,6 @@
       var t = {
         name: elName.value.trim(), title: elTitle.value.trim(), body: elSteps.value,
         params: splitList(elParams.value), budget_dollars: parseFloat(elBudget.value) || 5.0,
-        steps: stepsFromBody(elSteps.value),
       };
       // Preserve the wall-time cap of an edited template (the form has no field
       // for it) so a save round-trip can't reset it to the server default.
@@ -1296,7 +1295,11 @@
       setBusy(btn, true);
       setStatus('Refining…');
       var current = isPb ? collectPlaybook() : collectTemplate();
+      // Hand the refiner a real steps[] array (the save path doesn't need it, so
+      // it's added here, not in the shared collector) so the model revises
+      // structured steps instead of re-deriving them from the markdown body.
       if (isPb) current.name = pbName.value.trim();
+      else current.steps = stepsFromBody(elSteps.value);
       try {
         var resp = await fetch('/api/v1/workflows/refine', {
           method: 'POST', headers: { 'Content-Type': 'application/json' },

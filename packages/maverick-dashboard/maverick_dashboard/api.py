@@ -1900,6 +1900,17 @@ async def create_trigger(request: Request, payload: TriggerIn) -> TriggerOut:
             status_code=404, detail=f"template not found: {payload.template!r}"
         ) from e
     from maverick_dashboard import triggers_store
+    # Owner-scope the write like list/delete: a non-admin must not overwrite
+    # (hijack) a trigger registered by another tenant just by reusing its slug.
+    # set_trigger keys by slugify(name), so check the same slug for a foreign
+    # owner before replacing it.
+    owner_filter = goal_owner_filter(request)
+    if owner_filter is not None:
+        existing = triggers_store.get_trigger(
+            triggers_store.slugify(payload.name or payload.template))
+        if existing is not None and existing.get("owner", "") != owner_filter:
+            raise HTTPException(
+                status_code=409, detail="a trigger with that name already exists")
     try:
         rec = triggers_store.set_trigger(
             payload.name or payload.template, payload.template, payload.params or {},

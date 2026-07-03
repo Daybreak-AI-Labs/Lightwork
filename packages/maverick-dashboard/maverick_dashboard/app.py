@@ -3630,9 +3630,16 @@ async def webhook_run(request: Request, bg: BackgroundTasks) -> JSONResponse:
     # Honour the template's own budget/wall caps on every fire -- an operator who
     # baked budget_dollars/budget_wall_seconds into the template expects them to
     # hold when a trigger runs it, exactly as the CLI template-run path does
-    # (kernel rule 3: budget caps are not optional). These are operator-authored
-    # config, not external input, so they are trusted as-is.
-    bg.add_task(run_goal_in_thread, goal_id, tpl.budget_dollars, tpl.budget_wall_seconds)
+    # (kernel rule 3: budget caps are not optional). Still bound them: a template
+    # from a catalog install or a hand-edited on-disk file is NOT clamped by
+    # save_user_template (that runs only on save), so cap at the same ceiling the
+    # save layer enforces (WorkflowSaveIn: <=100 $, <=86400 s) -- otherwise an
+    # HMAC-signed burst against such a trigger could amplify per-fire spend far
+    # past what any builder-authored template could set. Peer route /webhook/start
+    # likewise clamps its externally-influenced budget.
+    max_dollars = min(float(tpl.budget_dollars), 100.0)
+    max_wall = min(float(tpl.budget_wall_seconds), 86400.0)
+    bg.add_task(run_goal_in_thread, goal_id, max_dollars, max_wall)
     return JSONResponse({"goal_id": goal_id, "trigger": name}, status_code=201)
 
 

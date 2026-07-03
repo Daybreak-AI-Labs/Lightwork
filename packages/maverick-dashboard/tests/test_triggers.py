@@ -274,6 +274,31 @@ def test_webhook_run_honors_template_budget(monkeypatch, tmp_path):
     assert seen["dollars"] == 0.75 and seen["wall"] == 120.0
 
 
+def test_webhook_run_clamps_oversized_template_budget(monkeypatch, tmp_path):
+    # A template on disk (catalog install / hand-edited) is not clamped at save
+    # time; the fire path must still cap it at the save-layer ceiling so a signed
+    # burst can't amplify per-fire spend past what the builder could set.
+    _isolate(monkeypatch, tmp_path)
+    _configured(monkeypatch)
+    import maverick.templates as tpl
+    (tpl.USER_TEMPLATES / "huge.md").write_text(
+        "---\ntitle: Huge\nbudget_dollars: 1000\nbudget_wall_seconds: 999999\n---\n"
+        "Do a big thing.\n", encoding="utf-8")
+    import maverick.runner as runner_mod
+    seen = {}
+
+    def fake_run(goal_id, max_dollars=None, max_wall_seconds=None, max_depth=3):
+        seen["dollars"] = max_dollars
+        seen["wall"] = max_wall_seconds
+
+    monkeypatch.setattr(runner_mod, "run_goal_in_thread", fake_run)
+    c = _client()
+    assert c.post("/api/v1/triggers", json={"template": "huge"}).status_code == 201
+    body = json.dumps({"trigger": "huge"}).encode()
+    assert c.post("/webhook/run", content=body, headers=_sign_headers(body)).status_code == 201
+    assert seen["dollars"] == 100.0 and seen["wall"] == 86400.0    # clamped down
+
+
 def test_webhook_run_verifies_signature_before_feature_flag(monkeypatch, tmp_path, _no_real_run):
     # With triggers disabled, an UNSIGNED/bad request must be rejected as auth
     # (403), not leak the feature state via a distinct 404.
@@ -308,3 +333,18 @@ def test_list_triggers_is_owner_scoped(monkeypatch, tmp_path):
     monkeypatch.setattr(api, "goal_owner_filter", lambda request: "user:alice")
     names = {t["name"] for t in _client().get("/api/v1/triggers").json()["triggers"]}
     assert names == {"mine"}
+
+
+def test_create_trigger_cannot_overwrite_another_owner(monkeypatch, tmp_path):
+    # A non-admin must not hijack a trigger owned by another tenant by reusing
+    # its slug; the existing trigger stays intact.
+    _isolate(monkeypatch, tmp_path)
+    from maverick_dashboard import api, triggers_store
+    triggers_store.set_trigger("shared", "weekly-report", {"topic": "x"}, owner="user:bob")
+    monkeypatch.setattr(api, "goal_owner_filter", lambda request: "user:alice")
+    monkeypatch.setattr(api, "caller_principal", lambda request: "user:alice")
+    r = _client().post("/api/v1/triggers", json={
+        "name": "shared", "template": "weekly-report", "params": {"topic": "y"}})
+    assert r.status_code == 409
+    got = triggers_store.get_trigger("shared")
+    assert got["owner"] == "user:bob" and got["params"] == {"topic": "x"}   # untouched
