@@ -545,6 +545,15 @@ CORE_TOOL_NAMES = frozenset({
     "spawn_subagent", "spawn_swarm",
 })
 
+# Credentialed SaaS/cloud tools that may use ambient host credentials (PR
+# #124): they only register when the operator opts in via
+# MAVERICK_ENABLE_CRED_TOOLS=true (see base_registry below). These names are
+# reserved -- the always-on enterprise_connectors catalog must never reuse one
+# (see test_no_collision_with_opt_in_ambient_cred_tools).
+AMBIENT_CRED_TOOL_NAMES = frozenset({
+    "airtable", "asana", "clickup", "lambda", "dynamodb", "vercel", "gdrive",
+})
+
 
 def _deferred_loading_enabled() -> bool:
     """Whether deferred tool loading is on (default off -- unchanged behavior).
@@ -1121,7 +1130,8 @@ def base_registry(
     reg.register(database_tool())
     # Credentialed SaaS/cloud tools are opt-in (PR #124): they can use
     # ambient host credentials, so they only register when the operator
-    # sets MAVERICK_ENABLE_CRED_TOOLS=true.
+    # sets MAVERICK_ENABLE_CRED_TOOLS=true. Their names are reserved in
+    # AMBIENT_CRED_TOOL_NAMES above -- keep that set in sync with this list.
     if _env_true("MAVERICK_ENABLE_CRED_TOOLS"):
         reg.register(airtable_tool())
         reg.register(asana_tool())
