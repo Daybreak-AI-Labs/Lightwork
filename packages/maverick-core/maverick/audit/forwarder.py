@@ -157,6 +157,7 @@ def forward(lines: Iterable[str], dest: str, *, timeout: float = 10.0) -> int:
     try:
         from ..entitlements import require
         licensed = require("siem_export")
+    # failure-policy: best_effort
     except Exception:  # pragma: no cover - entitlements missing => don't block
         licensed = True
     if not licensed:
