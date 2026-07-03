@@ -7,8 +7,6 @@ from fastapi.testclient import TestClient
 from vendor_console import audit, security, store
 from vendor_console.util import hash_token
 
-from conftest import make_staff
-
 
 def test_totp_single_use_rejects_replay():
     secret = security.new_totp_secret()
@@ -30,13 +28,14 @@ def test_logout_revokes_the_live_session(admin, app):
     assert r.status_code == 303 and r.headers["location"] == "/login"   # epoch bumped
 
 
-def test_login_locks_out_after_repeated_failures(client, app):
-    make_staff(app, email="boss@daybreak.co")    # password-1234
+def test_login_locks_out_after_repeated_failures(client, make_staff):
+    make_staff(email="boss@daybreak.co")    # password-1234
     for _ in range(5):
-        client.post("/login", data={"email": "boss@daybreak.co", "password": "wrong"})
+        client.post("/login", data={"email": "boss@daybreak.co",
+                                    "password": "wrong"})  # pragma: allowlist secret
     # even the CORRECT password is now refused during the lockout window
     r = client.post("/login", data={"email": "boss@daybreak.co",
-                                    "password": "password-1234"})
+                                    "password": "password-1234"})  # pragma: allowlist secret
     assert "Too many attempts" in r.text
 
 

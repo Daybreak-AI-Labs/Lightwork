@@ -5,8 +5,6 @@ from __future__ import annotations
 from maverick import entitlements
 from vendor_console import licensing, store
 
-from conftest import TEST_SIGNING_KEY
-
 
 def _customer(conn, name="Cedar Valley Bank"):
     return store.create_customer(conn, name=name, contact_email="ciso@cvb.example")
@@ -17,8 +15,9 @@ def test_issue_signs_a_verifiable_license(conn):
     lic = licensing.issue_license(conn, customer_id=cid, tier="gold",
                                   suites=["fleet"], expires="2027-01-01",
                                   actor="owner@daybreak.co")
-    # Verifies with the SAME code a customer runs, under our published public key.
-    pub = licensing.public_key_hex(TEST_SIGNING_KEY)
+    # Verifies with the SAME code a customer runs, under our published public key
+    # (public_key_hex() reads the signing key from the env the conftest pins).
+    pub = licensing.public_key_hex()
     ok, why = entitlements.verify_license(lic.doc, [pub])
     assert ok and why == "ok"
     assert lic.doc["customer"] == "Cedar Valley Bank" and lic.doc["tier"] == "gold"

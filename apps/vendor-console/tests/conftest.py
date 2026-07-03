@@ -16,8 +16,19 @@ for p in (Path(__file__).parent,                       # so tests can `import co
     if str(p) not in sys.path:
         sys.path.insert(0, str(p))
 
-pytest.importorskip("fastapi")
-pytest.importorskip("cryptography")
+# If the web deps are absent (e.g. a lint-only environment), ignore this dir's
+# test files CLEANLY rather than raising a collection error that would abort the
+# whole repo-wide `pytest` run (see CLAUDE.md: one collection error stops all).
+collect_ignore_glob: list[str] = []
+try:
+    import cryptography  # noqa: F401
+    import fastapi  # noqa: F401
+    try:
+        import python_multipart  # noqa: F401  (newer import name)
+    except ImportError:
+        import multipart  # noqa: F401  (older python-multipart)
+except ImportError:  # pragma: no cover
+    collect_ignore_glob = ["test_*.py"]
 
 # A fixed publisher private key so signatures + public_key_hex are deterministic.
 TEST_SIGNING_KEY = "1" * 64
@@ -53,28 +64,41 @@ def client(app):
     return TestClient(app)
 
 
-def make_staff(app, *, email="owner@daybreak.co", role="owner"):
-    """Create a staff row directly and return its id (bypasses the UI setup)."""
+# Helpers are exposed as FIXTURES (not module functions imported via
+# `from conftest import …`) — a top-level `conftest` import collides across the
+# repo's many conftest.py files under `pytest --import-mode=importlib` and would
+# abort collection. Fixtures are directory-scoped and safe.
+
+@pytest.fixture
+def make_staff(app):
+    """Factory: create a staff row directly (bypasses the UI setup), return id."""
     from vendor_console import security, store
-    conn = app.state.conn
-    return store.create_staff(conn, email=email, name="O", role=role,
-                              pw_hash=security.hash_password("password-1234"),
-                              totp_secret=security.new_totp_secret())
 
-
-def login_cookie(app, staff_id: int, role: str = "owner", epoch: int = 0) -> dict:
-    """A full-session cookie for a staff id (skips the password+TOTP screens)."""
-    from vendor_console import security
-    from vendor_console.auth import SESSION_COOKIE
-    token = security.sign_session(
-        {"sid": staff_id, "stage": "full", "role": role, "ep": epoch},
-        security.session_key())
-    return {SESSION_COOKIE: token}
+    def _make(*, email="owner@daybreak.co", role="owner"):
+        return store.create_staff(
+            app.state.conn, email=email, name="O", role=role,
+            pw_hash=security.hash_password("password-1234"),  # pragma: allowlist secret
+            totp_secret=security.new_totp_secret())
+    return _make
 
 
 @pytest.fixture
-def admin(app, client):
+def login_cookie():
+    """Factory: a full-session cookie for a staff id (skips password+TOTP)."""
+    from vendor_console import security
+    from vendor_console.auth import SESSION_COOKIE
+
+    def _cookie(staff_id: int, role: str = "owner", epoch: int = 0) -> dict:
+        token = security.sign_session(
+            {"sid": staff_id, "stage": "full", "role": role, "ep": epoch},
+            security.session_key())
+        return {SESSION_COOKIE: token}
+    return _cookie
+
+
+@pytest.fixture
+def admin(client, make_staff, login_cookie):
     """A TestClient authenticated as an owner (full session)."""
-    sid = make_staff(app, email="owner@daybreak.co", role="owner")
-    client.cookies.update(login_cookie(app, sid, "owner"))
+    sid = make_staff(email="owner@daybreak.co", role="owner")
+    client.cookies.update(login_cookie(sid, "owner"))
     return client

@@ -7,8 +7,6 @@ import re
 from maverick import entitlements
 from vendor_console import licensing, security, store
 
-from conftest import TEST_SIGNING_KEY, login_cookie, make_staff
-
 
 def test_healthz_ok(client):
     r = client.get("/healthz")
@@ -26,7 +24,8 @@ def test_full_setup_totp_login_flow(client, app):
     assert client.get("/login", follow_redirects=False).headers["location"] == "/setup"
     # create the owner
     r = client.post("/setup", data={"email": "boss@daybreak.co", "name": "Boss",
-                                    "password": "supersecret1"}, follow_redirects=False)
+                                    "password": "supersecret1"},  # pragma: allowlist secret
+                    follow_redirects=False)
     assert r.status_code == 303 and r.headers["location"] == "/enroll-totp"
     # enrollment shows a secret; confirm with a real code
     client.get("/enroll-totp")
@@ -38,7 +37,8 @@ def test_full_setup_totp_login_flow(client, app):
     assert client.get("/customers").status_code == 200
     # a wrong TOTP at login is refused
     client.cookies.clear()
-    client.post("/login", data={"email": "boss@daybreak.co", "password": "supersecret1"})
+    client.post("/login", data={"email": "boss@daybreak.co",
+                                "password": "supersecret1"})  # pragma: allowlist secret
     bad = client.post("/totp", data={"code": "000001"})
     assert "Wrong or expired code" in bad.text
 
@@ -65,7 +65,7 @@ def test_customer_issue_and_serve(admin, app):
                   params={"deployment": "dep-1", "version": "v0.1.6"})
     assert r.status_code == 200
     doc = r.json()
-    pub = licensing.public_key_hex(TEST_SIGNING_KEY)
+    pub = licensing.public_key_hex()
     ok, _ = entitlements.verify_license(doc, [pub])
     assert ok and doc["tier"] == "gold"
     # the poll recorded a fleet check-in
@@ -89,9 +89,9 @@ def test_license_download(admin, app):
     assert r.json()["tier"] == "platinum"
 
 
-def test_rbac_viewer_cannot_write(app, client):
-    sid = make_staff(app, email="view@daybreak.co", role="viewer")
-    client.cookies.update(login_cookie(app, sid, "viewer"))
+def test_rbac_viewer_cannot_write(client, make_staff, login_cookie):
+    sid = make_staff(email="view@daybreak.co", role="viewer")
+    client.cookies.update(login_cookie(sid, "viewer"))
     assert client.get("/customers").status_code == 200          # can read
     r = client.post("/customers", data={"name": "Nope"}, follow_redirects=False)
     assert r.status_code == 403                                  # cannot write
