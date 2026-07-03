@@ -147,14 +147,26 @@ def tenant_by_user_enabled() -> bool:
         "yes",
         "on",
     }:
-        return True
-    try:
-        from .config import load_config
+        base = True
+    else:
+        try:
+            from .config import load_config
 
-        cfg = (load_config() or {}).get("tenancy") or {}
-        return bool(cfg.get("by_user"))
-    except Exception:
+            cfg = (load_config() or {}).get("tenancy") or {}
+            base = bool(cfg.get("by_user"))
+        except Exception:
+            return False
+    if not base:
         return False
+    # Multi-tenant mode is a paid (Platinum) capability. Fail-open: only bites
+    # when license enforcement is on and the license lacks it, so a single-tenant
+    # or dev box is unchanged (require() returns True when not enforcing).
+    try:
+        from .entitlements import require
+
+        return require("multi_tenant")
+    except Exception:  # pragma: no cover - entitlements missing => keep base
+        return base
 
 
 @contextlib.contextmanager

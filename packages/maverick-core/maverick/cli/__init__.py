@@ -654,7 +654,8 @@ def support(output: str | None) -> None:
     import json as _json
 
     from ..support_bundle import collect
-    text = _json.dumps(collect(), indent=2, sort_keys=True, default=str)
+    bundle = collect()
+    text = _json.dumps(bundle, indent=2, sort_keys=True, default=str)
     if output:
         from pathlib import Path as _P
         path = _P(output).expanduser()
@@ -663,6 +664,20 @@ def support(output: str | None) -> None:
         with os.fdopen(fd, "w", encoding="utf-8") as f:
             f.write(text + "\n")
         click.echo(f"support bundle written: {path}")
+        # Record the export on the signed audit trail — redacted METADATA only
+        # (correlation_id / tier / customer / basename; never bundle contents),
+        # so a CISO can see every support touch on their own log. Fail-soft: a
+        # stripped-audit build or a write error must never break the export.
+        try:
+            from ..audit import record as _audit_record
+            _ent = bundle.get("entitlement", {}) or {}
+            _audit_record(
+                "support_bundle_exported", agent="cli",
+                correlation_id=bundle.get("correlation_id"),
+                customer=_ent.get("customer"), tier=_ent.get("tier"),
+                filename=path.name)
+        except Exception:  # pragma: no cover - audit must never crash the CLI
+            pass
     else:
         click.echo(text)
 
@@ -1829,13 +1844,17 @@ def fleet_run(ctx, fleet_name: str, agent_name: str, prompt: str,
     control plane governs the work automatically.
     """
     from ..capability import UnknownRoleError, capability_for_role
-    from ..fleet import load_fleet, record_run
+    from ..fleet import governance_enabled, load_fleet, record_run
     from ..runner import run_goal_in_thread
 
     f = load_fleet(fleet_name)
     if f is None:
         click.echo(f"no such fleet: {fleet_name}", err=True)
         sys.exit(1)
+    if not governance_enabled():
+        click.echo("fleet governance is a paid (Gold) add-on; this deployment's "
+                   "license does not include it", err=True)
+        sys.exit(2)
     agent = next((a for a in f.agents if a.name == agent_name), None)
     if agent is None:
         click.echo(f"no such agent {agent_name!r} in fleet {fleet_name!r}", err=True)

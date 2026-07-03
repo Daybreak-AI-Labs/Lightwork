@@ -151,3 +151,73 @@ def test_apply_refuses_a_blocked_plan(tmp_path, keys):
     res = R.apply_bundle(d, "v0.2.0", trusted_pubkeys=trust,   # downgrade
                          migrate=lambda _m: None, install=lambda _d, _m: None)
     assert not res.ok and res.reason.startswith("plan:")
+
+
+def test_apply_auto_rolls_back_on_failed_install(tmp_path, keys):
+    priv, trust = keys
+    d = _bundle(tmp_path, priv, migrations=["m6"])
+    events: list[str] = []
+
+    def _install(_d, _m):
+        raise RuntimeError("install boom")
+
+    res = R.apply_bundle(d, "v0.1.6", trusted_pubkeys=trust,
+                         migrate=events.append, install=_install,
+                         snapshot=lambda: "snap-1",
+                         rollback=lambda _d, _m, h: events.append(f"rollback:{h}"))
+    assert not res.ok and "install boom" in res.reason
+    assert res.rolled_back is True and res.snapshot == "snap-1"
+    assert events == ["m6", "rollback:snap-1"]           # migration ran, then rolled back
+
+
+def test_apply_reports_when_rollback_itself_fails(tmp_path, keys):
+    priv, trust = keys
+    d = _bundle(tmp_path, priv, migrations=[])
+
+    def _install(_d, _m):
+        raise RuntimeError("install boom")
+
+    def _rollback(_d, _m, _h):
+        raise RuntimeError("restore boom")
+
+    res = R.apply_bundle(d, "v0.1.6", trusted_pubkeys=trust, install=_install,
+                         snapshot=lambda: "snap-1", rollback=_rollback)
+    assert not res.ok and "rollback ALSO failed" in res.reason
+    assert res.rolled_back is False                       # break-glass: undo did not complete
+
+
+def test_apply_snapshot_failure_aborts_before_any_change(tmp_path, keys):
+    priv, trust = keys
+    d = _bundle(tmp_path, priv, migrations=["m6"])
+    touched: list[str] = []
+
+    def _snapshot():
+        raise RuntimeError("snap boom")
+
+    res = R.apply_bundle(d, "v0.1.6", trusted_pubkeys=trust,
+                         migrate=touched.append,
+                         install=lambda _d, _m: touched.append("install"),
+                         snapshot=_snapshot, rollback=lambda *_a: None)
+    assert not res.ok and "snapshot failed" in res.reason
+    assert touched == []                                  # nothing ran
+
+
+def test_apply_without_hooks_is_byte_identical(tmp_path, keys):
+    priv, trust = keys
+    d = _bundle(tmp_path, priv, migrations=["m6"])
+    res = R.apply_bundle(d, "v0.1.6", trusted_pubkeys=trust,
+                         migrate=lambda _m: None, install=lambda _d, _m: None)
+    assert res.ok and res.snapshot == "" and res.rolled_back is False
+
+
+def test_rollback_bundle_manual(tmp_path, keys):
+    priv, trust = keys
+    d = _bundle(tmp_path, priv, migrations=[])
+    called: dict = {}
+
+    def _rollback(_bundle_dir, manifest, h):
+        called["v"], called["h"] = manifest.get("version"), h
+
+    res = R.rollback_bundle(d, "snap-9", rollback=_rollback, trusted_pubkeys=trust)
+    assert res.ok and res.rolled_back and res.snapshot == "snap-9"
+    assert called == {"v": "v0.1.7", "h": "snap-9"}       # manifest context passed through

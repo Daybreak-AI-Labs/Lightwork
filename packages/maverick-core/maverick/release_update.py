@@ -169,20 +169,32 @@ class ApplyResult:
     to_version: str
     applied_migrations: list[str] = field(default_factory=list)
     dry_run: bool = False
+    #: Opaque handle from the ``snapshot()`` hook, captured before the risky
+    #: steps — the thing ``rollback`` restores.
+    snapshot: str = ""
+    #: True if a failed apply auto-triggered the injected ``rollback`` hook.
+    rolled_back: bool = False
 
 
 def apply_bundle(bundle_dir: str | Path, current_version: str, *,
                  trusted_pubkeys: list[str] | None = None,
-                 migrate=None, install=None, dry_run: bool = False) -> ApplyResult:
-    """Apply an offline update bundle: **verify → plan → migrate → install**.
+                 migrate=None, install=None, snapshot=None, rollback=None,
+                 dry_run: bool = False) -> ApplyResult:
+    """Apply an offline update bundle: **verify → plan → [snapshot] → migrate →
+    install**, with an optional **auto-rollback** on failure.
 
     Deployment-agnostic by injection — the caller passes ``migrate(id)`` (run one
     governed migration) and ``install(bundle_dir, manifest)`` (swap the binary /
     container tag); this owns the *order and the gates* so the risky steps only
     run after the signature, hashes, and version-gap checks pass. ``dry_run``
-    stops after planning. Migrations run **before** install and in manifest
-    order; if one raises, we stop and report what applied (the caller's
-    blue-green/snapshot handle — see snapshot+rollback — is the undo)."""
+    stops after planning.
+
+    ``snapshot()`` (optional) captures a checkpoint **before** the risky steps
+    and returns an opaque handle; ``rollback(bundle_dir, manifest, handle)``
+    (optional) restores it. When both are supplied, a failing migration or
+    install **auto-rolls-back** to the snapshot and sets ``rolled_back``. Both
+    default to ``None`` → behaviour is byte-identical to a no-hook apply (no
+    checkpoint, no undo), so existing callers are unaffected."""
     d = Path(bundle_dir)
     vc = verify_bundle(d, trusted_pubkeys=trusted_pubkeys)
     if not vc.ok:
@@ -196,6 +208,30 @@ def apply_bundle(bundle_dir: str | Path, current_version: str, *,
     if dry_run:
         return ApplyResult(True, "dry-run ok", plan.from_version, plan.to_version,
                            list(plan.migrations), dry_run=True)
+    handle = ""
+    if snapshot is not None:
+        try:
+            handle = str(snapshot() or "")
+        except Exception as e:  # noqa: BLE001 - snapshot fails BEFORE any change; safe to abort
+            return ApplyResult(False, f"snapshot failed: {e}",
+                               plan.from_version, plan.to_version)
+
+    def _undo(reason: str, applied: list[str]) -> ApplyResult:
+        """Fail an apply, auto-rolling-back to the snapshot when a hook + handle
+        exist. If the rollback itself fails, say so loudly (that's the
+        break-glass case an operator must see)."""
+        if rollback is not None and handle:
+            try:
+                rollback(d, manifest, handle)
+            except Exception as e:  # noqa: BLE001
+                return ApplyResult(False, f"{reason}; rollback ALSO failed: {e}",
+                                   plan.from_version, plan.to_version, applied,
+                                   snapshot=handle, rolled_back=False)
+            return ApplyResult(False, reason, plan.from_version, plan.to_version,
+                               applied, snapshot=handle, rolled_back=True)
+        return ApplyResult(False, reason, plan.from_version, plan.to_version,
+                           applied, snapshot=handle)
+
     applied: list[str] = []
     for mig in plan.migrations:
         try:
@@ -203,18 +239,37 @@ def apply_bundle(bundle_dir: str | Path, current_version: str, *,
                 migrate(mig)
             applied.append(mig)
         except Exception as e:  # noqa: BLE001 - stop at the first failing migration
-            return ApplyResult(False, f"migration {mig} failed: {e}",
-                               plan.from_version, plan.to_version, applied)
+            return _undo(f"migration {mig} failed: {e}", applied)
     if install is not None:
         try:
             install(d, manifest)
         except Exception as e:  # noqa: BLE001
-            return ApplyResult(False, f"install failed after migrations: {e}",
-                               plan.from_version, plan.to_version, applied)
-    return ApplyResult(True, "applied", plan.from_version, plan.to_version, applied)
+            return _undo(f"install failed after migrations: {e}", applied)
+    return ApplyResult(True, "applied", plan.from_version, plan.to_version,
+                       applied, snapshot=handle)
 
 
-# ---- CLI: python -m maverick.release_update {verify-bundle,plan,apply} ------
+def rollback_bundle(bundle_dir: str | Path, handle: str, *, rollback,
+                    trusted_pubkeys: list[str] | None = None) -> ApplyResult:
+    """Manually roll a deployment back to snapshot ``handle`` via the injected
+    ``rollback(bundle_dir, manifest, handle)`` hook — the operator-driven
+    counterpart to :func:`apply_bundle`'s auto-rollback (for when a bad release
+    is only caught after it applied cleanly). The bundle is verified for manifest
+    *context* (version), but a verify failure does **not** block the restore — you
+    must be able to roll back even away from a since-suspect bundle."""
+    d = Path(bundle_dir)
+    vc = verify_bundle(d, trusted_pubkeys=trusted_pubkeys)
+    manifest = vc.manifest if vc.ok else {}
+    to = manifest.get("version", "")
+    try:
+        rollback(d, manifest, handle)
+    except Exception as e:  # noqa: BLE001 - report; the caller decides break-glass next steps
+        return ApplyResult(False, f"rollback failed: {e}", "", to, snapshot=str(handle))
+    return ApplyResult(True, "rolled back", "", to, snapshot=str(handle),
+                       rolled_back=True)
+
+
+# ---- CLI: python -m maverick.release_update {verify-bundle,plan,apply,rollback} --
 
 def main(argv: list[str] | None = None) -> int:  # pragma: no cover -- CLI shell
     import argparse
@@ -237,6 +292,14 @@ def main(argv: list[str] | None = None) -> int:  # pragma: no cover -- CLI shell
     ap.add_argument("--pubkey", default=None, help="comma-separated trusted pubkey hex")
     ap.add_argument("--dry-run", action="store_true",
                     help="verify + plan only; do not run migrations or install")
+
+    rb = sub.add_parser("rollback",
+                        help="restore a workspace snapshot taken before an apply")
+    rb.add_argument("dir", help="the bundle dir (for manifest/version context)")
+    rb.add_argument("--snapshot", required=True, help="snapshot id to restore")
+    rb.add_argument("--store", required=True, help="snapshot store dir")
+    rb.add_argument("--dest", required=True, help="workspace dir to restore into")
+    rb.add_argument("--pubkey", default=None, help="comma-separated trusted pubkey hex")
 
     args = p.parse_args(argv)
 
@@ -270,6 +333,18 @@ def main(argv: list[str] | None = None) -> int:  # pragma: no cover -- CLI shell
         if res.ok:
             print(f"  {res.from_version} → {res.to_version}")
             print(f"  migrations: {', '.join(res.applied_migrations) or 'none'}")
+        return 0 if res.ok else 1
+
+    if args.cmd == "rollback":
+        trust = [k.strip() for k in args.pubkey.split(",")] if args.pubkey else None
+        from .workspace_snapshot import restore_snapshot
+
+        def _rollback(bundle_dir, manifest, snap_id) -> None:
+            restore_snapshot(Path(args.store), snap_id, Path(args.dest))
+
+        res = rollback_bundle(args.dir, args.snapshot, rollback=_rollback,
+                              trusted_pubkeys=trust)
+        print(f"{'ROLLED BACK' if res.ok else 'FAILED'}: {res.reason}")
         return 0 if res.ok else 1
 
     manifest = json.loads(Path(args.manifest).read_text("utf-8"))

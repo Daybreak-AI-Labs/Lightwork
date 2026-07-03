@@ -210,6 +210,65 @@ def test_refresh_refuses_a_file_scheme_api_url(monkeypatch, tmp_path):
     assert not (tmp_path / "license.json").exists()
 
 
+def test_fleet_governance_respects_entitlement(monkeypatch):
+    from maverick import fleet as F
+    monkeypatch.setattr("maverick.entitlements.require", lambda f: f != "fleet_governance")
+    assert F.governance_enabled() is False       # gated off (Gold feature)
+    monkeypatch.setattr("maverick.entitlements.require", lambda f: True)
+    assert F.governance_enabled() is True         # granted
+
+
+def test_advanced_evolve_respects_entitlement(monkeypatch):
+    from maverick import self_improvement as SI
+    monkeypatch.setenv("MAVERICK_SELF_IMPROVEMENT", "1")   # base-enabled
+    monkeypatch.setattr("maverick.entitlements.require", lambda f: False)
+    assert SI.enabled() is False                            # gated off (Platinum)
+    monkeypatch.setattr("maverick.entitlements.require", lambda f: True)
+    assert SI.enabled() is True                             # granted
+
+
+def test_custom_pack_factory_respects_entitlement(monkeypatch, tmp_path):
+    from maverick import intake
+    # gate is BEFORE the approved/write logic, so an un-entitled deployment can't
+    # persist a custom pack; drafting/previewing is unaffected (not tested here).
+    monkeypatch.setattr("maverick.entitlements.require",
+                        lambda f: f != "custom_pack_factory")
+    with pytest.raises(PermissionError, match="Platinum"):
+        intake.save_profile(object(), approved=True, dest_dir=tmp_path)
+
+
+def test_multi_tenant_gates_both_vectors(monkeypatch):
+    from maverick import paths
+    from maverick.tenant import registry
+    # (a) per-user tenancy switch gates on the platform tier
+    monkeypatch.setenv("MAVERICK_TENANT_BY_USER", "1")     # base-enabled
+    monkeypatch.setattr("maverick.entitlements.require", lambda f: False)
+    assert paths.tenant_by_user_enabled() is False
+    monkeypatch.setattr("maverick.entitlements.require", lambda f: True)
+    assert paths.tenant_by_user_enabled() is True
+    # (b) provisioning a named tenant is refused under enforcement w/o Platinum
+    monkeypatch.setattr("maverick.entitlements.require",
+                        lambda f: f != "multi_tenant")
+    with pytest.raises(PermissionError, match="Platinum"):
+        registry.create_tenant("acme")
+
+
+def test_support_export_emits_a_redacted_audit_event(monkeypatch, tmp_path):
+    import maverick.cli as C
+    from click.testing import CliRunner
+    calls = []
+    monkeypatch.setattr("maverick.audit.record",
+                        lambda kind, **kw: calls.append((kind, kw)) or True)
+    out = tmp_path / "bundle.json"
+    res = CliRunner().invoke(C.main, ["support", "-o", str(out)])
+    assert res.exit_code == 0, res.output
+    assert out.exists()
+    ev = [kw for kind, kw in calls if kind == "support_bundle_exported"]
+    assert len(ev) == 1                                    # exactly one export event
+    assert ev[0].get("correlation_id", "").startswith("sup_")
+    assert ev[0].get("filename") == "bundle.json"          # basename only, no path
+
+
 def test_ticket_summary_is_redacted_and_routable():
     from maverick import support_bundle as S
     bundle = {

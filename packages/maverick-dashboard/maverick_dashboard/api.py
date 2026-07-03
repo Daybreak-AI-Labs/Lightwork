@@ -2659,7 +2659,7 @@ async def run_fleet_agent(
         capability_for_role,
         capability_from_config,
     )
-    from maverick.fleet import load_fleet, record_run
+    from maverick.fleet import governance_enabled, load_fleet, record_run
     from maverick.runner import run_goal_in_thread
 
     fleet = load_fleet(fleet_name)
@@ -2674,6 +2674,14 @@ async def run_fleet_agent(
     agent = next((a for a in fleet.agents if a.name == payload.agent), None)
     if agent is None:
         raise HTTPException(status_code=404, detail="no such agent in fleet")
+    # Running an agent under the oversight control plane is the paid (Gold)
+    # "fleet governance" capability. Fail-open: a no-op unless license enforcement
+    # is on and the license lacks it. Checked after existence (404) so a missing
+    # fleet never reveals licensing state.
+    if not governance_enabled():
+        raise HTTPException(
+            status_code=403,
+            detail="fleet governance is a paid (Gold) add-on not included in this license")
     prompt = (payload.prompt or "").strip()
     if not prompt:
         raise HTTPException(status_code=400, detail="prompt is required")

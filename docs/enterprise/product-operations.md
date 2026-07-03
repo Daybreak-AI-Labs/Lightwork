@@ -55,17 +55,27 @@ python -m maverick.entitlements show --file license.json --pubkey <pub>
 **Built (this PR):** the `[license]` config knob (`enforce` / `publisher_pubkeys`
 / `license_file` / `api_url` / `api_token`), the **opt-in enforcement gate**
 (`enforcing()` / `require()` / `require_suite()`, **default off** so no dev/test
-box changes behavior), paid chokepoints wired at `fleet_memory.enabled()` **and**
-`audit.forwarder.forward()` (SIEM push = Gold `siem_export`), a connected
-**entitlement API** client (`refresh_from_server()` — fail-open, only persists a
-*verified* license so a spoofed API reply can't forge/downgrade entitlements),
-and the **installer-wizard step** (`pick_license()` writes `[license]`; the API
-token is stored as a `${MAVERICK_LICENSE_API_TOKEN}` env reference, never inline).
+box changes behavior), a connected **entitlement API** client
+(`refresh_from_server()` — fail-open, only persists a *verified, non-rollback*
+license so a spoofed/replayed API reply can't forge or downgrade entitlements),
+the **installer-wizard step** (`pick_license()` writes `[license]`; the API token
+is a `${MAVERICK_LICENSE_API_TOKEN}` env reference, never inline), and **all six
+gated capabilities wired to fail-open chokepoints**:
 
-**To build next:** usage metering + seat enforcement on the connected API; wiring
-`require()` into the remaining paid chokepoints (`multi_tenant`,
-`custom_pack_factory`, `advanced_evolve`); embed Daybreak's publisher pubkey in
-the build (`_EMBEDDED_PUBKEYS`).
+| Feature | Tier | Chokepoint |
+|---|---|---|
+| `fleet_memory` | Gold | `fleet_memory.enabled()` |
+| `fleet_governance` | Gold | `fleet.governance_enabled()` (CLI `fleet run` + dashboard run) |
+| `siem_export` | Gold | `audit.forwarder.forward()` |
+| `advanced_evolve` | Platinum | `self_improvement.enabled()` (promotion ladder) |
+| `custom_pack_factory` | Platinum | `intake.save_profile()` (persist a new custom pack) |
+| `multi_tenant` | Platinum | `paths.tenant_by_user_enabled()` + `tenant.registry.create_tenant()` |
+
+Every gate is a **no-op unless enforcement is on** (a dev/community box is
+byte-identical) and matches the canonical tier table in `docs/product-portfolio.md`.
+
+**To build next:** usage metering + seat enforcement on the connected API; embed
+Daybreak's publisher pubkey in the build (`_EMBEDDED_PUBKEYS`).
 
 ## 2. Updates — every size, every regulatory posture
 
@@ -101,16 +111,20 @@ automatic is in "to build next."
 - **Air-gapped:** hand a signed bundle out-of-band → `verify_bundle()` offline
   → apply under change control.
 
-**Built (this PR):** the offline verify + plan + **apply** CLI —
-`python -m maverick.release_update verify-bundle <dir>`, `… plan --current <v>
---manifest <f>`, and `… apply <dir> --current <v> [--dry-run]`. `apply_bundle()`
-owns the governed order (**verify → plan → migrate → install**) and is
-deployment-agnostic by injection: the caller passes `migrate(id)` and
-`install(dir, manifest)` callbacks (systemd, container tag, Tauri updater), so
-the risky swap only runs after signature + hash + version-gap checks pass, and a
-failing migration stops before install. **To build next:** the concrete
-`migrate`/`install` hooks per deployment target (the actual binary/container
-swap, blue-green via the existing snapshot+rollback); the release-feed publisher;
+**Built (this PR):** the offline verify + plan + **apply** + **rollback** CLI —
+`python -m maverick.release_update {verify-bundle,plan,apply,rollback}`.
+`apply_bundle()` owns the governed order (**verify → plan → [snapshot] → migrate
+→ install**) and is deployment-agnostic by injection: the caller passes
+`migrate(id)`, `install(dir, manifest)`, and optional `snapshot()`/`rollback(dir,
+manifest, handle)` callbacks (systemd, container tag, Tauri updater, workspace
+snapshot), so the risky swap only runs after signature + hash + version-gap
+checks pass. When a `snapshot`/`rollback` pair is supplied, a failing migration
+or install **auto-rolls-back** to the checkpoint (`ApplyResult.rolled_back`); a
+standalone `rollback_bundle()` + the `rollback` CLI (wired to
+`workspace_snapshot.restore_snapshot`) covers the "caught a bad release after it
+applied" case. Both hooks default to `None`, so an existing no-hook apply is
+byte-identical. **To build next:** the concrete per-target `migrate`/`install`
+hooks (the actual binary/container swap, blue-green); the release-feed publisher;
 channel config.
 
 ## 3. Support — see what broke, fix it, push the fix
@@ -136,10 +150,13 @@ secret-scrubbed config).
 controlled bundle to a file (keyed by `correlation_id`); `ticket_summary()`
 derives a compact, secret-free intake view (SKU, build, failing readiness checks,
 recent failure modes) from an already-redacted bundle — the fields an intake
-queue routes on, safe to POST to a portal/email→ticket bridge. **To build next:**
-emit an audit event on export (in the CLI wrapper, keeping `collect()` pure); the
-portal/email→ticket bridge that consumes `ticket_summary()`; the round-trip to a
-hotfix release (feeds §2).
+queue routes on, safe to POST to a portal/email→ticket bridge; and **`maverick
+support -o` now emits a redacted audit event** (`support_bundle_exported` —
+`correlation_id` / tier / customer / basename, never bundle contents) on the
+signed audit trail, so a CISO sees every support touch on their own log
+(`collect()` stays pure; the emit lives in the CLI wrapper and is fail-soft).
+**To build next:** the portal/email→ticket bridge that consumes
+`ticket_summary()`; the round-trip to a hotfix release (feeds §2).
 
 ---
 
