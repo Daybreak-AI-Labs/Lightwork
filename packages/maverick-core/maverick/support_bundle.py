@@ -190,6 +190,35 @@ def collect() -> dict:
     return bundle
 
 
+def ticket_summary(bundle: dict | None = None) -> dict:
+    """A compact, ticket-system-ready view of a bundle — the fields an intake
+    queue routes on, keyed by ``correlation_id``: which SKU (customer/tier/
+    status), which build, which readiness checks are failing, and the recent
+    failure modes. Derived purely from an already-redacted :func:`collect`
+    bundle, so it carries no secrets and is safe to POST to a portal/email→ticket
+    bridge. Pass a bundle to summarise, or omit to collect a fresh one."""
+    b = bundle if bundle is not None else collect()
+    ent = b.get("entitlement", {}) or {}
+    readiness = b.get("readiness", {}) or {}
+    failing = sorted(k for k, v in readiness.items() if str(v).startswith("fail"))
+    recent = b.get("recent_failures", {}) or {}
+    versions = b.get("versions", {}) or {}
+    return {
+        "correlation_id": b.get("correlation_id"),
+        "generated_at": b.get("generated_at"),
+        "customer": ent.get("customer"),
+        "tier": ent.get("tier"),
+        "entitlement_status": ent.get("status"),
+        "suites": ent.get("suites", []),
+        "agent_version": versions.get("maverick-agent"),
+        "readiness_failing": failing,
+        "healthy": not failing,
+        "failure_modes": recent.get("failure_modes"),
+        "failed_job_count": (len(recent["failed_jobs"])
+                             if isinstance(recent.get("failed_jobs"), list) else None),
+    }
+
+
 def export(path: str | None = None) -> tuple:
     """Assemble the redacted bundle and write it to ``path`` (default
     ``support-<correlation_id>.json`` in the cwd). Returns ``(Path, bundle)``.
@@ -206,4 +235,4 @@ def export(path: str | None = None) -> tuple:
     return out, bundle
 
 
-__all__ = ["collect", "export"]
+__all__ = ["collect", "export", "ticket_summary"]

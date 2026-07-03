@@ -2435,6 +2435,45 @@ def pick_suites() -> dict[str, bool]:
     return out
 
 
+def pick_license() -> dict[str, Any]:
+    """The ``[license]`` section — paid-feature entitlement enforcement.
+
+    Default **OFF** (a community/dev box runs everything, matching the
+    fail-open kernel). A licensed production deployment turns enforcement on and
+    points at its signed license file; paid features then gate on the license.
+    Returns a config map for ``[license]`` (empty when the operator keeps the
+    fail-open default, so nothing is emitted and nothing gates)."""
+    console.print()
+    console.print("[bold]Licensing[/bold] — enforce paid-feature entitlements "
+                  "(Gold/Platinum features, add-on suites like fleet).")
+    console.print("[dim]Fail-open by default: the kernel runs with no license. "
+                  "Turn enforcement on only for a licensed production deployment. "
+                  "A missing/expired license never stops the core — only paid "
+                  "add-ons gate off. Editable later under [license] in "
+                  "~/.maverick/config.toml.[/dim]")
+    if not _q_confirm("  Enforce paid-feature entitlements on this deployment?",
+                      default=False):
+        return {}
+    out: dict[str, Any] = {"enforce": True}
+    path = _q_text("    Signed license file path (blank = ~/.maverick/license.json)",
+                   default="")
+    if path.strip():
+        out["license_file"] = path.strip()
+    pub = _q_text("    Trusted publisher pubkey(s), comma-separated hex "
+                  "(blank = keys embedded in the build)", default="")
+    keys = _csv_list(pub, lower=True)
+    if keys:
+        out["publisher_pubkeys"] = keys
+    api = _q_text("    Entitlement API URL for connected refresh "
+                  "(blank = offline license file only)", default="")
+    if api.strip():
+        out["api_url"] = api.strip()
+        # The API token is a secret: reference an env var, never inline it
+        # (config.toml interpolates ${VAR}; the value lives in ~/.maverick/.env).
+        out["api_token"] = "${MAVERICK_LICENSE_API_TOKEN}"
+    return out
+
+
 def _cfg_deployment(deployment: str | None) -> list[str]:
     if not deployment:
         return []
@@ -2625,6 +2664,16 @@ def _cfg_suites(suites: dict[str, bool] | None) -> list[str]:
     lines = ["", "[suites]"]
     for k, v in suites.items():
         lines.append(f"{k} = {str(v).lower()}")
+    return lines
+
+
+def _cfg_license(license_cfg: dict[str, Any] | None) -> list[str]:
+    if not license_cfg:
+        return []
+    # Entitlement enforcement; maverick.entitlements reads this [license] table.
+    lines = ["", "[license]"]
+    for k, v in license_cfg.items():
+        _emit_kv(lines, k, v)
     return lines
 
 
@@ -3189,6 +3238,7 @@ def write_config(
     finance: dict[str, Any] | None = None,
     deployment: str | None = None,
     suites: dict[str, bool] | None = None,
+    license_cfg: dict[str, Any] | None = None,
 ) -> None:
     CONFIG_DIR.mkdir(parents=True, exist_ok=True)
 
@@ -3293,6 +3343,7 @@ def write_config(
 
     lines += _cfg_capabilities(capability_config, embedded_flash)
     lines += _cfg_suites(suites)
+    lines += _cfg_license(license_cfg)
     lines += _cfg_advanced(advanced, providers)
     lines += _cfg_mcp_servers(mcp_servers)
     lines += _cfg_registries("mcp_registries", mcp_registries)
@@ -4061,6 +4112,12 @@ def run(fast: bool = False, resume: bool = False) -> int:
 
     suites = pick_suites()
 
+    license_cfg = state.get("license")
+    if license_cfg is None:
+        license_cfg = pick_license()
+        state["license"] = license_cfg
+        _save_partial(state)
+
     console.print()
     if not _q_confirm("Write config and finish?", default=True):
         # Be honest about where the state lives and what restore does.
@@ -4098,6 +4155,7 @@ def run(fast: bool = False, resume: bool = False) -> int:
         durable=durable if durable.get("enabled") else None,
         finance=finance if finance.get("enable") else None,
         suites=suites,
+        license_cfg=license_cfg or None,
     )
     _clear_partial()
     ok = smoke_test()

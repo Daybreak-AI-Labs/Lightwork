@@ -33,6 +33,16 @@ from datetime import datetime, timedelta, timezone
 from pathlib import Path
 
 # ---- tier + capability registry (the single place features gate) -----------
+#
+# AXIS NOTE: this module is the **platform-tier** axis (Basic/Gold/Platinum),
+# gated by a signed *deployment* license — one of the three axes in
+# docs/product-portfolio.md ("Canonical naming, editions & SKU map"). It is
+# distinct from :mod:`maverick.billing`, whose ``Entitlements``/``feature_allowed``
+# gate the **per-tenant billing plan** (free/pro/enterprise) for a multi-tenant
+# operator. Same word ("entitlements"), different axis — don't cross the imports.
+# The two compose (a capability can be both tier-gated here and plan-gated there;
+# e.g. SIEM export is a Gold+ tier capability per that doc AND an ``audit_export``
+# billing-plan feature). Keep tier gates here; keep per-tenant plan gates there.
 
 _TIER_RANK = {"basic": 0, "gold": 1, "platinum": 2}
 BASE_TIER = "basic"
@@ -151,8 +161,15 @@ def verify_license(doc: dict, trusted_pubkeys: list[str]) -> tuple[bool, str]:
     A self-consistent signature is **not** enough — the signing key must be in
     ``trusted_pubkeys`` (the publisher key shipped with the build), otherwise
     anyone could self-sign a platinum license.
+
+    Never raises: a non-dict ``doc`` (a hostile API returning a JSON array/
+    string/number, or a corrupted license file that parses to valid-but-non-
+    object JSON) returns ``(False, "malformed")`` rather than crashing the
+    caller — the fail-open contract every chokepoint depends on.
     """
     from cryptography.hazmat.primitives.asymmetric import ed25519
+    if not isinstance(doc, dict):
+        return False, "malformed"
     sig = doc.get("sig")
     key_id = (doc.get("key_id") or "").lower()
     if not sig or not key_id:
@@ -222,12 +239,18 @@ def resolve(doc: dict | None, *, trusted_pubkeys: list[str] | None = None,
     if not ok:
         status = INVALID if why in ("bad_signature", "untrusted_key") else UNVERIFIED
         return Entitlements(status=status, reason=why)
-    exp = _parse_dt(doc.get("expires_at"))
-    now = _now(now)
-    status = LICENSED
-    if exp is not None and now > exp:
-        grace = timedelta(days=int(doc.get("grace_days", grace_days)))
-        status = GRACE if now <= exp + grace else EXPIRED
+    try:
+        exp = _parse_dt(doc.get("expires_at"))
+        now = _now(now)
+        status = LICENSED
+        if exp is not None and now > exp:
+            grace = timedelta(days=int(doc.get("grace_days", grace_days)))
+            status = GRACE if now <= exp + grace else EXPIRED
+    except (ValueError, TypeError):
+        # A signed-but-malformed date/grace field (publisher fat-finger, e.g. a
+        # unix-timestamp expires_at) must fail to base tier, not crash current().
+        return Entitlements(status=INVALID, reason="malformed expiry",
+                            customer=doc.get("customer"))
     live = status in _PAID_ACTIVE
     return Entitlements(
         tier=str(doc.get("tier", BASE_TIER)) if live else BASE_TIER,
@@ -279,9 +302,10 @@ def enforcing() -> bool:
     production posture (``[license] enforce = true`` or
     ``MAVERICK_LICENSE_ENFORCE=1``). This is what keeps the fail-open promise:
     the gate never activates unless an operator turns it on."""
-    v = os.environ.get("MAVERICK_LICENSE_ENFORCE")
-    if v is not None:
-        return v.strip().lower() in ("1", "true", "yes", "on")
+    from .config import env_flag
+    v = env_flag("MAVERICK_LICENSE_ENFORCE")   # shared truthy parser (sibling of
+    if v is not None:                          # fleet_memory's gate); None on an
+        return v                               # unrecognized value → fall to config
     return bool(_license_cfg().get("enforce", False))
 
 
@@ -298,6 +322,122 @@ def require_suite(suite: str) -> bool:
     if not enforcing():
         return True
     return current().suite_enabled(suite)
+
+
+# ---- connected entitlement API (optional; the signed file is the floor) -----
+
+DEFAULT_REFRESH_TIMEOUT = 10.0
+
+
+@dataclass(frozen=True)
+class RefreshResult:
+    """Outcome of a connected-API refresh — for logging/metering, never raised."""
+    ok: bool
+    reason: str
+    status: str
+    changed: bool = False
+
+
+def _http_get_json(url: str, token: str | None, timeout: float) -> dict:
+    """Minimal stdlib GET → JSON. No new top-level dep (kernel rule 5). The API
+    returns a **signed** license doc, so the signature — not the transport — is
+    the trust boundary: an attacker who MITMs the response still cannot forge a
+    publisher signature, and :func:`resolve` rejects anything unverified.
+    (urllib verifies TLS certs by default for https URLs.)"""
+    import urllib.parse
+    import urllib.request
+    scheme = urllib.parse.urlparse(url).scheme.lower()
+    if scheme not in ("https", "http"):
+        # api_url is operator/config-controlled; refuse file://, ftp://, etc. so
+        # a stray config value can't turn a license refresh into a local-file /
+        # SSRF read. Prefer https; http is allowed for a trusted segment.
+        raise ValueError(f"refusing non-http(s) entitlement API scheme: {scheme!r}")
+    req = urllib.request.Request(url, headers={"Accept": "application/json"})
+    if token:
+        req.add_header("Authorization", f"Bearer {token}")
+    with urllib.request.urlopen(req, timeout=timeout) as resp:
+        return json.loads(resp.read().decode("utf-8"))
+
+
+def _rollback_reason(path: Path, new_doc: dict) -> str | None:
+    """Refusal reason if persisting ``new_doc`` over the license already at
+    ``path`` would be a **rollback or subject swap**, else ``None``.
+
+    An attacker on the refresh path can only replay a *validly signed* older
+    license (they can't forge one), so freshness — not the signature — is what
+    stops a downgrade. Compares the stable subject (``customer``) and
+    ``issued_at``; a missing/unreadable installed license means there is nothing
+    to roll back from. ``license_id`` is deliberately **not** the subject key —
+    it's regenerated on every issue, so a legitimate renewal has a new one."""
+    if not path.exists():
+        return None
+    try:
+        cur = json.loads(path.read_text("utf-8"))
+    except Exception:  # noqa: BLE001 - an unreadable floor can always be replaced
+        return None
+    if not isinstance(cur, dict):
+        return None
+    cur_cust, new_cust = cur.get("customer"), new_doc.get("customer")
+    if cur_cust and new_cust and cur_cust != new_cust:
+        return "server license is for a different customer (refused)"
+    try:
+        cur_iss = _parse_dt(cur.get("issued_at"))
+        new_iss = _parse_dt(new_doc.get("issued_at"))
+    except (ValueError, TypeError):
+        return None
+    if cur_iss and new_iss and new_iss < cur_iss:
+        return "server license is older than installed (rollback refused)"
+    return None
+
+
+def refresh_from_server(url: str | None = None, *, token: str | None = None,
+                        trusted_pubkeys: list[str] | None = None,
+                        save: bool = True, timeout: float | None = None,
+                        fetch=None) -> RefreshResult:
+    """Connected path: pull a fresh signed license from the entitlement API and,
+    if it verifies, persist it so the **offline file stays the floor** for the
+    next boot (an air-gapped box simply never calls this).
+
+    Fail-open by contract (kernel rule 1): a missing URL, a network error, or an
+    unverifiable response NEVER raises and NEVER changes the running entitlement
+    — the last-known license file keeps the deployment live. Only a **verified,
+    paid-active, and not-a-rollback** license is written, so a spoofed,
+    downgraded, or replayed API reply cannot forge, strip, or roll back
+    entitlements. ``fetch`` is injectable for tests."""
+    cfg = _license_cfg()
+    api_url = url or os.environ.get("MAVERICK_LICENSE_API") or cfg.get("api_url")
+    if not api_url:
+        return RefreshResult(False, "no entitlement API configured", current().status)
+    # The token is a secret: resolve it through the secret provider (file/env
+    # backends), the same path the SIEM bearer uses — not a raw os.environ read.
+    from .secret_provider import get_secret
+    api_token = token or get_secret("MAVERICK_LICENSE_API_TOKEN") or cfg.get("api_token")
+    to = timeout if timeout is not None else DEFAULT_REFRESH_TIMEOUT
+    getter = fetch or (lambda: _http_get_json(str(api_url), api_token, to))
+    try:
+        doc = getter()
+    except Exception as e:  # noqa: BLE001 - network/parse failure must never brick
+        return RefreshResult(False, f"fetch failed: {type(e).__name__}", current().status)
+    ent = resolve(doc, trusted_pubkeys=trusted_pubkeys)
+    if ent.status not in _PAID_ACTIVE:
+        # Never overwrite a good local license with an unverifiable server reply.
+        return RefreshResult(False, f"server license {ent.status}", current().status)
+    changed = False
+    if save:
+        path = _default_license_path()
+        rolled = _rollback_reason(path, doc)
+        if rolled:
+            return RefreshResult(False, rolled, current().status)
+        try:
+            path.parent.mkdir(parents=True, exist_ok=True)
+            new_text = json.dumps(doc, indent=2) + "\n"
+            changed = (not path.exists()) or path.read_text("utf-8") != new_text
+            path.write_text(new_text, encoding="utf-8")
+        except Exception as e:  # noqa: BLE001 - persistence is best-effort
+            return RefreshResult(True, f"verified but not saved: {type(e).__name__}",
+                                 ent.status, False)
+    reset_cache()
+    return RefreshResult(True, "ok", ent.status, changed)
 
 
 # ---- CLI: python -m maverick.entitlements {keygen,issue,verify,show} -------

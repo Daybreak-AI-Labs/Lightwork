@@ -53,19 +53,24 @@ python -m maverick.entitlements show --file license.json --pubkey <pub>
 ```
 
 **Built (this PR):** the `[license]` config knob (`enforce` / `publisher_pubkeys`
-/ `license_file`), the **opt-in enforcement gate** (`enforcing()` / `require()`
-/ `require_suite()`, **default off** so no dev/test box changes behavior), and a
-first real chokepoint — `fleet_memory.enabled()` gates off under enforcement
-without a Gold+fleet entitlement.
+/ `license_file` / `api_url` / `api_token`), the **opt-in enforcement gate**
+(`enforcing()` / `require()` / `require_suite()`, **default off** so no dev/test
+box changes behavior), paid chokepoints wired at `fleet_memory.enabled()` **and**
+`audit.forwarder.forward()` (SIEM push = Gold `siem_export`), a connected
+**entitlement API** client (`refresh_from_server()` — fail-open, only persists a
+*verified* license so a spoofed API reply can't forge/downgrade entitlements),
+and the **installer-wizard step** (`pick_license()` writes `[license]`; the API
+token is stored as a `${MAVERICK_LICENSE_API_TOKEN}` env reference, never inline).
 
-**To build next:** the installer-wizard step (kernel rule 6); a connected
-**entitlement API** for instant flips + usage metering; wiring `require()` into
-the remaining paid chokepoints; embed Daybreak's publisher pubkey in the build.
+**To build next:** usage metering + seat enforcement on the connected API; wiring
+`require()` into the remaining paid chokepoints (`multi_tenant`,
+`custom_pack_factory`, `advanced_evolve`); embed Daybreak's publisher pubkey in
+the build (`_EMBEDDED_PUBKEYS`).
 
 ## 2. Updates — every size, every regulatory posture
 
 **Built:** [`maverick/release_update.py`](../../packages/maverick-core/maverick/release_update.py)
-(+ `tests/test_release_update.py`, 5 tests).
+(+ `tests/test_release_update.py`, 10 tests).
 
 A **release manifest** is an Ed25519-signed doc (same trust anchor) listing the
 `version`, `artifacts` (name + sha256 + size), the `min_from` version, and the
@@ -79,9 +84,14 @@ built:
   `min_from` → step through an intermediate so migrations apply in order),
   returning the migrations to run.
 
-This rides the machinery you already have: **immutable, checksum-locked
-migrations** (`migration_governance` + `schema_migrations --ci` gate online/
-offline hot-deploy safety) and **Sigstore** signing on release binaries.
+The governed migrations a manifest names are meant to resolve to the machinery
+you already have — **immutable, checksum-locked migrations** (`migration_governance`
++ `schema_migrations --ci` gate online/offline hot-deploy safety) — plus
+**Sigstore** signing on release binaries. Today `apply_bundle` runs each
+migration through the injected `migrate(id)` callback (a deployment wires it to
+`schema_migrations.plan()` / the online-vs-offline hot-deploy gate); it does not
+call that machinery itself yet — the linkage is the caller's, and making it
+automatic is in "to build next."
 
 - **Connected:** a signed release feed + channels (stable/edge); desktop =
   Tauri auto-update; cloud = container tag bump + rolling restart.
@@ -91,11 +101,17 @@ offline hot-deploy safety) and **Sigstore** signing on release binaries.
 - **Air-gapped:** hand a signed bundle out-of-band → `verify_bundle()` offline
   → apply under change control.
 
-**Built (this PR):** the offline verify + plan CLI —
-`python -m maverick.release_update verify-bundle <dir>` and `… plan --current
-<v> --manifest <f>`. **To build next:** the `maverick upgrade` **apply/rollback**
-(swap binary/container, run migrations, blue-green using the existing
-snapshot+rollback mechanism); the release-feed publisher; channel config.
+**Built (this PR):** the offline verify + plan + **apply** CLI —
+`python -m maverick.release_update verify-bundle <dir>`, `… plan --current <v>
+--manifest <f>`, and `… apply <dir> --current <v> [--dry-run]`. `apply_bundle()`
+owns the governed order (**verify → plan → migrate → install**) and is
+deployment-agnostic by injection: the caller passes `migrate(id)` and
+`install(dir, manifest)` callbacks (systemd, container tag, Tauri updater), so
+the risky swap only runs after signature + hash + version-gap checks pass, and a
+failing migration stops before install. **To build next:** the concrete
+`migrate`/`install` hooks per deployment target (the actual binary/container
+swap, blue-green via the existing snapshot+rollback); the release-feed publisher;
+channel config.
 
 ## 3. Support — see what broke, fix it, push the fix
 
@@ -117,10 +133,13 @@ secret-scrubbed config).
   siphon your data — it's on your audit log and you approve it."*
 
 **Built (this PR):** `support_bundle.export()` writes the redacted, customer-
-controlled bundle to a file (keyed by `correlation_id`). **To build next:** emit
-an audit event on export (in the CLI wrapper, keeping `collect()` pure); a
-lightweight **intake** (portal or email→ticket) keyed by `correlation_id` +
-version + entitlement; the round-trip to a hotfix release (feeds §2).
+controlled bundle to a file (keyed by `correlation_id`); `ticket_summary()`
+derives a compact, secret-free intake view (SKU, build, failing readiness checks,
+recent failure modes) from an already-redacted bundle — the fields an intake
+queue routes on, safe to POST to a portal/email→ticket bridge. **To build next:**
+emit an audit event on export (in the CLI wrapper, keeping `collect()` pure); the
+portal/email→ticket bridge that consumes `ticket_summary()`; the round-trip to a
+hotfix release (feeds §2).
 
 ---
 
@@ -133,3 +152,19 @@ governed and provable as the product, which is a differentiator with exactly
 your buyer. Ship the publisher keypair management carefully (it's the root of
 trust for licenses **and** updates): generate offline, store in an HSM/KMS,
 rotate with an overlap window, and ship the public key(s) embedded in the build.
+
+### Known limitations / accepted risks
+
+- **No hardware/deployment binding on a license.** A validly-signed license
+  grants its entitlements on *any* host, and `seats` is declared but not
+  enforced in code — inherent to the air-gapped, offline-verifiable design (a
+  license must verify with no network or callback). A leaked license file yields
+  its entitlements until it expires. Mitigations if this becomes material: bind a
+  license to a deployment/install id, or enforce `seats` via a signed count +
+  local registration. The connected refresh path additionally **refuses a
+  rollback** (an older or different-customer license replayed over the installed
+  one is rejected on freshness/subject), closing the on-path downgrade vector.
+- **Migration governance linkage is caller-wired** (see §2): `apply_bundle`
+  gates on signature + hash + version, then delegates each migration to the
+  injected `migrate` hook; wiring that hook to `schema_migrations` is the
+  deployment's responsibility until the automatic linkage ships.
