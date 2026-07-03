@@ -19,8 +19,10 @@ from starlette.exceptions import HTTPException as StarletteHTTPException
 
 from . import db, routes_api, routes_auth, routes_console
 from .render import render
+from .util import same_origin
 
 _HERE = Path(__file__).parent
+_MUTATING = {"POST", "PUT", "PATCH", "DELETE"}
 
 
 def create_app(db_path: str | None = None) -> FastAPI:
@@ -32,6 +34,16 @@ def create_app(db_path: str | None = None) -> FastAPI:
     static_dir = _HERE / "static"
     if static_dir.exists():
         app.mount("/static", StaticFiles(directory=str(static_dir)), name="static")
+
+    @app.middleware("http")
+    async def _csrf_origin(request: Request, call_next):
+        # Defence-in-depth over SameSite=Lax: reject a cross-site Origin on any
+        # state-changing request (the serve API is header-token auth, exempt).
+        if (request.method in _MUTATING and not request.url.path.startswith("/api")
+                and not same_origin(request)):
+            return JSONResponse({"error": "cross-origin request refused"},
+                                status_code=403)
+        return await call_next(request)
 
     @app.exception_handler(StarletteHTTPException)
     async def _on_http_exc(request: Request, exc: StarletteHTTPException):

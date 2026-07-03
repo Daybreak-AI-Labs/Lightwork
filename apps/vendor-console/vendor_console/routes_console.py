@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import json
+import re
 import secrets
 
 from fastapi import APIRouter, Depends, Form, Request
@@ -58,10 +59,9 @@ def customer_detail(request: Request, customer_id: int,
         raise HTTPException(status_code=404, detail="no such customer")
     rows = [{"lic": lic, "status": licensing.display_status(lic)}
             for lic in store.list_licenses(conn, customer_id)]
-    checkins = [c for c in store.latest_checkins(conn) if c["customer_id"] == customer_id]
     return render(request, "customer_detail.html",
                   {"staff": staff, "customer": cust, "licenses": rows,
-                   "checkin": checkins[0] if checkins else None,
+                   "checkin": store.latest_checkin_for(conn, customer_id),
                    "pubkey": licensing.public_key_hex(), "section": "customers"})
 
 
@@ -102,8 +102,11 @@ def download_license(request: Request, license_id: str,
     if lic is None:
         raise HTTPException(status_code=404, detail="no such license")
     body = json.dumps(lic.doc, indent=2) + "\n"
+    # license_id is server-generated (lic_<hex>), but sanitize before it lands in
+    # a response header regardless — never let a lookup key shape headers.
+    safe = re.sub(r"[^A-Za-z0-9_-]", "", license_id)[:40]
     return Response(body, media_type="application/json", headers={
-        "Content-Disposition": f'attachment; filename="license-{license_id}.json"'})
+        "Content-Disposition": f'attachment; filename="license-{safe}.json"'})
 
 
 @router.get("/fleet")

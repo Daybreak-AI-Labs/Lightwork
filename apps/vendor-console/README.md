@@ -50,7 +50,17 @@ skip this entirely — download the signed license file and hand-deliver it.
 | `VENDOR_CONSOLE_SECRET` | HMAC key for session cookies. Dev: random per-process (logs everyone out on restart). |
 | `VENDOR_CONSOLE_DB` | SQLite path (default `~/.daybreak/vendor-console.db`). |
 | `VENDOR_CONSOLE_HOST` / `PORT` | bind address (default `127.0.0.1:8900`). |
-| `VENDOR_CONSOLE_HTTPS` | set when behind TLS so session cookies get `Secure`. |
+| `VENDOR_CONSOLE_INSECURE` | dev/loopback only — disables the `Secure` cookie flag (which is **on by default** for every non-loopback host). |
+| `VENDOR_CONSOLE_TRUST_PROXY` | honour `X-Forwarded-For` for client IPs (only behind a trusted reverse proxy). |
+
+## Security posture
+
+Hardened after an adversarial review (auth/session, web, correctness):
+single-use TOTP, server-side session revocation on logout, rate-limited +
+timing-equalized login, `Secure` cookies + RBAC (DB-derived, never the cookie
+claim), an `Origin` CSRF check, header-only serve tokens, atomic first-owner
+bootstrap, and a lock-serialized, tamper-evident audit chain. The signing
+private key is never stored in the DB or returned by any route.
 
 ## Roles
 

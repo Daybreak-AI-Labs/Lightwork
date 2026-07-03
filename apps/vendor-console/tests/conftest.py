@@ -27,7 +27,10 @@ TEST_SIGNING_KEY = "1" * 64
 def _env(tmp_path, monkeypatch):
     monkeypatch.setenv("VENDOR_CONSOLE_SIGNING_KEY", TEST_SIGNING_KEY)
     monkeypatch.setenv("VENDOR_CONSOLE_SECRET", "test-session-secret")
+    monkeypatch.setenv("VENDOR_CONSOLE_INSECURE", "1")   # TestClient rides http
     monkeypatch.setenv("DAYBREAK_HOME", str(tmp_path / "daybreak"))
+    from vendor_console import ratelimit
+    ratelimit.reset_all()                                # no cross-test lockout leakage
 
 
 @pytest.fixture
@@ -59,12 +62,13 @@ def make_staff(app, *, email="owner@daybreak.co", role="owner"):
                               totp_secret=security.new_totp_secret())
 
 
-def login_cookie(app, staff_id: int, role: str = "owner") -> dict:
+def login_cookie(app, staff_id: int, role: str = "owner", epoch: int = 0) -> dict:
     """A full-session cookie for a staff id (skips the password+TOTP screens)."""
     from vendor_console import security
     from vendor_console.auth import SESSION_COOKIE
-    token = security.sign_session({"sid": staff_id, "stage": "full", "role": role},
-                                  security.session_key())
+    token = security.sign_session(
+        {"sid": staff_id, "stage": "full", "role": role, "ep": epoch},
+        security.session_key())
     return {SESSION_COOKIE: token}
 
 

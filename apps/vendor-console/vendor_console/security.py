@@ -65,17 +65,34 @@ def totp_now(secret_b32: str, *, at: float | None = None) -> str:
     return _totp_at(secret_b32, at if at is not None else time.time())
 
 
-def totp_verify(secret_b32: str, code: str, *, at: float | None = None,
-                window: int = 1) -> bool:
-    """True if ``code`` matches the current step, or ±``window`` steps (clock skew)."""
+def totp_step(at: float | None = None, *, step: int = 30) -> int:
+    return int((at if at is not None else time.time()) // step)
+
+
+def totp_match_step(secret_b32: str, code: str, *, at: float | None = None,
+                    window: int = 1, after_step: int = -1) -> int | None:
+    """Return the **time-step** a valid ``code`` matches (current or ±``window``
+    for clock skew), or ``None``. ``after_step`` enforces **single use** (RFC 6238
+    §5.2): a code whose step is ``<= after_step`` — already consumed — is rejected.
+    Callers persist the returned step so the same code can't be replayed."""
     if not code or not code.strip().isdigit():
-        return False
+        return None
     now = at if at is not None else time.time()
     code = code.strip()
+    base = totp_step(now)
     for drift in range(-window, window + 1):
-        if hmac.compare_digest(_totp_at(secret_b32, now + drift * 30), code):
-            return True
-    return False
+        step = base + drift
+        if step > after_step and hmac.compare_digest(
+                _totp_at(secret_b32, now + drift * 30), code):
+            return step
+    return None
+
+
+def totp_verify(secret_b32: str, code: str, *, at: float | None = None,
+                window: int = 1) -> bool:
+    """True if ``code`` matches the current step, or ±``window`` steps (clock skew).
+    Stateless (no single-use guard) — use :func:`totp_match_step` for login."""
+    return totp_match_step(secret_b32, code, at=at, window=window) is not None
 
 
 def totp_uri(secret_b32: str, account: str, *, issuer: str = "Daybreak Console") -> str:
@@ -124,10 +141,14 @@ def verify_session(token: str, key: bytes) -> dict | None:
 
 def session_key() -> bytes:
     """The HMAC key for session cookies. From ``VENDOR_CONSOLE_SECRET`` in prod;
-    a random per-process key in dev (which logs everyone out on restart — fine
-    for local use, never acceptable in prod, hence the env var)."""
+    a random per-process key in dev (which logs everyone out on restart, and
+    differs per worker under multi-process servers — fine for local use, never
+    acceptable in prod, hence the env var). A set-but-too-short secret is a
+    misconfiguration we refuse rather than silently weaken."""
     env = os.environ.get("VENDOR_CONSOLE_SECRET")
     if env:
+        if len(env) < 16:
+            raise RuntimeError("VENDOR_CONSOLE_SECRET must be at least 16 characters")
         return hashlib.sha256(env.encode("utf-8")).digest()
     return _DEV_KEY
 

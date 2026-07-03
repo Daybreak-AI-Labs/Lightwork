@@ -23,12 +23,13 @@ class Staff:
     totp_enrolled: bool
     disabled: bool
     created_at: float
+    session_epoch: int = 0
 
     @classmethod
     def from_row(cls, r) -> Staff:
         return cls(id=r["id"], email=r["email"], name=r["name"], role=r["role"],
                    totp_enrolled=bool(r["totp_enrolled"]), disabled=bool(r["disabled"]),
-                   created_at=r["created_at"])
+                   created_at=r["created_at"], session_epoch=r["session_epoch"])
 
     @property
     def can_write(self) -> bool:

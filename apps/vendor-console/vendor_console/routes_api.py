@@ -22,9 +22,10 @@ def healthz(request: Request) -> PlainTextResponse:
 @router.get("/api/v1/license")
 def serve_license(request: Request):
     conn = request.app.state.conn
+    # Header-only: never accept the serve token in the query string, where it
+    # would leak into proxy/access logs, browser history, and Referer.
     authz = request.headers.get("authorization", "")
-    token = (authz[7:].strip() if authz.lower().startswith("bearer ")
-             else request.query_params.get("token", ""))
+    token = authz[7:].strip() if authz.lower().startswith("bearer ") else ""
     if not token:
         raise HTTPException(status_code=401, detail="missing serve token")
     cust = store.customer_by_serve_token_hash(conn, hash_token(token))
