@@ -484,6 +484,12 @@
     var pickerTarget = null;      // the tool <input> to insert into
     var pickerRestrict = null;    // Set of names to limit to, or null for all
     var RISK_RANK = { low: 0, medium: 1, high: 2 };
+    // Whether this caller can save an Agent Playbook. Playbook save + the live
+    // governance lint go through the admin-gated pack-editing path, while
+    // drafting only needs "operate" — so without this guard a non-admin could
+    // build a whole playbook and only discover a 403 at Save. When false, we
+    // disable playbook mode up front and explain why.
+    var PACK_EDITING = {{ pack_editing_allowed | tojson }};
 
     var EXAMPLES = {
       template: [
@@ -529,6 +535,11 @@
     }
 
     function setForm(next) {
+      if (next === 'playbook' && !PACK_EDITING) {
+        setStatus('Agent playbooks require a dashboard admin to save. Ask an admin, '
+          + 'or build a reusable template here instead.', true);
+        return;
+      }
       mode = next;
       var isTpl = mode === 'template';
       formTplBtn.classList.toggle('is-active', isTpl);
@@ -543,6 +554,16 @@
     }
     formTplBtn.addEventListener('click', function () { setForm('template'); });
     formPbBtn.addEventListener('click', function () { setForm('playbook'); });
+    if (!PACK_EDITING) {
+      // Signal the disabled affordance visually and to assistive tech.
+      formPbBtn.disabled = true;
+      formPbBtn.setAttribute('aria-disabled', 'true');
+      formPbBtn.title = 'Agent playbooks require a dashboard admin';
+      formPbBtn.style.opacity = '0.55';
+      formPbBtn.style.cursor = 'not-allowed';
+      var pbSub = formPbBtn.querySelector('.seg__sub');
+      if (pbSub) pbSub.textContent = 'requires a dashboard admin';
+    }
 
     fileBtn.addEventListener('click', function () { fileInput.click(); });
     fileInput.addEventListener('change', function () {
@@ -560,33 +581,86 @@
     }
 
     // ---- template form ----
+    var wfEditingName = null;   // set when rehydrated via ?edit= (Save overwrites)
+    var wfEditWall = null;      // preserved budget_wall_seconds for an edited template
+    // Render an API error detail readably. A 422's `detail` is a Pydantic error
+    // ARRAY, not a string — assigning it to textContent would print "[object
+    // Object]", so flatten it to "field: message" here.
+    function detailText(data, status) {
+      var d = data && data.detail;
+      if (typeof d === 'string') return d;
+      if (Array.isArray(d)) {
+        return d.map(function (e) {
+          var loc = (e && e.loc && e.loc.length) ? e.loc[e.loc.length - 1] : '';
+          return (loc ? loc + ': ' : '') + ((e && e.msg) || 'invalid');
+        }).join('; ') || ('Save failed: ' + status);
+      }
+      return 'Save failed: ' + status;
+    }
     function renderDraft(d) {
       elName.value = d.name || '';
       elTitle.value = d.title || '';
       elSteps.value = d.body || '';
       elParams.value = (d.params || []).join(', ');
       elBudget.value = (d.budget_dollars != null) ? d.budget_dollars : 5;
+      if (d.budget_wall_seconds != null) wfEditWall = d.budget_wall_seconds;
       preview.hidden = false; pbPreview.hidden = true; savedBox.hidden = true;
       preview.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
     }
+    function stepsFromBody(body) {
+      // Recover the ordered steps from the numbered "## Steps" markdown so a
+      // refine round-trip hands the model a real steps[] array (not just prose,
+      // which risks dropped/reordered steps).
+      var out = [];
+      (body || '').split('\n').forEach(function (line) {
+        var m = /^\s*\d+\.\s+(.*\S)\s*$/.exec(line);
+        if (m) out.push(m[1]);
+      });
+      return out;
+    }
     function collectTemplate() {
-      return {
+      var t = {
         name: elName.value.trim(), title: elTitle.value.trim(), body: elSteps.value,
         params: splitList(elParams.value), budget_dollars: parseFloat(elBudget.value) || 5.0,
+        steps: stepsFromBody(elSteps.value),
       };
+      // Preserve the wall-time cap of an edited template (the form has no field
+      // for it) so a save round-trip can't reset it to the server default.
+      if (wfEditWall != null) t.budget_wall_seconds = wfEditWall;
+      // Overwrite only when saving back to the template we opened for edit; a
+      // fresh name must not silently clobber an existing one.
+      t.overwrite = !!(wfEditingName && t.name === wfEditingName);
+      return t;
+    }
+    async function postTemplate(payload) {
+      var resp = await fetch('/api/v1/workflows', {
+        method: 'POST', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(payload),
+      });
+      return { resp: resp, data: await resp.json().catch(function () { return {}; }) };
     }
 
     saveBtn.addEventListener('click', async function () {
+      var payload = collectTemplate();
+      if (!payload.name) { setStatus('Give the workflow a name (id).', true); elName.focus(); return; }
       saveBtn.disabled = true;
       setStatus('Saving…');
       try {
-        var resp = await fetch('/api/v1/workflows', {
-          method: 'POST', headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify(collectTemplate()),
-        });
-        var data = await resp.json().catch(function () { return {}; });
-        if (!resp.ok) { setStatus(data.detail || ('Save failed: ' + resp.status), true); return; }
+        var r = await postTemplate(payload);
+        if (r.resp.status === 409) {
+          // Name collision on a fresh save: confirm an explicit overwrite rather
+          // than clobbering someone else's template silently.
+          if (await mvConfirm('A workflow named “' + payload.name + '” already exists. Overwrite it?')) {
+            payload.overwrite = true;
+            r = await postTemplate(payload);
+          } else {
+            setStatus('Not saved — pick a different name.', true); return;
+          }
+        }
+        if (!r.resp.ok) { setStatus(detailText(r.data, r.resp.status), true); return; }
+        var data = r.data;
         setStatus('');
+        wfEditingName = data.name;   // subsequent saves overwrite this one
         savedMsg.textContent = 'Saved “' + (data.title || data.name) + '” as a reusable workflow'
           + ((data.params && data.params.length) ? ' (parameters: ' + data.params.join(', ') + ').' : '.');
         showSaved('/templates', 'Open Templates');
@@ -1177,6 +1251,9 @@
     // ---- shared draft action ----
     async function draft() {
       setBusy(draftBtn, true);
+      // A fresh draft is a NEW template — clear any edit context so Save doesn't
+      // overwrite the previously-edited one or carry its wall-time cap forward.
+      if (mode === 'template') { wfEditingName = null; wfEditWall = null; }
       setStatus(mode === 'playbook' ? 'Drafting the playbook…' : 'Drafting the workflow…');
       try {
         var resp;
@@ -1250,13 +1327,17 @@
     var PB_EDIT = {{ edit_agent_prefill | tojson }};
     var WF_EDIT = {{ edit_prefill | tojson }};
     var WF_PREFILL = {{ prefill | tojson }};
-    if (PB_EDIT && PB_EDIT.name) {
+    if (PB_EDIT && PB_EDIT.name && PACK_EDITING) {
       setForm('playbook');
       pbEditPreserve = PB_EDIT.preserve || null;
       renderPlaybook(PB_EDIT);
       setStatus('Editing agent “' + PB_EDIT.name + '” — change the persona, tools, or steps, then Save to overwrite.');
+    } else if (PB_EDIT && PB_EDIT.name) {
+      // Non-admin deep-linked to an agent edit: playbook editing is admin-only.
+      setStatus('Editing agent “' + PB_EDIT.name + '” requires a dashboard admin.', true);
     } else if (WF_EDIT && WF_EDIT.name) {
       setForm('template');
+      wfEditingName = WF_EDIT.name;   // Save overwrites this template
       renderDraft(WF_EDIT);
       setStatus('Editing “' + (WF_EDIT.title || WF_EDIT.name) + '” — change it and Save to overwrite (or rename to save a copy).');
     } else if (WF_PREFILL && WF_PREFILL.name) {

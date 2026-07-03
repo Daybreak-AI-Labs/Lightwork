@@ -245,3 +245,66 @@ def test_concurrent_set_trigger_does_not_lose_triggers(monkeypatch, tmp_path):
     assert len(triggers_store.list_triggers()) == n
     store_dir = triggers_store._path().parent
     assert list(store_dir.glob("*.tmp")) == []
+
+
+# ---- governance / scoping fixes ---------------------------------------------
+
+def test_webhook_run_honors_template_budget(monkeypatch, tmp_path):
+    # A trigger fire must run the goal under the template's own budget/wall caps
+    # (previously dropped -- the run fell back to the global default).
+    _isolate(monkeypatch, tmp_path)
+    _configured(monkeypatch)
+    import maverick.templates as tpl
+    (tpl.USER_TEMPLATES / "cheap.md").write_text(
+        "---\ntitle: Cheap\nbudget_dollars: 0.75\nbudget_wall_seconds: 120\n---\n"
+        "Do a small thing.\n", encoding="utf-8")
+    import maverick.runner as runner_mod
+    seen = {}
+
+    def fake_run(goal_id, max_dollars=None, max_wall_seconds=None, max_depth=3):
+        seen["dollars"] = max_dollars
+        seen["wall"] = max_wall_seconds
+
+    monkeypatch.setattr(runner_mod, "run_goal_in_thread", fake_run)
+    c = _client()
+    assert c.post("/api/v1/triggers", json={"template": "cheap"}).status_code == 201
+    body = json.dumps({"trigger": "cheap"}).encode()
+    r = c.post("/webhook/run", content=body, headers=_sign_headers(body))
+    assert r.status_code == 201, r.text
+    assert seen["dollars"] == 0.75 and seen["wall"] == 120.0
+
+
+def test_webhook_run_verifies_signature_before_feature_flag(monkeypatch, tmp_path, _no_real_run):
+    # With triggers disabled, an UNSIGNED/bad request must be rejected as auth
+    # (403), not leak the feature state via a distinct 404.
+    _isolate(monkeypatch, tmp_path)
+    _configured(monkeypatch)
+    from maverick import config
+    real = config.get_features
+    monkeypatch.setattr(config, "get_features", lambda: {**real(), "triggers": False})
+    body = json.dumps({"trigger": "whatever"}).encode()
+    r = _client().post("/webhook/run", content=body, headers={
+        "X-Maverick-Signature": "sha256=bad",
+        "X-Maverick-Timestamp": str(int(time.time())),
+    })
+    assert r.status_code == 403
+    assert _no_real_run == []
+
+
+def test_trigger_records_and_round_trips_owner(monkeypatch, tmp_path):
+    _isolate(monkeypatch, tmp_path)
+    from maverick_dashboard import triggers_store as ts
+    ts.set_trigger("t1", "weekly-report", {"topic": "x"}, owner="user:bob")
+    got = ts.get_trigger("t1")
+    assert got["owner"] == "user:bob"
+
+
+def test_list_triggers_is_owner_scoped(monkeypatch, tmp_path):
+    # A non-admin (goal_owner_filter -> principal) sees only its own triggers.
+    _isolate(monkeypatch, tmp_path)
+    from maverick_dashboard import api, triggers_store
+    triggers_store.set_trigger("mine", "weekly-report", {"topic": "x"}, owner="user:alice")
+    triggers_store.set_trigger("theirs", "weekly-report", {"topic": "y"}, owner="user:bob")
+    monkeypatch.setattr(api, "goal_owner_filter", lambda request: "user:alice")
+    names = {t["name"] for t in _client().get("/api/v1/triggers").json()["triggers"]}
+    assert names == {"mine"}
