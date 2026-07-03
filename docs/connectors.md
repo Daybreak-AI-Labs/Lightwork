@@ -76,6 +76,21 @@ an API `path`, optional `params`/`body`, and `confirm` for writes. Bespoke
 connectors (ServiceNow, Snowflake, SAP, Salesforce, ...) add system-specific
 operations.
 
+<!--
+  GENERATED TABLE -- do not hand-edit. Source of truth is
+  connector_catalog() in packages/maverick-core/maverick/tools/enterprise_connectors.py.
+  Regenerate after editing _SPECS/_GRAPHQL_SPECS/_BESPOKE_CATALOG with:
+
+    python3 -c "
+    from maverick.tools.enterprise_connectors import connector_catalog
+    for e in connector_catalog():
+        env = ', '.join(f'\`{n}\`' + ('' if s else ' *(url)*') for n, s in e['env'])
+        print(f\"| {e['label']} | \`{e['name']}\` | {env} |\")
+    "
+
+  then splice the output between the header row and the "Variables marked"
+  note below.
+-->
 | Connector | Tool name | Environment variables |
 | --- | --- | --- |
 | AbacusLaw (AbacusNext) legal practice management | `abacuslaw` | `ABACUSLAW_BASE_URL` *(url)*, `ABACUSLAW_TOKEN` |

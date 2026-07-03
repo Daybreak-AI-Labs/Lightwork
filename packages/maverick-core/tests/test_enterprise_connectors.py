@@ -205,10 +205,10 @@ def test_no_collision_with_opt_in_ambient_cred_tools():
     """Names reserved for the ambient-credential tools (registered only when
     MAVERICK_ENABLE_CRED_TOOLS=true) must never appear in the always-on
     enterprise_connectors catalog, or the opt-in gate is silently bypassed."""
+    from maverick.tools import AMBIENT_CRED_TOOL_NAMES
     from maverick.tools.enterprise_connectors import ENTERPRISE_CONNECTOR_NAMES
 
-    gated = {"airtable", "asana", "clickup", "lambda", "dynamodb", "vercel", "gdrive"}
-    assert gated.isdisjoint(ENTERPRISE_CONNECTOR_NAMES)
+    assert AMBIENT_CRED_TOOL_NAMES.isdisjoint(ENTERPRISE_CONNECTOR_NAMES)
 
 
 def test_automation_platform_connectors_present():
