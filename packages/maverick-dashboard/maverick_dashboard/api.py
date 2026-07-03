@@ -1995,6 +1995,10 @@ async def import_run_endpoint(request: Request, payload: ImportRunIn) -> ImportR
             status_code=400,
             detail=f"no importable automations found from {payload.source!r}",
         )
+    # translate_all drops malformed/unsupported definitions (logging each). It's
+    # 1:1, so the shortfall is the count that silently failed -- surface it so a
+    # partial import doesn't read as a clean success.
+    skipped = len(raws) - len(automations)
 
     # Resolve schedule activation: an explicit request field wins; when the UI
     # omits it (None), fall back to the [automation_import] create_schedules
@@ -2072,6 +2076,7 @@ async def import_run_endpoint(request: Request, payload: ImportRunIn) -> ImportR
         dry_run=payload.dry_run,
         webhook_url=_WEBHOOK_RUN_PATH,
         secret_configured=_inbound_secret_set(),
+        skipped=skipped,
     )
 
 

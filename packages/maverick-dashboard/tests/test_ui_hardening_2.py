@@ -14,6 +14,11 @@ def _reset_rate_limit():
     from maverick_dashboard import app as dash_app
     with dash_app._goal_rl_lock:
         dash_app._goal_times.clear()
+        # Also clear the process-wide window, not just the per-client one: it
+        # accumulates across the whole suite (goals from earlier tests within the
+        # 60s window), so without this a cap-boundary assertion here is at the
+        # mercy of how many goals other tests happened to create just before.
+        dash_app._goal_times_global.clear()
 
 
 # ---------- responsive tables ----------

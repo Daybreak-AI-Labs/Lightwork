@@ -60,13 +60,54 @@ def _trigger_kind(short: str) -> str:
     return TRIGGER_EVENT
 
 
+def _cron_from_interval(interval: dict) -> str | None:
+    """Synthesize a 5-field cron from one modern ``scheduleTrigger`` interval
+    rule (``{field, <field>Interval, triggerAtHour, triggerAtMinute, ...}``).
+
+    Covers minutes/hours/days/weeks/months -- the encodings n8n uses instead of
+    a raw cron. Returns ``None`` for sub-minute (``seconds``) or unknown fields,
+    which a 5-field cron can't express (the trigger still imports, just without
+    an auto-created schedule)."""
+    field = str(interval.get("field") or "").strip()
+
+    def _int(key: str, default: int) -> int:
+        try:
+            return int(interval.get(key, default))
+        except (TypeError, ValueError):
+            return default
+
+    minute = _int("triggerAtMinute", 0)
+    hour = _int("triggerAtHour", 0)
+    if field == "minutes":
+        n = max(1, _int("minutesInterval", 1))
+        return f"*/{n} * * * *"
+    if field == "hours":
+        n = max(1, _int("hoursInterval", 1))
+        return f"{minute} {'*' if n == 1 else f'*/{n}'} * * *"
+    if field == "days":
+        n = max(1, _int("daysInterval", 1))
+        return f"{minute} {hour} {'*' if n == 1 else f'*/{n}'} * *"
+    if field == "weeks":
+        days = interval.get("triggerAtDay")
+        dow = "*"
+        if isinstance(days, list) and days:
+            picked = [str(int(d)) for d in days if str(d).lstrip("-").isdigit()]
+            dow = ",".join(picked) or "*"
+        return f"{minute} {hour} * * {dow}"
+    if field == "months":
+        n = max(1, _int("monthsInterval", 1))
+        dom = max(1, _int("triggerAtDayOfMonth", 1))
+        return f"{minute} {hour} {dom} {'*' if n == 1 else f'*/{n}'} *"
+    return None  # seconds / unknown -> not representable in 5 fields
+
+
 def _extract_cron(params: dict) -> str | None:
     """Best-effort 5-field cron from a scheduleTrigger/cron node's parameters.
 
-    n8n encodes schedules several ways across versions; we only recover an
-    explicit cron expression, leaving ``None`` (the trigger still imports, just
-    without an auto-created schedule) for interval/rule encodings.
-    """
+    Recovers an explicit cron expression, and (new) synthesizes one from the
+    modern ``scheduleTrigger`` interval rules. Leaves ``None`` only for
+    sub-minute or otherwise un-expressible schedules -- the trigger still
+    imports, just without an auto-created schedule."""
     # Classic cron node: parameters.cronExpression, or triggerTimes.item[].mode.
     expr = params.get("cronExpression")
     if isinstance(expr, str) and expr.strip():
@@ -74,10 +115,14 @@ def _extract_cron(params: dict) -> str | None:
     rule = params.get("rule")
     if isinstance(rule, dict):
         for interval in rule.get("interval", []) or []:
-            if isinstance(interval, dict):
-                ce = interval.get("cronExpression") or interval.get("expression")
-                if isinstance(ce, str) and ce.strip():
-                    return ce.strip()
+            if not isinstance(interval, dict):
+                continue
+            ce = interval.get("cronExpression") or interval.get("expression")
+            if isinstance(ce, str) and ce.strip():
+                return ce.strip()
+            synthesized = _cron_from_interval(interval)
+            if synthesized:
+                return synthesized
     return None
 
 

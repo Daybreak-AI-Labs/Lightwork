@@ -316,6 +316,24 @@ def test_webhook_run_verifies_signature_before_feature_flag(monkeypatch, tmp_pat
     assert _no_real_run == []
 
 
+def test_webhook_run_dedupes_on_delivery_id(monkeypatch, tmp_path, _no_real_run):
+    # A caller-supplied delivery id gives at-most-once: a repeat 409s, while a
+    # DISTINCT id (or none) still fires. Ids are unique per test to avoid the
+    # process-global dedup store leaking across tests.
+    _isolate(monkeypatch, tmp_path)
+    _configured(monkeypatch)
+    c = _client()
+    name = _register(c)
+    b1 = json.dumps({"trigger": name, "id": "delivery-aaa"}).encode()
+    assert c.post("/webhook/run", content=b1, headers=_sign_headers(b1)).status_code == 201
+    # exact resend (same id) is rejected as a duplicate
+    assert c.post("/webhook/run", content=b1, headers=_sign_headers(b1)).status_code == 409
+    # a different id fires normally
+    b2 = json.dumps({"trigger": name, "id": "delivery-bbb"}).encode()
+    assert c.post("/webhook/run", content=b2, headers=_sign_headers(b2)).status_code == 201
+    assert len(_no_real_run) == 2   # two goals, not three
+
+
 def test_trigger_records_and_round_trips_owner(monkeypatch, tmp_path):
     _isolate(monkeypatch, tmp_path)
     from maverick_dashboard import triggers_store as ts
