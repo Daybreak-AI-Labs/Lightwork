@@ -124,12 +124,22 @@ def registry_path() -> Path:
 def enabled() -> bool:
     _v = env_flag("MAVERICK_FLEET_MEMORY")
     if _v is not None:
-        return _v
-    try:
-        from .config import load_config
-        return bool((load_config().get("fleet_memory") or {}).get("enable", False))
-    except Exception:  # pragma: no cover
+        base = _v
+    else:
+        try:
+            from .config import load_config
+            base = bool((load_config().get("fleet_memory") or {}).get("enable", False))
+        except Exception:  # pragma: no cover
+            return False
+    if not base:
         return False
+    # Fleet memory is a paid (Gold) add-on. Fail-open: the gate only bites when
+    # a deployment has turned enforcement on and the license doesn't grant it.
+    try:
+        from .entitlements import require
+        return require("fleet_memory")
+    except Exception:  # pragma: no cover - entitlements missing => keep base
+        return base
 
 
 def _sanitize(text: str, *, shield: Any | None) -> str | None:

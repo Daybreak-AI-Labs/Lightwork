@@ -179,6 +179,19 @@ def create_tenant(
 ) -> TenantRecord:
     """Provision a tenant + its workspace dir. Raises ValueError if it exists."""
     tid = _validate_id(tenant_id)
+    # Provisioning a named tenant IS multi-tenant mode — a paid (Platinum)
+    # capability. Fail-open: a no-op unless license enforcement is on and the
+    # deployment isn't entitled (a genuine single-tenant box never calls this —
+    # it uses the default tenant).
+    try:
+        from ..entitlements import require
+        allowed = require("multi_tenant")
+    except Exception:  # pragma: no cover - entitlements missing => don't block
+        allowed = True
+    if not allowed:
+        raise PermissionError(
+            "multi-tenant provisioning requires a Platinum license "
+            "(license enforcement is on and this deployment is not entitled)")
     _warn_if_unknown_plan(plan)
     with _locked():
         records = _load()

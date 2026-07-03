@@ -151,6 +151,19 @@ def forward(lines: Iterable[str], dest: str, *, timeout: float = 10.0) -> int:
     ``iter_audit_events``). Raises on an unsupported/ malformed destination or a
     transport error so the caller can surface the gap.
     """
+    # SIEM push is a paid (Gold) add-on. Fail-open: the gate only bites when a
+    # deployment has turned enforcement on and the license doesn't grant it — a
+    # community/dev box forwards freely (see maverick.entitlements.require).
+    try:
+        from ..entitlements import require
+        licensed = require("siem_export")
+    # failure-policy: best_effort
+    except Exception:  # pragma: no cover - entitlements missing => don't block
+        licensed = True
+    if not licensed:
+        raise PermissionError(
+            "SIEM audit forwarding requires a Gold entitlement (siem_export); "
+            "license enforcement is on and the current license doesn't grant it")
     scheme, host, port, url = parse_dest(dest)
     if scheme in ("tcp", "udp", "http"):
         log.warning(

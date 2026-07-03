@@ -149,10 +149,28 @@ def _recent_failures() -> dict:
     return out
 
 
+def _entitlement() -> dict:
+    """The deployment's licensed edition/tier — so a support ticket is keyed to
+    the exact SKU the customer runs (no secrets; the summary is safe to share)."""
+    try:
+        from .entitlements import current
+        ent = current()
+        return {"customer": ent.customer, "tier": ent.tier, "status": ent.status,
+                "suites": list(ent.suites),
+                "expires_at": ent.expires_at.date().isoformat() if ent.expires_at else None}
+    except Exception:  # pragma: no cover - never let this block the bundle
+        return {"status": "unavailable"}
+
+
 def collect() -> dict:
     """Assemble the full redacted diagnostics bundle."""
+    import secrets
     bundle: dict[str, Any] = {
+        # A ticket key: correlate the bundle a customer sends to their ticket,
+        # their entitlement, and the exact build — without any customer data.
+        "correlation_id": "sup_" + secrets.token_hex(6),
         "generated_at": time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime()),
+        "entitlement": _entitlement(),
         "versions": _versions(),
         "runtime": _runtime(),
         "readiness": _readiness(),
@@ -172,4 +190,49 @@ def collect() -> dict:
     return bundle
 
 
-__all__ = ["collect"]
+def ticket_summary(bundle: dict | None = None) -> dict:
+    """A compact, ticket-system-ready view of a bundle — the fields an intake
+    queue routes on, keyed by ``correlation_id``: which SKU (customer/tier/
+    status), which build, which readiness checks are failing, and the recent
+    failure modes. Derived purely from an already-redacted :func:`collect`
+    bundle, so it carries no secrets and is safe to POST to a portal/email→ticket
+    bridge. Pass a bundle to summarise, or omit to collect a fresh one."""
+    b = bundle if bundle is not None else collect()
+    ent = b.get("entitlement", {}) or {}
+    readiness = b.get("readiness", {}) or {}
+    failing = sorted(k for k, v in readiness.items() if str(v).startswith("fail"))
+    recent = b.get("recent_failures", {}) or {}
+    versions = b.get("versions", {}) or {}
+    return {
+        "correlation_id": b.get("correlation_id"),
+        "generated_at": b.get("generated_at"),
+        "customer": ent.get("customer"),
+        "tier": ent.get("tier"),
+        "entitlement_status": ent.get("status"),
+        "suites": ent.get("suites", []),
+        "agent_version": versions.get("maverick-agent"),
+        "readiness_failing": failing,
+        "healthy": not failing,
+        "failure_modes": recent.get("failure_modes"),
+        "failed_job_count": (len(recent["failed_jobs"])
+                             if isinstance(recent.get("failed_jobs"), list) else None),
+    }
+
+
+def export(path: str | None = None) -> tuple:
+    """Assemble the redacted bundle and write it to ``path`` (default
+    ``support-<correlation_id>.json`` in the cwd). Returns ``(Path, bundle)``.
+
+    The customer controls and can inspect the file before sending it — the
+    air-gap-safe, regulator-safe support channel (no silent telemetry). Wiring
+    an audit-trail record of the export belongs in the CLI wrapper so ``collect``
+    stays side-effect free (see docs/enterprise/product-operations.md)."""
+    import json
+    from pathlib import Path
+    bundle = collect()
+    out = Path(path) if path else Path.cwd() / f"support-{bundle['correlation_id']}.json"
+    out.write_text(json.dumps(bundle, indent=2, default=str), encoding="utf-8")
+    return out, bundle
+
+
+__all__ = ["collect", "export", "ticket_summary"]
