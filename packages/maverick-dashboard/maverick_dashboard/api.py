@@ -4017,8 +4017,14 @@ async def learning_api(request: Request) -> dict:
 async def set_learning_endpoint(request: Request, payload: LearningToggleIn) -> dict:
     """Turn the whole self-learning loop on or off in one action (writes the
     learning knobs to the config overlay). Returns the refreshed snapshot so the
-    caller sees the new state. Requires the operate permission."""
-    require_permission(request, "operate")
+    caller sees the new state.
+
+    Admin-gated: this writes the deployment-wide dashboard config overlay (the
+    same one [capabilities]/[features]/providers use, all admin-gated), which
+    ``load_config`` merges for every tenant and worker -- not an owner-scoped
+    action, so an operator must not flip it (e.g. force-enable trajectory
+    capture deployment-wide, or disable the whole learning loop)."""
+    require_permission(request, "admin")
     from maverick_dashboard import settings_store
     settings_store.set_learning(payload.enabled)
     return _learning_snapshot(request)
