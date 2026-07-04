@@ -145,6 +145,15 @@ class Candidate:
     capability_after: Any = None
     probe_tools: tuple[str, ...] = ()
     approved: bool = False
+    # Cryptographic human approval (maverick.approval_signing). When a deployment
+    # configures trusted approver keys, the ``approved`` boolean above is
+    # IGNORED at human-gated rungs and a valid Ed25519 signature over
+    # (id, rung, payload digest) is required instead -- a self-modifying agent
+    # cannot forge it. ``payload_sha256`` pins WHAT was approved (defaults to a
+    # digest of ``payload``) so an approval can't be replayed onto a swapped
+    # payload. Both unused unless signing is enforced (backward compatible).
+    approval_signature: str | None = None
+    payload_sha256: str | None = None
     # Truthy iff the change can be undone (a snapshot id / revert handle). A
     # change that can't be rolled back is never promoted.
     rollback: Any = None
@@ -168,6 +177,10 @@ class Verdict:
     promote: bool
     gates: tuple[GateResult, ...]
     blocking_reason: str = ""
+    # The approver key-id whose signature satisfied the human-approval gate
+    # (maverick.approval), or None when human approval was a boolean / not
+    # required. Recorded in the signed audit line for a promotion.
+    approver_id: str | None = None
 
     @property
     def ok(self) -> bool:
@@ -302,9 +315,8 @@ class SelfImprovementController:
         #    ``max_auto_rung`` (a deployment-wide ceiling on autonomous promotion).
         needs_human = bool(policy["require_human"]) or (
             _rung_rank(cand.rung) > _rung_rank(self.max_auto_rung))
-        human_ok = (not needs_human) or bool(cand.approved)
-        gates.append(GateResult("human_approval", human_ok,
-                                "" if human_ok else f"{cand.rung} promotion requires human approval"))
+        human_ok, approver, human_reason = self._human_approval(cand, needs_human)
+        gates.append(GateResult("human_approval", human_ok, "" if human_ok else human_reason))
 
         # 5. Reversibility: never promote a change you can't undo.
         rb_ok = bool(cand.rollback)
@@ -313,8 +325,45 @@ class SelfImprovementController:
 
         failing = [g for g in gates if not g.ok]
         if failing:
-            return Verdict(cand.id, cand.rung, False, tuple(gates), failing[0].reason)
-        return Verdict(cand.id, cand.rung, True, tuple(gates))
+            return Verdict(cand.id, cand.rung, False, tuple(gates), failing[0].reason,
+                           approver_id=approver)
+        return Verdict(cand.id, cand.rung, True, tuple(gates), approver_id=approver)
+
+    def _human_approval(self, cand: Candidate, needs_human: bool) -> tuple[bool, str | None, str]:
+        """Resolve the human-approval gate to ``(ok, approver_id, reason)``.
+
+        When cryptographic approval is enforced (a deployment configured trusted
+        approver keys, see :mod:`maverick.approval_signing`), a valid Ed25519 signature
+        over (candidate id, rung, payload digest) is REQUIRED at human-gated
+        rungs and the self-settable ``approved`` boolean is ignored -- the whole
+        point is that a self-modifying agent cannot forge the signature or set a
+        control that lives outside its process. Fails **closed**: no/invalid
+        signature or any verifier error => not approved. When signing is not
+        enforced, the legacy boolean is honoured (unchanged dev/community path).
+        """
+        if not needs_human:
+            return True, None, ""
+        enforced = False
+        approver: str | None = None
+        try:
+            from . import approval_signing
+            enforced = approval_signing.signing_enforced()
+            if enforced:
+                approver = approval_signing.verify_candidate(cand)
+        except Exception:  # pragma: no cover -- consult failure => decide below
+            # If the approval subsystem errored while enforced, `approver` stays
+            # None and we fail closed; if it was not enforced, fall through to
+            # the boolean path.
+            pass
+        if enforced:
+            if approver:
+                return True, approver, ""
+            return (False, None,
+                    f"{cand.rung} promotion requires a valid approver signature "
+                    "(none present or signature invalid)")
+        if bool(cand.approved):
+            return True, None, ""
+        return False, None, f"{cand.rung} promotion requires human approval"
 
     def _reject(self, cand: Candidate, gates: list[GateResult]) -> Verdict:
         return Verdict(cand.id, cand.rung, False, tuple(gates),
@@ -346,7 +395,8 @@ class SelfImprovementController:
             self.ledger.add(rec)
         self.audit_fn(content="self_improvement_promoted", decision="promote",
                       rung=cand.rung, candidate=cand.id,
-                      improvement=round(cand.candidate_score - cand.baseline_score, 6))
+                      improvement=round(cand.candidate_score - cand.baseline_score, 6),
+                      approver=verdict.approver_id)
         return verdict
 
     def rollback(self, record_id: str, *, undo: Callable[[], None] | None = None) -> bool:
