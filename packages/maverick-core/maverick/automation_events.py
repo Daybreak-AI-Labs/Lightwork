@@ -284,6 +284,121 @@ class RssSource:
 register("rss", RssSource)
 
 
+# ---- OAuth-authenticated sources -------------------------------------------
+#
+# A polled source that authenticates with a live OAuth token pulled from the
+# sealed per-tenant vault (never a token in the trigger config), refreshed on
+# demand. The token lives in the vault under a ``provider`` key; the trigger
+# stores only that reference. Covers the large class of bearer-auth REST feeds
+# (Slack, Gmail, GitHub, most SaaS APIs) with one connector, plus a couple of
+# named native conveniences on top.
+
+
+def _oauth_refresher(config: dict):
+    """A ``refresher(record) -> token_dict`` for ``vault.access_token``, or
+    ``None`` when the trigger supplied no refresh config (then a stored,
+    still-valid token is used as-is). ``client_secret`` is read from an env-var
+    name (``client_secret_env``), never stored in the trigger config."""
+    token_url = str((config or {}).get("token_url") or "").strip()
+    client_id = str((config or {}).get("client_id") or "").strip()
+    if not (token_url and client_id):
+        return None
+    secret_env = str((config or {}).get("client_secret_env") or "").strip()
+
+    def _refresh(record: dict) -> dict:
+        import os
+
+        from .tools.oauth_helper import _post_form  # SSRF + https-guarded POST
+        data = {"grant_type": "refresh_token", "client_id": client_id,
+                "refresh_token": str(record.get("refresh_token") or "")}
+        if secret_env and os.environ.get(secret_env):
+            data["client_secret"] = os.environ[secret_env]
+        try:
+            return _post_form(token_url, data)
+        except Exception as e:
+            raise EventSourceError(f"OAuth token refresh failed: {type(e).__name__}") from e
+    return _refresh
+
+
+def _oauth_bearer(config: dict) -> str:
+    """Resolve a live Bearer token for an OAuth'd source from the sealed vault
+    (``provider`` key), refreshing if the trigger supplied refresh config.
+    Raises when the vault is off or no usable token exists."""
+    provider = str((config or {}).get("provider") or "").strip()
+    if not provider:
+        raise EventSourceError("oauth source needs a 'provider' (the vault key)")
+    try:
+        from . import oauth_vault
+    except Exception as e:  # pragma: no cover -- vault module unavailable
+        raise EventSourceError("OAuth vault unavailable") from e
+    if not oauth_vault.enabled():
+        raise EventSourceError("OAuth vault is off ([oauth] vault / MAVERICK_OAUTH_VAULT)")
+    token = oauth_vault.get_vault().access_token(
+        provider, refresher=_oauth_refresher(config))
+    if not token:
+        raise EventSourceError(
+            f"no valid OAuth token for provider {provider!r}; authorize it first "
+            "(and set token_url + client_id to auto-refresh an expired one)")
+    return token
+
+
+class OAuthHttpJsonSource:
+    """Poll a Bearer-authenticated JSON HTTP endpoint. Same as ``http_json`` but
+    the ``Authorization`` header is a live OAuth token from the sealed vault
+    (``provider``) rather than a static header -- so long-lived polling of
+    Slack/Gmail/GitHub/most SaaS REST APIs works with token refresh. ``config``:
+    ``{provider, url, items_path?, id_field?, newest_first?, token_url?,
+    client_id?, client_secret_env?, headers?}``."""
+    source = "oauth_http_json"
+
+    def poll(self, config: dict, cursor: str) -> PollResult:
+        url, id_field, headers = _base_config(config, "oauth_http_json")
+        items_path = str((config or {}).get("items_path") or "")
+        newest_first = bool((config or {}).get("newest_first", True))
+        headers = {**headers, "Authorization": f"Bearer {_oauth_bearer(config)}"}
+        body = _http_get_json(url, headers=headers)
+        items = _dig(body, items_path) if items_path else body
+        if not isinstance(items, list):
+            raise EventSourceError(
+                "expected a JSON array of items"
+                + (f" at {items_path!r}" if items_path else "")
+            )
+        items = [it for it in items if isinstance(it, dict)]
+        return diff_new_items(items, cursor, id_field, newest_first=newest_first)
+
+
+register("oauth_http_json", OAuthHttpJsonSource)
+
+
+class GithubIssuesSource:
+    """Poll a GitHub repo's issues; each newly-opened issue fires (dedup by
+    number). ``config``: ``{owner, repo, state?, provider?}``. Auth: a vaulted
+    OAuth token when ``provider`` is set, else ``GITHUB_TOKEN`` env, else
+    anonymous (public repos, rate-limited). A named native convenience over
+    ``oauth_http_json`` so a trigger needs no GitHub URL knowledge."""
+    source = "github_issues"
+
+    def poll(self, config: dict, cursor: str) -> PollResult:
+        owner = str((config or {}).get("owner") or "").strip()
+        repo = str((config or {}).get("repo") or "").strip()
+        if not (owner and repo):
+            raise EventSourceError("github_issues source needs 'owner' and 'repo'")
+        state = str((config or {}).get("state") or "open")
+        from .tools.github_issues import _headers, _list_url
+        headers = _headers()  # GITHUB_TOKEN or anonymous
+        if str((config or {}).get("provider") or "").strip():
+            headers = {**headers, "Authorization": f"Bearer {_oauth_bearer(config)}"}
+        items = _http_get_json(_list_url(owner, repo, state, 50), headers=headers)
+        if not isinstance(items, list):
+            raise EventSourceError("GitHub did not return an issue array")
+        # The issues endpoint also lists PRs; drop them. Dedup by issue number.
+        items = [it for it in items if isinstance(it, dict) and "pull_request" not in it]
+        return diff_new_items(items, cursor, "number", newest_first=True)
+
+
+register("github_issues", GithubIssuesSource)
+
+
 def poll_source(source: str, config: dict, cursor: str) -> PollResult:
     """Poll one named source; raises :class:`EventSourceError` on trouble."""
     return get_source(source).poll(config or {}, cursor or "")
@@ -293,4 +408,5 @@ __all__ = [
     "EventSource", "EventSourceError", "PollResult",
     "available_sources", "get_source", "register", "enabled",
     "poll_source", "diff_new_items", "HttpJsonSource", "RssSource",
+    "OAuthHttpJsonSource", "GithubIssuesSource",
 ]
