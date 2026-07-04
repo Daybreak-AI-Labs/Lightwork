@@ -128,6 +128,37 @@ def apply_proposal(flow: Flow, node_id: str, to_kind: str, *,
 # ---- measure: did the applied change help? -----------------------------------
 
 
+_REVERT_MIN_AFTER = 5       # need this many post-change outcomes before judging
+_REVERT_MARGIN = 0.15       # revert only a clear drop, never noise
+
+
+def regressed(impact: dict, *, min_after: int = _REVERT_MIN_AFTER,
+              margin: float = _REVERT_MARGIN) -> bool:
+    """Whether a measured change clearly HURT: enough post-change outcomes AND the
+    mean fell by more than ``margin`` vs. before. Conservative -- thin or
+    ambiguous evidence is not a regression, so the autonomous pass never thrashes
+    on noise or reverts a change that simply hasn't been exercised yet."""
+    after = impact.get("after") or {}
+    delta = impact.get("delta")
+    if int(after.get("n") or 0) < min_after or delta is None:
+        return False
+    return delta < -abs(margin)
+
+
+def revert_node(flow: Flow, node_id: str, prior: FlowNode) -> Flow:
+    """Return a copy of ``flow`` with ``node_id``'s WORK definition (kind + tool/
+    params or brief) restored from ``prior`` -- an earlier version of that node --
+    while keeping the current routing / output / label / layout. Undoes a
+    regressed rewrite without disturbing topology that legitimately changed since
+    the rewrite was applied."""
+    if node_id not in flow.nodes:
+        raise KeyError(f"no such node {node_id!r}")
+    new = flow.copy()
+    n = new.nodes[node_id]
+    n.kind, n.tool, n.params, n.brief = prior.kind, prior.tool, dict(prior.params), prior.brief
+    return new
+
+
 def _mean(vals: list[float]) -> float | None:
     return sum(vals) / len(vals) if vals else None
 
@@ -152,4 +183,5 @@ def measure(flow_id: str, node_id: str, since_ts: float, *,
     }
 
 
-__all__ = ["NodeProposal", "propose", "maybe_propose", "apply_proposal", "measure"]
+__all__ = ["NodeProposal", "propose", "maybe_propose", "apply_proposal",
+           "measure", "regressed", "revert_node"]

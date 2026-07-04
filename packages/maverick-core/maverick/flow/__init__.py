@@ -36,8 +36,26 @@ def enabled() -> bool:
         return False
 
 
+def auto_evolve_enabled() -> bool:
+    """Whether the flow engine may AUTONOMOUSLY revert a regressed self-rewrite.
+    Requires the engine on AND ``[flows] auto_evolve`` (or ``MAVERICK_FLOWS_AUTO``).
+    OFF by default -- surfacing proposals + human apply never needs it. Never
+    raises."""
+    if not enabled():
+        return False
+    from ..config import env_flag
+    v = env_flag("MAVERICK_FLOWS_AUTO")
+    if v is not None:
+        return v
+    try:
+        from ..config import get_flows
+        return bool(get_flows().get("auto_evolve", False))
+    except Exception:  # pragma: no cover -- config must never block
+        return False
+
+
 __all__ = [
-    "enabled", "Flow", "FlowNode", "single_agent_flow",
+    "enabled", "auto_evolve_enabled", "Flow", "FlowNode", "single_agent_flow",
     "run_flow", "FlowRunResult", "render", "eval_condition",
     "NODE_ACTION", "NODE_AGENT", "NODE_BRANCH", "NODE_FOREACH",
     "NODE_PARALLEL", "NODE_APPROVAL", "NODE_DELAY",

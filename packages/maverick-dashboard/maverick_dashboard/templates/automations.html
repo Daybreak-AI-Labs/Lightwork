@@ -128,6 +128,11 @@
       <a class="btn btn--primary" href="/flows/designer" id="fd-new">✨ Design a flow</a>
     </div>
     <p class="auto__hint">A flow is a deterministic skeleton — branch, loop, parallel, approval, delay — over steps that are either a fixed tool call or a full agentic goal. Describe one in plain English and the designer drafts it; run one and it pauses at any approval for a human decision; each node’s outcome trains which steps should be deterministic vs. agentic. <span class="muted" id="auto-flows-count"></span></p>
+    <div class="auto__insights" id="flow-insights" role="status" aria-live="polite" hidden
+         style="margin: var(--space-3) 0; padding: var(--space-3); border: 1px solid var(--border); border-radius: 8px;">
+      <strong id="flow-insights-head"></strong>
+      <ul class="auto__list" id="flow-insights-list" aria-label="Flow suggestions"></ul>
+    </div>
     <ul class="auto__list" id="auto-flows-list" aria-label="Flows"></ul>
     <div class="mv-empty" id="auto-flows-empty" hidden>
       <p class="mv-empty__title">No flows yet</p>
@@ -623,6 +628,7 @@
         flowsList.appendChild(li);
       });
       loadFlowRuns();
+      loadFlowInsights();
     }
     function mkBtn(label, onClick) {
       var b = el('button', 'btn btn--ghost'); b.type = 'button'; b.textContent = label;
@@ -666,6 +672,46 @@
         flowsMsg.textContent = decision === 'approved' ? 'Approved — resuming.' : 'Rejected.';
         setTimeout(loadFlowRuns, 500);
       } catch (e) { flowsMsg.textContent = 'Could not resume.'; }
+    }
+    var insightsBox = document.getElementById('flow-insights');
+    var insightsHead = document.getElementById('flow-insights-head');
+    var insightsList = document.getElementById('flow-insights-list');
+    function pct(d) { return (d >= 0 ? '+' : '') + Math.round(d * 100) + '%'; }
+    async function loadFlowInsights() {
+      if (!insightsBox) return;
+      var r;
+      try { r = await fetch('/api/v1/flows/insights'); } catch (e) { return; }
+      if (!r.ok) { insightsBox.hidden = true; return; }
+      var data = await r.json();
+      var flows = data.flows || [];
+      insightsList.textContent = '';
+      if (!flows.length) { insightsBox.hidden = true; return; }
+      insightsBox.hidden = false;
+      var count = data.proposal_count || 0;
+      insightsHead.textContent = count
+        ? ('✨ ' + count + (count === 1 ? ' suggestion' : ' suggestions') + ' to improve your flows')
+        : 'What your flows have learned';
+      flows.forEach(function (f) {
+        var li = el('li', 'mv-row');
+        var main = el('div', 'mv-row__main');
+        var title = el('div', 'mv-row__title');
+        var a = document.createElement('a');
+        a.href = '/flows/designer/' + encodeURIComponent(f.flow_id);
+        a.textContent = f.name || f.flow_id;
+        title.appendChild(a); main.appendChild(title);
+        (f.proposals || []).forEach(function (p) {
+          main.appendChild(el('div', 'mv-row__sub', '💡 ' + (p.reason || (p.from_kind + ' → ' + p.to_kind))));
+        });
+        (f.changes || []).forEach(function (ch) {
+          var imp = ch.impact || {}, d = imp.delta;
+          var txt = 'node ' + ch.node_id + ' → ' + ch.to_kind
+            + (ch.source === 'auto-revert' ? ' (auto-reverted)' : '');
+          if (typeof d === 'number') txt += ' · ' + pct(d) + ' vs before';
+          main.appendChild(el('div', 'mv-row__sub', txt));
+        });
+        li.appendChild(main);
+        insightsList.appendChild(li);
+      });
     }
     loadFlows();
   }

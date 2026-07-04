@@ -1335,7 +1335,14 @@ def get_flows() -> dict:
     default deployment is unaffected.
     """
     cfg = load_config().get("flows", {})
-    return {"enable": bool(cfg.get("enable", False))}
+    return {
+        "enable": bool(cfg.get("enable", False)),
+        # Opt-in autonomous self-correction: a scheduled pass reverts an applied
+        # node-kind rewrite whose grounded outcomes measurably regressed. OFF by
+        # default -- surfacing proposals + human apply works without it; this only
+        # governs whether the loop is allowed to *undo* a bad change on its own.
+        "auto_evolve": bool(cfg.get("auto_evolve", False)),
+    }
 
 
 def get_operations_scientist() -> dict:

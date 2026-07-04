@@ -1025,6 +1025,36 @@ async def resume_flow_run_endpoint(request: Request, run_id: str,
     return {"run_id": run_id, "status": "resuming", "decision": payload.decision}
 
 
+@router.get("/flows/insights")
+async def flow_insights_endpoint(request: Request) -> dict:
+    """Proactive automation intelligence across all flows: pending self-rewrite
+    proposals and the measured before/after impact of changes already applied --
+    so the automations page can surface 'N suggestions to improve your flows'
+    without a human opening each one. Read-only. Declared before ``/flows/{flow_id}``
+    so the literal ``insights`` path isn't captured as a flow id."""
+    require_permission(request, "operate")
+    _require_flows()
+    from maverick.flow import evolution_log, evolve, store
+    flows_out = []
+    proposal_count = 0
+    for f in store.list_flows():
+        proposals = [p.to_dict() for p in evolve.maybe_propose(f)]
+        changes = []
+        for node_id in f.nodes:
+            last = evolution_log.last_apply(f.id, node_id)
+            if not last:
+                continue
+            changes.append({
+                "node_id": node_id, "to_kind": last.get("to_kind"),
+                "source": last.get("source"),
+                "impact": evolve.measure(f.id, node_id, float(last.get("ts") or 0.0))})
+        if proposals or changes:
+            flows_out.append({"flow_id": f.id, "name": f.name,
+                              "proposals": proposals, "changes": changes})
+        proposal_count += len(proposals)
+    return {"flows": flows_out, "proposal_count": proposal_count}
+
+
 @router.get("/flows/{flow_id}")
 async def get_flow_endpoint(request: Request, flow_id: str) -> dict:
     require_permission(request, "operate")

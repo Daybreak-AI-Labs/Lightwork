@@ -112,3 +112,48 @@ def test_impact_unchanged_node(monkeypatch, tmp_path):
     _save(c)
     r = c.get("/api/v1/flows/f/nodes/a/impact")
     assert r.status_code == 200 and r.json()["changed"] is False
+
+
+def test_insights_surfaces_applied_changes(monkeypatch, tmp_path):
+    _isolate(monkeypatch, tmp_path)
+    c = _client()
+    _save(c)
+    assert c.post("/api/v1/flows/f/apply",
+                  json={"node_id": "a", "to_kind": "action", "tool": "t"}).status_code == 200
+    body = c.get("/api/v1/flows/insights").json()
+    flow = next(fl for fl in body["flows"] if fl["flow_id"] == "f")
+    assert flow["changes"] and flow["changes"][0]["to_kind"] == "action"
+
+
+def _build_regressed_scenario():
+    # A hardened (agent->action) node whose grounded outcomes then regressed.
+    from maverick.flow import Flow, FlowNode, evolution_log, evolve, node_outcomes, store
+    store.save_flow(Flow(id="f", name="F", start="a",
+                         nodes={"a": FlowNode(id="a", kind="agent", brief="summarize")}))
+    for _ in range(4):
+        node_outcomes.record("f", "a", "agent", 0.9)        # worked well as an agent
+    saved = store.save_flow(evolve.apply_proposal(store.load_flow("f"), "a", "action", tool="t"))
+    evolution_log.record_apply("f", "a", "agent", "action", saved.version, source="manual")
+    for _ in range(6):
+        node_outcomes.record("f", "a", "action", 0.2)        # regressed as an action
+
+
+def test_evolve_pass_reverts_a_regression_when_enabled(monkeypatch, tmp_path):
+    _isolate(monkeypatch, tmp_path)
+    monkeypatch.setenv("MAVERICK_FLOWS_AUTO", "1")
+    from maverick.flow import evolution_log, store
+    from maverick_dashboard import automation_queue as aq
+    _build_regressed_scenario()
+    aq._handle_flow_evolve()
+    assert store.load_flow("f").nodes["a"].kind == "agent"          # undone
+    assert evolution_log.last_apply("f", "a")["source"] == "auto-revert"
+
+
+def test_evolve_pass_is_a_noop_when_disabled(monkeypatch, tmp_path):
+    _isolate(monkeypatch, tmp_path)
+    monkeypatch.delenv("MAVERICK_FLOWS_AUTO", raising=False)
+    from maverick.flow import store
+    from maverick_dashboard import automation_queue as aq
+    _build_regressed_scenario()
+    aq._handle_flow_evolve()
+    assert store.load_flow("f").nodes["a"].kind == "action"         # left alone
