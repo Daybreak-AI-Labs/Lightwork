@@ -183,7 +183,6 @@ class LearningToggleIn(BaseModel):
 
 class GoalEventOut(BaseModel):
     id: int
-    id: int
     agent: str
     kind: str
     content: str

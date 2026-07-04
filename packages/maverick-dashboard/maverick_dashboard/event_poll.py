@@ -57,6 +57,9 @@ def poll_and_fire(world: Any, triggers: list[dict], *, principal: str = "",
             world.record_goal_origin(goal_id, "event", trig["name"])
             fire(goal_id)
             summary["fired"].append(goal_id)
-        event_triggers_store.set_cursor(trig["name"], res.cursor)
+        # Only touch the store when the cursor actually moved -- an idle poll
+        # (no new items) shouldn't rewrite the whole trigger file every tick.
+        if res.cursor != trig["cursor"]:
+            event_triggers_store.set_cursor(trig["name"], res.cursor)
         results.append(summary)
     return results

@@ -1989,17 +1989,24 @@ def _event_trigger_out(rec: dict) -> EventTriggerOut:
     )
 
 
+def _owned_event_triggers(request: Request) -> list[dict]:
+    """Event triggers visible to the caller: their own when auth is on, all of
+    them for auth-off/admin (``goal_owner_filter`` returns None)."""
+    from maverick_dashboard import event_triggers_store
+    triggers = event_triggers_store.list_triggers()
+    owner = goal_owner_filter(request)
+    if owner is not None:
+        triggers = [t for t in triggers if t.get("owner", "") == owner]
+    return triggers
+
+
 @router.get("/event-triggers")
 async def list_event_triggers_endpoint(request: Request) -> dict:
     """Registered polled event triggers (owner-scoped) + the available sources."""
     from maverick.automation_events import available_sources
     from maverick.automation_events import enabled as _ev_enabled
 
-    from maverick_dashboard import event_triggers_store
-    triggers = event_triggers_store.list_triggers()
-    owner = goal_owner_filter(request)
-    if owner is not None:
-        triggers = [t for t in triggers if t.get("owner", "") == owner]
+    triggers = _owned_event_triggers(request)
     return {
         "triggers": [_event_trigger_out(t).model_dump() for t in triggers],
         "sources": available_sources(),
@@ -2070,14 +2077,11 @@ async def poll_event_triggers(request: Request, bg: BackgroundTasks, name: str =
     _require_event_triggers()
     from maverick.runner import run_goal_in_thread
 
-    from maverick_dashboard import event_poll, event_triggers_store
+    from maverick_dashboard import event_poll
 
-    owner = goal_owner_filter(request)
     principal = caller_principal(request) or ""
     user_id = execution_user_id_from_request(request)
-    triggers = event_triggers_store.list_triggers()
-    if owner is not None:
-        triggers = [t for t in triggers if t.get("owner", "") == owner]
+    triggers = _owned_event_triggers(request)
     if name:
         triggers = [t for t in triggers if t["name"] == name]
 
@@ -3947,28 +3951,27 @@ def _learning_snapshot(request: Request) -> dict:
     from maverick.config import get_data_engine
     from maverick.operating_record import assemble, stats
 
+    from maverick_dashboard.settings_store import LEARNING_SUBSYSTEMS
+
     def _data_engine_on() -> bool:
         try:
             return bool(get_data_engine().get("enable", False))
         except Exception:  # pragma: no cover - config never blocks the view
             return False
 
+    # Live enabled() per subsystem key -- paired with the shared registry so the
+    # label/how/config metadata stays single-sourced in settings_store.
+    on_by_key = {
+        "consequence": consequence.enabled(),
+        "reflexion": reflexion.enabled(),
+        "dreaming": dreaming.enabled(),
+        "capture": trajectory_store.enabled(),
+        "data_engine": _data_engine_on(),
+    }
     components = [
-        {"key": "consequence", "label": "Grounded outcomes (reality feedback)",
-         "on": consequence.enabled(),
-         "how": "[consequence] enable — or MAVERICK_CONSEQUENCE=1"},
-        {"key": "reflexion", "label": "Failure memory (learn from mistakes)",
-         "on": reflexion.enabled(),
-         "how": "[reflexion] enable — or MAVERICK_REFLEXION=1"},
-        {"key": "dreaming", "label": "Consolidation (distil skills + insights)",
-         "on": dreaming.enabled(),
-         "how": "[dreaming] enable — then run `maverick dream` on a schedule"},
-        {"key": "capture", "label": "Trajectory capture (fuel for the flywheel)",
-         "on": trajectory_store.enabled(),
-         "how": "[self_improvement] capture — or MAVERICK_TRAJECTORY_CAPTURE=1"},
-        {"key": "data_engine", "label": "Improvement flywheel",
-         "on": _data_engine_on(),
-         "how": "[data_engine] enable"},
+        {"key": s["key"], "label": s["label"],
+         "on": on_by_key.get(s["key"], False), "how": s["how"]}
+        for s in LEARNING_SUBSYSTEMS
     ]
 
     w = _world()

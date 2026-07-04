@@ -19,6 +19,10 @@ import time
 
 from maverick import config
 
+# Reuse the webhook store's slug (identical charset/length rules) so the two
+# can't drift.
+from .triggers_store import slugify
+
 _LOCK = threading.Lock()
 
 # URL/TOML-safe slug, same shape as webhook trigger names.
@@ -45,11 +49,6 @@ def _tomllib():
 
 def _path():
     return config.dashboard_overrides_path().parent / "dashboard-event-triggers.toml"
-
-
-def slugify(name: str) -> str:
-    s = re.sub(r"[^a-z0-9-]+", "-", (name or "").strip().lower()).strip("-")
-    return s[:48]
 
 
 def _decode_obj(raw: object) -> dict:
@@ -128,8 +127,9 @@ def set_trigger(name: str, template: str, source: str, *, config: dict | None = 
     if not _NAME_RE.match(slug):
         raise ValueError("trigger name must contain a letter or digit (a-z, 0-9, -)")
     with _locked():
-        kept = [t for t in list_triggers() if t["name"] != slug]
-        prior = next((t for t in list_triggers() if t["name"] == slug), None)
+        existing = list_triggers()
+        kept = [t for t in existing if t["name"] != slug]
+        prior = next((t for t in existing if t["name"] == slug), None)
         rec = {
             "name": slug,
             "template": str(template),
@@ -148,17 +148,19 @@ def set_trigger(name: str, template: str, source: str, *, config: dict | None = 
 
 
 def set_cursor(name: str, cursor: str) -> bool:
-    """Advance a trigger's cursor after a poll. Returns False if it's gone."""
+    """Advance a trigger's cursor after a poll. Returns False if it's gone.
+    Skips the rewrite when the cursor is unchanged, so an idle poll (no new
+    items) doesn't rewrite the whole store every tick."""
+    cursor = str(cursor)
     with _locked():
         triggers = list_triggers()
-        found = False
-        for t in triggers:
-            if t["name"] == name:
-                t["cursor"] = str(cursor)
-                found = True
-        if found:
+        match = next((t for t in triggers if t["name"] == name), None)
+        if match is None:
+            return False
+        if match["cursor"] != cursor:
+            match["cursor"] = cursor
             _write(triggers)
-        return found
+        return True
 
 
 def delete_trigger(name: str, owner: str | None = None) -> bool:

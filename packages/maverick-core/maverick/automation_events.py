@@ -152,10 +152,22 @@ def diff_new_items(items: list[dict], cursor: str, id_field: str, *,
 # ---- built-in source: poll a JSON HTTP endpoint ----------------------------
 
 
-def _http_get_json(url: str, headers: dict | None = None, timeout: float = 15.0) -> Any:
-    """GET ``url`` and parse JSON, through the SSRF guard (an event-source URL
-    is operator config, but a loopback/metadata host would make the poller an
-    SSRF proxy). Isolated so tests can inject a fake."""
+def _base_config(config: dict, source: str) -> tuple[str, str, dict]:
+    """Pull the fields every source shares: ``url`` (required), ``id_field``,
+    ``headers``. Raises if ``url`` is missing/blank."""
+    url = str((config or {}).get("url") or "").strip()
+    if not url:
+        raise EventSourceError(f"{source} event source needs a 'url'")
+    id_field = str((config or {}).get("id_field") or "id")
+    raw_headers = (config or {}).get("headers")
+    headers = raw_headers if isinstance(raw_headers, dict) else {}
+    return url, id_field, headers
+
+
+def _http_get(url: str, headers: dict | None = None, timeout: float = 15.0) -> Any:
+    """GET ``url`` through the SSRF guard, returning the checked response (an
+    event-source URL is operator config, but a loopback/metadata host would make
+    the poller an SSRF proxy). Shared by the JSON and text fetchers."""
     try:
         from .tools._ssrf import BlockedHost, safe_get
     except Exception as e:  # pragma: no cover -- guard unavailable
@@ -168,6 +180,12 @@ def _http_get_json(url: str, headers: dict | None = None, timeout: float = 15.0)
         raise EventSourceError(f"fetch failed: {type(e).__name__}: {e}") from e
     if getattr(resp, "status_code", 200) >= 400:
         raise EventSourceError(f"source returned HTTP {resp.status_code}")
+    return resp
+
+
+def _http_get_json(url: str, headers: dict | None = None, timeout: float = 15.0) -> Any:
+    """GET ``url`` and parse JSON. Isolated so tests can inject a fake."""
+    resp = _http_get(url, headers=headers, timeout=timeout)
     try:
         return resp.json()
     except Exception as e:
@@ -186,13 +204,9 @@ class HttpJsonSource:
     source = "http_json"
 
     def poll(self, config: dict, cursor: str) -> PollResult:
-        url = str((config or {}).get("url") or "").strip()
-        if not url:
-            raise EventSourceError("http_json event source needs a 'url'")
-        id_field = str((config or {}).get("id_field") or "id")
+        url, id_field, headers = _base_config(config, "http_json")
         items_path = str((config or {}).get("items_path") or "")
         newest_first = bool((config or {}).get("newest_first", True))
-        headers = config.get("headers") if isinstance(config.get("headers"), dict) else {}
 
         body = _http_get_json(url, headers=headers)
         items = _dig(body, items_path) if items_path else body
@@ -212,20 +226,8 @@ register("http_json", HttpJsonSource)
 
 
 def _http_get_text(url: str, headers: dict | None = None, timeout: float = 15.0) -> str:
-    """GET ``url`` as text, through the SSRF guard. Isolated for test injection."""
-    try:
-        from .tools._ssrf import BlockedHost, safe_get
-    except Exception as e:  # pragma: no cover
-        raise EventSourceError("SSRF guard unavailable") from e
-    try:
-        resp = safe_get(url, headers=headers or {}, timeout=timeout)
-    except BlockedHost as e:
-        raise EventSourceError(f"blocked by SSRF guard: {e}") from e
-    except Exception as e:
-        raise EventSourceError(f"fetch failed: {type(e).__name__}: {e}") from e
-    if getattr(resp, "status_code", 200) >= 400:
-        raise EventSourceError(f"source returned HTTP {resp.status_code}")
-    return resp.text or ""
+    """GET ``url`` as text. Isolated for test injection."""
+    return _http_get(url, headers=headers, timeout=timeout).text or ""
 
 
 def _parse_feed(text: str) -> list[dict]:
@@ -268,11 +270,7 @@ class RssSource:
     source = "rss"
 
     def poll(self, config: dict, cursor: str) -> PollResult:
-        url = str((config or {}).get("url") or "").strip()
-        if not url:
-            raise EventSourceError("rss event source needs a 'url'")
-        id_field = str((config or {}).get("id_field") or "id")
-        headers = config.get("headers") if isinstance(config.get("headers"), dict) else {}
+        url, id_field, headers = _base_config(config, "rss")
         items = _parse_feed(_http_get_text(url, headers=headers))
         return diff_new_items(items, cursor, id_field, newest_first=True)
 
