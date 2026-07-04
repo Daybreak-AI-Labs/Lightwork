@@ -1431,6 +1431,14 @@ def pick_advanced() -> dict[str, Any]:
             "no weight updates). Say yes to disable it entirely.",
             default=False,
         ),
+        "audit_rewards": _q_confirm(
+            "Sign verification rewards into the audit chain? Provable learning: write a "
+            "tamper-evident, signed row for every structured reward the system learns "
+            "from -- the per-dimension rubric, the score, and where a facet vetoed "
+            "(maverick.reasoning_reward). Off by default (adds audit volume); recommended "
+            "for regulated deployments.",
+            default=False,
+        ),
         "reward_laundering": _q_confirm(
             "Enforce reward-laundering resistance? Beyond freezing on verifier DRIFT, "
             "also freeze learning when the judge stays sharp on normal traffic but its "
@@ -1445,6 +1453,15 @@ def pick_advanced() -> dict[str, Any]:
             "change, verified against operator-held keys, so a self-modifying agent "
             "cannot approve itself (maverick.approval_signing). Off by default; you "
             "provide approver public keys (fails closed until you do).",
+            default=False,
+        ),
+        "self_modify": _q_confirm(
+            "Enable GOVERNED code self-modification? The workforce may propose diffs to "
+            "ITSELF (DGM-style), but only to an editable allowlist you define -- never "
+            "the promotion gate, approval verifier, calibration, sandbox, or audit "
+            "(maverick.self_modify) -- and each change must beat baseline on evidence, "
+            "not widen authority, be human-signed, and be reversible. Off by default AND "
+            "inert until you set editable_paths. Pair with signed_approval.",
             default=False,
         ),
         "skill_synthesis": _q_confirm(
@@ -2824,13 +2841,19 @@ def _cfg_advanced(  # noqa: C901 - flat sequence of independent opt-in toggles
         lines.append("")
         lines.append("[search]")
         lines.append("enable = true")
-    if advanced.get("structured_verifier_off"):
+    if advanced.get("structured_verifier_off") or advanced.get("audit_rewards"):
         lines.append("")
         lines.append("[reasoning_reward]")
-        lines.append("# The structured rubric verifier is ON by default (per-dimension")
-        lines.append("# scoring + safety veto + audit); disable it to fall back to the")
-        lines.append("# scalar verifier verdict (maverick.reasoning_reward).")
-        lines.append("enable = false")
+        if advanced.get("structured_verifier_off"):
+            lines.append("# The structured rubric verifier is ON by default (per-dimension")
+            lines.append("# scoring + safety veto); disable it to fall back to the scalar")
+            lines.append("# verifier verdict (maverick.reasoning_reward).")
+            lines.append("enable = false")
+        if advanced.get("audit_rewards"):
+            lines.append("# Sign each structured reward into the tamper-evident audit")
+            lines.append("# chain (provable learning) -- the evidence the system learns")
+            lines.append("# from, not just a mutable verdict. Off by default.")
+            lines.append("audit_rewards = true")
     if advanced.get("jit_rl_off"):
         lines.append("")
         lines.append("[jit_rl]")
@@ -2880,6 +2903,19 @@ def _cfg_advanced(  # noqa: C901 - flat sequence of independent opt-in toggles
             lines.append("require_signed_approval = true")
             lines.append('# approver_keys = ["<ed25519-pubkey-hex>"]')
             lines.append('# approver_keys_dir = "/etc/maverick/approvers"')
+    if advanced.get("self_modify"):
+        lines.append("")
+        lines.append("[self_modify]")
+        lines.append("# Governed code self-modification (maverick.self_modify): the agent")
+        lines.append("# may propose diffs to itself, but ONLY to editable_paths and NEVER")
+        lines.append("# the control plane (gate/approval/calibration/verifier/sandbox/audit,")
+        lines.append("# refused structurally). Each change still runs the full promotion")
+        lines.append("# ladder (evidence + non-escalation + human signature + reversible).")
+        lines.append("# Inert until you set an allowlist; keep it as narrow as possible.")
+        lines.append("# Requires [self_improvement] enable = true (the promotion ladder);")
+        lines.append("# without it every proposal is refused 'self-improvement disabled'.")
+        lines.append("enable = true")
+        lines.append('# editable_paths = ["packages/maverick-core/maverick/domains/*.toml"]')
     if advanced.get("rehearsal"):
         lines.append("")
         lines.append("[rehearsal]")

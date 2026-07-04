@@ -202,3 +202,30 @@ def test_enabled_env_override(monkeypatch):
 def test_default_rubric_weights_sum_to_one():
     # A sanity anchor: the holistic weighting is a proper mean over the rubric.
     assert round(sum(w for _, w, _ in DEFAULT_RUBRIC), 6) == 1.0
+
+
+def test_to_audit_summary_is_compact_and_stable():
+    dims = (DimensionScore("correctness", 0.9, "good"),
+            DimensionScore("safety", 0.2, "risky", vetoes=True))
+    r = ReasoningReward(score=0.7, confidence=0.8, reasoning="trace " * 100,
+                        critique="x" * 500, dimensions=dims)
+    s = r.to_audit_summary()
+    assert "reasoning" not in s              # long trace dropped
+    assert len(s["critique"]) <= 280         # critique truncated
+    assert s["vetoed"] is True
+    assert s["dimensions"][1] == {"name": "safety", "score": 0.2, "vetoes": True}
+    assert json.loads(json.dumps(s)) == s    # signed-chain needs a stable dict
+
+
+def test_audit_rewards_off_by_default(monkeypatch):
+    from maverick.reasoning_reward import audit_rewards_enabled
+    monkeypatch.delenv("MAVERICK_REASONING_REWARD_AUDIT", raising=False)
+    assert audit_rewards_enabled() is False
+
+
+def test_audit_rewards_env_override(monkeypatch):
+    from maverick.reasoning_reward import audit_rewards_enabled
+    monkeypatch.setenv("MAVERICK_REASONING_REWARD_AUDIT", "1")
+    assert audit_rewards_enabled() is True
+    monkeypatch.setenv("MAVERICK_REASONING_REWARD_AUDIT", "0")
+    assert audit_rewards_enabled() is False

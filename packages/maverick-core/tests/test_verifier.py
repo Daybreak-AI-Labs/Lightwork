@@ -207,6 +207,65 @@ class TestStructuredVerify:
         assert v.reward_audit is None  # scalar path, no rubric attached
 
     @pytest.mark.asyncio
+    async def test_reward_signed_into_audit_when_enabled(
+        self, fake_llm, make_llm_response, monkeypatch,
+    ):
+        import maverick.audit as audit
+        from maverick import reasoning_reward
+        from maverick.budget import Budget
+        from maverick.verifier import verify_proposal_structured
+        monkeypatch.setattr(reasoning_reward, "audit_rewards_enabled", lambda: True)
+        recorded = []
+        monkeypatch.setattr(audit, "record",
+                            lambda kind, **kw: recorded.append((kind, kw)) or True)
+        fake_llm.scripted = [make_llm_response(text=(
+            '{"reasoning": "long trace", "dimensions": '
+            '[{"name": "safety", "score": 0.1, "critique": "unsafe"}], '
+            '"score": 0.9, "confidence": 0.8}'))]
+        await verify_proposal_structured("b", "a", fake_llm, Budget())
+        assert recorded, "structured reward was not signed into the audit chain"
+        kind, payload = recorded[0]
+        assert kind == audit.EventKind.VERIFICATION_REWARD
+        assert payload["vetoed"] is True and "dimensions" in payload
+        assert "reasoning" not in payload  # compact summary, not the full trace
+
+    @pytest.mark.asyncio
+    async def test_reward_not_audited_when_disabled(
+        self, fake_llm, make_llm_response, monkeypatch,
+    ):
+        import maverick.audit as audit
+        from maverick import reasoning_reward
+        from maverick.budget import Budget
+        from maverick.verifier import verify_proposal_structured
+        monkeypatch.setattr(reasoning_reward, "audit_rewards_enabled", lambda: False)
+        recorded = []
+        monkeypatch.setattr(audit, "record", lambda kind, **kw: recorded.append(kind) or True)
+        fake_llm.scripted = [make_llm_response(text=(
+            '{"dimensions": [{"name": "safety", "score": 0.9}], "score": 0.9}'))]
+        await verify_proposal_structured("b", "a", fake_llm, Budget())
+        assert recorded == []
+
+    @pytest.mark.asyncio
+    async def test_audit_failure_never_breaks_verification(
+        self, fake_llm, make_llm_response, monkeypatch,
+    ):
+        import maverick.audit as audit
+        from maverick import reasoning_reward
+        from maverick.budget import Budget
+        from maverick.verifier import verify_proposal_structured
+        monkeypatch.setattr(reasoning_reward, "audit_rewards_enabled", lambda: True)
+
+        def _boom(*a, **k):
+            raise RuntimeError("audit chain down")
+
+        monkeypatch.setattr(audit, "record", _boom)
+        fake_llm.scripted = [make_llm_response(text=(
+            '{"dimensions": [{"name": "safety", "score": 0.9},'
+            '{"name": "correctness", "score": 0.9}], "score": 0.9}'))]
+        v = await verify_proposal_structured("b", "a", fake_llm, Budget())
+        assert v.accepts is True  # audit blew up; the verification still returned
+
+    @pytest.mark.asyncio
     async def test_verify_final_routes_to_structured_when_enabled(
         self, fake_llm, make_llm_response, monkeypatch,
     ):
