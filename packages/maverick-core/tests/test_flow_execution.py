@@ -82,7 +82,8 @@ class TestExecution:
         f = Flow(id="f2", name="f", start="a", nodes={
             "a": FlowNode(id="a", kind="approval", prompt="ok?", next="b"),
             "b": FlowNode(id="b", kind=NODE_AGENT, brief="go", output="done")})
-        ag = lambda brief, d: ("ran", 1.0)
+        def ag(brief, d):
+            return ("ran", 1.0)
         paused = execution.execute(f, agent_runner=ag, action_runner=lambda *a: ("", None),
                                    data={"n": 1})
         assert paused.status == "paused_approval" and paused.cursor == "a"
