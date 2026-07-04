@@ -64,6 +64,7 @@
     <label style="font-size:var(--text-sm);color:var(--muted);display:inline-flex;align-items:center;gap:4px;">
       <input type="checkbox" id="fd-notify" /> Notify on approval/finish
     </label>
+    <input class="input" id="fd-maxsec" type="number" min="0" placeholder="Max sec" aria-label="Flow deadline in seconds" style="width:90px;" title="Whole-flow wall-clock deadline (0 = none)" />
     <button class="btn" type="button" id="fd-save">Save</button>
     <button class="btn btn--ghost" type="button" id="fd-run" title="Mock run: no real goals or connector calls">▷ Test (dry)</button>
     <button class="btn btn--ghost" type="button" id="fd-run-real" title="Runs real agents and connectors">Run for real</button>

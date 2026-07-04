@@ -75,6 +75,7 @@ class FlowNode:
     # error handling ----------------------------------------------------------
     retries: int = 0                 # re-run a failed work node up to N more times
     on_error: str | None = None      # route here when the node fails (else `next`)
+    timeout: float = 0.0             # per-node soft wall-clock cap in seconds (0 = none)
     # common ------------------------------------------------------------------
     output: str = ""                 # flow-data key to store this node's result under
     label: str = ""                  # human label (provenance / UI)
@@ -95,6 +96,8 @@ class FlowNode:
             d["seconds"] = self.seconds
         if self.retries:
             d["retries"] = self.retries
+        if self.timeout:
+            d["timeout"] = self.timeout
         if self.limit:
             d["limit"] = self.limit
         if self.x or self.y:
@@ -121,6 +124,7 @@ class FlowNode:
             prompt=str(d.get("prompt", "")), seconds=float(d.get("seconds", 0.0)),
             flow_ref=str(d.get("flow_ref", "")),
             retries=int(d.get("retries", 0) or 0), on_error=d.get("on_error"),
+            timeout=float(d.get("timeout", 0.0) or 0.0),
             output=str(d.get("output", "")), label=str(d.get("label", "")),
             x=float(d.get("x", 0.0)), y=float(d.get("y", 0.0)),
         )
@@ -141,6 +145,7 @@ class Flow:
     nodes: dict[str, FlowNode] = field(default_factory=dict)
     version: int = 1
     notify: bool = False             # push a notification on approval-pause / finish
+    max_seconds: float = 0.0         # whole-flow wall-clock deadline (0 = no limit)
 
     def node(self, node_id: str | None) -> FlowNode | None:
         return self.nodes.get(node_id) if node_id else None
@@ -153,6 +158,7 @@ class Flow:
         return {
             "id": self.id, "name": self.name, "start": self.start,
             "version": self.version, "notify": self.notify,
+            "max_seconds": self.max_seconds,
             "nodes": [n.to_dict() for n in self.nodes.values()],
         }
 
@@ -165,6 +171,7 @@ class Flow:
             nodes={n.id: n for n in nodes},
             version=int(d.get("version", 1) or 1),
             notify=bool(d.get("notify", False)),
+            max_seconds=float(d.get("max_seconds", 0.0) or 0.0),
         )
 
     def validate(self) -> list[str]:

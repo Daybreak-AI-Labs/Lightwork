@@ -266,13 +266,15 @@ class _Ctx:
     allow_pause: bool
     resolve_flow: Callable[[str], Flow | None] | None = None
     flow_stack: set = field(default_factory=set)   # subflow ids on the call stack
+    deadline: float | None = None                  # whole-flow wall-clock deadline
 
     def nested(self) -> _Ctx:
         # A copy that cannot pause (foreach body / parallel branch / subflow run
-        # straight). Shares flow_stack so subflow cycle detection spans nesting.
+        # straight). Shares flow_stack + deadline so cycle detection and the
+        # whole-flow deadline span nesting.
         return _Ctx(self.agent_fn, self.action_fn, self.approve_fn, self.on_node,
                     self.now, allow_pause=False, resolve_flow=self.resolve_flow,
-                    flow_stack=self.flow_stack)
+                    flow_stack=self.flow_stack, deadline=self.deadline)
 
 
 def _render_params(node: FlowNode, data: dict) -> dict:
@@ -281,9 +283,25 @@ def _render_params(node: FlowNode, data: dict) -> dict:
 
 
 def _invoke_work(node: FlowNode, data: dict, ctx: _Ctx):
-    if node.kind == NODE_AGENT:
-        return ctx.agent_fn(node, render(node.brief, data), data)
-    return ctx.action_fn(node, _render_params(node, data), data)
+    def _call():
+        if node.kind == NODE_AGENT:
+            return ctx.agent_fn(node, render(node.brief, data), data)
+        return ctx.action_fn(node, _render_params(node, data), data)
+    if not (node.timeout and node.timeout > 0):
+        return _call()
+    # Soft per-node timeout: run the executor on a worker thread and give up
+    # waiting after `timeout`s (Python can't kill the thread, so the abandoned
+    # call finishes on its own -- but the flow stops blocking on it).
+    import concurrent.futures as _cf
+    ex = _cf.ThreadPoolExecutor(max_workers=1)
+    fut = ex.submit(_call)
+    try:
+        res = fut.result(timeout=node.timeout)
+        ex.shutdown(wait=False)
+        return res
+    except _cf.TimeoutError:
+        ex.shutdown(wait=False)          # don't block on the runaway call
+        return (f"ERROR: node timed out after {node.timeout}s", 0.0)
 
 
 def _run_work(node: FlowNode, data: dict, ctx: _Ctx) -> str | None:
@@ -401,6 +419,8 @@ def _run_chain(flow: Flow, data: dict, ctx: _Ctx, start: str | None) -> None:
     seen = 0
     limit = max(1000, len(flow.nodes) * 100)   # cycle backstop
     while cursor is not None:
+        if ctx.deadline is not None and ctx.now() > ctx.deadline:
+            raise RuntimeError(f"flow {flow.id!r} exceeded its wall-clock deadline")
         node = flow.node(cursor)
         if node is None:
             return
@@ -425,9 +445,11 @@ def run_flow(flow: Flow, *, agent_fn: AgentFn, action_fn: ActionFn,
     ``resolve_flow(flow_ref) -> Flow | None`` resolves a ``subflow`` node's target
     (with the caller's cycle/depth guard); ``None`` makes a subflow a no-op error.
     """
+    _now = now or time.time
     ctx = _Ctx(agent_fn, action_fn, approve_fn, on_node or (lambda *_: None),
-               now or time.time, allow_pause=True, resolve_flow=resolve_flow,
-               flow_stack={flow.id})   # so the top flow can't recurse into itself
+               _now, allow_pause=True, resolve_flow=resolve_flow,
+               flow_stack={flow.id},   # so the top flow can't recurse into itself
+               deadline=(_now() + flow.max_seconds if flow.max_seconds and flow.max_seconds > 0 else None))
     if resume:
         data = dict(resume.get("data") or data or {})
         node = flow.node(resume.get("node_id"))

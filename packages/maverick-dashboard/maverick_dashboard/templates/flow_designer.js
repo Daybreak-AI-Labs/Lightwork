@@ -178,7 +178,7 @@
   function addNode(kind) {
     var n = { id: newId(), kind: kind, x: Math.round((-view.x + 220) / view.k), y: Math.round((-view.y + 80) / view.k),
               next: null, params: {}, brief: '', tool: '', condition: '', if_true: null, if_false: null,
-              items: '', var: 'item', limit: 0, prompt: '', seconds: 0, flow_ref: '', retries: 0, on_error: null,
+              items: '', var: 'item', limit: 0, prompt: '', seconds: 0, flow_ref: '', retries: 0, on_error: null, timeout: 0,
               output: '', label: '', body: null, branches: [] };
     // place under the currently selected node if any
     var sel = selected && nodeById(selected);
@@ -266,6 +266,7 @@
     // error handling for work steps: retry then route on failure
     if (n.kind === 'agent' || n.kind === 'action') {
       props.appendChild(field('Retries on failure', input(String(n.retries || ''), function (v) { n.retries = parseInt(v, 10) || 0; }, '0')));
+      props.appendChild(field('Timeout (seconds, 0 = none)', input(String(n.timeout || ''), function (v) { n.timeout = parseFloat(v) || 0; }, '0')));
       var errOpts = [{ v: '', t: '(none — continue)' }].concat(flow.nodes.filter(function (m) { return m.id !== n.id; }).map(function (m) { return { v: m.id, t: (m.label || m.id) }; }));
       props.appendChild(field('On failure, go to', select(n.on_error || '', errOpts, function (v) { n.on_error = v || null; render(); })));
     }
@@ -330,6 +331,7 @@
       name: nameInput.value || flow.name || 'Untitled flow',
       start: flow.start,
       notify: !!(notifyEl && notifyEl.checked),
+      max_seconds: parseFloat((document.getElementById('fd-maxsec') || {}).value) || 0,
       nodes: flow.nodes.map(function (n) {
         var o = { id: n.id, kind: n.kind };
         ['next', 'tool', 'brief', 'condition', 'if_true', 'if_false', 'items', 'var', 'prompt', 'flow_ref', 'on_error', 'output', 'label'].forEach(function (k) {
@@ -338,6 +340,7 @@
         if (n.params && Object.keys(n.params).length) o.params = n.params;
         if (n.seconds) o.seconds = n.seconds;
         if (n.retries) o.retries = n.retries;
+        if (n.timeout) o.timeout = n.timeout;
         if (n.limit) o.limit = n.limit;
         if (n.body) o.body = n.body;
         if (n.branches && n.branches.length) o.branches = n.branches;
@@ -349,11 +352,12 @@
   function fromApiFlow(f) {
     runState = {}; runCursor = null; impacts = {};
     var lg = document.getElementById('fd-legend'); if (lg) lg.classList.remove('on');
-    flow = { id: f.id || '', name: f.name || '', start: f.start || '', nodes: [] };
+    flow = { id: f.id || '', name: f.name || '', start: f.start || '', nodes: [], max_seconds: f.max_seconds || 0 };
     var notifyEl = document.getElementById('fd-notify'); if (notifyEl) notifyEl.checked = !!f.notify;
+    var msEl = document.getElementById('fd-maxsec'); if (msEl) msEl.value = f.max_seconds || '';
     (f.nodes || []).forEach(function (nd, i) {
       var n = Object.assign({ params: {}, brief: '', tool: '', condition: '', if_true: null, if_false: null,
-        items: '', var: 'item', limit: 0, prompt: '', seconds: 0, flow_ref: '', retries: 0, on_error: null,
+        items: '', var: 'item', limit: 0, prompt: '', seconds: 0, flow_ref: '', retries: 0, on_error: null, timeout: 0,
         output: '', label: '', body: null, branches: [], next: null }, nd);
       n.id = n.id || ('n' + i);
       flow.nodes.push(n);
