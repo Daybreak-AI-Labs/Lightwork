@@ -63,6 +63,7 @@ class FlowNode:
     items: str = ""                  # flow-data key holding the list to iterate
     var: str = "item"                # loop variable exposed to the body
     body: Flow | None = None         # sub-flow run once per item
+    limit: int = 0                   # cap iterations (0 = no cap); body may set _break
     # parallel ----------------------------------------------------------------
     branches: list[Flow] = field(default_factory=list)   # sub-flows run + joined
     # approval ----------------------------------------------------------------
@@ -94,6 +95,8 @@ class FlowNode:
             d["seconds"] = self.seconds
         if self.retries:
             d["retries"] = self.retries
+        if self.limit:
+            d["limit"] = self.limit
         if self.x or self.y:
             d["x"], d["y"] = self.x, self.y
         if self.body is not None:
@@ -112,6 +115,7 @@ class FlowNode:
             condition=str(d.get("condition", "")),
             if_true=d.get("if_true"), if_false=d.get("if_false"),
             items=str(d.get("items", "")), var=str(d.get("var", "item")),
+            limit=int(d.get("limit", 0) or 0),
             body=Flow.from_dict(body) if body else None,
             branches=[Flow.from_dict(b) for b in (d.get("branches") or [])],
             prompt=str(d.get("prompt", "")), seconds=float(d.get("seconds", 0.0)),

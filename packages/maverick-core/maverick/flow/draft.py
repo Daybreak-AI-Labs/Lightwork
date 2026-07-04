@@ -36,7 +36,7 @@ Each node is one of these kinds (include only the fields for its kind):
 
 Rules:
 - Prefer an "agent" node when a step needs judgment/writing; an "action" node when it maps to a known tool.
-- Reference earlier results with {{key}} where a node's "output" set that key. Set "output" on nodes whose result a later node needs.
+- Reference earlier results with {{key}} where a node's "output" set that key. Set "output" on nodes whose result a later node needs. You may transform a value: {{upper(key)}}, {{lower(key)}}, {{trim(key)}}, {{title(key)}}, {{length(key)}}, {{concat(a," ",b)}}, {{replace(key,"x","y")}}, {{default(key,"fallback")}}.
 - A "branch" condition is a simple "<key> <op> <value>" (ops: == != > < >= <= contains) over flow data.
 - Insert an "approval" node before anything a human should review (sending, paying, deleting).
 - Node ids are short slugs (n0, n1, ...). "next":null (or omit) ends a path. "start" is the first node's id.

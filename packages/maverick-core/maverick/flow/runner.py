@@ -42,13 +42,92 @@ STATUS_PAUSED_DELAY = "paused_delay"
 STATUS_REJECTED = "rejected"
 STATUS_FAILED = "failed"
 
-_VAR = re.compile(r"\{\{\s*([\w.]+)\s*\}\}")
+_VAR = re.compile(r"\{\{\s*(.+?)\s*\}\}")
 _COND = re.compile(r"^\s*(\S+)\s*(==|!=|>=|<=|>|<|contains)\s*(.+?)\s*$")
+_FN_CALL = re.compile(r"^([a-zA-Z_]\w*)\s*\((.*)\)$")
 
 
 def render(text: str, data: dict) -> str:
-    """Substitute ``{{key}}`` from ``data`` (unfilled placeholders stay literal)."""
-    return _VAR.sub(lambda m: str(_dig(data, m.group(1), m.group(0))), str(text))
+    """Substitute ``{{expr}}`` from ``data``. ``expr`` is a dotted key
+    (``{{a.b}}``) or a transform call over keys/literals (``{{upper(name)}}``,
+    ``{{default(x, "n/a")}}``, ``{{concat(first, " ", last)}}``). An unfilled bare
+    key stays literal (unchanged); a function always resolves (missing args are
+    empty)."""
+    def _sub(m):
+        v = _eval_expr(m.group(1), data)
+        return m.group(0) if v is None else _as_text(v)
+    return _VAR.sub(_sub, str(text))
+
+
+def _as_text(v: Any) -> str:
+    if isinstance(v, bool):
+        return "true" if v else "false"
+    return str(v)
+
+
+# Safe transform functions usable inside {{ }} -- no eval, pure string/collection
+# helpers. Each takes the evaluated arg list.
+_FUNCS: dict[str, Callable[[list], Any]] = {
+    "upper": lambda a: str(a[0]).upper() if a else "",
+    "lower": lambda a: str(a[0]).lower() if a else "",
+    "trim": lambda a: str(a[0]).strip() if a else "",
+    "title": lambda a: str(a[0]).title() if a else "",
+    "length": lambda a: (len(a[0]) if a and hasattr(a[0], "__len__") else 0),
+    "concat": lambda a: "".join(_as_text(x) for x in a),
+    "replace": lambda a: (str(a[0]).replace(str(a[1]), str(a[2])) if len(a) >= 3 else (str(a[0]) if a else "")),
+    "default": lambda a: (a[0] if (a and a[0] not in (None, "", [], {})) else (a[1] if len(a) > 1 else "")),
+    "json": lambda a: (__import__("json").dumps(a[0]) if a else ""),
+}
+
+
+def _split_args(s: str) -> list[str]:
+    """Comma-split respecting single/double quotes (so a literal comma survives)."""
+    out, cur, q = [], "", None
+    for ch in s:
+        if q:
+            cur += ch
+            if ch == q:
+                q = None
+        elif ch in "'\"":
+            q = ch
+            cur += ch
+        elif ch == ",":
+            out.append(cur)
+            cur = ""
+        else:
+            cur += ch
+    if s.strip():
+        out.append(cur)
+    return [a.strip() for a in out]
+
+
+def _arg_value(tok: str, data: dict) -> Any:
+    """A function argument: a quoted/number literal, else a data key (missing -> '')."""
+    tok = tok.strip()
+    if len(tok) >= 2 and tok[0] in "'\"" and tok[-1] == tok[0]:
+        return tok[1:-1]
+    low = tok.lower()
+    if low in ("true", "false"):
+        return low == "true"
+    for cast in (int, float):
+        try:
+            return cast(tok)
+        except ValueError:
+            pass
+    return _dig(data, tok, "")
+
+
+def _eval_expr(expr: str, data: dict) -> Any:
+    """Evaluate a ``{{ }}`` expression: a transform call, else a dotted-key dig
+    (returning ``None`` for a missing bare key so render keeps it literal)."""
+    m = _FN_CALL.match(expr.strip())
+    if m and m.group(1) in _FUNCS:
+        args = [_arg_value(a, data) for a in _split_args(m.group(2))]
+        try:
+            return _FUNCS[m.group(1)](args)
+        except Exception:  # a bad transform never breaks rendering
+            return ""
+    return _dig(data, expr.strip())
 
 
 def _dig(data: dict, dotted: str, default: Any = None) -> Any:
@@ -205,12 +284,17 @@ def _run_branch(node: FlowNode, data: dict, ctx: _Ctx) -> str | None:
 
 
 def _run_foreach(node: FlowNode, data: dict, ctx: _Ctx) -> str | None:
+    items = list(_dig(data, node.items) or [])
+    if node.limit and node.limit > 0:
+        items = items[:node.limit]          # cap iterations (a runaway-list guard)
     results = []
-    for item in list(_dig(data, node.items) or []):
+    for item in items:
         sub = dict(data)
         sub[node.var] = item
         _run_chain(node.body, sub, ctx.nested(), node.body.start)
         results.append(sub)          # per-iteration data snapshot (body outputs included)
+        if sub.get("_break"):        # the body asked to stop early
+            break
     if node.output:
         data[node.output] = results
     ctx.on_node(node, "done", None)

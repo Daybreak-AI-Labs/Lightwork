@@ -177,7 +177,7 @@
   function addNode(kind) {
     var n = { id: newId(), kind: kind, x: Math.round((-view.x + 220) / view.k), y: Math.round((-view.y + 80) / view.k),
               next: null, params: {}, brief: '', tool: '', condition: '', if_true: null, if_false: null,
-              items: '', var: 'item', prompt: '', seconds: 0, flow_ref: '', retries: 0, on_error: null,
+              items: '', var: 'item', limit: 0, prompt: '', seconds: 0, flow_ref: '', retries: 0, on_error: null,
               output: '', label: '', body: null, branches: [] };
     // place under the currently selected node if any
     var sel = selected && nodeById(selected);
@@ -249,7 +249,9 @@
     if (n.kind === 'foreach') {
       props.appendChild(field('Items (data key with a list)', input(n.items, function (v) { n.items = v; render(); }, 'rows')));
       props.appendChild(field('Loop variable', input(n.var, function (v) { n.var = v; }, 'item')));
+      props.appendChild(field('Max iterations (0 = all)', input(String(n.limit || ''), function (v) { n.limit = parseInt(v, 10) || 0; }, '0')));
       props.appendChild(field('Body (flow JSON)', textarea(jsonOr(n.body), function (v) { n._bodyRaw = v; })));
+      props.appendChild(hint('The body can set _break to true to stop the loop early.'));
     }
     if (n.kind === 'parallel') props.appendChild(field('Branches (JSON array of flows)', textarea(jsonOr(n.branches), function (v) { n._branchesRaw = v; })));
     if (n.kind === 'approval') props.appendChild(field('Prompt (what a human approves)', input(n.prompt, function (v) { n.prompt = v; render(); }, 'Send this reply?')));
@@ -322,6 +324,7 @@
         if (n.params && Object.keys(n.params).length) o.params = n.params;
         if (n.seconds) o.seconds = n.seconds;
         if (n.retries) o.retries = n.retries;
+        if (n.limit) o.limit = n.limit;
         if (n.body) o.body = n.body;
         if (n.branches && n.branches.length) o.branches = n.branches;
         if (n.x || n.y) { o.x = n.x; o.y = n.y; }
@@ -335,7 +338,7 @@
     flow = { id: f.id || '', name: f.name || '', start: f.start || '', nodes: [] };
     (f.nodes || []).forEach(function (nd, i) {
       var n = Object.assign({ params: {}, brief: '', tool: '', condition: '', if_true: null, if_false: null,
-        items: '', var: 'item', prompt: '', seconds: 0, flow_ref: '', retries: 0, on_error: null,
+        items: '', var: 'item', limit: 0, prompt: '', seconds: 0, flow_ref: '', retries: 0, on_error: null,
         output: '', label: '', body: null, branches: [], next: null }, nd);
       n.id = n.id || ('n' + i);
       flow.nodes.push(n);
