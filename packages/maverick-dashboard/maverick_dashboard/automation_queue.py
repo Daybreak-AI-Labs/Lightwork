@@ -249,16 +249,53 @@ def _flow_runners(owner: str):
             execution.default_action_runner(w))
 
 
+def _public_base_url() -> str:
+    """The externally-reachable dashboard base URL for approval links, from
+    ``MAVERICK_PUBLIC_URL`` or ``[dashboard] public_url``. Empty when unset --
+    then approval links are omitted and the human uses the dashboard."""
+    import os
+    url = os.environ.get("MAVERICK_PUBLIC_URL", "").strip()
+    if not url:
+        try:
+            url = str((config.load_config().get("dashboard") or {}).get("public_url") or "").strip()
+        except Exception:  # pragma: no cover
+            url = ""
+    return url
+
+
+def enqueue_flow_resume(flow_id: str, run_id: str, decision: str, owner: str = "") -> None:
+    """Enqueue a durable resume of a paused flow run with a human decision. Shared
+    by the API resume endpoint and the signed-link approval endpoint."""
+    queue().enqueue(FLOW_RESUME_KIND, {
+        "flow_id": flow_id, "run_id": run_id, "decision": decision, "owner": owner})
+
+
+def _approval_body(name: str, run) -> str:
+    """The approval notification text, with clickable approve/reject links when a
+    public URL + webhook secret are configured (else just the prompt)."""
+    ask = run.prompt or "review and resume"
+    base = _public_base_url()
+    if base:
+        from maverick.flow.approvals import approval_links
+        links = approval_links(base, run.run_id)
+        if links:
+            return (f"“{name}” needs your approval: {ask}\n"
+                    f"✅ Approve: {links['approve']}\n"
+                    f"🚫 Reject: {links['reject']}")
+    return f"“{name}” needs your approval: {ask}"
+
+
 def _notify_flow(flow, run) -> None:
     """Best-effort push when a notify-enabled flow needs a human (paused on an
     approval) or finishes (completed/failed). A no-op unless the flow opted in
-    AND notifications are configured; never raises into the worker."""
+    AND notifications are configured; never raises into the worker. An approval
+    pause carries actionable approve/reject links when a public URL is set."""
     if flow is None or not getattr(flow, "notify", False):
         return
     from maverick.flow.runner import STATUS_COMPLETED, STATUS_FAILED, STATUS_PAUSED_APPROVAL
     name = flow.name or flow.id
     if run.status == STATUS_PAUSED_APPROVAL:
-        body, prio = f"“{name}” needs your approval: {run.prompt or 'review and resume'}", "high"
+        body, prio = _approval_body(name, run), "high"
     elif run.status == STATUS_COMPLETED:
         body, prio = f"“{name}” finished.", "default"
     elif run.status == STATUS_FAILED:
@@ -565,4 +602,4 @@ def stop() -> None:
 __all__ = ["start", "stop", "reconcile", "queue",
            "TICK_KIND", "DREAM_KIND", "FLYWHEEL_KIND",
            "FLOW_RUN_KIND", "FLOW_RESUME_KIND", "FLOW_SWEEP_KIND", "FLOW_EVOLVE_KIND",
-           "FLOW_CRON_KIND"]
+           "FLOW_CRON_KIND", "enqueue_flow_run", "enqueue_flow_resume"]

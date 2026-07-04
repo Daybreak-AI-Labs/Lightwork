@@ -478,6 +478,11 @@ _AUTH_EXEMPT = {
     "/webhook/jira",
     "/webhook/github",
     "/webhook/gitlab",
+    # Signed flow-approval links: a human clicks an approve/reject URL from a
+    # channel (Slack/Teams/email) with no dashboard session. The HMAC-signed,
+    # self-expiring token IS the auth (see maverick.flow.approvals); the state
+    # change is on the POST, gated by that token, so a link scanner's GET is inert.
+    "/flow/approve",
     # Built-in OIDC browser-login endpoints: they bootstrap a session and carry
     # their own flow-level security (state/PKCE/signed cookies). They must be
     # reachable by a browser that has no dashboard token yet; each self-gates on
@@ -3712,6 +3717,84 @@ async def webhook_run(request: Request, bg: BackgroundTasks) -> JSONResponse:
     max_wall = min(float(tpl.budget_wall_seconds), 86400.0)
     bg.add_task(run_goal_in_thread, goal_id, max_dollars, max_wall)
     return JSONResponse({"goal_id": goal_id, "trigger": name}, status_code=201)
+
+
+def _flow_approve_page(title: str, message: str, *, status: int = 200,
+                       form_token: str = "") -> HTMLResponse:
+    """A minimal self-contained confirmation/result page for the signed approval
+    link. When ``form_token`` is set it renders a confirm button that POSTs back
+    (so a link-prefetcher that merely GETs the URL never actuates the decision)."""
+    from html import escape
+    form = ""
+    if form_token:
+        form = (f'<form method="post" action="/flow/approve">'
+                f'<input type="hidden" name="token" value="{escape(form_token)}">'
+                f'<button type="submit" style="font-size:16px;padding:10px 22px;'
+                f'border-radius:8px;border:1px solid #888;cursor:pointer;">Confirm</button>'
+                f'</form>')
+    html = (f"<!doctype html><meta charset=utf-8><meta name=viewport "
+            f'content="width=device-width,initial-scale=1">'
+            f"<title>{escape(title)}</title>"
+            f'<div style="font-family:system-ui,sans-serif;max-width:520px;margin:60px auto;'
+            f'padding:0 20px;text-align:center;">'
+            f"<h2>{escape(title)}</h2><p>{escape(message)}</p>{form}</div>")
+    return HTMLResponse(html, status_code=status)
+
+
+def _load_paused_approval_run(token: str):
+    """Verify a signed approval ``token`` and return ``(run, decision)`` when it
+    points at a run currently paused on an approval; else ``(None, reason)``."""
+    from maverick.flow import store
+    from maverick.flow.approvals import verify_token
+    claim = verify_token(token)
+    if not claim:
+        return None, "This approval link is invalid or has expired."
+    run = store.load_run(claim["run_id"])
+    if run is None:
+        return None, "That flow run no longer exists."
+    if run.status != "paused_approval":
+        return None, f"This run is no longer awaiting approval (status: {run.status})."
+    return run, claim["decision"]
+
+
+@app.get("/flow/approve", response_class=HTMLResponse)
+async def flow_approve_confirm(request: Request, token: str = "") -> HTMLResponse:
+    """Show a one-click confirmation for a signed approve/reject link. The state
+    change happens on the POST (below), not this GET, so an email/link scanner
+    that pre-fetches the URL cannot silently actuate a decision. Auth is the
+    signed token itself (see ``_AUTH_EXEMPT``)."""
+    from maverick import flow
+    if not flow.enabled():
+        raise HTTPException(status_code=404, detail="the flow engine is off")
+    run, decision = _load_paused_approval_run(token)
+    if run is None:
+        return _flow_approve_page("Approval unavailable", decision, status=410)
+    verb = "approve" if decision == "approved" else "reject"
+    name = run.flow_id
+    return _flow_approve_page(
+        f"Confirm: {verb} this flow?",
+        f"“{name}” is paused: {run.prompt or 'awaiting your decision'}. "
+        f"Click Confirm to {verb} and resume it.",
+        form_token=token)
+
+
+@app.post("/flow/approve", response_class=HTMLResponse)
+async def flow_approve_submit(request: Request, token: str = Form("")) -> HTMLResponse:
+    """Actuate a signed approve/reject link: resume the paused run with the
+    decision the token carries. Idempotent -- a second click finds the run no
+    longer paused and reports that instead of re-resuming."""
+    from maverick import flow
+    if not flow.enabled():
+        raise HTTPException(status_code=404, detail="the flow engine is off")
+    run, decision = _load_paused_approval_run(token)
+    if run is None:
+        return _flow_approve_page("Approval unavailable", decision, status=410)
+    from maverick_dashboard import automation_queue as aq
+    aq.enqueue_flow_resume(run.flow_id, run.run_id, decision, run.owner)
+    verb = "approved" if decision == "approved" else "rejected"
+    return _flow_approve_page("Thanks — recorded",
+                              f"You {verb} “{run.flow_id}”. It is resuming now; "
+                              f"you can close this page.")
 
 
 @app.post("/webhook/linear")
