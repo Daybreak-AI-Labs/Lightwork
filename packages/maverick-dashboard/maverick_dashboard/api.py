@@ -2026,6 +2026,14 @@ async def list_event_triggers_endpoint(request: Request) -> dict:
 async def create_event_trigger(request: Request, payload: EventTriggerIn) -> EventTriggerOut:
     require_permission(request, "operate")
     _require_event_triggers()
+    # A trigger that reads an OAuth token from the shared per-tenant vault (any
+    # source given a `provider`) attaches that token to the caller-supplied
+    # `url`/`token_url` at poll time -- so it can send the token wherever the
+    # creator points it. That is the same trust as authorizing the token, so
+    # require ADMIN: otherwise a low-priv operator could name a provider they
+    # never authorized and exfiltrate its access/refresh token to their own host.
+    if (payload.config or {}).get("provider"):
+        require_permission(request, "admin")
     from maverick.automation_events import EventSourceError, get_source
     try:
         get_source(payload.source)   # a registered source?
