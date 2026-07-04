@@ -291,6 +291,22 @@ def test_validate_agent_override_requires_pack_admin(monkeypatch, tmp_path):
     assert c.post("/api/v1/agents/orchestrator/validate", json={}).status_code == 403
 
 
+def test_enable_learning_requires_admin(monkeypatch, tmp_path):
+    # POST /api/v1/learning writes the deployment-wide config overlay (like
+    # [capabilities]/[features], which are admin-gated). A tenant operator must
+    # not be able to flip it (force-enable trajectory capture deployment-wide).
+    monkeypatch.setenv("MAVERICK_DASHBOARD_ADMINS", "")
+    c = _client(monkeypatch, tmp_path)
+    from maverick_dashboard import rbac
+    rbac.set_role("user:op-lrn", "operator")
+    _as(monkeypatch, "user:op-lrn")
+    assert c.post("/api/v1/learning", json={"enabled": True}).status_code == 403
+
+    monkeypatch.setenv("MAVERICK_DASHBOARD_ADMINS", "user:ad-lrn")
+    _as(monkeypatch, "user:ad-lrn")
+    assert c.post("/api/v1/learning", json={"enabled": True}).status_code == 200
+
+
 def test_shared_halt_requires_admin(monkeypatch, tmp_path):
     # The shared Postgres halt is a global, untenanted fleet control. A tenant
     # operator may operate local goals, but must not arm the cluster-wide halt.

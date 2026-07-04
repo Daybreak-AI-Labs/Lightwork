@@ -56,6 +56,32 @@ CAPABILITY_DEFAULTS = {
 }
 FEATURE_DEFAULTS = {"skills": True, "world_model": True, "streaming": True}
 
+# The self-learning loop's subsystems -- ONE source of truth shared by the
+# one-click toggle (set_learning writes each (section, config_key) to the
+# overlay, which load_config deep-merges so every subsystem's enabled() sees it)
+# and the /learning status view (which pairs each key with its live enabled()).
+# Keeping both off one list stops the button and the view from drifting when a
+# subsystem is added. All OFF by default.
+LEARNING_SUBSYSTEMS: list[dict] = [
+    {"key": "consequence", "section": "consequence", "config_key": "enable",
+     "label": "Grounded outcomes (reality feedback)",
+     "how": "[consequence] enable — or MAVERICK_CONSEQUENCE=1"},
+    {"key": "reflexion", "section": "reflexion", "config_key": "enable",
+     "label": "Failure memory (learn from mistakes)",
+     "how": "[reflexion] enable — or MAVERICK_REFLEXION=1"},
+    {"key": "dreaming", "section": "dreaming", "config_key": "enable",
+     "label": "Consolidation (distil skills + insights)",
+     "how": "[dreaming] enable — then run `maverick dream` on a schedule"},
+    {"key": "capture", "section": "self_improvement", "config_key": "capture",
+     "label": "Trajectory capture (fuel for the flywheel)",
+     "how": "[self_improvement] capture — or MAVERICK_TRAJECTORY_CAPTURE=1"},
+    {"key": "data_engine", "section": "data_engine", "config_key": "enable",
+     "label": "Improvement flywheel",
+     "how": "[data_engine] enable"},
+]
+LEARNING_TOGGLES = [(s["section"], s["config_key"]) for s in LEARNING_SUBSYSTEMS]
+_LEARNING_SECTIONS = [s["section"] for s in LEARNING_SUBSYSTEMS]
+
 # Channels offered in the UI: name + per-field spec. Keys MUST match what
 # server.py's _wire_<name> reads from [channels.<name>] (verified against the
 # wiring), so a value saved here actually configures the channel via the
@@ -128,7 +154,7 @@ def _dump(data: dict) -> str:
         "# config.toml is never touched by the dashboard.",
         "",
     ]
-    for section in ("capabilities", "features"):
+    for section in ("capabilities", "features", *_LEARNING_SECTIONS):
         tbl = data.get(section) or {}
         if tbl:
             lines.append(f"[{section}]")
@@ -206,6 +232,19 @@ def set_toggle(section: str, name: str, enabled: bool) -> None:
     with _locked():
         data = load_overlay()
         data.setdefault(section, {})[name] = bool(enabled)
+        _write(data)
+
+
+def set_learning(enabled: bool) -> None:
+    """Turn the whole self-learning loop on or off in one action -- writes each
+    of ``LEARNING_TOGGLES`` to the overlay, which ``load_config()`` deep-merges,
+    so every subsystem's ``enabled()`` sees it. (An env var like
+    ``MAVERICK_CONSEQUENCE`` still overrides the overlay if a deployment set
+    one.)"""
+    with _locked():
+        data = load_overlay()
+        for section, key in LEARNING_TOGGLES:
+            data.setdefault(section, {})[key] = bool(enabled)
         _write(data)
 
 
@@ -350,6 +389,7 @@ def channels_state() -> list[dict]:
 
 __all__ = [
     "PROVIDERS", "CAPABILITY_DEFAULTS", "FEATURE_DEFAULTS", "CHANNELS",
-    "load_overlay", "set_provider", "clear_provider", "set_toggle", "state",
-    "set_channel", "clear_channel", "channels_state",
+    "LEARNING_SUBSYSTEMS", "load_overlay", "set_provider", "clear_provider",
+    "set_toggle", "set_learning", "state", "set_channel", "clear_channel",
+    "channels_state",
 ]

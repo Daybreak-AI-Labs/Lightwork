@@ -86,3 +86,15 @@ def test_capture_step_when_enabled(tmp_path, monkeypatch):
     store = TrajectoryStore(path=tmp_path / "t.ndjson")
     assert capture_step(_step(), store=store) is True
     assert store.count() == 1
+
+
+def test_tools_by_goal_groups_distinct_tools(tmp_path):
+    store = TrajectoryStore(path=tmp_path / "t.ndjson")
+    store.record(_step(goal_id=7, step=0, tool="web_search"))
+    store.record(_step(goal_id=7, step=1, tool="send_email"))
+    store.record(_step(goal_id=7, step=2, tool="web_search"))   # duplicate
+    store.record(_step(goal_id=7, step=3, tool=""))             # no tool -> ignored
+    store.record(_step(goal_id=8, step=0, tool="ocr_read"))
+    by_goal = store.tools_by_goal()
+    assert by_goal[7] == ["web_search", "send_email"]           # de-duped, in order
+    assert by_goal[8] == ["ocr_read"]

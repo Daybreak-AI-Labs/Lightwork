@@ -45,6 +45,8 @@ from .api_schemas import (
     CatalogInstallIn,
     ChildIn,
     ComposeIn,
+    EventTriggerIn,
+    EventTriggerOut,
     FactIn,
     FleetCreateIn,
     FleetRunIn,
@@ -55,6 +57,7 @@ from .api_schemas import (
     HaltIn,
     ImportRunIn,
     ImportRunOut,
+    LearningToggleIn,
     OutcomeIn,
     RedactIn,
     ReparentIn,
@@ -1456,9 +1459,34 @@ async def post_signoff(request: Request, goal_id: int, payload: SignoffIn) -> di
         raise HTTPException(status_code=400, detail="this deliverable has no sign-off gate")
     who = _supervisor(request)
     w.record_signoff(goal_id, payload.decision, decided_by=who, note=payload.note)
+    # Feed the human's certify/reject verdict back into the learning loop as a
+    # GROUNDED outcome: a person judging the actual deliverable is the cleanest
+    # ground-truth signal in the system, and it lands as exactly the
+    # (goal_id, episode_id, value) tuple the Consequence Engine / data-engine
+    # already consume. Both verdicts are signal -- an approval is a 1.0 reward,
+    # a rejection a 0.0. Best-effort and gated: no-op unless [consequence] is on.
+    _record_signoff_outcome(w, goal_id, payload.decision)
     if payload.decision == "approved":
         _handoff_approved_deliverable(g, who)
     return {"gate": _goal_gate(g.domain), "signoff": w.signoff_for(goal_id)}
+
+
+def _record_signoff_outcome(w, goal_id: int, decision: str) -> None:
+    """Record a deliverable sign-off as a grounded outcome for the goal's latest
+    episode. No-op unless ``[consequence]`` is enabled (kernel stays stateless by
+    default); never raises -- the sign-off is already persisted, so grounding it
+    must not fail the request."""
+    try:
+        from maverick import consequence
+        if not consequence.enabled():
+            return
+        episodes = w.list_episodes(goal_id=goal_id, limit=1)
+        if not episodes:
+            return  # a finished deliverable should have an episode, but be safe
+        value = 1.0 if decision == "approved" else 0.0
+        consequence.record_outcome(goal_id, episodes[0].id, value, kind="signoff")
+    except Exception as e:  # pragma: no cover - grounding is best-effort
+        log.debug("signoff outcome not recorded for goal %s: %s", goal_id, e)
 
 
 def _handoff_approved_deliverable(g, decided_by: str) -> None:
@@ -1937,6 +1965,137 @@ async def delete_trigger_endpoint(request: Request, name: str) -> dict:
     return {"deleted": name}
 
 
+# ---- event triggers: fire a saved template when a source has new items -------
+# The POLL half of workflow automation (the push half is /webhook/run).
+# Management is dashboard-authed + operate-gated + feature-knobbed; a scheduled
+# POST /event-triggers/poll drains each source and fires per new event.
+
+
+def _require_event_triggers() -> None:
+    from maverick.automation_events import enabled
+    if not enabled():
+        raise HTTPException(
+            status_code=403,
+            detail=("event triggers are off; enable [event_triggers] in "
+                    "config.toml or set MAVERICK_EVENT_TRIGGERS=1"),
+        )
+
+
+def _event_trigger_out(rec: dict) -> EventTriggerOut:
+    return EventTriggerOut(
+        name=rec["name"], template=rec["template"], source=rec["source"],
+        config=rec.get("config") or {}, params=rec.get("params") or {},
+        cursor=rec.get("cursor") or "",
+    )
+
+
+def _owned_event_triggers(request: Request) -> list[dict]:
+    """Event triggers visible to the caller: their own when auth is on, all of
+    them for auth-off/admin (``goal_owner_filter`` returns None)."""
+    from maverick_dashboard import event_triggers_store
+    triggers = event_triggers_store.list_triggers()
+    owner = goal_owner_filter(request)
+    if owner is not None:
+        triggers = [t for t in triggers if t.get("owner", "") == owner]
+    return triggers
+
+
+@router.get("/event-triggers")
+async def list_event_triggers_endpoint(request: Request) -> dict:
+    """Registered polled event triggers (owner-scoped) + the available sources."""
+    from maverick.automation_events import available_sources
+    from maverick.automation_events import enabled as _ev_enabled
+
+    triggers = _owned_event_triggers(request)
+    return {
+        "triggers": [_event_trigger_out(t).model_dump() for t in triggers],
+        "sources": available_sources(),
+        "enabled": _ev_enabled(),
+    }
+
+
+@router.post("/event-triggers", response_model=EventTriggerOut, status_code=201)
+async def create_event_trigger(request: Request, payload: EventTriggerIn) -> EventTriggerOut:
+    require_permission(request, "operate")
+    _require_event_triggers()
+    from maverick.automation_events import EventSourceError, get_source
+    try:
+        get_source(payload.source)   # a registered source?
+    except EventSourceError as e:
+        raise HTTPException(status_code=400, detail=str(e)) from e
+    # The template must EXIST, but -- unlike a webhook trigger -- we don't require
+    # it to render with the current defaults: each polled event fills the declared
+    # params at fire time, so a required param the event supplies is expected to
+    # be blank now.
+    from maverick.templates import load_template
+    try:
+        load_template(payload.template)
+    except FileNotFoundError as e:
+        raise HTTPException(
+            status_code=404, detail=f"template not found: {payload.template!r}") from e
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e)) from e
+    from maverick_dashboard import event_triggers_store
+    owner_filter = goal_owner_filter(request)
+    if owner_filter is not None:
+        existing = event_triggers_store.get_trigger(
+            event_triggers_store.slugify(payload.name or payload.template))
+        if existing is not None and existing.get("owner", "") != owner_filter:
+            raise HTTPException(
+                status_code=409, detail="an event trigger with that name already exists")
+    try:
+        rec = event_triggers_store.set_trigger(
+            payload.name or payload.template, payload.template, payload.source,
+            config=payload.config or {}, params=payload.params or {},
+            owner=caller_principal(request) or "")
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e)) from e
+    return _event_trigger_out(rec)
+
+
+@router.delete("/event-triggers/{name}")
+async def delete_event_trigger_endpoint(request: Request, name: str) -> dict:
+    require_permission(request, "operate")
+    _require_event_triggers()
+    from maverick_dashboard import event_triggers_store
+    if not event_triggers_store.delete_trigger(name, owner=goal_owner_filter(request)):
+        raise HTTPException(status_code=404, detail="no event trigger with that name")
+    return {"deleted": name}
+
+
+@router.post("/event-triggers/poll")
+async def poll_event_triggers(request: Request, bg: BackgroundTasks, name: str = "") -> dict:
+    """Poll event sources and fire the bound template for each new item.
+
+    Owner-scoped: a caller drains only its own triggers. Each source's cursor
+    advances so an item fires at most once; the per-poll event count is bounded
+    by the engine. A broken template still advances the cursor so it can't
+    re-fire a backlog forever. This is the on-demand path (the "Poll now" button
+    or an external cron); the app also polls on a background tick automatically
+    when the feature is on."""
+    require_permission(request, "operate")
+    _require_event_triggers()
+    from maverick.runner import run_goal_in_thread
+
+    from maverick_dashboard import event_poll
+
+    principal = caller_principal(request) or ""
+    user_id = execution_user_id_from_request(request)
+    triggers = _owned_event_triggers(request)
+    if name:
+        triggers = [t for t in triggers if t["name"] == name]
+
+    def _fire(goal_id: int) -> None:
+        if user_id:
+            bg.add_task(run_goal_in_thread, goal_id, channel="api", user_id=user_id)
+        else:
+            bg.add_task(run_goal_in_thread, goal_id)
+
+    results = await run_in_threadpool(
+        event_poll.poll_and_fire, _world(), triggers, principal=principal, fire=_fire)
+    return {"polled": len(results), "triggers": results}
+
+
 # ---- automation import: pull clients' existing automations into Lightwork -----
 
 
@@ -2088,9 +2247,10 @@ async def import_run_endpoint(request: Request, payload: ImportRunIn) -> ImportR
 @router.get("/automation-runs")
 async def automation_runs(request: Request, kind: str, ref: str, limit: int = 8) -> dict:
     """Recent goals an automation spawned + a status summary. ``kind`` is
-    'schedule' or 'trigger'; ``ref`` is the schedule_id or trigger name."""
-    if kind not in ("schedule", "trigger"):
-        raise HTTPException(status_code=400, detail="kind must be 'schedule' or 'trigger'")
+    'schedule', 'trigger', or 'event'; ``ref`` is the schedule_id or trigger name."""
+    if kind not in ("schedule", "trigger", "event"):
+        raise HTTPException(
+            status_code=400, detail="kind must be 'schedule', 'trigger', or 'event'")
     ref = (ref or "").strip()
     if not ref:
         return {"runs": [], "summary": {}}
@@ -3782,6 +3942,92 @@ async def outcomes_api(request: Request, top: int = 0) -> dict:
         "firm": firm_totals(assemble(w, owner=owner)).to_dict(),
         "workers": [c.to_dict() for c in cards],
     }
+
+
+def _learning_snapshot(request: Request) -> dict:
+    """Learning-engine status + accumulated moat. Shared by the JSON endpoint
+    and the /learning page so both render identical numbers."""
+    from maverick import consequence, dreaming, reflexion, trajectory_store
+    from maverick.config import get_data_engine
+    from maverick.operating_record import assemble, stats
+
+    from maverick_dashboard.settings_store import LEARNING_SUBSYSTEMS
+
+    def _data_engine_on() -> bool:
+        try:
+            return bool(get_data_engine().get("enable", False))
+        except Exception:  # pragma: no cover - config never blocks the view
+            return False
+
+    # Live enabled() per subsystem key -- paired with the shared registry so the
+    # label/how/config metadata stays single-sourced in settings_store.
+    on_by_key = {
+        "consequence": consequence.enabled(),
+        "reflexion": reflexion.enabled(),
+        "dreaming": dreaming.enabled(),
+        "capture": trajectory_store.enabled(),
+        "data_engine": _data_engine_on(),
+    }
+    components = [
+        {"key": s["key"], "label": s["label"],
+         "on": on_by_key.get(s["key"], False), "how": s["how"]}
+        for s in LEARNING_SUBSYSTEMS
+    ]
+
+    w = _world()
+    owner = goal_owner_filter(request)
+    st = stats(assemble(w, owner=owner))
+    accumulated = {
+        "decisions": st.n_records,
+        "human_decisions": st.n_human_decisions,
+        "approvals": st.n_approvals,
+        "departments": len(st.departments),
+    }
+    # Learned skills and grounded outcomes are deployment-level assets (neither is
+    # stored per-tenant), so only surface them on an unscoped/admin view -- a
+    # single tenant must never see deployment-wide totals as if they were its own.
+    if owner is None:
+        try:
+            learned_n = len(_learned_snapshot().get("learned") or [])
+        except Exception:  # pragma: no cover - the moat view never 500s on a sub-read
+            learned_n = 0
+        accumulated["grounded_outcomes"] = consequence.count()
+        accumulated["learned_capabilities"] = learned_n
+    return {
+        "components": components,
+        "accumulated": accumulated,
+        "components_on": sum(1 for c in components if c["on"]),
+        "components_total": len(components),
+    }
+
+
+@router.get("/learning")
+async def learning_api(request: Request) -> dict:
+    """Learning-engine status + the durable, per-tenant value it has accumulated.
+
+    ``components`` reflect each subsystem's own ``enabled()`` (the source of
+    truth). ``accumulated`` is the non-portable moat: decisions and human
+    judgements on the Operating Record, capabilities the workforce taught
+    itself, and the grounded outcomes it has learned from -- what a customer
+    would forfeit by leaving. Read-only and owner-scoped."""
+    return _learning_snapshot(request)
+
+
+@router.post("/learning")
+async def set_learning_endpoint(request: Request, payload: LearningToggleIn) -> dict:
+    """Turn the whole self-learning loop on or off in one action (writes the
+    learning knobs to the config overlay). Returns the refreshed snapshot so the
+    caller sees the new state.
+
+    Admin-gated: this writes the deployment-wide dashboard config overlay (the
+    same one [capabilities]/[features]/providers use, all admin-gated), which
+    ``load_config`` merges for every tenant and worker -- not an owner-scoped
+    action, so an operator must not flip it (e.g. force-enable trajectory
+    capture deployment-wide, or disable the whole learning loop)."""
+    require_permission(request, "admin")
+    from maverick_dashboard import settings_store
+    settings_store.set_learning(payload.enabled)
+    return _learning_snapshot(request)
 
 
 @router.get("/marketplace/packs")

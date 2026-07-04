@@ -153,6 +153,34 @@ class TriggerOut(BaseModel):
     secret_configured: bool
 
 
+class EventTriggerIn(BaseModel):
+    """Bind a saved template to a polled event source ("when X appears, run
+    this"). ``source`` is a registered EventSource; ``config`` is its settings
+    (e.g. the ``url`` for http_json). ``params`` are default values; each polled
+    event's fields fill declared params at fire time. ``name`` defaults to the
+    template name (slugified)."""
+    template: str = Field(..., max_length=80)
+    source: str = Field(..., max_length=40)
+    config: dict = Field(default_factory=dict)
+    params: dict[str, str] | None = None
+    name: str | None = Field(None, max_length=48)
+
+
+class EventTriggerOut(BaseModel):
+    name: str
+    template: str
+    source: str
+    config: dict = Field(default_factory=dict)
+    params: dict[str, str] = Field(default_factory=dict)
+    cursor: str = ""
+
+
+class LearningToggleIn(BaseModel):
+    """Turn the whole self-learning loop on/off from the dashboard (writes the
+    learning knobs to the config overlay)."""
+    enabled: bool
+
+
 class GoalEventOut(BaseModel):
     id: int
     agent: str

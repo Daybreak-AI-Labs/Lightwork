@@ -247,6 +247,59 @@ class TestInsightRecall:
         assert dreaming.format_context([]) == ""
 
 
+class TestSuccessToolAttribution:
+    """A distilled skill should carry the tools the successful runs actually
+    used (tools_needed), sourced from the trajectory store -- not an empty list.
+    """
+
+    def _world_with_two_reconciliations(self, tmp_path, monkeypatch):
+        monkeypatch.setenv("HOME", str(tmp_path))
+        monkeypatch.setenv("MAVERICK_HOME", str(tmp_path))
+        monkeypatch.setattr(dreaming, "settings", lambda: dict(_SETTINGS))
+        from maverick import trajectory_store, world_model
+        monkeypatch.setattr(world_model, "DEFAULT_DB", tmp_path / "world.db")
+        trajectory_store.reset_shared()
+        w = world_model.WorldModel(tmp_path / "world.db")
+        goals = ["reconcile the quarterly ledger accounts",
+                 "reconcile the monthly ledger accounts"]
+        gids = []
+        for text in goals:
+            gid = w.create_goal(text, "", domain="finance_sox")
+            w.set_goal_status(gid, "done", result="tied out")
+            gids.append(gid)
+        return w, gids, trajectory_store
+
+    def _run_dream(self, w, tmp_path):
+        return dreaming.dream_cycle(
+            w, profiles=PROFILES, reflexion_path=tmp_path / "reflexions.ndjson",
+            insights_path=tmp_path / "insights.ndjson",
+            skill_store=tmp_path / "skills",
+            skill_stats_path=tmp_path / "skill_stats.json",
+        )
+
+    def _distilled_text(self, tmp_path) -> str:
+        return "\n".join(
+            p.read_text() for p in (tmp_path / "skills").rglob("*.md"))
+
+    def test_captured_tools_land_in_distilled_skill(self, tmp_path, monkeypatch):
+        monkeypatch.setenv("MAVERICK_TRAJECTORY_CAPTURE", "1")
+        w, gids, ts = self._world_with_two_reconciliations(tmp_path, monkeypatch)
+        for gid in gids:
+            ts.shared().record(ts.TrajectoryStep(
+                ts=1.0, goal_id=gid, episode_id=1, step=0, role="worker",
+                tool="ledger_reconciler", tool_succeeded=True))
+        self._run_dream(w, tmp_path)
+        assert "ledger_reconciler" in self._distilled_text(tmp_path)
+
+    def test_no_capture_leaves_skill_without_tools(self, tmp_path, monkeypatch):
+        # Capture off -> the join is empty -> distilled skill has no tools_needed,
+        # exactly the pre-change behaviour (a default deployment is unaffected).
+        monkeypatch.delenv("MAVERICK_TRAJECTORY_CAPTURE", raising=False)
+        w, _gids, _ts = self._world_with_two_reconciliations(tmp_path, monkeypatch)
+        self._run_dream(w, tmp_path)
+        assert "tools_needed" not in self._distilled_text(tmp_path)
+
+
 class TestSharedPromotion:
     def _failure(self, goal: str, domain: str | None, ts: float = 1.0) -> dict:
         return {"goal_text": goal, "failure_class": "agent_error",

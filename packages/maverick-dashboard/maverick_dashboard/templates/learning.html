@@ -1,0 +1,100 @@
+{% extends "base.html" %}
+{% block title %}learning · Lightwork{% endblock %}
+{% block content %}
+<style>
+  .lrn { max-width: 900px; margin-inline: auto; }
+  .lrn :focus-visible { outline: 2px solid var(--ring); outline-offset: 2px; border-radius: var(--radius-sm); }
+  .lrn__lead { color: var(--muted); margin: 0 0 var(--space-6); max-width: 66ch; }
+  .lrn__grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(9rem, 1fr)); gap: var(--space-3); margin-bottom: var(--space-6); }
+  .lrn__stat { border: 1px solid var(--border); border-radius: var(--radius-md); background: var(--surface-2); padding: var(--space-4); }
+  .lrn__num { font-size: var(--text-2xl); font-weight: var(--font-semibold); font-variant-numeric: tabular-nums; line-height: 1.1; }
+  .lrn__lbl { color: var(--muted); font-size: var(--text-sm); margin-top: 2px; }
+  .lrn__section-h { font-size: var(--text-lg); margin: 0 0 var(--space-1); }
+  .lrn__section-sub { color: var(--muted); font-size: var(--text-sm); margin: 0 0 var(--space-3); }
+  .lrn__comp { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: var(--space-2); }
+  .lrn__row { display: flex; align-items: center; gap: var(--space-3); border: 1px solid var(--border); border-left: 3px solid var(--border); border-radius: var(--radius-md); padding: var(--space-3) var(--space-4); background: var(--surface-1); }
+  .lrn__row[data-on="true"] { border-left-color: var(--success); }
+  .lrn__row[data-on="false"] { border-left-color: var(--border-strong); }
+  .lrn__row-main { flex: 1 1 auto; min-width: 0; }
+  .lrn__row-label { font-weight: var(--font-medium); }
+  .lrn__row-how { color: var(--muted); font-size: var(--text-xs); margin-top: 2px; }
+  .lrn__row-how code { font-family: ui-monospace, SFMono-Regular, Menlo, monospace; }
+  .lrn__moat { border: 1px solid var(--brand-border); background: var(--brand-subtle); border-radius: var(--radius-md); padding: var(--space-3) var(--space-4); margin-bottom: var(--space-6); }
+  .lrn__moat strong { color: var(--brand); }
+  .lrn__enable-note { color: var(--muted); font-size: var(--text-sm); margin-top: var(--space-3); }
+</style>
+
+<div class="lrn">
+  <h1 class="page-title">Learning</h1>
+  <p class="lrn__lead">The judgement your AI workforce accumulates as it runs — grounded in your real outcomes,
+    partitioned to your tenant, and exportable only as a signature you control. This is the asset that
+    compounds with every run and doesn’t come with you to another tool.</p>
+
+  <div class="lrn__moat">
+    <strong>{{ snap.components_on }} of {{ snap.components_total }} learning systems are on.</strong>
+    Every run through Lightwork can teach the workforce — from failures, from consolidation, and from the
+    grounded outcomes of its own work. The more you turn on, the faster this asset compounds.
+    <div style="margin-top: var(--space-3); display:flex; gap: var(--space-3); align-items:center;">
+      <button type="button" id="lrn-enable" class="btn btn--primary">
+        {{ 'Turn all learning off' if snap.components_on == snap.components_total else 'Turn all learning on' }}
+      </button>
+      <span class="lrn__enable-note" id="lrn-enable-msg" aria-live="polite" style="margin-top:0;"></span>
+    </div>
+  </div>
+  <script>
+  (function () {
+    var btn = document.getElementById('lrn-enable');
+    if (!btn) return;
+    var allOn = {{ 'true' if snap.components_on == snap.components_total else 'false' }};
+    btn.addEventListener('click', async function () {
+      var msg = document.getElementById('lrn-enable-msg');
+      btn.disabled = true; msg.textContent = 'Applying…';
+      try {
+        var r = await fetch('/api/v1/learning', {
+          method: 'POST', headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ enabled: !allOn }),
+        });
+        if (!r.ok) { msg.textContent = 'Could not update (permission?).'; btn.disabled = false; return; }
+        location.reload();   // re-render with the new on/off state
+      } catch (e) { msg.textContent = 'Could not reach the server.'; btn.disabled = false; }
+    });
+  })();
+  </script>
+
+  <section aria-labelledby="lrn-acc-h">
+    <h2 id="lrn-acc-h" class="lrn__section-h">What your workforce has accumulated</h2>
+    <p class="lrn__section-sub">Read-only, from your Operating Record and learning stores — scoped to you.</p>
+    <div class="lrn__grid">
+      <div class="lrn__stat"><div class="lrn__num">{{ snap.accumulated.decisions }}</div><div class="lrn__lbl">decisions recorded</div></div>
+      <div class="lrn__stat"><div class="lrn__num">{{ snap.accumulated.human_decisions }}</div><div class="lrn__lbl">human judgements</div></div>
+      <div class="lrn__stat"><div class="lrn__num">{{ snap.accumulated.approvals }}</div><div class="lrn__lbl">approvals on record</div></div>
+      {% if 'grounded_outcomes' in snap.accumulated %}
+      <div class="lrn__stat"><div class="lrn__num">{{ snap.accumulated.grounded_outcomes }}</div><div class="lrn__lbl">grounded outcomes learned</div></div>
+      {% endif %}
+      {% if 'learned_capabilities' in snap.accumulated %}
+      <div class="lrn__stat"><div class="lrn__num">{{ snap.accumulated.learned_capabilities }}</div><div class="lrn__lbl">capabilities self-taught</div></div>
+      {% endif %}
+      <div class="lrn__stat"><div class="lrn__num">{{ snap.accumulated.departments }}</div><div class="lrn__lbl">departments active</div></div>
+    </div>
+  </section>
+
+  <section aria-labelledby="lrn-comp-h">
+    <h2 id="lrn-comp-h" class="lrn__section-h">Learning systems</h2>
+    <p class="lrn__section-sub">Off by default (the kernel stays stateless). Turn these on to route more of every run through learning.</p>
+    <ul class="lrn__comp" aria-label="Learning systems">
+      {% for c in snap.components %}
+      <li class="lrn__row" data-on="{{ 'true' if c.on else 'false' }}">
+        <span class="badge {{ 'active' if c.on else '' }}">{{ 'on' if c.on else 'off' }}</span>
+        <div class="lrn__row-main">
+          <div class="lrn__row-label">{{ c.label }}</div>
+          <div class="lrn__row-how">enable: <code>{{ c.how }}</code></div>
+        </div>
+      </li>
+      {% endfor %}
+    </ul>
+    <p class="lrn__enable-note">Set these in <code>~/.maverick/config.toml</code> (or the shown environment variables).
+      Once <code>[consequence]</code> is on, every human sign-off on a deliverable becomes grounded reward automatically —
+      see <a href="/workforce">Workforce</a> for what your teams have delivered, and <a href="/learned">Learned</a> for capabilities acquired mid-run.</p>
+  </section>
+</div>
+{% endblock %}
