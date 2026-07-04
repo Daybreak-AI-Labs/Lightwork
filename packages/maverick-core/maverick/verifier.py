@@ -494,18 +494,19 @@ async def verify_proposal_structured(
 
     reward = reasoning_reward.parse_structured(resp.text)
     if getattr(reward, "dimensions", ()):  # a compliant rubric reply
-        _maybe_audit_reward(reasoning_reward, reward)
+        _maybe_audit_reward(reward)
         return _verdict_from_reward(reward)
     # Non-rubric reply (or garbage): behave exactly like the scalar verifier.
     return _parse(resp.text)
 
 
-def _maybe_audit_reward(reasoning_reward: object, reward: object) -> None:
+def _maybe_audit_reward(reward: object) -> None:
     """Sign a structured reward into the tamper-evident audit chain when opted
     in (``[reasoning_reward] audit_rewards``) -- provable learning: the evidence
     the system learns from becomes a signed row, not just a mutable verdict.
     Best-effort: an audit write must never perturb a verification."""
     try:
+        from . import reasoning_reward
         if not reasoning_reward.audit_rewards_enabled():
             return
         from .audit import EventKind, record

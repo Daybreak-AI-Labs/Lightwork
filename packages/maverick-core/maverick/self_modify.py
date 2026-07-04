@@ -51,9 +51,16 @@ _PROTECTED_FILES = frozenset({
     "self_improvement.py",       # the promotion gate
     "self_improvement_runner.py",
     "approval_signing.py",       # cryptographic human approval
+    "approval_delegation.py",    # approval routing / quorum
     "calibration.py",            # the drift / reward-laundering interlock
     "verifier.py",               # the FINAL correctness gate
     "capability.py",             # the capability algebra (non-escalation proof)
+    "budget.py",                 # cost caps (kernel rule 3)
+    "entitlements.py",           # the license gate on the promotion engine
+    "promotion_effect.py",       # the evidence gate's causal input
+    "evaluator_evolution.py",    # anchor-gated judge promotion
+    "migration_governance.py",   # released-migration immutability gate
+    "llm.py",                    # ROLE_MODELS / model routing
     "config.py",                 # resolves every gate's settings
     "migrate.py",                # the config-section registry
     "sigstore_signing.py",       # signing primitives
@@ -61,15 +68,80 @@ _PROTECTED_FILES = frozenset({
 })
 # Whole packages under ``maverick`` that are off-limits (any file within).
 _PROTECTED_DIRS = frozenset({"audit", "sandbox"})
+# Case-folded copies: the boundary must hold on case-insensitive filesystems
+# (macOS/Windows), where ``Self_Improvement.py`` IS ``self_improvement.py``.
+_PROTECTED_FILES_CF = frozenset(f.casefold() for f in _PROTECTED_FILES)
+_PROTECTED_DIRS_CF = frozenset(d.casefold() for d in _PROTECTED_DIRS)
+
+# git C-style single-char escapes inside a quoted path (see quote_c_style).
+_C_ESCAPES = {
+    "a": "\a", "b": "\b", "t": "\t", "n": "\n", "v": "\v",
+    "f": "\f", "r": "\r", '"': '"', "\\": "\\",
+}
 
 
-def _normalize(path: str) -> str:
-    """Repo-relative POSIX path, leading ``./`` stripped. Not resolved against
-    the filesystem (patches reference paths that may not exist yet)."""
-    p = str(path).replace("\\", "/").strip()
-    while p.startswith("./"):
-        p = p[2:]
-    return p
+def _unquote_git(path: str) -> str | None:
+    """Decode a git C-quoted path (``"a/na\\303\\251me"`` etc.) to the real
+    filename, or return the input unchanged if it isn't quoted. Returns None on
+    malformed quoting so the caller can fail closed.
+
+    git quotes any path with special/high bytes and ``git apply`` un-quotes it,
+    so the boundary MUST decode octal (``\\NNN``) and ``\\t``/``\\n``/... escapes
+    before matching -- otherwise ``"a/maverick/self_improvement.py"`` (or an
+    octal-escaped spelling) slips past a raw-string comparison."""
+    if not (len(path) >= 2 and path[0] == '"' and path[-1] == '"'):
+        return path
+    body = path[1:-1]
+    out = bytearray()
+    i = 0
+    try:
+        while i < len(body):
+            ch = body[i]
+            if ch != "\\":
+                out.extend(ch.encode("utf-8"))
+                i += 1
+                continue
+            nxt = body[i + 1]
+            if nxt in "01234567":
+                j = 0
+                while j < 3 and i + 1 + j < len(body) and body[i + 1 + j] in "01234567":
+                    j += 1
+                out.append(int(body[i + 1:i + 1 + j], 8) & 0xFF)
+                i += 1 + j
+            elif nxt in _C_ESCAPES:
+                out.extend(_C_ESCAPES[nxt].encode("utf-8"))
+                i += 2
+            else:
+                out.append(ord(nxt) & 0xFF)
+                i += 2
+        return out.decode("utf-8", errors="replace")
+    except (ValueError, IndexError):
+        return None
+
+
+def _canonical(raw: str) -> str | None:
+    """Canonicalize a patch path EXACTLY as ``git apply`` would resolve it, so
+    the boundary classifies the real target: un-quote git C-escapes, drop an
+    ``a/``/``b/`` diff prefix, normalize ``\\`` to ``/``, collapse ``//`` and
+    ``.`` segments. Returns None (uncanonicalizable -> the caller fails closed)
+    for an absolute path, any ``..`` traversal, malformed quoting, or an empty
+    result."""
+    s = str(raw).strip()
+    if not s:
+        return None
+    if s.startswith('"'):
+        s = _unquote_git(s)
+        if s is None:
+            return None
+    s = s.replace("\\", "/")
+    if s.startswith(("a/", "b/")):
+        s = s[2:]
+    if s.startswith("/"):
+        return None  # absolute -> reaches outside the repo tree
+    parts = [p for p in s.split("/") if p not in ("", ".")]
+    if any(p == ".." for p in parts):
+        return None
+    return "/".join(parts) or None
 
 
 def _maverick_tail(parts: list[str]) -> list[str] | None:
@@ -85,18 +157,20 @@ def _maverick_tail(parts: list[str]) -> list[str] | None:
 def is_protected(path: str) -> bool:
     """Whether ``path`` is part of the reference monitor and may never be edited.
 
-    Fail-closed: an absolute path or any ``..`` traversal segment is treated as
-    protected (a patch must not reach outside the repo tree or dodge the check)."""
-    norm = _normalize(path)
-    parts = norm.split("/")
-    if norm.startswith("/") or ".." in parts:
+    Canonicalizes first (:func:`_canonical`) so a quoted / ``//`` / ``\\`` /
+    ``..`` / absolute spelling can't dodge the check, and matches case-insensitively
+    so a re-cased path can't dodge it on macOS/Windows. Fail-closed: a path that
+    can't be canonicalized (traversal, absolute, malformed quoting) is treated as
+    protected."""
+    c = _canonical(path)
+    if c is None:
         return True
-    tail = _maverick_tail(parts)
+    tail = _maverick_tail(c.split("/"))
     if tail is None:
         return False  # not a maverick source file; the allowlist decides
-    if tail and tail[0] in _PROTECTED_DIRS:
+    if tail and tail[0].casefold() in _PROTECTED_DIRS_CF:
         return True
-    return len(tail) == 1 and tail[0] in _PROTECTED_FILES
+    return len(tail) == 1 and tail[0].casefold() in _PROTECTED_FILES_CF
 
 
 @dataclass(frozen=True)
@@ -112,12 +186,20 @@ class EditableSurface:
     editable_globs: tuple[str, ...] = ()
 
     def classify(self, path: str) -> str:
-        """Return ``"protected"`` | ``"editable"`` | ``"unknown"``."""
+        """Return ``"protected"`` | ``"editable"`` | ``"unknown"``.
+
+        Matching is against the canonicalized path, so a quoted/`//`/`..` spelling
+        can't slip a control-plane file past the protected check into the
+        allowlist. Note: ``editable_globs`` use fnmatch, where ``*`` spans ``/`` --
+        keep them as narrow as possible, since the allowlist is what turns
+        ``unknown`` (refused) into ``editable`` (appliable)."""
         if is_protected(path):
             return "protected"
-        norm = _normalize(path)
+        c = _canonical(path)
+        if c is None:  # defensive: is_protected already fails these closed
+            return "protected"
         for g in self.editable_globs:
-            if fnmatch.fnmatch(norm, g):
+            if fnmatch.fnmatch(c, g):
                 return "editable"
         return "unknown"
 
@@ -249,8 +331,8 @@ class CodeChangeResult:
 
     @property
     def ok(self) -> bool:
-        return bool(self.review.ok and self.verdict is not None
-                    and getattr(self.verdict, "ok", False))
+        # getattr(None, "ok", False) is already False, so no explicit None guard.
+        return bool(self.review.ok and getattr(self.verdict, "ok", False))
 
 
 def propose_code_change(

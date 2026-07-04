@@ -2912,6 +2912,8 @@ def _cfg_advanced(  # noqa: C901 - flat sequence of independent opt-in toggles
         lines.append("# refused structurally). Each change still runs the full promotion")
         lines.append("# ladder (evidence + non-escalation + human signature + reversible).")
         lines.append("# Inert until you set an allowlist; keep it as narrow as possible.")
+        lines.append("# Requires [self_improvement] enable = true (the promotion ladder);")
+        lines.append("# without it every proposal is refused 'self-improvement disabled'.")
         lines.append("enable = true")
         lines.append('# editable_paths = ["packages/maverick-core/maverick/domains/*.toml"]')
     if advanced.get("rehearsal"):
