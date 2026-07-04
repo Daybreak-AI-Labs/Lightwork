@@ -2052,11 +2052,13 @@ async def create_event_trigger(request: Request, payload: EventTriggerIn) -> Eve
             raise HTTPException(
                 status_code=409, detail="an event trigger with that name already exists")
     try:
+        from maverick.paths import current_tenant_id
         rec = event_triggers_store.set_trigger(
             payload.name or payload.template, payload.template, payload.source,
             config=payload.config or {}, params=payload.params or {},
             owner=caller_principal(request) or "",
-            interval_seconds=payload.interval_seconds)
+            interval_seconds=payload.interval_seconds,
+            tenant=current_tenant_id() or "")   # bind OAuth vault reads to this tenant
     except ValueError as e:
         raise HTTPException(status_code=400, detail=str(e)) from e
     return _event_trigger_out(rec)
@@ -2114,7 +2116,7 @@ async def event_trigger_history(request: Request, name: str = "", limit: int = 5
     from maverick_dashboard import trigger_events_store
     owner = goal_owner_filter(request)
     rows = trigger_events_store.history(
-        name=name or None, owner=owner, limit=max(1, min(200, limit)))
+        name=name or None, owner=owner, limit=max(1, min(1000, limit)))
     return {"history": rows}
 
 

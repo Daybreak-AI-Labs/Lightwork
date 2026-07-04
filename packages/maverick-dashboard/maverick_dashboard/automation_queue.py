@@ -1,7 +1,7 @@
 """JobQueue-backed automation for the dashboard.
 
-Replaces the old bespoke asyncio + ``fcntl.flock`` scheduler with maverick-core's
-durable :class:`~maverick.job_queue.JobQueue` + :class:`~maverick.worker.Worker`:
+Replaces the old bespoke asyncio scheduler with maverick-core's durable
+:class:`~maverick.job_queue.JobQueue` + :class:`~maverick.worker.Worker`:
 
 * **One recurring ``automation_tick`` cron job** drives polling. Each run reads
   the event-trigger store and polls only the triggers whose per-trigger interval
@@ -11,10 +11,13 @@ durable :class:`~maverick.job_queue.JobQueue` + :class:`~maverick.worker.Worker`
 * **Fired goals are enqueued as durable ``run_goal`` jobs**, so a transient run
   failure is retried with backoff and a poison one lands in the ``failed``
   dead-letter state (``maverick queue failed``) -- instead of a bare daemon
-  thread whose failure was lost.
+  thread whose failure was lost. A small pool of worker threads drains them so a
+  slow goal doesn't stall polling.
 * **Dreaming is its own ``dream_cycle`` cron job**, re-armed by the worker.
-* JobQueue's exactly-once ``claim`` is the single-consumer guarantee across
-  dashboard workers -- the flock is gone.
+* JobQueue's exactly-once ``claim`` dedupes the tick/dream *jobs*; a non-blocking
+  ``flock`` around the poll body dedupes the *poll/cursor* critical section, so
+  two overlapping ticks (N dashboard workers, a slow source) can't both advance
+  the same cursor and double-create goals.
 
 It runs INSIDE the dashboard process (the only one that can read the dashboard-
 owned trigger store) on its OWN ``automation-jobs.db``, so its dashboard-specific
@@ -24,7 +27,9 @@ tests); the handlers/arming are unit-tested directly.
 """
 from __future__ import annotations
 
+import contextlib
 import logging
+import os
 import threading
 import time
 
@@ -34,14 +39,16 @@ log = logging.getLogger("maverick_dashboard.automation_queue")
 
 TICK_KIND = "automation_tick"
 DREAM_KIND = "dream_cycle"
+_MIN_INTERVAL = 60               # floor for a per-trigger cadence (matches the UI/schema)
 _DEFAULT_INTERVAL = 300          # per-trigger poll cadence when unset (5 min)
 _TICK_CRON = "* * * * *"         # evaluate due triggers every minute
 _DREAM_CRON_DEFAULT = "0 */6 * * *"  # consolidate every 6h
+_DEFAULT_WORKERS = 3             # goal-runner threads (so a slow goal can't stall the tick)
 
 _LOCK = threading.RLock()   # reentrant: start()/stop() call queue(), which also locks
 _queue = None
 _worker = None
-_worker_thread = None
+_worker_threads: list = []
 
 
 def _db_path():
@@ -58,6 +65,14 @@ def queue():
         return _queue
 
 
+def _cfg_int(section: str, key: str) -> int | None:
+    try:
+        v = (config.load_config().get(section) or {}).get(key)
+        return int(v) if v is not None else None
+    except Exception:  # pragma: no cover -- config never blocks the scheduler
+        return None
+
+
 # ---- per-trigger due tracking (a marker mtime, so an idle poll never rewrites
 # the trigger store) --------------------------------------------------------
 
@@ -65,12 +80,19 @@ def _poll_marker(name: str):
     return config.dashboard_overrides_path().parent / "automation-poll" / name
 
 
+def _default_interval() -> int:
+    v = _cfg_int("automation", "default_interval_seconds")
+    return max(_MIN_INTERVAL, v) if v else _DEFAULT_INTERVAL
+
+
 def _interval(trig: dict) -> int:
+    """Per-trigger cadence: a set value floored at 60s (matching the schema/UI),
+    else the configurable default."""
     try:
         v = int(trig.get("interval_seconds") or 0)
     except (TypeError, ValueError):
-        return _DEFAULT_INTERVAL
-    return v if v >= 60 else _DEFAULT_INTERVAL
+        return _default_interval()
+    return max(_MIN_INTERVAL, v) if v > 0 else _default_interval()
 
 
 def _due(name: str, interval: int) -> bool:
@@ -79,8 +101,8 @@ def _due(name: str, interval: int) -> bool:
         return (time.time() - p.stat().st_mtime) >= interval
     except FileNotFoundError:
         return True
-    except Exception:  # pragma: no cover -- never block a tick on a stat error
-        return False
+    except Exception:  # pragma: no cover -- a stat error shouldn't mute a trigger
+        return True
 
 
 def _mark_polled(name: str) -> None:
@@ -92,6 +114,37 @@ def _mark_polled(name: str) -> None:
         pass
 
 
+@contextlib.contextmanager
+def _poll_guard():
+    """Non-blocking cross-process lock around the poll body. Yields True when
+    acquired (this process polls), False when another process is already polling
+    (skip). JobQueue.claim dedupes the tick JOB; this dedupes the poll/cursor
+    read-modify-write it performs, so overlapping ticks can't double-fire."""
+    try:
+        import fcntl
+    except Exception:  # pragma: no cover -- non-POSIX: no cross-process guard
+        yield True
+        return
+    p = config.dashboard_overrides_path().parent / "automation-poll.lock"
+    fd = None
+    try:
+        p.parent.mkdir(parents=True, exist_ok=True)
+        fd = os.open(str(p), os.O_CREAT | os.O_RDWR, 0o600)
+        try:
+            fcntl.flock(fd, fcntl.LOCK_EX | fcntl.LOCK_NB)
+        except BlockingIOError:
+            yield False
+            return
+        yield True
+    finally:
+        if fd is not None:
+            try:
+                fcntl.flock(fd, fcntl.LOCK_UN)
+            except Exception:  # pragma: no cover
+                pass
+            os.close(fd)
+
+
 # ---- handlers ---------------------------------------------------------------
 
 def _world():
@@ -99,14 +152,7 @@ def _world():
     return _w()
 
 
-def _handle_tick(_job=None) -> None:
-    """Poll every DUE event trigger and fire its goals as durable run_goal jobs.
-    A source/template error is recorded (firing history) inside poll_and_fire and
-    doesn't fail the tick -- the next tick retries, and cursor dedup makes a
-    re-poll idempotent."""
-    from maverick import automation_events
-    if not automation_events.enabled():
-        return
+def _poll_due_triggers() -> None:
     from maverick_dashboard import event_poll, event_triggers_store
     due = [t for t in event_triggers_store.list_triggers() if _due(t["name"], _interval(t))]
     if not due:
@@ -116,16 +162,41 @@ def _handle_tick(_job=None) -> None:
     def _fire(goal_id: int) -> None:
         q.enqueue("run_goal", {"goal_id": int(goal_id)})   # durable: retry + dead-letter
 
-    event_poll.poll_and_fire(_world(), due, fire=_fire)
+    results = event_poll.poll_and_fire(_world(), due, fire=_fire)
+    # Advance the due-marker only for triggers that actually polled; a trigger
+    # whose source errored is left un-marked so it retries on the next tick
+    # rather than going dark for a full interval.
+    errored = {r["name"] for r in results if r.get("poll_error")}
     for t in due:
-        _mark_polled(t["name"])
+        if t["name"] not in errored:
+            _mark_polled(t["name"])
+
+
+def _handle_tick(_job=None) -> None:
+    """Poll every DUE event trigger and fire its goals as durable run_goal jobs.
+    Fail-open: a raise here must NOT fail the job (which would retry-storm every
+    60s); the next cron tick re-runs. Single-polled across workers via flock."""
+    from maverick import automation_events
+    if not automation_events.enabled():
+        return
+    try:
+        with _poll_guard() as acquired:
+            if acquired:
+                _poll_due_triggers()
+    except Exception:  # pragma: no cover -- fail-open, never retry-storm
+        log.exception("automation tick failed")
 
 
 def _handle_dream(_job=None) -> None:
+    """Fail-open: swallow errors so a partial dream isn't re-applied by the
+    worker's retry (dream_cycle is not transactional); the next cron runs it."""
     from maverick import dreaming
     if not dreaming.enabled():
         return
-    dreaming.dream_cycle(_world())
+    try:
+        dreaming.dream_cycle(_world())
+    except Exception:  # pragma: no cover -- fail-open
+        log.exception("scheduled dream cycle failed")
 
 
 # ---- cron seeding -----------------------------------------------------------
@@ -138,7 +209,8 @@ def _ensure_cron(kind: str, expr: str) -> None:
     """Ensure exactly one recurring job of ``kind`` is armed. The worker re-arms
     it on each run (payload carries ``__cron__``); this seeds the first one, and
     collapses to one lineage if two dashboard workers happened to seed
-    concurrently at boot (both saw no pending job before either enqueued)."""
+    concurrently at boot (both saw no pending job before either enqueued). A
+    surviving duplicate is harmless anyway -- the poll flock serializes them."""
     from maverick.scheduler import schedule_cron
     q = queue()
     pending = _pending(kind)
@@ -168,39 +240,52 @@ def reconcile() -> None:
 
 # ---- lifecycle --------------------------------------------------------------
 
+def _worker_count() -> int:
+    v = _cfg_int("automation", "workers")
+    return max(1, min(8, v)) if v else _DEFAULT_WORKERS
+
+
 def start() -> bool:
-    """Start the automation worker (its own thread) + seed cron jobs. No-op when
-    neither event triggers nor dreaming is enabled, and idempotent. Returns
-    whether a worker was started."""
-    global _worker, _worker_thread
+    """Start the automation worker pool + seed cron jobs. No-op when neither
+    event triggers nor dreaming is enabled, and idempotent. Returns whether the
+    pool was started."""
+    global _worker, _worker_threads
     from maverick import automation_events, dreaming
     if not (automation_events.enabled() or dreaming.enabled()):
         return False
     with _LOCK:
-        if _worker_thread is not None:
+        if _worker_threads:
             return True
         from maverick.worker import Worker
         w = Worker(queue=queue())
         w.register(TICK_KIND, _handle_tick)
         w.register(DREAM_KIND, _handle_dream)
         _worker = w
-        _worker_thread = threading.Thread(
-            target=w.run_forever, name="automation-worker", daemon=True)
-        t = _worker_thread
+        # One Worker, N threads sharing it: JobQueue.claim is atomic, so the
+        # threads safely divide the jobs -- a slow run_goal on one thread can't
+        # block the tick/dream on another.
+        _worker_threads = [
+            threading.Thread(target=w.run_forever, name=f"automation-worker-{i}", daemon=True)
+            for i in range(_worker_count())
+        ]
+        threads = list(_worker_threads)
     reconcile()
-    t.start()
-    log.info("automation worker started (db=%s)", _db_path())
+    for t in threads:
+        t.start()
+    log.info("automation worker started (%d threads, db=%s)", len(threads), _db_path())
     return True
 
 
 def stop() -> None:
-    global _worker, _worker_thread
+    global _worker, _worker_threads
     with _LOCK:
-        w, t = _worker, _worker_thread
-        _worker = _worker_thread = None
+        w = _worker
+        threads = list(_worker_threads)
+        _worker = None
+        _worker_threads = []
     if w is not None:
         w.stop()
-    if t is not None:
+    for t in threads:
         t.join(timeout=5.0)
 
 

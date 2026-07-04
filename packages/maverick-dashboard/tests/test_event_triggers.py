@@ -216,7 +216,7 @@ def _reset_aq(monkeypatch, aq):
     # fresh automation-jobs.db under its own tmp MAVERICK_HOME.
     monkeypatch.setattr(aq, "_queue", None)
     monkeypatch.setattr(aq, "_worker", None)
-    monkeypatch.setattr(aq, "_worker_thread", None)
+    monkeypatch.setattr(aq, "_worker_threads", [])
 
 
 def test_tick_polls_due_triggers_and_enqueues_durable_run_goal(monkeypatch, tmp_path):
@@ -283,6 +283,66 @@ def test_fired_goal_runs_via_durable_queue(monkeypatch, tmp_path):
     aq.queue().enqueue("run_goal", {"goal_id": 7})
     Worker(queue=aq.queue()).drain()
     assert ran == [7]
+
+
+def test_failed_poll_leaves_trigger_due(monkeypatch, tmp_path):
+    # A source error must NOT advance the due-marker, so the trigger retries on
+    # the next tick instead of going dark for a full interval.
+    _isolate(monkeypatch, tmp_path)
+    import maverick.automation_events as ev
+    from maverick_dashboard import automation_queue as aq
+    from maverick_dashboard import event_triggers_store as s
+    _reset_aq(monkeypatch, aq)
+    monkeypatch.setattr(ev, "_http_get_json",
+                        lambda *a, **k: (_ for _ in ()).throw(ev.EventSourceError("down")))
+    s.set_trigger("feed", "triage", "http_json", interval_seconds=3600,
+                  config={"url": "http://x", "items_path": "items", "id_field": "id"})
+    aq._handle_tick(None)
+    assert aq._due("feed", 3600) is True          # errored -> not marked -> still due
+
+
+def test_poll_runs_under_trigger_tenant(monkeypatch, tmp_path):
+    # The poll (and any OAuth vault read inside it) must run under the tenant
+    # that created the trigger, never the process-active tenant.
+    _isolate(monkeypatch, tmp_path)
+    import maverick.automation_events as ev
+    from maverick.paths import current_tenant_id
+    from maverick_dashboard import event_poll
+    from maverick_dashboard import event_triggers_store as s
+    seen = {}
+
+    def _fake(url, headers=None, timeout=15.0):
+        seen["tenant"] = current_tenant_id()
+        return {"items": [{"id": "1"}]}
+    monkeypatch.setattr(ev, "_http_get_json", _fake)
+    s.set_trigger("feed", "triage", "http_json", tenant="tenant:acme",
+                  config={"url": "http://x", "items_path": "items", "id_field": "id"})
+
+    class _W:
+        def create_goal(self, *a, **k):
+            return 1
+
+        def record_goal_origin(self, *a, **k):
+            pass
+    event_poll.poll_and_fire(_W(), [s.get_trigger("feed")], fire=lambda g: None)
+    assert seen["tenant"] == "tenant:acme"
+
+
+def test_all_skipped_events_record_no_fired_row(monkeypatch, tmp_path, _no_real_run):
+    # A poll whose events all fail template render is NOT "fired" -- it records
+    # event_skipped, not a misleading FIRED row (which the UI would count).
+    _isolate(monkeypatch, tmp_path)
+    box = [{"items": [{"id": "1"}]}]              # no 'title' -> render will skip
+    _feed(monkeypatch, box)
+    c = _client()
+    c.post("/api/v1/event-triggers", json={
+        "template": "triage", "source": "http_json",
+        "config": {"url": "http://x", "items_path": "items", "id_field": "id"}})
+    c.post("/api/v1/event-triggers/poll")         # baseline
+    box[0] = {"items": [{"id": "2"}, {"id": "1"}]}   # new event, still no title
+    c.post("/api/v1/event-triggers/poll")
+    kinds = [r["kind"] for r in c.get("/api/v1/event-triggers/history").json()["history"]]
+    assert "event_skipped" in kinds and "fired" not in kinds
 
 
 def test_reconcile_seeds_one_tick_and_is_idempotent(monkeypatch, tmp_path):

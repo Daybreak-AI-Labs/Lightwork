@@ -81,6 +81,7 @@ def list_triggers() -> list[dict]:
             "params": {str(k): str(v) for k, v in _decode_obj(t.get("params")).items()},
             "cursor": str(t.get("cursor") or ""),
             "owner": str(t.get("owner") or ""),
+            "tenant": str(t.get("tenant") or ""),
             "interval_seconds": int(t.get("interval_seconds") or 0),
             "created": float(t.get("created") or 0.0),
         })
@@ -109,6 +110,7 @@ def _dump(triggers: list[dict]) -> str:
         lines.append(f"params = {json.dumps(json.dumps(t.get('params') or {}, sort_keys=True))}")
         lines.append(f"cursor = {json.dumps(str(t.get('cursor') or ''))}")
         lines.append(f"owner = {json.dumps(str(t.get('owner') or ''))}")
+        lines.append(f"tenant = {json.dumps(str(t.get('tenant') or ''))}")
         lines.append(f"interval_seconds = {int(t.get('interval_seconds') or 0)}")
         lines.append(f"created = {float(t.get('created') or 0.0)}")
         lines.append("")
@@ -122,12 +124,13 @@ def _write(triggers: list[dict]) -> None:
 
 def set_trigger(name: str, template: str, source: str, *, config: dict | None = None,
                 params: dict | None = None, owner: str = "", cursor: str = "",
-                interval_seconds: int = 0) -> dict:
+                interval_seconds: int = 0, tenant: str = "") -> dict:
     """Create or replace an event trigger (by slugified name). Raises ValueError
     on an un-sluggable name. Preserves the existing cursor on replace unless one
     is passed, so re-saving a trigger doesn't replay its whole backlog.
     ``interval_seconds`` is the per-trigger poll cadence (0 = the scheduler
-    default)."""
+    default). ``tenant`` binds the trigger to the tenant that created it, so a
+    polled OAuth source reads that tenant's vault (never a cross-tenant token)."""
     slug = slugify(name)
     if not _NAME_RE.match(slug):
         raise ValueError("trigger name must contain a letter or digit (a-z, 0-9, -)")
@@ -145,6 +148,7 @@ def set_trigger(name: str, template: str, source: str, *, config: dict | None = 
             # Preserve the prior owner on a re-save that doesn't pass one, like
             # cursor/created, so an update can't silently orphan the trigger.
             "owner": str(owner) if owner else (prior["owner"] if prior else ""),
+            "tenant": str(tenant) if tenant else (prior.get("tenant", "") if prior else ""),
             "interval_seconds": int(interval_seconds or (prior or {}).get("interval_seconds", 0)),
             "created": (prior["created"] if prior else time.time()),
         }
