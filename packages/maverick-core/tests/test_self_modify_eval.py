@@ -10,6 +10,7 @@ from __future__ import annotations
 
 from pathlib import Path
 
+import pytest
 from maverick import self_modify_eval as ev
 from maverick.self_modify_eval import EvalResult, Score, evaluate_patch
 
@@ -139,3 +140,75 @@ class TestEvaluatePatch:
         res = evaluate_patch(_edit_patch(), src=src, workroot=tmp_path / "w",
                              score_fn=score)
         assert res.samples == 6
+
+
+class _FakeContainerSB:
+    """A non-host-visible backend stand-in (like docker/gvisor)."""
+    host_visible_fs = False
+
+    def __init__(self):
+        self.calls = []
+
+    def exec(self, cmd, timeout=None):
+        self.calls.append(cmd)
+        class R:
+            stdout = "3 passed in 0.1s"
+            stderr = ""
+            exit_code = 0
+        return R()
+
+
+class TestIsolationPolicy:
+    def test_no_policy_defaults_to_host_with_warning(self, tmp_path, monkeypatch):
+        monkeypatch.setattr(ev, "container_required", lambda: False)
+        sb = ev.resolve_eval_sandbox(None, tmp_path)
+        from maverick.sandbox.local import LocalBackend
+        assert isinstance(sb, LocalBackend)
+
+    def test_require_container_refuses_host_fallback(self, tmp_path, monkeypatch):
+        monkeypatch.setattr(ev, "container_required", lambda: True)
+        with pytest.raises(ev.EvalSandboxError, match="require-container"):
+            ev.resolve_eval_sandbox(None, tmp_path)
+
+    def test_require_container_refuses_host_visible_backend(self, tmp_path, monkeypatch):
+        monkeypatch.setattr(ev, "container_required", lambda: True)
+        from maverick.sandbox.local import LocalBackend
+        with pytest.raises(ev.EvalSandboxError):
+            ev.resolve_eval_sandbox(LocalBackend(workdir=tmp_path), tmp_path)
+
+    def test_container_backend_is_accepted_under_policy(self, tmp_path, monkeypatch):
+        monkeypatch.setattr(ev, "container_required", lambda: True)
+        sb = _FakeContainerSB()
+        assert ev.resolve_eval_sandbox(sb, tmp_path) is sb
+
+    def test_evaluate_patch_fails_closed_under_policy(self, tmp_path, monkeypatch):
+        monkeypatch.setattr(ev, "container_required", lambda: True)
+        src = _seed_repo(tmp_path)
+        res = evaluate_patch(_edit_patch(), src=src, workroot=tmp_path / "w")
+        assert res.ok is False and res.applied is False
+        assert "require-container" in res.reason
+        # and it must NOT have copied/executed anything on the host
+        assert not (tmp_path / "w" / "candidate").exists()
+
+    def test_git_apply_refuses_host_under_policy(self, tmp_path, monkeypatch):
+        monkeypatch.setattr(ev, "container_required", lambda: True)
+        src = _seed_repo(tmp_path)
+        res = ev.git_apply(_edit_patch(), src)   # no sandbox -> would be host
+        assert res.ok is False
+        assert (src / "pkg" / "a.py").read_text() == "VALUE = 1\n"  # untouched
+
+    def test_pytest_score_uses_container_and_scores(self, tmp_path, monkeypatch):
+        monkeypatch.setattr(ev, "container_required", lambda: True)
+        sb = _FakeContainerSB()
+        score = ev.pytest_score(sandbox=sb)(tmp_path)
+        assert score.samples == 3 and score.value == 1.0
+        assert sb.calls  # ran in the container, not the host
+
+    def test_pytest_score_budget_stop(self, tmp_path, monkeypatch):
+        monkeypatch.setattr(ev, "container_required", lambda: False)
+
+        class Budget:
+            def check(self):
+                raise RuntimeError("budget exhausted")
+        score = ev.pytest_score(budget=Budget())(tmp_path)
+        assert score == Score(0.0, 0)

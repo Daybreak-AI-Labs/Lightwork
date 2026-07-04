@@ -1747,6 +1747,92 @@ def harness_conflicts(model: str | None, semantic: bool) -> None:
         click.echo(f"    ⚔ {b}")
 
 
+@main.group("self-modify")
+def self_modify() -> None:
+    """Drive and inspect the governed code self-modification (DGM) loop."""
+
+
+@self_modify.command("status")
+def self_modify_status() -> None:
+    """Show the self-modify posture: enabled?, the editable surface the signed
+    track record currently entitles, and the DGM archive size. Read-only."""
+    from .. import self_modify as sm
+    from ..self_modify_loop import earned_surface
+    from ..self_modify_runner import build_policy, load_archive
+    enabled = sm.enabled()
+    click.echo(f"self-modify: {'ON' if enabled else 'OFF'} "
+               f"([self_modify] enable={'true' if enabled else 'false'})")
+    if not enabled:
+        click.echo("  (OFF: the loop proposes/evaluates/applies nothing.)")
+    policy = build_policy()
+    archive = load_archive()
+    try:
+        from .. import self_improvement as si
+        ledger = getattr(si.shared(), "ledger", None)
+    except Exception:
+        ledger = None
+    tier, surface = earned_surface(archive, policy, ledger=ledger)
+    click.echo(f"earned tier: {tier.name!r}")
+    click.echo("editable surface: " + (", ".join(surface.editable_globs) or "(none)"))
+    click.echo(f"archive: {len(archive.candidates)} candidate(s), "
+               f"{sum(1 for c in archive.candidates if c.promoted)} promoted")
+
+
+@self_modify.command("run")
+@click.option("--cycles", type=int, default=1, show_default=True,
+              help="Number of governed DGM cycles to run.")
+@click.option("--tree", default=None,
+              help="Repo tree to evaluate against (default: cwd).")
+def self_modify_run(cycles: int, tree: str | None) -> None:
+    """Run governed DGM cycles: propose → boundary → isolated eval → gate →
+    archive. A no-op while self-modify is OFF. Promotion at the code rung still
+    requires a human signature — this searches and archives, it does not
+    self-promote code."""
+    from ..self_modify_runner import run
+    summary = run(cycles=cycles, tree=Path(tree) if tree else None)
+    if not summary.ran:
+        click.echo(f"did not run: {summary.reason}")
+        return
+    click.echo(f"ran {len(summary.reports)} cycle(s): "
+               f"{summary.evaluated} evaluated, {summary.promoted} promoted.")
+    for i, r in enumerate(summary.reports):
+        note = r.reason or ("promoted" if r.promoted else "")
+        click.echo(f"  #{i} tier={r.tier or '-'} proposed={r.proposed} "
+                   f"eval={r.evaluated} promoted={r.promoted}"
+                   + (f" — {note}" if note else ""))
+
+
+@self_modify.command("archive")
+@click.option("--limit", type=int, default=20, show_default=True,
+              help="Most recent candidates to show.")
+@click.option("--json", "as_json", is_flag=True, help="Emit JSON.")
+def self_modify_archive(limit: int, as_json: bool) -> None:
+    """Show the DGM lineage archive — the diverse population of proposed changes
+    (promoted and the informative worse ancestors). Read-only."""
+    import json as _json
+
+    from ..self_modify_runner import load_archive
+    archive = load_archive()
+    cands = sorted(archive.candidates, key=lambda c: c.created_at, reverse=True)[:limit]
+    if as_json:
+        click.echo(_json.dumps([c.to_dict() for c in cands], indent=2, sort_keys=True))
+        return
+    if not cands:
+        click.echo("archive is empty.")
+        return
+    for c in cands:
+        flags = []
+        if c.promoted:
+            flags.append("promoted")
+        if c.rolled_back:
+            flags.append("rolled-back")
+        if c.capability_widens:
+            flags.append("widens")
+        tag = f"  [{', '.join(flags)}]" if flags else ""
+        click.echo(f"{c.id}  gen{c.generation}  score={c.score:.3f} "
+                   f"(baseline {c.baseline_score:.3f})  {c.summary}{tag}")
+
+
 @main.group()
 def fleet() -> None:
     """Manage per-employee agent fleets (enterprise)."""

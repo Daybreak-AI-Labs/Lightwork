@@ -428,6 +428,7 @@ def propose_code_change(
     rollback: object,
     surface: EditableSurface | None = None,
     capability_widens: bool | None = None,
+    baseline_files: dict[str, str] | None = None,
     approval_signature: str | None = None,
     payload_sha256: str | None = None,
     controller: object | None = None,
@@ -470,12 +471,31 @@ def propose_code_change(
                          "capability_widens=False: %s", widen_reasons)
             capability_widens = True
 
+        # Real non-escalation PROOF via the capability algebra (Gap 5): a
+        # differential over a fixed class universe, so the gate can compute
+        # escalation ("a class the *after* grant permits that *before* did not")
+        # instead of only trusting a boolean. When the caller declared
+        # ``capability_widens`` (incl. the heuristic's forced True) that wins;
+        # otherwise the algebra decides, and unlike a bare None it is a genuine
+        # proof the code rung can pass on. Best-effort: a delta error leaves the
+        # proof unset so the code rung falls back to demanding one (fail-closed).
+        cap_before = cap_after = None
+        probe: tuple[str, ...] = ()
+        try:
+            from .self_modify_capability import capability_delta
+            cap_before, cap_after, probe = capability_delta(
+                patch, baseline_files=baseline_files)
+        except Exception:  # pragma: no cover -- proof is best-effort
+            log.debug("self-modify: capability_delta failed", exc_info=True)
+
         from .self_improvement import Candidate, consider
         cand = Candidate(
             rung=rung, summary=summary,
             baseline_score=baseline_score, candidate_score=candidate_score,
             samples=samples, payload=patch, payload_sha256=payload_sha256,
             capability_widens=capability_widens,
+            capability_before=cap_before, capability_after=cap_after,
+            probe_tools=probe,
             approval_signature=approval_signature, rollback=rollback,
         )
         verdict = consider(cand, controller=controller)
