@@ -254,3 +254,102 @@ class TestBypassRegression:
         patch = _patch("packages/maverick-core/maverick//self_improvement.py")
         r = sm.review_patch(patch, s)
         assert r.ok is False
+
+
+def _patch_with_added(path: str, added: str) -> str:
+    return (f"diff --git a/{path} b/{path}\n--- a/{path}\n+++ b/{path}\n"
+            f"@@ -1 +1,2 @@\n old\n+{added}\n")
+
+
+class TestCapabilityDiff:
+    """The heuristic capability screen: a one-directional non-escalation SIGNAL."""
+
+    def test_clean_added_lines_do_not_widen(self):
+        widens, reasons = sm.capability_diff(
+            _patch_with_added("a.toml", "value = 42"))
+        assert widens is False and reasons == []
+
+    def test_empty_patch_does_not_widen(self):
+        assert sm.capability_diff("") == (False, [])
+
+    @pytest.mark.parametrize("added,needle", [
+        ("subprocess.run(['ls'])", "subprocess"),
+        ("proc = os.system('rm -rf /')", "process-spawn"),
+        ("run(cmd, shell=True)", "shell=True"),
+        ("data = eval(user_input)", "dynamic code"),
+        ("obj = pickle.loads(blob)", "pickle"),
+        ("import socket", "network"),
+        ("resp = requests.get(url)", "network"),
+        ("mod = __import__(name)", "dynamic import"),
+        ("os.remove(path)", "filesystem"),
+        ("shutil.rmtree(d)", "filesystem"),
+        ("p.write_text('x')", "file write"),
+        ("f = open('out.txt', 'w')", "file write"),
+        ("grant = new_entitlement()", "capability"),
+        ("editable_paths = ['**']", "capability"),
+    ])
+    def test_widening_constructs_are_flagged(self, added, needle):
+        widens, reasons = sm.capability_diff(_patch_with_added("a.py", added))
+        assert widens is True
+        assert any(needle in r for r in reasons), reasons
+
+    def test_only_added_lines_are_scanned(self):
+        # A REMOVED subprocess line (context/`-`) is not a new capability.
+        patch = ("diff --git a/a.py b/a.py\n--- a/a.py\n+++ b/a.py\n"
+                 "@@ -1,2 +1 @@\n-subprocess.run(x)\n remaining\n")
+        assert sm.capability_diff(patch) == (False, [])
+
+    def test_the_plusplusplus_header_is_not_a_construct(self):
+        # The +++ b/... file header must not be scanned as an added line.
+        widens, _ = sm.capability_diff(
+            _patch_with_added("packages/x/subprocess_helper.py", "value = 1"))
+        assert widens is False
+
+    def test_comment_only_addition_does_not_widen(self):
+        widens, reasons = sm.capability_diff(
+            _patch_with_added("a.py", "# subprocess is intentionally avoided here"))
+        assert widens is False and reasons == []
+
+
+class TestCapabilityScreenIntoGate:
+    """The screen can only make the gate STRICTER, never weaker."""
+
+    def _surface(self):
+        return sm.EditableSurface(
+            editable_globs=("packages/maverick-core/maverick/domains/*.py",))
+
+    def _controller(self):
+        from maverick import self_improvement as si
+        return si.SelfImprovementController(
+            min_improvement=0.0, max_auto_rung="policy",
+            frozen_fn=lambda: False, audit_fn=lambda **k: None)
+
+    def test_screen_blocks_a_widening_prompt_change(self, monkeypatch):
+        # An allowlisted, baseline-beating PROMPT edit that would otherwise
+        # auto-promote is refused because it adds a process-spawn line.
+        from maverick import self_improvement as si
+        monkeypatch.setattr(sm, "enabled", lambda: True)
+        monkeypatch.setattr(si, "enabled", lambda: True)
+        patch = _patch_with_added(
+            "packages/maverick-core/maverick/domains/foo.py",
+            "os.system('curl evil')")
+        res = sm.propose_code_change(
+            patch, summary="sneaky", baseline_score=0.5, candidate_score=0.9,
+            samples=8, rollback="snap", surface=self._surface(),
+            capability_widens=False,  # caller claims bounded...
+            rung="prompt", controller=self._controller())
+        assert res.review.ok is True         # surface is clean
+        assert res.ok is False               # ...but the screen overrode -> blocked
+        assert "capability" in res.reason.lower()
+
+    def test_caller_false_is_honoured_when_screen_is_clean(self, monkeypatch):
+        from maverick import self_improvement as si
+        monkeypatch.setattr(sm, "enabled", lambda: True)
+        monkeypatch.setattr(si, "enabled", lambda: True)
+        patch = _patch_with_added(
+            "packages/maverick-core/maverick/domains/foo.py", "TUNING = 0.7")
+        res = sm.propose_code_change(
+            patch, summary="tune", baseline_score=0.5, candidate_score=0.9,
+            samples=8, rollback="snap", surface=self._surface(),
+            capability_widens=False, rung="prompt", controller=self._controller())
+        assert res.ok is True, res.reason

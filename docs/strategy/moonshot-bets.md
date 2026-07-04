@@ -377,6 +377,54 @@ capture consent decision — the same four moves the council said convert the
 platform into a $50M asset. The deterministic half of every rung is now built,
 tested (~130 self-improvement tests total), and off by default.
 
+### Build log — update 4 (the governed DGM code rung, Phases 1–4)
+
+The Phase-5 code self-mod stub above is now a full, standalone Darwin-Gödel
+pipeline (DGM, arXiv:2505.22954) — **empirical validation instead of proof, run
+under a reference monitor** — across four modules, each OFF by default,
+fail-closed, live-model/sandbox parts injected as seams with deterministic
+offline defaults:
+
+- **Phase 1 — the editable-surface boundary (`self_modify.py`).** The
+  load-bearing primitive: a proposed patch is *structurally refused* if it
+  touches ANY control-plane path (the promotion gate, verifier, calibration,
+  capability algebra, approval signing, audit, sandbox, config, or the boundary
+  itself), before and independently of the promotion gate. Paths are
+  canonicalized exactly as `git apply` resolves them (un-quote C-escapes, collapse
+  `//`, drop `.`, reject `..`/absolute→fail-closed) and matched case-insensitively,
+  so a quoted/octal/re-cased spelling can't dodge it (every bypass a security
+  review found is now a regression test). The allowlist is EMPTY by default →
+  everything is `unknown` → refused.
+- **Phase 3 — capability screen + DGM archive.** `capability_diff` is a
+  one-directional non-escalation SIGNAL: a syntactic hit (process spawn, network,
+  dynamic code, filesystem mutation, an explicit tool/entitlement grant on an
+  ADDED line) FORCES `capability_widens=True` so the gate refuses; a clean scan
+  never asserts "bounded" (the code rung still demands the real capability proof).
+  `self_modify_archive.CodeArchive` is the DGM population — bounded,
+  diversity-aware (Jaccard patch distance), lineage-tracking, keeping the *worse*
+  ancestors to branch from (the plateau escape), persisted 0600 like the ledger.
+- **Phase 2 — the sandbox eval harness (`self_modify_eval.py`).** The empirical
+  measurement: a patch is scored on a THROWAWAY copy, never the live tree.
+  `git apply --check` gates before the real apply (routed through `sandbox.exec`,
+  kernel rule 4); baseline vs candidate are scored via an injected `score_fn`
+  (`pytest_score` runs the suite in the sandbox and scores by pass rate). Any
+  failure (copy, non-applying patch, scorer error) → non-`ok` result whose scores
+  can't clear the gate.
+- **Phase 4 — the loop + proof-gated surface widening (`self_modify_loop.py`).**
+  propose → boundary → evaluate → gate → archive, one governed cycle. The editable
+  surface is not fixed: it starts empty and WIDENS one tier at a time, and a tier
+  unlocks only after a track record of promoted, non-rolled-back changes — a
+  single rollback freezes widening (trust earned by record, forfeited by
+  regression). The agent can never widen its own surface (the widening policy
+  lives outside the editable surface; the boundary refuses any patch touching
+  `self_modify`/`config`). Autonomous search, human-gated promotion at the code
+  rung: the loop proposes/evaluates/archives freely but cannot self-promote code
+  without an Ed25519 human signature.
+
+120 new deterministic tests across the four modules; ruff + vulture clean.
+Everything off by default; no new config section (the whole capability rides the
+existing `[self_modify]` knob + its wizard step).
+
 ## Bet 5 — Consequence-Proven Autonomy → "Earned Autonomy" (the breakthrough)
 
 **Thesis.** The biggest blocker to enterprise agents isn't quality, it's **trust
