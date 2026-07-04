@@ -1416,6 +1416,37 @@ def pick_advanced() -> dict[str, Any]:
             "verifier scores highest (stronger, more tokens).",
             default=False,
         ),
+        "structured_verifier_off": _q_confirm(
+            "Turn OFF the structured rubric verifier? It's ON by default: the "
+            "verifier scores each FINAL on a rubric (correctness/completeness/"
+            "grounding/safety) and a failing safety facet vetoes even a high score, "
+            "with the rubric recorded for the learning audit (maverick.reasoning_reward). "
+            "Costs ~more tokens per verify; say yes to fall back to the scalar verifier.",
+            default=False,
+        ),
+        "jit_rl_off": _q_confirm(
+            "Turn OFF JitRL test-time adaptation? It's ON by default but a no-op until "
+            "experience accumulates: it records verifier-guided best-of-N outcomes and "
+            "steers candidate selection toward what has verified well (maverick.jit_rl, "
+            "no weight updates). Say yes to disable it entirely.",
+            default=False,
+        ),
+        "reward_laundering": _q_confirm(
+            "Enforce reward-laundering resistance? Beyond freezing on verifier DRIFT, "
+            "also freeze learning when the judge stays sharp on normal traffic but its "
+            "edge on adversarial probes collapses -- i.e. it's being GAMED "
+            "(maverick.calibration). Off by default; enables the calibration interlock "
+            "and needs adversarial probes recorded to bite.",
+            default=False,
+        ),
+        "signed_approval": _q_confirm(
+            "Require cryptographic approval for code/weights self-changes? Replace the "
+            "self-settable approval boolean with an Ed25519 signature over the exact "
+            "change, verified against operator-held keys, so a self-modifying agent "
+            "cannot approve itself (maverick.approval_signing). Off by default; you "
+            "provide approver public keys (fails closed until you do).",
+            default=False,
+        ),
         "skill_synthesis": _q_confirm(
             "Test-time skill synthesis? Write a short task-specific cheat-sheet for "
             "each goal before working on it.",
@@ -2768,10 +2799,16 @@ def _cfg_advanced(  # noqa: C901 - flat sequence of independent opt-in toggles
             lines.append("levels = true")
         if _wf_disable_grounding:
             lines.append("data_grounding = false")
-    if advanced.get("calibration_enforce"):
+    if advanced.get("calibration_enforce") or advanced.get("reward_laundering"):
         lines.append("")
         lines.append("[calibration]")
         lines.append("enforce = true")
+        if advanced.get("reward_laundering"):
+            lines.append("# Reward-laundering interlock: also freeze learning when the")
+            lines.append("# verifier's edge on adversarial probes falls below this fraction")
+            lines.append("# of its edge on natural traffic (the judge is being gamed). Needs")
+            lines.append("# adversarial probes recorded (calibration.record_probe) to bite.")
+            lines.append("min_resistance = 0.5")
     if advanced.get("donate_trajectories"):
         lines.append("")
         lines.append("[telemetry]")
@@ -2787,6 +2824,19 @@ def _cfg_advanced(  # noqa: C901 - flat sequence of independent opt-in toggles
         lines.append("")
         lines.append("[search]")
         lines.append("enable = true")
+    if advanced.get("structured_verifier_off"):
+        lines.append("")
+        lines.append("[reasoning_reward]")
+        lines.append("# The structured rubric verifier is ON by default (per-dimension")
+        lines.append("# scoring + safety veto + audit); disable it to fall back to the")
+        lines.append("# scalar verifier verdict (maverick.reasoning_reward).")
+        lines.append("enable = false")
+    if advanced.get("jit_rl_off"):
+        lines.append("")
+        lines.append("[jit_rl]")
+        lines.append("# JitRL test-time adaptation is ON by default (a no-op until it has")
+        lines.append("# learned something); disable it entirely here (maverick.jit_rl).")
+        lines.append("enable = false")
     if advanced.get("skill_synthesis"):
         lines.append("")
         lines.append("[skill_synthesis]")
@@ -2803,7 +2853,8 @@ def _cfg_advanced(  # noqa: C901 - flat sequence of independent opt-in toggles
     # diverges from its default (causal_promotion defaults off, factory_learning
     # defaults on -- so we only write factory_learning when the user opts out).
     declined_factory = "factory_learning" in advanced and not advanced.get("factory_learning")
-    if advanced.get("causal_promotion") or declined_factory or advanced.get("evaluator_evolution"):
+    if (advanced.get("causal_promotion") or declined_factory
+            or advanced.get("evaluator_evolution") or advanced.get("signed_approval")):
         lines.append("")
         lines.append("[self_improvement]")
         if advanced.get("causal_promotion"):
@@ -2821,6 +2872,14 @@ def _cfg_advanced(  # noqa: C901 - flat sequence of independent opt-in toggles
             lines.append("# its agreement with a checksum-locked ground-truth anchor beats")
             lines.append("# it (maverick.evaluator_evolution, 'evaluator' rung).")
             lines.append("evaluator_evolution = true")
+        if advanced.get("signed_approval"):
+            lines.append("# Require a cryptographic (Ed25519) human approval for the")
+            lines.append("# code/weights rungs instead of a self-settable boolean, bound to")
+            lines.append("# the exact change (maverick.approval_signing). Fails closed until")
+            lines.append("# you provide approver PUBLIC keys (hex) or a dir of *.pub.")
+            lines.append("require_signed_approval = true")
+            lines.append('# approver_keys = ["<ed25519-pubkey-hex>"]')
+            lines.append('# approver_keys_dir = "/etc/maverick/approvers"')
     if advanced.get("rehearsal"):
         lines.append("")
         lines.append("[rehearsal]")

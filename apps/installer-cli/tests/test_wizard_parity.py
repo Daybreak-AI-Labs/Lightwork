@@ -676,3 +676,62 @@ def test_write_config_finance_no_thresholds(tmp_path: Path, monkeypatch):
     assert parsed["governance"]["require_human_min_risk"] == "high"
     assert "require_human_above" not in parsed["governance"]
     assert "screening" not in parsed
+
+
+# ---------- learning defaults: reasoning_reward + jit_rl opt-out, governance opt-in ----------
+
+def test_pick_advanced_includes_learning_toggles(monkeypatch):
+    _StubQ(monkeypatch)
+    from maverick_installer.wizard import pick_advanced
+    adv = pick_advanced()
+    for key in ("structured_verifier_off", "jit_rl_off",
+                "reward_laundering", "signed_approval"):
+        assert key in adv, f"{key} missing from pick_advanced()"
+
+
+def test_write_config_disables_reasoning_reward(tmp_path: Path, monkeypatch):
+    # The rubric verifier is on by default; the wizard opt-out writes enable=false.
+    parsed = _write_full_config(
+        tmp_path, monkeypatch, advanced={"structured_verifier_off": True})
+    assert parsed["reasoning_reward"]["enable"] is False
+    # The kernel reads what the wizard wrote.
+    from maverick import config
+    monkeypatch.setattr(config, "load_config", lambda *a, **k: parsed)
+    assert config.get_reasoning_reward()["enable"] is False
+
+
+def test_write_config_disables_jit_rl(tmp_path: Path, monkeypatch):
+    parsed = _write_full_config(tmp_path, monkeypatch, advanced={"jit_rl_off": True})
+    assert parsed["jit_rl"]["enable"] is False
+    from maverick import config
+    monkeypatch.setattr(config, "load_config", lambda *a, **k: parsed)
+    assert config.get_jit_rl()["enable"] is False
+
+
+def test_write_config_emits_reward_laundering_floor(tmp_path: Path, monkeypatch):
+    parsed = _write_full_config(
+        tmp_path, monkeypatch, advanced={"reward_laundering": True})
+    assert parsed["calibration"]["enforce"] is True
+    assert parsed["calibration"]["min_resistance"] == 0.5
+    from maverick import config
+    monkeypatch.setattr(config, "load_config", lambda *a, **k: parsed)
+    assert config.get_calibration()["min_resistance"] == 0.5
+
+
+def test_write_config_emits_signed_approval(tmp_path: Path, monkeypatch):
+    parsed = _write_full_config(
+        tmp_path, monkeypatch, advanced={"signed_approval": True})
+    assert parsed["self_improvement"]["require_signed_approval"] is True
+    from maverick import config
+    monkeypatch.setattr(config, "load_config", lambda *a, **k: parsed)
+    assert config.get_self_improvement()["require_signed_approval"] is True
+
+
+def test_write_config_omits_learning_knobs_by_default(tmp_path: Path, monkeypatch):
+    # No advanced opt-in -> the on-by-default features write no override sections,
+    # and the opt-in governance knobs are absent.
+    parsed = _write_full_config(tmp_path, monkeypatch, advanced={})
+    assert "reasoning_reward" not in parsed
+    assert "jit_rl" not in parsed
+    assert "calibration" not in parsed
+    assert "self_improvement" not in parsed

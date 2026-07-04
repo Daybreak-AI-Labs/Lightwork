@@ -7,6 +7,7 @@ no-op), JSONL persistence, the PRM-encoded adapter path, and off-by-default.
 """
 from __future__ import annotations
 
+import pytest
 from maverick import jit_rl
 from maverick.jit_rl import JitAdapter, JitStore
 from maverick.prm import StepContext
@@ -127,16 +128,21 @@ class TestPersistence:
 
 
 class TestGate:
-    def test_off_by_default(self, monkeypatch):
+    def test_on_by_default(self, monkeypatch):
+        monkeypatch.delenv("MAVERICK_JIT_RL", raising=False)
+        # Real config default (no [jit_rl] enable set) -> on.
+        assert jit_rl.enabled() is True
+
+    def test_respects_disable_setting(self, monkeypatch):
         monkeypatch.delenv("MAVERICK_JIT_RL", raising=False)
         monkeypatch.setattr(jit_rl, "_settings", lambda: {
             "enable": False, "k": 8, "beta": 1.0, "max_experiences": 5000})
         assert jit_rl.enabled() is False
 
-    def test_env_enables(self, monkeypatch):
+    def test_env_override(self, monkeypatch):
         monkeypatch.setenv("MAVERICK_JIT_RL", "1")
         assert jit_rl.enabled() is True
-        monkeypatch.setenv("MAVERICK_JIT_RL", "0")
+        monkeypatch.setenv("MAVERICK_JIT_RL", "0")  # explicit opt-out
         assert jit_rl.enabled() is False
 
     def test_build_from_env_in_memory(self, tmp_path):
@@ -145,3 +151,62 @@ class TestGate:
         ctx = StepContext(goal_id=1, step_index=0, role="coder")
         adapter.record_step(ctx, "a", 1.0)
         assert len(adapter.store) == 1
+
+
+class TestBestOfNSelector:
+    def _cands(self):
+        from maverick.best_of_n import Candidate
+        return [
+            Candidate(text="a", confidence=0.7, accepts=True),
+            Candidate(text="b", confidence=0.72, accepts=True),
+        ]
+
+    def test_cold_store_matches_default_selection(self):
+        # With no experience, advantage is 0 everywhere -> highest confidence wins,
+        # exactly like the default (accepts, confidence) selection.
+        adapter = JitAdapter()
+        ctx = StepContext(goal_id=1, step_index=0, role="coder")
+        select = jit_rl.make_best_of_n_selector(adapter, ctx)
+        best = select(self._cands())
+        assert best.text == "b"  # 0.72 > 0.70
+
+    def test_records_outcomes_for_future_adaptation(self):
+        adapter = JitAdapter()
+        ctx = StepContext(goal_id=1, step_index=0, role="coder")
+        select = jit_rl.make_best_of_n_selector(adapter, ctx)
+        select(self._cands())
+        assert len(adapter.store) == 2  # both candidates recorded
+
+    def test_learned_advantage_biases_selection(self):
+        from maverick.best_of_n import Candidate
+        adapter = JitAdapter(k=8, beta=1.0)
+        ctx = StepContext(goal_id=1, step_index=0, role="coder")
+        feats = adapter._features(ctx)
+        # Teach the store that ordinal 0 ("cand_0") returns much better here.
+        for _ in range(5):
+            adapter.store.record(feats, "cand_0", 1.0)
+            adapter.store.record(feats, "cand_1", 0.0)
+        select = jit_rl.make_best_of_n_selector(adapter, ctx)
+        # Candidate 1 has slightly higher raw confidence, but cand_0's learned
+        # advantage outweighs the 0.02 gap -> the adapter steers to cand_0.
+        cands = [Candidate(text="a", confidence=0.70, accepts=True),
+                 Candidate(text="b", confidence=0.72, accepts=True)]
+        assert select(cands).text == "a"
+
+    @pytest.mark.asyncio
+    async def test_best_of_n_uses_select_hook(self):
+        from maverick.best_of_n import best_of_n
+
+        async def gen():
+            gen.i += 1
+            return f"cand{gen.i}"
+        gen.i = 0
+
+        async def verify(text):
+            from types import SimpleNamespace
+            return SimpleNamespace(confidence=0.8, accepts=True)
+
+        # A select hook that always picks the LAST candidate proves the hook is used.
+        res = await best_of_n(gen, verify, n=3, accept_early=False,
+                              select=lambda cs: cs[-1])
+        assert res.best == "cand3"

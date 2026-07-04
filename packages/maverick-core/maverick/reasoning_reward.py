@@ -347,13 +347,13 @@ def parse_structured(
 
 
 def enabled() -> bool:
-    """Whether structured reasoning rewards are turned on. OFF by default.
+    """Whether structured reasoning rewards are turned on. ON by default.
 
-    ``MAVERICK_REASONING_REWARD=1`` (or ``[reasoning_reward] enable`` in
-    config) opts in. Fail-open: any error resolving the flag leaves the feature
-    off, so a broken config never flips it on. The scalar verifier remains the
-    default judge; this gate lets a deployment upgrade to the rubric judge
-    without changing anyone else's behavior.
+    The verifier judges FINAL answers with the rubric reward and falls back to
+    the scalar verdict for any non-rubric reply (see
+    ``verifier.verify_proposal_structured``). ``MAVERICK_REASONING_REWARD=0``
+    (or ``[reasoning_reward] enable = false``) forces the scalar verifier.
+    Fail-open: any error resolving the flag leaves it at the configured default.
     """
     try:
         from .config import env_flag

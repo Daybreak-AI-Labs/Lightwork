@@ -23,10 +23,11 @@ call that re-ranks candidate actions by advantage. It does not touch the agent
 loop; a caller composes ``steer`` with best-of-N selection when opted in
 (mirroring how :mod:`maverick.prm` ships the interface before the wiring).
 
-Posture: OFF by default (:func:`enabled`), fail-open, standard library only
-(no torch, no gradients). Every hot-path method degrades to a neutral signal
-(zero advantage / unchanged order) rather than raising, so a cold or corrupt
-store can never block a run.
+Posture: ON by default (:func:`enabled`) but a no-op with a cold store --
+enabling it changes nothing until experience accumulates -- fail-open, standard
+library only (no torch, no gradients). Every hot-path method degrades to a
+neutral signal (zero advantage / unchanged order) rather than raising, so a
+cold or corrupt store can never block a run.
 """
 from __future__ import annotations
 
@@ -295,11 +296,15 @@ def _settings() -> dict:
 
 
 def enabled() -> bool:
-    """Whether JitRL test-time adaptation is turned on. OFF by default.
+    """Whether JitRL test-time adaptation is turned on. ON by default.
 
-    ``MAVERICK_JIT_RL=1`` (or ``[jit_rl] enable``) opts in. Fail-open: any error
-    leaves it off, so the frozen model's default behaviour is unchanged unless a
-    deployment explicitly enables adaptation."""
+    Wired into verifier-guided best-of-N selection
+    (:func:`make_best_of_n_selector`): it records candidate outcomes and factors
+    learned advantage into the choice, reducing to the pure verifier selection
+    with a cold store (so enabling it changes nothing until experience
+    accumulates). ``MAVERICK_JIT_RL=0`` (or ``[jit_rl] enable = false``) turns
+    it off. Fail-open: any error resolving the flag leaves it at the configured
+    default."""
     try:
         from .config import env_flag
         v = env_flag("MAVERICK_JIT_RL")
@@ -311,6 +316,44 @@ def enabled() -> bool:
         return bool(_settings()["enable"])
     except Exception:  # pragma: no cover
         return False
+
+
+def make_best_of_n_selector(adapter: JitAdapter, ctx: object):
+    """A ``best_of_n(select=...)`` hook that factors learned advantage into the
+    choice and records each candidate's realised return for future adaptation.
+
+    In state ``ctx``, each candidate's ordinal is its action; the verifier
+    confidence is the return. The winner maximises
+    ``(accepts, confidence + beta * advantage)``, so a position that has
+    historically verified better in similar states gets a nudge -- and with a
+    cold store every advantage is 0, reducing this to the default
+    ``(accepts, confidence)`` selection (enabling JitRL is a no-op until it has
+    learned something). Never raises: on any error it falls back to the default
+    max-key winner so a selection is always returned.
+
+    Note: ordinal-as-action is the minimal keying that needs no candidate
+    metadata; richer keying (by the generating model/role) is a natural
+    extension once callers thread that through.
+    """
+    def _select(candidates: list):
+        try:
+            feats = adapter._features(ctx)
+            actions = [f"cand_{i}" for i in range(len(candidates))]
+            advs = (adapter.store.advantage_batch(feats, actions, adapter.k)
+                    if feats else {})
+            best_i = max(
+                range(len(candidates)),
+                key=lambda i: (candidates[i].accepts,
+                               candidates[i].confidence
+                               + adapter.beta * advs.get(actions[i], 0.0)))
+            # Record each candidate's realised return AFTER choosing, so this
+            # selection isn't biased by its own just-observed outcomes.
+            for i, c in enumerate(candidates):
+                adapter.record_step(ctx, actions[i], c.confidence)
+            return candidates[best_i]
+        except Exception:  # pragma: no cover -- never lose the answer to a bad steer
+            return max(candidates, key=lambda c: (c.accepts, c.confidence))
+    return _select
 
 
 def default_store_path() -> Path:
@@ -340,6 +383,7 @@ __all__ = [
     "DEFAULT_BETA",
     "DEFAULT_MAX_EXPERIENCES",
     "enabled",
+    "make_best_of_n_selector",
     "default_store_path",
     "build_from_env",
 ]
