@@ -380,6 +380,13 @@
         var h = await (await fetch('/api/v1/event-triggers/history?limit=500')).json();
         (h.history || []).forEach(function (r) { (histByName[r.name] = histByName[r.name] || []).push(r); });
       } catch (e) { /* history is best-effort */ }
+      // Per-trigger goal-outcome counts (done/failed/blocked): attributes the
+      // QUALITY of what each automation produced, which the fire history can't.
+      var outByName = {};
+      try {
+        var o = await (await fetch('/api/v1/event-triggers/outcomes')).json();
+        outByName = o.outcomes || {};
+      } catch (e) { /* outcomes are best-effort */ }
       evList.textContent = '';
       if (evCount) evCount.textContent = items.length ? (items.length + (items.length === 1 ? ' trigger' : ' triggers')) : '';
       if (evEmpty) evEmpty.hidden = items.length > 0;
@@ -392,6 +399,7 @@
           + (t.cursor ? (' · at ' + t.cursor) : ' · not yet polled')));
         var runs = el('div', 'auto__runs'); main.appendChild(runs); loadRuns('event', t.name, runs);
         var hist = el('div', 'auto__runs'); main.appendChild(hist); renderEventHistory(histByName[t.name] || [], hist);
+        var outc = el('div', 'auto__runs'); main.appendChild(outc); renderEventOutcomes(outByName[t.name] || {}, outc);
         li.appendChild(main);
         li.appendChild(delBtn('Delete event trigger ' + t.name, function () { delEventTrigger(t.name); }));
         evList.appendChild(li);
@@ -407,6 +415,18 @@
       if (fires) bits.push('fired ' + fires + '×');
       if (err) bits.push('⚠ ' + (err.note || err.kind));
       if (bits.length) into.textContent = bits.join(' · ');
+    }
+    function renderEventOutcomes(counts, into) {
+      // Goal-outcome quality per trigger (done/failed/blocked): a rising failed
+      // count flags an automation firing bad goals -- and those same failures are
+      // grounded into the learning loop by the run itself.
+      var done = counts.done || 0;
+      var bad = (counts.failed || 0) + (counts.blocked || 0);
+      if (!done && !bad) return;
+      var bits = [];
+      if (done) bits.push('✓ ' + done + ' done');
+      if (bad) bits.push('✗ ' + bad + ' failed');
+      into.textContent = bits.join(' · ');
     }
     async function delEventTrigger(name) {
       if (!(await mvConfirm('Delete event trigger “' + name + '”? It will stop polling.'))) return;

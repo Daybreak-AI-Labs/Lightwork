@@ -39,10 +39,12 @@ log = logging.getLogger("maverick_dashboard.automation_queue")
 
 TICK_KIND = "automation_tick"
 DREAM_KIND = "dream_cycle"
+FLYWHEEL_KIND = "flywheel_cycle"
 _MIN_INTERVAL = 60               # floor for a per-trigger cadence (matches the UI/schema)
 _DEFAULT_INTERVAL = 300          # per-trigger poll cadence when unset (5 min)
 _TICK_CRON = "* * * * *"         # evaluate due triggers every minute
 _DREAM_CRON_DEFAULT = "0 */6 * * *"  # consolidate every 6h
+_FLYWHEEL_CRON_DEFAULT = "30 */6 * * *"  # turn the flywheel every 6h (offset from dream)
 _DEFAULT_WORKERS = 3             # goal-runner threads (so a slow goal can't stall the tick)
 
 _LOCK = threading.RLock()   # reentrant: start()/stop() call queue(), which also locks
@@ -199,6 +201,20 @@ def _handle_dream(_job=None) -> None:
         log.exception("scheduled dream cycle failed")
 
 
+def _handle_flywheel(_job=None) -> None:
+    """Turn the Cognitive Data Engine flywheel over the accumulated Operating
+    Record + grounded outcomes. This is the missing scheduled driver: outcomes
+    (failures, sign-offs, feedback, real system-of-record results) land
+    continuously, but nothing consolidated them into guardrails/habits without a
+    manual `maverick flywheel`. Gated (`maybe_run` is a no-op unless
+    ``[data_engine]`` is on) and fail-open like the dream cycle."""
+    from maverick import flywheel
+    try:
+        flywheel.maybe_run()
+    except Exception:  # pragma: no cover -- fail-open
+        log.exception("scheduled flywheel cycle failed")
+
+
 # ---- cron seeding -----------------------------------------------------------
 
 def _pending(kind: str) -> list:
@@ -229,13 +245,24 @@ def _dream_cron() -> str:
         return _DREAM_CRON_DEFAULT
 
 
+def _flywheel_cron() -> str:
+    try:
+        expr = str((config.load_config().get("data_engine") or {}).get("cron") or "").strip()
+        return expr or _FLYWHEEL_CRON_DEFAULT
+    except Exception:  # pragma: no cover
+        return _FLYWHEEL_CRON_DEFAULT
+
+
 def reconcile() -> None:
-    """Seed the tick + dream cron jobs for whichever subsystems are enabled."""
-    from maverick import automation_events, dreaming
+    """Seed the tick + dream + flywheel cron jobs for whichever subsystems are
+    enabled."""
+    from maverick import automation_events, data_engine, dreaming
     if automation_events.enabled():
         _ensure_cron(TICK_KIND, _TICK_CRON)
     if dreaming.enabled():
         _ensure_cron(DREAM_KIND, _dream_cron())
+    if data_engine.enabled():
+        _ensure_cron(FLYWHEEL_KIND, _flywheel_cron())
 
 
 # ---- lifecycle --------------------------------------------------------------
@@ -246,12 +273,12 @@ def _worker_count() -> int:
 
 
 def start() -> bool:
-    """Start the automation worker pool + seed cron jobs. No-op when neither
-    event triggers nor dreaming is enabled, and idempotent. Returns whether the
-    pool was started."""
+    """Start the automation worker pool + seed cron jobs. No-op when none of
+    event triggers, dreaming, or the data engine is enabled, and idempotent.
+    Returns whether the pool was started."""
     global _worker, _worker_threads
-    from maverick import automation_events, dreaming
-    if not (automation_events.enabled() or dreaming.enabled()):
+    from maverick import automation_events, data_engine, dreaming
+    if not (automation_events.enabled() or dreaming.enabled() or data_engine.enabled()):
         return False
     with _LOCK:
         if _worker_threads:
@@ -260,6 +287,7 @@ def start() -> bool:
         w = Worker(queue=queue())
         w.register(TICK_KIND, _handle_tick)
         w.register(DREAM_KIND, _handle_dream)
+        w.register(FLYWHEEL_KIND, _handle_flywheel)
         # Seed the cron jobs + actually start the threads BEFORE committing to the
         # module globals, so a failure in reconcile() (e.g. a boot-time sqlite
         # write error) leaves us cleanly un-started and retryable -- not wedged
@@ -293,4 +321,5 @@ def stop() -> None:
         t.join(timeout=5.0)
 
 
-__all__ = ["start", "stop", "reconcile", "queue", "TICK_KIND", "DREAM_KIND"]
+__all__ = ["start", "stop", "reconcile", "queue",
+           "TICK_KIND", "DREAM_KIND", "FLYWHEEL_KIND"]

@@ -48,6 +48,7 @@ from .api_schemas import (
     EventTriggerIn,
     EventTriggerOut,
     FactIn,
+    FeedbackIn,
     FleetCreateIn,
     FleetRunIn,
     GoalEventOut,
@@ -58,7 +59,9 @@ from .api_schemas import (
     ImportRunIn,
     ImportRunOut,
     LearningToggleIn,
+    OutcomeByKeyIn,
     OutcomeIn,
+    OutcomeLinkIn,
     RedactIn,
     ReparentIn,
     RetitleIn,
@@ -746,6 +749,57 @@ async def record_outcome(request: Request, payload: OutcomeIn) -> None:
     _rec(goal_id, episode_id, float(payload.value), kind=(payload.kind or ""))
 
 
+@router.post("/outcomes/link", status_code=204)
+async def link_outcome(request: Request, payload: OutcomeLinkIn) -> None:
+    """Link an external business key to the episode that acted on it.
+
+    The registration half of the system-of-record loop: when a run creates an
+    invoice / opens a ticket, this records ``invoice:INV-42 -> (goal, episode)``
+    so a later outcome reported against that key (see ``/outcomes/by-key``) can be
+    grounded without the reporter knowing any episode id. Always harmless to store.
+    """
+    require_permission(request, "operate")
+    goal_id = int(payload.goal_id)
+    episode_id = int(payload.episode_id)
+    w = _world()
+    g = w.get_goal(goal_id)
+    if g is None:
+        raise HTTPException(status_code=404, detail="no such goal")
+    assert_goal_access(request, g)
+    if not w.episode_exists(goal_id, episode_id):
+        raise HTTPException(status_code=404, detail="no such episode")
+    from maverick.consequence import link_outcome_key
+    link_outcome_key(payload.key, goal_id, episode_id)
+
+
+@router.post("/outcomes/by-key")
+async def record_outcome_by_key(request: Request, payload: OutcomeByKeyIn) -> dict:
+    """Ingest a real downstream outcome using only the business key.
+
+    The endpoint a system-of-record webhook (Stripe "invoice.paid", Zendesk
+    "ticket.reopened") calls: it knows its own key, not a Lightwork episode. We
+    resolve the key to the episode that acted (registered via ``/outcomes/link``)
+    and ground the reward there. ``matched`` is ``false`` when no run has linked
+    that key -- the connector reported an outcome for work Lightwork didn't do.
+    """
+    require_permission(request, "operate")
+    from maverick import consequence
+    hit = consequence.shared_correlation().resolve(payload.key)
+    if hit is None:
+        return {"matched": False}
+    goal_id, episode_id = hit
+    # The link maps to a real goal; enforce the same access boundary as the
+    # goal/episode ingest so an operate caller can't ground outcomes on a goal
+    # they can't see (the correlation store is already tenant-scoped by path).
+    w = _world()
+    g = w.get_goal(goal_id)
+    if g is None or not can_access_goal(request, g):
+        return {"matched": False}
+    consequence.record_outcome(goal_id, episode_id, float(payload.value),
+                               kind=(payload.kind or ""))
+    return {"matched": True}
+
+
 @router.get("/skills", response_model=list[SkillOut])
 async def list_installed_skills() -> list[SkillOut]:
     from maverick.skills import load_skills
@@ -764,7 +818,7 @@ async def get_flywheel_state() -> dict:
     auto-dropped when the harm is gone) and the **habits** it has consolidated
     (causally-beneficial actions, with a reinforcement strength). Empty until the
     flywheel has turned. Read-only; never mutates."""
-    out: dict = {"guardrails": [], "habits": []}
+    out: dict = {"guardrails": [], "habits": [], "signal": {}}
     try:
         from maverick.negative_knowledge import shared as _guardrails
         out["guardrails"] = [g.to_dict() for g in _guardrails().all()]
@@ -773,6 +827,19 @@ async def get_flywheel_state() -> dict:
     try:
         from maverick.procedural_memory import shared as _memory
         out["habits"] = [m.to_dict() for m in _memory().recall(top_k=20)]
+    except Exception:  # pragma: no cover
+        pass
+    # The grounded signal accumulating under the moat: how many real outcomes
+    # (failures, sign-offs, feedback, system-of-record results) and human verdicts
+    # have landed. Makes "the workforce is learning from reality" a live number.
+    try:
+        from maverick import consequence
+
+        from maverick_dashboard import goal_feedback_store
+        out["signal"] = {
+            "grounded_outcomes": consequence.count(),
+            "human_feedback": goal_feedback_store.count(),
+        }
     except Exception:  # pragma: no cover
         pass
     return out
@@ -1476,24 +1543,53 @@ async def post_signoff(request: Request, goal_id: int, payload: SignoffIn) -> di
 
 def _ground_outcome(w, goal_id: int, value: float, *, kind: str) -> None:
     """Record a real human/world outcome for the goal's latest episode as
-    grounded reward the learning flywheel prefers over its proxy. No-op unless
-    ``[consequence]`` is enabled (kernel stays stateless by default); never
-    raises -- grounding is best-effort and must not fail the request."""
-    try:
-        from maverick import consequence
-        if not consequence.enabled():
-            return
-        episodes = w.list_episodes(goal_id=goal_id, limit=1)
-        if not episodes:
-            return  # the action should have an episode, but be safe
-        consequence.record_outcome(goal_id, episodes[0].id, float(value), kind=kind)
-    except Exception as e:  # pragma: no cover - grounding is best-effort
-        log.debug("%s outcome not recorded for goal %s: %s", kind, goal_id, e)
+    grounded reward the learning flywheel prefers over its proxy. Delegates to
+    the shared core helper (no-op unless ``[consequence]`` is enabled; never
+    raises -- grounding is best-effort and must not fail the request)."""
+    from maverick import consequence
+    consequence.record_self_outcome(w, goal_id, value, kind=kind)
 
 
 def _record_signoff_outcome(w, goal_id: int, decision: str) -> None:
     """A deliverable sign-off -> grounded outcome (approved 1.0 / rejected 0.0)."""
     _ground_outcome(w, goal_id, 1.0 if decision == "approved" else 0.0, kind="signoff")
+
+
+@router.get("/goals/{goal_id}/feedback")
+async def get_feedback(request: Request, goal_id: int) -> dict:
+    """The current human thumbs-up/down on a goal's result (or ``null``)."""
+    w = _world()
+    g = w.get_goal(goal_id)
+    if g is None:
+        raise HTTPException(status_code=404, detail="no such goal")
+    assert_goal_access(request, g)
+    from maverick_dashboard import goal_feedback_store
+    return {"feedback": goal_feedback_store.latest_for_goal(goal_id)}
+
+
+@router.post("/goals/{goal_id}/feedback")
+async def post_feedback(request: Request, goal_id: int, payload: FeedbackIn) -> dict:
+    """Record a human thumbs-up/down on a goal's result.
+
+    The always-available verdict: unlike the sign-off gate (which only exists when
+    a pack declares one), any finished result can be rated here, and the rating is
+    fed back into the learning loop as a GROUNDED outcome -- an up is a 1.0 reward,
+    a down a 0.0 -- exactly the ``(goal_id, episode_id, value)`` tuple the
+    Consequence Engine / flywheel consume. Persisted for the UI + the "what your
+    workforce learned" count. Best-effort grounding, gated on ``[consequence]``."""
+    require_permission(request, "operate")
+    w = _world()
+    g = w.get_goal(goal_id)
+    if g is None:
+        raise HTTPException(status_code=404, detail="no such goal")
+    assert_goal_access(request, g)
+    value = 1.0 if payload.rating == "up" else 0.0
+    who = _supervisor(request)
+    from maverick_dashboard import goal_feedback_store
+    goal_feedback_store.record(goal_id, g.owner or "", payload.rating, value=value,
+                               note=payload.note or "", by=who)
+    _ground_outcome(w, goal_id, value, kind="feedback")
+    return {"feedback": goal_feedback_store.latest_for_goal(goal_id)}
 
 
 def _handoff_approved_deliverable(g, decided_by: str) -> None:
@@ -2127,6 +2223,25 @@ async def event_trigger_history(request: Request, name: str = "", limit: int = 5
     rows = trigger_events_store.history(
         name=name or None, owner=owner, limit=max(1, min(1000, limit)))
     return {"history": rows}
+
+
+@router.get("/event-triggers/outcomes")
+async def event_trigger_outcomes(request: Request) -> dict:
+    """Per-trigger goal-outcome counts (done / failed / blocked / active ...).
+
+    Closes the attribution loop the firing history can't: a trigger that fires a
+    *bad* goal shows up here as a rising ``failed``/``blocked`` count, so an
+    operator can see which automations produce work that doesn't land -- and the
+    same failed goals are grounded into the learning loop by the run itself.
+    Sourced from the goal-origin join (``origin_status_counts('event', name)``)."""
+    require_permission(request, "operate")
+    _require_event_triggers()
+    w = _world()
+    outcomes = {
+        t["name"]: w.origin_status_counts("event", t["name"])
+        for t in _owned_event_triggers(request)
+    }
+    return {"outcomes": outcomes}
 
 
 # ---- automation import: pull clients' existing automations into Lightwork -----

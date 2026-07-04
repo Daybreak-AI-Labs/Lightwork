@@ -213,6 +213,29 @@ class OutcomeIn(BaseModel):
     kind: str = ""
 
 
+class FeedbackIn(BaseModel):
+    """A human thumbs-up/down on a goal's result -- the always-available verdict
+    (unlike the gated sign-off). Grounds a real outcome into the learning loop."""
+    rating: str = Field(..., pattern="^(up|down)$")
+    note: str | None = Field(default=None, max_length=2000)
+
+
+class OutcomeLinkIn(BaseModel):
+    """Link an external business key (``invoice:INV-42``) to the episode that
+    acted on it, so a later outcome reported against that key can be grounded."""
+    goal_id: int
+    episode_id: int
+    key: str = Field(..., min_length=1, max_length=256)
+
+
+class OutcomeByKeyIn(BaseModel):
+    """A real downstream outcome reported by a system of record using only the
+    business key it owns -- resolved to the episode that acted via the link."""
+    key: str = Field(..., min_length=1, max_length=256)
+    value: float
+    kind: str = ""
+
+
 class AnswerIn(BaseModel):
     question_id: int
     answer: str

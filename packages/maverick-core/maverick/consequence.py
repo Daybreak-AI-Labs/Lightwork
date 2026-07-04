@@ -151,6 +151,8 @@ def shared() -> ConsequenceStore:
 def reset_shared() -> None:
     with _shared_lock:
         _shared.clear()
+    with _shared_corr_lock:
+        _shared_corr.clear()
 
 
 def record_outcome(goal_id: int, episode_id: int, value: float, *, kind: str = "",
@@ -188,7 +190,158 @@ def grounded_outcome(goal_id: int, episode_id: int, proxy: float | None, *,
     return real if real is not None else proxy
 
 
+def record_self_outcome(world, goal_id: int, value: float, *, kind: str,
+                        store: ConsequenceStore | None = None) -> bool:
+    """Ground a **first-party** outcome against a goal's latest episode.
+
+    The single helper for the outcomes Lightwork observes directly -- a human's
+    certify/reject, a thumbs-up/down, or the run's own terminal failure -- as
+    opposed to :func:`record_outcome`, which a system-of-record connector calls
+    with an episode id it already knows. Resolves the episode from ``world``
+    (duck-typed: needs ``list_episodes(goal_id=, limit=)``). A no-op returning
+    ``False`` unless ``[consequence]`` is enabled (the kernel stays stateless by
+    default), and never raises -- grounding is best-effort and must not fail the
+    action that produced it."""
+    try:
+        if not enabled():
+            return False
+        episodes = world.list_episodes(goal_id=goal_id, limit=1)
+        if not episodes:
+            return False
+        return record_outcome(goal_id, episodes[0].id, float(value), kind=kind, store=store)
+    except Exception:  # pragma: no cover -- grounding is best-effort
+        log.debug("self-outcome not recorded for goal %s", goal_id, exc_info=True)
+        return False
+
+
+# ---- outcome correlation: external business key -> the episode that acted ----
+#
+# The Consequence Engine keys reward on ``(goal_id, episode_id)``, but a system
+# of record reports back with only the business key it owns -- ``invoice INV-42
+# was paid``, ``ticket 91 reopened``. This store is the join that lets a webhook
+# ground an outcome with just that key: the run that acted on the entity links
+# the key to its episode, and the outcome ingest resolves the key back. This is
+# what makes the marquee "weeks later reality reports back" signal reachable from
+# an integration that has never heard of an episode id.
+
+_MAX_LINKS = 100_000
+
+
+@dataclass
+class CorrelationStore:
+    """Append-only map ``external key -> (goal_id, episode_id)`` that acted on it.
+
+    The latest link for a key wins (the most recent run to touch the entity owns
+    the outcome). Atomic-append, 0600, bounded -- the ``ConsequenceStore`` shape.
+    """
+
+    path: Path | None = None
+    max_rows: int = _MAX_LINKS
+    _latest: dict = None  # type: ignore[assignment]
+    _lock: threading.Lock = None  # type: ignore[assignment]
+
+    def __post_init__(self) -> None:
+        if self._lock is None:
+            self._lock = threading.Lock()
+        if self._latest is None:
+            self._latest = {}
+        if self.path is not None:
+            self._load()
+
+    def link(self, key: str, goal_id: int, episode_id: int, *,
+             ts: float | None = None) -> bool:
+        """Link an external business key to the episode that acted. Never raises."""
+        k = str(key).strip()
+        if not k:
+            return False
+        row = {"ts": ts if ts is not None else time.time(), "key": k[:256],
+               "goal_id": int(goal_id), "episode_id": int(episode_id)}
+        with self._lock:
+            self._latest[row["key"]] = (row["ts"], row["goal_id"], row["episode_id"])
+            if self.path is None:
+                return True
+            try:
+                p = Path(self.path)
+                p.parent.mkdir(parents=True, exist_ok=True)
+                with open(os.open(p, os.O_CREAT | os.O_WRONLY | os.O_APPEND, 0o600),
+                          "a", encoding="utf-8") as fh:
+                    fh.write(json.dumps(row, sort_keys=True) + "\n")
+                return True
+            except Exception:  # pragma: no cover -- best-effort
+                log.debug("outcome-link record failed", exc_info=True)
+                return False
+
+    def resolve(self, key: str) -> tuple[int, int] | None:
+        """The (goal_id, episode_id) most recently linked to ``key``, or None."""
+        with self._lock:
+            hit = self._latest.get(str(key).strip())
+            return (hit[1], hit[2]) if hit is not None else None
+
+    def count(self) -> int:
+        with self._lock:
+            return len(self._latest)
+
+    def _load(self) -> None:
+        try:
+            with open(self.path, encoding="utf-8") as fh:
+                lines = fh.readlines()
+        except OSError:
+            return
+        for raw in lines[-self.max_rows:]:
+            try:
+                d = json.loads(raw)
+                key = str(d["key"])
+                ts = float(d.get("ts", 0.0))
+                prev = self._latest.get(key)
+                if prev is None or ts >= prev[0]:
+                    self._latest[key] = (ts, int(d["goal_id"]), int(d["episode_id"]))
+            except (KeyError, ValueError, TypeError):
+                continue
+
+
+_shared_corr: dict = {}
+_shared_corr_lock = threading.Lock()
+
+
+def shared_correlation() -> CorrelationStore:
+    from .paths import data_dir
+
+    path = data_dir("outcome_links.ndjson")
+    with _shared_corr_lock:
+        store = _shared_corr.get(path)
+        if store is None:
+            store = CorrelationStore(path=path)
+            _shared_corr[path] = store
+        return store
+
+
+def link_outcome_key(key: str, goal_id: int, episode_id: int, *,
+                     store: CorrelationStore | None = None) -> bool:
+    """Record that ``key`` (an external business id) was acted on by this episode,
+    so a later outcome reported against ``key`` can be grounded. Always harmless."""
+    return (store or shared_correlation()).link(key, goal_id, episode_id)
+
+
+def record_outcome_for_key(key: str, value: float, *, kind: str = "",
+                           store: ConsequenceStore | None = None,
+                           corr: CorrelationStore | None = None) -> bool:
+    """Ground a downstream outcome using only the external business ``key``.
+
+    Resolves ``key`` to the episode that acted (via the correlation store) and
+    records the grounded reward there. Returns ``True`` when a correlation
+    existed and the outcome was recorded, ``False`` when no run has linked that
+    key yet (the connector reported an outcome for work Lightwork didn't do)."""
+    hit = (corr or shared_correlation()).resolve(key)
+    if hit is None:
+        return False
+    goal_id, episode_id = hit
+    return record_outcome(goal_id, episode_id, value, kind=kind, store=store)
+
+
 __all__ = [
     "ConsequenceStore", "enabled", "shared", "reset_shared",
     "record_outcome", "resolve", "grounded_outcome", "count",
+    "record_self_outcome",
+    "CorrelationStore", "shared_correlation", "link_outcome_key",
+    "record_outcome_for_key",
 ]
