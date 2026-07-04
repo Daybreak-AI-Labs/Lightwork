@@ -57,6 +57,7 @@ from .api_schemas import (
     HaltIn,
     ImportRunIn,
     ImportRunOut,
+    LearningToggleIn,
     OutcomeIn,
     RedactIn,
     ReparentIn,
@@ -2059,18 +2060,17 @@ async def delete_event_trigger_endpoint(request: Request, name: str) -> dict:
 async def poll_event_triggers(request: Request, bg: BackgroundTasks, name: str = "") -> dict:
     """Poll event sources and fire the bound template for each new item.
 
-    Meant to be hit on a schedule (a cron POSTing here, or `maverick worker`).
     Owner-scoped: a caller drains only its own triggers. Each source's cursor
     advances so an item fires at most once; the per-poll event count is bounded
     by the engine. A broken template still advances the cursor so it can't
-    re-fire a backlog forever."""
+    re-fire a backlog forever. This is the on-demand path (the "Poll now" button
+    or an external cron); the app also polls on a background tick automatically
+    when the feature is on."""
     require_permission(request, "operate")
     _require_event_triggers()
-    from maverick.automation_events import EventSourceError, poll_source
     from maverick.runner import run_goal_in_thread
-    from maverick.templates import load_template
 
-    from maverick_dashboard import event_triggers_store
+    from maverick_dashboard import event_poll, event_triggers_store
 
     owner = goal_owner_filter(request)
     principal = caller_principal(request) or ""
@@ -2081,45 +2081,14 @@ async def poll_event_triggers(request: Request, bg: BackgroundTasks, name: str =
     if name:
         triggers = [t for t in triggers if t["name"] == name]
 
-    w = _world()
-    results: list[dict] = []
-    for trig in triggers:
-        summary: dict = {"name": trig["name"], "new_events": 0, "fired": [], "notes": []}
-        try:
-            res = await run_in_threadpool(
-                poll_source, trig["source"], trig["config"], trig["cursor"])
-        except EventSourceError as e:
-            summary["notes"].append(f"poll failed: {e}")
-            results.append(summary)
-            continue
-        try:
-            tpl = load_template(trig["template"])
-        except (ValueError, FileNotFoundError) as e:
-            summary["notes"].append(f"template unavailable: {e}")
-            event_triggers_store.set_cursor(trig["name"], res.cursor)
-            results.append(summary)
-            continue
-        declared = set(tpl.params)
-        summary["new_events"] = len(res.events)
-        for event in res.events:
-            params = dict(trig.get("params") or {})
-            for k, v in event.items():          # event fields fill DECLARED params only
-                if k in declared:
-                    params[str(k)] = str(v)[:2000]
-            try:
-                title, description = tpl.render(**params)
-            except ValueError as e:
-                summary["notes"].append(f"skipped an event: {e}")
-                continue
-            goal_id = w.create_goal(title[:200], description[:8000], owner=principal)
-            w.record_goal_origin(goal_id, "event", trig["name"])
-            if user_id:
-                bg.add_task(run_goal_in_thread, goal_id, channel="api", user_id=user_id)
-            else:
-                bg.add_task(run_goal_in_thread, goal_id)
-            summary["fired"].append(goal_id)
-        event_triggers_store.set_cursor(trig["name"], res.cursor)
-        results.append(summary)
+    def _fire(goal_id: int) -> None:
+        if user_id:
+            bg.add_task(run_goal_in_thread, goal_id, channel="api", user_id=user_id)
+        else:
+            bg.add_task(run_goal_in_thread, goal_id)
+
+    results = await run_in_threadpool(
+        event_poll.poll_and_fire, _world(), triggers, principal=principal, fire=_fire)
     return {"polled": len(results), "triggers": results}
 
 
@@ -4034,6 +4003,17 @@ async def learning_api(request: Request) -> dict:
     judgements on the Operating Record, capabilities the workforce taught
     itself, and the grounded outcomes it has learned from -- what a customer
     would forfeit by leaving. Read-only and owner-scoped."""
+    return _learning_snapshot(request)
+
+
+@router.post("/learning")
+async def set_learning_endpoint(request: Request, payload: LearningToggleIn) -> dict:
+    """Turn the whole self-learning loop on or off in one action (writes the
+    learning knobs to the config overlay). Returns the refreshed snapshot so the
+    caller sees the new state. Requires the operate permission."""
+    require_permission(request, "operate")
+    from maverick_dashboard import settings_store
+    settings_store.set_learning(payload.enabled)
     return _learning_snapshot(request)
 
 

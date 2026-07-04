@@ -56,6 +56,20 @@ CAPABILITY_DEFAULTS = {
 }
 FEATURE_DEFAULTS = {"skills": True, "world_model": True, "streaming": True}
 
+# The learning loop's toggles, as (config section, key). Writing these to the
+# overlay flips the SAME knobs each subsystem's enabled() reads (load_config
+# deep-merges the overlay), so the dashboard can turn the whole self-learning
+# loop on in one action -- grounded outcomes, failure memory, consolidation,
+# trajectory capture, and the improvement flywheel. All OFF by default.
+LEARNING_TOGGLES = [
+    ("consequence", "enable"),
+    ("reflexion", "enable"),
+    ("dreaming", "enable"),
+    ("self_improvement", "capture"),
+    ("data_engine", "enable"),
+]
+_LEARNING_SECTIONS = [s for s, _ in LEARNING_TOGGLES]
+
 # Channels offered in the UI: name + per-field spec. Keys MUST match what
 # server.py's _wire_<name> reads from [channels.<name>] (verified against the
 # wiring), so a value saved here actually configures the channel via the
@@ -128,7 +142,7 @@ def _dump(data: dict) -> str:
         "# config.toml is never touched by the dashboard.",
         "",
     ]
-    for section in ("capabilities", "features"):
+    for section in ("capabilities", "features", *_LEARNING_SECTIONS):
         tbl = data.get(section) or {}
         if tbl:
             lines.append(f"[{section}]")
@@ -206,6 +220,19 @@ def set_toggle(section: str, name: str, enabled: bool) -> None:
     with _locked():
         data = load_overlay()
         data.setdefault(section, {})[name] = bool(enabled)
+        _write(data)
+
+
+def set_learning(enabled: bool) -> None:
+    """Turn the whole self-learning loop on or off in one action -- writes each
+    of ``LEARNING_TOGGLES`` to the overlay, which ``load_config()`` deep-merges,
+    so every subsystem's ``enabled()`` sees it. (An env var like
+    ``MAVERICK_CONSEQUENCE`` still overrides the overlay if a deployment set
+    one.)"""
+    with _locked():
+        data = load_overlay()
+        for section, key in LEARNING_TOGGLES:
+            data.setdefault(section, {})[key] = bool(enabled)
         _write(data)
 
 

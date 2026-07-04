@@ -208,6 +208,78 @@ class HttpJsonSource:
 register("http_json", HttpJsonSource)
 
 
+# ---- built-in source: poll an RSS / Atom feed -------------------------------
+
+
+def _http_get_text(url: str, headers: dict | None = None, timeout: float = 15.0) -> str:
+    """GET ``url`` as text, through the SSRF guard. Isolated for test injection."""
+    try:
+        from .tools._ssrf import BlockedHost, safe_get
+    except Exception as e:  # pragma: no cover
+        raise EventSourceError("SSRF guard unavailable") from e
+    try:
+        resp = safe_get(url, headers=headers or {}, timeout=timeout)
+    except BlockedHost as e:
+        raise EventSourceError(f"blocked by SSRF guard: {e}") from e
+    except Exception as e:
+        raise EventSourceError(f"fetch failed: {type(e).__name__}: {e}") from e
+    if getattr(resp, "status_code", 200) >= 400:
+        raise EventSourceError(f"source returned HTTP {resp.status_code}")
+    return resp.text or ""
+
+
+def _parse_feed(text: str) -> list[dict]:
+    """Parse an RSS or Atom feed into flat item dicts (id/title/link/summary/...).
+
+    Refuses any feed carrying a DOCTYPE/ENTITY declaration before parsing -- a
+    cheap guard against XXE / billion-laughs entity-expansion in the stdlib XML
+    parser, since the feed body is external."""
+    head = text[:4000].lower()
+    if "<!doctype" in head or "<!entity" in text.lower():
+        raise EventSourceError("feed declares a DOCTYPE/ENTITY (refused for safety)")
+    import xml.etree.ElementTree as ET
+    try:
+        root = ET.fromstring(text)
+    except ET.ParseError as e:
+        raise EventSourceError(f"feed is not valid XML: {e}") from e
+    items: list[dict] = []
+    for node in root.iter():
+        tag = node.tag.split("}")[-1]
+        if tag not in ("item", "entry"):   # RSS <item> / Atom <entry>
+            continue
+        d: dict = {}
+        for child in node:
+            ctag = child.tag.split("}")[-1]
+            val = (child.text or child.get("href") or "").strip()
+            if ctag == "guid":
+                d["id"] = val
+            elif ctag in ("title", "link", "summary", "description", "id",
+                          "published", "updated", "pubDate"):
+                d.setdefault(ctag, val)
+        d.setdefault("id", d.get("link") or d.get("title") or "")
+        items.append(d)
+    return items
+
+
+class RssSource:
+    """Poll an RSS or Atom feed; each new ``<item>``/``<entry>`` fires. Dedup is
+    by ``id_field`` (default ``id``, sourced from ``<guid>``/``<id>``/link).
+    ``config``: ``{url, id_field?, headers?}``."""
+    source = "rss"
+
+    def poll(self, config: dict, cursor: str) -> PollResult:
+        url = str((config or {}).get("url") or "").strip()
+        if not url:
+            raise EventSourceError("rss event source needs a 'url'")
+        id_field = str((config or {}).get("id_field") or "id")
+        headers = config.get("headers") if isinstance(config.get("headers"), dict) else {}
+        items = _parse_feed(_http_get_text(url, headers=headers))
+        return diff_new_items(items, cursor, id_field, newest_first=True)
+
+
+register("rss", RssSource)
+
+
 def poll_source(source: str, config: dict, cursor: str) -> PollResult:
     """Poll one named source; raises :class:`EventSourceError` on trouble."""
     return get_source(source).poll(config or {}, cursor or "")
@@ -216,5 +288,5 @@ def poll_source(source: str, config: dict, cursor: str) -> PollResult:
 __all__ = [
     "EventSource", "EventSourceError", "PollResult",
     "available_sources", "get_source", "register", "enabled",
-    "poll_source", "diff_new_items", "HttpJsonSource",
+    "poll_source", "diff_new_items", "HttpJsonSource", "RssSource",
 ]

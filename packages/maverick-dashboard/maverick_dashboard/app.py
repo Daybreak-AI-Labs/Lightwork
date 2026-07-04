@@ -240,6 +240,167 @@ def _assert_dashboard_auth_configured() -> None:
     )
 
 
+# ---- background automation scheduler (event polling + scheduled dreaming) ----
+# Lives in the dashboard lifespan, NOT the core worker: event triggers are a
+# dashboard-owned store, and the core worker (a separate process) can't reach
+# it. TestClient skips the lifespan, so this never runs under tests. Both halves
+# are OFF by default (their own enabled() gates) and fail-open.
+_automation_task = None  # asyncio.Task handle, cancelled on shutdown
+
+
+def _automation_tick_seconds() -> float:
+    try:
+        from maverick.config import load_config
+        v = (load_config().get("automation") or {}).get("tick_seconds")
+        return max(10.0, float(v)) if v is not None else 60.0
+    except Exception:  # pragma: no cover
+        return 60.0
+
+
+def _dream_interval_seconds() -> float:
+    try:
+        from maverick.config import get_dreaming
+        v = get_dreaming().get("interval_seconds")
+        return max(300.0, float(v)) if v is not None else 21600.0  # 6h
+    except Exception:  # pragma: no cover
+        return 21600.0
+
+
+def _automation_lock():
+    """Non-blocking cross-process flock so only ONE process runs a tick (else N
+    uvicorn workers would each poll and double-fire). Returns a held fd, ``-1``
+    when flock is unavailable (proceed), or ``None`` when another process owns
+    the tick (skip)."""
+    try:
+        import fcntl
+    except Exception:  # pragma: no cover - non-POSIX: no cross-process guard
+        return -1
+    from maverick.paths import maverick_home
+    fd = None
+    try:
+        p = maverick_home() / "automation-scheduler.lock"
+        p.parent.mkdir(parents=True, exist_ok=True)
+        fd = os.open(str(p), os.O_CREAT | os.O_RDWR, 0o600)
+        fcntl.flock(fd, fcntl.LOCK_EX | fcntl.LOCK_NB)
+        return fd
+    except BlockingIOError:
+        if fd is not None:
+            os.close(fd)
+        return None
+    except Exception:  # pragma: no cover
+        if fd is not None:
+            try:
+                os.close(fd)
+            except Exception:
+                pass
+        return None
+
+
+def _automation_unlock(fd) -> None:
+    if fd is None or fd == -1:
+        return
+    try:
+        import fcntl
+        fcntl.flock(fd, fcntl.LOCK_UN)
+    except Exception:  # pragma: no cover
+        pass
+    try:
+        os.close(fd)
+    except Exception:  # pragma: no cover
+        pass
+
+
+def _poll_all_event_triggers() -> None:
+    """Fire due event triggers system-wide (background tick), running each goal
+    in its own daemon thread (run_goal_in_thread self-limits via the global
+    concurrency semaphore)."""
+    import threading
+
+    from maverick.runner import run_goal_in_thread
+
+    from maverick_dashboard import event_poll, event_triggers_store
+    triggers = event_triggers_store.list_triggers()
+    if not triggers:
+        return
+
+    def _fire(gid: int) -> None:
+        threading.Thread(target=run_goal_in_thread, args=(gid,), daemon=True).start()
+
+    try:
+        event_poll.poll_and_fire(_world(), triggers, fire=_fire)
+    except Exception:  # pragma: no cover - a poll tick must never crash the loop
+        log.exception("event-trigger poll tick failed")
+
+
+def _run_dream_tick() -> None:
+    try:
+        from maverick import dreaming
+        dreaming.dream_cycle(_world())
+    except Exception:  # pragma: no cover - dreaming must never crash the loop
+        log.exception("scheduled dream cycle failed")
+
+
+async def _automation_loop() -> None:
+    import asyncio
+
+    from maverick import automation_events, dreaming
+    tick = _automation_tick_seconds()
+    dream_every = _dream_interval_seconds()
+    last_dream = time.monotonic()
+    log.info("automation scheduler: tick=%.0fs, dream every %.0fs", tick, dream_every)
+    while True:
+        try:
+            await asyncio.sleep(tick)
+        except asyncio.CancelledError:
+            break
+        fd = _automation_lock()
+        if fd is None:
+            continue  # another process owns this tick
+        try:
+            if automation_events.enabled():
+                await run_in_threadpool(_poll_all_event_triggers)
+            if dreaming.enabled() and (time.monotonic() - last_dream) >= dream_every:
+                await run_in_threadpool(_run_dream_tick)
+                last_dream = time.monotonic()
+        except asyncio.CancelledError:
+            _automation_unlock(fd)
+            break
+        except Exception:  # pragma: no cover - fail-open, keep ticking
+            log.exception("automation tick failed")
+        finally:
+            _automation_unlock(fd)
+
+
+async def _install_automation_scheduler() -> None:
+    """Start the background automation loop when event triggers OR dreaming is
+    enabled. No-op under TestClient (the lifespan doesn't run) and when both are
+    off, so default deployments and tests are unaffected."""
+    import asyncio
+    global _automation_task
+    try:
+        from maverick import automation_events, dreaming
+        if not (automation_events.enabled() or dreaming.enabled()):
+            return
+        _automation_task = asyncio.create_task(_automation_loop())
+        log.info("automation scheduler started")
+    except Exception:  # pragma: no cover - never block startup
+        log.exception("automation scheduler not started")
+
+
+async def _stop_automation_scheduler() -> None:
+    import asyncio
+    global _automation_task
+    task = _automation_task
+    _automation_task = None
+    if task is None:
+        return
+    task.cancel()
+    try:
+        await task
+    except (asyncio.CancelledError, Exception):  # pragma: no cover
+        pass
+
+
 @asynccontextmanager
 async def _lifespan(app: FastAPI):
     """Application lifespan: run startup tasks, then yield to serve.
@@ -266,7 +427,9 @@ async def _lifespan(app: FastAPI):
     _assert_dashboard_auth_configured()
     await _reclaim_orphans()
     await _install_queue_dispatcher()
+    await _install_automation_scheduler()
     yield
+    await _stop_automation_scheduler()
     # Graceful drain: give running goals a bounded window to finish. Bounded by
     # MAVERICK_DRAIN_TIMEOUT (default 25s, under the typical 30s
     # terminationGracePeriod so the kubelet's SIGKILL doesn't pre-empt it). Runs

@@ -148,6 +148,52 @@ def test_automations_page_hides_event_section_when_disabled(monkeypatch, tmp_pat
     assert 'id="auto-event-form"' not in _client().get("/automations").text
 
 
+def test_background_poll_fires_system_wide(monkeypatch, tmp_path):
+    # The lifespan scheduler's tick body fires due triggers with no request.
+    _isolate(monkeypatch, tmp_path)
+    import time as _t
+
+    import maverick.automation_events as ev
+    import maverick.runner as runner_mod
+    from maverick_dashboard import app as A
+    from maverick_dashboard import event_triggers_store as s
+    fired = []
+    monkeypatch.setattr(runner_mod, "run_goal_in_thread",
+                        lambda *a, **k: fired.append(a[0] if a else None))
+    box = [{"items": [{"id": "1", "title": "a"}]}]
+    monkeypatch.setattr(ev, "_http_get_json", lambda url, headers=None, timeout=15.0: box[0])
+    s.set_trigger("feed", "triage", "http_json",
+                  config={"url": "http://x", "items_path": "items", "id_field": "id"})
+    A._poll_all_event_triggers()                              # baseline: fires nothing
+    box[0] = {"items": [{"id": "2", "title": "b"}, {"id": "1", "title": "a"}]}
+    A._poll_all_event_triggers()                              # new item -> fires
+    _t.sleep(0.15)                                            # let the daemon thread record
+    assert len(fired) == 1
+
+
+def test_scheduler_starts_only_when_a_feature_is_on(monkeypatch, tmp_path):
+    import asyncio
+
+    _isolate(monkeypatch, tmp_path)                          # MAVERICK_EVENT_TRIGGERS=1
+    from maverick_dashboard import app as A
+
+    async def _drive():
+        await A._install_automation_scheduler()
+        started = A._automation_task is not None
+        await A._stop_automation_scheduler()
+        return started, A._automation_task is None
+    started, stopped = asyncio.run(_drive())
+    assert started and stopped
+
+    monkeypatch.setenv("MAVERICK_EVENT_TRIGGERS", "0")
+    monkeypatch.delenv("MAVERICK_DREAMING", raising=False)
+
+    async def _drive_off():
+        await A._install_automation_scheduler()
+        return A._automation_task
+    assert asyncio.run(_drive_off()) is None
+
+
 def test_list_is_owner_scoped(monkeypatch, tmp_path):
     _isolate(monkeypatch, tmp_path)
     from maverick_dashboard import api, event_triggers_store

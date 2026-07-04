@@ -175,6 +175,12 @@ class EventTriggerOut(BaseModel):
     cursor: str = ""
 
 
+class LearningToggleIn(BaseModel):
+    """Turn the whole self-learning loop on/off from the dashboard (writes the
+    learning knobs to the config overlay)."""
+    enabled: bool
+
+
 class GoalEventOut(BaseModel):
     id: int
     id: int

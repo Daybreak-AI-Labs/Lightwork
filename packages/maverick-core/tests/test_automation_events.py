@@ -66,8 +66,29 @@ def test_http_json_rejects_non_array(monkeypatch):
         ev.HttpJsonSource().poll({"url": "http://x", "items_path": "data"}, cursor="")
 
 
+_RSS = """<?xml version="1.0"?><rss><channel>
+  <item><guid>b</guid><title>Newer</title><link>http://x/b</link></item>
+  <item><guid>a</guid><title>Older</title><link>http://x/a</link></item>
+</channel></rss>"""
+
+
+def test_rss_source_parses_and_dedups(monkeypatch):
+    monkeypatch.setattr(ev, "_http_get_text", lambda url, headers=None, timeout=15.0: _RSS)
+    r = ev.RssSource().poll({"url": "http://x/feed"}, cursor="a")   # 'a' already seen
+    assert r.cursor == "b" and len(r.events) == 1
+    assert r.events[0]["title"] == "Newer" and r.events[0]["id"] == "b"
+
+
+def test_rss_refuses_doctype_entity(monkeypatch):
+    evil = '<?xml version="1.0"?><!DOCTYPE x [<!ENTITY e "boom">]><rss></rss>'
+    monkeypatch.setattr(ev, "_http_get_text", lambda url, headers=None, timeout=15.0: evil)
+    with pytest.raises(ev.EventSourceError):
+        ev.RssSource().poll({"url": "http://x"}, cursor="1")
+
+
 def test_registry_and_unknown_source():
     assert "http_json" in ev.available_sources()
+    assert "rss" in ev.available_sources()
     with pytest.raises(ev.EventSourceError):
         ev.get_source("nope")
 

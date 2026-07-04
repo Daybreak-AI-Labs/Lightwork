@@ -62,7 +62,7 @@
       <h2 id="auto-event-h" tabindex="-1">Event triggers</h2>
       <span class="muted" id="auto-event-count"></span>
     </div>
-    <p class="auto__hint">Run a workflow when something new appears in a source that can’t push a webhook — Lightwork polls it on a schedule and fires per new item, with the item’s fields filling the workflow’s parameters. Poll on a cron by POSTing to <code>/api/v1/event-triggers/poll</code>.</p>
+    <p class="auto__hint">Run a workflow when something new appears in a source that can’t push a webhook — the app polls each source automatically on a background tick and fires per new item, with the item’s fields filling the workflow’s parameters. Use “Poll now” to check immediately, or POST to <code>/api/v1/event-triggers/poll</code> from your own cron.</p>
     <ul class="auto__list" id="auto-event-list" aria-label="Event triggers"></ul>
     <div class="mv-empty" id="auto-event-empty" hidden>
       <p class="mv-empty__title">No event triggers yet</p>

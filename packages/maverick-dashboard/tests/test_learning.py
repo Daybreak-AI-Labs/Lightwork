@@ -62,6 +62,30 @@ def test_signoff_shows_up_as_a_grounded_outcome(tmp_path, monkeypatch):
     assert client.get("/api/v1/learning").json()["accumulated"]["grounded_outcomes"] == 1
 
 
+def test_enable_all_learning_flips_every_component(tmp_path, monkeypatch):
+    # env vars unset so the config overlay controls; one POST turns the whole
+    # loop on, and it persists + reverses.
+    for v in ("MAVERICK_CONSEQUENCE", "MAVERICK_REFLEXION", "MAVERICK_DREAMING",
+              "MAVERICK_TRAJECTORY_CAPTURE", "MAVERICK_DATA_ENGINE"):
+        monkeypatch.delenv(v, raising=False)
+    from maverick.config import reset_config_cache
+    self = _isolate(tmp_path, monkeypatch)  # noqa: F841 (world not needed here)
+    reset_config_cache()
+    total = client.get("/api/v1/learning").json()["components_total"]
+    assert client.get("/api/v1/learning").json()["components_on"] == 0
+    r = client.post("/api/v1/learning", json={"enabled": True})
+    assert r.status_code == 200 and r.json()["components_on"] == total
+    assert client.get("/api/v1/learning").json()["components_on"] == total   # persisted
+    client.post("/api/v1/learning", json={"enabled": False})
+    assert client.get("/api/v1/learning").json()["components_on"] == 0
+
+
+def test_learning_page_has_enable_button(tmp_path, monkeypatch):
+    _isolate(tmp_path, monkeypatch)
+    t = client.get("/learning").text
+    assert 'id="lrn-enable"' in t and "Turn all learning on" in t
+
+
 def test_learning_page_renders_the_moat(tmp_path, monkeypatch):
     _isolate(tmp_path, monkeypatch)
     t = client.get("/learning").text
