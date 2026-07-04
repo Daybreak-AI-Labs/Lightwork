@@ -60,7 +60,7 @@ def test_make_refresher_posts_to_preset_token_url(monkeypatch):
     assert seen["url"] == "https://slack.com/api/oauth.v2.access"
     assert seen["data"]["grant_type"] == "refresh_token"
     assert seen["data"]["client_id"] == "cid-1"
-    assert seen["data"]["client_secret"] == "shh"    # read from env, not stored
+    assert seen["data"]["client_secret"] == "shh"    # pragma: allowlist secret
     assert seen["data"]["refresh_token"] == "RT1"
 
 
