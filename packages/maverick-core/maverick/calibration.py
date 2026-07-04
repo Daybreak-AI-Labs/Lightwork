@@ -74,6 +74,11 @@ _DEFAULTS = {
     "min_samples": 20,
     "min_discrimination": 0.15,
     "collect_from_coding": False,
+    # Reward-laundering interlock. 0.0 = advisory (measured + audited, never
+    # freezes); >0 freezes learning when the verifier still separates natural
+    # traffic but its edge on ADVERSARIAL probes has collapsed below this
+    # fraction (see ``assess`` / ``resistance``). Off by default.
+    "min_resistance": 0.0,
 }
 
 _lock = threading.Lock()
@@ -109,6 +114,12 @@ class CalibrationSample:
     correct: bool
     ts: float = 0.0
     source: str = ""
+    # An ADVERSARIAL probe: a crafted plausible-but-wrong (or ugly-but-correct)
+    # case whose ground truth is known. Natural samples measure drift; probes
+    # measure whether the judge is being *gamed* (reward laundering) -- a
+    # verifier can look calibrated on everyday traffic while its edge on
+    # adversarial pairs quietly collapses. See ``assess``.
+    adversarial: bool = False
 
 
 @dataclass
@@ -117,8 +128,16 @@ class CalibrationReport:
 
     ``discrimination`` is mean(confidence | correct) - mean(confidence |
     incorrect): how much higher the verifier scores answers that were actually
-    right. ``brier`` is the mean squared error of confidence vs. outcome
-    (lower is better). ``adequate`` is the verdict the freeze gate reads.
+    right (measured on NATURAL traffic when adversarial probes are present).
+    ``brier`` is the mean squared error of confidence vs. outcome (lower is
+    better). ``adequate`` is the verdict the freeze gate reads.
+
+    ``adversarial_discrimination`` is the same edge measured only over crafted
+    adversarial probes, and ``resistance`` =
+    adversarial_discrimination / discrimination in [0, ~1]: 1.0 means the judge
+    is as sharp on adversarial pairs as on easy ones; toward 0 means it looks
+    calibrated on natural traffic but is being gamed (reward laundering). Both
+    are ``None`` when no probes of both classes were supplied.
     """
     n: int
     n_correct: int
@@ -127,6 +146,8 @@ class CalibrationReport:
     brier: float
     adequate: bool
     reason: str = ""
+    adversarial_discrimination: float | None = None
+    resistance: float | None = None
 
     def to_dict(self) -> dict:
         return {
@@ -138,6 +159,11 @@ class CalibrationReport:
             "brier": round(self.brier, 4),
             "adequate": self.adequate,
             "reason": self.reason,
+            "adversarial_discrimination": (
+                round(self.adversarial_discrimination, 4)
+                if self.adversarial_discrimination is not None else None),
+            "resistance": (
+                round(self.resistance, 4) if self.resistance is not None else None),
         }
 
 
@@ -146,57 +172,85 @@ def assess(
     *,
     min_samples: int | None = None,
     min_discrimination: float | None = None,
+    min_resistance: float | None = None,
 ) -> CalibrationReport:
     """Assess whether verifier confidence still discriminates correct answers.
 
-    Adequate requires: at least ``min_samples`` total, BOTH classes present
-    (you cannot judge discrimination with only correct or only incorrect
-    samples), and ``discrimination >= min_discrimination``. The thresholds
-    default to the ``[calibration]`` config.
+    Adequate requires: at least ``min_samples`` total, BOTH classes present in
+    the scored set (you cannot judge discrimination with only correct or only
+    incorrect samples), ``discrimination >= min_discrimination``, AND -- when
+    adversarial probes are supplied and ``min_resistance > 0`` --
+    ``resistance >= min_resistance`` (the reward-laundering interlock). The
+    thresholds default to the ``[calibration]`` config.
+
+    When any sample is tagged ``adversarial``, drift discrimination is measured
+    on the NATURAL subset only (probes are deliberately hard and would otherwise
+    depress the everyday-calibration number); with no probes the behaviour is
+    exactly the historical all-sample measurement.
     """
     s = _settings()
     min_n = s["min_samples"] if min_samples is None else min_samples
     min_disc = s["min_discrimination"] if min_discrimination is None else min_discrimination
+    if min_resistance is None:
+        min_resistance = float(s.get("min_resistance", 0.0))
 
     n = len(samples)
-    correct = [x for x in samples if x.correct]
-    incorrect = [x for x in samples if not x.correct]
-    nc, ni = len(correct), len(incorrect)
+    adversarial = [x for x in samples if getattr(x, "adversarial", False)]
+    natural = [x for x in samples if not getattr(x, "adversarial", False)]
+    # The drift gate reads discrimination on natural traffic. With no probes,
+    # `natural` already contains every sample, so this is the historical
+    # all-sample measurement unchanged.
+    base = natural
 
-    def _mean(xs: list[CalibrationSample]) -> float:
-        return sum(_clamp01(x.confidence) for x in xs) / len(xs) if xs else 0.0
+    def _disc(xs: list[CalibrationSample]) -> float | None:
+        c = [x for x in xs if x.correct]
+        i = [x for x in xs if not x.correct]
+        if not c or not i:
+            return None
+        mean_c = sum(_clamp01(x.confidence) for x in c) / len(c)
+        mean_i = sum(_clamp01(x.confidence) for x in i) / len(i)
+        return mean_c - mean_i
 
-    mean_c = _mean(correct)
-    mean_i = _mean(incorrect)
-    discrimination = mean_c - mean_i
+    discrimination = _disc(base)
+    disc_val = discrimination if discrimination is not None else 0.0
     brier = (
         sum((_clamp01(x.confidence) - (1.0 if x.correct else 0.0)) ** 2 for x in samples) / n
         if n else 1.0
     )
 
+    adv_disc = _disc(adversarial)
+    resistance: float | None = None
+    if adv_disc is not None and disc_val > 0:
+        resistance = adv_disc / disc_val
+
+    nc = sum(1 for x in base if x.correct)
+    ni = sum(1 for x in base if not x.correct)
+
+    def _report(adequate: bool, reason: str) -> CalibrationReport:
+        return CalibrationReport(
+            n=n, n_correct=nc, n_incorrect=ni, discrimination=disc_val, brier=brier,
+            adequate=adequate, reason=reason,
+            adversarial_discrimination=adv_disc, resistance=resistance,
+        )
+
     if n < min_n:
-        return CalibrationReport(
-            n, nc, ni, discrimination, brier, adequate=False,
-            reason=f"not enough samples ({n} < {min_n}); cannot assess calibration",
-        )
+        return _report(False, f"not enough samples ({n} < {min_n}); cannot assess calibration")
     if nc == 0 or ni == 0:
-        return CalibrationReport(
-            n, nc, ni, discrimination, brier, adequate=False,
-            reason="need both correct and incorrect samples to judge discrimination",
-        )
-    if discrimination < min_disc:
-        return CalibrationReport(
-            n, nc, ni, discrimination, brier, adequate=False,
-            reason=(
-                f"verifier discrimination {discrimination:.2f} below floor "
-                f"{min_disc:.2f}: confidence no longer separates correct from "
-                "incorrect; learning frozen"
-            ),
-        )
-    return CalibrationReport(
-        n, nc, ni, discrimination, brier, adequate=True,
-        reason=f"verifier discriminates by {discrimination:.2f} over {n} samples",
-    )
+        return _report(
+            False, "need both correct and incorrect samples to judge discrimination")
+    if disc_val < min_disc:
+        return _report(False, (
+            f"verifier discrimination {disc_val:.2f} below floor {min_disc:.2f}: "
+            "confidence no longer separates correct from incorrect; learning frozen"))
+    if resistance is not None and min_resistance > 0 and resistance < min_resistance:
+        return _report(False, (
+            f"reward-laundering resistance {resistance:.2f} below floor "
+            f"{min_resistance:.2f}: the verifier still separates natural samples "
+            f"(disc {disc_val:.2f}) but its edge on adversarial probes has collapsed "
+            f"(disc {adv_disc:.2f}) -- the judge is being gamed; learning frozen"))
+    tail = f"; laundering resistance {resistance:.2f}" if resistance is not None else ""
+    return _report(
+        True, f"verifier discriminates by {disc_val:.2f} over {n} samples{tail}")
 
 
 def _clamp01(v: float) -> float:
@@ -208,14 +262,17 @@ def _clamp01(v: float) -> float:
 
 def record_sample(
     confidence: float, correct: bool, *, source: str = "",
-    path: Path | None = None,
+    adversarial: bool = False, path: Path | None = None,
 ) -> bool:
-    """Append one ``(confidence, ground_truth)`` calibration sample. Never raises."""
+    """Append one ``(confidence, ground_truth)`` calibration sample. Never raises.
+
+    Set ``adversarial=True`` for a crafted probe whose known outcome tests
+    whether the judge is being gamed (see :func:`record_probe`)."""
     if path is None:
         path = _samples_path()
     entry = CalibrationSample(
         confidence=_clamp01(confidence), correct=bool(correct),
-        ts=time.time(), source=str(source or "")[:120],
+        ts=time.time(), source=str(source or "")[:120], adversarial=bool(adversarial),
     )
     with _lock:
         try:
@@ -230,6 +287,30 @@ def record_sample(
         except OSError as e:
             log.warning("calibration: sample write failed: %s", e)
             return False
+
+
+def record_probe(
+    confidence: float, correct: bool, *, source: str = "",
+    path: Path | None = None,
+) -> bool:
+    """Append one ADVERSARIAL calibration probe: a crafted case (plausible but
+    wrong, or ugly but correct) with known ground truth, tagged so
+    :func:`assess` can measure reward-laundering resistance. Same ledger as
+    natural samples. Never raises.
+
+    The probe corpus is exactly the fixed ground truth a governed platform
+    should hold immutable (cf. the evaluator anchors): a proposer or co-evolving
+    evaluator that games the judge shows up as adversarial discrimination
+    collapsing while natural discrimination stays healthy."""
+    return record_sample(confidence, correct, source=source, adversarial=True, path=path)
+
+
+def current_resistance(path: Path | None = None) -> float | None:
+    """The latest reward-laundering resistance over the sample ledger, or None
+    when no adversarial probes of both classes are present. A read-only summary
+    for dashboards / the evaluator co-evolution gate -- it does not persist a
+    verdict (that is :func:`run_assessment`)."""
+    return assess(load_samples(path)).resistance
 
 
 def load_samples(path: Path | None = None) -> list[CalibrationSample]:
@@ -251,6 +332,7 @@ def load_samples(path: Path | None = None) -> list[CalibrationSample]:
                         correct=bool(d.get("correct", False)),
                         ts=float(d.get("ts", 0.0) or 0.0),
                         source=str(d.get("source", "")),
+                        adversarial=bool(d.get("adversarial", False)),
                     ))
                 except (json.JSONDecodeError, TypeError, ValueError):
                     continue
@@ -331,6 +413,8 @@ __all__ = [
     "assess",
     "collect_from_coding_enabled",
     "record_sample",
+    "record_probe",
+    "current_resistance",
     "load_samples",
     "run_assessment",
     "learning_frozen",
