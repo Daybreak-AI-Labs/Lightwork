@@ -240,197 +240,31 @@ def _assert_dashboard_auth_configured() -> None:
     )
 
 
-# ---- background automation scheduler (event polling + scheduled dreaming) ----
-# Lives in the dashboard lifespan, NOT the core worker: event triggers are a
-# dashboard-owned store, and the core worker (a separate process) can't reach
-# it. TestClient skips the lifespan, so this never runs under tests. Both halves
-# are OFF by default (their own enabled() gates) and fail-open.
-_automation_task = None  # asyncio.Task handle, cancelled on shutdown
-
-
-def _automation_tick_seconds() -> float:
-    try:
-        from maverick.config import load_config
-        v = (load_config().get("automation") or {}).get("tick_seconds")
-        return max(10.0, float(v)) if v is not None else 60.0
-    except Exception:  # pragma: no cover
-        return 60.0
-
-
-def _dream_interval_seconds() -> float:
-    try:
-        from maverick.config import get_dreaming
-        v = get_dreaming().get("interval_seconds")
-        return max(300.0, float(v)) if v is not None else 21600.0  # 6h
-    except Exception:  # pragma: no cover
-        return 21600.0
-
-
-def _automation_lock():
-    """Non-blocking cross-process flock so only ONE process runs a tick (else N
-    uvicorn workers would each poll and double-fire). Returns a held fd, ``-1``
-    when flock is unavailable (proceed), or ``None`` when another process owns
-    the tick (skip)."""
-    try:
-        import fcntl
-    except Exception:  # pragma: no cover - non-POSIX: no cross-process guard
-        return -1
-    from maverick.paths import maverick_home
-    fd = None
-    try:
-        p = maverick_home() / "automation-scheduler.lock"
-        p.parent.mkdir(parents=True, exist_ok=True)
-        fd = os.open(str(p), os.O_CREAT | os.O_RDWR, 0o600)
-        fcntl.flock(fd, fcntl.LOCK_EX | fcntl.LOCK_NB)
-        return fd
-    except BlockingIOError:
-        if fd is not None:
-            os.close(fd)
-        return None
-    except Exception:  # pragma: no cover
-        if fd is not None:
-            try:
-                os.close(fd)
-            except Exception:
-                pass
-        return None
-
-
-def _automation_unlock(fd) -> None:
-    if fd is None or fd == -1:
-        return
-    try:
-        import fcntl
-        fcntl.flock(fd, fcntl.LOCK_UN)
-    except Exception:  # pragma: no cover
-        pass
-    try:
-        os.close(fd)
-    except Exception:  # pragma: no cover
-        pass
-
-
-def _poll_all_event_triggers() -> None:
-    """Fire due event triggers system-wide (background tick), running each goal
-    in its own daemon thread (run_goal_in_thread self-limits via the global
-    concurrency semaphore)."""
-    import threading
-
-    from maverick.runner import run_goal_in_thread
-
-    from maverick_dashboard import event_poll, event_triggers_store
-    triggers = event_triggers_store.list_triggers()
-    if not triggers:
-        return
-
-    def _fire(gid: int) -> None:
-        threading.Thread(target=run_goal_in_thread, args=(gid,), daemon=True).start()
-
-    try:
-        event_poll.poll_and_fire(_world(), triggers, fire=_fire)
-    except Exception:  # pragma: no cover - a poll tick must never crash the loop
-        log.exception("event-trigger poll tick failed")
-
-
-def _run_dream_tick() -> None:
-    try:
-        from maverick import dreaming
-        dreaming.dream_cycle(_world())
-    except Exception:  # pragma: no cover - dreaming must never crash the loop
-        log.exception("scheduled dream cycle failed")
-
-
-def _dream_marker_path():
-    from maverick.paths import maverick_home
-    return maverick_home() / "last-dream.marker"
-
-
-def _dream_due(interval: float) -> bool:
-    """Whether a scheduled dream is due, judged from a SHARED on-disk marker
-    (its mtime), not per-process state -- so N uvicorn workers run at most one
-    dream per interval, not one each. Checked + updated under the tick flock."""
-    p = _dream_marker_path()
-    try:
-        return (time.time() - p.stat().st_mtime) >= interval
-    except FileNotFoundError:
-        return True
-    except Exception:  # pragma: no cover
-        return False
-
-
-def _mark_dreamed() -> None:
-    p = _dream_marker_path()
-    try:
-        p.parent.mkdir(parents=True, exist_ok=True)
-        p.touch()
-        os.utime(p, None)
-    except Exception:  # pragma: no cover
-        pass
-
-
-async def _automation_loop() -> None:
-    import asyncio
-
-    from maverick import automation_events, dreaming
-    tick = _automation_tick_seconds()
-    dream_every = _dream_interval_seconds()
-    # Baseline the shared marker so the first scheduled dream is one interval out
-    # (not on boot); harmless if another worker already set it.
-    if not _dream_marker_path().exists():
-        _mark_dreamed()
-    log.info("automation scheduler: tick=%.0fs, dream every %.0fs", tick, dream_every)
-    while True:
-        try:
-            await asyncio.sleep(tick)
-        except asyncio.CancelledError:
-            break
-        fd = _automation_lock()
-        if fd is None:
-            continue  # another process owns this tick
-        try:
-            if automation_events.enabled():
-                await run_in_threadpool(_poll_all_event_triggers)
-            # _dream_due + _mark_dreamed run inside the held flock, so only the
-            # process that won this tick can advance the marker -- exactly one
-            # dream per interval across all workers.
-            if dreaming.enabled() and _dream_due(dream_every):
-                await run_in_threadpool(_run_dream_tick)
-                _mark_dreamed()
-        except asyncio.CancelledError:
-            break  # the finally releases the lock
-        except Exception:  # pragma: no cover - fail-open, keep ticking
-            log.exception("automation tick failed")
-        finally:
-            _automation_unlock(fd)
+# ---- background automation (event polling + scheduled dreaming) -------------
+# Runs in the dashboard lifespan, NOT the core worker: event triggers are a
+# dashboard-owned store the core worker (a separate process) can't reach. Driven
+# by maverick-core's JobQueue/Worker -- durable, retrying, exactly-once (the
+# flock is gone) -- via maverick_dashboard.automation_queue. Per-trigger polling
+# cadence + scheduled dreaming are recurring cron jobs; fired goals are durable
+# run_goal jobs with retry + dead-letter. TestClient skips the lifespan, so this
+# never runs under tests; both halves are OFF by default (their own enabled()).
 
 
 async def _install_automation_scheduler() -> None:
-    """Start the background automation loop when event triggers OR dreaming is
-    enabled. No-op under TestClient (the lifespan doesn't run) and when both are
-    off, so default deployments and tests are unaffected."""
-    import asyncio
-    global _automation_task
+    """Start the JobQueue-backed automation worker when event triggers OR
+    dreaming is enabled. No-op under TestClient and when both are off."""
     try:
-        from maverick import automation_events, dreaming
-        if not (automation_events.enabled() or dreaming.enabled()):
-            return
-        _automation_task = asyncio.create_task(_automation_loop())
-        log.info("automation scheduler started")
+        from maverick_dashboard import automation_queue
+        await run_in_threadpool(automation_queue.start)
     except Exception:  # pragma: no cover - never block startup
-        log.exception("automation scheduler not started")
+        log.exception("automation worker not started")
 
 
 async def _stop_automation_scheduler() -> None:
-    import asyncio
-    global _automation_task
-    task = _automation_task
-    _automation_task = None
-    if task is None:
-        return
-    task.cancel()
     try:
-        await task
-    except (asyncio.CancelledError, Exception):  # pragma: no cover
+        from maverick_dashboard import automation_queue
+        await run_in_threadpool(automation_queue.stop)
+    except Exception:  # pragma: no cover
         pass
 
 

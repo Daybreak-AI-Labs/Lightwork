@@ -1993,6 +1993,7 @@ def _event_trigger_out(rec: dict) -> EventTriggerOut:
         name=rec["name"], template=rec["template"], source=rec["source"],
         config=rec.get("config") or {}, params=rec.get("params") or {},
         cursor=rec.get("cursor") or "",
+        interval_seconds=int(rec.get("interval_seconds") or 0),
     )
 
 
@@ -2054,7 +2055,8 @@ async def create_event_trigger(request: Request, payload: EventTriggerIn) -> Eve
         rec = event_triggers_store.set_trigger(
             payload.name or payload.template, payload.template, payload.source,
             config=payload.config or {}, params=payload.params or {},
-            owner=caller_principal(request) or "")
+            owner=caller_principal(request) or "",
+            interval_seconds=payload.interval_seconds)
     except ValueError as e:
         raise HTTPException(status_code=400, detail=str(e)) from e
     return _event_trigger_out(rec)

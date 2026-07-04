@@ -164,6 +164,9 @@ class EventTriggerIn(BaseModel):
     config: dict = Field(default_factory=dict)
     params: dict[str, str] | None = None
     name: str | None = Field(None, max_length=48)
+    # Per-trigger poll cadence in seconds (0 = the scheduler default). Floored at
+    # 60s by the scheduler; a day cap keeps a fat-fingered value sane.
+    interval_seconds: int = Field(0, ge=0, le=86_400)
 
 
 class EventTriggerOut(BaseModel):
@@ -173,6 +176,7 @@ class EventTriggerOut(BaseModel):
     config: dict = Field(default_factory=dict)
     params: dict[str, str] = Field(default_factory=dict)
     cursor: str = ""
+    interval_seconds: int = 0
 
 
 class LearningToggleIn(BaseModel):
