@@ -39,10 +39,16 @@ log = logging.getLogger("maverick_dashboard.automation_queue")
 
 TICK_KIND = "automation_tick"
 DREAM_KIND = "dream_cycle"
+FLYWHEEL_KIND = "flywheel_cycle"
+FLOW_RUN_KIND = "flow_run"       # one-shot: run a flow to its next pause/finish
+FLOW_RESUME_KIND = "flow_resume"  # one-shot: resume a paused flow run
+FLOW_SWEEP_KIND = "flow_delay_sweep"  # recurring: re-arm flow runs whose delay elapsed
+_FLOW_SWEEP_CRON = "* * * * *"   # check for due delays every minute
 _MIN_INTERVAL = 60               # floor for a per-trigger cadence (matches the UI/schema)
 _DEFAULT_INTERVAL = 300          # per-trigger poll cadence when unset (5 min)
 _TICK_CRON = "* * * * *"         # evaluate due triggers every minute
 _DREAM_CRON_DEFAULT = "0 */6 * * *"  # consolidate every 6h
+_FLYWHEEL_CRON_DEFAULT = "30 */6 * * *"  # turn the flywheel every 6h (offset from dream)
 _DEFAULT_WORKERS = 3             # goal-runner threads (so a slow goal can't stall the tick)
 
 _LOCK = threading.RLock()   # reentrant: start()/stop() call queue(), which also locks
@@ -199,6 +205,95 @@ def _handle_dream(_job=None) -> None:
         log.exception("scheduled dream cycle failed")
 
 
+def _handle_flywheel(_job=None) -> None:
+    """Turn the Cognitive Data Engine flywheel over the accumulated Operating
+    Record + grounded outcomes. This is the missing scheduled driver: outcomes
+    (failures, sign-offs, feedback, real system-of-record results) land
+    continuously, but nothing consolidated them into guardrails/habits without a
+    manual `maverick flywheel`. Gated (`maybe_run` is a no-op unless
+    ``[data_engine]`` is on) and fail-open like the dream cycle."""
+    from maverick import flywheel
+    try:
+        flywheel.maybe_run()
+    except Exception:  # pragma: no cover -- fail-open
+        log.exception("scheduled flywheel cycle failed")
+
+
+def _flow_runners(owner: str):
+    from maverick.flow import execution
+    w = _world()
+    return (execution.default_agent_runner(w, owner=owner),
+            execution.default_action_runner(w))
+
+
+def _handle_flow_run(job=None) -> None:
+    """Run a stored flow to its next pause/finish (durable one-shot job). An
+    agent node becomes a real goal, an action node a tool call; the run state is
+    persisted so a pause survives. Fail-open: a bad flow must not retry-storm."""
+    payload = getattr(job, "payload", None) or {}
+    flow_id = str(payload.get("flow_id") or "")
+    if not flow_id:
+        return
+    try:
+        from maverick.flow import execution, store
+        flow = store.load_flow(flow_id)
+        if flow is None:
+            log.warning("flow_run: no such flow %s", flow_id)
+            return
+        owner = str(payload.get("owner") or "")
+        agent_runner, action_runner = _flow_runners(owner)
+        execution.execute(flow, agent_runner=agent_runner, action_runner=action_runner,
+                          owner=owner, data=dict(payload.get("data") or {}),
+                          run_id=payload.get("run_id"))
+    except Exception:  # pragma: no cover -- fail-open
+        log.exception("flow run failed for %s", flow_id)
+
+
+def _handle_flow_resume(job=None) -> None:
+    """Resume a paused flow run with a human decision (durable one-shot). A stale
+    resume (the run already advanced, e.g. a duplicate delay-sweep enqueue) is a
+    clean no-op, not an error."""
+    payload = getattr(job, "payload", None) or {}
+    run_id = str(payload.get("run_id") or "")
+    flow_id = str(payload.get("flow_id") or "")
+    if not (run_id and flow_id):
+        return
+    try:
+        from maverick.flow import execution, store
+        flow = store.load_flow(flow_id)
+        if flow is None:
+            return
+        owner = str(payload.get("owner") or "")
+        agent_runner, action_runner = _flow_runners(owner)
+        execution.execute(flow, agent_runner=agent_runner, action_runner=action_runner,
+                          owner=owner, resume_run_id=run_id,
+                          decision=str(payload.get("decision") or "approved"))
+    except execution.FlowNotResumable:
+        return  # already resumed/finished -- benign
+    except Exception:  # pragma: no cover -- fail-open
+        log.exception("flow resume failed for %s", run_id)
+
+
+def _handle_flow_sweep(_job=None) -> None:
+    """Re-arm flow runs whose delay has elapsed. A delay node persists the run as
+    paused_delay with a resume_at; this cron (every minute when flows are on) is
+    the driver that continues it -- without it, 'wait N seconds' never resumes.
+    Fail-open + idempotent (a stale resume is a no-op)."""
+    from maverick import flow
+    if not flow.enabled():
+        return
+    try:
+        from maverick.flow import runner, store
+        now = time.time()
+        for run in store.list_runs(owner=None, limit=1000):
+            if (run.status == runner.STATUS_PAUSED_DELAY and run.resume_at
+                    and run.resume_at <= now):
+                queue().enqueue(FLOW_RESUME_KIND, {
+                    "flow_id": run.flow_id, "run_id": run.run_id, "owner": run.owner})
+    except Exception:  # pragma: no cover -- fail-open
+        log.exception("flow delay sweep failed")
+
+
 # ---- cron seeding -----------------------------------------------------------
 
 def _pending(kind: str) -> list:
@@ -229,13 +324,26 @@ def _dream_cron() -> str:
         return _DREAM_CRON_DEFAULT
 
 
+def _flywheel_cron() -> str:
+    try:
+        expr = str((config.load_config().get("data_engine") or {}).get("cron") or "").strip()
+        return expr or _FLYWHEEL_CRON_DEFAULT
+    except Exception:  # pragma: no cover
+        return _FLYWHEEL_CRON_DEFAULT
+
+
 def reconcile() -> None:
-    """Seed the tick + dream cron jobs for whichever subsystems are enabled."""
-    from maverick import automation_events, dreaming
+    """Seed the tick + dream + flywheel cron jobs for whichever subsystems are
+    enabled."""
+    from maverick import automation_events, data_engine, dreaming, flow
     if automation_events.enabled():
         _ensure_cron(TICK_KIND, _TICK_CRON)
     if dreaming.enabled():
         _ensure_cron(DREAM_KIND, _dream_cron())
+    if data_engine.enabled():
+        _ensure_cron(FLYWHEEL_KIND, _flywheel_cron())
+    if flow.enabled():
+        _ensure_cron(FLOW_SWEEP_KIND, _FLOW_SWEEP_CRON)
 
 
 # ---- lifecycle --------------------------------------------------------------
@@ -246,12 +354,13 @@ def _worker_count() -> int:
 
 
 def start() -> bool:
-    """Start the automation worker pool + seed cron jobs. No-op when neither
-    event triggers nor dreaming is enabled, and idempotent. Returns whether the
-    pool was started."""
+    """Start the automation worker pool + seed cron jobs. No-op when none of
+    event triggers, dreaming, the data engine, or flows is enabled, and
+    idempotent. Returns whether the pool was started."""
     global _worker, _worker_threads
-    from maverick import automation_events, dreaming
-    if not (automation_events.enabled() or dreaming.enabled()):
+    from maverick import automation_events, data_engine, dreaming, flow
+    if not (automation_events.enabled() or dreaming.enabled()
+            or data_engine.enabled() or flow.enabled()):
         return False
     with _LOCK:
         if _worker_threads:
@@ -260,6 +369,10 @@ def start() -> bool:
         w = Worker(queue=queue())
         w.register(TICK_KIND, _handle_tick)
         w.register(DREAM_KIND, _handle_dream)
+        w.register(FLYWHEEL_KIND, _handle_flywheel)
+        w.register(FLOW_RUN_KIND, _handle_flow_run)
+        w.register(FLOW_RESUME_KIND, _handle_flow_resume)
+        w.register(FLOW_SWEEP_KIND, _handle_flow_sweep)
         # Seed the cron jobs + actually start the threads BEFORE committing to the
         # module globals, so a failure in reconcile() (e.g. a boot-time sqlite
         # write error) leaves us cleanly un-started and retryable -- not wedged
@@ -293,4 +406,6 @@ def stop() -> None:
         t.join(timeout=5.0)
 
 
-__all__ = ["start", "stop", "reconcile", "queue", "TICK_KIND", "DREAM_KIND"]
+__all__ = ["start", "stop", "reconcile", "queue",
+           "TICK_KIND", "DREAM_KIND", "FLYWHEEL_KIND",
+           "FLOW_RUN_KIND", "FLOW_RESUME_KIND", "FLOW_SWEEP_KIND"]

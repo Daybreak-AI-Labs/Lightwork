@@ -256,6 +256,7 @@ class TestMaterialize:
         assert res.template_name.startswith("n8n-new-lead-slack-crm-")
         assert res.suggested_trigger == {
             "kind": "webhook", "template": res.template_name, "name": res.template_name,
+            "params": {},   # this workflow's steps use static text -> no payload fields
         }
         # The template is loadable and renders a goal.
         from maverick.templates import load_template
@@ -353,3 +354,65 @@ class TestMaterialize:
         from maverick.templates import load_template
         with pytest.raises(FileNotFoundError):
             load_template(a.template_name())
+
+
+class TestImportPayloadFidelity:
+    """Fields a migrated workflow reads from its trigger become declared template
+    params (via {{placeholder}}), so the trigger's payload reaches the run."""
+
+    def _auto(self, steps):
+        return ir.ImportedAutomation(
+            source="n8n", source_id="wf1", name="Order flow",
+            trigger=ir.ImportedTrigger(kind=ir.TRIGGER_WEBHOOK), steps=steps)
+
+    def test_extracts_fields_across_dialects(self):
+        a = self._auto([
+            ir.ImportedStep(name="a", params={"t": "{{ $json.order_id }}"}),
+            ir.ImportedStep(name="b", params={"t": "@triggerBody()?['customer_email']"}),
+            ir.ImportedStep(name="c", params={"t": "{{1.status}}"}),
+            ir.ImportedStep(name="d", params={"t": "{{ trigger.region }}"}),
+        ])
+        assert a.payload_fields() == ["order_id", "customer_email", "status", "region"]
+
+    def test_render_emits_placeholders(self):
+        a = self._auto([ir.ImportedStep(name="a", params={"t": "{{ $json.order_id }}"})])
+        _, body = a.render()
+        assert "Inputs from the trigger" in body
+        assert "{{order_id}}" in body
+
+    def test_schedule_trigger_has_no_payload_fields(self):
+        a = ir.ImportedAutomation(
+            source="n8n", source_id="s", name="nightly",
+            trigger=ir.ImportedTrigger(kind=ir.TRIGGER_SCHEDULE, cron="0 0 * * *"),
+            steps=[ir.ImportedStep(name="a", params={"t": "{{ $json.foo }}"})])
+        assert a.payload_fields() == []
+
+    def test_sensitive_field_names_are_dropped(self):
+        a = self._auto([ir.ImportedStep(name="a", params={
+            "t": "{{ $json.api_key }} {{ $json.order_id }}"})])
+        assert a.payload_fields() == ["order_id"]   # api_key filtered out
+
+    def test_materialize_declares_params_and_defaults_the_trigger(self, tmp_path, monkeypatch):
+        import maverick.templates as t
+        monkeypatch.setattr(t, "USER_TEMPLATES", tmp_path / "templates")
+        a = self._auto([ir.ImportedStep(
+            name="a", app="slack", params={"t": "{{ $json.order_id }} for {{ $json.buyer }}"})])
+        res = ai.materialize(a)
+        # the saved template declares the payload fields...
+        tpl = t.load_template(res.template_name)
+        assert "order_id" in tpl.params and "buyer" in tpl.params
+        # ...and the suggested trigger defaults every declared param, so a fire
+        # with a missing field still renders (empty) instead of erroring.
+        assert res.suggested_trigger["params"] == {"order_id": "", "buyer": ""}
+        # a fire that supplies the data renders it by-name
+        title, body = tpl.render(order_id="X-9", buyer="acme")
+        assert "X-9" in body and "acme" in body
+
+    def test_imported_template_never_fails_render_with_trigger_defaults(self, tmp_path, monkeypatch):
+        import maverick.templates as t
+        monkeypatch.setattr(t, "USER_TEMPLATES", tmp_path / "templates")
+        a = self._auto([ir.ImportedStep(name="a", params={"t": "{{ $json.order_id }}"})])
+        res = ai.materialize(a)
+        tpl = t.load_template(res.template_name)
+        # the trigger's default params fill every declared slot -> render succeeds
+        assert tpl.render(**res.suggested_trigger["params"]) is not None

@@ -871,6 +871,15 @@ def base_registry(
     reg.register(clipboard())
     reg.register(preview_diff(sandbox))
     reg.register(kv_memory(world, goal_id))
+    # Grounded-outcome linking: only offered once the learning loop is on, so the
+    # default tool surface (and the plugin matrix) is unchanged (kernel rule 1).
+    try:
+        from ..consequence import enabled as _consequence_enabled
+        if _consequence_enabled():
+            from .outcome_link import remember_outcome_key
+            reg.register(remember_outcome_key(world, goal_id))
+    except Exception:  # pragma: no cover -- a tool never blocks registry build
+        pass
     reg.register(memory())
     reg.register(arxiv())
     reg.register(semantic_scholar())

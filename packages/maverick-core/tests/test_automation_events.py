@@ -130,6 +130,41 @@ def test_oauth_source_requires_provider(monkeypatch):
         ev.OAuthHttpJsonSource().poll({"url": "https://x"}, cursor="")
 
 
+def test_oauth_refresher_falls_back_to_preset(monkeypatch):
+    # A trigger config that names a preset provider (no explicit token_url) still
+    # gets a working refresher, built from the preset's token endpoint + env creds.
+    monkeypatch.setenv("SLACK_OAUTH_CLIENT_ID", "cid-1")
+    monkeypatch.setenv("SLACK_OAUTH_CLIENT_SECRET", "shh")
+    seen = {}
+    monkeypatch.setattr(
+        "maverick.tools.oauth_helper._post_form",
+        lambda url, data: seen.update(url=url, data=data) or {"access_token": "AT9"},
+    )
+    refresher = ev._oauth_refresher({"provider": "slack"})   # no token_url/client_id
+    assert refresher is not None
+    assert refresher({"refresh_token": "RT"})["access_token"] == "AT9"
+    assert seen["url"] == "https://slack.com/api/oauth.v2.access"
+
+
+def test_oauth_refresher_none_for_unknown_provider(monkeypatch):
+    monkeypatch.delenv("SLACK_OAUTH_CLIENT_ID", raising=False)
+    # unknown provider + no explicit endpoints -> no refresher (stored token used as-is)
+    assert ev._oauth_refresher({"provider": "totally-unknown"}) is None
+
+
+def test_oauth_refresher_prefers_explicit_config(monkeypatch):
+    # An explicit token_url + client_id wins over any preset lookup.
+    seen = {}
+    monkeypatch.setattr(
+        "maverick.tools.oauth_helper._post_form",
+        lambda url, data: seen.update(url=url) or {"access_token": "AT"},
+    )
+    refresher = ev._oauth_refresher(
+        {"provider": "slack", "token_url": "https://custom/token", "client_id": "c"})
+    refresher({"refresh_token": "r"})
+    assert seen["url"] == "https://custom/token"
+
+
 def test_github_issues_source_dedups_by_number_and_drops_prs(monkeypatch):
     feed = [
         {"number": 12, "title": "newer issue"},

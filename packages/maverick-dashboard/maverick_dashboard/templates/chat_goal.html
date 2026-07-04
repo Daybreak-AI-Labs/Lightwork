@@ -65,6 +65,11 @@
   .signoff__actions { display: flex; gap: var(--space-2); }
   .signoff textarea.input { width: 100%; margin-bottom: var(--space-3); }
 
+  /* Feedback: the always-available thumbs up/down on any finished result. */
+  .feedback { margin-top: var(--space-4); display: flex; align-items: center; gap: var(--space-2); flex-wrap: wrap; }
+  .feedback__q { font-size: var(--text-sm); }
+  .feedback .btn.is-active { border-color: var(--accent); background: var(--surface-sunken); }
+
   /* Artifacts: a goal's versioned, kind-tagged outputs. */
   .artifacts { margin-top: var(--space-5); }
   .artifacts__head { font-weight: var(--font-semibold); margin-bottom: var(--space-3); display: flex; align-items: center; gap: var(--space-2); }
@@ -191,6 +196,20 @@
       {% else %}
         <pre id="result" tabindex="0" aria-label="Goal result"
              style="white-space: pre-wrap; margin: 0;">{{ goal.result or '' }}</pre>
+      {% endif %}
+      {% if goal.status in ('done', 'blocked', 'failed') %}
+        {# Always-available thumbs up/down (unlike the gated sign-off above): any
+           finished result can be rated, and the verdict grounds a real outcome
+           into the learning loop. #}
+        <div id="feedback" class="feedback" role="group" aria-label="Rate this result">
+          <span class="feedback__q muted">Was this useful?</span>
+          <button id="feedback-up" class="btn btn--ghost" type="button"
+                  data-rating="up" aria-label="Yes, useful">👍</button>
+          <button id="feedback-down" class="btn btn--ghost" type="button"
+                  data-rating="down" aria-label="No, not useful">👎</button>
+          <span id="feedback-msg" role="status" aria-live="polite" class="muted"
+                style="min-height: 1em;"></span>
+        </div>
       {% endif %}
     </div>
     {% if artifacts %}
@@ -584,6 +603,51 @@
       }
       if (approve) approve.addEventListener('click', function () { submit('approved'); });
       if (reject) reject.addEventListener('click', function () { submit('rejected'); });
+    })();
+  </script>
+
+  <script>
+    // Thumbs up/down feedback: grounds a real outcome into the learning loop for
+    // any finished result. Reflects the current rating on load; textContent only.
+    (function () {
+      var box = document.getElementById('feedback');
+      if (!box) return;
+      var up = document.getElementById('feedback-up');
+      var down = document.getElementById('feedback-down');
+      var msg = document.getElementById('feedback-msg');
+      var goalId = {{ goal.id }};
+      function show(rating) {
+        [up, down].forEach(function (b) { if (b) b.classList.remove('is-active'); });
+        if (rating === 'up' && up) up.classList.add('is-active');
+        if (rating === 'down' && down) down.classList.add('is-active');
+      }
+      fetch('/api/v1/goals/' + goalId + '/feedback').then(function (r) {
+        return r.ok ? r.json() : {};
+      }).then(function (j) {
+        if (j && j.feedback && j.feedback.rating) show(j.feedback.rating);
+      }).catch(function () {});
+      function submit(rating) {
+        [up, down].forEach(function (b) { if (b) b.disabled = true; });
+        msg.style.color = 'var(--muted)';
+        msg.textContent = 'Recording…';
+        fetch('/api/v1/goals/' + goalId + '/feedback', {
+          method: 'POST', headers: {'Content-Type': 'application/json'},
+          body: JSON.stringify({rating: rating}),
+        }).then(function (r) {
+          [up, down].forEach(function (b) { if (b) b.disabled = false; });
+          if (r.ok) { show(rating); msg.textContent = 'Thanks — this trains your workforce.'; return; }
+          return r.json().catch(function () { return {}; }).then(function (j) {
+            msg.style.color = 'var(--danger)';
+            msg.textContent = j.detail || ('Feedback failed: ' + r.status);
+          });
+        }).catch(function (e) {
+          [up, down].forEach(function (b) { if (b) b.disabled = false; });
+          msg.style.color = 'var(--danger)';
+          msg.textContent = String(e);
+        });
+      }
+      if (up) up.addEventListener('click', function () { submit('up'); });
+      if (down) down.addEventListener('click', function () { submit('down'); });
     })();
   </script>
 

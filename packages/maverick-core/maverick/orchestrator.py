@@ -1316,6 +1316,15 @@ async def run_goal(  # noqa: C901  -- core goal-execution loop
                 _record_planning_outcome(goal, domain, _planning_mode, success=False)
                 _record_harness_outcome(domain, success=False, blackboard=blackboard,
                                         ctx=ctx)
+                # A run that genuinely could not finish is real negative ground
+                # truth (the work didn't get done) — the most common negative
+                # outcome, and until now invisible to the learning loop, which
+                # only saw human cancels/sign-offs. Feed it as a grounded 0.0 so
+                # the flywheel learns from organic failure, not just the proxy.
+                # Same budget-cap exclusion as above; best-effort + gated (a no-op
+                # unless [consequence] is enabled), so a default run is untouched.
+                from . import consequence
+                consequence.record_self_outcome(world, goal_id, 0.0, kind="failed")
             _fire_webhook("goal_finished", {
                 "goal_id": goal_id, "status": "blocked", "result": result.error,
             })

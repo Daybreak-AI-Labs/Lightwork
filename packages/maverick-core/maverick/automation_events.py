@@ -301,28 +301,51 @@ register("rss", RssSource)
 
 def _oauth_refresher(config: dict):
     """A ``refresher(record) -> token_dict`` for ``vault.access_token``, or
-    ``None`` when the trigger supplied no refresh config (then a stored,
-    still-valid token is used as-is). ``client_secret`` is read from an env-var
-    name (``client_secret_env``), never stored in the trigger config."""
-    token_url = str((config or {}).get("token_url") or "").strip()
-    client_id = str((config or {}).get("client_id") or "").strip()
-    if not (token_url and client_id):
-        return None
-    secret_env = str((config or {}).get("client_secret_env") or "").strip()
+    ``None`` when no refresh is possible (then a stored, still-valid token is
+    used as-is). Two ways to configure it:
 
-    def _refresh(record: dict) -> dict:
-        import os
+    * explicit ``token_url`` + ``client_id`` in the trigger config, or
+    * a ``provider`` that names a known preset (:mod:`maverick.oauth_providers`),
+      whose token endpoint + env credentials are used -- so ``{provider: 'slack'}``
+      refreshes turnkey without hand-entering Slack's token URL.
 
-        from .tools.oauth_helper import _post_form  # SSRF + https-guarded POST
-        data = {"grant_type": "refresh_token", "client_id": client_id,
-                "refresh_token": str(record.get("refresh_token") or "")}
-        if secret_env and os.environ.get(secret_env):
-            data["client_secret"] = os.environ[secret_env]
-        try:
+    ``client_secret`` is always read from an env-var name, never stored in config.
+    """
+    cfg = config or {}
+    token_url = str(cfg.get("token_url") or "").strip()
+    client_id = str(cfg.get("client_id") or "").strip()
+    secret_env = str(cfg.get("client_secret_env") or "").strip()
+
+    def _wrap(inner):
+        def _refresh(record: dict) -> dict:
+            try:
+                return inner(record)
+            except Exception as e:
+                raise EventSourceError(
+                    f"OAuth token refresh failed: {type(e).__name__}") from e
+        return _refresh
+
+    if token_url and client_id:
+        def _explicit(record: dict) -> dict:
+            import os
+
+            from .tools.oauth_helper import _post_form  # SSRF + https-guarded POST
+            data = {"grant_type": "refresh_token", "client_id": client_id,
+                    "refresh_token": str(record.get("refresh_token") or "")}
+            if secret_env and os.environ.get(secret_env):
+                data["client_secret"] = os.environ[secret_env]
             return _post_form(token_url, data)
-        except Exception as e:
-            raise EventSourceError(f"OAuth token refresh failed: {type(e).__name__}") from e
-    return _refresh
+        return _wrap(_explicit)
+
+    # Preset fallback: a known provider supplies its own token endpoint + creds.
+    provider = str(cfg.get("provider") or "").strip()
+    if provider:
+        from . import oauth_providers
+        preset = oauth_providers.make_refresher(
+            provider, client_id=client_id, client_secret_env=secret_env)
+        if preset is not None:
+            return _wrap(preset)
+    return None
 
 
 def _oauth_bearer(config: dict) -> str:

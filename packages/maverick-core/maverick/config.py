@@ -1319,6 +1319,19 @@ def get_consequence() -> dict:
     return {"enable": bool(cfg.get("enable", False))}
 
 
+def get_flows() -> dict:
+    """Return the ``[flows]`` section (the flow engine).
+
+    A flow is a deterministic control-flow skeleton (branch / foreach / parallel /
+    approval / delay) over agentic + tool steps -- the "do both" model that keeps
+    a migrated workflow's structure while any node can still be a full agentic
+    goal. OFF by default -- when ``enable`` is false the engine never runs, so a
+    default deployment is unaffected.
+    """
+    cfg = load_config().get("flows", {})
+    return {"enable": bool(cfg.get("enable", False))}
+
+
 def get_operations_scientist() -> dict:
     """Return the ``[operations_scientist]`` section (the discovery engine).
 

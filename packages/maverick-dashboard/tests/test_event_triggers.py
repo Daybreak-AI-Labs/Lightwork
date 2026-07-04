@@ -355,6 +355,34 @@ def test_reconcile_seeds_one_tick_and_is_idempotent(monkeypatch, tmp_path):
     assert len(ticks) == 1
 
 
+def test_reconcile_seeds_flywheel_only_when_data_engine_on(monkeypatch, tmp_path):
+    # The missing scheduled driver: enabling the data engine arms a recurring
+    # flywheel_cycle so accumulated outcomes actually get consolidated.
+    _isolate(monkeypatch, tmp_path)
+    from maverick_dashboard import automation_queue as aq
+    _reset_aq(monkeypatch, aq)
+    monkeypatch.delenv("MAVERICK_DATA_ENGINE", raising=False)
+    aq.reconcile()
+    assert not [j for j in aq.queue().list(status="pending") if j.kind == aq.FLYWHEEL_KIND]
+    monkeypatch.setenv("MAVERICK_DATA_ENGINE", "1")
+    aq.reconcile()
+    fly = [j for j in aq.queue().list(status="pending") if j.kind == aq.FLYWHEEL_KIND]
+    assert len(fly) == 1
+
+
+def test_flywheel_handler_is_gated_and_fail_open(monkeypatch, tmp_path):
+    _isolate(monkeypatch, tmp_path)
+    from maverick_dashboard import automation_queue as aq
+    calls = []
+    import maverick.flywheel as fw
+    monkeypatch.setattr(fw, "maybe_run", lambda: calls.append(1))
+    aq._handle_flywheel(None)          # maybe_run is itself gated; handler just drives it
+    assert calls == [1]
+    # a raising flywheel must not escape the handler (fail-open like the dream cycle)
+    monkeypatch.setattr(fw, "maybe_run", lambda: (_ for _ in ()).throw(RuntimeError("x")))
+    aq._handle_flywheel(None)          # no raise
+
+
 def test_list_is_owner_scoped(monkeypatch, tmp_path):
     _isolate(monkeypatch, tmp_path)
     from maverick_dashboard import api, event_triggers_store

@@ -213,6 +213,62 @@ class OutcomeIn(BaseModel):
     kind: str = ""
 
 
+class FeedbackIn(BaseModel):
+    """A human thumbs-up/down on a goal's result -- the always-available verdict
+    (unlike the gated sign-off). Grounds a real outcome into the learning loop."""
+    rating: str = Field(..., pattern="^(up|down)$")
+    note: str | None = Field(default=None, max_length=2000)
+
+
+class OutcomeLinkIn(BaseModel):
+    """Link an external business key (``invoice:INV-42``) to the episode that
+    acted on it, so a later outcome reported against that key can be grounded."""
+    goal_id: int
+    episode_id: int
+    key: str = Field(..., min_length=1, max_length=256)
+
+
+class OutcomeByKeyIn(BaseModel):
+    """A real downstream outcome reported by a system of record using only the
+    business key it owns -- resolved to the episode that acted via the link."""
+    key: str = Field(..., min_length=1, max_length=256)
+    value: float
+    kind: str = ""
+
+
+class OAuthAuthorizeIn(BaseModel):
+    """Start a turnkey 'connect this account' flow for a preset provider: build
+    the consent URL. The returned PKCE verifier is kept by the (admin) operator
+    and passed back to /exchange -- no server-side state."""
+    redirect_uri: str = Field(..., min_length=1, max_length=2048)
+    scopes: list[str] | None = None
+    client_id: str | None = Field(default=None, max_length=512)
+
+
+class OAuthExchangeIn(BaseModel):
+    """Finish the connect flow: swap the authorization code for tokens and seal
+    them in the per-tenant vault under the provider name."""
+    code: str = Field(..., min_length=1, max_length=4096)
+    redirect_uri: str = Field(..., min_length=1, max_length=2048)
+    verifier: str = Field(default="", max_length=256)
+    client_id: str | None = Field(default=None, max_length=512)
+
+
+class FlowSaveIn(BaseModel):
+    """A flow definition (a graph of typed nodes) to create or replace."""
+    flow: dict
+
+
+class FlowRunIn(BaseModel):
+    """Start a flow run with optional initial data (the trigger payload)."""
+    data: dict = Field(default_factory=dict)
+
+
+class FlowResumeIn(BaseModel):
+    """Resume a paused flow run: the human verdict on the approval node."""
+    decision: str = Field(default="approved", pattern="^(approved|rejected)$")
+
+
 class AnswerIn(BaseModel):
     question_id: int
     answer: str

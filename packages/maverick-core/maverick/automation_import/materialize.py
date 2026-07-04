@@ -56,6 +56,18 @@ def materialize(
     tname = automation.template_name()
     notes: list[str] = []
 
+    # Payload fields the workflow reads from its trigger -> declared template
+    # params, so the trigger's data reaches the run by-name. Empty for
+    # schedule/manual triggers. ``field_defaults`` covers EVERY {{placeholder}}
+    # the saved template ends up declaring (payload fields plus any placeholder a
+    # step input happens to carry), each defaulting to "" on the wired trigger --
+    # so a fire never fails on a missing param while real payload data overrides
+    # by-name.
+    import re as _re
+    fields = automation.payload_fields()
+    _declared = list(dict.fromkeys(_re.findall(r"\{\{\s*(\w+)\s*\}\}", body)))
+    field_defaults = dict.fromkeys(_declared, "")
+
     created = False
     if save:
         shield_scan(body, label=f"imported automation template {tname!r}")
@@ -63,7 +75,7 @@ def materialize(
             tname,
             title=title,
             body=body,
-            params=[],
+            params=fields,
             budget_dollars=float(budget_dollars),
             budget_wall_seconds=float(budget_wall_seconds),
             overwrite=overwrite,
@@ -129,13 +141,18 @@ def materialize(
             notes.append("source trigger is a schedule but no cron expression was recoverable; "
                          "set one when wiring the schedule")
     elif trig.kind in (TRIGGER_WEBHOOK,):
-        result.suggested_trigger = {"kind": "webhook", "template": tname, "name": tname}
+        result.suggested_trigger = {"kind": "webhook", "template": tname, "name": tname,
+                                    "params": field_defaults}
         notes.append("wire an inbound webhook trigger bound to this template "
                      "(dashboard Automations, or `maverick` trigger tooling)")
     else:
         result.suggested_trigger = {"kind": trig.kind, "template": tname, "name": tname,
-                                    "event": f"{trig.app} {trig.event}".strip()}
+                                    "event": f"{trig.app} {trig.event}".strip(),
+                                    "params": field_defaults}
         notes.append(f"source trigger ({trig.render()}) has no direct Lightwork equivalent; "
                      "bind the template to a webhook/schedule, or run it on demand")
+    if fields:
+        notes.append("trigger payload fields mapped to template params (fill on fire): "
+                     + ", ".join(fields))
 
     return result

@@ -95,8 +95,48 @@
         <span class="auto__hint" id="auto-event-msg" aria-live="polite"></span>
       </div>
     </form>
+
+    <div id="oauth-connect" style="margin-top: var(--space-5);" hidden>
+      <h3 style="margin-bottom: var(--space-2);">Connected accounts</h3>
+      <p class="auto__hint">Connect a SaaS account once, then poll it from an OAuth’d source (set <code>{"provider": "&lt;name&gt;"}</code> in a source config). The token is sealed per-tenant and refreshed automatically. Set the app’s client id/secret in the named environment variables first.</p>
+      <ul class="auto__list" id="oauth-list" aria-label="Connected accounts"></ul>
+      <div class="field" style="margin-top: var(--space-3);">
+        <label for="oauth-redirect">Redirect URI (registered with the OAuth app)</label>
+        <input type="text" id="oauth-redirect" placeholder="https://your-dashboard/oauth/callback" autocomplete="off" spellcheck="false" />
+      </div>
+      <div class="wf__row" style="display:flex; gap: var(--space-3); align-items:center; flex-wrap: wrap;">
+        <select id="oauth-provider" aria-label="Provider to connect"></select>
+        <button class="btn btn--ghost" type="button" id="oauth-get-url">Get consent link</button>
+        <span class="auto__hint" id="oauth-msg" aria-live="polite"></span>
+      </div>
+      <div id="oauth-finish" style="margin-top: var(--space-3);" hidden>
+        <p class="auto__hint">Open the link, authorize, then paste the <code>code</code> from the redirect here to finish.</p>
+        <a id="oauth-open" class="btn btn--ghost" href="#" target="_blank" rel="noopener noreferrer">Open consent page ↗</a>
+        <div class="field" style="margin-top: var(--space-2);">
+          <label for="oauth-code">Authorization code</label>
+          <input type="text" id="oauth-code" autocomplete="off" spellcheck="false" />
+        </div>
+        <button class="btn btn--primary" type="button" id="oauth-exchange">Finish connecting</button>
+      </div>
+    </div>
   </section>
   {% endif %}
+
+  <section class="auto__section" id="auto-flows-section" aria-labelledby="auto-flows-h" hidden>
+    <div class="section-head">
+      <h2 id="auto-flows-h" tabindex="-1">Flows</h2>
+      <span class="muted" id="auto-flows-count"></span>
+    </div>
+    <p class="auto__hint">A flow is a deterministic skeleton — branch, loop, parallel, approval, delay — over steps that are either a fixed tool call or a full agentic goal. Run one and it pauses at any approval for a human decision; each node’s outcome trains which steps should be deterministic vs. agentic. Author flows via <code>POST /api/v1/flows</code> or by importing a workflow.</p>
+    <ul class="auto__list" id="auto-flows-list" aria-label="Flows"></ul>
+    <div class="mv-empty" id="auto-flows-empty" hidden>
+      <p class="mv-empty__title">No flows yet</p>
+      <p class="mv-empty__body">Import a workflow or POST a flow definition to get started.</p>
+    </div>
+    <h3 style="margin-top: var(--space-4);">Recent runs</h3>
+    <ul class="auto__list" id="auto-flow-runs" aria-label="Flow runs"></ul>
+    <span class="auto__hint" id="auto-flows-msg" aria-live="polite"></span>
+  </section>
 
   {% if import_enabled %}
   <section class="auto__section" id="auto-import-section" aria-labelledby="auto-import-h">
@@ -380,6 +420,13 @@
         var h = await (await fetch('/api/v1/event-triggers/history?limit=500')).json();
         (h.history || []).forEach(function (r) { (histByName[r.name] = histByName[r.name] || []).push(r); });
       } catch (e) { /* history is best-effort */ }
+      // Per-trigger goal-outcome counts (done/failed/blocked): attributes the
+      // QUALITY of what each automation produced, which the fire history can't.
+      var outByName = {};
+      try {
+        var o = await (await fetch('/api/v1/event-triggers/outcomes')).json();
+        outByName = o.outcomes || {};
+      } catch (e) { /* outcomes are best-effort */ }
       evList.textContent = '';
       if (evCount) evCount.textContent = items.length ? (items.length + (items.length === 1 ? ' trigger' : ' triggers')) : '';
       if (evEmpty) evEmpty.hidden = items.length > 0;
@@ -392,6 +439,7 @@
           + (t.cursor ? (' · at ' + t.cursor) : ' · not yet polled')));
         var runs = el('div', 'auto__runs'); main.appendChild(runs); loadRuns('event', t.name, runs);
         var hist = el('div', 'auto__runs'); main.appendChild(hist); renderEventHistory(histByName[t.name] || [], hist);
+        var outc = el('div', 'auto__runs'); main.appendChild(outc); renderEventOutcomes(outByName[t.name] || {}, outc);
         li.appendChild(main);
         li.appendChild(delBtn('Delete event trigger ' + t.name, function () { delEventTrigger(t.name); }));
         evList.appendChild(li);
@@ -407,6 +455,18 @@
       if (fires) bits.push('fired ' + fires + '×');
       if (err) bits.push('⚠ ' + (err.note || err.kind));
       if (bits.length) into.textContent = bits.join(' · ');
+    }
+    function renderEventOutcomes(counts, into) {
+      // Goal-outcome quality per trigger (done/failed/blocked): a rising failed
+      // count flags an automation firing bad goals -- and those same failures are
+      // grounded into the learning loop by the run itself.
+      var done = counts.done || 0;
+      var bad = (counts.failed || 0) + (counts.blocked || 0);
+      if (!done && !bad) return;
+      var bits = [];
+      if (done) bits.push('✓ ' + done + ' done');
+      if (bad) bits.push('✗ ' + bad + ' failed');
+      into.textContent = bits.join(' · ');
     }
     async function delEventTrigger(name) {
       if (!(await mvConfirm('Delete event trigger “' + name + '”? It will stop polling.'))) return;
@@ -448,6 +508,161 @@
       } catch (e) { evMsg.textContent = 'Poll failed.'; }
     });
     loadEventTriggers();
+  }
+
+  // ---- connected accounts (turnkey OAuth) ----
+  var oauthBox = document.getElementById('oauth-connect');
+  if (oauthBox) {
+    var oList = document.getElementById('oauth-list');
+    var oProv = document.getElementById('oauth-provider');
+    var oMsg = document.getElementById('oauth-msg');
+    var oFinish = document.getElementById('oauth-finish');
+    var oOpen = document.getElementById('oauth-open');
+    var pendingVerifier = '';
+    async function loadOAuth() {
+      var data;
+      try { data = await (await fetch('/api/v1/oauth/providers')).json(); }
+      catch (e) { return; }
+      if (!data.vault_enabled) { oauthBox.hidden = true; return; }
+      oauthBox.hidden = false;
+      var connected = data.connected || [];
+      oList.textContent = '';
+      if (oProv && !oProv.children.length) {
+        (data.providers || []).forEach(function (p) {
+          var o = document.createElement('option'); o.value = p.name; o.textContent = p.label; oProv.appendChild(o);
+        });
+      }
+      (data.providers || []).forEach(function (p) {
+        if (connected.indexOf(p.name) === -1) return;
+        var li = el('li', 'mv-row');
+        var main = el('div', 'mv-row__main');
+        main.appendChild(el('div', 'mv-row__title', p.label + ' · connected'));
+        main.appendChild(el('div', 'mv-row__sub', 'provider ' + p.name));
+        li.appendChild(main);
+        li.appendChild(delBtn('Disconnect ' + p.label, function () { disconnect(p.name); }));
+        oList.appendChild(li);
+      });
+    }
+    async function disconnect(name) {
+      if (!(await mvConfirm('Disconnect ' + name + '? Triggers using it will stop authenticating.'))) return;
+      try {
+        var r = await fetch('/api/v1/oauth/' + encodeURIComponent(name), { method: 'DELETE' });
+        if (r.ok) { mvToast('Disconnected'); loadOAuth(); }
+        else { mvToast('Could not disconnect', { error: true }); }
+      } catch (e) { mvToast('Could not disconnect', { error: true }); }
+    }
+    document.getElementById('oauth-get-url').addEventListener('click', async function () {
+      var redirect = (document.getElementById('oauth-redirect').value || '').trim();
+      if (!redirect) { oMsg.textContent = 'Enter the redirect URI first.'; return; }
+      oMsg.textContent = 'Building consent link…';
+      try {
+        var r = await fetch('/api/v1/oauth/' + encodeURIComponent(oProv.value) + '/authorize-url', {
+          method: 'POST', headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ redirect_uri: redirect }),
+        });
+        var j = await r.json();
+        if (!r.ok) { oMsg.textContent = j.detail || ('Failed: ' + r.status); return; }
+        pendingVerifier = j.verifier || '';
+        oOpen.href = j.authorize_url;
+        oFinish.hidden = false;
+        oMsg.textContent = 'Open the consent page, then paste the code below.';
+      } catch (e) { oMsg.textContent = 'Failed to build consent link.'; }
+    });
+    document.getElementById('oauth-exchange').addEventListener('click', async function () {
+      var code = (document.getElementById('oauth-code').value || '').trim();
+      var redirect = (document.getElementById('oauth-redirect').value || '').trim();
+      if (!code) { oMsg.textContent = 'Paste the authorization code first.'; return; }
+      oMsg.textContent = 'Connecting…';
+      try {
+        var r = await fetch('/api/v1/oauth/' + encodeURIComponent(oProv.value) + '/exchange', {
+          method: 'POST', headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ code: code, redirect_uri: redirect, verifier: pendingVerifier }),
+        });
+        var j = await r.json();
+        if (!r.ok) { oMsg.textContent = j.detail || ('Exchange failed: ' + r.status); return; }
+        oMsg.textContent = 'Connected ✓';
+        oFinish.hidden = true;
+        document.getElementById('oauth-code').value = '';
+        loadOAuth();
+      } catch (e) { oMsg.textContent = 'Exchange failed.'; }
+    });
+    loadOAuth();
+  }
+
+  // ---- flows (deterministic skeleton over agentic/tool steps) ----
+  var flowsSection = document.getElementById('auto-flows-section');
+  if (flowsSection) {
+    var flowsList = document.getElementById('auto-flows-list');
+    var flowRuns = document.getElementById('auto-flow-runs');
+    var flowsCount = document.getElementById('auto-flows-count');
+    var flowsEmpty = document.getElementById('auto-flows-empty');
+    var flowsMsg = document.getElementById('auto-flows-msg');
+    async function loadFlows() {
+      var r;
+      try { r = await fetch('/api/v1/flows'); } catch (e) { return; }
+      if (r.status === 403) { flowsSection.hidden = true; return; }  // engine off
+      if (!r.ok) { flowsSection.hidden = true; return; }
+      flowsSection.hidden = false;
+      var flows = (await r.json()).flows || [];
+      flowsCount.textContent = flows.length ? (flows.length + (flows.length === 1 ? ' flow' : ' flows')) : '';
+      flowsEmpty.hidden = flows.length > 0;
+      flowsList.textContent = '';
+      flows.forEach(function (f) {
+        var li = el('li', 'mv-row');
+        var main = el('div', 'mv-row__main');
+        main.appendChild(el('div', 'mv-row__title', f.name || f.id));
+        main.appendChild(el('div', 'mv-row__sub', f.nodes + (f.nodes === 1 ? ' node' : ' nodes')
+          + (f.single_agent ? ' · single agent' : '')));
+        li.appendChild(main);
+        li.appendChild(mkBtn('Run', function () { runFlow(f.id); }));
+        flowsList.appendChild(li);
+      });
+      loadFlowRuns();
+    }
+    function mkBtn(label, onClick) {
+      var b = el('button', 'btn btn--ghost'); b.type = 'button'; b.textContent = label;
+      b.addEventListener('click', onClick); return b;
+    }
+    async function runFlow(id) {
+      flowsMsg.textContent = 'Starting…';
+      try {
+        var r = await fetch('/api/v1/flows/' + encodeURIComponent(id) + '/run', {
+          method: 'POST', headers: { 'Content-Type': 'application/json' }, body: '{}',
+        });
+        flowsMsg.textContent = r.ok ? 'Run queued.' : 'Could not start run.';
+        setTimeout(loadFlowRuns, 500);
+      } catch (e) { flowsMsg.textContent = 'Could not start run.'; }
+    }
+    async function loadFlowRuns() {
+      var r;
+      try { r = await fetch('/api/v1/flows/runs?limit=25'); } catch (e) { return; }
+      if (!r.ok) return;
+      var runs = (await r.json()).runs || [];
+      flowRuns.textContent = '';
+      runs.forEach(function (run) {
+        var li = el('li', 'mv-row');
+        var main = el('div', 'mv-row__main');
+        main.appendChild(el('div', 'mv-row__title', run.flow_id + ' — ' + run.status));
+        if (run.prompt) main.appendChild(el('div', 'mv-row__sub', run.prompt));
+        li.appendChild(main);
+        if (run.status === 'paused_approval') {
+          li.appendChild(mkBtn('Approve', function () { resumeRun(run.run_id, 'approved'); }));
+          li.appendChild(mkBtn('Reject', function () { resumeRun(run.run_id, 'rejected'); }));
+        }
+        flowRuns.appendChild(li);
+      });
+    }
+    async function resumeRun(runId, decision) {
+      try {
+        await fetch('/api/v1/flows/runs/' + encodeURIComponent(runId) + '/resume', {
+          method: 'POST', headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ decision: decision }),
+        });
+        flowsMsg.textContent = decision === 'approved' ? 'Approved — resuming.' : 'Rejected.';
+        setTimeout(loadFlowRuns, 500);
+      } catch (e) { flowsMsg.textContent = 'Could not resume.'; }
+    }
+    loadFlows();
   }
 
   loadSchedules();

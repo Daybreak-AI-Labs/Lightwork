@@ -48,8 +48,12 @@ from .api_schemas import (
     EventTriggerIn,
     EventTriggerOut,
     FactIn,
+    FeedbackIn,
     FleetCreateIn,
     FleetRunIn,
+    FlowResumeIn,
+    FlowRunIn,
+    FlowSaveIn,
     GoalEventOut,
     GoalEventsResponse,
     GoalIn,
@@ -58,7 +62,11 @@ from .api_schemas import (
     ImportRunIn,
     ImportRunOut,
     LearningToggleIn,
+    OAuthAuthorizeIn,
+    OAuthExchangeIn,
+    OutcomeByKeyIn,
     OutcomeIn,
+    OutcomeLinkIn,
     RedactIn,
     ReparentIn,
     RetitleIn,
@@ -746,6 +754,297 @@ async def record_outcome(request: Request, payload: OutcomeIn) -> None:
     _rec(goal_id, episode_id, float(payload.value), kind=(payload.kind or ""))
 
 
+@router.post("/outcomes/link", status_code=204)
+async def link_outcome(request: Request, payload: OutcomeLinkIn) -> None:
+    """Link an external business key to the episode that acted on it.
+
+    The registration half of the system-of-record loop: when a run creates an
+    invoice / opens a ticket, this records ``invoice:INV-42 -> (goal, episode)``
+    so a later outcome reported against that key (see ``/outcomes/by-key``) can be
+    grounded without the reporter knowing any episode id. Always harmless to store.
+    """
+    require_permission(request, "operate")
+    goal_id = int(payload.goal_id)
+    episode_id = int(payload.episode_id)
+    w = _world()
+    g = w.get_goal(goal_id)
+    if g is None:
+        raise HTTPException(status_code=404, detail="no such goal")
+    assert_goal_access(request, g)
+    if not w.episode_exists(goal_id, episode_id):
+        raise HTTPException(status_code=404, detail="no such episode")
+    from maverick.consequence import link_outcome_key
+    link_outcome_key(payload.key, goal_id, episode_id)
+
+
+@router.post("/outcomes/by-key")
+async def record_outcome_by_key(request: Request, payload: OutcomeByKeyIn) -> dict:
+    """Ingest a real downstream outcome using only the business key.
+
+    The endpoint a system-of-record webhook (Stripe "invoice.paid", Zendesk
+    "ticket.reopened") calls: it knows its own key, not a Lightwork episode. We
+    resolve the key to the episode that acted (registered via ``/outcomes/link``)
+    and ground the reward there. ``matched`` is ``false`` when no run has linked
+    that key -- the connector reported an outcome for work Lightwork didn't do.
+    """
+    require_permission(request, "operate")
+    from maverick import consequence
+    w = _world()
+
+    def _authorize(goal_id: int, _episode_id: int) -> bool:
+        # Enforce the same access boundary as the goal/episode ingest so an
+        # operate caller can't ground outcomes on a goal they can't see (the
+        # correlation store is already tenant-scoped by path).
+        g = w.get_goal(goal_id)
+        return g is not None and can_access_goal(request, g)
+
+    matched = consequence.record_outcome_for_key(
+        payload.key, float(payload.value), kind=(payload.kind or ""),
+        authorize=_authorize)
+    return {"matched": bool(matched)}
+
+
+# ---- turnkey "connect this account" OAuth flow --------------------------------
+#
+# Connect a SaaS account by NAME using a provider preset, so an OAuth'd event
+# source (oauth_http_json / github_issues with provider=<name>) can poll it.
+# Authorizing a token is the same trust as sending it, so all mutating steps are
+# ADMIN-gated (matching the provider-trigger admin gate). The client secret is
+# read from the operator's env, never posted here or persisted.
+
+
+def _require_oauth_vault() -> None:
+    from maverick import oauth_vault
+    if not oauth_vault.enabled():
+        raise HTTPException(
+            status_code=403,
+            detail=("the OAuth vault is off; enable [oauth] vault or set "
+                    "MAVERICK_OAUTH_VAULT=1 to connect accounts"),
+        )
+
+
+@router.get("/oauth/providers")
+async def oauth_providers_endpoint(request: Request) -> dict:
+    """The connectable provider presets + which are already connected (view)."""
+    require_permission(request, "view")
+    from maverick import oauth_providers, oauth_vault
+    connected: list[str] = []
+    if oauth_vault.enabled():
+        try:
+            connected = oauth_vault.get_vault().providers()
+        except Exception:  # pragma: no cover -- a vault read never errors the list
+            connected = []
+    return {
+        "providers": oauth_providers.provider_catalog(),
+        "connected": connected,
+        "vault_enabled": oauth_vault.enabled(),
+    }
+
+
+@router.post("/oauth/{provider}/authorize-url")
+async def oauth_authorize_url(request: Request, provider: str,
+                              payload: OAuthAuthorizeIn) -> dict:
+    """Build the consent URL for a preset provider (admin). Returns the URL to
+    open and the PKCE verifier to keep -- pass the verifier back to /exchange.
+    Stateless: the verifier round-trips through the (trusted) operator."""
+    require_permission(request, "admin")
+    _require_oauth_vault()
+    from maverick import oauth_providers
+    built = oauth_providers.build_authorize_url(
+        provider, redirect_uri=payload.redirect_uri,
+        client_id=payload.client_id or "", scopes=payload.scopes)
+    if built is None:
+        prov = oauth_providers.get_provider(provider)
+        if prov is None:
+            raise HTTPException(status_code=404, detail=f"unknown provider {provider!r}")
+        raise HTTPException(
+            status_code=400,
+            detail=f"set {prov.default_client_id_env()} (the OAuth app client id) first")
+    url, verifier = built
+    return {"authorize_url": url, "verifier": verifier}
+
+
+@router.post("/oauth/{provider}/exchange")
+async def oauth_exchange(request: Request, provider: str,
+                         payload: OAuthExchangeIn) -> dict:
+    """Swap the authorization code for tokens and seal them in the per-tenant
+    vault under the provider name (admin). The provider preset supplies the token
+    endpoint; the client secret is read from the operator's env."""
+    require_permission(request, "admin")
+    _require_oauth_vault()
+    from maverick import oauth_providers
+    if oauth_providers.get_provider(provider) is None:
+        raise HTTPException(status_code=404, detail=f"unknown provider {provider!r}")
+    try:
+        summary = oauth_providers.exchange_code(
+            provider, code=payload.code, redirect_uri=payload.redirect_uri,
+            verifier=payload.verifier or "", client_id=payload.client_id or "")
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e)) from e
+    except Exception as e:  # a provider/network failure -> 502, not a 500
+        raise HTTPException(status_code=502, detail=f"token exchange failed: {e}") from e
+    return {"connected": True, **summary}
+
+
+@router.delete("/oauth/{provider}", status_code=204)
+async def oauth_disconnect(request: Request, provider: str) -> None:
+    """Remove a connected account's sealed token from the vault (admin)."""
+    require_permission(request, "admin")
+    _require_oauth_vault()
+    from maverick import oauth_vault
+    oauth_vault.get_vault().delete(provider)
+
+
+# ---- flows: a deterministic skeleton over agentic + tool steps ---------------
+
+
+def _require_flows() -> None:
+    from maverick import flow
+    if not flow.enabled():
+        raise HTTPException(
+            status_code=403,
+            detail=("the flow engine is off; enable [flows] in config.toml or set "
+                    "MAVERICK_FLOWS=1"),
+        )
+
+
+@router.get("/flows")
+async def list_flows_endpoint(request: Request) -> dict:
+    """The saved flow definitions (a summary per flow)."""
+    require_permission(request, "operate")
+    _require_flows()
+    from maverick.flow import store
+    return {"flows": [
+        {"id": f.id, "name": f.name, "nodes": len(f.nodes),
+         "single_agent": f.is_single_agent()}
+        for f in store.list_flows()
+    ]}
+
+
+@router.post("/flows", status_code=201)
+async def save_flow_endpoint(request: Request, payload: FlowSaveIn) -> dict:
+    """Create or replace a flow definition (validated before it is stored)."""
+    require_permission(request, "operate")
+    _require_flows()
+    from maverick.flow import Flow, store
+    try:
+        flow = Flow.from_dict(payload.flow)
+    except Exception as e:  # a malformed graph
+        raise HTTPException(status_code=400, detail=f"invalid flow: {e}") from e
+    if not flow.id:
+        raise HTTPException(status_code=400, detail="flow needs an 'id'")
+    errs = flow.validate()
+    if errs:
+        raise HTTPException(status_code=400, detail="invalid flow: " + "; ".join(errs[:5]))
+    store.save_flow(flow)
+    return {"id": flow.id, "nodes": len(flow.nodes)}
+
+
+@router.get("/flows/runs")
+async def list_flow_runs_endpoint(request: Request, flow_id: str = "",
+                                  limit: int = 50) -> dict:
+    """Recent flow runs (owner-scoped). Defined before ``/flows/{flow_id}`` so the
+    literal ``runs`` path isn't captured as a flow id."""
+    require_permission(request, "operate")
+    _require_flows()
+    from maverick.flow import store
+    owner = goal_owner_filter(request)
+    runs = store.list_runs(flow_id=flow_id or None, owner=owner,
+                           limit=max(1, min(500, limit)))
+    return {"runs": [r.to_dict() for r in runs]}
+
+
+def _load_owned_run(request: Request, run_id: str):
+    """A flow run the caller may see, or a 404 (indistinguishable from missing,
+    so a run's existence isn't leaked across owners)."""
+    from maverick.flow import store
+    run = store.load_run(run_id)
+    if run is None:
+        raise HTTPException(status_code=404, detail="no such run")
+    owner = goal_owner_filter(request)
+    if owner is not None and run.owner != owner:
+        raise HTTPException(status_code=404, detail="no such run")
+    return run
+
+
+@router.get("/flows/runs/{run_id}")
+async def get_flow_run_endpoint(request: Request, run_id: str) -> dict:
+    require_permission(request, "operate")
+    _require_flows()
+    return _load_owned_run(request, run_id).to_dict()
+
+
+@router.post("/flows/runs/{run_id}/resume")
+async def resume_flow_run_endpoint(request: Request, run_id: str,
+                                   payload: FlowResumeIn) -> dict:
+    """Resume a paused flow run with a human decision (approve/reject)."""
+    require_permission(request, "operate")
+    _require_flows()
+    run = _load_owned_run(request, run_id)
+    # Only a paused run may be resumed -- resuming a completed/rejected run would
+    # re-run the flow or run a rejected node (409, not a silent no-op).
+    if run.status not in ("paused_approval", "paused_delay"):
+        raise HTTPException(status_code=409,
+                            detail=f"run is not paused (status {run.status})")
+    from maverick_dashboard import automation_queue as aq
+    aq.queue().enqueue(aq.FLOW_RESUME_KIND, {
+        "flow_id": run.flow_id, "run_id": run_id, "decision": payload.decision,
+        "owner": run.owner})
+    return {"run_id": run_id, "status": "resuming", "decision": payload.decision}
+
+
+@router.get("/flows/{flow_id}")
+async def get_flow_endpoint(request: Request, flow_id: str) -> dict:
+    require_permission(request, "operate")
+    _require_flows()
+    from maverick.flow import store
+    f = store.load_flow(flow_id)
+    if f is None:
+        raise HTTPException(status_code=404, detail="no such flow")
+    return f.to_dict()
+
+
+@router.delete("/flows/{flow_id}", status_code=204)
+async def delete_flow_endpoint(request: Request, flow_id: str) -> None:
+    require_permission(request, "operate")
+    _require_flows()
+    from maverick.flow import store
+    store.delete_flow(flow_id)
+
+
+@router.post("/flows/{flow_id}/run")
+async def run_flow_endpoint(request: Request, flow_id: str, payload: FlowRunIn) -> dict:
+    """Start a flow run as a durable job (agent nodes become goals, action nodes
+    tool calls). Returns the run id to poll; the run may pause on an approval."""
+    require_permission(request, "operate")
+    _require_flows()
+    from maverick.flow import store
+    if store.load_flow(flow_id) is None:
+        raise HTTPException(status_code=404, detail="no such flow")
+    owner = _supervisor(request)
+    run_id = store.new_run_id()
+    store.save_run(store.FlowRun(run_id=run_id, flow_id=flow_id, status="queued",
+                                 owner=owner, data=dict(payload.data or {})))
+    from maverick_dashboard import automation_queue as aq
+    aq.queue().enqueue(aq.FLOW_RUN_KIND, {
+        "flow_id": flow_id, "run_id": run_id, "data": payload.data, "owner": owner})
+    return {"run_id": run_id, "status": "queued"}
+
+
+@router.get("/flows/{flow_id}/proposals")
+async def flow_proposals_endpoint(request: Request, flow_id: str) -> dict:
+    """Self-rewrite proposals for a flow: node-type swaps its grounded per-node
+    outcomes justify (harden a reliable agent to an action, soften a flaky action
+    to an agent). Proposals only -- never auto-applied."""
+    require_permission(request, "operate")
+    _require_flows()
+    from maverick.flow import evolve, store
+    f = store.load_flow(flow_id)
+    if f is None:
+        raise HTTPException(status_code=404, detail="no such flow")
+    return {"proposals": [p.to_dict() for p in evolve.maybe_propose(f)]}
+
+
 @router.get("/skills", response_model=list[SkillOut])
 async def list_installed_skills() -> list[SkillOut]:
     from maverick.skills import load_skills
@@ -764,7 +1063,7 @@ async def get_flywheel_state() -> dict:
     auto-dropped when the harm is gone) and the **habits** it has consolidated
     (causally-beneficial actions, with a reinforcement strength). Empty until the
     flywheel has turned. Read-only; never mutates."""
-    out: dict = {"guardrails": [], "habits": []}
+    out: dict = {"guardrails": [], "habits": [], "signal": {}}
     try:
         from maverick.negative_knowledge import shared as _guardrails
         out["guardrails"] = [g.to_dict() for g in _guardrails().all()]
@@ -773,6 +1072,19 @@ async def get_flywheel_state() -> dict:
     try:
         from maverick.procedural_memory import shared as _memory
         out["habits"] = [m.to_dict() for m in _memory().recall(top_k=20)]
+    except Exception:  # pragma: no cover
+        pass
+    # The grounded signal accumulating under the moat: how many real outcomes
+    # (failures, sign-offs, feedback, system-of-record results) and human verdicts
+    # have landed. Makes "the workforce is learning from reality" a live number.
+    try:
+        from maverick import consequence
+
+        from maverick_dashboard import goal_feedback_store
+        out["signal"] = {
+            "grounded_outcomes": consequence.count(),
+            "human_feedback": goal_feedback_store.count(),
+        }
     except Exception:  # pragma: no cover
         pass
     return out
@@ -1476,24 +1788,53 @@ async def post_signoff(request: Request, goal_id: int, payload: SignoffIn) -> di
 
 def _ground_outcome(w, goal_id: int, value: float, *, kind: str) -> None:
     """Record a real human/world outcome for the goal's latest episode as
-    grounded reward the learning flywheel prefers over its proxy. No-op unless
-    ``[consequence]`` is enabled (kernel stays stateless by default); never
-    raises -- grounding is best-effort and must not fail the request."""
-    try:
-        from maverick import consequence
-        if not consequence.enabled():
-            return
-        episodes = w.list_episodes(goal_id=goal_id, limit=1)
-        if not episodes:
-            return  # the action should have an episode, but be safe
-        consequence.record_outcome(goal_id, episodes[0].id, float(value), kind=kind)
-    except Exception as e:  # pragma: no cover - grounding is best-effort
-        log.debug("%s outcome not recorded for goal %s: %s", kind, goal_id, e)
+    grounded reward the learning flywheel prefers over its proxy. Delegates to
+    the shared core helper (no-op unless ``[consequence]`` is enabled; never
+    raises -- grounding is best-effort and must not fail the request)."""
+    from maverick import consequence
+    consequence.record_self_outcome(w, goal_id, value, kind=kind)
 
 
 def _record_signoff_outcome(w, goal_id: int, decision: str) -> None:
     """A deliverable sign-off -> grounded outcome (approved 1.0 / rejected 0.0)."""
     _ground_outcome(w, goal_id, 1.0 if decision == "approved" else 0.0, kind="signoff")
+
+
+@router.get("/goals/{goal_id}/feedback")
+async def get_feedback(request: Request, goal_id: int) -> dict:
+    """The current human thumbs-up/down on a goal's result (or ``null``)."""
+    w = _world()
+    g = w.get_goal(goal_id)
+    if g is None:
+        raise HTTPException(status_code=404, detail="no such goal")
+    assert_goal_access(request, g)
+    from maverick_dashboard import goal_feedback_store
+    return {"feedback": goal_feedback_store.latest_for_goal(goal_id)}
+
+
+@router.post("/goals/{goal_id}/feedback")
+async def post_feedback(request: Request, goal_id: int, payload: FeedbackIn) -> dict:
+    """Record a human thumbs-up/down on a goal's result.
+
+    The always-available verdict: unlike the sign-off gate (which only exists when
+    a pack declares one), any finished result can be rated here, and the rating is
+    fed back into the learning loop as a GROUNDED outcome -- an up is a 1.0 reward,
+    a down a 0.0 -- exactly the ``(goal_id, episode_id, value)`` tuple the
+    Consequence Engine / flywheel consume. Persisted for the UI + the "what your
+    workforce learned" count. Best-effort grounding, gated on ``[consequence]``."""
+    require_permission(request, "operate")
+    w = _world()
+    g = w.get_goal(goal_id)
+    if g is None:
+        raise HTTPException(status_code=404, detail="no such goal")
+    assert_goal_access(request, g)
+    value = 1.0 if payload.rating == "up" else 0.0
+    who = _supervisor(request)
+    from maverick_dashboard import goal_feedback_store
+    row = goal_feedback_store.record(goal_id, g.owner or "", payload.rating, value=value,
+                                     note=payload.note or "", by=who)
+    _ground_outcome(w, goal_id, value, kind="feedback")
+    return {"feedback": row}
 
 
 def _handoff_approved_deliverable(g, decided_by: str) -> None:
@@ -2127,6 +2468,25 @@ async def event_trigger_history(request: Request, name: str = "", limit: int = 5
     rows = trigger_events_store.history(
         name=name or None, owner=owner, limit=max(1, min(1000, limit)))
     return {"history": rows}
+
+
+@router.get("/event-triggers/outcomes")
+async def event_trigger_outcomes(request: Request) -> dict:
+    """Per-trigger goal-outcome counts (done / failed / blocked / active ...).
+
+    Closes the attribution loop the firing history can't: a trigger that fires a
+    *bad* goal shows up here as a rising ``failed``/``blocked`` count, so an
+    operator can see which automations produce work that doesn't land -- and the
+    same failed goals are grounded into the learning loop by the run itself.
+    Sourced from the goal-origin join (``origin_status_counts('event', name)``)."""
+    require_permission(request, "operate")
+    _require_event_triggers()
+    w = _world()
+    outcomes = {
+        t["name"]: w.origin_status_counts("event", t["name"])
+        for t in _owned_event_triggers(request)
+    }
+    return {"outcomes": outcomes}
 
 
 # ---- automation import: pull clients' existing automations into Lightwork -----
