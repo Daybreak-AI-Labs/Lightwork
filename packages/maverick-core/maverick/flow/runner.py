@@ -30,6 +30,7 @@ from .ir import (
     NODE_DELAY,
     NODE_FOREACH,
     NODE_PARALLEL,
+    NODE_SUBFLOW,
     Flow,
     FlowNode,
 )
@@ -139,11 +140,15 @@ class _Ctx:
     on_node: Callable[[FlowNode, str, float | None], None]
     now: Callable[[], float]
     allow_pause: bool
+    resolve_flow: Callable[[str], Flow | None] | None = None
+    flow_stack: set = field(default_factory=set)   # subflow ids on the call stack
 
     def nested(self) -> _Ctx:
-        # A copy that cannot pause (foreach body / parallel branch run straight).
+        # A copy that cannot pause (foreach body / parallel branch / subflow run
+        # straight). Shares flow_stack so subflow cycle detection spans nesting.
         return _Ctx(self.agent_fn, self.action_fn, self.approve_fn, self.on_node,
-                    self.now, allow_pause=False)
+                    self.now, allow_pause=False, resolve_flow=self.resolve_flow,
+                    flow_stack=self.flow_stack)
 
 
 def _render_params(node: FlowNode, data: dict) -> dict:
@@ -151,14 +156,44 @@ def _render_params(node: FlowNode, data: dict) -> dict:
             for k, v in (node.params or {}).items()}
 
 
-def _run_work(node: FlowNode, data: dict, ctx: _Ctx) -> str | None:
+def _invoke_work(node: FlowNode, data: dict, ctx: _Ctx):
     if node.kind == NODE_AGENT:
-        result, outcome = ctx.agent_fn(node, render(node.brief, data), data)
-    else:
-        result, outcome = ctx.action_fn(node, _render_params(node, data), data)
+        return ctx.agent_fn(node, render(node.brief, data), data)
+    return ctx.action_fn(node, _render_params(node, data), data)
+
+
+def _run_work(node: FlowNode, data: dict, ctx: _Ctx) -> str | None:
+    result, outcome = _invoke_work(node, data, ctx)
+    # Retry a failed work node (outcome 0.0) up to `retries` more times -- a
+    # transient tool/agent failure gets another attempt before we give up.
+    tries = 0
+    while outcome == 0.0 and tries < max(0, node.retries):
+        tries += 1
+        result, outcome = _invoke_work(node, data, ctx)
     if node.output:
         data[node.output] = result
     ctx.on_node(node, "done", outcome)
+    # A node that still failed routes to its on_error handler if it has one, so a
+    # flow can catch and recover instead of poisoning `data` and marching on.
+    if outcome == 0.0 and node.on_error:
+        return node.on_error
+    return node.next
+
+
+def _run_subflow(node: FlowNode, data: dict, ctx: _Ctx) -> str | None:
+    sub = ctx.resolve_flow(node.flow_ref) if ctx.resolve_flow else None
+    if sub is None or sub.id in ctx.flow_stack:   # missing OR would recurse -> failure
+        ctx.on_node(node, "error", 0.0)
+        return node.on_error or node.next
+    # Runs on the SAME data dict (threaded), so the sub-flow reads parent data and
+    # its outputs flow back. Nested: it cannot pause (v1 -- HITL lives up top). The
+    # flow id is on the stack for its duration so a cyclic reference is caught.
+    ctx.flow_stack.add(sub.id)
+    try:
+        _run_chain(sub, data, ctx.nested(), sub.start)
+    finally:
+        ctx.flow_stack.discard(sub.id)
+    ctx.on_node(node, "done", None)
     return node.next
 
 
@@ -221,6 +256,7 @@ _HANDLERS = {
     NODE_AGENT: _run_work, NODE_ACTION: _run_work, NODE_BRANCH: _run_branch,
     NODE_FOREACH: _run_foreach, NODE_PARALLEL: _run_parallel,
     NODE_APPROVAL: _run_approval, NODE_DELAY: _run_delay,
+    NODE_SUBFLOW: _run_subflow,
 }
 
 
@@ -250,15 +286,19 @@ def run_flow(flow: Flow, *, agent_fn: AgentFn, action_fn: ActionFn,
              approve_fn: Callable[[FlowNode, dict], str] | None = None,
              on_node: Callable[[FlowNode, str, float | None], None] | None = None,
              resume: dict | None = None,
-             now: Callable[[], float] | None = None) -> FlowRunResult:
+             now: Callable[[], float] | None = None,
+             resolve_flow: Callable[[str], Flow | None] | None = None) -> FlowRunResult:
     """Run ``flow`` to completion or the next pause.
 
     ``resume`` continues a paused run: ``{"node_id", "data", "decision"?}`` --
     ``decision`` is the human's verdict on the approval node that paused it
     (``approved`` continues, ``rejected`` ends); a delay resume omits it.
+    ``resolve_flow(flow_ref) -> Flow | None`` resolves a ``subflow`` node's target
+    (with the caller's cycle/depth guard); ``None`` makes a subflow a no-op error.
     """
     ctx = _Ctx(agent_fn, action_fn, approve_fn, on_node or (lambda *_: None),
-               now or time.time, allow_pause=True)
+               now or time.time, allow_pause=True, resolve_flow=resolve_flow,
+               flow_stack={flow.id})   # so the top flow can't recurse into itself
     if resume:
         data = dict(resume.get("data") or data or {})
         node = flow.node(resume.get("node_id"))

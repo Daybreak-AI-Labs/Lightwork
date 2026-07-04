@@ -74,6 +74,9 @@ def execute(flow: Flow, *, agent_runner: AgentRunner, action_runner: ActionRunne
         agent_fn=lambda node, brief, d: agent_runner(brief, d),
         action_fn=lambda node, params, d: action_runner(node.tool, params, d),
         approve_fn=approve_fn, data=data, resume=resume, on_node=_on_node, now=now,
+        # A subflow node resolves to another SAVED flow; the runner's flow_stack
+        # guards against a cyclic reference (this loader stays a plain lookup).
+        resolve_flow=store.load_flow,
     )
     run = store.FlowRun(
         run_id=rid, flow_id=flow.id, status=res.status, data=res.data,

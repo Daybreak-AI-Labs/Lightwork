@@ -16,6 +16,7 @@ from .ir import (
     NODE_DELAY,
     NODE_FOREACH,
     NODE_PARALLEL,
+    NODE_SUBFLOW,
     Flow,
     FlowNode,
     single_agent_flow,
@@ -58,5 +59,5 @@ __all__ = [
     "enabled", "auto_evolve_enabled", "Flow", "FlowNode", "single_agent_flow",
     "run_flow", "FlowRunResult", "render", "eval_condition",
     "NODE_ACTION", "NODE_AGENT", "NODE_BRANCH", "NODE_FOREACH",
-    "NODE_PARALLEL", "NODE_APPROVAL", "NODE_DELAY",
+    "NODE_PARALLEL", "NODE_APPROVAL", "NODE_DELAY", "NODE_SUBFLOW",
 ]

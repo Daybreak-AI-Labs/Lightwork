@@ -4,7 +4,7 @@
   var SVG = 'http://www.w3.org/2000/svg';
   var W = 176, H = 64;                 // node card size
   var KIND_ICON = { agent: '🧠', action: '⚙️', branch: '🔀', foreach: '🔁',
-                    parallel: '🔱', approval: '✅', delay: '⏱' };
+                    parallel: '🔱', approval: '✅', delay: '⏱', subflow: '📎' };
 
   var flow = { id: '', name: '', start: '', nodes: [] };
   var proposals = {};   // node_id -> {to_kind, reason} from grounded per-node outcomes
@@ -44,6 +44,7 @@
     if (n.kind === 'parallel') return (n.branches ? n.branches.length : 0) + ' branches';
     if (n.kind === 'approval') return trunc(n.prompt || '(approve?)', 30);
     if (n.kind === 'delay') return (n.seconds || 0) + 's';
+    if (n.kind === 'subflow') return '↳ ' + trunc(n.flow_ref || '(flow)', 24);
     return n.kind;
   }
   function ports(n) {
@@ -176,7 +177,8 @@
   function addNode(kind) {
     var n = { id: newId(), kind: kind, x: Math.round((-view.x + 220) / view.k), y: Math.round((-view.y + 80) / view.k),
               next: null, params: {}, brief: '', tool: '', condition: '', if_true: null, if_false: null,
-              items: '', var: 'item', prompt: '', seconds: 0, output: '', label: '', body: null, branches: [] };
+              items: '', var: 'item', prompt: '', seconds: 0, flow_ref: '', retries: 0, on_error: null,
+              output: '', label: '', body: null, branches: [] };
     // place under the currently selected node if any
     var sel = selected && nodeById(selected);
     if (sel) { n.x = sel.x; n.y = sel.y + 110; if (!sel.next && sel.kind !== 'branch') sel.next = n.id; }
@@ -203,6 +205,11 @@
   function textarea(val, oninput, ph) {
     var t = document.createElement('textarea'); t.className = 'input'; t.value = val || ''; if (ph) t.placeholder = ph;
     t.addEventListener('input', function () { oninput(t.value); }); return t;
+  }
+  function select(val, opts, onchange) {
+    var s = document.createElement('select'); s.className = 'input';
+    opts.forEach(function (o) { var op = document.createElement('option'); op.value = o.v; op.textContent = o.t; if (o.v === val) op.selected = true; s.appendChild(op); });
+    s.addEventListener('change', function () { onchange(s.value); }); return s;
   }
   function renderProps() {
     props.textContent = '';
@@ -247,8 +254,18 @@
     if (n.kind === 'parallel') props.appendChild(field('Branches (JSON array of flows)', textarea(jsonOr(n.branches), function (v) { n._branchesRaw = v; })));
     if (n.kind === 'approval') props.appendChild(field('Prompt (what a human approves)', input(n.prompt, function (v) { n.prompt = v; render(); }, 'Send this reply?')));
     if (n.kind === 'delay') props.appendChild(field('Seconds', input(String(n.seconds || ''), function (v) { n.seconds = parseFloat(v) || 0; render(); }, '60')));
+    if (n.kind === 'subflow') {
+      props.appendChild(field('Flow to run (saved flow id)', input(n.flow_ref, function (v) { n.flow_ref = v; render(); }, 'onboard-customer')));
+      props.appendChild(hint('Runs another saved flow here, sharing this flow’s data. Cyclic references are blocked.'));
+    }
     if (n.kind === 'agent' || n.kind === 'action' || n.kind === 'foreach' || n.kind === 'parallel')
       props.appendChild(field('Output key (optional)', input(n.output, function (v) { n.output = v; }, 'store result under…')));
+    // error handling for work steps: retry then route on failure
+    if (n.kind === 'agent' || n.kind === 'action') {
+      props.appendChild(field('Retries on failure', input(String(n.retries || ''), function (v) { n.retries = parseInt(v, 10) || 0; }, '0')));
+      var errOpts = [{ v: '', t: '(none — continue)' }].concat(flow.nodes.filter(function (m) { return m.id !== n.id; }).map(function (m) { return { v: m.id, t: (m.label || m.id) }; }));
+      props.appendChild(field('On failure, go to', select(n.on_error || '', errOpts, function (v) { n.on_error = v || null; render(); })));
+    }
     // last run outcome for this node (from the live/last run overlay)
     var rs = runState[n.id];
     if (rs || n.id === runCursor) {
@@ -299,11 +316,12 @@
       start: flow.start,
       nodes: flow.nodes.map(function (n) {
         var o = { id: n.id, kind: n.kind };
-        ['next', 'tool', 'brief', 'condition', 'if_true', 'if_false', 'items', 'var', 'prompt', 'output', 'label'].forEach(function (k) {
+        ['next', 'tool', 'brief', 'condition', 'if_true', 'if_false', 'items', 'var', 'prompt', 'flow_ref', 'on_error', 'output', 'label'].forEach(function (k) {
           if (n[k] !== '' && n[k] != null) o[k] = n[k];
         });
         if (n.params && Object.keys(n.params).length) o.params = n.params;
         if (n.seconds) o.seconds = n.seconds;
+        if (n.retries) o.retries = n.retries;
         if (n.body) o.body = n.body;
         if (n.branches && n.branches.length) o.branches = n.branches;
         if (n.x || n.y) { o.x = n.x; o.y = n.y; }
@@ -317,7 +335,8 @@
     flow = { id: f.id || '', name: f.name || '', start: f.start || '', nodes: [] };
     (f.nodes || []).forEach(function (nd, i) {
       var n = Object.assign({ params: {}, brief: '', tool: '', condition: '', if_true: null, if_false: null,
-        items: '', var: 'item', prompt: '', seconds: 0, output: '', label: '', body: null, branches: [], next: null }, nd);
+        items: '', var: 'item', prompt: '', seconds: 0, flow_ref: '', retries: 0, on_error: null,
+        output: '', label: '', body: null, branches: [], next: null }, nd);
       n.id = n.id || ('n' + i);
       flow.nodes.push(n);
     });

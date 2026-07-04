@@ -36,7 +36,7 @@
   .fd-edge-label { font: 10px var(--font-sans, sans-serif); fill: var(--muted); }
   .k-agent { fill: #6366f1; } .k-action { fill: #0891b2; } .k-branch { fill: #d97706; }
   .k-foreach { fill: #7c3aed; } .k-parallel { fill: #db2777; } .k-approval { fill: #16a34a; }
-  .k-delay { fill: #64748b; }
+  .k-delay { fill: #64748b; } .k-subflow { fill: #0d9488; }
   /* live run overlay */
   .fd-node.run-ok rect.card { stroke: var(--success, #16a34a); stroke-width: 2.5; }
   .fd-node.run-err rect.card { stroke: var(--danger, #dc2626); stroke-width: 2.5; }
@@ -80,6 +80,7 @@
     <button class="btn btn--ghost" type="button" data-add="delay">⏱ Delay</button>
     <button class="btn btn--ghost" type="button" data-add="foreach">🔁 For-each</button>
     <button class="btn btn--ghost" type="button" data-add="parallel">🔱 Parallel</button>
+    <button class="btn btn--ghost" type="button" data-add="subflow">📎 Sub-flow</button>
   </div>
 
   <div class="fd__canvas-wrap">
