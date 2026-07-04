@@ -5,11 +5,16 @@ existed and was tested, but nothing in the live agent loop could reach it --
 the FINAL handler always called the single verify_proposal. verify_final()
 is the opt-in dispatch the agent loop now uses:
 
-  - default: single cross-family verifier (verify_proposal)
+  - default: structured rubric judge (verify_proposal_structured), which falls
+    back to the scalar verify_proposal for any non-rubric reply
+  - MAVERICK_REASONING_REWARD=0: scalar single cross-family verifier
   - MAVERICK_VERIFY_ENSEMBLE=1 / [routing] verify_ensemble=true: MAV panel
+    (takes precedence over both)
 
-Both paths share verify_proposal's signature + VerifierVerdict return, so
-the call site is verifier-agnostic.
+All paths share verify_proposal's signature + VerifierVerdict return, so
+the call site is verifier-agnostic. The single-vs-ensemble tests below opt out
+of the rubric judge (MAVERICK_REASONING_REWARD=0 in the _clean fixture) so they
+exercise that axis directly; structured routing is covered separately.
 """
 from __future__ import annotations
 
@@ -24,6 +29,9 @@ from maverick.verifier import VerifierVerdict
 def _clean(monkeypatch):
     monkeypatch.delenv("MAVERICK_VERIFY_ENSEMBLE", raising=False)
     monkeypatch.setenv("HOME", "/nonexistent-verify-final-test")  # no config
+    # These tests exercise the single-vs-ensemble dispatch axis; opt out of the
+    # (now default) rubric judge so verify_final routes to the scalar path.
+    monkeypatch.setenv("MAVERICK_REASONING_REWARD", "0")
 
 
 def _patch_both(monkeypatch):
@@ -48,6 +56,21 @@ def test_default_uses_single_verifier(_clean, monkeypatch):
     v = asyncio.run(verifier.verify_final("brief", "answer", llm=None))
     assert calls == ["single"]
     assert v.accepts is True
+
+
+def test_structured_is_default(_clean, monkeypatch):
+    # With the rubric judge on (its default), verify_final routes there ahead of
+    # the scalar single verifier. _clean disabled it, so re-enable for this test.
+    monkeypatch.setenv("MAVERICK_REASONING_REWARD", "1")
+    calls = _patch_both(monkeypatch)
+
+    async def _structured(*a, **k):
+        calls.append("structured")
+        return VerifierVerdict(confidence=0.9, accepts=True, critique="")
+
+    monkeypatch.setattr(verifier, "verify_proposal_structured", _structured)
+    asyncio.run(verifier.verify_final("brief", "answer", llm=None))
+    assert calls == ["structured"]
 
 
 def test_env_opt_in_uses_ensemble(_clean, monkeypatch):
