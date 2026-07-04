@@ -3892,6 +3892,7 @@ def _run_simple_picks(state: dict[str, Any], _announce) -> dict[str, Any]:
         "capabilities": capabilities,
         "self_learning": self_learning,
         "automation_import": automation_import,
+        "event_triggers": event_triggers,
         "oauth": oauth,
         "governed_connectors": governed_connectors,
         "durable": durable,
