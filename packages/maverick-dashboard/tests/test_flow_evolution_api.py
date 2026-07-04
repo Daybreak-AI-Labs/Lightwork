@@ -205,7 +205,7 @@ def test_run_api_redacts_secrets_in_data(monkeypatch, tmp_path):
     from maverick.flow import store
     rid = store.new_run_id()
     store.save_run(store.FlowRun(run_id=rid, flow_id="f", status="completed",
-                                 data={"api_key": "sk-secret", "user": "ada"}))
+                                 data={"api_key": "sk-secret", "user": "ada"}))  # pragma: allowlist secret
     got = _client().get("/api/v1/flows/runs/" + rid).json()
     assert got["data"]["api_key"] == "***redacted***" and got["data"]["user"] == "ada"
 

@@ -6,9 +6,9 @@ from maverick.flow.redact import cap, redact
 
 class TestRedact:
     def test_masks_secret_looking_keys_at_any_depth(self):
-        out = redact({"user": "ada", "api_key": "sk-123",
-                      "nested": {"password": "p", "note": "keep"},
-                      "list": [{"access_token": "t"}]})
+        out = redact({"user": "ada", "api_key": "sk-123",  # pragma: allowlist secret
+                      "nested": {"password": "p", "note": "keep"},  # pragma: allowlist secret
+                      "list": [{"access_token": "t"}]})  # pragma: allowlist secret
         assert out["user"] == "ada"
         assert out["api_key"] == "***redacted***"
         assert out["nested"]["password"] == "***redacted***"
