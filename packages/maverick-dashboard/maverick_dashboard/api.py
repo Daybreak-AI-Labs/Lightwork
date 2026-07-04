@@ -1388,6 +1388,9 @@ async def cancel_goal(request: Request, goal_id: int) -> None:
     if g.status in ("done", "cancelled", "failed"):
         return
     w.set_goal_status(goal_id, "cancelled", result="cancelled via dashboard")
+    # A human killing an in-progress run is real negative ground truth (the run
+    # wasn't worth finishing) -- feed it to the learning loop, best-effort.
+    _ground_outcome(w, goal_id, 0.0, kind="cancel")
 
 
 @router.get("/goals/{goal_id}/open_questions")
@@ -1471,22 +1474,26 @@ async def post_signoff(request: Request, goal_id: int, payload: SignoffIn) -> di
     return {"gate": _goal_gate(g.domain), "signoff": w.signoff_for(goal_id)}
 
 
-def _record_signoff_outcome(w, goal_id: int, decision: str) -> None:
-    """Record a deliverable sign-off as a grounded outcome for the goal's latest
-    episode. No-op unless ``[consequence]`` is enabled (kernel stays stateless by
-    default); never raises -- the sign-off is already persisted, so grounding it
-    must not fail the request."""
+def _ground_outcome(w, goal_id: int, value: float, *, kind: str) -> None:
+    """Record a real human/world outcome for the goal's latest episode as
+    grounded reward the learning flywheel prefers over its proxy. No-op unless
+    ``[consequence]`` is enabled (kernel stays stateless by default); never
+    raises -- grounding is best-effort and must not fail the request."""
     try:
         from maverick import consequence
         if not consequence.enabled():
             return
         episodes = w.list_episodes(goal_id=goal_id, limit=1)
         if not episodes:
-            return  # a finished deliverable should have an episode, but be safe
-        value = 1.0 if decision == "approved" else 0.0
-        consequence.record_outcome(goal_id, episodes[0].id, value, kind="signoff")
+            return  # the action should have an episode, but be safe
+        consequence.record_outcome(goal_id, episodes[0].id, float(value), kind=kind)
     except Exception as e:  # pragma: no cover - grounding is best-effort
-        log.debug("signoff outcome not recorded for goal %s: %s", goal_id, e)
+        log.debug("%s outcome not recorded for goal %s: %s", kind, goal_id, e)
+
+
+def _record_signoff_outcome(w, goal_id: int, decision: str) -> None:
+    """A deliverable sign-off -> grounded outcome (approved 1.0 / rejected 0.0)."""
+    _ground_outcome(w, goal_id, 1.0 if decision == "approved" else 0.0, kind="signoff")
 
 
 def _handoff_approved_deliverable(g, decided_by: str) -> None:

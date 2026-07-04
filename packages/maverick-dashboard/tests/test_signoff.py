@@ -139,6 +139,37 @@ class TestSignoffGroundsLearning:
         assert consequence.resolve(gid, eid) is None
 
 
+class TestCancelGroundsLearning:
+    """A human cancelling an in-progress run is real negative ground truth; when
+    [consequence] is on it must feed the learning loop as a 0.0 outcome."""
+
+    def _isolate(self, tmp_path, monkeypatch):
+        monkeypatch.setenv("HOME", str(tmp_path))
+        monkeypatch.setenv("MAVERICK_HOME", str(tmp_path))
+        from maverick import consequence
+        consequence.reset_shared()
+        return consequence
+
+    def test_cancel_records_grounded_outcome_0(self, tmp_path, monkeypatch):
+        monkeypatch.setenv("MAVERICK_CONSEQUENCE", "1")
+        consequence = self._isolate(tmp_path, monkeypatch)
+        w = _world(tmp_path, monkeypatch)
+        gid = w.create_goal("Long-running thing", "")
+        eid = w.start_episode(gid)
+        r = client.post(f"/api/v1/goals/{gid}/cancel")
+        assert r.status_code == 204
+        assert consequence.resolve(gid, eid) == 0.0
+
+    def test_no_outcome_when_consequence_disabled(self, tmp_path, monkeypatch):
+        monkeypatch.delenv("MAVERICK_CONSEQUENCE", raising=False)
+        consequence = self._isolate(tmp_path, monkeypatch)
+        w = _world(tmp_path, monkeypatch)
+        gid = w.create_goal("Long-running thing", "")
+        eid = w.start_episode(gid)
+        assert client.post(f"/api/v1/goals/{gid}/cancel").status_code == 204
+        assert consequence.resolve(gid, eid) is None
+
+
 class TestDeliverableExport:
     def test_forecast_exports_as_csv_after_approval(self, tmp_path, monkeypatch):
         w = _world(tmp_path, monkeypatch)
