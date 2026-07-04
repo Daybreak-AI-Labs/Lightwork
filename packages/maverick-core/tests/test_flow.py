@@ -112,6 +112,16 @@ class TestRunner:
         r = run_flow(f, agent_fn=_agent, action_fn=_action, data={})
         assert r.data["left"] == "[x]" and r.data["right"] == "[y]"
 
+    def test_parallel_branches_are_isolated(self):
+        # branch B references a key only branch A writes; with real parallel
+        # isolation it must NOT see A's output (kept as the literal placeholder).
+        f = _flow([FlowNode(id="a", kind="parallel", branches=[
+            _flow([FlowNode(id="x", kind="agent", brief="a", output="from_a")], start="x"),
+            _flow([FlowNode(id="y", kind="agent", brief="see {{from_a}}", output="from_b")], start="y"),
+        ])])
+        r = run_flow(f, agent_fn=_agent, action_fn=_action, data={})
+        assert r.data["from_b"] == "[see {{from_a}}]"     # no cross-branch leakage
+
     def test_approval_pauses_then_resumes(self):
         f = _flow([
             FlowNode(id="a", kind="approval", prompt="ok?", next="b"),

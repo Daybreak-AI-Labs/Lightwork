@@ -233,11 +233,9 @@ register(OAuthProvider(
     "https://api.linear.app/oauth/token", label="Linear",
     scopes=("read",),
 ))
-register(OAuthProvider(
-    "zendesk", "https://__subdomain__.zendesk.com/oauth/authorizations/new",
-    "https://__subdomain__.zendesk.com/oauth/tokens", label="Zendesk",
-    scopes=("read",),
-))
+# (Zendesk et al. are per-install-subdomain providers -- their endpoints embed a
+# tenant subdomain, which a static preset can't supply -- so they're left out of
+# the turnkey seed rather than shipped with an unsubstitutable placeholder host.)
 
 
 __all__ = [

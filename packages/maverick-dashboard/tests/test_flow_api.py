@@ -111,6 +111,28 @@ def test_runs_are_owner_scoped(monkeypatch, tmp_path):
     assert ids == {"r1"}
 
 
+def test_resume_of_non_paused_run_is_409(monkeypatch, tmp_path):
+    _isolate(monkeypatch, tmp_path)
+    from maverick.flow import store
+    store.save_run(store.FlowRun(run_id="rc", flow_id="demo", status="completed"))
+    r = _client().post("/api/v1/flows/runs/rc/resume", json={"decision": "approved"})
+    assert r.status_code == 409
+
+
+def test_delay_sweep_reenqueues_only_due_runs(monkeypatch, tmp_path):
+    _isolate(monkeypatch, tmp_path)
+    from maverick.flow import store
+    from maverick_dashboard import automation_queue as aq
+    _reset_aq(monkeypatch, aq)
+    store.save_run(store.FlowRun(run_id="d1", flow_id="demo",
+                                 status="paused_delay", resume_at=1.0))          # due
+    store.save_run(store.FlowRun(run_id="d2", flow_id="demo",
+                                 status="paused_delay", resume_at=9e18))         # not yet
+    aq._handle_flow_sweep(None)
+    jobs = [j for j in aq.queue().list(status="pending") if j.kind == aq.FLOW_RESUME_KIND]
+    assert {j.payload["run_id"] for j in jobs} == {"d1"}
+
+
 def test_proposals_endpoint(monkeypatch, tmp_path):
     _isolate(monkeypatch, tmp_path)
     from maverick.flow import node_outcomes, store

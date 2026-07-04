@@ -11,10 +11,10 @@ Append-only NDJSON (the consequence-store shape): 0600, best-effort, bounded tai
 """
 from __future__ import annotations
 
-import json
-import os
 import time
 from collections import defaultdict
+
+from ..ndjson_log import append_row, clamp01, tail_rows
 
 _MAX_ROWS = 100_000
 
@@ -26,38 +26,14 @@ def _path():
 
 def record(flow_id: str, node_id: str, kind: str, value: float) -> None:
     """Append one node outcome. ``value`` in [0, 1]. Best-effort; never raises."""
-    row = {
+    append_row(_path(), {
         "ts": time.time(), "flow_id": str(flow_id), "node_id": str(node_id),
-        "kind": str(kind), "value": max(0.0, min(1.0, float(value))),
-    }
-    try:
-        p = _path()
-        p.parent.mkdir(parents=True, exist_ok=True)
-        fd = os.open(str(p), os.O_CREAT | os.O_WRONLY | os.O_APPEND, 0o600)
-        with os.fdopen(fd, "a", encoding="utf-8") as fh:
-            fh.write(json.dumps(row, sort_keys=True) + "\n")
-    except Exception:  # pragma: no cover -- telemetry is best-effort
-        return
+        "kind": str(kind), "value": clamp01(value),
+    })
 
 
 def _read_rows() -> list[dict]:
-    p = _path()
-    if not p.exists():
-        return []
-    try:
-        with open(p, encoding="utf-8") as fh:
-            lines = fh.readlines()
-    except OSError:
-        return []
-    out = []
-    for raw in lines[-_MAX_ROWS:]:
-        try:
-            d = json.loads(raw)
-            if isinstance(d, dict):
-                out.append(d)
-        except (ValueError, TypeError):
-            continue
-    return out
+    return tail_rows(_path(), _MAX_ROWS)
 
 
 def stats(flow_id: str) -> dict[str, dict]:

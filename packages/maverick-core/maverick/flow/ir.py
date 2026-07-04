@@ -2,11 +2,12 @@
 
 A :class:`Flow` is a graph of typed nodes. The control-flow nodes (branch /
 foreach / parallel / approval / delay) run deterministically and are auditable
-and replayable; the *work* nodes are either a deterministic ``action`` (a typed,
-confirm-gated connector/tool call) or an ``agent`` (a brief run as a governed
-goal -- what today's templates already are). This is the "do both" architecture:
-the graph decides *when/whether/in what order* and waits for approvals; the agent
-decides *what happens inside a step*. A single ``agent`` node with no routing IS
+and replayable; the *work* nodes are either a deterministic ``action`` (a typed
+connector/tool call -- subject to that tool's own confirm gate) or an ``agent``
+(a brief run as a governed goal -- what today's templates already are). This is
+the "do both" architecture: the graph decides *when/whether/in what order* and
+waits for human approval at an explicit ``approval`` node; the agent decides
+*what happens inside a step*. A single ``agent`` node with no routing IS
 today's template, so a Flow is a superset, not a parallel product.
 
 The IR is a plain data structure -- no execution here (see :mod:`.runner`), no

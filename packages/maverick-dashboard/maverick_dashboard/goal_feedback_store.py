@@ -15,11 +15,10 @@ for owner-scoped reads.
 """
 from __future__ import annotations
 
-import json
-import os
 import time
 
 from maverick import config
+from maverick.ndjson_log import append_row, clamp01, tail_rows
 
 _MAX_ROWS = 5000  # bound the tail we read back; the file itself grows unbounded
 
@@ -29,45 +28,24 @@ def _path():
 
 
 def record(goal_id: int, owner: str, rating: str, *, value: float,
-           note: str = "", by: str = "") -> None:
-    """Append one feedback row (latest per goal wins on read). Never raises."""
+           note: str = "", by: str = "") -> dict:
+    """Append one feedback row (latest per goal wins on read) and return it.
+    Never raises."""
     row = {
         "ts": time.time(),
         "goal_id": int(goal_id),
         "owner": str(owner or ""),
         "rating": str(rating),          # "up" | "down" (display), value carries the reward
-        "value": max(0.0, min(1.0, float(value))),
+        "value": clamp01(value),
         "note": str(note)[:500],
         "by": str(by or ""),
     }
-    try:
-        p = _path()
-        p.parent.mkdir(parents=True, exist_ok=True)
-        fd = os.open(str(p), os.O_CREAT | os.O_WRONLY | os.O_APPEND, 0o600)
-        with os.fdopen(fd, "a", encoding="utf-8") as fh:
-            fh.write(json.dumps(row, sort_keys=True) + "\n")
-    except Exception:  # pragma: no cover -- feedback is best-effort
-        return
+    append_row(_path(), row)
+    return row
 
 
 def _read_rows() -> list[dict]:
-    p = _path()
-    if not p.exists():
-        return []
-    try:
-        with open(p, encoding="utf-8") as fh:
-            lines = fh.readlines()
-    except OSError:
-        return []
-    out: list[dict] = []
-    for raw in lines[-_MAX_ROWS:]:
-        try:
-            d = json.loads(raw)
-            if isinstance(d, dict):
-                out.append(d)
-        except (ValueError, TypeError):
-            continue
-    return out
+    return tail_rows(_path(), _MAX_ROWS)
 
 
 def latest_for_goal(goal_id: int) -> dict | None:

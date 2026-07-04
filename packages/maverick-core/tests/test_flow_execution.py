@@ -92,6 +92,20 @@ class TestExecution:
         assert resumed.status == "completed" and resumed.data["done"] == "ran"
         assert resumed.run_id == paused.run_id          # same run, resumed in place
 
+    def test_resume_of_completed_run_is_rejected(self, tmp_path, monkeypatch):
+        # Guard against re-running a finished flow (duplicate side effects) or
+        # running a node a human rejected.
+        import pytest
+        _patch_home(tmp_path, monkeypatch)
+        f = Flow(id="fc", name="f", start="a",
+                 nodes={"a": FlowNode(id="a", kind=NODE_AGENT, brief="b")})
+        run = execution.execute(f, agent_runner=lambda b, d: ("ok", 1.0),
+                                action_runner=lambda *a: ("", None))
+        assert run.status == "completed"
+        with pytest.raises(execution.FlowNotResumable):
+            execution.execute(f, agent_runner=lambda b, d: ("ok", 1.0),
+                              action_runner=lambda *a: ("", None), resume_run_id=run.run_id)
+
     def test_resume_rejected_ends_run(self, tmp_path, monkeypatch):
         _patch_home(tmp_path, monkeypatch)
         f = Flow(id="f3", name="f", start="a", nodes={

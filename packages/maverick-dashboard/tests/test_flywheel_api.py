@@ -24,7 +24,10 @@ def test_flywheel_state_empty_by_default(monkeypatch, tmp_path):
                         lambda: pm.MemoryStore(path=tmp_path / "m.json"))
     resp = client.get("/api/v1/flywheel")
     assert resp.status_code == 200
-    assert resp.json() == {"guardrails": [], "habits": []}
+    body = resp.json()
+    assert body["guardrails"] == [] and body["habits"] == []
+    # the grounded-signal counters ride alongside (0 when nothing has landed)
+    assert set(body["signal"]) == {"grounded_outcomes", "human_feedback"}
 
 
 def test_flywheel_state_reports_learned(monkeypatch, tmp_path):

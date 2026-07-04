@@ -17,7 +17,13 @@ from typing import Any
 
 from . import node_outcomes, store
 from .ir import Flow, FlowNode
-from .runner import STATUS_PAUSED_APPROVAL, run_flow
+from .runner import STATUS_PAUSED_APPROVAL, STATUS_PAUSED_DELAY, run_flow
+
+_RESUMABLE = (STATUS_PAUSED_APPROVAL, STATUS_PAUSED_DELAY)
+
+
+class FlowNotResumable(ValueError):
+    """A resume was requested for a run that is not paused."""
 
 # agent_runner(brief, data) -> (result, outcome: float | None)
 # action_runner(tool, params, data) -> (result, outcome: float | None)
@@ -41,6 +47,13 @@ def execute(flow: Flow, *, agent_runner: AgentRunner, action_runner: ActionRunne
         prior = store.load_run(resume_run_id)
         if prior is None:
             raise ValueError(f"no such flow run {resume_run_id!r}")
+        # Only a paused run may be resumed. Without this guard, resuming a
+        # completed run re-executes the whole flow (duplicate side effects) and
+        # resuming a rejected run runs the very node a human rejected -- defeating
+        # the approval gate.
+        if prior.status not in _RESUMABLE:
+            raise FlowNotResumable(
+                f"run {resume_run_id!r} is not paused (status {prior.status!r})")
         run_id = prior.run_id
         owner = owner or prior.owner
         resume = {"node_id": prior.cursor, "data": prior.data}

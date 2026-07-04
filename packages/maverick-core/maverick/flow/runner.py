@@ -151,65 +151,84 @@ def _render_params(node: FlowNode, data: dict) -> dict:
             for k, v in (node.params or {}).items()}
 
 
-def _run_node(flow: Flow, node: FlowNode, data: dict, ctx: _Ctx) -> str | None:
-    kind = node.kind
-    if kind == NODE_AGENT:
+def _run_work(node: FlowNode, data: dict, ctx: _Ctx) -> str | None:
+    if node.kind == NODE_AGENT:
         result, outcome = ctx.agent_fn(node, render(node.brief, data), data)
-        if node.output:
-            data[node.output] = result
-        ctx.on_node(node, "done", outcome)
-        return node.next
-    if kind == NODE_ACTION:
+    else:
         result, outcome = ctx.action_fn(node, _render_params(node, data), data)
-        if node.output:
-            data[node.output] = result
-        ctx.on_node(node, "done", outcome)
+    if node.output:
+        data[node.output] = result
+    ctx.on_node(node, "done", outcome)
+    return node.next
+
+
+def _run_branch(node: FlowNode, data: dict, ctx: _Ctx) -> str | None:
+    took = eval_condition(node.condition, data)
+    ctx.on_node(node, "true" if took else "false", None)
+    nxt = node.if_true if took else node.if_false
+    return nxt if nxt is not None else node.next
+
+
+def _run_foreach(node: FlowNode, data: dict, ctx: _Ctx) -> str | None:
+    results = []
+    for item in list(_dig(data, node.items) or []):
+        sub = dict(data)
+        sub[node.var] = item
+        _run_chain(node.body, sub, ctx.nested(), node.body.start)
+        results.append(sub)          # per-iteration data snapshot (body outputs included)
+    if node.output:
+        data[node.output] = results
+    ctx.on_node(node, "done", None)
+    return node.next
+
+
+def _run_parallel(node: FlowNode, data: dict, ctx: _Ctx) -> str | None:
+    base = dict(data)                     # frozen pre-parallel snapshot
+    branch_outputs = []
+    for branch in node.branches:
+        sub = dict(base)                  # each branch is isolated (sees only base)
+        _run_chain(branch, sub, ctx.nested(), branch.start)
+        branch_outputs.append(sub)
+    for sub in branch_outputs:            # merge new keys after all branches finish
+        for k, v in sub.items():          # (a later branch wins a key conflict)
+            if k not in base:
+                data[k] = v
+    if node.output:
+        data[node.output] = branch_outputs
+    ctx.on_node(node, "done", None)
+    return node.next
+
+
+def _run_approval(node: FlowNode, data: dict, ctx: _Ctx) -> str | None:
+    decision = ctx.approve_fn(node, data) if ctx.approve_fn else "pending"
+    ctx.on_node(node, decision, None)
+    if decision == "approved":
         return node.next
-    if kind == NODE_BRANCH:
-        took = eval_condition(node.condition, data)
-        ctx.on_node(node, "true" if took else "false", None)
-        nxt = node.if_true if took else node.if_false
-        return nxt if nxt is not None else node.next
-    if kind == NODE_FOREACH:
-        items = _dig(data, node.items) or []
-        results = []
-        for item in list(items):
-            sub = dict(data)
-            sub[node.var] = item
-            _run_chain(node.body, sub, ctx.nested(), node.body.start)
-            results.append(sub)          # per-iteration data snapshot (body outputs included)
-        if node.output:
-            data[node.output] = results
-        ctx.on_node(node, "done", None)
-        return node.next
-    if kind == NODE_PARALLEL:
-        branch_outputs = []
-        for branch in node.branches:
-            sub = dict(data)
-            _run_chain(branch, sub, ctx.nested(), branch.start)
-            branch_outputs.append(sub)
-            for k, v in sub.items():          # merge branch-produced keys back up
-                if k not in data:
-                    data[k] = v
-        if node.output:
-            data[node.output] = branch_outputs
-        ctx.on_node(node, "done", None)
-        return node.next
-    if kind == NODE_APPROVAL:
-        decision = ctx.approve_fn(node, data) if ctx.approve_fn else "pending"
-        ctx.on_node(node, decision, None)
-        if decision == "approved":
-            return node.next
-        if decision == "rejected":
-            raise _Reject(node, data)
-        if ctx.allow_pause:                    # pending + top level -> wait for a human
-            raise _Pause("approval", node, data)
-        raise _Reject(node, data)              # nested can't pause -> treat as not approved
-    if kind == NODE_DELAY:
-        if ctx.allow_pause and node.seconds > 0:
-            raise _Pause("delay", node, data, resume_at=ctx.now() + node.seconds)
-        return node.next
-    raise ValueError(f"unknown node kind {kind!r}")
+    if decision == "rejected":
+        raise _Reject(node, data)
+    if ctx.allow_pause:                    # pending + top level -> wait for a human
+        raise _Pause("approval", node, data)
+    raise _Reject(node, data)              # nested can't pause -> treat as not approved
+
+
+def _run_delay(node: FlowNode, data: dict, ctx: _Ctx) -> str | None:
+    if ctx.allow_pause and node.seconds > 0:
+        raise _Pause("delay", node, data, resume_at=ctx.now() + node.seconds)
+    return node.next
+
+
+_HANDLERS = {
+    NODE_AGENT: _run_work, NODE_ACTION: _run_work, NODE_BRANCH: _run_branch,
+    NODE_FOREACH: _run_foreach, NODE_PARALLEL: _run_parallel,
+    NODE_APPROVAL: _run_approval, NODE_DELAY: _run_delay,
+}
+
+
+def _run_node(node: FlowNode, data: dict, ctx: _Ctx) -> str | None:
+    handler = _HANDLERS.get(node.kind)
+    if handler is None:
+        raise ValueError(f"unknown node kind {node.kind!r}")
+    return handler(node, data, ctx)
 
 
 def _run_chain(flow: Flow, data: dict, ctx: _Ctx, start: str | None) -> None:
@@ -220,7 +239,7 @@ def _run_chain(flow: Flow, data: dict, ctx: _Ctx, start: str | None) -> None:
         node = flow.node(cursor)
         if node is None:
             return
-        cursor = _run_node(flow, node, data, ctx)
+        cursor = _run_node(node, data, ctx)
         seen += 1
         if seen > limit:
             raise RuntimeError(f"flow {flow.id!r} exceeded {limit} steps (cycle?)")

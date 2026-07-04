@@ -324,17 +324,22 @@ def link_outcome_key(key: str, goal_id: int, episode_id: int, *,
 
 def record_outcome_for_key(key: str, value: float, *, kind: str = "",
                            store: ConsequenceStore | None = None,
-                           corr: CorrelationStore | None = None) -> bool:
+                           corr: CorrelationStore | None = None,
+                           authorize=None) -> bool:
     """Ground a downstream outcome using only the external business ``key``.
 
     Resolves ``key`` to the episode that acted (via the correlation store) and
-    records the grounded reward there. Returns ``True`` when a correlation
-    existed and the outcome was recorded, ``False`` when no run has linked that
-    key yet (the connector reported an outcome for work Lightwork didn't do)."""
+    records the grounded reward there. ``authorize(goal_id, episode_id) -> bool``,
+    when given, must approve the resolved target first (the caller's access
+    check). Returns ``True`` when a correlation existed, was authorized, and the
+    outcome was recorded; ``False`` when no run has linked that key yet, or the
+    caller may not ground that target."""
     hit = (corr or shared_correlation()).resolve(key)
     if hit is None:
         return False
     goal_id, episode_id = hit
+    if authorize is not None and not authorize(goal_id, episode_id):
+        return False
     return record_outcome(goal_id, episode_id, value, kind=kind, store=store)
 
 

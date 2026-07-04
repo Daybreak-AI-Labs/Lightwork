@@ -789,20 +789,19 @@ async def record_outcome_by_key(request: Request, payload: OutcomeByKeyIn) -> di
     """
     require_permission(request, "operate")
     from maverick import consequence
-    hit = consequence.shared_correlation().resolve(payload.key)
-    if hit is None:
-        return {"matched": False}
-    goal_id, episode_id = hit
-    # The link maps to a real goal; enforce the same access boundary as the
-    # goal/episode ingest so an operate caller can't ground outcomes on a goal
-    # they can't see (the correlation store is already tenant-scoped by path).
     w = _world()
-    g = w.get_goal(goal_id)
-    if g is None or not can_access_goal(request, g):
-        return {"matched": False}
-    consequence.record_outcome(goal_id, episode_id, float(payload.value),
-                               kind=(payload.kind or ""))
-    return {"matched": True}
+
+    def _authorize(goal_id: int, _episode_id: int) -> bool:
+        # Enforce the same access boundary as the goal/episode ingest so an
+        # operate caller can't ground outcomes on a goal they can't see (the
+        # correlation store is already tenant-scoped by path).
+        g = w.get_goal(goal_id)
+        return g is not None and can_access_goal(request, g)
+
+    matched = consequence.record_outcome_for_key(
+        payload.key, float(payload.value), kind=(payload.kind or ""),
+        authorize=_authorize)
+    return {"matched": bool(matched)}
 
 
 # ---- turnkey "connect this account" OAuth flow --------------------------------
@@ -955,10 +954,9 @@ async def list_flow_runs_endpoint(request: Request, flow_id: str = "",
     return {"runs": [r.to_dict() for r in runs]}
 
 
-@router.get("/flows/runs/{run_id}")
-async def get_flow_run_endpoint(request: Request, run_id: str) -> dict:
-    require_permission(request, "operate")
-    _require_flows()
+def _load_owned_run(request: Request, run_id: str):
+    """A flow run the caller may see, or a 404 (indistinguishable from missing,
+    so a run's existence isn't leaked across owners)."""
     from maverick.flow import store
     run = store.load_run(run_id)
     if run is None:
@@ -966,7 +964,14 @@ async def get_flow_run_endpoint(request: Request, run_id: str) -> dict:
     owner = goal_owner_filter(request)
     if owner is not None and run.owner != owner:
         raise HTTPException(status_code=404, detail="no such run")
-    return run.to_dict()
+    return run
+
+
+@router.get("/flows/runs/{run_id}")
+async def get_flow_run_endpoint(request: Request, run_id: str) -> dict:
+    require_permission(request, "operate")
+    _require_flows()
+    return _load_owned_run(request, run_id).to_dict()
 
 
 @router.post("/flows/runs/{run_id}/resume")
@@ -975,13 +980,12 @@ async def resume_flow_run_endpoint(request: Request, run_id: str,
     """Resume a paused flow run with a human decision (approve/reject)."""
     require_permission(request, "operate")
     _require_flows()
-    from maverick.flow import store
-    run = store.load_run(run_id)
-    if run is None:
-        raise HTTPException(status_code=404, detail="no such run")
-    owner = goal_owner_filter(request)
-    if owner is not None and run.owner != owner:
-        raise HTTPException(status_code=404, detail="no such run")
+    run = _load_owned_run(request, run_id)
+    # Only a paused run may be resumed -- resuming a completed/rejected run would
+    # re-run the flow or run a rejected node (409, not a silent no-op).
+    if run.status not in ("paused_approval", "paused_delay"):
+        raise HTTPException(status_code=409,
+                            detail=f"run is not paused (status {run.status})")
     from maverick_dashboard import automation_queue as aq
     aq.queue().enqueue(aq.FLOW_RESUME_KIND, {
         "flow_id": run.flow_id, "run_id": run_id, "decision": payload.decision,
@@ -1827,10 +1831,10 @@ async def post_feedback(request: Request, goal_id: int, payload: FeedbackIn) -> 
     value = 1.0 if payload.rating == "up" else 0.0
     who = _supervisor(request)
     from maverick_dashboard import goal_feedback_store
-    goal_feedback_store.record(goal_id, g.owner or "", payload.rating, value=value,
-                               note=payload.note or "", by=who)
+    row = goal_feedback_store.record(goal_id, g.owner or "", payload.rating, value=value,
+                                     note=payload.note or "", by=who)
     _ground_outcome(w, goal_id, value, kind="feedback")
-    return {"feedback": goal_feedback_store.latest_for_goal(goal_id)}
+    return {"feedback": row}
 
 
 def _handoff_approved_deliverable(g, decided_by: str) -> None:

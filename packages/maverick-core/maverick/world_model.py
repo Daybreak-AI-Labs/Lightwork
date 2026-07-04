@@ -1252,16 +1252,6 @@ class WorldModel:
         )
         return [_goal_from_row(r) for r in rows]
 
-    def origin_for_goal(self, goal_id: int) -> tuple[str, str] | None:
-        """The (kind, ref) automation that spawned a goal, or ``None`` for a goal
-        with no recorded origin (created directly). The forward complement of
-        :meth:`goals_for_origin`, so an outcome can be attributed to its trigger."""
-        rows = self._read_all(
-            "SELECT kind, ref FROM goal_origins WHERE goal_id = ? LIMIT 1",
-            (int(goal_id),),
-        )
-        return (str(rows[0]["kind"]), str(rows[0]["ref"])) if rows else None
-
     def origin_status_counts(self, kind: str, ref: str) -> dict[str, int]:
         """An automation's spawned-goal counts keyed by status (run summary)."""
         rows = self._read_all(

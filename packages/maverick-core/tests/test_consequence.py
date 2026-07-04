@@ -150,6 +150,20 @@ def test_record_outcome_for_key_unmatched_is_false(tmp_path):
     assert cq.record_outcome_for_key("invoice:UNKNOWN", 1.0, store=cstore, corr=corr) is False
 
 
+def test_record_outcome_for_key_respects_authorize(tmp_path):
+    cstore = cq.ConsequenceStore(path=tmp_path / "c.ndjson")
+    corr = cq.CorrelationStore(path=tmp_path / "links.ndjson")
+    corr.link("invoice:INV-3", 8, 3)
+    # authorize denies -> not recorded
+    assert cq.record_outcome_for_key("invoice:INV-3", 1.0, store=cstore, corr=corr,
+                                     authorize=lambda g, e: False) is False
+    assert cstore.resolve(8, 3) is None
+    # authorize allows the resolved target -> recorded
+    assert cq.record_outcome_for_key("invoice:INV-3", 1.0, store=cstore, corr=corr,
+                                     authorize=lambda g, e: (g, e) == (8, 3)) is True
+    assert cstore.resolve(8, 3) == 1.0
+
+
 def test_reset_shared_reresolves_correlation_path(tmp_path, monkeypatch):
     # reset_shared clears the cached singleton so a later call re-resolves the
     # (tenant/HOME-scoped) path -- the isolation seam tests rely on. The NDJSON

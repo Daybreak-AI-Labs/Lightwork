@@ -4,7 +4,8 @@ The prose ``render()`` collapses a workflow into one agentic goal; this instead
 preserves each step as its own typed node, chained in order:
 
 * a step that maps cleanly to a single tool becomes a deterministic ``action``
-  node (auditable, replayable, confirm-gated) with its params carried through;
+  node (auditable, replayable, subject to that tool's own confirm gate) with its
+  params carried through;
 * every other step becomes an ``agent`` node whose brief is the step's
   instruction (the "figure it out" node).
 

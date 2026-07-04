@@ -42,6 +42,8 @@ DREAM_KIND = "dream_cycle"
 FLYWHEEL_KIND = "flywheel_cycle"
 FLOW_RUN_KIND = "flow_run"       # one-shot: run a flow to its next pause/finish
 FLOW_RESUME_KIND = "flow_resume"  # one-shot: resume a paused flow run
+FLOW_SWEEP_KIND = "flow_delay_sweep"  # recurring: re-arm flow runs whose delay elapsed
+_FLOW_SWEEP_CRON = "* * * * *"   # check for due delays every minute
 _MIN_INTERVAL = 60               # floor for a per-trigger cadence (matches the UI/schema)
 _DEFAULT_INTERVAL = 300          # per-trigger poll cadence when unset (5 min)
 _TICK_CRON = "* * * * *"         # evaluate due triggers every minute
@@ -248,7 +250,9 @@ def _handle_flow_run(job=None) -> None:
 
 
 def _handle_flow_resume(job=None) -> None:
-    """Resume a paused flow run with a human decision (durable one-shot)."""
+    """Resume a paused flow run with a human decision (durable one-shot). A stale
+    resume (the run already advanced, e.g. a duplicate delay-sweep enqueue) is a
+    clean no-op, not an error."""
     payload = getattr(job, "payload", None) or {}
     run_id = str(payload.get("run_id") or "")
     flow_id = str(payload.get("flow_id") or "")
@@ -264,8 +268,30 @@ def _handle_flow_resume(job=None) -> None:
         execution.execute(flow, agent_runner=agent_runner, action_runner=action_runner,
                           owner=owner, resume_run_id=run_id,
                           decision=str(payload.get("decision") or "approved"))
+    except execution.FlowNotResumable:
+        return  # already resumed/finished -- benign
     except Exception:  # pragma: no cover -- fail-open
         log.exception("flow resume failed for %s", run_id)
+
+
+def _handle_flow_sweep(_job=None) -> None:
+    """Re-arm flow runs whose delay has elapsed. A delay node persists the run as
+    paused_delay with a resume_at; this cron (every minute when flows are on) is
+    the driver that continues it -- without it, 'wait N seconds' never resumes.
+    Fail-open + idempotent (a stale resume is a no-op)."""
+    from maverick import flow
+    if not flow.enabled():
+        return
+    try:
+        from maverick.flow import runner, store
+        now = time.time()
+        for run in store.list_runs(owner=None, limit=1000):
+            if (run.status == runner.STATUS_PAUSED_DELAY and run.resume_at
+                    and run.resume_at <= now):
+                queue().enqueue(FLOW_RESUME_KIND, {
+                    "flow_id": run.flow_id, "run_id": run.run_id, "owner": run.owner})
+    except Exception:  # pragma: no cover -- fail-open
+        log.exception("flow delay sweep failed")
 
 
 # ---- cron seeding -----------------------------------------------------------
@@ -309,13 +335,15 @@ def _flywheel_cron() -> str:
 def reconcile() -> None:
     """Seed the tick + dream + flywheel cron jobs for whichever subsystems are
     enabled."""
-    from maverick import automation_events, data_engine, dreaming
+    from maverick import automation_events, data_engine, dreaming, flow
     if automation_events.enabled():
         _ensure_cron(TICK_KIND, _TICK_CRON)
     if dreaming.enabled():
         _ensure_cron(DREAM_KIND, _dream_cron())
     if data_engine.enabled():
         _ensure_cron(FLYWHEEL_KIND, _flywheel_cron())
+    if flow.enabled():
+        _ensure_cron(FLOW_SWEEP_KIND, _FLOW_SWEEP_CRON)
 
 
 # ---- lifecycle --------------------------------------------------------------
@@ -344,6 +372,7 @@ def start() -> bool:
         w.register(FLYWHEEL_KIND, _handle_flywheel)
         w.register(FLOW_RUN_KIND, _handle_flow_run)
         w.register(FLOW_RESUME_KIND, _handle_flow_resume)
+        w.register(FLOW_SWEEP_KIND, _handle_flow_sweep)
         # Seed the cron jobs + actually start the threads BEFORE committing to the
         # module globals, so a failure in reconcile() (e.g. a boot-time sqlite
         # write error) leaves us cleanly un-started and retryable -- not wedged
@@ -379,4 +408,4 @@ def stop() -> None:
 
 __all__ = ["start", "stop", "reconcile", "queue",
            "TICK_KIND", "DREAM_KIND", "FLYWHEEL_KIND",
-           "FLOW_RUN_KIND", "FLOW_RESUME_KIND"]
+           "FLOW_RUN_KIND", "FLOW_RESUME_KIND", "FLOW_SWEEP_KIND"]
