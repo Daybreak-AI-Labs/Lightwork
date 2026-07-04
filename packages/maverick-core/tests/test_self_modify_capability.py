@@ -39,10 +39,18 @@ class TestWidensDifferential:
         assert w is True and new == ["network"]
 
     def test_editing_within_an_existing_class_does_not_widen(self):
-        # context already does networking; the patch tweaks a network call.
+        # With a REAL baseline file that already does networking, tweaking a
+        # network call is not an escalation (the differential earns this).
+        p = _patch("resp = requests.post(url)", context="resp = requests.get(url)")
+        w, new = widens(p, baseline_files={"x.py": "resp = requests.get(url)"})
+        assert w is False and new == []
+
+    def test_without_baseline_any_construct_is_conservative(self):
+        # No baseline_files -> empty baseline -> even editing within a class reads
+        # as introducing it (fail-closed; context lines never seed the baseline).
         p = _patch("resp = requests.post(url)", context="resp = requests.get(url)")
         w, new = widens(p)
-        assert w is False and new == []
+        assert w is True and new == ["network"]
 
     def test_clean_edit_does_not_widen(self):
         w, new = widens(_patch("TUNING = 0.7"))
@@ -56,11 +64,19 @@ class TestWidensDifferential:
         assert w is False
 
     def test_missing_baseline_is_conservative(self):
-        # Same added line, but WITHOUT the baseline file the context under-counts
-        # and the change reads as introducing network -> over-reports (fail-closed).
+        # WITHOUT a baseline file the baseline is empty, so any added construct
+        # reads as new -> over-reports (fail-closed).
         p = _patch("s2 = socket.socket()")
         w, _ = widens(p)
         assert w is True
+
+    def test_context_line_word_cannot_seed_the_baseline(self):
+        # Security regression: an unchanged context line mentioning "allowlist"
+        # must NOT put authority_grant in `before` and mask an added grant.
+        p = _patch("editable_paths = ['**']",
+                   context="# this file manages the allowlist")
+        w, new = widens(p)
+        assert w is True and "authority_grant" in new
 
 
 class TestCapabilityDeltaShape:

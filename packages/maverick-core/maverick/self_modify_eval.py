@@ -98,12 +98,15 @@ class EvalSandboxError(RuntimeError):
 
 def container_required() -> bool:
     """Whether a container sandbox is mandatory for the eval (so host exec is
-    refused). Reuses the same signal ``build_sandbox`` enforces:
-    ``MAVERICK_REQUIRE_CONTAINER_BACKEND``, ``[sandbox] require_container``, or
-    enterprise mode. Off by default (single-tenant/dev keeps the warned host path)."""
+    refused). Uses the public, CONFIG-AWARE predicate
+    ``sandbox.container_backend_required`` so ``[sandbox] require_container = true``
+    in ``config.toml`` is honoured — not the bare private helper, which only sees
+    ``MAVERICK_REQUIRE_CONTAINER_BACKEND`` / enterprise mode and would let the
+    config knob silently no-op (fail-open). Off by default (single-tenant/dev
+    keeps the warned host path)."""
     try:
-        from .sandbox import _container_backend_required
-        return bool(_container_backend_required())
+        from .sandbox import container_backend_required
+        return bool(container_backend_required())
     except Exception:  # pragma: no cover -- never block on a lookup error
         return False
 
@@ -294,7 +297,6 @@ def evaluate_patch(
     apply_fn: Callable[[str, Path], ApplyResult] | None = None,
     materialize: Callable[[Path, Path], None] | None = None,
     sandbox=None,
-    require_isolation: bool = True,
 ) -> EvalResult:
     """Measure a patch on isolated copies of ``src``: score the unpatched tree
     (baseline), apply the patch to a second copy and score that (candidate).
@@ -305,24 +307,23 @@ def evaluate_patch(
     not clear the gate. The default seams make this runnable offline; inject
     ``score_fn=pytest_score(...)`` and a ``sandbox`` for a real evaluation.
 
-    Isolation (Gap 4): when ``require_isolation`` (default), the harness resolves
-    the sandbox up front and REFUSES to run under require-container/enterprise
-    policy without a container backend — returning a non-``ok`` result rather
-    than executing a candidate's code on the host. A custom ``apply_fn`` bypasses
-    the built-in ``git_apply`` guard, so the early check still fires; a custom
-    ``score_fn`` is the caller's responsibility to isolate."""
+    Isolation (Gap 4): the harness resolves the sandbox up front and REFUSES to
+    run under require-container/enterprise policy without a container backend —
+    returning a non-``ok`` result rather than executing a candidate's code on the
+    host. This is unconditional (there is no opt-out): a custom ``apply_fn``
+    still hits the early check, though a custom ``score_fn`` is the caller's own
+    responsibility to isolate."""
     src = Path(src)
     workroot = Path(workroot)
     score = score_fn or _default_score
     materialize = materialize or _default_materialize
     apply = apply_fn or (lambda p, wd: git_apply(p, wd, sandbox=sandbox))
 
-    if require_isolation:
-        # Fail closed BEFORE copying/applying if policy forbids host exec here.
-        try:
-            resolve_eval_sandbox(sandbox, workroot)
-        except EvalSandboxError as e:
-            return EvalResult(False, 0.0, 0.0, 0, applied=False, reason=str(e))
+    # Fail closed BEFORE copying/applying if policy forbids host exec here.
+    try:
+        resolve_eval_sandbox(sandbox, workroot)
+    except EvalSandboxError as e:
+        return EvalResult(False, 0.0, 0.0, 0, applied=False, reason=str(e))
 
     base_dir = workroot / "baseline"
     cand_dir = workroot / "candidate"

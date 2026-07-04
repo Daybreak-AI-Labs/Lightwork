@@ -85,6 +85,11 @@ def build_policy(cfg: dict | None = None) -> WideningPolicy:
                 minp = int(t.get("min_promotions", 0))
             except (TypeError, ValueError):
                 minp = 0
+            # Clamp to >= 0: a negative min_promotions would sort a NON-empty
+            # tier ahead of the empty tier-0, so the rollback-freeze (which
+            # returns the lowest tier) would freeze to a wide surface instead of
+            # to nothing. Keep the empty tier the narrowest.
+            minp = max(0, minp)
             tiers.append(SurfaceTier(str(t.get("name") or f"tier{minp}"), globs, minp))
     else:
         globs = tuple(str(g).strip() for g in (cfg.get("editable_paths") or [])
@@ -193,6 +198,12 @@ def run(
         archive = load_archive()
         ctrl = controller or si.shared()
         ledger = getattr(ctrl, "ledger", None)
+        if ledger is None:
+            # Proof-gated widening would otherwise fall back to the forgeable
+            # archive booleans. si.shared() always carries a ledger, so this only
+            # trips on a hand-built controller with none — warn loudly.
+            log.warning("self_modify_runner: controller has no promotion ledger; "
+                        "widening cannot use the tamper-resistant track record")
         tree = Path(tree) if tree is not None else Path.cwd()
 
         prop = proposer or _default_proposer(budget=budget)

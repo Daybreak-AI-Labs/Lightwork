@@ -273,20 +273,23 @@ class TestCapabilityDiff:
         assert sm.capability_diff("") == (False, [])
 
     @pytest.mark.parametrize("added,needle", [
-        ("subprocess.run(['ls'])", "subprocess"),
-        ("proc = os.system('rm -rf /')", "process-spawn"),
-        ("run(cmd, shell=True)", "shell-true"),
+        ("subprocess.run(['ls'])", "process spawn"),
+        ("proc = os.system('rm -rf /')", "process spawn"),
+        ("run(cmd, shell=True)", "process spawn"),
         ("data = eval(user_input)", "dynamic code"),
-        ("obj = pickle.loads(blob)", "pickle"),
+        # obfuscation constructs are treated as dynamic-code capability
+        ("fn = getattr(os, 'sys' + 'tem')", "dynamic code"),
+        ("payload = base64.b64decode(blob)", "dynamic code"),
+        ("obj = pickle.loads(blob)", "deserialization"),
         ("import socket", "network"),
         ("resp = requests.get(url)", "network"),
         ("mod = __import__(name)", "dynamic import"),
         ("os.remove(path)", "filesystem"),
         ("shutil.rmtree(d)", "filesystem"),
-        ("p.write_text('x')", "file write"),
-        ("f = open('out.txt', 'w')", "file write"),
-        ("grant = new_entitlement()", "capability"),
-        ("editable_paths = ['**']", "capability"),
+        ("p.write_text('x')", "filesystem"),
+        ("f = open('out.txt', 'w')", "filesystem"),
+        ("grant = new_entitlement()", "authority"),
+        ("editable_paths = ['**']", "authority"),
     ])
     def test_widening_constructs_are_flagged(self, added, needle):
         widens, reasons = sm.capability_diff(_patch_with_added("a.py", added))

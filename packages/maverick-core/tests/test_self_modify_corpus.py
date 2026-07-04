@@ -44,7 +44,10 @@ class _FakeSB:
                 passed, failed = 2, 0            # improves on BOTH splits
             elif self.scenario == "overfit":
                 passed, failed = (2, 0) if not is_out else (1, 1)  # held-in only
-        text = f"{passed} passed, {failed} failed in 0.1s"
+            elif self.scenario == "attrition" and is_out:
+                passed, failed = 1, 0            # a held-out test stopped running
+        text = f"{passed} passed, {failed} failed in 0.1s" if failed else \
+            f"{passed} passed in 0.1s"
 
         class R:
             stdout = text
@@ -108,6 +111,13 @@ class TestEvaluateOnCorpus:
             corpus=CodeEvalCorpus(test_ids=("tests/test_x.py::only",)),
             sandbox_factory=_factory(set(), "genuine"))
         assert res.ok is False and "held-out" in res.reason
+
+    def test_denominator_attrition_fails_closed(self, tmp_path):
+        # Candidate makes a held-out test stop being collected -> its pass-rate
+        # rises by attrition, not merit. Different denominators -> refuse.
+        res = self._run(tmp_path, "attrition")
+        assert res.ok is False
+        assert "different denominators" in res.reason
 
     def test_non_applying_patch_fails_closed(self, tmp_path):
         src = _seed(tmp_path)

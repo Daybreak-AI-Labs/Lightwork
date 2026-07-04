@@ -101,7 +101,11 @@ def _subset_score(
         except Exception as e:
             log.warning("self_modify_corpus: budget stop: %s", e)
             return Score(0.0, 0)
-    cmd = command_prefix + " " + " ".join(shlex.quote(i) for i in ids)
+    # ``--`` separates options from positional test args, so a config-supplied
+    # id like ``-p evilplugin`` / ``--pdb`` is treated as a (non-existent) test
+    # path rather than a pytest flag — defence in depth even though eval_tests is
+    # admin/config-owned (config.py is a protected path).
+    cmd = command_prefix + " -- " + " ".join(shlex.quote(i) for i in ids)
     try:
         res = sb.exec(cmd, timeout=timeout)
     except Exception as e:  # pragma: no cover -- exec failure is a 0 score
@@ -183,14 +187,28 @@ def evaluate_on_corpus(
     b_in = _score(held_in, sb_base)
     c_in = _score(held_in, sb_cand)
 
+    # Same-denominator guard: the two arms' pass RATES are only comparable if
+    # both ran the same number of held-out tests. If the candidate patch made a
+    # held-out test stop being collected (deselected / skipped / renamed), the
+    # candidate's denominator shrinks and its rate rises by attrition, not merit
+    # -- fail closed rather than credit that as improvement.
+    if b_out.samples != c_out.samples:
+        return CorpusEvalResult(
+            False, b_out.value, c_out.value, min(b_out.samples, c_out.samples),
+            held_in_baseline=b_in.value, held_in_candidate=c_in.value,
+            applied=True,
+            reason=f"held-out test set changed between arms "
+                   f"(baseline ran {b_out.samples}, candidate {c_out.samples}); "
+                   "refusing to compare across different denominators")
+
     overfit = (c_in.value > b_in.value) and (c_out.value <= b_out.value)
     reason = (f"held-out baseline={b_out.value:.4f} candidate={c_out.value:.4f} "
-              f"over {min(b_out.samples, c_out.samples)} tests"
+              f"over {b_out.samples} tests"
               + ("; OVERFIT: gained held-in only" if overfit else ""))
     return CorpusEvalResult(
         ok=not overfit,
         baseline_score=b_out.value, candidate_score=c_out.value,
-        samples=min(b_out.samples, c_out.samples),
+        samples=b_out.samples,
         held_in_baseline=b_in.value, held_in_candidate=c_in.value,
         overfit=overfit, applied=True, reason=reason,
     )

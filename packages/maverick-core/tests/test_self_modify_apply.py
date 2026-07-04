@@ -79,3 +79,17 @@ class TestRevert:
     def test_revert_bad_id_is_false_not_raise(self, tmp_path):
         assert ap.revert_change("snap-9999", tree=_tree(tmp_path),
                                 store=_store(tmp_path)) is False
+
+
+class TestBoundaryReCheck:
+    def test_refuses_a_control_plane_patch(self, tmp_path):
+        # Defense in depth: apply_change re-runs the boundary and refuses a patch
+        # that touches the control plane, even if a caller skipped the gate.
+        tree, store = _tree(tmp_path), _store(tmp_path)
+        cp = ("diff --git a/packages/maverick-core/maverick/verifier.py "
+              "b/packages/maverick-core/maverick/verifier.py\n"
+              "--- a/packages/maverick-core/maverick/verifier.py\n"
+              "+++ b/packages/maverick-core/maverick/verifier.py\n"
+              "@@ -1 +1 @@\n-x\n+y\n")
+        res = ap.apply_change(cp, tree=tree, store=store)
+        assert res.ok is False and "protected" in res.reason

@@ -36,7 +36,6 @@ from __future__ import annotations
 
 import fnmatch
 import logging
-import re
 from dataclasses import dataclass
 
 log = logging.getLogger(__name__)
@@ -281,84 +280,25 @@ def review_patch(patch: str, surface: EditableSurface | None = None) -> PatchRev
 
 # --- capability-diff: a heuristic non-escalation SIGNAL -----------------------
 
-# Constructs whose APPEARANCE in an added line means the patch may widen the
-# authority envelope: process spawn, raw sockets/network clients, dynamic code
-# execution, filesystem mutation, dynamic import, and explicit capability/tool
-# grants. This is a syntactic screen, not the capability algebra -- it exists to
-# make the boundary STRICTER (flag a suspicious diff), never more permissive.
-_CAP_PATTERNS: tuple[tuple[str, str], ...] = (
-    # NB: the label deliberately avoids the literal ``shell``+``=``+``True``
-    # spelling so the repo-wide rule-4 grep (which bans that construct outside
-    # sandbox/) doesn't flag this detector's own description. The regex still
-    # matches it in a scanned patch.
-    (r"\bshell\s*=\s*True\b", "shell-true kwarg (arbitrary shell execution)"),
-    (r"\bsubprocess\b", "subprocess (process spawn)"),
-    (r"\bos\.(system|popen|exec[lv]|spawn)\w*\s*\(", "os process-spawn call"),
-    (r"\bpty\.spawn\b", "pty.spawn (interactive process)"),
-    (r"\bmultiprocessing\b", "multiprocessing (process spawn)"),
-    (r"(?<!\w)(eval|exec)\s*\(", "eval/exec (dynamic code execution)"),
-    (r"\bcompile\s*\(", "compile (dynamic code object)"),
-    (r"\b__import__\s*\(", "__import__ (dynamic import)"),
-    (r"\bimportlib\b", "importlib (dynamic import)"),
-    (r"\b(socket|asyncio\.open_connection|http\.client|urllib|"
-     r"requests|httpx|aiohttp|smtplib|ftplib|paramiko)\b", "network client"),
-    (r"\bctypes\b", "ctypes (native memory / FFI)"),
-    (r"\bpickle\.(load|loads)\b", "pickle deserialization (code execution)"),
-    (r"\bos\.(remove|unlink|rmdir|chmod|chown|rename|replace)\s*\(",
-     "filesystem mutation"),
-    (r"\bshutil\.(rmtree|move|copy\w*)\s*\(", "filesystem mutation"),
-    (r"\bopen\s*\([^)]*['\"][rwax+bt]*[wax+][rwax+bt]*['\"]", "file write"),
-    (r"\.write_(text|bytes)\s*\(", "file write"),
-    # Explicit authority grants -- widening a tool allowlist / entitlement / the
-    # editable surface itself is exactly the escalation the gate must catch.
-    (r"\b(grant|entitlement|allow_?list|allowlist|editable_paths|"
-     r"probe_tools|capability_before|capability_after)\b",
-     "explicit capability / tool-grant surface"),
-)
-_CAP_COMPILED: tuple[tuple[object, str], ...] = tuple(
-    (re.compile(pat), why) for pat, why in _CAP_PATTERNS)
-
-
-def _added_lines(patch: str) -> list[str]:
-    """The content of every ADDED line in a unified diff (``+`` lines, excluding
-    the ``+++`` file header). These are what the patch introduces -- the only
-    lines that can widen authority."""
-    out: list[str] = []
-    for line in (patch or "").splitlines():
-        if line.startswith("+") and not line.startswith("+++"):
-            out.append(line[1:])
-    return out
-
-
 def capability_diff(patch: str) -> tuple[bool, list[str]]:
     """Heuristic scan for capability-widening constructs a patch ADDS.
 
-    Returns ``(widens, reasons)``. ``widens`` is True iff some added line matches
-    a construct in :data:`_CAP_PATTERNS` (process spawn, network, dynamic code,
-    filesystem mutation, dynamic import, an explicit tool/entitlement grant).
+    Returns ``(widens, reasons)``. ``widens`` is True iff the patch's added lines
+    evidence any capability class (process spawn, network, dynamic code,
+    filesystem write, dynamic import, native FFI, deserialization, an explicit
+    tool/entitlement grant). The construct taxonomy is defined ONCE in
+    :mod:`maverick.self_modify_capability` (``classes_in``) and shared with the
+    algebra screen, so the two detectors can never drift apart; ``reasons`` are
+    that module's human labels for the detected classes.
 
-    This is a **signal, not a proof**. The authoritative non-escalation check is
-    the capability algebra (:mod:`maverick.capability`); this syntactic screen is
-    deliberately conservative and one-directional -- :func:`propose_code_change`
-    uses a positive hit to force ``capability_widens=True`` (blocking the change),
-    but NEVER uses a negative result to assert a change is bounded. A miss here
-    therefore cannot launder an escalation past the gate: the code rung still
-    demands a real proof and a human signature. Comments/strings can trip it
-    (a false positive only makes the gate stricter, which is the safe direction)."""
-    reasons: list[str] = []
-    seen: set[str] = set()
-    for line in _added_lines(patch):
-        # Skip pure-comment additions: a ``# subprocess is banned`` note isn't a
-        # capability. (A string literal can still trip it -- deliberately, since
-        # a string can be an exec payload; the false positive only over-blocks.)
-        stripped = line.lstrip()
-        if stripped.startswith("#"):
-            continue
-        for rx, why in _CAP_COMPILED:
-            if why not in seen and rx.search(line):
-                seen.add(why)
-                reasons.append(why)
-    return bool(reasons), reasons
+    This is a **signal, not a proof**. It is deliberately one-directional --
+    :func:`propose_code_change` uses a positive hit to force
+    ``capability_widens=True`` (blocking the change), but never treats a clean
+    scan as a standalone certificate of non-escalation; the code rung's human
+    signature is the backstop for what a regex cannot catch."""
+    from .self_modify_capability import _added_lines, classes_in, describe_classes
+    hit = classes_in(_added_lines(patch))
+    return bool(hit), describe_classes(hit)
 
 
 # --- config / gate -----------------------------------------------------------

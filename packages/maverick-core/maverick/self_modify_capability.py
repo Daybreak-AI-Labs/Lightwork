@@ -1,10 +1,14 @@
-"""Capability-algebra non-escalation proof for a code patch (Gap 5).
+"""Capability-algebra non-escalation EVIDENCE for a code patch (Gap 5).
 
-``self_modify.capability_diff`` is a syntactic SIGNAL — it flags a suspicious
-added line but cannot *prove* non-escalation, so a code-rung change that clears
-it still has ``capability_widens=None`` and is refused for want of a proof. This
-module supplies the proof, computed with the real capability algebra
-(:mod:`maverick.capability`) instead of a boolean guess.
+This computes a machine screen for capability escalation using the real
+capability algebra (:mod:`maverick.capability`) instead of a boolean guess. It is
+deliberately called **evidence, not a proof**: detection is syntactic (regex over
+source lines), so a determined obfuscation (``getattr(os,'sy'+'stem')``, a
+base64/``codecs`` payload) can still evade it. It is one layer of a
+defence-in-depth stack — the editable-surface boundary, this screen, and a
+**human Ed25519 signature at the code rung** — not a standalone guarantee. The
+screen's job is to reliably CATCH the common escalations and make the gate
+stricter; the human signer is the backstop for what a regex cannot.
 
 The idea is **differential**: a patch widens authority only if it introduces a
 capability *class* the edited baseline did not already use. Editing a module that
@@ -17,15 +21,17 @@ FFI, deserialization, explicit authority grant), express each as a
 ``Capability.permits`` decide — so the answer routes through the same
 least-privilege algebra the runtime enforces on tools, not an ad-hoc check.
 
-The result plugs straight into the governed gate: :func:`capability_delta`
-returns ``(before, after, probe_tools)`` for a candidate's
-``capability_before`` / ``capability_after`` / ``probe_tools`` fields, and
+The result plugs into the governed gate: :func:`capability_delta` returns
+``(before, after, probe_tools)`` for a candidate's ``capability_before`` /
+``capability_after`` / ``probe_tools`` fields, and
 :func:`maverick.self_improvement._capability_widens` computes escalation as
 "some probed class the *after* grant permits that the *before* grant did not."
 
-Fail-closed: with no baseline source available the baseline class set is taken
-from the patch's own context/removed lines (a strict under-count that can only
-*over*-report widening), so a missing baseline never launders an escalation.
+Fail-closed: with no real baseline source the baseline class set is **empty**, so
+every capability construct the added lines introduce counts as new (maximally
+strict). A baseline derived from the patch's own context lines was rejected as
+unsafe — an unchanged context word could seed a class into ``before`` and mask a
+genuinely-added grant.
 """
 from __future__ import annotations
 
@@ -34,8 +40,8 @@ from collections.abc import Iterable
 
 from .capability import Capability
 
-# Capability classes and the constructs that evidence each. Mirrors the
-# categories self_modify._CAP_PATTERNS screens for, but grouped into named
+# Capability classes and the constructs that evidence each. This is the SINGLE
+# construct taxonomy — the syntactic screen (self_modify.capability_diff) reports
 # *classes* so the before/after comparison is over a small, stable universe.
 _CLASS_PATTERNS: dict[str, tuple[str, ...]] = {
     "process": (
@@ -49,6 +55,13 @@ _CLASS_PATTERNS: dict[str, tuple[str, ...]] = {
     ),
     "dynamic_code": (
         r"(?<!\w)(eval|exec)\s*\(", r"\bcompile\s*\(",
+        # Obfuscation constructs that reach the same primitives past a literal
+        # regex (getattr(os,'sy'+'stem'), __builtins__[...], base64/codecs
+        # payloads). A regex screen can't catch every spelling, so a change that
+        # even *uses* dynamic-attribute/decoded-payload machinery is itself
+        # treated as a dynamic-code capability -- fail toward flagging.
+        r"\bgetattr\s*\(", r"\b__builtins__\b", r"\bcodecs\.decode\b",
+        r"\bbase64\b", r"\bglobals\s*\(\s*\)\s*\[", r"\bvars\s*\(\s*\)\s*\[",
     ),
     "fs_write": (
         r"\bos\.(remove|unlink|rmdir|chmod|chown|rename|replace)\s*\(",
@@ -107,18 +120,6 @@ def _added_lines(patch: str) -> list[str]:
             if ln.startswith("+") and not ln.startswith("+++")]
 
 
-def _baseline_lines(patch: str) -> list[str]:
-    """Context (' ') and removed ('-') lines — the pre-image the patch edits.
-    Used as a conservative baseline when the full source file isn't available."""
-    out: list[str] = []
-    for ln in (patch or "").splitlines():
-        if ln.startswith("-") and not ln.startswith("---"):
-            out.append(ln[1:])
-        elif ln.startswith(" "):
-            out.append(ln[1:])
-    return out
-
-
 def _grant(principal: str, classes: Iterable[str]) -> Capability:
     """A capability whose allow-list is exactly ``classes`` (plus the anchor so
     it is never the empty 'all' set). ``permits(cls)`` is then True iff the grant
@@ -133,7 +134,8 @@ def capability_delta(
     baseline_files: dict[str, str] | None = None,
     principal: str = "self_modify",
 ) -> tuple[Capability, Capability, tuple[str, ...]]:
-    """Compute ``(before, after, probe_tools)`` for a patch's non-escalation proof.
+    """Compute ``(before, after, probe_tools)`` for a patch's non-escalation
+    EVIDENCE (not a proof — see the module docstring on the regex limitation).
 
     ``before`` permits the capability classes the baseline already uses;
     ``after`` permits those plus any class the patch's added lines introduce.
@@ -143,16 +145,17 @@ def capability_delta(
 
     ``baseline_files`` maps repo-relative path -> full current source for the
     touched files (from the Phase-2 materialized baseline tree); when given, the
-    baseline class set is taken from the real files. Without it the baseline is
-    the patch's own context/removed lines — a strict under-count, so a missing
-    baseline can only make the proof STRICTER (over-report widening), never
-    weaker."""
+    differential is real (a class already used elsewhere in the file is not a new
+    grant). WITHOUT it the baseline is **empty** — every capability class the
+    added lines introduce counts as new. Deriving the baseline from the patch's
+    own context lines was unsafe: an unchanged context line mentioning e.g.
+    ``allowlist``/``grant`` would seed that class into ``before`` and NEUTRALISE
+    detection of a genuinely-added grant. Empty-baseline is fail-closed (any
+    added construct widens); pass ``baseline_files`` to earn the differential."""
     added = classes_in(_added_lines(patch))
-    if baseline_files:
-        base = classes_in(
-            line for src in baseline_files.values() for line in str(src).splitlines())
-    else:
-        base = classes_in(_baseline_lines(patch))
+    base = classes_in(
+        line for src in (baseline_files or {}).values()
+        for line in str(src).splitlines())
     after = base | added
     return _grant(principal, base), _grant(principal, after), CAPABILITY_CLASSES
 
@@ -165,4 +168,27 @@ def widens(patch: str, *, baseline_files: dict[str, str] | None = None) -> tuple
     return bool(new), new
 
 
-__all__ = ["CAPABILITY_CLASSES", "classes_in", "capability_delta", "widens"]
+# Human-readable label per capability class — the single source the syntactic
+# screen (self_modify.capability_diff) also reports from, so the two detectors
+# can never drift apart.
+_CLASS_DESC: dict[str, str] = {
+    "process": "process spawn",
+    "network": "network client",
+    "dynamic_code": "dynamic code execution",
+    "fs_write": "filesystem write",
+    "dynamic_import": "dynamic import",
+    "native_ffi": "native FFI",
+    "deserialize": "deserialization",
+    "authority_grant": "authority / tool grant",
+}
+
+
+def describe_classes(classes: Iterable[str]) -> list[str]:
+    """Sorted human labels for a set of capability classes."""
+    return [_CLASS_DESC.get(c, c) for c in sorted(set(classes))]
+
+
+__all__ = [
+    "CAPABILITY_CLASSES", "classes_in", "capability_delta", "widens",
+    "describe_classes",
+]

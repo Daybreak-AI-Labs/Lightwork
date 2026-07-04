@@ -199,16 +199,18 @@ def _archive_track_record(archive: CodeArchive) -> tuple[int, bool]:
 
 
 def _ledger_track_record(ledger, *, rung: str = "code") -> tuple[int, bool]:
-    """``(promotions, had_rollback)`` from the signed promotion ledger — the
-    AUTHORITATIVE source for proof-gated widening (Gap 6).
+    """``(promotions, had_rollback)`` from the controller's promotion ledger — the
+    authoritative source for proof-gated widening (Gap 6).
 
     The :class:`~maverick.self_improvement.PromotionLedger` is written only by the
-    controller after every gate passed and the promotion was signed into the
-    audit chain, and it is persisted 0600 — so unlike the DGM archive's
-    self-attested booleans it cannot be forged by tampering with a sidecar to
-    unlock a wider editable surface. Counts promotions at ``rung`` (the code rung)
-    that were not rolled back; a single rolled-back code promotion forfeits
-    widening."""
+    controller after every gate passed and the promotion was recorded in the
+    signed audit chain, and it is persisted 0600 in the controller's own data dir
+    — so it is materially harder to forge than the DGM archive's self-attested
+    booleans (which live next to agent-writable state). It is NOT itself
+    cryptographically signed; the signed audit chain is the ultimate ground truth
+    and a fully hardened deployment would reconcile against it. Counts promotions
+    at ``rung`` (the code rung) that were not rolled back; a single rolled-back
+    code promotion forfeits widening."""
     try:
         records = list(ledger.all())
     except Exception:  # pragma: no cover -- unreadable ledger -> no trust earned
@@ -226,10 +228,12 @@ def earned_surface(
 ) -> tuple[SurfaceTier, sm.EditableSurface]:
     """The tier + surface the track record currently entitles the loop to edit.
 
-    When a signed promotion ``ledger`` is supplied the track record is derived
-    from it (the tamper-resistant, authoritative source — Gap 6); otherwise it
-    falls back to the archive's booleans (convenient for tests / offline, but not
-    a security boundary). Pure — reads the record, decides nothing else."""
+    When a promotion ``ledger`` is supplied the track record is derived from it
+    (the controller-owned, tamper-resistant source — Gap 6); otherwise it falls
+    back to the archive's booleans (convenient for tests / offline, but NOT a
+    security boundary — the runner always supplies the controller's ledger, so the
+    fallback is not on the operable path). Pure — reads the record, decides
+    nothing else."""
     if ledger is not None:
         promotions, had_rollback = _ledger_track_record(ledger, rung=rung)
     else:

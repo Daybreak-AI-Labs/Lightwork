@@ -111,9 +111,24 @@ def apply_change(
     reused; otherwise a snapshot is taken now. WITHOUT a snapshot the apply is
     REFUSED (no revert point → not reversible → fail closed). On a failed apply
     the tree is reverted to the snapshot so a half-applied change never persists.
-    Never raises."""
+    Never raises.
+
+    Defence in depth: this live-tree write RE-RUNS the editable-surface boundary
+    (:func:`maverick.self_modify.review_patch`) and refuses any patch that touches
+    a control-plane path — so even a mis-wired caller that skipped the gate can
+    never land a change on a protected file through this primitive."""
     tree = Path(tree)
     store = store or store_dir()
+
+    # Boundary re-check: refuse a patch that touches the reference monitor,
+    # independent of whatever gating the caller claims to have done.
+    from .self_modify import _diff_paths, is_protected
+    protected = [p for p in _diff_paths(patch) if is_protected(p)]
+    if protected:
+        return AppliedChange(
+            False, reason=f"refusing to apply: patch touches protected "
+            f"control-plane paths {sorted(protected)}")
+
     snap = snapshot_id or create_rollback_point(tree, store=store, label=label)
     if not snap:
         return AppliedChange(False, reason="no rollback point; refusing to apply")
@@ -121,10 +136,12 @@ def apply_change(
     ok, msg = _host_git_apply(patch, tree)
     handle = RollbackHandle(snapshot_id=snap, tree=tree, store=store)
     if not ok:
-        # Restore to the snapshot so a partial apply can't linger.
-        handle.revert()
-        return AppliedChange(False, snapshot_id=snap,
-                             reason=f"{msg}; reverted to {snap}")
+        # Restore to the snapshot so a partial apply can't linger, and report the
+        # ACTUAL revert result — a failed revert leaves the tree possibly dirty.
+        reverted = handle.revert()
+        detail = (f"reverted to {snap}" if reverted
+                  else f"REVERT FAILED for {snap} — tree may be dirty")
+        return AppliedChange(False, snapshot_id=snap, reason=f"{msg}; {detail}")
     return AppliedChange(True, snapshot_id=snap, reason=msg, rollback=handle)
 
 

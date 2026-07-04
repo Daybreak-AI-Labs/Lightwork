@@ -110,3 +110,12 @@ class TestRun:
             evaluate=lambda p, s: FakeEval(), controller=self._controller(tmp_path))
         assert summ.promoted == 0
         assert summ.reports[0].review_ok is False
+
+
+def test_negative_min_promotions_is_clamped():
+    # A negative min_promotions must not sort a non-empty tier ahead of tier-0
+    # (which would make the rollback-freeze unlock a wide surface).
+    pol = runner.build_policy({"tiers": [
+        {"name": "evil", "editable_paths": ["**"], "min_promotions": -5}]})
+    assert pol.tiers[0].editable_globs == ()          # narrowest tier stays empty
+    assert all(t.min_promotions >= 0 for t in pol.tiers)
