@@ -156,6 +156,21 @@ class TrajectoryStore:
                 continue
             yield TrajectoryStep(**{k: d.get(k) for k in TrajectoryStep.__dataclass_fields__})
 
+    def tools_by_goal(self, *, limit: int = 20_000) -> dict[int, list[str]]:
+        """Map ``goal_id`` -> the distinct tools that goal's run used, in first-
+        seen order. This is the signal dreaming needs to give a distilled skill
+        its ``tools_needed`` (the raw episode row records only a tool *count*).
+        Empty when capture is off (nothing was recorded)."""
+        out: dict[int, list[str]] = {}
+        for s in self.iter_steps(limit=limit):
+            tool = (s.tool or "").strip()
+            if not tool:
+                continue
+            seen = out.setdefault(int(s.goal_id), [])
+            if tool not in seen:
+                seen.append(tool)
+        return out
+
     def count(self) -> int:
         if self.path is None or not Path(self.path).exists():
             return 0
@@ -217,7 +232,15 @@ def episode_dag_fields(step_index: int, is_final: bool,
     }
 
 
+def tools_by_goal(*, store: TrajectoryStore | None = None,
+                  limit: int = 20_000) -> dict[int, list[str]]:
+    """Distinct tools each captured run used, keyed by goal_id. Empty when
+    capture is off (nothing recorded)."""
+    return (store or shared()).tools_by_goal(limit=limit)
+
+
 __all__ = [
     "TrajectoryStep", "TrajectoryStore",
     "enabled", "shared", "reset_shared", "capture_step", "episode_dag_fields",
+    "tools_by_goal",
 ]

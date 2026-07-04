@@ -1288,11 +1288,23 @@ def dream_cycle(
     # REPLAY: successes from the world model, failures from the reflexion log.
     successes: list[dict] = []
     if world is not None:
+        # Attribute the real tools each run used so a distilled skill gets its
+        # `tools_needed` (the goal row records only a tool *count*; the tool
+        # NAMES live in the trajectory store). Empty when capture is off, so a
+        # default deployment is unchanged; one read, joined by goal_id below.
+        tools_by_goal: dict[int, list[str]] = {}
+        try:
+            from . import trajectory_store
+            if trajectory_store.enabled():
+                tools_by_goal = trajectory_store.tools_by_goal()
+        except Exception as e:  # pragma: no cover -- capture read never blocks
+            log.debug("dreaming: trajectory tool join skipped: %s", e)
         try:
             for g in world.list_goals(status="done", limit=max_goals, order="desc"):
                 successes.append({
                     "goal": getattr(g, "title", "") or "",
-                    "success": True, "tools": [],
+                    "success": True,
+                    "tools": tools_by_goal.get(getattr(g, "id", None), []),
                     "t": getattr(g, "updated_at", 0.0) or 0.0,
                     # Exact attribution when the goal row carries its
                     # department (schema v14); lexical fallback otherwise.
