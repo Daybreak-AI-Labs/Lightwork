@@ -852,11 +852,19 @@ def get_calibration() -> dict:
         min_disc = float(cfg.get("min_discrimination", 0.15))
     except (TypeError, ValueError):
         min_disc = 0.15
+    try:
+        min_res = float(cfg.get("min_resistance", 0.0))
+    except (TypeError, ValueError):
+        min_res = 0.0
     return {
         "enforce": bool(cfg.get("enforce", False)),
         "min_samples": _int("min_samples", 20),
         "min_discrimination": max(0.0, min(1.0, min_disc)),
         "collect_from_coding": bool(cfg.get("collect_from_coding", False)),
+        # Reward-laundering interlock floor: freeze learning when the verifier's
+        # edge on adversarial probes falls below this fraction of its edge on
+        # natural traffic. 0.0 = advisory (measured, never freezes).
+        "min_resistance": max(0.0, min(1.0, min_res)),
     }
 
 
