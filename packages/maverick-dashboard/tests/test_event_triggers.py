@@ -171,6 +171,37 @@ def test_background_poll_fires_system_wide(monkeypatch, tmp_path):
     assert len(fired) == 1
 
 
+def test_background_poll_attributes_goal_to_trigger_owner(monkeypatch, tmp_path):
+    # The background tick has no request principal; the fired goal must still be
+    # owned by the trigger's owner (not left unowned), so owner-scoped views see it.
+    _isolate(monkeypatch, tmp_path)
+    import maverick.automation_events as ev
+    import maverick.runner as runner_mod
+    from maverick_dashboard import app as A
+    from maverick_dashboard import event_triggers_store as s
+    owners = []
+
+    class _FakeWorld:
+        def create_goal(self, title, description, owner=""):
+            owners.append(owner)
+            return len(owners)
+
+        def record_goal_origin(self, gid, kind, name):
+            pass
+
+    monkeypatch.setattr(A, "_world", _FakeWorld)
+    monkeypatch.setattr(runner_mod, "run_goal_in_thread", lambda *a, **k: None)
+    box = [{"items": [{"id": "1", "title": "a"}]}]
+    monkeypatch.setattr(ev, "_http_get_json", lambda url, headers=None, timeout=15.0: box[0])
+    s.set_trigger("feed", "triage", "http_json",
+                  config={"url": "http://x", "items_path": "items", "id_field": "id"},
+                  owner="user:alice")
+    A._poll_all_event_triggers()                              # baseline
+    box[0] = {"items": [{"id": "2", "title": "b"}, {"id": "1", "title": "a"}]}
+    A._poll_all_event_triggers()                              # fires
+    assert owners == ["user:alice"]
+
+
 def test_scheduler_starts_only_when_a_feature_is_on(monkeypatch, tmp_path):
     import asyncio
 

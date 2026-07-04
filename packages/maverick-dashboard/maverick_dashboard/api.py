@@ -3977,18 +3977,22 @@ def _learning_snapshot(request: Request) -> dict:
     w = _world()
     owner = goal_owner_filter(request)
     st = stats(assemble(w, owner=owner))
-    try:
-        learned_n = len(_learned_snapshot().get("learned") or [])
-    except Exception:  # pragma: no cover - the moat view never 500s on a sub-read
-        learned_n = 0
     accumulated = {
         "decisions": st.n_records,
         "human_decisions": st.n_human_decisions,
         "approvals": st.n_approvals,
         "departments": len(st.departments),
-        "learned_capabilities": learned_n,
-        "grounded_outcomes": consequence.count(),
     }
+    # Learned skills and grounded outcomes are deployment-level assets (neither is
+    # stored per-tenant), so only surface them on an unscoped/admin view -- a
+    # single tenant must never see deployment-wide totals as if they were its own.
+    if owner is None:
+        try:
+            learned_n = len(_learned_snapshot().get("learned") or [])
+        except Exception:  # pragma: no cover - the moat view never 500s on a sub-read
+            learned_n = 0
+        accumulated["grounded_outcomes"] = consequence.count()
+        accumulated["learned_capabilities"] = learned_n
     return {
         "components": components,
         "accumulated": accumulated,

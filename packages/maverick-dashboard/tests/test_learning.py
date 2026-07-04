@@ -39,6 +39,17 @@ def test_learning_api_reports_components_off_by_default(tmp_path, monkeypatch):
     }
 
 
+def test_scoped_caller_does_not_see_deployment_wide_counts(tmp_path, monkeypatch):
+    # A specific tenant (owner not None) must NOT see deployment-level learned
+    # skills / grounded outcomes attributed as its own -- those are admin-only.
+    _isolate(tmp_path, monkeypatch)
+    from maverick_dashboard import api
+    monkeypatch.setattr(api, "goal_owner_filter", lambda request: "user:alice")
+    acc = client.get("/api/v1/learning").json()["accumulated"]
+    assert "grounded_outcomes" not in acc and "learned_capabilities" not in acc
+    assert {"decisions", "human_decisions", "approvals", "departments"} <= set(acc)
+
+
 def test_consequence_flag_flips_component_on(tmp_path, monkeypatch):
     monkeypatch.setenv("MAVERICK_CONSEQUENCE", "1")
     _isolate(tmp_path, monkeypatch)

@@ -68,8 +68,12 @@
       <div class="lrn__stat"><div class="lrn__num">{{ snap.accumulated.decisions }}</div><div class="lrn__lbl">decisions recorded</div></div>
       <div class="lrn__stat"><div class="lrn__num">{{ snap.accumulated.human_decisions }}</div><div class="lrn__lbl">human judgements</div></div>
       <div class="lrn__stat"><div class="lrn__num">{{ snap.accumulated.approvals }}</div><div class="lrn__lbl">approvals on record</div></div>
+      {% if 'grounded_outcomes' in snap.accumulated %}
       <div class="lrn__stat"><div class="lrn__num">{{ snap.accumulated.grounded_outcomes }}</div><div class="lrn__lbl">grounded outcomes learned</div></div>
+      {% endif %}
+      {% if 'learned_capabilities' in snap.accumulated %}
       <div class="lrn__stat"><div class="lrn__num">{{ snap.accumulated.learned_capabilities }}</div><div class="lrn__lbl">capabilities self-taught</div></div>
+      {% endif %}
       <div class="lrn__stat"><div class="lrn__num">{{ snap.accumulated.departments }}</div><div class="lrn__lbl">departments active</div></div>
     </div>
   </section>

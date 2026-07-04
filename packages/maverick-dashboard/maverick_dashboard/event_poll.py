@@ -25,6 +25,11 @@ def poll_and_fire(world: Any, triggers: list[dict], *, principal: str = "",
 
     results: list[dict] = []
     for trig in triggers:
+        # Attribute the fired goal to the trigger's OWN owner -- so the
+        # background tick (which has no request principal and drains every
+        # owner's triggers) doesn't create unowned goals. On the on-demand path
+        # the trigger's owner is the caller, so this matches ``principal``.
+        owner = trig.get("owner") or principal
         summary: dict = {"name": trig["name"], "new_events": 0, "fired": [], "notes": []}
         try:
             res = poll_source(trig["source"], trig["config"], trig["cursor"])
@@ -53,7 +58,7 @@ def poll_and_fire(world: Any, triggers: list[dict], *, principal: str = "",
             except ValueError as e:             # a required param the event didn't supply
                 summary["notes"].append(f"skipped an event: {e}")
                 continue
-            goal_id = world.create_goal(title[:200], description[:8000], owner=principal)
+            goal_id = world.create_goal(title[:200], description[:8000], owner=owner)
             world.record_goal_origin(goal_id, "event", trig["name"])
             fire(goal_id)
             summary["fired"].append(goal_id)

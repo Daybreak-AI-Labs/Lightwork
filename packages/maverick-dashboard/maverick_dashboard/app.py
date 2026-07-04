@@ -340,13 +340,44 @@ def _run_dream_tick() -> None:
         log.exception("scheduled dream cycle failed")
 
 
+def _dream_marker_path():
+    from maverick.paths import maverick_home
+    return maverick_home() / "last-dream.marker"
+
+
+def _dream_due(interval: float) -> bool:
+    """Whether a scheduled dream is due, judged from a SHARED on-disk marker
+    (its mtime), not per-process state -- so N uvicorn workers run at most one
+    dream per interval, not one each. Checked + updated under the tick flock."""
+    p = _dream_marker_path()
+    try:
+        return (time.time() - p.stat().st_mtime) >= interval
+    except FileNotFoundError:
+        return True
+    except Exception:  # pragma: no cover
+        return False
+
+
+def _mark_dreamed() -> None:
+    p = _dream_marker_path()
+    try:
+        p.parent.mkdir(parents=True, exist_ok=True)
+        p.touch()
+        os.utime(p, None)
+    except Exception:  # pragma: no cover
+        pass
+
+
 async def _automation_loop() -> None:
     import asyncio
 
     from maverick import automation_events, dreaming
     tick = _automation_tick_seconds()
     dream_every = _dream_interval_seconds()
-    last_dream = time.monotonic()
+    # Baseline the shared marker so the first scheduled dream is one interval out
+    # (not on boot); harmless if another worker already set it.
+    if not _dream_marker_path().exists():
+        _mark_dreamed()
     log.info("automation scheduler: tick=%.0fs, dream every %.0fs", tick, dream_every)
     while True:
         try:
@@ -359,12 +390,14 @@ async def _automation_loop() -> None:
         try:
             if automation_events.enabled():
                 await run_in_threadpool(_poll_all_event_triggers)
-            if dreaming.enabled() and (time.monotonic() - last_dream) >= dream_every:
+            # _dream_due + _mark_dreamed run inside the held flock, so only the
+            # process that won this tick can advance the marker -- exactly one
+            # dream per interval across all workers.
+            if dreaming.enabled() and _dream_due(dream_every):
                 await run_in_threadpool(_run_dream_tick)
-                last_dream = time.monotonic()
+                _mark_dreamed()
         except asyncio.CancelledError:
-            _automation_unlock(fd)
-            break
+            break  # the finally releases the lock
         except Exception:  # pragma: no cover - fail-open, keep ticking
             log.exception("automation tick failed")
         finally:

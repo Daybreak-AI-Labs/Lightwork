@@ -144,9 +144,15 @@ def diff_new_items(items: list[dict], cursor: str, id_field: str, *,
         if iid and iid == cursor:
             break                                       # reached last-seen
         fresh.append(it)
-    fresh = fresh[:_MAX_EVENTS]
     fresh.reverse()                                     # oldest-first for firing
-    return PollResult(events=[_flatten(it) for it in fresh], cursor=newest)
+    # Fire the OLDEST _MAX_EVENTS of a backlog and advance the cursor only to the
+    # newest item we actually fired -- so a burst larger than the cap drains over
+    # subsequent polls instead of the older items being skipped and lost.
+    fresh = fresh[:_MAX_EVENTS]
+    if not fresh:
+        return PollResult(events=[], cursor=newest)
+    next_cursor = _id(fresh[-1]) or newest
+    return PollResult(events=[_flatten(it) for it in fresh], cursor=next_cursor)
 
 
 # ---- built-in source: poll a JSON HTTP endpoint ----------------------------

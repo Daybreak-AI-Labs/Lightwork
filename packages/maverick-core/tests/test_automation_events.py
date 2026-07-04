@@ -46,6 +46,20 @@ def test_event_burst_is_bounded():
     assert len(r.events) <= ev._MAX_EVENTS
 
 
+def test_burst_over_cap_drains_oldest_first_without_loss():
+    # 40 new items since cursor "0"; the cap is 25. The oldest 25 must fire this
+    # poll and the cursor must stop at the newest FIRED item so the remaining 15
+    # drain on the next poll -- no item is skipped.
+    items = [{"id": str(i)} for i in range(40, 0, -1)]  # 40..1, newest-first
+    first = ev.diff_new_items(items, cursor="0", id_field="id")
+    assert [e["id"] for e in first.events] == [str(i) for i in range(1, 26)]  # 1..25
+    assert first.cursor == "25"
+    # Next poll continues from the cursor: the remaining 26..40 fire, none lost.
+    second = ev.diff_new_items(items, cursor=first.cursor, id_field="id")
+    assert [e["id"] for e in second.events] == [str(i) for i in range(26, 41)]
+    assert second.cursor == "40"
+
+
 def test_http_json_source_with_injected_fetch(monkeypatch):
     monkeypatch.setattr(
         ev, "_http_get_json",
