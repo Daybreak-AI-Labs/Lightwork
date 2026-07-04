@@ -36,6 +36,7 @@ def execute(flow: Flow, *, agent_runner: AgentRunner, action_runner: ActionRunne
             approve_fn: Callable[[FlowNode, dict], str] | None = None,
             run_id: str | None = None,
             resume_run_id: str | None = None, decision: str | None = None,
+            inputs: dict | None = None,
             now: Callable[[], float] | None = None) -> store.FlowRun:
     """Run ``flow`` (or resume a paused run) with live executors, persisting the
     resulting :class:`~.store.FlowRun`. ``run_id`` pre-assigns a fresh run's id
@@ -56,7 +57,12 @@ def execute(flow: Flow, *, agent_runner: AgentRunner, action_runner: ActionRunne
                 f"run {resume_run_id!r} is not paused (status {prior.status!r})")
         run_id = prior.run_id
         owner = owner or prior.owner
-        resume = {"node_id": prior.cursor, "data": prior.data}
+        # Free-form human input merges into the run data on resume, so an approval
+        # can also COLLECT data (a corrected value, a note) -- not just yes/no.
+        resume_data = dict(prior.data)
+        if inputs:
+            resume_data.update(inputs)
+        resume = {"node_id": prior.cursor, "data": resume_data}
         if prior.status == STATUS_PAUSED_APPROVAL:
             resume["decision"] = decision or "approved"
     rid = run_id or store.new_run_id()

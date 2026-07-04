@@ -61,6 +61,9 @@
       <button class="btn btn--primary" type="button" id="fd-draft">✨ Draft</button>
     </div>
     <input class="input" id="fd-sample" placeholder='Sample input, e.g. {"issue":"…"}' aria-label="Sample input JSON" style="width:200px;" />
+    <label style="font-size:var(--text-sm);color:var(--muted);display:inline-flex;align-items:center;gap:4px;">
+      <input type="checkbox" id="fd-notify" /> Notify on approval/finish
+    </label>
     <button class="btn" type="button" id="fd-save">Save</button>
     <button class="btn btn--ghost" type="button" id="fd-run">▷ Test run</button>
     <span class="fd__msg" id="fd-msg" aria-live="polite"></span>

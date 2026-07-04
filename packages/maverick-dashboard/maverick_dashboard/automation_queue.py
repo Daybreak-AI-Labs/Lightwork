@@ -241,6 +241,29 @@ def _flow_runners(owner: str):
             execution.default_action_runner(w))
 
 
+def _notify_flow(flow, run) -> None:
+    """Best-effort push when a notify-enabled flow needs a human (paused on an
+    approval) or finishes (completed/failed). A no-op unless the flow opted in
+    AND notifications are configured; never raises into the worker."""
+    if flow is None or not getattr(flow, "notify", False):
+        return
+    from maverick.flow.runner import STATUS_COMPLETED, STATUS_FAILED, STATUS_PAUSED_APPROVAL
+    name = flow.name or flow.id
+    if run.status == STATUS_PAUSED_APPROVAL:
+        body, prio = f"“{name}” needs your approval: {run.prompt or 'review and resume'}", "high"
+    elif run.status == STATUS_COMPLETED:
+        body, prio = f"“{name}” finished.", "default"
+    elif run.status == STATUS_FAILED:
+        body, prio = f"“{name}” failed: {run.error or 'see the run'}", "high"
+    else:
+        return
+    try:
+        from maverick import notifications
+        notifications.notify(body, title="Lightwork flow", priority=prio)
+    except Exception:  # pragma: no cover -- notification is best-effort
+        log.debug("flow notify failed", exc_info=True)
+
+
 def _handle_flow_run(job=None) -> None:
     """Run a stored flow to its next pause/finish (durable one-shot job). An
     agent node becomes a real goal, an action node a tool call; the run state is
@@ -257,9 +280,10 @@ def _handle_flow_run(job=None) -> None:
             return
         owner = str(payload.get("owner") or "")
         agent_runner, action_runner = _flow_runners(owner)
-        execution.execute(flow, agent_runner=agent_runner, action_runner=action_runner,
-                          owner=owner, data=dict(payload.get("data") or {}),
-                          run_id=payload.get("run_id"))
+        run = execution.execute(flow, agent_runner=agent_runner, action_runner=action_runner,
+                                owner=owner, data=dict(payload.get("data") or {}),
+                                run_id=payload.get("run_id"))
+        _notify_flow(flow, run)
     except Exception:  # pragma: no cover -- fail-open
         log.exception("flow run failed for %s", flow_id)
 
@@ -280,9 +304,11 @@ def _handle_flow_resume(job=None) -> None:
             return
         owner = str(payload.get("owner") or "")
         agent_runner, action_runner = _flow_runners(owner)
-        execution.execute(flow, agent_runner=agent_runner, action_runner=action_runner,
-                          owner=owner, resume_run_id=run_id,
-                          decision=str(payload.get("decision") or "approved"))
+        run = execution.execute(flow, agent_runner=agent_runner, action_runner=action_runner,
+                                owner=owner, resume_run_id=run_id,
+                                decision=str(payload.get("decision") or "approved"),
+                                inputs=dict(payload.get("inputs") or {}))
+        _notify_flow(flow, run)
     except execution.FlowNotResumable:
         return  # already resumed/finished -- benign
     except Exception:  # pragma: no cover -- fail-open

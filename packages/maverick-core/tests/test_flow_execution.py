@@ -122,6 +122,26 @@ class TestExecution:
         assert resumed.status == "completed" and resumed.data["done"] == "ran"
         assert resumed.run_id == paused.run_id          # same run, resumed in place
 
+    def test_resume_merges_free_form_human_inputs(self, tmp_path, monkeypatch):
+        # An approval can also COLLECT data: inputs given at resume merge into the
+        # run data, so a downstream node sees the human's correction.
+        _patch_home(tmp_path, monkeypatch)
+        f = Flow(id="fi", name="f", start="a", nodes={
+            "a": FlowNode(id="a", kind="approval", prompt="fix?", next="b"),
+            "b": FlowNode(id="b", kind=NODE_AGENT, brief="use {{corrected}}", output="r")})
+        got = {}
+
+        def ag(brief, d):
+            got["brief"] = brief
+            return ("done", 1.0)
+        paused = execution.execute(f, agent_runner=ag, action_runner=lambda *a: ("", None), data={})
+        assert paused.status == "paused_approval"
+        resumed = execution.execute(f, agent_runner=ag, action_runner=lambda *a: ("", None),
+                                    resume_run_id=paused.run_id, decision="approved",
+                                    inputs={"corrected": "the fixed value"})
+        assert got["brief"] == "use the fixed value"        # human input threaded in
+        assert resumed.data["corrected"] == "the fixed value"
+
     def test_resume_of_completed_run_is_rejected(self, tmp_path, monkeypatch):
         # Guard against re-running a finished flow (duplicate side effects) or
         # running a node a human rejected.

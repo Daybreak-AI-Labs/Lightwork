@@ -1050,7 +1050,7 @@ async def resume_flow_run_endpoint(request: Request, run_id: str,
     from maverick_dashboard import automation_queue as aq
     aq.queue().enqueue(aq.FLOW_RESUME_KIND, {
         "flow_id": run.flow_id, "run_id": run_id, "decision": payload.decision,
-        "owner": run.owner})
+        "inputs": dict(payload.inputs or {}), "owner": run.owner})
     return {"run_id": run_id, "status": "resuming", "decision": payload.decision}
 
 

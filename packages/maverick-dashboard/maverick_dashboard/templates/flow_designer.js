@@ -312,10 +312,12 @@
     return bad;
   }
   function toApiFlow() {
+    var notifyEl = document.getElementById('fd-notify');
     return {
       id: (idInput.value || flow.id || '').trim(),
       name: nameInput.value || flow.name || 'Untitled flow',
       start: flow.start,
+      notify: !!(notifyEl && notifyEl.checked),
       nodes: flow.nodes.map(function (n) {
         var o = { id: n.id, kind: n.kind };
         ['next', 'tool', 'brief', 'condition', 'if_true', 'if_false', 'items', 'var', 'prompt', 'flow_ref', 'on_error', 'output', 'label'].forEach(function (k) {
@@ -336,6 +338,7 @@
     runState = {}; runCursor = null;
     var lg = document.getElementById('fd-legend'); if (lg) lg.classList.remove('on');
     flow = { id: f.id || '', name: f.name || '', start: f.start || '', nodes: [] };
+    var notifyEl = document.getElementById('fd-notify'); if (notifyEl) notifyEl.checked = !!f.notify;
     (f.nodes || []).forEach(function (nd, i) {
       var n = Object.assign({ params: {}, brief: '', tool: '', condition: '', if_true: null, if_false: null,
         items: '', var: 'item', limit: 0, prompt: '', seconds: 0, flow_ref: '', retries: 0, on_error: null,

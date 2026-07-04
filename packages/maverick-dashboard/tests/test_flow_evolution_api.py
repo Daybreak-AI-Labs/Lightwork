@@ -159,6 +159,31 @@ def test_evolve_pass_is_a_noop_when_disabled(monkeypatch, tmp_path):
     assert store.load_flow("f").nodes["a"].kind == "action"         # left alone
 
 
+def test_notify_flow_pushes_when_enabled(monkeypatch, tmp_path):
+    _isolate(monkeypatch, tmp_path)
+    from maverick.flow import Flow
+    from maverick.flow.store import FlowRun
+    from maverick_dashboard import automation_queue as aq
+    sent = []
+    monkeypatch.setattr("maverick.notifications.notify",
+                        lambda body, **k: (sent.append((body, k.get("priority"))), 1)[1])
+    flow = Flow(id="f", name="Payout", start="a", nodes={}, notify=True)
+    aq._notify_flow(flow, FlowRun(run_id="r", flow_id="f", status="paused_approval", prompt="ok?"))
+    assert sent and "Payout" in sent[0][0] and sent[0][1] == "high"
+
+
+def test_notify_flow_silent_when_disabled(monkeypatch, tmp_path):
+    _isolate(monkeypatch, tmp_path)
+    from maverick.flow import Flow
+    from maverick.flow.store import FlowRun
+    from maverick_dashboard import automation_queue as aq
+    sent = []
+    monkeypatch.setattr("maverick.notifications.notify", lambda body, **k: sent.append(body) or 1)
+    aq._notify_flow(Flow(id="f", name="X", start="a", nodes={}, notify=False),
+                    FlowRun(run_id="r", flow_id="f", status="completed"))
+    assert sent == []                                       # opt-in: no notify by default
+
+
 def test_tools_catalog_lists_connectors_with_metadata(monkeypatch, tmp_path):
     _isolate(monkeypatch, tmp_path)
     r = _client().get("/api/v1/flows/tools")

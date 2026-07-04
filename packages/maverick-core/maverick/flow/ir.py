@@ -140,6 +140,7 @@ class Flow:
     start: str
     nodes: dict[str, FlowNode] = field(default_factory=dict)
     version: int = 1
+    notify: bool = False             # push a notification on approval-pause / finish
 
     def node(self, node_id: str | None) -> FlowNode | None:
         return self.nodes.get(node_id) if node_id else None
@@ -151,7 +152,7 @@ class Flow:
     def to_dict(self) -> dict:
         return {
             "id": self.id, "name": self.name, "start": self.start,
-            "version": self.version,
+            "version": self.version, "notify": self.notify,
             "nodes": [n.to_dict() for n in self.nodes.values()],
         }
 
@@ -163,6 +164,7 @@ class Flow:
             start=str(d.get("start", "")),
             nodes={n.id: n for n in nodes},
             version=int(d.get("version", 1) or 1),
+            notify=bool(d.get("notify", False)),
         )
 
     def validate(self) -> list[str]:

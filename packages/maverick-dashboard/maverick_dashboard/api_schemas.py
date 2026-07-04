@@ -275,8 +275,11 @@ class FlowRunIn(BaseModel):
 
 
 class FlowResumeIn(BaseModel):
-    """Resume a paused flow run: the human verdict on the approval node."""
+    """Resume a paused flow run: the human verdict on the approval node, plus any
+    free-form inputs to merge into the run data (so an approval can also collect
+    a corrected value or a note, not just yes/no)."""
     decision: str = Field(default="approved", pattern="^(approved|rejected)$")
+    inputs: dict = Field(default_factory=dict)
 
 
 class FlowDraftIn(BaseModel):
