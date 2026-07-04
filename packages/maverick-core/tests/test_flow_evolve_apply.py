@@ -4,7 +4,6 @@ the change so an improvement can be proven rather than asserted."""
 from __future__ import annotations
 
 import pytest
-
 from maverick.flow import Flow, FlowNode, evolve
 
 
