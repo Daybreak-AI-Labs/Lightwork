@@ -72,6 +72,7 @@ async def best_of_n(
     *,
     n: int = 3,
     accept_early: bool = True,
+    select: Callable[[list[Candidate]], Candidate] | None = None,
 ) -> BestOfNResult:
     """Sample ``n`` candidates, score each with ``verify``, return the best.
 
@@ -84,6 +85,13 @@ async def best_of_n(
     >= any already seen (saves compute on easy tasks). Empty/failed generations
     are skipped; if all fail, raises ValueError (the caller falls back to its
     normal single-pass path).
+
+    ``select``: an optional hook that chooses the winner from the scored
+    candidates, overriding the default ``max(accepts, confidence)``. This is the
+    seam where learned test-time adaptation plugs in --
+    :func:`maverick.jit_rl.make_best_of_n_selector` factors a candidate's
+    learned advantage into the choice (and reduces to the default with a cold
+    store). ``None`` keeps the pure verifier-guided selection.
     """
     n = max(1, int(n))
     scored: list[Candidate] = []
@@ -108,7 +116,14 @@ async def best_of_n(
 
     if not scored:
         raise ValueError("best_of_n: no usable candidates generated")
-    best = max(scored, key=lambda c: (c.accepts, c.confidence))
+    if select is not None:
+        try:
+            best = select(scored)
+        except Exception as e:  # pragma: no cover -- a bad hook must not lose the answer
+            log.debug("best_of_n: select hook failed: %s; using default", e)
+            best = max(scored, key=lambda c: (c.accepts, c.confidence))
+    else:
+        best = max(scored, key=lambda c: (c.accepts, c.confidence))
     return BestOfNResult(
         best=best.text, best_confidence=best.confidence, candidates=scored,
     )

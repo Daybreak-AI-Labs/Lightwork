@@ -1186,21 +1186,27 @@ def get_self_improvement() -> dict:
 def get_reasoning_reward() -> dict:
     """Return the ``[reasoning_reward]`` section (structured, auditable rewards).
 
-    OFF by default: ``enable`` swaps the scalar verifier verdict for the
-    multi-faceted rubric reward (maverick.reasoning_reward). The scalar verifier
-    stays the default judge otherwise."""
+    ON by default: the verifier judges FINAL answers with the multi-faceted
+    rubric reward (maverick.reasoning_reward, Agent-RRM) -- per-dimension scores
+    with a safety veto, attached to the verdict for the learning audit -- and
+    falls back to the scalar verdict for any non-rubric reply. Set
+    ``enable = false`` (or MAVERICK_REASONING_REWARD=0) to force the scalar
+    verifier."""
     cfg = load_config().get("reasoning_reward", {})
-    return {"enable": bool(cfg.get("enable", False))}
+    return {"enable": bool(cfg.get("enable", True))}
 
 
 def get_jit_rl() -> dict:
     """Return the ``[jit_rl]`` section (gradient-free test-time adaptation).
 
-    OFF by default. ``k`` is the k-NN neighbourhood size and ``beta`` the
-    steering gain on the estimated advantage (maverick.jit_rl);
-    ``max_experiences`` bounds the (state, action, return) buffer. Defaults
+    ON by default, but a no-op with a cold store: it records verifier-guided
+    best-of-N outcomes and factors learned advantage into candidate selection
+    (maverick.jit_rl), reducing to the pure verifier choice until experience
+    accumulates. ``k`` is the k-NN neighbourhood size and ``beta`` the steering
+    gain; ``max_experiences`` bounds the (state, action, return) buffer. Defaults
     mirror ``jit_rl.DEFAULT_K`` / ``DEFAULT_BETA`` / ``DEFAULT_MAX_EXPERIENCES``
-    (kept literal here to avoid a config->jit_rl import cycle)."""
+    (kept literal here to avoid a config->jit_rl import cycle). Set
+    ``enable = false`` (or MAVERICK_JIT_RL=0) to disable."""
     cfg = load_config().get("jit_rl", {})
 
     def _int(key: str, default: int) -> int:
@@ -1214,7 +1220,7 @@ def get_jit_rl() -> dict:
     except (TypeError, ValueError):
         beta = 1.0
     return {
-        "enable": bool(cfg.get("enable", False)),
+        "enable": bool(cfg.get("enable", True)),
         "k": _int("k", 8),
         "beta": beta,
         "max_experiences": _int("max_experiences", 5000),

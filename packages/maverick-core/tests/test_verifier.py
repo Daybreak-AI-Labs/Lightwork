@@ -158,6 +158,71 @@ class TestAgentVerifierIntegration:
         assert len(fake_llm.calls) == 4
 
 
+class TestStructuredVerify:
+    """The rubric judge (reasoning_reward) wired into verify_final, on by default."""
+
+    @pytest.mark.asyncio
+    async def test_rubric_reply_drives_verdict(self, fake_llm, make_llm_response):
+        from maverick.budget import Budget
+        from maverick.verifier import verify_proposal_structured
+        fake_llm.scripted = [make_llm_response(text=(
+            '{"reasoning": "checked", "dimensions": ['
+            '{"name": "correctness", "score": 0.9, "critique": "ok"},'
+            '{"name": "completeness", "score": 0.9, "critique": ""},'
+            '{"name": "grounding", "score": 0.9, "critique": ""},'
+            '{"name": "safety", "score": 0.9, "critique": ""}],'
+            '"critique": "solid", "score": 0.9, "confidence": 0.8}'))]
+        v = await verify_proposal_structured("brief", "a real answer", fake_llm, Budget())
+        assert v.accepts is True
+        assert v.confidence == 0.9
+        assert v.reward_audit is not None and v.reward_audit["dimensions"]
+
+    @pytest.mark.asyncio
+    async def test_safety_veto_rejects_high_holistic(self, fake_llm, make_llm_response):
+        from maverick.budget import Budget
+        from maverick.verifier import verify_proposal_structured
+        # High holistic score but safety below its veto floor -> reject.
+        fake_llm.scripted = [make_llm_response(text=(
+            '{"dimensions": ['
+            '{"name": "correctness", "score": 1.0},'
+            '{"name": "completeness", "score": 1.0},'
+            '{"name": "grounding", "score": 1.0},'
+            '{"name": "safety", "score": 0.1, "critique": "unsafe"}],'
+            '"critique": "unsafe", "score": 0.95, "confidence": 0.9}'))]
+        v = await verify_proposal_structured("brief", "answer", fake_llm, Budget())
+        assert v.accepts is False
+        assert any("safety" in i for i in v.issues)
+
+    @pytest.mark.asyncio
+    async def test_non_rubric_reply_falls_back_to_scalar(self, fake_llm, make_llm_response):
+        # A scalar verdict reply (no dimensions) must behave exactly like the
+        # scalar verifier -- this is what keeps on-by-default backward-compatible.
+        from maverick.budget import Budget
+        from maverick.verifier import verify_proposal_structured
+        fake_llm.scripted = [make_llm_response(
+            text='{"confidence": 0.95, "accepts": true, "critique": "ok", "issues": []}')]
+        v = await verify_proposal_structured("brief", "answer", fake_llm, Budget())
+        assert v.accepts is True
+        assert v.confidence == 0.95
+        assert v.reward_audit is None  # scalar path, no rubric attached
+
+    @pytest.mark.asyncio
+    async def test_verify_final_routes_to_structured_when_enabled(
+        self, fake_llm, make_llm_response, monkeypatch,
+    ):
+        from maverick import reasoning_reward
+        from maverick.budget import Budget
+        from maverick.verifier import verify_final
+        monkeypatch.setattr(reasoning_reward, "enabled", lambda: True)
+        fake_llm.scripted = [make_llm_response(text=(
+            '{"dimensions": [{"name": "safety", "score": 0.1}], '
+            '"score": 0.9, "confidence": 0.8}'))]
+        v = await verify_final("brief", "answer", fake_llm, Budget())
+        # Routed to the rubric judge: the safety veto rejected despite score 0.9.
+        assert v.accepts is False
+        assert v.reward_audit is not None
+
+
 @pytest.mark.asyncio
 async def test_ensemble_reraises_budget_exceeded_not_swallowed():
     # A BudgetExceeded from one panel member must PROPAGATE out of the ensemble

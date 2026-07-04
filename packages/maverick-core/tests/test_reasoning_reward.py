@@ -185,15 +185,16 @@ def test_to_audit_dict_is_stable_and_complete():
     assert json.loads(json.dumps(d)) == d
 
 
-def test_enabled_off_by_default(monkeypatch):
+def test_enabled_on_by_default(monkeypatch):
     monkeypatch.delenv("MAVERICK_REASONING_REWARD", raising=False)
-    # With no env override, the default (no [reasoning_reward] enable) is off.
-    assert enabled() in (False,)
+    # The rubric judge is the default; no env override -> on.
+    assert enabled() is True
 
 
 def test_enabled_env_override(monkeypatch):
     monkeypatch.setenv("MAVERICK_REASONING_REWARD", "1")
     assert enabled() is True
+    # An explicit opt-out forces the scalar verifier even though the default is on.
     monkeypatch.setenv("MAVERICK_REASONING_REWARD", "0")
     assert enabled() is False
 

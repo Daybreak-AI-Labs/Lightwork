@@ -73,6 +73,11 @@ class VerifierVerdict:
     critique: str
     issues: list[str] = field(default_factory=list)
     raw: str = ""
+    # When the structured rubric judge (maverick.reasoning_reward) produced this
+    # verdict, its full to_audit_dict() -- the per-dimension rubric, reasoning,
+    # and veto -- so a caller can record the legible reward in the learning
+    # audit. None for the scalar verifier path.
+    reward_audit: dict | None = None
 
     @classmethod
     def reject(cls, reason: str) -> VerifierVerdict:
@@ -402,6 +407,98 @@ def _ensemble_enabled() -> bool:
         return False
 
 
+def _structured_verify_enabled() -> bool:
+    """Whether the structured rubric judge (maverick.reasoning_reward) is on."""
+    try:
+        from . import reasoning_reward
+        return bool(reasoning_reward.enabled())
+    except Exception:  # pragma: no cover -- never let this gate a run
+        return False
+
+
+def _verdict_from_reward(reward: object) -> VerifierVerdict:
+    """Map a structured ``ReasoningReward`` onto the ``VerifierVerdict`` contract.
+
+    ``confidence`` = holistic score; ``accepts`` = the reward's own accept
+    decision (holistic bar AND no vetoed dimension); ``issues`` surfaces the
+    failing/vetoed facets; ``reward_audit`` carries the full rubric for the
+    learning audit.
+    """
+    dims = getattr(reward, "dimensions", ()) or ()
+    issues: list[str] = []
+    for d in dims:
+        if getattr(d, "vetoes", False) or getattr(d, "score", 1.0) < 0.5:
+            crit = getattr(d, "critique", "") or ""
+            issues.append(f"{d.name}: {crit}" if crit else str(getattr(d, "name", "")))
+    return VerifierVerdict(
+        confidence=float(getattr(reward, "score", 0.0)),
+        accepts=bool(reward.accepts()),
+        critique=str(getattr(reward, "critique", "") or ""),
+        issues=[i for i in issues if i],
+        raw=str(getattr(reward, "raw", "") or ""),
+        reward_audit=reward.to_audit_dict(),
+    )
+
+
+async def verify_proposal_structured(
+    brief: str,
+    proposal: str,
+    llm: LLM,
+    budget: Budget | None = None,
+    *,
+    max_tokens: int = 1024,
+    proposer_model: str | None = None,
+) -> VerifierVerdict:
+    """Verify with the structured rubric judge (Agent-RRM, reasoning_reward).
+
+    Sends ``REASONING_REWARD_SYSTEM`` and parses a per-dimension rubric reward:
+    a single failing dimension (e.g. ``safety`` below its veto floor) rejects
+    even a high holistic score, and the full rubric is attached to the verdict
+    for the learning audit. Any reply that is NOT a compliant rubric (no
+    dimensions parsed) falls back to the scalar verifier parse, so this is a
+    safe superset of :func:`verify_proposal` with the same VerifierVerdict
+    contract and the same cross-family / fail-closed behaviour.
+    """
+    if not proposal or not proposal.strip():
+        return VerifierVerdict.reject("proposal is empty")
+
+    from . import reasoning_reward
+
+    model = model_for_role("verifier")
+    if proposer_model and _same_family(proposer_model, model):
+        cross = _cross_family_fallback(model)
+        if cross is not None:
+            model = cross
+        else:
+            _warn_same_family_verifier(model)
+
+    user_msg = (
+        f"GOAL BRIEF:\n{brief}\n\n"
+        f"PROPOSED FINAL ANSWER:\n{proposal}\n\n"
+        "Return the rubric JSON."
+    )
+    try:
+        resp = await llm.complete_async(
+            system=reasoning_reward.REASONING_REWARD_SYSTEM,
+            messages=[{"role": "user", "content": user_msg}],
+            tools=None,
+            budget=budget,
+            max_tokens=max_tokens,
+            model=model,
+        )
+    except BudgetExceeded:
+        raise
+    except Exception as e:  # pragma: no cover -- network errors
+        log.warning("structured verifier LLM call failed: %s; rejecting (fail-closed)", e)
+        return VerifierVerdict.reject(f"verifier call failed: {e}")
+
+    reward = reasoning_reward.parse_structured(resp.text)
+    if getattr(reward, "dimensions", ()):  # a compliant rubric reply
+        return _verdict_from_reward(reward)
+    # Non-rubric reply (or garbage): behave exactly like the scalar verifier.
+    return _parse(resp.text)
+
+
 async def verify_final(
     brief: str,
     proposal: str,
@@ -413,14 +510,19 @@ async def verify_final(
 ) -> VerifierVerdict:
     """Verify a FINAL answer using whichever verifier the operator chose.
 
-    Single dispatch point for the live agent loop: returns the adversarial
-    cross-family ensemble when opted in (``_ensemble_enabled``) OR when the
-    autonomy gate escalates a high-disagreement run (``force_ensemble``), else
-    the standard single cross-family verifier. Same signature + return type as
-    ``verify_proposal`` so the call site is verifier-agnostic.
+    Single dispatch point for the live agent loop. Precedence: the adversarial
+    cross-family ensemble when opted in (``_ensemble_enabled``) or escalated
+    (``force_ensemble``); else the structured rubric judge when enabled
+    (``reasoning_reward``, the default); else the scalar single cross-family
+    verifier. Same signature + return type either way, so the call site is
+    verifier-agnostic.
     """
     if force_ensemble or _ensemble_enabled():
         return await verify_proposal_ensemble(
+            brief, proposal, llm, budget, proposer_model=proposer_model,
+        )
+    if _structured_verify_enabled():
+        return await verify_proposal_structured(
             brief, proposal, llm, budget, proposer_model=proposer_model,
         )
     return await verify_proposal(

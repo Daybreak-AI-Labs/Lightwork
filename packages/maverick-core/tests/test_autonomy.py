@@ -303,9 +303,10 @@ class TestVerifyFinalRouting:
         assert called["single"] is False
 
     @pytest.mark.asyncio
-    async def test_default_routes_to_single(self, monkeypatch):
+    async def test_default_routes_to_structured(self, monkeypatch):
+        # The rubric judge is the default now; without ensemble it routes there.
         import maverick.verifier as v
-        called = {"ensemble": False, "single": False}
+        called = {"ensemble": False, "single": False, "structured": False}
 
         async def _ens(*a, **k):
             called["ensemble"] = True
@@ -315,9 +316,42 @@ class TestVerifyFinalRouting:
             called["single"] = True
             return v.VerifierVerdict.accept_unconditionally()
 
+        async def _structured(*a, **k):
+            called["structured"] = True
+            return v.VerifierVerdict.accept_unconditionally()
+
         monkeypatch.setattr(v, "verify_proposal_ensemble", _ens)
         monkeypatch.setattr(v, "verify_proposal", _single)
+        monkeypatch.setattr(v, "verify_proposal_structured", _structured)
         monkeypatch.setattr(v, "_ensemble_enabled", lambda: False)
+        monkeypatch.setattr(v, "_structured_verify_enabled", lambda: True)
+        await v.verify_final("b", "p", object(), None, force_ensemble=False)
+        assert called["structured"] is True
+        assert called["single"] is False and called["ensemble"] is False
+
+    @pytest.mark.asyncio
+    async def test_routes_to_scalar_single_when_structured_disabled(self, monkeypatch):
+        # Opting out of the rubric judge falls back to the scalar single verifier.
+        import maverick.verifier as v
+        called = {"ensemble": False, "single": False, "structured": False}
+
+        async def _ens(*a, **k):
+            called["ensemble"] = True
+            return v.VerifierVerdict.accept_unconditionally()
+
+        async def _single(*a, **k):
+            called["single"] = True
+            return v.VerifierVerdict.accept_unconditionally()
+
+        async def _structured(*a, **k):
+            called["structured"] = True
+            return v.VerifierVerdict.accept_unconditionally()
+
+        monkeypatch.setattr(v, "verify_proposal_ensemble", _ens)
+        monkeypatch.setattr(v, "verify_proposal", _single)
+        monkeypatch.setattr(v, "verify_proposal_structured", _structured)
+        monkeypatch.setattr(v, "_ensemble_enabled", lambda: False)
+        monkeypatch.setattr(v, "_structured_verify_enabled", lambda: False)
         await v.verify_final("b", "p", object(), None, force_ensemble=False)
         assert called["single"] is True
-        assert called["ensemble"] is False
+        assert called["ensemble"] is False and called["structured"] is False
