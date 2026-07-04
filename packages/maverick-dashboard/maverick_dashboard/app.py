@@ -4747,6 +4747,15 @@ async def workflows_index_page(request: Request) -> HTMLResponse:
     )
 
 
+@app.get("/flows/designer", response_class=HTMLResponse)
+@app.get("/flows/designer/{flow_id}", response_class=HTMLResponse)
+async def flow_designer_page(request: Request, flow_id: str = "") -> HTMLResponse:
+    """The visual flow designer -- a canvas node editor + the natural-language
+    drafter. Talks to the /api/v1/flows endpoints; the flow-engine gate is
+    enforced there, so the page renders even when flows are off (empty canvas)."""
+    return templates.TemplateResponse(request, "flow_designer.html", {"flow_id": flow_id})
+
+
 @app.get("/automations", response_class=HTMLResponse)
 async def automations_page(request: Request) -> HTMLResponse:
     """One place to see and manage every automation: cron schedules and inbound

@@ -45,12 +45,14 @@ from .api_schemas import (
     CatalogInstallIn,
     ChildIn,
     ComposeIn,
+    DeliverableEditIn,
     EventTriggerIn,
     EventTriggerOut,
     FactIn,
     FeedbackIn,
     FleetCreateIn,
     FleetRunIn,
+    FlowDraftIn,
     FlowResumeIn,
     FlowRunIn,
     FlowSaveIn,
@@ -938,6 +940,34 @@ async def save_flow_endpoint(request: Request, payload: FlowSaveIn) -> dict:
         raise HTTPException(status_code=400, detail="invalid flow: " + "; ".join(errs[:5]))
     store.save_flow(flow)
     return {"id": flow.id, "nodes": len(flow.nodes)}
+
+
+# Common connector tools to bias the NL drafter toward real action nodes; the
+# operator edits the result in the designer, and unknown tools fail gracefully.
+_FLOW_DRAFT_TOOLS = (
+    "slack_bot", "discord_bot", "teams_tool", "email_tool", "gmail_tool",
+    "twilio_tool", "github_issues", "github_actions", "jira", "linear",
+    "gitlab_issues", "salesforce_tool", "hubspot_tool", "stripe_tool",
+    "shopify_tool", "servicenow_tool", "zendesk_tool", "notion", "confluence_tool",
+    "asana_tool", "trello_tool", "clickup_tool", "airtable_tool", "calendar_tool",
+    "gdrive_tool", "dropbox_tool", "s3_tool", "http_fetch", "sql_query",
+)
+
+
+@router.post("/flows/draft")
+async def draft_flow_endpoint(request: Request, payload: FlowDraftIn) -> dict:
+    """Draft a first-pass flow from a plain-English description (the designer's
+    ✨ button). Returns the flow graph (not saved) + any notes; falls back to a
+    single agent step if the model can't produce a full graph."""
+    require_permission(request, "operate")
+    _require_flows()
+    from maverick_dashboard._shared import require_provider_or_400
+    require_provider_or_400()
+    from maverick.flow.draft import draft_flow
+    flow, notes = await run_in_threadpool(
+        lambda: draft_flow(payload.description, tools=_FLOW_DRAFT_TOOLS,
+                           flow_id=payload.flow_id))
+    return {"flow": flow.to_dict(), "notes": notes}
 
 
 @router.get("/flows/runs")
@@ -1837,6 +1867,36 @@ async def post_feedback(request: Request, goal_id: int, payload: FeedbackIn) -> 
     return {"feedback": row}
 
 
+@router.post("/goals/{goal_id}/deliverable/edit")
+async def edit_deliverable(request: Request, goal_id: int,
+                           payload: DeliverableEditIn) -> dict:
+    """Save a human's revised deliverable and ground the edit as a learning signal.
+
+    How much the human changed the agent's draft is graded ground truth: a
+    verbatim keep is a strong positive (~1.0), a heavy rewrite a graded negative.
+    The similarity becomes the grounded outcome (kind ``edit``), and the revised
+    text replaces the goal's result (the human's version is now canonical).
+    Best-effort grounding, gated on ``[consequence]``."""
+    require_permission(request, "operate")
+    w = _world()
+    g = w.get_goal(goal_id)
+    if g is None:
+        raise HTTPException(status_code=404, detail="no such goal")
+    assert_goal_access(request, g)
+    import difflib
+    original = g.result or ""
+    revised = payload.text or ""
+    w.set_goal_status(goal_id, g.status, result=revised)   # the edit is the deliverable now
+    if not original:
+        # Nothing to grade against: the agent produced no draft to keep or
+        # rewrite. Grounding this as 0.0 would punish it for text it never wrote,
+        # so we save the human's text but ground nothing.
+        return {"similarity": None}
+    similarity = difflib.SequenceMatcher(None, original, revised).ratio()
+    _ground_outcome(w, goal_id, similarity, kind="edit")
+    return {"similarity": round(similarity, 3)}
+
+
 def _handoff_approved_deliverable(g, decided_by: str) -> None:
     """Push an approved deliverable to the configured system-of-record endpoint.
 
@@ -2331,7 +2391,8 @@ def _require_event_triggers() -> None:
 
 def _event_trigger_out(rec: dict) -> EventTriggerOut:
     return EventTriggerOut(
-        name=rec["name"], template=rec["template"], source=rec["source"],
+        name=rec["name"], template=rec["template"], flow=rec.get("flow") or "",
+        source=rec["source"],
         config=rec.get("config") or {}, params=rec.get("params") or {},
         cursor=rec.get("cursor") or "",
         interval_seconds=int(rec.get("interval_seconds") or 0),
@@ -2380,32 +2441,47 @@ async def create_event_trigger(request: Request, payload: EventTriggerIn) -> Eve
         get_source(payload.source)   # a registered source?
     except EventSourceError as e:
         raise HTTPException(status_code=400, detail=str(e)) from e
-    # The template must EXIST, but -- unlike a webhook trigger -- we don't require
-    # it to render with the current defaults: each polled event fills the declared
-    # params at fire time, so a required param the event supplies is expected to
-    # be blank now.
-    from maverick.templates import load_template
-    try:
-        load_template(payload.template)
-    except FileNotFoundError as e:
-        raise HTTPException(
-            status_code=404, detail=f"template not found: {payload.template!r}") from e
-    except ValueError as e:
-        raise HTTPException(status_code=400, detail=str(e)) from e
+    # Exactly one target: a template (rendered into a goal) OR a flow (which runs
+    # the graph with the event as its data).
+    template, flow = (payload.template or "").strip(), (payload.flow or "").strip()
+    if bool(template) == bool(flow):
+        raise HTTPException(status_code=400,
+                            detail="set exactly one of 'template' or 'flow'")
+    if flow:
+        from maverick import flow as flow_mod
+        from maverick.flow import store as flow_store
+        if not flow_mod.enabled():
+            raise HTTPException(status_code=403,
+                                detail="the flow engine is off ([flows] / MAVERICK_FLOWS)")
+        if flow_store.load_flow(flow) is None:
+            raise HTTPException(status_code=404, detail=f"flow not found: {flow!r}")
+    else:
+        # The template must EXIST, but -- unlike a webhook trigger -- we don't
+        # require it to render with the current defaults: each polled event fills
+        # the declared params at fire time.
+        from maverick.templates import load_template
+        try:
+            load_template(template)
+        except FileNotFoundError as e:
+            raise HTTPException(
+                status_code=404, detail=f"template not found: {template!r}") from e
+        except ValueError as e:
+            raise HTTPException(status_code=400, detail=str(e)) from e
     from maverick_dashboard import event_triggers_store
+    default_name = payload.name or template or flow
     owner_filter = goal_owner_filter(request)
     if owner_filter is not None:
         existing = event_triggers_store.get_trigger(
-            event_triggers_store.slugify(payload.name or payload.template))
+            event_triggers_store.slugify(default_name))
         if existing is not None and existing.get("owner", "") != owner_filter:
             raise HTTPException(
                 status_code=409, detail="an event trigger with that name already exists")
     try:
         from maverick.paths import current_tenant_id
         rec = event_triggers_store.set_trigger(
-            payload.name or payload.template, payload.template, payload.source,
+            default_name, template, payload.source,
             config=payload.config or {}, params=payload.params or {},
-            owner=caller_principal(request) or "",
+            owner=caller_principal(request) or "", flow=flow,
             interval_seconds=payload.interval_seconds,
             tenant=current_tenant_id() or "")   # bind OAuth vault reads to this tenant
     except ValueError as e:
@@ -2451,8 +2527,15 @@ async def poll_event_triggers(request: Request, bg: BackgroundTasks, name: str =
         else:
             bg.add_task(run_goal_in_thread, goal_id)
 
+    def _fire_flow(flow_id: str, data: dict, owner: str) -> str:
+        # Flow targets go through the durable queue (same as the background tick),
+        # so a flow run gets retry + a trackable run id even on the on-demand path.
+        from maverick_dashboard import automation_queue
+        return automation_queue.enqueue_flow_run(flow_id, data, owner)
+
     results = await run_in_threadpool(
-        event_poll.poll_and_fire, _world(), triggers, principal=principal, fire=_fire)
+        lambda: event_poll.poll_and_fire(_world(), triggers, principal=principal,
+                                         fire=_fire, fire_flow=_fire_flow))
     return {"polled": len(results), "triggers": results}
 
 

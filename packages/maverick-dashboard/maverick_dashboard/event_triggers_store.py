@@ -76,6 +76,7 @@ def list_triggers() -> list[dict]:
         out.append({
             "name": name,
             "template": str(t.get("template") or ""),
+            "flow": str(t.get("flow") or ""),
             "source": str(t.get("source") or ""),
             "config": _decode_obj(t.get("config")),
             "params": {str(k): str(v) for k, v in _decode_obj(t.get("params")).items()},
@@ -105,6 +106,7 @@ def _dump(triggers: list[dict]) -> str:
     for t in sorted(triggers, key=lambda x: x["name"]):
         lines.append(f"[trigger.{t['name']}]")
         lines.append(f"template = {json.dumps(str(t['template']))}")
+        lines.append(f"flow = {json.dumps(str(t.get('flow') or ''))}")
         lines.append(f"source = {json.dumps(str(t.get('source') or ''))}")
         lines.append(f"config = {json.dumps(json.dumps(t.get('config') or {}, sort_keys=True))}")
         lines.append(f"params = {json.dumps(json.dumps(t.get('params') or {}, sort_keys=True))}")
@@ -124,13 +126,14 @@ def _write(triggers: list[dict]) -> None:
 
 def set_trigger(name: str, template: str, source: str, *, config: dict | None = None,
                 params: dict | None = None, owner: str = "", cursor: str = "",
-                interval_seconds: int = 0, tenant: str = "") -> dict:
+                interval_seconds: int = 0, tenant: str = "", flow: str = "") -> dict:
     """Create or replace an event trigger (by slugified name). Raises ValueError
     on an un-sluggable name. Preserves the existing cursor on replace unless one
     is passed, so re-saving a trigger doesn't replay its whole backlog.
     ``interval_seconds`` is the per-trigger poll cadence (0 = the scheduler
     default). ``tenant`` binds the trigger to the tenant that created it, so a
-    polled OAuth source reads that tenant's vault (never a cross-tenant token)."""
+    polled OAuth source reads that tenant's vault (never a cross-tenant token).
+    ``flow`` targets a flow instead of a ``template`` (the two are exclusive)."""
     slug = slugify(name)
     if not _NAME_RE.match(slug):
         raise ValueError("trigger name must contain a letter or digit (a-z, 0-9, -)")
@@ -141,6 +144,7 @@ def set_trigger(name: str, template: str, source: str, *, config: dict | None = 
         rec = {
             "name": slug,
             "template": str(template),
+            "flow": str(flow),
             "source": str(source),
             "config": dict(config or {}),
             "params": {str(k): str(v) for k, v in (params or {}).items()},

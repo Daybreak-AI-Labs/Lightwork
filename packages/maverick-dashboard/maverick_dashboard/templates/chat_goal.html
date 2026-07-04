@@ -207,8 +207,18 @@
                   data-rating="up" aria-label="Yes, useful">👍</button>
           <button id="feedback-down" class="btn btn--ghost" type="button"
                   data-rating="down" aria-label="No, not useful">👎</button>
+          <button id="edit-toggle" class="btn btn--ghost" type="button">✎ Edit &amp; save</button>
           <span id="feedback-msg" role="status" aria-live="polite" class="muted"
                 style="min-height: 1em;"></span>
+        </div>
+        <div id="edit-box" style="display:none; margin-top: var(--space-3);">
+          <textarea id="edit-text" class="input" rows="8" aria-label="Edit the deliverable"
+                    style="width:100%;">{{ goal.result or '' }}</textarea>
+          <div style="display:flex; gap:var(--space-2); margin-top: var(--space-2);">
+            <button id="edit-save" class="btn btn--primary" type="button">Save my version</button>
+            <span id="edit-msg" role="status" aria-live="polite" class="muted"></span>
+          </div>
+          <p class="muted" style="font-size: var(--text-sm); margin-top: var(--space-2);">Your revisions train your workforce — how much you change tells it how close it got.</p>
         </div>
       {% endif %}
     </div>
@@ -648,6 +658,38 @@
       }
       if (up) up.addEventListener('click', function () { submit('up'); });
       if (down) down.addEventListener('click', function () { submit('down'); });
+    })();
+  </script>
+
+  <script>
+    // Edit & save the deliverable: the human's revision replaces the result and
+    // its distance from the agent's draft grounds a graded learning signal.
+    (function () {
+      var toggle = document.getElementById('edit-toggle');
+      if (!toggle) return;
+      var box = document.getElementById('edit-box');
+      var textEl = document.getElementById('edit-text');
+      var saveBtn = document.getElementById('edit-save');
+      var editMsg = document.getElementById('edit-msg');
+      var goalId = {{ goal.id }};
+      toggle.addEventListener('click', function () {
+        box.style.display = box.style.display === 'none' ? 'block' : 'none';
+        if (box.style.display === 'block') textEl.focus();
+      });
+      saveBtn.addEventListener('click', function () {
+        saveBtn.disabled = true; editMsg.style.color = 'var(--muted)'; editMsg.textContent = 'Saving…';
+        fetch('/api/v1/goals/' + goalId + '/deliverable/edit', {
+          method: 'POST', headers: {'Content-Type': 'application/json'},
+          body: JSON.stringify({text: textEl.value}),
+        }).then(function (r) {
+          saveBtn.disabled = false;
+          if (r.ok) { editMsg.textContent = 'Saved — thanks, this trains your workforce.';
+                      setTimeout(function () { location.reload(); }, 900); return; }
+          return r.json().catch(function () { return {}; }).then(function (j) {
+            editMsg.style.color = 'var(--danger)'; editMsg.textContent = j.detail || ('Save failed: ' + r.status);
+          });
+        }).catch(function (e) { saveBtn.disabled = false; editMsg.style.color = 'var(--danger)'; editMsg.textContent = String(e); });
+      });
     })();
   </script>
 

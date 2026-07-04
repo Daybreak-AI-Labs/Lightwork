@@ -125,9 +125,9 @@
   <section class="auto__section" id="auto-flows-section" aria-labelledby="auto-flows-h" hidden>
     <div class="section-head">
       <h2 id="auto-flows-h" tabindex="-1">Flows</h2>
-      <span class="muted" id="auto-flows-count"></span>
+      <a class="btn btn--primary" href="/flows/designer" id="fd-new">✨ Design a flow</a>
     </div>
-    <p class="auto__hint">A flow is a deterministic skeleton — branch, loop, parallel, approval, delay — over steps that are either a fixed tool call or a full agentic goal. Run one and it pauses at any approval for a human decision; each node’s outcome trains which steps should be deterministic vs. agentic. Author flows via <code>POST /api/v1/flows</code> or by importing a workflow.</p>
+    <p class="auto__hint">A flow is a deterministic skeleton — branch, loop, parallel, approval, delay — over steps that are either a fixed tool call or a full agentic goal. Describe one in plain English and the designer drafts it; run one and it pauses at any approval for a human decision; each node’s outcome trains which steps should be deterministic vs. agentic. <span class="muted" id="auto-flows-count"></span></p>
     <ul class="auto__list" id="auto-flows-list" aria-label="Flows"></ul>
     <div class="mv-empty" id="auto-flows-empty" hidden>
       <p class="mv-empty__title">No flows yet</p>
@@ -502,7 +502,7 @@
       evMsg.textContent = 'Polling…';
       try {
         var out = await (await fetch('/api/v1/event-triggers/poll', { method: 'POST' })).json();
-        var fired = (out.triggers || []).reduce(function (a, t) { return a + (t.fired || []).length; }, 0);
+        var fired = (out.triggers || []).reduce(function (a, t) { return a + (t.fired || []).length + (t.fired_flows || []).length; }, 0);
         evMsg.textContent = 'Polled ' + (out.polled || 0) + ' — ' + fired + ' run' + (fired === 1 ? '' : 's') + ' started.';
         loadEventTriggers();
       } catch (e) { evMsg.textContent = 'Poll failed.'; }
@@ -610,10 +610,15 @@
       flows.forEach(function (f) {
         var li = el('li', 'mv-row');
         var main = el('div', 'mv-row__main');
-        main.appendChild(el('div', 'mv-row__title', f.name || f.id));
+        var title = el('div', 'mv-row__title');
+        var a = document.createElement('a');
+        a.href = '/flows/designer/' + encodeURIComponent(f.id);
+        a.textContent = f.name || f.id;                 // edit in the visual designer
+        title.appendChild(a); main.appendChild(title);
         main.appendChild(el('div', 'mv-row__sub', f.nodes + (f.nodes === 1 ? ' node' : ' nodes')
           + (f.single_agent ? ' · single agent' : '')));
         li.appendChild(main);
+        li.appendChild(mkBtn('Edit', function () { location.href = '/flows/designer/' + encodeURIComponent(f.id); }));
         li.appendChild(mkBtn('Run', function () { runFlow(f.id); }));
         flowsList.appendChild(li);
       });

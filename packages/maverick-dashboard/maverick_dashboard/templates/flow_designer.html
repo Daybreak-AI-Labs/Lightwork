@@ -1,0 +1,89 @@
+{% extends "base.html" %}
+{% block title %}flow designer · Lightwork{% endblock %}
+{% block content %}
+<style>
+  .fd { display: grid; grid-template-columns: 168px 1fr 300px; grid-template-rows: auto 1fr;
+        gap: var(--space-3); height: calc(100vh - 140px); min-height: 520px; }
+  .fd__bar { grid-column: 1 / -1; display: flex; gap: var(--space-3); align-items: center; flex-wrap: wrap; }
+  .fd__bar input.fd__name { font-weight: var(--font-semibold); min-width: 180px; }
+  .fd__nl { flex: 1; min-width: 220px; display: flex; gap: var(--space-2); }
+  .fd__nl input { flex: 1; }
+  .fd__palette { display: flex; flex-direction: column; gap: var(--space-2); overflow-y: auto; }
+  .fd__palette button { justify-content: flex-start; text-align: left; }
+  .fd__canvas-wrap { border: 1px solid var(--border); border-radius: var(--radius-lg);
+                     background: var(--surface-sunken); overflow: hidden; position: relative; }
+  #fd-canvas { width: 100%; height: 100%; display: block; cursor: grab; touch-action: none; }
+  #fd-canvas.panning { cursor: grabbing; }
+  .fd__props { border: 1px solid var(--border); border-radius: var(--radius-lg);
+               padding: var(--space-4); overflow-y: auto; background: var(--surface); }
+  .fd__props .field { margin-bottom: var(--space-3); }
+  .fd__props label { display: block; font-size: var(--text-sm); margin-bottom: var(--space-1); }
+  .fd__props textarea { width: 100%; min-height: 60px; font-family: var(--font-mono, monospace); font-size: 12px; }
+  .fd__props input, .fd__props select { width: 100%; }
+  .fd__empty { color: var(--muted); font-size: var(--text-sm); }
+  .fd__msg { font-size: var(--text-sm); color: var(--muted); }
+  /* node cards (SVG) */
+  .fd-node rect.card { fill: var(--surface); stroke: var(--border); stroke-width: 1.5; rx: 10; }
+  .fd-node.selected rect.card { stroke: var(--accent); stroke-width: 2.5; }
+  .fd-node.start rect.card { stroke: var(--success, #16a34a); }
+  .fd-node text { font: 12px var(--font-sans, sans-serif); fill: var(--text); pointer-events: none; }
+  .fd-node text.kind { font-weight: 700; text-transform: uppercase; font-size: 10px; letter-spacing: .04em; }
+  .fd-node .swatch { rx: 4; }
+  .fd-node .port { fill: var(--accent); stroke: var(--surface); stroke-width: 2; cursor: crosshair; }
+  .fd-edge { fill: none; stroke: var(--muted); stroke-width: 2; marker-end: url(#fd-arrow); }
+  .fd-edge.t { stroke: var(--success, #16a34a); }
+  .fd-edge.f { stroke: var(--danger, #dc2626); }
+  .fd-edge-label { font: 10px var(--font-sans, sans-serif); fill: var(--muted); }
+  .k-agent { fill: #6366f1; } .k-action { fill: #0891b2; } .k-branch { fill: #d97706; }
+  .k-foreach { fill: #7c3aed; } .k-parallel { fill: #db2777; } .k-approval { fill: #16a34a; }
+  .k-delay { fill: #64748b; }
+</style>
+
+<div class="fd">
+  <div class="fd__bar">
+    <input class="input fd__name" id="fd-name" placeholder="Flow name" aria-label="Flow name" />
+    <input class="input" id="fd-id" placeholder="flow-id" aria-label="Flow id" style="width:140px;" />
+    <div class="fd__nl">
+      <input class="input" id="fd-nl" placeholder="Describe your workflow in plain English…" aria-label="Describe your workflow" />
+      <button class="btn btn--primary" type="button" id="fd-draft">✨ Draft</button>
+    </div>
+    <button class="btn" type="button" id="fd-save">Save</button>
+    <button class="btn btn--ghost" type="button" id="fd-run">Save &amp; Run</button>
+    <span class="fd__msg" id="fd-msg" aria-live="polite"></span>
+  </div>
+
+  <div class="fd__palette" aria-label="Add node">
+    <div class="fd__empty">Add a step</div>
+    <button class="btn btn--ghost" type="button" data-add="agent">🧠 Agent</button>
+    <button class="btn btn--ghost" type="button" data-add="action">⚙️ Action</button>
+    <button class="btn btn--ghost" type="button" data-add="branch">🔀 Branch</button>
+    <button class="btn btn--ghost" type="button" data-add="approval">✅ Approval</button>
+    <button class="btn btn--ghost" type="button" data-add="delay">⏱ Delay</button>
+    <button class="btn btn--ghost" type="button" data-add="foreach">🔁 For-each</button>
+    <button class="btn btn--ghost" type="button" data-add="parallel">🔱 Parallel</button>
+  </div>
+
+  <div class="fd__canvas-wrap">
+    <svg id="fd-canvas" role="application" aria-label="Flow canvas" data-flow-id="{{ flow_id or '' }}">
+      <defs>
+        <marker id="fd-arrow" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse">
+          <path d="M0,0 L10,5 L0,10 z" fill="var(--muted)"></path>
+        </marker>
+      </defs>
+      <g id="fd-viewport">
+        <g id="fd-edges"></g>
+        <g id="fd-nodes"></g>
+        <path id="fd-temp-edge" class="fd-edge" style="display:none;"></path>
+      </g>
+    </svg>
+  </div>
+
+  <div class="fd__props" id="fd-props">
+    <p class="fd__empty">Select a node to edit it, or add a step from the palette. Connect steps by dragging from a node's bottom dot to another node.</p>
+  </div>
+</div>
+
+<script>
+{% include "flow_designer.js" %}
+</script>
+{% endblock %}

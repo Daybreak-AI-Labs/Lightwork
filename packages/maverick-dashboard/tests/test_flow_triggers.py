@@ -1,0 +1,129 @@
+"""Flows as first-class trigger targets: an event trigger can fire a FLOW (not
+just a template->goal), with the polled event's fields as the flow run's data."""
+from __future__ import annotations
+
+from fastapi.testclient import TestClient
+
+
+def _client():
+    from maverick_dashboard.app import app
+    return TestClient(app, headers={"Origin": "http://testserver"})
+
+
+def _isolate(monkeypatch, tmp_path):
+    monkeypatch.setenv("HOME", str(tmp_path))
+    monkeypatch.setenv("MAVERICK_HOME", str(tmp_path))
+    monkeypatch.setenv("MAVERICK_EVENT_TRIGGERS", "1")
+    monkeypatch.setenv("MAVERICK_FLOWS", "1")
+    monkeypatch.delenv("MAVERICK_DASHBOARD_TOKEN", raising=False)
+    from maverick import world_model
+    monkeypatch.setattr(world_model, "DEFAULT_DB", tmp_path / "world.db")
+
+
+def _reset_aq(monkeypatch, aq):
+    monkeypatch.setattr(aq, "_queue", None)
+    monkeypatch.setattr(aq, "_worker", None)
+    monkeypatch.setattr(aq, "_worker_threads", [])
+
+
+def _save_flow(fid="onboard"):
+    from maverick.flow import store
+    from maverick.flow.ir import Flow, FlowNode
+    store.save_flow(Flow(id=fid, name="Onboard", start="a",
+                         nodes={"a": FlowNode(id="a", kind="agent", brief="welcome {{email}}")}))
+
+
+def test_create_flow_target_trigger(monkeypatch, tmp_path):
+    _isolate(monkeypatch, tmp_path)
+    _save_flow()
+    r = _client().post("/api/v1/event-triggers", json={
+        "flow": "onboard", "source": "http_json", "config": {"url": "https://x"}})
+    assert r.status_code == 201
+    body = r.json()
+    assert body["flow"] == "onboard" and body["template"] == ""
+
+
+def test_exactly_one_target_required(monkeypatch, tmp_path):
+    _isolate(monkeypatch, tmp_path)
+    c = _client()
+    # neither
+    assert c.post("/api/v1/event-triggers", json={"source": "http_json"}).status_code == 400
+    # both
+    _save_flow()
+    r = c.post("/api/v1/event-triggers", json={
+        "template": "t", "flow": "onboard", "source": "http_json"})
+    assert r.status_code == 400
+
+
+def test_unknown_flow_is_404(monkeypatch, tmp_path):
+    _isolate(monkeypatch, tmp_path)
+    r = _client().post("/api/v1/event-triggers", json={
+        "flow": "ghost", "source": "http_json", "config": {"url": "https://x"}})
+    assert r.status_code == 404
+
+
+def test_poll_fires_a_flow_run_with_event_data(monkeypatch, tmp_path):
+    _isolate(monkeypatch, tmp_path)
+    _save_flow()
+    import maverick.automation_events as ev
+    from maverick.flow import store as flow_store
+    from maverick_dashboard import automation_queue as aq
+    _reset_aq(monkeypatch, aq)
+    box = [{"items": [{"id": "1", "email": "a@b.com"}]}]
+    monkeypatch.setattr(ev, "_http_get_json", lambda url, headers=None, timeout=15.0: box[0])
+    c = _client()
+    c.post("/api/v1/event-triggers", json={
+        "flow": "onboard", "source": "http_json",
+        "config": {"url": "https://x", "items_path": "items", "id_field": "id"}})
+    c.post("/api/v1/event-triggers/poll")                       # baseline: nothing new
+    box[0] = {"items": [{"id": "2", "email": "new@b.com"}, {"id": "1", "email": "a@b.com"}]}
+    out = c.post("/api/v1/event-triggers/poll").json()
+    # a flow run was queued for the new event
+    fired = out["triggers"][0].get("fired_flows")
+    assert fired and len(fired) == 1
+    run = flow_store.load_run(fired[0])
+    assert run.flow_id == "onboard"
+    assert run.data.get("email") == "new@b.com"                # event field became flow data
+
+
+def test_flow_fire_is_logged_in_history_with_run_ids(monkeypatch, tmp_path):
+    # A flow fire records a FIRED history row carrying the flow run ids (not an
+    # empty goal-id list), so the automations UI can show it fired.
+    _isolate(monkeypatch, tmp_path)
+    _save_flow()
+    import maverick.automation_events as ev
+    from maverick_dashboard import automation_queue as aq
+    _reset_aq(monkeypatch, aq)
+    box = [{"items": [{"id": "1", "email": "a@b.com"}]}]
+    monkeypatch.setattr(ev, "_http_get_json", lambda url, headers=None, timeout=15.0: box[0])
+    c = _client()
+    c.post("/api/v1/event-triggers", json={
+        "flow": "onboard", "source": "http_json",
+        "config": {"url": "https://x", "items_path": "items", "id_field": "id"}})
+    c.post("/api/v1/event-triggers/poll")                       # baseline: item 1 seen
+    box[0] = {"items": [{"id": "7", "email": "x@y.com"}, {"id": "1", "email": "a@b.com"}]}
+    out = c.post("/api/v1/event-triggers/poll").json()
+    run_ids = out["triggers"][0]["fired_flows"]
+    assert len(run_ids) == 1
+    hist = c.get("/api/v1/event-triggers/history").json()["history"]
+    fired = [r for r in hist if r["kind"] == "fired"]
+    assert fired and fired[0]["fired_flows"] == run_ids and fired[0]["fired"] == []
+
+
+def test_deleted_flow_advances_cursor_not_wedged(monkeypatch, tmp_path):
+    _isolate(monkeypatch, tmp_path)
+    _save_flow()
+    import maverick.automation_events as ev
+    from maverick.flow import store as flow_store
+    from maverick_dashboard import automation_queue as aq
+    _reset_aq(monkeypatch, aq)
+    monkeypatch.setattr(ev, "_http_get_json",
+                        lambda url, headers=None, timeout=15.0: {"items": [{"id": "9"}]})
+    c = _client()
+    c.post("/api/v1/event-triggers", json={
+        "flow": "onboard", "source": "http_json",
+        "config": {"url": "https://x", "items_path": "items", "id_field": "id"}})
+    flow_store.delete_flow("onboard")                          # target vanishes
+    out = c.post("/api/v1/event-triggers/poll").json()
+    assert out["triggers"][0]["fired_flows"] == []
+    assert any("flow unavailable" in n for n in out["triggers"][0]["notes"])

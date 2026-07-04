@@ -133,6 +133,28 @@ def test_delay_sweep_reenqueues_only_due_runs(monkeypatch, tmp_path):
     assert {j.payload["run_id"] for j in jobs} == {"d1"}
 
 
+def test_draft_endpoint_returns_a_flow(monkeypatch, tmp_path):
+    _isolate(monkeypatch, tmp_path)
+    # bypass the provider-key guard + the real LLM
+    import maverick.flow.draft as draft_mod
+    from maverick.flow.ir import single_agent_flow
+    monkeypatch.setattr("maverick_dashboard._shared.require_provider_or_400", lambda: None)
+    monkeypatch.setattr(draft_mod, "draft_flow",
+                        lambda desc, **k: (single_agent_flow(k.get("flow_id", ""), "Drafted", desc), ["note"]))
+    r = _client().post("/api/v1/flows/draft", json={"description": "email me on new leads"})
+    assert r.status_code == 200
+    body = r.json()
+    assert body["flow"]["nodes"][0]["kind"] == "agent"
+    assert body["notes"] == ["note"]
+
+
+def test_draft_requires_provider(monkeypatch, tmp_path):
+    _isolate(monkeypatch, tmp_path)
+    monkeypatch.setattr("maverick.config.any_provider_configured", lambda: False)
+    r = _client().post("/api/v1/flows/draft", json={"description": "x"})
+    assert r.status_code == 400
+
+
 def test_proposals_endpoint(monkeypatch, tmp_path):
     _isolate(monkeypatch, tmp_path)
     from maverick.flow import node_outcomes, store

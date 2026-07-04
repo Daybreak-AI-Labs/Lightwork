@@ -71,6 +71,9 @@ class FlowNode:
     # common ------------------------------------------------------------------
     output: str = ""                 # flow-data key to store this node's result under
     label: str = ""                  # human label (provenance / UI)
+    # designer layout (opaque to execution) -----------------------------------
+    x: float = 0.0                   # canvas position for the visual designer
+    y: float = 0.0
 
     def to_dict(self) -> dict:
         d: dict[str, Any] = {"id": self.id, "kind": self.kind}
@@ -83,6 +86,8 @@ class FlowNode:
             d["params"] = self.params
         if self.seconds:
             d["seconds"] = self.seconds
+        if self.x or self.y:
+            d["x"], d["y"] = self.x, self.y
         if self.body is not None:
             d["body"] = self.body.to_dict()
         if self.branches:
@@ -103,6 +108,7 @@ class FlowNode:
             branches=[Flow.from_dict(b) for b in (d.get("branches") or [])],
             prompt=str(d.get("prompt", "")), seconds=float(d.get("seconds", 0.0)),
             output=str(d.get("output", "")), label=str(d.get("label", "")),
+            x=float(d.get("x", 0.0)), y=float(d.get("y", 0.0)),
         )
 
 

@@ -35,8 +35,11 @@ def _path():
 
 
 def record(name: str, owner: str, kind: str, *, new_events: int = 0,
-           fired: list | None = None, note: str = "") -> None:
-    """Append one firing/err row. Best-effort: never raises."""
+           fired: list | None = None, fired_flows: list | None = None,
+           note: str = "") -> None:
+    """Append one firing/err row. Best-effort: never raises. ``fired`` holds
+    integer goal ids (template fires); ``fired_flows`` holds string flow run ids
+    (flow fires) -- a trigger fires one or the other, never both."""
     row = {
         "ts": time.time(),
         "name": str(name),
@@ -44,6 +47,7 @@ def record(name: str, owner: str, kind: str, *, new_events: int = 0,
         "kind": str(kind),
         "new_events": int(new_events),
         "fired": [int(g) for g in (fired or [])],
+        "fired_flows": [str(r) for r in (fired_flows or [])],
         "note": str(note)[:500],
     }
     try:
