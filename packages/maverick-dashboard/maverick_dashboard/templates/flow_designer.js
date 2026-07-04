@@ -123,9 +123,11 @@
       var mx = evt.clientX - r.left, my = evt.clientY - r.top;
       tempEdge.style.display = ''; tempEdge.removeAttribute('transform');
       tempEdge.setAttribute('d', 'M' + ((px)) + ' ' + (py) + ' L ' + mx + ' ' + my);
-      // note: temp edge is drawn in screen space inside the (translated) viewport,
-      // so undo the viewport transform:
-      tempEdge.setAttribute('transform', 'translate(' + (-view.x) + ',' + (-view.y) + ') scale(' + (1 / view.k) + ')');
+      // The temp edge is built in screen space but lives inside the (translated +
+      // scaled) viewport, so apply the viewport's exact inverse: undo the scale
+      // AND the translate under that scale -> scale(1/k) THEN translate(-x,-y)
+      // (SVG applies the rightmost transform first).
+      tempEdge.setAttribute('transform', 'scale(' + (1 / view.k) + ') translate(' + (-view.x) + ',' + (-view.y) + ')');
     }
   });
   window.addEventListener('mouseup', function (evt) {

@@ -13,10 +13,11 @@ from collections.abc import Callable
 from typing import Any
 
 
-def _fire_template(world, trig, tpl, events, owner, name, fire, summary) -> None:
+def _fire_template(world, trig, tpl, events, owner, fire, summary) -> None:
     """Render the bound template per event (event fields fill DECLARED params)
     and fire a goal. Mutates ``summary``."""
     from maverick_dashboard import trigger_events_store
+    name = trig["name"]
     declared = set(tpl.params)
     for event in events:
         params = dict(trig.get("params") or {})
@@ -35,10 +36,11 @@ def _fire_template(world, trig, tpl, events, owner, name, fire, summary) -> None
         summary["fired"].append(goal_id)
 
 
-def _fire_flow(trig, flow_id, events, owner, name, fire_flow, summary) -> None:
+def _fire_flow(trig, events, owner, fire_flow, summary) -> None:
     """Start a flow run per event, with the event's fields as the run's data
     (the trigger's ``params`` are defaults). Mutates ``summary``; run ids land in
     ``summary['fired_flows']``."""
+    flow_id = trig["flow"]
     for event in events:
         data = dict(trig.get("params") or {})
         for k, v in event.items():   # a flow takes ALL event fields as data (no declared set)
@@ -46,6 +48,43 @@ def _fire_flow(trig, flow_id, events, owner, name, fire_flow, summary) -> None:
         run_id = fire_flow(flow_id, data, owner)
         if run_id:
             summary["fired_flows"].append(run_id)
+
+
+def _deliver(world, trig, res, owner, fire, fire_flow, summary) -> bool:
+    """Dispatch a trigger's new events to its target (bound flow, else template).
+    Returns False when nothing was delivered and the caller must NOT advance the
+    cursor past these events (missing target, or no flow dispatcher wired);
+    otherwise True. The missing-target cases advance the cursor themselves so a
+    permanent backlog can't wedge the trigger."""
+    from maverick.templates import load_template
+
+    from maverick_dashboard import event_triggers_store, trigger_events_store
+    name = trig["name"]
+    if trig.get("flow"):
+        from maverick.flow import store as flow_store
+        if flow_store.load_flow(trig["flow"]) is None:
+            summary["notes"].append(f"flow unavailable: {trig['flow']}")
+            event_triggers_store.set_cursor(name, res.cursor)   # don't wedge on backlog
+            trigger_events_store.record(name, owner, trigger_events_store.TEMPLATE_UNAVAILABLE,
+                                        note=f"flow {trig['flow']} not found")
+            return False
+        if fire_flow is None:
+            # No flow dispatcher in this context (e.g. a caller that only wires
+            # template fires). Leave the cursor so these events retry once a
+            # dispatcher is available rather than silently advancing past them.
+            summary["notes"].append("flow firing unavailable in this context")
+            return False
+        _fire_flow(trig, res.events, owner, fire_flow, summary)
+        return True
+    try:
+        tpl = load_template(trig["template"])
+    except (ValueError, FileNotFoundError) as e:
+        summary["notes"].append(f"template unavailable: {e}")
+        event_triggers_store.set_cursor(name, res.cursor)
+        trigger_events_store.record(name, owner, trigger_events_store.TEMPLATE_UNAVAILABLE, note=str(e))
+        return False
+    _fire_template(world, trig, tpl, res.events, owner, fire, summary)
+    return True
 
 
 def poll_and_fire(world: Any, triggers: list[dict], *, principal: str = "",
@@ -85,7 +124,7 @@ def poll_and_fire(world: Any, triggers: list[dict], *, principal: str = "",
                 trigger_events_store.record(name, owner, trigger_events_store.POLL_ERROR, note=str(e))
                 continue
             summary["new_events"] = len(res.events)
-            if not _deliver(world, trig, res, owner, name, fire, fire_flow, summary):
+            if not _deliver(world, trig, res, owner, fire, fire_flow, summary):
                 continue
             # Only touch the store when the cursor actually moved -- an idle poll
             # (no new items) shouldn't rewrite the whole trigger file every tick.
@@ -93,7 +132,9 @@ def poll_and_fire(world: Any, triggers: list[dict], *, principal: str = "",
                 event_triggers_store.set_cursor(name, res.cursor)
             if summary["fired"] or summary["fired_flows"]:
                 trigger_events_store.record(name, owner, trigger_events_store.FIRED,
-                                            new_events=summary["new_events"], fired=summary["fired"])
+                                            new_events=summary["new_events"],
+                                            fired=summary["fired"],
+                                            fired_flows=summary["fired_flows"])
         except Exception as e:  # one trigger's unexpected error must not abort the batch
             summary["poll_error"] = True
             summary["notes"].append(f"trigger error: {type(e).__name__}: {e}")
@@ -103,32 +144,3 @@ def poll_and_fire(world: Any, triggers: list[dict], *, principal: str = "",
             if tok is not None:
                 reset_tenant(tok)
     return results
-
-
-def _deliver(world, trig, res, owner, name, fire, fire_flow, summary) -> bool:
-    """Dispatch a trigger's new events to its target. Returns False (skip cursor
-    advance handled by caller for the unavailable-target case) only when the
-    target is missing; otherwise True."""
-    from maverick.templates import load_template
-
-    from maverick_dashboard import event_triggers_store, trigger_events_store
-    if trig.get("flow"):
-        from maverick.flow import store as flow_store
-        if flow_store.load_flow(trig["flow"]) is None:
-            summary["notes"].append(f"flow unavailable: {trig['flow']}")
-            event_triggers_store.set_cursor(name, res.cursor)   # don't wedge on backlog
-            trigger_events_store.record(name, owner, trigger_events_store.TEMPLATE_UNAVAILABLE,
-                                        note=f"flow {trig['flow']} not found")
-            return False
-        if fire_flow is not None:
-            _fire_flow(trig, trig["flow"], res.events, owner, name, fire_flow, summary)
-        return True
-    try:
-        tpl = load_template(trig["template"])
-    except (ValueError, FileNotFoundError) as e:
-        summary["notes"].append(f"template unavailable: {e}")
-        event_triggers_store.set_cursor(name, res.cursor)
-        trigger_events_store.record(name, owner, trigger_events_store.TEMPLATE_UNAVAILABLE, note=str(e))
-        return False
-    _fire_template(world, trig, tpl, res.events, owner, name, fire, summary)
-    return True

@@ -86,6 +86,30 @@ def test_poll_fires_a_flow_run_with_event_data(monkeypatch, tmp_path):
     assert run.data.get("email") == "new@b.com"                # event field became flow data
 
 
+def test_flow_fire_is_logged_in_history_with_run_ids(monkeypatch, tmp_path):
+    # A flow fire records a FIRED history row carrying the flow run ids (not an
+    # empty goal-id list), so the automations UI can show it fired.
+    _isolate(monkeypatch, tmp_path)
+    _save_flow()
+    import maverick.automation_events as ev
+    from maverick_dashboard import automation_queue as aq
+    _reset_aq(monkeypatch, aq)
+    box = [{"items": [{"id": "1", "email": "a@b.com"}]}]
+    monkeypatch.setattr(ev, "_http_get_json", lambda url, headers=None, timeout=15.0: box[0])
+    c = _client()
+    c.post("/api/v1/event-triggers", json={
+        "flow": "onboard", "source": "http_json",
+        "config": {"url": "https://x", "items_path": "items", "id_field": "id"}})
+    c.post("/api/v1/event-triggers/poll")                       # baseline: item 1 seen
+    box[0] = {"items": [{"id": "7", "email": "x@y.com"}, {"id": "1", "email": "a@b.com"}]}
+    out = c.post("/api/v1/event-triggers/poll").json()
+    run_ids = out["triggers"][0]["fired_flows"]
+    assert len(run_ids) == 1
+    hist = c.get("/api/v1/event-triggers/history").json()["history"]
+    fired = [r for r in hist if r["kind"] == "fired"]
+    assert fired and fired[0]["fired_flows"] == run_ids and fired[0]["fired"] == []
+
+
 def test_deleted_flow_advances_cursor_not_wedged(monkeypatch, tmp_path):
     _isolate(monkeypatch, tmp_path)
     _save_flow()

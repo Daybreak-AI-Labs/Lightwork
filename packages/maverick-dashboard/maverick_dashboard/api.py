@@ -1886,8 +1886,13 @@ async def edit_deliverable(request: Request, goal_id: int,
     import difflib
     original = g.result or ""
     revised = payload.text or ""
-    similarity = difflib.SequenceMatcher(None, original, revised).ratio() if original else 0.0
     w.set_goal_status(goal_id, g.status, result=revised)   # the edit is the deliverable now
+    if not original:
+        # Nothing to grade against: the agent produced no draft to keep or
+        # rewrite. Grounding this as 0.0 would punish it for text it never wrote,
+        # so we save the human's text but ground nothing.
+        return {"similarity": None}
+    similarity = difflib.SequenceMatcher(None, original, revised).ratio()
     _ground_outcome(w, goal_id, similarity, kind="edit")
     return {"similarity": round(similarity, 3)}
 

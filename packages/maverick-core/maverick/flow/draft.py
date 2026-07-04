@@ -75,11 +75,16 @@ def _sanitize(raw: dict, description: str) -> dict:
     if not isinstance(nodes, list) or not nodes:
         raise ValueError("no nodes")
     clean = []
+    used: set[str] = set()
     for i, n in enumerate(nodes):
         if not isinstance(n, dict) or not n.get("kind"):
             continue
         n = dict(n)
-        n["id"] = str(n.get("id") or f"n{i}")
+        nid = str(n.get("id") or f"n{i}")
+        while nid in used:      # keep every node on an id collision (rename, don't drop)
+            nid = f"{nid}_{i}"
+        n["id"] = nid
+        used.add(nid)
         clean.append(n)
     if not clean:
         raise ValueError("no usable nodes")

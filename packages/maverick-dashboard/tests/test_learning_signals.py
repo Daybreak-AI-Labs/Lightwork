@@ -120,6 +120,21 @@ class TestDeliverableEditGrounding:
         assert client.post("/api/v1/goals/999/deliverable/edit",
                            json={"text": "x"}).status_code == 404
 
+    def test_edit_with_no_draft_saves_but_grounds_nothing(self, tmp_path, monkeypatch):
+        # No agent draft to grade against -> save the human's text but ground
+        # nothing (grounding a 0.0 would punish the agent for text it never wrote).
+        monkeypatch.setenv("MAVERICK_CONSEQUENCE", "1")
+        consequence = _isolate(tmp_path, monkeypatch)
+        w = _world(tmp_path, monkeypatch)
+        gid = w.create_goal("Draft the memo", "")
+        eid = w.start_episode(gid)
+        w.set_goal_status(gid, "done", result="")   # the agent produced nothing
+        r = client.post(f"/api/v1/goals/{gid}/deliverable/edit",
+                        json={"text": "a human-written memo"})
+        assert r.status_code == 200 and r.json()["similarity"] is None
+        assert w.get_goal(gid).result == "a human-written memo"   # still saved
+        assert consequence.resolve(gid, eid) is None               # ...but not grounded
+
 
 class TestSystemOfRecordLoop:
     """Register a business key during a run, then have a system of record report

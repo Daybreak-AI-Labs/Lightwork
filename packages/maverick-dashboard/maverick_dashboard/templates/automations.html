@@ -502,7 +502,7 @@
       evMsg.textContent = 'Polling…';
       try {
         var out = await (await fetch('/api/v1/event-triggers/poll', { method: 'POST' })).json();
-        var fired = (out.triggers || []).reduce(function (a, t) { return a + (t.fired || []).length; }, 0);
+        var fired = (out.triggers || []).reduce(function (a, t) { return a + (t.fired || []).length + (t.fired_flows || []).length; }, 0);
         evMsg.textContent = 'Polled ' + (out.polled || 0) + ' — ' + fired + ' run' + (fired === 1 ? '' : 's') + ' started.';
         loadEventTriggers();
       } catch (e) { evMsg.textContent = 'Poll failed.'; }
