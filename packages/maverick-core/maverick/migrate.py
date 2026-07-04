@@ -73,6 +73,10 @@ KNOWN_SECTIONS = frozenset({
     "actions", "domains", "dreaming", "fairness_monitor", "fleet_memory",
     "memory_guard", "rehearsal", "self_harness", "self_improvement",
     "speculative", "tax",
+    # Structured rubric verifier + JitRL test-time adaptation: read by
+    # load_config (config.get_reasoning_reward / get_jit_rl) and written by the
+    # wizard's advanced opt-out steps.
+    "reasoning_reward", "jit_rl",
 })
 
 
