@@ -4729,12 +4729,18 @@ async def automations_page(request: Request) -> HTMLResponse:
         import_enabled = _import_enabled()
     except Exception:  # pragma: no cover -- never block the page on the feature
         import_enabled = False
+    try:
+        from maverick.automation_events import enabled as _events_enabled
+        event_triggers_enabled = _events_enabled()
+    except Exception:  # pragma: no cover
+        event_triggers_enabled = False
     return templates.TemplateResponse(
         request, "automations.html",
         {
             "scheduling_enabled": feats.get("scheduling", True),
             "triggers_enabled": feats.get("triggers", True),
             "import_enabled": import_enabled,
+            "event_triggers_enabled": event_triggers_enabled,
         },
     )
 

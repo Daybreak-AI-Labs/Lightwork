@@ -45,6 +45,8 @@ from .api_schemas import (
     CatalogInstallIn,
     ChildIn,
     ComposeIn,
+    EventTriggerIn,
+    EventTriggerOut,
     FactIn,
     FleetCreateIn,
     FleetRunIn,
@@ -1962,6 +1964,165 @@ async def delete_trigger_endpoint(request: Request, name: str) -> dict:
     return {"deleted": name}
 
 
+# ---- event triggers: fire a saved template when a source has new items -------
+# The POLL half of workflow automation (the push half is /webhook/run).
+# Management is dashboard-authed + operate-gated + feature-knobbed; a scheduled
+# POST /event-triggers/poll drains each source and fires per new event.
+
+
+def _require_event_triggers() -> None:
+    from maverick.automation_events import enabled
+    if not enabled():
+        raise HTTPException(
+            status_code=403,
+            detail=("event triggers are off; enable [event_triggers] in "
+                    "config.toml or set MAVERICK_EVENT_TRIGGERS=1"),
+        )
+
+
+def _event_trigger_out(rec: dict) -> EventTriggerOut:
+    return EventTriggerOut(
+        name=rec["name"], template=rec["template"], source=rec["source"],
+        config=rec.get("config") or {}, params=rec.get("params") or {},
+        cursor=rec.get("cursor") or "",
+    )
+
+
+@router.get("/event-triggers")
+async def list_event_triggers_endpoint(request: Request) -> dict:
+    """Registered polled event triggers (owner-scoped) + the available sources."""
+    from maverick.automation_events import available_sources
+    from maverick.automation_events import enabled as _ev_enabled
+
+    from maverick_dashboard import event_triggers_store
+    triggers = event_triggers_store.list_triggers()
+    owner = goal_owner_filter(request)
+    if owner is not None:
+        triggers = [t for t in triggers if t.get("owner", "") == owner]
+    return {
+        "triggers": [_event_trigger_out(t).model_dump() for t in triggers],
+        "sources": available_sources(),
+        "enabled": _ev_enabled(),
+    }
+
+
+@router.post("/event-triggers", response_model=EventTriggerOut, status_code=201)
+async def create_event_trigger(request: Request, payload: EventTriggerIn) -> EventTriggerOut:
+    require_permission(request, "operate")
+    _require_event_triggers()
+    from maverick.automation_events import EventSourceError, get_source
+    try:
+        get_source(payload.source)   # a registered source?
+    except EventSourceError as e:
+        raise HTTPException(status_code=400, detail=str(e)) from e
+    # The template must EXIST, but -- unlike a webhook trigger -- we don't require
+    # it to render with the current defaults: each polled event fills the declared
+    # params at fire time, so a required param the event supplies is expected to
+    # be blank now.
+    from maverick.templates import load_template
+    try:
+        load_template(payload.template)
+    except FileNotFoundError as e:
+        raise HTTPException(
+            status_code=404, detail=f"template not found: {payload.template!r}") from e
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e)) from e
+    from maverick_dashboard import event_triggers_store
+    owner_filter = goal_owner_filter(request)
+    if owner_filter is not None:
+        existing = event_triggers_store.get_trigger(
+            event_triggers_store.slugify(payload.name or payload.template))
+        if existing is not None and existing.get("owner", "") != owner_filter:
+            raise HTTPException(
+                status_code=409, detail="an event trigger with that name already exists")
+    try:
+        rec = event_triggers_store.set_trigger(
+            payload.name or payload.template, payload.template, payload.source,
+            config=payload.config or {}, params=payload.params or {},
+            owner=caller_principal(request) or "")
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e)) from e
+    return _event_trigger_out(rec)
+
+
+@router.delete("/event-triggers/{name}")
+async def delete_event_trigger_endpoint(request: Request, name: str) -> dict:
+    require_permission(request, "operate")
+    _require_event_triggers()
+    from maverick_dashboard import event_triggers_store
+    if not event_triggers_store.delete_trigger(name, owner=goal_owner_filter(request)):
+        raise HTTPException(status_code=404, detail="no event trigger with that name")
+    return {"deleted": name}
+
+
+@router.post("/event-triggers/poll")
+async def poll_event_triggers(request: Request, bg: BackgroundTasks, name: str = "") -> dict:
+    """Poll event sources and fire the bound template for each new item.
+
+    Meant to be hit on a schedule (a cron POSTing here, or `maverick worker`).
+    Owner-scoped: a caller drains only its own triggers. Each source's cursor
+    advances so an item fires at most once; the per-poll event count is bounded
+    by the engine. A broken template still advances the cursor so it can't
+    re-fire a backlog forever."""
+    require_permission(request, "operate")
+    _require_event_triggers()
+    from maverick.automation_events import EventSourceError, poll_source
+    from maverick.runner import run_goal_in_thread
+    from maverick.templates import load_template
+
+    from maverick_dashboard import event_triggers_store
+
+    owner = goal_owner_filter(request)
+    principal = caller_principal(request) or ""
+    user_id = execution_user_id_from_request(request)
+    triggers = event_triggers_store.list_triggers()
+    if owner is not None:
+        triggers = [t for t in triggers if t.get("owner", "") == owner]
+    if name:
+        triggers = [t for t in triggers if t["name"] == name]
+
+    w = _world()
+    results: list[dict] = []
+    for trig in triggers:
+        summary: dict = {"name": trig["name"], "new_events": 0, "fired": [], "notes": []}
+        try:
+            res = await run_in_threadpool(
+                poll_source, trig["source"], trig["config"], trig["cursor"])
+        except EventSourceError as e:
+            summary["notes"].append(f"poll failed: {e}")
+            results.append(summary)
+            continue
+        try:
+            tpl = load_template(trig["template"])
+        except (ValueError, FileNotFoundError) as e:
+            summary["notes"].append(f"template unavailable: {e}")
+            event_triggers_store.set_cursor(trig["name"], res.cursor)
+            results.append(summary)
+            continue
+        declared = set(tpl.params)
+        summary["new_events"] = len(res.events)
+        for event in res.events:
+            params = dict(trig.get("params") or {})
+            for k, v in event.items():          # event fields fill DECLARED params only
+                if k in declared:
+                    params[str(k)] = str(v)[:2000]
+            try:
+                title, description = tpl.render(**params)
+            except ValueError as e:
+                summary["notes"].append(f"skipped an event: {e}")
+                continue
+            goal_id = w.create_goal(title[:200], description[:8000], owner=principal)
+            w.record_goal_origin(goal_id, "event", trig["name"])
+            if user_id:
+                bg.add_task(run_goal_in_thread, goal_id, channel="api", user_id=user_id)
+            else:
+                bg.add_task(run_goal_in_thread, goal_id)
+            summary["fired"].append(goal_id)
+        event_triggers_store.set_cursor(trig["name"], res.cursor)
+        results.append(summary)
+    return {"polled": len(results), "triggers": results}
+
+
 # ---- automation import: pull clients' existing automations into Lightwork -----
 
 
@@ -2113,9 +2274,10 @@ async def import_run_endpoint(request: Request, payload: ImportRunIn) -> ImportR
 @router.get("/automation-runs")
 async def automation_runs(request: Request, kind: str, ref: str, limit: int = 8) -> dict:
     """Recent goals an automation spawned + a status summary. ``kind`` is
-    'schedule' or 'trigger'; ``ref`` is the schedule_id or trigger name."""
-    if kind not in ("schedule", "trigger"):
-        raise HTTPException(status_code=400, detail="kind must be 'schedule' or 'trigger'")
+    'schedule', 'trigger', or 'event'; ``ref`` is the schedule_id or trigger name."""
+    if kind not in ("schedule", "trigger", "event"):
+        raise HTTPException(
+            status_code=400, detail="kind must be 'schedule', 'trigger', or 'event'")
     ref = (ref or "").strip()
     if not ref:
         return {"runs": [], "summary": {}}

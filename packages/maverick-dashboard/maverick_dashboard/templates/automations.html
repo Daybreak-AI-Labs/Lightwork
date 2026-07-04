@@ -56,6 +56,44 @@
   </section>
   {% endif %}
 
+  {% if event_triggers_enabled %}
+  <section class="auto__section" id="auto-event-section" aria-labelledby="auto-event-h">
+    <div class="section-head">
+      <h2 id="auto-event-h" tabindex="-1">Event triggers</h2>
+      <span class="muted" id="auto-event-count"></span>
+    </div>
+    <p class="auto__hint">Run a workflow when something new appears in a source that can’t push a webhook — Lightwork polls it on a schedule and fires per new item, with the item’s fields filling the workflow’s parameters. Poll on a cron by POSTing to <code>/api/v1/event-triggers/poll</code>.</p>
+    <ul class="auto__list" id="auto-event-list" aria-label="Event triggers"></ul>
+    <div class="mv-empty" id="auto-event-empty" hidden>
+      <p class="mv-empty__title">No event triggers yet</p>
+      <p class="mv-empty__body">Bind a saved workflow to a source below.</p>
+    </div>
+    <form id="auto-event-form" style="margin-top: var(--space-4);">
+      <div class="field">
+        <label for="auto-event-template">Workflow template (name/id)</label>
+        <input type="text" id="auto-event-template" placeholder="triage-lead" autocomplete="off" spellcheck="false" required />
+      </div>
+      <div class="field">
+        <label for="auto-event-source">Source</label>
+        <select id="auto-event-source"></select>
+      </div>
+      <div class="field">
+        <label for="auto-event-config">Source config (JSON)</label>
+        <textarea id="auto-event-config" rows="4" spellcheck="false" placeholder='{ "url": "https://api.example.com/leads", "items_path": "data", "id_field": "id" }'></textarea>
+      </div>
+      <div class="field">
+        <label for="auto-event-name">Trigger name (optional)</label>
+        <input type="text" id="auto-event-name" placeholder="(defaults to the template name)" autocomplete="off" />
+      </div>
+      <div class="wf__row" style="display:flex; gap: var(--space-3); align-items:center;">
+        <button class="btn btn--primary" type="submit">Create event trigger</button>
+        <button class="btn btn--ghost" type="button" id="auto-event-poll">Poll now</button>
+        <span class="auto__hint" id="auto-event-msg" aria-live="polite"></span>
+      </div>
+    </form>
+  </section>
+  {% endif %}
+
   {% if import_enabled %}
   <section class="auto__section" id="auto-import-section" aria-labelledby="auto-import-h">
     <div class="section-head">
@@ -311,6 +349,77 @@
       }
       if (!out.dry_run) { loadSchedules(); loadTriggers(); }
     });
+  }
+
+  // ---- event triggers (polled sources) ----
+  var evForm = document.getElementById('auto-event-form');
+  if (evForm) {
+    var evList = document.getElementById('auto-event-list');
+    var evEmpty = document.getElementById('auto-event-empty');
+    var evCount = document.getElementById('auto-event-count');
+    var evSource = document.getElementById('auto-event-source');
+    var evMsg = document.getElementById('auto-event-msg');
+    async function loadEventTriggers() {
+      var data = {};
+      try { data = await (await fetch('/api/v1/event-triggers')).json(); } catch (e) { return; }
+      if (evSource && !evSource.children.length) {
+        (data.sources || []).forEach(function (s) {
+          var o = document.createElement('option'); o.value = s; o.textContent = s; evSource.appendChild(o);
+        });
+      }
+      var items = data.triggers || [];
+      evList.textContent = '';
+      if (evCount) evCount.textContent = items.length ? (items.length + (items.length === 1 ? ' trigger' : ' triggers')) : '';
+      if (evEmpty) evEmpty.hidden = items.length > 0;
+      items.forEach(function (t) {
+        var li = el('li', 'mv-row');
+        var main = el('div', 'mv-row__main');
+        main.appendChild(el('div', 'mv-row__title', t.name));
+        main.appendChild(el('div', 'mv-row__sub', 'source ' + t.source + ' · template ' + t.template + (t.cursor ? (' · at ' + t.cursor) : ' · not yet polled')));
+        var runs = el('div', 'auto__runs'); main.appendChild(runs); loadRuns('event', t.name, runs);
+        li.appendChild(main);
+        li.appendChild(delBtn('Delete event trigger ' + t.name, function () { delEventTrigger(t.name); }));
+        evList.appendChild(li);
+      });
+    }
+    async function delEventTrigger(name) {
+      if (!(await mvConfirm('Delete event trigger “' + name + '”? It will stop polling.'))) return;
+      try {
+        var r = await fetch('/api/v1/event-triggers/' + encodeURIComponent(name), { method: 'DELETE' });
+        if (r.ok) { mvToast('Event trigger deleted'); loadEventTriggers(); }
+        else { mvToast('Could not delete', { error: true }); }
+      } catch (e) { mvToast('Could not delete', { error: true }); }
+    }
+    evForm.addEventListener('submit', async function (ev) {
+      ev.preventDefault();
+      evMsg.textContent = '';
+      var cfgRaw = document.getElementById('auto-event-config').value.trim();
+      var config = {};
+      if (cfgRaw) { try { config = JSON.parse(cfgRaw); } catch (e) { evMsg.textContent = 'Config is not valid JSON.'; return; } }
+      var body = {
+        template: document.getElementById('auto-event-template').value.trim(),
+        source: evSource.value, config: config,
+        name: document.getElementById('auto-event-name').value.trim() || null,
+      };
+      var resp = await fetch('/api/v1/event-triggers', {
+        method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body),
+      });
+      var data = await resp.json().catch(function () { return {}; });
+      if (!resp.ok) { evMsg.textContent = (typeof data.detail === 'string' ? data.detail : 'Create failed: ' + resp.status); return; }
+      evMsg.textContent = 'Created “' + data.name + '”. It polls when you (or a cron) hit “Poll now”.';
+      evForm.reset();
+      loadEventTriggers();
+    });
+    document.getElementById('auto-event-poll').addEventListener('click', async function () {
+      evMsg.textContent = 'Polling…';
+      try {
+        var out = await (await fetch('/api/v1/event-triggers/poll', { method: 'POST' })).json();
+        var fired = (out.triggers || []).reduce(function (a, t) { return a + (t.fired || []).length; }, 0);
+        evMsg.textContent = 'Polled ' + (out.polled || 0) + ' — ' + fired + ' run' + (fired === 1 ? '' : 's') + ' started.';
+        loadEventTriggers();
+      } catch (e) { evMsg.textContent = 'Poll failed.'; }
+    });
+    loadEventTriggers();
   }
 
   loadSchedules();
