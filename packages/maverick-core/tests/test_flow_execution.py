@@ -77,6 +77,36 @@ class TestExecution:
                           action_runner=lambda t, p, d: ("", None))
         assert node_outcomes.stats("fX")["a"] == {"n": 1, "mean": 0.9, "kind": NODE_AGENT}
 
+    def test_execute_records_per_node_run_trace(self, tmp_path, monkeypatch):
+        # The run persists a per-node {status, outcome} trace for the designer's
+        # live-run overlay.
+        _patch_home(tmp_path, monkeypatch)
+        f = Flow(id="fT", name="f", start="a", nodes={
+            "a": FlowNode(id="a", kind=NODE_AGENT, brief="ok step", next="b"),
+            "b": FlowNode(id="b", kind=NODE_ACTION, tool="t", next=None)})
+        run = execution.execute(
+            f, agent_runner=lambda brief, d: ("ok", 1.0),
+            action_runner=lambda t, p, d: ("ERROR: boom", 0.0))
+        assert run.nodes["a"] == {"status": "done", "outcome": 1.0}
+        assert run.nodes["b"] == {"status": "done", "outcome": 0.0}
+        from maverick.flow import store
+        assert store.load_run(run.run_id).nodes["b"]["outcome"] == 0.0   # persisted
+
+    def test_run_trace_survives_pause_and_resume(self, tmp_path, monkeypatch):
+        _patch_home(tmp_path, monkeypatch)
+        f = Flow(id="fTR", name="f", start="a", nodes={
+            "a": FlowNode(id="a", kind=NODE_AGENT, brief="first", output="r", next="b"),
+            "b": FlowNode(id="b", kind="approval", prompt="ok?", next="c"),
+            "c": FlowNode(id="c", kind=NODE_AGENT, brief="last")})
+        paused = execution.execute(f, agent_runner=lambda b, d: ("x", 1.0),
+                                   action_runner=lambda *a: ("", None))
+        assert paused.status == "paused_approval" and paused.nodes["a"]["outcome"] == 1.0
+        resumed = execution.execute(f, agent_runner=lambda b, d: ("x", 1.0),
+                                    action_runner=lambda *a: ("", None),
+                                    resume_run_id=paused.run_id, decision="approved")
+        # the pre-pause node's trace is preserved alongside the post-resume nodes
+        assert resumed.nodes["a"]["outcome"] == 1.0 and resumed.nodes["c"]["outcome"] == 1.0
+
     def test_pause_resume_across_persisted_state(self, tmp_path, monkeypatch):
         _patch_home(tmp_path, monkeypatch)
         f = Flow(id="f2", name="f", start="a", nodes={

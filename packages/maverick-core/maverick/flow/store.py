@@ -162,13 +162,16 @@ class FlowRun:
     owner: str = ""
     created: float = 0.0
     updated: float = 0.0
+    # Per-node run trace: {node_id: {status, outcome}} accumulated as the run
+    # executes, so the designer can overlay live status/result on the canvas.
+    nodes: dict = field(default_factory=dict)
 
     def to_dict(self) -> dict:
         return {
             "run_id": self.run_id, "flow_id": self.flow_id, "status": self.status,
             "data": self.data, "cursor": self.cursor, "resume_at": self.resume_at,
             "prompt": self.prompt, "error": self.error, "owner": self.owner,
-            "created": self.created, "updated": self.updated,
+            "created": self.created, "updated": self.updated, "nodes": self.nodes,
         }
 
     @staticmethod
@@ -180,6 +183,7 @@ class FlowRun:
             prompt=str(d.get("prompt", "")), error=str(d.get("error", "")),
             owner=str(d.get("owner", "")),
             created=float(d.get("created", 0.0)), updated=float(d.get("updated", 0.0)),
+            nodes=dict(d.get("nodes") or {}),
         )
 
 

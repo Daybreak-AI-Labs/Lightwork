@@ -60,8 +60,12 @@ def execute(flow: Flow, *, agent_runner: AgentRunner, action_runner: ActionRunne
         if prior.status == STATUS_PAUSED_APPROVAL:
             resume["decision"] = decision or "approved"
     rid = run_id or store.new_run_id()
+    # Per-node run trace for the designer overlay. Seeded from the prior run on
+    # resume so the pre-pause nodes' status survives across the pause.
+    node_states: dict = dict(prior.nodes) if (resume_run_id and prior) else {}
 
     def _on_node(node: FlowNode, status: str, outcome: float | None) -> None:
+        node_states[node.id] = {"status": status, "outcome": outcome}
         if outcome is not None:
             node_outcomes.record(flow.id, node.id, node.kind, outcome)
 
@@ -76,6 +80,7 @@ def execute(flow: Flow, *, agent_runner: AgentRunner, action_runner: ActionRunne
         cursor=res.cursor, resume_at=res.resume_at, prompt=res.prompt,
         error=res.error, owner=owner,
         created=(prior.created if resume_run_id and prior else 0.0),
+        nodes=node_states,
     )
     store.save_run(run)
     return run

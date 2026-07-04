@@ -8,6 +8,8 @@
 
   var flow = { id: '', name: '', start: '', nodes: [] };
   var proposals = {};   // node_id -> {to_kind, reason} from grounded per-node outcomes
+  var runState = {};    // node_id -> {status, outcome} from the last/live run
+  var runCursor = null; // node a paused run is waiting on
   var selected = null;
   var view = { x: 40, y: 20, k: 1 };
   var idSeq = 0;
@@ -49,6 +51,22 @@
       { key: 'if_false', x: W - 50, cls: 'f', label: 'no' }];
     return [{ key: 'next', x: W / 2, cls: '', label: '' }];
   }
+  function runClass(id) {
+    if (id === runCursor) return ' run-active';        // where the run is waiting
+    var rs = runState[id]; if (!rs) return '';
+    if (rs.outcome === 1) return ' run-ok';
+    if (rs.outcome === 0) return ' run-err';
+    return ' run-info';                                // a control step that ran
+  }
+  function runBadge(id) {
+    if (id === runCursor) return '⏳';
+    var rs = runState[id]; if (!rs) return '';
+    if (rs.outcome === 1) return '🟢';
+    if (rs.outcome === 0) return '🔴';
+    if (rs.status === 'true') return '✓';
+    if (rs.status === 'false') return '✗';
+    return '🟠';
+  }
 
   function render() {
     vp.setAttribute('transform', 'translate(' + view.x + ',' + view.y + ') scale(' + view.k + ')');
@@ -67,13 +85,15 @@
     });
     // nodes
     flow.nodes.forEach(function (n) {
-      var g = el('g', { class: 'fd-node' + (n.id === selected ? ' selected' : '') + (n.id === flow.start ? ' start' : ''),
+      var g = el('g', { class: 'fd-node' + (n.id === selected ? ' selected' : '') + (n.id === flow.start ? ' start' : '') + runClass(n.id),
                         transform: 'translate(' + n.x + ',' + n.y + ')' });
       g.setAttribute('data-node', n.id);
       g.appendChild(el('rect', { class: 'card', width: W, height: H, rx: 10 }));
       g.appendChild(el('rect', { class: 'swatch k-' + n.kind, x: 0, y: 0, width: 8, height: H, rx: 4 }));
       g.appendChild(el('text', { class: 'kind', x: 16, y: 20 }, (KIND_ICON[n.kind] || '') + ' ' + n.kind));
       g.appendChild(el('text', { x: 16, y: 40 }, trunc(n.label || summary(n), 26)));
+      var badge = runBadge(n.id);
+      if (badge) g.appendChild(el('text', { class: 'runbadge', x: W - 20, y: 20 }, badge));
       if (n.id === flow.start) g.appendChild(el('text', { x: 16, y: 56, class: 'fd-edge-label' }, '▶ start'));
       ports(n).forEach(function (p) {
         var c = el('circle', { class: 'port', cx: p.x, cy: H, r: 6 });
@@ -214,6 +234,15 @@
     if (n.kind === 'delay') props.appendChild(field('Seconds', input(String(n.seconds || ''), function (v) { n.seconds = parseFloat(v) || 0; render(); }, '60')));
     if (n.kind === 'agent' || n.kind === 'action' || n.kind === 'foreach' || n.kind === 'parallel')
       props.appendChild(field('Output key (optional)', input(n.output, function (v) { n.output = v; }, 'store result under…')));
+    // last run outcome for this node (from the live/last run overlay)
+    var rs = runState[n.id];
+    if (rs || n.id === runCursor) {
+      var badge = runBadge(n.id);
+      var rl = document.createElement('p'); rl.className = 'fd__empty'; rl.style.marginTop = 'var(--space-2)';
+      rl.textContent = 'Last run: ' + (n.id === runCursor ? 'waiting here'
+        : (rs.status || '') + (rs.outcome != null ? ' (' + (rs.outcome === 1 ? 'ok' : 'failed') + ')' : '')) + ' ' + badge;
+      props.appendChild(rl);
+    }
     // self-rewrite proposal for this node (from grounded per-node outcomes)
     var prop = proposals[n.id];
     if (prop) {
@@ -268,6 +297,8 @@
     };
   }
   function fromApiFlow(f) {
+    runState = {}; runCursor = null;
+    var lg = document.getElementById('fd-legend'); if (lg) lg.classList.remove('on');
     flow = { id: f.id || '', name: f.name || '', start: f.start || '', nodes: [] };
     (f.nodes || []).forEach(function (nd, i) {
       var n = Object.assign({ params: {}, brief: '', tool: '', condition: '', if_true: null, if_false: null,
@@ -301,11 +332,15 @@
   function apiFetch(url, opts) {
     return fetch(url, Object.assign({ headers: { 'Content-Type': 'application/json' } }, opts || {}));
   }
+  function slugify(s) {
+    return String(s || '').toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-+|-+$/g, '').slice(0, 60);
+  }
   function save(cb) {
     var bad = commitRawFields();
     if (bad.length) { say('Fix invalid JSON in: ' + bad.join(', '), true); return; }
     var body = toApiFlow();
-    if (!body.id) { say('Give the flow an id (top-left).', true); return; }
+    if (!body.id) { body.id = slugify(body.name); idInput.value = body.id; }   // auto-id from the name
+    if (!body.id) { say('Give the flow a name (top-left).', true); return; }
     if (!body.nodes.length) { say('Add at least one step.', true); return; }
     say('Saving…');
     apiFetch('/api/v1/flows', { method: 'POST', body: JSON.stringify({ flow: body }) })
@@ -316,12 +351,40 @@
       }).catch(function () { say('Save failed', true); });
   }
   function run() {
+    var data = {};
+    var raw = document.getElementById('fd-sample').value.trim();
+    if (raw) { try { data = JSON.parse(raw); } catch (e) { say('Sample input is not valid JSON.', true); return; } }
     save(function () {
-      apiFetch('/api/v1/flows/' + encodeURIComponent(flow.id) + '/run', { method: 'POST', body: '{}' })
+      apiFetch('/api/v1/flows/' + encodeURIComponent(flow.id) + '/run', { method: 'POST', body: JSON.stringify({ data: data }) })
         .then(function (r) { return r.json(); })
-        .then(function (j) { say(j.run_id ? 'Saved &amp; running (run ' + j.run_id.slice(0, 8) + '…)' : 'Run started'); })
-        .catch(function () { say('Run failed', true); });
+        .then(function (j) {
+          if (!j.run_id) { say('Run started'); return; }
+          runState = {}; runCursor = null;
+          say('Running (run ' + j.run_id.slice(0, 8) + '…)');
+          document.getElementById('fd-legend').classList.add('on');
+          pollRun(j.run_id, 20);
+        }).catch(function () { say('Run failed', true); });
     });
+  }
+  function pollRun(runId, tries) {
+    apiFetch('/api/v1/flows/runs/' + encodeURIComponent(runId))
+      .then(function (r) { return r.ok ? r.json() : null; })
+      .then(function (run) {
+        if (!run) return;
+        runState = run.nodes || {};
+        runCursor = (run.status === 'paused_approval' || run.status === 'paused_delay') ? run.cursor : null;
+        render(); if (selected) renderProps();
+        if (run.status === 'paused_approval') { say('⏸ waiting for approval — resume it from Automations.'); return; }
+        if (['completed', 'failed', 'rejected'].indexOf(run.status) >= 0) { say(runSummary(run)); return; }
+        if (tries > 0) setTimeout(function () { pollRun(runId, tries - 1); }, 900);
+        else say('Still running — check Automations for the result.');
+      }).catch(function () {});
+  }
+  function runSummary(run) {
+    var ok = 0, err = 0, ns = run.nodes || {};
+    for (var k in ns) { if (ns[k].outcome === 1) ok++; else if (ns[k].outcome === 0) err++; }
+    var head = run.status === 'completed' ? '✓ completed' : (run.status === 'rejected' ? '✋ rejected' : '⚠ ' + (run.error || run.status));
+    return head + ' · ' + ok + ' ok' + (err ? ', ' + err + ' failed' : '');
   }
   function draft() {
     var desc = document.getElementById('fd-nl').value.trim();

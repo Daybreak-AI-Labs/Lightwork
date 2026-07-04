@@ -37,6 +37,14 @@
   .k-agent { fill: #6366f1; } .k-action { fill: #0891b2; } .k-branch { fill: #d97706; }
   .k-foreach { fill: #7c3aed; } .k-parallel { fill: #db2777; } .k-approval { fill: #16a34a; }
   .k-delay { fill: #64748b; }
+  /* live run overlay */
+  .fd-node.run-ok rect.card { stroke: var(--success, #16a34a); stroke-width: 2.5; }
+  .fd-node.run-err rect.card { stroke: var(--danger, #dc2626); stroke-width: 2.5; }
+  .fd-node.run-info rect.card { stroke: #d97706; stroke-width: 2.5; }
+  .fd-node.run-active rect.card { stroke: var(--accent); stroke-width: 2.5; stroke-dasharray: 5 3; }
+  .fd-node .runbadge { font-size: 13px; }
+  .fd__legend { font-size: var(--text-sm); color: var(--muted); display: none; gap: var(--space-3); }
+  .fd__legend.on { display: inline-flex; }
 </style>
 
 <div class="fd">
@@ -47,9 +55,13 @@
       <input class="input" id="fd-nl" placeholder="Describe your workflow in plain English…" aria-label="Describe your workflow" />
       <button class="btn btn--primary" type="button" id="fd-draft">✨ Draft</button>
     </div>
+    <input class="input" id="fd-sample" placeholder='Sample input, e.g. {"issue":"…"}' aria-label="Sample input JSON" style="width:200px;" />
     <button class="btn" type="button" id="fd-save">Save</button>
-    <button class="btn btn--ghost" type="button" id="fd-run">Save &amp; Run</button>
+    <button class="btn btn--ghost" type="button" id="fd-run">▷ Test run</button>
     <span class="fd__msg" id="fd-msg" aria-live="polite"></span>
+    <span class="fd__legend" id="fd-legend" aria-hidden="true">
+      <span>🟢 ok</span><span>🔴 failed</span><span>🟠 branch/step</span><span>⏳ waiting</span>
+    </span>
   </div>
 
   <div class="fd__palette" aria-label="Add node">
