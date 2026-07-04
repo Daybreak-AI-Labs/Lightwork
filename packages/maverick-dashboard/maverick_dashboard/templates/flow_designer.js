@@ -7,6 +7,7 @@
                     parallel: '🔱', approval: '✅', delay: '⏱' };
 
   var flow = { id: '', name: '', start: '', nodes: [] };
+  var proposals = {};   // node_id -> {to_kind, reason} from grounded per-node outcomes
   var selected = null;
   var view = { x: 40, y: 20, k: 1 };
   var idSeq = 0;
@@ -211,6 +212,18 @@
     if (n.kind === 'delay') props.appendChild(field('Seconds', input(String(n.seconds || ''), function (v) { n.seconds = parseFloat(v) || 0; render(); }, '60')));
     if (n.kind === 'agent' || n.kind === 'action' || n.kind === 'foreach' || n.kind === 'parallel')
       props.appendChild(field('Output key (optional)', input(n.output, function (v) { n.output = v; }, 'store result under…')));
+    // self-rewrite proposal for this node (from grounded per-node outcomes)
+    var prop = proposals[n.id];
+    if (prop) {
+      var pbox = document.createElement('div');
+      pbox.style.cssText = 'margin-top:var(--space-3);padding:var(--space-2);border:1px solid var(--accent);border-radius:8px;';
+      var pl = document.createElement('p'); pl.className = 'fd__empty'; pl.style.marginBottom = 'var(--space-2)';
+      pl.textContent = '💡 ' + prop.reason;
+      var pb = document.createElement('button'); pb.className = 'btn btn--ghost'; pb.type = 'button';
+      pb.textContent = 'Convert to ' + prop.to_kind;
+      pb.addEventListener('click', function () { n.kind = prop.to_kind; delete proposals[n.id]; render(); renderProps(); });
+      pbox.appendChild(pl); pbox.appendChild(pb); props.appendChild(pbox);
+    }
     // actions
     var row = document.createElement('div'); row.style.display = 'flex'; row.style.gap = 'var(--space-2)'; row.style.marginTop = 'var(--space-3)';
     var mk = document.createElement('button'); mk.className = 'btn btn--ghost'; mk.type = 'button'; mk.textContent = 'Make start';
@@ -325,6 +338,14 @@
       if (!r.ok) { say('Could not load flow', true); return; }
       return r.json().then(fromApiFlow);
     }).catch(function () { say('Could not load flow', true); });
+    // self-rewrite suggestions (harden a reliable agent / soften a flaky action)
+    apiFetch('/api/v1/flows/' + encodeURIComponent(id) + '/proposals').then(function (r) {
+      return r.ok ? r.json() : { proposals: [] };
+    }).then(function (j) {
+      proposals = {};
+      (j.proposals || []).forEach(function (p) { proposals[p.node_id] = p; });
+      if (j.proposals && j.proposals.length) say('💡 ' + j.proposals.length + ' learned suggestion(s) — select a node to see them.');
+    }).catch(function () {});
   }
 
   // ---- wire ----

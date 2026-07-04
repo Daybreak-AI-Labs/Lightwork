@@ -45,6 +45,7 @@ from .api_schemas import (
     CatalogInstallIn,
     ChildIn,
     ComposeIn,
+    DeliverableEditIn,
     EventTriggerIn,
     EventTriggerOut,
     FactIn,
@@ -1864,6 +1865,31 @@ async def post_feedback(request: Request, goal_id: int, payload: FeedbackIn) -> 
                                      note=payload.note or "", by=who)
     _ground_outcome(w, goal_id, value, kind="feedback")
     return {"feedback": row}
+
+
+@router.post("/goals/{goal_id}/deliverable/edit")
+async def edit_deliverable(request: Request, goal_id: int,
+                           payload: DeliverableEditIn) -> dict:
+    """Save a human's revised deliverable and ground the edit as a learning signal.
+
+    How much the human changed the agent's draft is graded ground truth: a
+    verbatim keep is a strong positive (~1.0), a heavy rewrite a graded negative.
+    The similarity becomes the grounded outcome (kind ``edit``), and the revised
+    text replaces the goal's result (the human's version is now canonical).
+    Best-effort grounding, gated on ``[consequence]``."""
+    require_permission(request, "operate")
+    w = _world()
+    g = w.get_goal(goal_id)
+    if g is None:
+        raise HTTPException(status_code=404, detail="no such goal")
+    assert_goal_access(request, g)
+    import difflib
+    original = g.result or ""
+    revised = payload.text or ""
+    similarity = difflib.SequenceMatcher(None, original, revised).ratio() if original else 0.0
+    w.set_goal_status(goal_id, g.status, result=revised)   # the edit is the deliverable now
+    _ground_outcome(w, goal_id, similarity, kind="edit")
+    return {"similarity": round(similarity, 3)}
 
 
 def _handoff_approved_deliverable(g, decided_by: str) -> None:

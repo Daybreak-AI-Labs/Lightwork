@@ -87,6 +87,40 @@ class TestFeedbackGroundsLearning:
         assert consequence.resolve(gid, eid) is None     # ...but nothing is grounded
 
 
+class TestDeliverableEditGrounding:
+    def test_verbatim_keep_grounds_high_edit_replaces_result(self, tmp_path, monkeypatch):
+        monkeypatch.setenv("MAVERICK_CONSEQUENCE", "1")
+        consequence = _isolate(tmp_path, monkeypatch)
+        w = _world(tmp_path, monkeypatch)
+        gid = w.create_goal("Draft the memo", "")
+        eid = w.start_episode(gid)
+        w.set_goal_status(gid, "done", result="the agent's draft")
+        # a near-verbatim keep -> high similarity -> strong positive
+        r = client.post(f"/api/v1/goals/{gid}/deliverable/edit",
+                        json={"text": "the agent's draft."})
+        assert r.status_code == 200 and r.json()["similarity"] > 0.9
+        assert consequence.resolve(gid, eid) > 0.9
+        assert w.get_goal(gid).result == "the agent's draft."   # the edit is canonical now
+
+    def test_heavy_rewrite_grounds_low(self, tmp_path, monkeypatch):
+        monkeypatch.setenv("MAVERICK_CONSEQUENCE", "1")
+        consequence = _isolate(tmp_path, monkeypatch)
+        w = _world(tmp_path, monkeypatch)
+        gid = w.create_goal("Draft the memo", "")
+        eid = w.start_episode(gid)
+        w.set_goal_status(gid, "done", result="aaaaaaaaaaaaaaaaaaaa")
+        r = client.post(f"/api/v1/goals/{gid}/deliverable/edit",
+                        json={"text": "completely different text zzzzzzzz"})
+        assert r.status_code == 200 and r.json()["similarity"] < 0.5
+        assert consequence.resolve(gid, eid) < 0.5
+
+    def test_edit_missing_goal_is_404(self, tmp_path, monkeypatch):
+        _isolate(tmp_path, monkeypatch)
+        _world(tmp_path, monkeypatch)
+        assert client.post("/api/v1/goals/999/deliverable/edit",
+                           json={"text": "x"}).status_code == 404
+
+
 class TestSystemOfRecordLoop:
     """Register a business key during a run, then have a system of record report
     the real outcome using only that key -- the marquee grounded signal."""

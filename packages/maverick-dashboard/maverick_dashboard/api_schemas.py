@@ -223,6 +223,13 @@ class FeedbackIn(BaseModel):
     note: str | None = Field(default=None, max_length=2000)
 
 
+class DeliverableEditIn(BaseModel):
+    """A human's revised version of a goal's deliverable. How much they changed it
+    (vs. the agent's draft) grounds a graded outcome -- a verbatim keep is a strong
+    positive, a heavy rewrite is graded-negative ground truth."""
+    text: str = Field(..., max_length=200_000)
+
+
 class OutcomeLinkIn(BaseModel):
     """Link an external business key (``invoice:INV-42``) to the episode that
     acted on it, so a later outcome reported against that key can be grounded."""
