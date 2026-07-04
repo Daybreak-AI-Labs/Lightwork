@@ -920,7 +920,7 @@ async def list_flows_endpoint(request: Request) -> dict:
     from maverick.flow import store
     return {"flows": [
         {"id": f.id, "name": f.name, "nodes": len(f.nodes),
-         "single_agent": f.is_single_agent()}
+         "single_agent": f.is_single_agent(), "schedule": f.schedule}
         for f in store.list_flows()
     ]}
 

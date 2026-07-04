@@ -146,6 +146,7 @@ class Flow:
     version: int = 1
     notify: bool = False             # push a notification on approval-pause / finish
     max_seconds: float = 0.0         # whole-flow wall-clock deadline (0 = no limit)
+    schedule: str = ""               # a cron expression to run this flow on (empty = not scheduled)
 
     def node(self, node_id: str | None) -> FlowNode | None:
         return self.nodes.get(node_id) if node_id else None
@@ -158,7 +159,7 @@ class Flow:
         return {
             "id": self.id, "name": self.name, "start": self.start,
             "version": self.version, "notify": self.notify,
-            "max_seconds": self.max_seconds,
+            "max_seconds": self.max_seconds, "schedule": self.schedule,
             "nodes": [n.to_dict() for n in self.nodes.values()],
         }
 
@@ -172,6 +173,7 @@ class Flow:
             version=int(d.get("version", 1) or 1),
             notify=bool(d.get("notify", False)),
             max_seconds=float(d.get("max_seconds", 0.0) or 0.0),
+            schedule=str(d.get("schedule", "")),
         )
 
     def validate(self) -> list[str]:
@@ -182,6 +184,12 @@ class Flow:
             return errs
         if self.start not in self.nodes:
             errs.append(f"start node {self.start!r} is not in the flow")
+        if self.schedule.strip():
+            from ..scheduler import CronError, parse_cron
+            try:
+                parse_cron(self.schedule)
+            except CronError as e:
+                errs.append(f"invalid schedule {self.schedule!r}: {e}")
         seen_ids = set()
         for nid, n in self.nodes.items():
             if n.id != nid:

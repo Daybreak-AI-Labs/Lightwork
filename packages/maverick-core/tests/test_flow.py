@@ -47,6 +47,18 @@ class TestFlowIR:
         f = _flow([FlowNode(id="a", kind="action")])   # no tool
         assert any("has no tool" in e for e in f.validate())
 
+    def test_schedule_roundtrips_and_validates(self):
+        f = _flow([FlowNode(id="a", kind="agent", brief="x")])
+        f.schedule = "0 9 * * 1"
+        again = Flow.from_dict(f.to_dict())
+        assert again.schedule == "0 9 * * 1"
+        assert again.validate() == []
+
+    def test_invalid_schedule_is_a_validation_error(self):
+        f = _flow([FlowNode(id="a", kind="agent", brief="x")])
+        f.schedule = "not a cron"
+        assert any("invalid schedule" in e for e in f.validate())
+
     def test_roundtrip_serialisation_nested(self):
         body = _flow([FlowNode(id="x", kind="agent", brief="do {{item}}")], start="x")
         f = _flow([

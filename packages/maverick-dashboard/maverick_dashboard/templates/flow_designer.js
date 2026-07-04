@@ -332,6 +332,7 @@
       start: flow.start,
       notify: !!(notifyEl && notifyEl.checked),
       max_seconds: parseFloat((document.getElementById('fd-maxsec') || {}).value) || 0,
+      schedule: ((document.getElementById('fd-schedule') || {}).value || '').trim(),
       nodes: flow.nodes.map(function (n) {
         var o = { id: n.id, kind: n.kind };
         ['next', 'tool', 'brief', 'condition', 'if_true', 'if_false', 'items', 'var', 'prompt', 'flow_ref', 'on_error', 'output', 'label'].forEach(function (k) {
@@ -355,6 +356,7 @@
     flow = { id: f.id || '', name: f.name || '', start: f.start || '', nodes: [], max_seconds: f.max_seconds || 0 };
     var notifyEl = document.getElementById('fd-notify'); if (notifyEl) notifyEl.checked = !!f.notify;
     var msEl = document.getElementById('fd-maxsec'); if (msEl) msEl.value = f.max_seconds || '';
+    var schEl = document.getElementById('fd-schedule'); if (schEl) schEl.value = f.schedule || '';
     (f.nodes || []).forEach(function (nd, i) {
       var n = Object.assign({ params: {}, brief: '', tool: '', condition: '', if_true: null, if_false: null,
         items: '', var: 'item', limit: 0, prompt: '', seconds: 0, flow_ref: '', retries: 0, on_error: null, timeout: 0,

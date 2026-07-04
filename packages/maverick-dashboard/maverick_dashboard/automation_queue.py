@@ -44,6 +44,7 @@ FLOW_RUN_KIND = "flow_run"       # one-shot: run a flow to its next pause/finish
 FLOW_RESUME_KIND = "flow_resume"  # one-shot: resume a paused flow run
 FLOW_SWEEP_KIND = "flow_delay_sweep"  # recurring: re-arm flow runs whose delay elapsed
 FLOW_EVOLVE_KIND = "flow_evolve"  # recurring: autonomously revert a regressed rewrite
+FLOW_CRON_KIND = "flow_cron"     # recurring: fire a scheduled flow on its own cron cadence
 _FLOW_SWEEP_CRON = "* * * * *"   # check for due delays every minute
 _FLOW_EVOLVE_CRON = "*/30 * * * *"   # re-check applied rewrites every 30 min
 _MIN_INTERVAL = 60               # floor for a per-trigger cadence (matches the UI/schema)
@@ -345,6 +346,12 @@ def _handle_flow_sweep(_job=None) -> None:
                     "flow_id": run.flow_id, "run_id": run.run_id, "owner": run.owner})
     except Exception:  # pragma: no cover -- fail-open
         log.exception("flow delay sweep failed")
+    # Also re-sync per-flow cron schedules from the store, so a flow scheduled
+    # (or unscheduled) after boot is armed/disarmed within a minute -- no restart.
+    try:
+        _reconcile_flow_crons()
+    except Exception:  # pragma: no cover -- fail-open
+        log.exception("flow cron reconcile failed")
 
 
 def _handle_flow_evolve(_job=None) -> None:
@@ -383,6 +390,29 @@ def _handle_flow_evolve(_job=None) -> None:
         log.exception("flow evolve pass failed")
 
 
+def _handle_flow_cron(job=None) -> None:
+    """Fire a scheduled flow on its cron cadence: enqueue a fresh flow run each
+    occurrence. The worker re-arms the next occurrence (payload carries
+    ``__cron__``). Re-check the flow still exists and still carries THIS schedule,
+    so a schedule that was removed or changed stops firing immediately -- before
+    the next reconcile() cancels the now-stale cron job. Fail-open."""
+    payload = getattr(job, "payload", None) or {}
+    flow_id = str(payload.get("flow_id") or "")
+    if not flow_id:
+        return
+    try:
+        from maverick import flow as flow_mod
+        if not flow_mod.enabled():
+            return
+        from maverick.flow import store
+        flow = store.load_flow(flow_id)
+        if flow is None or flow.schedule.strip() != str(payload.get("__cron__") or "").strip():
+            return  # deleted, or the schedule changed out from under this cron
+        enqueue_flow_run(flow_id, {}, owner=str(payload.get("owner") or ""))
+    except Exception:  # pragma: no cover -- fail-open
+        log.exception("scheduled flow run failed for %s", flow_id)
+
+
 # ---- cron seeding -----------------------------------------------------------
 
 def _pending(kind: str) -> list:
@@ -403,6 +433,38 @@ def _ensure_cron(kind: str, expr: str) -> None:
             q.cancel(extra.id)
         return
     schedule_cron(q, expr, kind, {"__cron__": expr})
+
+
+def _reconcile_flow_crons() -> None:
+    """Seed one ``flow_cron`` job per scheduled flow and cancel the crons of
+    flows that lost (or changed) their schedule. Keyed by ``flow_id`` in the
+    payload, expression tracked in ``__cron__``: a job whose flow no longer has
+    the same schedule is stale and cancelled; a scheduled flow with no matching
+    live cron gets one seeded. Idempotent -- safe to run on every reconcile."""
+    from maverick.flow import store
+    from maverick.scheduler import CronError, parse_cron, schedule_cron
+    want: dict[str, str] = {}
+    for f in store.list_flows():
+        expr = f.schedule.strip()
+        if not expr:
+            continue
+        try:
+            parse_cron(expr)          # only arm a valid expression
+        except CronError:
+            continue
+        want[f.id] = expr
+    q = queue()
+    covered: set[str] = set()
+    for j in _pending(FLOW_CRON_KIND):
+        fid = str((j.payload or {}).get("flow_id") or "")
+        expr = str((j.payload or {}).get("__cron__") or "")
+        if want.get(fid) == expr and fid not in covered:
+            covered.add(fid)          # exactly one correct cron per flow; keep it
+        else:
+            q.cancel(j.id)            # stale (flow unscheduled, schedule changed, or dup)
+    for fid, expr in want.items():
+        if fid not in covered:
+            schedule_cron(q, expr, FLOW_CRON_KIND, {"flow_id": fid, "__cron__": expr})
 
 
 def _dream_cron() -> str:
@@ -433,6 +495,7 @@ def reconcile() -> None:
         _ensure_cron(FLYWHEEL_KIND, _flywheel_cron())
     if flow.enabled():
         _ensure_cron(FLOW_SWEEP_KIND, _FLOW_SWEEP_CRON)
+        _reconcile_flow_crons()
     if flow.auto_evolve_enabled():
         _ensure_cron(FLOW_EVOLVE_KIND, _FLOW_EVOLVE_CRON)
 
@@ -465,6 +528,7 @@ def start() -> bool:
         w.register(FLOW_RESUME_KIND, _handle_flow_resume)
         w.register(FLOW_SWEEP_KIND, _handle_flow_sweep)
         w.register(FLOW_EVOLVE_KIND, _handle_flow_evolve)
+        w.register(FLOW_CRON_KIND, _handle_flow_cron)
         # Seed the cron jobs + actually start the threads BEFORE committing to the
         # module globals, so a failure in reconcile() (e.g. a boot-time sqlite
         # write error) leaves us cleanly un-started and retryable -- not wedged
@@ -500,4 +564,5 @@ def stop() -> None:
 
 __all__ = ["start", "stop", "reconcile", "queue",
            "TICK_KIND", "DREAM_KIND", "FLYWHEEL_KIND",
-           "FLOW_RUN_KIND", "FLOW_RESUME_KIND", "FLOW_SWEEP_KIND", "FLOW_EVOLVE_KIND"]
+           "FLOW_RUN_KIND", "FLOW_RESUME_KIND", "FLOW_SWEEP_KIND", "FLOW_EVOLVE_KIND",
+           "FLOW_CRON_KIND"]
