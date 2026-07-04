@@ -95,6 +95,30 @@
         <span class="auto__hint" id="auto-event-msg" aria-live="polite"></span>
       </div>
     </form>
+
+    <div id="oauth-connect" style="margin-top: var(--space-5);" hidden>
+      <h3 style="margin-bottom: var(--space-2);">Connected accounts</h3>
+      <p class="auto__hint">Connect a SaaS account once, then poll it from an OAuth’d source (set <code>{"provider": "&lt;name&gt;"}</code> in a source config). The token is sealed per-tenant and refreshed automatically. Set the app’s client id/secret in the named environment variables first.</p>
+      <ul class="auto__list" id="oauth-list" aria-label="Connected accounts"></ul>
+      <div class="field" style="margin-top: var(--space-3);">
+        <label for="oauth-redirect">Redirect URI (registered with the OAuth app)</label>
+        <input type="text" id="oauth-redirect" placeholder="https://your-dashboard/oauth/callback" autocomplete="off" spellcheck="false" />
+      </div>
+      <div class="wf__row" style="display:flex; gap: var(--space-3); align-items:center; flex-wrap: wrap;">
+        <select id="oauth-provider" aria-label="Provider to connect"></select>
+        <button class="btn btn--ghost" type="button" id="oauth-get-url">Get consent link</button>
+        <span class="auto__hint" id="oauth-msg" aria-live="polite"></span>
+      </div>
+      <div id="oauth-finish" style="margin-top: var(--space-3);" hidden>
+        <p class="auto__hint">Open the link, authorize, then paste the <code>code</code> from the redirect here to finish.</p>
+        <a id="oauth-open" class="btn btn--ghost" href="#" target="_blank" rel="noopener noreferrer">Open consent page ↗</a>
+        <div class="field" style="margin-top: var(--space-2);">
+          <label for="oauth-code">Authorization code</label>
+          <input type="text" id="oauth-code" autocomplete="off" spellcheck="false" />
+        </div>
+        <button class="btn btn--primary" type="button" id="oauth-exchange">Finish connecting</button>
+      </div>
+    </div>
   </section>
   {% endif %}
 
@@ -468,6 +492,85 @@
       } catch (e) { evMsg.textContent = 'Poll failed.'; }
     });
     loadEventTriggers();
+  }
+
+  // ---- connected accounts (turnkey OAuth) ----
+  var oauthBox = document.getElementById('oauth-connect');
+  if (oauthBox) {
+    var oList = document.getElementById('oauth-list');
+    var oProv = document.getElementById('oauth-provider');
+    var oMsg = document.getElementById('oauth-msg');
+    var oFinish = document.getElementById('oauth-finish');
+    var oOpen = document.getElementById('oauth-open');
+    var pendingVerifier = '';
+    async function loadOAuth() {
+      var data;
+      try { data = await (await fetch('/api/v1/oauth/providers')).json(); }
+      catch (e) { return; }
+      if (!data.vault_enabled) { oauthBox.hidden = true; return; }
+      oauthBox.hidden = false;
+      var connected = data.connected || [];
+      oList.textContent = '';
+      if (oProv && !oProv.children.length) {
+        (data.providers || []).forEach(function (p) {
+          var o = document.createElement('option'); o.value = p.name; o.textContent = p.label; oProv.appendChild(o);
+        });
+      }
+      (data.providers || []).forEach(function (p) {
+        if (connected.indexOf(p.name) === -1) return;
+        var li = el('li', 'mv-row');
+        var main = el('div', 'mv-row__main');
+        main.appendChild(el('div', 'mv-row__title', p.label + ' · connected'));
+        main.appendChild(el('div', 'mv-row__sub', 'provider ' + p.name));
+        li.appendChild(main);
+        li.appendChild(delBtn('Disconnect ' + p.label, function () { disconnect(p.name); }));
+        oList.appendChild(li);
+      });
+    }
+    async function disconnect(name) {
+      if (!(await mvConfirm('Disconnect ' + name + '? Triggers using it will stop authenticating.'))) return;
+      try {
+        var r = await fetch('/api/v1/oauth/' + encodeURIComponent(name), { method: 'DELETE' });
+        if (r.ok) { mvToast('Disconnected'); loadOAuth(); }
+        else { mvToast('Could not disconnect', { error: true }); }
+      } catch (e) { mvToast('Could not disconnect', { error: true }); }
+    }
+    document.getElementById('oauth-get-url').addEventListener('click', async function () {
+      var redirect = (document.getElementById('oauth-redirect').value || '').trim();
+      if (!redirect) { oMsg.textContent = 'Enter the redirect URI first.'; return; }
+      oMsg.textContent = 'Building consent link…';
+      try {
+        var r = await fetch('/api/v1/oauth/' + encodeURIComponent(oProv.value) + '/authorize-url', {
+          method: 'POST', headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ redirect_uri: redirect }),
+        });
+        var j = await r.json();
+        if (!r.ok) { oMsg.textContent = j.detail || ('Failed: ' + r.status); return; }
+        pendingVerifier = j.verifier || '';
+        oOpen.href = j.authorize_url;
+        oFinish.hidden = false;
+        oMsg.textContent = 'Open the consent page, then paste the code below.';
+      } catch (e) { oMsg.textContent = 'Failed to build consent link.'; }
+    });
+    document.getElementById('oauth-exchange').addEventListener('click', async function () {
+      var code = (document.getElementById('oauth-code').value || '').trim();
+      var redirect = (document.getElementById('oauth-redirect').value || '').trim();
+      if (!code) { oMsg.textContent = 'Paste the authorization code first.'; return; }
+      oMsg.textContent = 'Connecting…';
+      try {
+        var r = await fetch('/api/v1/oauth/' + encodeURIComponent(oProv.value) + '/exchange', {
+          method: 'POST', headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ code: code, redirect_uri: redirect, verifier: pendingVerifier }),
+        });
+        var j = await r.json();
+        if (!r.ok) { oMsg.textContent = j.detail || ('Exchange failed: ' + r.status); return; }
+        oMsg.textContent = 'Connected ✓';
+        oFinish.hidden = true;
+        document.getElementById('oauth-code').value = '';
+        loadOAuth();
+      } catch (e) { oMsg.textContent = 'Exchange failed.'; }
+    });
+    loadOAuth();
   }
 
   loadSchedules();

@@ -236,6 +236,24 @@ class OutcomeByKeyIn(BaseModel):
     kind: str = ""
 
 
+class OAuthAuthorizeIn(BaseModel):
+    """Start a turnkey 'connect this account' flow for a preset provider: build
+    the consent URL. The returned PKCE verifier is kept by the (admin) operator
+    and passed back to /exchange -- no server-side state."""
+    redirect_uri: str = Field(..., min_length=1, max_length=2048)
+    scopes: list[str] | None = None
+    client_id: str | None = Field(default=None, max_length=512)
+
+
+class OAuthExchangeIn(BaseModel):
+    """Finish the connect flow: swap the authorization code for tokens and seal
+    them in the per-tenant vault under the provider name."""
+    code: str = Field(..., min_length=1, max_length=4096)
+    redirect_uri: str = Field(..., min_length=1, max_length=2048)
+    verifier: str = Field(default="", max_length=256)
+    client_id: str | None = Field(default=None, max_length=512)
+
+
 class AnswerIn(BaseModel):
     question_id: int
     answer: str

@@ -59,6 +59,8 @@ from .api_schemas import (
     ImportRunIn,
     ImportRunOut,
     LearningToggleIn,
+    OAuthAuthorizeIn,
+    OAuthExchangeIn,
     OutcomeByKeyIn,
     OutcomeIn,
     OutcomeLinkIn,
@@ -798,6 +800,97 @@ async def record_outcome_by_key(request: Request, payload: OutcomeByKeyIn) -> di
     consequence.record_outcome(goal_id, episode_id, float(payload.value),
                                kind=(payload.kind or ""))
     return {"matched": True}
+
+
+# ---- turnkey "connect this account" OAuth flow --------------------------------
+#
+# Connect a SaaS account by NAME using a provider preset, so an OAuth'd event
+# source (oauth_http_json / github_issues with provider=<name>) can poll it.
+# Authorizing a token is the same trust as sending it, so all mutating steps are
+# ADMIN-gated (matching the provider-trigger admin gate). The client secret is
+# read from the operator's env, never posted here or persisted.
+
+
+def _require_oauth_vault() -> None:
+    from maverick import oauth_vault
+    if not oauth_vault.enabled():
+        raise HTTPException(
+            status_code=403,
+            detail=("the OAuth vault is off; enable [oauth] vault or set "
+                    "MAVERICK_OAUTH_VAULT=1 to connect accounts"),
+        )
+
+
+@router.get("/oauth/providers")
+async def oauth_providers_endpoint(request: Request) -> dict:
+    """The connectable provider presets + which are already connected (view)."""
+    require_permission(request, "view")
+    from maverick import oauth_providers, oauth_vault
+    connected: list[str] = []
+    if oauth_vault.enabled():
+        try:
+            connected = oauth_vault.get_vault().providers()
+        except Exception:  # pragma: no cover -- a vault read never errors the list
+            connected = []
+    return {
+        "providers": oauth_providers.provider_catalog(),
+        "connected": connected,
+        "vault_enabled": oauth_vault.enabled(),
+    }
+
+
+@router.post("/oauth/{provider}/authorize-url")
+async def oauth_authorize_url(request: Request, provider: str,
+                              payload: OAuthAuthorizeIn) -> dict:
+    """Build the consent URL for a preset provider (admin). Returns the URL to
+    open and the PKCE verifier to keep -- pass the verifier back to /exchange.
+    Stateless: the verifier round-trips through the (trusted) operator."""
+    require_permission(request, "admin")
+    _require_oauth_vault()
+    from maverick import oauth_providers
+    built = oauth_providers.build_authorize_url(
+        provider, redirect_uri=payload.redirect_uri,
+        client_id=payload.client_id or "", scopes=payload.scopes)
+    if built is None:
+        prov = oauth_providers.get_provider(provider)
+        if prov is None:
+            raise HTTPException(status_code=404, detail=f"unknown provider {provider!r}")
+        raise HTTPException(
+            status_code=400,
+            detail=f"set {prov.default_client_id_env()} (the OAuth app client id) first")
+    url, verifier = built
+    return {"authorize_url": url, "verifier": verifier}
+
+
+@router.post("/oauth/{provider}/exchange")
+async def oauth_exchange(request: Request, provider: str,
+                         payload: OAuthExchangeIn) -> dict:
+    """Swap the authorization code for tokens and seal them in the per-tenant
+    vault under the provider name (admin). The provider preset supplies the token
+    endpoint; the client secret is read from the operator's env."""
+    require_permission(request, "admin")
+    _require_oauth_vault()
+    from maverick import oauth_providers
+    if oauth_providers.get_provider(provider) is None:
+        raise HTTPException(status_code=404, detail=f"unknown provider {provider!r}")
+    try:
+        summary = oauth_providers.exchange_code(
+            provider, code=payload.code, redirect_uri=payload.redirect_uri,
+            verifier=payload.verifier or "", client_id=payload.client_id or "")
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e)) from e
+    except Exception as e:  # a provider/network failure -> 502, not a 500
+        raise HTTPException(status_code=502, detail=f"token exchange failed: {e}") from e
+    return {"connected": True, **summary}
+
+
+@router.delete("/oauth/{provider}", status_code=204)
+async def oauth_disconnect(request: Request, provider: str) -> None:
+    """Remove a connected account's sealed token from the vault (admin)."""
+    require_permission(request, "admin")
+    _require_oauth_vault()
+    from maverick import oauth_vault
+    oauth_vault.get_vault().delete(provider)
 
 
 @router.get("/skills", response_model=list[SkillOut])
