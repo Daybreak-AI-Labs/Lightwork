@@ -1012,7 +1012,16 @@ async def list_flow_runs_endpoint(request: Request, flow_id: str = "",
     owner = goal_owner_filter(request)
     runs = store.list_runs(flow_id=flow_id or None, owner=owner,
                            limit=max(1, min(500, limit)))
-    return {"runs": [r.to_dict() for r in runs]}
+    return {"runs": [_run_out(r) for r in runs]}
+
+
+def _run_out(run) -> dict:
+    """A flow run for the API with secret-looking values in its ``data`` masked,
+    so a token a connector put into the run never leaves over HTTP."""
+    from maverick.flow.redact import redact
+    d = run.to_dict()
+    d["data"] = redact(d.get("data") or {})
+    return d
 
 
 def _load_owned_run(request: Request, run_id: str):
@@ -1032,7 +1041,7 @@ def _load_owned_run(request: Request, run_id: str):
 async def get_flow_run_endpoint(request: Request, run_id: str) -> dict:
     require_permission(request, "operate")
     _require_flows()
-    return _load_owned_run(request, run_id).to_dict()
+    return _run_out(_load_owned_run(request, run_id))
 
 
 @router.post("/flows/runs/{run_id}/resume")
@@ -1128,8 +1137,9 @@ async def run_flow_endpoint(request: Request, flow_id: str, payload: FlowRunIn) 
                                  owner=owner, data=dict(payload.data or {})))
     from maverick_dashboard import automation_queue as aq
     aq.queue().enqueue(aq.FLOW_RUN_KIND, {
-        "flow_id": flow_id, "run_id": run_id, "data": payload.data, "owner": owner})
-    return {"run_id": run_id, "status": "queued"}
+        "flow_id": flow_id, "run_id": run_id, "data": payload.data, "owner": owner,
+        "dry_run": bool(payload.dry_run)})
+    return {"run_id": run_id, "status": "queued", "dry_run": bool(payload.dry_run)}
 
 
 @router.get("/flows/{flow_id}/proposals")

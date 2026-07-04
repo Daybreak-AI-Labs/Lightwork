@@ -36,12 +36,15 @@ def execute(flow: Flow, *, agent_runner: AgentRunner, action_runner: ActionRunne
             approve_fn: Callable[[FlowNode, dict], str] | None = None,
             run_id: str | None = None,
             resume_run_id: str | None = None, decision: str | None = None,
-            inputs: dict | None = None,
+            inputs: dict | None = None, record_outcomes: bool = True,
             now: Callable[[], float] | None = None) -> store.FlowRun:
     """Run ``flow`` (or resume a paused run) with live executors, persisting the
     resulting :class:`~.store.FlowRun`. ``run_id`` pre-assigns a fresh run's id
     (so a caller can hand it back for polling); ``decision`` is the human verdict
-    when resuming a run paused on an approval (``approved`` / ``rejected``)."""
+    when resuming a run paused on an approval (``approved`` / ``rejected``).
+    ``record_outcomes=False`` (a dry run) still traces per-node status for the
+    overlay but does NOT ground outcomes -- a mock run's fake successes must not
+    pollute the self-rewrite signal."""
     resume = None
     prior = None
     if resume_run_id:
@@ -72,7 +75,7 @@ def execute(flow: Flow, *, agent_runner: AgentRunner, action_runner: ActionRunne
 
     def _on_node(node: FlowNode, status: str, outcome: float | None) -> None:
         node_states[node.id] = {"status": status, "outcome": outcome}
-        if outcome is not None:
+        if outcome is not None and record_outcomes:
             node_outcomes.record(flow.id, node.id, node.kind, outcome)
 
     res = run_flow(
@@ -137,4 +140,17 @@ def default_action_runner(world, sandbox=None) -> ActionRunner:
     return run
 
 
-__all__ = ["execute", "default_agent_runner", "default_action_runner"]
+def sandbox_runners() -> tuple[AgentRunner, ActionRunner]:
+    """Mock executors for a DRY RUN: they exercise the graph (routing, data
+    threading, {{ }} rendering) without creating a real goal or calling a real
+    connector, so a user can safely test a flow with sample input before wiring
+    it to a live trigger. Each returns a labeled placeholder + a success outcome."""
+    def agent(brief: str, data: dict) -> tuple[Any, float | None]:
+        return (f"[dry-run agent] {str(brief)[:120]}", 1.0)
+
+    def action(tool: str, params: dict, data: dict) -> tuple[Any, float | None]:
+        return ({"dry_run": True, "tool": tool, "params": params}, 1.0)
+    return agent, action
+
+
+__all__ = ["execute", "default_agent_runner", "default_action_runner", "sandbox_runners"]

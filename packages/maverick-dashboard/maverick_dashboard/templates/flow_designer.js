@@ -402,17 +402,18 @@
         flow.id = body.id; say('Saved ✓'); if (cb) cb();
       }).catch(function () { say('Save failed', true); });
   }
-  function run() {
+  function run(dryRun) {
     var data = {};
     var raw = document.getElementById('fd-sample').value.trim();
     if (raw) { try { data = JSON.parse(raw); } catch (e) { say('Sample input is not valid JSON.', true); return; } }
+    if (!dryRun && !window.confirm('Run for real? This creates real goals and calls real connectors.')) return;
     save(function () {
-      apiFetch('/api/v1/flows/' + encodeURIComponent(flow.id) + '/run', { method: 'POST', body: JSON.stringify({ data: data }) })
+      apiFetch('/api/v1/flows/' + encodeURIComponent(flow.id) + '/run', { method: 'POST', body: JSON.stringify({ data: data, dry_run: !!dryRun }) })
         .then(function (r) { return r.json(); })
         .then(function (j) {
           if (!j.run_id) { say('Run started'); return; }
           runState = {}; runCursor = null;
-          say('Running (run ' + j.run_id.slice(0, 8) + '…)');
+          say((dryRun ? '🧪 Dry run ' : 'Running ') + '(run ' + j.run_id.slice(0, 8) + '…)');
           document.getElementById('fd-legend').classList.add('on');
           pollRun(j.run_id, 20);
         }).catch(function () { say('Run failed', true); });
@@ -557,7 +558,8 @@
   });
   document.getElementById('fd-draft').addEventListener('click', draft);
   document.getElementById('fd-save').addEventListener('click', function () { save(); });
-  document.getElementById('fd-run').addEventListener('click', run);
+  document.getElementById('fd-run').addEventListener('click', function () { run(true); });
+  document.getElementById('fd-run-real').addEventListener('click', function () { run(false); });
   document.getElementById('fd-history').addEventListener('click', showHistory);
   document.getElementById('fd-nl').addEventListener('keydown', function (e) { if (e.key === 'Enter') draft(); });
   nameInput.addEventListener('input', function () { flow.name = nameInput.value; });

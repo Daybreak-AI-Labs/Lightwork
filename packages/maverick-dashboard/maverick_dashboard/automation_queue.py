@@ -279,11 +279,16 @@ def _handle_flow_run(job=None) -> None:
             log.warning("flow_run: no such flow %s", flow_id)
             return
         owner = str(payload.get("owner") or "")
-        agent_runner, action_runner = _flow_runners(owner)
+        dry_run = bool(payload.get("dry_run"))
+        # A dry run exercises the graph with mock executors and records no grounded
+        # outcome -- so "Test" can't hit production or skew the learning signal.
+        agent_runner, action_runner = (execution.sandbox_runners() if dry_run
+                                       else _flow_runners(owner))
         run = execution.execute(flow, agent_runner=agent_runner, action_runner=action_runner,
                                 owner=owner, data=dict(payload.get("data") or {}),
-                                run_id=payload.get("run_id"))
-        _notify_flow(flow, run)
+                                run_id=payload.get("run_id"), record_outcomes=not dry_run)
+        if not dry_run:
+            _notify_flow(flow, run)
     except Exception:  # pragma: no cover -- fail-open
         log.exception("flow run failed for %s", flow_id)
 

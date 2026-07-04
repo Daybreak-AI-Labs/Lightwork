@@ -197,7 +197,10 @@ def save_run(run: FlowRun) -> None:
     if not run.created:
         run.created = now
     run.updated = now
-    _write_json(_runs_dir() / f"{_safe_id(run.run_id)}.json", run.to_dict())
+    from .redact import cap
+    d = run.to_dict()
+    d["data"] = cap(d.get("data") or {})   # bound the payload so a runaway tool result can't bloat the store
+    _write_json(_runs_dir() / f"{_safe_id(run.run_id)}.json", d)
 
 
 def load_run(run_id: str) -> FlowRun | None:

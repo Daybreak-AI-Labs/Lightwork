@@ -142,6 +142,20 @@ class TestExecution:
         assert got["brief"] == "use the fixed value"        # human input threaded in
         assert resumed.data["corrected"] == "the fixed value"
 
+    def test_dry_run_traces_but_records_no_outcomes(self, tmp_path, monkeypatch):
+        # A sandboxed dry run exercises the graph (status trace captured) but must
+        # NOT ground outcomes -- mock successes would skew the self-rewrite signal.
+        _patch_home(tmp_path, monkeypatch)
+        f = Flow(id="dry", name="f", start="a", nodes={
+            "a": FlowNode(id="a", kind=NODE_AGENT, brief="do {{x}}", next="b"),
+            "b": FlowNode(id="b", kind=NODE_ACTION, tool="slack_bot")})
+        ag, act = execution.sandbox_runners()
+        run = execution.execute(f, agent_runner=ag, action_runner=act,
+                                data={"x": "1"}, record_outcomes=False)
+        assert run.status == "completed"
+        assert run.nodes["a"]["outcome"] == 1.0 and run.nodes["b"]["outcome"] == 1.0
+        assert node_outcomes.stats("dry") == {}          # nothing grounded
+
     def test_resume_of_completed_run_is_rejected(self, tmp_path, monkeypatch):
         # Guard against re-running a finished flow (duplicate side effects) or
         # running a node a human rejected.
