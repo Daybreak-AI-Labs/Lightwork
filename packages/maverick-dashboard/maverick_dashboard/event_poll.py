@@ -43,7 +43,10 @@ def _event_key(name: str, event: dict) -> str:
     import json as _json
     eid = event.get("id") or event.get("guid") or event.get("uid")
     if eid is None:
-        eid = hashlib.sha1(_json.dumps(event, sort_keys=True, default=str).encode()).hexdigest()[:16]
+        # A dedup fingerprint, not a security digest -> usedforsecurity=False.
+        digest = hashlib.sha1(_json.dumps(event, sort_keys=True, default=str).encode(),
+                              usedforsecurity=False)
+        eid = digest.hexdigest()[:16]
     return f"{name}:{eid}"
 
 

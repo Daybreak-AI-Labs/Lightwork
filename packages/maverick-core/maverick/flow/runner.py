@@ -62,11 +62,20 @@ def render(text: str, data: dict) -> str:
 def _as_text(v: Any) -> str:
     if isinstance(v, bool):
         return "true" if v else "false"
+    if isinstance(v, float) and v.is_integer():
+        return str(int(v))          # render add(2,3) as "5", not "5.0"
     return str(v)
 
 
-# Safe transform functions usable inside {{ }} -- no eval, pure string/collection
-# helpers. Each takes the evaluated arg list.
+def _num(x: Any) -> float:
+    try:
+        return float(x)
+    except (TypeError, ValueError):
+        return 0.0
+
+
+# Safe transform functions usable inside {{ }} -- no eval, pure string/collection/
+# arithmetic helpers. Each takes the evaluated arg list.
 _FUNCS: dict[str, Callable[[list], Any]] = {
     "upper": lambda a: str(a[0]).upper() if a else "",
     "lower": lambda a: str(a[0]).lower() if a else "",
@@ -77,6 +86,14 @@ _FUNCS: dict[str, Callable[[list], Any]] = {
     "replace": lambda a: (str(a[0]).replace(str(a[1]), str(a[2])) if len(a) >= 3 else (str(a[0]) if a else "")),
     "default": lambda a: (a[0] if (a and a[0] not in (None, "", [], {})) else (a[1] if len(a) > 1 else "")),
     "json": lambda a: (__import__("json").dumps(a[0]) if a else ""),
+    "first": lambda a: (a[0][0] if a and isinstance(a[0], (list, tuple)) and a[0] else ""),
+    "last": lambda a: (a[0][-1] if a and isinstance(a[0], (list, tuple)) and a[0] else ""),
+    # arithmetic
+    "add": lambda a: sum(_num(x) for x in a),
+    "sub": lambda a: (_num(a[0]) - _num(a[1])) if len(a) >= 2 else _num(a[0] if a else 0),
+    "mul": lambda a: (_num(a[0]) * _num(a[1])) if len(a) >= 2 else _num(a[0] if a else 0),
+    "div": lambda a: (_num(a[0]) / _num(a[1])) if (len(a) >= 2 and _num(a[1])) else 0,
+    "round": lambda a: round(_num(a[0]), int(_num(a[1])) if len(a) > 1 else 0) if a else 0,
 }
 
 
@@ -169,12 +186,8 @@ def _coerce(token: str) -> Any:
         return token
 
 
-def eval_condition(expr: str, data: dict) -> bool:
-    """A safe ``<key> <op> <value>`` predicate over flow data (no eval).
-
-    ``<key>`` reads flow data (dotted paths allowed); ``<value>`` is a literal
-    (number / 'quoted' / bareword / true|false). A bare ``expr`` tests truthiness
-    of that data key. Unknown operators / unparsable exprs are falsey."""
+def _eval_predicate(expr: str, data: dict) -> bool:
+    """One ``<key> <op> <value>`` comparison (or a bare truthiness test)."""
     m = _COND.match(str(expr or ""))
     if not m:
         return bool(_dig(data, str(expr).strip()))
@@ -192,6 +205,26 @@ def eval_condition(expr: str, data: dict) -> bool:
         return {">": lf > rf, "<": lf < rf, ">=": lf >= rf, "<=": lf <= rf}[op]
     except (TypeError, ValueError):
         return False
+
+
+_AND_OR = re.compile(r"\s+(?:and|or)\s+", re.IGNORECASE)
+
+
+def eval_condition(expr: str, data: dict) -> bool:
+    """A safe boolean predicate over flow data (no eval).
+
+    A predicate is ``<key> <op> <value>`` (``<value>`` a number / 'quoted' /
+    bareword / true|false), or a bare key (truthiness). Predicates compose with
+    ``and`` / ``or`` (``or`` of ``and`` groups, standard precedence), e.g.
+    ``amount > 100 and region == 'EU'``. Unparsable predicates are falsey."""
+    s = str(expr or "").strip()
+    if not _AND_OR.search(s):
+        return _eval_predicate(s, data)
+    for or_part in re.split(r"\s+or\s+", s, flags=re.IGNORECASE):
+        parts = [p for p in re.split(r"\s+and\s+", or_part, flags=re.IGNORECASE) if p.strip()]
+        if parts and all(_eval_predicate(p, data) for p in parts):
+            return True
+    return False
 
 
 @dataclass
