@@ -95,6 +95,50 @@ class TestSignoffApi:
         assert "HIDDEN" not in str(calls[0])
 
 
+class TestSignoffGroundsLearning:
+    """A human sign-off is the cleanest ground-truth label in the system; when
+    [consequence] is on it must feed the learning loop as a grounded outcome."""
+
+    def _isolate(self, tmp_path, monkeypatch):
+        # consequence.shared() resolves its store under MAVERICK_HOME at call time.
+        monkeypatch.setenv("HOME", str(tmp_path))
+        monkeypatch.setenv("MAVERICK_HOME", str(tmp_path))
+        from maverick import consequence
+        consequence.reset_shared()
+        return consequence
+
+    def test_approval_records_grounded_outcome_1(self, tmp_path, monkeypatch):
+        monkeypatch.setenv("MAVERICK_CONSEQUENCE", "1")
+        consequence = self._isolate(tmp_path, monkeypatch)
+        w = _world(tmp_path, monkeypatch)
+        gid = _forecast_goal(w)
+        eid = w.start_episode(gid)
+        r = client.post(f"/api/v1/goals/{gid}/signoff", json={"decision": "approved"})
+        assert r.status_code == 200
+        assert consequence.resolve(gid, eid) == 1.0   # approval -> reward 1.0
+
+    def test_rejection_records_grounded_outcome_0(self, tmp_path, monkeypatch):
+        monkeypatch.setenv("MAVERICK_CONSEQUENCE", "1")
+        consequence = self._isolate(tmp_path, monkeypatch)
+        w = _world(tmp_path, monkeypatch)
+        gid = _forecast_goal(w)
+        eid = w.start_episode(gid)
+        r = client.post(f"/api/v1/goals/{gid}/signoff", json={"decision": "rejected"})
+        assert r.status_code == 200
+        assert consequence.resolve(gid, eid) == 0.0   # rejection is signal too
+
+    def test_no_outcome_when_consequence_disabled(self, tmp_path, monkeypatch):
+        monkeypatch.delenv("MAVERICK_CONSEQUENCE", raising=False)
+        consequence = self._isolate(tmp_path, monkeypatch)
+        w = _world(tmp_path, monkeypatch)
+        gid = _forecast_goal(w)
+        eid = w.start_episode(gid)
+        r = client.post(f"/api/v1/goals/{gid}/signoff", json={"decision": "approved"})
+        assert r.status_code == 200
+        # kernel stays stateless by default: nothing written when the knob is off
+        assert consequence.resolve(gid, eid) is None
+
+
 class TestDeliverableExport:
     def test_forecast_exports_as_csv_after_approval(self, tmp_path, monkeypatch):
         w = _world(tmp_path, monkeypatch)

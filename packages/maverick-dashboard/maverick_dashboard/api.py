@@ -1456,9 +1456,34 @@ async def post_signoff(request: Request, goal_id: int, payload: SignoffIn) -> di
         raise HTTPException(status_code=400, detail="this deliverable has no sign-off gate")
     who = _supervisor(request)
     w.record_signoff(goal_id, payload.decision, decided_by=who, note=payload.note)
+    # Feed the human's certify/reject verdict back into the learning loop as a
+    # GROUNDED outcome: a person judging the actual deliverable is the cleanest
+    # ground-truth signal in the system, and it lands as exactly the
+    # (goal_id, episode_id, value) tuple the Consequence Engine / data-engine
+    # already consume. Both verdicts are signal -- an approval is a 1.0 reward,
+    # a rejection a 0.0. Best-effort and gated: no-op unless [consequence] is on.
+    _record_signoff_outcome(w, goal_id, payload.decision)
     if payload.decision == "approved":
         _handoff_approved_deliverable(g, who)
     return {"gate": _goal_gate(g.domain), "signoff": w.signoff_for(goal_id)}
+
+
+def _record_signoff_outcome(w, goal_id: int, decision: str) -> None:
+    """Record a deliverable sign-off as a grounded outcome for the goal's latest
+    episode. No-op unless ``[consequence]`` is enabled (kernel stays stateless by
+    default); never raises -- the sign-off is already persisted, so grounding it
+    must not fail the request."""
+    try:
+        from maverick import consequence
+        if not consequence.enabled():
+            return
+        episodes = w.list_episodes(goal_id=goal_id, limit=1)
+        if not episodes:
+            return  # a finished deliverable should have an episode, but be safe
+        value = 1.0 if decision == "approved" else 0.0
+        consequence.record_outcome(goal_id, episodes[0].id, value, kind="signoff")
+    except Exception as e:  # pragma: no cover - grounding is best-effort
+        log.debug("signoff outcome not recorded for goal %s: %s", goal_id, e)
 
 
 def _handoff_approved_deliverable(g, decided_by: str) -> None:
