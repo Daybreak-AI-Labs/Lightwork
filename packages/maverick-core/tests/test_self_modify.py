@@ -275,7 +275,7 @@ class TestCapabilityDiff:
     @pytest.mark.parametrize("added,needle", [
         ("subprocess.run(['ls'])", "subprocess"),
         ("proc = os.system('rm -rf /')", "process-spawn"),
-        ("run(cmd, shell=True)", "shell=True"),
+        ("run(cmd, shell=True)", "shell-true"),
         ("data = eval(user_input)", "dynamic code"),
         ("obj = pickle.loads(blob)", "pickle"),
         ("import socket", "network"),
