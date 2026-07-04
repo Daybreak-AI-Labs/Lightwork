@@ -1139,6 +1139,11 @@ def get_self_improvement() -> dict:
         except (TypeError, ValueError):
             return default
 
+    raw_keys = cfg.get("approver_keys")
+    approver_keys = (
+        [str(k).strip() for k in raw_keys if str(k).strip()]
+        if isinstance(raw_keys, list) else [])
+
     return {
         "enable": bool(cfg.get("enable", False)),
         "min_improvement": _ratio("min_improvement", 0.0),
@@ -1167,6 +1172,52 @@ def get_self_improvement() -> dict:
         # lower bound (lower = more conservative). After arXiv 2606.26294.
         "evaluator_evolution": bool(cfg.get("evaluator_evolution", False)),
         "evaluator_eps": _ratio("evaluator_eps", 0.05),
+        # Cryptographic approval of code/weights promotions
+        # (maverick.approval_signing): trusted approver Ed25519 public keys (hex)
+        # and an optional dir of raw ``*.pub`` files, plus a strict flag that
+        # requires a signed approval even before keys are provisioned. Empty
+        # (default) keeps the legacy self-settable boolean-approval path.
+        "approver_keys": approver_keys,
+        "approver_keys_dir": str(cfg.get("approver_keys_dir") or "") or None,
+        "require_signed_approval": bool(cfg.get("require_signed_approval", False)),
+    }
+
+
+def get_reasoning_reward() -> dict:
+    """Return the ``[reasoning_reward]`` section (structured, auditable rewards).
+
+    OFF by default: ``enable`` swaps the scalar verifier verdict for the
+    multi-faceted rubric reward (maverick.reasoning_reward). The scalar verifier
+    stays the default judge otherwise."""
+    cfg = load_config().get("reasoning_reward", {})
+    return {"enable": bool(cfg.get("enable", False))}
+
+
+def get_jit_rl() -> dict:
+    """Return the ``[jit_rl]`` section (gradient-free test-time adaptation).
+
+    OFF by default. ``k`` is the k-NN neighbourhood size and ``beta`` the
+    steering gain on the estimated advantage (maverick.jit_rl);
+    ``max_experiences`` bounds the (state, action, return) buffer. Defaults
+    mirror ``jit_rl.DEFAULT_K`` / ``DEFAULT_BETA`` / ``DEFAULT_MAX_EXPERIENCES``
+    (kept literal here to avoid a config->jit_rl import cycle)."""
+    cfg = load_config().get("jit_rl", {})
+
+    def _int(key: str, default: int) -> int:
+        try:
+            return max(1, int(cfg.get(key, default)))
+        except (TypeError, ValueError):
+            return default
+
+    try:
+        beta = float(cfg.get("beta", 1.0))
+    except (TypeError, ValueError):
+        beta = 1.0
+    return {
+        "enable": bool(cfg.get("enable", False)),
+        "k": _int("k", 8),
+        "beta": beta,
+        "max_experiences": _int("max_experiences", 5000),
     }
 
 

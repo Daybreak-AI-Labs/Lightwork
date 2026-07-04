@@ -197,9 +197,10 @@ def assess(
     n = len(samples)
     adversarial = [x for x in samples if getattr(x, "adversarial", False)]
     natural = [x for x in samples if not getattr(x, "adversarial", False)]
-    # The drift gate reads discrimination on natural traffic when probes exist;
-    # otherwise on all samples (unchanged default).
-    base = natural if adversarial else samples
+    # The drift gate reads discrimination on natural traffic. With no probes,
+    # `natural` already contains every sample, so this is the historical
+    # all-sample measurement unchanged.
+    base = natural
 
     def _disc(xs: list[CalibrationSample]) -> float | None:
         c = [x for x in xs if x.correct]

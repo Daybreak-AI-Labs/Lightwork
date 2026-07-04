@@ -109,6 +109,31 @@ class TestEnforcement:
         monkeypatch.setattr(ap, "_config_approval", dict)
         assert ap.signing_enforced() is True
 
+    def test_keys_loaded_from_dir_and_used_to_verify(self, tmp_path, monkeypatch):
+        # A raw 32-byte *.pub in the approver dir (the audit key-dir format) is
+        # picked up, and a signature under its key verifies end-to-end.
+        priv = ed25519.Ed25519PrivateKey.generate()
+        priv_hex = priv.private_bytes(
+            encoding=serialization.Encoding.Raw,
+            format=serialization.PrivateFormat.Raw,
+            encryption_algorithm=serialization.NoEncryption(),
+        ).hex()
+        pub_bytes = priv.public_key().public_bytes(
+            encoding=serialization.Encoding.Raw, format=serialization.PublicFormat.Raw)
+        (tmp_path / "approver.pub").write_bytes(pub_bytes)      # raw 32 bytes
+        (tmp_path / "not-a-key.pub").write_bytes(b"too short")  # skipped
+        monkeypatch.delenv("MAVERICK_APPROVER_KEYS", raising=False)
+        monkeypatch.setenv("MAVERICK_APPROVER_KEYS_DIR", str(tmp_path))
+        monkeypatch.setattr(ap, "_config_approval", dict)
+
+        keys = ap.trusted_approver_keys()
+        assert keys == [pub_bytes.hex()]  # only the valid 32-byte key
+        assert ap.signing_enforced() is True
+        cand = _candidate()
+        cand.approval_signature = ap.sign_request(
+            ap.ApprovalRequest.for_candidate(cand), priv_hex)
+        assert ap.verify_candidate(cand) == ap.key_id(pub_bytes.hex())
+
 
 class TestGateIntegration:
     """The controller's human-approval gate under enforcement."""

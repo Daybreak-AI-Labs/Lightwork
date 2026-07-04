@@ -30,12 +30,14 @@ store can never block a run.
 """
 from __future__ import annotations
 
+import heapq
 import json
 import logging
 import math
 import os
 import threading
 import time
+from collections import deque
 from dataclasses import dataclass
 from pathlib import Path
 
@@ -87,7 +89,9 @@ class JitStore:
                  max_experiences: int = DEFAULT_MAX_EXPERIENCES):
         self.path = Path(path) if path is not None else None
         self.max_experiences = max(1, int(max_experiences))
-        self._items: list[Experience] = []
+        # A bounded ring buffer: deque(maxlen) evicts the oldest on overflow in
+        # O(1), so no manual length check on the hot record path.
+        self._items: deque[Experience] = deque(maxlen=self.max_experiences)
         self._lock = threading.Lock()
         if self.path is not None:
             self._load()
@@ -104,9 +108,7 @@ class JitStore:
         except (TypeError, ValueError):
             return
         with self._lock:
-            self._items.append(exp)
-            if len(self._items) > self.max_experiences:
-                del self._items[: len(self._items) - self.max_experiences]
+            self._items.append(exp)  # deque(maxlen=...) drops the oldest
             self._append(exp)
 
     # -- k-NN reads ------------------------------------------------------
@@ -121,8 +123,9 @@ class JitStore:
             items = list(self._items)
         if not items:
             return []
-        scored = sorted(items, key=lambda e: _distance(q, e.features))
-        return scored[: max(1, int(k))]
+        # Partial selection: O(N log k) for the k closest, vs a full O(N log N)
+        # sort (tie order among neighbours is irrelevant to the mean).
+        return heapq.nsmallest(max(1, int(k)), items, key=lambda e: _distance(q, e.features))
 
     def value(self, features, k: int = DEFAULT_K) -> float:
         """V(s): mean return of the k nearest experiences (any action). 0 when
@@ -131,21 +134,31 @@ class JitStore:
         return sum(e.ret for e in nbrs) / len(nbrs) if nbrs else 0.0
 
     def advantage(self, features, action: str, k: int = DEFAULT_K) -> float:
-        """A(s,a) = Q(s,a) - V(s), estimated from the local neighbourhood.
+        """A(s,a) = Q(s,a) - V(s) for a single action (see :meth:`advantage_batch`)."""
+        return self.advantage_batch(features, [action], k).get(str(action), 0.0)
+
+    def advantage_batch(self, features, actions, k: int = DEFAULT_K) -> dict[str, float]:
+        """A(s,a) for MANY actions in one state, sharing a SINGLE k-NN scan.
 
         Q(s,a) is the mean return of the k nearest experiences that took
-        ``action``; V(s) is the mean over all k nearest. Returns 0.0 when no
-        neighbour took this action (no local evidence -> no steer), so an
-        unseen action is never penalised or rewarded on a hunch."""
+        ``a``; V(s) is the mean over all k nearest. The neighbourhood and V(s)
+        baseline depend only on the state, so they are computed ONCE and reused
+        across actions (the steer hot path) rather than re-scanning the store per
+        action. Returns ``{action: A(s,a)}``; an action no neighbour took maps to
+        0.0 (no local evidence -> no steer), so an unseen action is never
+        penalised or rewarded on a hunch."""
+        wanted = [str(a) for a in actions]
         nbrs = self.neighbors(features, k)
         if not nbrs:
-            return 0.0
-        same = [e.ret for e in nbrs if e.action == str(action)]
-        if not same:
-            return 0.0
-        q_sa = sum(same) / len(same)
+            return dict.fromkeys(wanted, 0.0)
         v_s = sum(e.ret for e in nbrs) / len(nbrs)
-        return q_sa - v_s
+        out: dict[str, float] = {}
+        for a in wanted:
+            if a in out:
+                continue
+            same = [e.ret for e in nbrs if e.action == a]
+            out[a] = (sum(same) / len(same) - v_s) if same else 0.0
+        return out
 
     def __len__(self) -> int:
         with self._lock:
@@ -176,8 +189,8 @@ class JitStore:
                         continue
         except OSError:
             return
-        # Keep only the most recent within the cap.
-        self._items = out[-self.max_experiences:]
+        # deque(iterable, maxlen) keeps only the most recent `maxlen` items.
+        self._items = deque(out, maxlen=self.max_experiences)
 
     def _append(self, exp: Experience) -> None:
         if self.path is None:
@@ -254,11 +267,14 @@ class JitAdapter:
                              candidate_actions) -> list[SteerScore]:
         """Advantage-rank candidates for an already-encoded state (the core of
         :meth:`steer`, separated so the ranking is testable without a full
-        StepContext). An empty ``feats`` yields all-zero scores (no steer)."""
-        scored: list[SteerScore] = []
-        for a in candidate_actions:
-            adv = self.store.advantage(feats, a, self.k) if feats else 0.0
-            scored.append(SteerScore(action=str(a), advantage=adv, score=self.beta * adv))
+        StepContext). One k-NN scan covers every candidate; an empty ``feats``
+        yields all-zero scores (no steer)."""
+        advs = self.store.advantage_batch(feats, candidate_actions, self.k) if feats else {}
+        scored = [
+            SteerScore(action=str(a), advantage=advs.get(str(a), 0.0),
+                       score=self.beta * advs.get(str(a), 0.0))
+            for a in candidate_actions
+        ]
         # Stable sort: equal scores preserve input order.
         scored.sort(key=lambda s: s.score, reverse=True)
         return scored
@@ -267,28 +283,15 @@ class JitAdapter:
 # -- config / construction ---------------------------------------------------
 
 def _settings() -> dict:
+    """The ``[jit_rl]`` config section via the shared getter (config.get_jit_rl),
+    matching the sibling capability modules. Falls back to the code defaults if
+    config can't be loaded."""
     try:
-        from .config import load_config
-        cfg = (load_config() or {}).get("jit_rl") or {}
+        from .config import get_jit_rl
+        return get_jit_rl()
     except Exception:  # pragma: no cover -- config never blocks
-        cfg = {}
-
-    def _int(key: str, default: int) -> int:
-        try:
-            return max(1, int(cfg.get(key, default)))
-        except (TypeError, ValueError):
-            return default
-
-    try:
-        beta = float(cfg.get("beta", DEFAULT_BETA))
-    except (TypeError, ValueError):
-        beta = DEFAULT_BETA
-    return {
-        "enable": bool(cfg.get("enable", False)),
-        "k": _int("k", DEFAULT_K),
-        "beta": beta,
-        "max_experiences": _int("max_experiences", DEFAULT_MAX_EXPERIENCES),
-    }
+        return {"enable": False, "k": DEFAULT_K, "beta": DEFAULT_BETA,
+                "max_experiences": DEFAULT_MAX_EXPERIENCES}
 
 
 def enabled() -> bool:

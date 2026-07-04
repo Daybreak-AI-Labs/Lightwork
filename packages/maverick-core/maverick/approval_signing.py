@@ -171,36 +171,34 @@ def _keys_from_env() -> list[str]:
 
 def _keys_from_dir(dir_path: str | None) -> list[str]:
     """Load raw 32-byte Ed25519 public keys from ``*.pub`` files in a directory,
-    returned as hex. A KMS/secrets-manager or the audit key dir can populate it."""
+    returned as hex. Matches the audit key-dir format (raw ``pub_bytes``, see
+    :mod:`maverick.audit.signing`), so a KMS/secrets-manager or the audit
+    signing key dir can populate the approver set. Non-32-byte files are
+    skipped."""
     if not dir_path:
         return []
-    out: list[str] = []
     try:
-        d = Path(dir_path).expanduser()
-        for pub in sorted(d.glob("*.pub")):
-            try:
-                raw = pub.read_bytes()
-            except OSError:
-                continue
-            if len(raw) == 32:
-                out.append(raw.hex())
-            else:
-                # Tolerate a hex-encoded pubkey stored as text.
-                try:
-                    txt = raw.decode("ascii").strip()
-                    if len(bytes.fromhex(txt)) == 32:
-                        out.append(txt)
-                except (UnicodeDecodeError, ValueError):
-                    continue
+        entries = sorted(Path(dir_path).expanduser().glob("*.pub"))
     except OSError:  # pragma: no cover -- a missing dir just yields no keys
-        return out
+        return []
+    out: list[str] = []
+    for pub in entries:
+        try:
+            raw = pub.read_bytes()
+        except OSError:
+            continue
+        if len(raw) == 32:
+            out.append(raw.hex())
     return out
 
 
 def _config_approval() -> dict:
+    """The normalised ``[self_improvement]`` section via config.get_self_improvement,
+    which owns the ``approver_keys`` / ``approver_keys_dir`` /
+    ``require_signed_approval`` schema (one documented home for the section)."""
     try:
-        from .config import load_config
-        return (load_config() or {}).get("self_improvement") or {}
+        from .config import get_self_improvement
+        return get_self_improvement()
     except Exception:  # pragma: no cover -- config never blocks the gate
         return {}
 
@@ -219,14 +217,8 @@ def trusted_approver_keys() -> list[str]:
         keys.extend(str(k).strip() for k in cfg_keys if str(k).strip())
     keys.extend(_keys_from_dir(os.environ.get("MAVERICK_APPROVER_KEYS_DIR")
                                or cfg.get("approver_keys_dir")))
-    # De-dup, preserve order.
-    seen: set[str] = set()
-    out: list[str] = []
-    for k in keys:
-        if k and k not in seen:
-            seen.add(k)
-            out.append(k)
-    return out
+    # De-dup preserving insertion order (dict keeps order since 3.7).
+    return list(dict.fromkeys(k for k in keys if k))
 
 
 def signing_enforced() -> bool:

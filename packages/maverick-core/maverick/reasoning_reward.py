@@ -67,9 +67,26 @@ DEFAULT_RUBRIC: tuple[tuple[str, float, float], ...] = (
     ("safety", 0.15, 0.50),
 )
 
-# Holistic score at/above which an answer is accepted, mirroring the
-# verifier's VERIFIER_CONFIDENCE_ACCEPT so the two judges agree on the bar.
+# Fallback accept bar, used only if the verifier module can't be imported.
+# The live value is the verifier's own ``VERIFIER_CONFIDENCE_ACCEPT`` (see
+# ``_accept_threshold``), which is operator-tunable via
+# ``MAVERICK_VERIFIER_CONFIDENCE`` -- so the two judges share ONE bar and a
+# retune can't silently desync them.
 ACCEPT_THRESHOLD = 0.75
+
+
+def _accept_threshold() -> float:
+    """The accept bar, shared with the verifier so both judges agree.
+
+    Reuses :data:`maverick.verifier.VERIFIER_CONFIDENCE_ACCEPT` (operator-tunable
+    via ``MAVERICK_VERIFIER_CONFIDENCE``); falls back to
+    :data:`ACCEPT_THRESHOLD` if the verifier module is unavailable, keeping this
+    module import-light and offline-safe."""
+    try:
+        from .verifier import VERIFIER_CONFIDENCE_ACCEPT
+        return float(VERIFIER_CONFIDENCE_ACCEPT)
+    except Exception:  # pragma: no cover -- verifier import optional/offline
+        return ACCEPT_THRESHOLD
 
 
 @dataclass(frozen=True)
@@ -148,13 +165,17 @@ class ReasoningReward:
         None when the reward carries no rubric decomposition."""
         return min(self.dimensions, key=lambda d: d.score, default=None)
 
-    def accepts(self, threshold: float = ACCEPT_THRESHOLD) -> bool:
-        """Accept iff the holistic score clears ``threshold`` AND no dimension
+    def accepts(self, threshold: float | None = None) -> bool:
+        """Accept iff the holistic score clears the accept bar AND no dimension
         vetoed. The veto is the point: a high average must not launder a
-        failing safety/correctness facet into an acceptance."""
+        failing safety/correctness facet into an acceptance.
+
+        ``threshold`` defaults to the verifier's shared, operator-tunable bar
+        (:func:`_accept_threshold`) so the two judges never disagree on it."""
         if self.vetoed:
             return False
-        return self.score >= threshold
+        bar = _accept_threshold() if threshold is None else threshold
+        return self.score >= bar
 
     def to_audit_dict(self) -> dict:
         """Stable, deterministic serialization for the signed learning audit.
@@ -342,9 +363,8 @@ def enabled() -> bool:
     except Exception:  # pragma: no cover -- env parsing never blocks
         pass
     try:
-        from .config import load_config
-        section = (load_config() or {}).get("reasoning_reward") or {}
-        return bool(section.get("enable", False))
+        from .config import get_reasoning_reward
+        return bool(get_reasoning_reward()["enable"])
     except Exception:  # pragma: no cover -- config never blocks a run
         return False
 
