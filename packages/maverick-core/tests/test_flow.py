@@ -122,6 +122,52 @@ class TestRunner:
         r = run_flow(f, agent_fn=_agent, action_fn=_action, data={})
         assert r.data["from_b"] == "[see {{from_a}}]"     # no cross-branch leakage
 
+    def test_parallel_branches_run_concurrently(self):
+        # Two branches that each block on a barrier: the run only completes if
+        # both are in flight at once. A sequential runner would deadlock here
+        # (branch 1 waits for branch 2 which hasn't started) and time out.
+        import threading
+        barrier = threading.Barrier(2, timeout=5.0)
+
+        def rendezvous(node, brief, data):
+            barrier.wait()                # both branches must arrive together
+            return (brief, 0.9)
+
+        f = _flow([FlowNode(id="a", kind="parallel", branches=[
+            _flow([FlowNode(id="x", kind="agent", brief="l", output="left")], start="x"),
+            _flow([FlowNode(id="y", kind="agent", brief="r", output="right")], start="y"),
+        ])])
+        r = run_flow(f, agent_fn=rendezvous, action_fn=_action, data={})
+        assert r.status == STATUS_COMPLETED
+        assert r.data["left"] == "l" and r.data["right"] == "r"
+
+    def test_parallel_branch_error_propagates(self):
+        # A raising branch must fail the whole run, not be silently swallowed
+        # (and not leak the other branch's thread).
+        def maybe_boom(node, brief, data):
+            if brief == "boom":
+                raise RuntimeError("branch blew up")
+            return (brief, 0.9)
+
+        f = _flow([FlowNode(id="a", kind="parallel", branches=[
+            _flow([FlowNode(id="x", kind="agent", brief="ok", output="left")], start="x"),
+            _flow([FlowNode(id="y", kind="agent", brief="boom", output="right")], start="y"),
+        ])])
+        r = run_flow(f, agent_fn=maybe_boom, action_fn=_action, data={})
+        assert r.status == "failed" and "branch blew up" in r.error
+
+    def test_parallel_branch_cycle_detection_is_per_branch(self):
+        # Both branches run the SAME subflow. With a shared flow_stack the second
+        # branch would falsely trip cycle detection; per-branch stacks let both run.
+        sub = _flow([FlowNode(id="s", kind="agent", brief="{{who}}", output="r")], start="s")
+        f = _flow([FlowNode(id="a", kind="parallel", branches=[
+            _flow([FlowNode(id="x", kind="subflow", flow_ref="shared", output="l")], start="x"),
+            _flow([FlowNode(id="y", kind="subflow", flow_ref="shared", output="r")], start="y"),
+        ])])
+        r = run_flow(f, agent_fn=_agent, action_fn=_action,
+                     resolve_flow=lambda fid: sub if fid == "shared" else None, data={})
+        assert r.status == STATUS_COMPLETED
+
     def test_approval_pauses_then_resumes(self):
         f = _flow([
             FlowNode(id="a", kind="approval", prompt="ok?", next="b"),

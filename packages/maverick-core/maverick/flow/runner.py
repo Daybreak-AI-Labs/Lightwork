@@ -269,12 +269,20 @@ class _Ctx:
     deadline: float | None = None                  # whole-flow wall-clock deadline
 
     def nested(self) -> _Ctx:
-        # A copy that cannot pause (foreach body / parallel branch / subflow run
-        # straight). Shares flow_stack + deadline so cycle detection and the
-        # whole-flow deadline span nesting.
+        # A copy that cannot pause (foreach body / subflow run straight). Shares
+        # flow_stack + deadline so cycle detection and the whole-flow deadline
+        # span the linear nesting.
         return _Ctx(self.agent_fn, self.action_fn, self.approve_fn, self.on_node,
                     self.now, allow_pause=False, resolve_flow=self.resolve_flow,
                     flow_stack=self.flow_stack, deadline=self.deadline)
+
+    def branched(self) -> _Ctx:
+        # For a CONCURRENT parallel branch: its own flow_stack copy (independent
+        # cycle detection -- a sibling branch's subflow isn't a cycle here), but a
+        # shared clock/deadline and the shared on_node sink.
+        return _Ctx(self.agent_fn, self.action_fn, self.approve_fn, self.on_node,
+                    self.now, allow_pause=False, resolve_flow=self.resolve_flow,
+                    flow_stack=set(self.flow_stack), deadline=self.deadline)
 
 
 def _render_params(node: FlowNode, data: dict) -> dict:
@@ -364,14 +372,28 @@ def _run_foreach(node: FlowNode, data: dict, ctx: _Ctx) -> str | None:
     return node.next
 
 
+_PARALLEL_MAX_WORKERS = 8   # cap fan-out threads per parallel node
+
+
 def _run_parallel(node: FlowNode, data: dict, ctx: _Ctx) -> str | None:
     base = dict(data)                     # frozen pre-parallel snapshot
-    branch_outputs = []
-    for branch in node.branches:
-        sub = dict(base)                  # each branch is isolated (sees only base)
-        _run_chain(branch, sub, ctx.nested(), branch.start)
-        branch_outputs.append(sub)
-    for sub in branch_outputs:            # merge new keys after all branches finish
+    branch_outputs = [dict(base) for _ in node.branches]   # each isolated (sees only base)
+    if len(node.branches) > 1:
+        # Run the branches CONCURRENTLY. Each has an isolated data copy and its
+        # own flow_stack (ctx.branched()); the shared world DB serialises writes
+        # (WAL + busy_timeout). A branch that raises propagates after the pool
+        # joins the rest, so there are no leaked threads.
+        import concurrent.futures as _cf
+        workers = min(len(node.branches), _PARALLEL_MAX_WORKERS)
+        with _cf.ThreadPoolExecutor(max_workers=workers) as ex:
+            futs = [ex.submit(_run_chain, br, sub, ctx.branched(), br.start)
+                    for br, sub in zip(node.branches, branch_outputs, strict=True)]
+            for f in futs:
+                f.result()                # wait for all; re-raise the first error
+    else:
+        for br, sub in zip(node.branches, branch_outputs, strict=True):
+            _run_chain(br, sub, ctx.nested(), br.start)
+    for sub in branch_outputs:            # merge new keys deterministically, in order
         for k, v in sub.items():          # (a later branch wins a key conflict)
             if k not in base:
                 data[k] = v
