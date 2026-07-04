@@ -36,7 +36,7 @@ Each node is one of these kinds (include only the fields for its kind):
 
 Rules:
 - Prefer an "agent" node when a step needs judgment/writing; an "action" node when it maps to a known tool.
-- Reference earlier results with {{key}} where a node's "output" set that key. Set "output" on nodes whose result a later node needs.
+- Reference earlier results with {{key}} where a node's "output" set that key. Set "output" on nodes whose result a later node needs. You may transform a value: {{upper(key)}}, {{lower(key)}}, {{trim(key)}}, {{title(key)}}, {{length(key)}}, {{concat(a," ",b)}}, {{replace(key,"x","y")}}, {{default(key,"fallback")}}.
 - A "branch" condition is a simple "<key> <op> <value>" (ops: == != > < >= <= contains) over flow data.
 - Insert an "approval" node before anything a human should review (sending, paying, deleting).
 - Node ids are short slugs (n0, n1, ...). "next":null (or omit) ends a path. "start" is the first node's id.
@@ -104,12 +104,22 @@ def _sanitize(raw: dict, description: str) -> dict:
     }
 
 
-def _run(complete, tools, description: str) -> str:
+def _tool_hint(tools, tool_docs) -> str:
+    """Ground the model in the ACTION tools it may reference. With ``tool_docs``
+    (name -> one-line description) it lists 'name: what it does' so the draft
+    picks a real connector for the right step; else just the names."""
+    if tool_docs:
+        lines = [f"- {n}: {str(d)[:100]}" for n, d in list(tool_docs.items())[:60]]
+        return "\nAvailable action tools (use the exact name):\n" + "\n".join(lines)
+    if tools:
+        return "\nAvailable action tools (use exact names): " + ", ".join(sorted(tools)[:60])
+    return ""
+
+
+def _run(complete, tools, description: str, tool_docs=None) -> str:
     from ..budget import Budget
-    tool_hint = ("\nAvailable action tools (use exact names): "
-                 + ", ".join(sorted(tools)[:60])) if tools else ""
     resp = complete(
-        system=FLOW_DRAFT_SYSTEM + tool_hint,
+        system=FLOW_DRAFT_SYSTEM + _tool_hint(tools, tool_docs),
         messages=[{"role": "user", "content": f"Design a flow for: {description}"}],
         budget=Budget(max_dollars=_DRAFT_MAX_DOLLARS),
         max_tokens=_DRAFT_MAX_TOKENS,
@@ -117,11 +127,12 @@ def _run(complete, tools, description: str) -> str:
     return getattr(resp, "text", "") or ""
 
 
-def draft_flow(description: str, *, tools=(), complete=None,
+def draft_flow(description: str, *, tools=(), tool_docs=None, complete=None,
                flow_id: str = "") -> tuple[Flow, list[str]]:
     """Draft a flow from ``description``. Returns ``(flow, notes)``. Falls back to
     a single agent node (never fails to return something runnable). ``complete``
-    defaults to a real LLM call (orchestrator model) when not injected."""
+    defaults to a real LLM call (orchestrator model) when not injected. ``tool_docs``
+    (name -> description) grounds the drafter so action nodes name a real tool."""
     description = (description or "").strip()
     if not description:
         raise ValueError("a description is required")
@@ -130,7 +141,7 @@ def draft_flow(description: str, *, tools=(), complete=None,
         from ..llm import LLM, model_for_role
         complete = LLM(model=model_for_role("orchestrator")).complete
     try:
-        raw = _extract_json(_run(complete, tools, description))
+        raw = _extract_json(_run(complete, tools, description, tool_docs))
         if raw is None:
             raise ValueError("model did not return JSON")
         flow = Flow.from_dict(_sanitize(raw, description))

@@ -18,11 +18,12 @@ from __future__ import annotations
 from dataclasses import dataclass
 
 from . import node_outcomes
-from .ir import NODE_ACTION, NODE_AGENT, Flow
+from .ir import NODE_ACTION, NODE_AGENT, Flow, FlowNode
 
 _DEFAULT_MIN_SUPPORT = 10
 _HARDEN_THRESHOLD = 0.9     # agent this reliable -> propose hardening to an action
 _SOFTEN_THRESHOLD = 0.5     # action failing this often -> propose softening to an agent
+_SWAPPABLE = frozenset({NODE_ACTION, NODE_AGENT})
 
 
 @dataclass(frozen=True)
@@ -83,4 +84,104 @@ def maybe_propose(flow: Flow, *, min_support: int = _DEFAULT_MIN_SUPPORT) -> lis
         return []
 
 
-__all__ = ["NodeProposal", "propose", "maybe_propose"]
+# ---- apply: enact a proposal -------------------------------------------------
+#
+# This is the arrow that turns a *proposal* into a *changed flow* -- the point
+# where the system rewrites itself. It only builds the new definition; the caller
+# persists it (versioned, via store.save_flow) and logs the apply so the change
+# can be measured and rolled back. Swaps are between the two work kinds only.
+
+
+def apply_proposal(flow: Flow, node_id: str, to_kind: str, *,
+                   tool: str = "", brief: str = "") -> Flow:
+    """Return a COPY of ``flow`` with ``node_id`` swapped to ``to_kind`` (does not
+    persist). Hardening to an ``action`` needs a ``tool``; softening to an
+    ``agent`` needs a ``brief`` (falls back to the node's existing brief/label).
+
+    Raises ``KeyError`` for an unknown node, ``ValueError`` for a non-swappable
+    kind or a swap that would leave the node structurally invalid (no tool / no
+    brief) -- so an unusable apply is rejected here, before anything is saved."""
+    node = flow.nodes.get(node_id)
+    if node is None:
+        raise KeyError(f"no such node {node_id!r}")
+    if to_kind not in _SWAPPABLE:
+        raise ValueError(f"can only swap between {sorted(_SWAPPABLE)}, not {to_kind!r}")
+    if node.kind not in _SWAPPABLE:
+        raise ValueError(f"node {node_id!r} is a {node.kind!r}, not a swappable work node")
+    new = flow.copy()
+    n: FlowNode = new.nodes[node_id]
+    n.kind = to_kind
+    if to_kind == NODE_ACTION:
+        n.tool = (tool or n.tool).strip()
+        n.brief = ""
+        if not n.tool:
+            raise ValueError("hardening to an action needs a tool name")
+    else:  # NODE_AGENT
+        n.brief = (brief or n.brief or n.label or "").strip()
+        n.tool = ""
+        n.params = {}
+        if not n.brief:
+            raise ValueError("softening to an agent needs a brief")
+    return new
+
+
+# ---- measure: did the applied change help? -----------------------------------
+
+
+_REVERT_MIN_AFTER = 5       # need this many post-change outcomes before judging
+_REVERT_MARGIN = 0.15       # revert only a clear drop, never noise
+
+
+def regressed(impact: dict, *, min_after: int = _REVERT_MIN_AFTER,
+              margin: float = _REVERT_MARGIN) -> bool:
+    """Whether a measured change clearly HURT: enough post-change outcomes AND the
+    mean fell by more than ``margin`` vs. before. Conservative -- thin or
+    ambiguous evidence is not a regression, so the autonomous pass never thrashes
+    on noise or reverts a change that simply hasn't been exercised yet."""
+    after = impact.get("after") or {}
+    delta = impact.get("delta")
+    if int(after.get("n") or 0) < min_after or delta is None:
+        return False
+    return delta < -abs(margin)
+
+
+def revert_node(flow: Flow, node_id: str, prior: FlowNode) -> Flow:
+    """Return a copy of ``flow`` with ``node_id``'s WORK definition (kind + tool/
+    params or brief) restored from ``prior`` -- an earlier version of that node --
+    while keeping the current routing / output / label / layout. Undoes a
+    regressed rewrite without disturbing topology that legitimately changed since
+    the rewrite was applied."""
+    if node_id not in flow.nodes:
+        raise KeyError(f"no such node {node_id!r}")
+    new = flow.copy()
+    n = new.nodes[node_id]
+    n.kind, n.tool, n.params, n.brief = prior.kind, prior.tool, dict(prior.params), prior.brief
+    return new
+
+
+def _mean(vals: list[float]) -> float | None:
+    return sum(vals) / len(vals) if vals else None
+
+
+def measure(flow_id: str, node_id: str, since_ts: float, *,
+            series: list[tuple[float, float]] | None = None) -> dict:
+    """Score a node's grounded outcomes BEFORE vs. AT/AFTER ``since_ts`` (the moment
+    a rewrite was applied). Returns ``{before, after, delta, improved}`` where each
+    side is ``{n, mean}`` (mean ``None`` with no data). ``delta`` is
+    ``after.mean - before.mean`` when both exist; ``improved`` is ``delta > 0``.
+    This is the proof step -- without it "self-improving" is unfalsifiable."""
+    rows = series if series is not None else node_outcomes.series(flow_id, node_id)
+    before = [v for ts, v in rows if ts < since_ts]
+    after = [v for ts, v in rows if ts >= since_ts]
+    bmean, amean = _mean(before), _mean(after)
+    delta = (amean - bmean) if (bmean is not None and amean is not None) else None
+    return {
+        "before": {"n": len(before), "mean": bmean},
+        "after": {"n": len(after), "mean": amean},
+        "delta": delta,
+        "improved": (delta is not None and delta > 0),
+    }
+
+
+__all__ = ["NodeProposal", "propose", "maybe_propose", "apply_proposal",
+           "measure", "regressed", "revert_node"]

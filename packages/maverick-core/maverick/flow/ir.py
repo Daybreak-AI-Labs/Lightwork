@@ -29,10 +29,11 @@ NODE_FOREACH = "foreach"    # loop: run a body sub-flow per item in a list
 NODE_PARALLEL = "parallel"  # fan out branch sub-flows, join their data
 NODE_APPROVAL = "approval"  # human-in-the-loop gate: pause until approved
 NODE_DELAY = "delay"        # wait N seconds, then continue
+NODE_SUBFLOW = "subflow"    # run another saved flow as a nested step (reuse)
 
 NODE_KINDS = frozenset({
     NODE_ACTION, NODE_AGENT, NODE_BRANCH, NODE_FOREACH,
-    NODE_PARALLEL, NODE_APPROVAL, NODE_DELAY,
+    NODE_PARALLEL, NODE_APPROVAL, NODE_DELAY, NODE_SUBFLOW,
 })
 _WORK_KINDS = frozenset({NODE_ACTION, NODE_AGENT})
 
@@ -62,12 +63,18 @@ class FlowNode:
     items: str = ""                  # flow-data key holding the list to iterate
     var: str = "item"                # loop variable exposed to the body
     body: Flow | None = None         # sub-flow run once per item
+    limit: int = 0                   # cap iterations (0 = no cap); body may set _break
     # parallel ----------------------------------------------------------------
     branches: list[Flow] = field(default_factory=list)   # sub-flows run + joined
     # approval ----------------------------------------------------------------
     prompt: str = ""                 # what a human is being asked to approve
     # delay -------------------------------------------------------------------
     seconds: float = 0.0
+    # subflow -----------------------------------------------------------------
+    flow_ref: str = ""               # a saved flow id to run as a nested step
+    # error handling ----------------------------------------------------------
+    retries: int = 0                 # re-run a failed work node up to N more times
+    on_error: str | None = None      # route here when the node fails (else `next`)
     # common ------------------------------------------------------------------
     output: str = ""                 # flow-data key to store this node's result under
     label: str = ""                  # human label (provenance / UI)
@@ -78,7 +85,7 @@ class FlowNode:
     def to_dict(self) -> dict:
         d: dict[str, Any] = {"id": self.id, "kind": self.kind}
         for key in ("next", "tool", "brief", "condition", "if_true", "if_false",
-                    "items", "var", "prompt", "output", "label"):
+                    "items", "var", "prompt", "flow_ref", "on_error", "output", "label"):
             v = getattr(self, key)
             if v not in ("", None):
                 d[key] = v
@@ -86,6 +93,10 @@ class FlowNode:
             d["params"] = self.params
         if self.seconds:
             d["seconds"] = self.seconds
+        if self.retries:
+            d["retries"] = self.retries
+        if self.limit:
+            d["limit"] = self.limit
         if self.x or self.y:
             d["x"], d["y"] = self.x, self.y
         if self.body is not None:
@@ -104,9 +115,12 @@ class FlowNode:
             condition=str(d.get("condition", "")),
             if_true=d.get("if_true"), if_false=d.get("if_false"),
             items=str(d.get("items", "")), var=str(d.get("var", "item")),
+            limit=int(d.get("limit", 0) or 0),
             body=Flow.from_dict(body) if body else None,
             branches=[Flow.from_dict(b) for b in (d.get("branches") or [])],
             prompt=str(d.get("prompt", "")), seconds=float(d.get("seconds", 0.0)),
+            flow_ref=str(d.get("flow_ref", "")),
+            retries=int(d.get("retries", 0) or 0), on_error=d.get("on_error"),
             output=str(d.get("output", "")), label=str(d.get("label", "")),
             x=float(d.get("x", 0.0)), y=float(d.get("y", 0.0)),
         )
@@ -114,19 +128,31 @@ class FlowNode:
 
 @dataclass
 class Flow:
-    """A named graph of nodes with a single entry point (``start``)."""
+    """A named graph of nodes with a single entry point (``start``).
+
+    ``version`` is a monotonic definition version stamped by the store on each
+    save (see :mod:`.store`), so an applied self-rewrite or a designer edit is a
+    new version the prior one can be rolled back to.
+    """
 
     id: str
     name: str
     start: str
     nodes: dict[str, FlowNode] = field(default_factory=dict)
+    version: int = 1
+    notify: bool = False             # push a notification on approval-pause / finish
 
     def node(self, node_id: str | None) -> FlowNode | None:
         return self.nodes.get(node_id) if node_id else None
 
+    def copy(self) -> Flow:
+        """A deep, independent copy (round-trips through the dict form)."""
+        return Flow.from_dict(self.to_dict())
+
     def to_dict(self) -> dict:
         return {
             "id": self.id, "name": self.name, "start": self.start,
+            "version": self.version, "notify": self.notify,
             "nodes": [n.to_dict() for n in self.nodes.values()],
         }
 
@@ -137,6 +163,8 @@ class Flow:
             id=str(d.get("id", "")), name=str(d.get("name", "")),
             start=str(d.get("start", "")),
             nodes={n.id: n for n in nodes},
+            version=int(d.get("version", 1) or 1),
+            notify=bool(d.get("notify", False)),
         )
 
     def validate(self) -> list[str]:
@@ -163,7 +191,7 @@ class Flow:
     def _validate_routing(self, n: FlowNode) -> list[str]:
         errs = []
         for ref, label in ((n.next, "next"), (n.if_true, "if_true"),
-                           (n.if_false, "if_false")):
+                           (n.if_false, "if_false"), (n.on_error, "on_error")):
             if ref is not None and ref not in self.nodes:
                 errs.append(f"node {n.id!r}: {label} -> unknown node {ref!r}")
         return errs
@@ -190,6 +218,8 @@ class Flow:
                 errs.extend(f"parallel {n.id!r} branch {i}: {e}" for e in b.validate())
         if n.kind == NODE_APPROVAL and not n.prompt:
             errs.append(f"approval node {n.id!r} has no prompt")
+        if n.kind == NODE_SUBFLOW and not n.flow_ref:
+            errs.append(f"subflow node {n.id!r} has no flow_ref")
         return errs
 
     def is_single_agent(self) -> bool:
@@ -211,5 +241,5 @@ def single_agent_flow(flow_id: str, name: str, brief: str) -> Flow:
 __all__ = [
     "Flow", "FlowNode", "single_agent_flow",
     "NODE_ACTION", "NODE_AGENT", "NODE_BRANCH", "NODE_FOREACH",
-    "NODE_PARALLEL", "NODE_APPROVAL", "NODE_DELAY", "NODE_KINDS",
+    "NODE_PARALLEL", "NODE_APPROVAL", "NODE_DELAY", "NODE_SUBFLOW", "NODE_KINDS",
 ]

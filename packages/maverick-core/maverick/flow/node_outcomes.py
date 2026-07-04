@@ -36,6 +36,21 @@ def _read_rows() -> list[dict]:
     return tail_rows(_path(), _MAX_ROWS)
 
 
+def series(flow_id: str, node_id: str) -> list[tuple[float, float]]:
+    """Time-ordered ``(ts, value)`` outcomes for one node -- the raw signal the
+    measurement pass splits around an applied change to score before vs. after."""
+    out: list[tuple[float, float]] = []
+    for r in _read_rows():
+        if r.get("flow_id") != flow_id or str(r.get("node_id")) != str(node_id):
+            continue
+        try:
+            out.append((float(r.get("ts") or 0.0), float(r.get("value"))))
+        except (TypeError, ValueError):
+            continue
+    out.sort(key=lambda tv: tv[0])
+    return out
+
+
 def stats(flow_id: str) -> dict[str, dict]:
     """Per-node aggregate for a flow: ``{node_id: {n, mean, kind}}``."""
     sums: dict[str, float] = defaultdict(float)

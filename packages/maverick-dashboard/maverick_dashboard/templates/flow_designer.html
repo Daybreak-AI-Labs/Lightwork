@@ -36,7 +36,20 @@
   .fd-edge-label { font: 10px var(--font-sans, sans-serif); fill: var(--muted); }
   .k-agent { fill: #6366f1; } .k-action { fill: #0891b2; } .k-branch { fill: #d97706; }
   .k-foreach { fill: #7c3aed; } .k-parallel { fill: #db2777; } .k-approval { fill: #16a34a; }
-  .k-delay { fill: #64748b; }
+  .k-delay { fill: #64748b; } .k-subflow { fill: #0d9488; }
+  /* live run overlay */
+  .fd-node.run-ok rect.card { stroke: var(--success, #16a34a); stroke-width: 2.5; }
+  .fd-node.run-err rect.card { stroke: var(--danger, #dc2626); stroke-width: 2.5; }
+  .fd-node.run-info rect.card { stroke: #d97706; stroke-width: 2.5; }
+  .fd-node.run-active rect.card { stroke: var(--accent); stroke-width: 2.5; stroke-dasharray: 5 3; }
+  .fd-node .runbadge { font-size: 13px; }
+  .fd__legend { font-size: var(--text-sm); color: var(--muted); display: none; gap: var(--space-3); }
+  .fd__legend.on { display: inline-flex; }
+  .fd__examples { flex-basis: 100%; display: flex; gap: var(--space-2); flex-wrap: wrap; }
+  .fd__chip { font-size: var(--text-sm); padding: 2px 10px; border: 1px solid var(--border);
+              border-radius: 999px; background: var(--surface); cursor: pointer; color: var(--muted); }
+  .fd__chip:hover { border-color: var(--accent); color: var(--text); }
+  .fd__props .toolhint { font-size: var(--text-sm); color: var(--muted); margin: -4px 0 var(--space-2); }
 </style>
 
 <div class="fd">
@@ -47,10 +60,19 @@
       <input class="input" id="fd-nl" placeholder="Describe your workflow in plain English…" aria-label="Describe your workflow" />
       <button class="btn btn--primary" type="button" id="fd-draft">✨ Draft</button>
     </div>
+    <input class="input" id="fd-sample" placeholder='Sample input, e.g. {"issue":"…"}' aria-label="Sample input JSON" style="width:200px;" />
+    <label style="font-size:var(--text-sm);color:var(--muted);display:inline-flex;align-items:center;gap:4px;">
+      <input type="checkbox" id="fd-notify" /> Notify on approval/finish
+    </label>
     <button class="btn" type="button" id="fd-save">Save</button>
-    <button class="btn btn--ghost" type="button" id="fd-run">Save &amp; Run</button>
+    <button class="btn btn--ghost" type="button" id="fd-run">▷ Test run</button>
     <span class="fd__msg" id="fd-msg" aria-live="polite"></span>
+    <span class="fd__legend" id="fd-legend" aria-hidden="true">
+      <span>🟢 ok</span><span>🔴 failed</span><span>🟠 branch/step</span><span>⏳ waiting</span>
+    </span>
+    <div class="fd__examples" id="fd-examples" aria-label="Example workflows"></div>
   </div>
+  <datalist id="fd-tools"></datalist>
 
   <div class="fd__palette" aria-label="Add node">
     <div class="fd__empty">Add a step</div>
@@ -61,6 +83,7 @@
     <button class="btn btn--ghost" type="button" data-add="delay">⏱ Delay</button>
     <button class="btn btn--ghost" type="button" data-add="foreach">🔁 For-each</button>
     <button class="btn btn--ghost" type="button" data-add="parallel">🔱 Parallel</button>
+    <button class="btn btn--ghost" type="button" data-add="subflow">📎 Sub-flow</button>
   </div>
 
   <div class="fd__canvas-wrap">

@@ -36,6 +36,7 @@ def execute(flow: Flow, *, agent_runner: AgentRunner, action_runner: ActionRunne
             approve_fn: Callable[[FlowNode, dict], str] | None = None,
             run_id: str | None = None,
             resume_run_id: str | None = None, decision: str | None = None,
+            inputs: dict | None = None,
             now: Callable[[], float] | None = None) -> store.FlowRun:
     """Run ``flow`` (or resume a paused run) with live executors, persisting the
     resulting :class:`~.store.FlowRun`. ``run_id`` pre-assigns a fresh run's id
@@ -56,12 +57,21 @@ def execute(flow: Flow, *, agent_runner: AgentRunner, action_runner: ActionRunne
                 f"run {resume_run_id!r} is not paused (status {prior.status!r})")
         run_id = prior.run_id
         owner = owner or prior.owner
-        resume = {"node_id": prior.cursor, "data": prior.data}
+        # Free-form human input merges into the run data on resume, so an approval
+        # can also COLLECT data (a corrected value, a note) -- not just yes/no.
+        resume_data = dict(prior.data)
+        if inputs:
+            resume_data.update(inputs)
+        resume = {"node_id": prior.cursor, "data": resume_data}
         if prior.status == STATUS_PAUSED_APPROVAL:
             resume["decision"] = decision or "approved"
     rid = run_id or store.new_run_id()
+    # Per-node run trace for the designer overlay. Seeded from the prior run on
+    # resume so the pre-pause nodes' status survives across the pause.
+    node_states: dict = dict(prior.nodes) if (resume_run_id and prior) else {}
 
     def _on_node(node: FlowNode, status: str, outcome: float | None) -> None:
+        node_states[node.id] = {"status": status, "outcome": outcome}
         if outcome is not None:
             node_outcomes.record(flow.id, node.id, node.kind, outcome)
 
@@ -70,12 +80,16 @@ def execute(flow: Flow, *, agent_runner: AgentRunner, action_runner: ActionRunne
         agent_fn=lambda node, brief, d: agent_runner(brief, d),
         action_fn=lambda node, params, d: action_runner(node.tool, params, d),
         approve_fn=approve_fn, data=data, resume=resume, on_node=_on_node, now=now,
+        # A subflow node resolves to another SAVED flow; the runner's flow_stack
+        # guards against a cyclic reference (this loader stays a plain lookup).
+        resolve_flow=store.load_flow,
     )
     run = store.FlowRun(
         run_id=rid, flow_id=flow.id, status=res.status, data=res.data,
         cursor=res.cursor, resume_at=res.resume_at, prompt=res.prompt,
         error=res.error, owner=owner,
         created=(prior.created if resume_run_id and prior else 0.0),
+        nodes=node_states,
     )
     store.save_run(run)
     return run

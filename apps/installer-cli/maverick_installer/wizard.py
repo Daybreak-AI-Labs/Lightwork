@@ -1764,6 +1764,16 @@ def pick_advanced() -> dict[str, Any]:
         )
         advanced["insight_pubkeys"] = [k.strip() for k in raw.split(",")
                                        if k.strip()]
+    # Autonomous self-correction only makes sense once flows are on. Human apply
+    # + surfaced proposals work without it; this governs whether the loop may
+    # UNDO a change on its own.
+    if advanced.get("flows") and _q_confirm(
+        "  Let flows self-correct? A scheduled pass reverts a node rewrite whose "
+        "grounded outcomes measurably regressed -- the loop undoes its own bad "
+        "changes. Off by default.",
+        default=False,
+    ):
+        advanced["flows_auto_evolve"] = True
     # Self-harness has a handful of optional paths beyond the validation floors
     # written by default. Only worth asking once the loop itself is on; each
     # stays at its historical default unless the operator opts in here.
@@ -2959,6 +2969,10 @@ def _cfg_advanced(  # noqa: C901 - flat sequence of independent opt-in toggles
         lines.append("# delay) over agentic + tool steps; migrated workflows keep their shape")
         lines.append("# while any node can still be a full agentic goal (maverick.flow).")
         lines.append("enable = true")
+        if advanced.get("flows_auto_evolve"):
+            lines.append("# Autonomously revert a node rewrite whose grounded outcomes")
+            lines.append("# regressed (the loop undoes its own bad changes).")
+            lines.append("auto_evolve = true")
     if advanced.get("emergent_protocol"):
         lines.append("")
         lines.append("[emergent_protocol]")

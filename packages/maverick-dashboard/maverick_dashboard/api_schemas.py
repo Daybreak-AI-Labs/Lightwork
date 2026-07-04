@@ -275,14 +275,33 @@ class FlowRunIn(BaseModel):
 
 
 class FlowResumeIn(BaseModel):
-    """Resume a paused flow run: the human verdict on the approval node."""
+    """Resume a paused flow run: the human verdict on the approval node, plus any
+    free-form inputs to merge into the run data (so an approval can also collect
+    a corrected value or a note, not just yes/no)."""
     decision: str = Field(default="approved", pattern="^(approved|rejected)$")
+    inputs: dict = Field(default_factory=dict)
 
 
 class FlowDraftIn(BaseModel):
     """Draft a flow from a plain-English description (the designer's ✨ button)."""
     description: str = Field(..., min_length=1, max_length=4000)
     flow_id: str = Field(default="", max_length=120)
+
+
+class FlowApplyIn(BaseModel):
+    """Apply a self-rewrite proposal: swap one node between agent and action.
+
+    Hardening to an action needs ``tool``; softening to an agent needs ``brief``
+    (else the node's existing brief/label is used). Produces a new flow version."""
+    node_id: str = Field(..., min_length=1, max_length=120)
+    to_kind: str = Field(..., pattern="^(agent|action)$")
+    tool: str = Field(default="", max_length=120)
+    brief: str = Field(default="", max_length=4000)
+
+
+class FlowRollbackIn(BaseModel):
+    """Roll a flow back to a prior version (default: the immediately previous)."""
+    version: int | None = Field(default=None, ge=1)
 
 
 class AnswerIn(BaseModel):

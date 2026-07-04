@@ -43,7 +43,9 @@ FLYWHEEL_KIND = "flywheel_cycle"
 FLOW_RUN_KIND = "flow_run"       # one-shot: run a flow to its next pause/finish
 FLOW_RESUME_KIND = "flow_resume"  # one-shot: resume a paused flow run
 FLOW_SWEEP_KIND = "flow_delay_sweep"  # recurring: re-arm flow runs whose delay elapsed
+FLOW_EVOLVE_KIND = "flow_evolve"  # recurring: autonomously revert a regressed rewrite
 _FLOW_SWEEP_CRON = "* * * * *"   # check for due delays every minute
+_FLOW_EVOLVE_CRON = "*/30 * * * *"   # re-check applied rewrites every 30 min
 _MIN_INTERVAL = 60               # floor for a per-trigger cadence (matches the UI/schema)
 _DEFAULT_INTERVAL = 300          # per-trigger poll cadence when unset (5 min)
 _TICK_CRON = "* * * * *"         # evaluate due triggers every minute
@@ -239,6 +241,29 @@ def _flow_runners(owner: str):
             execution.default_action_runner(w))
 
 
+def _notify_flow(flow, run) -> None:
+    """Best-effort push when a notify-enabled flow needs a human (paused on an
+    approval) or finishes (completed/failed). A no-op unless the flow opted in
+    AND notifications are configured; never raises into the worker."""
+    if flow is None or not getattr(flow, "notify", False):
+        return
+    from maverick.flow.runner import STATUS_COMPLETED, STATUS_FAILED, STATUS_PAUSED_APPROVAL
+    name = flow.name or flow.id
+    if run.status == STATUS_PAUSED_APPROVAL:
+        body, prio = f"“{name}” needs your approval: {run.prompt or 'review and resume'}", "high"
+    elif run.status == STATUS_COMPLETED:
+        body, prio = f"“{name}” finished.", "default"
+    elif run.status == STATUS_FAILED:
+        body, prio = f"“{name}” failed: {run.error or 'see the run'}", "high"
+    else:
+        return
+    try:
+        from maverick import notifications
+        notifications.notify(body, title="Lightwork flow", priority=prio)
+    except Exception:  # pragma: no cover -- notification is best-effort
+        log.debug("flow notify failed", exc_info=True)
+
+
 def _handle_flow_run(job=None) -> None:
     """Run a stored flow to its next pause/finish (durable one-shot job). An
     agent node becomes a real goal, an action node a tool call; the run state is
@@ -255,9 +280,10 @@ def _handle_flow_run(job=None) -> None:
             return
         owner = str(payload.get("owner") or "")
         agent_runner, action_runner = _flow_runners(owner)
-        execution.execute(flow, agent_runner=agent_runner, action_runner=action_runner,
-                          owner=owner, data=dict(payload.get("data") or {}),
-                          run_id=payload.get("run_id"))
+        run = execution.execute(flow, agent_runner=agent_runner, action_runner=action_runner,
+                                owner=owner, data=dict(payload.get("data") or {}),
+                                run_id=payload.get("run_id"))
+        _notify_flow(flow, run)
     except Exception:  # pragma: no cover -- fail-open
         log.exception("flow run failed for %s", flow_id)
 
@@ -278,9 +304,11 @@ def _handle_flow_resume(job=None) -> None:
             return
         owner = str(payload.get("owner") or "")
         agent_runner, action_runner = _flow_runners(owner)
-        execution.execute(flow, agent_runner=agent_runner, action_runner=action_runner,
-                          owner=owner, resume_run_id=run_id,
-                          decision=str(payload.get("decision") or "approved"))
+        run = execution.execute(flow, agent_runner=agent_runner, action_runner=action_runner,
+                                owner=owner, resume_run_id=run_id,
+                                decision=str(payload.get("decision") or "approved"),
+                                inputs=dict(payload.get("inputs") or {}))
+        _notify_flow(flow, run)
     except execution.FlowNotResumable:
         return  # already resumed/finished -- benign
     except Exception:  # pragma: no cover -- fail-open
@@ -305,6 +333,42 @@ def _handle_flow_sweep(_job=None) -> None:
                     "flow_id": run.flow_id, "run_id": run.run_id, "owner": run.owner})
     except Exception:  # pragma: no cover -- fail-open
         log.exception("flow delay sweep failed")
+
+
+def _handle_flow_evolve(_job=None) -> None:
+    """Autonomous self-correction: for each rewritten flow node, measure its
+    grounded outcomes before vs. after the change and REVERT it if it clearly
+    regressed -- the arrow that lets the loop undo its own mistakes. Gated on
+    ``[flows] auto_evolve`` (off by default); fail-open and idempotent (once a
+    node is reverted its newest apply is the revert, so it's skipped next pass)."""
+    from maverick import flow as flow_mod
+    if not flow_mod.auto_evolve_enabled():
+        return
+    try:
+        from maverick.flow import evolution_log, evolve, store
+        for f in store.list_flows():
+            for node_id in list(f.nodes):
+                last = evolution_log.last_apply(f.id, node_id)
+                if not last or last.get("source") == "auto-revert":
+                    continue  # never applied, or already auto-reverted -> settled
+                impact = evolve.measure(f.id, node_id, float(last.get("ts") or 0.0))
+                if not evolve.regressed(impact):
+                    continue
+                prior = store.load_version(f.id, int(last.get("version") or 0) - 1)
+                if prior is None or node_id not in prior.nodes:
+                    continue
+                reverted = evolve.revert_node(f, node_id, prior.nodes[node_id])
+                if reverted.validate():
+                    continue  # never save a structurally broken flow
+                applied_kind = f.nodes[node_id].kind
+                saved = store.save_flow(reverted)
+                evolution_log.record_apply(f.id, node_id, applied_kind,
+                                           prior.nodes[node_id].kind, saved.version,
+                                           source="auto-revert")
+                log.info("auto-reverted regressed rewrite: flow=%s node=%s (delta %.2f)",
+                         f.id, node_id, impact.get("delta") or 0.0)
+    except Exception:  # pragma: no cover -- fail-open
+        log.exception("flow evolve pass failed")
 
 
 # ---- cron seeding -----------------------------------------------------------
@@ -357,6 +421,8 @@ def reconcile() -> None:
         _ensure_cron(FLYWHEEL_KIND, _flywheel_cron())
     if flow.enabled():
         _ensure_cron(FLOW_SWEEP_KIND, _FLOW_SWEEP_CRON)
+    if flow.auto_evolve_enabled():
+        _ensure_cron(FLOW_EVOLVE_KIND, _FLOW_EVOLVE_CRON)
 
 
 # ---- lifecycle --------------------------------------------------------------
@@ -386,6 +452,7 @@ def start() -> bool:
         w.register(FLOW_RUN_KIND, _handle_flow_run)
         w.register(FLOW_RESUME_KIND, _handle_flow_resume)
         w.register(FLOW_SWEEP_KIND, _handle_flow_sweep)
+        w.register(FLOW_EVOLVE_KIND, _handle_flow_evolve)
         # Seed the cron jobs + actually start the threads BEFORE committing to the
         # module globals, so a failure in reconcile() (e.g. a boot-time sqlite
         # write error) leaves us cleanly un-started and retryable -- not wedged
@@ -421,4 +488,4 @@ def stop() -> None:
 
 __all__ = ["start", "stop", "reconcile", "queue",
            "TICK_KIND", "DREAM_KIND", "FLYWHEEL_KIND",
-           "FLOW_RUN_KIND", "FLOW_RESUME_KIND", "FLOW_SWEEP_KIND"]
+           "FLOW_RUN_KIND", "FLOW_RESUME_KIND", "FLOW_SWEEP_KIND", "FLOW_EVOLVE_KIND"]

@@ -39,6 +39,17 @@ def test_dangling_routing_is_dropped():
     assert flow.validate() == []
 
 
+def test_tool_docs_ground_the_prompt_with_descriptions():
+    seen = {}
+
+    def capture(system, messages, budget=None, max_tokens=0, **k):
+        seen["system"] = system
+        return _Resp('{"start":"a","nodes":[{"id":"a","kind":"agent","brief":"x"}]}')
+    draft_flow("do it", tool_docs={"slack_bot": "Post a message to a Slack channel"},
+               complete=capture)
+    assert "slack_bot: Post a message to a Slack channel" in seen["system"]
+
+
 def test_missing_start_defaults_to_first_node():
     js = '{"nodes":[{"id":"a","kind":"agent","brief":"x"},{"id":"b","kind":"agent","brief":"y"}]}'
     flow, _ = draft_flow("x", complete=_complete(js))

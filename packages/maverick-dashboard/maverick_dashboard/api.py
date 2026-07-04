@@ -52,8 +52,10 @@ from .api_schemas import (
     FeedbackIn,
     FleetCreateIn,
     FleetRunIn,
+    FlowApplyIn,
     FlowDraftIn,
     FlowResumeIn,
+    FlowRollbackIn,
     FlowRunIn,
     FlowSaveIn,
     GoalEventOut,
@@ -954,19 +956,48 @@ _FLOW_DRAFT_TOOLS = (
 )
 
 
+def _flow_tool_catalog() -> list[dict]:
+    """The curated connector catalog for the designer's action picker + the NL
+    drafter's grounding: each tool's name, one-line description, and param names
+    (from its input schema). Best-effort -- a tool absent from the live registry
+    still appears by name so the picker/drafter can offer it."""
+    tools = {}
+    try:
+        from maverick.sandbox import LocalBackend
+        from maverick.tools import base_registry
+        tools = {t.name: t for t in base_registry(_world(), LocalBackend(), goal_id=None).all()}
+    except Exception:  # pragma: no cover -- registry build varies by env; fall back to names
+        tools = {}
+    out = []
+    for name in _FLOW_DRAFT_TOOLS:
+        t = tools.get(name)
+        params = []
+        if t is not None and isinstance(t.input_schema, dict):
+            params = list((t.input_schema.get("properties") or {}).keys())[:12]
+        out.append({"name": name,
+                    "description": (t.description[:200] if t is not None else ""),
+                    "params": params})
+    return out
+
+
 @router.post("/flows/draft")
 async def draft_flow_endpoint(request: Request, payload: FlowDraftIn) -> dict:
     """Draft a first-pass flow from a plain-English description (the designer's
     ✨ button). Returns the flow graph (not saved) + any notes; falls back to a
-    single agent step if the model can't produce a full graph."""
+    single agent step if the model can't produce a full graph. The drafter is
+    grounded with each connector's description so action nodes name a real tool."""
     require_permission(request, "operate")
     _require_flows()
     from maverick_dashboard._shared import require_provider_or_400
     require_provider_or_400()
     from maverick.flow.draft import draft_flow
-    flow, notes = await run_in_threadpool(
-        lambda: draft_flow(payload.description, tools=_FLOW_DRAFT_TOOLS,
-                           flow_id=payload.flow_id))
+
+    def _draft():
+        catalog = _flow_tool_catalog()
+        tool_docs = {t["name"]: t["description"] for t in catalog if t["description"]}
+        return draft_flow(payload.description, tools=_FLOW_DRAFT_TOOLS,
+                          tool_docs=tool_docs, flow_id=payload.flow_id)
+    flow, notes = await run_in_threadpool(_draft)
     return {"flow": flow.to_dict(), "notes": notes}
 
 
@@ -1019,8 +1050,48 @@ async def resume_flow_run_endpoint(request: Request, run_id: str,
     from maverick_dashboard import automation_queue as aq
     aq.queue().enqueue(aq.FLOW_RESUME_KIND, {
         "flow_id": run.flow_id, "run_id": run_id, "decision": payload.decision,
-        "owner": run.owner})
+        "inputs": dict(payload.inputs or {}), "owner": run.owner})
     return {"run_id": run_id, "status": "resuming", "decision": payload.decision}
+
+
+@router.get("/flows/tools")
+async def flow_tools_endpoint(request: Request) -> dict:
+    """The connector/action catalog for the designer's searchable tool picker:
+    name, description, and param names. Declared before ``/flows/{flow_id}`` so
+    the literal ``tools`` path isn't captured as a flow id."""
+    require_permission(request, "operate")
+    _require_flows()
+    return {"tools": await run_in_threadpool(_flow_tool_catalog)}
+
+
+@router.get("/flows/insights")
+async def flow_insights_endpoint(request: Request) -> dict:
+    """Proactive automation intelligence across all flows: pending self-rewrite
+    proposals and the measured before/after impact of changes already applied --
+    so the automations page can surface 'N suggestions to improve your flows'
+    without a human opening each one. Read-only. Declared before ``/flows/{flow_id}``
+    so the literal ``insights`` path isn't captured as a flow id."""
+    require_permission(request, "operate")
+    _require_flows()
+    from maverick.flow import evolution_log, evolve, store
+    flows_out = []
+    proposal_count = 0
+    for f in store.list_flows():
+        proposals = [p.to_dict() for p in evolve.maybe_propose(f)]
+        changes = []
+        for node_id in f.nodes:
+            last = evolution_log.last_apply(f.id, node_id)
+            if not last:
+                continue
+            changes.append({
+                "node_id": node_id, "to_kind": last.get("to_kind"),
+                "source": last.get("source"),
+                "impact": evolve.measure(f.id, node_id, float(last.get("ts") or 0.0))})
+        if proposals or changes:
+            flows_out.append({"flow_id": f.id, "name": f.name,
+                              "proposals": proposals, "changes": changes})
+        proposal_count += len(proposals)
+    return {"flows": flows_out, "proposal_count": proposal_count}
 
 
 @router.get("/flows/{flow_id}")
@@ -1073,6 +1144,103 @@ async def flow_proposals_endpoint(request: Request, flow_id: str) -> dict:
     if f is None:
         raise HTTPException(status_code=404, detail="no such flow")
     return {"proposals": [p.to_dict() for p in evolve.maybe_propose(f)]}
+
+
+@router.post("/flows/{flow_id}/apply")
+async def apply_flow_proposal_endpoint(request: Request, flow_id: str,
+                                       payload: FlowApplyIn) -> dict:
+    """Apply a self-rewrite: swap a node between agent and action, producing a new
+    flow version. This is the step that lets a flow *change itself* -- the applied
+    definition is validated before it is saved, the prior version is retained (so
+    it can be rolled back), and the apply is logged so its effect can be measured."""
+    require_permission(request, "operate")
+    _require_flows()
+    from maverick.flow import evolution_log, evolve, store
+    f = store.load_flow(flow_id)
+    if f is None:
+        raise HTTPException(status_code=404, detail="no such flow")
+    node = f.nodes.get(payload.node_id)
+    if node is None:
+        raise HTTPException(status_code=404, detail="no such node")
+    if node.kind == payload.to_kind:
+        raise HTTPException(status_code=400,
+                            detail=f"node is already a {payload.to_kind}")
+    from_kind = node.kind
+    try:
+        new_flow = evolve.apply_proposal(f, payload.node_id, payload.to_kind,
+                                         tool=payload.tool, brief=payload.brief)
+    except (KeyError, ValueError) as e:
+        raise HTTPException(status_code=400, detail=str(e)) from e
+    errs = new_flow.validate()
+    if errs:
+        raise HTTPException(status_code=400,
+                            detail="resulting flow invalid: " + "; ".join(errs[:5]))
+    saved = store.save_flow(new_flow)
+    evolution_log.record_apply(flow_id, payload.node_id, from_kind,
+                               payload.to_kind, saved.version, source="manual")
+    return {"id": flow_id, "version": saved.version, "node_id": payload.node_id,
+            "from_kind": from_kind, "to_kind": payload.to_kind}
+
+
+@router.get("/flows/{flow_id}/versions")
+async def flow_versions_endpoint(request: Request, flow_id: str) -> dict:
+    """Every stored version of a flow (newest first), each with a per-kind node
+    count -- so the designer can show history and offer a rollback."""
+    require_permission(request, "operate")
+    _require_flows()
+    from maverick.flow import store
+    if store.load_flow(flow_id) is None:
+        raise HTTPException(status_code=404, detail="no such flow")
+
+    def _kinds(f) -> dict:
+        c: dict[str, int] = {}
+        for n in f.nodes.values():
+            c[n.kind] = c.get(n.kind, 0) + 1
+        return c
+    versions = store.list_versions(flow_id)
+    versions.reverse()  # newest first
+    return {"versions": [{"version": v.version, "name": v.name,
+                          "nodes": len(v.nodes), "kinds": _kinds(v)} for v in versions]}
+
+
+@router.post("/flows/{flow_id}/rollback")
+async def rollback_flow_endpoint(request: Request, flow_id: str,
+                                 payload: FlowRollbackIn) -> dict:
+    """Roll a flow back to a prior version (default: the immediately previous),
+    non-destructively -- the restore is itself a new version."""
+    require_permission(request, "operate")
+    _require_flows()
+    from maverick.flow import store
+    if store.load_flow(flow_id) is None:
+        raise HTTPException(status_code=404, detail="no such flow")
+    restored = store.rollback_flow(flow_id, payload.version)
+    if restored is None:
+        raise HTTPException(status_code=404, detail="no such version to roll back to")
+    return {"id": flow_id, "version": restored.version}
+
+
+@router.get("/flows/{flow_id}/nodes/{node_id}/impact")
+async def flow_node_impact_endpoint(request: Request, flow_id: str,
+                                    node_id: str) -> dict:
+    """Whether a node was rewritten and, if so, how its grounded outcomes compare
+    before vs. after the change -- the proof that a self-rewrite actually helped."""
+    require_permission(request, "operate")
+    _require_flows()
+    from maverick.flow import evolution_log, evolve, store
+    f = store.load_flow(flow_id)
+    if f is None:
+        raise HTTPException(status_code=404, detail="no such flow")
+    if node_id not in f.nodes:
+        raise HTTPException(status_code=404, detail="no such node")
+    last = evolution_log.last_apply(flow_id, node_id)
+    if last is None:
+        return {"node_id": node_id, "changed": False, "applied": None, "impact": None}
+    impact = evolve.measure(flow_id, node_id, float(last.get("ts") or 0.0))
+    return {"node_id": node_id, "changed": True,
+            "applied": {"from_kind": last.get("from_kind"), "to_kind": last.get("to_kind"),
+                        "version": last.get("version"), "ts": last.get("ts"),
+                        "source": last.get("source")},
+            "impact": impact}
 
 
 @router.get("/skills", response_model=list[SkillOut])

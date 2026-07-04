@@ -21,6 +21,11 @@ def _flows_dir():
     return data_dir("flows")
 
 
+def _history_dir(flow_id: str):
+    from ..paths import data_dir
+    return data_dir("flows", "history", _safe_id(flow_id))
+
+
 def _runs_dir():
     from ..paths import data_dir
     return data_dir("flows", "runs")
@@ -46,13 +51,68 @@ def _read_json(path) -> dict | None:
 
 # ---- flow definitions -------------------------------------------------------
 
-def save_flow(flow: Flow) -> None:
+def save_flow(flow: Flow) -> Flow:
+    """Persist ``flow`` as the current definition, snapshotting the prior current
+    into version history first so any earlier version can be rolled back to.
+
+    The store owns the version number: each save stamps ``version = prior + 1``
+    (a brand-new flow starts at 1). Returns the saved flow with its stamped
+    version. Forward-only history -- a rollback is itself a new version, so
+    nothing is ever destroyed."""
+    prior = load_flow(flow.id)
+    if prior is not None:
+        # Snapshot the version being replaced under its own number, then advance.
+        _write_json(_history_dir(flow.id) / f"v{int(prior.version)}.json", prior.to_dict())
+        flow.version = int(prior.version) + 1
+    else:
+        flow.version = int(flow.version) if flow.version else 1
     _write_json(_flows_dir() / f"{_safe_id(flow.id)}.json", flow.to_dict())
+    return flow
 
 
 def load_flow(flow_id: str) -> Flow | None:
     d = _read_json(_flows_dir() / f"{_safe_id(flow_id)}.json")
     return Flow.from_dict(d) if d else None
+
+
+def list_versions(flow_id: str) -> list[Flow]:
+    """Every stored version of a flow (history snapshots + the current), oldest
+    first. Empty if the flow is unknown."""
+    out: list[Flow] = []
+    hist = _history_dir(flow_id)
+    if hist.exists():
+        for p in hist.glob("v*.json"):
+            raw = _read_json(p)
+            if raw:
+                out.append(Flow.from_dict(raw))
+    cur = load_flow(flow_id)
+    if cur is not None:
+        out.append(cur)
+    out.sort(key=lambda f: f.version)
+    return out
+
+
+def load_version(flow_id: str, version: int) -> Flow | None:
+    """A specific historical (or current) version of a flow."""
+    cur = load_flow(flow_id)
+    if cur is not None and int(cur.version) == int(version):
+        return cur
+    raw = _read_json(_history_dir(flow_id) / f"v{int(version)}.json")
+    return Flow.from_dict(raw) if raw else None
+
+
+def rollback_flow(flow_id: str, version: int | None = None) -> Flow | None:
+    """Restore a prior ``version`` (default: the one immediately before current)
+    as a NEW current version -- non-destructive, so the rollback can itself be
+    undone. Returns the new current flow, or ``None`` if the target is unknown."""
+    cur = load_flow(flow_id)
+    if cur is None:
+        return None
+    target_v = version if version is not None else int(cur.version) - 1
+    target = load_version(flow_id, target_v)
+    if target is None:
+        return None
+    return save_flow(target.copy())   # re-save the old content as a fresh version
 
 
 def list_flows() -> list[Flow]:
@@ -71,9 +131,13 @@ def delete_flow(flow_id: str) -> bool:
     p = _flows_dir() / f"{_safe_id(flow_id)}.json"
     try:
         p.unlink()
-        return True
     except OSError:
         return False
+    # Drop version history too, so a later flow re-created with this id doesn't
+    # inherit stale snapshots (best-effort -- a missing history dir is fine).
+    import shutil
+    shutil.rmtree(_history_dir(flow_id), ignore_errors=True)
+    return True
 
 
 def _safe_id(flow_id: str) -> str:
@@ -98,13 +162,16 @@ class FlowRun:
     owner: str = ""
     created: float = 0.0
     updated: float = 0.0
+    # Per-node run trace: {node_id: {status, outcome}} accumulated as the run
+    # executes, so the designer can overlay live status/result on the canvas.
+    nodes: dict = field(default_factory=dict)
 
     def to_dict(self) -> dict:
         return {
             "run_id": self.run_id, "flow_id": self.flow_id, "status": self.status,
             "data": self.data, "cursor": self.cursor, "resume_at": self.resume_at,
             "prompt": self.prompt, "error": self.error, "owner": self.owner,
-            "created": self.created, "updated": self.updated,
+            "created": self.created, "updated": self.updated, "nodes": self.nodes,
         }
 
     @staticmethod
@@ -116,6 +183,7 @@ class FlowRun:
             prompt=str(d.get("prompt", "")), error=str(d.get("error", "")),
             owner=str(d.get("owner", "")),
             created=float(d.get("created", 0.0)), updated=float(d.get("updated", 0.0)),
+            nodes=dict(d.get("nodes") or {}),
         )
 
 
@@ -159,5 +227,6 @@ def list_runs(*, flow_id: str | None = None, owner: str | None = None,
 
 __all__: list[str] = [
     "save_flow", "load_flow", "list_flows", "delete_flow",
+    "list_versions", "load_version", "rollback_flow",
     "FlowRun", "new_run_id", "save_run", "load_run", "list_runs",
 ]
