@@ -158,6 +158,19 @@ def _world():
     return _w()
 
 
+def enqueue_flow_run(flow_id: str, data: dict, owner: str = "") -> str:
+    """Start a durable flow run (a pre-assigned, pollable run id + a flow_run job).
+    Shared by the background tick and the on-demand poll so a flow-target trigger
+    fires the same way on both paths."""
+    from maverick.flow import store as flow_store
+    run_id = flow_store.new_run_id()
+    flow_store.save_run(flow_store.FlowRun(run_id=run_id, flow_id=flow_id,
+                                           status="queued", owner=owner, data=dict(data)))
+    queue().enqueue(FLOW_RUN_KIND, {"flow_id": flow_id, "run_id": run_id,
+                                    "data": data, "owner": owner})
+    return run_id
+
+
 def _poll_due_triggers() -> None:
     from maverick_dashboard import event_poll, event_triggers_store
     due = [t for t in event_triggers_store.list_triggers() if _due(t["name"], _interval(t))]
@@ -168,7 +181,7 @@ def _poll_due_triggers() -> None:
     def _fire(goal_id: int) -> None:
         q.enqueue("run_goal", {"goal_id": int(goal_id)})   # durable: retry + dead-letter
 
-    results = event_poll.poll_and_fire(_world(), due, fire=_fire)
+    results = event_poll.poll_and_fire(_world(), due, fire=_fire, fire_flow=enqueue_flow_run)
     # Advance the due-marker only for triggers that actually polled; a trigger
     # whose source errored is left un-marked so it retries on the next tick
     # rather than going dark for a full interval.

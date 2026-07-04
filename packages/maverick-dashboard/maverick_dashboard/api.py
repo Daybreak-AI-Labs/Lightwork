@@ -2331,7 +2331,8 @@ def _require_event_triggers() -> None:
 
 def _event_trigger_out(rec: dict) -> EventTriggerOut:
     return EventTriggerOut(
-        name=rec["name"], template=rec["template"], source=rec["source"],
+        name=rec["name"], template=rec["template"], flow=rec.get("flow") or "",
+        source=rec["source"],
         config=rec.get("config") or {}, params=rec.get("params") or {},
         cursor=rec.get("cursor") or "",
         interval_seconds=int(rec.get("interval_seconds") or 0),
@@ -2380,32 +2381,47 @@ async def create_event_trigger(request: Request, payload: EventTriggerIn) -> Eve
         get_source(payload.source)   # a registered source?
     except EventSourceError as e:
         raise HTTPException(status_code=400, detail=str(e)) from e
-    # The template must EXIST, but -- unlike a webhook trigger -- we don't require
-    # it to render with the current defaults: each polled event fills the declared
-    # params at fire time, so a required param the event supplies is expected to
-    # be blank now.
-    from maverick.templates import load_template
-    try:
-        load_template(payload.template)
-    except FileNotFoundError as e:
-        raise HTTPException(
-            status_code=404, detail=f"template not found: {payload.template!r}") from e
-    except ValueError as e:
-        raise HTTPException(status_code=400, detail=str(e)) from e
+    # Exactly one target: a template (rendered into a goal) OR a flow (which runs
+    # the graph with the event as its data).
+    template, flow = (payload.template or "").strip(), (payload.flow or "").strip()
+    if bool(template) == bool(flow):
+        raise HTTPException(status_code=400,
+                            detail="set exactly one of 'template' or 'flow'")
+    if flow:
+        from maverick import flow as flow_mod
+        from maverick.flow import store as flow_store
+        if not flow_mod.enabled():
+            raise HTTPException(status_code=403,
+                                detail="the flow engine is off ([flows] / MAVERICK_FLOWS)")
+        if flow_store.load_flow(flow) is None:
+            raise HTTPException(status_code=404, detail=f"flow not found: {flow!r}")
+    else:
+        # The template must EXIST, but -- unlike a webhook trigger -- we don't
+        # require it to render with the current defaults: each polled event fills
+        # the declared params at fire time.
+        from maverick.templates import load_template
+        try:
+            load_template(template)
+        except FileNotFoundError as e:
+            raise HTTPException(
+                status_code=404, detail=f"template not found: {template!r}") from e
+        except ValueError as e:
+            raise HTTPException(status_code=400, detail=str(e)) from e
     from maverick_dashboard import event_triggers_store
+    default_name = payload.name or template or flow
     owner_filter = goal_owner_filter(request)
     if owner_filter is not None:
         existing = event_triggers_store.get_trigger(
-            event_triggers_store.slugify(payload.name or payload.template))
+            event_triggers_store.slugify(default_name))
         if existing is not None and existing.get("owner", "") != owner_filter:
             raise HTTPException(
                 status_code=409, detail="an event trigger with that name already exists")
     try:
         from maverick.paths import current_tenant_id
         rec = event_triggers_store.set_trigger(
-            payload.name or payload.template, payload.template, payload.source,
+            default_name, template, payload.source,
             config=payload.config or {}, params=payload.params or {},
-            owner=caller_principal(request) or "",
+            owner=caller_principal(request) or "", flow=flow,
             interval_seconds=payload.interval_seconds,
             tenant=current_tenant_id() or "")   # bind OAuth vault reads to this tenant
     except ValueError as e:
@@ -2451,8 +2467,15 @@ async def poll_event_triggers(request: Request, bg: BackgroundTasks, name: str =
         else:
             bg.add_task(run_goal_in_thread, goal_id)
 
+    def _fire_flow(flow_id: str, data: dict, owner: str) -> str:
+        # Flow targets go through the durable queue (same as the background tick),
+        # so a flow run gets retry + a trackable run id even on the on-demand path.
+        from maverick_dashboard import automation_queue
+        return automation_queue.enqueue_flow_run(flow_id, data, owner)
+
     results = await run_in_threadpool(
-        event_poll.poll_and_fire, _world(), triggers, principal=principal, fire=_fire)
+        lambda: event_poll.poll_and_fire(_world(), triggers, principal=principal,
+                                         fire=_fire, fire_flow=_fire_flow))
     return {"polled": len(results), "triggers": results}
 
 

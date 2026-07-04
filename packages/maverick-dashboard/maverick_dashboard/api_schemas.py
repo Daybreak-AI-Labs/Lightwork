@@ -154,12 +154,14 @@ class TriggerOut(BaseModel):
 
 
 class EventTriggerIn(BaseModel):
-    """Bind a saved template to a polled event source ("when X appears, run
-    this"). ``source`` is a registered EventSource; ``config`` is its settings
+    """Bind a saved template OR flow to a polled event source ("when X appears,
+    run this"). ``source`` is a registered EventSource; ``config`` is its settings
     (e.g. the ``url`` for http_json). ``params`` are default values; each polled
-    event's fields fill declared params at fire time. ``name`` defaults to the
-    template name (slugified)."""
-    template: str = Field(..., max_length=80)
+    event's fields fill declared params at fire time. Set exactly one of
+    ``template`` / ``flow`` (a flow receives the event fields as its run data).
+    ``name`` defaults to the target name (slugified)."""
+    template: str = Field("", max_length=80)
+    flow: str = Field("", max_length=120)
     source: str = Field(..., max_length=40)
     config: dict = Field(default_factory=dict)
     params: dict[str, str] | None = None
@@ -172,6 +174,7 @@ class EventTriggerIn(BaseModel):
 class EventTriggerOut(BaseModel):
     name: str
     template: str
+    flow: str = ""
     source: str
     config: dict = Field(default_factory=dict)
     params: dict[str, str] = Field(default_factory=dict)
