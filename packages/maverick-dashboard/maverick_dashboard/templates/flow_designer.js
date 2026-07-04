@@ -8,6 +8,7 @@
 
   var flow = { id: '', name: '', start: '', nodes: [] };
   var proposals = {};   // node_id -> {to_kind, reason} from grounded per-node outcomes
+  var impacts = {};     // node_id -> {changed, applied, impact} measured before/after a rewrite
   var runState = {};    // node_id -> {status, outcome} from the last/live run
   var runCursor = null; // node a paused run is waiting on
   var toolCatalog = {}; // tool name -> {description, params[]} for the action picker
@@ -277,6 +278,16 @@
         : (rs.status || '') + (rs.outcome != null ? ' (' + (rs.outcome === 1 ? 'ok' : 'failed') + ')' : '')) + ' ' + badge;
       props.appendChild(rl);
     }
+    // measured impact of a prior self-rewrite on this node (before vs. after)
+    var imp = impacts[n.id];
+    if (imp && imp.changed && imp.impact) {
+      var d = imp.impact.delta;
+      var il = document.createElement('p'); il.className = 'fd__empty'; il.style.marginTop = 'var(--space-2)';
+      il.textContent = '📈 since → ' + (imp.applied && imp.applied.to_kind) + ': '
+        + (typeof d === 'number' ? (d >= 0 ? '+' : '') + Math.round(d * 100) + '% vs before'
+          : 'measuring (' + (imp.impact.after && imp.impact.after.n || 0) + ' runs so far)');
+      props.appendChild(il);
+    }
     // self-rewrite proposal for this node (from grounded per-node outcomes)
     var prop = proposals[n.id];
     if (prop) {
@@ -284,9 +295,10 @@
       pbox.style.cssText = 'margin-top:var(--space-3);padding:var(--space-2);border:1px solid var(--accent);border-radius:8px;';
       var pl = document.createElement('p'); pl.className = 'fd__empty'; pl.style.marginBottom = 'var(--space-2)';
       pl.textContent = '💡 ' + prop.reason;
-      var pb = document.createElement('button'); pb.className = 'btn btn--ghost'; pb.type = 'button';
-      pb.textContent = 'Convert to ' + prop.to_kind;
-      pb.addEventListener('click', function () { n.kind = prop.to_kind; delete proposals[n.id]; render(); renderProps(); });
+      // Persisted apply: saves a new version + logs the change so its impact is measured.
+      var pb = document.createElement('button'); pb.className = 'btn btn--primary'; pb.type = 'button';
+      pb.textContent = 'Apply & track (→ ' + prop.to_kind + ')';
+      pb.addEventListener('click', function () { applyProposal(n, prop); });
       pbox.appendChild(pl); pbox.appendChild(pb); props.appendChild(pbox);
     }
     // actions
@@ -335,7 +347,7 @@
     };
   }
   function fromApiFlow(f) {
-    runState = {}; runCursor = null;
+    runState = {}; runCursor = null; impacts = {};
     var lg = document.getElementById('fd-legend'); if (lg) lg.classList.remove('on');
     flow = { id: f.id || '', name: f.name || '', start: f.start || '', nodes: [] };
     var notifyEl = document.getElementById('fd-notify'); if (notifyEl) notifyEl.checked = !!f.notify;
@@ -443,6 +455,9 @@
       if (!r.ok) { say('Could not load flow', true); return; }
       return r.json().then(fromApiFlow);
     }).catch(function () { say('Could not load flow', true); });
+    loadSuggestions(id);
+  }
+  function loadSuggestions(id) {
     // self-rewrite suggestions (harden a reliable agent / soften a flaky action)
     apiFetch('/api/v1/flows/' + encodeURIComponent(id) + '/proposals').then(function (r) {
       return r.ok ? r.json() : { proposals: [] };
@@ -450,7 +465,64 @@
       proposals = {};
       (j.proposals || []).forEach(function (p) { proposals[p.node_id] = p; });
       if (j.proposals && j.proposals.length) say('💡 ' + j.proposals.length + ' learned suggestion(s) — select a node to see them.');
+      if (selected) renderProps();
     }).catch(function () {});
+    // measured impact of changes already applied (before/after), via the aggregate
+    apiFetch('/api/v1/flows/insights').then(function (r) { return r.ok ? r.json() : { flows: [] }; })
+      .then(function (j) {
+        impacts = {};
+        (j.flows || []).forEach(function (f) {
+          if (f.flow_id !== id) return;
+          (f.changes || []).forEach(function (ch) { impacts[ch.node_id] = { changed: true, applied: ch, impact: ch.impact }; });
+        });
+        if (selected) renderProps();
+      }).catch(function () {});
+  }
+  function applyProposal(n, prop) {
+    // Persisted apply: save the current graph, then enact the swap server-side so
+    // it becomes a new version and its before/after impact is measured.
+    if (prop.to_kind === 'action' && !n.tool) {
+      say('Give this step a Tool first, then Apply (an action needs one).', true); return;
+    }
+    save(function () {
+      var body = { node_id: n.id, to_kind: prop.to_kind, tool: n.tool || '', brief: n.brief || n.label || '' };
+      apiFetch('/api/v1/flows/' + encodeURIComponent(flow.id) + '/apply', { method: 'POST', body: JSON.stringify(body) })
+        .then(function (r) { return r.json().then(function (j) { return { ok: r.ok, j: j }; }); })
+        .then(function (res) {
+          if (!res.ok) { say(res.j.detail || 'Apply failed', true); return; }
+          delete proposals[n.id];
+          say('Applied ✓ — now v' + res.j.version + '. Impact appears as new runs land.');
+          load(flow.id);                              // reload the new version + refresh
+        }).catch(function () { say('Apply failed', true); });
+    });
+  }
+  function showHistory() {
+    if (!flow.id) { say('Save the flow first.', true); return; }
+    apiFetch('/api/v1/flows/' + encodeURIComponent(flow.id) + '/versions')
+      .then(function (r) { return r.ok ? r.json() : { versions: [] }; })
+      .then(function (j) {
+        props.textContent = '';
+        var h = document.createElement('div'); h.style.fontWeight = '600'; h.style.marginBottom = 'var(--space-3)';
+        h.textContent = '⏱ Version history';
+        props.appendChild(h);
+        (j.versions || []).forEach(function (v) {
+          var row = document.createElement('div'); row.className = 'field';
+          var kinds = Object.keys(v.kinds || {}).map(function (k) { return v.kinds[k] + ' ' + k; }).join(', ');
+          var lbl = document.createElement('div'); lbl.textContent = 'v' + v.version + ' — ' + v.nodes + ' nodes (' + kinds + ')';
+          row.appendChild(lbl);
+          var rb = document.createElement('button'); rb.className = 'btn btn--ghost'; rb.type = 'button'; rb.textContent = 'Roll back to v' + v.version;
+          rb.addEventListener('click', function () { rollback(v.version); });
+          row.appendChild(rb); props.appendChild(row);
+        });
+      }).catch(function () { say('Could not load history', true); });
+  }
+  function rollback(version) {
+    apiFetch('/api/v1/flows/' + encodeURIComponent(flow.id) + '/rollback', { method: 'POST', body: JSON.stringify({ version: version }) })
+      .then(function (r) { return r.json().then(function (j) { return { ok: r.ok, j: j }; }); })
+      .then(function (res) {
+        if (!res.ok) { say(res.j.detail || 'Rollback failed', true); return; }
+        say('Rolled back — now v' + res.j.version + '.'); load(flow.id);
+      }).catch(function () { say('Rollback failed', true); });
   }
 
   var EXAMPLES = [
@@ -486,6 +558,7 @@
   document.getElementById('fd-draft').addEventListener('click', draft);
   document.getElementById('fd-save').addEventListener('click', function () { save(); });
   document.getElementById('fd-run').addEventListener('click', run);
+  document.getElementById('fd-history').addEventListener('click', showHistory);
   document.getElementById('fd-nl').addEventListener('keydown', function (e) { if (e.key === 'Enter') draft(); });
   nameInput.addEventListener('input', function () { flow.name = nameInput.value; });
   // keyboard: Delete removes the selected node, Esc deselects (unless typing)

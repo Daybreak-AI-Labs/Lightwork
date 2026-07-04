@@ -32,6 +32,17 @@ class TestExpressions:
     def test_unknown_function_is_treated_as_a_key(self):
         assert render("{{bogus(x)}}", {}) == "{{bogus(x)}}"   # not a known fn, no such key
 
+    def test_nested_function_calls_evaluate(self):
+        # a nested call's inner comma must not split the outer args, and the
+        # inner call must actually evaluate (was silently "" before the fix)
+        assert render("{{upper(default(x, 'fallback'))}}", {}) == "FALLBACK"
+        assert render("{{upper(default(x, 'fallback'))}}", {"x": "here"}) == "HERE"
+        assert render("{{concat(upper(first), ' ', lower(last))}}",
+                      {"first": "ada", "last": "LOVELACE"}) == "ADA lovelace"
+
+    def test_literal_comma_inside_nested_call_survives(self):
+        assert render("{{default(missing, concat('a', 'b'))}}", {}) == "ab"
+
 
 class TestLoopControls:
     def _counting_agent(self):

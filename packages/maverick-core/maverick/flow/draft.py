@@ -33,9 +33,14 @@ Each node is one of these kinds (include only the fields for its kind):
 - {"id","kind":"parallel","branches":[{<nested flow>},...],"next":"<id|null>"}
 - {"id","kind":"approval","prompt":"<what a human approves>","next":"<id|null>"}
 - {"id","kind":"delay","seconds":<number>,"next":"<id|null>"}
+- {"id","kind":"subflow","flow_ref":"<a saved flow id to run here>","next":"<id|null>"}
+
+Any "agent" or "action" node may also set "retries":<n> (re-try on failure) and "on_error":"<id>" (route there if it fails).
 
 Rules:
 - Prefer an "agent" node when a step needs judgment/writing; an "action" node when it maps to a known tool.
+- Use a "subflow" node to reuse an existing saved flow instead of rebuilding its steps.
+- For a step that can fail (an external call), set "retries" and/or an "on_error" handler node.
 - Reference earlier results with {{key}} where a node's "output" set that key. Set "output" on nodes whose result a later node needs. You may transform a value: {{upper(key)}}, {{lower(key)}}, {{trim(key)}}, {{title(key)}}, {{length(key)}}, {{concat(a," ",b)}}, {{replace(key,"x","y")}}, {{default(key,"fallback")}}.
 - A "branch" condition is a simple "<key> <op> <value>" (ops: == != > < >= <= contains) over flow data.
 - Insert an "approval" node before anything a human should review (sending, paying, deleting).

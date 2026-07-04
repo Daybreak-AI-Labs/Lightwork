@@ -81,8 +81,9 @@ _FUNCS: dict[str, Callable[[list], Any]] = {
 
 
 def _split_args(s: str) -> list[str]:
-    """Comma-split respecting single/double quotes (so a literal comma survives)."""
-    out, cur, q = [], "", None
+    """Comma-split respecting quotes AND nested parens, so a literal comma or a
+    nested call's arguments (``default(x, "y")``) survive as one argument."""
+    out, cur, q, depth = [], "", None, 0
     for ch in s:
         if q:
             cur += ch
@@ -91,7 +92,13 @@ def _split_args(s: str) -> list[str]:
         elif ch in "'\"":
             q = ch
             cur += ch
-        elif ch == ",":
+        elif ch == "(":
+            depth += 1
+            cur += ch
+        elif ch == ")":
+            depth = max(0, depth - 1)
+            cur += ch
+        elif ch == "," and depth == 0:
             out.append(cur)
             cur = ""
         else:
@@ -102,7 +109,8 @@ def _split_args(s: str) -> list[str]:
 
 
 def _arg_value(tok: str, data: dict) -> Any:
-    """A function argument: a quoted/number literal, else a data key (missing -> '')."""
+    """A function argument: a quoted/number/bool literal, a NESTED transform call
+    (evaluated recursively), else a data key (missing -> '')."""
     tok = tok.strip()
     if len(tok) >= 2 and tok[0] in "'\"" and tok[-1] == tok[0]:
         return tok[1:-1]
@@ -114,12 +122,16 @@ def _arg_value(tok: str, data: dict) -> Any:
             return cast(tok)
         except ValueError:
             pass
+    m = _FN_CALL.match(tok)
+    if m and m.group(1) in _FUNCS:          # nested call: {{upper(default(x,"y"))}}
+        return _eval_expr(tok, data)
     return _dig(data, tok, "")
 
 
 def _eval_expr(expr: str, data: dict) -> Any:
-    """Evaluate a ``{{ }}`` expression: a transform call, else a dotted-key dig
-    (returning ``None`` for a missing bare key so render keeps it literal)."""
+    """Evaluate a ``{{ }}`` expression: a transform call (args may themselves be
+    transform calls), else a dotted-key dig (``None`` for a missing bare key so
+    render keeps it literal)."""
     m = _FN_CALL.match(expr.strip())
     if m and m.group(1) in _FUNCS:
         args = [_arg_value(a, data) for a in _split_args(m.group(2))]
