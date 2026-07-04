@@ -10,6 +10,7 @@
   var proposals = {};   // node_id -> {to_kind, reason} from grounded per-node outcomes
   var runState = {};    // node_id -> {status, outcome} from the last/live run
   var runCursor = null; // node a paused run is waiting on
+  var toolCatalog = {}; // tool name -> {description, params[]} for the action picker
   var selected = null;
   var view = { x: 40, y: 20, k: 1 };
   var idSeq = 0;
@@ -217,8 +218,22 @@
     props.appendChild(field('Label (optional)', input(n.label, function (v) { n.label = v; render(); }, 'shown on the card')));
     if (n.kind === 'agent') props.appendChild(field('Brief (what the agent should do)', textarea(n.brief, function (v) { n.brief = v; render(); }, 'Summarize {{issue_body}} and draft a reply')));
     if (n.kind === 'action') {
-      props.appendChild(field('Tool', input(n.tool, function (v) { n.tool = v; render(); }, 'slack_bot')));
-      props.appendChild(field('Params (JSON)', textarea(jsonOr(n.params), function (v) { n._paramsRaw = v; })));
+      var toolIn = input(n.tool, function (v) { n.tool = v; renderProps(); render(); }, 'search connectors…');
+      toolIn.setAttribute('list', 'fd-tools');
+      props.appendChild(field('Connector / tool', toolIn));
+      var meta = toolCatalog[n.tool];
+      if (meta && meta.description) { var th = document.createElement('p'); th.className = 'toolhint'; th.textContent = meta.description; props.appendChild(th); }
+      // Known params -> a labeled input each (no raw JSON for a recognized tool)
+      var known = (meta && meta.params) || [];
+      if (known.length) {
+        known.forEach(function (pk) {
+          props.appendChild(field(pk, input(n.params[pk] != null ? String(n.params[pk]) : '',
+            function (v) { if (v === '') delete n.params[pk]; else n.params[pk] = v; }, '')));
+        });
+        props.appendChild(hint('Use {{key}} to insert an earlier step’s result.'));
+      } else {
+        props.appendChild(field('Params (JSON)', textarea(jsonOr(n.params), function (v) { n._paramsRaw = v; })));
+      }
     }
     if (n.kind === 'branch') {
       props.appendChild(field('Condition', input(n.condition, function (v) { n.condition = v; render(); }, 'amount > 100')));
@@ -413,6 +428,32 @@
     }).catch(function () {});
   }
 
+  var EXAMPLES = [
+    'When a new GitHub issue is opened, summarize it and post to Slack, but ask me before posting',
+    'Every morning, pull yesterday’s Stripe charges and email me a one-paragraph summary',
+    'When a HubSpot deal is marked won, create an onboarding task in Asana and notify the team',
+  ];
+  function buildExamples() {
+    var box = document.getElementById('fd-examples'); if (!box) return;
+    EXAMPLES.forEach(function (ex) {
+      var c = document.createElement('button'); c.type = 'button'; c.className = 'fd__chip';
+      c.textContent = '✨ ' + trunc(ex, 40); c.title = ex;
+      c.addEventListener('click', function () { var nl = document.getElementById('fd-nl'); nl.value = ex; nl.focus(); });
+      box.appendChild(c);
+    });
+  }
+  function loadTools() {
+    apiFetch('/api/v1/flows/tools').then(function (r) { return r.ok ? r.json() : { tools: [] }; })
+      .then(function (j) {
+        var dl = document.getElementById('fd-tools'); if (dl) dl.textContent = '';
+        (j.tools || []).forEach(function (t) {
+          toolCatalog[t.name] = { description: t.description || '', params: t.params || [] };
+          if (dl) { var o = document.createElement('option'); o.value = t.name; if (t.description) o.label = t.description; dl.appendChild(o); }
+        });
+        if (selected) renderProps();
+      }).catch(function () {});
+  }
+
   // ---- wire ----
   document.querySelectorAll('[data-add]').forEach(function (b) {
     b.addEventListener('click', function () { addNode(b.getAttribute('data-add')); });
@@ -422,7 +463,16 @@
   document.getElementById('fd-run').addEventListener('click', run);
   document.getElementById('fd-nl').addEventListener('keydown', function (e) { if (e.key === 'Enter') draft(); });
   nameInput.addEventListener('input', function () { flow.name = nameInput.value; });
+  // keyboard: Delete removes the selected node, Esc deselects (unless typing)
+  document.addEventListener('keydown', function (e) {
+    var tag = (e.target && e.target.tagName) || '';
+    var typing = tag === 'INPUT' || tag === 'TEXTAREA' || (e.target && e.target.isContentEditable);
+    if (e.key === 'Escape' && !typing) { selected = null; render(); renderProps(); }
+    else if ((e.key === 'Delete' || e.key === 'Backspace') && selected && !typing) { e.preventDefault(); deleteNode(selected); }
+  });
 
+  buildExamples();
+  loadTools();
   var editId = canvas.getAttribute('data-flow-id');
   if (editId) load(editId); else { render(); renderProps(); }
 })();

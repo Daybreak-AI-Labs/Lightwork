@@ -45,6 +45,11 @@
   .fd-node .runbadge { font-size: 13px; }
   .fd__legend { font-size: var(--text-sm); color: var(--muted); display: none; gap: var(--space-3); }
   .fd__legend.on { display: inline-flex; }
+  .fd__examples { flex-basis: 100%; display: flex; gap: var(--space-2); flex-wrap: wrap; }
+  .fd__chip { font-size: var(--text-sm); padding: 2px 10px; border: 1px solid var(--border);
+              border-radius: 999px; background: var(--surface); cursor: pointer; color: var(--muted); }
+  .fd__chip:hover { border-color: var(--accent); color: var(--text); }
+  .fd__props .toolhint { font-size: var(--text-sm); color: var(--muted); margin: -4px 0 var(--space-2); }
 </style>
 
 <div class="fd">
@@ -62,7 +67,9 @@
     <span class="fd__legend" id="fd-legend" aria-hidden="true">
       <span>🟢 ok</span><span>🔴 failed</span><span>🟠 branch/step</span><span>⏳ waiting</span>
     </span>
+    <div class="fd__examples" id="fd-examples" aria-label="Example workflows"></div>
   </div>
+  <datalist id="fd-tools"></datalist>
 
   <div class="fd__palette" aria-label="Add node">
     <div class="fd__empty">Add a step</div>

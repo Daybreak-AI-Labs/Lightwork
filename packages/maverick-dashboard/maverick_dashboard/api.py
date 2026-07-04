@@ -956,19 +956,48 @@ _FLOW_DRAFT_TOOLS = (
 )
 
 
+def _flow_tool_catalog() -> list[dict]:
+    """The curated connector catalog for the designer's action picker + the NL
+    drafter's grounding: each tool's name, one-line description, and param names
+    (from its input schema). Best-effort -- a tool absent from the live registry
+    still appears by name so the picker/drafter can offer it."""
+    tools = {}
+    try:
+        from maverick.sandbox import LocalBackend
+        from maverick.tools import base_registry
+        tools = {t.name: t for t in base_registry(_world(), LocalBackend(), goal_id=None).all()}
+    except Exception:  # pragma: no cover -- registry build varies by env; fall back to names
+        tools = {}
+    out = []
+    for name in _FLOW_DRAFT_TOOLS:
+        t = tools.get(name)
+        params = []
+        if t is not None and isinstance(t.input_schema, dict):
+            params = list((t.input_schema.get("properties") or {}).keys())[:12]
+        out.append({"name": name,
+                    "description": (t.description[:200] if t is not None else ""),
+                    "params": params})
+    return out
+
+
 @router.post("/flows/draft")
 async def draft_flow_endpoint(request: Request, payload: FlowDraftIn) -> dict:
     """Draft a first-pass flow from a plain-English description (the designer's
     ✨ button). Returns the flow graph (not saved) + any notes; falls back to a
-    single agent step if the model can't produce a full graph."""
+    single agent step if the model can't produce a full graph. The drafter is
+    grounded with each connector's description so action nodes name a real tool."""
     require_permission(request, "operate")
     _require_flows()
     from maverick_dashboard._shared import require_provider_or_400
     require_provider_or_400()
     from maverick.flow.draft import draft_flow
-    flow, notes = await run_in_threadpool(
-        lambda: draft_flow(payload.description, tools=_FLOW_DRAFT_TOOLS,
-                           flow_id=payload.flow_id))
+
+    def _draft():
+        catalog = _flow_tool_catalog()
+        tool_docs = {t["name"]: t["description"] for t in catalog if t["description"]}
+        return draft_flow(payload.description, tools=_FLOW_DRAFT_TOOLS,
+                          tool_docs=tool_docs, flow_id=payload.flow_id)
+    flow, notes = await run_in_threadpool(_draft)
     return {"flow": flow.to_dict(), "notes": notes}
 
 
@@ -1023,6 +1052,16 @@ async def resume_flow_run_endpoint(request: Request, run_id: str,
         "flow_id": run.flow_id, "run_id": run_id, "decision": payload.decision,
         "owner": run.owner})
     return {"run_id": run_id, "status": "resuming", "decision": payload.decision}
+
+
+@router.get("/flows/tools")
+async def flow_tools_endpoint(request: Request) -> dict:
+    """The connector/action catalog for the designer's searchable tool picker:
+    name, description, and param names. Declared before ``/flows/{flow_id}`` so
+    the literal ``tools`` path isn't captured as a flow id."""
+    require_permission(request, "operate")
+    _require_flows()
+    return {"tools": await run_in_threadpool(_flow_tool_catalog)}
 
 
 @router.get("/flows/insights")

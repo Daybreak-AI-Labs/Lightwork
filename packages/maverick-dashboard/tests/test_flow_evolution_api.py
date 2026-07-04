@@ -157,3 +157,14 @@ def test_evolve_pass_is_a_noop_when_disabled(monkeypatch, tmp_path):
     _build_regressed_scenario()
     aq._handle_flow_evolve()
     assert store.load_flow("f").nodes["a"].kind == "action"         # left alone
+
+
+def test_tools_catalog_lists_connectors_with_metadata(monkeypatch, tmp_path):
+    _isolate(monkeypatch, tmp_path)
+    r = _client().get("/api/v1/flows/tools")
+    assert r.status_code == 200
+    tools = r.json()["tools"]
+    names = [t["name"] for t in tools]
+    assert "slack_bot" in names and "github_issues" in names
+    for t in tools:                       # every entry carries the picker's fields
+        assert "description" in t and isinstance(t.get("params"), list)
