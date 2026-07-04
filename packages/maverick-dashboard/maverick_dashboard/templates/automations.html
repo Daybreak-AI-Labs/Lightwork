@@ -377,10 +377,26 @@
         main.appendChild(el('div', 'mv-row__title', t.name));
         main.appendChild(el('div', 'mv-row__sub', 'source ' + t.source + ' · template ' + t.template + (t.cursor ? (' · at ' + t.cursor) : ' · not yet polled')));
         var runs = el('div', 'auto__runs'); main.appendChild(runs); loadRuns('event', t.name, runs);
+        var hist = el('div', 'auto__runs'); main.appendChild(hist); loadEventHistory(t.name, hist);
         li.appendChild(main);
         li.appendChild(delBtn('Delete event trigger ' + t.name, function () { delEventTrigger(t.name); }));
         evList.appendChild(li);
       });
+    }
+    async function loadEventHistory(name, into) {
+      // Fires + no-goal outcomes (poll errors, missing template, skipped events)
+      // that the spawned-goal run list can't show.
+      var data = {};
+      try { data = await (await fetch('/api/v1/event-triggers/history?limit=50&name=' + encodeURIComponent(name))).json(); }
+      catch (e) { return; }
+      var rows = data.history || [];
+      if (!rows.length) return;
+      var fires = rows.filter(function (r) { return r.kind === 'fired'; }).length;
+      var err = rows.find(function (r) { return r.kind !== 'fired'; });
+      var bits = [];
+      if (fires) bits.push('fired ' + fires + '×');
+      if (err) bits.push('⚠ ' + (err.note || err.kind));
+      if (bits.length) into.textContent = bits.join(' · ');
     }
     async function delEventTrigger(name) {
       if (!(await mvConfirm('Delete event trigger “' + name + '”? It will stop polling.'))) return;

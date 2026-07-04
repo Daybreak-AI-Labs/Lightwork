@@ -136,6 +136,42 @@ def test_poll_reports_source_error_without_crashing(monkeypatch, tmp_path, _no_r
     assert any("poll failed" in n for n in out["triggers"][0]["notes"])
 
 
+def test_history_records_fires_and_errors(monkeypatch, tmp_path, _no_real_run):
+    _isolate(monkeypatch, tmp_path)
+    box = [{"items": [{"id": "1", "title": "first"}]}]
+    _feed(monkeypatch, box)
+    c = _client()
+    c.post("/api/v1/event-triggers", json={
+        "template": "triage", "source": "http_json",
+        "config": {"url": "http://x/feed", "items_path": "items", "id_field": "id"}})
+    c.post("/api/v1/event-triggers/poll")                      # baseline: no row
+    assert c.get("/api/v1/event-triggers/history").json()["history"] == []
+
+    box[0] = {"items": [{"id": "2", "title": "second"}, {"id": "1", "title": "first"}]}
+    c.post("/api/v1/event-triggers/poll")                      # fires -> a row
+    hist = c.get("/api/v1/event-triggers/history").json()["history"]
+    assert len(hist) == 1 and hist[0]["kind"] == "fired" and hist[0]["new_events"] == 1
+
+    # a source error is recorded too
+    import maverick.automation_events as ev
+    monkeypatch.setattr(ev, "_http_get_json",
+                        lambda *a, **k: (_ for _ in ()).throw(ev.EventSourceError("down")))
+    c.post("/api/v1/event-triggers/poll")
+    kinds = [r["kind"] for r in c.get("/api/v1/event-triggers/history").json()["history"]]
+    assert "poll_error" in kinds                               # newest-first, error on top
+
+
+def test_history_is_owner_scoped(monkeypatch, tmp_path):
+    _isolate(monkeypatch, tmp_path)
+    from maverick_dashboard import trigger_events_store as tes
+    tes.record("mine", "user:alice", tes.FIRED, new_events=1, fired=[1])
+    tes.record("theirs", "user:bob", tes.FIRED, new_events=1, fired=[2])
+    from maverick_dashboard import api
+    monkeypatch.setattr(api, "goal_owner_filter", lambda request: "user:alice")
+    names = [r["name"] for r in _client().get("/api/v1/event-triggers/history").json()["history"]]
+    assert names == ["mine"]
+
+
 def test_automations_page_shows_event_section_when_enabled(monkeypatch, tmp_path):
     _isolate(monkeypatch, tmp_path)
     t = _client().get("/automations").text

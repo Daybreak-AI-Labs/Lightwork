@@ -21,7 +21,7 @@ def poll_and_fire(world: Any, triggers: list[dict], *, principal: str = "",
     from maverick.automation_events import EventSourceError, poll_source
     from maverick.templates import load_template
 
-    from maverick_dashboard import event_triggers_store
+    from maverick_dashboard import event_triggers_store, trigger_events_store
 
     results: list[dict] = []
     for trig in triggers:
@@ -35,6 +35,7 @@ def poll_and_fire(world: Any, triggers: list[dict], *, principal: str = "",
             res = poll_source(trig["source"], trig["config"], trig["cursor"])
         except EventSourceError as e:
             summary["notes"].append(f"poll failed: {e}")
+            trigger_events_store.record_summary(summary, owner)
             results.append(summary)
             continue
         try:
@@ -44,6 +45,7 @@ def poll_and_fire(world: Any, triggers: list[dict], *, principal: str = "",
             # backlog forever: note it and advance the cursor past what we saw.
             summary["notes"].append(f"template unavailable: {e}")
             event_triggers_store.set_cursor(trig["name"], res.cursor)
+            trigger_events_store.record_summary(summary, owner)
             results.append(summary)
             continue
         declared = set(tpl.params)
@@ -66,5 +68,6 @@ def poll_and_fire(world: Any, triggers: list[dict], *, principal: str = "",
         # (no new items) shouldn't rewrite the whole trigger file every tick.
         if res.cursor != trig["cursor"]:
             event_triggers_store.set_cursor(trig["name"], res.cursor)
+        trigger_events_store.record_summary(summary, owner)
         results.append(summary)
     return results

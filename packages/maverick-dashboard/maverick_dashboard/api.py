@@ -2103,6 +2103,19 @@ async def poll_event_triggers(request: Request, bg: BackgroundTasks, name: str =
     return {"polled": len(results), "triggers": results}
 
 
+@router.get("/event-triggers/history")
+async def event_trigger_history(request: Request, name: str = "", limit: int = 50) -> dict:
+    """Recent firings + errors for event triggers (owner-scoped). Complements
+    ``/automation-runs?kind=event`` (which shows the goals a trigger spawned)
+    with the no-goal outcomes: poll failures, missing templates, skipped events."""
+    _require_event_triggers()
+    from maverick_dashboard import trigger_events_store
+    owner = goal_owner_filter(request)
+    rows = trigger_events_store.history(
+        name=name or None, owner=owner, limit=max(1, min(200, limit)))
+    return {"history": rows}
+
+
 # ---- automation import: pull clients' existing automations into Lightwork -----
 
 
