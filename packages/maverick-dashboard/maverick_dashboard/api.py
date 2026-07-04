@@ -52,8 +52,10 @@ from .api_schemas import (
     FeedbackIn,
     FleetCreateIn,
     FleetRunIn,
+    FlowApplyIn,
     FlowDraftIn,
     FlowResumeIn,
+    FlowRollbackIn,
     FlowRunIn,
     FlowSaveIn,
     GoalEventOut,
@@ -1073,6 +1075,103 @@ async def flow_proposals_endpoint(request: Request, flow_id: str) -> dict:
     if f is None:
         raise HTTPException(status_code=404, detail="no such flow")
     return {"proposals": [p.to_dict() for p in evolve.maybe_propose(f)]}
+
+
+@router.post("/flows/{flow_id}/apply")
+async def apply_flow_proposal_endpoint(request: Request, flow_id: str,
+                                       payload: FlowApplyIn) -> dict:
+    """Apply a self-rewrite: swap a node between agent and action, producing a new
+    flow version. This is the step that lets a flow *change itself* -- the applied
+    definition is validated before it is saved, the prior version is retained (so
+    it can be rolled back), and the apply is logged so its effect can be measured."""
+    require_permission(request, "operate")
+    _require_flows()
+    from maverick.flow import evolution_log, evolve, store
+    f = store.load_flow(flow_id)
+    if f is None:
+        raise HTTPException(status_code=404, detail="no such flow")
+    node = f.nodes.get(payload.node_id)
+    if node is None:
+        raise HTTPException(status_code=404, detail="no such node")
+    if node.kind == payload.to_kind:
+        raise HTTPException(status_code=400,
+                            detail=f"node is already a {payload.to_kind}")
+    from_kind = node.kind
+    try:
+        new_flow = evolve.apply_proposal(f, payload.node_id, payload.to_kind,
+                                         tool=payload.tool, brief=payload.brief)
+    except (KeyError, ValueError) as e:
+        raise HTTPException(status_code=400, detail=str(e)) from e
+    errs = new_flow.validate()
+    if errs:
+        raise HTTPException(status_code=400,
+                            detail="resulting flow invalid: " + "; ".join(errs[:5]))
+    saved = store.save_flow(new_flow)
+    evolution_log.record_apply(flow_id, payload.node_id, from_kind,
+                               payload.to_kind, saved.version, source="manual")
+    return {"id": flow_id, "version": saved.version, "node_id": payload.node_id,
+            "from_kind": from_kind, "to_kind": payload.to_kind}
+
+
+@router.get("/flows/{flow_id}/versions")
+async def flow_versions_endpoint(request: Request, flow_id: str) -> dict:
+    """Every stored version of a flow (newest first), each with a per-kind node
+    count -- so the designer can show history and offer a rollback."""
+    require_permission(request, "operate")
+    _require_flows()
+    from maverick.flow import store
+    if store.load_flow(flow_id) is None:
+        raise HTTPException(status_code=404, detail="no such flow")
+
+    def _kinds(f) -> dict:
+        c: dict[str, int] = {}
+        for n in f.nodes.values():
+            c[n.kind] = c.get(n.kind, 0) + 1
+        return c
+    versions = store.list_versions(flow_id)
+    versions.reverse()  # newest first
+    return {"versions": [{"version": v.version, "name": v.name,
+                          "nodes": len(v.nodes), "kinds": _kinds(v)} for v in versions]}
+
+
+@router.post("/flows/{flow_id}/rollback")
+async def rollback_flow_endpoint(request: Request, flow_id: str,
+                                 payload: FlowRollbackIn) -> dict:
+    """Roll a flow back to a prior version (default: the immediately previous),
+    non-destructively -- the restore is itself a new version."""
+    require_permission(request, "operate")
+    _require_flows()
+    from maverick.flow import store
+    if store.load_flow(flow_id) is None:
+        raise HTTPException(status_code=404, detail="no such flow")
+    restored = store.rollback_flow(flow_id, payload.version)
+    if restored is None:
+        raise HTTPException(status_code=404, detail="no such version to roll back to")
+    return {"id": flow_id, "version": restored.version}
+
+
+@router.get("/flows/{flow_id}/nodes/{node_id}/impact")
+async def flow_node_impact_endpoint(request: Request, flow_id: str,
+                                    node_id: str) -> dict:
+    """Whether a node was rewritten and, if so, how its grounded outcomes compare
+    before vs. after the change -- the proof that a self-rewrite actually helped."""
+    require_permission(request, "operate")
+    _require_flows()
+    from maverick.flow import evolution_log, evolve, store
+    f = store.load_flow(flow_id)
+    if f is None:
+        raise HTTPException(status_code=404, detail="no such flow")
+    if node_id not in f.nodes:
+        raise HTTPException(status_code=404, detail="no such node")
+    last = evolution_log.last_apply(flow_id, node_id)
+    if last is None:
+        return {"node_id": node_id, "changed": False, "applied": None, "impact": None}
+    impact = evolve.measure(flow_id, node_id, float(last.get("ts") or 0.0))
+    return {"node_id": node_id, "changed": True,
+            "applied": {"from_kind": last.get("from_kind"), "to_kind": last.get("to_kind"),
+                        "version": last.get("version"), "ts": last.get("ts"),
+                        "source": last.get("source")},
+            "impact": impact}
 
 
 @router.get("/skills", response_model=list[SkillOut])

@@ -114,19 +114,30 @@ class FlowNode:
 
 @dataclass
 class Flow:
-    """A named graph of nodes with a single entry point (``start``)."""
+    """A named graph of nodes with a single entry point (``start``).
+
+    ``version`` is a monotonic definition version stamped by the store on each
+    save (see :mod:`.store`), so an applied self-rewrite or a designer edit is a
+    new version the prior one can be rolled back to.
+    """
 
     id: str
     name: str
     start: str
     nodes: dict[str, FlowNode] = field(default_factory=dict)
+    version: int = 1
 
     def node(self, node_id: str | None) -> FlowNode | None:
         return self.nodes.get(node_id) if node_id else None
 
+    def copy(self) -> Flow:
+        """A deep, independent copy (round-trips through the dict form)."""
+        return Flow.from_dict(self.to_dict())
+
     def to_dict(self) -> dict:
         return {
             "id": self.id, "name": self.name, "start": self.start,
+            "version": self.version,
             "nodes": [n.to_dict() for n in self.nodes.values()],
         }
 
@@ -137,6 +148,7 @@ class Flow:
             id=str(d.get("id", "")), name=str(d.get("name", "")),
             start=str(d.get("start", "")),
             nodes={n.id: n for n in nodes},
+            version=int(d.get("version", 1) or 1),
         )
 
     def validate(self) -> list[str]:

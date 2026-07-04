@@ -285,6 +285,22 @@ class FlowDraftIn(BaseModel):
     flow_id: str = Field(default="", max_length=120)
 
 
+class FlowApplyIn(BaseModel):
+    """Apply a self-rewrite proposal: swap one node between agent and action.
+
+    Hardening to an action needs ``tool``; softening to an agent needs ``brief``
+    (else the node's existing brief/label is used). Produces a new flow version."""
+    node_id: str = Field(..., min_length=1, max_length=120)
+    to_kind: str = Field(..., pattern="^(agent|action)$")
+    tool: str = Field(default="", max_length=120)
+    brief: str = Field(default="", max_length=4000)
+
+
+class FlowRollbackIn(BaseModel):
+    """Roll a flow back to a prior version (default: the immediately previous)."""
+    version: int | None = Field(default=None, ge=1)
+
+
 class AnswerIn(BaseModel):
     question_id: int
     answer: str
