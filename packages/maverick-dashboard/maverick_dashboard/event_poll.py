@@ -36,16 +36,28 @@ def _fire_template(world, trig, tpl, events, owner, fire, summary) -> None:
         summary["fired"].append(goal_id)
 
 
+def _event_key(name: str, event: dict) -> str:
+    """A stable idempotency key for an event: the trigger name + the event's own
+    id (or a hash of its fields), so a re-delivered event doesn't fire twice."""
+    import hashlib
+    import json as _json
+    eid = event.get("id") or event.get("guid") or event.get("uid")
+    if eid is None:
+        eid = hashlib.sha1(_json.dumps(event, sort_keys=True, default=str).encode()).hexdigest()[:16]
+    return f"{name}:{eid}"
+
+
 def _fire_flow(trig, events, owner, fire_flow, summary) -> None:
     """Start a flow run per event, with the event's fields as the run's data
-    (the trigger's ``params`` are defaults). Mutates ``summary``; run ids land in
+    (the trigger's ``params`` are defaults). Each fire carries an idempotency key
+    so a re-delivered event is deduplicated. Mutates ``summary``; run ids land in
     ``summary['fired_flows']``."""
     flow_id = trig["flow"]
     for event in events:
         data = dict(trig.get("params") or {})
         for k, v in event.items():   # a flow takes ALL event fields as data (no declared set)
             data[str(k)] = v if isinstance(v, (int, float, bool)) else str(v)[:2000]
-        run_id = fire_flow(flow_id, data, owner)
+        run_id = fire_flow(flow_id, data, owner, _event_key(trig["name"], event))
         if run_id:
             summary["fired_flows"].append(run_id)
 
@@ -89,7 +101,7 @@ def _deliver(world, trig, res, owner, fire, fire_flow, summary) -> bool:
 
 def poll_and_fire(world: Any, triggers: list[dict], *, principal: str = "",
                   fire: Callable[[int], None],
-                  fire_flow: Callable[[str, dict, str], Any] | None = None) -> list[dict]:
+                  fire_flow: Callable[[str, dict, str, str], Any] | None = None) -> list[dict]:
     """Poll each trigger and fire its target (template->goal, or flow) per new
     event. Returns a summary per trigger: ``{name, new_events, fired: [goal_id...],
     fired_flows: [run_id...], notes, poll_error}``. Never raises for a single bad

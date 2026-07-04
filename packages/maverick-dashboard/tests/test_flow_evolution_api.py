@@ -210,6 +210,43 @@ def test_run_api_redacts_secrets_in_data(monkeypatch, tmp_path):
     assert got["data"]["api_key"] == "***redacted***" and got["data"]["user"] == "ada"
 
 
+def test_enqueue_flow_run_dedups_on_idem_key(monkeypatch, tmp_path):
+    _isolate(monkeypatch, tmp_path)
+    from maverick.flow import Flow, FlowNode, store
+    from maverick_dashboard import automation_queue as aq
+    monkeypatch.setattr(aq, "_queue", None)
+    store.save_flow(Flow(id="f", name="F", start="a",
+                         nodes={"a": FlowNode(id="a", kind="agent", brief="x")}))
+    r1 = aq.enqueue_flow_run("f", {"k": 1}, "", "evt:1")
+    r2 = aq.enqueue_flow_run("f", {"k": 1}, "", "evt:1")     # same event -> dedup to r1
+    r3 = aq.enqueue_flow_run("f", {"k": 1}, "", "evt:2")     # different event -> new run
+    assert r1 == r2 and r3 != r1
+
+
+def test_retry_reruns_from_original_inputs(monkeypatch, tmp_path):
+    _isolate(monkeypatch, tmp_path)
+    from maverick.flow import Flow, FlowNode, store
+    from maverick_dashboard import automation_queue as aq
+    monkeypatch.setattr(aq, "_queue", None)
+    store.save_flow(Flow(id="f", name="F", start="a",
+                         nodes={"a": FlowNode(id="a", kind="agent", brief="x")}))
+    rid = store.new_run_id()
+    store.save_run(store.FlowRun(run_id=rid, flow_id="f", status="failed",
+                                 input_data={"order": "A1"}, data={"order": "A1", "junk": "z"}))
+    r = _client().post("/api/v1/flows/runs/" + rid + "/retry")
+    assert r.status_code == 200 and r.json()["retried_from"] == rid
+    new = store.load_run(r.json()["run_id"])
+    assert new.run_id != rid and new.input_data == {"order": "A1"}   # original inputs, not mutated data
+
+
+def test_retry_of_active_run_is_409(monkeypatch, tmp_path):
+    _isolate(monkeypatch, tmp_path)
+    from maverick.flow import store
+    rid = store.new_run_id()
+    store.save_run(store.FlowRun(run_id=rid, flow_id="f", status="paused_approval"))
+    assert _client().post("/api/v1/flows/runs/" + rid + "/retry").status_code == 409
+
+
 def test_tools_catalog_lists_connectors_with_metadata(monkeypatch, tmp_path):
     _isolate(monkeypatch, tmp_path)
     r = _client().get("/api/v1/flows/tools")

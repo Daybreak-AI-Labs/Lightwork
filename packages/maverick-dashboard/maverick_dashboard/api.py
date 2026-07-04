@@ -1063,6 +1063,26 @@ async def resume_flow_run_endpoint(request: Request, run_id: str,
     return {"run_id": run_id, "status": "resuming", "decision": payload.decision}
 
 
+@router.post("/flows/runs/{run_id}/retry")
+async def retry_flow_run_endpoint(request: Request, run_id: str) -> dict:
+    """Re-run a finished/failed run from scratch with its ORIGINAL trigger inputs
+    (a fresh run, so any partial side effects aren't re-driven mid-flow). This is
+    the recovery path a dead-lettered run needs -- the run's input_data was kept
+    for exactly this."""
+    require_permission(request, "operate")
+    _require_flows()
+    run = _load_owned_run(request, run_id)
+    if run.status in ("queued", "running", "paused_approval", "paused_delay"):
+        raise HTTPException(status_code=409,
+                            detail=f"run is still active (status {run.status}); nothing to retry")
+    from maverick.flow import store
+    if store.load_flow(run.flow_id) is None:
+        raise HTTPException(status_code=404, detail="flow no longer exists")
+    from maverick_dashboard import automation_queue as aq
+    new_id = aq.enqueue_flow_run(run.flow_id, dict(run.input_data or {}), run.owner)
+    return {"run_id": new_id, "status": "queued", "retried_from": run_id}
+
+
 @router.get("/flows/tools")
 async def flow_tools_endpoint(request: Request) -> dict:
     """The connector/action catalog for the designer's searchable tool picker:
@@ -2705,11 +2725,12 @@ async def poll_event_triggers(request: Request, bg: BackgroundTasks, name: str =
         else:
             bg.add_task(run_goal_in_thread, goal_id)
 
-    def _fire_flow(flow_id: str, data: dict, owner: str) -> str:
+    def _fire_flow(flow_id: str, data: dict, owner: str, idem_key: str = "") -> str:
         # Flow targets go through the durable queue (same as the background tick),
         # so a flow run gets retry + a trackable run id even on the on-demand path.
+        # The idempotency key dedups a re-delivered event.
         from maverick_dashboard import automation_queue
-        return automation_queue.enqueue_flow_run(flow_id, data, owner)
+        return automation_queue.enqueue_flow_run(flow_id, data, owner, idem_key)
 
     results = await run_in_threadpool(
         lambda: event_poll.poll_and_fire(_world(), triggers, principal=principal,

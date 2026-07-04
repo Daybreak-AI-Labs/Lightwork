@@ -69,6 +69,9 @@ def execute(flow: Flow, *, agent_runner: AgentRunner, action_runner: ActionRunne
         if prior.status == STATUS_PAUSED_APPROVAL:
             resume["decision"] = decision or "approved"
     rid = run_id or store.new_run_id()
+    # A fresh run may have a queued placeholder (saved at enqueue with the
+    # idempotency key + original inputs) -- preserve those instead of resetting.
+    placeholder = store.load_run(rid) if (run_id and not resume_run_id) else None
     # Per-node run trace for the designer overlay. Seeded from the prior run on
     # resume so the pre-pause nodes' status survives across the pause.
     node_states: dict = dict(prior.nodes) if (resume_run_id and prior) else {}
@@ -91,8 +94,16 @@ def execute(flow: Flow, *, agent_runner: AgentRunner, action_runner: ActionRunne
         run_id=rid, flow_id=flow.id, status=res.status, data=res.data,
         cursor=res.cursor, resume_at=res.resume_at, prompt=res.prompt,
         error=res.error, owner=owner,
-        created=(prior.created if resume_run_id and prior else 0.0),
+        created=(prior.created if resume_run_id and prior
+                 else (placeholder.created if placeholder else 0.0)),
         nodes=node_states,
+        # Keep the original trigger payload (from the queued placeholder or this
+        # fresh data) / carry it across a resume, so a failed run can be retried
+        # from scratch with the same inputs; carry the idempotency key too.
+        input_data=(prior.input_data if (resume_run_id and prior)
+                    else (placeholder.input_data if placeholder else dict(data or {}))),
+        idem_key=(prior.idem_key if (resume_run_id and prior)
+                  else (placeholder.idem_key if placeholder else "")),
     )
     store.save_run(run)
     return run

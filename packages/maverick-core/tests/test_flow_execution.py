@@ -156,6 +156,21 @@ class TestExecution:
         assert run.nodes["a"]["outcome"] == 1.0 and run.nodes["b"]["outcome"] == 1.0
         assert node_outcomes.stats("dry") == {}          # nothing grounded
 
+    def test_execute_preserves_queued_placeholder_idem_and_inputs(self, tmp_path, monkeypatch):
+        # A queued placeholder (saved by enqueue with the idempotency key + inputs)
+        # keeps those fields when the job later runs it.
+        _patch_home(tmp_path, monkeypatch)
+        from maverick.flow import store
+        rid = store.new_run_id()
+        store.save_run(store.FlowRun(run_id=rid, flow_id="fp", status="queued",
+                                     idem_key="evt:9", input_data={"seed": 1}))
+        f = Flow(id="fp", name="f", start="a",
+                 nodes={"a": FlowNode(id="a", kind=NODE_AGENT, brief="go")})
+        run = execution.execute(f, agent_runner=lambda b, d: ("ok", 1.0),
+                                action_runner=lambda *a: ("", None), data={"seed": 1}, run_id=rid)
+        assert run.status == "completed"
+        assert run.idem_key == "evt:9" and run.input_data == {"seed": 1}
+
     def test_resume_of_completed_run_is_rejected(self, tmp_path, monkeypatch):
         # Guard against re-running a finished flow (duplicate side effects) or
         # running a node a human rejected.

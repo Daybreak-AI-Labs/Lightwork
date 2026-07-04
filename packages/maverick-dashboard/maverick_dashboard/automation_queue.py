@@ -160,14 +160,21 @@ def _world():
     return _w()
 
 
-def enqueue_flow_run(flow_id: str, data: dict, owner: str = "") -> str:
+def enqueue_flow_run(flow_id: str, data: dict, owner: str = "", idem_key: str = "") -> str:
     """Start a durable flow run (a pre-assigned, pollable run id + a flow_run job).
     Shared by the background tick and the on-demand poll so a flow-target trigger
-    fires the same way on both paths."""
+    fires the same way on both paths. ``idem_key`` (flow_id + a stable event id)
+    deduplicates: a re-delivered event returns the existing run instead of firing
+    a second one. The original inputs are kept so the run can be retried."""
     from maverick.flow import store as flow_store
+    if idem_key:
+        existing = flow_store.find_run_by_idem(flow_id, idem_key)
+        if existing is not None:
+            return existing.run_id            # already fired for this event -> dedup
     run_id = flow_store.new_run_id()
-    flow_store.save_run(flow_store.FlowRun(run_id=run_id, flow_id=flow_id,
-                                           status="queued", owner=owner, data=dict(data)))
+    flow_store.save_run(flow_store.FlowRun(
+        run_id=run_id, flow_id=flow_id, status="queued", owner=owner,
+        data=dict(data), input_data=dict(data), idem_key=idem_key))
     queue().enqueue(FLOW_RUN_KIND, {"flow_id": flow_id, "run_id": run_id,
                                     "data": data, "owner": owner})
     return run_id

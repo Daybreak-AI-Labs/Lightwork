@@ -660,8 +660,18 @@
           li.appendChild(mkBtn('Approve', function () { resumeRun(run.run_id, 'approved'); }));
           li.appendChild(mkBtn('Reject', function () { resumeRun(run.run_id, 'rejected'); }));
         }
+        if (['failed', 'completed', 'rejected'].indexOf(run.status) >= 0) {
+          li.appendChild(mkBtn('Retry', function () { retryRun(run.run_id); }));
+        }
         flowRuns.appendChild(li);
       });
+    }
+    async function retryRun(runId) {
+      try {
+        var r = await fetch('/api/v1/flows/runs/' + encodeURIComponent(runId) + '/retry', { method: 'POST' });
+        flowsMsg.textContent = r.ok ? 'Retrying with the original inputs…' : 'Could not retry.';
+        setTimeout(loadFlowRuns, 500);
+      } catch (e) { flowsMsg.textContent = 'Could not retry.'; }
     }
     async function resumeRun(runId, decision) {
       try {
