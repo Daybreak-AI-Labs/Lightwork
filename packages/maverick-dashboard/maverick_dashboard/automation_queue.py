@@ -25,7 +25,6 @@ tests); the handlers/arming are unit-tested directly.
 from __future__ import annotations
 
 import logging
-import os
 import threading
 import time
 
@@ -39,7 +38,7 @@ _DEFAULT_INTERVAL = 300          # per-trigger poll cadence when unset (5 min)
 _TICK_CRON = "* * * * *"         # evaluate due triggers every minute
 _DREAM_CRON_DEFAULT = "0 */6 * * *"  # consolidate every 6h
 
-_LOCK = threading.Lock()
+_LOCK = threading.RLock()   # reentrant: start()/stop() call queue(), which also locks
 _queue = None
 _worker = None
 _worker_thread = None
@@ -88,8 +87,7 @@ def _mark_polled(name: str) -> None:
     p = _poll_marker(name)
     try:
         p.parent.mkdir(parents=True, exist_ok=True)
-        p.touch()
-        os.utime(p, None)
+        p.touch()   # sets mtime to now
     except Exception:  # pragma: no cover
         pass
 
@@ -138,13 +136,14 @@ def _pending(kind: str) -> list:
 
 def _ensure_cron(kind: str, expr: str) -> None:
     """Ensure exactly one recurring job of ``kind`` is armed. The worker re-arms
-    it on each run (payload carries ``__cron__``); this only seeds the first one
-    and cancels any duplicate a prior double-seed may have left."""
+    it on each run (payload carries ``__cron__``); this seeds the first one, and
+    collapses to one lineage if two dashboard workers happened to seed
+    concurrently at boot (both saw no pending job before either enqueued)."""
     from maverick.scheduler import schedule_cron
     q = queue()
     pending = _pending(kind)
     if pending:
-        for extra in pending[1:]:   # dedup: keep one lineage
+        for extra in pending[1:]:
             q.cancel(extra.id)
         return
     schedule_cron(q, expr, kind, {"__cron__": expr})
@@ -177,12 +176,11 @@ def start() -> bool:
     from maverick import automation_events, dreaming
     if not (automation_events.enabled() or dreaming.enabled()):
         return False
-    q = queue()   # resolve the singleton BEFORE taking _LOCK (queue() locks too)
     with _LOCK:
         if _worker_thread is not None:
             return True
         from maverick.worker import Worker
-        w = Worker(queue=q)
+        w = Worker(queue=queue())
         w.register(TICK_KIND, _handle_tick)
         w.register(DREAM_KIND, _handle_dream)
         _worker = w

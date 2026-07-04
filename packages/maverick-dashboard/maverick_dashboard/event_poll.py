@@ -30,12 +30,13 @@ def poll_and_fire(world: Any, triggers: list[dict], *, principal: str = "",
         # owner's triggers) doesn't create unowned goals. On the on-demand path
         # the trigger's owner is the caller, so this matches ``principal``.
         owner = trig.get("owner") or principal
-        summary: dict = {"name": trig["name"], "new_events": 0, "fired": [], "notes": []}
+        name = trig["name"]
+        summary: dict = {"name": name, "new_events": 0, "fired": [], "notes": []}
         try:
             res = poll_source(trig["source"], trig["config"], trig["cursor"])
         except EventSourceError as e:
             summary["notes"].append(f"poll failed: {e}")
-            trigger_events_store.record_summary(summary, owner)
+            trigger_events_store.record(name, owner, trigger_events_store.POLL_ERROR, note=str(e))
             results.append(summary)
             continue
         try:
@@ -44,8 +45,8 @@ def poll_and_fire(world: Any, triggers: list[dict], *, principal: str = "",
             # A deleted/renamed template shouldn't wedge the trigger on its
             # backlog forever: note it and advance the cursor past what we saw.
             summary["notes"].append(f"template unavailable: {e}")
-            event_triggers_store.set_cursor(trig["name"], res.cursor)
-            trigger_events_store.record_summary(summary, owner)
+            event_triggers_store.set_cursor(name, res.cursor)
+            trigger_events_store.record(name, owner, trigger_events_store.TEMPLATE_UNAVAILABLE, note=str(e))
             results.append(summary)
             continue
         declared = set(tpl.params)
@@ -59,15 +60,18 @@ def poll_and_fire(world: Any, triggers: list[dict], *, principal: str = "",
                 title, description = tpl.render(**params)
             except ValueError as e:             # a required param the event didn't supply
                 summary["notes"].append(f"skipped an event: {e}")
+                trigger_events_store.record(name, owner, trigger_events_store.EVENT_SKIPPED, note=str(e))
                 continue
             goal_id = world.create_goal(title[:200], description[:8000], owner=owner)
-            world.record_goal_origin(goal_id, "event", trig["name"])
+            world.record_goal_origin(goal_id, "event", name)
             fire(goal_id)
             summary["fired"].append(goal_id)
         # Only touch the store when the cursor actually moved -- an idle poll
         # (no new items) shouldn't rewrite the whole trigger file every tick.
         if res.cursor != trig["cursor"]:
-            event_triggers_store.set_cursor(trig["name"], res.cursor)
-        trigger_events_store.record_summary(summary, owner)
+            event_triggers_store.set_cursor(name, res.cursor)
+        if summary["fired"] or summary["new_events"]:
+            trigger_events_store.record(name, owner, trigger_events_store.FIRED,
+                                        new_events=summary["new_events"], fired=summary["fired"])
         results.append(summary)
     return results

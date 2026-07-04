@@ -145,8 +145,7 @@ def set_trigger(name: str, template: str, source: str, *, config: dict | None = 
             # Preserve the prior owner on a re-save that doesn't pass one, like
             # cursor/created, so an update can't silently orphan the trigger.
             "owner": str(owner) if owner else (prior["owner"] if prior else ""),
-            "interval_seconds": int(interval_seconds) if interval_seconds
-            else (prior.get("interval_seconds", 0) if prior else 0),
+            "interval_seconds": int(interval_seconds or (prior or {}).get("interval_seconds", 0)),
             "created": (prior["created"] if prior else time.time()),
         }
         kept.append(rec)

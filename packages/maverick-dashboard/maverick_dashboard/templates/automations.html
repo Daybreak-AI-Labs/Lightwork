@@ -372,6 +372,14 @@
         });
       }
       var items = data.triggers || [];
+      // One batched history fetch (owner-scoped), grouped by trigger name -- the
+      // rows are newest-first, so each group stays newest-first. Avoids an
+      // N-per-row fetch + parse of the same file for the fires/last-error hint.
+      var histByName = {};
+      try {
+        var h = await (await fetch('/api/v1/event-triggers/history?limit=500')).json();
+        (h.history || []).forEach(function (r) { (histByName[r.name] = histByName[r.name] || []).push(r); });
+      } catch (e) { /* history is best-effort */ }
       evList.textContent = '';
       if (evCount) evCount.textContent = items.length ? (items.length + (items.length === 1 ? ' trigger' : ' triggers')) : '';
       if (evEmpty) evEmpty.hidden = items.length > 0;
@@ -383,19 +391,15 @@
           + ' · every ' + (t.interval_seconds ? t.interval_seconds + 's' : '5m')
           + (t.cursor ? (' · at ' + t.cursor) : ' · not yet polled')));
         var runs = el('div', 'auto__runs'); main.appendChild(runs); loadRuns('event', t.name, runs);
-        var hist = el('div', 'auto__runs'); main.appendChild(hist); loadEventHistory(t.name, hist);
+        var hist = el('div', 'auto__runs'); main.appendChild(hist); renderEventHistory(histByName[t.name] || [], hist);
         li.appendChild(main);
         li.appendChild(delBtn('Delete event trigger ' + t.name, function () { delEventTrigger(t.name); }));
         evList.appendChild(li);
       });
     }
-    async function loadEventHistory(name, into) {
+    function renderEventHistory(rows, into) {
       // Fires + no-goal outcomes (poll errors, missing template, skipped events)
       // that the spawned-goal run list can't show.
-      var data = {};
-      try { data = await (await fetch('/api/v1/event-triggers/history?limit=50&name=' + encodeURIComponent(name))).json(); }
-      catch (e) { return; }
-      var rows = data.history || [];
       if (!rows.length) return;
       var fires = rows.filter(function (r) { return r.kind === 'fired'; }).length;
       var err = rows.find(function (r) { return r.kind !== 'fired'; });

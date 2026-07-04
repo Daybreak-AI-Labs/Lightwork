@@ -20,7 +20,8 @@ import time
 
 from maverick import config
 
-_MAX_ROWS = 2000  # bounded tail read; the file is swept by _trim on write
+_MAX_ROWS = 2000  # bound the tail we read back; the file itself grows unbounded
+                  # (like the consequence log) -- fine for best-effort telemetry
 
 # kinds worth a row -- a fire, or one of the no-goal outcomes
 FIRED = "fired"
@@ -53,24 +54,6 @@ def record(name: str, owner: str, kind: str, *, new_events: int = 0,
             fh.write(json.dumps(row, sort_keys=True) + "\n")
     except Exception:  # pragma: no cover -- history is best-effort
         return
-
-
-def record_summary(summary: dict, owner: str) -> None:
-    """Record a ``poll_and_fire`` per-trigger summary: one FIRED row when it
-    fired, plus a typed row per note (poll/template/skip). Idle -> nothing."""
-    name = summary.get("name", "")
-    fired = summary.get("fired") or []
-    new_events = int(summary.get("new_events") or 0)
-    if fired or new_events:
-        record(name, owner, FIRED, new_events=new_events, fired=list(fired))
-    for note in summary.get("notes") or []:
-        kind = POLL_ERROR
-        low = str(note).lower()
-        if low.startswith("template unavailable"):
-            kind = TEMPLATE_UNAVAILABLE
-        elif low.startswith("skipped an event"):
-            kind = EVENT_SKIPPED
-        record(name, owner, kind, note=str(note))
 
 
 def _read_rows() -> list[dict]:
@@ -107,5 +90,5 @@ def history(*, name: str | None = None, owner: str | None = None,
     return rows[: max(0, int(limit))]
 
 
-__all__ = ["record", "record_summary", "history",
+__all__ = ["record", "history",
            "FIRED", "POLL_ERROR", "TEMPLATE_UNAVAILABLE", "EVENT_SKIPPED"]
