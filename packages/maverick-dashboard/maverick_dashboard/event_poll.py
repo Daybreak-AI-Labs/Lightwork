@@ -16,12 +16,14 @@ from typing import Any
 def poll_and_fire(world: Any, triggers: list[dict], *, principal: str = "",
                   fire: Callable[[int], None]) -> list[dict]:
     """Poll each trigger and fire the template per new event. Returns a summary
-    per trigger: ``{name, new_events, fired: [goal_id...], notes}``. Never raises
-    for a single bad source/template -- it is recorded in that trigger's notes."""
+    per trigger: ``{name, new_events, fired: [goal_id...], notes, poll_error}``.
+    Never raises for a single bad trigger -- it's recorded in that trigger's
+    notes + ``poll_error`` and the batch continues."""
     from maverick.automation_events import EventSourceError, poll_source
+    from maverick.paths import reset_tenant, set_tenant
     from maverick.templates import load_template
 
-    from maverick_dashboard import event_triggers_store
+    from maverick_dashboard import event_triggers_store, trigger_events_store
 
     results: list[dict] = []
     for trig in triggers:
@@ -30,41 +32,61 @@ def poll_and_fire(world: Any, triggers: list[dict], *, principal: str = "",
         # owner's triggers) doesn't create unowned goals. On the on-demand path
         # the trigger's owner is the caller, so this matches ``principal``.
         owner = trig.get("owner") or principal
-        summary: dict = {"name": trig["name"], "new_events": 0, "fired": [], "notes": []}
+        name = trig["name"]
+        summary: dict = {"name": name, "new_events": 0, "fired": [], "notes": [],
+                         "poll_error": False}
+        results.append(summary)   # append the ref now; it's mutated in place below
+        # Bind the poll (incl. any OAuth vault read) to the tenant that created
+        # the trigger, so a polled source never reads a cross-tenant token.
+        # Single-tenant deployments store "" and run under the active tenant.
+        tok = set_tenant(trig["tenant"]) if trig.get("tenant") else None
         try:
-            res = poll_source(trig["source"], trig["config"], trig["cursor"])
-        except EventSourceError as e:
-            summary["notes"].append(f"poll failed: {e}")
-            results.append(summary)
-            continue
-        try:
-            tpl = load_template(trig["template"])
-        except (ValueError, FileNotFoundError) as e:
-            # A deleted/renamed template shouldn't wedge the trigger on its
-            # backlog forever: note it and advance the cursor past what we saw.
-            summary["notes"].append(f"template unavailable: {e}")
-            event_triggers_store.set_cursor(trig["name"], res.cursor)
-            results.append(summary)
-            continue
-        declared = set(tpl.params)
-        summary["new_events"] = len(res.events)
-        for event in res.events:
-            params = dict(trig.get("params") or {})
-            for k, v in event.items():          # event fields fill DECLARED params only
-                if k in declared:
-                    params[str(k)] = str(v)[:2000]
             try:
-                title, description = tpl.render(**params)
-            except ValueError as e:             # a required param the event didn't supply
-                summary["notes"].append(f"skipped an event: {e}")
+                res = poll_source(trig["source"], trig["config"], trig["cursor"])
+            except EventSourceError as e:
+                summary["poll_error"] = True
+                summary["notes"].append(f"poll failed: {e}")
+                trigger_events_store.record(name, owner, trigger_events_store.POLL_ERROR, note=str(e))
                 continue
-            goal_id = world.create_goal(title[:200], description[:8000], owner=owner)
-            world.record_goal_origin(goal_id, "event", trig["name"])
-            fire(goal_id)
-            summary["fired"].append(goal_id)
-        # Only touch the store when the cursor actually moved -- an idle poll
-        # (no new items) shouldn't rewrite the whole trigger file every tick.
-        if res.cursor != trig["cursor"]:
-            event_triggers_store.set_cursor(trig["name"], res.cursor)
-        results.append(summary)
+            try:
+                tpl = load_template(trig["template"])
+            except (ValueError, FileNotFoundError) as e:
+                # A deleted/renamed template shouldn't wedge the trigger on its
+                # backlog forever: note it and advance the cursor past what we saw.
+                summary["notes"].append(f"template unavailable: {e}")
+                event_triggers_store.set_cursor(name, res.cursor)
+                trigger_events_store.record(name, owner, trigger_events_store.TEMPLATE_UNAVAILABLE, note=str(e))
+                continue
+            declared = set(tpl.params)
+            summary["new_events"] = len(res.events)
+            for event in res.events:
+                params = dict(trig.get("params") or {})
+                for k, v in event.items():      # event fields fill DECLARED params only
+                    if k in declared:
+                        params[str(k)] = str(v)[:2000]
+                try:
+                    title, description = tpl.render(**params)
+                except ValueError as e:         # a required param the event didn't supply
+                    summary["notes"].append(f"skipped an event: {e}")
+                    trigger_events_store.record(name, owner, trigger_events_store.EVENT_SKIPPED, note=str(e))
+                    continue
+                goal_id = world.create_goal(title[:200], description[:8000], owner=owner)
+                world.record_goal_origin(goal_id, "event", name)
+                fire(goal_id)
+                summary["fired"].append(goal_id)
+            # Only touch the store when the cursor actually moved -- an idle poll
+            # (no new items) shouldn't rewrite the whole trigger file every tick.
+            if res.cursor != trig["cursor"]:
+                event_triggers_store.set_cursor(name, res.cursor)
+            if summary["fired"]:   # only a real fire; all-skipped is not "fired"
+                trigger_events_store.record(name, owner, trigger_events_store.FIRED,
+                                            new_events=summary["new_events"], fired=summary["fired"])
+        except Exception as e:  # one trigger's unexpected error must not abort the batch
+            summary["poll_error"] = True
+            summary["notes"].append(f"trigger error: {type(e).__name__}: {e}")
+            trigger_events_store.record(name, owner, trigger_events_store.POLL_ERROR,
+                                        note=f"{type(e).__name__}: {e}")
+        finally:
+            if tok is not None:
+                reset_tenant(tok)
     return results

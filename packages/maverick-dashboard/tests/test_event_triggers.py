@@ -136,6 +136,42 @@ def test_poll_reports_source_error_without_crashing(monkeypatch, tmp_path, _no_r
     assert any("poll failed" in n for n in out["triggers"][0]["notes"])
 
 
+def test_history_records_fires_and_errors(monkeypatch, tmp_path, _no_real_run):
+    _isolate(monkeypatch, tmp_path)
+    box = [{"items": [{"id": "1", "title": "first"}]}]
+    _feed(monkeypatch, box)
+    c = _client()
+    c.post("/api/v1/event-triggers", json={
+        "template": "triage", "source": "http_json",
+        "config": {"url": "http://x/feed", "items_path": "items", "id_field": "id"}})
+    c.post("/api/v1/event-triggers/poll")                      # baseline: no row
+    assert c.get("/api/v1/event-triggers/history").json()["history"] == []
+
+    box[0] = {"items": [{"id": "2", "title": "second"}, {"id": "1", "title": "first"}]}
+    c.post("/api/v1/event-triggers/poll")                      # fires -> a row
+    hist = c.get("/api/v1/event-triggers/history").json()["history"]
+    assert len(hist) == 1 and hist[0]["kind"] == "fired" and hist[0]["new_events"] == 1
+
+    # a source error is recorded too
+    import maverick.automation_events as ev
+    monkeypatch.setattr(ev, "_http_get_json",
+                        lambda *a, **k: (_ for _ in ()).throw(ev.EventSourceError("down")))
+    c.post("/api/v1/event-triggers/poll")
+    kinds = [r["kind"] for r in c.get("/api/v1/event-triggers/history").json()["history"]]
+    assert "poll_error" in kinds                               # newest-first, error on top
+
+
+def test_history_is_owner_scoped(monkeypatch, tmp_path):
+    _isolate(monkeypatch, tmp_path)
+    from maverick_dashboard import trigger_events_store as tes
+    tes.record("mine", "user:alice", tes.FIRED, new_events=1, fired=[1])
+    tes.record("theirs", "user:bob", tes.FIRED, new_events=1, fired=[2])
+    from maverick_dashboard import api
+    monkeypatch.setattr(api, "goal_owner_filter", lambda request: "user:alice")
+    names = [r["name"] for r in _client().get("/api/v1/event-triggers/history").json()["history"]]
+    assert names == ["mine"]
+
+
 def test_automations_page_shows_event_section_when_enabled(monkeypatch, tmp_path):
     _isolate(monkeypatch, tmp_path)
     t = _client().get("/automations").text
@@ -148,36 +184,12 @@ def test_automations_page_hides_event_section_when_disabled(monkeypatch, tmp_pat
     assert 'id="auto-event-form"' not in _client().get("/automations").text
 
 
-def test_background_poll_fires_system_wide(monkeypatch, tmp_path):
-    # The lifespan scheduler's tick body fires due triggers with no request.
-    _isolate(monkeypatch, tmp_path)
-    import time as _t
-
-    import maverick.automation_events as ev
-    import maverick.runner as runner_mod
-    from maverick_dashboard import app as A
-    from maverick_dashboard import event_triggers_store as s
-    fired = []
-    monkeypatch.setattr(runner_mod, "run_goal_in_thread",
-                        lambda *a, **k: fired.append(a[0] if a else None))
-    box = [{"items": [{"id": "1", "title": "a"}]}]
-    monkeypatch.setattr(ev, "_http_get_json", lambda url, headers=None, timeout=15.0: box[0])
-    s.set_trigger("feed", "triage", "http_json",
-                  config={"url": "http://x", "items_path": "items", "id_field": "id"})
-    A._poll_all_event_triggers()                              # baseline: fires nothing
-    box[0] = {"items": [{"id": "2", "title": "b"}, {"id": "1", "title": "a"}]}
-    A._poll_all_event_triggers()                              # new item -> fires
-    _t.sleep(0.15)                                            # let the daemon thread record
-    assert len(fired) == 1
-
-
-def test_background_poll_attributes_goal_to_trigger_owner(monkeypatch, tmp_path):
-    # The background tick has no request principal; the fired goal must still be
-    # owned by the trigger's owner (not left unowned), so owner-scoped views see it.
+def test_poll_and_fire_attributes_goal_to_trigger_owner(monkeypatch, tmp_path):
+    # No request principal (the background path); the fired goal must still be
+    # owned by the trigger's owner, so owner-scoped views see it.
     _isolate(monkeypatch, tmp_path)
     import maverick.automation_events as ev
-    import maverick.runner as runner_mod
-    from maverick_dashboard import app as A
+    from maverick_dashboard import event_poll
     from maverick_dashboard import event_triggers_store as s
     owners = []
 
@@ -189,40 +201,158 @@ def test_background_poll_attributes_goal_to_trigger_owner(monkeypatch, tmp_path)
         def record_goal_origin(self, gid, kind, name):
             pass
 
-    monkeypatch.setattr(A, "_world", _FakeWorld)
-    monkeypatch.setattr(runner_mod, "run_goal_in_thread", lambda *a, **k: None)
     box = [{"items": [{"id": "1", "title": "a"}]}]
     monkeypatch.setattr(ev, "_http_get_json", lambda url, headers=None, timeout=15.0: box[0])
-    s.set_trigger("feed", "triage", "http_json",
-                  config={"url": "http://x", "items_path": "items", "id_field": "id"},
-                  owner="user:alice")
-    A._poll_all_event_triggers()                              # baseline
+    s.set_trigger("feed", "triage", "http_json", owner="user:alice",
+                  config={"url": "http://x", "items_path": "items", "id_field": "id"})
+    event_poll.poll_and_fire(_FakeWorld(), [s.get_trigger("feed")], fire=lambda g: None)
     box[0] = {"items": [{"id": "2", "title": "b"}, {"id": "1", "title": "a"}]}
-    A._poll_all_event_triggers()                              # fires
+    event_poll.poll_and_fire(_FakeWorld(), [s.get_trigger("feed")], fire=lambda g: None)
     assert owners == ["user:alice"]
 
 
-def test_scheduler_starts_only_when_a_feature_is_on(monkeypatch, tmp_path):
-    import asyncio
+def _reset_aq(monkeypatch, aq):
+    # The queue/worker are module singletons; reset them so each test gets a
+    # fresh automation-jobs.db under its own tmp MAVERICK_HOME.
+    monkeypatch.setattr(aq, "_queue", None)
+    monkeypatch.setattr(aq, "_worker", None)
+    monkeypatch.setattr(aq, "_worker_threads", [])
 
+
+def test_tick_polls_due_triggers_and_enqueues_durable_run_goal(monkeypatch, tmp_path):
+    # The JobQueue tick handler polls due triggers and enqueues a durable
+    # run_goal job per fired goal (retry + dead-letter), not a bare thread.
+    _isolate(monkeypatch, tmp_path)
+    import maverick.automation_events as ev
+    from maverick_dashboard import automation_queue as aq
+    from maverick_dashboard import event_triggers_store as s
+    _reset_aq(monkeypatch, aq)
+    monkeypatch.setattr(aq, "_due", lambda name, interval: True)   # ignore cadence in-test
+    box = [{"items": [{"id": "1", "title": "a"}]}]
+    monkeypatch.setattr(ev, "_http_get_json", lambda url, headers=None, timeout=15.0: box[0])
+    s.set_trigger("feed", "triage", "http_json",
+                  config={"url": "http://x", "items_path": "items", "id_field": "id"})
+    aq._handle_tick(None)                                     # baseline: nothing fires
+    assert aq.queue().counts().get("pending", 0) == 0
+    box[0] = {"items": [{"id": "2", "title": "b"}, {"id": "1", "title": "a"}]}
+    aq._handle_tick(None)                                     # new item -> a run_goal job
+    jobs = aq.queue().list(status="pending")
+    assert len(jobs) == 1 and jobs[0].kind == "run_goal"
+
+
+def test_tick_respects_per_trigger_interval(monkeypatch, tmp_path):
+    # A trigger polled within its interval is skipped on the next tick.
+    _isolate(monkeypatch, tmp_path)
+    import maverick.automation_events as ev
+    from maverick_dashboard import automation_queue as aq
+    from maverick_dashboard import event_triggers_store as s
+    _reset_aq(monkeypatch, aq)
+    monkeypatch.setattr(ev, "_http_get_json",
+                        lambda url, headers=None, timeout=15.0: {"items": [{"id": "1"}]})
+    s.set_trigger("feed", "triage", "http_json", interval_seconds=3600,
+                  config={"url": "http://x", "items_path": "items", "id_field": "id"})
+    assert aq._due("feed", 3600) is True                     # never polled -> due
+    aq._handle_tick(None)                                     # polls + marks
+    assert aq._due("feed", 3600) is False                    # within interval -> not due
+
+
+def test_worker_starts_only_when_a_feature_is_on(monkeypatch, tmp_path):
     _isolate(monkeypatch, tmp_path)                          # MAVERICK_EVENT_TRIGGERS=1
-    from maverick_dashboard import app as A
-
-    async def _drive():
-        await A._install_automation_scheduler()
-        started = A._automation_task is not None
-        await A._stop_automation_scheduler()
-        return started, A._automation_task is None
-    started, stopped = asyncio.run(_drive())
-    assert started and stopped
+    from maverick_dashboard import automation_queue as aq
+    _reset_aq(monkeypatch, aq)
+    assert aq.start() is True                                 # a feature is on
+    aq.stop()
 
     monkeypatch.setenv("MAVERICK_EVENT_TRIGGERS", "0")
     monkeypatch.delenv("MAVERICK_DREAMING", raising=False)
+    _reset_aq(monkeypatch, aq)
+    assert aq.start() is False                                # nothing on -> no worker
 
-    async def _drive_off():
-        await A._install_automation_scheduler()
-        return A._automation_task
-    assert asyncio.run(_drive_off()) is None
+
+def test_fired_goal_runs_via_durable_queue(monkeypatch, tmp_path):
+    # A run_goal job on the automation queue is drained through the worker's
+    # built-in handler -- the durable path that gets retry + dead-letter.
+    _isolate(monkeypatch, tmp_path)
+    import maverick.runner as runner_mod
+    from maverick.worker import Worker
+    from maverick_dashboard import automation_queue as aq
+    _reset_aq(monkeypatch, aq)
+    ran = []
+    monkeypatch.setattr(runner_mod, "run_goal_in_thread",
+                        lambda gid, **k: ran.append(gid) or "done")
+    aq.queue().enqueue("run_goal", {"goal_id": 7})
+    Worker(queue=aq.queue()).drain()
+    assert ran == [7]
+
+
+def test_failed_poll_leaves_trigger_due(monkeypatch, tmp_path):
+    # A source error must NOT advance the due-marker, so the trigger retries on
+    # the next tick instead of going dark for a full interval.
+    _isolate(monkeypatch, tmp_path)
+    import maverick.automation_events as ev
+    from maverick_dashboard import automation_queue as aq
+    from maverick_dashboard import event_triggers_store as s
+    _reset_aq(monkeypatch, aq)
+    monkeypatch.setattr(ev, "_http_get_json",
+                        lambda *a, **k: (_ for _ in ()).throw(ev.EventSourceError("down")))
+    s.set_trigger("feed", "triage", "http_json", interval_seconds=3600,
+                  config={"url": "http://x", "items_path": "items", "id_field": "id"})
+    aq._handle_tick(None)
+    assert aq._due("feed", 3600) is True          # errored -> not marked -> still due
+
+
+def test_poll_runs_under_trigger_tenant(monkeypatch, tmp_path):
+    # The poll (and any OAuth vault read inside it) must run under the tenant
+    # that created the trigger, never the process-active tenant.
+    _isolate(monkeypatch, tmp_path)
+    import maverick.automation_events as ev
+    from maverick.paths import current_tenant_id
+    from maverick_dashboard import event_poll
+    from maverick_dashboard import event_triggers_store as s
+    seen = {}
+
+    def _fake(url, headers=None, timeout=15.0):
+        seen["tenant"] = current_tenant_id()
+        return {"items": [{"id": "1"}]}
+    monkeypatch.setattr(ev, "_http_get_json", _fake)
+    s.set_trigger("feed", "triage", "http_json", tenant="tenant:acme",
+                  config={"url": "http://x", "items_path": "items", "id_field": "id"})
+
+    class _W:
+        def create_goal(self, *a, **k):
+            return 1
+
+        def record_goal_origin(self, *a, **k):
+            pass
+    event_poll.poll_and_fire(_W(), [s.get_trigger("feed")], fire=lambda g: None)
+    assert seen["tenant"] == "tenant:acme"
+
+
+def test_all_skipped_events_record_no_fired_row(monkeypatch, tmp_path, _no_real_run):
+    # A poll whose events all fail template render is NOT "fired" -- it records
+    # event_skipped, not a misleading FIRED row (which the UI would count).
+    _isolate(monkeypatch, tmp_path)
+    box = [{"items": [{"id": "1"}]}]              # no 'title' -> render will skip
+    _feed(monkeypatch, box)
+    c = _client()
+    c.post("/api/v1/event-triggers", json={
+        "template": "triage", "source": "http_json",
+        "config": {"url": "http://x", "items_path": "items", "id_field": "id"}})
+    c.post("/api/v1/event-triggers/poll")         # baseline
+    box[0] = {"items": [{"id": "2"}, {"id": "1"}]}   # new event, still no title
+    c.post("/api/v1/event-triggers/poll")
+    kinds = [r["kind"] for r in c.get("/api/v1/event-triggers/history").json()["history"]]
+    assert "event_skipped" in kinds and "fired" not in kinds
+
+
+def test_reconcile_seeds_one_tick_and_is_idempotent(monkeypatch, tmp_path):
+    _isolate(monkeypatch, tmp_path)                          # MAVERICK_EVENT_TRIGGERS=1
+    from maverick_dashboard import automation_queue as aq
+    _reset_aq(monkeypatch, aq)
+    aq.reconcile()
+    aq.reconcile()
+    ticks = [j for j in aq.queue().list(status="pending") if j.kind == aq.TICK_KIND]
+    assert len(ticks) == 1
 
 
 def test_list_is_owner_scoped(monkeypatch, tmp_path):

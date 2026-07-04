@@ -85,6 +85,10 @@
         <label for="auto-event-name">Trigger name (optional)</label>
         <input type="text" id="auto-event-name" placeholder="(defaults to the template name)" autocomplete="off" />
       </div>
+      <div class="field">
+        <label for="auto-event-interval">Poll every (seconds, optional)</label>
+        <input type="number" id="auto-event-interval" min="60" max="86400" step="60" placeholder="300 (default; min 60)" autocomplete="off" />
+      </div>
       <div class="wf__row" style="display:flex; gap: var(--space-3); align-items:center;">
         <button class="btn btn--primary" type="submit">Create event trigger</button>
         <button class="btn btn--ghost" type="button" id="auto-event-poll">Poll now</button>
@@ -368,6 +372,14 @@
         });
       }
       var items = data.triggers || [];
+      // One batched history fetch (owner-scoped), grouped by trigger name -- the
+      // rows are newest-first, so each group stays newest-first. Avoids an
+      // N-per-row fetch + parse of the same file for the fires/last-error hint.
+      var histByName = {};
+      try {
+        var h = await (await fetch('/api/v1/event-triggers/history?limit=500')).json();
+        (h.history || []).forEach(function (r) { (histByName[r.name] = histByName[r.name] || []).push(r); });
+      } catch (e) { /* history is best-effort */ }
       evList.textContent = '';
       if (evCount) evCount.textContent = items.length ? (items.length + (items.length === 1 ? ' trigger' : ' triggers')) : '';
       if (evEmpty) evEmpty.hidden = items.length > 0;
@@ -375,12 +387,26 @@
         var li = el('li', 'mv-row');
         var main = el('div', 'mv-row__main');
         main.appendChild(el('div', 'mv-row__title', t.name));
-        main.appendChild(el('div', 'mv-row__sub', 'source ' + t.source + ' · template ' + t.template + (t.cursor ? (' · at ' + t.cursor) : ' · not yet polled')));
+        main.appendChild(el('div', 'mv-row__sub', 'source ' + t.source + ' · template ' + t.template
+          + ' · every ' + (t.interval_seconds ? t.interval_seconds + 's' : '5m')
+          + (t.cursor ? (' · at ' + t.cursor) : ' · not yet polled')));
         var runs = el('div', 'auto__runs'); main.appendChild(runs); loadRuns('event', t.name, runs);
+        var hist = el('div', 'auto__runs'); main.appendChild(hist); renderEventHistory(histByName[t.name] || [], hist);
         li.appendChild(main);
         li.appendChild(delBtn('Delete event trigger ' + t.name, function () { delEventTrigger(t.name); }));
         evList.appendChild(li);
       });
+    }
+    function renderEventHistory(rows, into) {
+      // Fires + no-goal outcomes (poll errors, missing template, skipped events)
+      // that the spawned-goal run list can't show.
+      if (!rows.length) return;
+      var fires = rows.filter(function (r) { return r.kind === 'fired'; }).length;
+      var err = rows.find(function (r) { return r.kind !== 'fired'; });
+      var bits = [];
+      if (fires) bits.push('fired ' + fires + '×');
+      if (err) bits.push('⚠ ' + (err.note || err.kind));
+      if (bits.length) into.textContent = bits.join(' · ');
     }
     async function delEventTrigger(name) {
       if (!(await mvConfirm('Delete event trigger “' + name + '”? It will stop polling.'))) return;
@@ -396,10 +422,12 @@
       var cfgRaw = document.getElementById('auto-event-config').value.trim();
       var config = {};
       if (cfgRaw) { try { config = JSON.parse(cfgRaw); } catch (e) { evMsg.textContent = 'Config is not valid JSON.'; return; } }
+      var intervalRaw = document.getElementById('auto-event-interval').value.trim();
       var body = {
         template: document.getElementById('auto-event-template').value.trim(),
         source: evSource.value, config: config,
         name: document.getElementById('auto-event-name').value.trim() || null,
+        interval_seconds: intervalRaw ? parseInt(intervalRaw, 10) : 0,
       };
       var resp = await fetch('/api/v1/event-triggers', {
         method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body),

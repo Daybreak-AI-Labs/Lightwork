@@ -307,6 +307,28 @@ def test_enable_learning_requires_admin(monkeypatch, tmp_path):
     assert c.post("/api/v1/learning", json={"enabled": True}).status_code == 200
 
 
+def test_oauth_provider_trigger_requires_admin(monkeypatch, tmp_path):
+    # A trigger that reads a vaulted OAuth token (config.provider) attaches that
+    # token to a caller-supplied url/token_url at poll time. That's the trust of
+    # authorizing the token, so it must require admin -- an operator must not be
+    # able to name a provider and exfiltrate its token.
+    monkeypatch.setenv("MAVERICK_DASHBOARD_ADMINS", "")
+    monkeypatch.setenv("MAVERICK_EVENT_TRIGGERS", "1")
+    c = _client(monkeypatch, tmp_path)
+    from maverick_dashboard import rbac
+    rbac.set_role("user:op-oauth", "operator")
+    _as(monkeypatch, "user:op-oauth")
+    r = c.post("/api/v1/event-triggers", json={
+        "template": "triage", "source": "oauth_http_json",
+        "config": {"provider": "slack", "url": "https://x", "token_url": "https://x",
+                   "client_id": "x"}})
+    assert r.status_code == 403
+    # A non-vault trigger stays operate-allowed (not 403; it may 404 on template).
+    r2 = c.post("/api/v1/event-triggers", json={
+        "template": "triage", "source": "http_json", "config": {"url": "https://x"}})
+    assert r2.status_code != 403
+
+
 def test_shared_halt_requires_admin(monkeypatch, tmp_path):
     # The shared Postgres halt is a global, untenanted fleet control. A tenant
     # operator may operate local goals, but must not arm the cluster-wide halt.

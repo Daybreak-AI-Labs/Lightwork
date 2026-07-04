@@ -100,9 +100,58 @@ def test_rss_refuses_doctype_entity(monkeypatch):
         ev.RssSource().poll({"url": "http://x"}, cursor="1")
 
 
+def test_oauth_http_json_uses_a_vaulted_bearer_token(monkeypatch, tmp_path):
+    monkeypatch.setenv("MAVERICK_HOME", str(tmp_path))
+    monkeypatch.setenv("MAVERICK_OAUTH_VAULT", "1")
+    from maverick import oauth_vault
+    oauth_vault.get_vault().put("acme", {"access_token": "T0K3N", "expires_in": 3600})
+    seen = {}
+
+    def _fake(url, headers=None, timeout=15.0):
+        seen["auth"] = (headers or {}).get("Authorization")
+        return {"data": [{"id": "9", "who": "acme"}]}
+    monkeypatch.setattr(ev, "_http_get_json", _fake)
+    r = ev.OAuthHttpJsonSource().poll(
+        {"provider": "acme", "url": "https://x/api", "items_path": "data", "id_field": "id"},
+        cursor="8")
+    assert seen["auth"] == "Bearer T0K3N"
+    assert r.events[0]["who"] == "acme" and r.cursor == "9"
+
+
+def test_oauth_source_errors_when_vault_off(monkeypatch):
+    monkeypatch.setenv("MAVERICK_OAUTH_VAULT", "0")
+    with pytest.raises(ev.EventSourceError):
+        ev.OAuthHttpJsonSource().poll({"provider": "acme", "url": "https://x"}, cursor="")
+
+
+def test_oauth_source_requires_provider(monkeypatch):
+    monkeypatch.setenv("MAVERICK_OAUTH_VAULT", "1")
+    with pytest.raises(ev.EventSourceError):
+        ev.OAuthHttpJsonSource().poll({"url": "https://x"}, cursor="")
+
+
+def test_github_issues_source_dedups_by_number_and_drops_prs(monkeypatch):
+    feed = [
+        {"number": 12, "title": "newer issue"},
+        {"number": 11, "title": "a PR", "pull_request": {"url": "x"}},
+        {"number": 10, "title": "older issue"},
+    ]
+    monkeypatch.setattr(ev, "_http_get_json", lambda url, headers=None, timeout=15.0: feed)
+    r = ev.GithubIssuesSource().poll({"owner": "o", "repo": "r"}, cursor="10")
+    assert [e["number"] for e in r.events] == ["12"]   # PR + already-seen excluded
+    assert r.cursor == "12"
+
+
+def test_github_issues_requires_owner_repo():
+    with pytest.raises(ev.EventSourceError):
+        ev.GithubIssuesSource().poll({"owner": "o"}, cursor="")
+
+
 def test_registry_and_unknown_source():
     assert "http_json" in ev.available_sources()
     assert "rss" in ev.available_sources()
+    assert "oauth_http_json" in ev.available_sources()
+    assert "github_issues" in ev.available_sources()
     with pytest.raises(ev.EventSourceError):
         ev.get_source("nope")
 

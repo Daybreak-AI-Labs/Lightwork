@@ -1388,6 +1388,9 @@ async def cancel_goal(request: Request, goal_id: int) -> None:
     if g.status in ("done", "cancelled", "failed"):
         return
     w.set_goal_status(goal_id, "cancelled", result="cancelled via dashboard")
+    # A human killing an in-progress run is real negative ground truth (the run
+    # wasn't worth finishing) -- feed it to the learning loop, best-effort.
+    _ground_outcome(w, goal_id, 0.0, kind="cancel")
 
 
 @router.get("/goals/{goal_id}/open_questions")
@@ -1471,22 +1474,26 @@ async def post_signoff(request: Request, goal_id: int, payload: SignoffIn) -> di
     return {"gate": _goal_gate(g.domain), "signoff": w.signoff_for(goal_id)}
 
 
-def _record_signoff_outcome(w, goal_id: int, decision: str) -> None:
-    """Record a deliverable sign-off as a grounded outcome for the goal's latest
-    episode. No-op unless ``[consequence]`` is enabled (kernel stays stateless by
-    default); never raises -- the sign-off is already persisted, so grounding it
-    must not fail the request."""
+def _ground_outcome(w, goal_id: int, value: float, *, kind: str) -> None:
+    """Record a real human/world outcome for the goal's latest episode as
+    grounded reward the learning flywheel prefers over its proxy. No-op unless
+    ``[consequence]`` is enabled (kernel stays stateless by default); never
+    raises -- grounding is best-effort and must not fail the request."""
     try:
         from maverick import consequence
         if not consequence.enabled():
             return
         episodes = w.list_episodes(goal_id=goal_id, limit=1)
         if not episodes:
-            return  # a finished deliverable should have an episode, but be safe
-        value = 1.0 if decision == "approved" else 0.0
-        consequence.record_outcome(goal_id, episodes[0].id, value, kind="signoff")
+            return  # the action should have an episode, but be safe
+        consequence.record_outcome(goal_id, episodes[0].id, float(value), kind=kind)
     except Exception as e:  # pragma: no cover - grounding is best-effort
-        log.debug("signoff outcome not recorded for goal %s: %s", goal_id, e)
+        log.debug("%s outcome not recorded for goal %s: %s", kind, goal_id, e)
+
+
+def _record_signoff_outcome(w, goal_id: int, decision: str) -> None:
+    """A deliverable sign-off -> grounded outcome (approved 1.0 / rejected 0.0)."""
+    _ground_outcome(w, goal_id, 1.0 if decision == "approved" else 0.0, kind="signoff")
 
 
 def _handoff_approved_deliverable(g, decided_by: str) -> None:
@@ -1986,6 +1993,7 @@ def _event_trigger_out(rec: dict) -> EventTriggerOut:
         name=rec["name"], template=rec["template"], source=rec["source"],
         config=rec.get("config") or {}, params=rec.get("params") or {},
         cursor=rec.get("cursor") or "",
+        interval_seconds=int(rec.get("interval_seconds") or 0),
     )
 
 
@@ -2018,6 +2026,14 @@ async def list_event_triggers_endpoint(request: Request) -> dict:
 async def create_event_trigger(request: Request, payload: EventTriggerIn) -> EventTriggerOut:
     require_permission(request, "operate")
     _require_event_triggers()
+    # A trigger that reads an OAuth token from the shared per-tenant vault (any
+    # source given a `provider`) attaches that token to the caller-supplied
+    # `url`/`token_url` at poll time -- so it can send the token wherever the
+    # creator points it. That is the same trust as authorizing the token, so
+    # require ADMIN: otherwise a low-priv operator could name a provider they
+    # never authorized and exfiltrate its access/refresh token to their own host.
+    if (payload.config or {}).get("provider"):
+        require_permission(request, "admin")
     from maverick.automation_events import EventSourceError, get_source
     try:
         get_source(payload.source)   # a registered source?
@@ -2044,10 +2060,13 @@ async def create_event_trigger(request: Request, payload: EventTriggerIn) -> Eve
             raise HTTPException(
                 status_code=409, detail="an event trigger with that name already exists")
     try:
+        from maverick.paths import current_tenant_id
         rec = event_triggers_store.set_trigger(
             payload.name or payload.template, payload.template, payload.source,
             config=payload.config or {}, params=payload.params or {},
-            owner=caller_principal(request) or "")
+            owner=caller_principal(request) or "",
+            interval_seconds=payload.interval_seconds,
+            tenant=current_tenant_id() or "")   # bind OAuth vault reads to this tenant
     except ValueError as e:
         raise HTTPException(status_code=400, detail=str(e)) from e
     return _event_trigger_out(rec)
@@ -2094,6 +2113,20 @@ async def poll_event_triggers(request: Request, bg: BackgroundTasks, name: str =
     results = await run_in_threadpool(
         event_poll.poll_and_fire, _world(), triggers, principal=principal, fire=_fire)
     return {"polled": len(results), "triggers": results}
+
+
+@router.get("/event-triggers/history")
+async def event_trigger_history(request: Request, name: str = "", limit: int = 50) -> dict:
+    """Recent firings + errors for event triggers (owner-scoped). Complements
+    ``/automation-runs?kind=event`` (which shows the goals a trigger spawned)
+    with the no-goal outcomes: poll failures, missing templates, skipped events."""
+    require_permission(request, "operate")
+    _require_event_triggers()
+    from maverick_dashboard import trigger_events_store
+    owner = goal_owner_filter(request)
+    rows = trigger_events_store.history(
+        name=name or None, owner=owner, limit=max(1, min(1000, limit)))
+    return {"history": rows}
 
 
 # ---- automation import: pull clients' existing automations into Lightwork -----
