@@ -209,11 +209,16 @@ class HttpJsonSource:
     """
     source = "http_json"
 
+    def _extra_headers(self, config: dict) -> dict:
+        """Per-poll headers merged over the static ``headers`` config (e.g. a
+        live ``Authorization``). Base source adds none; subclasses override."""
+        return {}
+
     def poll(self, config: dict, cursor: str) -> PollResult:
-        url, id_field, headers = _base_config(config, "http_json")
+        url, id_field, headers = _base_config(config, self.source)
         items_path = str((config or {}).get("items_path") or "")
         newest_first = bool((config or {}).get("newest_first", True))
-
+        headers = {**headers, **self._extra_headers(config)}
         body = _http_get_json(url, headers=headers)
         items = _dig(body, items_path) if items_path else body
         if not isinstance(items, list):
@@ -342,7 +347,7 @@ def _oauth_bearer(config: dict) -> str:
     return token
 
 
-class OAuthHttpJsonSource:
+class OAuthHttpJsonSource(HttpJsonSource):
     """Poll a Bearer-authenticated JSON HTTP endpoint. Same as ``http_json`` but
     the ``Authorization`` header is a live OAuth token from the sealed vault
     (``provider``) rather than a static header -- so long-lived polling of
@@ -351,20 +356,8 @@ class OAuthHttpJsonSource:
     client_id?, client_secret_env?, headers?}``."""
     source = "oauth_http_json"
 
-    def poll(self, config: dict, cursor: str) -> PollResult:
-        url, id_field, headers = _base_config(config, "oauth_http_json")
-        items_path = str((config or {}).get("items_path") or "")
-        newest_first = bool((config or {}).get("newest_first", True))
-        headers = {**headers, "Authorization": f"Bearer {_oauth_bearer(config)}"}
-        body = _http_get_json(url, headers=headers)
-        items = _dig(body, items_path) if items_path else body
-        if not isinstance(items, list):
-            raise EventSourceError(
-                "expected a JSON array of items"
-                + (f" at {items_path!r}" if items_path else "")
-            )
-        items = [it for it in items if isinstance(it, dict)]
-        return diff_new_items(items, cursor, id_field, newest_first=newest_first)
+    def _extra_headers(self, config: dict) -> dict:
+        return {"Authorization": f"Bearer {_oauth_bearer(config)}"}
 
 
 register("oauth_http_json", OAuthHttpJsonSource)

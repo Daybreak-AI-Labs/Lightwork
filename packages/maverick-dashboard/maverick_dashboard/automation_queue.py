@@ -260,18 +260,22 @@ def start() -> bool:
         w = Worker(queue=queue())
         w.register(TICK_KIND, _handle_tick)
         w.register(DREAM_KIND, _handle_dream)
-        _worker = w
+        # Seed the cron jobs + actually start the threads BEFORE committing to the
+        # module globals, so a failure in reconcile() (e.g. a boot-time sqlite
+        # write error) leaves us cleanly un-started and retryable -- not wedged
+        # with recorded-but-never-started threads that stop() would join().
+        reconcile()
         # One Worker, N threads sharing it: JobQueue.claim is atomic, so the
         # threads safely divide the jobs -- a slow run_goal on one thread can't
         # block the tick/dream on another.
-        _worker_threads = [
+        threads = [
             threading.Thread(target=w.run_forever, name=f"automation-worker-{i}", daemon=True)
             for i in range(_worker_count())
         ]
-        threads = list(_worker_threads)
-    reconcile()
-    for t in threads:
-        t.start()
+        for t in threads:
+            t.start()
+        _worker = w
+        _worker_threads = threads
     log.info("automation worker started (%d threads, db=%s)", len(threads), _db_path())
     return True
 

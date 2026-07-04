@@ -149,7 +149,10 @@ def set_trigger(name: str, template: str, source: str, *, config: dict | None = 
             # cursor/created, so an update can't silently orphan the trigger.
             "owner": str(owner) if owner else (prior["owner"] if prior else ""),
             "tenant": str(tenant) if tenant else (prior.get("tenant", "") if prior else ""),
-            "interval_seconds": int(interval_seconds or (prior or {}).get("interval_seconds", 0)),
+            # The create form always submits this field, so take it verbatim --
+            # that's what lets an operator clear a custom cadence back to the
+            # scheduler default (0) by blanking the box.
+            "interval_seconds": int(interval_seconds),
             "created": (prior["created"] if prior else time.time()),
         }
         kept.append(rec)

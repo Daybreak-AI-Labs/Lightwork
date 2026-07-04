@@ -2120,6 +2120,7 @@ async def event_trigger_history(request: Request, name: str = "", limit: int = 5
     """Recent firings + errors for event triggers (owner-scoped). Complements
     ``/automation-runs?kind=event`` (which shows the goals a trigger spawned)
     with the no-goal outcomes: poll failures, missing templates, skipped events."""
+    require_permission(request, "operate")
     _require_event_triggers()
     from maverick_dashboard import trigger_events_store
     owner = goal_owner_filter(request)
