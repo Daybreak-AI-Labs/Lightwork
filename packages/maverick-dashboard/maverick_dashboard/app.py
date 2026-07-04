@@ -1236,6 +1236,18 @@ async def workforce_page(request: Request) -> HTMLResponse:
     )
 
 
+@app.get("/learning", response_class=HTMLResponse)
+async def learning_page(request: Request) -> HTMLResponse:
+    """The learning moat: which learning systems are on, and the durable,
+    per-tenant judgement the workforce has accumulated (Operating Record +
+    grounded outcomes + self-taught capabilities). Read-only; same numbers as
+    /api/v1/learning."""
+    from .api import _learning_snapshot
+    return templates.TemplateResponse(
+        request, "learning.html", {"snap": _learning_snapshot(request)},
+    )
+
+
 @app.get("/perf", response_class=HTMLResponse)
 async def perf_page(request: Request) -> HTMLResponse:
     """Public perf dashboard: SLA + benchmark history (data via /api/v1/perf)."""

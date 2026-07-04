@@ -3809,6 +3809,72 @@ async def outcomes_api(request: Request, top: int = 0) -> dict:
     }
 
 
+def _learning_snapshot(request: Request) -> dict:
+    """Learning-engine status + accumulated moat. Shared by the JSON endpoint
+    and the /learning page so both render identical numbers."""
+    from maverick import consequence, dreaming, reflexion, trajectory_store
+    from maverick.config import get_data_engine
+    from maverick.operating_record import assemble, stats
+
+    def _data_engine_on() -> bool:
+        try:
+            return bool(get_data_engine().get("enable", False))
+        except Exception:  # pragma: no cover - config never blocks the view
+            return False
+
+    components = [
+        {"key": "consequence", "label": "Grounded outcomes (reality feedback)",
+         "on": consequence.enabled(),
+         "how": "[consequence] enable — or MAVERICK_CONSEQUENCE=1"},
+        {"key": "reflexion", "label": "Failure memory (learn from mistakes)",
+         "on": reflexion.enabled(),
+         "how": "[reflexion] enable — or MAVERICK_REFLEXION=1"},
+        {"key": "dreaming", "label": "Consolidation (distil skills + insights)",
+         "on": dreaming.enabled(),
+         "how": "[dreaming] enable — then run `maverick dream` on a schedule"},
+        {"key": "capture", "label": "Trajectory capture (fuel for the flywheel)",
+         "on": trajectory_store.enabled(),
+         "how": "[self_improvement] capture — or MAVERICK_TRAJECTORY_CAPTURE=1"},
+        {"key": "data_engine", "label": "Improvement flywheel",
+         "on": _data_engine_on(),
+         "how": "[data_engine] enable"},
+    ]
+
+    w = _world()
+    owner = goal_owner_filter(request)
+    st = stats(assemble(w, owner=owner))
+    try:
+        learned_n = len(_learned_snapshot().get("learned") or [])
+    except Exception:  # pragma: no cover - the moat view never 500s on a sub-read
+        learned_n = 0
+    accumulated = {
+        "decisions": st.n_records,
+        "human_decisions": st.n_human_decisions,
+        "approvals": st.n_approvals,
+        "departments": len(st.departments),
+        "learned_capabilities": learned_n,
+        "grounded_outcomes": consequence.count(),
+    }
+    return {
+        "components": components,
+        "accumulated": accumulated,
+        "components_on": sum(1 for c in components if c["on"]),
+        "components_total": len(components),
+    }
+
+
+@router.get("/learning")
+async def learning_api(request: Request) -> dict:
+    """Learning-engine status + the durable, per-tenant value it has accumulated.
+
+    ``components`` reflect each subsystem's own ``enabled()`` (the source of
+    truth). ``accumulated`` is the non-portable moat: decisions and human
+    judgements on the Operating Record, capabilities the workforce taught
+    itself, and the grounded outcomes it has learned from -- what a customer
+    would forfeit by leaving. Read-only and owner-scoped."""
+    return _learning_snapshot(request)
+
+
 @router.get("/marketplace/packs")
 async def marketplace_packs_api(request: Request, q: str = "") -> dict:
     """Pack marketplace grouped by department, or a flat search when ``q`` set."""

@@ -108,6 +108,12 @@ class ConsequenceStore:
             hit = self._latest.get((int(goal_id), int(episode_id)))
             return hit[1] if hit is not None else None
 
+    def count(self) -> int:
+        """How many distinct episodes have a real outcome recorded -- the size of
+        the grounded-learning signal accumulated so far."""
+        with self._lock:
+            return len(self._latest)
+
     def _load(self) -> None:
         try:
             with open(self.path, encoding="utf-8") as fh:
@@ -163,6 +169,11 @@ def resolve(goal_id: int, episode_id: int, *, store: ConsequenceStore | None = N
     return (store or shared()).resolve(goal_id, episode_id)
 
 
+def count(*, store: ConsequenceStore | None = None) -> int:
+    """Number of episodes with a grounded outcome recorded (accumulated signal)."""
+    return (store or shared()).count()
+
+
 def grounded_outcome(goal_id: int, episode_id: int, proxy: float | None, *,
                      store: ConsequenceStore | None = None) -> float | None:
     """Prefer the real outcome over the proxy (verifier confidence) when present.
@@ -179,5 +190,5 @@ def grounded_outcome(goal_id: int, episode_id: int, proxy: float | None, *,
 
 __all__ = [
     "ConsequenceStore", "enabled", "shared", "reset_shared",
-    "record_outcome", "resolve", "grounded_outcome",
+    "record_outcome", "resolve", "grounded_outcome", "count",
 ]
