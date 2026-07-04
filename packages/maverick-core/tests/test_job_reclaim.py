@@ -112,6 +112,7 @@ def test_worker_reclaims_peer_orphan_while_running(tmp_path):
     only picks 'pending' rows), so the no-op handler never runs and the job
     never reaches 'done'.
     """
+    import sqlite3
     import threading
     import time
 
@@ -129,11 +130,26 @@ def test_worker_reclaims_peer_orphan_while_running(tmp_path):
     t.start()
     try:
         # Daemon is up and past its startup reclaim. Now simulate a *peer*
-        # worker that claimed this job and then hard-crashed: drive it into
-        # 'running' with an ancient updated_at so it is well past the lease.
-        jid = q.enqueue("recovered", {}, run_at=1000.0)
-        claimed = q.claim(now=1000.0)
-        assert claimed is not None and claimed.id == jid
+        # worker that claimed this job and then hard-crashed: a row stuck in
+        # 'running' with an ancient updated_at, well past the lease.
+        #
+        # We must NOT create it via q.claim() -- the live daemon races the main
+        # thread for the same 'pending' row, so the claim is non-deterministic
+        # (the flake this test used to hit). Instead: enqueue with a far-future
+        # run_at so the daemon's claim() (which filters run_at <= now) never
+        # touches the pending row, then stamp it straight into the orphaned
+        # 'running' state with a direct write. reclaim_stale ignores run_at and
+        # resets it to `now` when it requeues, so the daemon picks it up then.
+        jid = q.enqueue("recovered", {}, run_at=1e12)
+        con = sqlite3.connect(str(q.db_path))
+        try:
+            con.execute(
+                "UPDATE jobs SET status='running', attempts=1, updated_at=? WHERE id=?",
+                (1000.0, jid),
+            )
+            con.commit()
+        finally:
+            con.close()
         assert q.get(jid).status == "running"
 
         # The in-loop periodic reclaim (interval = reclaim_lease/2 = 1s) must
