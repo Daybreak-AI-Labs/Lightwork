@@ -1193,7 +1193,13 @@ def get_reasoning_reward() -> dict:
     ``enable = false`` (or MAVERICK_REASONING_REWARD=0) to force the scalar
     verifier."""
     cfg = load_config().get("reasoning_reward", {})
-    return {"enable": bool(cfg.get("enable", True))}
+    return {
+        "enable": bool(cfg.get("enable", True)),
+        # Sign each structured reward into the tamper-evident audit chain
+        # (provable learning). OFF by default -- opt in for the full signed
+        # learning trail. See reasoning_reward.audit_rewards_enabled.
+        "audit_rewards": bool(cfg.get("audit_rewards", False)),
+    }
 
 
 def get_jit_rl() -> dict:
@@ -1225,6 +1231,21 @@ def get_jit_rl() -> dict:
         "beta": beta,
         "max_experiences": _int("max_experiences", 5000),
     }
+
+
+def get_self_modify() -> dict:
+    """Return the ``[self_modify]`` section (governed code self-modification).
+
+    OFF by default AND inert until an editable allowlist is set: the engine
+    (maverick.self_modify) refuses any patch outside ``editable_paths`` and every
+    control-plane path unconditionally. ``editable_paths`` is a list of
+    repo-relative fnmatch globs the agent MAY propose changes to; empty (the
+    default) means nothing is editable."""
+    cfg = load_config().get("self_modify", {})
+    paths = cfg.get("editable_paths")
+    editable = ([str(p).strip() for p in paths if str(p).strip()]
+                if isinstance(paths, list) else [])
+    return {"enable": bool(cfg.get("enable", False)), "editable_paths": editable}
 
 
 def get_rehearsal() -> dict:

@@ -735,3 +735,42 @@ def test_write_config_omits_learning_knobs_by_default(tmp_path: Path, monkeypatc
     assert "jit_rl" not in parsed
     assert "calibration" not in parsed
     assert "self_improvement" not in parsed
+
+
+def test_write_config_emits_audit_rewards(tmp_path: Path, monkeypatch):
+    parsed = _write_full_config(tmp_path, monkeypatch, advanced={"audit_rewards": True})
+    assert parsed["reasoning_reward"]["audit_rewards"] is True
+    from maverick import config
+    monkeypatch.setattr(config, "load_config", lambda *a, **k: parsed)
+    assert config.get_reasoning_reward()["audit_rewards"] is True
+
+
+def test_write_config_reasoning_reward_both_keys_one_table(tmp_path: Path, monkeypatch):
+    # structured_verifier_off + audit_rewards must share ONE [reasoning_reward]
+    # table (two tables would be invalid TOML).
+    parsed = _write_full_config(
+        tmp_path, monkeypatch,
+        advanced={"structured_verifier_off": True, "audit_rewards": True})
+    assert parsed["reasoning_reward"]["enable"] is False
+    assert parsed["reasoning_reward"]["audit_rewards"] is True
+
+
+def test_pick_advanced_includes_self_modify(monkeypatch):
+    _StubQ(monkeypatch)
+    from maverick_installer.wizard import pick_advanced
+    assert "self_modify" in pick_advanced()
+
+
+def test_write_config_emits_self_modify(tmp_path: Path, monkeypatch):
+    parsed = _write_full_config(tmp_path, monkeypatch, advanced={"self_modify": True})
+    assert parsed["self_modify"]["enable"] is True
+    from maverick import config
+    monkeypatch.setattr(config, "load_config", lambda *a, **k: parsed)
+    resolved = config.get_self_modify()
+    assert resolved["enable"] is True
+    assert resolved["editable_paths"] == []  # allowlist stays commented -> inert
+
+
+def test_write_config_omits_self_modify_when_off(tmp_path: Path, monkeypatch):
+    parsed = _write_full_config(tmp_path, monkeypatch, advanced={})
+    assert "self_modify" not in parsed

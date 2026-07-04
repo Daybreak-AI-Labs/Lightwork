@@ -112,6 +112,13 @@ class EventKind:
     # wrote/retired/quarantined) so `maverick audit verify` covers learned
     # state the same way it covers tool calls.
     LEARNING_UPDATE = "learning_update"
+    # Provable learning: one signed row per structured verification reward
+    # (maverick.reasoning_reward), so the EVIDENCE the system learns from -- the
+    # per-dimension rubric, the holistic score, and whether a facet vetoed -- is
+    # tamper-evident in the chain, not just a mutable in-memory verdict. Opt-in
+    # ([reasoning_reward] audit_rewards); payload is to_audit_summary(): score,
+    # confidence, accepts, vetoed, and per-dimension name/score/veto.
+    VERIFICATION_REWARD = "verification_reward"
     # Memory governance (OWASP ASI06): a memory write was stamped/screened, or a
     # trust-aware retrieval pass filtered low-trust memory out of the brief.
     # payload: action:str (write|write_blocked|recall_filter), plus key/source/

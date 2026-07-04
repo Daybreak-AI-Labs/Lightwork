@@ -194,6 +194,25 @@ class ReasoningReward:
             "dimensions": [d.to_dict() for d in self.dimensions],
         }
 
+    def to_audit_summary(self) -> dict:
+        """A compact, chain-friendly view for the signed audit row.
+
+        Like :meth:`to_audit_dict` but drops the (potentially long) reasoning
+        trace, truncates the critique, and reduces each dimension to
+        name/score/vetoes -- so a VERIFICATION_REWARD row stays small and stable
+        while still recording WHAT the judge scored and WHERE it vetoed."""
+        return {
+            "score": round(self.score, 4),
+            "confidence": round(self.confidence, 4),
+            "accepts": self.accepts(),
+            "vetoed": self.vetoed,
+            "critique": (self.critique or "")[:280],
+            "dimensions": [
+                {"name": d.name, "score": round(d.score, 4), "vetoes": d.vetoes}
+                for d in self.dimensions
+            ],
+        }
+
     @classmethod
     def reject(cls, reason: str) -> ReasoningReward:
         """A conservative low reward used for every parse/judge failure."""
@@ -369,6 +388,29 @@ def enabled() -> bool:
         return False
 
 
+def audit_rewards_enabled() -> bool:
+    """Whether structured verification rewards are signed into the audit chain.
+
+    OFF by default (avoids audit volume and matches the opt-in posture of the
+    governance features); regulated deployments turn it on for a tamper-evident
+    record of every learning signal. ``MAVERICK_REASONING_REWARD_AUDIT=1`` or
+    ``[reasoning_reward] audit_rewards``. Independent of :func:`enabled` -- the
+    reward only exists when the rubric judge ran, but signing it is a separate
+    choice. Fail-open (leaves it at the configured default on any error)."""
+    try:
+        from .config import env_flag
+        v = env_flag("MAVERICK_REASONING_REWARD_AUDIT")
+        if v is not None:
+            return v
+    except Exception:  # pragma: no cover -- env parsing never blocks
+        pass
+    try:
+        from .config import get_reasoning_reward
+        return bool(get_reasoning_reward().get("audit_rewards", False))
+    except Exception:  # pragma: no cover -- config never blocks a run
+        return False
+
+
 __all__ = [
     "DEFAULT_RUBRIC",
     "ACCEPT_THRESHOLD",
@@ -378,4 +420,5 @@ __all__ = [
     "holistic_from_dimensions",
     "parse_structured",
     "enabled",
+    "audit_rewards_enabled",
 ]
