@@ -254,6 +254,21 @@ class OAuthExchangeIn(BaseModel):
     client_id: str | None = Field(default=None, max_length=512)
 
 
+class FlowSaveIn(BaseModel):
+    """A flow definition (a graph of typed nodes) to create or replace."""
+    flow: dict
+
+
+class FlowRunIn(BaseModel):
+    """Start a flow run with optional initial data (the trigger payload)."""
+    data: dict = Field(default_factory=dict)
+
+
+class FlowResumeIn(BaseModel):
+    """Resume a paused flow run: the human verdict on the approval node."""
+    decision: str = Field(default="approved", pattern="^(approved|rejected)$")
+
+
 class AnswerIn(BaseModel):
     question_id: int
     answer: str

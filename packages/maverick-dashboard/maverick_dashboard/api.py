@@ -51,6 +51,9 @@ from .api_schemas import (
     FeedbackIn,
     FleetCreateIn,
     FleetRunIn,
+    FlowResumeIn,
+    FlowRunIn,
+    FlowSaveIn,
     GoalEventOut,
     GoalEventsResponse,
     GoalIn,
@@ -891,6 +894,151 @@ async def oauth_disconnect(request: Request, provider: str) -> None:
     _require_oauth_vault()
     from maverick import oauth_vault
     oauth_vault.get_vault().delete(provider)
+
+
+# ---- flows: a deterministic skeleton over agentic + tool steps ---------------
+
+
+def _require_flows() -> None:
+    from maverick import flow
+    if not flow.enabled():
+        raise HTTPException(
+            status_code=403,
+            detail=("the flow engine is off; enable [flows] in config.toml or set "
+                    "MAVERICK_FLOWS=1"),
+        )
+
+
+@router.get("/flows")
+async def list_flows_endpoint(request: Request) -> dict:
+    """The saved flow definitions (a summary per flow)."""
+    require_permission(request, "operate")
+    _require_flows()
+    from maverick.flow import store
+    return {"flows": [
+        {"id": f.id, "name": f.name, "nodes": len(f.nodes),
+         "single_agent": f.is_single_agent()}
+        for f in store.list_flows()
+    ]}
+
+
+@router.post("/flows", status_code=201)
+async def save_flow_endpoint(request: Request, payload: FlowSaveIn) -> dict:
+    """Create or replace a flow definition (validated before it is stored)."""
+    require_permission(request, "operate")
+    _require_flows()
+    from maverick.flow import Flow, store
+    try:
+        flow = Flow.from_dict(payload.flow)
+    except Exception as e:  # a malformed graph
+        raise HTTPException(status_code=400, detail=f"invalid flow: {e}") from e
+    if not flow.id:
+        raise HTTPException(status_code=400, detail="flow needs an 'id'")
+    errs = flow.validate()
+    if errs:
+        raise HTTPException(status_code=400, detail="invalid flow: " + "; ".join(errs[:5]))
+    store.save_flow(flow)
+    return {"id": flow.id, "nodes": len(flow.nodes)}
+
+
+@router.get("/flows/runs")
+async def list_flow_runs_endpoint(request: Request, flow_id: str = "",
+                                  limit: int = 50) -> dict:
+    """Recent flow runs (owner-scoped). Defined before ``/flows/{flow_id}`` so the
+    literal ``runs`` path isn't captured as a flow id."""
+    require_permission(request, "operate")
+    _require_flows()
+    from maverick.flow import store
+    owner = goal_owner_filter(request)
+    runs = store.list_runs(flow_id=flow_id or None, owner=owner,
+                           limit=max(1, min(500, limit)))
+    return {"runs": [r.to_dict() for r in runs]}
+
+
+@router.get("/flows/runs/{run_id}")
+async def get_flow_run_endpoint(request: Request, run_id: str) -> dict:
+    require_permission(request, "operate")
+    _require_flows()
+    from maverick.flow import store
+    run = store.load_run(run_id)
+    if run is None:
+        raise HTTPException(status_code=404, detail="no such run")
+    owner = goal_owner_filter(request)
+    if owner is not None and run.owner != owner:
+        raise HTTPException(status_code=404, detail="no such run")
+    return run.to_dict()
+
+
+@router.post("/flows/runs/{run_id}/resume")
+async def resume_flow_run_endpoint(request: Request, run_id: str,
+                                   payload: FlowResumeIn) -> dict:
+    """Resume a paused flow run with a human decision (approve/reject)."""
+    require_permission(request, "operate")
+    _require_flows()
+    from maverick.flow import store
+    run = store.load_run(run_id)
+    if run is None:
+        raise HTTPException(status_code=404, detail="no such run")
+    owner = goal_owner_filter(request)
+    if owner is not None and run.owner != owner:
+        raise HTTPException(status_code=404, detail="no such run")
+    from maverick_dashboard import automation_queue as aq
+    aq.queue().enqueue(aq.FLOW_RESUME_KIND, {
+        "flow_id": run.flow_id, "run_id": run_id, "decision": payload.decision,
+        "owner": run.owner})
+    return {"run_id": run_id, "status": "resuming", "decision": payload.decision}
+
+
+@router.get("/flows/{flow_id}")
+async def get_flow_endpoint(request: Request, flow_id: str) -> dict:
+    require_permission(request, "operate")
+    _require_flows()
+    from maverick.flow import store
+    f = store.load_flow(flow_id)
+    if f is None:
+        raise HTTPException(status_code=404, detail="no such flow")
+    return f.to_dict()
+
+
+@router.delete("/flows/{flow_id}", status_code=204)
+async def delete_flow_endpoint(request: Request, flow_id: str) -> None:
+    require_permission(request, "operate")
+    _require_flows()
+    from maverick.flow import store
+    store.delete_flow(flow_id)
+
+
+@router.post("/flows/{flow_id}/run")
+async def run_flow_endpoint(request: Request, flow_id: str, payload: FlowRunIn) -> dict:
+    """Start a flow run as a durable job (agent nodes become goals, action nodes
+    tool calls). Returns the run id to poll; the run may pause on an approval."""
+    require_permission(request, "operate")
+    _require_flows()
+    from maverick.flow import store
+    if store.load_flow(flow_id) is None:
+        raise HTTPException(status_code=404, detail="no such flow")
+    owner = _supervisor(request)
+    run_id = store.new_run_id()
+    store.save_run(store.FlowRun(run_id=run_id, flow_id=flow_id, status="queued",
+                                 owner=owner, data=dict(payload.data or {})))
+    from maverick_dashboard import automation_queue as aq
+    aq.queue().enqueue(aq.FLOW_RUN_KIND, {
+        "flow_id": flow_id, "run_id": run_id, "data": payload.data, "owner": owner})
+    return {"run_id": run_id, "status": "queued"}
+
+
+@router.get("/flows/{flow_id}/proposals")
+async def flow_proposals_endpoint(request: Request, flow_id: str) -> dict:
+    """Self-rewrite proposals for a flow: node-type swaps its grounded per-node
+    outcomes justify (harden a reliable agent to an action, soften a flaky action
+    to an agent). Proposals only -- never auto-applied."""
+    require_permission(request, "operate")
+    _require_flows()
+    from maverick.flow import evolve, store
+    f = store.load_flow(flow_id)
+    if f is None:
+        raise HTTPException(status_code=404, detail="no such flow")
+    return {"proposals": [p.to_dict() for p in evolve.maybe_propose(f)]}
 
 
 @router.get("/skills", response_model=list[SkillOut])

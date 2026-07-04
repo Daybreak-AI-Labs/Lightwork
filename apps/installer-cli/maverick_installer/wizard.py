@@ -1496,6 +1496,14 @@ def pick_advanced() -> dict[str, Any]:
             "learns from reality. Reality is the reward signal; off by default.",
             default=False,
         ),
+        "flows": _q_confirm(
+            "Flow engine? A deterministic skeleton -- branch, loop, parallel, approval, "
+            "delay -- over steps that are either a fixed tool call or a full agentic goal. "
+            "Migrated workflows keep their structure and auditability, while any node can "
+            "still be an agent; each node's outcome trains which steps should be "
+            "deterministic vs. agentic. Off by default.",
+            default=False,
+        ),
         "emergent_protocol": _q_confirm(
             "Emergent coordination shorthand? Swarms evolve short codes for the boilerplate "
             "they repeat (cheaper coordination), while every code decodes EXACTLY back to "
@@ -2848,6 +2856,13 @@ def _cfg_advanced(  # noqa: C901 - flat sequence of independent opt-in toggles
         lines.append("# Ground learning in REAL downstream outcomes: a recorded consequence")
         lines.append("# (invoice paid, ticket reopened) overrides the model's self-graded")
         lines.append("# proxy reward, so the data engine learns from reality (maverick.consequence).")
+        lines.append("enable = true")
+    if advanced.get("flows"):
+        lines.append("")
+        lines.append("[flows]")
+        lines.append("# Deterministic control-flow skeleton (branch/foreach/parallel/approval/")
+        lines.append("# delay) over agentic + tool steps; migrated workflows keep their shape")
+        lines.append("# while any node can still be a full agentic goal (maverick.flow).")
         lines.append("enable = true")
     if advanced.get("emergent_protocol"):
         lines.append("")

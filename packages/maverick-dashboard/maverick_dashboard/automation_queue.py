@@ -40,6 +40,8 @@ log = logging.getLogger("maverick_dashboard.automation_queue")
 TICK_KIND = "automation_tick"
 DREAM_KIND = "dream_cycle"
 FLYWHEEL_KIND = "flywheel_cycle"
+FLOW_RUN_KIND = "flow_run"       # one-shot: run a flow to its next pause/finish
+FLOW_RESUME_KIND = "flow_resume"  # one-shot: resume a paused flow run
 _MIN_INTERVAL = 60               # floor for a per-trigger cadence (matches the UI/schema)
 _DEFAULT_INTERVAL = 300          # per-trigger poll cadence when unset (5 min)
 _TICK_CRON = "* * * * *"         # evaluate due triggers every minute
@@ -215,6 +217,57 @@ def _handle_flywheel(_job=None) -> None:
         log.exception("scheduled flywheel cycle failed")
 
 
+def _flow_runners(owner: str):
+    from maverick.flow import execution
+    w = _world()
+    return (execution.default_agent_runner(w, owner=owner),
+            execution.default_action_runner(w))
+
+
+def _handle_flow_run(job=None) -> None:
+    """Run a stored flow to its next pause/finish (durable one-shot job). An
+    agent node becomes a real goal, an action node a tool call; the run state is
+    persisted so a pause survives. Fail-open: a bad flow must not retry-storm."""
+    payload = getattr(job, "payload", None) or {}
+    flow_id = str(payload.get("flow_id") or "")
+    if not flow_id:
+        return
+    try:
+        from maverick.flow import execution, store
+        flow = store.load_flow(flow_id)
+        if flow is None:
+            log.warning("flow_run: no such flow %s", flow_id)
+            return
+        owner = str(payload.get("owner") or "")
+        agent_runner, action_runner = _flow_runners(owner)
+        execution.execute(flow, agent_runner=agent_runner, action_runner=action_runner,
+                          owner=owner, data=dict(payload.get("data") or {}),
+                          run_id=payload.get("run_id"))
+    except Exception:  # pragma: no cover -- fail-open
+        log.exception("flow run failed for %s", flow_id)
+
+
+def _handle_flow_resume(job=None) -> None:
+    """Resume a paused flow run with a human decision (durable one-shot)."""
+    payload = getattr(job, "payload", None) or {}
+    run_id = str(payload.get("run_id") or "")
+    flow_id = str(payload.get("flow_id") or "")
+    if not (run_id and flow_id):
+        return
+    try:
+        from maverick.flow import execution, store
+        flow = store.load_flow(flow_id)
+        if flow is None:
+            return
+        owner = str(payload.get("owner") or "")
+        agent_runner, action_runner = _flow_runners(owner)
+        execution.execute(flow, agent_runner=agent_runner, action_runner=action_runner,
+                          owner=owner, resume_run_id=run_id,
+                          decision=str(payload.get("decision") or "approved"))
+    except Exception:  # pragma: no cover -- fail-open
+        log.exception("flow resume failed for %s", run_id)
+
+
 # ---- cron seeding -----------------------------------------------------------
 
 def _pending(kind: str) -> list:
@@ -274,11 +327,12 @@ def _worker_count() -> int:
 
 def start() -> bool:
     """Start the automation worker pool + seed cron jobs. No-op when none of
-    event triggers, dreaming, or the data engine is enabled, and idempotent.
-    Returns whether the pool was started."""
+    event triggers, dreaming, the data engine, or flows is enabled, and
+    idempotent. Returns whether the pool was started."""
     global _worker, _worker_threads
-    from maverick import automation_events, data_engine, dreaming
-    if not (automation_events.enabled() or dreaming.enabled() or data_engine.enabled()):
+    from maverick import automation_events, data_engine, dreaming, flow
+    if not (automation_events.enabled() or dreaming.enabled()
+            or data_engine.enabled() or flow.enabled()):
         return False
     with _LOCK:
         if _worker_threads:
@@ -288,6 +342,8 @@ def start() -> bool:
         w.register(TICK_KIND, _handle_tick)
         w.register(DREAM_KIND, _handle_dream)
         w.register(FLYWHEEL_KIND, _handle_flywheel)
+        w.register(FLOW_RUN_KIND, _handle_flow_run)
+        w.register(FLOW_RESUME_KIND, _handle_flow_resume)
         # Seed the cron jobs + actually start the threads BEFORE committing to the
         # module globals, so a failure in reconcile() (e.g. a boot-time sqlite
         # write error) leaves us cleanly un-started and retryable -- not wedged
@@ -322,4 +378,5 @@ def stop() -> None:
 
 
 __all__ = ["start", "stop", "reconcile", "queue",
-           "TICK_KIND", "DREAM_KIND", "FLYWHEEL_KIND"]
+           "TICK_KIND", "DREAM_KIND", "FLYWHEEL_KIND",
+           "FLOW_RUN_KIND", "FLOW_RESUME_KIND"]

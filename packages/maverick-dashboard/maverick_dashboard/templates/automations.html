@@ -122,6 +122,22 @@
   </section>
   {% endif %}
 
+  <section class="auto__section" id="auto-flows-section" aria-labelledby="auto-flows-h" hidden>
+    <div class="section-head">
+      <h2 id="auto-flows-h" tabindex="-1">Flows</h2>
+      <span class="muted" id="auto-flows-count"></span>
+    </div>
+    <p class="auto__hint">A flow is a deterministic skeleton — branch, loop, parallel, approval, delay — over steps that are either a fixed tool call or a full agentic goal. Run one and it pauses at any approval for a human decision; each node’s outcome trains which steps should be deterministic vs. agentic. Author flows via <code>POST /api/v1/flows</code> or by importing a workflow.</p>
+    <ul class="auto__list" id="auto-flows-list" aria-label="Flows"></ul>
+    <div class="mv-empty" id="auto-flows-empty" hidden>
+      <p class="mv-empty__title">No flows yet</p>
+      <p class="mv-empty__body">Import a workflow or POST a flow definition to get started.</p>
+    </div>
+    <h3 style="margin-top: var(--space-4);">Recent runs</h3>
+    <ul class="auto__list" id="auto-flow-runs" aria-label="Flow runs"></ul>
+    <span class="auto__hint" id="auto-flows-msg" aria-live="polite"></span>
+  </section>
+
   {% if import_enabled %}
   <section class="auto__section" id="auto-import-section" aria-labelledby="auto-import-h">
     <div class="section-head">
@@ -571,6 +587,82 @@
       } catch (e) { oMsg.textContent = 'Exchange failed.'; }
     });
     loadOAuth();
+  }
+
+  // ---- flows (deterministic skeleton over agentic/tool steps) ----
+  var flowsSection = document.getElementById('auto-flows-section');
+  if (flowsSection) {
+    var flowsList = document.getElementById('auto-flows-list');
+    var flowRuns = document.getElementById('auto-flow-runs');
+    var flowsCount = document.getElementById('auto-flows-count');
+    var flowsEmpty = document.getElementById('auto-flows-empty');
+    var flowsMsg = document.getElementById('auto-flows-msg');
+    async function loadFlows() {
+      var r;
+      try { r = await fetch('/api/v1/flows'); } catch (e) { return; }
+      if (r.status === 403) { flowsSection.hidden = true; return; }  // engine off
+      if (!r.ok) { flowsSection.hidden = true; return; }
+      flowsSection.hidden = false;
+      var flows = (await r.json()).flows || [];
+      flowsCount.textContent = flows.length ? (flows.length + (flows.length === 1 ? ' flow' : ' flows')) : '';
+      flowsEmpty.hidden = flows.length > 0;
+      flowsList.textContent = '';
+      flows.forEach(function (f) {
+        var li = el('li', 'mv-row');
+        var main = el('div', 'mv-row__main');
+        main.appendChild(el('div', 'mv-row__title', f.name || f.id));
+        main.appendChild(el('div', 'mv-row__sub', f.nodes + (f.nodes === 1 ? ' node' : ' nodes')
+          + (f.single_agent ? ' · single agent' : '')));
+        li.appendChild(main);
+        li.appendChild(mkBtn('Run', function () { runFlow(f.id); }));
+        flowsList.appendChild(li);
+      });
+      loadFlowRuns();
+    }
+    function mkBtn(label, onClick) {
+      var b = el('button', 'btn btn--ghost'); b.type = 'button'; b.textContent = label;
+      b.addEventListener('click', onClick); return b;
+    }
+    async function runFlow(id) {
+      flowsMsg.textContent = 'Starting…';
+      try {
+        var r = await fetch('/api/v1/flows/' + encodeURIComponent(id) + '/run', {
+          method: 'POST', headers: { 'Content-Type': 'application/json' }, body: '{}',
+        });
+        flowsMsg.textContent = r.ok ? 'Run queued.' : 'Could not start run.';
+        setTimeout(loadFlowRuns, 500);
+      } catch (e) { flowsMsg.textContent = 'Could not start run.'; }
+    }
+    async function loadFlowRuns() {
+      var r;
+      try { r = await fetch('/api/v1/flows/runs?limit=25'); } catch (e) { return; }
+      if (!r.ok) return;
+      var runs = (await r.json()).runs || [];
+      flowRuns.textContent = '';
+      runs.forEach(function (run) {
+        var li = el('li', 'mv-row');
+        var main = el('div', 'mv-row__main');
+        main.appendChild(el('div', 'mv-row__title', run.flow_id + ' — ' + run.status));
+        if (run.prompt) main.appendChild(el('div', 'mv-row__sub', run.prompt));
+        li.appendChild(main);
+        if (run.status === 'paused_approval') {
+          li.appendChild(mkBtn('Approve', function () { resumeRun(run.run_id, 'approved'); }));
+          li.appendChild(mkBtn('Reject', function () { resumeRun(run.run_id, 'rejected'); }));
+        }
+        flowRuns.appendChild(li);
+      });
+    }
+    async function resumeRun(runId, decision) {
+      try {
+        await fetch('/api/v1/flows/runs/' + encodeURIComponent(runId) + '/resume', {
+          method: 'POST', headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ decision: decision }),
+        });
+        flowsMsg.textContent = decision === 'approved' ? 'Approved — resuming.' : 'Rejected.';
+        setTimeout(loadFlowRuns, 500);
+      } catch (e) { flowsMsg.textContent = 'Could not resume.'; }
+    }
+    loadFlows();
   }
 
   loadSchedules();
