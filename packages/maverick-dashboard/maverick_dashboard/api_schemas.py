@@ -272,6 +272,12 @@ class FlowResumeIn(BaseModel):
     decision: str = Field(default="approved", pattern="^(approved|rejected)$")
 
 
+class FlowDraftIn(BaseModel):
+    """Draft a flow from a plain-English description (the designer's ✨ button)."""
+    description: str = Field(..., min_length=1, max_length=4000)
+    flow_id: str = Field(default="", max_length=120)
+
+
 class AnswerIn(BaseModel):
     question_id: int
     answer: str

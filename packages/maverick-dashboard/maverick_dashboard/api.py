@@ -51,6 +51,7 @@ from .api_schemas import (
     FeedbackIn,
     FleetCreateIn,
     FleetRunIn,
+    FlowDraftIn,
     FlowResumeIn,
     FlowRunIn,
     FlowSaveIn,
@@ -938,6 +939,34 @@ async def save_flow_endpoint(request: Request, payload: FlowSaveIn) -> dict:
         raise HTTPException(status_code=400, detail="invalid flow: " + "; ".join(errs[:5]))
     store.save_flow(flow)
     return {"id": flow.id, "nodes": len(flow.nodes)}
+
+
+# Common connector tools to bias the NL drafter toward real action nodes; the
+# operator edits the result in the designer, and unknown tools fail gracefully.
+_FLOW_DRAFT_TOOLS = (
+    "slack_bot", "discord_bot", "teams_tool", "email_tool", "gmail_tool",
+    "twilio_tool", "github_issues", "github_actions", "jira", "linear",
+    "gitlab_issues", "salesforce_tool", "hubspot_tool", "stripe_tool",
+    "shopify_tool", "servicenow_tool", "zendesk_tool", "notion", "confluence_tool",
+    "asana_tool", "trello_tool", "clickup_tool", "airtable_tool", "calendar_tool",
+    "gdrive_tool", "dropbox_tool", "s3_tool", "http_fetch", "sql_query",
+)
+
+
+@router.post("/flows/draft")
+async def draft_flow_endpoint(request: Request, payload: FlowDraftIn) -> dict:
+    """Draft a first-pass flow from a plain-English description (the designer's
+    ✨ button). Returns the flow graph (not saved) + any notes; falls back to a
+    single agent step if the model can't produce a full graph."""
+    require_permission(request, "operate")
+    _require_flows()
+    from maverick_dashboard._shared import require_provider_or_400
+    require_provider_or_400()
+    from maverick.flow.draft import draft_flow
+    flow, notes = await run_in_threadpool(
+        lambda: draft_flow(payload.description, tools=_FLOW_DRAFT_TOOLS,
+                           flow_id=payload.flow_id))
+    return {"flow": flow.to_dict(), "notes": notes}
 
 
 @router.get("/flows/runs")
