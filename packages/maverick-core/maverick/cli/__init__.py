@@ -1757,6 +1757,80 @@ def harness_transfer(source: str, targets: tuple[str, ...], force: bool) -> None
             click.echo(f"    - {s}")
 
 
+@harness.command("migrate-store")
+def harness_migrate_store() -> None:
+    """Import this host's FILE learning stores into the shared WORLD database
+    — the one-way migration for [self_harness] store = "world"
+    (docs/proposals/fleet-learning-state.md, phase 1). Idempotent and
+    fleet-safe: existing world entries win, file-only keys import, and a
+    conflicting addenda block merges line-by-line under the normal cap.
+    Verifies the routed store serves every imported key, then renames the
+    files to *.migrated backups. Run once per host that learned locally.
+    """
+    import json as _json
+
+    from .. import learning_store
+    from .. import self_harness as sh
+    if sh.settings().get("store") != "world":
+        raise click.ClickException(
+            'set [self_harness] store = "world" first -- the migration '
+            "imports into the configured world database.")
+    src = sh._store_path()
+
+    def _raw(p, keep) -> dict:
+        try:
+            data = _json.loads(p.read_text(encoding="utf-8"))
+        except (FileNotFoundError, ValueError, OSError):
+            return {}
+        return {str(k): v for k, v in data.items() if keep(v)} \
+            if isinstance(data, dict) else {}
+
+    addenda = _raw(src, lambda v: isinstance(v, str) and v.strip())
+    meta = _raw(sh._meta_path(src), lambda v: isinstance(v, dict))
+    tried = {k: float(v) for k, v in
+             _raw(sh._transfer_tried_path(src),
+                  lambda v: isinstance(v, (int, float))).items()}
+    if not (addenda or meta or tried):
+        click.echo("nothing to migrate: no file learning stores on this host.")
+        return
+    merged = 0
+    with learning_store.rmw_lock():
+        db_add = learning_store.load_addenda_db()
+        for k, block in addenda.items():
+            if k not in db_add:
+                db_add[k] = block
+            elif db_add[k] != block:
+                cur = db_add[k]
+                have = {sh._norm_line(x) for x in sh._bullets(cur)}
+                for ln in sh._bullets(block):
+                    if sh._norm_line(ln) not in have:
+                        cur = sh._compose_addendum(k, cur, ln)
+                db_add[k] = cur
+                merged += 1
+        learning_store.write_addenda_db(db_add)
+        db_meta = learning_store.load_line_meta_db()
+        for lid, rec in meta.items():
+            db_meta.setdefault(lid, rec)
+        learning_store.write_line_meta_db(db_meta)
+        db_tried = learning_store.load_transfer_tried_db()
+        for lid, ts in tried.items():
+            db_tried.setdefault(lid, ts)
+        learning_store.write_transfer_tried_db(db_tried)
+    routed = sh.load_addenda()
+    missing = [k for k in addenda if k not in routed]
+    if missing:
+        raise click.ClickException(
+            f"verification failed -- keys missing after import: {missing[:3]}"
+            " (file stores left untouched)")
+    for p in (src, sh._meta_path(src), sh._transfer_tried_path(src)):
+        if p.exists():
+            p.rename(p.with_name(p.name + ".migrated"))
+    click.echo(f"imported {len(addenda)} addenda key(s), {len(meta)} provenance "
+               f"record(s), {len(tried)} tried pair(s) into the world store"
+               + (f" ({merged} conflicting key(s) merged)" if merged else "")
+               + "; file stores renamed to *.migrated.")
+
+
 @harness.group("corpus")
 def harness_corpus() -> None:
     """Bootstrap and review the eval corpus from real run history."""
