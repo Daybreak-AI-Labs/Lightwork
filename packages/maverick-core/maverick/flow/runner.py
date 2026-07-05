@@ -47,6 +47,11 @@ STATUS_PAUSED_EVENT = "paused_event"
 STATUS_REJECTED = "rejected"
 STATUS_FAILED = "failed"
 
+# A reserved resume decision the expiry sweep sends for a lapsed approval, so the
+# resume block can route to `on_expire` (escalation) rather than treat it as a
+# human verdict. Not a user-suppliable verdict (the schema regex excludes it).
+EXPIRED = "__expired__"
+
 # The single source of truth for "which statuses mean a run is parked and
 # resumable" and "which statuses mean a run is still in flight". Every gate that
 # used to hand-list these literals (the resume/retry endpoints, the sweep, the
@@ -91,6 +96,54 @@ def _num(x: Any) -> float:
         return 0.0
 
 
+def _fn_slice(a: list) -> Any:
+    """slice(value, start[, end]) -- substring or sublist. Missing end = to the
+    end. Works on a string or a list; out-of-range indices clamp like Python."""
+    if not a:
+        return ""
+    seq = a[0]
+    if not isinstance(seq, (str, list, tuple)):
+        seq = _as_text(seq)
+    start = int(_num(a[1])) if len(a) > 1 else 0
+    end = int(_num(a[2])) if len(a) > 2 else len(seq)
+    return seq[start:end]
+
+
+def _fn_regex(a: list) -> str:
+    """regex(value, pattern) -- the first match; group 1 if the pattern has a
+    capture group, else the whole match. Empty on no match / bad pattern. The
+    subject is length-capped so a pathological pattern can't run unbounded."""
+    if len(a) < 2:
+        return ""
+    subject = _as_text(a[0])[:10000]
+    try:
+        m = re.search(str(a[1]), subject)
+    except re.error:
+        return ""
+    if not m:
+        return ""
+    return m.group(1) if m.groups() else m.group(0)
+
+
+def _fn_datefmt(a: list) -> str:
+    """datefmt(value, fmt) -- format an epoch-seconds number or an ISO-8601
+    string with a strftime pattern (UTC). Bad input yields ''. Default fmt is
+    ISO date. E.g. datefmt(now(), "%Y-%m-%d")."""
+    if not a:
+        return ""
+    import datetime as _dt
+    fmt = str(a[1]) if len(a) > 1 else "%Y-%m-%d"
+    val = a[0]
+    try:
+        if isinstance(val, (int, float)) or (isinstance(val, str) and val.strip().replace(".", "", 1).isdigit()):
+            dt = _dt.datetime.fromtimestamp(_num(val), tz=_dt.timezone.utc)
+        else:
+            dt = _dt.datetime.fromisoformat(str(val).replace("Z", "+00:00"))
+        return dt.strftime(fmt)
+    except (ValueError, OverflowError, OSError):
+        return ""
+
+
 # Safe transform functions usable inside {{ }} -- no eval, pure string/collection/
 # arithmetic helpers. Each takes the evaluated arg list.
 _FUNCS: dict[str, Callable[[list], Any]] = {
@@ -105,12 +158,24 @@ _FUNCS: dict[str, Callable[[list], Any]] = {
     "json": lambda a: (__import__("json").dumps(a[0]) if a else ""),
     "first": lambda a: (a[0][0] if a and isinstance(a[0], (list, tuple)) and a[0] else ""),
     "last": lambda a: (a[0][-1] if a and isinstance(a[0], (list, tuple)) and a[0] else ""),
+    # string / collection transforms
+    "split": lambda a: (str(a[0]).split(str(a[1])) if len(a) >= 2 else str(a[0]).split() if a else []),
+    "join": lambda a: (str(a[1]).join(_as_text(x) for x in a[0]) if len(a) >= 2 and isinstance(a[0], (list, tuple)) else (_as_text(a[0]) if a else "")),
+    "slice": _fn_slice,
+    "index": lambda a: (a[0][int(_num(a[1]))] if a and isinstance(a[0], (list, tuple)) and -len(a[0]) <= int(_num(a[1])) < len(a[0]) else ""),
+    "regex": _fn_regex,
+    "keys": lambda a: (list(a[0].keys()) if a and isinstance(a[0], dict) else []),
     # arithmetic
     "add": lambda a: sum(_num(x) for x in a),
     "sub": lambda a: (_num(a[0]) - _num(a[1])) if len(a) >= 2 else _num(a[0] if a else 0),
     "mul": lambda a: (_num(a[0]) * _num(a[1])) if len(a) >= 2 else _num(a[0] if a else 0),
     "div": lambda a: (_num(a[0]) / _num(a[1])) if (len(a) >= 2 and _num(a[1])) else 0,
     "round": lambda a: round(_num(a[0]), int(_num(a[1])) if len(a) > 1 else 0) if a else 0,
+    "abs": lambda a: abs(_num(a[0])) if a else 0,
+    "int": lambda a: int(_num(a[0])) if a else 0,
+    # time (runtime, not replay-deterministic -- a workflow value, like a trigger)
+    "now": lambda a: int(time.time()),
+    "datefmt": _fn_datefmt,
 }
 
 
@@ -523,9 +588,12 @@ def _run_approval(node: FlowNode, data: dict, ctx: _Ctx) -> str | None:
     if decision == "rejected":
         raise _Reject(node, data)
     if ctx.allow_pause:                    # pending + top level -> wait for a human
-        # node.timeout on an approval is its EXPIRY: the delay sweep resolves a
-        # still-pending approval as rejected once resume_at passes (opt-in).
-        resume_at = ctx.now() + node.timeout if node.timeout and node.timeout > 0 else None
+        # An approval's EXPIRY is `expires_after` (its own field, so it can't be
+        # confused with the execution `timeout`); older flows encoded it in
+        # `timeout`, so fall back to that. On expiry the sweep resumes the run
+        # and it routes to `on_expire` (or rejects) -- see the resume block.
+        expiry = node.expires_after or node.timeout
+        resume_at = ctx.now() + expiry if expiry and expiry > 0 else None
         raise _Pause("approval", node, data, resume_at=resume_at)
     raise _Reject(node, data)              # nested can't pause -> treat as not approved
 
@@ -608,7 +676,16 @@ def run_flow(flow: Flow, *, agent_fn: AgentFn, action_fn: ActionFn,
                        "exists in this flow version"))
         if decision == "rejected":
             return FlowRunResult(status=STATUS_REJECTED, data=data, cursor=node.id)
-        if node.kind == NODE_APPROVAL and not resume.get("rerun"):
+        if decision == EXPIRED and node.kind == NODE_APPROVAL:
+            # The approval's expiry lapsed (the sweep resumed it). Route to
+            # `on_expire` if set (an escalation lane), else fail closed (reject).
+            # The escalation lane runs through the normal chain below.
+            if node.on_expire is None:
+                return FlowRunResult(status=STATUS_REJECTED, data=data, cursor=node.id)
+            if node.output:
+                data[node.output] = "expired"
+            start = node.on_expire
+        elif node.kind == NODE_APPROVAL and not resume.get("rerun"):
             # Resuming an approval gate: accept ONLY the literal "approved" or one
             # of the node's explicitly declared choices. Anything else fails
             # CLOSED (rejected), so a loosened decision string can never wave a
@@ -617,11 +694,13 @@ def run_flow(flow: Flow, *, agent_fn: AgentFn, action_fn: ActionFn,
             if decision == "approved" or (decision and decision in node.choices):
                 if node.output:
                     data[node.output] = decision
+                start = node.next
             else:
                 return FlowRunResult(status=STATUS_REJECTED, data=data, cursor=node.id)
-        # A pause resumes AFTER its node (the approval/delay is done); a
-        # failure retry re-enters AT the node that failed ("rerun").
-        start = node.id if resume.get("rerun") else node.next
+        else:
+            # A pause resumes AFTER its node (the approval/delay is done); a
+            # failure retry re-enters AT the node that failed ("rerun").
+            start = node.id if resume.get("rerun") else node.next
     else:
         data = dict(data or {})
         start = flow.start

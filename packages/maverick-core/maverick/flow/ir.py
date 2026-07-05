@@ -79,6 +79,15 @@ class FlowNode:
     prompt: str = ""                 # what a human approves / what the run waits for
     choices: list[str] = field(default_factory=list)  # approval: allowed verdicts
                                      # beyond approve/reject (recorded to output)
+    assignee: str = ""               # approval: who to notify / who owns the task
+    expires_after: float = 0.0       # approval: seconds until it auto-resolves
+                                     # (0 = waits forever); its own field so a kind
+                                     # change never confuses it with the execution
+                                     # `timeout`. Falls back to `timeout` for
+                                     # approvals saved before this field existed.
+    on_expire: str | None = None     # approval: route here on expiry (else rejected)
+    form: list[dict] = field(default_factory=list)   # approval: fields to collect
+                                     # on sign-off [{"name","label"}] (merged into data)
     # delay -------------------------------------------------------------------
     seconds: float = 0.0
     # subflow -----------------------------------------------------------------
@@ -97,7 +106,8 @@ class FlowNode:
     def to_dict(self) -> dict:
         d: dict[str, Any] = {"id": self.id, "kind": self.kind}
         for key in ("next", "tool", "brief", "condition", "if_true", "if_false",
-                    "items", "var", "prompt", "flow_ref", "on_error", "output", "label"):
+                    "items", "var", "prompt", "flow_ref", "on_error", "output", "label",
+                    "assignee", "on_expire"):
             v = getattr(self, key)
             if v not in ("", None):
                 d[key] = v
@@ -117,6 +127,10 @@ class FlowNode:
             d["cases"] = self.cases
         if self.choices:
             d["choices"] = self.choices
+        if self.expires_after:
+            d["expires_after"] = self.expires_after
+        if self.form:
+            d["form"] = self.form
         if self.x or self.y:
             d["x"], d["y"] = self.x, self.y
         if self.body is not None:
@@ -139,6 +153,10 @@ class FlowNode:
             concurrent=bool(d.get("concurrent", False)),
             cases=[c for c in (d.get("cases") or []) if isinstance(c, dict)],
             choices=[str(c) for c in (d.get("choices") or [])],
+            assignee=str(d.get("assignee", "")),
+            expires_after=float(d.get("expires_after", 0.0) or 0.0),
+            on_expire=d.get("on_expire"),
+            form=[c for c in (d.get("form") or []) if isinstance(c, dict)],
             body=Flow.from_dict(body) if body else None,
             branches=[Flow.from_dict(b) for b in (d.get("branches") or [])],
             prompt=str(d.get("prompt", "")), seconds=float(d.get("seconds", 0.0)),
@@ -229,7 +247,8 @@ class Flow:
     def _validate_routing(self, n: FlowNode) -> list[str]:
         errs = []
         for ref, label in ((n.next, "next"), (n.if_true, "if_true"),
-                           (n.if_false, "if_false"), (n.on_error, "on_error")):
+                           (n.if_false, "if_false"), (n.on_error, "on_error"),
+                           (n.on_expire, "on_expire")):
             if ref is not None and ref not in self.nodes:
                 errs.append(f"node {n.id!r}: {label} -> unknown node {ref!r}")
         return errs

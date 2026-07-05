@@ -22,6 +22,39 @@ class TestArithmeticAndLists:
         assert render("{{last(items)}}", {"items": ["a", "b"]}) == "b"
 
 
+class TestStringAndCollectionTransforms:
+    def test_split_and_join(self):
+        assert render("{{join(split(csv, \",\"), \" | \")}}", {"csv": "a,b,c"}) == "a | b | c"
+        assert render("{{split(name)}}", {"name": "a b"}) == "['a', 'b']"   # default whitespace split
+
+    def test_slice_string_and_list(self):
+        assert render("{{slice(s, 0, 3)}}", {"s": "hello"}) == "hel"
+        assert render("{{slice(s, 2)}}", {"s": "hello"}) == "llo"           # to end
+        assert render("{{index(items, 1)}}", {"items": ["x", "y", "z"]}) == "y"
+        assert render("{{index(items, -1)}}", {"items": ["x", "y"]}) == "y"
+        assert render("{{index(items, 9)}}", {"items": ["x"]}) == ""        # out of range
+
+    def test_regex_extracts_group_or_whole_match(self):
+        assert render("{{regex(email, \"@(.+)$\")}}", {"email": "a@example.com"}) == "example.com"
+        assert render("{{regex(s, \"[0-9]+\")}}", {"s": "order 42 ok"}) == "42"    # whole match
+        assert render("{{regex(s, \"zzz\")}}", {"s": "abc"}) == ""                 # no match
+        assert render("{{regex(s, \"(\")}}", {"s": "abc"}) == ""                   # bad pattern -> safe
+
+    def test_abs_int_keys(self):
+        assert render("{{abs(sub(3, 10))}}", {}) == "7"
+        assert render("{{int(x)}}", {"x": "5.9"}) == "5"
+        assert render("{{keys(m)}}", {"m": {"a": 1, "b": 2}}) == "['a', 'b']"
+
+    def test_datefmt_from_epoch_and_iso(self):
+        assert render("{{datefmt(ts, \"%Y-%m-%d\")}}", {"ts": 0}) == "1970-01-01"
+        assert render("{{datefmt(when, \"%Y\")}}", {"when": "2027-03-04T12:00:00Z"}) == "2027"
+        assert render("{{datefmt(bad, \"%Y\")}}", {"bad": "not-a-date"}) == ""
+
+    def test_now_is_an_integer_timestamp(self):
+        out = render("{{now()}}", {})
+        assert out.isdigit() and int(out) > 1_600_000_000
+
+
 class TestConditionComposition:
     def test_single_predicate_still_works(self):
         assert eval_condition("x > 5", {"x": 10}) is True

@@ -386,11 +386,13 @@ def _handle_flow_sweep(_job=None) -> None:
                 queue().enqueue(FLOW_RESUME_KIND, {
                     "flow_id": run.flow_id, "run_id": run.run_id, "owner": run.owner})
             elif run.status == runner.STATUS_PAUSED_APPROVAL:
-                # An approval whose node set an expiry (node.timeout) resolves as
-                # REJECTED once it lapses -- fail closed, never silently approve.
+                # An approval whose node set an expiry resolves once it lapses.
+                # The EXPIRED marker lets the runner route to the node's
+                # `on_expire` escalation lane if set; without one it fails closed
+                # (rejected) -- never a silent approval.
                 queue().enqueue(FLOW_RESUME_KIND, {
                     "flow_id": run.flow_id, "run_id": run.run_id, "owner": run.owner,
-                    "decision": "rejected"})
+                    "decision": runner.EXPIRED})
             # paused_event runs are NEVER swept -- only their event resumes them.
     except Exception:  # pragma: no cover -- fail-open
         log.exception("flow delay sweep failed")

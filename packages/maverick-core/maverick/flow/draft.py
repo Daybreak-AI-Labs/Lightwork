@@ -20,9 +20,10 @@ from .ir import Flow, single_agent_flow
 _DRAFT_MAX_DOLLARS = 0.50
 _DRAFT_MAX_TOKENS = 2500
 
-FLOW_DRAFT_SYSTEM = """You design automation FLOWS and output STRICT JSON only.
-
-A flow is a graph of typed nodes:
+# The node-kind catalog + expression reference, shared verbatim by the drafter
+# AND the chat copilot (chat.py imports this constant), so a schema change lands
+# in both prompts at once -- no prose-splitting one prompt out of the other.
+FLOW_SCHEMA_BLOCK = """A flow is a graph of typed nodes:
 {"id": "<slug>", "name": "<title>", "start": "<node id>", "nodes": [ ...nodes ]}
 
 Each node is one of these kinds (include only the fields for its kind):
@@ -33,23 +34,28 @@ Each node is one of these kinds (include only the fields for its kind):
 - {"id","kind":"foreach","items":"<data key holding a list>","var":"item","body":{<a nested flow>},"concurrent":<true to run iterations in parallel>,"next":"<id|null>"}
 - {"id","kind":"while","condition":"<keep-looping condition>","body":{<a nested flow>},"limit":<max passes>,"next":"<id|null>"}
 - {"id","kind":"parallel","branches":[{<nested flow>},...],"next":"<id|null>"}
-- {"id","kind":"approval","prompt":"<what a human approves>","choices":["<optional verdicts beyond approve/reject>"],"timeout":<seconds until it expires as rejected>,"next":"<id|null>"}
+- {"id","kind":"approval","prompt":"<what a human approves>","choices":["<optional verdicts beyond approve/reject>"],"assignee":"<who to notify, optional>","expires_after":<seconds until it auto-resolves>,"on_expire":"<id to route on expiry, optional (else rejected)>","form":[{"name":"<field>","label":"<prompt>"}],"next":"<id|null>"}
 - {"id","kind":"delay","seconds":<number>,"next":"<id|null>"}
 - {"id","kind":"wait_event","prompt":"<what the run is waiting for>","next":"<id|null>"}
 - {"id","kind":"scope","body":{<a nested flow>},"on_error":"<id of the catch step>","next":"<id|null>"}
 - {"id","kind":"subflow","flow_ref":"<a saved flow id to run here>","next":"<id|null>"}
 
-Any "agent" or "action" node may also set "retries":<n> (re-try on failure) and "on_error":"<id>" (route there if it fails).
+Any "agent" or "action" node may also set "retries":<n> (re-try on failure), "on_error":"<id>" (route there if it fails), and "timeout":<seconds> (per-node execution cap).
+
+Reference earlier results with {{key}} where a node's "output" set that key. Set "output" on nodes whose result a later node needs. Transforms: text (upper lower trim title concat replace split join slice regex), data (default length first last index keys json), number (add sub mul div round abs int), time (now datefmt). E.g. {{datefmt(now(),"%Y-%m-%d")}}, {{regex(email,"@(.+)$")}}, {{join(split(csv,","),"; ")}}.
+A "branch"/"while" condition is "<key> <op> <value>" (ops: == != > < >= <= contains) over flow data, composable with and/or. A "switch" routes by matching a data key against each case value."""
+
+FLOW_DRAFT_SYSTEM = """You design automation FLOWS and output STRICT JSON only.
+
+""" + FLOW_SCHEMA_BLOCK + """
 
 Rules:
 - Prefer an "agent" node when a step needs judgment/writing; an "action" node when it maps to a known tool.
 - Use a "subflow" node to reuse an existing saved flow instead of rebuilding its steps.
 - For a step that can fail (an external call), set "retries" and/or an "on_error" handler node.
-- Reference earlier results with {{key}} where a node's "output" set that key. Set "output" on nodes whose result a later node needs. You may transform a value: {{upper(key)}}, {{lower(key)}}, {{trim(key)}}, {{title(key)}}, {{length(key)}}, {{concat(a," ",b)}}, {{replace(key,"x","y")}}, {{default(key,"fallback")}}.
-- A "branch" condition is a simple "<key> <op> <value>" (ops: == != > < >= <= contains) over flow data.
 - Insert an "approval" node before anything a human should review (sending, paying, deleting).
 - Node ids are short slugs (n0, n1, ...). "next":null (or omit) ends a path. "start" is the first node's id.
-- Output the JSON object ONLY — no prose, no code fence."""
+- Output the JSON object ONLY -- no prose, no code fence."""
 
 
 def _strip_fence(text: str) -> str:
@@ -176,4 +182,4 @@ def draft_flow(description: str, *, tools=(), tool_docs=None, complete=None,
         return fallback, notes
 
 
-__all__ = ["draft_flow", "FLOW_DRAFT_SYSTEM"]
+__all__ = ["draft_flow", "FLOW_DRAFT_SYSTEM", "FLOW_SCHEMA_BLOCK"]
