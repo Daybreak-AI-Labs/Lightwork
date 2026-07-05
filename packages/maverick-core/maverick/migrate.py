@@ -81,6 +81,10 @@ KNOWN_SECTIONS = frozenset({
     # allowlist for the DGM-style code rung. Read by config.get_self_modify,
     # written by the wizard's advanced opt-in step.
     "self_modify",
+    # Data-residency region pinning (maverick.residency): read by real
+    # load_config() call sites and written by the wizard's regulated-posture
+    # step, yet was missing here -- a false "unknown section" for [residency].
+    "residency",
 })
 
 

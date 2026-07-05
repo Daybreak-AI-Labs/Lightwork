@@ -106,9 +106,10 @@ def test_wizard_model_ids_have_pricing():
     cost from the user. Wizard-offered ids must be priced.
 
     Exemptions:
-      - ollama / openrouter / tgi / openai_compatible: local or
-        aggregated or self-hosted catalogs (dynamic, zero per-token
-        cost known to the kernel).
+      - ollama / openrouter / tgi / openai_compatible / vllm / azure /
+        bedrock: local, aggregated, or self-hosted catalogs whose model id
+        is a placeholder for whatever the endpoint serves (dynamic, zero
+        per-token cost known to the kernel).
     """
     try:
         from maverick.llm import MODEL_PRICES
@@ -116,7 +117,8 @@ def test_wizard_model_ids_have_pricing():
         pytest.skip("maverick-core not installed in this environment")
     unpriced: list[str] = []
     for prov_id, info in models.PROVIDERS.items():
-        if prov_id in ("ollama", "openrouter", "tgi", "openai_compatible"):
+        if prov_id in ("ollama", "openrouter", "tgi", "openai_compatible",
+                       "vllm", "azure", "bedrock"):
             continue
         for m in info["models"]:
             if m["id"] not in MODEL_PRICES:

@@ -3,9 +3,9 @@
 Updated whenever providers ship new models. Each entry has an id, a
 notes string the wizard shows, and a status marker.
 
-All five providers are now wired up. Picking any of them in the wizard
+Every provider listed here is wired up. Picking any of them in the wizard
 generates a config that the agent kernel actually dispatches to via
-the multi-provider LLM facade.
+the multi-provider LLM facade (``maverick.providers.get_provider_client``).
 """
 
 ROLES: list[tuple[str, str]] = [
@@ -120,6 +120,33 @@ PROVIDERS: dict[str, dict] = {
         "env_vars": ["OPENAI_COMPATIBLE_BASE_URL"],
         "models": [
             {"id": "openai-compatible", "notes": "Set base_url to your endpoint; model id is whatever it serves."},
+        ],
+    },
+    "vllm": {
+        "status": "ready",
+        "label": "vLLM (self-hosted inference)",
+        "env": None,
+        "env_vars": ["VLLM_BASE_URL"],
+        "models": [
+            {"id": "vllm",                 "notes": "Whatever model your vLLM server serves; URL via VLLM_BASE_URL env (optional VLLM_API_KEY)."},
+        ],
+    },
+    "azure": {
+        "status": "ready",
+        "label": "Azure OpenAI",
+        "env": "AZURE_OPENAI_API_KEY",
+        "env_vars": ["AZURE_OPENAI_ENDPOINT", "AZURE_OPENAI_DEPLOYMENT"],
+        "models": [
+            {"id": "azure",                "notes": "Model = your AZURE_OPENAI_DEPLOYMENT name; needs AZURE_OPENAI_ENDPOINT (+ optional AZURE_OPENAI_API_VERSION)."},
+        ],
+    },
+    "bedrock": {
+        "status": "ready",
+        "label": "AWS Bedrock (OpenAI-compatible endpoint)",
+        "env": "BEDROCK_API_KEY",
+        "env_vars": ["AWS_REGION"],
+        "models": [
+            {"id": "bedrock",              "notes": "Set BEDROCK_MODEL_ID; needs AWS_REGION + BEDROCK_API_KEY (the Bedrock bearer)."},
         ],
     },
 }
