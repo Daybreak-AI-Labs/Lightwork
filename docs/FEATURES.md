@@ -585,17 +585,48 @@ here.
   session. A hosted **form** submission (`form_store.py`, public `POST /form/{token}`)
   fires a flow with the submitted fields as data.
 
-- **Migration fidelity** (`automation_import.to_flow`) — n8n IF/Filter,
-  Power Automate (WDL) `If` / `Foreach` / `Switch` / `Until` / `Scope`, and
-  Workato recipe `if` / `repeat` blocks are all captured **structurally**
-  (branch/foreach/switch/while/scope nodes, arms wired to rejoin, bodies as
-  nested flows, Until's exit condition negated);
-  graphless sources approximate each step as an agent node that still runs.
+- **Migration fidelity** (`automation_import.to_flow`) — a per-source
+  `_STRUCTURAL_LOWERERS` registry (register a source in one line): n8n IF/Filter,
+  Power Automate (WDL) `If` / `Foreach` / `Switch` / `Until` / `Scope`, Workato
+  recipe `if` / `repeat` blocks, and UiPath exported activity trees
+  (`Sequence` / `If` / `While` / `ForEach` / `TryCatch`) are all captured
+  **structurally** (branch/foreach/switch/while/scope nodes, arms wired to
+  rejoin, bodies as nested flows, Until's exit condition negated); a UiPath
+  Release with no exposed graph stays a correct one-step import; graphless
+  sources approximate each step as an agent node that still runs.
   `to_flow_with_report` returns the per-step fidelity log
   (`preserved` / `approximated` + why), and the dashboard import can save the
   graphs directly (`as_flows: true` on `POST /import/run`) with the fidelity
   summary rendered per automation — an import never silently pretends to be
   lossless.
+
+- **Rich human tasks** — an `approval` node carries `choices` (verdicts beyond
+  approve/reject, recorded to `output` for a downstream switch), an `assignee`,
+  an `expires_after` expiry (its own field, not the execution `timeout`) that
+  routes to an `on_expire` escalation lane on lapse (else fails closed), and a
+  `form` of fields collected on sign-off (merged into flow data). The run
+  viewer renders the choice buttons + form inputs; the sweep sends the reserved
+  `EXPIRED` marker so expiry can escalate rather than only reject.
+
+- **Data experience** — the `{{ }}` transform set spans text (`split` `join`
+  `slice` `regex` …), data (`index` `keys` …), number (`abs` `int` …), and time
+  (`now` `datefmt`). Real runs record per-output-key **schema hints** (types +
+  field names, never values; `maverick.flow.schema_infer`, `GET /flows/{id}/schema`)
+  so the designer's data pills offer nested keys (`order.total`). Branch/while
+  conditions have a **structured builder** (key / op / value dropdowns over a
+  data-key datalist) with a raw-text advanced mode for `and`/`or`.
+
+- **Named connections** (`maverick.connections`, gated on `[connections]`) —
+  store a connector's base URL + API token under a name, sealed at rest with
+  the tenant KMS key like the OAuth vault; a connector resolves a saved
+  connection as a fallback only when `<NAME>_TOKEN` is unset (env always wins).
+  CRUD + a reachability `test` at `/api/v1/connections`; a Connections page
+  wires a connector without shell access — the citizen-developer path.
+
+- **Flow analytics** (`GET /flows/analytics`) — per-flow volume, success rate,
+  failure count, duration p50/p95 (from per-node `seconds`), and top recent
+  error messages, on a Flow Analytics page. The Workflows index unifies flow
+  graphs alongside templates and playbooks (one surface, not two).
 
 ## Tools
 

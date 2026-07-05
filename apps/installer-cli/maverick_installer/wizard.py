@@ -93,6 +93,7 @@ STEPS: list[tuple[str, str]] = [
     ("automation_import", "Automation import"),
     ("event_triggers", "Event triggers"),
     ("flows", "Flow engine"),
+    ("connections", "Named connections"),
     ("knowledge", "Knowledge RAG"),
     ("oauth_vault", "OAuth token vault"),
     ("governed_connectors", "Governed connectors"),
@@ -1638,11 +1639,19 @@ def pick_advanced() -> dict[str, Any]:
             default=False,
         ),
         "flows": _q_confirm(
-            "Flow engine? A deterministic skeleton -- branch, loop, parallel, approval, "
-            "delay -- over steps that are either a fixed tool call or a full agentic goal. "
-            "Migrated workflows keep their structure and auditability, while any node can "
-            "still be an agent; each node's outcome trains which steps should be "
-            "deterministic vs. agentic. Off by default.",
+            "Flow engine? A deterministic skeleton -- branch, switch, loop, parallel, "
+            "approval, delay, wait-for-event, try/catch -- over steps that are either a "
+            "fixed tool call or a full agentic goal. Migrated workflows keep their "
+            "structure and auditability, while any node can still be an agent; each "
+            "node's outcome trains which steps should be deterministic vs. agentic. "
+            "Off by default.",
+            default=False,
+        ),
+        "connections": _q_confirm(
+            "Named connections? Store a connector's base URL + API token under a name, "
+            "sealed at rest, so a connector can be wired from the dashboard without "
+            "setting <NAME>_TOKEN env vars (an existing env var still wins). Off by "
+            "default.",
             default=False,
         ),
         "emergent_protocol": _q_confirm(
@@ -3150,6 +3159,13 @@ def _cfg_advanced(  # noqa: C901 - flat sequence of independent opt-in toggles
             lines.append("# Externally-reachable dashboard base URL for signed channel")
             lines.append("# Approve/Reject links (actionable approvals).")
             _emit_kv(lines, "public_url", advanced["flows_public_url"])
+    if advanced.get("connections"):
+        lines.append("")
+        lines.append("[connections]")
+        lines.append("# Named SaaS connections (base URL + sealed token) so a connector")
+        lines.append("# can be wired from the dashboard without <NAME>_TOKEN env vars; an")
+        lines.append("# existing env var still takes precedence (maverick.connections).")
+        lines.append("enable = true")
     if advanced.get("emergent_protocol"):
         lines.append("")
         lines.append("[emergent_protocol]")
