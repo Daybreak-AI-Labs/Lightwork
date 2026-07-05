@@ -128,6 +128,14 @@ drive them; this wave wires them, changing no default behavior:
   domain + invoked tools. Before this, worker models' lines earned recalls but
   never outcomes, so a worker canary promoted by `run --all-models` could
   never graduate or be demoted by the counter-driven review.
+- **Corpus bootstrapping** (`[self_harness] corpus_harvest = off|propose|auto`):
+  hindsight pairs — a goal that FAILED (a reflexion exists) and whose wording
+  later ran to DONE — become `{goal, expected}` eval-corpus candidates, the
+  succeeded goal's recorded result supplying the expected hint (the strongest
+  natural label run history offers; ACE's label-free caveat is why `auto` is
+  an explicit opt-in). `propose` stages candidates for `maverick self-harness
+  corpus review` (accept/reject before anything enters the loop's ground
+  truth); harvesting rides the dream beat and `self-harness corpus harvest`.
 - **Cross-model transfer** (testing the refuted "inherently model-specific"
   claim on the operator's own fleet): `self_harness.run_transfer` tries a
   source model's graduated model-wide lines (`transferable_lines` excludes

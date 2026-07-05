@@ -362,7 +362,157 @@ def llm_paraphraser(llm, *, budget=None, model: str | None = None,
     return _paraphrase
 
 
+# ---- corpus bootstrapping (hindsight-pair harvest) ------------------------
+# The eval corpus is the loop's ground truth, and authoring it by hand is the
+# last manual step. HINDSIGHT PAIRS are the strongest natural labels a run
+# history offers: a goal that FAILED (a reflexion exists) and whose wording
+# later ran to DONE. The succeeded goal's text becomes the case's ``goal`` and
+# a short fragment of its recorded result becomes the ``expected`` hint.
+# Modes (the operator chooses): "propose" stages candidates in a pending file
+# an operator reviews (`self-harness corpus review`) before anything enters
+# the live corpus; "auto" merges directly -- knob-gated, eyes open (label-free
+# ground truth degrades silently; ACE's caveat).
+
+_HINT_CHARS = 80
+
+
+def _htokens(text: str) -> set[str]:
+    import re as _re
+    return set(_re.findall(r"[a-z0-9_]+", (text or "").lower()))
+
+
+def _result_hint(result: str) -> str:
+    """A short, distinctive ``expected`` hint from a succeeded goal's result:
+    the first non-empty line, whitespace-normalized, clipped."""
+    for ln in str(result or "").splitlines():
+        ln = " ".join(ln.split())
+        if ln:
+            return ln[:_HINT_CHARS]
+    return ""
+
+
+def harvest_corpus_candidates(reflexions: list, done_goals: list, *,
+                              min_overlap: float = 0.5,
+                              max_candidates: int = 20) -> list[dict]:
+    """Mine ``{goal, expected}`` corpus candidates from hindsight pairs.
+
+    A reflexion (a recorded failure, already unscoped-filtered by the caller)
+    pairs with a DONE goal when the goal wording strongly overlaps
+    (token-Jaccard ``>= min_overlap``) and the success came LATER than the
+    failure -- the task demonstrably went from failing to working, so its
+    result is operator-visible ground truth, not a guess. Deterministic and
+    pure: same inputs, same candidates, ordered by goal text; deduped; goals
+    with empty results yield nothing (no hint, no case)."""
+    done = []
+    for g in done_goals or []:
+        text = f"{getattr(g, 'title', '') or ''}\n{getattr(g, 'description', '') or ''}".strip()
+        hint = _result_hint(getattr(g, "result", "") or "")
+        ts = getattr(g, "updated_at", None) or getattr(g, "created_at", None) or 0
+        if text and hint:
+            done.append((text, hint, float(ts or 0), _htokens(text)))
+    out: dict[str, str] = {}
+    for r in reflexions or []:
+        rtext = str((r.get("goal_text") if isinstance(r, dict)
+                     else getattr(r, "goal_text", "")) or "")
+        rts = float((r.get("ts") if isinstance(r, dict)
+                     else getattr(r, "ts", 0)) or 0)
+        rtok = _htokens(rtext)
+        if not rtok:
+            continue
+        for text, hint, ts, ttok in done:
+            if ts and rts and ts < rts:
+                continue  # the success must come AFTER the failure
+            inter = len(rtok & ttok)
+            union = len(rtok | ttok)
+            if union and inter / union >= min_overlap:
+                out.setdefault(text, hint)
+    return [{"goal": g, "expected": out[g]}
+            for g in sorted(out)][:max(0, int(max_candidates))]
+
+
+def pending_corpus_path(corpus_path: str | Path) -> Path:
+    return Path(str(corpus_path) + ".pending.json")
+
+
+def load_pending(corpus_path: str | Path) -> dict[str, list[dict]]:
+    """The staged-candidates file, same ``{key: [cases]}`` shape as the corpus."""
+    return load_eval_corpus(pending_corpus_path(corpus_path))
+
+
+def _write_corpus_file(path: Path, data: dict[str, list[dict]]) -> None:
+    from .file_lock import atomic_write_text
+    atomic_write_text(Path(path), json.dumps(data, indent=2, sort_keys=True),
+                      mode=0o600)
+
+
+def stage_candidates(corpus_path: str | Path, key: str,
+                     candidates: list[dict]) -> int:
+    """PROPOSE mode: add candidates for ``key`` to the pending file, skipping
+    goals already live in the corpus or already pending. Returns how many were
+    newly staged."""
+    corpus = load_eval_corpus(corpus_path)
+    pending = load_pending(corpus_path)
+    known = {c["goal"] for c in corpus.get(str(key), [])}
+    known |= {c["goal"] for c in pending.get(str(key), [])}
+    fresh = [c for c in candidates or []
+             if c.get("goal") and c.get("expected") and c["goal"] not in known]
+    if not fresh:
+        return 0
+    pending.setdefault(str(key), []).extend(
+        {"goal": c["goal"], "expected": c["expected"]} for c in fresh)
+    _write_corpus_file(pending_corpus_path(corpus_path), pending)
+    return len(fresh)
+
+
+def merge_candidates(corpus_path: str | Path, key: str,
+                     candidates: list[dict]) -> int:
+    """AUTO mode (or an accepted review): merge candidates for ``key`` straight
+    into the live corpus, deduped by goal. Returns how many were added."""
+    corpus = load_eval_corpus(corpus_path)
+    known = {c["goal"] for c in corpus.get(str(key), [])}
+    fresh = [c for c in candidates or []
+             if c.get("goal") and c.get("expected") and c["goal"] not in known]
+    if not fresh:
+        return 0
+    corpus.setdefault(str(key), []).extend(
+        {"goal": c["goal"], "expected": c["expected"]} for c in fresh)
+    _write_corpus_file(Path(corpus_path), corpus)
+    return len(fresh)
+
+
+def resolve_pending(corpus_path: str | Path, key: str, *,
+                    accept: list[int] | None = None,
+                    reject: list[int] | None = None,
+                    accept_all: bool = False) -> tuple[int, int]:
+    """Operator review verdicts over the pending file (1-based indexes as the
+    CLI lists them): accepted candidates merge into the live corpus, rejected
+    ones are dropped, everything else stays pending. Returns
+    ``(accepted, rejected)``."""
+    pending = load_pending(corpus_path)
+    rows = pending.get(str(key), [])
+    if not rows:
+        return (0, 0)
+    if accept_all:
+        acc_idx = set(range(1, len(rows) + 1))
+        rej_idx: set[int] = set()
+    else:
+        acc_idx = {int(i) for i in (accept or [])}
+        rej_idx = {int(i) for i in (reject or [])} - acc_idx
+    accepted = [c for i, c in enumerate(rows, 1) if i in acc_idx]
+    kept = [c for i, c in enumerate(rows, 1)
+            if i not in acc_idx and i not in rej_idx]
+    added = merge_candidates(corpus_path, key, accepted) if accepted else 0
+    if kept:
+        pending[str(key)] = kept
+    else:
+        pending.pop(str(key), None)
+    _write_corpus_file(pending_corpus_path(corpus_path), pending)
+    return (added, len(rows) - len(kept) - len(accepted))
+
+
 __all__ = [
     "load_eval_corpus", "corpus_cases", "corpus_split", "corpus_kfold_splits",
     "corpus_ab_scorers", "llm_judge", "llm_runner", "llm_paraphraser",
+    "harvest_corpus_candidates", "stage_candidates", "merge_candidates",
+    "resolve_pending", "load_pending", "pending_corpus_path",
 ]

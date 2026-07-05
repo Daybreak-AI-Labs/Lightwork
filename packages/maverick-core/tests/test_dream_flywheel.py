@@ -116,6 +116,29 @@ def test_dream_skips_transfer_without_the_knob(tmp_path, monkeypatch):
     assert "[self-harness transfer]" not in res.output
 
 
+def test_dream_harvests_corpus_when_configured(tmp_path, monkeypatch):
+    _stub_dreaming(monkeypatch)
+    monkeypatch.setenv("MAVERICK_SELF_HARNESS", "1")
+    cpath = tmp_path / "corpus.json"
+    cpath.write_text("{}")
+    monkeypatch.setattr("maverick.config.load_config", lambda *a, **k: {
+        "self_harness": {"enable": True, "auto_run": True,
+                         "corpus_harvest": "propose",
+                         "eval_corpus": str(cpath)}})
+    monkeypatch.setattr(
+        "maverick.self_improvement_runner.run_self_harness_all_models",
+        lambda **k: {})
+    monkeypatch.setattr("maverick.llm.model_for_role", lambda role: "m1")
+    monkeypatch.setattr(
+        "maverick.self_harness_eval.harvest_corpus_candidates",
+        lambda refl, goals, **k: [{"goal": "g", "expected": "e"}])
+    res = CliRunner().invoke(main, ["--db", str(tmp_path / "w.db"), "dream"])
+    assert res.exit_code == 0, res.output
+    assert "[self-harness corpus] 1 candidate case(s) staged for review" in res.output
+    from maverick import self_harness_eval as ev
+    assert ev.load_pending(cpath)["m1"] == [{"goal": "g", "expected": "e"}]
+
+
 def test_dream_skips_the_self_harness_when_disabled(tmp_path, monkeypatch):
     _stub_dreaming(monkeypatch)
     monkeypatch.delenv("MAVERICK_SELF_HARNESS", raising=False)

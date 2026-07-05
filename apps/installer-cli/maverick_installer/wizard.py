@@ -1923,6 +1923,12 @@ def pick_advanced() -> dict[str, Any]:
             "    Nightly cross-model transfer? Try each model's proven guidance "
             "on the rest of the fleet (gated, on probation, one-shot per pair).",
             default=False)
+        harvest_mode = _q_text(
+            "    Corpus bootstrapping from run history? 'propose' stages cases "
+            "for your review, 'auto' merges directly (off/propose/auto)",
+            default="off").strip().lower()
+        if harvest_mode in ("propose", "auto"):
+            advanced["self_harness_corpus_harvest"] = harvest_mode
         advanced["self_harness_candidates"] = max(1, _safe_int(_q_text(
             "    Candidate lines per weakness (best-of-N; 1 = single)",
             default="1"), default=1))
@@ -3300,6 +3306,8 @@ def _cfg_advanced(  # noqa: C901 - flat sequence of independent opt-in toggles
             lines.append("calibrate_judge = true")
         if advanced.get("self_harness_transfer_auto"):
             lines.append("transfer_auto = true")
+        if advanced.get("self_harness_corpus_harvest"):
+            _emit_kv(lines, "corpus_harvest", advanced["self_harness_corpus_harvest"])
         cands = advanced.get("self_harness_candidates")
         if cands and cands > 1:
             lines.append(f"candidates_per_signature = {int(cands)}")

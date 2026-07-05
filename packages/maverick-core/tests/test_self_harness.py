@@ -2516,6 +2516,16 @@ def test_config_transfer_auto(monkeypatch):
     assert sh.settings()["transfer_auto"] is False
 
 
+def test_config_corpus_harvest(monkeypatch):
+    from maverick import config
+    for raw, want in (("propose", "propose"), ("AUTO", "auto"),
+                      ("weird", "off"), (None, "off")):
+        monkeypatch.setattr(config, "load_config", lambda *a, _r=raw, **k: {
+            "self_harness": ({} if _r is None else {"corpus_harvest": _r})})
+        assert config.get_self_harness()["corpus_harvest"] == want
+    assert sh.settings()["corpus_harvest"] == "off"
+
+
 # ---------- recency: recent-outcomes window + relapse re-probation ----------
 
 def test_note_outcome_builds_and_caps_recent_window(monkeypatch, store):

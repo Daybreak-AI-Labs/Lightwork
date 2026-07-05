@@ -339,6 +339,34 @@ def test_transfer_cli_requires_corpus_then_reports(_home, monkeypatch):
     assert "+ (canary) ln" in r.output
 
 
+def test_corpus_harvest_requires_corpus(_home):
+    r = CliRunner().invoke(main, ["self-harness", "corpus", "harvest"])
+    assert r.exit_code != 0 and "eval_corpus" in r.output
+
+
+def test_corpus_review_lists_and_resolves(_home, monkeypatch, tmp_path):
+    import json as _json
+
+    from maverick import config
+    from maverick import self_harness_eval as ev
+    cpath = tmp_path / "corpus.json"
+    cpath.write_text(_json.dumps({"m1": [{"goal": "live", "expected": "x"}]}))
+    monkeypatch.setattr(config, "load_config", lambda *a, **k: {
+        "self_harness": {"enable": True, "eval_corpus": str(cpath)}})
+    ev.stage_candidates(cpath, "m1", [{"goal": "g1", "expected": "e1"}])
+    r = CliRunner().invoke(main, ["self-harness", "corpus", "review",
+                                  "--model", "m1"])
+    assert r.exit_code == 0, r.output
+    assert "1. g1" in r.output and "expected: e1" in r.output
+    r = CliRunner().invoke(main, ["self-harness", "corpus", "review",
+                                  "--model", "m1", "--accept", "1"])
+    assert r.exit_code == 0 and "accepted 1" in r.output
+    assert any(c["goal"] == "g1" for c in ev.load_eval_corpus(cpath)["m1"])
+    r = CliRunner().invoke(main, ["self-harness", "corpus", "review",
+                                  "--model", "m1"])
+    assert "no pending corpus candidates" in r.output
+
+
 def test_run_cli_echoes_relapsed_lines(_home, monkeypatch):
     from maverick import self_improvement_runner as runner
     rep = sh.SelfHarnessReport(model_id="claude-x")

@@ -66,13 +66,14 @@ def finance_lint_sod_cmd() -> None:
     raise click.ClickException(f"{len(conflicts)} SoD conflict(s)")
 
 
-def _run_self_harness_nightly() -> None:
+def _run_self_harness_nightly(world=None) -> None:
     """Operate the self-harness on the dream beat (opt-in, ``[self_harness]
     auto_run``): the governed mine -> propose -> validate -> gate cycle for
     every configured role model, so the loop runs without a second cron entry.
     Each model's pass auto-builds its live A/B from ``[self_harness]
     eval_corpus`` when configured (else it is a dry inspection + stale-line
-    retirement + canary review). Never breaks dreaming."""
+    retirement + canary review). With ``corpus_harvest`` on and a ``world``,
+    hindsight pairs feed the corpus too. Never breaks dreaming."""
     try:
         from .. import self_harness
         if not (self_harness.enabled() and self_harness.settings().get("auto_run")):
@@ -95,6 +96,28 @@ def _run_self_harness_nightly() -> None:
                             f"[self-harness transfer] {src} -> {tgt}: "
                             f"attempted={len(res['attempted'])} "
                             f"promoted={len(res['promoted'])}")
+        # Corpus bootstrapping on the same beat (opt-in, [self_harness]
+        # corpus_harvest): hindsight pairs -> staged ("propose") or merged
+        # ("auto") eval-corpus cases for the orchestrator model's key.
+        mode = self_harness.settings().get("corpus_harvest", "off")
+        corpus_path = self_harness.settings().get("eval_corpus")
+        if world is not None and corpus_path and mode in ("propose", "auto"):
+            from .. import reflexion as _reflexion
+            from .. import self_harness_eval as ev
+            from ..llm import model_for_role
+            refl = [r.to_dict() for r in _reflexion.list_recent(limit=500)
+                    if r.channel is None and r.user_id is None]
+            goals = world.list_goals(status="done", limit=200, order="desc")
+            cands = ev.harvest_corpus_candidates(refl, goals)
+            key = model_for_role("orchestrator")
+            if mode == "auto":
+                n = ev.merge_candidates(corpus_path, key, cands)
+                verb = "merged into the corpus"
+            else:
+                n = ev.stage_candidates(corpus_path, key, cands)
+                verb = "staged for review"
+            if n:
+                click.echo(f"[self-harness corpus] {n} candidate case(s) {verb}")
     except Exception:  # pragma: no cover -- the harness must never break dreaming
         pass
 
@@ -217,7 +240,7 @@ def dream(ctx, max_goals: int, rehearse: bool, rehearse_budget: float,
                     f"(recoverable lift ~{fw.predicted_lift:.2f})")
     except Exception:  # pragma: no cover -- the flywheel must never break dreaming
         pass
-    _run_self_harness_nightly()
+    _run_self_harness_nightly(world)
     if not rehearse:
         return
     cases = dreaming.load_rehearsals()

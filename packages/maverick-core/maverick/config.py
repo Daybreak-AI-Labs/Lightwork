@@ -728,6 +728,12 @@ def get_self_harness() -> dict:
         # canaried, budget-capped; the tried-memory keeps steady-state spend
         # near zero). Default off -- transfer runs only via the CLI.
         "transfer_auto": bool(cfg.get("transfer_auto", False)),
+        # Corpus bootstrapping from hindsight pairs (a failed goal whose wording
+        # later ran to done): "propose" stages candidates for operator review
+        # (`self-harness corpus review`); "auto" merges them straight into the
+        # live corpus. Anything else = "off" -- the corpus stays hand-authored.
+        "corpus_harvest": (lambda v: v if v in ("propose", "auto") else "off")(
+            str(cfg.get("corpus_harvest", "off")).strip().lower()),
         # Relapse recency guard: re-probate (back to canary) a graduated line
         # whose recent-outcomes window carries at least this failing share
         # (0 = off, the default; clamped to (0, 1]). relapse_min_outcomes is

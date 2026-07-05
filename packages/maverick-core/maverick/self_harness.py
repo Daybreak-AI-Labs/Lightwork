@@ -100,6 +100,7 @@ def settings() -> dict:
                 "holdout_rotations": 1, "judge_samples": 1,
                 "metamorphic": False, "metamorphic_tolerance": 0.0,
                 "calibrate_judge": False, "transfer_auto": False,
+                "corpus_harvest": "off",
                 "relapse_failure_share": 0.0, "relapse_min_outcomes": 5,
                 "promote_as_canary": False,
                 "efficacy_review": False, "eval_corpus": None,

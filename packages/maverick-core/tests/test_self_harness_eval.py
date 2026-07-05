@@ -231,6 +231,51 @@ def test_rate_nan_on_all_indeterminate_but_zero_on_empty():
     assert ev._rate(["a"], lambda g: True) == 1.0     # normal path unchanged
 
 
+# ---- corpus bootstrapping: hindsight-pair harvest + review ----
+
+class _G:
+    """A minimal done-goal stand-in (title/description/result/timestamps)."""
+
+    def __init__(self, title, result, ts=100.0, desc=""):
+        self.title, self.description, self.result = title, desc, result
+        self.updated_at = self.created_at = ts
+
+
+def test_harvest_pairs_failed_then_done_goals():
+    refl = [{"goal_text": "export the nightly ledger report", "ts": 50.0}]
+    goals = [
+        _G("export the nightly ledger report", "Ledger exported: 42 rows."),
+        _G("unrelated cleanup task entirely", "done fine"),      # no overlap
+        _G("export the nightly ledger report", "early win", ts=10.0),  # BEFORE the failure
+        _G("export the nightly ledger report", ""),              # no result -> no hint
+    ]
+    out = ev.harvest_corpus_candidates(refl, goals)
+    assert out == [{"goal": "export the nightly ledger report",
+                    "expected": "Ledger exported: 42 rows."}]
+    # deterministic: same inputs, same candidates
+    assert ev.harvest_corpus_candidates(refl, goals) == out
+    assert ev.harvest_corpus_candidates([], goals) == []
+
+
+def test_stage_review_and_auto_merge(tmp_path):
+    cpath = tmp_path / "corpus.json"
+    cpath.write_text(json.dumps({"M": [{"goal": "live", "expected": "x"}]}))
+    cands = [{"goal": "live", "expected": "dup"},        # already live -> skipped
+             {"goal": "g1", "expected": "e1"},
+             {"goal": "g2", "expected": "e2"}]
+    assert ev.stage_candidates(cpath, "M", cands) == 2
+    assert ev.stage_candidates(cpath, "M", cands) == 0   # idempotent
+    assert [c["goal"] for c in ev.load_pending(cpath)["M"]] == ["g1", "g2"]
+    # review: accept 1, reject 2 -> corpus gains g1, pending drains
+    a, r = ev.resolve_pending(cpath, "M", accept=[1], reject=[2])
+    assert (a, r) == (1, 1)
+    assert {c["goal"] for c in ev.load_eval_corpus(cpath)["M"]} == {"live", "g1"}
+    assert ev.load_pending(cpath) == {}
+    # auto mode merges straight into the live corpus
+    assert ev.merge_candidates(cpath, "M", [{"goal": "g3", "expected": "e3"}]) == 1
+    assert any(c["goal"] == "g3" for c in ev.load_eval_corpus(cpath)["M"])
+
+
 # ---- budget exhaustion fails the evaluation CLOSED, never open ----
 
 class _BrokeLLM:

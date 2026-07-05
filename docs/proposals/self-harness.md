@@ -248,6 +248,11 @@ safety model as skills and insights.
   against the target's corpus through the full floors + gate, landing as
   canaries; one-shot per (target, line) via the tried-memory. `[self_harness]
   transfer_auto` runs the fleet sweep on the dream beat.
+- `maverick self-harness corpus harvest [--auto]` / `corpus review
+  [--accept N] [--reject N] [--accept-all]` — bootstrap the eval corpus from
+  hindsight pairs (failed goals whose wording later ran to done); staged
+  candidates are human-gated by default, `[self_harness] corpus_harvest =
+  "auto"` merges directly on the dream beat.
 - `maverick self-harness retire --older-than-days N` — prune stale guidance.
 - `maverick self-harness conflicts` — flag contradictory lines for review.
 - `maverick self-harness log` / `forget [--domain D]` — the audit trail and the
