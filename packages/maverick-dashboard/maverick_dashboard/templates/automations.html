@@ -754,6 +754,7 @@
         title.appendChild(a); main.appendChild(title);
         (f.proposals || []).forEach(function (p) {
           main.appendChild(el('div', 'mv-row__sub', '💡 ' + (p.reason || (p.from_kind + ' → ' + p.to_kind))));
+          main.appendChild(mkBtn('Apply this improvement', function () { applyProposal(f.flow_id, p); }));
         });
         (f.changes || []).forEach(function (ch) {
           var imp = ch.impact || {}, d = imp.delta;
@@ -765,6 +766,26 @@
         li.appendChild(main);
         insightsList.appendChild(li);
       });
+    }
+    async function applyProposal(flowId, p) {
+      // Enact a self-rewrite the loop suggested. Softening (-> agent) needs no
+      // input; hardening (-> action) needs a tool name only a human can choose.
+      var body = { node_id: p.node_id, to_kind: p.to_kind };
+      if (p.to_kind === 'action') {
+        var tool = (window.prompt('Harden node "' + p.node_id + '" into a deterministic action.\n'
+          + 'Which tool should it call?') || '').trim();
+        if (!tool) { insightsHead.textContent = 'Cancelled — hardening needs a tool.'; return; }
+        body.tool = tool;
+      }
+      insightsHead.textContent = 'Applying…';
+      try {
+        var r = await fetch('/api/v1/flows/' + encodeURIComponent(flowId) + '/apply', {
+          method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body),
+        });
+        var j = await r.json();
+        if (!r.ok) { insightsHead.textContent = j.detail || 'Could not apply.'; return; }
+        loadFlows();          // re-render node counts + refresh insights (proposal now enacted)
+      } catch (e) { insightsHead.textContent = 'Could not reach the server.'; }
     }
     loadFlows();
   }

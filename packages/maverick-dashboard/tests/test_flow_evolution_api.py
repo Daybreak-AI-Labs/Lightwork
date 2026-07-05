@@ -76,6 +76,22 @@ def test_apply_hardens_agent_to_action_and_bumps_version(monkeypatch, tmp_path):
     assert node_a["kind"] == "action" and node_a["tool"] == "summarize_tool"
 
 
+def test_apply_softens_action_to_agent_without_a_brief(monkeypatch, tmp_path):
+    # The one-click "Apply this improvement" path for a soften: no brief supplied,
+    # so the node's own label/brief becomes the agent brief (no human input needed).
+    _isolate(monkeypatch, tmp_path)
+    c = _client()
+    from maverick.flow import store
+    from maverick.flow.ir import Flow, FlowNode
+    store.save_flow(Flow(id="f", name="F", start="a",
+                         nodes={"a": FlowNode(id="a", kind="action", tool="t",
+                                              label="reconcile the ledger")}))
+    r = c.post("/api/v1/flows/f/apply", json={"node_id": "a", "to_kind": "agent"})
+    assert r.status_code == 200
+    node_a = next(n for n in c.get("/api/v1/flows/f").json()["nodes"] if n["id"] == "a")
+    assert node_a["kind"] == "agent" and node_a["brief"] == "reconcile the ledger"
+
+
 def test_apply_without_tool_is_400(monkeypatch, tmp_path):
     _isolate(monkeypatch, tmp_path)
     c = _client()
