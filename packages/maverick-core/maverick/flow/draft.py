@@ -23,7 +23,9 @@ _DRAFT_MAX_TOKENS = 2500
 FLOW_DRAFT_SYSTEM = """You design automation FLOWS and output STRICT JSON only.
 
 A flow is a graph of typed nodes:
-{"id": "<slug>", "name": "<title>", "start": "<node id>", "nodes": [ ...nodes ]}
+{"id": "<slug>", "name": "<title>", "start": "<node id>", "nodes": [ ...nodes ], "inputs": [ {"key": "<data key>", "type": "text|number|bool|date", "label": "<prompt>", "required": true} ]}
+
+"inputs" (optional) declares the values a human supplies to run this flow manually -- they become the initial flow data (referenced with {{key}}) and are validated/coerced on run. Add them when the flow needs specific inputs from the person starting it.
 
 Each node is one of these kinds (include only the fields for its kind):
 - {"id","kind":"agent","brief":"<instruction for an AI agent>","next":"<id|null>"}

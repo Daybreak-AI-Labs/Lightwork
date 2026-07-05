@@ -52,6 +52,40 @@ def test_flows_gated_off_by_default(monkeypatch, tmp_path):
     assert _client().get("/api/v1/flows").status_code == 403
 
 
+_INPUT_FLOW = {
+    "id": "typed", "name": "Typed", "start": "a",
+    "nodes": [{"id": "a", "kind": "agent", "brief": "process {{amount}}"}],
+    "inputs": [{"key": "amount", "type": "number", "required": True}],
+}
+
+
+def test_run_rejects_a_missing_required_input(monkeypatch, tmp_path):
+    _isolate(monkeypatch, tmp_path)
+    c = _client()
+    c.post("/api/v1/flows", json={"flow": _INPUT_FLOW})
+    r = c.post("/api/v1/flows/typed/run", json={"data": {}})
+    assert r.status_code == 400 and "amount" in r.json()["detail"]
+
+
+def test_run_coerces_a_typed_input(monkeypatch, tmp_path):
+    _isolate(monkeypatch, tmp_path)
+    c = _client()
+    c.post("/api/v1/flows", json={"flow": _INPUT_FLOW})
+    r = c.post("/api/v1/flows/typed/run", json={"data": {"amount": "42"}})
+    assert r.status_code == 200
+    from maverick.flow import store
+    assert store.load_run(r.json()["run_id"]).data["amount"] == 42.0   # coerced to number
+
+
+def test_run_idempotency_key_dedups_a_repeat_submit(monkeypatch, tmp_path):
+    _isolate(monkeypatch, tmp_path)
+    c = _client()
+    c.post("/api/v1/flows", json={"flow": _FLOW})
+    a = c.post("/api/v1/flows/demo/run", json={"data": {"order": "X"}, "idempotency_key": "k1"}).json()
+    b = c.post("/api/v1/flows/demo/run", json={"data": {"order": "X"}, "idempotency_key": "k1"}).json()
+    assert a["run_id"] == b["run_id"] and b.get("deduplicated") is True
+
+
 def test_save_validate_get_delete(monkeypatch, tmp_path):
     _isolate(monkeypatch, tmp_path)
     c = _client()

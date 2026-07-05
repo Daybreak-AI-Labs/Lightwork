@@ -922,7 +922,8 @@ async def list_flows_endpoint(request: Request) -> dict:
     from maverick.flow import store
     return {"flows": [
         {"id": f.id, "name": f.name, "nodes": len(f.nodes),
-         "single_agent": f.is_single_agent(), "schedule": f.schedule}
+         "single_agent": f.is_single_agent(), "schedule": f.schedule,
+         "inputs": f.inputs}
         for f in store.list_flows()
     ]}
 
@@ -1381,15 +1382,32 @@ async def run_flow_endpoint(request: Request, flow_id: str, payload: FlowRunIn) 
     require_permission(request, "operate")
     _require_flows()
     from maverick.flow import store
-    if store.load_flow(flow_id) is None:
+    from maverick.flow.ir import coerce_inputs
+    flow = store.load_flow(flow_id)
+    if flow is None:
         raise HTTPException(status_code=404, detail="no such flow")
     owner = _supervisor(request)
+    # Validate/coerce the payload against the flow's declared inputs (a no-op when
+    # the flow declares none): reject a missing required input or a bad number/date
+    # up front, and coerce number/bool/date so a node's condition sees typed values.
+    data, input_errs = coerce_inputs(flow, dict(payload.data or {}))
+    if input_errs:
+        raise HTTPException(status_code=400, detail="; ".join(input_errs))
+    # Idempotency: a caller-supplied key dedups a repeat submit (double-click, retry)
+    # to the same run instead of firing a second one.
+    idem = (payload.idempotency_key or "").strip()
+    if idem and not payload.dry_run:
+        existing = store.find_run_by_idem(flow_id, idem)
+        if existing is not None:
+            return {"run_id": existing.run_id, "status": existing.status,
+                    "dry_run": False, "deduplicated": True}
     run_id = store.new_run_id()
     store.save_run(store.FlowRun(run_id=run_id, flow_id=flow_id, status="queued",
-                                 owner=owner, data=dict(payload.data or {})))
+                                 owner=owner, data=dict(data), input_data=dict(data),
+                                 idem_key=idem))
     from maverick_dashboard import automation_queue as aq
     aq.queue().enqueue(aq.FLOW_RUN_KIND, {
-        "flow_id": flow_id, "run_id": run_id, "data": payload.data, "owner": owner,
+        "flow_id": flow_id, "run_id": run_id, "data": data, "owner": owner,
         "dry_run": bool(payload.dry_run)})
     return {"run_id": run_id, "status": "queued", "dry_run": bool(payload.dry_run)}
 
