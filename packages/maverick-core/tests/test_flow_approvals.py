@@ -42,8 +42,9 @@ def test_swapped_body_is_rejected():
 def test_expired_token_is_rejected():
     past = time.time() - 10
     tok = approvals.mint_token("run-1", "approved", ttl=1, now=past)
-    assert approvals.verify_token(tok) is None            # expired ~9s ago
-    assert approvals.verify_token(tok, now=past + 0.5)     # still valid at mint+0.5s
+    assert approvals.verify_token(tok, now=past) is not None   # valid at mint instant
+    assert approvals.verify_token(tok, now=past + 5) is None    # well past the 1s ttl
+    assert approvals.verify_token(tok) is None                 # and vs real now (~10s later)
 
 
 def test_invalid_decision_mints_nothing():
