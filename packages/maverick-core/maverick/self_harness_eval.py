@@ -25,6 +25,7 @@ import hashlib
 import json
 import logging
 import threading
+import time
 from collections.abc import Callable, Mapping
 from pathlib import Path
 
@@ -35,6 +36,20 @@ log = logging.getLogger(__name__)
 
 # ---- corpus -------------------------------------------------------------
 
+def _read_json_text(path: str | Path) -> str:
+    """The file's JSON text, transparently unsealing an at-rest-encrypted
+    sidecar (a plaintext file is returned unchanged -- ``unseal`` is
+    plaintext-tolerant). A sealed blob that cannot be opened surfaces as
+    ``ValueError`` so the tolerant loaders' catch tuples apply."""
+    raw = Path(path).read_bytes()
+    try:
+        from .crypto_at_rest import unseal
+        raw = unseal(raw)
+    except Exception as e:
+        raise ValueError(f"unreadable sealed corpus file {path}: {e}") from e
+    return raw.decode("utf-8")
+
+
 def load_eval_corpus(path: str | Path) -> dict[str, list[dict]]:
     """Load a ``{key: [{"goal":..., "expected":...}, ...]}`` eval corpus from JSON.
 
@@ -43,7 +58,7 @@ def load_eval_corpus(path: str | Path) -> dict[str, list[dict]]:
     skipped rows rather than raising -- an eval corpus is operator data and a typo
     must not crash a learning pass."""
     try:
-        data = json.loads(Path(path).read_text(encoding="utf-8"))
+        data = json.loads(_read_json_text(path))
     except (FileNotFoundError, ValueError, OSError):
         return {}
     if not isinstance(data, dict):
@@ -198,12 +213,29 @@ def corpus_ab_scorers(
     expected = {str(c.get("goal") or ""): str(c.get("expected") or "") for c in cases}
     expected_of = expected.get if judge_unknown else expected.__getitem__
 
+    def _degraded() -> int:
+        # llm_runner/llm_judge count fail-open degradations (provider errors
+        # swallowed into ""/heuristic). Non-LLM seams have no counter -> 0.
+        return (int(getattr(run_fn, "degraded", 0))
+                + int(getattr(judge, "degraded", 0)))
+
     def score_with(line: str, goals: list[str]) -> float:
-        return _rate(goals, lambda g: judge(g, run_fn(line, g), expected_of(g) or ""))
+        before = _degraded()
+        r = _rate(goals, lambda g: judge(g, run_fn(line, g), expected_of(g) or ""))
+        score_with.last_clean = _degraded() == before
+        return r
 
     def score_without(_line: str, goals: list[str]) -> float:
-        return _rate(goals, lambda g: judge(g, run_fn("", g), expected_of(g) or ""))
+        before = _degraded()
+        r = _rate(goals, lambda g: judge(g, run_fn("", g), expected_of(g) or ""))
+        score_without.last_clean = _degraded() == before
+        return r
 
+    # ``last_clean`` marks whether the most recent call completed without any
+    # fail-open degradation -- a memoizing caller must never cache a dirty
+    # score (an outage 0.0 is indistinguishable from a real 0.0 afterwards).
+    score_with.last_clean = True
+    score_without.last_clean = True
     return score_with, score_without
 
 
@@ -270,6 +302,7 @@ def llm_judge(llm, *, budget=None, model: str | None = None, max_tokens: int = 8
             except BudgetExceeded:
                 raise  # exhausted budget fails the CASE closed, never the heuristic
             except Exception as e:  # pragma: no cover -- one bad sample abstains
+                _judge.degraded += 1
                 log.warning("eval: llm judge sample failed (%s)", e)
         if yes == no:
             # tie (incl. zero usable votes) -> deterministic heuristic tie-break;
@@ -279,6 +312,9 @@ def llm_judge(llm, *, budget=None, model: str | None = None, max_tokens: int = 8
         _note_judge_verdict(goal, output, expected, verdict,
                             confidence=max(yes, no) / (yes + no))
         return verdict
+    # Fail-open degradation counter (provider errors swallowed into abstains);
+    # corpus_ab_scorers reads it to mark a score dirty for memoizing callers.
+    _judge.degraded = 0
     return _judge
 
 
@@ -330,8 +366,12 @@ def llm_runner(llm, *, system_prefix: str = "", budget=None, model: str | None =
         except BudgetExceeded:
             raise  # exhausted budget is indeterminate, not a scored failure
         except Exception as e:  # pragma: no cover -- a failed generation isn't a success
+            _run.degraded += 1
             log.warning("eval: llm runner failed (%s)", e)
             return ""
+    # Fail-open degradation counter (provider errors swallowed into "");
+    # corpus_ab_scorers reads it to mark a score dirty for memoizing callers.
+    _run.degraded = 0
     return _run
 
 
@@ -472,7 +512,7 @@ def load_rejected(corpus_path: str | Path) -> dict[str, list[str]]:
     durable NO: without it the nightly harvest would re-stage the same
     candidate every beat until its source rows aged out of the mining windows."""
     try:
-        data = json.loads(rejected_corpus_path(corpus_path).read_text(encoding="utf-8"))
+        data = json.loads(_read_json_text(rejected_corpus_path(corpus_path)))
         if isinstance(data, dict):
             return {str(k): [str(g) for g in v]
                     for k, v in data.items() if isinstance(v, list)}
@@ -493,10 +533,23 @@ _REJECTED_CAP = 500
 _corpus_lock = threading.Lock()
 
 
-def _write_corpus_file(path: Path, data: dict) -> None:
+def _write_corpus_file(path: Path, data: dict, *, seal: bool = False) -> None:
+    """Serialize a corpus-family file. ``seal`` opts a MACHINE-OWNED sidecar
+    (pending/rejected) into at-rest encryption when the deployment seals its
+    stores -- goal text there is the same content the world DB seals. The LIVE
+    corpus is operator-authored/hand-editable by design and never sealed here.
+    A sealing failure propagates (fail closed, per crypto_at_rest.seal): the
+    caller must not silently write sensitive plaintext."""
+    text = json.dumps(data, indent=2, sort_keys=True)
+    if seal:
+        from .crypto_at_rest import at_rest_enabled
+        if at_rest_enabled():
+            from .crypto_at_rest import seal_text
+            from .file_lock import atomic_write_bytes
+            atomic_write_bytes(Path(path), seal_text(text), mode=0o600)
+            return
     from .file_lock import atomic_write_text
-    atomic_write_text(Path(path), json.dumps(data, indent=2, sort_keys=True),
-                      mode=0o600)
+    atomic_write_text(Path(path), text, mode=0o600)
 
 
 def _load_raw(path: str | Path) -> dict:
@@ -505,7 +558,7 @@ def _load_raw(path: str | Path) -> dict:
     normalized view would silently strip operator-authored per-case fields and
     unknown keys from the live ground-truth file."""
     try:
-        data = json.loads(Path(path).read_text(encoding="utf-8"))
+        data = json.loads(_read_json_text(path))
         if isinstance(data, dict):
             return data
     except (FileNotFoundError, ValueError, OSError):
@@ -514,7 +567,8 @@ def _load_raw(path: str | Path) -> dict:
 
 
 def _add_fresh(dest_path: Path, dest_raw: dict, key: str,
-               candidates: list[dict], known: set[str]) -> int:
+               candidates: list[dict], known: set[str], *,
+               seal: bool = False) -> int:
     """The one owner of candidate validity + dedup: append candidates whose
     goal is non-empty, labeled, and not in ``known`` to the RAW ``dest_raw[key]``
     rows and write the file. Returns how many were added (0 writes nothing)."""
@@ -525,8 +579,12 @@ def _add_fresh(dest_path: Path, dest_raw: dict, key: str,
     rows = dest_raw.get(str(key))
     if not isinstance(rows, list):
         rows = dest_raw[str(key)] = []
-    rows.extend({"goal": c["goal"], "expected": c["expected"]} for c in fresh)
-    _write_corpus_file(dest_path, dest_raw)
+    # ``added_at`` rides in the RAW file only (the normalized eval view strips
+    # it): it is what lets the quality lifecycle age harvested cases later.
+    now = time.time()
+    rows.extend({"goal": c["goal"], "expected": c["expected"], "added_at": now}
+                for c in fresh)
+    _write_corpus_file(dest_path, dest_raw, seal=seal)
     return len(fresh)
 
 
@@ -537,7 +595,7 @@ def _stage_locked(corpus_path: str | Path, key: str,
     known |= set(load_rejected(corpus_path).get(str(key), []))
     return _add_fresh(pending_corpus_path(corpus_path),
                       _load_raw(pending_corpus_path(corpus_path)),
-                      key, candidates, known)
+                      key, candidates, known, seal=True)
 
 
 def _merge_locked(corpus_path: str | Path, key: str,
@@ -605,18 +663,95 @@ def resolve_pending(corpus_path: str | Path, key: str, *,
             pending_raw[str(key)] = kept
         else:
             pending_raw.pop(str(key), None)
-        _write_corpus_file(pending_corpus_path(corpus_path), pending_raw)
+        _write_corpus_file(pending_corpus_path(corpus_path), pending_raw,
+                           seal=True)
         if rejected_rows:
             rej = load_rejected(corpus_path)
             seen = rej.get(str(key), [])
             seen.extend(c["goal"] for c in rejected_rows
                         if c["goal"] not in set(seen))
             rej[str(key)] = seen[-_REJECTED_CAP:]
-            _write_corpus_file(rejected_corpus_path(corpus_path), rej)
+            _write_corpus_file(rejected_corpus_path(corpus_path), rej,
+                               seal=True)
         return {"merged": added, "duplicates": len(accepted) - added,
                 "rejected": len(rejected_rows),
                 "accepted_goals": [c["goal"] for c in accepted],
                 "rejected_goals": [c["goal"] for c in rejected_rows]}
+
+
+# ---- corpus quality lifecycle ---------------------------------------------
+# The corpus is the loop's ground truth, but nothing above reviews the corpus
+# ITSELF: a case the baseline model already always solves can no longer
+# measure a candidate line's lift (non-discriminative), and it dilutes every
+# split it lands in. The probe below measures per-case baseline pass rates so
+# the operator can see -- and retire -- the dead weight.
+
+def corpus_quality(cases: list[dict], *, run_fn: Callable[[str, str], str],
+                   judge_fn: Callable[[str, str, str], bool] | None = None,
+                   samples: int = 2) -> list[dict]:
+    """Per-case discriminativeness of the corpus's ground truth.
+
+    Runs the BASELINE (no candidate line) ``samples`` times per case and
+    judges each attempt: a case the baseline passes every time cannot show a
+    candidate's lift -- it is dead weight in every split. Returns one row per
+    case: ``{goal, expected, passes, samples, baseline_rate,
+    discriminative}`` where ``discriminative`` is False only when every
+    sample passed. A sample that RAISES is indeterminate and excluded
+    (``baseline_rate`` is over the judged samples; a case with no judged
+    samples reports ``baseline_rate=None`` and stays discriminative --
+    unknown is not dead). ``BudgetExceeded`` propagates: a half-probed
+    quality report must not silently masquerade as a full one."""
+    judge = judge_fn or _heuristic_judge
+    out: list[dict] = []
+    n = max(1, int(samples))
+    for c in cases or []:
+        goal = str(c.get("goal") or "")
+        expected = str(c.get("expected") or "")
+        if not goal:
+            continue
+        passes = judged = 0
+        for _ in range(n):
+            try:
+                if judge(goal, run_fn("", goal), expected):
+                    passes += 1
+                judged += 1
+            except BudgetExceeded:
+                raise
+            except Exception:  # one bad sample is indeterminate, excluded
+                log.debug("eval: quality sample failed", exc_info=True)
+        rate = (passes / judged) if judged else None
+        out.append({"goal": goal, "expected": expected, "passes": passes,
+                    "samples": judged, "baseline_rate": rate,
+                    "discriminative": not (judged and passes == judged)})
+    return out
+
+
+def retire_corpus_cases(corpus_path: str | Path, key: str,
+                        goals: list[str]) -> int:
+    """Remove the named cases from the live corpus's ``key`` -- the quality
+    lifecycle's pruning hand. RAW-preserving (other rows keep every
+    operator-authored field) and serialized like every other corpus write.
+    Returns how many rows were removed."""
+    from .file_lock import cross_process_lock
+    drop = {str(g) for g in goals or []}
+    if not drop:
+        return 0
+    with _corpus_lock, cross_process_lock(Path(corpus_path)):
+        raw = _load_raw(corpus_path)
+        rows = raw.get(str(key))
+        if not isinstance(rows, list):
+            return 0
+        kept = [r for r in rows
+                if not (isinstance(r, Mapping) and str(r.get("goal")) in drop)]
+        removed = len(rows) - len(kept)
+        if not removed:
+            return 0
+        if kept:
+            raw[str(key)] = kept
+        else:
+            raw.pop(str(key), None)
+        _write_corpus_file(Path(corpus_path), raw)
+        return removed
 
 
 __all__ = [
@@ -625,4 +760,5 @@ __all__ = [
     "harvest_corpus_candidates", "stage_candidates", "merge_candidates",
     "resolve_pending", "load_pending", "pending_corpus_path",
     "load_rejected", "rejected_corpus_path",
+    "corpus_quality", "retire_corpus_cases",
 ]

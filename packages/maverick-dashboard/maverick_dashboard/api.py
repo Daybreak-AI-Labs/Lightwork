@@ -1833,28 +1833,43 @@ def _learned_snapshot(limit: int = 50) -> dict:
     except Exception as e:  # pragma: no cover -- never block the page
         log.debug("learned snapshot failed: %s", e)
     harness, harness_enabled = _harness_guidance()
+    pending = _pending_corpus_items()
     return {
         "learned": learned, "generated_tools": tools,
         "harness": harness, "harness_enabled": harness_enabled,
-        "pending_corpus": _pending_corpus_counts(),
+        "pending_corpus": {k: len(v) for k, v in pending.items()},
+        "pending_items": pending,
+        "transfer_memory": _transfer_memory(),
     }
 
 
-def _pending_corpus_counts() -> dict[str, int]:
+def _pending_corpus_items() -> dict[str, list[dict]]:
     """Harvested corpus candidates awaiting operator review, per corpus key --
-    so staged ground truth is visible, not forgotten. A CORPUS-key fact, kept
-    apart from the learned-guidance snapshot: the badge must show even when a
-    key has staged cases but no learned lines yet (the bootstrap case), and a
-    failure here must not blank the guidance list (or vice versa)."""
+    so staged ground truth is visible (and resolvable in-page), not
+    forgotten. A CORPUS-key fact, kept apart from the learned-guidance
+    snapshot: the section must show even when a key has staged cases but no
+    learned lines yet (the bootstrap case), and a failure here must not blank
+    the guidance list (or vice versa)."""
     try:
         from maverick.self_harness import settings
         from maverick.self_harness_eval import load_pending
         cpath = settings().get("eval_corpus")
         if cpath:
-            return {k: len(v) for k, v in load_pending(cpath).items() if v}
-    except Exception as e:  # pragma: no cover -- pending count is advisory
+            return {k: v for k, v in load_pending(cpath).items() if v}
+    except Exception as e:  # pragma: no cover -- pending items are advisory
         log.debug("pending corpus snapshot failed: %s", e)
     return {}
+
+
+def _transfer_memory() -> dict:
+    """Content-free transfer tried-memory stats (judged pairs + newest ts)
+    for the /learned page -- how caught-up the nightly sweep is."""
+    try:
+        from maverick.self_harness import transfer_memory_stats
+        return transfer_memory_stats()
+    except Exception as e:  # pragma: no cover -- advisory
+        log.debug("transfer memory snapshot failed: %s", e)
+        return {"pairs": 0, "last_judged_at": None}
 
 
 def _harness_guidance() -> tuple[list[dict], bool]:
@@ -1968,6 +1983,45 @@ async def remove_generated_tool(request: Request, name: str) -> None:
         target.unlink()
     except OSError as e:
         raise HTTPException(status_code=500, detail=f"could not remove: {e}") from e
+
+
+@router.post("/harness-corpus/review")
+async def review_harness_corpus(request: Request, payload: dict) -> dict:
+    """Resolve staged corpus candidates from the dashboard -- the same
+    accept/reject verdicts as ``maverick self-harness corpus review``, so
+    staged ground truth can be reviewed where it is displayed. Mutating the
+    loop's ground truth is an ``admin`` action (same rung as pulling a
+    generated tool); bearer/same-origin is enforced centrally by the
+    middleware (POST is a mutating method)."""
+    require_permission(request, "admin")
+    from maverick import self_harness_eval as ev
+    from maverick.self_harness import settings
+    corpus_path = settings().get("eval_corpus")
+    if not corpus_path:
+        raise HTTPException(status_code=409, detail="no eval corpus configured")
+    key = str(payload.get("key") or "")
+    if not key:
+        raise HTTPException(status_code=400, detail="missing corpus key")
+
+    def _indexes(name: str) -> list[int]:
+        v = payload.get(name) or []
+        if not isinstance(v, list) or not all(
+                isinstance(i, int) and not isinstance(i, bool) for i in v):
+            raise HTTPException(status_code=400,
+                                detail=f"{name} must be a list of 1-based indexes")
+        return v
+
+    accept, reject = _indexes("accept"), _indexes("reject")
+    if not accept and not reject:
+        raise HTTPException(status_code=400, detail="nothing to resolve")
+    try:
+        res = ev.resolve_pending(corpus_path, key, accept=accept, reject=reject)
+    except ValueError as e:
+        # Indexes rebased under the caller (another review/harvest landed):
+        # a conflict, not a bad request -- the page reloads and re-lists.
+        raise HTTPException(status_code=409, detail=str(e)) from e
+    return {"merged": res["merged"], "duplicates": res["duplicates"],
+            "rejected": res["rejected"]}
 
 
 @router.get("/spend")
@@ -4974,9 +5028,11 @@ def _learning_snapshot(request: Request) -> dict:
         try:
             # Count the ledger directly -- _learned_snapshot would also build
             # the whole harness/provenance/pending view just to be discarded.
+            # The stat is a TOTAL, so don't inherit the page's display limit
+            # (the old path silently capped the count at 50).
             from maverick import self_learning
             learned_n = len(self_learning.history(
-                limit=50, path=self_learning.LEARNED_PATH))
+                limit=1_000_000, path=self_learning.LEARNED_PATH))
         except Exception:  # pragma: no cover - the moat view never 500s on a sub-read
             learned_n = 0
         accumulated["grounded_outcomes"] = consequence.count()

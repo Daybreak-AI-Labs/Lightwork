@@ -332,7 +332,46 @@ def test_merge_preserves_operator_fields_and_unknown_keys(tmp_path):
     assert raw["M"][0] == {"goal": "live", "expected": "x", "notes": "keep me",
                            "reviewed": True}
     assert raw["_meta"] == {"owner": "ops"}
-    assert raw["M"][1] == {"goal": "g", "expected": "e"}
+    added = raw["M"][1]
+    assert added["goal"] == "g" and added["expected"] == "e"
+    assert added["added_at"] > 0        # harvest stamp for the quality lifecycle
+
+
+def test_corpus_quality_flags_dead_cases_and_retire_prunes_raw(tmp_path):
+    # A case the baseline always passes is DEAD ground truth; one it can fail
+    # is discriminative; an all-indeterminate probe stays discriminative
+    # (unknown is not dead). --retire drops only the dead rows, raw-preserving.
+    cases = [{"goal": "easy", "expected": "yes"},
+             {"goal": "hard", "expected": "yes"},
+             {"goal": "flaky", "expected": "yes"}]
+
+    calls = {"hard": 0}
+
+    def run_fn(line, goal):
+        if goal == "flaky":
+            raise RuntimeError("indeterminate")
+        if goal == "hard":
+            calls["hard"] += 1
+            return "yes" if calls["hard"] % 2 else "no"
+        return "yes"
+
+    rows = ev.corpus_quality(cases, run_fn=run_fn, samples=2)
+    by = {r["goal"]: r for r in rows}
+    assert by["easy"]["discriminative"] is False and by["easy"]["baseline_rate"] == 1.0
+    assert by["hard"]["discriminative"] is True and by["hard"]["baseline_rate"] == 0.5
+    assert by["flaky"]["discriminative"] is True and by["flaky"]["baseline_rate"] is None
+
+    cpath = tmp_path / "corpus.json"
+    cpath.write_text(json.dumps({
+        "M": [{"goal": "easy", "expected": "yes", "notes": "keep the field"},
+              {"goal": "hard", "expected": "yes"}],
+        "_meta": {"owner": "ops"},
+    }))
+    assert ev.retire_corpus_cases(cpath, "M", ["easy"]) == 1
+    raw = json.loads(cpath.read_text())
+    assert [r["goal"] for r in raw["M"]] == ["hard"]
+    assert raw["_meta"] == {"owner": "ops"}       # untouched keys survive
+    assert ev.retire_corpus_cases(cpath, "M", ["nope"]) == 0
 
 
 def test_harvest_rejects_pairs_missing_timestamps_and_honors_known():
@@ -346,6 +385,56 @@ def test_harvest_rejects_pairs_missing_timestamps_and_honors_known():
     assert ev.harvest_corpus_candidates(
         refl, goals, known={"export the nightly ledger report"}) == []
     assert ev.harvest_corpus_candidates(refl, goals, max_candidates=1) != []
+
+
+def test_scorers_mark_dirty_on_fail_open_degradation():
+    # A provider error swallowed fail-open (runner "" / judge abstain) marks
+    # that call dirty via last_clean, so a memoizing caller never freezes an
+    # outage score. Recovery marks the next call clean again.
+    class _FlakyLLM:
+        model = "fake:flaky"
+
+        def __init__(self):
+            self.n = 0
+
+        def complete(self, system, messages, **kw):
+            self.n += 1
+            if self.n == 1:
+                raise RuntimeError("provider down")
+            return type("R", (), {"text": "WIN"})()
+
+    run = ev.llm_runner(_FlakyLLM())
+    _sw, swo = ev.corpus_ab_scorers([{"goal": "g", "expected": "WIN"}], run_fn=run)
+    assert swo.last_clean is True            # untouched until the first call
+    swo("", ["g"])                           # outage -> degraded fail-open
+    assert swo.last_clean is False
+    assert swo("", ["g"]) == 1.0             # provider recovered
+    assert swo.last_clean is True
+
+
+def test_pending_and_rejected_sidecars_seal_at_rest(tmp_path, monkeypatch):
+    # The machine-owned harvest sidecars carry the same goal text the world DB
+    # seals: with at-rest encryption on they must not sit in plaintext, while
+    # the LIVE corpus stays operator-editable plaintext by design. Loaders
+    # unseal transparently (and stay plaintext-tolerant for legacy files).
+    import pytest
+    pytest.importorskip("cryptography")
+    monkeypatch.setenv("MAVERICK_HOME", str(tmp_path / "home"))
+    monkeypatch.setenv("MAVERICK_ENCRYPT_AT_REST", "1")
+    cpath = tmp_path / "corpus.json"
+    cpath.write_text("{}")
+    assert ev.stage_candidates(cpath, "M", [{"goal": "secret-ish goal",
+                                             "expected": "hint"}]) == 1
+    raw = ev.pending_corpus_path(cpath).read_bytes()
+    assert b"secret-ish goal" not in raw          # sealed on disk
+    assert ev.load_pending(cpath)["M"][0]["goal"] == "secret-ish goal"
+    res = ev.resolve_pending(cpath, "M", reject=[1])
+    assert res["rejected"] == 1
+    assert b"secret-ish goal" not in ev.rejected_corpus_path(cpath).read_bytes()
+    assert ev.load_rejected(cpath) == {"M": ["secret-ish goal"]}
+    # live corpus (operator data) remains plaintext-readable JSON
+    assert ev.merge_candidates(cpath, "M", [{"goal": "g2", "expected": "e"}]) == 1
+    assert "g2" in cpath.read_text()
 
 
 def test_rate_budget_death_fails_the_whole_arm_closed():

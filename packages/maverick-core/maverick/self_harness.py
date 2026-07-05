@@ -1308,7 +1308,16 @@ def validate_proposal(
     if metamorphic_fn is not None and held_out:
         try:
             mcases = [str(c) for c in (metamorphic_fn(list(held_out)) or [])]
-        except Exception:  # a bad transform can't fail a candidate -> skip the check
+        except Exception as e:
+            # An exhausted budget mid-paraphrase is INDETERMINATE, not a free
+            # pass: silently skipping the check under a dead pot would let the
+            # last candidates of a sweep dodge the robustness bar the earlier
+            # ones cleared. Any other bad transform can't fail a candidate --
+            # skip the check as before.
+            from .budget import BudgetExceeded
+            if isinstance(e, BudgetExceeded):
+                return ValidationResult(False, in_delta, out_delta,
+                                        _INDETERMINATE_REASON, **base)
             mcases = []
         if mcases:
             m_with, *_ = _score_parts(score_with(add, mcases))
@@ -1856,6 +1865,16 @@ def _record_transfer_tried(keys: list[str], *, path: Path | None = None) -> None
         atomic_write_text(p, json.dumps(tried, indent=2, sort_keys=True), mode=0o600)
 
 
+def transfer_memory_stats(path: Path | None = None) -> dict:
+    """Read-only view of the transfer tried-memory for surfaces (dashboard,
+    docs): ``{"pairs": <judged (target, line) pairs>, "last_judged_at":
+    <newest record ts | None>}``. Content-free by construction -- the memory
+    stores line-id hashes and timestamps only."""
+    tried = _load_transfer_tried(path)
+    return {"pairs": len(tried),
+            "last_judged_at": max(tried.values()) if tried else None}
+
+
 def transferable_lines(source_model: str, path: Path | None = None, *,
                        store: dict | None = None,
                        meta: dict | None = None) -> list[str]:
@@ -2314,7 +2333,7 @@ __all__ = [
     "load_line_meta", "line_provenance", "note_recall",
     "note_outcome", "line_efficacy", "review_efficacy",
     "mark_canary", "list_canaries", "review_canaries", "review_relapses",
-    "transferable_lines", "run_transfer",
+    "transferable_lines", "run_transfer", "transfer_memory_stats",
     "find_conflicts", "detect_store_conflicts", "llm_conflict_classifier",
     "FailureSignature", "mine_failures", "count_eligible", "semantic_similarity",
     "HarnessProposal", "ProposeFn", "propose_addendum", "llm_proposer",

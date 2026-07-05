@@ -27,6 +27,7 @@ from __future__ import annotations
 
 import logging
 import math
+import time
 from collections.abc import Callable, Mapping
 
 from .si_producers import ToolOutcomeTracker, propose_policy, propose_prompt, propose_tool
@@ -177,14 +178,15 @@ def run_self_harness_pass(
         if not self_harness.enabled():
             return self_harness.SelfHarnessReport(model_id=str(model_id or ""))
         st = self_harness.settings()
+        floors = _validation_floors(st)
         if min_support is None:
             min_support = st["min_support"]
         if require_held_out is None:
             require_held_out = st["require_held_out"]
         if min_delta is None:
-            min_delta = st["min_delta"]
+            min_delta = floors["min_delta"]
         if min_held_out is None:
-            min_held_out = st["min_held_out"]
+            min_held_out = floors["min_held_out"]
         if candidates_per_signature is None:
             candidates_per_signature = st["candidates_per_signature"]
         if semantic_mining is None:
@@ -196,7 +198,7 @@ def run_self_harness_pass(
         if canary is None:
             canary = st.get("promote_as_canary", False)
         if metamorphic_tolerance is None:
-            metamorphic_tolerance = st.get("metamorphic_tolerance", 0.0)
+            metamorphic_tolerance = floors["metamorphic_tolerance"]
         if not model_id:
             from .llm import model_for_role
             model_id = model_for_role("orchestrator")
@@ -208,10 +210,10 @@ def run_self_harness_pass(
             score_with=score_with, score_without=score_without,
             propose_fn=propose_fn, controller=controller, min_support=min_support,
             require_held_out=require_held_out, min_delta=min_delta,
-            min_held_out=min_held_out, confidence_z=st["confidence_z"],
-            max_cost_factor=st["max_cost_factor"],
-            max_latency_factor=st["max_latency_factor"],
-            max_tool_calls_factor=st["max_tool_calls_factor"],
+            min_held_out=min_held_out, confidence_z=floors["confidence_z"],
+            max_cost_factor=floors["max_cost_factor"],
+            max_latency_factor=floors["max_latency_factor"],
+            max_tool_calls_factor=floors["max_tool_calls_factor"],
             min_support_by_class=st["min_support_by_class"],
             candidates_per_signature=candidates_per_signature,
             semantic_mining=semantic_mining, similarity_fn=similarity_fn,
@@ -223,6 +225,19 @@ def run_self_harness_pass(
         log.debug("self-harness pass failed", exc_info=True)
         from . import self_harness
         return self_harness.SelfHarnessReport(model_id=str(model_id or ""))
+
+
+def _validation_floors(st: dict) -> dict:
+    """The ``[self_harness]`` validation floors in ``validate_proposal``'s
+    vocabulary -- the ONE source both the cycle pass and the transfer path
+    consume, so a floor added here reaches every promotion gate. A floor read
+    from settings anywhere else is a drift bug."""
+    return dict(
+        min_delta=st["min_delta"], min_held_out=st["min_held_out"],
+        confidence_z=st["confidence_z"], max_cost_factor=st["max_cost_factor"],
+        max_latency_factor=st["max_latency_factor"],
+        max_tool_calls_factor=st["max_tool_calls_factor"],
+        metamorphic_tolerance=st.get("metamorphic_tolerance", 0.0))
 
 
 def _auto_evaluator(model_id: str, *, corpus_path: str, held_out_frac: float = 0.3,
@@ -251,7 +266,10 @@ def _auto_evaluator(model_id: str, *, corpus_path: str, held_out_frac: float = 0
             judge_fn=ev.llm_judge(LLM(model_for_role("verifier")), budget=budget,
                                   samples=judge_samples),
             judge_unknown=judge_unknown)
-        return held_in, held_out, score_with, score_without
+        # The baseline arm ignores the candidate line: memoize it (averaged,
+        # clean-only) so best-of-N, rotation folds, efficacy review, and the
+        # transfer sweep all stop re-buying the same measurement.
+        return held_in, held_out, score_with, _memo_scorer(score_without)
     except Exception:  # pragma: no cover -- a missing provider/corpus stays dry
         log.debug("self-harness auto-evaluator construction failed", exc_info=True)
         return None
@@ -310,7 +328,7 @@ def _context_evaluator(model_id: str, *, corpus_path: str, budget=None,
                     sw, swo = ev.corpus_ab_scorers(
                         ev.corpus_cases(corpus, d), run_fn=run_fn,
                         judge_fn=judge_fn, judge_unknown=judge_unknown)
-                    cache[d] = (held_in, held_out, sw, swo)
+                    cache[d] = (held_in, held_out, sw, _memo_scorer(swo))
             return cache[d]
 
         return _for_context
@@ -468,26 +486,63 @@ def run_self_harness_cycle(
         return self_harness.SelfHarnessReport(model_id=str(model_id or "")), 0
 
 
-def _memo_scorer(fn):
+def _score_of(val) -> object:
+    return val.get("success") if isinstance(val, Mapping) else val
+
+
+def _finite_score(val) -> bool:
+    s = _score_of(val)
+    return isinstance(s, (int, float)) and math.isfinite(s)
+
+
+def _avg_scores(a, b):
+    """Mean of two scorer results (bare rates or mappings); numeric fields
+    present in both are averaged, anything else keeps ``a``'s value."""
+    if isinstance(a, Mapping) and isinstance(b, Mapping):
+        out = dict(a)
+        for k in ("success", "cost", "latency", "tool_calls"):
+            av, bv = a.get(k), b.get(k)
+            if isinstance(av, (int, float)) and isinstance(bv, (int, float)):
+                out[k] = (av + bv) / 2
+        return out
+    if isinstance(a, (int, float)) and isinstance(b, (int, float)):
+        return (a + b) / 2
+    return a
+
+
+def _memo_scorer(fn, *, draws: int = 2):
     """Cache a scorer on its goals tuple. The BASELINE arm ignores the
     candidate line, yet ``validate_proposal`` re-scores it per candidate --
-    with L transferable lines that is (L-1)x redundant LLM generations per
-    target, the dominant cost of a transfer sweep. An INDETERMINATE result
-    (NaN arm: budget-dead pot, broken scorer) is returned but never cached --
-    the sweep shares one context across all sources, so caching it would
-    poison every later candidate against this target. (A memoized baseline is
-    one frozen draw of a stochastic measurement; acceptable because transfers
-    land as canaries and real outcomes re-adjudicate them.)"""
+    with K candidates that is (K-1)x redundant LLM generations per pool, the
+    dominant redundant cost of a cycle or transfer sweep.
+
+    Two integrity rules, because a memoized baseline is a FROZEN draw of a
+    stochastic measurement that then adjudicates every later candidate:
+    (1) never cache an arm that is non-finite (budget-dead pot, broken
+    scorer) or DIRTY (the scorer's ``last_clean`` reports a fail-open
+    degradation -- an outage 0.0 is indistinguishable from a real 0.0 after
+    the fact); (2) average ``draws`` clean draws before freezing, halving the
+    variance of the one realization every candidate is compared against
+    (the correlated-draw tradeoff the adversarial review flagged)."""
     cache: dict[tuple, object] = {}
+
+    def _clean() -> bool:
+        return bool(getattr(fn, "last_clean", True))
 
     def _scored(line, goals):
         key = tuple(goals)
         if key in cache:
             return cache[key]
-        val = fn(line, goals)
-        s = val.get("success") if isinstance(val, Mapping) else val
-        if not (isinstance(s, float) and math.isnan(s)):
-            cache[key] = val
+        first = fn(line, goals)
+        if not (_finite_score(first) and _clean()):
+            return first  # indeterminate/dirty: use once, never freeze
+        val = first
+        for _ in range(max(0, int(draws) - 1)):
+            nxt = fn(line, goals)
+            if not (_finite_score(nxt) and _clean()):
+                return first  # keep the clean draw, don't freeze a mix
+            val = _avg_scores(val, nxt)
+        cache[key] = val
         return val
 
     return _scored
@@ -529,21 +584,14 @@ def _transfer_context(st: dict, corpus_path: str):
 
     def eval_for_target(m: str):
         if m not in cache:
-            built = _auto_evaluator(m, corpus_path=corpus_path,
-                                    judge_samples=st.get("judge_samples", 1),
-                                    budget=budget, judge_unknown=judge_unknown)
-            if built is not None:
-                hi, ho, sw, swo = built
-                built = (hi, ho, sw, _memo_scorer(swo))
-            cache[m] = built
+            # _auto_evaluator already memoizes the baseline arm.
+            cache[m] = _auto_evaluator(m, corpus_path=corpus_path,
+                                       judge_samples=st.get("judge_samples", 1),
+                                       budget=budget,
+                                       judge_unknown=judge_unknown)
         return cache[m]
 
-    validate_kwargs = dict(
-        min_delta=st["min_delta"], min_held_out=st["min_held_out"],
-        confidence_z=st["confidence_z"], max_cost_factor=st["max_cost_factor"],
-        max_latency_factor=st["max_latency_factor"],
-        max_tool_calls_factor=st["max_tool_calls_factor"],
-        metamorphic_tolerance=st.get("metamorphic_tolerance", 0.0))
+    validate_kwargs = _validation_floors(st)
     if st.get("metamorphic"):
         try:
             from . import self_harness_eval as ev
@@ -678,6 +726,52 @@ def run_corpus_harvest(world, *, mode: str | None = None, key: str | None = None
             raise
         log.warning("self-harness corpus harvest failed", exc_info=True)
         return 0
+
+
+def run_corpus_quality(*, key: str | None = None, corpus_path: str | None = None,
+                       samples: int = 2, raise_errors: bool = False) -> list[dict]:
+    """Driver entry for the corpus quality probe: measure each live case's
+    baseline discriminativeness with the same model-generates /
+    verifier-judges seams and eval-budget pot the A/B uses (``key`` is the
+    corpus key and, for a model key, the generating model). Rows gain
+    ``age_days`` from the raw file's harvest ``added_at`` stamp when present
+    (hand-authored rows have none -- age unknown). Returns ``[]`` when
+    off/unconfigured. Never raises unless ``raise_errors`` -- the interactive
+    CLI sets it."""
+    try:
+        from . import self_harness
+        from . import self_harness_eval as ev
+        from .llm import LLM, model_for_role
+        st = self_harness.settings()
+        corpus_path = corpus_path or st.get("eval_corpus")
+        if not corpus_path:
+            return []
+        if key is None:
+            key = model_for_role("orchestrator")
+        cases = ev.corpus_cases(ev.load_eval_corpus(corpus_path), key)
+        if not cases:
+            return []
+        budget = _eval_budget(st)
+        rows = ev.corpus_quality(
+            cases,
+            run_fn=ev.llm_runner(LLM(str(key)), budget=budget),
+            judge_fn=ev.llm_judge(LLM(model_for_role("verifier")), budget=budget,
+                                  samples=st.get("judge_samples", 1)),
+            samples=samples)
+        added: dict[str, float] = {}
+        for r in ev._load_raw(corpus_path).get(str(key), []) or []:
+            if isinstance(r, dict) and r.get("goal") and r.get("added_at"):
+                added[str(r["goal"])] = float(r["added_at"])
+        now = time.time()
+        for row in rows:
+            ts = added.get(row["goal"])
+            row["age_days"] = round((now - ts) / 86400.0, 1) if ts else None
+        return rows
+    except Exception:  # pragma: no cover -- a quality probe never perturbs a run
+        if raise_errors:
+            raise
+        log.warning("self-harness corpus quality probe failed", exc_info=True)
+        return []
 
 
 def harness_fleet_models() -> list[str]:

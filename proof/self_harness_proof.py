@@ -275,6 +275,60 @@ def g_canary_lifecycle() -> str:
     return "probation rides; 3 wins graduate, 2 failures pull it (audited forget)"
 
 
+def g_rollback_durable() -> str:
+    """A governed removal is durable against every automatic re-entry path:
+    a forgotten line is never resurrected by a transfer sweep from a fleet
+    peer that still carries it, and a review-rejected corpus candidate is
+    never re-staged by the harvest. The one-shot memories record verdicts ON
+    THE MERITS only -- an indeterminate evaluation stays retryable, so the
+    durability never turns into a silent learning blackout."""
+    from maverick import self_harness as sh
+    from maverick import self_harness_eval as ev
+    os.environ["MAVERICK_SELF_HARNESS"] = "1"
+    os.environ["MAVERICK_SELF_IMPROVEMENT"] = "1"
+    quad = (["a", "b"], ["c", "d", "e"], lambda a, c: 0.95, lambda a, c: 0.4)
+    with tempfile.TemporaryDirectory() as d:
+        store = pathlib.Path(d) / "addenda.json"
+        # SRC learns a line through the real gate; transfer lands it on TGT.
+        sh.run_self_harness(_recs(model="SRC", classes=("timeout",)),
+                            model_id="SRC", min_support=3, controller=_ctrl(),
+                            path=store, **_ENOUGH, **_GOOD_AB)
+        lines = sh.transferable_lines("SRC", store)
+        _check(len(lines) == 1, f"expected one transferable line, got {lines}")
+        rep = sh.run_transfer("SRC", ["TGT"], eval_for_target=lambda m: quad,
+                              controller=_ctrl(), path=store)
+        _check(rep["TGT"]["promoted"] == lines, f"transfer failed: {rep}")
+        # The target's operator rolls it back; the sweep must NOT bring it back.
+        _check(sh.forget_addendum("TGT", line=lines[0], path=store),
+               "forget removed nothing")
+        rep2 = sh.run_transfer("SRC", ["TGT"], eval_for_target=lambda m: quad,
+                               controller=_ctrl(), path=store)
+        _check(rep2["TGT"]["promoted"] == []
+               and any("already tried" in s for s in rep2["TGT"]["skipped"]),
+               f"rollback resurrected by transfer: {rep2}")
+        _check(lines[0] not in sh.recall_addendum("TGT", store),
+               "forgotten line back in the target prompt")
+        # A review-rejected corpus candidate is equally one-way.
+        corpus = pathlib.Path(d) / "corpus.json"
+        corpus.write_text("{}")
+        cand = [{"goal": "export the ledger nightly", "expected": "exported"}]
+        _check(ev.stage_candidates(corpus, "M", cand) == 1, "staging failed")
+        res = ev.resolve_pending(corpus, "M", reject=[1])
+        _check(res["rejected"] == 1, f"reject failed: {res}")
+        _check(ev.stage_candidates(corpus, "M", cand) == 0,
+               "rejected candidate re-staged")
+        # Merits-only: an INDETERMINATE evaluation (dead-pot NaN arm) must not
+        # burn the pair -- a healthy later sweep still transfers it.
+        dead = (["a"], ["c", "d"], lambda a, c: float("nan"), lambda a, c: 0.4)
+        sh.run_transfer("SRC", ["T2"], eval_for_target=lambda m: dead,
+                        controller=_ctrl(), path=store)
+        rep3 = sh.run_transfer("SRC", ["T2"], eval_for_target=lambda m: quad,
+                               controller=_ctrl(), path=store)
+        _check(rep3["T2"]["promoted"] == lines,
+               f"indeterminate verdict burned the pair: {rep3}")
+    return "forget/reject beat auto re-entry; indeterminate verdicts stay retryable"
+
+
 GUARANTEES = [
     ("determinism (consistent)", g_determinism),
     ("off by default", g_off_by_default),
@@ -284,6 +338,7 @@ GUARANTEES = [
     ("concurrency safe", g_concurrency),
     ("reversible + auditable", g_reversible),
     ("canary lifecycle", g_canary_lifecycle),
+    ("rollback durability", g_rollback_durable),
 ]
 
 
