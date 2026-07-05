@@ -52,14 +52,14 @@ def test_subflow_inputs_isolate_the_child_from_parent_keys():
     # The child echoes whatever it sees under "seen"; with mapped inputs it must
     # see ONLY the mapped value, not the parent's other keys.
     sub = Flow(id="sub", name="sub", start="s",
-               nodes={"s": FlowNode(id="s", kind="agent", brief="{{who}}|{{secret_key}}", output="seen")})
+               nodes={"s": FlowNode(id="s", kind="agent", brief="{{who}}|{{private}}", output="seen")})
     f = _flow([FlowNode(id="a", kind="subflow", flow_ref="sub",
                         subflow_inputs={"who": "{{name}}"}, output="ret")])
     r = run_flow(f, agent_fn=_ag, action_fn=lambda *a: ("", None),
                  resolve_flow=lambda fid: sub if fid == "sub" else None,
-                 data={"name": "sam", "secret_key": "TOPSECRET"})
-    # the child saw the mapped "who" but NOT the parent's secret_key ({{secret_key}} stays literal)
-    assert r.data["ret"]["seen"] == "sam|{{secret_key}}"
+                 data={"name": "sam", "private": "parent-only"})
+    # the child saw the mapped "who" but NOT the parent's "private" key (stays literal)
+    assert r.data["ret"]["seen"] == "sam|{{private}}"
 
 
 def test_subflow_inputs_prevent_the_child_clobbering_parent_data():
