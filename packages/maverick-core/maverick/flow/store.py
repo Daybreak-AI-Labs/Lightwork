@@ -31,6 +31,32 @@ def _runs_dir():
     return data_dir("flows", "runs")
 
 
+def _schema_dir():
+    from ..paths import data_dir
+    return data_dir("flows", "schema")
+
+
+def load_flow_schema(flow_id: str) -> dict:
+    """The accumulated per-output-key shape hints for a flow (empty if none).
+    Field names + types only -- never values (see :mod:`.schema_infer`)."""
+    return _read_json(_schema_dir() / f"{_safe_id(flow_id)}.json") or {}
+
+
+def record_flow_schema(flow_id: str, shapes: dict) -> dict:
+    """Merge freshly-observed output shapes into the flow's accumulated hints
+    and persist them. Best-effort: a write error is swallowed (a schema hint is
+    never worth failing a run over). Returns the merged map."""
+    if not shapes:
+        return load_flow_schema(flow_id)
+    from .schema_infer import merge_shapes
+    merged = merge_shapes(load_flow_schema(flow_id), shapes)
+    try:
+        _write_json(_schema_dir() / f"{_safe_id(flow_id)}.json", merged)
+    except OSError:  # pragma: no cover -- best-effort
+        pass
+    return merged
+
+
 def _write_json(path, obj: dict) -> None:
     path.parent.mkdir(mode=0o700, parents=True, exist_ok=True)
     tmp = path.with_suffix(path.suffix + ".tmp")
@@ -137,6 +163,10 @@ def delete_flow(flow_id: str) -> bool:
     # inherit stale snapshots (best-effort -- a missing history dir is fine).
     import shutil
     shutil.rmtree(_history_dir(flow_id), ignore_errors=True)
+    try:
+        (_schema_dir() / f"{_safe_id(flow_id)}.json").unlink()
+    except OSError:
+        pass
     return True
 
 
@@ -252,4 +282,5 @@ __all__: list[str] = [
     "save_flow", "load_flow", "list_flows", "delete_flow",
     "list_versions", "load_version", "rollback_flow",
     "FlowRun", "new_run_id", "save_run", "load_run", "list_runs", "find_run_by_idem",
+    "load_flow_schema", "record_flow_schema",
 ]

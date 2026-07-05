@@ -17,6 +17,7 @@
   var runState = {};    // node_id -> {status, outcome} from the last/live run
   var runCursor = null; // node a paused run is waiting on
   var toolCatalog = {}; // tool name -> {description, params[]} for the action picker
+  var flowSchema = {};  // output key -> {type, keys[]} learned from real runs (nested pills)
   var selected = null;
   var multiSel = {};        // node id -> true when marquee-selected (group drag/delete)
   var selectedEdge = null;  // {from, port} when an edge is selected (click to select, Del to cut)
@@ -740,6 +741,17 @@
   // ---- data pills: what THIS node can reference, one click to insert ----
   function availableKeys(nodeId) {
     var keys = FDCore.upstreamOutputs(flow, nodeId);
+    // Nested keys learned from real runs: for an upstream output that produced
+    // an object/array-of-objects, offer key.field so the user needn't guess.
+    keys.slice().forEach(function (k) {
+      var shape = flowSchema[k];
+      if (shape && shape.keys && shape.keys.length) {
+        shape.keys.forEach(function (f) {
+          var nested = k + '.' + f;
+          if (keys.indexOf(nested) < 0) keys.push(nested);
+        });
+      }
+    });
     try {   // the sample-input keys are the trigger payload's shape
       var raw = document.getElementById('fd-sample').value.trim();
       if (raw) Object.keys(JSON.parse(raw)).forEach(function (k) {
@@ -977,6 +989,14 @@
       return r.json().then(fromApiFlow);
     }).catch(function () { say('Could not load flow', true); });
     loadSuggestions(id);
+    loadSchema(id);
+  }
+  function loadSchema(id) {
+    // learned output shapes -> nested data pills (order.total, etc.)
+    apiFetch('/api/v1/flows/' + encodeURIComponent(id) + '/schema')
+      .then(function (r) { return r.ok ? r.json() : { schema: {} }; })
+      .then(function (j) { flowSchema = j.schema || {}; if (selected) renderProps(); })
+      .catch(function () {});
   }
   function loadSuggestions(id) {
     // self-rewrite suggestions (harden a reliable agent / soften a flaky action)

@@ -147,7 +147,9 @@ def test_sweep_rejects_expired_approvals_but_never_paused_events(monkeypatch, tm
     aq._handle_flow_sweep(None)
     jobs = [j for j in aq.queue().list(status="pending") if j.kind == aq.FLOW_RESUME_KIND]
     assert {j.payload["run_id"] for j in jobs} == {"ap1"}
-    assert jobs[0].payload["decision"] == "rejected"     # expiry fails closed
+    # expiry sends the EXPIRED marker -> the runner routes on_expire or rejects
+    from maverick.flow.runner import EXPIRED
+    assert jobs[0].payload["decision"] == EXPIRED
 
 
 def test_retry_of_paused_event_run_is_409_not_a_duplicate(monkeypatch, tmp_path):
@@ -372,6 +374,17 @@ def test_designer_page_has_copilot_and_toolbar(monkeypatch, tmp_path):
                    'data-add="while"', 'data-add="wait_event"', 'data-add="scope"',
                    "/api/v1/flows/chat", "upstreamOutputs", "validateFlow"):
         assert needle in r.text, needle
+
+
+def test_flow_schema_endpoint_returns_learned_shapes(monkeypatch, tmp_path):
+    _isolate(monkeypatch, tmp_path)
+    from maverick.flow import store
+    store.record_flow_schema("demo", {"order": {"type": "object", "keys": ["total"]}})
+    r = _client().get("/api/v1/flows/demo/schema")
+    assert r.status_code == 200
+    assert r.json()["schema"]["order"] == {"type": "object", "keys": ["total"]}
+    # unknown flow -> empty (not an error)
+    assert _client().get("/api/v1/flows/nope/schema").json()["schema"] == {}
 
 
 def test_gallery_returns_valid_starter_flows(monkeypatch, tmp_path):

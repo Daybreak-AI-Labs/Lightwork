@@ -1073,6 +1073,18 @@ async def list_flow_runs_endpoint(request: Request, flow_id: str = "",
     return {"runs": [_run_out(r) for r in runs]}
 
 
+@router.get("/flows/{flow_id}/schema")
+async def flow_schema_endpoint(request: Request, flow_id: str) -> dict:
+    """The learned output-key shapes for a flow (from real runs): per key, its
+    value type and, for objects/arrays-of-objects, the field names -- so the
+    designer's data pills can offer nested keys like ``order.total``. Field
+    names + types only; no values are ever stored or returned."""
+    require_permission(request, "operate")
+    _require_flows()
+    from maverick.flow import store
+    return {"schema": store.load_flow_schema(flow_id)}
+
+
 def _run_out(run) -> dict:
     """A flow run for the API with secret-looking values in its ``data`` masked,
     so a token a connector put into the run never leaves over HTTP."""

@@ -173,6 +173,15 @@ def execute(flow: Flow, *, agent_runner: AgentRunner, action_runner: ActionRunne
                   else (placeholder.idem_key if placeholder else "")),
     )
     store.save_run(run)
+    # Learn the shape of this flow's output keys from a REAL run's data (never a
+    # dry run -- mock executors produce placeholder shapes), so the designer's
+    # data pills can offer nested keys. Field names + types only; best-effort.
+    if record_outcomes:
+        from .schema_infer import infer_output_shapes
+        try:
+            store.record_flow_schema(flow.id, infer_output_shapes(flow, res.data))
+        except Exception:  # pragma: no cover -- a schema hint never fails a run
+            pass
     return run
 
 
