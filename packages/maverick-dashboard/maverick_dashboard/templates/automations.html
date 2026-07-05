@@ -688,6 +688,10 @@
         a.textContent = run.flow_id + ' — ' + run.status;
         title.appendChild(a); main.appendChild(title);
         if (run.prompt) main.appendChild(el('div', 'mv-row__sub', run.prompt));
+        var bits = [];
+        if (run.origin && run.origin !== 'manual') bits.push('via ' + run.origin);
+        if (run.cost_dollars) bits.push('$' + Number(run.cost_dollars).toFixed(2));
+        if (bits.length) main.appendChild(el('div', 'mv-row__sub', bits.join(' · ')));
         li.appendChild(main);
         if (run.status === 'paused_approval') {
           li.appendChild(mkBtn('Approve', function () { resumeRun(run.run_id, 'approved'); }));

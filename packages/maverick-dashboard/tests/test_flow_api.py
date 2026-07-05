@@ -111,6 +111,17 @@ def test_runs_are_owner_scoped(monkeypatch, tmp_path):
     assert ids == {"r1"}
 
 
+def test_runs_list_carries_origin_and_cost(monkeypatch, tmp_path):
+    # The list endpoint surfaces how each run was triggered and its $ cost so the
+    # automations UI can label cron/event/retry runs at a glance (not just manual).
+    _isolate(monkeypatch, tmp_path)
+    from maverick.flow import store
+    store.save_run(store.FlowRun(run_id="r1", flow_id="demo", status="completed",
+                                 origin="cron:demo", cost_dollars=0.42))
+    row = _client().get("/api/v1/flows/runs").json()["runs"][0]
+    assert row["origin"] == "cron:demo" and row["cost_dollars"] == 0.42
+
+
 def test_resume_of_non_paused_run_is_409(monkeypatch, tmp_path):
     _isolate(monkeypatch, tmp_path)
     from maverick.flow import store
