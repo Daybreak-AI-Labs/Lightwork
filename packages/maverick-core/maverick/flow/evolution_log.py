@@ -56,10 +56,22 @@ def last_apply(flow_id: str, node_id: str) -> dict | None:
 
 
 def improvement_count() -> int:
-    """How many times flows have self-improved -- forward applies (a human or the
-    autonomous pass enacting a proposal), excluding auto-reverts. A tangible
-    "your workflows got better N times on their own" moat number."""
-    return sum(1 for r in _rows() if r.get("source") != "auto-revert")
+    """How many flow-node self-rewrites STUCK -- forward applies (a human or the
+    autonomous pass enacting a proposal) that the loop did NOT later auto-revert.
+
+    A change the loop measured, found to regress, and undid is not an improvement,
+    so it is netted out rather than counted: we tally each rewritten node whose
+    latest apply is a forward one, not a revert. An honest "your workflows got
+    better and stayed better N times" moat number -- an inflated one would erode
+    the very trust it's meant to build."""
+    latest: dict[tuple[str, str], dict] = {}
+    forward: set[tuple[str, str]] = set()
+    for r in _rows():   # append-only chronological tail: last write per node wins
+        key = (str(r.get("flow_id")), str(r.get("node_id")))
+        latest[key] = r
+        if r.get("source") != "auto-revert":
+            forward.add(key)
+    return sum(1 for key in forward if latest[key].get("source") != "auto-revert")
 
 
 __all__ = ["record_apply", "history", "last_apply", "improvement_count"]

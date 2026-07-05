@@ -153,12 +153,14 @@ def test_top_level_approval_is_fine():
 
 # ---- flow self-improvement count (moat number) -----------------------------
 
-def test_improvement_count_excludes_reverts(tmp_path, monkeypatch):
+def test_improvement_count_nets_out_reverted_rewrites(tmp_path, monkeypatch):
     monkeypatch.setenv("MAVERICK_HOME", str(tmp_path))
     monkeypatch.setenv("HOME", str(tmp_path))
     from maverick.flow import evolution_log
     assert evolution_log.improvement_count() == 0
     evolution_log.record_apply("f", "a", "action", "agent", 2, source="human")
-    evolution_log.record_apply("f", "b", "agent", "action", 2, source="auto-apply")
+    evolution_log.record_apply("f", "b", "action", "agent", 2, source="auto-apply")
+    assert evolution_log.improvement_count() == 2   # two forward rewrites, both stuck
+    # node a regressed and the loop undid it -> it no longer counts as an improvement
     evolution_log.record_apply("f", "a", "agent", "action", 3, source="auto-revert")
-    assert evolution_log.improvement_count() == 2   # two forward applies, the revert excluded
+    assert evolution_log.improvement_count() == 1   # only the change that stuck
