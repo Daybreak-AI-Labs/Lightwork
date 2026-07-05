@@ -121,6 +121,28 @@ test('serializeNode keeps switch cases, approval choices, concurrent flag', () =
   assert.deepEqual(a.choices, ['ship', 'hold']);
 });
 
+test('serializeNode keeps approval human-task fields, drops empty form rows', () => {
+  const o = FDCore.serializeNode(FDCore.normalizeNode({
+    id: 'ap', kind: 'approval', prompt: 'ok?', assignee: '@alice',
+    expires_after: 3600, on_expire: 'esc',
+    form: [{ name: 'reason', label: 'Why?' }, { name: '', label: 'blank' }] }, 0));
+  assert.equal(o.assignee, '@alice');
+  assert.equal(o.expires_after, 3600);
+  assert.equal(o.on_expire, 'esc');
+  assert.deepEqual(o.form, [{ name: 'reason', label: 'Why?' }]);   // blank row dropped
+  // an approval with no human-task extras stays lean
+  const bare = FDCore.serializeNode(FDCore.normalizeNode({ id: 'b', kind: 'approval', prompt: 'p' }, 0));
+  assert.ok(!('assignee' in bare) && !('expires_after' in bare) && !('form' in bare) && !('on_expire' in bare));
+});
+
+test('validateFlow flags a dangling on_expire route', () => {
+  const bad = {
+    id: 'f', name: 'F', start: 'a',
+    nodes: [FDCore.normalizeNode({ id: 'a', kind: 'approval', prompt: 'p', on_expire: 'ghost' }, 0)]
+  };
+  assert.ok(FDCore.validateFlow(bad).some(e => e.includes('on_expire') && e.includes('ghost')));
+});
+
 test('validateFlow flags the same structural problems the server does', () => {
   const bad = {
     id: 'f', name: 'F', start: 'zzz',

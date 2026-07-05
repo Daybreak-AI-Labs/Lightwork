@@ -392,7 +392,7 @@
   function deleteNode(id) {
     pushHistory();
     flow.nodes = flow.nodes.filter(function (n) { return n.id !== id; });
-    flow.nodes.forEach(function (n) { ['next', 'if_true', 'if_false', 'on_error'].forEach(function (k) { if (n[k] === id) n[k] = null; }); });
+    flow.nodes.forEach(function (n) { ['next', 'if_true', 'if_false', 'on_error', 'on_expire'].forEach(function (k) { if (n[k] === id) n[k] = null; }); });
     if (flow.start === id) flow.start = flow.nodes.length ? flow.nodes[0].id : '';
     selectNode(null); render();
   }
@@ -402,7 +402,7 @@
     pushHistory();
     flow.nodes = flow.nodes.filter(function (n) { return !multiSel[n.id]; });
     flow.nodes.forEach(function (n) {
-      ['next', 'if_true', 'if_false', 'on_error'].forEach(function (k) { if (multiSel[n[k]]) n[k] = null; });
+      ['next', 'if_true', 'if_false', 'on_error', 'on_expire'].forEach(function (k) { if (multiSel[n[k]]) n[k] = null; });
       (n.cases || []).forEach(function (c) { if (multiSel[c.to]) c.to = null; });
     });
     if (multiSel[flow.start]) flow.start = flow.nodes.length ? flow.nodes[0].id : '';
@@ -418,7 +418,7 @@
     var copy = normalizeNode(JSON.parse(JSON.stringify(serialized)), 0);
     copy.id = newId();
     copy.x = x; copy.y = y;
-    copy.next = null; copy.if_true = null; copy.if_false = null; copy.on_error = null;
+    copy.next = null; copy.if_true = null; copy.if_false = null; copy.on_error = null; copy.on_expire = null;
     if (copy.cases && copy.cases.length) copy.cases = copy.cases.map(function (c) { return { value: c.value, to: null }; });
     return copy;
   }
@@ -576,8 +576,7 @@
       }
     }
     if (n.kind === 'branch') {
-      var condIn = input(n.condition, function (v) { n.condition = v; render(); }, 'amount > 100');
-      props.appendChild(withPills(n.id, field('Condition', condIn), condIn, true));
+      props.appendChild(conditionField(n, 'Condition', 'amount > 100'));
       props.appendChild(hint('Drag the green (yes) and red (no) dots to the next steps.'));
     }
     if (n.kind === 'switch') {
@@ -606,8 +605,7 @@
       props.appendChild(hint('No match falls through to this node’s normal next step (the default).'));
     }
     if (n.kind === 'while') {
-      var wcond = input(n.condition, function (v) { n.condition = v; render(); }, 'done != yes');
-      props.appendChild(withPills(n.id, field('Keep looping while', wcond), wcond, true));
+      props.appendChild(conditionField(n, 'Keep looping while', 'done != yes'));
       props.appendChild(field('Max passes (0 = 100)', input(String(n.limit || ''), function (v) { n.limit = parseInt(v, 10) || 0; }, '100')));
       var wbodyN = (n.body && n.body.nodes && n.body.nodes.length) || 0;
       var wb = document.createElement('button'); wb.className = 'btn btn--ghost'; wb.type = 'button';
@@ -670,13 +668,33 @@
     }
     if (n.kind === 'approval') {
       props.appendChild(field('Prompt (what a human approves)', input(n.prompt, function (v) { n.prompt = v; render(); }, 'Send this reply?')));
+      props.appendChild(field('Assignee (who to notify, optional)',
+        input(n.assignee, function (v) { n.assignee = v; }, 'ops@team or @alice')));
       props.appendChild(field('Choices beyond approve/reject (comma-separated, optional)',
         input((n.choices || []).join(', '), function (v) {
           n.choices = v.split(',').map(function (s) { return s.trim(); }).filter(Boolean);
         }, 'ship, hold, escalate')));
-      props.appendChild(field('Expires after (seconds; 0 = waits forever, expiry = rejected)',
-        input(String(n.timeout || ''), function (v) { n.timeout = parseFloat(v) || 0; }, '0')));
-      props.appendChild(hint('A chosen verdict is recorded under the Output key, so a switch after this can route on it.'));
+      props.appendChild(field('Expires after (seconds; 0 = waits forever)',
+        input(String(n.expires_after || ''), function (v) { n.expires_after = parseFloat(v) || 0; render(); }, '0')));
+      var expOpts = [{ v: '', t: '(on expiry: reject)' }].concat(
+        flow.nodes.filter(function (m) { return m.id !== n.id; })
+          .map(function (m) { return { v: m.id, t: 'escalate to ' + (m.label || m.id) }; }));
+      props.appendChild(field('On expiry, go to', select(n.on_expire || '', expOpts, function (v) { n.on_expire = v || null; render(); })));
+      // form fields collected on sign-off (merged into flow data)
+      var fwrap = document.createElement('div'); fwrap.className = 'field';
+      var fl = document.createElement('label'); fl.textContent = 'Collect on approval (form fields, optional)'; fwrap.appendChild(fl);
+      (n.form = n.form || []).forEach(function (fld, fi) {
+        var frow = document.createElement('div'); frow.style.cssText = 'display:flex;gap:4px;margin-bottom:4px;';
+        var nm = input(fld.name || '', function (v) { fld.name = v; }, 'key'); nm.style.flex = '1';
+        var lb = input(fld.label || '', function (v) { fld.label = v; }, 'prompt shown'); lb.style.flex = '1';
+        var rm = document.createElement('button'); rm.className = 'btn btn--ghost'; rm.type = 'button'; rm.textContent = '🗑';
+        rm.addEventListener('click', function () { n.form.splice(fi, 1); renderProps(); });
+        frow.appendChild(nm); frow.appendChild(lb); frow.appendChild(rm); fwrap.appendChild(frow);
+      });
+      var addF = document.createElement('button'); addF.className = 'btn btn--ghost'; addF.type = 'button'; addF.style.width = '100%';
+      addF.textContent = '+ Add field'; addF.addEventListener('click', function () { n.form.push({ name: '', label: '' }); renderProps(); });
+      fwrap.appendChild(addF); props.appendChild(fwrap);
+      props.appendChild(hint('A chosen verdict + any form fields are recorded in flow data, so a switch after this can route on them.'));
     }
     if (n.kind === 'delay') props.appendChild(field('Seconds', input(String(n.seconds || ''), function (v) { n.seconds = parseFloat(v) || 0; render(); }, '60')));
     if (n.kind === 'subflow') {
@@ -786,6 +804,45 @@
     return fieldEl;
   }
   function jsonOr(v) { try { return v && (typeof v === 'object') ? JSON.stringify(v, null, 2) : (v || ''); } catch (e) { return ''; } }
+
+  // ---- structured condition builder (key / op / value) with a raw fallback ----
+  var COND_OPS = ['==', '!=', '>', '<', '>=', '<=', 'contains'];
+  var COND_RE = /^\s*(\S+)\s*(==|!=|>=|<=|>|<|contains)\s*(.+?)\s*$/;
+  function conditionField(n, label, placeholder) {
+    var wrap = document.createElement('div'); wrap.className = 'field';
+    var head = document.createElement('div'); head.style.cssText = 'display:flex;justify-content:space-between;align-items:baseline;';
+    var l = document.createElement('label'); l.textContent = label; head.appendChild(l);
+    var isAdvanced = n._condAdvanced || / (and|or) /.test(n.condition || '') || (!COND_RE.test(n.condition || '') && !!(n.condition || '').trim());
+    var toggle = document.createElement('button'); toggle.type = 'button'; toggle.className = 'fd__pill';
+    toggle.textContent = isAdvanced ? 'simple' : 'advanced';
+    toggle.title = 'Switch between the dropdown builder and raw text (for and/or)';
+    toggle.addEventListener('click', function () { n._condAdvanced = !isAdvanced; renderProps(); });
+    head.appendChild(toggle); wrap.appendChild(head);
+    if (isAdvanced) {
+      var ta = input(n.condition, function (v) { n.condition = v; render(); }, (placeholder || 'a > 1') + ' and b == x');
+      wrap.appendChild(ta);
+      var pills = pillsRow(n.id, ta, true); if (pills) wrap.appendChild(pills);
+      return wrap;
+    }
+    var m = COND_RE.exec(n.condition || '');
+    var cur = { key: m ? m[1] : '', op: m ? m[2] : '==', value: m ? m[3] : '' };
+    function commit() { n.condition = (cur.key + ' ' + cur.op + ' ' + cur.value).trim(); render(); }
+    var row = document.createElement('div'); row.style.cssText = 'display:flex;gap:4px;';
+    var keyIn = input(cur.key, function (v) { cur.key = v; commit(); }, 'data key');
+    keyIn.setAttribute('list', 'fd-condkeys'); keyIn.style.flex = '1';
+    var opSel = select(cur.op, COND_OPS.map(function (o) { return { v: o, t: o }; }), function (v) { cur.op = v; commit(); });
+    opSel.style.flex = '0 0 88px';
+    var valIn = input(cur.value, function (v) { cur.value = v; commit(); }, 'value');
+    valIn.style.flex = '1';
+    row.appendChild(keyIn); row.appendChild(opSel); row.appendChild(valIn);
+    wrap.appendChild(row);
+    // a datalist of the keys this node can see (upstream outputs + payload)
+    var dl = document.getElementById('fd-condkeys');
+    if (!dl) { dl = document.createElement('datalist'); dl.id = 'fd-condkeys'; document.body.appendChild(dl); }
+    dl.textContent = '';
+    availableKeys(n.id).forEach(function (k) { var o = document.createElement('option'); o.value = k; dl.appendChild(o); });
+    return wrap;
+  }
 
   // ---- serialize / api ----
   function walkFlows(f, fn) {
