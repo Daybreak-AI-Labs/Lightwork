@@ -13,6 +13,7 @@
   var crumbs = ['Main flow'];   // breadcrumb labels; length === stack.length + 1
   var proposals = {};   // node_id -> {to_kind, reason} from grounded per-node outcomes
   var impacts = {};     // node_id -> {changed, applied, impact} measured before/after a rewrite
+  var signals = { nodes: {}, trigger: null };   // grounded per-node stats + trigger reliability
   var runState = {};    // node_id -> {status, outcome} from the last/live run
   var runCursor = null; // node a paused run is waiting on
   var toolCatalog = {}; // tool name -> {description, params[]} for the action picker
@@ -524,6 +525,16 @@
         : (rs.status || '') + (rs.outcome != null ? ' (' + (rs.outcome === 1 ? 'ok' : 'failed') + ')' : '')) + ' ' + badge;
       props.appendChild(rl);
     }
+    // grounded signal for this node across ALL its runs (not just the last):
+    // an approval's human accept-rate, a work node's success rate.
+    var sig = signals.nodes[n.id];
+    if (sig && sig.n) {
+      var sl = document.createElement('p'); sl.className = 'fd__empty'; sl.style.marginTop = 'var(--space-2)';
+      var pct = Math.round(sig.mean * 100);
+      if (n.kind === 'approval') sl.textContent = '🧑‍⚖️ humans approved ' + pct + '% of ' + sig.n + ' decisions';
+      else sl.textContent = '📊 succeeds ' + pct + '% over ' + sig.n + ' runs';
+      props.appendChild(sl);
+    }
     // measured impact of a prior self-rewrite on this node (before vs. after)
     var imp = impacts[n.id];
     if (imp && imp.changed && imp.impact) {
@@ -631,6 +642,8 @@
   function fromApiFlow(f) {
     runState = {}; runCursor = null; impacts = {};
     stack = []; crumbs = ['Main flow']; renderCrumbs();
+    signals = { nodes: {}, trigger: null };
+    var sigEl = document.getElementById('fd-signal'); if (sigEl) sigEl.hidden = true;
     var lg = document.getElementById('fd-legend'); if (lg) lg.classList.remove('on');
     flow = { id: f.id || '', name: f.name || '', start: f.start || '', nodes: [], max_seconds: f.max_seconds || 0 };
     var notifyEl = document.getElementById('fd-notify'); if (notifyEl) notifyEl.checked = !!f.notify;
@@ -731,7 +744,9 @@
     var ok = 0, err = 0, ns = run.nodes || {};
     for (var k in ns) { if (ns[k].outcome === 1) ok++; else if (ns[k].outcome === 0) err++; }
     var head = run.status === 'completed' ? '✓ completed' : (run.status === 'rejected' ? '✋ rejected' : '⚠ ' + (run.error || run.status));
-    return head + ' · ' + ok + ' ok' + (err ? ', ' + err + ' failed' : '');
+    var cost = run.cost_dollars ? ' · $' + Number(run.cost_dollars).toFixed(2) : '';
+    var origin = (run.origin && run.origin !== 'manual') ? ' · via ' + run.origin : '';
+    return head + ' · ' + ok + ' ok' + (err ? ', ' + err + ' failed' : '') + cost + origin;
   }
   function draft() {
     var desc = document.getElementById('fd-nl').value.trim();
@@ -773,6 +788,21 @@
         });
         if (selected) renderProps();
       }).catch(function () {});
+    // grounded learning signals: per-node success, approval accept-rate, trigger reliability
+    apiFetch('/api/v1/flows/' + encodeURIComponent(id) + '/signals').then(function (r) {
+      return r.ok ? r.json() : { nodes: {}, trigger: null };
+    }).then(function (j) {
+      signals = { nodes: j.nodes || {}, trigger: j.trigger || null };
+      var lg = document.getElementById('fd-signal');
+      if (lg) {
+        if (signals.trigger && signals.trigger.n) {
+          lg.textContent = '📊 triggered runs succeed ' + Math.round(signals.trigger.mean * 100) +
+            '% (' + signals.trigger.n + ')';
+          lg.hidden = false;
+        } else { lg.hidden = true; }
+      }
+      if (selected) renderProps();
+    }).catch(function () {});
   }
   function applyProposal(n, prop) {
     // Persisted apply: save the current graph, then enact the swap server-side so

@@ -1232,6 +1232,32 @@ async def flow_proposals_endpoint(request: Request, flow_id: str) -> dict:
     return {"proposals": [p.to_dict() for p in evolve.maybe_propose(f)]}
 
 
+@router.get("/flows/{flow_id}/signals")
+async def flow_signals_endpoint(request: Request, flow_id: str) -> dict:
+    """The grounded learning signals a flow has accumulated, for display:
+    per-node success rate (work nodes), human accept-rate (approval nodes), and
+    trigger reliability (the reserved ``__trigger__`` outcome). This is what the
+    loop CAPTURED made visible -- "which gates humans keep rejecting", "which
+    triggers produce runs that succeed" -- so a builder can act on it."""
+    require_permission(request, "operate")
+    _require_flows()
+    from maverick.flow import execution, node_outcomes, store
+    f = store.load_flow(flow_id)
+    if f is None:
+        raise HTTPException(status_code=404, detail="no such flow")
+    stats = node_outcomes.stats(flow_id)
+    trigger = stats.get(execution.TRIGGER_NODE)
+    nodes = {}
+    for nid, s in stats.items():
+        if nid == execution.TRIGGER_NODE:
+            continue
+        node = f.nodes.get(nid)
+        nodes[nid] = {"n": s["n"], "mean": s["mean"], "kind": s.get("kind"),
+                      "label": (node.label if node else "") or nid}
+    return {"nodes": nodes,
+            "trigger": ({"n": trigger["n"], "mean": trigger["mean"]} if trigger else None)}
+
+
 @router.post("/flows/{flow_id}/apply")
 async def apply_flow_proposal_endpoint(request: Request, flow_id: str,
                                        payload: FlowApplyIn) -> dict:

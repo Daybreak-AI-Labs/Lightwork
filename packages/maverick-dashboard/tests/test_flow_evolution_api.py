@@ -143,6 +143,30 @@ def test_impact_reports_before_after_once_applied(monkeypatch, tmp_path):
     assert imp["before"]["n"] + imp["after"]["n"] == 3       # all outcomes accounted for
 
 
+def test_signals_surfaces_approval_and_trigger_stats(monkeypatch, tmp_path):
+    _isolate(monkeypatch, tmp_path)
+    c = _client()
+    c.post("/api/v1/flows", json={"flow": {
+        "id": "s", "name": "S", "start": "g",
+        "nodes": [{"id": "g", "kind": "approval", "prompt": "ok?", "label": "gate"}]}})
+    from maverick.flow import execution, node_outcomes
+    node_outcomes.record("s", "g", "approval", 1.0)          # approved
+    node_outcomes.record("s", "g", "approval", 0.0)          # rejected
+    node_outcomes.record("s", execution.TRIGGER_NODE, "trigger", 1.0)
+    node_outcomes.record("s", execution.TRIGGER_NODE, "trigger", 1.0)
+    body = c.get("/api/v1/flows/s/signals").json()
+    assert body["nodes"]["g"]["mean"] == 0.5 and body["nodes"]["g"]["kind"] == "approval"
+    assert body["nodes"]["g"]["label"] == "gate"
+    assert body["trigger"]["n"] == 2 and body["trigger"]["mean"] == 1.0
+    # the reserved trigger node is not listed among the flow's own nodes
+    assert execution.TRIGGER_NODE not in body["nodes"]
+
+
+def test_signals_unknown_flow_is_404(monkeypatch, tmp_path):
+    _isolate(monkeypatch, tmp_path)
+    assert _client().get("/api/v1/flows/ghost/signals").status_code == 404
+
+
 def test_impact_unchanged_node(monkeypatch, tmp_path):
     _isolate(monkeypatch, tmp_path)
     c = _client()
