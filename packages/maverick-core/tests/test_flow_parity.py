@@ -46,6 +46,48 @@ def test_subflow_output_captures_added_keys():
     assert r.data["ret"] == {"sub_result": "x"}
 
 
+# ---- subflow argument passing / isolation -----------------------------------
+
+def test_subflow_inputs_isolate_the_child_from_parent_keys():
+    # The child echoes whatever it sees under "seen"; with mapped inputs it must
+    # see ONLY the mapped value, not the parent's other keys.
+    sub = Flow(id="sub", name="sub", start="s",
+               nodes={"s": FlowNode(id="s", kind="agent", brief="{{who}}|{{secret_key}}", output="seen")})
+    f = _flow([FlowNode(id="a", kind="subflow", flow_ref="sub",
+                        subflow_inputs={"who": "{{name}}"}, output="ret")])
+    r = run_flow(f, agent_fn=_ag, action_fn=lambda *a: ("", None),
+                 resolve_flow=lambda fid: sub if fid == "sub" else None,
+                 data={"name": "sam", "secret_key": "TOPSECRET"})
+    # the child saw the mapped "who" but NOT the parent's secret_key ({{secret_key}} stays literal)
+    assert r.data["ret"]["seen"] == "sam|{{secret_key}}"
+
+
+def test_subflow_inputs_prevent_the_child_clobbering_parent_data():
+    # The child writes a key named the same as a parent key; in isolated mode that
+    # write stays in the child, so the parent's value is preserved.
+    sub = Flow(id="sub", name="sub", start="s",
+               nodes={"s": FlowNode(id="s", kind="setvar", assignments={"status": "child-set"})})
+    f = _flow([FlowNode(id="a", kind="subflow", flow_ref="sub",
+                        subflow_inputs={"in": "{{x}}"}, output="ret", next="b"),
+               FlowNode(id="b", kind="agent", brief="{{status}}", output="r")])
+    r = run_flow(f, agent_fn=_ag, action_fn=lambda *a: ("", None),
+                 resolve_flow=lambda fid: sub if fid == "sub" else None,
+                 data={"x": 1, "status": "parent-set"})
+    assert r.data["status"] == "parent-set"          # parent key untouched by the child
+    assert r.data["ret"] == {"status": "child-set"}  # child's write returned via output
+
+
+def test_subflow_without_inputs_keeps_shared_data_behaviour():
+    # No subflow_inputs -> the child still reads parent data and its outputs flow back.
+    sub = Flow(id="sub", name="sub", start="s",
+               nodes={"s": FlowNode(id="s", kind="agent", brief="{{name}}", output="greeting")})
+    f = _flow([FlowNode(id="a", kind="subflow", flow_ref="sub", next="b"),
+               FlowNode(id="b", kind="agent", brief="{{greeting}}", output="r")])
+    r = run_flow(f, agent_fn=_ag, action_fn=lambda *a: ("", None),
+                 resolve_flow=lambda fid: sub if fid == "sub" else None, data={"name": "sam"})
+    assert r.data["r"] == "sam"                       # child read parent + result flowed back
+
+
 # ---- foreach runaway guard --------------------------------------------------
 
 def test_foreach_without_limit_caps_and_surfaces_truncation(monkeypatch):

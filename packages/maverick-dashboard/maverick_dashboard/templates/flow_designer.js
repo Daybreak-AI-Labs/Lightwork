@@ -685,7 +685,25 @@
     if (n.kind === 'delay') props.appendChild(field('Seconds', input(String(n.seconds || ''), function (v) { n.seconds = parseFloat(v) || 0; render(); }, '60')));
     if (n.kind === 'subflow') {
       props.appendChild(field('Flow to run (saved flow id)', input(n.flow_ref, function (v) { n.flow_ref = v; render(); }, 'onboard-customer')));
-      props.appendChild(hint('Runs another saved flow here, sharing this flow’s data. Cyclic references are blocked.'));
+      var si = document.createElement('div'); si.className = 'field';
+      var sil = document.createElement('label'); sil.textContent = 'Inputs to pass (child key ← value/{{…}})'; si.appendChild(sil);
+      n.subflow_inputs = n.subflow_inputs || {};
+      Object.keys(n.subflow_inputs).forEach(function (k) {
+        var rowi = document.createElement('div'); rowi.style.display = 'flex'; rowi.style.gap = '4px'; rowi.style.marginBottom = '4px';
+        var keyIn = input(k, null, 'child key'); keyIn.style.flex = '1';
+        keyIn.addEventListener('change', function () { var nv = keyIn.value.trim(); if (nv && nv !== k) { n.subflow_inputs[nv] = n.subflow_inputs[k]; delete n.subflow_inputs[k]; renderProps(); } });
+        var valIn = input(n.subflow_inputs[k], function (v) { n.subflow_inputs[k] = v; }, '{{order_id}}'); valIn.style.flex = '2';
+        var rm = document.createElement('button'); rm.className = 'btn btn--ghost'; rm.type = 'button'; rm.textContent = '🗑';
+        rm.addEventListener('click', function () { delete n.subflow_inputs[k]; renderProps(); render(); });
+        rowi.appendChild(keyIn); rowi.appendChild(valIn); rowi.appendChild(rm); si.appendChild(rowi);
+      });
+      var addi = document.createElement('button'); addi.className = 'btn btn--ghost'; addi.type = 'button'; addi.style.width = '100%';
+      addi.textContent = '+ Add input';
+      addi.addEventListener('click', function () { var key = 'in' + (Object.keys(n.subflow_inputs).length + 1); n.subflow_inputs[key] = ''; renderProps(); render(); });
+      si.appendChild(addi); props.appendChild(si);
+      props.appendChild(hint(Object.keys(n.subflow_inputs).length
+        ? 'Isolated: the child sees ONLY these inputs (can’t read or clobber this flow’s other data); its result returns under the Output key.'
+        : 'No inputs mapped → the child shares this flow’s data (reads it, and its outputs flow back). Add inputs to isolate it. Cyclic references are blocked.'));
     }
     if (n.kind === 'setvar') {
       var sv = document.createElement('div'); sv.className = 'field';

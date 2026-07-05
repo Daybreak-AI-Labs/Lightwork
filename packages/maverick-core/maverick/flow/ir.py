@@ -87,6 +87,9 @@ class FlowNode:
     seconds: float = 0.0
     # subflow -----------------------------------------------------------------
     flow_ref: str = ""               # a saved flow id to run as a nested step
+    subflow_inputs: dict[str, Any] = field(default_factory=dict)   # {child_key: expr};
+                                     # when set, the child runs ISOLATED on only these
+                                     # (no shared parent data); outputs return via `output`
     # error handling ----------------------------------------------------------
     retries: int = 0                 # re-run a failed work node up to N more times
     retry_backoff: float = 0.0       # base seconds between retries; exponential (0 = tight loop)
@@ -126,6 +129,8 @@ class FlowNode:
             d["choices"] = self.choices
         if self.assignments:
             d["assignments"] = self.assignments
+        if self.subflow_inputs:
+            d["subflow_inputs"] = self.subflow_inputs
         if self.x or self.y:
             d["x"], d["y"] = self.x, self.y
         if self.body is not None:
@@ -149,6 +154,7 @@ class FlowNode:
             cases=[dict(c) for c in (d.get("cases") or []) if isinstance(c, dict)],
             choices=[str(c) for c in (d.get("choices") or [])],
             assignments=dict(d.get("assignments") or {}),
+            subflow_inputs=dict(d.get("subflow_inputs") or {}),
             body=Flow.from_dict(body) if body else None,
             branches=[Flow.from_dict(b) for b in (d.get("branches") or [])],
             prompt=str(d.get("prompt", "")), seconds=float(d.get("seconds", 0.0)),

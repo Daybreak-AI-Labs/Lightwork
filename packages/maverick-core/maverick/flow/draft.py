@@ -37,7 +37,7 @@ Each node is one of these kinds (include only the fields for its kind):
 - {"id","kind":"delay","seconds":<number>,"next":"<id|null>"}
 - {"id","kind":"wait_event","prompt":"<what the run is waiting for>","next":"<id|null>"}
 - {"id","kind":"scope","body":{<a nested flow>},"on_error":"<id of the catch step>","next":"<id|null>"}
-- {"id","kind":"subflow","flow_ref":"<a saved flow id to run here>","next":"<id|null>"}
+- {"id","kind":"subflow","flow_ref":"<a saved flow id to run here>","subflow_inputs":{"<child key>":"<value or {{expr}}>"},"output":"<key>","next":"<id|null>"}
 - {"id","kind":"switch","cases":[{"condition":"<key op value>","goto":"<id>"},...],"next":"<default id|null>"}
 - {"id","kind":"setvar","assignments":{"<key>":"<value or {{expr}}>",...},"next":"<id|null>"}
 - {"id","kind":"try","body":{<a nested flow>},"on_error":"<id to run if the body fails>","next":"<id|null>"}
@@ -47,7 +47,7 @@ A "foreach" node may set "concurrency":<n> to run up to n iterations at once.
 
 Rules:
 - Prefer an "agent" node when a step needs judgment/writing; an "action" node when it maps to a known tool.
-- Use a "subflow" node to reuse an existing saved flow instead of rebuilding its steps.
+- Use a "subflow" node to reuse an existing saved flow instead of rebuilding its steps. Give it "subflow_inputs" to run the child ISOLATED on only those values (it can't read or clobber this flow's other data) and set "output" to capture what it returns; omit them to share this flow's data.
 - Use "switch" for multi-way routing (more than two paths); "setvar" to compute or update data (e.g. a loop counter {{add(count,1)}}); "try" to wrap steps that might fail and recover via its on_error.
 - Never put an "approval" or "delay" node inside a foreach/parallel/try body -- they only work at the top level.
 - For a step that can fail (an external call), set "retries" (optionally "retry_backoff" seconds for exponential wait) and/or an "on_error" handler node.
