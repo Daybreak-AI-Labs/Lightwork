@@ -11,7 +11,7 @@
   var rootFlow = flow;  // the top-level flow (save/run/history operate on this)
   var stack = [];       // drill-in frames: {flow, selected} for each level above root
   var crumbs = ['Main flow'];   // breadcrumb labels; length === stack.length + 1
-  var proposals = {};   // node_id -> {to_kind, reason} from grounded per-node outcomes
+  var proposals = {};   // node_id -> {to_kind, reason, inferred_tool} from grounded per-node outcomes
   var impacts = {};     // node_id -> {changed, applied, impact} measured before/after a rewrite
   var signals = { nodes: {}, trigger: null };   // grounded per-node stats + trigger reliability
   var runState = {};    // node_id -> {status, outcome} from the last/live run
@@ -554,7 +554,8 @@
       pl.textContent = '💡 ' + prop.reason;
       // Persisted apply: saves a new version + logs the change so its impact is measured.
       var pb = document.createElement('button'); pb.className = 'btn btn--primary'; pb.type = 'button';
-      pb.textContent = 'Apply & track (→ ' + prop.to_kind + ')';
+      pb.textContent = 'Apply & track (→ ' + prop.to_kind
+        + (prop.inferred_tool ? ' · ' + prop.inferred_tool : '') + ')';
       pb.addEventListener('click', function () { applyProposal(n, prop); });
       pbox.appendChild(pl); pbox.appendChild(pb); props.appendChild(pbox);
     }
@@ -806,12 +807,14 @@
   }
   function applyProposal(n, prop) {
     // Persisted apply: save the current graph, then enact the swap server-side so
-    // it becomes a new version and its before/after impact is measured.
-    if (prop.to_kind === 'action' && !n.tool) {
+    // it becomes a new version and its before/after impact is measured. Hardening
+    // needs a tool: the node's own, else the one the loop inferred it keeps calling.
+    var tool = n.tool || (prop.inferred_tool || '');
+    if (prop.to_kind === 'action' && !tool) {
       say('Give this step a Tool first, then Apply (an action needs one).', true); return;
     }
     save(function () {
-      var body = { node_id: n.id, to_kind: prop.to_kind, tool: n.tool || '', brief: n.brief || n.label || '' };
+      var body = { node_id: n.id, to_kind: prop.to_kind, tool: tool, brief: n.brief || n.label || '' };
       apiFetch('/api/v1/flows/' + encodeURIComponent(rootFlow.id) + '/apply', { method: 'POST', body: JSON.stringify(body) })
         .then(function (r) { return r.json().then(function (j) { return { ok: r.ok, j: j }; }); })
         .then(function (res) {
