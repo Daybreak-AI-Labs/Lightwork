@@ -73,32 +73,15 @@ def create_rollback_point(tree: Path, *, store: Path | None = None,
 
 
 def _host_git_apply(patch: str, tree: Path) -> tuple[bool, str]:
-    """Apply a unified diff to the live ``tree`` via ``sandbox.exec`` (rule 4),
-    ``--check`` first. This is the deployment of an already-approved patch, so it
-    runs on the host tree by design. Returns ``(ok, message)``."""
-    tree = Path(tree)
-    patch_file = tree / ".maverick-apply.diff"
-    try:
-        patch_file.write_text(patch, encoding="utf-8")
-    except OSError as e:  # pragma: no cover
-        return False, f"could not stage patch: {e}"
+    """Apply a unified diff to the live ``tree`` via ``sandbox.exec`` (rule 4).
+    This is the deployment of an already-approved patch, so it runs on the host
+    tree BY DESIGN (a ``LocalBackend``) — distinct from the isolated, untrusted
+    candidate *evaluation*, which pins a container. Delegates the staging /
+    ``--check`` / ``-p1`` / cleanup to the one shared :func:`run_git_apply`
+    mechanic so it can't drift from the eval path. Returns ``(ok, message)``."""
     from .sandbox.local import LocalBackend
-    sb = LocalBackend(workdir=tree)
-    try:
-        chk = sb.exec(f"git apply --check -p1 {patch_file.name}")
-        if not getattr(chk, "ok", False):
-            return False, f"patch does not apply: {chk.stderr.strip()[:200]}"
-        res = sb.exec(f"git apply -p1 {patch_file.name}")
-        if not getattr(res, "ok", False):
-            return False, f"git apply failed: {res.stderr.strip()[:200]}"
-        return True, "applied"
-    except Exception as e:  # pragma: no cover
-        return False, f"apply error: {e}"
-    finally:
-        try:
-            patch_file.unlink()
-        except OSError:
-            pass
+    from .self_modify_eval import run_git_apply
+    return run_git_apply(patch, Path(tree), LocalBackend(workdir=Path(tree)))
 
 
 def apply_change(

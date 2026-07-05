@@ -172,48 +172,54 @@ def _default_materialize(src: Path, dest: Path) -> None:
 
 # --- seam 2: apply the patch --------------------------------------------------
 
-def git_apply(patch: str, workdir: Path, *, sandbox=None) -> ApplyResult:
-    """Apply a unified diff to ``workdir`` with ``git apply``, routed through the
-    sandbox (kernel rule 4: shell only via ``sandbox.exec``). Runs ``--check``
-    first so a patch that would not apply cleanly is refused WITHOUT writing
-    anything; only on a clean check is the real apply run. Returns an
-    :class:`ApplyResult` — never raises."""
+def run_git_apply(patch: str, workdir: Path, sb, *,
+                  patch_name: str = ".maverick-apply.diff") -> tuple[bool, str]:
+    """Stage ``patch`` and apply it to ``workdir`` via an ALREADY-RESOLVED backend
+    ``sb`` (kernel rule 4: shell only via ``sandbox.exec``): ``git apply --check``
+    first so a non-applying patch writes nothing, then the real ``git apply -p1``.
+    Returns ``(ok, message)``; never raises. This is the one shared apply
+    mechanic — both the isolated eval (:func:`git_apply`) and the live-tree
+    deploy (:func:`maverick.self_modify_apply.apply_change`) call it, so the
+    staging/``-p1``/cleanup can't drift between them; the only difference is which
+    backend the caller resolves."""
     workdir = Path(workdir)
     if not (patch or "").strip():
-        return ApplyResult(False, "empty patch")
+        return False, "empty patch"
+    patch_file = workdir / patch_name
     try:
-        patch_file = workdir / ".maverick-eval-patch.diff"
         patch_file.write_text(patch, encoding="utf-8")
     except OSError as e:  # pragma: no cover -- temp write failure
-        return ApplyResult(False, f"could not stage patch: {e}")
-
+        return False, f"could not stage patch: {e}"
     try:
-        sb = resolve_eval_sandbox(sandbox, workdir)
-    except EvalSandboxError as e:
-        try:
-            patch_file.unlink()
-        except OSError:
-            pass
-        return ApplyResult(False, str(e))
-    # -p1 strips the a//b/ prefix; --check validates without touching the tree.
-    rel = patch_file.name
-    try:
-        chk = sb.exec(f"git apply --check -p1 {rel}")
+        chk = sb.exec(f"git apply --check -p1 {patch_file.name}")
         if not getattr(chk, "ok", False):
-            return ApplyResult(False,
-                               f"patch does not apply: {chk.stderr.strip()[:200]}")
-        res = sb.exec(f"git apply -p1 {rel}")
+            return False, f"patch does not apply: {chk.stderr.strip()[:200]}"
+        res = sb.exec(f"git apply -p1 {patch_file.name}")
         if not getattr(res, "ok", False):
-            return ApplyResult(False,
-                               f"git apply failed: {res.stderr.strip()[:200]}")
-        return ApplyResult(True, "applied")
+            return False, f"git apply failed: {res.stderr.strip()[:200]}"
+        return True, "applied"
     except Exception as e:  # pragma: no cover -- sandbox exec failure
-        return ApplyResult(False, f"apply error: {e}")
+        return False, f"apply error: {e}"
     finally:
         try:
             patch_file.unlink()
         except OSError:
             pass
+
+
+def git_apply(patch: str, workdir: Path, *, sandbox=None) -> ApplyResult:
+    """Apply a unified diff to an isolated ``workdir`` under the eval isolation
+    policy: resolve a sandbox (refusing host exec under require-container), then
+    run the shared :func:`run_git_apply`. Never raises."""
+    workdir = Path(workdir)
+    if not (patch or "").strip():
+        return ApplyResult(False, "empty patch")
+    try:
+        sb = resolve_eval_sandbox(sandbox, workdir)
+    except EvalSandboxError as e:
+        return ApplyResult(False, str(e))
+    ok, msg = run_git_apply(patch, workdir, sb, patch_name=".maverick-eval-patch.diff")
+    return ApplyResult(ok, msg)
 
 
 # --- seam 3: score (deterministic offline default) ---------------------------
@@ -361,5 +367,5 @@ def evaluate_patch(
 __all__ = [
     "Score", "ApplyResult", "EvalResult", "EvalSandboxError",
     "container_required", "resolve_eval_sandbox",
-    "git_apply", "pytest_score", "evaluate_patch",
+    "run_git_apply", "git_apply", "pytest_score", "evaluate_patch",
 ]

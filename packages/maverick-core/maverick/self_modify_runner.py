@@ -118,19 +118,34 @@ def _default_evaluate(*, tree: Path, sandbox=None, budget=None, cfg: dict):
     configured, else the whole-suite pass rate. Each call runs on a fresh
     throwaway copy under a temp workroot (cleaned up), inside the enforced
     isolation policy. Returns an object exposing ``ok`` / ``baseline_score`` /
-    ``candidate_score`` / ``samples`` — what the loop reads."""
+    ``candidate_score`` / ``samples`` — what the loop reads.
+
+    Isolation is **per copy**: when the caller injects no explicit ``sandbox`` the
+    corpus path builds a backend rooted at each copy via ``build_sandbox`` (so a
+    docker/gvisor deployment runs the baseline and candidate arms in their OWN
+    trees, and require-container policy is enforced per copy), instead of sharing
+    one fixed-root backend across both."""
     eval_tests = tuple(str(t).strip() for t in (cfg.get("eval_tests") or [])
                        if str(t).strip())
+
+    def _per_copy_factory(copy_dir):
+        # A fresh, config-driven, policy-enforced backend rooted at this copy.
+        from .sandbox import build_sandbox
+        return build_sandbox(workdir=copy_dir)
 
     def _evaluate(patch: str, *_):
         work = Path(tempfile.mkdtemp(prefix="maverick-selfmod-", dir=_work_root()))
         try:
             if eval_tests:
                 from .self_modify_corpus import CodeEvalCorpus, evaluate_on_corpus
+                # No explicit sandbox -> resolve one PER COPY (correct per-arm
+                # isolation, container-capable); an explicit sandbox is the
+                # caller's (fixed-root) choice.
+                factory = None if sandbox is not None else _per_copy_factory
                 return evaluate_on_corpus(
                     patch, src=tree, workroot=work,
                     corpus=CodeEvalCorpus(test_ids=eval_tests),
-                    sandbox=sandbox, budget=budget)
+                    sandbox=sandbox, sandbox_factory=factory, budget=budget)
             from .self_modify_eval import evaluate_patch, pytest_score
             return evaluate_patch(
                 patch, src=tree, workroot=work,
@@ -175,6 +190,7 @@ def run(
     evaluate: Callable[[str, object], object] | None = None,
     controller: object | None = None,
     approve: Callable | None = None,
+    apply: bool = False,
     budget=None,
     persist: bool = True,
 ) -> RunSummary:
@@ -187,7 +203,13 @@ def run(
     and isolated-copy evaluator; inject them (e.g. in tests, or to pin a model)
     to override. Promotion at the code rung still needs a human signature via
     ``approve``; without it the loop proposes/evaluates/archives but never
-    self-promotes code."""
+    self-promotes code.
+
+    ``apply`` (default False) opts into landing a PROMOTED change on the live
+    ``tree`` with a real snapshot rollback point (Gap 3, wired). It is off by
+    default so an autonomous search never snapshots or writes; turn it on only
+    with a human ``approve`` wired, since a code-rung promotion (the only thing
+    ``apply`` acts on) is impossible without a signature."""
     from . import self_improvement as si
     if not (sm.enabled() and si.enabled()):
         return RunSummary(False, reason="self-modification disabled "
@@ -213,7 +235,7 @@ def run(
         reports = run_loop(
             archive=archive, proposer=prop, evaluate=ev, policy=policy,
             cycles=cycles, rung="code", controller=ctrl, ledger=ledger,
-            approve=approve)
+            approve=approve, tree=(tree if apply else None))
         if persist:
             archive.save(archive_path())
         return RunSummary(True, reports=reports)

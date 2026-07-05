@@ -325,3 +325,46 @@ class TestLedgerBoundWidening:
         ledger.add(self._rec("p2", "config"))
         tier, _ = earned_surface(CodeArchive(), _tiers(), ledger=ledger)
         assert tier.name == "t0"     # no CODE promotions -> narrowest tier
+
+
+# --- Gap 3 wired: real snapshot rollback + apply-on-promote in the loop ------
+
+class TestWiredApply:
+    def _tree(self, root):
+        t = root / "tree"
+        t.mkdir()
+        (t / "f.py").write_text("VALUE = 1\n", encoding="utf-8")
+        return t
+
+    def _apply_patch(self):
+        return ("diff --git a/f.py b/f.py\n--- a/f.py\n+++ b/f.py\n"
+                "@@ -1 +1 @@\n-VALUE = 1\n+VALUE = 2\n")
+
+    def test_promotion_snapshots_and_applies_to_the_tree(self, _on, tmp_path):
+        tree = self._tree(tmp_path)
+        store = tmp_path / "snaps"
+        store.mkdir()
+        a = CodeArchive()
+        a.add(CodeCandidate(summary="seed", patch="+a", score=1.0, promoted=True))
+        policy = WideningPolicy(tiers=(SurfaceTier("wide", ("f.py",), 0),))
+        rep = run_cycle(
+            archive=a, proposer=lambda p, s: Proposal(self._apply_patch(), "bump"),
+            evaluate=lambda p, s: FakeEval(), policy=policy,
+            rung="prompt", controller=_controller(), tree=tree, store=store)
+        assert rep.promoted is True, rep.reason
+        assert rep.applied is True
+        assert rep.rollback_id and rep.rollback_id.startswith("snap-")
+        assert (tree / "f.py").read_text() == "VALUE = 2\n"   # landed on the tree
+
+    def test_no_tree_is_search_only_no_write(self, _on, tmp_path):
+        tree = self._tree(tmp_path)
+        a = CodeArchive()
+        a.add(CodeCandidate(summary="seed", patch="+a", score=1.0, promoted=True))
+        policy = WideningPolicy(tiers=(SurfaceTier("wide", ("f.py",), 0),))
+        rep = run_cycle(
+            archive=a, proposer=lambda p, s: Proposal(self._apply_patch(), "bump"),
+            evaluate=lambda p, s: FakeEval(), policy=policy,
+            rung="prompt", controller=_controller())   # no tree
+        assert rep.promoted is True
+        assert rep.applied is False and rep.rollback_id is None
+        assert (tree / "f.py").read_text() == "VALUE = 1\n"   # untouched

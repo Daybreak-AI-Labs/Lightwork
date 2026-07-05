@@ -475,6 +475,17 @@ fail-closed, live/sandbox parts as offline-testable seams):
 clean; all custom gates green. Gap 8 (real-container/real-model end-to-end +
 adversarial-containment tests) is mapped for next.
 
+**Follow-up (post-review wiring).** Three residual items from the review were
+closed: (1) `apply_change` is now WIRED into the loop — with a `tree`, `run_cycle`
+snapshots it before the gate (a real rollback handle, not the candidate-id token)
+and lands a promoted change on the live tree, opt-in via `runner.run(apply=True)`
+and dormant on an autonomous search since the code rung needs a signature; (2)
+one shared `run_git_apply` primitive backs both the isolated eval and the
+live-tree deploy, so the staging/`-p1`/cleanup can't drift; (3) the runner's
+corpus eval resolves a backend PER COPY via `build_sandbox`, so a docker/gvisor
+deployment runs the baseline and candidate arms in their own trees under enforced
+policy instead of sharing one fixed-root sandbox.
+
 ## Bet 5 — Consequence-Proven Autonomy → "Earned Autonomy" (the breakthrough)
 
 **Thesis.** The biggest blocker to enterprise agents isn't quality, it's **trust
