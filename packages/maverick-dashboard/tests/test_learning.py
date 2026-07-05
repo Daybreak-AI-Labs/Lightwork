@@ -137,6 +137,28 @@ def test_flow_autonomy_toggle_enables_the_loop(tmp_path, monkeypatch):
     assert snap["flow_autonomy"] == {"engine_on": True, "auto_evolve": True, "auto_apply": True}
 
 
+def test_learning_page_renders_flow_autonomy_toggles_when_engine_on(tmp_path, monkeypatch):
+    monkeypatch.setenv("MAVERICK_FLOWS", "1")
+    from maverick.config import reset_config_cache
+    _isolate(tmp_path, monkeypatch)
+    reset_config_cache()
+    t = client.get("/learning").text
+    assert 'id="lrn-auto-evolve"' in t and 'id="lrn-auto-apply"' in t
+    assert "Autonomous workflow self-improvement" in t
+
+
+def test_learning_page_hides_flow_autonomy_when_engine_off(tmp_path, monkeypatch):
+    monkeypatch.delenv("MAVERICK_FLOWS", raising=False)
+    from maverick.config import reset_config_cache
+    _isolate(tmp_path, monkeypatch)
+    reset_config_cache()
+    t = client.get("/learning").text
+    # engine off -> the section still renders (admin) but points at [flows] enable,
+    # not the live toggles.
+    assert "Turn the flow engine on first" in t
+    assert 'id="lrn-auto-evolve"' not in t
+
+
 def test_learning_page_has_enable_button(tmp_path, monkeypatch):
     _isolate(tmp_path, monkeypatch)
     t = client.get("/learning").text
