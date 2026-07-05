@@ -69,6 +69,22 @@ def test_build_runs_hard_sections_and_is_honest(monkeypatch, tmp_path):
     assert not [g for g in guarantees if not g["passed"]]
 
 
+def test_perf_sla_section_retries_a_transient_breach(monkeypatch):
+    # A noisy-neighbor p95 breach on the first attempt must not fail the pack
+    # when the immediate re-probe passes; a genuine regression (breaching both
+    # attempts) still fails. Thresholds stay untouched.
+    from maverick import perf_sla
+    bad = perf_sla.SLAResult("world_read_p95_ms", 26.7, 25.0)
+    good = perf_sla.SLAResult("world_read_p95_ms", 0.5, 25.0)
+    monkeypatch.setattr(perf_sla, "run_all", lambda: [bad])
+    monkeypatch.setattr(perf_sla, "CHECKS", (lambda: good,))
+    ev = proof_pack.collect_perf_sla()
+    assert ev.status == "PASS"
+    assert ev.data["results"][0]["measured"] == 0.5   # the re-probe is reported
+    monkeypatch.setattr(perf_sla, "CHECKS", (lambda: bad,))
+    assert proof_pack.collect_perf_sla().status == "FAIL"
+
+
 def test_learning_curve_reports_real_compounding():
     now = time.time()  # recent, so workforce_value's 90-day window counts them
     goal = SimpleNamespace(id=1, title="reconcile vendor statements", domain="finance")
