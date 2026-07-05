@@ -314,6 +314,87 @@ def _notify_flow(flow, run) -> None:
         log.debug("flow notify failed", exc_info=True)
 
 
+_ACTIVE_RUN_STATUSES = ("running", "paused_approval", "paused_delay")
+_SINGLETON_DEFER_SECONDS = 30.0   # how long to wait before re-checking a busy singleton
+_SINGLETON_MAX_DEFERS = 40        # ~20 min of deferral before giving up (avoid infinite requeue)
+
+
+@contextlib.contextmanager
+def _flow_slot_guard(flow_id: str):
+    """Non-blocking per-flow lock around the max_concurrent check+claim, so two
+    workers pulling two runs of the SAME flow at once can't both count 0 in-flight
+    and both start. Yields True when held (this worker decides), False when another
+    worker holds it (defer and let it decide). Mirrors _poll_guard's flock."""
+    try:
+        import fcntl
+    except Exception:  # pragma: no cover -- non-POSIX: no cross-process guard
+        yield True
+        return
+    from maverick.flow.store import _safe_id
+    p = config.dashboard_overrides_path().parent / f"flow-slot-{_safe_id(flow_id)}.lock"
+    fd = None
+    try:
+        p.parent.mkdir(parents=True, exist_ok=True)
+        fd = os.open(str(p), os.O_CREAT | os.O_RDWR, 0o600)
+        try:
+            fcntl.flock(fd, fcntl.LOCK_EX | fcntl.LOCK_NB)
+        except BlockingIOError:
+            yield False
+            return
+        yield True
+    finally:
+        if fd is not None:
+            try:
+                fcntl.flock(fd, fcntl.LOCK_UN)
+            except Exception:  # pragma: no cover
+                pass
+            os.close(fd)
+
+
+def _active_run_count(flow_id: str, exclude_run_id: str) -> int:
+    """In-flight runs of a flow (running / paused), excluding this run. Queued runs
+    don't count -- they're exactly what the slot guard gates -- else two queued
+    events would each see the other and defer forever."""
+    from maverick.flow import store
+    return sum(1 for r in store.list_runs(flow_id=flow_id, limit=200)
+               if r.run_id != exclude_run_id and r.status in _ACTIVE_RUN_STATUSES)
+
+
+def _defer_for_slot(payload: dict) -> bool:
+    """Re-enqueue a flow_run job later because the flow is at its concurrency cap.
+    Bounded so a permanently-stuck run (e.g. a run paused on approval forever)
+    can't requeue endlessly -- past the cap the run is left queued and skipped.
+    Returns True if it deferred, False if the defer budget is exhausted."""
+    defers = int(payload.get("_slot_defers") or 0)
+    if defers >= _SINGLETON_MAX_DEFERS:
+        return False
+    nxt = dict(payload)
+    nxt["_slot_defers"] = defers + 1
+    queue().enqueue(FLOW_RUN_KIND, nxt, run_at=time.time() + _SINGLETON_DEFER_SECONDS)
+    return True
+
+
+def _claim_run_slot(run_id: str) -> None:
+    """Flip a queued run to 'running' (preserving its inputs) while the slot lock is
+    held, so a concurrent sibling's _active_run_count sees it and defers. execute()
+    re-writes 'running' from the same placeholder, so this is just an early claim."""
+    from maverick.flow import store
+    run = store.load_run(run_id)
+    if run is not None and run.status == "queued":
+        run.status = "running"
+        store.save_run(run)
+
+
+def _skip_run_at_cap(run_id: str) -> None:
+    """Mark a run that never got a concurrency slot as skipped (not failed) -- it
+    never executed, so it's not a failure to learn from, just a dropped attempt."""
+    from maverick.flow import store
+    run = store.load_run(run_id)
+    if run is not None and run.status == "queued":
+        run.status = "skipped_concurrency"
+        store.save_run(run)
+
+
 def _handle_flow_run(job=None) -> None:
     """Run a stored flow to its next pause/finish (durable one-shot job). An
     agent node becomes a real goal, an action node a tool call; the run state is
@@ -330,6 +411,29 @@ def _handle_flow_run(job=None) -> None:
             return
         owner = str(payload.get("owner") or "")
         dry_run = bool(payload.get("dry_run"))
+        run_id = str(payload.get("run_id") or "")
+        # Per-flow concurrency cap: a singleton/limited flow (e.g. "drain the queue"
+        # / "sync record X") must not run overlapping instances -- that double-fires
+        # side effects and races the shared world. Under a per-flow lock, count
+        # in-flight runs; if at the cap, mark this run "running" only when a slot is
+        # free (so a concurrent sibling sees it), else defer the job a bit and let
+        # the running one finish. A dry run and a resume are never gated.
+        if flow.max_concurrent and not dry_run and run_id and not payload.get("_resume"):
+            with _flow_slot_guard(flow_id) as held:
+                if held:
+                    if _active_run_count(flow_id, run_id) >= flow.max_concurrent:
+                        if _defer_for_slot(payload):
+                            return
+                        log.warning("flow_run: %s at concurrency cap, defer budget spent"
+                                    " -- skipping run %s", flow_id, run_id)
+                        _skip_run_at_cap(run_id)
+                        return
+                    _claim_run_slot(run_id)   # flip queued -> running while holding the lock
+                elif not _defer_for_slot(payload):   # another worker is deciding; retry later
+                    _skip_run_at_cap(run_id)
+                    return
+                else:
+                    return
         # A dry run exercises the graph with mock executors and records no grounded
         # outcome -- so "Test" can't hit production or skew the learning signal.
         agent_runner, action_runner = (execution.sandbox_runners() if dry_run

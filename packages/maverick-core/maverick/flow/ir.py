@@ -172,6 +172,7 @@ class Flow:
     max_dollars: float = 0.0         # aggregate agent spend ceiling for one run (0 = no limit)
     schedule: str = ""               # a cron expression to run this flow on (empty = not scheduled)
     owner: str = ""                  # principal that owns this flow (for RBAC + attributing scheduled runs)
+    max_concurrent: int = 0          # cap simultaneous in-flight runs of this flow (0 = unlimited)
 
     def node(self, node_id: str | None) -> FlowNode | None:
         return self.nodes.get(node_id) if node_id else None
@@ -186,6 +187,7 @@ class Flow:
             "version": self.version, "notify": self.notify,
             "max_seconds": self.max_seconds, "max_dollars": self.max_dollars,
             "schedule": self.schedule, "owner": self.owner,
+            "max_concurrent": self.max_concurrent,
             "nodes": [n.to_dict() for n in self.nodes.values()],
         }
 
@@ -201,6 +203,7 @@ class Flow:
             max_seconds=float(d.get("max_seconds", 0.0) or 0.0),
             max_dollars=float(d.get("max_dollars", 0.0) or 0.0),
             schedule=str(d.get("schedule", "")), owner=str(d.get("owner", "")),
+            max_concurrent=int(d.get("max_concurrent", 0) or 0),
         )
 
     def validate(self) -> list[str]:

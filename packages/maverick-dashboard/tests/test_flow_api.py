@@ -100,6 +100,78 @@ def test_run_drains_through_queue_and_pauses_on_approval(monkeypatch, tmp_path):
     assert done["status"] == "completed"
 
 
+class _Job:
+    def __init__(self, payload):
+        self.payload = payload
+
+
+def _singleton_flow(mc=1):
+    from maverick.flow import store
+    from maverick.flow.ir import Flow, FlowNode
+    store.save_flow(Flow(id="s", name="S", start="a", max_concurrent=mc,
+                         nodes={"a": FlowNode(id="a", kind="agent", brief="go")}))
+
+
+def test_singleton_defers_a_run_while_another_is_in_flight(monkeypatch, tmp_path):
+    _isolate(monkeypatch, tmp_path)
+    from maverick.flow import store
+    from maverick_dashboard import automation_queue as aq
+    _reset_aq(monkeypatch, aq)
+    _singleton_flow(mc=1)
+    store.save_run(store.FlowRun(run_id="r_active", flow_id="s", status="running"))
+    store.save_run(store.FlowRun(run_id="r_new", flow_id="s", status="queued"))
+    aq._handle_flow_run(_Job({"flow_id": "s", "run_id": "r_new"}))
+    # the slot is taken -> the new run is NOT executed, it's left queued (deferred)
+    assert store.load_run("r_new").status == "queued"
+
+
+def test_singleton_runs_when_the_slot_is_free(monkeypatch, tmp_path):
+    _isolate(monkeypatch, tmp_path)
+    from maverick.flow import execution, store
+    from maverick_dashboard import automation_queue as aq
+    _reset_aq(monkeypatch, aq)
+    monkeypatch.setattr(execution, "default_agent_runner",
+                        lambda world, **k: (lambda brief, d, **kw: ("ok", 1.0)))
+    monkeypatch.setattr(execution, "default_action_runner",
+                        lambda world, sandbox=None: (lambda t, p, d: ("", None)))
+    _singleton_flow(mc=1)
+    store.save_run(store.FlowRun(run_id="r_new", flow_id="s", status="queued"))
+    aq._handle_flow_run(_Job({"flow_id": "s", "run_id": "r_new"}))
+    assert store.load_run("r_new").status == "completed"   # no sibling -> claimed + ran
+
+
+def test_singleton_skips_once_the_defer_budget_is_spent(monkeypatch, tmp_path):
+    _isolate(monkeypatch, tmp_path)
+    from maverick.flow import store
+    from maverick_dashboard import automation_queue as aq
+    _reset_aq(monkeypatch, aq)
+    _singleton_flow(mc=1)
+    store.save_run(store.FlowRun(run_id="r_active", flow_id="s", status="paused_approval"))
+    store.save_run(store.FlowRun(run_id="r_new", flow_id="s", status="queued"))
+    # a run that has already been deferred to the limit is dropped, not re-queued forever
+    aq._handle_flow_run(_Job({"flow_id": "s", "run_id": "r_new",
+                              "_slot_defers": aq._SINGLETON_MAX_DEFERS}))
+    assert store.load_run("r_new").status == "skipped_concurrency"
+
+
+def test_unlimited_flow_ignores_the_slot_guard(monkeypatch, tmp_path):
+    _isolate(monkeypatch, tmp_path)
+    from maverick.flow import execution, store
+    from maverick.flow.ir import Flow, FlowNode
+    from maverick_dashboard import automation_queue as aq
+    _reset_aq(monkeypatch, aq)
+    monkeypatch.setattr(execution, "default_agent_runner",
+                        lambda world, **k: (lambda brief, d, **kw: ("ok", 1.0)))
+    monkeypatch.setattr(execution, "default_action_runner",
+                        lambda world, sandbox=None: (lambda t, p, d: ("", None)))
+    store.save_flow(Flow(id="u", name="U", start="a", max_concurrent=0,
+                         nodes={"a": FlowNode(id="a", kind="agent", brief="go")}))
+    store.save_run(store.FlowRun(run_id="ua", flow_id="u", status="running"))   # sibling
+    store.save_run(store.FlowRun(run_id="ub", flow_id="u", status="queued"))
+    aq._handle_flow_run(_Job({"flow_id": "u", "run_id": "ub"}))
+    assert store.load_run("ub").status == "completed"   # 0 = unlimited -> runs anyway
+
+
 def test_runs_are_owner_scoped(monkeypatch, tmp_path):
     _isolate(monkeypatch, tmp_path)
     from maverick.flow import store

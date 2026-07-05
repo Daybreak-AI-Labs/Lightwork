@@ -517,8 +517,11 @@ here.
   list ops, and `and`/`or` conditions), a whole-flow wall-clock deadline
   (`Flow.max_seconds`), a per-run **aggregate agent-spend ceiling**
   (`Flow.max_dollars`, enforced in `execution.py` so a wide parallel / long
-  foreach can't fan out unbounded cost), per-node retries/timeout/on-error
-  routing, and **real intra-flow parallel concurrency** (branches run on a bounded
+  foreach can't fan out unbounded cost), a per-flow **concurrency cap**
+  (`Flow.max_concurrent`, a lock-guarded slot claim at dispatch that defers an
+  overlapping run so a singleton "drain/sync" flow never double-fires its side
+  effects), per-node retries with exponential **backoff** (`retry_backoff`, and
+  a raising executor is retried too) / timeout / on-error routing, and **real intra-flow parallel concurrency** (branches run on a bounded
   thread pool with per-branch cycle detection). The live driver (`execution.py`)
   persists a resumable run (`store.py`) with per-node trace, dry-run sandbox
   executors, and secret redaction (`redact.py`). A **self-rewrite loop**
