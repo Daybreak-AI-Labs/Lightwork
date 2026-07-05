@@ -58,6 +58,32 @@
   .fd__crumbs.on { display: block; }
   .fd__crumb { background: none; border: none; color: var(--accent); cursor: pointer; padding: 0; font: inherit; }
   .fd__crumb--cur { color: var(--text); cursor: default; font-weight: var(--font-semibold); }
+  /* clickable edges: an invisible fat hit path + a selected state */
+  .fd-edge-hit { fill: none; stroke: transparent; stroke-width: 14; cursor: pointer; pointer-events: stroke; }
+  .fd-edge.selected { stroke: var(--accent); stroke-width: 3; }
+  /* data pills: one-click {{key}} insertion from upstream outputs */
+  .fd__pills { display: flex; flex-wrap: wrap; gap: 4px; margin: -4px 0 var(--space-2); }
+  .fd__pill { font-size: 11px; font-family: var(--font-mono, monospace); padding: 1px 8px;
+              border: 1px solid var(--border); border-radius: 999px; background: var(--surface-sunken);
+              cursor: pointer; color: var(--muted); }
+  .fd__pill:hover { border-color: var(--accent); color: var(--text); }
+  /* copilot chat drawer (over the canvas' right edge) */
+  .fd__chat { display: none; position: absolute; top: 8px; right: 8px; bottom: 8px; width: 320px;
+              z-index: 3; background: var(--surface); border: 1px solid var(--border);
+              border-radius: var(--radius-lg); flex-direction: column; box-shadow: var(--shadow-lg, 0 8px 24px rgba(0,0,0,.12)); }
+  .fd__chat.on { display: flex; }
+  .fd__chat-head { display: flex; align-items: center; justify-content: space-between;
+                   padding: var(--space-2) var(--space-3); border-bottom: 1px solid var(--border);
+                   font-weight: var(--font-semibold); font-size: var(--text-sm); }
+  .fd__chat-log { flex: 1; overflow-y: auto; padding: var(--space-3); display: flex;
+                  flex-direction: column; gap: var(--space-2); }
+  .fd__chat-msg { max-width: 92%; padding: 6px 10px; border-radius: 10px; font-size: var(--text-sm);
+                  white-space: pre-wrap; word-break: break-word; }
+  .fd__chat-msg.user { align-self: flex-end; background: var(--accent); color: #fff; }
+  .fd__chat-msg.assistant { align-self: flex-start; background: var(--surface-sunken); border: 1px solid var(--border); }
+  .fd__chat-msg.note { align-self: flex-start; color: var(--muted); font-style: italic; padding: 0 2px; }
+  .fd__chat-form { display: flex; gap: var(--space-2); padding: var(--space-2); border-top: 1px solid var(--border); }
+  .fd__chat-form input { flex: 1; }
 </style>
 
 <div class="fd">
@@ -79,6 +105,10 @@
     <button class="btn btn--ghost" type="button" id="fd-run" title="Mock run: no real goals or connector calls">▷ Test (dry)</button>
     <button class="btn btn--ghost" type="button" id="fd-run-real" title="Runs real agents and connectors">Run for real</button>
     <button class="btn btn--ghost" type="button" id="fd-history">⏱ History</button>
+    <button class="btn btn--ghost" type="button" id="fd-undo" title="Undo (Ctrl+Z)">↶</button>
+    <button class="btn btn--ghost" type="button" id="fd-redo" title="Redo (Ctrl+Shift+Z)">↷</button>
+    <button class="btn btn--ghost" type="button" id="fd-fit" title="Zoom to fit">⛶</button>
+    <button class="btn btn--ghost" type="button" id="fd-chat-toggle" title="Build and fix this flow by chatting">💬 Copilot</button>
     <span class="fd__msg" id="fd-msg" aria-live="polite"></span>
     <span class="fd__legend" id="fd-legend" aria-hidden="true">
       <span>🟢 ok</span><span>🔴 failed</span><span>🟠 branch/step</span><span>⏳ waiting</span>
@@ -101,6 +131,19 @@
 
   <div class="fd__canvas-wrap">
     <div id="fd-crumbs" class="fd__crumbs" aria-label="Flow location"></div>
+    <div id="fd-chat" class="fd__chat" aria-label="Flow copilot">
+      <div class="fd__chat-head">
+        <span>💬 Flow copilot</span>
+        <button class="btn btn--ghost" type="button" id="fd-chat-close" aria-label="Close copilot">✕</button>
+      </div>
+      <div id="fd-chat-log" class="fd__chat-log" aria-live="polite">
+        <div class="fd__chat-msg assistant">Tell me what to build or change — “add an approval before the Slack post”, “why did the last run fail?”, “fix it”.</div>
+      </div>
+      <form id="fd-chat-form" class="fd__chat-form">
+        <input class="input" id="fd-chat-input" placeholder="Ask or instruct…" aria-label="Message the flow copilot" autocomplete="off" />
+        <button class="btn btn--primary" type="submit">Send</button>
+      </form>
+    </div>
     <svg id="fd-canvas" role="application" aria-label="Flow canvas" data-flow-id="{{ flow_id or '' }}">
       <defs>
         <marker id="fd-arrow" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse">

@@ -76,3 +76,42 @@ test('serializeNode works on a raw (never-normalized) nested dict', () => {
   const o = FDCore.serializeNode(raw);
   assert.equal(o.body.nodes[0].brief, 'b');
 });
+
+test('cloneFlow is a deep, independent snapshot', () => {
+  const flow = { id: 'f', name: 'F', start: 'a',
+    nodes: [FDCore.normalizeNode({ id: 'a', kind: 'agent', brief: 'one' }, 0)] };
+  const snap = FDCore.cloneFlow(flow);
+  flow.nodes[0].brief = 'changed';
+  assert.equal(snap.nodes[0].brief, 'one');
+});
+
+test('upstreamOutputs returns only keys from nodes that reach the target', () => {
+  const flow = { id: 'f', name: 'F', start: 'a', nodes: [
+    FDCore.normalizeNode({ id: 'a', kind: 'agent', brief: 'x', output: 'summary', next: 'b' }, 0),
+    FDCore.normalizeNode({ id: 'b', kind: 'branch', condition: 'x == 1', if_true: 'c', if_false: 'd' }, 1),
+    FDCore.normalizeNode({ id: 'c', kind: 'action', tool: 't', output: 'sent' }, 2),
+    FDCore.normalizeNode({ id: 'd', kind: 'agent', brief: 'y', output: 'other' }, 3),
+  ] };
+  // c sees a's output (a -> b -> c) but not d's (a sibling branch arm)
+  assert.deepEqual(FDCore.upstreamOutputs(flow, 'c'), ['summary']);
+  // a has nothing upstream; its own output is not offered to itself
+  assert.deepEqual(FDCore.upstreamOutputs(flow, 'a'), []);
+});
+
+test('upstreamOutputs follows on_error routing and survives cycles', () => {
+  const flow = { id: 'f', name: 'F', start: 'a', nodes: [
+    FDCore.normalizeNode({ id: 'a', kind: 'action', tool: 't', output: 'r', on_error: 'h', next: 'a' }, 0),
+    FDCore.normalizeNode({ id: 'h', kind: 'agent', brief: 'recover' }, 1),
+  ] };
+  assert.deepEqual(FDCore.upstreamOutputs(flow, 'h'), ['r']);
+});
+
+test('fitView centers and clamps zoom', () => {
+  const v = FDCore.fitView([{ x: 0, y: 0 }, { x: 1000, y: 800 }], 600, 400, 176, 64, 40);
+  assert.ok(v.k >= 0.35 && v.k <= 1);
+  // fitting a tiny flow never zooms IN past 1:1
+  const v2 = FDCore.fitView([{ x: 10, y: 10 }], 800, 600, 176, 64, 40);
+  assert.equal(v2.k, 1);
+  // empty flow -> default view
+  assert.deepEqual(FDCore.fitView([], 800, 600, 176, 64, 40), { x: 40, y: 20, k: 1 });
+});

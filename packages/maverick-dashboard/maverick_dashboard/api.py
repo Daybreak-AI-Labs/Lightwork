@@ -53,6 +53,7 @@ from .api_schemas import (
     FleetCreateIn,
     FleetRunIn,
     FlowApplyIn,
+    FlowChatIn,
     FlowDraftIn,
     FlowResumeIn,
     FlowRollbackIn,
@@ -1001,6 +1002,39 @@ async def draft_flow_endpoint(request: Request, payload: FlowDraftIn) -> dict:
     return {"flow": flow.to_dict(), "notes": notes}
 
 
+@router.post("/flows/chat")
+async def flow_chat_endpoint(request: Request, payload: FlowChatIn) -> dict:
+    """One turn of the designer's flow copilot: answer a question about the
+    current canvas, or edit it via validated patches (never a whole-graph
+    regeneration on a populated canvas). ``run_id`` grounds "why did this
+    fail?" / "fix it" turns in that run's real per-node trace. The patched
+    graph is returned to the canvas; nothing is saved until the user saves."""
+    require_permission(request, "operate")
+    _require_flows()
+    from maverick_dashboard._shared import require_provider_or_400
+    require_provider_or_400()
+    from maverick.flow import Flow
+    from maverick.flow.chat import chat_flow
+    try:
+        current = Flow.from_dict(payload.flow) if payload.flow else None
+    except Exception as e:
+        raise HTTPException(status_code=400, detail=f"invalid flow: {e}") from e
+    run = _run_out(_load_owned_run(request, payload.run_id)) if payload.run_id else None
+
+    def _turn():
+        catalog = _flow_tool_catalog()
+        tool_docs = {t["name"]: t["description"] for t in catalog if t["description"]}
+        return chat_flow(payload.message, flow=current, history=payload.history,
+                         run=run, tools=_FLOW_DRAFT_TOOLS, tool_docs=tool_docs)
+    res = await run_in_threadpool(_turn)
+    return {
+        "reply": res.reply,
+        "flow": res.flow.to_dict() if res.flow is not None else None,
+        "applied": res.applied,
+        "notes": res.notes,
+    }
+
+
 @router.get("/flows/runs")
 async def list_flow_runs_endpoint(request: Request, flow_id: str = "",
                                   limit: int = 50) -> dict:
@@ -1064,11 +1098,17 @@ async def resume_flow_run_endpoint(request: Request, run_id: str,
 
 
 @router.post("/flows/runs/{run_id}/retry")
-async def retry_flow_run_endpoint(request: Request, run_id: str) -> dict:
+async def retry_flow_run_endpoint(request: Request, run_id: str,
+                                  from_failure: bool = False) -> dict:
     """Re-run a finished/failed run from scratch with its ORIGINAL trigger inputs
     (a fresh run, so any partial side effects aren't re-driven mid-flow). This is
     the recovery path a dead-lettered run needs -- the run's input_data was kept
-    for exactly this."""
+    for exactly this.
+
+    ``?from_failure=1`` instead RESUMES a FAILED run in place, re-entering AT the
+    node that failed with the data as of the failure -- the pre-failure nodes'
+    side effects are not re-driven. Requires the run to be failed with a
+    recorded failure cursor (409 otherwise)."""
     require_permission(request, "operate")
     _require_flows()
     run = _load_owned_run(request, run_id)
@@ -1079,6 +1119,16 @@ async def retry_flow_run_endpoint(request: Request, run_id: str) -> dict:
     if store.load_flow(run.flow_id) is None:
         raise HTTPException(status_code=404, detail="flow no longer exists")
     from maverick_dashboard import automation_queue as aq
+    if from_failure:
+        if run.status != "failed" or not run.cursor:
+            raise HTTPException(
+                status_code=409,
+                detail="only a failed run with a recorded failure node can be "
+                       "resumed from its failure; use a plain retry instead")
+        aq.queue().enqueue(aq.FLOW_RESUME_KIND, {
+            "flow_id": run.flow_id, "run_id": run_id, "owner": run.owner,
+            "from_failure": True})
+        return {"run_id": run_id, "status": "resuming", "from_node": run.cursor}
     new_id = aq.enqueue_flow_run(run.flow_id, dict(run.input_data or {}), run.owner)
     return {"run_id": new_id, "status": "queued", "retried_from": run_id}
 
@@ -2520,39 +2570,53 @@ async def list_triggers_endpoint(request: Request) -> dict:
 async def create_trigger(request: Request, payload: TriggerIn) -> TriggerOut:
     require_permission(request, "operate")
     _require_triggers()
-    # Validate now: the template must exist and render with the given defaults,
-    # so a trigger can't be armed against a missing/incompatible template.
-    from maverick.templates import load_template
-    try:
-        load_template(payload.template).render(**(payload.params or {}))
-    except ValueError as e:
-        raise HTTPException(status_code=400, detail=str(e)) from e
-    except FileNotFoundError as e:
-        # Reflect the caller's template name, not the raw error (it carries the
-        # absolute on-disk path). Original stays chained for server logs.
+    if bool(payload.template) == bool(payload.flow):
         raise HTTPException(
-            status_code=404, detail=f"template not found: {payload.template!r}"
-        ) from e
+            status_code=400, detail="set exactly one of 'template' or 'flow'")
+    if payload.flow:
+        # A flow target: the flow engine must be on and the flow must exist, so
+        # a trigger can't be armed against a missing graph.
+        _require_flows()
+        from maverick.flow import store as flow_store
+        if flow_store.load_flow(payload.flow) is None:
+            raise HTTPException(
+                status_code=404, detail=f"flow not found: {payload.flow!r}")
+    else:
+        # Validate now: the template must exist and render with the given
+        # defaults, so a trigger can't be armed against a missing/incompatible
+        # template.
+        from maverick.templates import load_template
+        try:
+            load_template(payload.template).render(**(payload.params or {}))
+        except ValueError as e:
+            raise HTTPException(status_code=400, detail=str(e)) from e
+        except FileNotFoundError as e:
+            # Reflect the caller's template name, not the raw error (it carries
+            # the absolute on-disk path). Original stays chained for server logs.
+            raise HTTPException(
+                status_code=404, detail=f"template not found: {payload.template!r}"
+            ) from e
     from maverick_dashboard import triggers_store
     # Owner-scope the write like list/delete: a non-admin must not overwrite
     # (hijack) a trigger registered by another tenant just by reusing its slug.
     # set_trigger keys by slugify(name), so check the same slug for a foreign
     # owner before replacing it.
+    default_name = payload.name or payload.template or payload.flow
     owner_filter = goal_owner_filter(request)
     if owner_filter is not None:
-        existing = triggers_store.get_trigger(
-            triggers_store.slugify(payload.name or payload.template))
+        existing = triggers_store.get_trigger(triggers_store.slugify(default_name))
         if existing is not None and existing.get("owner", "") != owner_filter:
             raise HTTPException(
                 status_code=409, detail="a trigger with that name already exists")
     try:
         rec = triggers_store.set_trigger(
-            payload.name or payload.template, payload.template, payload.params or {},
-            owner=caller_principal(request) or "")
+            default_name, payload.template, payload.params or {},
+            owner=caller_principal(request) or "", flow=payload.flow)
     except ValueError as e:
         raise HTTPException(status_code=400, detail=str(e)) from e
     return TriggerOut(
-        name=rec["name"], template=rec["template"], params=rec["params"],
+        name=rec["name"], template=rec["template"], flow=rec.get("flow") or "",
+        params=rec["params"],
         webhook_url=_WEBHOOK_RUN_PATH, secret_configured=_inbound_secret_set(),
     )
 

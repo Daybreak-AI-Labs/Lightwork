@@ -682,23 +682,33 @@
       runs.forEach(function (run) {
         var li = el('li', 'mv-row');
         var main = el('div', 'mv-row__main');
-        main.appendChild(el('div', 'mv-row__title', run.flow_id + ' — ' + run.status));
+        var title = el('div', 'mv-row__title');
+        var a = document.createElement('a');
+        a.href = '/flows/' + encodeURIComponent(run.flow_id) + '/runs/' + encodeURIComponent(run.run_id);
+        a.textContent = run.flow_id + ' — ' + run.status;
+        title.appendChild(a); main.appendChild(title);
         if (run.prompt) main.appendChild(el('div', 'mv-row__sub', run.prompt));
         li.appendChild(main);
         if (run.status === 'paused_approval') {
           li.appendChild(mkBtn('Approve', function () { resumeRun(run.run_id, 'approved'); }));
           li.appendChild(mkBtn('Reject', function () { resumeRun(run.run_id, 'rejected'); }));
         }
+        if (run.status === 'failed' && run.cursor) {
+          li.appendChild(mkBtn('Retry from failed step', function () { retryRun(run.run_id, true); }));
+        }
         if (['failed', 'completed', 'rejected'].indexOf(run.status) >= 0) {
-          li.appendChild(mkBtn('Retry', function () { retryRun(run.run_id); }));
+          li.appendChild(mkBtn('Retry', function () { retryRun(run.run_id, false); }));
         }
         flowRuns.appendChild(li);
       });
     }
-    async function retryRun(runId) {
+    async function retryRun(runId, fromFailure) {
       try {
-        var r = await fetch('/api/v1/flows/runs/' + encodeURIComponent(runId) + '/retry', { method: 'POST' });
-        flowsMsg.textContent = r.ok ? 'Retrying with the original inputs…' : 'Could not retry.';
+        var r = await fetch('/api/v1/flows/runs/' + encodeURIComponent(runId) + '/retry'
+          + (fromFailure ? '?from_failure=1' : ''), { method: 'POST' });
+        flowsMsg.textContent = r.ok
+          ? (fromFailure ? 'Resuming from the failed step…' : 'Retrying with the original inputs…')
+          : 'Could not retry.';
         setTimeout(loadFlowRuns, 500);
       } catch (e) { flowsMsg.textContent = 'Could not retry.'; }
     }

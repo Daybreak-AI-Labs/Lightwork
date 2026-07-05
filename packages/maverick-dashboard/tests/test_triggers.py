@@ -106,6 +106,82 @@ def test_create_trigger_validates_template(monkeypatch, tmp_path):
                   json={"template": "nope", "params": {}}).status_code == 404
 
 
+def _save_flow(monkeypatch):
+    monkeypatch.setenv("MAVERICK_FLOWS", "1")
+    from maverick.flow import store
+    from maverick.flow.ir import Flow, FlowNode
+    store.save_flow(Flow(id="triage", name="Triage", start="a", nodes={
+        "a": FlowNode(id="a", kind="agent", brief="triage {{issue}}", output="r")}))
+
+
+def test_create_flow_trigger_and_exclusivity(monkeypatch, tmp_path):
+    _isolate(monkeypatch, tmp_path)
+    _save_flow(monkeypatch)
+    c = _client()
+    r = c.post("/api/v1/triggers", json={"flow": "triage"})
+    assert r.status_code == 201, r.text
+    body = r.json()
+    assert body["name"] == "triage" and body["flow"] == "triage" and body["template"] == ""
+    # exactly one of template/flow
+    assert c.post("/api/v1/triggers", json={
+        "template": "weekly-report", "flow": "triage"}).status_code == 400
+    assert c.post("/api/v1/triggers", json={}).status_code == 400
+    # an unknown flow is a 404
+    assert c.post("/api/v1/triggers", json={"flow": "nope"}).status_code == 404
+
+
+def test_flow_trigger_requires_flow_engine(monkeypatch, tmp_path):
+    _isolate(monkeypatch, tmp_path)
+    monkeypatch.delenv("MAVERICK_FLOWS", raising=False)
+    monkeypatch.setattr("maverick.config.get_flows", lambda: {"enable": False})
+    assert _client().post("/api/v1/triggers",
+                          json={"flow": "triage"}).status_code == 403
+
+
+def test_webhook_fires_flow_trigger_with_idempotent_delivery(monkeypatch, tmp_path):
+    _isolate(monkeypatch, tmp_path)
+    _configured(monkeypatch)
+    _save_flow(monkeypatch)
+    from maverick.flow import store
+    from maverick_dashboard import automation_queue as aq
+    monkeypatch.setattr(aq, "_queue", None)
+    c = _client()
+    _register(c, template="", flow="triage", params=None)
+    body = json.dumps({"trigger": "triage", "data": {"issue": "bug #7"},
+                       "id": "evt-1"}).encode()
+    r = c.post("/webhook/run", content=body,
+               headers={**_sign_headers(body), "Content-Type": "application/json"})
+    assert r.status_code == 201, r.text
+    out = r.json()
+    assert out["flow"] == "triage" and out["trigger"] == "triage"
+    run = store.load_run(out["run_id"])
+    assert run.status == "queued" and run.input_data == {"issue": "bug #7"}
+    assert run.idem_key == "webhook:triage:evt-1"
+    # a queued flow_run job was armed for the worker
+    jobs = [j for j in aq.queue().list(status="pending") if j.kind == aq.FLOW_RUN_KIND]
+    assert len(jobs) == 1 and jobs[0].payload["flow_id"] == "triage"
+    # re-delivery of the same event id returns the SAME run (no duplicate)
+    r2 = c.post("/webhook/run", content=body,
+                headers={**_sign_headers(body), "Content-Type": "application/json"})
+    assert r2.status_code in (201, 409)       # delivery-id dedup may 409 first
+    if r2.status_code == 201:
+        assert r2.json()["run_id"] == out["run_id"]
+
+
+def test_webhook_flow_trigger_when_engine_off_is_409(monkeypatch, tmp_path):
+    _isolate(monkeypatch, tmp_path)
+    _configured(monkeypatch)
+    _save_flow(monkeypatch)
+    c = _client()
+    _register(c, template="", flow="triage", params=None)
+    monkeypatch.delenv("MAVERICK_FLOWS", raising=False)
+    monkeypatch.setattr("maverick.config.get_flows", lambda: {"enable": False})
+    body = json.dumps({"trigger": "triage"}).encode()
+    r = c.post("/webhook/run", content=body,
+               headers={**_sign_headers(body), "Content-Type": "application/json"})
+    assert r.status_code == 409
+
+
 def test_triggers_feature_off_403(monkeypatch, tmp_path):
     _isolate(monkeypatch, tmp_path)
     from maverick import config

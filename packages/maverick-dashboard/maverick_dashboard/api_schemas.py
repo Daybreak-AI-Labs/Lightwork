@@ -136,11 +136,13 @@ class ImportRunOut(BaseModel):
 
 
 class TriggerIn(BaseModel):
-    """Bind a saved template to an inbound webhook. ``params`` are the operator's
-    default values (baked at registration); an HMAC-signed POST to /webhook/run
-    may override declared params at fire time. ``name`` defaults to the template
-    name (slugified)."""
-    template: str = Field(..., max_length=80)
+    """Bind a saved template OR flow to an inbound webhook. Set exactly one of
+    ``template`` / ``flow`` (a flow receives the webhook ``data`` as its run
+    data). ``params`` are the operator's default values (template targets only);
+    an HMAC-signed POST to /webhook/run may override declared params at fire
+    time. ``name`` defaults to the target name (slugified)."""
+    template: str = Field("", max_length=80)
+    flow: str = Field("", max_length=120)
     params: dict[str, str] | None = None
     name: str | None = Field(None, max_length=48)
 
@@ -148,6 +150,7 @@ class TriggerIn(BaseModel):
 class TriggerOut(BaseModel):
     name: str
     template: str
+    flow: str = ""
     params: dict[str, str] = Field(default_factory=dict)
     webhook_url: str
     secret_configured: bool
@@ -291,6 +294,18 @@ class FlowDraftIn(BaseModel):
     """Draft a flow from a plain-English description (the designer's ✨ button)."""
     description: str = Field(..., min_length=1, max_length=4000)
     flow_id: str = Field(default="", max_length=120)
+
+
+class FlowChatIn(BaseModel):
+    """One copilot turn in the designer's chat panel: the user's message, the
+    CURRENT canvas graph (not necessarily saved), the recent transcript, and
+    optionally a run id to ground diagnose/repair questions in a real trace.
+    The reply may carry a patched flow -- the canvas applies it; nothing is
+    saved server-side until the user saves."""
+    message: str = Field(..., min_length=1, max_length=4000)
+    flow: dict = Field(default_factory=dict)
+    history: list[dict] = Field(default_factory=list, max_length=24)
+    run_id: str = Field(default="", max_length=64)
 
 
 class FlowApplyIn(BaseModel):

@@ -359,6 +359,7 @@ def _handle_flow_resume(job=None) -> None:
         run = execution.execute(flow, agent_runner=agent_runner, action_runner=action_runner,
                                 owner=owner, resume_run_id=run_id,
                                 decision=str(payload.get("decision") or "approved"),
+                                from_failure=bool(payload.get("from_failure")),
                                 inputs=dict(payload.get("inputs") or {}))
         _notify_flow(flow, run)
     except execution.FlowNotResumable:

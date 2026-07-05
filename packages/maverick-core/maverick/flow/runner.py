@@ -256,6 +256,15 @@ class _Reject(Exception):
         self.node, self.data = node, data
 
 
+class _NodeError(Exception):
+    """An executor raised inside a specific node -- carries the node id so a
+    failed run records WHERE it failed (the retry-from-failure entry point)."""
+
+    def __init__(self, node_id: str, cause: Exception):
+        super().__init__(f"node {node_id!r}: {cause}")
+        self.node_id = node_id
+
+
 @dataclass
 class _Ctx:
     agent_fn: AgentFn
@@ -446,7 +455,12 @@ def _run_chain(flow: Flow, data: dict, ctx: _Ctx, start: str | None) -> None:
         node = flow.node(cursor)
         if node is None:
             return
-        cursor = _run_node(node, data, ctx)
+        try:
+            cursor = _run_node(node, data, ctx)
+        except (_Pause, _Reject, _NodeError):
+            raise
+        except Exception as e:
+            raise _NodeError(node.id, e) from e
         seen += 1
         if seen > limit:
             raise RuntimeError(f"flow {flow.id!r} exceeded {limit} steps (cycle?)")
@@ -478,7 +492,12 @@ def run_flow(flow: Flow, *, agent_fn: AgentFn, action_fn: ActionFn,
         if resume.get("decision") == "rejected":
             return FlowRunResult(status=STATUS_REJECTED, data=data,
                                  cursor=resume.get("node_id"))
-        start = node.next if node else flow.start
+        # A pause resumes AFTER its node (the approval/delay is done); a
+        # failure retry re-enters AT the node that failed ("rerun").
+        if resume.get("rerun"):
+            start = node.id if node else flow.start
+        else:
+            start = node.next if node else flow.start
     else:
         data = dict(data or {})
         start = flow.start
@@ -491,6 +510,10 @@ def run_flow(flow: Flow, *, agent_fn: AgentFn, action_fn: ActionFn,
                              resume_at=p.resume_at, prompt=p.node.prompt)
     except _Reject as r:
         return FlowRunResult(status=STATUS_REJECTED, data=r.data, cursor=r.node.id)
+    except _NodeError as e:  # an executor blew up inside a known node -- keep the
+        # node id as the cursor so the run can be retried from right there.
+        return FlowRunResult(status=STATUS_FAILED, data=data, error=str(e),
+                             cursor=e.node_id)
     except Exception as e:  # a node executor blew up -> surface, don't crash the caller
         return FlowRunResult(status=STATUS_FAILED, data=data, error=str(e))
 

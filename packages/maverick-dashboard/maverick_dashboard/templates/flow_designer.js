@@ -16,8 +16,12 @@
   var runCursor = null; // node a paused run is waiting on
   var toolCatalog = {}; // tool name -> {description, params[]} for the action picker
   var selected = null;
+  var selectedEdge = null;  // {from, port} when an edge is selected (click to select, Del to cut)
   var view = { x: 40, y: 20, k: 1 };
   var idSeq = 0;
+  var undoStack = [], redoStack = [], pendingSnap = null;   // serialized rootFlow snapshots
+  var chatHistory = [];     // copilot transcript: {role, content}
+  var lastRunId = null;     // most recent run started here (grounds "why did it fail?")
 
   var canvas = document.getElementById('fd-canvas');
   var vp = document.getElementById('fd-viewport');
@@ -34,6 +38,52 @@
     for (var k in (attrs || {})) e.setAttribute(k, attrs[k]);
     if (text != null) e.textContent = text;
     return e;
+  }
+
+  // ---- undo/redo: whole-root snapshots (the same serialized form a save uses),
+  // so a chat edit, a draft, or a hand edit all undo the same way ----
+  function snapState() {
+    return JSON.stringify(FDCore.cloneFlow({
+      id: idInput.value || rootFlow.id, name: nameInput.value || rootFlow.name,
+      start: rootFlow.start, nodes: rootFlow.nodes }));
+  }
+  function pushHistory() {
+    var s = snapState();
+    if (undoStack[undoStack.length - 1] === s) return;
+    undoStack.push(s);
+    if (undoStack.length > 50) undoStack.shift();
+    redoStack = [];
+  }
+  function histFocus() { pendingSnap = snapState(); }
+  function histBlur() {
+    if (pendingSnap && pendingSnap !== snapState()) {
+      undoStack.push(pendingSnap);
+      if (undoStack.length > 50) undoStack.shift();
+      redoStack = [];
+    }
+    pendingSnap = null;
+  }
+  function restoreState(s) {
+    var f = JSON.parse(s);
+    stack = []; crumbs = ['Main flow']; renderCrumbs();
+    flow = { id: f.id || '', name: f.name || '', start: f.start || '', nodes: [] };
+    (f.nodes || []).forEach(function (nd, i) { flow.nodes.push(normalizeNode(nd, i)); });
+    rootFlow = flow;
+    nameInput.value = flow.name; idInput.value = flow.id;
+    selected = null; selectedEdge = null;
+    autoLayout(); render(); renderProps();
+  }
+  function undo() {
+    if (!undoStack.length) { say('Nothing to undo.'); return; }
+    redoStack.push(snapState());
+    restoreState(undoStack.pop());
+    say('↶ undone');
+  }
+  function redo() {
+    if (!redoStack.length) { say('Nothing to redo.'); return; }
+    undoStack.push(snapState());
+    restoreState(redoStack.pop());
+    say('↷ redone');
   }
   function nodeById(id) { for (var i = 0; i < flow.nodes.length; i++) if (flow.nodes[i].id === id) return flow.nodes[i]; return null; }
   function newId() { var id; do { id = 'n' + (idSeq++); } while (nodeById(id)); return id; }
@@ -83,9 +133,14 @@
         var tgt = n[p.key]; if (!tgt) return;
         var t = nodeById(tgt); if (!t) return;
         var px = n.x + p.x, py = n.y + H, tx = t.x + W / 2, ty = t.y;
-        var path = el('path', { class: 'fd-edge ' + p.cls,
-          d: 'M' + px + ' ' + py + ' C ' + px + ' ' + (py + 46) + ', ' + tx + ' ' + (ty - 46) + ', ' + tx + ' ' + ty });
-        gEdges.appendChild(path);
+        var d = 'M' + px + ' ' + py + ' C ' + px + ' ' + (py + 46) + ', ' + tx + ' ' + (ty - 46) + ', ' + tx + ' ' + ty;
+        var isSel = selectedEdge && selectedEdge.from === n.id && selectedEdge.port === p.key;
+        gEdges.appendChild(el('path', { class: 'fd-edge ' + p.cls + (isSel ? ' selected' : ''), d: d }));
+        // invisible fat twin so a 2px curve is actually clickable (click = select,
+        // Delete = cut; a second click on the same edge also cuts)
+        var hit = el('path', { class: 'fd-edge-hit', d: d });
+        hit.setAttribute('data-edge-from', n.id); hit.setAttribute('data-edge-port', p.key);
+        gEdges.appendChild(hit);
         if (p.label) gEdges.appendChild(el('text', { class: 'fd-edge-label', x: px + 4, y: py + 14 }, p.label));
       });
     });
@@ -100,6 +155,11 @@
       g.appendChild(el('text', { x: 16, y: 40 }, trunc(n.label || summary(n), 26)));
       var badge = runBadge(n.id);
       if (badge) g.appendChild(el('text', { class: 'runbadge', x: W - 20, y: 20 }, badge));
+      if (proposals[n.id]) {
+        var lamp = el('text', { class: 'runbadge', x: W - (badge ? 40 : 20), y: 20 }, '💡');
+        lamp.appendChild(el('title', {}, 'Learned suggestion — select this node to review it'));
+        g.appendChild(lamp);
+      }
       if (n.id === flow.start) g.appendChild(el('text', { x: 16, y: 56, class: 'fd-edge-label' }, '▶ start'));
       ports(n).forEach(function (p) {
         var c = el('circle', { class: 'port', cx: p.x, cy: H, r: 6 });
@@ -120,10 +180,23 @@
   canvas.addEventListener('mousedown', function (evt) {
     var portEl = evt.target.closest('[data-port]');
     var nodeEl = evt.target.closest('[data-node]');
+    var edgeEl = evt.target.closest('[data-edge-from]');
     if (portEl) {
       drag = { kind: 'connect', from: portEl.getAttribute('data-node'), port: portEl.getAttribute('data-port') };
       evt.preventDefault(); return;
     }
+    if (edgeEl) {
+      var ef = edgeEl.getAttribute('data-edge-from'), ep = edgeEl.getAttribute('data-edge-port');
+      if (selectedEdge && selectedEdge.from === ef && selectedEdge.port === ep) {
+        deleteEdge(selectedEdge);              // second click on a selected edge cuts it
+      } else {
+        selectedEdge = { from: ef, port: ep };
+        selected = null; renderProps(); render();
+        say('Edge selected — click it again (or press Delete) to cut it.');
+      }
+      evt.preventDefault(); return;
+    }
+    selectedEdge = null;
     if (nodeEl) {
       var id = nodeEl.getAttribute('data-node'); selectNode(id);
       var n = nodeById(id), p = worldPt(evt);
@@ -134,6 +207,12 @@
     canvas.classList.add('panning');
     selectNode(null);
   });
+  function deleteEdge(edge) {
+    var n = nodeById(edge.from);
+    if (n) { pushHistory(); n[edge.port] = null; }
+    selectedEdge = null; render(); renderProps();
+    say('Edge removed.');
+  }
   canvas.addEventListener('dblclick', function (evt) {
     var nodeEl = evt.target.closest('[data-node]'); if (!nodeEl) return;
     var n = nodeById(nodeEl.getAttribute('data-node')); if (!n) return;
@@ -169,7 +248,7 @@
       var nodeEl = evt.target.closest('[data-node]');
       if (nodeEl) {
         var to = nodeEl.getAttribute('data-node'), from = nodeById(drag.from);
-        if (from && to !== from.id) { from[drag.port] = to; renderProps(); render(); }
+        if (from && to !== from.id) { pushHistory(); from[drag.port] = to; renderProps(); render(); }
       }
     }
     drag = null;
@@ -185,6 +264,7 @@
 
   // ---- nodes ----
   function addNode(kind) {
+    pushHistory();
     var n = { id: newId(), kind: kind, x: Math.round((-view.x + 220) / view.k), y: Math.round((-view.y + 80) / view.k),
               next: null, params: {}, brief: '', tool: '', condition: '', if_true: null, if_false: null,
               items: '', var: 'item', limit: 0, prompt: '', seconds: 0, flow_ref: '', retries: 0, on_error: null, timeout: 0,
@@ -196,12 +276,28 @@
     flow.nodes.push(n); selectNode(n.id); render();
   }
   function deleteNode(id) {
+    pushHistory();
     flow.nodes = flow.nodes.filter(function (n) { return n.id !== id; });
-    flow.nodes.forEach(function (n) { ['next', 'if_true', 'if_false'].forEach(function (k) { if (n[k] === id) n[k] = null; }); });
+    flow.nodes.forEach(function (n) { ['next', 'if_true', 'if_false', 'on_error'].forEach(function (k) { if (n[k] === id) n[k] = null; }); });
     if (flow.start === id) flow.start = flow.nodes.length ? flow.nodes[0].id : '';
     selectNode(null); render();
   }
-  function selectNode(id) { selected = id; renderProps(); render(); }
+  function duplicateNode(id) {
+    var src = nodeById(id); if (!src) return;
+    pushHistory();
+    var copy = normalizeNode(JSON.parse(JSON.stringify(FDCore.serializeNode(src))), 0);
+    copy.id = newId();
+    copy.x = (src.x || 0) + 30; copy.y = (src.y || 0) + 40;
+    copy.next = null; copy.if_true = null; copy.if_false = null; copy.on_error = null;
+    flow.nodes.push(copy); selectNode(copy.id); render();
+    say('Duplicated as ' + copy.id + '.');
+  }
+  function selectNode(id) { selected = id; if (id) selectedEdge = null; renderProps(); render(); }
+  function zoomToFit() {
+    var r = canvas.getBoundingClientRect();
+    view = FDCore.fitView(flow.nodes, r.width, r.height, W, H, 40);
+    render();
+  }
 
   // ---- nested sub-flow editing (foreach body / parallel branches) ----
   // Pure serialization/normalization lives in FDCore (flow_designer_core.js) so
@@ -266,11 +362,15 @@
   }
   function input(val, oninput, ph) {
     var i = document.createElement('input'); i.className = 'input'; i.value = val || ''; if (ph) i.placeholder = ph;
-    i.addEventListener('input', function () { oninput(i.value); }); return i;
+    i.addEventListener('input', function () { oninput(i.value); });
+    i.addEventListener('focus', histFocus); i.addEventListener('blur', histBlur);
+    return i;
   }
   function textarea(val, oninput, ph) {
     var t = document.createElement('textarea'); t.className = 'input'; t.value = val || ''; if (ph) t.placeholder = ph;
-    t.addEventListener('input', function () { oninput(t.value); }); return t;
+    t.addEventListener('input', function () { oninput(t.value); });
+    t.addEventListener('focus', histFocus); t.addEventListener('blur', histBlur);
+    return t;
   }
   function select(val, opts, onchange) {
     var s = document.createElement('select'); s.className = 'input';
@@ -289,7 +389,10 @@
     head.textContent = (KIND_ICON[n.kind] || '') + ' ' + n.kind + ' node';
     props.appendChild(head);
     props.appendChild(field('Label (optional)', input(n.label, function (v) { n.label = v; render(); }, 'shown on the card')));
-    if (n.kind === 'agent') props.appendChild(field('Brief (what the agent should do)', textarea(n.brief, function (v) { n.brief = v; render(); }, 'Summarize {{issue_body}} and draft a reply')));
+    if (n.kind === 'agent') {
+      var briefTa = textarea(n.brief, function (v) { n.brief = v; render(); }, 'Summarize {{issue_body}} and draft a reply');
+      props.appendChild(withPills(n.id, field('Brief (what the agent should do)', briefTa), briefTa));
+    }
     if (n.kind === 'action') {
       var toolIn = input(n.tool, function (v) { n.tool = v; renderProps(); render(); }, 'search connectors…');
       toolIn.setAttribute('list', 'fd-tools');
@@ -300,16 +403,19 @@
       var known = (meta && meta.params) || [];
       if (known.length) {
         known.forEach(function (pk) {
-          props.appendChild(field(pk, input(n.params[pk] != null ? String(n.params[pk]) : '',
-            function (v) { if (v === '') delete n.params[pk]; else n.params[pk] = v; }, '')));
+          var pin = input(n.params[pk] != null ? String(n.params[pk]) : '',
+            function (v) { if (v === '') delete n.params[pk]; else n.params[pk] = v; }, '');
+          props.appendChild(withPills(n.id, field(pk, pin), pin));
         });
         props.appendChild(hint('Use {{key}} to insert an earlier step’s result.'));
       } else {
-        props.appendChild(field('Params (JSON)', textarea(jsonOr(n.params), function (v) { n._paramsRaw = v; })));
+        var pta = textarea(jsonOr(n.params), function (v) { n._paramsRaw = v; });
+        props.appendChild(withPills(n.id, field('Params (JSON)', pta), pta));
       }
     }
     if (n.kind === 'branch') {
-      props.appendChild(field('Condition', input(n.condition, function (v) { n.condition = v; render(); }, 'amount > 100')));
+      var condIn = input(n.condition, function (v) { n.condition = v; render(); }, 'amount > 100');
+      props.appendChild(withPills(n.id, field('Condition', condIn), condIn, true));
       props.appendChild(hint('Drag the green (yes) and red (no) dots to the next steps.'));
     }
     if (n.kind === 'foreach') {
@@ -390,14 +496,54 @@
       pbox.appendChild(pl); pbox.appendChild(pb); props.appendChild(pbox);
     }
     // actions
-    var row = document.createElement('div'); row.style.display = 'flex'; row.style.gap = 'var(--space-2)'; row.style.marginTop = 'var(--space-3)';
+    var row = document.createElement('div'); row.style.display = 'flex'; row.style.gap = 'var(--space-2)'; row.style.marginTop = 'var(--space-3)'; row.style.flexWrap = 'wrap';
     var mk = document.createElement('button'); mk.className = 'btn btn--ghost'; mk.type = 'button'; mk.textContent = 'Make start';
     mk.addEventListener('click', function () { flow.start = n.id; render(); });
+    var dup = document.createElement('button'); dup.className = 'btn btn--ghost'; dup.type = 'button'; dup.textContent = '⧉ Duplicate';
+    dup.title = 'Ctrl+D';
+    dup.addEventListener('click', function () { duplicateNode(n.id); });
     var del = document.createElement('button'); del.className = 'btn btn--ghost'; del.type = 'button'; del.textContent = '🗑 Delete';
     del.addEventListener('click', function () { deleteNode(n.id); });
-    row.appendChild(mk); row.appendChild(del); props.appendChild(row);
+    row.appendChild(mk); row.appendChild(dup); row.appendChild(del); props.appendChild(row);
   }
   function hint(t) { var p = document.createElement('p'); p.className = 'fd__empty'; p.textContent = t; return p; }
+
+  // ---- data pills: what THIS node can reference, one click to insert ----
+  function availableKeys(nodeId) {
+    var keys = FDCore.upstreamOutputs(flow, nodeId);
+    try {   // the sample-input keys are the trigger payload's shape
+      var raw = document.getElementById('fd-sample').value.trim();
+      if (raw) Object.keys(JSON.parse(raw)).forEach(function (k) {
+        if (keys.indexOf(k) < 0) keys.push(k);
+      });
+    } catch (e) { /* not JSON yet -- no payload pills */ }
+    return keys;
+  }
+  function insertAtCursor(target, text) {
+    var s = target.selectionStart, e = target.selectionEnd, v = target.value;
+    if (s == null) { target.value = v + text; }
+    else { target.value = v.slice(0, s) + text + v.slice(e); target.selectionStart = target.selectionEnd = s + text.length; }
+    target.dispatchEvent(new Event('input', { bubbles: false }));
+    target.focus();
+  }
+  function pillsRow(nodeId, target, raw) {
+    var keys = availableKeys(nodeId);
+    if (!keys.length) return null;
+    var row = document.createElement('div'); row.className = 'fd__pills';
+    keys.forEach(function (k) {
+      var b = document.createElement('button'); b.type = 'button'; b.className = 'fd__pill';
+      b.textContent = raw ? k : '{{' + k + '}}'; b.title = 'Insert ' + (raw ? k : '{{' + k + '}}');
+      b.addEventListener('mousedown', function (evt) { evt.preventDefault(); });   // keep target's focus
+      b.addEventListener('click', function () { insertAtCursor(target, raw ? k : '{{' + k + '}}'); });
+      row.appendChild(b);
+    });
+    return row;
+  }
+  function withPills(nodeId, fieldEl, target, raw) {
+    var pills = pillsRow(nodeId, target, raw);
+    if (pills) fieldEl.appendChild(pills);
+    return fieldEl;
+  }
   function jsonOr(v) { try { return v && (typeof v === 'object') ? JSON.stringify(v, null, 2) : (v || ''); } catch (e) { return ''; } }
 
   // ---- serialize / api ----
@@ -443,7 +589,7 @@
     rootFlow = flow;
     autoLayout();
     nameInput.value = flow.name; idInput.value = flow.id;
-    selected = null; view = { x: 40, y: 20, k: 1 }; render(); renderProps();
+    selected = null; selectedEdge = null; view = { x: 40, y: 20, k: 1 }; render(); renderProps();
   }
   function autoLayout() {
     var need = flow.nodes.some(function (n) { return !n.x && !n.y; });
@@ -495,12 +641,21 @@
         .then(function (r) { return r.json(); })
         .then(function (j) {
           if (!j.run_id) { say('Run started'); return; }
-          runState = {}; runCursor = null;
+          runState = {}; runCursor = null; lastRunId = j.run_id;
           say((dryRun ? '🧪 Dry run ' : 'Running ') + '(run ' + j.run_id.slice(0, 8) + '…)');
           document.getElementById('fd-legend').classList.add('on');
           pollRun(j.run_id, 20);
         }).catch(function () { say('Run failed', true); });
     });
+  }
+  function runUrl(runId) {
+    return '/flows/' + encodeURIComponent(rootFlow.id) + '/runs/' + encodeURIComponent(runId);
+  }
+  function sayWithRunLink(text, runId) {
+    say(text);
+    var a = document.createElement('a'); a.href = runUrl(runId); a.textContent = 'view run →';
+    a.style.marginLeft = '6px';
+    msg.appendChild(a);
   }
   function pollRun(runId, tries) {
     apiFetch('/api/v1/flows/runs/' + encodeURIComponent(runId))
@@ -510,10 +665,14 @@
         runState = run.nodes || {};
         runCursor = (run.status === 'paused_approval' || run.status === 'paused_delay') ? run.cursor : null;
         render(); if (selected) renderProps();
-        if (run.status === 'paused_approval') { say('⏸ waiting for approval — resume it from Automations.'); return; }
-        if (['completed', 'failed', 'rejected'].indexOf(run.status) >= 0) { say(runSummary(run)); return; }
+        if (run.status === 'paused_approval') { sayWithRunLink('⏸ waiting for approval —', runId); return; }
+        if (run.status === 'failed') {
+          sayWithRunLink(runSummary(run) + ' · ask the 💬 Copilot “why did it fail?” ·', runId);
+          return;
+        }
+        if (['completed', 'rejected'].indexOf(run.status) >= 0) { sayWithRunLink(runSummary(run) + ' ·', runId); return; }
         if (tries > 0) setTimeout(function () { pollRun(runId, tries - 1); }, 900);
-        else say('Still running — check Automations for the result.');
+        else sayWithRunLink('Still running —', runId);
       }).catch(function () {});
   }
   function runSummary(run) {
@@ -530,6 +689,7 @@
       .then(function (r) { return r.json().then(function (j) { return { ok: r.ok, j: j }; }); })
       .then(function (res) {
         if (!res.ok) { say(res.j.detail || 'Draft failed', true); return; }
+        pushHistory();                    // the pre-draft canvas is one Ctrl+Z away
         fromApiFlow(res.j.flow);
         say((res.j.notes && res.j.notes.length) ? res.j.notes[0] : 'Drafted ✓ — edit and save.');
       }).catch(function () { say('Draft failed', true); });
@@ -623,6 +783,75 @@
       box.appendChild(c);
     });
   }
+  // ---- copilot chat: converse to build, edit, explain, and repair the flow ----
+  function chatMsgEl(role, text) {
+    var d = document.createElement('div'); d.className = 'fd__chat-msg ' + role; d.textContent = text; return d;
+  }
+  function chatAppend(role, text) {
+    var log = document.getElementById('fd-chat-log');
+    log.appendChild(chatMsgEl(role, text));
+    log.scrollTop = log.scrollHeight;
+  }
+  function placeNewNodes(f) {
+    // Give canvas positions to nodes the copilot just added (patched nodes keep
+    // theirs), so an AI edit lands NEXT TO its neighbors instead of re-laying
+    // out the user's whole arrangement.
+    var byId = {};
+    (f.nodes || []).forEach(function (n) { byId[n.id] = n; });
+    var maxY = 40;
+    (f.nodes || []).forEach(function (n) { if (n.y) maxY = Math.max(maxY, n.y); });
+    (f.nodes || []).forEach(function (n) {
+      if (n.x || n.y) return;
+      var pred = (f.nodes || []).filter(function (m) {
+        return m !== n && (m.next === n.id || m.if_true === n.id || m.if_false === n.id || m.on_error === n.id);
+      })[0];
+      if (pred && (pred.x || pred.y)) { n.x = (pred.x || 0) + 24; n.y = (pred.y || 0) + 110; }
+      else { n.x = 60; n.y = maxY + 110; }
+      maxY = Math.max(maxY, n.y);
+    });
+  }
+  function chatSend() {
+    var inp = document.getElementById('fd-chat-input');
+    var text = (inp.value || '').trim();
+    if (!text) return;
+    var bad = commitRawFields();
+    if (bad.length) { say('Fix invalid JSON in: ' + bad.join(', '), true); return; }
+    inp.value = '';
+    chatAppend('user', text);
+    chatHistory.push({ role: 'user', content: text });
+    chatAppend('note', '…thinking');
+    var body = { message: text, flow: toApiFlow(), history: chatHistory.slice(-12), run_id: lastRunId || '' };
+    apiFetch('/api/v1/flows/chat', { method: 'POST', body: JSON.stringify(body) })
+      .then(function (r) { return r.json().then(function (j) { return { ok: r.ok, j: j }; }); })
+      .then(function (res) {
+        var log = document.getElementById('fd-chat-log');
+        log.removeChild(log.lastChild);                       // the …thinking note
+        if (!res.ok) { chatAppend('note', res.j.detail || 'The copilot call failed.'); return; }
+        var j = res.j;
+        chatAppend('assistant', j.reply || 'Done.');
+        chatHistory.push({ role: 'assistant', content: j.reply || '' });
+        (j.notes || []).forEach(function (nt) { chatAppend('note', nt); });
+        if (j.flow) {
+          pushHistory();                                      // "undo what the AI did" is one Ctrl+Z
+          placeNewNodes(j.flow);
+          var keep = { x: view.x, y: view.y, k: view.k };
+          fromApiFlow(j.flow);
+          view = keep; render();
+          if (j.applied && j.applied.length) chatAppend('note', '✏️ ' + j.applied.join(' · '));
+          say('🤖 Copilot edited the flow — review and Save.');
+        }
+      }).catch(function () {
+        var log = document.getElementById('fd-chat-log');
+        if (log.lastChild && log.lastChild.textContent === '…thinking') log.removeChild(log.lastChild);
+        chatAppend('note', 'The copilot call failed.');
+      });
+  }
+  function chatToggle(showOnly) {
+    var box = document.getElementById('fd-chat');
+    if (showOnly) box.classList.add('on'); else box.classList.toggle('on');
+    if (box.classList.contains('on')) document.getElementById('fd-chat-input').focus();
+  }
+
   function loadTools() {
     apiFetch('/api/v1/flows/tools').then(function (r) { return r.ok ? r.json() : { tools: [] }; })
       .then(function (j) {
@@ -644,14 +873,28 @@
   document.getElementById('fd-run').addEventListener('click', function () { run(true); });
   document.getElementById('fd-run-real').addEventListener('click', function () { run(false); });
   document.getElementById('fd-history').addEventListener('click', showHistory);
+  document.getElementById('fd-undo').addEventListener('click', undo);
+  document.getElementById('fd-redo').addEventListener('click', redo);
+  document.getElementById('fd-fit').addEventListener('click', zoomToFit);
+  document.getElementById('fd-chat-toggle').addEventListener('click', function () { chatToggle(); });
+  document.getElementById('fd-chat-close').addEventListener('click', function () { chatToggle(); });
+  document.getElementById('fd-chat-form').addEventListener('submit', function (e) { e.preventDefault(); chatSend(); });
   document.getElementById('fd-nl').addEventListener('keydown', function (e) { if (e.key === 'Enter') draft(); });
   nameInput.addEventListener('input', function () { rootFlow.name = nameInput.value; });
-  // keyboard: Delete removes the selected node, Esc deselects (unless typing)
+  // keyboard: Delete removes the selected node/edge, Esc deselects, Ctrl+Z/Y
+  // undo/redo, Ctrl+D duplicates (all no-ops while typing in a field)
   document.addEventListener('keydown', function (e) {
     var tag = (e.target && e.target.tagName) || '';
     var typing = tag === 'INPUT' || tag === 'TEXTAREA' || (e.target && e.target.isContentEditable);
-    if (e.key === 'Escape' && !typing) { selected = null; render(); renderProps(); }
-    else if ((e.key === 'Delete' || e.key === 'Backspace') && selected && !typing) { e.preventDefault(); deleteNode(selected); }
+    var mod = e.ctrlKey || e.metaKey;
+    if (mod && !typing && (e.key === 'z' || e.key === 'Z')) { e.preventDefault(); if (e.shiftKey) redo(); else undo(); return; }
+    if (mod && !typing && (e.key === 'y' || e.key === 'Y')) { e.preventDefault(); redo(); return; }
+    if (mod && !typing && (e.key === 'd' || e.key === 'D') && selected) { e.preventDefault(); duplicateNode(selected); return; }
+    if (e.key === 'Escape' && !typing) { selected = null; selectedEdge = null; render(); renderProps(); }
+    else if ((e.key === 'Delete' || e.key === 'Backspace') && !typing) {
+      if (selectedEdge) { e.preventDefault(); deleteEdge(selectedEdge); }
+      else if (selected) { e.preventDefault(); deleteNode(selected); }
+    }
   });
 
   buildExamples();

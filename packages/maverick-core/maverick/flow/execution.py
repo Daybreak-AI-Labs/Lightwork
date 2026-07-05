@@ -17,7 +17,7 @@ from typing import Any
 
 from . import node_outcomes, store
 from .ir import Flow, FlowNode
-from .runner import STATUS_PAUSED_APPROVAL, STATUS_PAUSED_DELAY, run_flow
+from .runner import STATUS_FAILED, STATUS_PAUSED_APPROVAL, STATUS_PAUSED_DELAY, run_flow
 
 _RESUMABLE = (STATUS_PAUSED_APPROVAL, STATUS_PAUSED_DELAY)
 
@@ -60,6 +60,7 @@ def execute(flow: Flow, *, agent_runner: AgentRunner, action_runner: ActionRunne
             approve_fn: Callable[[FlowNode, dict], str] | None = None,
             run_id: str | None = None,
             resume_run_id: str | None = None, decision: str | None = None,
+            from_failure: bool = False,
             inputs: dict | None = None, record_outcomes: bool = True,
             agent_budget_dollars: float = DEFAULT_AGENT_BUDGET,
             now: Callable[[], float] | None = None) -> store.FlowRun:
@@ -76,13 +77,19 @@ def execute(flow: Flow, *, agent_runner: AgentRunner, action_runner: ActionRunne
         prior = store.load_run(resume_run_id)
         if prior is None:
             raise ValueError(f"no such flow run {resume_run_id!r}")
-        # Only a paused run may be resumed. Without this guard, resuming a
-        # completed run re-executes the whole flow (duplicate side effects) and
-        # resuming a rejected run runs the very node a human rejected -- defeating
-        # the approval gate.
-        if prior.status not in _RESUMABLE:
+        # Only a paused run may be resumed -- or, with ``from_failure``, a FAILED
+        # run whose failing node was recorded (it re-enters AT that node with the
+        # data as of the failure, instead of re-running the whole flow). Without
+        # this guard, resuming a completed run re-executes the whole flow
+        # (duplicate side effects) and resuming a rejected run runs the very node
+        # a human rejected -- defeating the approval gate.
+        retryable_failure = (from_failure and prior.status == STATUS_FAILED
+                             and bool(prior.cursor))
+        if prior.status not in _RESUMABLE and not retryable_failure:
             raise FlowNotResumable(
-                f"run {resume_run_id!r} is not paused (status {prior.status!r})")
+                f"run {resume_run_id!r} is not paused (status {prior.status!r})"
+                + ("; it has no failure cursor to retry from"
+                   if from_failure and prior.status == STATUS_FAILED else ""))
         run_id = prior.run_id
         owner = owner or prior.owner
         # Free-form human input merges into the run data on resume, so an approval
@@ -91,7 +98,9 @@ def execute(flow: Flow, *, agent_runner: AgentRunner, action_runner: ActionRunne
         if inputs:
             resume_data.update(inputs)
         resume = {"node_id": prior.cursor, "data": resume_data}
-        if prior.status == STATUS_PAUSED_APPROVAL:
+        if retryable_failure:
+            resume["rerun"] = True
+        elif prior.status == STATUS_PAUSED_APPROVAL:
             resume["decision"] = decision or "approved"
     rid = run_id or store.new_run_id()
     # A fresh run may have a queued placeholder (saved at enqueue with the
