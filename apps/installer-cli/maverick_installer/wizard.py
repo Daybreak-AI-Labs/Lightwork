@@ -1919,6 +1919,10 @@ def pick_advanced() -> dict[str, Any]:
             "    Judge calibration? Feed the evaluation judge's verdicts into "
             "the verifier-drift freeze so a drifting judge pauses learning.",
             default=False)
+        advanced["self_harness_transfer_auto"] = _q_confirm(
+            "    Nightly cross-model transfer? Try each model's proven guidance "
+            "on the rest of the fleet (gated, on probation, one-shot per pair).",
+            default=False)
         advanced["self_harness_candidates"] = max(1, _safe_int(_q_text(
             "    Candidate lines per weakness (best-of-N; 1 = single)",
             default="1"), default=1))
@@ -3294,6 +3298,8 @@ def _cfg_advanced(  # noqa: C901 - flat sequence of independent opt-in toggles
             lines.append("relapse_failure_share = 0.5")
         if advanced.get("self_harness_calibrate_judge"):
             lines.append("calibrate_judge = true")
+        if advanced.get("self_harness_transfer_auto"):
+            lines.append("transfer_auto = true")
         cands = advanced.get("self_harness_candidates")
         if cands and cands > 1:
             lines.append(f"candidates_per_signature = {int(cands)}")

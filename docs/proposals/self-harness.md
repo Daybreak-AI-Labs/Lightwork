@@ -243,6 +243,11 @@ safety model as skills and insights.
 - `maverick self-harness canary --model M [--review]` — inspect lines on canary
   probation, or `--review` to advance the lifecycle (graduate the proven, pull the
   failing) from the accumulated counters.
+- `maverick self-harness transfer --from M [--to T] [--force]` — try one
+  model's proven guidance on other fleet models: graduated lines validated
+  against the target's corpus through the full floors + gate, landing as
+  canaries; one-shot per (target, line) via the tried-memory. `[self_harness]
+  transfer_auto` runs the fleet sweep on the dream beat.
 - `maverick self-harness retire --older-than-days N` — prune stale guidance.
 - `maverick self-harness conflicts` — flag contradictory lines for review.
 - `maverick self-harness log` / `forget [--domain D]` — the audit trail and the

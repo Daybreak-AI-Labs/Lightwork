@@ -321,6 +321,24 @@ def test_run_cli_all_models(_home, monkeypatch):
     assert "model: model-a" in r.output and "model: model-b" in r.output
 
 
+def test_transfer_cli_requires_corpus_then_reports(_home, monkeypatch):
+    from maverick import config
+    from maverick import self_improvement_runner as runner
+    # no eval corpus -> friendly refusal (transfer validates against it)
+    r = CliRunner().invoke(main, ["self-harness", "transfer", "--from", "m1"])
+    assert r.exit_code != 0 and "eval_corpus" in r.output
+    monkeypatch.setattr(config, "load_config", lambda *a, **k: {
+        "self_harness": {"enable": True, "eval_corpus": "/etc/maverick/c.json"}})
+    monkeypatch.setattr(
+        runner, "run_self_harness_transfer",
+        lambda src, targets=None, force=False: {
+            "m2": {"attempted": ["ln"], "promoted": ["ln"], "skipped": []}})
+    r = CliRunner().invoke(main, ["self-harness", "transfer", "--from", "m1"])
+    assert r.exit_code == 0, r.output
+    assert "m1 -> m2: attempted=1 promoted=1" in r.output
+    assert "+ (canary) ln" in r.output
+
+
 def test_run_cli_echoes_relapsed_lines(_home, monkeypatch):
     from maverick import self_improvement_runner as runner
     rep = sh.SelfHarnessReport(model_id="claude-x")

@@ -2393,6 +2393,129 @@ def test_reflexion_records_role(tmp_path):
     assert reflexion.list_recent(path=p)[-1].role is None
 
 
+# ---------- cross-model transfer: engine, tried-memory, gating ----------
+
+def _quad_good():
+    return (["a", "b"], ["c", "d", "e"],
+            lambda a, c: 0.95, lambda a, c: 0.4)
+
+
+def test_transferable_lines_filters_probation_and_relapsing(monkeypatch, store):
+    ctrl = _enable(monkeypatch)
+    _promote_line(store, "SRC", "c0", "solid line", ctrl)
+    _promote_line(store, "SRC", "c1", "canary line", ctrl)
+    _promote_line(store, "SRC", "c2", "relapsing line", ctrl)
+    sh.mark_canary("SRC", "canary line", path=store)
+    meta = sh.load_line_meta(store)
+    meta[sh._line_id("SRC", "relapsing line")]["recent_outcomes"] = [0, 0, 0, 1]
+    sh._write_line_meta(meta, store)
+    assert sh.transferable_lines("SRC", store) == ["solid line"]
+
+
+def test_transfer_promotes_as_canary(monkeypatch, store, tmp_path):
+    ctrl = _enable(monkeypatch)
+    _promote_line(store, "SRC", "c0", "solid line", ctrl)
+    rep = sh.run_transfer("SRC", ["TGT"], eval_for_target=lambda m: _quad_good(),
+                          controller=ctrl, path=store,
+                          tried_path=tmp_path / "tried.json")
+    assert rep["TGT"]["promoted"] == ["solid line"]
+    assert "solid line" in sh.recall_addendum("TGT", store)
+    assert sh.list_canaries("TGT", store) == ["solid line"]   # lands on probation
+    # a re-run skips it for free: the line is now present on the target
+    rep2 = sh.run_transfer("SRC", ["TGT"], eval_for_target=lambda m: _quad_good(),
+                           controller=ctrl, path=store,
+                           tried_path=tmp_path / "tried.json")
+    assert rep2["TGT"]["attempted"] == []
+    assert any("already present" in s for s in rep2["TGT"]["skipped"])
+
+
+def test_transfer_rejected_line_is_one_shot(monkeypatch, store, tmp_path):
+    ctrl = _enable(monkeypatch)
+    tried = tmp_path / "tried.json"
+    _promote_line(store, "SRC", "c0", "weak line", ctrl)
+    calls = {"n": 0}
+
+    def flat(m):
+        calls["n"] += 1
+        return (["a"], ["c", "d"], lambda a, c: 0.5, lambda a, c: 0.5)
+
+    rep = sh.run_transfer("SRC", ["TGT"], eval_for_target=flat,
+                          controller=ctrl, path=store, tried_path=tried)
+    assert rep["TGT"]["attempted"] == ["weak line"]
+    assert rep["TGT"]["promoted"] == [] and sh.recall_addendum("TGT", store) == ""
+    # the judged pair is remembered -- a sweep re-run spends NOTHING on it
+    rep2 = sh.run_transfer("SRC", ["TGT"], eval_for_target=flat,
+                           controller=ctrl, path=store, tried_path=tried)
+    assert rep2["TGT"]["attempted"] == [] and calls["n"] == 1
+    assert any("already tried" in s for s in rep2["TGT"]["skipped"])
+    # --force re-attempts the judged pair
+    rep3 = sh.run_transfer("SRC", ["TGT"], eval_for_target=flat, force=True,
+                           controller=ctrl, path=store, tried_path=tried)
+    assert rep3["TGT"]["attempted"] == ["weak line"] and calls["n"] == 2
+
+
+def test_transfer_skips_self_target_and_missing_evaluator(monkeypatch, store, tmp_path):
+    ctrl = _enable(monkeypatch)
+    _promote_line(store, "SRC", "c0", "solid line", ctrl)
+    rep = sh.run_transfer("SRC", ["SRC", "TGT"], eval_for_target=lambda m: None,
+                          controller=ctrl, path=store,
+                          tried_path=tmp_path / "t.json")
+    assert "SRC" not in rep                       # never transfers to itself
+    assert rep["TGT"]["skipped"] == ["no evaluator/corpus for target"]
+    assert rep["TGT"]["attempted"] == []
+
+
+def test_runner_transfer_end_to_end(monkeypatch, tmp_path, store):
+    # Driver path: fleet targets, corpus-built evaluator, canary landing.
+    import json as _json
+
+    from maverick import config, llm
+    from maverick import self_improvement_runner as runner
+    ctrl = _enable(monkeypatch)
+    monkeypatch.setattr(sh, "_store_path", lambda: store)
+    monkeypatch.setattr(sh, "_transfer_tried_path", lambda: tmp_path / "tried.json")
+    _promote_line(store, "SRC", "c0", "MAGIC-LINE bound the export window", ctrl)
+    cpath = tmp_path / "corpus.json"
+    cpath.write_text(_json.dumps(
+        {"TGT": [{"goal": f"g{i}", "expected": "WIN"} for i in range(6)]}))
+    monkeypatch.setattr(config, "load_config", lambda *a, **k: {
+        "self_harness": {"enable": True, "eval_corpus": str(cpath)}})
+
+    class _FakeLLM:
+        def __init__(self, model="x", **kw):
+            self.model = model
+
+        def complete(self, system, messages, **kw):
+            if "evaluator" in (system or "").lower():
+                content = messages[0]["content"]
+                out = content.split("OUTPUT:\n", 1)[1].split("\n\nExpected")[0]
+                return type("R", (), {"text": "yes" if out == "WIN" else "no"})()
+            helped = "MAGIC-LINE" in (system or "")
+            return type("R", (), {"text": "WIN" if helped else "LOSE"})()
+
+    monkeypatch.setattr(llm, "LLM", _FakeLLM)
+    monkeypatch.setattr(llm, "model_for_role", lambda role: "verifier-model")
+    monkeypatch.setattr(runner, "harness_fleet_models", lambda: ["SRC", "TGT"])
+    rep = runner.run_self_harness_transfer("SRC")
+    assert rep["TGT"]["promoted"] == ["MAGIC-LINE bound the export window"]
+    assert sh.list_canaries("TGT", store) == ["MAGIC-LINE bound the export window"]
+    # sweep shape: sources that attempted something appear keyed by source
+    monkeypatch.setattr(sh, "_transfer_tried_path", lambda: tmp_path / "tried2.json")
+    sh.forget_addendum("TGT", path=store)
+    sweep = runner.run_self_harness_transfer_sweep()
+    assert "SRC" in sweep and sweep["SRC"]["TGT"]["promoted"]
+
+
+def test_config_transfer_auto(monkeypatch):
+    from maverick import config
+    monkeypatch.setattr(config, "load_config", lambda *a, **k: {
+        "self_harness": {"transfer_auto": True}})
+    assert config.get_self_harness()["transfer_auto"] is True
+    monkeypatch.setattr(config, "load_config", lambda *a, **k: {"self_harness": {}})
+    assert config.get_self_harness()["transfer_auto"] is False
+    assert sh.settings()["transfer_auto"] is False
+
+
 # ---------- recency: recent-outcomes window + relapse re-probation ----------
 
 def test_note_outcome_builds_and_caps_recent_window(monkeypatch, store):

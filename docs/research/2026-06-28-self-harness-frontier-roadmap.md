@@ -128,6 +128,17 @@ drive them; this wave wires them, changing no default behavior:
   domain + invoked tools. Before this, worker models' lines earned recalls but
   never outcomes, so a worker canary promoted by `run --all-models` could
   never graduate or be demoted by the counter-driven review.
+- **Cross-model transfer** (testing the refuted "inherently model-specific"
+  claim on the operator's own fleet): `self_harness.run_transfer` tries a
+  source model's graduated model-wide lines (`transferable_lines` excludes
+  probation + relapsing lines; scoped lines stay home) on target models
+  through the SAME validation floors and governed gate, landing survivors as
+  canaries. A persisted tried-memory keyed (target, normalized line) makes
+  every attempt one-shot, so the nightly sweep (`[self_harness]
+  transfer_auto`, default off, riding `auto_run` on the dream beat) spends
+  ~nothing at steady state. Operator surface: `maverick self-harness transfer
+  --from M [--to T] [--force]`; the driver builds per-target evaluators from
+  the corpus on one shared eval-budget pot.
 - **Per-role component profiles** (the Continual Harness direction, survey
   taxonomy's per-role axis): reflexions now carry the agent `role` in play at
   failure (goal-level captures stamp `orchestrator`), `role` joins the

@@ -467,6 +467,66 @@ def run_self_harness_cycle(
         return self_harness.SelfHarnessReport(model_id=str(model_id or "")), 0
 
 
+def run_self_harness_transfer(source_model: str, *, targets=None,
+                              corpus_path: str | None = None,
+                              controller=None, force: bool = False) -> dict:
+    """Driver entry for a governed cross-model transfer trial: try
+    ``source_model``'s graduated lines on ``targets`` (default: the whole
+    fleet minus the source) against each target's corpus-built A/B, applying
+    the configured validation floors, one shared eval-budget pot, and the
+    canary landing ``self_harness.run_transfer`` enforces. The tried-memory
+    makes repeat invocations spend nothing on already-judged pairs (``force``
+    overrides). Returns the per-target report; ``{}`` when the loop is off or
+    no corpus is configured. Never raises."""
+    try:
+        from . import self_harness
+        if not self_harness.enabled():
+            return {}
+        st = self_harness.settings()
+        corpus_path = corpus_path or st.get("eval_corpus")
+        if not corpus_path:
+            return {}
+        budget = _eval_budget(st)
+        cache: dict[str, tuple | None] = {}
+
+        def eval_for_target(m: str):
+            if m not in cache:
+                cache[m] = _auto_evaluator(m, corpus_path=corpus_path,
+                                           judge_samples=st.get("judge_samples", 1),
+                                           budget=budget)
+            return cache[m]
+
+        if targets is None:
+            targets = [m for m in harness_fleet_models() if m != str(source_model)]
+        validate_kwargs = dict(
+            min_delta=st["min_delta"], min_held_out=st["min_held_out"],
+            confidence_z=st["confidence_z"], max_cost_factor=st["max_cost_factor"],
+            max_latency_factor=st["max_latency_factor"],
+            max_tool_calls_factor=st["max_tool_calls_factor"])
+        return self_harness.run_transfer(
+            str(source_model), list(targets), eval_for_target=eval_for_target,
+            controller=controller, force=force, validate_kwargs=validate_kwargs)
+    except Exception:  # pragma: no cover -- a transfer trial never perturbs a run
+        log.debug("self-harness transfer failed", exc_info=True)
+        return {}
+
+
+def run_self_harness_transfer_sweep(*, controller=None) -> dict:
+    """Fleet-wide transfer: every configured role model as source in turn.
+    The tried-memory keeps steady-state spend near zero -- only lines learned
+    since the last sweep generate new evaluations. Returns
+    ``{source: per-target report}`` for sources that attempted anything."""
+    out: dict[str, dict] = {}
+    try:
+        for m in harness_fleet_models():
+            rep = run_self_harness_transfer(m, controller=controller)
+            if any(r.get("attempted") or r.get("promoted") for r in rep.values()):
+                out[m] = rep
+    except Exception:  # pragma: no cover -- a sweep never perturbs a run
+        log.debug("self-harness transfer sweep failed", exc_info=True)
+    return out
+
+
 def harness_fleet_models() -> list[str]:
     """The DISTINCT set of models the fleet runs, resolved across every role in
     ``llm.ROLE_MODELS`` (each via ``model_for_role``, deduped, sorted for a
@@ -516,4 +576,5 @@ __all__ = [
     "collect_calibration", "should_retire", "review_generated_tools",
     "build_prm_examples", "emit_strategy_candidate", "run_self_harness_pass",
     "run_self_harness_cycle", "run_self_harness_all_models", "harness_fleet_models",
+    "run_self_harness_transfer", "run_self_harness_transfer_sweep",
 ]

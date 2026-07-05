@@ -1710,6 +1710,49 @@ def harness_run(model: str | None, all_models: bool, limit: int, retire: bool,
     _echo_harness_cycle(report, retired)
 
 
+@harness.command("transfer")
+@click.option("--from", "source", required=True,
+              help="Source model whose graduated guidance to try elsewhere.")
+@click.option("--to", "targets", multiple=True,
+              help="Target model(s); default: every other configured role model.")
+@click.option("--force", is_flag=True,
+              help="Ignore the tried-memory and re-attempt already-judged pairs.")
+def harness_transfer(source: str, targets: tuple[str, ...], force: bool) -> None:
+    """Try one model's PROVEN guidance on other fleet models — a governed
+    experiment, not an assumption.
+
+    Each graduated (non-canary, not-relapsing) model-wide line of the source is
+    validated against the target's own eval corpus through the full floors and
+    the promotion gate, landing as a CANARY so real run outcomes adjudicate it.
+    Attempts are one-shot per (target, line) — re-running spends nothing on
+    pairs already judged (--force overrides). Requires [self_harness] enable,
+    an eval_corpus, and [self_improvement] enable to actually promote.
+    """
+    from .. import self_harness
+    from .. import self_improvement_runner as runner
+    if not self_harness.enabled():
+        raise click.ClickException(
+            "self-harness is off. Set [self_harness] enable = true or "
+            "MAVERICK_SELF_HARNESS=1.")
+    if not self_harness.settings().get("eval_corpus"):
+        raise click.ClickException(
+            "no [self_harness] eval_corpus configured — transfer validates "
+            "against the target's corpus cases, so it needs one.")
+    report = runner.run_self_harness_transfer(
+        source, targets=(list(targets) or None), force=force)
+    if not report:
+        click.echo("no transfer targets (fleet has no other models?).")
+        return
+    for tgt in sorted(report):
+        res = report[tgt]
+        click.echo(f"{source} -> {tgt}: attempted={len(res['attempted'])} "
+                   f"promoted={len(res['promoted'])}")
+        for ln in res["promoted"]:
+            click.echo(f"    + (canary) {ln}")
+        for s in res["skipped"][:10]:
+            click.echo(f"    - {s}")
+
+
 @harness.command("conflicts")
 @click.option("--model", default=None, help="Only check this model's guidance.")
 @click.option("--semantic", is_flag=True,

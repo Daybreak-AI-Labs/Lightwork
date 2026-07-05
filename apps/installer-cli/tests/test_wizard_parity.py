@@ -234,7 +234,8 @@ def test_write_config_self_harness_ships_production_floors(tmp_path: Path, monke
     for k in ("eval_corpus", "eval_budget_dollars", "mine_bucket_by",
               "semantic_mining", "efficacy_review", "promote_as_canary",
               "auto_run", "metamorphic", "relapse_failure_share",
-              "calibrate_judge", "candidates_per_signature", "retire_after_days"):
+              "calibrate_judge", "transfer_auto", "candidates_per_signature",
+              "retire_after_days"):
         assert k not in parsed["self_harness"]
 
 
@@ -253,6 +254,7 @@ def test_write_config_self_harness_advanced_knobs(tmp_path: Path, monkeypatch):
         "self_harness_metamorphic": True,
         "self_harness_relapse": True,
         "self_harness_calibrate_judge": True,
+        "self_harness_transfer_auto": True,
         "self_harness_candidates": 3,
         "self_harness_retire_days": 45,
     })
@@ -267,6 +269,7 @@ def test_write_config_self_harness_advanced_knobs(tmp_path: Path, monkeypatch):
     assert sh["metamorphic"] is True
     assert sh["relapse_failure_share"] == 0.5
     assert sh["calibrate_judge"] is True
+    assert sh["transfer_auto"] is True
     assert sh["candidates_per_signature"] == 3
     assert sh["retire_after_days"] == 45
     # The kernel actually reads what the wizard wrote.
@@ -283,6 +286,7 @@ def test_write_config_self_harness_advanced_knobs(tmp_path: Path, monkeypatch):
     assert resolved["metamorphic"] is True
     assert resolved["relapse_failure_share"] == 0.5
     assert resolved["calibrate_judge"] is True
+    assert resolved["transfer_auto"] is True
     assert resolved["candidates_per_signature"] == 3
     assert resolved["retire_after_days"] == 45.0
 

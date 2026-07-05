@@ -723,6 +723,11 @@ def get_self_harness() -> dict:
         # calibration.learning_frozen can detect THIS loop's judge drifting.
         # Default off -- telemetry only, never load-bearing.
         "calibrate_judge": bool(cfg.get("calibrate_judge", False)),
+        # Nightly cross-model transfer: after the dream-beat cycles, try each
+        # fleet model's graduated lines on the rest of the fleet (gated,
+        # canaried, budget-capped; the tried-memory keeps steady-state spend
+        # near zero). Default off -- transfer runs only via the CLI.
+        "transfer_auto": bool(cfg.get("transfer_auto", False)),
         # Relapse recency guard: re-probate (back to canary) a graduated line
         # whose recent-outcomes window carries at least this failing share
         # (0 = off, the default; clamped to (0, 1]). relapse_min_outcomes is

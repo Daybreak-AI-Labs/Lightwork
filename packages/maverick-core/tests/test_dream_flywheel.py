@@ -81,6 +81,41 @@ def test_dream_skips_the_self_harness_without_auto_run(tmp_path, monkeypatch):
     assert "[self-harness]" not in res.output
 
 
+def test_dream_runs_transfer_sweep_when_enabled(tmp_path, monkeypatch):
+    _stub_dreaming(monkeypatch)
+    monkeypatch.setenv("MAVERICK_SELF_HARNESS", "1")
+    monkeypatch.setattr("maverick.config.load_config", lambda *a, **k: {
+        "self_harness": {"enable": True, "auto_run": True, "transfer_auto": True}})
+    monkeypatch.setattr(
+        "maverick.self_improvement_runner.run_self_harness_all_models",
+        lambda **k: {})
+    monkeypatch.setattr(
+        "maverick.self_improvement_runner.run_self_harness_transfer_sweep",
+        lambda **k: {"m1": {"m2": {"attempted": ["ln"], "promoted": ["ln"],
+                                   "skipped": []}}})
+    res = CliRunner().invoke(main, ["--db", str(tmp_path / "w.db"), "dream"])
+    assert res.exit_code == 0, res.output
+    assert "[self-harness transfer] m1 -> m2: attempted=1 promoted=1" in res.output
+
+
+def test_dream_skips_transfer_without_the_knob(tmp_path, monkeypatch):
+    _stub_dreaming(monkeypatch)
+    monkeypatch.setenv("MAVERICK_SELF_HARNESS", "1")
+    monkeypatch.setattr("maverick.config.load_config", lambda *a, **k: {
+        "self_harness": {"enable": True, "auto_run": True}})   # transfer_auto OFF
+    monkeypatch.setattr(
+        "maverick.self_improvement_runner.run_self_harness_all_models",
+        lambda **k: {})
+
+    def _boom(**k):
+        raise AssertionError("transfer sweep should not run without transfer_auto")
+    monkeypatch.setattr(
+        "maverick.self_improvement_runner.run_self_harness_transfer_sweep", _boom)
+    res = CliRunner().invoke(main, ["--db", str(tmp_path / "w.db"), "dream"])
+    assert res.exit_code == 0, res.output
+    assert "[self-harness transfer]" not in res.output
+
+
 def test_dream_skips_the_self_harness_when_disabled(tmp_path, monkeypatch):
     _stub_dreaming(monkeypatch)
     monkeypatch.delenv("MAVERICK_SELF_HARNESS", raising=False)

@@ -83,6 +83,18 @@ def _run_self_harness_nightly() -> None:
                 f"[self-harness] {mid}: mined={rep.mined} "
                 f"promoted={rep.promoted} demoted={len(rep.demoted)} "
                 f"retired={retired} relapsed={len(rep.relapsed)}")
+        # Cross-model transfer on the same beat (opt-in, [self_harness]
+        # transfer_auto): the tried-memory makes it near-free once caught up.
+        if self_harness.settings().get("transfer_auto"):
+            sweep = si_runner.run_self_harness_transfer_sweep()
+            for src in sorted(sweep):
+                for tgt in sorted(sweep[src]):
+                    res = sweep[src][tgt]
+                    if res.get("attempted") or res.get("promoted"):
+                        click.echo(
+                            f"[self-harness transfer] {src} -> {tgt}: "
+                            f"attempted={len(res['attempted'])} "
+                            f"promoted={len(res['promoted'])}")
     except Exception:  # pragma: no cover -- the harness must never break dreaming
         pass
 
