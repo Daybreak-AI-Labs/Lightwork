@@ -415,6 +415,23 @@
         (data.sources || []).forEach(function (s) {
           var o = document.createElement('option'); o.value = s; o.textContent = s; evSource.appendChild(o);
         });
+        // Show each source's config keys in the JSON textarea placeholder so a
+        // user knows what to fill in (the field stays free-form JSON).
+        var evCfg = document.getElementById('auto-event-config');
+        var HINTS = {
+          http_json: '{ "url": "https://api.example.com/leads", "items_path": "data", "id_field": "id" }',
+          rss: '{ "url": "https://example.com/feed.xml" }',
+          oauth_http_json: '{ "url": "https://slack.com/api/...", "provider": "slack", "items_path": "messages" }',
+          github_issues: '{ "owner": "acme", "repo": "app", "state": "open" }',
+          imap_email: '{ "host": "imap.gmail.com", "username": "you@x.com", "password_env": "MY_IMAP_PW", "mailbox": "INBOX" }',  // pragma: allowlist secret
+          file_dir: '{ "path": "/data/inbound", "glob": "*.csv", "recursive": false }',
+          form: '{ "token": "signup" }  → POST submissions to /form/signup'
+        };
+        if (evCfg && evSource) {
+          var applyHint = function () { if (HINTS[evSource.value]) evCfg.placeholder = HINTS[evSource.value]; };
+          evSource.addEventListener('change', applyHint);
+          applyHint();
+        }
       }
       var items = data.triggers || [];
       // One batched history fetch (owner-scoped), grouped by trigger name -- the

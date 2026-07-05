@@ -415,6 +415,167 @@ class GithubIssuesSource:
 register("github_issues", GithubIssuesSource)
 
 
+# ---- built-in source: watch a directory for new files ----------------------
+
+
+def _list_dir_files(path: str, glob: str, recursive: bool) -> list:
+    """The files under ``path`` matching ``glob`` (isolated for test injection)."""
+    from pathlib import Path
+    root = Path(path).expanduser()
+    if not root.is_dir():
+        raise EventSourceError(f"file_dir path is not a directory: {path}")
+    it = root.rglob(glob) if recursive else root.glob(glob)
+    return [p for p in it if p.is_file()]
+
+
+class FileDirSource:
+    """Watch a directory and fire when a new file appears. ``config``:
+    ``{path, glob?, recursive?}`` (glob default ``*``). Dedup is by modification
+    time -- the cursor is the newest mtime fired, and only files strictly newer
+    fire next -- so a deleted file never causes a replay (unlike id-walking) and
+    a backlog drains oldest-first. Each event carries ``{path, name, size, mtime}``."""
+    source = "file_dir"
+
+    def poll(self, config: dict, cursor: str) -> PollResult:
+        path = str((config or {}).get("path") or "").strip()
+        if not path:
+            raise EventSourceError("file_dir source needs a 'path'")
+        glob = str((config or {}).get("glob") or "*")
+        recursive = bool((config or {}).get("recursive", False))
+        files = _list_dir_files(path, glob, recursive)
+        try:
+            since = float(cursor) if cursor else None
+        except (TypeError, ValueError):
+            since = None
+        stamped = []
+        for p in files:
+            try:
+                st = p.stat()
+            except OSError:  # pragma: no cover -- file vanished mid-scan
+                continue
+            stamped.append((st.st_mtime, p, st.st_size))
+        stamped.sort(key=lambda t: t[0])                 # oldest-first
+        # A non-empty baseline cursor even for an empty dir ("0"), so the NEXT
+        # poll isn't re-treated as a baseline and the first file to land fires.
+        newest = str(stamped[-1][0]) if stamped else (cursor or "0")
+        if since is None:
+            return PollResult(events=[], cursor=newest)  # baseline: don't replay history
+        fresh = [(m, p, sz) for (m, p, sz) in stamped if m > since]
+        fresh = fresh[:_MAX_EVENTS]
+        if not fresh:
+            return PollResult(events=[], cursor=newest)
+        events = [_flatten({"id": str(p), "path": str(p), "name": p.name,
+                            "size": sz, "mtime": m}) for (m, p, sz) in fresh]
+        return PollResult(events=events, cursor=str(fresh[-1][0]))
+
+
+register("file_dir", FileDirSource)
+
+
+# ---- built-in source: watch an IMAP mailbox for new mail -------------------
+
+
+def _fetch_imap(config: dict, since_uid: int) -> tuple[list[dict], int]:
+    """Fetch messages with UID > ``since_uid`` from an IMAP mailbox. Returns
+    ``(messages, highest_uid)`` where each message is a flat header dict. The
+    password is read from the env var named by ``password_env`` (never stored in
+    config). Isolated at module scope so tests can inject without a live server."""
+    import email
+    import imaplib
+    import os
+    from email.utils import parseaddr
+
+    host = str((config or {}).get("host") or "").strip()
+    user = str((config or {}).get("username") or "").strip()
+    pw_env = str((config or {}).get("password_env") or "").strip()
+    if not (host and user and pw_env):
+        raise EventSourceError("imap_email source needs 'host', 'username', 'password_env'")
+    password = os.environ.get(pw_env) or ""
+    if not password:
+        raise EventSourceError(f"imap_email: env var {pw_env} is unset")
+    mailbox = str((config or {}).get("mailbox") or "INBOX")
+    port = int((config or {}).get("port") or 993)
+    use_ssl = bool((config or {}).get("use_ssl", True))
+    cls = imaplib.IMAP4_SSL if use_ssl else imaplib.IMAP4
+    conn = cls(host, port)
+    try:
+        conn.login(user, password)
+        conn.select(mailbox, readonly=True)
+        # UID search for anything above the last-seen uid; first poll sees all
+        # and just records the high-water mark (baseline, no replay).
+        typ, data = conn.uid("search", None, f"UID {since_uid + 1}:*")
+        uids = [int(x) for x in (data[0].split() if data and data[0] else []) if int(x) > since_uid]
+        msgs: list[dict] = []
+        highest = since_uid
+        for uid in sorted(uids)[:_MAX_EVENTS]:
+            typ, mdata = conn.uid("fetch", str(uid), "(RFC822.HEADER)")
+            if not mdata or not isinstance(mdata[0], tuple):
+                continue
+            msg = email.message_from_bytes(mdata[0][1])
+            msgs.append({
+                "id": str(uid), "uid": uid,
+                "from": parseaddr(msg.get("From", ""))[1],
+                "subject": str(msg.get("Subject", "")),
+                "date": str(msg.get("Date", "")),
+                "message_id": str(msg.get("Message-ID", "")),
+            })
+            highest = max(highest, uid)
+        return msgs, highest
+    finally:
+        try:
+            conn.logout()
+        except Exception:  # pragma: no cover -- best-effort close
+            pass
+
+
+class ImapEmailSource:
+    """Fire when a new email arrives in an IMAP mailbox. ``config``: ``{host,
+    username, password_env, mailbox?, port?, use_ssl?}``. Dedup + ordering by
+    IMAP UID (monotonic within a mailbox): the cursor is the highest UID seen, so
+    the first poll only records the high-water mark and never replays the inbox.
+    Each event carries ``{uid, from, subject, date, message_id}`` -- the body is
+    deliberately not fetched (headers are enough to route, and cheaper/safer)."""
+    source = "imap_email"
+
+    def poll(self, config: dict, cursor: str) -> PollResult:
+        try:
+            since = int(cursor) if cursor else 0
+        except (TypeError, ValueError):
+            since = 0
+        msgs, highest = _fetch_imap(config or {}, since)
+        if not cursor:
+            return PollResult(events=[], cursor=str(highest))   # baseline
+        events = [_flatten(m) for m in msgs]
+        return PollResult(events=events, cursor=str(highest))
+
+
+register("imap_email", ImapEmailSource)
+
+
+# ---- built-in source: hosted-form submissions ------------------------------
+
+
+class FormSource:
+    """Fire when a hosted form is submitted. A public ``POST /form/<token>``
+    records the submission (:mod:`maverick.form_store`); this polls that store by
+    ``token`` so each new submission fires a flow with the form fields as data.
+    ``config``: ``{token}``. Dedup + ordering by a per-token monotonic ``seq``,
+    so the first poll only records the high-water mark (no replay of old
+    submissions) and a backlog drains oldest-first."""
+    source = "form"
+
+    def poll(self, config: dict, cursor: str) -> PollResult:
+        token = str((config or {}).get("token") or "").strip()
+        if not token:
+            raise EventSourceError("form source needs a 'token'")
+        from . import form_store
+        events, new_cursor = form_store.since(token, cursor or "")
+        return PollResult(events=[_flatten(e) for e in events], cursor=new_cursor)
+
+
+register("form", FormSource)
+
+
 def poll_source(source: str, config: dict, cursor: str) -> PollResult:
     """Poll one named source; raises :class:`EventSourceError` on trouble."""
     return get_source(source).poll(config or {}, cursor or "")
@@ -424,5 +585,6 @@ __all__ = [
     "EventSource", "EventSourceError", "PollResult",
     "available_sources", "get_source", "register", "enabled",
     "poll_source", "diff_new_items", "HttpJsonSource", "RssSource",
-    "OAuthHttpJsonSource", "GithubIssuesSource",
+    "OAuthHttpJsonSource", "GithubIssuesSource", "FileDirSource", "ImapEmailSource",
+    "FormSource",
 ]

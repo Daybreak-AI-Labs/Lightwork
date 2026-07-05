@@ -703,6 +703,7 @@ async def bearer_auth(request: Request, call_next):
     expected = os.environ.get("MAVERICK_DASHBOARD_TOKEN")
     if (request.url.path in _AUTH_EXEMPT or request.url.path.startswith("/share/")
             or request.url.path.startswith("/scim/")
+            or request.url.path.startswith("/form/")
             or request.url.path.startswith("/saml/")):
         # /share/<token> self-authenticates with its signed, revocable token
         # (verified in the route, which 404s an invalid/expired/revoked one) --
@@ -3795,6 +3796,38 @@ async def flow_approve_submit(request: Request, token: str = Form("")) -> HTMLRe
     return _flow_approve_page("Thanks — recorded",
                               f"You {verb} “{run.flow_id}”. It is resuming now; "
                               f"you can close this page.")
+
+
+@app.post("/form/{token}")
+async def form_submit(request: Request, token: str) -> JSONResponse:
+    """Record a hosted-form submission under ``token`` so a ``form`` event trigger
+    fires a flow with the submitted fields as data. Public by design (a form is
+    meant to be filled by anyone with the link); the unguessable ``token`` in the
+    path is the addressing secret, the body is size/field-bounded, and firing is
+    rate-limited. Gated on event triggers being enabled (404 otherwise)."""
+    from maverick import automation_events
+    if not automation_events.enabled():
+        raise HTTPException(status_code=404, detail="event triggers are disabled")
+    fields: dict = {}
+    ctype = request.headers.get("content-type", "")
+    if "application/json" in ctype:
+        body = await _read_limited_webhook_body(request)   # bounded read (shared cap)
+        import json as _json
+        try:
+            parsed = _json.loads(body or b"{}")
+        except ValueError as e:
+            raise HTTPException(status_code=400, detail="invalid JSON body") from e
+        if isinstance(parsed, dict):
+            fields = parsed
+    else:
+        # urlencoded / multipart form post -- read the stream once via the form
+        # parser (its own size limits apply); don't pre-read the body above.
+        form = await request.form()
+        fields = {k: str(v) for k, v in form.items()}
+    check_goal_rate_limit(request, source="form")
+    from maverick import form_store
+    seq = form_store.append(token, fields)
+    return JSONResponse({"ok": True, "seq": seq}, status_code=201)
 
 
 @app.post("/webhook/linear")
