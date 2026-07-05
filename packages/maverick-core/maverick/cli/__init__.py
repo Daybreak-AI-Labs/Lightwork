@@ -4552,9 +4552,11 @@ def ps(ctx, limit: int, as_json: bool) -> None:
     try:
         world = open_world(ctx.obj["db"])
         for g in world.list_goals(limit=limit, order="desc"):
+            # Raw title here: --json PRESERVES stored values (pinned by
+            # test_ps_json_preserves_raw_values); the table renderer below
+            # strips terminal control bytes at display time.
             procs.append({"type": "goal", "id": g.id, "state": g.status,
-                          "when": _when(g.updated_at),
-                          "what": _strip_terminal_control(g.title)})
+                          "when": _when(g.updated_at), "what": g.title})
     except Exception:  # fail-soft: a missing/locked world shouldn't crash ps
         pass
     try:
