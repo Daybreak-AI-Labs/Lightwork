@@ -717,6 +717,12 @@ def get_self_harness() -> dict:
         # the judge this many times (diverse framings) and take the majority vote
         # (1 = single call, the historical behavior).
         "judge_samples": max(1, _num("judge_samples", 1, int)),
+        # Feed the auto-built LLM judge's verdicts into the calibration
+        # interlock: each corpus-labeled verdict is recorded as a
+        # (vote-share confidence, agrees-with-label) sample, so
+        # calibration.learning_frozen can detect THIS loop's judge drifting.
+        # Default off -- telemetry only, never load-bearing.
+        "calibrate_judge": bool(cfg.get("calibrate_judge", False)),
         # Relapse recency guard: re-probate (back to canary) a graduated line
         # whose recent-outcomes window carries at least this failing share
         # (0 = off, the default; clamped to (0, 1]). relapse_min_outcomes is

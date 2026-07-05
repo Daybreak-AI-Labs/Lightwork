@@ -2393,6 +2393,16 @@ def test_cycle_runs_relapse_review_when_configured(monkeypatch, store):
     assert "shaky line" in sh.recall_addendum("M", store)           # still recalled
 
 
+def test_config_calibrate_judge(monkeypatch):
+    from maverick import config
+    monkeypatch.setattr(config, "load_config", lambda *a, **k: {
+        "self_harness": {"calibrate_judge": True}})
+    assert config.get_self_harness()["calibrate_judge"] is True
+    monkeypatch.setattr(config, "load_config", lambda *a, **k: {"self_harness": {}})
+    assert config.get_self_harness()["calibrate_judge"] is False
+    assert sh.settings()["calibrate_judge"] is False
+
+
 def test_config_relapse_knobs(monkeypatch):
     from maverick import config
     monkeypatch.setattr(config, "load_config", lambda *a, **k: {

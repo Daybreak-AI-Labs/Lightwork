@@ -310,6 +310,61 @@ def test_llm_paraphraser_reraises_budget_exceeded():
         ev.llm_paraphraser(_BrokeLLM())(["g"])
 
 
+# ---- judge calibration: verdicts arm the verifier-drift freeze ----
+
+def _calibration_sink(monkeypatch):
+    """Capture collect_calibration samples; returns the list."""
+    from maverick import self_improvement_runner as runner
+    seen = []
+    monkeypatch.setattr(
+        runner, "collect_calibration",
+        lambda confidence, correct, **kw: seen.append(
+            (confidence, correct, kw.get("source"))) or True)
+    return seen
+
+
+def _calibrate_on(monkeypatch, on=True):
+    from maverick import config
+    monkeypatch.setattr(config, "load_config", lambda *a, **k: {
+        "self_harness": {"calibrate_judge": on}})
+
+
+def test_judge_calibration_records_agreement(monkeypatch):
+    seen = _calibration_sink(monkeypatch)
+    _calibrate_on(monkeypatch)
+    # judge says YES and the label agrees (expected hint in output) -> correct,
+    # single-call confidence 1.0
+    assert ev.llm_judge(_FakeLLM(text="yes"))("g", "the answer is DONE", "done") is True
+    # judge says YES but the label disagrees -> recorded as incorrect
+    assert ev.llm_judge(_FakeLLM(text="yes"))("g", "mismatch", "done") is True
+    assert seen == [(1.0, True, "self_harness_judge"),
+                    (1.0, False, "self_harness_judge")]
+
+
+def test_judge_calibration_confidence_is_vote_share(monkeypatch):
+    seen = _calibration_sink(monkeypatch)
+    _calibrate_on(monkeypatch)
+    # 2 yes / 1 no -> verdict yes at 2/3 confidence; label agrees
+    j = ev.llm_judge(_SeqLLM(["yes", "no", "yes"]), samples=3)
+    assert j("g", "has done", "done") is True
+    assert seen == [(2 / 3, True, "self_harness_judge")]
+
+
+def test_judge_calibration_skips_ties_unlabeled_and_when_off(monkeypatch):
+    seen = _calibration_sink(monkeypatch)
+    _calibrate_on(monkeypatch)
+    # a tie falls to the heuristic -- the LLM abstained, nothing to calibrate
+    ev.llm_judge(_SeqLLM(["yes", "no"]), samples=2)("g", "has done", "done")
+    # an unlabeled case (empty expected, e.g. a judge_unknown paraphrase)
+    # carries no ground truth
+    ev.llm_judge(_FakeLLM(text="yes"))("g", "output", "")
+    assert seen == []
+    # knob off (the default): labeled verdicts are not recorded either
+    _calibrate_on(monkeypatch, on=False)
+    ev.llm_judge(_FakeLLM(text="yes"))("g", "has done", "done")
+    assert seen == []
+
+
 def test_corpus_scorers_judge_unknown_scores_paraphrases():
     # Default: a non-corpus goal is indeterminate (NaN arm) -- so the
     # metamorphic branch no-ops. judge_unknown lets a hint-free judge score
