@@ -81,6 +81,8 @@ for false unless noted otherwise.
 | `MAVERICK_DATA_ENGINE` | config `[data_engine] enable` (off) | Enable the Cognitive Data Engine flywheel: causal failure triage → guardrails → habits (`maverick flywheel`). |
 | `MAVERICK_OPERATIONS_SCIENTIST` | config `[operations_scientist] enable` (off) | Enable the Operations Scientist: propose + simulate a better process before a real experiment. |
 | `MAVERICK_CONSEQUENCE` | config `[consequence] enable` (off) | Ground learning in real downstream outcomes over the verifier proxy (`maverick record-outcome`). |
+| `MAVERICK_FLOWS` | config `[flows] enable` (off) | Enable the visual flow-automation engine (deterministic graph of agent/action/branch/… nodes; the dashboard designer + triggers). |
+| `MAVERICK_FLOWS_AUTO` | config `[flows] auto_evolve` (off) | Let the flow self-rewrite loop act autonomously: revert a node rewrite it measures as a regression. Pairs with `[flows] auto_apply` (apply an improvement forward) — both are also toggleable from the dashboard Learning page. |
 | `MAVERICK_EMERGENT_PROTOCOL` | config `[emergent_protocol] enable` (off) | Enable the auditable coordination codec (sentinel form; `maverick codebook`). |
 | `MAVERICK_EMERGENT_CODEC` | config `[emergent_codec] enable` (off) | Measure the token-aware codec on the live coordination stream (telemetry only; `maverick codec-learn`). |
 | `MAVERICK_DOMAIN_DISCIPLINE` | config `[domains] discipline` (on) | Append suite operating discipline to specialist personas at spawn. |
