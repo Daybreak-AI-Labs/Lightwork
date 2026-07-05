@@ -1078,6 +1078,75 @@ async def get_flow_run_endpoint(request: Request, run_id: str) -> dict:
     return _run_out(_load_owned_run(request, run_id))
 
 
+@router.get("/flows/runs/{run_id}/events")
+async def flow_run_events_stream(request: Request, run_id: str) -> StreamingResponse:
+    """Server-Sent Events stream of a flow run's live state: one snapshot per
+    change (keyed on the run's ``updated`` stamp), ending with a terminal event
+    when the run completes/fails/rejects or parks on a human/event pause. The
+    canvas overlay and the run viewer prefer this over polling; both fall back
+    to polling when SSE is unavailable. Same slot cap + lifetime bound as the
+    goal-events stream, so open tabs can't exhaust the event loop."""
+    import asyncio as _asyncio
+    import json as _json
+
+    require_permission(request, "operate")
+    _require_flows()
+    _load_owned_run(request, run_id)     # 404 before holding a stream slot
+    from maverick.flow import store as flow_store
+
+    from maverick_dashboard._shared import _get_sse_semaphore
+    sem = _get_sse_semaphore()
+    if sem.locked():
+        raise HTTPException(status_code=503,
+                            detail="too many concurrent event streams; retry shortly",
+                            headers={"Retry-After": "5"})
+    await sem.acquire()
+
+    # completed/failed/rejected are final; a run parked on a human or an
+    # external event won't change until someone acts -- close the stream and
+    # let the page's actions (approve / resume) drive the next one.
+    end_states = ("completed", "failed", "rejected", "paused_approval", "paused_event")
+    poll, max_poll, max_seconds, heartbeat_every = 0.5, 5.0, 300.0, 30.0
+
+    async def generate():
+        started = _asyncio.get_running_loop().time()
+        last_stamp = None
+        interval, idle = poll, 0.0
+        yield "retry: 3000\n\n"
+        try:
+            while True:
+                if (_asyncio.get_running_loop().time() - started) >= max_seconds:
+                    yield "event: timeout\ndata: {\"detail\": \"stream lifetime exceeded\"}\n\n"
+                    return
+                run = await run_in_threadpool(flow_store.load_run, run_id)
+                if run is None:
+                    yield "event: error\ndata: {\"detail\": \"run vanished\"}\n\n"
+                    return
+                if run.updated != last_stamp:
+                    last_stamp = run.updated
+                    payload = _run_out(run)
+                    kind = "terminal" if run.status in end_states else "snapshot"
+                    yield f"event: {kind}\ndata: {_json.dumps(payload, default=str)}\n\n"
+                    if kind == "terminal":
+                        return
+                    interval, idle = poll, 0.0
+                else:
+                    idle += interval
+                    if idle >= heartbeat_every:
+                        yield ": heartbeat\n\n"
+                        idle = 0.0
+                    interval = min(max_poll, interval * 1.5)
+                await _asyncio.sleep(interval)
+        except _asyncio.CancelledError:
+            return
+        finally:
+            sem.release()
+
+    return StreamingResponse(
+        generate(), media_type="text/event-stream",
+        headers={"Cache-Control": "no-cache", "X-Accel-Buffering": "no"})
+
+
 @router.post("/flows/runs/{run_id}/resume")
 async def resume_flow_run_endpoint(request: Request, run_id: str,
                                    payload: FlowResumeIn) -> dict:

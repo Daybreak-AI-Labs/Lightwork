@@ -321,6 +321,25 @@ def test_retry_from_failure_resumes_at_failed_node(monkeypatch, tmp_path):
     assert c.post("/api/v1/flows/runs/ry/retry?from_failure=1").status_code == 409
 
 
+def test_run_events_stream_ends_with_terminal_snapshot(monkeypatch, tmp_path):
+    _isolate(monkeypatch, tmp_path)
+    from maverick.flow import store
+    store.save_run(store.FlowRun(run_id="sse1", flow_id="demo", status="completed",
+                                 data={"r": "ok"}, nodes={"a": {"status": "done", "outcome": 1.0}}))
+    c = _client()
+    with c.stream("GET", "/api/v1/flows/runs/sse1/events") as r:
+        assert r.status_code == 200
+        assert r.headers["content-type"].startswith("text/event-stream")
+        body = ""
+        for chunk in r.iter_text():
+            body += chunk
+            if "event: terminal" in body:
+                break
+    assert "event: terminal" in body and '"status": "completed"' in body
+    # unknown run 404s before a stream slot is held
+    assert c.get("/api/v1/flows/runs/nope/events").status_code == 404
+
+
 def test_run_viewer_page_renders(monkeypatch, tmp_path):
     _isolate(monkeypatch, tmp_path)
     r = _client().get("/flows/demo/runs/abc123")

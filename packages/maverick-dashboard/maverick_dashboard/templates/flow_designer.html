@@ -69,6 +69,15 @@
               border: 1px solid var(--border); border-radius: 999px; background: var(--surface-sunken);
               cursor: pointer; color: var(--muted); }
   .fd__pill:hover { border-color: var(--accent); color: var(--text); }
+  /* marquee multi-select (shift-drag on empty canvas) */
+  #fd-marquee { fill: color-mix(in srgb, var(--accent) 12%, transparent); stroke: var(--accent);
+                stroke-width: 1; stroke-dasharray: 4 3; pointer-events: none; }
+  /* minimap (bottom-left overview; click to jump) */
+  .fd__minimap { position: absolute; left: 8px; bottom: 8px; z-index: 2; width: 160px; height: 110px;
+                 background: var(--surface); border: 1px solid var(--border); border-radius: var(--radius);
+                 opacity: .92; cursor: pointer; }
+  .fd__minimap rect.mini-node { fill: var(--muted); }
+  .fd__minimap rect.mini-view { fill: none; stroke: var(--accent); stroke-width: 1.5; }
   /* copilot chat drawer (over the canvas' right edge) */
   .fd__chat { display: none; position: absolute; top: 8px; right: 8px; bottom: 8px; width: 320px;
               z-index: 3; background: var(--surface); border: 1px solid var(--border);
@@ -164,8 +173,10 @@
         <g id="fd-edges"></g>
         <g id="fd-nodes"></g>
         <path id="fd-temp-edge" class="fd-edge" style="display:none;"></path>
+        <rect id="fd-marquee" style="display:none;"></rect>
       </g>
     </svg>
+    <svg id="fd-minimap" class="fd__minimap" viewBox="0 0 160 110" aria-label="Flow overview map"></svg>
   </div>
 
   <div class="fd__props" id="fd-props">

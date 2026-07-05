@@ -182,11 +182,28 @@
         if (ACTIVE.indexOf(run.status) >= 0 && tries > 0) setTimeout(function () { poll(tries - 1); }, 1200);
       }).catch(function () { say('Could not load the run.'); });
   }
+  function watch() {
+    // Live updates over SSE; polling is the fallback (no EventSource, stream
+    // slots exhausted, or the connection never opens).
+    if (typeof EventSource === 'undefined') { poll(60); return; }
+    var es;
+    try { es = new EventSource('/api/v1/flows/runs/' + encodeURIComponent(runId) + '/events'); }
+    catch (e) { poll(60); return; }
+    var gotAny = false;
+    function onSnap(evt) {
+      gotAny = true;
+      try { renderRun(JSON.parse(evt.data)); } catch (e) { /* keep streaming */ }
+    }
+    es.addEventListener('snapshot', onSnap);
+    es.addEventListener('terminal', function (evt) { onSnap(evt); es.close(); });
+    es.addEventListener('timeout', function () { es.close(); poll(60); });
+    es.onerror = function () { if (!gotAny) { es.close(); poll(60); } };
+  }
 
   api('/api/v1/flows/' + encodeURIComponent(flowId))
     .then(function (r) { return r.ok ? r.json() : null; })
-    .then(function (f) { if (f) flowNodes = orderNodes(f); poll(25); })
-    .catch(function () { poll(25); });
+    .then(function (f) { if (f) flowNodes = orderNodes(f); watch(); })
+    .catch(function () { watch(); });
 })();
 </script>
 {% endblock %}

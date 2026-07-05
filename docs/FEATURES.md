@@ -550,7 +550,13 @@ here.
   the flow (cron / webhooks / event triggers) in one place, a **gallery**
   (`GET /flows/gallery`) loads curated starter graphs onto the canvas, flows
   export/import as JSON files, and `?from_template=` opens any saved template
-  as its single-agent flow (the text-builder → designer bridge). A dedicated
+  as its single-agent flow (the text-builder → designer bridge). Shift-drag
+  **marquee multi-select** moves/deletes node groups together, a corner
+  **minimap** gives click-to-jump orientation, and a failed run surfaces a
+  one-click **🔧 Fix it** that opens the copilot pre-armed with a
+  diagnose-and-patch turn grounded in that run's trace. Live status streams
+  over **SSE** (`GET /flows/runs/{id}/events`, slot-capped like the goal
+  stream) with automatic fallback to backoff polling. A dedicated
   **run viewer** (`/flows/{flow_id}/runs/{run_id}`) shows the node-by-node
   timeline with per-step durations, redacted run data, and the recovery
   actions.
@@ -579,10 +585,11 @@ here.
   session. A hosted **form** submission (`form_store.py`, public `POST /form/{token}`)
   fires a flow with the submitted fields as data.
 
-- **Migration fidelity** (`automation_import.to_flow`) — n8n IF/Filter and
-  Power Automate (WDL) `If` / `Foreach` / `Switch` / `Until` / `Scope` are all
-  captured **structurally** (branch/foreach/switch/while/scope nodes, arms
-  wired to rejoin, bodies as nested flows, Until's exit condition negated);
+- **Migration fidelity** (`automation_import.to_flow`) — n8n IF/Filter,
+  Power Automate (WDL) `If` / `Foreach` / `Switch` / `Until` / `Scope`, and
+  Workato recipe `if` / `repeat` blocks are all captured **structurally**
+  (branch/foreach/switch/while/scope nodes, arms wired to rejoin, bodies as
+  nested flows, Until's exit condition negated);
   graphless sources approximate each step as an agent node that still runs.
   `to_flow_with_report` returns the per-step fidelity log
   (`preserved` / `approximated` + why), and the dashboard import can save the

@@ -18,6 +18,7 @@
   var runCursor = null; // node a paused run is waiting on
   var toolCatalog = {}; // tool name -> {description, params[]} for the action picker
   var selected = null;
+  var multiSel = {};        // node id -> true when marquee-selected (group drag/delete)
   var selectedEdge = null;  // {from, port} when an edge is selected (click to select, Del to cut)
   var view = { x: 40, y: 20, k: 1 };
   var idSeq = 0;
@@ -152,7 +153,7 @@
     });
     // nodes
     flow.nodes.forEach(function (n) {
-      var g = el('g', { class: 'fd-node' + (n.id === selected ? ' selected' : '') + (n.id === flow.start ? ' start' : '') + runClass(n.id),
+      var g = el('g', { class: 'fd-node' + ((n.id === selected || multiSel[n.id]) ? ' selected' : '') + (n.id === flow.start ? ' start' : '') + runClass(n.id),
                         transform: 'translate(' + n.x + ',' + n.y + ')' });
       g.setAttribute('data-node', n.id);
       g.appendChild(el('rect', { class: 'card', width: W, height: H, rx: 10 }));
@@ -174,6 +175,42 @@
       });
       gNodes.appendChild(g);
     });
+    renderMinimap();
+  }
+
+  // ---- minimap: a scaled overview with the viewport rect; click to jump ----
+  var MINI_W = 160, MINI_H = 110, MINI_PAD = 8;
+  function miniScale() {
+    var minX = 0, minY = 0, maxX = 400, maxY = 300;
+    if (flow.nodes.length) {
+      minX = Infinity; minY = Infinity; maxX = -Infinity; maxY = -Infinity;
+      flow.nodes.forEach(function (n) {
+        minX = Math.min(minX, n.x); minY = Math.min(minY, n.y);
+        maxX = Math.max(maxX, n.x + W); maxY = Math.max(maxY, n.y + H);
+      });
+    }
+    var r = canvas.getBoundingClientRect();
+    // include the visible viewport so the view rect always fits on the map
+    minX = Math.min(minX, -view.x / view.k); minY = Math.min(minY, -view.y / view.k);
+    maxX = Math.max(maxX, (-view.x + r.width) / view.k); maxY = Math.max(maxY, (-view.y + r.height) / view.k);
+    var k = Math.min((MINI_W - 2 * MINI_PAD) / Math.max(1, maxX - minX),
+                     (MINI_H - 2 * MINI_PAD) / Math.max(1, maxY - minY));
+    return { minX: minX, minY: minY, k: k };
+  }
+  function renderMinimap() {
+    var mm = document.getElementById('fd-minimap'); if (!mm) return;
+    mm.textContent = '';
+    var s = miniScale();
+    flow.nodes.forEach(function (n) {
+      mm.appendChild(el('rect', { class: 'mini-node',
+        x: MINI_PAD + (n.x - s.minX) * s.k, y: MINI_PAD + (n.y - s.minY) * s.k,
+        width: Math.max(2, W * s.k), height: Math.max(2, H * s.k), rx: 1 }));
+    });
+    var r = canvas.getBoundingClientRect();
+    mm.appendChild(el('rect', { class: 'mini-view',
+      x: MINI_PAD + (-view.x / view.k - s.minX) * s.k,
+      y: MINI_PAD + (-view.y / view.k - s.minY) * s.k,
+      width: (r.width / view.k) * s.k, height: (r.height / view.k) * s.k }));
   }
 
   // ---- coordinate + interaction ----
@@ -204,13 +241,28 @@
     }
     selectedEdge = null;
     if (nodeEl) {
-      var id = nodeEl.getAttribute('data-node'); selectNode(id);
+      var id = nodeEl.getAttribute('data-node');
       var n = nodeById(id), p = worldPt(evt);
+      if (multiSel[id] && Object.keys(multiSel).length > 1) {
+        // dragging one selected node moves the whole marquee selection
+        var offs = {};
+        flow.nodes.forEach(function (m) { if (multiSel[m.id]) offs[m.id] = { dx: p.x - m.x, dy: p.y - m.y }; });
+        drag = { kind: 'group', offs: offs };
+        evt.preventDefault(); return;
+      }
+      multiSel = {};
+      selectNode(id);
       drag = { kind: 'node', id: id, dx: p.x - n.x, dy: p.y - n.y };
+      evt.preventDefault(); return;
+    }
+    if (evt.shiftKey) {           // shift-drag on empty canvas: marquee select
+      var mp = worldPt(evt);
+      drag = { kind: 'marquee', sx: mp.x, sy: mp.y };
       evt.preventDefault(); return;
     }
     drag = { kind: 'pan', sx: evt.clientX - view.x, sy: evt.clientY - view.y };
     canvas.classList.add('panning');
+    multiSel = {};
     selectNode(null);
   });
   function deleteEdge(edge) {
@@ -234,6 +286,21 @@
       n.x = Math.round((p.x - drag.dx) / 16) * 16;
       n.y = Math.round((p.y - drag.dy) / 16) * 16;
       render();
+    } else if (drag.kind === 'group') {
+      var gp = worldPt(evt);
+      flow.nodes.forEach(function (m) {
+        var o = drag.offs[m.id]; if (!o) return;
+        m.x = Math.round((gp.x - o.dx) / 16) * 16;
+        m.y = Math.round((gp.y - o.dy) / 16) * 16;
+      });
+      render();
+    } else if (drag.kind === 'marquee') {
+      var mq = document.getElementById('fd-marquee');
+      var mp2 = worldPt(evt);
+      drag.ex = mp2.x; drag.ey = mp2.y;
+      mq.style.display = '';
+      mq.setAttribute('x', Math.min(drag.sx, mp2.x)); mq.setAttribute('y', Math.min(drag.sy, mp2.y));
+      mq.setAttribute('width', Math.abs(mp2.x - drag.sx)); mq.setAttribute('height', Math.abs(mp2.y - drag.sy));
     } else if (drag.kind === 'pan') {
       view.x = evt.clientX - drag.sx; view.y = evt.clientY - drag.sy; render();
     } else if (drag.kind === 'connect') {
@@ -254,6 +321,21 @@
   window.addEventListener('mouseup', function (evt) {
     canvas.classList.remove('panning');
     tempEdge.style.display = 'none';
+    if (drag && drag.kind === 'marquee') {
+      document.getElementById('fd-marquee').style.display = 'none';
+      var x0 = Math.min(drag.sx, drag.ex || drag.sx), x1 = Math.max(drag.sx, drag.ex || drag.sx);
+      var y0 = Math.min(drag.sy, drag.ey || drag.sy), y1 = Math.max(drag.sy, drag.ey || drag.sy);
+      multiSel = {};
+      flow.nodes.forEach(function (n) {
+        var cx = n.x + W / 2, cy = n.y + H / 2;
+        if (cx >= x0 && cx <= x1 && cy >= y0 && cy <= y1) multiSel[n.id] = true;
+      });
+      selected = null;
+      var count = Object.keys(multiSel).length;
+      say(count ? count + ' node' + (count === 1 ? '' : 's') + ' selected — drag to move together, Delete to remove.' : '');
+      renderProps(); render();
+      drag = null; return;
+    }
     if (drag && drag.kind === 'connect') {
       var nodeEl = evt.target.closest('[data-node]');
       if (nodeEl) {
@@ -304,6 +386,20 @@
     flow.nodes.forEach(function (n) { ['next', 'if_true', 'if_false', 'on_error'].forEach(function (k) { if (n[k] === id) n[k] = null; }); });
     if (flow.start === id) flow.start = flow.nodes.length ? flow.nodes[0].id : '';
     selectNode(null); render();
+  }
+  function deleteSelection() {
+    var ids = Object.keys(multiSel);
+    if (!ids.length) return;
+    pushHistory();
+    flow.nodes = flow.nodes.filter(function (n) { return !multiSel[n.id]; });
+    flow.nodes.forEach(function (n) {
+      ['next', 'if_true', 'if_false', 'on_error'].forEach(function (k) { if (multiSel[n[k]]) n[k] = null; });
+      (n.cases || []).forEach(function (c) { if (multiSel[c.to]) c.to = null; });
+    });
+    if (multiSel[flow.start]) flow.start = flow.nodes.length ? flow.nodes[0].id : '';
+    multiSel = {};
+    selectNode(null); render();
+    say('Removed ' + ids.length + ' node' + (ids.length === 1 ? '' : 's') + '.');
   }
   function duplicateNode(id) {
     var src = nodeById(id); if (!src) return;
@@ -418,9 +514,21 @@
   }
   function renderProps() {
     props.textContent = '';
+    var selCount = Object.keys(multiSel).length;
+    if (selCount) {
+      var mh = document.createElement('div'); mh.style.fontWeight = '600'; mh.style.marginBottom = 'var(--space-3)';
+      mh.textContent = selCount + ' nodes selected';
+      props.appendChild(mh);
+      props.appendChild(hint('Drag any selected node to move the group. Delete removes them all; Esc deselects.'));
+      var db = document.createElement('button'); db.className = 'btn btn--ghost'; db.type = 'button';
+      db.textContent = '🗑 Delete ' + selCount + ' nodes';
+      db.addEventListener('click', deleteSelection);
+      props.appendChild(db);
+      return;
+    }
     if (!selected) {
       var p = document.createElement('p'); p.className = 'fd__empty';
-      p.textContent = "Select a node to edit it, or add a step. Connect steps by dragging from a node's bottom dot to another node.";
+      p.textContent = "Select a node to edit it, or add a step. Connect steps by dragging from a node's bottom dot to another node. Shift-drag selects several.";
       props.appendChild(p); return;
     }
     var n = nodeById(selected); if (!n) return;
@@ -753,7 +861,7 @@
           runState = {}; runCursor = null; lastRunId = j.run_id;
           say((dryRun ? '🧪 Dry run ' : 'Running ') + '(run ' + j.run_id.slice(0, 8) + '…)');
           document.getElementById('fd-legend').classList.add('on');
-          pollRun(j.run_id, 20);
+          watchRun(j.run_id);
         }).catch(function () { say('Run failed', true); });
     });
   }
@@ -766,6 +874,43 @@
     a.style.marginLeft = '6px';
     msg.appendChild(a);
   }
+  function handleRunUpdate(run, runId) {
+    // Paint one run snapshot onto the canvas; returns true when the run has
+    // reached a state that needs no further watching.
+    runState = run.nodes || {};
+    runCursor = (['paused_approval', 'paused_delay', 'paused_event'].indexOf(run.status) >= 0) ? run.cursor : null;
+    render(); if (selected) renderProps();
+    if (run.status === 'paused_approval') { sayWithRunLink('⏸ waiting for approval —', runId); return true; }
+    if (run.status === 'paused_event') { sayWithRunLink('📥 waiting for an external event —', runId); return true; }
+    if (run.status === 'failed') {
+      sayWithRunLink(runSummary(run) + ' ·', runId);
+      offerFixIt(runId);
+      return true;
+    }
+    if (['completed', 'rejected'].indexOf(run.status) >= 0) { sayWithRunLink(runSummary(run) + ' ·', runId); return true; }
+    return false;
+  }
+  function watchRun(runId) {
+    // Live status over SSE; falls back to polling where EventSource or the
+    // stream isn't available (older proxies, stream-slot exhaustion).
+    if (typeof EventSource === 'undefined') { pollRun(runId, 0); return; }
+    var es;
+    try { es = new EventSource('/api/v1/flows/runs/' + encodeURIComponent(runId) + '/events'); }
+    catch (e) { pollRun(runId, 0); return; }
+    var gotAny = false;
+    function onSnap(evt) {
+      gotAny = true;
+      try { if (handleRunUpdate(JSON.parse(evt.data), runId)) es.close(); } catch (e) { /* keep streaming */ }
+    }
+    es.addEventListener('snapshot', onSnap);
+    es.addEventListener('terminal', function (evt) { onSnap(evt); es.close(); });
+    es.addEventListener('timeout', function () { es.close(); pollRun(runId, 0); });
+    es.onerror = function () {
+      // never connected -> fall back to polling; a drop mid-stream lets
+      // EventSource retry on its own
+      if (!gotAny) { es.close(); pollRun(runId, 0); }
+    };
+  }
   function pollRun(runId, tick) {
     // Poll until a terminal/paused state: fast at first, backing off to 3s so a
     // long run keeps updating the canvas instead of silently going dark.
@@ -773,19 +918,25 @@
       .then(function (r) { return r.ok ? r.json() : null; })
       .then(function (run) {
         if (!run) return;
-        runState = run.nodes || {};
-        runCursor = (['paused_approval', 'paused_delay', 'paused_event'].indexOf(run.status) >= 0) ? run.cursor : null;
-        render(); if (selected) renderProps();
-        if (run.status === 'paused_approval') { sayWithRunLink('⏸ waiting for approval —', runId); return; }
-        if (run.status === 'paused_event') { sayWithRunLink('📥 waiting for an external event —', runId); return; }
-        if (run.status === 'failed') {
-          sayWithRunLink(runSummary(run) + ' · ask the 💬 Copilot “why did it fail?” ·', runId);
-          return;
-        }
-        if (['completed', 'rejected'].indexOf(run.status) >= 0) { sayWithRunLink(runSummary(run) + ' ·', runId); return; }
+        if (handleRunUpdate(run, runId)) return;
         var wait = Math.min(3000, 900 + (tick || 0) * 150);
         setTimeout(function () { pollRun(runId, (tick || 0) + 1); }, wait);
       }).catch(function () {});
+  }
+  function offerFixIt(runId) {
+    // One-click repair: open the copilot pre-armed with a diagnose+fix turn
+    // grounded in the failed run's trace.
+    var a = document.createElement('button');
+    a.className = 'btn btn--ghost'; a.type = 'button'; a.textContent = '🔧 Fix it';
+    a.style.marginLeft = '6px';
+    a.addEventListener('click', function () {
+      lastRunId = runId;
+      chatToggle(true);
+      var inp = document.getElementById('fd-chat-input');
+      inp.value = 'The last run failed. Diagnose why from the run trace and propose the smallest patch that fixes it.';
+      chatSend();
+    });
+    msg.appendChild(a);
   }
   function runSummary(run) {
     var ok = 0, err = 0, ns = run.nodes || {};
@@ -1107,6 +1258,19 @@
   document.getElementById('fd-redo').addEventListener('click', redo);
   document.getElementById('fd-fit').addEventListener('click', zoomToFit);
   document.getElementById('fd-triggers').addEventListener('click', showTriggers);
+  document.getElementById('fd-minimap').addEventListener('mousedown', function (evt) {
+    // click the overview to center the canvas on that spot
+    evt.preventDefault();
+    var mm = document.getElementById('fd-minimap');
+    var mr = mm.getBoundingClientRect();
+    var s = miniScale();
+    var wx = (evt.clientX - mr.left - MINI_PAD) / s.k + s.minX;
+    var wy = (evt.clientY - mr.top - MINI_PAD) / s.k + s.minY;
+    var r = canvas.getBoundingClientRect();
+    view.x = r.width / 2 - wx * view.k;
+    view.y = r.height / 2 - wy * view.k;
+    render();
+  });
   document.getElementById('fd-export').addEventListener('click', exportJson);
   document.getElementById('fd-import-json').addEventListener('click', function () {
     document.getElementById('fd-import-file').click();
@@ -1130,9 +1294,10 @@
     if (mod && !typing && (e.key === 'd' || e.key === 'D') && selected) { e.preventDefault(); duplicateNode(selected); return; }
     if (mod && !typing && (e.key === 'c' || e.key === 'C') && selected) { e.preventDefault(); copyNode(selected); return; }
     if (mod && !typing && (e.key === 'v' || e.key === 'V')) { e.preventDefault(); pasteNode(); return; }
-    if (e.key === 'Escape' && !typing) { selected = null; selectedEdge = null; render(); renderProps(); }
+    if (e.key === 'Escape' && !typing) { selected = null; selectedEdge = null; multiSel = {}; render(); renderProps(); }
     else if ((e.key === 'Delete' || e.key === 'Backspace') && !typing) {
       if (selectedEdge) { e.preventDefault(); deleteEdge(selectedEdge); }
+      else if (Object.keys(multiSel).length) { e.preventDefault(); deleteSelection(); }
       else if (selected) { e.preventDefault(); deleteNode(selected); }
     }
   });

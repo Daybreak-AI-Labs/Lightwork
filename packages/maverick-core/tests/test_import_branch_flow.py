@@ -243,6 +243,49 @@ def test_power_automate_scope_becomes_scope_node():
     assert next(r for r in report if r["step"] == "Try_block")["fidelity"] == "preserved"
 
 
+def test_workato_if_and_repeat_are_captured_structurally():
+    import json as _json
+
+    from maverick.automation_import import workato
+    from maverick.flow.ir import NODE_FOREACH
+    recipe = {
+        "id": 7, "name": "Escalate big deals", "running": True,
+        "code": _json.dumps({
+            "provider": "salesforce", "name": "new_opportunity",
+            "block": [
+                {"keyword": "if", "description": "Big deal?",
+                 "input": {"a": "#{_('data.salesforce.amount')}",
+                           "operation": "greater_than", "b": "10000"},
+                 "block": [
+                     {"keyword": "action", "provider": "slack", "name": "post_message",
+                      "input": {"text": "big deal!"}},
+                 ]},
+                {"keyword": "foreach", "description": "Per line item",
+                 "input": {"source": "#{_('data.salesforce.line_items')}"},
+                 "block": [
+                     {"keyword": "action", "provider": "quickbooks", "name": "create_invoice_line",
+                      "input": {}},
+                 ]},
+                {"keyword": "action", "provider": "gmail", "name": "send_email",
+                 "input": {"to": "sales@x.com"}},
+            ],
+        }),
+    }
+    f, report = to_flow_with_report(workato.translate(recipe))
+    assert f.validate() == []
+    branch = next(n for n in f.nodes.values() if n.kind == NODE_BRANCH)
+    assert branch.condition == "amount > 10000"
+    then_node = f.nodes[branch.if_true]
+    loop = next(n for n in f.nodes.values() if n.kind == NODE_FOREACH)
+    assert then_node.tool == "slack"
+    assert then_node.next == loop.id          # then-arm rejoins the chain
+    assert branch.if_false == loop.id         # no-match falls through
+    assert loop.items == "line_items" and loop.body is not None
+    fidelity = {r["step"]: r["fidelity"] for r in report}
+    assert fidelity["Big deal?"] == "preserved"
+    assert fidelity["Per line item"] == "preserved"
+
+
 def test_every_lowering_path_emits_a_report():
     from maverick.automation_import import ir as iir
     a = iir.ImportedAutomation("make", "9", "x", iir.ImportedTrigger(kind=iir.TRIGGER_WEBHOOK),

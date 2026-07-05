@@ -344,6 +344,113 @@ def _pa_to_flow(automation: ImportedAutomation,
     return flow
 
 
+# ---- Workato recipe-tree graph capture ---------------------------------------
+
+# Workato condition operations -> the flow condition-evaluator's operators.
+_WK_OPS = {"equals_to": "==", "not_equals_to": "!=", "greater_than": ">",
+           "less_than": "<", "greater_than_or_equals_to": ">=",
+           "less_than_or_equals_to": "<=", "contains": "contains"}
+
+
+def _wk_operand(v) -> str:
+    """A Workato operand (``#{_('data.salesforce.opportunity.stage')}``, a
+    literal) reduced to a flow-data key / literal."""
+    s = str(v).strip()
+    m = re.search(r"_\('([^']+)'\)", s)
+    if m:
+        return _safe_line(m.group(1).rsplit(".", 1)[-1], max_chars=40)
+    return _safe_line(s, max_chars=40)
+
+
+def _wk_condition(inp: dict) -> str:
+    op = _WK_OPS.get(str(inp.get("operation") or ""), "==")
+    left = _wk_operand(inp.get("a") or inp.get("left") or "")
+    right = _wk_operand(inp.get("b") or inp.get("right") or "")
+    if left:
+        return f"{left} {op} {right}".strip()
+    return "result == true"
+
+
+def _wk_lower(block: list, prefix: str,
+              report: list[dict]) -> tuple[dict[str, FlowNode], str | None]:
+    """Lower one Workato ``block`` list (one nesting level) into chained nodes.
+    ``if`` steps become branch nodes (the nested block is the then-arm, wired to
+    rejoin); ``foreach``/``repeat`` steps become foreach nodes with the nested
+    block as the body."""
+    from .workato import _step as _wk_step
+    steps = [n for n in (block or []) if isinstance(n, dict)]
+    ids = {i: f"{prefix}{i}" for i in range(len(steps))}
+    nodes: dict[str, FlowNode] = {}
+    for i, node in enumerate(steps):
+        nid = ids[i]
+        nxt = ids[i + 1] if i + 1 < len(steps) else None
+        keyword = str(node.get("keyword") or "").lower()
+        name = str(node.get("description") or node.get("name") or keyword or "step")
+        inp = node.get("input") if isinstance(node.get("input"), dict) else {}
+        nested = node.get("block") if isinstance(node.get("block"), list) else []
+        if keyword == "if":
+            t_nodes, t_start = _wk_lower(nested, nid + "t", report)
+            _pa_wire_tail(t_nodes, nxt)
+            nodes.update(t_nodes)
+            nodes[nid] = FlowNode(id=nid, kind=NODE_BRANCH, condition=_wk_condition(inp),
+                                  if_true=t_start or nxt, if_false=nxt, next=nxt,
+                                  label=_safe_line(name, max_chars=60))
+            report.append({"step": name, "node": nid, "kind": NODE_BRANCH,
+                           "fidelity": "preserved",
+                           "note": "Workato IF -> branch (then-arm wired; no-match falls through)"})
+        elif keyword in ("foreach", "repeat"):
+            b_nodes, b_start = _wk_lower(nested, "b", report)
+            body = Flow(id="", name=f"{name} body", start=b_start or "",
+                        nodes=b_nodes) if b_nodes else None
+            items = _wk_operand(inp.get("source") or inp.get("list") or "") or "items"
+            if body is not None:
+                nodes[nid] = FlowNode(id=nid, kind=NODE_FOREACH, items=items, body=body,
+                                      next=nxt, output=f"{nid}_out",
+                                      label=_safe_line(name, max_chars=60))
+                report.append({"step": name, "node": nid, "kind": NODE_FOREACH,
+                               "fidelity": "preserved",
+                               "note": "Workato repeat -> foreach with a nested body"})
+            else:
+                nodes[nid] = _node_for_step(_wk_step(node), nid, nxt)
+                report.append({"step": name, "node": nid, "kind": nodes[nid].kind,
+                               "fidelity": "approximated",
+                               "note": "repeat body unreadable -> agent step"})
+        else:
+            fnode = _node_for_step(_wk_step(node), nid, nxt)
+            nodes[nid] = fnode
+            report.append({"step": name, "node": nid, "kind": fnode.kind,
+                           "fidelity": ("preserved" if fnode.kind == NODE_ACTION
+                                        else "approximated"),
+                           "note": ("connector call -> action node" if fnode.kind == NODE_ACTION
+                                    else "no single-tool mapping -> agent step")})
+    return nodes, (ids[0] if steps else None)
+
+
+def _wk_to_flow(automation: ImportedAutomation,
+                report: list[dict]) -> Flow | None:
+    """Lower a Workato recipe's code tree, preserving IF/repeat structure.
+    Returns ``None`` when the tree isn't usable (caller falls back)."""
+    from .base import ImporterError
+    from .workato import _parse_code
+    raw = automation.raw if isinstance(automation.raw, dict) else {}
+    try:
+        tree = _parse_code(raw) if raw else None
+    except ImporterError:
+        return None
+    block = tree.get("block") if isinstance(tree, dict) else None
+    if not isinstance(block, list) or not block:
+        return None
+    nodes, start = _wk_lower(block, "n", report)
+    if not nodes or not start:
+        return None
+    flow = Flow(id=automation.template_name(), name=automation.name,
+                start=start, nodes=nodes)
+    if flow.validate():
+        report.clear()
+        return None
+    return flow
+
+
 def _linear_report(flow: Flow, report: list[dict]) -> None:
     """Fidelity entries derived from an already-lowered graph (the n8n path and
     the flat fallback), so every import surfaces a report."""
@@ -371,6 +478,11 @@ def to_flow_with_report(automation: ImportedAutomation) -> tuple[Flow, list[dict
             return graph, report
     if automation.source == "power_automate":
         graph = _pa_to_flow(automation, report)
+        if graph is not None:
+            return graph, report
+        report.clear()
+    if automation.source == "workato":
+        graph = _wk_to_flow(automation, report)
         if graph is not None:
             return graph, report
         report.clear()
