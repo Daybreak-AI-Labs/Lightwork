@@ -161,12 +161,15 @@ def _world():
     return _w()
 
 
-def enqueue_flow_run(flow_id: str, data: dict, owner: str = "", idem_key: str = "") -> str:
+def enqueue_flow_run(flow_id: str, data: dict, owner: str = "", idem_key: str = "",
+                     origin: str = "manual") -> str:
     """Start a durable flow run (a pre-assigned, pollable run id + a flow_run job).
     Shared by the background tick and the on-demand poll so a flow-target trigger
     fires the same way on both paths. ``idem_key`` (flow_id + a stable event id)
     deduplicates: a re-delivered event returns the existing run instead of firing
-    a second one. The original inputs are kept so the run can be retried."""
+    a second one. ``origin`` records what fired the run (cron/event/form/manual)
+    for attribution + trigger-outcome learning. The original inputs are kept so
+    the run can be retried."""
     from maverick.flow import store as flow_store
     if idem_key:
         existing = flow_store.find_run_by_idem(flow_id, idem_key)
@@ -175,9 +178,9 @@ def enqueue_flow_run(flow_id: str, data: dict, owner: str = "", idem_key: str = 
     run_id = flow_store.new_run_id()
     flow_store.save_run(flow_store.FlowRun(
         run_id=run_id, flow_id=flow_id, status="queued", owner=owner,
-        data=dict(data), input_data=dict(data), idem_key=idem_key))
+        data=dict(data), input_data=dict(data), idem_key=idem_key, origin=origin))
     queue().enqueue(FLOW_RUN_KIND, {"flow_id": flow_id, "run_id": run_id,
-                                    "data": data, "owner": owner})
+                                    "data": data, "owner": owner, "origin": origin})
     return run_id
 
 
@@ -333,7 +336,8 @@ def _handle_flow_run(job=None) -> None:
                                        else _flow_runners(owner))
         run = execution.execute(flow, agent_runner=agent_runner, action_runner=action_runner,
                                 owner=owner, data=dict(payload.get("data") or {}),
-                                run_id=payload.get("run_id"), record_outcomes=not dry_run)
+                                run_id=payload.get("run_id"), record_outcomes=not dry_run,
+                                origin=str(payload.get("origin") or "manual"))
         if not dry_run:
             _notify_flow(flow, run)
     except Exception:  # pragma: no cover -- fail-open
@@ -448,7 +452,9 @@ def _handle_flow_cron(job=None) -> None:
         flow = store.load_flow(flow_id)
         if flow is None or flow.schedule.strip() != str(payload.get("__cron__") or "").strip():
             return  # deleted, or the schedule changed out from under this cron
-        enqueue_flow_run(flow_id, {}, owner=str(payload.get("owner") or ""))
+        # Attribute the scheduled run to the flow's owner (loaded here, so the cron
+        # payload needn't carry it) and stamp its origin for the run history.
+        enqueue_flow_run(flow_id, {}, owner=flow.owner, origin=f"cron:{flow_id}")
     except Exception:  # pragma: no cover -- fail-open
         log.exception("scheduled flow run failed for %s", flow_id)
 

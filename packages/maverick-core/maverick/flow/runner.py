@@ -352,7 +352,9 @@ def _run_subflow(node: FlowNode, data: dict, ctx: _Ctx) -> str | None:
         _run_chain(sub, data, ctx.nested(), sub.start)
     finally:
         ctx.flow_stack.discard(sub.id)
-    ctx.on_node(node, "done", None)
+    # Ground success as 1.0 (failure already grounds 0.0 above), so a subflow
+    # node has a symmetric success-rate signal the self-rewrite loop can measure.
+    ctx.on_node(node, "done", 1.0)
     return node.next
 
 
@@ -373,6 +375,11 @@ def _run_foreach(node: FlowNode, data: dict, ctx: _Ctx) -> str | None:
         sub[node.var] = item
         _run_chain(node.body, sub, ctx.nested(), node.body.start)
         results.append(sub)          # per-iteration data snapshot (body outputs included)
+        if node.output:
+            # Publish partial results after EACH iteration, so a whole-flow
+            # deadline or a failure mid-loop keeps the batch's completed work
+            # (run_flow returns the data as-of the abort) instead of losing it all.
+            data[node.output] = list(results)
         if sub.get("_break"):        # the body asked to stop early
             break
     if node.output:
@@ -412,9 +419,20 @@ def _run_parallel(node: FlowNode, data: dict, ctx: _Ctx) -> str | None:
     return node.next
 
 
+def _approval_outcome(decision: str) -> float | None:
+    # A decided approval is the highest-value grounded HUMAN signal: which gates
+    # humans keep rejecting (rework them) vs. rubber-stamp (automate them away).
+    # A still-pending pause is not yet a decision, so it grounds nothing.
+    if decision == "approved":
+        return 1.0
+    if decision == "rejected":
+        return 0.0
+    return None
+
+
 def _run_approval(node: FlowNode, data: dict, ctx: _Ctx) -> str | None:
     decision = ctx.approve_fn(node, data) if ctx.approve_fn else "pending"
-    ctx.on_node(node, decision, None)
+    ctx.on_node(node, decision, _approval_outcome(decision))
     if decision == "approved":
         return node.next
     if decision == "rejected":
@@ -489,7 +507,13 @@ def run_flow(flow: Flow, *, agent_fn: AgentFn, action_fn: ActionFn,
     if resume:
         data = dict(resume.get("data") or data or {})
         node = flow.node(resume.get("node_id"))
-        if resume.get("decision") == "rejected":
+        decision = resume.get("decision")
+        # Ground the HUMAN verdict on resume too -- the approval node's handler
+        # isn't re-run (we resume AFTER it), so without this the decision signal
+        # is lost on the resume path exactly as it is captured on the auto path.
+        if node is not None and decision in ("approved", "rejected"):
+            (on_node or (lambda *_: None))(node, decision, _approval_outcome(decision))
+        if decision == "rejected":
             return FlowRunResult(status=STATUS_REJECTED, data=data,
                                  cursor=resume.get("node_id"))
         # A pause resumes AFTER its node (the approval/delay is done); a

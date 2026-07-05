@@ -17,7 +17,16 @@ from typing import Any
 
 from . import node_outcomes, store
 from .ir import Flow, FlowNode
-from .runner import STATUS_FAILED, STATUS_PAUSED_APPROVAL, STATUS_PAUSED_DELAY, run_flow
+from .runner import (
+    STATUS_COMPLETED,
+    STATUS_FAILED,
+    STATUS_PAUSED_APPROVAL,
+    STATUS_PAUSED_DELAY,
+    run_flow,
+)
+
+STATUS_RUNNING = "running"   # written while a run is executing (was: stuck on "queued")
+TRIGGER_NODE = "__trigger__"  # reserved node id under which a trigger's run-outcome is grounded
 
 _RESUMABLE = (STATUS_PAUSED_APPROVAL, STATUS_PAUSED_DELAY)
 
@@ -34,25 +43,57 @@ ActionRunner = Callable[[str, dict, dict], "tuple[Any, float | None]"]
 DEFAULT_AGENT_BUDGET = 5.0   # matches default_agent_runner's per-node cap
 
 
-def _budget_gated(agent_runner: AgentRunner, cap: float, per_call: float) -> AgentRunner:
+def _budget_gated(agent_runner: AgentRunner, cap: float, per_call: float, spent: list) -> AgentRunner:
     """Wrap an agent runner with a per-RUN aggregate spend ceiling. Each agent
     node is reserved at its worst-case per-node budget (``per_call``) against a
     shared, lock-guarded total; once the next reservation would exceed ``cap`` the
-    node is skipped with an error outcome instead of spawning another goal. This
-    bounds fan-out spend -- a wide ``parallel`` or a long ``foreach`` can't
-    multiply cost without a ceiling. Conservative: it counts each node at its
-    cap, so it never under-counts real spend. Thread-safe for concurrent branches."""
+    node is skipped instead of spawning another goal. This bounds fan-out spend --
+    a wide ``parallel`` or a long ``foreach`` can't multiply cost without a
+    ceiling. Conservative: it counts each node at its cap, so it never
+    under-counts real spend. Thread-safe for concurrent branches.
+
+    A skipped node grounds a ``None`` outcome, NOT ``0.0``: it never ran, so it is
+    not a failure -- grounding 0.0 would make a healthy node look flaky (skewing
+    self-rewrite proposals), burn its retries against the still-exhausted gate,
+    and fire its on_error branch. ``None`` means "no signal," which is correct."""
     import threading
     lock = threading.Lock()
-    spent = [0.0]
 
-    def run(brief: str, data: dict) -> tuple:
+    def run(brief: str, data: dict, **kw) -> tuple:
         with lock:
             if spent[0] + per_call > cap:
-                return (f"skipped: flow budget exhausted (${cap:g} cap)", 0.0)
+                return (f"skipped: flow budget exhausted (${cap:g} cap)", None)
             spent[0] += per_call
-        return agent_runner(brief, data)
+        return agent_runner(brief, data, **kw)
     return run
+
+
+def _spend_tracked(agent_runner: AgentRunner, per_call: float, spent: list) -> AgentRunner:
+    """Wrap a runner to accumulate reserved spend (``per_call`` per invocation)
+    into ``spent`` so the run's total cost can be persisted -- used when there is
+    NO ``max_dollars`` gate (the gate already tracks spend itself)."""
+    import threading
+    lock = threading.Lock()
+
+    def run(brief: str, data: dict, **kw) -> tuple:
+        with lock:
+            spent[0] += per_call
+        return agent_runner(brief, data, **kw)
+    return run
+
+
+def _call_agent(runner: AgentRunner, brief: str, data: dict, wall: float) -> tuple:
+    """Invoke an agent runner, bounding its wall-clock to a node ``timeout`` when
+    set so a timed-out node's underlying goal self-terminates near the point the
+    flow gives up waiting -- instead of running on to its default cap, still
+    spending budget after the flow moved on. Injected 2-arg test runners that
+    don't accept ``wall`` are called plainly."""
+    if wall and wall > 0:
+        try:
+            return runner(brief, data, wall=wall)
+        except TypeError:
+            pass
+    return runner(brief, data)
 
 
 def execute(flow: Flow, *, agent_runner: AgentRunner, action_runner: ActionRunner,
@@ -62,7 +103,7 @@ def execute(flow: Flow, *, agent_runner: AgentRunner, action_runner: ActionRunne
             resume_run_id: str | None = None, decision: str | None = None,
             from_failure: bool = False,
             inputs: dict | None = None, record_outcomes: bool = True,
-            agent_budget_dollars: float = DEFAULT_AGENT_BUDGET,
+            agent_budget_dollars: float = DEFAULT_AGENT_BUDGET, origin: str = "manual",
             now: Callable[[], float] | None = None) -> store.FlowRun:
     """Run ``flow`` (or resume a paused run) with live executors, persisting the
     resulting :class:`~.store.FlowRun`. ``run_id`` pre-assigns a fresh run's id
@@ -115,25 +156,51 @@ def execute(flow: Flow, *, agent_runner: AgentRunner, action_runner: ActionRunne
         if outcome is not None and record_outcomes:
             node_outcomes.record(flow.id, node.id, node.kind, outcome)
 
-    # Aggregate per-run spend ceiling: cap total agent-goal spend so a wide
-    # parallel / long foreach can't fan out unbounded cost (per-node budget alone
-    # doesn't bound the COUNT of nodes). Only for a real (grounded) run.
-    if flow.max_dollars and flow.max_dollars > 0 and record_outcomes:
-        agent_runner = _budget_gated(agent_runner, flow.max_dollars, agent_budget_dollars)
+    # Origin (what fired this run) comes from the queued placeholder when present,
+    # else the caller's argument -- carried across a resume from the prior run.
+    run_origin = (prior.origin if (resume_run_id and prior)
+                  else (placeholder.origin if placeholder else origin))
+    # Track reserved agent spend for the run. The max_dollars gate already tracks
+    # it; without a gate, wrap a plain spend tracker so cost is still recorded.
+    spent = [0.0]
+    if record_outcomes:
+        if flow.max_dollars and flow.max_dollars > 0:
+            # Aggregate per-run spend ceiling: a wide parallel / long foreach can't
+            # fan out unbounded cost (per-node budget alone doesn't bound the COUNT).
+            agent_runner = _budget_gated(agent_runner, flow.max_dollars, agent_budget_dollars, spent)
+        else:
+            agent_runner = _spend_tracked(agent_runner, agent_budget_dollars, spent)
+
+    # Write a "running" state before executing so a long run is distinguishable
+    # from a stuck "queued" one on the dashboard (a fresh, non-resume run only).
+    if not resume_run_id:
+        store.save_run(store.FlowRun(
+            run_id=rid, flow_id=flow.id, status=STATUS_RUNNING, owner=owner,
+            data=dict(data or {}), origin=run_origin,
+            created=(placeholder.created if placeholder else 0.0),
+            input_data=(placeholder.input_data if placeholder else dict(data or {})),
+            idem_key=(placeholder.idem_key if placeholder else "")))
 
     res = run_flow(
         flow,
-        agent_fn=lambda node, brief, d: agent_runner(brief, d),
+        agent_fn=lambda node, brief, d: _call_agent(agent_runner, brief, d, node.timeout),
         action_fn=lambda node, params, d: action_runner(node.tool, params, d),
         approve_fn=approve_fn, data=data, resume=resume, on_node=_on_node, now=now,
         # A subflow node resolves to another SAVED flow; the runner's flow_stack
         # guards against a cyclic reference (this loader stays a plain lookup).
         resolve_flow=store.load_flow,
     )
+    # Ground the TRIGGER's run-outcome (which triggers produce valuable runs vs.
+    # noise) when a triggered run reaches a terminal state -- the top-of-funnel
+    # signal, kept under a reserved node id so it's separable from work nodes.
+    if record_outcomes and run_origin != "manual" and res.status in (STATUS_COMPLETED, STATUS_FAILED):
+        node_outcomes.record(flow.id, TRIGGER_NODE, "trigger",
+                             1.0 if res.status == STATUS_COMPLETED else 0.0)
+
     run = store.FlowRun(
         run_id=rid, flow_id=flow.id, status=res.status, data=res.data,
         cursor=res.cursor, resume_at=res.resume_at, prompt=res.prompt,
-        error=res.error, owner=owner,
+        error=res.error, owner=owner, origin=run_origin, cost_dollars=round(spent[0], 4),
         created=(prior.created if resume_run_id and prior
                  else (placeholder.created if placeholder else 0.0)),
         nodes=node_states,
@@ -157,12 +224,16 @@ def default_agent_runner(world, *, owner: str = "", budget_dollars: float = 5.0,
     and grounds a terminal outcome (done=1.0 / not=0.0) as the node's signal.
     Best-effort: a runner failure yields a failure result + a 0.0 outcome rather
     than raising into the flow."""
-    def run(brief: str, data: dict) -> tuple[Any, float | None]:
+    def run(brief: str, data: dict, wall: float | None = None) -> tuple[Any, float | None]:
         gid = world.create_goal(str(brief)[:200], str(brief)[:8000], owner=owner)
+        # A per-node timeout bounds this goal's wall so a timed-out node's goal
+        # self-terminates instead of running to the default cap after the flow
+        # gave up on it (kernel rule 3 still holds -- this only ever lowers it).
+        ws = min(budget_wall_seconds, wall) if (wall and wall > 0) else budget_wall_seconds
         try:
             from ..runner import run_goal_in_thread
             result = run_goal_in_thread(
-                gid, budget_dollars=budget_dollars, wall_seconds=budget_wall_seconds)
+                gid, budget_dollars=budget_dollars, wall_seconds=ws)
         except Exception as e:  # pragma: no cover -- runner wiring varies by env
             return (f"agent step failed: {type(e).__name__}: {e}", 0.0)
         g = world.get_goal(gid)

@@ -148,6 +148,7 @@ class Flow:
     max_seconds: float = 0.0         # whole-flow wall-clock deadline (0 = no limit)
     max_dollars: float = 0.0         # aggregate agent spend ceiling for one run (0 = no limit)
     schedule: str = ""               # a cron expression to run this flow on (empty = not scheduled)
+    owner: str = ""                  # principal that owns this flow (for RBAC + attributing scheduled runs)
 
     def node(self, node_id: str | None) -> FlowNode | None:
         return self.nodes.get(node_id) if node_id else None
@@ -161,7 +162,7 @@ class Flow:
             "id": self.id, "name": self.name, "start": self.start,
             "version": self.version, "notify": self.notify,
             "max_seconds": self.max_seconds, "max_dollars": self.max_dollars,
-            "schedule": self.schedule,
+            "schedule": self.schedule, "owner": self.owner,
             "nodes": [n.to_dict() for n in self.nodes.values()],
         }
 
@@ -176,7 +177,7 @@ class Flow:
             notify=bool(d.get("notify", False)),
             max_seconds=float(d.get("max_seconds", 0.0) or 0.0),
             max_dollars=float(d.get("max_dollars", 0.0) or 0.0),
-            schedule=str(d.get("schedule", "")),
+            schedule=str(d.get("schedule", "")), owner=str(d.get("owner", "")),
         )
 
     def validate(self) -> list[str]:
@@ -229,11 +230,13 @@ class Flow:
                 errs.append(f"foreach node {n.id!r} has no body")
             else:
                 errs.extend(f"foreach {n.id!r} body: {e}" for e in n.body.validate())
+                errs.extend(f"foreach {n.id!r} body: {e}" for e in _pause_node_errors(n.body))
         if n.kind == NODE_PARALLEL:
             if not n.branches:
                 errs.append(f"parallel node {n.id!r} has no branches")
             for i, b in enumerate(n.branches):
                 errs.extend(f"parallel {n.id!r} branch {i}: {e}" for e in b.validate())
+                errs.extend(f"parallel {n.id!r} branch {i}: {e}" for e in _pause_node_errors(b))
         if n.kind == NODE_APPROVAL and not n.prompt:
             errs.append(f"approval node {n.id!r} has no prompt")
         if n.kind == NODE_SUBFLOW and not n.flow_ref:
@@ -247,6 +250,29 @@ class Flow:
             return False
         only = next(iter(self.nodes.values()))
         return only.kind == NODE_AGENT and not only.next
+
+
+def _pause_node_errors(flow: Flow) -> list[str]:
+    """Errors for ``approval``/``delay`` nodes anywhere inside a NESTED sub-flow
+    (a foreach body, a parallel branch, and recursively their own nested bodies).
+    Human-in-the-loop lives only at the top flow: a nested context can't pause, so
+    a nested ``approval`` rejects the WHOLE run and a nested ``delay`` silently
+    does nothing. Flagging it at validation turns a runtime footgun into a clear
+    save-time error."""
+    errs: list[str] = []
+    for n in flow.nodes.values():
+        if n.kind == NODE_APPROVAL:
+            errs.append(f"approval node {n.id!r} can't pause inside a loop/branch "
+                        "(nested approvals reject the whole run); move it to the top flow")
+        if n.kind == NODE_DELAY:
+            errs.append(f"delay node {n.id!r} can't wait inside a loop/branch "
+                        "(nested delays are skipped); move it to the top flow")
+        if n.kind == NODE_FOREACH and n.body is not None:
+            errs.extend(_pause_node_errors(n.body))
+        if n.kind == NODE_PARALLEL:
+            for b in n.branches:
+                errs.extend(_pause_node_errors(b))
+    return errs
 
 
 def single_agent_flow(flow_id: str, name: str, brief: str) -> Flow:

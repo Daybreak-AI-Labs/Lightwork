@@ -941,6 +941,11 @@ async def save_flow_endpoint(request: Request, payload: FlowSaveIn) -> dict:
     errs = flow.validate()
     if errs:
         raise HTTPException(status_code=400, detail="invalid flow: " + "; ".join(errs[:5]))
+    # Stamp ownership: the creator on first save, preserved across later edits so a
+    # re-save can't silently transfer ownership. Scheduled (cron) runs attribute to
+    # this owner (they have no request principal of their own).
+    prior = store.load_flow(flow.id)
+    flow.owner = prior.owner if (prior and prior.owner) else (caller_principal(request) or "")
     store.save_flow(flow)
     return {"id": flow.id, "nodes": len(flow.nodes)}
 
@@ -1129,7 +1134,8 @@ async def retry_flow_run_endpoint(request: Request, run_id: str,
             "flow_id": run.flow_id, "run_id": run_id, "owner": run.owner,
             "from_failure": True})
         return {"run_id": run_id, "status": "resuming", "from_node": run.cursor}
-    new_id = aq.enqueue_flow_run(run.flow_id, dict(run.input_data or {}), run.owner)
+    new_id = aq.enqueue_flow_run(run.flow_id, dict(run.input_data or {}), run.owner,
+                                 origin=f"retry:{run_id}")
     return {"run_id": new_id, "status": "queued", "retried_from": run_id}
 
 
@@ -2789,12 +2795,13 @@ async def poll_event_triggers(request: Request, bg: BackgroundTasks, name: str =
         else:
             bg.add_task(run_goal_in_thread, goal_id)
 
-    def _fire_flow(flow_id: str, data: dict, owner: str, idem_key: str = "") -> str:
+    def _fire_flow(flow_id: str, data: dict, owner: str, idem_key: str = "",
+                   origin: str = "manual") -> str:
         # Flow targets go through the durable queue (same as the background tick),
         # so a flow run gets retry + a trackable run id even on the on-demand path.
-        # The idempotency key dedups a re-delivered event.
+        # The idempotency key dedups a re-delivered event; origin records the trigger.
         from maverick_dashboard import automation_queue
-        return automation_queue.enqueue_flow_run(flow_id, data, owner, idem_key)
+        return automation_queue.enqueue_flow_run(flow_id, data, owner, idem_key, origin)
 
     results = await run_in_threadpool(
         lambda: event_poll.poll_and_fire(_world(), triggers, principal=principal,
