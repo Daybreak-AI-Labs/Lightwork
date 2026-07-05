@@ -653,7 +653,12 @@ def run_corpus_harvest(world, *, mode: str | None = None, key: str | None = None
             key = model_for_role("orchestrator")
         refl = [r.to_dict() for r in reflexion.list_recent(limit=500)
                 if _scope_matches(r, channel=None, user_id=None)]
-        goals = world.list_goals(status="done", limit=200, order="desc")
+        # Isolation parity with the reflexion side: owner-scoped goals stay
+        # out of the shared corpus -- one tenant's goal text must never be
+        # mined into ground truth other contexts evaluate against.
+        goals = [g for g in world.list_goals(status="done", limit=200,
+                                             order="desc")
+                 if not getattr(g, "owner", "")]
         known = {c["goal"] for c in ev.load_eval_corpus(corpus_path).get(str(key), [])}
         known |= {c["goal"] for c in ev.load_pending(corpus_path).get(str(key), [])}
         known |= set(ev.load_rejected(corpus_path).get(str(key), []))

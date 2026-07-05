@@ -2614,6 +2614,51 @@ def test_runner_transfer_end_to_end(monkeypatch, tmp_path, store):
     assert "SRC" in sweep and sweep["SRC"]["TGT"]["promoted"]
 
 
+def test_corpus_harvest_skips_owned_goals(monkeypatch, tmp_path):
+    # Isolation parity: the reflexion side mines UNSCOPED entries only, so the
+    # goal side must equally skip owner-scoped goals -- one tenant's goal text
+    # must never be mined into the shared eval corpus.
+    from maverick import config, reflexion
+    from maverick import self_harness_eval as ev
+    from maverick import self_improvement_runner as runner
+    cpath = tmp_path / "corpus.json"
+    cpath.write_text("{}")
+    monkeypatch.setattr(config, "load_config", lambda *a, **k: {
+        "self_harness": {"enable": True, "corpus_harvest": "propose",
+                         "eval_corpus": str(cpath)}})
+
+    class _R:
+        ts = 50.0
+        goal_text = "export the nightly ledger report"
+        channel = None
+        user_id = None
+
+        def to_dict(self):
+            return {"goal_text": self.goal_text, "ts": self.ts}
+
+    monkeypatch.setattr(reflexion, "list_recent", lambda **k: [_R()])
+
+    class _Goal:
+        def __init__(self, owner, title, result):
+            self.title, self.description, self.result = title, "", result
+            self.updated_at = self.created_at = 100.0
+            self.owner = owner
+
+    class _World:
+        def list_goals(self, **k):
+            # The tenant goal overlaps the reflexion too -- without the owner
+            # filter it WOULD pair and leak into the corpus files.
+            return [_Goal("tenant-a", "export the nightly payroll report",
+                          "tenant-only details"),
+                    _Goal("", "export the nightly ledger report",
+                          "Ledger exported: 42 rows.")]
+
+    n = runner.run_corpus_harvest(_World(), key="m1", corpus_path=str(cpath))
+    assert n == 1
+    staged = [c["goal"] for c in ev.load_pending(cpath)["m1"]]
+    assert staged == ["export the nightly ledger report"]
+
+
 def test_memo_scorer_never_caches_an_indeterminate_arm():
     # The sweep shares one context: a cached NaN (dead pot) or a poisoned
     # first draw would adjudicate every later source against that target.

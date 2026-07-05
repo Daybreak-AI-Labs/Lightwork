@@ -231,6 +231,10 @@ wave confirmed and fixed a cluster of lifecycle-integrity defects:
   `raise_errors=True` (a write failure is no longer indistinguishable from
   "nothing to do"); the wizard uses a select for the harvest mode and warns
   when nightly knobs are configured without `auto_run`/a corpus.
+- **Isolation parity** (from the follow-up security review, which otherwise
+  found no new exploitable surface): the harvest's goal side now skips
+  owner-scoped goals, matching the reflexion side's unscoped-only filter --
+  one tenant's goal text is never mined into the shared eval corpus.
 
 ## Principle (unchanged across every wave)
 
