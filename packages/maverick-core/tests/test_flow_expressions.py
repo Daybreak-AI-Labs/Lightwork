@@ -50,9 +50,12 @@ class TestStringAndCollectionTransforms:
         assert render("{{datefmt(when, \"%Y\")}}", {"when": "2027-03-04T12:00:00Z"}) == "2027"
         assert render("{{datefmt(bad, \"%Y\")}}", {"bad": "not-a-date"}) == ""
 
-    def test_now_is_an_integer_timestamp(self):
+    def test_now_is_an_iso_utc_datetime(self):
+        # ISO (not epoch) so it composes with add_days/today and lexical compares
         out = render("{{now()}}", {})
-        assert out.isdigit() and int(out) > 1_600_000_000
+        import datetime as dt
+        parsed = dt.datetime.fromisoformat(out)
+        assert parsed.tzinfo is not None and parsed.year >= 2026
 
 
 class TestConditionComposition:
@@ -78,6 +81,77 @@ class TestConditionComposition:
         assert eval_condition(c, {"tier": "gold", "amount": 0, "region": "US"}) is True
         assert eval_condition(c, {"tier": "silver", "amount": 2000, "region": "EU"}) is True
         assert eval_condition(c, {"tier": "silver", "amount": 2000, "region": "US"}) is False
+
+
+class TestDateFunctions:
+    def test_today_is_an_iso_date(self):
+        import datetime as dt
+        assert render("{{today()}}", {}) == dt.datetime.now(dt.timezone.utc).date().isoformat()
+
+    def test_add_days_from_a_given_date(self):
+        assert render("{{add_days('2026-07-05', 3)}}", {}) == "2026-07-08"
+        assert render("{{add_days('2026-07-05', -5)}}", {}) == "2026-06-30"
+
+    def test_add_days_from_today_when_blank(self):
+        import datetime as dt
+        want = (dt.datetime.now(dt.timezone.utc).date() + dt.timedelta(days=2)).isoformat()
+        assert render("{{add_days('', 2)}}", {}) == want
+
+    def test_date_helpers_compose_with_ordering(self):
+        # "is this due date within the next 3 days?" -- add_days + lexical compare
+        d = {"due": "2026-07-05"}
+        assert eval_condition("due <= '2026-07-08'", d) is True
+        assert eval_condition("due <= '2026-07-04'", d) is False
+
+    def test_bad_date_is_empty(self):
+        assert render("{{add_days('not-a-date', 3)}}", {}) == ""
+
+
+class TestOrderingComparisons:
+    def test_iso_date_strings_order_lexically(self):
+        # the footgun: a date compare used to force float() and silently be False
+        assert eval_condition("created >= '2026-01-01'", {"created": "2026-07-05"}) is True
+        assert eval_condition("created >= '2026-01-01'", {"created": "2025-12-31"}) is False
+        assert eval_condition("created < '2026-01-01'", {"created": "2025-06-30"}) is True
+
+    def test_plain_string_ordering(self):
+        assert eval_condition("tier > 'a'", {"tier": "b"}) is True
+        assert eval_condition("tier < 'a'", {"tier": "b"}) is False
+
+    def test_numeric_ordering_stays_numeric_not_lexical(self):
+        # 10 vs 9 must be numeric (10 > 9), not the string-wise '10' > '9' == False
+        assert eval_condition("n > 9", {"n": 10}) is True
+        assert eval_condition("n >= 100", {"n": 100}) is True
+
+    def test_missing_key_is_never_ordered_true(self):
+        assert eval_condition("ghost >= '2026-01-01'", {}) is False
+        assert eval_condition("ghost > 5", {}) is False
+
+
+class TestSecretFunction:
+    def test_secret_resolves_from_the_provider(self, monkeypatch):
+        monkeypatch.setenv("STRIPE_KEY", "sk_test_123")
+        assert render("{{secret('STRIPE_KEY')}}", {}) == "sk_test_123"
+
+    def test_missing_secret_is_empty_not_the_key(self, monkeypatch):
+        monkeypatch.delenv("NO_SUCH_SECRET", raising=False)
+        assert render("{{secret('NO_SUCH_SECRET')}}", {}) == ""
+
+    def test_secret_in_an_action_param_is_not_persisted_in_run_data(self, monkeypatch):
+        # The whole point: the connector gets the resolved secret, but it never
+        # lands in the flow's persisted data (only the transient rendered param).
+        monkeypatch.setenv("API_KEY", "s3kret-value")
+        seen = {}
+
+        def action(node, params, data):
+            seen["params"] = params
+            return ("ok", 1.0)
+        f = Flow(id="f", name="f", start="a",
+                 nodes={"a": FlowNode(id="a", kind="action", tool="t",
+                                      params={"key": "{{secret('API_KEY')}}"}, output="r")})
+        res = run_flow(f, agent_fn=lambda *a: ("", None), action_fn=action)
+        assert seen["params"]["key"] == "s3kret-value"   # connector receives it
+        assert "s3kret-value" not in str(res.data)        # but flow data doesn't carry it
 
 
 class TestExpressions:

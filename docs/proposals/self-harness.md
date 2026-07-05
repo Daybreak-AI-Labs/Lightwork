@@ -260,6 +260,10 @@ safety model as skills and insights.
   before they leave the world DB; rejections are remembered (never re-staged);
   `--accept-all --reject N` means "all but N"; merges append to the raw file
   under a cross-process lock, so hand-authored corpus fields survive.
+- `maverick self-harness corpus quality [--samples N] [--retire]` — measure
+  each live case's baseline discriminativeness (a case the baseline always
+  passes cannot show a candidate's lift); `--retire` prunes the dead cases,
+  raw-preservingly. Harvested rows carry `added_at` so age is visible.
 - `maverick self-harness retire --older-than-days N` — prune stale guidance.
 - `maverick self-harness conflicts` — flag contradictory lines for review.
 - `maverick self-harness log` / `forget [--domain D]` — the audit trail and the

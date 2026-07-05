@@ -52,6 +52,40 @@ def test_flows_gated_off_by_default(monkeypatch, tmp_path):
     assert _client().get("/api/v1/flows").status_code == 403
 
 
+_INPUT_FLOW = {
+    "id": "typed", "name": "Typed", "start": "a",
+    "nodes": [{"id": "a", "kind": "agent", "brief": "process {{amount}}"}],
+    "inputs": [{"key": "amount", "type": "number", "required": True}],
+}
+
+
+def test_run_rejects_a_missing_required_input(monkeypatch, tmp_path):
+    _isolate(monkeypatch, tmp_path)
+    c = _client()
+    c.post("/api/v1/flows", json={"flow": _INPUT_FLOW})
+    r = c.post("/api/v1/flows/typed/run", json={"data": {}})
+    assert r.status_code == 400 and "amount" in r.json()["detail"]
+
+
+def test_run_coerces_a_typed_input(monkeypatch, tmp_path):
+    _isolate(monkeypatch, tmp_path)
+    c = _client()
+    c.post("/api/v1/flows", json={"flow": _INPUT_FLOW})
+    r = c.post("/api/v1/flows/typed/run", json={"data": {"amount": "42"}})
+    assert r.status_code == 200
+    from maverick.flow import store
+    assert store.load_run(r.json()["run_id"]).data["amount"] == 42.0   # coerced to number
+
+
+def test_run_idempotency_key_dedups_a_repeat_submit(monkeypatch, tmp_path):
+    _isolate(monkeypatch, tmp_path)
+    c = _client()
+    c.post("/api/v1/flows", json={"flow": _FLOW})
+    a = c.post("/api/v1/flows/demo/run", json={"data": {"order": "X"}, "idempotency_key": "k1"}).json()
+    b = c.post("/api/v1/flows/demo/run", json={"data": {"order": "X"}, "idempotency_key": "k1"}).json()
+    assert a["run_id"] == b["run_id"] and b.get("deduplicated") is True
+
+
 def test_save_validate_get_delete(monkeypatch, tmp_path):
     _isolate(monkeypatch, tmp_path)
     c = _client()
@@ -100,6 +134,78 @@ def test_run_drains_through_queue_and_pauses_on_approval(monkeypatch, tmp_path):
     assert done["status"] == "completed"
 
 
+class _Job:
+    def __init__(self, payload):
+        self.payload = payload
+
+
+def _singleton_flow(mc=1):
+    from maverick.flow import store
+    from maverick.flow.ir import Flow, FlowNode
+    store.save_flow(Flow(id="s", name="S", start="a", max_concurrent=mc,
+                         nodes={"a": FlowNode(id="a", kind="agent", brief="go")}))
+
+
+def test_singleton_defers_a_run_while_another_is_in_flight(monkeypatch, tmp_path):
+    _isolate(monkeypatch, tmp_path)
+    from maverick.flow import store
+    from maverick_dashboard import automation_queue as aq
+    _reset_aq(monkeypatch, aq)
+    _singleton_flow(mc=1)
+    store.save_run(store.FlowRun(run_id="r_active", flow_id="s", status="running"))
+    store.save_run(store.FlowRun(run_id="r_new", flow_id="s", status="queued"))
+    aq._handle_flow_run(_Job({"flow_id": "s", "run_id": "r_new"}))
+    # the slot is taken -> the new run is NOT executed, it's left queued (deferred)
+    assert store.load_run("r_new").status == "queued"
+
+
+def test_singleton_runs_when_the_slot_is_free(monkeypatch, tmp_path):
+    _isolate(monkeypatch, tmp_path)
+    from maverick.flow import execution, store
+    from maverick_dashboard import automation_queue as aq
+    _reset_aq(monkeypatch, aq)
+    monkeypatch.setattr(execution, "default_agent_runner",
+                        lambda world, **k: (lambda brief, d, **kw: ("ok", 1.0)))
+    monkeypatch.setattr(execution, "default_action_runner",
+                        lambda world, sandbox=None: (lambda t, p, d: ("", None)))
+    _singleton_flow(mc=1)
+    store.save_run(store.FlowRun(run_id="r_new", flow_id="s", status="queued"))
+    aq._handle_flow_run(_Job({"flow_id": "s", "run_id": "r_new"}))
+    assert store.load_run("r_new").status == "completed"   # no sibling -> claimed + ran
+
+
+def test_singleton_skips_once_the_defer_budget_is_spent(monkeypatch, tmp_path):
+    _isolate(monkeypatch, tmp_path)
+    from maverick.flow import store
+    from maverick_dashboard import automation_queue as aq
+    _reset_aq(monkeypatch, aq)
+    _singleton_flow(mc=1)
+    store.save_run(store.FlowRun(run_id="r_active", flow_id="s", status="paused_approval"))
+    store.save_run(store.FlowRun(run_id="r_new", flow_id="s", status="queued"))
+    # a run that has already been deferred to the limit is dropped, not re-queued forever
+    aq._handle_flow_run(_Job({"flow_id": "s", "run_id": "r_new",
+                              "_slot_defers": aq._SINGLETON_MAX_DEFERS}))
+    assert store.load_run("r_new").status == "skipped_concurrency"
+
+
+def test_unlimited_flow_ignores_the_slot_guard(monkeypatch, tmp_path):
+    _isolate(monkeypatch, tmp_path)
+    from maverick.flow import execution, store
+    from maverick.flow.ir import Flow, FlowNode
+    from maverick_dashboard import automation_queue as aq
+    _reset_aq(monkeypatch, aq)
+    monkeypatch.setattr(execution, "default_agent_runner",
+                        lambda world, **k: (lambda brief, d, **kw: ("ok", 1.0)))
+    monkeypatch.setattr(execution, "default_action_runner",
+                        lambda world, sandbox=None: (lambda t, p, d: ("", None)))
+    store.save_flow(Flow(id="u", name="U", start="a", max_concurrent=0,
+                         nodes={"a": FlowNode(id="a", kind="agent", brief="go")}))
+    store.save_run(store.FlowRun(run_id="ua", flow_id="u", status="running"))   # sibling
+    store.save_run(store.FlowRun(run_id="ub", flow_id="u", status="queued"))
+    aq._handle_flow_run(_Job({"flow_id": "u", "run_id": "ub"}))
+    assert store.load_run("ub").status == "completed"   # 0 = unlimited -> runs anyway
+
+
 def test_runs_are_owner_scoped(monkeypatch, tmp_path):
     _isolate(monkeypatch, tmp_path)
     from maverick.flow import store
@@ -109,6 +215,17 @@ def test_runs_are_owner_scoped(monkeypatch, tmp_path):
     monkeypatch.setattr(api, "goal_owner_filter", lambda request: "user:alice")
     ids = {r["run_id"] for r in _client().get("/api/v1/flows/runs").json()["runs"]}
     assert ids == {"r1"}
+
+
+def test_runs_list_carries_origin_and_cost(monkeypatch, tmp_path):
+    # The list endpoint surfaces how each run was triggered and its $ cost so the
+    # automations UI can label cron/event/retry runs at a glance (not just manual).
+    _isolate(monkeypatch, tmp_path)
+    from maverick.flow import store
+    store.save_run(store.FlowRun(run_id="r1", flow_id="demo", status="completed",
+                                 origin="cron:demo", cost_dollars=0.42))
+    row = _client().get("/api/v1/flows/runs").json()["runs"][0]
+    assert row["origin"] == "cron:demo" and row["cost_dollars"] == 0.42
 
 
 def test_resume_of_non_paused_run_is_409(monkeypatch, tmp_path):

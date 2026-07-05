@@ -339,6 +339,34 @@ def test_transfer_cli_requires_corpus_then_reports(_home, monkeypatch):
     assert "+ (canary) ln" in r.output
 
 
+def test_corpus_quality_reports_and_retires(_home, monkeypatch, tmp_path):
+    import json as _json
+
+    from maverick import config
+    from maverick import self_harness_eval as ev
+    from maverick import self_improvement_runner as runner
+    cpath = tmp_path / "corpus.json"
+    cpath.write_text(_json.dumps({"m1": [{"goal": "easy", "expected": "y"},
+                                         {"goal": "hard", "expected": "y"}]}))
+    monkeypatch.setattr(config, "load_config", lambda *a, **k: {
+        "self_harness": {"enable": True, "eval_corpus": str(cpath)}})
+    monkeypatch.setattr(runner, "run_corpus_quality", lambda **kw: [
+        {"goal": "easy", "expected": "y", "passes": 2, "samples": 2,
+         "baseline_rate": 1.0, "discriminative": False, "age_days": 3.0},
+        {"goal": "hard", "expected": "y", "passes": 1, "samples": 2,
+         "baseline_rate": 0.5, "discriminative": True, "age_days": None}])
+    r = CliRunner().invoke(main, ["self-harness", "corpus", "quality",
+                                  "--model", "m1"])
+    assert r.exit_code == 0, r.output
+    assert "DEAD" in r.output and "2 case(s); 1 non-discriminative" in r.output
+    assert "age=3.0d" in r.output
+    r = CliRunner().invoke(main, ["self-harness", "corpus", "quality",
+                                  "--model", "m1", "--retire"])
+    assert r.exit_code == 0, r.output
+    assert "retired 1 case(s)" in r.output
+    assert [c["goal"] for c in ev.load_eval_corpus(cpath)["m1"]] == ["hard"]
+
+
 def test_corpus_harvest_requires_corpus(_home):
     r = CliRunner().invoke(main, ["self-harness", "corpus", "harvest"])
     assert r.exit_code != 0 and "eval_corpus" in r.output
@@ -358,6 +386,14 @@ def test_corpus_review_lists_and_resolves(_home, monkeypatch, tmp_path):
                                   "--model", "m1"])
     assert r.exit_code == 0, r.output
     assert "1. g1" in r.output and "expected: e1" in r.output
+    # Harvested goal text is run-history text: terminal control bytes are
+    # stripped before echoing (ANSI/OSC injection).
+    ev.stage_candidates(cpath, "m1", [{"goal": "evil \x1b[31mred\x1b[0m goal",
+                                       "expected": "\x1b]0;t\x07done"}])
+    r = CliRunner().invoke(main, ["self-harness", "corpus", "review",
+                                  "--model", "m1"])
+    assert r.exit_code == 0, r.output
+    assert "\x1b" not in r.output and "evil red goal" in r.output
     r = CliRunner().invoke(main, ["self-harness", "corpus", "review",
                                   "--model", "m1", "--accept", "1"])
     assert r.exit_code == 0, r.output
@@ -368,6 +404,10 @@ def test_corpus_review_lists_and_resolves(_home, monkeypatch, tmp_path):
     r = CliRunner().invoke(main, ["self-harness", "corpus", "review",
                                   "--model", "m1", "--accept", "9"])
     assert r.exit_code != 0 and "out of range" in r.output
+    # drain the remaining (control-char) candidate, then the list is empty
+    r = CliRunner().invoke(main, ["self-harness", "corpus", "review",
+                                  "--model", "m1", "--reject", "1"])
+    assert r.exit_code == 0 and "\x1b" not in r.output
     r = CliRunner().invoke(main, ["self-harness", "corpus", "review",
                                   "--model", "m1"])
     assert "no pending corpus candidates" in r.output

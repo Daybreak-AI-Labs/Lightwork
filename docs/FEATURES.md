@@ -512,27 +512,50 @@ here.
 - **Flow engine & visual automation** (`maverick.flow.*`, gated on `[flows]`) — a
   deterministic graph of typed nodes (`ir.py`: agent / action / branch / switch /
   foreach / while / parallel / approval / delay / wait_event / scope (try-catch) /
-  subflow) run by a pure interpreter (`runner.py`)
+  subflow / setvar) run by a pure interpreter (`runner.py`)
   with data threading, safe expression rendering (`{{fn(...)}}` incl. arithmetic,
-  list ops, and `and`/`or` conditions), a whole-flow wall-clock deadline
+  list ops, `and`/`or` conditions with numeric-or-lexical ordering so date/string
+  comparisons work, and `{{secret('NAME')}}` to pull a connector credential from
+  the governed vault at run time so the raw value never enters the flow definition
+  or persisted run data), a whole-flow wall-clock deadline
   (`Flow.max_seconds`), a per-run **aggregate agent-spend ceiling**
   (`Flow.max_dollars`, enforced in `execution.py` so a wide parallel / long
-  foreach can't fan out unbounded cost), per-node retries/timeout/on-error
-  routing, and **real intra-flow parallel concurrency** (parallel branches AND
-  `foreach concurrent: true` iterations run on a bounded thread pool with
-  per-branch cycle detection). `switch` routes n-way on a data key; `while`
-  loops a body with a runaway cap; `wait_event` pauses the run until an
-  external event resumes it; `scope` is try/catch (a body failure routes to
-  `on_error` with `{{_error}}` readable in the catch arm). Approvals support
-  **choice verdicts** beyond approve/reject (recorded to `output` for
-  downstream routing) and an **expiry** (`timeout` — a lapsed approval resolves
-  as rejected via the sweep, fail-closed). The live driver (`execution.py`)
-  persists a resumable run (`store.py`) with per-node trace **including each
-  work node's measured wall-clock seconds**, dry-run sandbox executors, and
-  secret redaction (`redact.py`). A **self-rewrite loop**
+  foreach can't fan out unbounded cost), a per-flow **concurrency cap**
+  (`Flow.max_concurrent`, a lock-guarded slot claim at dispatch that defers an
+  overlapping run so a singleton "drain/sync" flow never double-fires its side
+  effects), a per-flow **schedule timezone** (`Flow.timezone`, an IANA zone so
+  `0 9 * * *` fires at 9am local and follows DST; `scheduler.next_run(tz=...)`),
+  per-node retries with exponential **backoff** (`retry_backoff`, and a raising
+  executor is retried too) / timeout / on-error routing, and **real intra-flow
+  parallel concurrency** (parallel branches AND `foreach concurrent: true`
+  iterations run on a bounded thread pool with per-branch cycle detection).
+  `switch` routes n-way on a data key; `while` loops a body with a runaway cap;
+  `setvar` computes flow-data keys from expressions (a loop counter, a composed
+  field); `wait_event` pauses the run until an external event resumes it; `scope`
+  is try/catch (a body failure routes to `on_error` with `{{_error}}` readable in
+  the catch arm). A flow may declare **typed manual-run inputs** (`Flow.inputs`:
+  `{key, type: text|number|bool|date, required, default}`) — the designer's Run
+  button prompts for them and `POST /flows/{id}/run` validates + coerces them
+  (`ir.coerce_inputs`, 400 on a missing-required or bad value), and that endpoint
+  takes an optional `idempotency_key` so a double-submit dedups to one run.
+  Reusable **sub-flows take mapped inputs** (`subflow_inputs`) to run isolated —
+  the child sees only what's passed, can't clobber parent data, and returns via
+  its `output` key. Approvals support **choice verdicts** beyond approve/reject
+  (recorded to `output` for downstream routing) and an **expiry** (`timeout` — a
+  lapsed approval resolves as rejected via the sweep, fail-closed). The live
+  driver (`execution.py`) persists a resumable run (`store.py`) with per-node
+  trace **including each work node's measured wall-clock seconds**, dry-run
+  sandbox executors, and secret redaction (`redact.py`). A **self-rewrite loop**
   (`evolve.py` + `evolution_log.py`) swaps a node kind, measures grounded
   before/after outcomes, versions the definition, and autonomously reverts a
-  regression. A failed run records WHICH node failed (`FlowRun.cursor`) and can
+  regression. It grounds which tool a reliable agent node keeps calling
+  (`node_tools.py`, sourced from the trajectory store) so a **hardening**
+  proposal (agent → deterministic action) can name — and, under `[flows]
+  auto_apply`, autonomously apply — the inferred tool instead of waiting for a
+  human to pick one. Both autonomy knobs (`auto_evolve` revert, `auto_apply`
+  forward) are toggled from the Learning page, deliberately kept off the blanket
+  "turn all learning on" button. `evolution_log.improvement_count()` reports the
+  self-rewrites that stuck (reverted ones netted out) as the moat number. A failed run records WHICH node failed (`FlowRun.cursor`) and can
   **resume from the failed step** with the data as of the failure
   (`execution.execute(from_failure=True)`, `POST /flows/runs/{id}/retry?from_failure=1`)
   — pre-failure side effects are never re-driven. The server-rendered **visual

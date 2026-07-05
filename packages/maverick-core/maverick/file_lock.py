@@ -93,3 +93,24 @@ def atomic_write_text(path: str | Path, text: str, *, mode: int = 0o600,
         except OSError:
             pass
         raise
+
+
+def atomic_write_bytes(path: str | Path, data: bytes, *, mode: int = 0o600) -> None:
+    """Byte-for-byte sibling of :func:`atomic_write_text` for binary payloads
+    (e.g. an at-rest-sealed blob): unique temp in the same directory, then
+    ``os.replace`` into position; the temp is cleaned up on any failure."""
+    path = Path(path)
+    path.parent.mkdir(parents=True, exist_ok=True)
+    fd, tmp = tempfile.mkstemp(dir=str(path.parent), prefix=f".{path.name}-",
+                               suffix=".tmp")
+    try:
+        with os.fdopen(fd, "wb") as f:
+            f.write(data)
+        os.chmod(tmp, mode)
+        os.replace(tmp, path)
+    except BaseException:
+        try:
+            os.unlink(tmp)
+        except OSError:
+            pass
+        raise

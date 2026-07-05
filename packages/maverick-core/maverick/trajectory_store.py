@@ -239,8 +239,21 @@ def tools_by_goal(*, store: TrajectoryStore | None = None,
     return (store or shared()).tools_by_goal(limit=limit)
 
 
+def tools_for_goal(goal_id: int, *, store: TrajectoryStore | None = None,
+                   limit: int = 20_000) -> list[str]:
+    """Distinct tools ONE captured run used, in first-seen order. Empty when
+    capture is off or that goal called no tool. Cheaper than scanning every goal
+    when only one is needed (a flow node grounding its own agent run)."""
+    seen: list[str] = []
+    for s in (store or shared()).iter_steps(goal_id=goal_id, limit=limit):
+        tool = (s.tool or "").strip()
+        if tool and tool not in seen:
+            seen.append(tool)
+    return seen
+
+
 __all__ = [
     "TrajectoryStep", "TrajectoryStore",
     "enabled", "shared", "reset_shared", "capture_step", "episode_dag_fields",
-    "tools_by_goal",
+    "tools_by_goal", "tools_for_goal",
 ]

@@ -61,6 +61,59 @@
   })();
   </script>
 
+  {% if snap.flow_autonomy %}
+  <section aria-labelledby="lrn-auto-h" class="lrn__moat" style="border-color: var(--border); background: var(--surface-2);">
+    <h2 id="lrn-auto-h" class="lrn__section-h">Autonomous workflow self-improvement</h2>
+    <p class="lrn__section-sub" style="margin-bottom: var(--space-3);">
+      Kept separate from the button above on purpose: this lets the loop change your
+      <em>live</em> workflows on its own — a heavier step than passive learning, so it’s its own opt-in.
+      Each rewrite is measured against real outcomes and versioned, so a change that hurts is undone.</p>
+    {% if not snap.flow_autonomy.engine_on %}
+    <p class="lrn__enable-note" style="margin-top:0;">Turn the flow engine on first
+      (<code>[flows] enable</code>) — then these become available.</p>
+    {% else %}
+    <div style="display:flex; flex-direction:column; gap: var(--space-2);">
+      <button type="button" class="btn" id="lrn-auto-evolve" data-on="{{ 'true' if snap.flow_autonomy.auto_evolve else 'false' }}"
+              aria-pressed="{{ 'true' if snap.flow_autonomy.auto_evolve else 'false' }}">
+        {{ '✓ Auto-revert regressions is ON' if snap.flow_autonomy.auto_evolve else 'Turn on auto-revert regressions' }}
+      </button>
+      <span class="lrn__enable-note" style="margin-top:0;">Undo a self-rewrite the loop measures as a clear regression — the safety net.</span>
+      <button type="button" class="btn" id="lrn-auto-apply" data-on="{{ 'true' if snap.flow_autonomy.auto_apply else 'false' }}"
+              aria-pressed="{{ 'true' if snap.flow_autonomy.auto_apply else 'false' }}"
+              {{ 'disabled' if not snap.flow_autonomy.auto_evolve else '' }}>
+        {{ '✓ Auto-apply improvements is ON' if snap.flow_autonomy.auto_apply else 'Turn on auto-apply improvements' }}
+      </button>
+      <span class="lrn__enable-note" style="margin-top:0;">Apply a proven improvement forward without a human. Needs auto-revert on (its safety net).</span>
+      <span class="lrn__enable-note" id="lrn-auto-msg" aria-live="polite" style="margin-top:0;"></span>
+    </div>
+    <script>
+    (function () {
+      function wire(id, field) {
+        var btn = document.getElementById(id);
+        if (!btn) return;
+        btn.addEventListener('click', async function () {
+          var msg = document.getElementById('lrn-auto-msg');
+          var next = btn.getAttribute('data-on') !== 'true';
+          var body = {}; body[field] = next;
+          btn.disabled = true; msg.textContent = 'Applying…';
+          try {
+            var r = await fetch('/api/v1/learning/flow-autonomy', {
+              method: 'POST', headers: { 'Content-Type': 'application/json' },
+              body: JSON.stringify(body),
+            });
+            if (!r.ok) { msg.textContent = 'Could not update (permission?).'; btn.disabled = false; return; }
+            location.reload();
+          } catch (e) { msg.textContent = 'Could not reach the server.'; btn.disabled = false; }
+        });
+      }
+      wire('lrn-auto-evolve', 'auto_evolve');
+      wire('lrn-auto-apply', 'auto_apply');
+    })();
+    </script>
+    {% endif %}
+  </section>
+  {% endif %}
+
   <section aria-labelledby="lrn-acc-h">
     <h2 id="lrn-acc-h" class="lrn__section-h">What your workforce has accumulated</h2>
     <p class="lrn__section-sub">Read-only, from your Operating Record and learning stores — scoped to you.</p>
@@ -73,6 +126,9 @@
       {% endif %}
       {% if 'learned_capabilities' in snap.accumulated %}
       <div class="lrn__stat"><div class="lrn__num">{{ snap.accumulated.learned_capabilities }}</div><div class="lrn__lbl">capabilities self-taught</div></div>
+      {% endif %}
+      {% if 'flow_self_improvements' in snap.accumulated %}
+      <div class="lrn__stat"><div class="lrn__num">{{ snap.accumulated.flow_self_improvements }}</div><div class="lrn__lbl">workflow self-improvements</div></div>
       {% endif %}
       <div class="lrn__stat"><div class="lrn__num">{{ snap.accumulated.departments }}</div><div class="lrn__lbl">departments active</div></div>
     </div>

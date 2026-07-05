@@ -37,6 +37,8 @@ jobs:
       - uses: actions/setup-node@v6
         with:
           node-version: "22"
+      - name: Flow designer JS unit tests (pure serialization, no deps)
+        run: node --test packages/maverick-dashboard/tests/js/*.test.js
       - name: Install Lightwork (kernel + MCP server)
         run: |
           pip install -e ./packages/maverick-core

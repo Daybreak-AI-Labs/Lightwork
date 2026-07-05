@@ -54,6 +54,7 @@ from .api_schemas import (
     FleetCreateIn,
     FleetRunIn,
     FlowApplyIn,
+    FlowAutonomyIn,
     FlowChatIn,
     FlowDraftIn,
     FlowResumeIn,
@@ -1009,7 +1010,8 @@ async def list_flows_endpoint(request: Request) -> dict:
     from maverick.flow import store
     return {"flows": [
         {"id": f.id, "name": f.name, "nodes": len(f.nodes),
-         "single_agent": f.is_single_agent(), "schedule": f.schedule}
+         "single_agent": f.is_single_agent(), "schedule": f.schedule,
+         "inputs": f.inputs}
         for f in store.list_flows()
     ]}
 
@@ -1029,6 +1031,11 @@ async def save_flow_endpoint(request: Request, payload: FlowSaveIn) -> dict:
     errs = flow.validate()
     if errs:
         raise HTTPException(status_code=400, detail="invalid flow: " + "; ".join(errs[:5]))
+    # Stamp ownership: the creator on first save, preserved across later edits so a
+    # re-save can't silently transfer ownership. Scheduled (cron) runs attribute to
+    # this owner (they have no request principal of their own).
+    prior = store.load_flow(flow.id)
+    flow.owner = prior.owner if (prior and prior.owner) else (caller_principal(request) or "")
     store.save_flow(flow)
     return {"id": flow.id, "nodes": len(flow.nodes)}
 
@@ -1333,7 +1340,8 @@ async def retry_flow_run_endpoint(request: Request, run_id: str,
             "flow_id": run.flow_id, "run_id": run_id, "owner": run.owner,
             "from_failure": True})
         return {"run_id": run_id, "status": "resuming", "from_node": run.cursor}
-    new_id = aq.enqueue_flow_run(run.flow_id, dict(run.input_data or {}), run.owner)
+    new_id = aq.enqueue_flow_run(run.flow_id, dict(run.input_data or {}), run.owner,
+                                 origin=f"retry:{run_id}")
     return {"run_id": new_id, "status": "queued", "retried_from": run_id}
 
 
@@ -1538,15 +1546,32 @@ async def run_flow_endpoint(request: Request, flow_id: str, payload: FlowRunIn) 
     require_permission(request, "operate")
     _require_flows()
     from maverick.flow import store
-    if store.load_flow(flow_id) is None:
+    from maverick.flow.ir import coerce_inputs
+    flow = store.load_flow(flow_id)
+    if flow is None:
         raise HTTPException(status_code=404, detail="no such flow")
     owner = _supervisor(request)
+    # Validate/coerce the payload against the flow's declared inputs (a no-op when
+    # the flow declares none): reject a missing required input or a bad number/date
+    # up front, and coerce number/bool/date so a node's condition sees typed values.
+    data, input_errs = coerce_inputs(flow, dict(payload.data or {}))
+    if input_errs:
+        raise HTTPException(status_code=400, detail="; ".join(input_errs))
+    # Idempotency: a caller-supplied key dedups a repeat submit (double-click, retry)
+    # to the same run instead of firing a second one.
+    idem = (payload.idempotency_key or "").strip()
+    if idem and not payload.dry_run:
+        existing = store.find_run_by_idem(flow_id, idem)
+        if existing is not None:
+            return {"run_id": existing.run_id, "status": existing.status,
+                    "dry_run": False, "deduplicated": True}
     run_id = store.new_run_id()
     store.save_run(store.FlowRun(run_id=run_id, flow_id=flow_id, status="queued",
-                                 owner=owner, data=dict(payload.data or {})))
+                                 owner=owner, data=dict(data), input_data=dict(data),
+                                 idem_key=idem))
     from maverick_dashboard import automation_queue as aq
     aq.queue().enqueue(aq.FLOW_RUN_KIND, {
-        "flow_id": flow_id, "run_id": run_id, "data": payload.data, "owner": owner,
+        "flow_id": flow_id, "run_id": run_id, "data": data, "owner": owner,
         "dry_run": bool(payload.dry_run)})
     return {"run_id": run_id, "status": "queued", "dry_run": bool(payload.dry_run)}
 
@@ -1563,6 +1588,32 @@ async def flow_proposals_endpoint(request: Request, flow_id: str) -> dict:
     if f is None:
         raise HTTPException(status_code=404, detail="no such flow")
     return {"proposals": [p.to_dict() for p in evolve.maybe_propose(f)]}
+
+
+@router.get("/flows/{flow_id}/signals")
+async def flow_signals_endpoint(request: Request, flow_id: str) -> dict:
+    """The grounded learning signals a flow has accumulated, for display:
+    per-node success rate (work nodes), human accept-rate (approval nodes), and
+    trigger reliability (the reserved ``__trigger__`` outcome). This is what the
+    loop CAPTURED made visible -- "which gates humans keep rejecting", "which
+    triggers produce runs that succeed" -- so a builder can act on it."""
+    require_permission(request, "operate")
+    _require_flows()
+    from maverick.flow import execution, node_outcomes, store
+    f = store.load_flow(flow_id)
+    if f is None:
+        raise HTTPException(status_code=404, detail="no such flow")
+    stats = node_outcomes.stats(flow_id)
+    trigger = stats.get(execution.TRIGGER_NODE)
+    nodes = {}
+    for nid, s in stats.items():
+        if nid == execution.TRIGGER_NODE:
+            continue
+        node = f.nodes.get(nid)
+        nodes[nid] = {"n": s["n"], "mean": s["mean"], "kind": s.get("kind"),
+                      "label": (node.label if node else "") or nid}
+    return {"nodes": nodes,
+            "trigger": ({"n": trigger["n"], "mean": trigger["mean"]} if trigger else None)}
 
 
 @router.post("/flows/{flow_id}/apply")
@@ -1964,28 +2015,43 @@ def _learned_snapshot(limit: int = 50) -> dict:
     except Exception as e:  # pragma: no cover -- never block the page
         log.debug("learned snapshot failed: %s", e)
     harness, harness_enabled = _harness_guidance()
+    pending = _pending_corpus_items()
     return {
         "learned": learned, "generated_tools": tools,
         "harness": harness, "harness_enabled": harness_enabled,
-        "pending_corpus": _pending_corpus_counts(),
+        "pending_corpus": {k: len(v) for k, v in pending.items()},
+        "pending_items": pending,
+        "transfer_memory": _transfer_memory(),
     }
 
 
-def _pending_corpus_counts() -> dict[str, int]:
+def _pending_corpus_items() -> dict[str, list[dict]]:
     """Harvested corpus candidates awaiting operator review, per corpus key --
-    so staged ground truth is visible, not forgotten. A CORPUS-key fact, kept
-    apart from the learned-guidance snapshot: the badge must show even when a
-    key has staged cases but no learned lines yet (the bootstrap case), and a
-    failure here must not blank the guidance list (or vice versa)."""
+    so staged ground truth is visible (and resolvable in-page), not
+    forgotten. A CORPUS-key fact, kept apart from the learned-guidance
+    snapshot: the section must show even when a key has staged cases but no
+    learned lines yet (the bootstrap case), and a failure here must not blank
+    the guidance list (or vice versa)."""
     try:
         from maverick.self_harness import settings
         from maverick.self_harness_eval import load_pending
         cpath = settings().get("eval_corpus")
         if cpath:
-            return {k: len(v) for k, v in load_pending(cpath).items() if v}
-    except Exception as e:  # pragma: no cover -- pending count is advisory
+            return {k: v for k, v in load_pending(cpath).items() if v}
+    except Exception as e:  # pragma: no cover -- pending items are advisory
         log.debug("pending corpus snapshot failed: %s", e)
     return {}
+
+
+def _transfer_memory() -> dict:
+    """Content-free transfer tried-memory stats (judged pairs + newest ts)
+    for the /learned page -- how caught-up the nightly sweep is."""
+    try:
+        from maverick.self_harness import transfer_memory_stats
+        return transfer_memory_stats()
+    except Exception as e:  # pragma: no cover -- advisory
+        log.debug("transfer memory snapshot failed: %s", e)
+        return {"pairs": 0, "last_judged_at": None}
 
 
 def _harness_guidance() -> tuple[list[dict], bool]:
@@ -2099,6 +2165,45 @@ async def remove_generated_tool(request: Request, name: str) -> None:
         target.unlink()
     except OSError as e:
         raise HTTPException(status_code=500, detail=f"could not remove: {e}") from e
+
+
+@router.post("/harness-corpus/review")
+async def review_harness_corpus(request: Request, payload: dict) -> dict:
+    """Resolve staged corpus candidates from the dashboard -- the same
+    accept/reject verdicts as ``maverick self-harness corpus review``, so
+    staged ground truth can be reviewed where it is displayed. Mutating the
+    loop's ground truth is an ``admin`` action (same rung as pulling a
+    generated tool); bearer/same-origin is enforced centrally by the
+    middleware (POST is a mutating method)."""
+    require_permission(request, "admin")
+    from maverick import self_harness_eval as ev
+    from maverick.self_harness import settings
+    corpus_path = settings().get("eval_corpus")
+    if not corpus_path:
+        raise HTTPException(status_code=409, detail="no eval corpus configured")
+    key = str(payload.get("key") or "")
+    if not key:
+        raise HTTPException(status_code=400, detail="missing corpus key")
+
+    def _indexes(name: str) -> list[int]:
+        v = payload.get(name) or []
+        if not isinstance(v, list) or not all(
+                isinstance(i, int) and not isinstance(i, bool) for i in v):
+            raise HTTPException(status_code=400,
+                                detail=f"{name} must be a list of 1-based indexes")
+        return v
+
+    accept, reject = _indexes("accept"), _indexes("reject")
+    if not accept and not reject:
+        raise HTTPException(status_code=400, detail="nothing to resolve")
+    try:
+        res = ev.resolve_pending(corpus_path, key, accept=accept, reject=reject)
+    except ValueError as e:
+        # Indexes rebased under the caller (another review/harvest landed):
+        # a conflict, not a bad request -- the page reloads and re-lists.
+        raise HTTPException(status_code=409, detail=str(e)) from e
+    return {"merged": res["merged"], "duplicates": res["duplicates"],
+            "rejected": res["rejected"]}
 
 
 @router.get("/spend")
@@ -3149,12 +3254,13 @@ async def poll_event_triggers(request: Request, bg: BackgroundTasks, name: str =
         else:
             bg.add_task(run_goal_in_thread, goal_id)
 
-    def _fire_flow(flow_id: str, data: dict, owner: str, idem_key: str = "") -> str:
+    def _fire_flow(flow_id: str, data: dict, owner: str, idem_key: str = "",
+                   origin: str = "manual") -> str:
         # Flow targets go through the durable queue (same as the background tick),
         # so a flow run gets retry + a trackable run id even on the on-demand path.
-        # The idempotency key dedups a re-delivered event.
+        # The idempotency key dedups a re-delivered event; origin records the trigger.
         from maverick_dashboard import automation_queue
-        return automation_queue.enqueue_flow_run(flow_id, data, owner, idem_key)
+        return automation_queue.enqueue_flow_run(flow_id, data, owner, idem_key, origin)
 
     results = await run_in_threadpool(
         lambda: event_poll.poll_and_fire(_world(), triggers, principal=principal,
@@ -5104,15 +5210,41 @@ def _learning_snapshot(request: Request) -> dict:
         try:
             # Count the ledger directly -- _learned_snapshot would also build
             # the whole harness/provenance/pending view just to be discarded.
+            # The stat is a TOTAL, so don't inherit the page's display limit
+            # (the old path silently capped the count at 50).
             from maverick import self_learning
             learned_n = len(self_learning.history(
-                limit=50, path=self_learning.LEARNED_PATH))
+                limit=1_000_000, path=self_learning.LEARNED_PATH))
         except Exception:  # pragma: no cover - the moat view never 500s on a sub-read
             learned_n = 0
         accumulated["grounded_outcomes"] = consequence.count()
         accumulated["learned_capabilities"] = learned_n
+        # Flows that improved themselves -- forward self-rewrites the loop enacted,
+        # a tangible "your automations got better on their own" moat number.
+        try:
+            from maverick.flow import evolution_log
+            improvements = evolution_log.improvement_count()
+        except Exception:  # pragma: no cover -- the moat view never 500s on a sub-read
+            improvements = 0
+        if improvements:
+            accumulated["flow_self_improvements"] = improvements
+    # Autonomous flow self-improvement: its own opt-in, deliberately NOT folded
+    # into the blanket "turn learning on" button -- autonomously rewriting a live
+    # workflow is a heavier consequence than passive learning. Admin/unscoped view.
+    flow_autonomy = None
+    if owner is None:
+        try:
+            from maverick import flow as _flow_mod
+            flow_autonomy = {
+                "engine_on": _flow_mod.enabled(),
+                "auto_evolve": _flow_mod.auto_evolve_enabled(),   # revert regressions
+                "auto_apply": _flow_mod.auto_apply_enabled(),     # apply improvements
+            }
+        except Exception:  # pragma: no cover -- the moat view never 500s on a sub-read
+            flow_autonomy = None
     return {
         "components": components,
+        "flow_autonomy": flow_autonomy,
         "accumulated": accumulated,
         "components_on": sum(1 for c in components if c["on"]),
         "components_total": len(components),
@@ -5145,6 +5277,25 @@ async def set_learning_endpoint(request: Request, payload: LearningToggleIn) -> 
     require_permission(request, "admin")
     from maverick_dashboard import settings_store
     settings_store.set_learning(payload.enabled)
+    return _learning_snapshot(request)
+
+
+@router.post("/learning/flow-autonomy")
+async def set_flow_autonomy_endpoint(request: Request, payload: FlowAutonomyIn) -> dict:
+    """Turn the AUTONOMOUS flow self-improvement loop on/off -- its own opt-in,
+    kept off the blanket learning button because autonomously rewriting a live
+    workflow is a heavier consequence than passive learning.
+
+    Two independent knobs: ``auto_evolve`` lets the loop revert a rewrite it
+    measures as a regression; ``auto_apply`` (which needs auto_evolve on for the
+    revert safety net) lets it apply an improvement forward without a human. Same
+    admin gate + deployment-wide overlay as the blanket toggle."""
+    require_permission(request, "admin")
+    from maverick_dashboard import settings_store
+    settings_store.set_flow_autonomy(auto_evolve=payload.auto_evolve,
+                                     auto_apply=payload.auto_apply)
+    from maverick.config import reset_config_cache
+    reset_config_cache()   # so the refreshed snapshot reflects the new overlay
     return _learning_snapshot(request)
 
 

@@ -108,9 +108,44 @@ def test_harness_view_shows_recent_rate_and_pending_corpus(monkeypatch, tmp_path
     assert "75% success" in text                       # lifetime rate unchanged
     assert "recent 1✓/3✗ (25%)" in text                # the recency signal
     assert "harvested corpus candidate" in text        # staged ground truth visible
+    assert 'class="pc-resolve"' in text                # ...and resolvable in-page
     body = _client().get("/api/v1/learned").json()
     rec = body["harness"][0]["provenance"][0]
     assert rec["recent_rate"] == 0.25 and body["pending_corpus"] == {"m1": 1}
+    assert body["pending_items"]["m1"][0]["goal"] == "g"
+
+
+def test_harness_corpus_review_endpoint(monkeypatch, tmp_path):
+    # The dashboard resolves staged candidates with the SAME verdicts as the
+    # CLI: accept merges into the live corpus, reject is remembered. Cross-
+    # site POSTs are blocked by the same-origin middleware; a stale index is
+    # a 409 (the page reloads and re-lists), not a silent no-op.
+    _isolate(monkeypatch, tmp_path)
+    from maverick import config
+    from maverick import self_harness_eval as ev
+    cpath = tmp_path / "corpus.json"
+    cpath.write_text("{}")
+    ev.stage_candidates(cpath, "m1", [{"goal": "g1", "expected": "e1"},
+                                      {"goal": "g2", "expected": "e2"}])
+    monkeypatch.setattr(config, "load_config", lambda *a, **k: {
+        "self_harness": {"enable": True, "eval_corpus": str(cpath)}})
+    client = _client()
+    ok = {"Origin": "http://testserver"}
+    r = client.post("/api/v1/harness-corpus/review",
+                    json={"key": "m1", "accept": [1], "reject": [2]}, headers=ok)
+    assert r.status_code == 200, r.text
+    assert r.json() == {"merged": 1, "duplicates": 0, "rejected": 1}
+    assert [c["goal"] for c in ev.load_eval_corpus(cpath)["m1"]] == ["g1"]
+    assert ev.load_rejected(cpath) == {"m1": ["g2"]}
+    # stale index -> 409 conflict
+    r = client.post("/api/v1/harness-corpus/review",
+                    json={"key": "m1", "accept": [5]}, headers=ok)
+    assert r.status_code == 409
+    # cross-site POST blocked by the same-origin middleware
+    r = client.post("/api/v1/harness-corpus/review",
+                    json={"key": "m1", "accept": [1]},
+                    headers={"Origin": "http://evil.example"})
+    assert r.status_code == 403
 
 
 def test_harness_view_shows_provenance_and_conflicts(monkeypatch, tmp_path):

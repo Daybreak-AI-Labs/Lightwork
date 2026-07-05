@@ -201,6 +201,12 @@ class FlowRun:
     # Optional idempotency key (flow_id + a stable event id) so a re-delivered
     # trigger event doesn't spawn a duplicate run.
     idem_key: str = ""
+    # What fired this run: "manual" | "cron:<flow>" | "event:<trigger>" |
+    # "form:<token>" | "retry:<run>" -- so a viewer can see why it ran and the
+    # loop can learn which triggers produce value.
+    origin: str = "manual"
+    # Agent spend reserved for this run (dollars), so a viewer can see run cost.
+    cost_dollars: float = 0.0
 
     def to_dict(self) -> dict:
         return {
@@ -209,6 +215,7 @@ class FlowRun:
             "prompt": self.prompt, "error": self.error, "owner": self.owner,
             "created": self.created, "updated": self.updated, "nodes": self.nodes,
             "input_data": self.input_data, "idem_key": self.idem_key,
+            "origin": self.origin, "cost_dollars": self.cost_dollars,
         }
 
     @staticmethod
@@ -222,6 +229,8 @@ class FlowRun:
             created=float(d.get("created", 0.0)), updated=float(d.get("updated", 0.0)),
             nodes=dict(d.get("nodes") or {}),
             input_data=dict(d.get("input_data") or {}), idem_key=str(d.get("idem_key", "")),
+            origin=str(d.get("origin", "manual") or "manual"),
+            cost_dollars=float(d.get("cost_dollars", 0.0) or 0.0),
         )
 
 

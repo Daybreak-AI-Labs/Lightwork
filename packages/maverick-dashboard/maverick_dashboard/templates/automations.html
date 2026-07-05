@@ -674,7 +674,7 @@
           + (f.single_agent ? ' · single agent' : '')));
         li.appendChild(main);
         li.appendChild(mkBtn('Edit', function () { location.href = '/flows/designer/' + encodeURIComponent(f.id); }));
-        li.appendChild(mkBtn('Run', function () { runFlow(f.id); }));
+        li.appendChild(mkBtn('Run', function () { runFlow(f.id, f.inputs || []); }));
         flowsList.appendChild(li);
       });
       loadFlowRuns();
@@ -684,13 +684,22 @@
       var b = el('button', 'btn btn--ghost'); b.type = 'button'; b.textContent = label;
       b.addEventListener('click', onClick); return b;
     }
-    async function runFlow(id) {
+    async function runFlow(id, inputs) {
+      var data = {};
+      for (var i = 0; i < (inputs || []).length; i++) {          // prompt for declared inputs
+        var spec = inputs[i]; var key = (spec.key || '').trim(); if (!key) continue;
+        var def = (spec.default != null ? String(spec.default) : '');
+        var v = window.prompt((spec.label || key) + ' [' + (spec.type || 'text') + (spec.required ? ', required' : '') + ']', def);
+        if (v === null) { flowsMsg.textContent = 'Run cancelled.'; return; }
+        if (v.trim()) data[key] = v.trim();
+      }
       flowsMsg.textContent = 'Starting…';
       try {
         var r = await fetch('/api/v1/flows/' + encodeURIComponent(id) + '/run', {
-          method: 'POST', headers: { 'Content-Type': 'application/json' }, body: '{}',
+          method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ data: data }),
         });
-        flowsMsg.textContent = r.ok ? 'Run queued.' : 'Could not start run.';
+        if (r.ok) { flowsMsg.textContent = 'Run queued.'; }
+        else { var j = await r.json().catch(function () { return {}; }); flowsMsg.textContent = j.detail || 'Could not start run.'; }
         setTimeout(loadFlowRuns, 500);
       } catch (e) { flowsMsg.textContent = 'Could not start run.'; }
     }
@@ -709,6 +718,10 @@
         a.textContent = run.flow_id + ' — ' + run.status;
         title.appendChild(a); main.appendChild(title);
         if (run.prompt) main.appendChild(el('div', 'mv-row__sub', run.prompt));
+        var bits = [];
+        if (run.origin && run.origin !== 'manual') bits.push('via ' + run.origin);
+        if (run.cost_dollars) bits.push('$' + Number(run.cost_dollars).toFixed(2));
+        if (bits.length) main.appendChild(el('div', 'mv-row__sub', bits.join(' · ')));
         li.appendChild(main);
         if (run.status === 'paused_approval') {
           li.appendChild(mkBtn('Approve', function () { resumeRun(run.run_id, 'approved'); }));
@@ -771,6 +784,7 @@
         title.appendChild(a); main.appendChild(title);
         (f.proposals || []).forEach(function (p) {
           main.appendChild(el('div', 'mv-row__sub', '💡 ' + (p.reason || (p.from_kind + ' → ' + p.to_kind))));
+          main.appendChild(mkBtn('Apply this improvement', function () { applyProposal(f.flow_id, p); }));
         });
         (f.changes || []).forEach(function (ch) {
           var imp = ch.impact || {}, d = imp.delta;
@@ -782,6 +796,31 @@
         li.appendChild(main);
         insightsList.appendChild(li);
       });
+    }
+    async function applyProposal(flowId, p) {
+      // Enact a self-rewrite the loop suggested. Softening (-> agent) needs no
+      // input; hardening (-> action) needs a tool name only a human can choose.
+      var body = { node_id: p.node_id, to_kind: p.to_kind };
+      if (p.to_kind === 'action') {
+        // The loop may already know the tool this node has been calling; only
+        // ask when it couldn't infer one confidently.
+        var tool = (p.inferred_tool || '').trim();
+        if (!tool) {
+          tool = (window.prompt('Harden node "' + p.node_id + '" into a deterministic action.\n'
+            + 'Which tool should it call?') || '').trim();
+        }
+        if (!tool) { insightsHead.textContent = 'Cancelled — hardening needs a tool.'; return; }
+        body.tool = tool;
+      }
+      insightsHead.textContent = 'Applying…';
+      try {
+        var r = await fetch('/api/v1/flows/' + encodeURIComponent(flowId) + '/apply', {
+          method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body),
+        });
+        var j = await r.json();
+        if (!r.ok) { insightsHead.textContent = j.detail || 'Could not apply.'; return; }
+        loadFlows();          // re-render node counts + refresh insights (proposal now enacted)
+      } catch (e) { insightsHead.textContent = 'Could not reach the server.'; }
     }
     loadFlows();
   }

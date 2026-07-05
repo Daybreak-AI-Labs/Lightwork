@@ -24,7 +24,9 @@ _DRAFT_MAX_TOKENS = 2500
 # AND the chat copilot (chat.py imports this constant), so a schema change lands
 # in both prompts at once -- no prose-splitting one prompt out of the other.
 FLOW_SCHEMA_BLOCK = """A flow is a graph of typed nodes:
-{"id": "<slug>", "name": "<title>", "start": "<node id>", "nodes": [ ...nodes ]}
+{"id": "<slug>", "name": "<title>", "start": "<node id>", "nodes": [ ...nodes ], "inputs": [ {"key": "<data key>", "type": "text|number|bool|date", "label": "<prompt>", "required": true} ]}
+
+"inputs" (optional) declares the values a human supplies to run this flow manually -- they become the initial flow data (referenced with {{key}}) and are validated/coerced on run. Add them when the flow needs specific inputs from the person starting it.
 
 Each node is one of these kinds (include only the fields for its kind):
 - {"id","kind":"agent","brief":"<instruction for an AI agent>","next":"<id|null>"}
@@ -38,11 +40,13 @@ Each node is one of these kinds (include only the fields for its kind):
 - {"id","kind":"delay","seconds":<number>,"next":"<id|null>"}
 - {"id","kind":"wait_event","prompt":"<what the run is waiting for>","next":"<id|null>"}
 - {"id","kind":"scope","body":{<a nested flow>},"on_error":"<id of the catch step>","next":"<id|null>"}
-- {"id","kind":"subflow","flow_ref":"<a saved flow id to run here>","next":"<id|null>"}
+- {"id","kind":"subflow","flow_ref":"<a saved flow id to run here>","subflow_inputs":{"<child key>":"<value or {{expr}}>"},"output":"<key>","next":"<id|null>"}
+- {"id","kind":"setvar","assignments":{"<key>":"<value or {{expr}}>",...},"next":"<id|null>"}
 
-Any "agent" or "action" node may also set "retries":<n> (re-try on failure), "on_error":"<id>" (route there if it fails), and "timeout":<seconds> (per-node execution cap).
+Any "agent" or "action" node may also set "retries":<n> (re-try on failure; optional "retry_backoff":<seconds> for exponential wait), "on_error":"<id>" (route there if it fails), and "timeout":<seconds> (per-node execution cap).
 
-Reference earlier results with {{key}} where a node's "output" set that key. Set "output" on nodes whose result a later node needs. Transforms: text (upper lower trim title concat replace split join slice regex), data (default length first last index keys json), number (add sub mul div round abs int), time (now datefmt). E.g. {{datefmt(now(),"%Y-%m-%d")}}, {{regex(email,"@(.+)$")}}, {{join(split(csv,","),"; ")}}.
+Reference earlier results with {{key}} where a node's "output" set that key. Set "output" on nodes whose result a later node needs. Transforms: text (upper lower trim title concat replace split join slice regex), data (default length first last index keys json), number (add sub mul div round abs int), time (now today add_days datefmt -- UTC, ISO-formatted so dates compare lexically). E.g. {{datefmt(now(),"%Y-%m-%d")}}, {{add_days('', 3)}} (3 days from today), {{regex(email,"@(.+)$")}}, {{join(split(csv,","),"; ")}}.
+For a connector credential in an action param, use {{secret('NAME')}} -- it resolves from the secure vault at run time and never lands in the flow definition or run data. Never inline a raw API key.
 A "branch"/"while" condition is "<key> <op> <value>" (ops: == != > < >= <= contains) over flow data, composable with and/or. A "switch" routes by matching a data key against each case value."""
 
 FLOW_DRAFT_SYSTEM = """You design automation FLOWS and output STRICT JSON only.
@@ -51,7 +55,9 @@ FLOW_DRAFT_SYSTEM = """You design automation FLOWS and output STRICT JSON only.
 
 Rules:
 - Prefer an "agent" node when a step needs judgment/writing; an "action" node when it maps to a known tool.
-- Use a "subflow" node to reuse an existing saved flow instead of rebuilding its steps.
+- Use a "subflow" node to reuse an existing saved flow instead of rebuilding its steps. Give it "subflow_inputs" to run the child ISOLATED on only those values (it can't read or clobber this flow's other data) and set "output" to capture what it returns; omit them to share this flow's data.
+- Use "switch" for multi-way routing (more than two paths); "setvar" to compute or update data (e.g. a loop counter {{add(count,1)}}); "scope" to wrap steps that might fail and recover via its on_error.
+- Never put an "approval" or "delay" node inside a foreach/parallel/scope body -- they only work at the top level.
 - For a step that can fail (an external call), set "retries" and/or an "on_error" handler node.
 - Insert an "approval" node before anything a human should review (sending, paying, deleting).
 - Node ids are short slugs (n0, n1, ...). "next":null (or omit) ends a path. "start" is the first node's id.

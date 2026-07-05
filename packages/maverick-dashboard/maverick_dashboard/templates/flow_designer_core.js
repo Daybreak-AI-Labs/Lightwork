@@ -8,8 +8,8 @@ var FDCore = (function () {
     cases: [], items: '', var: 'item', limit: 0, concurrent: false, prompt: '',
     choices: [], assignee: '', expires_after: 0, on_expire: null, form: [],
     seconds: 0, flow_ref: '',
-    retries: 0, on_error: null, timeout: 0, output: '', label: '',
-    body: null, branches: [], next: null
+    retries: 0, retry_backoff: 0, on_error: null, timeout: 0, output: '', label: '',
+    assignments: {}, subflow_inputs: {}, body: null, branches: [], next: null
   };
   var SCALARS = ['next', 'tool', 'brief', 'condition', 'if_true', 'if_false',
     'items', 'var', 'prompt', 'flow_ref', 'on_error', 'output', 'label',
@@ -36,6 +36,7 @@ var FDCore = (function () {
     if (n.params && Object.keys(n.params).length) o.params = n.params;
     if (n.seconds) o.seconds = n.seconds;
     if (n.retries) o.retries = n.retries;
+    if (n.retry_backoff) o.retry_backoff = n.retry_backoff;
     if (n.timeout) o.timeout = n.timeout;
     if (n.limit) o.limit = n.limit;
     if (n.concurrent) o.concurrent = true;
@@ -43,6 +44,8 @@ var FDCore = (function () {
     if (n.choices && n.choices.length) o.choices = n.choices;
     if (n.expires_after) o.expires_after = n.expires_after;
     if (n.form && n.form.length) o.form = n.form.filter(function (f) { return f && f.name; });
+    if (n.assignments && Object.keys(n.assignments).length) o.assignments = n.assignments;
+    if (n.subflow_inputs && Object.keys(n.subflow_inputs).length) o.subflow_inputs = n.subflow_inputs;
     if (n.body && n.body.nodes && n.body.nodes.length) o.body = serializeFlow(n.body);
     if (n.branches && n.branches.length) {
       var bs = n.branches.map(serializeFlow).filter(function (b) { return b.nodes.length; });
