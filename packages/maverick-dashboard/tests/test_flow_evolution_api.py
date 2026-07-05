@@ -47,6 +47,48 @@ def test_auto_apply_softens_a_failing_action_when_enabled(monkeypatch, tmp_path)
     assert evolution_log.last_apply("fa", "a")["source"] == "auto-apply"
 
 
+def test_auto_apply_hardens_a_reliable_one_tool_agent_when_tool_inferred(monkeypatch, tmp_path):
+    # The forward HARDEN arrow: a reliably-succeeding agent node that consistently
+    # called one tool is autonomously hardened to a deterministic action calling
+    # that tool -- no human needed once the tool was inferred from captured runs.
+    _isolate(monkeypatch, tmp_path)
+    monkeypatch.setenv("MAVERICK_FLOWS_AUTO", "1")
+    monkeypatch.setattr("maverick.config.get_flows",
+                        lambda: {"auto_evolve": True, "auto_apply": True})
+    from maverick.flow import node_outcomes, node_tools, store
+    from maverick.flow.ir import Flow, FlowNode
+    store.save_flow(Flow(id="fh", name="F", start="a",
+                         nodes={"a": FlowNode(id="a", kind="agent", brief="summarize it")}))
+    for _ in range(20):
+        node_outcomes.record("fh", "a", "agent", 1.0)     # reliably succeeds
+    for _ in range(6):
+        node_tools.record("fh", "a", ["summarize_tool"])  # always the same one tool
+    from maverick_dashboard import automation_queue as aq
+    monkeypatch.setattr(aq, "_queue", None)
+    aq._handle_flow_evolve()
+    hardened = store.load_flow("fh").nodes["a"]
+    assert hardened.kind == "action" and hardened.tool == "summarize_tool"
+
+
+def test_auto_apply_leaves_a_reliable_agent_alone_without_an_inferred_tool(monkeypatch, tmp_path):
+    # No captured tool -> hardening still needs a human to pick one; the loop must
+    # NOT guess, so a reliable agent node with no tool signal is left untouched.
+    _isolate(monkeypatch, tmp_path)
+    monkeypatch.setenv("MAVERICK_FLOWS_AUTO", "1")
+    monkeypatch.setattr("maverick.config.get_flows",
+                        lambda: {"auto_evolve": True, "auto_apply": True})
+    from maverick.flow import node_outcomes, store
+    from maverick.flow.ir import Flow, FlowNode
+    store.save_flow(Flow(id="fn", name="F", start="a",
+                         nodes={"a": FlowNode(id="a", kind="agent", brief="summarize it")}))
+    for _ in range(20):
+        node_outcomes.record("fn", "a", "agent", 1.0)
+    from maverick_dashboard import automation_queue as aq
+    monkeypatch.setattr(aq, "_queue", None)
+    aq._handle_flow_evolve()
+    assert store.load_flow("fn").nodes["a"].kind == "agent"   # untouched
+
+
 def test_auto_apply_off_by_default_leaves_the_flow_alone(monkeypatch, tmp_path):
     _isolate(monkeypatch, tmp_path)
     monkeypatch.setenv("MAVERICK_FLOWS_AUTO", "1")           # auto_evolve on, auto_apply OFF

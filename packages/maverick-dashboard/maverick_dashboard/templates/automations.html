@@ -772,8 +772,13 @@
       // input; hardening (-> action) needs a tool name only a human can choose.
       var body = { node_id: p.node_id, to_kind: p.to_kind };
       if (p.to_kind === 'action') {
-        var tool = (window.prompt('Harden node "' + p.node_id + '" into a deterministic action.\n'
-          + 'Which tool should it call?') || '').trim();
+        // The loop may already know the tool this node has been calling; only
+        // ask when it couldn't infer one confidently.
+        var tool = (p.inferred_tool || '').trim();
+        if (!tool) {
+          tool = (window.prompt('Harden node "' + p.node_id + '" into a deterministic action.\n'
+            + 'Which tool should it call?') || '').trim();
+        }
         if (!tool) { insightsHead.textContent = 'Cancelled — hardening needs a tool.'; return; }
         body.tool = tool;
       }

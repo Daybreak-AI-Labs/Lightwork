@@ -12,6 +12,7 @@ and :func:`default_action_runner` supply the production bindings.
 """
 from __future__ import annotations
 
+import contextvars
 from collections.abc import Callable
 from typing import Any
 
@@ -82,18 +83,35 @@ def _spend_tracked(agent_runner: AgentRunner, per_call: float, spent: list) -> A
     return run
 
 
-def _call_agent(runner: AgentRunner, brief: str, data: dict, wall: float) -> tuple:
+# The node an agent runner is currently serving, set by _call_agent around the
+# call and read by default_agent_runner to attribute the goal's tool usage back
+# to the node (for harden-tool inference). A ContextVar, not a kwarg, so the
+# runner contract stays (brief, data[, wall]) -- no new signature to break, and
+# no double-invocation of the stateful budget wrappers on a fallback path. Set +
+# read happen synchronously on one thread (even under the foreach pool), so the
+# value is always the right node.
+_active_node: contextvars.ContextVar[tuple[str, str]] = contextvars.ContextVar(
+    "_flow_active_node", default=("", ""))
+
+
+def _call_agent(runner: AgentRunner, brief: str, data: dict, wall: float,
+                flow_id: str = "", node_id: str = "") -> tuple:
     """Invoke an agent runner, bounding its wall-clock to a node ``timeout`` when
     set so a timed-out node's underlying goal self-terminates near the point the
     flow gives up waiting -- instead of running on to its default cap, still
     spending budget after the flow moved on. Injected 2-arg test runners that
-    don't accept ``wall`` are called plainly."""
-    if wall and wall > 0:
-        try:
-            return runner(brief, data, wall=wall)
-        except TypeError:
-            pass
-    return runner(brief, data)
+    don't accept ``wall`` are called plainly. Publishes the current node id on a
+    ContextVar so the production runner can attribute its goal's tools to it."""
+    token = _active_node.set((flow_id, node_id))
+    try:
+        if wall and wall > 0:
+            try:
+                return runner(brief, data, wall=wall)
+            except TypeError:
+                pass
+        return runner(brief, data)
+    finally:
+        _active_node.reset(token)
 
 
 def execute(flow: Flow, *, agent_runner: AgentRunner, action_runner: ActionRunner,
@@ -183,7 +201,8 @@ def execute(flow: Flow, *, agent_runner: AgentRunner, action_runner: ActionRunne
 
     res = run_flow(
         flow,
-        agent_fn=lambda node, brief, d: _call_agent(agent_runner, brief, d, node.timeout),
+        agent_fn=lambda node, brief, d: _call_agent(agent_runner, brief, d, node.timeout,
+                                                    flow_id=flow.id, node_id=node.id),
         action_fn=lambda node, params, d: action_runner(node.tool, params, d),
         approve_fn=approve_fn, data=data, resume=resume, on_node=_on_node, now=now,
         # A subflow node resolves to another SAVED flow; the runner's flow_stack
@@ -238,8 +257,29 @@ def default_agent_runner(world, *, owner: str = "", budget_dollars: float = 5.0,
             return (f"agent step failed: {type(e).__name__}: {e}", 0.0)
         g = world.get_goal(gid)
         outcome = 1.0 if (g and g.status == "done") else 0.0
+        # Attribute this goal's tool usage back to the node (from the ContextVar
+        # _call_agent published), so the self-rewrite pass can infer which tool a
+        # reliably-one-tool agent node should harden into. Best-effort + only when
+        # trajectory capture recorded anything.
+        fid, nid = _active_node.get()
+        if fid and nid:
+            _capture_node_tools(fid, nid, gid)
         return (result if result is not None else (g.result if g else ""), outcome)
     return run
+
+
+def _capture_node_tools(flow_id: str, node_id: str, goal_id: int) -> None:
+    """Record the distinct tools an agent node's goal used (for harden inference).
+    No-op when trajectory capture is off (nothing to read); never raises."""
+    try:
+        from .. import trajectory_store
+        if not trajectory_store.enabled():
+            return
+        tools = trajectory_store.tools_for_goal(goal_id)
+        from . import node_tools
+        node_tools.record(flow_id, node_id, tools)
+    except Exception:  # pragma: no cover -- capture must never break a run
+        pass
 
 
 def default_action_runner(world, sandbox=None) -> ActionRunner:

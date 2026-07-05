@@ -438,23 +438,36 @@ def _handle_flow_evolve(_job=None) -> None:
 
 def _auto_apply_proposals() -> None:
     """Autonomously APPLY the strongest self-rewrite proposal per flow (the
-    forward arrow, gated on ``[flows] auto_apply``). Only the SOFTEN direction
-    (action -> agent) is applied without a human: hardening to an action needs a
-    tool a human must choose. Skips a node that already has a pending apply (so it
-    is measured -- and auto-reverted if it regresses -- before another change).
-    Idempotent + conservative: one apply per flow per pass."""
+    forward arrow, gated on ``[flows] auto_apply``). Two directions are applied
+    without a human:
+
+    * SOFTEN (action -> agent): a chronically-failing fixed step handed to an
+      agent; the brief derives from the node.
+    * HARDEN (agent -> action): a reliably-succeeding agent node that has been
+      calling ONE tool over and over, hardened to call that tool directly -- but
+      ONLY when that tool was confidently inferred from captured runs
+      (``inferred_tool``). Without it, hardening still needs a human to pick the
+      tool, so it's left as a surfaced proposal.
+
+    Skips a node that already has a pending apply (so it is measured -- and
+    auto-reverted if it regresses -- before another change). Idempotent +
+    conservative: one apply per flow per pass."""
     from maverick.flow import evolution_log, evolve, store
     from maverick.flow.ir import NODE_ACTION
     for f in store.list_flows():
         for prop in evolve.maybe_propose(f):
-            if prop.from_kind != NODE_ACTION:      # soften-only; harden needs a tool
-                continue
             if evolution_log.last_apply(f.id, prop.node_id):
                 continue                            # already changed -> let it be measured first
             node = f.nodes.get(prop.node_id)
-            brief = (node.brief or node.label) if node else ""
+            kwargs: dict = {}
+            if prop.from_kind == NODE_ACTION:       # soften: derive the brief
+                kwargs["brief"] = (node.brief or node.label) if node else ""
+            elif prop.inferred_tool:                # harden: only with an inferred tool
+                kwargs["tool"] = prop.inferred_tool
+            else:
+                continue                            # harden with no known tool -> human-gated
             try:
-                changed = evolve.apply_proposal(f, prop.node_id, prop.to_kind, brief=brief)
+                changed = evolve.apply_proposal(f, prop.node_id, prop.to_kind, **kwargs)
             except (KeyError, ValueError):
                 continue
             if changed.validate():
@@ -462,8 +475,9 @@ def _auto_apply_proposals() -> None:
             saved = store.save_flow(changed)
             evolution_log.record_apply(f.id, prop.node_id, prop.from_kind, prop.to_kind,
                                        saved.version, source="auto-apply")
-            log.info("auto-applied rewrite: flow=%s node=%s %s->%s (%.0f%% over %d)",
-                     f.id, prop.node_id, prop.from_kind, prop.to_kind, prop.mean * 100, prop.n)
+            log.info("auto-applied rewrite: flow=%s node=%s %s->%s (%.0f%% over %d)%s",
+                     f.id, prop.node_id, prop.from_kind, prop.to_kind, prop.mean * 100, prop.n,
+                     f" via {prop.inferred_tool}" if prop.inferred_tool else "")
             break                                    # one apply per flow per pass
 
 
