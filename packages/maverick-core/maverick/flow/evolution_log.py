@@ -55,4 +55,11 @@ def last_apply(flow_id: str, node_id: str) -> dict | None:
     return rows[0] if rows else None
 
 
-__all__ = ["record_apply", "history", "last_apply"]
+def improvement_count() -> int:
+    """How many times flows have self-improved -- forward applies (a human or the
+    autonomous pass enacting a proposal), excluding auto-reverts. A tangible
+    "your workflows got better N times on their own" moat number."""
+    return sum(1 for r in _rows() if r.get("source") != "auto-revert")
+
+
+__all__ = ["record_apply", "history", "last_apply", "improvement_count"]

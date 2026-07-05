@@ -74,6 +74,9 @@
       {% if 'learned_capabilities' in snap.accumulated %}
       <div class="lrn__stat"><div class="lrn__num">{{ snap.accumulated.learned_capabilities }}</div><div class="lrn__lbl">capabilities self-taught</div></div>
       {% endif %}
+      {% if 'flow_self_improvements' in snap.accumulated %}
+      <div class="lrn__stat"><div class="lrn__num">{{ snap.accumulated.flow_self_improvements }}</div><div class="lrn__lbl">workflow self-improvements</div></div>
+      {% endif %}
       <div class="lrn__stat"><div class="lrn__num">{{ snap.accumulated.departments }}</div><div class="lrn__lbl">departments active</div></div>
     </div>
   </section>

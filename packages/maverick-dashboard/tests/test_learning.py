@@ -91,6 +91,18 @@ def test_enable_all_learning_flips_every_component(tmp_path, monkeypatch):
     assert client.get("/api/v1/learning").json()["components_on"] == 0
 
 
+def test_flow_self_improvements_surface_in_the_moat(tmp_path, monkeypatch):
+    # A forward flow self-rewrite (the loop enacting a proposal) shows up as a
+    # counted moat number for an admin caller; auto-reverts don't inflate it.
+    _isolate(tmp_path, monkeypatch)
+    from maverick.flow import evolution_log
+    assert "flow_self_improvements" not in client.get("/api/v1/learning").json()["accumulated"]
+    evolution_log.record_apply("f", "a", "action", "agent", 2, source="auto-apply")
+    evolution_log.record_apply("f", "a", "agent", "action", 3, source="auto-revert")
+    acc = client.get("/api/v1/learning").json()["accumulated"]
+    assert acc["flow_self_improvements"] == 1   # the revert is excluded
+
+
 def test_learning_page_has_enable_button(tmp_path, monkeypatch):
     _isolate(tmp_path, monkeypatch)
     t = client.get("/learning").text

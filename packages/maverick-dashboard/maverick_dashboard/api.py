@@ -4765,6 +4765,15 @@ def _learning_snapshot(request: Request) -> dict:
             learned_n = 0
         accumulated["grounded_outcomes"] = consequence.count()
         accumulated["learned_capabilities"] = learned_n
+        # Flows that improved themselves -- forward self-rewrites the loop enacted,
+        # a tangible "your automations got better on their own" moat number.
+        try:
+            from maverick.flow import evolution_log
+            improvements = evolution_log.improvement_count()
+        except Exception:  # pragma: no cover -- the moat view never 500s on a sub-read
+            improvements = 0
+        if improvements:
+            accumulated["flow_self_improvements"] = improvements
     return {
         "components": components,
         "accumulated": accumulated,

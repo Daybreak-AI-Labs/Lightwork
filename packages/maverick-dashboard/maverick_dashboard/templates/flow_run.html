@@ -34,6 +34,7 @@
     <a id="fr-designer-link" href="/flows/designer/{{ flow_id }}">open in designer →</a>
     <a href="/automations">all automations</a>
   </div>
+  <p class="fr__msg" id="fr-meta"></p>
   <div class="fr__error" id="fr-error" hidden></div>
   <div class="fr__actions" id="fr-actions"></div>
   <span class="fr__msg" id="fr-msg" aria-live="polite"></span>
@@ -158,6 +159,14 @@
     document.getElementById('fr-runid').textContent = run.run_id.slice(0, 12) + '…';
     var st = document.getElementById('fr-status');
     st.textContent = run.status; st.className = 'fr__status ' + run.status;
+    var meta = document.getElementById('fr-meta');
+    if (meta) {
+      var bits = [];
+      if (run.origin && run.origin !== 'manual') bits.push('fired by ' + run.origin);
+      else bits.push('run manually');
+      if (run.cost_dollars) bits.push('cost $' + Number(run.cost_dollars).toFixed(2));
+      meta.textContent = bits.join(' · ');
+    }
     var err = document.getElementById('fr-error');
     if (run.error) { err.hidden = false; err.textContent = run.error; } else { err.hidden = true; }
     document.getElementById('fr-data').textContent = JSON.stringify(run.data || {}, null, 2);

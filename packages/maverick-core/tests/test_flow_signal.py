@@ -149,3 +149,16 @@ def test_validate_flags_delay_inside_parallel_branch():
 def test_top_level_approval_is_fine():
     f = _flow([FlowNode(id="a", kind="approval", prompt="ok?")])
     assert f.validate() == []
+
+
+# ---- flow self-improvement count (moat number) -----------------------------
+
+def test_improvement_count_excludes_reverts(tmp_path, monkeypatch):
+    monkeypatch.setenv("MAVERICK_HOME", str(tmp_path))
+    monkeypatch.setenv("HOME", str(tmp_path))
+    from maverick.flow import evolution_log
+    assert evolution_log.improvement_count() == 0
+    evolution_log.record_apply("f", "a", "action", "agent", 2, source="human")
+    evolution_log.record_apply("f", "b", "agent", "action", 2, source="auto-apply")
+    evolution_log.record_apply("f", "a", "agent", "action", 3, source="auto-revert")
+    assert evolution_log.improvement_count() == 2   # two forward applies, the revert excluded
