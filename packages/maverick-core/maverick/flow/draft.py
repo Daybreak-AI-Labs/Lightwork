@@ -99,9 +99,17 @@ def _sanitize(raw: dict, description: str) -> dict:
         raise ValueError("no usable nodes")
     ids = {n["id"] for n in clean}
     for n in clean:                       # drop routing that points nowhere
-        for key in ("next", "if_true", "if_false"):
+        for key in ("next", "if_true", "if_false", "on_error"):
             if n.get(key) is not None and n.get(key) not in ids:
                 n[key] = None
+        # A switch node's case arms are routing too; prune any that point at a
+        # node the model hallucinated (else the whole draft fails validation and
+        # is discarded for a single-agent fallback -- switch/scope drafts newly
+        # documented in the prompt would be disproportionately fragile).
+        cases = n.get("cases")
+        if isinstance(cases, list):
+            n["cases"] = [c for c in cases
+                          if isinstance(c, dict) and c.get("to") in ids]
     start = str(raw.get("start") or "")
     if start not in ids:
         start = clean[0]["id"]

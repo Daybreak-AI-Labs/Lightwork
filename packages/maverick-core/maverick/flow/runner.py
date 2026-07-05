@@ -47,6 +47,16 @@ STATUS_PAUSED_EVENT = "paused_event"
 STATUS_REJECTED = "rejected"
 STATUS_FAILED = "failed"
 
+# The single source of truth for "which statuses mean a run is parked and
+# resumable" and "which statuses mean a run is still in flight". Every gate that
+# used to hand-list these literals (the resume/retry endpoints, the sweep, the
+# JS overlay) should consume these instead -- a new pause status is then added
+# in one place, not six.
+PAUSED_STATUSES = frozenset({
+    STATUS_PAUSED_APPROVAL, STATUS_PAUSED_DELAY, STATUS_PAUSED_EVENT,
+})
+ACTIVE_STATUSES = frozenset({"queued", "running"}) | PAUSED_STATUSES
+
 _WHILE_DEFAULT_CAP = 100   # while-loop iterations when the node sets no limit
 
 _VAR = re.compile(r"\{\{\s*(.+?)\s*\}\}")
@@ -409,8 +419,11 @@ def _run_wait(node: FlowNode, data: dict, ctx: _Ctx) -> str | None:
     if ctx.allow_pause:
         ctx.on_node(node, "waiting", None)
         raise _Pause("event", node, data)
+    # Nested (foreach/while/scope body, parallel branch): can't pause. Fail
+    # CLOSED like a nested approval rather than silently continuing -- otherwise
+    # downstream nodes run before the awaited event's data has arrived.
     ctx.on_node(node, "skipped", None)
-    return node.next
+    raise _Reject(node, data)
 
 
 def _run_scope(node: FlowNode, data: dict, ctx: _Ctx) -> str | None:
@@ -584,24 +597,31 @@ def run_flow(flow: Flow, *, agent_fn: AgentFn, action_fn: ActionFn,
         data = dict(resume.get("data") or data or {})
         node = flow.node(resume.get("node_id"))
         decision = resume.get("decision")
+        # The paused/failed node must still exist in this (current) flow version.
+        # If an edit or rollback removed or replaced it between pause and resume,
+        # fail CLOSED -- silently falling back to flow.start would re-execute the
+        # whole flow and re-drive every pre-pause side effect.
+        if node is None:
+            return FlowRunResult(
+                status=STATUS_FAILED, data=data, cursor=resume.get("node_id"),
+                error=(f"cannot resume: node {resume.get('node_id')!r} no longer "
+                       "exists in this flow version"))
         if decision == "rejected":
-            return FlowRunResult(status=STATUS_REJECTED, data=data,
-                                 cursor=resume.get("node_id"))
-        if node is not None and node.kind == NODE_APPROVAL and decision:
-            # A choice approval: an unlisted verdict fails CLOSED (rejected), a
-            # listed one is recorded to the node's output so downstream routing
-            # (a branch/switch on the verdict) works exactly like the inline path.
-            if node.choices and decision != "approved" and decision not in node.choices:
-                return FlowRunResult(status=STATUS_REJECTED, data=data,
-                                     cursor=resume.get("node_id"))
-            if node.output:
-                data[node.output] = decision
+            return FlowRunResult(status=STATUS_REJECTED, data=data, cursor=node.id)
+        if node.kind == NODE_APPROVAL and not resume.get("rerun"):
+            # Resuming an approval gate: accept ONLY the literal "approved" or one
+            # of the node's explicitly declared choices. Anything else fails
+            # CLOSED (rejected), so a loosened decision string can never wave a
+            # run past a human gate. The accepted verdict is recorded to the
+            # node's output for downstream routing (matches the inline path).
+            if decision == "approved" or (decision and decision in node.choices):
+                if node.output:
+                    data[node.output] = decision
+            else:
+                return FlowRunResult(status=STATUS_REJECTED, data=data, cursor=node.id)
         # A pause resumes AFTER its node (the approval/delay is done); a
         # failure retry re-enters AT the node that failed ("rerun").
-        if resume.get("rerun"):
-            start = node.id if node else flow.start
-        else:
-            start = node.next if node else flow.start
+        start = node.id if resume.get("rerun") else node.next
     else:
         data = dict(data or {})
         start = flow.start
@@ -627,4 +647,5 @@ __all__ = [
     "run_flow", "render", "eval_condition", "FlowRunResult",
     "STATUS_COMPLETED", "STATUS_PAUSED_APPROVAL", "STATUS_PAUSED_DELAY",
     "STATUS_PAUSED_EVENT", "STATUS_REJECTED", "STATUS_FAILED",
+    "PAUSED_STATUSES", "ACTIVE_STATUSES",
 ]

@@ -175,7 +175,9 @@
       });
       gNodes.appendChild(g);
     });
-    renderMinimap();
+    // Skip the minimap rebuild mid-drag (render() fires every mousemove frame);
+    // the mouseup handler refreshes it once the drag settles.
+    if (!drag || drag.kind === 'connect' || drag.kind === 'marquee') renderMinimap();
   }
 
   // ---- minimap: a scaled overview with the viewport rect; click to jump ----
@@ -257,7 +259,9 @@
     }
     if (evt.shiftKey) {           // shift-drag on empty canvas: marquee select
       var mp = worldPt(evt);
-      drag = { kind: 'marquee', sx: mp.x, sy: mp.y };
+      // ex/ey start AT the origin (a click with no drag = an empty box), so the
+      // mouseup reader needs no undefined-guard.
+      drag = { kind: 'marquee', sx: mp.x, sy: mp.y, ex: mp.x, ey: mp.y };
       evt.preventDefault(); return;
     }
     drag = { kind: 'pan', sx: evt.clientX - view.x, sy: evt.clientY - view.y };
@@ -323,8 +327,8 @@
     tempEdge.style.display = 'none';
     if (drag && drag.kind === 'marquee') {
       document.getElementById('fd-marquee').style.display = 'none';
-      var x0 = Math.min(drag.sx, drag.ex || drag.sx), x1 = Math.max(drag.sx, drag.ex || drag.sx);
-      var y0 = Math.min(drag.sy, drag.ey || drag.sy), y1 = Math.max(drag.sy, drag.ey || drag.sy);
+      var x0 = Math.min(drag.sx, drag.ex), x1 = Math.max(drag.sx, drag.ex);
+      var y0 = Math.min(drag.sy, drag.ey), y1 = Math.max(drag.sy, drag.ey);
       multiSel = {};
       flow.nodes.forEach(function (n) {
         var cx = n.x + W / 2, cy = n.y + H / 2;
@@ -343,7 +347,11 @@
         if (from && to !== from.id) { pushHistory(); from[drag.port] = to; renderProps(); render(); }
       }
     }
+    var wasDragging = drag && (drag.kind === 'node' || drag.kind === 'group' || drag.kind === 'pan');
     drag = null;
+    // The minimap is skipped mid-drag (see render); refresh it once now that the
+    // drag settled, so it isn't left stale.
+    if (wasDragging) renderMinimap();
   });
   canvas.addEventListener('wheel', function (evt) {
     evt.preventDefault();
@@ -401,13 +409,22 @@
     selectNode(null); render();
     say('Removed ' + ids.length + ' node' + (ids.length === 1 ? '' : 's') + '.');
   }
+  // Build an independent copy of a serialized node with a fresh id and ALL
+  // outgoing edges cleared -- so a clone never smuggles a stale reference to the
+  // original's downstream. The one place the edge-field list is maintained
+  // (next/if_true/if_false/on_error AND a switch node's cases[].to).
+  function makeClone(serialized, x, y) {
+    var copy = normalizeNode(JSON.parse(JSON.stringify(serialized)), 0);
+    copy.id = newId();
+    copy.x = x; copy.y = y;
+    copy.next = null; copy.if_true = null; copy.if_false = null; copy.on_error = null;
+    if (copy.cases && copy.cases.length) copy.cases = copy.cases.map(function (c) { return { value: c.value, to: null }; });
+    return copy;
+  }
   function duplicateNode(id) {
     var src = nodeById(id); if (!src) return;
     pushHistory();
-    var copy = normalizeNode(JSON.parse(JSON.stringify(FDCore.serializeNode(src))), 0);
-    copy.id = newId();
-    copy.x = (src.x || 0) + 30; copy.y = (src.y || 0) + 40;
-    copy.next = null; copy.if_true = null; copy.if_false = null; copy.on_error = null;
+    var copy = makeClone(FDCore.serializeNode(src), (src.x || 0) + 30, (src.y || 0) + 40);
     flow.nodes.push(copy); selectNode(copy.id); render();
     say('Duplicated as ' + copy.id + '.');
   }
@@ -421,10 +438,7 @@
   function pasteNode() {
     if (!clipboard) { say('Nothing copied yet.'); return; }
     pushHistory();
-    var copy = normalizeNode(JSON.parse(JSON.stringify(clipboard)), 0);
-    copy.id = newId();
-    copy.x = (copy.x || 60) + 32; copy.y = (copy.y || 60) + 48;
-    copy.next = null; copy.if_true = null; copy.if_false = null; copy.on_error = null;
+    var copy = makeClone(clipboard, (clipboard.x || 60) + 32, (clipboard.y || 60) + 48);
     flow.nodes.push(copy); selectNode(copy.id); render();
     say('Pasted as ' + copy.id + '.');
   }

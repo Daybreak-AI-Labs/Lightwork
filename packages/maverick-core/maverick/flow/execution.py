@@ -18,14 +18,13 @@ from typing import Any
 from . import node_outcomes, store
 from .ir import Flow, FlowNode
 from .runner import (
+    PAUSED_STATUSES,
     STATUS_FAILED,
     STATUS_PAUSED_APPROVAL,
-    STATUS_PAUSED_DELAY,
-    STATUS_PAUSED_EVENT,
     run_flow,
 )
 
-_RESUMABLE = (STATUS_PAUSED_APPROVAL, STATUS_PAUSED_DELAY, STATUS_PAUSED_EVENT)
+_RESUMABLE = PAUSED_STATUSES
 
 
 class FlowNotResumable(ValueError):
@@ -118,6 +117,11 @@ def execute(flow: Flow, *, agent_runner: AgentRunner, action_runner: ActionRunne
     # Wall-clock per work node (accumulated across retries), measured at the
     # executor seam so the pure runner's on_node contract stays unchanged.
     durations: dict[str, float] = {}
+    # A concurrent foreach runs the SAME body node ids on several threads through
+    # this shared sink; guard the trace mutations so the duration read-modify-
+    # write can't lose updates.
+    import threading as _threading
+    trace_lock = _threading.Lock()
 
     def _timed(node_id: str, fn, *args):
         import time as _time
@@ -125,13 +129,16 @@ def execute(flow: Flow, *, agent_runner: AgentRunner, action_runner: ActionRunne
         try:
             return fn(*args)
         finally:
-            durations[node_id] = durations.get(node_id, 0.0) + (_time.perf_counter() - t0)
+            dt = _time.perf_counter() - t0
+            with trace_lock:
+                durations[node_id] = durations.get(node_id, 0.0) + dt
 
     def _on_node(node: FlowNode, status: str, outcome: float | None) -> None:
-        entry: dict = {"status": status, "outcome": outcome}
-        if node.id in durations:
-            entry["seconds"] = round(durations[node.id], 3)
-        node_states[node.id] = entry
+        with trace_lock:
+            entry: dict = {"status": status, "outcome": outcome}
+            if node.id in durations:
+                entry["seconds"] = round(durations[node.id], 3)
+            node_states[node.id] = entry
         if outcome is not None and record_outcomes:
             node_outcomes.record(flow.id, node.id, node.kind, outcome)
 

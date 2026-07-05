@@ -150,6 +150,22 @@ def test_sweep_rejects_expired_approvals_but_never_paused_events(monkeypatch, tm
     assert jobs[0].payload["decision"] == "rejected"     # expiry fails closed
 
 
+def test_retry_of_paused_event_run_is_409_not_a_duplicate(monkeypatch, tmp_path):
+    _isolate(monkeypatch, tmp_path)
+    from maverick.flow import store
+    from maverick_dashboard import automation_queue as aq
+    _reset_aq(monkeypatch, aq)
+    c = _client()
+    assert c.post("/api/v1/flows", json={"flow": _FLOW}).status_code == 201
+    store.save_run(store.FlowRun(run_id="pe", flow_id="demo", status="paused_event",
+                                 cursor="w"))
+    r = c.post("/api/v1/flows/runs/pe/retry")
+    assert r.status_code == 409 and "still active" in r.json()["detail"]
+    # no duplicate flow_run job was enqueued
+    jobs = [j for j in aq.queue().list(status="pending") if j.kind == aq.FLOW_RUN_KIND]
+    assert jobs == []
+
+
 def test_paused_event_run_resumes_via_api_with_event_data(monkeypatch, tmp_path):
     _isolate(monkeypatch, tmp_path)
     from maverick.flow import execution

@@ -5,7 +5,9 @@ from __future__ import annotations
 from maverick.flow.ir import Flow
 from maverick.flow.runner import (
     STATUS_COMPLETED,
+    STATUS_FAILED,
     STATUS_PAUSED_EVENT,
+    STATUS_REJECTED,
     run_flow,
 )
 
@@ -119,6 +121,73 @@ def test_scope_catches_a_body_failure_and_routes_on_error():
     assert res.status == STATUS_COMPLETED
     assert res.data["r"].startswith("ran:recover from")
     assert "connector down" in res.data["_error"]
+
+
+def test_nested_wait_event_fails_closed_not_open():
+    # A wait_event buried in a foreach body cannot pause; it must fail closed
+    # (reject) rather than silently continue before the event's data arrives.
+    f = {
+        "id": "nw", "name": "nw", "start": "l",
+        "nodes": [{"id": "l", "kind": "foreach", "items": "rows", "var": "row",
+                   "next": "after",
+                   "body": {"id": "", "name": "b", "start": "w",
+                            "nodes": [
+                                {"id": "w", "kind": "wait_event", "prompt": "cb", "next": "x"},
+                                {"id": "x", "kind": "agent", "brief": "should NOT run", "output": "r"},
+                            ]}},
+                  {"id": "after", "kind": "agent", "brief": "downstream", "output": "done"}],
+    }
+    ran = []
+    res = run_flow(Flow.from_dict(f),
+                   agent_fn=lambda n, b, d: (ran.append(b) or ("x", 1.0)),
+                   action_fn=lambda n, p, d: ("", 1.0), data={"rows": ["a"]})
+    assert res.status == STATUS_REJECTED
+    assert "should NOT run" not in ran and "downstream" not in ran
+
+
+def test_resume_with_missing_node_fails_closed_not_restart():
+    # If the paused node no longer exists in the (edited) flow, resuming must
+    # fail closed, never silently restart the whole flow from the top.
+    f = {
+        "id": "re", "name": "re", "start": "a",
+        "nodes": [{"id": "a", "kind": "agent", "brief": "step", "output": "r"}],
+    }
+    ran = []
+    res = run_flow(Flow.from_dict(f),
+                   agent_fn=lambda n, b, d: (ran.append(b) or ("x", 1.0)),
+                   action_fn=lambda n, p, d: ("", 1.0),
+                   resume={"node_id": "ghost", "data": {}})
+    assert res.status == STATUS_FAILED and res.cursor == "ghost"
+    assert "no longer exists" in res.error
+    assert ran == []                       # nothing re-executed from the top
+
+
+def test_resume_plain_approval_rejects_any_non_approved_string():
+    # A no-choices approval resumed with a bogus verdict must NOT be treated as
+    # approved (the human-gate-bypass fix).
+    f = {
+        "id": "ap", "name": "ap", "start": "a",
+        "nodes": [
+            {"id": "a", "kind": "approval", "prompt": "ok?", "next": "b"},
+            {"id": "b", "kind": "agent", "brief": "gated action", "output": "r"},
+        ],
+    }
+    ran = []
+
+    def agent(n, b, d):
+        ran.append(b)
+        return ("x", 1.0)
+    for bogus in ("banana", "approve", "ok", "yes", "deny"):
+        res = run_flow(Flow.from_dict(f), agent_fn=agent,
+                       action_fn=lambda n, p, d: ("", 1.0),
+                       resume={"node_id": "a", "data": {}, "decision": bogus})
+        assert res.status == STATUS_REJECTED, bogus
+    assert ran == []                       # the gated action never ran
+    # only the literal "approved" continues
+    ok = run_flow(Flow.from_dict(f), agent_fn=agent,
+                  action_fn=lambda n, p, d: ("", 1.0),
+                  resume={"node_id": "a", "data": {}, "decision": "approved"})
+    assert ok.status == STATUS_COMPLETED and ran == ["gated action"]
 
 
 def test_scope_without_catch_still_fails_the_run():

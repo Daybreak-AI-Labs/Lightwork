@@ -193,6 +193,27 @@ def test_webhook_event_resume_continues_a_waiting_run(monkeypatch, tmp_path):
     assert r2.status_code == 409
 
 
+def test_webhook_event_resume_dedupes_repeat_delivery_id(monkeypatch, tmp_path):
+    _isolate(monkeypatch, tmp_path)
+    _configured(monkeypatch)
+    monkeypatch.setenv("MAVERICK_FLOWS", "1")
+    from maverick.flow import store
+    from maverick_dashboard import automation_queue as aq
+    monkeypatch.setattr(aq, "_queue", None)
+    store.save_run(store.FlowRun(run_id="wd1", flow_id="anyflow",
+                                 status="paused_event", cursor="w"))
+    payload = {"resume": "wd1", "data": {"payload": "x"}, "id": "evt-dup"}
+    body = json.dumps(payload).encode()
+    r1 = _client().post("/webhook/run", content=body,
+                        headers={**_sign_headers(body), "Content-Type": "application/json"})
+    assert r1.status_code == 202
+    # same delivery id again -> 409 duplicate (the dedup the trigger paths have)
+    body2 = json.dumps(payload).encode()
+    r2 = _client().post("/webhook/run", content=body2,
+                        headers={**_sign_headers(body2), "Content-Type": "application/json"})
+    assert r2.status_code == 409 and "duplicate" in r2.json()["detail"]
+
+
 def test_webhook_flow_trigger_when_engine_off_is_409(monkeypatch, tmp_path):
     _isolate(monkeypatch, tmp_path)
     _configured(monkeypatch)

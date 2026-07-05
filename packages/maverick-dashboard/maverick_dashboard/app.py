@@ -3662,6 +3662,11 @@ async def webhook_run(request: Request, bg: BackgroundTasks) -> JSONResponse:
     # for. Same HMAC credential; the data merges into the run before it continues.
     resume_id = str(payload.get("resume") or "").strip()
     if resume_id:
+        # Same guards as the trigger paths below: reject a replayed delivery id
+        # and apply the webhook rate limit, so a holder of the secret can't flood
+        # resume enqueues by varying the timestamp/body.
+        if _webhook_duplicate_delivery("run", payload):
+            raise HTTPException(status_code=409, detail="duplicate delivery id (already processed)")
         from maverick import flow as flow_mod
         if not flow_mod.enabled():
             raise HTTPException(status_code=409, detail="the flow engine is off")
@@ -3673,6 +3678,7 @@ async def webhook_run(request: Request, bg: BackgroundTasks) -> JSONResponse:
             raise HTTPException(
                 status_code=409,
                 detail=f"run is not waiting for an event (status {run.status})")
+        check_goal_rate_limit(request, source="webhook")
         inbound_evt = payload.get("data")
         inputs = ({str(k): v for k, v in inbound_evt.items()}
                   if isinstance(inbound_evt, dict) else {})

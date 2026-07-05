@@ -957,27 +957,51 @@ _FLOW_DRAFT_TOOLS = (
 )
 
 
+_TOOL_INDEX_CACHE: list[dict] | None = None
+_TOOL_INDEX_LOCK = threading.Lock()
+
+
+def _live_tool_index() -> list[dict]:
+    """The full flattened tool list ({name, description, params}) built ONCE and
+    memoized. The registry (built-ins + every enabled connector) is process-
+    stable config, so rebuilding hundreds of tool objects on every picker
+    request -- once per debounced keystroke on the search path -- was wasted
+    work. Both the curated catalog and the ?q= search read this cache. Cleared
+    only by a process restart, which is also when connector config changes."""
+    global _TOOL_INDEX_CACHE
+    if _TOOL_INDEX_CACHE is not None:
+        return _TOOL_INDEX_CACHE
+    try:
+        from maverick.sandbox import LocalBackend
+        from maverick.tools import base_registry
+        live = base_registry(_world(), LocalBackend(), goal_id=None).all()
+    except Exception:  # pragma: no cover -- registry build varies by env
+        live = []
+    idx = []
+    for t in live:
+        params = []
+        if isinstance(t.input_schema, dict):
+            params = list((t.input_schema.get("properties") or {}).keys())[:12]
+        idx.append({"name": t.name, "description": (t.description or "")[:200],
+                    "params": params})
+    with _TOOL_INDEX_LOCK:
+        if _TOOL_INDEX_CACHE is None:
+            _TOOL_INDEX_CACHE = idx
+    return _TOOL_INDEX_CACHE
+
+
 def _flow_tool_catalog() -> list[dict]:
     """The curated connector catalog for the designer's action picker + the NL
     drafter's grounding: each tool's name, one-line description, and param names
     (from its input schema). Best-effort -- a tool absent from the live registry
     still appears by name so the picker/drafter can offer it."""
-    tools = {}
-    try:
-        from maverick.sandbox import LocalBackend
-        from maverick.tools import base_registry
-        tools = {t.name: t for t in base_registry(_world(), LocalBackend(), goal_id=None).all()}
-    except Exception:  # pragma: no cover -- registry build varies by env; fall back to names
-        tools = {}
+    by_name = {t["name"]: t for t in _live_tool_index()}
     out = []
     for name in _FLOW_DRAFT_TOOLS:
-        t = tools.get(name)
-        params = []
-        if t is not None and isinstance(t.input_schema, dict):
-            params = list((t.input_schema.get("properties") or {}).keys())[:12]
+        t = by_name.get(name)
         out.append({"name": name,
-                    "description": (t.description[:200] if t is not None else ""),
-                    "params": params})
+                    "description": (t["description"] if t is not None else ""),
+                    "params": (t["params"] if t is not None else [])})
     return out
 
 
@@ -1118,6 +1142,11 @@ async def flow_run_events_stream(request: Request, run_id: str) -> StreamingResp
                 if (_asyncio.get_running_loop().time() - started) >= max_seconds:
                     yield "event: timeout\ndata: {\"detail\": \"stream lifetime exceeded\"}\n\n"
                     return
+                # Stop re-reading the run file the moment the client goes away
+                # (a closed tab) instead of leaning solely on CancelledError
+                # timing -- matches the goal-events stream.
+                if await request.is_disconnected():
+                    return
                 run = await run_in_threadpool(flow_store.load_run, run_id)
                 if run is None:
                     yield "event: error\ndata: {\"detail\": \"run vanished\"}\n\n"
@@ -1156,7 +1185,8 @@ async def resume_flow_run_endpoint(request: Request, run_id: str,
     run = _load_owned_run(request, run_id)
     # Only a paused run may be resumed -- resuming a completed/rejected run would
     # re-run the flow or run a rejected node (409, not a silent no-op).
-    if run.status not in ("paused_approval", "paused_delay", "paused_event"):
+    from maverick.flow.runner import PAUSED_STATUSES
+    if run.status not in PAUSED_STATUSES:
         raise HTTPException(status_code=409,
                             detail=f"run is not paused (status {run.status})")
     from maverick_dashboard import automation_queue as aq
@@ -1181,7 +1211,12 @@ async def retry_flow_run_endpoint(request: Request, run_id: str,
     require_permission(request, "operate")
     _require_flows()
     run = _load_owned_run(request, run_id)
-    if run.status in ("queued", "running", "paused_approval", "paused_delay"):
+    # A still-in-flight run (queued/running or parked on ANY pause, including
+    # paused_event) must not be retried-from-scratch -- that would spawn a
+    # duplicate run alongside the live one. from_failure below is the only path
+    # that acts on a failed run.
+    from maverick.flow.runner import ACTIVE_STATUSES
+    if run.status in ACTIVE_STATUSES:
         raise HTTPException(status_code=409,
                             detail=f"run is still active (status {run.status}); nothing to retry")
     from maverick.flow import store
@@ -1218,22 +1253,8 @@ async def flow_tools_endpoint(request: Request, q: str = "") -> dict:
         return {"tools": await run_in_threadpool(_flow_tool_catalog)}
 
     def _search():
-        try:
-            from maverick.sandbox import LocalBackend
-            from maverick.tools import base_registry
-            live = base_registry(_world(), LocalBackend(), goal_id=None).all()
-        except Exception:  # pragma: no cover -- registry build varies by env
-            live = []
-        out = []
-        for t in live:
-            hay = f"{t.name} {t.description or ''}".lower()
-            if q not in hay:
-                continue
-            params = []
-            if isinstance(t.input_schema, dict):
-                params = list((t.input_schema.get("properties") or {}).keys())[:12]
-            out.append({"name": t.name, "description": (t.description or "")[:200],
-                        "params": params})
+        out = [t for t in _live_tool_index()
+               if q in f"{t['name']} {t['description']}".lower()]
         # name-prefix matches first, then name matches, then description-only
         out.sort(key=lambda t: (not t["name"].lower().startswith(q),
                                 q not in t["name"].lower(), t["name"]))
