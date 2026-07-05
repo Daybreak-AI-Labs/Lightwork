@@ -82,9 +82,12 @@ def since(token: str, cursor: str) -> tuple[list[dict], str]:
                 except ValueError:
                     continue
     except OSError:
-        return [], cursor or ""
+        # A non-empty baseline cursor even for a missing store ("0"), so the
+        # first submission after the trigger is armed locks in and then fires --
+        # returning "" would leave the trigger's cursor unadvanced and swallow it.
+        return [], cursor or "0"
     if not rows:
-        return [], cursor or ""
+        return [], cursor or "0"
     highest = str(rows[-1].get("seq") or len(rows))
     try:
         after = int(cursor) if cursor else None

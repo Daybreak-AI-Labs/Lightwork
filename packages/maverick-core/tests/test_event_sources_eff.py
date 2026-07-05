@@ -84,6 +84,22 @@ def test_form_source_fires_new_submissions(tmp_path, monkeypatch):
     assert out.cursor == "2"
 
 
+def test_form_source_first_submission_fires_when_store_absent(tmp_path, monkeypatch):
+    # The normal ordering: arm the trigger (no store file yet), THEN a submission
+    # arrives. The baseline must lock a non-empty cursor so the FIRST real
+    # submission fires rather than being swallowed as the baseline.
+    monkeypatch.setenv("MAVERICK_HOME", str(tmp_path))
+    monkeypatch.setenv("HOME", str(tmp_path))
+    from maverick import form_store
+    src = ev.get_source("form")
+    cfg = {"token": "waitlist"}
+    base = src.poll(cfg, "")                        # store file does not exist yet
+    assert base.events == [] and base.cursor == "0"  # locked, not empty
+    form_store.append("waitlist", {"email": "first@x.com"})
+    out = src.poll(cfg, base.cursor)
+    assert [e["email"] for e in out.events] == ["first@x.com"]   # the first one fires
+
+
 def test_form_source_requires_token():
     with pytest.raises(ev.EventSourceError):
         ev.get_source("form").poll({}, "")
