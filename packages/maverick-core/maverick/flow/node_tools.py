@@ -62,7 +62,8 @@ def dominant_tool(flow_id: str, node_id: str, *,
     so a wrong guess would break a flow. Requires at least ``min_support`` recorded
     runs AND that one tool was the node's sole tool call in at least ``min_frac`` of
     ALL those runs (a run that used two tools, or none, counts against it). Returns
-    that tool only when both hold."""
+    that tool only when both hold. (Only successful node runs are recorded -- see
+    execution._capture_node_tools -- so one row is one run, not one retry attempt.)"""
     rows = _rows_for(flow_id, node_id)
     if len(rows) < min_support:
         return None

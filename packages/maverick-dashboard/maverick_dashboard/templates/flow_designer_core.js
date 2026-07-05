@@ -6,7 +6,7 @@ var FDCore = (function () {
   var NODE_DEFAULTS = {
     params: {}, brief: '', tool: '', condition: '', if_true: null, if_false: null,
     items: '', var: 'item', limit: 0, concurrency: 1, prompt: '', seconds: 0, flow_ref: '',
-    retries: 0, on_error: null, timeout: 0, output: '', label: '',
+    retries: 0, retry_backoff: 0, on_error: null, timeout: 0, output: '', label: '',
     cases: [], assignments: {}, body: null, branches: [], next: null
   };
   var SCALARS = ['next', 'tool', 'brief', 'condition', 'if_true', 'if_false',
@@ -33,6 +33,7 @@ var FDCore = (function () {
     if (n.params && Object.keys(n.params).length) o.params = n.params;
     if (n.seconds) o.seconds = n.seconds;
     if (n.retries) o.retries = n.retries;
+    if (n.retry_backoff) o.retry_backoff = n.retry_backoff;
     if (n.timeout) o.timeout = n.timeout;
     if (n.limit) o.limit = n.limit;
     if (n.concurrency && n.concurrency !== 1) o.concurrency = n.concurrency;

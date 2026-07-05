@@ -272,7 +272,7 @@
     pushHistory();
     var n = { id: newId(), kind: kind, x: Math.round((-view.x + 220) / view.k), y: Math.round((-view.y + 80) / view.k),
               next: null, params: {}, brief: '', tool: '', condition: '', if_true: null, if_false: null,
-              items: '', var: 'item', limit: 0, concurrency: 1, prompt: '', seconds: 0, flow_ref: '', retries: 0, on_error: null, timeout: 0,
+              items: '', var: 'item', limit: 0, concurrency: 1, prompt: '', seconds: 0, flow_ref: '', retries: 0, retry_backoff: 0, on_error: null, timeout: 0,
               output: '', label: '', cases: [], assignments: {}, body: null, branches: [] };
     // place under the currently selected node if any
     var sel = selected && nodeById(selected);
@@ -510,6 +510,7 @@
     // error handling: retry (work nodes) then route on failure (work + subflow + try)
     if (n.kind === 'agent' || n.kind === 'action') {
       props.appendChild(field('Retries on failure', input(String(n.retries || ''), function (v) { n.retries = parseInt(v, 10) || 0; }, '0')));
+      props.appendChild(field('Retry backoff (base seconds, 0 = no wait)', input(String(n.retry_backoff || ''), function (v) { n.retry_backoff = parseFloat(v) || 0; }, '0')));
       props.appendChild(field('Timeout (seconds, 0 = none)', input(String(n.timeout || ''), function (v) { n.timeout = parseFloat(v) || 0; }, '0')));
     }
     if (['agent', 'action', 'subflow', 'try'].indexOf(n.kind) >= 0) {

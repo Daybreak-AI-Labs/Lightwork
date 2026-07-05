@@ -83,6 +83,7 @@ class FlowNode:
     flow_ref: str = ""               # a saved flow id to run as a nested step
     # error handling ----------------------------------------------------------
     retries: int = 0                 # re-run a failed work node up to N more times
+    retry_backoff: float = 0.0       # base seconds between retries; exponential (0 = tight loop)
     on_error: str | None = None      # route here when the node fails (else `next`)
     timeout: float = 0.0             # per-node soft wall-clock cap in seconds (0 = none)
     # common ------------------------------------------------------------------
@@ -105,6 +106,8 @@ class FlowNode:
             d["seconds"] = self.seconds
         if self.retries:
             d["retries"] = self.retries
+        if self.retry_backoff:
+            d["retry_backoff"] = self.retry_backoff
         if self.timeout:
             d["timeout"] = self.timeout
         if self.limit:
@@ -141,7 +144,9 @@ class FlowNode:
             branches=[Flow.from_dict(b) for b in (d.get("branches") or [])],
             prompt=str(d.get("prompt", "")), seconds=float(d.get("seconds", 0.0)),
             flow_ref=str(d.get("flow_ref", "")),
-            retries=int(d.get("retries", 0) or 0), on_error=d.get("on_error"),
+            retries=int(d.get("retries", 0) or 0),
+            retry_backoff=float(d.get("retry_backoff", 0.0) or 0.0),
+            on_error=d.get("on_error"),
             timeout=float(d.get("timeout", 0.0) or 0.0),
             output=str(d.get("output", "")), label=str(d.get("label", "")),
             x=float(d.get("x", 0.0)), y=float(d.get("y", 0.0)),

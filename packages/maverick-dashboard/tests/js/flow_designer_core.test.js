@@ -28,6 +28,15 @@ test('serializeNode omits empty scalars and keeps set ones', () => {
   assert.ok(!('tool' in o) && !('params' in o) && !('condition' in o) && !('next' in o));
 });
 
+test('serializeNode carries retry_backoff only when set', () => {
+  const on = FDCore.serializeNode(FDCore.normalizeNode(
+    { id: 'a', kind: 'action', tool: 't', retries: 3, retry_backoff: 2.5 }, 0));
+  assert.equal(on.retry_backoff, 2.5);
+  const off = FDCore.serializeNode(FDCore.normalizeNode(
+    { id: 'b', kind: 'action', tool: 't', retries: 3 }, 0));
+  assert.ok(!('retry_backoff' in off));   // 0 -> omitted (tight loop, no wire noise)
+});
+
 test('serializeFlow round-trips a nested foreach body', () => {
   const flow = {
     id: 'f', name: 'F', start: 'a',

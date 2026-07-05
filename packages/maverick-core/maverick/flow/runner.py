@@ -203,11 +203,25 @@ def _eval_predicate(expr: str, data: dict) -> bool:
             return lhs != rhs
         if op == "contains":
             return str(rhs) in str(lhs) if lhs is not None else False
-        # numeric comparisons; non-numeric operands are never ordered-true
-        lf, rf = float(lhs), float(rhs)  # type: ignore[arg-type]
-        return {">": lf > rf, "<": lf < rf, ">=": lf >= rf, "<=": lf <= rf}[op]
+        # Ordering: numeric when BOTH sides are numbers, else lexical -- so an ISO
+        # date/string comparison (`created >= '2026-01-01'`) is honoured instead of
+        # silently false. A None lhs (missing key) is never ordered-true.
+        if lhs is None:
+            return False
+        lo, ro = _order_operands(lhs, rhs)
+        return {">": lo > ro, "<": lo < ro, ">=": lo >= ro, "<=": lo <= ro}[op]
     except (TypeError, ValueError):
         return False
+
+
+def _order_operands(lhs: Any, rhs: Any) -> tuple[Any, Any]:
+    """Coerce a pair for an ordering comparison: floats when both parse as numbers
+    (so `10 > 9` isn't the string-wise `'10' > '9'` == False), else strings (so
+    dates and other text order lexically instead of raising / being dropped)."""
+    try:
+        return float(lhs), float(rhs)
+    except (TypeError, ValueError):
+        return str(lhs), str(rhs)
 
 
 _AND_OR = re.compile(r"\s+(?:and|or)\s+", re.IGNORECASE)
@@ -324,14 +338,34 @@ def _invoke_work(node: FlowNode, data: dict, ctx: _Ctx):
         return (f"ERROR: node timed out after {node.timeout}s", 0.0)
 
 
+_MAX_RETRY_BACKOFF = 30.0   # cap a single backoff wait so a big N can't stall a worker
+
+
 def _run_work(node: FlowNode, data: dict, ctx: _Ctx) -> str | None:
-    result, outcome = _invoke_work(node, data, ctx)
-    # Retry a failed work node (outcome 0.0) up to `retries` more times -- a
-    # transient tool/agent failure gets another attempt before we give up.
-    tries = 0
-    while outcome == 0.0 and tries < max(0, node.retries):
-        tries += 1
-        result, outcome = _invoke_work(node, data, ctx)
+    # Retry a failed work node up to `retries` more times -- a transient tool/agent
+    # failure (outcome 0.0) OR a hard exception from the executor gets another
+    # attempt before we give up. With `retry_backoff` set, wait an exponentially
+    # growing interval between attempts (capped) instead of re-hammering instantly;
+    # backoff 0 keeps the original tight loop (and adds no sleep to existing flows).
+    backoff = max(0.0, node.retry_backoff)
+    result: Any = None
+    outcome: float | None = None
+    last_exc: Exception | None = None
+    for attempt in range(max(0, node.retries) + 1):
+        if attempt and backoff:
+            time.sleep(min(_MAX_RETRY_BACKOFF, backoff * (2 ** (attempt - 1))))
+        try:
+            result, outcome = _invoke_work(node, data, ctx)
+            last_exc = None
+        except Exception as e:   # a raising executor is a retryable failure, not instant death
+            last_exc, outcome = e, 0.0
+            continue
+        if outcome != 0.0:
+            break
+    # A hard exception that survived every retry stays terminal (records WHERE it
+    # failed via _NodeError up the chain) -- retries buy attempts, not silence.
+    if last_exc is not None:
+        raise last_exc
     if node.output:
         data[node.output] = result
     ctx.on_node(node, "done", outcome)

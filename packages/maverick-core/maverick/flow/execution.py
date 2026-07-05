@@ -259,10 +259,14 @@ def default_agent_runner(world, *, owner: str = "", budget_dollars: float = 5.0,
         outcome = 1.0 if (g and g.status == "done") else 0.0
         # Attribute this goal's tool usage back to the node (from the ContextVar
         # _call_agent published), so the self-rewrite pass can infer which tool a
-        # reliably-one-tool agent node should harden into. Best-effort + only when
-        # trajectory capture recorded anything.
+        # reliably-one-tool agent node should harden into. Only on SUCCESS: a node
+        # with retries invokes this runner once PER ATTEMPT, so recording every
+        # attempt would let one retried run masquerade as many "runs" and inflate
+        # the inference support -- and a failed attempt's tools are noise anyway.
+        # A reliable node (the only harden candidate) succeeds ~once per run, so
+        # this yields ~one tool record per logical run, aligned with node_outcomes.
         fid, nid = _active_node.get()
-        if fid and nid:
+        if fid and nid and outcome == 1.0:
             _capture_node_tools(fid, nid, gid)
         return (result if result is not None else (g.result if g else ""), outcome)
     return run

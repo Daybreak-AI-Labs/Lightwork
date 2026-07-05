@@ -47,6 +47,27 @@ class TestConditionComposition:
         assert eval_condition(c, {"tier": "silver", "amount": 2000, "region": "US"}) is False
 
 
+class TestOrderingComparisons:
+    def test_iso_date_strings_order_lexically(self):
+        # the footgun: a date compare used to force float() and silently be False
+        assert eval_condition("created >= '2026-01-01'", {"created": "2026-07-05"}) is True
+        assert eval_condition("created >= '2026-01-01'", {"created": "2025-12-31"}) is False
+        assert eval_condition("created < '2026-01-01'", {"created": "2025-06-30"}) is True
+
+    def test_plain_string_ordering(self):
+        assert eval_condition("tier > 'a'", {"tier": "b"}) is True
+        assert eval_condition("tier < 'a'", {"tier": "b"}) is False
+
+    def test_numeric_ordering_stays_numeric_not_lexical(self):
+        # 10 vs 9 must be numeric (10 > 9), not the string-wise '10' > '9' == False
+        assert eval_condition("n > 9", {"n": 10}) is True
+        assert eval_condition("n >= 100", {"n": 100}) is True
+
+    def test_missing_key_is_never_ordered_true(self):
+        assert eval_condition("ghost >= '2026-01-01'", {}) is False
+        assert eval_condition("ghost > 5", {}) is False
+
+
 class TestExpressions:
     def test_case_and_trim_transforms(self):
         d = {"name": "  aDa  "}
