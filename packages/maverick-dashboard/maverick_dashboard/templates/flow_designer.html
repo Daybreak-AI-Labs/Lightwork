@@ -50,6 +50,14 @@
               border-radius: 999px; background: var(--surface); cursor: pointer; color: var(--muted); }
   .fd__chip:hover { border-color: var(--accent); color: var(--text); }
   .fd__props .toolhint { font-size: var(--text-sm); color: var(--muted); margin: -4px 0 var(--space-2); }
+  /* breadcrumb: shown only while editing a nested sub-flow (foreach body / branch) */
+  .fd__crumbs { display: none; position: absolute; top: 8px; left: 8px; z-index: 2;
+                background: var(--surface); border: 1px solid var(--border); border-radius: var(--radius);
+                padding: 4px 10px; font-size: var(--text-sm); color: var(--muted); max-width: calc(100% - 16px);
+                overflow-x: auto; white-space: nowrap; }
+  .fd__crumbs.on { display: block; }
+  .fd__crumb { background: none; border: none; color: var(--accent); cursor: pointer; padding: 0; font: inherit; }
+  .fd__crumb--cur { color: var(--text); cursor: default; font-weight: var(--font-semibold); }
 </style>
 
 <div class="fd">
@@ -91,6 +99,7 @@
   </div>
 
   <div class="fd__canvas-wrap">
+    <div id="fd-crumbs" class="fd__crumbs" aria-label="Flow location"></div>
     <svg id="fd-canvas" role="application" aria-label="Flow canvas" data-flow-id="{{ flow_id or '' }}">
       <defs>
         <marker id="fd-arrow" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse">
