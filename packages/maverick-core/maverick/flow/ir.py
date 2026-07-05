@@ -146,6 +146,7 @@ class Flow:
     version: int = 1
     notify: bool = False             # push a notification on approval-pause / finish
     max_seconds: float = 0.0         # whole-flow wall-clock deadline (0 = no limit)
+    max_dollars: float = 0.0         # aggregate agent spend ceiling for one run (0 = no limit)
     schedule: str = ""               # a cron expression to run this flow on (empty = not scheduled)
 
     def node(self, node_id: str | None) -> FlowNode | None:
@@ -159,7 +160,8 @@ class Flow:
         return {
             "id": self.id, "name": self.name, "start": self.start,
             "version": self.version, "notify": self.notify,
-            "max_seconds": self.max_seconds, "schedule": self.schedule,
+            "max_seconds": self.max_seconds, "max_dollars": self.max_dollars,
+            "schedule": self.schedule,
             "nodes": [n.to_dict() for n in self.nodes.values()],
         }
 
@@ -173,6 +175,7 @@ class Flow:
             version=int(d.get("version", 1) or 1),
             notify=bool(d.get("notify", False)),
             max_seconds=float(d.get("max_seconds", 0.0) or 0.0),
+            max_dollars=float(d.get("max_dollars", 0.0) or 0.0),
             schedule=str(d.get("schedule", "")),
         )
 

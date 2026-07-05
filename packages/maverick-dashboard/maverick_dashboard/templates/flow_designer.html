@@ -73,6 +73,7 @@
       <input type="checkbox" id="fd-notify" /> Notify on approval/finish
     </label>
     <input class="input" id="fd-maxsec" type="number" min="0" placeholder="Max sec" aria-label="Flow deadline in seconds" style="width:90px;" title="Whole-flow wall-clock deadline (0 = none)" />
+    <input class="input" id="fd-maxdollars" type="number" min="0" step="0.5" placeholder="Max $" aria-label="Flow agent budget in dollars" style="width:80px;" title="Aggregate agent spend ceiling for one run (0 = none)" />
     <input class="input" id="fd-schedule" placeholder="Schedule (cron)" aria-label="Cron schedule" style="width:130px;" title="Run on a schedule, e.g. '0 9 * * 1' (Mondays 9am UTC). Blank = manual/trigger only." />
     <button class="btn" type="button" id="fd-save">Save</button>
     <button class="btn btn--ghost" type="button" id="fd-run" title="Mock run: no real goals or connector calls">▷ Test (dry)</button>

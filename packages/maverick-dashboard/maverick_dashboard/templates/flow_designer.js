@@ -451,6 +451,7 @@
       name: nameInput.value || rootFlow.name || 'Untitled flow', start: rootFlow.start, nodes: rootFlow.nodes });
     out.notify = !!(notifyEl && notifyEl.checked);
     out.max_seconds = parseFloat((document.getElementById('fd-maxsec') || {}).value) || 0;
+    out.max_dollars = parseFloat((document.getElementById('fd-maxdollars') || {}).value) || 0;
     out.schedule = ((document.getElementById('fd-schedule') || {}).value || '').trim();
     return out;
   }
@@ -461,6 +462,7 @@
     flow = { id: f.id || '', name: f.name || '', start: f.start || '', nodes: [], max_seconds: f.max_seconds || 0 };
     var notifyEl = document.getElementById('fd-notify'); if (notifyEl) notifyEl.checked = !!f.notify;
     var msEl = document.getElementById('fd-maxsec'); if (msEl) msEl.value = f.max_seconds || '';
+    var mdEl = document.getElementById('fd-maxdollars'); if (mdEl) mdEl.value = f.max_dollars || '';
     var schEl = document.getElementById('fd-schedule'); if (schEl) schEl.value = f.schedule || '';
     (f.nodes || []).forEach(function (nd, i) { flow.nodes.push(normalizeNode(nd, i)); });
     rootFlow = flow;

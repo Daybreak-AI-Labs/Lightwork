@@ -69,6 +69,32 @@ class TestExecution:
         from maverick.flow import store
         assert store.load_run(run.run_id).owner == "user:a"
 
+    def test_flow_max_dollars_caps_agent_fan_out(self, tmp_path, monkeypatch):
+        # Three chained agent nodes at the default $5 per-node reservation; a $12
+        # aggregate cap lets 2 run and skips the 3rd (2*5=10 ok, +5 would exceed).
+        _patch_home(tmp_path, monkeypatch)
+        ran = []
+        f = Flow(id="fB", name="f", start="a", max_dollars=12.0, nodes={
+            "a": FlowNode(id="a", kind=NODE_AGENT, brief="1", output="r1", next="b"),
+            "b": FlowNode(id="b", kind=NODE_AGENT, brief="2", output="r2", next="c"),
+            "c": FlowNode(id="c", kind=NODE_AGENT, brief="3", output="r3")})
+
+        def agent(brief, d):
+            ran.append(brief)
+            return ("ok", 1.0)
+        run = execution.execute(f, agent_runner=agent, action_runner=lambda t, p, d: ("", None))
+        assert ran == ["1", "2"]                       # the 3rd never spawned a goal
+        assert "budget exhausted" in str(run.data["r3"])
+
+    def test_flow_max_dollars_zero_is_unlimited(self, tmp_path, monkeypatch):
+        _patch_home(tmp_path, monkeypatch)
+        f = Flow(id="fB0", name="f", start="a", nodes={
+            "a": FlowNode(id="a", kind=NODE_AGENT, brief="1", output="r1", next="b"),
+            "b": FlowNode(id="b", kind=NODE_AGENT, brief="2", output="r2")})
+        run = execution.execute(f, agent_runner=lambda brief, d: ("ok", 1.0),
+                                action_runner=lambda t, p, d: ("", None))
+        assert run.data["r1"] == "ok" and run.data["r2"] == "ok"
+
     def test_execute_records_node_outcomes(self, tmp_path, monkeypatch):
         _patch_home(tmp_path, monkeypatch)
         f = Flow(id="fX", name="f", start="a", nodes={

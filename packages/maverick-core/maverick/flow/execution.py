@@ -31,12 +31,37 @@ AgentRunner = Callable[[str, dict], "tuple[Any, float | None]"]
 ActionRunner = Callable[[str, dict, dict], "tuple[Any, float | None]"]
 
 
+DEFAULT_AGENT_BUDGET = 5.0   # matches default_agent_runner's per-node cap
+
+
+def _budget_gated(agent_runner: AgentRunner, cap: float, per_call: float) -> AgentRunner:
+    """Wrap an agent runner with a per-RUN aggregate spend ceiling. Each agent
+    node is reserved at its worst-case per-node budget (``per_call``) against a
+    shared, lock-guarded total; once the next reservation would exceed ``cap`` the
+    node is skipped with an error outcome instead of spawning another goal. This
+    bounds fan-out spend -- a wide ``parallel`` or a long ``foreach`` can't
+    multiply cost without a ceiling. Conservative: it counts each node at its
+    cap, so it never under-counts real spend. Thread-safe for concurrent branches."""
+    import threading
+    lock = threading.Lock()
+    spent = [0.0]
+
+    def run(brief: str, data: dict) -> tuple:
+        with lock:
+            if spent[0] + per_call > cap:
+                return (f"skipped: flow budget exhausted (${cap:g} cap)", 0.0)
+            spent[0] += per_call
+        return agent_runner(brief, data)
+    return run
+
+
 def execute(flow: Flow, *, agent_runner: AgentRunner, action_runner: ActionRunner,
             owner: str = "", data: dict | None = None,
             approve_fn: Callable[[FlowNode, dict], str] | None = None,
             run_id: str | None = None,
             resume_run_id: str | None = None, decision: str | None = None,
             inputs: dict | None = None, record_outcomes: bool = True,
+            agent_budget_dollars: float = DEFAULT_AGENT_BUDGET,
             now: Callable[[], float] | None = None) -> store.FlowRun:
     """Run ``flow`` (or resume a paused run) with live executors, persisting the
     resulting :class:`~.store.FlowRun`. ``run_id`` pre-assigns a fresh run's id
@@ -80,6 +105,12 @@ def execute(flow: Flow, *, agent_runner: AgentRunner, action_runner: ActionRunne
         node_states[node.id] = {"status": status, "outcome": outcome}
         if outcome is not None and record_outcomes:
             node_outcomes.record(flow.id, node.id, node.kind, outcome)
+
+    # Aggregate per-run spend ceiling: cap total agent-goal spend so a wide
+    # parallel / long foreach can't fan out unbounded cost (per-node budget alone
+    # doesn't bound the COUNT of nodes). Only for a real (grounded) run.
+    if flow.max_dollars and flow.max_dollars > 0 and record_outcomes:
+        agent_runner = _budget_gated(agent_runner, flow.max_dollars, agent_budget_dollars)
 
     res = run_flow(
         flow,

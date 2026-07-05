@@ -87,7 +87,10 @@ KNOWN_SCHEMA: dict[str, set[str] | None] = {
     # (app.py) and a [dashboard.themes] subtable (themes.py). Listing only
     # "token" made config-lint warn "unknown key" on documented operator
     # settings like `[dashboard] theme = "dark"` (user-testing finding).
-    "dashboard": {"token", "theme", "density", "allow_extension", "themes"},
+    # public_url: the externally-reachable base URL used to build signed flow
+    # approval links (automation_queue._public_base_url); without it here a client
+    # configuring actionable channel approvals got a false "unknown key".
+    "dashboard": {"token", "theme", "density", "allow_extension", "themes", "public_url"},
     "analytics": {"mcp_client_language"},
     # --- dynamic / open-ended sections (any subkey accepted) ---
     "providers": None,

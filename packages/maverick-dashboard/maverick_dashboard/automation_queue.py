@@ -257,7 +257,9 @@ def _public_base_url() -> str:
     url = os.environ.get("MAVERICK_PUBLIC_URL", "").strip()
     if not url:
         try:
-            url = str((config.load_config().get("dashboard") or {}).get("public_url") or "").strip()
+            cfg = config.load_config()
+            url = str((cfg.get("dashboard") or {}).get("public_url")
+                      or (cfg.get("flows") or {}).get("public_url") or "").strip()
         except Exception:  # pragma: no cover
             url = ""
     return url
