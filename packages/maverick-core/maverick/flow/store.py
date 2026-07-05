@@ -165,6 +165,12 @@ class FlowRun:
     # Per-node run trace: {node_id: {status, outcome}} accumulated as the run
     # executes, so the designer can overlay live status/result on the canvas.
     nodes: dict = field(default_factory=dict)
+    # The data the run STARTED with (the trigger payload), kept so a failed run
+    # can be retried from scratch with the same inputs.
+    input_data: dict = field(default_factory=dict)
+    # Optional idempotency key (flow_id + a stable event id) so a re-delivered
+    # trigger event doesn't spawn a duplicate run.
+    idem_key: str = ""
 
     def to_dict(self) -> dict:
         return {
@@ -172,6 +178,7 @@ class FlowRun:
             "data": self.data, "cursor": self.cursor, "resume_at": self.resume_at,
             "prompt": self.prompt, "error": self.error, "owner": self.owner,
             "created": self.created, "updated": self.updated, "nodes": self.nodes,
+            "input_data": self.input_data, "idem_key": self.idem_key,
         }
 
     @staticmethod
@@ -184,7 +191,19 @@ class FlowRun:
             owner=str(d.get("owner", "")),
             created=float(d.get("created", 0.0)), updated=float(d.get("updated", 0.0)),
             nodes=dict(d.get("nodes") or {}),
+            input_data=dict(d.get("input_data") or {}), idem_key=str(d.get("idem_key", "")),
         )
+
+
+def find_run_by_idem(flow_id: str, idem_key: str, *, within: int = 500) -> FlowRun | None:
+    """The most recent run for ``flow_id`` with this idempotency key, if any --
+    the dedup check that stops a re-delivered event from firing a second run."""
+    if not idem_key:
+        return None
+    for r in list_runs(flow_id=flow_id, limit=within):
+        if r.idem_key == idem_key:
+            return r
+    return None
 
 
 def new_run_id() -> str:
@@ -197,7 +216,11 @@ def save_run(run: FlowRun) -> None:
     if not run.created:
         run.created = now
     run.updated = now
-    _write_json(_runs_dir() / f"{_safe_id(run.run_id)}.json", run.to_dict())
+    from .redact import cap
+    d = run.to_dict()
+    d["data"] = cap(d.get("data") or {})   # bound the payload so a runaway tool result can't bloat the store
+    d["input_data"] = cap(d.get("input_data") or {})
+    _write_json(_runs_dir() / f"{_safe_id(run.run_id)}.json", d)
 
 
 def load_run(run_id: str) -> FlowRun | None:
@@ -228,5 +251,5 @@ def list_runs(*, flow_id: str | None = None, owner: str | None = None,
 __all__: list[str] = [
     "save_flow", "load_flow", "list_flows", "delete_flow",
     "list_versions", "load_version", "rollback_flow",
-    "FlowRun", "new_run_id", "save_run", "load_run", "list_runs",
+    "FlowRun", "new_run_id", "save_run", "load_run", "list_runs", "find_run_by_idem",
 ]

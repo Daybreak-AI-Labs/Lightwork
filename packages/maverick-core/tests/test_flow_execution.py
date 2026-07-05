@@ -69,6 +69,32 @@ class TestExecution:
         from maverick.flow import store
         assert store.load_run(run.run_id).owner == "user:a"
 
+    def test_flow_max_dollars_caps_agent_fan_out(self, tmp_path, monkeypatch):
+        # Three chained agent nodes at the default $5 per-node reservation; a $12
+        # aggregate cap lets 2 run and skips the 3rd (2*5=10 ok, +5 would exceed).
+        _patch_home(tmp_path, monkeypatch)
+        ran = []
+        f = Flow(id="fB", name="f", start="a", max_dollars=12.0, nodes={
+            "a": FlowNode(id="a", kind=NODE_AGENT, brief="1", output="r1", next="b"),
+            "b": FlowNode(id="b", kind=NODE_AGENT, brief="2", output="r2", next="c"),
+            "c": FlowNode(id="c", kind=NODE_AGENT, brief="3", output="r3")})
+
+        def agent(brief, d):
+            ran.append(brief)
+            return ("ok", 1.0)
+        run = execution.execute(f, agent_runner=agent, action_runner=lambda t, p, d: ("", None))
+        assert ran == ["1", "2"]                       # the 3rd never spawned a goal
+        assert "budget exhausted" in str(run.data["r3"])
+
+    def test_flow_max_dollars_zero_is_unlimited(self, tmp_path, monkeypatch):
+        _patch_home(tmp_path, monkeypatch)
+        f = Flow(id="fB0", name="f", start="a", nodes={
+            "a": FlowNode(id="a", kind=NODE_AGENT, brief="1", output="r1", next="b"),
+            "b": FlowNode(id="b", kind=NODE_AGENT, brief="2", output="r2")})
+        run = execution.execute(f, agent_runner=lambda brief, d: ("ok", 1.0),
+                                action_runner=lambda t, p, d: ("", None))
+        assert run.data["r1"] == "ok" and run.data["r2"] == "ok"
+
     def test_execute_records_node_outcomes(self, tmp_path, monkeypatch):
         _patch_home(tmp_path, monkeypatch)
         f = Flow(id="fX", name="f", start="a", nodes={
@@ -141,6 +167,35 @@ class TestExecution:
                                     inputs={"corrected": "the fixed value"})
         assert got["brief"] == "use the fixed value"        # human input threaded in
         assert resumed.data["corrected"] == "the fixed value"
+
+    def test_dry_run_traces_but_records_no_outcomes(self, tmp_path, monkeypatch):
+        # A sandboxed dry run exercises the graph (status trace captured) but must
+        # NOT ground outcomes -- mock successes would skew the self-rewrite signal.
+        _patch_home(tmp_path, monkeypatch)
+        f = Flow(id="dry", name="f", start="a", nodes={
+            "a": FlowNode(id="a", kind=NODE_AGENT, brief="do {{x}}", next="b"),
+            "b": FlowNode(id="b", kind=NODE_ACTION, tool="slack_bot")})
+        ag, act = execution.sandbox_runners()
+        run = execution.execute(f, agent_runner=ag, action_runner=act,
+                                data={"x": "1"}, record_outcomes=False)
+        assert run.status == "completed"
+        assert run.nodes["a"]["outcome"] == 1.0 and run.nodes["b"]["outcome"] == 1.0
+        assert node_outcomes.stats("dry") == {}          # nothing grounded
+
+    def test_execute_preserves_queued_placeholder_idem_and_inputs(self, tmp_path, monkeypatch):
+        # A queued placeholder (saved by enqueue with the idempotency key + inputs)
+        # keeps those fields when the job later runs it.
+        _patch_home(tmp_path, monkeypatch)
+        from maverick.flow import store
+        rid = store.new_run_id()
+        store.save_run(store.FlowRun(run_id=rid, flow_id="fp", status="queued",
+                                     idem_key="evt:9", input_data={"seed": 1}))
+        f = Flow(id="fp", name="f", start="a",
+                 nodes={"a": FlowNode(id="a", kind=NODE_AGENT, brief="go")})
+        run = execution.execute(f, agent_runner=lambda b, d: ("ok", 1.0),
+                                action_runner=lambda *a: ("", None), data={"seed": 1}, run_id=rid)
+        assert run.status == "completed"
+        assert run.idem_key == "evt:9" and run.input_data == {"seed": 1}
 
     def test_resume_of_completed_run_is_rejected(self, tmp_path, monkeypatch):
         # Guard against re-running a finished flow (duplicate side effects) or

@@ -920,7 +920,7 @@ async def list_flows_endpoint(request: Request) -> dict:
     from maverick.flow import store
     return {"flows": [
         {"id": f.id, "name": f.name, "nodes": len(f.nodes),
-         "single_agent": f.is_single_agent()}
+         "single_agent": f.is_single_agent(), "schedule": f.schedule}
         for f in store.list_flows()
     ]}
 
@@ -1012,7 +1012,16 @@ async def list_flow_runs_endpoint(request: Request, flow_id: str = "",
     owner = goal_owner_filter(request)
     runs = store.list_runs(flow_id=flow_id or None, owner=owner,
                            limit=max(1, min(500, limit)))
-    return {"runs": [r.to_dict() for r in runs]}
+    return {"runs": [_run_out(r) for r in runs]}
+
+
+def _run_out(run) -> dict:
+    """A flow run for the API with secret-looking values in its ``data`` masked,
+    so a token a connector put into the run never leaves over HTTP."""
+    from maverick.flow.redact import redact
+    d = run.to_dict()
+    d["data"] = redact(d.get("data") or {})
+    return d
 
 
 def _load_owned_run(request: Request, run_id: str):
@@ -1032,7 +1041,7 @@ def _load_owned_run(request: Request, run_id: str):
 async def get_flow_run_endpoint(request: Request, run_id: str) -> dict:
     require_permission(request, "operate")
     _require_flows()
-    return _load_owned_run(request, run_id).to_dict()
+    return _run_out(_load_owned_run(request, run_id))
 
 
 @router.post("/flows/runs/{run_id}/resume")
@@ -1052,6 +1061,26 @@ async def resume_flow_run_endpoint(request: Request, run_id: str,
         "flow_id": run.flow_id, "run_id": run_id, "decision": payload.decision,
         "inputs": dict(payload.inputs or {}), "owner": run.owner})
     return {"run_id": run_id, "status": "resuming", "decision": payload.decision}
+
+
+@router.post("/flows/runs/{run_id}/retry")
+async def retry_flow_run_endpoint(request: Request, run_id: str) -> dict:
+    """Re-run a finished/failed run from scratch with its ORIGINAL trigger inputs
+    (a fresh run, so any partial side effects aren't re-driven mid-flow). This is
+    the recovery path a dead-lettered run needs -- the run's input_data was kept
+    for exactly this."""
+    require_permission(request, "operate")
+    _require_flows()
+    run = _load_owned_run(request, run_id)
+    if run.status in ("queued", "running", "paused_approval", "paused_delay"):
+        raise HTTPException(status_code=409,
+                            detail=f"run is still active (status {run.status}); nothing to retry")
+    from maverick.flow import store
+    if store.load_flow(run.flow_id) is None:
+        raise HTTPException(status_code=404, detail="flow no longer exists")
+    from maverick_dashboard import automation_queue as aq
+    new_id = aq.enqueue_flow_run(run.flow_id, dict(run.input_data or {}), run.owner)
+    return {"run_id": new_id, "status": "queued", "retried_from": run_id}
 
 
 @router.get("/flows/tools")
@@ -1128,8 +1157,9 @@ async def run_flow_endpoint(request: Request, flow_id: str, payload: FlowRunIn) 
                                  owner=owner, data=dict(payload.data or {})))
     from maverick_dashboard import automation_queue as aq
     aq.queue().enqueue(aq.FLOW_RUN_KIND, {
-        "flow_id": flow_id, "run_id": run_id, "data": payload.data, "owner": owner})
-    return {"run_id": run_id, "status": "queued"}
+        "flow_id": flow_id, "run_id": run_id, "data": payload.data, "owner": owner,
+        "dry_run": bool(payload.dry_run)})
+    return {"run_id": run_id, "status": "queued", "dry_run": bool(payload.dry_run)}
 
 
 @router.get("/flows/{flow_id}/proposals")
@@ -2695,11 +2725,12 @@ async def poll_event_triggers(request: Request, bg: BackgroundTasks, name: str =
         else:
             bg.add_task(run_goal_in_thread, goal_id)
 
-    def _fire_flow(flow_id: str, data: dict, owner: str) -> str:
+    def _fire_flow(flow_id: str, data: dict, owner: str, idem_key: str = "") -> str:
         # Flow targets go through the durable queue (same as the background tick),
         # so a flow run gets retry + a trackable run id even on the on-demand path.
+        # The idempotency key dedups a re-delivered event.
         from maverick_dashboard import automation_queue
-        return automation_queue.enqueue_flow_run(flow_id, data, owner)
+        return automation_queue.enqueue_flow_run(flow_id, data, owner, idem_key)
 
     results = await run_in_threadpool(
         lambda: event_poll.poll_and_fire(_world(), triggers, principal=principal,

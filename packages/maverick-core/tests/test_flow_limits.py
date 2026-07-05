@@ -1,0 +1,47 @@
+"""Resource caps: a whole-flow wall-clock deadline and a per-node soft timeout."""
+from __future__ import annotations
+
+import time
+
+from maverick.flow import Flow, FlowNode
+from maverick.flow.runner import run_flow
+
+
+def test_flow_deadline_fails_the_run():
+    # a clock that jumps past the deadline before the second node runs
+    ticks = iter([0.0, 0.0, 100.0, 100.0, 100.0])
+    now = lambda: next(ticks, 100.0)          # noqa: E731
+    f = Flow(id="f", name="f", start="a", max_seconds=10.0, nodes={
+        "a": FlowNode(id="a", kind="agent", brief="one", next="b"),
+        "b": FlowNode(id="b", kind="agent", brief="two")})
+    res = run_flow(f, agent_fn=lambda n, br, d: ("x", 1.0),
+                   action_fn=lambda *a: ("", None), now=now)
+    assert res.status == "failed" and "deadline" in res.error
+
+
+def test_no_deadline_when_unset():
+    f = Flow(id="f", name="f", start="a", nodes={
+        "a": FlowNode(id="a", kind="agent", brief="one")})
+    res = run_flow(f, agent_fn=lambda n, br, d: ("x", 1.0), action_fn=lambda *a: ("", None))
+    assert res.status == "completed"
+
+
+def test_node_timeout_returns_error_outcome_and_moves_on():
+    def slow_action(node, params, data):
+        time.sleep(0.3)
+        return ("done", 1.0)
+    f = Flow(id="f", name="f", start="a", nodes={
+        "a": FlowNode(id="a", kind="action", tool="t", timeout=0.05, output="r", next="b"),
+        "b": FlowNode(id="b", kind="agent", brief="after", output="done")})
+    res = run_flow(f, agent_fn=lambda n, br, d: ("ok", 1.0), action_fn=slow_action)
+    assert res.status == "completed"
+    assert "timed out" in str(res.data["r"])       # the slow node timed out...
+    assert res.data["done"] == "ok"                # ...and the flow continued
+
+
+def test_fast_node_under_timeout_succeeds():
+    f = Flow(id="f", name="f", start="a", nodes={
+        "a": FlowNode(id="a", kind="action", tool="t", timeout=2.0, output="r")})
+    res = run_flow(f, agent_fn=lambda *a: ("", None),
+                   action_fn=lambda n, p, d: ("quick", 1.0))
+    assert res.status == "completed" and res.data["r"] == "quick"

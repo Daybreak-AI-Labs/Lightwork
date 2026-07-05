@@ -509,6 +509,34 @@ here.
   (`GET /api/v1/codec` reports what it would save on real traffic) — agents
   reading the codes to *realize* the savings is a separate, gated step.
 
+- **Flow engine & visual automation** (`maverick.flow.*`, gated on `[flows]`) — a
+  deterministic graph of typed nodes (`ir.py`: agent / action / branch / foreach /
+  parallel / approval / delay / subflow) run by a pure interpreter (`runner.py`)
+  with data threading, safe expression rendering (`{{fn(...)}}` incl. arithmetic,
+  list ops, and `and`/`or` conditions), a whole-flow wall-clock deadline
+  (`Flow.max_seconds`), a per-run **aggregate agent-spend ceiling**
+  (`Flow.max_dollars`, enforced in `execution.py` so a wide parallel / long
+  foreach can't fan out unbounded cost), per-node retries/timeout/on-error
+  routing, and **real intra-flow parallel concurrency** (branches run on a bounded
+  thread pool with per-branch cycle detection). The live driver (`execution.py`)
+  persists a resumable run (`store.py`) with per-node trace, dry-run sandbox
+  executors, and secret redaction (`redact.py`). A **self-rewrite loop**
+  (`evolve.py` + `evolution_log.py`) swaps a node kind, measures grounded
+  before/after outcomes, versions the definition, and autonomously reverts a
+  regression. The server-rendered **visual designer** (`flow_designer*.js`, pure
+  serialization in `flow_designer_core.js`) drafts a flow from natural language,
+  edits nested foreach bodies / parallel branches on their own canvas, and shows
+  live run + measured-impact overlays.
+
+- **Triggers for flows** — a flow fires from a cron schedule (`Flow.schedule`, a
+  per-flow `flow_cron` job), any polled event source (`automation_events.py`:
+  `http_json` / `rss` / `oauth_http_json` / `github_issues` / `imap_email` /
+  `file_dir` / `form`), or a manual/dry run. A paused **approval** node can post
+  signed Approve/Reject links to a channel (`approvals.py` — a stateless HMAC
+  token; `POST /flow/approve` resumes) so a human clears it without a dashboard
+  session. A hosted **form** submission (`form_store.py`, public `POST /form/{token}`)
+  fires a flow with the submitted fields as data.
+
 ## Tools
 
 286 built-in tool modules. Highlights by group (all under `tools/`):

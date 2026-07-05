@@ -50,6 +50,14 @@
               border-radius: 999px; background: var(--surface); cursor: pointer; color: var(--muted); }
   .fd__chip:hover { border-color: var(--accent); color: var(--text); }
   .fd__props .toolhint { font-size: var(--text-sm); color: var(--muted); margin: -4px 0 var(--space-2); }
+  /* breadcrumb: shown only while editing a nested sub-flow (foreach body / branch) */
+  .fd__crumbs { display: none; position: absolute; top: 8px; left: 8px; z-index: 2;
+                background: var(--surface); border: 1px solid var(--border); border-radius: var(--radius);
+                padding: 4px 10px; font-size: var(--text-sm); color: var(--muted); max-width: calc(100% - 16px);
+                overflow-x: auto; white-space: nowrap; }
+  .fd__crumbs.on { display: block; }
+  .fd__crumb { background: none; border: none; color: var(--accent); cursor: pointer; padding: 0; font: inherit; }
+  .fd__crumb--cur { color: var(--text); cursor: default; font-weight: var(--font-semibold); }
 </style>
 
 <div class="fd">
@@ -64,8 +72,13 @@
     <label style="font-size:var(--text-sm);color:var(--muted);display:inline-flex;align-items:center;gap:4px;">
       <input type="checkbox" id="fd-notify" /> Notify on approval/finish
     </label>
+    <input class="input" id="fd-maxsec" type="number" min="0" placeholder="Max sec" aria-label="Flow deadline in seconds" style="width:90px;" title="Whole-flow wall-clock deadline (0 = none)" />
+    <input class="input" id="fd-maxdollars" type="number" min="0" step="0.5" placeholder="Max $" aria-label="Flow agent budget in dollars" style="width:80px;" title="Aggregate agent spend ceiling for one run (0 = none)" />
+    <input class="input" id="fd-schedule" placeholder="Schedule (cron)" aria-label="Cron schedule" style="width:130px;" title="Run on a schedule, e.g. '0 9 * * 1' (Mondays 9am UTC). Blank = manual/trigger only." />
     <button class="btn" type="button" id="fd-save">Save</button>
-    <button class="btn btn--ghost" type="button" id="fd-run">▷ Test run</button>
+    <button class="btn btn--ghost" type="button" id="fd-run" title="Mock run: no real goals or connector calls">▷ Test (dry)</button>
+    <button class="btn btn--ghost" type="button" id="fd-run-real" title="Runs real agents and connectors">Run for real</button>
+    <button class="btn btn--ghost" type="button" id="fd-history">⏱ History</button>
     <span class="fd__msg" id="fd-msg" aria-live="polite"></span>
     <span class="fd__legend" id="fd-legend" aria-hidden="true">
       <span>🟢 ok</span><span>🔴 failed</span><span>🟠 branch/step</span><span>⏳ waiting</span>
@@ -87,6 +100,7 @@
   </div>
 
   <div class="fd__canvas-wrap">
+    <div id="fd-crumbs" class="fd__crumbs" aria-label="Flow location"></div>
     <svg id="fd-canvas" role="application" aria-label="Flow canvas" data-flow-id="{{ flow_id or '' }}">
       <defs>
         <marker id="fd-arrow" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse">
@@ -106,6 +120,9 @@
   </div>
 </div>
 
+<script>
+{% include "flow_designer_core.js" %}
+</script>
 <script>
 {% include "flow_designer.js" %}
 </script>

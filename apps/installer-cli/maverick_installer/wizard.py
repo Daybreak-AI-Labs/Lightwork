@@ -92,6 +92,7 @@ STEPS: list[tuple[str, str]] = [
     ("self_learning", "Self-learning"),
     ("automation_import", "Automation import"),
     ("event_triggers", "Event triggers"),
+    ("flows", "Flow engine"),
     ("oauth_vault", "OAuth token vault"),
     ("governed_connectors", "Governed connectors"),
     ("durable", "Durable execution"),
@@ -1039,6 +1040,37 @@ def pick_event_triggers() -> dict[str, Any]:
     )
     enable = _q_confirm("Enable event triggers?", default=False)
     return {"enable": bool(enable)}
+
+
+def pick_flows() -> dict[str, Any]:
+    """Opt-in to the flow engine (multi-step visual workflows).
+
+    Off by default. When on, the dashboard's visual designer can build and run
+    flows -- a deterministic graph of agent/action/branch/loop/approval nodes,
+    schedulable on a cron, with self-rewrite + rollback. When a flow pauses for
+    approval it can post signed Approve/Reject links to a channel; those links
+    need the dashboard's externally-reachable base URL, collected here and
+    written as ``[flows] public_url``. Returns a dict written under ``[flows]``.
+    """
+    console.print()
+    console.print(
+        "[dim]The flow engine runs multi-step visual workflows (agent + action + "
+        "branch + loop + approval), schedulable on a cron, with self-rewrite and "
+        "rollback. OFF by default.[/dim]"
+    )
+    if not _q_confirm("Enable the flow engine?", default=False):
+        return {"enable": False}
+    out: dict[str, Any] = {"enable": True}
+    console.print(
+        "[dim]For actionable channel approvals (clickable Approve/Reject links), "
+        "the dashboard needs its externally-reachable base URL. Leave blank to "
+        "skip -- approvals then happen from the dashboard.[/dim]"
+    )
+    url = _q_text("Public base URL for approval links (e.g. https://ops.acme.com)",
+                  default="").strip()
+    if url:
+        out["public_url"] = url
+    return out
 
 
 def pick_oauth_vault() -> dict[str, Any]:
@@ -2675,6 +2707,17 @@ def _cfg_event_triggers(event_triggers: dict[str, Any] | None) -> list[str]:
     return lines
 
 
+def _cfg_flows(flows: dict[str, Any] | None) -> list[str]:
+    if not flows:
+        return []
+    # Flow engine. enable gates the visual multi-step workflow designer/runner;
+    # public_url (optional) is the base URL for signed channel-approval links.
+    lines = ["", "[flows]"]
+    for k, v in flows.items():
+        _emit_kv(lines, k, v)
+    return lines
+
+
 def _cfg_oauth(oauth: dict[str, Any] | None) -> list[str]:
     if not (oauth and oauth.get("vault")):
         return []
@@ -3389,6 +3432,7 @@ def write_config(
     self_learning: dict[str, Any] | None = None,
     automation_import: dict[str, Any] | None = None,
     event_triggers: dict[str, Any] | None = None,
+    flows: dict[str, Any] | None = None,
     oauth: dict[str, Any] | None = None,
     governed_connectors: dict[str, Any] | None = None,
     durable: dict[str, Any] | None = None,
@@ -3476,6 +3520,7 @@ def write_config(
     lines += _cfg_self_learning(self_learning)
     lines += _cfg_automation_import(automation_import)
     lines += _cfg_event_triggers(event_triggers)
+    lines += _cfg_flows(flows)
     lines += _cfg_oauth(oauth)
     lines += _cfg_governed_connectors(governed_connectors)
     lines += _cfg_durable(durable)
@@ -3984,6 +4029,11 @@ def _run_simple_picks(state: dict[str, Any], _announce) -> dict[str, Any]:
     _save_partial(state)
 
     _announce()
+    flows = state.get("flows") or pick_flows()
+    state["flows"] = flows
+    _save_partial(state)
+
+    _announce()
     oauth = state.get("oauth") or pick_oauth_vault()
     state["oauth"] = oauth
     _save_partial(state)
@@ -4017,6 +4067,7 @@ def _run_simple_picks(state: dict[str, Any], _announce) -> dict[str, Any]:
         "self_learning": self_learning,
         "automation_import": automation_import,
         "event_triggers": event_triggers,
+        "flows": flows,
         "oauth": oauth,
         "governed_connectors": governed_connectors,
         "durable": durable,
@@ -4208,6 +4259,7 @@ def run(fast: bool = False, resume: bool = False) -> int:
     self_learning = _simple["self_learning"]
     automation_import = _simple["automation_import"]
     event_triggers = _simple["event_triggers"]
+    flows = _simple["flows"]
     oauth = _simple["oauth"]
     governed_connectors = _simple["governed_connectors"]
     durable = _simple["durable"]
@@ -4316,6 +4368,7 @@ def run(fast: bool = False, resume: bool = False) -> int:
         self_learning=self_learning if self_learning.get("enable") else None,
         automation_import=automation_import if automation_import.get("enable") else None,
         event_triggers=event_triggers if event_triggers.get("enable") else None,
+        flows=flows if flows.get("enable") else None,
         oauth=oauth if oauth.get("vault") else None,
         governed_connectors=governed_connectors if governed_connectors.get("enable") else None,
         durable=durable if durable.get("enabled") else None,

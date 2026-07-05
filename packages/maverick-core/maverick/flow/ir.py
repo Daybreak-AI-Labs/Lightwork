@@ -75,6 +75,7 @@ class FlowNode:
     # error handling ----------------------------------------------------------
     retries: int = 0                 # re-run a failed work node up to N more times
     on_error: str | None = None      # route here when the node fails (else `next`)
+    timeout: float = 0.0             # per-node soft wall-clock cap in seconds (0 = none)
     # common ------------------------------------------------------------------
     output: str = ""                 # flow-data key to store this node's result under
     label: str = ""                  # human label (provenance / UI)
@@ -95,6 +96,8 @@ class FlowNode:
             d["seconds"] = self.seconds
         if self.retries:
             d["retries"] = self.retries
+        if self.timeout:
+            d["timeout"] = self.timeout
         if self.limit:
             d["limit"] = self.limit
         if self.x or self.y:
@@ -121,6 +124,7 @@ class FlowNode:
             prompt=str(d.get("prompt", "")), seconds=float(d.get("seconds", 0.0)),
             flow_ref=str(d.get("flow_ref", "")),
             retries=int(d.get("retries", 0) or 0), on_error=d.get("on_error"),
+            timeout=float(d.get("timeout", 0.0) or 0.0),
             output=str(d.get("output", "")), label=str(d.get("label", "")),
             x=float(d.get("x", 0.0)), y=float(d.get("y", 0.0)),
         )
@@ -141,6 +145,9 @@ class Flow:
     nodes: dict[str, FlowNode] = field(default_factory=dict)
     version: int = 1
     notify: bool = False             # push a notification on approval-pause / finish
+    max_seconds: float = 0.0         # whole-flow wall-clock deadline (0 = no limit)
+    max_dollars: float = 0.0         # aggregate agent spend ceiling for one run (0 = no limit)
+    schedule: str = ""               # a cron expression to run this flow on (empty = not scheduled)
 
     def node(self, node_id: str | None) -> FlowNode | None:
         return self.nodes.get(node_id) if node_id else None
@@ -153,6 +160,8 @@ class Flow:
         return {
             "id": self.id, "name": self.name, "start": self.start,
             "version": self.version, "notify": self.notify,
+            "max_seconds": self.max_seconds, "max_dollars": self.max_dollars,
+            "schedule": self.schedule,
             "nodes": [n.to_dict() for n in self.nodes.values()],
         }
 
@@ -165,6 +174,9 @@ class Flow:
             nodes={n.id: n for n in nodes},
             version=int(d.get("version", 1) or 1),
             notify=bool(d.get("notify", False)),
+            max_seconds=float(d.get("max_seconds", 0.0) or 0.0),
+            max_dollars=float(d.get("max_dollars", 0.0) or 0.0),
+            schedule=str(d.get("schedule", "")),
         )
 
     def validate(self) -> list[str]:
@@ -175,6 +187,12 @@ class Flow:
             return errs
         if self.start not in self.nodes:
             errs.append(f"start node {self.start!r} is not in the flow")
+        if self.schedule.strip():
+            from ..scheduler import CronError, parse_cron
+            try:
+                parse_cron(self.schedule)
+            except CronError as e:
+                errs.append(f"invalid schedule {self.schedule!r}: {e}")
         seen_ids = set()
         for nid, n in self.nodes.items():
             if n.id != nid:

@@ -44,6 +44,7 @@ FLOW_RUN_KIND = "flow_run"       # one-shot: run a flow to its next pause/finish
 FLOW_RESUME_KIND = "flow_resume"  # one-shot: resume a paused flow run
 FLOW_SWEEP_KIND = "flow_delay_sweep"  # recurring: re-arm flow runs whose delay elapsed
 FLOW_EVOLVE_KIND = "flow_evolve"  # recurring: autonomously revert a regressed rewrite
+FLOW_CRON_KIND = "flow_cron"     # recurring: fire a scheduled flow on its own cron cadence
 _FLOW_SWEEP_CRON = "* * * * *"   # check for due delays every minute
 _FLOW_EVOLVE_CRON = "*/30 * * * *"   # re-check applied rewrites every 30 min
 _MIN_INTERVAL = 60               # floor for a per-trigger cadence (matches the UI/schema)
@@ -160,14 +161,21 @@ def _world():
     return _w()
 
 
-def enqueue_flow_run(flow_id: str, data: dict, owner: str = "") -> str:
+def enqueue_flow_run(flow_id: str, data: dict, owner: str = "", idem_key: str = "") -> str:
     """Start a durable flow run (a pre-assigned, pollable run id + a flow_run job).
     Shared by the background tick and the on-demand poll so a flow-target trigger
-    fires the same way on both paths."""
+    fires the same way on both paths. ``idem_key`` (flow_id + a stable event id)
+    deduplicates: a re-delivered event returns the existing run instead of firing
+    a second one. The original inputs are kept so the run can be retried."""
     from maverick.flow import store as flow_store
+    if idem_key:
+        existing = flow_store.find_run_by_idem(flow_id, idem_key)
+        if existing is not None:
+            return existing.run_id            # already fired for this event -> dedup
     run_id = flow_store.new_run_id()
-    flow_store.save_run(flow_store.FlowRun(run_id=run_id, flow_id=flow_id,
-                                           status="queued", owner=owner, data=dict(data)))
+    flow_store.save_run(flow_store.FlowRun(
+        run_id=run_id, flow_id=flow_id, status="queued", owner=owner,
+        data=dict(data), input_data=dict(data), idem_key=idem_key))
     queue().enqueue(FLOW_RUN_KIND, {"flow_id": flow_id, "run_id": run_id,
                                     "data": data, "owner": owner})
     return run_id
@@ -241,16 +249,55 @@ def _flow_runners(owner: str):
             execution.default_action_runner(w))
 
 
+def _public_base_url() -> str:
+    """The externally-reachable dashboard base URL for approval links, from
+    ``MAVERICK_PUBLIC_URL`` or ``[dashboard] public_url``. Empty when unset --
+    then approval links are omitted and the human uses the dashboard."""
+    import os
+    url = os.environ.get("MAVERICK_PUBLIC_URL", "").strip()
+    if not url:
+        try:
+            cfg = config.load_config()
+            url = str((cfg.get("dashboard") or {}).get("public_url")
+                      or (cfg.get("flows") or {}).get("public_url") or "").strip()
+        except Exception:  # pragma: no cover
+            url = ""
+    return url
+
+
+def enqueue_flow_resume(flow_id: str, run_id: str, decision: str, owner: str = "") -> None:
+    """Enqueue a durable resume of a paused flow run with a human decision. Shared
+    by the API resume endpoint and the signed-link approval endpoint."""
+    queue().enqueue(FLOW_RESUME_KIND, {
+        "flow_id": flow_id, "run_id": run_id, "decision": decision, "owner": owner})
+
+
+def _approval_body(name: str, run) -> str:
+    """The approval notification text, with clickable approve/reject links when a
+    public URL + webhook secret are configured (else just the prompt)."""
+    ask = run.prompt or "review and resume"
+    base = _public_base_url()
+    if base:
+        from maverick.flow.approvals import approval_links
+        links = approval_links(base, run.run_id)
+        if links:
+            return (f"“{name}” needs your approval: {ask}\n"
+                    f"✅ Approve: {links['approve']}\n"
+                    f"🚫 Reject: {links['reject']}")
+    return f"“{name}” needs your approval: {ask}"
+
+
 def _notify_flow(flow, run) -> None:
     """Best-effort push when a notify-enabled flow needs a human (paused on an
     approval) or finishes (completed/failed). A no-op unless the flow opted in
-    AND notifications are configured; never raises into the worker."""
+    AND notifications are configured; never raises into the worker. An approval
+    pause carries actionable approve/reject links when a public URL is set."""
     if flow is None or not getattr(flow, "notify", False):
         return
     from maverick.flow.runner import STATUS_COMPLETED, STATUS_FAILED, STATUS_PAUSED_APPROVAL
     name = flow.name or flow.id
     if run.status == STATUS_PAUSED_APPROVAL:
-        body, prio = f"“{name}” needs your approval: {run.prompt or 'review and resume'}", "high"
+        body, prio = _approval_body(name, run), "high"
     elif run.status == STATUS_COMPLETED:
         body, prio = f"“{name}” finished.", "default"
     elif run.status == STATUS_FAILED:
@@ -279,11 +326,16 @@ def _handle_flow_run(job=None) -> None:
             log.warning("flow_run: no such flow %s", flow_id)
             return
         owner = str(payload.get("owner") or "")
-        agent_runner, action_runner = _flow_runners(owner)
+        dry_run = bool(payload.get("dry_run"))
+        # A dry run exercises the graph with mock executors and records no grounded
+        # outcome -- so "Test" can't hit production or skew the learning signal.
+        agent_runner, action_runner = (execution.sandbox_runners() if dry_run
+                                       else _flow_runners(owner))
         run = execution.execute(flow, agent_runner=agent_runner, action_runner=action_runner,
                                 owner=owner, data=dict(payload.get("data") or {}),
-                                run_id=payload.get("run_id"))
-        _notify_flow(flow, run)
+                                run_id=payload.get("run_id"), record_outcomes=not dry_run)
+        if not dry_run:
+            _notify_flow(flow, run)
     except Exception:  # pragma: no cover -- fail-open
         log.exception("flow run failed for %s", flow_id)
 
@@ -333,6 +385,12 @@ def _handle_flow_sweep(_job=None) -> None:
                     "flow_id": run.flow_id, "run_id": run.run_id, "owner": run.owner})
     except Exception:  # pragma: no cover -- fail-open
         log.exception("flow delay sweep failed")
+    # Also re-sync per-flow cron schedules from the store, so a flow scheduled
+    # (or unscheduled) after boot is armed/disarmed within a minute -- no restart.
+    try:
+        _reconcile_flow_crons()
+    except Exception:  # pragma: no cover -- fail-open
+        log.exception("flow cron reconcile failed")
 
 
 def _handle_flow_evolve(_job=None) -> None:
@@ -371,6 +429,29 @@ def _handle_flow_evolve(_job=None) -> None:
         log.exception("flow evolve pass failed")
 
 
+def _handle_flow_cron(job=None) -> None:
+    """Fire a scheduled flow on its cron cadence: enqueue a fresh flow run each
+    occurrence. The worker re-arms the next occurrence (payload carries
+    ``__cron__``). Re-check the flow still exists and still carries THIS schedule,
+    so a schedule that was removed or changed stops firing immediately -- before
+    the next reconcile() cancels the now-stale cron job. Fail-open."""
+    payload = getattr(job, "payload", None) or {}
+    flow_id = str(payload.get("flow_id") or "")
+    if not flow_id:
+        return
+    try:
+        from maverick import flow as flow_mod
+        if not flow_mod.enabled():
+            return
+        from maverick.flow import store
+        flow = store.load_flow(flow_id)
+        if flow is None or flow.schedule.strip() != str(payload.get("__cron__") or "").strip():
+            return  # deleted, or the schedule changed out from under this cron
+        enqueue_flow_run(flow_id, {}, owner=str(payload.get("owner") or ""))
+    except Exception:  # pragma: no cover -- fail-open
+        log.exception("scheduled flow run failed for %s", flow_id)
+
+
 # ---- cron seeding -----------------------------------------------------------
 
 def _pending(kind: str) -> list:
@@ -391,6 +472,38 @@ def _ensure_cron(kind: str, expr: str) -> None:
             q.cancel(extra.id)
         return
     schedule_cron(q, expr, kind, {"__cron__": expr})
+
+
+def _reconcile_flow_crons() -> None:
+    """Seed one ``flow_cron`` job per scheduled flow and cancel the crons of
+    flows that lost (or changed) their schedule. Keyed by ``flow_id`` in the
+    payload, expression tracked in ``__cron__``: a job whose flow no longer has
+    the same schedule is stale and cancelled; a scheduled flow with no matching
+    live cron gets one seeded. Idempotent -- safe to run on every reconcile."""
+    from maverick.flow import store
+    from maverick.scheduler import CronError, parse_cron, schedule_cron
+    want: dict[str, str] = {}
+    for f in store.list_flows():
+        expr = f.schedule.strip()
+        if not expr:
+            continue
+        try:
+            parse_cron(expr)          # only arm a valid expression
+        except CronError:
+            continue
+        want[f.id] = expr
+    q = queue()
+    covered: set[str] = set()
+    for j in _pending(FLOW_CRON_KIND):
+        fid = str((j.payload or {}).get("flow_id") or "")
+        expr = str((j.payload or {}).get("__cron__") or "")
+        if want.get(fid) == expr and fid not in covered:
+            covered.add(fid)          # exactly one correct cron per flow; keep it
+        else:
+            q.cancel(j.id)            # stale (flow unscheduled, schedule changed, or dup)
+    for fid, expr in want.items():
+        if fid not in covered:
+            schedule_cron(q, expr, FLOW_CRON_KIND, {"flow_id": fid, "__cron__": expr})
 
 
 def _dream_cron() -> str:
@@ -421,6 +534,7 @@ def reconcile() -> None:
         _ensure_cron(FLYWHEEL_KIND, _flywheel_cron())
     if flow.enabled():
         _ensure_cron(FLOW_SWEEP_KIND, _FLOW_SWEEP_CRON)
+        _reconcile_flow_crons()
     if flow.auto_evolve_enabled():
         _ensure_cron(FLOW_EVOLVE_KIND, _FLOW_EVOLVE_CRON)
 
@@ -453,6 +567,7 @@ def start() -> bool:
         w.register(FLOW_RESUME_KIND, _handle_flow_resume)
         w.register(FLOW_SWEEP_KIND, _handle_flow_sweep)
         w.register(FLOW_EVOLVE_KIND, _handle_flow_evolve)
+        w.register(FLOW_CRON_KIND, _handle_flow_cron)
         # Seed the cron jobs + actually start the threads BEFORE committing to the
         # module globals, so a failure in reconcile() (e.g. a boot-time sqlite
         # write error) leaves us cleanly un-started and retryable -- not wedged
@@ -488,4 +603,5 @@ def stop() -> None:
 
 __all__ = ["start", "stop", "reconcile", "queue",
            "TICK_KIND", "DREAM_KIND", "FLYWHEEL_KIND",
-           "FLOW_RUN_KIND", "FLOW_RESUME_KIND", "FLOW_SWEEP_KIND", "FLOW_EVOLVE_KIND"]
+           "FLOW_RUN_KIND", "FLOW_RESUME_KIND", "FLOW_SWEEP_KIND", "FLOW_EVOLVE_KIND",
+           "FLOW_CRON_KIND", "enqueue_flow_run", "enqueue_flow_resume"]

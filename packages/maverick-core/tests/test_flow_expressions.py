@@ -3,7 +3,48 @@
 from __future__ import annotations
 
 from maverick.flow import Flow, FlowNode
-from maverick.flow.runner import render, run_flow
+from maverick.flow.runner import eval_condition, render, run_flow
+
+
+class TestArithmeticAndLists:
+    def test_arithmetic(self):
+        assert render("{{add(a, b)}}", {"a": 2, "b": 3}) == "5"      # int, not 5.0
+        assert render("{{sub(10, 3)}}", {}) == "7"
+        assert render("{{mul(qty, price)}}", {"qty": 3, "price": 4}) == "12"
+        assert render("{{div(10, 4)}}", {}) == "2.5"
+        assert render("{{div(1, 0)}}", {}) == "0"                    # divide-by-zero -> 0
+
+    def test_nested_arithmetic_and_round(self):
+        assert render("{{round(div(10, 3), 2)}}", {}) == "3.33"
+
+    def test_list_first_last(self):
+        assert render("{{first(items)}}", {"items": ["a", "b"]}) == "a"
+        assert render("{{last(items)}}", {"items": ["a", "b"]}) == "b"
+
+
+class TestConditionComposition:
+    def test_single_predicate_still_works(self):
+        assert eval_condition("x > 5", {"x": 10}) is True
+        assert eval_condition("x > 5", {"x": 1}) is False
+
+    def test_and_requires_both(self):
+        c = "amount > 100 and region == 'EU'"
+        assert eval_condition(c, {"amount": 150, "region": "EU"}) is True
+        assert eval_condition(c, {"amount": 150, "region": "US"}) is False
+        assert eval_condition(c, {"amount": 50, "region": "EU"}) is False
+
+    def test_or_requires_either(self):
+        c = "a == 1 or b == 2"
+        assert eval_condition(c, {"a": 9, "b": 2}) is True
+        assert eval_condition(c, {"a": 1, "b": 9}) is True
+        assert eval_condition(c, {"a": 9, "b": 9}) is False
+
+    def test_or_of_ands_precedence(self):
+        # (tier == gold) OR (amount > 1000 AND region == 'EU')
+        c = "tier == 'gold' or amount > 1000 and region == 'EU'"
+        assert eval_condition(c, {"tier": "gold", "amount": 0, "region": "US"}) is True
+        assert eval_condition(c, {"tier": "silver", "amount": 2000, "region": "EU"}) is True
+        assert eval_condition(c, {"tier": "silver", "amount": 2000, "region": "US"}) is False
 
 
 class TestExpressions:
@@ -31,6 +72,17 @@ class TestExpressions:
 
     def test_unknown_function_is_treated_as_a_key(self):
         assert render("{{bogus(x)}}", {}) == "{{bogus(x)}}"   # not a known fn, no such key
+
+    def test_nested_function_calls_evaluate(self):
+        # a nested call's inner comma must not split the outer args, and the
+        # inner call must actually evaluate (was silently "" before the fix)
+        assert render("{{upper(default(x, 'fallback'))}}", {}) == "FALLBACK"
+        assert render("{{upper(default(x, 'fallback'))}}", {"x": "here"}) == "HERE"
+        assert render("{{concat(upper(first), ' ', lower(last))}}",
+                      {"first": "ada", "last": "LOVELACE"}) == "ADA lovelace"
+
+    def test_literal_comma_inside_nested_call_survives(self):
+        assert render("{{default(missing, concat('a', 'b'))}}", {}) == "ab"
 
 
 class TestLoopControls:

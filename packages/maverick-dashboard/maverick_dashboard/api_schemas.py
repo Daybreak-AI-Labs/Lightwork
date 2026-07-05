@@ -270,8 +270,13 @@ class FlowSaveIn(BaseModel):
 
 
 class FlowRunIn(BaseModel):
-    """Start a flow run with optional initial data (the trigger payload)."""
+    """Start a flow run with optional initial data (the trigger payload).
+
+    ``dry_run`` exercises the graph with MOCK executors -- no real goal, no real
+    connector call, and no grounded outcome recorded -- so a flow can be tested
+    with sample input before it's wired to a live trigger."""
     data: dict = Field(default_factory=dict)
+    dry_run: bool = False
 
 
 class FlowResumeIn(BaseModel):

@@ -1,0 +1,84 @@
+"""Actionable approvals: signed approve/reject links a human can click from a
+channel -- Slack, Teams, email, SMS -- to resume a flow paused on an approval
+node, without logging into the dashboard.
+
+A link carries a stateless HMAC token over ``(run_id, decision, expiry)``. The
+dashboard endpoint verifies the token and resumes the run, so there is no
+per-channel signing scheme to implement: any surface that renders a URL gets a
+working button. The token reuses the control-plane webhook secret
+(:func:`maverick.webhooks.inbound_secret`) so operators configure one key, and
+it FAILS CLOSED -- with no secret configured, no token is minted and no link is
+posted (the human falls back to the dashboard).
+"""
+from __future__ import annotations
+
+import base64
+import hashlib
+import hmac
+import json
+import time
+
+_DEFAULT_TTL = 7 * 24 * 3600      # a week to act on an approval
+_DECISIONS = ("approved", "rejected")
+
+
+def _secret() -> str | None:
+    from ..webhooks import inbound_secret
+    return inbound_secret()
+
+
+def _sign(material: bytes, secret: str) -> str:
+    return hmac.new(secret.encode("utf-8"), material, hashlib.sha256).hexdigest()
+
+
+def mint_token(run_id: str, decision: str, *, ttl: int = _DEFAULT_TTL,
+               now: float | None = None) -> str | None:
+    """A signed, self-expiring token authorising ONE decision on ONE run.
+    ``None`` when no secret is configured or the inputs are invalid (fail closed)."""
+    secret = _secret()
+    if not secret or decision not in _DECISIONS or not run_id:
+        return None
+    exp = int((now if now is not None else time.time()) + ttl)
+    raw = json.dumps({"r": str(run_id), "d": decision, "e": exp},
+                     separators=(",", ":"), sort_keys=True).encode("utf-8")
+    body = base64.urlsafe_b64encode(raw).decode("ascii").rstrip("=")
+    return f"{body}.{_sign(body.encode('ascii'), secret)}"
+
+
+def verify_token(token: str, *, now: float | None = None) -> dict | None:
+    """Return ``{"run_id", "decision"}`` for a valid, unexpired, correctly-signed
+    token; ``None`` otherwise (no secret / bad format / bad signature / expired)."""
+    secret = _secret()
+    if not secret or not token or "." not in token:
+        return None
+    body, _, sig = token.partition(".")
+    if not hmac.compare_digest(sig, _sign(body.encode("ascii"), secret)):
+        return None
+    try:
+        pad = "=" * (-len(body) % 4)
+        payload = json.loads(base64.urlsafe_b64decode(body + pad))
+    except (ValueError, TypeError):
+        return None
+    run_id, decision, exp = payload.get("r"), payload.get("d"), payload.get("e")
+    if decision not in _DECISIONS or not run_id or not isinstance(exp, (int, float)):
+        return None
+    if (now if now is not None else time.time()) > exp:
+        return None
+    return {"run_id": str(run_id), "decision": str(decision)}
+
+
+def approval_links(base_url: str, run_id: str, *, ttl: int = _DEFAULT_TTL,
+                   now: float | None = None) -> dict | None:
+    """The approve/reject URLs for a run (pointing at ``/flow/approve``), or
+    ``None`` when unsigned (no secret) so the caller can fall back to a plain
+    notification."""
+    approve = mint_token(run_id, "approved", ttl=ttl, now=now)
+    reject = mint_token(run_id, "rejected", ttl=ttl, now=now)
+    if not (approve and reject):
+        return None
+    base = base_url.rstrip("/")
+    return {"approve": f"{base}/flow/approve?token={approve}",
+            "reject": f"{base}/flow/approve?token={reject}"}
+
+
+__all__ = ["mint_token", "verify_token", "approval_links"]

@@ -62,11 +62,20 @@ def render(text: str, data: dict) -> str:
 def _as_text(v: Any) -> str:
     if isinstance(v, bool):
         return "true" if v else "false"
+    if isinstance(v, float) and v.is_integer():
+        return str(int(v))          # render add(2,3) as "5", not "5.0"
     return str(v)
 
 
-# Safe transform functions usable inside {{ }} -- no eval, pure string/collection
-# helpers. Each takes the evaluated arg list.
+def _num(x: Any) -> float:
+    try:
+        return float(x)
+    except (TypeError, ValueError):
+        return 0.0
+
+
+# Safe transform functions usable inside {{ }} -- no eval, pure string/collection/
+# arithmetic helpers. Each takes the evaluated arg list.
 _FUNCS: dict[str, Callable[[list], Any]] = {
     "upper": lambda a: str(a[0]).upper() if a else "",
     "lower": lambda a: str(a[0]).lower() if a else "",
@@ -77,12 +86,21 @@ _FUNCS: dict[str, Callable[[list], Any]] = {
     "replace": lambda a: (str(a[0]).replace(str(a[1]), str(a[2])) if len(a) >= 3 else (str(a[0]) if a else "")),
     "default": lambda a: (a[0] if (a and a[0] not in (None, "", [], {})) else (a[1] if len(a) > 1 else "")),
     "json": lambda a: (__import__("json").dumps(a[0]) if a else ""),
+    "first": lambda a: (a[0][0] if a and isinstance(a[0], (list, tuple)) and a[0] else ""),
+    "last": lambda a: (a[0][-1] if a and isinstance(a[0], (list, tuple)) and a[0] else ""),
+    # arithmetic
+    "add": lambda a: sum(_num(x) for x in a),
+    "sub": lambda a: (_num(a[0]) - _num(a[1])) if len(a) >= 2 else _num(a[0] if a else 0),
+    "mul": lambda a: (_num(a[0]) * _num(a[1])) if len(a) >= 2 else _num(a[0] if a else 0),
+    "div": lambda a: (_num(a[0]) / _num(a[1])) if (len(a) >= 2 and _num(a[1])) else 0,
+    "round": lambda a: round(_num(a[0]), int(_num(a[1])) if len(a) > 1 else 0) if a else 0,
 }
 
 
 def _split_args(s: str) -> list[str]:
-    """Comma-split respecting single/double quotes (so a literal comma survives)."""
-    out, cur, q = [], "", None
+    """Comma-split respecting quotes AND nested parens, so a literal comma or a
+    nested call's arguments (``default(x, "y")``) survive as one argument."""
+    out, cur, q, depth = [], "", None, 0
     for ch in s:
         if q:
             cur += ch
@@ -91,7 +109,13 @@ def _split_args(s: str) -> list[str]:
         elif ch in "'\"":
             q = ch
             cur += ch
-        elif ch == ",":
+        elif ch == "(":
+            depth += 1
+            cur += ch
+        elif ch == ")":
+            depth = max(0, depth - 1)
+            cur += ch
+        elif ch == "," and depth == 0:
             out.append(cur)
             cur = ""
         else:
@@ -102,7 +126,8 @@ def _split_args(s: str) -> list[str]:
 
 
 def _arg_value(tok: str, data: dict) -> Any:
-    """A function argument: a quoted/number literal, else a data key (missing -> '')."""
+    """A function argument: a quoted/number/bool literal, a NESTED transform call
+    (evaluated recursively), else a data key (missing -> '')."""
     tok = tok.strip()
     if len(tok) >= 2 and tok[0] in "'\"" and tok[-1] == tok[0]:
         return tok[1:-1]
@@ -114,12 +139,16 @@ def _arg_value(tok: str, data: dict) -> Any:
             return cast(tok)
         except ValueError:
             pass
+    m = _FN_CALL.match(tok)
+    if m and m.group(1) in _FUNCS:          # nested call: {{upper(default(x,"y"))}}
+        return _eval_expr(tok, data)
     return _dig(data, tok, "")
 
 
 def _eval_expr(expr: str, data: dict) -> Any:
-    """Evaluate a ``{{ }}`` expression: a transform call, else a dotted-key dig
-    (returning ``None`` for a missing bare key so render keeps it literal)."""
+    """Evaluate a ``{{ }}`` expression: a transform call (args may themselves be
+    transform calls), else a dotted-key dig (``None`` for a missing bare key so
+    render keeps it literal)."""
     m = _FN_CALL.match(expr.strip())
     if m and m.group(1) in _FUNCS:
         args = [_arg_value(a, data) for a in _split_args(m.group(2))]
@@ -157,12 +186,8 @@ def _coerce(token: str) -> Any:
         return token
 
 
-def eval_condition(expr: str, data: dict) -> bool:
-    """A safe ``<key> <op> <value>`` predicate over flow data (no eval).
-
-    ``<key>`` reads flow data (dotted paths allowed); ``<value>`` is a literal
-    (number / 'quoted' / bareword / true|false). A bare ``expr`` tests truthiness
-    of that data key. Unknown operators / unparsable exprs are falsey."""
+def _eval_predicate(expr: str, data: dict) -> bool:
+    """One ``<key> <op> <value>`` comparison (or a bare truthiness test)."""
     m = _COND.match(str(expr or ""))
     if not m:
         return bool(_dig(data, str(expr).strip()))
@@ -180,6 +205,26 @@ def eval_condition(expr: str, data: dict) -> bool:
         return {">": lf > rf, "<": lf < rf, ">=": lf >= rf, "<=": lf <= rf}[op]
     except (TypeError, ValueError):
         return False
+
+
+_AND_OR = re.compile(r"\s+(?:and|or)\s+", re.IGNORECASE)
+
+
+def eval_condition(expr: str, data: dict) -> bool:
+    """A safe boolean predicate over flow data (no eval).
+
+    A predicate is ``<key> <op> <value>`` (``<value>`` a number / 'quoted' /
+    bareword / true|false), or a bare key (truthiness). Predicates compose with
+    ``and`` / ``or`` (``or`` of ``and`` groups, standard precedence), e.g.
+    ``amount > 100 and region == 'EU'``. Unparsable predicates are falsey."""
+    s = str(expr or "").strip()
+    if not _AND_OR.search(s):
+        return _eval_predicate(s, data)
+    for or_part in re.split(r"\s+or\s+", s, flags=re.IGNORECASE):
+        parts = [p for p in re.split(r"\s+and\s+", or_part, flags=re.IGNORECASE) if p.strip()]
+        if parts and all(_eval_predicate(p, data) for p in parts):
+            return True
+    return False
 
 
 @dataclass
@@ -221,13 +266,23 @@ class _Ctx:
     allow_pause: bool
     resolve_flow: Callable[[str], Flow | None] | None = None
     flow_stack: set = field(default_factory=set)   # subflow ids on the call stack
+    deadline: float | None = None                  # whole-flow wall-clock deadline
 
     def nested(self) -> _Ctx:
-        # A copy that cannot pause (foreach body / parallel branch / subflow run
-        # straight). Shares flow_stack so subflow cycle detection spans nesting.
+        # A copy that cannot pause (foreach body / subflow run straight). Shares
+        # flow_stack + deadline so cycle detection and the whole-flow deadline
+        # span the linear nesting.
         return _Ctx(self.agent_fn, self.action_fn, self.approve_fn, self.on_node,
                     self.now, allow_pause=False, resolve_flow=self.resolve_flow,
-                    flow_stack=self.flow_stack)
+                    flow_stack=self.flow_stack, deadline=self.deadline)
+
+    def branched(self) -> _Ctx:
+        # For a CONCURRENT parallel branch: its own flow_stack copy (independent
+        # cycle detection -- a sibling branch's subflow isn't a cycle here), but a
+        # shared clock/deadline and the shared on_node sink.
+        return _Ctx(self.agent_fn, self.action_fn, self.approve_fn, self.on_node,
+                    self.now, allow_pause=False, resolve_flow=self.resolve_flow,
+                    flow_stack=set(self.flow_stack), deadline=self.deadline)
 
 
 def _render_params(node: FlowNode, data: dict) -> dict:
@@ -236,9 +291,25 @@ def _render_params(node: FlowNode, data: dict) -> dict:
 
 
 def _invoke_work(node: FlowNode, data: dict, ctx: _Ctx):
-    if node.kind == NODE_AGENT:
-        return ctx.agent_fn(node, render(node.brief, data), data)
-    return ctx.action_fn(node, _render_params(node, data), data)
+    def _call():
+        if node.kind == NODE_AGENT:
+            return ctx.agent_fn(node, render(node.brief, data), data)
+        return ctx.action_fn(node, _render_params(node, data), data)
+    if not (node.timeout and node.timeout > 0):
+        return _call()
+    # Soft per-node timeout: run the executor on a worker thread and give up
+    # waiting after `timeout`s (Python can't kill the thread, so the abandoned
+    # call finishes on its own -- but the flow stops blocking on it).
+    import concurrent.futures as _cf
+    ex = _cf.ThreadPoolExecutor(max_workers=1)
+    fut = ex.submit(_call)
+    try:
+        res = fut.result(timeout=node.timeout)
+        ex.shutdown(wait=False)
+        return res
+    except _cf.TimeoutError:
+        ex.shutdown(wait=False)          # don't block on the runaway call
+        return (f"ERROR: node timed out after {node.timeout}s", 0.0)
 
 
 def _run_work(node: FlowNode, data: dict, ctx: _Ctx) -> str | None:
@@ -301,14 +372,28 @@ def _run_foreach(node: FlowNode, data: dict, ctx: _Ctx) -> str | None:
     return node.next
 
 
+_PARALLEL_MAX_WORKERS = 8   # cap fan-out threads per parallel node
+
+
 def _run_parallel(node: FlowNode, data: dict, ctx: _Ctx) -> str | None:
     base = dict(data)                     # frozen pre-parallel snapshot
-    branch_outputs = []
-    for branch in node.branches:
-        sub = dict(base)                  # each branch is isolated (sees only base)
-        _run_chain(branch, sub, ctx.nested(), branch.start)
-        branch_outputs.append(sub)
-    for sub in branch_outputs:            # merge new keys after all branches finish
+    branch_outputs = [dict(base) for _ in node.branches]   # each isolated (sees only base)
+    if len(node.branches) > 1:
+        # Run the branches CONCURRENTLY. Each has an isolated data copy and its
+        # own flow_stack (ctx.branched()); the shared world DB serialises writes
+        # (WAL + busy_timeout). A branch that raises propagates after the pool
+        # joins the rest, so there are no leaked threads.
+        import concurrent.futures as _cf
+        workers = min(len(node.branches), _PARALLEL_MAX_WORKERS)
+        with _cf.ThreadPoolExecutor(max_workers=workers) as ex:
+            futs = [ex.submit(_run_chain, br, sub, ctx.branched(), br.start)
+                    for br, sub in zip(node.branches, branch_outputs, strict=True)]
+            for f in futs:
+                f.result()                # wait for all; re-raise the first error
+    else:
+        for br, sub in zip(node.branches, branch_outputs, strict=True):
+            _run_chain(br, sub, ctx.nested(), br.start)
+    for sub in branch_outputs:            # merge new keys deterministically, in order
         for k, v in sub.items():          # (a later branch wins a key conflict)
             if k not in base:
                 data[k] = v
@@ -356,6 +441,8 @@ def _run_chain(flow: Flow, data: dict, ctx: _Ctx, start: str | None) -> None:
     seen = 0
     limit = max(1000, len(flow.nodes) * 100)   # cycle backstop
     while cursor is not None:
+        if ctx.deadline is not None and ctx.now() > ctx.deadline:
+            raise RuntimeError(f"flow {flow.id!r} exceeded its wall-clock deadline")
         node = flow.node(cursor)
         if node is None:
             return
@@ -380,9 +467,11 @@ def run_flow(flow: Flow, *, agent_fn: AgentFn, action_fn: ActionFn,
     ``resolve_flow(flow_ref) -> Flow | None`` resolves a ``subflow`` node's target
     (with the caller's cycle/depth guard); ``None`` makes a subflow a no-op error.
     """
+    _now = now or time.time
     ctx = _Ctx(agent_fn, action_fn, approve_fn, on_node or (lambda *_: None),
-               now or time.time, allow_pause=True, resolve_flow=resolve_flow,
-               flow_stack={flow.id})   # so the top flow can't recurse into itself
+               _now, allow_pause=True, resolve_flow=resolve_flow,
+               flow_stack={flow.id},   # so the top flow can't recurse into itself
+               deadline=(_now() + flow.max_seconds if flow.max_seconds and flow.max_seconds > 0 else None))
     if resume:
         data = dict(resume.get("data") or data or {})
         node = flow.node(resume.get("node_id"))

@@ -7,7 +7,11 @@
                     parallel: '🔱', approval: '✅', delay: '⏱', subflow: '📎' };
 
   var flow = { id: '', name: '', start: '', nodes: [] };
+  var rootFlow = flow;  // the top-level flow (save/run/history operate on this)
+  var stack = [];       // drill-in frames: {flow, selected} for each level above root
+  var crumbs = ['Main flow'];   // breadcrumb labels; length === stack.length + 1
   var proposals = {};   // node_id -> {to_kind, reason} from grounded per-node outcomes
+  var impacts = {};     // node_id -> {changed, applied, impact} measured before/after a rewrite
   var runState = {};    // node_id -> {status, outcome} from the last/live run
   var runCursor = null; // node a paused run is waiting on
   var toolCatalog = {}; // tool name -> {description, params[]} for the action picker
@@ -130,6 +134,12 @@
     canvas.classList.add('panning');
     selectNode(null);
   });
+  canvas.addEventListener('dblclick', function (evt) {
+    var nodeEl = evt.target.closest('[data-node]'); if (!nodeEl) return;
+    var n = nodeById(nodeEl.getAttribute('data-node')); if (!n) return;
+    if (n.kind === 'foreach') { evt.preventDefault(); enterSub(n, 'foreach'); }
+    else if (n.kind === 'parallel') { evt.preventDefault(); enterSub(n, 'parallel', 0); }
+  });
   window.addEventListener('mousemove', function (evt) {
     if (!drag) return;
     if (drag.kind === 'node') {
@@ -177,7 +187,7 @@
   function addNode(kind) {
     var n = { id: newId(), kind: kind, x: Math.round((-view.x + 220) / view.k), y: Math.round((-view.y + 80) / view.k),
               next: null, params: {}, brief: '', tool: '', condition: '', if_true: null, if_false: null,
-              items: '', var: 'item', limit: 0, prompt: '', seconds: 0, flow_ref: '', retries: 0, on_error: null,
+              items: '', var: 'item', limit: 0, prompt: '', seconds: 0, flow_ref: '', retries: 0, on_error: null, timeout: 0,
               output: '', label: '', body: null, branches: [] };
     // place under the currently selected node if any
     var sel = selected && nodeById(selected);
@@ -192,6 +202,62 @@
     selectNode(null); render();
   }
   function selectNode(id) { selected = id; renderProps(); render(); }
+
+  // ---- nested sub-flow editing (foreach body / parallel branches) ----
+  // Pure serialization/normalization lives in FDCore (flow_designer_core.js) so
+  // it's unit-testable under node without a DOM.
+  var normalizeNode = FDCore.normalizeNode;
+  function normalizeFlow(f) {
+    // Upgrade a raw nested-flow dict's nodes into editable node objects (in place,
+    // so the parent node's body/branches[i] keeps the same reference).
+    f.nodes = (f.nodes || []).map(normalizeNode);
+    if (!f.start && f.nodes.length) f.start = f.nodes[0].id;
+  }
+  function commitFlowRaw(f) {
+    // flush any buffered JSON textareas for the nodes of ONE flow (current view)
+    (f.nodes || []).forEach(function (n) {
+      if (n._paramsRaw !== undefined) { try { n.params = n._paramsRaw.trim() ? JSON.parse(n._paramsRaw) : {}; } catch (e) { /* reported on save */ } delete n._paramsRaw; }
+    });
+  }
+  function enterSub(node, kind, index) {
+    commitFlowRaw(flow);
+    var sub, label;
+    if (kind === 'foreach') {
+      if (!node.body) node.body = { id: '', name: 'loop body', start: '', nodes: [] };
+      sub = node.body; label = '🔁 ' + (node.label || 'for-each') + ' body';
+    } else {
+      node.branches = node.branches || [];
+      if (!node.branches[index]) node.branches[index] = { id: '', name: 'branch ' + (index + 1), start: '', nodes: [] };
+      sub = node.branches[index]; label = '🔱 ' + (node.label || 'parallel') + ' · branch ' + (index + 1);
+    }
+    normalizeFlow(sub);
+    stack.push({ flow: flow, selected: selected });
+    crumbs.push(label);
+    flow = sub; selected = null;
+    autoLayout(); renderCrumbs(); render(); renderProps();
+  }
+  function exitToDepth(d) {
+    commitFlowRaw(flow);
+    while (stack.length > d) { var fr = stack.pop(); flow = fr.flow; selected = fr.selected; }
+    crumbs.length = d + 1;
+    renderCrumbs(); render(); renderProps();
+  }
+  function renderCrumbs() {
+    var c = document.getElementById('fd-crumbs'); if (!c) return;
+    c.textContent = '';
+    if (!stack.length) { c.classList.remove('on'); return; }   // hidden at the root
+    c.classList.add('on');
+    crumbs.forEach(function (label, i) {
+      if (i) c.appendChild(document.createTextNode(' ▸ '));
+      if (i < crumbs.length - 1) {
+        var b = document.createElement('button'); b.type = 'button'; b.className = 'fd__crumb';
+        b.textContent = label; b.addEventListener('click', function () { exitToDepth(i); });
+        c.appendChild(b);
+      } else {
+        var s = document.createElement('span'); s.className = 'fd__crumb fd__crumb--cur'; s.textContent = label; c.appendChild(s);
+      }
+    });
+  }
 
   // ---- property panel ----
   function field(label, inputEl) {
@@ -250,10 +316,32 @@
       props.appendChild(field('Items (data key with a list)', input(n.items, function (v) { n.items = v; render(); }, 'rows')));
       props.appendChild(field('Loop variable', input(n.var, function (v) { n.var = v; }, 'item')));
       props.appendChild(field('Max iterations (0 = all)', input(String(n.limit || ''), function (v) { n.limit = parseInt(v, 10) || 0; }, '0')));
-      props.appendChild(field('Body (flow JSON)', textarea(jsonOr(n.body), function (v) { n._bodyRaw = v; })));
-      props.appendChild(hint('The body can set _break to true to stop the loop early.'));
+      var bodyN = (n.body && n.body.nodes && n.body.nodes.length) || 0;
+      var eb = document.createElement('button'); eb.className = 'btn btn--ghost'; eb.type = 'button';
+      eb.style.width = '100%'; eb.textContent = '✏️ Edit loop body (' + bodyN + (bodyN === 1 ? ' step)' : ' steps)') + ' ↳';
+      eb.addEventListener('click', function () { enterSub(n, 'foreach'); });
+      props.appendChild(field('Loop body (visual)', eb));
+      props.appendChild(hint('Opens the body as its own canvas. It can set _break to true to stop early.'));
     }
-    if (n.kind === 'parallel') props.appendChild(field('Branches (JSON array of flows)', textarea(jsonOr(n.branches), function (v) { n._branchesRaw = v; })));
+    if (n.kind === 'parallel') {
+      var wrap = document.createElement('div'); wrap.className = 'field';
+      var wl = document.createElement('label'); wl.textContent = 'Branches (each runs concurrently)'; wrap.appendChild(wl);
+      (n.branches || []).forEach(function (br, bi) {
+        var cnt = (br && br.nodes && br.nodes.length) || 0;
+        var rowb = document.createElement('div'); rowb.style.display = 'flex'; rowb.style.gap = '4px'; rowb.style.marginBottom = '4px';
+        var edit = document.createElement('button'); edit.className = 'btn btn--ghost'; edit.type = 'button'; edit.style.flex = '1';
+        edit.textContent = '✏️ Branch ' + (bi + 1) + ' (' + cnt + ')'; edit.addEventListener('click', function () { enterSub(n, 'parallel', bi); });
+        var rm = document.createElement('button'); rm.className = 'btn btn--ghost'; rm.type = 'button'; rm.textContent = '🗑';
+        rm.title = 'Remove branch ' + (bi + 1);
+        rm.addEventListener('click', function () { n.branches.splice(bi, 1); renderProps(); render(); });
+        rowb.appendChild(edit); rowb.appendChild(rm); wrap.appendChild(rowb);
+      });
+      var add = document.createElement('button'); add.className = 'btn btn--ghost'; add.type = 'button'; add.style.width = '100%';
+      add.textContent = '+ Add branch';
+      add.addEventListener('click', function () { n.branches = n.branches || []; n.branches.push({ id: '', name: 'branch ' + (n.branches.length + 1), start: '', nodes: [] }); renderProps(); render(); });
+      wrap.appendChild(add); props.appendChild(wrap);
+      props.appendChild(hint('Each branch is an isolated sub-flow; they run in parallel and their outputs merge.'));
+    }
     if (n.kind === 'approval') props.appendChild(field('Prompt (what a human approves)', input(n.prompt, function (v) { n.prompt = v; render(); }, 'Send this reply?')));
     if (n.kind === 'delay') props.appendChild(field('Seconds', input(String(n.seconds || ''), function (v) { n.seconds = parseFloat(v) || 0; render(); }, '60')));
     if (n.kind === 'subflow') {
@@ -265,6 +353,7 @@
     // error handling for work steps: retry then route on failure
     if (n.kind === 'agent' || n.kind === 'action') {
       props.appendChild(field('Retries on failure', input(String(n.retries || ''), function (v) { n.retries = parseInt(v, 10) || 0; }, '0')));
+      props.appendChild(field('Timeout (seconds, 0 = none)', input(String(n.timeout || ''), function (v) { n.timeout = parseFloat(v) || 0; }, '0')));
       var errOpts = [{ v: '', t: '(none — continue)' }].concat(flow.nodes.filter(function (m) { return m.id !== n.id; }).map(function (m) { return { v: m.id, t: (m.label || m.id) }; }));
       props.appendChild(field('On failure, go to', select(n.on_error || '', errOpts, function (v) { n.on_error = v || null; render(); })));
     }
@@ -277,6 +366,16 @@
         : (rs.status || '') + (rs.outcome != null ? ' (' + (rs.outcome === 1 ? 'ok' : 'failed') + ')' : '')) + ' ' + badge;
       props.appendChild(rl);
     }
+    // measured impact of a prior self-rewrite on this node (before vs. after)
+    var imp = impacts[n.id];
+    if (imp && imp.changed && imp.impact) {
+      var d = imp.impact.delta;
+      var il = document.createElement('p'); il.className = 'fd__empty'; il.style.marginTop = 'var(--space-2)';
+      il.textContent = '📈 since → ' + (imp.applied && imp.applied.to_kind) + ': '
+        + (typeof d === 'number' ? (d >= 0 ? '+' : '') + Math.round(d * 100) + '% vs before'
+          : 'measuring (' + (imp.impact.after && imp.impact.after.n || 0) + ' runs so far)');
+      props.appendChild(il);
+    }
     // self-rewrite proposal for this node (from grounded per-node outcomes)
     var prop = proposals[n.id];
     if (prop) {
@@ -284,9 +383,10 @@
       pbox.style.cssText = 'margin-top:var(--space-3);padding:var(--space-2);border:1px solid var(--accent);border-radius:8px;';
       var pl = document.createElement('p'); pl.className = 'fd__empty'; pl.style.marginBottom = 'var(--space-2)';
       pl.textContent = '💡 ' + prop.reason;
-      var pb = document.createElement('button'); pb.className = 'btn btn--ghost'; pb.type = 'button';
-      pb.textContent = 'Convert to ' + prop.to_kind;
-      pb.addEventListener('click', function () { n.kind = prop.to_kind; delete proposals[n.id]; render(); renderProps(); });
+      // Persisted apply: saves a new version + logs the change so its impact is measured.
+      var pb = document.createElement('button'); pb.className = 'btn btn--primary'; pb.type = 'button';
+      pb.textContent = 'Apply & track (→ ' + prop.to_kind + ')';
+      pb.addEventListener('click', function () { applyProposal(n, prop); });
       pbox.appendChild(pl); pbox.appendChild(pb); props.appendChild(pbox);
     }
     // actions
@@ -301,51 +401,46 @@
   function jsonOr(v) { try { return v && (typeof v === 'object') ? JSON.stringify(v, null, 2) : (v || ''); } catch (e) { return ''; } }
 
   // ---- serialize / api ----
+  function walkFlows(f, fn) {
+    // depth-first over a flow and every nested body/branch sub-flow
+    fn(f);
+    (f.nodes || []).forEach(function (n) {
+      if (n.body) walkFlows(n.body, fn);
+      (n.branches || []).forEach(function (b) { walkFlows(b, fn); });
+    });
+  }
   function commitRawFields() {
-    // parse the JSON textareas (params/body/branches) that we buffered as raw
+    // parse the buffered params JSON across the root AND every nested sub-flow
     var bad = [];
-    flow.nodes.forEach(function (n) {
-      if (n._paramsRaw !== undefined) { try { n.params = n._paramsRaw.trim() ? JSON.parse(n._paramsRaw) : {}; } catch (e) { bad.push(n.id + '.params'); } delete n._paramsRaw; }
-      if (n._bodyRaw !== undefined) { try { n.body = n._bodyRaw.trim() ? JSON.parse(n._bodyRaw) : null; } catch (e) { bad.push(n.id + '.body'); } delete n._bodyRaw; }
-      if (n._branchesRaw !== undefined) { try { n.branches = n._branchesRaw.trim() ? JSON.parse(n._branchesRaw) : []; } catch (e) { bad.push(n.id + '.branches'); } delete n._branchesRaw; }
+    walkFlows(rootFlow, function (f) {
+      (f.nodes || []).forEach(function (n) {
+        if (n._paramsRaw !== undefined) { try { n.params = n._paramsRaw.trim() ? JSON.parse(n._paramsRaw) : {}; } catch (e) { bad.push(n.id + '.params'); } delete n._paramsRaw; }
+      });
     });
     return bad;
   }
+  var serializeFlow = FDCore.serializeFlow;
   function toApiFlow() {
     var notifyEl = document.getElementById('fd-notify');
-    return {
-      id: (idInput.value || flow.id || '').trim(),
-      name: nameInput.value || flow.name || 'Untitled flow',
-      start: flow.start,
-      notify: !!(notifyEl && notifyEl.checked),
-      nodes: flow.nodes.map(function (n) {
-        var o = { id: n.id, kind: n.kind };
-        ['next', 'tool', 'brief', 'condition', 'if_true', 'if_false', 'items', 'var', 'prompt', 'flow_ref', 'on_error', 'output', 'label'].forEach(function (k) {
-          if (n[k] !== '' && n[k] != null) o[k] = n[k];
-        });
-        if (n.params && Object.keys(n.params).length) o.params = n.params;
-        if (n.seconds) o.seconds = n.seconds;
-        if (n.retries) o.retries = n.retries;
-        if (n.limit) o.limit = n.limit;
-        if (n.body) o.body = n.body;
-        if (n.branches && n.branches.length) o.branches = n.branches;
-        if (n.x || n.y) { o.x = n.x; o.y = n.y; }
-        return o;
-      })
-    };
+    var out = serializeFlow({ id: (idInput.value || rootFlow.id || '').trim(),
+      name: nameInput.value || rootFlow.name || 'Untitled flow', start: rootFlow.start, nodes: rootFlow.nodes });
+    out.notify = !!(notifyEl && notifyEl.checked);
+    out.max_seconds = parseFloat((document.getElementById('fd-maxsec') || {}).value) || 0;
+    out.max_dollars = parseFloat((document.getElementById('fd-maxdollars') || {}).value) || 0;
+    out.schedule = ((document.getElementById('fd-schedule') || {}).value || '').trim();
+    return out;
   }
   function fromApiFlow(f) {
-    runState = {}; runCursor = null;
+    runState = {}; runCursor = null; impacts = {};
+    stack = []; crumbs = ['Main flow']; renderCrumbs();
     var lg = document.getElementById('fd-legend'); if (lg) lg.classList.remove('on');
-    flow = { id: f.id || '', name: f.name || '', start: f.start || '', nodes: [] };
+    flow = { id: f.id || '', name: f.name || '', start: f.start || '', nodes: [], max_seconds: f.max_seconds || 0 };
     var notifyEl = document.getElementById('fd-notify'); if (notifyEl) notifyEl.checked = !!f.notify;
-    (f.nodes || []).forEach(function (nd, i) {
-      var n = Object.assign({ params: {}, brief: '', tool: '', condition: '', if_true: null, if_false: null,
-        items: '', var: 'item', limit: 0, prompt: '', seconds: 0, flow_ref: '', retries: 0, on_error: null,
-        output: '', label: '', body: null, branches: [], next: null }, nd);
-      n.id = n.id || ('n' + i);
-      flow.nodes.push(n);
-    });
+    var msEl = document.getElementById('fd-maxsec'); if (msEl) msEl.value = f.max_seconds || '';
+    var mdEl = document.getElementById('fd-maxdollars'); if (mdEl) mdEl.value = f.max_dollars || '';
+    var schEl = document.getElementById('fd-schedule'); if (schEl) schEl.value = f.schedule || '';
+    (f.nodes || []).forEach(function (nd, i) { flow.nodes.push(normalizeNode(nd, i)); });
+    rootFlow = flow;
     autoLayout();
     nameInput.value = flow.name; idInput.value = flow.id;
     selected = null; view = { x: 40, y: 20, k: 1 }; render(); renderProps();
@@ -387,20 +482,21 @@
       .then(function (r) { return r.json().then(function (j) { return { ok: r.ok, j: j }; }); })
       .then(function (res) {
         if (!res.ok) { say(res.j.detail || 'Save failed', true); return; }
-        flow.id = body.id; say('Saved ✓'); if (cb) cb();
+        rootFlow.id = body.id; say('Saved ✓'); if (cb) cb();
       }).catch(function () { say('Save failed', true); });
   }
-  function run() {
+  function run(dryRun) {
     var data = {};
     var raw = document.getElementById('fd-sample').value.trim();
     if (raw) { try { data = JSON.parse(raw); } catch (e) { say('Sample input is not valid JSON.', true); return; } }
+    if (!dryRun && !window.confirm('Run for real? This creates real goals and calls real connectors.')) return;
     save(function () {
-      apiFetch('/api/v1/flows/' + encodeURIComponent(flow.id) + '/run', { method: 'POST', body: JSON.stringify({ data: data }) })
+      apiFetch('/api/v1/flows/' + encodeURIComponent(rootFlow.id) + '/run', { method: 'POST', body: JSON.stringify({ data: data, dry_run: !!dryRun }) })
         .then(function (r) { return r.json(); })
         .then(function (j) {
           if (!j.run_id) { say('Run started'); return; }
           runState = {}; runCursor = null;
-          say('Running (run ' + j.run_id.slice(0, 8) + '…)');
+          say((dryRun ? '🧪 Dry run ' : 'Running ') + '(run ' + j.run_id.slice(0, 8) + '…)');
           document.getElementById('fd-legend').classList.add('on');
           pollRun(j.run_id, 20);
         }).catch(function () { say('Run failed', true); });
@@ -443,6 +539,9 @@
       if (!r.ok) { say('Could not load flow', true); return; }
       return r.json().then(fromApiFlow);
     }).catch(function () { say('Could not load flow', true); });
+    loadSuggestions(id);
+  }
+  function loadSuggestions(id) {
     // self-rewrite suggestions (harden a reliable agent / soften a flaky action)
     apiFetch('/api/v1/flows/' + encodeURIComponent(id) + '/proposals').then(function (r) {
       return r.ok ? r.json() : { proposals: [] };
@@ -450,7 +549,64 @@
       proposals = {};
       (j.proposals || []).forEach(function (p) { proposals[p.node_id] = p; });
       if (j.proposals && j.proposals.length) say('💡 ' + j.proposals.length + ' learned suggestion(s) — select a node to see them.');
+      if (selected) renderProps();
     }).catch(function () {});
+    // measured impact of changes already applied (before/after), via the aggregate
+    apiFetch('/api/v1/flows/insights').then(function (r) { return r.ok ? r.json() : { flows: [] }; })
+      .then(function (j) {
+        impacts = {};
+        (j.flows || []).forEach(function (f) {
+          if (f.flow_id !== id) return;
+          (f.changes || []).forEach(function (ch) { impacts[ch.node_id] = { changed: true, applied: ch, impact: ch.impact }; });
+        });
+        if (selected) renderProps();
+      }).catch(function () {});
+  }
+  function applyProposal(n, prop) {
+    // Persisted apply: save the current graph, then enact the swap server-side so
+    // it becomes a new version and its before/after impact is measured.
+    if (prop.to_kind === 'action' && !n.tool) {
+      say('Give this step a Tool first, then Apply (an action needs one).', true); return;
+    }
+    save(function () {
+      var body = { node_id: n.id, to_kind: prop.to_kind, tool: n.tool || '', brief: n.brief || n.label || '' };
+      apiFetch('/api/v1/flows/' + encodeURIComponent(rootFlow.id) + '/apply', { method: 'POST', body: JSON.stringify(body) })
+        .then(function (r) { return r.json().then(function (j) { return { ok: r.ok, j: j }; }); })
+        .then(function (res) {
+          if (!res.ok) { say(res.j.detail || 'Apply failed', true); return; }
+          delete proposals[n.id];
+          say('Applied ✓ — now v' + res.j.version + '. Impact appears as new runs land.');
+          load(rootFlow.id);                          // reload the new version + refresh
+        }).catch(function () { say('Apply failed', true); });
+    });
+  }
+  function showHistory() {
+    if (!rootFlow.id) { say('Save the flow first.', true); return; }
+    apiFetch('/api/v1/flows/' + encodeURIComponent(rootFlow.id) + '/versions')
+      .then(function (r) { return r.ok ? r.json() : { versions: [] }; })
+      .then(function (j) {
+        props.textContent = '';
+        var h = document.createElement('div'); h.style.fontWeight = '600'; h.style.marginBottom = 'var(--space-3)';
+        h.textContent = '⏱ Version history';
+        props.appendChild(h);
+        (j.versions || []).forEach(function (v) {
+          var row = document.createElement('div'); row.className = 'field';
+          var kinds = Object.keys(v.kinds || {}).map(function (k) { return v.kinds[k] + ' ' + k; }).join(', ');
+          var lbl = document.createElement('div'); lbl.textContent = 'v' + v.version + ' — ' + v.nodes + ' nodes (' + kinds + ')';
+          row.appendChild(lbl);
+          var rb = document.createElement('button'); rb.className = 'btn btn--ghost'; rb.type = 'button'; rb.textContent = 'Roll back to v' + v.version;
+          rb.addEventListener('click', function () { rollback(v.version); });
+          row.appendChild(rb); props.appendChild(row);
+        });
+      }).catch(function () { say('Could not load history', true); });
+  }
+  function rollback(version) {
+    apiFetch('/api/v1/flows/' + encodeURIComponent(rootFlow.id) + '/rollback', { method: 'POST', body: JSON.stringify({ version: version }) })
+      .then(function (r) { return r.json().then(function (j) { return { ok: r.ok, j: j }; }); })
+      .then(function (res) {
+        if (!res.ok) { say(res.j.detail || 'Rollback failed', true); return; }
+        say('Rolled back — now v' + res.j.version + '.'); load(rootFlow.id);
+      }).catch(function () { say('Rollback failed', true); });
   }
 
   var EXAMPLES = [
@@ -485,9 +641,11 @@
   });
   document.getElementById('fd-draft').addEventListener('click', draft);
   document.getElementById('fd-save').addEventListener('click', function () { save(); });
-  document.getElementById('fd-run').addEventListener('click', run);
+  document.getElementById('fd-run').addEventListener('click', function () { run(true); });
+  document.getElementById('fd-run-real').addEventListener('click', function () { run(false); });
+  document.getElementById('fd-history').addEventListener('click', showHistory);
   document.getElementById('fd-nl').addEventListener('keydown', function (e) { if (e.key === 'Enter') draft(); });
-  nameInput.addEventListener('input', function () { flow.name = nameInput.value; });
+  nameInput.addEventListener('input', function () { rootFlow.name = nameInput.value; });
   // keyboard: Delete removes the selected node, Esc deselects (unless typing)
   document.addEventListener('keydown', function (e) {
     var tag = (e.target && e.target.tagName) || '';

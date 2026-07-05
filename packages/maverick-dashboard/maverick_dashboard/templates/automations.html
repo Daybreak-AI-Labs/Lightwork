@@ -80,6 +80,7 @@
       <div class="field">
         <label for="auto-event-config">Source config (JSON)</label>
         <textarea id="auto-event-config" rows="4" spellcheck="false" placeholder='{ "url": "https://api.example.com/leads", "items_path": "data", "id_field": "id" }'></textarea>
+        <p class="auto__hint" id="auto-event-formurl" hidden></p>
       </div>
       <div class="field">
         <label for="auto-event-name">Trigger name (optional)</label>
@@ -415,6 +416,34 @@
         (data.sources || []).forEach(function (s) {
           var o = document.createElement('option'); o.value = s; o.textContent = s; evSource.appendChild(o);
         });
+        // Show each source's config keys in the JSON textarea placeholder so a
+        // user knows what to fill in (the field stays free-form JSON).
+        var evCfg = document.getElementById('auto-event-config');
+        var HINTS = {
+          http_json: '{ "url": "https://api.example.com/leads", "items_path": "data", "id_field": "id" }',
+          rss: '{ "url": "https://example.com/feed.xml" }',
+          oauth_http_json: '{ "url": "https://slack.com/api/...", "provider": "slack", "items_path": "messages" }',
+          github_issues: '{ "owner": "acme", "repo": "app", "state": "open" }',
+          imap_email: '{ "host": "imap.gmail.com", "username": "you@x.com", "password_env": "MY_IMAP_PW", "mailbox": "INBOX" }',  // pragma: allowlist secret
+          file_dir: '{ "path": "/data/inbound", "glob": "*.csv", "recursive": false }',
+          form: '{ "token": "signup" }  → POST submissions to /form/signup'
+        };
+        var formUrl = document.getElementById('auto-event-formurl');
+        var showFormUrl = function () {
+          if (!formUrl) return;
+          if (evSource.value !== 'form') { formUrl.hidden = true; return; }
+          var token = '';
+          try { token = (JSON.parse(evCfg.value || '{}').token || '').trim(); } catch (e) { token = ''; }
+          if (!token) { formUrl.textContent = 'Add {"token":"…"} above; submissions POST to /form/<token>.'; formUrl.hidden = false; return; }
+          formUrl.textContent = 'Point your form at: ' + window.location.origin + '/form/' + encodeURIComponent(token);
+          formUrl.hidden = false;
+        };
+        if (evCfg && evSource) {
+          var applyHint = function () { if (HINTS[evSource.value]) evCfg.placeholder = HINTS[evSource.value]; showFormUrl(); };
+          evSource.addEventListener('change', applyHint);
+          evCfg.addEventListener('input', showFormUrl);
+          applyHint();
+        }
       }
       var items = data.triggers || [];
       // One batched history fetch (owner-scoped), grouped by trigger name -- the
@@ -660,8 +689,18 @@
           li.appendChild(mkBtn('Approve', function () { resumeRun(run.run_id, 'approved'); }));
           li.appendChild(mkBtn('Reject', function () { resumeRun(run.run_id, 'rejected'); }));
         }
+        if (['failed', 'completed', 'rejected'].indexOf(run.status) >= 0) {
+          li.appendChild(mkBtn('Retry', function () { retryRun(run.run_id); }));
+        }
         flowRuns.appendChild(li);
       });
+    }
+    async function retryRun(runId) {
+      try {
+        var r = await fetch('/api/v1/flows/runs/' + encodeURIComponent(runId) + '/retry', { method: 'POST' });
+        flowsMsg.textContent = r.ok ? 'Retrying with the original inputs…' : 'Could not retry.';
+        setTimeout(loadFlowRuns, 500);
+      } catch (e) { flowsMsg.textContent = 'Could not retry.'; }
     }
     async function resumeRun(runId, decision) {
       try {
