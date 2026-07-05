@@ -201,6 +201,11 @@ safety model as skills and insights.
   --semantic` wires `llm_conflict_classifier` (verifier role) over the lexical
   heuristic — catching contradictions that share no wording, with per-pair
   fallback to the heuristic if the judge fails.
+- **Judge calibration:** `[self_harness] calibrate_judge` feeds each
+  corpus-labeled verdict of the evaluation judge into the calibration
+  interlock (vote-share confidence vs the operator's `expected` label, source
+  `self_harness_judge`), arming the verifier-drift freeze against this loop's
+  own judge — a drifting judge pauses learning instead of silently steering it.
 
 ## Operating it
 

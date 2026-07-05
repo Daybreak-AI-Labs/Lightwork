@@ -263,13 +263,44 @@ def llm_judge(llm, *, budget=None, model: str | None = None, max_tokens: int = 8
                 raise  # exhausted budget fails the CASE closed, never the heuristic
             except Exception as e:  # pragma: no cover -- one bad sample abstains
                 log.warning("eval: llm judge sample failed (%s)", e)
-        if yes > no:
-            return True
-        if no > yes:
-            return False
-        # tie (incl. zero usable votes) -> deterministic heuristic tie-break
-        return _heuristic_judge(goal, output, expected)
+        if yes == no:
+            # tie (incl. zero usable votes) -> deterministic heuristic tie-break;
+            # the LLM abstained, so there is no verdict to calibrate either.
+            return _heuristic_judge(goal, output, expected)
+        verdict = yes > no
+        _note_judge_verdict(goal, output, expected, verdict,
+                            confidence=max(yes, no) / (yes + no))
+        return verdict
     return _judge
+
+
+def _note_judge_verdict(goal: str, output: str, expected: str, verdict: bool, *,
+                        confidence: float) -> None:
+    """Feed one LLM-judge verdict into the calibration interlock (opt-in,
+    ``[self_harness] calibrate_judge``) -- so ``calibration.learning_frozen``
+    can detect THIS loop's judge drifting, not only the coding verifier's.
+
+    Ground truth is the corpus's operator-authored ``expected`` label, checked
+    by the same deterministic heuristic the judge falls back to: ``correct`` is
+    whether the LLM's verdict AGREES with that label. ``confidence`` is the
+    self-consistency vote share (1.0 for a single-call judge). An UNLABELED
+    case -- e.g. a metamorphic paraphrase judged under ``judge_unknown`` with an
+    empty hint -- carries no ground truth and is skipped, as is a tie (the
+    caller never gets here on one). Best-effort; never perturbs an evaluation."""
+    try:
+        if not expected:
+            return
+        from .self_harness import settings
+        if not settings().get("calibrate_judge"):
+            return
+        from .self_improvement_runner import collect_calibration
+        correct = _heuristic_judge(goal, output, expected) == bool(verdict)
+        # The [self_harness] knob IS the gate for this source; don't also
+        # require the coding-mode collection toggle.
+        collect_calibration(float(confidence), correct,
+                            source="self_harness_judge", enabled_fn=lambda: True)
+    except Exception:  # pragma: no cover -- calibration is telemetry, never load-bearing
+        log.debug("eval: judge calibration note failed", exc_info=True)
 
 
 def llm_runner(llm, *, system_prefix: str = "", budget=None, model: str | None = None,

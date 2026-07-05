@@ -1727,6 +1727,10 @@ def pick_advanced() -> dict[str, Any]:
         advanced["self_harness_relapse"] = _q_confirm(
             "    Relapse watch? Put a learned line back on probation when half "
             "or more of its recent run outcomes are failures.", default=False)
+        advanced["self_harness_calibrate_judge"] = _q_confirm(
+            "    Judge calibration? Feed the evaluation judge's verdicts into "
+            "the verifier-drift freeze so a drifting judge pauses learning.",
+            default=False)
         advanced["self_harness_candidates"] = max(1, _safe_int(_q_text(
             "    Candidate lines per weakness (best-of-N; 1 = single)",
             default="1"), default=1))
@@ -2925,6 +2929,8 @@ def _cfg_advanced(  # noqa: C901 - flat sequence of independent opt-in toggles
             lines.append("metamorphic = true")
         if advanced.get("self_harness_relapse"):
             lines.append("relapse_failure_share = 0.5")
+        if advanced.get("self_harness_calibrate_judge"):
+            lines.append("calibrate_judge = true")
         cands = advanced.get("self_harness_candidates")
         if cands and cands > 1:
             lines.append(f"candidates_per_signature = {int(cands)}")

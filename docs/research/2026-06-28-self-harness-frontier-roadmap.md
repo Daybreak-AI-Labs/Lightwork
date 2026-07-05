@@ -128,6 +128,14 @@ drive them; this wave wires them, changing no default behavior:
   domain + invoked tools. Before this, worker models' lines earned recalls but
   never outcomes, so a worker canary promoted by `run --all-models` could
   never graduate or be demoted by the counter-driven review.
+- **Judge calibration** (`[self_harness] calibrate_judge`, default off): every
+  corpus-labeled verdict the auto-built LLM judge issues is recorded into the
+  calibration interlock as a (self-consistency vote-share confidence,
+  agrees-with-the-operator's-`expected`-label) sample, source
+  `self_harness_judge` — so `calibration.learning_frozen` can detect **this
+  loop's own judge** drifting and pause promotions, not only the coding
+  verifier. Ties (the judge abstained) and unlabeled cases (`judge_unknown`
+  paraphrases) are skipped. Closes the research note's open question #4.
 - **Outcome recency + relapse re-probation**: `note_outcome` now also keeps a
   bounded (20-entry) per-line `recent_outcomes` window; `review_canaries`
   judges the window when present (a re-probated veteran can't hide behind

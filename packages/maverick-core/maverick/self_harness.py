@@ -99,6 +99,7 @@ def settings() -> dict:
                 "candidates_per_signature": 1, "mine_bucket_by": (),
                 "holdout_rotations": 1, "judge_samples": 1,
                 "metamorphic": False, "metamorphic_tolerance": 0.0,
+                "calibrate_judge": False,
                 "relapse_failure_share": 0.0, "relapse_min_outcomes": 5,
                 "promote_as_canary": False,
                 "efficacy_review": False, "eval_corpus": None,
