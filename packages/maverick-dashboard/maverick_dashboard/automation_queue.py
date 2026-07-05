@@ -430,8 +430,41 @@ def _handle_flow_evolve(_job=None) -> None:
                                            source="auto-revert")
                 log.info("auto-reverted regressed rewrite: flow=%s node=%s (delta %.2f)",
                          f.id, node_id, impact.get("delta") or 0.0)
+        if flow_mod.auto_apply_enabled():
+            _auto_apply_proposals()
     except Exception:  # pragma: no cover -- fail-open
         log.exception("flow evolve pass failed")
+
+
+def _auto_apply_proposals() -> None:
+    """Autonomously APPLY the strongest self-rewrite proposal per flow (the
+    forward arrow, gated on ``[flows] auto_apply``). Only the SOFTEN direction
+    (action -> agent) is applied without a human: hardening to an action needs a
+    tool a human must choose. Skips a node that already has a pending apply (so it
+    is measured -- and auto-reverted if it regresses -- before another change).
+    Idempotent + conservative: one apply per flow per pass."""
+    from maverick.flow import evolution_log, evolve, store
+    from maverick.flow.ir import NODE_ACTION
+    for f in store.list_flows():
+        for prop in evolve.maybe_propose(f):
+            if prop.from_kind != NODE_ACTION:      # soften-only; harden needs a tool
+                continue
+            if evolution_log.last_apply(f.id, prop.node_id):
+                continue                            # already changed -> let it be measured first
+            node = f.nodes.get(prop.node_id)
+            brief = (node.brief or node.label) if node else ""
+            try:
+                changed = evolve.apply_proposal(f, prop.node_id, prop.to_kind, brief=brief)
+            except (KeyError, ValueError):
+                continue
+            if changed.validate():
+                continue                            # never save a structurally broken flow
+            saved = store.save_flow(changed)
+            evolution_log.record_apply(f.id, prop.node_id, prop.from_kind, prop.to_kind,
+                                       saved.version, source="auto-apply")
+            log.info("auto-applied rewrite: flow=%s node=%s %s->%s (%.0f%% over %d)",
+                     f.id, prop.node_id, prop.from_kind, prop.to_kind, prop.mean * 100, prop.n)
+            break                                    # one apply per flow per pass
 
 
 def _handle_flow_cron(job=None) -> None:

@@ -26,6 +26,43 @@ def _save(c, fid="f"):
         "nodes": [{"id": "a", "kind": "agent", "brief": "summarize {{x}}"}]}})
 
 
+def test_auto_apply_softens_a_failing_action_when_enabled(monkeypatch, tmp_path):
+    # B9: with auto_evolve + auto_apply on, a chronically-failing action node is
+    # autonomously softened to an agent -- the forward arrow, gated + soften-only.
+    _isolate(monkeypatch, tmp_path)
+    monkeypatch.setenv("MAVERICK_FLOWS_AUTO", "1")
+    monkeypatch.setattr("maverick.config.get_flows",
+                        lambda: {"auto_evolve": True, "auto_apply": True})
+    from maverick.flow import node_outcomes, store
+    from maverick.flow.ir import Flow, FlowNode
+    store.save_flow(Flow(id="fa", name="F", start="a",
+                         nodes={"a": FlowNode(id="a", kind="action", tool="t", brief="do it")}))
+    for _ in range(12):
+        node_outcomes.record("fa", "a", "action", 0.0)      # it keeps failing
+    from maverick_dashboard import automation_queue as aq
+    monkeypatch.setattr(aq, "_queue", None)
+    aq._handle_flow_evolve()
+    assert store.load_flow("fa").nodes["a"].kind == "agent"  # softened autonomously
+    from maverick.flow import evolution_log
+    assert evolution_log.last_apply("fa", "a")["source"] == "auto-apply"
+
+
+def test_auto_apply_off_by_default_leaves_the_flow_alone(monkeypatch, tmp_path):
+    _isolate(monkeypatch, tmp_path)
+    monkeypatch.setenv("MAVERICK_FLOWS_AUTO", "1")           # auto_evolve on, auto_apply OFF
+    monkeypatch.setattr("maverick.config.get_flows", lambda: {"auto_evolve": True})
+    from maverick.flow import node_outcomes, store
+    from maverick.flow.ir import Flow, FlowNode
+    store.save_flow(Flow(id="fb", name="F", start="a",
+                         nodes={"a": FlowNode(id="a", kind="action", tool="t", brief="do it")}))
+    for _ in range(12):
+        node_outcomes.record("fb", "a", "action", 0.0)
+    from maverick_dashboard import automation_queue as aq
+    monkeypatch.setattr(aq, "_queue", None)
+    aq._handle_flow_evolve()
+    assert store.load_flow("fb").nodes["a"].kind == "action"  # untouched
+
+
 def test_apply_hardens_agent_to_action_and_bumps_version(monkeypatch, tmp_path):
     _isolate(monkeypatch, tmp_path)
     c = _client()

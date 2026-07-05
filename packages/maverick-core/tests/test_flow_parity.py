@@ -124,3 +124,16 @@ def test_try_requires_a_body():
                FlowNode(id="x", kind="agent", brief="h")])
     assert any("try node 'a' has no body" in e for e in f.validate())
 
+
+# ---- foreach runaway guard --------------------------------------------------
+
+def test_foreach_without_limit_caps_and_surfaces_truncation(monkeypatch):
+    from maverick.flow import runner
+    monkeypatch.setattr(runner, "_FOREACH_DEFAULT_CAP", 5)
+    body = _flow([FlowNode(id="x", kind="agent", brief="{{item}}", output="r")], start="x")
+    f = _flow([FlowNode(id="a", kind="foreach", items="rows", var="item", body=body, output="out")])
+    r = run_flow(f, agent_fn=_ag, action_fn=lambda *a: ("", None),
+                 data={"rows": list(range(20))})       # no explicit limit
+    assert len(r.data["out"]) == 5                     # bounded to the default cap
+    assert r.data["_foreach_truncated"] is True        # and surfaced, not silent
+

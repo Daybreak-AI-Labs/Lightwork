@@ -510,8 +510,9 @@ here.
   reading the codes to *realize* the savings is a separate, gated step.
 
 - **Flow engine & visual automation** (`maverick.flow.*`, gated on `[flows]`) — a
-  deterministic graph of typed nodes (`ir.py`: agent / action / branch / foreach /
-  parallel / approval / delay / subflow) run by a pure interpreter (`runner.py`)
+  deterministic graph of typed nodes (`ir.py`: agent / action / branch / switch /
+  foreach / parallel / approval / delay / subflow / setvar / try) run by a pure
+  interpreter (`runner.py`)
   with data threading, safe expression rendering (`{{fn(...)}}` incl. arithmetic,
   list ops, and `and`/`or` conditions), a whole-flow wall-clock deadline
   (`Flow.max_seconds`), a per-run **aggregate agent-spend ceiling**

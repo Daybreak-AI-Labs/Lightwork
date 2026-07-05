@@ -374,10 +374,19 @@ def _run_branch(node: FlowNode, data: dict, ctx: _Ctx) -> str | None:
     return nxt if nxt is not None else node.next
 
 
+_FOREACH_DEFAULT_CAP = 1000   # runaway guard when a foreach sets no explicit limit
+
+
 def _run_foreach(node: FlowNode, data: dict, ctx: _Ctx) -> str | None:
     items = list(_dig(data, node.items) or [])
     if node.limit and node.limit > 0:
         items = items[:node.limit]          # cap iterations (a runaway-list guard)
+    elif len(items) > _FOREACH_DEFAULT_CAP:
+        # No explicit limit: a foreach of action nodes has no per-node budget gate
+        # (that wraps agents only), so bound the fan-out to a safe default and
+        # SURFACE the truncation rather than silently firing 10k+ connector calls.
+        items = items[:_FOREACH_DEFAULT_CAP]
+        data["_foreach_truncated"] = True
     conc = max(1, int(node.concurrency or 1))
     if conc > 1 and len(items) > 1:
         results = _foreach_concurrent(node, data, ctx, items, conc)

@@ -57,3 +57,14 @@ class TestAutoEvolveGate:
         assert flow.auto_evolve_enabled() is True
         monkeypatch.setenv("MAVERICK_FLOWS", "0")
         assert flow.auto_evolve_enabled() is False           # auto on but engine off
+
+    def test_auto_apply_needs_auto_evolve_plus_its_own_flag(self, monkeypatch):
+        from maverick import flow
+        monkeypatch.setenv("MAVERICK_FLOWS", "1")
+        monkeypatch.setenv("MAVERICK_FLOWS_AUTO", "1")        # auto_evolve on
+        monkeypatch.setattr("maverick.config.get_flows", lambda: {"auto_apply": False})
+        assert flow.auto_apply_enabled() is False            # forward-apply still off
+        monkeypatch.setattr("maverick.config.get_flows", lambda: {"auto_apply": True})
+        assert flow.auto_apply_enabled() is True
+        monkeypatch.setenv("MAVERICK_FLOWS_AUTO", "0")
+        assert flow.auto_apply_enabled() is False            # apply requires auto_evolve too

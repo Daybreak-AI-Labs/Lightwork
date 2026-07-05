@@ -55,8 +55,24 @@ def auto_evolve_enabled() -> bool:
         return False
 
 
+def auto_apply_enabled() -> bool:
+    """Whether the loop may AUTONOMOUSLY APPLY a self-rewrite proposal forward
+    (not just revert). Strictly opt-in: requires auto_evolve on (so a bad apply
+    is auto-reverted) AND ``[flows] auto_apply``. OFF by default -- the forward
+    step is human-gated unless an operator explicitly enables full autonomy.
+    Never raises."""
+    if not auto_evolve_enabled():
+        return False
+    try:
+        from ..config import get_flows
+        return bool(get_flows().get("auto_apply", False))
+    except Exception:  # pragma: no cover
+        return False
+
+
 __all__ = [
-    "enabled", "auto_evolve_enabled", "Flow", "FlowNode", "single_agent_flow",
+    "enabled", "auto_evolve_enabled", "auto_apply_enabled",
+    "Flow", "FlowNode", "single_agent_flow",
     "run_flow", "FlowRunResult", "render", "eval_condition",
     "NODE_ACTION", "NODE_AGENT", "NODE_BRANCH", "NODE_FOREACH",
     "NODE_PARALLEL", "NODE_APPROVAL", "NODE_DELAY", "NODE_SUBFLOW",
