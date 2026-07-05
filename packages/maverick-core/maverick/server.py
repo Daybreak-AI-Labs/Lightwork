@@ -274,6 +274,15 @@ class Server:
             tenant_concurrency.release(tenant)
 
     def add_channel(self, channel) -> None:
+        # Opt-in rich rendering ([channels] rich_render): wrap so replies with
+        # math/Mermaid also ship a rendered HTML artifact. A pure passthrough
+        # decorator that is a no-op for plain text and returns the channel
+        # unchanged when the knob is off (default), so wiring it here is safe.
+        try:
+            from maverick_channels.rich_render import maybe_wrap
+            channel = maybe_wrap(channel)
+        except Exception:  # pragma: no cover -- rendering must never block wiring
+            log.exception("rich_render wrap failed; using channel as-is")
         self._channels.append(channel)
 
     async def run(self) -> None:

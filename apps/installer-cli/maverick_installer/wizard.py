@@ -93,6 +93,7 @@ STEPS: list[tuple[str, str]] = [
     ("automation_import", "Automation import"),
     ("event_triggers", "Event triggers"),
     ("flows", "Flow engine"),
+    ("knowledge", "Knowledge RAG"),
     ("oauth_vault", "OAuth token vault"),
     ("governed_connectors", "Governed connectors"),
     ("durable", "Durable execution"),
@@ -512,15 +513,22 @@ def welcome() -> None:
 
 
 def pick_deployment() -> str:
-    pick = _q_select(
-        "Where will Lightwork run?",
-        [
-            "desktop  - This computer (recommended for first-time users)",
-            "docker   - Local Docker container (isolated, easy to remove)",
-            "vps      - Remote server you own (always-on)",
-            "phone    - Phone companion (Lightwork runs on desktop/VPS; phone is a frontend)",
-        ],
-    )
+    choices = [
+        "desktop  - This computer (recommended for first-time users)",
+        "docker   - Local Docker container (isolated, easy to remove)",
+        "vps      - Remote server you own (always-on)",
+        "phone    - Phone companion (Lightwork runs on desktop/VPS; phone is a frontend)",
+    ]
+    # Default to the previously recorded target on a re-run of `maverick init`
+    # (what [deployment] type was written for).
+    default = None
+    try:
+        from maverick.config import get_deployment
+        prior = get_deployment().get("type", "")
+        default = next((c for c in choices if c.split()[0] == prior), None)
+    except Exception:  # pragma: no cover -- never block the wizard
+        default = None
+    pick = _q_select("Where will Lightwork run?", choices, default=default)
     return pick.split()[0]
 
 
@@ -1080,6 +1088,49 @@ def pick_flows() -> dict[str, Any]:
     if _q_confirm("Let flows self-correct (autonomous revert of a regressed rewrite)?",
                   default=False):
         out["auto_evolve"] = True
+    return out
+
+
+def pick_knowledge() -> dict[str, Any]:
+    """Opt-in to per-domain vector RAG (the maverick-knowledge package).
+
+    Off by default; the kernel never requires maverick-knowledge. When on,
+    ``embedder`` selects the embedding provider (hosted Voyage / local /
+    deterministic) and ``store`` selects the vector backend (sqlite / pgvector).
+    Returns a dict written under ``[knowledge]``.
+    """
+    console.print()
+    console.print(
+        "[dim]Knowledge RAG gives the agent per-domain document recall via a "
+        "vector store (the knowledge_search tool). Needs the maverick-knowledge "
+        "package + an embedder. OFF by default.[/dim]"
+    )
+    if not _q_confirm("Enable per-domain knowledge RAG?", default=False):
+        return {"enable": False}
+    out: dict[str, Any] = {"enable": True}
+    embedder = _q_select(
+        "  Embedder:",
+        [
+            "hosted        - Voyage AI (needs VOYAGE_API_KEY)",
+            "local         - on-box sentence-transformers (no API key)",
+            "deterministic - hashing stub (offline; low quality, for testing)",
+        ],
+        default="hosted        - Voyage AI (needs VOYAGE_API_KEY)",
+    ).split()[0]
+    out["embedder"] = embedder
+    store = _q_select(
+        "  Vector store:",
+        [
+            "sqlite   - single-file, local (recommended to start)",
+            "pgvector - Postgres + pgvector (scale / shared)",
+        ],
+        default="sqlite   - single-file, local (recommended to start)",
+    ).split()[0]
+    out["store"] = store
+    if store == "pgvector":
+        dsn = _q_text("  pgvector DSN (blank = PGVECTOR_DSN env)", default="").strip()
+        if dsn:
+            out["dsn"] = dsn
     return out
 
 
@@ -1890,6 +1941,26 @@ def pick_advanced() -> dict[str, Any]:
         )
         advanced["tax_pubkeys"] = [k.strip() for k in raw.split(",")
                                    if k.strip()]
+    # Regulated-deployment posture: data-residency region + a compliance
+    # disclosure line. These map to the independent [residency]/[compliance]
+    # scalar tables a regulated deployment needs; previously only hand-editable.
+    # (Action-level [governance] guards stay config-only: they share the
+    # [governance] table the finance step already owns.)
+    if _q_confirm(
+        "  Set regulated-deployment knobs (data residency, compliance "
+        "disclosure)?",
+        default=False,
+    ):
+        region = _q_text(
+            "  Data-residency region (e.g. us / eu / us-east-1; blank = none)",
+            default="").strip()
+        if region:
+            advanced["residency_region"] = region
+        disclosure = _q_text(
+            "  Compliance disclosure line shown to users (blank = none)",
+            default="").strip()
+        if disclosure:
+            advanced["compliance_disclosure_text"] = disclosure
     # OIDC SSO is a string-bearing toggle (issuer/audience/jwks_uri), so it has
     # its own prompt; the result is nested under the "oidc" key and the writer
     # emits a single [auth.oidc] table for it.
@@ -2740,6 +2811,17 @@ def _cfg_flows(flows: dict[str, Any] | None) -> list[str]:
     return lines
 
 
+def _cfg_knowledge(knowledge: dict[str, Any] | None) -> list[str]:
+    if not knowledge:
+        return []
+    # Per-domain vector RAG (maverick-knowledge). enable gates the whole
+    # feature; embedder/store/dsn are read by config.get_knowledge.
+    lines = ["", "[knowledge]"]
+    for k, v in knowledge.items():
+        _emit_kv(lines, k, v)
+    return lines
+
+
 def _cfg_oauth(oauth: dict[str, Any] | None) -> list[str]:
     if not (oauth and oauth.get("vault")):
         return []
@@ -3080,6 +3162,17 @@ def _cfg_advanced(  # noqa: C901 - flat sequence of independent opt-in toggles
         lines.append("")
         lines.append("[enterprise]")
         lines.append("mode = true")
+    if advanced.get("residency_region"):
+        lines.append("")
+        lines.append("# Data-residency region hint (maverick.residency); strict")
+        lines.append("# mode is a separate [residency] strict knob.")
+        lines.append("[residency]")
+        _emit_kv(lines, "region", advanced["residency_region"])
+    if advanced.get("compliance_disclosure_text"):
+        lines.append("")
+        lines.append("# AI-disclosure line surfaced to users (maverick.compliance).")
+        lines.append("[compliance]")
+        _emit_kv(lines, "disclosure_text", advanced["compliance_disclosure_text"])
     if advanced.get("agent_trust"):
         lines.append("")
         lines.append("[agent_trust]")
@@ -3461,6 +3554,7 @@ def write_config(
     automation_import: dict[str, Any] | None = None,
     event_triggers: dict[str, Any] | None = None,
     flows: dict[str, Any] | None = None,
+    knowledge: dict[str, Any] | None = None,
     oauth: dict[str, Any] | None = None,
     governed_connectors: dict[str, Any] | None = None,
     durable: dict[str, Any] | None = None,
@@ -3549,6 +3643,7 @@ def write_config(
     lines += _cfg_automation_import(automation_import)
     lines += _cfg_event_triggers(event_triggers)
     lines += _cfg_flows(flows)
+    lines += _cfg_knowledge(knowledge)
     lines += _cfg_oauth(oauth)
     lines += _cfg_governed_connectors(governed_connectors)
     lines += _cfg_durable(durable)
@@ -4062,6 +4157,11 @@ def _run_simple_picks(state: dict[str, Any], _announce) -> dict[str, Any]:
     _save_partial(state)
 
     _announce()
+    knowledge = state.get("knowledge") or pick_knowledge()
+    state["knowledge"] = knowledge
+    _save_partial(state)
+
+    _announce()
     oauth = state.get("oauth") or pick_oauth_vault()
     state["oauth"] = oauth
     _save_partial(state)
@@ -4096,6 +4196,7 @@ def _run_simple_picks(state: dict[str, Any], _announce) -> dict[str, Any]:
         "automation_import": automation_import,
         "event_triggers": event_triggers,
         "flows": flows,
+        "knowledge": knowledge,
         "oauth": oauth,
         "governed_connectors": governed_connectors,
         "durable": durable,
@@ -4288,6 +4389,7 @@ def run(fast: bool = False, resume: bool = False) -> int:
     automation_import = _simple["automation_import"]
     event_triggers = _simple["event_triggers"]
     flows = _simple["flows"]
+    knowledge = _simple["knowledge"]
     oauth = _simple["oauth"]
     governed_connectors = _simple["governed_connectors"]
     durable = _simple["durable"]
@@ -4397,6 +4499,7 @@ def run(fast: bool = False, resume: bool = False) -> int:
         automation_import=automation_import if automation_import.get("enable") else None,
         event_triggers=event_triggers if event_triggers.get("enable") else None,
         flows=flows if flows.get("enable") else None,
+        knowledge=knowledge if knowledge.get("enable") else None,
         oauth=oauth if oauth.get("vault") else None,
         governed_connectors=governed_connectors if governed_connectors.get("enable") else None,
         durable=durable if durable.get("enabled") else None,

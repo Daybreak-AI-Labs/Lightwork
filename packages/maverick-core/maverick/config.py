@@ -1352,6 +1352,17 @@ def get_consequence() -> dict:
     return {"enable": bool(cfg.get("enable", False))}
 
 
+def get_deployment() -> dict:
+    """Return the ``[deployment]`` section (install provenance).
+
+    Written by the installer wizard to record where Lightwork runs
+    (desktop/docker/vps/phone). Read back so a re-run of ``maverick init``
+    can default to the prior choice. ``type`` is empty when never recorded.
+    """
+    cfg = load_config().get("deployment", {}) or {}
+    return {"type": str(cfg.get("type", "")).strip()}
+
+
 def get_flows() -> dict:
     """Return the ``[flows]`` section (the flow engine).
 

@@ -168,6 +168,34 @@ def test_write_config_emits_mcp_registries(tmp_path: Path, monkeypatch):
         "https://registry.example.com/catalog", "https://internal.acme/catalog"]
 
 
+def test_write_config_emits_knowledge(tmp_path: Path, monkeypatch):
+    parsed = _write_full_config(
+        tmp_path, monkeypatch,
+        knowledge={"enable": True, "embedder": "hosted", "store": "pgvector",
+                   "dsn": "postgresql://x"},
+    )
+    assert parsed["knowledge"]["enable"] is True
+    assert parsed["knowledge"]["embedder"] == "hosted"
+    assert parsed["knowledge"]["store"] == "pgvector"
+    assert parsed["knowledge"]["dsn"] == "postgresql://x"
+
+
+def test_write_config_omits_knowledge_by_default(tmp_path: Path, monkeypatch):
+    # No override -> no [knowledge] section (per-domain RAG is opt-in).
+    parsed = _write_full_config(tmp_path, monkeypatch)
+    assert "knowledge" not in parsed
+
+
+def test_write_config_emits_regulated_scalars(tmp_path: Path, monkeypatch):
+    parsed = _write_full_config(
+        tmp_path, monkeypatch,
+        advanced={"residency_region": "eu",
+                  "compliance_disclosure_text": "AI assistant in use."},
+    )
+    assert parsed["residency"]["region"] == "eu"
+    assert parsed["compliance"]["disclosure_text"] == "AI assistant in use."
+
+
 def test_write_config_omits_mcp_registries_by_default(tmp_path: Path, monkeypatch):
     # No override -> no [mcp_registries] section (discovery uses the built-in
     # default index, so the config stays minimal).
