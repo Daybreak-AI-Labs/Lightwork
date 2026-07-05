@@ -154,7 +154,9 @@ def _dump(data: dict) -> str:
         "# config.toml is never touched by the dashboard.",
         "",
     ]
-    for section in ("capabilities", "features", *_LEARNING_SECTIONS):
+    # "flows" carries the autonomous self-improvement knobs (auto_evolve/auto_apply,
+    # both booleans) -- persisted here so set_flow_autonomy survives a restart.
+    for section in ("capabilities", "features", "flows", *_LEARNING_SECTIONS):
         tbl = data.get(section) or {}
         if tbl:
             lines.append(f"[{section}]")
@@ -245,6 +247,26 @@ def set_learning(enabled: bool) -> None:
         data = load_overlay()
         for section, key in LEARNING_TOGGLES:
             data.setdefault(section, {})[key] = bool(enabled)
+        _write(data)
+
+
+def set_flow_autonomy(*, auto_evolve: bool | None = None,
+                      auto_apply: bool | None = None) -> None:
+    """Override the flow self-improvement loop's [flows] knobs in the overlay.
+
+    Kept OFF the blanket ``set_learning`` list on purpose: autonomously rewriting
+    a live workflow is a heavier consequence than the passive learning that button
+    controls, so it gets its own explicit opt-in. ``auto_apply`` only takes effect
+    while ``auto_evolve`` is on (the forward arrow needs the revert safety net);
+    only the fields passed are changed. An env var (``MAVERICK_FLOWS_AUTO``) still
+    overrides the overlay if a deployment set one."""
+    with _locked():
+        data = load_overlay()
+        flows = data.setdefault("flows", {})
+        if auto_evolve is not None:
+            flows["auto_evolve"] = bool(auto_evolve)
+        if auto_apply is not None:
+            flows["auto_apply"] = bool(auto_apply)
         _write(data)
 
 
@@ -390,6 +412,6 @@ def channels_state() -> list[dict]:
 __all__ = [
     "PROVIDERS", "CAPABILITY_DEFAULTS", "FEATURE_DEFAULTS", "CHANNELS",
     "LEARNING_SUBSYSTEMS", "load_overlay", "set_provider", "clear_provider",
-    "set_toggle", "set_learning", "state", "set_channel", "clear_channel",
+    "set_toggle", "set_learning", "set_flow_autonomy", "state", "set_channel", "clear_channel",
     "channels_state",
 ]

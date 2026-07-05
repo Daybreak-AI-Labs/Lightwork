@@ -191,6 +191,14 @@ class LearningToggleIn(BaseModel):
     enabled: bool
 
 
+class FlowAutonomyIn(BaseModel):
+    """Toggle the autonomous flow self-improvement loop ([flows] auto_evolve /
+    auto_apply). Its own opt-in, distinct from the blanket learning button. Only
+    the fields provided are changed; ``auto_apply`` needs ``auto_evolve`` on."""
+    auto_evolve: bool | None = None
+    auto_apply: bool | None = None
+
+
 class GoalEventOut(BaseModel):
     id: int
     agent: str

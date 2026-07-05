@@ -104,6 +104,39 @@ def test_flow_self_improvements_surface_in_the_moat(tmp_path, monkeypatch):
     assert acc["flow_self_improvements"] == 1   # only the rewrite that stuck is counted
 
 
+def test_flow_autonomy_is_its_own_opt_in_not_the_blanket_button(tmp_path, monkeypatch):
+    # The autonomous flow loop is deliberately NOT part of the blanket learning
+    # toggle: flipping "turn all learning on" must leave [flows] auto_* untouched.
+    for v in ("MAVERICK_CONSEQUENCE", "MAVERICK_REFLEXION", "MAVERICK_DREAMING",
+              "MAVERICK_TRAJECTORY_CAPTURE", "MAVERICK_DATA_ENGINE", "MAVERICK_FLOWS_AUTO"):
+        monkeypatch.delenv(v, raising=False)
+    monkeypatch.setenv("MAVERICK_FLOWS", "1")   # engine on so the section renders
+    from maverick.config import reset_config_cache
+    _isolate(tmp_path, monkeypatch)
+    reset_config_cache()
+    snap = client.get("/api/v1/learning").json()
+    assert snap["flow_autonomy"] == {"engine_on": True, "auto_evolve": False, "auto_apply": False}
+    client.post("/api/v1/learning", json={"enabled": True})            # blanket button
+    reset_config_cache()
+    assert client.get("/api/v1/learning").json()["flow_autonomy"]["auto_evolve"] is False
+
+
+def test_flow_autonomy_toggle_enables_the_loop(tmp_path, monkeypatch):
+    for v in ("MAVERICK_FLOWS_AUTO",):
+        monkeypatch.delenv(v, raising=False)
+    monkeypatch.setenv("MAVERICK_FLOWS", "1")
+    from maverick.config import reset_config_cache
+    _isolate(tmp_path, monkeypatch)
+    reset_config_cache()
+    # auto_apply alone does nothing (needs auto_evolve for the revert safety net)
+    snap = client.post("/api/v1/learning/flow-autonomy", json={"auto_apply": True}).json()
+    assert snap["flow_autonomy"]["auto_apply"] is False
+    # turning auto_evolve on, then auto_apply, sticks
+    client.post("/api/v1/learning/flow-autonomy", json={"auto_evolve": True})
+    snap = client.post("/api/v1/learning/flow-autonomy", json={"auto_apply": True}).json()
+    assert snap["flow_autonomy"] == {"engine_on": True, "auto_evolve": True, "auto_apply": True}
+
+
 def test_learning_page_has_enable_button(tmp_path, monkeypatch):
     _isolate(tmp_path, monkeypatch)
     t = client.get("/learning").text
