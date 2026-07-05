@@ -17,9 +17,15 @@ from typing import Any
 
 from . import node_outcomes, store
 from .ir import Flow, FlowNode
-from .runner import STATUS_FAILED, STATUS_PAUSED_APPROVAL, STATUS_PAUSED_DELAY, run_flow
+from .runner import (
+    STATUS_FAILED,
+    STATUS_PAUSED_APPROVAL,
+    STATUS_PAUSED_DELAY,
+    STATUS_PAUSED_EVENT,
+    run_flow,
+)
 
-_RESUMABLE = (STATUS_PAUSED_APPROVAL, STATUS_PAUSED_DELAY)
+_RESUMABLE = (STATUS_PAUSED_APPROVAL, STATUS_PAUSED_DELAY, STATUS_PAUSED_EVENT)
 
 
 class FlowNotResumable(ValueError):
@@ -109,9 +115,23 @@ def execute(flow: Flow, *, agent_runner: AgentRunner, action_runner: ActionRunne
     # Per-node run trace for the designer overlay. Seeded from the prior run on
     # resume so the pre-pause nodes' status survives across the pause.
     node_states: dict = dict(prior.nodes) if (resume_run_id and prior) else {}
+    # Wall-clock per work node (accumulated across retries), measured at the
+    # executor seam so the pure runner's on_node contract stays unchanged.
+    durations: dict[str, float] = {}
+
+    def _timed(node_id: str, fn, *args):
+        import time as _time
+        t0 = _time.perf_counter()
+        try:
+            return fn(*args)
+        finally:
+            durations[node_id] = durations.get(node_id, 0.0) + (_time.perf_counter() - t0)
 
     def _on_node(node: FlowNode, status: str, outcome: float | None) -> None:
-        node_states[node.id] = {"status": status, "outcome": outcome}
+        entry: dict = {"status": status, "outcome": outcome}
+        if node.id in durations:
+            entry["seconds"] = round(durations[node.id], 3)
+        node_states[node.id] = entry
         if outcome is not None and record_outcomes:
             node_outcomes.record(flow.id, node.id, node.kind, outcome)
 
@@ -123,8 +143,8 @@ def execute(flow: Flow, *, agent_runner: AgentRunner, action_runner: ActionRunne
 
     res = run_flow(
         flow,
-        agent_fn=lambda node, brief, d: agent_runner(brief, d),
-        action_fn=lambda node, params, d: action_runner(node.tool, params, d),
+        agent_fn=lambda node, brief, d: _timed(node.id, agent_runner, brief, d),
+        action_fn=lambda node, params, d: _timed(node.id, action_runner, node.tool, params, d),
         approve_fn=approve_fn, data=data, resume=resume, on_node=_on_node, now=now,
         # A subflow node resolves to another SAVED flow; the runner's flow_stack
         # guards against a cyclic reference (this loader stays a plain lookup).

@@ -26,7 +26,17 @@ from __future__ import annotations
 
 import re
 
-from ..flow.ir import NODE_ACTION, NODE_AGENT, NODE_BRANCH, NODE_FOREACH, Flow, FlowNode
+from ..flow.ir import (
+    NODE_ACTION,
+    NODE_AGENT,
+    NODE_BRANCH,
+    NODE_FOREACH,
+    NODE_SCOPE,
+    NODE_SWITCH,
+    NODE_WHILE,
+    Flow,
+    FlowNode,
+)
 from .ir import ImportedAutomation, ImportedStep, _safe_line, safe_params
 
 
@@ -174,6 +184,18 @@ def _pa_condition(expr) -> str:
     return "result == true"
 
 
+_NEGATED_OPS = {"==": "!=", "!=": "==", ">": "<=", "<=": ">", "<": ">=", ">=": "<"}
+
+
+def _negate_condition(cond: str) -> str:
+    """Invert a simple ``<key> <op> <value>`` condition (WDL Until exits when its
+    expression is TRUE; our while loops WHILE the condition is true)."""
+    parts = cond.split(" ", 2)
+    if len(parts) == 3 and parts[1] in _NEGATED_OPS:
+        return f"{parts[0]} {_NEGATED_OPS[parts[1]]} {parts[2]}"
+    return "result != true"     # un-negatable shape -> loop until result is set true
+
+
 def _pa_wire_tail(nodes: dict[str, FlowNode], nxt: str | None) -> None:
     """Point an arm's loose ends at the If's successor, so both arms rejoin the
     chain after the branch (WDL's implicit join)."""
@@ -229,12 +251,70 @@ def _pa_lower(actions: dict, prefix: str,
                 nodes[nid] = _node_for_step(_step(name, spec), nid, nxt)
                 report.append({"step": name, "node": nid, "kind": nodes[nid].kind,
                                "fidelity": "approximated", "note": "Foreach body unreadable -> agent step"})
+        elif atype == "Switch":
+            cases_d = spec.get("cases") if isinstance(spec.get("cases"), dict) else {}
+            default_env = spec.get("default") if isinstance(spec.get("default"), dict) else {}
+            default_d = default_env.get("actions") if isinstance(default_env.get("actions"), dict) else {}
+            case_entries = []
+            for ci, (cname, cspec) in enumerate(cases_d.items()):
+                cspec = cspec if isinstance(cspec, dict) else {}
+                arm_d = cspec.get("actions") if isinstance(cspec.get("actions"), dict) else {}
+                a_nodes, a_start = _pa_lower(arm_d, f"{nid}c{ci}", report)
+                _pa_wire_tail(a_nodes, nxt)
+                nodes.update(a_nodes)
+                case_entries.append({"value": _safe_line(cspec.get("case", cname), max_chars=60),
+                                     "to": a_start or nxt})
+            d_nodes, d_start = _pa_lower(default_d, nid + "d", report)
+            _pa_wire_tail(d_nodes, nxt)
+            nodes.update(d_nodes)
+            if case_entries:
+                nodes[nid] = FlowNode(id=nid, kind=NODE_SWITCH,
+                                      condition=_pa_operand(spec.get("expression") or ""),
+                                      cases=case_entries, next=d_start or nxt, label=label)
+                report.append({"step": name, "node": nid, "kind": NODE_SWITCH,
+                               "fidelity": "preserved",
+                               "note": "WDL Switch -> switch (cases + default wired)"})
+            else:   # no readable cases -> an agent step with the switch's intent
+                nodes[nid] = _node_for_step(_step(name, spec), nid, nxt)
+                report.append({"step": name, "node": nid, "kind": nodes[nid].kind,
+                               "fidelity": "approximated", "note": "Switch cases unreadable -> agent step"})
+        elif atype == "Until":
+            body_d = spec.get("actions") if isinstance(spec.get("actions"), dict) else {}
+            b_nodes, b_start = _pa_lower(body_d, "b", report)
+            body = Flow(id="", name=f"{label} body", start=b_start or "",
+                        nodes=b_nodes) if b_nodes else None
+            limit_env = spec.get("limit") if isinstance(spec.get("limit"), dict) else {}
+            if body is not None:
+                nodes[nid] = FlowNode(id=nid, kind=NODE_WHILE,
+                                      condition=_negate_condition(_pa_condition(spec.get("expression"))),
+                                      body=body, limit=int(limit_env.get("count") or 0),
+                                      next=nxt, output=f"{nid}_out", label=label)
+                report.append({"step": name, "node": nid, "kind": NODE_WHILE,
+                               "fidelity": "preserved",
+                               "note": "WDL Until -> while (exit condition negated; "
+                                       "checks before each pass, not after)"})
+            else:
+                nodes[nid] = _node_for_step(_step(name, spec), nid, nxt)
+                report.append({"step": name, "node": nid, "kind": nodes[nid].kind,
+                               "fidelity": "approximated", "note": "Until body unreadable -> agent step"})
+        elif atype == "Scope":
+            body_d = spec.get("actions") if isinstance(spec.get("actions"), dict) else {}
+            b_nodes, b_start = _pa_lower(body_d, "s" + nid, report)
+            if b_nodes and b_start:
+                body = Flow(id="", name=f"{label} body", start=b_start, nodes=b_nodes)
+                nodes[nid] = FlowNode(id=nid, kind=NODE_SCOPE, body=body, next=nxt, label=label)
+                report.append({"step": name, "node": nid, "kind": NODE_SCOPE,
+                               "fidelity": "preserved",
+                               "note": "WDL Scope -> scope (wire on_error in the designer "
+                                       "to add a catch arm)"})
+            else:
+                nodes[nid] = _node_for_step(_step(name, spec), nid, nxt)
+                report.append({"step": name, "node": nid, "kind": nodes[nid].kind,
+                               "fidelity": "approximated", "note": "Scope body unreadable -> agent step"})
         else:
             node = _node_for_step(_step(name, spec), nid, nxt)
             nodes[nid] = node
-            if atype in ("Switch", "Until", "Scope"):
-                fid, note = "approximated", f"WDL {atype} is not yet captured structurally -> agent step"
-            elif node.kind == NODE_ACTION:
+            if node.kind == NODE_ACTION:
                 fid, note = "preserved", "connector call -> action node"
             else:
                 fid, note = "approximated", "no single-tool mapping -> agent step"

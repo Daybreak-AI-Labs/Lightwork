@@ -239,3 +239,36 @@ def test_run_rejects_oversized_definition():
     ]
     r = _client().post("/api/v1/import/run", json={"source": "n8n", "definitions": [wf]})
     assert r.status_code == 413
+
+
+def test_import_as_flows_saves_graph_and_reports_fidelity(monkeypatch):
+    monkeypatch.setenv("MAVERICK_FLOWS", "1")
+    r = _client().post("/api/v1/import/run", json={
+        "source": "n8n", "definitions": [N8N_WF], "as_flows": True})
+    assert r.status_code == 200, r.text
+    item = r.json()["imported"][0]
+    assert item["flow"]                                # a flow id came back
+    assert item["fidelity"] and all(
+        f["fidelity"] in ("preserved", "approximated") for f in item["fidelity"])
+    from maverick.flow import store
+    flow = store.load_flow(item["flow"])
+    assert flow is not None and flow.validate() == []
+
+
+def test_import_as_flows_requires_flow_engine(monkeypatch):
+    monkeypatch.delenv("MAVERICK_FLOWS", raising=False)
+    monkeypatch.setattr("maverick.config.get_flows", lambda: {"enable": False})
+    r = _client().post("/api/v1/import/run", json={
+        "source": "n8n", "definitions": [N8N_WF], "as_flows": True})
+    assert r.status_code == 403
+
+
+def test_import_as_flows_dry_run_previews_without_saving(monkeypatch):
+    monkeypatch.setenv("MAVERICK_FLOWS", "1")
+    r = _client().post("/api/v1/import/run", json={
+        "source": "n8n", "definitions": [N8N_WF], "as_flows": True, "dry_run": True})
+    assert r.status_code == 200
+    item = r.json()["imported"][0]
+    assert item["flow"] and item["fidelity"]
+    from maverick.flow import store
+    assert store.load_flow(item["flow"]) is None       # previewed, not persisted

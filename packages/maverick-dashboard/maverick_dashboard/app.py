@@ -3657,6 +3657,32 @@ async def webhook_run(request: Request, bg: BackgroundTasks) -> JSONResponse:
     if not get_features().get("triggers", True):
         raise HTTPException(status_code=404, detail="triggers are disabled")
 
+    # Event resume: {"resume": "<run_id>", "data": {...}} continues a flow run
+    # paused on a wait_event node -- the external callback the node was waiting
+    # for. Same HMAC credential; the data merges into the run before it continues.
+    resume_id = str(payload.get("resume") or "").strip()
+    if resume_id:
+        from maverick import flow as flow_mod
+        if not flow_mod.enabled():
+            raise HTTPException(status_code=409, detail="the flow engine is off")
+        from maverick.flow import store as flow_store
+        run = flow_store.load_run(resume_id)
+        if run is None:
+            raise HTTPException(status_code=404, detail="no such run")
+        if run.status != "paused_event":
+            raise HTTPException(
+                status_code=409,
+                detail=f"run is not waiting for an event (status {run.status})")
+        inbound_evt = payload.get("data")
+        inputs = ({str(k): v for k, v in inbound_evt.items()}
+                  if isinstance(inbound_evt, dict) else {})
+        from maverick_dashboard import automation_queue as aq
+        aq.queue().enqueue(aq.FLOW_RESUME_KIND, {
+            "flow_id": run.flow_id, "run_id": run.run_id, "owner": run.owner,
+            "inputs": inputs})
+        return JSONResponse({"run_id": run.run_id, "status": "resuming"},
+                            status_code=202)
+
     name = str(payload.get("trigger") or "").strip()
     if not name:
         raise HTTPException(status_code=400, detail="trigger is required")
@@ -4887,11 +4913,31 @@ async def workflows_index_page(request: Request) -> HTMLResponse:
 
 @app.get("/flows/designer", response_class=HTMLResponse)
 @app.get("/flows/designer/{flow_id}", response_class=HTMLResponse)
-async def flow_designer_page(request: Request, flow_id: str = "") -> HTMLResponse:
+async def flow_designer_page(request: Request, flow_id: str = "",
+                             from_template: str = "") -> HTMLResponse:
     """The visual flow designer -- a canvas node editor + the natural-language
-    drafter. Talks to the /api/v1/flows endpoints; the flow-engine gate is
-    enforced there, so the page renders even when flows are off (empty canvas)."""
-    return templates.TemplateResponse(request, "flow_designer.html", {"flow_id": flow_id})
+    drafter + the copilot chat. Talks to the /api/v1/flows endpoints; the
+    flow-engine gate is enforced there, so the page renders even when flows are
+    off (empty canvas).
+
+    ``?from_template=<name>`` opens a saved TEMPLATE as its equivalent
+    single-agent flow (the IR's degenerate case) -- the bridge from the text
+    workflow builder into the graph designer: start from what you had, then add
+    branches/approvals/loops around it."""
+    seed_flow = None
+    if from_template:
+        try:
+            from maverick.templates import load_template
+            tpl = load_template(from_template)
+            from maverick.flow.ir import single_agent_flow
+            body = getattr(tpl, "body", "") or getattr(tpl, "title", "") or from_template
+            seed = single_agent_flow("", tpl.title or from_template, str(body)[:8000])
+            seed_flow = seed.to_dict()
+        except (ValueError, FileNotFoundError):
+            seed_flow = None    # unknown template -> a blank canvas, not a 500
+    return templates.TemplateResponse(
+        request, "flow_designer.html",
+        {"flow_id": flow_id, "seed_flow": seed_flow})
 
 
 @app.get("/flows/{flow_id}/runs/{run_id}", response_class=HTMLResponse)

@@ -37,6 +37,8 @@
   .k-agent { fill: #6366f1; } .k-action { fill: #0891b2; } .k-branch { fill: #d97706; }
   .k-foreach { fill: #7c3aed; } .k-parallel { fill: #db2777; } .k-approval { fill: #16a34a; }
   .k-delay { fill: #64748b; } .k-subflow { fill: #0d9488; }
+  .k-switch { fill: #b45309; } .k-while { fill: #8b5cf6; } .k-wait_event { fill: #0369a1; }
+  .k-scope { fill: #4d7c0f; }
   /* live run overlay */
   .fd-node.run-ok rect.card { stroke: var(--success, #16a34a); stroke-width: 2.5; }
   .fd-node.run-err rect.card { stroke: var(--danger, #dc2626); stroke-width: 2.5; }
@@ -108,6 +110,10 @@
     <button class="btn btn--ghost" type="button" id="fd-undo" title="Undo (Ctrl+Z)">↶</button>
     <button class="btn btn--ghost" type="button" id="fd-redo" title="Redo (Ctrl+Shift+Z)">↷</button>
     <button class="btn btn--ghost" type="button" id="fd-fit" title="Zoom to fit">⛶</button>
+    <button class="btn btn--ghost" type="button" id="fd-triggers" title="Everything that starts this flow">⚡ Triggers</button>
+    <button class="btn btn--ghost" type="button" id="fd-export" title="Download this flow as JSON">⬇</button>
+    <button class="btn btn--ghost" type="button" id="fd-import-json" title="Load a flow from a JSON file">⬆</button>
+    <input type="file" id="fd-import-file" accept=".json,application/json" hidden aria-label="Flow JSON file" />
     <button class="btn btn--ghost" type="button" id="fd-chat-toggle" title="Build and fix this flow by chatting">💬 Copilot</button>
     <span class="fd__msg" id="fd-msg" aria-live="polite"></span>
     <span class="fd__legend" id="fd-legend" aria-hidden="true">
@@ -122,10 +128,14 @@
     <button class="btn btn--ghost" type="button" data-add="agent">🧠 Agent</button>
     <button class="btn btn--ghost" type="button" data-add="action">⚙️ Action</button>
     <button class="btn btn--ghost" type="button" data-add="branch">🔀 Branch</button>
+    <button class="btn btn--ghost" type="button" data-add="switch">🔃 Switch</button>
     <button class="btn btn--ghost" type="button" data-add="approval">✅ Approval</button>
     <button class="btn btn--ghost" type="button" data-add="delay">⏱ Delay</button>
+    <button class="btn btn--ghost" type="button" data-add="wait_event">📥 Wait for event</button>
     <button class="btn btn--ghost" type="button" data-add="foreach">🔁 For-each</button>
+    <button class="btn btn--ghost" type="button" data-add="while">🔄 While</button>
     <button class="btn btn--ghost" type="button" data-add="parallel">🔱 Parallel</button>
+    <button class="btn btn--ghost" type="button" data-add="scope">🛡 Try/catch</button>
     <button class="btn btn--ghost" type="button" data-add="subflow">📎 Sub-flow</button>
   </div>
 
@@ -163,6 +173,7 @@
   </div>
 </div>
 
+<script id="fd-seed" type="application/json">{{ (seed_flow or none) | tojson }}</script>
 <script>
 {% include "flow_designer_core.js" %}
 </script>

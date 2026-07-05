@@ -31,6 +31,7 @@
         </div>
         <div class="mv-row__actions">
           <a class="btn btn--ghost" href="/workflow-builder?edit={{ t.name | urlencode }}">Edit</a>
+          <a class="btn btn--ghost" href="/flows/designer?from_template={{ t.name | urlencode }}" title="Open this template as a one-step flow, then add branches, approvals, and loops around it">Open as flow</a>
           {% if scheduling_enabled or triggers_enabled %}<a class="btn btn--ghost" href="/workflow-builder?template={{ t.name | urlencode }}">Automate</a>{% endif %}
           <a class="btn btn--ghost" href="/chat?title={{ t.title | urlencode }}">Use</a>
         </div>

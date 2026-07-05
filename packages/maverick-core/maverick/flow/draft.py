@@ -29,10 +29,14 @@ Each node is one of these kinds (include only the fields for its kind):
 - {"id","kind":"agent","brief":"<instruction for an AI agent>","next":"<id|null>"}
 - {"id","kind":"action","tool":"<tool name>","params":{...},"next":"<id|null>"}
 - {"id","kind":"branch","condition":"<key op value>","if_true":"<id>","if_false":"<id>"}
-- {"id","kind":"foreach","items":"<data key holding a list>","var":"item","body":{<a nested flow>},"next":"<id|null>"}
+- {"id","kind":"switch","condition":"<data key to route on>","cases":[{"value":"<match>","to":"<id>"}],"next":"<id|null = the default arm>"}
+- {"id","kind":"foreach","items":"<data key holding a list>","var":"item","body":{<a nested flow>},"concurrent":<true to run iterations in parallel>,"next":"<id|null>"}
+- {"id","kind":"while","condition":"<keep-looping condition>","body":{<a nested flow>},"limit":<max passes>,"next":"<id|null>"}
 - {"id","kind":"parallel","branches":[{<nested flow>},...],"next":"<id|null>"}
-- {"id","kind":"approval","prompt":"<what a human approves>","next":"<id|null>"}
+- {"id","kind":"approval","prompt":"<what a human approves>","choices":["<optional verdicts beyond approve/reject>"],"timeout":<seconds until it expires as rejected>,"next":"<id|null>"}
 - {"id","kind":"delay","seconds":<number>,"next":"<id|null>"}
+- {"id","kind":"wait_event","prompt":"<what the run is waiting for>","next":"<id|null>"}
+- {"id","kind":"scope","body":{<a nested flow>},"on_error":"<id of the catch step>","next":"<id|null>"}
 - {"id","kind":"subflow","flow_ref":"<a saved flow id to run here>","next":"<id|null>"}
 
 Any "agent" or "action" node may also set "retries":<n> (re-try on failure) and "on_error":"<id>" (route there if it fails).

@@ -34,8 +34,9 @@ _ROUTE_FIELDS = frozenset({"next", "if_true", "if_false", "on_error"})
 _FLOW_FIELDS = frozenset({"name", "start", "notify", "max_seconds", "max_dollars", "schedule"})
 _NODE_FIELDS = frozenset({
     "kind", "next", "tool", "params", "brief", "condition", "if_true", "if_false",
-    "items", "var", "body", "limit", "branches", "prompt", "seconds", "flow_ref",
-    "retries", "on_error", "timeout", "output", "label", "x", "y",
+    "cases", "items", "var", "body", "limit", "concurrent", "branches", "prompt",
+    "choices", "seconds", "flow_ref", "retries", "on_error", "timeout", "output",
+    "label", "x", "y",
 })
 
 

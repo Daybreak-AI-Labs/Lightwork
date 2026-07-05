@@ -106,6 +106,43 @@ test('upstreamOutputs follows on_error routing and survives cycles', () => {
   assert.deepEqual(FDCore.upstreamOutputs(flow, 'h'), ['r']);
 });
 
+test('serializeNode keeps switch cases, approval choices, concurrent flag', () => {
+  const o = FDCore.serializeNode(FDCore.normalizeNode({
+    id: 's', kind: 'switch', condition: 'k',
+    cases: [{ value: 'a', to: 'x' }], choices: [], concurrent: false }, 0));
+  assert.deepEqual(o.cases, [{ value: 'a', to: 'x' }]);
+  assert.ok(!('choices' in o) && !('concurrent' in o));   // empty/false dropped
+  const f = FDCore.serializeNode(FDCore.normalizeNode({
+    id: 'l', kind: 'foreach', items: 'r', concurrent: true,
+    body: { id: '', name: '', start: 'n', nodes: [{ id: 'n', kind: 'agent', brief: 'b' }] } }, 0));
+  assert.equal(f.concurrent, true);
+  const a = FDCore.serializeNode(FDCore.normalizeNode({
+    id: 'ap', kind: 'approval', prompt: 'p', choices: ['ship', 'hold'] }, 0));
+  assert.deepEqual(a.choices, ['ship', 'hold']);
+});
+
+test('validateFlow flags the same structural problems the server does', () => {
+  const bad = {
+    id: 'f', name: 'F', start: 'zzz',
+    nodes: [
+      FDCore.normalizeNode({ id: 'a', kind: 'agent', next: 'ghost' }, 0),
+      FDCore.normalizeNode({ id: 's', kind: 'switch', condition: '', cases: [{ value: 'x', to: 'ghost' }] }, 1),
+      FDCore.normalizeNode({ id: 'w', kind: 'wait_event' }, 2),
+    ]
+  };
+  const errs = FDCore.validateFlow(bad);
+  assert.ok(errs.some(e => e.includes('start node')));
+  assert.ok(errs.some(e => e.includes('unknown node "ghost"')));
+  assert.ok(errs.some(e => e.includes('has no brief')));
+  assert.ok(errs.some(e => e.includes('has no key')));
+  assert.ok(errs.some(e => e.includes('has no prompt')));
+  const good = {
+    id: 'f', name: 'F', start: 'a',
+    nodes: [FDCore.normalizeNode({ id: 'a', kind: 'agent', brief: 'do it' }, 0)]
+  };
+  assert.deepEqual(FDCore.validateFlow(good), []);
+});
+
 test('fitView centers and clamps zoom', () => {
   const v = FDCore.fitView([{ x: 0, y: 0 }, { x: 1000, y: 800 }], 600, 400, 176, 64, 40);
   assert.ok(v.k >= 0.35 && v.k <= 1);

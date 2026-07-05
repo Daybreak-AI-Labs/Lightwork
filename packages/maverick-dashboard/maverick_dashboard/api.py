@@ -1087,7 +1087,7 @@ async def resume_flow_run_endpoint(request: Request, run_id: str,
     run = _load_owned_run(request, run_id)
     # Only a paused run may be resumed -- resuming a completed/rejected run would
     # re-run the flow or run a rejected node (409, not a silent no-op).
-    if run.status not in ("paused_approval", "paused_delay"):
+    if run.status not in ("paused_approval", "paused_delay", "paused_event"):
         raise HTTPException(status_code=409,
                             detail=f"run is not paused (status {run.status})")
     from maverick_dashboard import automation_queue as aq
@@ -1134,13 +1134,98 @@ async def retry_flow_run_endpoint(request: Request, run_id: str,
 
 
 @router.get("/flows/tools")
-async def flow_tools_endpoint(request: Request) -> dict:
+async def flow_tools_endpoint(request: Request, q: str = "") -> dict:
     """The connector/action catalog for the designer's searchable tool picker:
-    name, description, and param names. Declared before ``/flows/{flow_id}`` so
-    the literal ``tools`` path isn't captured as a flow id."""
+    name, description, and param names. Without ``q``: the curated starter set.
+    With ``q``: a substring search over the FULL live tool registry (built-ins +
+    every enabled connector), so the picker reaches everything the action node
+    can actually call -- not just the curated list. Declared before
+    ``/flows/{flow_id}`` so the literal ``tools`` path isn't captured as a
+    flow id."""
     require_permission(request, "operate")
     _require_flows()
-    return {"tools": await run_in_threadpool(_flow_tool_catalog)}
+    q = q.strip().lower()[:80]
+    if not q:
+        return {"tools": await run_in_threadpool(_flow_tool_catalog)}
+
+    def _search():
+        try:
+            from maverick.sandbox import LocalBackend
+            from maverick.tools import base_registry
+            live = base_registry(_world(), LocalBackend(), goal_id=None).all()
+        except Exception:  # pragma: no cover -- registry build varies by env
+            live = []
+        out = []
+        for t in live:
+            hay = f"{t.name} {t.description or ''}".lower()
+            if q not in hay:
+                continue
+            params = []
+            if isinstance(t.input_schema, dict):
+                params = list((t.input_schema.get("properties") or {}).keys())[:12]
+            out.append({"name": t.name, "description": (t.description or "")[:200],
+                        "params": params})
+        # name-prefix matches first, then name matches, then description-only
+        out.sort(key=lambda t: (not t["name"].lower().startswith(q),
+                                q not in t["name"].lower(), t["name"]))
+        return out[:50]
+    return {"tools": await run_in_threadpool(_search)}
+
+
+# Curated starter flows for the designer's gallery: small, runnable graphs a
+# user edits (or asks the copilot to change) instead of starting from a blank
+# canvas. Each is a plain Flow dict -- validated by the same save path as any
+# hand-built graph when the user saves it.
+_FLOW_GALLERY: tuple[dict, ...] = (
+    {
+        "id": "", "name": "Triage inbound issues", "start": "n0",
+        "description": "Summarize a new issue, escalate urgent ones, ask before posting.",
+        "nodes": [
+            {"id": "n0", "kind": "agent", "brief": "Summarize this issue and rate its urgency high/normal: {{title}} — {{body}}", "output": "summary", "next": "n1"},
+            {"id": "n1", "kind": "branch", "condition": "urgency == high", "if_true": "n2", "if_false": "n3"},
+            {"id": "n2", "kind": "approval", "prompt": "Escalate this to the on-call channel?", "next": "n3"},
+            {"id": "n3", "kind": "action", "tool": "slack_bot", "params": {"text": "{{summary}}"}},
+        ],
+    },
+    {
+        "id": "", "name": "Daily digest", "start": "n0",
+        "description": "On a schedule, gather updates and email a one-paragraph digest.",
+        "schedule": "0 9 * * *",
+        "nodes": [
+            {"id": "n0", "kind": "agent", "brief": "Gather yesterday's notable updates and write a one-paragraph digest.", "output": "digest", "next": "n1"},
+            {"id": "n1", "kind": "action", "tool": "email_tool", "params": {"body": "{{digest}}"}},
+        ],
+    },
+    {
+        "id": "", "name": "Process a list with review", "start": "n0",
+        "description": "Loop items concurrently, then a human signs off on the batch.",
+        "nodes": [
+            {"id": "n0", "kind": "foreach", "items": "rows", "var": "row", "concurrent": True, "output": "results", "next": "n1",
+             "body": {"id": "", "name": "per row", "start": "b0",
+                      "nodes": [{"id": "b0", "kind": "agent", "brief": "Handle {{row}}", "output": "r"}]}},
+            {"id": "n1", "kind": "approval", "prompt": "Batch processed — publish the results?", "next": "n2"},
+            {"id": "n2", "kind": "agent", "brief": "Publish the approved results: {{results}}"},
+        ],
+    },
+    {
+        "id": "", "name": "Wait for a callback", "start": "n0",
+        "description": "Kick off work, wait for an external system to call back, then finish.",
+        "nodes": [
+            {"id": "n0", "kind": "agent", "brief": "Submit the request described in {{request}}", "output": "submitted", "next": "n1"},
+            {"id": "n1", "kind": "wait_event", "prompt": "Waiting for the provider callback", "next": "n2"},
+            {"id": "n2", "kind": "agent", "brief": "Reconcile the callback payload {{payload}} with {{submitted}}", "output": "done"},
+        ],
+    },
+)
+
+
+@router.get("/flows/gallery")
+async def flow_gallery_endpoint(request: Request) -> dict:
+    """Starter flow graphs for the designer's gallery. Declared before
+    ``/flows/{flow_id}`` so the literal path isn't captured as a flow id."""
+    require_permission(request, "operate")
+    _require_flows()
+    return {"flows": [dict(f) for f in _FLOW_GALLERY]}
 
 
 @router.get("/flows/insights")
@@ -2872,6 +2957,8 @@ async def import_run_endpoint(request: Request, payload: ImportRunIn) -> ImportR
         get_importer(payload.source)
     except ImporterError as e:
         raise HTTPException(status_code=400, detail=str(e)) from e
+    if payload.as_flows:
+        _require_flows()          # importing to graphs needs the flow engine
 
     # Definitions from the request (offline/connect) or a live fetch (env creds).
     if payload.definitions is not None:
@@ -2962,11 +3049,24 @@ async def import_run_endpoint(request: Request, payload: ImportRunIn) -> ImportR
                     webhook_trigger = rec["name"]
                 except ValueError as e:
                     res.notes.append(f"could not create webhook trigger: {e}")
+        flow_id = None
+        fidelity: list[dict] = []
+        if payload.as_flows:
+            # Lower to a real graph too: structure preserved where the source
+            # exposes it, each step's disposition logged -- the migration is
+            # never silently lossy.
+            from maverick.automation_import.to_flow import to_flow_with_report
+            from maverick.flow import store as flow_store
+            flow_graph, fidelity = to_flow_with_report(a)
+            if not payload.dry_run:
+                flow_store.save_flow(flow_graph)
+            flow_id = flow_graph.id
         results.append({
             "source": a.source, "name": a.name, "template": res.template_name,
             "created": res.created_template, "trigger": a.trigger.kind,
             "webhook_trigger": webhook_trigger, "schedule": res.schedule,
             "tools": res.tool_hints, "notes": res.notes,
+            "flow": flow_id, "fidelity": fidelity,
         })
 
     return ImportRunOut(

@@ -510,17 +510,26 @@ here.
   reading the codes to *realize* the savings is a separate, gated step.
 
 - **Flow engine & visual automation** (`maverick.flow.*`, gated on `[flows]`) — a
-  deterministic graph of typed nodes (`ir.py`: agent / action / branch / foreach /
-  parallel / approval / delay / subflow) run by a pure interpreter (`runner.py`)
+  deterministic graph of typed nodes (`ir.py`: agent / action / branch / switch /
+  foreach / while / parallel / approval / delay / wait_event / scope (try-catch) /
+  subflow) run by a pure interpreter (`runner.py`)
   with data threading, safe expression rendering (`{{fn(...)}}` incl. arithmetic,
   list ops, and `and`/`or` conditions), a whole-flow wall-clock deadline
   (`Flow.max_seconds`), a per-run **aggregate agent-spend ceiling**
   (`Flow.max_dollars`, enforced in `execution.py` so a wide parallel / long
   foreach can't fan out unbounded cost), per-node retries/timeout/on-error
-  routing, and **real intra-flow parallel concurrency** (branches run on a bounded
-  thread pool with per-branch cycle detection). The live driver (`execution.py`)
-  persists a resumable run (`store.py`) with per-node trace, dry-run sandbox
-  executors, and secret redaction (`redact.py`). A **self-rewrite loop**
+  routing, and **real intra-flow parallel concurrency** (parallel branches AND
+  `foreach concurrent: true` iterations run on a bounded thread pool with
+  per-branch cycle detection). `switch` routes n-way on a data key; `while`
+  loops a body with a runaway cap; `wait_event` pauses the run until an
+  external event resumes it; `scope` is try/catch (a body failure routes to
+  `on_error` with `{{_error}}` readable in the catch arm). Approvals support
+  **choice verdicts** beyond approve/reject (recorded to `output` for
+  downstream routing) and an **expiry** (`timeout` — a lapsed approval resolves
+  as rejected via the sweep, fail-closed). The live driver (`execution.py`)
+  persists a resumable run (`store.py`) with per-node trace **including each
+  work node's measured wall-clock seconds**, dry-run sandbox executors, and
+  secret redaction (`redact.py`). A **self-rewrite loop**
   (`evolve.py` + `evolution_log.py`) swaps a node kind, measures grounded
   before/after outcomes, versions the definition, and autonomously reverts a
   regression. A failed run records WHICH node failed (`FlowRun.cursor`) and can
@@ -531,11 +540,20 @@ here.
   a flow from natural language, edits nested foreach bodies / parallel branches
   on their own canvas, shows live run + measured-impact overlays (💡 badges mark
   nodes with learned self-rewrite proposals), and carries the editor
-  fundamentals: undo/redo (Ctrl+Z/Y), node duplicate (Ctrl+D), click-to-cut
-  edges, zoom-to-fit, and **data pills** — one-click `{{key}}` insertion from
-  the outputs a node can actually see upstream (`FDCore.upstreamOutputs`). A
-  dedicated **run viewer** (`/flows/{flow_id}/runs/{run_id}`) shows the
-  node-by-node timeline, redacted run data, and the recovery actions.
+  fundamentals: undo/redo (Ctrl+Z/Y), duplicate (Ctrl+D), copy/paste
+  (Ctrl+C/V), click-to-cut edges, insert-a-node-into-a-selected-edge, 16px
+  grid snapping, zoom-to-fit, client-side structural validation before save
+  (`FDCore.validateFlow`), and **data pills** — one-click `{{key}}` insertion
+  from the outputs a node can actually see upstream (`FDCore.upstreamOutputs`).
+  The action picker searches the FULL live tool registry
+  (`GET /flows/tools?q=`), a **⚡ Triggers panel** shows everything that starts
+  the flow (cron / webhooks / event triggers) in one place, a **gallery**
+  (`GET /flows/gallery`) loads curated starter graphs onto the canvas, flows
+  export/import as JSON files, and `?from_template=` opens any saved template
+  as its single-agent flow (the text-builder → designer bridge). A dedicated
+  **run viewer** (`/flows/{flow_id}/runs/{run_id}`) shows the node-by-node
+  timeline with per-step durations, redacted run data, and the recovery
+  actions.
 
 - **Flow copilot (chat that builds the flow)** — a conversational assistant
   docked in the designer (`maverick.flow.chat` + `POST /api/v1/flows/chat`).
@@ -553,19 +571,24 @@ here.
   `file_dir` / `form`), an **inbound webhook** (`/webhook/run` with a
   flow-target trigger — the signed payload's `data` becomes the run data and the
   delivery `id` doubles as the idempotency key, so a re-delivered event never
-  fires twice), or a manual/dry run. A paused **approval** node can post
+  fires twice), or a manual/dry run. A run paused on a **wait_event** node
+  resumes from the same webhook (`{"resume": "<run_id>", "data": {...}}` — the
+  event payload merges into the flow data). A paused **approval** node can post
   signed Approve/Reject links to a channel (`approvals.py` — a stateless HMAC
   token; `POST /flow/approve` resumes) so a human clears it without a dashboard
   session. A hosted **form** submission (`form_store.py`, public `POST /form/{token}`)
   fires a flow with the submitted fields as data.
 
 - **Migration fidelity** (`automation_import.to_flow`) — n8n IF/Filter and
-  Power Automate (WDL) `If`/`Foreach` are captured **structurally** (real
-  branch/foreach nodes, arms wired to rejoin, loop bodies as nested flows);
-  `Switch`/`Until`/`Scope` and graphless sources approximate each step as an
-  agent node that still runs. `to_flow_with_report` returns the per-step
-  fidelity log (`preserved` / `approximated` + why), so an import never
-  silently pretends to be lossless.
+  Power Automate (WDL) `If` / `Foreach` / `Switch` / `Until` / `Scope` are all
+  captured **structurally** (branch/foreach/switch/while/scope nodes, arms
+  wired to rejoin, bodies as nested flows, Until's exit condition negated);
+  graphless sources approximate each step as an agent node that still runs.
+  `to_flow_with_report` returns the per-step fidelity log
+  (`preserved` / `approximated` + why), and the dashboard import can save the
+  graphs directly (`as_flows: true` on `POST /import/run`) with the fidelity
+  summary rendered per automation — an import never silently pretends to be
+  lossless.
 
 ## Tools
 

@@ -160,6 +160,89 @@ def test_power_automate_switch_approximates_with_report():
     assert r["fidelity"] == "approximated" and "Switch" in r["note"]
 
 
+def test_power_automate_switch_with_cases_becomes_switch_node():
+    wf = {
+        "properties": {"displayName": "Route by tier", "definition": {
+            "triggers": {"Manual": {"type": "Request"}},
+            "actions": {
+                "Route": {
+                    "type": "Switch", "runAfter": {},
+                    "expression": "@triggerBody()?['tier']",
+                    "cases": {
+                        "Gold": {"case": "gold", "actions": {
+                            "VIP": {"type": "OpenApiConnection", "runAfter": {},
+                                    "inputs": {"host": {"apiId": ".../apis/shared_slack",
+                                                        "operationId": "PostMessage"},
+                                               "parameters": {"text": "vip"}}}}},
+                        "Free": {"case": "free", "actions": {}},
+                    },
+                    "default": {"actions": {
+                        "Log": {"type": "Compose", "runAfter": {}, "inputs": "meh"}}},
+                },
+                "Done": {"type": "Compose", "runAfter": {"Route": ["Succeeded"]},
+                         "inputs": "done"},
+            },
+        }},
+    }
+    from maverick.flow.ir import NODE_SWITCH
+    f, report = to_flow_with_report(power_automate.translate(wf))
+    assert f.validate() == []
+    sw = next(n for n in f.nodes.values() if n.kind == NODE_SWITCH)
+    assert sw.condition == "tier"
+    values = {c["value"] for c in sw.cases}
+    assert values == {"gold", "free"}
+    # the gold arm holds the slack action and rejoins the step after the switch
+    gold_to = next(c["to"] for c in sw.cases if c["value"] == "gold")
+    done = next(n for n in f.nodes.values() if (n.label or "") == "Done")
+    assert f.nodes[gold_to].tool == "slack" and f.nodes[gold_to].next == done.id
+    # an empty case arm falls straight through to the join
+    free_to = next(c["to"] for c in sw.cases if c["value"] == "free")
+    assert free_to == done.id
+    # the default arm is the switch's next
+    assert f.nodes[sw.next].label == "Log"
+    assert next(r for r in report if r["step"] == "Route")["fidelity"] == "preserved"
+
+
+def test_power_automate_until_becomes_while_with_negated_exit():
+    wf = {
+        "properties": {"displayName": "Poll until done", "definition": {
+            "triggers": {"Manual": {"type": "Request"}},
+            "actions": {"Keep_checking": {
+                "type": "Until", "runAfter": {},
+                "expression": {"equals": ["@outputs('Check')?['status']", "done"]},
+                "limit": {"count": 12},
+                "actions": {"Check": {"type": "Compose", "runAfter": {},
+                                      "inputs": "@body('poll')"}},
+            }},
+        }},
+    }
+    from maverick.flow.ir import NODE_WHILE
+    f, report = to_flow_with_report(power_automate.translate(wf))
+    assert f.validate() == []
+    loop = next(n for n in f.nodes.values() if n.kind == NODE_WHILE)
+    assert loop.condition == "status != done"       # exit condition negated
+    assert loop.limit == 12 and loop.body is not None
+    assert next(r for r in report if r["step"] == "Keep_checking")["fidelity"] == "preserved"
+
+
+def test_power_automate_scope_becomes_scope_node():
+    wf = {
+        "properties": {"displayName": "Grouped", "definition": {
+            "triggers": {"Manual": {"type": "Request"}},
+            "actions": {"Try_block": {
+                "type": "Scope", "runAfter": {},
+                "actions": {"Step": {"type": "Compose", "runAfter": {}, "inputs": "x"}},
+            }},
+        }},
+    }
+    from maverick.flow.ir import NODE_SCOPE
+    f, report = to_flow_with_report(power_automate.translate(wf))
+    assert f.validate() == []
+    sc = next(n for n in f.nodes.values() if n.kind == NODE_SCOPE)
+    assert sc.body is not None and len(sc.body.nodes) == 1
+    assert next(r for r in report if r["step"] == "Try_block")["fidelity"] == "preserved"
+
+
 def test_every_lowering_path_emits_a_report():
     from maverick.automation_import import ir as iir
     a = iir.ImportedAutomation("make", "9", "x", iir.ImportedTrigger(kind=iir.TRIGGER_WEBHOOK),

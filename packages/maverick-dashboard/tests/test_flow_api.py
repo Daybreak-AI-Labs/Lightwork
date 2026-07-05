@@ -133,6 +133,78 @@ def test_delay_sweep_reenqueues_only_due_runs(monkeypatch, tmp_path):
     assert {j.payload["run_id"] for j in jobs} == {"d1"}
 
 
+def test_sweep_rejects_expired_approvals_but_never_paused_events(monkeypatch, tmp_path):
+    _isolate(monkeypatch, tmp_path)
+    from maverick.flow import store
+    from maverick_dashboard import automation_queue as aq
+    _reset_aq(monkeypatch, aq)
+    store.save_run(store.FlowRun(run_id="ap1", flow_id="demo",
+                                 status="paused_approval", resume_at=1.0))     # expired
+    store.save_run(store.FlowRun(run_id="ap2", flow_id="demo",
+                                 status="paused_approval", resume_at=9e18))    # still open
+    store.save_run(store.FlowRun(run_id="ev1", flow_id="demo",
+                                 status="paused_event", resume_at=1.0))        # event-only
+    aq._handle_flow_sweep(None)
+    jobs = [j for j in aq.queue().list(status="pending") if j.kind == aq.FLOW_RESUME_KIND]
+    assert {j.payload["run_id"] for j in jobs} == {"ap1"}
+    assert jobs[0].payload["decision"] == "rejected"     # expiry fails closed
+
+
+def test_paused_event_run_resumes_via_api_with_event_data(monkeypatch, tmp_path):
+    _isolate(monkeypatch, tmp_path)
+    from maverick.flow import execution
+    from maverick_dashboard import automation_queue as aq
+    _reset_aq(monkeypatch, aq)
+    monkeypatch.setattr(execution, "default_agent_runner",
+                        lambda world, **k: lambda brief, d: (f"ran:{brief}", 1.0))
+    monkeypatch.setattr(execution, "default_action_runner",
+                        lambda world, sandbox=None: lambda t, p, d: ("", 1.0))
+    c = _client()
+    flow = {"id": "fev", "name": "f", "start": "w", "nodes": [
+        {"id": "w", "kind": "wait_event", "prompt": "cb", "next": "a"},
+        {"id": "a", "kind": "agent", "brief": "handle {{payload}}", "output": "r"},
+    ]}
+    assert c.post("/api/v1/flows", json={"flow": flow}).status_code == 201
+    run_id = c.post("/api/v1/flows/fev/run", json={"data": {}}).json()["run_id"]
+    _drain(aq)
+    assert c.get(f"/api/v1/flows/runs/{run_id}").json()["status"] == "paused_event"
+    r = c.post(f"/api/v1/flows/runs/{run_id}/resume",
+               json={"inputs": {"payload": "evt-7"}})
+    assert r.status_code == 200
+    _drain(aq)
+    done = c.get(f"/api/v1/flows/runs/{run_id}").json()
+    assert done["status"] == "completed" and done["data"]["r"] == "ran:handle evt-7"
+
+
+def test_choice_approval_verdict_flows_through_resume(monkeypatch, tmp_path):
+    _isolate(monkeypatch, tmp_path)
+    from maverick.flow import execution
+    from maverick_dashboard import automation_queue as aq
+    _reset_aq(monkeypatch, aq)
+    monkeypatch.setattr(execution, "default_agent_runner",
+                        lambda world, **k: lambda brief, d: (f"ran:{brief}", 1.0))
+    monkeypatch.setattr(execution, "default_action_runner",
+                        lambda world, sandbox=None: lambda t, p, d: ("", 1.0))
+    c = _client()
+    flow = {"id": "fch", "name": "f", "start": "a", "nodes": [
+        {"id": "a", "kind": "approval", "prompt": "ship or hold?",
+         "choices": ["ship", "hold"], "output": "verdict", "next": "s"},
+        {"id": "s", "kind": "switch", "condition": "verdict",
+         "cases": [{"value": "ship", "to": "go"}], "next": "no"},
+        {"id": "go", "kind": "agent", "brief": "shipping", "output": "r"},
+        {"id": "no", "kind": "agent", "brief": "holding", "output": "r"},
+    ]}
+    assert c.post("/api/v1/flows", json={"flow": flow}).status_code == 201
+    run_id = c.post("/api/v1/flows/fch/run", json={"data": {}}).json()["run_id"]
+    _drain(aq)
+    r = c.post(f"/api/v1/flows/runs/{run_id}/resume", json={"decision": "ship"})
+    assert r.status_code == 200, r.text
+    _drain(aq)
+    done = c.get(f"/api/v1/flows/runs/{run_id}").json()
+    assert done["status"] == "completed"
+    assert done["data"]["verdict"] == "ship" and done["data"]["r"] == "ran:shipping"
+
+
 def test_draft_endpoint_returns_a_flow(monkeypatch, tmp_path):
     _isolate(monkeypatch, tmp_path)
     # bypass the provider-key guard + the real LLM
@@ -261,8 +333,48 @@ def test_designer_page_has_copilot_and_toolbar(monkeypatch, tmp_path):
     r = _client().get("/flows/designer")
     assert r.status_code == 200
     for needle in ('id="fd-chat"', 'id="fd-undo"', 'id="fd-redo"', 'id="fd-fit"',
-                   "/api/v1/flows/chat", "upstreamOutputs"):
+                   'id="fd-triggers"', 'id="fd-export"', 'data-add="switch"',
+                   'data-add="while"', 'data-add="wait_event"', 'data-add="scope"',
+                   "/api/v1/flows/chat", "upstreamOutputs", "validateFlow"):
         assert needle in r.text, needle
+
+
+def test_gallery_returns_valid_starter_flows(monkeypatch, tmp_path):
+    _isolate(monkeypatch, tmp_path)
+    from maverick.flow import Flow
+    flows = _client().get("/api/v1/flows/gallery").json()["flows"]
+    assert len(flows) >= 3
+    for g in flows:
+        f = Flow.from_dict(g)
+        f.id = "gallery-check"
+        assert f.validate() == [], (g["name"], f.validate())
+
+
+def test_tools_search_reaches_the_full_registry(monkeypatch, tmp_path):
+    _isolate(monkeypatch, tmp_path)
+    c = _client()
+    curated = c.get("/api/v1/flows/tools").json()["tools"]
+    assert curated and any(t["name"] == "slack_bot" for t in curated)
+    hits = c.get("/api/v1/flows/tools?q=http").json()["tools"]
+    assert hits and all("http" in (t["name"] + t["description"]).lower() for t in hits)
+    # name-prefix matches rank first
+    assert hits[0]["name"].startswith("http")
+
+
+def test_designer_opens_a_template_as_a_flow(monkeypatch, tmp_path):
+    _isolate(monkeypatch, tmp_path)
+    import maverick.templates as tpl
+    tdir = tmp_path / ".maverick" / "templates"
+    monkeypatch.setattr(tpl, "USER_TEMPLATES", tdir)
+    tdir.mkdir(parents=True, exist_ok=True)
+    (tdir / "weekly-digest.md").write_text(
+        "---\ntitle: Weekly digest\nparams: []\n---\nWrite the weekly digest.\n",
+        encoding="utf-8")
+    r = _client().get("/flows/designer?from_template=weekly-digest")
+    assert r.status_code == 200
+    assert "Write the weekly digest." in r.text          # seeded as an agent brief
+    # an unknown template degrades to a blank canvas, not an error
+    assert _client().get("/flows/designer?from_template=nope").status_code == 200
 
 
 def test_proposals_endpoint(monkeypatch, tmp_path):
