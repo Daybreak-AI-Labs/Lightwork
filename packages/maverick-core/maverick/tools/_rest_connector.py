@@ -45,13 +45,30 @@ def _capability_egress_denial(url: str, args: dict[str, Any], *, name: str) -> s
     return f"capability policy denies host {host!r} for tool {name!r}"
 
 
+def _connection_fallback(name: str) -> tuple[str, str] | None:
+    """A dashboard-created named connection credentialing ``name``, used only
+    when the env vars are unset (purely additive -- env always wins). Best-effort
+    and gated: returns None unless the connections feature is on and one exists."""
+    try:
+        from maverick import connections
+        return connections.resolve(name)
+    except Exception:  # pragma: no cover -- a connection read never breaks a tool
+        return None
+
+
 def _env_config(name: str, base_url_env: str, token_env: str) -> tuple[str, str]:
     """Resolve (base_url, token) from env or raise a loud, consistent error.
-    Shared by the REST and GraphQL factories so they can't drift."""
+    Shared by the REST and GraphQL factories so they can't drift. Falls back to
+    a sealed named connection when the env vars aren't set."""
     base = os.environ.get(base_url_env, "").strip().rstrip("/")
     tok = os.environ.get(token_env, "").strip()
     if not base or not tok:
-        raise RuntimeError(f"{name} requires {base_url_env} + {token_env}.")
+        conn = _connection_fallback(name)
+        if conn and conn[0] and conn[1]:
+            return conn[0].rstrip("/"), conn[1]
+        raise RuntimeError(
+            f"{name} requires {base_url_env} + {token_env} "
+            f"(or a saved '{name}' connection).")
     return base, tok
 
 

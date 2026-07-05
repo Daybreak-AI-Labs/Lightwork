@@ -45,6 +45,7 @@ from .api_schemas import (
     CatalogInstallIn,
     ChildIn,
     ComposeIn,
+    ConnectionIn,
     DeliverableEditIn,
     EventTriggerIn,
     EventTriggerOut,
@@ -898,6 +899,93 @@ async def oauth_disconnect(request: Request, provider: str) -> None:
     _require_oauth_vault()
     from maverick import oauth_vault
     oauth_vault.get_vault().delete(provider)
+
+
+# ---- connections: named, sealed SaaS credentials -----------------------------
+
+
+def _require_connections() -> None:
+    from maverick import connections
+    if not connections.enabled():
+        raise HTTPException(
+            status_code=403,
+            detail=("connections are off; enable [connections] in config.toml or "
+                    "set MAVERICK_CONNECTIONS=1"),
+        )
+
+
+@router.get("/connections")
+async def list_connections_endpoint(request: Request) -> dict:
+    """Named connections the caller may see (tokens never returned -- only
+    ``has_token``). Owner-scoped when auth is on."""
+    require_permission(request, "operate")
+    _require_connections()
+    from maverick import connections
+    return {"connections": connections.list_connections(owner=goal_owner_filter(request))}
+
+
+@router.post("/connections", status_code=201)
+async def create_connection_endpoint(request: Request, payload: ConnectionIn) -> dict:
+    """Create or replace a named connection (base URL + token, sealed at rest).
+    A connector can then be wired without env vars -- the connection is the
+    fallback when ``<NAME>_TOKEN`` is unset."""
+    require_permission(request, "operate")
+    _require_connections()
+    from maverick import connections
+    # Owner-scope like triggers: a non-admin can't overwrite another tenant's
+    # connection by reusing its name.
+    owner_filter = goal_owner_filter(request)
+    if owner_filter is not None:
+        existing = connections.get_connection(connections.normalize_name(payload.name))
+        if existing is not None and existing.get("owner", "") != owner_filter:
+            raise HTTPException(status_code=409, detail="a connection with that name already exists")
+    try:
+        rec = connections.set_connection(
+            payload.name, connector=payload.connector, base_url=payload.base_url,
+            token=payload.token, owner=caller_principal(request) or "")
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e)) from e
+    return rec
+
+
+@router.post("/connections/{name}/test")
+async def test_connection_endpoint(request: Request, name: str) -> dict:
+    """Best-effort reachability check: GET the connection's base URL with its
+    token and report whether it authenticates. Never returns the token."""
+    require_permission(request, "operate")
+    _require_connections()
+    from maverick import connections
+    rec = connections.get_connection(name)
+    if rec is None:
+        raise HTTPException(status_code=404, detail="no such connection")
+    base = str(rec.get("base_url") or "").rstrip("/")
+    if not base:
+        return {"ok": False, "detail": "no base URL set"}
+
+    def _probe() -> dict:
+        try:
+            import httpx
+            r = httpx.get(base, headers={"Authorization": f"Bearer {rec.get('token')}",
+                                         "Accept": "application/json"},
+                          timeout=10.0, follow_redirects=True)
+            # 2xx/3xx or 401/403 all mean "reachable"; only a connect error is a hard fail.
+            ok = r.status_code < 500
+            return {"ok": ok, "status": r.status_code,
+                    "detail": ("authenticated" if r.status_code < 400
+                               else f"reachable but returned {r.status_code}")}
+        except Exception as e:  # pragma: no cover -- network varies
+            return {"ok": False, "detail": f"could not reach host: {type(e).__name__}"}
+    return await run_in_threadpool(_probe)
+
+
+@router.delete("/connections/{name}")
+async def delete_connection_endpoint(request: Request, name: str) -> dict:
+    require_permission(request, "operate")
+    _require_connections()
+    from maverick import connections
+    if not connections.delete_connection(name, owner=goal_owner_filter(request)):
+        raise HTTPException(status_code=404, detail="no connection with that name")
+    return {"deleted": connections.normalize_name(name)}
 
 
 # ---- flows: a deterministic skeleton over agentic + tool steps ---------------

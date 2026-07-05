@@ -4917,6 +4917,14 @@ async def workflows_index_page(request: Request) -> HTMLResponse:
     )
 
 
+@app.get("/connections", response_class=HTMLResponse)
+async def connections_page(request: Request) -> HTMLResponse:
+    """Manage named SaaS connections (base URL + sealed token) so connectors can
+    be wired without env vars. CRUD + reachability test go through
+    /api/v1/connections; the feature gate is enforced there."""
+    return templates.TemplateResponse(request, "connections.html", {})
+
+
 @app.get("/flows/designer", response_class=HTMLResponse)
 @app.get("/flows/designer/{flow_id}", response_class=HTMLResponse)
 async def flow_designer_page(request: Request, flow_id: str = "",
