@@ -80,6 +80,7 @@
       <div class="field">
         <label for="auto-event-config">Source config (JSON)</label>
         <textarea id="auto-event-config" rows="4" spellcheck="false" placeholder='{ "url": "https://api.example.com/leads", "items_path": "data", "id_field": "id" }'></textarea>
+        <p class="auto__hint" id="auto-event-formurl" hidden></p>
       </div>
       <div class="field">
         <label for="auto-event-name">Trigger name (optional)</label>
@@ -427,9 +428,20 @@
           file_dir: '{ "path": "/data/inbound", "glob": "*.csv", "recursive": false }',
           form: '{ "token": "signup" }  → POST submissions to /form/signup'
         };
+        var formUrl = document.getElementById('auto-event-formurl');
+        var showFormUrl = function () {
+          if (!formUrl) return;
+          if (evSource.value !== 'form') { formUrl.hidden = true; return; }
+          var token = '';
+          try { token = (JSON.parse(evCfg.value || '{}').token || '').trim(); } catch (e) { token = ''; }
+          if (!token) { formUrl.textContent = 'Add {"token":"…"} above; submissions POST to /form/<token>.'; formUrl.hidden = false; return; }
+          formUrl.textContent = 'Point your form at: ' + window.location.origin + '/form/' + encodeURIComponent(token);
+          formUrl.hidden = false;
+        };
         if (evCfg && evSource) {
-          var applyHint = function () { if (HINTS[evSource.value]) evCfg.placeholder = HINTS[evSource.value]; };
+          var applyHint = function () { if (HINTS[evSource.value]) evCfg.placeholder = HINTS[evSource.value]; showFormUrl(); };
           evSource.addEventListener('change', applyHint);
+          evCfg.addEventListener('input', showFormUrl);
           applyHint();
         }
       }

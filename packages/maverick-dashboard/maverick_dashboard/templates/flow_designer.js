@@ -204,13 +204,9 @@
   function selectNode(id) { selected = id; renderProps(); render(); }
 
   // ---- nested sub-flow editing (foreach body / parallel branches) ----
-  function normalizeNode(nd, i) {
-    var n = Object.assign({ params: {}, brief: '', tool: '', condition: '', if_true: null, if_false: null,
-      items: '', var: 'item', limit: 0, prompt: '', seconds: 0, flow_ref: '', retries: 0, on_error: null, timeout: 0,
-      output: '', label: '', body: null, branches: [], next: null }, nd);
-    n.id = n.id || ('n' + i);
-    return n;
-  }
+  // Pure serialization/normalization lives in FDCore (flow_designer_core.js) so
+  // it's unit-testable under node without a DOM.
+  var normalizeNode = FDCore.normalizeNode;
   function normalizeFlow(f) {
     // Upgrade a raw nested-flow dict's nodes into editable node objects (in place,
     // so the parent node's body/branches[i] keeps the same reference).
@@ -423,28 +419,7 @@
     });
     return bad;
   }
-  function serializeNode(n) {
-    var o = { id: n.id, kind: n.kind };
-    ['next', 'tool', 'brief', 'condition', 'if_true', 'if_false', 'items', 'var', 'prompt', 'flow_ref', 'on_error', 'output', 'label'].forEach(function (k) {
-      if (n[k] !== '' && n[k] != null) o[k] = n[k];
-    });
-    if (n.params && Object.keys(n.params).length) o.params = n.params;
-    if (n.seconds) o.seconds = n.seconds;
-    if (n.retries) o.retries = n.retries;
-    if (n.timeout) o.timeout = n.timeout;
-    if (n.limit) o.limit = n.limit;
-    // recurse into nested sub-flows; drop empties so they revert to "no body/branches"
-    if (n.body && n.body.nodes && n.body.nodes.length) o.body = serializeFlow(n.body);
-    if (n.branches && n.branches.length) {
-      var bs = n.branches.map(serializeFlow).filter(function (b) { return b.nodes.length; });
-      if (bs.length) o.branches = bs;
-    }
-    if (n.x || n.y) { o.x = n.x; o.y = n.y; }
-    return o;
-  }
-  function serializeFlow(f) {
-    return { id: f.id || '', name: f.name || '', start: f.start || '', nodes: (f.nodes || []).map(serializeNode) };
-  }
+  var serializeFlow = FDCore.serializeFlow;
   function toApiFlow() {
     var notifyEl = document.getElementById('fd-notify');
     var out = serializeFlow({ id: (idInput.value || rootFlow.id || '').trim(),
