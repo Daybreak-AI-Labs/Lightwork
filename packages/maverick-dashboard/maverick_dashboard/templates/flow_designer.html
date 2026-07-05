@@ -37,7 +37,8 @@
   .k-agent { fill: #6366f1; } .k-action { fill: #0891b2; } .k-branch { fill: #d97706; }
   .k-foreach { fill: #7c3aed; } .k-parallel { fill: #db2777; } .k-approval { fill: #16a34a; }
   .k-delay { fill: #64748b; } .k-subflow { fill: #0d9488; }
-  .k-switch { fill: #ca8a04; } .k-setvar { fill: #4f46e5; } .k-try { fill: #b91c1c; }
+  .k-switch { fill: #b45309; } .k-while { fill: #8b5cf6; } .k-wait_event { fill: #0369a1; }
+  .k-scope { fill: #4d7c0f; } .k-setvar { fill: #4f46e5; }
   /* live run overlay */
   .fd-node.run-ok rect.card { stroke: var(--success, #16a34a); stroke-width: 2.5; }
   .fd-node.run-err rect.card { stroke: var(--danger, #dc2626); stroke-width: 2.5; }
@@ -68,6 +69,15 @@
               border: 1px solid var(--border); border-radius: 999px; background: var(--surface-sunken);
               cursor: pointer; color: var(--muted); }
   .fd__pill:hover { border-color: var(--accent); color: var(--text); }
+  /* marquee multi-select (shift-drag on empty canvas) */
+  #fd-marquee { fill: color-mix(in srgb, var(--accent) 12%, transparent); stroke: var(--accent);
+                stroke-width: 1; stroke-dasharray: 4 3; pointer-events: none; }
+  /* minimap (bottom-left overview; click to jump) */
+  .fd__minimap { position: absolute; left: 8px; bottom: 8px; z-index: 2; width: 160px; height: 110px;
+                 background: var(--surface); border: 1px solid var(--border); border-radius: var(--radius);
+                 opacity: .92; cursor: pointer; }
+  .fd__minimap rect.mini-node { fill: var(--muted); }
+  .fd__minimap rect.mini-view { fill: none; stroke: var(--accent); stroke-width: 1.5; }
   /* copilot chat drawer (over the canvas' right edge) */
   .fd__chat { display: none; position: absolute; top: 8px; right: 8px; bottom: 8px; width: 320px;
               z-index: 3; background: var(--surface); border: 1px solid var(--border);
@@ -111,6 +121,10 @@
     <button class="btn btn--ghost" type="button" id="fd-undo" title="Undo (Ctrl+Z)">↶</button>
     <button class="btn btn--ghost" type="button" id="fd-redo" title="Redo (Ctrl+Shift+Z)">↷</button>
     <button class="btn btn--ghost" type="button" id="fd-fit" title="Zoom to fit">⛶</button>
+    <button class="btn btn--ghost" type="button" id="fd-triggers" title="Everything that starts this flow">⚡ Triggers</button>
+    <button class="btn btn--ghost" type="button" id="fd-export" title="Download this flow as JSON">⬇</button>
+    <button class="btn btn--ghost" type="button" id="fd-import-json" title="Load a flow from a JSON file">⬆</button>
+    <input type="file" id="fd-import-file" accept=".json,application/json" hidden aria-label="Flow JSON file" />
     <button class="btn btn--ghost" type="button" id="fd-chat-toggle" title="Build and fix this flow by chatting">💬 Copilot</button>
     <span class="fd__msg" id="fd-msg" aria-live="polite"></span>
     <span class="fd__msg" id="fd-signal" hidden title="Share of triggered runs that completed successfully"></span>
@@ -126,14 +140,17 @@
     <button class="btn btn--ghost" type="button" data-add="agent">🧠 Agent</button>
     <button class="btn btn--ghost" type="button" data-add="action">⚙️ Action</button>
     <button class="btn btn--ghost" type="button" data-add="branch">🔀 Branch</button>
+    <button class="btn btn--ghost" type="button" data-add="switch">🔃 Switch</button>
     <button class="btn btn--ghost" type="button" data-add="approval">✅ Approval</button>
     <button class="btn btn--ghost" type="button" data-add="delay">⏱ Delay</button>
+    <button class="btn btn--ghost" type="button" data-add="wait_event">📥 Wait for event</button>
     <button class="btn btn--ghost" type="button" data-add="foreach">🔁 For-each</button>
+    <button class="btn btn--ghost" type="button" data-add="while">🔄 While</button>
     <button class="btn btn--ghost" type="button" data-add="parallel">🔱 Parallel</button>
+    <button class="btn btn--ghost" type="button" data-add="scope">🛡 Try/catch</button>
     <button class="btn btn--ghost" type="button" data-add="subflow">📎 Sub-flow</button>
     <button class="btn btn--ghost" type="button" data-add="switch">🔃 Switch</button>
     <button class="btn btn--ghost" type="button" data-add="setvar">📝 Set data</button>
-    <button class="btn btn--ghost" type="button" data-add="try">🛡️ Try / catch</button>
   </div>
 
   <div class="fd__canvas-wrap">
@@ -161,8 +178,10 @@
         <g id="fd-edges"></g>
         <g id="fd-nodes"></g>
         <path id="fd-temp-edge" class="fd-edge" style="display:none;"></path>
+        <rect id="fd-marquee" style="display:none;"></rect>
       </g>
     </svg>
+    <svg id="fd-minimap" class="fd__minimap" viewBox="0 0 160 110" aria-label="Flow overview map"></svg>
   </div>
 
   <div class="fd__props" id="fd-props">
@@ -170,6 +189,7 @@
   </div>
 </div>
 
+<script id="fd-seed" type="application/json">{{ (seed_flow or none) | tojson }}</script>
 <script>
 {% include "flow_designer_core.js" %}
 </script>

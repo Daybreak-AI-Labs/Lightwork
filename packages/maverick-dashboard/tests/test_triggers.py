@@ -168,6 +168,52 @@ def test_webhook_fires_flow_trigger_with_idempotent_delivery(monkeypatch, tmp_pa
         assert r2.json()["run_id"] == out["run_id"]
 
 
+def test_webhook_event_resume_continues_a_waiting_run(monkeypatch, tmp_path):
+    _isolate(monkeypatch, tmp_path)
+    _configured(monkeypatch)
+    monkeypatch.setenv("MAVERICK_FLOWS", "1")
+    from maverick.flow import store
+    from maverick_dashboard import automation_queue as aq
+    monkeypatch.setattr(aq, "_queue", None)
+    store.save_run(store.FlowRun(run_id="wr1", flow_id="anyflow",
+                                 status="paused_event", cursor="w"))
+    body = json.dumps({"resume": "wr1", "data": {"payload": "cb-1"}}).encode()
+    r = _client().post("/webhook/run", content=body,
+                       headers={**_sign_headers(body), "Content-Type": "application/json"})
+    assert r.status_code == 202, r.text
+    jobs = [j for j in aq.queue().list(status="pending") if j.kind == aq.FLOW_RESUME_KIND]
+    assert len(jobs) == 1
+    assert jobs[0].payload["run_id"] == "wr1"
+    assert jobs[0].payload["inputs"] == {"payload": "cb-1"}
+    # a run that isn't waiting for an event can't be event-resumed
+    store.save_run(store.FlowRun(run_id="wr2", flow_id="anyflow", status="completed"))
+    body2 = json.dumps({"resume": "wr2"}).encode()
+    r2 = _client().post("/webhook/run", content=body2,
+                        headers={**_sign_headers(body2), "Content-Type": "application/json"})
+    assert r2.status_code == 409
+
+
+def test_webhook_event_resume_dedupes_repeat_delivery_id(monkeypatch, tmp_path):
+    _isolate(monkeypatch, tmp_path)
+    _configured(monkeypatch)
+    monkeypatch.setenv("MAVERICK_FLOWS", "1")
+    from maverick.flow import store
+    from maverick_dashboard import automation_queue as aq
+    monkeypatch.setattr(aq, "_queue", None)
+    store.save_run(store.FlowRun(run_id="wd1", flow_id="anyflow",
+                                 status="paused_event", cursor="w"))
+    payload = {"resume": "wd1", "data": {"payload": "x"}, "id": "evt-dup"}
+    body = json.dumps(payload).encode()
+    r1 = _client().post("/webhook/run", content=body,
+                        headers={**_sign_headers(body), "Content-Type": "application/json"})
+    assert r1.status_code == 202
+    # same delivery id again -> 409 duplicate (the dedup the trigger paths have)
+    body2 = json.dumps(payload).encode()
+    r2 = _client().post("/webhook/run", content=body2,
+                        headers={**_sign_headers(body2), "Content-Type": "application/json"})
+    assert r2.status_code == 409 and "duplicate" in r2.json()["detail"]
+
+
 def test_webhook_flow_trigger_when_engine_off_is_409(monkeypatch, tmp_path):
     _isolate(monkeypatch, tmp_path)
     _configured(monkeypatch)

@@ -1710,6 +1710,138 @@ def harness_run(model: str | None, all_models: bool, limit: int, retire: bool,
     _echo_harness_cycle(report, retired)
 
 
+@harness.command("transfer")
+@click.option("--from", "source", required=True,
+              help="Source model whose graduated guidance to try elsewhere.")
+@click.option("--to", "targets", multiple=True,
+              help="Target model(s); default: every other configured role model.")
+@click.option("--force", is_flag=True,
+              help="Ignore the tried-memory and re-attempt already-judged pairs.")
+def harness_transfer(source: str, targets: tuple[str, ...], force: bool) -> None:
+    """Try one model's PROVEN guidance on other fleet models — a governed
+    experiment, not an assumption.
+
+    Each graduated (non-canary, not-relapsing) model-wide line of the source is
+    validated against the target's own eval corpus through the full floors and
+    the promotion gate, landing as a CANARY so real run outcomes adjudicate it.
+    Attempts are one-shot per (target, line) — re-running spends nothing on
+    pairs already judged (--force overrides). Requires [self_harness] enable,
+    an eval_corpus, and [self_improvement] enable to actually promote.
+    """
+    from .. import self_harness
+    from .. import self_improvement_runner as runner
+    if not self_harness.enabled():
+        raise click.ClickException(
+            "self-harness is off. Set [self_harness] enable = true or "
+            "MAVERICK_SELF_HARNESS=1.")
+    if not self_harness.settings().get("eval_corpus"):
+        raise click.ClickException(
+            "no [self_harness] eval_corpus configured — transfer validates "
+            "against the target's corpus cases, so it needs one.")
+    # Resolve the target list HERE so an empty report can only mean an empty
+    # fleet, never a swallowed runner failure (raise_errors surfaces those).
+    resolved = list(targets) or [m for m in runner.harness_fleet_models()
+                                 if m != source]
+    if not resolved:
+        raise click.ClickException(
+            "no transfer targets: the fleet has no other configured models.")
+    report = runner.run_self_harness_transfer(
+        source, targets=resolved, force=force, raise_errors=True)
+    for tgt in sorted(report):
+        res = report[tgt]
+        click.echo(f"{source} -> {tgt}: attempted={len(res['attempted'])} "
+                   f"promoted={len(res['promoted'])}")
+        for ln in res["promoted"]:
+            click.echo(f"    + (canary) {ln}")
+        for s in res["skipped"][:10]:
+            click.echo(f"    - {s}")
+
+
+@harness.group("corpus")
+def harness_corpus() -> None:
+    """Bootstrap and review the eval corpus from real run history."""
+
+
+def _corpus_key_and_path(model: str | None) -> tuple[str, str]:
+    from ..self_harness import settings
+    corpus_path = settings().get("eval_corpus")
+    if not corpus_path:
+        raise click.ClickException("no [self_harness] eval_corpus configured.")
+    if model:
+        return model, corpus_path
+    from ..llm import model_for_role
+    return model_for_role("orchestrator"), corpus_path
+
+
+@harness_corpus.command("harvest")
+@click.option("--model", default=None,
+              help="Corpus key to harvest for (default: the orchestrator model).")
+@click.option("--auto", is_flag=True,
+              help="Merge straight into the live corpus instead of staging "
+                   "for review.")
+@click.pass_context
+def corpus_harvest_cmd(ctx, model: str | None, auto: bool) -> None:
+    """Mine {goal, expected} eval cases from HINDSIGHT PAIRS — goals that
+    failed (a reflexion exists) and whose wording later ran to done. The
+    succeeded goal's text becomes the case; a fragment of its recorded result
+    becomes the expected hint. Staged for `corpus review` unless --auto.
+    """
+    from .. import self_improvement_runner as runner
+    from ..world_model import open_world
+    key, corpus_path = _corpus_key_and_path(model)
+    n = runner.run_corpus_harvest(
+        open_world(ctx.obj["db"]), mode=("auto" if auto else "propose"),
+        key=key, corpus_path=corpus_path, raise_errors=True)
+    if auto:
+        click.echo(f"{n} candidate case(s) merged into the corpus.")
+    else:
+        click.echo(f"{n} candidate case(s) staged; review with "
+                   "`maverick self-harness corpus review`.")
+
+
+@harness_corpus.command("review")
+@click.option("--model", default=None,
+              help="Corpus key to review (default: the orchestrator model).")
+@click.option("--accept", "accepts", multiple=True, type=int,
+              help="Accept a listed candidate (1-based; repeatable).")
+@click.option("--reject", "rejects", multiple=True, type=int,
+              help="Reject a listed candidate (1-based; repeatable).")
+@click.option("--accept-all", is_flag=True, help="Accept every pending candidate.")
+def corpus_review_cmd(model: str | None, accepts: tuple[int, ...],
+                      rejects: tuple[int, ...], accept_all: bool) -> None:
+    """List staged corpus candidates, or resolve them: accepted cases merge
+    into the LIVE corpus (the loop's ground truth — human-gated by default),
+    rejected ones are dropped, the rest stay pending.
+    """
+    from .. import self_harness_eval as ev
+    key, corpus_path = _corpus_key_and_path(model)
+    if not (accepts or rejects or accept_all):
+        rows = ev.load_pending(corpus_path).get(key, [])
+        if not rows:
+            click.echo("no pending corpus candidates.")
+            return
+        click.echo(f"{len(rows)} pending candidate(s) for {key!r}:")
+        for i, c in enumerate(rows, 1):
+            click.echo(f"  {i}. {c['goal'].splitlines()[0][:70]}")
+            click.echo(f"     expected: {c['expected']}")
+        return
+    try:
+        res = ev.resolve_pending(corpus_path, key, accept=list(accepts),
+                                 reject=list(rejects), accept_all=accept_all)
+    except ValueError as e:
+        raise click.ClickException(str(e)) from e
+    # Echo WHAT was resolved, not just counts -- indexes rebase between
+    # invocations, so a mis-target must be visible immediately.
+    for g in res["accepted_goals"]:
+        click.echo(f"  + accepted: {g.splitlines()[0][:70]}")
+    for g in res["rejected_goals"]:
+        click.echo(f"  - rejected: {g.splitlines()[0][:70]}")
+    dup = (f", {res['duplicates']} already live/unlabeled"
+           if res["duplicates"] else "")
+    click.echo(f"merged {res['merged']} into the corpus{dup}, "
+               f"rejected {res['rejected']} (remembered).")
+
+
 @harness.command("conflicts")
 @click.option("--model", default=None, help="Only check this model's guidance.")
 @click.option("--semantic", is_flag=True,

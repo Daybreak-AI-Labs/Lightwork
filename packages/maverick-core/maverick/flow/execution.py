@@ -19,17 +19,17 @@ from typing import Any
 from . import node_outcomes, store
 from .ir import Flow, FlowNode
 from .runner import (
+    PAUSED_STATUSES,
     STATUS_COMPLETED,
     STATUS_FAILED,
     STATUS_PAUSED_APPROVAL,
-    STATUS_PAUSED_DELAY,
     run_flow,
 )
 
 STATUS_RUNNING = "running"   # written while a run is executing (was: stuck on "queued")
 TRIGGER_NODE = "__trigger__"  # reserved node id under which a trigger's run-outcome is grounded
 
-_RESUMABLE = (STATUS_PAUSED_APPROVAL, STATUS_PAUSED_DELAY)
+_RESUMABLE = PAUSED_STATUSES
 
 
 class FlowNotResumable(ValueError):
@@ -168,9 +168,31 @@ def execute(flow: Flow, *, agent_runner: AgentRunner, action_runner: ActionRunne
     # Per-node run trace for the designer overlay. Seeded from the prior run on
     # resume so the pre-pause nodes' status survives across the pause.
     node_states: dict = dict(prior.nodes) if (resume_run_id and prior) else {}
+    # Wall-clock per work node (accumulated across retries), measured at the
+    # executor seam so the pure runner's on_node contract stays unchanged.
+    durations: dict[str, float] = {}
+    # A concurrent foreach runs the SAME body node ids on several threads through
+    # this shared sink; guard the trace mutations so the duration read-modify-
+    # write can't lose updates.
+    import threading as _threading
+    trace_lock = _threading.Lock()
+
+    def _timed(node_id: str, fn, *args):
+        import time as _time
+        t0 = _time.perf_counter()
+        try:
+            return fn(*args)
+        finally:
+            dt = _time.perf_counter() - t0
+            with trace_lock:
+                durations[node_id] = durations.get(node_id, 0.0) + dt
 
     def _on_node(node: FlowNode, status: str, outcome: float | None) -> None:
-        node_states[node.id] = {"status": status, "outcome": outcome}
+        with trace_lock:
+            entry: dict = {"status": status, "outcome": outcome}
+            if node.id in durations:
+                entry["seconds"] = round(durations[node.id], 3)
+            node_states[node.id] = entry
         if outcome is not None and record_outcomes:
             node_outcomes.record(flow.id, node.id, node.kind, outcome)
 
@@ -201,9 +223,9 @@ def execute(flow: Flow, *, agent_runner: AgentRunner, action_runner: ActionRunne
 
     res = run_flow(
         flow,
-        agent_fn=lambda node, brief, d: _call_agent(agent_runner, brief, d, node.timeout,
-                                                    flow_id=flow.id, node_id=node.id),
-        action_fn=lambda node, params, d: action_runner(node.tool, params, d),
+        agent_fn=lambda node, brief, d: _timed(node.id, lambda: _call_agent(
+            agent_runner, brief, d, node.timeout, flow_id=flow.id, node_id=node.id)),
+        action_fn=lambda node, params, d: _timed(node.id, lambda: action_runner(node.tool, params, d)),
         approve_fn=approve_fn, data=data, resume=resume, on_node=_on_node, now=now,
         # A subflow node resolves to another SAVED flow; the runner's flow_stack
         # guards against a cyclic reference (this loader stays a plain lookup).

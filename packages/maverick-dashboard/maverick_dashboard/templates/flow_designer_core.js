@@ -5,9 +5,10 @@ var FDCore = (function () {
   'use strict';
   var NODE_DEFAULTS = {
     params: {}, brief: '', tool: '', condition: '', if_true: null, if_false: null,
-    items: '', var: 'item', limit: 0, concurrency: 1, prompt: '', seconds: 0, flow_ref: '',
+    cases: [], items: '', var: 'item', limit: 0, concurrent: false, prompt: '',
+    choices: [], seconds: 0, flow_ref: '',
     retries: 0, retry_backoff: 0, on_error: null, timeout: 0, output: '', label: '',
-    cases: [], assignments: {}, body: null, branches: [], next: null
+    assignments: {}, body: null, branches: [], next: null
   };
   var SCALARS = ['next', 'tool', 'brief', 'condition', 'if_true', 'if_false',
     'items', 'var', 'prompt', 'flow_ref', 'on_error', 'output', 'label'];
@@ -36,8 +37,9 @@ var FDCore = (function () {
     if (n.retry_backoff) o.retry_backoff = n.retry_backoff;
     if (n.timeout) o.timeout = n.timeout;
     if (n.limit) o.limit = n.limit;
-    if (n.concurrency && n.concurrency !== 1) o.concurrency = n.concurrency;
+    if (n.concurrent) o.concurrent = true;
     if (n.cases && n.cases.length) o.cases = n.cases;
+    if (n.choices && n.choices.length) o.choices = n.choices;
     if (n.assignments && Object.keys(n.assignments).length) o.assignments = n.assignments;
     if (n.body && n.body.nodes && n.body.nodes.length) o.body = serializeFlow(n.body);
     if (n.branches && n.branches.length) {
@@ -91,6 +93,48 @@ var FDCore = (function () {
     return keys;
   }
 
+  // Client-side structural validation -- the same rules the server's
+  // Flow.validate() enforces, so a broken graph is flagged BEFORE the save
+  // round-trip. Returns a list of human-readable problems (empty = valid).
+  function validateFlow(f) {
+    var errs = [];
+    var nodes = f.nodes || [];
+    if (!nodes.length) return ['flow has no nodes'];
+    var ids = {};
+    nodes.forEach(function (n) { ids[n.id] = true; });
+    if (!f.start || !ids[f.start]) errs.push('start node "' + f.start + '" is not in the flow');
+    nodes.forEach(function (n) {
+      ['next', 'if_true', 'if_false', 'on_error'].forEach(function (k) {
+        if (n[k] != null && !ids[n[k]]) errs.push(n.id + ': ' + k + ' points at unknown node "' + n[k] + '"');
+      });
+      if (n.kind === 'action' && !n.tool) errs.push('action ' + n.id + ' has no tool');
+      if (n.kind === 'agent' && !n.brief) errs.push('agent ' + n.id + ' has no brief');
+      if (n.kind === 'branch' && !n.condition) errs.push('branch ' + n.id + ' has no condition');
+      if (n.kind === 'switch') {
+        if (!n.condition) errs.push('switch ' + n.id + ' has no key');
+        if (!(n.cases && n.cases.length)) errs.push('switch ' + n.id + ' has no cases');
+        (n.cases || []).forEach(function (c, i) {
+          if (c.to != null && !ids[c.to]) errs.push('switch ' + n.id + ' case ' + i + ' points at unknown node "' + c.to + '"');
+        });
+      }
+      if (n.kind === 'while') {
+        if (!n.condition) errs.push('while ' + n.id + ' has no condition');
+        if (!(n.body && n.body.nodes && n.body.nodes.length)) errs.push('while ' + n.id + ' has an empty body');
+      }
+      if (n.kind === 'scope' && !(n.body && n.body.nodes && n.body.nodes.length)) errs.push('scope ' + n.id + ' has an empty body');
+      if (n.kind === 'wait_event' && !n.prompt) errs.push('wait ' + n.id + ' has no prompt');
+      if (n.kind === 'foreach') {
+        if (!n.items) errs.push('foreach ' + n.id + ' has no items key');
+        if (!(n.body && n.body.nodes && n.body.nodes.length)) errs.push('foreach ' + n.id + ' has an empty body');
+      }
+      if (n.kind === 'parallel' && !(n.branches && n.branches.some(function (b) { return b && b.nodes && b.nodes.length; })))
+        errs.push('parallel ' + n.id + ' has no branches');
+      if (n.kind === 'approval' && !n.prompt) errs.push('approval ' + n.id + ' has no prompt');
+      if (n.kind === 'subflow' && !n.flow_ref) errs.push('subflow ' + n.id + ' has no flow reference');
+    });
+    return errs;
+  }
+
   // The view {x, y, k} that fits every node into a cw x ch canvas with padding.
   // Zoom is clamped to the designer's wheel range; an empty flow gets the
   // default view.
@@ -114,7 +158,8 @@ var FDCore = (function () {
 
   return { normalizeNode: normalizeNode, serializeNode: serializeNode,
            serializeFlow: serializeFlow, cloneFlow: cloneFlow,
-           upstreamOutputs: upstreamOutputs, fitView: fitView };
+           upstreamOutputs: upstreamOutputs, fitView: fitView,
+           validateFlow: validateFlow };
 })();
 
 if (typeof module !== 'undefined' && module.exports) module.exports = FDCore;

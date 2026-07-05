@@ -53,6 +53,9 @@
         enable</code> is set.
       {% endif %}
     </p>
+    {% for key, n in pending_corpus | dictsort %}
+      <p class="badge info" style="display:inline-block">📥 <code>{{ key }}</code>: {{ n }} harvested corpus candidate{{ '' if n == 1 else 's' }} awaiting <code>maverick self-harness corpus review</code></p>
+    {% endfor %}
     {% if harness %}
       {% for h in harness %}
         <h3><code>{{ h.model_id }}</code> <span class="muted">({{ h.lines | length }} line{{ '' if h.lines | length == 1 else 's' }})</span></h3>
@@ -68,7 +71,7 @@
               <br><span class="muted">why: {{ rec.signature }}{% if rec.held_out_delta is not none and rec.samples %} · held-out {{ '%+.3g' | format(rec.held_out_delta) }} over {{ rec.samples }} samples{% endif %}{% if rec.last_recalled_at %} · in use{% endif %}</span>
             {% endif %}
             {% if rec.rate is defined and rec.rate is not none %}
-              <br><span class="muted">outcomes: {{ rec.success }}✓ / {{ rec.failure }}✗ · {{ '%.0f%%' | format(rec.rate * 100) }} success</span>
+              <br><span class="muted">outcomes: {{ rec.success }}✓ / {{ rec.failure }}✗ · {{ '%.0f%%' | format(rec.rate * 100) }} success{% if rec.recent_rate is defined and rec.recent_rate is not none %} · recent {{ rec.recent_success }}✓/{{ rec.recent_failure }}✗ ({{ '%.0f%%' | format(rec.recent_rate * 100) }}){% endif %}</span>
             {% endif %}
           </li>
         {% else %}

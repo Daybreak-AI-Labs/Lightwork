@@ -110,6 +110,10 @@ class ImportRunIn(BaseModel):
     dry_run: bool = False
     activate_schedules: bool | None = None
     create_webhook_triggers: bool = False
+    # Also lower each automation to a real flow GRAPH (branch/loop structure
+    # preserved where the source exposes it) and save it, returning the per-step
+    # migration fidelity report. Requires the flow engine.
+    as_flows: bool = False
 
 
 class ImportResultOut(BaseModel):
@@ -122,6 +126,10 @@ class ImportResultOut(BaseModel):
     schedule: dict | None = None
     tools: list[str] = Field(default_factory=list)
     notes: list[str] = Field(default_factory=list)
+    # Set when as_flows: the saved flow's id + the per-step fidelity log
+    # ({step, node, kind, fidelity: preserved|approximated, note}).
+    flow: str | None = None
+    fidelity: list[dict] = Field(default_factory=list)
 
 
 class ImportRunOut(BaseModel):
@@ -293,8 +301,12 @@ class FlowRunIn(BaseModel):
 class FlowResumeIn(BaseModel):
     """Resume a paused flow run: the human verdict on the approval node, plus any
     free-form inputs to merge into the run data (so an approval can also collect
-    a corrected value or a note, not just yes/no)."""
-    decision: str = Field(default="approved", pattern="^(approved|rejected)$")
+    a corrected value or a note, not just yes/no). Beyond approved/rejected the
+    verdict may be one of the node's declared ``choices`` (the runner validates
+    against them; an unlisted verdict pauses again). A paused_event run ignores
+    the decision -- the event's ``inputs`` are the point."""
+    decision: str = Field(default="approved", max_length=40,
+                          pattern=r"^[A-Za-z0-9][A-Za-z0-9 _-]{0,39}$")
     inputs: dict = Field(default_factory=dict)
 
 

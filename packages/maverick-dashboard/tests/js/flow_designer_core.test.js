@@ -115,20 +115,47 @@ test('upstreamOutputs follows on_error routing and survives cycles', () => {
   assert.deepEqual(FDCore.upstreamOutputs(flow, 'h'), ['r']);
 });
 
-test('serializeNode carries switch cases, setvar assignments, foreach concurrency', () => {
-  const sw = FDCore.serializeNode(FDCore.normalizeNode(
-    { id: 's', kind: 'switch', cases: [{ condition: 'x == 1', goto: 'g' }] }, 0));
-  assert.deepEqual(sw.cases, [{ condition: 'x == 1', goto: 'g' }]);
+test('serializeNode carries setvar assignments', () => {
   const sv = FDCore.serializeNode(FDCore.normalizeNode(
     { id: 'v', kind: 'setvar', assignments: { n: '{{add(c,1)}}' } }, 0));
   assert.deepEqual(sv.assignments, { n: '{{add(c,1)}}' });
-  const fe = FDCore.serializeNode(FDCore.normalizeNode(
-    { id: 'f', kind: 'foreach', items: 'r', concurrency: 4 }, 0));
-  assert.equal(fe.concurrency, 4);
-  // concurrency of 1 (the default) is omitted
-  const fe1 = FDCore.serializeNode(FDCore.normalizeNode(
-    { id: 'f', kind: 'foreach', items: 'r', concurrency: 1 }, 0));
-  assert.ok(!('concurrency' in fe1));
+});
+
+test('serializeNode keeps switch cases, approval choices, concurrent flag', () => {
+  const o = FDCore.serializeNode(FDCore.normalizeNode({
+    id: 's', kind: 'switch', condition: 'k',
+    cases: [{ value: 'a', to: 'x' }], choices: [], concurrent: false }, 0));
+  assert.deepEqual(o.cases, [{ value: 'a', to: 'x' }]);
+  assert.ok(!('choices' in o) && !('concurrent' in o));   // empty/false dropped
+  const f = FDCore.serializeNode(FDCore.normalizeNode({
+    id: 'l', kind: 'foreach', items: 'r', concurrent: true,
+    body: { id: '', name: '', start: 'n', nodes: [{ id: 'n', kind: 'agent', brief: 'b' }] } }, 0));
+  assert.equal(f.concurrent, true);
+  const a = FDCore.serializeNode(FDCore.normalizeNode({
+    id: 'ap', kind: 'approval', prompt: 'p', choices: ['ship', 'hold'] }, 0));
+  assert.deepEqual(a.choices, ['ship', 'hold']);
+});
+
+test('validateFlow flags the same structural problems the server does', () => {
+  const bad = {
+    id: 'f', name: 'F', start: 'zzz',
+    nodes: [
+      FDCore.normalizeNode({ id: 'a', kind: 'agent', next: 'ghost' }, 0),
+      FDCore.normalizeNode({ id: 's', kind: 'switch', condition: '', cases: [{ value: 'x', to: 'ghost' }] }, 1),
+      FDCore.normalizeNode({ id: 'w', kind: 'wait_event' }, 2),
+    ]
+  };
+  const errs = FDCore.validateFlow(bad);
+  assert.ok(errs.some(e => e.includes('start node')));
+  assert.ok(errs.some(e => e.includes('unknown node "ghost"')));
+  assert.ok(errs.some(e => e.includes('has no brief')));
+  assert.ok(errs.some(e => e.includes('has no key')));
+  assert.ok(errs.some(e => e.includes('has no prompt')));
+  const good = {
+    id: 'f', name: 'F', start: 'a',
+    nodes: [FDCore.normalizeNode({ id: 'a', kind: 'agent', brief: 'do it' }, 0)]
+  };
+  assert.deepEqual(FDCore.validateFlow(good), []);
 });
 
 test('fitView centers and clamps zoom', () => {

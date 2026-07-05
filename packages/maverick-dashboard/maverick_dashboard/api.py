@@ -963,27 +963,51 @@ _FLOW_DRAFT_TOOLS = (
 )
 
 
+_TOOL_INDEX_CACHE: list[dict] | None = None
+_TOOL_INDEX_LOCK = threading.Lock()
+
+
+def _live_tool_index() -> list[dict]:
+    """The full flattened tool list ({name, description, params}) built ONCE and
+    memoized. The registry (built-ins + every enabled connector) is process-
+    stable config, so rebuilding hundreds of tool objects on every picker
+    request -- once per debounced keystroke on the search path -- was wasted
+    work. Both the curated catalog and the ?q= search read this cache. Cleared
+    only by a process restart, which is also when connector config changes."""
+    global _TOOL_INDEX_CACHE
+    if _TOOL_INDEX_CACHE is not None:
+        return _TOOL_INDEX_CACHE
+    try:
+        from maverick.sandbox import LocalBackend
+        from maverick.tools import base_registry
+        live = base_registry(_world(), LocalBackend(), goal_id=None).all()
+    except Exception:  # pragma: no cover -- registry build varies by env
+        live = []
+    idx = []
+    for t in live:
+        params = []
+        if isinstance(t.input_schema, dict):
+            params = list((t.input_schema.get("properties") or {}).keys())[:12]
+        idx.append({"name": t.name, "description": (t.description or "")[:200],
+                    "params": params})
+    with _TOOL_INDEX_LOCK:
+        if _TOOL_INDEX_CACHE is None:
+            _TOOL_INDEX_CACHE = idx
+    return _TOOL_INDEX_CACHE
+
+
 def _flow_tool_catalog() -> list[dict]:
     """The curated connector catalog for the designer's action picker + the NL
     drafter's grounding: each tool's name, one-line description, and param names
     (from its input schema). Best-effort -- a tool absent from the live registry
     still appears by name so the picker/drafter can offer it."""
-    tools = {}
-    try:
-        from maverick.sandbox import LocalBackend
-        from maverick.tools import base_registry
-        tools = {t.name: t for t in base_registry(_world(), LocalBackend(), goal_id=None).all()}
-    except Exception:  # pragma: no cover -- registry build varies by env; fall back to names
-        tools = {}
+    by_name = {t["name"]: t for t in _live_tool_index()}
     out = []
     for name in _FLOW_DRAFT_TOOLS:
-        t = tools.get(name)
-        params = []
-        if t is not None and isinstance(t.input_schema, dict):
-            params = list((t.input_schema.get("properties") or {}).keys())[:12]
+        t = by_name.get(name)
         out.append({"name": name,
-                    "description": (t.description[:200] if t is not None else ""),
-                    "params": params})
+                    "description": (t["description"] if t is not None else ""),
+                    "params": (t["params"] if t is not None else [])})
     return out
 
 
@@ -1084,6 +1108,80 @@ async def get_flow_run_endpoint(request: Request, run_id: str) -> dict:
     return _run_out(_load_owned_run(request, run_id))
 
 
+@router.get("/flows/runs/{run_id}/events")
+async def flow_run_events_stream(request: Request, run_id: str) -> StreamingResponse:
+    """Server-Sent Events stream of a flow run's live state: one snapshot per
+    change (keyed on the run's ``updated`` stamp), ending with a terminal event
+    when the run completes/fails/rejects or parks on a human/event pause. The
+    canvas overlay and the run viewer prefer this over polling; both fall back
+    to polling when SSE is unavailable. Same slot cap + lifetime bound as the
+    goal-events stream, so open tabs can't exhaust the event loop."""
+    import asyncio as _asyncio
+    import json as _json
+
+    require_permission(request, "operate")
+    _require_flows()
+    _load_owned_run(request, run_id)     # 404 before holding a stream slot
+    from maverick.flow import store as flow_store
+
+    from maverick_dashboard._shared import _get_sse_semaphore
+    sem = _get_sse_semaphore()
+    if sem.locked():
+        raise HTTPException(status_code=503,
+                            detail="too many concurrent event streams; retry shortly",
+                            headers={"Retry-After": "5"})
+    await sem.acquire()
+
+    # completed/failed/rejected are final; a run parked on a human or an
+    # external event won't change until someone acts -- close the stream and
+    # let the page's actions (approve / resume) drive the next one.
+    end_states = ("completed", "failed", "rejected", "paused_approval", "paused_event")
+    poll, max_poll, max_seconds, heartbeat_every = 0.5, 5.0, 300.0, 30.0
+
+    async def generate():
+        started = _asyncio.get_running_loop().time()
+        last_stamp = None
+        interval, idle = poll, 0.0
+        yield "retry: 3000\n\n"
+        try:
+            while True:
+                if (_asyncio.get_running_loop().time() - started) >= max_seconds:
+                    yield "event: timeout\ndata: {\"detail\": \"stream lifetime exceeded\"}\n\n"
+                    return
+                # Stop re-reading the run file the moment the client goes away
+                # (a closed tab) instead of leaning solely on CancelledError
+                # timing -- matches the goal-events stream.
+                if await request.is_disconnected():
+                    return
+                run = await run_in_threadpool(flow_store.load_run, run_id)
+                if run is None:
+                    yield "event: error\ndata: {\"detail\": \"run vanished\"}\n\n"
+                    return
+                if run.updated != last_stamp:
+                    last_stamp = run.updated
+                    payload = _run_out(run)
+                    kind = "terminal" if run.status in end_states else "snapshot"
+                    yield f"event: {kind}\ndata: {_json.dumps(payload, default=str)}\n\n"
+                    if kind == "terminal":
+                        return
+                    interval, idle = poll, 0.0
+                else:
+                    idle += interval
+                    if idle >= heartbeat_every:
+                        yield ": heartbeat\n\n"
+                        idle = 0.0
+                    interval = min(max_poll, interval * 1.5)
+                await _asyncio.sleep(interval)
+        except _asyncio.CancelledError:
+            return
+        finally:
+            sem.release()
+
+    return StreamingResponse(
+        generate(), media_type="text/event-stream",
+        headers={"Cache-Control": "no-cache", "X-Accel-Buffering": "no"})
+
+
 @router.post("/flows/runs/{run_id}/resume")
 async def resume_flow_run_endpoint(request: Request, run_id: str,
                                    payload: FlowResumeIn) -> dict:
@@ -1093,7 +1191,8 @@ async def resume_flow_run_endpoint(request: Request, run_id: str,
     run = _load_owned_run(request, run_id)
     # Only a paused run may be resumed -- resuming a completed/rejected run would
     # re-run the flow or run a rejected node (409, not a silent no-op).
-    if run.status not in ("paused_approval", "paused_delay"):
+    from maverick.flow.runner import PAUSED_STATUSES
+    if run.status not in PAUSED_STATUSES:
         raise HTTPException(status_code=409,
                             detail=f"run is not paused (status {run.status})")
     from maverick_dashboard import automation_queue as aq
@@ -1118,7 +1217,12 @@ async def retry_flow_run_endpoint(request: Request, run_id: str,
     require_permission(request, "operate")
     _require_flows()
     run = _load_owned_run(request, run_id)
-    if run.status in ("queued", "running", "paused_approval", "paused_delay"):
+    # A still-in-flight run (queued/running or parked on ANY pause, including
+    # paused_event) must not be retried-from-scratch -- that would spawn a
+    # duplicate run alongside the live one. from_failure below is the only path
+    # that acts on a failed run.
+    from maverick.flow.runner import ACTIVE_STATUSES
+    if run.status in ACTIVE_STATUSES:
         raise HTTPException(status_code=409,
                             detail=f"run is still active (status {run.status}); nothing to retry")
     from maverick.flow import store
@@ -1141,13 +1245,84 @@ async def retry_flow_run_endpoint(request: Request, run_id: str,
 
 
 @router.get("/flows/tools")
-async def flow_tools_endpoint(request: Request) -> dict:
+async def flow_tools_endpoint(request: Request, q: str = "") -> dict:
     """The connector/action catalog for the designer's searchable tool picker:
-    name, description, and param names. Declared before ``/flows/{flow_id}`` so
-    the literal ``tools`` path isn't captured as a flow id."""
+    name, description, and param names. Without ``q``: the curated starter set.
+    With ``q``: a substring search over the FULL live tool registry (built-ins +
+    every enabled connector), so the picker reaches everything the action node
+    can actually call -- not just the curated list. Declared before
+    ``/flows/{flow_id}`` so the literal ``tools`` path isn't captured as a
+    flow id."""
     require_permission(request, "operate")
     _require_flows()
-    return {"tools": await run_in_threadpool(_flow_tool_catalog)}
+    q = q.strip().lower()[:80]
+    if not q:
+        return {"tools": await run_in_threadpool(_flow_tool_catalog)}
+
+    def _search():
+        out = [t for t in _live_tool_index()
+               if q in f"{t['name']} {t['description']}".lower()]
+        # name-prefix matches first, then name matches, then description-only
+        out.sort(key=lambda t: (not t["name"].lower().startswith(q),
+                                q not in t["name"].lower(), t["name"]))
+        return out[:50]
+    return {"tools": await run_in_threadpool(_search)}
+
+
+# Curated starter flows for the designer's gallery: small, runnable graphs a
+# user edits (or asks the copilot to change) instead of starting from a blank
+# canvas. Each is a plain Flow dict -- validated by the same save path as any
+# hand-built graph when the user saves it.
+_FLOW_GALLERY: tuple[dict, ...] = (
+    {
+        "id": "", "name": "Triage inbound issues", "start": "n0",
+        "description": "Summarize a new issue, escalate urgent ones, ask before posting.",
+        "nodes": [
+            {"id": "n0", "kind": "agent", "brief": "Summarize this issue and rate its urgency high/normal: {{title}} — {{body}}", "output": "summary", "next": "n1"},
+            {"id": "n1", "kind": "branch", "condition": "urgency == high", "if_true": "n2", "if_false": "n3"},
+            {"id": "n2", "kind": "approval", "prompt": "Escalate this to the on-call channel?", "next": "n3"},
+            {"id": "n3", "kind": "action", "tool": "slack_bot", "params": {"text": "{{summary}}"}},
+        ],
+    },
+    {
+        "id": "", "name": "Daily digest", "start": "n0",
+        "description": "On a schedule, gather updates and email a one-paragraph digest.",
+        "schedule": "0 9 * * *",
+        "nodes": [
+            {"id": "n0", "kind": "agent", "brief": "Gather yesterday's notable updates and write a one-paragraph digest.", "output": "digest", "next": "n1"},
+            {"id": "n1", "kind": "action", "tool": "email_tool", "params": {"body": "{{digest}}"}},
+        ],
+    },
+    {
+        "id": "", "name": "Process a list with review", "start": "n0",
+        "description": "Loop items concurrently, then a human signs off on the batch.",
+        "nodes": [
+            {"id": "n0", "kind": "foreach", "items": "rows", "var": "row", "concurrent": True, "output": "results", "next": "n1",
+             "body": {"id": "", "name": "per row", "start": "b0",
+                      "nodes": [{"id": "b0", "kind": "agent", "brief": "Handle {{row}}", "output": "r"}]}},
+            {"id": "n1", "kind": "approval", "prompt": "Batch processed — publish the results?", "next": "n2"},
+            {"id": "n2", "kind": "agent", "brief": "Publish the approved results: {{results}}"},
+        ],
+    },
+    {
+        "id": "", "name": "Wait for a callback", "start": "n0",
+        "description": "Kick off work, wait for an external system to call back, then finish.",
+        "nodes": [
+            {"id": "n0", "kind": "agent", "brief": "Submit the request described in {{request}}", "output": "submitted", "next": "n1"},
+            {"id": "n1", "kind": "wait_event", "prompt": "Waiting for the provider callback", "next": "n2"},
+            {"id": "n2", "kind": "agent", "brief": "Reconcile the callback payload {{payload}} with {{submitted}}", "output": "done"},
+        ],
+    },
+)
+
+
+@router.get("/flows/gallery")
+async def flow_gallery_endpoint(request: Request) -> dict:
+    """Starter flow graphs for the designer's gallery. Declared before
+    ``/flows/{flow_id}`` so the literal path isn't captured as a flow id."""
+    require_permission(request, "operate")
+    _require_flows()
+    return {"flows": [dict(f) for f in _FLOW_GALLERY]}
 
 
 @router.get("/flows/insights")
@@ -1661,20 +1836,38 @@ def _learned_snapshot(limit: int = 50) -> dict:
     return {
         "learned": learned, "generated_tools": tools,
         "harness": harness, "harness_enabled": harness_enabled,
+        "pending_corpus": _pending_corpus_counts(),
     }
+
+
+def _pending_corpus_counts() -> dict[str, int]:
+    """Harvested corpus candidates awaiting operator review, per corpus key --
+    so staged ground truth is visible, not forgotten. A CORPUS-key fact, kept
+    apart from the learned-guidance snapshot: the badge must show even when a
+    key has staged cases but no learned lines yet (the bootstrap case), and a
+    failure here must not blank the guidance list (or vice versa)."""
+    try:
+        from maverick.self_harness import settings
+        from maverick.self_harness_eval import load_pending
+        cpath = settings().get("eval_corpus")
+        if cpath:
+            return {k: len(v) for k, v in load_pending(cpath).items() if v}
+    except Exception as e:  # pragma: no cover -- pending count is advisory
+        log.debug("pending corpus snapshot failed: %s", e)
+    return {}
 
 
 def _harness_guidance() -> tuple[list[dict], bool]:
     """The self-harness per-model operating guidance recalled into prompts.
 
-    Returns ``([{model_id, lines}], enabled)``. This is the self-harness loop's
-    most prompt-impacting output, yet the /learned page surfaced only the
-    capability ledger -- an operator could see it ONLY via `maverick
-    self-harness show`. Read-only; ``list_learned`` reads the store regardless
-    of the toggle (so paused guidance is still inspectable), so we return the
-    ``enabled`` flag too -- stored guidance is NOT recalled into prompts until
-    the feature is on. Kept in its own try so a self-harness failure never
-    blanks the capability ledger, and vice versa."""
+    Returns ``([{model_id, lines, provenance, conflicts}], enabled)``. This is
+    the self-harness loop's most prompt-impacting output, yet the /learned page
+    surfaced only the capability ledger -- an operator could see it ONLY via
+    `maverick self-harness show`. Read-only; ``list_learned`` reads the store
+    regardless of the toggle (so paused guidance is still inspectable), so we
+    return the ``enabled`` flag too -- stored guidance is NOT recalled into
+    prompts until the feature is on. Kept in its own try so a self-harness
+    failure never blanks the capability ledger, and vice versa."""
     try:
         from maverick.self_harness import (
             detect_store_conflicts,
@@ -1710,6 +1903,9 @@ def _harness_guidance() -> tuple[list[dict], bool]:
                 if e:
                     rec["success"], rec["failure"] = e["success"], e["failure"]
                     rec["rate"] = e["rate"]
+                    rec["recent_success"] = e.get("recent_success")
+                    rec["recent_failure"] = e.get("recent_failure")
+                    rec["recent_rate"] = e.get("recent_rate")
                 rec["canary"] = rec["text"] in canaries
             return prov
 
@@ -2906,6 +3102,8 @@ async def import_run_endpoint(request: Request, payload: ImportRunIn) -> ImportR
         get_importer(payload.source)
     except ImporterError as e:
         raise HTTPException(status_code=400, detail=str(e)) from e
+    if payload.as_flows:
+        _require_flows()          # importing to graphs needs the flow engine
 
     # Definitions from the request (offline/connect) or a live fetch (env creds).
     if payload.definitions is not None:
@@ -2996,11 +3194,24 @@ async def import_run_endpoint(request: Request, payload: ImportRunIn) -> ImportR
                     webhook_trigger = rec["name"]
                 except ValueError as e:
                     res.notes.append(f"could not create webhook trigger: {e}")
+        flow_id = None
+        fidelity: list[dict] = []
+        if payload.as_flows:
+            # Lower to a real graph too: structure preserved where the source
+            # exposes it, each step's disposition logged -- the migration is
+            # never silently lossy.
+            from maverick.automation_import.to_flow import to_flow_with_report
+            from maverick.flow import store as flow_store
+            flow_graph, fidelity = to_flow_with_report(a)
+            if not payload.dry_run:
+                flow_store.save_flow(flow_graph)
+            flow_id = flow_graph.id
         results.append({
             "source": a.source, "name": a.name, "template": res.template_name,
             "created": res.created_template, "trigger": a.trigger.kind,
             "webhook_trigger": webhook_trigger, "schedule": res.schedule,
             "tools": res.tool_hints, "notes": res.notes,
+            "flow": flow_id, "fidelity": fidelity,
         })
 
     return ImportRunOut(
@@ -4761,7 +4972,11 @@ def _learning_snapshot(request: Request) -> dict:
     # single tenant must never see deployment-wide totals as if they were its own.
     if owner is None:
         try:
-            learned_n = len(_learned_snapshot().get("learned") or [])
+            # Count the ledger directly -- _learned_snapshot would also build
+            # the whole harness/provenance/pending view just to be discarded.
+            from maverick import self_learning
+            learned_n = len(self_learning.history(
+                limit=50, path=self_learning.LEARNED_PATH))
         except Exception:  # pragma: no cover - the moat view never 500s on a sub-read
             learned_n = 0
         accumulated["grounded_outcomes"] = consequence.count()

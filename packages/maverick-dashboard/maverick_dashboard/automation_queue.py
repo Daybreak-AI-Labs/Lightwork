@@ -488,10 +488,18 @@ def _handle_flow_sweep(_job=None) -> None:
         from maverick.flow import runner, store
         now = time.time()
         for run in store.list_runs(owner=None, limit=1000):
-            if (run.status == runner.STATUS_PAUSED_DELAY and run.resume_at
-                    and run.resume_at <= now):
+            if not (run.resume_at and run.resume_at <= now):
+                continue
+            if run.status == runner.STATUS_PAUSED_DELAY:
                 queue().enqueue(FLOW_RESUME_KIND, {
                     "flow_id": run.flow_id, "run_id": run.run_id, "owner": run.owner})
+            elif run.status == runner.STATUS_PAUSED_APPROVAL:
+                # An approval whose node set an expiry (node.timeout) resolves as
+                # REJECTED once it lapses -- fail closed, never silently approve.
+                queue().enqueue(FLOW_RESUME_KIND, {
+                    "flow_id": run.flow_id, "run_id": run.run_id, "owner": run.owner,
+                    "decision": "rejected"})
+            # paused_event runs are NEVER swept -- only their event resumes them.
     except Exception:  # pragma: no cover -- fail-open
         log.exception("flow delay sweep failed")
     # Also re-sync per-flow cron schedules from the store, so a flow scheduled

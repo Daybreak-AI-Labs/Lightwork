@@ -30,10 +30,12 @@ from .ir import (
     NODE_DELAY,
     NODE_FOREACH,
     NODE_PARALLEL,
+    NODE_SCOPE,
     NODE_SETVAR,
     NODE_SUBFLOW,
     NODE_SWITCH,
-    NODE_TRY,
+    NODE_WAIT,
+    NODE_WHILE,
     Flow,
     FlowNode,
 )
@@ -42,8 +44,21 @@ from .ir import (
 STATUS_COMPLETED = "completed"
 STATUS_PAUSED_APPROVAL = "paused_approval"
 STATUS_PAUSED_DELAY = "paused_delay"
+STATUS_PAUSED_EVENT = "paused_event"
 STATUS_REJECTED = "rejected"
 STATUS_FAILED = "failed"
+
+# The single source of truth for "which statuses mean a run is parked and
+# resumable" and "which statuses mean a run is still in flight". Every gate that
+# used to hand-list these literals (the resume/retry endpoints, the sweep, the
+# JS overlay) should consume these instead -- a new pause status is then added
+# in one place, not six.
+PAUSED_STATUSES = frozenset({
+    STATUS_PAUSED_APPROVAL, STATUS_PAUSED_DELAY, STATUS_PAUSED_EVENT,
+})
+ACTIVE_STATUSES = frozenset({"queued", "running"}) | PAUSED_STATUSES
+
+_WHILE_DEFAULT_CAP = 100   # while-loop iterations when the node sets no limit
 
 _VAR = re.compile(r"\{\{\s*(.+?)\s*\}\}")
 _COND = re.compile(r"^\s*(\S+)\s*(==|!=|>=|<=|>|<|contains)\s*(.+?)\s*$")
@@ -448,6 +463,68 @@ def _run_branch(node: FlowNode, data: dict, ctx: _Ctx) -> str | None:
 _FOREACH_DEFAULT_CAP = 1000   # runaway guard when a foreach sets no explicit limit
 
 
+def _run_switch(node: FlowNode, data: dict, ctx: _Ctx) -> str | None:
+    """n-way route: the value under the ``condition`` data key is compared (as
+    text) to each case's ``value``; the first match routes to its ``to``. No
+    match falls through to ``next`` (the default arm)."""
+    subject = _as_text(_dig(data, node.condition))
+    for case in node.cases:
+        if _as_text(case.get("value")) == subject:
+            ctx.on_node(node, f"case:{_as_text(case.get('value'))[:40]}", None)
+            to = case.get("to")
+            return to if to is not None else node.next
+    ctx.on_node(node, "default", None)
+    return node.next
+
+
+def _run_while(node: FlowNode, data: dict, ctx: _Ctx) -> str | None:
+    """Run the body sub-flow while the condition holds, on the SAME data dict
+    (so the body can change what the condition sees). Iterations are capped by
+    ``limit`` (default 100) as the runaway guard; the body may set ``_break``."""
+    cap = node.limit if node.limit and node.limit > 0 else _WHILE_DEFAULT_CAP
+    passes = 0
+    while passes < cap and eval_condition(node.condition, data):
+        _run_chain(node.body, data, ctx.nested(), node.body.start)
+        passes += 1
+        if data.get("_break"):
+            data.pop("_break", None)
+            break
+    if node.output:
+        data[node.output] = passes
+    ctx.on_node(node, "done", None)
+    return node.next
+
+
+def _run_wait(node: FlowNode, data: dict, ctx: _Ctx) -> str | None:
+    """Pause the run until an external event resumes it (a webhook delivery,
+    an API resume). Nested contexts can't pause, so there it is a no-op step
+    (the outer graph is where waiting lives, same as approvals)."""
+    if ctx.allow_pause:
+        ctx.on_node(node, "waiting", None)
+        raise _Pause("event", node, data)
+    # Nested (foreach/while/scope body, parallel branch): can't pause. Fail
+    # CLOSED like a nested approval rather than silently continuing -- otherwise
+    # downstream nodes run before the awaited event's data has arrived.
+    ctx.on_node(node, "skipped", None)
+    raise _Reject(node, data)
+
+
+def _run_scope(node: FlowNode, data: dict, ctx: _Ctx) -> str | None:
+    """try/catch: run the body on the shared data; if a body node raises, route
+    to ``on_error`` (the catch arm) instead of failing the whole run. Without an
+    ``on_error`` the failure propagates -- a try with no catch still fails."""
+    try:
+        _run_chain(node.body, data, ctx.nested(), node.body.start)
+    except _NodeError as e:
+        if node.on_error is None:
+            raise
+        data["_error"] = str(e)          # the catch arm can read what went wrong
+        ctx.on_node(node, "caught", 0.0)
+        return node.on_error
+    ctx.on_node(node, "done", None)
+    return node.next
+
+
 def _run_foreach(node: FlowNode, data: dict, ctx: _Ctx) -> str | None:
     items = list(_dig(data, node.items) or [])
     if node.limit and node.limit > 0:
@@ -458,11 +535,26 @@ def _run_foreach(node: FlowNode, data: dict, ctx: _Ctx) -> str | None:
         # SURFACE the truncation rather than silently firing 10k+ connector calls.
         items = items[:_FOREACH_DEFAULT_CAP]
         data["_foreach_truncated"] = True
-    conc = max(1, int(node.concurrency or 1))
-    if conc > 1 and len(items) > 1:
-        results = _foreach_concurrent(node, data, ctx, items, conc)
+    results = []
+    if node.concurrent and len(items) > 1:
+        # Concurrent iteration: each item gets an isolated data copy and its own
+        # branch context (independent cycle detection), on the same bounded pool
+        # the parallel node uses. Results keep ITEM ORDER; ``_break`` doesn't
+        # apply (iterations overlap, there is no "early" to stop at).
+        import concurrent.futures as _cf
+        subs = []
+        for item in items:
+            sub = dict(data)
+            sub[node.var] = item
+            subs.append(sub)
+        workers = min(len(subs), _PARALLEL_MAX_WORKERS)
+        with _cf.ThreadPoolExecutor(max_workers=workers) as ex:
+            futs = [ex.submit(_run_chain, node.body, sub, ctx.branched(), node.body.start)
+                    for sub in subs]
+            for f in futs:
+                f.result()
+        results = subs
     else:
-        results = []
         for item in items:
             sub = dict(data)
             sub[node.var] = item
@@ -479,25 +571,6 @@ def _run_foreach(node: FlowNode, data: dict, ctx: _Ctx) -> str | None:
         data[node.output] = results
     ctx.on_node(node, "done", None)
     return node.next
-
-
-def _foreach_concurrent(node: FlowNode, data: dict, ctx: _Ctx, items: list, conc: int) -> list:
-    """Run up to ``conc`` iterations at once ("apply to each with concurrency N").
-    Each iteration is isolated (its own data copy + flow_stack via ctx.branched());
-    results stay in input order. ``_break`` is a sequential-only feature and is
-    ignored here (all scheduled iterations run)."""
-    import concurrent.futures as _cf
-    subs = []
-    for item in items:
-        s = dict(data)
-        s[node.var] = item
-        subs.append(s)
-    with _cf.ThreadPoolExecutor(max_workers=min(conc, len(subs))) as ex:
-        futs = [ex.submit(_run_chain, node.body, s, ctx.branched(), node.body.start)
-                for s in subs]
-        for f in futs:
-            f.result()                       # wait all; re-raise the first error
-    return subs
 
 
 _PARALLEL_MAX_WORKERS = 8   # cap fan-out threads per parallel node
@@ -544,31 +617,29 @@ def _approval_outcome(decision: str) -> float | None:
 
 def _run_approval(node: FlowNode, data: dict, ctx: _Ctx) -> str | None:
     decision = ctx.approve_fn(node, data) if ctx.approve_fn else "pending"
+    # Ground the decided verdict (B7): approved=1.0 / rejected=0.0 / pending=None --
+    # the highest-value human signal for the self-rewrite loop.
     ctx.on_node(node, decision, _approval_outcome(decision))
-    if decision == "approved":
+    # "approved" -- or any verdict the node explicitly offers (a choice approval:
+    # "ship"/"hold"/"escalate") -- continues; the verdict is recorded to `output`
+    # so downstream nodes (a branch/switch) can route on it.
+    if decision == "approved" or (node.choices and decision in node.choices):
+        if node.output:
+            data[node.output] = decision
         return node.next
     if decision == "rejected":
         raise _Reject(node, data)
     if ctx.allow_pause:                    # pending + top level -> wait for a human
-        raise _Pause("approval", node, data)
+        # node.timeout on an approval is its EXPIRY: the delay sweep resolves a
+        # still-pending approval as rejected once resume_at passes (opt-in).
+        resume_at = ctx.now() + node.timeout if node.timeout and node.timeout > 0 else None
+        raise _Pause("approval", node, data, resume_at=resume_at)
     raise _Reject(node, data)              # nested can't pause -> treat as not approved
 
 
 def _run_delay(node: FlowNode, data: dict, ctx: _Ctx) -> str | None:
     if ctx.allow_pause and node.seconds > 0:
         raise _Pause("delay", node, data, resume_at=ctx.now() + node.seconds)
-    return node.next
-
-
-def _run_switch(node: FlowNode, data: dict, ctx: _Ctx) -> str | None:
-    """Multi-way route: the FIRST case whose condition is true wins; if none
-    match, fall through to ``next`` (the default). Avoids hand-chaining branches."""
-    for i, case in enumerate(node.cases):
-        if eval_condition(str(case.get("condition") or ""), data):
-            ctx.on_node(node, f"case {i}", None)
-            goto = case.get("goto")
-            return goto if goto is not None else node.next
-    ctx.on_node(node, "default", None)
     return node.next
 
 
@@ -584,31 +655,12 @@ def _run_setvar(node: FlowNode, data: dict, ctx: _Ctx) -> str | None:
     return node.next
 
 
-def _run_try(node: FlowNode, data: dict, ctx: _Ctx) -> str | None:
-    """Run an inline body; if ANYTHING inside it fails hard (a node executor
-    raises), catch it -- record the error under ``_error`` and route to
-    ``on_error`` (the catch handler) -- instead of failing the whole run. This is
-    the scope-level try/catch that per-node ``on_error`` (single node only) can't
-    express. A body that merely returns a 0.0 outcome is not an exception; use a
-    node's own on_error for that."""
-    try:
-        _run_chain(node.body, data, ctx.nested(), node.body.start)
-    except _NodeError as e:
-        data["_error"] = str(e)
-        ctx.on_node(node, "caught", 0.0)
-        if node.on_error:
-            return node.on_error
-        return node.next
-    ctx.on_node(node, "done", 1.0)
-    return node.next
-
-
 _HANDLERS = {
     NODE_AGENT: _run_work, NODE_ACTION: _run_work, NODE_BRANCH: _run_branch,
-    NODE_FOREACH: _run_foreach, NODE_PARALLEL: _run_parallel,
-    NODE_APPROVAL: _run_approval, NODE_DELAY: _run_delay,
-    NODE_SUBFLOW: _run_subflow, NODE_SWITCH: _run_switch, NODE_SETVAR: _run_setvar,
-    NODE_TRY: _run_try,
+    NODE_SWITCH: _run_switch, NODE_FOREACH: _run_foreach, NODE_WHILE: _run_while,
+    NODE_PARALLEL: _run_parallel, NODE_APPROVAL: _run_approval,
+    NODE_DELAY: _run_delay, NODE_WAIT: _run_wait, NODE_SCOPE: _run_scope,
+    NODE_SUBFLOW: _run_subflow, NODE_SETVAR: _run_setvar,
 }
 
 
@@ -664,20 +716,36 @@ def run_flow(flow: Flow, *, agent_fn: AgentFn, action_fn: ActionFn,
         data = dict(resume.get("data") or data or {})
         node = flow.node(resume.get("node_id"))
         decision = resume.get("decision")
-        # Ground the HUMAN verdict on resume too -- the approval node's handler
+        # Ground the HUMAN verdict on resume too (B7) -- the approval node's handler
         # isn't re-run (we resume AFTER it), so without this the decision signal
         # is lost on the resume path exactly as it is captured on the auto path.
         if node is not None and decision in ("approved", "rejected"):
             (on_node or (lambda *_: None))(node, decision, _approval_outcome(decision))
+        # The paused/failed node must still exist in this (current) flow version.
+        # If an edit or rollback removed or replaced it between pause and resume,
+        # fail CLOSED -- silently falling back to flow.start would re-execute the
+        # whole flow and re-drive every pre-pause side effect.
+        if node is None:
+            return FlowRunResult(
+                status=STATUS_FAILED, data=data, cursor=resume.get("node_id"),
+                error=(f"cannot resume: node {resume.get('node_id')!r} no longer "
+                       "exists in this flow version"))
         if decision == "rejected":
-            return FlowRunResult(status=STATUS_REJECTED, data=data,
-                                 cursor=resume.get("node_id"))
+            return FlowRunResult(status=STATUS_REJECTED, data=data, cursor=node.id)
+        if node.kind == NODE_APPROVAL and not resume.get("rerun"):
+            # Resuming an approval gate: accept ONLY the literal "approved" or one
+            # of the node's explicitly declared choices. Anything else fails
+            # CLOSED (rejected), so a loosened decision string can never wave a
+            # run past a human gate. The accepted verdict is recorded to the
+            # node's output for downstream routing (matches the inline path).
+            if decision == "approved" or (decision and decision in node.choices):
+                if node.output:
+                    data[node.output] = decision
+            else:
+                return FlowRunResult(status=STATUS_REJECTED, data=data, cursor=node.id)
         # A pause resumes AFTER its node (the approval/delay is done); a
         # failure retry re-enters AT the node that failed ("rerun").
-        if resume.get("rerun"):
-            start = node.id if node else flow.start
-        else:
-            start = node.next if node else flow.start
+        start = node.id if resume.get("rerun") else node.next
     else:
         data = dict(data or {})
         start = flow.start
@@ -685,7 +753,8 @@ def run_flow(flow: Flow, *, agent_fn: AgentFn, action_fn: ActionFn,
         _run_chain(flow, data, ctx, start)
         return FlowRunResult(status=STATUS_COMPLETED, data=data)
     except _Pause as p:
-        status = STATUS_PAUSED_APPROVAL if p.kind == "approval" else STATUS_PAUSED_DELAY
+        status = {"approval": STATUS_PAUSED_APPROVAL,
+                  "event": STATUS_PAUSED_EVENT}.get(p.kind, STATUS_PAUSED_DELAY)
         return FlowRunResult(status=status, data=p.data, cursor=p.node.id,
                              resume_at=p.resume_at, prompt=p.node.prompt)
     except _Reject as r:
@@ -701,5 +770,6 @@ def run_flow(flow: Flow, *, agent_fn: AgentFn, action_fn: ActionFn,
 __all__ = [
     "run_flow", "render", "eval_condition", "FlowRunResult",
     "STATUS_COMPLETED", "STATUS_PAUSED_APPROVAL", "STATUS_PAUSED_DELAY",
-    "STATUS_REJECTED", "STATUS_FAILED",
+    "STATUS_PAUSED_EVENT", "STATUS_REJECTED", "STATUS_FAILED",
+    "PAUSED_STATUSES", "ACTIVE_STATUSES",
 ]

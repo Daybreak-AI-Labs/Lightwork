@@ -26,7 +26,17 @@ from __future__ import annotations
 
 import re
 
-from ..flow.ir import NODE_ACTION, NODE_AGENT, NODE_BRANCH, NODE_FOREACH, Flow, FlowNode
+from ..flow.ir import (
+    NODE_ACTION,
+    NODE_AGENT,
+    NODE_BRANCH,
+    NODE_FOREACH,
+    NODE_SCOPE,
+    NODE_SWITCH,
+    NODE_WHILE,
+    Flow,
+    FlowNode,
+)
 from .ir import ImportedAutomation, ImportedStep, _safe_line, safe_params
 
 
@@ -174,6 +184,18 @@ def _pa_condition(expr) -> str:
     return "result == true"
 
 
+_NEGATED_OPS = {"==": "!=", "!=": "==", ">": "<=", "<=": ">", "<": ">=", ">=": "<"}
+
+
+def _negate_condition(cond: str) -> str:
+    """Invert a simple ``<key> <op> <value>`` condition (WDL Until exits when its
+    expression is TRUE; our while loops WHILE the condition is true)."""
+    parts = cond.split(" ", 2)
+    if len(parts) == 3 and parts[1] in _NEGATED_OPS:
+        return f"{parts[0]} {_NEGATED_OPS[parts[1]]} {parts[2]}"
+    return "result != true"     # un-negatable shape -> loop until result is set true
+
+
 def _pa_wire_tail(nodes: dict[str, FlowNode], nxt: str | None) -> None:
     """Point an arm's loose ends at the If's successor, so both arms rejoin the
     chain after the branch (WDL's implicit join)."""
@@ -229,12 +251,70 @@ def _pa_lower(actions: dict, prefix: str,
                 nodes[nid] = _node_for_step(_step(name, spec), nid, nxt)
                 report.append({"step": name, "node": nid, "kind": nodes[nid].kind,
                                "fidelity": "approximated", "note": "Foreach body unreadable -> agent step"})
+        elif atype == "Switch":
+            cases_d = spec.get("cases") if isinstance(spec.get("cases"), dict) else {}
+            default_env = spec.get("default") if isinstance(spec.get("default"), dict) else {}
+            default_d = default_env.get("actions") if isinstance(default_env.get("actions"), dict) else {}
+            case_entries = []
+            for ci, (cname, cspec) in enumerate(cases_d.items()):
+                cspec = cspec if isinstance(cspec, dict) else {}
+                arm_d = cspec.get("actions") if isinstance(cspec.get("actions"), dict) else {}
+                a_nodes, a_start = _pa_lower(arm_d, f"{nid}c{ci}", report)
+                _pa_wire_tail(a_nodes, nxt)
+                nodes.update(a_nodes)
+                case_entries.append({"value": _safe_line(cspec.get("case", cname), max_chars=60),
+                                     "to": a_start or nxt})
+            d_nodes, d_start = _pa_lower(default_d, nid + "d", report)
+            _pa_wire_tail(d_nodes, nxt)
+            nodes.update(d_nodes)
+            if case_entries:
+                nodes[nid] = FlowNode(id=nid, kind=NODE_SWITCH,
+                                      condition=_pa_operand(spec.get("expression") or ""),
+                                      cases=case_entries, next=d_start or nxt, label=label)
+                report.append({"step": name, "node": nid, "kind": NODE_SWITCH,
+                               "fidelity": "preserved",
+                               "note": "WDL Switch -> switch (cases + default wired)"})
+            else:   # no readable cases -> an agent step with the switch's intent
+                nodes[nid] = _node_for_step(_step(name, spec), nid, nxt)
+                report.append({"step": name, "node": nid, "kind": nodes[nid].kind,
+                               "fidelity": "approximated", "note": "Switch cases unreadable -> agent step"})
+        elif atype == "Until":
+            body_d = spec.get("actions") if isinstance(spec.get("actions"), dict) else {}
+            b_nodes, b_start = _pa_lower(body_d, "b", report)
+            body = Flow(id="", name=f"{label} body", start=b_start or "",
+                        nodes=b_nodes) if b_nodes else None
+            limit_env = spec.get("limit") if isinstance(spec.get("limit"), dict) else {}
+            if body is not None:
+                nodes[nid] = FlowNode(id=nid, kind=NODE_WHILE,
+                                      condition=_negate_condition(_pa_condition(spec.get("expression"))),
+                                      body=body, limit=int(limit_env.get("count") or 0),
+                                      next=nxt, output=f"{nid}_out", label=label)
+                report.append({"step": name, "node": nid, "kind": NODE_WHILE,
+                               "fidelity": "preserved",
+                               "note": "WDL Until -> while (exit condition negated; "
+                                       "checks before each pass, not after)"})
+            else:
+                nodes[nid] = _node_for_step(_step(name, spec), nid, nxt)
+                report.append({"step": name, "node": nid, "kind": nodes[nid].kind,
+                               "fidelity": "approximated", "note": "Until body unreadable -> agent step"})
+        elif atype == "Scope":
+            body_d = spec.get("actions") if isinstance(spec.get("actions"), dict) else {}
+            b_nodes, b_start = _pa_lower(body_d, "s" + nid, report)
+            if b_nodes and b_start:
+                body = Flow(id="", name=f"{label} body", start=b_start, nodes=b_nodes)
+                nodes[nid] = FlowNode(id=nid, kind=NODE_SCOPE, body=body, next=nxt, label=label)
+                report.append({"step": name, "node": nid, "kind": NODE_SCOPE,
+                               "fidelity": "preserved",
+                               "note": "WDL Scope -> scope (wire on_error in the designer "
+                                       "to add a catch arm)"})
+            else:
+                nodes[nid] = _node_for_step(_step(name, spec), nid, nxt)
+                report.append({"step": name, "node": nid, "kind": nodes[nid].kind,
+                               "fidelity": "approximated", "note": "Scope body unreadable -> agent step"})
         else:
             node = _node_for_step(_step(name, spec), nid, nxt)
             nodes[nid] = node
-            if atype in ("Switch", "Until", "Scope"):
-                fid, note = "approximated", f"WDL {atype} is not yet captured structurally -> agent step"
-            elif node.kind == NODE_ACTION:
+            if node.kind == NODE_ACTION:
                 fid, note = "preserved", "connector call -> action node"
             else:
                 fid, note = "approximated", "no single-tool mapping -> agent step"
@@ -254,6 +334,113 @@ def _pa_to_flow(automation: ImportedAutomation,
     if not actions:
         return None
     nodes, start = _pa_lower(actions, "n", report)
+    if not nodes or not start:
+        return None
+    flow = Flow(id=automation.template_name(), name=automation.name,
+                start=start, nodes=nodes)
+    if flow.validate():
+        report.clear()
+        return None
+    return flow
+
+
+# ---- Workato recipe-tree graph capture ---------------------------------------
+
+# Workato condition operations -> the flow condition-evaluator's operators.
+_WK_OPS = {"equals_to": "==", "not_equals_to": "!=", "greater_than": ">",
+           "less_than": "<", "greater_than_or_equals_to": ">=",
+           "less_than_or_equals_to": "<=", "contains": "contains"}
+
+
+def _wk_operand(v) -> str:
+    """A Workato operand (``#{_('data.salesforce.opportunity.stage')}``, a
+    literal) reduced to a flow-data key / literal."""
+    s = str(v).strip()
+    m = re.search(r"_\('([^']+)'\)", s)
+    if m:
+        return _safe_line(m.group(1).rsplit(".", 1)[-1], max_chars=40)
+    return _safe_line(s, max_chars=40)
+
+
+def _wk_condition(inp: dict) -> str:
+    op = _WK_OPS.get(str(inp.get("operation") or ""), "==")
+    left = _wk_operand(inp.get("a") or inp.get("left") or "")
+    right = _wk_operand(inp.get("b") or inp.get("right") or "")
+    if left:
+        return f"{left} {op} {right}".strip()
+    return "result == true"
+
+
+def _wk_lower(block: list, prefix: str,
+              report: list[dict]) -> tuple[dict[str, FlowNode], str | None]:
+    """Lower one Workato ``block`` list (one nesting level) into chained nodes.
+    ``if`` steps become branch nodes (the nested block is the then-arm, wired to
+    rejoin); ``foreach``/``repeat`` steps become foreach nodes with the nested
+    block as the body."""
+    from .workato import _step as _wk_step
+    steps = [n for n in (block or []) if isinstance(n, dict)]
+    ids = {i: f"{prefix}{i}" for i in range(len(steps))}
+    nodes: dict[str, FlowNode] = {}
+    for i, node in enumerate(steps):
+        nid = ids[i]
+        nxt = ids[i + 1] if i + 1 < len(steps) else None
+        keyword = str(node.get("keyword") or "").lower()
+        name = str(node.get("description") or node.get("name") or keyword or "step")
+        inp = node.get("input") if isinstance(node.get("input"), dict) else {}
+        nested = node.get("block") if isinstance(node.get("block"), list) else []
+        if keyword == "if":
+            t_nodes, t_start = _wk_lower(nested, nid + "t", report)
+            _pa_wire_tail(t_nodes, nxt)
+            nodes.update(t_nodes)
+            nodes[nid] = FlowNode(id=nid, kind=NODE_BRANCH, condition=_wk_condition(inp),
+                                  if_true=t_start or nxt, if_false=nxt, next=nxt,
+                                  label=_safe_line(name, max_chars=60))
+            report.append({"step": name, "node": nid, "kind": NODE_BRANCH,
+                           "fidelity": "preserved",
+                           "note": "Workato IF -> branch (then-arm wired; no-match falls through)"})
+        elif keyword in ("foreach", "repeat"):
+            b_nodes, b_start = _wk_lower(nested, "b", report)
+            body = Flow(id="", name=f"{name} body", start=b_start or "",
+                        nodes=b_nodes) if b_nodes else None
+            items = _wk_operand(inp.get("source") or inp.get("list") or "") or "items"
+            if body is not None:
+                nodes[nid] = FlowNode(id=nid, kind=NODE_FOREACH, items=items, body=body,
+                                      next=nxt, output=f"{nid}_out",
+                                      label=_safe_line(name, max_chars=60))
+                report.append({"step": name, "node": nid, "kind": NODE_FOREACH,
+                               "fidelity": "preserved",
+                               "note": "Workato repeat -> foreach with a nested body"})
+            else:
+                nodes[nid] = _node_for_step(_wk_step(node), nid, nxt)
+                report.append({"step": name, "node": nid, "kind": nodes[nid].kind,
+                               "fidelity": "approximated",
+                               "note": "repeat body unreadable -> agent step"})
+        else:
+            fnode = _node_for_step(_wk_step(node), nid, nxt)
+            nodes[nid] = fnode
+            report.append({"step": name, "node": nid, "kind": fnode.kind,
+                           "fidelity": ("preserved" if fnode.kind == NODE_ACTION
+                                        else "approximated"),
+                           "note": ("connector call -> action node" if fnode.kind == NODE_ACTION
+                                    else "no single-tool mapping -> agent step")})
+    return nodes, (ids[0] if steps else None)
+
+
+def _wk_to_flow(automation: ImportedAutomation,
+                report: list[dict]) -> Flow | None:
+    """Lower a Workato recipe's code tree, preserving IF/repeat structure.
+    Returns ``None`` when the tree isn't usable (caller falls back)."""
+    from .base import ImporterError
+    from .workato import _parse_code
+    raw = automation.raw if isinstance(automation.raw, dict) else {}
+    try:
+        tree = _parse_code(raw) if raw else None
+    except ImporterError:
+        return None
+    block = tree.get("block") if isinstance(tree, dict) else None
+    if not isinstance(block, list) or not block:
+        return None
+    nodes, start = _wk_lower(block, "n", report)
     if not nodes or not start:
         return None
     flow = Flow(id=automation.template_name(), name=automation.name,
@@ -291,6 +478,11 @@ def to_flow_with_report(automation: ImportedAutomation) -> tuple[Flow, list[dict
             return graph, report
     if automation.source == "power_automate":
         graph = _pa_to_flow(automation, report)
+        if graph is not None:
+            return graph, report
+        report.clear()
+    if automation.source == "workato":
+        graph = _wk_to_flow(automation, report)
         if graph is not None:
             return graph, report
         report.clear()

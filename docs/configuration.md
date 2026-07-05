@@ -202,6 +202,22 @@ enable = false             # mine failures -> propose -> regression-validate ->
                            #   show` (what was learned), `preview` (dry-run of
                            #   what it would propose), `log` (audit trail), and
                            #   `forget` (roll a learned line back).
+# Lifecycle & evaluation knobs (all default off / historical behavior; the
+# wizard's advanced follow-up writes each on opt-in — details in
+# docs/proposals/self-harness.md):
+#   eval_corpus = "/path.json"   {model|domain: [{goal, expected}]} — enables
+#                                the auto-built live A/B on scheduled runs
+#   eval_budget_dollars = 5.0    spend cap per auto-evaluated cycle (fail-closed)
+#   auto_run = true              run the fleet cycle as part of `maverick dream`
+#   promote_as_canary = true     stage every promotion on probation
+#   relapse_failure_share = 0.5  re-probate a line whose recent outcomes turn bad
+#   metamorphic = true           reject lines overfit to exact goal wording
+#   judge_samples = 3            self-consistency majority vote for the judge
+#   calibrate_judge = true       feed judge verdicts into the drift freeze
+#   transfer_auto = true         nightly cross-model transfer of proven lines
+#   corpus_harvest = "propose"   bootstrap eval cases from hindsight pairs
+#                                ("propose" = human-gated review; "auto" = direct)
+#   mine_bucket_by = ["domain"]  scope mining/recall per domain / role / tool
 
 [self_learning]            # local continuous learning (default off)
 enable = true
