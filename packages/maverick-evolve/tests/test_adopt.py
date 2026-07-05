@@ -167,13 +167,24 @@ def test_adopt_best_roundtrips_real_shipped_pack(tmp_path):
 def test_concurrent_adopt_keeps_one_bak_and_no_temp(tmp_path):
     """The .bak guard (exists() and not bak.exists()) was a TOCTOU and the write
     used a fixed ".tmp"; serialized under a lock, concurrent adoptions leave the
-    dest valid, exactly one .bak, and no temp residue."""
+    dest valid, exactly one pristine .bak, and no temp residue.
+
+    The destination is PRE-SEEDED with the pristine pack so a backup is due
+    under EVERY interleaving. On an empty dest a fully-serialized schedule
+    (thread 1 finishes before the rest plan) lets every other thread no-op
+    against the already-adopted dest, so no .bak is ever owed -- correct
+    idempotent behavior that made the bare exists() assertion timing-dependent
+    (it flaked on loaded CI runners)."""
+    import shutil
     import threading
 
     apath, pack = _setup(tmp_path, {
         "persona": "You are a SOX specialist; verify evidence twice.",
     })
     out = tmp_path / "out"
+    out.mkdir()
+    dest = out / pack.name
+    shutil.copy2(pack, dest)                     # pristine pack already deployed
     n = 10
 
     def worker():
@@ -185,7 +196,8 @@ def test_concurrent_adopt_keeps_one_bak_and_no_temp(tmp_path):
     for t in threads:
         t.join()
 
-    dest = out / pack.name
     assert dest.exists() and "SOX specialist" in dest.read_text()
-    assert (out / (pack.name + ".bak")).exists()
+    bak = out / (pack.name + ".bak")
+    assert list(out.glob("*.bak")) == [bak]      # exactly one backup
+    assert bak.read_text() == PACK               # and it is the PRISTINE pack
     assert list(out.glob("*.tmp")) == []

@@ -233,6 +233,48 @@ def g_reversible() -> str:
     return "rollback handle restores exactly; forget() clears guidance"
 
 
+def g_canary_lifecycle() -> str:
+    """A canary-staged line rides on probation and is adjudicated by real
+    outcomes: recent successes graduate it to permanent, recent failures pull
+    it -- through the audited forget path, never silently."""
+    from maverick import self_harness as sh
+    from maverick.audit import EventKind, default_audit_log
+    os.environ["MAVERICK_SELF_HARNESS"] = "1"
+    os.environ["MAVERICK_SELF_IMPROVEMENT"] = "1"
+    with tempfile.TemporaryDirectory() as d:
+        store = pathlib.Path(d) / "addenda.json"
+        rep = sh.run_self_harness(
+            _recs(model="M", classes=("timeout", "auth")), model_id="M",
+            min_support=3, controller=_ctrl(), path=store, canary=True,
+            **_ENOUGH, **_GOOD_AB)
+        _check(rep.promoted == 2, f"expected 2 canary promotions, got {rep.promoted}")
+        cans = sh.list_canaries("M", store)
+        _check(len(cans) == 2, f"expected 2 lines on probation, got {cans}")
+        block = sh.recall_addendum("M", store)
+        _check(all(ln in block for ln in cans),
+               "a probation line was not recalled (canaries must still ride)")
+        good, bad = cans
+        for _ in range(3):
+            sh.note_outcome("M", True, line=good, path=store)
+        for _ in range(2):
+            sh.note_outcome("M", False, line=bad, path=store)
+        res = sh.review_canaries("M", graduate_after=3, demote_after=2, path=store)
+        _check(res["graduated"] == [good], f"graduation mismatch: {res}")
+        _check(res["demoted"] == [bad], f"demotion mismatch: {res}")
+        _check(sh.list_canaries("M", store) == [], "probation flags survived review")
+        block = sh.recall_addendum("M", store)
+        _check(good in block, "graduated line lost from recall")
+        _check(bad not in block, "demoted line still recalled")
+        # The pull went through the audited forget path -- a signed trail row
+        # names the exact line ("never silently").
+        forgot = [ev for ev in default_audit_log().tail(2000)
+                  if ev.get("kind") == EventKind.LEARNING_UPDATE
+                  and ev.get("agent") == "self_harness"
+                  and ev.get("phase") == "forget" and ev.get("line") == bad]
+        _check(forgot, "demotion left no audit row")
+    return "probation rides; 3 wins graduate, 2 failures pull it (audited forget)"
+
+
 GUARANTEES = [
     ("determinism (consistent)", g_determinism),
     ("off by default", g_off_by_default),
@@ -241,6 +283,7 @@ GUARANTEES = [
     ("bounded addendum", g_bounded),
     ("concurrency safe", g_concurrency),
     ("reversible + auditable", g_reversible),
+    ("canary lifecycle", g_canary_lifecycle),
 ]
 
 
