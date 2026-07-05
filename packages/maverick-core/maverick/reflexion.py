@@ -85,6 +85,11 @@ class Reflexion:
     # another's), so it needs the model tagged on the trace. Older lines without
     # the key load as None — fully backward compatible.
     model_id: str | None = None
+    # The agent ROLE in play when the failure landed (orchestrator, coder,
+    # verifier, ...). Lets the self-harness loop mine weaknesses per role and
+    # scope the learned guidance so an orchestrator lesson doesn't tax worker
+    # prompts of the same model. Older lines load as None — backward compatible.
+    role: str | None = None
 
     def to_dict(self) -> dict:
         return asdict(self)
@@ -111,6 +116,7 @@ def record(
     user_id: str | None = None,
     domain: str | None = None,
     model_id: str | None = None,
+    role: str | None = None,
     path: Path | None = None,
 ) -> bool:
     """Append a Reflexion. Returns True on success.
@@ -130,6 +136,7 @@ def record(
         user_id=user_id,
         domain=domain,
         model_id=model_id,
+        role=role,
     )
     with _lock:
         try:
@@ -341,6 +348,7 @@ def list_recent(
                             "ts", "goal_text", "failure_class",
                             "failure_msg", "reflection", "tools_used",
                             "channel", "user_id", "domain", "model_id",
+                            "role",
                         )
                     }))
                 except TypeError:

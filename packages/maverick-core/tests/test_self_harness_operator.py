@@ -78,6 +78,19 @@ def test_no_cost_when_nothing_learned(ctx, store, monkeypatch):
     assert "Operating guidance learned for this model" not in _agent(ctx, "model-x").system
 
 
+def test_recall_scopes_to_agent_role(ctx, store, monkeypatch):
+    # A role-scoped line reaches only agents of that role -- an orchestrator
+    # lesson stays off a verifier prompt of the same model.
+    monkeypatch.setenv("MAVERICK_SELF_HARNESS", "1")
+    key = sh._scoped_key("model-x", "role=orchestrator")
+    sh._write_addenda(
+        {key: "Operating guidance learned for this model:\n- plan tighter"}, store)
+    assert "plan tighter" in _agent(ctx, "model-x").system     # orchestrator agent
+    verifier = Agent(ctx=ctx, role="verifier", brief="check a thing",
+                     model_override="model-x")
+    assert "plan tighter" not in verifier.system
+
+
 def test_recall_registers_model_for_outcome_credit(ctx, store, monkeypatch):
     # Building a prompt that recalls guidance registers the agent's model on
     # ctx.harness_models -- the set the orchestrator credits at run end, so a

@@ -152,15 +152,19 @@ def _scoped_key(model_id: str, context: str) -> str:
 
 
 def _scope_contexts(domain: str | None = None,
-                    tools: list[str] | tuple[str, ...] | None = None) -> list[str]:
+                    tools: list[str] | tuple[str, ...] | None = None,
+                    role: str | None = None) -> list[str]:
     """The ordered, deduped list of mining-scope context strings for a run:
-    ``domain=<d>`` first (one department per run), then ``tool=<t>`` for each tool
-    the run had on hand, SORTED so the recalled block is deterministic regardless
-    of the agent's tool-registry iteration order. Empty entries are dropped. The
-    shared basis for recall / usage / outcome scoping so all three stay in step."""
+    ``domain=<d>`` first (one department per run), then ``role=<r>`` (one role
+    per agent), then ``tool=<t>`` for each tool the run had on hand, SORTED so
+    the recalled block is deterministic regardless of the agent's tool-registry
+    iteration order. Empty entries are dropped. The shared basis for recall /
+    usage / outcome scoping so all three stay in step."""
     out: list[str] = []
     if domain:
         out.append(f"domain={domain}")
+    if role:
+        out.append(f"role={role}")
     for t in sorted({str(t) for t in (tools or []) if t}):
         out.append(f"tool={t}")
     return out
@@ -168,21 +172,24 @@ def _scope_contexts(domain: str | None = None,
 
 def recall_addendum(model_id: str | None, path: Path | None = None, *,
                     domain: str | None = None,
-                    tools: list[str] | tuple[str, ...] | None = None) -> str:
+                    tools: list[str] | tuple[str, ...] | None = None,
+                    role: str | None = None) -> str:
     """The learned operating-guidance block for ``model_id`` (``""`` if none /
     disabled). Recalled into the system prompt by the agent at build time.
 
     The model-wide block is always included. When ``domain`` is given, guidance
     mined SCOPED to that department is appended (so a finance lesson rides only
-    finance runs); when ``tools`` are given, guidance mined scoped to each tool the
-    run has on hand is appended (so a ``web_fetch`` lesson rides only runs that can
-    call ``web_fetch`` -- #7 component profiles). With neither (the default) this is
-    exactly the model-wide block, byte-for-byte unchanged."""
+    finance runs); when ``role`` is given, guidance mined scoped to that agent
+    role is appended (so an orchestrator lesson doesn't tax a coder prompt of
+    the same model); when ``tools`` are given, guidance mined scoped to each tool
+    the run has on hand is appended (so a ``web_fetch`` lesson rides only runs
+    that can call ``web_fetch`` -- #7 component profiles). With none (the default)
+    this is exactly the model-wide block, byte-for-byte unchanged."""
     if not model_id or not enabled():
         return ""
     store = load_addenda(path)
     block = store.get(str(model_id), "")
-    for ctx in _scope_contexts(domain, tools):
+    for ctx in _scope_contexts(domain, tools, role):
         scoped = store.get(_scoped_key(str(model_id), ctx), "")
         if scoped:
             block = (block + "\n" + scoped) if block else scoped
@@ -663,7 +670,10 @@ def count_eligible(reflexions: list[dict], *, model_id: str) -> int:
 # ``tool`` is the component the failure occurred in -- the tool in play when the
 # run failed (the last of ``tools_used``) -- so a weakness can be mined PER TOOL
 # and its guidance recalled only when that tool is on hand (#7 component profiles).
-_BUCKET_DIMS = ("domain", "tool")
+# ``role`` is the agent role in play at failure (stamped on the reflexion), so a
+# weakness can be mined PER ROLE and its guidance recalled only into that role's
+# prompts -- an orchestrator lesson stops taxing worker prompts of the same model.
+_BUCKET_DIMS = ("domain", "tool", "role")
 
 
 def _bucket_value(r: dict, dim: str) -> str:
@@ -1460,7 +1470,8 @@ _recall_noted_monotonic: dict[str, float] = {}
 def note_recall(model_id: str | None, *, now: float | None = None,
                 path: Path | None = None, min_interval_s: float = 3600.0,
                 domain: str | None = None,
-                tools: list[str] | tuple[str, ...] | None = None) -> None:
+                tools: list[str] | tuple[str, ...] | None = None,
+                role: str | None = None) -> None:
     """Best-effort: record that ``model_id``'s guidance was just recalled, so
     staleness can be judged by USE, not only by promotion. In-process throttled
     (``min_interval_s``; 0 disables the throttle, for tests) so the hot recall
@@ -1471,7 +1482,7 @@ def note_recall(model_id: str | None, *, now: float | None = None,
     if not model_id:
         return
     mid = str(model_id)
-    contexts = _scope_contexts(domain, tools)
+    contexts = _scope_contexts(domain, tools, role)
     throttle_key = mid + "\x00" + "\x00".join(contexts)
     if min_interval_s:
         mono = time.monotonic()
@@ -1534,6 +1545,7 @@ def _recent_counts(rec: Mapping) -> tuple[int, int]:
 def note_outcome(model_id: str | None, success: bool, *, line: str | None = None,
                  domain: str | None = None,
                  tools: list[str] | tuple[str, ...] | None = None,
+                 role: str | None = None,
                  path: Path | None = None) -> None:
     """Record that a run using ``model_id``'s guidance succeeded or failed,
     incrementing per-line ``recall_success``/``recall_failure`` counters AND
@@ -1561,7 +1573,7 @@ def note_outcome(model_id: str | None, success: bool, *, line: str | None = None
                 pairs = [(k, ln) for k, ln in _iter_model_lines(store, mid) if ln == line]
             else:
                 keys = [mid] + [_scoped_key(mid, ctx)
-                                for ctx in _scope_contexts(domain, tools)]
+                                for ctx in _scope_contexts(domain, tools, role)]
                 pairs = [(k, ln) for k in keys for ln in _bullets(store.get(k, ""))]
             for k, ln in pairs:
                 rec = meta.get(_line_id(k, ln))

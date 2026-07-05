@@ -128,6 +128,15 @@ drive them; this wave wires them, changing no default behavior:
   domain + invoked tools. Before this, worker models' lines earned recalls but
   never outcomes, so a worker canary promoted by `run --all-models` could
   never graduate or be demoted by the counter-driven review.
+- **Per-role component profiles** (the Continual Harness direction, survey
+  taxonomy's per-role axis): reflexions now carry the agent `role` in play at
+  failure (goal-level captures stamp `orchestrator`), `role` joins the
+  allowlisted mining dims (`mine_bucket_by=("role",)`, config-gated for all
+  roles), and recall/usage/outcome scoping gains `role=` — wired from
+  `Agent._with_harness_addendum` via `self.role`. A `role=orchestrator` lesson
+  rides only orchestrator prompts instead of taxing every agent of the same
+  model; scope ordering is `domain`, `role`, then sorted `tool`s
+  (deterministic).
 - **Judge calibration** (`[self_harness] calibrate_judge`, default off): every
   corpus-labeled verdict the auto-built LLM judge issues is recorded into the
   calibration interlock as a (self-consistency vote-share confidence,

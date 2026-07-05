@@ -993,11 +993,16 @@ class Agent:
             # the model-wide block when the agent has no domain and no scoped tools.
             _dom = getattr(self, "domain", None)
             _tools = self._harness_tool_names()
-            addendum = recall_addendum(self.model, domain=_dom, tools=_tools)
+            # The agent's role scopes recall too: guidance mined per role rides
+            # only that role's prompts (an orchestrator lesson stays off a
+            # coder's context of the same model).
+            _role = getattr(self, "role", None)
+            addendum = recall_addendum(self.model, domain=_dom, tools=_tools,
+                                       role=_role)
             if addendum:
                 # Track that this guidance was USED (throttled, best-effort) so
                 # retirement keeps actively-recalled lines and prunes dormant ones.
-                note_recall(self.model, domain=_dom, tools=_tools)
+                note_recall(self.model, domain=_dom, tools=_tools, role=_role)
                 # Register this model for run-end outcome attribution (mirrors
                 # ctx.skills_used): a WORKER's recalled guidance earns outcome
                 # credit too, not only the orchestrator's.
