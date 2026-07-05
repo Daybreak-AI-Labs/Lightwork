@@ -533,7 +533,14 @@ here.
   `setvar` computes flow-data keys from expressions (a loop counter, a composed
   field); `wait_event` pauses the run until an external event resumes it; `scope`
   is try/catch (a body failure routes to `on_error` with `{{_error}}` readable in
-  the catch arm). Approvals support **choice verdicts** beyond approve/reject
+  the catch arm). A flow may declare **typed manual-run inputs** (`Flow.inputs`:
+  `{key, type: text|number|bool|date, required, default}`) — the designer's Run
+  button prompts for them and `POST /flows/{id}/run` validates + coerces them
+  (`ir.coerce_inputs`, 400 on a missing-required or bad value), and that endpoint
+  takes an optional `idempotency_key` so a double-submit dedups to one run.
+  Reusable **sub-flows take mapped inputs** (`subflow_inputs`) to run isolated —
+  the child sees only what's passed, can't clobber parent data, and returns via
+  its `output` key. Approvals support **choice verdicts** beyond approve/reject
   (recorded to `output` for downstream routing) and an **expiry** (`timeout` — a
   lapsed approval resolves as rejected via the sweep, fail-closed). The live
   driver (`execution.py`) persists a resumable run (`store.py`) with per-node

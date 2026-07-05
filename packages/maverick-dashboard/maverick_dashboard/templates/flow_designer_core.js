@@ -8,7 +8,7 @@ var FDCore = (function () {
     cases: [], items: '', var: 'item', limit: 0, concurrent: false, prompt: '',
     choices: [], seconds: 0, flow_ref: '',
     retries: 0, retry_backoff: 0, on_error: null, timeout: 0, output: '', label: '',
-    assignments: {}, body: null, branches: [], next: null
+    assignments: {}, subflow_inputs: {}, body: null, branches: [], next: null
   };
   var SCALARS = ['next', 'tool', 'brief', 'condition', 'if_true', 'if_false',
     'items', 'var', 'prompt', 'flow_ref', 'on_error', 'output', 'label'];
@@ -41,6 +41,7 @@ var FDCore = (function () {
     if (n.cases && n.cases.length) o.cases = n.cases;
     if (n.choices && n.choices.length) o.choices = n.choices;
     if (n.assignments && Object.keys(n.assignments).length) o.assignments = n.assignments;
+    if (n.subflow_inputs && Object.keys(n.subflow_inputs).length) o.subflow_inputs = n.subflow_inputs;
     if (n.body && n.body.nodes && n.body.nodes.length) o.body = serializeFlow(n.body);
     if (n.branches && n.branches.length) {
       var bs = n.branches.map(serializeFlow).filter(function (b) { return b.nodes.length; });

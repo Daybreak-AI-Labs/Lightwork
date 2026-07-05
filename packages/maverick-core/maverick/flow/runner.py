@@ -437,16 +437,32 @@ def _run_subflow(node: FlowNode, data: dict, ctx: _Ctx) -> str | None:
     # its outputs flow back. Nested: it cannot pause (v1 -- HITL lives up top). The
     # flow id is on the stack for its duration so a cyclic reference is caught.
     ctx.flow_stack.add(sub.id)
-    before = set(data)
-    try:
-        _run_chain(sub, data, ctx.nested(), sub.start)
-    finally:
-        ctx.flow_stack.discard(sub.id)
-    # Capture the subflow's return -- the keys it ADDED -- under node.output, so a
-    # reusable subflow's result can be referenced by name instead of only leaking
-    # into the shared data dict by side effect.
-    if node.output:
-        data[node.output] = {k: data[k] for k in data if k not in before}
+    # Two modes. Default (no subflow_inputs): the child runs on the SHARED data dict
+    # -- it reads parent data and its outputs flow back (v1 behaviour). Scoped (with
+    # subflow_inputs): the child runs on an ISOLATED dict seeded with ONLY the mapped
+    # inputs, so a reusable subflow can't read or clobber unrelated parent keys; its
+    # results return solely via `output`. Nested: it cannot pause (HITL lives up top).
+    if node.subflow_inputs:
+        child = {str(k): (render(v, data) if isinstance(v, str) else v)
+                 for k, v in node.subflow_inputs.items()}
+        seeded = set(child)
+        try:
+            _run_chain(sub, child, ctx.nested(), sub.start)
+        finally:
+            ctx.flow_stack.discard(sub.id)
+        if node.output:
+            data[node.output] = {k: child[k] for k in child if k not in seeded}
+    else:
+        before = set(data)
+        try:
+            _run_chain(sub, data, ctx.nested(), sub.start)
+        finally:
+            ctx.flow_stack.discard(sub.id)
+        # Capture the subflow's return -- the keys it ADDED -- under node.output, so a
+        # reusable subflow's result can be referenced by name instead of only leaking
+        # into the shared data dict by side effect.
+        if node.output:
+            data[node.output] = {k: data[k] for k in data if k not in before}
     # Ground success as 1.0 (failure already grounds 0.0 above), so a subflow
     # node has a symmetric success-rate signal the self-rewrite loop can measure.
     ctx.on_node(node, "done", 1.0)

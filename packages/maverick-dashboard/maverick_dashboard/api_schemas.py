@@ -296,6 +296,9 @@ class FlowRunIn(BaseModel):
     with sample input before it's wired to a live trigger."""
     data: dict = Field(default_factory=dict)
     dry_run: bool = False
+    # Optional caller-supplied dedup key: a repeat POST with the same key returns
+    # the existing run instead of starting a second one (double-click / retry safe).
+    idempotency_key: str = Field(default="", max_length=200)
 
 
 class FlowResumeIn(BaseModel):

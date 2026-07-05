@@ -87,6 +87,9 @@ class FlowNode:
     seconds: float = 0.0
     # subflow -----------------------------------------------------------------
     flow_ref: str = ""               # a saved flow id to run as a nested step
+    subflow_inputs: dict[str, Any] = field(default_factory=dict)   # {child_key: expr};
+                                     # when set, the child runs ISOLATED on only these
+                                     # (no shared parent data); outputs return via `output`
     # error handling ----------------------------------------------------------
     retries: int = 0                 # re-run a failed work node up to N more times
     retry_backoff: float = 0.0       # base seconds between retries; exponential (0 = tight loop)
@@ -126,6 +129,8 @@ class FlowNode:
             d["choices"] = self.choices
         if self.assignments:
             d["assignments"] = self.assignments
+        if self.subflow_inputs:
+            d["subflow_inputs"] = self.subflow_inputs
         if self.x or self.y:
             d["x"], d["y"] = self.x, self.y
         if self.body is not None:
@@ -149,6 +154,7 @@ class FlowNode:
             cases=[dict(c) for c in (d.get("cases") or []) if isinstance(c, dict)],
             choices=[str(c) for c in (d.get("choices") or [])],
             assignments=dict(d.get("assignments") or {}),
+            subflow_inputs=dict(d.get("subflow_inputs") or {}),
             body=Flow.from_dict(body) if body else None,
             branches=[Flow.from_dict(b) for b in (d.get("branches") or [])],
             prompt=str(d.get("prompt", "")), seconds=float(d.get("seconds", 0.0)),
@@ -183,6 +189,8 @@ class Flow:
     timezone: str = ""               # IANA zone the schedule is in (empty = UTC)
     owner: str = ""                  # principal that owns this flow (for RBAC + attributing scheduled runs)
     max_concurrent: int = 0          # cap simultaneous in-flight runs of this flow (0 = unlimited)
+    inputs: list[dict] = field(default_factory=list)   # declared manual-run inputs:
+                                     # [{key, type: text|number|bool|date, label, required, default}]
 
     def node(self, node_id: str | None) -> FlowNode | None:
         return self.nodes.get(node_id) if node_id else None
@@ -197,7 +205,7 @@ class Flow:
             "version": self.version, "notify": self.notify,
             "max_seconds": self.max_seconds, "max_dollars": self.max_dollars,
             "schedule": self.schedule, "timezone": self.timezone, "owner": self.owner,
-            "max_concurrent": self.max_concurrent,
+            "max_concurrent": self.max_concurrent, "inputs": self.inputs,
             "nodes": [n.to_dict() for n in self.nodes.values()],
         }
 
@@ -215,6 +223,7 @@ class Flow:
             schedule=str(d.get("schedule", "")), timezone=str(d.get("timezone", "")),
             owner=str(d.get("owner", "")),
             max_concurrent=int(d.get("max_concurrent", 0) or 0),
+            inputs=[dict(i) for i in (d.get("inputs") or []) if isinstance(i, dict)],
         )
 
     def validate(self) -> list[str]:
@@ -242,6 +251,18 @@ class Flow:
                 errs.append(f"node {n.id!r}: unknown kind {n.kind!r}")
             errs.extend(self._validate_routing(n))
             errs.extend(self._validate_kind(n))
+        seen_input_keys = set()
+        for i, spec in enumerate(self.inputs):
+            key = str(spec.get("key") or "").strip()
+            if not key:
+                errs.append(f"input {i}: no key")
+                continue
+            if key in seen_input_keys:
+                errs.append(f"duplicate input key {key!r}")
+            seen_input_keys.add(key)
+            typ = str(spec.get("type") or "text")
+            if typ not in INPUT_TYPES:
+                errs.append(f"input {key!r}: unknown type {typ!r}")
         return errs
 
     def _validate_routing(self, n: FlowNode) -> list[str]:
@@ -343,8 +364,50 @@ def single_agent_flow(flow_id: str, name: str, brief: str) -> Flow:
     return Flow(id=flow_id, name=name, start="n0", nodes={"n0": n})
 
 
+INPUT_TYPES = frozenset({"text", "number", "bool", "date"})
+
+
+def coerce_inputs(flow: Flow, data: dict) -> tuple[dict, list[str]]:
+    """Validate + coerce a manual run's ``data`` against ``flow.inputs`` (the
+    declared input schema). Returns ``(coerced, errors)``: numbers become floats,
+    bools are parsed from truthy strings, dates are ISO-validated, a missing input
+    falls back to its ``default`` (else errors if ``required``). Keys not in the
+    schema pass through untouched, so a flow with no declared inputs is a clean
+    no-op. Pure -- the run endpoint 400s when ``errors`` is non-empty."""
+    out = dict(data or {})
+    errors: list[str] = []
+    for spec in (flow.inputs or []):
+        key = str(spec.get("key") or "").strip()
+        if not key:
+            continue
+        typ = str(spec.get("type") or "text")
+        present = key in out and out[key] not in (None, "")
+        if not present:
+            if "default" in spec:
+                out[key] = spec["default"]
+            elif spec.get("required"):
+                errors.append(f"missing required input {key!r}")
+            continue
+        val = out[key]
+        if typ == "number":
+            try:
+                out[key] = float(val)
+            except (TypeError, ValueError):
+                errors.append(f"input {key!r} must be a number")
+        elif typ == "bool":
+            out[key] = val if isinstance(val, bool) else \
+                str(val).strip().lower() in ("true", "1", "yes", "on")
+        elif typ == "date":
+            import datetime as _dt
+            try:
+                _dt.date.fromisoformat(str(val)[:10])
+            except ValueError:
+                errors.append(f"input {key!r} must be an ISO date (YYYY-MM-DD)")
+    return out, errors
+
+
 __all__ = [
-    "Flow", "FlowNode", "single_agent_flow",
+    "Flow", "FlowNode", "single_agent_flow", "coerce_inputs", "INPUT_TYPES",
     "NODE_ACTION", "NODE_AGENT", "NODE_BRANCH", "NODE_SWITCH", "NODE_FOREACH",
     "NODE_WHILE", "NODE_PARALLEL", "NODE_APPROVAL", "NODE_DELAY", "NODE_WAIT",
     "NODE_SCOPE", "NODE_SUBFLOW", "NODE_KINDS",

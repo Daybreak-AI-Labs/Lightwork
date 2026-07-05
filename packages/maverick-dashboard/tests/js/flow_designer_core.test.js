@@ -121,6 +121,15 @@ test('serializeNode carries setvar assignments', () => {
   assert.deepEqual(sv.assignments, { n: '{{add(c,1)}}' });
 });
 
+test('serializeNode carries subflow_inputs only when set', () => {
+  const on = FDCore.serializeNode(FDCore.normalizeNode(
+    { id: 's', kind: 'subflow', flow_ref: 'child', subflow_inputs: { who: '{{name}}' } }, 0));
+  assert.deepEqual(on.subflow_inputs, { who: '{{name}}' });
+  const off = FDCore.serializeNode(FDCore.normalizeNode(
+    { id: 's2', kind: 'subflow', flow_ref: 'child' }, 0));
+  assert.ok(!('subflow_inputs' in off));   // empty mapping omitted
+});
+
 test('serializeNode keeps switch cases, approval choices, concurrent flag', () => {
   const o = FDCore.serializeNode(FDCore.normalizeNode({
     id: 's', kind: 'switch', condition: 'k',

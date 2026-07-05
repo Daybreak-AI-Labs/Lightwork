@@ -17,6 +17,7 @@
   var signals = { nodes: {}, trigger: null };   // grounded per-node stats + trigger reliability
   var runState = {};    // node_id -> {status, outcome} from the last/live run
   var runCursor = null; // node a paused run is waiting on
+  var flowInputs = [];  // declared manual-run inputs [{key,type,label,required,default}]
   var toolCatalog = {}; // tool name -> {description, params[]} for the action picker
   var selected = null;
   var multiSel = {};        // node id -> true when marquee-selected (group drag/delete)
@@ -547,7 +548,31 @@
     if (!selected) {
       var p = document.createElement('p'); p.className = 'fd__empty';
       p.textContent = "Select a node to edit it, or add a step. Connect steps by dragging from a node's bottom dot to another node. Shift-drag selects several.";
-      props.appendChild(p); return;
+      props.appendChild(p);
+      // Flow-level: declared manual-run inputs (a typed run form + validation).
+      var ih = document.createElement('div'); ih.style.fontWeight = '600'; ih.style.margin = 'var(--space-4) 0 var(--space-2)';
+      ih.textContent = 'Manual-run inputs'; props.appendChild(ih);
+      flowInputs.forEach(function (spec, ii) {
+        var row = document.createElement('div'); row.style.display = 'flex'; row.style.gap = '4px'; row.style.marginBottom = '4px'; row.style.flexWrap = 'wrap';
+        var keyIn = input(spec.key || '', function (v) { spec.key = v; }, 'key'); keyIn.style.flex = '2';
+        var typeSel = select(spec.type || 'text',
+          ['text', 'number', 'bool', 'date'].map(function (t) { return { v: t, t: t }; }),
+          function (v) { spec.type = v; }); typeSel.style.flex = '1';
+        var reqWrap = document.createElement('label'); reqWrap.style.display = 'flex'; reqWrap.style.alignItems = 'center'; reqWrap.style.gap = '2px'; reqWrap.style.fontSize = '11px';
+        var reqCb = document.createElement('input'); reqCb.type = 'checkbox'; reqCb.checked = !!spec.required;
+        reqCb.addEventListener('change', function () { spec.required = reqCb.checked; });
+        reqWrap.appendChild(reqCb); reqWrap.appendChild(document.createTextNode('req'));
+        var rm = document.createElement('button'); rm.className = 'btn btn--ghost'; rm.type = 'button'; rm.textContent = '🗑';
+        rm.addEventListener('click', function () { flowInputs.splice(ii, 1); renderProps(); });
+        row.appendChild(keyIn); row.appendChild(typeSel); row.appendChild(reqWrap); row.appendChild(rm);
+        props.appendChild(row);
+      });
+      var addI = document.createElement('button'); addI.className = 'btn btn--ghost'; addI.type = 'button'; addI.style.width = '100%';
+      addI.textContent = '+ Add input';
+      addI.addEventListener('click', function () { flowInputs.push({ key: '', type: 'text', required: false }); renderProps(); });
+      props.appendChild(addI);
+      props.appendChild(hint('Declared inputs make the Run button prompt for typed values and are validated/coerced server-side.'));
+      return;
     }
     var n = nodeById(selected); if (!n) return;
     var head = document.createElement('div'); head.style.fontWeight = '600'; head.style.marginBottom = 'var(--space-3)';
@@ -685,7 +710,25 @@
     if (n.kind === 'delay') props.appendChild(field('Seconds', input(String(n.seconds || ''), function (v) { n.seconds = parseFloat(v) || 0; render(); }, '60')));
     if (n.kind === 'subflow') {
       props.appendChild(field('Flow to run (saved flow id)', input(n.flow_ref, function (v) { n.flow_ref = v; render(); }, 'onboard-customer')));
-      props.appendChild(hint('Runs another saved flow here, sharing this flow’s data. Cyclic references are blocked.'));
+      var si = document.createElement('div'); si.className = 'field';
+      var sil = document.createElement('label'); sil.textContent = 'Inputs to pass (child key ← value/{{…}})'; si.appendChild(sil);
+      n.subflow_inputs = n.subflow_inputs || {};
+      Object.keys(n.subflow_inputs).forEach(function (k) {
+        var rowi = document.createElement('div'); rowi.style.display = 'flex'; rowi.style.gap = '4px'; rowi.style.marginBottom = '4px';
+        var keyIn = input(k, null, 'child key'); keyIn.style.flex = '1';
+        keyIn.addEventListener('change', function () { var nv = keyIn.value.trim(); if (nv && nv !== k) { n.subflow_inputs[nv] = n.subflow_inputs[k]; delete n.subflow_inputs[k]; renderProps(); } });
+        var valIn = input(n.subflow_inputs[k], function (v) { n.subflow_inputs[k] = v; }, '{{order_id}}'); valIn.style.flex = '2';
+        var rm = document.createElement('button'); rm.className = 'btn btn--ghost'; rm.type = 'button'; rm.textContent = '🗑';
+        rm.addEventListener('click', function () { delete n.subflow_inputs[k]; renderProps(); render(); });
+        rowi.appendChild(keyIn); rowi.appendChild(valIn); rowi.appendChild(rm); si.appendChild(rowi);
+      });
+      var addi = document.createElement('button'); addi.className = 'btn btn--ghost'; addi.type = 'button'; addi.style.width = '100%';
+      addi.textContent = '+ Add input';
+      addi.addEventListener('click', function () { var key = 'in' + (Object.keys(n.subflow_inputs).length + 1); n.subflow_inputs[key] = ''; renderProps(); render(); });
+      si.appendChild(addi); props.appendChild(si);
+      props.appendChild(hint(Object.keys(n.subflow_inputs).length
+        ? 'Isolated: the child sees ONLY these inputs (can’t read or clobber this flow’s other data); its result returns under the Output key.'
+        : 'No inputs mapped → the child shares this flow’s data (reads it, and its outputs flow back). Add inputs to isolate it. Cyclic references are blocked.'));
     }
     if (n.kind === 'setvar') {
       var sv = document.createElement('div'); sv.className = 'field';
@@ -843,6 +886,7 @@
     out.schedule = ((document.getElementById('fd-schedule') || {}).value || '').trim();
     out.timezone = ((document.getElementById('fd-tz') || {}).value || '').trim();
     out.max_concurrent = parseInt((document.getElementById('fd-maxconc') || {}).value, 10) || 0;
+    out.inputs = flowInputs.filter(function (i) { return (i.key || '').trim(); });
     return out;
   }
   function fromApiFlow(f) {
@@ -858,6 +902,7 @@
     var schEl = document.getElementById('fd-schedule'); if (schEl) schEl.value = f.schedule || '';
     var tzEl = document.getElementById('fd-tz'); if (tzEl) tzEl.value = f.timezone || '';
     var mcEl = document.getElementById('fd-maxconc'); if (mcEl) mcEl.value = f.max_concurrent || '';
+    flowInputs = (f.inputs || []).map(function (i) { return Object.assign({}, i); });
     (f.nodes || []).forEach(function (nd, i) { flow.nodes.push(normalizeNode(nd, i)); });
     rootFlow = flow;
     autoLayout();
@@ -906,10 +951,32 @@
         rootFlow.id = body.id; say('Saved ✓'); if (cb) cb();
       }).catch(function () { say('Save failed', true); });
   }
+  function collectInputs() {
+    // Prompt for each DECLARED input (a typed manual-run form); returns the data
+    // object, or null if the operator cancelled. The server validates + coerces.
+    var data = {};
+    for (var i = 0; i < flowInputs.length; i++) {
+      var spec = flowInputs[i]; var key = (spec.key || '').trim();
+      if (!key) continue;
+      var label = (spec.label || key) + ' [' + (spec.type || 'text') + (spec.required ? ', required' : '') + ']';
+      var def = (spec.default != null ? String(spec.default) : '');
+      var v = window.prompt(label, def);
+      if (v === null) return null;                 // cancelled
+      v = v.trim();
+      if (!v && spec.required && !('default' in spec)) { say('“' + key + '” is required.', true); return null; }
+      if (v) data[key] = v;
+    }
+    return data;
+  }
   function run(dryRun) {
     var data = {};
     var raw = document.getElementById('fd-sample').value.trim();
     if (raw) { try { data = JSON.parse(raw); } catch (e) { say('Sample input is not valid JSON.', true); return; } }
+    if (!dryRun && flowInputs.length) {
+      var collected = collectInputs();
+      if (collected === null) { say('Run cancelled.'); return; }
+      Object.keys(collected).forEach(function (k) { data[k] = collected[k]; });   // declared inputs win
+    }
     if (!dryRun && !window.confirm('Run for real? This creates real goals and calls real connectors.')) return;
     save(function () {
       apiFetch('/api/v1/flows/' + encodeURIComponent(rootFlow.id) + '/run', { method: 'POST', body: JSON.stringify({ data: data, dry_run: !!dryRun }) })

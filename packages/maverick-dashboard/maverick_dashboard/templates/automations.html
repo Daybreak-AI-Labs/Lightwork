@@ -674,7 +674,7 @@
           + (f.single_agent ? ' · single agent' : '')));
         li.appendChild(main);
         li.appendChild(mkBtn('Edit', function () { location.href = '/flows/designer/' + encodeURIComponent(f.id); }));
-        li.appendChild(mkBtn('Run', function () { runFlow(f.id); }));
+        li.appendChild(mkBtn('Run', function () { runFlow(f.id, f.inputs || []); }));
         flowsList.appendChild(li);
       });
       loadFlowRuns();
@@ -684,13 +684,22 @@
       var b = el('button', 'btn btn--ghost'); b.type = 'button'; b.textContent = label;
       b.addEventListener('click', onClick); return b;
     }
-    async function runFlow(id) {
+    async function runFlow(id, inputs) {
+      var data = {};
+      for (var i = 0; i < (inputs || []).length; i++) {          // prompt for declared inputs
+        var spec = inputs[i]; var key = (spec.key || '').trim(); if (!key) continue;
+        var def = (spec.default != null ? String(spec.default) : '');
+        var v = window.prompt((spec.label || key) + ' [' + (spec.type || 'text') + (spec.required ? ', required' : '') + ']', def);
+        if (v === null) { flowsMsg.textContent = 'Run cancelled.'; return; }
+        if (v.trim()) data[key] = v.trim();
+      }
       flowsMsg.textContent = 'Starting…';
       try {
         var r = await fetch('/api/v1/flows/' + encodeURIComponent(id) + '/run', {
-          method: 'POST', headers: { 'Content-Type': 'application/json' }, body: '{}',
+          method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ data: data }),
         });
-        flowsMsg.textContent = r.ok ? 'Run queued.' : 'Could not start run.';
+        if (r.ok) { flowsMsg.textContent = 'Run queued.'; }
+        else { var j = await r.json().catch(function () { return {}; }); flowsMsg.textContent = j.detail || 'Could not start run.'; }
         setTimeout(loadFlowRuns, 500);
       } catch (e) { flowsMsg.textContent = 'Could not start run.'; }
     }
