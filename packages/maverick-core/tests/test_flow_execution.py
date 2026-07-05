@@ -113,8 +113,10 @@ class TestExecution:
         run = execution.execute(
             f, agent_runner=lambda brief, d: ("ok", 1.0),
             action_runner=lambda t, p, d: ("ERROR: boom", 0.0))
-        assert run.nodes["a"] == {"status": "done", "outcome": 1.0}
-        assert run.nodes["b"] == {"status": "done", "outcome": 0.0}
+        assert run.nodes["a"]["status"] == "done" and run.nodes["a"]["outcome"] == 1.0
+        assert run.nodes["b"]["status"] == "done" and run.nodes["b"]["outcome"] == 0.0
+        # work nodes also carry their measured wall-clock duration
+        assert run.nodes["a"]["seconds"] >= 0.0 and run.nodes["b"]["seconds"] >= 0.0
         from maverick.flow import store
         assert store.load_run(run.run_id).nodes["b"]["outcome"] == 0.0   # persisted
 

@@ -3,8 +3,10 @@
   'use strict';
   var SVG = 'http://www.w3.org/2000/svg';
   var W = 176, H = 64;                 // node card size
-  var KIND_ICON = { agent: '🧠', action: '⚙️', branch: '🔀', foreach: '🔁',
-                    parallel: '🔱', approval: '✅', delay: '⏱', subflow: '📎' };
+  var KIND_ICON = { agent: '🧠', action: '⚙️', branch: '🔀', switch: '🔃',
+                    foreach: '🔁', while: '🔄', parallel: '🔱', approval: '✅',
+                    delay: '⏱', wait_event: '📥', scope: '🛡', subflow: '📎' };
+  var BODY_KINDS = { foreach: '🔁 loop body', while: '🔄 while body', scope: '🛡 try body' };
 
   var flow = { id: '', name: '', start: '', nodes: [] };
   var rootFlow = flow;  // the top-level flow (save/run/history operate on this)
@@ -16,6 +18,7 @@
   var runCursor = null; // node a paused run is waiting on
   var toolCatalog = {}; // tool name -> {description, params[]} for the action picker
   var selected = null;
+  var multiSel = {};        // node id -> true when marquee-selected (group drag/delete)
   var selectedEdge = null;  // {from, port} when an edge is selected (click to select, Del to cut)
   var view = { x: 40, y: 20, k: 1 };
   var idSeq = 0;
@@ -94,10 +97,14 @@
     if (n.kind === 'agent') return trunc(n.brief || '(no brief)', 30);
     if (n.kind === 'action') return trunc(n.tool || '(no tool)', 30);
     if (n.kind === 'branch') return trunc(n.condition || '(condition)', 30);
-    if (n.kind === 'foreach') return 'for each ' + trunc(n.items || '…', 20);
+    if (n.kind === 'switch') return 'on ' + trunc(n.condition || '…', 16) + ' (' + ((n.cases || []).length) + ' cases)';
+    if (n.kind === 'foreach') return 'for each ' + trunc(n.items || '…', 20) + (n.concurrent ? ' ∥' : '');
+    if (n.kind === 'while') return 'while ' + trunc(n.condition || '…', 24);
     if (n.kind === 'parallel') return (n.branches ? n.branches.length : 0) + ' branches';
     if (n.kind === 'approval') return trunc(n.prompt || '(approve?)', 30);
     if (n.kind === 'delay') return (n.seconds || 0) + 's';
+    if (n.kind === 'wait_event') return trunc(n.prompt || '(wait for event)', 30);
+    if (n.kind === 'scope') return 'try ' + (((n.body || {}).nodes || []).length) + ' step(s)';
     if (n.kind === 'subflow') return '↳ ' + trunc(n.flow_ref || '(flow)', 24);
     return n.kind;
   }
@@ -146,7 +153,7 @@
     });
     // nodes
     flow.nodes.forEach(function (n) {
-      var g = el('g', { class: 'fd-node' + (n.id === selected ? ' selected' : '') + (n.id === flow.start ? ' start' : '') + runClass(n.id),
+      var g = el('g', { class: 'fd-node' + ((n.id === selected || multiSel[n.id]) ? ' selected' : '') + (n.id === flow.start ? ' start' : '') + runClass(n.id),
                         transform: 'translate(' + n.x + ',' + n.y + ')' });
       g.setAttribute('data-node', n.id);
       g.appendChild(el('rect', { class: 'card', width: W, height: H, rx: 10 }));
@@ -168,6 +175,44 @@
       });
       gNodes.appendChild(g);
     });
+    // Skip the minimap rebuild mid-drag (render() fires every mousemove frame);
+    // the mouseup handler refreshes it once the drag settles.
+    if (!drag || drag.kind === 'connect' || drag.kind === 'marquee') renderMinimap();
+  }
+
+  // ---- minimap: a scaled overview with the viewport rect; click to jump ----
+  var MINI_W = 160, MINI_H = 110, MINI_PAD = 8;
+  function miniScale() {
+    var minX = 0, minY = 0, maxX = 400, maxY = 300;
+    if (flow.nodes.length) {
+      minX = Infinity; minY = Infinity; maxX = -Infinity; maxY = -Infinity;
+      flow.nodes.forEach(function (n) {
+        minX = Math.min(minX, n.x); minY = Math.min(minY, n.y);
+        maxX = Math.max(maxX, n.x + W); maxY = Math.max(maxY, n.y + H);
+      });
+    }
+    var r = canvas.getBoundingClientRect();
+    // include the visible viewport so the view rect always fits on the map
+    minX = Math.min(minX, -view.x / view.k); minY = Math.min(minY, -view.y / view.k);
+    maxX = Math.max(maxX, (-view.x + r.width) / view.k); maxY = Math.max(maxY, (-view.y + r.height) / view.k);
+    var k = Math.min((MINI_W - 2 * MINI_PAD) / Math.max(1, maxX - minX),
+                     (MINI_H - 2 * MINI_PAD) / Math.max(1, maxY - minY));
+    return { minX: minX, minY: minY, k: k };
+  }
+  function renderMinimap() {
+    var mm = document.getElementById('fd-minimap'); if (!mm) return;
+    mm.textContent = '';
+    var s = miniScale();
+    flow.nodes.forEach(function (n) {
+      mm.appendChild(el('rect', { class: 'mini-node',
+        x: MINI_PAD + (n.x - s.minX) * s.k, y: MINI_PAD + (n.y - s.minY) * s.k,
+        width: Math.max(2, W * s.k), height: Math.max(2, H * s.k), rx: 1 }));
+    });
+    var r = canvas.getBoundingClientRect();
+    mm.appendChild(el('rect', { class: 'mini-view',
+      x: MINI_PAD + (-view.x / view.k - s.minX) * s.k,
+      y: MINI_PAD + (-view.y / view.k - s.minY) * s.k,
+      width: (r.width / view.k) * s.k, height: (r.height / view.k) * s.k }));
   }
 
   // ---- coordinate + interaction ----
@@ -198,13 +243,30 @@
     }
     selectedEdge = null;
     if (nodeEl) {
-      var id = nodeEl.getAttribute('data-node'); selectNode(id);
+      var id = nodeEl.getAttribute('data-node');
       var n = nodeById(id), p = worldPt(evt);
+      if (multiSel[id] && Object.keys(multiSel).length > 1) {
+        // dragging one selected node moves the whole marquee selection
+        var offs = {};
+        flow.nodes.forEach(function (m) { if (multiSel[m.id]) offs[m.id] = { dx: p.x - m.x, dy: p.y - m.y }; });
+        drag = { kind: 'group', offs: offs };
+        evt.preventDefault(); return;
+      }
+      multiSel = {};
+      selectNode(id);
       drag = { kind: 'node', id: id, dx: p.x - n.x, dy: p.y - n.y };
+      evt.preventDefault(); return;
+    }
+    if (evt.shiftKey) {           // shift-drag on empty canvas: marquee select
+      var mp = worldPt(evt);
+      // ex/ey start AT the origin (a click with no drag = an empty box), so the
+      // mouseup reader needs no undefined-guard.
+      drag = { kind: 'marquee', sx: mp.x, sy: mp.y, ex: mp.x, ey: mp.y };
       evt.preventDefault(); return;
     }
     drag = { kind: 'pan', sx: evt.clientX - view.x, sy: evt.clientY - view.y };
     canvas.classList.add('panning');
+    multiSel = {};
     selectNode(null);
   });
   function deleteEdge(edge) {
@@ -216,14 +278,33 @@
   canvas.addEventListener('dblclick', function (evt) {
     var nodeEl = evt.target.closest('[data-node]'); if (!nodeEl) return;
     var n = nodeById(nodeEl.getAttribute('data-node')); if (!n) return;
-    if (n.kind === 'foreach') { evt.preventDefault(); enterSub(n, 'foreach'); }
+    if (BODY_KINDS[n.kind]) { evt.preventDefault(); enterSub(n, n.kind); }
     else if (n.kind === 'parallel') { evt.preventDefault(); enterSub(n, 'parallel', 0); }
   });
   window.addEventListener('mousemove', function (evt) {
     if (!drag) return;
     if (drag.kind === 'node') {
       var n = nodeById(drag.id); if (!n) return;
-      var p = worldPt(evt); n.x = Math.round(p.x - drag.dx); n.y = Math.round(p.y - drag.dy); render();
+      var p = worldPt(evt);
+      // snap to a 16px grid so hand-laid flows line up without guides
+      n.x = Math.round((p.x - drag.dx) / 16) * 16;
+      n.y = Math.round((p.y - drag.dy) / 16) * 16;
+      render();
+    } else if (drag.kind === 'group') {
+      var gp = worldPt(evt);
+      flow.nodes.forEach(function (m) {
+        var o = drag.offs[m.id]; if (!o) return;
+        m.x = Math.round((gp.x - o.dx) / 16) * 16;
+        m.y = Math.round((gp.y - o.dy) / 16) * 16;
+      });
+      render();
+    } else if (drag.kind === 'marquee') {
+      var mq = document.getElementById('fd-marquee');
+      var mp2 = worldPt(evt);
+      drag.ex = mp2.x; drag.ey = mp2.y;
+      mq.style.display = '';
+      mq.setAttribute('x', Math.min(drag.sx, mp2.x)); mq.setAttribute('y', Math.min(drag.sy, mp2.y));
+      mq.setAttribute('width', Math.abs(mp2.x - drag.sx)); mq.setAttribute('height', Math.abs(mp2.y - drag.sy));
     } else if (drag.kind === 'pan') {
       view.x = evt.clientX - drag.sx; view.y = evt.clientY - drag.sy; render();
     } else if (drag.kind === 'connect') {
@@ -244,6 +325,21 @@
   window.addEventListener('mouseup', function (evt) {
     canvas.classList.remove('panning');
     tempEdge.style.display = 'none';
+    if (drag && drag.kind === 'marquee') {
+      document.getElementById('fd-marquee').style.display = 'none';
+      var x0 = Math.min(drag.sx, drag.ex), x1 = Math.max(drag.sx, drag.ex);
+      var y0 = Math.min(drag.sy, drag.ey), y1 = Math.max(drag.sy, drag.ey);
+      multiSel = {};
+      flow.nodes.forEach(function (n) {
+        var cx = n.x + W / 2, cy = n.y + H / 2;
+        if (cx >= x0 && cx <= x1 && cy >= y0 && cy <= y1) multiSel[n.id] = true;
+      });
+      selected = null;
+      var count = Object.keys(multiSel).length;
+      say(count ? count + ' node' + (count === 1 ? '' : 's') + ' selected — drag to move together, Delete to remove.' : '');
+      renderProps(); render();
+      drag = null; return;
+    }
     if (drag && drag.kind === 'connect') {
       var nodeEl = evt.target.closest('[data-node]');
       if (nodeEl) {
@@ -251,7 +347,11 @@
         if (from && to !== from.id) { pushHistory(); from[drag.port] = to; renderProps(); render(); }
       }
     }
+    var wasDragging = drag && (drag.kind === 'node' || drag.kind === 'group' || drag.kind === 'pan');
     drag = null;
+    // The minimap is skipped mid-drag (see render); refresh it once now that the
+    // drag settled, so it isn't left stale.
+    if (wasDragging) renderMinimap();
   });
   canvas.addEventListener('wheel', function (evt) {
     evt.preventDefault();
@@ -265,11 +365,24 @@
   // ---- nodes ----
   function addNode(kind) {
     pushHistory();
-    var n = { id: newId(), kind: kind, x: Math.round((-view.x + 220) / view.k), y: Math.round((-view.y + 80) / view.k),
-              next: null, params: {}, brief: '', tool: '', condition: '', if_true: null, if_false: null,
-              items: '', var: 'item', limit: 0, prompt: '', seconds: 0, flow_ref: '', retries: 0, on_error: null, timeout: 0,
-              output: '', label: '', body: null, branches: [] };
-    // place under the currently selected node if any
+    var n = normalizeNode({ id: newId(), kind: kind,
+      x: Math.round((-view.x + 220) / view.k), y: Math.round((-view.y + 80) / view.k) }, 0);
+    // an edge is selected -> insert the new node INTO that edge
+    if (selectedEdge) {
+      var from = nodeById(selectedEdge.from);
+      if (from) {
+        n.next = from[selectedEdge.port] || null;
+        from[selectedEdge.port] = n.id;
+        var tgt = n.next && nodeById(n.next);
+        n.x = tgt && from ? Math.round((from.x + tgt.x) / 2) + 24 : from.x + 24;
+        n.y = tgt && from ? Math.round((from.y + tgt.y) / 2) : from.y + 110;
+        selectedEdge = null;
+        flow.nodes.push(n); selectNode(n.id); render();
+        say('Inserted into the edge.');
+        return;
+      }
+    }
+    // else place under the currently selected node if any
     var sel = selected && nodeById(selected);
     if (sel) { n.x = sel.x; n.y = sel.y + 110; if (!sel.next && sel.kind !== 'branch') sel.next = n.id; }
     if (!flow.nodes.length) flow.start = n.id;
@@ -282,17 +395,53 @@
     if (flow.start === id) flow.start = flow.nodes.length ? flow.nodes[0].id : '';
     selectNode(null); render();
   }
+  function deleteSelection() {
+    var ids = Object.keys(multiSel);
+    if (!ids.length) return;
+    pushHistory();
+    flow.nodes = flow.nodes.filter(function (n) { return !multiSel[n.id]; });
+    flow.nodes.forEach(function (n) {
+      ['next', 'if_true', 'if_false', 'on_error'].forEach(function (k) { if (multiSel[n[k]]) n[k] = null; });
+      (n.cases || []).forEach(function (c) { if (multiSel[c.to]) c.to = null; });
+    });
+    if (multiSel[flow.start]) flow.start = flow.nodes.length ? flow.nodes[0].id : '';
+    multiSel = {};
+    selectNode(null); render();
+    say('Removed ' + ids.length + ' node' + (ids.length === 1 ? '' : 's') + '.');
+  }
+  // Build an independent copy of a serialized node with a fresh id and ALL
+  // outgoing edges cleared -- so a clone never smuggles a stale reference to the
+  // original's downstream. The one place the edge-field list is maintained
+  // (next/if_true/if_false/on_error AND a switch node's cases[].to).
+  function makeClone(serialized, x, y) {
+    var copy = normalizeNode(JSON.parse(JSON.stringify(serialized)), 0);
+    copy.id = newId();
+    copy.x = x; copy.y = y;
+    copy.next = null; copy.if_true = null; copy.if_false = null; copy.on_error = null;
+    if (copy.cases && copy.cases.length) copy.cases = copy.cases.map(function (c) { return { value: c.value, to: null }; });
+    return copy;
+  }
   function duplicateNode(id) {
     var src = nodeById(id); if (!src) return;
     pushHistory();
-    var copy = normalizeNode(JSON.parse(JSON.stringify(FDCore.serializeNode(src))), 0);
-    copy.id = newId();
-    copy.x = (src.x || 0) + 30; copy.y = (src.y || 0) + 40;
-    copy.next = null; copy.if_true = null; copy.if_false = null; copy.on_error = null;
+    var copy = makeClone(FDCore.serializeNode(src), (src.x || 0) + 30, (src.y || 0) + 40);
     flow.nodes.push(copy); selectNode(copy.id); render();
     say('Duplicated as ' + copy.id + '.');
   }
   function selectNode(id) { selected = id; if (id) selectedEdge = null; renderProps(); render(); }
+  var clipboard = null;    // serialized node (Ctrl+C), pasted with Ctrl+V
+  function copyNode(id) {
+    var n = nodeById(id); if (!n) return;
+    clipboard = FDCore.serializeNode(n);
+    say('Copied ' + id + ' — Ctrl+V pastes it.');
+  }
+  function pasteNode() {
+    if (!clipboard) { say('Nothing copied yet.'); return; }
+    pushHistory();
+    var copy = makeClone(clipboard, (clipboard.x || 60) + 32, (clipboard.y || 60) + 48);
+    flow.nodes.push(copy); selectNode(copy.id); render();
+    say('Pasted as ' + copy.id + '.');
+  }
   function zoomToFit() {
     var r = canvas.getBoundingClientRect();
     view = FDCore.fitView(flow.nodes, r.width, r.height, W, H, 40);
@@ -318,9 +467,9 @@
   function enterSub(node, kind, index) {
     commitFlowRaw(flow);
     var sub, label;
-    if (kind === 'foreach') {
-      if (!node.body) node.body = { id: '', name: 'loop body', start: '', nodes: [] };
-      sub = node.body; label = '🔁 ' + (node.label || 'for-each') + ' body';
+    if (BODY_KINDS[kind]) {
+      if (!node.body) node.body = { id: '', name: 'body', start: '', nodes: [] };
+      sub = node.body; label = (node.label ? node.label + ' · ' : '') + BODY_KINDS[kind];
     } else {
       node.branches = node.branches || [];
       if (!node.branches[index]) node.branches[index] = { id: '', name: 'branch ' + (index + 1), start: '', nodes: [] };
@@ -379,9 +528,21 @@
   }
   function renderProps() {
     props.textContent = '';
+    var selCount = Object.keys(multiSel).length;
+    if (selCount) {
+      var mh = document.createElement('div'); mh.style.fontWeight = '600'; mh.style.marginBottom = 'var(--space-3)';
+      mh.textContent = selCount + ' nodes selected';
+      props.appendChild(mh);
+      props.appendChild(hint('Drag any selected node to move the group. Delete removes them all; Esc deselects.'));
+      var db = document.createElement('button'); db.className = 'btn btn--ghost'; db.type = 'button';
+      db.textContent = '🗑 Delete ' + selCount + ' nodes';
+      db.addEventListener('click', deleteSelection);
+      props.appendChild(db);
+      return;
+    }
     if (!selected) {
       var p = document.createElement('p'); p.className = 'fd__empty';
-      p.textContent = "Select a node to edit it, or add a step. Connect steps by dragging from a node's bottom dot to another node.";
+      p.textContent = "Select a node to edit it, or add a step. Connect steps by dragging from a node's bottom dot to another node. Shift-drag selects several.";
       props.appendChild(p); return;
     }
     var n = nodeById(selected); if (!n) return;
@@ -394,7 +555,7 @@
       props.appendChild(withPills(n.id, field('Brief (what the agent should do)', briefTa), briefTa));
     }
     if (n.kind === 'action') {
-      var toolIn = input(n.tool, function (v) { n.tool = v; renderProps(); render(); }, 'search connectors…');
+      var toolIn = input(n.tool, function (v) { n.tool = v; scheduleToolSearch(v); renderProps(); render(); }, 'search all connectors…');
       toolIn.setAttribute('list', 'fd-tools');
       props.appendChild(field('Connector / tool', toolIn));
       var meta = toolCatalog[n.tool];
@@ -418,6 +579,58 @@
       props.appendChild(withPills(n.id, field('Condition', condIn), condIn, true));
       props.appendChild(hint('Drag the green (yes) and red (no) dots to the next steps.'));
     }
+    if (n.kind === 'switch') {
+      var keyIn = input(n.condition, function (v) { n.condition = v; render(); }, 'status');
+      props.appendChild(withPills(n.id, field('Route on (data key)', keyIn), keyIn, true));
+      var cwrap = document.createElement('div'); cwrap.className = 'field';
+      var cl = document.createElement('label'); cl.textContent = 'Cases (value → step)'; cwrap.appendChild(cl);
+      var targets = [{ v: '', t: '(pick a step)' }].concat(
+        flow.nodes.filter(function (m) { return m.id !== n.id; })
+          .map(function (m) { return { v: m.id, t: (m.label || m.id) }; }));
+      (n.cases = n.cases || []).forEach(function (c, ci) {
+        var rowc = document.createElement('div'); rowc.style.display = 'flex'; rowc.style.gap = '4px'; rowc.style.marginBottom = '4px';
+        var vi = input(c.value != null ? String(c.value) : '', function (v) { c.value = v; render(); }, 'value');
+        vi.style.flex = '1';
+        var ts = select(c.to || '', targets, function (v) { c.to = v || null; render(); });
+        ts.style.flex = '1';
+        var rm = document.createElement('button'); rm.className = 'btn btn--ghost'; rm.type = 'button'; rm.textContent = '🗑';
+        rm.title = 'Remove case';
+        rm.addEventListener('click', function () { n.cases.splice(ci, 1); renderProps(); render(); });
+        rowc.appendChild(vi); rowc.appendChild(ts); rowc.appendChild(rm); cwrap.appendChild(rowc);
+      });
+      var addc = document.createElement('button'); addc.className = 'btn btn--ghost'; addc.type = 'button'; addc.style.width = '100%';
+      addc.textContent = '+ Add case';
+      addc.addEventListener('click', function () { n.cases.push({ value: '', to: null }); renderProps(); });
+      cwrap.appendChild(addc); props.appendChild(cwrap);
+      props.appendChild(hint('No match falls through to this node’s normal next step (the default).'));
+    }
+    if (n.kind === 'while') {
+      var wcond = input(n.condition, function (v) { n.condition = v; render(); }, 'done != yes');
+      props.appendChild(withPills(n.id, field('Keep looping while', wcond), wcond, true));
+      props.appendChild(field('Max passes (0 = 100)', input(String(n.limit || ''), function (v) { n.limit = parseInt(v, 10) || 0; }, '100')));
+      var wbodyN = (n.body && n.body.nodes && n.body.nodes.length) || 0;
+      var wb = document.createElement('button'); wb.className = 'btn btn--ghost'; wb.type = 'button';
+      wb.style.width = '100%'; wb.textContent = '✏️ Edit loop body (' + wbodyN + (wbodyN === 1 ? ' step)' : ' steps)') + ' ↳';
+      wb.addEventListener('click', function () { enterSub(n, 'while'); });
+      props.appendChild(field('Loop body (visual)', wb));
+      props.appendChild(hint('The body runs on the SAME data, so it can change what the condition sees; it may set _break to stop early.'));
+    }
+    if (n.kind === 'wait_event') {
+      props.appendChild(field('Waiting for (shown while paused)', input(n.prompt, function (v) { n.prompt = v; render(); }, 'the payment provider callback')));
+      props.appendChild(hint('The run pauses here until an event resumes it: POST /webhook/run {"resume": "<run id>", "data": {...}} — the data merges into the flow.'));
+    }
+    if (n.kind === 'scope') {
+      var sbodyN = (n.body && n.body.nodes && n.body.nodes.length) || 0;
+      var sb = document.createElement('button'); sb.className = 'btn btn--ghost'; sb.type = 'button';
+      sb.style.width = '100%'; sb.textContent = '✏️ Edit try body (' + sbodyN + (sbodyN === 1 ? ' step)' : ' steps)') + ' ↳';
+      sb.addEventListener('click', function () { enterSub(n, 'scope'); });
+      props.appendChild(field('Try these steps (visual)', sb));
+      var scErr = [{ v: '', t: '(no catch — a failure fails the run)' }].concat(
+        flow.nodes.filter(function (m) { return m.id !== n.id; })
+          .map(function (m) { return { v: m.id, t: (m.label || m.id) }; }));
+      props.appendChild(field('On failure, go to (the catch step)', select(n.on_error || '', scErr, function (v) { n.on_error = v || null; render(); })));
+      props.appendChild(hint('The catch step can read what went wrong from {{_error}}.'));
+    }
     if (n.kind === 'foreach') {
       props.appendChild(field('Items (data key with a list)', input(n.items, function (v) { n.items = v; render(); }, 'rows')));
       props.appendChild(field('Loop variable', input(n.var, function (v) { n.var = v; }, 'item')));
@@ -427,6 +640,12 @@
       eb.style.width = '100%'; eb.textContent = '✏️ Edit loop body (' + bodyN + (bodyN === 1 ? ' step)' : ' steps)') + ' ↳';
       eb.addEventListener('click', function () { enterSub(n, 'foreach'); });
       props.appendChild(field('Loop body (visual)', eb));
+      var conc = document.createElement('label');
+      conc.style.cssText = 'display:flex;align-items:center;gap:6px;font-size:var(--text-sm);margin-bottom:var(--space-3);';
+      var cb = document.createElement('input'); cb.type = 'checkbox'; cb.checked = !!n.concurrent;
+      cb.addEventListener('change', function () { n.concurrent = cb.checked; render(); });
+      conc.appendChild(cb); conc.appendChild(document.createTextNode('Run iterations in parallel (bounded pool; _break doesn’t apply)'));
+      props.appendChild(conc);
       props.appendChild(hint('Opens the body as its own canvas. It can set _break to true to stop early.'));
     }
     if (n.kind === 'parallel') {
@@ -448,13 +667,22 @@
       wrap.appendChild(add); props.appendChild(wrap);
       props.appendChild(hint('Each branch is an isolated sub-flow; they run in parallel and their outputs merge.'));
     }
-    if (n.kind === 'approval') props.appendChild(field('Prompt (what a human approves)', input(n.prompt, function (v) { n.prompt = v; render(); }, 'Send this reply?')));
+    if (n.kind === 'approval') {
+      props.appendChild(field('Prompt (what a human approves)', input(n.prompt, function (v) { n.prompt = v; render(); }, 'Send this reply?')));
+      props.appendChild(field('Choices beyond approve/reject (comma-separated, optional)',
+        input((n.choices || []).join(', '), function (v) {
+          n.choices = v.split(',').map(function (s) { return s.trim(); }).filter(Boolean);
+        }, 'ship, hold, escalate')));
+      props.appendChild(field('Expires after (seconds; 0 = waits forever, expiry = rejected)',
+        input(String(n.timeout || ''), function (v) { n.timeout = parseFloat(v) || 0; }, '0')));
+      props.appendChild(hint('A chosen verdict is recorded under the Output key, so a switch after this can route on it.'));
+    }
     if (n.kind === 'delay') props.appendChild(field('Seconds', input(String(n.seconds || ''), function (v) { n.seconds = parseFloat(v) || 0; render(); }, '60')));
     if (n.kind === 'subflow') {
       props.appendChild(field('Flow to run (saved flow id)', input(n.flow_ref, function (v) { n.flow_ref = v; render(); }, 'onboard-customer')));
       props.appendChild(hint('Runs another saved flow here, sharing this flow’s data. Cyclic references are blocked.'));
     }
-    if (n.kind === 'agent' || n.kind === 'action' || n.kind === 'foreach' || n.kind === 'parallel')
+    if (['agent', 'action', 'foreach', 'parallel', 'while', 'approval'].indexOf(n.kind) >= 0)
       props.appendChild(field('Output key (optional)', input(n.output, function (v) { n.output = v; }, 'store result under…')));
     // error handling for work steps: retry then route on failure
     if (n.kind === 'agent' || n.kind === 'action') {
@@ -469,7 +697,8 @@
       var badge = runBadge(n.id);
       var rl = document.createElement('p'); rl.className = 'fd__empty'; rl.style.marginTop = 'var(--space-2)';
       rl.textContent = 'Last run: ' + (n.id === runCursor ? 'waiting here'
-        : (rs.status || '') + (rs.outcome != null ? ' (' + (rs.outcome === 1 ? 'ok' : 'failed') + ')' : '')) + ' ' + badge;
+        : (rs.status || '') + (rs.outcome != null ? ' (' + (rs.outcome === 1 ? 'ok' : 'failed') + ')' : ''))
+        + (rs && rs.seconds != null ? ' · ' + rs.seconds + 's' : '') + ' ' + badge;
       props.appendChild(rl);
     }
     // measured impact of a prior self-rewrite on this node (before vs. after)
@@ -623,6 +852,8 @@
     if (!body.id) { body.id = slugify(body.name); idInput.value = body.id; }   // auto-id from the name
     if (!body.id) { say('Give the flow a name (top-left).', true); return; }
     if (!body.nodes.length) { say('Add at least one step.', true); return; }
+    var verrs = FDCore.validateFlow(body);
+    if (verrs.length) { say('Fix first: ' + verrs.slice(0, 3).join(' · '), true); return; }
     say('Saving…');
     apiFetch('/api/v1/flows', { method: 'POST', body: JSON.stringify({ flow: body }) })
       .then(function (r) { return r.json().then(function (j) { return { ok: r.ok, j: j }; }); })
@@ -644,7 +875,7 @@
           runState = {}; runCursor = null; lastRunId = j.run_id;
           say((dryRun ? '🧪 Dry run ' : 'Running ') + '(run ' + j.run_id.slice(0, 8) + '…)');
           document.getElementById('fd-legend').classList.add('on');
-          pollRun(j.run_id, 20);
+          watchRun(j.run_id);
         }).catch(function () { say('Run failed', true); });
     });
   }
@@ -657,23 +888,69 @@
     a.style.marginLeft = '6px';
     msg.appendChild(a);
   }
-  function pollRun(runId, tries) {
+  function handleRunUpdate(run, runId) {
+    // Paint one run snapshot onto the canvas; returns true when the run has
+    // reached a state that needs no further watching.
+    runState = run.nodes || {};
+    runCursor = (['paused_approval', 'paused_delay', 'paused_event'].indexOf(run.status) >= 0) ? run.cursor : null;
+    render(); if (selected) renderProps();
+    if (run.status === 'paused_approval') { sayWithRunLink('⏸ waiting for approval —', runId); return true; }
+    if (run.status === 'paused_event') { sayWithRunLink('📥 waiting for an external event —', runId); return true; }
+    if (run.status === 'failed') {
+      sayWithRunLink(runSummary(run) + ' ·', runId);
+      offerFixIt(runId);
+      return true;
+    }
+    if (['completed', 'rejected'].indexOf(run.status) >= 0) { sayWithRunLink(runSummary(run) + ' ·', runId); return true; }
+    return false;
+  }
+  function watchRun(runId) {
+    // Live status over SSE; falls back to polling where EventSource or the
+    // stream isn't available (older proxies, stream-slot exhaustion).
+    if (typeof EventSource === 'undefined') { pollRun(runId, 0); return; }
+    var es;
+    try { es = new EventSource('/api/v1/flows/runs/' + encodeURIComponent(runId) + '/events'); }
+    catch (e) { pollRun(runId, 0); return; }
+    var gotAny = false;
+    function onSnap(evt) {
+      gotAny = true;
+      try { if (handleRunUpdate(JSON.parse(evt.data), runId)) es.close(); } catch (e) { /* keep streaming */ }
+    }
+    es.addEventListener('snapshot', onSnap);
+    es.addEventListener('terminal', function (evt) { onSnap(evt); es.close(); });
+    es.addEventListener('timeout', function () { es.close(); pollRun(runId, 0); });
+    es.onerror = function () {
+      // never connected -> fall back to polling; a drop mid-stream lets
+      // EventSource retry on its own
+      if (!gotAny) { es.close(); pollRun(runId, 0); }
+    };
+  }
+  function pollRun(runId, tick) {
+    // Poll until a terminal/paused state: fast at first, backing off to 3s so a
+    // long run keeps updating the canvas instead of silently going dark.
     apiFetch('/api/v1/flows/runs/' + encodeURIComponent(runId))
       .then(function (r) { return r.ok ? r.json() : null; })
       .then(function (run) {
         if (!run) return;
-        runState = run.nodes || {};
-        runCursor = (run.status === 'paused_approval' || run.status === 'paused_delay') ? run.cursor : null;
-        render(); if (selected) renderProps();
-        if (run.status === 'paused_approval') { sayWithRunLink('⏸ waiting for approval —', runId); return; }
-        if (run.status === 'failed') {
-          sayWithRunLink(runSummary(run) + ' · ask the 💬 Copilot “why did it fail?” ·', runId);
-          return;
-        }
-        if (['completed', 'rejected'].indexOf(run.status) >= 0) { sayWithRunLink(runSummary(run) + ' ·', runId); return; }
-        if (tries > 0) setTimeout(function () { pollRun(runId, tries - 1); }, 900);
-        else sayWithRunLink('Still running —', runId);
+        if (handleRunUpdate(run, runId)) return;
+        var wait = Math.min(3000, 900 + (tick || 0) * 150);
+        setTimeout(function () { pollRun(runId, (tick || 0) + 1); }, wait);
       }).catch(function () {});
+  }
+  function offerFixIt(runId) {
+    // One-click repair: open the copilot pre-armed with a diagnose+fix turn
+    // grounded in the failed run's trace.
+    var a = document.createElement('button');
+    a.className = 'btn btn--ghost'; a.type = 'button'; a.textContent = '🔧 Fix it';
+    a.style.marginLeft = '6px';
+    a.addEventListener('click', function () {
+      lastRunId = runId;
+      chatToggle(true);
+      var inp = document.getElementById('fd-chat-input');
+      inp.value = 'The last run failed. Diagnose why from the run trace and propose the smallest patch that fixes it.';
+      chatSend();
+    });
+    msg.appendChild(a);
   }
   function runSummary(run) {
     var ok = 0, err = 0, ns = run.nodes || {};
@@ -783,6 +1060,113 @@
       box.appendChild(c);
     });
   }
+  // ---- export / import (flow JSON as a file) ----
+  function exportJson() {
+    var bad = commitRawFields();
+    if (bad.length) { say('Fix invalid JSON in: ' + bad.join(', '), true); return; }
+    var body = toApiFlow();
+    var blob = new Blob([JSON.stringify(body, null, 2)], { type: 'application/json' });
+    var a = document.createElement('a');
+    a.href = URL.createObjectURL(blob);
+    a.download = (body.id || slugify(body.name) || 'flow') + '.json';
+    a.click();
+    URL.revokeObjectURL(a.href);
+    say('Exported.');
+  }
+  function importJsonFile(file) {
+    var reader = new FileReader();
+    reader.onload = function () {
+      try {
+        var f = JSON.parse(String(reader.result || ''));
+        if (!f || !Array.isArray(f.nodes)) throw new Error('not a flow');
+        pushHistory();
+        fromApiFlow(f);
+        say('Loaded from file — review and Save.');
+      } catch (e) { say('That file is not a flow JSON.', true); }
+    };
+    reader.readAsText(file);
+  }
+
+  // ---- triggers panel: everything that starts THIS flow, in one place ----
+  function showTriggers() {
+    if (!rootFlow.id) { say('Save the flow first.', true); return; }
+    props.textContent = '';
+    var h = document.createElement('div'); h.style.fontWeight = '600'; h.style.marginBottom = 'var(--space-3)';
+    h.textContent = '⚡ What starts this flow';
+    props.appendChild(h);
+    var sch = ((document.getElementById('fd-schedule') || {}).value || '').trim();
+    props.appendChild(hint(sch ? ('⏰ Cron schedule: ' + sch + ' (edit it in the toolbar, then Save).')
+                               : '⏰ No cron schedule — set one in the toolbar field.'));
+    // inbound webhook triggers bound to this flow
+    apiFetch('/api/v1/triggers').then(function (r) { return r.ok ? r.json() : { triggers: [] }; })
+      .then(function (j) {
+        var mine = (j.triggers || []).filter(function (t) { return t.flow === rootFlow.id; });
+        var wl = document.createElement('div'); wl.className = 'field';
+        var lab = document.createElement('label'); lab.textContent = '📡 Inbound webhooks (POST ' + (j.webhook_url || '/webhook/run') + ')';
+        wl.appendChild(lab);
+        mine.forEach(function (t) {
+          var row = document.createElement('div'); row.style.display = 'flex'; row.style.gap = '4px'; row.style.marginBottom = '4px';
+          var nm = document.createElement('span'); nm.style.flex = '1'; nm.textContent = '‘' + t.name + '’ → this flow';
+          var rm = document.createElement('button'); rm.className = 'btn btn--ghost'; rm.type = 'button'; rm.textContent = '🗑';
+          rm.addEventListener('click', function () {
+            apiFetch('/api/v1/triggers/' + encodeURIComponent(t.name), { method: 'DELETE' })
+              .then(function () { showTriggers(); }).catch(function () {});
+          });
+          row.appendChild(nm); row.appendChild(rm); wl.appendChild(row);
+        });
+        if (!mine.length) {
+          var none = document.createElement('div'); none.className = 'fd__empty'; none.textContent = 'None yet.'; wl.appendChild(none);
+        }
+        var add = document.createElement('button'); add.className = 'btn btn--ghost'; add.type = 'button'; add.style.width = '100%';
+        add.textContent = '+ Add a webhook trigger for this flow';
+        add.addEventListener('click', function () {
+          apiFetch('/api/v1/triggers', { method: 'POST', body: JSON.stringify({ flow: rootFlow.id }) })
+            .then(function (r) { return r.json().then(function (jj) { return { ok: r.ok, j: jj }; }); })
+            .then(function (res) {
+              if (!res.ok) { say(res.j.detail || 'Could not create the trigger', true); return; }
+              if (!res.j.secret_configured) say('Trigger armed — set a [webhooks] secret so it can fire.', true);
+              showTriggers();
+            }).catch(function () { say('Could not create the trigger', true); });
+        });
+        wl.appendChild(add); props.appendChild(wl);
+      }).catch(function () {});
+    // polled event triggers bound to this flow (managed on Automations)
+    apiFetch('/api/v1/event-triggers').then(function (r) { return r.ok ? r.json() : { triggers: [] }; })
+      .then(function (j) {
+        var mine = (j.triggers || []).filter(function (t) { return t.flow === rootFlow.id; });
+        var el2 = document.createElement('div'); el2.className = 'field';
+        var lab2 = document.createElement('label'); lab2.textContent = '🛰 Polled event triggers';
+        el2.appendChild(lab2);
+        mine.forEach(function (t) {
+          var d = document.createElement('div'); d.className = 'fd__empty';
+          d.textContent = '‘' + t.name + '’ — ' + t.source; el2.appendChild(d);
+        });
+        var link = document.createElement('a'); link.href = '/automations';
+        link.textContent = (mine.length ? 'Manage' : 'Add one') + ' on the Automations page →';
+        el2.appendChild(link); props.appendChild(el2);
+      }).catch(function () {});
+  }
+
+  // ---- gallery: curated starter graphs (one click -> editable canvas) ----
+  function loadGallery() {
+    apiFetch('/api/v1/flows/gallery').then(function (r) { return r.ok ? r.json() : { flows: [] }; })
+      .then(function (j) {
+        var box = document.getElementById('fd-examples'); if (!box) return;
+        (j.flows || []).forEach(function (g) {
+          var c = document.createElement('button'); c.type = 'button'; c.className = 'fd__chip';
+          c.textContent = '📋 ' + g.name; c.title = (g.description || '') + ' (loads onto the canvas)';
+          c.addEventListener('click', function () {
+            pushHistory();
+            fromApiFlow(g);
+            var schEl = document.getElementById('fd-schedule');
+            if (schEl && g.schedule) schEl.value = g.schedule;
+            say('Loaded “' + g.name + '” — edit it, or tell the Copilot what to change.');
+          });
+          box.appendChild(c);
+        });
+      }).catch(function () {});
+  }
+
   // ---- copilot chat: converse to build, edit, explain, and repair the flow ----
   function chatMsgEl(role, text) {
     var d = document.createElement('div'); d.className = 'fd__chat-msg ' + role; d.textContent = text; return d;
@@ -852,8 +1236,9 @@
     if (box.classList.contains('on')) document.getElementById('fd-chat-input').focus();
   }
 
-  function loadTools() {
-    apiFetch('/api/v1/flows/tools').then(function (r) { return r.ok ? r.json() : { tools: [] }; })
+  function loadTools(q) {
+    var url = '/api/v1/flows/tools' + (q ? ('?q=' + encodeURIComponent(q)) : '');
+    apiFetch(url).then(function (r) { return r.ok ? r.json() : { tools: [] }; })
       .then(function (j) {
         var dl = document.getElementById('fd-tools'); if (dl) dl.textContent = '';
         (j.tools || []).forEach(function (t) {
@@ -862,6 +1247,16 @@
         });
         if (selected) renderProps();
       }).catch(function () {});
+  }
+  // Debounced full-registry search: typing in an action node's tool field
+  // searches EVERY live connector (built-ins + enabled enterprise connectors),
+  // not just the curated starter set.
+  var toolSearchTimer = null;
+  function scheduleToolSearch(q) {
+    if (toolSearchTimer) clearTimeout(toolSearchTimer);
+    toolSearchTimer = setTimeout(function () {
+      loadTools((q || '').trim().length >= 2 ? q.trim() : '');
+    }, 250);
   }
 
   // ---- wire ----
@@ -876,6 +1271,27 @@
   document.getElementById('fd-undo').addEventListener('click', undo);
   document.getElementById('fd-redo').addEventListener('click', redo);
   document.getElementById('fd-fit').addEventListener('click', zoomToFit);
+  document.getElementById('fd-triggers').addEventListener('click', showTriggers);
+  document.getElementById('fd-minimap').addEventListener('mousedown', function (evt) {
+    // click the overview to center the canvas on that spot
+    evt.preventDefault();
+    var mm = document.getElementById('fd-minimap');
+    var mr = mm.getBoundingClientRect();
+    var s = miniScale();
+    var wx = (evt.clientX - mr.left - MINI_PAD) / s.k + s.minX;
+    var wy = (evt.clientY - mr.top - MINI_PAD) / s.k + s.minY;
+    var r = canvas.getBoundingClientRect();
+    view.x = r.width / 2 - wx * view.k;
+    view.y = r.height / 2 - wy * view.k;
+    render();
+  });
+  document.getElementById('fd-export').addEventListener('click', exportJson);
+  document.getElementById('fd-import-json').addEventListener('click', function () {
+    document.getElementById('fd-import-file').click();
+  });
+  document.getElementById('fd-import-file').addEventListener('change', function (e) {
+    if (e.target.files && e.target.files[0]) { importJsonFile(e.target.files[0]); e.target.value = ''; }
+  });
   document.getElementById('fd-chat-toggle').addEventListener('click', function () { chatToggle(); });
   document.getElementById('fd-chat-close').addEventListener('click', function () { chatToggle(); });
   document.getElementById('fd-chat-form').addEventListener('submit', function (e) { e.preventDefault(); chatSend(); });
@@ -890,16 +1306,27 @@
     if (mod && !typing && (e.key === 'z' || e.key === 'Z')) { e.preventDefault(); if (e.shiftKey) redo(); else undo(); return; }
     if (mod && !typing && (e.key === 'y' || e.key === 'Y')) { e.preventDefault(); redo(); return; }
     if (mod && !typing && (e.key === 'd' || e.key === 'D') && selected) { e.preventDefault(); duplicateNode(selected); return; }
-    if (e.key === 'Escape' && !typing) { selected = null; selectedEdge = null; render(); renderProps(); }
+    if (mod && !typing && (e.key === 'c' || e.key === 'C') && selected) { e.preventDefault(); copyNode(selected); return; }
+    if (mod && !typing && (e.key === 'v' || e.key === 'V')) { e.preventDefault(); pasteNode(); return; }
+    if (e.key === 'Escape' && !typing) { selected = null; selectedEdge = null; multiSel = {}; render(); renderProps(); }
     else if ((e.key === 'Delete' || e.key === 'Backspace') && !typing) {
       if (selectedEdge) { e.preventDefault(); deleteEdge(selectedEdge); }
+      else if (Object.keys(multiSel).length) { e.preventDefault(); deleteSelection(); }
       else if (selected) { e.preventDefault(); deleteNode(selected); }
     }
   });
 
   buildExamples();
+  loadGallery();
   loadTools();
   var editId = canvas.getAttribute('data-flow-id');
-  if (editId) load(editId); else { render(); renderProps(); }
+  var seedEl = document.getElementById('fd-seed');
+  var seed = null;
+  if (seedEl) { try { seed = JSON.parse(seedEl.textContent); } catch (e) { seed = null; } }
+  if (editId) load(editId);
+  else if (seed && seed.nodes) {   // ?from_template= -> the template as a 1-node flow
+    fromApiFlow(seed);
+    say('Loaded the template as a flow — add branches, approvals, or loops around it.');
+  } else { render(); renderProps(); }
 })();
 {% endraw %}

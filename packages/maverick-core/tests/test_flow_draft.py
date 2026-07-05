@@ -26,6 +26,22 @@ def test_drafts_a_valid_graph():
     assert flow.validate() == [] and notes == []
 
 
+def test_sanitizer_prunes_dangling_switch_cases_and_on_error():
+    # A drafted switch case.to / on_error pointing at a hallucinated id must be
+    # pruned so the graph validates, instead of being discarded wholesale for a
+    # single-agent fallback.
+    js = ('{"id":"x","name":"Route","start":"s","nodes":['
+          '{"id":"s","kind":"switch","condition":"tier","cases":['
+          '{"value":"gold","to":"g"},{"value":"ghost","to":"nowhere"}],"next":"g"},'
+          '{"id":"g","kind":"action","tool":"slack_bot","params":{},"on_error":"missing"}]}')
+    flow, notes = draft_flow("route by tier", complete=_complete(js), flow_id="r")
+    assert flow.validate() == []                    # not discarded to a fallback
+    sw = flow.nodes["s"]
+    assert [c["value"] for c in sw.cases] == ["gold"]   # the dangling case dropped
+    assert flow.nodes["g"].on_error is None             # dangling on_error nulled
+    assert not any("single agent" in n for n in notes)
+
+
 def test_tolerates_code_fence_and_prose():
     js = 'Sure!\n```json\n{"name":"F","start":"a","nodes":[{"id":"a","kind":"agent","brief":"do"}]}\n```'
     flow, notes = draft_flow("do a thing", complete=_complete(js))

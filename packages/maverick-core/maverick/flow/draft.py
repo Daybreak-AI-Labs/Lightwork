@@ -29,10 +29,14 @@ Each node is one of these kinds (include only the fields for its kind):
 - {"id","kind":"agent","brief":"<instruction for an AI agent>","next":"<id|null>"}
 - {"id","kind":"action","tool":"<tool name>","params":{...},"next":"<id|null>"}
 - {"id","kind":"branch","condition":"<key op value>","if_true":"<id>","if_false":"<id>"}
-- {"id","kind":"foreach","items":"<data key holding a list>","var":"item","body":{<a nested flow>},"next":"<id|null>"}
+- {"id","kind":"switch","condition":"<data key to route on>","cases":[{"value":"<match>","to":"<id>"}],"next":"<id|null = the default arm>"}
+- {"id","kind":"foreach","items":"<data key holding a list>","var":"item","body":{<a nested flow>},"concurrent":<true to run iterations in parallel>,"next":"<id|null>"}
+- {"id","kind":"while","condition":"<keep-looping condition>","body":{<a nested flow>},"limit":<max passes>,"next":"<id|null>"}
 - {"id","kind":"parallel","branches":[{<nested flow>},...],"next":"<id|null>"}
-- {"id","kind":"approval","prompt":"<what a human approves>","next":"<id|null>"}
+- {"id","kind":"approval","prompt":"<what a human approves>","choices":["<optional verdicts beyond approve/reject>"],"timeout":<seconds until it expires as rejected>,"next":"<id|null>"}
 - {"id","kind":"delay","seconds":<number>,"next":"<id|null>"}
+- {"id","kind":"wait_event","prompt":"<what the run is waiting for>","next":"<id|null>"}
+- {"id","kind":"scope","body":{<a nested flow>},"on_error":"<id of the catch step>","next":"<id|null>"}
 - {"id","kind":"subflow","flow_ref":"<a saved flow id to run here>","next":"<id|null>"}
 
 Any "agent" or "action" node may also set "retries":<n> (re-try on failure) and "on_error":"<id>" (route there if it fails).
@@ -95,9 +99,17 @@ def _sanitize(raw: dict, description: str) -> dict:
         raise ValueError("no usable nodes")
     ids = {n["id"] for n in clean}
     for n in clean:                       # drop routing that points nowhere
-        for key in ("next", "if_true", "if_false"):
+        for key in ("next", "if_true", "if_false", "on_error"):
             if n.get(key) is not None and n.get(key) not in ids:
                 n[key] = None
+        # A switch node's case arms are routing too; prune any that point at a
+        # node the model hallucinated (else the whole draft fails validation and
+        # is discarded for a single-agent fallback -- switch/scope drafts newly
+        # documented in the prompt would be disproportionately fragile).
+        cases = n.get("cases")
+        if isinstance(cases, list):
+            n["cases"] = [c for c in cases
+                          if isinstance(c, dict) and c.get("to") in ids]
     start = str(raw.get("start") or "")
     if start not in ids:
         start = clean[0]["id"]

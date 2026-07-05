@@ -85,7 +85,7 @@
   }
 
   function badgeFor(run, id) {
-    if (run.cursor === id && (run.status === 'paused_approval' || run.status === 'paused_delay')) return '⏳';
+    if (run.cursor === id && ['paused_approval', 'paused_delay', 'paused_event'].indexOf(run.status) >= 0) return '⏳';
     if (run.cursor === id && run.status === 'failed') return '🔴';
     var rs = (run.nodes || {})[id];
     if (!rs) return '·';
@@ -111,7 +111,8 @@
       li.appendChild(span('kind', (KIND_ICON[n.kind] || '') + ' ' + (n.kind || '')));
       li.appendChild(span('lbl', n.label || ''));
       var st = rs.status || (run.cursor === n.id ? (run.status === 'failed' ? 'failed here' : 'waiting here') : 'not reached');
-      li.appendChild(span('', st + (rs.outcome != null ? ' (' + (rs.outcome === 1 ? 'ok' : 'failed') + ')' : '')));
+      li.appendChild(span('', st + (rs.outcome != null ? ' (' + (rs.outcome === 1 ? 'ok' : 'failed') + ')' : '')
+        + (rs.seconds != null ? ' · ' + rs.seconds + 's' : '')));
       ul.appendChild(li);
     });
   }
@@ -128,6 +129,10 @@
       if (run.prompt) { var p = document.createElement('span'); p.className = 'fr__msg'; p.textContent = '“' + run.prompt + '” '; box.appendChild(p); }
       btn('✅ Approve', true, function () { resume('approved'); });
       btn('🚫 Reject', false, function () { resume('rejected'); });
+    }
+    if (run.status === 'paused_event') {
+      if (run.prompt) { var pe = document.createElement('span'); pe.className = 'fr__msg'; pe.textContent = '📥 ' + run.prompt + ' '; box.appendChild(pe); }
+      btn('▶ Resume now (skip the wait)', false, function () { resume('approved'); });
     }
     if (run.status === 'failed' && run.cursor) {
       btn('🔁 Retry from failed step (' + run.cursor + ')', true, function () { retry(true); });
@@ -177,11 +182,28 @@
         if (ACTIVE.indexOf(run.status) >= 0 && tries > 0) setTimeout(function () { poll(tries - 1); }, 1200);
       }).catch(function () { say('Could not load the run.'); });
   }
+  function watch() {
+    // Live updates over SSE; polling is the fallback (no EventSource, stream
+    // slots exhausted, or the connection never opens).
+    if (typeof EventSource === 'undefined') { poll(60); return; }
+    var es;
+    try { es = new EventSource('/api/v1/flows/runs/' + encodeURIComponent(runId) + '/events'); }
+    catch (e) { poll(60); return; }
+    var gotAny = false;
+    function onSnap(evt) {
+      gotAny = true;
+      try { renderRun(JSON.parse(evt.data)); } catch (e) { /* keep streaming */ }
+    }
+    es.addEventListener('snapshot', onSnap);
+    es.addEventListener('terminal', function (evt) { onSnap(evt); es.close(); });
+    es.addEventListener('timeout', function () { es.close(); poll(60); });
+    es.onerror = function () { if (!gotAny) { es.close(); poll(60); } };
+  }
 
   api('/api/v1/flows/' + encodeURIComponent(flowId))
     .then(function (r) { return r.ok ? r.json() : null; })
-    .then(function (f) { if (f) flowNodes = orderNodes(f); poll(25); })
-    .catch(function () { poll(25); });
+    .then(function (f) { if (f) flowNodes = orderNodes(f); watch(); })
+    .catch(function () { watch(); });
 })();
 </script>
 {% endblock %}

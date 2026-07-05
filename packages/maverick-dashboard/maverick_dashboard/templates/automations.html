@@ -167,6 +167,9 @@
         <label><input type="checkbox" id="auto-import-schedules"> Activate recovered schedules (arm a cron for scheduled automations)</label>
       </div>
       <div class="field">
+        <label><input type="checkbox" id="auto-import-flows"> Also import as flow graphs (branches/loops preserved where the source exposes them, with a per-step fidelity report)</label>
+      </div>
+      <div class="field">
         <label><input type="checkbox" id="auto-import-dry"> Preview only (dry run)</label>
       </div>
       <button class="btn btn--primary" type="submit">Import</button>
@@ -354,6 +357,7 @@
         dry_run: document.getElementById('auto-import-dry').checked,
         create_webhook_triggers: document.getElementById('auto-import-webhooks').checked,
         activate_schedules: document.getElementById('auto-import-schedules').checked,
+        as_flows: document.getElementById('auto-import-flows').checked,
       };
       var raw = document.getElementById('auto-import-defs').value.trim();
       if (raw) {
@@ -388,6 +392,23 @@
         });
         if (it.tools && it.tools.length) {
           var tools = el('div', 'auto__runs'); tools.textContent = 'tools: ' + it.tools.join(', '); li.appendChild(tools);
+        }
+        if (it.flow) {
+          var fl = el('div', 'auto__runs');
+          var fa = document.createElement('a');
+          fa.href = '/flows/designer/' + encodeURIComponent(it.flow);
+          fa.textContent = 'flow ‘' + it.flow + '’' + (out.dry_run ? ' (preview)' : ' — open in designer');
+          fl.appendChild(document.createTextNode('↳ '));
+          fl.appendChild(fa); li.appendChild(fl);
+          var kept = (it.fidelity || []).filter(function (r) { return r.fidelity === 'preserved'; }).length;
+          var approx = (it.fidelity || []).length - kept;
+          var sum = el('div', 'auto__runs');
+          sum.textContent = '↳ migration fidelity: ' + kept + ' step' + (kept === 1 ? '' : 's')
+            + ' preserved structurally' + (approx ? (', ' + approx + ' approximated as agent steps (they still run)') : '');
+          li.appendChild(sum);
+          (it.fidelity || []).filter(function (r) { return r.fidelity !== 'preserved'; }).forEach(function (r) {
+            var d = el('div', 'auto__runs'); d.textContent = '   · ' + r.step + ': ' + r.note; li.appendChild(d);
+          });
         }
         results.appendChild(li);
       });

@@ -25,15 +25,19 @@ from typing import Any
 NODE_ACTION = "action"      # a deterministic tool/connector call
 NODE_AGENT = "agent"        # an agentic goal (a brief); the "figure it out" node
 NODE_BRANCH = "branch"      # conditional: evaluate, go if_true / if_false
+NODE_SWITCH = "switch"      # n-way conditional: route by a data key's value
 NODE_FOREACH = "foreach"    # loop: run a body sub-flow per item in a list
+NODE_WHILE = "while"        # loop: run a body sub-flow while a condition holds
 NODE_PARALLEL = "parallel"  # fan out branch sub-flows, join their data
 NODE_APPROVAL = "approval"  # human-in-the-loop gate: pause until approved
 NODE_DELAY = "delay"        # wait N seconds, then continue
+NODE_WAIT = "wait_event"    # pause until an external event resumes the run
+NODE_SCOPE = "scope"        # try/catch: run a body; a failure routes to on_error
 NODE_SUBFLOW = "subflow"    # run another saved flow as a nested step (reuse)
 
 NODE_KINDS = frozenset({
-    NODE_ACTION, NODE_AGENT, NODE_BRANCH, NODE_FOREACH,
-    NODE_PARALLEL, NODE_APPROVAL, NODE_DELAY, NODE_SUBFLOW,
+    NODE_ACTION, NODE_AGENT, NODE_BRANCH, NODE_SWITCH, NODE_FOREACH, NODE_WHILE,
+    NODE_PARALLEL, NODE_APPROVAL, NODE_DELAY, NODE_WAIT, NODE_SCOPE, NODE_SUBFLOW,
 })
 _WORK_KINDS = frozenset({NODE_ACTION, NODE_AGENT})
 
@@ -57,17 +61,24 @@ class FlowNode:
     brief: str = ""                  # goal brief (rendered from flow data)
     # branch ------------------------------------------------------------------
     condition: str = ""              # a safe "<key> <op> <value>" expression
+                                     # (switch: the data key to route on;
+                                     #  while: the keep-looping condition)
     if_true: str | None = None
     if_false: str | None = None
-    # foreach -----------------------------------------------------------------
+    # switch ------------------------------------------------------------------
+    cases: list[dict] = field(default_factory=list)   # [{"value": x, "to": node_id}]
+    # foreach / while ----------------------------------------------------------
     items: str = ""                  # flow-data key holding the list to iterate
     var: str = "item"                # loop variable exposed to the body
-    body: Flow | None = None         # sub-flow run once per item
-    limit: int = 0                   # cap iterations (0 = no cap); body may set _break
+    body: Flow | None = None         # sub-flow run per item / per while pass / scope
+    limit: int = 0                   # cap iterations (0 = default cap); body may set _break
+    concurrent: bool = False         # foreach: run iterations on a bounded pool
     # parallel ----------------------------------------------------------------
     branches: list[Flow] = field(default_factory=list)   # sub-flows run + joined
-    # approval ----------------------------------------------------------------
-    prompt: str = ""                 # what a human is being asked to approve
+    # approval / wait_event ----------------------------------------------------
+    prompt: str = ""                 # what a human approves / what the run waits for
+    choices: list[str] = field(default_factory=list)  # approval: allowed verdicts
+                                     # beyond approve/reject (recorded to output)
     # delay -------------------------------------------------------------------
     seconds: float = 0.0
     # subflow -----------------------------------------------------------------
@@ -100,6 +111,12 @@ class FlowNode:
             d["timeout"] = self.timeout
         if self.limit:
             d["limit"] = self.limit
+        if self.concurrent:
+            d["concurrent"] = True
+        if self.cases:
+            d["cases"] = self.cases
+        if self.choices:
+            d["choices"] = self.choices
         if self.x or self.y:
             d["x"], d["y"] = self.x, self.y
         if self.body is not None:
@@ -119,6 +136,9 @@ class FlowNode:
             if_true=d.get("if_true"), if_false=d.get("if_false"),
             items=str(d.get("items", "")), var=str(d.get("var", "item")),
             limit=int(d.get("limit", 0) or 0),
+            concurrent=bool(d.get("concurrent", False)),
+            cases=[c for c in (d.get("cases") or []) if isinstance(c, dict)],
+            choices=[str(c) for c in (d.get("choices") or [])],
             body=Flow.from_dict(body) if body else None,
             branches=[Flow.from_dict(b) for b in (d.get("branches") or [])],
             prompt=str(d.get("prompt", "")), seconds=float(d.get("seconds", 0.0)),
@@ -215,6 +235,10 @@ class Flow:
         return errs
 
     def _validate_kind(self, n: FlowNode) -> list[str]:
+        return self._validate_kind_fields(n) + self._validate_kind_nested(n)
+
+    def _validate_kind_fields(self, n: FlowNode) -> list[str]:
+        """Flat required-field checks per kind (no sub-flow recursion)."""
         errs = []
         if n.kind == NODE_ACTION and not n.tool:
             errs.append(f"action node {n.id!r} has no tool")
@@ -222,22 +246,40 @@ class Flow:
             errs.append(f"agent node {n.id!r} has no brief")
         if n.kind == NODE_BRANCH and not n.condition:
             errs.append(f"branch node {n.id!r} has no condition")
-        if n.kind == NODE_FOREACH:
-            if not n.items:
-                errs.append(f"foreach node {n.id!r} has no items key")
+        if n.kind == NODE_SWITCH:
+            if not n.condition:
+                errs.append(f"switch node {n.id!r} has no key (condition)")
+            if not n.cases:
+                errs.append(f"switch node {n.id!r} has no cases")
+            for i, c in enumerate(n.cases):
+                to = c.get("to")
+                if to is not None and to not in self.nodes:
+                    errs.append(f"switch {n.id!r} case {i}: to -> unknown node {to!r}")
+        if n.kind == NODE_WAIT and not n.prompt:
+            errs.append(f"wait_event node {n.id!r} has no prompt")
+        if n.kind == NODE_APPROVAL and not n.prompt:
+            errs.append(f"approval node {n.id!r} has no prompt")
+        if n.kind == NODE_SUBFLOW and not n.flow_ref:
+            errs.append(f"subflow node {n.id!r} has no flow_ref")
+        return errs
+
+    def _validate_kind_nested(self, n: FlowNode) -> list[str]:
+        """Body/branch checks for the container kinds (recurses into sub-flows)."""
+        errs = []
+        if n.kind == NODE_WHILE and not n.condition:
+            errs.append(f"while node {n.id!r} has no condition")
+        if n.kind == NODE_FOREACH and not n.items:
+            errs.append(f"foreach node {n.id!r} has no items key")
+        if n.kind in (NODE_WHILE, NODE_SCOPE, NODE_FOREACH):
             if n.body is None:
-                errs.append(f"foreach node {n.id!r} has no body")
+                errs.append(f"{n.kind} node {n.id!r} has no body")
             else:
-                errs.extend(f"foreach {n.id!r} body: {e}" for e in n.body.validate())
+                errs.extend(f"{n.kind} {n.id!r} body: {e}" for e in n.body.validate())
         if n.kind == NODE_PARALLEL:
             if not n.branches:
                 errs.append(f"parallel node {n.id!r} has no branches")
             for i, b in enumerate(n.branches):
                 errs.extend(f"parallel {n.id!r} branch {i}: {e}" for e in b.validate())
-        if n.kind == NODE_APPROVAL and not n.prompt:
-            errs.append(f"approval node {n.id!r} has no prompt")
-        if n.kind == NODE_SUBFLOW and not n.flow_ref:
-            errs.append(f"subflow node {n.id!r} has no flow_ref")
         return errs
 
     def is_single_agent(self) -> bool:
@@ -258,6 +300,7 @@ def single_agent_flow(flow_id: str, name: str, brief: str) -> Flow:
 
 __all__ = [
     "Flow", "FlowNode", "single_agent_flow",
-    "NODE_ACTION", "NODE_AGENT", "NODE_BRANCH", "NODE_FOREACH",
-    "NODE_PARALLEL", "NODE_APPROVAL", "NODE_DELAY", "NODE_SUBFLOW", "NODE_KINDS",
+    "NODE_ACTION", "NODE_AGENT", "NODE_BRANCH", "NODE_SWITCH", "NODE_FOREACH",
+    "NODE_WHILE", "NODE_PARALLEL", "NODE_APPROVAL", "NODE_DELAY", "NODE_WAIT",
+    "NODE_SCOPE", "NODE_SUBFLOW", "NODE_KINDS",
 ]
