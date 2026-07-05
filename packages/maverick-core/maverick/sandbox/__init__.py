@@ -36,6 +36,7 @@ __all__ = [
     "ExecResult",
     "build_sandbox",
     "fs_is_host_visible",
+    "container_backend_required",
     "SandboxPolicyError",
     "SDK_VERSION",
     "SandboxV2",
@@ -167,6 +168,23 @@ def _container_backend_required(full_cfg: dict | None = None) -> bool:
         return bool(enterprise_enabled())
     except Exception:  # pragma: no cover -- never block startup on a lookup error
         return False
+
+
+def container_backend_required() -> bool:
+    """Public, config-aware predicate: is a container sandbox mandatory here?
+
+    Loads ``[sandbox]`` itself and passes it to :func:`_container_backend_required`,
+    so ``[sandbox] require_container = true`` in ``config.toml`` is honoured — the
+    bare no-arg helper only sees the env var / enterprise mode because
+    ``build_sandbox`` is where config is normally loaded. Callers outside
+    ``build_sandbox`` (e.g. the self-modify eval isolation gate) MUST use this,
+    not the private helper, or the config knob silently no-ops (fail-open)."""
+    try:
+        from ..config import load_config
+        full_cfg = (load_config() or {}).get("sandbox", {})
+    except Exception:  # pragma: no cover -- config never blocks the predicate
+        full_cfg = None
+    return _container_backend_required(full_cfg)
 
 
 def _resolve_local_under_policy(chosen: str, full_cfg: dict | None) -> str:

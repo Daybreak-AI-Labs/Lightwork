@@ -81,10 +81,89 @@ class EvalResult:
     samples: int
     applied: bool
     reason: str = ""
+    # The baseline arm's own sample count, exposed so a caller can cache the
+    # baseline Score across cycles (the tree is invariant on an autonomous run).
+    baseline_samples: int = 0
 
     @property
     def improvement(self) -> float:
         return self.candidate_score - self.baseline_score
+
+    @property
+    def baseline(self) -> Score:
+        """The baseline arm as a reusable Score (for cross-cycle caching)."""
+        return Score(self.baseline_score, self.baseline_samples)
+
+
+# --- isolation policy (Gap 4): never run a candidate's code on the host -------
+
+class EvalSandboxError(RuntimeError):
+    """Raised when the eval cannot run under the deployment's isolation policy —
+    e.g. require-container/enterprise is active but no container backend was
+    supplied, so applying + testing a candidate patch would execute untrusted
+    code directly on the host."""
+
+
+def container_required() -> bool:
+    """Whether a container sandbox is mandatory for the eval (so host exec is
+    refused). Uses the public, CONFIG-AWARE predicate
+    ``sandbox.container_backend_required`` so ``[sandbox] require_container = true``
+    in ``config.toml`` is honoured — not the bare private helper, which only sees
+    ``MAVERICK_REQUIRE_CONTAINER_BACKEND`` / enterprise mode and would let the
+    config knob silently no-op (fail-open). Off by default (single-tenant/dev
+    keeps the warned host path)."""
+    try:
+        from .sandbox import container_backend_required
+        return bool(container_backend_required())
+    except Exception:  # pragma: no cover -- never block on a lookup error
+        return False
+
+
+def _host_visible(sb) -> bool:
+    try:
+        from .sandbox import fs_is_host_visible
+        return bool(fs_is_host_visible(sb))
+    except Exception:  # pragma: no cover -- unknown backend -> assume host-visible
+        return True
+
+
+_HOST_EVAL_WARNED = False
+
+
+def resolve_eval_sandbox(sandbox, workdir: Path):
+    """Return the sandbox the eval should exec in, enforcing isolation policy.
+
+    A candidate patch is untrusted code; applying and *running its tests* is
+    arbitrary execution. So under require-container/enterprise policy this
+    REFUSES to fall back to host exec (``LocalBackend``) and raises
+    :class:`EvalSandboxError` — fail closed. An explicit container backend is
+    used as-is; a host-visible backend under policy is also refused. Only when
+    the policy is inactive does it default to a warned ``LocalBackend`` (dev /
+    single-tenant), matching ``build_sandbox``'s posture."""
+    if sandbox is not None:
+        if container_required() and _host_visible(sandbox):
+            raise EvalSandboxError(
+                "refusing to evaluate a candidate patch on a host-visible sandbox "
+                "under require-container/enterprise policy: running its tests would "
+                "execute untrusted code on the host. Pass a container backend "
+                "(docker/gvisor/podman/firecracker).")
+        return sandbox
+    if container_required():
+        raise EvalSandboxError(
+            "refusing host-exec self-modify evaluation: require-container/enterprise "
+            "policy is active but no container sandbox was supplied. Applying and "
+            "testing a candidate patch on the host is arbitrary code execution. "
+            "Inject a container backend into evaluate_patch(sandbox=...).")
+    global _HOST_EVAL_WARNED
+    if not _HOST_EVAL_WARNED:
+        _HOST_EVAL_WARNED = True
+        log.warning(
+            "self_modify_eval: no container sandbox supplied; a candidate patch's "
+            "tests will run on the HOST with no isolation. Acceptable only for a "
+            "trusted single-tenant/dev box. Set [sandbox] require_container=true "
+            "(or inject a container backend) to enforce isolation.")
+    from .sandbox.local import LocalBackend
+    return LocalBackend(workdir=Path(workdir))
 
 
 # --- seam 1: materialize an isolated copy ------------------------------------
@@ -101,44 +180,54 @@ def _default_materialize(src: Path, dest: Path) -> None:
 
 # --- seam 2: apply the patch --------------------------------------------------
 
-def git_apply(patch: str, workdir: Path, *, sandbox=None) -> ApplyResult:
-    """Apply a unified diff to ``workdir`` with ``git apply``, routed through the
-    sandbox (kernel rule 4: shell only via ``sandbox.exec``). Runs ``--check``
-    first so a patch that would not apply cleanly is refused WITHOUT writing
-    anything; only on a clean check is the real apply run. Returns an
-    :class:`ApplyResult` — never raises."""
+def run_git_apply(patch: str, workdir: Path, sb, *,
+                  patch_name: str = ".maverick-apply.diff") -> tuple[bool, str]:
+    """Stage ``patch`` and apply it to ``workdir`` via an ALREADY-RESOLVED backend
+    ``sb`` (kernel rule 4: shell only via ``sandbox.exec``): ``git apply --check``
+    first so a non-applying patch writes nothing, then the real ``git apply -p1``.
+    Returns ``(ok, message)``; never raises. This is the one shared apply
+    mechanic — both the isolated eval (:func:`git_apply`) and the live-tree
+    deploy (:func:`maverick.self_modify_apply.apply_change`) call it, so the
+    staging/``-p1``/cleanup can't drift between them; the only difference is which
+    backend the caller resolves."""
     workdir = Path(workdir)
     if not (patch or "").strip():
-        return ApplyResult(False, "empty patch")
+        return False, "empty patch"
+    patch_file = workdir / patch_name
     try:
-        patch_file = workdir / ".maverick-eval-patch.diff"
         patch_file.write_text(patch, encoding="utf-8")
     except OSError as e:  # pragma: no cover -- temp write failure
-        return ApplyResult(False, f"could not stage patch: {e}")
-
-    sb = sandbox
-    if sb is None:
-        from .sandbox.local import LocalBackend
-        sb = LocalBackend(workdir=workdir)
-    # -p1 strips the a//b/ prefix; --check validates without touching the tree.
-    rel = patch_file.name
+        return False, f"could not stage patch: {e}"
     try:
-        chk = sb.exec(f"git apply --check -p1 {rel}")
+        chk = sb.exec(f"git apply --check -p1 {patch_file.name}")
         if not getattr(chk, "ok", False):
-            return ApplyResult(False,
-                               f"patch does not apply: {chk.stderr.strip()[:200]}")
-        res = sb.exec(f"git apply -p1 {rel}")
+            return False, f"patch does not apply: {chk.stderr.strip()[:200]}"
+        res = sb.exec(f"git apply -p1 {patch_file.name}")
         if not getattr(res, "ok", False):
-            return ApplyResult(False,
-                               f"git apply failed: {res.stderr.strip()[:200]}")
-        return ApplyResult(True, "applied")
+            return False, f"git apply failed: {res.stderr.strip()[:200]}"
+        return True, "applied"
     except Exception as e:  # pragma: no cover -- sandbox exec failure
-        return ApplyResult(False, f"apply error: {e}")
+        return False, f"apply error: {e}"
     finally:
         try:
             patch_file.unlink()
         except OSError:
             pass
+
+
+def git_apply(patch: str, workdir: Path, *, sandbox=None) -> ApplyResult:
+    """Apply a unified diff to an isolated ``workdir`` under the eval isolation
+    policy: resolve a sandbox (refusing host exec under require-container), then
+    run the shared :func:`run_git_apply`. Never raises."""
+    workdir = Path(workdir)
+    if not (patch or "").strip():
+        return ApplyResult(False, "empty patch")
+    try:
+        sb = resolve_eval_sandbox(sandbox, workdir)
+    except EvalSandboxError as e:
+        return ApplyResult(False, str(e))
+    ok, msg = run_git_apply(patch, workdir, sb, patch_name=".maverick-eval-patch.diff")
+    return ApplyResult(ok, msg)
 
 
 # --- seam 3: score (deterministic offline default) ---------------------------
@@ -154,19 +243,32 @@ def _default_score(workdir: Path) -> Score:
 
 def pytest_score(
     *, sandbox=None, command: str = "python3 -m pytest -q",
-    timeout: float = 600.0,
+    timeout: float = 600.0, budget=None,
 ) -> Callable[[Path], Score]:
     """Build a ``score_fn`` that runs a test command in the sandbox and scores by
     pass rate. The score is ``passed / (passed + failed)`` parsed from pytest's
     summary line; ``samples`` is the number of tests seen. A run that errors or
     yields no parseable summary scores ``0.0`` over ``0`` samples, so the
     evidence gate refuses it (fail closed). The command is NOT hard-coded to a
-    package — the caller points it at the surface under evaluation."""
+    package — the caller points it at the surface under evaluation.
+
+    Isolation (Gap 4): when no ``sandbox`` is given the backend is resolved
+    through :func:`resolve_eval_sandbox`, which REFUSES host exec under
+    require-container/enterprise policy — a candidate's tests never run on the
+    host there. ``timeout`` bounds the run; an optional ``budget`` is checked
+    before the run so an exhausted budget stops the eval (fail closed)."""
     def _score(workdir: Path) -> Score:
-        sb = sandbox
-        if sb is None:
-            from .sandbox.local import LocalBackend
-            sb = LocalBackend(workdir=Path(workdir))
+        if budget is not None:
+            try:
+                budget.check()
+            except Exception as e:
+                log.warning("self_modify_eval: budget stop before test run: %s", e)
+                return Score(0.0, 0)
+        try:
+            sb = resolve_eval_sandbox(sandbox, Path(workdir))
+        except EvalSandboxError as e:
+            log.warning("self_modify_eval: %s", e)
+            return Score(0.0, 0)
         try:
             res = sb.exec(command, timeout=timeout)
         except Exception as e:  # pragma: no cover -- exec failure is a 0 score
@@ -209,6 +311,7 @@ def evaluate_patch(
     apply_fn: Callable[[str, Path], ApplyResult] | None = None,
     materialize: Callable[[Path, Path], None] | None = None,
     sandbox=None,
+    baseline: Score | None = None,
 ) -> EvalResult:
     """Measure a patch on isolated copies of ``src``: score the unpatched tree
     (baseline), apply the patch to a second copy and score that (candidate).
@@ -217,17 +320,37 @@ def evaluate_patch(
     under (and which the caller cleans up). Never mutates ``src``. Never raises —
     any failure (copy, apply, scorer) returns a non-``ok`` result whose scores do
     not clear the gate. The default seams make this runnable offline; inject
-    ``score_fn=pytest_score(...)`` and a ``sandbox`` for a real evaluation."""
+    ``score_fn=pytest_score(...)`` and a ``sandbox`` for a real evaluation.
+
+    ``baseline`` (a precomputed :class:`Score`) skips the baseline arm entirely —
+    no baseline copy, no baseline test run. Since ``src`` is invariant across an
+    autonomous run (nothing is applied between cycles), the driver computes the
+    baseline once and passes it back, turning N cycles' worth of full baseline
+    suites into one. Omit it (or invalidate after a real apply) for correctness.
+
+    Isolation (Gap 4): the harness resolves the sandbox up front and REFUSES to
+    run under require-container/enterprise policy without a container backend —
+    returning a non-``ok`` result rather than executing a candidate's code on the
+    host. This is unconditional (there is no opt-out): a custom ``apply_fn``
+    still hits the early check, though a custom ``score_fn`` is the caller's own
+    responsibility to isolate."""
     src = Path(src)
     workroot = Path(workroot)
     score = score_fn or _default_score
     materialize = materialize or _default_materialize
     apply = apply_fn or (lambda p, wd: git_apply(p, wd, sandbox=sandbox))
 
+    # Fail closed BEFORE copying/applying if policy forbids host exec here.
+    try:
+        resolve_eval_sandbox(sandbox, workroot)
+    except EvalSandboxError as e:
+        return EvalResult(False, 0.0, 0.0, 0, applied=False, reason=str(e))
+
     base_dir = workroot / "baseline"
     cand_dir = workroot / "candidate"
     try:
-        materialize(src, base_dir)
+        if baseline is None:
+            materialize(src, base_dir)
         materialize(src, cand_dir)
     except Exception as e:
         log.warning("self_modify_eval: materialize failed: %s", e, exc_info=True)
@@ -239,7 +362,7 @@ def evaluate_patch(
         return EvalResult(False, 0.0, 0.0, 0, applied=False, reason=applied.reason)
 
     try:
-        base = score(base_dir)
+        base = baseline if baseline is not None else score(base_dir)
         cand = score(cand_dir)
     except Exception as e:  # pragma: no cover -- a scorer must not crash the pass
         log.warning("self_modify_eval: scorer raised: %s", e, exc_info=True)
@@ -251,13 +374,14 @@ def evaluate_patch(
     samples = min(base.samples, cand.samples)
     return EvalResult(
         ok=True, baseline_score=base.value, candidate_score=cand.value,
-        samples=samples, applied=True,
+        samples=samples, applied=True, baseline_samples=base.samples,
         reason=f"baseline={base.value:.4f} candidate={cand.value:.4f} "
                f"over {samples} samples",
     )
 
 
 __all__ = [
-    "Score", "ApplyResult", "EvalResult",
-    "git_apply", "pytest_score", "evaluate_patch",
+    "Score", "ApplyResult", "EvalResult", "EvalSandboxError",
+    "container_required", "resolve_eval_sandbox",
+    "run_git_apply", "git_apply", "pytest_score", "evaluate_patch",
 ]

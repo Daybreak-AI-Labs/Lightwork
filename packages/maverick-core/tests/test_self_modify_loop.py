@@ -13,6 +13,7 @@ from dataclasses import dataclass
 import pytest
 from maverick import self_improvement as si
 from maverick import self_modify as sm
+from maverick import self_modify_loop as loop
 from maverick.self_modify_archive import CodeArchive, CodeCandidate
 from maverick.self_modify_loop import (
     Proposal,
@@ -213,3 +214,184 @@ class TestRunLoop:
         assert all(r.promoted for r in reps)
         # seed + 3 new promoted candidates
         assert len([c for c in a.candidates if c.promoted]) == 4
+
+
+# --- Gap 1: the live-model proposer seam ------------------------------------
+
+class _Resp:
+    def __init__(self, text):
+        self.text = text
+
+
+class _FakeLLM:
+    def __init__(self, text):
+        self._text = text
+        self.calls = []
+
+    def complete(self, system, messages, **kw):
+        self.calls.append((system, messages, kw))
+        return _Resp(self._text)
+
+
+_DIFF = ("diff --git a/pkg/a.py b/pkg/a.py\n--- a/pkg/a.py\n+++ b/pkg/a.py\n"
+         "@@ -1 +1 @@\n-x = 1\n+x = 2\n")
+
+
+class TestExtractDiff:
+    def test_plain_diff(self):
+        assert loop._extract_diff(_DIFF).startswith("diff --git")
+
+    def test_strips_markdown_fence(self):
+        fenced = f"Here you go:\n```diff\n{_DIFF}```\nDone."
+        out = loop._extract_diff(fenced)
+        assert out.startswith("diff --git") and "```" not in out
+
+    def test_no_diff_is_empty(self):
+        assert loop._extract_diff("I could not find an improvement.") == ""
+
+    def test_leading_prose_before_diff_is_dropped(self):
+        out = loop._extract_diff("Reasoning: improve X.\n" + _DIFF)
+        assert out.startswith("diff --git")
+
+
+class TestLlmProposer:
+    def test_returns_a_proposal_from_the_model_diff(self):
+        prop = loop.llm_proposer(_FakeLLM(_DIFF))
+        surface = sm.EditableSurface(editable_globs=("pkg/*.py",))
+        p = prop(None, surface)
+        assert p is not None and p.patch.startswith("diff --git")
+
+    def test_non_diff_reply_is_no_proposal(self):
+        prop = loop.llm_proposer(_FakeLLM("no change needed"))
+        assert prop(None, sm.EditableSurface(editable_globs=("**",))) is None
+
+    def test_provider_error_is_no_proposal(self):
+        class Boom:
+            def complete(self, *a, **k):
+                raise RuntimeError("provider down")
+        prop = loop.llm_proposer(Boom())
+        assert prop(None, sm.EditableSurface(editable_globs=("**",))) is None
+
+    def test_surface_globs_are_in_the_prompt(self):
+        llm = _FakeLLM(_DIFF)
+        prop = loop.llm_proposer(llm)
+        prop(None, sm.EditableSurface(editable_globs=("pkg/only/*.py",)))
+        system = llm.calls[0][0]
+        assert "pkg/only/*.py" in system
+        assert "control-plane" in system.lower()
+
+    def test_parent_patch_is_referenced(self):
+        llm = _FakeLLM(_DIFF)
+        prop = loop.llm_proposer(llm)
+        parent = CodeCandidate(summary="prior", patch="+prior line", score=1.0)
+        prop(parent, sm.EditableSurface(editable_globs=("**",)))
+        user = llm.calls[0][1][0]["content"]
+        assert "prior" in user
+
+
+# --- Gap 6: proof-gated widening bound to the SIGNED ledger ------------------
+
+class TestLedgerBoundWidening:
+    def _ledger(self, tmp_path):
+        return si.PromotionLedger(path=tmp_path / "ledger.json")
+
+    def _rec(self, rid, rung, rolled_back=False):
+        return si.PromotionRecord(
+            id=rid, rung=rung, summary="s", baseline_score=0.5,
+            candidate_score=0.9, promoted_at=1.0, rolled_back=rolled_back)
+
+    def test_ledger_drives_the_tier_not_the_archive(self, tmp_path):
+        # The archive falsely claims 5 promotions; the SIGNED ledger has 1.
+        archive = CodeArchive()
+        for i in range(5):
+            archive.add(CodeCandidate(summary=f"forged{i}", patch=f"+a{i}",
+                                      score=1.0, promoted=True))
+        ledger = self._ledger(tmp_path)
+        ledger.add(self._rec("r1", "code"))
+        tier, _ = earned_surface(archive, _tiers(), ledger=ledger)
+        assert tier.name == "t1"     # 1 real promotion -> t1, NOT t2 (the forged 5)
+
+    def test_ledger_rollback_freezes_widening(self, tmp_path):
+        ledger = self._ledger(tmp_path)
+        for i in range(4):
+            ledger.add(self._rec(f"ok{i}", "code"))
+        ledger.add(self._rec("bad", "code", rolled_back=True))
+        tier, _ = earned_surface(CodeArchive(), _tiers(), ledger=ledger)
+        assert tier.name == "t0"     # a rolled-back code promotion forfeits widening
+
+    def test_only_code_rung_promotions_count(self, tmp_path):
+        ledger = self._ledger(tmp_path)
+        ledger.add(self._rec("p1", "prompt"))   # not the code rung
+        ledger.add(self._rec("p2", "config"))
+        tier, _ = earned_surface(CodeArchive(), _tiers(), ledger=ledger)
+        assert tier.name == "t0"     # no CODE promotions -> narrowest tier
+
+
+# --- Gap 3 wired: real snapshot rollback + apply-on-promote in the loop ------
+
+class TestWiredApply:
+    def _tree(self, root):
+        t = root / "tree"
+        t.mkdir()
+        (t / "f.py").write_text("VALUE = 1\n", encoding="utf-8")
+        return t
+
+    def _apply_patch(self):
+        return ("diff --git a/f.py b/f.py\n--- a/f.py\n+++ b/f.py\n"
+                "@@ -1 +1 @@\n-VALUE = 1\n+VALUE = 2\n")
+
+    def test_promotion_snapshots_and_applies_to_the_tree(self, _on, tmp_path):
+        tree = self._tree(tmp_path)
+        store = tmp_path / "snaps"
+        store.mkdir()
+        a = CodeArchive()
+        a.add(CodeCandidate(summary="seed", patch="+a", score=1.0, promoted=True))
+        policy = WideningPolicy(tiers=(SurfaceTier("wide", ("f.py",), 0),))
+        rep = run_cycle(
+            archive=a, proposer=lambda p, s: Proposal(self._apply_patch(), "bump"),
+            evaluate=lambda p, s: FakeEval(), policy=policy,
+            rung="prompt", controller=_controller(), tree=tree, store=store)
+        assert rep.promoted is True, rep.reason
+        assert rep.applied is True
+        assert rep.rollback_id and rep.rollback_id.startswith("snap-")
+        assert (tree / "f.py").read_text() == "VALUE = 2\n"   # landed on the tree
+
+    def test_no_tree_is_search_only_no_write(self, _on, tmp_path):
+        tree = self._tree(tmp_path)
+        a = CodeArchive()
+        a.add(CodeCandidate(summary="seed", patch="+a", score=1.0, promoted=True))
+        policy = WideningPolicy(tiers=(SurfaceTier("wide", ("f.py",), 0),))
+        rep = run_cycle(
+            archive=a, proposer=lambda p, s: Proposal(self._apply_patch(), "bump"),
+            evaluate=lambda p, s: FakeEval(), policy=policy,
+            rung="prompt", controller=_controller())   # no tree
+        assert rep.promoted is True
+        assert rep.applied is False and rep.rollback_id is None
+        assert (tree / "f.py").read_text() == "VALUE = 1\n"   # untouched
+
+
+class TestAuditBoundWidening:
+    def test_track_record_arg_supersedes_ledger_and_archive(self, tmp_path):
+        # A forged archive AND a ledger both say "many"; the explicit signed
+        # track_record (the audit chain) is what earned_surface must use.
+        a = CodeArchive()
+        for i in range(9):
+            a.add(CodeCandidate(summary=f"f{i}", patch=f"+a{i}", score=1.0,
+                                promoted=True))
+        ledger = si.PromotionLedger(path=tmp_path / "l.json")
+        for i in range(9):
+            ledger.add(si.PromotionRecord(
+                id=f"r{i}", rung="code", summary="s", baseline_score=0.5,
+                candidate_score=0.9, promoted_at=1.0))
+        # audit chain says exactly 1 real promotion
+        tier, _ = earned_surface(a, _tiers(), ledger=ledger, track_record=(1, False))
+        assert tier.name == "t1"
+
+    def test_audit_rollback_freezes(self, tmp_path):
+        tier, _ = earned_surface(CodeArchive(), _tiers(), track_record=(50, True))
+        assert tier.name == "t0"
+
+    def test_audit_track_record_none_when_no_events(self):
+        # In the offline test env the audit chain has no self_improvement
+        # learning events -> None -> caller defers to the ledger.
+        assert loop._audit_track_record("code") is None

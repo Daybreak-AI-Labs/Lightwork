@@ -425,6 +425,83 @@ offline defaults:
 Everything off by default; no new config section (the whole capability rides the
 existing `[self_modify]` knob + its wizard step).
 
+### Build log — update 5 (closing the DGM gaps: from scaffolding to operable)
+
+Update 4 shipped the governance skeleton; a candid gap audit found the parts that
+make it *actually self-improve code* were still seams or unwired. This update
+closes seven of them — the engine it governs is now real (still OFF by default,
+fail-closed, live/sandbox parts as offline-testable seams):
+
+- **Real capability proof, not a heuristic** (`self_modify_capability.py`). The
+  syntactic screen was a signal that couldn't *prove* non-escalation. Now a patch
+  is mapped to capability *classes* (process/network/dynamic-code/fs-write/…) and
+  the **real capability algebra** (`Capability.permits`) decides escalation as a
+  *differential* — a class the *after* grant permits that the baseline did not.
+  Editing a module that already opens sockets no longer false-flags; the gate gets
+  a genuine non-escalation proof (`capability_before`/`after`/`probe_tools`), and
+  a missing baseline can only over-report (fail-closed).
+- **Isolation is a machine, not a directory** (`self_modify_eval`, Gap 4). Running
+  a candidate's tests is arbitrary code execution; under
+  require-container/enterprise the harness now **refuses host exec** and fails
+  closed rather than running an untrusted patch on the host, plus a budget/timeout
+  bound.
+- **A discriminating eval** (`self_modify_corpus.py`, Gap 2). Whole-suite pass rate
+  can't tell a one-fix change from noise. A targeted corpus is split into held-in
+  and an **unseen held-out** set (reusing the self-harness split), promotion is
+  judged on held-out generalization, and a candidate that gains only on held-in is
+  flagged **overfit** and refused — per-copy execution so baseline and candidate
+  run in their own trees.
+- **Real apply + rollback** (`self_modify_apply.py`, Gap 3). The loop passed a
+  string as its "rollback". Now the reversibility handle is a real workspace
+  snapshot taken *before* the gate (so "reversible" is backed by an actual restore
+  point); an approved patch lands on the live tree via `sandbox.exec`, and a failed
+  apply auto-reverts.
+- **The generative heart** (`self_modify_loop.llm_proposer`, Gap 1). A
+  model-agnostic proposer (coding role, kernel rule 2) turns a sampled parent +
+  lineage into a unified diff, fail-open to no-proposal. The boundary + gate are
+  what make a *bad* proposal safe, so the proposer only has to produce candidates.
+- **Widening bound to the signed ledger** (Gap 6). Proof-gated surface widening
+  read the DGM archive's self-attested booleans — a mutable sidecar an attacker
+  could forge. It now derives the track record from the **signed promotion
+  ledger** (controller-owned, 0600), and freezes (fail-closed) if that record
+  can't be read.
+- **Operable** (`self_modify_runner.py` + `maverick self-modify` CLI, Gap 7).
+  Nothing invoked the loop; now a runner builds archive/proposer/eval/policy/ledger
+  from config and runs governed cycles (persisting lineage 0600), and
+  `self-modify status | run | archive` drive and inspect it. Still human-signed at
+  the code rung: it searches and archives autonomously, never self-promotes code.
+
++107 new deterministic tests (240 across the self-modify suite); ruff + vulture
+clean; all custom gates green. Gap 8 (real-container/real-model end-to-end +
+adversarial-containment tests) is mapped for next.
+
+**Follow-up (post-review wiring).** Three residual items from the review were
+closed: (1) `apply_change` is now WIRED into the loop — with a `tree`, `run_cycle`
+snapshots it before the gate (a real rollback handle, not the candidate-id token)
+and lands a promoted change on the live tree, opt-in via `runner.run(apply=True)`
+and dormant on an autonomous search since the code rung needs a signature; (2)
+one shared `run_git_apply` primitive backs both the isolated eval and the
+live-tree deploy, so the staging/`-p1`/cleanup can't drift; (3) the runner's
+corpus eval resolves a backend PER COPY via `build_sandbox`, so a docker/gvisor
+deployment runs the baseline and candidate arms in their own trees under enforced
+policy instead of sharing one fixed-root sandbox.
+
+**Depth pass (everything outside Gap 8).** The three deferred "architectural"
+items are now done: (1) **AST capability analysis** — `classes_in_source` adds a
+structural `ast` walk (union with the regex, so strictly stricter) that catches
+import-aliasing (`from os import system as s; s()`), `getattr`/`__builtins__`
+obfuscation, and attribute calls the line regex missed; the differential and the
+screen both route through it. (2) **Audit-chain-bound widening** — the widening
+track record now prefers the SIGNED audit chain (`_audit_track_record` over
+`audit.reader.iter_events`) above the 0600 ledger and the forgeable archive, so
+"earned trust" reads from the tamper-evident WORM log; it defers to the ledger
+only when the chain carries no relevant events (fresh/offline). (3) **Baseline
+caching** — `evaluate_patch` takes a precomputed `baseline` Score and the runner
+computes the whole-suite baseline once per run (the tree is invariant on an
+autonomous search), turning N cycles' N baseline suites into one; disabled when
+`apply=True` invalidates the tree. Only Gap 8 (real-container/real-model
+end-to-end + adversarial-containment tests) remains.
+
 ## Bet 5 — Consequence-Proven Autonomy → "Earned Autonomy" (the breakthrough)
 
 **Thesis.** The biggest blocker to enterprise agents isn't quality, it's **trust
