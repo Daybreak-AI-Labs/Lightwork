@@ -1050,7 +1050,8 @@ def pick_flows() -> dict[str, Any]:
     schedulable on a cron, with self-rewrite + rollback. When a flow pauses for
     approval it can post signed Approve/Reject links to a channel; those links
     need the dashboard's externally-reachable base URL, collected here and
-    written as ``[flows] public_url``. Returns a dict written under ``[flows]``.
+    written as ``[flows] public_url``. Optionally lets the loop self-correct
+    (``[flows] auto_evolve``). Returns a dict written under ``[flows]``.
     """
     console.print()
     console.print(
@@ -1070,6 +1071,15 @@ def pick_flows() -> dict[str, Any]:
                   default="").strip()
     if url:
         out["public_url"] = url
+    console.print(
+        "[dim]Self-correction lets a scheduled pass autonomously revert a node "
+        "rewrite whose grounded outcomes measurably regressed -- the loop undoes "
+        "its own bad changes. Off by default; surfaced proposals + human apply "
+        "work without it.[/dim]"
+    )
+    if _q_confirm("Let flows self-correct (autonomous revert of a regressed rewrite)?",
+                  default=False):
+        out["auto_evolve"] = True
     return out
 
 
@@ -1806,6 +1816,14 @@ def pick_advanced() -> dict[str, Any]:
         default=False,
     ):
         advanced["flows_auto_evolve"] = True
+    # Signed channel Approve/Reject links need the dashboard's externally-
+    # reachable base URL; blank keeps approvals on the dashboard itself.
+    if advanced.get("flows"):
+        flows_url = _q_text(
+            "  Public base URL for flow approval links (e.g. https://ops.acme.com; "
+            "blank = approve from the dashboard)", default="").strip()
+        if flows_url:
+            advanced["flows_public_url"] = flows_url
     # Self-harness has a handful of optional paths beyond the validation floors
     # written by default. Only worth asking once the loop itself is on; each
     # stays at its historical default unless the operator opts in here.
@@ -3016,6 +3034,10 @@ def _cfg_advanced(  # noqa: C901 - flat sequence of independent opt-in toggles
             lines.append("# Autonomously revert a node rewrite whose grounded outcomes")
             lines.append("# regressed (the loop undoes its own bad changes).")
             lines.append("auto_evolve = true")
+        if advanced.get("flows_public_url"):
+            lines.append("# Externally-reachable dashboard base URL for signed channel")
+            lines.append("# Approve/Reject links (actionable approvals).")
+            _emit_kv(lines, "public_url", advanced["flows_public_url"])
     if advanced.get("emergent_protocol"):
         lines.append("")
         lines.append("[emergent_protocol]")
