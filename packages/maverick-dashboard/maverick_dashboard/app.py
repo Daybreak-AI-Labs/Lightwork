@@ -4917,6 +4917,13 @@ async def workflows_index_page(request: Request) -> HTMLResponse:
     )
 
 
+@app.get("/flows/analytics", response_class=HTMLResponse)
+async def flow_analytics_page(request: Request) -> HTMLResponse:
+    """Per-flow run analytics (volume, success rate, duration p50/p95, top
+    errors). Data comes from /api/v1/flows/analytics client-side."""
+    return templates.TemplateResponse(request, "flow_analytics.html", {})
+
+
 @app.get("/connections", response_class=HTMLResponse)
 async def connections_page(request: Request) -> HTMLResponse:
     """Manage named SaaS connections (base URL + sealed token) so connectors can

@@ -376,6 +376,29 @@ def test_designer_page_has_copilot_and_toolbar(monkeypatch, tmp_path):
         assert needle in r.text, needle
 
 
+def test_flow_analytics_aggregates_runs(monkeypatch, tmp_path):
+    _isolate(monkeypatch, tmp_path)
+    from maverick.flow import store
+    for i in range(3):
+        store.save_run(store.FlowRun(run_id=f"c{i}", flow_id="demo", status="completed",
+                                     nodes={"a": {"status": "done", "outcome": 1.0, "seconds": 2.0 + i}}))
+    store.save_run(store.FlowRun(run_id="f1", flow_id="demo", status="failed",
+                                 error="node 'b': connector down"))
+    store.save_run(store.FlowRun(run_id="p1", flow_id="demo", status="paused_approval"))
+    flows = _client().get("/api/v1/flows/analytics").json()["flows"]
+    demo = next(f for f in flows if f["flow_id"] == "demo")
+    assert demo["runs"] == 5 and demo["completed"] == 3 and demo["failed"] == 1 and demo["paused"] == 1
+    assert demo["success_rate"] == 0.75          # 3 completed / 4 finished
+    assert demo["p50_seconds"] >= 2.0 and demo["p95_seconds"] >= demo["p50_seconds"]
+    assert demo["top_errors"][0]["error"].startswith("node 'b'")
+
+
+def test_flow_analytics_page_renders(monkeypatch, tmp_path):
+    _isolate(monkeypatch, tmp_path)
+    r = _client().get("/flows/analytics")
+    assert r.status_code == 200 and 'id="fa-table"' in r.text
+
+
 def test_flow_schema_endpoint_returns_learned_shapes(monkeypatch, tmp_path):
     _isolate(monkeypatch, tmp_path)
     from maverick.flow import store
