@@ -10,6 +10,42 @@
 
 ---
 
+## 0. Progress since this audit (2026-07)
+
+Much of the plan below has shipped; `docs/FEATURES.md` is the current source of
+truth. Closed since the audit:
+
+- **G3 Designer ergonomics** — undo/redo, duplicate, click-to-cut edges,
+  zoom-to-fit, multi-select marquee, minimap, insert-into-edge, and nested
+  foreach/parallel/scope body drill-in.
+- **G4 Data experience** — one-click **data pills** (`{{key}}` from the outputs a
+  node can actually see upstream); ordering comparisons now numeric-or-lexical so
+  date/string conditions work, plus `now()`/`today()`/`add_days()`.
+- **G6 Debugging** — a dedicated **run viewer** (node timeline, redacted run data,
+  measured per-node seconds, origin + $ cost) and live canvas overlays.
+- **G7 Node vocabulary** — `switch` (n-way), `while`, `scope` (try/catch),
+  `wait_event`, `setvar`, approval **choice verdicts** + **expiry**, and
+  **parallel `foreach`** (`concurrent`). (`try` shipped then consolidated into
+  `scope`.)
+- **G5 Triggers** — cron (with per-flow **timezone**/DST), webhook, email (imap),
+  form, file, RSS, http_json polling, OAuth'd sources, GitHub issues.
+- **Chat copilot (G2)** — a conversational designer assistant that edits the
+  canvas via validated patches and diagnoses "why did this fail?".
+- **Engine/production** — per-node **retry backoff** (+ hard-exception retries),
+  per-flow **concurrency cap** (singleton), `{{secret('NAME')}}` from the vault,
+  **typed manual-run inputs** (validated form + run idempotency key), and
+  **sub-flow argument passing / isolation** (`subflow_inputs`).
+- **Self-learning moat** — the self-rewrite loop now **infers the tool** a
+  reliable agent node calls to auto-harden it (`node_tools.py`), the autonomy
+  knobs (`auto_evolve`/`auto_apply`) are toggleable from the Learning page, and an
+  honest "workflows improved N times" moat number.
+
+Still open (largely UX/glue, not engine): **G1** product coherence/nav, **G8**
+import branch-fidelity for PA/UiPath, **G9** connection-management UI, **G10**
+template gallery + sharing.
+
+---
+
 ## 1. Where we stand — honest scorecard
 
 | Area | Status vs Power Automate / UiPath |

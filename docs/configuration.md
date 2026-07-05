@@ -99,6 +99,18 @@ bot_token = "${TELEGRAM_BOT_TOKEN}"
 # internet; harmless to leave unset on a desktop install (localhost-only).
 token = "${MAVERICK_DASHBOARD_TOKEN}"
 
+[flows]
+# The visual flow-automation engine (a deterministic graph of agent/action/
+# branch/switch/foreach/while/parallel/approval/delay/wait_event/scope/subflow/
+# setvar nodes) + the dashboard designer and triggers. OFF by default.
+enable      = false      # or MAVERICK_FLOWS=1
+# Autonomous self-improvement of live flows. Both OFF by default and also
+# toggleable from the dashboard Learning page.
+auto_evolve = false      # revert a node rewrite the loop measures as a regression
+                         # (the safety net; or MAVERICK_FLOWS_AUTO=1)
+auto_apply  = false      # apply a proven improvement forward without a human
+                         # (needs auto_evolve on for the revert safety net)
+
 [persona]
 # Appended to every agent's system prompt. Optional.
 name      = "Lightwork"
