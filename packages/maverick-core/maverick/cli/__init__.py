@@ -1787,11 +1787,15 @@ def corpus_harvest_cmd(ctx, model: str | None, auto: bool) -> None:
     becomes the expected hint. Staged for `corpus review` unless --auto.
     """
     from .. import self_improvement_runner as runner
+    from ..self_harness import settings
     from ..world_model import open_world
-    key, corpus_path = _corpus_key_and_path(model)
+    if not settings().get("eval_corpus"):
+        raise click.ClickException("no [self_harness] eval_corpus configured.")
+    # Key/path defaulting is run_corpus_harvest's job (the one owner of the
+    # harvest policy) -- the CLI only supplies the operator's explicit choice.
     n = runner.run_corpus_harvest(
         open_world(ctx.obj["db"]), mode=("auto" if auto else "propose"),
-        key=key, corpus_path=corpus_path, raise_errors=True)
+        key=model, raise_errors=True)
     if auto:
         click.echo(f"{n} candidate case(s) merged into the corpus.")
     else:
@@ -1821,9 +1825,13 @@ def corpus_review_cmd(model: str | None, accepts: tuple[int, ...],
             click.echo("no pending corpus candidates.")
             return
         click.echo(f"{len(rows)} pending candidate(s) for {key!r}:")
+        # Harvested goal text originates in run history -- strip terminal
+        # control bytes before echoing untrusted text (same rule as status/
+        # history).
         for i, c in enumerate(rows, 1):
-            click.echo(f"  {i}. {c['goal'].splitlines()[0][:70]}")
-            click.echo(f"     expected: {c['expected']}")
+            click.echo(f"  {i}. "
+                       f"{_strip_terminal_control(c['goal'].splitlines()[0][:70])}")
+            click.echo(f"     expected: {_strip_terminal_control(c['expected'])}")
         return
     try:
         res = ev.resolve_pending(corpus_path, key, accept=list(accepts),
@@ -1833,13 +1841,49 @@ def corpus_review_cmd(model: str | None, accepts: tuple[int, ...],
     # Echo WHAT was resolved, not just counts -- indexes rebase between
     # invocations, so a mis-target must be visible immediately.
     for g in res["accepted_goals"]:
-        click.echo(f"  + accepted: {g.splitlines()[0][:70]}")
+        click.echo(f"  + accepted: {_strip_terminal_control(g.splitlines()[0][:70])}")
     for g in res["rejected_goals"]:
-        click.echo(f"  - rejected: {g.splitlines()[0][:70]}")
+        click.echo(f"  - rejected: {_strip_terminal_control(g.splitlines()[0][:70])}")
     dup = (f", {res['duplicates']} already live/unlabeled"
            if res["duplicates"] else "")
     click.echo(f"merged {res['merged']} into the corpus{dup}, "
                f"rejected {res['rejected']} (remembered).")
+
+
+@harness_corpus.command("quality")
+@click.option("--model", default=None,
+              help="Corpus key to probe (default: the orchestrator model).")
+@click.option("--samples", default=2, show_default=True,
+              help="Baseline attempts per case.")
+@click.option("--retire", is_flag=True,
+              help="Remove non-discriminative cases from the live corpus.")
+def corpus_quality_cmd(model: str | None, samples: int, retire: bool) -> None:
+    """Measure each live corpus case's baseline DISCRIMINATIVENESS — a case
+    the baseline model already passes every time cannot show a candidate
+    line's lift, so it is dead ground truth diluting every split. Spends
+    real evaluation dollars (the [self_harness] eval budget caps it);
+    --retire prunes the dead cases, preserving every other row untouched.
+    """
+    from .. import self_harness_eval as ev
+    from .. import self_improvement_runner as runner
+    key, corpus_path = _corpus_key_and_path(model)
+    rows = runner.run_corpus_quality(key=key, corpus_path=corpus_path,
+                                     samples=samples, raise_errors=True)
+    if not rows:
+        click.echo("no live corpus cases for this key.")
+        return
+    dead = [r for r in rows if not r["discriminative"]]
+    for r in rows:
+        rate = ("n/a" if r["baseline_rate"] is None
+                else f"{r['baseline_rate']:.0%}")
+        age = "" if r.get("age_days") is None else f"  age={r['age_days']}d"
+        mark = "ok  " if r["discriminative"] else "DEAD"
+        click.echo(f"  {mark} baseline={rate}{age}  "
+                   f"{_strip_terminal_control(r['goal'].splitlines()[0][:60])}")
+    click.echo(f"{len(rows)} case(s); {len(dead)} non-discriminative.")
+    if retire and dead:
+        n = ev.retire_corpus_cases(corpus_path, key, [r["goal"] for r in dead])
+        click.echo(f"retired {n} case(s) from the live corpus.")
 
 
 @harness.command("conflicts")
@@ -4426,9 +4470,12 @@ def history(ctx, limit: int) -> None:
         click.echo("no goals yet.")
         return
     for g in goals[-limit:]:
-        click.echo(f"#{g.id} [{g.status}] {g.title}")
+        # Goal titles/results are run-history text: strip terminal control
+        # bytes (ANSI/OSC injection) before echoing.
+        click.echo(f"#{g.id} [{g.status}] {_strip_terminal_control(g.title)}")
         if g.result:
-            preview = (g.result or "")[:200].replace("\n", " ")
+            preview = _strip_terminal_control(
+                (g.result or "")[:200].replace("\n", " "))
             click.echo(f"  -> {preview}{'...' if len(g.result) > 200 else ''}")
 
 
@@ -4467,13 +4514,14 @@ def status(ctx, cost: bool) -> None:
         click.echo("no goals yet. start one with `maverick start \"...\"`")
         return
     for g in goals[-10:]:
-        click.echo(f"  #{g.id} [{g.status}] {g.title}")
+        click.echo(f"  #{g.id} [{g.status}] {_strip_terminal_control(g.title)}")
     qs = world.open_questions()
     if qs:
         click.echo("")
         click.echo("open questions:")
         for q in qs:
-            click.echo(f"  #{q.id} (goal {q.goal_id}): {q.question}")
+            click.echo(f"  #{q.id} (goal {q.goal_id}): "
+                       f"{_strip_terminal_control(q.question)}")
 
 
 @main.command()
@@ -4505,7 +4553,8 @@ def ps(ctx, limit: int, as_json: bool) -> None:
         world = open_world(ctx.obj["db"])
         for g in world.list_goals(limit=limit, order="desc"):
             procs.append({"type": "goal", "id": g.id, "state": g.status,
-                          "when": _when(g.updated_at), "what": g.title})
+                          "when": _when(g.updated_at),
+                          "what": _strip_terminal_control(g.title)})
     except Exception:  # fail-soft: a missing/locked world shouldn't crash ps
         pass
     try:

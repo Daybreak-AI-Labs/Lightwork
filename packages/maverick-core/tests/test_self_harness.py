@@ -2662,14 +2662,52 @@ def test_corpus_harvest_skips_owned_goals(monkeypatch, tmp_path):
 def test_memo_scorer_never_caches_an_indeterminate_arm():
     # The sweep shares one context: a cached NaN (dead pot) or a poisoned
     # first draw would adjudicate every later source against that target.
+    # A clean freeze AVERAGES two draws (halving the variance of the one
+    # realization every candidate is then compared against).
     import math
 
     from maverick import self_improvement_runner as runner
-    vals = iter([float("nan"), 0.5, 99])
+    vals = iter([float("nan"), 0.4, 0.6, 99.0])
     memo = runner._memo_scorer(lambda line, goals: next(vals))
     assert math.isnan(memo("", ["g"]))       # first draw: dead pot -> NOT pinned
-    assert memo("", ["g"]) == 0.5            # recovers on the next draw
-    assert memo("", ["g"]) == 0.5            # ...and the finite result IS cached
+    assert memo("", ["g"]) == 0.5            # recovered: 0.4/0.6 averaged + frozen
+    assert memo("", ["g"]) == 0.5            # cached; 99.0 is never drawn
+
+
+def test_memo_scorer_never_caches_a_dirty_arm():
+    # A fail-open provider outage yields a FINITE wrong score (e.g. 0.0) that
+    # is indistinguishable from a real one afterwards -- the scorer's
+    # last_clean flag is the only signal, and a dirty draw must not freeze.
+    from maverick import self_improvement_runner as runner
+
+    def fn(line, goals):
+        fn.calls += 1
+        return 0.0
+
+    fn.calls = 0
+    fn.last_clean = False                    # outage degraded this arm
+    memo = runner._memo_scorer(fn)
+    assert memo("", ["g"]) == 0.0 and fn.calls == 1   # used once, not frozen
+    fn.last_clean = True                     # provider recovered
+    assert memo("", ["g"]) == 0.0 and fn.calls == 3   # two clean draws freeze
+    assert memo("", ["g"]) == 0.0 and fn.calls == 3   # cached
+
+
+def test_metamorphic_budget_death_is_indeterminate():
+    # A dead pot mid-paraphrase must not become a free pass on the robustness
+    # check -- the candidate rejects with the indeterminate sentinel (which
+    # the transfer tried-memory deliberately does not record).
+    from maverick.budget import BudgetExceeded
+
+    def para(goals):
+        raise BudgetExceeded("dead pot")
+
+    p = sh.HarnessProposal("M", "sig", "the line", "r")
+    vr = sh.validate_proposal(p, held_in=["a"], held_out=["b", "c"],
+                              score_with=lambda a, c: 0.9,
+                              score_without=lambda a, c: 0.4,
+                              metamorphic_fn=para)
+    assert not vr.accepted and vr.reason == sh._INDETERMINATE_REASON
 
 
 def test_memo_paraphraser_caches_only_nonempty():

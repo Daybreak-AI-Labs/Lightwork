@@ -53,8 +53,21 @@
         enable</code> is set.
       {% endif %}
     </p>
-    {% for key, n in pending_corpus | dictsort %}
-      <p class="badge info" style="display:inline-block">📥 <code>{{ key }}</code>: {{ n }} harvested corpus candidate{{ '' if n == 1 else 's' }} awaiting <code>maverick self-harness corpus review</code></p>
+    {% if transfer_memory and transfer_memory.pairs %}
+      <p class="muted">transfer memory: {{ transfer_memory.pairs }} (target, line) pair{{ '' if transfer_memory.pairs == 1 else 's' }} judged{% if transfer_memory.last_judged_at %} · last {{ transfer_memory.last_judged_at | datetime }}{% endif %}</p>
+    {% endif %}
+    {% for key, items in pending_items | dictsort %}
+      <p class="badge info" style="display:inline-block">📥 <code>{{ key }}</code>: {{ items | length }} harvested corpus candidate{{ '' if items | length == 1 else 's' }} awaiting review</p>
+      <ul class="pending-corpus" data-key="{{ key }}">
+      {% for c in items %}
+        <li>
+          {{ c.goal }}
+          <span class="muted">(expected: {{ c.expected }})</span>
+          <button class="pc-resolve" data-key="{{ key }}" data-index="{{ loop.index }}" data-verdict="accept">Accept</button>
+          <button class="pc-resolve" data-key="{{ key }}" data-index="{{ loop.index }}" data-verdict="reject">Reject</button>
+        </li>
+      {% endfor %}
+      </ul>
     {% endfor %}
     {% if harness %}
       {% for h in harness %}
@@ -115,9 +128,44 @@
     button.gt-remove { padding: 0.35rem 0.85rem; background: var(--panel); color: var(--danger); border: 1px solid var(--border); border-radius: 4px; cursor: pointer; font-size: 0.85rem; }
     button.gt-remove:hover { border-color: var(--danger); }
     button.gt-remove[disabled] { opacity: 0.6; cursor: not-allowed; }
+    button.pc-resolve { padding: 0.2rem 0.6rem; margin-left: 0.35rem; background: var(--panel); color: var(--fg); border: 1px solid var(--border); border-radius: 4px; cursor: pointer; font-size: 0.8rem; }
+    button.pc-resolve:hover { border-color: var(--accent); }
+    button.pc-resolve[disabled] { opacity: 0.6; cursor: not-allowed; }
   </style>
 
   <script>
+    (function() {
+      // Staged-candidate review: one verdict per click, then a full reload --
+      // pending indexes are positional and REBASE after every resolution, so
+      // surgically removing rows would desynchronize the remaining buttons.
+      document.querySelectorAll('button.pc-resolve').forEach(function(btn) {
+        btn.addEventListener('click', async function() {
+          const verdict = btn.dataset.verdict;
+          if (!(await mvConfirm(verdict === 'accept'
+              ? 'Merge this candidate into the LIVE eval corpus?'
+              : 'Reject this candidate? (It will never be re-staged.)',
+              { okText: verdict === 'accept' ? 'Merge it' : 'Reject it' }))) return;
+          btn.closest('ul').querySelectorAll('button').forEach(function(b) { b.disabled = true; });
+          const body = { key: btn.dataset.key };
+          body[verdict] = [parseInt(btn.dataset.index, 10)];
+          try {
+            const r = await fetch('/api/v1/harness-corpus/review', {
+              method: 'POST',
+              headers: { 'Content-Type': 'application/json' },
+              body: JSON.stringify(body),
+            });
+            if (!r.ok) {
+              const j = await r.json().catch(function() { return {}; });
+              alert(j.detail || ('Failed: ' + r.status));
+            }
+          } catch (e) {
+            alert(String(e));
+          }
+          location.reload();
+        });
+      });
+    })();
+
     (function() {
       const msg = document.getElementById('gt-msg');
       document.querySelectorAll('button.gt-remove').forEach(function(btn) {

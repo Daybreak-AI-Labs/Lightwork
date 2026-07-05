@@ -34,7 +34,7 @@ wiring.
 | Conflicts | semantic-judge seam over the lexical heuristic | `find_conflicts(classifier_fn=)` |
 
 Every wave is opt-in, leaves default behavior **byte-identical**, keeps the
-determinism proof at **8/8**, and routes any promotion through the one governed
+determinism proof at **9/9**, and routes any promotion through the one governed
 gate. Backlog item map: #1 driver (`run_self_harness_cycle`), #2/#4 reference-free
 evaluator (`self_harness_eval`), #3 eval corpus (`load_eval_corpus`/`corpus_split`),
 #5 best-of-N, #6 semantic mining, #7 component profiles (per-domain AND per-tool
@@ -236,9 +236,46 @@ wave confirmed and fixed a cluster of lifecycle-integrity defects:
   owner-scoped goals, matching the reflexion side's unscoped-only filter --
   one tenant's goal text is never mined into the shared eval corpus.
 
+## Wave: gap closure (2026-07-05, "do it all")
+
+Every remaining tractable gap from the post-merge assessment, in one wave:
+
+- **Statistics**: the memoized baseline moved into `_auto_evaluator` /
+  `_context_evaluator` (cycle, rotation folds, efficacy review, and transfer
+  all stop re-buying the same measurement), AVERAGES two clean draws before
+  freezing (halving the correlated-draw variance), and never caches a dirty
+  arm — `llm_runner`/`llm_judge` count fail-open degradations and
+  `corpus_ab_scorers` exposes `last_clean`, so an outage 0.0 can no longer
+  masquerade as a real baseline. `validate_proposal` treats a
+  `BudgetExceeded` mid-paraphrase as an INDETERMINATE rejection (never a free
+  pass on the robustness check). `_validation_floors(st)` is now the one
+  source of floors for the pass, the cycle, and transfer.
+- **Proof**: 9th guarantee, *rollback durability* — a forgotten line is never
+  resurrected by a transfer sweep, a rejected candidate never re-stages, and
+  an indeterminate verdict stays retryable (merits-only one-shot).
+- **Corpus quality lifecycle**: harvested rows carry `added_at` (raw file
+  only); `maverick self-harness corpus quality [--retire]` measures each live
+  case's baseline discriminativeness on the eval budget and prunes dead
+  ground truth raw-preservingly.
+- **Sealing parity**: the machine-owned pending/rejected sidecars are sealed
+  under at-rest encryption (loaders unseal transparently, plaintext-tolerant);
+  the live corpus stays operator-editable plaintext by design.
+- **Surfaces**: /learned resolves staged candidates in-page (admin POST, same
+  verdicts as the CLI, stale indexes are a 409 + re-list) and shows the
+  transfer-memory stats; CLI echoes of stored goal text go through the
+  terminal-control stripper repo-wide (status/history/ps/review).
+- **Ops**: `reflexion.list_recent` tail-reads the log; the learning stat
+  counts the full ledger; the harvest CLI defers key/path defaulting to the
+  runner.
+- **Deferred at the right altitude**: multi-node shared learning state is a
+  DESIGN (docs/proposals/fleet-learning-state.md — world-DB tables behind a
+  store seam, battery-verified on both backends) and live-LLM validation is a
+  deploy-night checklist in that proposal, not something a keyless CI can
+  fake.
+
 ## Principle (unchanged across every wave)
 
-**Off-by-default / byte-identical default**, **determinism proof 8/8**, and **the
+**Off-by-default / byte-identical default**, **determinism proof 9/9**, and **the
 governed gate decides promotion** (demotion uses the reversible audited `forget`
 path, never the gate). Scoped recall keeps the default store byte-identical
 because model-wide lines stay under the bare `model_id` key — the composite

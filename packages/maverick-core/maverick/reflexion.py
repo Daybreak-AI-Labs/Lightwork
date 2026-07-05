@@ -336,23 +336,28 @@ def list_recent(
         return []
     entries: list[Reflexion] = []
     try:
+        from collections import deque
         with open(path, encoding="utf-8") as f:
-            for raw in f:
-                try:
-                    data = json.loads(raw)
-                except json.JSONDecodeError:
-                    continue
-                try:
-                    entries.append(Reflexion(**{
-                        k: data.get(k) for k in (
-                            "ts", "goal_text", "failure_class",
-                            "failure_msg", "reflection", "tools_used",
-                            "channel", "user_id", "domain", "model_id",
-                            "role",
-                        )
-                    }))
-                except TypeError:
-                    continue
+            # The log is append-ordered and unbounded; only the tail can hold
+            # the N most recent entries. 4x headroom absorbs malformed lines
+            # and any local ts jitter without paying an O(whole-file) parse.
+            tail = deque(f, maxlen=max(1, limit) * 4)
+        for raw in tail:
+            try:
+                data = json.loads(raw)
+            except json.JSONDecodeError:
+                continue
+            try:
+                entries.append(Reflexion(**{
+                    k: data.get(k) for k in (
+                        "ts", "goal_text", "failure_class",
+                        "failure_msg", "reflection", "tools_used",
+                        "channel", "user_id", "domain", "model_id",
+                        "role",
+                    )
+                }))
+            except TypeError:
+                continue
     except OSError:
         return []
     # A legacy/hand-written line can lack ``ts`` (loaded as None); a None key
