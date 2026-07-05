@@ -111,7 +111,8 @@ def _default_proposer(*, budget=None):
         return lambda *_: None
 
 
-def _default_evaluate(*, tree: Path, sandbox=None, budget=None, cfg: dict):
+def _default_evaluate(*, tree: Path, sandbox=None, budget=None, cfg: dict,
+                      cache_baseline: bool = True):
     """Build the ``evaluate(patch, surface)`` seam against the real ``tree``.
 
     Uses the targeted corpus (``[self_modify] eval_tests``, held-out-judged) when
@@ -124,9 +125,15 @@ def _default_evaluate(*, tree: Path, sandbox=None, budget=None, cfg: dict):
     corpus path builds a backend rooted at each copy via ``build_sandbox`` (so a
     docker/gvisor deployment runs the baseline and candidate arms in their OWN
     trees, and require-container policy is enforced per copy), instead of sharing
-    one fixed-root backend across both."""
+    one fixed-root backend across both.
+
+    Baseline caching: when ``cache_baseline`` (the default, safe while nothing is
+    applied between cycles) the whole-suite baseline is computed once and reused,
+    so an N-cycle run does ONE baseline suite instead of N. The driver disables it
+    when ``apply=True`` (a landed change mutates the tree, invalidating it)."""
     eval_tests = tuple(str(t).strip() for t in (cfg.get("eval_tests") or [])
                        if str(t).strip())
+    state: dict = {}  # {'base': Score} — cached whole-suite baseline
 
     def _per_copy_factory(copy_dir):
         # A fresh, config-driven, policy-enforced backend rooted at this copy.
@@ -147,10 +154,13 @@ def _default_evaluate(*, tree: Path, sandbox=None, budget=None, cfg: dict):
                     corpus=CodeEvalCorpus(test_ids=eval_tests),
                     sandbox=sandbox, sandbox_factory=factory, budget=budget)
             from .self_modify_eval import evaluate_patch, pytest_score
-            return evaluate_patch(
+            res = evaluate_patch(
                 patch, src=tree, workroot=work,
                 score_fn=pytest_score(sandbox=sandbox, budget=budget),
-                sandbox=sandbox)
+                sandbox=sandbox, baseline=state.get("base"))
+            if cache_baseline and res.ok and "base" not in state:
+                state["base"] = res.baseline   # reuse next cycle (tree invariant)
+            return res
         finally:
             shutil.rmtree(work, ignore_errors=True)
 
@@ -230,7 +240,8 @@ def run(
 
         prop = proposer or _default_proposer(budget=budget)
         ev = evaluate or _default_evaluate(
-            tree=tree, sandbox=sandbox, budget=budget, cfg=cfg)
+            tree=tree, sandbox=sandbox, budget=budget, cfg=cfg,
+            cache_baseline=not apply)  # a landed change would invalidate the cache
 
         reports = run_loop(
             archive=archive, proposer=prop, evaluate=ev, policy=policy,

@@ -368,3 +368,30 @@ class TestWiredApply:
         assert rep.promoted is True
         assert rep.applied is False and rep.rollback_id is None
         assert (tree / "f.py").read_text() == "VALUE = 1\n"   # untouched
+
+
+class TestAuditBoundWidening:
+    def test_track_record_arg_supersedes_ledger_and_archive(self, tmp_path):
+        # A forged archive AND a ledger both say "many"; the explicit signed
+        # track_record (the audit chain) is what earned_surface must use.
+        a = CodeArchive()
+        for i in range(9):
+            a.add(CodeCandidate(summary=f"f{i}", patch=f"+a{i}", score=1.0,
+                                promoted=True))
+        ledger = si.PromotionLedger(path=tmp_path / "l.json")
+        for i in range(9):
+            ledger.add(si.PromotionRecord(
+                id=f"r{i}", rung="code", summary="s", baseline_score=0.5,
+                candidate_score=0.9, promoted_at=1.0))
+        # audit chain says exactly 1 real promotion
+        tier, _ = earned_surface(a, _tiers(), ledger=ledger, track_record=(1, False))
+        assert tier.name == "t1"
+
+    def test_audit_rollback_freezes(self, tmp_path):
+        tier, _ = earned_surface(CodeArchive(), _tiers(), track_record=(50, True))
+        assert tier.name == "t0"
+
+    def test_audit_track_record_none_when_no_events(self):
+        # In the offline test env the audit chain has no self_improvement
+        # learning events -> None -> caller defers to the ledger.
+        assert loop._audit_track_record("code") is None

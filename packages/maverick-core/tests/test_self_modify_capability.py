@@ -95,3 +95,32 @@ class TestCapabilityDeltaShape:
         before, after, probe = capability_delta(_patch("x = 1"))
         assert not any(before.permits(c) for c in probe)
         assert not any(after.permits(c) for c in probe)
+
+
+class TestAstDetection:
+    """The AST pass catches obfuscation/aliasing the line regex cannot."""
+
+    def test_import_aliasing_is_caught(self):
+        assert "process" in cap.classes_in_source("from os import system as s\ns()")
+
+    def test_getattr_obfuscation_is_caught(self):
+        assert "dynamic_code" in cap.classes_in_source("f = getattr(o, 'sy'+'stem')")
+
+    def test_attribute_call_on_imported_module(self):
+        assert "fs_write" in cap.classes_in_source("import shutil\nshutil.rmtree(d)")
+
+    def test_from_import_of_dangerous_name_flags_immediately(self):
+        assert "process" in cap.classes_in_source("from subprocess import run")
+
+    def test_open_write_mode_is_fs_write_read_is_not(self):
+        # AST reads the mode argument structurally (regex over-flags a filename
+        # that happens to contain a mode char, which is the safe direction).
+        assert "fs_write" in cap.classes_in_source("open('out', 'w')")
+        assert "fs_write" not in cap.classes_in_source("open('f', 'r')")
+
+    def test_unparseable_fragment_falls_back_to_regex(self):
+        # a bare partial expression won't AST-parse; regex still flags it
+        assert "network" in cap.classes_in_source("    resp = requests.get(")
+
+    def test_clean_source_has_nothing(self):
+        assert cap.classes_in_source("def f(x):\n    return x + 1") == frozenset()

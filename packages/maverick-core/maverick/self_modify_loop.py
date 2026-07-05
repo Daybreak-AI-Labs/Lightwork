@@ -222,19 +222,59 @@ def _ledger_track_record(ledger, *, rung: str = "code") -> tuple[int, bool]:
     return promotions, had_rollback
 
 
+def _audit_track_record(rung: str = "code") -> tuple[int, bool] | None:
+    """``(promotions, had_rollback)`` from the SIGNED audit chain — the strongest
+    anti-tamper source for widening (stronger than the ledger, which is a plain
+    0600 JSON sidecar). Reads the tamper-evident audit NDJSON for
+    ``self_improvement`` promote/rollback events at ``rung`` and counts promoted
+    candidates that were not later rolled back.
+
+    Returns ``None`` when the chain carries NO relevant events at all (a fresh
+    deployment, or an offline/test run with audit disabled), so the caller cleanly
+    defers to the ledger instead of mistaking 'no signed record yet' for 'zero
+    promotions' (which would wrongly freeze widening). Fail-soft: any read error
+    also returns None → defer."""
+    try:
+        from .audit import EventKind
+        from .audit.reader import iter_events
+        promoted: set[str] = set()
+        rolled_back: set[str] = set()
+        seen = False
+        for ev in iter_events(all_days=True):
+            if (ev.get("kind") != EventKind.LEARNING_UPDATE
+                    or ev.get("agent") != "self_improvement"
+                    or ev.get("rung") != rung):
+                continue
+            decision, cand = ev.get("decision"), ev.get("candidate")
+            if not cand:
+                continue
+            if decision == "promote":
+                seen = True
+                promoted.add(cand)
+            elif decision == "rollback":
+                seen = True
+                rolled_back.add(cand)
+        if not seen:
+            return None
+        return len(promoted - rolled_back), bool(rolled_back)
+    except Exception:  # pragma: no cover -- audit unavailable -> defer to ledger
+        log.debug("self_modify_loop: audit-chain track record unavailable", exc_info=True)
+        return None
+
+
 def earned_surface(
     archive: CodeArchive, policy: WideningPolicy, *,
-    ledger=None, rung: str = "code",
+    ledger=None, rung: str = "code", track_record: tuple[int, bool] | None = None,
 ) -> tuple[SurfaceTier, sm.EditableSurface]:
     """The tier + surface the track record currently entitles the loop to edit.
 
-    When a promotion ``ledger`` is supplied the track record is derived from it
-    (the controller-owned, tamper-resistant source — Gap 6); otherwise it falls
-    back to the archive's booleans (convenient for tests / offline, but NOT a
-    security boundary — the runner always supplies the controller's ledger, so the
-    fallback is not on the operable path). Pure — reads the record, decides
-    nothing else."""
-    if ledger is not None:
+    Precedence: an explicit ``track_record`` (the signed audit chain, passed by
+    the loop — the strongest source) > the controller ``ledger`` (0600 sidecar) >
+    the archive's booleans (convenient for tests / offline, NOT a security
+    boundary). Pure — reads the record, decides nothing else."""
+    if track_record is not None:
+        promotions, had_rollback = track_record
+    elif ledger is not None:
         promotions, had_rollback = _ledger_track_record(ledger, rung=rung)
     else:
         promotions, had_rollback = _archive_track_record(archive)
@@ -306,7 +346,12 @@ def run_cycle(
         return report
     try:
         policy = policy or WideningPolicy()
-        tier, surface = earned_surface(archive, policy, ledger=ledger, rung=rung)
+        # Prefer the SIGNED audit chain for the widening track record on the
+        # operable path (a controller ledger present); it supersedes both the
+        # ledger and the forgeable archive when it carries relevant events.
+        audit_tr = _audit_track_record(rung) if ledger is not None else None
+        tier, surface = earned_surface(archive, policy, ledger=ledger, rung=rung,
+                                      track_record=audit_tr)
         report.tier = tier.name
         if not surface.editable_globs:
             report.reason = f"tier {tier.name!r} grants no editable surface yet"

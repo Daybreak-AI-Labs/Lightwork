@@ -296,8 +296,8 @@ def capability_diff(patch: str) -> tuple[bool, list[str]]:
     ``capability_widens=True`` (blocking the change), but never treats a clean
     scan as a standalone certificate of non-escalation; the code rung's human
     signature is the backstop for what a regex cannot catch."""
-    from .self_modify_capability import _added_lines, classes_in, describe_classes
-    hit = classes_in(_added_lines(patch))
+    from .self_modify_capability import _added_lines, classes_in_source, describe_classes
+    hit = classes_in_source("\n".join(_added_lines(patch)))
     return bool(hit), describe_classes(hit)
 
 

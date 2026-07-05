@@ -212,3 +212,30 @@ class TestIsolationPolicy:
                 raise RuntimeError("budget exhausted")
         score = ev.pytest_score(budget=Budget())(tmp_path)
         assert score == Score(0.0, 0)
+
+
+class TestBaselineCache:
+    def test_cached_baseline_skips_the_baseline_arm(self, tmp_path):
+        src = _seed_repo(tmp_path)
+        calls = {"n": 0}
+
+        def score(workdir):
+            calls["n"] += 1
+            text = (Path(workdir) / "pkg" / "a.py").read_text()
+            return Score(1.0 if "99" in text else 0.0, samples=4)
+
+        cached = Score(0.5, samples=7)
+        res = evaluate_patch(_edit_patch(), src=src, workroot=tmp_path / "w",
+                             score_fn=score, baseline=cached)
+        assert res.ok is True
+        assert calls["n"] == 1                      # only the CANDIDATE was scored
+        assert res.baseline_score == 0.5            # used the cached baseline
+        assert res.candidate_score == 1.0
+        assert res.samples == 4                     # min(cached 7, cand 4)
+        assert not (tmp_path / "w" / "baseline").exists()   # no baseline copy made
+
+    def test_result_exposes_baseline_for_caching(self, tmp_path):
+        src = _seed_repo(tmp_path)
+        res = evaluate_patch(_edit_patch(), src=src, workroot=tmp_path / "w",
+                             score_fn=lambda wd: Score(0.3, samples=5))
+        assert res.baseline.value == 0.3 and res.baseline.samples == 5

@@ -81,10 +81,18 @@ class EvalResult:
     samples: int
     applied: bool
     reason: str = ""
+    # The baseline arm's own sample count, exposed so a caller can cache the
+    # baseline Score across cycles (the tree is invariant on an autonomous run).
+    baseline_samples: int = 0
 
     @property
     def improvement(self) -> float:
         return self.candidate_score - self.baseline_score
+
+    @property
+    def baseline(self) -> Score:
+        """The baseline arm as a reusable Score (for cross-cycle caching)."""
+        return Score(self.baseline_score, self.baseline_samples)
 
 
 # --- isolation policy (Gap 4): never run a candidate's code on the host -------
@@ -303,6 +311,7 @@ def evaluate_patch(
     apply_fn: Callable[[str, Path], ApplyResult] | None = None,
     materialize: Callable[[Path, Path], None] | None = None,
     sandbox=None,
+    baseline: Score | None = None,
 ) -> EvalResult:
     """Measure a patch on isolated copies of ``src``: score the unpatched tree
     (baseline), apply the patch to a second copy and score that (candidate).
@@ -312,6 +321,12 @@ def evaluate_patch(
     any failure (copy, apply, scorer) returns a non-``ok`` result whose scores do
     not clear the gate. The default seams make this runnable offline; inject
     ``score_fn=pytest_score(...)`` and a ``sandbox`` for a real evaluation.
+
+    ``baseline`` (a precomputed :class:`Score`) skips the baseline arm entirely —
+    no baseline copy, no baseline test run. Since ``src`` is invariant across an
+    autonomous run (nothing is applied between cycles), the driver computes the
+    baseline once and passes it back, turning N cycles' worth of full baseline
+    suites into one. Omit it (or invalidate after a real apply) for correctness.
 
     Isolation (Gap 4): the harness resolves the sandbox up front and REFUSES to
     run under require-container/enterprise policy without a container backend —
@@ -334,7 +349,8 @@ def evaluate_patch(
     base_dir = workroot / "baseline"
     cand_dir = workroot / "candidate"
     try:
-        materialize(src, base_dir)
+        if baseline is None:
+            materialize(src, base_dir)
         materialize(src, cand_dir)
     except Exception as e:
         log.warning("self_modify_eval: materialize failed: %s", e, exc_info=True)
@@ -346,7 +362,7 @@ def evaluate_patch(
         return EvalResult(False, 0.0, 0.0, 0, applied=False, reason=applied.reason)
 
     try:
-        base = score(base_dir)
+        base = baseline if baseline is not None else score(base_dir)
         cand = score(cand_dir)
     except Exception as e:  # pragma: no cover -- a scorer must not crash the pass
         log.warning("self_modify_eval: scorer raised: %s", e, exc_info=True)
@@ -358,7 +374,7 @@ def evaluate_patch(
     samples = min(base.samples, cand.samples)
     return EvalResult(
         ok=True, baseline_score=base.value, candidate_score=cand.value,
-        samples=samples, applied=True,
+        samples=samples, applied=True, baseline_samples=base.samples,
         reason=f"baseline={base.value:.4f} candidate={cand.value:.4f} "
                f"over {samples} samples",
     )

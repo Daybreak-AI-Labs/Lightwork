@@ -35,6 +35,7 @@ genuinely-added grant.
 """
 from __future__ import annotations
 
+import ast
 import re
 from collections.abc import Iterable
 
@@ -98,10 +99,12 @@ _ANCHOR = "\x00cap-anchor"
 
 
 def classes_in(lines: Iterable[str]) -> frozenset[str]:
-    """The capability classes evidenced by a block of source lines. A pure
-    comment line contributes nothing (a ``# subprocess`` note is not a spawn);
-    string literals can still match, deliberately (a string can be an exec
-    payload, and a false positive only over-reports widening)."""
+    """The capability classes evidenced by a block of source lines via the regex
+    screen. A pure comment line contributes nothing (a ``# subprocess`` note is
+    not a spawn); string literals can still match, deliberately (a string can be
+    an exec payload, and a false positive only over-reports widening). For a
+    coherent source string prefer :func:`classes_in_source`, which adds a
+    structural AST pass that catches import-aliasing / getattr obfuscation."""
     found: set[str] = set()
     for raw in lines:
         stripped = str(raw).lstrip()
@@ -113,6 +116,165 @@ def classes_in(lines: Iterable[str]) -> frozenset[str]:
             if any(rx.search(raw) for rx in patterns):
                 found.add(cls)
     return frozenset(found)
+
+
+# --- structural (AST) detection: robust to obfuscation the regex misses -------
+
+# Root module -> capability class it grants merely by being imported (matches the
+# regex's bareword flags: `import socket` etc. is itself the signal).
+_IMPORT_MODULE_CLASS: dict[str, str] = {
+    "subprocess": "process", "multiprocessing": "process", "pty": "process",
+    "socket": "network", "urllib": "network", "http": "network",
+    "requests": "network", "httpx": "network", "aiohttp": "network",
+    "smtplib": "network", "ftplib": "network", "paramiko": "network",
+    "websockets": "network",
+    "ctypes": "native_ffi", "cffi": "native_ffi",
+    "importlib": "dynamic_import", "base64": "dynamic_code",
+}
+_NETWORK_ROOTS = frozenset({
+    "socket", "urllib", "requests", "httpx", "aiohttp", "smtplib", "ftplib",
+    "paramiko", "websockets", "http",
+})
+_OS_FS_ATTRS = frozenset({
+    "remove", "unlink", "rmdir", "chmod", "chown", "rename", "replace"})
+_AUTHORITY_NAMES = frozenset({
+    "grant", "entitlement", "allowlist", "allow_list", "editable_paths",
+    "probe_tools", "capability_before", "capability_after", "max_risk",
+    "deny_tools"})
+
+
+class _CapVisitor(ast.NodeVisitor):
+    """Walk an AST accumulating capability classes. Catches what the line regex
+    can't: ``from os import system as s; s(...)`` (aliasing), ``getattr(os,
+    'sy'+'stem')`` (dynamic attribute), attribute calls on known-dangerous
+    modules, and a subprocess ``shell`` keyword set true as a real kwarg node."""
+
+    def __init__(self) -> None:
+        self.found: set[str] = set()
+        self.aliases: dict[str, str] = {}  # local name -> class (aliased funcs)
+
+    def _add(self, cls: str | None) -> None:
+        if cls:
+            self.found.add(cls)
+
+    def visit_Import(self, node: ast.Import) -> None:
+        for a in node.names:
+            self._add(_IMPORT_MODULE_CLASS.get(a.name.split(".")[0]))
+        self.generic_visit(node)
+
+    def visit_ImportFrom(self, node: ast.ImportFrom) -> None:
+        root = (node.module or "").split(".")[0]
+        self._add(_IMPORT_MODULE_CLASS.get(root))
+        for a in node.names:  # dangerous from-imports (incl. aliases)
+            local, cls = a.asname or a.name, None
+            if root == "os" and (a.name in ("system", "popen")
+                                 or a.name.startswith(("exec", "spawn"))):
+                cls = "process"
+            elif root == "os" and a.name in _OS_FS_ATTRS:
+                cls = "fs_write"
+            elif root == "subprocess":
+                cls = "process"
+            elif root in ("pickle", "marshal") and a.name in ("load", "loads"):
+                cls = "deserialize"
+            if cls:
+                # Importing the dangerous name IS acquiring the capability; also
+                # track the local alias so a later bare call is attributed too.
+                self._add(cls)
+                self.aliases[local] = cls
+        self.generic_visit(node)
+
+    def visit_Call(self, node: ast.Call) -> None:
+        f = node.func
+        if isinstance(f, ast.Name):
+            nm = f.id
+            if nm in ("eval", "exec", "compile", "getattr"):
+                self._add("dynamic_code")
+            elif nm == "__import__":
+                self._add("dynamic_import")
+            elif nm == "open" and self._open_is_write(node):
+                self._add("fs_write")
+            elif nm in self.aliases:
+                self._add(self.aliases[nm])
+        elif isinstance(f, ast.Attribute):
+            self._add(self._attr_class(f))
+        for kw in node.keywords:
+            if (kw.arg == "shell" and isinstance(kw.value, ast.Constant)
+                    and kw.value.value is True):
+                self._add("process")
+        self.generic_visit(node)
+
+    def visit_Attribute(self, node: ast.Attribute) -> None:
+        if node.attr in _AUTHORITY_NAMES:
+            self._add("authority_grant")
+        self.generic_visit(node)
+
+    def visit_Name(self, node: ast.Name) -> None:
+        if node.id in _AUTHORITY_NAMES:
+            self._add("authority_grant")
+        elif node.id == "__builtins__":
+            self._add("dynamic_code")
+        self.generic_visit(node)
+
+    @staticmethod
+    def _attr_class(f: ast.Attribute) -> str | None:
+        attr = f.attr
+        if attr in ("write_text", "write_bytes"):
+            return "fs_write"
+        root = f.value.id if isinstance(f.value, ast.Name) else None
+        if root is None:
+            return None
+        if root == "os":
+            if attr in ("system", "popen") or attr.startswith(("exec", "spawn")):
+                return "process"
+            if attr in _OS_FS_ATTRS:
+                return "fs_write"
+        if root in ("subprocess", "multiprocessing"):
+            return "process"
+        if root == "pty" and attr == "spawn":
+            return "process"
+        if root == "shutil" and (attr in ("rmtree", "move") or attr.startswith("copy")):
+            return "fs_write"
+        if root in ("pickle", "marshal") and attr in ("load", "loads"):
+            return "deserialize"
+        if root == "codecs" and attr == "decode":
+            return "dynamic_code"
+        if root == "base64":
+            return "dynamic_code"
+        if root in _NETWORK_ROOTS:
+            return "network"
+        return None
+
+    @staticmethod
+    def _open_is_write(node: ast.Call) -> bool:
+        mode = None
+        if len(node.args) >= 2 and isinstance(node.args[1], ast.Constant):
+            mode = node.args[1].value
+        for kw in node.keywords:
+            if kw.arg == "mode" and isinstance(kw.value, ast.Constant):
+                mode = kw.value.value
+        return isinstance(mode, str) and any(c in mode for c in "wax+")
+
+
+def _ast_classes(source: str) -> set[str]:
+    """AST-detected classes for a source string; ``set()`` if it doesn't parse
+    (a partial diff fragment) — the regex screen still covers that case."""
+    try:
+        tree = ast.parse(source)
+    except (SyntaxError, ValueError):
+        return set()
+    v = _CapVisitor()
+    v.visit(tree)
+    return v.found
+
+
+def classes_in_source(source: str) -> frozenset[str]:
+    """Capability classes in a (whole or partial) source string — the UNION of a
+    structural AST walk (robust to import-aliasing / ``getattr`` obfuscation /
+    attribute calls) and the regex line scan. Union, so detection only ever gets
+    STRICTER; the AST pass no-ops on an unparseable fragment and the regex covers
+    it. This is what the differential and the screen should use when they have a
+    source string rather than a bare line list."""
+    return frozenset(_ast_classes(source) | set(classes_in((source or "").splitlines())))
 
 
 def _added_lines(patch: str) -> list[str]:
@@ -152,10 +314,11 @@ def capability_delta(
     ``allowlist``/``grant`` would seed that class into ``before`` and NEUTRALISE
     detection of a genuinely-added grant. Empty-baseline is fail-closed (any
     added construct widens); pass ``baseline_files`` to earn the differential."""
-    added = classes_in(_added_lines(patch))
-    base = classes_in(
-        line for src in (baseline_files or {}).values()
-        for line in str(src).splitlines())
+    # AST-aware detection on coherent source (the joined added block often parses;
+    # baseline files always do), falling back to the regex within classes_in_source.
+    added = classes_in_source("\n".join(_added_lines(patch)))
+    base = classes_in_source(
+        "\n".join(str(src) for src in (baseline_files or {}).values()))
     after = base | added
     return _grant(principal, base), _grant(principal, after), CAPABILITY_CLASSES
 
@@ -189,6 +352,6 @@ def describe_classes(classes: Iterable[str]) -> list[str]:
 
 
 __all__ = [
-    "CAPABILITY_CLASSES", "classes_in", "capability_delta", "widens",
-    "describe_classes",
+    "CAPABILITY_CLASSES", "classes_in", "classes_in_source",
+    "capability_delta", "widens", "describe_classes",
 ]

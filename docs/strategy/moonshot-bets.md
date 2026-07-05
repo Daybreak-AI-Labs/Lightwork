@@ -486,6 +486,22 @@ corpus eval resolves a backend PER COPY via `build_sandbox`, so a docker/gvisor
 deployment runs the baseline and candidate arms in their own trees under enforced
 policy instead of sharing one fixed-root sandbox.
 
+**Depth pass (everything outside Gap 8).** The three deferred "architectural"
+items are now done: (1) **AST capability analysis** — `classes_in_source` adds a
+structural `ast` walk (union with the regex, so strictly stricter) that catches
+import-aliasing (`from os import system as s; s()`), `getattr`/`__builtins__`
+obfuscation, and attribute calls the line regex missed; the differential and the
+screen both route through it. (2) **Audit-chain-bound widening** — the widening
+track record now prefers the SIGNED audit chain (`_audit_track_record` over
+`audit.reader.iter_events`) above the 0600 ledger and the forgeable archive, so
+"earned trust" reads from the tamper-evident WORM log; it defers to the ledger
+only when the chain carries no relevant events (fresh/offline). (3) **Baseline
+caching** — `evaluate_patch` takes a precomputed `baseline` Score and the runner
+computes the whole-suite baseline once per run (the tree is invariant on an
+autonomous search), turning N cycles' N baseline suites into one; disabled when
+`apply=True` invalidates the tree. Only Gap 8 (real-container/real-model
+end-to-end + adversarial-containment tests) remains.
+
 ## Bet 5 — Consequence-Proven Autonomy → "Earned Autonomy" (the breakthrough)
 
 **Thesis.** The biggest blocker to enterprise agents isn't quality, it's **trust
