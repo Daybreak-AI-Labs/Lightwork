@@ -2405,14 +2405,20 @@ def test_transferable_lines_filters_probation_and_relapsing(monkeypatch, store):
     _promote_line(store, "SRC", "c0", "solid line", ctrl)
     _promote_line(store, "SRC", "c1", "canary line", ctrl)
     _promote_line(store, "SRC", "c2", "relapsing line", ctrl)
+    _promote_line(store, "SRC", "c3", "one bad day line", ctrl)
     sh.mark_canary("SRC", "canary line", path=store)
     meta = sh.load_line_meta(store)
-    meta[sh._line_id("SRC", "relapsing line")]["recent_outcomes"] = [0, 0, 0, 1]
+    # 5 recent outcomes, 4 failures: relapsing under the shared predicate.
+    meta[sh._line_id("SRC", "relapsing line")]["recent_outcomes"] = [0, 0, 0, 1, 0]
+    # A single recent failure is BELOW the evidence floor (min_outcomes=5):
+    # not enough recency evidence to brand a graduated line relapsing.
+    meta[sh._line_id("SRC", "one bad day line")]["recent_outcomes"] = [0]
     sh._write_line_meta(meta, store)
-    assert sh.transferable_lines("SRC", store) == ["solid line"]
+    assert sh.transferable_lines("SRC", store) == ["solid line",
+                                                   "one bad day line"]
 
 
-def test_transfer_promotes_as_canary(monkeypatch, store, tmp_path):
+def test_transfer_promotes_as_canary(monkeypatch, store):
     ctrl = _enable(monkeypatch)
     _promote_line(store, "SRC", "c0", "solid line", ctrl)
     rep = sh.run_transfer("SRC", ["TGT"], eval_for_target=lambda m: _quad_good(),
@@ -2427,7 +2433,7 @@ def test_transfer_promotes_as_canary(monkeypatch, store, tmp_path):
     assert any("already present" in s for s in rep2["TGT"]["skipped"])
 
 
-def test_transfer_rejected_line_is_one_shot(monkeypatch, store, tmp_path):
+def test_transfer_rejected_line_is_one_shot(monkeypatch, store):
     ctrl = _enable(monkeypatch)
     _promote_line(store, "SRC", "c0", "weak line", ctrl)
     calls = {"n": 0}
@@ -2451,7 +2457,7 @@ def test_transfer_rejected_line_is_one_shot(monkeypatch, store, tmp_path):
     assert rep3["TGT"]["attempted"] == ["weak line"] and calls["n"] == 2
 
 
-def test_transfer_skips_self_target_and_missing_evaluator(monkeypatch, store, tmp_path):
+def test_transfer_skips_self_target_and_missing_evaluator(monkeypatch, store):
     ctrl = _enable(monkeypatch)
     _promote_line(store, "SRC", "c0", "solid line", ctrl)
     rep = sh.run_transfer("SRC", ["SRC", "TGT"], eval_for_target=lambda m: None,
@@ -2459,6 +2465,110 @@ def test_transfer_skips_self_target_and_missing_evaluator(monkeypatch, store, tm
     assert "SRC" not in rep                       # never transfers to itself
     assert rep["TGT"]["skipped"] == ["no evaluator/corpus for target"]
     assert rep["TGT"]["attempted"] == []
+
+
+def test_transfer_dedups_repeated_targets(monkeypatch, store):
+    # `--to m2 --to m2` must not re-spend evaluation or double-audit the gate.
+    ctrl = _enable(monkeypatch)
+    _promote_line(store, "SRC", "c0", "solid line", ctrl)
+    calls = {"n": 0}
+
+    def quad(m):
+        calls["n"] += 1
+        return _quad_good()
+
+    rep = sh.run_transfer("SRC", ["TGT", "TGT"], eval_for_target=quad,
+                          controller=ctrl, path=store)
+    assert calls["n"] == 1
+    assert rep["TGT"]["promoted"] == ["solid line"]
+
+
+def test_transfer_gate_refusal_is_not_burned(monkeypatch, store):
+    # A gate refusal is environmental (self-improvement off, freeze, evidence
+    # floor) -- the pair was never judged on the merits, so it must stay
+    # retryable once the gate opens, without --force.
+    ctrl = _enable(monkeypatch)
+    _promote_line(store, "SRC", "c0", "solid line", ctrl)
+    monkeypatch.setattr(si, "enabled", lambda: False)       # gate slams shut
+    rep = sh.run_transfer("SRC", ["TGT"], eval_for_target=lambda m: _quad_good(),
+                          controller=ctrl, path=store)
+    assert rep["TGT"]["promoted"] == []
+    assert any("gate refused" in s for s in rep["TGT"]["skipped"])
+    monkeypatch.setattr(si, "enabled", lambda: True)        # gate opens
+    rep2 = sh.run_transfer("SRC", ["TGT"], eval_for_target=lambda m: _quad_good(),
+                           controller=ctrl, path=store)
+    assert rep2["TGT"]["promoted"] == ["solid line"]
+
+
+def test_transfer_indeterminate_eval_is_not_burned(monkeypatch, store):
+    # A budget-dead/broken scorer arm rejects with the indeterminate sentinel;
+    # nothing was judged, so the pair must stay retryable on a healthy sweep.
+    ctrl = _enable(monkeypatch)
+    _promote_line(store, "SRC", "c0", "solid line", ctrl)
+    bad = (["a"], ["c", "d"], lambda a, c: float("nan"), lambda a, c: 0.4)
+    rep = sh.run_transfer("SRC", ["TGT"], eval_for_target=lambda m: bad,
+                          controller=ctrl, path=store)
+    assert rep["TGT"]["promoted"] == []
+    assert any("non-finite" in s for s in rep["TGT"]["skipped"])
+    rep2 = sh.run_transfer("SRC", ["TGT"], eval_for_target=lambda m: _quad_good(),
+                           controller=ctrl, path=store)
+    assert rep2["TGT"]["promoted"] == ["solid line"]
+
+
+def test_transfer_respects_target_capacity(monkeypatch, store):
+    # A transfer canary must never evict the target's proven lines: a full
+    # block is skipped BEFORE any evaluation spend.
+    ctrl = _enable(monkeypatch)
+    _promote_line(store, "SRC", "c0", "travelling line", ctrl)
+    for k in range(sh._MAX_LINES_PER_MODEL):
+        _promote_line(store, "TGT", f"t{k}", f"proven line {k}", ctrl)
+    before = sh.recall_addendum("TGT", store)
+    calls = {"n": 0}
+
+    def quad(m):
+        calls["n"] += 1
+        return _quad_good()
+
+    rep = sh.run_transfer("SRC", ["TGT"], eval_for_target=quad,
+                          controller=ctrl, path=store)
+    assert calls["n"] == 0
+    assert rep["TGT"]["attempted"] == []
+    assert any("at capacity" in s for s in rep["TGT"]["skipped"])
+    assert sh.recall_addendum("TGT", store) == before       # nothing evicted
+
+
+def test_forget_blocks_transfer_resurrection(monkeypatch, store):
+    # A governed rollback is durable: the sweep must not re-land a line the
+    # target just forgot while a fleet peer still carries it.
+    ctrl = _enable(monkeypatch)
+    _promote_line(store, "SRC", "c0", "solid line", ctrl)
+    rep = sh.run_transfer("SRC", ["TGT"], eval_for_target=lambda m: _quad_good(),
+                          controller=ctrl, path=store)
+    assert rep["TGT"]["promoted"] == ["solid line"]
+    assert sh.forget_addendum("TGT", line="solid line", path=store)
+    rep2 = sh.run_transfer("SRC", ["TGT"], eval_for_target=lambda m: _quad_good(),
+                           controller=ctrl, path=store)
+    assert rep2["TGT"]["promoted"] == []
+    assert any("already tried" in s for s in rep2["TGT"]["skipped"])
+
+
+def test_transfer_honors_holdout_rotations(monkeypatch, store):
+    # With rotations configured, a transferred line faces the same ALL-folds
+    # cross-validation home-grown candidates face -- not a weaker single split.
+    ctrl = _enable(monkeypatch)
+    _promote_line(store, "SRC", "c0", "solid line", ctrl)
+    seen = {}
+    real = sh._validate_rotated
+
+    def spy(proposal, **kw):
+        seen["rotations"] = kw.get("rotations")
+        return real(proposal, **kw)
+
+    monkeypatch.setattr(sh, "_validate_rotated", spy)
+    rep = sh.run_transfer("SRC", ["TGT"], eval_for_target=lambda m: _quad_good(),
+                          controller=ctrl, path=store, holdout_rotations=3)
+    assert seen["rotations"] == 3
+    assert rep["TGT"]["promoted"] == ["solid line"]   # uniform lift clears all folds
 
 
 def test_runner_transfer_end_to_end(monkeypatch, tmp_path, store):
@@ -2494,12 +2604,38 @@ def test_runner_transfer_end_to_end(monkeypatch, tmp_path, store):
     rep = runner.run_self_harness_transfer("SRC")
     assert rep["TGT"]["promoted"] == ["MAGIC-LINE bound the export window"]
     assert sh.list_canaries("TGT", store) == ["MAGIC-LINE bound the export window"]
-    # sweep shape: sources that attempted something appear keyed by source
-    # (clear the tried sidecar so the judged pair is re-attemptable)
-    sh._transfer_tried_path(store).unlink()
+    # sweep shape: sources that attempted something appear keyed by source.
+    # forget FIRST (it deliberately records the removed line as tried, so a
+    # sweep can't resurrect a rollback), THEN clear the sidecar so the pair
+    # is re-attemptable for this test.
     sh.forget_addendum("TGT", path=store)
+    sh._transfer_tried_path(store).unlink()
     sweep = runner.run_self_harness_transfer_sweep()
     assert "SRC" in sweep and sweep["SRC"]["TGT"]["promoted"]
+
+
+def test_memo_scorer_never_caches_an_indeterminate_arm():
+    # The sweep shares one context: a cached NaN (dead pot) or a poisoned
+    # first draw would adjudicate every later source against that target.
+    import math
+
+    from maverick import self_improvement_runner as runner
+    vals = iter([float("nan"), 0.5, 99])
+    memo = runner._memo_scorer(lambda line, goals: next(vals))
+    assert math.isnan(memo("", ["g"]))       # first draw: dead pot -> NOT pinned
+    assert memo("", ["g"]) == 0.5            # recovers on the next draw
+    assert memo("", ["g"]) == 0.5            # ...and the finite result IS cached
+
+
+def test_memo_paraphraser_caches_only_nonempty():
+    # Paraphrases depend only on the goals; one batch per target per sweep --
+    # but a transient failure must not disable the metamorphic check for good.
+    from maverick import self_improvement_runner as runner
+    outs = iter([[], ["p1"], ["IGNORED"]])
+    memo = runner._memo_paraphraser(lambda goals: next(outs))
+    assert memo(["g"]) == []                 # failure not cached
+    assert memo(["g"]) == ["p1"]             # first success cached
+    assert memo(["g"]) == ["p1"]
 
 
 def test_config_transfer_auto(monkeypatch):

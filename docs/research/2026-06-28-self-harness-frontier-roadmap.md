@@ -201,6 +201,37 @@ drive them; this wave wires them, changing no default behavior:
   the general pool — and a domain-keyed-only corpus now promotes its
   departments' lines even when the model-wide A/B can't build.
 
+## Wave: adversarial review hardening (2026-07-05)
+
+A 10-angle / 11-verifier adversarial review of the transfer + corpus-harvest
+wave confirmed and fixed a cluster of lifecycle-integrity defects:
+
+- **Merits-only tried-memory**: `run_transfer` no longer records pairs whose
+  evaluation was indeterminate (budget-dead arm — `validate_proposal`'s
+  `_INDETERMINATE_REASON` sentinel) or whose gate refusal was environmental
+  (self-improvement off, calibration freeze, evidence floor); judged keys
+  flush per target, targets are deduped, and `forget`/demotion now WRITES the
+  memory so a nightly sweep can't resurrect a governed rollback.
+- **Fail-closed evaluation under budget death**: `_rate` treats a
+  `BudgetExceeded` as invalidating the whole arm (NaN, never a prefix mean
+  compared against a full-corpus memoized baseline with a fabricated Wilson
+  n); `_memo_scorer` never caches an indeterminate arm; the transfer
+  paraphraser is memoized per goals-tuple (one batch per target per sweep).
+- **Gate parity**: transfer honors `holdout_rotations` (same ALL-folds rule as
+  the home cycle) and respects `_MAX_LINES_PER_MODEL` capacity — a transfer
+  canary can no longer evict a target's graduated lines.
+- **Corpus integrity**: stage/merge/resolve serialize under a cross-process
+  lock on the live corpus path; merges append to the RAW file (operator
+  fields survive); harvest candidates are secret-redacted before leaving the
+  world DB; missing timestamps fail the hindsight guard CLOSED; rejections
+  are remembered (`.rejected.json`) and excluded before the candidate cap;
+  `--accept-all --reject N` means "all but N"; out-of-range review indexes
+  are hard errors and the CLI echoes exactly what it resolved.
+- **Honest CLIs**: interactive `transfer`/`corpus harvest` pass
+  `raise_errors=True` (a write failure is no longer indistinguishable from
+  "nothing to do"); the wizard uses a select for the harvest mode and warns
+  when nightly knobs are configured without `auto_run`/a corpus.
+
 ## Principle (unchanged across every wave)
 
 **Off-by-default / byte-identical default**, **determinism proof 8/8**, and **the

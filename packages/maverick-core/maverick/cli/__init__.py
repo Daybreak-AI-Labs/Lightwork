@@ -1738,11 +1738,15 @@ def harness_transfer(source: str, targets: tuple[str, ...], force: bool) -> None
         raise click.ClickException(
             "no [self_harness] eval_corpus configured — transfer validates "
             "against the target's corpus cases, so it needs one.")
+    # Resolve the target list HERE so an empty report can only mean an empty
+    # fleet, never a swallowed runner failure (raise_errors surfaces those).
+    resolved = list(targets) or [m for m in runner.harness_fleet_models()
+                                 if m != source]
+    if not resolved:
+        raise click.ClickException(
+            "no transfer targets: the fleet has no other configured models.")
     report = runner.run_self_harness_transfer(
-        source, targets=(list(targets) or None), force=force)
-    if not report:
-        click.echo("no transfer targets (fleet has no other models?).")
-        return
+        source, targets=resolved, force=force, raise_errors=True)
     for tgt in sorted(report):
         res = report[tgt]
         click.echo(f"{source} -> {tgt}: attempted={len(res['attempted'])} "
@@ -1787,7 +1791,7 @@ def corpus_harvest_cmd(ctx, model: str | None, auto: bool) -> None:
     key, corpus_path = _corpus_key_and_path(model)
     n = runner.run_corpus_harvest(
         open_world(ctx.obj["db"]), mode=("auto" if auto else "propose"),
-        key=key, corpus_path=corpus_path)
+        key=key, corpus_path=corpus_path, raise_errors=True)
     if auto:
         click.echo(f"{n} candidate case(s) merged into the corpus.")
     else:
@@ -1821,9 +1825,21 @@ def corpus_review_cmd(model: str | None, accepts: tuple[int, ...],
             click.echo(f"  {i}. {c['goal'].splitlines()[0][:70]}")
             click.echo(f"     expected: {c['expected']}")
         return
-    a, r = ev.resolve_pending(corpus_path, key, accept=list(accepts),
-                              reject=list(rejects), accept_all=accept_all)
-    click.echo(f"accepted {a} into the corpus, rejected {r}.")
+    try:
+        res = ev.resolve_pending(corpus_path, key, accept=list(accepts),
+                                 reject=list(rejects), accept_all=accept_all)
+    except ValueError as e:
+        raise click.ClickException(str(e)) from e
+    # Echo WHAT was resolved, not just counts -- indexes rebase between
+    # invocations, so a mis-target must be visible immediately.
+    for g in res["accepted_goals"]:
+        click.echo(f"  + accepted: {g.splitlines()[0][:70]}")
+    for g in res["rejected_goals"]:
+        click.echo(f"  - rejected: {g.splitlines()[0][:70]}")
+    dup = (f", {res['duplicates']} already live/unlabeled"
+           if res["duplicates"] else "")
+    click.echo(f"merged {res['merged']} into the corpus{dup}, "
+               f"rejected {res['rejected']} (remembered).")
 
 
 @harness.command("conflicts")

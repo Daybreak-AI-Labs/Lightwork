@@ -1923,12 +1923,28 @@ def pick_advanced() -> dict[str, Any]:
             "    Nightly cross-model transfer? Try each model's proven guidance "
             "on the rest of the fleet (gated, on probation, one-shot per pair).",
             default=False)
-        harvest_mode = _q_text(
-            "    Corpus bootstrapping from run history? 'propose' stages cases "
-            "for your review, 'auto' merges directly (off/propose/auto)",
-            default="off").strip().lower()
+        harvest_mode = _q_select(
+            "    Corpus bootstrapping from run history?",
+            ["off     - don't harvest",
+             "propose - stage mined cases for your review",
+             "auto    - merge mined cases straight into the corpus"],
+            default="off     - don't harvest").split()[0]
         if harvest_mode in ("propose", "auto"):
             advanced["self_harness_corpus_harvest"] = harvest_mode
+        # Both nightly paths ride the dream beat: without auto_run (or, for
+        # harvesting, a corpus) they are configured but never executed --
+        # say so NOW, not silently at 3am.
+        if not advanced.get("self_harness_auto_run") and (
+                advanced.get("self_harness_transfer_auto")
+                or harvest_mode in ("propose", "auto")):
+            console.print(
+                "    [yellow]Note: nightly transfer/harvesting only run when "
+                "auto-run is on -- enable it above (or run them manually via "
+                "`maverick self-harness transfer` / `corpus harvest`).[/yellow]")
+        if harvest_mode in ("propose", "auto") and not corpus:
+            console.print(
+                "    [yellow]Note: corpus bootstrapping needs the eval-corpus "
+                "path above; without one the harvest is a no-op.[/yellow]")
         advanced["self_harness_candidates"] = max(1, _safe_int(_q_text(
             "    Candidate lines per weakness (best-of-N; 1 = single)",
             default="1"), default=1))

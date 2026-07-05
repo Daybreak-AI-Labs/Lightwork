@@ -24,6 +24,7 @@ from __future__ import annotations
 import hashlib
 import json
 import logging
+import threading
 from collections.abc import Callable, Mapping
 from pathlib import Path
 
@@ -149,6 +150,10 @@ def _rate(goals: list[str], success_of: Callable[[str], bool]) -> float:
     indeterminate, return NaN -- not 0.0 -- so the caller's ``math.isfinite`` guard
     (validate_proposal) rejects the run instead of treating an all-error arm as a
     0% pass rate, which would otherwise inflate the measured lift of the other arm.
+    A :class:`BudgetExceeded` makes the WHOLE arm indeterminate, not just the one
+    case: the pot never un-exhausts mid-arm, so a partial prefix mean would be
+    compared against a full-corpus other arm with a fabricated sample size --
+    return NaN immediately and let the finite-check reject (fail closed).
     An empty ``goals`` list is a legitimately empty split -> 0.0 (unchanged)."""
     vals = []
     attempted = 0
@@ -156,6 +161,9 @@ def _rate(goals: list[str], success_of: Callable[[str], bool]) -> float:
         attempted += 1
         try:
             vals.append(1.0 if success_of(g) else 0.0)
+        except BudgetExceeded:  # a dead pot invalidates the whole arm
+            log.debug("eval: budget exhausted mid-arm; arm is indeterminate")
+            return float("nan")
         except Exception:  # one bad case is indeterminate, excluded (not a failure)
             log.debug("eval: scoring case failed", exc_info=True)
     if vals:
@@ -377,8 +385,10 @@ _HINT_CHARS = 80
 
 
 def _htokens(text: str) -> set[str]:
-    import re as _re
-    return set(_re.findall(r"[a-z0-9_]+", (text or "").lower()))
+    # Reuse mining's canonical tokenizer so harvest pairing can never drift
+    # from the token rules the rest of the subsystem indexes with.
+    from .self_harness import _tokens
+    return _tokens(text)
 
 
 def _result_hint(result: str) -> str:
@@ -391,25 +401,41 @@ def _result_hint(result: str) -> str:
     return ""
 
 
+# Several reflexion recorders clip goal_text to its first 500 chars; overlap is
+# also checked against the same-length goal prefix so a long goal's truncated
+# failure record can still pair with its own later success.
+_REFL_TEXT_CLIP = 500
+
+
 def harvest_corpus_candidates(reflexions: list, done_goals: list, *,
                               min_overlap: float = 0.5,
-                              max_candidates: int = 20) -> list[dict]:
+                              max_candidates: int = 20,
+                              known: set[str] | None = None) -> list[dict]:
     """Mine ``{goal, expected}`` corpus candidates from hindsight pairs.
 
     A reflexion (a recorded failure, already unscoped-filtered by the caller)
     pairs with a DONE goal when the goal wording strongly overlaps
-    (token-Jaccard ``>= min_overlap``) and the success came LATER than the
-    failure -- the task demonstrably went from failing to working, so its
-    result is operator-visible ground truth, not a guess. Deterministic and
-    pure: same inputs, same candidates, ordered by goal text; deduped; goals
-    with empty results yield nothing (no hint, no case)."""
+    (token-Jaccard ``>= min_overlap``, also checked against the goal's first
+    500 chars to match recorders that clip ``goal_text``) and the success came
+    LATER than the failure -- the task demonstrably went from failing to
+    working, so its result is operator-visible ground truth, not a guess. A
+    pair missing a timestamp on either side is REJECTED (fail closed): without
+    both, the failed-then-worked ordering cannot be proven. ``known`` goals
+    (already live, pending, or operator-rejected) are excluded BEFORE the
+    ``max_candidates`` cap, so long-known goals can't starve fresh candidates
+    out of the slice. Deterministic and pure: same inputs, same candidates,
+    ordered by goal text; deduped; goals with empty results yield nothing (no
+    hint, no case)."""
+    from .self_harness import _jaccard
+    skip = known or set()
     done = []
     for g in done_goals or []:
         text = f"{getattr(g, 'title', '') or ''}\n{getattr(g, 'description', '') or ''}".strip()
         hint = _result_hint(getattr(g, "result", "") or "")
         ts = getattr(g, "updated_at", None) or getattr(g, "created_at", None) or 0
-        if text and hint:
-            done.append((text, hint, float(ts or 0), _htokens(text)))
+        if text and hint and text not in skip:
+            done.append((text, hint, float(ts or 0), _htokens(text),
+                         _htokens(text[:_REFL_TEXT_CLIP])))
     out: dict[str, str] = {}
     for r in reflexions or []:
         rtext = str((r.get("goal_text") if isinstance(r, dict)
@@ -419,12 +445,10 @@ def harvest_corpus_candidates(reflexions: list, done_goals: list, *,
         rtok = _htokens(rtext)
         if not rtok:
             continue
-        for text, hint, ts, ttok in done:
-            if ts and rts and ts < rts:
-                continue  # the success must come AFTER the failure
-            inter = len(rtok & ttok)
-            union = len(rtok | ttok)
-            if union and inter / union >= min_overlap:
+        for text, hint, ts, ttok, ttok_clip in done:
+            if not (ts and rts) or ts < rts:
+                continue  # need BOTH timestamps, and the success at/after the failure
+            if max(_jaccard(rtok, ttok), _jaccard(rtok, ttok_clip)) >= min_overlap:
                 out.setdefault(text, hint)
     return [{"goal": g, "expected": out[g]}
             for g in sorted(out)][:max(0, int(max_candidates))]
@@ -434,81 +458,165 @@ def pending_corpus_path(corpus_path: str | Path) -> Path:
     return Path(str(corpus_path) + ".pending.json")
 
 
+def rejected_corpus_path(corpus_path: str | Path) -> Path:
+    return Path(str(corpus_path) + ".rejected.json")
+
+
 def load_pending(corpus_path: str | Path) -> dict[str, list[dict]]:
     """The staged-candidates file, same ``{key: [cases]}`` shape as the corpus."""
     return load_eval_corpus(pending_corpus_path(corpus_path))
 
 
-def _write_corpus_file(path: Path, data: dict[str, list[dict]]) -> None:
+def load_rejected(corpus_path: str | Path) -> dict[str, list[str]]:
+    """``{key: [goal, ...]}`` -- goals an operator rejected in review. The
+    durable NO: without it the nightly harvest would re-stage the same
+    candidate every beat until its source rows aged out of the mining windows."""
+    try:
+        data = json.loads(rejected_corpus_path(corpus_path).read_text(encoding="utf-8"))
+        if isinstance(data, dict):
+            return {str(k): [str(g) for g in v]
+                    for k, v in data.items() if isinstance(v, list)}
+    except (FileNotFoundError, ValueError, OSError):
+        pass
+    return {}
+
+
+# Bounds the reject memory per key -- comfortably above the harvest's own
+# mining windows, so a verdict outlives every re-minable source row.
+_REJECTED_CAP = 500
+
+# The corpus, pending, and rejected files form one logical store mutated from
+# more than one process (the cron dream beat vs. an interactive review), so
+# every read-modify-write below serializes on the LIVE corpus path -- the
+# pending/rejected sidecars derive from it, one lock covers the trio. Same
+# in-process + flock pattern as the addenda store's mutators.
+_corpus_lock = threading.Lock()
+
+
+def _write_corpus_file(path: Path, data: dict) -> None:
     from .file_lock import atomic_write_text
     atomic_write_text(Path(path), json.dumps(data, indent=2, sort_keys=True),
                       mode=0o600)
 
 
-def _add_fresh(dest_path: Path, dest_data: dict, key: str,
+def _load_raw(path: str | Path) -> dict:
+    """The file's raw JSON dict (tolerant: ``{}`` on any error). Writers merge
+    into THIS, not the normalized :func:`load_eval_corpus` view -- rewriting the
+    normalized view would silently strip operator-authored per-case fields and
+    unknown keys from the live ground-truth file."""
+    try:
+        data = json.loads(Path(path).read_text(encoding="utf-8"))
+        if isinstance(data, dict):
+            return data
+    except (FileNotFoundError, ValueError, OSError):
+        pass
+    return {}
+
+
+def _add_fresh(dest_path: Path, dest_raw: dict, key: str,
                candidates: list[dict], known: set[str]) -> int:
     """The one owner of candidate validity + dedup: append candidates whose
-    goal is non-empty, labeled, and not in ``known`` to ``dest_data[key]`` and
-    write the file. Returns how many were added (0 writes nothing)."""
+    goal is non-empty, labeled, and not in ``known`` to the RAW ``dest_raw[key]``
+    rows and write the file. Returns how many were added (0 writes nothing)."""
     fresh = [c for c in candidates or []
              if c.get("goal") and c.get("expected") and c["goal"] not in known]
     if not fresh:
         return 0
-    dest_data.setdefault(str(key), []).extend(
-        {"goal": c["goal"], "expected": c["expected"]} for c in fresh)
-    _write_corpus_file(dest_path, dest_data)
+    rows = dest_raw.get(str(key))
+    if not isinstance(rows, list):
+        rows = dest_raw[str(key)] = []
+    rows.extend({"goal": c["goal"], "expected": c["expected"]} for c in fresh)
+    _write_corpus_file(dest_path, dest_raw)
     return len(fresh)
+
+
+def _stage_locked(corpus_path: str | Path, key: str,
+                  candidates: list[dict]) -> int:
+    known = {c["goal"] for c in load_eval_corpus(corpus_path).get(str(key), [])}
+    known |= {c["goal"] for c in load_pending(corpus_path).get(str(key), [])}
+    known |= set(load_rejected(corpus_path).get(str(key), []))
+    return _add_fresh(pending_corpus_path(corpus_path),
+                      _load_raw(pending_corpus_path(corpus_path)),
+                      key, candidates, known)
+
+
+def _merge_locked(corpus_path: str | Path, key: str,
+                  candidates: list[dict]) -> int:
+    known = {c["goal"] for c in load_eval_corpus(corpus_path).get(str(key), [])}
+    return _add_fresh(Path(corpus_path), _load_raw(corpus_path),
+                      key, candidates, known)
 
 
 def stage_candidates(corpus_path: str | Path, key: str,
                      candidates: list[dict]) -> int:
     """PROPOSE mode: add candidates for ``key`` to the pending file, skipping
-    goals already live in the corpus or already pending. Returns how many were
-    newly staged."""
-    pending = load_pending(corpus_path)
-    known = {c["goal"] for c in load_eval_corpus(corpus_path).get(str(key), [])}
-    known |= {c["goal"] for c in pending.get(str(key), [])}
-    return _add_fresh(pending_corpus_path(corpus_path), pending, key,
-                      candidates, known)
+    goals already live in the corpus, already pending, or previously REJECTED
+    by an operator (a review verdict is durable). Returns how many were newly
+    staged."""
+    from .file_lock import cross_process_lock
+    with _corpus_lock, cross_process_lock(Path(corpus_path)):
+        return _stage_locked(corpus_path, key, candidates)
 
 
 def merge_candidates(corpus_path: str | Path, key: str,
                      candidates: list[dict]) -> int:
     """AUTO mode (or an accepted review): merge candidates for ``key`` straight
     into the live corpus, deduped by goal. Returns how many were added."""
-    corpus = load_eval_corpus(corpus_path)
-    known = {c["goal"] for c in corpus.get(str(key), [])}
-    return _add_fresh(Path(corpus_path), corpus, key, candidates, known)
+    from .file_lock import cross_process_lock
+    with _corpus_lock, cross_process_lock(Path(corpus_path)):
+        return _merge_locked(corpus_path, key, candidates)
 
 
 def resolve_pending(corpus_path: str | Path, key: str, *,
                     accept: list[int] | None = None,
                     reject: list[int] | None = None,
-                    accept_all: bool = False) -> tuple[int, int]:
+                    accept_all: bool = False) -> dict:
     """Operator review verdicts over the pending file (1-based indexes as the
     CLI lists them): accepted candidates merge into the live corpus, rejected
-    ones are dropped, everything else stays pending. Returns
-    ``(accepted, rejected)``."""
-    pending = load_pending(corpus_path)
-    rows = pending.get(str(key), [])
-    if not rows:
-        return (0, 0)
-    if accept_all:
-        acc_idx = set(range(1, len(rows) + 1))
-        rej_idx: set[int] = set()
-    else:
-        acc_idx = {int(i) for i in (accept or [])}
-        rej_idx = {int(i) for i in (reject or [])} - acc_idx
-    accepted = [c for i, c in enumerate(rows, 1) if i in acc_idx]
-    kept = [c for i, c in enumerate(rows, 1)
-            if i not in acc_idx and i not in rej_idx]
-    added = merge_candidates(corpus_path, key, accepted) if accepted else 0
-    if kept:
-        pending[str(key)] = kept
-    else:
-        pending.pop(str(key), None)
-    _write_corpus_file(pending_corpus_path(corpus_path), pending)
-    return (added, len(rows) - len(kept) - len(accepted))
+    ones are dropped AND remembered (the harvest never re-stages them),
+    everything else stays pending. ``accept_all`` accepts the remainder --
+    explicit ``reject`` indexes still win, so ``--accept-all --reject 7`` means
+    "all but 7". An index outside the current listing raises ``ValueError``
+    (a silent no-op would be indistinguishable from a typo). Returns
+    ``{"merged", "duplicates", "rejected", "accepted_goals",
+    "rejected_goals"}`` -- ``duplicates`` counts accepted rows that were
+    already live or unlabeled (resolved, but not re-added)."""
+    from .file_lock import cross_process_lock
+    with _corpus_lock, cross_process_lock(Path(corpus_path)):
+        rows = load_pending(corpus_path).get(str(key), [])
+        if accept_all:
+            rej_idx = {int(i) for i in (reject or [])}
+            acc_idx = set(range(1, len(rows) + 1)) - rej_idx
+        else:
+            acc_idx = {int(i) for i in (accept or [])}
+            rej_idx = {int(i) for i in (reject or [])} - acc_idx
+        bad = (acc_idx | rej_idx) - set(range(1, len(rows) + 1))
+        if bad:
+            raise ValueError(
+                f"pending index out of range: {sorted(bad)} "
+                f"({len(rows)} candidate(s) pending)")
+        accepted = [c for i, c in enumerate(rows, 1) if i in acc_idx]
+        rejected_rows = [c for i, c in enumerate(rows, 1) if i in rej_idx]
+        kept = [c for i, c in enumerate(rows, 1)
+                if i not in acc_idx and i not in rej_idx]
+        added = _merge_locked(corpus_path, key, accepted) if accepted else 0
+        pending_raw = _load_raw(pending_corpus_path(corpus_path))
+        if kept:
+            pending_raw[str(key)] = kept
+        else:
+            pending_raw.pop(str(key), None)
+        _write_corpus_file(pending_corpus_path(corpus_path), pending_raw)
+        if rejected_rows:
+            rej = load_rejected(corpus_path)
+            seen = rej.get(str(key), [])
+            seen.extend(c["goal"] for c in rejected_rows
+                        if c["goal"] not in set(seen))
+            rej[str(key)] = seen[-_REJECTED_CAP:]
+            _write_corpus_file(rejected_corpus_path(corpus_path), rej)
+        return {"merged": added, "duplicates": len(accepted) - added,
+                "rejected": len(rejected_rows),
+                "accepted_goals": [c["goal"] for c in accepted],
+                "rejected_goals": [c["goal"] for c in rejected_rows]}
 
 
 __all__ = [
@@ -516,4 +624,5 @@ __all__ = [
     "corpus_ab_scorers", "llm_judge", "llm_runner", "llm_paraphraser",
     "harvest_corpus_candidates", "stage_candidates", "merge_candidates",
     "resolve_pending", "load_pending", "pending_corpus_path",
+    "load_rejected", "rejected_corpus_path",
 ]

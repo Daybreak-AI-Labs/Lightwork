@@ -66,17 +66,18 @@ def finance_lint_sod_cmd() -> None:
     raise click.ClickException(f"{len(conflicts)} SoD conflict(s)")
 
 
-def _run_self_harness_nightly(world=None) -> None:
+def _run_self_harness_nightly(world) -> None:
     """Operate the self-harness on the dream beat (opt-in, ``[self_harness]
     auto_run``): the governed mine -> propose -> validate -> gate cycle for
     every configured role model, so the loop runs without a second cron entry.
     Each model's pass auto-builds its live A/B from ``[self_harness]
     eval_corpus`` when configured (else it is a dry inspection + stale-line
-    retirement + canary review). With ``corpus_harvest`` on and a ``world``,
-    hindsight pairs feed the corpus too. Never breaks dreaming."""
+    retirement + canary review). With ``corpus_harvest`` on, hindsight pairs
+    feed the corpus too. Never breaks dreaming."""
     try:
         from .. import self_harness
-        if not (self_harness.enabled() and self_harness.settings().get("auto_run")):
+        st = self_harness.settings()
+        if not (self_harness.enabled() and st.get("auto_run")):
             return
         from .. import self_improvement_runner as si_runner
         for mid, (rep, retired) in sorted(si_runner.run_self_harness_all_models().items()):
@@ -86,7 +87,6 @@ def _run_self_harness_nightly(world=None) -> None:
                 f"retired={retired} relapsed={len(rep.relapsed)}")
         # Cross-model transfer on the same beat (opt-in, [self_harness]
         # transfer_auto): the tried-memory makes it near-free once caught up.
-        st = self_harness.settings()
         if st.get("transfer_auto"):
             sweep = si_runner.run_self_harness_transfer_sweep()
             for src in sorted(sweep):
@@ -97,16 +97,15 @@ def _run_self_harness_nightly(world=None) -> None:
                             f"[self-harness transfer] {src} -> {tgt}: "
                             f"attempted={len(res['attempted'])} "
                             f"promoted={len(res['promoted'])}")
-        # Corpus bootstrapping on the same beat (opt-in, [self_harness]
-        # corpus_harvest): hindsight pairs -> staged ("propose") or merged
-        # ("auto") eval-corpus cases. Policy lives in run_corpus_harvest.
-        mode = st.get("corpus_harvest", "off")
-        if mode in ("propose", "auto"):
-            n = si_runner.run_corpus_harvest(world, mode=mode)
-            if n:
-                verb = ("merged into the corpus" if mode == "auto"
-                        else "staged for review")
-                click.echo(f"[self-harness corpus] {n} candidate case(s) {verb}")
+        # Corpus bootstrapping on the same beat: run_corpus_harvest owns the
+        # whole policy (mode gate, corpus default, limits); ``mode`` is read
+        # here only to word the echo.
+        n = si_runner.run_corpus_harvest(world)
+        if n:
+            verb = ("merged into the corpus"
+                    if st.get("corpus_harvest") == "auto"
+                    else "staged for review")
+            click.echo(f"[self-harness corpus] {n} candidate case(s) {verb}")
     except Exception:  # pragma: no cover -- the harness must never break dreaming
         pass
 

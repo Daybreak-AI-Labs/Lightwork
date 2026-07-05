@@ -501,6 +501,22 @@ def forget_addendum(model_id: str, *, line: str | None = None,
             _write_line_meta(meta, p)
         except Exception:  # pragma: no cover -- sidecar is best-effort
             log.debug("self_harness: line-meta prune failed", exc_info=True)
+    # A governed removal must be durable against auto-transfer: record the
+    # removed lines in the transfer tried-memory so a nightly sweep can't
+    # resurrect a line this model just rolled back (operator forget, canary
+    # demotion, efficacy retirement) from a fleet peer that still carries it.
+    # Outside the store lock -- the recorder takes the same lock.
+    try:
+        gone: set[str] = set()
+        for k in touched:
+            kept_now = set(_bullets(after.get(k, "")))
+            gone |= {ln for ln in _bullets(before[k]) if ln not in kept_now}
+        if gone:
+            _record_transfer_tried(
+                [_line_id(str(model_id), ln) for ln in sorted(gone)], path=p)
+    except Exception:  # pragma: no cover -- the memory is best-effort
+        log.debug("self_harness: transfer-tried record on forget failed",
+                  exc_info=True)
     try:
         from .audit import EventKind, record
         record(EventKind.LEARNING_UPDATE, agent="self_harness", model_id=model_id,
@@ -1188,6 +1204,13 @@ def _score_parts(v: object) -> tuple:
     return (v, None, None, None)
 
 
+# The rejection reason for an evaluation that never actually judged the line
+# (budget-dead arm, broken scorer). A sentinel constant so callers that must
+# distinguish "judged on the merits" from "indeterminate" (the transfer
+# tried-memory) don't string-match prose.
+_INDETERMINATE_REASON = "scorer returned a non-finite or out-of-range value"
+
+
 def validate_proposal(
     proposal: HarnessProposal, *, held_in: list[str], held_out: list[str],
     score_with: ScoreFn, score_without: ScoreFn,
@@ -1231,8 +1254,7 @@ def validate_proposal(
     scores = (in_with, in_without, out_with, out_without)
     if not all(isinstance(s, (int, float)) and math.isfinite(s) and 0.0 <= s <= 1.0
                for s in scores):
-        return ValidationResult(False, 0.0, 0.0,
-                                "scorer returned a non-finite or out-of-range value",
+        return ValidationResult(False, 0.0, 0.0, _INDETERMINATE_REASON,
                                 baseline_score=0.0, candidate_score=0.0, samples=n)
     in_delta, out_delta = in_with - in_without, out_with - out_without
     # The gate sees the unseen split as the honest baseline/candidate evidence.
@@ -1543,6 +1565,20 @@ def _recent_counts(rec: Mapping) -> tuple[int, int]:
     return int(rec.get("recall_success") or 0), int(rec.get("recall_failure") or 0)
 
 
+def _is_relapsing(rec: Mapping, *, failure_share: float, min_outcomes: int) -> bool:
+    """The recent-window relapse predicate, shared by :func:`review_relapses`
+    and :func:`transferable_lines` so the two can't drift. ``failure_share <= 0``
+    disables it; a record whose window holds fewer than ``min_outcomes``
+    outcomes -- including legacy records with no window at all -- is never
+    relapsing (lifetime counters are not a recency signal)."""
+    if not failure_share or failure_share <= 0:
+        return False
+    window = rec.get("recent_outcomes")
+    if not isinstance(window, list) or len(window) < max(1, int(min_outcomes)):
+        return False
+    return sum(1 for o in window if not o) / len(window) >= failure_share
+
+
 def note_outcome(model_id: str | None, success: bool, *, line: str | None = None,
                  domain: str | None = None,
                  tools: list[str] | tuple[str, ...] | None = None,
@@ -1756,12 +1792,11 @@ def review_relapses(model_id: str, *, failure_share: float,
             rec = meta.get(_line_id(k, ln)) or {}
             if rec.get("canary"):
                 continue  # already on probation, already watched
-            window = rec.get("recent_outcomes")
-            if not isinstance(window, list) or len(window) < max(1, int(min_outcomes)):
+            if not _is_relapsing(rec, failure_share=failure_share,
+                                 min_outcomes=min_outcomes):
                 continue
+            window = rec.get("recent_outcomes") or []
             fails = sum(1 for o in window if not o)
-            if fails / len(window) < failure_share:
-                continue
             if mark_canary(model_id, ln, canary=True, path=path):
                 relapsed.append(ln)
                 try:
@@ -1796,7 +1831,7 @@ def _transfer_tried_path(addenda_path: Path | None = None) -> Path:
     return p.with_suffix(".transfer.json")
 
 
-def load_transfer_tried(path: Path | None = None) -> dict[str, float]:
+def _load_transfer_tried(path: Path | None = None) -> dict[str, float]:
     """The ``{line_id: ts}`` transfer attempt memory for the store at ``path``
     (empty on any error). Keys are :func:`_line_id` of (target, line) -- the
     same content-addressed identity the provenance sidecar uses."""
@@ -1815,7 +1850,7 @@ def _record_transfer_tried(keys: list[str], *, path: Path | None = None) -> None
     p = _transfer_tried_path(path)
     ts = time.time()
     with _lock, cross_process_lock(p):
-        tried = load_transfer_tried(path)
+        tried = _load_transfer_tried(path)
         for k in keys:
             tried[k] = ts
         atomic_write_text(p, json.dumps(tried, indent=2, sort_keys=True), mode=0o600)
@@ -1825,19 +1860,24 @@ def transferable_lines(source_model: str, path: Path | None = None, *,
                        store: dict | None = None,
                        meta: dict | None = None) -> list[str]:
     """The ``source_model`` lines worth trying elsewhere: MODEL-WIDE and
-    GRADUATED -- not on canary probation, and not currently relapsing (recent
-    failure share over 1/2). Scoped (domain/role/tool) lines stay home: they
-    encode a context the target run may not share. ``store``/``meta`` accept
-    pre-loaded copies so a caller that already holds them skips the re-read."""
+    GRADUATED -- not on canary probation, and not currently relapsing by the
+    SAME configured predicate :func:`review_relapses` applies
+    (``relapse_failure_share``/``relapse_min_outcomes``; a 1/2 recent failure
+    share is the filter's own default when the relapse knob is off). Scoped
+    (domain/role/tool) lines stay home: they encode a context the target run
+    may not share. ``store``/``meta`` accept pre-loaded copies so a caller that
+    already holds them skips the re-read."""
     store = store if store is not None else load_addenda(path)
     meta = meta if meta is not None else load_line_meta(path)
+    st = settings()
+    share = float(st.get("relapse_failure_share") or 0.0) or 0.5
+    min_out = int(st.get("relapse_min_outcomes") or 5)
     out = []
     for ln in _bullets(store.get(str(source_model), "")):
         rec = meta.get(_line_id(str(source_model), ln)) or {}
         if rec.get("canary"):
             continue
-        s, f = _recent_counts(rec)
-        if (s + f) and f / (s + f) > 0.5:
+        if _is_relapsing(rec, failure_share=share, min_outcomes=min_out):
             continue
         out.append(ln)
     return out
@@ -1847,20 +1887,30 @@ def run_transfer(source_model: str, targets: list[str], *,
                  eval_for_target: Callable[[str], tuple | None],
                  controller=None, path: Path | None = None,
                  force: bool = False,
-                 validate_kwargs: dict | None = None) -> dict:
+                 validate_kwargs: dict | None = None,
+                 holdout_rotations: int = 1) -> dict:
     """Try ``source_model``'s graduated model-wide lines on each target model
     through the FULL validation + governed gate, landing survivors as CANARIES.
 
     ``eval_for_target(model) -> (held_in, held_out, score_with, score_without)
     | None`` is the injected evaluation seam (a real A/B needs a real model +
-    corpus); a target with no quad is skipped with a reason. Every attempted
-    (target, line) pair is recorded in the tried-memory (a sidecar of the
-    store at ``path``) -- accepted OR rejected -- so a scheduled sweep never
-    re-spends on a judged pair
-    (``force`` ignores the memory and re-records). A line already present in
-    the target's block (normalized) is skipped for free. Returns
-    ``{target: {"attempted": [...], "promoted": [...], "skipped": [...]}}``.
-    Never raises -- a transfer trial must not perturb anything."""
+    corpus); a target with no quad is skipped with a reason. A (target, line)
+    pair is recorded in the tried-memory (a sidecar of the store at ``path``)
+    only when it was judged ON THE MERITS -- promoted, or rejected by the
+    validation floors. An indeterminate evaluation (budget-dead arm, broken
+    scorer) and a gate refusal (loop disabled, calibration freeze, evidence
+    floor) are environmental, not verdicts: those pairs stay out of the memory
+    so a healthy sweep retries them. Judged keys are flushed per target, so a
+    mid-sweep crash loses at most the in-flight pair. ``force`` ignores the
+    memory and re-records. With ``holdout_rotations > 1`` a line must clear
+    :func:`_validate_rotated`'s ALL-folds rule -- the same cross-validation the
+    home-grown cycle applies, so transfer is never the weaker gate. A line
+    already present in the target's block (normalized) is skipped for free, and
+    a target block at :data:`_MAX_LINES_PER_MODEL` capacity is skipped before
+    any evaluation spend -- a transfer canary must never evict a proven line.
+    Returns ``{target: {"attempted": [...], "promoted": [...],
+    "skipped": [...]}}``. Never raises -- a transfer trial must not perturb
+    anything."""
     report: dict[str, dict] = {}
     try:
         if not enabled():
@@ -1868,15 +1918,19 @@ def run_transfer(source_model: str, targets: list[str], *,
         store = load_addenda(path)
         lines = transferable_lines(source_model, path, store=store,
                                    meta=load_line_meta(path))
-        tried = {} if force else load_transfer_tried(path)
-        attempted_keys: list[str] = []
-        for target in targets or []:
-            tgt = str(target)
+        tried = {} if (force or not lines) else _load_transfer_tried(path)
+        # Dedup while preserving order: a repeated --to target must not
+        # re-spend evaluation or double-audit the gate.
+        for tgt in dict.fromkeys(str(t) for t in targets or []):
             if tgt == str(source_model):
                 continue
             res = {"attempted": [], "promoted": [], "skipped": []}
             report[tgt] = res
-            existing = {_norm_line(x) for x in _bullets(store.get(tgt, ""))}
+            if not lines:
+                continue
+            block = _bullets(store.get(tgt, ""))
+            existing = {_norm_line(x) for x in block}
+            free = _MAX_LINES_PER_MODEL - len(block)
             todo = []
             for ln in lines:
                 if _norm_line(ln) in existing:
@@ -1886,6 +1940,12 @@ def run_transfer(source_model: str, targets: list[str], *,
                 else:
                     todo.append(ln)
             if not todo:
+                continue
+            if free <= 0:
+                # The composition cap would drop the target's OLDEST bullets to
+                # make room and the sidecar reconcile would erase their history;
+                # skip before spending a single evaluation dollar.
+                res["skipped"].append("target addendum at capacity")
                 continue
             try:
                 quad = eval_for_target(tgt)
@@ -1897,27 +1957,44 @@ def run_transfer(source_model: str, targets: list[str], *,
                 res["skipped"].append("no evaluator/corpus for target")
                 continue
             hi, ho, sw, swo = quad
-            for ln in todo:
-                proposal = HarnessProposal(
-                    model_id=tgt, signature=f"transfer from {source_model}",
-                    addendum_line=ln,
-                    rationale=f"proven on {source_model}; transfer trial")
-                res["attempted"].append(ln)
-                attempted_keys.append(_line_id(tgt, ln))
-                vr = validate_proposal(
-                    proposal, held_in=list(hi), held_out=list(ho),
-                    score_with=sw, score_without=swo, **(validate_kwargs or {}))
-                if not vr.accepted:
-                    res["skipped"].append(f"rejected ({vr.reason}): {ln}")
-                    continue
-                ok, why = _gate_and_apply(proposal, vr, controller=controller,
-                                          path=path, canary=True)
-                if ok:
-                    res["promoted"].append(ln)
-                else:
-                    res["skipped"].append(f"gate refused ({why}): {ln}")
-        if attempted_keys:
-            _record_transfer_tried(attempted_keys, path=path)
+            judged_keys: list[str] = []
+            try:
+                for ln in todo:
+                    if free <= 0:
+                        res["skipped"].append(f"target addendum at capacity: {ln}")
+                        continue
+                    proposal = HarnessProposal(
+                        model_id=tgt, signature=f"transfer from {source_model}",
+                        addendum_line=ln,
+                        rationale=f"proven on {source_model}; transfer trial")
+                    res["attempted"].append(ln)
+                    if holdout_rotations and int(holdout_rotations) > 1 and ho:
+                        vr = _validate_rotated(
+                            proposal, pool=list(hi) + list(ho),
+                            rotations=int(holdout_rotations),
+                            score_with=sw, score_without=swo,
+                            validate_kwargs=dict(validate_kwargs or {}))
+                    else:
+                        vr = validate_proposal(
+                            proposal, held_in=list(hi), held_out=list(ho),
+                            score_with=sw, score_without=swo,
+                            **(validate_kwargs or {}))
+                    if not vr.accepted:
+                        res["skipped"].append(f"rejected ({vr.reason}): {ln}")
+                        if _INDETERMINATE_REASON not in vr.reason:
+                            judged_keys.append(_line_id(tgt, ln))
+                        continue
+                    ok, why = _gate_and_apply(proposal, vr, controller=controller,
+                                              path=path, canary=True)
+                    if ok:
+                        res["promoted"].append(ln)
+                        judged_keys.append(_line_id(tgt, ln))
+                        free -= 1
+                    else:
+                        res["skipped"].append(f"gate refused ({why}): {ln}")
+            finally:
+                if judged_keys:
+                    _record_transfer_tried(judged_keys, path=path)
     except Exception:  # pragma: no cover -- a transfer trial never perturbs a run
         log.warning("self_harness: transfer failed", exc_info=True)
     return report
@@ -2237,7 +2314,7 @@ __all__ = [
     "load_line_meta", "line_provenance", "note_recall",
     "note_outcome", "line_efficacy", "review_efficacy",
     "mark_canary", "list_canaries", "review_canaries", "review_relapses",
-    "transferable_lines", "run_transfer", "load_transfer_tried",
+    "transferable_lines", "run_transfer",
     "find_conflicts", "detect_store_conflicts", "llm_conflict_classifier",
     "FailureSignature", "mine_failures", "count_eligible", "semantic_similarity",
     "HarnessProposal", "ProposeFn", "propose_addendum", "llm_proposer",

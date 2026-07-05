@@ -331,7 +331,7 @@ def test_transfer_cli_requires_corpus_then_reports(_home, monkeypatch):
         "self_harness": {"enable": True, "eval_corpus": "/etc/maverick/c.json"}})
     monkeypatch.setattr(
         runner, "run_self_harness_transfer",
-        lambda src, targets=None, force=False: {
+        lambda src, targets=None, force=False, **kw: {
             "m2": {"attempted": ["ln"], "promoted": ["ln"], "skipped": []}})
     r = CliRunner().invoke(main, ["self-harness", "transfer", "--from", "m1"])
     assert r.exit_code == 0, r.output
@@ -360,8 +360,14 @@ def test_corpus_review_lists_and_resolves(_home, monkeypatch, tmp_path):
     assert "1. g1" in r.output and "expected: e1" in r.output
     r = CliRunner().invoke(main, ["self-harness", "corpus", "review",
                                   "--model", "m1", "--accept", "1"])
-    assert r.exit_code == 0 and "accepted 1" in r.output
+    assert r.exit_code == 0, r.output
+    assert "merged 1 into the corpus" in r.output
+    assert "+ accepted: g1" in r.output          # WHAT was resolved is echoed
     assert any(c["goal"] == "g1" for c in ev.load_eval_corpus(cpath)["m1"])
+    # an out-of-range index is a hard error, not a silent no-op
+    r = CliRunner().invoke(main, ["self-harness", "corpus", "review",
+                                  "--model", "m1", "--accept", "9"])
+    assert r.exit_code != 0 and "out of range" in r.output
     r = CliRunner().invoke(main, ["self-harness", "corpus", "review",
                                   "--model", "m1"])
     assert "no pending corpus candidates" in r.output
