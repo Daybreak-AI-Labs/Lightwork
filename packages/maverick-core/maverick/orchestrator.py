@@ -380,10 +380,15 @@ def _record_harness_outcome(domain: str | None, *, success: bool,
         if blackboard is not None:
             from . import reflexion
             tools = reflexion.tools_from_blackboard(blackboard)
+        orch = model_for_role("orchestrator")
         models = {str(m) for m in (getattr(ctx, "harness_models", None) or ())}
-        models.add(model_for_role("orchestrator"))
+        models.add(orch)
         for m in sorted(models):
-            self_harness.note_outcome(m, bool(success), domain=domain, tools=tools)
+            # Role scope is only knowable for the orchestrator model here (a
+            # worker model's role varies per agent); its role-scoped lines get
+            # outcome credit, workers credit their model/domain/tool scopes.
+            self_harness.note_outcome(m, bool(success), domain=domain, tools=tools,
+                                      role=("orchestrator" if m == orch else None))
     except Exception:  # pragma: no cover -- stats never block a run
         pass
 
@@ -473,6 +478,10 @@ def _maybe_record_reflexion(
             user_id=user_id,
             domain=domain,
             model_id=model_id,
+            # Goal-level failures land on the run's primary reasoner; per-role
+            # mining scopes the resulting guidance so an orchestrator lesson
+            # doesn't tax worker prompts of the same model.
+            role="orchestrator",
         )
 
 

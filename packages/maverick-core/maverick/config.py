@@ -677,7 +677,7 @@ def get_self_harness() -> dict:
 
     # Mining bucket dimensions: keep only allowlisted reflexion dims
     # (mirrors self_harness._BUCKET_DIMS) and de-dupe, preserving order.
-    _allowed_dims = ("domain", "tool")
+    _allowed_dims = ("domain", "tool", "role")
     raw_dims = cfg.get("mine_bucket_by", [])
     if isinstance(raw_dims, str):
         raw_dims = [raw_dims]

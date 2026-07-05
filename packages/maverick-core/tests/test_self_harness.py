@@ -2317,6 +2317,82 @@ def test_context_evaluator_serves_and_caches_domain_quads(monkeypatch, tmp_path)
     assert built["n"] == 0
 
 
+# ---------- per-role component profiles: bucket_by=("role",) + scoped recall ----------
+
+def _refl_r(model, fclass, goal, role):
+    return {"model_id": model, "failure_class": fclass, "goal_text": goal,
+            "failure_msg": "x", "channel": None, "user_id": None, "role": role}
+
+
+def test_mine_bucket_by_role_splits_signatures():
+    rs = ([_refl_r("M", "timeout", "process the report", "orchestrator")
+           for _ in range(3)]
+          + [_refl_r("M", "timeout", "process the report", "coder")
+             for _ in range(3)])
+    flat = sh.mine_failures(rs, model_id="M", min_support=3)
+    assert len(flat) == 1 and flat[0].support == 6 and flat[0].context == ""
+    scoped = sh.mine_failures(rs, model_id="M", min_support=3, bucket_by=("role",))
+    assert {s.context for s in scoped} == {"role=orchestrator", "role=coder"}
+    assert all(s.support == 3 for s in scoped)
+
+
+def test_recall_addendum_scopes_to_role(monkeypatch, store):
+    # A role-scoped line rides only that role's prompts of the model.
+    ctrl = _enable(monkeypatch)
+    rs = [_refl_r("M", "timeout", "process the report", "orchestrator")
+          for _ in range(3)]
+    rep = sh.run_self_harness(
+        rs, model_id="M", controller=ctrl, min_support=3, path=store,
+        held_in=["a", "b"], held_out=["c", "d", "e"],
+        score_with=lambda a, c: 0.9, score_without=lambda a, c: 0.4,
+        bucket_by=("role",))
+    assert rep.mined == 1 and rep.promoted == 1
+    assert sh.recall_addendum("M", store) == ""                    # not model-wide
+    assert sh.recall_addendum("M", store, role="coder") == ""      # other role: no
+    assert "role=orchestrator" in sh.recall_addendum("M", store, role="orchestrator")
+
+
+def test_note_outcome_credits_role_scope(monkeypatch, store):
+    monkeypatch.setenv("MAVERICK_SELF_HARNESS", "1")
+    key = sh._scoped_key("M", "role=orchestrator")
+    sh._write_addenda(
+        {key: "Operating guidance learned for this model:\n- plan tighter"}, store)
+    sh._write_line_meta({sh._line_id(key, "plan tighter"): {
+        "model_id": "M", "text": "plan tighter"}}, store)
+    sh.note_outcome("M", True, role="orchestrator", path=store)
+    sh.note_outcome("M", True, role="coder", path=store)     # other role: no credit
+    sh.note_outcome("M", True, path=store)                   # role-less: no credit
+    eff = {r["text"]: r for r in sh.line_efficacy("M", store)}
+    assert eff["plan tighter"]["success"] == 1
+
+
+def test_scope_contexts_order_is_deterministic():
+    assert sh._scope_contexts("fin", ["b", "a"], "coder") == [
+        "domain=fin", "role=coder", "tool=a", "tool=b"]
+    assert sh._scope_contexts() == []
+
+
+def test_config_bucket_role_allowlisted(monkeypatch):
+    from maverick import config
+    monkeypatch.setattr(config, "load_config", lambda *a, **k: {
+        "self_harness": {"mine_bucket_by": ["role", "goal_text"]}})
+    assert config.get_self_harness()["mine_bucket_by"] == ("role",)
+
+
+def test_reflexion_records_role(tmp_path):
+    from maverick import reflexion
+    p = tmp_path / "r.ndjson"
+    reflexion.record(goal_text="g", failure_class="timeout", failure_msg="m",
+                     reflection="r", role="coder", model_id="M", path=p)
+    got = reflexion.list_recent(path=p)
+    assert got[0].role == "coder" and got[0].to_dict()["role"] == "coder"
+    # older lines without the key load as None (backward compatible)
+    with open(p, "a", encoding="utf-8") as f:
+        f.write('{"ts": 1, "goal_text": "old", "failure_class": "x", '
+                '"failure_msg": "", "reflection": ""}\n')
+    assert reflexion.list_recent(path=p)[-1].role is None
+
+
 # ---------- recency: recent-outcomes window + relapse re-probation ----------
 
 def test_note_outcome_builds_and_caps_recent_window(monkeypatch, store):

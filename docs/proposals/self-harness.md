@@ -147,12 +147,17 @@ safety model as skills and insights.
   Advisory only — a false positive must never silently drop real guidance.
 - **Scoped recall (per-domain AND per-tool):** a line mined scoped to a
   department or a tool (`mine_bucket_by=("domain","tool")`) is stored under a
-  composite key (`"<model>\x00domain=<d>"` or `"<model>\x00tool=<t>"`,
+  composite key (`"<model>\x00domain=<d>"`, `"<model>\x00role=<r>"`, or
+  `"<model>\x00tool=<t>"`,
   NUL-separated so it can't collide with a model id) and recalled **only for
-  matching runs** via `recall_addendum(model_id, domain=…, tools=…)` — wired into
-  `Agent._with_harness_addendum` from the run's `self.domain` and its available
-  tools. The "tool" a failure belongs to is the tool in play at failure (the last
-  of the reflexion's `tools_used`); tool scopes are sorted so the recalled block
+  matching runs** via `recall_addendum(model_id, domain=…, tools=…, role=…)` —
+  wired into
+  `Agent._with_harness_addendum` from the run's `self.domain`, its available
+  tools, and the agent's `self.role`. The "tool" a failure belongs to is the tool
+  in play at failure (the last
+  of the reflexion's `tools_used`); the "role" is the agent role stamped on the
+  reflexion at capture — so an orchestrator lesson stops taxing worker prompts
+  of the same model. Tool scopes are sorted so the recalled block
   is byte-identical regardless of registry order. Model-wide lines stay under the
   bare model id, so the default store is **byte-identical** and the determinism
   proof is unaffected.
