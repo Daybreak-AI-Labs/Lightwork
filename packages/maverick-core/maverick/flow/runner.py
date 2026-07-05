@@ -77,6 +77,19 @@ def _num(x: Any) -> float:
         return 0.0
 
 
+def _resolve_secret(name: Any) -> str:
+    """Resolve a named secret from the governed provider (file vault / env) at
+    render time -- so a connector credential can be `{{secret('STRIPE_KEY')}}` in
+    an action param WITHOUT the raw value living in the flow definition or the
+    persisted run data (it only ever materializes in the transient rendered call).
+    Missing -> '' (never raises, never the literal key)."""
+    try:
+        from ..secret_provider import get_secret
+        return get_secret(str(name)) or ""
+    except Exception:  # pragma: no cover -- a secret lookup must never break a render
+        return ""
+
+
 # Safe transform functions usable inside {{ }} -- no eval, pure string/collection/
 # arithmetic helpers. Each takes the evaluated arg list.
 _FUNCS: dict[str, Callable[[list], Any]] = {
@@ -89,6 +102,7 @@ _FUNCS: dict[str, Callable[[list], Any]] = {
     "replace": lambda a: (str(a[0]).replace(str(a[1]), str(a[2])) if len(a) >= 3 else (str(a[0]) if a else "")),
     "default": lambda a: (a[0] if (a and a[0] not in (None, "", [], {})) else (a[1] if len(a) > 1 else "")),
     "json": lambda a: (__import__("json").dumps(a[0]) if a else ""),
+    "secret": lambda a: _resolve_secret(a[0]) if a else "",
     "first": lambda a: (a[0][0] if a and isinstance(a[0], (list, tuple)) and a[0] else ""),
     "last": lambda a: (a[0][-1] if a and isinstance(a[0], (list, tuple)) and a[0] else ""),
     # arithmetic

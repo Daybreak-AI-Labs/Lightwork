@@ -68,6 +68,32 @@ class TestOrderingComparisons:
         assert eval_condition("ghost > 5", {}) is False
 
 
+class TestSecretFunction:
+    def test_secret_resolves_from_the_provider(self, monkeypatch):
+        monkeypatch.setenv("STRIPE_KEY", "sk_test_123")
+        assert render("{{secret('STRIPE_KEY')}}", {}) == "sk_test_123"
+
+    def test_missing_secret_is_empty_not_the_key(self, monkeypatch):
+        monkeypatch.delenv("NO_SUCH_SECRET", raising=False)
+        assert render("{{secret('NO_SUCH_SECRET')}}", {}) == ""
+
+    def test_secret_in_an_action_param_is_not_persisted_in_run_data(self, monkeypatch):
+        # The whole point: the connector gets the resolved secret, but it never
+        # lands in the flow's persisted data (only the transient rendered param).
+        monkeypatch.setenv("API_KEY", "s3kret-value")
+        seen = {}
+
+        def action(node, params, data):
+            seen["params"] = params
+            return ("ok", 1.0)
+        f = Flow(id="f", name="f", start="a",
+                 nodes={"a": FlowNode(id="a", kind="action", tool="t",
+                                      params={"key": "{{secret('API_KEY')}}"}, output="r")})
+        res = run_flow(f, agent_fn=lambda *a: ("", None), action_fn=action)
+        assert seen["params"]["key"] == "s3kret-value"   # connector receives it
+        assert "s3kret-value" not in str(res.data)        # but flow data doesn't carry it
+
+
 class TestExpressions:
     def test_case_and_trim_transforms(self):
         d = {"name": "  aDa  "}

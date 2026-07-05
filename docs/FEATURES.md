@@ -514,7 +514,10 @@ here.
   foreach / parallel / approval / delay / subflow / setvar / try) run by a pure
   interpreter (`runner.py`)
   with data threading, safe expression rendering (`{{fn(...)}}` incl. arithmetic,
-  list ops, and `and`/`or` conditions), a whole-flow wall-clock deadline
+  list ops, `and`/`or` conditions with numeric-or-lexical ordering so date/string
+  comparisons work, and `{{secret('NAME')}}` to pull a connector credential from
+  the governed vault at run time so the raw value never enters the flow definition
+  or persisted run data), a whole-flow wall-clock deadline
   (`Flow.max_seconds`), a per-run **aggregate agent-spend ceiling**
   (`Flow.max_dollars`, enforced in `execution.py` so a wide parallel / long
   foreach can't fan out unbounded cost), a per-flow **concurrency cap**

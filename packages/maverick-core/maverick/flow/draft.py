@@ -46,7 +46,8 @@ Rules:
 - Use a "subflow" node to reuse an existing saved flow instead of rebuilding its steps.
 - Use "switch" for multi-way routing (more than two paths); "setvar" to compute or update data (e.g. a loop counter {{add(count,1)}}); "try" to wrap steps that might fail and recover via its on_error.
 - Never put an "approval" or "delay" node inside a foreach/parallel/try body -- they only work at the top level.
-- For a step that can fail (an external call), set "retries" and/or an "on_error" handler node.
+- For a step that can fail (an external call), set "retries" (optionally "retry_backoff" seconds for exponential wait) and/or an "on_error" handler node.
+- For a connector credential in an action param, use {{secret('NAME')}} -- it resolves from the secure vault at run time and never lands in the flow definition or run data. Never inline a raw API key.
 - Reference earlier results with {{key}} where a node's "output" set that key. Set "output" on nodes whose result a later node needs. You may transform a value: {{upper(key)}}, {{lower(key)}}, {{trim(key)}}, {{title(key)}}, {{length(key)}}, {{concat(a," ",b)}}, {{replace(key,"x","y")}}, {{default(key,"fallback")}}.
 - A "branch" condition is a simple "<key> <op> <value>" (ops: == != > < >= <= contains) over flow data.
 - Insert an "approval" node before anything a human should review (sending, paying, deleting).
