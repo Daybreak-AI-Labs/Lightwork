@@ -1788,13 +1788,19 @@ def review_relapses(model_id: str, *, failure_share: float,
 # persisted tried-memory keyed (target, normalized line) makes every attempt
 # one-shot -- a nightly sweep never re-spends on a pair it has already judged.
 
-def _transfer_tried_path() -> Path:
-    return data_dir("harness") / "transfer_tried.json"
+def _transfer_tried_path(addenda_path: Path | None = None) -> Path:
+    """The tried-memory SIDECAR of the addenda store -- derived from the store
+    path exactly like the ``.meta.json`` provenance sidecar, so a caller that
+    redirects the store (tests, tenants) redirects the memory with it."""
+    p = addenda_path if addenda_path is not None else _store_path()
+    return p.with_suffix(".transfer.json")
 
 
 def load_transfer_tried(path: Path | None = None) -> dict[str, float]:
-    """The ``{tried_key: ts}`` transfer attempt memory (empty on any error)."""
-    p = path if path is not None else _transfer_tried_path()
+    """The ``{line_id: ts}`` transfer attempt memory for the store at ``path``
+    (empty on any error). Keys are :func:`_line_id` of (target, line) -- the
+    same content-addressed identity the provenance sidecar uses."""
+    p = _transfer_tried_path(path)
     try:
         data = json.loads(p.read_text(encoding="utf-8"))
         if isinstance(data, dict):
@@ -1804,29 +1810,27 @@ def load_transfer_tried(path: Path | None = None) -> dict[str, float]:
     return {}
 
 
-def _tried_key(target_model: str, line: str) -> str:
-    return f"{target_model}\x00{_norm_line(line)}"
-
-
-def _record_transfer_tried(keys: list[str], *, path: Path | None = None,
-                           now: float | None = None) -> None:
+def _record_transfer_tried(keys: list[str], *, path: Path | None = None) -> None:
     from .file_lock import atomic_write_text, cross_process_lock
-    p = path if path is not None else _transfer_tried_path()
-    ts = now if now is not None else time.time()
+    p = _transfer_tried_path(path)
+    ts = time.time()
     with _lock, cross_process_lock(p):
-        tried = load_transfer_tried(p)
+        tried = load_transfer_tried(path)
         for k in keys:
             tried[k] = ts
         atomic_write_text(p, json.dumps(tried, indent=2, sort_keys=True), mode=0o600)
 
 
-def transferable_lines(source_model: str, path: Path | None = None) -> list[str]:
+def transferable_lines(source_model: str, path: Path | None = None, *,
+                       store: dict | None = None,
+                       meta: dict | None = None) -> list[str]:
     """The ``source_model`` lines worth trying elsewhere: MODEL-WIDE and
     GRADUATED -- not on canary probation, and not currently relapsing (recent
     failure share over 1/2). Scoped (domain/role/tool) lines stay home: they
-    encode a context the target run may not share."""
-    store = load_addenda(path)
-    meta = load_line_meta(path)
+    encode a context the target run may not share. ``store``/``meta`` accept
+    pre-loaded copies so a caller that already holds them skips the re-read."""
+    store = store if store is not None else load_addenda(path)
+    meta = meta if meta is not None else load_line_meta(path)
     out = []
     for ln in _bullets(store.get(str(source_model), "")):
         rec = meta.get(_line_id(str(source_model), ln)) or {}
@@ -1842,7 +1846,7 @@ def transferable_lines(source_model: str, path: Path | None = None) -> list[str]
 def run_transfer(source_model: str, targets: list[str], *,
                  eval_for_target: Callable[[str], tuple | None],
                  controller=None, path: Path | None = None,
-                 tried_path: Path | None = None, force: bool = False,
+                 force: bool = False,
                  validate_kwargs: dict | None = None) -> dict:
     """Try ``source_model``'s graduated model-wide lines on each target model
     through the FULL validation + governed gate, landing survivors as CANARIES.
@@ -1850,8 +1854,9 @@ def run_transfer(source_model: str, targets: list[str], *,
     ``eval_for_target(model) -> (held_in, held_out, score_with, score_without)
     | None`` is the injected evaluation seam (a real A/B needs a real model +
     corpus); a target with no quad is skipped with a reason. Every attempted
-    (target, line) pair is recorded in the tried-memory -- accepted OR
-    rejected -- so a scheduled sweep never re-spends on a judged pair
+    (target, line) pair is recorded in the tried-memory (a sidecar of the
+    store at ``path``) -- accepted OR rejected -- so a scheduled sweep never
+    re-spends on a judged pair
     (``force`` ignores the memory and re-records). A line already present in
     the target's block (normalized) is skipped for free. Returns
     ``{target: {"attempted": [...], "promoted": [...], "skipped": [...]}}``.
@@ -1860,10 +1865,11 @@ def run_transfer(source_model: str, targets: list[str], *,
     try:
         if not enabled():
             return report
-        lines = transferable_lines(source_model, path)
-        tried = {} if force else load_transfer_tried(tried_path)
-        attempted_keys: list[str] = []
         store = load_addenda(path)
+        lines = transferable_lines(source_model, path, store=store,
+                                   meta=load_line_meta(path))
+        tried = {} if force else load_transfer_tried(path)
+        attempted_keys: list[str] = []
         for target in targets or []:
             tgt = str(target)
             if tgt == str(source_model):
@@ -1875,7 +1881,7 @@ def run_transfer(source_model: str, targets: list[str], *,
             for ln in lines:
                 if _norm_line(ln) in existing:
                     res["skipped"].append(f"already present: {ln}")
-                elif _tried_key(tgt, ln) in tried:
+                elif _line_id(tgt, ln) in tried:
                     res["skipped"].append(f"already tried: {ln}")
                 else:
                     todo.append(ln)
@@ -1897,7 +1903,7 @@ def run_transfer(source_model: str, targets: list[str], *,
                     addendum_line=ln,
                     rationale=f"proven on {source_model}; transfer trial")
                 res["attempted"].append(ln)
-                attempted_keys.append(_tried_key(tgt, ln))
+                attempted_keys.append(_line_id(tgt, ln))
                 vr = validate_proposal(
                     proposal, held_in=list(hi), held_out=list(ho),
                     score_with=sw, score_without=swo, **(validate_kwargs or {}))
@@ -1911,7 +1917,7 @@ def run_transfer(source_model: str, targets: list[str], *,
                 else:
                     res["skipped"].append(f"gate refused ({why}): {ln}")
         if attempted_keys:
-            _record_transfer_tried(attempted_keys, path=tried_path)
+            _record_transfer_tried(attempted_keys, path=path)
     except Exception:  # pragma: no cover -- a transfer trial never perturbs a run
         log.warning("self_harness: transfer failed", exc_info=True)
     return report

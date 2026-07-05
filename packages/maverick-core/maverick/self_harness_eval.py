@@ -445,23 +445,31 @@ def _write_corpus_file(path: Path, data: dict[str, list[dict]]) -> None:
                       mode=0o600)
 
 
+def _add_fresh(dest_path: Path, dest_data: dict, key: str,
+               candidates: list[dict], known: set[str]) -> int:
+    """The one owner of candidate validity + dedup: append candidates whose
+    goal is non-empty, labeled, and not in ``known`` to ``dest_data[key]`` and
+    write the file. Returns how many were added (0 writes nothing)."""
+    fresh = [c for c in candidates or []
+             if c.get("goal") and c.get("expected") and c["goal"] not in known]
+    if not fresh:
+        return 0
+    dest_data.setdefault(str(key), []).extend(
+        {"goal": c["goal"], "expected": c["expected"]} for c in fresh)
+    _write_corpus_file(dest_path, dest_data)
+    return len(fresh)
+
+
 def stage_candidates(corpus_path: str | Path, key: str,
                      candidates: list[dict]) -> int:
     """PROPOSE mode: add candidates for ``key`` to the pending file, skipping
     goals already live in the corpus or already pending. Returns how many were
     newly staged."""
-    corpus = load_eval_corpus(corpus_path)
     pending = load_pending(corpus_path)
-    known = {c["goal"] for c in corpus.get(str(key), [])}
+    known = {c["goal"] for c in load_eval_corpus(corpus_path).get(str(key), [])}
     known |= {c["goal"] for c in pending.get(str(key), [])}
-    fresh = [c for c in candidates or []
-             if c.get("goal") and c.get("expected") and c["goal"] not in known]
-    if not fresh:
-        return 0
-    pending.setdefault(str(key), []).extend(
-        {"goal": c["goal"], "expected": c["expected"]} for c in fresh)
-    _write_corpus_file(pending_corpus_path(corpus_path), pending)
-    return len(fresh)
+    return _add_fresh(pending_corpus_path(corpus_path), pending, key,
+                      candidates, known)
 
 
 def merge_candidates(corpus_path: str | Path, key: str,
@@ -470,14 +478,7 @@ def merge_candidates(corpus_path: str | Path, key: str,
     into the live corpus, deduped by goal. Returns how many were added."""
     corpus = load_eval_corpus(corpus_path)
     known = {c["goal"] for c in corpus.get(str(key), [])}
-    fresh = [c for c in candidates or []
-             if c.get("goal") and c.get("expected") and c["goal"] not in known]
-    if not fresh:
-        return 0
-    corpus.setdefault(str(key), []).extend(
-        {"goal": c["goal"], "expected": c["expected"]} for c in fresh)
-    _write_corpus_file(Path(corpus_path), corpus)
-    return len(fresh)
+    return _add_fresh(Path(corpus_path), corpus, key, candidates, known)
 
 
 def resolve_pending(corpus_path: str | Path, key: str, *,

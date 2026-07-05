@@ -1624,14 +1624,15 @@ def _learned_snapshot(limit: int = 50) -> dict:
             )
     except Exception as e:  # pragma: no cover -- never block the page
         log.debug("learned snapshot failed: %s", e)
-    harness, harness_enabled = _harness_guidance()
+    harness, harness_enabled, pending_corpus = _harness_guidance()
     return {
         "learned": learned, "generated_tools": tools,
         "harness": harness, "harness_enabled": harness_enabled,
+        "pending_corpus": pending_corpus,
     }
 
 
-def _harness_guidance() -> tuple[list[dict], bool]:
+def _harness_guidance() -> tuple[list[dict], bool, dict[str, int]]:
     """The self-harness per-model operating guidance recalled into prompts.
 
     Returns ``([{model_id, lines}], enabled)``. This is the self-harness loop's
@@ -1697,13 +1698,15 @@ def _harness_guidance() -> tuple[list[dict], bool]:
 
         rows = [{"model_id": m, "lines": lines,
                  "provenance": _enriched_provenance(m),
-                 "pending_corpus": pending_corpus.get(m, 0),
                  "conflicts": conflicts_by_model.get(m, [])}
                 for m, lines in sorted(list_learned().items())]
-        return rows, bool(enabled())
+        # Pending candidates are a CORPUS-key fact, not a learned-guidance
+        # fact: returned beside the rows so the badge shows even when a key
+        # has staged cases but no learned lines yet (the bootstrap case).
+        return rows, bool(enabled()), pending_corpus
     except Exception as e:  # pragma: no cover -- never block the page
         log.debug("harness guidance snapshot failed: %s", e)
-        return [], False
+        return [], False, {}
 
 
 def _resolve_generated_tool(name: str):

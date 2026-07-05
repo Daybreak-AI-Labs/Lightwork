@@ -2416,22 +2416,19 @@ def test_transfer_promotes_as_canary(monkeypatch, store, tmp_path):
     ctrl = _enable(monkeypatch)
     _promote_line(store, "SRC", "c0", "solid line", ctrl)
     rep = sh.run_transfer("SRC", ["TGT"], eval_for_target=lambda m: _quad_good(),
-                          controller=ctrl, path=store,
-                          tried_path=tmp_path / "tried.json")
+                          controller=ctrl, path=store)
     assert rep["TGT"]["promoted"] == ["solid line"]
     assert "solid line" in sh.recall_addendum("TGT", store)
     assert sh.list_canaries("TGT", store) == ["solid line"]   # lands on probation
     # a re-run skips it for free: the line is now present on the target
     rep2 = sh.run_transfer("SRC", ["TGT"], eval_for_target=lambda m: _quad_good(),
-                           controller=ctrl, path=store,
-                           tried_path=tmp_path / "tried.json")
+                           controller=ctrl, path=store)
     assert rep2["TGT"]["attempted"] == []
     assert any("already present" in s for s in rep2["TGT"]["skipped"])
 
 
 def test_transfer_rejected_line_is_one_shot(monkeypatch, store, tmp_path):
     ctrl = _enable(monkeypatch)
-    tried = tmp_path / "tried.json"
     _promote_line(store, "SRC", "c0", "weak line", ctrl)
     calls = {"n": 0}
 
@@ -2440,17 +2437,17 @@ def test_transfer_rejected_line_is_one_shot(monkeypatch, store, tmp_path):
         return (["a"], ["c", "d"], lambda a, c: 0.5, lambda a, c: 0.5)
 
     rep = sh.run_transfer("SRC", ["TGT"], eval_for_target=flat,
-                          controller=ctrl, path=store, tried_path=tried)
+                          controller=ctrl, path=store)
     assert rep["TGT"]["attempted"] == ["weak line"]
     assert rep["TGT"]["promoted"] == [] and sh.recall_addendum("TGT", store) == ""
     # the judged pair is remembered -- a sweep re-run spends NOTHING on it
     rep2 = sh.run_transfer("SRC", ["TGT"], eval_for_target=flat,
-                           controller=ctrl, path=store, tried_path=tried)
+                           controller=ctrl, path=store)
     assert rep2["TGT"]["attempted"] == [] and calls["n"] == 1
     assert any("already tried" in s for s in rep2["TGT"]["skipped"])
     # --force re-attempts the judged pair
     rep3 = sh.run_transfer("SRC", ["TGT"], eval_for_target=flat, force=True,
-                           controller=ctrl, path=store, tried_path=tried)
+                           controller=ctrl, path=store)
     assert rep3["TGT"]["attempted"] == ["weak line"] and calls["n"] == 2
 
 
@@ -2458,8 +2455,7 @@ def test_transfer_skips_self_target_and_missing_evaluator(monkeypatch, store, tm
     ctrl = _enable(monkeypatch)
     _promote_line(store, "SRC", "c0", "solid line", ctrl)
     rep = sh.run_transfer("SRC", ["SRC", "TGT"], eval_for_target=lambda m: None,
-                          controller=ctrl, path=store,
-                          tried_path=tmp_path / "t.json")
+                          controller=ctrl, path=store)
     assert "SRC" not in rep                       # never transfers to itself
     assert rep["TGT"]["skipped"] == ["no evaluator/corpus for target"]
     assert rep["TGT"]["attempted"] == []
@@ -2473,7 +2469,6 @@ def test_runner_transfer_end_to_end(monkeypatch, tmp_path, store):
     from maverick import self_improvement_runner as runner
     ctrl = _enable(monkeypatch)
     monkeypatch.setattr(sh, "_store_path", lambda: store)
-    monkeypatch.setattr(sh, "_transfer_tried_path", lambda: tmp_path / "tried.json")
     _promote_line(store, "SRC", "c0", "MAGIC-LINE bound the export window", ctrl)
     cpath = tmp_path / "corpus.json"
     cpath.write_text(_json.dumps(
@@ -2500,7 +2495,8 @@ def test_runner_transfer_end_to_end(monkeypatch, tmp_path, store):
     assert rep["TGT"]["promoted"] == ["MAGIC-LINE bound the export window"]
     assert sh.list_canaries("TGT", store) == ["MAGIC-LINE bound the export window"]
     # sweep shape: sources that attempted something appear keyed by source
-    monkeypatch.setattr(sh, "_transfer_tried_path", lambda: tmp_path / "tried2.json")
+    # (clear the tried sidecar so the judged pair is re-attemptable)
+    sh._transfer_tried_path(store).unlink()
     sh.forget_addendum("TGT", path=store)
     sweep = runner.run_self_harness_transfer_sweep()
     assert "SRC" in sweep and sweep["SRC"]["TGT"]["promoted"]

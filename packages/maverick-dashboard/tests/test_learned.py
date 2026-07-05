@@ -110,7 +110,7 @@ def test_harness_view_shows_recent_rate_and_pending_corpus(monkeypatch, tmp_path
     assert "harvested corpus candidate" in text        # staged ground truth visible
     body = _client().get("/api/v1/learned").json()
     rec = body["harness"][0]["provenance"][0]
-    assert rec["recent_rate"] == 0.25 and body["harness"][0]["pending_corpus"] == 1
+    assert rec["recent_rate"] == 0.25 and body["pending_corpus"] == {"m1": 1}
 
 
 def test_harness_view_shows_provenance_and_conflicts(monkeypatch, tmp_path):

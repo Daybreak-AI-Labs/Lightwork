@@ -467,9 +467,66 @@ def run_self_harness_cycle(
         return self_harness.SelfHarnessReport(model_id=str(model_id or "")), 0
 
 
+def _memo_scorer(fn):
+    """Cache a scorer on its goals tuple. The BASELINE arm ignores the
+    candidate line, yet ``validate_proposal`` re-scores it per candidate --
+    with L transferable lines that is (L-1)x redundant LLM generations per
+    target, the dominant cost of a transfer sweep."""
+    cache: dict[tuple, object] = {}
+
+    def _scored(line, goals):
+        key = tuple(goals)
+        if key not in cache:
+            cache[key] = fn(line, goals)
+        return cache[key]
+
+    return _scored
+
+
+def _transfer_context(st: dict, corpus_path: str):
+    """The shared per-sweep transfer state: ``(eval_for_target, validate_kwargs)``.
+
+    ``eval_for_target`` caches each target's corpus-built quad (so a fleet
+    sweep builds every evaluator once, not once per source) with the baseline
+    arm memoized, one eval-budget pot across everything, and the SAME floors +
+    metamorphic/judge_unknown wiring the cycle applies -- a transferred line
+    must clear the gate home-grown lines clear, not a weaker copy of it."""
+    budget = _eval_budget(st)
+    judge_unknown = bool(st.get("metamorphic"))
+    cache: dict[str, tuple | None] = {}
+
+    def eval_for_target(m: str):
+        if m not in cache:
+            built = _auto_evaluator(m, corpus_path=corpus_path,
+                                    judge_samples=st.get("judge_samples", 1),
+                                    budget=budget, judge_unknown=judge_unknown)
+            if built is not None:
+                hi, ho, sw, swo = built
+                built = (hi, ho, sw, _memo_scorer(swo))
+            cache[m] = built
+        return cache[m]
+
+    validate_kwargs = dict(
+        min_delta=st["min_delta"], min_held_out=st["min_held_out"],
+        confidence_z=st["confidence_z"], max_cost_factor=st["max_cost_factor"],
+        max_latency_factor=st["max_latency_factor"],
+        max_tool_calls_factor=st["max_tool_calls_factor"],
+        metamorphic_tolerance=st.get("metamorphic_tolerance", 0.0))
+    if st.get("metamorphic"):
+        try:
+            from . import self_harness_eval as ev
+            from .llm import LLM, model_for_role
+            validate_kwargs["metamorphic_fn"] = ev.llm_paraphraser(
+                LLM(model_for_role("summarizer")), budget=budget)
+        except Exception:  # pragma: no cover -- no paraphraser = check off
+            log.debug("transfer paraphraser construction failed", exc_info=True)
+    return eval_for_target, validate_kwargs
+
+
 def run_self_harness_transfer(source_model: str, *, targets=None,
                               corpus_path: str | None = None,
-                              controller=None, force: bool = False) -> dict:
+                              controller=None, force: bool = False,
+                              _context=None) -> dict:
     """Driver entry for a governed cross-model transfer trial: try
     ``source_model``'s graduated lines on ``targets`` (default: the whole
     fleet minus the source) against each target's corpus-built A/B, applying
@@ -486,23 +543,11 @@ def run_self_harness_transfer(source_model: str, *, targets=None,
         corpus_path = corpus_path or st.get("eval_corpus")
         if not corpus_path:
             return {}
-        budget = _eval_budget(st)
-        cache: dict[str, tuple | None] = {}
-
-        def eval_for_target(m: str):
-            if m not in cache:
-                cache[m] = _auto_evaluator(m, corpus_path=corpus_path,
-                                           judge_samples=st.get("judge_samples", 1),
-                                           budget=budget)
-            return cache[m]
-
+        eval_for_target, validate_kwargs = (
+            _context if _context is not None
+            else _transfer_context(st, corpus_path))
         if targets is None:
             targets = [m for m in harness_fleet_models() if m != str(source_model)]
-        validate_kwargs = dict(
-            min_delta=st["min_delta"], min_held_out=st["min_held_out"],
-            confidence_z=st["confidence_z"], max_cost_factor=st["max_cost_factor"],
-            max_latency_factor=st["max_latency_factor"],
-            max_tool_calls_factor=st["max_tool_calls_factor"])
         return self_harness.run_transfer(
             str(source_model), list(targets), eval_for_target=eval_for_target,
             controller=controller, force=force, validate_kwargs=validate_kwargs)
@@ -512,19 +557,61 @@ def run_self_harness_transfer(source_model: str, *, targets=None,
 
 
 def run_self_harness_transfer_sweep(*, controller=None) -> dict:
-    """Fleet-wide transfer: every configured role model as source in turn.
-    The tried-memory keeps steady-state spend near zero -- only lines learned
-    since the last sweep generate new evaluations. Returns
+    """Fleet-wide transfer: every configured role model as source in turn,
+    all sources sharing ONE transfer context (evaluator cache, budget pot,
+    floors). The tried-memory keeps steady-state spend near zero -- only lines
+    learned since the last sweep generate new evaluations. Returns
     ``{source: per-target report}`` for sources that attempted anything."""
     out: dict[str, dict] = {}
     try:
-        for m in harness_fleet_models():
-            rep = run_self_harness_transfer(m, controller=controller)
-            if any(r.get("attempted") or r.get("promoted") for r in rep.values()):
+        from . import self_harness
+        if not self_harness.enabled():
+            return out
+        st = self_harness.settings()
+        corpus_path = st.get("eval_corpus")
+        if not corpus_path:
+            return out
+        context = _transfer_context(st, corpus_path)
+        fleet = harness_fleet_models()
+        for m in fleet:
+            rep = run_self_harness_transfer(
+                m, targets=[t for t in fleet if t != m],
+                corpus_path=corpus_path, controller=controller, _context=context)
+            if any(r.get("attempted") for r in rep.values()):
                 out[m] = rep
     except Exception:  # pragma: no cover -- a sweep never perturbs a run
         log.debug("self-harness transfer sweep failed", exc_info=True)
     return out
+
+
+def run_corpus_harvest(world, *, mode: str | None = None, key: str | None = None,
+                       corpus_path: str | None = None) -> int:
+    """Driver entry for corpus bootstrapping: mine hindsight-pair candidates
+    from the reflexion log + the world's DONE goals and stage ("propose") or
+    merge ("auto") them for ``key`` (default: the orchestrator model). The one
+    owner of the harvest policy -- the unscoped-reflexion filter and history
+    limits live here, not in each CLI. Returns how many candidates were newly
+    staged/merged; 0 when off/unconfigured. Never raises."""
+    try:
+        from . import reflexion, self_harness
+        from . import self_harness_eval as ev
+        st = self_harness.settings()
+        mode = mode or st.get("corpus_harvest", "off")
+        corpus_path = corpus_path or st.get("eval_corpus")
+        if mode not in ("propose", "auto") or not corpus_path or world is None:
+            return 0
+        if key is None:
+            from .llm import model_for_role
+            key = model_for_role("orchestrator")
+        refl = [r.to_dict() for r in reflexion.list_recent(limit=500)
+                if r.channel is None and r.user_id is None]
+        goals = world.list_goals(status="done", limit=200, order="desc")
+        cands = ev.harvest_corpus_candidates(refl, goals)
+        add = ev.merge_candidates if mode == "auto" else ev.stage_candidates
+        return add(corpus_path, key, cands)
+    except Exception:  # pragma: no cover -- harvesting never perturbs a run
+        log.debug("self-harness corpus harvest failed", exc_info=True)
+        return 0
 
 
 def harness_fleet_models() -> list[str]:
@@ -577,4 +664,5 @@ __all__ = [
     "build_prm_examples", "emit_strategy_candidate", "run_self_harness_pass",
     "run_self_harness_cycle", "run_self_harness_all_models", "harness_fleet_models",
     "run_self_harness_transfer", "run_self_harness_transfer_sweep",
+    "run_corpus_harvest",
 ]

@@ -86,37 +86,26 @@ def _run_self_harness_nightly(world=None) -> None:
                 f"retired={retired} relapsed={len(rep.relapsed)}")
         # Cross-model transfer on the same beat (opt-in, [self_harness]
         # transfer_auto): the tried-memory makes it near-free once caught up.
-        if self_harness.settings().get("transfer_auto"):
+        st = self_harness.settings()
+        if st.get("transfer_auto"):
             sweep = si_runner.run_self_harness_transfer_sweep()
             for src in sorted(sweep):
                 for tgt in sorted(sweep[src]):
                     res = sweep[src][tgt]
-                    if res.get("attempted") or res.get("promoted"):
+                    if res.get("attempted"):
                         click.echo(
                             f"[self-harness transfer] {src} -> {tgt}: "
                             f"attempted={len(res['attempted'])} "
                             f"promoted={len(res['promoted'])}")
         # Corpus bootstrapping on the same beat (opt-in, [self_harness]
         # corpus_harvest): hindsight pairs -> staged ("propose") or merged
-        # ("auto") eval-corpus cases for the orchestrator model's key.
-        mode = self_harness.settings().get("corpus_harvest", "off")
-        corpus_path = self_harness.settings().get("eval_corpus")
-        if world is not None and corpus_path and mode in ("propose", "auto"):
-            from .. import reflexion as _reflexion
-            from .. import self_harness_eval as ev
-            from ..llm import model_for_role
-            refl = [r.to_dict() for r in _reflexion.list_recent(limit=500)
-                    if r.channel is None and r.user_id is None]
-            goals = world.list_goals(status="done", limit=200, order="desc")
-            cands = ev.harvest_corpus_candidates(refl, goals)
-            key = model_for_role("orchestrator")
-            if mode == "auto":
-                n = ev.merge_candidates(corpus_path, key, cands)
-                verb = "merged into the corpus"
-            else:
-                n = ev.stage_candidates(corpus_path, key, cands)
-                verb = "staged for review"
+        # ("auto") eval-corpus cases. Policy lives in run_corpus_harvest.
+        mode = st.get("corpus_harvest", "off")
+        if mode in ("propose", "auto"):
+            n = si_runner.run_corpus_harvest(world, mode=mode)
             if n:
+                verb = ("merged into the corpus" if mode == "auto"
+                        else "staged for review")
                 click.echo(f"[self-harness corpus] {n} candidate case(s) {verb}")
     except Exception:  # pragma: no cover -- the harness must never break dreaming
         pass

@@ -53,14 +53,16 @@
         enable</code> is set.
       {% endif %}
     </p>
+    {% if pending_corpus %}
+      {% for key, n in pending_corpus | dictsort %}
+        <p class="badge info" style="display:inline-block">📥 <code>{{ key }}</code>: {{ n }} harvested corpus candidate{{ '' if n == 1 else 's' }} awaiting <code>maverick self-harness corpus review</code></p>
+      {% endfor %}
+    {% endif %}
     {% if harness %}
       {% for h in harness %}
         <h3><code>{{ h.model_id }}</code> <span class="muted">({{ h.lines | length }} line{{ '' if h.lines | length == 1 else 's' }})</span></h3>
         {% if h.conflicts %}
           <p class="badge blocked" style="display:inline-block">⚔ {{ h.conflicts | length }} possible conflict{{ '' if h.conflicts | length == 1 else 's' }} — review with <code>maverick self-harness conflicts</code></p>
-        {% endif %}
-        {% if h.pending_corpus %}
-          <p class="badge info" style="display:inline-block">📥 {{ h.pending_corpus }} harvested corpus candidate{{ '' if h.pending_corpus == 1 else 's' }} awaiting <code>maverick self-harness corpus review</code></p>
         {% endif %}
         <ul>
         {% for rec in h.provenance %}

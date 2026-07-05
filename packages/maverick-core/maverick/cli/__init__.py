@@ -1782,17 +1782,12 @@ def corpus_harvest_cmd(ctx, model: str | None, auto: bool) -> None:
     succeeded goal's text becomes the case; a fragment of its recorded result
     becomes the expected hint. Staged for `corpus review` unless --auto.
     """
-    from .. import reflexion
-    from .. import self_harness_eval as ev
+    from .. import self_improvement_runner as runner
     from ..world_model import open_world
     key, corpus_path = _corpus_key_and_path(model)
-    refl = [r.to_dict() for r in reflexion.list_recent(limit=500)
-            if r.channel is None and r.user_id is None]
-    world = open_world(ctx.obj["db"])
-    goals = world.list_goals(status="done", limit=200, order="desc")
-    cands = ev.harvest_corpus_candidates(refl, goals)
-    n = (ev.merge_candidates if auto else ev.stage_candidates)(
-        corpus_path, key, cands)
+    n = runner.run_corpus_harvest(
+        open_world(ctx.obj["db"]), mode=("auto" if auto else "propose"),
+        key=key, corpus_path=corpus_path)
     if auto:
         click.echo(f"{n} candidate case(s) merged into the corpus.")
     else:
