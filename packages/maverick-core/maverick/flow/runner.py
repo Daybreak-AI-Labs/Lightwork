@@ -30,7 +30,10 @@ from .ir import (
     NODE_DELAY,
     NODE_FOREACH,
     NODE_PARALLEL,
+    NODE_SETVAR,
     NODE_SUBFLOW,
+    NODE_SWITCH,
+    NODE_TRY,
     Flow,
     FlowNode,
 )
@@ -348,10 +351,16 @@ def _run_subflow(node: FlowNode, data: dict, ctx: _Ctx) -> str | None:
     # its outputs flow back. Nested: it cannot pause (v1 -- HITL lives up top). The
     # flow id is on the stack for its duration so a cyclic reference is caught.
     ctx.flow_stack.add(sub.id)
+    before = set(data)
     try:
         _run_chain(sub, data, ctx.nested(), sub.start)
     finally:
         ctx.flow_stack.discard(sub.id)
+    # Capture the subflow's return -- the keys it ADDED -- under node.output, so a
+    # reusable subflow's result can be referenced by name instead of only leaking
+    # into the shared data dict by side effect.
+    if node.output:
+        data[node.output] = {k: data[k] for k in data if k not in before}
     # Ground success as 1.0 (failure already grounds 0.0 above), so a subflow
     # node has a symmetric success-rate signal the self-rewrite loop can measure.
     ctx.on_node(node, "done", 1.0)
@@ -369,23 +378,46 @@ def _run_foreach(node: FlowNode, data: dict, ctx: _Ctx) -> str | None:
     items = list(_dig(data, node.items) or [])
     if node.limit and node.limit > 0:
         items = items[:node.limit]          # cap iterations (a runaway-list guard)
-    results = []
-    for item in items:
-        sub = dict(data)
-        sub[node.var] = item
-        _run_chain(node.body, sub, ctx.nested(), node.body.start)
-        results.append(sub)          # per-iteration data snapshot (body outputs included)
-        if node.output:
-            # Publish partial results after EACH iteration, so a whole-flow
-            # deadline or a failure mid-loop keeps the batch's completed work
-            # (run_flow returns the data as-of the abort) instead of losing it all.
-            data[node.output] = list(results)
-        if sub.get("_break"):        # the body asked to stop early
-            break
+    conc = max(1, int(node.concurrency or 1))
+    if conc > 1 and len(items) > 1:
+        results = _foreach_concurrent(node, data, ctx, items, conc)
+    else:
+        results = []
+        for item in items:
+            sub = dict(data)
+            sub[node.var] = item
+            _run_chain(node.body, sub, ctx.nested(), node.body.start)
+            results.append(sub)      # per-iteration data snapshot (body outputs included)
+            if node.output:
+                # Publish partial results after EACH iteration, so a whole-flow
+                # deadline or a failure mid-loop keeps the batch's completed work
+                # (run_flow returns the data as-of the abort) instead of losing it.
+                data[node.output] = list(results)
+            if sub.get("_break"):    # the body asked to stop early (sequential only)
+                break
     if node.output:
         data[node.output] = results
     ctx.on_node(node, "done", None)
     return node.next
+
+
+def _foreach_concurrent(node: FlowNode, data: dict, ctx: _Ctx, items: list, conc: int) -> list:
+    """Run up to ``conc`` iterations at once ("apply to each with concurrency N").
+    Each iteration is isolated (its own data copy + flow_stack via ctx.branched());
+    results stay in input order. ``_break`` is a sequential-only feature and is
+    ignored here (all scheduled iterations run)."""
+    import concurrent.futures as _cf
+    subs = []
+    for item in items:
+        s = dict(data)
+        s[node.var] = item
+        subs.append(s)
+    with _cf.ThreadPoolExecutor(max_workers=min(conc, len(subs))) as ex:
+        futs = [ex.submit(_run_chain, node.body, s, ctx.branched(), node.body.start)
+                for s in subs]
+        for f in futs:
+            f.result()                       # wait all; re-raise the first error
+    return subs
 
 
 _PARALLEL_MAX_WORKERS = 8   # cap fan-out threads per parallel node
@@ -448,11 +480,55 @@ def _run_delay(node: FlowNode, data: dict, ctx: _Ctx) -> str | None:
     return node.next
 
 
+def _run_switch(node: FlowNode, data: dict, ctx: _Ctx) -> str | None:
+    """Multi-way route: the FIRST case whose condition is true wins; if none
+    match, fall through to ``next`` (the default). Avoids hand-chaining branches."""
+    for i, case in enumerate(node.cases):
+        if eval_condition(str(case.get("condition") or ""), data):
+            ctx.on_node(node, f"case {i}", None)
+            goto = case.get("goto")
+            return goto if goto is not None else node.next
+    ctx.on_node(node, "default", None)
+    return node.next
+
+
+def _run_setvar(node: FlowNode, data: dict, ctx: _Ctx) -> str | None:
+    """Set flow-data keys from expressions -- the 'compose'/'set variable' step.
+    A string value is rendered (so ``{{add(count,1)}}`` computes a loop counter and
+    ``{{upper(name)}}`` composes a field); a non-string is stored as-is. This is
+    what makes computed state + a while-loop (setvar counter -> branch -> back)
+    expressible in the graph."""
+    for key, expr in (node.assignments or {}).items():
+        data[str(key)] = render(expr, data) if isinstance(expr, str) else expr
+    ctx.on_node(node, "done", None)
+    return node.next
+
+
+def _run_try(node: FlowNode, data: dict, ctx: _Ctx) -> str | None:
+    """Run an inline body; if ANYTHING inside it fails hard (a node executor
+    raises), catch it -- record the error under ``_error`` and route to
+    ``on_error`` (the catch handler) -- instead of failing the whole run. This is
+    the scope-level try/catch that per-node ``on_error`` (single node only) can't
+    express. A body that merely returns a 0.0 outcome is not an exception; use a
+    node's own on_error for that."""
+    try:
+        _run_chain(node.body, data, ctx.nested(), node.body.start)
+    except _NodeError as e:
+        data["_error"] = str(e)
+        ctx.on_node(node, "caught", 0.0)
+        if node.on_error:
+            return node.on_error
+        return node.next
+    ctx.on_node(node, "done", 1.0)
+    return node.next
+
+
 _HANDLERS = {
     NODE_AGENT: _run_work, NODE_ACTION: _run_work, NODE_BRANCH: _run_branch,
     NODE_FOREACH: _run_foreach, NODE_PARALLEL: _run_parallel,
     NODE_APPROVAL: _run_approval, NODE_DELAY: _run_delay,
-    NODE_SUBFLOW: _run_subflow,
+    NODE_SUBFLOW: _run_subflow, NODE_SWITCH: _run_switch, NODE_SETVAR: _run_setvar,
+    NODE_TRY: _run_try,
 }
 
 

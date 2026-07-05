@@ -34,12 +34,18 @@ Each node is one of these kinds (include only the fields for its kind):
 - {"id","kind":"approval","prompt":"<what a human approves>","next":"<id|null>"}
 - {"id","kind":"delay","seconds":<number>,"next":"<id|null>"}
 - {"id","kind":"subflow","flow_ref":"<a saved flow id to run here>","next":"<id|null>"}
+- {"id","kind":"switch","cases":[{"condition":"<key op value>","goto":"<id>"},...],"next":"<default id|null>"}
+- {"id","kind":"setvar","assignments":{"<key>":"<value or {{expr}}>",...},"next":"<id|null>"}
+- {"id","kind":"try","body":{<a nested flow>},"on_error":"<id to run if the body fails>","next":"<id|null>"}
 
 Any "agent" or "action" node may also set "retries":<n> (re-try on failure) and "on_error":"<id>" (route there if it fails).
+A "foreach" node may set "concurrency":<n> to run up to n iterations at once.
 
 Rules:
 - Prefer an "agent" node when a step needs judgment/writing; an "action" node when it maps to a known tool.
 - Use a "subflow" node to reuse an existing saved flow instead of rebuilding its steps.
+- Use "switch" for multi-way routing (more than two paths); "setvar" to compute or update data (e.g. a loop counter {{add(count,1)}}); "try" to wrap steps that might fail and recover via its on_error.
+- Never put an "approval" or "delay" node inside a foreach/parallel/try body -- they only work at the top level.
 - For a step that can fail (an external call), set "retries" and/or an "on_error" handler node.
 - Reference earlier results with {{key}} where a node's "output" set that key. Set "output" on nodes whose result a later node needs. You may transform a value: {{upper(key)}}, {{lower(key)}}, {{trim(key)}}, {{title(key)}}, {{length(key)}}, {{concat(a," ",b)}}, {{replace(key,"x","y")}}, {{default(key,"fallback")}}.
 - A "branch" condition is a simple "<key> <op> <value>" (ops: == != > < >= <= contains) over flow data.

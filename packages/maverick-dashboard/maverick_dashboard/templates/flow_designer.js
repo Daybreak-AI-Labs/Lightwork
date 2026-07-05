@@ -4,7 +4,8 @@
   var SVG = 'http://www.w3.org/2000/svg';
   var W = 176, H = 64;                 // node card size
   var KIND_ICON = { agent: '🧠', action: '⚙️', branch: '🔀', foreach: '🔁',
-                    parallel: '🔱', approval: '✅', delay: '⏱', subflow: '📎' };
+                    parallel: '🔱', approval: '✅', delay: '⏱', subflow: '📎',
+                    switch: '🔃', setvar: '📝', try: '🛡️' };
 
   var flow = { id: '', name: '', start: '', nodes: [] };
   var rootFlow = flow;  // the top-level flow (save/run/history operate on this)
@@ -99,6 +100,9 @@
     if (n.kind === 'approval') return trunc(n.prompt || '(approve?)', 30);
     if (n.kind === 'delay') return (n.seconds || 0) + 's';
     if (n.kind === 'subflow') return '↳ ' + trunc(n.flow_ref || '(flow)', 24);
+    if (n.kind === 'switch') return (n.cases ? n.cases.length : 0) + ' cases';
+    if (n.kind === 'setvar') return 'set ' + trunc(Object.keys(n.assignments || {}).join(', ') || '…', 22);
+    if (n.kind === 'try') return 'try / catch';
     return n.kind;
   }
   function ports(n) {
@@ -267,8 +271,8 @@
     pushHistory();
     var n = { id: newId(), kind: kind, x: Math.round((-view.x + 220) / view.k), y: Math.round((-view.y + 80) / view.k),
               next: null, params: {}, brief: '', tool: '', condition: '', if_true: null, if_false: null,
-              items: '', var: 'item', limit: 0, prompt: '', seconds: 0, flow_ref: '', retries: 0, on_error: null, timeout: 0,
-              output: '', label: '', body: null, branches: [] };
+              items: '', var: 'item', limit: 0, concurrency: 1, prompt: '', seconds: 0, flow_ref: '', retries: 0, on_error: null, timeout: 0,
+              output: '', label: '', cases: [], assignments: {}, body: null, branches: [] };
     // place under the currently selected node if any
     var sel = selected && nodeById(selected);
     if (sel) { n.x = sel.x; n.y = sel.y + 110; if (!sel.next && sel.kind !== 'branch') sel.next = n.id; }
@@ -422,6 +426,7 @@
       props.appendChild(field('Items (data key with a list)', input(n.items, function (v) { n.items = v; render(); }, 'rows')));
       props.appendChild(field('Loop variable', input(n.var, function (v) { n.var = v; }, 'item')));
       props.appendChild(field('Max iterations (0 = all)', input(String(n.limit || ''), function (v) { n.limit = parseInt(v, 10) || 0; }, '0')));
+      props.appendChild(field('Concurrency (1 = one at a time)', input(String(n.concurrency || ''), function (v) { n.concurrency = parseInt(v, 10) || 1; }, '1')));
       var bodyN = (n.body && n.body.nodes && n.body.nodes.length) || 0;
       var eb = document.createElement('button'); eb.className = 'btn btn--ghost'; eb.type = 'button';
       eb.style.width = '100%'; eb.textContent = '✏️ Edit loop body (' + bodyN + (bodyN === 1 ? ' step)' : ' steps)') + ' ↳';
@@ -454,12 +459,59 @@
       props.appendChild(field('Flow to run (saved flow id)', input(n.flow_ref, function (v) { n.flow_ref = v; render(); }, 'onboard-customer')));
       props.appendChild(hint('Runs another saved flow here, sharing this flow’s data. Cyclic references are blocked.'));
     }
-    if (n.kind === 'agent' || n.kind === 'action' || n.kind === 'foreach' || n.kind === 'parallel')
+    if (n.kind === 'switch') {
+      var nodeOpts = function () { return [{ v: '', t: '(default → next)' }].concat(flow.nodes.filter(function (m) { return m.id !== n.id; }).map(function (m) { return { v: m.id, t: (m.label || m.id) }; })); };
+      var sw = document.createElement('div'); sw.className = 'field';
+      var swl = document.createElement('label'); swl.textContent = 'Cases (first match wins)'; sw.appendChild(swl);
+      n.cases = n.cases || [];
+      n.cases.forEach(function (c, ci) {
+        var rowc = document.createElement('div'); rowc.style.display = 'flex'; rowc.style.gap = '4px'; rowc.style.marginBottom = '4px';
+        var cond = input(c.condition, function (v) { c.condition = v; render(); }, 'tier == gold'); cond.style.flex = '2';
+        var goto = select(c.goto || '', nodeOpts(), function (v) { c.goto = v || null; render(); }); goto.style.flex = '1';
+        var rm = document.createElement('button'); rm.className = 'btn btn--ghost'; rm.type = 'button'; rm.textContent = '🗑';
+        rm.addEventListener('click', function () { n.cases.splice(ci, 1); renderProps(); render(); });
+        rowc.appendChild(cond); rowc.appendChild(goto); rowc.appendChild(rm); sw.appendChild(rowc);
+      });
+      var addc = document.createElement('button'); addc.className = 'btn btn--ghost'; addc.type = 'button'; addc.style.width = '100%';
+      addc.textContent = '+ Add case';
+      addc.addEventListener('click', function () { n.cases.push({ condition: '', goto: null }); renderProps(); render(); });
+      sw.appendChild(addc); props.appendChild(sw);
+      props.appendChild(hint('If no case matches, the flow follows this node’s default arrow.'));
+    }
+    if (n.kind === 'setvar') {
+      var sv = document.createElement('div'); sv.className = 'field';
+      var svl = document.createElement('label'); svl.textContent = 'Set data keys (value can use {{…}})'; sv.appendChild(svl);
+      n.assignments = n.assignments || {};
+      Object.keys(n.assignments).forEach(function (k) {
+        var rowv = document.createElement('div'); rowv.style.display = 'flex'; rowv.style.gap = '4px'; rowv.style.marginBottom = '4px';
+        var keyIn = input(k, null, 'key'); keyIn.style.flex = '1';
+        keyIn.addEventListener('change', function () { var nv = keyIn.value.trim(); if (nv && nv !== k) { n.assignments[nv] = n.assignments[k]; delete n.assignments[k]; renderProps(); } });
+        var valIn = input(n.assignments[k], function (v) { n.assignments[k] = v; }, '{{add(count,1)}}'); valIn.style.flex = '2';
+        var rm = document.createElement('button'); rm.className = 'btn btn--ghost'; rm.type = 'button'; rm.textContent = '🗑';
+        rm.addEventListener('click', function () { delete n.assignments[k]; renderProps(); render(); });
+        rowv.appendChild(keyIn); rowv.appendChild(valIn); rowv.appendChild(rm); sv.appendChild(rowv);
+      });
+      var addv = document.createElement('button'); addv.className = 'btn btn--ghost'; addv.type = 'button'; addv.style.width = '100%';
+      addv.textContent = '+ Add assignment';
+      addv.addEventListener('click', function () { var key = 'var' + (Object.keys(n.assignments).length + 1); n.assignments[key] = ''; renderProps(); render(); });
+      sv.appendChild(addv); props.appendChild(sv);
+    }
+    if (n.kind === 'try') {
+      var tbN = (n.body && n.body.nodes && n.body.nodes.length) || 0;
+      var tb = document.createElement('button'); tb.className = 'btn btn--ghost'; tb.type = 'button'; tb.style.width = '100%';
+      tb.textContent = '✏️ Edit protected body (' + tbN + (tbN === 1 ? ' step)' : ' steps)') + ' ↳';
+      tb.addEventListener('click', function () { enterSub(n, 'foreach'); });   // reuse body drill-in
+      props.appendChild(field('Body (visual)', tb));
+      props.appendChild(hint('If anything inside the body fails, the flow jumps to the “On failure” step below and sets {{_error}}.'));
+    }
+    if (['agent', 'action', 'foreach', 'parallel', 'subflow'].indexOf(n.kind) >= 0)
       props.appendChild(field('Output key (optional)', input(n.output, function (v) { n.output = v; }, 'store result under…')));
-    // error handling for work steps: retry then route on failure
+    // error handling: retry (work nodes) then route on failure (work + subflow + try)
     if (n.kind === 'agent' || n.kind === 'action') {
       props.appendChild(field('Retries on failure', input(String(n.retries || ''), function (v) { n.retries = parseInt(v, 10) || 0; }, '0')));
       props.appendChild(field('Timeout (seconds, 0 = none)', input(String(n.timeout || ''), function (v) { n.timeout = parseFloat(v) || 0; }, '0')));
+    }
+    if (['agent', 'action', 'subflow', 'try'].indexOf(n.kind) >= 0) {
       var errOpts = [{ v: '', t: '(none — continue)' }].concat(flow.nodes.filter(function (m) { return m.id !== n.id; }).map(function (m) { return { v: m.id, t: (m.label || m.id) }; }));
       props.appendChild(field('On failure, go to', select(n.on_error || '', errOpts, function (v) { n.on_error = v || null; render(); })));
     }

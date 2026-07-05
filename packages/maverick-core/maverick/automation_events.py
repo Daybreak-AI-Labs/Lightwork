@@ -219,14 +219,25 @@ class HttpJsonSource:
         items_path = str((config or {}).get("items_path") or "")
         newest_first = bool((config or {}).get("newest_first", True))
         headers = {**headers, **self._extra_headers(config)}
-        body = _http_get_json(url, headers=headers)
-        items = _dig(body, items_path) if items_path else body
-        if not isinstance(items, list):
-            raise EventSourceError(
-                "expected a JSON array of items"
-                + (f" at {items_path!r}" if items_path else "")
-            )
-        items = [it for it in items if isinstance(it, dict)]
+        # Pagination: follow ``next_path`` (a dotted path to the next-page URL in
+        # each response) up to ``max_pages``, so a burst larger than one page
+        # doesn't lose the overflow. Off unless next_path is configured.
+        next_path = str((config or {}).get("next_path") or "").strip()
+        max_pages = max(1, int((config or {}).get("max_pages") or 1))
+        items: list = []
+        page_url: str | None = url
+        pages = 0
+        while page_url and pages < max_pages:
+            body = _http_get_json(page_url, headers=headers)
+            page_items = _dig(body, items_path) if items_path else body
+            if not isinstance(page_items, list):
+                raise EventSourceError(
+                    "expected a JSON array of items"
+                    + (f" at {items_path!r}" if items_path else ""))
+            items.extend(it for it in page_items if isinstance(it, dict))
+            pages += 1
+            nxt = _dig(body, next_path) if next_path else None
+            page_url = str(nxt) if (nxt and next_path) else None
         return diff_new_items(items, cursor, id_field, newest_first=newest_first)
 
 
@@ -475,6 +486,27 @@ register("file_dir", FileDirSource)
 # ---- built-in source: watch an IMAP mailbox for new mail -------------------
 
 
+def _email_body_text(msg) -> str:
+    """The first ``text/plain`` part of an email as text, bounded. Falls back to
+    the payload for a non-multipart message. Best-effort decode."""
+    try:
+        if msg.is_multipart():
+            for part in msg.walk():
+                if part.get_content_type() == "text/plain" and \
+                        "attachment" not in str(part.get("Content-Disposition") or ""):
+                    payload = part.get_payload(decode=True)
+                    if payload:
+                        return payload.decode(part.get_content_charset() or "utf-8",
+                                              "replace")[:8000]
+            return ""
+        payload = msg.get_payload(decode=True)
+        if payload:
+            return payload.decode(msg.get_content_charset() or "utf-8", "replace")[:8000]
+    except Exception:  # pragma: no cover -- never let a weird MIME tree break polling
+        return ""
+    return ""
+
+
 def _fetch_imap(config: dict, since_uid: int) -> tuple[list[dict], int]:
     """Fetch messages with UID > ``since_uid`` from an IMAP mailbox. Returns
     ``(messages, highest_uid)`` where each message is a flat header dict. The
@@ -496,6 +528,10 @@ def _fetch_imap(config: dict, since_uid: int) -> tuple[list[dict], int]:
     mailbox = str((config or {}).get("mailbox") or "INBOX")
     port = int((config or {}).get("port") or 993)
     use_ssl = bool((config or {}).get("use_ssl", True))
+    include_body = bool((config or {}).get("include_body", False))
+    # Headers-only is cheaper; fetch the full message only when the flow needs the
+    # body to act on (opt-in), then extract the text/plain part (bounded).
+    fetch_spec = "(RFC822)" if include_body else "(RFC822.HEADER)"
     cls = imaplib.IMAP4_SSL if use_ssl else imaplib.IMAP4
     conn = cls(host, port)
     try:
@@ -508,17 +544,20 @@ def _fetch_imap(config: dict, since_uid: int) -> tuple[list[dict], int]:
         msgs: list[dict] = []
         highest = since_uid
         for uid in sorted(uids)[:_MAX_EVENTS]:
-            typ, mdata = conn.uid("fetch", str(uid), "(RFC822.HEADER)")
+            typ, mdata = conn.uid("fetch", str(uid), fetch_spec)
             if not mdata or not isinstance(mdata[0], tuple):
                 continue
             msg = email.message_from_bytes(mdata[0][1])
-            msgs.append({
+            rec = {
                 "id": str(uid), "uid": uid,
                 "from": parseaddr(msg.get("From", ""))[1],
                 "subject": str(msg.get("Subject", "")),
                 "date": str(msg.get("Date", "")),
                 "message_id": str(msg.get("Message-ID", "")),
-            })
+            }
+            if include_body:
+                rec["body"] = _email_body_text(msg)
+            msgs.append(rec)
             highest = max(highest, uid)
         return msgs, highest
     finally:
@@ -533,8 +572,9 @@ class ImapEmailSource:
     username, password_env, mailbox?, port?, use_ssl?}``. Dedup + ordering by
     IMAP UID (monotonic within a mailbox): the cursor is the highest UID seen, so
     the first poll only records the high-water mark and never replays the inbox.
-    Each event carries ``{uid, from, subject, date, message_id}`` -- the body is
-    deliberately not fetched (headers are enough to route, and cheaper/safer)."""
+    Each event carries ``{uid, from, subject, date, message_id}``; set
+    ``include_body: true`` to also fetch the ``text/plain`` body (opt-in, since it
+    fetches the full message) so a flow can act on the email content."""
     source = "imap_email"
 
     def poll(self, config: dict, cursor: str) -> PollResult:

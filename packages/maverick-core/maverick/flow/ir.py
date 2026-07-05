@@ -30,10 +30,14 @@ NODE_PARALLEL = "parallel"  # fan out branch sub-flows, join their data
 NODE_APPROVAL = "approval"  # human-in-the-loop gate: pause until approved
 NODE_DELAY = "delay"        # wait N seconds, then continue
 NODE_SUBFLOW = "subflow"    # run another saved flow as a nested step (reuse)
+NODE_SWITCH = "switch"      # multi-way route: first matching case wins, else default
+NODE_SETVAR = "setvar"      # set flow-data keys from expressions (compose / loop counter)
+NODE_TRY = "try"            # run an inline body; on ANY failure inside it, route to on_error
 
 NODE_KINDS = frozenset({
     NODE_ACTION, NODE_AGENT, NODE_BRANCH, NODE_FOREACH,
     NODE_PARALLEL, NODE_APPROVAL, NODE_DELAY, NODE_SUBFLOW,
+    NODE_SWITCH, NODE_SETVAR, NODE_TRY,
 })
 _WORK_KINDS = frozenset({NODE_ACTION, NODE_AGENT})
 
@@ -64,6 +68,11 @@ class FlowNode:
     var: str = "item"                # loop variable exposed to the body
     body: Flow | None = None         # sub-flow run once per item
     limit: int = 0                   # cap iterations (0 = no cap); body may set _break
+    concurrency: int = 1             # run up to N iterations at once (1 = sequential)
+    # switch ------------------------------------------------------------------
+    cases: list[dict] = field(default_factory=list)   # [{condition, goto}]; first match wins, else `next`
+    # setvar ------------------------------------------------------------------
+    assignments: dict[str, Any] = field(default_factory=dict)   # {key: expression}; sets flow data
     # parallel ----------------------------------------------------------------
     branches: list[Flow] = field(default_factory=list)   # sub-flows run + joined
     # approval ----------------------------------------------------------------
@@ -100,6 +109,12 @@ class FlowNode:
             d["timeout"] = self.timeout
         if self.limit:
             d["limit"] = self.limit
+        if self.concurrency and self.concurrency != 1:
+            d["concurrency"] = self.concurrency
+        if self.cases:
+            d["cases"] = self.cases
+        if self.assignments:
+            d["assignments"] = self.assignments
         if self.x or self.y:
             d["x"], d["y"] = self.x, self.y
         if self.body is not None:
@@ -119,6 +134,9 @@ class FlowNode:
             if_true=d.get("if_true"), if_false=d.get("if_false"),
             items=str(d.get("items", "")), var=str(d.get("var", "item")),
             limit=int(d.get("limit", 0) or 0),
+            concurrency=int(d.get("concurrency", 1) or 1),
+            cases=[dict(c) for c in (d.get("cases") or []) if isinstance(c, dict)],
+            assignments=dict(d.get("assignments") or {}),
             body=Flow.from_dict(body) if body else None,
             branches=[Flow.from_dict(b) for b in (d.get("branches") or [])],
             prompt=str(d.get("prompt", "")), seconds=float(d.get("seconds", 0.0)),
@@ -241,6 +259,23 @@ class Flow:
             errs.append(f"approval node {n.id!r} has no prompt")
         if n.kind == NODE_SUBFLOW and not n.flow_ref:
             errs.append(f"subflow node {n.id!r} has no flow_ref")
+        if n.kind == NODE_SWITCH:
+            if not n.cases:
+                errs.append(f"switch node {n.id!r} has no cases")
+            for i, c in enumerate(n.cases):
+                if not c.get("condition"):
+                    errs.append(f"switch {n.id!r} case {i}: no condition")
+                goto = c.get("goto")
+                if goto is not None and goto not in self.nodes:
+                    errs.append(f"switch {n.id!r} case {i}: goto -> unknown node {goto!r}")
+        if n.kind == NODE_SETVAR and not n.assignments:
+            errs.append(f"setvar node {n.id!r} has no assignments")
+        if n.kind == NODE_TRY:
+            if n.body is None:
+                errs.append(f"try node {n.id!r} has no body")
+            else:
+                errs.extend(f"try {n.id!r} body: {e}" for e in n.body.validate())
+                errs.extend(f"try {n.id!r} body: {e}" for e in _pause_node_errors(n.body))
         return errs
 
     def is_single_agent(self) -> bool:

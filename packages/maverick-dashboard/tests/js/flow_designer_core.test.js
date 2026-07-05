@@ -106,6 +106,22 @@ test('upstreamOutputs follows on_error routing and survives cycles', () => {
   assert.deepEqual(FDCore.upstreamOutputs(flow, 'h'), ['r']);
 });
 
+test('serializeNode carries switch cases, setvar assignments, foreach concurrency', () => {
+  const sw = FDCore.serializeNode(FDCore.normalizeNode(
+    { id: 's', kind: 'switch', cases: [{ condition: 'x == 1', goto: 'g' }] }, 0));
+  assert.deepEqual(sw.cases, [{ condition: 'x == 1', goto: 'g' }]);
+  const sv = FDCore.serializeNode(FDCore.normalizeNode(
+    { id: 'v', kind: 'setvar', assignments: { n: '{{add(c,1)}}' } }, 0));
+  assert.deepEqual(sv.assignments, { n: '{{add(c,1)}}' });
+  const fe = FDCore.serializeNode(FDCore.normalizeNode(
+    { id: 'f', kind: 'foreach', items: 'r', concurrency: 4 }, 0));
+  assert.equal(fe.concurrency, 4);
+  // concurrency of 1 (the default) is omitted
+  const fe1 = FDCore.serializeNode(FDCore.normalizeNode(
+    { id: 'f', kind: 'foreach', items: 'r', concurrency: 1 }, 0));
+  assert.ok(!('concurrency' in fe1));
+});
+
 test('fitView centers and clamps zoom', () => {
   const v = FDCore.fitView([{ x: 0, y: 0 }, { x: 1000, y: 800 }], 600, 400, 176, 64, 40);
   assert.ok(v.k >= 0.35 && v.k <= 1);

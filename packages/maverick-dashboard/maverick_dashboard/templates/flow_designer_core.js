@@ -5,9 +5,9 @@ var FDCore = (function () {
   'use strict';
   var NODE_DEFAULTS = {
     params: {}, brief: '', tool: '', condition: '', if_true: null, if_false: null,
-    items: '', var: 'item', limit: 0, prompt: '', seconds: 0, flow_ref: '',
+    items: '', var: 'item', limit: 0, concurrency: 1, prompt: '', seconds: 0, flow_ref: '',
     retries: 0, on_error: null, timeout: 0, output: '', label: '',
-    body: null, branches: [], next: null
+    cases: [], assignments: {}, body: null, branches: [], next: null
   };
   var SCALARS = ['next', 'tool', 'brief', 'condition', 'if_true', 'if_false',
     'items', 'var', 'prompt', 'flow_ref', 'on_error', 'output', 'label'];
@@ -35,6 +35,9 @@ var FDCore = (function () {
     if (n.retries) o.retries = n.retries;
     if (n.timeout) o.timeout = n.timeout;
     if (n.limit) o.limit = n.limit;
+    if (n.concurrency && n.concurrency !== 1) o.concurrency = n.concurrency;
+    if (n.cases && n.cases.length) o.cases = n.cases;
+    if (n.assignments && Object.keys(n.assignments).length) o.assignments = n.assignments;
     if (n.body && n.body.nodes && n.body.nodes.length) o.body = serializeFlow(n.body);
     if (n.branches && n.branches.length) {
       var bs = n.branches.map(serializeFlow).filter(function (b) { return b.nodes.length; });
