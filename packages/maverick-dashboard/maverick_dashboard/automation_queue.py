@@ -640,7 +640,7 @@ def _reconcile_flow_crons() -> None:
     live cron gets one seeded. Idempotent -- safe to run on every reconcile."""
     from maverick.flow import store
     from maverick.scheduler import CronError, parse_cron, schedule_cron
-    want: dict[str, str] = {}
+    want: dict[str, tuple[str, str]] = {}
     for f in store.list_flows():
         expr = f.schedule.strip()
         if not expr:
@@ -649,19 +649,21 @@ def _reconcile_flow_crons() -> None:
             parse_cron(expr)          # only arm a valid expression
         except CronError:
             continue
-        want[f.id] = expr
+        want[f.id] = (expr, f.timezone.strip())
     q = queue()
     covered: set[str] = set()
     for j in _pending(FLOW_CRON_KIND):
-        fid = str((j.payload or {}).get("flow_id") or "")
-        expr = str((j.payload or {}).get("__cron__") or "")
-        if want.get(fid) == expr and fid not in covered:
+        p = j.payload or {}
+        fid = str(p.get("flow_id") or "")
+        cur = (str(p.get("__cron__") or ""), str(p.get("__tz__") or ""))
+        if want.get(fid) == cur and fid not in covered:
             covered.add(fid)          # exactly one correct cron per flow; keep it
         else:
-            q.cancel(j.id)            # stale (flow unscheduled, schedule changed, or dup)
-    for fid, expr in want.items():
+            q.cancel(j.id)            # stale (flow unscheduled, schedule/tz changed, or dup)
+    for fid, (expr, tz) in want.items():
         if fid not in covered:
-            schedule_cron(q, expr, FLOW_CRON_KIND, {"flow_id": fid, "__cron__": expr})
+            schedule_cron(q, expr, FLOW_CRON_KIND,
+                          {"flow_id": fid, "__cron__": expr, "__tz__": tz})
 
 
 def _dream_cron() -> str:

@@ -639,6 +639,7 @@
     out.max_seconds = parseFloat((document.getElementById('fd-maxsec') || {}).value) || 0;
     out.max_dollars = parseFloat((document.getElementById('fd-maxdollars') || {}).value) || 0;
     out.schedule = ((document.getElementById('fd-schedule') || {}).value || '').trim();
+    out.timezone = ((document.getElementById('fd-tz') || {}).value || '').trim();
     out.max_concurrent = parseInt((document.getElementById('fd-maxconc') || {}).value, 10) || 0;
     return out;
   }
@@ -653,6 +654,7 @@
     var msEl = document.getElementById('fd-maxsec'); if (msEl) msEl.value = f.max_seconds || '';
     var mdEl = document.getElementById('fd-maxdollars'); if (mdEl) mdEl.value = f.max_dollars || '';
     var schEl = document.getElementById('fd-schedule'); if (schEl) schEl.value = f.schedule || '';
+    var tzEl = document.getElementById('fd-tz'); if (tzEl) tzEl.value = f.timezone || '';
     var mcEl = document.getElementById('fd-maxconc'); if (mcEl) mcEl.value = f.max_concurrent || '';
     (f.nodes || []).forEach(function (nd, i) { flow.nodes.push(normalizeNode(nd, i)); });
     rootFlow = flow;

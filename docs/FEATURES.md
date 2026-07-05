@@ -523,7 +523,9 @@ here.
   foreach can't fan out unbounded cost), a per-flow **concurrency cap**
   (`Flow.max_concurrent`, a lock-guarded slot claim at dispatch that defers an
   overlapping run so a singleton "drain/sync" flow never double-fires its side
-  effects), per-node retries with exponential **backoff** (`retry_backoff`, and
+  effects), a per-flow **schedule timezone** (`Flow.timezone`, an IANA zone so
+  `0 9 * * *` fires at 9am local and follows DST, carried on the cron payload so
+  the worker's re-arm stays correct; `scheduler.next_run(tz=...)`), per-node retries with exponential **backoff** (`retry_backoff`, and
   a raising executor is retried too) / timeout / on-error routing, and **real intra-flow parallel concurrency** (branches run on a bounded
   thread pool with per-branch cycle detection). The live driver (`execution.py`)
   persists a resumable run (`store.py`) with per-node trace, dry-run sandbox

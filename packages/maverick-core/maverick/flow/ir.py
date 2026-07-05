@@ -171,6 +171,7 @@ class Flow:
     max_seconds: float = 0.0         # whole-flow wall-clock deadline (0 = no limit)
     max_dollars: float = 0.0         # aggregate agent spend ceiling for one run (0 = no limit)
     schedule: str = ""               # a cron expression to run this flow on (empty = not scheduled)
+    timezone: str = ""               # IANA zone the schedule is in (empty = UTC)
     owner: str = ""                  # principal that owns this flow (for RBAC + attributing scheduled runs)
     max_concurrent: int = 0          # cap simultaneous in-flight runs of this flow (0 = unlimited)
 
@@ -186,7 +187,7 @@ class Flow:
             "id": self.id, "name": self.name, "start": self.start,
             "version": self.version, "notify": self.notify,
             "max_seconds": self.max_seconds, "max_dollars": self.max_dollars,
-            "schedule": self.schedule, "owner": self.owner,
+            "schedule": self.schedule, "timezone": self.timezone, "owner": self.owner,
             "max_concurrent": self.max_concurrent,
             "nodes": [n.to_dict() for n in self.nodes.values()],
         }
@@ -202,7 +203,8 @@ class Flow:
             notify=bool(d.get("notify", False)),
             max_seconds=float(d.get("max_seconds", 0.0) or 0.0),
             max_dollars=float(d.get("max_dollars", 0.0) or 0.0),
-            schedule=str(d.get("schedule", "")), owner=str(d.get("owner", "")),
+            schedule=str(d.get("schedule", "")), timezone=str(d.get("timezone", "")),
+            owner=str(d.get("owner", "")),
             max_concurrent=int(d.get("max_concurrent", 0) or 0),
         )
 

@@ -110,27 +110,42 @@ def parse_cron(expr: str) -> tuple[set[int], set[int], set[int], set[int], set[i
     return minute, hour, dom, mon, dow
 
 
-def next_run(expr: str, *, after: float | None = None) -> float:
-    """Return the next epoch timestamp matching ``expr`` strictly after
-    ``after`` (default: now). Searches up to ~4 years forward.
+def _resolve_zone(tz: str):
+    """A tzinfo for ``tz`` (an IANA name like 'America/New_York'), or UTC when
+    empty/unknown -- an unrecognized zone must never crash a schedule, just fall
+    back to the historical UTC behaviour."""
+    if not tz:
+        return _dt.timezone.utc
+    try:
+        from zoneinfo import ZoneInfo
+        return ZoneInfo(tz)
+    except Exception:
+        return _dt.timezone.utc
 
-    Cron fields are matched in **UTC** — ``0 0 * * *`` fires at 00:00
-    UTC, not host-local midnight. Pass a UTC epoch for ``after`` (the
-    default uses the current UTC time). Day-of-month and day-of-week
-    follow Vixie cron semantics: if BOTH are restricted (not ``*``), a
-    match on EITHER fires.
+
+def next_run(expr: str, *, after: float | None = None, tz: str = "") -> float:
+    """Return the next epoch timestamp matching ``expr`` strictly after
+    ``after`` (default: now). Searches up to ~9 years forward.
+
+    Cron fields are matched in ``tz`` (an IANA zone name) when given, else in
+    **UTC** — so ``0 9 * * *`` with ``tz='America/New_York'`` fires at 09:00 New
+    York wall-clock (adjusting across DST), not 09:00 UTC. The returned value is
+    always a UTC epoch. Day-of-month and day-of-week follow Vixie cron semantics:
+    if BOTH are restricted (not ``*``), a match on EITHER fires. (Across a DST
+    transition a local schedule at the skipped/doubled hour may fire irregularly
+    that day -- the standard local-cron caveat.)
     """
     minute, hour, dom, mon, dow = parse_cron(expr)
-    # Match cron fields in UTC. Using timezone-aware UTC datetimes makes
-    # the "pass a UTC timestamp for UTC scheduling" contract literally
-    # true AND removes DST hazards: there is no spring-forward/fall-back
-    # in UTC, so the minute-by-minute walk below never lands on a
-    # non-existent or doubled wall-clock minute.
+    # Walk the wall-clock in the target zone: the cron fields (hour/minute/day)
+    # are matched against LOCAL time, and a zone-aware datetime's .timestamp()
+    # yields the correct UTC epoch. UTC (the default) keeps the original
+    # DST-free, contract-exact behaviour.
+    zone = _resolve_zone(tz)
     after_ts = (
         after if after is not None
         else _dt.datetime.now(_dt.timezone.utc).timestamp()
     )
-    base = _dt.datetime.fromtimestamp(after_ts, tz=_dt.timezone.utc)
+    base = _dt.datetime.fromtimestamp(after_ts, tz=zone)
     # Round up to the next whole minute.
     t = base.replace(second=0, microsecond=0) + _dt.timedelta(minutes=1)
 
@@ -178,9 +193,12 @@ def schedule_cron(queue, expr: str, kind: str, payload: dict | None = None,
     """Enqueue ``kind`` at the next time matching ``expr``.
 
     Returns ``(job_id, run_at)``. Pair with a worker that calls
-    ``schedule_cron`` again after each run to make it recurring.
+    ``schedule_cron`` again after each run to make it recurring. A ``__tz__`` key
+    in ``payload`` (an IANA zone name) matches the cron in that zone -- carried on
+    the payload so the worker's re-arm (which reuses it) stays timezone-correct.
     """
-    run_at = next_run(expr, after=after)
+    tz = str((payload or {}).get("__tz__") or "")
+    run_at = next_run(expr, after=after, tz=tz)
     job_id = queue.enqueue(kind, payload or {}, run_at=run_at)
     return job_id, run_at
 
