@@ -77,6 +77,24 @@ def _num(x: Any) -> float:
         return 0.0
 
 
+def _now_utc():
+    import datetime as _dt
+    return _dt.datetime.now(_dt.timezone.utc)
+
+
+def _add_days(value: Any, n: Any) -> str:
+    """``value`` (an ISO date/datetime, or '' for today) plus ``n`` days, as an ISO
+    date (YYYY-MM-DD) -- so "due in 3 days" is ``{{add_days('', 3)}}`` and it
+    orders correctly against other ISO dates. A bad date -> ''."""
+    import datetime as _dt
+    s = str(value or "").strip()
+    try:
+        base = _dt.date.fromisoformat(s[:10]) if s else _now_utc().date()
+        return (base + _dt.timedelta(days=int(_num(n)))).isoformat()
+    except (TypeError, ValueError):
+        return ""
+
+
 def _resolve_secret(name: Any) -> str:
     """Resolve a named secret from the governed provider (file vault / env) at
     render time -- so a connector credential can be `{{secret('STRIPE_KEY')}}` in
@@ -103,6 +121,11 @@ _FUNCS: dict[str, Callable[[list], Any]] = {
     "default": lambda a: (a[0] if (a and a[0] not in (None, "", [], {})) else (a[1] if len(a) > 1 else "")),
     "json": lambda a: (__import__("json").dumps(a[0]) if a else ""),
     "secret": lambda a: _resolve_secret(a[0]) if a else "",
+    # date/time (UTC): enable "due in N days" / "older than a week" workflows,
+    # ISO-formatted so they order correctly with the lexical comparison above.
+    "now": lambda a: _now_utc().isoformat(timespec="seconds"),
+    "today": lambda a: _now_utc().date().isoformat(),
+    "add_days": lambda a: _add_days(a[0], a[1]) if len(a) >= 2 else "",
     "first": lambda a: (a[0][0] if a and isinstance(a[0], (list, tuple)) and a[0] else ""),
     "last": lambda a: (a[0][-1] if a and isinstance(a[0], (list, tuple)) and a[0] else ""),
     # arithmetic

@@ -47,6 +47,30 @@ class TestConditionComposition:
         assert eval_condition(c, {"tier": "silver", "amount": 2000, "region": "US"}) is False
 
 
+class TestDateFunctions:
+    def test_today_is_an_iso_date(self):
+        import datetime as dt
+        assert render("{{today()}}", {}) == dt.datetime.now(dt.timezone.utc).date().isoformat()
+
+    def test_add_days_from_a_given_date(self):
+        assert render("{{add_days('2026-07-05', 3)}}", {}) == "2026-07-08"
+        assert render("{{add_days('2026-07-05', -5)}}", {}) == "2026-06-30"
+
+    def test_add_days_from_today_when_blank(self):
+        import datetime as dt
+        want = (dt.datetime.now(dt.timezone.utc).date() + dt.timedelta(days=2)).isoformat()
+        assert render("{{add_days('', 2)}}", {}) == want
+
+    def test_date_helpers_compose_with_ordering(self):
+        # "is this due date within the next 3 days?" -- add_days + lexical compare
+        d = {"due": "2026-07-05"}
+        assert eval_condition("due <= '2026-07-08'", d) is True
+        assert eval_condition("due <= '2026-07-04'", d) is False
+
+    def test_bad_date_is_empty(self):
+        assert render("{{add_days('not-a-date', 3)}}", {}) == ""
+
+
 class TestOrderingComparisons:
     def test_iso_date_strings_order_lexically(self):
         # the footgun: a date compare used to force float() and silently be False
