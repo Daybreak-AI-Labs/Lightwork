@@ -42,6 +42,51 @@ class TestRetryAndOnError:
         res = run_flow(f, agent_fn=lambda *a: ("x", 1.0), action_fn=lambda *a: ("ERROR", 0.0))
         assert res.data.get("done") == "x"                            # legacy march-on kept
 
+    def test_a_raising_executor_is_retried_not_instantly_fatal(self):
+        # Before: a hard exception bypassed retries and killed the run at attempt 1.
+        calls = {"n": 0}
+
+        def action(node, params, data):
+            calls["n"] += 1
+            if calls["n"] < 3:
+                raise RuntimeError("transient boom")
+            return ("ok", 1.0)
+        f = _flow([FlowNode(id="a", kind="action", tool="t", retries=3, output="r")])
+        res = run_flow(f, agent_fn=lambda *a: ("", None), action_fn=action)
+        assert res.status == STATUS_COMPLETED and calls["n"] == 3 and res.data["r"] == "ok"
+
+    def test_a_persistently_raising_executor_stays_terminal_after_retries(self):
+        calls = {"n": 0}
+
+        def action(node, params, data):
+            calls["n"] += 1
+            raise RuntimeError("always boom")
+        f = _flow([FlowNode(id="a", kind="action", tool="t", retries=2)])
+        res = run_flow(f, agent_fn=lambda *a: ("", None), action_fn=action)
+        assert res.status == "failed" and res.cursor == "a"           # still records WHERE
+        assert calls["n"] == 3                                        # 1 + 2 retries
+
+    def test_retry_backoff_waits_between_attempts(self, monkeypatch):
+        slept = []
+        monkeypatch.setattr("maverick.flow.runner.time.sleep", lambda s: slept.append(s))
+        calls = {"n": 0}
+
+        def action(node, params, data):
+            calls["n"] += 1
+            return ("ok", 1.0) if calls["n"] >= 3 else ("ERROR", 0.0)
+        f = _flow([FlowNode(id="a", kind="action", tool="t", retries=3,
+                            retry_backoff=2.0, output="r")])
+        res = run_flow(f, agent_fn=lambda *a: ("", None), action_fn=action)
+        assert res.status == STATUS_COMPLETED
+        assert slept == [2.0, 4.0]        # exponential: 2*2^0 before retry 1, 2*2^1 before retry 2
+
+    def test_no_backoff_never_sleeps(self, monkeypatch):
+        slept = []
+        monkeypatch.setattr("maverick.flow.runner.time.sleep", lambda s: slept.append(s))
+        f = _flow([FlowNode(id="a", kind="action", tool="t", retries=2, output="r")])
+        run_flow(f, agent_fn=lambda *a: ("", None), action_fn=lambda *a: ("ERROR", 0.0))
+        assert slept == []                # backoff 0 -> tight loop, no added latency
+
 
 class TestSubflow:
     def _child(self):

@@ -60,7 +60,8 @@ def _fire_flow(trig, events, owner, fire_flow, summary) -> None:
         data = dict(trig.get("params") or {})
         for k, v in event.items():   # a flow takes ALL event fields as data (no declared set)
             data[str(k)] = v if isinstance(v, (int, float, bool)) else str(v)[:2000]
-        run_id = fire_flow(flow_id, data, owner, _event_key(trig["name"], event))
+        run_id = fire_flow(flow_id, data, owner, _event_key(trig["name"], event),
+                           f"event:{trig['name']}")
         if run_id:
             summary["fired_flows"].append(run_id)
 
@@ -104,7 +105,7 @@ def _deliver(world, trig, res, owner, fire, fire_flow, summary) -> bool:
 
 def poll_and_fire(world: Any, triggers: list[dict], *, principal: str = "",
                   fire: Callable[[int], None],
-                  fire_flow: Callable[[str, dict, str, str], Any] | None = None) -> list[dict]:
+                  fire_flow: Callable[..., Any] | None = None) -> list[dict]:
     """Poll each trigger and fire its target (template->goal, or flow) per new
     event. Returns a summary per trigger: ``{name, new_events, fired: [goal_id...],
     fired_flows: [run_id...], notes, poll_error}``. Never raises for a single bad

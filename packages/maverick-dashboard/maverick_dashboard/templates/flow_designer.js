@@ -5,15 +5,16 @@
   var W = 176, H = 64;                 // node card size
   var KIND_ICON = { agent: '🧠', action: '⚙️', branch: '🔀', switch: '🔃',
                     foreach: '🔁', while: '🔄', parallel: '🔱', approval: '✅',
-                    delay: '⏱', wait_event: '📥', scope: '🛡', subflow: '📎' };
+                    delay: '⏱', wait_event: '📥', scope: '🛡', subflow: '📎', setvar: '📝' };
   var BODY_KINDS = { foreach: '🔁 loop body', while: '🔄 while body', scope: '🛡 try body' };
 
   var flow = { id: '', name: '', start: '', nodes: [] };
   var rootFlow = flow;  // the top-level flow (save/run/history operate on this)
   var stack = [];       // drill-in frames: {flow, selected} for each level above root
   var crumbs = ['Main flow'];   // breadcrumb labels; length === stack.length + 1
-  var proposals = {};   // node_id -> {to_kind, reason} from grounded per-node outcomes
+  var proposals = {};   // node_id -> {to_kind, reason, inferred_tool} from grounded per-node outcomes
   var impacts = {};     // node_id -> {changed, applied, impact} measured before/after a rewrite
+  var signals = { nodes: {}, trigger: null };   // grounded per-node stats + trigger reliability
   var runState = {};    // node_id -> {status, outcome} from the last/live run
   var runCursor = null; // node a paused run is waiting on
   var toolCatalog = {}; // tool name -> {description, params[]} for the action picker
@@ -106,6 +107,9 @@
     if (n.kind === 'wait_event') return trunc(n.prompt || '(wait for event)', 30);
     if (n.kind === 'scope') return 'try ' + (((n.body || {}).nodes || []).length) + ' step(s)';
     if (n.kind === 'subflow') return '↳ ' + trunc(n.flow_ref || '(flow)', 24);
+    if (n.kind === 'switch') return (n.cases ? n.cases.length : 0) + ' cases';
+    if (n.kind === 'setvar') return 'set ' + trunc(Object.keys(n.assignments || {}).join(', ') || '…', 22);
+    if (n.kind === 'try') return 'try / catch';
     return n.kind;
   }
   function ports(n) {
@@ -635,6 +639,7 @@
       props.appendChild(field('Items (data key with a list)', input(n.items, function (v) { n.items = v; render(); }, 'rows')));
       props.appendChild(field('Loop variable', input(n.var, function (v) { n.var = v; }, 'item')));
       props.appendChild(field('Max iterations (0 = all)', input(String(n.limit || ''), function (v) { n.limit = parseInt(v, 10) || 0; }, '0')));
+      props.appendChild(field('Concurrency (1 = one at a time)', input(String(n.concurrency || ''), function (v) { n.concurrency = parseInt(v, 10) || 1; }, '1')));
       var bodyN = (n.body && n.body.nodes && n.body.nodes.length) || 0;
       var eb = document.createElement('button'); eb.className = 'btn btn--ghost'; eb.type = 'button';
       eb.style.width = '100%'; eb.textContent = '✏️ Edit loop body (' + bodyN + (bodyN === 1 ? ' step)' : ' steps)') + ' ↳';
@@ -682,12 +687,34 @@
       props.appendChild(field('Flow to run (saved flow id)', input(n.flow_ref, function (v) { n.flow_ref = v; render(); }, 'onboard-customer')));
       props.appendChild(hint('Runs another saved flow here, sharing this flow’s data. Cyclic references are blocked.'));
     }
-    if (['agent', 'action', 'foreach', 'parallel', 'while', 'approval'].indexOf(n.kind) >= 0)
+    if (n.kind === 'setvar') {
+      var sv = document.createElement('div'); sv.className = 'field';
+      var svl = document.createElement('label'); svl.textContent = 'Set data keys (value can use {{…}})'; sv.appendChild(svl);
+      n.assignments = n.assignments || {};
+      Object.keys(n.assignments).forEach(function (k) {
+        var rowv = document.createElement('div'); rowv.style.display = 'flex'; rowv.style.gap = '4px'; rowv.style.marginBottom = '4px';
+        var keyIn = input(k, null, 'key'); keyIn.style.flex = '1';
+        keyIn.addEventListener('change', function () { var nv = keyIn.value.trim(); if (nv && nv !== k) { n.assignments[nv] = n.assignments[k]; delete n.assignments[k]; renderProps(); } });
+        var valIn = input(n.assignments[k], function (v) { n.assignments[k] = v; }, '{{add(count,1)}}'); valIn.style.flex = '2';
+        var rm = document.createElement('button'); rm.className = 'btn btn--ghost'; rm.type = 'button'; rm.textContent = '🗑';
+        rm.addEventListener('click', function () { delete n.assignments[k]; renderProps(); render(); });
+        rowv.appendChild(keyIn); rowv.appendChild(valIn); rowv.appendChild(rm); sv.appendChild(rowv);
+      });
+      var addv = document.createElement('button'); addv.className = 'btn btn--ghost'; addv.type = 'button'; addv.style.width = '100%';
+      addv.textContent = '+ Add assignment';
+      addv.addEventListener('click', function () { var key = 'var' + (Object.keys(n.assignments).length + 1); n.assignments[key] = ''; renderProps(); render(); });
+      sv.appendChild(addv); props.appendChild(sv);
+    }
+    if (['agent', 'action', 'foreach', 'parallel', 'while', 'approval', 'subflow'].indexOf(n.kind) >= 0)
       props.appendChild(field('Output key (optional)', input(n.output, function (v) { n.output = v; }, 'store result under…')));
-    // error handling for work steps: retry then route on failure
+    // error handling: retry (work nodes) then route on failure (work + subflow;
+    // a scope node's catch arm is edited in its own props block above)
     if (n.kind === 'agent' || n.kind === 'action') {
       props.appendChild(field('Retries on failure', input(String(n.retries || ''), function (v) { n.retries = parseInt(v, 10) || 0; }, '0')));
+      props.appendChild(field('Retry backoff (base seconds, 0 = no wait)', input(String(n.retry_backoff || ''), function (v) { n.retry_backoff = parseFloat(v) || 0; }, '0')));
       props.appendChild(field('Timeout (seconds, 0 = none)', input(String(n.timeout || ''), function (v) { n.timeout = parseFloat(v) || 0; }, '0')));
+    }
+    if (['agent', 'action', 'subflow'].indexOf(n.kind) >= 0) {
       var errOpts = [{ v: '', t: '(none — continue)' }].concat(flow.nodes.filter(function (m) { return m.id !== n.id; }).map(function (m) { return { v: m.id, t: (m.label || m.id) }; }));
       props.appendChild(field('On failure, go to', select(n.on_error || '', errOpts, function (v) { n.on_error = v || null; render(); })));
     }
@@ -700,6 +727,16 @@
         : (rs.status || '') + (rs.outcome != null ? ' (' + (rs.outcome === 1 ? 'ok' : 'failed') + ')' : ''))
         + (rs && rs.seconds != null ? ' · ' + rs.seconds + 's' : '') + ' ' + badge;
       props.appendChild(rl);
+    }
+    // grounded signal for this node across ALL its runs (not just the last):
+    // an approval's human accept-rate, a work node's success rate.
+    var sig = signals.nodes[n.id];
+    if (sig && sig.n) {
+      var sl = document.createElement('p'); sl.className = 'fd__empty'; sl.style.marginTop = 'var(--space-2)';
+      var pct = Math.round(sig.mean * 100);
+      if (n.kind === 'approval') sl.textContent = '🧑‍⚖️ humans approved ' + pct + '% of ' + sig.n + ' decisions';
+      else sl.textContent = '📊 succeeds ' + pct + '% over ' + sig.n + ' runs';
+      props.appendChild(sl);
     }
     // measured impact of a prior self-rewrite on this node (before vs. after)
     var imp = impacts[n.id];
@@ -720,7 +757,8 @@
       pl.textContent = '💡 ' + prop.reason;
       // Persisted apply: saves a new version + logs the change so its impact is measured.
       var pb = document.createElement('button'); pb.className = 'btn btn--primary'; pb.type = 'button';
-      pb.textContent = 'Apply & track (→ ' + prop.to_kind + ')';
+      pb.textContent = 'Apply & track (→ ' + prop.to_kind
+        + (prop.inferred_tool ? ' · ' + prop.inferred_tool : '') + ')';
       pb.addEventListener('click', function () { applyProposal(n, prop); });
       pbox.appendChild(pl); pbox.appendChild(pb); props.appendChild(pbox);
     }
@@ -803,17 +841,23 @@
     out.max_seconds = parseFloat((document.getElementById('fd-maxsec') || {}).value) || 0;
     out.max_dollars = parseFloat((document.getElementById('fd-maxdollars') || {}).value) || 0;
     out.schedule = ((document.getElementById('fd-schedule') || {}).value || '').trim();
+    out.timezone = ((document.getElementById('fd-tz') || {}).value || '').trim();
+    out.max_concurrent = parseInt((document.getElementById('fd-maxconc') || {}).value, 10) || 0;
     return out;
   }
   function fromApiFlow(f) {
     runState = {}; runCursor = null; impacts = {};
     stack = []; crumbs = ['Main flow']; renderCrumbs();
+    signals = { nodes: {}, trigger: null };
+    var sigEl = document.getElementById('fd-signal'); if (sigEl) sigEl.hidden = true;
     var lg = document.getElementById('fd-legend'); if (lg) lg.classList.remove('on');
     flow = { id: f.id || '', name: f.name || '', start: f.start || '', nodes: [], max_seconds: f.max_seconds || 0 };
     var notifyEl = document.getElementById('fd-notify'); if (notifyEl) notifyEl.checked = !!f.notify;
     var msEl = document.getElementById('fd-maxsec'); if (msEl) msEl.value = f.max_seconds || '';
     var mdEl = document.getElementById('fd-maxdollars'); if (mdEl) mdEl.value = f.max_dollars || '';
     var schEl = document.getElementById('fd-schedule'); if (schEl) schEl.value = f.schedule || '';
+    var tzEl = document.getElementById('fd-tz'); if (tzEl) tzEl.value = f.timezone || '';
+    var mcEl = document.getElementById('fd-maxconc'); if (mcEl) mcEl.value = f.max_concurrent || '';
     (f.nodes || []).forEach(function (nd, i) { flow.nodes.push(normalizeNode(nd, i)); });
     rootFlow = flow;
     autoLayout();
@@ -956,7 +1000,9 @@
     var ok = 0, err = 0, ns = run.nodes || {};
     for (var k in ns) { if (ns[k].outcome === 1) ok++; else if (ns[k].outcome === 0) err++; }
     var head = run.status === 'completed' ? '✓ completed' : (run.status === 'rejected' ? '✋ rejected' : '⚠ ' + (run.error || run.status));
-    return head + ' · ' + ok + ' ok' + (err ? ', ' + err + ' failed' : '');
+    var cost = run.cost_dollars ? ' · $' + Number(run.cost_dollars).toFixed(2) : '';
+    var origin = (run.origin && run.origin !== 'manual') ? ' · via ' + run.origin : '';
+    return head + ' · ' + ok + ' ok' + (err ? ', ' + err + ' failed' : '') + cost + origin;
   }
   function draft() {
     var desc = document.getElementById('fd-nl').value.trim();
@@ -998,15 +1044,32 @@
         });
         if (selected) renderProps();
       }).catch(function () {});
+    // grounded learning signals: per-node success, approval accept-rate, trigger reliability
+    apiFetch('/api/v1/flows/' + encodeURIComponent(id) + '/signals').then(function (r) {
+      return r.ok ? r.json() : { nodes: {}, trigger: null };
+    }).then(function (j) {
+      signals = { nodes: j.nodes || {}, trigger: j.trigger || null };
+      var lg = document.getElementById('fd-signal');
+      if (lg) {
+        if (signals.trigger && signals.trigger.n) {
+          lg.textContent = '📊 triggered runs succeed ' + Math.round(signals.trigger.mean * 100) +
+            '% (' + signals.trigger.n + ')';
+          lg.hidden = false;
+        } else { lg.hidden = true; }
+      }
+      if (selected) renderProps();
+    }).catch(function () {});
   }
   function applyProposal(n, prop) {
     // Persisted apply: save the current graph, then enact the swap server-side so
-    // it becomes a new version and its before/after impact is measured.
-    if (prop.to_kind === 'action' && !n.tool) {
+    // it becomes a new version and its before/after impact is measured. Hardening
+    // needs a tool: the node's own, else the one the loop inferred it keeps calling.
+    var tool = n.tool || (prop.inferred_tool || '');
+    if (prop.to_kind === 'action' && !tool) {
       say('Give this step a Tool first, then Apply (an action needs one).', true); return;
     }
     save(function () {
-      var body = { node_id: n.id, to_kind: prop.to_kind, tool: n.tool || '', brief: n.brief || n.label || '' };
+      var body = { node_id: n.id, to_kind: prop.to_kind, tool: tool, brief: n.brief || n.label || '' };
       apiFetch('/api/v1/flows/' + encodeURIComponent(rootFlow.id) + '/apply', { method: 'POST', body: JSON.stringify(body) })
         .then(function (r) { return r.json().then(function (j) { return { ok: r.ok, j: j }; }); })
         .then(function (res) {

@@ -38,7 +38,7 @@
   .k-foreach { fill: #7c3aed; } .k-parallel { fill: #db2777; } .k-approval { fill: #16a34a; }
   .k-delay { fill: #64748b; } .k-subflow { fill: #0d9488; }
   .k-switch { fill: #b45309; } .k-while { fill: #8b5cf6; } .k-wait_event { fill: #0369a1; }
-  .k-scope { fill: #4d7c0f; }
+  .k-scope { fill: #4d7c0f; } .k-setvar { fill: #4f46e5; }
   /* live run overlay */
   .fd-node.run-ok rect.card { stroke: var(--success, #16a34a); stroke-width: 2.5; }
   .fd-node.run-err rect.card { stroke: var(--danger, #dc2626); stroke-width: 2.5; }
@@ -111,7 +111,9 @@
     </label>
     <input class="input" id="fd-maxsec" type="number" min="0" placeholder="Max sec" aria-label="Flow deadline in seconds" style="width:90px;" title="Whole-flow wall-clock deadline (0 = none)" />
     <input class="input" id="fd-maxdollars" type="number" min="0" step="0.5" placeholder="Max $" aria-label="Flow agent budget in dollars" style="width:80px;" title="Aggregate agent spend ceiling for one run (0 = none)" />
-    <input class="input" id="fd-schedule" placeholder="Schedule (cron)" aria-label="Cron schedule" style="width:130px;" title="Run on a schedule, e.g. '0 9 * * 1' (Mondays 9am UTC). Blank = manual/trigger only." />
+    <input class="input" id="fd-schedule" placeholder="Schedule (cron)" aria-label="Cron schedule" style="width:130px;" title="Run on a schedule, e.g. '0 9 * * 1' (Mondays 9am). Blank = manual/trigger only." />
+    <input class="input" id="fd-tz" placeholder="Timezone" aria-label="Schedule timezone" style="width:130px;" title="IANA zone for the schedule, e.g. 'America/New_York'. Blank = UTC. Adjusts across DST." />
+    <input class="input" id="fd-maxconc" type="number" min="0" placeholder="Max runs" aria-label="Max concurrent runs" style="width:90px;" title="Cap simultaneous runs of this flow (0 = unlimited). Set 1 for a singleton that must never overlap itself." />
     <button class="btn" type="button" id="fd-save">Save</button>
     <button class="btn btn--ghost" type="button" id="fd-run" title="Mock run: no real goals or connector calls">▷ Test (dry)</button>
     <button class="btn btn--ghost" type="button" id="fd-run-real" title="Runs real agents and connectors">Run for real</button>
@@ -125,6 +127,7 @@
     <input type="file" id="fd-import-file" accept=".json,application/json" hidden aria-label="Flow JSON file" />
     <button class="btn btn--ghost" type="button" id="fd-chat-toggle" title="Build and fix this flow by chatting">💬 Copilot</button>
     <span class="fd__msg" id="fd-msg" aria-live="polite"></span>
+    <span class="fd__msg" id="fd-signal" hidden title="Share of triggered runs that completed successfully"></span>
     <span class="fd__legend" id="fd-legend" aria-hidden="true">
       <span>🟢 ok</span><span>🔴 failed</span><span>🟠 branch/step</span><span>⏳ waiting</span>
     </span>
@@ -146,6 +149,8 @@
     <button class="btn btn--ghost" type="button" data-add="parallel">🔱 Parallel</button>
     <button class="btn btn--ghost" type="button" data-add="scope">🛡 Try/catch</button>
     <button class="btn btn--ghost" type="button" data-add="subflow">📎 Sub-flow</button>
+    <button class="btn btn--ghost" type="button" data-add="switch">🔃 Switch</button>
+    <button class="btn btn--ghost" type="button" data-add="setvar">📝 Set data</button>
   </div>
 
   <div class="fd__canvas-wrap">

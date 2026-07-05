@@ -31,6 +31,7 @@ from .ir import (
     NODE_FOREACH,
     NODE_PARALLEL,
     NODE_SCOPE,
+    NODE_SETVAR,
     NODE_SUBFLOW,
     NODE_SWITCH,
     NODE_WAIT,
@@ -91,6 +92,37 @@ def _num(x: Any) -> float:
         return 0.0
 
 
+def _now_utc():
+    import datetime as _dt
+    return _dt.datetime.now(_dt.timezone.utc)
+
+
+def _add_days(value: Any, n: Any) -> str:
+    """``value`` (an ISO date/datetime, or '' for today) plus ``n`` days, as an ISO
+    date (YYYY-MM-DD) -- so "due in 3 days" is ``{{add_days('', 3)}}`` and it
+    orders correctly against other ISO dates. A bad date -> ''."""
+    import datetime as _dt
+    s = str(value or "").strip()
+    try:
+        base = _dt.date.fromisoformat(s[:10]) if s else _now_utc().date()
+        return (base + _dt.timedelta(days=int(_num(n)))).isoformat()
+    except (TypeError, ValueError):
+        return ""
+
+
+def _resolve_secret(name: Any) -> str:
+    """Resolve a named secret from the governed provider (file vault / env) at
+    render time -- so a connector credential can be `{{secret('STRIPE_KEY')}}` in
+    an action param WITHOUT the raw value living in the flow definition or the
+    persisted run data (it only ever materializes in the transient rendered call).
+    Missing -> '' (never raises, never the literal key)."""
+    try:
+        from ..secret_provider import get_secret
+        return get_secret(str(name)) or ""
+    except Exception:  # pragma: no cover -- a secret lookup must never break a render
+        return ""
+
+
 # Safe transform functions usable inside {{ }} -- no eval, pure string/collection/
 # arithmetic helpers. Each takes the evaluated arg list.
 _FUNCS: dict[str, Callable[[list], Any]] = {
@@ -103,6 +135,12 @@ _FUNCS: dict[str, Callable[[list], Any]] = {
     "replace": lambda a: (str(a[0]).replace(str(a[1]), str(a[2])) if len(a) >= 3 else (str(a[0]) if a else "")),
     "default": lambda a: (a[0] if (a and a[0] not in (None, "", [], {})) else (a[1] if len(a) > 1 else "")),
     "json": lambda a: (__import__("json").dumps(a[0]) if a else ""),
+    "secret": lambda a: _resolve_secret(a[0]) if a else "",
+    # date/time (UTC): enable "due in N days" / "older than a week" workflows,
+    # ISO-formatted so they order correctly with the lexical comparison above.
+    "now": lambda a: _now_utc().isoformat(timespec="seconds"),
+    "today": lambda a: _now_utc().date().isoformat(),
+    "add_days": lambda a: _add_days(a[0], a[1]) if len(a) >= 2 else "",
     "first": lambda a: (a[0][0] if a and isinstance(a[0], (list, tuple)) and a[0] else ""),
     "last": lambda a: (a[0][-1] if a and isinstance(a[0], (list, tuple)) and a[0] else ""),
     # arithmetic
@@ -217,11 +255,25 @@ def _eval_predicate(expr: str, data: dict) -> bool:
             return lhs != rhs
         if op == "contains":
             return str(rhs) in str(lhs) if lhs is not None else False
-        # numeric comparisons; non-numeric operands are never ordered-true
-        lf, rf = float(lhs), float(rhs)  # type: ignore[arg-type]
-        return {">": lf > rf, "<": lf < rf, ">=": lf >= rf, "<=": lf <= rf}[op]
+        # Ordering: numeric when BOTH sides are numbers, else lexical -- so an ISO
+        # date/string comparison (`created >= '2026-01-01'`) is honoured instead of
+        # silently false. A None lhs (missing key) is never ordered-true.
+        if lhs is None:
+            return False
+        lo, ro = _order_operands(lhs, rhs)
+        return {">": lo > ro, "<": lo < ro, ">=": lo >= ro, "<=": lo <= ro}[op]
     except (TypeError, ValueError):
         return False
+
+
+def _order_operands(lhs: Any, rhs: Any) -> tuple[Any, Any]:
+    """Coerce a pair for an ordering comparison: floats when both parse as numbers
+    (so `10 > 9` isn't the string-wise `'10' > '9'` == False), else strings (so
+    dates and other text order lexically instead of raising / being dropped)."""
+    try:
+        return float(lhs), float(rhs)
+    except (TypeError, ValueError):
+        return str(lhs), str(rhs)
 
 
 _AND_OR = re.compile(r"\s+(?:and|or)\s+", re.IGNORECASE)
@@ -338,14 +390,34 @@ def _invoke_work(node: FlowNode, data: dict, ctx: _Ctx):
         return (f"ERROR: node timed out after {node.timeout}s", 0.0)
 
 
+_MAX_RETRY_BACKOFF = 30.0   # cap a single backoff wait so a big N can't stall a worker
+
+
 def _run_work(node: FlowNode, data: dict, ctx: _Ctx) -> str | None:
-    result, outcome = _invoke_work(node, data, ctx)
-    # Retry a failed work node (outcome 0.0) up to `retries` more times -- a
-    # transient tool/agent failure gets another attempt before we give up.
-    tries = 0
-    while outcome == 0.0 and tries < max(0, node.retries):
-        tries += 1
-        result, outcome = _invoke_work(node, data, ctx)
+    # Retry a failed work node up to `retries` more times -- a transient tool/agent
+    # failure (outcome 0.0) OR a hard exception from the executor gets another
+    # attempt before we give up. With `retry_backoff` set, wait an exponentially
+    # growing interval between attempts (capped) instead of re-hammering instantly;
+    # backoff 0 keeps the original tight loop (and adds no sleep to existing flows).
+    backoff = max(0.0, node.retry_backoff)
+    result: Any = None
+    outcome: float | None = None
+    last_exc: Exception | None = None
+    for attempt in range(max(0, node.retries) + 1):
+        if attempt and backoff:
+            time.sleep(min(_MAX_RETRY_BACKOFF, backoff * (2 ** (attempt - 1))))
+        try:
+            result, outcome = _invoke_work(node, data, ctx)
+            last_exc = None
+        except Exception as e:   # a raising executor is a retryable failure, not instant death
+            last_exc, outcome = e, 0.0
+            continue
+        if outcome != 0.0:
+            break
+    # A hard exception that survived every retry stays terminal (records WHERE it
+    # failed via _NodeError up the chain) -- retries buy attempts, not silence.
+    if last_exc is not None:
+        raise last_exc
     if node.output:
         data[node.output] = result
     ctx.on_node(node, "done", outcome)
@@ -365,11 +437,19 @@ def _run_subflow(node: FlowNode, data: dict, ctx: _Ctx) -> str | None:
     # its outputs flow back. Nested: it cannot pause (v1 -- HITL lives up top). The
     # flow id is on the stack for its duration so a cyclic reference is caught.
     ctx.flow_stack.add(sub.id)
+    before = set(data)
     try:
         _run_chain(sub, data, ctx.nested(), sub.start)
     finally:
         ctx.flow_stack.discard(sub.id)
-    ctx.on_node(node, "done", None)
+    # Capture the subflow's return -- the keys it ADDED -- under node.output, so a
+    # reusable subflow's result can be referenced by name instead of only leaking
+    # into the shared data dict by side effect.
+    if node.output:
+        data[node.output] = {k: data[k] for k in data if k not in before}
+    # Ground success as 1.0 (failure already grounds 0.0 above), so a subflow
+    # node has a symmetric success-rate signal the self-rewrite loop can measure.
+    ctx.on_node(node, "done", 1.0)
     return node.next
 
 
@@ -378,6 +458,9 @@ def _run_branch(node: FlowNode, data: dict, ctx: _Ctx) -> str | None:
     ctx.on_node(node, "true" if took else "false", None)
     nxt = node.if_true if took else node.if_false
     return nxt if nxt is not None else node.next
+
+
+_FOREACH_DEFAULT_CAP = 1000   # runaway guard when a foreach sets no explicit limit
 
 
 def _run_switch(node: FlowNode, data: dict, ctx: _Ctx) -> str | None:
@@ -446,6 +529,12 @@ def _run_foreach(node: FlowNode, data: dict, ctx: _Ctx) -> str | None:
     items = list(_dig(data, node.items) or [])
     if node.limit and node.limit > 0:
         items = items[:node.limit]          # cap iterations (a runaway-list guard)
+    elif len(items) > _FOREACH_DEFAULT_CAP:
+        # No explicit limit: a foreach of action nodes has no per-node budget gate
+        # (that wraps agents only), so bound the fan-out to a safe default and
+        # SURFACE the truncation rather than silently firing 10k+ connector calls.
+        items = items[:_FOREACH_DEFAULT_CAP]
+        data["_foreach_truncated"] = True
     results = []
     if node.concurrent and len(items) > 1:
         # Concurrent iteration: each item gets an isolated data copy and its own
@@ -471,7 +560,12 @@ def _run_foreach(node: FlowNode, data: dict, ctx: _Ctx) -> str | None:
             sub[node.var] = item
             _run_chain(node.body, sub, ctx.nested(), node.body.start)
             results.append(sub)      # per-iteration data snapshot (body outputs included)
-            if sub.get("_break"):    # the body asked to stop early
+            if node.output:
+                # Publish partial results after EACH iteration, so a whole-flow
+                # deadline or a failure mid-loop keeps the batch's completed work
+                # (run_flow returns the data as-of the abort) instead of losing it.
+                data[node.output] = list(results)
+            if sub.get("_break"):    # the body asked to stop early (sequential only)
                 break
     if node.output:
         data[node.output] = results
@@ -510,9 +604,22 @@ def _run_parallel(node: FlowNode, data: dict, ctx: _Ctx) -> str | None:
     return node.next
 
 
+def _approval_outcome(decision: str) -> float | None:
+    # A decided approval is the highest-value grounded HUMAN signal: which gates
+    # humans keep rejecting (rework them) vs. rubber-stamp (automate them away).
+    # A still-pending pause is not yet a decision, so it grounds nothing.
+    if decision == "approved":
+        return 1.0
+    if decision == "rejected":
+        return 0.0
+    return None
+
+
 def _run_approval(node: FlowNode, data: dict, ctx: _Ctx) -> str | None:
     decision = ctx.approve_fn(node, data) if ctx.approve_fn else "pending"
-    ctx.on_node(node, decision, None)
+    # Ground the decided verdict (B7): approved=1.0 / rejected=0.0 / pending=None --
+    # the highest-value human signal for the self-rewrite loop.
+    ctx.on_node(node, decision, _approval_outcome(decision))
     # "approved" -- or any verdict the node explicitly offers (a choice approval:
     # "ship"/"hold"/"escalate") -- continues; the verdict is recorded to `output`
     # so downstream nodes (a branch/switch) can route on it.
@@ -536,12 +643,24 @@ def _run_delay(node: FlowNode, data: dict, ctx: _Ctx) -> str | None:
     return node.next
 
 
+def _run_setvar(node: FlowNode, data: dict, ctx: _Ctx) -> str | None:
+    """Set flow-data keys from expressions -- the 'compose'/'set variable' step.
+    A string value is rendered (so ``{{add(count,1)}}`` computes a loop counter and
+    ``{{upper(name)}}`` composes a field); a non-string is stored as-is. This is
+    what makes computed state + a while-loop (setvar counter -> branch -> back)
+    expressible in the graph."""
+    for key, expr in (node.assignments or {}).items():
+        data[str(key)] = render(expr, data) if isinstance(expr, str) else expr
+    ctx.on_node(node, "done", None)
+    return node.next
+
+
 _HANDLERS = {
     NODE_AGENT: _run_work, NODE_ACTION: _run_work, NODE_BRANCH: _run_branch,
     NODE_SWITCH: _run_switch, NODE_FOREACH: _run_foreach, NODE_WHILE: _run_while,
     NODE_PARALLEL: _run_parallel, NODE_APPROVAL: _run_approval,
     NODE_DELAY: _run_delay, NODE_WAIT: _run_wait, NODE_SCOPE: _run_scope,
-    NODE_SUBFLOW: _run_subflow,
+    NODE_SUBFLOW: _run_subflow, NODE_SETVAR: _run_setvar,
 }
 
 
@@ -597,6 +716,11 @@ def run_flow(flow: Flow, *, agent_fn: AgentFn, action_fn: ActionFn,
         data = dict(resume.get("data") or data or {})
         node = flow.node(resume.get("node_id"))
         decision = resume.get("decision")
+        # Ground the HUMAN verdict on resume too (B7) -- the approval node's handler
+        # isn't re-run (we resume AFTER it), so without this the decision signal
+        # is lost on the resume path exactly as it is captured on the auto path.
+        if node is not None and decision in ("approved", "rejected"):
+            (on_node or (lambda *_: None))(node, decision, _approval_outcome(decision))
         # The paused/failed node must still exist in this (current) flow version.
         # If an edit or rollback removed or replaced it between pause and resume,
         # fail CLOSED -- silently falling back to flow.start would re-execute the

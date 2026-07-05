@@ -26,6 +26,85 @@ def _save(c, fid="f"):
         "nodes": [{"id": "a", "kind": "agent", "brief": "summarize {{x}}"}]}})
 
 
+def test_auto_apply_softens_a_failing_action_when_enabled(monkeypatch, tmp_path):
+    # B9: with auto_evolve + auto_apply on, a chronically-failing action node is
+    # autonomously softened to an agent -- the forward arrow, gated + soften-only.
+    _isolate(monkeypatch, tmp_path)
+    monkeypatch.setenv("MAVERICK_FLOWS_AUTO", "1")
+    monkeypatch.setattr("maverick.config.get_flows",
+                        lambda: {"auto_evolve": True, "auto_apply": True})
+    from maverick.flow import node_outcomes, store
+    from maverick.flow.ir import Flow, FlowNode
+    store.save_flow(Flow(id="fa", name="F", start="a",
+                         nodes={"a": FlowNode(id="a", kind="action", tool="t", brief="do it")}))
+    for _ in range(12):
+        node_outcomes.record("fa", "a", "action", 0.0)      # it keeps failing
+    from maverick_dashboard import automation_queue as aq
+    monkeypatch.setattr(aq, "_queue", None)
+    aq._handle_flow_evolve()
+    assert store.load_flow("fa").nodes["a"].kind == "agent"  # softened autonomously
+    from maverick.flow import evolution_log
+    assert evolution_log.last_apply("fa", "a")["source"] == "auto-apply"
+
+
+def test_auto_apply_hardens_a_reliable_one_tool_agent_when_tool_inferred(monkeypatch, tmp_path):
+    # The forward HARDEN arrow: a reliably-succeeding agent node that consistently
+    # called one tool is autonomously hardened to a deterministic action calling
+    # that tool -- no human needed once the tool was inferred from captured runs.
+    _isolate(monkeypatch, tmp_path)
+    monkeypatch.setenv("MAVERICK_FLOWS_AUTO", "1")
+    monkeypatch.setattr("maverick.config.get_flows",
+                        lambda: {"auto_evolve": True, "auto_apply": True})
+    from maverick.flow import node_outcomes, node_tools, store
+    from maverick.flow.ir import Flow, FlowNode
+    store.save_flow(Flow(id="fh", name="F", start="a",
+                         nodes={"a": FlowNode(id="a", kind="agent", brief="summarize it")}))
+    for _ in range(20):
+        node_outcomes.record("fh", "a", "agent", 1.0)     # reliably succeeds
+    for _ in range(6):
+        node_tools.record("fh", "a", ["summarize_tool"])  # always the same one tool
+    from maverick_dashboard import automation_queue as aq
+    monkeypatch.setattr(aq, "_queue", None)
+    aq._handle_flow_evolve()
+    hardened = store.load_flow("fh").nodes["a"]
+    assert hardened.kind == "action" and hardened.tool == "summarize_tool"
+
+
+def test_auto_apply_leaves_a_reliable_agent_alone_without_an_inferred_tool(monkeypatch, tmp_path):
+    # No captured tool -> hardening still needs a human to pick one; the loop must
+    # NOT guess, so a reliable agent node with no tool signal is left untouched.
+    _isolate(monkeypatch, tmp_path)
+    monkeypatch.setenv("MAVERICK_FLOWS_AUTO", "1")
+    monkeypatch.setattr("maverick.config.get_flows",
+                        lambda: {"auto_evolve": True, "auto_apply": True})
+    from maverick.flow import node_outcomes, store
+    from maverick.flow.ir import Flow, FlowNode
+    store.save_flow(Flow(id="fn", name="F", start="a",
+                         nodes={"a": FlowNode(id="a", kind="agent", brief="summarize it")}))
+    for _ in range(20):
+        node_outcomes.record("fn", "a", "agent", 1.0)
+    from maverick_dashboard import automation_queue as aq
+    monkeypatch.setattr(aq, "_queue", None)
+    aq._handle_flow_evolve()
+    assert store.load_flow("fn").nodes["a"].kind == "agent"   # untouched
+
+
+def test_auto_apply_off_by_default_leaves_the_flow_alone(monkeypatch, tmp_path):
+    _isolate(monkeypatch, tmp_path)
+    monkeypatch.setenv("MAVERICK_FLOWS_AUTO", "1")           # auto_evolve on, auto_apply OFF
+    monkeypatch.setattr("maverick.config.get_flows", lambda: {"auto_evolve": True})
+    from maverick.flow import node_outcomes, store
+    from maverick.flow.ir import Flow, FlowNode
+    store.save_flow(Flow(id="fb", name="F", start="a",
+                         nodes={"a": FlowNode(id="a", kind="action", tool="t", brief="do it")}))
+    for _ in range(12):
+        node_outcomes.record("fb", "a", "action", 0.0)
+    from maverick_dashboard import automation_queue as aq
+    monkeypatch.setattr(aq, "_queue", None)
+    aq._handle_flow_evolve()
+    assert store.load_flow("fb").nodes["a"].kind == "action"  # untouched
+
+
 def test_apply_hardens_agent_to_action_and_bumps_version(monkeypatch, tmp_path):
     _isolate(monkeypatch, tmp_path)
     c = _client()
@@ -37,6 +116,22 @@ def test_apply_hardens_agent_to_action_and_bumps_version(monkeypatch, tmp_path):
     assert body["version"] == 2 and body["from_kind"] == "agent" and body["to_kind"] == "action"
     node_a = next(n for n in c.get("/api/v1/flows/f").json()["nodes"] if n["id"] == "a")
     assert node_a["kind"] == "action" and node_a["tool"] == "summarize_tool"
+
+
+def test_apply_softens_action_to_agent_without_a_brief(monkeypatch, tmp_path):
+    # The one-click "Apply this improvement" path for a soften: no brief supplied,
+    # so the node's own label/brief becomes the agent brief (no human input needed).
+    _isolate(monkeypatch, tmp_path)
+    c = _client()
+    from maverick.flow import store
+    from maverick.flow.ir import Flow, FlowNode
+    store.save_flow(Flow(id="f", name="F", start="a",
+                         nodes={"a": FlowNode(id="a", kind="action", tool="t",
+                                              label="reconcile the ledger")}))
+    r = c.post("/api/v1/flows/f/apply", json={"node_id": "a", "to_kind": "agent"})
+    assert r.status_code == 200
+    node_a = next(n for n in c.get("/api/v1/flows/f").json()["nodes"] if n["id"] == "a")
+    assert node_a["kind"] == "agent" and node_a["brief"] == "reconcile the ledger"
 
 
 def test_apply_without_tool_is_400(monkeypatch, tmp_path):
@@ -104,6 +199,30 @@ def test_impact_reports_before_after_once_applied(monkeypatch, tmp_path):
     assert body["changed"] is True and body["applied"]["to_kind"] == "action"
     imp = body["impact"]
     assert imp["before"]["n"] + imp["after"]["n"] == 3       # all outcomes accounted for
+
+
+def test_signals_surfaces_approval_and_trigger_stats(monkeypatch, tmp_path):
+    _isolate(monkeypatch, tmp_path)
+    c = _client()
+    c.post("/api/v1/flows", json={"flow": {
+        "id": "s", "name": "S", "start": "g",
+        "nodes": [{"id": "g", "kind": "approval", "prompt": "ok?", "label": "gate"}]}})
+    from maverick.flow import execution, node_outcomes
+    node_outcomes.record("s", "g", "approval", 1.0)          # approved
+    node_outcomes.record("s", "g", "approval", 0.0)          # rejected
+    node_outcomes.record("s", execution.TRIGGER_NODE, "trigger", 1.0)
+    node_outcomes.record("s", execution.TRIGGER_NODE, "trigger", 1.0)
+    body = c.get("/api/v1/flows/s/signals").json()
+    assert body["nodes"]["g"]["mean"] == 0.5 and body["nodes"]["g"]["kind"] == "approval"
+    assert body["nodes"]["g"]["label"] == "gate"
+    assert body["trigger"]["n"] == 2 and body["trigger"]["mean"] == 1.0
+    # the reserved trigger node is not listed among the flow's own nodes
+    assert execution.TRIGGER_NODE not in body["nodes"]
+
+
+def test_signals_unknown_flow_is_404(monkeypatch, tmp_path):
+    _isolate(monkeypatch, tmp_path)
+    assert _client().get("/api/v1/flows/ghost/signals").status_code == 404
 
 
 def test_impact_unchanged_node(monkeypatch, tmp_path):

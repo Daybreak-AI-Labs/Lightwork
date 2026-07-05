@@ -54,6 +54,11 @@ class TestFlowIR:
         assert again.schedule == "0 9 * * 1"
         assert again.validate() == []
 
+    def test_max_concurrent_roundtrips(self):
+        f = _flow([FlowNode(id="a", kind="agent", brief="x")])
+        f.max_concurrent = 1
+        assert Flow.from_dict(f.to_dict()).max_concurrent == 1
+
     def test_invalid_schedule_is_a_validation_error(self):
         f = _flow([FlowNode(id="a", kind="agent", brief="x")])
         f.schedule = "not a cron"

@@ -108,3 +108,66 @@ def test_form_source_requires_token():
 def test_new_sources_are_registered():
     for name in ("file_dir", "imap_email", "form"):
         assert name in ev.available_sources()
+
+
+# ---- imap body (opt-in) -----------------------------------------------------
+
+def test_imap_include_body_is_passed_and_surfaced(monkeypatch):
+    captured = {}
+
+    def fake_fetch(config, since_uid):
+        captured["include_body"] = config.get("include_body")
+        if since_uid == 0:
+            return [], 1
+        return ([{"id": "2", "uid": 2, "from": "a@b.com", "subject": "s",
+                  "date": "", "message_id": "<2>", "body": "hello world"}], 2)
+
+    monkeypatch.setattr(ev, "_fetch_imap", fake_fetch)
+    src = ev.get_source("imap_email")
+    cfg = {"host": "h", "username": "u", "password_env": "P", "include_body": True}
+    base = src.poll(cfg, "")
+    out = src.poll(cfg, base.cursor)
+    assert captured["include_body"] is True
+    assert out.events[0]["body"] == "hello world"
+
+
+def test_email_body_text_extracts_plain_part():
+    import email
+    raw = (b"From: a@b.com\r\nSubject: hi\r\nContent-Type: text/plain\r\n\r\n"
+           b"the body text")
+    msg = email.message_from_bytes(raw)
+    assert ev._email_body_text(msg) == "the body text"
+
+
+# ---- http_json pagination ---------------------------------------------------
+
+def test_http_json_follows_next_page(monkeypatch):
+    pages = {
+        "https://api/x?page=1": {"items": [{"id": "1"}, {"id": "2"}], "next": "https://api/x?page=2"},
+        "https://api/x?page=2": {"items": [{"id": "3"}], "next": None},
+    }
+    monkeypatch.setattr(ev, "_http_get_json", lambda url, headers=None, timeout=15.0: pages[url])
+    src = ev.get_source("http_json")
+    cfg = {"url": "https://api/x?page=1", "items_path": "items", "id_field": "id",
+           "next_path": "next", "max_pages": 5, "newest_first": True}
+    # baseline records the newest across BOTH pages
+    base = src.poll(cfg, "")
+    assert base.cursor == "1"          # newest-first: page1[0] id after full walk
+    # a later poll that finds new items ahead of the cursor fires them
+    pages["https://api/x?page=1"] = {"items": [{"id": "5"}, {"id": "1"}], "next": None}
+    out = src.poll(cfg, base.cursor)
+    assert [e["id"] for e in out.events] == ["5"]
+
+
+def test_http_json_max_pages_caps_the_walk(monkeypatch):
+    calls = []
+
+    def fake(url, headers=None, timeout=15.0):
+        calls.append(url)
+        return {"items": [{"id": url}], "next": url + "n"}   # infinite next chain
+
+    monkeypatch.setattr(ev, "_http_get_json", fake)
+    src = ev.get_source("http_json")
+    cfg = {"url": "u", "items_path": "items", "next_path": "next", "max_pages": 3}
+    src.poll(cfg, "")
+    assert len(calls) == 3             # stopped at max_pages, didn't follow forever

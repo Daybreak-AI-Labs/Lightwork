@@ -53,6 +53,7 @@ from .api_schemas import (
     FleetCreateIn,
     FleetRunIn,
     FlowApplyIn,
+    FlowAutonomyIn,
     FlowChatIn,
     FlowDraftIn,
     FlowResumeIn,
@@ -941,6 +942,11 @@ async def save_flow_endpoint(request: Request, payload: FlowSaveIn) -> dict:
     errs = flow.validate()
     if errs:
         raise HTTPException(status_code=400, detail="invalid flow: " + "; ".join(errs[:5]))
+    # Stamp ownership: the creator on first save, preserved across later edits so a
+    # re-save can't silently transfer ownership. Scheduled (cron) runs attribute to
+    # this owner (they have no request principal of their own).
+    prior = store.load_flow(flow.id)
+    flow.owner = prior.owner if (prior and prior.owner) else (caller_principal(request) or "")
     store.save_flow(flow)
     return {"id": flow.id, "nodes": len(flow.nodes)}
 
@@ -1233,7 +1239,8 @@ async def retry_flow_run_endpoint(request: Request, run_id: str,
             "flow_id": run.flow_id, "run_id": run_id, "owner": run.owner,
             "from_failure": True})
         return {"run_id": run_id, "status": "resuming", "from_node": run.cursor}
-    new_id = aq.enqueue_flow_run(run.flow_id, dict(run.input_data or {}), run.owner)
+    new_id = aq.enqueue_flow_run(run.flow_id, dict(run.input_data or {}), run.owner,
+                                 origin=f"retry:{run_id}")
     return {"run_id": new_id, "status": "queued", "retried_from": run_id}
 
 
@@ -1399,6 +1406,32 @@ async def flow_proposals_endpoint(request: Request, flow_id: str) -> dict:
     if f is None:
         raise HTTPException(status_code=404, detail="no such flow")
     return {"proposals": [p.to_dict() for p in evolve.maybe_propose(f)]}
+
+
+@router.get("/flows/{flow_id}/signals")
+async def flow_signals_endpoint(request: Request, flow_id: str) -> dict:
+    """The grounded learning signals a flow has accumulated, for display:
+    per-node success rate (work nodes), human accept-rate (approval nodes), and
+    trigger reliability (the reserved ``__trigger__`` outcome). This is what the
+    loop CAPTURED made visible -- "which gates humans keep rejecting", "which
+    triggers produce runs that succeed" -- so a builder can act on it."""
+    require_permission(request, "operate")
+    _require_flows()
+    from maverick.flow import execution, node_outcomes, store
+    f = store.load_flow(flow_id)
+    if f is None:
+        raise HTTPException(status_code=404, detail="no such flow")
+    stats = node_outcomes.stats(flow_id)
+    trigger = stats.get(execution.TRIGGER_NODE)
+    nodes = {}
+    for nid, s in stats.items():
+        if nid == execution.TRIGGER_NODE:
+            continue
+        node = f.nodes.get(nid)
+        nodes[nid] = {"n": s["n"], "mean": s["mean"], "kind": s.get("kind"),
+                      "label": (node.label if node else "") or nid}
+    return {"nodes": nodes,
+            "trigger": ({"n": trigger["n"], "mean": trigger["mean"]} if trigger else None)}
 
 
 @router.post("/flows/{flow_id}/apply")
@@ -2985,12 +3018,13 @@ async def poll_event_triggers(request: Request, bg: BackgroundTasks, name: str =
         else:
             bg.add_task(run_goal_in_thread, goal_id)
 
-    def _fire_flow(flow_id: str, data: dict, owner: str, idem_key: str = "") -> str:
+    def _fire_flow(flow_id: str, data: dict, owner: str, idem_key: str = "",
+                   origin: str = "manual") -> str:
         # Flow targets go through the durable queue (same as the background tick),
         # so a flow run gets retry + a trackable run id even on the on-demand path.
-        # The idempotency key dedups a re-delivered event.
+        # The idempotency key dedups a re-delivered event; origin records the trigger.
         from maverick_dashboard import automation_queue
-        return automation_queue.enqueue_flow_run(flow_id, data, owner, idem_key)
+        return automation_queue.enqueue_flow_run(flow_id, data, owner, idem_key, origin)
 
     results = await run_in_threadpool(
         lambda: event_poll.poll_and_fire(_world(), triggers, principal=principal,
@@ -4947,8 +4981,32 @@ def _learning_snapshot(request: Request) -> dict:
             learned_n = 0
         accumulated["grounded_outcomes"] = consequence.count()
         accumulated["learned_capabilities"] = learned_n
+        # Flows that improved themselves -- forward self-rewrites the loop enacted,
+        # a tangible "your automations got better on their own" moat number.
+        try:
+            from maverick.flow import evolution_log
+            improvements = evolution_log.improvement_count()
+        except Exception:  # pragma: no cover -- the moat view never 500s on a sub-read
+            improvements = 0
+        if improvements:
+            accumulated["flow_self_improvements"] = improvements
+    # Autonomous flow self-improvement: its own opt-in, deliberately NOT folded
+    # into the blanket "turn learning on" button -- autonomously rewriting a live
+    # workflow is a heavier consequence than passive learning. Admin/unscoped view.
+    flow_autonomy = None
+    if owner is None:
+        try:
+            from maverick import flow as _flow_mod
+            flow_autonomy = {
+                "engine_on": _flow_mod.enabled(),
+                "auto_evolve": _flow_mod.auto_evolve_enabled(),   # revert regressions
+                "auto_apply": _flow_mod.auto_apply_enabled(),     # apply improvements
+            }
+        except Exception:  # pragma: no cover -- the moat view never 500s on a sub-read
+            flow_autonomy = None
     return {
         "components": components,
+        "flow_autonomy": flow_autonomy,
         "accumulated": accumulated,
         "components_on": sum(1 for c in components if c["on"]),
         "components_total": len(components),
@@ -4981,6 +5039,25 @@ async def set_learning_endpoint(request: Request, payload: LearningToggleIn) -> 
     require_permission(request, "admin")
     from maverick_dashboard import settings_store
     settings_store.set_learning(payload.enabled)
+    return _learning_snapshot(request)
+
+
+@router.post("/learning/flow-autonomy")
+async def set_flow_autonomy_endpoint(request: Request, payload: FlowAutonomyIn) -> dict:
+    """Turn the AUTONOMOUS flow self-improvement loop on/off -- its own opt-in,
+    kept off the blanket learning button because autonomously rewriting a live
+    workflow is a heavier consequence than passive learning.
+
+    Two independent knobs: ``auto_evolve`` lets the loop revert a rewrite it
+    measures as a regression; ``auto_apply`` (which needs auto_evolve on for the
+    revert safety net) lets it apply an improvement forward without a human. Same
+    admin gate + deployment-wide overlay as the blanket toggle."""
+    require_permission(request, "admin")
+    from maverick_dashboard import settings_store
+    settings_store.set_flow_autonomy(auto_evolve=payload.auto_evolve,
+                                     auto_apply=payload.auto_apply)
+    from maverick.config import reset_config_cache
+    reset_config_cache()   # so the refreshed snapshot reflects the new overlay
     return _learning_snapshot(request)
 
 

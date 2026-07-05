@@ -1391,6 +1391,12 @@ def get_flows() -> dict:
         # default -- surfacing proposals + human apply works without it; this only
         # governs whether the loop is allowed to *undo* a bad change on its own.
         "auto_evolve": bool(cfg.get("auto_evolve", False)),
+        # Opt-in autonomous forward apply: the loop enacts a self-rewrite proposal
+        # (not just reverts a bad one). Strictly gated -- auto_apply_enabled() also
+        # requires auto_evolve on for the revert safety net. OFF by default. Without
+        # this key here auto_apply could never be read from config (only the env
+        # var / a monkeypatch), so the [flows] auto_apply knob was inert.
+        "auto_apply": bool(cfg.get("auto_apply", False)),
     }
 
 

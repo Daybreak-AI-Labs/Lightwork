@@ -34,10 +34,12 @@ NODE_DELAY = "delay"        # wait N seconds, then continue
 NODE_WAIT = "wait_event"    # pause until an external event resumes the run
 NODE_SCOPE = "scope"        # try/catch: run a body; a failure routes to on_error
 NODE_SUBFLOW = "subflow"    # run another saved flow as a nested step (reuse)
+NODE_SETVAR = "setvar"      # set flow-data keys from expressions (compose / loop counter)
 
 NODE_KINDS = frozenset({
     NODE_ACTION, NODE_AGENT, NODE_BRANCH, NODE_SWITCH, NODE_FOREACH, NODE_WHILE,
     NODE_PARALLEL, NODE_APPROVAL, NODE_DELAY, NODE_WAIT, NODE_SCOPE, NODE_SUBFLOW,
+    NODE_SETVAR,
 })
 _WORK_KINDS = frozenset({NODE_ACTION, NODE_AGENT})
 
@@ -73,6 +75,8 @@ class FlowNode:
     body: Flow | None = None         # sub-flow run per item / per while pass / scope
     limit: int = 0                   # cap iterations (0 = default cap); body may set _break
     concurrent: bool = False         # foreach: run iterations on a bounded pool
+    # setvar ------------------------------------------------------------------
+    assignments: dict[str, Any] = field(default_factory=dict)   # {key: expression}; sets flow data
     # parallel ----------------------------------------------------------------
     branches: list[Flow] = field(default_factory=list)   # sub-flows run + joined
     # approval / wait_event ----------------------------------------------------
@@ -85,6 +89,7 @@ class FlowNode:
     flow_ref: str = ""               # a saved flow id to run as a nested step
     # error handling ----------------------------------------------------------
     retries: int = 0                 # re-run a failed work node up to N more times
+    retry_backoff: float = 0.0       # base seconds between retries; exponential (0 = tight loop)
     on_error: str | None = None      # route here when the node fails (else `next`)
     timeout: float = 0.0             # per-node soft wall-clock cap in seconds (0 = none)
     # common ------------------------------------------------------------------
@@ -107,6 +112,8 @@ class FlowNode:
             d["seconds"] = self.seconds
         if self.retries:
             d["retries"] = self.retries
+        if self.retry_backoff:
+            d["retry_backoff"] = self.retry_backoff
         if self.timeout:
             d["timeout"] = self.timeout
         if self.limit:
@@ -117,6 +124,8 @@ class FlowNode:
             d["cases"] = self.cases
         if self.choices:
             d["choices"] = self.choices
+        if self.assignments:
+            d["assignments"] = self.assignments
         if self.x or self.y:
             d["x"], d["y"] = self.x, self.y
         if self.body is not None:
@@ -137,13 +146,16 @@ class FlowNode:
             items=str(d.get("items", "")), var=str(d.get("var", "item")),
             limit=int(d.get("limit", 0) or 0),
             concurrent=bool(d.get("concurrent", False)),
-            cases=[c for c in (d.get("cases") or []) if isinstance(c, dict)],
+            cases=[dict(c) for c in (d.get("cases") or []) if isinstance(c, dict)],
             choices=[str(c) for c in (d.get("choices") or [])],
+            assignments=dict(d.get("assignments") or {}),
             body=Flow.from_dict(body) if body else None,
             branches=[Flow.from_dict(b) for b in (d.get("branches") or [])],
             prompt=str(d.get("prompt", "")), seconds=float(d.get("seconds", 0.0)),
             flow_ref=str(d.get("flow_ref", "")),
-            retries=int(d.get("retries", 0) or 0), on_error=d.get("on_error"),
+            retries=int(d.get("retries", 0) or 0),
+            retry_backoff=float(d.get("retry_backoff", 0.0) or 0.0),
+            on_error=d.get("on_error"),
             timeout=float(d.get("timeout", 0.0) or 0.0),
             output=str(d.get("output", "")), label=str(d.get("label", "")),
             x=float(d.get("x", 0.0)), y=float(d.get("y", 0.0)),
@@ -168,6 +180,9 @@ class Flow:
     max_seconds: float = 0.0         # whole-flow wall-clock deadline (0 = no limit)
     max_dollars: float = 0.0         # aggregate agent spend ceiling for one run (0 = no limit)
     schedule: str = ""               # a cron expression to run this flow on (empty = not scheduled)
+    timezone: str = ""               # IANA zone the schedule is in (empty = UTC)
+    owner: str = ""                  # principal that owns this flow (for RBAC + attributing scheduled runs)
+    max_concurrent: int = 0          # cap simultaneous in-flight runs of this flow (0 = unlimited)
 
     def node(self, node_id: str | None) -> FlowNode | None:
         return self.nodes.get(node_id) if node_id else None
@@ -181,7 +196,8 @@ class Flow:
             "id": self.id, "name": self.name, "start": self.start,
             "version": self.version, "notify": self.notify,
             "max_seconds": self.max_seconds, "max_dollars": self.max_dollars,
-            "schedule": self.schedule,
+            "schedule": self.schedule, "timezone": self.timezone, "owner": self.owner,
+            "max_concurrent": self.max_concurrent,
             "nodes": [n.to_dict() for n in self.nodes.values()],
         }
 
@@ -196,7 +212,9 @@ class Flow:
             notify=bool(d.get("notify", False)),
             max_seconds=float(d.get("max_seconds", 0.0) or 0.0),
             max_dollars=float(d.get("max_dollars", 0.0) or 0.0),
-            schedule=str(d.get("schedule", "")),
+            schedule=str(d.get("schedule", "")), timezone=str(d.get("timezone", "")),
+            owner=str(d.get("owner", "")),
+            max_concurrent=int(d.get("max_concurrent", 0) or 0),
         )
 
     def validate(self) -> list[str]:
@@ -275,11 +293,15 @@ class Flow:
                 errs.append(f"{n.kind} node {n.id!r} has no body")
             else:
                 errs.extend(f"{n.kind} {n.id!r} body: {e}" for e in n.body.validate())
+                errs.extend(f"{n.kind} {n.id!r} body: {e}" for e in _pause_node_errors(n.body))
         if n.kind == NODE_PARALLEL:
             if not n.branches:
                 errs.append(f"parallel node {n.id!r} has no branches")
             for i, b in enumerate(n.branches):
                 errs.extend(f"parallel {n.id!r} branch {i}: {e}" for e in b.validate())
+                errs.extend(f"parallel {n.id!r} branch {i}: {e}" for e in _pause_node_errors(b))
+        if n.kind == NODE_SETVAR and not n.assignments:
+            errs.append(f"setvar node {n.id!r} has no assignments")
         return errs
 
     def is_single_agent(self) -> bool:
@@ -289,6 +311,29 @@ class Flow:
             return False
         only = next(iter(self.nodes.values()))
         return only.kind == NODE_AGENT and not only.next
+
+
+def _pause_node_errors(flow: Flow) -> list[str]:
+    """Errors for ``approval``/``delay`` nodes anywhere inside a NESTED sub-flow
+    (a foreach body, a parallel branch, and recursively their own nested bodies).
+    Human-in-the-loop lives only at the top flow: a nested context can't pause, so
+    a nested ``approval`` rejects the WHOLE run and a nested ``delay`` silently
+    does nothing. Flagging it at validation turns a runtime footgun into a clear
+    save-time error."""
+    errs: list[str] = []
+    for n in flow.nodes.values():
+        if n.kind == NODE_APPROVAL:
+            errs.append(f"approval node {n.id!r} can't pause inside a loop/branch "
+                        "(nested approvals reject the whole run); move it to the top flow")
+        if n.kind == NODE_DELAY:
+            errs.append(f"delay node {n.id!r} can't wait inside a loop/branch "
+                        "(nested delays are skipped); move it to the top flow")
+        if n.kind in (NODE_FOREACH, NODE_WHILE, NODE_SCOPE) and n.body is not None:
+            errs.extend(_pause_node_errors(n.body))
+        if n.kind == NODE_PARALLEL:
+            for b in n.branches:
+                errs.extend(_pause_node_errors(b))
+    return errs
 
 
 def single_agent_flow(flow_id: str, name: str, brief: str) -> Flow:

@@ -161,12 +161,15 @@ def _world():
     return _w()
 
 
-def enqueue_flow_run(flow_id: str, data: dict, owner: str = "", idem_key: str = "") -> str:
+def enqueue_flow_run(flow_id: str, data: dict, owner: str = "", idem_key: str = "",
+                     origin: str = "manual") -> str:
     """Start a durable flow run (a pre-assigned, pollable run id + a flow_run job).
     Shared by the background tick and the on-demand poll so a flow-target trigger
     fires the same way on both paths. ``idem_key`` (flow_id + a stable event id)
     deduplicates: a re-delivered event returns the existing run instead of firing
-    a second one. The original inputs are kept so the run can be retried."""
+    a second one. ``origin`` records what fired the run (cron/event/form/manual)
+    for attribution + trigger-outcome learning. The original inputs are kept so
+    the run can be retried."""
     from maverick.flow import store as flow_store
     if idem_key:
         existing = flow_store.find_run_by_idem(flow_id, idem_key)
@@ -175,9 +178,9 @@ def enqueue_flow_run(flow_id: str, data: dict, owner: str = "", idem_key: str = 
     run_id = flow_store.new_run_id()
     flow_store.save_run(flow_store.FlowRun(
         run_id=run_id, flow_id=flow_id, status="queued", owner=owner,
-        data=dict(data), input_data=dict(data), idem_key=idem_key))
+        data=dict(data), input_data=dict(data), idem_key=idem_key, origin=origin))
     queue().enqueue(FLOW_RUN_KIND, {"flow_id": flow_id, "run_id": run_id,
-                                    "data": data, "owner": owner})
+                                    "data": data, "owner": owner, "origin": origin})
     return run_id
 
 
@@ -311,6 +314,87 @@ def _notify_flow(flow, run) -> None:
         log.debug("flow notify failed", exc_info=True)
 
 
+_ACTIVE_RUN_STATUSES = ("running", "paused_approval", "paused_delay")
+_SINGLETON_DEFER_SECONDS = 30.0   # how long to wait before re-checking a busy singleton
+_SINGLETON_MAX_DEFERS = 40        # ~20 min of deferral before giving up (avoid infinite requeue)
+
+
+@contextlib.contextmanager
+def _flow_slot_guard(flow_id: str):
+    """Non-blocking per-flow lock around the max_concurrent check+claim, so two
+    workers pulling two runs of the SAME flow at once can't both count 0 in-flight
+    and both start. Yields True when held (this worker decides), False when another
+    worker holds it (defer and let it decide). Mirrors _poll_guard's flock."""
+    try:
+        import fcntl
+    except Exception:  # pragma: no cover -- non-POSIX: no cross-process guard
+        yield True
+        return
+    from maverick.flow.store import _safe_id
+    p = config.dashboard_overrides_path().parent / f"flow-slot-{_safe_id(flow_id)}.lock"
+    fd = None
+    try:
+        p.parent.mkdir(parents=True, exist_ok=True)
+        fd = os.open(str(p), os.O_CREAT | os.O_RDWR, 0o600)
+        try:
+            fcntl.flock(fd, fcntl.LOCK_EX | fcntl.LOCK_NB)
+        except BlockingIOError:
+            yield False
+            return
+        yield True
+    finally:
+        if fd is not None:
+            try:
+                fcntl.flock(fd, fcntl.LOCK_UN)
+            except Exception:  # pragma: no cover
+                pass
+            os.close(fd)
+
+
+def _active_run_count(flow_id: str, exclude_run_id: str) -> int:
+    """In-flight runs of a flow (running / paused), excluding this run. Queued runs
+    don't count -- they're exactly what the slot guard gates -- else two queued
+    events would each see the other and defer forever."""
+    from maverick.flow import store
+    return sum(1 for r in store.list_runs(flow_id=flow_id, limit=200)
+               if r.run_id != exclude_run_id and r.status in _ACTIVE_RUN_STATUSES)
+
+
+def _defer_for_slot(payload: dict) -> bool:
+    """Re-enqueue a flow_run job later because the flow is at its concurrency cap.
+    Bounded so a permanently-stuck run (e.g. a run paused on approval forever)
+    can't requeue endlessly -- past the cap the run is left queued and skipped.
+    Returns True if it deferred, False if the defer budget is exhausted."""
+    defers = int(payload.get("_slot_defers") or 0)
+    if defers >= _SINGLETON_MAX_DEFERS:
+        return False
+    nxt = dict(payload)
+    nxt["_slot_defers"] = defers + 1
+    queue().enqueue(FLOW_RUN_KIND, nxt, run_at=time.time() + _SINGLETON_DEFER_SECONDS)
+    return True
+
+
+def _claim_run_slot(run_id: str) -> None:
+    """Flip a queued run to 'running' (preserving its inputs) while the slot lock is
+    held, so a concurrent sibling's _active_run_count sees it and defers. execute()
+    re-writes 'running' from the same placeholder, so this is just an early claim."""
+    from maverick.flow import store
+    run = store.load_run(run_id)
+    if run is not None and run.status == "queued":
+        run.status = "running"
+        store.save_run(run)
+
+
+def _skip_run_at_cap(run_id: str) -> None:
+    """Mark a run that never got a concurrency slot as skipped (not failed) -- it
+    never executed, so it's not a failure to learn from, just a dropped attempt."""
+    from maverick.flow import store
+    run = store.load_run(run_id)
+    if run is not None and run.status == "queued":
+        run.status = "skipped_concurrency"
+        store.save_run(run)
+
+
 def _handle_flow_run(job=None) -> None:
     """Run a stored flow to its next pause/finish (durable one-shot job). An
     agent node becomes a real goal, an action node a tool call; the run state is
@@ -327,13 +411,37 @@ def _handle_flow_run(job=None) -> None:
             return
         owner = str(payload.get("owner") or "")
         dry_run = bool(payload.get("dry_run"))
+        run_id = str(payload.get("run_id") or "")
+        # Per-flow concurrency cap: a singleton/limited flow (e.g. "drain the queue"
+        # / "sync record X") must not run overlapping instances -- that double-fires
+        # side effects and races the shared world. Under a per-flow lock, count
+        # in-flight runs; if at the cap, mark this run "running" only when a slot is
+        # free (so a concurrent sibling sees it), else defer the job a bit and let
+        # the running one finish. A dry run and a resume are never gated.
+        if flow.max_concurrent and not dry_run and run_id and not payload.get("_resume"):
+            with _flow_slot_guard(flow_id) as held:
+                if held:
+                    if _active_run_count(flow_id, run_id) >= flow.max_concurrent:
+                        if _defer_for_slot(payload):
+                            return
+                        log.warning("flow_run: %s at concurrency cap, defer budget spent"
+                                    " -- skipping run %s", flow_id, run_id)
+                        _skip_run_at_cap(run_id)
+                        return
+                    _claim_run_slot(run_id)   # flip queued -> running while holding the lock
+                elif not _defer_for_slot(payload):   # another worker is deciding; retry later
+                    _skip_run_at_cap(run_id)
+                    return
+                else:
+                    return
         # A dry run exercises the graph with mock executors and records no grounded
         # outcome -- so "Test" can't hit production or skew the learning signal.
         agent_runner, action_runner = (execution.sandbox_runners() if dry_run
                                        else _flow_runners(owner))
         run = execution.execute(flow, agent_runner=agent_runner, action_runner=action_runner,
                                 owner=owner, data=dict(payload.get("data") or {}),
-                                run_id=payload.get("run_id"), record_outcomes=not dry_run)
+                                run_id=payload.get("run_id"), record_outcomes=not dry_run,
+                                origin=str(payload.get("origin") or "manual"))
         if not dry_run:
             _notify_flow(flow, run)
     except Exception:  # pragma: no cover -- fail-open
@@ -434,8 +542,55 @@ def _handle_flow_evolve(_job=None) -> None:
                                            source="auto-revert")
                 log.info("auto-reverted regressed rewrite: flow=%s node=%s (delta %.2f)",
                          f.id, node_id, impact.get("delta") or 0.0)
+        if flow_mod.auto_apply_enabled():
+            _auto_apply_proposals()
     except Exception:  # pragma: no cover -- fail-open
         log.exception("flow evolve pass failed")
+
+
+def _auto_apply_proposals() -> None:
+    """Autonomously APPLY the strongest self-rewrite proposal per flow (the
+    forward arrow, gated on ``[flows] auto_apply``). Two directions are applied
+    without a human:
+
+    * SOFTEN (action -> agent): a chronically-failing fixed step handed to an
+      agent; the brief derives from the node.
+    * HARDEN (agent -> action): a reliably-succeeding agent node that has been
+      calling ONE tool over and over, hardened to call that tool directly -- but
+      ONLY when that tool was confidently inferred from captured runs
+      (``inferred_tool``). Without it, hardening still needs a human to pick the
+      tool, so it's left as a surfaced proposal.
+
+    Skips a node that already has a pending apply (so it is measured -- and
+    auto-reverted if it regresses -- before another change). Idempotent +
+    conservative: one apply per flow per pass."""
+    from maverick.flow import evolution_log, evolve, store
+    from maverick.flow.ir import NODE_ACTION
+    for f in store.list_flows():
+        for prop in evolve.maybe_propose(f):
+            if evolution_log.last_apply(f.id, prop.node_id):
+                continue                            # already changed -> let it be measured first
+            node = f.nodes.get(prop.node_id)
+            kwargs: dict = {}
+            if prop.from_kind == NODE_ACTION:       # soften: derive the brief
+                kwargs["brief"] = (node.brief or node.label) if node else ""
+            elif prop.inferred_tool:                # harden: only with an inferred tool
+                kwargs["tool"] = prop.inferred_tool
+            else:
+                continue                            # harden with no known tool -> human-gated
+            try:
+                changed = evolve.apply_proposal(f, prop.node_id, prop.to_kind, **kwargs)
+            except (KeyError, ValueError):
+                continue
+            if changed.validate():
+                continue                            # never save a structurally broken flow
+            saved = store.save_flow(changed)
+            evolution_log.record_apply(f.id, prop.node_id, prop.from_kind, prop.to_kind,
+                                       saved.version, source="auto-apply")
+            log.info("auto-applied rewrite: flow=%s node=%s %s->%s (%.0f%% over %d)%s",
+                     f.id, prop.node_id, prop.from_kind, prop.to_kind, prop.mean * 100, prop.n,
+                     f" via {prop.inferred_tool}" if prop.inferred_tool else "")
+            break                                    # one apply per flow per pass
 
 
 def _handle_flow_cron(job=None) -> None:
@@ -456,7 +611,9 @@ def _handle_flow_cron(job=None) -> None:
         flow = store.load_flow(flow_id)
         if flow is None or flow.schedule.strip() != str(payload.get("__cron__") or "").strip():
             return  # deleted, or the schedule changed out from under this cron
-        enqueue_flow_run(flow_id, {}, owner=str(payload.get("owner") or ""))
+        # Attribute the scheduled run to the flow's owner (loaded here, so the cron
+        # payload needn't carry it) and stamp its origin for the run history.
+        enqueue_flow_run(flow_id, {}, owner=flow.owner, origin=f"cron:{flow_id}")
     except Exception:  # pragma: no cover -- fail-open
         log.exception("scheduled flow run failed for %s", flow_id)
 
@@ -491,7 +648,7 @@ def _reconcile_flow_crons() -> None:
     live cron gets one seeded. Idempotent -- safe to run on every reconcile."""
     from maverick.flow import store
     from maverick.scheduler import CronError, parse_cron, schedule_cron
-    want: dict[str, str] = {}
+    want: dict[str, tuple[str, str]] = {}
     for f in store.list_flows():
         expr = f.schedule.strip()
         if not expr:
@@ -500,19 +657,21 @@ def _reconcile_flow_crons() -> None:
             parse_cron(expr)          # only arm a valid expression
         except CronError:
             continue
-        want[f.id] = expr
+        want[f.id] = (expr, f.timezone.strip())
     q = queue()
     covered: set[str] = set()
     for j in _pending(FLOW_CRON_KIND):
-        fid = str((j.payload or {}).get("flow_id") or "")
-        expr = str((j.payload or {}).get("__cron__") or "")
-        if want.get(fid) == expr and fid not in covered:
+        p = j.payload or {}
+        fid = str(p.get("flow_id") or "")
+        cur = (str(p.get("__cron__") or ""), str(p.get("__tz__") or ""))
+        if want.get(fid) == cur and fid not in covered:
             covered.add(fid)          # exactly one correct cron per flow; keep it
         else:
-            q.cancel(j.id)            # stale (flow unscheduled, schedule changed, or dup)
-    for fid, expr in want.items():
+            q.cancel(j.id)            # stale (flow unscheduled, schedule/tz changed, or dup)
+    for fid, (expr, tz) in want.items():
         if fid not in covered:
-            schedule_cron(q, expr, FLOW_CRON_KIND, {"flow_id": fid, "__cron__": expr})
+            schedule_cron(q, expr, FLOW_CRON_KIND,
+                          {"flow_id": fid, "__cron__": expr, "__tz__": tz})
 
 
 def _dream_cron() -> str:

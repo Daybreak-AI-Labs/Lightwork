@@ -1088,6 +1088,12 @@ def pick_flows() -> dict[str, Any]:
     if _q_confirm("Let flows self-correct (autonomous revert of a regressed rewrite)?",
                   default=False):
         out["auto_evolve"] = True
+        # Full autonomy: also APPLY a proposal forward (soften a failing action to
+        # an agent), not just revert. Strictly opt-in on top of self-correction,
+        # since a bad apply is auto-reverted only if the revert side is on.
+        if _q_confirm("Also let flows autonomously APPLY a learned rewrite (not just revert)?",
+                      default=False):
+            out["auto_apply"] = True
     return out
 
 

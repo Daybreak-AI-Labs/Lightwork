@@ -34,13 +34,26 @@ class NodeProposal:
     reason: str
     n: int
     mean: float
+    inferred_tool: str = ""   # for a harden proposal: the tool the node has been calling
 
     def to_dict(self) -> dict:
         return {
             "node_id": self.node_id, "from_kind": self.from_kind,
             "to_kind": self.to_kind, "reason": self.reason,
             "n": self.n, "mean": round(self.mean, 3),
+            "inferred_tool": self.inferred_tool,
         }
+
+
+def _infer_tool(flow_id: str, node_id: str) -> str:
+    """The single tool an agent node has consistently called (for hardening it to
+    a deterministic action), or ``""`` when there's no confident answer -- capture
+    off, too few runs, or mixed tools. Never raises."""
+    try:
+        from . import node_tools
+        return node_tools.dominant_tool(flow_id, node_id) or ""
+    except Exception:  # pragma: no cover -- inference is best-effort
+        return ""
 
 
 def propose(flow: Flow, *, min_support: int = _DEFAULT_MIN_SUPPORT,
@@ -57,11 +70,13 @@ def propose(flow: Flow, *, min_support: int = _DEFAULT_MIN_SUPPORT,
             continue
         mean = s["mean"]
         if node.kind == NODE_AGENT and mean >= _HARDEN_THRESHOLD:
+            tool = _infer_tool(flow.id, node_id)
+            reason = (f"agent node succeeds {mean:.0%} over {s['n']} runs -- its behaviour "
+                      "is predictable enough to harden into a deterministic action")
+            if tool:
+                reason += f", and it consistently calls `{tool}`"
             out.append(NodeProposal(
-                node_id, NODE_AGENT, NODE_ACTION,
-                f"agent node succeeds {mean:.0%} over {s['n']} runs -- its behaviour "
-                "is predictable enough to harden into a deterministic action",
-                s["n"], mean))
+                node_id, NODE_AGENT, NODE_ACTION, reason, s["n"], mean, inferred_tool=tool))
         elif node.kind == NODE_ACTION and mean < _SOFTEN_THRESHOLD:
             out.append(NodeProposal(
                 node_id, NODE_ACTION, NODE_AGENT,
