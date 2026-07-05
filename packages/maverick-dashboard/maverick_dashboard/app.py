@@ -3673,6 +3673,28 @@ async def webhook_run(request: Request, bg: BackgroundTasks) -> JSONResponse:
     if trig is None:
         raise HTTPException(status_code=404, detail="unknown trigger")
 
+    if trig.get("flow"):
+        # A flow-target trigger: start a durable flow run with the inbound
+        # ``data`` as the run data (same shape as an event-trigger fire). The
+        # caller's delivery ``id`` doubles as the run's idempotency key, so a
+        # re-delivered webhook returns the existing run instead of a duplicate.
+        from maverick import flow as flow_mod
+        if not flow_mod.enabled():
+            raise HTTPException(status_code=409, detail="the flow engine is off")
+        from maverick.flow import store as flow_store
+        if flow_store.load_flow(trig["flow"]) is None:
+            raise HTTPException(status_code=409, detail="trigger flow unavailable")
+        check_goal_rate_limit(request, source="webhook")
+        inbound_data = payload.get("data")
+        run_data = ({str(k): v for k, v in inbound_data.items()}
+                    if isinstance(inbound_data, dict) else {})
+        delivery = str(payload.get("id") or "").strip()
+        idem = f"webhook:{name}:{delivery}" if delivery else ""
+        from maverick_dashboard import automation_queue as aq
+        run_id = aq.enqueue_flow_run(trig["flow"], run_data, owner="", idem_key=idem)
+        return JSONResponse({"run_id": run_id, "trigger": name,
+                             "flow": trig["flow"]}, status_code=201)
+
     from maverick.templates import load_template
     try:
         tpl = load_template(trig["template"])
@@ -4870,6 +4892,16 @@ async def flow_designer_page(request: Request, flow_id: str = "") -> HTMLRespons
     drafter. Talks to the /api/v1/flows endpoints; the flow-engine gate is
     enforced there, so the page renders even when flows are off (empty canvas)."""
     return templates.TemplateResponse(request, "flow_designer.html", {"flow_id": flow_id})
+
+
+@app.get("/flows/{flow_id}/runs/{run_id}", response_class=HTMLResponse)
+async def flow_run_page(request: Request, flow_id: str, run_id: str) -> HTMLResponse:
+    """The run viewer: one flow run's node-by-node timeline, inputs/outputs
+    (redacted), and the recovery actions (approve/reject, retry, retry from the
+    failed step). Data comes from /api/v1/flows/runs/{run_id} client-side, so
+    owner-scoping and the flow-engine gate are enforced by the API."""
+    return templates.TemplateResponse(
+        request, "flow_run.html", {"flow_id": flow_id, "run_id": run_id})
 
 
 @app.get("/automations", response_class=HTMLResponse)

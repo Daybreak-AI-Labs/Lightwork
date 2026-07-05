@@ -1,9 +1,11 @@
 """Dashboard-owned registry of inbound webhook triggers.
 
-A trigger binds a saved template (plus operator-set default params) to a name.
-An HMAC-signed POST to ``/webhook/run`` with that name renders the template and
-runs it as a goal (the inbound body may override *declared* params at fire
-time). Persisted to ``~/.maverick/dashboard-triggers.toml`` -- dashboard-owned,
+A trigger binds a saved template (plus operator-set default params) OR a flow
+to a name. An HMAC-signed POST to ``/webhook/run`` with that name renders the
+template and runs it as a goal (the inbound body may override *declared* params
+at fire time), or -- for a flow target -- starts a durable flow run with the
+inbound ``data`` as the run data.
+Persisted to ``~/.maverick/dashboard-triggers.toml`` -- dashboard-owned,
 like the Settings overlay, and deliberately NOT merged into the kernel config
 (``load_config`` never reads it). Mirrors ``settings_store``'s atomic, 0600
 write and hand-rolled TOML so we add no serialization dependency.
@@ -79,6 +81,9 @@ def list_triggers() -> list[dict]:
         out.append({
             "name": name,
             "template": str(t.get("template") or ""),
+            # Flow target: when set the webhook starts this flow instead of
+            # rendering a template ("" for template triggers / pre-flow rows).
+            "flow": str(t.get("flow") or ""),
             "params": params if isinstance(params, dict) else {},
             "created": float(t.get("created") or 0.0),
             # Owner principal that registered the trigger ("" for admin/auth-off
@@ -106,6 +111,7 @@ def _dump(triggers: list[dict]) -> str:
         params_json = json.dumps(t.get("params") or {}, sort_keys=True)
         lines.append(f"[trigger.{t['name']}]")
         lines.append(f"template = {json.dumps(str(t['template']))}")
+        lines.append(f"flow = {json.dumps(str(t.get('flow') or ''))}")
         lines.append(f"params = {json.dumps(params_json)}")
         lines.append(f"created = {float(t.get('created') or 0.0)}")
         lines.append(f"owner = {json.dumps(str(t.get('owner') or ''))}")
@@ -121,17 +127,20 @@ def _write(triggers: list[dict]) -> None:
 
 
 def set_trigger(
-    name: str, template: str, params: dict | None = None, owner: str = ""
+    name: str, template: str, params: dict | None = None, owner: str = "",
+    flow: str = "",
 ) -> dict:
     """Create or replace a trigger (by slugified name). Raises ValueError on a
     name that can't be made into a valid slug. ``owner`` records the principal
-    that registered it so the dashboard can scope the list per tenant."""
+    that registered it so the dashboard can scope the list per tenant. Exactly
+    one of ``template`` / ``flow`` should be set (the API layer enforces it)."""
     slug = slugify(name)
     if not _NAME_RE.match(slug):
         raise ValueError("trigger name must contain a letter or digit (a-z, 0-9, -)")
     rec = {
         "name": slug,
         "template": str(template),
+        "flow": str(flow or ""),
         "params": {str(k): str(v) for k, v in (params or {}).items()},
         "created": time.time(),
         "owner": str(owner or ""),

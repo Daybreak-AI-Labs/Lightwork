@@ -51,7 +51,66 @@ var FDCore = (function () {
     };
   }
 
-  return { normalizeNode: normalizeNode, serializeNode: serializeNode, serializeFlow: serializeFlow };
+  // A deep, independent snapshot of a flow (the undo/redo unit). Serialized
+  // form, so restoring goes through normalizeNode like a server load.
+  function cloneFlow(f) {
+    return JSON.parse(JSON.stringify(serializeFlow(f)));
+  }
+
+  // Output keys visible to `nodeId` from nodes that can run BEFORE it (any node
+  // that reaches it via next/if_true/if_false/on_error) -- the data pills for
+  // {{key}} insertion. Deterministic order: graph order of the flow's nodes.
+  function upstreamOutputs(f, nodeId) {
+    var nodes = f.nodes || [];
+    var byId = {};
+    nodes.forEach(function (n) { byId[n.id] = n; });
+    function reaches(fromId, toId) {
+      var seen = {}, queue = [fromId];
+      while (queue.length) {
+        var id = queue.shift();
+        if (id === toId) return true;
+        if (!id || seen[id]) continue;
+        seen[id] = 1;
+        var n = byId[id];
+        if (!n) continue;
+        ['next', 'if_true', 'if_false', 'on_error'].forEach(function (k) {
+          if (n[k]) queue.push(n[k]);
+        });
+      }
+      return false;
+    }
+    var keys = [];
+    nodes.forEach(function (n) {
+      if (n.id !== nodeId && n.output && reaches(n.id, nodeId) && keys.indexOf(n.output) < 0)
+        keys.push(n.output);
+    });
+    return keys;
+  }
+
+  // The view {x, y, k} that fits every node into a cw x ch canvas with padding.
+  // Zoom is clamped to the designer's wheel range; an empty flow gets the
+  // default view.
+  function fitView(nodes, cw, ch, nodeW, nodeH, pad) {
+    if (!nodes || !nodes.length) return { x: 40, y: 20, k: 1 };
+    pad = pad == null ? 40 : pad;
+    var minX = Infinity, minY = Infinity, maxX = -Infinity, maxY = -Infinity;
+    nodes.forEach(function (n) {
+      minX = Math.min(minX, n.x || 0); minY = Math.min(minY, n.y || 0);
+      maxX = Math.max(maxX, (n.x || 0) + nodeW); maxY = Math.max(maxY, (n.y || 0) + nodeH);
+    });
+    var w = Math.max(1, maxX - minX), h = Math.max(1, maxY - minY);
+    var k = Math.min((cw - 2 * pad) / w, (ch - 2 * pad) / h);
+    k = Math.max(0.35, Math.min(1, k));
+    return {
+      x: Math.round((cw - w * k) / 2 - minX * k),
+      y: Math.round((ch - h * k) / 2 - minY * k),
+      k: k
+    };
+  }
+
+  return { normalizeNode: normalizeNode, serializeNode: serializeNode,
+           serializeFlow: serializeFlow, cloneFlow: cloneFlow,
+           upstreamOutputs: upstreamOutputs, fitView: fitView };
 })();
 
 if (typeof module !== 'undefined' && module.exports) module.exports = FDCore;

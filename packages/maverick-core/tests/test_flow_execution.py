@@ -224,6 +224,60 @@ class TestExecution:
         assert rej.status == "rejected" and "done" not in rej.data
 
 
+class TestRetryFromFailure:
+    def _flow(self):
+        return Flow(id="fr", name="f", start="a", nodes={
+            "a": FlowNode(id="a", kind=NODE_AGENT, brief="prep", output="r1", next="b"),
+            "b": FlowNode(id="b", kind=NODE_ACTION, tool="t", output="r2", next="c"),
+            "c": FlowNode(id="c", kind=NODE_AGENT, brief="wrap", output="r3")})
+
+    def test_failed_run_records_cursor_and_resumes_at_failed_node(self, tmp_path, monkeypatch):
+        _patch_home(tmp_path, monkeypatch)
+        agent_calls = []
+
+        def agent(brief, d):
+            agent_calls.append(brief)
+            return ("ok", 1.0)
+
+        def broken(t, p, d):
+            raise RuntimeError("connector down")
+        run = execution.execute(self._flow(), agent_runner=agent, action_runner=broken)
+        assert run.status == "failed" and run.cursor == "b"
+        assert "connector down" in run.error
+        # data as of the failure survives: node a's output is still there
+        assert run.data["r1"] == "ok"
+        resumed = execution.execute(
+            self._flow(), agent_runner=agent, action_runner=lambda t, p, d: ("fixed", 1.0),
+            resume_run_id=run.run_id, from_failure=True)
+        assert resumed.status == "completed" and resumed.run_id == run.run_id
+        assert resumed.data["r2"] == "fixed" and resumed.data["r3"] == "ok"
+        # node a ran exactly once across the original run + the retry
+        assert agent_calls == ["prep", "wrap"]
+
+    def test_from_failure_only_applies_to_failed_runs(self, tmp_path, monkeypatch):
+        import pytest
+        _patch_home(tmp_path, monkeypatch)
+        f = Flow(id="fr2", name="f", start="a",
+                 nodes={"a": FlowNode(id="a", kind=NODE_AGENT, brief="b")})
+        done = execution.execute(f, agent_runner=lambda b, d: ("ok", 1.0),
+                                 action_runner=lambda *a: ("", None))
+        with pytest.raises(execution.FlowNotResumable):
+            execution.execute(f, agent_runner=lambda b, d: ("ok", 1.0),
+                              action_runner=lambda *a: ("", None),
+                              resume_run_id=done.run_id, from_failure=True)
+
+    def test_failed_run_without_cursor_is_not_retryable(self, tmp_path, monkeypatch):
+        import pytest
+        from maverick.flow import store
+        _patch_home(tmp_path, monkeypatch)
+        f = self._flow()
+        store.save_run(store.FlowRun(run_id="r-nocursor", flow_id=f.id, status="failed"))
+        with pytest.raises(execution.FlowNotResumable, match="failure cursor"):
+            execution.execute(f, agent_runner=lambda *a: ("", None),
+                              action_runner=lambda *a: ("", None),
+                              resume_run_id="r-nocursor", from_failure=True)
+
+
 # ---- self-rewrite proposals -------------------------------------------------
 
 class TestEvolve:

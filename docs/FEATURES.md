@@ -523,19 +523,49 @@ here.
   executors, and secret redaction (`redact.py`). A **self-rewrite loop**
   (`evolve.py` + `evolution_log.py`) swaps a node kind, measures grounded
   before/after outcomes, versions the definition, and autonomously reverts a
-  regression. The server-rendered **visual designer** (`flow_designer*.js`, pure
-  serialization in `flow_designer_core.js`) drafts a flow from natural language,
-  edits nested foreach bodies / parallel branches on their own canvas, and shows
-  live run + measured-impact overlays.
+  regression. A failed run records WHICH node failed (`FlowRun.cursor`) and can
+  **resume from the failed step** with the data as of the failure
+  (`execution.execute(from_failure=True)`, `POST /flows/runs/{id}/retry?from_failure=1`)
+  — pre-failure side effects are never re-driven. The server-rendered **visual
+  designer** (`flow_designer*.js`, pure logic in `flow_designer_core.js`) drafts
+  a flow from natural language, edits nested foreach bodies / parallel branches
+  on their own canvas, shows live run + measured-impact overlays (💡 badges mark
+  nodes with learned self-rewrite proposals), and carries the editor
+  fundamentals: undo/redo (Ctrl+Z/Y), node duplicate (Ctrl+D), click-to-cut
+  edges, zoom-to-fit, and **data pills** — one-click `{{key}}` insertion from
+  the outputs a node can actually see upstream (`FDCore.upstreamOutputs`). A
+  dedicated **run viewer** (`/flows/{flow_id}/runs/{run_id}`) shows the
+  node-by-node timeline, redacted run data, and the recovery actions.
+
+- **Flow copilot (chat that builds the flow)** — a conversational assistant
+  docked in the designer (`maverick.flow.chat` + `POST /api/v1/flows/chat`).
+  It edits a populated canvas via small **validated patches**
+  (`maverick.flow.patch`: add/remove node, set field, rewire — applied
+  copy-on-write and `Flow.validate()`d, so the model can never leave the canvas
+  broken), drafts a full graph only on an empty canvas, answers "what does this
+  flow do?", and — grounded in a real run trace via `run_id` — diagnoses "why
+  did it fail?" and proposes the fix. Budget-capped per turn like the drafter;
+  every applied edit is one designer undo step and a normal flow version.
 
 - **Triggers for flows** — a flow fires from a cron schedule (`Flow.schedule`, a
   per-flow `flow_cron` job), any polled event source (`automation_events.py`:
   `http_json` / `rss` / `oauth_http_json` / `github_issues` / `imap_email` /
-  `file_dir` / `form`), or a manual/dry run. A paused **approval** node can post
+  `file_dir` / `form`), an **inbound webhook** (`/webhook/run` with a
+  flow-target trigger — the signed payload's `data` becomes the run data and the
+  delivery `id` doubles as the idempotency key, so a re-delivered event never
+  fires twice), or a manual/dry run. A paused **approval** node can post
   signed Approve/Reject links to a channel (`approvals.py` — a stateless HMAC
   token; `POST /flow/approve` resumes) so a human clears it without a dashboard
   session. A hosted **form** submission (`form_store.py`, public `POST /form/{token}`)
   fires a flow with the submitted fields as data.
+
+- **Migration fidelity** (`automation_import.to_flow`) — n8n IF/Filter and
+  Power Automate (WDL) `If`/`Foreach` are captured **structurally** (real
+  branch/foreach nodes, arms wired to rejoin, loop bodies as nested flows);
+  `Switch`/`Until`/`Scope` and graphless sources approximate each step as an
+  agent node that still runs. `to_flow_with_report` returns the per-step
+  fidelity log (`preserved` / `approximated` + why), so an import never
+  silently pretends to be lossless.
 
 ## Tools
 
