@@ -524,7 +524,14 @@ here.
   executors, and secret redaction (`redact.py`). A **self-rewrite loop**
   (`evolve.py` + `evolution_log.py`) swaps a node kind, measures grounded
   before/after outcomes, versions the definition, and autonomously reverts a
-  regression. A failed run records WHICH node failed (`FlowRun.cursor`) and can
+  regression. It grounds which tool a reliable agent node keeps calling
+  (`node_tools.py`, sourced from the trajectory store) so a **hardening**
+  proposal (agent → deterministic action) can name — and, under `[flows]
+  auto_apply`, autonomously apply — the inferred tool instead of waiting for a
+  human to pick one. Both autonomy knobs (`auto_evolve` revert, `auto_apply`
+  forward) are toggled from the Learning page, deliberately kept off the blanket
+  "turn all learning on" button. `evolution_log.improvement_count()` reports the
+  self-rewrites that stuck (reverted ones netted out) as the moat number. A failed run records WHICH node failed (`FlowRun.cursor`) and can
   **resume from the failed step** with the data as of the failure
   (`execution.execute(from_failure=True)`, `POST /flows/runs/{id}/retry?from_failure=1`)
   — pre-failure side effects are never re-driven. The server-rendered **visual
