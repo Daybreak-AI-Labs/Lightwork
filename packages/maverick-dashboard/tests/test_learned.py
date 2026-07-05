@@ -84,6 +84,35 @@ def test_harness_guidance_renders_on_page_and_api(monkeypatch, tmp_path):
     assert "verify the export precondition before acting" in body["harness"][0]["lines"]
 
 
+def test_harness_view_shows_recent_rate_and_pending_corpus(monkeypatch, tmp_path):
+    _isolate(monkeypatch, tmp_path)
+    from maverick import config
+    from maverick import self_harness as sh
+    from maverick import self_harness_eval as ev
+    store = tmp_path / "addenda.json"
+    monkeypatch.setattr(sh, "_store_path", lambda: store)
+    monkeypatch.setenv("MAVERICK_SELF_HARNESS", "1")
+    sh._write_addenda({"m1": "Operating guidance learned for this model:\n"
+                             "- verify the export"}, store)
+    sh._write_line_meta({sh._line_id("m1", "verify the export"): {
+        "model_id": "m1", "text": "verify the export",
+        "signature": "timeout: slow export",
+        "recall_success": 6, "recall_failure": 2,
+        "recent_outcomes": [1, 0, 0, 0]}}, store)
+    cpath = tmp_path / "corpus.json"
+    cpath.write_text("{}")
+    ev.stage_candidates(cpath, "m1", [{"goal": "g", "expected": "e"}])
+    monkeypatch.setattr(config, "load_config", lambda *a, **k: {
+        "self_harness": {"enable": True, "eval_corpus": str(cpath)}})
+    text = _client().get("/learned").text
+    assert "75% success" in text                       # lifetime rate unchanged
+    assert "recent 1✓/3✗ (25%)" in text                # the recency signal
+    assert "harvested corpus candidate" in text        # staged ground truth visible
+    body = _client().get("/api/v1/learned").json()
+    rec = body["harness"][0]["provenance"][0]
+    assert rec["recent_rate"] == 0.25 and body["harness"][0]["pending_corpus"] == 1
+
+
 def test_harness_view_shows_provenance_and_conflicts(monkeypatch, tmp_path):
     _isolate(monkeypatch, tmp_path)
     from maverick import self_harness as sh

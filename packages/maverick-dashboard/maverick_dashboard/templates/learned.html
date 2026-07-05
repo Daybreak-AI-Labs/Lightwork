@@ -59,6 +59,9 @@
         {% if h.conflicts %}
           <p class="badge blocked" style="display:inline-block">⚔ {{ h.conflicts | length }} possible conflict{{ '' if h.conflicts | length == 1 else 's' }} — review with <code>maverick self-harness conflicts</code></p>
         {% endif %}
+        {% if h.pending_corpus %}
+          <p class="badge info" style="display:inline-block">📥 {{ h.pending_corpus }} harvested corpus candidate{{ '' if h.pending_corpus == 1 else 's' }} awaiting <code>maverick self-harness corpus review</code></p>
+        {% endif %}
         <ul>
         {% for rec in h.provenance %}
           <li>{{ rec.text }}
@@ -68,7 +71,7 @@
               <br><span class="muted">why: {{ rec.signature }}{% if rec.held_out_delta is not none and rec.samples %} · held-out {{ '%+.3g' | format(rec.held_out_delta) }} over {{ rec.samples }} samples{% endif %}{% if rec.last_recalled_at %} · in use{% endif %}</span>
             {% endif %}
             {% if rec.rate is defined and rec.rate is not none %}
-              <br><span class="muted">outcomes: {{ rec.success }}✓ / {{ rec.failure }}✗ · {{ '%.0f%%' | format(rec.rate * 100) }} success</span>
+              <br><span class="muted">outcomes: {{ rec.success }}✓ / {{ rec.failure }}✗ · {{ '%.0f%%' | format(rec.rate * 100) }} success{% if rec.recent_rate is defined and rec.recent_rate is not none %} · recent {{ rec.recent_success }}✓/{{ rec.recent_failure }}✗ ({{ '%.0f%%' | format(rec.recent_rate * 100) }}){% endif %}</span>
             {% endif %}
           </li>
         {% else %}

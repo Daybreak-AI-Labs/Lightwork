@@ -1677,11 +1677,27 @@ def _harness_guidance() -> tuple[list[dict], bool]:
                 if e:
                     rec["success"], rec["failure"] = e["success"], e["failure"]
                     rec["rate"] = e["rate"]
+                    rec["recent_success"] = e.get("recent_success")
+                    rec["recent_failure"] = e.get("recent_failure")
+                    rec["recent_rate"] = e.get("recent_rate")
                 rec["canary"] = rec["text"] in canaries
             return prov
 
+        # Harvested corpus candidates awaiting operator review (advisory count
+        # per corpus key) -- so staged ground truth is visible, not forgotten.
+        pending_corpus: dict[str, int] = {}
+        try:
+            from maverick.self_harness import settings
+            from maverick.self_harness_eval import load_pending
+            cpath = settings().get("eval_corpus")
+            if cpath:
+                pending_corpus = {k: len(v) for k, v in load_pending(cpath).items() if v}
+        except Exception:  # pragma: no cover -- pending count is advisory
+            pass
+
         rows = [{"model_id": m, "lines": lines,
                  "provenance": _enriched_provenance(m),
+                 "pending_corpus": pending_corpus.get(m, 0),
                  "conflicts": conflicts_by_model.get(m, [])}
                 for m, lines in sorted(list_learned().items())]
         return rows, bool(enabled())
