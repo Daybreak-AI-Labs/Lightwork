@@ -128,6 +128,25 @@ drive them; this wave wires them, changing no default behavior:
   domain + invoked tools. Before this, worker models' lines earned recalls but
   never outcomes, so a worker canary promoted by `run --all-models` could
   never graduate or be demoted by the counter-driven review.
+- **Corpus bootstrapping** (`[self_harness] corpus_harvest = off|propose|auto`):
+  hindsight pairs — a goal that FAILED (a reflexion exists) and whose wording
+  later ran to DONE — become `{goal, expected}` eval-corpus candidates, the
+  succeeded goal's recorded result supplying the expected hint (the strongest
+  natural label run history offers; ACE's label-free caveat is why `auto` is
+  an explicit opt-in). `propose` stages candidates for `maverick self-harness
+  corpus review` (accept/reject before anything enters the loop's ground
+  truth); harvesting rides the dream beat and `self-harness corpus harvest`.
+- **Cross-model transfer** (testing the refuted "inherently model-specific"
+  claim on the operator's own fleet): `self_harness.run_transfer` tries a
+  source model's graduated model-wide lines (`transferable_lines` excludes
+  probation + relapsing lines; scoped lines stay home) on target models
+  through the SAME validation floors and governed gate, landing survivors as
+  canaries. A persisted tried-memory keyed (target, normalized line) makes
+  every attempt one-shot, so the nightly sweep (`[self_harness]
+  transfer_auto`, default off, riding `auto_run` on the dream beat) spends
+  ~nothing at steady state. Operator surface: `maverick self-harness transfer
+  --from M [--to T] [--force]`; the driver builds per-target evaluators from
+  the corpus on one shared eval-budget pot.
 - **Per-role component profiles** (the Continual Harness direction, survey
   taxonomy's per-role axis): reflexions now carry the agent `role` in play at
   failure (goal-level captures stamp `orchestrator`), `role` joins the
@@ -181,6 +200,41 @@ drive them; this wave wires them, changing no default behavior:
   `domain=finance` weakness is validated against the finance cases instead of
   the general pool — and a domain-keyed-only corpus now promotes its
   departments' lines even when the model-wide A/B can't build.
+
+## Wave: adversarial review hardening (2026-07-05)
+
+A 10-angle / 11-verifier adversarial review of the transfer + corpus-harvest
+wave confirmed and fixed a cluster of lifecycle-integrity defects:
+
+- **Merits-only tried-memory**: `run_transfer` no longer records pairs whose
+  evaluation was indeterminate (budget-dead arm — `validate_proposal`'s
+  `_INDETERMINATE_REASON` sentinel) or whose gate refusal was environmental
+  (self-improvement off, calibration freeze, evidence floor); judged keys
+  flush per target, targets are deduped, and `forget`/demotion now WRITES the
+  memory so a nightly sweep can't resurrect a governed rollback.
+- **Fail-closed evaluation under budget death**: `_rate` treats a
+  `BudgetExceeded` as invalidating the whole arm (NaN, never a prefix mean
+  compared against a full-corpus memoized baseline with a fabricated Wilson
+  n); `_memo_scorer` never caches an indeterminate arm; the transfer
+  paraphraser is memoized per goals-tuple (one batch per target per sweep).
+- **Gate parity**: transfer honors `holdout_rotations` (same ALL-folds rule as
+  the home cycle) and respects `_MAX_LINES_PER_MODEL` capacity — a transfer
+  canary can no longer evict a target's graduated lines.
+- **Corpus integrity**: stage/merge/resolve serialize under a cross-process
+  lock on the live corpus path; merges append to the RAW file (operator
+  fields survive); harvest candidates are secret-redacted before leaving the
+  world DB; missing timestamps fail the hindsight guard CLOSED; rejections
+  are remembered (`.rejected.json`) and excluded before the candidate cap;
+  `--accept-all --reject N` means "all but N"; out-of-range review indexes
+  are hard errors and the CLI echoes exactly what it resolved.
+- **Honest CLIs**: interactive `transfer`/`corpus harvest` pass
+  `raise_errors=True` (a write failure is no longer indistinguishable from
+  "nothing to do"); the wizard uses a select for the harvest mode and warns
+  when nightly knobs are configured without `auto_run`/a corpus.
+- **Isolation parity** (from the follow-up security review, which otherwise
+  found no new exploitable surface): the harvest's goal side now skips
+  owner-scoped goals, matching the reflexion side's unscoped-only filter --
+  one tenant's goal text is never mined into the shared eval corpus.
 
 ## Principle (unchanged across every wave)
 

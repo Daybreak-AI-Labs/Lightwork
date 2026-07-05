@@ -1628,20 +1628,38 @@ def _learned_snapshot(limit: int = 50) -> dict:
     return {
         "learned": learned, "generated_tools": tools,
         "harness": harness, "harness_enabled": harness_enabled,
+        "pending_corpus": _pending_corpus_counts(),
     }
+
+
+def _pending_corpus_counts() -> dict[str, int]:
+    """Harvested corpus candidates awaiting operator review, per corpus key --
+    so staged ground truth is visible, not forgotten. A CORPUS-key fact, kept
+    apart from the learned-guidance snapshot: the badge must show even when a
+    key has staged cases but no learned lines yet (the bootstrap case), and a
+    failure here must not blank the guidance list (or vice versa)."""
+    try:
+        from maverick.self_harness import settings
+        from maverick.self_harness_eval import load_pending
+        cpath = settings().get("eval_corpus")
+        if cpath:
+            return {k: len(v) for k, v in load_pending(cpath).items() if v}
+    except Exception as e:  # pragma: no cover -- pending count is advisory
+        log.debug("pending corpus snapshot failed: %s", e)
+    return {}
 
 
 def _harness_guidance() -> tuple[list[dict], bool]:
     """The self-harness per-model operating guidance recalled into prompts.
 
-    Returns ``([{model_id, lines}], enabled)``. This is the self-harness loop's
-    most prompt-impacting output, yet the /learned page surfaced only the
-    capability ledger -- an operator could see it ONLY via `maverick
-    self-harness show`. Read-only; ``list_learned`` reads the store regardless
-    of the toggle (so paused guidance is still inspectable), so we return the
-    ``enabled`` flag too -- stored guidance is NOT recalled into prompts until
-    the feature is on. Kept in its own try so a self-harness failure never
-    blanks the capability ledger, and vice versa."""
+    Returns ``([{model_id, lines, provenance, conflicts}], enabled)``. This is
+    the self-harness loop's most prompt-impacting output, yet the /learned page
+    surfaced only the capability ledger -- an operator could see it ONLY via
+    `maverick self-harness show`. Read-only; ``list_learned`` reads the store
+    regardless of the toggle (so paused guidance is still inspectable), so we
+    return the ``enabled`` flag too -- stored guidance is NOT recalled into
+    prompts until the feature is on. Kept in its own try so a self-harness
+    failure never blanks the capability ledger, and vice versa."""
     try:
         from maverick.self_harness import (
             detect_store_conflicts,
@@ -1677,6 +1695,9 @@ def _harness_guidance() -> tuple[list[dict], bool]:
                 if e:
                     rec["success"], rec["failure"] = e["success"], e["failure"]
                     rec["rate"] = e["rate"]
+                    rec["recent_success"] = e.get("recent_success")
+                    rec["recent_failure"] = e.get("recent_failure")
+                    rec["recent_rate"] = e.get("recent_rate")
                 rec["canary"] = rec["text"] in canaries
             return prov
 
@@ -4727,7 +4748,11 @@ def _learning_snapshot(request: Request) -> dict:
     # single tenant must never see deployment-wide totals as if they were its own.
     if owner is None:
         try:
-            learned_n = len(_learned_snapshot().get("learned") or [])
+            # Count the ledger directly -- _learned_snapshot would also build
+            # the whole harness/provenance/pending view just to be discarded.
+            from maverick import self_learning
+            learned_n = len(self_learning.history(
+                limit=50, path=self_learning.LEARNED_PATH))
         except Exception:  # pragma: no cover - the moat view never 500s on a sub-read
             learned_n = 0
         accumulated["grounded_outcomes"] = consequence.count()

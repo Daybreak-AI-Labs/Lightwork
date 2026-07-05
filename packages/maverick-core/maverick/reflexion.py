@@ -355,7 +355,9 @@ def list_recent(
                     continue
     except OSError:
         return []
-    entries.sort(key=lambda r: r.ts, reverse=True)
+    # A legacy/hand-written line can lack ``ts`` (loaded as None); a None key
+    # would TypeError the whole sort and silently blank every caller.
+    entries.sort(key=lambda r: r.ts or 0, reverse=True)
     return entries[:max(1, limit)]
 
 

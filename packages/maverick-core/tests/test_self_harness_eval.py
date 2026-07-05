@@ -231,6 +231,140 @@ def test_rate_nan_on_all_indeterminate_but_zero_on_empty():
     assert ev._rate(["a"], lambda g: True) == 1.0     # normal path unchanged
 
 
+# ---- corpus bootstrapping: hindsight-pair harvest + review ----
+
+class _G:
+    """A minimal done-goal stand-in (title/description/result/timestamps)."""
+
+    def __init__(self, title, result, ts=100.0, desc=""):
+        self.title, self.description, self.result = title, desc, result
+        self.updated_at = self.created_at = ts
+
+
+def test_harvest_pairs_failed_then_done_goals():
+    refl = [{"goal_text": "export the nightly ledger report", "ts": 50.0}]
+    goals = [
+        _G("export the nightly ledger report", "Ledger exported: 42 rows."),
+        _G("unrelated cleanup task entirely", "done fine"),      # no overlap
+        _G("export the nightly ledger report", "early win", ts=10.0),  # BEFORE the failure
+        _G("export the nightly ledger report", ""),              # no result -> no hint
+    ]
+    out = ev.harvest_corpus_candidates(refl, goals)
+    assert out == [{"goal": "export the nightly ledger report",
+                    "expected": "Ledger exported: 42 rows."}]
+    # deterministic: same inputs, same candidates
+    assert ev.harvest_corpus_candidates(refl, goals) == out
+    assert ev.harvest_corpus_candidates([], goals) == []
+
+
+def test_stage_review_and_auto_merge(tmp_path):
+    cpath = tmp_path / "corpus.json"
+    cpath.write_text(json.dumps({"M": [{"goal": "live", "expected": "x"}]}))
+    cands = [{"goal": "live", "expected": "dup"},        # already live -> skipped
+             {"goal": "g1", "expected": "e1"},
+             {"goal": "g2", "expected": "e2"}]
+    assert ev.stage_candidates(cpath, "M", cands) == 2
+    assert ev.stage_candidates(cpath, "M", cands) == 0   # idempotent
+    assert [c["goal"] for c in ev.load_pending(cpath)["M"]] == ["g1", "g2"]
+    # review: accept 1, reject 2 -> corpus gains g1, pending drains
+    res = ev.resolve_pending(cpath, "M", accept=[1], reject=[2])
+    assert (res["merged"], res["rejected"]) == (1, 1)
+    assert res["accepted_goals"] == ["g1"] and res["rejected_goals"] == ["g2"]
+    assert {c["goal"] for c in ev.load_eval_corpus(cpath)["M"]} == {"live", "g1"}
+    assert ev.load_pending(cpath) == {}
+    # the rejection is REMEMBERED: the harvest can't re-stage the same case
+    assert ev.stage_candidates(cpath, "M", cands) == 0
+    assert ev.load_rejected(cpath) == {"M": ["g2"]}
+    # auto mode merges straight into the live corpus
+    assert ev.merge_candidates(cpath, "M", [{"goal": "g3", "expected": "e3"}]) == 1
+    assert any(c["goal"] == "g3" for c in ev.load_eval_corpus(cpath)["M"])
+
+
+def test_resolve_pending_duplicate_accept_is_reported_not_silent(tmp_path):
+    # A goal that went live between staging and review resolves as a DUPLICATE,
+    # not a silent "accepted 0" indistinguishable from a typo'd index.
+    cpath = tmp_path / "corpus.json"
+    cpath.write_text("{}")
+    ev.stage_candidates(cpath, "M", [{"goal": "g1", "expected": "e1"}])
+    ev.merge_candidates(cpath, "M", [{"goal": "g1", "expected": "e1"}])
+    res = ev.resolve_pending(cpath, "M", accept=[1])
+    assert res["merged"] == 0 and res["duplicates"] == 1
+    assert res["accepted_goals"] == ["g1"]
+    assert ev.load_pending(cpath) == {}          # resolved either way
+
+
+def test_resolve_pending_rejects_out_of_range_index(tmp_path):
+    import pytest
+    cpath = tmp_path / "corpus.json"
+    cpath.write_text("{}")
+    ev.stage_candidates(cpath, "M", [{"goal": "g1", "expected": "e1"}])
+    with pytest.raises(ValueError, match="out of range"):
+        ev.resolve_pending(cpath, "M", accept=[2])
+    assert [c["goal"] for c in ev.load_pending(cpath)["M"]] == ["g1"]  # untouched
+
+
+def test_accept_all_still_honors_explicit_rejects(tmp_path):
+    # `--accept-all --reject 2` means "all but 2" -- the known-bad case must
+    # not ride into the live ground truth on the bulk flag.
+    cpath = tmp_path / "corpus.json"
+    cpath.write_text("{}")
+    ev.stage_candidates(cpath, "M", [{"goal": "g1", "expected": "e1"},
+                                     {"goal": "g2", "expected": "e2"},
+                                     {"goal": "g3", "expected": "e3"}])
+    res = ev.resolve_pending(cpath, "M", reject=[2], accept_all=True)
+    assert res["merged"] == 2 and res["rejected"] == 1
+    assert res["rejected_goals"] == ["g2"]
+    assert {c["goal"] for c in ev.load_eval_corpus(cpath)["M"]} == {"g1", "g3"}
+
+
+def test_merge_preserves_operator_fields_and_unknown_keys(tmp_path):
+    # The live corpus is operator data: a merge APPENDS -- it must never strip
+    # hand-authored per-case fields or unknown keys via a normalization
+    # round-trip.
+    cpath = tmp_path / "corpus.json"
+    cpath.write_text(json.dumps({
+        "M": [{"goal": "live", "expected": "x", "notes": "keep me",
+               "reviewed": True}],
+        "_meta": {"owner": "ops"},
+    }))
+    assert ev.merge_candidates(cpath, "M", [{"goal": "g", "expected": "e"}]) == 1
+    raw = json.loads(cpath.read_text())
+    assert raw["M"][0] == {"goal": "live", "expected": "x", "notes": "keep me",
+                           "reviewed": True}
+    assert raw["_meta"] == {"owner": "ops"}
+    assert raw["M"][1] == {"goal": "g", "expected": "e"}
+
+
+def test_harvest_rejects_pairs_missing_timestamps_and_honors_known():
+    # Fail closed: without BOTH timestamps the failed-then-worked ordering
+    # cannot be proven. And `known` goals are excluded BEFORE the cap, so
+    # long-known goals can't starve fresh candidates out of the slice.
+    goals = [_G("export the nightly ledger report", "Ledger exported.")]
+    assert ev.harvest_corpus_candidates(
+        [{"goal_text": "export the nightly ledger report"}], goals) == []
+    refl = [{"goal_text": "export the nightly ledger report", "ts": 50.0}]
+    assert ev.harvest_corpus_candidates(
+        refl, goals, known={"export the nightly ledger report"}) == []
+    assert ev.harvest_corpus_candidates(refl, goals, max_candidates=1) != []
+
+
+def test_rate_budget_death_fails_the_whole_arm_closed():
+    # A dead pot never un-exhausts mid-arm: a partial prefix mean would be
+    # compared against a full-corpus other arm with a fabricated sample size.
+    import math
+
+    from maverick.budget import BudgetExceeded
+    calls = {"n": 0}
+
+    def dies_after_two(g):
+        calls["n"] += 1
+        if calls["n"] > 2:
+            raise BudgetExceeded("dead pot")
+        return True
+
+    assert math.isnan(ev._rate(["a", "b", "c", "d"], dies_after_two))
+
+
 # ---- budget exhaustion fails the evaluation CLOSED, never open ----
 
 class _BrokeLLM:

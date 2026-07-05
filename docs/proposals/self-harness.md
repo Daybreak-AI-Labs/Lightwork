@@ -243,6 +243,23 @@ safety model as skills and insights.
 - `maverick self-harness canary --model M [--review]` — inspect lines on canary
   probation, or `--review` to advance the lifecycle (graduate the proven, pull the
   failing) from the accumulated counters.
+- `maverick self-harness transfer --from M [--to T] [--force]` — try one
+  model's proven guidance on other fleet models: graduated lines validated
+  against the target's corpus through the full floors + gate (including
+  `holdout_rotations` when configured), landing as canaries and never evicting
+  a full target block. One-shot per (target, line) via the tried-memory — but
+  only pairs judged ON THE MERITS are recorded: a budget-dead evaluation or a
+  transient gate refusal stays retryable, while a `forget`/demotion writes the
+  memory so a sweep can't resurrect a governed rollback. `[self_harness]
+  transfer_auto` runs the fleet sweep on the dream beat.
+- `maverick self-harness corpus harvest [--auto]` / `corpus review
+  [--accept N] [--reject N] [--accept-all]` — bootstrap the eval corpus from
+  hindsight pairs (failed goals whose wording later ran to done); staged
+  candidates are human-gated by default, `[self_harness] corpus_harvest =
+  "auto"` merges directly on the dream beat. Candidates are secret-redacted
+  before they leave the world DB; rejections are remembered (never re-staged);
+  `--accept-all --reject N` means "all but N"; merges append to the raw file
+  under a cross-process lock, so hand-authored corpus fields survive.
 - `maverick self-harness retire --older-than-days N` — prune stale guidance.
 - `maverick self-harness conflicts` — flag contradictory lines for review.
 - `maverick self-harness log` / `forget [--domain D]` — the audit trail and the

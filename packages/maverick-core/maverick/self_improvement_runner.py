@@ -26,7 +26,8 @@ are no-ops unless ``[self_improvement] enable`` is set.
 from __future__ import annotations
 
 import logging
-from collections.abc import Callable
+import math
+from collections.abc import Callable, Mapping
 
 from .si_producers import ToolOutcomeTracker, propose_policy, propose_prompt, propose_tool
 
@@ -467,6 +468,218 @@ def run_self_harness_cycle(
         return self_harness.SelfHarnessReport(model_id=str(model_id or "")), 0
 
 
+def _memo_scorer(fn):
+    """Cache a scorer on its goals tuple. The BASELINE arm ignores the
+    candidate line, yet ``validate_proposal`` re-scores it per candidate --
+    with L transferable lines that is (L-1)x redundant LLM generations per
+    target, the dominant cost of a transfer sweep. An INDETERMINATE result
+    (NaN arm: budget-dead pot, broken scorer) is returned but never cached --
+    the sweep shares one context across all sources, so caching it would
+    poison every later candidate against this target. (A memoized baseline is
+    one frozen draw of a stochastic measurement; acceptable because transfers
+    land as canaries and real outcomes re-adjudicate them.)"""
+    cache: dict[tuple, object] = {}
+
+    def _scored(line, goals):
+        key = tuple(goals)
+        if key in cache:
+            return cache[key]
+        val = fn(line, goals)
+        s = val.get("success") if isinstance(val, Mapping) else val
+        if not (isinstance(s, float) and math.isnan(s)):
+            cache[key] = val
+        return val
+
+    return _scored
+
+
+def _memo_paraphraser(fn):
+    """Cache a paraphraser on its input goals tuple: paraphrases depend only
+    on the held-out cases, never on the candidate line, yet
+    ``validate_proposal`` regenerates them per candidate -- L x H redundant
+    LLM calls per target. A stable paraphrase list also keeps the memoized
+    baseline arm's cache key stable across candidates. A falsy result is NOT
+    cached, so one transient paraphraser failure can't silently disable the
+    metamorphic check for the whole sweep."""
+    cache: dict[tuple, list] = {}
+
+    def _para(goals):
+        key = tuple(goals)
+        if key not in cache:
+            out = fn(goals)
+            if not out:
+                return out
+            cache[key] = out
+        return cache[key]
+
+    return _para
+
+
+def _transfer_context(st: dict, corpus_path: str):
+    """The shared per-sweep transfer state: ``(eval_for_target, validate_kwargs)``.
+
+    ``eval_for_target`` caches each target's corpus-built quad (so a fleet
+    sweep builds every evaluator once, not once per source) with the baseline
+    arm memoized, one eval-budget pot across everything, and the SAME floors +
+    metamorphic/judge_unknown wiring the cycle applies -- a transferred line
+    must clear the gate home-grown lines clear, not a weaker copy of it."""
+    budget = _eval_budget(st)
+    judge_unknown = bool(st.get("metamorphic"))
+    cache: dict[str, tuple | None] = {}
+
+    def eval_for_target(m: str):
+        if m not in cache:
+            built = _auto_evaluator(m, corpus_path=corpus_path,
+                                    judge_samples=st.get("judge_samples", 1),
+                                    budget=budget, judge_unknown=judge_unknown)
+            if built is not None:
+                hi, ho, sw, swo = built
+                built = (hi, ho, sw, _memo_scorer(swo))
+            cache[m] = built
+        return cache[m]
+
+    validate_kwargs = dict(
+        min_delta=st["min_delta"], min_held_out=st["min_held_out"],
+        confidence_z=st["confidence_z"], max_cost_factor=st["max_cost_factor"],
+        max_latency_factor=st["max_latency_factor"],
+        max_tool_calls_factor=st["max_tool_calls_factor"],
+        metamorphic_tolerance=st.get("metamorphic_tolerance", 0.0))
+    if st.get("metamorphic"):
+        try:
+            from . import self_harness_eval as ev
+            from .llm import LLM, model_for_role
+            validate_kwargs["metamorphic_fn"] = _memo_paraphraser(
+                ev.llm_paraphraser(LLM(model_for_role("summarizer")),
+                                   budget=budget))
+        except Exception:  # pragma: no cover -- no paraphraser = check off
+            log.debug("transfer paraphraser construction failed", exc_info=True)
+    return eval_for_target, validate_kwargs
+
+
+def run_self_harness_transfer(source_model: str, *, targets=None,
+                              corpus_path: str | None = None,
+                              controller=None, force: bool = False,
+                              raise_errors: bool = False,
+                              _context=None) -> dict:
+    """Driver entry for a governed cross-model transfer trial: try
+    ``source_model``'s graduated lines on ``targets`` (default: the whole
+    fleet) against each target's corpus-built A/B, applying the configured
+    validation floors (including ``holdout_rotations`` -- the same
+    cross-validation home-grown lines face), one shared eval-budget pot, and
+    the canary landing ``self_harness.run_transfer`` enforces. The
+    tried-memory makes repeat invocations spend nothing on already-judged
+    pairs (``force`` overrides). Returns the per-target report; ``{}`` when
+    the loop is off or no corpus is configured. Never raises unless
+    ``raise_errors`` -- the interactive CLI sets it, because a swallowed
+    error is indistinguishable from an empty fleet."""
+    try:
+        from . import self_harness
+        if not self_harness.enabled():
+            return {}
+        st = self_harness.settings()
+        corpus_path = corpus_path or st.get("eval_corpus")
+        if not corpus_path:
+            return {}
+        eval_for_target, validate_kwargs = (
+            _context if _context is not None
+            else _transfer_context(st, corpus_path))
+        if targets is None:
+            targets = harness_fleet_models()
+        return self_harness.run_transfer(
+            str(source_model), list(targets), eval_for_target=eval_for_target,
+            controller=controller, force=force, validate_kwargs=validate_kwargs,
+            holdout_rotations=int(st.get("holdout_rotations", 1) or 1))
+    except Exception:  # pragma: no cover -- a transfer trial never perturbs a run
+        if raise_errors:
+            raise
+        log.warning("self-harness transfer failed", exc_info=True)
+        return {}
+
+
+def run_self_harness_transfer_sweep(*, controller=None) -> dict:
+    """Fleet-wide transfer: every configured role model as source in turn,
+    all sources sharing ONE transfer context (evaluator cache, budget pot,
+    floors). The tried-memory keeps steady-state spend near zero -- only lines
+    learned since the last sweep generate new evaluations. Returns
+    ``{source: per-target report}`` for sources that attempted anything."""
+    out: dict[str, dict] = {}
+    try:
+        from . import self_harness
+        if not self_harness.enabled():
+            return out
+        st = self_harness.settings()
+        corpus_path = st.get("eval_corpus")
+        if not corpus_path:
+            return out
+        context = _transfer_context(st, corpus_path)
+        fleet = harness_fleet_models()
+        for m in fleet:
+            # run_transfer skips the source itself -- no pre-filter needed.
+            rep = run_self_harness_transfer(
+                m, targets=fleet,
+                corpus_path=corpus_path, controller=controller, _context=context)
+            if any(r.get("attempted") for r in rep.values()):
+                out[m] = rep
+    except Exception:  # pragma: no cover -- a sweep never perturbs a run
+        log.debug("self-harness transfer sweep failed", exc_info=True)
+    return out
+
+
+def run_corpus_harvest(world, *, mode: str | None = None, key: str | None = None,
+                       corpus_path: str | None = None,
+                       raise_errors: bool = False) -> int:
+    """Driver entry for corpus bootstrapping: mine hindsight-pair candidates
+    from the reflexion log + the world's DONE goals and stage ("propose") or
+    merge ("auto") them for ``key`` (default: the orchestrator model). The one
+    owner of the harvest policy -- the unscoped-reflexion filter (via
+    reflexion's own scope predicate), the history limits, and the
+    secret-redaction pass live here, not in each CLI. Goals already live,
+    pending, or operator-rejected are excluded BEFORE the candidate cap so
+    they can't starve fresh candidates. Returns how many candidates were
+    newly staged/merged; 0 when off/unconfigured. Never raises unless
+    ``raise_errors`` -- the interactive CLI sets it so a write failure isn't
+    indistinguishable from "nothing to harvest"."""
+    try:
+        from . import reflexion, self_harness
+        from . import self_harness_eval as ev
+        from .reflexion import _sanitize_text, _scope_matches
+        st = self_harness.settings()
+        mode = mode or st.get("corpus_harvest", "off")
+        corpus_path = corpus_path or st.get("eval_corpus")
+        if mode not in ("propose", "auto") or not corpus_path or world is None:
+            return 0
+        if key is None:
+            from .llm import model_for_role
+            key = model_for_role("orchestrator")
+        refl = [r.to_dict() for r in reflexion.list_recent(limit=500)
+                if _scope_matches(r, channel=None, user_id=None)]
+        # Isolation parity with the reflexion side: owner-scoped goals stay
+        # out of the shared corpus -- one tenant's goal text must never be
+        # mined into ground truth other contexts evaluate against.
+        goals = [g for g in world.list_goals(status="done", limit=200,
+                                             order="desc")
+                 if not getattr(g, "owner", "")]
+        known = {c["goal"] for c in ev.load_eval_corpus(corpus_path).get(str(key), [])}
+        known |= {c["goal"] for c in ev.load_pending(corpus_path).get(str(key), [])}
+        known |= set(ev.load_rejected(corpus_path).get(str(key), []))
+        # The corpus/pending files are plaintext sidecars; goal content can be
+        # sealed at rest and is secret-redacted on every other persistence
+        # path -- redact here too, before it leaves the world DB.
+        cands = [{"goal": _sanitize_text(c["goal"]),
+                  "expected": _sanitize_text(c["expected"])}
+                 for c in ev.harvest_corpus_candidates(refl, goals, known=known)]
+        # The files hold REDACTED text, so re-check known post-redaction too
+        # (a secret-bearing goal changes form between mining and staging).
+        cands = [c for c in cands if c["goal"] not in known]
+        add = ev.merge_candidates if mode == "auto" else ev.stage_candidates
+        return add(corpus_path, key, cands)
+    except Exception:  # pragma: no cover -- harvesting never perturbs a run
+        if raise_errors:
+            raise
+        log.warning("self-harness corpus harvest failed", exc_info=True)
+        return 0
+
+
 def harness_fleet_models() -> list[str]:
     """The DISTINCT set of models the fleet runs, resolved across every role in
     ``llm.ROLE_MODELS`` (each via ``model_for_role``, deduped, sorted for a
@@ -516,4 +729,6 @@ __all__ = [
     "collect_calibration", "should_retire", "review_generated_tools",
     "build_prm_examples", "emit_strategy_candidate", "run_self_harness_pass",
     "run_self_harness_cycle", "run_self_harness_all_models", "harness_fleet_models",
+    "run_self_harness_transfer", "run_self_harness_transfer_sweep",
+    "run_corpus_harvest",
 ]
