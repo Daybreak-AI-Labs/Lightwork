@@ -34,7 +34,7 @@ wiring.
 | Conflicts | semantic-judge seam over the lexical heuristic | `find_conflicts(classifier_fn=)` |
 
 Every wave is opt-in, leaves default behavior **byte-identical**, keeps the
-determinism proof at **7/7**, and routes any promotion through the one governed
+determinism proof at **8/8**, and routes any promotion through the one governed
 gate. Backlog item map: #1 driver (`run_self_harness_cycle`), #2/#4 reference-free
 evaluator (`self_harness_eval`), #3 eval corpus (`load_eval_corpus`/`corpus_split`),
 #5 best-of-N, #6 semantic mining, #7 component profiles (per-domain AND per-tool
@@ -175,7 +175,7 @@ drive them; this wave wires them, changing no default behavior:
 
 ## Principle (unchanged across every wave)
 
-**Off-by-default / byte-identical default**, **determinism proof 7/7**, and **the
+**Off-by-default / byte-identical default**, **determinism proof 8/8**, and **the
 governed gate decides promotion** (demotion uses the reversible audited `forget`
 path, never the gate). Scoped recall keeps the default store byte-identical
 because model-wide lines stay under the bare `model_id` key — the composite

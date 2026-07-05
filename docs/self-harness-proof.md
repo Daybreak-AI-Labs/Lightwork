@@ -14,7 +14,7 @@
 | High-round soak (knobs cranked far past defaults) | **187 passed**, ~**2.1M** randomized scenarios, **0 invariant violations** |
 | Concurrency battery ×25 repeats | **25/25 clean** — no lost promotions, no store corruption |
 | Determinism (real loop) | same inputs → **byte-identical** learned store across 6 independent runs |
-| Standalone proof scoreboard (`proof/self_harness_proof.py`) | **7/7 guarantees PROVEN**, reproducible |
+| Standalone proof scoreboard (`proof/self_harness_proof.py`) | **8/8 guarantees PROVEN**, reproducible |
 
 Only skips in the whole run were two unrelated optional-dependency modules
 (`z3`, `duckdb`) — no self-harness test skipped.
@@ -101,7 +101,8 @@ python3 proof/self_harness_proof.py
   [PASS]  bounded addendum            <= 8 lines / 1500 chars under overflow
   [PASS]  concurrency safe            8 concurrent promotions, 0 lost, store valid
   [PASS]  reversible + auditable      rollback handle restores exactly; forget() clears guidance
-  7 guarantees PROVEN, 0 failed
+  [PASS]  canary lifecycle            probation rides; 3 wins graduate, 2 failures pull it (audited forget)
+  8 guarantees PROVEN, 0 failed
 ```
 
 The headline guarantee, **determinism**, runs the loop six times on identical
