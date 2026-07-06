@@ -97,3 +97,45 @@ def test_transcribe_rejects_oversized_audio(monkeypatch, tmp_path):
     r = _post_audio(_client(), data=b"x" * 11)
     assert r.status_code == 400
     assert "audio too large" in r.json()["detail"]
+
+
+# ---- POST /api/v1/voice/speak (read-aloud) ----------------------------------
+
+def test_speak_returns_mp3(monkeypatch, tmp_path):
+    _isolate(monkeypatch, tmp_path)
+    import maverick.tools.voice as voice_mod
+
+    def _fake_tts(text, voice, output):
+        assert "the answer is 42" in text
+        output.write_bytes(b"ID3fake-mp3-bytes")
+        return True
+
+    monkeypatch.setattr(voice_mod, "_tts_openai", _fake_tts)
+    r = _client().post("/api/v1/voice/speak",
+                       json={"text": "the answer is 42"})
+    assert r.status_code == 200
+    assert r.headers["content-type"].startswith("audio/mpeg")
+    assert r.content == b"ID3fake-mp3-bytes"
+
+
+def test_speak_503_when_no_backend(monkeypatch, tmp_path):
+    _isolate(monkeypatch, tmp_path)
+    import maverick.tools.voice as voice_mod
+    monkeypatch.setattr(voice_mod, "_tts_openai", lambda *a: False)
+    monkeypatch.setattr(voice_mod, "_tts_elevenlabs", lambda *a: False)
+    r = _client().post("/api/v1/voice/speak", json={"text": "hello"})
+    assert r.status_code == 503
+    assert "text-to-speech" in r.json()["detail"]
+
+
+def test_speak_rejects_empty_text(monkeypatch, tmp_path):
+    _isolate(monkeypatch, tmp_path)
+    r = _client().post("/api/v1/voice/speak", json={"text": "  "})
+    assert r.status_code == 400
+
+
+def test_speak_404_when_disabled(monkeypatch, tmp_path):
+    _isolate(monkeypatch, tmp_path)
+    monkeypatch.setenv("MAVERICK_VOICE_COMMANDS", "0")
+    r = _client().post("/api/v1/voice/speak", json={"text": "hello"})
+    assert r.status_code == 404

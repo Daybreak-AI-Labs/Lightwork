@@ -1380,6 +1380,13 @@ def pick_advanced() -> dict[str, Any]:
             "default.",
             default=False,
         ),
+        "attachment_understanding": _q_confirm(
+            "Attachment understanding? Auto-transcribe incoming audio/video and "
+            "extract text from Office documents into the goal context (audio "
+            "needs an STT key: OPENAI_API_KEY/GROQ_API_KEY or local "
+            "faster-whisper). ON by default.",
+            default=True,
+        ),
         "compaction_strategy": _q_select(
             "  Compaction strategy? (default = simple shrink)",
             ["default     - keep recent + trim big tool outputs",
@@ -3340,10 +3347,17 @@ def _cfg_advanced(  # noqa: C901 - flat sequence of independent opt-in toggles
         lines.append("")
         lines.append("[voice]")
         lines.append("dashboard_commands = false")
+    _attach_lines = []
     if advanced.get("attach_any_mime"):
+        _attach_lines.append("allow_any_mime = true")
+    if advanced.get("attachment_understanding") is False:
+        # Default-on; only a decline needs lines.
+        _attach_lines.append("transcribe_media = false")
+        _attach_lines.append("extract_text = false")
+    if _attach_lines:
         lines.append("")
         lines.append("[attachments]")
-        lines.append("allow_any_mime = true")
+        lines.extend(_attach_lines)
     if advanced.get("reflexion"):
         lines.append("")
         lines.append("[reflexion]")

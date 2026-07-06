@@ -5,6 +5,8 @@ Set up:
   2. Enable Socket Mode; copy the App-Level Token to ${SLACK_APP_TOKEN}
   3. Install to your workspace; copy the Bot Token to ${SLACK_BOT_TOKEN}
   4. Subscribe to `message.im` events; add `chat:write`, `im:history` scopes
+     (+ `files:read` if users will share files with the bot — shared files
+     become goal attachments)
 
 Requires::
 
@@ -70,6 +72,49 @@ class SlackChannel(Channel):
         self._sm.socket_mode_request_listeners.append(self._on_request)
         self._stop_event = asyncio.Event()
 
+    async def _download_files(self, event: dict) -> list[dict]:
+        """Download a message's shared files into IncomingMessage.attachments.
+
+        Slack file objects carry ``url_private_download`` which requires the
+        bot token as a bearer header (and the ``files:read`` scope). Each
+        file becomes ``{"filename", "mime", "data"}``; the server stores them
+        under the same size/mime/magic-byte rules as a dashboard upload.
+        Best-effort: a missing scope or a failed download just means no
+        attachment, never a dropped message.
+        """
+        files = event.get("files") or []
+        if not files:
+            return []
+        try:
+            import aiohttp  # slack_sdk's async client already requires it
+        except ImportError:  # pragma: no cover
+            return []
+        out: list[dict] = []
+        headers = {"Authorization": f"Bearer {self.bot_token}"}
+        async with aiohttp.ClientSession(headers=headers) as session:
+            for f in files[:10]:
+                url = f.get("url_private_download") or f.get("url_private")
+                if not url:
+                    continue
+                size = f.get("size")
+                if size and int(size) > 100 * 1024 * 1024:
+                    continue  # attachments.store would reject it anyway
+                try:
+                    async with session.get(url) as resp:
+                        resp.raise_for_status()
+                        data = await resp.content.read(100 * 1024 * 1024 + 1)
+                except Exception:  # noqa: BLE001 -- never drop the message
+                    log.warning("slack: file download failed", exc_info=True)
+                    continue
+                if not data or len(data) > 100 * 1024 * 1024:
+                    continue
+                out.append({
+                    "filename": f.get("name") or "file.bin",
+                    "mime": f.get("mimetype") or "application/octet-stream",
+                    "data": data,
+                })
+        return out
+
     async def _on_request(self, client, req):
         # Ack IMMEDIATELY, before doing any work. Slack redelivers an event
         # (up to ~3x) if the Socket Mode ack doesn't arrive within ~3s, and the
@@ -91,13 +136,22 @@ class SlackChannel(Channel):
                 if not is_allowed(sender, self.allowed_user_ids):
                     log.warning("unauthorized slack access: user=%s", sender)
                 else:
+                    # Authorized sender: pull any shared files so they become
+                    # goal attachments (auth first — downloads for unlisted
+                    # senders would be free resource burn).
+                    attachments = await self._download_files(event)
+                    text = event.get("text", "")
+                    if not text.strip() and attachments:
+                        # File-only share: give the swarm a working brief.
+                        text = "Process the attached file(s)."
                     msg = IncomingMessage(
                         user_id=event.get("channel", ""),
-                        text=event.get("text", ""),
+                        text=text,
                         channel="slack",
                         raw=event,
                         sender_id=sender,
                         message_id=event.get("ts"),
+                        attachments=attachments,
                     )
                     try:
                         reply = await self.dispatch_text(msg)

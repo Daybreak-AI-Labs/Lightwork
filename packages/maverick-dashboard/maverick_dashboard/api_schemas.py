@@ -362,6 +362,12 @@ class AnswerIn(BaseModel):
     answer: str
 
 
+class SpeakIn(BaseModel):
+    """Text for the dashboard read-aloud endpoint (POST /voice/speak)."""
+    text: str
+    voice: str | None = None
+
+
 class SkillInstallIn(BaseModel):
     source: str = Field(..., description="https://... or gh:org/repo[:path]")
 

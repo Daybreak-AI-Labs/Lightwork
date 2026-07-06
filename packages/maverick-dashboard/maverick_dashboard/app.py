@@ -3280,6 +3280,11 @@ async def chat_send(
             w.add_attachment(goal_id, rec.filename, rec.mime, rec.size_bytes,
                              rec.sha256, str(rec.path))
             total += rec.size_bytes
+        # Text companions (audio/video transcripts, extracted Office-doc
+        # text) BEFORE the goal runs, so they embed on the agent's first
+        # message. Background tasks run sequentially in add order;
+        # generate_companions is best-effort and never raises.
+        bg.add_task(_att.generate_companions, w, goal_id)
     # Use the shared runner so this path gets the same concurrency cap,
     # budget defaults, and error handling as the REST API and MCP server.
     from maverick.runner import run_goal_in_thread

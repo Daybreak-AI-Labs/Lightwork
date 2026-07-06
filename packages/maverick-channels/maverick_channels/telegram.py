@@ -85,13 +85,64 @@ class TelegramChannel(Channel):
             return True
         return False
 
+    @staticmethod
+    async def _collect_attachments(message) -> list[dict]:
+        """Download a message's files into IncomingMessage.attachments dicts.
+
+        Documents, photos (largest size), voice notes, audio, and video all
+        map to ``{"filename", "mime", "data"}``; the server stores them under
+        the same rules as a dashboard upload (and voice notes auto-transcribe
+        into the goal context via the companion pipeline). Entirely
+        best-effort: any download error just means no attachment.
+        """
+        candidates: list[tuple[object, str, str]] = []
+        if getattr(message, "document", None):
+            d = message.document
+            candidates.append((d, d.file_name or "document.bin",
+                               d.mime_type or "application/octet-stream"))
+        if getattr(message, "photo", None):
+            candidates.append((message.photo[-1], "photo.jpg", "image/jpeg"))
+        if getattr(message, "voice", None):
+            candidates.append((message.voice, "voice-note.ogg", "audio/ogg"))
+        if getattr(message, "audio", None):
+            a = message.audio
+            candidates.append((a, a.file_name or "audio.mp3",
+                               a.mime_type or "audio/mpeg"))
+        if getattr(message, "video", None):
+            v = message.video
+            candidates.append((v, v.file_name or "video.mp4",
+                               v.mime_type or "video/mp4"))
+        out: list[dict] = []
+        for obj, filename, mime in candidates[:10]:
+            size = getattr(obj, "file_size", None)
+            if size and size > 100 * 1024 * 1024:
+                continue  # attachments.store would reject it anyway
+            try:
+                f = await obj.get_file()
+                data = bytes(await f.download_as_bytearray())
+            except Exception:  # noqa: BLE001 -- a broken file never blocks
+                log.warning("telegram: attachment download failed", exc_info=True)
+                continue
+            if data:
+                out.append({"filename": filename, "mime": mime, "data": data})
+        return out
+
     async def _on_message(self, update: Update, _ctx: ContextTypes.DEFAULT_TYPE) -> None:
-        if not update.message or not update.message.text:
+        if not update.message:
             return
         if not self._is_authorized(update):
             log.warning("unauthorized telegram access: user_id=%s chat_id=%s",
                         getattr(update.effective_user, "id", None),
                         getattr(update.effective_chat, "id", None))
+            return
+        # Authorize FIRST, download after — file downloads on behalf of an
+        # unauthorized sender would be free resource burn.
+        attachments = await self._collect_attachments(update.message)
+        text = update.message.text or update.message.caption or ""
+        if not text and attachments:
+            # Attachment-only message: give the swarm a working brief.
+            text = "Process the attached file(s)."
+        if not text:
             return
         # Per the IncomingMessage contract, user_id is the REPLY/SEND TARGET and
         # sender_id is the human identity. For a room-based adapter that means
@@ -106,11 +157,12 @@ class TelegramChannel(Channel):
         # AttributeError.
         msg = IncomingMessage(
             user_id=str(update.effective_chat.id) if update.effective_chat else "",
-            text=update.message.text,
+            text=text,
             channel="telegram",
             raw=update,
             sender_id=str(update.effective_user.id) if update.effective_user else None,
             message_id=str(update.message.message_id),
+            attachments=attachments,
         )
         try:
             reply = await self.dispatch_text(msg)
@@ -131,7 +183,12 @@ class TelegramChannel(Channel):
 
     async def start(self) -> None:
         self._app = Application.builder().token(self.token).build()
-        self._app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, self._on_message))
+        # TEXT for plain messages, ATTACHMENT so files/photos/voice notes
+        # (with or without a caption) reach the handler too — they become
+        # goal attachments via IncomingMessage.attachments.
+        self._app.add_handler(MessageHandler(
+            (filters.TEXT | filters.ATTACHMENT) & ~filters.COMMAND,
+            self._on_message))
         log.info("Telegram channel started")
         await self._app.initialize()
         await self._app.start()

@@ -235,13 +235,17 @@ class EmailChannel(Channel):
                 log.exception("email poll failed")
                 messages = []
                 errors += 1
-            for from_addr, subject, body in messages:
+            for from_addr, subject, body, attachments in messages:
                 if not is_allowed((from_addr or "").lower(), self.allowed_user_ids):
                     log.warning("unauthorized email access: from=%s", from_addr)
                     continue
                 text = f"Subject: {subject}\n\n{body}" if subject else body
+                if not text.strip():
+                    # Attachment-only email: give the swarm a working brief.
+                    text = "Process the attached file(s)."
                 msg = IncomingMessage(
                     user_id=from_addr, text=text, channel="email",
+                    attachments=attachments,
                 )
                 try:
                     reply = await self.dispatch_text(msg)
@@ -260,8 +264,41 @@ class EmailChannel(Channel):
                     log.exception("email send failed for %s", from_addr)
             await asyncio.sleep(backoff_delay(self.poll_interval, errors))
 
-    def _fetch_unseen(self) -> list[tuple[str, str, str]]:
-        out: list[tuple[str, str, str]] = []
+    @staticmethod
+    def _extract_attachments(msg) -> list[dict]:
+        """File parts of one message as IncomingMessage.attachments dicts.
+
+        Any part with a filename (or an explicit attachment disposition)
+        becomes ``{"filename", "mime", "data"}``; the server stores them as
+        goal attachments under the same size/mime/magic-byte rules as a
+        dashboard upload. Bounded (count + per-file bytes) so one hostile
+        email can't balloon the poll loop.
+        """
+        out: list[dict] = []
+        if not msg.is_multipart():
+            return out
+        for part in msg.walk():
+            if len(out) >= 10:
+                break
+            filename = part.get_filename()
+            disposition = (part.get_content_disposition() or "").lower()
+            if not filename and disposition != "attachment":
+                continue
+            payload = part.get_payload(decode=True)
+            if not isinstance(payload, (bytes, bytearray)) or not payload:
+                continue
+            if len(payload) > 100 * 1024 * 1024:
+                continue  # attachments.store would reject it anyway
+            out.append({
+                "filename": str(filename or "attachment.bin"),
+                "mime": (part.get_content_type()
+                         or "application/octet-stream").lower(),
+                "data": bytes(payload),
+            })
+        return out
+
+    def _fetch_unseen(self) -> list[tuple[str, str, str, list[dict]]]:
+        out: list[tuple[str, str, str, list[dict]]] = []
         with imaplib.IMAP4_SSL(self.imap_host, timeout=IMAP_TIMEOUT) as mail:
             mail.login(self.imap_user, self.imap_password)
             mail.select("INBOX")
@@ -298,8 +335,9 @@ class EmailChannel(Channel):
                         from_addr,
                     )
                     continue
-                if from_addr and body:
-                    out.append((from_addr, subject, body))
+                attachments = self._extract_attachments(m)
+                if from_addr and (body or attachments):
+                    out.append((from_addr, subject, body, attachments))
         return out
 
     def _extract_body(self, msg) -> str:

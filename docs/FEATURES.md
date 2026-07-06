@@ -762,7 +762,19 @@ here.
   extra_mime_prefixes` or accept any declared type with `allow_any_mime`;
   images auto-embed as vision blocks and PDFs as native document blocks
   budgeted by the driving model's context window, `[attachments]
-  embed_documents` to opt out), **S3-backed
+  embed_documents` to opt out), **attachment understanding**
+  (`generate_companions`: incoming audio/video auto-transcribes via the
+  kernel STT backends and Office/OpenDocument/RTF files auto-extract text
+  via the knowledge parsers into `<name>.transcript.txt` /
+  `<name>.extracted.txt` companion attachments, which embed as text blocks
+  on the first message under a window-scaled budget — user text files stay
+  tool-reachable only; off via `[attachments] transcribe_media` /
+  `extract_text`), **channel inbound attachments** (files shared over
+  email/Telegram/Slack download in the adapter — auth first — travel as
+  `IncomingMessage.attachments`, and the server stores them as goal
+  attachments under the same validation as a dashboard upload, then runs
+  companion generation; attachment-only messages get a "Process the
+  attached file(s)." brief), **S3-backed
   attachments** (`[attachments] s3_bucket`: mirror every stored attachment to
   any S3-compatible bucket + `s3_fetch` pulls it down on another worker host;
   local disk stays the source tools read, mirror is fail-open), `license_scan`
@@ -2249,7 +2261,10 @@ tested without spawning py-spy.
   fill the goal field for review — speech never auto-submits; falls back to
   the browser's own speech recognition when no STT backend is configured;
   on by default, off via `[voice] dashboard_commands = false` /
-  `MAVERICK_VOICE_COMMANDS=0`.
+  `MAVERICK_VOICE_COMMANDS=0`; the goal page's clarifying-question reply
+  box has the same mic, and finished results get a **read-aloud** button
+  (`POST /api/v1/voice/speak`: kernel TTS backends with the voice-safety
+  redaction pass, browser speechSynthesis fallback).
 - **Browser extension** (`extensions/browser/`, opt-in `[dashboard]
   allow_extension` plus `MAVERICK_DASHBOARD_TOKEN` — fail-closed CORS scoped
   to extension origins only): a
