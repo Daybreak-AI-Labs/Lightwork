@@ -548,6 +548,26 @@ def test_tools_search_reaches_the_full_registry(monkeypatch, tmp_path):
     assert hits[0]["name"].startswith("http")
 
 
+def test_tools_catalog_carries_categories(monkeypatch, tmp_path):
+    _isolate(monkeypatch, tmp_path)
+    body = _client().get("/api/v1/flows/tools").json()
+    # Every response advertises the category list so the picker can build its filter.
+    assert "Communication" in body["categories"] and body["categories"][-1] == "Other"
+    # Curated tools each carry a category.
+    assert body["tools"] and all("category" in t for t in body["tools"])
+
+
+def test_tools_category_filter_narrows_the_registry(monkeypatch, tmp_path):
+    _isolate(monkeypatch, tmp_path)
+    c = _client()
+    comms = c.get("/api/v1/flows/tools?category=Communication").json()["tools"]
+    assert comms and all(t["category"] == "Communication" for t in comms)
+    # A category + query intersect: only Communication tools matching the query.
+    both = c.get("/api/v1/flows/tools?q=slack&category=Communication").json()["tools"]
+    assert both and all(t["category"] == "Communication" for t in both)
+    assert all("slack" in (t["name"] + t["description"]).lower() for t in both)
+
+
 def test_designer_opens_a_template_as_a_flow(monkeypatch, tmp_path):
     _isolate(monkeypatch, tmp_path)
     import maverick.templates as tpl
