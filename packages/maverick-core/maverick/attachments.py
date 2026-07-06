@@ -1,14 +1,22 @@
-"""Attachment storage for goal inputs (files + images).
+"""Attachment storage for goal inputs (files of all kinds).
 
 Stores bytes under ``~/.maverick/attachments/<goal_id>/<sha256>`` and
 records the metadata in the world model. Enforces:
-  - max per-file size (default 25 MiB, env-configurable)
-  - max total per-goal size (default 100 MiB)
-  - mime-type allowlist (text + image families by default)
+  - max per-file size (default 100 MiB, MAVERICK_ATTACH_MAX_FILE_BYTES)
+  - max total per-goal size (default 500 MiB, env-configurable)
+  - mime-type allowlist: text, image, audio, and video families plus the
+    common document formats (PDF, Office/OOXML, OpenDocument, epub, RTF,
+    CSV/JSON/XML/YAML). Deployments extend it with ``[attachments]
+    extra_mime_prefixes`` / ``MAVERICK_ATTACH_EXTRA_MIME``, or accept any
+    declared mime with ``allow_any_mime`` / ``MAVERICK_ATTACH_ALLOW_ANY``.
+  - an active magic-byte deny for executables and generic archives that
+    no mime setting bypasses (document ZIP containers like docx/odt/epub
+    are structurally sniffed and exempted; a plain .zip is not).
 
 The agent has a ``list_attachments`` tool that returns the on-disk paths
-so the existing ``read_file`` tool can pick them up. Images are also
-delivered to the orchestrator as Anthropic vision content blocks (see
+so the existing ``read_file`` / ``transcribe_audio`` / OCR tools can pick
+them up. Images are also delivered to the orchestrator as Anthropic
+vision content blocks and PDFs as native document blocks (see
 ``content_blocks_for_goal``) so the agent can SEE them, not just read
 their bytes.
 
@@ -47,22 +55,83 @@ def _env_int(name: str, default: int) -> int:
         return default
 
 
-MAX_FILE_BYTES = _env_int("MAVERICK_ATTACH_MAX_FILE_BYTES", 25 * 1024 * 1024)
-MAX_GOAL_BYTES = _env_int("MAVERICK_ATTACH_MAX_GOAL_BYTES", 100 * 1024 * 1024)
+# 100 MiB per file / 500 MiB per goal: sized for audio and video now that
+# every media kind is accepted (a 25 MiB cap rejected most recordings).
+MAX_FILE_BYTES = _env_int("MAVERICK_ATTACH_MAX_FILE_BYTES", 100 * 1024 * 1024)
+MAX_GOAL_BYTES = _env_int("MAVERICK_ATTACH_MAX_GOAL_BYTES", 500 * 1024 * 1024)
 
-# Mime allowlist. Text + image families. PDF allowed (anthropic vision
-# supports it directly). Active deny for executables and archives.
+# Office / OpenDocument packages are ZIP containers, so they need BOTH a
+# mime allowlist entry AND a structural exemption from the archive deny
+# (see _is_document_package). epub is the same shape.
+DOCUMENT_ZIP_MIME_PREFIXES = (
+    "application/vnd.openxmlformats-officedocument.",  # docx/xlsx/pptx
+    "application/vnd.oasis.opendocument.",             # odt/ods/odp
+    "application/epub+zip",
+)
+
+# Mime allowlist. Text, image, audio, and video families plus the common
+# document formats (PDF natively; Office/ODF as sniffed ZIP packages).
+# Active deny for executables and generic archives regardless of the
+# claimed mime. Extend per-deployment with [attachments]
+# extra_mime_prefixes / MAVERICK_ATTACH_EXTRA_MIME (comma-separated), or
+# accept everything (magic-byte deny still applies) with [attachments]
+# allow_any_mime / MAVERICK_ATTACH_ALLOW_ANY=1.
 ALLOWED_MIME_PREFIXES = (
     "text/",
     "image/",
+    "audio/",
+    "video/",
     "application/pdf",
     "application/json",
     "application/xml",
     "application/x-yaml",
-)
+    "application/csv",
+    "application/rtf",
+    "application/msword",
+    "application/vnd.ms-excel",
+    "application/vnd.ms-powerpoint",
+) + DOCUMENT_ZIP_MIME_PREFIXES
 ALLOWED_IMAGE_MIMES = frozenset({
     "image/jpeg", "image/png", "image/gif", "image/webp",
 })
+
+
+def _extra_mime_prefixes() -> tuple[str, ...]:
+    """Deployment-added mime prefixes (env wins, then config). Fail-soft."""
+    raw = os.environ.get("MAVERICK_ATTACH_EXTRA_MIME", "").strip()
+    if not raw:
+        try:
+            from .config import load_config
+            cfg = (load_config() or {}).get("attachments") or {}
+            val = cfg.get("extra_mime_prefixes") or []
+            if isinstance(val, str):
+                raw = val
+            else:
+                return tuple(str(p).strip() for p in val if str(p).strip())
+        except Exception:  # pragma: no cover -- config never blocks an upload
+            return ()
+    return tuple(p.strip() for p in raw.split(",") if p.strip())
+
+
+def _allow_any_mime() -> bool:
+    """Accept any declared mime (magic-byte deny still enforced)."""
+    raw = (os.environ.get("MAVERICK_ATTACH_ALLOW_ANY") or "").strip().lower()
+    if raw:
+        return raw in {"1", "true", "yes", "on"}
+    try:
+        from .config import load_config
+        cfg = (load_config() or {}).get("attachments") or {}
+        return bool(cfg.get("allow_any_mime", False))
+    except Exception:  # pragma: no cover
+        return False
+
+
+def mime_allowed(mime: str) -> bool:
+    """Whether ``mime`` passes the (built-in + deployment-extended) allowlist."""
+    if _allow_any_mime():
+        return True
+    prefixes = ALLOWED_MIME_PREFIXES + _extra_mime_prefixes()
+    return any(mime.startswith(p) for p in prefixes)
 
 # Magic-byte deny for executables + archives. The mime allowlist above is
 # advisory only -- the caller-supplied Content-Type is client-controlled, so
@@ -101,6 +170,52 @@ def _looks_executable_or_archive(data: bytes) -> bool:
     if len(data) >= 262 and data[257:262] == b"ustar":
         return True
     return False
+
+
+def _is_document_package(data: bytes) -> bool:
+    """True when ZIP bytes are a real document container, not a raw archive.
+
+    Office (docx/xlsx/pptx) and OpenDocument/epub files ARE ZIPs, so the
+    blanket PK-magic deny would reject every one of them. Sniff the actual
+    ZIP structure (never the client-claimed mime): OOXML always carries
+    ``[Content_Types].xml``; ODF/epub always carry a ``mimetype`` entry
+    declaring an opendocument/epub type. Anything else — including invalid
+    ZIP bytes and generic .zip archives — stays denied. Reads the central
+    directory only; nothing is extracted.
+    """
+    import io
+    import zipfile
+    try:
+        with zipfile.ZipFile(io.BytesIO(data)) as zf:
+            names = set(zf.namelist()[:256])
+            if "[Content_Types].xml" in names:
+                return True
+            if "mimetype" in names:
+                declared = zf.read("mimetype")[:100].decode("ascii", "replace")
+                return declared.startswith(
+                    ("application/vnd.oasis.opendocument", "application/epub+zip")
+                )
+    except Exception:  # noqa: BLE001 -- malformed zip = not a document
+        return False
+    return False
+
+
+def _content_denied(data: bytes, mime: str) -> bool:
+    """The magic-byte deny, with the document-package carve-out.
+
+    ZIP bytes pass ONLY when the claimed mime is a document-container type
+    AND the bytes structurally are one; every other executable/archive
+    signature is denied regardless of mime.
+    """
+    if not _looks_executable_or_archive(data):
+        return False
+    if (
+        data[:2] == b"PK"
+        and mime.startswith(DOCUMENT_ZIP_MIME_PREFIXES)
+        and _is_document_package(data)
+    ):
+        return False
+    return True
 
 
 class AttachmentRejected(ValueError):
@@ -226,14 +341,12 @@ def s3_fetch(goal_id: int, name: str, *, root: Path | None = None) -> Path | Non
         # upload path -- a shared/poisoned bucket must not be able to land an
         # ELF/ZIP archive on local disk that store() would have rejected. If the
         # object carries a ContentType, honour the mime allowlist too.
-        if _looks_executable_or_archive(data):
+        content_type = str(obj.get("ContentType") or "").split(";", 1)[0].strip()
+        if _content_denied(data, content_type):
             raise AttachmentRejected(
                 "executable or archive content is not allowed"
             )
-        content_type = str(obj.get("ContentType") or "").split(";", 1)[0].strip()
-        if content_type and not any(
-            content_type.startswith(p) for p in ALLOWED_MIME_PREFIXES
-        ):
+        if content_type and not mime_allowed(content_type):
             raise AttachmentRejected(f"mime type not allowed: {content_type}")
     except AttachmentRejected:
         raise
@@ -279,12 +392,14 @@ def store(
         raise AttachmentRejected(f"control character in filename: {filename!r}")
     if not mime:
         raise AttachmentRejected("mime type is required")
-    if not any(mime.startswith(p) for p in ALLOWED_MIME_PREFIXES):
+    if not mime_allowed(mime):
         raise AttachmentRejected(f"mime type not allowed: {mime}")
     # The claimed mime is client-controlled; sniff the real bytes so an
     # executable/archive can't be planted under a benign Content-Type
     # (enforces the "active deny" promised in the module docstring).
-    if _looks_executable_or_archive(data):
+    # Document containers (docx/odt/epub — structurally ZIPs) are the one
+    # sniffed carve-out; see _content_denied.
+    if _content_denied(data, mime):
         raise AttachmentRejected(
             "executable or archive content is not allowed"
         )
@@ -335,28 +450,230 @@ def store(
     )
 
 
-def content_blocks_for_goal(world, goal_id: int) -> list[dict]:
-    """Build Anthropic content blocks for image attachments on a goal.
+def _embed_documents_enabled() -> bool:
+    """Whether PDF attachments auto-embed as document blocks. ON by default;
+    off via MAVERICK_ATTACH_EMBED_DOCS=0 / [attachments] embed_documents."""
+    raw = (os.environ.get("MAVERICK_ATTACH_EMBED_DOCS") or "").strip().lower()
+    if raw:
+        return raw not in {"0", "false", "no", "off"}
+    try:
+        from .config import load_config
+        cfg = (load_config() or {}).get("attachments") or {}
+        return bool(cfg.get("embed_documents", True))
+    except Exception:  # pragma: no cover
+        return True
 
-    Text/PDF attachments are NOT auto-embedded -- the agent uses
-    `list_attachments` + `read_file` for those (so token usage is opt-in).
-    Images, however, need to be sent as vision blocks for the agent to
-    see them, so we embed every accepted image at run-time.
+
+def _document_byte_budget(model: str | None) -> int:
+    """Cumulative byte budget for auto-embedded PDFs, sized to the driving
+    model's context window (~3 bytes/token heuristic), hard-capped under the
+    provider request limit."""
+    try:
+        from .context_scaling import model_window
+        return min(model_window(model) * 3, 25 * 1024 * 1024)
+    except Exception:  # pragma: no cover -- sizing never blocks embedding
+        return 512_000
+
+
+def _companion_text_budget(model: str | None) -> int:
+    """Cumulative char budget for auto-embedded companion text (transcripts,
+    extracted document text), scaled to the driving model's window."""
+    try:
+        from .context_scaling import model_window
+        return min(model_window(model) * 2, 1_000_000)
+    except Exception:  # pragma: no cover -- sizing never blocks embedding
+        return 100_000
+
+
+def content_blocks_for_goal(world, goal_id: int, model: str | None = None) -> list[dict]:
+    """Build Anthropic content blocks for a goal's attachments.
+
+    Images are embedded as vision blocks (the agent needs to SEE them).
+    PDFs are embedded as native ``document`` blocks — bounded by the driving
+    model's context window (bigger window, more document capacity) and only
+    for Anthropic models, the one provider whose message format takes them.
+    Machine-generated text companions (audio/video transcripts, extracted
+    Office-doc text — see ``generate_companions``) embed as plain text
+    blocks under their own window-scaled budget. Everything else (raw
+    audio/video bytes, user text files) stays tool-reachable via
+    `list_attachments` + `read_file` / `transcribe_audio`.
     """
     blocks: list[dict] = []
-    for a in world.list_attachments(goal_id):
-        if a.mime not in ALLOWED_IMAGE_MIMES:
-            continue
+    doc_blocks: list[dict] = []
+    text_blocks: list[dict] = []
+    text_budget = _companion_text_budget(model)
+    embed_pdfs = _embed_documents_enabled() and bool(model)
+    if embed_pdfs:
         try:
-            b = Path(a.path).read_bytes()
-        except OSError:
+            from .llm import _parse_spec
+            embed_pdfs = _parse_spec(model)[0] == "anthropic"
+        except Exception:  # pragma: no cover -- unknown spec: skip documents
+            embed_pdfs = False
+    doc_budget = _document_byte_budget(model) if embed_pdfs else 0
+    for a in world.list_attachments(goal_id):
+        if a.mime in ALLOWED_IMAGE_MIMES:
+            try:
+                b = Path(a.path).read_bytes()
+            except OSError:
+                continue
+            blocks.append({
+                "type": "image",
+                "source": {
+                    "type": "base64",
+                    "media_type": a.mime,
+                    "data": base64.b64encode(b).decode("ascii"),
+                },
+            })
+        elif a.mime == "application/pdf" and embed_pdfs:
+            if a.size_bytes > doc_budget:
+                continue  # over budget: stays reachable via the tools
+            try:
+                b = Path(a.path).read_bytes()
+            except OSError:
+                continue
+            doc_budget -= len(b)
+            doc_blocks.append({
+                "type": "document",
+                "source": {
+                    "type": "base64",
+                    "media_type": "application/pdf",
+                    "data": base64.b64encode(b).decode("ascii"),
+                },
+            })
+        elif _is_companion(a.filename) and a.mime == "text/plain":
+            # Machine-generated companions (audio transcripts, extracted
+            # document text) speak for attachments the model can't ingest
+            # natively. User-uploaded text files stay tool-reachable only
+            # (unchanged behaviour) -- companions are ours, so embedding
+            # them is safe and expected.
+            if a.size_bytes > text_budget:
+                continue
+            try:
+                body = Path(a.path).read_text(encoding="utf-8", errors="replace")
+            except OSError:
+                continue
+            text_budget -= len(body)
+            text_blocks.append({
+                "type": "text",
+                "text": f"[attachment companion: {a.filename}]\n{body}",
+            })
+    return blocks + doc_blocks + text_blocks
+
+
+# ---- machine-generated companions (transcripts, extracted text) -------------
+
+# Suffixes marking a companion attachment generated BY the platform from a
+# sibling upload. Only these auto-embed as text blocks; a user's own .txt
+# upload never does (token spend on user files stays opt-in via the tools).
+COMPANION_SUFFIXES = (".transcript.txt", ".extracted.txt")
+
+# One companion never exceeds this many characters -- a bound on both the
+# stored file and the prompt injection surface of a hostile upload.
+_COMPANION_MAX_CHARS = 400_000
+
+_TRANSCRIBE_MIME_PREFIXES = ("audio/", "video/")
+_EXTRACT_MIMES_PREFIXES = DOCUMENT_ZIP_MIME_PREFIXES + (
+    "application/msword",
+    "application/rtf",
+)
+
+
+def _is_companion(filename: str) -> bool:
+    return filename.endswith(COMPANION_SUFFIXES)
+
+
+def _companion_feature(key: str, env: str) -> bool:
+    """[attachments] <key> / env toggle; default ON, fail-soft to ON."""
+    raw = (os.environ.get(env) or "").strip().lower()
+    if raw:
+        return raw not in {"0", "false", "no", "off"}
+    try:
+        from .config import load_config
+        cfg = (load_config() or {}).get("attachments") or {}
+        return bool(cfg.get(key, True))
+    except Exception:  # pragma: no cover
+        return True
+
+
+def _transcribe_media(path: Path) -> str | None:
+    """Speech-to-text via the kernel STT backends. None when unavailable."""
+    try:
+        from .tools.voice import _run_transcribe
+        out = _run_transcribe({"source": str(path)}, None)
+    except Exception:  # noqa: BLE001 -- companion generation never raises
+        return None
+    if not out or out.startswith("ERROR"):
+        return None
+    return out.strip() or None
+
+
+def _extract_document(path: Path) -> str | None:
+    """Text extraction via maverick-knowledge's parsers (optional install)."""
+    try:
+        from maverick_knowledge.parse import extract_text
+    except ImportError:
+        return None
+    try:
+        out = extract_text(path)
+    except Exception:  # noqa: BLE001 -- unparseable file: no companion
+        return None
+    return (out or "").strip() or None
+
+
+def generate_companions(world, goal_id: int, *, root: Path | None = None) -> int:
+    """Create text companions for a goal's media/document attachments.
+
+    For each audio/video attachment, a ``<name>.transcript.txt`` (kernel STT
+    backends: OpenAI/Groq Whisper or local faster-whisper); for each Office/
+    OpenDocument/RTF attachment, a ``<name>.extracted.txt`` (maverick-knowledge
+    parsers). Companions are stored as ordinary goal attachments -- the agent
+    reads them via ``list_attachments``/``read_file`` AND they auto-embed as
+    text blocks on the first message (see ``content_blocks_for_goal``), so a
+    voice memo or a .docx brief reaches the model without a tool call.
+
+    Idempotent (skips attachments that already have a companion), quota-aware,
+    entirely best-effort: no backend, no parser, or any error just means no
+    companion. Blocking (STT is a network call) -- run it off the hot path.
+    Returns the number of companions created. Off-switches:
+    ``[attachments] transcribe_media`` / ``MAVERICK_ATTACH_TRANSCRIBE`` and
+    ``[attachments] extract_text`` / ``MAVERICK_ATTACH_EXTRACT``.
+    """
+    try:
+        existing = list(world.list_attachments(goal_id))
+    except Exception:  # noqa: BLE001
+        return 0
+    have = {a.filename for a in existing}
+    total = sum(a.size_bytes for a in existing)
+    transcribe_on = _companion_feature("transcribe_media", "MAVERICK_ATTACH_TRANSCRIBE")
+    extract_on = _companion_feature("extract_text", "MAVERICK_ATTACH_EXTRACT")
+    created = 0
+    for a in existing:
+        if _is_companion(a.filename):
             continue
-        blocks.append({
-            "type": "image",
-            "source": {
-                "type": "base64",
-                "media_type": a.mime,
-                "data": base64.b64encode(b).decode("ascii"),
-            },
-        })
-    return blocks
+        if a.mime.startswith(_TRANSCRIBE_MIME_PREFIXES) and transcribe_on:
+            suffix = ".transcript.txt"
+            produce = _transcribe_media
+        elif a.mime.startswith(_EXTRACT_MIMES_PREFIXES) and extract_on:
+            suffix = ".extracted.txt"
+            produce = _extract_document
+        else:
+            continue
+        name = a.filename + suffix
+        if name in have:
+            continue
+        text = produce(Path(a.path))
+        if not text:
+            continue
+        data = text[:_COMPANION_MAX_CHARS].encode("utf-8")
+        try:
+            rec = store(goal_id, name, "text/plain", data,
+                        existing_total=total, root=root)
+            world.add_attachment(goal_id, rec.filename, rec.mime,
+                                 rec.size_bytes, rec.sha256, str(rec.path))
+        except Exception:  # noqa: BLE001 -- quota/store issues: skip quietly
+            log.warning("companion %s not stored", name, exc_info=True)
+            continue
+        have.add(name)
+        total += rec.size_bytes
+        created += 1
+    return created

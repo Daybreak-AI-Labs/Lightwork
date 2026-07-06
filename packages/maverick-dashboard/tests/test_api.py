@@ -251,7 +251,10 @@ class TestAttachments:
         f = _File()
         # upload_attachment now takes the Request first (for owner scoping); a
         # bare object has no .state.principal, so auth is treated as OFF here.
-        out = asyncio.run(api_mod.upload_attachment(object(), 1, f))
+        # BackgroundTasks (third) receives the companion-generation task; not
+        # executing it here keeps the test focused on the size-cap read.
+        from fastapi import BackgroundTasks
+        out = asyncio.run(api_mod.upload_attachment(object(), 1, BackgroundTasks(), f))
 
         assert f.read_sizes == [8]
         assert called["data"] == b"x"

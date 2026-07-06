@@ -238,6 +238,26 @@ class Server:
             title = msg.text[:80]
             goal_id = world.create_goal(title, msg.text)
 
+            # Inbound channel attachments (Slack files, email/Telegram
+            # attachments) become goal attachments, exactly like a dashboard
+            # upload: store() enforces the size/mime/magic-byte rules, then
+            # text companions (transcripts, extracted doc text) generate so
+            # the agent's first message can carry them. Best-effort — a
+            # rejected or broken file never blocks the message.
+            if getattr(msg, "attachments", None):
+                stored_any = self._store_inbound_attachments(
+                    world, goal_id, msg.attachments)
+                if stored_any:
+                    import asyncio as _asyncio
+
+                    from .attachments import generate_companions
+                    try:
+                        await _asyncio.to_thread(
+                            generate_companions, world, goal_id)
+                    except Exception:  # pragma: no cover -- never blocks
+                        log.warning("companion generation failed",
+                                    exc_info=True)
+
             budget = budget_from_config()
             try:
                 # Per-user tenant isolation when enabled (no-op otherwise): scopes
@@ -272,6 +292,46 @@ class Server:
         finally:
             # Always free the tenant's concurrency slot, on every exit path.
             tenant_concurrency.release(tenant)
+
+    @staticmethod
+    def _store_inbound_attachments(world, goal_id: int, items) -> int:
+        """Persist channel-delivered files as goal attachments.
+
+        ``items`` is ``IncomingMessage.attachments``: dicts with ``filename``,
+        ``mime``, and ``data`` (bytes) — the shape every adapter that
+        downloads inbound files produces. Entries without bytes (metadata-only
+        adapters) are skipped. Each file passes the same ``attachments.store``
+        validation as a dashboard upload; rejects are logged, never raised —
+        an attachment must not kill the message. Bounded to the first 10
+        items so a hostile sender can't fan out storage work. Returns how
+        many were stored.
+        """
+        from . import attachments as _att
+        stored = 0
+        total = sum(a.size_bytes for a in world.list_attachments(goal_id))
+        for item in list(items)[:10]:
+            if not isinstance(item, dict):
+                continue
+            data = item.get("data")
+            filename = str(item.get("filename") or "").strip()
+            if not isinstance(data, (bytes, bytearray)) or not data or not filename:
+                continue
+            mime = str(item.get("mime") or "application/octet-stream")
+            try:
+                rec = _att.store(goal_id, filename, mime, bytes(data),
+                                 existing_total=total)
+                world.add_attachment(goal_id, rec.filename, rec.mime,
+                                     rec.size_bytes, rec.sha256, str(rec.path))
+            except _att.AttachmentRejected as exc:
+                log.info("inbound attachment %r rejected: %s", filename, exc)
+                continue
+            except Exception:  # noqa: BLE001 -- never kill the message
+                log.warning("inbound attachment %r not stored", filename,
+                            exc_info=True)
+                continue
+            total += rec.size_bytes
+            stored += 1
+        return stored
 
     def add_channel(self, channel) -> None:
         # Opt-in rich rendering ([channels] rich_render): wrap so replies with

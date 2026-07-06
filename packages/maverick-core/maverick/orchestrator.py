@@ -753,34 +753,57 @@ async def _build_orchestrator_brief(
     # unscanned, so a `user` message that passed scan_input once
     # could replay forever as a prompt-injection vector. Re-scan
     # each turn here and drop any that the shield now flags.
+    # Context bounds below (history turns/chars, compaction target, router
+    # threshold) scale with the DRIVING MODEL's context window, so resolve
+    # the orchestrator model once. Fail-soft: sizing never blocks a run.
+    try:
+        from .llm import model_for_role
+        _orch_model: str | None = model_for_role("orchestrator")
+    except Exception:  # pragma: no cover
+        _orch_model = None
+
     history_block = ""
     if conversation_id is not None:
         # Compaction (opt-in via [context] compact / MAVERICK_COMPACT_HISTORY):
         # pull a larger window and compact it to a token budget so a long
         # conversation keeps the most relevant older turns, not just the
-        # last 10. Default: the last 10 turns, each truncated to 300 chars
-        # (unchanged behaviour).
+        # last few. Both paths size their bounds from the driving model's
+        # context window (context_scaling; legacy 10 turns x 300 chars are
+        # the floors) so a 1M-window model actually gets a 1M-window's
+        # worth of history. [context] history_tokens/history_window and
+        # their env vars still win over the scaled defaults.
         from . import context_compactor as _cc
+        from . import context_scaling as _cs
+        _turn_chars = _cs.history_turn_chars(_orch_model)
         if _cc.enabled():
-            _turns = world.recent_turns(conversation_id, limit=_cc.window())
-            _msgs = [{"role": t.role, "content": t.content[:300]} for t in _turns]
+            _turns = world.recent_turns(
+                conversation_id,
+                limit=_cc.window(default=_cs.compact_window_turns(_orch_model)),
+            )
+            _msgs = [
+                {"role": t.role, "content": t.content[:_turn_chars]}
+                for t in _turns
+            ]
+            _target = _cc.target_tokens(
+                default=_cs.compact_target_tokens(_orch_model))
             from . import async_compaction as _ac
             if _ac.enabled():
                 # Off-hot-path compaction: use the background-precomputed
                 # prefix when it matches; schedule a refresh either way.
                 _kept = _ac.compact_with_precompute(
                     f"conv:{conversation_id}", _msgs,
-                    target_tokens=_cc.target_tokens())
+                    target_tokens=_target)
             else:
-                _kept = _cc.compact(_msgs, target_tokens=_cc.target_tokens()).messages
+                _kept = _cc.compact(_msgs, target_tokens=_target).messages
             pairs = [
                 (str(m.get("role") or "user"), str(m.get("content") or ""))
                 for m in _kept
             ]
         else:
             pairs = [
-                (t.role, t.content[:300])
-                for t in world.recent_turns(conversation_id, limit=10)
+                (t.role, t.content[:_turn_chars])
+                for t in world.recent_turns(
+                    conversation_id, limit=_cs.history_turns(_orch_model))
             ]
         history_lines: list[str] = []
         for role, content in pairs:
@@ -842,6 +865,8 @@ async def _build_orchestrator_brief(
     if goal.description:
         from . import long_context_router as _lcr
         try:
+            # route() resolves the driving model itself for its scaled
+            # threshold default; the 2-arg call shape is a stable seam.
             description = _lcr.route(goal.description, goal.title)
         except Exception:  # pragma: no cover -- never block a run on routing
             description = goal.description

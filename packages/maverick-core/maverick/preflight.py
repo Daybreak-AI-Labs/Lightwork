@@ -60,12 +60,40 @@ _MODEL_CONTEXT_LIMITS: dict[str, int] = {
 }
 
 
+def _declared_windows() -> dict[str, int]:
+    """Operator-declared per-model windows: ``[context.model_windows]``.
+
+    The escape hatch for models this table doesn't know (self-hosted
+    vLLM/TGI, brand-new releases): declare the real window in config and
+    both preflight and context_scaling honour it instead of the 32k
+    fallback. Fail-soft: a bad config entry is skipped, never raises.
+    """
+    try:
+        from .config import load_config
+        raw = (load_config().get("context", {}) or {}).get("model_windows", {})
+        out: dict[str, int] = {}
+        for k, v in dict(raw).items():
+            try:
+                n = int(v)
+            except (TypeError, ValueError):
+                continue
+            if n > 0:
+                out[str(k)] = n
+        return out
+    except Exception:  # pragma: no cover -- config never blocks a call
+        return {}
+
+
 def context_limit(model: str) -> int:
     """Return the (conservative) context limit for ``model``.
 
-    Falls back to family-prefix match, then 32k as the safe default
-    when we have no clue.
+    Operator-declared ``[context.model_windows]`` entries win, then the
+    built-in table, then family-prefix match, then 32k as the safe
+    default when we have no clue.
     """
+    declared = _declared_windows()
+    if model in declared:
+        return declared[model]
     if model in _MODEL_CONTEXT_LIMITS:
         return _MODEL_CONTEXT_LIMITS[model]
     # Family-prefix fallback.

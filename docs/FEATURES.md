@@ -52,6 +52,16 @@ here.
   of overflowing the model window — zero-dep lexical ranking by default, an
   injected Chroma/Qdrant store for embedding-quality retrieval; opt-in via
   `[context] retrieval_router`.
+- **Model-scaled context** (`context_scaling.py`, on by default; `[context]
+  model_scaled = false` pins the legacy fixed bounds) — history windows,
+  per-turn caps, compaction targets, the retrieval-router threshold, tool-result
+  caps, and per-turn `max_tokens` all derive from the **driving model's real
+  context window** (`preflight.context_limit`) instead of constants tuned for a
+  200k model: a 1M-window model gets 1M-window bounds, a 32k model routes
+  before overflowing. Legacy values are the floors (nothing shrinks), explicit
+  `[context]` keys/env vars still win, and unknown/self-hosted models declare
+  their window via `[context.model_windows]` or
+  `MAVERICK_MODEL_CONTEXT_WINDOW`.
 - **Compaction plug-in API** (`compaction/plugins.py`) — register a custom
   context-compaction strategy (graph-structured, domain summarizer, a learned
   model) under a name and select it via `[context] compaction_strategy`; the
@@ -744,7 +754,33 @@ here.
   tasks — add/status/ready/order/list plus **`critical`**: the longest
   dependency chain, weighted by optional per-task cost, that bounds completion
   no matter the parallelism — the tasks a critical-path-aware scheduler runs
-  first), `workspace_snapshot` (snapshot/restore a working dir), **S3-backed
+  first), `workspace_snapshot` (snapshot/restore a working dir), **attachments
+  of all kinds** (`attachments.py`: text, images, audio, video, PDFs, and
+  Office/OpenDocument/epub files — document ZIP containers are structurally
+  sniffed past the executable/archive magic-byte deny, which no setting
+  bypasses; extend the mime allowlist with `[attachments]
+  extra_mime_prefixes` or accept any declared type with `allow_any_mime`;
+  images auto-embed as vision blocks and PDFs as native document blocks
+  budgeted by the driving model's context window, `[attachments]
+  embed_documents` to opt out), **attachment understanding**
+  (`generate_companions`: incoming audio/video auto-transcribes via the
+  kernel STT backends and Office/OpenDocument/RTF files auto-extract text
+  via the knowledge parsers into `<name>.transcript.txt` /
+  `<name>.extracted.txt` companion attachments, which embed as text blocks
+  on the first message under a window-scaled budget — user text files stay
+  tool-reachable only; off via `[attachments] transcribe_media` /
+  `extract_text`), **channel inbound attachments** (files shared over
+  email/Telegram/Slack download in the adapter — auth first — travel as
+  `IncomingMessage.attachments`, and the server stores them as goal
+  attachments under the same validation as a dashboard upload, then runs
+  companion generation; attachment-only messages get a "Process the
+  attached file(s)." brief), **attachments panel** (the goal page lists a
+  goal's files with companion labels, uploads more via `POST
+  /api/v1/goals/{id}/attachments`, and downloads each via `GET
+  .../attachments/{aid}/download` — always `Content-Disposition:
+  attachment` + `nosniff`, so a crafted HTML/SVG upload can't execute in
+  the dashboard origin; the chat composer also takes drag-and-drop and
+  pasted files), **S3-backed
   attachments** (`[attachments] s3_bucket`: mirror every stored attachment to
   any S3-compatible bucket + `s3_fetch` pulls it down on another worker host;
   local disk stays the source tools read, mirror is fail-open), `license_scan`
@@ -2223,7 +2259,18 @@ tested without spawning py-spy.
   marketplace** (`/templates`: catalog + ratings, "use" prefills the chat
   form — no auto-start); **live voice captions** (`live_captions.py` + SSE
   `GET /api/v1/voice/captions`): a rolling caption window over an injected
-  transcript source (finalized vs in-flight, word-boundary trimming).
+  transcript source (finalized vs in-flight, word-boundary trimming);
+  **dashboard voice commands** (`POST /api/v1/voice/transcribe` + a mic
+  button on the chat composer): record a spoken goal in the browser
+  (MediaRecorder), transcribe it server-side through the kernel STT backends
+  (OpenAI/Groq Whisper or local faster-whisper via `tools/voice.py`), and
+  fill the goal field for review — speech never auto-submits; falls back to
+  the browser's own speech recognition when no STT backend is configured;
+  on by default, off via `[voice] dashboard_commands = false` /
+  `MAVERICK_VOICE_COMMANDS=0`; the goal page's clarifying-question reply
+  box has the same mic, and finished results get a **read-aloud** button
+  (`POST /api/v1/voice/speak`: kernel TTS backends with the voice-safety
+  redaction pass, browser speechSynthesis fallback).
 - **Browser extension** (`extensions/browser/`, opt-in `[dashboard]
   allow_extension` plus `MAVERICK_DASHBOARD_TOKEN` — fail-closed CORS scoped
   to extension origins only): a

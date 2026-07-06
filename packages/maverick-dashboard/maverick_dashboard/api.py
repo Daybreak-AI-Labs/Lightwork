@@ -28,7 +28,7 @@ from maverick.runner import (
     DEFAULT_MAX_WALL_SECONDS,
 )
 from starlette.concurrency import run_in_threadpool
-from starlette.responses import StreamingResponse
+from starlette.responses import JSONResponse, StreamingResponse
 
 from ._shared import (
     _any_provider_key_set,
@@ -84,6 +84,7 @@ from .api_schemas import (
     SkillCreateIn,
     SkillInstallIn,
     SkillOut,
+    SpeakIn,
     TenantCreateIn,
     TenantOut,
     TenantPlanIn,
@@ -645,13 +646,17 @@ async def answer_question(request: Request, goal_id: int, payload: AnswerIn) -> 
     status_code=201,
 )
 async def upload_attachment(
-    request: Request, goal_id: int, file: UploadFile = File(...),
+    request: Request, goal_id: int, bg: BackgroundTasks,
+    file: UploadFile = File(...),
 ) -> AttachmentOut:
-    """Upload a file (text, image, or PDF) and attach it to a goal.
+    """Upload a file of any supported kind and attach it to a goal.
 
-    Size and mime-type validation are enforced server-side; the agent's
-    `list_attachments` tool exposes the uploaded set, and image
-    attachments are auto-embedded as vision blocks on the first message.
+    Text, images, audio, video, PDFs, and Office/OpenDocument files are
+    accepted (executables and generic archives are always denied by
+    magic-byte sniffing). Size and mime-type validation are enforced
+    server-side; the agent's `list_attachments` tool exposes the uploaded
+    set, images are auto-embedded as vision blocks and PDFs as document
+    blocks on the first message.
     """
     require_permission(request, "operate")
     w = _world()
@@ -698,6 +703,10 @@ async def upload_attachment(
         sha256=stored.sha256,
         path=str(stored.path),
     )
+    # Companion generation (transcripts / extracted text) off the request
+    # path; best-effort, never raises.
+    from maverick.attachments import generate_companions
+    bg.add_task(generate_companions, w, goal_id)
     return AttachmentOut(
         id=aid,
         filename=stored.filename,
@@ -721,6 +730,48 @@ async def list_goal_attachments(request: Request, goal_id: int) -> list[Attachme
         )
         for a in w.list_attachments(goal_id)
     ]
+
+
+@router.get("/goals/{goal_id}/attachments/{attachment_id}/download")
+async def download_goal_attachment(
+    request: Request, goal_id: int, attachment_id: int,
+) -> Response:
+    """Serve one stored attachment back to the browser (goal-page panel).
+
+    Same access rules as the list; the bytes come off the local store (with
+    an S3 pull-back for multi-host deployments). Served as a download with
+    the ORIGINAL filename — never inline, so a crafted HTML/SVG upload can't
+    execute in the dashboard origin.
+    """
+    w = _world()
+    g = w.get_goal(goal_id)
+    if g is None:
+        raise HTTPException(status_code=404, detail="no such goal")
+    assert_goal_access(request, g)
+    match = next(
+        (a for a in w.list_attachments(goal_id) if a.id == attachment_id), None)
+    if match is None:
+        raise HTTPException(status_code=404, detail="no such attachment")
+    from pathlib import Path as _Path
+    path = _Path(match.path)
+    if not path.is_file():
+        # Uploaded on another worker host: try the S3 mirror.
+        from maverick.attachments import s3_fetch
+        fetched = await run_in_threadpool(s3_fetch, goal_id, path.name)
+        if fetched is None:
+            raise HTTPException(
+                status_code=410, detail="attachment bytes not on this host")
+        path = fetched
+    data = await run_in_threadpool(path.read_bytes)
+    safe_name = match.filename.replace('"', "_")
+    return Response(
+        content=data,
+        media_type=match.mime or "application/octet-stream",
+        headers={
+            "Content-Disposition": f'attachment; filename="{safe_name}"',
+            "X-Content-Type-Options": "nosniff",
+        },
+    )
 
 
 @router.get("/facts", response_model=dict[str, str])
@@ -1894,6 +1945,150 @@ async def templates_suggested(request: Request, k: int = 5) -> dict:
     return {
         "suggested": suggest(_world(), k=k, owner=goal_owner_filter(request)),
     }
+
+
+def _voice_commands_enabled() -> bool:
+    """Dashboard voice-command input. ON by default; off via
+    MAVERICK_VOICE_COMMANDS=0 / [voice] dashboard_commands = false."""
+    import os as _os
+    raw = (_os.environ.get("MAVERICK_VOICE_COMMANDS") or "").strip().lower()
+    if raw:
+        return raw not in {"0", "false", "no", "off"}
+    try:
+        from maverick.config import load_config
+        return bool((load_config().get("voice") or {}).get("dashboard_commands", True))
+    except Exception:  # pragma: no cover -- config never blocks the endpoint
+        return True
+
+
+# Audio container suffixes the STT backends accept; browsers record webm/ogg.
+_VOICE_SUFFIXES = {
+    ".webm": ".webm", ".ogg": ".ogg", ".oga": ".ogg", ".mp3": ".mp3",
+    ".wav": ".wav", ".m4a": ".m4a", ".mp4": ".mp4", ".flac": ".flac",
+}
+_VOICE_MAX_BYTES = 25 * 1024 * 1024
+
+
+@router.post("/voice/transcribe")
+async def voice_transcribe(
+    request: Request,
+    file: UploadFile = File(...),
+    language: str = "",
+) -> JSONResponse:
+    """Transcribe a short voice recording to text (dashboard voice commands).
+
+    The chat composer's mic button records audio in the browser and posts it
+    here; the transcript goes back into the goal field so the user can review
+    before submitting (speech never starts a goal unreviewed). Reuses the
+    kernel STT backends (OpenAI / Groq Whisper, local faster-whisper) via
+    ``maverick.tools.voice``; 503 with a setup hint when none is configured,
+    which the client treats as "fall back to browser speech recognition".
+    """
+    if not _voice_commands_enabled():
+        raise HTTPException(status_code=404, detail="voice commands are disabled")
+    require_permission(request, "operate")
+
+    import os as _os
+    import tempfile as _tempfile
+
+    max_bytes = _VOICE_MAX_BYTES
+    try:
+        max_bytes = int(_os.environ.get("MAVERICK_VOICE_MAX_BYTES", max_bytes))
+    except (TypeError, ValueError):
+        pass
+    data = await file.read(max_bytes + 1)
+    if not data:
+        raise HTTPException(status_code=400, detail="empty audio")
+    if len(data) > max_bytes:
+        raise HTTPException(
+            status_code=400,
+            detail=f"audio too large: {len(data)} bytes (limit {max_bytes})",
+        )
+
+    suffix = _VOICE_SUFFIXES.get(
+        _os.path.splitext(file.filename or "")[1].lower(), ".webm")
+    lang = (language or "").strip()[:8] or None
+
+    from maverick.tools.voice import _run_transcribe
+    tmp = _tempfile.NamedTemporaryFile(suffix=suffix, delete=False)
+    try:
+        tmp.write(data)
+        tmp.close()
+        # sandbox=None: the path is our own temp file, not model-supplied.
+        args: dict = {"source": tmp.name}
+        if lang:
+            args["language"] = lang
+        text = await run_in_threadpool(_run_transcribe, args, None)
+    finally:
+        try:
+            _os.unlink(tmp.name)
+        except OSError:  # pragma: no cover
+            pass
+    if text.startswith("ERROR:"):
+        raise HTTPException(
+            status_code=503,
+            detail=(
+                "no speech-to-text backend available. Set OPENAI_API_KEY or "
+                "GROQ_API_KEY, or install faster-whisper "
+                "(pip install 'maverick-agent[voice]')."
+            ),
+        )
+    return JSONResponse({"text": text.strip()})
+
+
+@router.post("/voice/speak")
+async def voice_speak(request: Request, payload: SpeakIn) -> Response:
+    """Synthesize speech for a reply (dashboard read-aloud).
+
+    Returns the mp3 bytes; the client plays them inline. Reuses the kernel
+    TTS backends (OpenAI TTS / ElevenLabs via ``maverick.tools.voice``),
+    including the voice-safety redaction pass — a secret must never be
+    spoken aloud. 503 with a setup hint when no backend is configured.
+    """
+    if not _voice_commands_enabled():
+        raise HTTPException(status_code=404, detail="voice commands are disabled")
+    require_permission(request, "operate")
+    text = (payload.text or "").strip()
+    if not text:
+        raise HTTPException(status_code=400, detail="text is required")
+    text = text[:4096]
+    try:
+        from maverick.safety.voice_safety import redact_for_speech
+        text, _redactions = redact_for_speech(text)
+    except Exception:  # pragma: no cover -- redaction is fail-open by design
+        pass
+
+    import os as _os
+    import tempfile as _tempfile
+    from pathlib import Path as _Path
+
+    from maverick.tools.voice import _tts_elevenlabs, _tts_openai
+
+    def _synthesize() -> bytes | None:
+        tmp = _tempfile.NamedTemporaryFile(suffix=".mp3", delete=False)
+        tmp.close()
+        out = _Path(tmp.name)
+        try:
+            if _tts_openai(text, payload.voice, out) or _tts_elevenlabs(
+                    text, payload.voice, out):
+                return out.read_bytes()
+            return None
+        finally:
+            try:
+                _os.unlink(tmp.name)
+            except OSError:  # pragma: no cover
+                pass
+
+    audio = await run_in_threadpool(_synthesize)
+    if not audio:
+        raise HTTPException(
+            status_code=503,
+            detail=(
+                "no text-to-speech backend available. Set OPENAI_API_KEY or "
+                "ELEVENLABS_API_KEY."
+            ),
+        )
+    return Response(content=audio, media_type="audio/mpeg")
 
 
 @router.get("/voice/captions")
@@ -4738,6 +4933,34 @@ async def compose_goal(request: Request, payload: ComposeIn, bg: BackgroundTasks
 _WORKFLOW_DOC_MAX_BYTES = 512_000  # ample for a spec/runbook; the model sees a truncated head
 
 
+def _extract_binary_doc_text(raw: bytes, filename: str) -> str | None:
+    """Text of a binary document (PDF/DOCX/ODT) via the maverick-knowledge
+    parsers, or None when they're not installed / the file is unparseable.
+    Blocking — call through run_in_threadpool."""
+    import tempfile as _tempfile
+    from pathlib import Path as _Path
+    suffix = _Path(filename).suffix.lower() or ".bin"
+    if suffix not in {".pdf", ".docx", ".odt", ".rtf", ".html", ".htm"}:
+        return None
+    try:
+        from maverick_knowledge.parse import extract_text
+    except ImportError:
+        return None
+    tmp = _tempfile.NamedTemporaryFile(suffix=suffix, delete=False)
+    try:
+        tmp.write(raw)
+        tmp.close()
+        out = extract_text(_Path(tmp.name))
+        return out.strip() or None
+    except Exception:  # noqa: BLE001 -- unparseable: caller 400s with a hint
+        return None
+    finally:
+        try:
+            os.unlink(tmp.name)
+        except OSError:  # pragma: no cover
+            pass
+
+
 def _require_provider_for_drafting() -> None:
     if not _any_provider_key_set():
         raise HTTPException(
@@ -4789,7 +5012,8 @@ async def draft_workflow_from_upload(
     form: str = Form("template"),
 ) -> dict:
     """Upload path: extract a workflow or playbook (per ``form``) from a
-    text / markdown / JSON document."""
+    text / markdown / JSON document — or a PDF / Word / OpenDocument file
+    when the maverick-knowledge parsers are installed."""
     require_permission(request, "operate")
     _require_provider_for_drafting()
     from maverick_dashboard.app import check_goal_rate_limit
@@ -4803,11 +5027,15 @@ async def draft_workflow_from_upload(
     try:
         text = raw.decode("utf-8")
     except UnicodeDecodeError:
-        raise HTTPException(
-            status_code=400,
-            detail=("could not read this file as text — upload a .txt / .md / .json "
-                    "document, or describe the workflow in the brief"),
-        ) from None
+        text = await run_in_threadpool(
+            _extract_binary_doc_text, raw, file.filename or "upload")
+        if text is None:
+            raise HTTPException(
+                status_code=400,
+                detail=("could not read this file as text — upload a .txt / .md / "
+                        ".json / .pdf / .docx document, or describe the workflow "
+                        "in the brief"),
+            ) from None
     if not text.strip():
         raise HTTPException(status_code=400, detail="the uploaded file was empty")
     try:

@@ -418,8 +418,12 @@ def _tool_status(output: str) -> str:
 # Cap any single result; the model keeps the head + tail and is told how to get
 # the rest. ~32 KB chars (~8k tokens) — the old 100 KB default let one result
 # inject ~25k tokens that compaction never touches while it sits in the recent
-# window. Tune via MAVERICK_MAX_TOOL_RESULT_BYTES.
-_MAX_TOOL_RESULT_BYTES = max(2_000, env_int("MAVERICK_MAX_TOOL_RESULT_BYTES", 32_000))
+# window. Scales up with the driving model's context window (32 KB is the
+# 200k-window baseline; see _tool_result_limit). Tune via
+# MAVERICK_MAX_TOOL_RESULT_BYTES.
+_DEFAULT_TOOL_RESULT_BYTES = 32_000
+_MAX_TOOL_RESULT_BYTES = max(
+    2_000, env_int("MAVERICK_MAX_TOOL_RESULT_BYTES", _DEFAULT_TOOL_RESULT_BYTES))
 
 
 def unframe_tool_output(framed: str) -> str:
@@ -440,7 +444,25 @@ def unframe_tool_output(framed: str) -> str:
     return inner
 
 
-def _cap_tool_output(text: str) -> str:
+def _tool_result_limit(model: str | None = None) -> int:
+    """Effective per-result byte cap for ``model``.
+
+    An explicit cap (MAVERICK_MAX_TOOL_RESULT_BYTES, or a test patching
+    ``_MAX_TOOL_RESULT_BYTES``) wins outright, even to shrink; otherwise
+    the default scales with the driving model's context window
+    (context_scaling.tool_result_bytes -- 32 KB at a 200k window, larger
+    above it), so a big-window model isn't stuck with a cap tuned for a
+    smaller one."""
+    if _MAX_TOOL_RESULT_BYTES != _DEFAULT_TOOL_RESULT_BYTES:
+        return _MAX_TOOL_RESULT_BYTES
+    try:
+        from .context_scaling import tool_result_bytes
+        return max(_MAX_TOOL_RESULT_BYTES, tool_result_bytes(model))
+    except Exception:  # pragma: no cover -- sizing never blocks a tool
+        return _MAX_TOOL_RESULT_BYTES
+
+
+def _cap_tool_output(text: str, limit: int | None = None) -> str:
     """Bound a single tool result so one runaway can't blow the context window.
 
     Keeps the head (2/3) and tail (1/3) -- results often put the actionable bit
@@ -448,12 +470,14 @@ def _cap_tool_output(text: str) -> str:
     states what was dropped and how to avoid it. A no-op below the cap, so normal
     results are byte-identical. The head is preserved, so a leading ``ERROR`` is
     intact for failure classification."""
+    if limit is None:
+        limit = _MAX_TOOL_RESULT_BYTES
     if not isinstance(text, str):  # defensive: never crash on a non-str result
         text = "" if text is None else str(text)
-    if len(text) <= _MAX_TOOL_RESULT_BYTES:
+    if len(text) <= limit:
         return text
-    head = _MAX_TOOL_RESULT_BYTES * 2 // 3
-    tail = _MAX_TOOL_RESULT_BYTES - head
+    head = limit * 2 // 3
+    tail = limit - head
     omitted = len(text) - head - tail
     return (
         text[:head]
@@ -1068,6 +1092,19 @@ class Agent:
         # success rate. Disabled or low-data -> returns `base` unchanged.
         from .thinking_budget import adjust
         return adjust(self.role, base)
+
+    def _turn_max_tokens(self) -> int:
+        """Per-turn output cap, scaled to the driving model's context window.
+
+        Was a hard 4096 regardless of model; now context_scaling derives it
+        from the model's real window (4096 stays the floor, so nothing
+        shrinks). MAVERICK_AGENT_MAX_TOKENS / [context] max_output_tokens
+        override; budget caps still bound actual spend. Fail-soft."""
+        try:
+            from .context_scaling import max_output_tokens
+            return max_output_tokens(self.model)
+        except Exception:  # pragma: no cover -- sizing never blocks a turn
+            return 4096
 
     def _extract_and_apply_patch(self, final: str):
         """Wave 11: unify SEARCH/REPLACE and unified-diff extraction.
@@ -1880,7 +1917,7 @@ class Agent:
             pass
         # Bound a single runaway result before it enters the context window
         # (compaction only trims results behind the recent window).
-        output = _cap_tool_output(output)
+        output = _cap_tool_output(output, limit=_tool_result_limit(self.model))
         # Council-of-20 security finding: a literal `</tool_output>` in
         # `output` (attacker-controlled file contents, shell stdout, MCP
         # response) escapes the framing and lets following text read as
@@ -2313,16 +2350,18 @@ class Agent:
             except Exception:  # pragma: no cover -- prewarm never blocks a run
                 pass
 
-        # If the goal has image attachments, embed them as vision content
-        # blocks on the first user message so the agent can see them.
-        # Text/PDF attachments are reachable via `list_attachments` +
-        # `read_file` (opt-in so we don't blow token budget on huge PDFs).
+        # If the goal has image/PDF attachments, embed them as vision /
+        # document content blocks on the first user message so the agent can
+        # see them (PDFs are budgeted against the driving model's context
+        # window). Everything else (audio, video, Office docs, text) is
+        # reachable via `list_attachments` + `read_file` / `transcribe_audio`
+        # (opt-in so we don't blow token budget on huge media).
         image_blocks: list[dict] = []
         if self.depth == 0 and self.ctx.goal_id is not None:
             try:
                 from .attachments import content_blocks_for_goal
                 image_blocks = content_blocks_for_goal(
-                    self.ctx.world, self.ctx.goal_id,
+                    self.ctx.world, self.ctx.goal_id, model=self.model,
                 )
             except Exception:
                 image_blocks = []
@@ -2458,7 +2497,7 @@ class Agent:
                     messages=messages,
                     tools=self.tools.to_anthropic(),
                     budget=self.ctx.budget,
-                    max_tokens=4096,
+                    max_tokens=self._turn_max_tokens(),
                     thinking_budget=self._thinking_budget(),
                     model=self._speculative_turn_model(),
                     **_effort_kw,
