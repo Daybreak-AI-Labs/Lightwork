@@ -1,11 +1,12 @@
 # Proposal: fleet-shared learning state
 
-Status: **phase 1 IMPLEMENTED** — the three learning stores (addenda,
-line-meta, transfer tried-memory) ship behind ``[self_harness] store =
-"world"`` (`maverick.learning_store`, world-DB tables at v25 on both
-backends, `maverick self-harness migrate-store`, battery guarantee
-*fleet store parity* at 10/10). The corpus family (live/pending/rejected)
-remains file-backed — **phase 2** below.
+Status: **COMPLETE (phases 1 + 2)** — the three learning stores (addenda,
+line-meta, transfer tried-memory) AND the corpus family (live/pending/
+rejected) ship behind ``[self_harness] store = "world"``
+(`maverick.learning_store`; world-DB tables at v25/v26 on both backends;
+`maverick self-harness migrate-store` imports a host's files; `corpus
+export`/`corpus import` keep hand-editing first-class; battery guarantees
+*fleet store parity* + *fleet corpus store* at 11/11).
 Owner: self-harness subsystem
 Prerequisite reading: `docs/proposals/self-harness.md`,
 `docs/research/2026-06-28-self-harness-frontier-roadmap.md`
@@ -46,10 +47,13 @@ answer.
   tenant redirection unchanged); the default location resolves to the
   configured store. Postgres RMW is serialized by a session advisory lock
   (`learning_store.rmw_lock`); SQLite rides the existing same-host flock.
-- **Phase 2 (open)**: the corpus family (`live`/`pending`/`rejected` rows in
-  a `harness_corpus` table) — deferred because `eval_corpus` is an
-  operator-authored, path-configured file with hand-editing as a first-class
-  workflow; moving it needs an export/import story, not just a seam.
+- **Phase 2 (shipped)**: the corpus family as `harness_corpus` rows
+  (kinds `live`/`pending`/`rejected`, plus `extra` preserving a live file's
+  non-list top-level entries). Routing keys off the CONFIGURED `eval_corpus`
+  path at the eval module's one read funnel and one write funnel — any other
+  path stays a plain file. The hand-editing story is `maverick self-harness
+  corpus export --out f.json` → edit → `corpus import f.json [--replace]`,
+  preserving every operator-authored field both ways.
 
 ## Design (recommended): learning state as world-model tables
 

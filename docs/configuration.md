@@ -230,10 +230,11 @@ enable = false             # mine failures -> propose -> regression-validate ->
 #   corpus_harvest = "propose"   bootstrap eval cases from hindsight pairs
 #                                ("propose" = human-gated review; "auto" = direct)
 #   mine_bucket_by = ["domain"]  scope mining/recall per domain / role / tool
-#   store = "world"              learning stores in the shared world database so a
-#                                multi-host fleet learns as one (default "files";
-#                                import a host's files with `maverick self-harness
-#                                migrate-store`)
+#   store = "world"              learning stores AND the eval-corpus family in the
+#                                shared world database so a multi-host fleet learns
+#                                as one (default "files"; import a host's files with
+#                                `maverick self-harness migrate-store`; hand-edit via
+#                                `corpus export` / `corpus import`)
 
 [self_learning]            # local continuous learning (default off)
 enable = true

@@ -387,6 +387,48 @@ def g_store_parity() -> str:
     return "same content as files; 8/8 concurrent promotions; forget round-trips"
 
 
+def g_corpus_store() -> str:
+    """Phase 2 of the fleet store: the eval-corpus family (live cases,
+    harvest pending, reject memory) lives in the world DB with the SAME
+    lifecycle semantics as the files -- staging, durable rejection, accepted
+    merges -- and the export/import round trip preserves every
+    operator-authored field, so hand-editing stays first-class."""
+    from maverick import self_harness_eval as ev
+    os.environ["MAVERICK_SELF_HARNESS"] = "1"
+    cpath = pathlib.Path(_ISOLATED_HOME) / "corpus.json"
+    cfg = pathlib.Path(_ISOLATED_HOME) / "config.toml"
+    cfg.write_text('[self_harness]\nenable = true\nstore = "world"\n'
+                   f'eval_corpus = "{cpath}"\n')
+    os.environ["MAVERICK_CONFIG"] = str(cfg)
+    try:
+        _check(ev.stage_candidates(cpath, "M", [
+            {"goal": "export the ledger", "expected": "exported"},
+            {"goal": "reconcile the books", "expected": "reconciled"}]) == 2,
+               "staging failed")
+        _check(not cpath.exists() and not ev.pending_corpus_path(cpath).exists(),
+               "world mode still wrote corpus files")
+        res = ev.resolve_pending(cpath, "M", accept=[1], reject=[2])
+        _check(res["merged"] == 1 and res["rejected"] == 1,
+               f"review verdicts failed: {res}")
+        _check(ev.stage_candidates(cpath, "M", [
+            {"goal": "reconcile the books", "expected": "x"}]) == 0,
+               "rejected candidate re-staged through the DB store")
+        # Export -> hand-edit -> import: operator fields survive both ways.
+        ev.import_corpus(cpath, {"M": [{"goal": "hand-authored",
+                                        "expected": "y", "notes": "keep"}],
+                                 "_meta": {"owner": "ops"}})
+        raw = ev._load_raw(cpath)
+        by_goal = {r["goal"]: r for r in raw["M"]}
+        _check(by_goal["hand-authored"]["notes"] == "keep"
+               and raw["_meta"] == {"owner": "ops"}
+               and "export the ledger" in by_goal,
+               f"round trip lost operator data: {raw}")
+    finally:
+        os.environ.pop("MAVERICK_CONFIG", None)
+        cfg.unlink(missing_ok=True)
+    return "stage/reject/accept as world rows; export-import keeps every field"
+
+
 GUARANTEES = [
     ("determinism (consistent)", g_determinism),
     ("off by default", g_off_by_default),
@@ -398,6 +440,7 @@ GUARANTEES = [
     ("canary lifecycle", g_canary_lifecycle),
     ("rollback durability", g_rollback_durable),
     ("fleet store parity", g_store_parity),
+    ("fleet corpus store", g_corpus_store),
 ]
 
 

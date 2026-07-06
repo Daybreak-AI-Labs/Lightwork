@@ -34,7 +34,7 @@ wiring.
 | Conflicts | semantic-judge seam over the lexical heuristic | `find_conflicts(classifier_fn=)` |
 
 Every wave is opt-in, leaves default behavior **byte-identical**, keeps the
-determinism proof at **10/10**, and routes any promotion through the one governed
+determinism proof at **11/11**, and routes any promotion through the one governed
 gate. Backlog item map: #1 driver (`run_self_harness_cycle`), #2/#4 reference-free
 evaluator (`self_harness_eval`), #3 eval corpus (`load_eval_corpus`/`corpus_split`),
 #5 best-of-N, #6 semantic mining, #7 component profiles (per-domain AND per-tool
@@ -289,12 +289,20 @@ imports a host's files (idempotent, merge-on-conflict, verified, files
 renamed to backups). The proof battery gained its 10th guarantee, *fleet
 store parity*: the same seeded workload learns identical content in both
 stores, 8/8 concurrent promotions survive the DB path, and the audited
-forget round-trips. The corpus family stays file-backed (phase 2 in the
-proposal).
+forget round-trips.
+
+**Phase 2 (same day)**: the corpus family joins — `harness_corpus` rows at
+v26 (kinds live/pending/rejected + `extra` preserving non-list top-level
+entries), routed at the eval module's single read/write funnels keyed off
+the configured `eval_corpus` path, DB-side RMW lock in every corpus writer,
+`migrate-store` carries the corpus files, and `corpus export`/`corpus
+import [--replace]` keep hand-editing first-class (every operator field
+survives the round trip). Battery guarantee 11, *fleet corpus store*. The
+proposal is COMPLETE.
 
 ## Principle (unchanged across every wave)
 
-**Off-by-default / byte-identical default**, **determinism proof 10/10**, and **the
+**Off-by-default / byte-identical default**, **determinism proof 11/11**, and **the
 governed gate decides promotion** (demotion uses the reversible audited `forget`
 path, never the gate). Scoped recall keeps the default store byte-identical
 because model-wide lines stay under the bare `model_id` key — the composite
