@@ -34,7 +34,7 @@ wiring.
 | Conflicts | semantic-judge seam over the lexical heuristic | `find_conflicts(classifier_fn=)` |
 
 Every wave is opt-in, leaves default behavior **byte-identical**, keeps the
-determinism proof at **9/9**, and routes any promotion through the one governed
+determinism proof at **10/10**, and routes any promotion through the one governed
 gate. Backlog item map: #1 driver (`run_self_harness_cycle`), #2/#4 reference-free
 evaluator (`self_harness_eval`), #3 eval corpus (`load_eval_corpus`/`corpus_split`),
 #5 best-of-N, #6 semantic mining, #7 component profiles (per-domain AND per-tool
@@ -273,9 +273,28 @@ Every remaining tractable gap from the post-merge assessment, in one wave:
   deploy-night checklist in that proposal, not something a keyless CI can
   fake.
 
+## Wave: fleet learning store, phase 1 (2026-07-05)
+
+`docs/proposals/fleet-learning-state.md` moved from design to code for the
+three LEARNING stores: `[self_harness] store = "world"` (default `"files"`,
+byte-identical) routes the addenda map, the provenance sidecar, and the
+transfer tried-memory to world-database tables (`maverick.learning_store`;
+SQLite + Postgres ladders at v25, migration governance regenerated), so a
+multi-host fleet learns as ONE — transfer sweeps see every host's guidance
+and outcome evidence aggregates. The seam: an explicit store path always
+means the file store at that path (tests/tenant redirection unchanged); the
+default location resolves to the configured store. Postgres read-modify-writes
+serialize under a session advisory lock; `maverick self-harness migrate-store`
+imports a host's files (idempotent, merge-on-conflict, verified, files
+renamed to backups). The proof battery gained its 10th guarantee, *fleet
+store parity*: the same seeded workload learns identical content in both
+stores, 8/8 concurrent promotions survive the DB path, and the audited
+forget round-trips. The corpus family stays file-backed (phase 2 in the
+proposal).
+
 ## Principle (unchanged across every wave)
 
-**Off-by-default / byte-identical default**, **determinism proof 9/9**, and **the
+**Off-by-default / byte-identical default**, **determinism proof 10/10**, and **the
 governed gate decides promotion** (demotion uses the reversible audited `forget`
 path, never the gate). Scoped recall keeps the default store byte-identical
 because model-wide lines stay under the bare `model_id` key — the composite

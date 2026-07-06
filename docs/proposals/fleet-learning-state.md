@@ -1,6 +1,11 @@
 # Proposal: fleet-shared learning state
 
-Status: **proposed** (design only — no code in this wave)
+Status: **phase 1 IMPLEMENTED** — the three learning stores (addenda,
+line-meta, transfer tried-memory) ship behind ``[self_harness] store =
+"world"`` (`maverick.learning_store`, world-DB tables at v25 on both
+backends, `maverick self-harness migrate-store`, battery guarantee
+*fleet store parity* at 10/10). The corpus family (live/pending/rejected)
+remains file-backed — **phase 2** below.
 Owner: self-harness subsystem
 Prerequisite reading: `docs/proposals/self-harness.md`,
 `docs/research/2026-06-28-self-harness-frontier-roadmap.md`
@@ -32,6 +37,19 @@ answer.
 - A network service. The world model already solves "shared, migrated,
   postgres-backed state" — learning state should ride the same rails, not
   invent new ones.
+
+## Phase split
+
+- **Phase 1 (shipped)**: the LEARNING stores — `harness_addenda`,
+  `harness_line_meta`, `harness_transfer_tried` — as world tables. The seam:
+  an EXPLICIT store path always means the file store at that path (tests and
+  tenant redirection unchanged); the default location resolves to the
+  configured store. Postgres RMW is serialized by a session advisory lock
+  (`learning_store.rmw_lock`); SQLite rides the existing same-host flock.
+- **Phase 2 (open)**: the corpus family (`live`/`pending`/`rejected` rows in
+  a `harness_corpus` table) — deferred because `eval_corpus` is an
+  operator-authored, path-configured file with hand-editing as a first-class
+  workflow; moving it needs an export/import story, not just a seam.
 
 ## Design (recommended): learning state as world-model tables
 

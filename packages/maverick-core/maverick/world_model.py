@@ -30,7 +30,7 @@ from .paths import data_dir
 log = logging.getLogger(__name__)
 
 DEFAULT_DB = data_dir("world.db")
-SCHEMA_VERSION = 24
+SCHEMA_VERSION = 25
 DEFAULT_BUSY_TIMEOUT_MS = 5000
 WAL_SWITCH_BUSY_TIMEOUT_MS = 50
 WAL_SWITCH_RETRY_SECONDS = 5.0
@@ -366,6 +366,25 @@ CREATE INDEX IF NOT EXISTS idx_goals_status_updated
     ON goals(status, updated_at DESC);
 CREATE INDEX IF NOT EXISTS idx_goals_parent
     ON goals(parent_id, created_at);
+
+-- v25 fleet learning store (docs/proposals/fleet-learning-state.md, phase 1):
+-- the self-harness addenda / provenance / transfer tried-memory as shared
+-- tables, so a multi-host fleet learns as one. Written only when
+-- [self_harness] store = "world"; empty tables otherwise.
+CREATE TABLE IF NOT EXISTS harness_addenda (
+    key        TEXT PRIMARY KEY,
+    block      TEXT NOT NULL,
+    updated_at REAL NOT NULL
+);
+CREATE TABLE IF NOT EXISTS harness_line_meta (
+    line_id    TEXT PRIMARY KEY,
+    record     TEXT NOT NULL,
+    updated_at REAL NOT NULL
+);
+CREATE TABLE IF NOT EXISTS harness_transfer_tried (
+    line_id TEXT PRIMARY KEY,
+    ts      REAL NOT NULL
+);
 """
 
 
@@ -494,6 +513,10 @@ MIGRATIONS: dict[int, list[str]] = {
     # exists only to keep the SQLite head at v24 to match the Postgres ladder
     # (which adds the columns at v24). See migration_governance head-parity gate.
     24: [],
+    # v25 fleet learning store: the harness_* tables are in SCHEMA (idempotent
+    # CREATE, applied on every open); listed here so existing DBs bump the
+    # version, matching the v9/v15/v22 pattern and the Postgres ladder.
+    25: [],
 }
 
 

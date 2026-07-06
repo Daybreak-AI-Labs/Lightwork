@@ -329,6 +329,64 @@ def g_rollback_durable() -> str:
     return "forget/reject beat auto re-entry; indeterminate verdicts stay retryable"
 
 
+def g_store_parity() -> str:
+    """The world learning store ([self_harness] store = "world",
+    docs/proposals/fleet-learning-state.md) preserves the loop's invariants:
+    the same seeded workload learns IDENTICAL content in the world DB as in
+    the file store, concurrent promotions are never lost, and the audited
+    forget round-trips -- so the fleet-shared backend is not a weaker copy of
+    the proven one."""
+    from maverick import self_harness as sh
+    os.environ["MAVERICK_SELF_HARNESS"] = "1"
+    os.environ["MAVERICK_SELF_IMPROVEMENT"] = "1"
+    # Baseline: the seeded workload through the FILE store.
+    with tempfile.TemporaryDirectory() as d:
+        fstore = pathlib.Path(d) / "addenda.json"
+        sh.run_self_harness(_recs(model="M"), model_id="M", min_support=3,
+                            controller=_ctrl(), path=fstore, **_ENOUGH, **_GOOD_AB)
+        file_content = sh.load_addenda(fstore)
+    # Same workload through the WORLD store (config selects it; the world DB
+    # lives inside this proof's throwaway MAVERICK_HOME).
+    cfg = pathlib.Path(_ISOLATED_HOME) / "config.toml"
+    cfg.write_text('[self_harness]\nenable = true\nstore = "world"\n')
+    os.environ["MAVERICK_CONFIG"] = str(cfg)
+    try:
+        _check(sh.settings().get("store") == "world", "store knob did not resolve")
+        sh.run_self_harness(_recs(model="M"), model_id="M", min_support=3,
+                            controller=_ctrl(), **_ENOUGH, **_GOOD_AB)
+        _check(sh.load_addenda() == file_content,
+               "world store learned different content than the file store")
+        _check(not sh._store_path().exists(),
+               "world mode still wrote the JSON file store")
+        # Concurrency: 8 threads promote distinct lines; none may be lost.
+        errs: list[BaseException] = []
+
+        def _work(i: int) -> None:
+            try:
+                sh.run_self_harness(
+                    _recs(model="C", classes=(f"cls{i}",)), model_id="C",
+                    min_support=3, controller=_ctrl(), **_ENOUGH, **_GOOD_AB)
+            except BaseException as e:  # pragma: no cover
+                errs.append(e)
+
+        threads = [threading.Thread(target=_work, args=(i,)) for i in range(8)]
+        for t in threads:
+            t.start()
+        for t in threads:
+            t.join()
+        _check(not errs, f"concurrent world-store promotion failed: {errs[:1]}")
+        lines = [ln for ln in sh.recall_addendum("C").splitlines()
+                 if ln.startswith("- ")]
+        _check(len(lines) == 8, f"lost promotions: {len(lines)}/8 survived")
+        # Reversible: the audited forget clears the DB-backed guidance too.
+        _check(sh.forget_addendum("M"), "world-store forget removed nothing")
+        _check(sh.recall_addendum("M") == "", "forgotten guidance still recalled")
+    finally:
+        os.environ.pop("MAVERICK_CONFIG", None)
+        cfg.unlink(missing_ok=True)
+    return "same content as files; 8/8 concurrent promotions; forget round-trips"
+
+
 GUARANTEES = [
     ("determinism (consistent)", g_determinism),
     ("off by default", g_off_by_default),
@@ -339,6 +397,7 @@ GUARANTEES = [
     ("reversible + auditable", g_reversible),
     ("canary lifecycle", g_canary_lifecycle),
     ("rollback durability", g_rollback_durable),
+    ("fleet store parity", g_store_parity),
 ]
 
 

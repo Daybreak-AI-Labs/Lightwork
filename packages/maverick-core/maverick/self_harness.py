@@ -100,7 +100,7 @@ def settings() -> dict:
                 "holdout_rotations": 1, "judge_samples": 1,
                 "metamorphic": False, "metamorphic_tolerance": 0.0,
                 "calibrate_judge": False, "transfer_auto": False,
-                "corpus_harvest": "off",
+                "corpus_harvest": "off", "store": "files",
                 "relapse_failure_share": 0.0, "relapse_min_outcomes": 5,
                 "promote_as_canary": False,
                 "efficacy_review": False, "eval_corpus": None,
@@ -111,11 +111,42 @@ def _store_path() -> Path:
     return data_dir("harness") / "addenda.json"
 
 
+def _world_routed(p: Path) -> bool:
+    """True when ``p`` is the DEFAULT store location and the operator selected
+    the world learning store (``[self_harness] store = "world"`` -- phase 1 of
+    docs/proposals/fleet-learning-state.md). An EXPLICIT non-default path
+    always means the file store at that path, so tests and tenant redirection
+    are byte-for-byte unchanged."""
+    try:
+        if str(settings().get("store") or "files").strip().lower() != "world":
+            return False
+        return Path(p) == _store_path()
+    except Exception:  # pragma: no cover -- config trouble means file store
+        return False
+
+
+def _store_rmw_lock(p: Path):
+    """DB-side critical-section lock for the world store: ``flock`` only
+    serializes ONE host, so a Postgres-backed fleet also takes a session
+    advisory lock around the whole load-modify-save. A no-op for the file
+    store and the (single-host) SQLite world store."""
+    if _world_routed(p):
+        from . import learning_store
+        return learning_store.rmw_lock()
+    import contextlib
+    return contextlib.nullcontext()
+
+
 # ---- store (the learned, per-model addenda) -------------------------------
 
 def load_addenda(path: Path | None = None) -> dict[str, str]:
     """The accepted ``{model_id: addendum_text}`` map (empty on any error)."""
     p = path if path is not None else _store_path()
+    if _world_routed(p):
+        from . import learning_store
+        raw = learning_store.load_addenda_db()
+        return {str(k): v for k, v in raw.items()
+                if isinstance(v, str) and v.strip()}
     try:
         data = json.loads(p.read_text(encoding="utf-8"))
         if isinstance(data, dict):
@@ -130,6 +161,11 @@ def load_addenda(path: Path | None = None) -> dict[str, str]:
 
 
 def _write_addenda(addenda: dict[str, str], path: Path | None = None) -> None:
+    p0 = path if path is not None else _store_path()
+    if _world_routed(p0):
+        from . import learning_store
+        learning_store.write_addenda_db(addenda)
+        return
     # Route through atomic_write_text: a UNIQUE temp + os.replace + chmod 0600
     # that CLEANS THE TEMP UP on any failure. A hand-rolled fixed "<name>.tmp"
     # instead would (a) leave a stale .tmp behind whenever os.replace fails
@@ -221,6 +257,9 @@ def _line_id(model_id: str, line: str) -> str:
 
 def load_line_meta(path: Path | None = None) -> dict[str, dict]:
     """The ``{line_id: record}`` provenance sidecar (empty on any error)."""
+    if _world_routed(path if path is not None else _store_path()):
+        from . import learning_store
+        return learning_store.load_line_meta_db()
     mp = _meta_path(path)
     try:
         data = json.loads(mp.read_text(encoding="utf-8"))
@@ -232,6 +271,10 @@ def load_line_meta(path: Path | None = None) -> dict[str, dict]:
 
 
 def _write_line_meta(meta: dict[str, dict], path: Path | None = None) -> None:
+    if _world_routed(path if path is not None else _store_path()):
+        from . import learning_store
+        learning_store.write_line_meta_db(meta)
+        return
     from .file_lock import atomic_write_text
     atomic_write_text(_meta_path(path),
                       json.dumps(meta, indent=2, sort_keys=True), mode=0o600)
@@ -459,7 +502,7 @@ def forget_addendum(model_id: str, *, line: str | None = None,
     p = path if path is not None else _store_path()
     from .file_lock import cross_process_lock
     removed = False
-    with _lock, cross_process_lock(p):
+    with _lock, cross_process_lock(p), _store_rmw_lock(p):
         before = load_addenda(p)
         # Span ALL of the model's scopes (bare + composite "<model>\x00domain=...")
         # so a full rollback can't ORPHAN a domain-scoped block that recall still
@@ -542,7 +585,7 @@ def retire_stale(*, older_than_days: float, model_id: str | None = None,
     removed: list[tuple[str, str]] = []
     from .file_lock import cross_process_lock
     try:
-        with _lock, cross_process_lock(p):
+        with _lock, cross_process_lock(p), _store_rmw_lock(p):
             add = load_addenda(p)
             meta = load_line_meta(p)
             after = dict(add)
@@ -1471,7 +1514,7 @@ def _apply_addendum(proposal: HarnessProposal, path: Path | None = None, *,
     # with whichever block the line actually lives in.
     store_key = _scoped_key(proposal.model_id, proposal.context)
     from .file_lock import cross_process_lock
-    with _lock, cross_process_lock(p):
+    with _lock, cross_process_lock(p), _store_rmw_lock(p):
         before = load_addenda(p)
         after = dict(before)
         new_block = _compose_addendum(
@@ -1528,7 +1571,7 @@ def note_recall(model_id: str | None, *, now: float | None = None,
         ts = now if now is not None else time.time()
         keys = [mid] + [_scoped_key(mid, ctx) for ctx in contexts]
         from .file_lock import cross_process_lock
-        with _lock, cross_process_lock(p):
+        with _lock, cross_process_lock(p), _store_rmw_lock(p):
             meta = load_line_meta(p)
             store = load_addenda(p)
             changed = False
@@ -1611,7 +1654,7 @@ def note_outcome(model_id: str | None, success: bool, *, line: str | None = None
     try:
         p = path if path is not None else _store_path()
         from .file_lock import cross_process_lock
-        with _lock, cross_process_lock(p):
+        with _lock, cross_process_lock(p), _store_rmw_lock(p):
             store = load_addenda(p)
             meta = load_line_meta(p)
             changed = False
@@ -1713,7 +1756,7 @@ def mark_canary(model_id: str, line: str, *, canary: bool = True,
     try:
         p = path if path is not None else _store_path()
         from .file_lock import cross_process_lock
-        with _lock, cross_process_lock(p):
+        with _lock, cross_process_lock(p), _store_rmw_lock(p):
             store = load_addenda(p)
             meta = load_line_meta(p)
             changed = False
@@ -1844,6 +1887,9 @@ def _load_transfer_tried(path: Path | None = None) -> dict[str, float]:
     """The ``{line_id: ts}`` transfer attempt memory for the store at ``path``
     (empty on any error). Keys are :func:`_line_id` of (target, line) -- the
     same content-addressed identity the provenance sidecar uses."""
+    if _world_routed(path if path is not None else _store_path()):
+        from . import learning_store
+        return learning_store.load_transfer_tried_db()
     p = _transfer_tried_path(path)
     try:
         data = json.loads(p.read_text(encoding="utf-8"))
@@ -1856,12 +1902,17 @@ def _load_transfer_tried(path: Path | None = None) -> dict[str, float]:
 
 def _record_transfer_tried(keys: list[str], *, path: Path | None = None) -> None:
     from .file_lock import atomic_write_text, cross_process_lock
+    ap = path if path is not None else _store_path()
     p = _transfer_tried_path(path)
     ts = time.time()
-    with _lock, cross_process_lock(p):
+    with _lock, cross_process_lock(p), _store_rmw_lock(ap):
         tried = _load_transfer_tried(path)
         for k in keys:
             tried[k] = ts
+        if _world_routed(ap):
+            from . import learning_store
+            learning_store.write_transfer_tried_db(tried)
+            return
         atomic_write_text(p, json.dumps(tried, indent=2, sort_keys=True), mode=0o600)
 
 

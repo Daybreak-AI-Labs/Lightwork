@@ -1951,6 +1951,14 @@ def pick_advanced() -> dict[str, Any]:
             console.print(
                 "    [yellow]Note: corpus bootstrapping needs the eval-corpus "
                 "path above; without one the harvest is a no-op.[/yellow]")
+        store_pick = _q_select(
+            "    Learning-store backend?",
+            ["files - per-host JSON under ~/.maverick (default)",
+             "world - shared world database (a multi-host fleet learns as one)"],
+            default="files - per-host JSON under ~/.maverick (default)",
+        ).split()[0]
+        if store_pick == "world":
+            advanced["self_harness_store"] = "world"
         advanced["self_harness_candidates"] = max(1, _safe_int(_q_text(
             "    Candidate lines per weakness (best-of-N; 1 = single)",
             default="1"), default=1))
@@ -3330,6 +3338,8 @@ def _cfg_advanced(  # noqa: C901 - flat sequence of independent opt-in toggles
             lines.append("transfer_auto = true")
         if advanced.get("self_harness_corpus_harvest"):
             _emit_kv(lines, "corpus_harvest", advanced["self_harness_corpus_harvest"])
+        if advanced.get("self_harness_store"):
+            _emit_kv(lines, "store", advanced["self_harness_store"])
         cands = advanced.get("self_harness_candidates")
         if cands and cands > 1:
             lines.append(f"candidates_per_signature = {int(cands)}")
