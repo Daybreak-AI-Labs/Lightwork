@@ -175,7 +175,7 @@ async def review_diff(
     llm: LLM,
     budget: Budget | None = None,
     *,
-    max_tokens: int = 1024,
+    max_tokens: int = 2048,
     proposer_model: str | None = None,
 ) -> ReviewVerdict:
     """Run the reviewer over a diff. Conservative: any parsing failure

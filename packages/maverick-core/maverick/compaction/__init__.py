@@ -281,6 +281,8 @@ def excerpt(text: str, cap: int, note: str = "truncated") -> str:
     renders, swarm results, brief facts, finding posts) so the marker format
     can't drift per site. The compaction shrink helpers above keep their own
     formats — those are frozen by the idempotence regexes."""
+    if not isinstance(text, str):  # defensive: a bad post must not break
+        text = "" if text is None else str(text)  # every brief that renders it
     if len(text) <= cap:
         return text
     return text[:cap].rstrip() + f" ... [{len(text)}B {note}]"

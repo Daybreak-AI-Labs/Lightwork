@@ -1052,13 +1052,18 @@ class Agent:
             return None
         # Thinking tokens bill at the output rate, so the base is a first-class
         # cost knob: `[thinking] budget` (default 8000, the long-standing value).
-        base = 8000
-        try:
-            from .config import load_config
-            base = int(((load_config() or {}).get("thinking") or {})
-                       .get("budget", base) or base)
-        except Exception:  # pragma: no cover -- config never blocks a turn
-            pass
+        # Resolved once per agent — this runs every turn and load_config()
+        # re-stats/merges overlay files on each call; config is fixed mid-run.
+        base = getattr(self, "_thinking_base", None)
+        if base is None:
+            base = 8000
+            try:
+                from .config import load_config
+                base = int(((load_config() or {}).get("thinking") or {})
+                           .get("budget", base) or base)
+            except Exception:  # pragma: no cover -- config never blocks a turn
+                pass
+            self._thinking_base = base
         # Adaptive controller (opt-in, default off): trims/raises by recent
         # success rate. Disabled or low-data -> returns `base` unchanged.
         from .thinking_budget import adjust

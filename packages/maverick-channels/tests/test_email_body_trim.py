@@ -93,3 +93,44 @@ class TestHtmlStripping:
         msg.add_alternative("<p>only html here</p>", subtype="html")
         out = ch._extract_body(msg)
         assert "only html here" in out and "<p>" not in out
+
+
+class TestReviewRegressions:
+    def test_bottom_posted_answer_survives_marker(self):
+        # The real answer sits BELOW the attribution + quote block; the
+        # marker cut must be skipped so the swarm sees the actual reply.
+        body = (
+            "Thanks for the summary.\n"
+            "On Mon, Jul 6, 2026 at 9:00 AM Alice <a@x.com> wrote:\n"
+            "> can you approve the Q3 budget?\n"
+            "Approved - go ahead with vendor B.\n"
+        )
+        out = _trim_reply_noise(body)
+        assert "Approved - go ahead with vendor B." in out
+
+    def test_top_posted_reply_still_trimmed(self):
+        body = (
+            "Ship it.\n"
+            "On Mon, Jul 6, 2026 at 9:00 AM Alice <a@x.com> wrote:\n"
+            "> long quoted history\n> more\n"
+        )
+        out = _trim_reply_noise(body)
+        assert out == "Ship it."
+
+    def test_bare_dashdash_divider_is_not_a_signature(self):
+        # RFC 3676 delimiter is dash-dash-SPACE; a bare -- is a common prose
+        # divider and everything below it is real content.
+        body = "Here's the plan:\n--\nStep 1\nStep 2"
+        out = _trim_reply_noise(body)
+        assert "Step 2" in out
+
+    def test_outlook_divider_still_cuts_unquoted_copy(self):
+        body = "New answer.\n-----Original Message-----\nFrom: bob\nold text"
+        assert _trim_reply_noise(body) == "New answer."
+
+    def test_long_attribution_line_matched(self):
+        attribution = ("On Mon, Jul 6, 2026 at 9:00 AM " + "Alice Example "
+                       "<alice.example@corp.example.com>, " * 4 + "wrote:")
+        assert len(attribution) < 320
+        body = "Done.\n" + attribution + "\n> quoted\n"
+        assert _trim_reply_noise(body) == "Done."

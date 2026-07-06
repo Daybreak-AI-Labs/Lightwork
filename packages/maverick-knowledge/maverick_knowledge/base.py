@@ -77,6 +77,12 @@ def _dedup_hits(hits: list[Hit], *, max_overlap: int) -> list[Hit]:
     for h in hits:
         absorbed = False
         for j, prev in enumerate(kept):
+            # Same-source only: absorbing across documents would render
+            # one document's text under another's [source: ...] label — a
+            # silent citation corruption (shared boilerplate/license text
+            # is a realistic cross-document substring).
+            if h.source != prev.source:
+                continue
             if h.text and h.text in prev.text:
                 absorbed = True
                 break
@@ -205,12 +211,15 @@ class KnowledgeBase:
         """Delete an unapproved or retired collection from the backing store."""
         self.store.delete_collection(collection)
 
-    def search(self, collection: str, query: str, k: int = 5) -> list[Hit]:
-        vector = self.embedder.embed([query])[0]
+    def _search_vec(self, collection: str, vector, k: int) -> list[Hit]:
+        """Store lookup for an already-embedded query; one Hit-wrap site."""
         return [
             Hit(m.score, m.text, m.meta.get("source", ""))
             for m in self.store.search(collection, vector, k)
         ]
+
+    def search(self, collection: str, query: str, k: int = 5) -> list[Hit]:
+        return self._search_vec(collection, self.embedder.embed([query])[0], k)
 
     def search_formatted(self, collections, query: str, k: int = 5) -> str:
         """Search one or more domain collections and render the top-k chunks with
@@ -225,10 +234,7 @@ class KnowledgeBase:
         vector = self.embedder.embed([query])[0]
         hits: list[Hit] = []
         for c in collections:
-            hits.extend(
-                Hit(m.score, m.text, m.meta.get("source", ""))
-                for m in self.store.search(c, vector, k)
-            )
+            hits.extend(self._search_vec(c, vector, k))
         hits.sort(key=lambda h: h.score, reverse=True)
         hits = _dedup_hits(hits, max_overlap=self.chunk_overlap)[: max(1, k)]
         if not hits:

@@ -738,3 +738,20 @@ class TestCohereEmbedder:
         monkeypatch.setenv("COHERE_API_KEY", "from-env")
         e = build_embedder({"embedder": "cohere"})
         assert isinstance(e, CohereEmbedder) and e.api_key == "from-env"
+
+
+    def test_cross_source_containment_never_relabels(self):
+        # Shared boilerplate makes doc B's chunk contain doc A's chunk; both
+        # must render under their OWN sources — absorbing would cite A for
+        # B's text (provenance corruption).
+        from maverick_knowledge.base import Hit, _dedup_hits
+        shared = "standard limitation of liability clause text here"
+        hits = [
+            Hit(0.9, shared, "doc-a"),
+            Hit(0.8, shared + " plus doc-b specific terms", "doc-b"),
+        ]
+        out = _dedup_hits(hits, max_overlap=64)
+        assert [(h.text, h.source) for h in out] == [
+            (shared, "doc-a"),
+            (shared + " plus doc-b specific terms", "doc-b"),
+        ]

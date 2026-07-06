@@ -49,11 +49,8 @@ def _adaptive_max_tokens_floor() -> int:
     council value) quadrupled the agent loop's 4096 for roles that never asked
     to think; 8192 keeps generous anti-empty-response headroom at half the
     ceiling. Tune via MAVERICK_ADAPTIVE_MAX_TOKENS_FLOOR (min 2048)."""
-    try:
-        v = int(os.environ.get("MAVERICK_ADAPTIVE_MAX_TOKENS_FLOOR", "8192"))
-    except ValueError:
-        v = 8192
-    return max(2048, v)
+    from .._envparse import env_int
+    return max(2048, env_int("MAVERICK_ADAPTIVE_MAX_TOKENS_FLOOR", 8192))
 
 
 def _is_opus_adaptive(model_id: str) -> bool:
@@ -677,11 +674,12 @@ class AnthropicClient:
         mid = model or self.DEFAULT_MODEL
         est_tokens = (len(system or "")
                       + sum(len(str(t)) for t in tools or [])) / 4
-        if est_tokens < _min_cache_tokens(mid):
+        min_tokens = _min_cache_tokens(mid)
+        if est_tokens < min_tokens:
             log.debug(
                 "prompt-cache prewarm skipped: est %d tokens < %d minimum "
                 "for %s (nothing would be cached)",
-                est_tokens, _min_cache_tokens(mid), mid)
+                est_tokens, min_tokens, mid)
             return False
         try:
             kwargs: dict[str, Any] = {

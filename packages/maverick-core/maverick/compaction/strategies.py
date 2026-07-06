@@ -75,8 +75,14 @@ def compact_with_strategy(
     try:
         if name == "learned":
             from .learned import LearnedSummarizer
-            return LearnedSummarizer(llm=llm, budget=budget, scope=scope).compact(
-                messages, keep_recent=keep_recent)
+            # Every strategy path funnels through compact_messages so the
+            # structural shrink AND the total-window ceiling apply uniformly
+            # (the shrink is idempotent, so double application is a no-op).
+            return compact_messages(
+                LearnedSummarizer(llm=llm, budget=budget, scope=scope).compact(
+                    messages, keep_recent=keep_recent),
+                keep_recent=keep_recent, max_tool_bytes=max_tool_bytes,
+            )
         if name == "multimodal":
             from .multimodal import compact_media
             # Stub heavy media blocks, then apply the standard shrink pass.
@@ -87,13 +93,19 @@ def compact_with_strategy(
             )
         if name == "streaming":
             from .streaming import compact_streaming
-            return compact_streaming(
-                messages, conversation_id=conversation_id,
-                keep_recent=keep_recent, llm=llm, budget=budget,
+            return compact_messages(
+                compact_streaming(
+                    messages, conversation_id=conversation_id,
+                    keep_recent=keep_recent, llm=llm, budget=budget,
+                ),
+                keep_recent=keep_recent, max_tool_bytes=max_tool_bytes,
             )
         from .graph import compact_graph
-        return compact_graph(
-            messages, keep_recent=keep_recent, llm=llm, budget=budget)
+        return compact_messages(
+            compact_graph(
+                messages, keep_recent=keep_recent, llm=llm, budget=budget),
+            keep_recent=keep_recent, max_tool_bytes=max_tool_bytes,
+        )
     except Exception as e:
         log.warning("compaction strategy %r failed (%s); using default path", name, e)
         return compact_messages(

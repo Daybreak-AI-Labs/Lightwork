@@ -248,11 +248,10 @@ def _end_episode_with_spend(
     # budget_receipts ledger so each finished goal appends a tamper-evident
     # tokens+cache+cost record — the regression baseline for token
     # efficiency. Best-effort; never blocks the goal.
-    if goal_id is not None and os.environ.get(
-            "MAVERICK_BUDGET_RECEIPTS", "").strip().lower() in ("1", "true", "yes"):
+    from . import budget_receipts
+    if goal_id is not None and budget_receipts.enabled():
         try:
-            from .budget_receipts import mint
-            mint(world, int(goal_id))
+            budget_receipts.mint(world, int(goal_id))
         except Exception:  # pragma: no cover -- observability never blocks
             log.debug("budget receipt mint skipped", exc_info=True)
     _fire_webhook("episode_finished", {
@@ -528,6 +527,7 @@ def _brief_facts_block(world: WorldModel, goal_id: int, shield: Any | None) -> s
     # the newest N (get_facts orders newest-first) and cap each value, the
     # same treatment the QA block gets via _QA_MAX_*. Env-tunable.
     from ._envparse import env_int as _env_int
+    from .compaction import excerpt
     max_facts = max(1, _env_int("MAVERICK_BRIEF_FACTS_MAX", 50))
     max_val = max(40, _env_int("MAVERICK_BRIEF_FACT_VALUE_CHARS", 300))
     omitted = max(0, len(facts) - max_facts)
@@ -547,7 +547,6 @@ def _brief_facts_block(world: WorldModel, goal_id: int, shield: Any | None) -> s
         val = val.replace("\r", " ").replace("\n", " ")
         # Truncate AFTER redaction: cutting first could split a secret so the
         # detector misses it and half of it rides into the brief.
-        from .compaction import excerpt
         val = excerpt(val, max_val)
         if shield is not None:
             try:

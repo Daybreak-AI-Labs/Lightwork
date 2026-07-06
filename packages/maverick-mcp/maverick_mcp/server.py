@@ -559,12 +559,13 @@ class MCPServer:
         else:
             raise _ProtocolError(-32602, f"unknown resource path: {uri}")
 
+        from maverick.fastjson import dumps_compact
         return {
             "contents": [{
                 "uri": uri,
                 "mimeType": "application/json",
-                # compact separators: this JSON re-enters a client LLM's context
-                "text": json.dumps(data, separators=(",", ":"), default=str),
+                # compact: this JSON re-enters a client LLM's context
+                "text": dumps_compact(data),
             }],
         }
 
@@ -1114,10 +1115,16 @@ class MCPServer:
             return "no facts known"
         # Bounded: this string re-enters the calling LLM's context, and the
         # fact store grows without limit. Newest first (get_facts order);
-        # values capped like the orchestrator brief's facts block.
-        lines = [f"{k}: {str(v)[:300]}" for k, v in list(facts.items())[:100]]
-        if len(facts) > 100:
-            lines.append(f"... ({len(facts) - 100} more facts omitted)")
+        # same knobs + truncation marker as the orchestrator brief's facts
+        # block so the two renderers of one store can't drift.
+        from maverick._envparse import env_int
+        from maverick.compaction import excerpt
+        max_n = max(1, env_int("MAVERICK_BRIEF_FACTS_MAX", 50))
+        max_val = max(40, env_int("MAVERICK_BRIEF_FACT_VALUE_CHARS", 300))
+        lines = [f"{k}: {excerpt(str(v), max_val)}"
+                 for k, v in list(facts.items())[:max_n]]
+        if len(facts) > max_n:
+            lines.append(f"... ({len(facts) - max_n} more facts omitted)")
         return "\n".join(lines)
 
     def _send(self, message: dict) -> None:

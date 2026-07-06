@@ -55,8 +55,15 @@ _AUTHSERV_RE = re.compile(r"\s*([^\s;]+)")
 # Reply-noise trimming: a reply carries the whole prior thread as quoted
 # text, re-ingested on EVERY message — the classic email token multiplier.
 # Markers cut the quoted history; the RFC 3676 "-- " line cuts the signature.
-_QUOTE_CUT_RES = (
-    re.compile(r"^\s*On .{0,200}wrote:\s*$", re.IGNORECASE),
+# 300-char middle: long attribution lines (many recipients, localized dates)
+# blow past 200 and a missed match re-ingests the whole thread. This marker
+# precedes ">"-quoted text, so its cut is guarded by _only_quotes_below —
+# bottom-posted answers AFTER the quote block must survive.
+_ON_WROTE_RE = re.compile(r"^\s*On .{0,300}wrote:\s*$", re.IGNORECASE)
+# Outlook/forward dividers precede an UNQUOTED copy of the old mail (headers
+# then body), so these cut unconditionally — bottom-posting below them is not
+# a convention.
+_DIVIDER_CUT_RES = (
     re.compile(r"^\s*-{3,}\s*Original Message\s*-{3,}", re.IGNORECASE),
     re.compile(r"^\s*Begin forwarded message:\s*$", re.IGNORECASE),
 )
@@ -79,22 +86,39 @@ def _strip_html(html: str) -> str:
     return "\n".join(ln for ln in lines if ln).strip()
 
 
+def _only_quotes_below(lines: list[str], start: int) -> bool:
+    """True when everything below ``start`` is quoted/blank — i.e. cutting
+    there loses no fresh content. A bottom-posted reply (real answer BELOW
+    the ``On ... wrote:`` attribution and its quote block) fails this check,
+    so the marker cut is skipped and the answer survives."""
+    return all(
+        not ln.strip() or ln.lstrip().startswith(">")
+        for ln in lines[start:]
+    )
+
+
 def _trim_reply_noise(body: str) -> str:
     """Drop quoted-reply history and the signature block from one message.
 
-    Cuts at the first reply/forward marker, then at the RFC 3676 ``-- ``
-    signature delimiter, then drops a trailing run of ``>``-quoted lines.
-    Interleaved quotes mid-message (bottom-posted answers) are preserved.
-    Fail-safe: an all-quote body returns unchanged, never empty.
+    Cuts at a reply/forward marker only when nothing but quoted text follows
+    it (top-posted replies — the dominant style); at the RFC 3676 ``-- ``
+    signature delimiter (dash-dash-SPACE only: a bare ``--`` is a common
+    prose divider and cutting there dropped real body text); then drops a
+    trailing run of ``>``-quoted lines. Bottom-posted and interleaved
+    answers are preserved. Fail-safe: an all-quote body returns unchanged,
+    never empty.
     """
     text = body or ""
     lines = text.splitlines()
     cut = len(lines)
     for i, line in enumerate(lines):
-        if any(m.match(line) for m in _QUOTE_CUT_RES):
+        if any(m.match(line) for m in _DIVIDER_CUT_RES):
             cut = i
             break
-        if line.rstrip("\r") in ("-- ", "--"):
+        if _ON_WROTE_RE.match(line) and _only_quotes_below(lines, i + 1):
+            cut = i
+            break
+        if line.rstrip("\r") == "-- ":
             cut = i
             break
     kept = lines[:cut]

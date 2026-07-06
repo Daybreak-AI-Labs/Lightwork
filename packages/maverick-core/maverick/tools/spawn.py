@@ -451,6 +451,7 @@ def _format_swarm_results(parent: Agent, children: list, results: list,
     trailing children once spent — every child keeps an identity line, and
     full answers remain in the run record.
     """
+    from ..compaction import excerpt
     child_cap = max(200, env_int("MAVERICK_SWARM_CHILD_RESULT_CHARS", 4000))
     total_cap = max(child_cap, env_int("MAVERICK_SWARM_RESULTS_TOTAL_CHARS", 24_000))
     parts: list[str] = []
@@ -471,7 +472,6 @@ def _format_swarm_results(parent: Agent, children: list, results: list,
         if notice is not None:
             parts.append(f"[{child.role}/{child.name}] {notice}")
         elif res.final:
-            from ..compaction import excerpt
             answer = excerpt(res.final, child_cap,
                              "truncated; full answer in the run record")
             if used + len(answer) > total_cap and used:

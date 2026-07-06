@@ -155,7 +155,7 @@ async def verify_proposal(
     llm: LLM,
     budget: Budget | None = None,
     *,
-    max_tokens: int = 512,
+    max_tokens: int = 1024,
     proposer_model: str | None = None,
 ) -> VerifierVerdict:
     """Ask the verifier role to judge a proposer's final answer.
@@ -349,7 +349,7 @@ async def verify_proposal_ensemble(
                 messages=[{"role": "user", "content": user_msg}],
                 tools=None,
                 budget=budget,
-                max_tokens=512,
+                max_tokens=1024,
                 model=model,
             )
             return _parse(resp.text)
@@ -446,7 +446,7 @@ async def verify_proposal_structured(
     llm: LLM,
     budget: Budget | None = None,
     *,
-    max_tokens: int = 512,
+    max_tokens: int = 1024,
     proposer_model: str | None = None,
 ) -> VerifierVerdict:
     """Verify with the structured rubric judge (Agent-RRM, reasoning_reward).
