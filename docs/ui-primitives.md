@@ -37,6 +37,25 @@ Callers must be `async`. If the confirmed action removes the element that held
 focus (e.g. a deleted list row), move focus to a stable landmark afterward — a
 `tabindex="-1"` section heading — since the opener no longer exists.
 
+## `window.mvForm(title, fields, { okText }) -> Promise<object|null>`
+
+Collects a small set of typed fields in the native `<dialog>` (focus trap, `Esc`
+cancels, focus returns to the opener) — the replacement for a chain of
+`window.prompt` calls. Resolves to a `{ key: value }` object, or `null` if
+cancelled. Required fields with no value block submit with an inline error.
+Falls back to sequential `prompt`s where `<dialog>.showModal` is unavailable.
+**Not re-entrant** (shared dialog). Each field is
+`{ key, label, type, required, default, options, placeholder, help }` where
+`type` is `text` | `number` | `date` | `bool` | `select` (`options` for `select`).
+
+```js
+const vals = await mvForm('Run this flow', [
+  { key: 'amount', label: 'Amount', type: 'number', required: true },
+  { key: 'urgent', label: 'Urgent?', type: 'bool', default: false },
+], { okText: 'Run' });
+if (vals === null) return;                 // cancelled
+```
+
 ## `window.mvCopy(text)`
 
 Copies `text` to the clipboard (Clipboard API, with a hidden-textarea fallback)
