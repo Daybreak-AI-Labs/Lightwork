@@ -611,12 +611,16 @@ here.
 - **Migration fidelity** (`automation_import.to_flow`) — a per-source
   `_STRUCTURAL_LOWERERS` registry (register a source in one line): n8n IF/Filter,
   Power Automate (WDL) `If` / `Foreach` / `Switch` / `Until` / `Scope`, Workato
-  recipe `if` / `repeat` blocks, and UiPath exported activity trees
-  (`Sequence` / `If` / `While` / `ForEach` / `TryCatch`) are all captured
-  **structurally** (branch/foreach/switch/while/scope nodes, arms wired to
-  rejoin, bodies as nested flows, Until's exit condition negated); a UiPath
-  Release with no exposed graph stays a correct one-step import; graphless
-  sources approximate each step as an agent node that still runs.
+  recipe `if` / `repeat`, UiPath exported activity trees
+  (`Sequence` / `If` / `While` / `ForEach` / `TryCatch`), and Make (Integromat)
+  `BasicRouter` routes are all captured **structurally** (branch/foreach/switch/
+  while/scope nodes, arms wired to rejoin, bodies as nested flows, Until's exit
+  condition negated, a Make router lowered to an if/else-if/else branch chain
+  from its route filters); graphless sources approximate each step as an agent
+  node that still runs. A UiPath Release/Schedule with no exposed activity tree
+  stays a correct one-step *invocation* import — honestly reported
+  `approximated` (the Orchestrator API returns no .xaml, so the process's
+  internal control flow isn't visible), never a false `preserved`.
   `to_flow_with_report` returns the per-step fidelity log
   (`preserved` / `approximated` + why), and the dashboard import can save the
   graphs directly (`as_flows: true` on `POST /import/run`) with the fidelity
