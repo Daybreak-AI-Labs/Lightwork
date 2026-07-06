@@ -3952,7 +3952,8 @@ def run_fast() -> int:
     console.print(Panel.fit(
         "[bold green]Fast setup finished.[/bold green]\n\n"
         "Try: [bold]maverick start \"hello\"[/bold]\n"
-        "(If ANTHROPIC_API_KEY wasn't set, edit ~/.maverick/.env first.)",
+        "(If ANTHROPIC_API_KEY wasn't set, edit ~/.maverick/.env first.)\n"
+        "[dim]The maverick command is also available as lightwork.[/dim]",
         border_style="green",
     ))
     return 0
@@ -4151,7 +4152,8 @@ def run_consumer() -> int:
             "Try your first goal:\n"
             f"  [bold]maverick start \"{CONSUMER_DEMO_GOAL}\" --model {CONSUMER_DEMO_MODEL}[/bold]\n\n"
             "Then:\n"
-            "  [bold]maverick dashboard[/bold]   web UI at http://127.0.0.1:8765",
+            "  [bold]maverick dashboard[/bold]   web UI at http://127.0.0.1:8765\n\n"
+            "[dim]The maverick command is also available as lightwork.[/dim]",
             border_style="green",
         ))
     else:
@@ -4627,7 +4629,8 @@ def run(fast: bool = False, resume: bool = False) -> int:
             "Try:\n"
             f"  [bold]{next_step}[/bold]\n"
             "  [bold]maverick status[/bold]\n"
-            "  [bold]maverick dashboard[/bold]    # web UI at http://127.0.0.1:8765",
+            "  [bold]maverick dashboard[/bold]    # web UI at http://127.0.0.1:8765\n\n"
+            "[dim]The maverick command is also available as lightwork.[/dim]",
             border_style="green",
         ))
         show_compliance_commands(advanced)

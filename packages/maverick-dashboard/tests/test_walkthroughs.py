@@ -38,7 +38,7 @@ def client(world, monkeypatch):
 def test_page_empty_state_is_honest(client, home):
     r = client.get("/walkthroughs")
     assert r.status_code == 200
-    assert "No walkthroughs exported yet" in r.text
+    assert "No walkthroughs yet" in r.text
     # the real export path + where artifacts land
     assert "/api/v1/goals/" in r.text and "/walkthrough" in r.text
     assert str(home / "walkthroughs") in r.text

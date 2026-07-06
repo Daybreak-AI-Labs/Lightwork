@@ -1,8 +1,8 @@
 {% extends "base.html" %}
-{% block title %}audit log · Lightwork{% endblock %}
+{% block title %}Audit log · Lightwork{% endblock %}
 {% block content %}
   <h1 class="page-title">Audit</h1>
-  <p class="page-subtitle">The complete, append-only audit log — filter and full-text search every recorded event.</p>
+  <p class="page-subtitle">A complete, tamper-resistant record of everything that has happened here — filter or search any event.</p>
 
   <div class="panel">
     <form method="get" action="/audit" style="display: flex; gap: 1rem; align-items: end; flex-wrap: wrap;">
@@ -27,7 +27,7 @@
         </select>
       </label>
       <button type="submit"
-              style="padding: 0.45rem 1rem; background: var(--panel); color: var(--text); border: 1px solid var(--border); border-radius: 4px; cursor: pointer;">
+              style="padding: 0.45rem 1rem; background: var(--surface-1); color: var(--text); border: 1px solid var(--border); border-radius: 4px; cursor: pointer;">
         load
       </button>
     </form>
@@ -124,8 +124,8 @@
       </table>
     {% else %}
       <p class="muted">
-        No audit events for the selected day. Lightwork writes to
-        <code>~/.maverick/audit/YYYY-MM-DD.ndjson</code>; run a goal first.
+        No activity recorded for this day yet. Every action is logged here
+        automatically as soon as work runs.
       </p>
     {% endif %}
   </div>

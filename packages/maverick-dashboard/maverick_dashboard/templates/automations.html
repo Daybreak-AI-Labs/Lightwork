@@ -1,5 +1,5 @@
 {% extends "base.html" %}
-{% block title %}automations · Lightwork{% endblock %}
+{% block title %}Automations · Lightwork{% endblock %}
 {% block content %}
 <style>
   .auto { max-width: 880px; margin-inline: auto; }
@@ -30,7 +30,11 @@
       <h2 id="auto-sched-h" tabindex="-1">Schedules</h2>
       <span class="muted" id="auto-sched-count"></span>
     </div>
-    <p class="auto__hint">Cron schedules run while <code>maverick worker</code> is active.</p>
+    <p class="auto__hint">Schedules run while the Lightwork background worker is on.</p>
+    <details style="margin-bottom: var(--space-3);">
+      <summary class="muted" style="cursor: pointer; font-size: var(--text-sm);">For administrators: running the worker</summary>
+      <p class="auto__hint" style="margin-top: var(--space-2);">Cron schedules run while <code>maverick worker</code> is active.</p>
+    </details>
     <ul class="auto__list" id="auto-sched-list" aria-label="Schedules"></ul>
     <div class="mv-empty" id="auto-sched-empty" hidden>
       <p class="mv-empty__title">No schedules yet</p>
@@ -46,7 +50,12 @@
       <h2 id="auto-trig-h" tabindex="-1">Webhook triggers</h2>
       <span class="muted" id="auto-trig-count"></span>
     </div>
-    <div class="auto__warn" id="auto-trig-nosecret" hidden>No <code>[webhooks]</code> secret is configured, so triggers won’t fire. Set one in <code>~/.maverick/config.toml</code> or <code>MAVERICK_WEBHOOK_SECRET</code>.</div>
+    <div class="auto__warn" id="auto-trig-nosecret" hidden>Webhook triggers are not fully set up yet — ask your administrator to configure a signing secret.
+      <details style="margin-top: var(--space-2);">
+        <summary class="muted" style="cursor: pointer; font-size: var(--text-sm);">For administrators: configuring the signing secret</summary>
+        <p style="margin: var(--space-2) 0 0;">No <code>[webhooks]</code> secret is configured, so triggers won’t fire. Set one in <code>~/.maverick/config.toml</code> or <code>MAVERICK_WEBHOOK_SECRET</code>.</p>
+      </details>
+    </div>
     <ul class="auto__list" id="auto-trig-list" aria-label="Webhook triggers"></ul>
     <div class="mv-empty" id="auto-trig-empty" hidden>
       <p class="mv-empty__title">No triggers yet</p>
@@ -62,7 +71,11 @@
       <h2 id="auto-event-h" tabindex="-1">Event triggers</h2>
       <span class="muted" id="auto-event-count"></span>
     </div>
-    <p class="auto__hint">Run a workflow when something new appears in a source that can’t push a webhook — the app polls each source automatically on a background tick and fires per new item, with the item’s fields filling the workflow’s parameters. Use “Poll now” to check immediately, or POST to <code>/api/v1/event-triggers/poll</code> from your own cron.</p>
+    <p class="auto__hint">Run a workflow when something new appears in a source that can’t push a webhook — Lightwork checks each source automatically in the background and starts a run per new item, with the item’s fields filling the workflow’s parameters. Use “Poll now” to check immediately.</p>
+    <details style="margin-bottom: var(--space-3);">
+      <summary class="muted" style="cursor: pointer; font-size: var(--text-sm);">For developers: polling on your own schedule</summary>
+      <p class="auto__hint" style="margin-top: var(--space-2);">POST to <code>/api/v1/event-triggers/poll</code> from your own cron to control when sources are checked.</p>
+    </details>
     <ul class="auto__list" id="auto-event-list" aria-label="Event triggers"></ul>
     <div class="mv-empty" id="auto-event-empty" hidden>
       <p class="mv-empty__title">No event triggers yet</p>
@@ -181,7 +194,11 @@
   {% if not scheduling_enabled and not triggers_enabled and not import_enabled %}
   <div class="mv-empty">
     <p class="mv-empty__title">Automations are disabled</p>
-    <p class="mv-empty__body">Enable <code>[features] scheduling</code> and/or <code>[features] triggers</code> in config to use this page.</p>
+    <p class="mv-empty__body">Ask your administrator to turn on scheduling or triggers to use this page.</p>
+    <details style="margin-top: var(--space-2);">
+      <summary class="muted" style="cursor: pointer; font-size: var(--text-sm);">For administrators: enabling automations</summary>
+      <p class="mv-empty__body" style="margin-top: var(--space-2);">Enable <code>[features] scheduling</code> and/or <code>[features] triggers</code> in config to use this page.</p>
+    </details>
   </div>
   {% endif %}
 </div>
@@ -328,7 +345,7 @@
       var mode = sourceModes[sourceSel.value];
       if (mode === 'connect-and-trigger') {
         modeHint.textContent = 'This platform doesn’t expose its automation definitions, '
-          + 'so there’s nothing to fetch. Paste the automation as IR JSON above, or have '
+          + 'so there’s nothing to fetch. Paste the automation’s exported JSON above, or have '
           + 'it call an inbound webhook trigger instead — importing with a blank box will report that.';
         modeHint.hidden = false;
       } else {

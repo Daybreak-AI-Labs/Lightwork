@@ -1,12 +1,75 @@
 {% extends "base.html" %}
-{% block title %}tenants · Lightwork{% endblock %}
+{% block title %}Tenants · Lightwork{% endblock %}
 {% block content %}
   <h1 class="page-title">Tenants</h1>
   <p class="muted">
-    The provisioned-tenant roster (hosted control plane): status, plan, and
-    per-tenant daily spend quota. Manage with <code>maverick tenant …</code>;
-    rate usage into invoices with <code>maverick billing invoice &lt;tenant&gt;</code>.
+    Each tenant is an isolated workspace with its own data and daily spend
+    limit. This roster shows every tenant on this deployment — status, plan,
+    and spend limit.
   </p>
+  <details>
+    <summary class="muted" style="cursor: pointer; font-size: var(--text-sm);">For administrators: manage tenants from the command line</summary>
+    <p class="muted" style="font-size: var(--text-sm);">
+      Manage with <code>maverick tenant …</code>;
+      rate usage into invoices with <code>maverick billing invoice &lt;tenant&gt;</code>.
+    </p>
+  </details>
+
+  {% if is_admin %}
+  <h2>Create a workspace</h2>
+  <div class="panel">
+    <form id="tenant-add" style="display: grid; grid-template-columns: repeat(auto-fit, minmax(12rem, 1fr)); gap: var(--space-3); align-items: end;">
+      <label>Workspace ID <span class="muted">(letters, numbers, dashes)</span>
+        <input class="input" name="id" required maxlength="128" placeholder="acme-finance">
+      </label>
+      <label>Display name
+        <input class="input" name="display_name" maxlength="200" placeholder="Acme Finance">
+      </label>
+      <label>Plan
+        <select class="select" name="plan">
+          <option value="free" selected>Free</option>
+          <option value="pro">Pro</option>
+          <option value="enterprise">Enterprise</option>
+        </select>
+      </label>
+      <label>Daily spend limit ($, 0 = none)
+        <input class="input" name="max_daily_dollars" type="number" min="0" step="0.01" value="0">
+      </label>
+      <div><button type="submit" class="btn btn--primary">Create workspace</button></div>
+    </form>
+    <p id="tenant-add-msg" role="status" aria-live="polite" class="muted" style="font-size: var(--text-sm); margin: var(--space-2) 0 0;"></p>
+  </div>
+  <script>
+  (function () {
+    var form = document.getElementById('tenant-add');
+    var msg = document.getElementById('tenant-add-msg');
+    if (!form) return;
+    form.addEventListener('submit', async function (ev) {
+      ev.preventDefault();
+      var f = new FormData(form);
+      msg.textContent = 'Creating\u2026';
+      try {
+        var r = await fetch('/api/v1/admin/tenants', {
+          method: 'POST', headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            id: String(f.get('id') || '').trim(),
+            display_name: String(f.get('display_name') || '').trim(),
+            plan: String(f.get('plan') || 'free'),
+            max_daily_dollars: Number(f.get('max_daily_dollars') || 0),
+          }),
+        });
+        if (!r.ok) {
+          var j = await r.json().catch(function () { return {}; });
+          msg.textContent = j.detail || ('That did not work (error ' + r.status + ').');
+          return;
+        }
+        msg.textContent = 'Workspace created.';
+        setTimeout(function () { window.location.reload(); }, 350);
+      } catch (e) { msg.textContent = 'Connection lost \u2014 is the dashboard still running?'; }
+    });
+  })();
+  </script>
+  {% endif %}
 
   {% if not is_admin %}
     <div class="panel">
@@ -16,9 +79,13 @@
     </div>
   {% elif not tenants %}
     <div class="panel">
-      <p class="muted">No tenants provisioned. Create one with
-      <code>maverick tenant create &lt;id&gt;</code> — single-tenant and
+      <p class="muted">No tenants provisioned. Single-tenant and
       unprovisioned deployments run without a registry.</p>
+      <details>
+        <summary class="muted" style="cursor: pointer; font-size: var(--text-sm);">For administrators: create a tenant from the command line</summary>
+        <p class="muted" style="font-size: var(--text-sm);">Create one with
+        <code>maverick tenant create &lt;id&gt;</code>.</p>
+      </details>
     </div>
   {% else %}
     <div class="panel">

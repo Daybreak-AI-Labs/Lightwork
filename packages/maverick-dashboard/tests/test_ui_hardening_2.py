@@ -39,14 +39,14 @@ def test_panel_has_horizontal_overflow(monkeypatch, tmp_path):
 # ---------- page titles ----------
 
 @pytest.mark.parametrize("path,fragment", [
-    ("/goals", "goals · Lightwork"),
-    ("/facts", "facts · Lightwork"),
-    ("/tools", "tools · Lightwork"),
-    ("/spend", "spend · Lightwork"),
-    ("/plugins", "plugins · Lightwork"),
-    ("/channels", "channels · Lightwork"),
-    ("/audit", "audit log · Lightwork"),
-    ("/mcp", "MCP servers · Lightwork"),
+    ("/goals", "Goals · Lightwork"),
+    ("/facts", "Facts · Lightwork"),
+    ("/tools", "Tools · Lightwork"),
+    ("/spend", "Spend · Lightwork"),
+    ("/plugins", "Plugins · Lightwork"),
+    ("/channels", "Channels · Lightwork"),
+    ("/audit", "Audit log · Lightwork"),
+    ("/mcp", "Tool servers · Lightwork"),
 ])
 def test_page_titles_carry_app_name(monkeypatch, tmp_path, path, fragment):
     from maverick import world_model

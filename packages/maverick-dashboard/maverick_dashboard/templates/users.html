@@ -1,5 +1,5 @@
 {% extends "base.html" %}
-{% block title %}users · Lightwork{% endblock %}
+{% block title %}Users · Lightwork{% endblock %}
 {% block content %}
   <h1 class="page-title">Users &amp; roles</h1>
 
@@ -12,9 +12,9 @@
 
   {% if not auth_on %}
   <div class="panel" style="border-color: color-mix(in srgb, var(--warn) 40%, transparent);">
-    <p class="muted" style="margin: 0;"><strong>Authentication is off.</strong> Roles only take effect once an
-      auth mode (OIDC or reverse-proxy) is enabled — in local mode everyone on this machine is an
-      administrator. You can stage assignments here now; they apply when auth is turned on.</p>
+    <p class="muted" style="margin: 0;"><strong>Sign-in is off.</strong> Roles only take effect once your
+      company sign-in (SSO) is enabled — right now everyone on this machine is an
+      administrator. You can stage assignments here now; they apply when sign-in is turned on.</p>
   </div>
   {% endif %}
 
@@ -25,16 +25,21 @@
   </p>
 
   {% if bootstrap_admins %}
-  <h2>Bootstrap admins</h2>
+  <h2>Permanent administrators</h2>
   <div class="panel">
-    <p class="muted" style="margin-top: 0;">Pinned in config (<code>[dashboard] admins</code> /
-      <code>MAVERICK_DASHBOARD_ADMINS</code>) — always admin and not removable here, so you can't lock
-      yourself out.</p>
+    <p class="muted" style="margin-top: 0;">Set on the server by your administrator — always admin and
+      not removable here, so you can't lock yourself out.</p>
     {% for a in bootstrap_admins %}
     <div style="padding: var(--space-2) 0; border-top: 1px solid var(--hairline);">
       <code>{{ a }}</code> <span class="badge active">admin</span>
     </div>
     {% endfor %}
+    <details style="margin-top: var(--space-3);"><summary class="muted" style="cursor: pointer; font-size: var(--text-sm);">For administrators: how these are set</summary>
+      <p class="muted" style="font-size: var(--text-sm); margin-bottom: 0;">
+        Pinned in config (<code>[dashboard] admins</code> /
+        <code>MAVERICK_DASHBOARD_ADMINS</code>).
+      </p>
+    </details>
   </div>
   {% endif %}
 
@@ -80,7 +85,7 @@
       <button type="submit" class="btn btn--primary">Save user</button>
     </form>
     <p class="muted" style="margin-bottom: 0; font-size: var(--text-sm);">A principal is the user's identity
-      as <code>user:&lt;sub&gt;</code> (their OIDC subject) — the same string shown on their goals and in the
-      audit log.</p>
+      from your company sign-in (SSO), written as <code>user:&lt;sub&gt;</code> — the same string shown on
+      their goals and in the audit log.</p>
   </div>
 {% endblock %}

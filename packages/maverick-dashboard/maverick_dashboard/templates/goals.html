@@ -1,5 +1,5 @@
 {% extends "base.html" %}
-{% block title %}goals · Lightwork{% endblock %}
+{% block title %}Goals · Lightwork{% endblock %}
 {% block content %}
   <h1 class="page-title">Goals</h1>
   <p class="page-subtitle">Every run this deployment has executed — search, then open a plan, replay, or errors.</p>
@@ -30,8 +30,11 @@
     {% else %}
       <div class="mv-empty">
         <p class="mv-empty__title">No goals yet</p>
-        <p class="mv-empty__body">Start one from <a href="/chat">chat</a>, or from the command line:</p>
-        <pre style="background: var(--surface-sunken); color: var(--text); padding: var(--space-3) var(--space-4); border-radius: var(--radius-sm); display: inline-block; text-align: start; margin: var(--space-2) 0 0;">maverick start "Plan a 3-day trip to Lisbon under $1500"</pre>
+        <p class="mv-empty__body">Start your first piece of work from the <a href="/chat">Chat</a> page — describe what you need in plain English.</p>
+        <details style="margin-top: var(--space-2);">
+          <summary class="muted" style="cursor: pointer; font-size: var(--text-sm);">For developers: start a goal from the command line</summary>
+          <pre style="background: var(--surface-sunken); color: var(--text); padding: var(--space-3) var(--space-4); border-radius: var(--radius-sm); display: inline-block; text-align: start; margin: var(--space-2) 0 0;">maverick start "Plan a 3-day trip to Lisbon under $1500"</pre>
+        </details>
       </div>
     {% endif %}
   </div>

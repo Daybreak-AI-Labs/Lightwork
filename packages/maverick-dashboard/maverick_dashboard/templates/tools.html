@@ -1,19 +1,24 @@
 {% extends "base.html" %}
-{% block title %}tools · Lightwork{% endblock %}
+{% block title %}Tools · Lightwork{% endblock %}
 {% block content %}
   <h1 class="page-title">Tools</h1>
-  <p class="page-subtitle">Every tool registered in this deployment, after ACL and rate-limit filtering.</p>
+  <p class="page-subtitle">Everything your agents are able to use here, after your organization's allow and deny rules are applied.</p>
 
   <div class="panel">
     {% if error %}
-      <p style="color: var(--danger);">Could not build the tool registry: <code>{{ error }}</code></p>
+      <p style="color: var(--danger);">Could not build the tool list: <code>{{ error }}</code></p>
     {% elif tools %}
       <p class="muted">
-        {{ tools | length }} tool(s) available after ACL + rate-limit filtering.
-        Configure in <code>[security].allowed_tools</code> /
-        <code>[security].denied_tools</code> /
-        <code>[rate_limits]</code>.
+        {{ tools | length }} tool(s) available after your organization's allow,
+        deny and rate-limit rules are applied.
       </p>
+      <details style="margin-bottom: var(--space-3);"><summary class="muted" style="cursor: pointer; font-size: var(--text-sm);">For administrators: configuring these rules</summary>
+        <p class="muted" style="font-size: var(--text-sm); margin-bottom: 0;">
+          Configure in <code>[security].allowed_tools</code> /
+          <code>[security].denied_tools</code> /
+          <code>[rate_limits]</code>.
+        </p>
+      </details>
       <table>
         <thead><tr><th scope="col">name</th><th scope="col">description</th></tr></thead>
         <tbody>

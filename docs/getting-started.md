@@ -9,7 +9,7 @@ pipx install 'maverick-agent[installer]'
 maverick init
 ```
 
-If you need the no-prerequisite desktop bootstrap, download `deploy/desktop/install.sh` or `deploy/desktop/install.ps1` from a commit or release you trust, verify it, and set `MAVERICK_REF` to a full 40-character commit SHA. The scripts reject mutable branch/tag refs by default.
+If you need the no-prerequisite desktop bootstrap, download `deploy/desktop/install.sh` or `deploy/desktop/install.ps1` from a commit or release you trust, verify it, and set `MAVERICK_REF` to a full 40-character commit SHA. The scripts reject mutable branch/tag refs by default. Every `MAVERICK_*` variable can also be spelled `LIGHTWORK_*`.
 
 The PyPI package is `maverick-agent` (the `maverick` name is
 squatted). The `[installer]` extra pulls the wizard into the same

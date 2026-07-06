@@ -2450,7 +2450,7 @@ tested without spawning py-spy.
   replaces only the chosen kinds' spans and *honestly* reports
   `proven_clean: false` with the residual kinds left behind, instead of a
   false guarantee. Preview-only: nothing is stored server-side.
-- **Visual graph editor** (`/graph-editor` + `GET /api/v1/goal-tree` +
+- **Goal Map — visual graph editor** (`/graph-editor` + `GET /api/v1/goal-tree` +
   retitle/reparent/add-child endpoints): the goal forest as an interactive
   SVG node graph — server-side layered layout (pure, unit-tested), pan/
   zoom, status colors — with editing that refuses cycles and self-parenting
@@ -2463,8 +2463,8 @@ tested without spawning py-spy.
   budget block is enforced as the runner's real `max_dollars` (clamped to
   the server cap); channel/priority ride in the brief and say so.
 - **Embedded analytics web component**
-  (`/static/maverick-analytics.js` + `/embed-demo`): a self-contained
-  `<maverick-analytics>` custom element (Shadow DOM, no framework, no CDN)
+  (`/static/lightwork-analytics.js` + `/embed-demo`; the pre-rebrand `/static/maverick-analytics.js` URL and `<maverick-analytics>` tag still work): a self-contained
+  `<lightwork-analytics>` custom element (Shadow DOM, no framework, no CDN)
   fetching the real spend + goals endpoints and hand-drawing SVG
   sparklines/bars; same-origin/token limits documented in the JS header and
   on the demo page; errors render as HTTP status, never fake data.
@@ -2480,7 +2480,7 @@ tested without spawning py-spy.
   encoded vs manifest-only honestly with the exact argv), generates a real
   WebVTT captions track from the storyboard frames, and lists MP4s with
   native `<video controls>` + `<track>`; strict name-pattern media serving.
-- **3D plan tree** (`/plan-tree-3d`): raw WebGL (no three.js) point-sprite
+- **3D plan view** (`/plan-tree-3d`): raw WebGL (no three.js) point-sprite
   nodes + line edges over the same `goal-tree` endpoint, orbit/zoom,
   click-to-focus overlay; the text tree is always present in `<details>`
   as the accessible/no-WebGL representation, and the WebXR "Enter VR"

@@ -92,6 +92,8 @@ from .api_schemas import (
     TenantRoleIn,
     TriggerIn,
     TriggerOut,
+    TrustAgentIn,
+    TrustRevokeIn,
     WorkflowDraftIn,
     WorkflowRefineIn,
     WorkflowSaveIn,
@@ -326,9 +328,10 @@ def _reject_tenant_role_assignment_under_per_user_tenancy() -> None:
     if tenant_by_user_enabled():
         raise HTTPException(
             status_code=409,
-            detail="per-tenant roles do not apply under per-user tenancy "
-                   "(MAVERICK_TENANT_BY_USER): each user is isolated in their own "
-                   "tenant. Assign a global role via POST /users/set instead.",
+            detail="Tenant-level roles aren't available on this deployment — "
+                   "per-user tenancy is enabled, so each user already works in "
+                   "their own isolated tenant (MAVERICK_TENANT_BY_USER). Assign "
+                   "the user a global role instead (POST /users/set).",
         )
 
 
@@ -876,8 +879,9 @@ def _require_oauth_vault() -> None:
     if not oauth_vault.enabled():
         raise HTTPException(
             status_code=403,
-            detail=("the OAuth vault is off; enable [oauth] vault or set "
-                    "MAVERICK_OAUTH_VAULT=1 to connect accounts"),
+            detail=("Account connections aren't enabled yet — an administrator "
+                    "must turn on the OAuth vault first (enable [oauth] vault "
+                    "in the server configuration, or set MAVERICK_OAUTH_VAULT=1)."),
         )
 
 
@@ -994,8 +998,9 @@ def _require_connections() -> None:
     if not connections.enabled():
         raise HTTPException(
             status_code=403,
-            detail=("connections are off; enable [connections] in config.toml or "
-                    "set MAVERICK_CONNECTIONS=1"),
+            detail=("Connections aren't enabled on this server yet — an "
+                    "administrator can switch them on (enable [connections] in "
+                    "the server configuration, or set MAVERICK_CONNECTIONS=1)."),
         )
 
 
@@ -1095,8 +1100,9 @@ def _require_flows() -> None:
     if not flow.enabled():
         raise HTTPException(
             status_code=403,
-            detail=("the flow engine is off; enable [flows] in config.toml or set "
-                    "MAVERICK_FLOWS=1"),
+            detail=("Flows aren't enabled on this server yet — an administrator "
+                    "can switch on the flow engine (enable [flows] in the "
+                    "server configuration, or set MAVERICK_FLOWS=1)."),
         )
 
 
@@ -1850,9 +1856,10 @@ def _require_skill_install_opt_in() -> None:
         raise HTTPException(
             status_code=403,
             detail=(
-                "skill install via REST is disabled. Set "
-                "MAVERICK_ALLOW_SKILL_INSTALL=1 to opt in, or use "
-                "`maverick skill install` on the host."
+                "Installing skills from the dashboard is disabled on this "
+                "server — an administrator can opt in (set "
+                "MAVERICK_ALLOW_SKILL_INSTALL=1, or run "
+                "`maverick skill install` on the host)."
             ),
         )
 
@@ -3325,8 +3332,9 @@ def _require_event_triggers() -> None:
     if not enabled():
         raise HTTPException(
             status_code=403,
-            detail=("event triggers are off; enable [event_triggers] in "
-                    "config.toml or set MAVERICK_EVENT_TRIGGERS=1"),
+            detail=("Event triggers aren't enabled on this server yet — an "
+                    "administrator can switch them on (enable [event_triggers] "
+                    "in the server configuration, or set MAVERICK_EVENT_TRIGGERS=1)."),
         )
 
 
@@ -3392,8 +3400,11 @@ async def create_event_trigger(request: Request, payload: EventTriggerIn) -> Eve
         from maverick import flow as flow_mod
         from maverick.flow import store as flow_store
         if not flow_mod.enabled():
-            raise HTTPException(status_code=403,
-                                detail="the flow engine is off ([flows] / MAVERICK_FLOWS)")
+            raise HTTPException(
+                status_code=403,
+                detail=("Flows aren't enabled on this server yet — an "
+                        "administrator can switch on the flow engine ([flows] "
+                        "in the server configuration, or MAVERICK_FLOWS=1)."))
         if flow_store.load_flow(flow) is None:
             raise HTTPException(status_code=404, detail=f"flow not found: {flow!r}")
     else:
@@ -3523,8 +3534,9 @@ def _require_automation_import() -> None:
     if not enabled():
         raise HTTPException(
             status_code=403,
-            detail=("automation import is off; enable [automation_import] in "
-                    "config.toml or set MAVERICK_AUTOMATION_IMPORT=1"),
+            detail=("Automation import isn't enabled on this server yet — an "
+                    "administrator can switch it on (enable [automation_import] "
+                    "in the server configuration, or set MAVERICK_AUTOMATION_IMPORT=1)."),
         )
 
 
@@ -3965,6 +3977,54 @@ async def trust_agents(request: Request) -> dict:
     return trust_overview()
 
 
+@router.post("/trust/agents", status_code=201)
+async def trust_agent_register(request: Request, payload: TrustAgentIn) -> dict:
+    """Register or replace an external agent from the app (admin).
+
+    Writes the dashboard/CLI-managed overlay (``agent_trust.json``), never the
+    operator's config file; a managed entry with the same id overrides the
+    config-file one, so admins can also amend hand-edited entries here."""
+    require_permission(request, "admin")
+    from maverick.agent_trust import AgentTrustError, put_agent
+    try:
+        agent = put_agent(payload.model_dump())
+    except AgentTrustError as e:
+        raise HTTPException(status_code=400, detail=str(e)) from e
+    return {"ok": True, "id": agent.id}
+
+
+@router.post("/trust/agents/{agent_id}/revoke")
+async def trust_agent_revoke(request: Request, agent_id: str,
+                             payload: TrustRevokeIn) -> dict:
+    """Revoke (or restore) a managed external agent (admin). Entries defined in
+    the operator's config file can't be flipped here -- register the same id
+    from the app first to take it under management."""
+    require_permission(request, "admin")
+    from maverick.agent_trust import set_revoked
+    if not set_revoked(agent_id, payload.revoked):
+        raise HTTPException(
+            status_code=404,
+            detail="this agent is defined in the server's config file, not in "
+                   "the app-managed registry. Register the same id here to "
+                   "override it, or ask your administrator to edit the config.",
+        )
+    return {"ok": True, "id": agent_id, "revoked": payload.revoked}
+
+
+@router.delete("/trust/agents/{agent_id}", status_code=204)
+async def trust_agent_remove(request: Request, agent_id: str) -> None:
+    """Remove a managed external agent (admin). Config-file entries reappear
+    after their managed override is deleted; the same 404 rule applies."""
+    require_permission(request, "admin")
+    from maverick.agent_trust import remove_agent
+    if not remove_agent(agent_id):
+        raise HTTPException(
+            status_code=404,
+            detail="this agent is not in the app-managed registry (it may be "
+                   "defined in the server's config file).",
+        )
+
+
 @router.get("/discovery")
 async def discovery(request: Request) -> dict:
     """Inventory of governable surfaces: tools (by risk), MCP servers (with
@@ -4014,7 +4074,7 @@ async def compliance_packet_download(request: Request) -> Response:
         content=body,
         media_type="application/json",
         headers={
-            "Content-Disposition": 'attachment; filename="maverick-compliance-packet.json"',
+            "Content-Disposition": 'attachment; filename="lightwork-compliance-packet.json"',
         },
     )
 
@@ -4312,7 +4372,9 @@ async def run_fleet_agent(
     if not _any_provider_key_set():
         raise HTTPException(
             status_code=400,
-            detail="No LLM provider key configured (run 'maverick init').",
+            detail=("No AI provider is connected yet — an administrator needs "
+                    "to add a provider key before agents can run "
+                    "(run 'maverick init')."),
         )
     from maverick_dashboard.app import check_goal_rate_limit
     check_goal_rate_limit(request)
@@ -4502,7 +4564,7 @@ async def compliance_report_md(framework: str = "all") -> Response:
     from maverick.compliance import render_report_text
     framework, checks = _compliance_checks(framework)
     body = render_report_text(checks)
-    fname = f"maverick-compliance-{framework}.md"
+    fname = f"lightwork-compliance-{framework}.md"
     return Response(
         content=body,
         media_type="text/markdown",
@@ -4529,7 +4591,7 @@ async def compliance_report_csv(framework: str = "all") -> Response:
         writer.writerow([c.framework, c.control, c.regulation, c.status, c.detail])
     writer.writerow([])
     writer.writerow(["disclaimer", COMPLIANCE_DISCLAIMER])
-    fname = f"maverick-compliance-{framework}.csv"
+    fname = f"lightwork-compliance-{framework}.csv"
     return Response(
         content=buf.getvalue(),
         media_type="text/csv",
@@ -4966,10 +5028,11 @@ def _require_provider_for_drafting() -> None:
         raise HTTPException(
             status_code=400,
             detail=(
-                "No LLM provider configured. Run 'maverick init', export a "
-                "provider key (ANTHROPIC_API_KEY / OPENAI_API_KEY / "
-                "GEMINI_API_KEY), or set [providers.<name>] in config before "
-                "drafting a workflow."
+                "No AI provider is connected yet — drafting a workflow needs "
+                "one, and an administrator can set it up (run 'maverick init', "
+                "export a provider key such as ANTHROPIC_API_KEY / "
+                "OPENAI_API_KEY / GEMINI_API_KEY, or set [providers.<name>] "
+                "in the server configuration)."
             ),
         )
 

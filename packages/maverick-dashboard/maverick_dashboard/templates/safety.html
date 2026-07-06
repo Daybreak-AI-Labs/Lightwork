@@ -1,10 +1,10 @@
 {% extends "base.html" %}
-{% block title %}safety · Lightwork{% endblock %}
+{% block title %}Safety · Lightwork{% endblock %}
 {% block content %}
   <h1 class="page-title">Safety</h1>
   <p class="muted">
-    What Agent Shield blocked — denied inputs, tool calls, and outputs, read
-    from the local audit log (<code>shield_block</code> events).
+    What Agent Shield — the safety layer that screens what agents read, do,
+    and say — blocked, read from this server's audit log.
   </p>
 
   <div class="panel">
@@ -20,7 +20,7 @@
                style="padding: 0.4rem 0.5rem; background: var(--bg); border: 1px solid var(--border); border-radius: 4px; color: var(--text);" />
       </label>
       <button type="submit"
-              style="padding: 0.45rem 1rem; background: var(--panel); color: var(--text); border: 1px solid var(--border); border-radius: 4px; cursor: pointer;">
+              style="padding: 0.45rem 1rem; background: var(--surface-1); color: var(--text); border: 1px solid var(--border); border-radius: 4px; cursor: pointer;">
         load
       </button>
     </form>
@@ -73,10 +73,15 @@
       </table>
     {% else %}
       <p class="muted">
-        No shield blocks for the selected day — nothing was denied. Lightwork records
-        these as <code>shield_block</code> events in
-        <code>~/.maverick/audit/YYYY-MM-DD.ndjson</code>.
+        No shield blocks for the selected day — nothing was denied. Every
+        block is recorded in the audit log kept on this server.
       </p>
+      <details>
+        <summary class="muted" style="cursor: pointer; font-size: var(--text-sm);">For administrators: where blocks are recorded</summary>
+        <p class="muted" style="font-size: var(--text-sm);">Lightwork records
+        these as <code>shield_block</code> events in
+        <code>~/.maverick/audit/YYYY-MM-DD.ndjson</code>.</p>
+      </details>
     {% endif %}
   </div>
 {% endblock %}

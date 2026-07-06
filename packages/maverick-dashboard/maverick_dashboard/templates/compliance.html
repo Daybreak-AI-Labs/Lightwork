@@ -1,5 +1,5 @@
 {% extends "base.html" %}
-{% block title %}compliance · Lightwork{% endblock %}
+{% block title %}Compliance · Lightwork{% endblock %}
 {% block content %}
   <h1 class="page-title">Compliance</h1>
   <p class="muted">
@@ -21,7 +21,7 @@
         </select>
       </label>
       <button type="submit"
-              style="padding: 0.45rem 1rem; background: var(--panel); color: var(--text); border: 1px solid var(--border); border-radius: 4px; cursor: pointer;">
+              style="padding: 0.45rem 1rem; background: var(--surface-1); color: var(--text); border: 1px solid var(--border); border-radius: 4px; cursor: pointer;">
         filter
       </button>
       <span style="margin-left: auto; display: flex; gap: 0.75rem; align-items: center;">
@@ -79,11 +79,15 @@
   {% else %}
     <div class="panel">
       <p class="muted">
-        No compliance controls to report — the core compliance module is
-        unavailable or returned nothing for this filter. Run
-        <code>maverick compliance --framework {{ framework }}</code> from the CLI
-        to see control coverage.
+        No compliance controls to report — compliance reporting is
+        unavailable or returned nothing for this filter.
       </p>
+      <details>
+        <summary class="muted" style="cursor: pointer; font-size: var(--text-sm);">For administrators: generate this report from the command line</summary>
+        <p class="muted" style="font-size: var(--text-sm);">Run
+        <code>maverick compliance --framework {{ framework }}</code> to see
+        control coverage.</p>
+      </details>
     </div>
   {% endif %}
 

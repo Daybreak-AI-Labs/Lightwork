@@ -23,7 +23,7 @@ Local web dashboard for Lightwork. Reads `~/.maverick/world.db` and
   removed in the council security pass because it leaks via Referer
   and access logs.
 - Baseline browser security headers (X-Frame-Options DENY,
-  X-Content-Type-Options nosniff, Referrer-Policy no-referrer,
+  X-Content-Type-Options nosniff, Referrer-Policy same-origin,
   Cross-Origin-Opener-Policy same-origin) are applied to every response.
 - WorldModel is held as a singleton per DB path so each request
   doesn't reopen SQLite + reapply migrations.

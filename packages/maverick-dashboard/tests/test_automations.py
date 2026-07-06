@@ -164,7 +164,7 @@ def test_p2_shared_primitives_and_scrim(monkeypatch, tmp_path):
     t = _client().get("/automations").text
     assert "--scrim:" in t and "var(--scrim)" in t
     assert "window.mvCopy" in t
-    assert "mvConfirm('Arm the killswitch" in t
+    assert "mvConfirm('Stop all work" in t
 
 
 def test_p2_native_confirm_alert_migrated_to_primitives():

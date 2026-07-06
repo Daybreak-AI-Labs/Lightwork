@@ -163,6 +163,13 @@ def _dump(data: dict) -> str:
             for k in sorted(tbl):
                 lines.append(f"{k} = {'true' if tbl[k] else 'false'}")
             lines.append("")
+    # [webhooks] secret -- the signing key the Settings page manages. Written
+    # verbatim (never logged or re-displayed).
+    whk = data.get("webhooks") or {}
+    if whk.get("secret"):
+        lines.append("[webhooks]")
+        lines.append(f"secret = {_toml_str(whk['secret'])}")
+        lines.append("")
     for name in sorted(data.get("providers") or {}):
         pcfg = data["providers"][name] or {}
         fields = [(f, pcfg.get(f)) for f in ("api_key", "base_url") if pcfg.get(f)]
@@ -223,6 +230,22 @@ def clear_provider(name: str) -> None:
     with _locked():
         data = load_overlay()
         (data.get("providers") or {}).pop(name, None)
+        _write(data)
+
+
+def set_webhooks_secret(secret: str | None) -> None:
+    """Set (or clear, when empty) the inbound/outbound webhook signing secret
+    in the dashboard overlay -- the same [webhooks] secret knob operators set
+    in config; the MAVERICK_WEBHOOK_SECRET env var still takes precedence."""
+    with _locked():
+        data = load_overlay()
+        cleaned = (secret or "").strip()
+        if cleaned:
+            data.setdefault("webhooks", {})["secret"] = cleaned
+        else:
+            (data.get("webhooks") or {}).pop("secret", None)
+            if not data.get("webhooks"):
+                data.pop("webhooks", None)
         _write(data)
 
 

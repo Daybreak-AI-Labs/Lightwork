@@ -1,18 +1,23 @@
 {% extends "base.html" %}
-{% block title %}learned · Lightwork{% endblock %}
+{% block title %}Learned · Lightwork{% endblock %}
 {% block content %}
   <h1 class="page-title">Learned</h1>
   <p class="page-subtitle">What Lightwork taught itself — capabilities acquired mid-run and tools it generated.</p>
   <div class="panel">
     <p class="muted">
-      Capabilities the swarm acquired on demand mid-run (skills, tools,
-      apis) and the tools it generated for itself. Self-learning is off by
-      default; this is empty until it's enabled. Source of truth is the
-      ledger at <code>~/.maverick/learned.ndjson</code>.
+      Skills, tools, and integrations your workforce picked up on its own
+      while working, and the tools it built for itself. Self-learning is off
+      by default; this page is empty until it's enabled. Everything here comes
+      from the tamper-evident record kept on this server.
     </p>
+    <details>
+      <summary class="muted" style="cursor: pointer; font-size: var(--text-sm);">For administrators: where the record lives</summary>
+      <p class="muted" style="font-size: var(--text-sm);">Source of truth is
+      the ledger at <code>~/.maverick/learned.ndjson</code>.</p>
+    </details>
   </div>
 
-  <h2>learned capabilities</h2>
+  <h2>Learned capabilities</h2>
   <div class="panel">
     {% if learned %}
       <table>
@@ -41,18 +46,27 @@
     {% endif %}
   </div>
 
-  <h2>self-harness guidance</h2>
+  <h2>Self-harness guidance</h2>
   <div class="panel" id="harness-guidance">
     <p class="muted">
-      Model-specific operating guidance the self-harness loop learned from
-      recurring failures and recalls into that model's system prompt. Roll any
-      line back with <code>maverick self-harness forget</code>.
+      Working guidance Lightwork learned from its own recurring mistakes —
+      reminders it now gives itself before doing similar work. Any line can
+      be rolled back.
       {% if harness and not harness_enabled %}
         <strong>Self-harness is OFF</strong> — this guidance is stored but
-        <em>not</em> recalled into prompts until <code>[self_harness]
-        enable</code> is set.
+        <em>not</em> used until an administrator turns it on.
       {% endif %}
     </p>
+    <details>
+      <summary class="muted" style="cursor: pointer; font-size: var(--text-sm);">For administrators: manage from the command line</summary>
+      <p class="muted" style="font-size: var(--text-sm);">
+        Roll any line back with <code>maverick self-harness forget</code>;
+        review flagged conflicts with <code>maverick self-harness conflicts</code>;
+        graduate or pull probationary (canary) lines with
+        <code>maverick self-harness canary --review</code>. Recall is enabled by
+        setting <code>[self_harness] enable</code> in the server configuration.
+      </p>
+    </details>
     {% if transfer_memory and transfer_memory.pairs %}
       <p class="muted">transfer memory: {{ transfer_memory.pairs }} (target, line) pair{{ '' if transfer_memory.pairs == 1 else 's' }} judged{% if transfer_memory.last_judged_at %} · last {{ transfer_memory.last_judged_at | datetime }}{% endif %}</p>
     {% endif %}
@@ -73,13 +87,13 @@
       {% for h in harness %}
         <h3><code>{{ h.model_id }}</code> <span class="muted">({{ h.lines | length }} line{{ '' if h.lines | length == 1 else 's' }})</span></h3>
         {% if h.conflicts %}
-          <p class="badge blocked" style="display:inline-block">⚔ {{ h.conflicts | length }} possible conflict{{ '' if h.conflicts | length == 1 else 's' }} — review with <code>maverick self-harness conflicts</code></p>
+          <p class="badge blocked" style="display:inline-block">⚔ {{ h.conflicts | length }} possible conflict{{ '' if h.conflicts | length == 1 else 's' }} flagged for review</p>
         {% endif %}
         <ul>
         {% for rec in h.provenance %}
           <li>{{ rec.text }}
             {% if rec.domain %}<span class="badge" style="display:inline-block">{{ rec.domain }}</span>{% endif %}
-            {% if rec.canary %}<span class="badge info" style="display:inline-block" title="recalled but on probation — graduates or is pulled by `maverick self-harness canary --review`">🐤 canary</span>{% endif %}
+            {% if rec.canary %}<span class="badge info" style="display:inline-block" title="recently learned — on probation until it proves itself">🐤 canary</span>{% endif %}
             {% if rec.signature %}
               <br><span class="muted">why: {{ rec.signature }}{% if rec.held_out_delta is not none and rec.samples %} · held-out {{ '%+.3g' | format(rec.held_out_delta) }} over {{ rec.samples }} samples{% endif %}{% if rec.last_recalled_at %} · in use{% endif %}</span>
             {% endif %}
@@ -97,14 +111,18 @@
     {% endif %}
   </div>
 
-  <h2>generated tools</h2>
+  <h2>Generated tools</h2>
   <div class="panel" id="generated-tools">
     <p class="muted">
-      Auto-generated Python tool modules in
-      <code>~/.maverick/generated_tools/</code>. Remove pulls a
-      misbehaving tool — the file is deleted and it won't load on the next
-      run.
+      Tools Lightwork wrote for itself. Remove pulls a misbehaving tool —
+      it's deleted and won't load on the next run.
     </p>
+    <details>
+      <summary class="muted" style="cursor: pointer; font-size: var(--text-sm);">For administrators: where generated tools live</summary>
+      <p class="muted" style="font-size: var(--text-sm);">Auto-generated
+      Python tool modules are stored in
+      <code>~/.maverick/generated_tools/</code>.</p>
+    </details>
     {% if generated_tools %}
       <table>
         <thead><tr><th scope="col">file</th><th scope="col">action</th></tr></thead>
@@ -125,10 +143,10 @@
   <p id="gt-msg" role="status" aria-live="polite" class="muted" style="min-height: 1em;"></p>
 
   <style>
-    button.gt-remove { padding: 0.35rem 0.85rem; background: var(--panel); color: var(--danger); border: 1px solid var(--border); border-radius: 4px; cursor: pointer; font-size: 0.85rem; }
+    button.gt-remove { padding: 0.35rem 0.85rem; background: var(--surface-1); color: var(--danger); border: 1px solid var(--border); border-radius: 4px; cursor: pointer; font-size: 0.85rem; }
     button.gt-remove:hover { border-color: var(--danger); }
     button.gt-remove[disabled] { opacity: 0.6; cursor: not-allowed; }
-    button.pc-resolve { padding: 0.2rem 0.6rem; margin-left: 0.35rem; background: var(--panel); color: var(--fg); border: 1px solid var(--border); border-radius: 4px; cursor: pointer; font-size: 0.8rem; }
+    button.pc-resolve { padding: 0.2rem 0.6rem; margin-left: 0.35rem; background: var(--surface-1); color: var(--fg); border: 1px solid var(--border); border-radius: 4px; cursor: pointer; font-size: 0.8rem; }
     button.pc-resolve:hover { border-color: var(--accent); }
     button.pc-resolve[disabled] { opacity: 0.6; cursor: not-allowed; }
   </style>

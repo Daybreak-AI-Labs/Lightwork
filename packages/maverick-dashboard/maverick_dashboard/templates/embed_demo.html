@@ -1,40 +1,45 @@
 {% extends "base.html" %}
-{% block title %}embed analytics · Lightwork{% endblock %}
+{% block title %}Embedded analytics · Lightwork{% endblock %}
 {% block content %}
-<h2>embeddable analytics component</h2>
+<h1 class="page-title">Embedded analytics</h1>
+<p class="page-subtitle">Put a live snapshot of your workspace — spend, activity, and outcomes — on any internal page, like a team wiki or status hub.</p>
 <div class="panel">
   <p>
-    <code>&lt;maverick-analytics&gt;</code> is a self-contained web component
-    (no framework, no CDN) served by this dashboard at
-    <a href="/static/maverick-analytics.js"><code>/static/maverick-analytics.js</code></a>.
-    It reads the existing <code>/api/v1/spend</code> and
-    <code>/api/v1/goals</code> endpoints and draws its charts as inline SVG.
-    Below is a live instance running against this deployment:
+    This is the analytics card, running live against this workspace. It shows
+    total spend, the cost trend, and work by status, and it updates every time
+    the page loads:
   </p>
-  <maverick-analytics></maverick-analytics>
+  <lightwork-analytics></lightwork-analytics>
 </div>
 
-<h2>using it on another page</h2>
+<h2>Add it to another page</h2>
 <div class="panel">
-  <pre style="overflow-x: auto;">&lt;script src="http://YOUR-DASHBOARD:8765/static/maverick-analytics.js"&gt;&lt;/script&gt;
-&lt;maverick-analytics
+  <p>
+    Copy the snippet below into the page where you want the card to appear.
+    Replace <code>YOUR-DASHBOARD</code> with this dashboard's address, and ask
+    your administrator for an access token if your workspace requires sign-in:
+  </p>
+  <pre style="overflow-x: auto;">&lt;script src="http://YOUR-DASHBOARD:8765/static/lightwork-analytics.js"&gt;&lt;/script&gt;
+&lt;lightwork-analytics
     endpoint="http://YOUR-DASHBOARD:8765"
-    token="YOUR-MAVERICK_DASHBOARD_TOKEN"&gt;&lt;/maverick-analytics&gt;</pre>
-  <h3 style="font-size: 0.78rem; color: var(--muted); text-transform: uppercase; letter-spacing: 0.08em;">Honest limits</h3>
+    token="YOUR-ACCESS-TOKEN"&gt;&lt;/lightwork-analytics&gt;</pre>
+  <h3 style="font-size: 0.78rem; color: var(--muted); text-transform: uppercase; letter-spacing: 0.08em;">Good to know</h3>
   <ul class="muted" style="font-size: 0.9rem;">
-    <li><strong>Same-origin requirement.</strong> The dashboard sends no CORS
-      headers, so a page on a different origin cannot fetch its API — the
-      browser blocks it. Embed on a page served by the dashboard itself (like
-      this one) or behind the same reverse proxy / hostname.</li>
-    <li><strong>Token exposure.</strong> A <code>token</code> attribute is
-      visible to anyone who can read the embedding page's HTML, and it grants
-      full dashboard API access. Only embed on pages whose audience you would
-      trust with the dashboard itself. In no-token loopback mode, omit the
-      attribute entirely.</li>
-    <li><strong>Read-only data.</strong> The component only performs GETs
-      against existing endpoints; it renders exactly what they return and
-      shows the HTTP error when a fetch fails.</li>
+    <li><strong>Works on pages served alongside Lightwork.</strong> For
+      security, browsers only let the card load data from pages on the same
+      address as this dashboard (or behind the same reverse proxy). A page
+      hosted elsewhere will show a blocked-request error rather than your data.</li>
+    <li><strong>Treat the token like a password.</strong> Anyone who can view
+      the embedding page can see the token, and it grants the same access as
+      the dashboard itself. Only embed on pages whose audience you trust with
+      that access. If your workspace runs without sign-in, leave the token
+      out entirely.</li>
+    <li><strong>View-only.</strong> The card only reads data — it can't change
+      anything, and it shows the error plainly if a request fails.</li>
+    <li><strong>Already embedded somewhere?</strong> Snippets created before
+      the Lightwork rebrand (<code>&lt;maverick-analytics&gt;</code>) keep
+      working unchanged.</li>
   </ul>
 </div>
-<script src="/static/maverick-analytics.js"></script>
+<script src="/static/lightwork-analytics.js"></script>
 {% endblock %}

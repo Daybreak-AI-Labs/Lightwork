@@ -1,7 +1,11 @@
 {% extends "base.html" %}
-{% block title %}MCP servers · Lightwork{% endblock %}
+{% block title %}Tool servers · Lightwork{% endblock %}
 {% block content %}
-  <h1 class="page-title">MCP servers</h1>
+  <h1 class="page-title">Tool servers</h1>
+  <p class="page-subtitle">
+    External tool servers your agents can use — calendars, CRMs, file systems and
+    more — connected through the open MCP standard.
+  </p>
 
   {% if saved %}
   <div class="panel" role="status"
@@ -30,7 +34,7 @@
             <td class="muted" style="font-size: var(--text-sm);">{{ s.args | join(' ') if s.args else '-' }}</td>
             <td>
               {% if s.source == 'dashboard' %}<span class="badge active">dashboard</span>
-              {% else %}<span class="muted">config.toml</span>{% endif %}
+              {% else %}<span class="muted">server configuration</span>{% endif %}
             </td>
             <td>
               {% if s.removable %}
@@ -45,16 +49,16 @@
         </tbody>
       </table>
     {% else %}
-      <p class="muted" style="margin: 0;">No MCP servers configured yet. Add one below.</p>
+      <p class="muted" style="margin: 0;">No tool servers connected yet. Add one below.</p>
     {% endif %}
   </div>
 
-  <h2>Add a local (stdio) server</h2>
+  <h2>Add a server running on this machine</h2>
   <div class="panel">
     <p class="muted" style="margin-top: 0;">
-      Runs a local command that speaks MCP over stdio. Saved to the dashboard
-      overlay (<code>~/.maverick/runtime-overrides.toml</code>), never your
-      <code>config.toml</code>; effective on the next goal.
+      Runs a command on this machine that provides tools to your agents. Changes
+      made here take effect on the next goal and never modify your server's
+      configuration files.
     </p>
     <form method="post" action="/mcp/add"
           style="display: flex; flex-direction: column; gap: var(--space-3); max-width: 36rem;">
@@ -83,13 +87,21 @@
       </label>
       <p style="margin: 0;"><button type="submit" class="btn btn--primary">Add local server</button></p>
     </form>
+    <details style="margin-top: var(--space-3);"><summary class="muted" style="cursor: pointer; font-size: var(--text-sm);">For administrators: transport and storage</summary>
+      <p class="muted" style="font-size: var(--text-sm); margin-bottom: 0;">
+        Runs a local command that speaks MCP over stdio. Saved to the dashboard
+        overlay (<code>~/.maverick/runtime-overrides.toml</code>), never your
+        <code>config.toml</code>.
+      </p>
+    </details>
   </div>
 
-  <h2>Add a remote (HTTP) server</h2>
+  <h2>Add a server by web address (URL)</h2>
   <div class="panel">
     <p class="muted" style="margin-top: 0;">
-      Connects to a server over Streamable HTTP. Saved to the dashboard overlay,
-      never your <code>config.toml</code>; effective on the next goal.
+      Connects to a tool server hosted elsewhere, using its web address. Changes
+      made here take effect on the next goal and never modify your server's
+      configuration files.
     </p>
     <form method="post" action="/mcp/add"
           style="display: flex; flex-direction: column; gap: var(--space-3); max-width: 36rem;">
@@ -117,15 +129,27 @@
       </label>
       <p style="margin: 0;"><button type="submit" class="btn btn--primary">Add remote server</button></p>
     </form>
+    <details style="margin-top: var(--space-3);"><summary class="muted" style="cursor: pointer; font-size: var(--text-sm);">For administrators: transport and storage</summary>
+      <p class="muted" style="font-size: var(--text-sm); margin-bottom: 0;">
+        Connects to a server over Streamable HTTP. Saved to the dashboard overlay
+        (<code>~/.maverick/runtime-overrides.toml</code>), never your <code>config.toml</code>.
+      </p>
+    </details>
   </div>
 
   <div class="panel">
     <h3 style="margin-top: 0;">What is MCP?</h3>
     <p class="muted" style="margin-bottom: 0;">
-      Model Context Protocol servers expose tools (filesystem access, GitHub, databases, etc.)
-      over a JSON-RPC channel. Lightwork consumes them as <code>mcp_&lt;server&gt;__&lt;tool&gt;</code>.
-      See <a href="https://modelcontextprotocol.io" rel="noopener noreferrer" style="color: var(--brand);">modelcontextprotocol.io</a>
-      for the spec.
+      MCP (Model Context Protocol) is an open standard for connecting AI agents to
+      outside tools — file storage, GitHub, databases and more. Each server you add
+      here gives your agents a new set of tools they can use on your behalf.
+      Learn more at <a href="https://modelcontextprotocol.io" rel="noopener noreferrer" style="color: var(--brand);">modelcontextprotocol.io</a>.
     </p>
+    <details style="margin-top: var(--space-3);"><summary class="muted" style="cursor: pointer; font-size: var(--text-sm);">For administrators: tool naming</summary>
+      <p class="muted" style="font-size: var(--text-sm); margin-bottom: 0;">
+        Servers expose tools over a JSON-RPC channel; Lightwork consumes them as
+        <code>mcp_&lt;server&gt;__&lt;tool&gt;</code>.
+      </p>
+    </details>
   </div>
 {% endblock %}

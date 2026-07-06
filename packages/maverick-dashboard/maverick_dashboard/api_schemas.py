@@ -283,6 +283,28 @@ class OAuthExchangeIn(BaseModel):
     client_id: str | None = Field(default=None, max_length=512)
 
 
+class TrustAgentIn(BaseModel):
+    """Register (or replace) an external agent in the Agent Trust Plane's
+    dashboard-managed registry overlay (agent_trust.json) -- so an admin can
+    govern federation / A2A / MCP peers from the app without editing the
+    operator's config file. A managed entry with the same id overrides the
+    config-file one."""
+    id: str = Field(..., min_length=1, max_length=64)
+    pubkey: str = Field(default="", max_length=64)
+    direction: str = Field(default="both", pattern="^(inbound|outbound|both)$")
+    allow_tools: list[str] = Field(default_factory=list)
+    deny_tools: list[str] = Field(default_factory=list)
+    max_risk: str | None = Field(default=None, pattern="^(low|medium|high)$")
+    max_dollars: float | None = Field(default=None, ge=0)
+    max_wall_seconds: float | None = Field(default=None, ge=0)
+    data_scopes: list[str] = Field(default_factory=list)
+
+
+class TrustRevokeIn(BaseModel):
+    """Revoke (or restore) a managed external agent without deleting it."""
+    revoked: bool = True
+
+
 class ConnectionIn(BaseModel):
     """Create/replace a named SaaS connection: the connector it credentials, its
     base URL, and an API token (sealed at rest, never returned). ``name`` lets

@@ -1,5 +1,5 @@
 {% extends "base.html" %}
-{% block title %}settings · Lightwork{% endblock %}
+{% block title %}Settings · Lightwork{% endblock %}
 {% block content %}
   <h1 class="page-title">Settings</h1>
 
@@ -64,10 +64,9 @@
     <p class="muted" style="margin-top: 0;">
       Pick any configured provider's model (see Provider keys below) or type any model
       id — e.g. <code>openai:gpt-5.4</code>, <code>gemini:gemini-3.5-pro</code>,
-      <code>ollama:llama-4-maverick</code>. Saved to a dashboard-owned file
-      (<code>~/.maverick/runtime-overrides.toml</code>), never your <code>config.toml</code>;
-      a model pinned per role in config still wins. Admins extend the list via
-      <code>[models] catalog</code> in config.toml.
+      <code>ollama:llama-4-maverick</code>. Changes made here apply on the next run
+      and never modify your server's configuration files; a model your administrator
+      has pinned for a specific role still wins.
     </p>
     <datalist id="model-catalog">
       {% for spec, plabel in picker_options %}
@@ -86,7 +85,7 @@
         <span>Default model</span>
         <input class="ctl" type="text" name="model" list="model-catalog"
                value="{{ pinned_model or '' }}"
-               placeholder="Use config.toml / defaults — type or pick"
+               placeholder="Use server default — type or pick"
                aria-label="Default model" />
       </label>
       <button type="submit" class="btn btn--primary">Save model</button>
@@ -94,6 +93,13 @@
     {% if pinned_model %}
     <p class="muted" style="margin-bottom: 0;">Currently pinned: <code>{{ pinned_model }}</code></p>
     {% endif %}
+    <details style="margin-top: var(--space-3);"><summary class="muted" style="cursor: pointer; font-size: var(--text-sm);">For administrators: where this is saved</summary>
+      <p class="muted" style="font-size: var(--text-sm); margin-bottom: 0;">
+        Saved to a dashboard-owned file (<code>~/.maverick/runtime-overrides.toml</code>),
+        never your <code>config.toml</code>; a model pinned per role in config still wins.
+        Extend the picker list via <code>[models] catalog</code> in config.toml.
+      </p>
+    </details>
   </div>
 
   <h2>Per-role models</h2>
@@ -101,8 +107,8 @@
     <p class="muted" style="margin-top: 0;">
       Override the model for a specific agent role — the platform's strength is
       role-specialised models. "Use default" falls back to the default model above,
-      then <code>config.toml</code>, then the built-in default. The Effective column
-      is what each role will actually use.
+      then your server's configuration, then the built-in default. The Effective
+      column is what each role will actually use.
     </p>
     <form method="post" action="/settings/models/roles">
       <table>
@@ -134,11 +140,10 @@
     <p class="muted" style="margin-top: 0;">
       Restrict which models anyone may use. Check the ones you approve and save;
       the default and per-role pickers above are then limited to your selection,
-      and <strong>every agent is hard-capped to it</strong> — a model pinned in
-      <code>config.toml</code> or the environment cannot run outside this list.
-      Leave every box unchecked to allow all models. Saved to the dashboard
-      overlay (<code>~/.maverick/runtime-overrides.toml</code>), never
-      <code>config.toml</code>.
+      and <strong>every agent is hard-capped to it</strong> — even a model pinned
+      elsewhere by an administrator cannot run outside this list. Leave every box
+      unchecked to allow all models. Changes made here apply on the next run and
+      never modify your server's configuration files.
     </p>
     <form method="post" action="/settings/models/allowed">
       {% for spec, plabel in model_options %}
@@ -152,14 +157,21 @@
         {% if allowed_models %}<span class="muted" style="margin-left: var(--space-3);">{{ allowed_models|length }} model(s) allowed. Uncheck all and save to allow every model.</span>{% endif %}
       </p>
     </form>
+    <details style="margin-top: var(--space-3);"><summary class="muted" style="cursor: pointer; font-size: var(--text-sm);">For administrators: where this is saved</summary>
+      <p class="muted" style="font-size: var(--text-sm); margin-bottom: 0;">
+        Saved to the dashboard overlay (<code>~/.maverick/runtime-overrides.toml</code>),
+        never <code>config.toml</code>. A model pinned in <code>config.toml</code> or the
+        environment cannot run outside this list.
+      </p>
+    </details>
   </div>
 
   <h2>Spend cap</h2>
   <div class="panel">
     <p class="muted" style="margin-top: 0;">
-      The most a single goal may spend before Lightwork stops it. Saved to the
-      dashboard overlay (<code>~/.maverick/runtime-overrides.toml</code>), never
-      <code>config.toml</code>. Default is ${{ '%.2f'|format(default_budget) }} per goal.
+      The most a single goal may spend before Lightwork stops it. Changes made
+      here apply on the next run and never modify your server's configuration
+      files. Default is ${{ '%.2f'|format(default_budget) }} per goal.
     </p>
     <form method="post" action="/settings/budget"
           style="display: flex; flex-wrap: wrap; gap: var(--space-4); align-items: flex-end;">
@@ -176,15 +188,21 @@
       Current cap: <code>${{ '%.2f'|format(budget) }}</code> per goal. Clear the field and save to use the default.
     </p>
     {% endif %}
+    <details style="margin-top: var(--space-3);"><summary class="muted" style="cursor: pointer; font-size: var(--text-sm);">For administrators: where this is saved</summary>
+      <p class="muted" style="font-size: var(--text-sm); margin-bottom: 0;">
+        Saved to the dashboard overlay (<code>~/.maverick/runtime-overrides.toml</code>),
+        never <code>config.toml</code>.
+      </p>
+    </details>
   </div>
 
   <h2>Provider keys</h2>
   <div class="panel">
     <p class="muted" style="margin-top: 0;">
       Set an API key for at least one provider to run goals. Keys are stored
-      locally (chmod 600) in the dashboard overlay and resolved <em>before</em>
-      any environment variable — never shown again, never written to
-      <code>config.toml</code>. Leave a field blank to keep the current value.
+      securely on this server, are never shown again, and never modify your
+      server's configuration files. A key saved here takes precedence over one
+      set up by your administrator. Leave a field blank to keep the current value.
     </p>
     {% for p in providers %}
     <div style="display: flex; flex-wrap: wrap; gap: var(--space-3); align-items: flex-end; padding: var(--space-3) 0; border-top: 1px solid var(--hairline);">
@@ -192,7 +210,7 @@
         <div style="font-weight: var(--font-medium);">{{ p.label }}</div>
         <div class="muted" style="font-size: var(--text-sm);">
           {% if p.configured %}<span class="badge active">configured</span> via {{ p.via }}{% if p.key_hint %} · {{ p.key_hint }}{% endif %}
-          {% else %}not set{% if p.env_hint %} · or env <code>{{ p.env_hint }}</code>{% endif %}{% endif %}
+          {% else %}not set{% if p.env_hint %} · administrators can also set <code>{{ p.env_hint }}</code> on the server{% endif %}{% endif %}
         </div>
       </div>
       <form method="post" action="/settings/providers" style="display: flex; flex-wrap: wrap; gap: var(--space-2); align-items: flex-end;">
@@ -213,11 +231,44 @@
       {% endif %}
     </div>
     {% endfor %}
+    <details style="margin-top: var(--space-3);"><summary class="muted" style="cursor: pointer; font-size: var(--text-sm);">For administrators: where keys are stored</summary>
+      <p class="muted" style="font-size: var(--text-sm); margin-bottom: 0;">
+        Keys are stored locally (chmod 600) in the dashboard overlay and resolved
+        <em>before</em> any environment variable — never written to <code>config.toml</code>.
+      </p>
+    </details>
+  </div>
+
+  <h2>Automation webhooks</h2>
+  <div class="panel">
+    <p class="muted" style="margin-top: 0;">
+      The signing secret that lets other systems securely start your workflows
+      (used by webhook triggers on the <a href="/automations">Automations</a>
+      page). Status:
+      {% if webhook_configured %}<span class="badge active">configured</span>
+      {% else %}<span class="badge blocked">not set — webhook triggers won't fire</span>{% endif %}
+    </p>
+    <form method="post" action="/settings/webhooks" style="display: flex; gap: var(--space-2); align-items: end; flex-wrap: wrap;">
+      <label style="flex: 1 1 18rem;">New signing secret <span class="muted">(leave blank and save to clear)</span>
+        <input class="input" type="password" name="secret" autocomplete="new-password" placeholder="paste a long random value">
+      </label>
+      <button type="submit" class="btn btn--primary">Save secret</button>
+    </form>
+    <details style="margin-top: var(--space-3);">
+      <summary class="muted" style="cursor: pointer; font-size: var(--text-sm);">For administrators: where this is saved</summary>
+      <p class="muted" style="font-size: var(--text-sm); margin-bottom: 0;">
+        Stored as <code>[webhooks] secret</code> in the dashboard overlay
+        (<code>~/.maverick/dashboard-config.toml</code>, chmod 600), never your
+        <code>config.toml</code>. A <code>MAVERICK_WEBHOOK_SECRET</code>
+        environment variable still takes precedence. The value is never
+        displayed once saved.
+      </p>
+    </details>
   </div>
 
   <h2>Capabilities</h2>
   <div class="panel">
-    <p class="muted" style="margin-top: 0;">High-impact tools, off by default. Saved to the dashboard overlay; effective on the next run.</p>
+    <p class="muted" style="margin-top: 0;">High-impact tools, off by default. Changes made here apply on the next run and never modify your server's configuration files.</p>
     <form method="post" action="/settings/capabilities">
       {% for c in capabilities %}
       <label style="display: flex; align-items: center; justify-content: space-between; gap: var(--space-3); padding: var(--space-2) 0;">

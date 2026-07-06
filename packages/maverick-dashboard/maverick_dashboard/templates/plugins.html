@@ -1,5 +1,5 @@
 {% extends "base.html" %}
-{% block title %}plugins · Lightwork{% endblock %}
+{% block title %}Plugins · Lightwork{% endblock %}
 {% block content %}
   <h1 class="page-title">Plugins</h1>
 
@@ -11,15 +11,23 @@
 
   <div class="panel">
     <p class="muted">
-      Toggle plugins on or off here — this writes a dashboard-owned overlay
-      (<code>~/.maverick/runtime-overrides.toml</code>), never your <code>config.toml</code>.
+      Toggle plugins on or off here — changes apply from the next run and never
+      modify your server's configuration files.
       {% if allowlist_active %}
-        <code>[plugins].enabled</code> in config sets the baseline; toggles here override it.
+        Your server's configuration sets the baseline; toggles here override it.
       {% else %}
-        With no <code>[plugins].enabled</code> allowlist, pip-installed plugins load by default — disable any you don't want.
+        Installed plugins are on by default — turn off any you don't want.
       {% endif %}
       Enabling a plugin loads its code on the next goal.
     </p>
+    <details style="margin-top: var(--space-3);"><summary class="muted" style="cursor: pointer; font-size: var(--text-sm);">For administrators: how toggles are stored</summary>
+      <p class="muted" style="font-size: var(--text-sm); margin-bottom: 0;">
+        Toggles write a dashboard-owned overlay
+        (<code>~/.maverick/runtime-overrides.toml</code>), never your <code>config.toml</code>.
+        <code>[plugins].enabled</code> in config sets the baseline; with no
+        <code>[plugins].enabled</code> allowlist, pip-installed plugins load by default.
+      </p>
+    </details>
   </div>
 
   {% for label, items in groups.items() %}
@@ -48,7 +56,7 @@
                   <button type="submit" name="action" value="enable" class="btn btn--primary">Enable</button>
                   {% endif %}
                   {% if p.forced %}
-                  <button type="submit" name="action" value="reset" class="btn btn--ghost" title="Revert to config.toml">Reset</button>
+                  <button type="submit" name="action" value="reset" class="btn btn--ghost" title="Revert to the server default">Reset</button>
                   {% endif %}
                 </form>
               </td>
@@ -66,11 +74,11 @@
   <div class="panel">
     {% if installable %}
       <p class="muted">
-        Operator-approved plugin packages (<code>[plugins] installable</code>) —
-        one-click install, then enable from the list above.
+        Plugin packages approved by your administrator — one-click install, then
+        enable from the list above.
         {% if not install_enabled %}
-          <strong>Installing is off:</strong> set
-          <code>MAVERICK_ALLOW_PLUGIN_INSTALL=1</code> on the dashboard to enable the buttons.
+          <strong>In-app installation is off:</strong> ask your administrator to
+          enable it to use these buttons.
         {% endif %}
       </p>
       <table>
@@ -90,21 +98,34 @@
         </tbody>
       </table>
       <p class="muted" style="font-size: 0.85rem; margin-top: var(--space-3);">
-        Installs run <code>pip install</code> in the dashboard's environment and take
-        effect on the next goal. Only these pre-approved packages can be installed here —
-        never arbitrary input.
+        New plugins take effect on the next goal. Only these pre-approved packages
+        can be installed here — never arbitrary input.
       </p>
+      <details style="margin-top: var(--space-3);"><summary class="muted" style="cursor: pointer; font-size: var(--text-sm);">For administrators: how in-app installs work</summary>
+        <p class="muted" style="font-size: var(--text-sm); margin-bottom: 0;">
+          Installs run <code>pip install</code> in the dashboard's environment.
+          Approved packages are listed under <code>[plugins] installable</code>; the
+          buttons require <code>MAVERICK_ALLOW_PLUGIN_INSTALL=1</code> on the dashboard.
+        </p>
+      </details>
     {% else %}
       <p class="muted">
-        Plugins are Python packages declaring <code>maverick.tools</code>,
-        <code>maverick.channels</code>, <code>maverick.skills</code>, or
-        <code>maverick.personas</code> entry points. For one-click install from
-        here, list approved packages under <code>[plugins] installable</code> in
-        <code>~/.maverick/config.toml</code> and set
-        <code>MAVERICK_ALLOW_PLUGIN_INSTALL=1</code>. Or install on the host:
+        Plugins add new tools, channels, skills and personas. No plugins are
+        available for in-app installation yet — ask your administrator to enable
+        in-app installation and approve packages to use this page.
       </p>
-      <pre style="background: var(--bg); padding: 0.75rem; border-radius: 4px; overflow-x: auto;">pipx inject maverick-agent &lt;package-name&gt;</pre>
-      <p class="muted">Then enable it from the list above — no <code>config.toml</code> editing needed.</p>
+      <details style="margin-top: var(--space-3);"><summary class="muted" style="cursor: pointer; font-size: var(--text-sm);">For administrators: enabling plugin installs</summary>
+        <p class="muted" style="font-size: var(--text-sm);">
+          Plugins are Python packages declaring <code>maverick.tools</code>,
+          <code>maverick.channels</code>, <code>maverick.skills</code>, or
+          <code>maverick.personas</code> entry points. For one-click install from
+          here, list approved packages under <code>[plugins] installable</code> in
+          <code>~/.maverick/config.toml</code> and set
+          <code>MAVERICK_ALLOW_PLUGIN_INSTALL=1</code>. Or install on the host:
+        </p>
+        <pre style="background: var(--bg); padding: 0.75rem; border-radius: 4px; overflow-x: auto;">pipx inject maverick-agent &lt;package-name&gt;</pre>
+        <p class="muted" style="margin-bottom: 0;">Then enable it from the list above — no <code>config.toml</code> editing needed.</p>
+      </details>
     {% endif %}
   </div>
 {% endblock %}

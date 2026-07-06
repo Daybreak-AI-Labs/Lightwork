@@ -1,14 +1,14 @@
 {% extends "base.html" %}
-{% block title %}goal builder · Lightwork{% endblock %}
+{% block title %}Goal Builder · Lightwork{% endblock %}
 {% block content %}
 <style>
   .gb-wrap { display: grid; grid-template-columns: 220px minmax(0, 1fr); gap: 1rem; }
   @media (max-width: 900px) { .gb-wrap { grid-template-columns: 1fr; } }
-  .gb-palette button { display: block; width: 100%; margin-bottom: 0.5rem; padding: 0.6rem 0.8rem; background: var(--panel); color: var(--text); border: 1px dashed var(--border); border-radius: 6px; cursor: grab; text-align: start; }
+  .gb-palette button { display: block; width: 100%; margin-bottom: 0.5rem; padding: 0.6rem 0.8rem; background: var(--surface-1); color: var(--text); border: 1px dashed var(--border); border-radius: 6px; cursor: grab; text-align: start; }
   .gb-palette button:hover { border-color: var(--brand); }
   #gb-canvas { list-style: none; margin: 0; padding: 0.5rem; min-height: 220px; border: 2px dashed var(--border); border-radius: 8px; }
   #gb-canvas.dragover { border-color: var(--brand); }
-  #gb-canvas li { display: flex; gap: 0.5rem; align-items: center; background: var(--panel); border: 1px solid var(--border); border-radius: 6px; padding: 0.5rem 0.65rem; margin-bottom: 0.5rem; }
+  #gb-canvas li { display: flex; gap: 0.5rem; align-items: center; background: var(--surface-1); border: 1px solid var(--border); border-radius: 6px; padding: 0.5rem 0.65rem; margin-bottom: 0.5rem; }
   #gb-canvas li.placeholder { border-style: dashed; color: var(--muted); justify-content: center; cursor: default; }
   #gb-canvas .kind { font-size: 0.7rem; text-transform: uppercase; letter-spacing: 0.06em; color: var(--muted); min-width: 4.2rem; }
   #gb-canvas input, #gb-canvas select { flex: 1; min-width: 0; padding: 0.35rem 0.5rem; background: var(--bg); color: var(--text); border: 1px solid var(--border); border-radius: 4px; }
@@ -18,7 +18,8 @@
   .gb-field label { display: block; font-size: 0.8rem; color: var(--muted); margin: 0 0 0.25rem; }
   .gb-field input { width: 100%; padding: 0.55rem 0.7rem; background: var(--bg); color: var(--text); border: 1px solid var(--border); border-radius: 6px; }
 </style>
-<h2>drag-and-drop goal builder</h2>
+<h1 class="page-title">Goal builder</h1>
+<p class="page-subtitle">Assemble a goal from building blocks — steps, a budget, a channel, a priority — then run it.</p>
 <div class="panel">
   <div class="gb-field" style="margin-bottom: 1rem;">
     <label for="gb-title">Goal title</label>
@@ -27,7 +28,7 @@
   </div>
   <div class="gb-wrap">
     <div class="gb-palette" aria-label="Block palette">
-      <h3 style="margin: 0 0 0.5rem; font-size: 0.78rem; color: var(--muted); text-transform: uppercase; letter-spacing: 0.08em;">Blocks</h3>
+      <h2 style="margin: 0 0 0.5rem; font-size: 0.78rem; color: var(--muted); text-transform: uppercase; letter-spacing: 0.08em;">Blocks</h2>
       {# Each palette entry is BOTH a drag source (HTML5 DnD) and a plain
          button (keyboard / touch path) that appends the block. #}
       <button type="button" class="gb-add" data-kind="step" draggable="true">+ Step (checklist line)</button>
@@ -40,11 +41,11 @@
       </p>
     </div>
     <div>
-      <h3 style="margin: 0 0 0.5rem; font-size: 0.78rem; color: var(--muted); text-transform: uppercase; letter-spacing: 0.08em;">Canvas</h3>
+      <h2 style="margin: 0 0 0.5rem; font-size: 0.78rem; color: var(--muted); text-transform: uppercase; letter-spacing: 0.08em;">Canvas</h2>
       <ol id="gb-canvas" aria-label="Goal blocks (ordered)">
         <li class="placeholder">Drop blocks here</li>
       </ol>
-      <h3 style="margin: 1rem 0 0.5rem; font-size: 0.78rem; color: var(--muted); text-transform: uppercase; letter-spacing: 0.08em;">Assembled brief</h3>
+      <h2 style="margin: 1rem 0 0.5rem; font-size: 0.78rem; color: var(--muted); text-transform: uppercase; letter-spacing: 0.08em;">Assembled brief</h2>
       <pre id="gb-preview" aria-label="Assembled goal description preview"
            style="background: var(--bg); border: 1px solid var(--border); border-radius: 6px; padding: 0.75rem; min-height: 4rem; white-space: pre-wrap;">(add blocks to preview the brief)</pre>
       <button type="button" id="gb-submit"
@@ -54,10 +55,9 @@
       <p id="gb-error" role="alert" aria-live="assertive"
          style="display: none; margin: 0.75rem 0 0; color: var(--danger); font-size: 0.85rem;"></p>
       <p class="muted" style="font-size: 0.78rem;">
-        Steps become a markdown checklist in the goal description. The goals
-        table has no metadata columns, so channel and priority ride in the
-        brief for the agent to act on; the budget block additionally becomes
-        the run's real <code>max_dollars</code> cap.
+        Steps become a checklist in the goal description. Channel and priority
+        ride in the brief for the agent to act on; the budget block also
+        becomes the run's real spending cap.
       </p>
     </div>
   </div>

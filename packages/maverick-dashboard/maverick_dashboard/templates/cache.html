@@ -1,12 +1,12 @@
 {% extends "base.html" %}
-{% block title %}cache · Lightwork{% endblock %}
+{% block title %}Cache · Lightwork{% endblock %}
 {% block content %}
   <h1 class="page-title">Cache</h1>
 
   <div class="panel">
     <p class="muted">
-      In-process caches reduce duplicate file reads and repo-map work.
-      Purge if a tool result looks stale or you want to force a fresh
+      Lightwork keeps short-term caches so it doesn't redo the same reading
+      work. Purge if a result looks stale or you want to force a fresh
       read.
     </p>
     <table>
@@ -50,7 +50,7 @@
   <style>
     button.purge {
       padding: 0.35rem 0.85rem;
-      background: var(--panel);
+      background: var(--surface-1);
       color: var(--text);
       border: 1px solid var(--border);
       border-radius: 4px;
