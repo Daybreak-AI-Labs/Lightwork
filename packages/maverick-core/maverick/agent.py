@@ -177,7 +177,7 @@ def apply_role_overlays(base: str, *, role: str, domain_persona: str | None) -> 
 
 
 def apply_skill_overlays(
-    base: str, *, brief: str, use_skills: bool,
+    base: str, *, brief: str, use_skills: bool, depth: int = 0,
 ) -> tuple[str, list]:
     """Append relevant prior-run skills to ``base``; return ``(base, skills)``.
 
@@ -192,7 +192,11 @@ def apply_skill_overlays(
         return base, []
     try:
         from .skills import available_skills, relevant_skills, render_for_prompt
-        skills = relevant_skills(brief, available_skills())
+        # Deep workers get the single most relevant skill: overlays ride every
+        # node's system prompt, so a swarm re-pays the full render per child.
+        # The root keeps the standard top-3 recall.
+        skills = relevant_skills(brief, available_skills(),
+                                 max_n=3 if depth == 0 else 1)
         if skills:
             base = base + "\n\n" + render_for_prompt(skills)
             return base, list(skills)
@@ -960,7 +964,8 @@ class Agent:
         # renders + returns the recalled skills; the stats/ctx bookkeeping stays
         # here, all-or-nothing inside one fail-safe block, exactly as before.
         base, _skills = apply_skill_overlays(
-            base, brief=self.brief, use_skills=self.ctx.use_skills)
+            base, brief=self.brief, use_skills=self.ctx.use_skills,
+            depth=self.depth)
         if _skills:
             try:
                 from .skill import stats as skill_stats
