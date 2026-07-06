@@ -475,6 +475,10 @@ class ToolRegistry:
                 if store_cached is not None:
                     try:
                         store_cached(_tool, args, result)
+                        # A side-effectful tool may have changed what any
+                        # cached read returned; drop stale reads.
+                        from ..cache.tool import note_side_effect
+                        note_side_effect(_tool)
                     except Exception:  # pragma: no cover
                         pass
                 try:

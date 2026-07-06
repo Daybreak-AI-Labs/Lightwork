@@ -241,6 +241,23 @@ def reset() -> None:
         _warmed = False
 
 
+def note_side_effect(tool: Any) -> None:
+    """Invalidate cached reads after a side-effectful tool ran.
+
+    ``parallel_safe=False`` is the registry's side-effect signal — a write,
+    patch, shell command, or message send may have changed what any cached
+    read (read_file, repo_map, ...) returned, so the whole store is dropped.
+    Conservative over-invalidation is the price of correctness; the LRU
+    re-warms on the next reads. No-op when the cache is off/empty or the
+    tool is itself read-only."""
+    if not enabled() or cacheable(tool):
+        return
+    with _lock:
+        if not _store:
+            return
+    purge()
+
+
 def purge(tool_name: str | None = None) -> int:
     """Drop cached entries -- all of them, or just those for ``tool_name``.
 
@@ -262,5 +279,6 @@ def purge(tool_name: str | None = None) -> int:
 
 __all__ = [
     "enabled", "cacheable", "get_cached", "store_cached", "stats", "reset",
-    "snapshot_enabled", "save_snapshot", "warm_on_start",
+    "snapshot_enabled", "save_snapshot", "warm_on_start", "note_side_effect",
+    "purge",
 ]

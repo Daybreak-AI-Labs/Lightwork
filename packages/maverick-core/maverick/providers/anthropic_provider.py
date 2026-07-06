@@ -180,14 +180,38 @@ def _strip_message_cache_control(messages: list[dict]) -> list[dict]:
 # window and silently miss. When the history is long we add a SECOND, earlier
 # breakpoint within the window so the chain stays warm. System(1)+tools(1)+2
 # message marks = 4, exactly the hard breakpoint limit.
-_LONG_HISTORY_MSGS = 24
-_SECONDARY_MIN_GAP = 4
-_SECONDARY_MAX_GAP = 14
+#
+# All three thresholds are counted in CONTENT BLOCKS, the unit the lookback
+# actually uses — the old >=24-MESSAGE trigger missed block-heavy histories (a
+# few fan-out turns with many parallel tool_results blow past 20 blocks well
+# under 24 messages), leaving the chain cold exactly when tool output is
+# biggest and each turn re-wrote the full prefix.
+_LONG_HISTORY_BLOCKS = 16
+_SECONDARY_MIN_GAP_BLOCKS = 4
+_SECONDARY_MAX_GAP_BLOCKS = 16
+
+
+def _content_block_count(msg: dict) -> int:
+    """Content blocks one message contributes (str content counts as one)."""
+    c = msg.get("content")
+    return len(c) if isinstance(c, list) else 1
+
+
+def _msg_cache_ttl() -> str:
+    """TTL for the MESSAGE-tier breakpoints (system/tools keep
+    ``_default_cache_ttl``). The message breakpoint re-anchors to a new
+    position every turn, so its write surcharge is paid per turn — and the
+    re-read lands seconds later on the next turn. 5m (1.25x write) covers
+    that; 1h (2x write) buys nothing unless turns stall. An explicit
+    operator TTL (either env) still wins."""
+    explicit = (os.environ.get("MAVERICK_ANTHROPIC_MSG_CACHE_TTL")
+                or os.environ.get("MAVERICK_ANTHROPIC_CACHE_TTL"))
+    return explicit or "5m"
 
 
 def _mark_user_message(msg: dict) -> dict:
     """Return a copy of ``msg`` with cache_control on its last content block."""
-    cc = {"type": "ephemeral", "ttl": _default_cache_ttl()}
+    cc = {"type": "ephemeral", "ttl": _msg_cache_ttl()}
     content = msg.get("content")
     if isinstance(content, str):
         return {**msg, "content": [{"type": "text", "text": content, "cache_control": cc}]}
@@ -228,14 +252,20 @@ def _add_messages_cache_breakpoint(messages: list[dict]) -> list[dict]:
     new_messages[target_idx] = _mark_user_message(new_messages[target_idx])
 
     # Secondary breakpoint for long histories: an earlier user message inside
-    # the lookback window, so a single long turn can't push the chain out of it.
-    if len(messages) >= _LONG_HISTORY_MSGS:
-        lo = target_idx - _SECONDARY_MAX_GAP
-        hi = target_idx - _SECONDARY_MIN_GAP
-        for i in range(hi, max(lo, -1), -1):
-            if new_messages[i].get("role") == "user":
+    # the lookback window, so a single long turn can't push the chain out of
+    # it. Counted in blocks (the lookback's unit): pick the closest user
+    # message >= MIN_GAP blocks behind the primary, giving up past MAX_GAP.
+    total_blocks = sum(_content_block_count(m) for m in messages)
+    if total_blocks >= _LONG_HISTORY_BLOCKS:
+        gap = _content_block_count(messages[target_idx])
+        for i in range(target_idx - 1, -1, -1):
+            if gap > _SECONDARY_MAX_GAP_BLOCKS:
+                break
+            if (gap >= _SECONDARY_MIN_GAP_BLOCKS
+                    and new_messages[i].get("role") == "user"):
                 new_messages[i] = _mark_user_message(new_messages[i])
                 break
+            gap += _content_block_count(messages[i])
     return new_messages
 
 
@@ -633,6 +663,19 @@ class AnthropicClient:
         leaves the system+tools cache intact (it only invalidates the messages
         tier), so a thinking-free warm still serves a thinking-enabled real call.
         Never raises into the caller; returns whether the warm was sent."""
+        # Minimum-size gate: below the model's cacheable-prefix minimum the
+        # breakpoint is silently ignored, so the warm call would bill its
+        # full input at list price and write NOTHING — cost with zero
+        # benefit. chars/4 mirrors the preflight heuristic.
+        mid = model or self.DEFAULT_MODEL
+        est_tokens = (len(system or "")
+                      + sum(len(str(t)) for t in tools or [])) / 4
+        if est_tokens < _min_cache_tokens(mid):
+            log.debug(
+                "prompt-cache prewarm skipped: est %d tokens < %d minimum "
+                "for %s (nothing would be cached)",
+                est_tokens, _min_cache_tokens(mid), mid)
+            return False
         try:
             kwargs: dict[str, Any] = {
                 "model": model or self.DEFAULT_MODEL,
