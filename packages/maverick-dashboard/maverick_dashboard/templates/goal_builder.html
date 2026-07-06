@@ -4,11 +4,11 @@
 <style>
   .gb-wrap { display: grid; grid-template-columns: 220px minmax(0, 1fr); gap: 1rem; }
   @media (max-width: 900px) { .gb-wrap { grid-template-columns: 1fr; } }
-  .gb-palette button { display: block; width: 100%; margin-bottom: 0.5rem; padding: 0.6rem 0.8rem; background: var(--panel); color: var(--text); border: 1px dashed var(--border); border-radius: 6px; cursor: grab; text-align: start; }
+  .gb-palette button { display: block; width: 100%; margin-bottom: 0.5rem; padding: 0.6rem 0.8rem; background: var(--surface-1); color: var(--text); border: 1px dashed var(--border); border-radius: 6px; cursor: grab; text-align: start; }
   .gb-palette button:hover { border-color: var(--brand); }
   #gb-canvas { list-style: none; margin: 0; padding: 0.5rem; min-height: 220px; border: 2px dashed var(--border); border-radius: 8px; }
   #gb-canvas.dragover { border-color: var(--brand); }
-  #gb-canvas li { display: flex; gap: 0.5rem; align-items: center; background: var(--panel); border: 1px solid var(--border); border-radius: 6px; padding: 0.5rem 0.65rem; margin-bottom: 0.5rem; }
+  #gb-canvas li { display: flex; gap: 0.5rem; align-items: center; background: var(--surface-1); border: 1px solid var(--border); border-radius: 6px; padding: 0.5rem 0.65rem; margin-bottom: 0.5rem; }
   #gb-canvas li.placeholder { border-style: dashed; color: var(--muted); justify-content: center; cursor: default; }
   #gb-canvas .kind { font-size: 0.7rem; text-transform: uppercase; letter-spacing: 0.06em; color: var(--muted); min-width: 4.2rem; }
   #gb-canvas input, #gb-canvas select { flex: 1; min-width: 0; padding: 0.35rem 0.5rem; background: var(--bg); color: var(--text); border: 1px solid var(--border); border-radius: 4px; }

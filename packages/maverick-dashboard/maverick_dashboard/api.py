@@ -328,9 +328,10 @@ def _reject_tenant_role_assignment_under_per_user_tenancy() -> None:
     if tenant_by_user_enabled():
         raise HTTPException(
             status_code=409,
-            detail="per-tenant roles do not apply under per-user tenancy "
-                   "(MAVERICK_TENANT_BY_USER): each user is isolated in their own "
-                   "tenant. Assign a global role via POST /users/set instead.",
+            detail="Tenant-level roles aren't available on this deployment — "
+                   "per-user tenancy is enabled, so each user already works in "
+                   "their own isolated tenant (MAVERICK_TENANT_BY_USER). Assign "
+                   "the user a global role instead (POST /users/set).",
         )
 
 
@@ -878,8 +879,9 @@ def _require_oauth_vault() -> None:
     if not oauth_vault.enabled():
         raise HTTPException(
             status_code=403,
-            detail=("the OAuth vault is off; enable [oauth] vault or set "
-                    "MAVERICK_OAUTH_VAULT=1 to connect accounts"),
+            detail=("Account connections aren't enabled yet — an administrator "
+                    "must turn on the OAuth vault first (enable [oauth] vault "
+                    "in the server configuration, or set MAVERICK_OAUTH_VAULT=1)."),
         )
 
 
@@ -996,8 +998,9 @@ def _require_connections() -> None:
     if not connections.enabled():
         raise HTTPException(
             status_code=403,
-            detail=("connections are off; enable [connections] in config.toml or "
-                    "set MAVERICK_CONNECTIONS=1"),
+            detail=("Connections aren't enabled on this server yet — an "
+                    "administrator can switch them on (enable [connections] in "
+                    "the server configuration, or set MAVERICK_CONNECTIONS=1)."),
         )
 
 
@@ -1097,8 +1100,9 @@ def _require_flows() -> None:
     if not flow.enabled():
         raise HTTPException(
             status_code=403,
-            detail=("the flow engine is off; enable [flows] in config.toml or set "
-                    "MAVERICK_FLOWS=1"),
+            detail=("Flows aren't enabled on this server yet — an administrator "
+                    "can switch on the flow engine (enable [flows] in the "
+                    "server configuration, or set MAVERICK_FLOWS=1)."),
         )
 
 
@@ -1852,9 +1856,10 @@ def _require_skill_install_opt_in() -> None:
         raise HTTPException(
             status_code=403,
             detail=(
-                "skill install via REST is disabled. Set "
-                "MAVERICK_ALLOW_SKILL_INSTALL=1 to opt in, or use "
-                "`maverick skill install` on the host."
+                "Installing skills from the dashboard is disabled on this "
+                "server — an administrator can opt in (set "
+                "MAVERICK_ALLOW_SKILL_INSTALL=1, or run "
+                "`maverick skill install` on the host)."
             ),
         )
 
@@ -3327,8 +3332,9 @@ def _require_event_triggers() -> None:
     if not enabled():
         raise HTTPException(
             status_code=403,
-            detail=("event triggers are off; enable [event_triggers] in "
-                    "config.toml or set MAVERICK_EVENT_TRIGGERS=1"),
+            detail=("Event triggers aren't enabled on this server yet — an "
+                    "administrator can switch them on (enable [event_triggers] "
+                    "in the server configuration, or set MAVERICK_EVENT_TRIGGERS=1)."),
         )
 
 
@@ -3394,8 +3400,11 @@ async def create_event_trigger(request: Request, payload: EventTriggerIn) -> Eve
         from maverick import flow as flow_mod
         from maverick.flow import store as flow_store
         if not flow_mod.enabled():
-            raise HTTPException(status_code=403,
-                                detail="the flow engine is off ([flows] / MAVERICK_FLOWS)")
+            raise HTTPException(
+                status_code=403,
+                detail=("Flows aren't enabled on this server yet — an "
+                        "administrator can switch on the flow engine ([flows] "
+                        "in the server configuration, or MAVERICK_FLOWS=1)."))
         if flow_store.load_flow(flow) is None:
             raise HTTPException(status_code=404, detail=f"flow not found: {flow!r}")
     else:
@@ -3525,8 +3534,9 @@ def _require_automation_import() -> None:
     if not enabled():
         raise HTTPException(
             status_code=403,
-            detail=("automation import is off; enable [automation_import] in "
-                    "config.toml or set MAVERICK_AUTOMATION_IMPORT=1"),
+            detail=("Automation import isn't enabled on this server yet — an "
+                    "administrator can switch it on (enable [automation_import] "
+                    "in the server configuration, or set MAVERICK_AUTOMATION_IMPORT=1)."),
         )
 
 
@@ -4362,7 +4372,9 @@ async def run_fleet_agent(
     if not _any_provider_key_set():
         raise HTTPException(
             status_code=400,
-            detail="No LLM provider key configured (run 'maverick init').",
+            detail=("No AI provider is connected yet — an administrator needs "
+                    "to add a provider key before agents can run "
+                    "(run 'maverick init')."),
         )
     from maverick_dashboard.app import check_goal_rate_limit
     check_goal_rate_limit(request)
@@ -5016,10 +5028,11 @@ def _require_provider_for_drafting() -> None:
         raise HTTPException(
             status_code=400,
             detail=(
-                "No LLM provider configured. Run 'maverick init', export a "
-                "provider key (ANTHROPIC_API_KEY / OPENAI_API_KEY / "
-                "GEMINI_API_KEY), or set [providers.<name>] in config before "
-                "drafting a workflow."
+                "No AI provider is connected yet — drafting a workflow needs "
+                "one, and an administrator can set it up (run 'maverick init', "
+                "export a provider key such as ANTHROPIC_API_KEY / "
+                "OPENAI_API_KEY / GEMINI_API_KEY, or set [providers.<name>] "
+                "in the server configuration)."
             ),
         )
 

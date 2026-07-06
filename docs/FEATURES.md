@@ -2450,7 +2450,7 @@ tested without spawning py-spy.
   replaces only the chosen kinds' spans and *honestly* reports
   `proven_clean: false` with the residual kinds left behind, instead of a
   false guarantee. Preview-only: nothing is stored server-side.
-- **Visual graph editor** (`/graph-editor` + `GET /api/v1/goal-tree` +
+- **Goal Map — visual graph editor** (`/graph-editor` + `GET /api/v1/goal-tree` +
   retitle/reparent/add-child endpoints): the goal forest as an interactive
   SVG node graph — server-side layered layout (pure, unit-tested), pan/
   zoom, status colors — with editing that refuses cycles and self-parenting
@@ -2480,7 +2480,7 @@ tested without spawning py-spy.
   encoded vs manifest-only honestly with the exact argv), generates a real
   WebVTT captions track from the storyboard frames, and lists MP4s with
   native `<video controls>` + `<track>`; strict name-pattern media serving.
-- **3D plan tree** (`/plan-tree-3d`): raw WebGL (no three.js) point-sprite
+- **3D plan view** (`/plan-tree-3d`): raw WebGL (no three.js) point-sprite
   nodes + line edges over the same `goal-tree` endpoint, orbit/zoom,
   click-to-focus overlay; the text tree is always present in `<details>`
   as the accessible/no-WebGL representation, and the WebXR "Enter VR"

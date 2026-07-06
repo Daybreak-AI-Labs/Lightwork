@@ -566,8 +566,10 @@ async def _verify_maverick_webhook(request: Request) -> dict:
         raise HTTPException(
             status_code=401,
             detail=(
-                "inbound webhooks are not configured. Set a [webhooks] "
-                "secret in ~/.maverick/config.toml or MAVERICK_WEBHOOK_SECRET."
+                "Inbound webhooks aren't set up yet — an administrator must "
+                "configure a signing secret (a [webhooks] secret in the server "
+                "configuration, or the MAVERICK_WEBHOOK_SECRET environment "
+                "variable)."
             ),
         )
     signature = request.headers.get("X-Maverick-Signature") or ""
@@ -739,8 +741,11 @@ async def bearer_auth(request: Request, call_next):
             from maverick.client import client_binding_enforced
             if client_binding_enforced():
                 return JSONResponse(
-                    {"detail": "dashboard requires MAVERICK_DASHBOARD_TOKEN "
-                               "(or OIDC) under client binding / enterprise mode"},
+                    {"detail": "Sign-in is required on this deployment — an "
+                               "administrator must configure dashboard "
+                               "authentication for enterprise / client-binding "
+                               "mode (set MAVERICK_DASHBOARD_TOKEN, or enable "
+                               "OIDC)."},
                     status_code=401,
                 )
         except Exception:  # pragma: no cover - never break auth on a read error
@@ -775,7 +780,10 @@ async def bearer_auth(request: Request, call_next):
                 )
             return await call_next(request)
         return JSONResponse(
-            {"detail": "dashboard requires MAVERICK_DASHBOARD_TOKEN for non-loopback or proxied access"},
+            {"detail": "Remote access to this dashboard requires an access "
+                       "token — an administrator must configure one for "
+                       "non-loopback or proxied access (set "
+                       "MAVERICK_DASHBOARD_TOKEN)."},
             status_code=401,
         )
     auth = request.headers.get("authorization", "")
@@ -2189,7 +2197,9 @@ async def plugins_install(request: Request, name: str = Form(...)) -> RedirectRe
     if os.environ.get("MAVERICK_ALLOW_PLUGIN_INSTALL", "").lower() not in {"1", "true", "yes"}:
         raise HTTPException(
             status_code=403,
-            detail="plugin install via dashboard is disabled; set MAVERICK_ALLOW_PLUGIN_INSTALL=1",
+            detail=("Installing plugins from the dashboard is disabled on this "
+                    "server — an administrator can opt in (set "
+                    "MAVERICK_ALLOW_PLUGIN_INSTALL=1)."),
         )
     require_permission(request, "admin")
     from maverick.plugins import install_plugin
@@ -3366,6 +3376,7 @@ async def settings_page(request: Request, saved: str = "") -> HTMLResponse:
         "budget": "Spend cap updated.",
         "allowed": "Allowed models updated.",
         "providers": "Provider keys updated.",
+        "webhooks": "Webhook signing secret updated.",
         "capabilities": "Capabilities updated.",
         "features": "Features updated.",
     }.get(saved, "")
@@ -3380,6 +3391,7 @@ async def settings_page(request: Request, saved: str = "") -> HTMLResponse:
         "features": cfg_state["features"],
         "budget": budget_override(),
         "default_budget": DEFAULT_MAX_DOLLARS,
+        "webhook_configured": _webhook_secret_configured(),
         "saved": saved_msg,
     })
 
@@ -3470,6 +3482,31 @@ async def settings_set_allowed_models(request: Request) -> RedirectResponse:
     except ValueError as exc:
         raise HTTPException(status_code=400, detail="invalid model id") from exc
     return RedirectResponse("/settings?saved=allowed", status_code=303)
+
+
+def _webhook_secret_configured() -> bool:
+    """Whether inbound webhooks currently have a signing secret (env, config,
+    or the dashboard overlay) -- reported as a boolean only, never the value."""
+    try:
+        from maverick.webhooks import inbound_secret
+        return bool(inbound_secret())
+    except Exception:  # pragma: no cover -- never break the settings page
+        return False
+
+
+@app.post("/settings/webhooks")
+async def settings_set_webhooks(
+    request: Request,
+    secret: str = Form(""),
+) -> RedirectResponse:
+    """Set or clear the webhook signing secret from the settings page (admin).
+    Saved to the dashboard config overlay (0600), never the operator's config
+    file; an env-provided secret still wins."""
+    _require_same_origin(request)
+    require_permission(request, "admin")
+    from maverick_dashboard import settings_store
+    settings_store.set_webhooks_secret(secret)
+    return RedirectResponse("/settings?saved=webhooks", status_code=303)
 
 
 @app.post("/settings/providers")
@@ -3986,7 +4023,9 @@ async def webhook_gitlab(request: Request, bg: BackgroundTasks) -> JSONResponse:
     if not secret:
         raise HTTPException(
             status_code=401,
-            detail="GitLab webhook not configured. Set MAVERICK_GITLAB_WEBHOOK_TOKEN.",
+            detail=("GitLab webhooks aren't set up yet — an administrator must "
+                    "configure the shared webhook token (the "
+                    "MAVERICK_GITLAB_WEBHOOK_TOKEN environment variable)."),
         )
     if not verify_gitlab_token(request.headers.get("X-Gitlab-Token"), secret):
         raise HTTPException(status_code=403, detail="bad webhook token")
@@ -4012,7 +4051,9 @@ async def webhook_gitlab(request: Request, bg: BackgroundTasks) -> JSONResponse:
     if not _any_provider_key_set():
         raise HTTPException(
             status_code=400,
-            detail="No LLM provider key configured. Run 'maverick init'.",
+            detail=("No AI provider is connected yet — an administrator needs "
+                    "to add a provider key before goals can run "
+                    "(run 'maverick init')."),
         )
     check_goal_rate_limit(request, source="webhook:gitlab")
     w = _world()
@@ -4108,8 +4149,10 @@ async def _handle_issue_webhook(
         raise HTTPException(
             status_code=401,
             detail=(
-                "inbound webhooks are not configured. Set a [webhooks] "
-                "secret in ~/.maverick/config.toml or MAVERICK_WEBHOOK_SECRET."
+                "Inbound webhooks aren't set up yet — an administrator must "
+                "configure a signing secret (a [webhooks] secret in the server "
+                "configuration, or the MAVERICK_WEBHOOK_SECRET environment "
+                "variable)."
             ),
         )
     signature = request.headers.get(sig_header) or ""
@@ -4148,7 +4191,9 @@ async def _handle_issue_webhook(
     if not _any_provider_key_set():
         raise HTTPException(
             status_code=400,
-            detail="No LLM provider key configured. Run 'maverick init'.",
+            detail=("No AI provider is connected yet — an administrator needs "
+                    "to add a provider key before goals can run "
+                    "(run 'maverick init')."),
         )
     check_goal_rate_limit(request, source=f"webhook:{provider}")
     w = _world()

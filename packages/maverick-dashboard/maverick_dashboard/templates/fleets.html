@@ -31,9 +31,9 @@
       </div>
       <div style="display: flex; gap: 0.5rem; align-items: center; flex-wrap: wrap;">
         <button type="button" id="add-agent-row"
-                style="padding: 0.4rem 0.8rem; background: var(--panel); color: var(--text); border: 1px solid var(--border); border-radius: 4px; cursor: pointer;">+ add agent</button>
+                style="padding: 0.4rem 0.8rem; background: var(--surface-1); color: var(--text); border: 1px solid var(--border); border-radius: 4px; cursor: pointer;">+ add agent</button>
         <button type="submit"
-                style="padding: 0.45rem 1rem; background: var(--panel); color: var(--text); border: 1px solid var(--border); border-radius: 4px; cursor: pointer;">Create fleet</button>
+                style="padding: 0.45rem 1rem; background: var(--surface-1); color: var(--text); border: 1px solid var(--border); border-radius: 4px; cursor: pointer;">Create fleet</button>
         <span id="fleet-create-msg" class="muted" role="status" aria-live="polite" style="min-height: 1em;"></span>
       </div>
     </form>
@@ -47,7 +47,7 @@
           <span class="muted">owner: <code>{{ fleet.owner or '—' }}</code></span>
           <span class="muted">{{ fleet.agents | length }} agent(s)</span>
           <button class="fleet-remove-btn" data-fleet="{{ fleet.name }}"
-                  style="margin-left: auto; padding: 0.3rem 0.7rem; background: var(--panel); color: var(--text); border: 1px solid var(--border); border-radius: 4px; cursor: pointer; font-size: 0.8rem;">Remove</button>
+                  style="margin-left: auto; padding: 0.3rem 0.7rem; background: var(--surface-1); color: var(--text); border: 1px solid var(--border); border-radius: 4px; cursor: pointer; font-size: 0.8rem;">Remove</button>
         </div>
         {% if fleet.agents %}
           <table style="margin-top: 0.75rem;">
@@ -82,7 +82,7 @@
                      style="width: 100%; padding: 0.4rem 0.5rem; background: var(--bg); border: 1px solid var(--border); border-radius: 4px; color: var(--text);" />
             </label>
             <button type="submit"
-                    style="padding: 0.45rem 1rem; background: var(--panel); color: var(--text); border: 1px solid var(--border); border-radius: 4px; cursor: pointer;">Run</button>
+                    style="padding: 0.45rem 1rem; background: var(--surface-1); color: var(--text); border: 1px solid var(--border); border-radius: 4px; cursor: pointer;">Run</button>
             <span class="fleet-run-msg muted" role="status" aria-live="polite" style="min-height: 1em;"></span>
           </form>
         {% else %}

@@ -239,6 +239,33 @@
     </details>
   </div>
 
+  <h2>Automation webhooks</h2>
+  <div class="panel">
+    <p class="muted" style="margin-top: 0;">
+      The signing secret that lets other systems securely start your workflows
+      (used by webhook triggers on the <a href="/automations">Automations</a>
+      page). Status:
+      {% if webhook_configured %}<span class="badge active">configured</span>
+      {% else %}<span class="badge blocked">not set — webhook triggers won't fire</span>{% endif %}
+    </p>
+    <form method="post" action="/settings/webhooks" style="display: flex; gap: var(--space-2); align-items: end; flex-wrap: wrap;">
+      <label style="flex: 1 1 18rem;">New signing secret <span class="muted">(leave blank and save to clear)</span>
+        <input class="input" type="password" name="secret" autocomplete="new-password" placeholder="paste a long random value">
+      </label>
+      <button type="submit" class="btn btn--primary">Save secret</button>
+    </form>
+    <details style="margin-top: var(--space-3);">
+      <summary class="muted" style="cursor: pointer; font-size: var(--text-sm);">For administrators: where this is saved</summary>
+      <p class="muted" style="font-size: var(--text-sm); margin-bottom: 0;">
+        Stored as <code>[webhooks] secret</code> in the dashboard overlay
+        (<code>~/.maverick/dashboard-config.toml</code>, chmod 600), never your
+        <code>config.toml</code>. A <code>MAVERICK_WEBHOOK_SECRET</code>
+        environment variable still takes precedence. The value is never
+        displayed once saved.
+      </p>
+    </details>
+  </div>
+
   <h2>Capabilities</h2>
   <div class="panel">
     <p class="muted" style="margin-top: 0;">High-impact tools, off by default. Changes made here apply on the next run and never modify your server's configuration files.</p>

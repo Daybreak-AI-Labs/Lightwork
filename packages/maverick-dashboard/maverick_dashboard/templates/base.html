@@ -454,7 +454,7 @@
     .mv-toast--error { border-left: 4px solid var(--danger); }
     @keyframes mv-toast-in { from { opacity: 0; transform: translateY(8px); } to { opacity: 1; transform: none; } }
     @keyframes mv-rise { from { opacity: 0; transform: translateY(4px); } to { opacity: 1; transform: none; } }
-    .mv-confirm { border: 1px solid var(--border-strong); border-radius: var(--radius-lg); padding: 0; max-width: 28rem; width: calc(100vw - 2rem); background: var(--panel); color: var(--text); box-shadow: 0 12px 40px rgba(0,0,0,0.28); }
+    .mv-confirm { border: 1px solid var(--border-strong); border-radius: var(--radius-lg); padding: 0; max-width: 28rem; width: calc(100vw - 2rem); background: var(--surface-1); color: var(--text); box-shadow: 0 12px 40px rgba(0,0,0,0.28); }
     .mv-confirm::backdrop { background: var(--scrim); }
     .mv-confirm__body { padding: var(--space-5); }
     .mv-confirm__msg { margin: 0 0 var(--space-4); }
@@ -504,6 +504,14 @@
         --glass-soft: color-mix(in srgb, var(--panel) 54%, transparent);
         --glass-border: color-mix(in srgb, var(--text) 13%, transparent);
         --glass-edge: inset 0 1px 0 0 color-mix(in srgb, #ffffff 8%, transparent);
+        /* Glass propagates to every component through the derived surface
+           tokens, so page-local classes (chat composer, learning stats, flow
+           toolbars…) pick it up without per-template edits. The values sit
+           over the fixed ambient gradient below, so translucency alone reads
+           as glass even without a backdrop blur of its own. */
+        --surface-1: color-mix(in srgb, var(--panel) 72%, transparent);
+        --surface-2: color-mix(in srgb, color-mix(in srgb, var(--panel) 86%, var(--text) 14%) 62%, transparent);
+        --surface-sunken: color-mix(in srgb, var(--bg) 52%, transparent);
         background:
           radial-gradient(1100px 720px at 88% -12%, color-mix(in srgb, var(--brand) 15%, transparent), transparent 62%),
           radial-gradient(920px 640px at -12% 28%, color-mix(in srgb, var(--accent) 9%, transparent), transparent 58%),
@@ -553,7 +561,12 @@
         box-shadow: 0 2px 14px color-mix(in srgb, var(--brand) 38%, transparent);
       }
       @media (prefers-reduced-transparency: reduce) {
-        body:not(.theme-hicontrast) { background: var(--bg); }
+        body:not(.theme-hicontrast) {
+          background: var(--bg);
+          --surface-1: var(--panel);
+          --surface-2: color-mix(in srgb, var(--panel) 86%, var(--text) 14%);
+          --surface-sunken: color-mix(in srgb, var(--panel) 78%, var(--bg) 22%);
+        }
         body:not(.theme-hicontrast) .panel,
         body:not(.theme-hicontrast) .stat,
         body:not(.theme-hicontrast) .card,
