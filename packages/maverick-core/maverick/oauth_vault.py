@@ -149,6 +149,25 @@ class OAuthVault:
         with _lock:
             return sorted(self._load())
 
+    def status(self, provider: str, *, now: float | None = None) -> dict | None:
+        """A **token-free** health summary for ``provider`` -- safe to return to
+        a dashboard. ``None`` when nothing is stored. Never includes the access
+        or refresh token itself, only metadata: whether it's expired, its
+        absolute expiry, granted scopes, whether a refresh token is on file, and
+        when it was obtained."""
+        with _lock:
+            record = self._load().get(provider)
+        if record is None:
+            return None
+        return {
+            "provider": provider,
+            "expired": is_expired(record, now=now),
+            "expires_at": _expires_at_from(record),
+            "scope": record.get("scope"),
+            "has_refresh_token": bool(record.get("refresh_token")),
+            "obtained_at": record.get("obtained_at"),
+        }
+
     def access_token(
         self, provider: str, *,
         refresher: Callable[[dict], dict] | None = None,

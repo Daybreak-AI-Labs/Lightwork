@@ -713,7 +713,11 @@ here.
   summarised with a sha fingerprint and never echoed into context; full tokens
   seal into the per-tenant OAuth vault — `oauth_vault.py`, AES-256-GCM under the
   tenant DEK, refresh-aware via a caller-supplied refresher — when `[oauth] vault`
-  is on, else a 0600 MAVERICK_OAUTH_OUT file), `cost_curve` (per-provider cost
+  is on, else a 0600 MAVERICK_OAUTH_OUT file; the Automations page's **Connected
+  accounts** panel lists each provider's token-free health (expiry, granted
+  scope, auto-refresh) and a **Test** action that forces a live refresh through
+  the preset's token endpoint so a stale connection surfaces before a flow hits
+  it — `oauth_vault.status()` and `POST /oauth/{provider}/test`), `cost_curve` (per-provider cost
   model), `bench_track` (record benchmark scores + flag regressions), `teams`
   (Microsoft Teams webhook), `knowledge_graph` (extract/query/render
   subject-relation-object triples; no external graph DB), `cross_repo_deps`
