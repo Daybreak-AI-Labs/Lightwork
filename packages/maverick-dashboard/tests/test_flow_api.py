@@ -509,6 +509,24 @@ def test_flow_analytics_aggregates_runs(monkeypatch, tmp_path):
     assert demo["top_errors"][0]["error"].startswith("node 'b'")
 
 
+def test_flow_pages_render_under_strict_undefined(monkeypatch, tmp_path):
+    # A literal "{{key}}" in template TEXT (a CSS/JS comment, an example string)
+    # is a stray Jinja expression: harmless under the default Undefined (renders
+    # empty), but a 500 on any instance configured with StrictUndefined -- which
+    # is exactly what broke the flow designer in the field. Render the flow
+    # pages (and their included JS) under StrictUndefined so a stray "{{ }}"
+    # doc-literal fails HERE instead of on a hardened deployment.
+    from jinja2 import StrictUndefined
+    from maverick_dashboard.app import templates
+    _isolate(monkeypatch, tmp_path)
+    monkeypatch.setattr(templates.env, "undefined", StrictUndefined)
+    c = _client()
+    for path in ("/flows/designer", "/flows/designer/demo", "/workflow-builder",
+                 "/flows/analytics", "/connections", "/workflows",
+                 "/flows/f/runs/r"):
+        assert c.get(path).status_code == 200, path
+
+
 def test_flow_analytics_page_renders(monkeypatch, tmp_path):
     _isolate(monkeypatch, tmp_path)
     r = _client().get("/flows/analytics")
