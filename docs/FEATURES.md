@@ -569,7 +569,11 @@ here.
   (`FDCore.validateFlow`), and **data pills** — one-click `{{key}}` insertion
   from the outputs a node can actually see upstream (`FDCore.upstreamOutputs`).
   The action picker searches the FULL live tool registry
-  (`GET /flows/tools?q=`), a **⚡ Triggers panel** shows everything that starts
+  (`GET /flows/tools?q=`) and groups its ~3,300 connectors into coarse,
+  browsable **categories** (Communication, Dev & Code, CRM, Finance, … +
+  Other — `tool_categories.py`, keyword-classified) so a user can filter to one
+  area instead of scrolling a flat list; `?category=` narrows the registry and
+  `?q=`+`?category=` intersect, a **⚡ Triggers panel** shows everything that starts
   the flow (cron / webhooks / event triggers) in one place, a **gallery**
   (`GET /flows/gallery`) loads curated starter graphs onto the canvas, flows
   export/import as JSON files, and `?from_template=` opens any saved template

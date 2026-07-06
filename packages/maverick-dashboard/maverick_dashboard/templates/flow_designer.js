@@ -18,7 +18,9 @@
   var runState = {};    // node_id -> {status, outcome} from the last/live run
   var runCursor = null; // node a paused run is waiting on
   var flowInputs = [];  // declared manual-run inputs [{key,type,label,required,default}]
-  var toolCatalog = {}; // tool name -> {description, params[]} for the action picker
+  var toolCatalog = {}; // tool name -> {description, params[], category} for the action picker
+  var toolCategories = [];   // display-ordered category names from the server
+  var toolFilterCategory = ''; // '' = all; else browse one category in the picker
   var flowSchema = {};  // output key -> {type, keys[]} learned from real runs (nested pills)
   var selected = null;
   var multiSel = {};        // node id -> true when marquee-selected (group drag/delete)
@@ -585,10 +587,25 @@
       props.appendChild(withPills(n.id, field('Brief (what the agent should do)', briefTa), briefTa));
     }
     if (n.kind === 'action') {
-      var toolIn = input(n.tool, function (v) { n.tool = v; scheduleToolSearch(v); renderProps(); render(); }, 'search all connectors…');
+      // Category filter: browse one bucket instead of a 3k-name typeahead.
+      if (toolCategories.length) {
+        var catOpts = [{ v: '', t: 'All categories' }].concat(
+          toolCategories.map(function (c) { return { v: c, t: c }; }));
+        var catSel = select(toolFilterCategory, catOpts, function (v) {
+          toolFilterCategory = v;
+          loadTools('', v);   // browse the whole bucket (or curated set when cleared)
+        });
+        props.appendChild(field('Category', catSel));
+      }
+      var toolIn = input(n.tool, function (v) { n.tool = v; scheduleToolSearch(v); renderProps(); render(); },
+        toolFilterCategory ? ('search ' + toolFilterCategory + '…') : 'search all connectors…');
       toolIn.setAttribute('list', 'fd-tools');
       props.appendChild(field('Connector / tool', toolIn));
       var meta = toolCatalog[n.tool];
+      if (meta && meta.category) {
+        var tc = document.createElement('p'); tc.className = 'toolhint'; tc.style.opacity = '0.75';
+        tc.textContent = 'Category: ' + meta.category; props.appendChild(tc);
+      }
       if (meta && meta.description) { var th = document.createElement('p'); th.className = 'toolhint'; th.textContent = meta.description; props.appendChild(th); }
       // Known params -> a labeled input each (no raw JSON for a recognized tool)
       var known = (meta && meta.params) || [];
@@ -1443,26 +1460,38 @@
     if (box.classList.contains('on')) document.getElementById('fd-chat-input').focus();
   }
 
-  function loadTools(q) {
-    var url = '/api/v1/flows/tools' + (q ? ('?q=' + encodeURIComponent(q)) : '');
+  function loadTools(q, category) {
+    var params = [];
+    if (q) params.push('q=' + encodeURIComponent(q));
+    if (category) params.push('category=' + encodeURIComponent(category));
+    var url = '/api/v1/flows/tools' + (params.length ? ('?' + params.join('&')) : '');
     apiFetch(url).then(function (r) { return r.ok ? r.json() : { tools: [] }; })
       .then(function (j) {
+        if (j.categories && j.categories.length) toolCategories = j.categories;
         var dl = document.getElementById('fd-tools'); if (dl) dl.textContent = '';
         (j.tools || []).forEach(function (t) {
-          toolCatalog[t.name] = { description: t.description || '', params: t.params || [] };
-          if (dl) { var o = document.createElement('option'); o.value = t.name; if (t.description) o.label = t.description; dl.appendChild(o); }
+          toolCatalog[t.name] = { description: t.description || '', params: t.params || [], category: t.category || '' };
+          if (dl) {
+            var o = document.createElement('option'); o.value = t.name;
+            // Native datalist option label = category + description, so the
+            // typeahead itself shows which bucket each connector is in.
+            var lbl = t.category ? ('[' + t.category + '] ') : '';
+            if (t.description) o.label = lbl + t.description; else if (lbl) o.label = lbl;
+            dl.appendChild(o);
+          }
         });
         if (selected) renderProps();
       }).catch(function () {});
   }
-  // Debounced full-registry search: typing in an action node's tool field
-  // searches EVERY live connector (built-ins + enabled enterprise connectors),
-  // not just the curated starter set.
+  // Debounced registry search: typing in an action node's tool field searches
+  // EVERY live connector (built-ins + enabled enterprise connectors), narrowed
+  // to the chosen category when one is picked. An empty query with a category
+  // browses that whole bucket; an empty query with no category = curated set.
   var toolSearchTimer = null;
   function scheduleToolSearch(q) {
     if (toolSearchTimer) clearTimeout(toolSearchTimer);
     toolSearchTimer = setTimeout(function () {
-      loadTools((q || '').trim().length >= 2 ? q.trim() : '');
+      loadTools((q || '').trim().length >= 2 ? q.trim() : '', toolFilterCategory);
     }, 250);
   }
 

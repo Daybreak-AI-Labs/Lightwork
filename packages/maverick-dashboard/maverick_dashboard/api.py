@@ -1119,13 +1119,15 @@ def _live_tool_index() -> list[dict]:
         live = base_registry(_world(), LocalBackend(), goal_id=None).all()
     except Exception:  # pragma: no cover -- registry build varies by env
         live = []
+    from .tool_categories import categorize
     idx = []
     for t in live:
         params = []
         if isinstance(t.input_schema, dict):
             params = list((t.input_schema.get("properties") or {}).keys())[:12]
-        idx.append({"name": t.name, "description": (t.description or "")[:200],
-                    "params": params})
+        desc = (t.description or "")[:200]
+        idx.append({"name": t.name, "description": desc, "params": params,
+                    "category": categorize(t.name, desc)})
     with _TOOL_INDEX_LOCK:
         if _TOOL_INDEX_CACHE is None:
             _TOOL_INDEX_CACHE = idx
@@ -1137,13 +1139,15 @@ def _flow_tool_catalog() -> list[dict]:
     drafter's grounding: each tool's name, one-line description, and param names
     (from its input schema). Best-effort -- a tool absent from the live registry
     still appears by name so the picker/drafter can offer it."""
+    from .tool_categories import categorize
     by_name = {t["name"]: t for t in _live_tool_index()}
     out = []
     for name in _FLOW_DRAFT_TOOLS:
         t = by_name.get(name)
-        out.append({"name": name,
-                    "description": (t["description"] if t is not None else ""),
-                    "params": (t["params"] if t is not None else [])})
+        desc = t["description"] if t is not None else ""
+        out.append({"name": name, "description": desc,
+                    "params": (t["params"] if t is not None else []),
+                    "category": (t["category"] if t is not None else categorize(name, desc))})
     return out
 
 
@@ -1393,28 +1397,44 @@ async def retry_flow_run_endpoint(request: Request, run_id: str,
 
 
 @router.get("/flows/tools")
-async def flow_tools_endpoint(request: Request, q: str = "") -> dict:
-    """The connector/action catalog for the designer's searchable tool picker:
-    name, description, and param names. Without ``q``: the curated starter set.
-    With ``q``: a substring search over the FULL live tool registry (built-ins +
-    every enabled connector), so the picker reaches everything the action node
-    can actually call -- not just the curated list. Declared before
-    ``/flows/{flow_id}`` so the literal ``tools`` path isn't captured as a
+async def flow_tools_endpoint(request: Request, q: str = "", category: str = "") -> dict:
+    """The connector/action catalog for the designer's categorized, searchable
+    tool picker: name, description, param names, and a coarse ``category``.
+
+    - no ``q``, no ``category``: the curated starter set.
+    - ``category`` (no ``q``): every live tool in that bucket (built-ins + every
+      enabled connector), so a user can browse one area instead of a 3k-name list.
+    - ``q``: a substring search over the FULL live registry, optionally narrowed
+      to ``category``.
+
+    Every response also carries ``categories`` (the display-ordered bucket names)
+    so the picker can offer the filter without a second round-trip. Declared
+    before ``/flows/{flow_id}`` so the literal ``tools`` path isn't captured as a
     flow id."""
     require_permission(request, "operate")
     _require_flows()
+    from .tool_categories import categories as _cat_names
     q = q.strip().lower()[:80]
-    if not q:
-        return {"tools": await run_in_threadpool(_flow_tool_catalog)}
+    category = category.strip()[:40]
+    cats = _cat_names()
 
-    def _search():
-        out = [t for t in _live_tool_index()
-               if q in f"{t['name']} {t['description']}".lower()]
-        # name-prefix matches first, then name matches, then description-only
-        out.sort(key=lambda t: (not t["name"].lower().startswith(q),
-                                q not in t["name"].lower(), t["name"]))
+    if not q and not category:
+        return {"tools": await run_in_threadpool(_flow_tool_catalog),
+                "categories": cats}
+
+    def _filter():
+        out = _live_tool_index()
+        if category:
+            out = [t for t in out if t.get("category") == category]
+        if q:
+            out = [t for t in out if q in f"{t['name']} {t['description']}".lower()]
+            # name-prefix matches first, then name matches, then description-only
+            out = sorted(out, key=lambda t: (not t["name"].lower().startswith(q),
+                                             q not in t["name"].lower(), t["name"]))
+        else:
+            out = sorted(out, key=lambda t: t["name"])
         return out[:50]
-    return {"tools": await run_in_threadpool(_search)}
+    return {"tools": await run_in_threadpool(_filter), "categories": cats}
 
 
 # Curated starter flows for the designer's gallery: small, runnable graphs a
