@@ -472,6 +472,21 @@ _FACTS_TRUST_MIGRATION: list[str] = [
     "ALTER TABLE facts ADD COLUMN IF NOT EXISTS sensitivity TEXT NOT NULL DEFAULT 'internal';",
 ]
 
+# v25 fleet learning store (docs/proposals/fleet-learning-state.md, phase 1):
+# the self-harness learning stores as shared tables so a multi-host fleet
+# learns as one. Additive CREATE IF NOT EXISTS -- passes the
+# migration-governance additive-only gate.
+_HARNESS_STORE_MIGRATION: list[str] = [
+    "CREATE TABLE IF NOT EXISTS harness_addenda ("
+    " key TEXT PRIMARY KEY, block TEXT NOT NULL,"
+    " updated_at DOUBLE PRECISION NOT NULL);",
+    "CREATE TABLE IF NOT EXISTS harness_line_meta ("
+    " line_id TEXT PRIMARY KEY, record TEXT NOT NULL,"
+    " updated_at DOUBLE PRECISION NOT NULL);",
+    "CREATE TABLE IF NOT EXISTS harness_transfer_tried ("
+    " line_id TEXT PRIMARY KEY, ts DOUBLE PRECISION NOT NULL);",
+]
+
 MIGRATIONS: list[tuple[int, list[str]]] = [
     (1, SCHEMA),
     (10, _TENANT_MIGRATION),
@@ -487,6 +502,7 @@ MIGRATIONS: list[tuple[int, list[str]]] = [
     (22, _HALT_MIGRATION),
     (23, _PROVIDER_SPEND_MIGRATION),
     (24, _FACTS_TRUST_MIGRATION),
+    (25, _HARNESS_STORE_MIGRATION),
 ]
 
 # Highest migration version = the reported schema version.

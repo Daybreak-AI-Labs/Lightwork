@@ -1021,44 +1021,43 @@
         rootFlow.id = body.id; say('Saved ✓'); if (cb) cb();
       }).catch(function () { say('Save failed', true); });
   }
-  function collectInputs() {
-    // Prompt for each DECLARED input (a typed manual-run form); returns the data
-    // object, or null if the operator cancelled. The server validates + coerces.
-    var data = {};
-    for (var i = 0; i < flowInputs.length; i++) {
-      var spec = flowInputs[i]; var key = (spec.key || '').trim();
-      if (!key) continue;
-      var label = (spec.label || key) + ' [' + (spec.type || 'text') + (spec.required ? ', required' : '') + ']';
-      var def = (spec.default != null ? String(spec.default) : '');
-      var v = window.prompt(label, def);
-      if (v === null) return null;                 // cancelled
-      v = v.trim();
-      if (!v && spec.required && !('default' in spec)) { say('“' + key + '” is required.', true); return null; }
-      if (v) data[key] = v;
-    }
-    return data;
+  function inputFields() {
+    // The declared manual-run inputs as an mvForm field spec.
+    return flowInputs.filter(function (s) { return (s.key || '').trim(); }).map(function (s) {
+      return { key: s.key, label: s.label || s.key, type: (s.type || 'text'),
+               required: !!s.required, default: (s.default != null ? s.default : undefined) };
+    });
   }
   function run(dryRun) {
     var data = {};
     var raw = document.getElementById('fd-sample').value.trim();
     if (raw) { try { data = JSON.parse(raw); } catch (e) { say('Sample input is not valid JSON.', true); return; } }
-    if (!dryRun && flowInputs.length) {
-      var collected = collectInputs();
-      if (collected === null) { say('Run cancelled.'); return; }
-      Object.keys(collected).forEach(function (k) { data[k] = collected[k]; });   // declared inputs win
+    function proceed() {
+      save(function () {
+        apiFetch('/api/v1/flows/' + encodeURIComponent(rootFlow.id) + '/run', { method: 'POST', body: JSON.stringify({ data: data, dry_run: !!dryRun }) })
+          .then(function (r) { return r.json(); })
+          .then(function (j) {
+            if (!j.run_id) { say('Run started'); return; }
+            runState = {}; runCursor = null; lastRunId = j.run_id;
+            say((dryRun ? '🧪 Dry run ' : 'Running ') + '(run ' + j.run_id.slice(0, 8) + '…)');
+            document.getElementById('fd-legend').classList.add('on');
+            watchRun(j.run_id);
+          }).catch(function () { say('Run failed', true); });
+      });
     }
-    if (!dryRun && !window.confirm('Run for real? This creates real goals and calls real connectors.')) return;
-    save(function () {
-      apiFetch('/api/v1/flows/' + encodeURIComponent(rootFlow.id) + '/run', { method: 'POST', body: JSON.stringify({ data: data, dry_run: !!dryRun }) })
-        .then(function (r) { return r.json(); })
-        .then(function (j) {
-          if (!j.run_id) { say('Run started'); return; }
-          runState = {}; runCursor = null; lastRunId = j.run_id;
-          say((dryRun ? '🧪 Dry run ' : 'Running ') + '(run ' + j.run_id.slice(0, 8) + '…)');
-          document.getElementById('fd-legend').classList.add('on');
-          watchRun(j.run_id);
-        }).catch(function () { say('Run failed', true); });
-    });
+    var fields = inputFields();
+    if (fields.length) {   // the typed-input form doubles as the run confirmation
+      window.mvForm((dryRun ? 'Dry run' : 'Run') + ' “' + (rootFlow.name || rootFlow.id || 'flow') + '”',
+        fields, { okText: dryRun ? 'Dry run' : 'Run for real' }).then(function (vals) {
+        if (vals === null) { say('Run cancelled.'); return; }
+        Object.keys(vals).forEach(function (k) { data[k] = vals[k]; });   // declared inputs win over sample
+        proceed();
+      });
+      return;
+    }
+    if (dryRun) { proceed(); return; }
+    window.mvConfirm('Run for real? This creates real goals and calls real connectors.', { okText: 'Run for real' })
+      .then(function (ok) { if (ok) proceed(); });
   }
   function runUrl(runId) {
     return '/flows/' + encodeURIComponent(rootFlow.id) + '/runs/' + encodeURIComponent(runId);

@@ -459,6 +459,15 @@
     .mv-confirm__body { padding: var(--space-5); }
     .mv-confirm__msg { margin: 0 0 var(--space-4); }
     .mv-confirm__row { display: flex; justify-content: flex-end; gap: var(--space-2); }
+    /* Reusable form modal (window.mvForm): a titled field list in a native dialog. */
+    .mv-form { max-width: 32rem; }
+    .mv-form__title { margin: 0 0 var(--space-3); font-size: var(--text-lg); }
+    .mv-form__field { margin-bottom: var(--space-3); }
+    .mv-form__field > label { display: block; font-size: var(--text-sm); margin-bottom: var(--space-1); }
+    .mv-form__field input.input, .mv-form__field select { width: 100%; }
+    .mv-form__check { display: flex; align-items: center; gap: var(--space-2); }
+    .mv-form__help { color: var(--muted); font-size: var(--text-xs); margin-top: 2px; }
+    .mv-form__err { color: var(--danger, #dc2626); font-size: var(--text-sm); min-height: 1em; margin: 0 0 var(--space-2); }
     /* Shared list-row: an icon/title + muted subline + trailing actions. */
     .mv-row { display: flex; align-items: center; gap: var(--space-3); padding: var(--space-3) var(--space-4); border: 1px solid var(--border); border-radius: var(--radius-md); background: var(--surface-1); transition: border-color .12s ease; animation: mv-rise 180ms ease-out both; }
     .mv-row:hover { border-color: var(--border-strong); }
@@ -627,7 +636,7 @@
         '/workforce': 'agents',
       } %}
       {% set _nav_groups = [
-        ('Operate', [('/start', 'Get started'), ('/chat', 'Chat'), ('/goals', 'Goals'), ('/projects', 'Projects'), ('/deliverables', 'Deliverables'), ('/agents', 'Agents'), ('/roles', 'Roles'), ('/workforce', 'Workforce'), ('/goal-builder', 'Builder'), ('/workflows', 'Workflows'), ('/flows/designer', 'Flow Designer'), ('/flows/analytics', 'Flow Analytics'), ('/automations', 'Automations'), ('/graph-editor', 'Graph'), ('/fleets', 'Fleets')]),
+        ('Operate', [('/start', 'Get started'), ('/chat', 'Chat'), ('/goals', 'Goals'), ('/goal-builder', 'Quick Goal'), ('/graph-editor', 'Goal Graph'), ('/projects', 'Projects'), ('/deliverables', 'Deliverables'), ('/agents', 'Agents'), ('/roles', 'Roles'), ('/workforce', 'Workforce'), ('/workflows', 'Workflows'), ('/flows/designer', 'Flow Designer'), ('/flows/analytics', 'Flow Analytics'), ('/automations', 'Automations'), ('/fleets', 'Fleets')]),
         ('Observe', [('/overview', 'Overview'), ('/oversight', 'Oversight'), ('/discovery', 'Discovery'), ('/spend', 'Spend'), ('/billing', 'Billing'), ('/providers', 'Providers'), ('/benchmarks', 'Benchmarks'), ('/learning', 'Learning'), ('/learned', 'Learned'), ('/plan-tree-3d', '3D')]),
         ('Govern', [('/approvals', 'Approvals'), ('/permissions', 'Permissions'), ('/simulate', 'Simulate'), ('/safety', 'Safety'), ('/compliance', 'Compliance'), ('/compartments', 'Compartments'), ('/audit', 'Audit'), ('/replay', 'Replay'), ('/trust', 'Agent Trust')]),
         ('Extend', [('/skills', 'Skills'), ('/store', 'Store'), ('/templates', 'Templates'), ('/tools', 'Tools'), ('/connections', 'Connections'), ('/plugins', 'Plugins'), ('/mcp', 'MCP'), ('/channels', 'Channels')]),
@@ -671,6 +680,17 @@
         <button type="button" class="btn btn--primary" id="mv-confirm-ok">Confirm</button>
       </div>
     </div>
+  </dialog>
+  <dialog id="mv-form" class="mv-confirm mv-form" aria-labelledby="mv-form-title">
+    <form id="mv-form-form" class="mv-confirm__body">
+      <h2 class="mv-form__title" id="mv-form-title"></h2>
+      <div id="mv-form-fields"></div>
+      <p class="mv-form__err" id="mv-form-err" aria-live="polite"></p>
+      <div class="mv-confirm__row">
+        <button type="button" class="btn btn--ghost" id="mv-form-cancel">Cancel</button>
+        <button type="submit" class="btn btn--primary" id="mv-form-ok">OK</button>
+      </div>
+    </form>
   </dialog>
   <script>
     // Reusable feedback primitives, on every page that extends base.html.
@@ -729,6 +749,101 @@
           dlg.addEventListener('cancel', onCancel);   // Esc / backdrop
           dlg.showModal();
           cancelBtn.focus();
+        });
+      };
+      // Collect a small set of typed fields in a modal form (replaces per-value
+      // window.prompt chains). fields: [{key,label,type,required,default,options,
+      // placeholder,help}] where type is text|number|date|bool|select. Resolves to
+      // a {key:value} object, or null if cancelled. Falls back to sequential
+      // prompts where <dialog> is unsupported.
+      var fdlg = document.getElementById('mv-form');
+      window.mvForm = function (title, fields, opts) {
+        opts = opts || {};
+        fields = fields || [];
+        if (!fdlg || typeof fdlg.showModal !== 'function') {
+          var out0 = {};
+          for (var i = 0; i < fields.length; i++) {
+            var s = fields[i];
+            var v0 = window.prompt((s.label || s.key) + (s.required ? ' *' : ''),
+              s.default != null ? String(s.default) : '');
+            if (v0 === null) return Promise.resolve(null);
+            if (v0 !== '') out0[s.key] = v0;
+          }
+          return Promise.resolve(out0);
+        }
+        if (fdlg.open) return Promise.resolve(null);   // shared dialog, not re-entrant
+        var opener = document.activeElement;
+        var form = document.getElementById('mv-form-form');
+        var body = document.getElementById('mv-form-fields');
+        var errEl = document.getElementById('mv-form-err');
+        var cancelBtn = document.getElementById('mv-form-cancel');
+        document.getElementById('mv-form-title').textContent = String(title || 'Details');
+        document.getElementById('mv-form-ok').textContent = opts.okText || 'OK';
+        body.textContent = ''; errEl.textContent = '';
+        var controls = [];
+        fields.forEach(function (f) {
+          var id = 'mvf-' + f.key;
+          var wrap = document.createElement('div'); wrap.className = 'mv-form__field';
+          var ctl;
+          if (f.type === 'bool' || f.type === 'checkbox') {
+            wrap.className += ' mv-form__check';
+            ctl = document.createElement('input'); ctl.type = 'checkbox'; ctl.checked = !!f.default; ctl.id = id;
+            var l1 = document.createElement('label'); l1.setAttribute('for', id); l1.textContent = f.label || f.key;
+            wrap.appendChild(ctl); wrap.appendChild(l1);
+          } else {
+            var lab = document.createElement('label'); lab.setAttribute('for', id);
+            lab.textContent = (f.label || f.key) + (f.required ? ' *' : '');
+            wrap.appendChild(lab);
+            if (f.type === 'select') {
+              ctl = document.createElement('select');
+              (f.options || []).forEach(function (o) {
+                var op = document.createElement('option');
+                op.value = (o && o.value != null) ? o.value : o;
+                op.textContent = (o && o.label != null) ? o.label : o;
+                ctl.appendChild(op);
+              });
+              if (f.default != null) ctl.value = String(f.default);
+            } else {
+              ctl = document.createElement('input');
+              ctl.type = f.type === 'number' ? 'number' : f.type === 'date' ? 'date' : 'text';
+              ctl.className = 'input';
+              if (f.default != null) ctl.value = String(f.default);
+              if (f.placeholder) ctl.placeholder = f.placeholder;
+            }
+            ctl.id = id;
+            wrap.appendChild(ctl);
+          }
+          if (f.help) { var h = document.createElement('div'); h.className = 'mv-form__help'; h.textContent = f.help; wrap.appendChild(h); }
+          controls.push({ f: f, ctl: ctl });
+          body.appendChild(wrap);
+        });
+        return new Promise(function (resolve) {
+          function collect() {
+            var out = {}, missing = [];
+            controls.forEach(function (c) {
+              if (c.f.type === 'bool' || c.f.type === 'checkbox') { out[c.f.key] = c.ctl.checked; return; }
+              var val = (c.ctl.value || '').trim();
+              if (!val && c.f.required && c.f.default == null) { missing.push(c.f.label || c.f.key); return; }
+              if (val) out[c.f.key] = val;
+            });
+            if (missing.length) { errEl.textContent = 'Required: ' + missing.join(', '); return null; }
+            return out;
+          }
+          function done(val) {
+            form.removeEventListener('submit', onSubmit);
+            cancelBtn.removeEventListener('click', onCancel);
+            fdlg.removeEventListener('cancel', onCancel);
+            if (fdlg.open) fdlg.close();
+            if (opener && opener.isConnected && typeof opener.focus === 'function') opener.focus();
+            resolve(val);
+          }
+          function onSubmit(e) { e.preventDefault(); var v = collect(); if (v !== null) done(v); }
+          function onCancel(e) { if (e) e.preventDefault(); done(null); }
+          form.addEventListener('submit', onSubmit);
+          cancelBtn.addEventListener('click', onCancel);
+          fdlg.addEventListener('cancel', onCancel);   // Esc / backdrop
+          fdlg.showModal();
+          var first = body.querySelector('input, select'); if (first) first.focus();
         });
       };
       // Copy text to the clipboard with a toast; falls back for old browsers.

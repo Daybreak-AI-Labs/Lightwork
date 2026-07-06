@@ -728,6 +728,13 @@ def get_self_harness() -> dict:
         # canaried, budget-capped; the tried-memory keeps steady-state spend
         # near zero). Default off -- transfer runs only via the CLI.
         "transfer_auto": bool(cfg.get("transfer_auto", False)),
+        # Where the learning stores (addenda, provenance, transfer memory)
+        # live: "files" = per-host JSON under ~/.maverick (default); "world" =
+        # tables in the shared world database, so a fleet spanning hosts
+        # learns as one (docs/proposals/fleet-learning-state.md, phase 1).
+        # Unknown values mean "files".
+        "store": (lambda v: v if v in ("files", "world") else "files")(
+            str(cfg.get("store", "files")).strip().lower()),
         # Corpus bootstrapping from hindsight pairs (a failed goal whose wording
         # later ran to done): "propose" stages candidates for operator review
         # (`self-harness corpus review`); "auto" merges them straight into the

@@ -14,7 +14,7 @@
 | High-round soak (knobs cranked far past defaults) | **187 passed**, ~**2.1M** randomized scenarios, **0 invariant violations** |
 | Concurrency battery ×25 repeats | **25/25 clean** — no lost promotions, no store corruption |
 | Determinism (real loop) | same inputs → **byte-identical** learned store across 6 independent runs |
-| Standalone proof scoreboard (`proof/self_harness_proof.py`) | **9/9 guarantees PROVEN**, reproducible |
+| Standalone proof scoreboard (`proof/self_harness_proof.py`) | **10/10 guarantees PROVEN**, reproducible |
 
 Only skips in the whole run were two unrelated optional-dependency modules
 (`z3`, `duckdb`) — no self-harness test skipped.
@@ -87,7 +87,7 @@ JSON within the line/char caps every time.
 ### 4. Determinism + standalone scoreboard
 
 `proof/self_harness_proof.py` drives the **real** loop and gate and asserts
-nine guarantees, exiting 0 iff all hold:
+ten guarantees, exiting 0 iff all hold:
 
 ```
 python3 proof/self_harness_proof.py
@@ -103,7 +103,8 @@ python3 proof/self_harness_proof.py
   [PASS]  reversible + auditable      rollback handle restores exactly; forget() clears guidance
   [PASS]  canary lifecycle            probation rides; 3 wins graduate, 2 failures pull it (audited forget)
   [PASS]  rollback durability         forget/reject beat auto re-entry; indeterminate verdicts stay retryable
-  9 guarantees PROVEN, 0 failed
+  [PASS]  fleet store parity          same content as files; 8/8 concurrent promotions; forget round-trips
+  10 guarantees PROVEN, 0 failed
 ```
 
 The headline guarantee, **determinism**, runs the loop six times on identical

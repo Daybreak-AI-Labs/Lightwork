@@ -99,6 +99,18 @@ bot_token = "${TELEGRAM_BOT_TOKEN}"
 # internet; harmless to leave unset on a desktop install (localhost-only).
 token = "${MAVERICK_DASHBOARD_TOKEN}"
 
+[flows]
+# The visual flow-automation engine (a deterministic graph of agent/action/
+# branch/switch/foreach/while/parallel/approval/delay/wait_event/scope/subflow/
+# setvar nodes) + the dashboard designer and triggers. OFF by default.
+enable      = false      # or MAVERICK_FLOWS=1
+# Autonomous self-improvement of live flows. Both OFF by default and also
+# toggleable from the dashboard Learning page.
+auto_evolve = false      # revert a node rewrite the loop measures as a regression
+                         # (the safety net; or MAVERICK_FLOWS_AUTO=1)
+auto_apply  = false      # apply a proven improvement forward without a human
+                         # (needs auto_evolve on for the revert safety net)
+
 [persona]
 # Appended to every agent's system prompt. Optional.
 name      = "Lightwork"
@@ -218,6 +230,10 @@ enable = false             # mine failures -> propose -> regression-validate ->
 #   corpus_harvest = "propose"   bootstrap eval cases from hindsight pairs
 #                                ("propose" = human-gated review; "auto" = direct)
 #   mine_bucket_by = ["domain"]  scope mining/recall per domain / role / tool
+#   store = "world"              learning stores in the shared world database so a
+#                                multi-host fleet learns as one (default "files";
+#                                import a host's files with `maverick self-harness
+#                                migrate-store`)
 
 [self_learning]            # local continuous learning (default off)
 enable = true
