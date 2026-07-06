@@ -42,19 +42,18 @@ def load_flow_schema(flow_id: str) -> dict:
     return _read_json(_schema_dir() / f"{_safe_id(flow_id)}.json") or {}
 
 
-def record_flow_schema(flow_id: str, shapes: dict) -> dict:
+def record_flow_schema(flow_id: str, shapes: dict) -> None:
     """Merge freshly-observed output shapes into the flow's accumulated hints
-    and persist them. Best-effort: a write error is swallowed (a schema hint is
-    never worth failing a run over). Returns the merged map."""
+    and persist them. Best-effort: any error is swallowed HERE, the one owner
+    of that policy (a schema hint is never worth failing a run over)."""
     if not shapes:
-        return load_flow_schema(flow_id)
-    from .schema_infer import merge_shapes
-    merged = merge_shapes(load_flow_schema(flow_id), shapes)
+        return
     try:
+        from .schema_infer import merge_shapes
+        merged = merge_shapes(load_flow_schema(flow_id), shapes)
         _write_json(_schema_dir() / f"{_safe_id(flow_id)}.json", merged)
-    except OSError:  # pragma: no cover -- best-effort
+    except Exception:  # pragma: no cover -- best-effort
         pass
-    return merged
 
 
 def _write_json(path, obj: dict) -> None:
@@ -153,6 +152,28 @@ def list_flows() -> list[Flow]:
     return out
 
 
+def list_flow_summaries() -> list[dict]:
+    """Cheap listing for index pages -- id/name/node count/single-agent flag
+    plucked from the raw JSON, WITHOUT building the full recursive Flow IR per
+    file (list_flows constructs every nested body just to be counted)."""
+    d = _flows_dir()
+    if not d.exists():
+        return []
+    out = []
+    for p in sorted(d.glob("*.json")):
+        raw = _read_json(p) or {}
+        if not raw.get("id"):
+            continue
+        nodes = [n for n in (raw.get("nodes") or []) if isinstance(n, dict)]
+        out.append({
+            "id": str(raw["id"]), "name": str(raw.get("name") or ""),
+            "nodes": len(nodes),
+            "single_agent": (len(nodes) == 1 and nodes[0].get("kind") == "agent"
+                             and not nodes[0].get("next")),
+        })
+    return out
+
+
 def delete_flow(flow_id: str) -> bool:
     p = _flows_dir() / f"{_safe_id(flow_id)}.json"
     try:
@@ -207,6 +228,10 @@ class FlowRun:
     origin: str = "manual"
     # Agent spend reserved for this run (dollars), so a viewer can see run cost.
     cost_dollars: float = 0.0
+    # Snapshot of the paused human task (choices/form/assignee) taken AT PAUSE
+    # time, like `prompt` -- so the run viewer renders what the paused node
+    # actually declared, even if the flow is edited while the run waits.
+    human: dict = field(default_factory=dict)
 
     def to_dict(self) -> dict:
         return {
@@ -216,6 +241,7 @@ class FlowRun:
             "created": self.created, "updated": self.updated, "nodes": self.nodes,
             "input_data": self.input_data, "idem_key": self.idem_key,
             "origin": self.origin, "cost_dollars": self.cost_dollars,
+            "human": self.human,
         }
 
     @staticmethod
@@ -231,6 +257,7 @@ class FlowRun:
             input_data=dict(d.get("input_data") or {}), idem_key=str(d.get("idem_key", "")),
             origin=str(d.get("origin", "manual") or "manual"),
             cost_dollars=float(d.get("cost_dollars", 0.0) or 0.0),
+            human=dict(d.get("human") or {}),
         )
 
 

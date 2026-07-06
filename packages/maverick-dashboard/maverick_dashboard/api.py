@@ -933,17 +933,16 @@ async def create_connection_endpoint(request: Request, payload: ConnectionIn) ->
     require_permission(request, "operate")
     _require_connections()
     from maverick import connections
-    # Owner-scope like triggers: a non-admin can't overwrite another tenant's
-    # connection by reusing its name.
-    owner_filter = goal_owner_filter(request)
-    if owner_filter is not None:
-        existing = connections.get_connection(connections.normalize_name(payload.name))
-        if existing is not None and existing.get("owner", "") != owner_filter:
-            raise HTTPException(status_code=409, detail="a connection with that name already exists")
     try:
+        # Owner-scope like triggers: a non-admin can't overwrite another
+        # tenant's connection by reusing its name. Enforced INSIDE the store
+        # lock (expected_owner) so the check and the write are atomic.
         rec = connections.set_connection(
             payload.name, connector=payload.connector, base_url=payload.base_url,
-            token=payload.token, owner=caller_principal(request) or "")
+            token=payload.token, owner=caller_principal(request) or "",
+            expected_owner=goal_owner_filter(request))
+    except PermissionError as e:
+        raise HTTPException(status_code=409, detail=str(e)) from e
     except ValueError as e:
         raise HTTPException(status_code=400, detail=str(e)) from e
     return rec
@@ -966,9 +965,13 @@ async def test_connection_endpoint(request: Request, name: str) -> dict:
     def _probe() -> dict:
         try:
             import httpx
-            r = httpx.get(base, headers={"Authorization": f"Bearer {rec.get('token')}",
-                                         "Accept": "application/json"},
-                          timeout=10.0, follow_redirects=True)
+            from maverick.tools.enterprise_connectors import auth_headers_for
+            # Speak the connector's real auth dialect (basic / custom scheme /
+            # extra headers), not a hardcoded Bearer -- else a working
+            # basic-auth connection "fails" its test.
+            headers = auth_headers_for(str(rec.get("connector") or ""),
+                                       str(rec.get("token") or ""))
+            r = httpx.get(base, headers=headers, timeout=10.0, follow_redirects=True)
             # 2xx/3xx or 401/403 all mean "reachable"; only a connect error is a hard fail.
             ok = r.status_code < 500
             return {"ok": ok, "status": r.status_code,
@@ -1426,23 +1429,6 @@ async def flow_gallery_endpoint(request: Request) -> dict:
     return {"flows": [dict(f) for f in _FLOW_GALLERY]}
 
 
-def _percentile(sorted_vals: list, pct: float) -> float:
-    """The ``pct`` (0-100) percentile of a pre-sorted list (nearest-rank)."""
-    if not sorted_vals:
-        return 0.0
-    k = max(0, min(len(sorted_vals) - 1, int(round((pct / 100.0) * (len(sorted_vals) - 1)))))
-    return round(float(sorted_vals[k]), 3)
-
-
-def _run_duration(run) -> float:
-    """A run's wall-clock: the sum of its work nodes' measured seconds."""
-    total = 0.0
-    for st in (run.nodes or {}).values():
-        if isinstance(st, dict) and isinstance(st.get("seconds"), (int, float)):
-            total += float(st["seconds"])
-    return total
-
-
 @router.get("/flows/analytics")
 async def flow_analytics_endpoint(request: Request, limit: int = 500) -> dict:
     """Per-flow run analytics over recent runs: volume, success rate, failure
@@ -1451,43 +1437,12 @@ async def flow_analytics_endpoint(request: Request, limit: int = 500) -> dict:
     ``/flows/{flow_id}`` so the literal path isn't captured as a flow id."""
     require_permission(request, "operate")
     _require_flows()
-    from collections import Counter, defaultdict
-
-    from maverick.flow import store
+    from maverick.flow import analytics
     owner = goal_owner_filter(request)
-    runs = store.list_runs(owner=owner, limit=max(1, min(2000, limit)))
-    by_flow: dict = defaultdict(lambda: {"runs": 0, "completed": 0, "failed": 0,
-                                         "rejected": 0, "paused": 0,
-                                         "durations": [], "errors": Counter()})
-    terminal_pause = ("paused_approval", "paused_delay", "paused_event")
-    for r in runs:
-        agg = by_flow[r.flow_id]
-        agg["runs"] += 1
-        if r.status == "completed":
-            agg["completed"] += 1
-            agg["durations"].append(_run_duration(r))
-        elif r.status == "failed":
-            agg["failed"] += 1
-            if r.error:
-                agg["errors"][str(r.error)[:160]] += 1
-        elif r.status == "rejected":
-            agg["rejected"] += 1
-        elif r.status in terminal_pause:
-            agg["paused"] += 1
-    out = []
-    for flow_id, agg in by_flow.items():
-        durs = sorted(agg["durations"])
-        finished = agg["completed"] + agg["failed"] + agg["rejected"]
-        out.append({
-            "flow_id": flow_id, "runs": agg["runs"],
-            "completed": agg["completed"], "failed": agg["failed"],
-            "rejected": agg["rejected"], "paused": agg["paused"],
-            "success_rate": round(agg["completed"] / finished, 3) if finished else None,
-            "p50_seconds": _percentile(durs, 50), "p95_seconds": _percentile(durs, 95),
-            "top_errors": [{"error": e, "count": c} for e, c in agg["errors"].most_common(3)],
-        })
-    out.sort(key=lambda f: f["runs"], reverse=True)
-    return {"flows": out, "run_window": len(runs)}
+    # The aggregation reads + parses every run file in the window: keep that
+    # off the event loop.
+    return await run_in_threadpool(
+        analytics.aggregate, owner=owner, limit=max(1, min(2000, limit)))
 
 
 @router.get("/flows/insights")

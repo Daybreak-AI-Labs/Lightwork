@@ -53,10 +53,7 @@
   var msg = document.getElementById('cx-msg');
   var list = document.getElementById('cx-list');
   function say(t, err) { msg.textContent = t || ''; msg.style.color = err ? 'var(--danger)' : 'var(--muted)'; }
-  function api(url, opts) {
-    return fetch(url, Object.assign({ headers: { 'Content-Type': 'application/json' } }, opts || {}));
-  }
-  function el(tag, cls, text) { var e = document.createElement(tag); if (cls) e.className = cls; if (text != null) e.textContent = text; return e; }
+  {% include "_dash_helpers.js" %}
 
   function load() {
     api('/api/v1/connections').then(function (r) {

@@ -63,9 +63,10 @@ def _env_config(name: str, base_url_env: str, token_env: str) -> tuple[str, str]
     base = os.environ.get(base_url_env, "").strip().rstrip("/")
     tok = os.environ.get(token_env, "").strip()
     if not base or not tok:
+        # resolve() guarantees a non-empty token; base_url can still be blank.
         conn = _connection_fallback(name)
-        if conn and conn[0] and conn[1]:
-            return conn[0].rstrip("/"), conn[1]
+        if conn and conn[0]:
+            return conn
         raise RuntimeError(
             f"{name} requires {base_url_env} + {token_env} "
             f"(or a saved '{name}' connection).")

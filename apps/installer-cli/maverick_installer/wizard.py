@@ -93,7 +93,6 @@ STEPS: list[tuple[str, str]] = [
     ("automation_import", "Automation import"),
     ("event_triggers", "Event triggers"),
     ("flows", "Flow engine"),
-    ("connections", "Named connections"),
     ("knowledge", "Knowledge RAG"),
     ("oauth_vault", "OAuth token vault"),
     ("governed_connectors", "Governed connectors"),

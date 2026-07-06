@@ -38,15 +38,16 @@
 (function () {
   'use strict';
   var msg = document.getElementById('fa-msg');
-  function el(tag, cls, text) { var e = document.createElement(tag); if (cls) e.className = cls; if (text != null) e.textContent = text; return e; }
+  {% include "_dash_helpers.js" %}
   function pct(x) { return x == null ? '—' : Math.round(x * 100) + '%'; }
   function secs(x) { return (x || x === 0) ? (x < 1 ? Math.round(x * 1000) + 'ms' : x.toFixed(1) + 's') : '—'; }
 
-  fetch('/api/v1/flows/analytics').then(function (r) {
-    if (r.status === 403) { msg.textContent = 'The flow engine is off.'; return null; }
+  api('/api/v1/flows/analytics').then(function (r) {
+    if (r.status === 403) { msg.textContent = 'The flow engine is off.'; return { off: true }; }
     return r.ok ? r.json() : null;
   }).then(function (j) {
-    if (!j) { if (msg.textContent === 'Loading…') msg.textContent = 'Could not load analytics.'; return; }
+    if (j && j.off) { return; }               // 403 message already shown
+    if (!j) { msg.textContent = 'Could not load analytics.'; return; }
     var flows = j.flows || [];
     if (!flows.length) { msg.textContent = 'No flow runs yet.'; return; }
     msg.textContent = flows.length + ' flow' + (flows.length === 1 ? '' : 's') + ' · ' + j.run_window + ' runs in window';

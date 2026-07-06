@@ -48,11 +48,6 @@ STATUS_PAUSED_EVENT = "paused_event"
 STATUS_REJECTED = "rejected"
 STATUS_FAILED = "failed"
 
-# A reserved resume decision the expiry sweep sends for a lapsed approval, so the
-# resume block can route to `on_expire` (escalation) rather than treat it as a
-# human verdict. Not a user-suppliable verdict (the schema regex excludes it).
-EXPIRED = "__expired__"
-
 # The single source of truth for "which statuses mean a run is parked and
 # resumable" and "which statuses mean a run is still in flight". Every gate that
 # used to hand-list these literals (the resume/retry endpoints, the sweep, the
@@ -710,10 +705,10 @@ def _run_approval(node: FlowNode, data: dict, ctx: _Ctx) -> str | None:
         raise _Reject(node, data)
     if ctx.allow_pause:                    # pending + top level -> wait for a human
         # An approval's EXPIRY is `expires_after` (its own field, so it can't be
-        # confused with the execution `timeout`); older flows encoded it in
-        # `timeout`, so fall back to that. On expiry the sweep resumes the run
-        # and it routes to `on_expire` (or rejects) -- see the resume block.
-        expiry = node.expires_after or node.timeout
+        # confused with the execution `timeout`). Older flows that encoded it in
+        # `timeout` are migrated at LOAD time (FlowNode.from_dict), so every
+        # consumer -- this runner, the designer, the sweep -- sees one field.
+        expiry = node.expires_after
         resume_at = ctx.now() + expiry if expiry and expiry > 0 else None
         raise _Pause("approval", node, data, resume_at=resume_at)
     raise _Reject(node, data)              # nested can't pause -> treat as not approved
@@ -814,10 +809,14 @@ def run_flow(flow: Flow, *, agent_fn: AgentFn, action_fn: ActionFn,
                        "exists in this flow version"))
         if decision == "rejected":
             return FlowRunResult(status=STATUS_REJECTED, data=data, cursor=node.id)
-        if decision == EXPIRED and node.kind == NODE_APPROVAL:
-            # The approval's expiry lapsed (the sweep resumed it). Route to
-            # `on_expire` if set (an escalation lane), else fail closed (reject).
-            # The escalation lane runs through the normal chain below.
+        # Default continuation: a pause resumes AFTER its node (the approval/
+        # delay is done); a failure retry re-enters AT the node ("rerun").
+        start = node.id if resume.get("rerun") else node.next
+        if resume.get("expired") and node.kind == NODE_APPROVAL:
+            # The approval's expiry lapsed (the sweep resumed it with the
+            # OUT-OF-BAND ``expired`` flag -- never a decision string a caller
+            # could forge). Route to `on_expire` if set (an escalation lane),
+            # else fail closed (reject). The lane runs through the chain below.
             if node.on_expire is None:
                 return FlowRunResult(status=STATUS_REJECTED, data=data, cursor=node.id)
             if node.output:
@@ -832,13 +831,8 @@ def run_flow(flow: Flow, *, agent_fn: AgentFn, action_fn: ActionFn,
             if decision == "approved" or (decision and decision in node.choices):
                 if node.output:
                     data[node.output] = decision
-                start = node.next
             else:
                 return FlowRunResult(status=STATUS_REJECTED, data=data, cursor=node.id)
-        else:
-            # A pause resumes AFTER its node (the approval/delay is done); a
-            # failure retry re-enters AT the node that failed ("rerun").
-            start = node.id if resume.get("rerun") else node.next
     else:
         data = dict(data or {})
         start = flow.start

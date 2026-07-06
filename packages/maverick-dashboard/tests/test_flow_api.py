@@ -264,9 +264,8 @@ def test_sweep_rejects_expired_approvals_but_never_paused_events(monkeypatch, tm
     aq._handle_flow_sweep(None)
     jobs = [j for j in aq.queue().list(status="pending") if j.kind == aq.FLOW_RESUME_KIND]
     assert {j.payload["run_id"] for j in jobs} == {"ap1"}
-    # expiry sends the EXPIRED marker -> the runner routes on_expire or rejects
-    from maverick.flow.runner import EXPIRED
-    assert jobs[0].payload["decision"] == EXPIRED
+    # expiry rides the out-of-band flag -> the runner routes on_expire or rejects
+    assert jobs[0].payload["expired"] is True and "decision" not in jobs[0].payload
 
 
 def test_retry_of_paused_event_run_is_409_not_a_duplicate(monkeypatch, tmp_path):

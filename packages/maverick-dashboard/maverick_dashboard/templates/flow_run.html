@@ -62,9 +62,7 @@
   var flowNodes = null;   // ordered [{id, kind, label}] from the flow definition
 
   function say(t) { msg.textContent = t || ''; }
-  function api(url, opts) {
-    return fetch(url, Object.assign({ headers: { 'Content-Type': 'application/json' } }, opts || {}));
-  }
+  {% include "_dash_helpers.js" %}
 
   function orderNodes(flow) {
     // BFS from start so the timeline reads in execution order; orphans go last.
@@ -128,7 +126,11 @@
       b.textContent = label; b.addEventListener('click', onClick); box.appendChild(b);
     }
     if (run.status === 'paused_approval') {
-      var node = (flowNodes || []).filter(function (n) { return n.id === run.cursor; })[0] || {};
+      // Prefer the pause-time snapshot (run.human): it is what the node
+      // declared when it paused, immune to flow edits made while waiting.
+      var node = (run.human && Object.keys(run.human).length)
+        ? run.human
+        : ((flowNodes || []).filter(function (n) { return n.id === run.cursor; })[0] || {});
       if (run.prompt) { var p = document.createElement('span'); p.className = 'fr__msg'; p.textContent = '“' + run.prompt + '” '; box.appendChild(p); }
       if (node.assignee) { var as = document.createElement('span'); as.className = 'fr__msg'; as.textContent = '· for ' + node.assignee + ' '; box.appendChild(as); }
       // optional form fields collected on sign-off (merged into flow data on resume)

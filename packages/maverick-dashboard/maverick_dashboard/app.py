@@ -4881,14 +4881,6 @@ async def get_started_page(request: Request) -> HTMLResponse:
     )
 
 
-def _flows_enabled_safe() -> bool:
-    try:
-        from maverick import flow as _flow
-        return _flow.enabled()
-    except Exception:  # pragma: no cover
-        return False
-
-
 @app.get("/workflows", response_class=HTMLResponse)
 async def workflows_index_page(request: Request) -> HTMLResponse:
     """Your saved workflows: templates you authored + agent playbooks you built,
@@ -4916,13 +4908,13 @@ async def workflows_index_page(request: Request) -> HTMLResponse:
         playbooks = []
     # Unify the surface: saved flow graphs live here too, not on a separate page.
     flows: list[dict] = []
+    flows_enabled = False
     try:
         from maverick import flow as _flow
-        if _flow.enabled():
+        flows_enabled = _flow.enabled()
+        if flows_enabled:
             from maverick.flow import store as _flow_store
-            flows = [{"id": f.id, "name": f.name, "nodes": len(f.nodes),
-                      "single_agent": f.is_single_agent()}
-                     for f in _flow_store.list_flows()]
+            flows = _flow_store.list_flow_summaries()
     except Exception:  # pragma: no cover -- never block the page on the flow engine
         flows = []
     return templates.TemplateResponse(
@@ -4931,7 +4923,7 @@ async def workflows_index_page(request: Request) -> HTMLResponse:
             "templates": tpls,
             "playbooks": playbooks,
             "flows": flows,
-            "flows_enabled": bool(flows) or _flows_enabled_safe(),
+            "flows_enabled": flows_enabled,
             "scheduling_enabled": feats.get("scheduling", True),
             "triggers_enabled": feats.get("triggers", True),
         },

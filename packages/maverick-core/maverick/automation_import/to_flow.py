@@ -495,6 +495,20 @@ def _uipath_lower(activities: list, prefix: str,
             flat.append(a)
     ids = {i: f"{prefix}{i}" for i in range(len(flat))}
     nodes: dict[str, FlowNode] = {}
+
+    def _lowered_body(act: dict, body_prefix: str, name: str):
+        """The activity's children as a nested body Flow, or None when the
+        body is unreadable (the caller then falls back to one step node)."""
+        b_nodes, b_start = _uipath_lower(_uipath_children(act), body_prefix, report)
+        return (Flow(id="", name=name, start=b_start, nodes=b_nodes)
+                if b_nodes and b_start else None)
+
+    def _step_fallback(act: dict, nid: str, nxt: str | None, label: str, note: str):
+        """Shared 'body unreadable -> one approximated step node' arm."""
+        nodes[nid] = _node_for_step(_uipath_step(act), nid, nxt)
+        report.append({"step": label, "node": nid, "kind": nodes[nid].kind,
+                       "fidelity": "approximated", "note": note})
+
     for i, act in enumerate(flat):
         nid = ids[i]
         nxt = ids[i + 1] if i + 1 < len(flat) else None
@@ -516,20 +530,16 @@ def _uipath_lower(activities: list, prefix: str,
             report.append({"step": label, "node": nid, "kind": NODE_BRANCH,
                            "fidelity": "preserved", "note": "UiPath If -> branch (arms wired)"})
         elif atype in ("while", "dowhile"):
-            b_nodes, b_start = _uipath_lower(_uipath_children(act), "b", report)
-            body = Flow(id="", name=f"{label} body", start=b_start or "", nodes=b_nodes) if b_nodes else None
+            body = _lowered_body(act, "b", f"{label} body")
             if body is not None:
                 nodes[nid] = FlowNode(id=nid, kind=NODE_WHILE, condition=cond, body=body,
                                       next=nxt, output=f"{nid}_out", label=label)
                 report.append({"step": label, "node": nid, "kind": NODE_WHILE,
                                "fidelity": "preserved", "note": "UiPath While -> while with a nested body"})
             else:
-                nodes[nid] = _node_for_step(_uipath_step(act), nid, nxt)
-                report.append({"step": label, "node": nid, "kind": nodes[nid].kind,
-                               "fidelity": "approximated", "note": "While body unreadable -> agent step"})
+                _step_fallback(act, nid, nxt, label, "While body unreadable -> agent step")
         elif atype in ("foreach", "foreachrow", "parallelforeach"):
-            b_nodes, b_start = _uipath_lower(_uipath_children(act), "b", report)
-            body = Flow(id="", name=f"{label} body", start=b_start or "", nodes=b_nodes) if b_nodes else None
+            body = _lowered_body(act, "b", f"{label} body")
             items = _safe_line(act.get("values") or act.get("Values") or act.get("collection") or "items", max_chars=40)
             if body is not None:
                 nodes[nid] = FlowNode(id=nid, kind=NODE_FOREACH, items=items, body=body,
@@ -538,21 +548,17 @@ def _uipath_lower(activities: list, prefix: str,
                 report.append({"step": label, "node": nid, "kind": NODE_FOREACH,
                                "fidelity": "preserved", "note": "UiPath ForEach -> foreach with a nested body"})
             else:
-                nodes[nid] = _node_for_step(_uipath_step(act), nid, nxt)
-                report.append({"step": label, "node": nid, "kind": nodes[nid].kind,
-                               "fidelity": "approximated", "note": "ForEach body unreadable -> agent step"})
+                _step_fallback(act, nid, nxt, label, "ForEach body unreadable -> agent step")
         elif atype in ("trycatch", "try"):
-            try_acts = _uipath_children(act.get("try") or act.get("Try") or {}) or _uipath_children(act)
-            b_nodes, b_start = _uipath_lower(try_acts, "s" + nid, report)
-            if b_nodes and b_start:
-                body = Flow(id="", name=f"{label} body", start=b_start, nodes=b_nodes)
+            try_act = act.get("try") or act.get("Try")
+            body = (_lowered_body({"children": _uipath_children(try_act)}, "s" + nid, f"{label} body")
+                    if isinstance(try_act, dict) else None) or _lowered_body(act, "s" + nid, f"{label} body")
+            if body is not None:
                 nodes[nid] = FlowNode(id=nid, kind=NODE_SCOPE, body=body, next=nxt, label=label)
                 report.append({"step": label, "node": nid, "kind": NODE_SCOPE,
                                "fidelity": "preserved", "note": "UiPath TryCatch -> scope (wire on_error for a catch arm)"})
             else:
-                nodes[nid] = _node_for_step(_uipath_step(act), nid, nxt)
-                report.append({"step": label, "node": nid, "kind": nodes[nid].kind,
-                               "fidelity": "approximated", "note": "Try body unreadable -> agent step"})
+                _step_fallback(act, nid, nxt, label, "Try body unreadable -> agent step")
         else:
             node = _node_for_step(_uipath_step(act), nid, nxt)
             nodes[nid] = node
@@ -589,8 +595,7 @@ def _uipath_to_flow(automation: ImportedAutomation, report: list[dict]) -> Flow 
         return None
     flow = Flow(id=automation.template_name(), name=automation.name, start=start, nodes=nodes)
     if flow.validate():
-        report.clear()
-        return None
+        return None   # the dispatcher clears the report on a None fallback
     return flow
 
 

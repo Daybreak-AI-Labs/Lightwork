@@ -161,10 +161,17 @@ var FDCore = (function () {
     };
   }
 
+  // ---- condition grammar (mirrors the server's runner._COND parser) --------
+  // Kept HERE (the tested shared module) so the builder UI and any future
+  // consumer share one copy; changing an op means updating this + the runner.
+  var COND_OPS = ['==', '!=', '>', '<', '>=', '<=', 'contains'];
+  var COND_RE = /^\s*(\S+)\s*(==|!=|>=|<=|>|<|contains)\s*(.+?)\s*$/;
+
   return { normalizeNode: normalizeNode, serializeNode: serializeNode,
            serializeFlow: serializeFlow, cloneFlow: cloneFlow,
            upstreamOutputs: upstreamOutputs, fitView: fitView,
-           validateFlow: validateFlow };
+           validateFlow: validateFlow,
+           COND_OPS: COND_OPS, COND_RE: COND_RE };
 })();
 
 if (typeof module !== 'undefined' && module.exports) module.exports = FDCore;

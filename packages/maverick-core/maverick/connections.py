@@ -32,7 +32,8 @@ _NAME_RE = re.compile(r"^[a-z0-9][a-z0-9_-]{0,63}$")
 
 
 def enabled() -> bool:
-    if os.environ.get("MAVERICK_CONNECTIONS", "").strip() in ("1", "true", "yes"):
+    from .config import env_flag
+    if env_flag("MAVERICK_CONNECTIONS"):
         return True
     try:
         from .config import load_config
@@ -45,32 +46,45 @@ def _path():
     return data_dir("connections", "connections.sealed")
 
 
-def _seal_tenant() -> str | None:
-    from .paths import current_tenant_id
-    return current_tenant_id()
+# Unsealed-store cache keyed by path (paths are tenant-scoped, so one entry per
+# tenant) and invalidated by mtime -- resolve() runs on EVERY connector tool
+# call when env creds are unset, and must not re-decrypt an unchanged file.
+_cache: dict[str, tuple[int, dict[str, dict]]] = {}
 
 
 def _load() -> dict[str, dict]:
+    from .paths import current_tenant_id
     path = _path()
-    if not path.exists():
-        return {}
     try:
-        raw = unseal_text_for_tenant(_seal_tenant(), path.read_bytes())
+        mtime = path.stat().st_mtime_ns
+    except OSError:
+        return {}
+    key = str(path)
+    hit = _cache.get(key)   # single dict ops are GIL-atomic; a lost race just re-parses
+    if hit and hit[0] == mtime:
+        return hit[1]
+    try:
+        raw = unseal_text_for_tenant(current_tenant_id(), path.read_bytes())
         data = json.loads(raw)
-        return data if isinstance(data, dict) else {}
+        if not isinstance(data, dict):
+            return {}
     except (FileNotFoundError, ValueError, OSError):
         return {}
+    _cache[key] = (mtime, data)
+    return data
 
 
 def _save(data: dict[str, dict]) -> None:
+    from .paths import current_tenant_id
     path = _path()
-    blob = seal_text_for_tenant(_seal_tenant(), json.dumps(data, sort_keys=True))
+    blob = seal_text_for_tenant(current_tenant_id(), json.dumps(data, sort_keys=True))
     path.parent.mkdir(mode=0o700, parents=True, exist_ok=True)
     tmp = path.with_suffix(".sealed.tmp")
     fd = os.open(tmp, os.O_WRONLY | os.O_CREAT | os.O_TRUNC, 0o600)
     with os.fdopen(fd, "wb") as f:
         f.write(blob)
     os.replace(tmp, path)
+    _cache.pop(str(path), None)   # next _load() re-reads the fresh file
 
 
 def normalize_name(name: str) -> str:
@@ -78,10 +92,17 @@ def normalize_name(name: str) -> str:
 
 
 def set_connection(name: str, *, connector: str = "", base_url: str = "",
-                   token: str = "", owner: str = "") -> dict:
+                   token: str = "", owner: str = "",
+                   expected_owner: str | None = None) -> dict:
     """Create or replace a named connection (sealed). ``connector`` is the tool
     name it credentials (e.g. ``salesforce``); ``name`` may differ so one tool
-    can have several accounts. Raises ValueError on an unusable name."""
+    can have several accounts. Raises ValueError on an unusable name.
+
+    ``expected_owner`` (when not None) makes the overwrite conditional UNDER THE
+    STORE LOCK: replacing an existing connection owned by someone else raises
+    PermissionError -- the owner check and the write are one atomic step, so an
+    API-layer read-then-write can't race a concurrent create (mirrors
+    :func:`delete_connection`'s in-store owner enforcement)."""
     slug = normalize_name(name)
     if not _NAME_RE.match(slug):
         raise ValueError("connection name must be a slug (a-z, 0-9, -, _)")
@@ -91,7 +112,11 @@ def set_connection(name: str, *, connector: str = "", base_url: str = "",
         "created": time.time(), "owner": str(owner or ""),
     }
     with _lock:
-        data = _load()
+        data = dict(_load())
+        existing = data.get(slug)
+        if (expected_owner is not None and existing is not None
+                and existing.get("owner", "") != expected_owner):
+            raise PermissionError("a connection with that name already exists")
         data[slug] = rec
         _save(data)
     return _public(rec)
@@ -105,7 +130,7 @@ def get_connection(name: str) -> dict | None:
 def delete_connection(name: str, owner: str | None = None) -> bool:
     slug = normalize_name(name)
     with _lock:
-        data = _load()
+        data = dict(_load())
         rec = data.get(slug)
         if rec is None or (owner is not None and rec.get("owner", "") != owner):
             return False

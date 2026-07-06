@@ -887,8 +887,9 @@
   function jsonOr(v) { try { return v && (typeof v === 'object') ? JSON.stringify(v, null, 2) : (v || ''); } catch (e) { return ''; } }
 
   // ---- structured condition builder (key / op / value) with a raw fallback ----
-  var COND_OPS = ['==', '!=', '>', '<', '>=', '<=', 'contains'];
-  var COND_RE = /^\s*(\S+)\s*(==|!=|>=|<=|>|<|contains)\s*(.+?)\s*$/;
+  // Grammar lives in FDCore (the unit-tested shared module) -- no copy here.
+  var COND_OPS = FDCore.COND_OPS;
+  var COND_RE = FDCore.COND_RE;
   function conditionField(n, label, placeholder) {
     var wrap = document.createElement('div'); wrap.className = 'field';
     var head = document.createElement('div'); head.style.cssText = 'display:flex;justify-content:space-between;align-items:baseline;';

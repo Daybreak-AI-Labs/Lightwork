@@ -156,6 +156,12 @@ class FlowNode:
     @staticmethod
     def from_dict(d: dict) -> FlowNode:
         body = d.get("body")
+        # Legacy-shape migration, done HERE so every consumer (runner, sweep,
+        # designer, drafter) sees one field: old approvals encoded their expiry
+        # in `timeout` before `expires_after` existed.
+        expires_after = float(d.get("expires_after", 0.0) or 0.0)
+        if str(d.get("kind")) == NODE_APPROVAL and not expires_after:
+            expires_after = float(d.get("timeout", 0.0) or 0.0)
         return FlowNode(
             id=str(d["id"]), kind=str(d["kind"]),
             next=d.get("next"), tool=str(d.get("tool", "")),
@@ -168,7 +174,7 @@ class FlowNode:
             cases=[dict(c) for c in (d.get("cases") or []) if isinstance(c, dict)],
             choices=[str(c) for c in (d.get("choices") or [])],
             assignee=str(d.get("assignee", "")),
-            expires_after=float(d.get("expires_after", 0.0) or 0.0),
+            expires_after=expires_after,
             on_expire=d.get("on_expire"),
             form=[c for c in (d.get("form") or []) if isinstance(c, dict)],
             assignments=dict(d.get("assignments") or {}),

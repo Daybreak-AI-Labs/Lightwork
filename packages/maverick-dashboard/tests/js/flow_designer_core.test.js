@@ -198,3 +198,15 @@ test('fitView centers and clamps zoom', () => {
   // empty flow -> default view
   assert.deepEqual(FDCore.fitView([], 800, 600, 176, 64, 40), { x: 40, y: 20, k: 1 });
 });
+
+test('condition grammar parses simple predicates and rejects composites', () => {
+  // one source of truth for the builder UI -- mirrors runner._COND
+  const m = FDCore.COND_RE.exec('total >= 100');
+  assert.ok(m && m[1] === 'total' && m[2] === '>=' && m[3] === '100');
+  const c = FDCore.COND_RE.exec('name contains "bob"');
+  assert.ok(c && c[2] === 'contains');
+  assert.ok(FDCore.COND_OPS.includes('contains') && FDCore.COND_OPS.length === 7);
+  // quoted values keep their quotes (raw mode handles stripping)
+  const q = FDCore.COND_RE.exec('status == "open item"');
+  assert.equal(q[3], '"open item"');
+});

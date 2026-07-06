@@ -119,6 +119,7 @@ def execute(flow: Flow, *, agent_runner: AgentRunner, action_runner: ActionRunne
             approve_fn: Callable[[FlowNode, dict], str] | None = None,
             run_id: str | None = None,
             resume_run_id: str | None = None, decision: str | None = None,
+            expired: bool = False,
             from_failure: bool = False,
             inputs: dict | None = None, record_outcomes: bool = True,
             agent_budget_dollars: float = DEFAULT_AGENT_BUDGET, origin: str = "manual",
@@ -153,14 +154,28 @@ def execute(flow: Flow, *, agent_runner: AgentRunner, action_runner: ActionRunne
         owner = owner or prior.owner
         # Free-form human input merges into the run data on resume, so an approval
         # can also COLLECT data (a corrected value, a note) -- not just yes/no.
+        # When the paused node declares a `form`, only its declared field names
+        # are accepted -- the form is the server-side allowlist, so a resume
+        # caller can't overwrite arbitrary run-data keys (e.g. what a downstream
+        # branch routes on). A form-less node keeps free-form inputs.
         resume_data = dict(prior.data)
         if inputs:
+            paused = flow.node(prior.cursor) if prior.cursor else None
+            declared = [str(f.get("name")) for f in getattr(paused, "form", None) or []
+                        if isinstance(f, dict) and f.get("name")]
+            if declared:
+                inputs = {k: v for k, v in inputs.items() if k in declared}
             resume_data.update(inputs)
         resume = {"node_id": prior.cursor, "data": resume_data}
         if retryable_failure:
             resume["rerun"] = True
         elif prior.status == STATUS_PAUSED_APPROVAL:
-            resume["decision"] = decision or "approved"
+            # `expired` rides OUT OF BAND (the sweep's signal), never through
+            # the human-verdict string -- so no caller can forge an expiry.
+            if expired:
+                resume["expired"] = True
+            else:
+                resume["decision"] = decision or "approved"
     rid = run_id or store.new_run_id()
     # A fresh run may have a queued placeholder (saved at enqueue with the
     # idempotency key + original inputs) -- preserve those instead of resetting.
@@ -238,10 +253,21 @@ def execute(flow: Flow, *, agent_runner: AgentRunner, action_runner: ActionRunne
         node_outcomes.record(flow.id, TRIGGER_NODE, "trigger",
                              1.0 if res.status == STATUS_COMPLETED else 0.0)
 
+    # Snapshot the paused human task's declared UI (choices/form/assignee) onto
+    # the run, like `prompt` -- the viewer must render what the node said AT
+    # PAUSE time, not whatever the flow definition says by the time a human looks.
+    human: dict = {}
+    if res.status == STATUS_PAUSED_APPROVAL and res.cursor:
+        paused_node = flow.node(res.cursor)
+        if paused_node is not None:
+            human = {"choices": list(paused_node.choices),
+                     "assignee": paused_node.assignee,
+                     "form": [dict(f) for f in paused_node.form]}
     run = store.FlowRun(
         run_id=rid, flow_id=flow.id, status=res.status, data=res.data,
         cursor=res.cursor, resume_at=res.resume_at, prompt=res.prompt,
         error=res.error, owner=owner, origin=run_origin, cost_dollars=round(spent[0], 4),
+        human=human,
         created=(prior.created if resume_run_id and prior
                  else (placeholder.created if placeholder else 0.0)),
         nodes=node_states,
@@ -259,10 +285,8 @@ def execute(flow: Flow, *, agent_runner: AgentRunner, action_runner: ActionRunne
     # data pills can offer nested keys. Field names + types only; best-effort.
     if record_outcomes:
         from .schema_infer import infer_output_shapes
-        try:
-            store.record_flow_schema(flow.id, infer_output_shapes(flow, res.data))
-        except Exception:  # pragma: no cover -- a schema hint never fails a run
-            pass
+        # record_flow_schema owns the best-effort swallow.
+        store.record_flow_schema(flow.id, infer_output_shapes(flow, res.data))
     return run
 
 
