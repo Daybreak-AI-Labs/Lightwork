@@ -551,7 +551,11 @@ def _uipath_lower(activities: list, prefix: str,
                 _step_fallback(act, nid, nxt, label, "ForEach body unreadable -> agent step")
         elif atype in ("trycatch", "try"):
             try_act = act.get("try") or act.get("Try")
-            body = (_lowered_body({"children": _uipath_children(try_act)}, "s" + nid, f"{label} body")
+            # Lower the Try block AS an activity ([try_act]) -- not its children --
+            # so a single container Try (a While/If/ForEach) keeps its control
+            # node; _uipath_lower flattens a Sequence wrapper itself. Falls back
+            # to act's own children when Try isn't a nested dict.
+            body = (_lowered_body({"children": [try_act]}, "s" + nid, f"{label} body")
                     if isinstance(try_act, dict) else None) or _lowered_body(act, "s" + nid, f"{label} body")
             if body is not None:
                 nodes[nid] = FlowNode(id=nid, kind=NODE_SCOPE, body=body, next=nxt, label=label)

@@ -105,15 +105,29 @@ def _fn_slice(a: list) -> Any:
     return seq[start:end]
 
 
+# A nested UNBOUNDED quantifier (a group whose body has `*`/`+`, immediately
+# followed by another quantifier) is the classic catastrophic-backtracking
+# shape -- `(a+)+`, `(.*)*`, `(a+){2,}`. Python's `re` has no timeout, so we
+# reject the pattern outright rather than let it pin a shared worker.
+_REDOS_SHAPE = re.compile(r"\([^()]*[+*][^()]*\)[*+]|\([^()]*[+*][^()]*\)\{")
+_REGEX_MAX_PATTERN = 200
+_REGEX_MAX_SUBJECT = 2000
+
+
 def _fn_regex(a: list) -> str:
     """regex(value, pattern) -- the first match; group 1 if the pattern has a
-    capture group, else the whole match. Empty on no match / bad pattern. The
-    subject is length-capped so a pathological pattern can't run unbounded."""
+    capture group, else the whole match. Empty on no match / bad or unsafe
+    pattern. Guarded against ReDoS: the pattern is length-capped and rejected
+    if it has a nested unbounded quantifier, and the subject is length-capped
+    (Python's ``re`` offers no match timeout, so prevention is the only lever)."""
     if len(a) < 2:
         return ""
-    subject = _as_text(a[0])[:10000]
+    pattern = str(a[1])
+    if len(pattern) > _REGEX_MAX_PATTERN or _REDOS_SHAPE.search(pattern):
+        return ""
+    subject = _as_text(a[0])[:_REGEX_MAX_SUBJECT]
     try:
-        m = re.search(str(a[1]), subject)
+        m = re.search(pattern, subject)
     except re.error:
         return ""
     if not m:

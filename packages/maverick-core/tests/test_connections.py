@@ -71,3 +71,16 @@ def test_env_still_wins_over_connection(monkeypatch):
                                base_url="https://conn.acme", token="conn-tok")
     base, tok = _rest_connector._env_config("acme", "ACME_BASE_URL", "ACME_TOKEN")
     assert base == "https://env.acme" and tok == "env-tok"    # env precedence
+
+
+def test_env_base_wins_per_field_when_only_token_missing(monkeypatch):
+    # A set base_url env must NOT be swapped for the connection's URL just
+    # because the token env is unset (per-field precedence, not all-or-nothing).
+    from maverick.tools import _rest_connector
+    monkeypatch.setenv("ACME_BASE_URL", "https://sandbox.acme")
+    monkeypatch.delenv("ACME_TOKEN", raising=False)
+    connections.set_connection("acme", connector="acme",
+                               base_url="https://prod.acme", token="conn-tok")
+    base, tok = _rest_connector._env_config("acme", "ACME_BASE_URL", "ACME_TOKEN")
+    assert base == "https://sandbox.acme"   # env base kept, not prod.acme
+    assert tok == "conn-tok"                # token filled from the connection

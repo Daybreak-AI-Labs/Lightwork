@@ -627,9 +627,11 @@ here.
   approve/reject, recorded to `output` for a downstream switch), an `assignee`,
   an `expires_after` expiry (its own field, not the execution `timeout`) that
   routes to an `on_expire` escalation lane on lapse (else fails closed), and a
-  `form` of fields collected on sign-off (merged into flow data). The run
-  viewer renders the choice buttons + form inputs; the sweep sends the reserved
-  `EXPIRED` marker so expiry can escalate rather than only reject.
+  `form` of fields collected on sign-off (merged into flow data, filtered to the
+  declared field names). The run viewer renders the choice buttons + form inputs;
+  the expiry sweep resumes the run with an out-of-band `expired` flag (never a
+  human-verdict string, so no resume caller can forge it) so expiry escalates via
+  `on_expire` rather than only reject.
 
 - **Data experience** — the `{{ }}` transform set spans text (`split` `join`
   `slice` `regex` …), data (`index` `keys` …), number (`abs` `int` …), and time

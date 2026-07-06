@@ -956,7 +956,11 @@ async def test_connection_endpoint(request: Request, name: str) -> dict:
     _require_connections()
     from maverick import connections
     rec = connections.get_connection(name)
-    if rec is None:
+    # Owner-scope like list/delete/create: a non-admin can only test their own
+    # connection (else a name-guess is a cross-owner reachability oracle AND
+    # sends another owner's token). A 404 (not 403) so it can't confirm the name.
+    owner_filter = goal_owner_filter(request)
+    if rec is None or (owner_filter is not None and rec.get("owner", "") != owner_filter):
         raise HTTPException(status_code=404, detail="no such connection")
     base = str(rec.get("base_url") or "").rstrip("/")
     if not base:
@@ -964,19 +968,26 @@ async def test_connection_endpoint(request: Request, name: str) -> dict:
 
     def _probe() -> dict:
         try:
-            import httpx
+            from maverick.tools import _ssrf
             from maverick.tools.enterprise_connectors import auth_headers_for
             # Speak the connector's real auth dialect (basic / custom scheme /
             # extra headers), not a hardcoded Bearer -- else a working
             # basic-auth connection "fails" its test.
             headers = auth_headers_for(str(rec.get("connector") or ""),
                                        str(rec.get("token") or ""))
-            r = httpx.get(base, headers=headers, timeout=10.0, follow_redirects=True)
+            # This request carries the sealed token, so it MUST go through the
+            # governed SSRF-safe path: safe_get pins the host to a validated
+            # PUBLIC ip (blocks 169.254/127.0.0.1/private/link-local) and forces
+            # follow_redirects=False, so a base_url or a 3xx can't turn this into
+            # an internal-network probe or forward the token to another host.
+            r = _ssrf.safe_get(base, headers=headers, timeout=10.0)
             # 2xx/3xx or 401/403 all mean "reachable"; only a connect error is a hard fail.
             ok = r.status_code < 500
             return {"ok": ok, "status": r.status_code,
                     "detail": ("authenticated" if r.status_code < 400
                                else f"reachable but returned {r.status_code}")}
+        except _ssrf.BlockedHost:
+            return {"ok": False, "detail": "base URL host is not permitted"}
         except Exception as e:  # pragma: no cover -- network varies
             return {"ok": False, "detail": f"could not reach host: {type(e).__name__}"}
     return await run_in_threadpool(_probe)

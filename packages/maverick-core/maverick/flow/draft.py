@@ -111,7 +111,7 @@ def _sanitize(raw: dict, description: str) -> dict:
         raise ValueError("no usable nodes")
     ids = {n["id"] for n in clean}
     for n in clean:                       # drop routing that points nowhere
-        for key in ("next", "if_true", "if_false", "on_error"):
+        for key in ("next", "if_true", "if_false", "on_error", "on_expire"):
             if n.get(key) is not None and n.get(key) not in ids:
                 n[key] = None
         # A switch node's case arms are routing too; prune any that point at a

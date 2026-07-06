@@ -40,6 +40,14 @@ class TestStringAndCollectionTransforms:
         assert render("{{regex(s, \"zzz\")}}", {"s": "abc"}) == ""                 # no match
         assert render("{{regex(s, \"(\")}}", {"s": "abc"}) == ""                   # bad pattern -> safe
 
+    def test_regex_rejects_redos_patterns(self):
+        # a nested unbounded quantifier (catastrophic backtracking) is refused
+        # outright -> "" rather than pinning a worker (re has no timeout).
+        assert render("{{regex(s, \"(a+)+$\")}}", {"s": "aaaaaaaaaaaaaaaaX"}) == ""
+        assert render("{{regex(s, \"(.*)*\")}}", {"s": "abc"}) == ""
+        # a normal capture with a single '+' inside a group still works
+        assert render("{{regex(email, \"([a-z]+)@\")}}", {"email": "bob@x.com"}) == "bob"
+
     def test_abs_int_keys(self):
         assert render("{{abs(sub(3, 10))}}", {}) == "7"
         assert render("{{int(x)}}", {"x": "5.9"}) == "5"

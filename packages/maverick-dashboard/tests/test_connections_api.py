@@ -57,6 +57,22 @@ def test_test_endpoint_reports_unreachable_without_crashing(monkeypatch, tmp_pat
     assert c.post("/api/v1/connections/nope/test").status_code == 404
 
 
+def test_test_endpoint_blocks_ssrf_to_internal_hosts(monkeypatch, tmp_path):
+    # The probe carries the sealed token, so it MUST go through the SSRF-safe
+    # path: a base_url pointing at cloud metadata / a private host is refused
+    # (BlockedHost) BEFORE any request leaves -- no internal-network oracle, no
+    # token forwarded via a redirect.
+    _isolate(monkeypatch, tmp_path)
+    c = _client()
+    for host in ("http://169.254.169.254/latest/meta-data/",
+                 "http://127.0.0.1/", "http://10.0.0.5/"):
+        c.post("/api/v1/connections", json={"name": "ssrf", "base_url": host, "token": "t"})
+        r = c.post("/api/v1/connections/ssrf/test")
+        assert r.status_code == 200, r.text
+        j = r.json()
+        assert j["ok"] is False and "not permitted" in j["detail"], (host, j)
+
+
 def test_connections_page_renders(monkeypatch, tmp_path):
     _isolate(monkeypatch, tmp_path)
     r = _client().get("/connections")

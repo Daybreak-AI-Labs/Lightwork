@@ -63,10 +63,15 @@ def _env_config(name: str, base_url_env: str, token_env: str) -> tuple[str, str]
     base = os.environ.get(base_url_env, "").strip().rstrip("/")
     tok = os.environ.get(token_env, "").strip()
     if not base or not tok:
-        # resolve() guarantees a non-empty token; base_url can still be blank.
         conn = _connection_fallback(name)
-        if conn and conn[0]:
-            return conn
+        if conn:
+            # PER-FIELD precedence: a set env var always wins; the connection
+            # only fills a field the env left unset. So a sandbox base_url in
+            # env is never silently swapped for the connection's production URL
+            # just because the token env happens to be unset.
+            base = base or str(conn[0]).rstrip("/")
+            tok = tok or conn[1]
+    if not base or not tok:
         raise RuntimeError(
             f"{name} requires {base_url_env} + {token_env} "
             f"(or a saved '{name}' connection).")

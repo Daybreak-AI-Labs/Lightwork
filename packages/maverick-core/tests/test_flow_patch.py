@@ -53,6 +53,21 @@ def test_set_field_and_flow_field():
     assert out.name == "Issue triage"
 
 
+def test_set_field_accepts_rich_human_task_fields():
+    # the copilot's schema documents these approval fields, so set_field must
+    # accept them (else "make it expire after a day and escalate to n2" fails).
+    out = apply_patches(_flow(), [
+        {"op": "set_field", "id": "n1", "field": "expires_after", "value": 86400},
+        {"op": "set_field", "id": "n1", "field": "on_expire", "value": "n2"},
+        {"op": "set_field", "id": "n1", "field": "assignee", "value": "ops"},
+        {"op": "set_field", "id": "n1", "field": "form",
+         "value": [{"name": "note", "label": "Why?"}]},
+    ])
+    assert out.nodes["n1"].expires_after == 86400.0
+    assert out.nodes["n1"].on_expire == "n2" and out.nodes["n1"].assignee == "ops"
+    assert out.validate() == []
+
+
 def test_set_field_rejects_id_and_unknown_fields():
     with pytest.raises(PatchError, match="not editable"):
         apply_patches(_flow(), [{"op": "set_field", "id": "n0", "field": "id", "value": "zz"}])
