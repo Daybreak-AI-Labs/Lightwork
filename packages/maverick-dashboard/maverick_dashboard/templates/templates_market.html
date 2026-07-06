@@ -1,11 +1,11 @@
 {% extends "base.html" %}
-{% block title %}templates · Lightwork{% endblock %}
+{% block title %}Templates · Lightwork{% endblock %}
 {% block content %}
 <div class="tplm">
   <h1 class="page-title">Templates</h1>
   <p class="muted" style="margin: var(--space-1) 0 var(--space-5); max-width: 64ch;">
-    Reusable goal patterns (user-installed + bundled) with your star ratings
-    (<code>maverick template rate</code>). “Use” prefills the chat form — nothing
+    Reusable goal patterns — the ones your team has added plus the bundled set —
+    with your star ratings. “Use” prefills the chat form — nothing
     starts until you press Run. <a href="/api/v1/templates/suggested">Suggested for you →</a>
   </p>
 
@@ -34,8 +34,12 @@
   {% else %}
     <div class="mv-empty">
       <p class="mv-empty__title">No templates yet</p>
-      <p class="mv-empty__body">Build one in the workflow builder, or drop a <code>&lt;name&gt;.md</code> into <code>~/.maverick/templates/</code>, or install one with <code>maverick template install &lt;name&gt;</code>.</p>
+      <p class="mv-empty__body">Build one in the workflow builder.</p>
       <a class="btn btn--primary" href="/workflow-builder">New workflow</a>
+      <details style="margin-top: var(--space-3);">
+        <summary class="muted" style="cursor: pointer; font-size: var(--text-sm);">For developers: add templates from the command line</summary>
+        <p class="mv-empty__body" style="margin-top: var(--space-2);">Drop a <code>&lt;name&gt;.md</code> into <code>~/.maverick/templates/</code>, install one with <code>maverick template install &lt;name&gt;</code>, or rate one with <code>maverick template rate</code>.</p>
+      </details>
     </div>
   {% endif %}
 </div>

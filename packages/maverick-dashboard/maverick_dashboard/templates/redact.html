@@ -1,17 +1,14 @@
 {% extends "base.html" %}
-{% block title %}redact · Lightwork{% endblock %}
+{% block title %}Redaction Check · Lightwork{% endblock %}
 {% block content %}
-  <h2>granular redaction</h2>
+  <h1 class="page-title">Redaction check</h1>
+  <p class="page-subtitle">Paste text, see every secret or personal-data finding, choose which kinds to scrub, and copy the cleaned result. Nothing you paste is stored.</p>
   <div class="panel">
-    <p class="muted">
-      Paste text, see every secret/PII finding, choose which kinds to scrub,
-      and copy the provably-redacted result. Nothing is stored server-side.
-    </p>
     <label for="redact-input">Text to redact</label>
     <textarea id="redact-input" rows="8" style="width:100%"></textarea>
     <div id="kind-toggles" style="margin:0.5rem 0"></div>
     <button id="redact-preview">Preview</button>
-    <h3>result <span id="proof-badge" class="muted"></span></h3>
+    <h2>Result <span id="proof-badge" class="muted"></span></h2>
     <pre id="redact-output" style="white-space:pre-wrap"></pre>
   </div>
   <script>

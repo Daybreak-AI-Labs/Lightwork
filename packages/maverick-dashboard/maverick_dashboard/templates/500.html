@@ -5,8 +5,12 @@
     <h2 style="font-size: 1.4rem; color: var(--text); text-transform: none; letter-spacing: 0; font-weight: 600; margin-bottom: 0.75rem;">Something went wrong</h2>
     <p class="muted" style="max-width: 480px; margin: 0 auto 1.5rem;">
       The dashboard caught an unexpected error on <code>{{ path or request.url.path }}</code>.
-      Check <code>maverick logs</code> or the server output for the full trace.
+      Try again, and if this keeps happening ask your administrator to check the server logs.
     </p>
+    <details style="max-width: 480px; margin: 0 auto 1.5rem;">
+      <summary class="muted" style="cursor: pointer; font-size: var(--text-sm);">For administrators: finding the full trace</summary>
+      <p class="muted" style="margin: 0.5rem 0 0;">Check <code>maverick logs</code> or the server output for the full trace.</p>
+    </details>
     <p style="margin-top: 1.5rem;">
       <a href="/" style="color: var(--accent);">Back to the overview</a>
     </p>

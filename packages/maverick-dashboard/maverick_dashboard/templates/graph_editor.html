@@ -1,5 +1,5 @@
 {% extends "base.html" %}
-{% block title %}graph editor · Lightwork{% endblock %}
+{% block title %}Goal Map · Lightwork{% endblock %}
 {% block content %}
 <style>
   .ge-wrap { display: grid; grid-template-columns: minmax(0, 1fr) 320px; gap: 1rem; }
@@ -27,7 +27,8 @@
   .tree > ul { padding-inline-start: 0; border-inline-start: 0; }
 </style>
 <p class="muted"><a href="/goals">← all goals</a> · <a href="/plan-tree-3d">3D view</a></p>
-<h2>visual graph editor</h2>
+<h1 class="page-title">Goal map</h1>
+<p class="page-subtitle">Every goal in this deployment as a living map — click a node to select it, rename goals, and reorganize how they nest.</p>
 <div class="panel">
   <div class="legend">
     <span><span class="badge active">active</span></span>
@@ -40,7 +41,7 @@
   <div class="ge-wrap">
     <svg id="ge-svg" role="img" aria-label="Goal graph: {{ node_count }} goals, drawn as a force-directed constellation. Use the editor panel beside the graph to select and edit nodes without a pointer."></svg>
     <div class="ge-form panel" style="margin-bottom: 0;">
-      <h3 style="margin: 0; font-size: 0.78rem; color: var(--muted); text-transform: uppercase; letter-spacing: 0.08em;">Edit a goal</h3>
+      <h2 style="margin: 0; font-size: 0.78rem; color: var(--muted); text-transform: uppercase; letter-spacing: 0.08em;">Edit a goal</h2>
 
       <label for="ge-select">Selected goal</label>
       <select id="ge-select"><option value="">(click a node or pick here)</option></select>

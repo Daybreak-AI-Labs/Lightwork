@@ -1,5 +1,5 @@
 {% extends "base.html" %}
-{% block title %}goal #{{ goal.id }} · Lightwork{% endblock %}
+{% block title %}Goal #{{ goal.id }} · Lightwork{% endblock %}
 {% block content %}
 <style>
   /* Goal as a conversation — same column + composer language as /chat, so
@@ -297,10 +297,18 @@
       <div class="halt-card__title">Stopped before finishing</div>
       <p id="halt-reason" class="muted" style="margin: var(--space-2) 0 0;"></p>
       <p class="muted" style="margin: var(--space-3) 0 0; font-size: var(--text-sm);">
-        This usually means the goal reached its budget or time cap, the killswitch was armed, or it hit an error.
-        <a href="/oversight">Open Oversight</a> for details, or resume with a higher cap from the command line:
-        <code>maverick resume {{ goal.id }} --max-dollars 5</code>
+        This usually means the goal reached its budget or time cap, the emergency stop was armed, or it hit an error.
+        You can resume it from here, or <a href="/oversight">open Oversight</a> for details.
       </p>
+      <div style="display: flex; align-items: center; gap: var(--space-2); margin-top: var(--space-3);">
+        <button id="halt-resume" class="btn btn--primary" type="button">Resume this goal</button>
+        <span id="halt-resume-msg" role="status" aria-live="polite" class="muted" style="font-size: var(--text-sm);"></span>
+      </div>
+      <details style="margin-top: var(--space-3);">
+        <summary class="muted" style="cursor: pointer; font-size: var(--text-sm);">For developers: resume from the command line</summary>
+        <p class="muted" style="margin: var(--space-2) 0 0; font-size: var(--text-sm);">Resume with a higher cap:
+          <code>maverick resume {{ goal.id }} --max-dollars 5</code></p>
+      </details>
     </div>
   </div>
 
@@ -593,6 +601,33 @@
       // Poll questions on a longer cadence so the form picks up on
       // ask_user that happens between event ticks.
       setInterval(function() { if (!done) pollQuestions(); }, 5000);
+    })();
+  </script>
+  <script>
+    // Resume a halted goal in-app: same endpoint the CLI parity route exposes
+    // (POST /api/v1/goals/{id}/resume flips blocked/cancelled/failed back to
+    // pending and re-queues the runner).
+    (function () {
+      var btn = document.getElementById('halt-resume');
+      if (!btn) return;
+      var msg = document.getElementById('halt-resume-msg');
+      var goalId = {{ goal.id }};
+      btn.addEventListener('click', function () {
+        btn.disabled = true;
+        msg.textContent = 'Resuming…';
+        fetch('/api/v1/goals/' + goalId + '/resume', { method: 'POST' })
+          .then(function (r) {
+            if (r.ok || r.status === 204) { location.reload(); return null; }
+            return r.json().catch(function () { return {}; }).then(function (j) {
+              msg.textContent = j.detail || ('Could not resume (' + r.status + ').');
+              btn.disabled = false;
+            });
+          })
+          .catch(function () {
+            msg.textContent = 'Could not resume — check your connection.';
+            btn.disabled = false;
+          });
+      });
     })();
   </script>
   <script>

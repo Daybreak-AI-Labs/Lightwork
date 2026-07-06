@@ -1,5 +1,5 @@
 {% extends "base.html" %}
-{% block title %}providers · Lightwork{% endblock %}
+{% block title %}Providers · Lightwork{% endblock %}
 {% block content %}
   <h1 class="page-title">Providers</h1>
   <p class="page-subtitle">Live provider health — calls, error rates, latency, and spend (in-memory, resets on restart).</p>
@@ -48,7 +48,10 @@
   {% endif %}
 </section>
 <section class="panel">
-  <h2>scrape</h2>
-  <p class="muted">JSON snapshot: <code>GET /api/v1/providers</code></p>
+  <h2>Monitoring export</h2>
+  <details>
+    <summary class="muted" style="cursor: pointer; font-size: var(--text-sm);">For developers: fetch these stats as JSON</summary>
+    <p class="muted" style="margin-top: var(--space-2);">JSON snapshot: <code>GET /api/v1/providers</code></p>
+  </details>
 </section>
 {% endblock %}

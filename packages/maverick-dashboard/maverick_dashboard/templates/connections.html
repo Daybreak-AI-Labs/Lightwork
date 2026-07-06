@@ -1,5 +1,5 @@
 {% extends "base.html" %}
-{% block title %}connections · Lightwork{% endblock %}
+{% block title %}Connections · Lightwork{% endblock %}
 {% block content %}
 <style>
   .cx { max-width: 820px; }
@@ -22,10 +22,14 @@
 </style>
 
 <div class="cx">
-  <h1 style="margin:0 0 4px;">Connections</h1>
-  <p class="cx__sub">Store a connector's base URL and API token once, under a name, sealed at rest —
-    then wire the connector in a flow without touching environment variables. An existing
-    <code>&lt;NAME&gt;_TOKEN</code> env var still takes precedence.</p>
+  <h1 class="page-title" style="margin:0 0 4px;">Connections</h1>
+  <p class="cx__sub">Save a connector's web address and API token once, under a name — stored
+    encrypted — then use that connector in your flows with no further setup.</p>
+  <details style="margin-bottom: var(--space-4);">
+    <summary class="muted" style="cursor: pointer; font-size: var(--text-sm);">For administrators: token precedence</summary>
+    <p class="cx__sub" style="margin-top: var(--space-2);">An existing
+      <code>&lt;NAME&gt;_TOKEN</code> env var still takes precedence over a saved connection.</p>
+  </details>
 
   <form class="cx__form" id="cx-form" autocomplete="off">
     <div><label for="cx-name">Name</label>
@@ -57,7 +61,7 @@
 
   function load() {
     api('/api/v1/connections').then(function (r) {
-      if (r.status === 403) { say('Connections are off — enable [connections] or set MAVERICK_CONNECTIONS=1.', true); return { connections: [] }; }
+      if (r.status === 403) { say('Connections are turned off — an administrator can enable them in Settings.', true); return { connections: [] }; }
       return r.ok ? r.json() : { connections: [] };
     }).then(function (j) {
       var conns = j.connections || [];

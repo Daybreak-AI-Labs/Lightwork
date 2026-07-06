@@ -1,20 +1,24 @@
 {% extends "base.html" %}
-{% block title %}perf · Lightwork{% endblock %}
+{% block title %}Performance · Lightwork{% endblock %}
 {% block content %}
-  <h2>performance</h2>
+  <h1 class="page-title">Performance</h1>
+  <p class="page-subtitle">Service-level checks measured live on this host, plus recorded benchmark history.</p>
 
   <div class="panel">
-    <p class="muted">
-      The published perf SLA (<code>docs/perf-sla.md</code>) measured live on
-      this host, plus recorded benchmark history. Loaded from
-      <code>/api/v1/perf</code>.
-    </p>
-    <h3>SLA</h3>
+    <details style="margin-bottom: var(--space-3);">
+      <summary class="muted" style="cursor: pointer; font-size: var(--text-sm);">For developers: where these numbers come from</summary>
+      <p class="muted" style="margin-top: var(--space-2);">
+        The published perf SLA (<code>docs/perf-sla.md</code>) measured live on
+        this host, plus recorded benchmark history. Loaded from
+        <code>/api/v1/perf</code>.
+      </p>
+    </details>
+    <h2>SLA</h2>
     <table id="sla-table">
       <thead><tr><th>check</th><th>measured</th><th>threshold</th><th>verdict</th></tr></thead>
       <tbody></tbody>
     </table>
-    <h3>benchmarks</h3>
+    <h2>Benchmarks</h2>
     <table id="bench-table">
       <thead><tr><th>benchmark</th><th>runs</th><th>latest</th><th>best</th><th>trend</th><th>regression</th></tr></thead>
       <tbody></tbody>
