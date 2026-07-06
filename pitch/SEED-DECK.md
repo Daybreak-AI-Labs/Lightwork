@@ -107,7 +107,7 @@ flowchart LR
 - **2,020 prebuilt, least-privilege specialist packs across 53 suites** — `maverick domains-lint`: **0 errors, 0 warnings.** Run it yourself.
 - **The frontier, per the field itself:** the academic survey that organized self-improving agents names *governance of co-evolution* as the open challenge — and **no published system ships signed, auditable proof of what was learned, with rollback. We productized it.**
 
-**Speaker notes:** "Everyone in this market can make an agent smarter this quarter — that's the commodity layer. The question a regulated buyer asks is 'prove it's learning *safely*.' We're the only platform where the harness, the agents, the agent factory, and even the platform's own code improve under one rule: show evidence on work you haven't seen, get a human signature, leave a tamper-evident receipt, stay reversible. The literature calls governed co-evolution the open frontier; we hold the productized version of it — ~660,000 lines of it, not a prompt over an API."
+**Speaker notes:** "Everyone in this market can make an agent smarter this quarter — that's the commodity layer. The question a regulated buyer asks is 'prove it's learning *safely*.' We're the only platform where the harness, the agents, the agent factory, and even the platform's own code improve under one rule: show evidence on work you haven't seen, get a human signature, leave a tamper-evident receipt, stay reversible. The literature calls governed co-evolution the open frontier; we hold the productized version of it — deep, tested infrastructure, not a prompt over an API."
 
 **Visual:** Four stacked layers (Harness · Agents · Factory · Code), each with the same small badge repeated: "evidence → signature → receipt → reversible." One motif, four layers — the repetition IS the message.
 
@@ -196,7 +196,7 @@ flowchart LR
 ## Slide 11 — Traction & what's built
 
 **On slide:**
-- **Built and installable today (alpha):** ~660K lines across 8 packages — ~240K product code + ~200K tests (**13,300+ test functions, near 1:1 test-to-code**) — native installers for Win/macOS/Linux, self-host or air-gap.
+- **Built and installable today (alpha):** 8 packages, native installers for Win/macOS/Linux, self-host or air-gap — with **13,300+ automated tests (near 1:1 test-to-code)** behind it.
 - **The product proves itself, live:** 21 governance & learning guarantees run green on a fresh machine (Proof Pack 7 · containment eval 5/5 at 100% prevention/100% utility · learning-loop 9/9), 2,020 lint-clean packs (0 errors). The governed self-modification chassis is built and tested (192 tests) — **the live evidence campaign is what this round runs.**
 - **Design partners / pilots:** `[FILL: e.g. "2 BFSI design partners in conversation; 1 signed LOI"]`
 - **Revenue:** `[FILL: pre-revenue / $X MRR / pilot value]`
