@@ -418,8 +418,12 @@ def _tool_status(output: str) -> str:
 # Cap any single result; the model keeps the head + tail and is told how to get
 # the rest. ~32 KB chars (~8k tokens) — the old 100 KB default let one result
 # inject ~25k tokens that compaction never touches while it sits in the recent
-# window. Tune via MAVERICK_MAX_TOOL_RESULT_BYTES.
-_MAX_TOOL_RESULT_BYTES = max(2_000, env_int("MAVERICK_MAX_TOOL_RESULT_BYTES", 32_000))
+# window. Scales up with the driving model's context window (32 KB is the
+# 200k-window baseline; see _tool_result_limit). Tune via
+# MAVERICK_MAX_TOOL_RESULT_BYTES.
+_DEFAULT_TOOL_RESULT_BYTES = 32_000
+_MAX_TOOL_RESULT_BYTES = max(
+    2_000, env_int("MAVERICK_MAX_TOOL_RESULT_BYTES", _DEFAULT_TOOL_RESULT_BYTES))
 
 
 def unframe_tool_output(framed: str) -> str:
@@ -443,12 +447,13 @@ def unframe_tool_output(framed: str) -> str:
 def _tool_result_limit(model: str | None = None) -> int:
     """Effective per-result byte cap for ``model``.
 
-    An explicit MAVERICK_MAX_TOOL_RESULT_BYTES wins outright (even to
-    shrink); otherwise the default scales with the driving model's context
-    window (context_scaling.tool_result_bytes -- 100 KB at a 200k window,
-    larger above it), so a big-window model isn't stuck with a cap tuned
-    for a smaller one."""
-    if os.environ.get("MAVERICK_MAX_TOOL_RESULT_BYTES"):
+    An explicit cap (MAVERICK_MAX_TOOL_RESULT_BYTES, or a test patching
+    ``_MAX_TOOL_RESULT_BYTES``) wins outright, even to shrink; otherwise
+    the default scales with the driving model's context window
+    (context_scaling.tool_result_bytes -- 32 KB at a 200k window, larger
+    above it), so a big-window model isn't stuck with a cap tuned for a
+    smaller one."""
+    if _MAX_TOOL_RESULT_BYTES != _DEFAULT_TOOL_RESULT_BYTES:
         return _MAX_TOOL_RESULT_BYTES
     try:
         from .context_scaling import tool_result_bytes

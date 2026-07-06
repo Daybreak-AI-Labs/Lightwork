@@ -44,7 +44,7 @@ LEGACY_HISTORY_TURN_CHARS = 300
 LEGACY_COMPACT_WINDOW_TURNS = 50
 LEGACY_COMPACT_TARGET_TOKENS = 1500
 LEGACY_MAX_OUTPUT_TOKENS = 4096
-LEGACY_TOOL_RESULT_BYTES = 100_000
+LEGACY_TOOL_RESULT_BYTES = 32_000
 
 # Hard ceilings so a 10M-window model can't turn one goal into an
 # unbounded prompt (budget caps still apply on top of all of this).
@@ -172,12 +172,13 @@ def tool_result_bytes(model: str | None = None) -> int:
     """Per-tool-result byte cap before a result enters the context.
 
     ``MAVERICK_MAX_TOOL_RESULT_BYTES`` (read at the call site) still wins
-    outright; this only scales the default. window/2 tokens * ~4 chars/token
-    /4 = window//2 bytes: a 200k window keeps the legacy 100 KB exactly.
+    outright; this only scales the default, keeping the token-efficiency
+    baseline ratio (32 KB at a 200k window = window * 4 // 25) as the
+    window grows.
     """
     if not enabled():
         return LEGACY_TOOL_RESULT_BYTES
-    return _clamp(model_window(model) // 2,
+    return _clamp(model_window(model) * 4 // 25,
                   LEGACY_TOOL_RESULT_BYTES, _MAX_TOOL_RESULT_BYTES)
 
 

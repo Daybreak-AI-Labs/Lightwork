@@ -865,8 +865,9 @@ async def _build_orchestrator_brief(
     if goal.description:
         from . import long_context_router as _lcr
         try:
-            description = _lcr.route(goal.description, goal.title,
-                                     model=_orch_model)
+            # route() resolves the driving model itself for its scaled
+            # threshold default; the 2-arg call shape is a stable seam.
+            description = _lcr.route(goal.description, goal.title)
         except Exception:  # pragma: no cover -- never block a run on routing
             description = goal.description
 

@@ -39,7 +39,7 @@ class TestScaledBounds:
         assert cs.compact_window_turns(model) == 200   # 200k // 1000
         assert cs.compact_target_tokens(model) == 25_000
         assert cs.router_threshold_tokens(model) == 180_000
-        assert cs.tool_result_bytes(model) == 100_000  # legacy cap == 200k case
+        assert cs.tool_result_bytes(model) == 32_000  # baseline == 200k case
 
     def test_1m_window_scales_further(self, monkeypatch):
         _clear_env(monkeypatch)
@@ -49,7 +49,7 @@ class TestScaledBounds:
         assert cs.compact_target_tokens(model) == 125_000
         assert cs.router_threshold_tokens(model) == 900_000
         assert cs.max_output_tokens(model) == 32_000   # ceiling
-        assert cs.tool_result_bytes(model) == 500_000
+        assert cs.tool_result_bytes(model) == 160_000
 
     def test_small_window_keeps_legacy_floors(self, monkeypatch):
         _clear_env(monkeypatch)
@@ -103,12 +103,11 @@ class TestDeclaredWindows:
 
 
 class TestAgentWiring:
-    def test_turn_max_tokens_uses_scaling(self, monkeypatch):
+    def test_explicit_tool_result_cap_wins_outright(self, monkeypatch):
         _clear_env(monkeypatch)
-        from maverick.agent import _tool_result_limit
-        # Env-set cap wins outright, even to shrink.
-        monkeypatch.setenv("MAVERICK_MAX_TOOL_RESULT_BYTES", "50000")
+        # An explicit cap (env / patched constant) wins, even to shrink.
         import maverick.agent as agent_mod
+        from maverick.agent import _tool_result_limit
         monkeypatch.setattr(agent_mod, "_MAX_TOOL_RESULT_BYTES", 50_000)
         assert _tool_result_limit("gemini-3-pro") == 50_000
 
@@ -116,8 +115,8 @@ class TestAgentWiring:
         _clear_env(monkeypatch)
         monkeypatch.delenv("MAVERICK_MAX_TOOL_RESULT_BYTES", raising=False)
         from maverick.agent import _tool_result_limit
-        assert _tool_result_limit("gemini-3-pro") == 500_000
-        assert _tool_result_limit("claude-opus-4-8") == 100_000
+        assert _tool_result_limit("gemini-3-pro") == 160_000
+        assert _tool_result_limit("claude-opus-4-8") == 32_000
 
 
 class TestRouterWiring:
