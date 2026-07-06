@@ -1,5 +1,5 @@
 {% extends "base.html" %}
-{% block title %}learning · Lightwork{% endblock %}
+{% block title %}Learning · Lightwork{% endblock %}
 {% block content %}
 <style>
   .lrn { max-width: 900px; margin-inline: auto; }
@@ -143,14 +143,22 @@
         <span class="badge {{ 'active' if c.on else '' }}">{{ 'on' if c.on else 'off' }}</span>
         <div class="lrn__row-main">
           <div class="lrn__row-label">{{ c.label }}</div>
-          <div class="lrn__row-how">enable: <code>{{ c.how }}</code></div>
         </div>
       </li>
       {% endfor %}
     </ul>
-    <p class="lrn__enable-note">Set these in <code>~/.maverick/config.toml</code> (or the shown environment variables).
-      Once <code>[consequence]</code> is on, every human sign-off on a deliverable becomes grounded reward automatically —
-      see <a href="/workforce">Workforce</a> for what your teams have delivered, and <a href="/learned">Learned</a> for capabilities acquired mid-run.</p>
+    <p class="lrn__enable-note">Use the button above to turn learning on or off.
+      Once outcome tracking is on, every human sign-off on a deliverable automatically becomes
+      feedback your workforce learns from — see <a href="/workforce">Workforce</a> for what your
+      teams have delivered, and <a href="/learned">Learned</a> for capabilities picked up along the way.</p>
+    <details style="margin-top: var(--space-3);">
+      <summary class="muted" style="cursor: pointer; font-size: var(--text-sm);">For administrators: enable individual systems in the server configuration</summary>
+      <ul class="muted" style="font-size: var(--text-sm);">
+        {% for c in snap.components %}
+        <li>{{ c.label }} — <code>{{ c.how }}</code></li>
+        {% endfor %}
+      </ul>
+    </details>
   </section>
 </div>
 {% endblock %}

@@ -92,6 +92,8 @@ from .api_schemas import (
     TenantRoleIn,
     TriggerIn,
     TriggerOut,
+    TrustAgentIn,
+    TrustRevokeIn,
     WorkflowDraftIn,
     WorkflowRefineIn,
     WorkflowSaveIn,
@@ -3965,6 +3967,54 @@ async def trust_agents(request: Request) -> dict:
     return trust_overview()
 
 
+@router.post("/trust/agents", status_code=201)
+async def trust_agent_register(request: Request, payload: TrustAgentIn) -> dict:
+    """Register or replace an external agent from the app (admin).
+
+    Writes the dashboard/CLI-managed overlay (``agent_trust.json``), never the
+    operator's config file; a managed entry with the same id overrides the
+    config-file one, so admins can also amend hand-edited entries here."""
+    require_permission(request, "admin")
+    from maverick.agent_trust import AgentTrustError, put_agent
+    try:
+        agent = put_agent(payload.model_dump())
+    except AgentTrustError as e:
+        raise HTTPException(status_code=400, detail=str(e)) from e
+    return {"ok": True, "id": agent.id}
+
+
+@router.post("/trust/agents/{agent_id}/revoke")
+async def trust_agent_revoke(request: Request, agent_id: str,
+                             payload: TrustRevokeIn) -> dict:
+    """Revoke (or restore) a managed external agent (admin). Entries defined in
+    the operator's config file can't be flipped here -- register the same id
+    from the app first to take it under management."""
+    require_permission(request, "admin")
+    from maverick.agent_trust import set_revoked
+    if not set_revoked(agent_id, payload.revoked):
+        raise HTTPException(
+            status_code=404,
+            detail="this agent is defined in the server's config file, not in "
+                   "the app-managed registry. Register the same id here to "
+                   "override it, or ask your administrator to edit the config.",
+        )
+    return {"ok": True, "id": agent_id, "revoked": payload.revoked}
+
+
+@router.delete("/trust/agents/{agent_id}", status_code=204)
+async def trust_agent_remove(request: Request, agent_id: str) -> None:
+    """Remove a managed external agent (admin). Config-file entries reappear
+    after their managed override is deleted; the same 404 rule applies."""
+    require_permission(request, "admin")
+    from maverick.agent_trust import remove_agent
+    if not remove_agent(agent_id):
+        raise HTTPException(
+            status_code=404,
+            detail="this agent is not in the app-managed registry (it may be "
+                   "defined in the server's config file).",
+        )
+
+
 @router.get("/discovery")
 async def discovery(request: Request) -> dict:
     """Inventory of governable surfaces: tools (by risk), MCP servers (with
@@ -4014,7 +4064,7 @@ async def compliance_packet_download(request: Request) -> Response:
         content=body,
         media_type="application/json",
         headers={
-            "Content-Disposition": 'attachment; filename="maverick-compliance-packet.json"',
+            "Content-Disposition": 'attachment; filename="lightwork-compliance-packet.json"',
         },
     )
 
@@ -4502,7 +4552,7 @@ async def compliance_report_md(framework: str = "all") -> Response:
     from maverick.compliance import render_report_text
     framework, checks = _compliance_checks(framework)
     body = render_report_text(checks)
-    fname = f"maverick-compliance-{framework}.md"
+    fname = f"lightwork-compliance-{framework}.md"
     return Response(
         content=body,
         media_type="text/markdown",
@@ -4529,7 +4579,7 @@ async def compliance_report_csv(framework: str = "all") -> Response:
         writer.writerow([c.framework, c.control, c.regulation, c.status, c.detail])
     writer.writerow([])
     writer.writerow(["disclaimer", COMPLIANCE_DISCLAIMER])
-    fname = f"maverick-compliance-{framework}.csv"
+    fname = f"lightwork-compliance-{framework}.csv"
     return Response(
         content=buf.getvalue(),
         media_type="text/csv",

@@ -642,7 +642,12 @@ def _require_same_origin(request: Request) -> None:
     """Reject a cross-site mutating form POST (403). Shared CSRF guard inlined by
     ~20 form handlers."""
     if not _is_same_origin(request):
-        raise HTTPException(status_code=403, detail="cross-site form post blocked")
+        raise HTTPException(
+            status_code=403,
+            detail="cross-site form post blocked — for your security, changes "
+                   "must be made from the Lightwork page itself. Reload the "
+                   "dashboard and try again.",
+        )
 
 
 def _is_loopback_client(host: str) -> bool:
@@ -763,7 +768,9 @@ async def bearer_auth(request: Request, call_next):
             # only behind the operator's explicit opt-in (see extension_cors).
             if not _is_same_origin(request) and _allowed_extension_origin(request) is None:
                 return JSONResponse(
-                    {"detail": "cross-site request blocked"},
+                    {"detail": "cross-site request blocked — for your security, "
+                               "changes must be made from the Lightwork page "
+                               "itself. Reload the dashboard and try again."},
                     status_code=403,
                 )
             return await call_next(request)
@@ -856,7 +863,15 @@ async def security_headers(request: Request, call_next):
     response = await call_next(request)
     response.headers.setdefault("X-Frame-Options", "DENY")
     response.headers.setdefault("X-Content-Type-Options", "nosniff")
-    response.headers.setdefault("Referrer-Policy", "no-referrer")
+    # "same-origin", NOT "no-referrer": under no-referrer the Fetch spec makes
+    # browsers send "Origin: null" on same-origin form POST navigations, which
+    # the CSRF guard (_is_same_origin) must reject — so every native form save
+    # in the dashboard 403'd in a real browser ("cross-site request blocked")
+    # while fetch()-based saves (mode "cors" keeps the real Origin) and tests
+    # (explicit Origin header) still passed. same-origin keeps the privacy win
+    # (no Referer leaks to external sites) and restores Origin/Referer on
+    # first-party requests.
+    response.headers.setdefault("Referrer-Policy", "same-origin")
     response.headers.setdefault(
         "Cross-Origin-Opener-Policy", "same-origin",
     )
@@ -4710,13 +4725,24 @@ async def api_goal_events_stream(request: Request, goal_id: int, since: int = 0)
 _STATIC_DIR = Path(__file__).parent / "static"
 
 
-@app.get("/static/maverick-analytics.js")
+@app.get("/static/lightwork-analytics.js")
 async def embed_analytics_js() -> FileResponse:
-    """The embeddable ``<maverick-analytics>`` web component (plain JS, no
+    """The embeddable ``<lightwork-analytics>`` web component (plain JS, no
     framework). See the file's header comment for the same-origin + token
     caveats; /embed-demo shows it running."""
     return FileResponse(
-        _STATIC_DIR / "maverick-analytics.js",
+        _STATIC_DIR / "lightwork-analytics.js",
+        media_type="application/javascript; charset=utf-8",
+    )
+
+
+@app.get("/static/maverick-analytics.js")
+async def embed_analytics_js_legacy() -> FileResponse:
+    """Pre-rebrand URL for the analytics component. Pages that embedded the
+    script before the Lightwork rebrand keep working; the file itself also
+    registers the old <maverick-analytics> tag as an alias."""
+    return FileResponse(
+        _STATIC_DIR / "lightwork-analytics.js",
         media_type="application/javascript; charset=utf-8",
     )
 

@@ -320,7 +320,7 @@
       {% if scheduling_enabled %}
       <details class="wf__sched" id="wf-sched" hidden>
         <summary class="wf__sched-title"><span role="heading" aria-level="3">Run it on a schedule</span></summary>
-        <p class="wf__hint">Lightwork starts this workflow automatically. Schedules run while <code>maverick worker</code> is active.</p>
+        <p class="wf__hint">Lightwork starts this workflow automatically. Schedules run while the Lightwork background worker is on.</p>
         <div class="wf-grid">
           <div class="wf__field">
             <label for="sched-cadence">Cadence</label>
@@ -378,7 +378,7 @@
           <span class="wf__hint" id="trig-msg" aria-live="polite"></span>
         </div>
         <div id="trig-howto" hidden>
-          <p class="wf__hint">POST to this URL, HMAC-signed with your <code>[webhooks]</code> secret.<span id="trig-secret-warn" hidden> ⚠ No <code>[webhooks]</code> secret is set yet — configure one before the URL will accept calls.</span></p>
+          <p class="wf__hint">Other systems can start this workflow by sending a signed request to this address (your administrator holds the signing secret).<span id="trig-secret-warn" hidden> ⚠ No signing secret is set yet — an administrator must configure one before this address will accept calls.</span></p>
           <div class="wf__copyrow"><code id="trig-url"></code><button type="button" class="btn btn--ghost" id="trig-url-copy">Copy URL</button></div>
           <p class="wf__hint" style="margin: var(--space-3) 0 var(--space-1);">Or copy a ready-to-run signed request:</p>
           <pre class="wf__curl" id="trig-curl" aria-label="Signed curl example"></pre>

@@ -489,6 +489,97 @@
     .section-head h2 { margin: 0; font-size: var(--text-lg); }
     .section-head h2:focus-visible { outline: 2px solid var(--ring); outline-offset: 2px; }
     @media (prefers-reduced-motion: reduce) { .mv-toast, .mv-row, .card { animation: none; } }
+
+    /* =====================================================================
+       Liquid glass. Panels, chrome, and overlays become translucent,
+       backdrop-blurred surfaces floating over a soft ambient gradient tinted
+       by the active theme's brand/accent. Scoped in @supports so browsers
+       without backdrop-filter keep the solid look above. The high-contrast
+       theme and users who prefer reduced transparency keep solid surfaces —
+       readability always wins over the effect.
+       ===================================================================== */
+    @supports ((backdrop-filter: blur(1px)) or (-webkit-backdrop-filter: blur(1px))) {
+      body:not(.theme-hicontrast) {
+        --glass: color-mix(in srgb, var(--panel) 68%, transparent);
+        --glass-soft: color-mix(in srgb, var(--panel) 54%, transparent);
+        --glass-border: color-mix(in srgb, var(--text) 13%, transparent);
+        --glass-edge: inset 0 1px 0 0 color-mix(in srgb, #ffffff 8%, transparent);
+        background:
+          radial-gradient(1100px 720px at 88% -12%, color-mix(in srgb, var(--brand) 15%, transparent), transparent 62%),
+          radial-gradient(920px 640px at -12% 28%, color-mix(in srgb, var(--accent) 9%, transparent), transparent 58%),
+          radial-gradient(760px 540px at 55% 112%, color-mix(in srgb, var(--info) 8%, transparent), transparent 60%),
+          var(--bg);
+        background-attachment: fixed;
+      }
+      body:not(.theme-hicontrast) .panel,
+      body:not(.theme-hicontrast) .stat,
+      body:not(.theme-hicontrast) .card,
+      body:not(.theme-hicontrast) .mv-row,
+      body:not(.theme-hicontrast) .mv-empty {
+        background: var(--glass);
+        -webkit-backdrop-filter: blur(16px) saturate(150%);
+        backdrop-filter: blur(16px) saturate(150%);
+        border-color: var(--glass-border);
+        box-shadow: var(--shadow-sm), var(--glass-edge);
+      }
+      body:not(.theme-hicontrast) .topbar {
+        background: color-mix(in srgb, var(--panel) 56%, transparent);
+        -webkit-backdrop-filter: blur(18px) saturate(170%);
+        backdrop-filter: blur(18px) saturate(170%);
+        border-bottom-color: var(--glass-border);
+      }
+      body:not(.theme-hicontrast) .sidebar {
+        background: linear-gradient(180deg,
+          color-mix(in srgb, var(--panel) 46%, transparent),
+          color-mix(in srgb, var(--panel) 24%, transparent));
+        -webkit-backdrop-filter: blur(18px) saturate(160%);
+        backdrop-filter: blur(18px) saturate(160%);
+        border-inline-end-color: var(--glass-border);
+      }
+      body:not(.theme-hicontrast) .prefs__panel,
+      body:not(.theme-hicontrast) .mv-confirm {
+        background: var(--glass-soft);
+        -webkit-backdrop-filter: blur(24px) saturate(160%);
+        backdrop-filter: blur(24px) saturate(160%);
+        border-color: var(--glass-border);
+        box-shadow: var(--shadow-lg), var(--glass-edge);
+      }
+      body:not(.theme-hicontrast) .mv-confirm::backdrop {
+        background: var(--scrim);
+        -webkit-backdrop-filter: blur(3px);
+        backdrop-filter: blur(3px);
+      }
+      body:not(.theme-hicontrast) .btn--primary {
+        box-shadow: 0 2px 14px color-mix(in srgb, var(--brand) 38%, transparent);
+      }
+      @media (prefers-reduced-transparency: reduce) {
+        body:not(.theme-hicontrast) { background: var(--bg); }
+        body:not(.theme-hicontrast) .panel,
+        body:not(.theme-hicontrast) .stat,
+        body:not(.theme-hicontrast) .card,
+        body:not(.theme-hicontrast) .mv-row,
+        body:not(.theme-hicontrast) .mv-empty,
+        body:not(.theme-hicontrast) .prefs__panel,
+        body:not(.theme-hicontrast) .mv-confirm {
+          background: var(--surface-1);
+          -webkit-backdrop-filter: none;
+          backdrop-filter: none;
+          box-shadow: var(--shadow-sm);
+        }
+        body:not(.theme-hicontrast) .topbar {
+          background: color-mix(in srgb, var(--panel) 92%, var(--bg));
+          -webkit-backdrop-filter: none;
+          backdrop-filter: none;
+        }
+        body:not(.theme-hicontrast) .sidebar {
+          background: linear-gradient(180deg,
+            color-mix(in srgb, var(--panel) 58%, var(--bg)),
+            color-mix(in srgb, var(--panel) 30%, var(--bg)));
+          -webkit-backdrop-filter: none;
+          backdrop-filter: none;
+        }
+      }
+    }
   </style>
   {% if custom_theme_css %}
   <style>
@@ -560,7 +651,7 @@
       <span class="brand__name">Lightwork</span>
     </a>
     <span class="topbar__controls">
-      <a href="#" id="halt-pill" class="halt-pill" role="button" aria-label="Halt: arm or clear killswitch">
+      <a href="#" id="halt-pill" class="halt-pill" role="button" aria-label="Emergency stop: stop or resume all work">
         <span class="dot" aria-hidden="true"></span>
         <span id="halt-label">checking</span>
       </a>
@@ -636,11 +727,11 @@
         '/workforce': 'agents',
       } %}
       {% set _nav_groups = [
-        ('Operate', [('/start', 'Get started'), ('/chat', 'Chat'), ('/goals', 'Goals'), ('/goal-builder', 'Quick Goal'), ('/graph-editor', 'Goal Graph'), ('/projects', 'Projects'), ('/deliverables', 'Deliverables'), ('/agents', 'Agents'), ('/roles', 'Roles'), ('/workforce', 'Workforce'), ('/workflows', 'Workflows'), ('/flows/designer', 'Flow Designer'), ('/flows/analytics', 'Flow Analytics'), ('/automations', 'Automations'), ('/fleets', 'Fleets')]),
-        ('Observe', [('/overview', 'Overview'), ('/oversight', 'Oversight'), ('/discovery', 'Discovery'), ('/spend', 'Spend'), ('/billing', 'Billing'), ('/providers', 'Providers'), ('/benchmarks', 'Benchmarks'), ('/learning', 'Learning'), ('/learned', 'Learned'), ('/plan-tree-3d', '3D')]),
+        ('Operate', [('/start', 'Get started'), ('/chat', 'Chat'), ('/goals', 'Goals'), ('/goal-builder', 'Quick Goal'), ('/graph-editor', 'Goal Map'), ('/projects', 'Projects'), ('/deliverables', 'Deliverables'), ('/agents', 'Agents'), ('/roles', 'Roles'), ('/workforce', 'Workforce'), ('/workflows', 'Workflows'), ('/flows/designer', 'Flow Designer'), ('/flows/analytics', 'Flow Analytics'), ('/automations', 'Automations'), ('/fleets', 'Fleets')]),
+        ('Observe', [('/overview', 'Overview'), ('/oversight', 'Oversight'), ('/discovery', 'Discovery'), ('/spend', 'Spend'), ('/billing', 'Billing'), ('/providers', 'Providers'), ('/benchmarks', 'Benchmarks'), ('/learning', 'Learning'), ('/learned', 'Learned'), ('/plan-tree-3d', '3D Plan View')]),
         ('Govern', [('/approvals', 'Approvals'), ('/permissions', 'Permissions'), ('/simulate', 'Simulate'), ('/safety', 'Safety'), ('/compliance', 'Compliance'), ('/compartments', 'Compartments'), ('/audit', 'Audit'), ('/replay', 'Replay'), ('/trust', 'Agent Trust')]),
-        ('Extend', [('/skills', 'Skills'), ('/store', 'Store'), ('/templates', 'Templates'), ('/tools', 'Tools'), ('/connections', 'Connections'), ('/plugins', 'Plugins'), ('/mcp', 'MCP'), ('/channels', 'Channels')]),
-        ('Admin', [('/settings', 'Settings'), ('/styles', 'Styles'), ('/users', 'Users'), ('/tenants', 'Tenants'), ('/cache', 'Cache'), ('/facts', 'Facts'), ('/walkthroughs', 'Walkthroughs'), ('/embed-demo', 'Embed')]),
+        ('Extend', [('/skills', 'Skills'), ('/store', 'Store'), ('/templates', 'Templates'), ('/tools', 'Tools'), ('/connections', 'Connections'), ('/plugins', 'Plugins'), ('/mcp', 'Tool Servers'), ('/channels', 'Channels')]),
+        ('Admin', [('/settings', 'Settings'), ('/styles', 'Response Styles'), ('/users', 'Users'), ('/tenants', 'Tenants'), ('/cache', 'Cache'), ('/facts', 'Facts'), ('/walkthroughs', 'Walkthroughs'), ('/embed-demo', 'Embed Analytics')]),
       ] %}
       {% for _group in _nav_groups %}
         <div class="navgrp">
@@ -884,20 +975,20 @@
       async function refresh() {
         try {
           const r = await fetch('/api/v1/halt');
-          if (!r.ok) { label.textContent = 'halt'; return; }
+          if (!r.ok) { label.textContent = 'Stop all'; return; }
           const j = await r.json();
           armed = !!j.active;
           pill.classList.toggle('armed', armed);
-          label.textContent = armed ? 'HALTED. Click to resume.' : 'halt';
+          label.textContent = armed ? 'STOPPED — click to resume' : 'Stop all';
           pill.setAttribute('aria-pressed', armed ? 'true' : 'false');
-        } catch (e) { label.textContent = 'halt'; }
+        } catch (e) { label.textContent = 'Stop all'; }
       }
       pill.addEventListener('click', async function(ev) {
         ev.preventDefault();
         if (armed) {
           await fetch('/api/v1/halt', { method: 'DELETE' });
         } else {
-          if (!(await mvConfirm('Arm the killswitch? Every running goal stops at its next tool-call boundary.', { okText: 'Arm killswitch' }))) return;
+          if (!(await mvConfirm('Stop all work? Every running goal pauses safely at its next step and waits for you to resume.', { okText: 'Stop all work' }))) return;
           await fetch('/api/v1/halt', {
             method: 'POST',
             headers: {'Content-Type': 'application/json'},

@@ -2463,8 +2463,8 @@ tested without spawning py-spy.
   budget block is enforced as the runner's real `max_dollars` (clamped to
   the server cap); channel/priority ride in the brief and say so.
 - **Embedded analytics web component**
-  (`/static/maverick-analytics.js` + `/embed-demo`): a self-contained
-  `<maverick-analytics>` custom element (Shadow DOM, no framework, no CDN)
+  (`/static/lightwork-analytics.js` + `/embed-demo`; the pre-rebrand `/static/maverick-analytics.js` URL and `<maverick-analytics>` tag still work): a self-contained
+  `<lightwork-analytics>` custom element (Shadow DOM, no framework, no CDN)
   fetching the real spend + goals endpoints and hand-drawing SVG
   sparklines/bars; same-origin/token limits documented in the JS header and
   on the demo page; errors render as HTTP status, never fake data.

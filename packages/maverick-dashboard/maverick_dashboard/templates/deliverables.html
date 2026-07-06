@@ -1,11 +1,11 @@
 {% extends "base.html" %}
-{% block title %}deliverables · Lightwork{% endblock %}
+{% block title %}Deliverables · Lightwork{% endblock %}
 {% block content %}
   <h1 class="page-title">Deliverables</h1>
   <p class="page-subtitle">
-    What the fleet produces, grouped by deliverable and scoped to who consumes
-    it — your forecasts, assessments awaiting your sign-off — not the flat
-    <a href="/goals">run list</a>.
+    The work your AI teams produce, organized by deliverable and by who it's
+    for — your forecasts, reports, and items awaiting your sign-off (the full
+    <a href="/goals">run history</a> is separate).
   </p>
 
   {% if showing_mine %}
@@ -89,10 +89,10 @@
           No deliverables are routed to <strong>{{ mine|join(', ') }}</strong> yet —
           <a href="/deliverables?role=all">see all deliverables</a>.
         {% else %}
-          A deliverable appears here once a domain pack declares its
-          <code>[output]</code> contract — a label, the roles who consume it, and
-          an optional sign-off gate. See <a href="/compartments">Compartments</a>
-          for the pack roster.
+          Deliverables appear here as soon as your teams start producing
+          them — each one names what it is, who it's for, and whether it
+          needs a sign-off. See <a href="/compartments">Compartments</a>
+          for the teams set up in this workspace.
         {% endif %}
       </p>
     </div>

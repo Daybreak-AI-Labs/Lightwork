@@ -1,32 +1,36 @@
 {% extends "base.html" %}
-{% block title %}Lightwork · overview{% endblock %}
+{% block title %}Overview · Lightwork{% endblock %}
 {% block content %}
   <div id="tour" role="region" aria-label="How to start a goal" hidden
        class="panel" style="position: relative; border-color: var(--brand);">
     <button type="button" id="tour-dismiss" aria-label="Dismiss tour"
             style="position: absolute; top: 0.6rem; inset-inline-end: 0.6rem; background: transparent; color: var(--muted); border: 0; font-size: 1.1rem; line-height: 1; cursor: pointer; padding: 0.25rem 0.4rem;">&times;</button>
-    <h2 style="color: var(--brand);">Three ways to start a goal · 60-second tour</h2>
-    <ol style="margin: 0; padding-inline-start: 1.2rem; display: grid; gap: var(--space-3);">
-      <li>
-        <strong>Web UI</strong> — use the goal box on this page or open the
-        <a href="/chat">chat</a>.
-      </li>
-      <li>
-        <strong>REST API</strong> — <code>POST /api/v1/goals</code>:
-        <br /><code>curl -X POST http://127.0.0.1:8765/api/v1/goals -d '{"title":"Plan a trip to Japan"}'</code>
-      </li>
-      <li>
-        <strong>CLI</strong> — <code>maverick start "your goal"</code>.
-      </li>
-    </ol>
+    <h2 style="color: var(--brand);">Welcome to Lightwork · 60-second tour</h2>
+    <p style="margin: 0 0 var(--space-2);">
+      Describe what you need in the box below — or open the
+      <a href="/chat">chat</a> — and Lightwork puts a team of AI agents on it,
+      within the budget you allow.
+    </p>
+    <details>
+      <summary class="muted" style="cursor: pointer; font-size: var(--text-sm);">For developers: start work from the API or command line</summary>
+      <ol style="margin: var(--space-2) 0 0; padding-inline-start: 1.2rem; display: grid; gap: var(--space-2);">
+        <li>
+          <strong>REST API</strong> — <code>POST /api/v1/goals</code>:
+          <br /><code>curl -X POST http://127.0.0.1:8765/api/v1/goals -d '{"title":"Plan a trip to Japan"}'</code>
+        </li>
+        <li>
+          <strong>CLI</strong> — <code>maverick start "your goal"</code>.
+        </li>
+      </ol>
+    </details>
   </div>
 
   {% if counts.total == 0 %}
     <div class="panel empty">
       <h2 class="empty__title">Start your first goal</h2>
       <p class="muted" style="max-width: 540px; margin: 0 auto 1.75rem;">
-        Lightwork will plan a sub-agent swarm, run it under a budget cap, and
-        stream results back here.
+        Describe the outcome you want. Lightwork plans the work across a team
+        of AI agents, runs it within your budget, and streams results back here.
       </p>
       <form method="post" action="/chat/send" style="display: flex; gap: 0.5rem; max-width: 580px; margin: 0 auto; flex-wrap: wrap;">
         <input type="text" name="title" required autofocus
@@ -64,10 +68,10 @@
       </div>
     </div>
 
-    <h2>recent goals</h2>
+    <h2>Recent goals</h2>
     <div class="panel">
       <table>
-        <thead><tr><th scope="col">id</th><th scope="col">status</th><th scope="col">title</th><th scope="col">updated</th></tr></thead>
+        <thead><tr><th scope="col">Nº</th><th scope="col">Status</th><th scope="col">Title</th><th scope="col">Updated</th></tr></thead>
         <tbody>
         {% for g in goals %}
           <tr>
@@ -81,25 +85,25 @@
       </table>
     </div>
 
-    <h2>facts</h2>
+    <h2>Facts</h2>
     <div class="panel">
       {% if facts %}
         {% for k, v in facts.items() %}
           <p><code>{{ k }}</code>: {{ v }}</p>
         {% endfor %}
       {% else %}
-        <p class="muted">No facts yet. Set one with <code>maverick fact &lt;key&gt; &lt;value&gt;</code>.</p>
+        <p class="muted">No facts yet. Facts are details Lightwork remembers about your business — add them on the <a href="/facts">Facts</a> page.</p>
       {% endif %}
     </div>
 
-    <h2>top skills</h2>
+    <h2>Top skills</h2>
     <div class="panel">
       {% if skills %}
         {% for s in skills %}
           <p><code>{{ s.name }}</code> <span class="muted">· {{ s.triggers|length }} trigger(s)</span></p>
         {% endfor %}
       {% else %}
-        <p class="muted">No distilled skills yet. They appear after the agent finishes its first multi-step goal.</p>
+        <p class="muted">No skills yet. Lightwork turns finished work into reusable skills — they appear after the first multi-step goal completes.</p>
       {% endif %}
     </div>
 

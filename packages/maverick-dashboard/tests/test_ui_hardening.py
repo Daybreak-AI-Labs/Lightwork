@@ -53,7 +53,9 @@ def test_all_baseline_headers_still_present(monkeypatch, tmp_path):
     h = _client().get("/").headers
     assert h["X-Frame-Options"] == "DENY"
     assert h["X-Content-Type-Options"] == "nosniff"
-    assert h["Referrer-Policy"] == "no-referrer"
+    # same-origin (not no-referrer): no-referrer makes browsers send
+    # "Origin: null" on same-origin form POSTs, which the CSRF guard rejects.
+    assert h["Referrer-Policy"] == "same-origin"
     assert h["Cross-Origin-Opener-Policy"] == "same-origin"
 
 
