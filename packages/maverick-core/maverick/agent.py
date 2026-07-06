@@ -462,6 +462,22 @@ def _cap_tool_output(text: str) -> str:
     )
 
 
+def _finding_excerpt(final: str) -> str:
+    """The blackboard copy of a FINAL, bounded.
+
+    A finding is re-rendered into every later worker's first turn via
+    ``bb.render(40)`` — the O(K^2) swarm re-send — so post an excerpt, not the
+    whole answer. The full FINAL still reaches the parent via the spawn return
+    and is persisted in the world record. Tune via
+    MAVERICK_FINDING_POST_MAX_CHARS (min 200)."""
+    cap = max(200, env_int("MAVERICK_FINDING_POST_MAX_CHARS", 1500))
+    text = final or ""
+    if len(text) <= cap:
+        return text
+    return (text[:cap].rstrip()
+            + f" ... [{len(text)}B finding truncated; full answer in the run record]")
+
+
 def _last_assistant_text(messages: list[dict]) -> str:
     """Best-effort plain text of the most recent assistant message.
 
@@ -3017,7 +3033,7 @@ class Agent:
                                 f"verifier accepted (conf={verdict.confidence:.2f})",
                             )
 
-                    bb.post(self.name, "finding", final)
+                    bb.post(self.name, "finding", _finding_excerpt(final))
                     self.ctx.world.append_message(
                         self.ctx.goal_id, f"agent:{self.name}", final
                     )

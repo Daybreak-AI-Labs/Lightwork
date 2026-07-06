@@ -145,10 +145,23 @@ class Blackboard:
         # agent's findings must not steer the orchestrator or its siblings.
         visible = [e for e in snapshot if not self._is_sealed(e.agent)]
         recent = visible[-max_entries:]
+        # Per-entry bound: render() is injected into every spawned worker's
+        # first turn, so one oversized post (a long finding, a pasted dump)
+        # would otherwise dominate every brief that includes it. Posts are
+        # stored whole; only the rendered view is bounded.
+        try:
+            entry_cap = max(80, int(os.environ.get(
+                "MAVERICK_BB_RENDER_ENTRY_CHARS", "800")))
+        except ValueError:
+            entry_cap = 800
         lines = []
         for e in recent:
             head = f"[{e.agent}/{e.kind}]"
-            lines.append(f"{head} {e.content}")
+            content = e.content
+            if len(content) > entry_cap:
+                content = (content[:entry_cap].rstrip()
+                           + f" ... [{len(e.content)}B truncated]")
+            lines.append(f"{head} {content}")
         rendered = "\n".join(lines)
         self._measure_codec(rendered)
         return rendered
