@@ -27,16 +27,17 @@ def test_settings_page_shows_webhook_state_without_the_value():
 
 
 def test_save_secret_roundtrip_and_clear():
-    r = client.post("/settings/webhooks", data={"secret": "s3cret-value-123"},
+    r = client.post("/settings/webhooks",
+                    data={"secret": "s3cret-value-123"},  # pragma: allowlist secret
                     follow_redirects=False)
     assert r.status_code == 303
 
     from maverick.webhooks import inbound_secret
-    assert inbound_secret() == "s3cret-value-123"
+    assert inbound_secret() == "s3cret-value-123"  # pragma: allowlist secret
 
     page = client.get("/settings").text
     assert "configured" in page
-    assert "s3cret-value-123" not in page          # never echoed back
+    assert "s3cret-value-123" not in page  # pragma: allowlist secret -- never echoed back
 
     r = client.post("/settings/webhooks", data={"secret": "  "},
                     follow_redirects=False)
@@ -45,11 +46,12 @@ def test_save_secret_roundtrip_and_clear():
 
 
 def test_env_secret_still_wins(monkeypatch):
-    client.post("/settings/webhooks", data={"secret": "overlay-secret"},
+    client.post("/settings/webhooks",
+                data={"secret": "overlay-secret"},  # pragma: allowlist secret
                 follow_redirects=False)
-    monkeypatch.setenv("MAVERICK_WEBHOOK_SECRET", "env-secret")
+    monkeypatch.setenv("MAVERICK_WEBHOOK_SECRET", "env-secret")  # pragma: allowlist secret
     from maverick.webhooks import inbound_secret
-    assert inbound_secret() == "env-secret"
+    assert inbound_secret() == "env-secret"  # pragma: allowlist secret
 
 
 def test_cross_site_save_is_blocked():
