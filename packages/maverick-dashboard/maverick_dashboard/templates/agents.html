@@ -1,5 +1,5 @@
 {% extends "base.html" %}
-{% block title %}agents · Lightwork{% endblock %}
+{% block title %}Agents · Lightwork{% endblock %}
 
 {# One workflow-step row. ``s`` is a step dict (server-rendered existing step)
    or ``none`` (the empty row cloned for "Add step"). Kept as a macro so the
@@ -36,15 +36,22 @@
 {% block content %}
   <h1 class="page-title">Agents</h1>
   <p class="muted" style="max-width: 48rem;">
-    Every specialist pack, and the editor to tailor one for this deployment.
-    Saving writes a <em>tenant override</em> that inherits the built-in pack and
-    patches only what you change — including the agent's <strong>workflow</strong>
-    (the playbook it follows). An override can never weaken the safety envelope:
-    one that fails validation is rejected, not saved.
+    Every specialist agent, and the editor to tailor one for your organization.
+    Saving keeps the built-in agent intact and changes only what you edit —
+    including the agent's <strong>workflow</strong> (the playbook it follows).
+    A change can never weaken the safety envelope: one that fails validation is
+    rejected, not saved.
   </p>
+  <details style="max-width: 48rem; margin-bottom: var(--space-3);"><summary class="muted" style="cursor: pointer; font-size: var(--text-sm);">For administrators: how edits are stored</summary>
+    <p class="muted" style="font-size: var(--text-sm); margin-bottom: 0;">
+      Saving writes a <em>tenant override</em> that inherits the built-in pack and
+      patches only what you change. Editing is disabled with
+      <code>[features] pack_editing = false</code>.
+    </p>
+  </details>
   {% if not editable %}
-  <p><span class="badge">read-only</span> <span class="muted">pack editing is disabled
-    (<code>[features] pack_editing = false</code>) — viewing only.</span></p>
+  <p><span class="badge">read-only</span> <span class="muted">Agent editing has been turned off
+    by your administrator — viewing only.</span></p>
   {% endif %}
 
   <div class="panel" style="display: flex; gap: 1.5rem; align-items: flex-start;">
@@ -73,8 +80,8 @@
         <code>{{ selected.name }}</code>{% if selected.suite %} <span class="muted">· {{ selected.suite }}</span>{% endif %}
       </h2>
       {% if selected.is_override %}
-      <p class="muted">Overridden fields: {{ selected.overridden|join(', ') or '—' }}
-        (everything else inherits the built-in pack).</p>
+      <p class="muted">Customized fields: {{ selected.overridden|join(', ') or '—' }}
+        (everything else inherits the built-in agent).</p>
       {% endif %}
       <div id="agent-msg" role="status" aria-live="polite" class="muted" style="min-height: 1.2rem;"></div>
 

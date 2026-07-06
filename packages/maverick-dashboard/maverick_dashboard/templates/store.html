@@ -1,15 +1,23 @@
 {% extends "base.html" %}
-{% block title %}skill store · Lightwork{% endblock %}
+{% block title %}Skill Store · Lightwork{% endblock %}
 {% block content %}
   <h1 class="page-title">Store</h1>
 
   <div class="panel">
     <p class="muted">
-      Curated skills from the community catalog. Each is hash-pinned, so
-      installing here is safe without the developer opt-in flag. Point at
-      your own index with <code>[catalogs] indexes</code> in
-      <code>~/.maverick/config.toml</code>.
+      Curated skills from the community catalog. Each one is pinned to the exact
+      version that was reviewed, so what you install is what was checked.
+      In-app installation is off by default; an administrator can enable it.
+      Your administrator can also point this page at your organization's own catalog.
     </p>
+    <details style="margin-top: var(--space-3);"><summary class="muted" style="cursor: pointer; font-size: var(--text-sm);">For administrators: catalog configuration</summary>
+      <p class="muted" style="font-size: var(--text-sm); margin-bottom: 0;">
+        Each entry is hash-pinned. In-app installs require
+        <code>MAVERICK_ALLOW_SKILL_INSTALL=1</code> on the dashboard process.
+        Point at your own index with <code>[catalogs] indexes</code> in
+        <code>~/.maverick/config.toml</code>.
+      </p>
+    </details>
   </div>
 
   {% if entries %}
@@ -37,9 +45,9 @@
     <div class="mv-empty">
       <p class="mv-empty__title">No catalog entries</p>
       <p class="mv-empty__body">
-        The configured catalog index is empty or unreachable. Once a
-        community index is published (or you point at your own), curated
-        skills appear here for one-click install.
+        The catalog is empty or unreachable right now. Once a community
+        catalog is published (or your administrator points at your own),
+        curated skills appear here for one-click install.
       </p>
     </div>
   {% endif %}

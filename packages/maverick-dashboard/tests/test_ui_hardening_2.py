@@ -39,10 +39,10 @@ def test_panel_has_horizontal_overflow(monkeypatch, tmp_path):
 # ---------- page titles ----------
 
 @pytest.mark.parametrize("path,fragment", [
-    ("/goals", "goals · Lightwork"),
-    ("/facts", "facts · Lightwork"),
+    ("/goals", "Goals · Lightwork"),
+    ("/facts", "Facts · Lightwork"),
     ("/tools", "Tools · Lightwork"),
-    ("/spend", "spend · Lightwork"),
+    ("/spend", "Spend · Lightwork"),
     ("/plugins", "Plugins · Lightwork"),
     ("/channels", "Channels · Lightwork"),
     ("/audit", "Audit log · Lightwork"),

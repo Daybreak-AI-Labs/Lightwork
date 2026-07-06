@@ -1,17 +1,25 @@
 {% extends "base.html" %}
-{% block title %}roles · Lightwork{% endblock %}
+{% block title %}Roles · Lightwork{% endblock %}
 {% block content %}
   <h1 class="page-title">Roles</h1>
   <p class="muted" style="max-width: 48rem;">
-    The kernel's core roles. Add a per-client <strong>system-prompt addendum</strong>
-    to any role — extra instructions appended to its base template on every spawn,
-    so you can shape how the orchestrator plans or how the coder writes for this
-    deployment, without forking the kernel. Model and reasoning effort are set
-    separately (under <code>[models]</code> / <code>[effort]</code>).
+    The core agent roles that power Lightwork. Add a <strong>system-prompt
+    addendum</strong> to any role — extra instructions added to its built-in
+    guidance every time it runs, so you can shape how work is planned or written
+    for your organization. Model and reasoning effort are set separately, on this
+    page and in Settings.
   </p>
+  <details style="max-width: 48rem; margin-bottom: var(--space-3);"><summary class="muted" style="cursor: pointer; font-size: var(--text-sm);">For administrators: related configuration</summary>
+    <p class="muted" style="font-size: var(--text-sm); margin-bottom: 0;">
+      Addenda are appended to the role's base template on every spawn, without
+      forking the kernel. Models and reasoning effort are configured under
+      <code>[models]</code> / <code>[effort]</code>. Role editing is disabled with
+      <code>[features] role_editing = false</code>.
+    </p>
+  </details>
   {% if not editable %}
-  <p><span class="badge">read-only</span> <span class="muted">role editing is disabled
-    (<code>[features] role_editing = false</code>) — viewing only.</span></p>
+  <p><span class="badge">read-only</span> <span class="muted">Role editing has been turned off
+    by your administrator — viewing only.</span></p>
   {% endif %}
 
   <div class="panel" style="display: flex; gap: 1.5rem; align-items: flex-start;">

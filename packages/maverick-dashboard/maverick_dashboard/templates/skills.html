@@ -1,5 +1,5 @@
 {% extends "base.html" %}
-{% block title %}skills · Lightwork{% endblock %}
+{% block title %}Skills · Lightwork{% endblock %}
 {% block content %}
   <h1 class="page-title">Skills</h1>
   <h2>Installed skills</h2>
@@ -46,11 +46,18 @@
     </form>
     <p id="skill-create-msg" role="status" aria-live="polite" class="muted" style="margin-top: 0.75rem; min-height: 1em;"></p>
     <p class="muted" style="font-size: 0.85rem; margin-top: 1rem;">
-      Authored skills are saved to <code>~/.maverick/skills</code> and injected
-      into matching agents on the next run. Same opt-in as install
-      (<code>MAVERICK_ALLOW_SKILL_INSTALL=1</code>); the body is secret- and
-      shield-scanned before it's written.
+      New skills are picked up by matching agents on the next run. In-app skill
+      creation is off by default; an administrator can enable it. Every skill is
+      scanned for secrets and safety issues before it is saved.
     </p>
+    <details style="margin-top: var(--space-3);"><summary class="muted" style="cursor: pointer; font-size: var(--text-sm);">For administrators: storage and opt-in</summary>
+      <p class="muted" style="font-size: var(--text-sm); margin-bottom: 0;">
+        Authored skills are saved to <code>~/.maverick/skills</code> and injected
+        into matching agents on the next run. Same opt-in as install
+        (<code>MAVERICK_ALLOW_SKILL_INSTALL=1</code>); the body is secret- and
+        shield-scanned before it's written.
+      </p>
+    </details>
   </div>
 
   <style>
@@ -77,11 +84,17 @@
     </form>
     <p id="skill-install-msg" role="status" aria-live="polite" class="muted" style="margin-top: 0.75rem; min-height: 1em;"></p>
     <p class="muted" style="font-size: 0.85rem; margin-top: 1rem;">
-      Installs run untrusted code on the next agent invocation. Opt in by
-      setting <code>MAVERICK_ALLOW_SKILL_INSTALL=1</code> on the dashboard
-      process; otherwise the endpoint returns 403 and you can use
-      <code>maverick skill install</code> on the host.
+      <strong>Installed skills run untrusted code</strong> the next time an agent
+      uses them — only install from sources you trust. In-app installation is off
+      by default; an administrator can enable it.
     </p>
+    <details style="margin-top: var(--space-3);"><summary class="muted" style="cursor: pointer; font-size: var(--text-sm);">For administrators: enabling installs</summary>
+      <p class="muted" style="font-size: var(--text-sm); margin-bottom: 0;">
+        Opt in by setting <code>MAVERICK_ALLOW_SKILL_INSTALL=1</code> on the
+        dashboard process; otherwise the endpoint returns 403 and you can use
+        <code>maverick skill install</code> on the host.
+      </p>
+    </details>
   </div>
 
   <script>

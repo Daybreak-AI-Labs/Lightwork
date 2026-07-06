@@ -1,5 +1,5 @@
 {% extends "base.html" %}
-{% block title %}channels · Lightwork{% endblock %}
+{% block title %}Channels · Lightwork{% endblock %}
 {% block content %}
   <h1 class="page-title">Channels</h1>
 
@@ -12,11 +12,10 @@
 
   <p class="muted">
     Connect Lightwork to a chat or messaging service so people can reach the
-    agent there. Enable a channel and paste its credentials below — saved to the
-    dashboard overlay (<code>~/.maverick/runtime-overrides</code>'s sibling
-    <code>dashboard-config.toml</code>), never your <code>config.toml</code>.
-    Secrets are stored locally (chmod 600) and never shown again. Effective on
-    the next <code>maverick serve</code>.
+    agent there. Enable a channel and paste its credentials below — changes made
+    here never modify your server's configuration files, and take effect the next
+    time the channel server starts. Secrets are stored securely and never shown
+    again.
   </p>
 
   {% for c in managed %}
@@ -92,7 +91,21 @@
 
   <div class="panel">
     <h3 style="margin-top: 0;">Start the channel server</h3>
-    <pre style="background: var(--bg); padding: 0.75rem; border-radius: 4px; overflow-x: auto;">maverick serve</pre>
-    <p class="muted" style="margin-bottom: 0;">Channels poll/listen in the background; goals arrive over the network and run through the same swarm.</p>
+    <p class="muted">
+      Channels listen in the background: requests arrive from your chat service
+      and run through the same workforce as goals started here. If a channel
+      isn't responding, ask your administrator to check that the channel server
+      is running.
+    </p>
+    <details><summary class="muted" style="cursor: pointer; font-size: var(--text-sm);">For administrators: start the channel server</summary>
+      <pre style="background: var(--bg); padding: 0.75rem; border-radius: 4px; overflow-x: auto;">maverick serve</pre>
+      <p class="muted" style="font-size: var(--text-sm); margin-bottom: 0;">
+        Channel settings are saved to the dashboard overlay
+        (<code>~/.maverick/runtime-overrides</code>'s sibling
+        <code>dashboard-config.toml</code>), never your <code>config.toml</code>;
+        secrets are stored locally (chmod 600). Effective on the next
+        <code>maverick serve</code>.
+      </p>
+    </details>
   </div>
 {% endblock %}
