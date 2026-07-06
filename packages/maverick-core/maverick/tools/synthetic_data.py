@@ -11,11 +11,11 @@ ops:
 """
 from __future__ import annotations
 
-import json
 import random
 import uuid
 from typing import Any
 
+from ..fastjson import dumps_compact
 from . import Tool
 
 _FIRST = ["Ada", "Linus", "Grace", "Alan", "Edsger", "Barbara", "Ken", "Margaret"]
@@ -55,7 +55,7 @@ def _generate(fields: list[dict], n: int, seed: int, fmt: str) -> str:
         for row in rows:
             out.append(",".join(_csv_cell(row[name]) for name in names))
         return "\n".join(out)
-    return json.dumps(rows, indent=2, default=str)
+    return dumps_compact(rows)
 
 
 def _csv_cell(v: Any) -> str:

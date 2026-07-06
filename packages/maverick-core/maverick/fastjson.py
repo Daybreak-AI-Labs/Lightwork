@@ -45,6 +45,23 @@ def dumps(obj: Any, *, sort_keys: bool = False) -> str:
     return _json.dumps(obj, sort_keys=sort_keys, default=str)
 
 
+def dumps_compact(obj: Any, *, sort_keys: bool = False) -> str:
+    """Serialize ``obj`` to the densest JSON form (no indent, no separator spaces).
+
+    For model-facing payloads — tool results that re-enter the context window —
+    whitespace is pure token waste, and callers that truncate to a char budget
+    (``[:3000]``-style) lose real data to it. orjson output is already compact;
+    the stdlib path pins ``separators`` so both backends produce the same shape.
+    """
+    if _orjson is not None:
+        opt = _orjson.OPT_SORT_KEYS if sort_keys else 0
+        try:
+            return _orjson.dumps(obj, option=opt).decode("utf-8")
+        except TypeError:
+            pass  # orjson is stricter; fall through to stdlib
+    return _json.dumps(obj, sort_keys=sort_keys, separators=(",", ":"), default=str)
+
+
 def loads(data: str | bytes) -> Any:
     """Parse JSON from ``str``/``bytes``. orjson when available, else stdlib."""
     if _orjson is not None:
@@ -57,4 +74,4 @@ def loads(data: str | bytes) -> Any:
     return _json.loads(data)
 
 
-__all__ = ["dumps", "loads", "backend"]
+__all__ = ["dumps", "dumps_compact", "loads", "backend"]

@@ -20,12 +20,12 @@ ops:
 """
 from __future__ import annotations
 
-import json
 import logging
 import os
 import re
 from typing import Any
 
+from ..fastjson import dumps_compact
 from . import Tool, as_bool
 
 log = logging.getLogger(__name__)
@@ -136,7 +136,7 @@ def _op_soql(query: str, version: str) -> str:
     # Drop the redundant `attributes` block per record.
     for r in rows[:50]:
         slim = {k: v for k, v in r.items() if k != "attributes"}
-        out.append("  " + json.dumps(slim, default=str)[:300])
+        out.append("  " + dumps_compact(slim)[:300])
     if len(rows) > 50:
         out.append(f"  ... (+{len(rows) - 50} more rows in response)")
     return "\n".join(out)
@@ -153,7 +153,7 @@ def _op_record_get(sobject: str, rid: str, version: str) -> str:
     if code >= 400 or not isinstance(data, dict):
         return f"ERROR: record_get ({code}): {data}"
     slim = {k: v for k, v in data.items() if k != "attributes"}
-    return json.dumps(slim, indent=2, default=str)[:3000]
+    return dumps_compact(slim)[:3000]
 
 
 def _op_record_create(sobject: str, fields: dict, confirm: bool, version: str) -> str:

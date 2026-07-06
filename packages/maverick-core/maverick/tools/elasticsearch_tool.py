@@ -18,11 +18,11 @@ ops:
 from __future__ import annotations
 
 import base64
-import json
 import logging
 import os
 from typing import Any
 
+from ..fastjson import dumps_compact
 from . import Tool, as_bool
 
 log = logging.getLogger(__name__)
@@ -139,7 +139,7 @@ def _op_search(args: dict) -> str:
         score_s = f"{sc:>6.2f}" if isinstance(sc, (int, float)) else f"{'—':>6}"
         out.append(
             f"  [{score_s}]  {h.get('_id')}  "
-            f"{json.dumps(h.get('_source') or {}, default=str)[:200]}"
+            f"{dumps_compact(h.get('_source') or {})[:200]}"
         )
     return "\n".join(out)
 
@@ -154,7 +154,7 @@ def _op_get(args: dict) -> str:
         return f"doc {index}/{did} not found"
     if code >= 400 or not isinstance(data, dict):
         return f"ERROR: get ({code}): {data}"
-    return json.dumps(data.get("_source") or {}, indent=2, default=str)[:3000]
+    return dumps_compact(data.get("_source") or {})[:3000]
 
 
 def _op_index(args: dict) -> str:

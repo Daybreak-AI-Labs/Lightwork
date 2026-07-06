@@ -22,12 +22,12 @@ Requires::
 """
 from __future__ import annotations
 
-import json
 import logging
 import os
 import threading
 from typing import Any
 
+from ..fastjson import dumps_compact
 from . import Tool, as_bool
 
 log = logging.getLogger(__name__)
@@ -118,7 +118,7 @@ def _serialize(obj: Any, _depth: int = 0) -> Any:
 
 
 def _dump(obj: Any, max_chars: int = 3000) -> str:
-    s = json.dumps(_serialize(obj), indent=2, default=str)
+    s = dumps_compact(_serialize(obj))
     if len(s) > max_chars:
         s = s[:max_chars] + "\n... (truncated)"
     return s
