@@ -32,4 +32,9 @@ where = ["."]
 include = ["maverick_dashboard*"]
 
 [tool.setuptools.package-data]
-maverick_dashboard = ["templates/*.html", "static/*"]
+# templates/*.js are Jinja-included by the .html templates (the flow designer's
+# FDCore + designer scripts, the shared _dash_helpers). They MUST ship in the
+# wheel/PyInstaller bundle or `{% include "flow_designer_core.js" %}` raises
+# TemplateNotFound at render time (the page 500s in a built app while working
+# from a source checkout). Keep this glob covering every template file type.
+maverick_dashboard = ["templates/*.html", "templates/*.js", "static/*"]
