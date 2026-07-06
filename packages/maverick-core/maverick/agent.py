@@ -2369,7 +2369,11 @@ class Agent:
 
             # Karpathy SOTA-review item: long-context compaction. Drop
             # raw tool_result content >2KiB once it's behind the recent
-            # window. The first message (user brief) is always kept.
+            # window, and hold the whole window under a total ceiling
+            # (MAVERICK_COMPACT_MAX_TOTAL_BYTES) by shrinking into the
+            # recent window oldest-first when a few results at the
+            # per-result cap add up. The first message (user brief) and
+            # the newest message are always kept.
             # The compaction cost is O(len(messages)) per turn -- cheap
             # vs. paying full-price input tokens for a 100k history.
             # Default path is the heuristic shrink; an operator can opt into a

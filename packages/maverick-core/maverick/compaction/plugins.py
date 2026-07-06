@@ -37,7 +37,8 @@ class _HeuristicStrategy:
 
     def compact(self, messages: list[dict], **kwargs) -> list[dict]:
         from . import compact_messages
-        allowed = {k: kwargs[k] for k in ("keep_recent", "max_tool_bytes")
+        allowed = {k: kwargs[k]
+                   for k in ("keep_recent", "max_tool_bytes", "max_total_bytes")
                    if k in kwargs}
         return compact_messages(messages, **allowed)
 

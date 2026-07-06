@@ -5,6 +5,9 @@ and pay full price every turn. The compaction policy:
 
 * **Drop**: raw tool output blocks > MAX_TOOL_OUTPUT_BYTES (default
   2 KiB) older than KEEP_RECENT_TURNS turns; keep a one-line digest.
+* **Ceiling**: when the whole window still exceeds MAX_TOTAL_BYTES
+  (default 200 KB chars), the same shrink extends into the recent
+  window, oldest first, sparing the brief and the newest message.
 * **Summarize**: every DIGEST_EVERY turns, fold prior turns into one
   ``<digest>`` block prepended to the messages list; raw turns are
   removed.
@@ -48,6 +51,14 @@ def _env_int(name: str, default: int) -> int:
 MAX_TOOL_OUTPUT_BYTES = _env_int("MAVERICK_COMPACT_MAX_TOOL_BYTES", 2 * 1024)
 KEEP_RECENT_TURNS = _env_int("MAVERICK_COMPACT_KEEP_RECENT", 4)
 DIGEST_EVERY = _env_int("MAVERICK_COMPACT_DIGEST_EVERY", 10)
+# Ceiling on the WHOLE live window. The per-block pass above only trims
+# content behind keep_recent, so a few results at the per-result cap
+# (agent._MAX_TOOL_RESULT_BYTES, default 100 KB) can still ride inside the
+# recent window at ~100k tokens total. Over this ceiling the shrink extends
+# into the recent window, oldest first — sparing the first message (the
+# brief) and the last (the freshest results the model must act on). ~200 KB
+# chars (~50k tokens). 0 disables.
+MAX_TOTAL_BYTES = _env_int("MAVERICK_COMPACT_MAX_TOTAL_BYTES", 200_000)
 
 
 def _block_size(block: dict) -> int:
@@ -211,11 +222,62 @@ def _shrink_text_block(block: dict, max_bytes: int) -> dict:
     return new_block
 
 
+def _message_size(msg: dict) -> int:
+    """Rough char size of one message's content."""
+    content = msg.get("content")
+    if isinstance(content, str):
+        return len(content)
+    if isinstance(content, list):
+        return sum(_block_size(b) for b in content if isinstance(b, dict))
+    return 0
+
+
+def _shrink_message(
+    msg: dict, max_tool_bytes: int, tool_use_by_id: dict[str, dict]
+) -> dict:
+    """One message through the per-block shrink (tool_result digest + text
+    truncate). Returns the original object when nothing changed, so callers
+    can cheaply detect a no-op."""
+    content = msg.get("content")
+    if isinstance(content, list):
+        new_content = []
+        changed = False
+        for blk in content:
+            if isinstance(blk, dict) and blk.get("type") == "tool_result":
+                source = _source_locator(tool_use_by_id.get(blk.get("tool_use_id")))
+                new_blk = _shrink_tool_result(blk, max_tool_bytes, source)
+            elif isinstance(blk, dict) and blk.get("type") == "text":
+                new_blk = _shrink_text_block(blk, max_tool_bytes)
+            else:
+                new_blk = blk
+            changed = changed or new_blk is not blk
+            new_content.append(new_blk)
+        if not changed:
+            return msg
+        new_msg = dict(msg)
+        new_msg["content"] = new_content
+        return new_msg
+    if (isinstance(content, str) and len(content) > max_tool_bytes
+            and not _STR_TRUNC_RE.search(content)):
+        # The trailing guard keeps a second pass a no-op: an already-
+        # truncated string still exceeds max_tool_bytes (its note has a
+        # floor) and would otherwise be re-truncated, churning the byte
+        # count on every compaction.
+        new_msg = dict(msg)
+        new_msg["content"] = (
+            content[:max_tool_bytes].rstrip()
+            + f" ... [{len(content)}B truncated]"
+        )
+        return new_msg
+    return msg
+
+
 def compact_messages(
     messages: list[dict],
     *,
     keep_recent: int = KEEP_RECENT_TURNS,
     max_tool_bytes: int = MAX_TOOL_OUTPUT_BYTES,
+    max_total_bytes: int = MAX_TOTAL_BYTES,
 ) -> list[dict]:
     """Return a compacted copy of ``messages``.
 
@@ -226,10 +288,14 @@ def compact_messages(
        truncated.
     3. The first message (the user brief) is always preserved verbatim
        so the agent never loses the goal.
+    4. If the whole window still exceeds ``max_total_bytes``, the same
+       shrink extends INTO the recent window, oldest first, sparing the
+       first and the last message. Messages are never dropped, so
+       tool_use/tool_result pairing stays intact. A soft ceiling: with
+       everything shrinkable already shrunk the window can still exceed
+       it, but the dominant payloads (raw tool output) are bounded.
+       ``max_total_bytes <= 0`` disables the overflow pass.
     """
-    if len(messages) <= keep_recent + 1:
-        return list(messages)
-
     # Index tool_use blocks by id so a shrunk tool_result can name its source
     # (the tool + the file path / url it read) in the structural reference.
     tool_use_by_id: dict[str, dict] = {}
@@ -242,40 +308,36 @@ def compact_messages(
                     if isinstance(bid, str):
                         tool_use_by_id[bid] = blk
 
-    out: list[dict] = []
-    cutoff = len(messages) - keep_recent
-    for i, msg in enumerate(messages):
-        if i == 0 or i >= cutoff:
-            out.append(msg)
-            continue
-        content = msg.get("content")
-        if isinstance(content, list):
-            new_content = []
-            for blk in content:
-                if isinstance(blk, dict) and blk.get("type") == "tool_result":
-                    source = _source_locator(tool_use_by_id.get(blk.get("tool_use_id")))
-                    new_content.append(_shrink_tool_result(blk, max_tool_bytes, source))
-                elif isinstance(blk, dict) and blk.get("type") == "text":
-                    new_content.append(_shrink_text_block(blk, max_tool_bytes))
-                else:
-                    new_content.append(blk)
-            new_msg = dict(msg)
-            new_msg["content"] = new_content
-            out.append(new_msg)
-        elif (isinstance(content, str) and len(content) > max_tool_bytes
-              and not _STR_TRUNC_RE.search(content)):
-            # The trailing guard keeps a second pass a no-op: an already-
-            # truncated string still exceeds max_tool_bytes (its note has a
-            # floor) and would otherwise be re-truncated, churning the byte
-            # count on every compaction.
-            new_msg = dict(msg)
-            new_msg["content"] = (
-                content[:max_tool_bytes].rstrip()
-                + f" ... [{len(content)}B truncated]"
-            )
-            out.append(new_msg)
-        else:
-            out.append(msg)
+    if len(messages) <= keep_recent + 1:
+        # Everything is inside the recent window; only the ceiling below can
+        # shrink anything (a short window can still be huge byte-wise).
+        out = list(messages)
+    else:
+        out = []
+        cutoff = len(messages) - keep_recent
+        for i, msg in enumerate(messages):
+            if i == 0 or i >= cutoff:
+                out.append(msg)
+                continue
+            out.append(_shrink_message(msg, max_tool_bytes, tool_use_by_id))
+
+    if max_total_bytes <= 0:
+        return out
+    total = sum(_message_size(m) for m in out)
+    if total <= max_total_bytes:
+        return out
+    # Overflow pass: the recent window itself is over the ceiling (a few
+    # results at the per-result cap add up fast). Shrink oldest-first until
+    # under; never touch the brief (0) or the last message (the freshest
+    # tool results, which the model needs whole to act).
+    for i in range(1, len(out) - 1):
+        if total <= max_total_bytes:
+            break
+        before = _message_size(out[i])
+        shrunk = _shrink_message(out[i], max_tool_bytes, tool_use_by_id)
+        if shrunk is not out[i]:
+            out[i] = shrunk
+            total += _message_size(shrunk) - before
     return out
 
 
