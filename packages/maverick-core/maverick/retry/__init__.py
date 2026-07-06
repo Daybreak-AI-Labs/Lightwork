@@ -35,7 +35,10 @@ T = TypeVar("T")
 # range(0) -- the wrapped fn is NEVER called, `last` stays None, and the call
 # dies on `assert last is not None` with an opaque AssertionError, the provider
 # request silently never dispatched. At least one attempt is always made.
-MAX_ATTEMPTS = max(1, env_int("MAVERICK_LLM_RETRY_ATTEMPTS", 5))
+# 3 attempts: retries re-generate the FULL output at billed rates, so this is
+# the one same-call output-token amplifier — 5 attempts quintupled worst-case
+# spend during a provider incident for marginal extra success.
+MAX_ATTEMPTS = max(1, env_int("MAVERICK_LLM_RETRY_ATTEMPTS", 3))
 BASE_DELAY = env_float("MAVERICK_LLM_RETRY_BASE_DELAY", 1.0)
 MAX_DELAY = env_float("MAVERICK_LLM_RETRY_MAX_DELAY", 30.0)
 

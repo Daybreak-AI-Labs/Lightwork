@@ -416,8 +416,10 @@ def _tool_status(output: str) -> str:
 # would otherwise enter the CURRENT context window uncapped -- compaction only
 # trims results behind the recent window -- blowing tokens/budget in one turn.
 # Cap any single result; the model keeps the head + tail and is told how to get
-# the rest. ~100 KB chars (~25k tokens). Tune via MAVERICK_MAX_TOOL_RESULT_BYTES.
-_MAX_TOOL_RESULT_BYTES = max(2_000, env_int("MAVERICK_MAX_TOOL_RESULT_BYTES", 100_000))
+# the rest. ~32 KB chars (~8k tokens) — the old 100 KB default let one result
+# inject ~25k tokens that compaction never touches while it sits in the recent
+# window. Tune via MAVERICK_MAX_TOOL_RESULT_BYTES.
+_MAX_TOOL_RESULT_BYTES = max(2_000, env_int("MAVERICK_MAX_TOOL_RESULT_BYTES", 32_000))
 
 
 def unframe_tool_output(framed: str) -> str:

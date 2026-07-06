@@ -64,7 +64,7 @@ class TestDepthGating:
             return []
 
         monkeypatch.setattr("maverick.skills.relevant_skills", fake_relevant)
-        monkeypatch.setattr("maverick.skills.available_skills", lambda: [])
+        monkeypatch.setattr("maverick.skills.available_skills", list)
         apply_skill_overlays("B", brief="x", use_skills=True, depth=0)
         assert seen["max_n"] == 3
         apply_skill_overlays("B", brief="x", use_skills=True, depth=2)

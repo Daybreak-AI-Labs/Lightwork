@@ -49,7 +49,7 @@ _FETCH_INPUT_SCHEMA: dict[str, Any] = {
         },
         "max_bytes": {
             "type": "integer",
-            "description": "Cap response body size (default 200_000).",
+            "description": "Cap response body size (default 64_000).",
         },
     },
     "required": ["url"],
@@ -474,7 +474,10 @@ def _run_fetch(args: dict[str, Any]) -> str:
     headers.setdefault("User-Agent", "Mozilla/5.0 (compatible; Lightwork/1.0)")
     headers.setdefault("Accept", "text/html,application/xhtml+xml,*/*;q=0.8")
     body = args.get("body")
-    max_bytes = int(args.get("max_bytes") or 200_000)
+    # 64 KB default: a page render trims to markdown anyway, and the old
+    # 200 KB default guaranteed one fetch filled the whole per-tool-result
+    # context budget. Callers needing more pass max_bytes explicitly.
+    max_bytes = int(args.get("max_bytes") or 64_000)
     render = (args.get("render") or "markdown").lower()
 
     # Connect to the IP we validated above, not a freshly-resolved one:

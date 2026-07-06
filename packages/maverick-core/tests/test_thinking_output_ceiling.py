@@ -124,7 +124,7 @@ class TestThinkingBudgetKnob:
     def test_default_base_unchanged(self, monkeypatch):
         import maverick.agent as agent_mod
 
-        monkeypatch.setattr("maverick.config.load_config", lambda: {})
+        monkeypatch.setattr("maverick.config.load_config", dict)
         a = agent_mod.Agent.__new__(agent_mod.Agent)
         a.role = "revisor"
         assert a._thinking_budget() == 8000

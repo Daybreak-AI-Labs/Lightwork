@@ -563,7 +563,8 @@ class MCPServer:
             "contents": [{
                 "uri": uri,
                 "mimeType": "application/json",
-                "text": json.dumps(data, indent=2, default=str),
+                # compact separators: this JSON re-enters a client LLM's context
+                "text": json.dumps(data, separators=(",", ":"), default=str),
             }],
         }
 
@@ -1067,7 +1068,10 @@ class MCPServer:
         items = load_skills()
         if not items:
             return "no skills installed"
-        return "\n".join(f"{s.name}: {', '.join(s.triggers[:3])}" for s in items)
+        lines = [f"{s.name}: {', '.join(s.triggers[:3])}" for s in items[:100]]
+        if len(items) > 100:
+            lines.append(f"... ({len(items) - 100} more skills omitted)")
+        return "\n".join(lines)
 
     def _tool_fact_set(self, args: dict) -> str:
         # Facts are concatenated into the orchestrator's system brief on every
@@ -1108,7 +1112,13 @@ class MCPServer:
         facts = w.get_facts()
         if not facts:
             return "no facts known"
-        return "\n".join(f"{k}: {v}" for k, v in facts.items())
+        # Bounded: this string re-enters the calling LLM's context, and the
+        # fact store grows without limit. Newest first (get_facts order);
+        # values capped like the orchestrator brief's facts block.
+        lines = [f"{k}: {str(v)[:300]}" for k, v in list(facts.items())[:100]]
+        if len(facts) > 100:
+            lines.append(f"... ({len(facts) - 100} more facts omitted)")
+        return "\n".join(lines)
 
     def _send(self, message: dict) -> None:
         line = json.dumps(message) + "\n"

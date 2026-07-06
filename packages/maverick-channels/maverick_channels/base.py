@@ -61,9 +61,9 @@ def _max_inbound_chars() -> int:
     drive an uncapped-context, uncapped-cost agent run. Override with
     MAVERICK_MAX_INBOUND_CHARS; 0 disables the cap."""
     try:
-        return int(os.environ.get("MAVERICK_MAX_INBOUND_CHARS", "100000"))
+        return int(os.environ.get("MAVERICK_MAX_INBOUND_CHARS", "30000"))
     except ValueError:
-        return 100000
+        return 30000
 
 
 def backoff_delay(base_interval: float, consecutive_errors: int, *, cap: float = 300.0) -> float:
