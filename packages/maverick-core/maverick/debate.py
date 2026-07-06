@@ -61,13 +61,24 @@ class DebateParticipant:
     model: str | None = None
 
 
+# Sliding transcript window per speaker turn. Without it every speaker
+# received the FULL growing transcript each round — O((P·R)^2) input tokens
+# over a debate. Late turns argue against the recent exchange anyway; the
+# judge still sees the whole transcript once at the end.
+_TRANSCRIPT_WINDOW_TURNS = 8
+
+
 def _build_messages_for_turn(
     question: str, transcript: list[DebateTurn], speaker: str, persona: str,
 ) -> list[dict]:
     """Render the running transcript as the next speaker's user message."""
+    window = transcript[-_TRANSCRIPT_WINDOW_TURNS:]
+    elided = len(transcript) - len(window)
     prior = "\n\n".join(
-        f"[{t.speaker}]\n{t.text}" for t in transcript
+        f"[{t.speaker}]\n{t.text}" for t in window
     ) or "(opening turn — no prior arguments yet)"
+    if elided > 0:
+        prior = f"({elided} earlier turn(s) elided)\n\n" + prior
     return [{
         "role": "user",
         "content": (

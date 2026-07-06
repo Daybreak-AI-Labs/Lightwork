@@ -51,6 +51,9 @@ async def evolve_continuous(
     archive = Archive.load(archive_path) if archive_path else Archive()
     history: list[dict] = []
     current = dict(seed_config)
+    # Round 0's seed is genuinely unscored; later rounds seed from the prior
+    # round's best, whose score we already paid for.
+    prior_best_score: float | None = None
 
     # Seed the archive up front so best() always returns a valid candidate --
     # even when every round is SKIPPED by a frozen calibration (otherwise the
@@ -68,9 +71,12 @@ async def evolve_continuous(
         best = await evolve_with_eval(
             current, cases, agent_factory,
             generations=generations_per_round, scorer=scorer, rng=rng,
-            archive=archive, space=space,
+            archive=archive, space=space, seed_score=prior_best_score,
         )
         current = dict(best.config)  # compound: next round branches from the best
+        # The next round seeds from this scored best; passing its score down
+        # skips re-paying a full |cases| evaluation just to re-learn it.
+        prior_best_score = best.score
         if archive_path:
             archive.save(archive_path)
         history.append({
