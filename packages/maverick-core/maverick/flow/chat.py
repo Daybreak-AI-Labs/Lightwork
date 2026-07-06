@@ -20,7 +20,7 @@ from __future__ import annotations
 import json
 from dataclasses import dataclass, field
 
-from .draft import FLOW_DRAFT_SYSTEM, _extract_json, _sanitize
+from .draft import FLOW_SCHEMA_BLOCK, _extract_json, _sanitize
 from .ir import Flow
 from .patch import PatchError, apply_patches, describe_patch
 
@@ -54,8 +54,8 @@ Rules:
 - Insert an "approval" node before anything irreversible (sending, paying, deleting).
 - Output the JSON object ONLY -- no prose, no code fence.
 
-""" + FLOW_DRAFT_SYSTEM.split("Rules:")[0].replace(
-    "You design automation FLOWS and output STRICT JSON only.", "Flow schema:")
+Flow schema:
+""" + FLOW_SCHEMA_BLOCK
 
 
 @dataclass

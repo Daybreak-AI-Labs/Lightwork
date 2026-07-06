@@ -45,6 +45,7 @@ from .api_schemas import (
     CatalogInstallIn,
     ChildIn,
     ComposeIn,
+    ConnectionIn,
     DeliverableEditIn,
     EventTriggerIn,
     EventTriggerOut,
@@ -934,6 +935,107 @@ async def oauth_disconnect(request: Request, provider: str) -> None:
     oauth_vault.get_vault().delete(provider)
 
 
+# ---- connections: named, sealed SaaS credentials -----------------------------
+
+
+def _require_connections() -> None:
+    from maverick import connections
+    if not connections.enabled():
+        raise HTTPException(
+            status_code=403,
+            detail=("connections are off; enable [connections] in config.toml or "
+                    "set MAVERICK_CONNECTIONS=1"),
+        )
+
+
+@router.get("/connections")
+async def list_connections_endpoint(request: Request) -> dict:
+    """Named connections the caller may see (tokens never returned -- only
+    ``has_token``). Owner-scoped when auth is on."""
+    require_permission(request, "operate")
+    _require_connections()
+    from maverick import connections
+    return {"connections": connections.list_connections(owner=goal_owner_filter(request))}
+
+
+@router.post("/connections", status_code=201)
+async def create_connection_endpoint(request: Request, payload: ConnectionIn) -> dict:
+    """Create or replace a named connection (base URL + token, sealed at rest).
+    A connector can then be wired without env vars -- the connection is the
+    fallback when ``<NAME>_TOKEN`` is unset."""
+    require_permission(request, "operate")
+    _require_connections()
+    from maverick import connections
+    try:
+        # Owner-scope like triggers: a non-admin can't overwrite another
+        # tenant's connection by reusing its name. Enforced INSIDE the store
+        # lock (expected_owner) so the check and the write are atomic.
+        rec = connections.set_connection(
+            payload.name, connector=payload.connector, base_url=payload.base_url,
+            token=payload.token, owner=caller_principal(request) or "",
+            expected_owner=goal_owner_filter(request))
+    except PermissionError as e:
+        raise HTTPException(status_code=409, detail=str(e)) from e
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e)) from e
+    return rec
+
+
+@router.post("/connections/{name}/test")
+async def test_connection_endpoint(request: Request, name: str) -> dict:
+    """Best-effort reachability check: GET the connection's base URL with its
+    token and report whether it authenticates. Never returns the token."""
+    require_permission(request, "operate")
+    _require_connections()
+    from maverick import connections
+    rec = connections.get_connection(name)
+    # Owner-scope like list/delete/create: a non-admin can only test their own
+    # connection (else a name-guess is a cross-owner reachability oracle AND
+    # sends another owner's token). A 404 (not 403) so it can't confirm the name.
+    owner_filter = goal_owner_filter(request)
+    if rec is None or (owner_filter is not None and rec.get("owner", "") != owner_filter):
+        raise HTTPException(status_code=404, detail="no such connection")
+    base = str(rec.get("base_url") or "").rstrip("/")
+    if not base:
+        return {"ok": False, "detail": "no base URL set"}
+
+    def _probe() -> dict:
+        try:
+            from maverick.tools import _ssrf
+            from maverick.tools.enterprise_connectors import auth_headers_for
+            # Speak the connector's real auth dialect (basic / custom scheme /
+            # extra headers), not a hardcoded Bearer -- else a working
+            # basic-auth connection "fails" its test.
+            headers = auth_headers_for(str(rec.get("connector") or ""),
+                                       str(rec.get("token") or ""))
+            # This request carries the sealed token, so it MUST go through the
+            # governed SSRF-safe path: safe_get pins the host to a validated
+            # PUBLIC ip (blocks 169.254/127.0.0.1/private/link-local) and forces
+            # follow_redirects=False, so a base_url or a 3xx can't turn this into
+            # an internal-network probe or forward the token to another host.
+            r = _ssrf.safe_get(base, headers=headers, timeout=10.0)
+            # 2xx/3xx or 401/403 all mean "reachable"; only a connect error is a hard fail.
+            ok = r.status_code < 500
+            return {"ok": ok, "status": r.status_code,
+                    "detail": ("authenticated" if r.status_code < 400
+                               else f"reachable but returned {r.status_code}")}
+        except _ssrf.BlockedHost:
+            return {"ok": False, "detail": "base URL host is not permitted"}
+        except Exception as e:  # pragma: no cover -- network varies
+            return {"ok": False, "detail": f"could not reach host: {type(e).__name__}"}
+    return await run_in_threadpool(_probe)
+
+
+@router.delete("/connections/{name}")
+async def delete_connection_endpoint(request: Request, name: str) -> dict:
+    require_permission(request, "operate")
+    _require_connections()
+    from maverick import connections
+    if not connections.delete_connection(name, owner=goal_owner_filter(request)):
+        raise HTTPException(status_code=404, detail="no connection with that name")
+    return {"deleted": connections.normalize_name(name)}
+
+
 # ---- flows: a deterministic skeleton over agentic + tool steps ---------------
 
 
@@ -1111,6 +1213,18 @@ async def list_flow_runs_endpoint(request: Request, flow_id: str = "",
     runs = store.list_runs(flow_id=flow_id or None, owner=owner,
                            limit=max(1, min(500, limit)))
     return {"runs": [_run_out(r) for r in runs]}
+
+
+@router.get("/flows/{flow_id}/schema")
+async def flow_schema_endpoint(request: Request, flow_id: str) -> dict:
+    """The learned output-key shapes for a flow (from real runs): per key, its
+    value type and, for objects/arrays-of-objects, the field names -- so the
+    designer's data pills can offer nested keys like ``order.total``. Field
+    names + types only; no values are ever stored or returned."""
+    require_permission(request, "operate")
+    _require_flows()
+    from maverick.flow import store
+    return {"schema": store.load_flow_schema(flow_id)}
 
 
 def _run_out(run) -> dict:
@@ -1357,6 +1471,22 @@ async def flow_gallery_endpoint(request: Request) -> dict:
     require_permission(request, "operate")
     _require_flows()
     return {"flows": [dict(f) for f in _FLOW_GALLERY]}
+
+
+@router.get("/flows/analytics")
+async def flow_analytics_endpoint(request: Request, limit: int = 500) -> dict:
+    """Per-flow run analytics over recent runs: volume, success rate, failure
+    count, duration p50/p95, and the top recent error messages -- the aggregate
+    view a single run page can't give. Owner-scoped. Declared before
+    ``/flows/{flow_id}`` so the literal path isn't captured as a flow id."""
+    require_permission(request, "operate")
+    _require_flows()
+    from maverick.flow import analytics
+    owner = goal_owner_filter(request)
+    # The aggregation reads + parses every run file in the window: keep that
+    # off the event loop.
+    return await run_in_threadpool(
+        analytics.aggregate, owner=owner, limit=max(1, min(2000, limit)))
 
 
 @router.get("/flows/insights")

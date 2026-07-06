@@ -62,9 +62,7 @@
   var flowNodes = null;   // ordered [{id, kind, label}] from the flow definition
 
   function say(t) { msg.textContent = t || ''; }
-  function api(url, opts) {
-    return fetch(url, Object.assign({ headers: { 'Content-Type': 'application/json' } }, opts || {}));
-  }
+  {% include "_dash_helpers.js" %}
 
   function orderNodes(flow) {
     // BFS from start so the timeline reads in execution order; orphans go last.
@@ -81,7 +79,8 @@
     }
     (flow.nodes || []).forEach(function (n) { if (!seen[n.id]) order.push(n); });
     return order.map(function (n) {
-      return { id: n.id, kind: n.kind, label: n.label || n.brief || n.tool || n.prompt || n.condition || '' };
+      return { id: n.id, kind: n.kind, label: n.label || n.brief || n.tool || n.prompt || n.condition || '',
+               choices: n.choices || [], form: n.form || [], assignee: n.assignee || '' };
     });
   }
 
@@ -127,9 +126,30 @@
       b.textContent = label; b.addEventListener('click', onClick); box.appendChild(b);
     }
     if (run.status === 'paused_approval') {
+      // Prefer the pause-time snapshot (run.human): it is what the node
+      // declared when it paused, immune to flow edits made while waiting.
+      var node = (run.human && Object.keys(run.human).length)
+        ? run.human
+        : ((flowNodes || []).filter(function (n) { return n.id === run.cursor; })[0] || {});
       if (run.prompt) { var p = document.createElement('span'); p.className = 'fr__msg'; p.textContent = '“' + run.prompt + '” '; box.appendChild(p); }
-      btn('✅ Approve', true, function () { resume('approved'); });
-      btn('🚫 Reject', false, function () { resume('rejected'); });
+      if (node.assignee) { var as = document.createElement('span'); as.className = 'fr__msg'; as.textContent = '· for ' + node.assignee + ' '; box.appendChild(as); }
+      // optional form fields collected on sign-off (merged into flow data on resume)
+      var inputs = {};
+      (node.form || []).forEach(function (fld) {
+        if (!fld.name) return;
+        var wrap = document.createElement('div'); wrap.style.margin = '4px 0';
+        var lab = document.createElement('label'); lab.style.cssText = 'display:block;font-size:12px;color:var(--muted);';
+        lab.textContent = fld.label || fld.name;
+        var inp = document.createElement('input'); inp.className = 'input';
+        inp.addEventListener('input', function () { inputs[fld.name] = inp.value; });
+        wrap.appendChild(lab); wrap.appendChild(inp); box.appendChild(wrap);
+      });
+      btn('✅ Approve', true, function () { resume('approved', inputs); });
+      // any declared choice verdicts become their own buttons (routed by a switch)
+      (node.choices || []).forEach(function (ch) {
+        btn(ch, false, function () { resume(ch, inputs); });
+      });
+      btn('🚫 Reject', false, function () { resume('rejected', inputs); });
     }
     if (run.status === 'paused_event') {
       if (run.prompt) { var pe = document.createElement('span'); pe.className = 'fr__msg'; pe.textContent = '📥 ' + run.prompt + ' '; box.appendChild(pe); }
@@ -143,10 +163,10 @@
     }
   }
 
-  function resume(decision) {
+  function resume(decision, inputs) {
     api('/api/v1/flows/runs/' + encodeURIComponent(runId) + '/resume',
-        { method: 'POST', body: JSON.stringify({ decision: decision }) })
-      .then(function (r) { say(r.ok ? (decision === 'approved' ? 'Approved — resuming…' : 'Rejected.') : 'Could not resume.'); poll(8); })
+        { method: 'POST', body: JSON.stringify({ decision: decision, inputs: inputs || {} }) })
+      .then(function (r) { say(r.ok ? (decision === 'rejected' ? 'Rejected.' : '‘' + decision + '’ — resuming…') : 'Could not resume.'); poll(8); })
       .catch(function () { say('Could not resume.'); });
   }
   function retry(fromFailure) {

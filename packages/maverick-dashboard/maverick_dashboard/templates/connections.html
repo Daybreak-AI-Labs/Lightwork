@@ -1,0 +1,115 @@
+{% extends "base.html" %}
+{% block title %}connections · Lightwork{% endblock %}
+{% block content %}
+<style>
+  .cx { max-width: 820px; }
+  .cx__sub { color: var(--muted); font-size: var(--text-sm); margin-bottom: var(--space-4); }
+  .cx__form { display: grid; grid-template-columns: 1fr 1fr; gap: var(--space-2);
+              border: 1px solid var(--border); border-radius: var(--radius-lg);
+              padding: var(--space-4); margin-bottom: var(--space-4); }
+  .cx__form .full { grid-column: 1 / -1; }
+  .cx__form label { display: block; font-size: var(--text-sm); margin-bottom: 2px; color: var(--muted); }
+  .cx__list { list-style: none; padding: 0; margin: 0; }
+  .cx__row { display: flex; align-items: baseline; gap: var(--space-3);
+             border: 1px solid var(--border); border-radius: var(--radius); padding: var(--space-3);
+             margin-bottom: var(--space-2); }
+  .cx__row .name { font-weight: var(--font-semibold); }
+  .cx__row .meta { color: var(--muted); font-size: var(--text-sm); flex: 1; word-break: break-all; }
+  .cx__badge { font-size: 11px; padding: 1px 8px; border-radius: 999px; border: 1px solid var(--border); }
+  .cx__badge.ok { color: var(--success, #16a34a); border-color: currentColor; }
+  .cx__badge.no { color: var(--danger, #dc2626); border-color: currentColor; }
+  .cx__msg { font-size: var(--text-sm); color: var(--muted); min-height: 1.2em; }
+</style>
+
+<div class="cx">
+  <h1 style="margin:0 0 4px;">Connections</h1>
+  <p class="cx__sub">Store a connector's base URL and API token once, under a name, sealed at rest —
+    then wire the connector in a flow without touching environment variables. An existing
+    <code>&lt;NAME&gt;_TOKEN</code> env var still takes precedence.</p>
+
+  <form class="cx__form" id="cx-form" autocomplete="off">
+    <div><label for="cx-name">Name</label>
+      <input class="input" id="cx-name" placeholder="salesforce-eu" required></div>
+    <div><label for="cx-connector">Connector (tool name)</label>
+      <input class="input" id="cx-connector" placeholder="salesforce"></div>
+    <div class="full"><label for="cx-base">Base URL</label>
+      <input class="input" id="cx-base" placeholder="https://api.example.com"></div>
+    <div class="full"><label for="cx-token">API token / key (sealed, never shown again)</label>
+      <input class="input" id="cx-token" type="password" placeholder="paste the token"></div>
+    <div class="full" style="display:flex;gap:var(--space-2);align-items:center;">
+      <button class="btn btn--primary" type="submit">Save connection</button>
+      <span class="cx__msg" id="cx-msg" aria-live="polite"></span>
+    </div>
+  </form>
+
+  <h2 style="font-size:var(--text-base);">Saved connections</h2>
+  <ul class="cx__list" id="cx-list"></ul>
+  <p class="cx__sub" id="cx-empty" hidden>None yet.</p>
+</div>
+
+<script>
+(function () {
+  'use strict';
+  var msg = document.getElementById('cx-msg');
+  var list = document.getElementById('cx-list');
+  function say(t, err) { msg.textContent = t || ''; msg.style.color = err ? 'var(--danger)' : 'var(--muted)'; }
+  {% include "_dash_helpers.js" %}
+
+  function load() {
+    api('/api/v1/connections').then(function (r) {
+      if (r.status === 403) { say('Connections are off — enable [connections] or set MAVERICK_CONNECTIONS=1.', true); return { connections: [] }; }
+      return r.ok ? r.json() : { connections: [] };
+    }).then(function (j) {
+      var conns = j.connections || [];
+      list.textContent = '';
+      document.getElementById('cx-empty').hidden = conns.length > 0;
+      conns.forEach(function (c) {
+        var li = el('li', 'cx__row');
+        li.appendChild(el('span', 'name', c.name));
+        var meta = el('div', 'meta', (c.connector ? '→ ' + c.connector + '  ' : '') + (c.base_url || '(no base URL)'));
+        li.appendChild(meta);
+        li.appendChild(el('span', 'cx__badge ' + (c.has_token ? 'ok' : 'no'), c.has_token ? 'token set' : 'no token'));
+        var test = el('button', 'btn btn--ghost', 'Test');
+        test.type = 'button';
+        test.addEventListener('click', function () {
+          test.textContent = 'Testing…';
+          api('/api/v1/connections/' + encodeURIComponent(c.name) + '/test', { method: 'POST' })
+            .then(function (r) { return r.json(); })
+            .then(function (res) { test.textContent = (res.ok ? '✓ ' : '✗ ') + (res.detail || ''); })
+            .catch(function () { test.textContent = '✗ error'; });
+        });
+        var del = el('button', 'btn btn--ghost', '🗑');
+        del.type = 'button';
+        del.addEventListener('click', function () {
+          if (!window.confirm('Delete connection ‘' + c.name + '’?')) return;
+          api('/api/v1/connections/' + encodeURIComponent(c.name), { method: 'DELETE' })
+            .then(function () { load(); });
+        });
+        li.appendChild(test); li.appendChild(del);
+        list.appendChild(li);
+      });
+    }).catch(function () { say('Could not load connections.', true); });
+  }
+
+  document.getElementById('cx-form').addEventListener('submit', function (e) {
+    e.preventDefault();
+    var body = {
+      name: document.getElementById('cx-name').value.trim(),
+      connector: document.getElementById('cx-connector').value.trim(),
+      base_url: document.getElementById('cx-base').value.trim(),
+      token: document.getElementById('cx-token').value,
+    };
+    if (!body.name) { say('Give the connection a name.', true); return; }
+    say('Saving…');
+    api('/api/v1/connections', { method: 'POST', body: JSON.stringify(body) })
+      .then(function (r) { return r.json().then(function (j) { return { ok: r.ok, j: j }; }); })
+      .then(function (res) {
+        if (!res.ok) { say(res.j.detail || 'Save failed', true); return; }
+        say('Saved ✓'); document.getElementById('cx-token').value = ''; load();
+      }).catch(function () { say('Save failed', true); });
+  });
+
+  load();
+})();
+</script>
+{% endblock %}

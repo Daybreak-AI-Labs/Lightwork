@@ -264,7 +264,8 @@ def test_sweep_rejects_expired_approvals_but_never_paused_events(monkeypatch, tm
     aq._handle_flow_sweep(None)
     jobs = [j for j in aq.queue().list(status="pending") if j.kind == aq.FLOW_RESUME_KIND]
     assert {j.payload["run_id"] for j in jobs} == {"ap1"}
-    assert jobs[0].payload["decision"] == "rejected"     # expiry fails closed
+    # expiry rides the out-of-band flag -> the runner routes on_expire or rejects
+    assert jobs[0].payload["expired"] is True and "decision" not in jobs[0].payload
 
 
 def test_retry_of_paused_event_run_is_409_not_a_duplicate(monkeypatch, tmp_path):
@@ -489,6 +490,40 @@ def test_designer_page_has_copilot_and_toolbar(monkeypatch, tmp_path):
                    'data-add="while"', 'data-add="wait_event"', 'data-add="scope"',
                    "/api/v1/flows/chat", "upstreamOutputs", "validateFlow"):
         assert needle in r.text, needle
+
+
+def test_flow_analytics_aggregates_runs(monkeypatch, tmp_path):
+    _isolate(monkeypatch, tmp_path)
+    from maverick.flow import store
+    for i in range(3):
+        store.save_run(store.FlowRun(run_id=f"c{i}", flow_id="demo", status="completed",
+                                     nodes={"a": {"status": "done", "outcome": 1.0, "seconds": 2.0 + i}}))
+    store.save_run(store.FlowRun(run_id="f1", flow_id="demo", status="failed",
+                                 error="node 'b': connector down"))
+    store.save_run(store.FlowRun(run_id="p1", flow_id="demo", status="paused_approval"))
+    flows = _client().get("/api/v1/flows/analytics").json()["flows"]
+    demo = next(f for f in flows if f["flow_id"] == "demo")
+    assert demo["runs"] == 5 and demo["completed"] == 3 and demo["failed"] == 1 and demo["paused"] == 1
+    assert demo["success_rate"] == 0.75          # 3 completed / 4 finished
+    assert demo["p50_seconds"] >= 2.0 and demo["p95_seconds"] >= demo["p50_seconds"]
+    assert demo["top_errors"][0]["error"].startswith("node 'b'")
+
+
+def test_flow_analytics_page_renders(monkeypatch, tmp_path):
+    _isolate(monkeypatch, tmp_path)
+    r = _client().get("/flows/analytics")
+    assert r.status_code == 200 and 'id="fa-table"' in r.text
+
+
+def test_flow_schema_endpoint_returns_learned_shapes(monkeypatch, tmp_path):
+    _isolate(monkeypatch, tmp_path)
+    from maverick.flow import store
+    store.record_flow_schema("demo", {"order": {"type": "object", "keys": ["total"]}})
+    r = _client().get("/api/v1/flows/demo/schema")
+    assert r.status_code == 200
+    assert r.json()["schema"]["order"] == {"type": "object", "keys": ["total"]}
+    # unknown flow -> empty (not an error)
+    assert _client().get("/api/v1/flows/nope/schema").json()["schema"] == {}
 
 
 def test_gallery_returns_valid_starter_flows(monkeypatch, tmp_path):

@@ -9,7 +9,7 @@ spec here — no new module per connector. Systems that need a bespoke shape
 from __future__ import annotations
 
 from . import Tool
-from ._rest_connector import make_graphql_tool, make_rest_tool
+from ._rest_connector import _build_auth_headers, make_graphql_tool, make_rest_tool
 
 
 def _fill_env(spec: dict) -> dict:
@@ -3998,6 +3998,22 @@ READ_CONNECTOR_RISKS: dict[str, str] = {
 ENTERPRISE_CONNECTOR_NAMES: list[str] = (
     [s["name"] for s in _SPECS] + [s["name"] for s in _GRAPHQL_SPECS]
 )
+
+
+def auth_headers_for(connector: str, token: str) -> dict[str, str]:
+    """Auth headers for probing ``connector`` with ``token`` -- the same
+    bearer/basic/custom-scheme translation the connector tool itself sends
+    (``_build_auth_headers``), looked up from the connector's spec so a
+    reachability test speaks the service's real auth dialect instead of
+    assuming Bearer. Unknown connectors fall back to standard Bearer."""
+    spec = next((s for s in _SPECS + _READ_SPECS + _GRAPHQL_SPECS
+                 if s.get("name") == connector), {})
+    return _build_auth_headers(
+        token, basic=bool(spec.get("basic")),
+        token_header=str(spec.get("token_header", "Authorization")),
+        scheme=str(spec.get("scheme", "Bearer")),
+        extra_headers_env=spec.get("extra_headers_env"),
+    )
 
 
 def enterprise_connectors() -> list[Tool]:

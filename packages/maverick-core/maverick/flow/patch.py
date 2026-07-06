@@ -30,13 +30,17 @@ from .ir import Flow, FlowNode
 
 PATCH_OPS = frozenset({"add_node", "remove_node", "set_field", "set_flow_field", "rewire"})
 
-_ROUTE_FIELDS = frozenset({"next", "if_true", "if_false", "on_error"})
+_ROUTE_FIELDS = frozenset({"next", "if_true", "if_false", "on_error", "on_expire"})
 _FLOW_FIELDS = frozenset({"name", "start", "notify", "max_seconds", "max_dollars", "schedule"})
 _NODE_FIELDS = frozenset({
     "kind", "next", "tool", "params", "brief", "condition", "if_true", "if_false",
     "cases", "items", "var", "body", "limit", "concurrent", "branches", "prompt",
     "choices", "seconds", "flow_ref", "retries", "on_error", "timeout", "output",
     "label", "x", "y",
+    # rich human-task fields (approval) -- documented in FLOW_SCHEMA_BLOCK, so
+    # the copilot must be able to set them, else "make it expire / escalate /
+    # collect a note" edits are rejected as un-editable fields.
+    "assignee", "expires_after", "on_expire", "form",
 })
 
 

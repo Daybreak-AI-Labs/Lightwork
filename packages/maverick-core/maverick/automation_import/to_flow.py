@@ -451,6 +451,173 @@ def _wk_to_flow(automation: ImportedAutomation,
     return flow
 
 
+# ---- UiPath activity-tree capture (best-effort) ------------------------------
+# A UiPath Release/Schedule is correctly a one-step "run process X" import (the
+# logic is compiled XAML the API doesn't expose). But an EXPORTED workflow whose
+# raw carries an activity tree (some Studio/JSON exports do) has real structure
+# -- Sequence / If / While / ForEach / TryCatch -- worth capturing.
+
+_UIPATH_CHILD_KEYS = ("activities", "children", "body", "Body", "Activities")
+
+
+def _uipath_children(node: dict) -> list:
+    for k in _UIPATH_CHILD_KEYS:
+        v = node.get(k)
+        if isinstance(v, list):
+            return [c for c in v if isinstance(c, dict)]
+        if isinstance(v, dict):     # a single wrapped child (Body: {...})
+            return [v]
+    return []
+
+
+def _uipath_type(node: dict) -> str:
+    raw = str(node.get("type") or node.get("$type") or node.get("activityType")
+              or node.get("Activity") or "")
+    return raw.rsplit(".", 1)[-1].split(",")[0].strip().lower()
+
+
+def _uipath_label(node: dict) -> str:
+    return _safe_line(node.get("displayName") or node.get("DisplayName")
+                      or node.get("name") or _uipath_type(node) or "step", max_chars=60)
+
+
+def _uipath_lower(activities: list, prefix: str,
+                  report: list[dict]) -> tuple[dict[str, FlowNode], str | None]:
+    """Lower an ordered UiPath activity list (one nesting level) into chained
+    nodes. Sequence/Flowchart flatten; If -> branch; While/DoWhile -> while;
+    ForEach -> foreach; TryCatch -> scope; everything else -> a step node."""
+    # flatten any Sequence/Flowchart wrappers at this level, in order
+    flat: list[dict] = []
+    for a in activities:
+        if _uipath_type(a) in ("sequence", "flowchart", "statemachine"):
+            flat.extend(_uipath_children(a))
+        else:
+            flat.append(a)
+    ids = {i: f"{prefix}{i}" for i in range(len(flat))}
+    nodes: dict[str, FlowNode] = {}
+
+    def _lowered_body(act: dict, body_prefix: str, name: str):
+        """The activity's children as a nested body Flow, or None when the
+        body is unreadable (the caller then falls back to one step node)."""
+        b_nodes, b_start = _uipath_lower(_uipath_children(act), body_prefix, report)
+        return (Flow(id="", name=name, start=b_start, nodes=b_nodes)
+                if b_nodes and b_start else None)
+
+    def _step_fallback(act: dict, nid: str, nxt: str | None, label: str, note: str):
+        """Shared 'body unreadable -> one approximated step node' arm."""
+        nodes[nid] = _node_for_step(_uipath_step(act), nid, nxt)
+        report.append({"step": label, "node": nid, "kind": nodes[nid].kind,
+                       "fidelity": "approximated", "note": note})
+
+    for i, act in enumerate(flat):
+        nid = ids[i]
+        nxt = ids[i + 1] if i + 1 < len(flat) else None
+        atype = _uipath_type(act)
+        label = _uipath_label(act)
+        cond = _safe_line(act.get("condition") or act.get("Condition") or "result == true", max_chars=60)
+        if atype == "if":
+            then_acts = _uipath_children(act.get("then") or act.get("Then") or {}) or _uipath_children(act)
+            else_acts = _uipath_children(act.get("else") or act.get("Else") or {})
+            t_nodes, t_start = _uipath_lower(then_acts, nid + "t", report)
+            f_nodes, f_start = _uipath_lower(else_acts, nid + "f", report)
+            _pa_wire_tail(t_nodes, nxt)
+            _pa_wire_tail(f_nodes, nxt)
+            nodes.update(t_nodes)
+            nodes.update(f_nodes)
+            nodes[nid] = FlowNode(id=nid, kind=NODE_BRANCH, condition=cond,
+                                  if_true=t_start or nxt, if_false=f_start or nxt,
+                                  next=nxt, label=label)
+            report.append({"step": label, "node": nid, "kind": NODE_BRANCH,
+                           "fidelity": "preserved", "note": "UiPath If -> branch (arms wired)"})
+        elif atype in ("while", "dowhile"):
+            body = _lowered_body(act, "b", f"{label} body")
+            if body is not None:
+                nodes[nid] = FlowNode(id=nid, kind=NODE_WHILE, condition=cond, body=body,
+                                      next=nxt, output=f"{nid}_out", label=label)
+                report.append({"step": label, "node": nid, "kind": NODE_WHILE,
+                               "fidelity": "preserved", "note": "UiPath While -> while with a nested body"})
+            else:
+                _step_fallback(act, nid, nxt, label, "While body unreadable -> agent step")
+        elif atype in ("foreach", "foreachrow", "parallelforeach"):
+            body = _lowered_body(act, "b", f"{label} body")
+            items = _safe_line(act.get("values") or act.get("Values") or act.get("collection") or "items", max_chars=40)
+            if body is not None:
+                nodes[nid] = FlowNode(id=nid, kind=NODE_FOREACH, items=items, body=body,
+                                      concurrent=(atype == "parallelforeach"),
+                                      next=nxt, output=f"{nid}_out", label=label)
+                report.append({"step": label, "node": nid, "kind": NODE_FOREACH,
+                               "fidelity": "preserved", "note": "UiPath ForEach -> foreach with a nested body"})
+            else:
+                _step_fallback(act, nid, nxt, label, "ForEach body unreadable -> agent step")
+        elif atype in ("trycatch", "try"):
+            try_act = act.get("try") or act.get("Try")
+            # Lower the Try block AS an activity ([try_act]) -- not its children --
+            # so a single container Try (a While/If/ForEach) keeps its control
+            # node; _uipath_lower flattens a Sequence wrapper itself. Falls back
+            # to act's own children when Try isn't a nested dict.
+            body = (_lowered_body({"children": [try_act]}, "s" + nid, f"{label} body")
+                    if isinstance(try_act, dict) else None) or _lowered_body(act, "s" + nid, f"{label} body")
+            if body is not None:
+                nodes[nid] = FlowNode(id=nid, kind=NODE_SCOPE, body=body, next=nxt, label=label)
+                report.append({"step": label, "node": nid, "kind": NODE_SCOPE,
+                               "fidelity": "preserved", "note": "UiPath TryCatch -> scope (wire on_error for a catch arm)"})
+            else:
+                _step_fallback(act, nid, nxt, label, "Try body unreadable -> agent step")
+        else:
+            node = _node_for_step(_uipath_step(act), nid, nxt)
+            nodes[nid] = node
+            report.append({"step": label, "node": nid, "kind": node.kind,
+                           "fidelity": ("preserved" if node.kind == NODE_ACTION else "approximated"),
+                           "note": ("connector call -> action node" if node.kind == NODE_ACTION
+                                    else "UiPath activity -> agent step")})
+    return nodes, (ids[0] if flat else None)
+
+
+def _uipath_step(act: dict) -> ImportedStep:
+    label = _uipath_label(act)
+    atype = _uipath_type(act)
+    # an InvokeWorkflow/InvokeProcess maps to the uipath connector; else an agent
+    is_invoke = "invoke" in atype or "process" in atype
+    return ImportedStep(
+        name=label,
+        description=f"UiPath {atype} activity.",
+        app="uipath" if is_invoke else "",
+        operation="start_job" if is_invoke else atype,
+        params={}, tools_hint=["uipath"] if is_invoke else [])
+
+
+def _uipath_to_flow(automation: ImportedAutomation, report: list[dict]) -> Flow | None:
+    """Capture a UiPath workflow's activity tree if the raw carries one; else
+    None (a Release/Schedule has no exposed graph -> the one-step lowering)."""
+    raw = automation.raw if isinstance(automation.raw, dict) else {}
+    root = raw.get("Root") or raw.get("root") or raw.get("workflow") or raw.get("Workflow") or raw
+    activities = _uipath_children(root) if isinstance(root, dict) else []
+    if not activities:
+        return None
+    nodes, start = _uipath_lower(activities, "n", report)
+    if not nodes or not start:
+        return None
+    flow = Flow(id=automation.template_name(), name=automation.name, start=start, nodes=nodes)
+    if flow.validate():
+        return None   # the dispatcher clears the report on a None fallback
+    return flow
+
+
+def _n8n_structural(automation: ImportedAutomation, report: list[dict]) -> Flow | None:
+    graph = _n8n_to_flow(automation)
+    if graph is not None:
+        _linear_report(graph, report)
+    return graph
+
+
+_STRUCTURAL_LOWERERS = {
+    "n8n": _n8n_structural,
+    "power_automate": _pa_to_flow,
+    "workato": _wk_to_flow,
+    "uipath": _uipath_to_flow,
+}
+
+
 def _linear_report(flow: Flow, report: list[dict]) -> None:
     """Fidelity entries derived from an already-lowered graph (the n8n path and
     the flat fallback), so every import surfaces a report."""
@@ -471,18 +638,14 @@ def to_flow_with_report(automation: ImportedAutomation) -> tuple[Flow, list[dict
     importer can say exactly what carried over structurally and what became an
     agent step (which still runs; it is an approximation, not a drop)."""
     report: list[dict] = []
-    if automation.source == "n8n":
-        graph = _n8n_to_flow(automation)
-        if graph is not None:
-            _linear_report(graph, report)
-            return graph, report
-    if automation.source == "power_automate":
-        graph = _pa_to_flow(automation, report)
-        if graph is not None:
-            return graph, report
-        report.clear()
-    if automation.source == "workato":
-        graph = _wk_to_flow(automation, report)
+    # Per-source structural lowerers: source -> fn(automation, report) -> Flow|None.
+    # Registering one here is all it takes to capture a new source's graph
+    # structurally -- the dispatch below needs no change. A lowerer fills
+    # ``report`` and returns None when the raw has no usable structure (the
+    # caller then falls back to the ordered-chain lowering).
+    lowerer = _STRUCTURAL_LOWERERS.get(automation.source)
+    if lowerer is not None:
+        graph = lowerer(automation, report)
         if graph is not None:
             return graph, report
         report.clear()

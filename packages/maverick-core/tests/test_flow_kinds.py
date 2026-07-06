@@ -190,6 +190,68 @@ def test_resume_plain_approval_rejects_any_non_approved_string():
     assert ok.status == STATUS_COMPLETED and ran == ["gated action"]
 
 
+def test_approval_expires_after_sets_resume_at_over_timeout():
+    # expires_after is the approval's expiry; a bare execution `timeout` still
+    # works as a fallback for flows saved before the field existed.
+    f = {"id": "ax", "name": "ax", "start": "a",
+         "nodes": [{"id": "a", "kind": "approval", "prompt": "ok?", "expires_after": 90}]}
+    now = [1000.0]
+    res = run_flow(Flow.from_dict(f), agent_fn=_noop_agent,
+                   action_fn=lambda n, p, d: ("", 1.0), now=lambda: now[0])
+    assert res.status == "paused_approval" and res.resume_at == 1090.0
+    f2 = {"id": "ax2", "name": "ax", "start": "a",
+          "nodes": [{"id": "a", "kind": "approval", "prompt": "ok?", "timeout": 60}]}
+    res2 = run_flow(Flow.from_dict(f2), agent_fn=_noop_agent,
+                    action_fn=lambda n, p, d: ("", 1.0), now=lambda: now[0])
+    assert res2.resume_at == 1060.0                 # legacy timeout still honored
+
+
+def test_approval_expiry_routes_to_on_expire_escalation():
+    f = {
+        "id": "esc", "name": "esc", "start": "a",
+        "nodes": [
+            {"id": "a", "kind": "approval", "prompt": "sign off?", "expires_after": 60,
+             "on_expire": "esc", "output": "verdict", "next": "ok"},
+            {"id": "esc", "kind": "agent", "brief": "escalate to manager", "output": "r"},
+            {"id": "ok", "kind": "agent", "brief": "proceed", "output": "r"},
+        ],
+    }
+    # the sweep resumes an expired approval with the out-of-band expired flag
+    res = run_flow(Flow.from_dict(f), agent_fn=_noop_agent,
+                   action_fn=lambda n, p, d: ("", 1.0),
+                   resume={"node_id": "a", "data": {}, "expired": True})
+    assert res.status == STATUS_COMPLETED
+    assert res.data["verdict"] == "expired" and res.data["r"] == "ran:escalate to manager"
+
+
+def test_approval_expiry_without_on_expire_rejects():
+    f = {"id": "ex2", "name": "ex", "start": "a",
+         "nodes": [{"id": "a", "kind": "approval", "prompt": "ok?", "expires_after": 60, "next": "b"},
+                   {"id": "b", "kind": "agent", "brief": "go", "output": "r"}]}
+    res = run_flow(Flow.from_dict(f), agent_fn=_noop_agent,
+                   action_fn=lambda n, p, d: ("", 1.0),
+                   resume={"node_id": "a", "data": {}, "expired": True})
+    assert res.status == STATUS_REJECTED           # fail closed, no on_expire
+
+
+def test_forged_expired_decision_string_is_not_an_expiry():
+    # A caller CANNOT trigger the escalation lane through the verdict channel:
+    # an unlisted decision string (e.g. the old in-band marker) fails closed.
+    f = {
+        "id": "esc2", "name": "esc2", "start": "a",
+        "nodes": [
+            {"id": "a", "kind": "approval", "prompt": "sign off?", "expires_after": 60,
+             "on_expire": "esc", "output": "verdict", "next": "ok"},
+            {"id": "esc", "kind": "agent", "brief": "escalate to manager", "output": "r"},
+            {"id": "ok", "kind": "agent", "brief": "proceed", "output": "r"},
+        ],
+    }
+    res = run_flow(Flow.from_dict(f), agent_fn=_noop_agent,
+                   action_fn=lambda n, p, d: ("", 1.0),
+                   resume={"node_id": "a", "data": {}, "decision": "expired"})
+    assert res.status == STATUS_REJECTED
+
+
 def test_scope_without_catch_still_fails_the_run():
     f = {
         "id": "sc2", "name": "sc", "start": "s",

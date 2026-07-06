@@ -283,6 +283,16 @@ class OAuthExchangeIn(BaseModel):
     client_id: str | None = Field(default=None, max_length=512)
 
 
+class ConnectionIn(BaseModel):
+    """Create/replace a named SaaS connection: the connector it credentials, its
+    base URL, and an API token (sealed at rest, never returned). ``name`` lets
+    one connector have several accounts (salesforce / salesforce-eu)."""
+    name: str = Field(..., min_length=1, max_length=64)
+    connector: str = Field("", max_length=64)
+    base_url: str = Field("", max_length=2048)
+    token: str = Field("", max_length=8192)
+
+
 class FlowSaveIn(BaseModel):
     """A flow definition (a graph of typed nodes) to create or replace."""
     flow: dict

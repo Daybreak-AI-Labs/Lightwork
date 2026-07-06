@@ -6,12 +6,14 @@ var FDCore = (function () {
   var NODE_DEFAULTS = {
     params: {}, brief: '', tool: '', condition: '', if_true: null, if_false: null,
     cases: [], items: '', var: 'item', limit: 0, concurrent: false, prompt: '',
-    choices: [], seconds: 0, flow_ref: '',
+    choices: [], assignee: '', expires_after: 0, on_expire: null, form: [],
+    seconds: 0, flow_ref: '',
     retries: 0, retry_backoff: 0, on_error: null, timeout: 0, output: '', label: '',
     assignments: {}, subflow_inputs: {}, body: null, branches: [], next: null
   };
   var SCALARS = ['next', 'tool', 'brief', 'condition', 'if_true', 'if_false',
-    'items', 'var', 'prompt', 'flow_ref', 'on_error', 'output', 'label'];
+    'items', 'var', 'prompt', 'flow_ref', 'on_error', 'output', 'label',
+    'assignee', 'on_expire'];
 
   // Upgrade a raw node dict into an editable node object (defaults + id fallback).
   function normalizeNode(nd, i) {
@@ -40,6 +42,8 @@ var FDCore = (function () {
     if (n.concurrent) o.concurrent = true;
     if (n.cases && n.cases.length) o.cases = n.cases;
     if (n.choices && n.choices.length) o.choices = n.choices;
+    if (n.expires_after) o.expires_after = n.expires_after;
+    if (n.form && n.form.length) o.form = n.form.filter(function (f) { return f && f.name; });
     if (n.assignments && Object.keys(n.assignments).length) o.assignments = n.assignments;
     if (n.subflow_inputs && Object.keys(n.subflow_inputs).length) o.subflow_inputs = n.subflow_inputs;
     if (n.body && n.body.nodes && n.body.nodes.length) o.body = serializeFlow(n.body);
@@ -105,7 +109,7 @@ var FDCore = (function () {
     nodes.forEach(function (n) { ids[n.id] = true; });
     if (!f.start || !ids[f.start]) errs.push('start node "' + f.start + '" is not in the flow');
     nodes.forEach(function (n) {
-      ['next', 'if_true', 'if_false', 'on_error'].forEach(function (k) {
+      ['next', 'if_true', 'if_false', 'on_error', 'on_expire'].forEach(function (k) {
         if (n[k] != null && !ids[n[k]]) errs.push(n.id + ': ' + k + ' points at unknown node "' + n[k] + '"');
       });
       if (n.kind === 'action' && !n.tool) errs.push('action ' + n.id + ' has no tool');
@@ -157,10 +161,17 @@ var FDCore = (function () {
     };
   }
 
+  // ---- condition grammar (mirrors the server's runner._COND parser) --------
+  // Kept HERE (the tested shared module) so the builder UI and any future
+  // consumer share one copy; changing an op means updating this + the runner.
+  var COND_OPS = ['==', '!=', '>', '<', '>=', '<=', 'contains'];
+  var COND_RE = /^\s*(\S+)\s*(==|!=|>=|<=|>|<|contains)\s*(.+?)\s*$/;
+
   return { normalizeNode: normalizeNode, serializeNode: serializeNode,
            serializeFlow: serializeFlow, cloneFlow: cloneFlow,
            upstreamOutputs: upstreamOutputs, fitView: fitView,
-           validateFlow: validateFlow };
+           validateFlow: validateFlow,
+           COND_OPS: COND_OPS, COND_RE: COND_RE };
 })();
 
 if (typeof module !== 'undefined' && module.exports) module.exports = FDCore;

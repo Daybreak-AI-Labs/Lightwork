@@ -4906,15 +4906,43 @@ async def workflows_index_page(request: Request) -> HTMLResponse:
                      if a.get("is_override") and a.get("has_workflow")]
     except Exception:
         playbooks = []
+    # Unify the surface: saved flow graphs live here too, not on a separate page.
+    flows: list[dict] = []
+    flows_enabled = False
+    try:
+        from maverick import flow as _flow
+        flows_enabled = _flow.enabled()
+        if flows_enabled:
+            from maverick.flow import store as _flow_store
+            flows = _flow_store.list_flow_summaries()
+    except Exception:  # pragma: no cover -- never block the page on the flow engine
+        flows = []
     return templates.TemplateResponse(
         request, "workflows_index.html",
         {
             "templates": tpls,
             "playbooks": playbooks,
+            "flows": flows,
+            "flows_enabled": flows_enabled,
             "scheduling_enabled": feats.get("scheduling", True),
             "triggers_enabled": feats.get("triggers", True),
         },
     )
+
+
+@app.get("/flows/analytics", response_class=HTMLResponse)
+async def flow_analytics_page(request: Request) -> HTMLResponse:
+    """Per-flow run analytics (volume, success rate, duration p50/p95, top
+    errors). Data comes from /api/v1/flows/analytics client-side."""
+    return templates.TemplateResponse(request, "flow_analytics.html", {})
+
+
+@app.get("/connections", response_class=HTMLResponse)
+async def connections_page(request: Request) -> HTMLResponse:
+    """Manage named SaaS connections (base URL + sealed token) so connectors can
+    be wired without env vars. CRUD + reachability test go through
+    /api/v1/connections; the feature gate is enforced there."""
+    return templates.TemplateResponse(request, "connections.html", {})
 
 
 @app.get("/flows/designer", response_class=HTMLResponse)

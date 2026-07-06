@@ -15,9 +15,37 @@
 <div class="wfx">
   <div class="wfx__head">
     <h1 class="page-title">Workflows</h1>
-    <a class="btn btn--primary" href="/workflow-builder">New workflow</a>
+    <span style="display:flex;gap:var(--space-2);">
+      {% if flows_enabled %}<a class="btn" href="/flows/designer">New flow</a>{% endif %}
+      <a class="btn btn--primary" href="/workflow-builder">New workflow</a>
+    </span>
   </div>
-  <p class="wfx__sub">Workflows and agent playbooks you've built — edit them, or put them on a schedule / webhook. Browse the full catalog on <a href="/templates">Templates</a>.</p>
+  <p class="wfx__sub">Flow graphs, workflows, and agent playbooks you've built — edit them, or put them on a schedule / webhook. Browse the full catalog on <a href="/templates">Templates</a>.</p>
+
+  {% if flows_enabled %}
+  <section class="wfx__section" aria-labelledby="wfx-flow-h">
+    <h2 id="wfx-flow-h">Flows <span style="font-weight:normal;color:var(--muted);font-size:var(--text-sm);">— visual graphs with branches, loops, approvals</span></h2>
+    {% if flows %}
+    <ul class="wfx__list" aria-label="Your flows">
+      {% for f in flows %}
+      <li class="mv-row">
+        <div class="mv-row__main">
+          <div class="mv-row__title">{{ f.name or f.id }}</div>
+          <div class="mv-row__sub">{{ f.id }} · {{ f.nodes }} step{{ '' if f.nodes == 1 else 's' }}{% if f.single_agent %} · single step{% endif %}</div>
+        </div>
+        <div class="mv-row__actions">
+          <a class="btn btn--ghost" href="/flows/designer/{{ f.id | urlencode }}">Edit</a>
+          <a class="btn btn--ghost" href="/flows/analytics">Analytics</a>
+        </div>
+      </li>
+      {% endfor %}
+    </ul>
+    {% else %}
+    <div class="mv-empty"><p class="mv-empty__title">No flows yet</p>
+      <p class="mv-empty__sub"><a href="/flows/designer">Open the designer</a> or ask the copilot to build one.</p></div>
+    {% endif %}
+  </section>
+  {% endif %}
 
   <section class="wfx__section" aria-labelledby="wfx-tpl-h">
     <h2 id="wfx-tpl-h">Templates</h2>

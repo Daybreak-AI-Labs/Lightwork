@@ -286,6 +286,75 @@ def test_workato_if_and_repeat_are_captured_structurally():
     assert fidelity["Per line item"] == "preserved"
 
 
+def test_uipath_release_stays_a_single_step():
+    # A UiPath Release has no exposed graph -> the correct one-step lowering.
+    from maverick.automation_import import uipath
+    rel = {"Name": "Invoice bot", "ProcessKey": "InvoiceBot", "Key": "k1"}
+    f, report = to_flow_with_report(uipath.translate(rel))
+    assert f.validate() == [] and len(f.nodes) == 1
+    only = next(iter(f.nodes.values()))
+    assert only.tool == "uipath"
+
+
+def test_uipath_exported_activity_tree_is_captured_structurally():
+    from maverick.automation_import import ir as iir
+    from maverick.flow.ir import NODE_FOREACH, NODE_SCOPE, NODE_WHILE
+    # a raw carrying an exported activity tree (Sequence with If/ForEach/While/TryCatch)
+    raw = {
+        "Name": "Process invoices",
+        "workflow": {"type": "Sequence", "activities": [
+            {"type": "If", "displayName": "High value?",
+             "condition": "amount > 1000",
+             "then": {"activities": [
+                 {"type": "InvokeWorkflow", "displayName": "Escalate"}]},
+             "else": {"activities": [
+                 {"type": "WriteLine", "displayName": "Log"}]}},
+            {"type": "ForEach", "displayName": "Per line", "values": "lines",
+             "activities": [{"type": "InvokeWorkflow", "displayName": "Post line"}]},
+            {"type": "While", "displayName": "Retry", "condition": "done != yes",
+             "activities": [{"type": "InvokeWorkflow", "displayName": "Attempt"}]},
+            {"type": "TryCatch", "displayName": "Guarded",
+             "try": {"activities": [{"type": "InvokeWorkflow", "displayName": "Risky"}]}},
+        ]},
+    }
+    a = iir.ImportedAutomation("uipath", "1", "Process invoices",
+                               iir.ImportedTrigger(kind=iir.TRIGGER_MANUAL),
+                               steps=[iir.ImportedStep(name="x")], raw=raw)
+    f, report = to_flow_with_report(a)
+    assert f.validate() == []
+    kinds = {n.kind for n in f.nodes.values()}
+    assert NODE_BRANCH in kinds and NODE_FOREACH in kinds
+    assert NODE_WHILE in kinds and NODE_SCOPE in kinds
+    branch = next(n for n in f.nodes.values() if n.kind == NODE_BRANCH)
+    assert branch.condition == "amount > 1000"
+    assert {r["fidelity"] for r in report if r["kind"] == NODE_BRANCH} == {"preserved"}
+
+
+def test_uipath_trycatch_wrapping_a_loop_keeps_the_loop_node():
+    # A TryCatch whose Try is a single container activity (a While) must keep
+    # the While inside the scope body -- lowering Try AS an activity, not its
+    # children (which would drop the loop and run its steps once).
+    from maverick.automation_import import ir as iir
+    from maverick.flow.ir import NODE_SCOPE, NODE_WHILE
+    raw = {
+        "Name": "Guarded loop",
+        "workflow": {"type": "Sequence", "activities": [
+            {"type": "TryCatch", "displayName": "Guarded",
+             "try": {"type": "While", "displayName": "Retry", "condition": "done != yes",
+                     "activities": [{"type": "InvokeWorkflow", "displayName": "Attempt"}]}},
+        ]},
+    }
+    a = iir.ImportedAutomation("uipath", "1", "Guarded loop",
+                               iir.ImportedTrigger(kind=iir.TRIGGER_MANUAL),
+                               steps=[iir.ImportedStep(name="x")], raw=raw)
+    f, _report = to_flow_with_report(a)
+    assert f.validate() == []
+    scope = next(n for n in f.nodes.values() if n.kind == NODE_SCOPE)
+    assert scope.body is not None
+    body_kinds = {n.kind for n in scope.body.nodes.values()}
+    assert NODE_WHILE in body_kinds   # the loop survived, not unwrapped to its steps
+
+
 def test_every_lowering_path_emits_a_report():
     from maverick.automation_import import ir as iir
     a = iir.ImportedAutomation("make", "9", "x", iir.ImportedTrigger(kind=iir.TRIGGER_WEBHOOK),
