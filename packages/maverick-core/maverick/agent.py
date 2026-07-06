@@ -2174,6 +2174,8 @@ class Agent:
                 input_tokens=b.input_tokens,
                 output_tokens=b.output_tokens,
                 tool_calls=b.tool_calls,
+                cache_read_tokens=b.cache_read_tokens,
+                cache_write_tokens=b.cache_write_tokens,
             )
         except Exception as e:  # pragma: no cover -- observability never blocks
             log.debug("live-spend mirror skipped: %s", e)

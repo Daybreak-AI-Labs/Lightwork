@@ -239,9 +239,22 @@ def _end_episode_with_spend(
             input_tokens=budget.input_tokens,
             output_tokens=budget.output_tokens,
             tool_calls=budget.tool_calls,
+            cache_read_tokens=budget.cache_read_tokens,
+            cache_write_tokens=budget.cache_write_tokens,
         )
     except TypeError:
         world.end_episode(episode_id, summary, outcome)
+    # Signed per-goal spend receipt (opt-in): activates the dormant
+    # budget_receipts ledger so each finished goal appends a tamper-evident
+    # tokens+cache+cost record — the regression baseline for token
+    # efficiency. Best-effort; never blocks the goal.
+    if goal_id is not None and os.environ.get(
+            "MAVERICK_BUDGET_RECEIPTS", "").strip().lower() in ("1", "true", "yes"):
+        try:
+            from .budget_receipts import mint
+            mint(world, int(goal_id))
+        except Exception:  # pragma: no cover -- observability never blocks
+            log.debug("budget receipt mint skipped", exc_info=True)
     _fire_webhook("episode_finished", {
         "goal_id": goal_id,
         "episode_id": episode_id,

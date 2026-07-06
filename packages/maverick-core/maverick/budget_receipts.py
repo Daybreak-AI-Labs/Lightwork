@@ -267,6 +267,10 @@ def mint(
             "total_dollars": round(sum(e.cost_dollars for e in episodes), 6),
             "in_tokens": sum(e.input_tokens for e in episodes),
             "out_tokens": sum(e.output_tokens for e in episodes),
+            "cache_read_tokens": sum(
+                getattr(e, "cache_read_tokens", 0) for e in episodes),
+            "cache_write_tokens": sum(
+                getattr(e, "cache_write_tokens", 0) for e in episodes),
             "tool_calls": sum(e.tool_calls for e in episodes),
             "episodes": len(episodes),
             "started_at": min(starts) if starts else None,
