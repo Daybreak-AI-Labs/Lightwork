@@ -470,6 +470,84 @@ class TestSearchFormatted:
         out = kb.search_formatted(["a", "b"], "revenue", k=5)
         assert "da" in out and "db" in out
 
+    def test_query_embedded_once_across_collections(self):
+        # search_formatted used to re-embed the identical query once per
+        # collection; the vector must be computed once and reused.
+        calls = []
+
+        class _Spy(DeterministicEmbedder):
+            def embed(self, texts):
+                calls.append(list(texts))
+                return super().embed(texts)
+
+        kb = KnowledgeBase(embedder=_Spy(dim=64))
+        for c in ("a", "b", "c"):
+            kb.ingest_text(c, f"{c} contract terms", source=c)
+        calls.clear()
+        kb.search_formatted(["a", "b", "c"], "contract", k=3)
+        assert calls == [["contract"]]
+
+
+class TestDedupHits:
+    def _kb(self):
+        return KnowledgeBase(embedder=DeterministicEmbedder(dim=64),
+                             chunk_size=100, chunk_overlap=40)
+
+    def test_chunk_overlap_rendered_once(self):
+        from maverick_knowledge.base import Hit, _dedup_hits
+        shared = "the indemnification clause survives termination "  # 48 chars
+        hits = [
+            Hit(0.9, "first part of the policy text then " + shared, "doc"),
+            Hit(0.8, shared + "and binds all successors in interest", "doc"),
+        ]
+        out = _dedup_hits(hits, max_overlap=64)
+        joined = "\n".join(h.text for h in out)
+        assert joined.count("indemnification clause survives") == 1
+        # the non-overlapping remainder of BOTH chunks is retained
+        assert "first part of the policy" in joined
+        assert "binds all successors" in joined
+
+    def test_contained_duplicate_absorbed(self):
+        from maverick_knowledge.base import Hit, _dedup_hits
+        full = "quarterly revenue grew twelve percent year over year"
+        hits = [
+            Hit(0.9, full, "10q"),
+            Hit(0.7, "revenue grew twelve percent", "10q"),  # substring re-rank
+            Hit(0.6, "an unrelated legal clause about venue", "msa"),
+        ]
+        out = _dedup_hits(hits, max_overlap=64)
+        assert [h.text for h in out] == [
+            full, "an unrelated legal clause about venue"]
+
+    def test_short_coincidental_overlap_not_trimmed(self):
+        from maverick_knowledge.base import Hit, _dedup_hits
+        hits = [
+            Hit(0.9, "payment is due net thirty", "a"),
+            Hit(0.8, "net thirty is standard for vendors", "a"),
+        ]
+        # 10-char shared run is below the trim floor -- left alone
+        out = _dedup_hits(hits, max_overlap=64)
+        assert [h.text for h in out] == [h.text for h in hits]
+
+    def test_cross_source_never_trimmed(self):
+        from maverick_knowledge.base import Hit, _dedup_hits
+        shared = "the indemnification clause survives termination "
+        hits = [
+            Hit(0.9, "policy text then " + shared, "doc-a"),
+            Hit(0.8, shared + "and binds successors", "doc-b"),
+        ]
+        out = _dedup_hits(hits, max_overlap=64)
+        assert [h.text for h in out] == [h.text for h in hits]
+
+    def test_dedup_backfills_to_k(self):
+        # dedup runs BEFORE the top-k slice, so absorbed duplicates make room
+        # for the next-best distinct chunk instead of shrinking the result.
+        kb = self._kb()
+        kb.ingest_text("d", "alpha " * 30, source="s1")   # chunks all contain each other's overlap
+        kb.ingest_text("d", "distinct beta clause about billing", source="s2")
+        out = kb.search_formatted(["d"], "beta billing", k=2)
+        assert "beta clause" in out
+
 
 class TestImageIngestion:
     def test_is_image(self):
