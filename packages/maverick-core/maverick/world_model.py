@@ -30,7 +30,7 @@ from .paths import data_dir
 log = logging.getLogger(__name__)
 
 DEFAULT_DB = data_dir("world.db")
-SCHEMA_VERSION = 25
+SCHEMA_VERSION = 26
 DEFAULT_BUSY_TIMEOUT_MS = 5000
 WAL_SWITCH_BUSY_TIMEOUT_MS = 50
 WAL_SWITCH_RETRY_SECONDS = 5.0
@@ -385,6 +385,18 @@ CREATE TABLE IF NOT EXISTS harness_transfer_tried (
     line_id TEXT PRIMARY KEY,
     ts      REAL NOT NULL
 );
+
+-- v26 fleet learning store, phase 2: the eval-corpus family (live cases,
+-- harvest pending, reject memory, plus "extra" rows preserving a live file's
+-- non-list top-level entries). seq preserves row order (review indexes are
+-- positional). Written only when [self_harness] store = "world".
+CREATE TABLE IF NOT EXISTS harness_corpus (
+    kind TEXT NOT NULL,
+    key  TEXT NOT NULL,
+    seq  INTEGER NOT NULL,
+    row  TEXT NOT NULL,
+    PRIMARY KEY (kind, key, seq)
+);
 """
 
 
@@ -517,6 +529,9 @@ MIGRATIONS: dict[int, list[str]] = {
     # CREATE, applied on every open); listed here so existing DBs bump the
     # version, matching the v9/v15/v22 pattern and the Postgres ladder.
     25: [],
+    # v26 fleet learning store phase 2: harness_corpus is in SCHEMA (idempotent
+    # CREATE); listed here so existing DBs bump the version.
+    26: [],
 }
 
 

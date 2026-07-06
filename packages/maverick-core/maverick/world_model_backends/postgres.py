@@ -487,6 +487,15 @@ _HARNESS_STORE_MIGRATION: list[str] = [
     " line_id TEXT PRIMARY KEY, ts DOUBLE PRECISION NOT NULL);",
 ]
 
+# v26 fleet learning store phase 2: the eval-corpus family as shared rows
+# (live/pending/rejected + "extra" preserving non-list top-level entries).
+# Additive CREATE IF NOT EXISTS -- passes the additive-only gate.
+_HARNESS_CORPUS_MIGRATION: list[str] = [
+    "CREATE TABLE IF NOT EXISTS harness_corpus ("
+    " kind TEXT NOT NULL, key TEXT NOT NULL, seq INTEGER NOT NULL,"
+    " row TEXT NOT NULL, PRIMARY KEY (kind, key, seq));",
+]
+
 MIGRATIONS: list[tuple[int, list[str]]] = [
     (1, SCHEMA),
     (10, _TENANT_MIGRATION),
@@ -503,6 +512,7 @@ MIGRATIONS: list[tuple[int, list[str]]] = [
     (23, _PROVIDER_SPEND_MIGRATION),
     (24, _FACTS_TRUST_MIGRATION),
     (25, _HARNESS_STORE_MIGRATION),
+    (26, _HARNESS_CORPUS_MIGRATION),
 ]
 
 # Highest migration version = the reported schema version.

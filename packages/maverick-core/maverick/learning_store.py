@@ -47,6 +47,13 @@ _SQLITE_DDL = (
     " line_id TEXT PRIMARY KEY, record TEXT NOT NULL, updated_at REAL NOT NULL)",
     "CREATE TABLE IF NOT EXISTS harness_transfer_tried ("
     " line_id TEXT PRIMARY KEY, ts REAL NOT NULL)",
+    # Phase 2: the eval-corpus family. ``kind`` is live|pending|rejected plus
+    # ``extra`` for a live file's non-list top-level entries (operator
+    # annotations like "_meta"), so an export/import round-trip loses nothing.
+    # ``seq`` preserves row order -- review indexes are positional.
+    "CREATE TABLE IF NOT EXISTS harness_corpus ("
+    " kind TEXT NOT NULL, key TEXT NOT NULL, seq INTEGER NOT NULL,"
+    " row TEXT NOT NULL, PRIMARY KEY (kind, key, seq))",
 )
 
 # Session-scoped Postgres advisory lock serializing the store's whole
@@ -248,9 +255,63 @@ def write_transfer_tried_db(tried: dict[str, float]) -> None:
                      f"VALUES ({_ph(2)})", (str(lid), float(ts)))
 
 
+def load_corpus_db(kind: str) -> dict:
+    """The corpus family from the world store, in the FILE shape:
+    ``kind="live"`` returns ``{key: [row-dicts]}`` merged with any preserved
+    non-list top-level entries (stored under kind ``extra``); ``"pending"``
+    returns ``{key: [row-dicts]}``; ``"rejected"`` returns ``{key: [goals]}``.
+    ``{}`` on any error, like the tolerant file loaders."""
+    out: dict = {}
+    try:
+        with _conn() as c:
+            for key, row in _rows(
+                    c, f"SELECT key, row FROM harness_corpus WHERE kind = {_ph(1)}"
+                       " ORDER BY key, seq", (str(kind),)):
+                try:
+                    out.setdefault(str(key), []).append(json.loads(row))
+                except ValueError:
+                    continue
+            if kind == "live":
+                for key, row in _rows(
+                        c, f"SELECT key, row FROM harness_corpus "
+                           f"WHERE kind = {_ph(1)} ORDER BY key, seq",
+                        ("extra",)):
+                    try:
+                        out[str(key)] = json.loads(row)
+                    except ValueError:
+                        continue
+    except Exception:
+        log.debug("learning_store: corpus read failed (%s)", kind, exc_info=True)
+        return {}
+    return out
+
+
+def write_corpus_db(kind: str, data: dict) -> None:
+    """Whole-family replace for ``kind``, mirroring the file store's atomic
+    rewrite. For ``"live"``, non-list top-level values are preserved under the
+    ``extra`` kind so operator annotations survive the round-trip."""
+    with _conn() as c:
+        _exec(c, f"DELETE FROM harness_corpus WHERE kind = {_ph(1)}",
+              (str(kind),))
+        if kind == "live":
+            _exec(c, f"DELETE FROM harness_corpus WHERE kind = {_ph(1)}",
+                  ("extra",))
+        for key, val in (data or {}).items():
+            if kind == "live" and not isinstance(val, list):
+                _exec(c, f"INSERT INTO harness_corpus (kind, key, seq, row) "
+                         f"VALUES ({_ph(4)})",
+                      ("extra", str(key), 0, json.dumps(val, sort_keys=True)))
+                continue
+            for i, row in enumerate(val if isinstance(val, list) else []):
+                _exec(c, f"INSERT INTO harness_corpus (kind, key, seq, row) "
+                         f"VALUES ({_ph(4)})",
+                      (str(kind), str(key), i, json.dumps(row, sort_keys=True)))
+
+
 __all__ = [
     "enabled", "rmw_lock",
     "load_addenda_db", "write_addenda_db",
     "load_line_meta_db", "write_line_meta_db",
     "load_transfer_tried_db", "write_transfer_tried_db",
+    "load_corpus_db", "write_corpus_db",
 ]

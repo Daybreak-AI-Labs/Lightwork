@@ -1790,9 +1790,24 @@ def harness_migrate_store() -> None:
     tried = {k: float(v) for k, v in
              _raw(sh._transfer_tried_path(src),
                   lambda v: isinstance(v, (int, float))).items()}
-    if not (addenda or meta or tried):
+    migrated_any = bool(addenda or meta or tried)
+    if migrated_any:
+        _migrate_learning_files(sh, learning_store, src, addenda, meta, tried)
+    # Phase 2: the corpus family rides the same migration when configured.
+    cpath = sh.settings().get("eval_corpus")
+    if cpath:
+        from .. import self_harness_eval as ev
+        counts = ev.migrate_corpus_files(cpath)
+        if counts and any(counts.values()):
+            migrated_any = True
+            click.echo(f"corpus: merged {counts['live']} live case(s), "
+                       f"{counts['pending']} pending, {counts['rejected']} "
+                       "rejected goal(s) into the world store.")
+    if not migrated_any:
         click.echo("nothing to migrate: no file learning stores on this host.")
-        return
+
+
+def _migrate_learning_files(sh, learning_store, src, addenda, meta, tried) -> None:
     merged = 0
     with learning_store.rmw_lock():
         db_add = learning_store.load_addenda_db()
@@ -1922,6 +1937,61 @@ def corpus_review_cmd(model: str | None, accepts: tuple[int, ...],
            if res["duplicates"] else "")
     click.echo(f"merged {res['merged']} into the corpus{dup}, "
                f"rejected {res['rejected']} (remembered).")
+
+
+@harness_corpus.command("export")
+@click.option("--out", "out_path", required=True,
+              type=click.Path(dir_okay=False),
+              help="Destination JSON file for the live corpus.")
+def corpus_export_cmd(out_path: str) -> None:
+    """Write the LIVE eval corpus to a JSON file — the hand-editing handle
+    when the corpus lives in the world store ([self_harness] store =
+    "world"): export, edit, then `corpus import`. Works identically in file
+    mode. Every operator-authored field is preserved.
+    """
+    import json as _json
+
+    from .. import self_harness_eval as ev
+    from ..self_harness import settings
+    cpath = settings().get("eval_corpus")
+    if not cpath:
+        raise click.ClickException("no [self_harness] eval_corpus configured.")
+    raw = ev._load_raw(cpath)
+    Path(out_path).write_text(_json.dumps(raw, indent=2, sort_keys=True),
+                              encoding="utf-8")
+    n = sum(len(v) for v in raw.values() if isinstance(v, list))
+    click.echo(f"exported {n} case(s) across "
+               f"{sum(1 for v in raw.values() if isinstance(v, list))} key(s) "
+               f"to {out_path}")
+
+
+@harness_corpus.command("import")
+@click.argument("src", type=click.Path(exists=True, dir_okay=False))
+@click.option("--replace", is_flag=True,
+              help="Replace the whole live corpus instead of merging by goal.")
+def corpus_import_cmd(src: str, replace: bool) -> None:
+    """Import a corpus JSON file into the LIVE eval corpus — the other half
+    of the edit round trip. Default merges by goal (new rows append with
+    every field kept; existing rows untouched); --replace overwrites, which
+    is what a full hand-edit of an export wants.
+    """
+    import json as _json
+
+    from .. import self_harness_eval as ev
+    from ..self_harness import settings
+    cpath = settings().get("eval_corpus")
+    if not cpath:
+        raise click.ClickException("no [self_harness] eval_corpus configured.")
+    try:
+        data = _json.loads(Path(src).read_text(encoding="utf-8"))
+    except ValueError as e:
+        raise click.ClickException(f"{src} is not valid JSON: {e}") from e
+    try:
+        n = ev.import_corpus(cpath, data, replace=replace)
+    except ValueError as e:
+        raise click.ClickException(str(e)) from e
+    click.echo(f"{'replaced the live corpus with' if replace else 'merged'} "
+               f"{n} case(s).")
 
 
 @harness_corpus.command("quality")

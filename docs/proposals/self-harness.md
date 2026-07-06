@@ -260,6 +260,10 @@ safety model as skills and insights.
   before they leave the world DB; rejections are remembered (never re-staged);
   `--accept-all --reject N` means "all but N"; merges append to the raw file
   under a cross-process lock, so hand-authored corpus fields survive.
+- `maverick self-harness corpus export --out f.json` / `corpus import
+  f.json [--replace]` — the hand-editing round trip (mandatory when the
+  corpus lives in the world store; identical in file mode). Every
+  operator-authored field survives both directions.
 - `maverick self-harness corpus quality [--samples N] [--retire]` — measure
   each live case's baseline discriminativeness (a case the baseline always
   passes cannot show a candidate's lift); `--retire` prunes the dead cases,
