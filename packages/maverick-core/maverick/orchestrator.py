@@ -547,8 +547,8 @@ def _brief_facts_block(world: WorldModel, goal_id: int, shield: Any | None) -> s
         val = val.replace("\r", " ").replace("\n", " ")
         # Truncate AFTER redaction: cutting first could split a secret so the
         # detector misses it and half of it rides into the brief.
-        if len(val) > max_val:
-            val = val[:max_val].rstrip() + f"... [{len(val)}B truncated]"
+        from .compaction import excerpt
+        val = excerpt(val, max_val)
         if shield is not None:
             try:
                 fv = shield.scan_input(f"{k}: {val}")

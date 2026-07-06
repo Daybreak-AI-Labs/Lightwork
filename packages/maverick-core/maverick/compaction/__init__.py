@@ -72,8 +72,10 @@ def _block_size(block: dict) -> int:
                 return sum(_block_size(c) for c in content if isinstance(c, dict))
             return len(str(content))
         if block.get("type") == "tool_use":
-            import json
-            return len(json.dumps(block.get("input", {})))
+            # Approximate: str() is ~10x cheaper than json.dumps and this
+            # runs for every block of the whole history on every turn (the
+            # total-ceiling pass); sizing only needs the right magnitude.
+            return len(str(block.get("input", {})))
         if block.get("type") == "image":
             src = block.get("source", {})
             return len(src.get("data", "")) if isinstance(src, dict) else 0
@@ -270,6 +272,18 @@ def _shrink_message(
         )
         return new_msg
     return msg
+
+
+def excerpt(text: str, cap: int, note: str = "truncated") -> str:
+    """Head of ``text`` with the canonical `` ... [<n>B <note>]`` marker.
+
+    The one bounded-injection primitive for prompt-bound previews (blackboard
+    renders, swarm results, brief facts, finding posts) so the marker format
+    can't drift per site. The compaction shrink helpers above keep their own
+    formats — those are frozen by the idempotence regexes."""
+    if len(text) <= cap:
+        return text
+    return text[:cap].rstrip() + f" ... [{len(text)}B {note}]"
 
 
 def compact_messages(

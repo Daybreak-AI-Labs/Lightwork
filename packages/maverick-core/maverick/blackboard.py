@@ -149,19 +149,12 @@ class Blackboard:
         # first turn, so one oversized post (a long finding, a pasted dump)
         # would otherwise dominate every brief that includes it. Posts are
         # stored whole; only the rendered view is bounded.
-        try:
-            entry_cap = max(80, int(os.environ.get(
-                "MAVERICK_BB_RENDER_ENTRY_CHARS", "800")))
-        except ValueError:
-            entry_cap = 800
+        from ._envparse import env_int
+        from .compaction import excerpt
+        entry_cap = max(80, env_int("MAVERICK_BB_RENDER_ENTRY_CHARS", 800))
         lines = []
         for e in recent:
-            head = f"[{e.agent}/{e.kind}]"
-            content = e.content
-            if len(content) > entry_cap:
-                content = (content[:entry_cap].rstrip()
-                           + f" ... [{len(e.content)}B truncated]")
-            lines.append(f"{head} {content}")
+            lines.append(f"[{e.agent}/{e.kind}] {excerpt(e.content, entry_cap)}")
         rendered = "\n".join(lines)
         self._measure_codec(rendered)
         return rendered

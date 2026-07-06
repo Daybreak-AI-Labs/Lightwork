@@ -373,14 +373,6 @@ def relevant_skills(goal: str, all_skills: list[Skill], max_n: int = 3) -> list[
     return _relevant_skills_lexical(goal, all_skills, max_n=max_n, min_score=lexical_min)
 
 
-def _render_cap(env: str, default: int) -> int:
-    """Render-size cap from env; 0 disables. Never raises."""
-    try:
-        return int(os.environ.get(env, default))
-    except (TypeError, ValueError):
-        return default
-
-
 def render_for_prompt(skills: list[Skill], *, max_body_chars: int | None = None,
                       max_total_chars: int | None = None) -> str:
     """Render recalled skills for the system prompt, BOUNDED.
@@ -395,10 +387,11 @@ def render_for_prompt(skills: list[Skill], *, max_body_chars: int | None = None,
     """
     if not skills:
         return ""
+    from ._envparse import env_int
     if max_body_chars is None:
-        max_body_chars = _render_cap("MAVERICK_SKILL_RENDER_MAX_CHARS", 4000)
+        max_body_chars = env_int("MAVERICK_SKILL_RENDER_MAX_CHARS", 4000)
     if max_total_chars is None:
-        max_total_chars = _render_cap("MAVERICK_SKILL_RENDER_TOTAL_CHARS", 10_000)
+        max_total_chars = env_int("MAVERICK_SKILL_RENDER_TOTAL_CHARS", 10_000)
     parts = ["# Relevant skills from past runs", ""]
     total = 0
     for s in skills:

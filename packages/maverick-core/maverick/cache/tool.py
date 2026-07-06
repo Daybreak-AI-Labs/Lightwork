@@ -252,10 +252,7 @@ def note_side_effect(tool: Any) -> None:
     tool is itself read-only."""
     if not enabled() or cacheable(tool):
         return
-    with _lock:
-        if not _store:
-            return
-    purge()
+    purge()  # no-ops cheaply on an empty store; single lock acquisition
 
 
 def purge(tool_name: str | None = None) -> int:

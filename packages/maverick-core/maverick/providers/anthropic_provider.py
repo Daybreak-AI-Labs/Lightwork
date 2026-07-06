@@ -56,17 +56,26 @@ def _adaptive_max_tokens_floor() -> int:
     return max(2048, v)
 
 
+def _is_opus_adaptive(model_id: str) -> bool:
+    """Opus 4.7/4.8 (incl. ``-fast`` variants): the models that ONLY accept
+    adaptive thinking (explicit "enabled" returns 400) and get the auto-
+    adaptive default. The single place to extend when 4.9 lands — the request
+    builder and the budget estimate both key off this predicate."""
+    return (model_id.startswith("claude-opus-4-7")
+            or model_id.startswith("claude-opus-4-8"))
+
+
 def effective_max_tokens(model_id: str, max_tokens: int,
                          thinking_budget: int | None = None) -> int:
-    """The max_tokens ``_build_request`` will actually send, given the bumps
-    it applies for thinking headroom. The budget ``reserve()`` estimate uses
-    this so pre-dispatch holds price the real worst-case output, not the
-    caller's pre-bump value. Accepts bare model ids or "provider:model" specs.
+    """The max_tokens ``_build_request`` sends — and the value it computes it
+    with: the builder calls this, so the budget ``reserve()`` estimate that
+    also calls it can never drift from the real request. Accepts bare model
+    ids or "provider:model" specs.
     """
     mid = (model_id or "").split(":", 1)[-1]
     if thinking_budget and thinking_budget > 0:
         return max(max_tokens, thinking_budget + 1024)
-    if mid.startswith("claude-opus-4-7") or mid.startswith("claude-opus-4-8"):
+    if _is_opus_adaptive(mid):
         return max(max_tokens, _adaptive_max_tokens_floor())
     return max_tokens
 
@@ -373,10 +382,7 @@ class AnthropicClient:
         # Opus 4.7 AND 4.8 (the current default, incl. its `-fast` variant)
         # only accept adaptive thinking; manual `enabled` returns 400.
         # Gating on 4-7 alone left the default model on the `enabled` path.
-        is_opus_47 = (
-            model_id.startswith("claude-opus-4-7")
-            or model_id.startswith("claude-opus-4-8")
-        )
+        is_opus_47 = _is_opus_adaptive(model_id)
         is_modern_4x = (
             model_id.startswith("claude-opus-4-6")
             or model_id.startswith("claude-opus-4-7")
@@ -390,7 +396,8 @@ class AnthropicClient:
         )
 
         if thinking_budget and thinking_budget > 0:
-            kwargs["max_tokens"] = max(max_tokens, thinking_budget + 1024)
+            kwargs["max_tokens"] = effective_max_tokens(
+                model_id, max_tokens, thinking_budget)
             if is_opus_47:
                 # Opus 4.7 rejects explicit "enabled"; only "adaptive"
                 # is supported. Drop budget_tokens — adaptive auto-sizes.
@@ -424,7 +431,7 @@ class AnthropicClient:
             # bounded: this fires for every role that did NOT ask to
             # think (thinking_budget=None), so the floor is the default
             # worst-case output spend of the whole fleet.
-            kwargs["max_tokens"] = max(max_tokens, _adaptive_max_tokens_floor())
+            kwargs["max_tokens"] = effective_max_tokens(model_id, max_tokens)
         _ = is_modern_4x  # documented above; kept for future logic
         # Orchestrator best-of-N sets a per-attempt sampling temperature to
         # force candidate diversity. It is read from a ContextVar (per goal

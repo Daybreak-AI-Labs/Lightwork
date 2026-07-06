@@ -471,13 +471,14 @@ def _finding_excerpt(final: str) -> str:
     ``bb.render(40)`` — the O(K^2) swarm re-send — so post an excerpt, not the
     whole answer. The full FINAL still reaches the parent via the spawn return
     and is persisted in the world record. Tune via
-    MAVERICK_FINDING_POST_MAX_CHARS (min 200)."""
+    MAVERICK_FINDING_POST_MAX_CHARS (min 200). NB: this bounds what is
+    STORED; Blackboard.render applies its own (smaller) per-entry cap at
+    injection, so raising this alone does not widen worker briefs — raise
+    MAVERICK_BB_RENDER_ENTRY_CHARS with it."""
+    from .compaction import excerpt
     cap = max(200, env_int("MAVERICK_FINDING_POST_MAX_CHARS", 1500))
-    text = final or ""
-    if len(text) <= cap:
-        return text
-    return (text[:cap].rstrip()
-            + f" ... [{len(text)}B finding truncated; full answer in the run record]")
+    return excerpt(final or "", cap,
+                   "finding truncated; full answer in the run record")
 
 
 def _last_assistant_text(messages: list[dict]) -> str:

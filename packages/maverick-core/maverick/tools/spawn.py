@@ -471,11 +471,9 @@ def _format_swarm_results(parent: Agent, children: list, results: list,
         if notice is not None:
             parts.append(f"[{child.role}/{child.name}] {notice}")
         elif res.final:
-            answer = res.final
-            if len(answer) > child_cap:
-                answer = (answer[:child_cap].rstrip()
-                          + f" ... [{len(res.final)}B truncated; full answer "
-                          "in the run record]")
+            from ..compaction import excerpt
+            answer = excerpt(res.final, child_cap,
+                             "truncated; full answer in the run record")
             if used + len(answer) > total_cap and used:
                 parts.append(
                     f"[{child.role}/{child.name}] [answer elided: "
