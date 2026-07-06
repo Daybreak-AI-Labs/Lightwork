@@ -1,5 +1,5 @@
 {% extends "base.html" %}
-{% block title %}oversight · Lightwork{% endblock %}
+{% block title %}Oversight · Lightwork{% endblock %}
 {% block content %}
 <style>
   /* By-guardrail breakdown — horizontal bars scaled to the busiest guardrail. */
@@ -126,7 +126,7 @@
 
   <h2>Pending approvals</h2>
   <div class="panel">
-    <p class="muted" style="margin-top: 0;">Act on REQUIRE_HUMAN holds (EU AI Act Art 14).</p>
+    <p class="muted" style="margin-top: 0;">Actions held for human sign-off (EU AI Act Art 14, the human-oversight requirement) — approve or deny each one here.</p>
     {% include "_approvals_queue.html" %}
   </div>
 
@@ -209,12 +209,18 @@
       </table>
     {% else %}
       <p class="muted">
-        No control-plane interventions for the selected day — nothing was blocked or
-        held. These are recorded as <code>governance_denied</code>,
+        No interventions for the selected day — nothing was blocked or
+        held. Every intervention is recorded in the audit log kept on this
+        server.
+      </p>
+      <details>
+        <summary class="muted" style="cursor: pointer; font-size: var(--text-sm);">For administrators: how interventions are recorded</summary>
+        <p class="muted" style="font-size: var(--text-sm);">These are recorded
+        as <code>governance_denied</code>,
         <code>shield_block</code>, <code>capability_denied</code>,
         <code>egress_blocked</code>, <code>consent_result</code>, and
-        <code>halt</code> events in the audit log.
-      </p>
+        <code>halt</code> events in the audit log.</p>
+      </details>
     {% endif %}
   </div>
 {% endblock %}

@@ -79,7 +79,7 @@ def test_non_intervention_events_excluded(monkeypatch, tmp_path):
     record("tool_call", agent="a", name="read_file", input_summary="x")
     text = _client().get("/oversight").text
     # Ordinary activity isn't an intervention -> empty state.
-    assert "No control-plane interventions" in text
+    assert "No interventions for the selected day" in text
 
 
 def test_halt_state_reflected(monkeypatch, tmp_path):

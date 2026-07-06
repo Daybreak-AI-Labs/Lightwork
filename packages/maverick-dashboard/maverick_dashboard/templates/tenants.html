@@ -1,12 +1,19 @@
 {% extends "base.html" %}
-{% block title %}tenants · Lightwork{% endblock %}
+{% block title %}Tenants · Lightwork{% endblock %}
 {% block content %}
   <h1 class="page-title">Tenants</h1>
   <p class="muted">
-    The provisioned-tenant roster (hosted control plane): status, plan, and
-    per-tenant daily spend quota. Manage with <code>maverick tenant …</code>;
-    rate usage into invoices with <code>maverick billing invoice &lt;tenant&gt;</code>.
+    Each tenant is an isolated workspace with its own data and daily spend
+    limit. This roster shows every tenant on this deployment — status, plan,
+    and spend limit.
   </p>
+  <details>
+    <summary class="muted" style="cursor: pointer; font-size: var(--text-sm);">For administrators: manage tenants from the command line</summary>
+    <p class="muted" style="font-size: var(--text-sm);">
+      Manage with <code>maverick tenant …</code>;
+      rate usage into invoices with <code>maverick billing invoice &lt;tenant&gt;</code>.
+    </p>
+  </details>
 
   {% if not is_admin %}
     <div class="panel">
@@ -16,9 +23,13 @@
     </div>
   {% elif not tenants %}
     <div class="panel">
-      <p class="muted">No tenants provisioned. Create one with
-      <code>maverick tenant create &lt;id&gt;</code> — single-tenant and
+      <p class="muted">No tenants provisioned. Single-tenant and
       unprovisioned deployments run without a registry.</p>
+      <details>
+        <summary class="muted" style="cursor: pointer; font-size: var(--text-sm);">For administrators: create a tenant from the command line</summary>
+        <p class="muted" style="font-size: var(--text-sm);">Create one with
+        <code>maverick tenant create &lt;id&gt;</code>.</p>
+      </details>
     </div>
   {% else %}
     <div class="panel">

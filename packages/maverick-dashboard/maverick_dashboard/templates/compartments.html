@@ -1,5 +1,5 @@
 {% extends "base.html" %}
-{% block title %}compartments · Lightwork{% endblock %}
+{% block title %}Compartments · Lightwork{% endblock %}
 {% block content %}
   <h1 class="page-title">Compartments</h1>
   <p class="muted" style="max-width: 48rem;">
@@ -51,8 +51,11 @@
     {% else %}
       <div class="mv-empty">
         <p class="mv-empty__title">No domain agents yet</p>
-        <p class="mv-empty__body">Onboard a business to mint its first sealed agent:</p>
-        <pre style="background: var(--surface-sunken); color: var(--text); padding: var(--space-3) var(--space-4); border-radius: var(--radius-sm); display: inline-block; text-align: start; margin: 0;">maverick onboard</pre>
+        <p class="mv-empty__body">Compartments are created when your organization onboards a department — each one gets its own sealed agent.</p>
+        <details>
+          <summary class="muted" style="cursor: pointer; font-size: var(--text-sm);">For administrators: onboard from the command line</summary>
+          <pre style="background: var(--surface-sunken); color: var(--text); padding: var(--space-3) var(--space-4); border-radius: var(--radius-sm); display: inline-block; text-align: start; margin: 0;">maverick onboard</pre>
+        </details>
       </div>
     {% endif %}
   </div>

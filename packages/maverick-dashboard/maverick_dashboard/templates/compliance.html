@@ -1,5 +1,5 @@
 {% extends "base.html" %}
-{% block title %}compliance · Lightwork{% endblock %}
+{% block title %}Compliance · Lightwork{% endblock %}
 {% block content %}
   <h1 class="page-title">Compliance</h1>
   <p class="muted">
@@ -79,11 +79,15 @@
   {% else %}
     <div class="panel">
       <p class="muted">
-        No compliance controls to report — the core compliance module is
-        unavailable or returned nothing for this filter. Run
-        <code>maverick compliance --framework {{ framework }}</code> from the CLI
-        to see control coverage.
+        No compliance controls to report — compliance reporting is
+        unavailable or returned nothing for this filter.
       </p>
+      <details>
+        <summary class="muted" style="cursor: pointer; font-size: var(--text-sm);">For administrators: generate this report from the command line</summary>
+        <p class="muted" style="font-size: var(--text-sm);">Run
+        <code>maverick compliance --framework {{ framework }}</code> to see
+        control coverage.</p>
+      </details>
     </div>
   {% endif %}
 

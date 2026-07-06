@@ -1,15 +1,13 @@
 {% extends "base.html" %}
 {% block title %}Workforce · Lightwork{% endblock %}
 {% block content %}
-  <h2>Workforce</h2>
+  <h1 class="page-title">Workforce</h1>
+  <p class="page-subtitle">Your AI departments — each team's specialists, what they've delivered, and their performance reviews.</p>
 
   <div class="panel">
     <p class="muted">
       Your specialist packs as deployable <strong>departments</strong> — pick a
-      team, see what it delivered, and open a governed performance review. Built
-      from <code>maverick.departments</code>, <code>maverick.outcomes</code>, and
-      <code>maverick.worker_review</code>; reviews load from
-      <code>/api/v1/departments/&lt;key&gt;/review</code>.
+      team, see what it delivered, and open a governed performance review.
     </p>
     <div class="card-grid">
       <div class="stat"><strong>{{ departments|length }}</strong><span class="muted">departments</span></div>
@@ -20,7 +18,7 @@
   </div>
 
   <div class="panel">
-    <h3>Delivery</h3>
+    <h2>Delivery</h2>
     <p class="muted">Firm-wide rollup from the Operating Record — delivery, not usage.</p>
     <table>
       <thead><tr><th scope="col">Metric</th><th scope="col">Value</th></tr></thead>
@@ -31,7 +29,7 @@
       </tbody>
     </table>
 
-    <h3>Top performers</h3>
+    <h2>Top performers</h2>
     {% if leaders %}
     <table>
       <thead><tr><th scope="col">Specialist</th><th scope="col">Department</th><th scope="col">Delivered</th></tr></thead>
@@ -47,7 +45,7 @@
   </div>
 
   <div class="panel">
-    <h3>Integrations</h3>
+    <h2>Integrations</h2>
     <p class="muted">{{ connector_total }} connectors ready to configure.</p>
     <label for="conn-search">Search connectors</label>
     <input id="conn-search" type="search" placeholder="e.g. zendesk, salesforce" aria-label="Search connectors" />
@@ -55,11 +53,11 @@
   </div>
 
   <div class="panel">
-    <h3>Departments</h3>
+    <h2>Departments</h2>
     <div class="card-grid" id="dept-grid">
       {% for d in departments %}
       <article class="card" data-key="{{ d.key }}">
-        <h4>{{ d.title }}</h4>
+        <h3>{{ d.title }}</h3>
         <p class="muted">{{ d.charter }}</p>
         <p>
           <span class="badge">{{ d.headcount }} specialists</span>

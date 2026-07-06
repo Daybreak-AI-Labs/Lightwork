@@ -1,5 +1,5 @@
 {% extends "base.html" %}
-{% block title %}fleets · Lightwork{% endblock %}
+{% block title %}Fleets · Lightwork{% endblock %}
 {% block content %}
   <h1 class="page-title">Fleets</h1>
   <p class="page-subtitle">Operator console — each employee's fleet of role-scoped agents and its oversight trail.</p>
@@ -7,8 +7,8 @@
   <div class="panel">
     <p class="muted">
       Each employee's fleet of role-scoped agents and the oversight trail over
-      them. Governance can <code>DENY</code> or hold an action for human sign-off
-      (EU AI Act Art 14); holds land in the
+      them. Governance can deny an action or hold it for human sign-off
+      (EU AI Act Art 14, the human-oversight requirement); holds land in the
       <a href="/approvals">approval queue</a>
       ({{ pending_count }} pending) and every verdict is recorded below.
     </p>
@@ -111,22 +111,29 @@
           </table>
         {% else %}
           <p class="muted" style="margin: 0.4rem 0 0;">
-            No runs yet — dispatch a task above (or <code>maverick fleet run</code>).
+            No runs yet — dispatch a task with the form above.
           </p>
+          <details style="margin-top: 0.4rem;">
+            <summary class="muted" style="cursor: pointer; font-size: var(--text-sm);">For administrators: dispatch from the command line</summary>
+            <p class="muted" style="font-size: var(--text-sm); margin: 0.4rem 0 0;">Dispatch a task with <code>maverick fleet run</code>.</p>
+          </details>
         {% endif %}
       </div>
     {% endfor %}
   {% else %}
     <div class="panel">
       <p class="muted" style="margin-bottom: 0;">
-        No fleets yet — use <strong>+ Create a fleet</strong> above (or
-        <code>maverick fleet create</code>) to give an employee a roster of
-        role-scoped agents.
+        No fleets yet — use <strong>+ Create a fleet</strong> above to give an
+        employee a roster of role-scoped agents.
       </p>
+      <details style="margin-top: 0.4rem;">
+        <summary class="muted" style="cursor: pointer; font-size: var(--text-sm);">For administrators: create from the command line</summary>
+        <p class="muted" style="font-size: var(--text-sm); margin: 0.4rem 0 0;">Create a fleet with <code>maverick fleet create</code>.</p>
+      </details>
     </div>
   {% endif %}
 
-  <h2>recent oversight</h2>
+  <h2>Recent oversight</h2>
   <div class="panel">
     <p class="muted">
       The last {{ holds | length }} governance verdict(s) — org-policy blocks
@@ -154,8 +161,8 @@
       </table>
     {% else %}
       <p class="muted" style="margin-bottom: 0;">
-        No governance verdicts today. Holds and blocks appear here once an
-        org <code>[governance]</code> policy gates an agent action.
+        No governance verdicts today. Holds and blocks appear here once your
+        organization's governance policy gates an agent action.
       </p>
     {% endif %}
   </div>
