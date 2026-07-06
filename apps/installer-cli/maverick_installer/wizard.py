@@ -3992,6 +3992,7 @@ def pick_mode() -> str:
     console.print(Panel.fit(
         "[bold]How do you want to set this up?[/bold]\n\n"
         "  consumer  Four questions, safe defaults. About a minute.\n"
+        "  express   A few questions, then turn ON all safe features.\n"
         "  advanced  Pick every model, channel, safety level, budget.",
         border_style="cyan",
     ))
@@ -3999,6 +4000,7 @@ def pick_mode() -> str:
         "Pick a mode:",
         [
             "consumer - just get me running",
+            "express  - turn on all features, few questions",
             "advanced - let me configure everything",
         ],
         default="consumer - just get me running",
@@ -4179,6 +4181,149 @@ def run_consumer() -> int:
             f"[bold yellow]Setup saved without an API key, {user_name}.[/bold yellow]\n\n"
             "Add one later by exporting ANTHROPIC_API_KEY or by running\n"
             "[bold]maverick init[/bold] again.",
+            border_style="yellow",
+        ))
+    _clear_partial()
+    return 0
+
+
+# Express mode turns on the safe, single-user PRODUCT + self-improvement
+# features with sane defaults -- everything that makes Lightwork "fully lit up"
+# WITHOUT the host-dangerous or infra-shaped toggles that must stay explicit
+# opt-in (computer/browser control, code execution, autonomous self-
+# modification, at-rest encryption + multi-tenancy, channel tokens, license
+# enforcement). Kept as data so a test can assert exactly what express enables
+# without driving the prompts. Every key here is one `_cfg_advanced` recognises.
+_EXPRESS_ADVANCED: dict[str, Any] = {
+    # cheaper + faster + stronger reasoning
+    "cost_aware": True,
+    "compact_history": True,
+    "adaptive_compute": True,
+    "risk_proportional_verify": True,
+    "verify_ensemble": True,
+    "autonomy_gate": True,
+    "effort": True,
+    "cache_prewarm": True,
+    "output_cache": True,
+    # the closed self-improvement lifecycle
+    "reflexion": True,
+    "dreaming": True,
+    "experience_guidance": True,
+    "skill_synthesis": True,
+    "credit_assignment": True,
+    "self_harness": True,
+    "data_engine": True,
+    "operations_scientist": True,
+    "consequence": True,
+    "rehearsal": True,
+    "evaluator_evolution": True,
+    # governed memory + provable-learning audit (non-blocking)
+    "memory_guard": True,
+    "temporal_memory": True,
+    "fairness_monitor": True,
+    "governed_actions": True,
+    "calibration_enforce": True,
+    "audit_sign": True,
+    "audit_rewards": True,
+    # product surface: named SaaS connections (flows go via the dedicated arg)
+    "connections": True,
+}
+
+# Self-learning ON, but WITHOUT the generate-and-run-new-code autonomy
+# (create_tools) and WITHOUT MCP-server acquisition (allow_mcp) -- those two are
+# higher-trust and stay an explicit opt-in even in express.
+_EXPRESS_SELF_LEARNING: dict[str, Any] = {
+    "enable": True,
+    "preflight": True,
+    "create_tools": False,
+    "provision_packs": True,
+    "allow_mcp": False,
+    "distill_local": True,
+}
+
+
+def run_express() -> int:
+    """Express setup: a few user-specific questions, then turn on every safe
+    single-user feature at once. The shortcut for "I want everything on"
+    without sitting through the full advanced wizard. Host-dangerous and
+    infra-shaped toggles stay off (and are listed for the user)."""
+    console.print()
+    console.print(Panel.fit(
+        "[bold]Lightwork express setup[/bold]\n\n"
+        "A few questions, then every safe single-user feature is turned on:\n"
+        "the flow engine, named connections, the self-improvement lifecycle\n"
+        "(reflexion, dreaming, experience, self-harness, data engine),\n"
+        "governed memory, web search, durable execution, and all 53 suites.\n\n"
+        "[dim]Left off (enable later via `maverick init` advanced): computer/\n"
+        "browser control, code execution, autonomous self-modification, at-rest\n"
+        "encryption + multi-tenancy, messaging channels, and license enforcement\n"
+        "(leaving enforcement off is what keeps every paid feature unlocked).[/dim]",
+        border_style="cyan",
+    ))
+
+    if not preflight():
+        console.print(
+            "[red]Setup can't continue.[/red] Fix the issues above and try again."
+        )
+        return 1
+
+    user_name = _q_text(
+        "What should we call you?",
+        default=os.environ.get("USER") or os.environ.get("USERNAME") or "",
+    ).strip() or "you"
+    keys = _consumer_api_key()
+    workdir = _q_text(
+        "Where can Lightwork work?",
+        default=str(Path.home() / "Documents" / "Maverick"),
+    ).strip() or str(Path.home() / "Documents" / "Maverick")
+    budget = _consumer_budget()
+
+    Path(workdir).expanduser().mkdir(parents=True, exist_ok=True)
+    backend = "docker" if _docker_available() else "local"
+    try:
+        write_config(
+            providers=["anthropic"],
+            role_models={},
+            channels={},
+            safety={"profile": "balanced", "scan_input": True,
+                    "scan_tool_calls": True, "scan_output": True},
+            budget=budget,
+            sandbox={"backend": backend,
+                     "workdir": str(Path(workdir).expanduser()), "timeout": 60},
+            keys=keys,
+            # Host-mutating capabilities require explicit opt-in even in express.
+            capabilities={"computer_use": False, "browser": False,
+                          "ros": False, "code_exec": False},
+            advanced=dict(_EXPRESS_ADVANCED),
+            persona={"name": "Lightwork", "style": "balanced", "user_name": user_name},
+            web_search_enabled=True,
+            self_learning=dict(_EXPRESS_SELF_LEARNING),
+            automation_import={"enable": True},
+            event_triggers={"enable": True},
+            flows={"enable": True},
+            oauth={"vault": True},
+            durable={"enabled": True},
+            deployment="desktop",
+        )
+    except Exception as e:
+        show_install_failure(e)
+        return 1
+
+    console.print()
+    if keys:
+        console.print(Panel.fit(
+            f"[bold green]Everything's on, {user_name}.[/bold green]\n\n"
+            "Open the dashboard:\n"
+            "  [bold]maverick dashboard[/bold]   web UI at http://127.0.0.1:8765\n\n"
+            "[dim]Change anything in ~/.maverick/config.toml, or re-run "
+            "maverick init.[/dim]",
+            border_style="green",
+        ))
+    else:
+        console.print(Panel.fit(
+            f"[bold yellow]Everything's on, but no API key yet, {user_name}.[/bold yellow]\n\n"
+            "Add one by exporting ANTHROPIC_API_KEY or re-running "
+            "[bold]maverick init[/bold].",
             border_style="yellow",
         ))
     _clear_partial()
@@ -4440,6 +4585,8 @@ def run(fast: bool = False, resume: bool = False) -> int:
         mode = pick_mode()
         if mode == "consumer":
             return run_consumer()
+        if mode == "express":
+            return run_express()
     if not preflight():
         console.print(
             "[red]Preflight failed.[/red] Fix the issues above and re-run `maverick init`."
