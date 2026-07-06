@@ -160,7 +160,7 @@
       <div class="wf__field" style="margin-bottom: var(--space-3);">
         <label for="wf-brief">Describe the <span id="wf-noun">workflow</span></label>
         <textarea id="wf-brief" class="input wf__brief"
-          placeholder="e.g. Weekly competitive-intel report — gather recent news on {{ competitor }}, summarize the notable moves, and draft an email to the team."></textarea>
+          placeholder="{% raw %}e.g. Weekly competitive-intel report — gather recent news on {{ competitor }}, summarize the notable moves, and draft an email to the team.{% endraw %}"></textarea>
         <div class="wf__chips" id="wf-examples" aria-label="Starter examples"></div>
       </div>
       <div class="wf__row">
@@ -493,9 +493,9 @@
 
     var EXAMPLES = {
       template: [
-        'Weekly competitive-intel report on {{competitor}} — summarize moves and email the team',
+        {% raw %}'Weekly competitive-intel report on {{competitor}} — summarize moves and email the team',
         'Onboard a new {{role}} hire: build the checklist and draft a welcome email',
-        'Summarize {{document}} into a one-page brief with key risks and next steps',
+        'Summarize {{document}} into a one-page brief with key risks and next steps',{% endraw %}
       ],
       playbook: [
         'An accounts-payable clerk that reads, three-way-matches, and pays invoices',

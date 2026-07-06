@@ -69,8 +69,11 @@ var FDCore = (function () {
   }
 
   // Output keys visible to `nodeId` from nodes that can run BEFORE it (any node
-  // that reaches it via next/if_true/if_false/on_error) -- the data pills for
-  // {{key}} insertion. Deterministic order: graph order of the flow's nodes.
+  // that reaches it via next/if_true/if_false/on_error) -- the data pills a
+  // user clicks to insert an upstream key. Deterministic order: graph order of
+  // the flow's nodes. (No double-brace token in this comment: the file is BOTH
+  // Jinja-included into the designer AND require()'d by the node tests, so it
+  // must stay literal JS with nothing Jinja could try to evaluate.)
   function upstreamOutputs(f, nodeId) {
     var nodes = f.nodes || [];
     var byId = {};
