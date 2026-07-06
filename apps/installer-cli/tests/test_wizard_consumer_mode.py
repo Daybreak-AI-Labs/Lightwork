@@ -30,6 +30,59 @@ def test_pick_mode_advanced_selectable(monkeypatch):
     assert wizard.pick_mode() == "advanced"
 
 
+def test_pick_mode_express_selectable(monkeypatch):
+    from maverick_installer import wizard
+    monkeypatch.setattr(wizard, "_q_select",
+                        lambda *a, **kw: "express  - turn on all features, few questions")
+    assert wizard.pick_mode() == "express"
+
+
+# ---------- run_express: everything-on shortcut ----------
+
+def test_run_express_enables_all_safe_features(monkeypatch, tmp_path: Path):
+    """Express writes a single valid config that turns the safe single-user
+    features ON, keeps host-dangerous ones OFF, and never enables license
+    enforcement (which would gate paid features off)."""
+    wizard = _stub_wizard_io(monkeypatch, tmp_path)
+    rc = wizard.run_express()
+    assert rc == 0
+
+    # A duplicate table would raise here -- the whole config must parse.
+    config = tomllib.loads((tmp_path / ".maverick" / "config.toml").read_text())
+
+    # Product surfaces + the self-improvement lifecycle are ON.
+    assert config["flows"]["enable"] is True
+    assert config["connections"]["enable"] is True
+    assert config["self_learning"]["enable"] is True
+    assert config["durable"]["enabled"] is True
+    assert config["reflexion"]["enable"] is True
+    assert config["dreaming"]["enable"] is True
+    assert config["data_engine"]["enable"] is True
+    assert config["capabilities"]["web_search"] is True
+
+    # Host-dangerous capabilities stay OFF (opt-in only).
+    assert config["capabilities"]["computer_use"] is False
+    assert config["capabilities"]["code_exec"] is False
+    # Self-learning is on WITHOUT the generate-and-run-code autonomy.
+    assert config["self_learning"]["create_tools"] is False
+
+    # License enforcement must NOT be on -- fail-open keeps everything unlocked.
+    assert "license" not in config or not config["license"].get("enforce")
+
+    # The smoke-test canary: sandbox survives the round-trip (no [flows] dup).
+    assert config["sandbox"]["backend"] == "local"
+
+
+def test_run_express_routed_via_pick_mode(monkeypatch, tmp_path: Path):
+    """Non-resume run() forks to run_express() when express is picked."""
+    wizard = _stub_wizard_io(monkeypatch, tmp_path)
+    monkeypatch.setattr(wizard, "pick_mode", lambda: "express")
+    monkeypatch.setattr(wizard, "welcome", lambda: None)
+    rc = wizard.run(fast=False, resume=False)
+    assert rc == 0
+    assert (tmp_path / ".maverick" / "config.toml").exists()
+
+
 # ---------- run_consumer happy path ----------
 
 def _stub_wizard_io(monkeypatch, tmp_path: Path, key: str = "sk-ant-test"):
