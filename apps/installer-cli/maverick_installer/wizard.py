@@ -3739,6 +3739,24 @@ def write_config(
             except OSError:
                 pass
 
+    # [flows] can be requested by two independent wizard steps: the dedicated
+    # flow-engine step (the `flows` arg) and the advanced-reasoning "Flow
+    # engine?" toggle (`advanced["flows"]`). Emitting the table from both paths
+    # writes [flows] twice, which is invalid TOML -- tomllib rejects the WHOLE
+    # file and load_config() silently falls back to {} (every wizard choice
+    # lost; the smoke test then reports "sandbox backend missing"). Fold the
+    # advanced flow extras into the single dedicated [flows] table so it is
+    # emitted exactly once. Copy `advanced` so we never mutate the caller's dict.
+    advanced = dict(advanced or {})
+    if advanced.pop("flows", False):
+        flows = dict(flows or {})
+        flows.setdefault("enable", True)
+        if advanced.pop("flows_auto_evolve", False):
+            flows.setdefault("auto_evolve", True)
+        _flows_url = advanced.pop("flows_public_url", None)
+        if _flows_url:
+            flows.setdefault("public_url", _flows_url)
+
     lines = [
         "# Lightwork config. Regenerate with:  maverick init",
         "",

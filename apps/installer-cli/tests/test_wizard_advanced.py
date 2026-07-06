@@ -327,6 +327,56 @@ def test_enforce_capabilities_reuses_existing_capabilities_table(tmp_path, monke
     from maverick.capability import capability_enforced
 
     assert capability_enforced() is True
+def _write_with_flows(cfg_dir, monkeypatch, flows, advanced):
+    monkeypatch.setattr("maverick_installer.wizard.CONFIG_DIR", cfg_dir)
+    monkeypatch.setattr("maverick_installer.wizard.ENV_FILE", cfg_dir / ".env")
+    monkeypatch.setattr("maverick_installer.wizard.CONFIG_FILE", cfg_dir / "config.toml")
+    from maverick_installer.wizard import write_config
+    write_config(
+        providers=["anthropic"], role_models={},
+        channels={}, safety={"profile": "balanced"},
+        budget={"max_dollars": 5.0, "max_wall_seconds": 600, "max_tool_calls": 30},
+        sandbox={"backend": "local", "workdir": "~/ws"},
+        keys={"ANTHROPIC_API_KEY": "x"},
+        capabilities={}, advanced=advanced, flows=flows,
+    )
+    return (cfg_dir / "config.toml").read_text()
+
+
+def test_flows_requested_by_both_steps_emits_one_table(tmp_path, monkeypatch):
+    """The dedicated flow-engine step AND the advanced 'Flow engine?' toggle can
+    both ask for [flows]. Emitting the table twice is invalid TOML -- tomllib
+    rejects the whole file and load_config() falls back to {} (every wizard
+    choice silently lost, and the smoke test reports 'sandbox backend missing').
+    Saying yes to both must still produce exactly one parseable [flows] table."""
+    cfg = _write_with_flows(
+        tmp_path, monkeypatch,
+        flows={"enable": True},
+        advanced={"flows": True, "flows_auto_evolve": True,
+                  "flows_public_url": "https://ops.example.com"},
+    )
+    assert cfg.count("[flows]") == 1
+    parsed = tomllib.loads(cfg)  # a duplicate table would raise here
+    assert parsed["flows"]["enable"] is True
+    assert parsed["flows"]["auto_evolve"] is True
+    assert parsed["flows"]["public_url"] == "https://ops.example.com"
+    # The smoke test's canary -- the rest of the config survives the round-trip.
+    assert parsed["sandbox"]["backend"] == "local"
+
+
+def test_flows_only_advanced_step_still_writes_table(tmp_path, monkeypatch):
+    """Enabling flows via only the advanced toggle (no dedicated flows arg) still
+    emits a single valid [flows] table with the folded extras."""
+    cfg = _write_with_flows(
+        tmp_path, monkeypatch,
+        flows=None,
+        advanced={"flows": True, "flows_auto_evolve": True},
+    )
+    assert cfg.count("[flows]") == 1
+    parsed = tomllib.loads(cfg)
+    assert parsed["flows"] == {"enable": True, "auto_evolve": True}
+
+
 def test_tenant_by_user_writes_and_is_read(tmp_path, monkeypatch):
     """Rule-6 loop: the wizard's tenant toggle writes [tenancy] by_user, and
     the kernel reads it back."""
