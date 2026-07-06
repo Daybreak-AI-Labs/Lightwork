@@ -28,7 +28,7 @@ from maverick.runner import (
     DEFAULT_MAX_WALL_SECONDS,
 )
 from starlette.concurrency import run_in_threadpool
-from starlette.responses import StreamingResponse
+from starlette.responses import JSONResponse, StreamingResponse
 
 from ._shared import (
     _any_provider_key_set,
@@ -647,11 +647,14 @@ async def answer_question(request: Request, goal_id: int, payload: AnswerIn) -> 
 async def upload_attachment(
     request: Request, goal_id: int, file: UploadFile = File(...),
 ) -> AttachmentOut:
-    """Upload a file (text, image, or PDF) and attach it to a goal.
+    """Upload a file of any supported kind and attach it to a goal.
 
-    Size and mime-type validation are enforced server-side; the agent's
-    `list_attachments` tool exposes the uploaded set, and image
-    attachments are auto-embedded as vision blocks on the first message.
+    Text, images, audio, video, PDFs, and Office/OpenDocument files are
+    accepted (executables and generic archives are always denied by
+    magic-byte sniffing). Size and mime-type validation are enforced
+    server-side; the agent's `list_attachments` tool exposes the uploaded
+    set, images are auto-embedded as vision blocks and PDFs as document
+    blocks on the first message.
     """
     require_permission(request, "operate")
     w = _world()
@@ -1894,6 +1897,95 @@ async def templates_suggested(request: Request, k: int = 5) -> dict:
     return {
         "suggested": suggest(_world(), k=k, owner=goal_owner_filter(request)),
     }
+
+
+def _voice_commands_enabled() -> bool:
+    """Dashboard voice-command input. ON by default; off via
+    MAVERICK_VOICE_COMMANDS=0 / [voice] dashboard_commands = false."""
+    import os as _os
+    raw = (_os.environ.get("MAVERICK_VOICE_COMMANDS") or "").strip().lower()
+    if raw:
+        return raw not in {"0", "false", "no", "off"}
+    try:
+        from maverick.config import load_config
+        return bool((load_config().get("voice") or {}).get("dashboard_commands", True))
+    except Exception:  # pragma: no cover -- config never blocks the endpoint
+        return True
+
+
+# Audio container suffixes the STT backends accept; browsers record webm/ogg.
+_VOICE_SUFFIXES = {
+    ".webm": ".webm", ".ogg": ".ogg", ".oga": ".ogg", ".mp3": ".mp3",
+    ".wav": ".wav", ".m4a": ".m4a", ".mp4": ".mp4", ".flac": ".flac",
+}
+_VOICE_MAX_BYTES = 25 * 1024 * 1024
+
+
+@router.post("/voice/transcribe")
+async def voice_transcribe(
+    request: Request,
+    file: UploadFile = File(...),
+    language: str = "",
+) -> JSONResponse:
+    """Transcribe a short voice recording to text (dashboard voice commands).
+
+    The chat composer's mic button records audio in the browser and posts it
+    here; the transcript goes back into the goal field so the user can review
+    before submitting (speech never starts a goal unreviewed). Reuses the
+    kernel STT backends (OpenAI / Groq Whisper, local faster-whisper) via
+    ``maverick.tools.voice``; 503 with a setup hint when none is configured,
+    which the client treats as "fall back to browser speech recognition".
+    """
+    if not _voice_commands_enabled():
+        raise HTTPException(status_code=404, detail="voice commands are disabled")
+    require_permission(request, "operate")
+
+    import os as _os
+    import tempfile as _tempfile
+
+    max_bytes = _VOICE_MAX_BYTES
+    try:
+        max_bytes = int(_os.environ.get("MAVERICK_VOICE_MAX_BYTES", max_bytes))
+    except (TypeError, ValueError):
+        pass
+    data = await file.read(max_bytes + 1)
+    if not data:
+        raise HTTPException(status_code=400, detail="empty audio")
+    if len(data) > max_bytes:
+        raise HTTPException(
+            status_code=400,
+            detail=f"audio too large: {len(data)} bytes (limit {max_bytes})",
+        )
+
+    suffix = _VOICE_SUFFIXES.get(
+        _os.path.splitext(file.filename or "")[1].lower(), ".webm")
+    lang = (language or "").strip()[:8] or None
+
+    from maverick.tools.voice import _run_transcribe
+    tmp = _tempfile.NamedTemporaryFile(suffix=suffix, delete=False)
+    try:
+        tmp.write(data)
+        tmp.close()
+        # sandbox=None: the path is our own temp file, not model-supplied.
+        args: dict = {"source": tmp.name}
+        if lang:
+            args["language"] = lang
+        text = await run_in_threadpool(_run_transcribe, args, None)
+    finally:
+        try:
+            _os.unlink(tmp.name)
+        except OSError:  # pragma: no cover
+            pass
+    if text.startswith("ERROR:"):
+        raise HTTPException(
+            status_code=503,
+            detail=(
+                "no speech-to-text backend available. Set OPENAI_API_KEY or "
+                "GROQ_API_KEY, or install faster-whisper "
+                "(pip install 'maverick-agent[voice]')."
+            ),
+        )
+    return JSONResponse({"text": text.strip()})
 
 
 @router.get("/voice/captions")

@@ -249,13 +249,26 @@ def route_text(
     )
 
 
-def route(text: str, query: str, *, store=None) -> str:
+def route(text: str, query: str, *, store=None, model: str | None = None) -> str:
     """Config-reading convenience for the assembly path. No-op (returns ``text``
-    unchanged) when the router is disabled. Reads threshold / top-k from config."""
+    unchanged) when the router is disabled. Reads threshold / top-k from config.
+
+    The threshold DEFAULT scales with the driving model's context window
+    (``context_scaling.router_threshold_tokens``): fire just before a payload
+    would overflow whatever model is in charge — late on a 1M-window model,
+    early on a 32k one. An explicit ``[context] router_threshold_tokens`` /
+    ``MAVERICK_ROUTER_THRESHOLD_TOKENS`` still wins.
+    """
     if not enabled():
         return text
+    default = _DEFAULT_THRESHOLD_TOKENS
+    try:
+        from . import context_scaling
+        default = context_scaling.router_threshold_tokens(model)
+    except Exception:  # pragma: no cover -- sizing never blocks routing
+        pass
     return route_text(
-        text, query, store=store, k=top_k(), threshold=threshold_tokens()
+        text, query, store=store, k=top_k(), threshold=threshold_tokens(default)
     ).text
 
 

@@ -130,6 +130,9 @@ async def test_long_history_is_compacted_when_enabled(monkeypatch, tmp_path: Pat
 @pytest.mark.asyncio
 async def test_history_uses_last_10_when_disabled(monkeypatch, tmp_path: Path, fake_llm):
     monkeypatch.delenv("MAVERICK_COMPACT_HISTORY", raising=False)
+    # Pin the legacy fixed bounds: with model-scaled context (the default)
+    # a 200k-window orchestrator keeps 50 turns, not 10.
+    monkeypatch.setenv("MAVERICK_CONTEXT_MODEL_SCALED", "0")
     monkeypatch.setattr(cfg, "load_config", dict)
 
     world = WorldModel(path=tmp_path / "world.db")
@@ -148,6 +151,32 @@ async def test_history_uses_last_10_when_disabled(monkeypatch, tmp_path: Path, f
     assert "compacted to save context" not in blob   # no compaction
     assert "message number 29" in blob               # last turn included
     assert "message number 0 about" not in blob       # turn 0 dropped (only last 10)
+
+
+@pytest.mark.asyncio
+async def test_history_scales_with_model_window_by_default(
+        monkeypatch, tmp_path: Path, fake_llm):
+    """Model-scaled context (default ON): a 200k-window orchestrator keeps
+    50 turns, so all 30 seeded turns — including turn 0 — make the brief."""
+    monkeypatch.delenv("MAVERICK_COMPACT_HISTORY", raising=False)
+    monkeypatch.delenv("MAVERICK_CONTEXT_MODEL_SCALED", raising=False)
+    monkeypatch.setattr(cfg, "load_config", dict)
+
+    world = WorldModel(path=tmp_path / "world.db")
+    conv = _seed_conversation(world, n=30)
+    gid = world.create_goal("Continue the deploy", "")
+    fake_llm.scripted = [
+        LLMResponse(text="FINAL: done", thinking=None, stop_reason="end_turn", tool_calls=[]),
+    ]
+
+    await run_goal(
+        llm=fake_llm, world=world, budget=Budget(max_dollars=1.0),
+        goal_id=gid, sandbox=LocalBackend(workdir=tmp_path), max_depth=1,
+        conversation_id=conv.id,
+    )
+    blob = _prompt_blob(fake_llm)
+    assert "message number 29" in blob
+    assert "message number 0 about" in blob
 
 def test_compactor_trims_oversized_tail_to_target():
     old = [
@@ -173,6 +202,9 @@ async def test_compact_history_caps_each_persisted_turn(monkeypatch, tmp_path: P
     monkeypatch.setenv("MAVERICK_COMPACT_HISTORY", "1")
     monkeypatch.setenv("MAVERICK_HISTORY_TOKENS", "1500")
     monkeypatch.setenv("MAVERICK_HISTORY_WINDOW", "10")
+    # Pin the legacy 300-char per-turn cap; model-scaled context (the
+    # default) raises it with the orchestrator model's window.
+    monkeypatch.setenv("MAVERICK_CONTEXT_MODEL_SCALED", "0")
 
     world = WorldModel(path=tmp_path / "world.db")
     conv = world.get_or_create_conversation("tg", "u1")

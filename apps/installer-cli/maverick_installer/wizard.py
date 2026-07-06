@@ -1359,6 +1359,27 @@ def pick_advanced() -> dict[str, Any]:
             "token budget instead of just the last few.",
             default=False,
         ),
+        "model_scaled_context": _q_confirm(
+            "Model-scaled context? Size history windows, compaction targets, and "
+            "routing thresholds to the driving model's real context window (a "
+            "1M-token model gets 1M-token bounds) instead of fixed constants. "
+            "Recommended; ON by default.",
+            default=True,
+        ),
+        "voice_commands": _q_confirm(
+            "Dashboard voice commands? A mic button on the chat composer records "
+            "a spoken goal and transcribes it (OpenAI/Groq Whisper key or local "
+            "faster-whisper; falls back to browser speech recognition). ON by "
+            "default.",
+            default=True,
+        ),
+        "attach_any_mime": _q_confirm(
+            "Accept attachments of ANY declared type? Text, images, audio, video, "
+            "and document formats are always accepted; this also admits anything "
+            "else EXCEPT executables/archives (magic-byte deny stays). OFF by "
+            "default.",
+            default=False,
+        ),
         "compaction_strategy": _q_select(
             "  Compaction strategy? (default = simple shrink)",
             ["default     - keep recent + trim big tool outputs",
@@ -3301,14 +3322,28 @@ def _cfg_advanced(  # noqa: C901 - flat sequence of independent opt-in toggles
         lines.append("")
         lines.append("[planning]")
         lines.append('mode = "tree_of_thought"')
-    if advanced.get("compact_history") or advanced.get("compaction_strategy"):
+    _context_lines = []
+    if advanced.get("compact_history"):
+        _context_lines.append("compact = true")
+    strat = advanced.get("compaction_strategy")
+    if strat and strat != "default":
+        _context_lines.append(f'compaction_strategy = "{strat}"')
+    if advanced.get("model_scaled_context") is False:
+        # Default-on; only a decline needs a line.
+        _context_lines.append("model_scaled = false")
+    if _context_lines:
         lines.append("")
         lines.append("[context]")
-        if advanced.get("compact_history"):
-            lines.append("compact = true")
-        strat = advanced.get("compaction_strategy")
-        if strat and strat != "default":
-            lines.append(f'compaction_strategy = "{strat}"')
+        lines.extend(_context_lines)
+    if advanced.get("voice_commands") is False:
+        # Default-on; only a decline needs a line.
+        lines.append("")
+        lines.append("[voice]")
+        lines.append("dashboard_commands = false")
+    if advanced.get("attach_any_mime"):
+        lines.append("")
+        lines.append("[attachments]")
+        lines.append("allow_any_mime = true")
     if advanced.get("reflexion"):
         lines.append("")
         lines.append("[reflexion]")
