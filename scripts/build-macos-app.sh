@@ -54,7 +54,7 @@ python -c "import sqlite3, _sqlite3; print('sqlite3', sqlite3.sqlite_version)"
 
 echo ">> [4/6] compile the binary (PyInstaller, from build/)"
 ( cd build && pyinstaller --clean --noconfirm --distpath ../dist maverick.spec )
-./dist/maverick --version
+./dist/maverick version
 ./dist/maverick dashboard --help >/dev/null && echo "   dashboard subcommand ok"
 
 echo ">> [5/6] wrap the compiled binary into Lightwork.app"
