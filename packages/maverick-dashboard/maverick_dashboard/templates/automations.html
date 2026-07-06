@@ -587,16 +587,42 @@
           var o = document.createElement('option'); o.value = p.name; o.textContent = p.label; oProv.appendChild(o);
         });
       }
+      var status = data.status || {};
       (data.providers || []).forEach(function (p) {
         if (connected.indexOf(p.name) === -1) return;
+        var st = status[p.name] || {};
         var li = el('li', 'mv-row');
         var main = el('div', 'mv-row__main');
-        main.appendChild(el('div', 'mv-row__title', p.label + ' · connected'));
-        main.appendChild(el('div', 'mv-row__sub', 'provider ' + p.name));
+        var title = p.label + (st.expired ? ' · token expired' : ' · connected');
+        main.appendChild(el('div', 'mv-row__title', title));
+        var sub = 'provider ' + p.name;
+        if (st.expires_at) sub += ' · expires ' + fmtWhen(st.expires_at);
+        if (st.has_refresh_token) sub += ' · auto-refreshes';
+        main.appendChild(el('div', 'mv-row__sub', sub));
         li.appendChild(main);
-        li.appendChild(delBtn('Disconnect ' + p.label, function () { disconnect(p.name); }));
+        var actions = el('div', 'mv-row__actions');
+        var testBtn = el('button', 'btn btn--ghost', 'Test'); testBtn.type = 'button';
+        testBtn.setAttribute('aria-label', 'Test ' + p.label + ' connection');
+        testBtn.addEventListener('click', function () { testConn(p.name, testBtn); });
+        actions.appendChild(testBtn);
+        actions.appendChild(delBtn('Disconnect ' + p.label, function () { disconnect(p.name); }));
+        li.appendChild(actions);
         oList.appendChild(li);
       });
+    }
+    async function testConn(name, btn) {
+      if (btn) { btn.disabled = true; }
+      try {
+        var r = await fetch('/api/v1/oauth/' + encodeURIComponent(name) + '/test', { method: 'POST' });
+        var body = {};
+        try { body = await r.json(); } catch (e) { body = {}; }
+        if (r.ok && body.ok) { mvToast(name + ' connection is healthy'); loadOAuth(); }
+        else {
+          var why = body.error || (body.detail || 'token could not be refreshed');
+          mvToast(name + ' connection failed: ' + why, { error: true });
+        }
+      } catch (e) { mvToast('Could not test ' + name, { error: true }); }
+      finally { if (btn) { btn.disabled = false; } }
     }
     async function disconnect(name) {
       if (!(await mvConfirm('Disconnect ' + name + '? Triggers using it will stop authenticating.'))) return;

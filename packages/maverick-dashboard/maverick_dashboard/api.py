@@ -835,14 +835,24 @@ async def oauth_providers_endpoint(request: Request) -> dict:
     require_permission(request, "view")
     from maverick import oauth_providers, oauth_vault
     connected: list[str] = []
+    status: dict[str, dict] = {}
     if oauth_vault.enabled():
         try:
-            connected = oauth_vault.get_vault().providers()
+            vault = oauth_vault.get_vault()
+            connected = vault.providers()
+            # Token-free per-provider health so the UI can flag an expired
+            # connection without a live network call.
+            for name in connected:
+                st = vault.status(name)
+                if st is not None:
+                    status[name] = st
         except Exception:  # pragma: no cover -- a vault read never errors the list
             connected = []
+            status = {}
     return {
         "providers": oauth_providers.provider_catalog(),
         "connected": connected,
+        "status": status,
         "vault_enabled": oauth_vault.enabled(),
     }
 
@@ -890,6 +900,29 @@ async def oauth_exchange(request: Request, provider: str,
     except Exception as e:  # a provider/network failure -> 502, not a 500
         raise HTTPException(status_code=502, detail=f"token exchange failed: {e}") from e
     return {"connected": True, **summary}
+
+
+@router.post("/oauth/{provider}/test")
+async def oauth_test(request: Request, provider: str) -> dict:
+    """Validate a connected account (admin): obtain a live access token from the
+    sealed vault, refreshing it through the preset's token endpoint if it's
+    expired. Reports health only -- never the token itself. ``ok`` is true when
+    a usable token could be produced, false (with a redacted ``error``) when the
+    refresh failed, so an operator sees a stale connection before a flow does."""
+    require_permission(request, "admin")
+    _require_oauth_vault()
+    from maverick import oauth_providers, oauth_vault
+    if oauth_providers.get_provider(provider) is None:
+        raise HTTPException(status_code=404, detail=f"unknown provider {provider!r}")
+    vault = oauth_vault.get_vault()
+    if vault.status(provider) is None:
+        raise HTTPException(status_code=404, detail=f"{provider!r} is not connected")
+    refresher = oauth_providers.make_refresher(provider)
+    try:
+        token = vault.access_token(provider, refresher=refresher)
+    except Exception as e:  # a provider/network failure -> reported, not a 500
+        return {"ok": False, "error": str(e), "status": vault.status(provider)}
+    return {"ok": bool(token), "status": vault.status(provider)}
 
 
 @router.delete("/oauth/{provider}", status_code=204)

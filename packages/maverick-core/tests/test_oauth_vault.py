@@ -132,6 +132,29 @@ class TestExpiryAndRefresh:
         assert _vault().access_token("absent", refresher=lambda r: {}) is None
 
 
+class TestStatus:
+    def test_status_none_when_absent(self):
+        assert _vault().status("nope") is None
+
+    def test_status_is_token_free_and_reports_health(self):
+        v = _vault()
+        v.put("slack", {"access_token": "at", "refresh_token": "rt",
+                        "scope": "chat:write", "expires_in": 3600})
+        st = v.status("slack")
+        assert st["provider"] == "slack"
+        assert st["expired"] is False
+        assert st["has_refresh_token"] is True
+        assert st["scope"] == "chat:write"
+        assert st["expires_at"] is not None
+        # Never leaks the token material itself.
+        assert "access_token" not in st and "refresh_token" not in st
+
+    def test_status_flags_expired(self):
+        v = _vault()
+        v.put("g", {"access_token": "at", "expires_at": time.time() - 10})
+        assert v.status("g")["expired"] is True
+
+
 class TestToggles:
     def test_enabled_off_by_default(self, monkeypatch):
         monkeypatch.delenv("MAVERICK_OAUTH_VAULT", raising=False)

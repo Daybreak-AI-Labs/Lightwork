@@ -88,3 +88,81 @@ def test_exchange_unknown_provider_is_404(monkeypatch, tmp_path):
     r = client.post("/api/v1/oauth/nope/exchange",
                     json={"code": "c", "redirect_uri": "https://a/cb"})
     assert r.status_code == 404
+
+
+class _FakeVault:
+    """A vault stub that reports one connected provider whose refresh succeeds
+    or fails per ``refresh_raises``, and never leaks a token in status()."""
+
+    def __init__(self, *, expired=False, refresh_raises=False):
+        self._expired, self._raises = expired, refresh_raises
+
+    def providers(self):
+        return ["slack"]
+
+    def status(self, provider, now=None):
+        if provider != "slack":
+            return None
+        return {"provider": "slack", "expired": self._expired, "expires_at": 123.0,
+                "scope": "chat:write", "has_refresh_token": True, "obtained_at": 1.0}
+
+    def access_token(self, provider, *, refresher=None, skew=60):
+        if self._raises:
+            raise RuntimeError("invalid_grant")
+        return "" if self._expired and refresher is None else "AT"
+
+
+def test_providers_includes_token_free_status(monkeypatch):
+    monkeypatch.setattr("maverick.oauth_vault.enabled", lambda: True)
+    monkeypatch.setattr("maverick.oauth_vault.get_vault", lambda *a, **k: _FakeVault())
+    r = client.get("/api/v1/oauth/providers")
+    assert r.status_code == 200
+    body = r.json()
+    assert body["connected"] == ["slack"]
+    st = body["status"]["slack"]
+    assert st["scope"] == "chat:write" and "access_token" not in st
+
+
+def test_test_endpoint_requires_vault(monkeypatch):
+    monkeypatch.delenv("MAVERICK_OAUTH_VAULT", raising=False)
+    monkeypatch.setattr("maverick.oauth_vault.enabled", lambda: False)
+    r = client.post("/api/v1/oauth/slack/test")
+    assert r.status_code == 403
+
+
+def test_test_endpoint_unknown_provider_is_404(monkeypatch):
+    monkeypatch.setattr("maverick.oauth_vault.enabled", lambda: True)
+    r = client.post("/api/v1/oauth/nope/test")
+    assert r.status_code == 404
+
+
+def test_test_endpoint_not_connected_is_404(monkeypatch):
+    monkeypatch.setattr("maverick.oauth_vault.enabled", lambda: True)
+
+    class _Empty:
+        def status(self, provider, now=None):
+            return None
+
+    monkeypatch.setattr("maverick.oauth_vault.get_vault", lambda *a, **k: _Empty())
+    r = client.post("/api/v1/oauth/slack/test")
+    assert r.status_code == 404
+
+
+def test_test_endpoint_ok(monkeypatch):
+    monkeypatch.setattr("maverick.oauth_vault.enabled", lambda: True)
+    monkeypatch.setattr("maverick.oauth_vault.get_vault", lambda *a, **k: _FakeVault())
+    r = client.post("/api/v1/oauth/slack/test")
+    assert r.status_code == 200
+    body = r.json()
+    assert body["ok"] is True and body["status"]["provider"] == "slack"
+    assert "access_token" not in body["status"]
+
+
+def test_test_endpoint_reports_refresh_failure(monkeypatch):
+    monkeypatch.setattr("maverick.oauth_vault.enabled", lambda: True)
+    monkeypatch.setattr("maverick.oauth_vault.get_vault",
+                        lambda *a, **k: _FakeVault(expired=True, refresh_raises=True))
+    r = client.post("/api/v1/oauth/slack/test")
+    assert r.status_code == 200            # a stale connection is reported, not a 500
+    body = r.json()
+    assert body["ok"] is False and "invalid_grant" in body["error"]
