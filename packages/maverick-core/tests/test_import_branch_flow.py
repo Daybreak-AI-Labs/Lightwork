@@ -363,3 +363,60 @@ def test_every_lowering_path_emits_a_report():
     assert report and report[0]["fidelity"] in ("preserved", "approximated")
     _, n8n_report = to_flow_with_report(n8n.translate(_IF_WF))
     assert any(r["kind"] == NODE_BRANCH and r["fidelity"] == "preserved" for r in n8n_report)
+
+
+# ---- Make (Integromat) router structural capture -----------------------------
+
+_MAKE_ROUTER = {
+    "name": "Route lead",
+    "flow": [
+        {"id": 1, "module": "gateway:CustomWebHook", "mapper": {}},
+        {"id": 2, "module": "slack:CreateMessage", "mapper": {"text": "hi"},
+         "metadata": {"designer": {"name": "Greet"}}},
+        {"id": 3, "module": "builtin:BasicRouter", "routes": [
+            {"filter": {"name": "hot", "conditions": [[
+                {"a": "score", "o": "number:greater", "b": "80"}]]},
+             "flow": [{"id": 4, "module": "hubspot:createDeal", "mapper": {}}]},
+            {"flow": [{"id": 5, "module": "slack:CreateMessage", "mapper": {"text": "later"},
+                       "metadata": {"designer": {"name": "Nurture"}}}]},
+        ]},
+    ],
+}
+
+
+def test_make_router_becomes_a_branch_chain():
+    from maverick.automation_import import make
+    f, report = to_flow_with_report(make.translate(_MAKE_ROUTER))
+    assert f.validate() == []
+    branch = next(n for n in f.nodes.values() if n.kind == NODE_BRANCH)
+    assert branch.condition.endswith("> 80")             # filter operator mapped
+    # the filtered route's deal is the true arm; the unconditional route is the else
+    assert f.nodes[branch.if_true].kind == NODE_ACTION
+    assert f.nodes[branch.if_false].kind == NODE_ACTION
+    # the pre-router action runs first, then the router branch
+    assert f.nodes[f.start].kind == NODE_ACTION and f.nodes[f.start].next == branch.id
+    assert any(e["kind"] == NODE_BRANCH and e["fidelity"] == "preserved" for e in report)
+
+
+def test_make_without_a_router_still_lowers_linearly():
+    from maverick.automation_import import make
+    bp = {"name": "flat", "flow": [
+        {"id": 1, "module": "gateway:CustomWebHook"},
+        {"id": 2, "module": "slack:CreateMessage", "mapper": {"text": "hi"}},
+        {"id": 3, "module": "hubspot:createContact", "mapper": {}},
+    ]}
+    f = to_flow(make.translate(bp))
+    assert f.validate() == []
+    assert not any(n.kind == NODE_BRANCH for n in f.nodes.values())
+
+
+def test_uipath_invocation_is_reported_approximated():
+    # A UiPath process is imported as a single start_job action, but its internal
+    # If/Switch/While/ForEach live in .xaml the Orchestrator API doesn't return --
+    # so the report must say "approximated", not falsely claim the branches survived.
+    from maverick.automation_import import uipath
+    f, report = to_flow_with_report(uipath.translate({"Name": "Invoice bot", "Key": "k1"}))
+    assert f.validate() == []
+    assert len(report) == 1 and report[0]["kind"] == NODE_ACTION
+    assert report[0]["fidelity"] == "approximated"
+    assert "Orchestrator" in report[0]["note"]

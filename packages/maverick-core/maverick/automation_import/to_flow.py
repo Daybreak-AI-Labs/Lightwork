@@ -14,13 +14,22 @@ step can still be a full agentic goal. A one-step automation lowers to a single
 ``agent`` node -- i.e. exactly what ``render()`` + a template already produce, so
 this is a superset, not a replacement.
 
-Source-graph branch/loop capture: n8n ``IF``/``Filter`` nodes and Power Automate
-(WDL) ``If``/``Foreach`` actions are preserved as real ``branch``/``foreach``
-nodes with their arms/bodies wired; other importers (and other WDL action types
--- ``Switch``/``Until``/``Scope``) still flatten, with each such step
-approximated as an ``agent`` node that carries the original step's intent.
-:func:`to_flow_with_report` says exactly which happened per step (the migration
-fidelity report), so an import never silently pretends to be lossless.
+Source-graph branch/loop capture, per importer:
+
+* n8n ``IF``/``Filter`` -> ``branch`` (arms wired);
+* Power Automate (WDL) ``If`` -> ``branch``, ``Foreach`` -> ``foreach``,
+  ``Switch`` -> ``switch``, ``Until`` -> ``while`` (negated exit), ``Scope`` ->
+  ``scope`` (bodies wired);
+* Workato ``if`` -> ``branch``, ``foreach``/``repeat`` -> ``foreach``;
+* Make ``BasicRouter`` routes -> an if/else-if/else ``branch`` chain (each
+  route's filter is the condition, its modules the true arm).
+
+Everything else lowers to an ordered chain. A UiPath import is a single process
+*invocation* (the Orchestrator API returns no .xaml), so its internal control
+flow can't be captured -- the report marks it ``approximated`` rather than
+pretending the process's branches survived. :func:`to_flow_with_report` says
+exactly what happened per step, so an import never silently pretends to be
+lossless.
 """
 from __future__ import annotations
 
@@ -618,11 +627,143 @@ _STRUCTURAL_LOWERERS = {
 }
 
 
-def _linear_report(flow: Flow, report: list[dict]) -> None:
+# ---- Make (Integromat) router capture ----------------------------------------
+
+# Make filter operator tokens (`text:equal`, `number:greater`, ...) -> the flow
+# condition-evaluator's operators. We key on the part after the colon.
+_MAKE_OPS = {"equal": "==", "notequal": "!=", "greater": ">", "greaterorequal": ">=",
+             "less": "<", "lessorequal": "<=", "contain": "contains", "contains": "contains"}
+
+
+def _make_condition(route: dict) -> str | None:
+    """A route filter reduced to the flow condition grammar, or ``None`` when the
+    route has no filter (Make's unconditional fallback route). A Make filter is
+    ``{name, conditions: [[{a, o, b}]]}`` -- an OR of AND-groups; we take the
+    first leaf as the representative test (the operator refines it in the
+    designer, exactly like the n8n/WDL paths)."""
+    filt = route.get("filter") if isinstance(route.get("filter"), dict) else None
+    if not filt:
+        return None
+    groups = filt.get("conditions")
+    if isinstance(groups, list):
+        for grp in groups:
+            if isinstance(grp, list) and grp and isinstance(grp[0], dict):
+                c = grp[0]
+                left = _safe_line(c.get("a", ""), max_chars=40)
+                raw_op = str(c.get("o", "")).rsplit(":", 1)[-1].lower()
+                right = _safe_line(c.get("b", ""), max_chars=40)
+                return f"{left} {_MAKE_OPS.get(raw_op, '==')} {right}".strip()
+    return "result == true"
+
+
+def _has_router(modules: list) -> bool:
+    """Whether any module (or nested route) is a router -- if not, the flat
+    fallback already captures the scenario faithfully, so we skip this path."""
+    for m in modules or []:
+        if not isinstance(m, dict):
+            continue
+        routes = m.get("routes")
+        if routes:
+            return True
+    return False
+
+
+def _make_seq(modules: list, nodes: dict, ctr: dict, report: list[dict],
+              join: str | None) -> str | None:
+    """Lower an ordered Make module list into a chain (tail -> ``join``),
+    returning the start node id. A router module becomes a branch chain. Built
+    right-to-left so each node knows its successor without a second pass."""
+    nxt = join
+    from .make import _step_from_module
+    for mod in reversed([m for m in modules if isinstance(m, dict)]):
+        if mod.get("routes"):
+            nxt = _make_router(mod.get("routes"), nodes, ctr, report, nxt)
+            continue
+        nid = f"n{ctr['i']}"
+        ctr["i"] += 1
+        step = _step_from_module(mod)
+        fnode = _node_for_step(step, nid, nxt)
+        nodes[nid] = fnode
+        report.append({"step": step.name, "node": nid, "kind": fnode.kind,
+                       "fidelity": ("preserved" if fnode.kind == NODE_ACTION else "approximated"),
+                       "note": ("connector call -> action node" if fnode.kind == NODE_ACTION
+                                else "no single-tool mapping -> agent step")})
+        nxt = nid
+    return nxt
+
+
+def _make_router(routes: list, nodes: dict, ctr: dict, report: list[dict],
+                 join: str | None) -> str | None:
+    """Lower a Make router into an if / else-if / else branch chain: each route's
+    filter is a ``branch`` whose true arm enters that route's lowered sub-flow and
+    whose false arm falls to the next route. A trailing route with no filter is
+    the else target. Returns the first branch (or the fallback body when a single
+    unconditional route makes the router a plain container)."""
+    valid = [r for r in (routes or []) if isinstance(r, dict)]
+    lowered = [(_make_condition(r), _make_seq(r.get("flow", []) or [], nodes, ctr, report, join))
+               for r in valid]
+    else_tgt = join
+    if lowered and lowered[-1][0] is None:
+        else_tgt = lowered[-1][1]      # trailing unconditional route = else
+        lowered = lowered[:-1]
+    for cond, body in reversed(lowered):
+        bid = f"n{ctr['i']}"
+        ctr["i"] += 1
+        nodes[bid] = FlowNode(id=bid, kind=NODE_BRANCH,
+                              condition=cond or "result == true",
+                              if_true=body, if_false=else_tgt, label="router")
+        report.append({"step": "router route", "node": bid, "kind": NODE_BRANCH,
+                       "fidelity": ("preserved" if cond else "approximated"),
+                       "note": ("Make router route -> branch" if cond
+                                else "router route without a readable filter -> branch (condition approximated)")})
+        else_tgt = bid
+    return else_tgt
+
+
+def _make_to_flow(automation: ImportedAutomation, report: list[dict]) -> Flow | None:
+    """Lower a Make scenario's blueprint, preserving ``BasicRouter`` routes as real
+    ``branch`` nodes instead of the flat ``_flatten_flow`` inlining. Returns
+    ``None`` when there's no router (flat fallback suffices) or the blueprint isn't
+    usable (caller falls back to the linear lowering)."""
+    from .make import _unwrap
+    raw = automation.raw if isinstance(automation.raw, dict) else {}
+    if not raw:
+        return None
+    bp = _unwrap(raw)
+    flow_list = bp.get("flow") if isinstance(bp, dict) else None
+    if not isinstance(flow_list, list) or len(flow_list) < 2:
+        return None
+    modules = flow_list[1:]                       # drop the trigger module
+    if not _has_router(modules):
+        return None
+    ctr = {"i": 0}
+    nodes: dict[str, FlowNode] = {}
+    start = _make_seq(modules, nodes, ctr, report, None)
+    if not nodes or start is None:
+        return None
+    flow = Flow(id=automation.template_name(), name=automation.name,
+                start=start, nodes=nodes)
+    if flow.validate():
+        report.clear()
+        return None
+    return flow
+
+
+def _linear_report(flow: Flow, report: list[dict], source: str = "") -> None:
     """Fidelity entries derived from an already-lowered graph (the n8n path and
-    the flat fallback), so every import surfaces a report."""
+    the flat fallback), so every import surfaces a report.
+
+    ``source`` lets an invocation-only importer be honest: a UiPath import is a
+    single ``start_job`` action, and the Orchestrator API returns no .xaml, so the
+    invoked process's internal If/Switch/While/ForEach are *not visible* -- that
+    is an approximation of the real workflow, not a preserved one, and saying so
+    is the whole point of the report."""
     for n in flow.nodes.values():
-        if n.kind == NODE_BRANCH:
+        if source == "uipath" and n.kind == NODE_ACTION:
+            entry = ("approximated",
+                     "UiPath process invocation; the process's internal "
+                     "If/Switch/While/ForEach isn't visible from Orchestrator metadata")
+        elif n.kind == NODE_BRANCH:
             entry = ("preserved", "source IF -> branch (arms wired)")
         elif n.kind == NODE_ACTION:
             entry = ("preserved", "connector call -> action node")
@@ -649,6 +790,11 @@ def to_flow_with_report(automation: ImportedAutomation) -> tuple[Flow, list[dict
         if graph is not None:
             return graph, report
         report.clear()
+    if automation.source == "make":
+        graph = _make_to_flow(automation, report)
+        if graph is not None:
+            return graph, report
+        report.clear()
     steps = automation.steps
     if not steps:
         # No extractable actions -> a single agent node that runs the automation's
@@ -669,7 +815,7 @@ def to_flow_with_report(automation: ImportedAutomation) -> tuple[Flow, list[dict
         nodes[node_id] = _node_for_step(step, node_id, nxt)
     flow = Flow(id=automation.template_name(), name=automation.name,
                 start="n0", nodes=nodes)
-    _linear_report(flow, report)
+    _linear_report(flow, report, source=automation.source)
     return flow, report
 
 

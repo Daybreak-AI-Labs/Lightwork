@@ -5,9 +5,10 @@ Make exposes a scenario's definition as a *blueprint* over its REST API
 {...}}}``). A blueprint is ``{name, flow[], metadata{}}`` where ``flow`` is the
 ordered module list and each module is ``{id, module: "app:Operation",
 parameters, mapper, metadata, routes?}``. The FIRST module is the trigger; the
-rest are actions. Routers (``builtin:BasicRouter``) fan out into ``routes[].flow``
-which we flatten in order (Lightwork runs the brief; branch fidelity is a
-follow-on). Make schedules by interval/type in ``metadata.scheduling`` rather
+rest are actions. Routers (``builtin:BasicRouter``) fan out into ``routes[].flow``;
+``translate`` flattens them in order for the prose IR (the goal brief), while
+:func:`maverick.automation_import.to_flow._make_to_flow` preserves each route as a
+real ``branch`` node when importing to a Flow. Make schedules by interval/type in ``metadata.scheduling`` rather
 than cron, so a scheduled scenario imports as a schedule trigger without an
 auto-created cron (the operator sets the cadence when wiring it).
 
