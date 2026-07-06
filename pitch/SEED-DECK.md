@@ -14,7 +14,7 @@
 
 **On slide:**
 - **Lightwork**
-- *The agent workforce a regulated enterprise can actually deploy.*
+- *The AI workforce that gets better every week — and can prove it to your auditor.*
 - Christopher Day, Founder · `[FILL: contact]` · `[FILL: month 2026]`
 
 **Speaker notes:** "We let regulated enterprises put AI agents to work on real, high-stakes operations — finance, legal, healthcare ops — with the governance, audit trail, and *proof of improvement* that a bank or a hospital actually requires before an agent touches their systems."
@@ -43,9 +43,9 @@
 - **Lightwork is a governed agent *runtime* — not a chatbot, not a framework.**
 - A recursive multi-agent swarm where **every single action passes one chokepoint**: capability check → governance policy (allow / deny / require-human) → safety shield → hard budget → tamper-evident audit.
 - **Self-host or air-gap.** Runs on the customer's data, in their environment. No required egress — an application-layer egress lock means a prompt-injected agent can't exfiltrate through the LLM/HTTP paths (pair with a network-level egress firewall to also cover raw-shell egress).
-- **A workforce that *provably* improves** — a closed, audited learning loop, not a static model.
+- **A workforce that *provably* improves** — every agent, playbook, and workflow learns from every job. Each lesson is tested on work it hasn't seen, signed off by a human where it matters, recorded in the audit trail, and reversible. **Like a new employee with a probation period and an HR file — not a black box that drifts.**
 
-**Speaker notes:** "We didn't build a smarter agent — frontier labs do that. We built the layer a regulated buyer needs *around* the agent: governance bound to every action, a signed audit log, self-hosting, and a learning loop you can prove. That's the part Sierra and LangChain don't ship and a bank can't build itself fast enough."
+**Speaker notes:** "We didn't build a smarter agent — frontier labs do that. We built the layer a regulated buyer needs *around* the agent: governance bound to every action, a signed audit log, self-hosting, and a learning loop you can prove. That's the part Sierra and LangChain don't ship and a bank can't build itself fast enough. And the model is deliberately a commodity input — the accumulated, signed learning belongs to the customer and compounds on *their* data, whichever frontier model is best that quarter."
 
 **Visual:** The hero diagram (see the Mermaid below — render it as a clean horizontal flow).
 
@@ -99,13 +99,33 @@ flowchart LR
 
 **On slide:**
 - **Governance bound to every action** — capability tokens (attenuate-only), policy engine, egress lock, and a **signed, hash-chained audit log** with offline verification. Not a wrapper — deep infra.
-- **A workforce that provably improves** — an audited, snapshot-/rollback-able learning loop: offline consolidation ("dreaming"), per-department memory, and a causal "flywheel" that mines self-correcting guardrails from real outcomes. *Every causal claim must survive a placebo test before it changes behavior.*
+- **Everything above the model improves itself — governed, at four layers:**
+  1. **The harness learns** — fleet memory, skills, per-department knowledge that compounds run over run.
+  2. **The agents improve** — a lesson is promoted only when it beats its baseline on *held-out* work; a drifted or gamed judge freezes learning automatically.
+  3. **The factory improves** — new specialists are equipped at birth with the skills the roster has already learned, inside an envelope that never widens.
+  4. **The system can improve its own code** — a governed Darwin-Gödel loop: it *proposes* changes to a bounded surface, sandbox-tests them against held-out evidence, and a human cryptographically signs every promotion. The control plane is structurally un-editable. **Built and tested; the live evidence campaign is what this round runs.**
 - **2,020 prebuilt, least-privilege specialist packs across 53 suites** — `maverick domains-lint`: **0 errors, 0 warnings.** Run it yourself.
-- **The thing a frontier lab won't ship into a bank:** a system that *rewrites itself in production* — governed, gated, and reversible.
+- **The frontier, per the field itself:** the academic survey that organized self-improving agents names *governance of co-evolution* as the open challenge — and **no published system ships signed, auditable proof of what was learned, with rollback. We productized it.**
 
-**Speaker notes:** "Three compounding moats: the governance substrate, the provable-learning loop, and the 2,020-pack library — all audited. None of it is a prompt over an API; it's ~310,000 lines of infrastructure. A competitor doesn't catch up in a quarter, and an incumbent's hosted product can't be self-hosted into an air-gapped bank."
+**Speaker notes:** "Everyone in this market can make an agent smarter this quarter — that's the commodity layer. The question a regulated buyer asks is 'prove it's learning *safely*.' We're the only platform where the harness, the agents, the agent factory, and even the platform's own code improve under one rule: show evidence on work you haven't seen, get a human signature, leave a tamper-evident receipt, stay reversible. The literature calls governed co-evolution the open frontier; we hold the productized version of it — ~660,000 lines of it, not a prompt over an API."
 
-**Visual:** Three stacked "moat" bars (Governance · Provable learning · Governed library), each with a one-line proof underneath.
+**Visual:** Four stacked layers (Harness · Agents · Factory · Code), each with the same small badge repeated: "evidence → signature → receipt → reversible." One motif, four layers — the repetition IS the message.
+
+---
+
+## Slide 6b — What "provably improves" means (plain English)
+
+**On slide:**
+- Hiring an agent should work like hiring a person:
+  - **Probation** — a new lesson runs as a canary; it graduates on wins, gets pulled on failures.
+  - **Performance review** — it's kept only if it measurably does the job better *on work it has never seen*.
+  - **Sign-off** — changes that matter carry a human's cryptographic signature. The agent cannot sign for itself.
+  - **The HR file** — every lesson, promotion, and rollback is in a tamper-evident record your auditor can verify offline.
+- The chart that ends the debate: **the same task, week 0 vs. week 6** — cost down, completion up, **zero governance breaches** — and every gain in between is signed.
+
+**Speaker notes:** "Strip the jargon and the pitch is one sentence: our agents learn the way your employees do — on probation, with reviews, sign-offs, and a personnel file — except the file is cryptographic and a regulator can check it. Then show the week-0-vs-week-6 curve. That one chart is what the design-partner program produces."
+
+**Visual:** Left: four HR-metaphor icons (probation · review · sign-off · file). Right: the compounding curve — two bars per week (cost ↓, completion ↑), a flat green "breaches: 0" line underneath. *(Run the moat protocol to populate with real data; never mock it.)*
 
 ---
 
@@ -162,10 +182,12 @@ flowchart LR
 | Cognition / Devin (coding) | ❌ | ❌ | ❌ | ❌ |
 | LangChain (framework) | ❌ DIY | ✅ but DIY | ❌ | ❌ |
 | ServiceNow / Salesforce | policy, not agent-native | ❌ | ❌ | ❌ |
+| Power Automate / Copilot Studio | policy, not agent-native | ❌ hosted | ❌ static flows | connectors, not governed specialists |
 
 - **We don't compete on the runtime** (a commoditizing race) — we compete on the **governance + provable-learning layer no one else ships.**
+- **On workflows:** automation suites win on connector count — we don't fight that. They cannot ship **workflows that improve themselves under a signed audit**. Different axis; we own it.
 
-**Speaker notes:** "Sierra is brilliant at hosted customer-experience agents — different buyer, can't air-gap. Cognition is coding. LangChain is ungoverned plumbing you secure yourself. The incumbents have policy but not an agent-native governed runtime. Nobody owns 'governed, self-hostable, provably-improving agent workforce for regulated work.' That's the lane."
+**Speaker notes:** "Sierra is brilliant at hosted customer-experience agents — different buyer, can't air-gap. Cognition is coding. LangChain is ungoverned plumbing you secure yourself. The incumbents — including Power Automate — have policy and connectors, but their flows are static: a human rebuilds them when they underperform. Ours provably improve, with receipts. Nobody owns 'governed, self-hostable, provably-improving agent workforce for regulated work.' That's the lane."
 
 **Visual:** The table above, Lightwork's row highlighted. Footer: "We govern the agents; we don't race to build a smarter one."
 
@@ -174,15 +196,15 @@ flowchart LR
 ## Slide 11 — Traction & what's built
 
 **On slide:**
-- **Built and installable today (alpha):** ~310K LOC across 8 packages (native installers + source today; PyPI publish wired, pending first tag), native installers for Win/macOS/Linux, self-host or air-gap.
-- **The product proves itself:** signed Proof Pack, the governance guarantees scoreboard, 2,020 lint-clean packs (0 errors).
+- **Built and installable today (alpha):** ~660K lines across 8 packages — ~240K product code + ~200K tests (**13,300+ test functions, near 1:1 test-to-code**) — native installers for Win/macOS/Linux, self-host or air-gap.
+- **The product proves itself, live:** 21 governance & learning guarantees run green on a fresh machine (Proof Pack 7 · containment eval 5/5 at 100% prevention/100% utility · learning-loop 9/9), 2,020 lint-clean packs (0 errors). The governed self-modification chassis is built and tested (192 tests) — **the live evidence campaign is what this round runs.**
 - **Design partners / pilots:** `[FILL: e.g. "2 BFSI design partners in conversation; 1 signed LOI"]`
 - **Revenue:** `[FILL: pre-revenue / $X MRR / pilot value]`
-- **Roadmap to the milestone this round buys:** 3 design partners live · SOC 2 Type I in progress · first paid ARR.
+- **Roadmap to the milestone this round buys:** 3 design partners live · the week-0-vs-week-6 compounding curve, published · SOC 2 Type I in progress · first paid ARR.
 
-**Speaker notes (be honest):** "We're pre-revenue and alpha — and unusually far along on *substance*: the hard infrastructure is built and tested, and the product can prove its own guarantees on the spot. What this round buys is the validation layer — design partners, SOC 2, first ARR — that turns a strong asset into a company."
+**Speaker notes (be honest):** "We're pre-revenue and alpha — and unusually far along on *substance*: the hard infrastructure is built and tested, and the product proves its own guarantees in front of you, on your machine, in under a minute. What we have not yet published is the compounding evidence at scale — the learning loop's fuel is real workload, which is exactly what design partners provide. That's the honest shape of the round: the machinery is done; this round buys the proof and the first ARR."
 
-**Visual:** Two columns — "Built (✅ checklist)" vs "Next 12 months (→ milestones)". Big honest stat: "~310K LOC, installable today."
+**Visual:** Two columns — "Built (✅ checklist, each with its verify command)" vs "Next 12 months (→ milestones)". Big honest stat: "21 guarantees, proven live on a fresh machine."
 
 ---
 
@@ -202,9 +224,9 @@ flowchart LR
 ## Slide 13 — The ask
 
 **On slide:**
-- **Raising `[FILL: $X]` at `[FILL: $Y pre-money]`.**
-- **Use of funds (12–18 mo):** `[FILL: e.g. 2 eng hires · design-partner success · SOC 2 + pen test · GTM]`.
-- **Milestones this funds:** 3 design partners live → first paid ARR → SOC 2 Type I → a fundable Series A story.
+- **Raising `[FILL: $X — default to react to: $2.5–3.5M post-money SAFE, $12–18M cap]`.**
+- **Use of funds (12–18 mo):** 2–3 eng/forward-deploy hires · **the evidence campaign** (ground-truth eval corpus built *with* design partners → live governed self-improvement cycles → published benchmark + compounding results) · SOC 2 + pen test · GTM.
+- **Milestones this funds:** 3 design partners live → the signed week-0-vs-week-6 compounding curve → first paid ARR → SOC 2 Type I → a Series A priced on *demonstrated* provable learning, not the promise of it.
 
 **Speaker notes:** "We're raising `[$X]` to convert a built, defensible asset into a revenue-generating company: land design partners, get the SOC 2 a regulated buyer requires, and turn on the first ARR. For context, the 2026 market is pricing defensible, IP-heavy seed companies in the `[$8–20M pre-money]` range — and that's *before* the traction this round delivers."
 
