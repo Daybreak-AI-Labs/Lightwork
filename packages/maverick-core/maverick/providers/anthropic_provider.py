@@ -41,6 +41,42 @@ def _default_cache_ttl() -> str:
     return "1h"
 
 
+def _adaptive_max_tokens_floor() -> int:
+    """Headroom ceiling for AUTO-adaptive thinking (Opus 4.7/4.8, no explicit
+    thinking_budget). Adaptive thinking bills as output (~5x input) and can
+    spend up to max_tokens, so this floor is the worst-case output cost of
+    every non-thinking-role turn on the default model. 16384 (the May 26
+    council value) quadrupled the agent loop's 4096 for roles that never asked
+    to think; 8192 keeps generous anti-empty-response headroom at half the
+    ceiling. Tune via MAVERICK_ADAPTIVE_MAX_TOKENS_FLOOR (min 2048)."""
+    from .._envparse import env_int
+    return max(2048, env_int("MAVERICK_ADAPTIVE_MAX_TOKENS_FLOOR", 8192))
+
+
+def _is_opus_adaptive(model_id: str) -> bool:
+    """Opus 4.7/4.8 (incl. ``-fast`` variants): the models that ONLY accept
+    adaptive thinking (explicit "enabled" returns 400) and get the auto-
+    adaptive default. The single place to extend when 4.9 lands — the request
+    builder and the budget estimate both key off this predicate."""
+    return (model_id.startswith("claude-opus-4-7")
+            or model_id.startswith("claude-opus-4-8"))
+
+
+def effective_max_tokens(model_id: str, max_tokens: int,
+                         thinking_budget: int | None = None) -> int:
+    """The max_tokens ``_build_request`` sends — and the value it computes it
+    with: the builder calls this, so the budget ``reserve()`` estimate that
+    also calls it can never drift from the real request. Accepts bare model
+    ids or "provider:model" specs.
+    """
+    mid = (model_id or "").split(":", 1)[-1]
+    if thinking_budget and thinking_budget > 0:
+        return max(max_tokens, thinking_budget + 1024)
+    if _is_opus_adaptive(mid):
+        return max(max_tokens, _adaptive_max_tokens_floor())
+    return max_tokens
+
+
 def _ephemeral(obj: dict) -> dict:
     # Anthropic regressed the default cache TTL from 1h to 5m in early
     # March 2026 (issue #46829 on anthropics/claude-code). For agent
@@ -150,14 +186,38 @@ def _strip_message_cache_control(messages: list[dict]) -> list[dict]:
 # window and silently miss. When the history is long we add a SECOND, earlier
 # breakpoint within the window so the chain stays warm. System(1)+tools(1)+2
 # message marks = 4, exactly the hard breakpoint limit.
-_LONG_HISTORY_MSGS = 24
-_SECONDARY_MIN_GAP = 4
-_SECONDARY_MAX_GAP = 14
+#
+# All three thresholds are counted in CONTENT BLOCKS, the unit the lookback
+# actually uses — the old >=24-MESSAGE trigger missed block-heavy histories (a
+# few fan-out turns with many parallel tool_results blow past 20 blocks well
+# under 24 messages), leaving the chain cold exactly when tool output is
+# biggest and each turn re-wrote the full prefix.
+_LONG_HISTORY_BLOCKS = 16
+_SECONDARY_MIN_GAP_BLOCKS = 4
+_SECONDARY_MAX_GAP_BLOCKS = 16
+
+
+def _content_block_count(msg: dict) -> int:
+    """Content blocks one message contributes (str content counts as one)."""
+    c = msg.get("content")
+    return len(c) if isinstance(c, list) else 1
+
+
+def _msg_cache_ttl() -> str:
+    """TTL for the MESSAGE-tier breakpoints (system/tools keep
+    ``_default_cache_ttl``). The message breakpoint re-anchors to a new
+    position every turn, so its write surcharge is paid per turn — and the
+    re-read lands seconds later on the next turn. 5m (1.25x write) covers
+    that; 1h (2x write) buys nothing unless turns stall. An explicit
+    operator TTL (either env) still wins."""
+    explicit = (os.environ.get("MAVERICK_ANTHROPIC_MSG_CACHE_TTL")
+                or os.environ.get("MAVERICK_ANTHROPIC_CACHE_TTL"))
+    return explicit or "5m"
 
 
 def _mark_user_message(msg: dict) -> dict:
     """Return a copy of ``msg`` with cache_control on its last content block."""
-    cc = {"type": "ephemeral", "ttl": _default_cache_ttl()}
+    cc = {"type": "ephemeral", "ttl": _msg_cache_ttl()}
     content = msg.get("content")
     if isinstance(content, str):
         return {**msg, "content": [{"type": "text", "text": content, "cache_control": cc}]}
@@ -198,14 +258,20 @@ def _add_messages_cache_breakpoint(messages: list[dict]) -> list[dict]:
     new_messages[target_idx] = _mark_user_message(new_messages[target_idx])
 
     # Secondary breakpoint for long histories: an earlier user message inside
-    # the lookback window, so a single long turn can't push the chain out of it.
-    if len(messages) >= _LONG_HISTORY_MSGS:
-        lo = target_idx - _SECONDARY_MAX_GAP
-        hi = target_idx - _SECONDARY_MIN_GAP
-        for i in range(hi, max(lo, -1), -1):
-            if new_messages[i].get("role") == "user":
+    # the lookback window, so a single long turn can't push the chain out of
+    # it. Counted in blocks (the lookback's unit): pick the closest user
+    # message >= MIN_GAP blocks behind the primary, giving up past MAX_GAP.
+    total_blocks = sum(_content_block_count(m) for m in messages)
+    if total_blocks >= _LONG_HISTORY_BLOCKS:
+        gap = _content_block_count(messages[target_idx])
+        for i in range(target_idx - 1, -1, -1):
+            if gap > _SECONDARY_MAX_GAP_BLOCKS:
+                break
+            if (gap >= _SECONDARY_MIN_GAP_BLOCKS
+                    and new_messages[i].get("role") == "user"):
                 new_messages[i] = _mark_user_message(new_messages[i])
                 break
+            gap += _content_block_count(messages[i])
     return new_messages
 
 
@@ -313,10 +379,7 @@ class AnthropicClient:
         # Opus 4.7 AND 4.8 (the current default, incl. its `-fast` variant)
         # only accept adaptive thinking; manual `enabled` returns 400.
         # Gating on 4-7 alone left the default model on the `enabled` path.
-        is_opus_47 = (
-            model_id.startswith("claude-opus-4-7")
-            or model_id.startswith("claude-opus-4-8")
-        )
+        is_opus_47 = _is_opus_adaptive(model_id)
         is_modern_4x = (
             model_id.startswith("claude-opus-4-6")
             or model_id.startswith("claude-opus-4-7")
@@ -330,7 +393,8 @@ class AnthropicClient:
         )
 
         if thinking_budget and thinking_budget > 0:
-            kwargs["max_tokens"] = max(max_tokens, thinking_budget + 1024)
+            kwargs["max_tokens"] = effective_max_tokens(
+                model_id, max_tokens, thinking_budget)
             if is_opus_47:
                 # Opus 4.7 rejects explicit "enabled"; only "adaptive"
                 # is supported. Drop budget_tokens — adaptive auto-sizes.
@@ -360,8 +424,11 @@ class AnthropicClient:
             # May 26 council fix (API audit #18): adaptive thinking
             # can spend the entire `max_tokens` budget on thinking and
             # leave nothing for the tool_use / text output, producing
-            # an empty response. Bump headroom for adaptive runs.
-            kwargs["max_tokens"] = max(max_tokens, 16384)
+            # an empty response. Bump headroom for adaptive runs — but
+            # bounded: this fires for every role that did NOT ask to
+            # think (thinking_budget=None), so the floor is the default
+            # worst-case output spend of the whole fleet.
+            kwargs["max_tokens"] = effective_max_tokens(model_id, max_tokens)
         _ = is_modern_4x  # documented above; kept for future logic
         # Orchestrator best-of-N sets a per-attempt sampling temperature to
         # force candidate diversity. It is read from a ContextVar (per goal
@@ -600,6 +667,20 @@ class AnthropicClient:
         leaves the system+tools cache intact (it only invalidates the messages
         tier), so a thinking-free warm still serves a thinking-enabled real call.
         Never raises into the caller; returns whether the warm was sent."""
+        # Minimum-size gate: below the model's cacheable-prefix minimum the
+        # breakpoint is silently ignored, so the warm call would bill its
+        # full input at list price and write NOTHING — cost with zero
+        # benefit. chars/4 mirrors the preflight heuristic.
+        mid = model or self.DEFAULT_MODEL
+        est_tokens = (len(system or "")
+                      + sum(len(str(t)) for t in tools or [])) / 4
+        min_tokens = _min_cache_tokens(mid)
+        if est_tokens < min_tokens:
+            log.debug(
+                "prompt-cache prewarm skipped: est %d tokens < %d minimum "
+                "for %s (nothing would be cached)",
+                est_tokens, min_tokens, mid)
+            return False
         try:
             kwargs: dict[str, Any] = {
                 "model": model or self.DEFAULT_MODEL,

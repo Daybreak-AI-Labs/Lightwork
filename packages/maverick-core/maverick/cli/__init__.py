@@ -527,10 +527,13 @@ def spend(as_json: bool, tag_field: str, limit: int, top: int) -> None:
     for e in w.list_episodes(limit=max(limit, top * 8)):
         b = by_goal.setdefault(e.goal_id, {
             "goal_id": e.goal_id, "cost": 0.0,
-            "input_tokens": 0, "output_tokens": 0, "runs": 0})
+            "input_tokens": 0, "output_tokens": 0, "runs": 0,
+            "cache_read_tokens": 0, "cache_write_tokens": 0})
         b["cost"] += e.cost_dollars
         b["input_tokens"] += e.input_tokens
         b["output_tokens"] += e.output_tokens
+        b["cache_read_tokens"] += getattr(e, "cache_read_tokens", 0)
+        b["cache_write_tokens"] += getattr(e, "cache_write_tokens", 0)
         b["runs"] += 1
     goals = sorted(by_goal.values(), key=lambda x: x["cost"], reverse=True)[:top]
     for g in goals:
@@ -540,6 +543,14 @@ def spend(as_json: bool, tag_field: str, limit: int, top: int) -> None:
             go = None
         g["cost"] = round(g["cost"], 6)
         g["title"] = (go.title if go else "") or ""
+        # Token-efficiency baseline: work bought per dollar, and how much of
+        # the input bill the prompt cache absorbed. billable input = fresh
+        # input tokens; cache reads are the 0.1x-priced remainder.
+        toks = g["input_tokens"] + g["output_tokens"]
+        g["tokens_per_dollar"] = round(toks / g["cost"]) if g["cost"] > 0 else None
+        denom = g["input_tokens"] + g["cache_read_tokens"]
+        g["cache_hit_rate"] = (
+            round(g["cache_read_tokens"] / denom, 4) if denom else None)
 
     tags = split_by_tag(gather(w, tag_field=tag_field, limit=limit))
 
@@ -562,7 +573,13 @@ def spend(as_json: bool, tag_field: str, limit: int, top: int) -> None:
         title = g["title"]
         if len(title) > 44:
             title = title[:43] + "…"
-        click.echo(f"  ${g['cost']:>9.4f}  #{g['goal_id']:<5} {title}  ({g['runs']} runs)")
+        eff = ""
+        if g.get("tokens_per_dollar"):
+            eff = f"  {g['tokens_per_dollar']:,} tok/$"
+        if g.get("cache_hit_rate") is not None:
+            eff += f"  cache {g['cache_hit_rate'] * 100:.0f}%"
+        click.echo(f"  ${g['cost']:>9.4f}  #{g['goal_id']:<5} {title}  "
+                   f"({g['runs']} runs){eff}")
     click.echo("")
     click.echo(click.style(f"Spend by {tag_field}", bold=True))
     click.echo("  " + render(tags).replace("\n", "\n  "))

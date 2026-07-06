@@ -160,7 +160,19 @@ Config equivalents live under `[effort]` (`enabled`, `default`, `<role>`) and
 | `MAVERICK_COMPACT_KEEP_RECENT` | `4` | Recent turns always kept uncompacted. |
 | `MAVERICK_COMPACT_DIGEST_EVERY` | `10` | Digest older turns every N turns. |
 | `MAVERICK_COMPACT_MAX_TOOL_BYTES` | `2048` | Max bytes of tool output retained before truncation during compaction (applies to results behind the recent window). |
+| `MAVERICK_COMPACT_MAX_TOTAL_BYTES` | `200000` | Ceiling on the whole live message window. When a few results at the per-result cap push the window over it, compaction shrinks into the recent window oldest-first (the brief and the newest message are always spared). `0` disables. |
 | `MAVERICK_MAX_TOOL_RESULT_BYTES` | `100000` | Hard cap on a single tool result (head+tail kept) before it enters the context window, so one runaway `shell`/query output can't blow tokens/budget in a turn. |
+| `MAVERICK_ADAPTIVE_MAX_TOKENS_FLOOR` | `8192` | `max_tokens` headroom floor when Opus 4.7/4.8 auto-injects adaptive thinking for a role with no explicit thinking budget. Thinking bills at the output rate, so this is the worst-case output spend of every non-thinking-role turn on the default model (min 2048). Config `[thinking] budget` sets the orchestrator/revisor base (default 8000). |
+| `MAVERICK_SKILL_RENDER_MAX_CHARS` | `4000` | Per-skill body cap when recalled skills are rendered into a system prompt (`0` disables). |
+| `MAVERICK_SKILL_RENDER_TOTAL_CHARS` | `10000` | Combined budget across rendered skills; the relevance-ranked tail is dropped once spent (`0` disables). |
+| `MAVERICK_FINDING_POST_MAX_CHARS` | `1500` | Excerpt size for a FINAL posted to the blackboard (the full answer still reaches the parent and the run record). |
+| `MAVERICK_BB_RENDER_ENTRY_CHARS` | `800` | Per-entry bound when blackboard activity is rendered into a worker's brief. |
+| `MAVERICK_SWARM_CHILD_RESULT_CHARS` | `4000` | Per-child answer cap in the `spawn_swarm` result returned to the parent. |
+| `MAVERICK_SWARM_RESULTS_TOTAL_CHARS` | `24000` | Total budget for the joined swarm result; trailing children's answers are elided (identity line kept). |
+| `MAVERICK_BRIEF_FACTS_MAX` | `50` | Newest facts included in the orchestrator brief's facts block. |
+| `MAVERICK_BRIEF_FACT_VALUE_CHARS` | `300` | Per-fact value cap in the brief's facts block (truncation runs after secret redaction). |
+| `MAVERICK_ANTHROPIC_MSG_CACHE_TTL` | `5m` | TTL for the message-tier cache breakpoints (re-anchored every turn, so the write surcharge is paid per turn); system/tools keep `MAVERICK_ANTHROPIC_CACHE_TTL` semantics. |
+| `MAVERICK_BUDGET_RECEIPTS` | off | Mint a signed budget receipt (tokens, cache buckets, cost) per finished goal into the hash-chained ledger. |
 | `MAVERICK_RETRIEVAL_ROUTER` | config `[context] retrieval_router` (off) | Enable the long-context retrieval router: when a single payload (e.g. a pasted document in the goal description) exceeds the token threshold, shard it and keep only the shards relevant to the goal, instead of overflowing the model window. |
 | `MAVERICK_ROUTER_THRESHOLD_TOKENS` | config `[context]` (`200000`) | Payload size (approx tokens) above which the retrieval router activates. |
 | `MAVERICK_ROUTER_TOP_K` | config `[context]` (`12`) | Number of shards the retrieval router retains. |

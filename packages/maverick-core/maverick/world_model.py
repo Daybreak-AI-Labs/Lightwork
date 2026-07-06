@@ -30,7 +30,7 @@ from .paths import data_dir
 log = logging.getLogger(__name__)
 
 DEFAULT_DB = data_dir("world.db")
-SCHEMA_VERSION = 26
+SCHEMA_VERSION = 27
 DEFAULT_BUSY_TIMEOUT_MS = 5000
 WAL_SWITCH_BUSY_TIMEOUT_MS = 50
 WAL_SWITCH_RETRY_SECONDS = 5.0
@@ -154,7 +154,9 @@ CREATE TABLE IF NOT EXISTS episodes (
     cost_dollars REAL DEFAULT 0,
     input_tokens INTEGER DEFAULT 0,
     output_tokens INTEGER DEFAULT 0,
-    tool_calls INTEGER DEFAULT 0
+    tool_calls INTEGER DEFAULT 0,
+    cache_read_tokens INTEGER DEFAULT 0,
+    cache_write_tokens INTEGER DEFAULT 0
 );
 
 CREATE INDEX IF NOT EXISTS idx_episodes_ended_at ON episodes(ended_at);
@@ -532,6 +534,14 @@ MIGRATIONS: dict[int, list[str]] = {
     # v26 fleet learning store phase 2: harness_corpus is in SCHEMA (idempotent
     # CREATE); listed here so existing DBs bump the version.
     26: [],
+    # v27 cache-token spend columns: Budget breaks out cache_read/cache_write
+    # tokens (priced at 0.1x / 1.25-2x) but the episode row dropped them, so
+    # nothing persisted could answer "how much of this goal's input was cache
+    # vs fresh" — the tokens-per-goal efficiency baseline needs both buckets.
+    27: [
+        "ALTER TABLE episodes ADD COLUMN cache_read_tokens INTEGER DEFAULT 0",
+        "ALTER TABLE episodes ADD COLUMN cache_write_tokens INTEGER DEFAULT 0",
+    ],
 }
 
 
@@ -590,6 +600,8 @@ class EpisodeSpend:
     input_tokens: int
     output_tokens: int
     tool_calls: int
+    cache_read_tokens: int = 0
+    cache_write_tokens: int = 0
 
 
 @dataclass
@@ -1732,6 +1744,8 @@ class WorldModel:
         input_tokens: int = 0,
         output_tokens: int = 0,
         tool_calls: int = 0,
+        cache_read_tokens: int = 0,
+        cache_write_tokens: int = 0,
     ) -> None:
         """Mirror in-flight spend onto a LIVE (not-yet-ended) episode row.
 
@@ -1748,10 +1762,11 @@ class WorldModel:
         with self._writing() as conn:
             conn.execute(
                 "UPDATE episodes SET cost_dollars = ?, input_tokens = ?, "
-                "output_tokens = ?, tool_calls = ? "
+                "output_tokens = ?, tool_calls = ?, cache_read_tokens = ?, "
+                "cache_write_tokens = ? "
                 "WHERE id = ? AND ended_at IS NULL",
                 (cost_dollars, input_tokens, output_tokens, tool_calls,
-                 episode_id),
+                 cache_read_tokens, cache_write_tokens, episode_id),
             )
 
     def end_episode(
@@ -1763,14 +1778,18 @@ class WorldModel:
         input_tokens: int = 0,
         output_tokens: int = 0,
         tool_calls: int = 0,
+        cache_read_tokens: int = 0,
+        cache_write_tokens: int = 0,
     ) -> None:
         with self._writing() as conn:
             conn.execute(
                 "UPDATE episodes SET ended_at = ?, summary = ?, outcome = ?, "
-                "cost_dollars = ?, input_tokens = ?, output_tokens = ?, tool_calls = ? "
+                "cost_dollars = ?, input_tokens = ?, output_tokens = ?, "
+                "tool_calls = ?, cache_read_tokens = ?, cache_write_tokens = ? "
                 "WHERE id = ?",
                 (time.time(), _enc_field(summary), _enc_field(outcome), cost_dollars,
-                 input_tokens, output_tokens, tool_calls, episode_id),
+                 input_tokens, output_tokens, tool_calls,
+                 cache_read_tokens, cache_write_tokens, episode_id),
             )
 
     def list_episodes(
@@ -1792,7 +1811,9 @@ class WorldModel:
             "COALESCE(e.cost_dollars, 0) AS cost_dollars, "
             "COALESCE(e.input_tokens, 0) AS input_tokens, "
             "COALESCE(e.output_tokens, 0) AS output_tokens, "
-            "COALESCE(e.tool_calls, 0) AS tool_calls "
+            "COALESCE(e.tool_calls, 0) AS tool_calls, "
+            "COALESCE(e.cache_read_tokens, 0) AS cache_read_tokens, "
+            "COALESCE(e.cache_write_tokens, 0) AS cache_write_tokens "
         )
         join = ("FROM episodes e JOIN goals g ON e.goal_id = g.id "
                 if owner is not None else "FROM episodes e ")

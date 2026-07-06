@@ -13,12 +13,12 @@ ops:
 """
 from __future__ import annotations
 
-import json
 import logging
 import os
 from decimal import Decimal
 from typing import Any
 
+from ..fastjson import dumps_compact
 from . import Tool, as_bool
 
 log = logging.getLogger(__name__)
@@ -72,7 +72,7 @@ def _serialize(obj: Any, _depth: int = 0) -> Any:
 
 
 def _dump(obj: Any, n: int = 3000) -> str:
-    s = json.dumps(_serialize(obj), indent=2, default=str)
+    s = dumps_compact(_serialize(obj))
     if len(s) > n:
         s = s[:n] + "\n... (truncated)"
     return s

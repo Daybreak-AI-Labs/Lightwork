@@ -17,12 +17,12 @@ the user has accepted licensing for.
 """
 from __future__ import annotations
 
-import json
 import logging
 import os
 from typing import Any
 from urllib.parse import urlparse
 
+from ..fastjson import dumps_compact
 from . import Tool
 
 log = logging.getLogger(__name__)
@@ -109,7 +109,7 @@ def _post_bytes(model: str, blob: bytes, content_type: str) -> tuple[int, Any]:
 
 def _format_body(body: Any, *, max_chars: int = 3000) -> str:
     if isinstance(body, (dict, list)):
-        out = json.dumps(body, indent=2, default=str)
+        out = dumps_compact(body)
     else:
         out = str(body)
     if len(out) > max_chars:

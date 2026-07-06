@@ -60,6 +60,7 @@ async def evolve_with_eval(
     rng: random.Random | None = None,
     archive: Archive | None = None,
     space: dict[str, tuple] | None = None,
+    seed_score: float | None = None,
 ) -> Candidate:
     """Evolve ``seed_config`` to maximize eval-harness fitness, if calibrated.
 
@@ -88,6 +89,7 @@ async def evolve_with_eval(
     return await evolve(
         seed_config, _mutate, _score,
         generations=generations, archive=archive, rng=rng,
+        seed_score=seed_score,
     )
 
 

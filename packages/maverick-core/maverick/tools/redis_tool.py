@@ -22,12 +22,12 @@ Requires::
 """
 from __future__ import annotations
 
-import json
 import logging
 import os
 import threading
 from typing import Any
 
+from ..fastjson import dumps_compact
 from . import Tool
 
 log = logging.getLogger(__name__)
@@ -156,7 +156,7 @@ def _op_publish(channel: str, message: str) -> str:
 
 def _op_info(section: str) -> str:
     info = _client().info(section) if section else _client().info()
-    return json.dumps(info, indent=2, default=str)[:3000]
+    return dumps_compact(info)[:3000]
 
 
 def _run(args: dict[str, Any]) -> str:

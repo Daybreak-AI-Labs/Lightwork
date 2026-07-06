@@ -72,7 +72,9 @@ SCHEMA: list[str] = [
       cost_dollars  DOUBLE PRECISION DEFAULT 0,
       input_tokens  INTEGER DEFAULT 0,
       output_tokens INTEGER DEFAULT 0,
-      tool_calls    INTEGER DEFAULT 0
+      tool_calls    INTEGER DEFAULT 0,
+      cache_read_tokens  INTEGER DEFAULT 0,
+      cache_write_tokens INTEGER DEFAULT 0
     );
     """,
     # Idempotent add for DBs created before `summary` existed.
@@ -496,6 +498,12 @@ _HARNESS_CORPUS_MIGRATION: list[str] = [
     " row TEXT NOT NULL, PRIMARY KEY (kind, key, seq));",
 ]
 
+# v27: cache-token spend columns (see world_model.MIGRATIONS[27]).
+_EPISODE_CACHE_TOKENS_MIGRATION = [
+    "ALTER TABLE episodes ADD COLUMN IF NOT EXISTS cache_read_tokens INTEGER DEFAULT 0;",
+    "ALTER TABLE episodes ADD COLUMN IF NOT EXISTS cache_write_tokens INTEGER DEFAULT 0;",
+]
+
 MIGRATIONS: list[tuple[int, list[str]]] = [
     (1, SCHEMA),
     (10, _TENANT_MIGRATION),
@@ -513,6 +521,7 @@ MIGRATIONS: list[tuple[int, list[str]]] = [
     (24, _FACTS_TRUST_MIGRATION),
     (25, _HARNESS_STORE_MIGRATION),
     (26, _HARNESS_CORPUS_MIGRATION),
+    (27, _EPISODE_CACHE_TOKENS_MIGRATION),
 ]
 
 # Highest migration version = the reported schema version.
@@ -1949,6 +1958,8 @@ class PostgresWorldModel:
         input_tokens: int = 0,
         output_tokens: int = 0,
         tool_calls: int = 0,
+        cache_read_tokens: int = 0,
+        cache_write_tokens: int = 0,
     ) -> None:
         """Mirror in-flight spend onto a live (not-yet-ended) episode row.
 
@@ -1959,10 +1970,11 @@ class PostgresWorldModel:
         with self._tx() as cur:
             cur.execute(
                 "UPDATE episodes SET cost_dollars=%s, input_tokens=%s, "
-                "output_tokens=%s, tool_calls=%s "
+                "output_tokens=%s, tool_calls=%s, cache_read_tokens=%s, "
+                "cache_write_tokens=%s "
                 "WHERE id=%s AND ended_at IS NULL" + cond,
                 (cost_dollars, input_tokens, output_tokens, tool_calls,
-                 episode_id, *cparams),
+                 cache_read_tokens, cache_write_tokens, episode_id, *cparams),
             )
 
     def end_episode(
@@ -1975,16 +1987,19 @@ class PostgresWorldModel:
         input_tokens: int = 0,
         output_tokens: int = 0,
         tool_calls: int = 0,
+        cache_read_tokens: int = 0,
+        cache_write_tokens: int = 0,
     ) -> None:
         cond, cparams = self._episode_tenant_cond()
         with self._tx() as cur:
             cur.execute(
                 "UPDATE episodes SET ended_at=%s, summary=%s, outcome=%s, "
                 "cost_dollars=%s, input_tokens=%s, output_tokens=%s, "
-                "tool_calls=%s WHERE id=%s" + cond,
+                "tool_calls=%s, cache_read_tokens=%s, cache_write_tokens=%s "
+                "WHERE id=%s" + cond,
                 (time.time(), _seal(summary), _seal(outcome),
                  cost_dollars, input_tokens, output_tokens, tool_calls,
-                 episode_id, *cparams),
+                 cache_read_tokens, cache_write_tokens, episode_id, *cparams),
             )
 
     def list_episodes(self, limit: int = 50, goal_id: int | None = None) -> list:
@@ -1992,7 +2007,8 @@ class PostgresWorldModel:
         cols = (
             "e.id, e.goal_id, e.started_at, e.ended_at, e.outcome, "
             "COALESCE(e.cost_dollars, 0), COALESCE(e.input_tokens, 0), "
-            "COALESCE(e.output_tokens, 0), COALESCE(e.tool_calls, 0)"
+            "COALESCE(e.output_tokens, 0), COALESCE(e.tool_calls, 0), "
+            "COALESCE(e.cache_read_tokens, 0), COALESCE(e.cache_write_tokens, 0)"
         )
         frag, fparams = _tenant_scope("g.tenant_id")
         conds: list[str] = []
@@ -2016,7 +2032,7 @@ class PostgresWorldModel:
             rows = cur.fetchall()
         # outcome (index 4) is sealed at rest; the rest are numeric/timestamps.
         return [EpisodeSpend(r[0], r[1], r[2], r[3], _unseal(r[4]),
-                             r[5], r[6], r[7], r[8]) for r in rows]
+                             r[5], r[6], r[7], r[8], r[9], r[10]) for r in rows]
 
     def episode_exists(self, goal_id: int, episode_id: int) -> bool:
         frag, fparams = _tenant_scope("g.tenant_id")

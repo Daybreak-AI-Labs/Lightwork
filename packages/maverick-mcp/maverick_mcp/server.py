@@ -559,11 +559,13 @@ class MCPServer:
         else:
             raise _ProtocolError(-32602, f"unknown resource path: {uri}")
 
+        from maverick.fastjson import dumps_compact
         return {
             "contents": [{
                 "uri": uri,
                 "mimeType": "application/json",
-                "text": json.dumps(data, indent=2, default=str),
+                # compact: this JSON re-enters a client LLM's context
+                "text": dumps_compact(data),
             }],
         }
 
@@ -1067,7 +1069,10 @@ class MCPServer:
         items = load_skills()
         if not items:
             return "no skills installed"
-        return "\n".join(f"{s.name}: {', '.join(s.triggers[:3])}" for s in items)
+        lines = [f"{s.name}: {', '.join(s.triggers[:3])}" for s in items[:100]]
+        if len(items) > 100:
+            lines.append(f"... ({len(items) - 100} more skills omitted)")
+        return "\n".join(lines)
 
     def _tool_fact_set(self, args: dict) -> str:
         # Facts are concatenated into the orchestrator's system brief on every
@@ -1108,7 +1113,19 @@ class MCPServer:
         facts = w.get_facts()
         if not facts:
             return "no facts known"
-        return "\n".join(f"{k}: {v}" for k, v in facts.items())
+        # Bounded: this string re-enters the calling LLM's context, and the
+        # fact store grows without limit. Newest first (get_facts order);
+        # same knobs + truncation marker as the orchestrator brief's facts
+        # block so the two renderers of one store can't drift.
+        from maverick._envparse import env_int
+        from maverick.compaction import excerpt
+        max_n = max(1, env_int("MAVERICK_BRIEF_FACTS_MAX", 50))
+        max_val = max(40, env_int("MAVERICK_BRIEF_FACT_VALUE_CHARS", 300))
+        lines = [f"{k}: {excerpt(str(v), max_val)}"
+                 for k, v in list(facts.items())[:max_n]]
+        if len(facts) > max_n:
+            lines.append(f"... ({len(facts) - max_n} more facts omitted)")
+        return "\n".join(lines)
 
     def _send(self, message: dict) -> None:
         line = json.dumps(message) + "\n"

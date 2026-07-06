@@ -18,6 +18,7 @@ import logging
 import os
 from typing import Any
 
+from ..fastjson import dumps_compact
 from . import Tool
 
 log = logging.getLogger(__name__)
@@ -132,7 +133,7 @@ def _op_segmentation(args: dict) -> str:
         data = r.json()
     except ValueError:
         return r.text[:1000]
-    return json.dumps(data, indent=2, default=str)[:3000]
+    return dumps_compact(data)[:3000]
 
 
 def _run(args: dict[str, Any]) -> str:

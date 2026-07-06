@@ -132,7 +132,7 @@ def test_role_overlays_addendum_keyed_on_role(monkeypatch):
 def test_skill_overlays_appends_and_returns_skills(monkeypatch):
     sk = [_FakeSkill("a"), _FakeSkill("b")]
     monkeypatch.setattr("maverick.skills.available_skills", lambda: ["all"])
-    monkeypatch.setattr("maverick.skills.relevant_skills", lambda brief, avail: sk)
+    monkeypatch.setattr("maverick.skills.relevant_skills", lambda brief, avail, max_n=3: sk)
     monkeypatch.setattr("maverick.skills.render_for_prompt", lambda skills: "RENDERED")
     base, skills = apply_skill_overlays("BASE", brief="do x", use_skills=True)
     assert base == "BASE\n\nRENDERED"
@@ -150,7 +150,7 @@ def test_skill_overlays_disabled_is_noop(monkeypatch):
 
 def test_skill_overlays_no_relevant_skills(monkeypatch):
     monkeypatch.setattr("maverick.skills.available_skills", list)
-    monkeypatch.setattr("maverick.skills.relevant_skills", lambda brief, avail: [])
+    monkeypatch.setattr("maverick.skills.relevant_skills", lambda brief, avail, max_n=3: [])
     assert apply_skill_overlays("BASE", brief="x", use_skills=True) == ("BASE", [])
 
 

@@ -106,6 +106,15 @@ class ChainReport:
         return self.broken_at is None
 
 
+def enabled() -> bool:
+    """Whether per-goal receipt minting is on (default OFF).
+
+    The env-var name and its parsing live here, with the ledger they switch
+    on — callers gate on this instead of re-spelling the truthy set."""
+    from ._envparse import is_truthy
+    return is_truthy(os.environ.get("MAVERICK_BUDGET_RECEIPTS"))
+
+
 def receipts_path() -> Path:
     """The deployment's append-only receipt chain (tenant-aware data dir)."""
     return data_dir("budget_receipts.jsonl")
@@ -267,6 +276,10 @@ def mint(
             "total_dollars": round(sum(e.cost_dollars for e in episodes), 6),
             "in_tokens": sum(e.input_tokens for e in episodes),
             "out_tokens": sum(e.output_tokens for e in episodes),
+            "cache_read_tokens": sum(
+                getattr(e, "cache_read_tokens", 0) for e in episodes),
+            "cache_write_tokens": sum(
+                getattr(e, "cache_write_tokens", 0) for e in episodes),
             "tool_calls": sum(e.tool_calls for e in episodes),
             "episodes": len(episodes),
             "started_at": min(starts) if starts else None,

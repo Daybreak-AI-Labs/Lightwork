@@ -440,8 +440,22 @@ async def _swarm_credit_assignment(parent: Agent, children: list, results: list)
 
 def _format_swarm_results(parent: Agent, children: list, results: list,
                           escalated: bool) -> str:
-    """Render the per-child swarm output, withholding sealed children's answers."""
+    """Render the per-child swarm output, withholding sealed children's answers.
+
+    Bounded: this string becomes the ``spawn_swarm`` tool result in the
+    PARENT's message list, where it is re-sent on every subsequent turn — a
+    wide fan-out of verbose children would otherwise dump N full answers into
+    the orchestrator's window in one shot. Each child's answer is capped
+    (MAVERICK_SWARM_CHILD_RESULT_CHARS, default 4000) and a total budget
+    (MAVERICK_SWARM_RESULTS_TOTAL_CHARS, default 24000) elides the answers of
+    trailing children once spent — every child keeps an identity line, and
+    full answers remain in the run record.
+    """
+    from ..compaction import excerpt
+    child_cap = max(200, env_int("MAVERICK_SWARM_CHILD_RESULT_CHARS", 4000))
+    total_cap = max(child_cap, env_int("MAVERICK_SWARM_RESULTS_TOTAL_CHARS", 24_000))
     parts: list[str] = []
+    used = 0
     if escalated:
         parts.append(
             "[swarm] NOTE: the sub-agents disagreed substantially. Do not "
@@ -458,7 +472,16 @@ def _format_swarm_results(parent: Agent, children: list, results: list,
         if notice is not None:
             parts.append(f"[{child.role}/{child.name}] {notice}")
         elif res.final:
-            parts.append(f"[{child.role}/{child.name}] {res.final}")
+            answer = excerpt(res.final, child_cap,
+                             "truncated; full answer in the run record")
+            if used + len(answer) > total_cap and used:
+                parts.append(
+                    f"[{child.role}/{child.name}] [answer elided: "
+                    f"{len(res.final)}B over the swarm result budget; full "
+                    "answer in the run record]")
+                continue
+            used += len(answer)
+            parts.append(f"[{child.role}/{child.name}] {answer}")
         elif res.blocked_on_user:
             parts.append(f"[{child.role}/{child.name}] BLOCKED_ON_USER")
         else:

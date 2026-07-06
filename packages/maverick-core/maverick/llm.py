@@ -500,13 +500,24 @@ def _release_budget_hold(budget: Budget | None, held: float) -> None:
         budget.release(held)
 
 
-def _estimate_call_cost(model_id, system, messages, tools, max_tokens) -> float:
+def _estimate_call_cost(model_id, system, messages, tools, max_tokens,
+                        thinking_budget=None) -> float:
     """Rough $ for one call BEFORE dispatch: estimated input tokens at the
     model's input rate + max_tokens at the output rate (chars/4 heuristic,
     matching the token preflight). Input dominates -- a 200k-token context is
     the cost driver -- so output using the full max_tokens is acceptably
     conservative."""
     from .budget import _lookup_price
+    try:
+        # Price the max_tokens the provider will actually send: the Anthropic
+        # request builder bumps it for thinking headroom (explicit budget, or
+        # the adaptive floor on Opus 4.7/4.8), and a hold priced at the
+        # pre-bump value under-reserves the real worst-case output spend.
+        from .providers.anthropic_provider import effective_max_tokens
+        max_tokens = effective_max_tokens(str(model_id or ""), max_tokens,
+                                          thinking_budget)
+    except Exception:  # pragma: no cover -- estimate must never block a call
+        pass
     in_rate, out_rate = _lookup_price(model_id)
     chars = len(system or "")
     for m in messages or []:
@@ -808,7 +819,8 @@ class LLM:
         # check() and then collectively overshoot -- the same defense the async
         # path uses. reserve() raises BudgetExceeded if the call won't fit;
         # released in `finally` once the actual spend lands.
-        _est_cost = _estimate_call_cost(_price_spec, system, messages, tools, max_tokens)
+        _est_cost = _estimate_call_cost(_price_spec, system, messages, tools,
+                                        max_tokens, thinking_budget=thinking_budget)
         _held = budget.reserve(_est_cost) if budget is not None else 0.0
         try:
             with _trace_span(
@@ -932,7 +944,8 @@ class LLM:
         # check and then collectively overshoot (a $2.50 cap reached $6+ with a
         # wide parallel fan-out). reserve() raises BudgetExceeded here if the
         # call won't fit; released in `finally` once the actual spend lands.
-        _est_cost = _estimate_call_cost(_price_spec, system, messages, tools, max_tokens)
+        _est_cost = _estimate_call_cost(_price_spec, system, messages, tools,
+                                        max_tokens, thinking_budget=thinking_budget)
         _held = budget.reserve(_est_cost) if budget is not None else 0.0
         try:
             with _trace_span(

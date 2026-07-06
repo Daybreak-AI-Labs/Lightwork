@@ -239,9 +239,21 @@ def _end_episode_with_spend(
             input_tokens=budget.input_tokens,
             output_tokens=budget.output_tokens,
             tool_calls=budget.tool_calls,
+            cache_read_tokens=budget.cache_read_tokens,
+            cache_write_tokens=budget.cache_write_tokens,
         )
     except TypeError:
         world.end_episode(episode_id, summary, outcome)
+    # Signed per-goal spend receipt (opt-in): activates the dormant
+    # budget_receipts ledger so each finished goal appends a tamper-evident
+    # tokens+cache+cost record — the regression baseline for token
+    # efficiency. Best-effort; never blocks the goal.
+    from . import budget_receipts
+    if goal_id is not None and budget_receipts.enabled():
+        try:
+            budget_receipts.mint(world, int(goal_id))
+        except Exception:  # pragma: no cover -- observability never blocks
+            log.debug("budget receipt mint skipped", exc_info=True)
     _fire_webhook("episode_finished", {
         "goal_id": goal_id,
         "episode_id": episode_id,
@@ -510,8 +522,17 @@ def _brief_facts_block(world: WorldModel, goal_id: int, shield: Any | None) -> s
             )
         else:
             facts = world.get_facts()
+    # Bound the block: facts are a standing brief section on EVERY goal, and
+    # the store grows forever (kv_memory, dashboard, MCP all write it). Keep
+    # the newest N (get_facts orders newest-first) and cap each value, the
+    # same treatment the QA block gets via _QA_MAX_*. Env-tunable.
+    from ._envparse import env_int as _env_int
+    from .compaction import excerpt
+    max_facts = max(1, _env_int("MAVERICK_BRIEF_FACTS_MAX", 50))
+    max_val = max(40, _env_int("MAVERICK_BRIEF_FACT_VALUE_CHARS", 300))
+    omitted = max(0, len(facts) - max_facts)
     fact_lines: list[str] = []
-    for k, v in facts.items():
+    for k, v in list(facts.items())[:max_facts]:
         val = str(v)
         try:
             from .safety.secret_detector import redact as _redact
@@ -524,6 +545,9 @@ def _brief_facts_block(world: WorldModel, goal_id: int, shield: Any | None) -> s
         except Exception:  # pragma: no cover
             pass
         val = val.replace("\r", " ").replace("\n", " ")
+        # Truncate AFTER redaction: cutting first could split a secret so the
+        # detector misses it and half of it rides into the brief.
+        val = excerpt(val, max_val)
         if shield is not None:
             try:
                 fv = shield.scan_input(f"{k}: {val}")
@@ -533,6 +557,10 @@ def _brief_facts_block(world: WorldModel, goal_id: int, shield: Any | None) -> s
             except Exception:  # pragma: no cover
                 pass
         fact_lines.append(f"  {k}: {val}")
+    if omitted:
+        fact_lines.append(
+            f"  ... ({omitted} more fact(s) omitted; query the kv memory "
+            "tool for the full set)")
     facts_block = "\n".join(fact_lines) or "  (none)"
     return facts_block
 

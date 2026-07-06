@@ -15,8 +15,7 @@ Read-only; builds the grant from config via ``capability_from_config`` (same
 """
 from __future__ import annotations
 
-import json
-
+from ..fastjson import dumps_compact
 from . import Tool
 
 _SCHEMA = {
@@ -43,7 +42,7 @@ def _run(args: dict, user_id: str | None) -> str:
         return f"capability enforcement: {'ON' if on else 'OFF (default-open)'}"
     if op == "list":
         cap = _grant(principal)
-        return json.dumps({
+        return dumps_compact({
             "principal": cap.principal,
             "enforced": capability_enforced(),
             "allow_tools": sorted(cap.allow_tools) or "(all)",
@@ -52,7 +51,7 @@ def _run(args: dict, user_id: str | None) -> str:
             "expires_at": cap.expires_at,
             "allow_paths": sorted(cap.allow_paths) or "(all)",
             "allow_hosts": sorted(cap.allow_hosts) or "(all)",
-        }, indent=2)
+        })
     if op == "check":
         name = str(args.get("tool") or "").strip()
         if not name:

@@ -44,6 +44,28 @@ def test_backend_name():
     assert fastjson.backend() in ("orjson", "stdlib")
 
 
+def test_dumps_compact_has_no_separator_whitespace():
+    # Model-facing payloads: every space is a wasted token, and callers that
+    # truncate to a char budget lose real data to it. Both backends must emit
+    # the dense form.
+    out = fastjson.dumps_compact({"a": 1, "b": [1, 2], "c": {"d": "e"}})
+    assert out == '{"a":1,"b":[1,2],"c":{"d":"e"}}'
+
+
+def test_dumps_compact_roundtrips_and_sorts():
+    obj = {"b": 1, "a": {"y": [3, 2], "x": None}}
+    assert fastjson.loads(fastjson.dumps_compact(obj)) == obj
+    out = fastjson.dumps_compact(obj, sort_keys=True)
+    assert out.index('"a"') < out.index('"b"')
+
+
+def test_dumps_compact_falls_back_for_nonstandard_types():
+    # sets aren't serializable by either backend; the stdlib fallback's
+    # default=str stringifies instead of raising (same contract as dumps()).
+    out = fastjson.dumps_compact({"s": {1, 2}})
+    assert "s" in fastjson.loads(out)
+
+
 def test_tool_cache_snapshot_roundtrips_via_fastjson(tmp_path, monkeypatch):
     # The wired site: save_snapshot writes rows with fastjson; warm_on_start
     # parses them back. A full round-trip through the fastjson seam.

@@ -373,14 +373,38 @@ def relevant_skills(goal: str, all_skills: list[Skill], max_n: int = 3) -> list[
     return _relevant_skills_lexical(goal, all_skills, max_n=max_n, min_score=lexical_min)
 
 
-def render_for_prompt(skills: list[Skill]) -> str:
+def render_for_prompt(skills: list[Skill], *, max_body_chars: int | None = None,
+                      max_total_chars: int | None = None) -> str:
+    """Render recalled skills for the system prompt, BOUNDED.
+
+    Bodies ride every agent's system prompt at every swarm depth, and the only
+    other size limit is 256 KB at install time — unbounded rendering let three
+    recalled skills dominate the prompt. Per-body cap
+    (MAVERICK_SKILL_RENDER_MAX_CHARS, default 4000) truncates oversized bodies;
+    a combined budget (MAVERICK_SKILL_RENDER_TOTAL_CHARS, default 10000) drops
+    the relevance-ranked tail once spent (the first skill always renders).
+    0 disables either cap.
+    """
     if not skills:
         return ""
+    from ._envparse import env_int
+    if max_body_chars is None:
+        max_body_chars = env_int("MAVERICK_SKILL_RENDER_MAX_CHARS", 4000)
+    if max_total_chars is None:
+        max_total_chars = env_int("MAVERICK_SKILL_RENDER_TOTAL_CHARS", 10_000)
     parts = ["# Relevant skills from past runs", ""]
+    total = 0
     for s in skills:
+        body = s.body or ""
+        if max_body_chars > 0 and len(body) > max_body_chars:
+            body = (body[:max_body_chars].rstrip()
+                    + f"\n... [skill body {len(s.body)}B truncated to {max_body_chars}B]")
+        if max_total_chars > 0 and total and total + len(body) > max_total_chars:
+            break  # combined budget spent; skills are relevance-ranked
         parts.append(f"## {s.name}")
-        parts.append(s.body)
+        parts.append(body)
         parts.append("")
+        total += len(body)
     return "\n".join(parts)
 
 

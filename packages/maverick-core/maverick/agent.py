@@ -177,7 +177,7 @@ def apply_role_overlays(base: str, *, role: str, domain_persona: str | None) -> 
 
 
 def apply_skill_overlays(
-    base: str, *, brief: str, use_skills: bool,
+    base: str, *, brief: str, use_skills: bool, depth: int = 0,
 ) -> tuple[str, list]:
     """Append relevant prior-run skills to ``base``; return ``(base, skills)``.
 
@@ -192,7 +192,11 @@ def apply_skill_overlays(
         return base, []
     try:
         from .skills import available_skills, relevant_skills, render_for_prompt
-        skills = relevant_skills(brief, available_skills())
+        # Deep workers get the single most relevant skill: overlays ride every
+        # node's system prompt, so a swarm re-pays the full render per child.
+        # The root keeps the standard top-3 recall.
+        skills = relevant_skills(brief, available_skills(),
+                                 max_n=3 if depth == 0 else 1)
         if skills:
             base = base + "\n\n" + render_for_prompt(skills)
             return base, list(skills)
@@ -412,8 +416,10 @@ def _tool_status(output: str) -> str:
 # would otherwise enter the CURRENT context window uncapped -- compaction only
 # trims results behind the recent window -- blowing tokens/budget in one turn.
 # Cap any single result; the model keeps the head + tail and is told how to get
-# the rest. ~100 KB chars (~25k tokens). Tune via MAVERICK_MAX_TOOL_RESULT_BYTES.
-_MAX_TOOL_RESULT_BYTES = max(2_000, env_int("MAVERICK_MAX_TOOL_RESULT_BYTES", 100_000))
+# the rest. ~32 KB chars (~8k tokens) — the old 100 KB default let one result
+# inject ~25k tokens that compaction never touches while it sits in the recent
+# window. Tune via MAVERICK_MAX_TOOL_RESULT_BYTES.
+_MAX_TOOL_RESULT_BYTES = max(2_000, env_int("MAVERICK_MAX_TOOL_RESULT_BYTES", 32_000))
 
 
 def unframe_tool_output(framed: str) -> str:
@@ -456,6 +462,23 @@ def _cap_tool_output(text: str) -> str:
         "write the full output to a file and read it back in slices.] ...\n\n"
         + text[-tail:]
     )
+
+
+def _finding_excerpt(final: str) -> str:
+    """The blackboard copy of a FINAL, bounded.
+
+    A finding is re-rendered into every later worker's first turn via
+    ``bb.render(40)`` — the O(K^2) swarm re-send — so post an excerpt, not the
+    whole answer. The full FINAL still reaches the parent via the spawn return
+    and is persisted in the world record. Tune via
+    MAVERICK_FINDING_POST_MAX_CHARS (min 200). NB: this bounds what is
+    STORED; Blackboard.render applies its own (smaller) per-entry cap at
+    injection, so raising this alone does not widen worker briefs — raise
+    MAVERICK_BB_RENDER_ENTRY_CHARS with it."""
+    from .compaction import excerpt
+    cap = max(200, env_int("MAVERICK_FINDING_POST_MAX_CHARS", 1500))
+    return excerpt(final or "", cap,
+                   "finding truncated; full answer in the run record")
 
 
 def _last_assistant_text(messages: list[dict]) -> str:
@@ -960,7 +983,8 @@ class Agent:
         # renders + returns the recalled skills; the stats/ctx bookkeeping stays
         # here, all-or-nothing inside one fail-safe block, exactly as before.
         base, _skills = apply_skill_overlays(
-            base, brief=self.brief, use_skills=self.ctx.use_skills)
+            base, brief=self.brief, use_skills=self.ctx.use_skills,
+            depth=self.depth)
         if _skills:
             try:
                 from .skill import stats as skill_stats
@@ -1024,7 +1048,22 @@ class Agent:
             return []
 
     def _thinking_budget(self) -> int | None:
-        base = 8000 if self.role in ("orchestrator", "revisor") else None
+        if self.role not in ("orchestrator", "revisor"):
+            return None
+        # Thinking tokens bill at the output rate, so the base is a first-class
+        # cost knob: `[thinking] budget` (default 8000, the long-standing value).
+        # Resolved once per agent — this runs every turn and load_config()
+        # re-stats/merges overlay files on each call; config is fixed mid-run.
+        base = getattr(self, "_thinking_base", None)
+        if base is None:
+            base = 8000
+            try:
+                from .config import load_config
+                base = int(((load_config() or {}).get("thinking") or {})
+                           .get("budget", base) or base)
+            except Exception:  # pragma: no cover -- config never blocks a turn
+                pass
+            self._thinking_base = base
         # Adaptive controller (opt-in, default off): trims/raises by recent
         # success rate. Disabled or low-data -> returns `base` unchanged.
         from .thinking_budget import adjust
@@ -2141,6 +2180,8 @@ class Agent:
                 input_tokens=b.input_tokens,
                 output_tokens=b.output_tokens,
                 tool_calls=b.tool_calls,
+                cache_read_tokens=b.cache_read_tokens,
+                cache_write_tokens=b.cache_write_tokens,
             )
         except Exception as e:  # pragma: no cover -- observability never blocks
             log.debug("live-spend mirror skipped: %s", e)
@@ -2369,7 +2410,11 @@ class Agent:
 
             # Karpathy SOTA-review item: long-context compaction. Drop
             # raw tool_result content >2KiB once it's behind the recent
-            # window. The first message (user brief) is always kept.
+            # window, and hold the whole window under a total ceiling
+            # (MAVERICK_COMPACT_MAX_TOTAL_BYTES) by shrinking into the
+            # recent window oldest-first when a few results at the
+            # per-result cap add up. The first message (user brief) and
+            # the newest message are always kept.
             # The compaction cost is O(len(messages)) per turn -- cheap
             # vs. paying full-price input tokens for a 100k history.
             # Default path is the heuristic shrink; an operator can opt into a
@@ -2998,7 +3043,7 @@ class Agent:
                                 f"verifier accepted (conf={verdict.confidence:.2f})",
                             )
 
-                    bb.post(self.name, "finding", final)
+                    bb.post(self.name, "finding", _finding_excerpt(final))
                     self.ctx.world.append_message(
                         self.ctx.goal_id, f"agent:{self.name}", final
                     )

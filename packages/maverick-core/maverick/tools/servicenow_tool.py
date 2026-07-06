@@ -18,11 +18,11 @@ ops:
 """
 from __future__ import annotations
 
-import json
 import logging
 import os
 from typing import Any
 
+from ..fastjson import dumps_compact
 from . import Tool, as_bool
 
 log = logging.getLogger(__name__)
@@ -106,7 +106,7 @@ def _op_query(table: str, query: str, limit: int) -> str:
         return "no records"
     out = [f"{len(rows)} record(s):"]
     for r in rows[:50]:
-        out.append("  " + json.dumps(r, default=str)[:300])
+        out.append("  " + dumps_compact(r)[:300])
     return "\n".join(out)
 
 
@@ -118,7 +118,7 @@ def _op_get(table: str, sys_id: str) -> str:
         return f"{table}/{sys_id} not found"
     if code >= 400:
         return f"ERROR: get ({code}): {_result(data)}"
-    return json.dumps(_result(data), indent=2, default=str)[:3000]
+    return dumps_compact(_result(data))[:3000]
 
 
 def _op_create(table: str, fields: dict, confirm: bool) -> str:

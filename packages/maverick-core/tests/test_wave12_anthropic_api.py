@@ -31,11 +31,18 @@ class TestCacheTtlConsistent:
             "causing Budget over-bill on write surcharge"
         )
 
-    def test_messages_breakpoint_uses_1h_in_normal_mode(self, monkeypatch):
+    def test_messages_breakpoint_uses_5m_in_normal_mode(self, monkeypatch):
+        # The message breakpoint re-anchors to a new position every turn, so
+        # its cache WRITE is paid per turn and the re-read lands seconds later
+        # on the next turn. 5m TTL (1.25x write) covers that; the prior 1h
+        # (2x write) bought nothing unless turns stalled. System/tools keep
+        # the 1h interactive TTL via _default_cache_ttl; an explicit
+        # MAVERICK_ANTHROPIC_CACHE_TTL / _MSG_CACHE_TTL still wins.
         from maverick.providers.anthropic_provider import (
             _add_messages_cache_breakpoint,
         )
         monkeypatch.delenv("MAVERICK_ANTHROPIC_CACHE_TTL", raising=False)
+        monkeypatch.delenv("MAVERICK_ANTHROPIC_MSG_CACHE_TTL", raising=False)
         monkeypatch.delenv("MAVERICK_CODING_MODE", raising=False)
         msgs = [
             {"role": "user", "content": "hi"},
@@ -44,7 +51,7 @@ class TestCacheTtlConsistent:
         ]
         out = _add_messages_cache_breakpoint(msgs)
         cc = out[0]["content"][0]["cache_control"]
-        assert cc["ttl"] == "1h"
+        assert cc["ttl"] == "5m"
 
     def test_explicit_env_var_wins(self, monkeypatch):
         from maverick.providers.anthropic_provider import (

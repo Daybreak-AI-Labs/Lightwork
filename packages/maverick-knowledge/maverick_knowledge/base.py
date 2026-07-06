@@ -52,6 +52,61 @@ class Hit:
     source: str
 
 
+# Floor for the same-source suffix/prefix trim in _dedup_hits: a shared run
+# this long between two chunks of one document is almost certainly the
+# chunker's overlap, not coincidence. Shorter repeats (headings, boilerplate
+# phrases) are left alone.
+_MIN_DEDUP_OVERLAP = 32
+
+
+def _dedup_hits(hits: list[Hit], *, max_overlap: int) -> list[Hit]:
+    """Collapse retrieval redundancy before chunks are rendered into a prompt.
+
+    The chunker overlaps neighbours by ``chunk_overlap`` chars so boundary
+    facts stay retrievable -- but when both neighbours rank, the shared region
+    would be sent to the model twice. Two passes over the score-sorted hits:
+
+    1. absorb hits whose text is contained in a kept hit (keeping the longer
+       text under the better score);
+    2. for same-source pairs, trim a duplicated suffix/prefix run
+       (>= _MIN_DEDUP_OVERLAP, <= ``max_overlap``) off the lower-ranked chunk.
+
+    Purely lexical and conservative: different sources are never touched.
+    """
+    kept: list[Hit] = []
+    for h in hits:
+        absorbed = False
+        for j, prev in enumerate(kept):
+            # Same-source only: absorbing across documents would render
+            # one document's text under another's [source: ...] label — a
+            # silent citation corruption (shared boilerplate/license text
+            # is a realistic cross-document substring).
+            if h.source != prev.source:
+                continue
+            if h.text and h.text in prev.text:
+                absorbed = True
+                break
+            if prev.text and prev.text in h.text:
+                kept[j] = Hit(prev.score, h.text, prev.source)
+                absorbed = True
+                break
+        if not absorbed:
+            kept.append(h)
+    for i in range(len(kept)):
+        for j in range(len(kept)):
+            if i == j:
+                continue
+            a, b = kept[i], kept[j]
+            if a.source != b.source or not a.text or not b.text:
+                continue
+            limit = min(len(a.text), len(b.text), max_overlap)
+            for n in range(limit, _MIN_DEDUP_OVERLAP - 1, -1):
+                if a.text[-n:] == b.text[:n]:
+                    kept[j] = Hit(b.score, b.text[n:].lstrip(), b.source)
+                    break
+    return [h for h in kept if h.text]
+
+
 class KnowledgeBase:
     """A per-domain document store.
 
@@ -156,22 +211,32 @@ class KnowledgeBase:
         """Delete an unapproved or retired collection from the backing store."""
         self.store.delete_collection(collection)
 
-    def search(self, collection: str, query: str, k: int = 5) -> list[Hit]:
-        vector = self.embedder.embed([query])[0]
+    def _search_vec(self, collection: str, vector, k: int) -> list[Hit]:
+        """Store lookup for an already-embedded query; one Hit-wrap site."""
         return [
             Hit(m.score, m.text, m.meta.get("source", ""))
             for m in self.store.search(collection, vector, k)
         ]
 
+    def search(self, collection: str, query: str, k: int = 5) -> list[Hit]:
+        return self._search_vec(collection, self.embedder.embed([query])[0], k)
+
     def search_formatted(self, collections, query: str, k: int = 5) -> str:
         """Search one or more domain collections and render the top-k chunks with
         their sources -- the string a domain agent's ``knowledge_search`` tool
-        returns. Merges across collections, then keeps the globally top-k."""
+        returns. Merges across collections, then keeps the globally top-k.
+
+        The query is embedded once and the vector reused per collection, and
+        redundant chunk content (the chunker's overlap, contained duplicates)
+        is collapsed before the k-slice -- absorbed duplicates make room for
+        the next-best distinct chunk rather than shrinking the result, and the
+        model never pays tokens for the same span twice."""
+        vector = self.embedder.embed([query])[0]
         hits: list[Hit] = []
         for c in collections:
-            hits.extend(self.search(c, query, k))
+            hits.extend(self._search_vec(c, vector, k))
         hits.sort(key=lambda h: h.score, reverse=True)
-        hits = hits[: max(1, k)]
+        hits = _dedup_hits(hits, max_overlap=self.chunk_overlap)[: max(1, k)]
         if not hits:
             return "No relevant documents found in this domain's knowledge base."
         return "\n\n".join(

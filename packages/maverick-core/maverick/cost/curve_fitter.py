@@ -71,9 +71,12 @@ def gather(world, *, limit: int = 500) -> dict[str, list[tuple[float, float, flo
         if cost <= 0:
             continue
         provider = getattr(ep, "provider", None) or "(all)"
+        # EpisodeSpend's fields are input_tokens/output_tokens; the old
+        # in_tokens/out_tokens getattrs read 0 from every real episode, so the
+        # curve fit on all-zero rows and the cost router was never trained.
         out.setdefault(str(provider), []).append((
-            float(getattr(ep, "in_tokens", 0) or 0),
-            float(getattr(ep, "out_tokens", 0) or 0),
+            float(getattr(ep, "input_tokens", 0) or 0),
+            float(getattr(ep, "output_tokens", 0) or 0),
             float(cost),
         ))
     return out

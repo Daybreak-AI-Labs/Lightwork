@@ -25,37 +25,37 @@ def test_pending_skips_already_applied():
     # share/signoff/origin (v17), temporal fact_history (v18), rate_events (v19),
     # N-of-M dual control (v21), cluster-wide halt (v22), provider spend (v23),
     # facts provenance columns (v24), fleet learning store (v25),
-    # corpus family (v26).
+    # corpus family (v26), episode cache-token spend columns (v27).
     pending = pg.pending_migrations(1)
-    assert [v for v, _ in pending] == [10, 11, 13, 14, 15, 16, 17, 18, 19, 21, 22, 23, 24, 25, 26]
+    assert [v for v, _ in pending] == [10, 11, 13, 14, 15, 16, 17, 18, 19, 21, 22, 23, 24, 25, 26, 27]
     # A DB at v10 still needs the remaining upgrades.
-    assert [v for v, _ in pg.pending_migrations(10)] == [11, 13, 14, 15, 16, 17, 18, 19, 21, 22, 23, 24, 25, 26]
+    assert [v for v, _ in pg.pending_migrations(10)] == [11, 13, 14, 15, 16, 17, 18, 19, 21, 22, 23, 24, 25, 26, 27]
     # A DB at v11 still needs the rest of the ladder.
-    assert [v for v, _ in pg.pending_migrations(11)] == [13, 14, 15, 16, 17, 18, 19, 21, 22, 23, 24, 25, 26]
+    assert [v for v, _ in pg.pending_migrations(11)] == [13, 14, 15, 16, 17, 18, 19, 21, 22, 23, 24, 25, 26, 27]
     # A DB at v13 still needs goal-domain + projects + artifacts + share/etc.
-    assert [v for v, _ in pg.pending_migrations(13)] == [14, 15, 16, 17, 18, 19, 21, 22, 23, 24, 25, 26]
+    assert [v for v, _ in pg.pending_migrations(13)] == [14, 15, 16, 17, 18, 19, 21, 22, 23, 24, 25, 26, 27]
     # A DB at v14 still needs projects + artifacts + share/signoff/origin.
-    assert [v for v, _ in pg.pending_migrations(14)] == [15, 16, 17, 18, 19, 21, 22, 23, 24, 25, 26]
+    assert [v for v, _ in pg.pending_migrations(14)] == [15, 16, 17, 18, 19, 21, 22, 23, 24, 25, 26, 27]
     # A DB at v15 still needs artifacts + share/signoff/origin + fact_history.
-    assert [v for v, _ in pg.pending_migrations(15)] == [16, 17, 18, 19, 21, 22, 23, 24, 25, 26]
+    assert [v for v, _ in pg.pending_migrations(15)] == [16, 17, 18, 19, 21, 22, 23, 24, 25, 26, 27]
     # A DB at v16 still needs the share/signoff/origin + fact_history migrations.
-    assert [v for v, _ in pg.pending_migrations(16)] == [17, 18, 19, 21, 22, 23, 24, 25, 26]
+    assert [v for v, _ in pg.pending_migrations(16)] == [17, 18, 19, 21, 22, 23, 24, 25, 26, 27]
     # A DB at v17 still needs fact_history + rate_events.
-    assert [v for v, _ in pg.pending_migrations(17)] == [18, 19, 21, 22, 23, 24, 25, 26]
+    assert [v for v, _ in pg.pending_migrations(17)] == [18, 19, 21, 22, 23, 24, 25, 26, 27]
     # A DB at v18 still needs the rate_events migration.
-    assert [v for v, _ in pg.pending_migrations(18)] == [19, 21, 22, 23, 24, 25, 26]
+    assert [v for v, _ in pg.pending_migrations(18)] == [19, 21, 22, 23, 24, 25, 26, 27]
     # A DB at v19 still needs dual-control + halt + provider-spend + facts trust.
-    assert [v for v, _ in pg.pending_migrations(19)] == [21, 22, 23, 24, 25, 26]
+    assert [v for v, _ in pg.pending_migrations(19)] == [21, 22, 23, 24, 25, 26, 27]
     # A DB at v21 still needs halt + provider-spend + facts trust.
-    assert [v for v, _ in pg.pending_migrations(21)] == [22, 23, 24, 25, 26]
+    assert [v for v, _ in pg.pending_migrations(21)] == [22, 23, 24, 25, 26, 27]
     # A DB at v22 still needs provider-spend + facts trust.
-    assert [v for v, _ in pg.pending_migrations(22)] == [23, 24, 25, 26]
+    assert [v for v, _ in pg.pending_migrations(22)] == [23, 24, 25, 26, 27]
     # A DB at v23 still needs the facts provenance migration + the store.
-    assert [v for v, _ in pg.pending_migrations(23)] == [24, 25, 26]
+    assert [v for v, _ in pg.pending_migrations(23)] == [24, 25, 26, 27]
     # A DB at v24 still needs the fleet learning store + corpus family.
-    assert [v for v, _ in pg.pending_migrations(24)] == [25, 26]
+    assert [v for v, _ in pg.pending_migrations(24)] == [25, 26, 27]
     # A DB at v25 still needs the corpus family.
-    assert [v for v, _ in pg.pending_migrations(25)] == [26]
+    assert [v for v, _ in pg.pending_migrations(25)] == [26, 27]
 
 
 def test_pending_is_ordered_with_custom_ladder():
@@ -93,7 +93,7 @@ def test_approval_claims_migration_adds_collaboration_columns():
 
 
 def test_schema_version_is_latest_migration():
-    assert pg._PG_SCHEMA_VERSION == 26
+    assert pg._PG_SCHEMA_VERSION == 27
     assert max(v for v, _ in pg.MIGRATIONS) == pg._PG_SCHEMA_VERSION
 
 

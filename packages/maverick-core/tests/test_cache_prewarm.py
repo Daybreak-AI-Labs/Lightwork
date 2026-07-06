@@ -19,7 +19,7 @@ def test_provider_prewarm_sends_max_tokens_zero(monkeypatch):
             return object()
 
     monkeypatch.setattr(p.client, "messages", _Msgs())
-    ok = p.prewarm("a large system prompt", tools=[{"name": "t", "description": "d",
+    ok = p.prewarm("a large system prompt " * 2000, tools=[{"name": "t", "description": "d",
                    "input_schema": {"type": "object"}}], model="claude-opus-4-8")
     assert ok is True
     req = sent[0]
@@ -55,7 +55,7 @@ def test_provider_prewarm_records_budget_usage(monkeypatch):
     monkeypatch.setattr(p.client, "messages", _Msgs())
     budget = Budget(max_dollars=100.0)
 
-    assert p.prewarm("sys", None, "claude-opus-4-8", budget=budget) is True
+    assert p.prewarm("sys " * 5000, None, "claude-opus-4-8", budget=budget) is True
     assert budget.input_tokens == 10
     assert budget.cache_read_tokens == 20
     assert budget.cache_write_tokens == 1000

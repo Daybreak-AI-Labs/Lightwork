@@ -52,6 +52,82 @@ _DKIM_RE = re.compile(r"\bdkim=(\w+)")
 _AUTHSERV_RE = re.compile(r"\s*([^\s;]+)")
 
 
+# Reply-noise trimming: a reply carries the whole prior thread as quoted
+# text, re-ingested on EVERY message — the classic email token multiplier.
+# Markers cut the quoted history; the RFC 3676 "-- " line cuts the signature.
+# 300-char middle: long attribution lines (many recipients, localized dates)
+# blow past 200 and a missed match re-ingests the whole thread. This marker
+# precedes ">"-quoted text, so its cut is guarded by _only_quotes_below —
+# bottom-posted answers AFTER the quote block must survive.
+_ON_WROTE_RE = re.compile(r"^\s*On .{0,300}wrote:\s*$", re.IGNORECASE)
+# Outlook/forward dividers precede an UNQUOTED copy of the old mail (headers
+# then body), so these cut unconditionally — bottom-posting below them is not
+# a convention.
+_DIVIDER_CUT_RES = (
+    re.compile(r"^\s*-{3,}\s*Original Message\s*-{3,}", re.IGNORECASE),
+    re.compile(r"^\s*Begin forwarded message:\s*$", re.IGNORECASE),
+)
+_HTML_DROP_RE = re.compile(r"<(script|style)[^>]*>.*?</\1\s*>",
+                           re.IGNORECASE | re.DOTALL)
+_HTML_BREAK_RE = re.compile(r"<\s*(?:br|/p|/div|/tr|/li|/h[1-6])\s*/?\s*>",
+                            re.IGNORECASE)
+_HTML_TAG_RE = re.compile(r"<[^>]+>")
+
+
+def _strip_html(html: str) -> str:
+    """HTML body -> plain text (tags/CSS/JS are 3-10x the visible text)."""
+    import html as _htmllib
+    text = _HTML_DROP_RE.sub("", html or "")
+    text = _HTML_BREAK_RE.sub("\n", text)
+    text = _HTML_TAG_RE.sub("", text)
+    text = _htmllib.unescape(text)
+    # collapse the whitespace the markup structure leaves behind
+    lines = [ln.strip() for ln in text.splitlines()]
+    return "\n".join(ln for ln in lines if ln).strip()
+
+
+def _only_quotes_below(lines: list[str], start: int) -> bool:
+    """True when everything below ``start`` is quoted/blank — i.e. cutting
+    there loses no fresh content. A bottom-posted reply (real answer BELOW
+    the ``On ... wrote:`` attribution and its quote block) fails this check,
+    so the marker cut is skipped and the answer survives."""
+    return all(
+        not ln.strip() or ln.lstrip().startswith(">")
+        for ln in lines[start:]
+    )
+
+
+def _trim_reply_noise(body: str) -> str:
+    """Drop quoted-reply history and the signature block from one message.
+
+    Cuts at a reply/forward marker only when nothing but quoted text follows
+    it (top-posted replies — the dominant style); at the RFC 3676 ``-- ``
+    signature delimiter (dash-dash-SPACE only: a bare ``--`` is a common
+    prose divider and cutting there dropped real body text); then drops a
+    trailing run of ``>``-quoted lines. Bottom-posted and interleaved
+    answers are preserved. Fail-safe: an all-quote body returns unchanged,
+    never empty.
+    """
+    text = body or ""
+    lines = text.splitlines()
+    cut = len(lines)
+    for i, line in enumerate(lines):
+        if any(m.match(line) for m in _DIVIDER_CUT_RES):
+            cut = i
+            break
+        if _ON_WROTE_RE.match(line) and _only_quotes_below(lines, i + 1):
+            cut = i
+            break
+        if line.rstrip("\r") == "-- ":
+            cut = i
+            break
+    kept = lines[:cut]
+    while kept and (not kept[-1].strip() or kept[-1].lstrip().startswith(">")):
+        kept.pop()
+    trimmed = "\n".join(kept).strip()
+    return trimmed or text
+
+
 def _authentication_verdict(msg) -> str:
     """Classify a message's inbound authentication as 'pass' | 'fail' | 'none'.
 
@@ -227,17 +303,35 @@ class EmailChannel(Channel):
         return out
 
     def _extract_body(self, msg) -> str:
+        """Plain text of one message, TRIMMED for context entry.
+
+        The body becomes goal text the whole swarm reads, so per-message noise
+        is dropped here: quoted-reply history (every reply in a thread carries
+        the entire prior thread), the signature block, and raw HTML markup
+        (tags/CSS are 3-10x the visible text). text/plain is preferred; an
+        HTML-only message falls back to stripped HTML instead of being lost.
+        """
         if msg.is_multipart():
+            html_fallback = ""
             for part in msg.walk():
-                if part.get_content_type() == "text/plain":
-                    payload = part.get_payload(decode=True)
-                    if isinstance(payload, (bytes, bytearray)):
-                        return payload.decode(errors="replace").strip()
-            return ""
+                ctype = part.get_content_type()
+                payload = part.get_payload(decode=True)
+                if not isinstance(payload, (bytes, bytearray)):
+                    continue
+                if ctype == "text/plain":
+                    return _trim_reply_noise(
+                        payload.decode(errors="replace").strip())
+                if ctype == "text/html" and not html_fallback:
+                    html_fallback = _strip_html(payload.decode(errors="replace"))
+            return _trim_reply_noise(html_fallback)
         payload = msg.get_payload(decode=True)
         if isinstance(payload, (bytes, bytearray)):
-            return payload.decode(errors="replace").strip()
-        return str(payload or "").strip()
+            text = payload.decode(errors="replace").strip()
+        else:
+            text = str(payload or "").strip()
+        if (msg.get_content_type() or "").lower() == "text/html":
+            text = _strip_html(text)
+        return _trim_reply_noise(text)
 
     async def send(self, user_id: str, text: str, subject: str = "Lightwork") -> None:
         await asyncio.to_thread(self._send_sync, user_id, text, subject)
