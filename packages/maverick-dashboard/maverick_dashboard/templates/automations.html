@@ -686,12 +686,15 @@
     }
     async function runFlow(id, inputs) {
       var data = {};
-      for (var i = 0; i < (inputs || []).length; i++) {          // prompt for declared inputs
-        var spec = inputs[i]; var key = (spec.key || '').trim(); if (!key) continue;
-        var def = (spec.default != null ? String(spec.default) : '');
-        var v = window.prompt((spec.label || key) + ' [' + (spec.type || 'text') + (spec.required ? ', required' : '') + ']', def);
-        if (v === null) { flowsMsg.textContent = 'Run cancelled.'; return; }
-        if (v.trim()) data[key] = v.trim();
+      var declared = (inputs || []).filter(function (s) { return (s.key || '').trim(); });
+      if (declared.length) {                                     // typed run form for declared inputs
+        var fields = declared.map(function (s) {
+          return { key: s.key, label: s.label || s.key, type: (s.type || 'text'),
+                   required: !!s.required, default: (s.default != null ? s.default : undefined) };
+        });
+        var vals = await window.mvForm('Run this flow', fields, { okText: 'Run' });
+        if (vals === null) { flowsMsg.textContent = 'Run cancelled.'; return; }
+        data = vals;
       }
       flowsMsg.textContent = 'Starting…';
       try {
@@ -806,8 +809,12 @@
         // ask when it couldn't infer one confidently.
         var tool = (p.inferred_tool || '').trim();
         if (!tool) {
-          tool = (window.prompt('Harden node "' + p.node_id + '" into a deterministic action.\n'
-            + 'Which tool should it call?') || '').trim();
+          var vals = await window.mvForm('Harden node “' + p.node_id + '” to a deterministic action',
+            [{ key: 'tool', label: 'Tool it should call', required: true, placeholder: 'e.g. send_email',
+               help: 'The action node will call this tool directly instead of running an agent.' }],
+            { okText: 'Harden' });
+          if (vals === null) { insightsHead.textContent = 'Cancelled.'; return; }
+          tool = (vals.tool || '').trim();
         }
         if (!tool) { insightsHead.textContent = 'Cancelled — hardening needs a tool.'; return; }
         body.tool = tool;
