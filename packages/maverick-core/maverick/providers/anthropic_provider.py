@@ -41,6 +41,36 @@ def _default_cache_ttl() -> str:
     return "1h"
 
 
+def _adaptive_max_tokens_floor() -> int:
+    """Headroom ceiling for AUTO-adaptive thinking (Opus 4.7/4.8, no explicit
+    thinking_budget). Adaptive thinking bills as output (~5x input) and can
+    spend up to max_tokens, so this floor is the worst-case output cost of
+    every non-thinking-role turn on the default model. 16384 (the May 26
+    council value) quadrupled the agent loop's 4096 for roles that never asked
+    to think; 8192 keeps generous anti-empty-response headroom at half the
+    ceiling. Tune via MAVERICK_ADAPTIVE_MAX_TOKENS_FLOOR (min 2048)."""
+    try:
+        v = int(os.environ.get("MAVERICK_ADAPTIVE_MAX_TOKENS_FLOOR", "8192"))
+    except ValueError:
+        v = 8192
+    return max(2048, v)
+
+
+def effective_max_tokens(model_id: str, max_tokens: int,
+                         thinking_budget: int | None = None) -> int:
+    """The max_tokens ``_build_request`` will actually send, given the bumps
+    it applies for thinking headroom. The budget ``reserve()`` estimate uses
+    this so pre-dispatch holds price the real worst-case output, not the
+    caller's pre-bump value. Accepts bare model ids or "provider:model" specs.
+    """
+    mid = (model_id or "").split(":", 1)[-1]
+    if thinking_budget and thinking_budget > 0:
+        return max(max_tokens, thinking_budget + 1024)
+    if mid.startswith("claude-opus-4-7") or mid.startswith("claude-opus-4-8"):
+        return max(max_tokens, _adaptive_max_tokens_floor())
+    return max_tokens
+
+
 def _ephemeral(obj: dict) -> dict:
     # Anthropic regressed the default cache TTL from 1h to 5m in early
     # March 2026 (issue #46829 on anthropics/claude-code). For agent
@@ -360,8 +390,11 @@ class AnthropicClient:
             # May 26 council fix (API audit #18): adaptive thinking
             # can spend the entire `max_tokens` budget on thinking and
             # leave nothing for the tool_use / text output, producing
-            # an empty response. Bump headroom for adaptive runs.
-            kwargs["max_tokens"] = max(max_tokens, 16384)
+            # an empty response. Bump headroom for adaptive runs — but
+            # bounded: this fires for every role that did NOT ask to
+            # think (thinking_budget=None), so the floor is the default
+            # worst-case output spend of the whole fleet.
+            kwargs["max_tokens"] = max(max_tokens, _adaptive_max_tokens_floor())
         _ = is_modern_4x  # documented above; kept for future logic
         # Orchestrator best-of-N sets a per-attempt sampling temperature to
         # force candidate diversity. It is read from a ContextVar (per goal

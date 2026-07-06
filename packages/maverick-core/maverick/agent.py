@@ -1024,7 +1024,17 @@ class Agent:
             return []
 
     def _thinking_budget(self) -> int | None:
-        base = 8000 if self.role in ("orchestrator", "revisor") else None
+        if self.role not in ("orchestrator", "revisor"):
+            return None
+        # Thinking tokens bill at the output rate, so the base is a first-class
+        # cost knob: `[thinking] budget` (default 8000, the long-standing value).
+        base = 8000
+        try:
+            from .config import load_config
+            base = int(((load_config() or {}).get("thinking") or {})
+                       .get("budget", base) or base)
+        except Exception:  # pragma: no cover -- config never blocks a turn
+            pass
         # Adaptive controller (opt-in, default off): trims/raises by recent
         # success rate. Disabled or low-data -> returns `base` unchanged.
         from .thinking_budget import adjust
