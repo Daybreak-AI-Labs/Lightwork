@@ -225,18 +225,56 @@
     });
   });
 
-  // Attach button opens the hidden file input; chosen filenames show in the hint.
+  // Attach button opens the hidden file input; chosen filenames show in the
+  // hint. Files can also be dragged onto the composer or pasted (screenshots,
+  // copied files) — both merge into the same input via DataTransfer.
   (function () {
     var btn = document.getElementById('attach-btn');
     var input = document.getElementById('attach-input');
     var hint = document.getElementById('composer-hint');
+    var form = document.querySelector('form.composer');
     if (!btn || !input || !hint) return;
     var original = hint.textContent;
-    btn.addEventListener('click', function () { input.click(); });
-    input.addEventListener('change', function () {
+    function showNames() {
       var names = Array.prototype.map.call(input.files, function (f) { return f.name; });
       hint.textContent = names.length ? ('Attached: ' + names.join(', ')) : original;
-    });
+    }
+    function addFiles(files) {
+      if (!files || !files.length) return;
+      var dt = new DataTransfer();
+      Array.prototype.forEach.call(input.files, function (f) { dt.items.add(f); });
+      Array.prototype.forEach.call(files, function (f) { dt.items.add(f); });
+      input.files = dt.files;
+      showNames();
+    }
+    btn.addEventListener('click', function () { input.click(); });
+    input.addEventListener('change', showNames);
+    if (form) {
+      ['dragover', 'dragenter'].forEach(function (ev) {
+        form.addEventListener(ev, function (e) {
+          if (e.dataTransfer && Array.prototype.indexOf.call(e.dataTransfer.types, 'Files') !== -1) {
+            e.preventDefault();
+            form.style.borderColor = 'var(--brand-border)';
+          }
+        });
+      });
+      ['dragleave', 'drop'].forEach(function (ev) {
+        form.addEventListener(ev, function () { form.style.borderColor = ''; });
+      });
+      form.addEventListener('drop', function (e) {
+        if (e.dataTransfer && e.dataTransfer.files.length) {
+          e.preventDefault();
+          addFiles(e.dataTransfer.files);
+        }
+      });
+      form.addEventListener('paste', function (e) {
+        if (!e.clipboardData) return;
+        var files = Array.prototype.map.call(e.clipboardData.items, function (it) {
+          return it.kind === 'file' ? it.getAsFile() : null;
+        }).filter(Boolean);
+        if (files.length) addFiles(files);
+      });
+    }
   })();
 
   // Voice commands: the mic button records via MediaRecorder and posts the

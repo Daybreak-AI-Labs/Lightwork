@@ -732,6 +732,48 @@ async def list_goal_attachments(request: Request, goal_id: int) -> list[Attachme
     ]
 
 
+@router.get("/goals/{goal_id}/attachments/{attachment_id}/download")
+async def download_goal_attachment(
+    request: Request, goal_id: int, attachment_id: int,
+) -> Response:
+    """Serve one stored attachment back to the browser (goal-page panel).
+
+    Same access rules as the list; the bytes come off the local store (with
+    an S3 pull-back for multi-host deployments). Served as a download with
+    the ORIGINAL filename — never inline, so a crafted HTML/SVG upload can't
+    execute in the dashboard origin.
+    """
+    w = _world()
+    g = w.get_goal(goal_id)
+    if g is None:
+        raise HTTPException(status_code=404, detail="no such goal")
+    assert_goal_access(request, g)
+    match = next(
+        (a for a in w.list_attachments(goal_id) if a.id == attachment_id), None)
+    if match is None:
+        raise HTTPException(status_code=404, detail="no such attachment")
+    from pathlib import Path as _Path
+    path = _Path(match.path)
+    if not path.is_file():
+        # Uploaded on another worker host: try the S3 mirror.
+        from maverick.attachments import s3_fetch
+        fetched = await run_in_threadpool(s3_fetch, goal_id, path.name)
+        if fetched is None:
+            raise HTTPException(
+                status_code=410, detail="attachment bytes not on this host")
+        path = fetched
+    data = await run_in_threadpool(path.read_bytes)
+    safe_name = match.filename.replace('"', "_")
+    return Response(
+        content=data,
+        media_type=match.mime or "application/octet-stream",
+        headers={
+            "Content-Disposition": f'attachment; filename="{safe_name}"',
+            "X-Content-Type-Options": "nosniff",
+        },
+    )
+
+
 @router.get("/facts", response_model=dict[str, str])
 async def list_facts() -> dict[str, str]:
     return _world().get_facts()

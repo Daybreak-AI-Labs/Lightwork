@@ -774,7 +774,13 @@ here.
   `IncomingMessage.attachments`, and the server stores them as goal
   attachments under the same validation as a dashboard upload, then runs
   companion generation; attachment-only messages get a "Process the
-  attached file(s)." brief), **S3-backed
+  attached file(s)." brief), **attachments panel** (the goal page lists a
+  goal's files with companion labels, uploads more via `POST
+  /api/v1/goals/{id}/attachments`, and downloads each via `GET
+  .../attachments/{aid}/download` — always `Content-Disposition:
+  attachment` + `nosniff`, so a crafted HTML/SVG upload can't execute in
+  the dashboard origin; the chat composer also takes drag-and-drop and
+  pasted files), **S3-backed
   attachments** (`[attachments] s3_bucket`: mirror every stored attachment to
   any S3-compatible bucket + `s3_fetch` pulls it down on another worker host;
   local disk stays the source tools read, mirror is fail-open), `license_scan`

@@ -146,6 +146,19 @@
     </div>
   </div>
 
+  <details id="attachments-panel" style="display: none; margin: var(--space-2) 0;">
+    <summary style="cursor: pointer; color: var(--muted); font-size: var(--text-sm); width: max-content;">
+      📎 Attachments (<span id="attachments-count">0</span>)
+    </summary>
+    <ul id="attachments-list" style="list-style: none; margin: var(--space-2) 0 0; padding: 0; display: flex; flex-direction: column; gap: var(--space-1);"></ul>
+    <div style="display: flex; align-items: center; gap: var(--space-2); margin-top: var(--space-2);">
+      <button type="button" id="attach-add-btn" class="btn btn--ghost">+ Add file</button>
+      <input type="file" id="attach-add" multiple aria-label="Add files to this goal"
+             style="position: absolute; width: 1px; height: 1px; padding: 0; margin: -1px; overflow: hidden; clip: rect(0 0 0 0); border: 0;" />
+      <span id="attach-msg" role="status" aria-live="polite" class="muted" style="font-size: var(--text-xs);"></span>
+    </div>
+  </details>
+
   <div class="msg msg--agent">
     <div class="agent__label">
       <svg width="16" height="16" viewBox="0 0 22 22" aria-hidden="true">
@@ -805,6 +818,86 @@
           } else { btn.disabled = false; }
         } catch (e) { btn.disabled = false; }
       });
+    })();
+  </script>
+  <script>
+    // Attachments panel: list the goal's files (uploads + machine-generated
+    // transcript/extract companions), download each, add more to a goal.
+    (function () {
+      var goalId = {{ goal.id }};
+      var panel = document.getElementById('attachments-panel');
+      var list = document.getElementById('attachments-list');
+      var count = document.getElementById('attachments-count');
+      var addBtn = document.getElementById('attach-add-btn');
+      var input = document.getElementById('attach-add');
+      var msg = document.getElementById('attach-msg');
+      if (!panel || !list) return;
+
+      function fmtSize(n) {
+        if (n >= 1048576) return (n / 1048576).toFixed(1) + ' MB';
+        if (n >= 1024) return Math.round(n / 1024) + ' KB';
+        return n + ' B';
+      }
+      function isCompanion(name) {
+        return /\.(transcript|extracted)\.txt$/.test(name);
+      }
+      function render(items) {
+        list.textContent = '';
+        count.textContent = items.length;
+        panel.style.display = items.length ? 'block' : 'none';
+        items.forEach(function (a) {
+          var li = document.createElement('li');
+          li.style.cssText = 'display:flex;align-items:center;gap:0.5rem;font-size:var(--text-sm);';
+          var link = document.createElement('a');
+          link.href = '/api/v1/goals/' + goalId + '/attachments/' + a.id + '/download';
+          link.textContent = a.filename;
+          link.setAttribute('download', a.filename);
+          li.appendChild(link);
+          var meta = document.createElement('span');
+          meta.className = 'muted';
+          meta.style.fontSize = 'var(--text-xs)';
+          meta.textContent = fmtSize(a.size_bytes) + (isCompanion(a.filename) ? ' · auto-generated' : '');
+          li.appendChild(meta);
+          list.appendChild(li);
+        });
+      }
+      function refresh() {
+        fetch('/api/v1/goals/' + goalId + '/attachments')
+          .then(function (r) { return r.ok ? r.json() : []; })
+          .then(render)
+          .catch(function () {});
+      }
+      if (addBtn && input) {
+        addBtn.addEventListener('click', function () { input.click(); });
+        input.addEventListener('change', function () {
+          var files = Array.prototype.slice.call(input.files);
+          input.value = '';
+          if (!files.length) return;
+          msg.textContent = 'Uploading…';
+          var chain = Promise.resolve();
+          files.forEach(function (f) {
+            chain = chain.then(function () {
+              var fd = new FormData();
+              fd.append('file', f, f.name);
+              return fetch('/api/v1/goals/' + goalId + '/attachments', { method: 'POST', body: fd })
+                .then(function (r) {
+                  if (!r.ok) return r.json().catch(function () { return {}; }).then(function (j) {
+                    throw new Error(j.detail || (f.name + ' upload failed'));
+                  });
+                });
+            });
+          });
+          chain.then(function () { msg.textContent = ''; refresh(); })
+               .catch(function (e) { msg.textContent = String(e.message || e); refresh(); });
+        });
+      }
+      refresh();
+      // Companions land seconds after upload; refresh a few times so they appear.
+      var polls = 0;
+      var t = setInterval(function () {
+        refresh();
+        if (++polls >= 6) clearInterval(t);
+      }, 5000);
     })();
   </script>
   <script>

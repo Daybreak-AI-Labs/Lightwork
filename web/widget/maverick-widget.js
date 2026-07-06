@@ -86,15 +86,33 @@
     line("You", msg);
     input.value = "";
     send.disabled = true;
+    // /chat/send takes multipart form fields (title required) and answers
+    // with a 303 redirect to the new goal page. fetch follows the redirect,
+    // so a landed response whose URL contains /chat/goal/ IS the success
+    // signal; link the user straight to the live goal.
+    var fd = new FormData();
+    fd.append("title", msg);
     fetch(BASE + "/chat/send", {
       method: "POST",
-      headers: { "Content-Type": "application/x-www-form-urlencoded" },
-      body: "message=" + encodeURIComponent(msg),
+      body: fd,
       credentials: "include"
     })
-      .then(function (r) { return r.ok ? r.json() : Promise.reject(r.status); })
-      .then(function (data) {
-        line("Lightwork", (data && (data.reply || data.result)) || "Started.");
+      .then(function (r) {
+        if (!r.ok) return Promise.reject(r.status);
+        var m = (r.url || "").match(/\/chat\/goal\/(\d+)/);
+        if (m) {
+          var row = el("div", null, { margin: "6px 0" });
+          row.appendChild(el("b", { textContent: "Lightwork: " }));
+          row.appendChild(document.createTextNode("Goal started — "));
+          row.appendChild(el("a", {
+            textContent: "watch it live", href: BASE + "/chat/goal/" + m[1],
+            target: "_blank", rel: "noopener"
+          }));
+          log.appendChild(row);
+          log.scrollTop = log.scrollHeight;
+        } else {
+          line("Lightwork", "Started.");
+        }
       })
       .catch(function (err) { line("Lightwork", "Error: " + err); })
       .finally(function () { send.disabled = false; });
