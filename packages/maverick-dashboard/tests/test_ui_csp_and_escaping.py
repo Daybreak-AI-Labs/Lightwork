@@ -1,4 +1,4 @@
-"""UI hardening: CSP + security headers, plan-tree escaping, trajectory a11y."""
+"""UI hardening (csp_and_escaping): CSP + security headers, plan-tree escaping, trajectory a11y."""
 from __future__ import annotations
 
 from fastapi.testclient import TestClient

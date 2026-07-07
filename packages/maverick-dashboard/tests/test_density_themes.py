@@ -43,9 +43,13 @@ def test_density_param_sets_body_class_and_cookie():
     assert "density-comfortable" in r2.text
 
 
-def test_compact_css_ships_in_base():
+def test_compact_css_ships_in_stylesheet():
+    # The design system lives in the extracted stylesheet (linked by base.html),
+    # not inline in the page.
+    css = client.get("/static/lightwork.css").text
+    assert "body.density-compact" in css
     r = client.get("/")
-    assert "body.density-compact" in r.text
+    assert '/static/lightwork.css' in r.text
     assert 'id="density-select"' in r.text
 
 

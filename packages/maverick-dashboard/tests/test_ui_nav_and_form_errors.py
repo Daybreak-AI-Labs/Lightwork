@@ -1,4 +1,4 @@
-"""UI hardening round 3: active-nav highlighting + graceful goal-form errors."""
+"""UI hardening (nav_and_form_errors): active-nav highlighting + graceful goal-form errors."""
 from __future__ import annotations
 
 import pytest
@@ -70,9 +70,11 @@ def test_chat_form_submits_via_fetch(monkeypatch, tmp_path):
     """
     _prep(monkeypatch, tmp_path)
     r = _client().get("/chat")
-    assert "new FormData(form)" in r.text
+    assert '/static/lightwork-ui.js' in r.text
+    ui = _client().get("/static/lightwork-ui.js").text
+    assert "new FormData(form)" in ui
     # It reads Retry-After so a rate-limited user sees the wait time.
-    assert "Retry-After" in r.text
+    assert "Retry-After" in ui
 
 
 def test_overview_first_run_form_has_inline_error_region(monkeypatch, tmp_path):

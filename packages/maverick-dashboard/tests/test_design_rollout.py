@@ -26,12 +26,15 @@ def test_pages_use_shared_page_title(monkeypatch, tmp_path):
         assert '<h1 class="page-title">' + label in t, path
 
 
-def test_generic_empties_use_mv_empty(monkeypatch, tmp_path):
+def test_generic_empties_use_mv_empty():
     # Generic full-page empties converged onto the single .mv-empty component.
-    _isolate(monkeypatch, tmp_path)
-    c = _client()
-    for path in ["/benchmarks", "/compartments", "/store"]:
-        assert "mv-empty" in c.get(path).text, path
+    # Asserted against the template source: whether a live render shows the
+    # empty branch depends on seeded data, and the stylesheet no longer ships
+    # inline to mask that (the old page-text assertion matched the CSS rule).
+    import pathlib
+    base = pathlib.Path(__file__).resolve().parents[1] / "maverick_dashboard" / "templates"
+    for f in ["benchmarks.html", "compartments.html", "store.html"]:
+        assert "mv-empty" in (base / f).read_text(), f
 
 
 def test_store_modernized_off_bespoke_classes(monkeypatch, tmp_path):
@@ -46,7 +49,7 @@ def test_store_modernized_off_bespoke_classes(monkeypatch, tmp_path):
 def test_buttons_have_tactile_transition(monkeypatch, tmp_path):
     # Buttons gained a smooth transition + a subtle press, gated by reduced motion.
     _isolate(monkeypatch, tmp_path)
-    t = _client().get("/start").text
+    t = _client().get("/static/lightwork.css").text
     assert ".btn:active { transform: translateY(1px); }" in t
     assert ".btn:active { transform: none; }" in t
 

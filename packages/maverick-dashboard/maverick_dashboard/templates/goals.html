@@ -3,6 +3,13 @@
 {% block content %}
   <h1 class="page-title">Goals</h1>
   <p class="page-subtitle">Every run this deployment has executed — search, then open a plan, replay, or errors.</p>
+  {# The alternate composers live here (one nav entry per job): Chat is the
+     primary path; the form and map editors are a click away. #}
+  <div style="display: flex; gap: var(--space-2); flex-wrap: wrap; margin-bottom: var(--space-4);">
+    <a class="btn btn--primary" href="/chat">New goal in Chat</a>
+    <a class="btn" href="/goal-builder">Quick Goal form</a>
+    <a class="btn" href="/graph-editor">Goal Map editor</a>
+  </div>
   <div class="panel{% if not goals %} empty{% endif %}">
     {% if goals %}
     <input id="run-search-q" type="search" placeholder="Search across runs…"

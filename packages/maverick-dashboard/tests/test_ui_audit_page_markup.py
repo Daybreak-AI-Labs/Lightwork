@@ -1,4 +1,4 @@
-"""UI hardening round 6: audit-page markup correctness + a11y."""
+"""UI hardening (audit_page_markup): audit-page markup correctness + a11y."""
 from __future__ import annotations
 
 from fastapi.testclient import TestClient

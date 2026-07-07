@@ -35,6 +35,9 @@ from . import rbac
 # Settings matrix -- order here IS the nav order. ``floor`` mirrors the
 # route-enforced gate ("view" when the GET route has none); ``default`` is the
 # permission a role must hold to see the page before any admin override.
+# ``in_nav: False`` keeps a page governed (enforced + in the Settings matrix)
+# but out of the sidebar -- secondary composers/detail surfaces reached from a
+# primary page's own links, so the nav stays one entry per job.
 PAGES: tuple[dict, ...] = (
     # -- Operate --------------------------------------------------------------
     {"path": "/start", "label": "Get started", "group": "Operate", "icon": "check",
@@ -43,10 +46,11 @@ PAGES: tuple[dict, ...] = (
      "floor": "view", "default": "operate"},
     {"path": "/goals", "label": "Goals", "group": "Operate", "icon": "target",
      "floor": "view", "default": "view"},
+    # Alternate goal composers, linked from the Goals page toolbar.
     {"path": "/goal-builder", "label": "Quick Goal", "group": "Operate", "icon": "builder",
-     "floor": "view", "default": "operate"},
+     "floor": "view", "default": "operate", "in_nav": False},
     {"path": "/graph-editor", "label": "Goal Map", "group": "Operate", "icon": "graph",
-     "floor": "view", "default": "operate"},
+     "floor": "view", "default": "operate", "in_nav": False},
     {"path": "/projects", "label": "Projects", "group": "Operate", "icon": "fleets",
      "floor": "view", "default": "view"},
     {"path": "/deliverables", "label": "Deliverables", "group": "Operate", "icon": "templates",
@@ -59,10 +63,11 @@ PAGES: tuple[dict, ...] = (
      "floor": "view", "default": "view"},
     {"path": "/workflows", "label": "Workflows", "group": "Operate", "icon": "workflow",
      "floor": "view", "default": "operate"},
+    # Builder/designer surfaces, linked from Workflows, Automations and Agents.
+    {"path": "/workflow-builder", "label": "Workflow Builder", "group": "Operate",
+     "icon": "workflow", "floor": "view", "default": "operate", "in_nav": False},
     {"path": "/flows/designer", "label": "Flow Designer", "group": "Operate", "icon": "graph",
-     "floor": "view", "default": "operate"},
-    {"path": "/flows/analytics", "label": "Flow Analytics", "group": "Operate", "icon": "bench",
-     "floor": "view", "default": "view"},
+     "floor": "view", "default": "operate", "in_nav": False},
     {"path": "/automations", "label": "Automations", "group": "Operate", "icon": "clock",
      "floor": "view", "default": "operate"},
     {"path": "/fleets", "label": "Fleets", "group": "Operate", "icon": "fleets",
@@ -76,15 +81,24 @@ PAGES: tuple[dict, ...] = (
      "floor": "view", "default": "view"},
     {"path": "/spend", "label": "Spend", "group": "Observe", "icon": "spend",
      "floor": "view", "default": "view"},
+    # The monthly statement behind Spend's "Billing statement" link.
     {"path": "/billing", "label": "Billing", "group": "Observe", "icon": "spend",
-     "floor": "view", "default": "view"},
+     "floor": "view", "default": "view", "in_nav": False},
     {"path": "/providers", "label": "Providers", "group": "Observe", "icon": "providers",
      "floor": "view", "default": "view"},
     {"path": "/benchmarks", "label": "Benchmarks", "group": "Observe", "icon": "bench",
      "floor": "view", "default": "view"},
+    {"path": "/flows/analytics", "label": "Flow Analytics", "group": "Observe", "icon": "bench",
+     "floor": "view", "default": "view"},
     {"path": "/learning", "label": "Learning", "group": "Observe", "icon": "learned",
      "floor": "view", "default": "view"},
+    # The acquired-capabilities record, linked from the Learning page.
     {"path": "/learned", "label": "Learned", "group": "Observe", "icon": "learned",
+     "floor": "view", "default": "view", "in_nav": False},
+    # Per-user goal recordings (owner-scoped) -- an operator review surface.
+    {"path": "/walkthroughs", "label": "Walkthroughs", "group": "Observe",
+     "icon": "walkthroughs", "floor": "view", "default": "operate"},
+    {"path": "/facts", "label": "Facts", "group": "Observe", "icon": "facts",
      "floor": "view", "default": "view"},
     {"path": "/plan-tree-3d", "label": "3D Plan View", "group": "Observe", "icon": "cube",
      "floor": "view", "default": "view"},
@@ -95,6 +109,10 @@ PAGES: tuple[dict, ...] = (
      "floor": "view", "default": "operate"},
     {"path": "/simulate", "label": "Simulate", "group": "Govern", "icon": "graph",
      "floor": "view", "default": "operate"},
+    # Redaction workbench (its preview API requires operate); reached from
+    # goal/trajectory surfaces rather than the sidebar.
+    {"path": "/redact", "label": "Redaction", "group": "Govern", "icon": "shield",
+     "floor": "view", "default": "operate", "in_nav": False},
     {"path": "/safety", "label": "Safety", "group": "Govern", "icon": "shield",
      "floor": "view", "default": "view"},
     {"path": "/compliance", "label": "Compliance", "group": "Govern", "icon": "compliance",
@@ -120,6 +138,10 @@ PAGES: tuple[dict, ...] = (
      "floor": "view", "default": "operate"},
     {"path": "/plugins", "label": "Plugins", "group": "Extend", "icon": "plugins",
      "floor": "view", "default": "operate"},
+    # Output-style customization: mutations are operate-gated, so it lives with
+    # the other operator-facing extension surfaces, not admin plumbing.
+    {"path": "/styles", "label": "Response Styles", "group": "Extend", "icon": "roles",
+     "floor": "view", "default": "operate"},
     {"path": "/mcp", "label": "Tool Servers", "group": "Extend", "icon": "mcp",
      "floor": "admin", "default": "admin"},
     {"path": "/channels", "label": "Channels", "group": "Extend", "icon": "channels",
@@ -127,20 +149,12 @@ PAGES: tuple[dict, ...] = (
     # -- Admin ----------------------------------------------------------------
     {"path": "/settings", "label": "Settings", "group": "Admin", "icon": "settings",
      "floor": "admin", "default": "admin"},
-    {"path": "/styles", "label": "Response Styles", "group": "Admin", "icon": "roles",
-     "floor": "view", "default": "admin"},
     {"path": "/users", "label": "Users", "group": "Admin", "icon": "users",
      "floor": "admin", "default": "admin"},
     {"path": "/tenants", "label": "Tenants", "group": "Admin", "icon": "tenants",
-     "floor": "view", "default": "admin"},
+     "floor": "admin", "default": "admin"},
     {"path": "/cache", "label": "Cache", "group": "Admin", "icon": "cache",
      "floor": "view", "default": "admin"},
-    {"path": "/facts", "label": "Facts", "group": "Admin", "icon": "facts",
-     "floor": "view", "default": "admin"},
-    # Walkthroughs are per-user goal recordings (owner-scoped), not admin
-    # plumbing -- operators keep them by default despite the Admin grouping.
-    {"path": "/walkthroughs", "label": "Walkthroughs", "group": "Admin", "icon": "walkthroughs",
-     "floor": "view", "default": "operate"},
     {"path": "/embed-demo", "label": "Embed Analytics", "group": "Admin", "icon": "embed",
      "floor": "view", "default": "admin"},
 )
@@ -303,11 +317,14 @@ def nav_groups(role: str | None) -> list[dict]:
     """The sidebar nav for ``role``: ``[{label, links: [{href, label, icon}]}]``.
 
     Pages the role doesn't see are dropped; a group with nothing left is
-    dropped whole. ``role=None`` (auth off) returns the full nav.
+    dropped whole. ``role=None`` (auth off) returns the full nav. Pages marked
+    ``in_nav: False`` stay governed but never render a sidebar entry.
     """
     ov = overrides() if role is not None else {}
     groups: list[dict] = []
     for page in PAGES:
+        if not page.get("in_nav", True):
+            continue
         if role is not None:
             if (page["path"], role) not in LOCKED:
                 if not eligible(page, role):
@@ -347,7 +364,8 @@ def matrix() -> list[dict]:
             groups.append({"label": page["group"], "pages": []})
         groups[-1]["pages"].append({
             "path": page["path"], "label": page["label"],
-            "floor": page["floor"], "cells": cells,
+            "floor": page["floor"], "in_nav": page.get("in_nav", True),
+            "cells": cells,
         })
     return groups
 

@@ -1,4 +1,4 @@
-"""UI hardening round 5: inline errors + a11y on the goal-detail page."""
+"""UI hardening (goal_detail_a11y): inline errors + a11y on the goal-detail page."""
 from __future__ import annotations
 
 from fastapi.testclient import TestClient

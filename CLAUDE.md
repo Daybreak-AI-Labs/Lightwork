@@ -93,9 +93,11 @@ All verified locally green; each is a build-failer:
   exactly-once — a duplicate means `JobQueue.claim`'s `WHERE status='pending'`
   guard broke). Both set `MAVERICK_ENCRYPT_AT_REST=0` so they need no crypto
   extra; execution is stubbed at the LLM boundary (plumbing, not the agent loop).
-- Bugbear (B) is OFF on purpose: 127 latent findings (61 B904, 45 B905...).
-  Do not fix or enable them in an unrelated PR. Complexity capped at 20 with
-  30 grandfathered `# noqa: C901` — new code stays under the cap.
+- Bugbear (B) is ON repo-wide (raise-from B904, zip strict= B905, loop-var
+  capture B023...); FastAPI `Depends`/`Form`/`Query` called in argument
+  defaults is whitelisted via extend-immutable-calls, not a violation.
+  Complexity capped at 20 with ~30 grandfathered `# noqa: C901` — new code
+  stays under the cap.
 - No mypy/pyright anywhere. Ruff is the only static gate; don't add type-only
   "fixes" expecting a checker to validate them.
 

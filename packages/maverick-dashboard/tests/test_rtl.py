@@ -41,11 +41,12 @@ def test_rtl_cookie_persists_direction():
 
 
 def test_base_layout_uses_logical_properties():
-    r = client.get("/")
     # the chrome CSS flips with dir instead of hard-coding left/right
-    assert "inset-inline-start" in r.text
-    assert "margin-inline-start" in r.text
-    assert "text-align: start" in r.text
+    # (the design system ships from the extracted stylesheet)
+    css = client.get("/static/lightwork.css").text
+    assert "inset-inline-start" in css
+    assert "margin-inline-start" in css
+    assert "text-align: start" in css
 
 
 def test_lang_select_offers_arabic():

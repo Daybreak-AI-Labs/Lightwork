@@ -50,8 +50,9 @@ def test_learned_page_renders_empty(monkeypatch, tmp_path):
     assert "Nothing learned yet" in text
     assert "No generated tools" in text
     assert "No self-harness guidance learned" in text
-    # Nav link present.
-    assert 'href="/learned"' in text
+    # Reached from the Learning page (one nav entry per job: /learned left the
+    # sidebar; the link lives on /learning).
+    assert 'href="/learned"' in _client().get("/learning").text
 
 
 def _seed_harness(monkeypatch, tmp_path, *, enabled=True):

@@ -1,4 +1,4 @@
-"""UI hardening round 7: a11y + dark-mode sweep.
+"""UI hardening (a11y_dark_mode): a11y + dark-mode sweep.
 
 Covers table-header scope, color-scheme, the nav landmark label, the
 skip-link focus target, and the skill-install double-submit guard.
@@ -48,9 +48,9 @@ def test_no_bare_table_headers(monkeypatch, tmp_path, path):
 def test_color_scheme_declared_for_native_controls(monkeypatch, tmp_path):
     """Native controls (scrollbars, selects, number spinners) match the theme."""
     _prep(monkeypatch, tmp_path)
-    r = _client().get("/")
-    assert "color-scheme: dark;" in r.text
-    assert "color-scheme: light;" in r.text
+    css = _client().get("/static/lightwork.css").text
+    assert "color-scheme: dark;" in css
+    assert "color-scheme: light;" in css
 
 
 def test_nav_landmark_is_labelled(monkeypatch, tmp_path):

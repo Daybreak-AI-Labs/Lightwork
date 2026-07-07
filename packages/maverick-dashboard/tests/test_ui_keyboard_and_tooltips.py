@@ -1,4 +1,4 @@
-"""UI hardening round 10: keyboard-scrollable regions + truncation tooltips."""
+"""UI hardening (keyboard_and_tooltips): keyboard-scrollable regions + truncation tooltips."""
 from __future__ import annotations
 
 from fastapi.testclient import TestClient
@@ -41,8 +41,8 @@ def test_audit_results_region_is_focusable_and_named(monkeypatch, tmp_path):
 
 def test_focus_ring_covers_focusable_regions(monkeypatch, tmp_path):
     _prep(monkeypatch, tmp_path)
-    r = _client().get("/")
-    assert '[tabindex="0"]:focus-visible' in r.text
+    css = _client().get("/static/lightwork.css").text
+    assert '[tabindex="0"]:focus-visible' in css
 
 
 def test_long_goal_description_has_tooltip(monkeypatch, tmp_path):
