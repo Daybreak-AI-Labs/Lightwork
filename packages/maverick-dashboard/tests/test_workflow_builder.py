@@ -542,7 +542,7 @@ def test_p1_builder_refinements(monkeypatch, tmp_path):
     assert 'value="hourly"' in t and 'value="custom"' in t and 'id="sched-cron"' in t
     assert 'id="trig-curl"' in t and "openssl dgst -sha256 -hmac" in t and "Copy curl" in t
     assert ".pb-gatebadge.gov" in t and "'gov'" in t   # approval = brand, not amber
-    assert "window.mvCopy" in t                          # shared copy primitive
+    assert "mvCopy(" in t                                # shared copy primitive
 
 
 def test_p0_council_fixes_builder(monkeypatch, tmp_path):

@@ -1762,6 +1762,15 @@ pre-warming** (`max_tokens=0` prefill at orchestrator start) and a
   guard), and /api routes are untouched. Auth off = full nav, nothing
   enforced (single-user mode unchanged). Store: diffs-only
   `~/.maverick/dashboard-ui-visibility.json` (0600), global control-plane.
+  The registry also declutters the sidebar to one entry per job: secondary
+  composers/detail surfaces (`in_nav: False` — Quick Goal, Goal Map, Workflow
+  Builder, Flow Designer, Billing, Learned, Redaction) stay governed but are
+  reached from their primary page's own links; Walkthroughs/Facts live under
+  Observe and Response Styles under Extend, matching their real audience. The
+  shell's design system + behaviors ship as static assets
+  (`/static/lightwork.css`, `/static/lightwork-ui.js`) rather than inline in
+  `base.html`, and the /settings + /users routes live on their own router
+  (`maverick_dashboard/admin_pages.py`).
 - **Reverse-proxy SSO** — trusted forwarded-identity header for enterprise auth.
 - **SAML 2.0 SSO** (`maverick_dashboard/saml.py`, the `[saml]` extra / pysaml2) —
   a SAML SP browser-login front-end (`/saml/metadata`/`login`/`acs`) for IdPs that

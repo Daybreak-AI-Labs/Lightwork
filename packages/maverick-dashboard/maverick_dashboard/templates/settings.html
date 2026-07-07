@@ -317,7 +317,7 @@
                   style="padding-top: var(--space-4);">{{ grp.label }}</th></tr>
           {% for pg in grp.pages %}
           <tr>
-            <td>{{ pg.label }} <span class="muted mono" style="font-size: var(--text-xs);">{{ pg.path }}</span></td>
+            <td>{{ pg.label }} <span class="muted mono" style="font-size: var(--text-xs);">{{ pg.path }}</span>{% if not pg.in_nav %} <span class="muted" style="font-size: var(--text-xs);">· linked from other pages, not in the sidebar</span>{% endif %}</td>
             {% for cell in pg.cells %}
             <td>
               {% if cell.locked %}

@@ -71,7 +71,9 @@ def test_billing_csv_other_period_is_empty(client, world):
     assert len(r.text.strip().splitlines()) == 1  # header only, no episodes
 
 
-def test_billing_linked_in_nav(client):
-    r = client.get("/overview")
+def test_billing_linked_from_spend(client):
+    # /billing left the sidebar (one nav entry per job); the Spend page links
+    # to the monthly statement instead.
+    r = client.get("/spend")
     assert r.status_code == 200
-    assert "/billing" in r.text
+    assert 'href="/billing"' in r.text

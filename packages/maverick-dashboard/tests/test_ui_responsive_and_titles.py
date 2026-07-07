@@ -1,4 +1,4 @@
-"""UI hardening round 2: responsive tables, page titles, goal rate limit."""
+"""UI hardening (responsive_and_titles): responsive tables, page titles, goal rate limit."""
 from __future__ import annotations
 
 import pytest
@@ -30,10 +30,13 @@ def test_panel_has_horizontal_overflow(monkeypatch, tmp_path):
     monkeypatch.delenv("MAVERICK_DASHBOARD_TOKEN", raising=False)
     from maverick_dashboard import app as dash_app
     dash_app._world_cache.clear()
-    r = _client().get("/")
-    assert ".panel" in r.text
+    # /goals renders real .panel markup (the / landing does not; the old
+    # page-text assertion matched the inline CSS rule, not markup).
+    r = _client().get("/goals")
+    assert 'class="panel' in r.text
     # The base stylesheet gives panels overflow-x so tables don't overflow.
-    assert "overflow-x: auto" in r.text
+    css = _client().get("/static/lightwork.css").text
+    assert ".panel" in css and "overflow-x: auto" in css
 
 
 # ---------- page titles ----------

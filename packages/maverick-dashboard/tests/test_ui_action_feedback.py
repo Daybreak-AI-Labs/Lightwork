@@ -1,4 +1,4 @@
-"""UI hardening round 4: action-result feedback (ARIA live + error detail)."""
+"""UI hardening (action_feedback): action-result feedback (ARIA live + error detail)."""
 from __future__ import annotations
 
 import pytest

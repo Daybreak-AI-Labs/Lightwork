@@ -1,4 +1,4 @@
-"""UI hardening round 8: markup well-formedness + base-layout polish.
+"""UI hardening (markup_wellformed): markup well-formedness + base-layout polish.
 
 Adds a render-time tag-balance guard across every HTML route (would have
 caught the audit stray </div> and the channels missing </tbody>), plus
@@ -66,8 +66,8 @@ def test_theme_switch_preserves_query_params(monkeypatch, tmp_path):
 
 def test_halt_pill_activates_on_space(monkeypatch, tmp_path):
     _prep(monkeypatch, tmp_path)
-    r = _client().get("/")
-    assert "pill.addEventListener('keydown'" in r.text
+    ui = _client().get("/static/lightwork-ui.js").text
+    assert "pill.addEventListener('keydown'" in ui
 
 
 def test_head_declares_color_scheme_and_theme_color(monkeypatch, tmp_path):

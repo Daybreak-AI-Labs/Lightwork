@@ -1,4 +1,4 @@
-"""UI hardening round 9: unique ids, input accessible names, search guard."""
+"""UI hardening (ids_and_labels): unique ids, input accessible names, search guard."""
 from __future__ import annotations
 
 import re

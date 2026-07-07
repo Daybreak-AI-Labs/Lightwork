@@ -131,12 +131,15 @@ def test_nav_groups_per_role(monkeypatch, tmp_path):
     def hrefs(role):
         return {ln["href"] for g in ui_visibility.nav_groups(role) for ln in g["links"]}
 
-    # auth off: everything, in full.
-    assert hrefs(None) == {p["path"] for p in ui_visibility.PAGES}
+    in_nav = {p["path"] for p in ui_visibility.PAGES if p.get("in_nav", True)}
+    # auth off: every sidebar page (in_nav: False pages are reached from
+    # in-page links, never the sidebar).
+    assert hrefs(None) == in_nav
+    assert "/goal-builder" not in in_nav and "/flows/designer" not in in_nav
     # viewer: read-only pages only -- no run/build/admin surfaces, and the
     # groups left empty (Extend, Admin) are dropped whole.
     v = hrefs("viewer")
-    assert {"/goals", "/overview", "/spend", "/safety"} <= v
+    assert {"/goals", "/overview", "/spend", "/safety", "/facts"} <= v
     assert v.isdisjoint({"/chat", "/automations", "/settings", "/users", "/mcp", "/audit"})
     assert {g["label"] for g in ui_visibility.nav_groups("viewer")} == {
         "Operate", "Observe", "Govern"}
@@ -146,10 +149,12 @@ def test_nav_groups_per_role(monkeypatch, tmp_path):
     assert a.isdisjoint({"/chat", "/settings", "/automations"})
     # operator: operate surfaces but no admin plumbing.
     o = hrefs("operator")
-    assert {"/chat", "/goals", "/automations", "/approvals", "/skills"} <= o
-    assert o.isdisjoint({"/settings", "/users", "/mcp", "/channels", "/facts", "/audit"})
-    # admin: everything.
-    assert hrefs("admin") == {p["path"] for p in ui_visibility.PAGES}
+    assert {"/chat", "/goals", "/automations", "/approvals", "/skills",
+            "/walkthroughs", "/styles"} <= o
+    assert o.isdisjoint({"/settings", "/users", "/tenants", "/mcp", "/channels",
+                         "/cache", "/audit"})
+    # admin: every sidebar page.
+    assert hrefs("admin") == in_nav
 
 
 # ---------- HTTP enforcement + settings matrix ----------
@@ -202,8 +207,8 @@ def test_operator_blocked_from_admin_group_pages(monkeypatch, tmp_path):
     rbac.set_role("user:op", "operator")
     _as(monkeypatch, "user:op")
     assert c.get("/automations").status_code == 200
-    assert c.get("/facts").status_code == 403
     assert c.get("/cache").status_code == 403
+    assert c.get("/tenants").status_code == 403
 
 
 def test_admin_override_hides_page_but_not_api(monkeypatch, tmp_path):
