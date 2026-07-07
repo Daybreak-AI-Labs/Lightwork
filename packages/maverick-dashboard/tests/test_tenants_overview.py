@@ -89,10 +89,12 @@ def _as_user(monkeypatch, name: str) -> dict:
 def test_overview_is_admin_only(monkeypatch, tmp_path):
     _seed_tenant_with_runs_and_spend()
     headers = _as_user(monkeypatch, "mallory")
-    # Page: access notice, no roster data (same guard as /tenants).
+    # Page: blocked outright -- /tenants is an admin page, so role-based UI
+    # visibility 403s a non-admin before the in-page guard even runs (and the
+    # roster data still never leaks).
     page = _client().get("/tenants/overview", headers=headers)
-    assert page.status_code == 200
-    assert "admin" in page.text and "acme" not in page.text
+    assert page.status_code == 403
+    assert "acme" not in page.text
     # API: explicit 403.
     api = _client().get("/api/v1/tenants/overview", headers=headers)
     assert api.status_code == 403

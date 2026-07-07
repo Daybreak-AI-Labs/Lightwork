@@ -58,6 +58,7 @@ from .api import router as api_router
 from .auth import (
     assert_goal_access,
     caller_principal,
+    caller_role,
     can_access_goal,
     can_access_goal_principal,
     execution_user_id_from_request,
@@ -183,6 +184,31 @@ def _theme_context(request: Request) -> dict:
 # Register the per-request context processor with Starlette so every
 # TemplateResponse picks up the resolved theme automatically.
 templates.context_processors.append(_theme_context)
+
+
+# Context processor: every template gets `nav_groups` -- the sidebar filtered
+# to the pages the caller's RBAC role may see (defaults + the admin's Settings
+# overrides; see maverick_dashboard.ui_visibility). Auth off -> full nav,
+# exactly as before.
+def _nav_context(request: Request) -> dict:
+    from . import ui_visibility
+    try:
+        role = caller_role(request)
+    except Exception:  # pragma: no cover -- nav must never break a render
+        role = None
+    groups = ui_visibility.nav_groups(role)
+    # The topbar's Settings gear follows the same policy as the sidebar entry.
+    show_settings = any(
+        link["href"] == "/settings" for g in groups for link in g["links"]
+    )
+    return {"nav_groups": groups, "show_settings_link": show_settings}
+
+
+templates.context_processors.append(_nav_context)
+# Requestless renders (rare; legacy paths) still get a complete sidebar.
+from . import ui_visibility as _ui_visibility  # noqa: E402
+
+templates.env.globals.setdefault("nav_groups", _ui_visibility.nav_groups(None))
 
 
 def _set_theme_cookie(response, theme: str) -> None:
@@ -314,6 +340,31 @@ async def _lifespan(app: FastAPI):
         pass
 
 
+def enforce_page_visibility(
+    request: Request = None,  # type: ignore[assignment]
+) -> None:
+    """App-level dependency: 403 a UI page hidden for the caller's RBAC role.
+
+    Runs AFTER ``require_principal`` (dependency order), so the verified
+    principal is already on ``request.state``. Visibility (defaults + the
+    admin's Settings overrides) governs registered page paths and their
+    subpaths only -- /api, webhooks, share links, auth and probe endpoints are
+    unregistered and untouched. Auth off (no principal -> role None) is a
+    no-op, preserving single-user local mode; hiding the nav entry alone would
+    be cosmetic, this makes the hidden page unreachable too.
+    """
+    if request is None:  # WebSocket connection -- page policy doesn't apply
+        return
+    from . import ui_visibility
+    page = ui_visibility.page_for(request.url.path)
+    if page is None:
+        return
+    role = caller_role(request)
+    if role is None or ui_visibility.is_visible(page, role):
+        return
+    raise HTTPException(status_code=403, detail="this page is not enabled for your role")
+
+
 app = FastAPI(
     title="Lightwork Dashboard + REST API",
     description="Local browser UI plus REST API for programmatic access.",
@@ -324,8 +375,9 @@ app = FastAPI(
     # enforces a valid `Authorization: Bearer` ID token on each request (health/
     # liveness/docs paths excepted; see maverick_dashboard.auth). This is an
     # auth layer ON TOP OF the existing MAVERICK_DASHBOARD_TOKEN middleware, not
-    # a replacement for it.
-    dependencies=[Depends(require_principal)],
+    # a replacement for it. `enforce_page_visibility` runs second so the
+    # role-based page-visibility policy sees the established principal.
+    dependencies=[Depends(require_principal), Depends(enforce_page_visibility)],
     lifespan=_lifespan,
 )
 app.include_router(api_router)
@@ -3379,8 +3431,13 @@ async def settings_page(request: Request, saved: str = "") -> HTMLResponse:
         "webhooks": "Webhook signing secret updated.",
         "capabilities": "Capabilities updated.",
         "features": "Features updated.",
+        "visibility": "Page visibility updated.",
+        "visibility_reset": "Page visibility reset to defaults.",
     }.get(saved, "")
+    from maverick_dashboard import rbac, ui_visibility
     return templates.TemplateResponse(request, "settings.html", {
+        "visibility_matrix": ui_visibility.matrix(),
+        "visibility_roles": list(rbac.ROLES),
         "role_models": role_models,
         "model_options": model_options,
         "picker_options": picker_options,
@@ -3564,6 +3621,31 @@ async def settings_set_features(request: Request) -> RedirectResponse:
     for name in settings_store.FEATURE_DEFAULTS:
         settings_store.set_toggle("features", name, name in form)
     return RedirectResponse("/settings?saved=features", status_code=303)
+
+
+@app.post("/settings/ui-visibility")
+async def settings_set_ui_visibility(request: Request) -> RedirectResponse:
+    """Save the page-visibility matrix (admin). Every eligible, unlocked
+    page x role checkbox is submitted as ``cell=role:path``; an absent cell is
+    hidden. Only differences from the defaults are stored (0600 JSON, never
+    config.toml); a role can never be shown a page its permissions don't reach,
+    and admins always keep Settings + Users."""
+    _require_same_origin(request)
+    require_permission(request, "admin")
+    from maverick_dashboard import ui_visibility
+    form = await request.form()
+    ui_visibility.apply_selection(set(form.getlist("cell")))
+    return RedirectResponse("/settings?saved=visibility#ui-visibility", status_code=303)
+
+
+@app.post("/settings/ui-visibility/reset")
+async def settings_reset_ui_visibility(request: Request) -> RedirectResponse:
+    """Reset every page x role cell to its default visibility (admin)."""
+    _require_same_origin(request)
+    require_permission(request, "admin")
+    from maverick_dashboard import ui_visibility
+    ui_visibility.clear_overrides()
+    return RedirectResponse("/settings?saved=visibility_reset#ui-visibility", status_code=303)
 
 
 @app.get("/users", response_class=HTMLResponse)
