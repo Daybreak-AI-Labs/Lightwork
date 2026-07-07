@@ -293,4 +293,67 @@
       <p style="margin-bottom: 0;"><button type="submit" class="btn btn--primary">Save features</button></p>
     </form>
   </div>
+
+  <h2 id="ui-visibility">Page visibility by role</h2>
+  <div class="panel">
+    <p class="muted" style="margin-top: 0;">
+      Choose which pages each role sees. Unchecking a box removes the page from
+      that role's navigation <em>and</em> blocks direct access to it. A dash
+      means the role's permissions can't reach that page at all (visibility can
+      never grant more than a role's permissions allow — change the user's role
+      on the <a href="/users">Users</a> page instead). Admins always keep
+      Settings and Users, so you can't lock yourself out. Roles only apply when
+      sign-in is configured; in local single-user mode everyone sees everything.
+    </p>
+    <form method="post" action="/settings/ui-visibility">
+      <table>
+        <thead><tr>
+          <th scope="col">Page</th>
+          {% for r in visibility_roles %}<th scope="col">{{ r|capitalize }}</th>{% endfor %}
+        </tr></thead>
+        <tbody>
+          {% for grp in visibility_matrix %}
+          <tr><th colspan="{{ 1 + visibility_roles|length }}" scope="colgroup"
+                  style="padding-top: var(--space-4);">{{ grp.label }}</th></tr>
+          {% for pg in grp.pages %}
+          <tr>
+            <td>{{ pg.label }} <span class="muted mono" style="font-size: var(--text-xs);">{{ pg.path }}</span></td>
+            {% for cell in pg.cells %}
+            <td>
+              {% if cell.locked %}
+              <input type="checkbox" checked disabled
+                     aria-label="{{ pg.label }} is always visible to admins"
+                     title="Always available to admins (lockout protection)"
+                     style="width: 18px; height: 18px; accent-color: var(--brand);" />
+              {% elif not cell.eligible %}
+              <span class="muted" title="Not available to this role (needs the {{ pg.floor }} permission)" aria-label="{{ pg.label }} is not available to the {{ cell.role }} role">—</span>
+              {% else %}
+              <input type="checkbox" name="cell" value="{{ cell.role }}:{{ pg.path }}"
+                     {% if cell.visible %}checked{% endif %}
+                     aria-label="Show {{ pg.label }} to the {{ cell.role }} role"
+                     style="width: 18px; height: 18px; accent-color: var(--brand);" />
+              {% endif %}
+            </td>
+            {% endfor %}
+          </tr>
+          {% endfor %}
+          {% endfor %}
+        </tbody>
+      </table>
+      <p style="margin-bottom: 0; margin-top: var(--space-3);">
+        <button type="submit" class="btn btn--primary">Save page visibility</button>
+      </p>
+    </form>
+    <form method="post" action="/settings/ui-visibility/reset" style="margin-top: var(--space-2);">
+      <button type="submit" class="btn">Reset to defaults</button>
+    </form>
+    <details style="margin-top: var(--space-3);"><summary class="muted" style="cursor: pointer; font-size: var(--text-sm);">For administrators: where this is saved</summary>
+      <p class="muted" style="font-size: var(--text-sm); margin-bottom: 0;">
+        Saved as differences from the defaults in
+        <code>~/.maverick/dashboard-ui-visibility.json</code> (chmod 600), never
+        your <code>config.toml</code>. This controls what each role <em>sees</em>;
+        the underlying permission checks on every route still apply regardless.
+      </p>
+    </details>
+  </div>
 {% endblock %}

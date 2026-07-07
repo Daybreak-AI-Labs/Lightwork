@@ -1750,6 +1750,18 @@ pre-warming** (`max_tokens=0` prefill at orchestrator start) and a
   (or any OpenAI-compatible endpoint), **Cohere** (`/v2/embed`, typed
   `embedding_types`), local, or deterministic — fails loud rather than silently
   degrading.
+- **Role-based page visibility** (`maverick_dashboard/ui_visibility.py`) — one
+  page registry drives the sidebar nav, a per-role visibility policy, and the
+  Settings "Page visibility by role" matrix. Each RBAC role (admin/operator/
+  auditor/viewer) sees only the pages its work needs by default (a viewer gets
+  read-only pages, an auditor the audit surfaces, an operator no admin
+  plumbing), and an admin can show/hide any page per role from Settings.
+  Hidden pages leave the nav AND 403 on direct access (an app-level dependency
+  after `require_principal`); overrides can never show a page past the role's
+  enforced permission floor, admins can never lose Settings/Users (lockout
+  guard), and /api routes are untouched. Auth off = full nav, nothing
+  enforced (single-user mode unchanged). Store: diffs-only
+  `~/.maverick/dashboard-ui-visibility.json` (0600), global control-plane.
 - **Reverse-proxy SSO** — trusted forwarded-identity header for enterprise auth.
 - **SAML 2.0 SSO** (`maverick_dashboard/saml.py`, the `[saml]` extra / pysaml2) —
   a SAML SP browser-login front-end (`/saml/metadata`/`login`/`acs`) for IdPs that

@@ -668,9 +668,11 @@
         <span class="dot" aria-hidden="true"></span>
         <span id="halt-label">checking</span>
       </a>
+      {% if show_settings_link is not defined or show_settings_link %}
       <a class="iconbtn" href="/settings" aria-label="Settings" title="Settings">
         <svg viewBox="0 0 16 16" aria-hidden="true"><use href="#i-settings"></use></svg>
       </a>
+      {% endif %}
       <details class="prefs" id="prefs-menu">
         <summary class="iconbtn" aria-label="Display preferences" title="Display preferences">
           <svg viewBox="0 0 16 16" aria-hidden="true"><path d="M2.5 5h3.4M10.4 5h3.1M2.5 11h6.3M13.1 11h.4"/><circle cx="7.7" cy="5" r="1.7"/><circle cx="10.8" cy="11" r="1.7"/></svg>
@@ -723,40 +725,20 @@
       {% set _path = request.url.path if request else '' %}
       {# The dashboard lands on /chat, so highlight Chat when at the bare root. #}
       {% set _active_path = '/chat' if _path == '/' else _path %}
-      {% set _icons = {
-        '/chat': 'chat', '/goals': 'target', '/projects': 'fleets', '/deliverables': 'templates', '/agents': 'agents', '/roles': 'roles',
-        '/start': 'check',
-        '/goal-builder': 'builder', '/workflow-builder': 'workflow', '/workflows': 'workflow',
-        '/automations': 'clock', '/flows/designer': 'graph', '/flows/analytics': 'bench',
-        '/graph-editor': 'graph', '/fleets': 'fleets',
-        '/overview': 'overview', '/oversight': 'eye', '/spend': 'spend', '/billing': 'spend',
-        '/providers': 'providers', '/benchmarks': 'bench', '/learning': 'learned', '/learned': 'learned',
-        '/plan-tree-3d': 'cube', '/approvals': 'check', '/permissions': 'key',
-        '/safety': 'shield', '/compliance': 'compliance', '/compartments': 'compartments',
-        '/audit': 'audit', '/replay': 'audit', '/trust': 'agents', '/discovery': 'overview', '/simulate': 'graph', '/skills': 'skills', '/store': 'store', '/templates': 'templates',
-        '/tools': 'tools', '/plugins': 'plugins', '/mcp': 'mcp', '/channels': 'channels', '/connections': 'key',
-        '/settings': 'settings', '/styles': 'roles', '/users': 'users', '/tenants': 'tenants', '/cache': 'cache',
-        '/facts': 'facts', '/walkthroughs': 'walkthroughs', '/embed-demo': 'embed',
-        '/workforce': 'agents',
-      } %}
-      {% set _nav_groups = [
-        ('Operate', [('/start', 'Get started'), ('/chat', 'Chat'), ('/goals', 'Goals'), ('/goal-builder', 'Quick Goal'), ('/graph-editor', 'Goal Map'), ('/projects', 'Projects'), ('/deliverables', 'Deliverables'), ('/agents', 'Agents'), ('/roles', 'Roles'), ('/workforce', 'Workforce'), ('/workflows', 'Workflows'), ('/flows/designer', 'Flow Designer'), ('/flows/analytics', 'Flow Analytics'), ('/automations', 'Automations'), ('/fleets', 'Fleets')]),
-        ('Observe', [('/overview', 'Overview'), ('/oversight', 'Oversight'), ('/discovery', 'Discovery'), ('/spend', 'Spend'), ('/billing', 'Billing'), ('/providers', 'Providers'), ('/benchmarks', 'Benchmarks'), ('/learning', 'Learning'), ('/learned', 'Learned'), ('/plan-tree-3d', '3D Plan View')]),
-        ('Govern', [('/approvals', 'Approvals'), ('/permissions', 'Permissions'), ('/simulate', 'Simulate'), ('/safety', 'Safety'), ('/compliance', 'Compliance'), ('/compartments', 'Compartments'), ('/audit', 'Audit'), ('/replay', 'Replay'), ('/trust', 'Agent Trust')]),
-        ('Extend', [('/skills', 'Skills'), ('/store', 'Store'), ('/templates', 'Templates'), ('/tools', 'Tools'), ('/connections', 'Connections'), ('/plugins', 'Plugins'), ('/mcp', 'Tool Servers'), ('/channels', 'Channels')]),
-        ('Admin', [('/settings', 'Settings'), ('/styles', 'Response Styles'), ('/users', 'Users'), ('/tenants', 'Tenants'), ('/cache', 'Cache'), ('/facts', 'Facts'), ('/walkthroughs', 'Walkthroughs'), ('/embed-demo', 'Embed Analytics')]),
-      ] %}
-      {% for _group in _nav_groups %}
+      {# nav_groups comes from the _nav_context context processor: the page
+         registry (maverick_dashboard.ui_visibility.PAGES) filtered to what the
+         caller's RBAC role may see. Auth off -> the full nav, as before. #}
+      {% for _group in nav_groups %}
         <div class="navgrp">
-          <button type="button" class="navgrp__toggle" data-grp="{{ _group[0] }}"
+          <button type="button" class="navgrp__toggle" data-grp="{{ _group.label }}"
                   aria-expanded="true" aria-controls="navgrp-{{ loop.index0 }}">
-            <span class="navgrp__label">{{ _group[0] }}</span>
+            <span class="navgrp__label">{{ _group.label }}</span>
             <svg class="navgrp__caret" width="10" height="10" viewBox="0 0 10 10" aria-hidden="true"><path d="M2 3.5 L5 6.5 L8 3.5" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"/></svg>
           </button>
           <ul class="navgrp__items" id="navgrp-{{ loop.index0 }}">
-            {% for _href, _label in _group[1] %}
-              {% set _active = (_active_path == _href or _active_path.startswith(_href ~ '/')) %}
-              <li><a href="{{ _href }}"{% if _active %} class="active" aria-current="page"{% endif %}><svg class="nav-ic" aria-hidden="true"><use href="#i-{{ _icons.get(_href, 'dot') }}"></use></svg><span class="nav-label">{{ _label }}</span></a></li>
+            {% for _link in _group.links %}
+              {% set _active = (_active_path == _link.href or _active_path.startswith(_link.href ~ '/')) %}
+              <li><a href="{{ _link.href }}"{% if _active %} class="active" aria-current="page"{% endif %}><svg class="nav-ic" aria-hidden="true"><use href="#i-{{ _link.icon or 'dot' }}"></use></svg><span class="nav-label">{{ _link.label }}</span></a></li>
             {% endfor %}
           </ul>
         </div>
