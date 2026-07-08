@@ -127,3 +127,51 @@ def test_deleted_flow_advances_cursor_not_wedged(monkeypatch, tmp_path):
     out = c.post("/api/v1/event-triggers/poll").json()
     assert out["triggers"][0]["fired_flows"] == []
     assert any("flow unavailable" in n for n in out["triggers"][0]["notes"])
+
+
+def test_event_flow_queue_restores_trigger_tenant(monkeypatch, tmp_path):
+    # A flow_run job enqueued under a tenant must load/execute/persist under
+    # THAT tenant when the worker drains it later -- not whatever tenant the
+    # worker thread happens to be scoped to (or the shared/no-tenant namespace).
+    _isolate(monkeypatch, tmp_path)
+    from maverick.flow import execution, store
+    from maverick.flow.ir import Flow, FlowNode
+    from maverick.paths import reset_tenant, set_tenant
+    from maverick_dashboard import automation_queue as aq
+    _reset_aq(monkeypatch, aq)
+
+    observed = []
+
+    def _fake_agent(world, **k):
+        return lambda brief, d: (observed.append(brief) or brief, 1.0)
+
+    monkeypatch.setattr(execution, "default_agent_runner", _fake_agent)
+    monkeypatch.setattr(execution, "default_action_runner",
+                        lambda world: (lambda t, p, d: ("ok", 1.0)))
+
+    shared = Flow(id="same", name="Shared", start="a",
+                  nodes={"a": FlowNode(id="a", kind="agent", brief="shared {{secret}}")})
+    tenant = Flow(id="same", name="Tenant", start="a",
+                  nodes={"a": FlowNode(id="a", kind="agent", brief="tenant {{secret}}")})
+    store.save_flow(shared)
+    tok = set_tenant("tenant-a")
+    try:
+        store.save_flow(tenant)
+        run_id = aq.enqueue_flow_run("same", {"secret": "TENANT_DATA"}, owner="alice")
+        jobs = [j for j in aq.queue().list(status="pending") if j.kind == aq.FLOW_RUN_KIND]
+        assert jobs[-1].payload["tenant"] == "tenant-a"
+    finally:
+        reset_tenant(tok)
+
+    aq._handle_flow_run(jobs[-1])   # drained OUTSIDE tenant-a -- must restore it itself
+
+    assert observed == ["tenant TENANT_DATA"]
+    assert store.load_run(run_id) is None   # not visible from the shared namespace
+    tok = set_tenant("tenant-a")
+    try:
+        run = store.load_run(run_id)
+        assert run is not None
+        assert run.status == "completed"
+        assert run.data["secret"] == "TENANT_DATA"
+    finally:
+        reset_tenant(tok)

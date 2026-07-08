@@ -161,6 +161,32 @@ def _world():
     return _w()
 
 
+def _job_tenant_payload() -> dict:
+    """The active tenant, captured for a queued job's payload -- so a worker
+    (which has no request/trigger context of its own) can restore it before
+    loading/executing the flow. Empty (omitted) for single-tenant deployments."""
+    from maverick.paths import current_tenant_id
+    tenant = current_tenant_id()
+    return {"tenant": tenant} if tenant else {}
+
+
+def _run_in_payload_tenant(payload: dict, fn) -> None:
+    """Run ``fn`` inside the tenant captured on the job payload (if any), so a
+    queued flow_run/flow_resume job loads/executes/persists under the SAME
+    tenant namespace its creating trigger ran in -- not whatever tenant the
+    worker thread happens to be scoped to."""
+    tenant = payload.get("tenant")
+    if not tenant:
+        fn()
+        return
+    from maverick.paths import reset_tenant, set_tenant
+    token = set_tenant(str(tenant))
+    try:
+        fn()
+    finally:
+        reset_tenant(token)
+
+
 def enqueue_flow_run(flow_id: str, data: dict, owner: str = "", idem_key: str = "",
                      origin: str = "manual") -> str:
     """Start a durable flow run (a pre-assigned, pollable run id + a flow_run job).
@@ -179,8 +205,10 @@ def enqueue_flow_run(flow_id: str, data: dict, owner: str = "", idem_key: str = 
     flow_store.save_run(flow_store.FlowRun(
         run_id=run_id, flow_id=flow_id, status="queued", owner=owner,
         data=dict(data), input_data=dict(data), idem_key=idem_key, origin=origin))
-    queue().enqueue(FLOW_RUN_KIND, {"flow_id": flow_id, "run_id": run_id,
-                                    "data": data, "owner": owner, "origin": origin})
+    payload = {"flow_id": flow_id, "run_id": run_id, "data": data, "owner": owner,
+              "origin": origin}
+    payload.update(_job_tenant_payload())
+    queue().enqueue(FLOW_RUN_KIND, payload)
     return run_id
 
 
@@ -405,46 +433,48 @@ def _handle_flow_run(job=None) -> None:
     if not flow_id:
         return
     try:
-        from maverick.flow import execution, store
-        flow = store.load_flow(flow_id)
-        if flow is None:
-            log.warning("flow_run: no such flow %s", flow_id)
-            return
-        owner = str(payload.get("owner") or "")
-        dry_run = bool(payload.get("dry_run"))
-        run_id = str(payload.get("run_id") or "")
-        # Per-flow concurrency cap: a singleton/limited flow (e.g. "drain the queue"
-        # / "sync record X") must not run overlapping instances -- that double-fires
-        # side effects and races the shared world. Under a per-flow lock, count
-        # in-flight runs; if at the cap, mark this run "running" only when a slot is
-        # free (so a concurrent sibling sees it), else defer the job a bit and let
-        # the running one finish. A dry run and a resume are never gated.
-        if flow.max_concurrent and not dry_run and run_id and not payload.get("_resume"):
-            with _flow_slot_guard(flow_id) as held:
-                if held:
-                    if _active_run_count(flow_id, run_id) >= flow.max_concurrent:
-                        if _defer_for_slot(payload):
+        def _run() -> None:
+            from maverick.flow import execution, store
+            flow = store.load_flow(flow_id)
+            if flow is None:
+                log.warning("flow_run: no such flow %s", flow_id)
+                return
+            owner = str(payload.get("owner") or "")
+            dry_run = bool(payload.get("dry_run"))
+            run_id = str(payload.get("run_id") or "")
+            # Per-flow concurrency cap: a singleton/limited flow (e.g. "drain the queue"
+            # / "sync record X") must not run overlapping instances -- that double-fires
+            # side effects and races the shared world. Under a per-flow lock, count
+            # in-flight runs; if at the cap, mark this run "running" only when a slot is
+            # free (so a concurrent sibling sees it), else defer the job a bit and let
+            # the running one finish. A dry run and a resume are never gated.
+            if flow.max_concurrent and not dry_run and run_id and not payload.get("_resume"):
+                with _flow_slot_guard(flow_id) as held:
+                    if held:
+                        if _active_run_count(flow_id, run_id) >= flow.max_concurrent:
+                            if _defer_for_slot(payload):
+                                return
+                            log.warning("flow_run: %s at concurrency cap, defer budget spent"
+                                        " -- skipping run %s", flow_id, run_id)
+                            _skip_run_at_cap(run_id)
                             return
-                        log.warning("flow_run: %s at concurrency cap, defer budget spent"
-                                    " -- skipping run %s", flow_id, run_id)
+                        _claim_run_slot(run_id)   # flip queued -> running while holding the lock
+                    elif not _defer_for_slot(payload):   # another worker is deciding; retry later
                         _skip_run_at_cap(run_id)
                         return
-                    _claim_run_slot(run_id)   # flip queued -> running while holding the lock
-                elif not _defer_for_slot(payload):   # another worker is deciding; retry later
-                    _skip_run_at_cap(run_id)
-                    return
-                else:
-                    return
-        # A dry run exercises the graph with mock executors and records no grounded
-        # outcome -- so "Test" can't hit production or skew the learning signal.
-        agent_runner, action_runner = (execution.sandbox_runners() if dry_run
-                                       else _flow_runners(owner))
-        run = execution.execute(flow, agent_runner=agent_runner, action_runner=action_runner,
-                                owner=owner, data=dict(payload.get("data") or {}),
-                                run_id=payload.get("run_id"), record_outcomes=not dry_run,
-                                origin=str(payload.get("origin") or "manual"))
-        if not dry_run:
-            _notify_flow(flow, run)
+                    else:
+                        return
+            # A dry run exercises the graph with mock executors and records no grounded
+            # outcome -- so "Test" can't hit production or skew the learning signal.
+            agent_runner, action_runner = (execution.sandbox_runners() if dry_run
+                                           else _flow_runners(owner))
+            run = execution.execute(flow, agent_runner=agent_runner, action_runner=action_runner,
+                                    owner=owner, data=dict(payload.get("data") or {}),
+                                    run_id=payload.get("run_id"), record_outcomes=not dry_run,
+                                    origin=str(payload.get("origin") or "manual"))
+            if not dry_run:
+                _notify_flow(flow, run)
+        _run_in_payload_tenant(payload, _run)
     except Exception:  # pragma: no cover -- fail-open
         log.exception("flow run failed for %s", flow_id)
 
@@ -458,20 +488,23 @@ def _handle_flow_resume(job=None) -> None:
     flow_id = str(payload.get("flow_id") or "")
     if not (run_id and flow_id):
         return
+    from maverick.flow import execution
     try:
-        from maverick.flow import execution, store
-        flow = store.load_flow(flow_id)
-        if flow is None:
-            return
-        owner = str(payload.get("owner") or "")
-        agent_runner, action_runner = _flow_runners(owner)
-        run = execution.execute(flow, agent_runner=agent_runner, action_runner=action_runner,
-                                owner=owner, resume_run_id=run_id,
-                                decision=str(payload.get("decision") or "approved"),
-                                expired=bool(payload.get("expired")),
-                                from_failure=bool(payload.get("from_failure")),
-                                inputs=dict(payload.get("inputs") or {}))
-        _notify_flow(flow, run)
+        def _resume() -> None:
+            from maverick.flow import store
+            flow = store.load_flow(flow_id)
+            if flow is None:
+                return
+            owner = str(payload.get("owner") or "")
+            agent_runner, action_runner = _flow_runners(owner)
+            run = execution.execute(flow, agent_runner=agent_runner, action_runner=action_runner,
+                                    owner=owner, resume_run_id=run_id,
+                                    decision=str(payload.get("decision") or "approved"),
+                                    expired=bool(payload.get("expired")),
+                                    from_failure=bool(payload.get("from_failure")),
+                                    inputs=dict(payload.get("inputs") or {}))
+            _notify_flow(flow, run)
+        _run_in_payload_tenant(payload, _resume)
     except execution.FlowNotResumable:
         return  # already resumed/finished -- benign
     except Exception:  # pragma: no cover -- fail-open
@@ -493,8 +526,10 @@ def _handle_flow_sweep(_job=None) -> None:
             if not (run.resume_at and run.resume_at <= now):
                 continue
             if run.status == runner.STATUS_PAUSED_DELAY:
-                queue().enqueue(FLOW_RESUME_KIND, {
-                    "flow_id": run.flow_id, "run_id": run.run_id, "owner": run.owner})
+                sweep_payload = {"flow_id": run.flow_id, "run_id": run.run_id,
+                                 "owner": run.owner}
+                sweep_payload.update(_job_tenant_payload())
+                queue().enqueue(FLOW_RESUME_KIND, sweep_payload)
             elif run.status == runner.STATUS_PAUSED_APPROVAL:
                 # An approval whose node set an expiry resolves once it lapses.
                 # The OUT-OF-BAND `expired` flag (not a decision string, so no
@@ -502,9 +537,10 @@ def _handle_flow_sweep(_job=None) -> None:
                 # the runner route to the node's `on_expire` escalation lane if
                 # set; without one it fails closed (rejected) -- never a silent
                 # approval.
-                queue().enqueue(FLOW_RESUME_KIND, {
-                    "flow_id": run.flow_id, "run_id": run.run_id, "owner": run.owner,
-                    "expired": True})
+                sweep_payload = {"flow_id": run.flow_id, "run_id": run.run_id,
+                                 "owner": run.owner, "expired": True}
+                sweep_payload.update(_job_tenant_payload())
+                queue().enqueue(FLOW_RESUME_KIND, sweep_payload)
             # paused_event runs are NEVER swept -- only their event resumes them.
     except Exception:  # pragma: no cover -- fail-open
         log.exception("flow delay sweep failed")
