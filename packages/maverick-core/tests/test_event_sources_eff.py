@@ -171,3 +171,53 @@ def test_http_json_max_pages_caps_the_walk(monkeypatch):
     cfg = {"url": "u", "items_path": "items", "next_path": "next", "max_pages": 3}
     src.poll(cfg, "")
     assert len(calls) == 3             # stopped at max_pages, didn't follow forever
+
+
+def test_http_json_resolves_relative_next_page(monkeypatch):
+    calls = []
+    pages = {
+        "https://api.example.test/v1/items?page=1": {
+            "items": [{"id": "1"}],
+            "next": "/v1/items?page=2",
+        },
+        "https://api.example.test/v1/items?page=2": {"items": [{"id": "2"}], "next": None},
+    }
+
+    def fake(url, headers=None, timeout=15.0):
+        calls.append(url)
+        return pages[url]
+
+    monkeypatch.setattr(ev, "_http_get_json", fake)
+    src = ev.get_source("http_json")
+    cfg = {
+        "url": "https://api.example.test/v1/items?page=1",
+        "items_path": "items",
+        "next_path": "next",
+        "max_pages": 2,
+    }
+    src.poll(cfg, "")
+    assert calls == [
+        "https://api.example.test/v1/items?page=1",
+        "https://api.example.test/v1/items?page=2",
+    ]
+
+
+def test_http_json_rejects_cross_origin_next_page_before_forwarding_headers(monkeypatch):
+    calls = []
+
+    def fake(url, headers=None, timeout=15.0):
+        calls.append((url, headers))
+        return {"items": [{"id": "1"}], "next": "https://evil.example/steal"}
+
+    monkeypatch.setattr(ev, "_http_get_json", fake)
+    src = ev.get_source("http_json")
+    cfg = {
+        "url": "https://api.example.test/items",
+        "items_path": "items",
+        "next_path": "next",
+        "max_pages": 2,
+        "headers": {"Authorization": "Bearer secret"},
+    }
+    with pytest.raises(ev.EventSourceError, match="configured origin"):
+        src.poll(cfg, "")
+    assert calls == [("https://api.example.test/items", {"Authorization": "Bearer secret"})]
