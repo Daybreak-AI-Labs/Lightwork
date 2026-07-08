@@ -267,6 +267,8 @@ def set_flow_autonomy(*, auto_evolve: bool | None = None,
             flows["auto_evolve"] = bool(auto_evolve)
         if auto_apply is not None:
             flows["auto_apply"] = bool(auto_apply)
+        if not bool(flows.get("auto_evolve", False)):
+            flows["auto_apply"] = False
         _write(data)
 
 
