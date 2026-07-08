@@ -156,17 +156,11 @@ def tenant_by_user_enabled() -> bool:
             base = bool(cfg.get("by_user"))
         except Exception:
             return False
-    if not base:
-        return False
-    # Multi-tenant mode is a paid (Platinum) capability. Fail-open: only bites
-    # when license enforcement is on and the license lacks it, so a single-tenant
-    # or dev box is unchanged (require() returns True when not enforcing).
-    try:
-        from .entitlements import require
-
-        return require("multi_tenant")
-    except Exception:  # pragma: no cover - entitlements missing => keep base
-        return base
+    # This is an operator-selected isolation control, not a paid-feature gate.
+    # If an operator enables per-user tenancy, never silently degrade to the
+    # shared world because a license is missing/expired/under-tiered. Named
+    # tenant provisioning remains entitlement-gated in maverick.tenant.registry.
+    return base
 
 
 @contextlib.contextmanager
