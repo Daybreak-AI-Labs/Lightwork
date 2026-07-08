@@ -540,3 +540,50 @@ def test_proposals_endpoint(monkeypatch, tmp_path):
         node_outcomes.record("fp", "a", "agent", 1.0)   # reliable agent
     props = _client().get("/api/v1/flows/fp/proposals").json()["proposals"]
     assert props and props[0]["to_kind"] == "action"
+
+
+def test_flow_crud_is_owner_scoped_for_authenticated_non_admin(monkeypatch, tmp_path):
+    _isolate(monkeypatch, tmp_path)
+    from maverick_dashboard import api as api_mod
+
+    current = {"principal": "user:alice"}
+    monkeypatch.setattr(api_mod, "caller_principal", lambda request: current["principal"])
+    monkeypatch.setattr(api_mod, "is_dashboard_admin", lambda principal: False)
+    monkeypatch.setattr(api_mod, "require_permission", lambda request, permission: None)
+
+    c = _client()
+    assert c.post("/api/v1/flows", json={"flow": _FLOW}).status_code == 201
+
+    current["principal"] = "user:bob"
+    assert c.get("/api/v1/flows").json()["flows"] == []
+    assert c.get("/api/v1/flows/demo").status_code == 404
+    assert c.post("/api/v1/flows/demo/run", json={"data": {}}).status_code == 404
+    assert c.delete("/api/v1/flows/demo").status_code == 404
+
+    updated = {**_FLOW, "name": "Bob overwrite", "schedule": "* * * * *"}
+    assert c.post("/api/v1/flows", json={"flow": updated}).status_code == 404
+
+    current["principal"] = "user:alice"
+    saved = c.get("/api/v1/flows/demo").json()
+    assert saved["name"] == "Demo"
+    assert saved["owner"] == "user:alice"
+
+
+def test_flow_crud_admin_keeps_unscoped_access(monkeypatch, tmp_path):
+    _isolate(monkeypatch, tmp_path)
+    from maverick_dashboard import api as api_mod
+
+    current = {"principal": "user:alice", "admin": False}
+    monkeypatch.setattr(api_mod, "caller_principal", lambda request: current["principal"])
+    monkeypatch.setattr(api_mod, "is_dashboard_admin", lambda principal: current["admin"])
+    monkeypatch.setattr(api_mod, "require_permission", lambda request, permission: None)
+
+    c = _client()
+    assert c.post("/api/v1/flows", json={"flow": _FLOW}).status_code == 201
+
+    current.update(principal="user:admin", admin=True)
+    updated = {**_FLOW, "name": "Admin edit", "schedule": "* * * * *"}
+    assert c.post("/api/v1/flows", json={"flow": updated}).status_code == 201
+    saved = c.get("/api/v1/flows/demo").json()
+    assert saved["name"] == "Admin edit"
+    assert saved["owner"] == "user:alice"

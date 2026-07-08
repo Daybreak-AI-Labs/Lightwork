@@ -914,6 +914,24 @@ def _require_flows() -> None:
         )
 
 
+def _can_access_flow(request: Request, flow) -> bool:
+    """Whether the caller may read or mutate a saved flow definition.
+
+    Auth-off and dashboard admins keep the historical unscoped behavior.
+    Authenticated non-admins may only access flows they own; legacy ownerless
+    flows remain reachable only from the auth-off/admin paths.
+    """
+    principal = caller_principal(request)
+    if principal is None or is_dashboard_admin(principal):
+        return True
+    return getattr(flow, "owner", "") == principal
+
+
+def _assert_flow_access(request: Request, flow) -> None:
+    if not _can_access_flow(request, flow):
+        raise HTTPException(status_code=404, detail="no such flow")
+
+
 @router.get("/flows")
 async def list_flows_endpoint(request: Request) -> dict:
     """The saved flow definitions (a summary per flow)."""
@@ -925,6 +943,7 @@ async def list_flows_endpoint(request: Request) -> dict:
          "single_agent": f.is_single_agent(), "schedule": f.schedule,
          "inputs": f.inputs}
         for f in store.list_flows()
+        if _can_access_flow(request, f)
     ]}
 
 
@@ -947,6 +966,8 @@ async def save_flow_endpoint(request: Request, payload: FlowSaveIn) -> dict:
     # re-save can't silently transfer ownership. Scheduled (cron) runs attribute to
     # this owner (they have no request principal of their own).
     prior = store.load_flow(flow.id)
+    if prior is not None:
+        _assert_flow_access(request, prior)
     flow.owner = prior.owner if (prior and prior.owner) else (caller_principal(request) or "")
     store.save_flow(flow)
     return {"id": flow.id, "nodes": len(flow.nodes)}
@@ -1364,6 +1385,7 @@ async def get_flow_endpoint(request: Request, flow_id: str) -> dict:
     f = store.load_flow(flow_id)
     if f is None:
         raise HTTPException(status_code=404, detail="no such flow")
+    _assert_flow_access(request, f)
     return f.to_dict()
 
 
@@ -1372,6 +1394,10 @@ async def delete_flow_endpoint(request: Request, flow_id: str) -> None:
     require_permission(request, "operate")
     _require_flows()
     from maverick.flow import store
+    f = store.load_flow(flow_id)
+    if f is None:
+        raise HTTPException(status_code=404, detail="no such flow")
+    _assert_flow_access(request, f)
     store.delete_flow(flow_id)
 
 
@@ -1386,6 +1412,7 @@ async def run_flow_endpoint(request: Request, flow_id: str, payload: FlowRunIn) 
     flow = store.load_flow(flow_id)
     if flow is None:
         raise HTTPException(status_code=404, detail="no such flow")
+    _assert_flow_access(request, flow)
     owner = _supervisor(request)
     # Validate/coerce the payload against the flow's declared inputs (a no-op when
     # the flow declares none): reject a missing required input or a bad number/date
