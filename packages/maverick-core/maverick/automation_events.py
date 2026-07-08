@@ -22,6 +22,7 @@ from __future__ import annotations
 from collections.abc import Callable
 from dataclasses import dataclass, field
 from typing import Any, Protocol, runtime_checkable
+from urllib.parse import urljoin, urlparse
 
 
 class EventSourceError(RuntimeError):
@@ -170,6 +171,24 @@ def _base_config(config: dict, source: str) -> tuple[str, str, dict]:
     return url, id_field, headers
 
 
+def _same_origin_url(base_url: str, next_url: str) -> str:
+    """Resolve a pagination URL and reject cross-origin redirects.
+
+    Pagination links come from remote JSON bodies, so they are untrusted. Keep
+    credentials scoped to the configured endpoint origin by allowing relative
+    links and absolute same-origin links only.
+    """
+    candidate = str(next_url or "").strip()
+    if not candidate:
+        return ""
+    resolved = urljoin(base_url, candidate)
+    base = urlparse(base_url)
+    page = urlparse(resolved)
+    if (base.scheme, base.hostname, base.port) != (page.scheme, page.hostname, page.port):
+        raise EventSourceError("pagination next URL must stay on the configured origin")
+    return resolved
+
+
 def _http_get(url: str, headers: dict | None = None, timeout: float = 15.0) -> Any:
     """GET ``url`` through the SSRF guard, returning the checked response (an
     event-source URL is operator config, but a loopback/metadata host would make
@@ -237,7 +256,7 @@ class HttpJsonSource:
             items.extend(it for it in page_items if isinstance(it, dict))
             pages += 1
             nxt = _dig(body, next_path) if next_path else None
-            page_url = str(nxt) if (nxt and next_path) else None
+            page_url = _same_origin_url(url, str(nxt)) if (nxt and next_path) else None
         return diff_new_items(items, cursor, id_field, newest_first=newest_first)
 
 
