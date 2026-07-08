@@ -1003,11 +1003,13 @@ async def test_connection_endpoint(request: Request, name: str) -> dict:
         try:
             from maverick.tools import _ssrf
             from maverick.tools.enterprise_connectors import auth_headers_for
-            # Speak the connector's real auth dialect (basic / custom scheme /
-            # extra headers), not a hardcoded Bearer -- else a working
-            # basic-auth connection "fails" its test.
-            headers = auth_headers_for(str(rec.get("connector") or ""),
-                                       str(rec.get("token") or ""))
+            # Speak the connector's saved-token auth dialect (basic / custom
+            # scheme), but do not include operator environment-backed auxiliary
+            # headers: saved connection tests use a caller-controlled base_url.
+            headers = auth_headers_for(
+                str(rec.get("connector") or ""), str(rec.get("token") or ""),
+                include_extra_headers_env=False,
+            )
             # This request carries the sealed token, so it MUST go through the
             # governed SSRF-safe path: safe_get pins the host to a validated
             # PUBLIC ip (blocks 169.254/127.0.0.1/private/link-local) and forces
