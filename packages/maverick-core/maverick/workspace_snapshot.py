@@ -154,15 +154,22 @@ def _resolve_archive(store: Path, snap_id: str) -> Path:
 
 def _is_within(base: Path, target: Path) -> bool:
     # Lexical containment: normalize away any ``..`` in the archive member name
-    # WITHOUT resolving symlinks. ``target.resolve()`` followed a pre-existing
-    # symlink already living in ``dest`` (the common rollback-into-the-same-
-    # workspace case) out to its target, so an outward-pointing symlink tripped
-    # a false "escapes destination" and aborted the restore partway. The actual
-    # threat here is a ``../`` traversal in the member name, which normpath
-    # collapses on its own.
+    # WITHOUT resolving symlinks. Link archive members are skipped before this
+    # check, so an outward symlink already present in ``dest`` does not abort an
+    # in-place rollback merely because the skipped link itself points outside.
     base_s = os.path.normpath(str(base))
     target_s = os.path.normpath(str(target))
     return target_s == base_s or target_s.startswith(base_s + os.sep)
+
+
+def _resolved_within(base: Path, target: Path) -> bool:
+    base_r = base.resolve(strict=False)
+    target_r = target.resolve(strict=False)
+    try:
+        target_r.relative_to(base_r)
+    except ValueError:
+        return False
+    return True
 
 
 def restore_snapshot(store: Path, snap_id: str, dest: Path) -> dict:
@@ -183,14 +190,25 @@ def restore_snapshot(store: Path, snap_id: str, dest: Path) -> dict:
                 # whole in-place rollback and leave later members unrestored.
                 skipped_links += 1
                 continue
+            if not (member.isfile() or member.isdir()):
+                raise ValueError(
+                    f"unsafe archive member type for restore: {member.name!r}")
             out_path = dest / member.name
             if not _is_within(dest, out_path):
                 raise ValueError(
                     f"unsafe archive member escapes destination: {member.name!r}")
+            if not _resolved_within(dest, out_path):
+                raise ValueError(
+                    f"unsafe archive member follows a link outside destination: "
+                    f"{member.name!r}")
+            if member.isfile() and not _resolved_within(dest, out_path.parent):
+                raise ValueError(
+                    f"unsafe archive member parent escapes destination: "
+                    f"{member.name!r}")
             # ``filter="data"`` is the safe extraction policy (rejects absolute
             # paths / traversal / device files) and the future default; the
-            # kwarg only exists on 3.12+, so fall back on 3.10/3.11 where our
-            # manual _is_within check above already enforces confinement.
+            # kwarg only exists on 3.12+.  On 3.10/3.11 the resolved checks
+            # above also prevent writes through pre-existing symlink components.
             try:
                 tar.extract(member, path=dest, filter="data")
             except TypeError:

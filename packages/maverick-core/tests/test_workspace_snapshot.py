@@ -144,6 +144,33 @@ def test_restore_still_blocks_traversal_through_symlinked_subdir(tmp_path):
     assert not (tmp_path / "escape.txt").exists()
 
 
+def test_restore_blocks_legacy_extract_through_preexisting_symlink(tmp_path, monkeypatch):
+    src = tmp_path / "src"
+    (src / "cache").mkdir(parents=True)
+    (src / "cache" / "pwn.txt").write_text("owned", encoding="utf-8")
+    store = tmp_path / "snaps"
+    man = create_snapshot(src, store, label="safe")
+
+    dest = tmp_path / "dest"
+    outside = tmp_path / "outside"
+    dest.mkdir()
+    outside.mkdir()
+    (dest / "cache").symlink_to(outside, target_is_directory=True)
+
+    real_extract = tarfile.TarFile.extract
+
+    def legacy_extract(self, member, path="", set_attrs=True, *, numeric_owner=False,
+                       filter=None):
+        if filter is not None:
+            raise TypeError("legacy tarfile has no filter kwarg")
+        return real_extract(
+            self, member, path, set_attrs=set_attrs, numeric_owner=numeric_owner)
+
+    monkeypatch.setattr(tarfile.TarFile, "extract", legacy_extract)
+    with pytest.raises(ValueError, match="follows a link outside destination"):
+        restore_snapshot(store, man["id"], dest)
+    assert not (outside / "pwn.txt").exists()
+
 def test_tool_snapshot_confined_to_workspace(tmp_path):
     # HOME is isolated by the autouse conftest, so the store lands under tmp.
     work = tmp_path / "work"
