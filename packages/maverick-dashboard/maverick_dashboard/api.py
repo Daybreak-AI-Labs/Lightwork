@@ -1428,9 +1428,11 @@ async def resume_flow_run_endpoint(request: Request, run_id: str,
         raise HTTPException(status_code=409,
                             detail=f"run is not paused (status {run.status})")
     from maverick_dashboard import automation_queue as aq
-    aq.queue().enqueue(aq.FLOW_RESUME_KIND, {
+    resume_payload = {
         "flow_id": run.flow_id, "run_id": run_id, "decision": payload.decision,
-        "inputs": dict(payload.inputs or {}), "owner": run.owner})
+        "inputs": dict(payload.inputs or {}), "owner": run.owner}
+    resume_payload.update(aq._job_tenant_payload())
+    aq.queue().enqueue(aq.FLOW_RESUME_KIND, resume_payload)
     return {"run_id": run_id, "status": "resuming", "decision": payload.decision}
 
 
@@ -1467,9 +1469,10 @@ async def retry_flow_run_endpoint(request: Request, run_id: str,
                 status_code=409,
                 detail="only a failed run with a recorded failure node can be "
                        "resumed from its failure; use a plain retry instead")
-        aq.queue().enqueue(aq.FLOW_RESUME_KIND, {
-            "flow_id": run.flow_id, "run_id": run_id, "owner": run.owner,
-            "from_failure": True})
+        retry_payload = {"flow_id": run.flow_id, "run_id": run_id, "owner": run.owner,
+                        "from_failure": True}
+        retry_payload.update(aq._job_tenant_payload())
+        aq.queue().enqueue(aq.FLOW_RESUME_KIND, retry_payload)
         return {"run_id": run_id, "status": "resuming", "from_node": run.cursor}
     new_id = aq.enqueue_flow_run(run.flow_id, dict(run.input_data or {}), run.owner,
                                  origin=f"retry:{run_id}")
