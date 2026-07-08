@@ -282,7 +282,8 @@ def _approval_body(name: str, run) -> str:
     base = _public_base_url()
     if base:
         from maverick.flow.approvals import approval_links
-        links = approval_links(base, run.run_id)
+        links = approval_links(base, run.run_id, cursor=run.cursor,
+                               prompt=run.prompt, updated=run.updated)
         if links:
             return (f"“{name}” needs your approval: {ask}\n"
                     f"✅ Approve: {links['approve']}\n"

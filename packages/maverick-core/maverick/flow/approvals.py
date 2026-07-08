@@ -2,7 +2,8 @@
 channel -- Slack, Teams, email, SMS -- to resume a flow paused on an approval
 node, without logging into the dashboard.
 
-A link carries a stateless HMAC token over ``(run_id, decision, expiry)``. The
+A link carries a stateless HMAC token over the run, decision, expiry, and
+the exact approval pause (cursor/prompt/run timestamp). The
 dashboard endpoint verifies the token and resumes the run, so there is no
 per-channel signing scheme to implement: any surface that renders a URL gets a
 working button. The token reuses the control-plane webhook secret
@@ -31,23 +32,26 @@ def _sign(material: bytes, secret: str) -> str:
     return hmac.new(secret.encode("utf-8"), material, hashlib.sha256).hexdigest()
 
 
-def mint_token(run_id: str, decision: str, *, ttl: int = _DEFAULT_TTL,
-               now: float | None = None) -> str | None:
-    """A signed, self-expiring token authorising ONE decision on ONE run.
-    ``None`` when no secret is configured or the inputs are invalid (fail closed)."""
+def mint_token(run_id: str, decision: str, *, cursor: str | None = None,
+               prompt: str = "", updated: float | None = None,
+               ttl: int = _DEFAULT_TTL, now: float | None = None) -> str | None:
+    """A signed, self-expiring token authorising ONE decision on ONE approval
+    pause. ``None`` when no secret is configured or inputs are invalid (fail closed)."""
     secret = _secret()
-    if not secret or decision not in _DECISIONS or not run_id:
+    if (not secret or decision not in _DECISIONS or not run_id or not cursor
+            or updated is None):
         return None
     exp = int((now if now is not None else time.time()) + ttl)
-    raw = json.dumps({"r": str(run_id), "d": decision, "e": exp},
+    raw = json.dumps({"r": str(run_id), "d": decision, "e": exp,
+                      "c": str(cursor), "p": str(prompt), "u": float(updated)},
                      separators=(",", ":"), sort_keys=True).encode("utf-8")
     body = base64.urlsafe_b64encode(raw).decode("ascii").rstrip("=")
     return f"{body}.{_sign(body.encode('ascii'), secret)}"
 
 
 def verify_token(token: str, *, now: float | None = None) -> dict | None:
-    """Return ``{"run_id", "decision"}`` for a valid, unexpired, correctly-signed
-    token; ``None`` otherwise (no secret / bad format / bad signature / expired)."""
+    """Return the approval claim for a valid, unexpired, correctly-signed token;
+    ``None`` otherwise (no secret / bad format / bad signature / expired)."""
     secret = _secret()
     if not secret or not token or "." not in token:
         return None
@@ -60,20 +64,27 @@ def verify_token(token: str, *, now: float | None = None) -> dict | None:
     except (ValueError, TypeError):
         return None
     run_id, decision, exp = payload.get("r"), payload.get("d"), payload.get("e")
-    if decision not in _DECISIONS or not run_id or not isinstance(exp, (int, float)):
+    cursor, updated = payload.get("c"), payload.get("u")
+    if (decision not in _DECISIONS or not run_id or not cursor
+            or not isinstance(exp, (int, float)) or not isinstance(updated, (int, float))):
         return None
     if (now if now is not None else time.time()) > exp:
         return None
-    return {"run_id": str(run_id), "decision": str(decision)}
+    return {"run_id": str(run_id), "decision": str(decision),
+            "cursor": str(cursor), "prompt": str(payload.get("p", "")),
+            "updated": float(updated)}
 
 
-def approval_links(base_url: str, run_id: str, *, ttl: int = _DEFAULT_TTL,
-                   now: float | None = None) -> dict | None:
+def approval_links(base_url: str, run_id: str, *, cursor: str | None = None,
+                   prompt: str = "", updated: float | None = None,
+                   ttl: int = _DEFAULT_TTL, now: float | None = None) -> dict | None:
     """The approve/reject URLs for a run (pointing at ``/flow/approve``), or
     ``None`` when unsigned (no secret) so the caller can fall back to a plain
     notification."""
-    approve = mint_token(run_id, "approved", ttl=ttl, now=now)
-    reject = mint_token(run_id, "rejected", ttl=ttl, now=now)
+    approve = mint_token(run_id, "approved", cursor=cursor, prompt=prompt,
+                         updated=updated, ttl=ttl, now=now)
+    reject = mint_token(run_id, "rejected", cursor=cursor, prompt=prompt,
+                        updated=updated, ttl=ttl, now=now)
     if not (approve and reject):
         return None
     base = base_url.rstrip("/")
