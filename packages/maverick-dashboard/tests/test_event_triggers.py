@@ -240,6 +240,37 @@ def test_tick_polls_due_triggers_and_enqueues_durable_run_goal(monkeypatch, tmp_
     assert len(jobs) == 1 and jobs[0].kind == "run_goal"
 
 
+def test_tick_runs_owned_trigger_with_owner_execution_identity(monkeypatch, tmp_path):
+    # A background-tick fire for an owned trigger must carry the owner's
+    # user_id/channel on the run_goal job, so the run is attributed to (and
+    # quota-scoped to) the trigger owner instead of falling back to
+    # `user:local`. An unowned trigger keeps the legacy bare payload.
+    _isolate(monkeypatch, tmp_path)
+    import maverick.automation_events as ev
+    from maverick_dashboard import automation_queue as aq
+    from maverick_dashboard import event_triggers_store as s
+    _reset_aq(monkeypatch, aq)
+    monkeypatch.setattr(aq, "_due", lambda name, interval: True)
+    box = {"x": {"items": [{"id": "1", "title": "a"}]},
+           "y": {"items": [{"id": "1", "title": "a"}]}}
+    monkeypatch.setattr(ev, "_http_get_json",
+                        lambda url, headers=None, timeout=15.0: box["x" if "x" in url else "y"])
+    s.set_trigger("owned", "triage", "http_json", owner="user:alice",
+                  config={"url": "http://x", "items_path": "items", "id_field": "id"})
+    s.set_trigger("unowned", "triage", "http_json",
+                  config={"url": "http://y", "items_path": "items", "id_field": "id"})
+    aq._poll_due_triggers()                                   # baseline: nothing fires yet
+    box["x"] = {"items": [{"id": "2", "title": "b"}, {"id": "1", "title": "a"}]}
+    box["y"] = {"items": [{"id": "2", "title": "b"}, {"id": "1", "title": "a"}]}
+    aq._poll_due_triggers()                                   # new item on each -> fires
+    jobs = {j.payload["goal_id"]: j.payload for j in aq.queue().list(status="pending")}
+    payloads = list(jobs.values())
+    owned = [p for p in payloads if p.get("user_id") == "alice"]
+    unowned = [p for p in payloads if "user_id" not in p]
+    assert len(owned) == 1 and owned[0]["channel"] == "api"
+    assert len(unowned) == 1
+
+
 def test_tick_respects_per_trigger_interval(monkeypatch, tmp_path):
     # A trigger polled within its interval is skipped on the next tick.
     _isolate(monkeypatch, tmp_path)

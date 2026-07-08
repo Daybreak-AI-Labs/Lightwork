@@ -184,6 +184,15 @@ def enqueue_flow_run(flow_id: str, data: dict, owner: str = "", idem_key: str = 
     return run_id
 
 
+def _user_id_from_owner(owner: str) -> str:
+    """Derive a runner ``user_id`` from a trigger owner principal (``user:<id>``),
+    mirroring ``execution_user_id_from_request`` for the request path. Empty for
+    unowned triggers or non-``user:`` owners (e.g. a future ``tenant:`` scope)."""
+    if owner.startswith("user:") and len(owner) > len("user:"):
+        return owner[len("user:"):]
+    return ""
+
+
 def _poll_due_triggers() -> None:
     from maverick_dashboard import event_poll, event_triggers_store
     due = [t for t in event_triggers_store.list_triggers() if _due(t["name"], _interval(t))]
@@ -191,10 +200,29 @@ def _poll_due_triggers() -> None:
         return
     q = queue()
 
-    def _fire(goal_id: int) -> None:
-        q.enqueue("run_goal", {"goal_id": int(goal_id)})   # durable: retry + dead-letter
+    # Group by owner and poll each group separately so the durable run_goal job
+    # carries the trigger owner's execution identity -- otherwise every fired
+    # goal runs under the fallback `user:local` principal, bypassing per-user
+    # concurrency/quota attribution. Unowned triggers (owner == "") keep the
+    # legacy behavior: no user_id, principal="".
+    groups: dict[str, list[dict]] = {}
+    for t in due:
+        groups.setdefault(t.get("owner") or "", []).append(t)
 
-    results = event_poll.poll_and_fire(_world(), due, fire=_fire, fire_flow=enqueue_flow_run)
+    results: list[dict] = []
+    for owner, triggers in groups.items():
+        user_id = _user_id_from_owner(owner)
+
+        def _fire(goal_id: int, user_id: str = user_id) -> None:
+            payload: dict = {"goal_id": int(goal_id)}
+            if user_id:
+                payload["user_id"] = user_id
+                payload["channel"] = "api"
+            q.enqueue("run_goal", payload)   # durable: retry + dead-letter
+
+        results.extend(event_poll.poll_and_fire(
+            _world(), triggers, principal=owner, fire=_fire, fire_flow=enqueue_flow_run))
+
     # Advance the due-marker only for triggers that actually polled; a trigger
     # whose source errored is left un-marked so it retries on the next tick
     # rather than going dark for a full interval.
