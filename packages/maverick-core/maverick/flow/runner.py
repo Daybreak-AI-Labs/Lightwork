@@ -65,14 +65,19 @@ _COND = re.compile(r"^\s*(\S+)\s*(==|!=|>=|<=|>|<|contains)\s*(.+?)\s*$")
 _FN_CALL = re.compile(r"^([a-zA-Z_]\w*)\s*\((.*)\)$")
 
 
-def render(text: str, data: dict) -> str:
+def render(text: str, data: dict, *, allow_secrets: bool = False) -> str:
     """Substitute ``{{expr}}`` from ``data``. ``expr`` is a dotted key
     (``{{a.b}}``) or a transform call over keys/literals (``{{upper(name)}}``,
     ``{{default(x, "n/a")}}``, ``{{concat(first, " ", last)}}``). An unfilled bare
     key stays literal (unchanged); a function always resolves (missing args are
-    empty)."""
+    empty).
+
+    Secret resolution is opt-in and reserved for transient action parameters.
+    Other render sites feed persisted flow data, prompts, or scoped inputs, so
+    ``{{secret(...)}}`` must remain unavailable there.
+    """
     def _sub(m):
-        v = _eval_expr(m.group(1), data)
+        v = _eval_expr(m.group(1), data, allow_secrets=allow_secrets)
         return m.group(0) if v is None else _as_text(v)
     return _VAR.sub(_sub, str(text))
 
@@ -197,7 +202,6 @@ _FUNCS: dict[str, Callable[[list], Any]] = {
     "replace": lambda a: (str(a[0]).replace(str(a[1]), str(a[2])) if len(a) >= 3 else (str(a[0]) if a else "")),
     "default": lambda a: (a[0] if (a and a[0] not in (None, "", [], {})) else (a[1] if len(a) > 1 else "")),
     "json": lambda a: (__import__("json").dumps(a[0]) if a else ""),
-    "secret": lambda a: _resolve_secret(a[0]) if a else "",
     # date/time (UTC): enable "due in N days" / "older than a week" workflows,
     # ISO-formatted so they order correctly with the lexical comparison above.
     "now": lambda a: _now_utc().isoformat(timespec="seconds"),
@@ -252,7 +256,7 @@ def _split_args(s: str) -> list[str]:
     return [a.strip() for a in out]
 
 
-def _arg_value(tok: str, data: dict) -> Any:
+def _arg_value(tok: str, data: dict, *, allow_secrets: bool = False) -> Any:
     """A function argument: a quoted/number/bool literal, a NESTED transform call
     (evaluated recursively), else a data key (missing -> '')."""
     tok = tok.strip()
@@ -267,20 +271,28 @@ def _arg_value(tok: str, data: dict) -> Any:
         except ValueError:
             pass
     m = _FN_CALL.match(tok)
-    if m and m.group(1) in _FUNCS:          # nested call: {{upper(default(x,"y"))}}
-        return _eval_expr(tok, data)
+    funcs = _funcs(allow_secrets=allow_secrets)
+    if m and m.group(1) in funcs:          # nested call: {{upper(default(x,"y"))}}
+        return _eval_expr(tok, data, allow_secrets=allow_secrets)
     return _dig(data, tok, "")
 
 
-def _eval_expr(expr: str, data: dict) -> Any:
+def _funcs(*, allow_secrets: bool = False) -> dict[str, Callable[[list], Any]]:
+    if not allow_secrets:
+        return _FUNCS
+    return {**_FUNCS, "secret": lambda a: _resolve_secret(a[0]) if a else ""}
+
+
+def _eval_expr(expr: str, data: dict, *, allow_secrets: bool = False) -> Any:
     """Evaluate a ``{{ }}`` expression: a transform call (args may themselves be
     transform calls), else a dotted-key dig (``None`` for a missing bare key so
     render keeps it literal)."""
     m = _FN_CALL.match(expr.strip())
-    if m and m.group(1) in _FUNCS:
-        args = [_arg_value(a, data) for a in _split_args(m.group(2))]
+    funcs = _funcs(allow_secrets=allow_secrets)
+    if m and m.group(1) in funcs:
+        args = [_arg_value(a, data, allow_secrets=allow_secrets) for a in _split_args(m.group(2))]
         try:
-            return _FUNCS[m.group(1)](args)
+            return funcs[m.group(1)](args)
         except Exception:  # a bad transform never breaks rendering
             return ""
     return _dig(data, expr.strip())
@@ -436,7 +448,7 @@ class _Ctx:
 
 
 def _render_params(node: FlowNode, data: dict) -> dict:
-    return {k: render(v, data) if isinstance(v, str) else v
+    return {k: render(v, data, allow_secrets=True) if isinstance(v, str) else v
             for k, v in (node.params or {}).items()}
 
 
