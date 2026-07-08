@@ -237,16 +237,16 @@ def test_custom_pack_factory_respects_entitlement(monkeypatch, tmp_path):
         intake.save_profile(object(), approved=True, dest_dir=tmp_path)
 
 
-def test_multi_tenant_gates_both_vectors(monkeypatch):
+def test_multi_tenant_gates_named_tenant_provisioning_only(monkeypatch):
     from maverick import paths
     from maverick.tenant import registry
-    # (a) per-user tenancy switch gates on the platform tier
-    monkeypatch.setenv("MAVERICK_TENANT_BY_USER", "1")     # base-enabled
+    # Per-user tenancy is a security isolation control. Once an operator enables
+    # it, license state must not silently downgrade channel users into the shared
+    # world/memory/audit scope.
+    monkeypatch.setenv("MAVERICK_TENANT_BY_USER", "1")
     monkeypatch.setattr("maverick.entitlements.require", lambda f: False)
-    assert paths.tenant_by_user_enabled() is False
-    monkeypatch.setattr("maverick.entitlements.require", lambda f: True)
     assert paths.tenant_by_user_enabled() is True
-    # (b) provisioning a named tenant is refused under enforcement w/o Platinum
+    # Provisioning a named tenant is still refused under enforcement w/o Platinum.
     monkeypatch.setattr("maverick.entitlements.require",
                         lambda f: f != "multi_tenant")
     with pytest.raises(PermissionError, match="Platinum"):
