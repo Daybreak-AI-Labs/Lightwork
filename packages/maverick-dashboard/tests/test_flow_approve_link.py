@@ -32,8 +32,11 @@ def _paused_run(rid="r1", fid="f1"):
 
 
 def _tok(rid, decision):
+    from maverick.flow import store
     from maverick.flow.approvals import mint_token
-    return mint_token(rid, decision)
+    run = store.load_run(rid)
+    return mint_token(rid, decision, cursor=run.cursor, prompt=run.prompt,
+                      updated=run.updated)
 
 
 def test_get_shows_confirm_page_without_resuming(monkeypatch, tmp_path):
@@ -82,6 +85,24 @@ def test_post_on_already_resolved_run_is_noop(monkeypatch, tmp_path):
     store.save_run(run)
     r = _client().post("/flow/approve", data={"token": _tok(rid, "approved")})
     assert r.status_code == 410 and "no longer awaiting approval" in r.text
+    jobs = [j for j in aq.queue().list(status="pending", limit=100)
+            if j.kind == aq.FLOW_RESUME_KIND]
+    assert jobs == []
+
+
+def test_old_link_cannot_resolve_later_approval(monkeypatch, tmp_path):
+    _isolate(monkeypatch, tmp_path)
+    from maverick_dashboard import automation_queue as aq
+    monkeypatch.setattr(aq, "_queue", None)
+    rid, _ = _paused_run()
+    old = _tok(rid, "approved")
+    from maverick.flow import store
+    run = store.load_run(rid)
+    run.cursor = "b"
+    run.prompt = "second approval?"
+    store.save_run(run)
+    r = _client().post("/flow/approve", data={"token": old})
+    assert r.status_code == 410 and "older approval step" in r.text
     jobs = [j for j in aq.queue().list(status="pending", limit=100)
             if j.kind == aq.FLOW_RESUME_KIND]
     assert jobs == []

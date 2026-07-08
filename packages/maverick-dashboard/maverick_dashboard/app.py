@@ -3755,6 +3755,10 @@ def _load_paused_approval_run(token: str):
         return None, "That flow run no longer exists."
     if run.status != "paused_approval":
         return None, f"This run is no longer awaiting approval (status: {run.status})."
+    if (str(run.cursor or "") != claim.get("cursor")
+            or str(run.prompt or "") != claim.get("prompt")
+            or float(run.updated or 0.0) != float(claim.get("updated", -1.0))):
+        return None, "This approval link is for an older approval step."
     return run, claim["decision"]
 
 
