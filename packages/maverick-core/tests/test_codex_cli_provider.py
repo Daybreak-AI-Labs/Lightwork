@@ -1,0 +1,301 @@
+"""Codex CLI provider: registry wiring, auth gating, subprocess hygiene.
+
+No real ``codex`` binary and no network: ``shutil.which`` and
+``subprocess.run`` are monkeypatched. The security-critical assertions --
+the access token never appears on argv or in error text, argv is a list
+(never ``shell=True``), the prompt travels on STDIN -- live here.
+"""
+from __future__ import annotations
+
+import json
+import subprocess
+from pathlib import Path
+
+import pytest
+from maverick.budget import Budget
+from maverick.llm import _parse_spec
+from maverick.providers import KNOWN_PROVIDERS, get_provider_client, missing_sdks
+from maverick.providers.codex_cli_provider import CodexCLIClient
+
+FAKE_TOKEN = "codex-test-access-token-not-real"  # pragma: allowlist secret
+
+
+@pytest.fixture
+def codex_env(monkeypatch, tmp_path):
+    """A world where the codex binary exists and a token is configured."""
+    monkeypatch.setenv("CODEX_ACCESS_TOKEN", FAKE_TOKEN)
+    monkeypatch.setenv("CODEX_HOME", str(tmp_path / "codex-home"))
+    monkeypatch.setattr(
+        "maverick.providers.codex_cli_provider.shutil.which",
+        lambda name: f"/usr/bin/{name}",
+    )
+    return tmp_path
+
+
+def _write_auth(tmp_path: Path) -> None:
+    home = tmp_path / "codex-home"
+    home.mkdir(parents=True, exist_ok=True)
+    (home / "auth.json").write_text("{}")
+
+
+class _FakeRun:
+    """Records every subprocess.run call; plays a scripted codex exec."""
+
+    def __init__(self, *, text="hello from codex", usage=None, returncode=0,
+                 stderr=""):
+        self.calls: list[dict] = []
+        self.text = text
+        self.usage = usage or {"input_tokens": 120, "cached_input_tokens": 20,
+                               "output_tokens": 45}
+        self.returncode = returncode
+        self.stderr = stderr
+
+    def __call__(self, cmd, **kwargs):
+        self.calls.append({"cmd": list(cmd), **kwargs})
+        if "login" in cmd:
+            return subprocess.CompletedProcess(cmd, 0, stdout="", stderr="")
+        if "--output-last-message" in cmd:
+            out_file = Path(cmd[cmd.index("--output-last-message") + 1])
+            if self.returncode == 0:
+                out_file.write_text(self.text)
+        stdout = "\n".join([
+            "codex banner line (not json)",
+            json.dumps({"type": "item.completed",
+                        "item": {"type": "agent_message", "text": self.text}}),
+            json.dumps({"type": "turn.completed", "usage": self.usage}),
+        ])
+        return subprocess.CompletedProcess(
+            cmd, self.returncode, stdout=stdout, stderr=self.stderr,
+        )
+
+
+class TestRegistry:
+    def test_known_provider(self):
+        assert "codex_cli" in KNOWN_PROVIDERS
+
+    def test_spec_aliases_canonicalize(self):
+        assert _parse_spec("codex_cli:gpt-5.5-codex") == ("codex_cli", "gpt-5.5-codex")
+        assert _parse_spec("codex-cli:gpt-5.5-codex") == ("codex_cli", "gpt-5.5-codex")
+        assert _parse_spec("codex:gpt-5.5-codex") == ("codex_cli", "gpt-5.5-codex")
+
+    def test_registry_instantiates(self, codex_env):
+        client = get_provider_client("codex_cli")
+        assert isinstance(client, CodexCLIClient)
+
+    def test_missing_sdks_wants_binary_not_pip(self, monkeypatch):
+        # Binary present: nothing missing, and crucially no `openai` pip demand.
+        import shutil as _shutil
+        monkeypatch.setattr(_shutil, "which", lambda name: f"/usr/bin/{name}")
+        assert missing_sdks(["codex_cli:gpt-5.5-codex"]) == []
+        # Binary absent: an actionable install hint, still no pip demand.
+        monkeypatch.setattr(_shutil, "which", lambda name: None)
+        msgs = missing_sdks(["codex_cli:gpt-5.5-codex"])
+        assert len(msgs) == 1 and "@openai/codex" in msgs[0]
+
+    def test_catalog_lists_codex(self):
+        from maverick.llm import MODEL_CATALOG, PROVIDER_LABELS, catalog_specs
+        assert "codex_cli" in MODEL_CATALOG
+        assert "codex_cli" in PROVIDER_LABELS
+        specs = [s for s, _ in catalog_specs()]
+        assert "codex_cli:gpt-5.5-codex" in specs
+
+
+class TestAuthGating:
+    def test_refuses_without_token_or_login(self, monkeypatch, tmp_path):
+        monkeypatch.delenv("CODEX_ACCESS_TOKEN", raising=False)
+        monkeypatch.setenv("CODEX_HOME", str(tmp_path / "empty"))
+        monkeypatch.setattr(
+            "maverick.providers.codex_cli_provider.shutil.which",
+            lambda name: f"/usr/bin/{name}",
+        )
+        with pytest.raises(RuntimeError, match="not authenticated"):
+            CodexCLIClient()
+
+    def test_refuses_without_binary(self, monkeypatch, tmp_path):
+        monkeypatch.setenv("CODEX_ACCESS_TOKEN", FAKE_TOKEN)
+        monkeypatch.setenv("CODEX_HOME", str(tmp_path))
+        monkeypatch.setattr(
+            "maverick.providers.codex_cli_provider.shutil.which",
+            lambda name: None,
+        )
+        with pytest.raises(RuntimeError, match="not found on PATH"):
+            CodexCLIClient()
+
+    def test_auth_json_alone_suffices(self, monkeypatch, tmp_path):
+        monkeypatch.delenv("CODEX_ACCESS_TOKEN", raising=False)
+        monkeypatch.setenv("CODEX_HOME", str(tmp_path / "codex-home"))
+        _write_auth(tmp_path)
+        monkeypatch.setattr(
+            "maverick.providers.codex_cli_provider.shutil.which",
+            lambda name: f"/usr/bin/{name}",
+        )
+        assert CodexCLIClient() is not None
+
+    def test_auto_login_feeds_token_on_stdin_only(self, codex_env, monkeypatch):
+        fake = _FakeRun()
+        monkeypatch.setattr(
+            "maverick.providers.codex_cli_provider.subprocess.run", fake)
+        client = CodexCLIClient()
+        client.complete("sys", [{"role": "user", "content": "hi"}])
+        login = next(c for c in fake.calls if "login" in c["cmd"])
+        assert login["cmd"][:2] == ["codex", "login"]
+        assert login["input"] == FAKE_TOKEN          # STDIN carries the token
+        assert FAKE_TOKEN not in " ".join(login["cmd"])  # argv never does
+
+    def test_no_login_when_auth_json_present(self, codex_env, monkeypatch):
+        _write_auth(codex_env)
+        fake = _FakeRun()
+        monkeypatch.setattr(
+            "maverick.providers.codex_cli_provider.subprocess.run", fake)
+        CodexCLIClient().complete("sys", [{"role": "user", "content": "hi"}])
+        assert not any("login" in c["cmd"] for c in fake.calls)
+
+
+class TestExec:
+    def _client(self, codex_env, monkeypatch, fake):
+        _write_auth(codex_env)  # skip the login round-trip
+        monkeypatch.setattr(
+            "maverick.providers.codex_cli_provider.subprocess.run", fake)
+        return CodexCLIClient()
+
+    def test_complete_basic(self, codex_env, monkeypatch):
+        fake = _FakeRun(text="The answer is 4.")
+        client = self._client(codex_env, monkeypatch, fake)
+        resp = client.complete("You are terse.",
+                               [{"role": "user", "content": "2+2?"}])
+        assert resp.text == "The answer is 4."
+        assert resp.stop_reason == "end_turn"
+        assert resp.tool_calls == []
+        call = fake.calls[-1]
+        cmd = call["cmd"]
+        assert cmd[0] == "codex" and cmd[1] == "exec"
+        assert "--json" in cmd and "--skip-git-repo-check" in cmd
+        assert cmd[cmd.index("--sandbox") + 1] == "read-only"
+        assert cmd[cmd.index("--model") + 1] == client.DEFAULT_MODEL
+        assert cmd[-1] == "-"                      # prompt via STDIN
+        assert "You are terse." in call["input"]   # system reached the prompt
+        assert "2+2?" in call["input"]
+        assert call.get("shell") is None           # list argv, never shell=True
+        assert FAKE_TOKEN not in " ".join(cmd)
+
+    def test_budget_records_tokens_at_zero_dollars(self, codex_env, monkeypatch):
+        fake = _FakeRun()
+        client = self._client(codex_env, monkeypatch, fake)
+        budget = Budget(max_dollars=0.01)  # subscription: must not consume $
+        client.complete("s", [{"role": "user", "content": "q"}], budget=budget)
+        assert budget.dollars == 0.0
+        # input_tokens counts the billable (non-cached) remainder: 120 - 20.
+        assert budget.input_tokens == 100
+        assert budget.cache_read_tokens == 20
+        assert budget.output_tokens == 45
+
+    def test_wall_clock_cap_still_enforced(self, codex_env, monkeypatch):
+        from maverick.budget import BudgetExceeded
+        fake = _FakeRun()
+        client = self._client(codex_env, monkeypatch, fake)
+        budget = Budget(max_wall_seconds=0.0)
+        with pytest.raises(BudgetExceeded):
+            client.complete("s", [{"role": "user", "content": "q"}],
+                            budget=budget)
+
+    def test_tool_call_protocol_round_trip(self, codex_env, monkeypatch):
+        reply = (
+            "Let me look that up.\n\n"
+            '```json\n{"tool_call": {"name": "web_search", '
+            '"input": {"query": "lightwork"}}}\n```'
+        )
+        fake = _FakeRun(text=reply)
+        client = self._client(codex_env, monkeypatch, fake)
+        tools = [{"name": "web_search", "description": "Search the web.",
+                  "input_schema": {"type": "object",
+                                   "properties": {"query": {"type": "string"}}}}]
+        resp = client.complete("s", [{"role": "user", "content": "q"}],
+                               tools=tools)
+        assert resp.stop_reason == "tool_use"
+        assert len(resp.tool_calls) == 1
+        tc = resp.tool_calls[0]
+        assert tc.name == "web_search"
+        assert tc.input == {"query": "lightwork"}
+        assert tc.id.startswith("codex_")
+        assert resp.text == "Let me look that up."
+        # The protocol instructions and schema made it into the prompt.
+        prompt = fake.calls[-1]["input"]
+        assert "web_search" in prompt and "tool_call" in prompt
+
+    def test_plain_text_with_tools_is_end_turn(self, codex_env, monkeypatch):
+        fake = _FakeRun(text="No tool needed: 4.")
+        client = self._client(codex_env, monkeypatch, fake)
+        resp = client.complete(
+            "s", [{"role": "user", "content": "q"}],
+            tools=[{"name": "t", "description": "", "input_schema": {}}],
+        )
+        assert resp.stop_reason == "end_turn"
+        assert resp.tool_calls == []
+
+    def test_history_flattening(self, codex_env, monkeypatch):
+        fake = _FakeRun()
+        client = self._client(codex_env, monkeypatch, fake)
+        messages = [
+            {"role": "user", "content": "find the file"},
+            {"role": "assistant", "content": [
+                {"type": "text", "text": "Searching."},
+                {"type": "tool_use", "id": "tu_1", "name": "grep",
+                 "input": {"pattern": "x"}},
+            ]},
+            {"role": "user", "content": [
+                {"type": "tool_result", "tool_use_id": "tu_1",
+                 "content": [{"type": "text", "text": "found in a.py"}]},
+            ]},
+        ]
+        client.complete("s", messages)
+        prompt = fake.calls[-1]["input"]
+        assert "find the file" in prompt
+        assert "grep" in prompt and "tu_1" in prompt
+        assert "found in a.py" in prompt
+
+    def test_nonzero_exit_raises_with_scrubbed_stderr(self, codex_env, monkeypatch):
+        fake = _FakeRun(returncode=1,
+                        stderr=f"boom CODEX_ACCESS_TOKEN={FAKE_TOKEN} end")
+        client = self._client(codex_env, monkeypatch, fake)
+        with pytest.raises(RuntimeError, match="codex exec failed") as exc:
+            client.complete("s", [{"role": "user", "content": "q"}])
+        assert FAKE_TOKEN not in str(exc.value)
+
+    def test_empty_reply_raises(self, codex_env, monkeypatch):
+        fake = _FakeRun(text="")
+        client = self._client(codex_env, monkeypatch, fake)
+        with pytest.raises(RuntimeError, match="no agent message"):
+            client.complete("s", [{"role": "user", "content": "q"}])
+
+    @pytest.mark.asyncio
+    async def test_complete_async(self, codex_env, monkeypatch):
+        fake = _FakeRun(text="async ok")
+        client = self._client(codex_env, monkeypatch, fake)
+        resp = await client.complete_async(
+            "s", [{"role": "user", "content": "q"}])
+        assert resp.text == "async ok"
+
+
+class TestEventParsing:
+    def test_legacy_msg_shape(self):
+        stdout = "\n".join([
+            json.dumps({"msg": {"type": "agent_message", "message": "hi"}}),
+            json.dumps({"msg": {"type": "token_count",
+                                "info": {"input_tokens": 10,
+                                         "output_tokens": 3}}}),
+        ])
+        text, usage = CodexCLIClient._parse_events(stdout)
+        assert text == "hi"
+        assert usage["input_tokens"] == 10
+        assert usage["output_tokens"] == 3
+
+    def test_garbage_lines_skipped(self):
+        text, usage = CodexCLIClient._parse_events(
+            "not json\n{broken\n" + json.dumps({"type": "other"}))
+        assert text is None
+        assert usage["input_tokens"] == 0
+
+    def test_tool_call_block_with_no_marker_ignored(self):
+        text, tc = CodexCLIClient._extract_tool_call(
+            'see:\n```json\n{"just": "data"}\n```')
+        assert tc is None and "just" in text

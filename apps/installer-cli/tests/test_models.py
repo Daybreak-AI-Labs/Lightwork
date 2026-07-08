@@ -110,6 +110,9 @@ def test_wizard_model_ids_have_pricing():
         bedrock: local, aggregated, or self-hosted catalogs whose model id
         is a placeholder for whatever the endpoint serves (dynamic, zero
         per-token cost known to the kernel).
+      - codex_cli: ChatGPT/Codex subscription via the Codex CLI -- no
+        per-token API invoice exists; budget._lookup_price prices the
+        codex_cli: prefix at $0 deliberately (not a silent fallback).
     """
     try:
         from maverick.llm import MODEL_PRICES
@@ -118,7 +121,7 @@ def test_wizard_model_ids_have_pricing():
     unpriced: list[str] = []
     for prov_id, info in models.PROVIDERS.items():
         if prov_id in ("ollama", "openrouter", "tgi", "openai_compatible",
-                       "vllm", "azure", "bedrock"):
+                       "vllm", "azure", "bedrock", "codex_cli"):
             continue
         for m in info["models"]:
             if m["id"] not in MODEL_PRICES:

@@ -142,12 +142,17 @@ MODEL_CATALOG: dict[str, list[str]] = {
     "moonshot":   ["kimi-k2", "kimi-k1.5", "moonshot-v1-128k"],
     "openrouter": ["minimax/minimax-m2.5", "qwen/qwen3-coder-next"],
     "ollama":     ["qwen3-coder-next", "qwen3-32b", "llama-4-maverick"],
+    # ChatGPT/Codex subscription via the local Codex CLI (`codex exec`), not
+    # the metered OpenAI API. Ids are whatever the user's Codex plan serves;
+    # unknown ids behind the codex_cli: prefix price $0 (subscription-billed).
+    "codex_cli":  ["gpt-5.5-codex", "gpt-5.5", "gpt-5.4"],
 }
 
 PROVIDER_LABELS: dict[str, str] = {
     "anthropic": "Anthropic (Claude)", "openai": "OpenAI", "gemini": "Google Gemini",
     "xai": "xAI (Grok)", "deepseek": "DeepSeek", "moonshot": "Moonshot",
     "openrouter": "OpenRouter", "ollama": "Ollama (local)",
+    "codex_cli": "Codex CLI (ChatGPT subscription)",
 }
 
 

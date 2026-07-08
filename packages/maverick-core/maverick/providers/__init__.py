@@ -30,6 +30,9 @@ _PROVIDER_ALIASES = {
     "azure":      ("azure-openai",),
     "bedrock":    ("aws-bedrock",),
     "openai_compatible": ("openai-compatible", "custom"),
+    # ChatGPT/Codex subscription via the local Codex CLI (`codex exec`) --
+    # NOT the metered OpenAI API (that's the `openai` provider above).
+    "codex_cli":  ("codex-cli", "codex"),
 }
 
 
@@ -107,6 +110,9 @@ def get_provider_client(
     if canon == "openai_compatible":
         from .openai_compatible_provider import OpenAICompatibleClient
         return OpenAICompatibleClient(api_key=api_key, base_url=base_url)
+    if canon == "codex_cli":
+        from .codex_cli_provider import CodexCLIClient
+        return CodexCLIClient(api_key=api_key, base_url=base_url)
     raise ValueError(
         f"unknown provider {name!r}. Available: "
         + ", ".join(KNOWN_PROVIDERS)
@@ -116,15 +122,16 @@ def get_provider_client(
 KNOWN_PROVIDERS = (
     "anthropic", "openai", "moonshot", "xai", "gemini",
     "deepseek", "openrouter", "ollama", "tgi", "vllm",
-    "azure", "bedrock", "openai_compatible",
+    "azure", "bedrock", "openai_compatible", "codex_cli",
 )
 
 # The pip package each provider's client imports at construction/call time.
 # Everything OpenAI-translated (incl. bedrock, which subclasses OpenAIClient)
-# needs ``openai``; anthropic needs ``anthropic``.
+# needs ``openai``; anthropic needs ``anthropic``. codex_cli needs NO pip SDK
+# -- it shells out to the Codex CLI binary (checked separately below).
 _SDK_MODULE: dict[str, str] = {
     "anthropic": "anthropic",
-    **{p: "openai" for p in KNOWN_PROVIDERS if p != "anthropic"},
+    **{p: "openai" for p in KNOWN_PROVIDERS if p not in ("anthropic", "codex_cli")},
 }
 
 _SDK_HINT: dict[str, str] = {
@@ -151,6 +158,23 @@ def missing_sdks(model_specs) -> list[str]:
         if not isinstance(spec, str) or not spec.strip():
             continue
         provider = _canonical(spec.split(":", 1)[0]) if ":" in spec else "anthropic"
+        # codex_cli's "SDK" is the Codex CLI binary, not a pip package.
+        if provider == "codex_cli" and provider not in seen:
+            seen.add(provider)
+            import shutil
+            binary = "codex"
+            try:
+                from ..config import get_provider_config
+                binary = str((get_provider_config("codex_cli") or {})
+                             .get("binary") or binary)
+            except Exception:  # fail open: never block start on a config probe
+                pass
+            if shutil.which(binary) is None:
+                msgs.append(
+                    f"Codex CLI binary {binary!r} not found (needed for the "
+                    "codex_cli provider). Run: npm install -g @openai/codex"
+                )
+            continue
         mod = _SDK_MODULE.get(provider)
         if mod is None or mod in seen:
             continue

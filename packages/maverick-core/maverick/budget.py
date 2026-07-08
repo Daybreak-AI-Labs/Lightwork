@@ -155,9 +155,11 @@ def _lookup_price(model: str | None) -> tuple[float, float]:
     # local models -- platform-test finding). A known table id behind the
     # same prefix was matched above and keeps its real rate. The generic
     # openai_compatible provider is intentionally excluded because it can
-    # point at paid public gateways.
+    # point at paid public gateways. codex_cli is cloud but SUBSCRIPTION
+    # metered (ChatGPT/Codex plan, no per-token invoice), so its marginal
+    # dollar cost is likewise $0 -- token/wall/tool caps still enforce.
     if ":" in model and model.split(":", 1)[0] in (
-        "ollama", "vllm", "tgi",
+        "ollama", "vllm", "tgi", "codex_cli",
     ):
         return 0.0, 0.0
     # Genuinely unknown model: no verified rate exists. Default behaviour bills

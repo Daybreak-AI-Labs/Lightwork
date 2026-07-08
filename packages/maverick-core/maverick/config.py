@@ -344,6 +344,9 @@ PROVIDER_KEY_ENV_MAP: dict[str, tuple[str, ...]] = {
     "moonshot": ("MOONSHOT_API_KEY",),
     "deepseek": ("DEEPSEEK_API_KEY",),
     "xai": ("XAI_API_KEY", "GROK_API_KEY"),
+    # ChatGPT/Codex access token for the codex_cli provider. Consumed by
+    # `codex login --with-access-token` (fed on STDIN, never argv/logs).
+    "codex_cli": ("CODEX_ACCESS_TOKEN",),
 }
 
 PROVIDER_KEY_ENV_VARS = tuple(

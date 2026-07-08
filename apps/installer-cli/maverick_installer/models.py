@@ -45,6 +45,15 @@ PROVIDERS: dict[str, dict] = {
             {"id": "gpt-5.4-nano",  "notes": "Tiny, very cheap. Good for summarizer."},
         ],
     },
+    "codex_cli": {
+        "status": "ready",
+        "label": "Codex CLI (ChatGPT subscription, no API key)",
+        "env": "CODEX_ACCESS_TOKEN",
+        "models": [
+            {"id": "gpt-5.5-codex", "notes": "Codex-tuned flagship via your ChatGPT plan; needs the codex CLI installed."},
+            {"id": "gpt-5.5",       "notes": "General flagship via Codex CLI; subscription-billed ($0 API spend)."},
+        ],
+    },
     "moonshot": {
         "status": "ready",
         "label": "Moonshot / Kimi",
