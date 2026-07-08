@@ -58,3 +58,27 @@ def test_cross_site_save_is_blocked():
     bare = TestClient(app)
     assert bare.post("/settings/webhooks",
                      data={"secret": "x"}).status_code == 403
+
+
+def test_tenant_admin_cannot_set_global_webhook_secret(tmp_path, monkeypatch):
+    # The webhook signing secret gates every auth-exempt inbound webhook
+    # endpoint deployment-wide -- a principal who is only a TENANT-local admin
+    # (global viewer) must be denied, not just a non-admin.
+    from maverick.paths import reset_tenant, set_tenant
+    from maverick_dashboard import auth, rbac
+
+    rbac.set_role("user:alice", "viewer")
+    rbac.set_tenant_role("acme", "user:alice", "admin")
+    monkeypatch.setattr(auth, "caller_principal", lambda request: "user:alice")
+
+    tok = set_tenant("acme")
+    try:
+        assert auth.role_for_principal("user:alice") == "admin"
+        r = client.post("/settings/webhooks", data={"secret": "s"},
+                        follow_redirects=False)
+    finally:
+        reset_tenant(tok)
+
+    assert r.status_code == 403
+    from maverick.webhooks import inbound_secret
+    assert not inbound_secret()
