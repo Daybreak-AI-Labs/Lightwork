@@ -323,11 +323,30 @@ def _poll_all_event_triggers() -> None:
     if not triggers:
         return
 
-    def _fire(gid: int) -> None:
-        threading.Thread(target=run_goal_in_thread, args=(gid,), daemon=True).start()
+    def _execution_user_id(owner: str) -> str | None:
+        if owner.startswith("user:") and len(owner) > len("user:"):
+            return owner[len("user:"):]
+        return None
+
+    def _fire_for_owner(owner: str):
+        user_id = _execution_user_id(owner)
+
+        def _fire(gid: int) -> None:
+            kwargs = {"channel": "api", "user_id": user_id} if user_id else {}
+            threading.Thread(
+                target=run_goal_in_thread, args=(gid,), kwargs=kwargs, daemon=True,
+            ).start()
+
+        return _fire
 
     try:
-        event_poll.poll_and_fire(_world(), triggers, fire=_fire)
+        by_owner: dict[str, list[dict]] = {}
+        for trig in triggers:
+            by_owner.setdefault(str(trig.get("owner") or ""), []).append(trig)
+        for owner, owner_triggers in by_owner.items():
+            event_poll.poll_and_fire(
+                _world(), owner_triggers, principal=owner, fire=_fire_for_owner(owner),
+            )
     except Exception:  # pragma: no cover - a poll tick must never crash the loop
         log.exception("event-trigger poll tick failed")
 
