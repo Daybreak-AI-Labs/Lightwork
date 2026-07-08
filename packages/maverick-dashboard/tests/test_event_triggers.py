@@ -202,6 +202,35 @@ def test_background_poll_attributes_goal_to_trigger_owner(monkeypatch, tmp_path)
     assert owners == ["user:alice"]
 
 
+def test_background_poll_runs_owned_trigger_as_owner_user(monkeypatch, tmp_path):
+    # The request-less scheduler must preserve the trigger owner's execution
+    # identity so quotas/concurrency are charged to that user, not user:local.
+    _isolate(monkeypatch, tmp_path)
+    import time as _t
+
+    import maverick.automation_events as ev
+    import maverick.runner as runner_mod
+    from maverick_dashboard import app as A
+    from maverick_dashboard import event_triggers_store as s
+    run_calls = []
+
+    def _run_goal(*args, **kwargs):
+        run_calls.append((args, kwargs))
+
+    monkeypatch.setattr(runner_mod, "run_goal_in_thread", _run_goal)
+    box = [{"items": [{"id": "1", "title": "a"}]}]
+    monkeypatch.setattr(ev, "_http_get_json", lambda url, headers=None, timeout=15.0: box[0])
+    s.set_trigger("feed", "triage", "http_json",
+                  config={"url": "http://x", "items_path": "items", "id_field": "id"},
+                  owner="user:alice")
+    A._poll_all_event_triggers()
+    box[0] = {"items": [{"id": "2", "title": "b"}, {"id": "1", "title": "a"}]}
+    A._poll_all_event_triggers()
+    _t.sleep(0.15)
+    assert len(run_calls) == 1
+    assert run_calls[0][1] == {"channel": "api", "user_id": "alice"}
+
+
 def test_scheduler_starts_only_when_a_feature_is_on(monkeypatch, tmp_path):
     import asyncio
 
