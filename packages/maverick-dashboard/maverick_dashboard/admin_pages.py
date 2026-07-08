@@ -211,9 +211,11 @@ async def settings_set_webhooks(
 ) -> RedirectResponse:
     """Set or clear the webhook signing secret from the settings page (admin).
     Saved to the dashboard config overlay (0600), never the operator's config
-    file; an env-provided secret still wins."""
+    file; an env-provided secret still wins. Global-admin gated: this HMAC
+    secret guards every auth-exempt inbound webhook endpoint deployment-wide,
+    so a tenant-scoped admin must not be able to set/rotate it."""
     _app()._require_same_origin(request)
-    auth.require_permission(request, "admin")
+    auth.require_global_permission(request, "admin")
     from maverick_dashboard import settings_store
     settings_store.set_webhooks_secret(secret)
     return RedirectResponse("/settings?saved=webhooks", status_code=303)
