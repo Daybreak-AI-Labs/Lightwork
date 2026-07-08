@@ -4000,19 +4000,26 @@ ENTERPRISE_CONNECTOR_NAMES: list[str] = (
 )
 
 
-def auth_headers_for(connector: str, token: str) -> dict[str, str]:
-    """Auth headers for probing ``connector`` with ``token`` -- the same
-    bearer/basic/custom-scheme translation the connector tool itself sends
-    (``_build_auth_headers``), looked up from the connector's spec so a
-    reachability test speaks the service's real auth dialect instead of
-    assuming Bearer. Unknown connectors fall back to standard Bearer."""
+def auth_headers_for(
+    connector: str, token: str, *, include_extra_headers_env: bool = True,
+) -> dict[str, str]:
+    """Auth headers for probing ``connector`` with ``token``.
+
+    By default this mirrors the connector tool's bearer/basic/custom-scheme
+    translation, including any operator-provided auxiliary env headers used by
+    trusted connector calls. User-controlled saved-connection tests must pass
+    ``include_extra_headers_env=False`` so environment secrets are not sent to
+    arbitrary ``base_url`` values. Unknown connectors fall back to standard
+    Bearer.
+    """
     spec = next((s for s in _SPECS + _READ_SPECS + _GRAPHQL_SPECS
                  if s.get("name") == connector), {})
     return _build_auth_headers(
         token, basic=bool(spec.get("basic")),
         token_header=str(spec.get("token_header", "Authorization")),
         scheme=str(spec.get("scheme", "Bearer")),
-        extra_headers_env=spec.get("extra_headers_env"),
+        extra_headers_env=(spec.get("extra_headers_env")
+                           if include_extra_headers_env else None),
     )
 
 
