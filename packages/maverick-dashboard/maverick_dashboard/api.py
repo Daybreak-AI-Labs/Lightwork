@@ -5629,7 +5629,7 @@ async def set_flow_autonomy_endpoint(request: Request, payload: FlowAutonomyIn) 
     measures as a regression; ``auto_apply`` (which needs auto_evolve on for the
     revert safety net) lets it apply an improvement forward without a human. Same
     admin gate + deployment-wide overlay as the blanket toggle."""
-    require_permission(request, "admin")
+    require_global_permission(request, "admin")
     from maverick_dashboard import settings_store
     settings_store.set_flow_autonomy(auto_evolve=payload.auto_evolve,
                                      auto_apply=payload.auto_apply)

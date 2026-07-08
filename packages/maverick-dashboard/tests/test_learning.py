@@ -131,10 +131,41 @@ def test_flow_autonomy_toggle_enables_the_loop(tmp_path, monkeypatch):
     # auto_apply alone does nothing (needs auto_evolve for the revert safety net)
     snap = client.post("/api/v1/learning/flow-autonomy", json={"auto_apply": True}).json()
     assert snap["flow_autonomy"]["auto_apply"] is False
+    from maverick_dashboard import settings_store
+    assert settings_store.load_overlay()["flows"]["auto_apply"] is False
     # turning auto_evolve on, then auto_apply, sticks
     client.post("/api/v1/learning/flow-autonomy", json={"auto_evolve": True})
     snap = client.post("/api/v1/learning/flow-autonomy", json={"auto_apply": True}).json()
     assert snap["flow_autonomy"] == {"engine_on": True, "auto_evolve": True, "auto_apply": True}
+    # Disabling the safety-net clears auto_apply, so re-enabling auto_evolve
+    # later cannot silently arm forward rewrites without a fresh opt-in.
+    snap = client.post("/api/v1/learning/flow-autonomy", json={"auto_evolve": False}).json()
+    assert snap["flow_autonomy"]["auto_apply"] is False
+    client.post("/api/v1/learning/flow-autonomy", json={"auto_evolve": True})
+    snap = client.get("/api/v1/learning").json()
+    assert snap["flow_autonomy"] == {"engine_on": True, "auto_evolve": True, "auto_apply": False}
+
+
+def test_flow_autonomy_requires_global_admin(tmp_path, monkeypatch):
+    from maverick.paths import reset_tenant, set_tenant
+    from maverick_dashboard import auth, rbac
+
+    for v in ("MAVERICK_FLOWS_AUTO",):
+        monkeypatch.delenv(v, raising=False)
+    monkeypatch.setenv("MAVERICK_FLOWS", "1")
+    _isolate(tmp_path, monkeypatch)
+    rbac.set_role("user:alice", "viewer")
+    rbac.set_tenant_role("acme", "user:alice", "admin")
+    monkeypatch.setattr(auth, "caller_principal", lambda request: "user:alice")
+
+    tok = set_tenant("acme")
+    try:
+        assert auth.role_for_principal("user:alice") == "admin"
+        r = client.post("/api/v1/learning/flow-autonomy", json={"auto_evolve": True})
+    finally:
+        reset_tenant(tok)
+
+    assert r.status_code == 403
 
 
 def test_learning_page_renders_flow_autonomy_toggles_when_engine_on(tmp_path, monkeypatch):
