@@ -2362,6 +2362,7 @@ class Agent:
                 from .attachments import content_blocks_for_goal
                 image_blocks = content_blocks_for_goal(
                     self.ctx.world, self.ctx.goal_id, model=self.model,
+                    shield=self.ctx.shield,
                 )
             except Exception:
                 image_blocks = []
