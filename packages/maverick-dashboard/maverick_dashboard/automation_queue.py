@@ -160,6 +160,25 @@ def _world():
     return _w()
 
 
+def _job_tenant_payload() -> dict:
+    from maverick.paths import current_tenant_id
+    tenant = current_tenant_id()
+    return {"tenant": tenant} if tenant else {}
+
+
+def _run_in_payload_tenant(payload: dict, fn) -> None:
+    tenant = payload.get("tenant")
+    if not tenant:
+        fn()
+        return
+    from maverick.paths import reset_tenant, set_tenant
+    token = set_tenant(str(tenant))
+    try:
+        fn()
+    finally:
+        reset_tenant(token)
+
+
 def enqueue_flow_run(flow_id: str, data: dict, owner: str = "") -> str:
     """Start a durable flow run (a pre-assigned, pollable run id + a flow_run job).
     Shared by the background tick and the on-demand poll so a flow-target trigger
@@ -168,8 +187,9 @@ def enqueue_flow_run(flow_id: str, data: dict, owner: str = "") -> str:
     run_id = flow_store.new_run_id()
     flow_store.save_run(flow_store.FlowRun(run_id=run_id, flow_id=flow_id,
                                            status="queued", owner=owner, data=dict(data)))
-    queue().enqueue(FLOW_RUN_KIND, {"flow_id": flow_id, "run_id": run_id,
-                                    "data": data, "owner": owner})
+    payload = {"flow_id": flow_id, "run_id": run_id, "data": data, "owner": owner}
+    payload.update(_job_tenant_payload())
+    queue().enqueue(FLOW_RUN_KIND, payload)
     return run_id
 
 
@@ -273,17 +293,19 @@ def _handle_flow_run(job=None) -> None:
     if not flow_id:
         return
     try:
-        from maverick.flow import execution, store
-        flow = store.load_flow(flow_id)
-        if flow is None:
-            log.warning("flow_run: no such flow %s", flow_id)
-            return
-        owner = str(payload.get("owner") or "")
-        agent_runner, action_runner = _flow_runners(owner)
-        run = execution.execute(flow, agent_runner=agent_runner, action_runner=action_runner,
-                                owner=owner, data=dict(payload.get("data") or {}),
-                                run_id=payload.get("run_id"))
-        _notify_flow(flow, run)
+        def _run() -> None:
+            from maverick.flow import execution, store
+            flow = store.load_flow(flow_id)
+            if flow is None:
+                log.warning("flow_run: no such flow %s", flow_id)
+                return
+            owner = str(payload.get("owner") or "")
+            agent_runner, action_runner = _flow_runners(owner)
+            run = execution.execute(flow, agent_runner=agent_runner, action_runner=action_runner,
+                                    owner=owner, data=dict(payload.get("data") or {}),
+                                    run_id=payload.get("run_id"))
+            _notify_flow(flow, run)
+        _run_in_payload_tenant(payload, _run)
     except Exception:  # pragma: no cover -- fail-open
         log.exception("flow run failed for %s", flow_id)
 
@@ -297,18 +319,21 @@ def _handle_flow_resume(job=None) -> None:
     flow_id = str(payload.get("flow_id") or "")
     if not (run_id and flow_id):
         return
+    from maverick.flow import execution
     try:
-        from maverick.flow import execution, store
-        flow = store.load_flow(flow_id)
-        if flow is None:
-            return
-        owner = str(payload.get("owner") or "")
-        agent_runner, action_runner = _flow_runners(owner)
-        run = execution.execute(flow, agent_runner=agent_runner, action_runner=action_runner,
-                                owner=owner, resume_run_id=run_id,
-                                decision=str(payload.get("decision") or "approved"),
-                                inputs=dict(payload.get("inputs") or {}))
-        _notify_flow(flow, run)
+        def _resume() -> None:
+            from maverick.flow import store
+            flow = store.load_flow(flow_id)
+            if flow is None:
+                return
+            owner = str(payload.get("owner") or "")
+            agent_runner, action_runner = _flow_runners(owner)
+            run = execution.execute(flow, agent_runner=agent_runner, action_runner=action_runner,
+                                    owner=owner, resume_run_id=run_id,
+                                    decision=str(payload.get("decision") or "approved"),
+                                    inputs=dict(payload.get("inputs") or {}))
+            _notify_flow(flow, run)
+        _run_in_payload_tenant(payload, _resume)
     except execution.FlowNotResumable:
         return  # already resumed/finished -- benign
     except Exception:  # pragma: no cover -- fail-open
@@ -329,8 +354,9 @@ def _handle_flow_sweep(_job=None) -> None:
         for run in store.list_runs(owner=None, limit=1000):
             if (run.status == runner.STATUS_PAUSED_DELAY and run.resume_at
                     and run.resume_at <= now):
-                queue().enqueue(FLOW_RESUME_KIND, {
-                    "flow_id": run.flow_id, "run_id": run.run_id, "owner": run.owner})
+                payload = {"flow_id": run.flow_id, "run_id": run.run_id, "owner": run.owner}
+                payload.update(_job_tenant_payload())
+                queue().enqueue(FLOW_RESUME_KIND, payload)
     except Exception:  # pragma: no cover -- fail-open
         log.exception("flow delay sweep failed")
 
