@@ -1138,9 +1138,14 @@ into it, so the 2nd..Nth command in a run skip container startup; torn down on
 
 ## LLM providers & routing
 
-12 providers, routable per role (`llm.py`): Anthropic, OpenAI, OpenRouter,
+13 providers, routable per role (`llm.py`): Anthropic, OpenAI, OpenRouter,
 Ollama, Gemini, DeepSeek, Bedrock, Azure, xAI, Moonshot, TGI, vLLM (generic
-OpenAI-compatible via `base_url`). Cost-aware routing (`cost_router.py`) with **per-role
+OpenAI-compatible via `base_url`), and **Codex CLI**
+(`providers/codex_cli_provider.py`: ChatGPT/Codex *subscription* via a local
+`codex exec` subprocess — auth from `CODEX_ACCESS_TOKEN` or `codex login`,
+token fed on STDIN only; tool calls emulated via a fenced-JSON protocol;
+spend is subscription-metered so `codex_cli:` ids price $0 while token /
+wall-clock / tool-call budget caps still enforce). Cost-aware routing (`cost_router.py`) with **per-role
 policies** (`[routing.roles.<role>]`: provider allow/deny, cost ceiling, tier
 floor) and provider failover (`provider_failover.py`) with a **policy engine**
 (`failover_policy.py`: error-class gating — auth fails fast, 429/timeout/5xx
