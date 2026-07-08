@@ -62,6 +62,7 @@ from .auth import (
     can_access_goal_principal,
     execution_user_id_from_request,
     goal_owner_filter,
+    require_global_permission,
     require_permission,
     require_principal,
     websocket_caller_principal,
@@ -3503,7 +3504,7 @@ async def settings_set_webhooks(
     Saved to the dashboard config overlay (0600), never the operator's config
     file; an env-provided secret still wins."""
     _require_same_origin(request)
-    require_permission(request, "admin")
+    require_global_permission(request, "admin")
     from maverick_dashboard import settings_store
     settings_store.set_webhooks_secret(secret)
     return RedirectResponse("/settings?saved=webhooks", status_code=303)

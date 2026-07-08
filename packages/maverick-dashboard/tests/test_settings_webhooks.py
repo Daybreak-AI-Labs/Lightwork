@@ -3,6 +3,8 @@ the dashboard overlay, picked up by maverick.webhooks.inbound_secret, never
 echoed back, env var still wins."""
 from __future__ import annotations
 
+from pathlib import Path
+
 import pytest
 from fastapi.testclient import TestClient
 from maverick_dashboard.app import app
@@ -58,3 +60,34 @@ def test_cross_site_save_is_blocked():
     bare = TestClient(app)
     assert bare.post("/settings/webhooks",
                      data={"secret": "x"}).status_code == 403
+
+
+def test_tenant_admin_cannot_set_global_webhook_secret(monkeypatch):
+    """Tenant-scoped admins must not satisfy the global webhook secret gate."""
+    from maverick.paths import reset_tenant, set_tenant
+    from maverick_dashboard import auth, rbac
+
+    roles_dir = Path.home() / ".maverick"
+    monkeypatch.setattr(rbac, "store_path", lambda: roles_dir / "dashboard-users.json")
+    monkeypatch.setattr(
+        rbac, "tenant_store_path", lambda: roles_dir / "dashboard-tenant-roles.json"
+    )
+    rbac.set_role("user:alice", "viewer")
+    rbac.set_tenant_role("acme", "user:alice", "admin")
+    monkeypatch.setattr(auth, "caller_principal", lambda request: "user:alice")
+
+    tok = set_tenant("acme")
+    try:
+        assert auth.role_for_principal("user:alice") == "admin"
+        r = client.post(
+            "/settings/webhooks",
+            data={"secret": "attacker-known-secret"},  # pragma: allowlist secret
+            follow_redirects=False,
+        )
+    finally:
+        reset_tenant(tok)
+
+    assert r.status_code == 403
+    from maverick.webhooks import inbound_secret
+
+    assert inbound_secret() is None
