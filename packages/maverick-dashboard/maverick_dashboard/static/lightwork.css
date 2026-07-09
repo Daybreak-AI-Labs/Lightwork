@@ -545,6 +545,17 @@
           var(--bg);
         background-attachment: fixed;
       }
+      /* Light theme: the same washes that read as ambient glow over a dark bg
+         mix a DARK brand navy into white, rendering as grey stains (visually a
+         dirty screen, caught by the screenshot audit). Keep the effect but at
+         whisper strength, and drop the bottom wash entirely. */
+      body.theme-light:not(.theme-hicontrast) {
+        background:
+          radial-gradient(1100px 720px at 88% -12%, color-mix(in srgb, var(--brand) 5%, transparent), transparent 62%),
+          radial-gradient(920px 640px at -12% 28%, color-mix(in srgb, var(--accent) 4%, transparent), transparent 58%),
+          var(--bg);
+        background-attachment: fixed;
+      }
       body:not(.theme-hicontrast) .panel,
       body:not(.theme-hicontrast) .stat,
       body:not(.theme-hicontrast) .card,
