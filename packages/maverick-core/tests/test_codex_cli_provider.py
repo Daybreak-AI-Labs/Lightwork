@@ -190,6 +190,7 @@ class TestAuthGating:
         assert login["cmd"][0] == client._binary_path
         assert login["cmd"][:2] == [client._binary_path, "login"]
         assert login["input"] == FAKE_TOKEN          # STDIN carries the token
+        assert login.get("encoding") == "utf-8"      # UTF-8 pinned here too
         assert FAKE_TOKEN not in " ".join(login["cmd"])  # argv never does
 
     def test_no_login_when_auth_json_present(self, codex_env, monkeypatch):
@@ -229,6 +230,10 @@ class TestExec:
         assert "You are terse." in call["input"]   # system reached the prompt
         assert "2+2?" in call["input"]
         assert call.get("shell") is None           # list argv, never shell=True
+        # UTF-8 pinned so a "→" in the prompt/reply doesn't UnicodeEncodeError
+        # under Windows' cp1252 locale default.
+        assert call.get("encoding") == "utf-8"
+        assert call.get("errors") == "replace"
         assert FAKE_TOKEN not in " ".join(cmd)
 
     def test_budget_records_tokens_at_zero_dollars(self, codex_env, monkeypatch):

@@ -210,6 +210,7 @@ class CodexCLIClient:
                 [*self._launch_prefix(), "login", "--with-access-token"],
                 input=self._access_token,
                 capture_output=True, text=True, timeout=60,
+                encoding="utf-8", errors="replace",
             )
             if proc.returncode != 0:
                 raise RuntimeError(
@@ -384,6 +385,11 @@ class CodexCLIClient:
                     cmd,
                     input=prompt,
                     capture_output=True, text=True,
+                    # Codex speaks UTF-8 on stdin/stdout. Pin it explicitly:
+                    # text=True otherwise uses the locale default (cp1252 on
+                    # Windows), which raised UnicodeEncodeError on prompts /
+                    # replies containing non-Latin-1 chars (e.g. U+2192 "→").
+                    encoding="utf-8", errors="replace",
                     timeout=self.timeout_seconds,
                     cwd=self.cwd or tmp,
                 )
