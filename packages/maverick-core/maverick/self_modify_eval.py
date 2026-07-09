@@ -189,7 +189,19 @@ def run_git_apply(patch: str, workdir: Path, sb, *,
     mechanic — both the isolated eval (:func:`git_apply`) and the live-tree
     deploy (:func:`maverick.self_modify_apply.apply_change`) call it, so the
     staging/``-p1``/cleanup can't drift between them; the only difference is which
-    backend the caller resolves."""
+    backend the caller resolves.
+
+    Strict-first with a ``--recount`` fallback: if the strict ``--check`` fails,
+    retry with ``git apply --recount``, which re-derives each hunk's line counts
+    from its body instead of trusting the ``@@`` header. This rescues the common
+    LLM failure mode where a hand-written diff has correct context/body but a
+    MISCOUNTED hunk header (models can't reliably count diff lines) — git errors
+    "corrupt patch" on the header while the change itself is sound. It is a no-op
+    for well-formed patches (they clear the strict gate above and never reach it)
+    and does NOT rescue a genuine context mismatch (wrong context lines still
+    fail both gates). Both rungs run ``--check`` before their real apply, so a
+    non-applying patch still writes nothing; a patch that fails BOTH gates fails
+    closed with the ORIGINAL strict error as the reason."""
     workdir = Path(workdir)
     if not (patch or "").strip():
         return False, "empty patch"
@@ -199,13 +211,27 @@ def run_git_apply(patch: str, workdir: Path, sb, *,
     except OSError as e:  # pragma: no cover -- temp write failure
         return False, f"could not stage patch: {e}"
     try:
+        # Rung 1 — strict: the check gate guarantees a non-applying patch writes
+        # nothing; a clean patch takes this path and behaves exactly as before.
         chk = sb.exec(f"git apply --check -p1 {patch_file.name}")
-        if not getattr(chk, "ok", False):
-            return False, f"patch does not apply: {chk.stderr.strip()[:200]}"
-        res = sb.exec(f"git apply -p1 {patch_file.name}")
-        if not getattr(res, "ok", False):
-            return False, f"git apply failed: {res.stderr.strip()[:200]}"
-        return True, "applied"
+        if getattr(chk, "ok", False):
+            res = sb.exec(f"git apply -p1 {patch_file.name}")
+            if not getattr(res, "ok", False):
+                return False, f"git apply failed: {res.stderr.strip()[:200]}"
+            return True, "applied"
+        # Rung 2 — recount fallback: only reached when strict --check failed. Lets
+        # git re-derive the hunk line counts from the body, rescuing a miscounted
+        # header while still refusing a real context mismatch (it fails --check
+        # too). The check gate again protects against a half-write.
+        rchk = sb.exec(f"git apply --check --recount -p1 {patch_file.name}")
+        if getattr(rchk, "ok", False):
+            res = sb.exec(f"git apply --recount -p1 {patch_file.name}")
+            if not getattr(res, "ok", False):
+                return False, f"git apply failed: {res.stderr.strip()[:200]}"
+            return True, "applied (recounted)"
+        # Both gates failed → fail closed, reporting the ORIGINAL strict error so
+        # a genuinely-broken patch gives a meaningful reason.
+        return False, f"patch does not apply: {chk.stderr.strip()[:200]}"
     except Exception as e:  # pragma: no cover -- sandbox exec failure
         return False, f"apply error: {e}"
     finally:
