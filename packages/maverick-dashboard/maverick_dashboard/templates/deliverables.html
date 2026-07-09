@@ -14,16 +14,34 @@
     </p>
   {% endif %}
 
-  {% if items or role or showing_mine %}
+  {% if items or role or showing_mine or active_roles %}
     <div class="dlv-filter" role="group" aria-label="Filter by role">
       {% if mine %}
         <a href="/deliverables" class="dlv-chip{% if showing_mine %} dlv-chip--on{% endif %}">Mine</a>
       {% endif %}
       <a href="/deliverables?role=all" class="dlv-chip{% if not showing_mine and not role %} dlv-chip--on{% endif %}">All</a>
-      {% for r in roles %}
+      {# Only roles with live work get a chip — not the whole catalogue. #}
+      {% for r in active_roles %}
         <a href="/deliverables?role={{ r }}" class="dlv-chip{% if role == r %} dlv-chip--on{% endif %}{% if r in mine %} dlv-chip--mine{% endif %}">{{ r }}</a>
       {% endfor %}
+      {# A hand-picked role that has no work yet still needs its own chip. #}
+      {% if role and role not in active_roles %}
+        <a href="/deliverables?role={{ role }}" class="dlv-chip dlv-chip--on">{{ role }}</a>
+      {% endif %}
     </div>
+    {# The full role set is searchable rather than a wall of chips. #}
+    {% if roles|length > active_roles|length %}
+      <form class="dlv-jump" method="get" action="/deliverables" role="search">
+        <input list="dlv-roles" name="role" class="input dlv-jump__in"
+               placeholder="Search {{ roles|length }} roles…" autocomplete="off"
+               aria-label="Jump to a role"
+               value="{{ role if role and role not in active_roles else '' }}">
+        <datalist id="dlv-roles">
+          {% for r in roles %}<option value="{{ r }}"></option>{% endfor %}
+        </datalist>
+        <button class="btn" type="submit">Go</button>
+      </form>
+    {% endif %}
   {% endif %}
 
   {% if awaiting %}
@@ -99,7 +117,9 @@
   {% endif %}
 
   <style>
-    .dlv-filter { display: flex; flex-wrap: wrap; gap: var(--space-2); margin-bottom: var(--space-5); }
+    .dlv-filter { display: flex; flex-wrap: wrap; gap: var(--space-2); margin-bottom: var(--space-3); }
+    .dlv-jump { display: flex; gap: var(--space-2); align-items: center; margin-bottom: var(--space-5); max-width: 30rem; }
+    .dlv-jump__in { flex: 1 1 auto; }
     .dlv-chip {
       padding: 0.3rem 0.8rem; border: 1px solid var(--border); border-radius: 999px;
       font-size: var(--text-sm); color: var(--muted); background: var(--surface-1);

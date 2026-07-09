@@ -32,6 +32,27 @@ class AgentOverrideIn(BaseModel):
     extends: str | None = None
 
 
+class AssessmentRefreshIn(BaseModel):
+    """Auto-draft (or re-draft) a governance assessment. ``template`` selects
+    which lenses to run; ``None`` keeps the existing/default one."""
+    template: str | None = Field(default=None, max_length=64)
+
+
+class AssessmentReviewIn(BaseModel):
+    """A reviewer's decision on one lens of an assessment."""
+    lens: str = Field(..., pattern="^(privacy|security|ai_risk)$")
+    decision: str = Field(..., pattern="^(accepted|needs_work)$")
+    note: str | None = Field(default=None, max_length=4000)
+    cadence_days: int | None = Field(default=None, ge=0, le=3650)
+
+
+class AssessmentEvidenceIn(BaseModel):
+    """An evidence note/link attached to a specific finding."""
+    lens: str = Field(..., pattern="^(privacy|security|ai_risk)$")
+    control: str = Field(..., max_length=200)
+    evidence: str = Field(..., max_length=2000)
+
+
 class SignoffIn(BaseModel):
     """A human's sign-off on a finished, gated deliverable -- the certify/reject
     decision the pack's output gate calls for, with an optional review note."""
