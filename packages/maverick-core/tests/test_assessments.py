@@ -134,6 +134,14 @@ def test_review_writes_an_audit_event(monkeypatch, tmp_path):
     assert reviews[0]["subject"] == "calm_bot" and reviews[0]["reviewer"] == "ada"
 
 
+def test_sweep_due_refreshes_and_reports(monkeypatch):
+    _use_surface(monkeypatch, SAFE)
+    A.refresh("agent", "calm_bot", now=1.0)          # a draft -> due
+    out = A.sweep_due(now=5.0)
+    assert out["refreshed"] == 1
+    assert any(d["subject"] == "calm_bot" for d in out["due"])
+
+
 def test_refresh_on_change_only_touches_existing(monkeypatch):
     _use_surface(monkeypatch, SAFE)
     # No assessment yet -> a change is a no-op (doesn't spawn one).

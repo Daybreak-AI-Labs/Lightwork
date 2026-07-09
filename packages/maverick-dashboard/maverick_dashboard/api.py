@@ -1142,6 +1142,15 @@ async def export_assessments_endpoint(request: Request, format: str = "json") ->
     return JSONResponse({"rows": rows})
 
 
+@router.post("/assessments/sweep")
+async def sweep_assessments_endpoint(request: Request) -> dict:
+    """Re-assess every subject now (catch drift) and return what needs attention.
+    The same sweep the automation scheduler runs daily, on demand."""
+    require_permission(request, "admin")
+    from maverick import assessments
+    return assessments.sweep_due()
+
+
 @router.get("/assessments/{kind}/{name}")
 async def get_assessment_endpoint(request: Request, kind: str, name: str) -> dict:
     require_permission(request, "audit")

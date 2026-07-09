@@ -492,6 +492,22 @@ def due_assessments(now: float | None = None) -> list[dict]:
     return out
 
 
+def sweep_due(now: float | None = None) -> dict:
+    """Re-draft every stored assessment (so drift is caught) and return the ones
+    still needing human attention. This is the primitive the scheduler fires on a
+    cadence and the dashboard's "Re-check due now" button calls on demand."""
+    now = time.time() if now is None else now
+    refreshed = 0
+    for key in list(_load_all().keys()):
+        kind, _, name = key.partition(":")
+        try:
+            if refresh(kind, name, now=now) is not None:
+                refreshed += 1
+        except Exception:  # pragma: no cover -- one bad subject never stops the sweep
+            pass
+    return {"refreshed": refreshed, "due": due_assessments(now=now)}
+
+
 def export_rows() -> list[dict]:
     """One flat row per finding, for CSV/JSON audit export."""
     rows = []

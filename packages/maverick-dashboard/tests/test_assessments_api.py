@@ -76,6 +76,19 @@ def test_review_rejects_bad_lens(monkeypatch, tmp_path):
     assert r.status_code == 422  # schema pattern rejects it
 
 
+def test_sweep_endpoint(monkeypatch, tmp_path):
+    name = _an_agent(monkeypatch, tmp_path)
+    if not name:
+        import pytest
+        pytest.skip("no packs discovered")
+    c = _client()
+    c.post(f"/api/v1/assessments/agent/{name}/refresh", json={})
+    r = c.post("/api/v1/assessments/sweep", json={})
+    assert r.status_code == 200
+    body = r.json()
+    assert body["refreshed"] >= 1 and "due" in body
+
+
 def test_refresh_unknown_agent_404(monkeypatch, tmp_path):
     _isolate(monkeypatch, tmp_path)
     r = _client().post("/api/v1/assessments/agent/____nope____/refresh", json={})

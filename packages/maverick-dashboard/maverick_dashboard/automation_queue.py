@@ -45,6 +45,8 @@ FLOW_RESUME_KIND = "flow_resume"  # one-shot: resume a paused flow run
 FLOW_SWEEP_KIND = "flow_delay_sweep"  # recurring: re-arm flow runs whose delay elapsed
 FLOW_EVOLVE_KIND = "flow_evolve"  # recurring: autonomously revert a regressed rewrite
 FLOW_CRON_KIND = "flow_cron"     # recurring: fire a scheduled flow on its own cron cadence
+ASSESS_SWEEP_KIND = "assessment_sweep"  # recurring: re-assess subjects + flag due reviews
+_ASSESS_SWEEP_CRON = "0 3 * * *"  # re-check governance assessments daily at 03:00
 _FLOW_SWEEP_CRON = "* * * * *"   # check for due delays every minute
 _FLOW_EVOLVE_CRON = "*/30 * * * *"   # re-check applied rewrites every 30 min
 _MIN_INTERVAL = 60               # floor for a per-trigger cadence (matches the UI/schema)
@@ -285,6 +287,17 @@ def _handle_dream(_job=None) -> None:
         dreaming.dream_cycle(_world())
     except Exception:  # pragma: no cover -- fail-open
         log.exception("scheduled dream cycle failed")
+
+
+def _handle_assess_sweep(_job=None) -> None:
+    """Re-assess every governance subject on a cadence, so drift flips accepted
+    reviews back to needs-review and overdue re-reviews surface without a human
+    remembering to click. Fail-open like the other cron handlers."""
+    try:
+        from maverick import assessments
+        assessments.sweep_due()
+    except Exception:  # pragma: no cover -- fail-open
+        log.exception("scheduled assessment sweep failed")
 
 
 def _handle_flywheel(_job=None) -> None:
@@ -775,6 +788,10 @@ def reconcile() -> None:
         _reconcile_flow_crons()
     if flow.auto_evolve_enabled():
         _ensure_cron(FLOW_EVOLVE_KIND, _FLOW_EVOLVE_CRON)
+    # Governance assessments re-check daily whenever the automation worker runs.
+    # Cheap and a no-op with an empty register; keeps accepted reviews honest
+    # (drift) and surfaces overdue re-reviews without a human remembering to.
+    _ensure_cron(ASSESS_SWEEP_KIND, _ASSESS_SWEEP_CRON)
 
 
 # ---- lifecycle --------------------------------------------------------------
@@ -806,6 +823,7 @@ def start() -> bool:
         w.register(FLOW_SWEEP_KIND, _handle_flow_sweep)
         w.register(FLOW_EVOLVE_KIND, _handle_flow_evolve)
         w.register(FLOW_CRON_KIND, _handle_flow_cron)
+        w.register(ASSESS_SWEEP_KIND, _handle_assess_sweep)
         # Seed the cron jobs + actually start the threads BEFORE committing to the
         # module globals, so a failure in reconcile() (e.g. a boot-time sqlite
         # write error) leaves us cleanly un-started and retryable -- not wedged
