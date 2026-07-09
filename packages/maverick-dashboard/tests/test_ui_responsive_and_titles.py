@@ -30,9 +30,9 @@ def test_panel_has_horizontal_overflow(monkeypatch, tmp_path):
     monkeypatch.delenv("MAVERICK_DASHBOARD_TOKEN", raising=False)
     from maverick_dashboard import app as dash_app
     dash_app._world_cache.clear()
-    # /goals renders real .panel markup (the / landing does not; the old
-    # page-text assertion matched the inline CSS rule, not markup).
-    r = _client().get("/goals")
+    # /spend renders real .panel markup wrapping a wide table (Goals moved to a
+    # rows layout with no table, so it no longer needs the overflow wrapper).
+    r = _client().get("/spend")
     assert 'class="panel' in r.text
     # The base stylesheet gives panels overflow-x so tables don't overflow.
     css = _client().get("/static/lightwork.css").text
