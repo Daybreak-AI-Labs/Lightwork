@@ -222,7 +222,12 @@ def govern_solver_change(
     out.resolved_map = {"baseline": r_base, "candidate": r_cand}
     out.baseline_held_in, out.candidate_held_in = _rate(r_base, held_in), _rate(r_cand, held_in)
     out.baseline_held_out, out.candidate_held_out = _rate(r_base, held_out), _rate(r_cand, held_out)
-    out.samples = sum(i.total_tests for i in held_out)
+    # Evidence count must be in the SAME unit as the fitness metric: the metric
+    # is a per-INSTANCE resolved-rate (each held-out instance is one independent
+    # trial), so samples = number of held-out instances, not the sum of their
+    # test ids. Counting test ids inflates the evidence n and lets a tiny
+    # instance corpus clear the code-rung min_samples on a handful of trials.
+    out.samples = len(held_out)
 
     # 4. Overfit guard: gained on seen instances but not unseen -> memorisation.
     out.overfit = (out.candidate_held_in > out.baseline_held_in
@@ -233,11 +238,19 @@ def govern_solver_change(
                       "solver memorised seen instances")
         return out
 
-    # 5. Capability non-escalation proof over the solver patch.
+    # 5. Capability non-escalation proof over the solver patch. Pass the current
+    #    solver source as the differential baseline (baseline_files) -- without
+    #    it capability_delta has no "before" to diff against and the proof is
+    #    unset, so the code rung falls back to demanding one (fail-closed) and a
+    #    genuine uplift can never promote.
     cb = ca = None
     probe: tuple[str, ...] = ()
     try:
-        cb, ca, probe = capability_delta(solver_patch)
+        baseline_files = None
+        solver_py = Path(solver_dir) / "solver.py"
+        if solver_py.exists():
+            baseline_files = {"solver.py": solver_py.read_text(encoding="utf-8")}
+        cb, ca, probe = capability_delta(solver_patch, baseline_files=baseline_files)
         if cb is not None and ca is not None and probe:
             out.capability_widens = any(ca.permits(t) and not cb.permits(t) for t in probe)
     except Exception:
