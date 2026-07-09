@@ -95,10 +95,64 @@
   .fd__chat-msg.note { align-self: flex-start; color: var(--muted); font-style: italic; padding: 0 2px; }
   .fd__chat-form { display: flex; gap: var(--space-2); padding: var(--space-2); border-top: 1px solid var(--border); }
   .fd__chat-form input { flex: 1; }
+
+  /* ---- Redesign layer: glass surfaces, a hero NL "Draft" band, and a
+     friendly Steps view toggled against the Canvas. Additive — the toolbar
+     stays the single shared control bar; the toggle only swaps the workspace
+     below it, so every existing control id is untouched. ---- */
+  :where(body){
+    --glass: color-mix(in srgb, var(--panel) 68%, transparent);
+    --glass-soft: color-mix(in srgb, var(--panel) 54%, transparent);
+    --glass-border: color-mix(in srgb, var(--text) 13%, transparent);
+    --glass-edge: inset 0 1px 0 0 color-mix(in srgb, #ffffff 8%, transparent);
+  }
+  .fd__canvas-wrap, .fd__props{
+    border-color: var(--glass-border); background: var(--glass-soft);
+    box-shadow: var(--glass-edge);
+    -webkit-backdrop-filter: blur(10px); backdrop-filter: blur(10px);
+  }
+  /* Promote "Describe your workflow → ✨ Draft" to a hero band. */
+  .fd__nl{
+    background: var(--glass); border: 1px solid var(--glass-border); border-radius: var(--radius-pill);
+    box-shadow: var(--glass-edge); padding: 3px 3px 3px var(--space-3); align-items: center;
+    -webkit-backdrop-filter: blur(10px); backdrop-filter: blur(10px);
+  }
+  .fd__nl input{ border: 0; background: transparent; font-size: var(--text-md); }
+  .fd__nl input:focus{ outline: none; box-shadow: none; }
+  .fd__nl::before{ content: "✨"; align-self: center; }
+  /* Steps ⇄ Canvas view switch. */
+  .fd__viewswitch{ display: inline-flex; border: 1px solid var(--glass-border);
+    border-radius: var(--radius-md); overflow: hidden; background: var(--glass-soft); }
+  .fd__viewswitch button{ font: inherit; font-size: var(--text-sm); padding: 0.3rem 0.75rem;
+    background: transparent; color: var(--muted); border: 0; cursor: pointer; }
+  .fd__viewswitch button.is-on{ background: var(--brand); color: var(--brand-fg); font-weight: var(--font-semibold); }
+  /* Toggle the workspace: Steps hides palette/canvas/props, shows the cards. */
+  .fd[data-view="steps"] .fd__palette,
+  .fd[data-view="steps"] .fd__canvas-wrap,
+  .fd[data-view="steps"] .fd__props{ display: none; }
+  #fd-simple{ display: none; grid-column: 1 / -1; overflow-y: auto; padding-bottom: var(--space-6); }
+  .fd[data-view="steps"] #fd-simple{ display: block; }
+  .fd-simple__inner{ max-width: 640px; margin-inline: auto; }
+  .fd-scard{ display: flex; align-items: center; gap: var(--space-3); padding: var(--space-3) var(--space-4);
+    border: 1px solid var(--glass-border); border-radius: var(--radius-lg); background: var(--glass-soft);
+    box-shadow: var(--glass-edge); -webkit-backdrop-filter: blur(10px); backdrop-filter: blur(10px); }
+  .fd-scard__ic{ width: 34px; height: 34px; border-radius: 9px; display: grid; place-items: center;
+    background: var(--brand-subtle); color: var(--brand-hi); flex: none; font-size: 18px; }
+  .fd-scard__kind{ font-size: var(--text-xs); text-transform: uppercase; letter-spacing: 0.08em; color: var(--muted); }
+  .fd-scard__t{ font-weight: var(--font-semibold); }
+  .fd-scard__d{ color: var(--muted); font-size: var(--text-sm); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .fd-conn{ width: 2px; height: 14px; background: var(--border); margin-inline-start: calc(var(--space-4) + 16px); }
+  .fd-simple__empty{ text-align: center; color: var(--muted); padding: var(--space-6) var(--space-4);
+    border: 1px dashed var(--glass-border); border-radius: var(--radius-lg); background: var(--glass-soft); }
+  .fd-simple__foot{ display: flex; justify-content: center; margin-top: var(--space-4); }
 </style>
 
-<div class="fd">
+<div class="fd" data-view="steps">
   <div class="fd__bar">
+    <div class="fd__viewswitch" role="group" aria-label="Flow view">
+      <button type="button" id="fd-view-steps" class="is-on" aria-pressed="true">Steps</button>
+      <button type="button" id="fd-view-canvas" aria-pressed="false">Canvas</button>
+    </div>
     <input class="input fd__name" id="fd-name" placeholder="Flow name" aria-label="Flow name" />
     <input class="input" id="fd-id" placeholder="flow-id" aria-label="Flow id" style="width:140px;" />
     <div class="fd__nl">
@@ -187,6 +241,13 @@
   <div class="fd__props" id="fd-props">
     <p class="fd__empty">Select a node to edit it, or add a step from the palette. Connect steps by dragging from a node's bottom dot to another node.</p>
   </div>
+
+  <!-- Friendly "Steps" view: a readable overview of the flow's steps, rendered
+       from the flow's saved shape. The toolbar above (Draft / Save / Test /
+       Run) is the shared control bar; switch to Canvas to edit structure. -->
+  <div id="fd-simple" aria-label="Flow steps">
+    <div class="fd-simple__inner" id="fd-simple-body"></div>
+  </div>
 </div>
 
 <script id="fd-seed" type="application/json">{{ (seed_flow or none) | tojson }}</script>
@@ -195,5 +256,96 @@
 </script>
 <script>
 {% include "flow_designer.js" %}
+</script>
+<script>
+  // Steps ⇄ Canvas view switch. The canvas engine (flow_designer.js) owns its
+  // own IIFE state; this only toggles which workspace shows and renders a
+  // read-friendly step list from the flow's seed shape. Structural editing
+  // stays in Canvas — the shared toolbar drives both.
+  (function () {
+    var fd = document.querySelector('.fd');
+    var body = document.getElementById('fd-simple-body');
+    var stepsBtn = document.getElementById('fd-view-steps');
+    var canvasBtn = document.getElementById('fd-view-canvas');
+    if (!fd || !body || !stepsBtn || !canvasBtn) return;
+
+    var ICON = { agent: '🧠', action: '⚙️', branch: '🔀', switch: '🔃', foreach: '🔁',
+      while: '🔄', parallel: '🔱', approval: '✅', delay: '⏱', wait_event: '📥',
+      scope: '🛡', subflow: '📎', setvar: '📝', trigger: '⚡' };
+    var KLABEL = { agent: 'Agent', action: 'Action', branch: 'Branch', switch: 'Switch',
+      foreach: 'For-each', while: 'While', parallel: 'Parallel', approval: 'Approval',
+      delay: 'Delay', wait_event: 'Wait for event', scope: 'Try / catch',
+      subflow: 'Sub-flow', setvar: 'Set data' };
+
+    function seed() {
+      try { return JSON.parse(document.getElementById('fd-seed').textContent || 'null'); }
+      catch (e) { return null; }
+    }
+    function summarize(n) {
+      return (n.brief || n.prompt || n.condition || n.tool || n.name
+              || (n.params && JSON.stringify(n.params)) || '').toString();
+    }
+    function render() {
+      var f = seed();
+      var nodes = (f && Array.isArray(f.nodes)) ? f.nodes : [];
+      body.textContent = '';
+      if (!nodes.length) {
+        var empty = document.createElement('div');
+        empty.className = 'fd-simple__empty';
+        empty.textContent = 'No steps yet. Describe your workflow in the bar above and hit ✨ Draft to generate the steps — then fine-tune here or in Canvas.';
+        body.appendChild(empty);
+        return;
+      }
+      nodes.forEach(function (n, i) {
+        if (i) { var c = document.createElement('div'); c.className = 'fd-conn'; body.appendChild(c); }
+        var card = document.createElement('div');
+        card.className = 'fd-scard';
+        var ic = document.createElement('span');
+        ic.className = 'fd-scard__ic'; ic.textContent = ICON[n.kind] || '◆';
+        var mid = document.createElement('span');
+        mid.style.minWidth = '0'; mid.style.flex = '1';
+        var kind = document.createElement('div'); kind.className = 'fd-scard__kind';
+        kind.textContent = KLABEL[n.kind] || (n.kind || 'step');
+        var title = document.createElement('div'); title.className = 'fd-scard__t';
+        title.textContent = n.title || n.name || KLABEL[n.kind] || 'Step';
+        var desc = document.createElement('div'); desc.className = 'fd-scard__d';
+        desc.textContent = summarize(n);
+        mid.appendChild(kind); mid.appendChild(title); if (desc.textContent) mid.appendChild(desc);
+        card.appendChild(ic); card.appendChild(mid);
+        body.appendChild(card);
+      });
+      var foot = document.createElement('div');
+      foot.className = 'fd-simple__foot';
+      var edit = document.createElement('button');
+      edit.type = 'button'; edit.className = 'btn btn--ghost';
+      edit.textContent = 'Edit structure in Canvas →';
+      edit.addEventListener('click', function () { setView('canvas'); });
+      foot.appendChild(edit);
+      body.appendChild(foot);
+    }
+
+    var fittedOnce = false;
+    function setView(v) {
+      fd.setAttribute('data-view', v);
+      var steps = v === 'steps';
+      stepsBtn.classList.toggle('is-on', steps);
+      canvasBtn.classList.toggle('is-on', !steps);
+      stepsBtn.setAttribute('aria-pressed', steps ? 'true' : 'false');
+      canvasBtn.setAttribute('aria-pressed', steps ? 'false' : 'true');
+      if (steps) { render(); }
+      else if (!fittedOnce) {
+        // The canvas was hidden on load; re-fit it the first time it's shown.
+        fittedOnce = true;
+        var fit = document.getElementById('fd-fit');
+        if (fit) setTimeout(function () { fit.click(); }, 30);
+      }
+    }
+    stepsBtn.addEventListener('click', function () { setView('steps'); });
+    canvasBtn.addEventListener('click', function () { setView('canvas'); });
+    // Re-render the Steps list after a Draft (the seed script node is rewritten
+    // server-agnostically by the drafter into the canvas; keep the overview honest
+    // by re-reading on focus back to Steps). Default view is Steps.
+    render();
+  })();
 </script>
 {% endblock %}
