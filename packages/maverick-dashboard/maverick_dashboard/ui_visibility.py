@@ -55,19 +55,22 @@ PAGES: tuple[dict, ...] = (
      "floor": "view", "default": "view"},
     {"path": "/deliverables", "label": "Deliverables", "group": "Operate", "icon": "templates",
      "floor": "view", "default": "view"},
-    {"path": "/agents", "label": "Agents", "group": "Operate", "icon": "agents",
+    {"path": "/agents", "label": "Agent Factory", "group": "Operate", "icon": "agents",
      "floor": "view", "default": "operate"},
     {"path": "/roles", "label": "Roles", "group": "Operate", "icon": "roles",
      "floor": "view", "default": "operate"},
     {"path": "/workforce", "label": "Workforce", "group": "Operate", "icon": "agents",
      "floor": "view", "default": "view"},
-    {"path": "/workflows", "label": "Workflows", "group": "Operate", "icon": "workflow",
+    # Flows: the redesigned builder (/flows/designer) is the primary sidebar
+    # entry. The saved-workflows index and the older NL builder are reached from
+    # the Flows builder / Automations / Agents pages rather than the sidebar, so
+    # the nav shows one clear "Flows" job instead of three near-duplicates.
+    {"path": "/flows/designer", "label": "Flows", "group": "Operate", "icon": "workflow",
      "floor": "view", "default": "operate"},
-    # Builder/designer surfaces, linked from Workflows, Automations and Agents.
+    {"path": "/workflows", "label": "Workflows", "group": "Operate", "icon": "workflow",
+     "floor": "view", "default": "operate", "in_nav": False},
     {"path": "/workflow-builder", "label": "Workflow Builder", "group": "Operate",
      "icon": "workflow", "floor": "view", "default": "operate", "in_nav": False},
-    {"path": "/flows/designer", "label": "Flow Designer", "group": "Operate", "icon": "graph",
-     "floor": "view", "default": "operate", "in_nav": False},
     {"path": "/automations", "label": "Automations", "group": "Operate", "icon": "clock",
      "floor": "view", "default": "operate"},
     {"path": "/fleets", "label": "Fleets", "group": "Operate", "icon": "fleets",

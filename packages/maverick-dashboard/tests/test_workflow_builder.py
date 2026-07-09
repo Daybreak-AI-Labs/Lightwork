@@ -531,8 +531,9 @@ def test_workflow_builder_page_renders(monkeypatch, tmp_path):
     # Decluttered: the automate panels are collapsible <details>, not always-open.
     assert '<details class="wf__sched" id="wf-sched"' in r.text
     assert '<summary class="wf__sched-title">' in r.text
-    # Reachable from the primary nav (Operate group).
-    assert '<span class="nav-label">Workflows</span>' in r.text
+    # Reachable from the primary nav (Operate group): the redesigned Flows
+    # builder is the sidebar entry; the workflow builder is linked in-page from it.
+    assert '<span class="nav-label">Flows</span>' in r.text
 
 
 def test_p1_builder_refinements(monkeypatch, tmp_path):
