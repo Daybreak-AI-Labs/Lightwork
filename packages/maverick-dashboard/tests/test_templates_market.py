@@ -50,7 +50,8 @@ def test_templates_page_lists_catalog_with_ratings(catalog):
     assert "trip-plan" in r.text and "research-report" in r.text
     assert "★★★★☆" in r.text       # rated template
     assert "unrated" in r.text      # the other one
-    assert 'href="/templates"' in r.text  # nav link wired
+    # (Templates is folded out of the sidebar in the moderate declutter; still
+    # reachable at /templates and rendered above.)
 
 
 def test_use_template_links_prefill_chat_not_autostart(catalog):

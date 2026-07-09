@@ -162,6 +162,28 @@ PAGES: tuple[dict, ...] = (
      "floor": "view", "default": "admin"},
 )
 
+# Moderate sidebar declutter: keep a focused set of everyday destinations in the
+# rail; fold the rest OUT of the sidebar (in_nav=False) while leaving them fully
+# reachable in-page and by URL. One place to adjust the balance — move a path
+# out of this set to bring its tab back. (Pages already in_nav=False in the
+# registry above, e.g. builders reached from a parent page, are unaffected.)
+_NAV_FOLD: frozenset[str] = frozenset({
+    # Operate — reached from Goals / Agent Factory / Workforce
+    "/start", "/projects", "/roles", "/fleets",
+    # Observe — analytical/advanced views reached from Overview & friends
+    "/discovery", "/providers", "/benchmarks", "/flows/analytics",
+    "/walkthroughs", "/facts", "/plan-tree-3d",
+    # Govern — advanced governance surfaces
+    "/simulate", "/compartments", "/replay", "/trust",
+    # Extend — secondary catalogs
+    "/store", "/templates", "/tools", "/styles",
+    # Admin — rarely-touched plumbing
+    "/cache", "/embed-demo",
+})
+for _pg in PAGES:
+    if _pg["path"] in _NAV_FOLD:
+        _pg["in_nav"] = False
+
 _PAGES_BY_PATH = {p["path"]: p for p in PAGES}
 
 # Lockout guard: the pages an admin needs to *undo* a bad matrix save. Always

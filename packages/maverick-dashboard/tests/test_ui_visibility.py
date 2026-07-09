@@ -143,18 +143,18 @@ def test_nav_groups_per_role(monkeypatch, tmp_path):
     # viewer: read-only pages only -- no run/build/admin surfaces, and the
     # groups left empty (Extend, Admin) are dropped whole.
     v = hrefs("viewer")
-    assert {"/goals", "/overview", "/spend", "/safety", "/facts"} <= v
+    assert {"/goals", "/overview", "/spend", "/safety", "/learning"} <= v
     assert v.isdisjoint({"/chat", "/automations", "/settings", "/users", "/mcp", "/audit"})
     assert {g["label"] for g in ui_visibility.nav_groups("viewer")} == {
         "Operate", "Observe", "Govern"}
-    # auditor: the audit read surfaces, nothing operational.
+    # auditor: the audit read surfaces, nothing operational. (/replay is folded
+    # out of the sidebar in the moderate declutter; reached from Audit in-page.)
     a = hrefs("auditor")
-    assert {"/audit", "/replay", "/compliance", "/overview"} <= a
-    assert a.isdisjoint({"/chat", "/settings", "/automations"})
+    assert {"/audit", "/compliance", "/overview"} <= a
+    assert a.isdisjoint({"/chat", "/settings", "/automations", "/replay"})
     # operator: operate surfaces but no admin plumbing.
     o = hrefs("operator")
-    assert {"/chat", "/goals", "/automations", "/approvals", "/skills",
-            "/walkthroughs", "/styles"} <= o
+    assert {"/chat", "/goals", "/automations", "/approvals", "/skills"} <= o
     assert o.isdisjoint({"/settings", "/users", "/tenants", "/mcp", "/channels",
                          "/cache", "/audit"})
     # admin: every sidebar page.

@@ -127,7 +127,8 @@ def test_store_page_renders_entries(monkeypatch, tmp_path):
     assert "summarize-url" in r.text
     assert "Summarise any URL" in r.text
     assert "Install" in r.text
-    assert 'href="/store"' in r.text  # nav link
+    # (Store is folded out of the sidebar in the moderate declutter; still
+    # reachable at /store and rendered above.)
 
 
 def test_store_page_empty_state(monkeypatch, tmp_path):

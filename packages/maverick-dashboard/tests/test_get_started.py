@@ -39,9 +39,12 @@ def test_checklist_reflects_progress(monkeypatch, tmp_path):
     assert "1 of 3 done" in t and "gs__step--done" in t
 
 
-def test_nav_has_get_started(monkeypatch, tmp_path):
+def test_get_started_reachable(monkeypatch, tmp_path):
+    # Get started is folded out of the sidebar in the moderate declutter (it's
+    # onboarding, linked from the empty states), but still renders at /start.
     _isolate(monkeypatch, tmp_path)
     import maverick.config as config
     monkeypatch.setattr(config, "any_provider_configured", lambda: False)
-    t = _client().get("/start").text
-    assert '<span class="nav-label">Get started</span>' in t and 'href="/start"' in t
+    r = _client().get("/start")
+    assert r.status_code == 200
+    assert 'page-title">Get started' in r.text
