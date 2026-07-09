@@ -42,7 +42,7 @@
     </div>
   </div>
 
-  <h2>Active now</h2>
+  <div class="section-head" style="margin-top: var(--space-5);"><h2>Active now</h2></div>
   <div class="panel">
     <p class="muted" style="margin-top: 0;">Agents running right now (live).</p>
     <div id="active-now" aria-live="polite"><p class="muted">loading…</p></div>
@@ -124,13 +124,13 @@
     })();
   </script>
 
-  <h2>Pending approvals</h2>
+  <div class="section-head" style="margin-top: var(--space-5);"><h2>Pending approvals</h2></div>
   <div class="panel">
     <p class="muted" style="margin-top: 0;">Actions held for human sign-off (EU AI Act Art 14, the human-oversight requirement) — approve or deny each one here.</p>
     {% include "_approvals_queue.html" %}
   </div>
 
-  <h2>By guardrail</h2>
+  <div class="section-head" style="margin-top: var(--space-5);"><h2>By guardrail</h2></div>
   <div class="panel">
     {% set _gk = [
       ('governance', by_kind.get('governance_denied', 0)),
@@ -156,39 +156,34 @@
     {% endif %}
   </div>
 
-  <h2>Filter</h2>
-  <div class="panel">
-    <form method="get" action="/oversight" style="display: flex; gap: 1rem; align-items: end; flex-wrap: wrap;">
+  <div class="section-head" style="margin-top: var(--space-5);"><h2>Recent interventions</h2></div>
+  <details class="panel" style="margin-bottom: var(--space-3);"{% if ranged or day %} open{% endif %}>
+    <summary style="cursor: pointer; color: var(--muted); font-size: var(--text-sm);">
+      ⧉ Filter window{% if ranged %} — {{ since or '…' }} → {{ until or '…' }}{% elif day %} — {{ day }}{% else %} — today{% endif %}
+    </summary>
+    <form method="get" action="/oversight" style="display: flex; gap: var(--space-3); align-items: end; flex-wrap: wrap; margin-top: var(--space-3);">
       <label>
         <div class="muted" style="font-size: 0.75rem; text-transform: uppercase;">events scanned</div>
-        <input type="number" name="n" value="{{ n }}" min="1" max="5000"
-               class="ctl" />
+        <input type="number" name="n" value="{{ n }}" min="1" max="5000" class="ctl" />
       </label>
       <label>
         <div class="muted" style="font-size: 0.75rem; text-transform: uppercase;">day (YYYY-MM-DD)</div>
-        <input type="text" name="day" value="{{ day or '' }}" placeholder="today"
-               class="ctl" />
+        <input type="text" name="day" value="{{ day or '' }}" placeholder="today" class="ctl" />
       </label>
       <label>
         <div class="muted" style="font-size: 0.75rem; text-transform: uppercase;">since (YYYY-MM-DD)</div>
-        <input type="text" name="since" value="{{ since or '' }}" placeholder="open"
-               class="ctl" />
+        <input type="text" name="since" value="{{ since or '' }}" placeholder="open" class="ctl" />
       </label>
       <label>
         <div class="muted" style="font-size: 0.75rem; text-transform: uppercase;">until (YYYY-MM-DD)</div>
-        <input type="text" name="until" value="{{ until or '' }}" placeholder="open"
-               class="ctl" />
+        <input type="text" name="until" value="{{ until or '' }}" placeholder="open" class="ctl" />
       </label>
-      <button type="submit" class="btn">
-        load
-      </button>
+      <button type="submit" class="btn">Load</button>
     </form>
-    <p class="muted" style="margin: 0.5rem 0 0; font-size: 0.8rem;">
+    <p class="muted" style="margin: var(--space-2) 0 0; font-size: 0.8rem;">
       Set <em>since</em> and/or <em>until</em> for a multi-day window (incident review); they override <em>day</em>.
     </p>
-  </div>
-
-  <h2>Recent interventions</h2>
+  </details>
   <div class="panel">
     {% if events %}
       <table>

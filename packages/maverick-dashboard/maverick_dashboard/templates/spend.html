@@ -44,7 +44,7 @@
 
   {% set _max = (episodes | map(attribute='cost_dollars') | max) if episodes else 0 %}
 
-  <h2>Cost per run</h2>
+  <div class="section-head"><h2>Cost per run</h2></div>
   <div class="panel">
     {% if episodes %}
       <div class="spend-bars" role="img"

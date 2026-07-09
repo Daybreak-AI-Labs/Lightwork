@@ -24,13 +24,15 @@ def _prep(monkeypatch, tmp_path):
 
 # ---------- table headers carry scope ----------
 
-def test_goals_table_headers_have_scope(monkeypatch, tmp_path):
+def test_goals_renders_runs_accessibly(monkeypatch, tmp_path):
+    # Goals now renders scannable run rows (not a table); the a11y guarantee is
+    # that it carries no bare header cells and surfaces the run.
     _prep(monkeypatch, tmp_path)
     from maverick import world_model
     world_model.WorldModel(tmp_path / "world.db").create_goal("g", "d")
     r = _client().get("/goals")
     assert r.status_code == 200
-    assert '<th scope="col">' in r.text
+    assert "g-row" in r.text and "g" in r.text
     assert "<th>" not in r.text  # no bare header cells
 
 
