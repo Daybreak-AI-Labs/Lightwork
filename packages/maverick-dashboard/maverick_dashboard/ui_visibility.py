@@ -118,6 +118,11 @@ PAGES: tuple[dict, ...] = (
      "floor": "view", "default": "operate", "in_nav": False},
     {"path": "/safety", "label": "Safety", "group": "Govern", "icon": "shield",
      "floor": "view", "default": "view"},
+    # Privacy / security / AI-risk assessments of every agent & flow: auto-drafted
+    # from the declared capability surface, reviewed + signed off, re-assessed on
+    # change. Reading is audit-level; drafting/reviewing is admin (mutation API).
+    {"path": "/assessments", "label": "Assessments", "group": "Govern", "icon": "shield",
+     "floor": "audit", "default": "audit"},
     {"path": "/compliance", "label": "Compliance", "group": "Govern", "icon": "compliance",
      "floor": "view", "default": "audit"},
     {"path": "/compartments", "label": "Compartments", "group": "Govern", "icon": "compartments",

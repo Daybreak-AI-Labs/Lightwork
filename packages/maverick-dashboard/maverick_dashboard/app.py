@@ -1872,6 +1872,33 @@ async def agents_page(request: Request) -> HTMLResponse:
     )
 
 
+@app.get("/assessments", response_class=HTMLResponse)
+async def assessments_page(request: Request) -> HTMLResponse:
+    """Govern → Assessments: the privacy / security / AI-risk register. Every
+    agent and flow can be auto-assessed from its declared capability surface,
+    reviewed and signed off per lens, and re-assessed when it changes. The
+    register + templates load client-side from /api/v1/assessments; the page
+    provides the subject pickers (agents + flows) for drafting a new one."""
+    agents: list = []
+    flows: list = []
+    try:
+        from maverick.domain_edit import list_agents
+        agents = [{"name": a["name"], "suite": a.get("suite")} for a in list_agents()]
+    except Exception:  # never 500 the page if the factory layer is unavailable
+        agents = []
+    try:
+        from maverick import flow as _flow
+        if _flow.enabled():
+            from maverick.flow import store as _flow_store
+            flows = [{"id": f.get("id"), "name": f.get("name") or f.get("id")}
+                     for f in _flow_store.list_flow_summaries()]
+    except Exception:  # pragma: no cover -- flow engine optional
+        flows = []
+    return templates.TemplateResponse(
+        request, "assessments.html", {"agents": agents, "flows": flows},
+    )
+
+
 def model_picker_options() -> list[tuple[str, str]]:
     """Every model a picker may offer, as ``(spec, provider_label)``: the built-in
     catalogue, plus any ``[models] catalog`` the admin added, capped to the admin

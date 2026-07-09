@@ -40,6 +40,9 @@ from ._shared import _world_cache as _world_cache  # re-export: tests clear api.
 from .api_schemas import (
     AgentOverrideIn,
     AnswerIn,
+    AssessmentEvidenceIn,
+    AssessmentRefreshIn,
+    AssessmentReviewIn,
     AttachmentOut,
     CachePurgeIn,
     CatalogInstallIn,
@@ -1095,6 +1098,111 @@ async def delete_connection_endpoint(request: Request, name: str) -> dict:
     if not connections.delete_connection(name, owner=goal_owner_filter(request)):
         raise HTTPException(status_code=404, detail="no connection with that name")
     return {"deleted": connections.normalize_name(name)}
+
+
+# ---- governance assessments: privacy / security / AI-risk register ------------
+# Reading the register is audit-level; drafting and reviewing (which record a
+# governance decision) require admin. Auto-draft heuristics live in
+# maverick.assessments; this is thin plumbing over that engine.
+
+def _assess_kind(kind: str) -> str:
+    if kind not in ("agent", "flow"):
+        raise HTTPException(status_code=400, detail="kind must be 'agent' or 'flow'")
+    return kind
+
+
+@router.get("/assessments")
+async def list_assessments_endpoint(request: Request) -> dict:
+    require_permission(request, "audit")
+    from maverick import assessments
+    return {"assessments": assessments.list_assessments(),
+            "due": assessments.due_assessments(),
+            "templates": assessments.list_templates()}
+
+
+@router.get("/assessments/export")
+async def export_assessments_endpoint(request: Request, format: str = "json") -> Response:
+    """Audit export of every finding. ``?format=csv`` for a spreadsheet."""
+    require_permission(request, "audit")
+    from maverick import assessments
+    rows = assessments.export_rows()
+    if format == "csv":
+        import csv
+        import io
+        cols = ["kind", "subject", "assessment_status", "lens", "lens_status",
+                "control", "severity", "finding_status", "note", "mitigation",
+                "evidence", "reviewer", "reviewed_at"]
+        buf = io.StringIO()
+        w = csv.DictWriter(buf, fieldnames=cols, extrasaction="ignore")
+        w.writeheader()
+        for r in rows:
+            w.writerow(r)
+        return Response(content=buf.getvalue(), media_type="text/csv",
+                        headers={"Content-Disposition": "attachment; filename=assessments.csv"})
+    return JSONResponse({"rows": rows})
+
+
+@router.get("/assessments/{kind}/{name}")
+async def get_assessment_endpoint(request: Request, kind: str, name: str) -> dict:
+    require_permission(request, "audit")
+    from maverick import assessments
+    a = assessments.get_assessment(_assess_kind(kind), name)
+    if a is None:
+        raise HTTPException(status_code=404, detail="no assessment for that subject")
+    return a
+
+
+@router.post("/assessments/{kind}/{name}/refresh")
+async def refresh_assessment_endpoint(
+    request: Request, kind: str, name: str, payload: AssessmentRefreshIn
+) -> dict:
+    """Auto-draft (or re-draft, detecting drift) the assessment for a subject."""
+    require_permission(request, "admin")
+    from maverick import assessments
+    a = assessments.refresh(_assess_kind(kind), name, template=payload.template)
+    if a is None:
+        raise HTTPException(status_code=404, detail=f"unknown {kind}: {name!r}")
+    return a
+
+
+@router.post("/assessments/{kind}/{name}/review")
+async def review_assessment_endpoint(
+    request: Request, kind: str, name: str, payload: AssessmentReviewIn
+) -> dict:
+    """Record a reviewer's accept / needs-work decision on one lens."""
+    require_permission(request, "admin")
+    from maverick import assessments
+    try:
+        a = assessments.record_review(
+            _assess_kind(kind), name, payload.lens, payload.decision,
+            reviewer=caller_principal(request) or "", note=payload.note or "",
+            cadence_days=payload.cadence_days)
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e)) from e
+    if a is None:
+        raise HTTPException(status_code=404, detail="no assessment for that subject")
+    return a
+
+
+@router.post("/assessments/{kind}/{name}/evidence")
+async def add_assessment_evidence_endpoint(
+    request: Request, kind: str, name: str, payload: AssessmentEvidenceIn
+) -> dict:
+    require_permission(request, "admin")
+    from maverick import assessments
+    a = assessments.add_evidence(_assess_kind(kind), name, payload.lens,
+                                 payload.control, payload.evidence)
+    if a is None:
+        raise HTTPException(status_code=404, detail="no such finding")
+    return a
+
+
+@router.delete("/assessments/{kind}/{name}", status_code=204)
+async def delete_assessment_endpoint(request: Request, kind: str, name: str) -> Response:
+    require_permission(request, "admin")
+    from maverick import assessments
+    assessments.delete_assessment(_assess_kind(kind), name)
+    return Response(status_code=204)
 
 
 # ---- flows: a deterministic skeleton over agentic + tool steps ---------------
