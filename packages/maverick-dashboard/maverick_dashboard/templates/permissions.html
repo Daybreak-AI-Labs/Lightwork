@@ -22,7 +22,7 @@
     </p>
   </div>
 
-  <h2>Tools</h2>
+  <div class="section-head"><h2>Tools</h2></div>
   <div class="panel">
     {% if perm.tools %}
       <table>
@@ -51,7 +51,7 @@
     {% endif %}
   </div>
 
-  <h2>Capabilities &amp; limits</h2>
+  <div class="section-head"><h2>Capabilities &amp; limits</h2></div>
   <div class="panel">
     <table>
       <tbody>
@@ -65,7 +65,7 @@
     </table>
   </div>
 
-  <h2>Channels</h2>
+  <div class="section-head"><h2>Channels</h2></div>
   <div class="panel">
     {% if perm.channels %}
       {% for c in perm.channels %}
@@ -76,7 +76,7 @@
     {% endif %}
   </div>
 
-  <h2>Your data</h2>
+  <div class="section-head"><h2>Your data</h2></div>
   <div class="panel">
     <p class="muted">
       Your prompts and tool outputs are sent to:

@@ -32,7 +32,7 @@
 </div>
 
 {% if items %}
-  <h2>{{ items|length }} walkthrough{{ 's' if items|length != 1 }}</h2>
+  <div class="section-head"><h2>{{ items|length }} walkthrough{{ 's' if items|length != 1 }}</h2></div>
   {% for it in items %}
   <div class="panel">
     <h3 style="margin: 0 0 0.75rem; font-size: 1rem; text-transform: none; letter-spacing: 0; color: var(--text);">

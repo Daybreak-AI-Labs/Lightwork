@@ -2,6 +2,7 @@
 {% block title %}Channels · Lightwork{% endblock %}
 {% block content %}
   <h1 class="page-title">Channels</h1>
+  <p class="page-subtitle">Connect the places your team already works — Slack, email, and more — so people can start work and get results where they are.</p>
 
   {% if saved %}
   <div class="panel" role="status"
@@ -19,7 +20,7 @@
   </p>
 
   {% for c in managed %}
-  <h2>{{ c.label }}</h2>
+  <div class="section-head"><h2>{{ c.label }}</h2></div>
   <div class="panel">
     <form method="post" action="/channels/save"
           style="display: flex; flex-direction: column; gap: var(--space-3); max-width: 36rem;">
@@ -59,7 +60,7 @@
   </div>
   {% endfor %}
 
-  <h2>All configured channels</h2>
+  <div class="section-head"><h2>All configured channels</h2></div>
   <div class="panel">
     {% if channels %}
       <table>

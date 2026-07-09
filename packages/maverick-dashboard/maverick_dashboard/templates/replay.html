@@ -17,10 +17,10 @@
           {%- else %}No signed log{% endif -%}
         </span>
       </div>
-      <div class="stat"><strong>{{ replay.summary.tool_calls }}</strong> <span class="muted">tool calls</span></div>
-      <div class="stat"><strong>{{ replay.summary.approved }}/{{ replay.summary.approvals }}</strong> <span class="muted">approvals granted</span></div>
-      <div class="stat"><strong>{{ replay.summary.denied }}</strong> <span class="muted">denied</span></div>
-      <div class="stat"><strong>{{ replay.summary.blocks }}</strong> <span class="muted">governance blocks</span></div>
+      <div class="stat"><div class="num">{{ replay.summary.tool_calls }}</div><div class="label">tool calls</div></div>
+      <div class="stat"><div class="num">{{ replay.summary.approved }}/{{ replay.summary.approvals }}</div><div class="label">approvals granted</div></div>
+      <div class="stat"><div class="num">{{ replay.summary.denied }}</div><div class="label">denied</div></div>
+      <div class="stat"><div class="num">{{ replay.summary.blocks }}</div><div class="label">governance blocks</div></div>
     </div>
     <p style="margin-top:1rem">
       <a class="btn btn--primary" href="/api/v1/replay/{{ goal.id }}/evidence">⬇ Export evidence packet (JSON)</a>
