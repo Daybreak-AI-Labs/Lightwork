@@ -217,6 +217,11 @@
     .sidebar {
       grid-column: 1; grid-row: 2;
       position: sticky; top: var(--topbar-h); align-self: start;
+      /* Fill the visible column even on short pages: without the min-height the
+         rail (background + border) stops at its content and the column below
+         reads as a broken half-drawn panel. Sticky + exactly viewport-height
+         means the visible rail is always fully painted. */
+      min-height: calc(100dvh - var(--topbar-h));
       max-height: calc(100dvh - var(--topbar-h)); overflow-y: auto;
       background: linear-gradient(180deg,
         color-mix(in srgb, var(--panel) 58%, var(--bg)),
@@ -241,6 +246,16 @@
     .nav-label { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
     .sidebar nav a:hover { color: var(--text); background: var(--surface-2); text-decoration: none; }
     .sidebar nav a:hover .nav-ic { color: var(--text); opacity: 1; }
+    /* The "New goal" CTA is an <a> inside the nav, so the muted link rules above
+       out-specify .btn--primary and washed it out to grey-on-pale (it read as
+       disabled). Re-assert the primary treatment at equal-or-higher specificity. */
+    .sidebar nav a.navquick,
+    .sidebar nav a.navquick:hover {
+      color: var(--brand-fg); background: var(--brand);
+      font-weight: var(--font-semibold);
+      box-shadow: 0 2px 12px color-mix(in srgb, var(--brand) 38%, transparent);
+    }
+    .sidebar nav a.navquick:hover { background: var(--brand-hi); }
     .sidebar nav a.active {
       color: var(--brand); background: var(--brand-subtle); font-weight: var(--font-medium);
     }
@@ -279,7 +294,9 @@
       grid-column: 1 / -1; grid-row: 3;
       text-align: center; color: var(--muted);
       padding: var(--space-6); font-size: var(--text-xs);
-      border-top: 1px solid var(--border);
+      /* Hairline, not the full border token: a hard rule across the whole shell
+         read as a seam/artifact under the translucent ambient background. */
+      border-top: 1px solid var(--hairline);
     }
 
     /* ---------- headings ---------- */
@@ -525,6 +542,17 @@
           radial-gradient(1100px 720px at 88% -12%, color-mix(in srgb, var(--brand) 15%, transparent), transparent 62%),
           radial-gradient(920px 640px at -12% 28%, color-mix(in srgb, var(--accent) 9%, transparent), transparent 58%),
           radial-gradient(760px 540px at 55% 112%, color-mix(in srgb, var(--info) 8%, transparent), transparent 60%),
+          var(--bg);
+        background-attachment: fixed;
+      }
+      /* Light theme: the same washes that read as ambient glow over a dark bg
+         mix a DARK brand navy into white, rendering as grey stains (visually a
+         dirty screen, caught by the screenshot audit). Keep the effect but at
+         whisper strength, and drop the bottom wash entirely. */
+      body.theme-light:not(.theme-hicontrast) {
+        background:
+          radial-gradient(1100px 720px at 88% -12%, color-mix(in srgb, var(--brand) 5%, transparent), transparent 62%),
+          radial-gradient(920px 640px at -12% 28%, color-mix(in srgb, var(--accent) 4%, transparent), transparent 58%),
           var(--bg);
         background-attachment: fixed;
       }

@@ -367,9 +367,16 @@ def nav_groups(role: str | None) -> list[dict]:
                 shown = cell if cell is not None else default_visible(page, role)
                 if not shown:
                     continue
-        if not groups or groups[-1]["label"] != page["group"]:
-            groups.append({"label": page["group"], "links": []})
-        groups[-1]["links"].append(
+        # Merge by group label (first-seen order), not adjacency: a page whose
+        # group differs from its list neighbours (e.g. an entry re-homed to
+        # Admin) must join its group, not split it into a duplicate section.
+        for g in groups:
+            if g["label"] == page["group"]:
+                break
+        else:
+            g = {"label": page["group"], "links": []}
+            groups.append(g)
+        g["links"].append(
             {"href": page["path"], "label": page["label"], "icon": page["icon"]}
         )
     return groups
@@ -394,9 +401,14 @@ def matrix() -> list[dict]:
                 el and (cell if cell is not None else default_visible(page, role))
             )
             cells.append({"role": role, "eligible": el, "visible": visible, "locked": locked})
-        if not groups or groups[-1]["label"] != page["group"]:
-            groups.append({"label": page["group"], "pages": []})
-        groups[-1]["pages"].append({
+        # Merge by group label like nav_groups (see comment there).
+        for g in groups:
+            if g["label"] == page["group"]:
+                break
+        else:
+            g = {"label": page["group"], "pages": []}
+            groups.append(g)
+        g["pages"].append({
             "path": page["path"], "label": page["label"],
             "floor": page["floor"], "in_nav": page.get("in_nav", True),
             "cells": cells,
