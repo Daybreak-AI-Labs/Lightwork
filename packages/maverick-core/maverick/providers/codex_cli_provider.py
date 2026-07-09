@@ -147,12 +147,21 @@ class CodexCLIClient:
         cwd = cfg.get("cwd")
         self.cwd = str(cwd) if isinstance(cwd, str) and cwd.strip() else None
 
-        if shutil.which(self.binary) is None:
+        # Resolve to an ABSOLUTE path once, here, and launch that -- not the
+        # bare name. On Windows `npm install -g` puts `codex` on PATH as a
+        # `.cmd`/`.bat` shim; a bare-name subprocess (correctly, no shell) then
+        # fails with FileNotFoundError mid-run even though `shutil.which` found
+        # the shim. Resolving + routing the shim (see `_launch_prefix`) fixes
+        # that. shutil.which also accepts an already-absolute path, so an
+        # operator-set `binary` pointing straight at codex.exe works too.
+        resolved = shutil.which(self.binary)
+        if resolved is None:
             raise RuntimeError(
                 f"Codex CLI binary {self.binary!r} not found on PATH. Install it "
                 "(npm install -g @openai/codex, or brew install codex) or set "
                 "[providers.codex_cli] binary in ~/.maverick/config.toml."
             )
+        self._binary_path = resolved
         if not self._access_token and not _auth_file_present():
             raise RuntimeError(
                 "Codex CLI is not authenticated: no CODEX_ACCESS_TOKEN env var, "
@@ -169,6 +178,23 @@ class CodexCLIClient:
         except Exception:  # pragma: no cover -- config read fails soft
             return {}
 
+    def _launch_prefix(self) -> list[str]:
+        """The argv head that actually launches Codex.
+
+        A real executable is launched directly by its absolute path. On Windows
+        a `.cmd`/`.bat` shim (how npm installs the `codex` bin) cannot be run by
+        CreateProcess without an interpreter, so route it through ``%COMSPEC%``
+        (cmd.exe) ``/c``. That is still a fixed argv with no shell string
+        parsing, so it stays within the no-shell rule (the interpreter is an
+        explicit argv entry, not a subprocess shell). No-op off Windows and for
+        a direct ``.exe``.
+        """
+        path = self._binary_path
+        if os.name == "nt" and path.lower().endswith((".cmd", ".bat")):
+            comspec = os.environ.get("COMSPEC") or "cmd.exe"
+            return [comspec, "/c", path]
+        return [path]
+
     # ------------------------------------------------------------------ auth
 
     def _ensure_login(self) -> None:
@@ -181,7 +207,7 @@ class CodexCLIClient:
                 return
             self._login_attempted = True
             proc = subprocess.run(  # fixed argv, no shell
-                [self.binary, "login", "--with-access-token"],
+                [*self._launch_prefix(), "login", "--with-access-token"],
                 input=self._access_token,
                 capture_output=True, text=True, timeout=60,
             )
@@ -345,7 +371,7 @@ class CodexCLIClient:
         with tempfile.TemporaryDirectory(prefix="mav-codex-") as tmp:
             last_msg = Path(tmp) / "last-message.txt"
             cmd = [
-                self.binary, "exec",
+                *self._launch_prefix(), "exec",
                 "--json",
                 "--skip-git-repo-check",
                 "--sandbox", self.sandbox_mode,
@@ -363,7 +389,7 @@ class CodexCLIClient:
                 )
             except FileNotFoundError as e:
                 raise RuntimeError(
-                    f"Codex CLI binary {self.binary!r} disappeared from PATH"
+                    f"Codex CLI binary {self._binary_path!r} disappeared from PATH"
                 ) from e
             except subprocess.TimeoutExpired as e:
                 raise RuntimeError(
