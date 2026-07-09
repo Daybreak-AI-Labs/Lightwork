@@ -157,26 +157,46 @@ def _desanitize_csv_patch(diff: str) -> str:
     return diff
 
 
+# Benchmark env the coding agent needs, applied with setdefault so an operator
+# or the CLI can override any of them. THE critical one is CONSENT_MODE: the
+# ``shell`` tool declares risk="high", which under secure-by-default resolves to
+# "ask" and DENIES non-interactively -- so without this every shell/git call the
+# agent makes is refused and it produces no patch (the first paid run's failure).
+# The rest mirror benchmarks/RUNBOOK_SWE_BENCH_VERIFIED.md: OPAQUE=1 is the
+# anti-cheat honesty gate (blocks test-file reads / git log -p / network),
+# MAX_STEPS bounds turns, LONG_CMD_TIMEOUT lets pytest run through the shell tool.
+_BENCH_ENV = {
+    "MAVERICK_CONSENT_MODE": "auto-approve",
+    "MAVERICK_CODING_MODE": "1",
+    "MAVERICK_BENCHMARK_OPAQUE": "1",
+    "MAVERICK_USE_SKILLS": "0",
+    "MAVERICK_MAX_STEPS": "25",
+    "MAVERICK_LONG_CMD_TIMEOUT": "600",
+}
+
+
 def llm_proposer(inst: Instance) -> str:
     """Generate a patch with the coding-mode agent (needs a provider key).
 
     Adapter over the proven ``benchmarks/swe_bench.py`` solver (``run_maverick``:
-    coding mode, best-of-N via ``MAVERICK_BEST_OF_N``). It runs the agent WITH
-    the instance's checked-out tree as its working directory, then captures the
-    agent's ACTUAL edits as a raw ``git diff`` (:func:`_worktree_diff`) -- which
-    is always ``git apply``-able. It deliberately does NOT return
-    ``row.predicted_patch``: that field is CSV-sanitized for the harness's CSV
-    column and can carry a leading ``'`` guard byte that makes ``git apply``
-    reject the whole patch ("No valid patches in input"). The prose-extracted
-    patch is only a de-sanitized fallback for the rare case the agent printed a
-    diff without editing the tree.
+    coding mode, best-of-N via ``MAVERICK_BEST_OF_N``). Runs the agent with the
+    instance's checked-out tree as cwd, then takes the agent's proposed fix as
+    the de-sanitized prose diff (coding mode's deliverable IS the emitted unified
+    diff; ``row.predicted_patch`` is CSV-sanitized -- a leading ``'`` guard byte
+    would make ``git apply`` reject it, so :func:`_desanitize_csv_patch` strips
+    it). Falls back to the agent's actual working-tree edits (:func:`_worktree_diff`,
+    always ``git apply``-able) when no prose diff was emitted.
+
+    Sets the benchmark env (:data:`_BENCH_ENV`) via ``setdefault`` -- most
+    importantly ``MAVERICK_CONSENT_MODE=auto-approve`` so the agent's shell/git
+    tools are not consent-denied non-interactively. Safe for a THROWAWAY instance
+    checkout on a disposable box; use a container sandbox backend for the full run.
 
     Writes a per-instance forensics sidecar (``<ledger-dir>/forensics/`` or
     ``MAVERICK_SWEBENCH_FORENSICS``) with the model's result text, both patch
-    captures, and cost/turns -- so a failed apply/grade is debuggable without a
-    re-run. Resets the tree afterward (``git reset --hard`` + ``git clean
-    -fdx``): point ``repo_path`` ONLY at a dedicated instance checkout. Fail-loud
-    on a missing key -- a keyless run must not silently score 0.
+    captures, cost/turns. Resets the tree afterward (``git reset --hard`` + ``git
+    clean -fdx``): point ``repo_path`` ONLY at a dedicated instance checkout.
+    Fail-loud on a missing key -- a keyless run must not silently score 0.
     """
     if not (os.environ.get("ANTHROPIC_API_KEY") or os.environ.get("MAVERICK_PROVIDER_READY")):
         raise RuntimeError(
@@ -184,6 +204,8 @@ def llm_proposer(inst: Instance) -> str:
             "MAVERICK_PROVIDER_READY=1 if another provider is configured in "
             "~/.maverick/config.toml). Use --proposer oracle for the keyless "
             "pipeline proof.")
+    for k, v in _BENCH_ENV.items():
+        os.environ.setdefault(k, v)
 
     from swe_bench import _reset_workdir, run_maverick
 
@@ -197,9 +219,9 @@ def llm_proposer(inst: Instance) -> str:
             gold_patch=inst.gold_patch, language=inst.language)
         tree_diff = _worktree_diff(inst.repo_path)
         prose_diff = _desanitize_csv_patch(row.predicted_patch or "")
-        # Authoritative: the agent's real edits. Fall back to its prose diff
-        # only when it printed a patch without touching the tree.
-        return tree_diff if tree_diff.strip() else prose_diff
+        # Coding mode's deliverable is the emitted diff; prefer it. Fall back to
+        # the agent's real working-tree edits when it emitted no prose diff.
+        return prose_diff if prose_diff.strip() else tree_diff
     finally:
         _dump_forensics(inst, row, tree_diff, prose_diff)
         os.chdir(prev_cwd)
