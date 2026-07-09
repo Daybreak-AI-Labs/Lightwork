@@ -1373,7 +1373,18 @@
 
   // ---- gallery: curated starter graphs (one click -> editable canvas) ----
   function loadGallery() {
-    apiFetch('/api/v1/flows/gallery').then(function (r) { return r.ok ? r.json() : { flows: [] }; })
+    apiFetch('/api/v1/flows/gallery').then(function (r) {
+        // Flow engine off (the default install): say so up front instead of
+        // letting the user build a whole flow and only learn it on Save.
+        if (r.status === 403) {
+          var msg = document.getElementById('fd-msg');
+          if (msg && !msg.textContent) {
+            msg.textContent = 'Flows are disabled on this server — you can design and export, '
+              + 'but Save/Run need an administrator to enable [flows].';
+          }
+        }
+        return r.ok ? r.json() : { flows: [] };
+      })
       .then(function (j) {
         var box = document.getElementById('fd-examples'); if (!box) return;
         (j.flows || []).forEach(function (g) {
@@ -1564,5 +1575,9 @@
     fromApiFlow(seed);
     say('Loaded the template as a flow — add branches, approvals, or loops around it.');
   } else { render(); renderProps(); }
+
+  // The friendly Steps view renders the LIVE graph (not just the server seed),
+  // so nodes built on the canvas show up the moment you switch views.
+  window.__fdLiveFlow = toApiFlow;
 })();
 {% endraw %}
