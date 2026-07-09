@@ -261,22 +261,25 @@
       });
     })();
 
-    // Collapsible sidebar groups. Default open (progressive enhancement: with
-    // no JS every group stays visible); collapse state persists per-group in
-    // localStorage, but the group holding the active page is always forced open.
+    // Collapsible sidebar groups. Chat-first: groups start COLLAPSED so the
+    // nav isn't a wall of every page — the group holding the active page is
+    // always forced open, and any group the user pins open persists per-group
+    // in localStorage. Progressive enhancement: with no JS the markup leaves
+    // every group open (aria-expanded="true"), so nothing is hidden without JS.
     (function() {
-      const KEY = 'mvk_nav_collapsed';
-      let collapsed = {};
-      try { collapsed = JSON.parse(localStorage.getItem(KEY) || '{}') || {}; } catch (e) {}
+      const KEY = 'mvk_nav_expanded';
+      let expanded = {};
+      try { expanded = JSON.parse(localStorage.getItem(KEY) || '{}') || {}; } catch (e) {}
       document.querySelectorAll('.navgrp__toggle').forEach(function(btn) {
         const grp = btn.getAttribute('data-grp');
         const hasActive = btn.parentElement.querySelector('a.active');
-        if (collapsed[grp] && !hasActive) btn.setAttribute('aria-expanded', 'false');
+        const open = !!expanded[grp] || !!hasActive;
+        btn.setAttribute('aria-expanded', open ? 'true' : 'false');
         btn.addEventListener('click', function() {
-          const open = btn.getAttribute('aria-expanded') === 'true';
-          btn.setAttribute('aria-expanded', open ? 'false' : 'true');
-          collapsed[grp] = open;
-          try { localStorage.setItem(KEY, JSON.stringify(collapsed)); } catch (e) {}
+          const nowOpen = btn.getAttribute('aria-expanded') === 'true';
+          btn.setAttribute('aria-expanded', nowOpen ? 'false' : 'true');
+          if (nowOpen) delete expanded[grp]; else expanded[grp] = true;
+          try { localStorage.setItem(KEY, JSON.stringify(expanded)); } catch (e) {}
         });
       });
     })();
