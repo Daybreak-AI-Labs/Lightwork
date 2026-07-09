@@ -63,6 +63,11 @@ class Instance:
     gold_patch: str = ""
     brief: str = ""
     language: str = "python"
+    # The GRADER's test fixture (SWE-bench semantics): applied to BOTH arms
+    # before running, because the graded FAIL_TO_PASS tests are usually added
+    # or updated by it. Distinct from the candidate patch, which the anti-cheat
+    # boundary still refuses if it touches tests.
+    test_patch: str = ""
 
     @property
     def total_tests(self) -> int:
@@ -79,6 +84,9 @@ class GovernedResult:
     baseline_score: float = 0.0     # pre-patch pass-rate (FAIL_TO_PASS should fail)
     candidate_score: float = 0.0    # post-patch pass-rate
     tests_resolved: bool = False    # all FAIL_TO_PASS pass AND all PASS_TO_PASS pass
+    # True when the env can't grade the instance at all (baseline can't run its
+    # own passing tests). Reported separately from unresolved; never resolved.
+    ungradable: bool = False
     capability_widens: bool | None = None
     promoted: bool = False          # the governed gate signed + recorded it
     approver_id: str | None = None
@@ -191,6 +199,7 @@ def govern_candidate(
     apply_fn: Callable[[str, Path], object] | None = None,
     timeout: float = 600.0,
     controller=None,
+    check_gold_overlap: bool = True,
 ) -> GovernedResult:
     """Drive one candidate patch through the full governance chain. Never raises.
 
@@ -201,6 +210,11 @@ def govern_candidate(
          isolated copies (``resolved`` = every FAIL_TO_PASS + PASS_TO_PASS passes);
       3. capability non-escalation proof;
       4. human-signed, reversible promotion recorded to the ledger.
+
+    ``check_gold_overlap=False`` disables ONLY the gold-copy similarity check --
+    for the ``oracle`` proposer, whose candidate IS the gold patch by definition
+    (overlap is 100% and meaningless there). Test/setup-edit refusal always
+    stays on; LLM runs must keep the overlap check armed.
     """
     from maverick.coding_mode import defensive_validate
     from maverick.self_modify_capability import capability_delta
@@ -217,7 +231,8 @@ def govern_candidate(
 
     # 1. Anti-cheat boundary -- structural, before any test is run.
     dv = defensive_validate(patch, fail_to_pass=inst.fail_to_pass,
-                            pass_to_pass=inst.pass_to_pass, gold_patch=inst.gold_patch)
+                            pass_to_pass=inst.pass_to_pass,
+                            gold_patch=inst.gold_patch if check_gold_overlap else "")
     out.warnings = list(dv.warnings)
     out.boundary_ok = bool(dv.ok)
     if not dv.ok:
@@ -234,6 +249,16 @@ def govern_candidate(
     except Exception as e:
         out.reason = f"could not isolate workspace: {e}"
         return out
+    # SWE-bench grading semantics: the instance's test_patch (the grader's
+    # added/updated tests) is applied to BOTH arms before anything runs --
+    # the graded FAIL_TO_PASS tests usually don't exist at base_commit.
+    if (inst.test_patch or "").strip():
+        for arm_name, arm_dir in (("baseline", base_dir), ("candidate", cand_dir)):
+            tp = apply(inst.test_patch, arm_dir)
+            if not getattr(tp, "ok", False):
+                out.reason = (f"grader test_patch did not apply to {arm_name}: "
+                              f"{getattr(tp, 'reason', 'unknown')}")
+                return out
     applied = apply(patch, cand_dir)
     if not getattr(applied, "ok", False):
         out.reason = f"patch did not apply: {getattr(applied, 'reason', 'unknown')}"
@@ -246,8 +271,19 @@ def govern_candidate(
     out.baseline_score, _, out.samples = _score(base_dir, inst, sb_base, timeout=timeout)
     out.candidate_score, out.tests_resolved, _ = _score(cand_dir, inst, sb_cand, timeout=timeout)
     if not out.tests_resolved:
-        out.reason = (f"not resolved: candidate {out.candidate_score:.3f} "
-                      f"(baseline {out.baseline_score:.3f}); some FAIL/PASS_TO_PASS failing")
+        # Honest-reporting distinction: if the BASELINE can't even run the
+        # instance's previously-passing tests, this environment can't grade the
+        # instance (deps missing / wrong interpreter) -- that's "ungradable
+        # here", not "the agent failed". Never counted as resolved either way
+        # (fail-closed); the tag keeps the scoreboard honest in both directions.
+        if out.baseline_score == 0.0 and inst.pass_to_pass:
+            out.ungradable = True
+            out.reason = ("ungradable in this environment: baseline cannot run "
+                          "the instance's own passing tests (install its deps "
+                          "or grade in the per-instance Docker env)")
+        else:
+            out.reason = (f"not resolved: candidate {out.candidate_score:.3f} "
+                          f"(baseline {out.baseline_score:.3f}); some FAIL/PASS_TO_PASS failing")
         return out
 
     # 3. Capability non-escalation proof (best-effort; a delta error stays None
@@ -312,6 +348,28 @@ def _promote(inst, patch, res, cb, ca, probe, *, keys_dir, ledger, controller):
 
 # --- CLI ----------------------------------------------------------------------
 
+def _sane_test_ids(ids: list, *, instance_id: str, which: str) -> list[str]:
+    """Drop malformed test ids, LOUDLY (no silent caps).
+
+    The upstream SWE-bench dataset built FAIL_TO_PASS/PASS_TO_PASS by
+    comma-splitting test-output lines, so a parametrized id whose params
+    contain a comma (``test_x[foo, bar-expected2]``) arrives truncated
+    (``test_x[foo,``). Passing such an id to pytest aborts the WHOLE chunk
+    ("not found"), zeroing every other test with it. Filter the malformation
+    signature -- unbalanced brackets or a trailing comma -- and say so."""
+    keep: list[str] = []
+    for t in ids:
+        t = str(t).strip()
+        if not t:
+            continue
+        if t.count("[") != t.count("]") or t.endswith((",", "\\")):
+            print(f"  [note ]  {instance_id}: dropping malformed {which} id "
+                  f"(upstream dataset truncation): {t!r}")
+            continue
+        keep.append(t)
+    return keep
+
+
 def _load_manifest(path: Path) -> list[Instance]:
     out: list[Instance] = []
     for line in Path(path).read_text().splitlines():
@@ -323,11 +381,14 @@ def _load_manifest(path: Path) -> list[Instance]:
         repo_path = row.get("repo_path") or str(Path(path).parent / "repos" / iid)
         out.append(Instance(
             instance_id=iid, repo_path=Path(repo_path),
-            fail_to_pass=list(row.get("fail_to_pass") or []),
-            pass_to_pass=list(row.get("pass_to_pass") or []),
+            fail_to_pass=_sane_test_ids(list(row.get("fail_to_pass") or []),
+                                        instance_id=iid, which="FAIL_TO_PASS"),
+            pass_to_pass=_sane_test_ids(list(row.get("pass_to_pass") or []),
+                                        instance_id=iid, which="PASS_TO_PASS"),
             gold_patch=row.get("gold_patch", "") or "",
             brief=row.get("brief", "") or "",
-            language=row.get("language", "python") or "python"))
+            language=row.get("language", "python") or "python",
+            test_patch=row.get("test_patch", "") or ""))
     return out
 
 
@@ -354,7 +415,7 @@ def main(argv: list[str] | None = None) -> int:
     print("=" * 78)
     print(f"  SWE-BENCH UNDER GOVERNANCE   proposer={args.proposer}  n={len(instances)}")
     print("=" * 78)
-    resolved = boundary_refused = unresolved = 0
+    resolved = boundary_refused = unresolved = ungradable = 0
     with tempfile.TemporaryDirectory(prefix="swebench-gov-") as td:
         for i, inst in enumerate(instances):
             try:
@@ -371,13 +432,17 @@ def main(argv: list[str] | None = None) -> int:
                 unresolved += 1
                 continue
             r = govern_candidate(inst, patch, keys_dir=args.keys, ledger=ledger,
-                                 workroot=Path(td) / f"i{i}", timeout=args.timeout)
+                                 workroot=Path(td) / f"i{i}", timeout=args.timeout,
+                                 check_gold_overlap=(args.proposer != "oracle"))
             if r.resolved_under_governance:
                 resolved += 1
                 tag = "PASS"
             elif not r.boundary_ok:
                 boundary_refused += 1
                 tag = "CHEAT"
+            elif r.ungradable:
+                ungradable += 1
+                tag = "NOENV"
             else:
                 unresolved += 1
                 tag = "FAIL"
@@ -385,7 +450,11 @@ def main(argv: list[str] | None = None) -> int:
     n = len(instances) or 1
     print("=" * 78)
     print(f"  resolved under governance: {resolved}/{len(instances)} ({100*resolved/n:.1f}%)"
-          f"   |  boundary-refused: {boundary_refused}  |  unresolved: {unresolved}")
+          f"   |  boundary-refused: {boundary_refused}  |  unresolved: {unresolved}"
+          f"   |  ungradable-here: {ungradable}")
+    if ungradable:
+        print("  NOTE: ungradable instances need their deps installed (or the Docker env);"
+              " they are NOT counted as resolved -- report the headline as X/(total).")
     print(f"  signed promotion ledger: {args.ledger}")
     print("=" * 78)
     return 0

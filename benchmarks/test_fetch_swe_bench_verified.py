@@ -69,12 +69,17 @@ class TestRowConversion:
         assert "diff --git" in out["gold_patch"]
         assert "+new" in out["gold_patch"]
 
-    def test_test_patch_NOT_exposed(self):
-        """The grader's test_patch is the HOLDOUT; the agent must not
-        see it. Our manifest must NOT include it."""
+    def test_test_patch_carried_for_the_grader(self):
+        """The grader NEEDS test_patch: SWE-bench semantics apply it to both
+        arms before scoring, because the graded FAIL_TO_PASS tests usually
+        don't exist at base_commit (verified live on pylint-dev__pylint-8898:
+        without it every instance scores 0.000 on both arms). The agent never
+        reads the manifest — run_maverick's env snapshot forwards only the
+        FAIL/PASS/GOLD vars — and the anti-cheat boundary still refuses any
+        CANDIDATE patch that touches tests."""
         m = _load_fetcher()
         out = m._row_to_manifest(self._sample_hf_row())
-        assert "test_patch" not in out
+        assert out["test_patch"].startswith("diff --git a/tests/test_x.py")
 
     def test_handles_empty_test_lists(self):
         m = _load_fetcher()

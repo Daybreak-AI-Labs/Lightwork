@@ -1142,7 +1142,13 @@ def _cmd_for(runner: str, ids: list[str]):
     if runner == "pytest":
         # Wave 9 fix (council #12): NO `-x` — that aborts on first
         # failure and we can never count PASS_TO_PASS correctly.
-        return "pytest --tb=short -p no:cacheprovider " + " ".join(q(i) for i in ids)
+        # `python3 -m pytest`, never bare `pytest` (CLAUDE.md environment
+        # rule): the module form puts the workdir on sys.path, so a repo's
+        # own uninstalled package is importable — bare `pytest` can't import
+        # it, and with an editable install of another checkout present it
+        # would silently run the tests against THAT tree instead of this one.
+        return ("python3 -m pytest --tb=short -p no:cacheprovider "
+                + " ".join(q(i) for i in ids))
     if runner in ("jest", "vitest"):
         files: list[str] = []
         names: list[str] = []
