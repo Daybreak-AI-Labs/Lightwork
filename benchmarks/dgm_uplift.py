@@ -88,6 +88,12 @@ def score_instance(inst, patch: str, workroot: Path, *, timeout: float = 600.0) 
     work = Path(workroot)
     try:
         _default_materialize(inst.repo_path, work / "tree")
+        # SWE-bench grading semantics: the grader's test_patch goes on first
+        # (the graded tests usually don't exist at base_commit).
+        if (getattr(inst, "test_patch", "") or "").strip():
+            tp = git_apply(inst.test_patch, work / "tree")
+            if not tp.ok:
+                return False
         applied = git_apply(patch, work / "tree")
         if not applied.ok:
             return False
