@@ -70,6 +70,7 @@
 
   <div class="as-bar">
     <span class="pill" id="as-due-count" title="Subjects needing attention">—</span>
+    <button class="btn btn--ghost" type="button" id="as-sweep" title="Re-assess every subject now (catch drift) and refresh what's due — the same sweep that runs automatically each day">↻ Re-check due now</button>
     <span class="as-bar__spacer"></span>
     <a class="btn btn--ghost" href="/api/v1/assessments/export?format=csv" id="as-export-csv">⬇ Export CSV</a>
     <a class="btn btn--ghost" href="/api/v1/assessments/export?format=json" target="_blank" rel="noopener">⬇ JSON</a>
@@ -299,6 +300,18 @@
         draftMsg.style.color = 'var(--accent)'; draftMsg.textContent = 'Assessed ' + name + '.';
         renderDetail(res.j); reload();
       }).catch(function () { draftMsg.style.color = 'var(--danger)'; draftMsg.textContent = 'Failed.'; });
+  });
+
+  var sweepBtn = document.getElementById('as-sweep');
+  if (sweepBtn) sweepBtn.addEventListener('click', function () {
+    sweepBtn.disabled = true; var label = sweepBtn.textContent; sweepBtn.textContent = 'Re-checking…';
+    jfetch('/api/v1/assessments/sweep', { method: 'POST', body: '{}' })
+      .then(function (r) { return r.ok ? r.json() : null; })
+      .then(function (res) {
+        sweepBtn.disabled = false; sweepBtn.textContent = label;
+        if (res) { dueCount.textContent = (res.due || []).length + ' need attention'; reload(); }
+      })
+      .catch(function () { sweepBtn.disabled = false; sweepBtn.textContent = label; });
   });
 
   reload();

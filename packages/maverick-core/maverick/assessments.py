@@ -431,7 +431,35 @@ def record_review(kind: str, name: str, lens: str, decision: str, *,
     else:
         a["status"] = "in_review"
     _save_all(data)
+    _audit_review(kind, name, lens, decision, reviewer, a["status"], now)
     return _summarize(a)
+
+
+def _audit_review(kind: str, name: str, lens: str, decision: str, reviewer: str,
+                  result_status: str, now: float) -> None:
+    """Anchor a sign-off in the signed audit chain, so a "reviewed" governance
+    record doesn't rest on the mutable JSON register alone. Best-effort: an audit
+    failure never blocks the review itself."""
+    try:
+        from .audit.events import AuditEvent, EventKind
+        from .audit.writer import default_audit_log
+        default_audit_log().record(AuditEvent(
+            ts=now, kind=EventKind.ASSESSMENT_REVIEW, agent="governance",
+            payload={"subject_kind": kind, "subject": name, "lens": lens,
+                     "decision": decision, "reviewer": reviewer or "",
+                     "result_status": result_status}))
+    except Exception:  # pragma: no cover -- audit is best-effort here
+        pass
+
+
+def refresh_on_change(kind: str, name: str, now: float | None = None) -> dict | None:
+    """Re-draft an assessment ONLY if one already exists (detecting drift), for
+    callers that just changed a subject (e.g. an agent-override save). Returns the
+    refreshed assessment, or ``None`` if the subject has no assessment yet — a
+    changed subject that was never assessed shouldn't spawn one silently."""
+    if _key(kind, name) not in _load_all():
+        return None
+    return refresh(kind, name, now=now)
 
 
 def add_evidence(kind: str, name: str, lens: str, control: str, evidence: str,
@@ -462,6 +490,22 @@ def due_assessments(now: float | None = None) -> list[dict]:
             out.append(_summarize(a))
     out.sort(key=lambda a: (a.get("due_at") or 0))
     return out
+
+
+def sweep_due(now: float | None = None) -> dict:
+    """Re-draft every stored assessment (so drift is caught) and return the ones
+    still needing human attention. This is the primitive the scheduler fires on a
+    cadence and the dashboard's "Re-check due now" button calls on demand."""
+    now = time.time() if now is None else now
+    refreshed = 0
+    for key in list(_load_all().keys()):
+        kind, _, name = key.partition(":")
+        try:
+            if refresh(kind, name, now=now) is not None:
+                refreshed += 1
+        except Exception:  # pragma: no cover -- one bad subject never stops the sweep
+            pass
+    return {"refreshed": refreshed, "due": due_assessments(now=now)}
 
 
 def export_rows() -> list[dict]:

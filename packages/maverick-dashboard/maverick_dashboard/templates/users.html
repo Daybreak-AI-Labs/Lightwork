@@ -25,7 +25,7 @@
   </p>
 
   {% if bootstrap_admins %}
-  <h2>Permanent administrators</h2>
+  <div class="section-head"><h2>Permanent administrators</h2></div>
   <div class="panel">
     <p class="muted" style="margin-top: 0;">Set on the server by your administrator — always admin and
       not removable here, so you can't lock yourself out.</p>
@@ -43,7 +43,7 @@
   </div>
   {% endif %}
 
-  <h2>Assigned users</h2>
+  <div class="section-head"><h2>Assigned users</h2></div>
   <div class="panel">
     {% if users %}
     {% for principal, role in users %}
@@ -68,7 +68,7 @@
     {% endif %}
   </div>
 
-  <h2>Add or change a user</h2>
+  <div class="section-head"><h2>Add or change a user</h2></div>
   <div class="panel">
     <form method="post" action="/users/set" style="display: flex; flex-wrap: wrap; gap: var(--space-3); align-items: flex-end;">
       <label style="display: flex; flex-direction: column; gap: var(--space-1); flex: 1 1 18rem;">

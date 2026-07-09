@@ -68,7 +68,7 @@
       </div>
     </div>
 
-    <h2>Recent goals</h2>
+    <div class="section-head"><h2>Recent goals</h2></div>
     <div class="panel">
       <table>
         <thead><tr><th scope="col">Nº</th><th scope="col">Status</th><th scope="col">Title</th><th scope="col">Updated</th></tr></thead>
@@ -85,7 +85,7 @@
       </table>
     </div>
 
-    <h2>Facts</h2>
+    <div class="section-head"><h2>Facts</h2></div>
     <div class="panel">
       {% if facts %}
         {% for k, v in facts.items() %}
@@ -96,7 +96,7 @@
       {% endif %}
     </div>
 
-    <h2>Top skills</h2>
+    <div class="section-head"><h2>Top skills</h2></div>
     <div class="panel">
       {% if skills %}
         {% for s in skills %}

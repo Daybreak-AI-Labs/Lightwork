@@ -2,6 +2,7 @@
 {% block title %}Settings · Lightwork{% endblock %}
 {% block content %}
   <h1 class="page-title">Settings</h1>
+  <p class="page-subtitle">Appearance, models, spend, providers, and platform capabilities — each section saves on its own.</p>
 
   {% if saved %}
   <div class="panel" role="status"
@@ -10,7 +11,7 @@
   </div>
   {% endif %}
 
-  <h2>Appearance</h2>
+  <div class="section-head"><h2>Appearance</h2></div>
   <div class="panel">
     <p class="muted" style="margin-top: 0;">
       Theme, density, font and language for this browser. Applies when you save.
@@ -59,7 +60,7 @@
     </form>
   </div>
 
-  <h2>Models</h2>
+  <div class="section-head"><h2>Models</h2></div>
   <div class="panel">
     <p class="muted" style="margin-top: 0;">
       Pick any configured provider's model (see Provider keys below) or type any model
@@ -102,7 +103,7 @@
     </details>
   </div>
 
-  <h2>Per-role models</h2>
+  <div class="section-head"><h2>Per-role models</h2></div>
   <div class="panel">
     <p class="muted" style="margin-top: 0;">
       Override the model for a specific agent role — the platform's strength is
@@ -135,7 +136,7 @@
     </form>
   </div>
 
-  <h2>Allowed models</h2>
+  <div class="section-head"><h2>Allowed models</h2></div>
   <div class="panel">
     <p class="muted" style="margin-top: 0;">
       Restrict which models anyone may use. Check the ones you approve and save;
@@ -166,7 +167,7 @@
     </details>
   </div>
 
-  <h2>Spend cap</h2>
+  <div class="section-head"><h2>Spend cap</h2></div>
   <div class="panel">
     <p class="muted" style="margin-top: 0;">
       The most a single goal may spend before Lightwork stops it. Changes made
@@ -196,7 +197,7 @@
     </details>
   </div>
 
-  <h2>Provider keys</h2>
+  <div class="section-head"><h2>Provider keys</h2></div>
   <div class="panel">
     <p class="muted" style="margin-top: 0;">
       Set an API key for at least one provider to run goals. Keys are stored
@@ -239,7 +240,7 @@
     </details>
   </div>
 
-  <h2>Automation webhooks</h2>
+  <div class="section-head"><h2>Automation webhooks</h2></div>
   <div class="panel">
     <p class="muted" style="margin-top: 0;">
       The signing secret that lets other systems securely start your workflows
@@ -266,7 +267,7 @@
     </details>
   </div>
 
-  <h2>Capabilities</h2>
+  <div class="section-head"><h2>Capabilities</h2></div>
   <div class="panel">
     <p class="muted" style="margin-top: 0;">High-impact tools, off by default. Changes made here apply on the next run and never modify your server's configuration files.</p>
     <form method="post" action="/settings/capabilities">
@@ -280,7 +281,7 @@
     </form>
   </div>
 
-  <h2>Features</h2>
+  <div class="section-head"><h2>Features</h2></div>
   <div class="panel">
     <p class="muted" style="margin-top: 0;">Agent behaviours that are otherwise on by default.</p>
     <form method="post" action="/settings/features">
@@ -294,7 +295,7 @@
     </form>
   </div>
 
-  <h2 id="ui-visibility">Page visibility by role</h2>
+  <div class="section-head"><h2 id="ui-visibility">Page visibility by role</h2></div>
   <div class="panel">
     <p class="muted" style="margin-top: 0;">
       Choose which pages each role sees. Unchecking a box removes the page from

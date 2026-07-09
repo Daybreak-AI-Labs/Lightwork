@@ -150,6 +150,12 @@ class EventKind:
     # equal_opportunity_diff:float|None, failing_groups:list[str], samples:int,
     # threshold:float.
     FAIRNESS_ALERT = "fairness_alert"
+    # Governance assessment sign-off: a reviewer accepted (or sent back) one lens
+    # of a privacy/security/AI-risk assessment. Anchoring the decision in the
+    # signed chain means a "reviewed" governance record can't rest on the mutable
+    # JSON register alone. payload: subject_kind:str, subject:str, lens:str,
+    # decision:str (accepted|needs_work), reviewer:str, result_status:str.
+    ASSESSMENT_REVIEW = "assessment_review"
 
 
 @dataclass
