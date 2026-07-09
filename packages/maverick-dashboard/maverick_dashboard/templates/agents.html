@@ -34,14 +34,57 @@
 {% endmacro %}
 
 {% block content %}
-  <h1 class="page-title">Agents</h1>
-  <p class="muted" style="max-width: 48rem;">
-    Every specialist agent, and the editor to tailor one for your organization.
-    Saving keeps the built-in agent intact and changes only what you edit —
-    including the agent's <strong>workflow</strong> (the playbook it follows).
-    A change can never weaken the safety envelope: one that fails validation is
-    rejected, not saved.
-  </p>
+<style>
+  /* Agent Factory — friendly "build a specialist" framing over the real
+     agent-override editor. Glass to match the chat + design system. Every
+     form-field id the save/validate script uses is preserved. */
+  :where(body){
+    --glass: color-mix(in srgb, var(--panel) 68%, transparent);
+    --glass-soft: color-mix(in srgb, var(--panel) 54%, transparent);
+    --glass-border: color-mix(in srgb, var(--text) 13%, transparent);
+    --glass-edge: inset 0 1px 0 0 color-mix(in srgb, #ffffff 8%, transparent);
+  }
+  .factory-lede{ max-width: 48rem; margin: 0 0 var(--space-5); }
+  .factory-lede h1{ font-family: var(--font-serif); font-weight: 400; font-size: var(--text-2xl);
+    letter-spacing: -0.01em; margin: 0 0 var(--space-1); }
+  .factory-lede p{ margin: 0; color: var(--muted); }
+  .factory{ display: grid; grid-template-columns: 1fr; gap: var(--space-4);
+    border: 1px solid var(--glass-border); border-radius: var(--radius-lg);
+    background: var(--glass-soft); box-shadow: var(--glass-edge);
+    -webkit-backdrop-filter: blur(12px); backdrop-filter: blur(12px);
+    padding: var(--space-5); }
+  .factory nav[aria-label="Agent roster"]{ border: 1px solid var(--glass-border);
+    border-radius: var(--radius-md); background: var(--glass); padding: var(--space-2); }
+  .fld{ margin: 0 0 var(--space-4); }
+  .fld > label{ display: block; font-weight: var(--font-semibold); margin-bottom: var(--space-2); }
+  .fld .sub{ font-weight: 400; color: var(--muted); }
+  .factory input[type="text"], .factory textarea, .factory select{
+    background: var(--surface-sunken); border: 1px solid var(--border); color: var(--text);
+    border-radius: var(--radius-md); padding: 0.55rem 0.7rem; font: inherit; }
+  .factory input[type="text"]:focus, .factory textarea:focus, .factory select:focus{
+    outline: none; border-color: var(--brand-border); box-shadow: 0 0 0 3px var(--brand-subtle); }
+  #f-persona{ min-height: 8.5rem; line-height: 1.5; }
+  /* Advanced: the power-user editor (deny-tools + workflow playbook), folded. */
+  .advanced{ border: 1px solid var(--glass-border); border-radius: var(--radius-md);
+    background: var(--glass); margin: var(--space-2) 0 var(--space-4); overflow: hidden; }
+  .advanced > summary{ cursor: pointer; list-style: none; padding: 0.6rem var(--space-4);
+    display: flex; align-items: center; gap: var(--space-2); color: var(--muted); font-size: var(--text-sm); }
+  .advanced > summary::-webkit-details-marker{ display: none; }
+  .advanced > summary::before{ content: "⚙"; }
+  .advanced__caret{ margin-left: auto; transition: transform .18s ease; }
+  .advanced[open] .advanced__caret{ transform: rotate(180deg); }
+  .advanced__body{ padding: 0 var(--space-4) var(--space-4); }
+  .factory-actions{ display: flex; gap: var(--space-2); flex-wrap: wrap;
+    padding-top: var(--space-3); border-top: 1px solid var(--hairline); }
+</style>
+  <div class="factory-lede">
+    <h1>Agent Factory</h1>
+    <p>Describe a specialist in plain English — its job, the tools it can reach, and its
+      guardrails — and Lightwork tailors it for you. Saving keeps the built-in agent intact
+      and patches only what you change; anything that would weaken the safety envelope is
+      rejected, not saved. Power-user controls live under <strong>Advanced</strong>.</p>
+    <p style="margin: var(--space-2) 0 0;"><a class="btn btn--ghost" href="/workforce">View your departments →</a></p>
+  </div>
   <details style="max-width: 48rem; margin-bottom: var(--space-3);"><summary class="muted" style="cursor: pointer; font-size: var(--text-sm);">For administrators: how edits are stored</summary>
     <p class="muted" style="font-size: var(--text-sm); margin-bottom: 0;">
       Saving writes a <em>tenant override</em> that inherits the built-in pack and
@@ -54,7 +97,7 @@
     by your administrator — viewing only.</span></p>
   {% endif %}
 
-  <div class="panel" style="display: flex; gap: 1.5rem; align-items: flex-start;">
+  <div class="factory" style="display: flex; gap: 1.5rem; align-items: flex-start;">
     <nav aria-label="Agent roster" style="min-width: 15rem; max-height: 70vh; overflow: auto;">
       {% if agents %}
       <ul style="list-style: none; padding: 0; margin: 0;">
@@ -86,51 +129,62 @@
       <div id="agent-msg" role="status" aria-live="polite" class="muted" style="min-height: 1.2rem;"></div>
 
       <form id="agent-form" data-name="{{ selected.name }}">
-        <p>
-          <label for="f-description">Description</label><br>
+        <div class="fld">
+          <label for="f-description">Name / summary</label>
           <input id="f-description" name="description" type="text" style="width: 100%;"
                  value="{{ selected.description }}">
-        </p>
-        <p>
-          <label for="f-persona">Persona (system instructions)</label><br>
+        </div>
+        <div class="fld">
+          <label for="f-persona">What should this specialist do?
+            <span class="sub">— plain-English instructions</span></label>
           <textarea id="f-persona" name="persona" rows="8" style="width: 100%;">{{ selected.persona }}</textarea>
-        </p>
-        <p>
-          <label for="f-allow">Allowed tools <span class="muted">(space-separated)</span></label><br>
+        </div>
+        <div class="fld">
+          <label for="f-allow">Skills &amp; tools it can use
+            <span class="sub">— space-separated</span></label>
           <input id="f-allow" name="allow_tools" type="text" style="width: 100%;"
                  value="{{ selected.allow_tools|join(' ') }}">
-        </p>
-        <p>
-          <label for="f-deny">Denied tools <span class="muted">(space-separated)</span></label><br>
-          <input id="f-deny" name="deny_tools" type="text" style="width: 100%;"
-                 value="{{ selected.deny_tools|join(' ') }}">
-        </p>
-        <p>
-          <label for="f-risk">Max risk ceiling</label><br>
+        </div>
+        <div class="fld">
+          <label for="f-risk">Guardrail <span class="sub">— highest risk this specialist may take</span></label>
           <select id="f-risk" name="max_risk">
             {% for r in ['low', 'medium', 'high'] %}
             <option value="{{ r }}"{% if selected.max_risk == r %} selected{% endif %}>{{ r }}</option>
             {% endfor %}
           </select>
-        </p>
-        <fieldset style="border: 1px solid var(--border); border-radius: 6px; margin: 0.5rem 0; padding: 0.6rem 0.8rem;">
-          <legend>Workflow playbook <span class="muted">— ordered steps the agent follows</span></legend>
-          <div id="wf-steps">
-            {% for s in selected.workflow %}{{ wf_row(s) }}{% endfor %}
+        </div>
+
+        <details class="advanced">
+          <summary>Advanced — denied tools &amp; the step-by-step playbook
+            <svg class="advanced__caret" width="12" height="12" viewBox="0 0 10 10" aria-hidden="true"><path d="M2 3.5 5 6.5 8 3.5" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"/></svg>
+          </summary>
+          <div class="advanced__body">
+            <div class="fld">
+              <label for="f-deny">Denied tools <span class="sub">— space-separated; always blocked</span></label>
+              <input id="f-deny" name="deny_tools" type="text" style="width: 100%;"
+                     value="{{ selected.deny_tools|join(' ') }}">
+            </div>
+            <fieldset style="border: 1px solid var(--border); border-radius: 6px; margin: 0.5rem 0; padding: 0.6rem 0.8rem;">
+              <legend>Workflow playbook <span class="muted">— ordered steps the agent follows</span></legend>
+              <div id="wf-steps">
+                {% for s in selected.workflow %}{{ wf_row(s) }}{% endfor %}
+              </div>
+              {% if editable %}
+              <button type="button" id="wf-add">+ Add step</button>
+              {% endif %}
+            </fieldset>
+            {% if editable and selected.workflow %}
+            <p><a class="btn btn--ghost" href="/workflow-builder?edit_agent={{ selected.name | urlencode }}">Edit playbook in builder</a></p>
+            {% endif %}
           </div>
-          {% if editable %}
-          <button type="button" id="wf-add">+ Add step</button>
-          {% endif %}
-        </fieldset>
+        </details>
+
         {% if editable %}
-        <p>
-          <button type="button" id="btn-validate">Validate</button>
-          <button type="button" id="btn-save">Save override</button>
-          <button type="button" id="btn-reset">Reset to built-in</button>
-        </p>
-        {% if selected.workflow %}
-        <p><a class="btn btn--ghost" href="/workflow-builder?edit_agent={{ selected.name | urlencode }}">Edit playbook in builder</a></p>
-        {% endif %}
+        <div class="factory-actions">
+          <button type="button" class="btn btn--primary" id="btn-save">Save specialist</button>
+          <button type="button" class="btn" id="btn-validate">Validate</button>
+          <button type="button" class="btn btn--ghost" id="btn-reset">Reset to built-in</button>
+        </div>
         {% else %}
         <p class="muted">Editing is disabled in this deployment.</p>
         {% endif %}
