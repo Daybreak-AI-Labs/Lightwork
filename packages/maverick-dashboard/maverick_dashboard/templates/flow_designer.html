@@ -2,10 +2,33 @@
 {% block title %}flow designer · Lightwork{% endblock %}
 {% block content %}
 <style>
-  .fd { display: grid; grid-template-columns: 168px 1fr 300px; grid-template-rows: auto 1fr;
-        gap: var(--space-3); height: calc(100vh - 140px); min-height: 520px; }
-  .fd__bar { grid-column: 1 / -1; display: flex; gap: var(--space-3); align-items: center; flex-wrap: wrap; }
-  .fd__bar input.fd__name { font-weight: var(--font-semibold); min-width: 180px; }
+  /* Mockup layout: a clean header + a hero Draft bar, then a workspace that is
+     either the friendly Steps (cards + settings rail) or the full Canvas
+     (palette + svg + props). Every engine control keeps its id; the layout
+     just repositions them and shows/hides per view. */
+  .fd { display: flex; flex-direction: column; gap: var(--space-3); }
+  .fdx-head { display: flex; align-items: center; gap: var(--space-2); flex-wrap: wrap; }
+  .fdx-head .fd__name { flex: 0 1 260px; font-weight: var(--font-semibold); }
+  .fdx-head__spacer { margin-inline-start: auto; }
+  .fdx-canvastools { display: none; gap: var(--space-2); align-items: center; flex-wrap: wrap; }
+  .fd[data-view="canvas"] .fdx-canvastools { display: flex; }
+  .fdx-work { display: grid; gap: var(--space-4); align-items: start; }
+  .fd[data-view="steps"] .fdx-work { grid-template-columns: minmax(0, 1fr) 320px; }
+  .fd[data-view="canvas"] .fdx-work { grid-template-columns: 168px 1fr 300px;
+        height: calc(100vh - 230px); min-height: 460px; }
+  @media (max-width: 900px) {
+    .fd[data-view="steps"] .fdx-work, .fd[data-view="canvas"] .fdx-work {
+      grid-template-columns: 1fr; height: auto; }
+  }
+  .fdx-rail { display: flex; flex-direction: column; gap: var(--space-3); }
+  .fdx-panel { background: var(--glass-soft); border: 1px solid var(--glass-border);
+        border-radius: var(--radius-lg); box-shadow: var(--glass-edge); padding: var(--space-4);
+        -webkit-backdrop-filter: blur(10px); backdrop-filter: blur(10px); }
+  .fdx-panel__t { font-weight: var(--font-semibold); margin: 0 0 var(--space-3); }
+  .fdx-kv { display: flex; align-items: center; gap: var(--space-2); margin-bottom: var(--space-2); }
+  .fdx-kv label { width: 92px; flex: none; color: var(--muted); font-size: var(--text-sm); }
+  .fdx-kv .input { padding: 0.4rem 0.55rem; font-size: var(--text-sm); }
+  .fdx-mini { color: var(--muted); font-size: var(--text-xs); margin: var(--space-2) 0 0; }
   .fd__nl { flex: 1; min-width: 220px; display: flex; gap: var(--space-2); }
   .fd__nl input { flex: 1; }
   .fd__palette { display: flex; flex-direction: column; gap: var(--space-2); overflow-y: auto; }
@@ -130,8 +153,10 @@
   .fd[data-view="steps"] .fd__palette,
   .fd[data-view="steps"] .fd__canvas-wrap,
   .fd[data-view="steps"] .fd__props{ display: none; }
-  #fd-simple{ display: none; grid-column: 1 / -1; overflow-y: auto; padding-bottom: var(--space-6); }
+  #fd-simple{ display: none; overflow-y: auto; padding-bottom: var(--space-6); }
   .fd[data-view="steps"] #fd-simple{ display: block; }
+  /* Settings rail rides alongside the steps; canvas view goes full-bleed. */
+  .fd[data-view="canvas"] .fdx-rail{ display: none; }
   .fd-simple__inner{ max-width: 640px; margin-inline: auto; }
   .fd-scard{ display: flex; align-items: center; gap: var(--space-3); padding: var(--space-3) var(--space-4);
     border: 1px solid var(--glass-border); border-radius: var(--radius-lg); background: var(--glass-soft);
@@ -148,47 +173,47 @@
 </style>
 
 <div class="fd" data-view="steps">
-  <div class="fd__bar">
+  <!-- Header: name, the Steps/Canvas switch, and the primary actions. -->
+  <div class="fdx-head">
+    <input class="input fd__name" id="fd-name" placeholder="Untitled flow" aria-label="Flow name" />
     <div class="fd__viewswitch" role="group" aria-label="Flow view">
       <button type="button" id="fd-view-steps" class="is-on" aria-pressed="true">Steps</button>
       <button type="button" id="fd-view-canvas" aria-pressed="false">Canvas</button>
     </div>
-    <input class="input fd__name" id="fd-name" placeholder="Flow name" aria-label="Flow name" />
-    <input class="input" id="fd-id" placeholder="flow-id" aria-label="Flow id" style="width:140px;" />
-    <div class="fd__nl">
-      <input class="input" id="fd-nl" placeholder="Describe your workflow in plain English…" aria-label="Describe your workflow" />
-      <button class="btn btn--primary" type="button" id="fd-draft">✨ Draft</button>
-    </div>
-    <input class="input" id="fd-sample" placeholder='Sample input, e.g. {"issue":"…"}' aria-label="Sample input JSON" style="width:200px;" />
-    <label style="font-size:var(--text-sm);color:var(--muted);display:inline-flex;align-items:center;gap:4px;">
-      <input type="checkbox" id="fd-notify" /> Notify on approval/finish
-    </label>
-    <input class="input" id="fd-maxsec" type="number" min="0" placeholder="Max sec" aria-label="Flow deadline in seconds" style="width:90px;" title="Whole-flow wall-clock deadline (0 = none)" />
-    <input class="input" id="fd-maxdollars" type="number" min="0" step="0.5" placeholder="Max $" aria-label="Flow agent budget in dollars" style="width:80px;" title="Aggregate agent spend ceiling for one run (0 = none)" />
-    <input class="input" id="fd-schedule" placeholder="Schedule (cron)" aria-label="Cron schedule" style="width:130px;" title="Run on a schedule, e.g. '0 9 * * 1' (Mondays 9am). Blank = manual/trigger only." />
-    <input class="input" id="fd-tz" placeholder="Timezone" aria-label="Schedule timezone" style="width:130px;" title="IANA zone for the schedule, e.g. 'America/New_York'. Blank = UTC. Adjusts across DST." />
-    <input class="input" id="fd-maxconc" type="number" min="0" placeholder="Max runs" aria-label="Max concurrent runs" style="width:90px;" title="Cap simultaneous runs of this flow (0 = unlimited). Set 1 for a singleton that must never overlap itself." />
-    <button class="btn" type="button" id="fd-save">Save</button>
-    <button class="btn btn--ghost" type="button" id="fd-run" title="Mock run: no real goals or connector calls">▷ Test (dry)</button>
-    <button class="btn btn--ghost" type="button" id="fd-run-real" title="Runs real agents and connectors">Run for real</button>
+    <span class="fdx-head__spacer"></span>
+    <button class="btn btn--primary" type="button" id="fd-save">Save</button>
+    <button class="btn btn--ghost" type="button" id="fd-run" title="Mock run: no real goals or connector calls">▷ Test</button>
+    <button class="btn btn--ghost" type="button" id="fd-run-real" title="Runs real agents and connectors">Run</button>
     <button class="btn btn--ghost" type="button" id="fd-history">⏱ History</button>
+    <button class="btn btn--ghost" type="button" id="fd-triggers" title="Everything that starts this flow">⚡ Triggers</button>
+    <button class="btn btn--ghost" type="button" id="fd-chat-toggle" title="Build and fix this flow by chatting">💬 Copilot</button>
+    <span class="fd__msg" id="fd-msg" aria-live="polite"></span>
+  </div>
+
+  <!-- Hero: describe it in plain English, hit Draft. Present in both views. -->
+  <div class="fd__nl">
+    <input class="input" id="fd-nl" placeholder="Describe your workflow in plain English…" aria-label="Describe your workflow" />
+    <button class="btn btn--primary" type="button" id="fd-draft">✨ Draft</button>
+  </div>
+  <div class="fd__examples" id="fd-examples" aria-label="Example workflows"></div>
+
+  <!-- Canvas-only tools: id, history/zoom, import/export, run signal + legend. -->
+  <div class="fdx-canvastools">
+    <input class="input" id="fd-id" placeholder="flow-id" aria-label="Flow id" style="width:140px;" />
     <button class="btn btn--ghost" type="button" id="fd-undo" title="Undo (Ctrl+Z)">↶</button>
     <button class="btn btn--ghost" type="button" id="fd-redo" title="Redo (Ctrl+Shift+Z)">↷</button>
     <button class="btn btn--ghost" type="button" id="fd-fit" title="Zoom to fit">⛶</button>
-    <button class="btn btn--ghost" type="button" id="fd-triggers" title="Everything that starts this flow">⚡ Triggers</button>
     <button class="btn btn--ghost" type="button" id="fd-export" title="Download this flow as JSON">⬇</button>
     <button class="btn btn--ghost" type="button" id="fd-import-json" title="Load a flow from a JSON file">⬆</button>
     <input type="file" id="fd-import-file" accept=".json,application/json" hidden aria-label="Flow JSON file" />
-    <button class="btn btn--ghost" type="button" id="fd-chat-toggle" title="Build and fix this flow by chatting">💬 Copilot</button>
-    <span class="fd__msg" id="fd-msg" aria-live="polite"></span>
     <span class="fd__msg" id="fd-signal" hidden title="Share of triggered runs that completed successfully"></span>
     <span class="fd__legend" id="fd-legend" aria-hidden="true">
       <span>🟢 ok</span><span>🔴 failed</span><span>🟠 branch/step</span><span>⏳ waiting</span>
     </span>
-    <div class="fd__examples" id="fd-examples" aria-label="Example workflows"></div>
   </div>
   <datalist id="fd-tools"></datalist>
 
+  <div class="fdx-work">
   <div class="fd__palette" aria-label="Add node">
     <div class="fd__empty">Add a step</div>
     <button class="btn btn--ghost" type="button" data-add="agent">🧠 Agent</button>
@@ -247,6 +272,52 @@
        Run) is the shared control bar; switch to Canvas to edit structure. -->
   <div id="fd-simple" aria-label="Flow steps">
     <div class="fd-simple__inner" id="fd-simple-body"></div>
+  </div>
+
+  <!-- Settings rail (steps view): schedule & limits, in plain terms. The
+       inputs stay in the DOM in Canvas view too, so Save always reads them. -->
+  <aside class="fdx-rail" aria-label="Flow settings">
+    <div class="fdx-panel">
+      <h3 class="fdx-panel__t">Schedule</h3>
+      <div class="fdx-kv">
+        <label for="fd-schedule">Run on</label>
+        <input class="input" id="fd-schedule" placeholder="cron, e.g. 0 9 * * 1" aria-label="Cron schedule" title="Run on a schedule, e.g. '0 9 * * 1' (Mondays 9am). Blank = manual/trigger only." />
+      </div>
+      <div class="fdx-kv">
+        <label for="fd-tz">Timezone</label>
+        <input class="input" id="fd-tz" placeholder="America/New_York" aria-label="Schedule timezone" title="IANA zone for the schedule. Blank = UTC. Adjusts across DST." />
+      </div>
+      <p class="fdx-mini">Leave blank to run manually or from a trigger.</p>
+    </div>
+
+    <div class="fdx-panel">
+      <h3 class="fdx-panel__t">Limits</h3>
+      <div class="fdx-kv">
+        <label for="fd-maxdollars">Budget $</label>
+        <input class="input" id="fd-maxdollars" type="number" min="0" step="0.5" placeholder="0" aria-label="Flow agent budget in dollars" title="Aggregate agent spend ceiling for one run (0 = none)." />
+      </div>
+      <div class="fdx-kv">
+        <label for="fd-maxsec">Deadline s</label>
+        <input class="input" id="fd-maxsec" type="number" min="0" placeholder="0" aria-label="Flow deadline in seconds" title="Whole-flow wall-clock deadline (0 = none)." />
+      </div>
+      <div class="fdx-kv">
+        <label for="fd-maxconc">Max runs</label>
+        <input class="input" id="fd-maxconc" type="number" min="0" placeholder="0" aria-label="Max concurrent runs" title="Cap simultaneous runs (0 = unlimited). Set 1 for a singleton that must never overlap itself." />
+      </div>
+      <p class="fdx-mini">0 means no cap.</p>
+    </div>
+
+    <div class="fdx-panel">
+      <h3 class="fdx-panel__t">Test input</h3>
+      <div class="fdx-kv" style="align-items:flex-start;">
+        <label for="fd-sample">Sample</label>
+        <input class="input" id="fd-sample" placeholder='{"issue":"…"}' aria-label="Sample input JSON" />
+      </div>
+      <label class="fdx-mini" style="display:inline-flex;align-items:center;gap:6px;cursor:pointer;">
+        <input type="checkbox" id="fd-notify" /> Notify me on approval / finish
+      </label>
+    </div>
+  </aside>
   </div>
 </div>
 
