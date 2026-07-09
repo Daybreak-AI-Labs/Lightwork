@@ -284,8 +284,11 @@
 
     /* ---------- headings ---------- */
     .page-title {
-      font-size: var(--text-3xl); font-weight: var(--font-semibold);
-      letter-spacing: -0.022em; line-height: 1.15; color: var(--text); margin: 0 0 var(--space-2);
+      /* Serif display face, matching the redesigned Chat / Agent Factory /
+         Flows headings — one editorial voice for every page title. */
+      font-family: var(--font-serif); font-weight: 400;
+      font-size: var(--text-3xl);
+      letter-spacing: -0.012em; line-height: 1.14; color: var(--text); margin: 0 0 var(--space-2);
     }
     .page-subtitle { color: var(--muted); margin: 0 0 var(--space-5); }
     /* Section label (the established uppercase "eyebrow" used across pages). */
@@ -357,17 +360,28 @@
     }
     .btn:hover { border-color: var(--border-strong); text-decoration: none; }
     .btn:active { transform: translateY(1px); }
-    .btn--primary { background: var(--brand); border-color: var(--brand); color: var(--brand-fg); }
-    .btn--primary:hover { background: var(--brand-hi); border-color: var(--brand-hi); }
+    /* Primary action: brand fill + a soft brand-tinted lift so it reads as
+       the tactile, glass-era button used across the redesigned screens. */
+    .btn--primary { background: var(--brand); border-color: transparent; color: var(--brand-fg);
+      box-shadow: 0 2px 10px color-mix(in srgb, var(--brand) 32%, transparent); }
+    .btn--primary:hover { background: var(--brand-hi); border-color: transparent;
+      box-shadow: 0 4px 14px color-mix(in srgb, var(--brand) 40%, transparent); }
     .btn--ghost { background: transparent; }
     .btn--danger { background: var(--danger); border-color: var(--danger); color: #fff; }
-    .btn:disabled { opacity: 0.55; cursor: not-allowed; }
+    .btn:disabled { opacity: 0.55; cursor: not-allowed; box-shadow: none; }
     .input, .select, .textarea {
       background: var(--surface-sunken); color: var(--text);
       border: 1px solid var(--border); border-radius: var(--radius-md);
       padding: 0.55rem 0.7rem; font: inherit; width: 100%;
+      transition: border-color .13s ease, box-shadow .13s ease;
     }
     .input:hover, .select:hover, .textarea:hover { border-color: var(--border-strong); }
+    /* Brand focus ring on form fields — same glow as the redesigned composers /
+       builder forms. Sits on top of the global :focus-visible outline, so
+       keyboard users keep their outline; mouse-focus gets the polished glow. */
+    .input:focus, .select:focus, .textarea:focus {
+      border-color: var(--brand-border); box-shadow: 0 0 0 3px var(--brand-subtle);
+    }
 
     /* ---------- empty + loading states ---------- */
     .empty { text-align: center; padding: var(--space-7) var(--space-5); color: var(--muted); }
