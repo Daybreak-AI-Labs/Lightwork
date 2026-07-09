@@ -180,14 +180,13 @@ class _Result:
 
 
 def run_all(work: Path) -> list[_Result]:
-    from maverick import self_modify as sm
-    from maverick import approval_signing as asig
-    from maverick.self_modify_corpus import CodeEvalCorpus, evaluate_on_corpus
-    from maverick.self_modify_capability import capability_delta
-    from maverick.self_improvement import (
-        Candidate, PromotionLedger, SelfImprovementController)
-    from cryptography.hazmat.primitives.asymmetric import ed25519
     from cryptography.hazmat.primitives import serialization
+    from cryptography.hazmat.primitives.asymmetric import ed25519
+    from maverick import approval_signing as asig
+    from maverick import self_modify as sm
+    from maverick.self_improvement import Candidate, PromotionLedger, SelfImprovementController
+    from maverick.self_modify_capability import capability_delta
+    from maverick.self_modify_corpus import CodeEvalCorpus, evaluate_on_corpus
 
     out: list[_Result] = []
     src = _seed_tree(work)
