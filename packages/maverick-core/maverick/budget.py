@@ -128,6 +128,14 @@ def _lookup_price(model: str | None) -> tuple[float, float]:
     """Return (in_per_mtok, out_per_mtok) for a model id. Falls back to Sonnet."""
     if not model:
         return _FALLBACK_PRICE_IN, _FALLBACK_PRICE_OUT
+    # codex_cli is SUBSCRIPTION-metered (ChatGPT/Codex plan, no per-token
+    # invoice), so it always prices $0 -- BEFORE any table lookup. This must
+    # come first because Codex model ids (gpt-5.5, gpt-5) collide with priced
+    # OpenAI-API entries in MODEL_PRICES; the bare-id lookup below would
+    # otherwise bill a free subscription run at OpenAI API rates and could trip
+    # a --max-dollars cap. Token / wall-clock / tool-call caps still enforce.
+    if model.startswith("codex_cli:"):
+        return 0.0, 0.0
     try:
         from .llm import MODEL_PRICES
     except ImportError:
@@ -155,11 +163,11 @@ def _lookup_price(model: str | None) -> tuple[float, float]:
     # local models -- platform-test finding). A known table id behind the
     # same prefix was matched above and keeps its real rate. The generic
     # openai_compatible provider is intentionally excluded because it can
-    # point at paid public gateways. codex_cli is cloud but SUBSCRIPTION
-    # metered (ChatGPT/Codex plan, no per-token invoice), so its marginal
-    # dollar cost is likewise $0 -- token/wall/tool caps still enforce.
+    # point at paid public gateways. (codex_cli is handled up top -- its ids
+    # collide with priced OpenAI entries, so it must short-circuit before the
+    # table lookups above, not here.)
     if ":" in model and model.split(":", 1)[0] in (
-        "ollama", "vllm", "tgi", "codex_cli",
+        "ollama", "vllm", "tgi",
     ):
         return 0.0, 0.0
     # Genuinely unknown model: no verified rate exists. Default behaviour bills

@@ -50,8 +50,8 @@ PROVIDERS: dict[str, dict] = {
         "label": "Codex CLI (ChatGPT subscription, no API key)",
         "env": "CODEX_ACCESS_TOKEN",
         "models": [
-            {"id": "gpt-5.5-codex", "notes": "Codex-tuned flagship via your ChatGPT plan; needs the codex CLI installed."},
-            {"id": "gpt-5.5",       "notes": "General flagship via Codex CLI; subscription-billed ($0 API spend)."},
+            {"id": "gpt-5.5", "notes": "Flagship via your ChatGPT plan (the codex CLI's own default); subscription-billed ($0 API spend). Needs the codex CLI installed + `codex login`."},
+            {"id": "gpt-5",   "notes": "Prior GPT-5 generation via Codex CLI."},
         ],
     },
     "moonshot": {
