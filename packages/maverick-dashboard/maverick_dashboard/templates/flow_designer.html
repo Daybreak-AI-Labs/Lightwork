@@ -14,8 +14,17 @@
   .fd[data-view="canvas"] .fdx-canvastools { display: flex; }
   .fdx-work { display: grid; gap: var(--space-4); align-items: start; }
   .fd[data-view="steps"] .fdx-work { grid-template-columns: minmax(0, 1fr) 320px; }
+  /* Canvas view must STRETCH its columns: with align-items:start the canvas
+     wrap collapses to its intrinsic (near-zero) height — the editor rendered
+     as a 150px letterbox with new nodes spawning out of view. */
   .fd[data-view="canvas"] .fdx-work { grid-template-columns: 168px 1fr 300px;
+        align-items: stretch;
         height: calc(100vh - 230px); min-height: 460px; }
+  .fd[data-view="canvas"] .fd__canvas-wrap { min-height: 0; }
+  .fd[data-view="canvas"] .fd__palette, .fd[data-view="canvas"] .fd__props { min-height: 0; }
+  /* An editor surface is not prose: mid-drag the browser otherwise paints text
+     selection across the palette/props while wiring or moving nodes. */
+  .fd__canvas-wrap, .fd__palette { user-select: none; -webkit-user-select: none; }
   @media (max-width: 900px) {
     .fd[data-view="steps"] .fdx-work, .fd[data-view="canvas"] .fdx-work {
       grid-template-columns: 1fr; height: auto; }
@@ -228,7 +237,6 @@
     <button class="btn btn--ghost" type="button" data-add="parallel">🔱 Parallel</button>
     <button class="btn btn--ghost" type="button" data-add="scope">🛡 Try/catch</button>
     <button class="btn btn--ghost" type="button" data-add="subflow">📎 Sub-flow</button>
-    <button class="btn btn--ghost" type="button" data-add="switch">🔃 Switch</button>
     <button class="btn btn--ghost" type="button" data-add="setvar">📝 Set data</button>
   </div>
 
@@ -349,6 +357,9 @@
       subflow: 'Sub-flow', setvar: 'Set data' };
 
     function seed() {
+      // Prefer the canvas engine's LIVE graph, so steps built (or drafted) on
+      // the canvas appear here without a save; fall back to the server seed.
+      try { if (window.__fdLiveFlow) return window.__fdLiveFlow(); } catch (e) { /* engine absent */ }
       try { return JSON.parse(document.getElementById('fd-seed').textContent || 'null'); }
       catch (e) { return null; }
     }
