@@ -2,13 +2,13 @@
 {% block title %}Skill Store · Lightwork{% endblock %}
 {% block content %}
   <h1 class="page-title">Store</h1>
+  <p class="page-subtitle">Curated skills from the community catalog — each pinned to the exact
+    version that was reviewed, so what you install is what was checked.</p>
 
   <div class="panel">
-    <p class="muted">
-      Curated skills from the community catalog. Each one is pinned to the exact
-      version that was reviewed, so what you install is what was checked.
-      In-app installation is off by default; an administrator can enable it.
-      Your administrator can also point this page at your organization's own catalog.
+    <p class="muted" style="margin-top: 0;">
+      In-app installation is off by default; an administrator can enable it, and can
+      also point this page at your organization's own catalog.
     </p>
     <details style="margin-top: var(--space-3);"><summary class="muted" style="cursor: pointer; font-size: var(--text-sm);">For administrators: catalog configuration</summary>
       <p class="muted" style="font-size: var(--text-sm); margin-bottom: 0;">
@@ -55,6 +55,7 @@
   <p id="store-msg" role="status" aria-live="polite" class="muted" style="min-height: 1em; margin-top: var(--space-4);"></p>
 
   <style>
+    .card-grid .card { display: flex; flex-direction: column; }
     .store__head { display: flex; align-items: center; gap: var(--space-2); margin-bottom: var(--space-2); }
     .store__name { font-size: var(--text-sm); }
     .store__summary { margin: 0 0 var(--space-3); flex: 1 1 auto; }

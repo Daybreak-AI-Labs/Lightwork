@@ -4,22 +4,16 @@
   <h1 class="page-title">Workforce</h1>
   <p class="page-subtitle">Your AI departments — each team's specialists, what they've delivered, and their performance reviews.</p>
 
-  <div class="panel">
-    <p class="muted">
-      Your specialist packs as deployable <strong>departments</strong> — pick a
-      team, see what it delivered, and open a governed performance review.
-    </p>
-    <div class="card-grid">
-      <div class="stat"><strong>{{ departments|length }}</strong><span class="muted">departments</span></div>
-      <div class="stat"><strong>{{ pack_total }}</strong><span class="muted">specialists</span></div>
-      <div class="stat"><strong>{{ connector_total }}</strong><span class="muted">connectors</span></div>
-      <div class="stat"><strong>{{ firm.goals_completed }}</strong><span class="muted">goals completed</span></div>
-    </div>
+  <div class="grid">
+    <div class="stat"><div class="num">{{ departments|length }}</div><div class="label">departments</div></div>
+    <div class="stat"><div class="num">{{ pack_total }}</div><div class="label">specialists</div></div>
+    <div class="stat"><div class="num">{{ connector_total }}</div><div class="label">connectors</div></div>
+    <div class="stat"><div class="num">{{ firm.goals_completed }}</div><div class="label">goals completed</div></div>
   </div>
 
   <div class="panel">
-    <h2>Delivery</h2>
-    <p class="muted">Firm-wide rollup from the Operating Record — delivery, not usage.</p>
+    <div class="section-head"><h2>Delivery</h2></div>
+    <p class="muted" style="margin-top: 0;">Firm-wide rollup from the Operating Record — delivery, not usage.</p>
     <table>
       <thead><tr><th scope="col">Metric</th><th scope="col">Value</th></tr></thead>
       <tbody>
@@ -29,7 +23,7 @@
       </tbody>
     </table>
 
-    <h2>Top performers</h2>
+    <div class="section-head" style="margin-top: var(--space-4);"><h2>Top performers</h2></div>
     {% if leaders %}
     <table>
       <thead><tr><th scope="col">Specialist</th><th scope="col">Department</th><th scope="col">Delivered</th></tr></thead>
@@ -45,15 +39,15 @@
   </div>
 
   <div class="panel">
-    <h2>Integrations</h2>
-    <p class="muted">{{ connector_total }} connectors ready to configure.</p>
+    <div class="section-head"><h2>Integrations</h2></div>
+    <p class="muted" style="margin-top: 0;">{{ connector_total }} connectors ready to configure.</p>
     <label for="conn-search">Search connectors</label>
     <input id="conn-search" type="search" placeholder="e.g. zendesk, salesforce" aria-label="Search connectors" />
     <ul id="conn-results" class="muted"></ul>
   </div>
 
   <div class="panel">
-    <h2>Departments</h2>
+    <div class="section-head"><h2>Departments</h2></div>
     <div class="card-grid" id="dept-grid">
       {% for d in departments %}
       <article class="card" data-key="{{ d.key }}">
