@@ -431,7 +431,35 @@ def record_review(kind: str, name: str, lens: str, decision: str, *,
     else:
         a["status"] = "in_review"
     _save_all(data)
+    _audit_review(kind, name, lens, decision, reviewer, a["status"], now)
     return _summarize(a)
+
+
+def _audit_review(kind: str, name: str, lens: str, decision: str, reviewer: str,
+                  result_status: str, now: float) -> None:
+    """Anchor a sign-off in the signed audit chain, so a "reviewed" governance
+    record doesn't rest on the mutable JSON register alone. Best-effort: an audit
+    failure never blocks the review itself."""
+    try:
+        from .audit.events import AuditEvent, EventKind
+        from .audit.writer import default_audit_log
+        default_audit_log().record(AuditEvent(
+            ts=now, kind=EventKind.ASSESSMENT_REVIEW, agent="governance",
+            payload={"subject_kind": kind, "subject": name, "lens": lens,
+                     "decision": decision, "reviewer": reviewer or "",
+                     "result_status": result_status}))
+    except Exception:  # pragma: no cover -- audit is best-effort here
+        pass
+
+
+def refresh_on_change(kind: str, name: str, now: float | None = None) -> dict | None:
+    """Re-draft an assessment ONLY if one already exists (detecting drift), for
+    callers that just changed a subject (e.g. an agent-override save). Returns the
+    refreshed assessment, or ``None`` if the subject has no assessment yet — a
+    changed subject that was never assessed shouldn't spawn one silently."""
+    if _key(kind, name) not in _load_all():
+        return None
+    return refresh(kind, name, now=now)
 
 
 def add_evidence(kind: str, name: str, lens: str, control: str, evidence: str,

@@ -118,3 +118,30 @@ def test_real_agent_surface_resolves():
         pytest.skip("no packs discovered in this environment")
     s = A.agent_surface(agents[0]["name"])
     assert s is not None and s["kind"] == "agent" and "allow_tools" in s
+
+
+def test_review_writes_an_audit_event(monkeypatch, tmp_path):
+    # A sign-off is anchored in the signed audit chain, not just the register.
+    _use_surface(monkeypatch, SAFE)
+    import maverick.audit.writer as w
+    from maverick.audit.writer import AuditLog
+    al = AuditLog(audit_dir=tmp_path / "audit")
+    monkeypatch.setattr(w, "default_audit_log", lambda: al)
+    A.refresh("agent", "calm_bot", now=1.0)
+    A.record_review("agent", "calm_bot", "security", "accepted", reviewer="ada", now=2.0)
+    reviews = [e for e in al.tail(200) if e.get("kind") == "assessment_review"]
+    assert reviews and reviews[0]["decision"] == "accepted"
+    assert reviews[0]["subject"] == "calm_bot" and reviews[0]["reviewer"] == "ada"
+
+
+def test_refresh_on_change_only_touches_existing(monkeypatch):
+    _use_surface(monkeypatch, SAFE)
+    # No assessment yet -> a change is a no-op (doesn't spawn one).
+    assert A.refresh_on_change("agent", "calm_bot") is None
+    # Assess + accept, then a surface change re-drafts and flips to needs_review.
+    A.refresh("agent", "calm_bot", now=1.0)
+    for lens in A.LENSES:
+        A.record_review("agent", "calm_bot", lens, "accepted", now=2.0)
+    _use_surface(monkeypatch, {**SAFE, "allow_tools": ["read_file", "shell"], "max_risk": "high"})
+    changed = A.refresh_on_change("agent", "calm_bot", now=3.0)
+    assert changed is not None and changed["status"] == "needs_review"

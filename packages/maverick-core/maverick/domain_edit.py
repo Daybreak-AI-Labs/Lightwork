@@ -170,6 +170,15 @@ def write_override(name: str, patch: dict, directory: str | Path | None = None) 
     d.mkdir(parents=True, exist_ok=True)
     path = d / f"{name}.toml"
     path.write_text(overlay_toml(patch), encoding="utf-8")
+    # The pack's capability surface may have changed. If it already has a
+    # governance assessment, re-draft it so drift flips an accepted review back
+    # to needs-review (best-effort; only touches the default user dir).
+    if directory is None:
+        try:
+            from . import assessments
+            assessments.refresh_on_change("agent", name)
+        except Exception:  # pragma: no cover -- never let assessment break a save
+            pass
     return str(path)
 
 
