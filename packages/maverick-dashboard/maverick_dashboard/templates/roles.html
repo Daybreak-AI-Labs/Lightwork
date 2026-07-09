@@ -3,11 +3,11 @@
 {% block content %}
   <h1 class="page-title">Roles</h1>
   <p class="muted" style="max-width: 48rem;">
-    The core agent roles that power Lightwork. Add a <strong>system-prompt
-    addendum</strong> to any role — extra instructions added to its built-in
-    guidance every time it runs, so you can shape how work is planned or written
-    for your organization. Model and reasoning effort are set separately, on this
-    page and in Settings.
+    The core agent roles that power Lightwork. For any role you can pick the
+    <strong>model</strong> it runs on, set its <strong>reasoning effort</strong>,
+    and add a <strong>system-prompt addendum</strong> — extra instructions added
+    to its built-in guidance every time it runs — so you can shape how work is
+    planned or written for your organization.
   </p>
   <details style="max-width: 48rem; margin-bottom: var(--space-3);"><summary class="muted" style="cursor: pointer; font-size: var(--text-sm);">For administrators: related configuration</summary>
     <p class="muted" style="font-size: var(--text-sm); margin-bottom: 0;">
@@ -53,10 +53,19 @@
 
       <form id="role-form" data-role="{{ selected.role }}">
         <p>
-          <label for="f-model">Model <span class="muted">(provider:model-id; empty = inherit the
-            configured default)</span></label><br>
-          <input id="f-model" name="model" type="text" style="width: 100%;"
-                 value="{{ selected.model_override }}" placeholder="{{ selected.model or '' }}">
+          <label for="f-model">Model <span class="muted">(which model this role runs on;
+            "Inherit" uses the configured default)</span></label><br>
+          <select id="f-model" name="model" style="width: 100%;">
+            <option value="">Inherit default{% if selected.model %} — {{ selected.model }}{% endif %}</option>
+            {% set cur = selected.model_override %}
+            {% set known = model_options | map(attribute=0) | list %}
+            {% if cur and cur not in known %}
+              <option value="{{ cur }}" selected>Custom — {{ cur }}</option>
+            {% endif %}
+            {% for spec, label in model_options %}
+              <option value="{{ spec }}"{% if cur == spec %} selected{% endif %}>{{ spec }} · {{ label }}</option>
+            {% endfor %}
+          </select>
         </p>
         <p>
           <label for="f-effort">Reasoning effort <span class="muted">(empty = inherit)</span></label><br>

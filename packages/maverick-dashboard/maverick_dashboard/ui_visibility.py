@@ -137,8 +137,12 @@ PAGES: tuple[dict, ...] = (
      "floor": "view", "default": "operate"},
     {"path": "/tools", "label": "Tools", "group": "Extend", "icon": "tools",
      "floor": "view", "default": "operate"},
-    {"path": "/connections", "label": "Connections", "group": "Extend", "icon": "key",
-     "floor": "view", "default": "operate"},
+    # Connections hold live SaaS credentials/tokens, so managing them is admin
+    # plumbing, not an everyday operator surface. Builders still *reference* an
+    # existing connection by name in a flow (GET /api/v1/connections stays
+    # operate-readable); only create/rotate/delete/test are admin-gated.
+    {"path": "/connections", "label": "Connections", "group": "Admin", "icon": "key",
+     "floor": "admin", "default": "admin"},
     {"path": "/plugins", "label": "Plugins", "group": "Extend", "icon": "plugins",
      "floor": "view", "default": "operate"},
     # Output-style customization: mutations are operate-gated, so it lives with

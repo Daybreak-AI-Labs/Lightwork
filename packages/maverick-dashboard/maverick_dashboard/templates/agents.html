@@ -144,38 +144,52 @@
     <div class="af-card">
       <div class="af-card__title">Build a specialist</div>
 
-      {% if agents %}
-      <div class="fld">
-        <label for="agent-picker">Specialist <span class="sub">— pick one to tailor</span></label>
-        <select id="agent-picker" aria-label="Choose a specialist to tailor"
-                onchange="if(this.value) location.href='/agents?name=' + encodeURIComponent(this.value)">
-          {% if not selected %}<option value="">— choose a specialist —</option>{% endif %}
-          {% for a in agents %}
-          <option value="{{ a.name }}"{% if selected and selected.name == a.name %} selected{% endif %}>
-            {{ a.name }}{% if a.is_override %} (custom){% endif %}
-          </option>
-          {% endfor %}
-        </select>
+      <div class="fld af-picker">
+        {% if agents %}
+        <label for="agent-picker">Start from a specialist <span class="sub">— pick one to tailor</span></label>
+        <div style="display:flex; gap:var(--space-2); align-items:center;">
+          <select id="agent-picker" aria-label="Choose a specialist to tailor" style="flex:1;"
+                  onchange="if(this.value) location.href='/agents?name=' + encodeURIComponent(this.value)">
+            {% if not selected %}<option value="">— choose a specialist —</option>{% endif %}
+            {% for a in agents %}
+            <option value="{{ a.name }}"{% if selected and selected.name == a.name %} selected{% endif %}>
+              {{ a.name }}{% if a.is_override %} (custom){% endif %}
+            </option>
+            {% endfor %}
+          </select>
+          {% if editable %}
+          <span class="sub">or</span>
+          <a class="btn{% if creating %} btn--primary{% endif %}" href="/agents?new=1" id="btn-new-agent">＋ New custom agent</a>
+          {% endif %}
+        </div>
+        {% elif editable %}
+        <a class="btn btn--primary" href="/agents?new=1" id="btn-new-agent">＋ New custom agent</a>
+        {% endif %}
       </div>
-      {% endif %}
 
-      {% if selected %}
+      {% if selected or creating %}
       <div id="agent-msg" role="status" aria-live="polite" class="muted" style="min-height: 1.2rem;"></div>
-      <form id="agent-form" data-name="{{ selected.name }}">
+      <form id="agent-form" data-name="{{ selected.name if selected else '' }}" data-creating="{{ '1' if creating else '' }}">
+        {% if creating %}
+        <div class="fld">
+          <label for="f-new-id">Agent ID <span class="sub">— unique, lowercase &amp; underscores, e.g. onboarding_buddy</span></label>
+          <input id="f-new-id" type="text" placeholder="my_custom_agent" autocomplete="off" spellcheck="false">
+        </div>
+        {% endif %}
         <div class="fld">
           <label for="f-description">Name <span class="sub">— a short summary of the role</span></label>
-          <input id="f-description" name="description" type="text" value="{{ selected.description }}">
+          <input id="f-description" name="description" type="text" value="{{ selected.description if selected else '' }}">
         </div>
         <div class="fld">
           <label for="f-persona">What should it do? <span class="sub">— plain English</span></label>
-          <textarea id="f-persona" name="persona" rows="6">{{ selected.persona }}</textarea>
+          <textarea id="f-persona" name="persona" rows="6" placeholder="Describe the job in plain English — what it handles, how it should behave, what 'done' looks like.">{{ selected.persona if selected else '' }}</textarea>
         </div>
 
         <div class="fld">
           <label>Skills &amp; tools <span class="sub">— what it can reach</span></label>
           <div class="chips" id="skill-chips" aria-label="Tools this specialist can use"></div>
           {# The chips sync into this hidden input, which the save script reads. #}
-          <input id="f-allow" name="allow_tools" type="hidden" value="{{ selected.allow_tools|join(' ') }}">
+          <input id="f-allow" name="allow_tools" type="hidden" value="{{ selected.allow_tools|join(' ') if selected else '' }}">
         </div>
 
         <div class="fld">
@@ -183,14 +197,15 @@
           <div class="guard-row">
             <span class="tt">Highest risk it may take
               <small>How far it can go without a stricter gate.</small></span>
+            {% set cur_risk = selected.max_risk if selected else 'low' %}
             <span class="risk-seg" id="risk-seg" role="group" aria-label="Risk ceiling">
               {% for r in ['low', 'medium', 'high'] %}
-              <button type="button" data-risk="{{ r }}"{% if selected.max_risk == r %} class="on"{% endif %}>{{ r }}</button>
+              <button type="button" data-risk="{{ r }}"{% if cur_risk == r %} class="on"{% endif %}>{{ r }}</button>
               {% endfor %}
             </span>
             <select id="f-risk" name="max_risk" hidden aria-label="Risk ceiling">
               {% for r in ['low', 'medium', 'high'] %}
-              <option value="{{ r }}"{% if selected.max_risk == r %} selected{% endif %}>{{ r }}</option>
+              <option value="{{ r }}"{% if cur_risk == r %} selected{% endif %}>{{ r }}</option>
               {% endfor %}
             </select>
           </div>
@@ -213,16 +228,16 @@
           <div class="advanced__body">
             <div class="fld">
               <label for="f-deny">Denied tools <span class="sub">— space-separated; always blocked</span></label>
-              <input id="f-deny" name="deny_tools" type="text" value="{{ selected.deny_tools|join(' ') }}">
+              <input id="f-deny" name="deny_tools" type="text" value="{{ selected.deny_tools|join(' ') if selected else '' }}">
             </div>
             <fieldset style="border: 1px solid var(--border); border-radius: 6px; margin: 0.5rem 0; padding: 0.6rem 0.8rem;">
               <legend>Workflow playbook <span class="muted">— ordered steps the agent follows</span></legend>
               <div id="wf-steps">
-                {% for s in selected.workflow %}{{ wf_row(s) }}{% endfor %}
+                {% if selected %}{% for s in selected.workflow %}{{ wf_row(s) }}{% endfor %}{% endif %}
               </div>
               {% if editable %}<button type="button" id="wf-add">+ Add step</button>{% endif %}
             </fieldset>
-            {% if editable and selected.workflow %}
+            {% if editable and selected and selected.workflow %}
             <p><a class="btn btn--ghost" href="/workflow-builder?edit_agent={{ selected.name | urlencode }}">Edit playbook in builder</a></p>
             {% endif %}
           </div>
@@ -230,23 +245,23 @@
 
         {% if editable %}
         <div class="af-actions">
-          <button type="button" class="btn btn--primary" id="btn-save">Deploy specialist</button>
+          <button type="button" class="btn btn--primary" id="btn-save">{{ 'Create custom agent' if creating else 'Deploy specialist' }}</button>
           <button type="button" class="btn" id="btn-validate">Validate</button>
-          <button type="button" class="btn btn--ghost" id="btn-reset">Reset to built-in</button>
+          {% if not creating %}<button type="button" class="btn btn--ghost" id="btn-reset">Reset to built-in</button>{% endif %}
         </div>
         {% else %}
         <p class="muted">Editing is disabled in this deployment.</p>
         {% endif %}
       </form>
 
-      {% if selected.errors or selected.warnings %}
+      {% if selected and (selected.errors or selected.warnings) %}
       <div class="panel" style="margin-top: 1rem;">
         {% for e in selected.errors %}<div>⛔ {{ e }}</div>{% endfor %}
         {% for w in selected.warnings %}<div class="muted">⚠ {{ w }}</div>{% endfor %}
       </div>
       {% endif %}
       {% else %}
-      <p class="muted">Pick a specialist above to tailor it.</p>
+      <p class="muted">Pick a specialist above to tailor it — or start a <a href="/agents?new=1">new custom agent</a>.</p>
       {% endif %}
     </div>
 
@@ -262,7 +277,7 @@
     </div>
   </div>
 
-  {% if selected and editable %}
+  {% if (selected or creating) and editable %}
   <template id="wf-row-tpl">{{ wf_row(none) }}</template>
   {% endif %}
 
@@ -381,14 +396,21 @@
     })();
   </script>
 
-  {% if selected and editable %}
+  {% if (selected or creating) and editable %}
   <script>
     // ---- save / validate / reset (real agent-override endpoints) ----
     (function () {
       const form = document.getElementById('agent-form');
       if (!form) return;
-      const name = form.dataset.name;
+      const creating = form.dataset.creating === '1';
+      const idInput = document.getElementById('f-new-id');
       const msg = document.getElementById('agent-msg');
+      // The target agent name: the pre-selected pack, or (new mode) the id typed
+      // in. Normalized to the lowercase/underscore shape packs use.
+      function targetName() {
+        if (!creating) return form.dataset.name;
+        return (idInput ? idInput.value : '').trim().toLowerCase().replace(/[^a-z0-9_]+/g, '_').replace(/^_+|_+$/g, '');
+      }
       const words = (s) => s.split(/\s+/).filter(Boolean);
       function show(text, ok) { msg.textContent = text; msg.style.color = ok ? 'var(--accent)' : 'var(--danger)'; }
 
@@ -445,17 +467,23 @@
         return { status: r.status, data };
       }
       document.getElementById('btn-validate').addEventListener('click', async () => {
+        const name = targetName();
+        if (!name) { show('Give your agent an id first (e.g. onboarding_buddy).', false); return; }
         const { data } = await call('POST', `/api/v1/agents/${name}/validate`, payload());
         if (data.errors && data.errors.length) show('Invalid: ' + data.errors.join('; '), false);
         else if (data.warnings && data.warnings.length) show('OK, with warnings: ' + data.warnings.join('; '), true);
         else show('Looks good.', true);
       });
       document.getElementById('btn-save').addEventListener('click', async () => {
+        const name = targetName();
+        if (!name) { show('Give your agent an id first (e.g. onboarding_buddy).', false); return; }
         const { status, data } = await call('POST', `/api/v1/agents/${name}/override`, payload());
-        if (status === 200) { show('Deployed.', true); window.location.search = '?name=' + encodeURIComponent(name); }
+        if (status === 200) { show(creating ? 'Custom agent created.' : 'Deployed.', true); window.location.search = '?name=' + encodeURIComponent(name); }
         else show('Rejected: ' + (data.detail || ('HTTP ' + status)), false);
       });
-      document.getElementById('btn-reset').addEventListener('click', async () => {
+      const resetBtn = document.getElementById('btn-reset');
+      if (resetBtn) resetBtn.addEventListener('click', async () => {
+        const name = targetName();
         const { status, data } = await call('DELETE', `/api/v1/agents/${name}/override`);
         if (status === 200) { show('Reverted to built-in.', true); window.location.search = '?name=' + encodeURIComponent(name); }
         else show('Failed: ' + (data.detail || ('HTTP ' + status)), false);

@@ -1850,6 +1850,10 @@ async def agents_page(request: Request) -> HTMLResponse:
     agents: list = []
     selected = None
     editable = True
+    # ``?new=1`` opens a blank builder for a brand-new, from-scratch custom agent
+    # (no built-in base): the save posts to /api/v1/agents/<the id you type>, which
+    # coerces a standalone pack. ``?name=`` still tailors an existing specialist.
+    creating = request.query_params.get("new") in ("1", "true", "yes")
     try:
         from maverick.config import get_features
         from maverick.domain_edit import list_agents, resolved_view
@@ -1858,24 +1862,54 @@ async def agents_page(request: Request) -> HTMLResponse:
         name = request.query_params.get("name")
         if name:
             selected = resolved_view(name)
+            creating = False  # editing an existing agent wins over the new form
     except Exception:  # never 500 the page if the factory layer is unavailable
         agents = []
     return templates.TemplateResponse(
         request, "agents.html",
-        {"agents": agents, "selected": selected, "editable": editable},
+        {"agents": agents, "selected": selected, "editable": editable,
+         "creating": creating},
     )
+
+
+def model_picker_options() -> list[tuple[str, str]]:
+    """Every model a picker may offer, as ``(spec, provider_label)``: the built-in
+    catalogue, plus any ``[models] catalog`` the admin added, capped to the admin
+    allow-list when one is set. Shared by the Settings and Roles model pickers so
+    the two never drift."""
+    import re as _re
+
+    from maverick.llm import catalog_specs
+    from maverick.runtime_overrides import allowed_models
+    options = list(catalog_specs())
+    seen = {s for s, _ in options}
+    try:  # admins extend the picker via [models] catalog in config.toml
+        from maverick.config import load_config
+        for spec in (load_config().get("models", {}) or {}).get("catalog") or []:
+            s = str(spec).strip()
+            if s and s not in seen and _re.fullmatch(r"[A-Za-z0-9_.:/-]{1,128}", s):
+                options.append((s, "Custom (config)"))
+                seen.add(s)
+    except Exception:  # pragma: no cover -- config read fails soft
+        pass
+    allow = allowed_models()
+    if allow:
+        label_by_spec = dict(options)
+        return [(s, label_by_spec.get(s, "Allowed")) for s in sorted(allow)]
+    return options
 
 
 @app.get("/roles", response_class=HTMLResponse)
 async def roles_page(request: Request) -> HTMLResponse:
     """The per-client roles editor: each core role (orchestrator, coder, ...)
-    and its editable system-prompt addendum. ``?role=`` opens that role. The
-    addendum is appended to the role's base template at spawn; model/effort are
-    shown read-only (configured via [models]/[effort]). Read-only when
-    [features] role_editing is off."""
+    with an editable system-prompt addendum AND an editable per-role model
+    (picked from the catalogue) + reasoning effort. ``?role=`` opens that role.
+    The addendum is appended to the role's base template at spawn. Read-only
+    when [features] role_editing is off."""
     roles: list = []
     selected = None
     editable = True
+    model_options: list[tuple[str, str]] = []
     try:
         from maverick.config import get_features
         from maverick.role_edit import list_roles, resolved_role
@@ -1884,11 +1918,13 @@ async def roles_page(request: Request) -> HTMLResponse:
         role = request.query_params.get("role")
         if role:
             selected = resolved_role(role)
+        model_options = model_picker_options()
     except Exception:  # never 500 the page if the role layer is unavailable
         roles = []
     return templates.TemplateResponse(
         request, "roles.html",
-        {"roles": roles, "selected": selected, "editable": editable},
+        {"roles": roles, "selected": selected, "editable": editable,
+         "model_options": model_options},
     )
 
 

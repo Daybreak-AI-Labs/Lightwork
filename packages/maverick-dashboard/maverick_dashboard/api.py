@@ -1018,8 +1018,9 @@ async def list_connections_endpoint(request: Request) -> dict:
 async def create_connection_endpoint(request: Request, payload: ConnectionIn) -> dict:
     """Create or replace a named connection (base URL + token, sealed at rest).
     A connector can then be wired without env vars -- the connection is the
-    fallback when ``<NAME>_TOKEN`` is unset."""
-    require_permission(request, "operate")
+    fallback when ``<NAME>_TOKEN`` is unset. Admin-gated: a saved connection
+    holds a live credential, so only administrators may create/rotate one."""
+    require_permission(request, "admin")
     _require_connections()
     from maverick import connections
     try:
@@ -1040,8 +1041,10 @@ async def create_connection_endpoint(request: Request, payload: ConnectionIn) ->
 @router.post("/connections/{name}/test")
 async def test_connection_endpoint(request: Request, name: str) -> dict:
     """Best-effort reachability check: GET the connection's base URL with its
-    token and report whether it authenticates. Never returns the token."""
-    require_permission(request, "operate")
+    token and report whether it authenticates. Never returns the token.
+    Admin-gated: the probe sends the sealed token, so it's part of managing the
+    credential, not an operator action."""
+    require_permission(request, "admin")
     _require_connections()
     from maverick import connections
     rec = connections.get_connection(name)
@@ -1086,7 +1089,7 @@ async def test_connection_endpoint(request: Request, name: str) -> dict:
 
 @router.delete("/connections/{name}")
 async def delete_connection_endpoint(request: Request, name: str) -> dict:
-    require_permission(request, "operate")
+    require_permission(request, "admin")  # managing credentials is admin-only
     _require_connections()
     from maverick import connections
     if not connections.delete_connection(name, owner=goal_owner_filter(request)):

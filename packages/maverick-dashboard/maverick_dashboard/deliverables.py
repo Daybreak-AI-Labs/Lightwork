@@ -77,7 +77,15 @@ def build_inbox(specs: list[dict], runs_by_domain: dict[str, list],
     ``items`` (one per deliverable, runs attached, gated-and-finished floated to
     the top), and ``awaiting`` (the flat sign-off queue, newest first)."""
     signoffs = signoffs or {}
+    # Full consumer set (for the searchable "jump to any role" control) and the
+    # much smaller set of roles that actually have live work right now (the only
+    # ones worth rendering as chips -- otherwise a 2,000-pack workspace dumps its
+    # entire role catalogue as a wall of chips).
     roles = sorted({r for s in specs for r in s.get("consumers", [])})
+    active_roles = sorted({
+        r for s in specs if runs_by_domain.get(s["domain"])
+        for r in s.get("consumers", [])
+    })
     showing_mine = bool(mine) and not role
     if role:
         specs = [s for s in specs if role in s.get("consumers", [])]
@@ -101,8 +109,9 @@ def build_inbox(specs: list[dict], runs_by_domain: dict[str, list],
     # Deliverables that need a human float to the top; then alphabetical.
     items.sort(key=lambda it: (it["awaiting_count"] == 0, it["deliverable"].lower()))
     awaiting.sort(key=lambda r: r["updated_at"], reverse=True)
-    return {"roles": roles, "role": role or "", "mine": sorted(mine or []),
-            "showing_mine": showing_mine, "items": items, "awaiting": awaiting}
+    return {"roles": roles, "active_roles": active_roles, "role": role or "",
+            "mine": sorted(mine or []), "showing_mine": showing_mine,
+            "items": items, "awaiting": awaiting}
 
 
 __all__ = ["build_inbox", "persona_roles_for"]
