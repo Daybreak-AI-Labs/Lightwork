@@ -207,10 +207,15 @@ def llm_proposer(inst: Instance) -> str:
     for k, v in _BENCH_ENV.items():
         os.environ.setdefault(k, v)
 
+    from maverick.config import reset_config_cache
     from swe_bench import _reset_workdir, run_maverick
 
-    prev_cwd = os.getcwd()
-    os.chdir(inst.repo_path)  # build_sandbox() falls back to cwd for its workdir
+    # Point the agent's sandbox at THIS instance's checkout. build_sandbox()
+    # reads [sandbox] workdir from config (default ~/maverick-workspace) and
+    # NEVER consults cwd -- so without this the agent operates on an empty
+    # placeholder workspace, not the repo, and can only produce no-diff. A
+    # deep-merged config overlay is the one runtime knob build_sandbox honors.
+    restore = _point_sandbox_at(inst.repo_path)
     row = tree_diff = prose_diff = None
     try:
         row = run_maverick(
@@ -224,12 +229,39 @@ def llm_proposer(inst: Instance) -> str:
         return prose_diff if prose_diff.strip() else tree_diff
     finally:
         _dump_forensics(inst, row, tree_diff, prose_diff)
-        os.chdir(prev_cwd)
+        restore()
+        reset_config_cache()
         try:
             _reset_workdir(inst.repo_path)
         except Exception:
             log.warning("llm_proposer: could not reset %s after proposing",
                         inst.repo_path, exc_info=True)
+
+
+def _point_sandbox_at(repo: Path):
+    """Redirect the agent's sandbox workdir to ``repo`` via a config overlay,
+    reset the config cache so it takes effect, and return a restore() callable.
+    build_sandbox() reads ``[sandbox] workdir`` from config and never consults
+    cwd; a MAVERICK_CONFIG_OVERLAY file is the runtime knob it honors."""
+    import tempfile
+
+    from maverick.config import reset_config_cache
+    overlay = Path(tempfile.gettempdir()) / f"mav_sbx_overlay_{os.getpid()}.toml"
+    overlay.write_text(f'[sandbox]\nworkdir = "{repo}"\n', encoding="utf-8")
+    prev = os.environ.get("MAVERICK_CONFIG_OVERLAY")
+    os.environ["MAVERICK_CONFIG_OVERLAY"] = str(overlay)
+    reset_config_cache()
+
+    def restore():
+        if prev is None:
+            os.environ.pop("MAVERICK_CONFIG_OVERLAY", None)
+        else:
+            os.environ["MAVERICK_CONFIG_OVERLAY"] = prev
+        try:
+            overlay.unlink()
+        except OSError:
+            pass
+    return restore
 
 
 def _dump_forensics(inst, row, tree_diff, prose_diff) -> None:
