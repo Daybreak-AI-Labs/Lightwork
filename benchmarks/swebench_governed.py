@@ -117,13 +117,48 @@ def oracle_proposer(inst: Instance) -> str:
 def llm_proposer(inst: Instance) -> str:
     """Generate a patch with the coding-mode agent (needs a provider key).
 
-    Kept as a seam: the full agent loop is driven by ``benchmarks/swe_bench.py``
-    (best-of-N, defensive validation, retries). Wire that here when running the
-    capability measurement; raising keeps a keyless run from silently scoring 0.
+    Thin adapter over the proven ``benchmarks/swe_bench.py`` solver
+    (``run_maverick``: coding mode, diff-only template, ``git apply --check``
+    self-validation, optional best-of-N via ``MAVERICK_BEST_OF_N``). It runs the
+    agent WITH the instance's checked-out tree as its working directory, captures
+    the predicted unified diff, then resets the tree -- so the governed evaluator
+    always scores from a clean base and the proposer can never leak edits into
+    the baseline arm.
+
+    NOTE: the reset is ``git reset --hard`` + ``git clean -fdx`` on
+    ``inst.repo_path`` -- point it ONLY at a dedicated instance checkout (the
+    ``repos/<instance_id>`` tree the fetcher makes), never at a repo with
+    uncommitted work. Fail-loud on a missing key: a keyless run must not
+    silently score 0.
     """
-    raise NotImplementedError(
-        "llm_proposer: wire benchmarks/swe_bench.py's agent solver here and set "
-        "ANTHROPIC_API_KEY. Use --proposer oracle for the keyless pipeline proof.")
+    import os
+
+    if not (os.environ.get("ANTHROPIC_API_KEY") or os.environ.get("MAVERICK_PROVIDER_READY")):
+        raise RuntimeError(
+            "llm_proposer needs a provider key (set ANTHROPIC_API_KEY, or set "
+            "MAVERICK_PROVIDER_READY=1 if another provider is configured in "
+            "~/.maverick/config.toml). Use --proposer oracle for the keyless "
+            "pipeline proof.")
+
+    from swe_bench import _reset_workdir, run_maverick
+
+    prev_cwd = os.getcwd()
+    os.chdir(inst.repo_path)  # build_sandbox() falls back to cwd for its workdir
+    try:
+        row = run_maverick(
+            inst.instance_id, inst.brief,
+            fail_to_pass=inst.fail_to_pass, pass_to_pass=inst.pass_to_pass,
+            gold_patch=inst.gold_patch, language=inst.language)
+        return row.predicted_patch or ""
+    finally:
+        os.chdir(prev_cwd)
+        # The agent may have edited the tree in place; the governed evaluator
+        # must start from the clean base. Patch-in-hand, reset hard + clean.
+        try:
+            _reset_workdir(inst.repo_path)
+        except Exception:
+            log.warning("llm_proposer: could not reset %s after proposing",
+                        inst.repo_path, exc_info=True)
 
 
 PROPOSERS: dict[str, Callable[[Instance], str]] = {
@@ -324,8 +359,16 @@ def main(argv: list[str] | None = None) -> int:
         for i, inst in enumerate(instances):
             try:
                 patch = propose(inst)
-            except NotImplementedError as e:
-                print(f"  [SKIP]  {inst.instance_id:40}  {e}")
+            except RuntimeError as e:
+                # Missing provider key: config problem, not a per-instance
+                # failure. Abort loudly instead of skipping 500 instances.
+                print(f"  [ABORT] {e}")
+                return 2
+            except Exception as e:
+                # A per-instance proposer crash scores that instance 0 and the
+                # run continues -- one bad instance must not kill a $1k run.
+                print(f"  [ERROR] {inst.instance_id:40}  proposer failed: {e}")
+                unresolved += 1
                 continue
             r = govern_candidate(inst, patch, keys_dir=args.keys, ledger=ledger,
                                  workroot=Path(td) / f"i{i}", timeout=args.timeout)
