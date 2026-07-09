@@ -6,12 +6,16 @@ subscription can back Lightwork roles and benchmarks. Spec form:
 ``codex_cli:<model-id>`` (aliases ``codex-cli:`` / ``codex:``), e.g.::
 
     [models]
-    orchestrator = "codex_cli:gpt-5.5-codex"
+    orchestrator = "codex_cli:gpt-5.5"
 
 or, for a one-off benchmark run::
 
-    MAVERICK_MODEL_OVERRIDE='codex_cli:gpt-5.5-codex' \
+    MAVERICK_MODEL_OVERRIDE='codex_cli:gpt-5.5' \
         python3 benchmarks/eval_tau2.py --limit 1 --max-dollars 2
+
+Use a model id your Codex plan actually serves. With a ChatGPT subscription
+that is ``gpt-5.5`` (the codex CLI's own default) or ``gpt-5``; the
+Codex-tuned ``*-codex`` ids are rejected for ChatGPT-account auth.
 
 Auth comes from the Codex CLI's own login state (``$CODEX_HOME/auth.json``,
 default ``~/.codex/auth.json``) or from ``CODEX_ACCESS_TOKEN`` — the env var
@@ -114,7 +118,10 @@ class CodexCLIClient:
     logged, never placed on argv, and never echoed into error messages.
     """
 
-    DEFAULT_MODEL = "gpt-5.5-codex"
+    # The codex CLI's own default for ChatGPT-account auth. The Codex-tuned
+    # `*-codex` ids (e.g. gpt-5.5-codex) 400 with "not supported when using
+    # Codex with a ChatGPT account", so they must NOT be the default.
+    DEFAULT_MODEL = "gpt-5.5"
     PRICE_MODEL_PREFIX = PRICE_MODEL_PREFIX
     # Subscription usage: nothing to dollar-enforce, so a missing usage
     # event must not abort the turn (mirrors the self-hosted providers).

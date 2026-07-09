@@ -145,7 +145,7 @@ MODEL_CATALOG: dict[str, list[str]] = {
     # ChatGPT/Codex subscription via the local Codex CLI (`codex exec`), not
     # the metered OpenAI API. Ids are whatever the user's Codex plan serves;
     # unknown ids behind the codex_cli: prefix price $0 (subscription-billed).
-    "codex_cli":  ["gpt-5.5-codex", "gpt-5.5", "gpt-5.4"],
+    "codex_cli":  ["gpt-5.5", "gpt-5"],
 }
 
 PROVIDER_LABELS: dict[str, str] = {

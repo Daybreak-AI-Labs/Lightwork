@@ -97,7 +97,34 @@ class TestRegistry:
         assert "codex_cli" in MODEL_CATALOG
         assert "codex_cli" in PROVIDER_LABELS
         specs = [s for s, _ in catalog_specs()]
-        assert "codex_cli:gpt-5.5-codex" in specs
+        # Catalogued ids must be ones a ChatGPT account actually serves; the
+        # Codex-tuned *-codex ids 400 for ChatGPT-account auth, so they're out.
+        assert "codex_cli:gpt-5.5" in specs
+        assert not any(s.endswith("-codex") for s in specs if s.startswith("codex_cli:"))
+
+
+class TestPricing:
+    """codex_cli is subscription-metered -> always $0, even for model ids that
+    collide with priced OpenAI-API entries (gpt-5.5, gpt-5)."""
+
+    def test_codex_cli_prices_zero_despite_colliding_id(self):
+        from maverick.budget import _lookup_price
+        from maverick.llm import MODEL_PRICES
+        # gpt-5.5 has a real (nonzero) OpenAI-API price in the table...
+        assert MODEL_PRICES.get("gpt-5.5", (0, 0)) != (0.0, 0.0)
+        # ...but behind the codex_cli: prefix it must resolve to $0, not that
+        # API rate (the bug that billed a subscription run at ~$0.40).
+        assert _lookup_price("codex_cli:gpt-5.5") == (0.0, 0.0)
+        assert _lookup_price("codex_cli:gpt-5") == (0.0, 0.0)
+        # The bare OpenAI id (openai provider) still bills at its API rate.
+        assert _lookup_price("gpt-5.5") == MODEL_PRICES["gpt-5.5"]
+
+    def test_codex_cli_budget_records_zero_dollars(self):
+        from maverick.budget import Budget
+        b = Budget(max_dollars=0.01)  # would trip immediately if billed as API
+        b.record_tokens(75601, 813, model="codex_cli:gpt-5.5", cache_read_tok=7424)
+        assert b.dollars == 0.0
+        assert b.input_tokens == 75601 and b.output_tokens == 813
 
 
 class TestLaunchPrefix:
