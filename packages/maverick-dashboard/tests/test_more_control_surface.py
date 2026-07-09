@@ -104,8 +104,8 @@ def test_cache_html_page_renders(monkeypatch, tmp_path):
     text = r.text
     assert "Purge" in text
     assert "files" in text
-    # Nav link present.
-    assert 'href="/cache"' in text
+    # (Cache is folded out of the sidebar in the moderate declutter; still
+    # reachable at /cache and rendered above.)
 
 
 # ---------- audit grep ----------

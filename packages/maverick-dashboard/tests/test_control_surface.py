@@ -267,7 +267,9 @@ def test_base_nav_includes_new_pages(monkeypatch, tmp_path):
     client = _client()
     r = client.get("/")
     text = r.text
-    for href in ("/audit", "/plugins", "/mcp", "/tools", "/channels"):
+    # /tools is folded out of the sidebar in the moderate declutter (reached
+    # in-page); the rest remain first-class nav entries.
+    for href in ("/audit", "/plugins", "/mcp", "/channels"):
         assert href in text, f'nav missing link to {href}'
 
 

@@ -55,19 +55,22 @@ PAGES: tuple[dict, ...] = (
      "floor": "view", "default": "view"},
     {"path": "/deliverables", "label": "Deliverables", "group": "Operate", "icon": "templates",
      "floor": "view", "default": "view"},
-    {"path": "/agents", "label": "Agents", "group": "Operate", "icon": "agents",
+    {"path": "/agents", "label": "Agent Factory", "group": "Operate", "icon": "agents",
      "floor": "view", "default": "operate"},
     {"path": "/roles", "label": "Roles", "group": "Operate", "icon": "roles",
      "floor": "view", "default": "operate"},
     {"path": "/workforce", "label": "Workforce", "group": "Operate", "icon": "agents",
      "floor": "view", "default": "view"},
-    {"path": "/workflows", "label": "Workflows", "group": "Operate", "icon": "workflow",
+    # Flows: the redesigned builder (/flows/designer) is the primary sidebar
+    # entry. The saved-workflows index and the older NL builder are reached from
+    # the Flows builder / Automations / Agents pages rather than the sidebar, so
+    # the nav shows one clear "Flows" job instead of three near-duplicates.
+    {"path": "/flows/designer", "label": "Flows", "group": "Operate", "icon": "workflow",
      "floor": "view", "default": "operate"},
-    # Builder/designer surfaces, linked from Workflows, Automations and Agents.
+    {"path": "/workflows", "label": "Workflows", "group": "Operate", "icon": "workflow",
+     "floor": "view", "default": "operate", "in_nav": False},
     {"path": "/workflow-builder", "label": "Workflow Builder", "group": "Operate",
      "icon": "workflow", "floor": "view", "default": "operate", "in_nav": False},
-    {"path": "/flows/designer", "label": "Flow Designer", "group": "Operate", "icon": "graph",
-     "floor": "view", "default": "operate", "in_nav": False},
     {"path": "/automations", "label": "Automations", "group": "Operate", "icon": "clock",
      "floor": "view", "default": "operate"},
     {"path": "/fleets", "label": "Fleets", "group": "Operate", "icon": "fleets",
@@ -158,6 +161,28 @@ PAGES: tuple[dict, ...] = (
     {"path": "/embed-demo", "label": "Embed Analytics", "group": "Admin", "icon": "embed",
      "floor": "view", "default": "admin"},
 )
+
+# Moderate sidebar declutter: keep a focused set of everyday destinations in the
+# rail; fold the rest OUT of the sidebar (in_nav=False) while leaving them fully
+# reachable in-page and by URL. One place to adjust the balance — move a path
+# out of this set to bring its tab back. (Pages already in_nav=False in the
+# registry above, e.g. builders reached from a parent page, are unaffected.)
+_NAV_FOLD: frozenset[str] = frozenset({
+    # Operate — reached from Goals / Agent Factory / Workforce
+    "/start", "/projects", "/roles", "/fleets",
+    # Observe — analytical/advanced views reached from Overview & friends
+    "/discovery", "/providers", "/benchmarks", "/flows/analytics",
+    "/walkthroughs", "/facts", "/plan-tree-3d",
+    # Govern — advanced governance surfaces
+    "/simulate", "/compartments", "/replay", "/trust",
+    # Extend — secondary catalogs
+    "/store", "/templates", "/tools", "/styles",
+    # Admin — rarely-touched plumbing
+    "/cache", "/embed-demo",
+})
+for _pg in PAGES:
+    if _pg["path"] in _NAV_FOLD:
+        _pg["in_nav"] = False
 
 _PAGES_BY_PATH = {p["path"]: p for p in PAGES}
 

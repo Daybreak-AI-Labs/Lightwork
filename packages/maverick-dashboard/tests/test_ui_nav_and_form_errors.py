@@ -23,8 +23,8 @@ def _prep(monkeypatch, tmp_path):
 @pytest.mark.parametrize("path,label", [
     ("/overview", "Overview"),
     ("/goals", "Goals"),
-    ("/facts", "Facts"),
-    ("/tools", "Tools"),
+    ("/agents", "Agent Factory"),
+    ("/skills", "Skills"),
     ("/spend", "Spend"),
 ])
 def test_current_page_link_is_marked_active(monkeypatch, tmp_path, path, label):

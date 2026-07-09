@@ -57,12 +57,13 @@ def test_fleets_empty_state_shows_create_hint(monkeypatch, tmp_path):
     assert "maverick fleet create" in r.text
 
 
-def test_fleets_nav_link_present(monkeypatch, tmp_path):
+def test_fleets_page_reachable(monkeypatch, tmp_path):
+    # Fleets is folded out of the sidebar in the moderate declutter (reached
+    # from Workforce in-page), but the page still renders at its URL.
     _isolate(monkeypatch, tmp_path)
     r = _client().get("/fleets")
     assert r.status_code == 200
-    assert 'href="/fleets"' in r.text
-    assert ">Fleets<" in r.text
+    assert 'page-title">Fleets' in r.text
 
 
 def test_recent_oversight_panel_shows_governance_holds(monkeypatch, tmp_path):
