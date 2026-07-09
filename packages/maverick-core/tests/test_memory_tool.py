@@ -72,6 +72,24 @@ def test_insert(mem):
     assert mem({"command": "view", "path": "a"}) == "1: one\n2: two\n3: three"
 
 
+def test_insert_normalizes_crlf_before_writing(mem, tmp_path, monkeypatch):
+    """A Windows rewrite must not double the CR before an inserted line."""
+    import maverick.tools.memory as memory_mod
+
+    path = tmp_path / "mem" / "a"
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_bytes(b"one\r\nthree")
+
+    def windows_write(target, text):
+        # Emulate text-mode newline translation while keeping this test portable.
+        target.write_bytes(text.replace("\n", "\r\n").encode("utf-8"))
+
+    monkeypatch.setattr(memory_mod, "_write_text", windows_write)
+    assert mem({"command": "insert", "path": "a", "insert_line": 1,
+                "insert_text": "two"}).startswith("inserted")
+    assert path.read_bytes() == b"one\r\ntwo\r\nthree"
+
+
 def test_insert_out_of_range(mem):
     mem({"command": "create", "path": "a", "file_text": "one"})
     assert "out of range" in mem({"command": "insert", "path": "a",

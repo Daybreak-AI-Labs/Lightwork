@@ -181,6 +181,19 @@ class VoiceOnlySession:
                 self.speak("Voice mode off. Goodbye.")
                 break
             try:
+                from .safety.voice_safety import scan_transcript
+                verdict = scan_transcript(text)
+            except Exception:  # safety scanner failures are explicitly fail-open
+                log.warning("voice_only transcript safety scan failed", exc_info=True)
+            else:
+                if not verdict.ok:
+                    log.warning("voice_only transcript blocked: %s", "; ".join(verdict.reasons))
+                    self.speak("I can't process that request.")
+                    turns += 1
+                    if turns >= self.max_turns:
+                        break
+                    continue
+            try:
                 reply = self.respond(text)
             except Exception as e:
                 log.warning("voice_only: respond failed: %s", e)

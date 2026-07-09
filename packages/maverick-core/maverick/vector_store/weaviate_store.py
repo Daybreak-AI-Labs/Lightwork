@@ -6,8 +6,11 @@ swap one for another with no code change.
 
 Uses Weaviate's embedded mode by default (no separate server) and a remote
 cluster when configured:
-  - ``MAVERICK_WEAVIATE_URL``     -> remote server URL (overrides embedded)
-  - ``MAVERICK_WEAVIATE_API_KEY`` -> remote API key
+  - ``MAVERICK_WEAVIATE_URL``       -> remote HTTP(S) server URL (overrides embedded)
+  - ``MAVERICK_WEAVIATE_API_KEY``   -> optional remote API key
+  - ``MAVERICK_WEAVIATE_GRPC_HOST`` -> optional gRPC host (defaults to URL host)
+  - ``MAVERICK_WEAVIATE_GRPC_PORT`` -> optional gRPC port (defaults to 50051,
+    or 443 for a standard HTTPS endpoint)
 
 Vectorization is delegated to Weaviate's configured vectorizer module, so the
 collection embeds text server-side — the same "no extra wiring" stance as the
@@ -26,6 +29,8 @@ from __future__ import annotations
 import logging
 import os
 import uuid as _uuid
+from typing import Any
+from urllib.parse import urlparse
 
 log = logging.getLogger(__name__)
 
@@ -85,18 +90,64 @@ class WeaviateStore:
         )
 
         if url:
-            if api_key:
-                from weaviate.classes.init import Auth
-                self._client = weaviate.connect_to_weaviate_cloud(
-                    cluster_url=url, auth_credentials=Auth.api_key(api_key))
-            else:
-                self._client = weaviate.connect_to_local(host=url)
+            self._client = self._connect_remote(weaviate, url, api_key)
         else:
             self._client = weaviate.connect_to_embedded()
 
         # Weaviate collection names are capitalized GraphQL classes.
         self._collection = collection[:1].upper() + collection[1:]
         self._ensure_collection()
+
+    @staticmethod
+    def _connect_remote(weaviate, url: str, api_key: str | None):
+        """Connect a configured remote endpoint with the v4 custom helper.
+
+        ``connect_to_local`` accepts a bare local hostname, not a full URL, and
+        ``connect_to_weaviate_cloud`` is not a generic self-hosted API-key
+        connector. Parse the documented URL once, then supply the HTTP and
+        gRPC settings explicitly so self-hosted deployments work with or
+        without an API key.
+        """
+        raw = str(url or "").strip()
+        parsed = urlparse(raw if "://" in raw else f"http://{raw}")
+        if parsed.scheme.lower() not in {"http", "https"} or not parsed.hostname:
+            raise ValueError(
+                "MAVERICK_WEAVIATE_URL must be an http(s) URL with a hostname"
+            )
+        if parsed.username or parsed.password or parsed.path not in {"", "/"} \
+                or parsed.params or parsed.query or parsed.fragment:
+            raise ValueError(
+                "MAVERICK_WEAVIATE_URL must contain only scheme, host, and optional port"
+            )
+        try:
+            http_port = parsed.port or (443 if parsed.scheme.lower() == "https" else 80)
+        except ValueError as e:
+            raise ValueError("MAVERICK_WEAVIATE_URL contains an invalid port") from e
+
+        grpc_host = os.environ.get("MAVERICK_WEAVIATE_GRPC_HOST", "").strip()
+        grpc_host = grpc_host or parsed.hostname
+        default_grpc_port = 443 if http_port == 443 else 50051
+        raw_grpc_port = os.environ.get("MAVERICK_WEAVIATE_GRPC_PORT", "").strip()
+        try:
+            grpc_port = int(raw_grpc_port) if raw_grpc_port else default_grpc_port
+        except ValueError as e:
+            raise ValueError("MAVERICK_WEAVIATE_GRPC_PORT must be an integer") from e
+        if not 1 <= grpc_port <= 65535:
+            raise ValueError("MAVERICK_WEAVIATE_GRPC_PORT must be between 1 and 65535")
+
+        secure = parsed.scheme.lower() == "https"
+        kwargs: dict[str, Any] = {
+            "http_host": parsed.hostname,
+            "http_port": http_port,
+            "http_secure": secure,
+            "grpc_host": grpc_host,
+            "grpc_port": grpc_port,
+            "grpc_secure": secure,
+        }
+        if api_key:
+            from weaviate.classes.init import Auth
+            kwargs["auth_credentials"] = Auth.api_key(api_key)
+        return weaviate.connect_to_custom(**kwargs)
 
     def _vectorizer_config(self):
         """Build the ``Configure.Vectorizer`` config for the chosen module, or
@@ -130,7 +181,11 @@ class WeaviateStore:
                     self._client.collections.create(
                         self._collection, vectorizer_config=vec_cfg)
         except Exception as e:  # pragma: no cover -- backend-specific
-            log.warning("weaviate: ensure collection failed: %s", e)
+            # A usable store requires its collection. Continuing after a failed
+            # create only defers the error to an unrelated add/query call.
+            raise RuntimeError(
+                f"weaviate: could not ensure collection {self._collection!r}"
+            ) from e
 
     def add(
         self,

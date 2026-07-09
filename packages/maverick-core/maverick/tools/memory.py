@@ -80,9 +80,11 @@ def _resolve(root: Path, rel: str) -> Path:
 
 def _rel(p: Path, root: Path) -> str:
     try:
-        return str(p.relative_to(root)) or "."
+        # Tool paths are part of the agent-facing protocol. Keep them POSIX
+        # shaped on every host so a returned path can be used in a later call.
+        return p.relative_to(root).as_posix() or "."
     except ValueError:  # pragma: no cover -- _resolve already confined it
-        return str(p)
+        return p.as_posix()
 
 
 def _dir_size(root: Path) -> int:
@@ -230,11 +232,14 @@ def _cmd_insert(root: Path, target: Path, args: dict) -> str:
     except (TypeError, ValueError, OverflowError):
         return f"ERROR: insert_line must be an integer; got {after!r}"
     data = _read_text(target)
-    lines = data.split("\n")
+    # ``_read_text`` reads bytes so sealed files can be decoded, which means
+    # CRLF is not translated on Windows. Splitting only on ``\n`` leaves a
+    # trailing ``\r`` that the next text-mode write doubles into a blank line.
+    lines = data.splitlines()
     if idx < 0 or idx > len(lines):
         return (f"ERROR: insert_line={idx} out of range "
                 f"(file has {len(lines)} lines; 0 = before first line)")
-    new_data = "\n".join(lines[:idx] + text.split("\n") + lines[idx:])
+    new_data = "\n".join(lines[:idx] + text.splitlines() + lines[idx:])
     err = _fits(root, target, new_data)
     if err:
         return err

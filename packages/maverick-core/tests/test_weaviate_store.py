@@ -30,6 +30,7 @@ def _install_fake_weaviate(monkeypatch) -> MagicMock:
     fake_module = MagicMock(name="weaviate module")
     fake_module.connect_to_embedded.return_value = fake_client
     fake_module.connect_to_local.return_value = fake_client
+    fake_module.connect_to_custom.return_value = fake_client
     fake_module.connect_to_weaviate_cloud.return_value = fake_client
     monkeypatch.setitem(sys.modules, "weaviate", fake_module)
     return fake_client
@@ -56,6 +57,40 @@ def test_weaviate_vectorizer_none_skips_config(monkeypatch):
     WeaviateStore(collection="goals", vectorizer="none")
     # Explicit opt-out: created with no vectorizer_config.
     fake.collections.create.assert_called_once_with("Goals")
+
+
+def test_weaviate_remote_url_uses_custom_connector(monkeypatch):
+    _install_fake_weaviate(monkeypatch)
+    from maverick.vector_store.weaviate_store import WeaviateStore
+
+    WeaviateStore(url="https://weaviate.example:8443", vectorizer="none")
+
+    sys.modules["weaviate"].connect_to_custom.assert_called_once_with(
+        http_host="weaviate.example",
+        http_port=8443,
+        http_secure=True,
+        grpc_host="weaviate.example",
+        grpc_port=50051,
+        grpc_secure=True,
+    )
+
+
+def test_weaviate_remote_url_honors_grpc_overrides(monkeypatch):
+    _install_fake_weaviate(monkeypatch)
+    monkeypatch.setenv("MAVERICK_WEAVIATE_GRPC_HOST", "grpc.internal")
+    monkeypatch.setenv("MAVERICK_WEAVIATE_GRPC_PORT", "60051")
+    from maverick.vector_store.weaviate_store import WeaviateStore
+
+    WeaviateStore(url="http://weaviate.internal:8080", vectorizer="none")
+
+    sys.modules["weaviate"].connect_to_custom.assert_called_once_with(
+        http_host="weaviate.internal",
+        http_port=8080,
+        http_secure=False,
+        grpc_host="grpc.internal",
+        grpc_port=60051,
+        grpc_secure=False,
+    )
 
 
 def test_weaviate_uuid_for_is_stable():

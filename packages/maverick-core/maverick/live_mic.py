@@ -92,6 +92,16 @@ def run_live_mic(
         utterance = (transcriber(chunk) or "").strip()
         if not utterance:
             continue
+        try:
+            from .safety.voice_safety import scan_transcript
+            verdict = scan_transcript(utterance)
+        except Exception:  # safety scanner failures are explicitly fail-open
+            log.warning("live-mic transcript safety scan failed", exc_info=True)
+        else:
+            if not verdict.ok:
+                log.warning("live-mic transcript blocked: %s", "; ".join(verdict.reasons))
+                events.append(MicEvent(utterance=utterance, intent=None, status="denied"))
+                continue
         match = match_utterance(grammar, utterance)
         if match is None:
             events.append(MicEvent(utterance=utterance, intent=None))
