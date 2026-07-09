@@ -43,6 +43,7 @@ import json
 import logging
 import os
 import pathlib
+import re
 import sys
 from collections.abc import Callable
 from dataclasses import dataclass, field
@@ -69,6 +70,13 @@ class Instance:
     # or updated by it. Distinct from the candidate patch, which the anti-cheat
     # boundary still refuses if it touches tests.
     test_patch: str = ""
+    # False when the instance can't yield a trustworthy resolve verdict here --
+    # e.g. all its FAIL_TO_PASS ids were dropped as malformed at load, so a
+    # candidate would be graded only on PASS_TO_PASS (which pass regardless of
+    # the fix). govern_candidate marks such an instance ungradable, never
+    # resolved.
+    gradable: bool = True
+    ungradable_reason: str = ""
 
     @property
     def total_tests(self) -> int:
@@ -124,12 +132,17 @@ def oracle_proposer(inst: Instance) -> str:
 
 
 def _worktree_diff(repo: Path) -> str:
-    """The repo's uncommitted changes as a raw, git-appliable unified diff --
-    INCLUDING new files (``git add -N`` intent-to-add makes untracked files
-    show in ``git diff``). This is the authoritative patch: it is literal
-    ``git diff`` output, so it always applies with ``git apply -p1``, unlike a
-    diff parsed out of the model's prose. Hardened env (no ext-diff/textconv,
-    no global config) mirrors ``swe_bench._git_diff``."""
+    """The agent's edits vs HEAD as a raw, git-appliable unified diff.
+
+    Uses ``git diff HEAD`` (not bare ``git diff``) so it captures the change
+    whether the agent left it UNSTAGED or ``git add``-ed it -- a coding agent
+    often stages its edit, which bare ``git diff`` (working-vs-index) then shows
+    as EMPTY, silently dropping a perfectly good fix and forcing the fallback to
+    the model's hand-written prose diff (which LLMs miscount -> "corrupt patch").
+    ``git add -N`` first so brand-new files also appear. When HEAD is the grader
+    test-fixture commit, this excludes test_patch by construction. Literal git
+    output, so it always applies with ``git apply -p1``. Hardened env mirrors
+    ``swe_bench._git_diff``."""
     import subprocess
 
     env = {"GIT_CONFIG_GLOBAL": os.devnull, "GIT_CONFIG_NOSYSTEM": "1",
@@ -139,7 +152,7 @@ def _worktree_diff(repo: Path) -> str:
         subprocess.run(["git", "-C", str(repo), "add", "-N", "."],
                        capture_output=True, timeout=60, env=env)
         out = subprocess.run(
-            ["git", "-C", str(repo), "diff", "--no-ext-diff", "--no-textconv"],
+            ["git", "-C", str(repo), "diff", "HEAD", "--no-ext-diff", "--no-textconv"],
             capture_output=True, text=True, timeout=60, env=env)
         return out.stdout or ""
     except (subprocess.SubprocessError, OSError):
@@ -208,34 +221,100 @@ def llm_proposer(inst: Instance) -> str:
         os.environ.setdefault(k, v)
 
     from maverick.config import reset_config_cache
-    from swe_bench import _reset_workdir, run_maverick
+    from swe_bench import run_maverick
+
+    base_sha = _git_head(inst.repo_path)
+    # Give the agent the GRADED tests so its own test verifier gives REAL
+    # feedback. The FAIL_TO_PASS/PASS_TO_PASS the agent is told to satisfy are
+    # added by the grader's test_patch, which does NOT exist at base_commit --
+    # so without this the agent runs "test not found" -> 0/N on everything,
+    # concludes its fix broke the suite, thrashes, and emits no diff (the
+    # observed failure). Commit test_patch as a fixture on top of base_commit:
+    # the tests now exist and run, opaque mode still blocks READING their
+    # source, and committing it keeps the candidate diff clean (git diff against
+    # this commit excludes the fixture).
+    fixture_sha = base_sha
+    if (inst.test_patch or "").strip() and base_sha:
+        if _commit_fixture(inst.repo_path, inst.test_patch):
+            fixture_sha = _git_head(inst.repo_path)
 
     # Point the agent's sandbox at THIS instance's checkout. build_sandbox()
     # reads [sandbox] workdir from config (default ~/maverick-workspace) and
-    # NEVER consults cwd -- so without this the agent operates on an empty
-    # placeholder workspace, not the repo, and can only produce no-diff. A
-    # deep-merged config overlay is the one runtime knob build_sandbox honors.
+    # NEVER consults cwd -- the overlay is the one runtime knob it honors.
     restore = _point_sandbox_at(inst.repo_path)
     row = tree_diff = prose_diff = None
     try:
         row = run_maverick(
             inst.instance_id, inst.brief,
             fail_to_pass=inst.fail_to_pass, pass_to_pass=inst.pass_to_pass,
-            gold_patch=inst.gold_patch, language=inst.language)
+            gold_patch=inst.gold_patch, language=inst.language,
+            # Reset to the fixture commit (base + test_patch), not bare base,
+            # so run_maverick's pre-run reset keeps the graded tests present.
+            base_commit=fixture_sha)
+        # Candidate = the agent's source edits ONLY: diff against the fixture
+        # commit excludes the committed test_patch. Fall back to the desanitized
+        # prose diff if the tree is clean (agent emitted a diff without editing).
         tree_diff = _worktree_diff(inst.repo_path)
         prose_diff = _desanitize_csv_patch(row.predicted_patch or "")
-        # Coding mode's deliverable is the emitted diff; prefer it. Fall back to
-        # the agent's real working-tree edits when it emitted no prose diff.
-        return prose_diff if prose_diff.strip() else tree_diff
+        return tree_diff if tree_diff.strip() else prose_diff
     finally:
         _dump_forensics(inst, row, tree_diff, prose_diff)
         restore()
         reset_config_cache()
-        try:
-            _reset_workdir(inst.repo_path)
-        except Exception:
-            log.warning("llm_proposer: could not reset %s after proposing",
-                        inst.repo_path, exc_info=True)
+        # Restore the tree to the pristine base_commit (drop the fixture commit
+        # AND the agent's edits) so the governed evaluator copies a clean base.
+        _hard_reset(inst.repo_path, base_sha)
+
+
+def _git_head(repo: Path) -> str:
+    import subprocess
+    try:
+        r = subprocess.run(["git", "-C", str(repo), "rev-parse", "HEAD"],
+                           capture_output=True, text=True, timeout=30)
+        return (r.stdout or "").strip() if r.returncode == 0 else ""
+    except (subprocess.SubprocessError, OSError):
+        return ""
+
+
+def _commit_fixture(repo: Path, test_patch: str) -> bool:
+    """Apply ``test_patch`` and commit it as a throwaway fixture on top of the
+    current commit. Returns True on success. Best-effort: on any failure the
+    caller proceeds without the fixture (agent gets weaker feedback, still
+    correct)."""
+    import subprocess
+
+    from maverick.self_modify_eval import git_apply
+    if not getattr(git_apply(test_patch, repo), "ok", False):
+        log.warning("_commit_fixture: test_patch did not apply to %s", repo)
+        return False
+    env = {"GIT_CONFIG_GLOBAL": os.devnull, "GIT_CONFIG_NOSYSTEM": "1",
+           "GIT_AUTHOR_NAME": "swebench", "GIT_AUTHOR_EMAIL": "swebench@local",
+           "GIT_COMMITTER_NAME": "swebench", "GIT_COMMITTER_EMAIL": "swebench@local",
+           "PATH": os.environ.get("PATH", "")}
+    try:
+        subprocess.run(["git", "-C", str(repo), "add", "-A"],
+                       capture_output=True, timeout=60, env=env, check=True)
+        subprocess.run(["git", "-C", str(repo), "commit", "-q", "-m",
+                        "swebench: grader test fixture (throwaway)"],
+                       capture_output=True, timeout=60, env=env, check=True)
+        return True
+    except (subprocess.SubprocessError, OSError):
+        log.warning("_commit_fixture: could not commit fixture in %s", repo, exc_info=True)
+        return False
+
+
+def _hard_reset(repo: Path, sha: str) -> None:
+    """Reset ``repo`` hard to ``sha`` (or HEAD) and clean untracked; best-effort."""
+    import subprocess
+    env = {"GIT_CONFIG_GLOBAL": os.devnull, "GIT_CONFIG_NOSYSTEM": "1",
+           "PATH": os.environ.get("PATH", "")}
+    try:
+        subprocess.run(["git", "-C", str(repo), "reset", "--hard", sha or "HEAD"],
+                       capture_output=True, timeout=60, env=env)
+        subprocess.run(["git", "-C", str(repo), "clean", "-fdx"],
+                       capture_output=True, timeout=120, env=env)
+    except (subprocess.SubprocessError, OSError):
+        log.warning("_hard_reset: could not reset %s", repo, exc_info=True)
 
 
 def _point_sandbox_at(repo: Path):
@@ -298,13 +377,45 @@ PROPOSERS: dict[str, Callable[[Instance], str]] = {
 # --- the governed scorer ------------------------------------------------------
 
 def _score(workdir: Path, inst: Instance, sandbox, *, timeout: float) -> tuple[float, bool, int]:
-    """Run the instance's tests in ``workdir``; return (score, resolved, samples)."""
+    """Run the instance's tests in ``workdir``; return (score, all_pass, samples).
+
+    Prepends the isolated copy (and its ``src/``) to PYTHONPATH so the copy
+    SHADOWS any cross-instance editable install (a ``__editable__.*.pth`` on
+    sys.path). Without this, a src-layout repo (no package at the copy root)
+    imports the ORIGINAL checkout via the editable finder, so both arms test the
+    SAME unpatched tree and the candidate patch is invisible -- a silent
+    honesty inversion. Best-effort for the no-Docker path; per-instance Docker
+    (no cross-instance .pth at all) is the real isolation."""
     from maverick.coding_mode import run_failing_tests
-    res = run_failing_tests(
-        workdir, inst.fail_to_pass, inst.pass_to_pass, sandbox,
-        timeout=timeout, language=inst.language)
+    prev = os.environ.get("PYTHONPATH")
+    parts = [str(workdir), str(Path(workdir) / "src")]
+    os.environ["PYTHONPATH"] = os.pathsep.join(parts + ([prev] if prev else []))
+    try:
+        res = run_failing_tests(
+            workdir, inst.fail_to_pass, inst.pass_to_pass, sandbox,
+            timeout=timeout, language=inst.language)
+    finally:
+        if prev is None:
+            os.environ.pop("PYTHONPATH", None)
+        else:
+            os.environ["PYTHONPATH"] = prev
     samples = res.fail_to_pass_total + res.pass_to_pass_total
     return res.score, res.all_pass, samples
+
+
+# Grading-sensitive files: the base defensive_validate only WARNS on these, but
+# a candidate that edits conftest.py / pytest.ini / setup.cfg [tool:pytest] /
+# pyproject can make the graded test pass WITHOUT fixing the bug. A governed,
+# un-inflatable number must refuse them outright (stricter than the harness).
+_GRADING_SENSITIVE_RE = re.compile(
+    r"(^|/)(conftest\.py|pytest\.ini|tox\.ini|setup\.py|setup\.cfg|"
+    r"pyproject\.toml|requirements[^/]*\.txt|Makefile)$")
+
+
+def _grading_sensitive_paths(patch: str) -> list[str]:
+    """Paths in ``patch`` that could rig the grader rather than fix the bug."""
+    from maverick.self_modify import _diff_paths
+    return sorted({p for p in _diff_paths(patch or "") if _GRADING_SENSITIVE_RE.search(p)})
 
 
 def govern_candidate(
@@ -359,9 +470,26 @@ def govern_candidate(
         out.boundary_reason = "; ".join(dv.warnings) or "patch rejected by anti-cheat boundary"
         out.reason = f"boundary refused: {out.boundary_reason}"
         return out
+    # Stricter than the base harness: hard-refuse candidate edits to
+    # grading-sensitive config (conftest/pytest.ini/setup*/pyproject/...).
+    sensitive = _grading_sensitive_paths(patch)
+    if sensitive:
+        out.boundary_ok = False
+        out.boundary_reason = f"candidate edits grading-sensitive config: {sensitive}"
+        out.reason = f"boundary refused: {out.boundary_reason}"
+        return out
+    # An instance whose graded FAIL_TO_PASS were all dropped as malformed at
+    # load (or was flagged ungradable) can never be a real "resolved" -- its
+    # candidate would be graded only on PASS_TO_PASS. Refuse to grade it.
+    if not inst.gradable:
+        out.ungradable = True
+        out.reason = f"ungradable: {inst.ungradable_reason or 'no gradable FAIL_TO_PASS tests'}"
+        return out
     out.boundary_reason = "no test/config edits; not a gold copy"
 
-    # 2. Held-out fitness on isolated copies (baseline vs candidate).
+    # 2. Held-out fitness on isolated copies. Upstream SWE-bench order: apply the
+    #    CANDIDATE first, THEN the grader's test_patch, then run. The baseline
+    #    arm gets ONLY test_patch (no candidate).
     base_dir, cand_dir = workroot / "baseline", workroot / "candidate"
     try:
         materialize(inst.repo_path, base_dir)
@@ -369,9 +497,12 @@ def govern_candidate(
     except Exception as e:
         out.reason = f"could not isolate workspace: {e}"
         return out
-    # SWE-bench grading semantics: the instance's test_patch (the grader's
-    # added/updated tests) is applied to BOTH arms before anything runs --
-    # the graded FAIL_TO_PASS tests usually don't exist at base_commit.
+    applied = apply(patch, cand_dir)
+    if not getattr(applied, "ok", False):
+        out.reason = f"patch did not apply: {getattr(applied, 'reason', 'unknown')}"
+        return out
+    # test_patch (the grader's added/updated tests) to BOTH arms -- the graded
+    # FAIL_TO_PASS usually don't exist at base_commit.
     if (inst.test_patch or "").strip():
         for arm_name, arm_dir in (("baseline", base_dir), ("candidate", cand_dir)):
             tp = apply(inst.test_patch, arm_dir)
@@ -379,16 +510,22 @@ def govern_candidate(
                 out.reason = (f"grader test_patch did not apply to {arm_name}: "
                               f"{getattr(tp, 'reason', 'unknown')}")
                 return out
-    applied = apply(patch, cand_dir)
-    if not getattr(applied, "ok", False):
-        out.reason = f"patch did not apply: {getattr(applied, 'reason', 'unknown')}"
-        return out
     try:
         sb_base, sb_cand = make_sb(base_dir), make_sb(cand_dir)
     except Exception as e:
         out.reason = f"sandbox refused (isolation policy): {e}"
         return out
-    out.baseline_score, _, out.samples = _score(base_dir, inst, sb_base, timeout=timeout)
+    out.baseline_score, base_all_pass, out.samples = _score(base_dir, inst, sb_base, timeout=timeout)
+    # The baseline MUST fail the graded tests -- otherwise there is no bug to
+    # fix (mis-seeded instance) or the candidate copy is shadowed by an editable
+    # install so both arms test identical code. Either way it can't be a real
+    # resolution: mark ungradable, never resolved.
+    if base_all_pass:
+        out.ungradable = True
+        out.reason = ("mis-seeded/shadowed: baseline already passes the target "
+                      "tests (no failing bug, or an editable install shadows the "
+                      "isolated copy -- grade in per-instance Docker)")
+        return out
     out.candidate_score, out.tests_resolved, _ = _score(cand_dir, inst, sb_cand, timeout=timeout)
     if not out.tests_resolved:
         # Honest-reporting distinction: if the BASELINE can't even run the
@@ -499,16 +636,28 @@ def _load_manifest(path: Path) -> list[Instance]:
         row = json.loads(line)
         iid = row["instance_id"]
         repo_path = row.get("repo_path") or str(Path(path).parent / "repos" / iid)
+        raw_f2p = list(row.get("fail_to_pass") or [])
+        f2p = _sane_test_ids(raw_f2p, instance_id=iid, which="FAIL_TO_PASS")
+        # If the row HAD FAIL_TO_PASS but sanitizing emptied it (all ids were
+        # malformed upstream truncations), the instance can't be graded as
+        # resolved -- a candidate would face only PASS_TO_PASS. Flag it.
+        gradable, why = True, ""
+        if raw_f2p and not f2p:
+            gradable, why = False, (
+                f"all {len(raw_f2p)} FAIL_TO_PASS ids were malformed (upstream "
+                "truncation); no gradable failing test remains")
+        elif not raw_f2p:
+            gradable, why = False, "manifest row has no FAIL_TO_PASS tests"
         out.append(Instance(
             instance_id=iid, repo_path=Path(repo_path),
-            fail_to_pass=_sane_test_ids(list(row.get("fail_to_pass") or []),
-                                        instance_id=iid, which="FAIL_TO_PASS"),
+            fail_to_pass=f2p,
             pass_to_pass=_sane_test_ids(list(row.get("pass_to_pass") or []),
                                         instance_id=iid, which="PASS_TO_PASS"),
             gold_patch=row.get("gold_patch", "") or "",
             brief=row.get("brief", "") or "",
             language=row.get("language", "python") or "python",
-            test_patch=row.get("test_patch", "") or ""))
+            test_patch=row.get("test_patch", "") or "",
+            gradable=gradable, ungradable_reason=why))
     return out
 
 
@@ -523,8 +672,24 @@ def main(argv: list[str] | None = None) -> int:
     ap.add_argument("--keys", required=True, type=Path, help="dir with operator.priv.hex + operator.pub")
     ap.add_argument("--ledger", type=Path, default=Path("swebench_ledger.json"))
     ap.add_argument("--limit", type=int, default=0)
-    ap.add_argument("--timeout", type=float, default=600.0)
+    ap.add_argument("--timeout", type=float, default=600.0,
+                    help="per-arm test-run timeout (seconds); does NOT bound the agent")
+    ap.add_argument("--abort-at-dollars", type=float, default=0.0,
+                    help="hard stop once cumulative agent spend reaches this (0 = no cap)")
+    ap.add_argument("--max-consecutive-failures", type=int, default=0,
+                    help="abort after this many non-resolved instances in a row (0 = off) "
+                         "-- a circuit breaker so a broken env doesn't burn a whole budget")
+    ap.add_argument("--agent-wall-sec", type=float, default=None,
+                    help="per-instance agent wall-clock cap (sets MAVERICK_INSTANCE_WALL_SEC)")
+    ap.add_argument("--agent-max-steps", type=int, default=None,
+                    help="per-instance agent turn cap (sets MAVERICK_MAX_STEPS)")
     args = ap.parse_args(argv)
+
+    # Surface the env knobs run_maverick reads as first-class flags.
+    if args.agent_wall_sec is not None:
+        os.environ["MAVERICK_INSTANCE_WALL_SEC"] = str(args.agent_wall_sec)
+    if args.agent_max_steps is not None:
+        os.environ["MAVERICK_MAX_STEPS"] = str(args.agent_max_steps)
 
     instances = _load_manifest(args.manifest)
     if args.limit:
@@ -540,8 +705,18 @@ def main(argv: list[str] | None = None) -> int:
     print(f"  SWE-BENCH UNDER GOVERNANCE   proposer={args.proposer}  n={len(instances)}")
     print("=" * 78)
     resolved = boundary_refused = unresolved = ungradable = 0
+    spend = 0.0
+    consec_fail = 0
     with tempfile.TemporaryDirectory(prefix="swebench-gov-") as td:
         for i, inst in enumerate(instances):
+            if args.abort_at_dollars and spend >= args.abort_at_dollars:
+                print(f"  [ABORT] cumulative spend ${spend:.2f} >= "
+                      f"${args.abort_at_dollars:.2f} cap; stopping")
+                break
+            if args.max_consecutive_failures and consec_fail >= args.max_consecutive_failures:
+                print(f"  [ABORT] {consec_fail} consecutive non-resolved instances "
+                      "(circuit breaker); stopping -- check the environment")
+                break
             try:
                 patch = propose(inst)
             except RuntimeError as e:
@@ -554,34 +729,57 @@ def main(argv: list[str] | None = None) -> int:
                 # run continues -- one bad instance must not kill a $1k run.
                 print(f"  [ERROR] {inst.instance_id:40}  proposer failed: {e}")
                 unresolved += 1
+                consec_fail += 1
                 continue
+            # Attribute agent spend from the forensics sidecar (best-effort).
+            spend += _instance_spend(inst.instance_id)
             r = govern_candidate(inst, patch, keys_dir=args.keys, ledger=ledger,
                                  workroot=Path(td) / f"i{i}", timeout=args.timeout,
                                  check_gold_overlap=(args.proposer != "oracle"))
             if r.resolved_under_governance:
                 resolved += 1
+                consec_fail = 0
                 tag = "PASS"
             elif not r.boundary_ok:
                 boundary_refused += 1
+                consec_fail += 1
                 tag = "CHEAT"
             elif r.ungradable:
-                ungradable += 1
+                ungradable += 1  # ungradable-here does not count against the breaker
                 tag = "NOENV"
             else:
                 unresolved += 1
+                consec_fail += 1
                 tag = "FAIL"
             print(f"  [{tag}]  {inst.instance_id:40}  {r.reason}")
     n = len(instances) or 1
+    gradable_total = resolved + boundary_refused + unresolved
     print("=" * 78)
-    print(f"  resolved under governance: {resolved}/{len(instances)} ({100*resolved/n:.1f}%)"
+    print(f"  resolved under governance: {resolved}/{len(instances)} ({100*resolved/n:.1f}% of all)"
           f"   |  boundary-refused: {boundary_refused}  |  unresolved: {unresolved}"
           f"   |  ungradable-here: {ungradable}")
+    if gradable_total:
+        print(f"  resolved of GRADABLE (excl. ungradable): {resolved}/{gradable_total} "
+              f"({100*resolved/gradable_total:.1f}%)")
     if ungradable:
-        print("  NOTE: ungradable instances need their deps installed (or the Docker env);"
-              " they are NOT counted as resolved -- report the headline as X/(total).")
-    print(f"  signed promotion ledger: {args.ledger}")
+        print("  NOTE: ungradable instances need their deps / the per-instance Docker env;"
+              " they are NOT counted as resolved. Report both figures honestly.")
+    print(f"  agent spend (attributed): ~${spend:.2f}   |   signed ledger: {args.ledger}")
     print("=" * 78)
     return 0
+
+
+def _instance_spend(instance_id: str) -> float:
+    """Read the agent $ cost for an instance from its forensics sidecar."""
+    try:
+        base = os.environ.get("MAVERICK_SWEBENCH_FORENSICS")
+        outdir = Path(base) if base else (_FORENSICS_DIR or Path.cwd() / "forensics")
+        f = outdir / f"{instance_id}.json"
+        if f.exists():
+            return float(json.loads(f.read_text()).get("cost_dollars", 0.0) or 0.0)
+    except Exception:
+        pass
+    return 0.0
 
 
 if __name__ == "__main__":
