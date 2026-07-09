@@ -132,12 +132,17 @@ def oracle_proposer(inst: Instance) -> str:
 
 
 def _worktree_diff(repo: Path) -> str:
-    """The repo's uncommitted changes as a raw, git-appliable unified diff --
-    INCLUDING new files (``git add -N`` intent-to-add makes untracked files
-    show in ``git diff``). This is the authoritative patch: it is literal
-    ``git diff`` output, so it always applies with ``git apply -p1``, unlike a
-    diff parsed out of the model's prose. Hardened env (no ext-diff/textconv,
-    no global config) mirrors ``swe_bench._git_diff``."""
+    """The agent's edits vs HEAD as a raw, git-appliable unified diff.
+
+    Uses ``git diff HEAD`` (not bare ``git diff``) so it captures the change
+    whether the agent left it UNSTAGED or ``git add``-ed it -- a coding agent
+    often stages its edit, which bare ``git diff`` (working-vs-index) then shows
+    as EMPTY, silently dropping a perfectly good fix and forcing the fallback to
+    the model's hand-written prose diff (which LLMs miscount -> "corrupt patch").
+    ``git add -N`` first so brand-new files also appear. When HEAD is the grader
+    test-fixture commit, this excludes test_patch by construction. Literal git
+    output, so it always applies with ``git apply -p1``. Hardened env mirrors
+    ``swe_bench._git_diff``."""
     import subprocess
 
     env = {"GIT_CONFIG_GLOBAL": os.devnull, "GIT_CONFIG_NOSYSTEM": "1",
@@ -147,7 +152,7 @@ def _worktree_diff(repo: Path) -> str:
         subprocess.run(["git", "-C", str(repo), "add", "-N", "."],
                        capture_output=True, timeout=60, env=env)
         out = subprocess.run(
-            ["git", "-C", str(repo), "diff", "--no-ext-diff", "--no-textconv"],
+            ["git", "-C", str(repo), "diff", "HEAD", "--no-ext-diff", "--no-textconv"],
             capture_output=True, text=True, timeout=60, env=env)
         return out.stdout or ""
     except (subprocess.SubprocessError, OSError):
