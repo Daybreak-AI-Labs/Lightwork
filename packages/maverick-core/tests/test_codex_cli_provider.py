@@ -100,6 +100,55 @@ class TestRegistry:
         assert "codex_cli:gpt-5.5-codex" in specs
 
 
+class TestLaunchPrefix:
+    """Binary resolution + Windows .cmd-shim routing (the fix for
+    'Codex CLI binary codex disappeared from PATH' on Windows npm installs)."""
+
+    def _client(self, monkeypatch, tmp_path, which_result):
+        monkeypatch.setenv("CODEX_ACCESS_TOKEN", FAKE_TOKEN)
+        monkeypatch.setenv("CODEX_HOME", str(tmp_path / "codex-home"))
+        _write_auth(tmp_path)
+        monkeypatch.setattr(
+            "maverick.providers.codex_cli_provider.shutil.which",
+            lambda name: which_result,
+        )
+        return CodexCLIClient()
+
+    def test_posix_exe_launched_directly(self, monkeypatch, tmp_path):
+        monkeypatch.setattr(
+            "maverick.providers.codex_cli_provider.os.name", "posix")
+        client = self._client(monkeypatch, tmp_path, "/usr/local/bin/codex")
+        assert client._binary_path == "/usr/local/bin/codex"
+        assert client._launch_prefix() == ["/usr/local/bin/codex"]
+
+    def test_windows_cmd_shim_routed_through_comspec(self, monkeypatch, tmp_path):
+        monkeypatch.setattr(
+            "maverick.providers.codex_cli_provider.os.name", "nt")
+        monkeypatch.setenv("COMSPEC", r"C:\Windows\System32\cmd.exe")
+        shim = r"C:\Users\me\AppData\Roaming\npm\codex.cmd"
+        client = self._client(monkeypatch, tmp_path, shim)
+        assert client._launch_prefix() == [
+            r"C:\Windows\System32\cmd.exe", "/c", shim,
+        ]
+
+    def test_windows_real_exe_launched_directly(self, monkeypatch, tmp_path):
+        # An operator pointing [providers.codex_cli] binary straight at the
+        # bundled codex.exe skips the interpreter hop.
+        monkeypatch.setattr(
+            "maverick.providers.codex_cli_provider.os.name", "nt")
+        exe = r"C:\...\codex-win32-x64\vendor\x86_64-pc-windows-msvc\codex.exe"
+        client = self._client(monkeypatch, tmp_path, exe)
+        assert client._launch_prefix() == [exe]
+
+    def test_windows_bat_shim_routed(self, monkeypatch, tmp_path):
+        monkeypatch.setattr(
+            "maverick.providers.codex_cli_provider.os.name", "nt")
+        monkeypatch.delenv("COMSPEC", raising=False)  # falls back to cmd.exe
+        shim = r"C:\tools\codex.bat"
+        client = self._client(monkeypatch, tmp_path, shim)
+        assert client._launch_prefix() == ["cmd.exe", "/c", shim]
+
+
 class TestAuthGating:
     def test_refuses_without_token_or_login(self, monkeypatch, tmp_path):
         monkeypatch.delenv("CODEX_ACCESS_TOKEN", raising=False)
@@ -138,8 +187,10 @@ class TestAuthGating:
         client = CodexCLIClient()
         client.complete("sys", [{"role": "user", "content": "hi"}])
         login = next(c for c in fake.calls if "login" in c["cmd"])
-        assert login["cmd"][:2] == ["codex", "login"]
+        assert login["cmd"][0] == client._binary_path
+        assert login["cmd"][:2] == [client._binary_path, "login"]
         assert login["input"] == FAKE_TOKEN          # STDIN carries the token
+        assert login.get("encoding") == "utf-8"      # UTF-8 pinned here too
         assert FAKE_TOKEN not in " ".join(login["cmd"])  # argv never does
 
     def test_no_login_when_auth_json_present(self, codex_env, monkeypatch):
@@ -168,7 +219,10 @@ class TestExec:
         assert resp.tool_calls == []
         call = fake.calls[-1]
         cmd = call["cmd"]
-        assert cmd[0] == "codex" and cmd[1] == "exec"
+        # cmd[0] is the RESOLVED absolute path (shutil.which result), not the
+        # bare name -- the fix that stops Windows shims failing mid-run.
+        assert cmd[0] == client._binary_path
+        assert cmd[0].endswith("codex") and cmd[1] == "exec"
         assert "--json" in cmd and "--skip-git-repo-check" in cmd
         assert cmd[cmd.index("--sandbox") + 1] == "read-only"
         assert cmd[cmd.index("--model") + 1] == client.DEFAULT_MODEL
@@ -176,6 +230,10 @@ class TestExec:
         assert "You are terse." in call["input"]   # system reached the prompt
         assert "2+2?" in call["input"]
         assert call.get("shell") is None           # list argv, never shell=True
+        # UTF-8 pinned so a "→" in the prompt/reply doesn't UnicodeEncodeError
+        # under Windows' cp1252 locale default.
+        assert call.get("encoding") == "utf-8"
+        assert call.get("errors") == "replace"
         assert FAKE_TOKEN not in " ".join(cmd)
 
     def test_budget_records_tokens_at_zero_dollars(self, codex_env, monkeypatch):
