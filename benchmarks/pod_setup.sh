@@ -15,6 +15,13 @@ if [ -z "$ANTHROPIC_API_KEY" ]; then
 fi
 echo "key OK (${ANTHROPIC_API_KEY:0:13}..., length ${#ANTHROPIC_API_KEY})"
 
+# Pods often ship several Pythons; bare `pip` can belong to a different
+# interpreter than `python3`, silently splitting the install. Pin every
+# pip call (including post-create.sh's) to python3's own pip.
+pip() { python3 -m pip "$@"; }
+export -f pip
+python3 -m pip install -q --upgrade pip >/dev/null 2>&1
+
 echo "[1/5] installing Lightwork packages (few minutes)..."
 cd ~/Lightwork || { echo "!!! ~/Lightwork missing - clone the repo first"; exit 1; }
 bash .devcontainer/post-create.sh > /tmp/postcreate.log 2>&1 \
@@ -22,6 +29,7 @@ bash .devcontainer/post-create.sh > /tmp/postcreate.log 2>&1 \
     || { echo "!!! INSTALL FAILED - last lines:"; tail -5 /tmp/postcreate.log; exit 1; }
 
 echo "[2/5] signing keys..."
+python3 -m pip install -q cryptography >/dev/null 2>&1
 python3 - <<'PY'
 from cryptography.hazmat.primitives import serialization
 from cryptography.hazmat.primitives.asymmetric import ed25519
@@ -37,7 +45,7 @@ print("    keys OK ->", k)
 PY
 
 echo "[3/5] staging SWE-bench Verified instances (few minutes)..."
-pip install -q datasets >/dev/null 2>&1
+python3 -m pip install -q datasets >/dev/null 2>&1
 mkdir -p ~/swebench_stage && cd ~/swebench_stage
 python3 ~/Lightwork/benchmarks/fetch_swe_bench_verified.py \
     --repos psf/requests,pylint-dev/pylint,pallets/flask \
@@ -50,7 +58,7 @@ echo "[4/5] instance test dependencies..."
 cd ~/swebench_stage/repos
 for fam in pylint-dev__pylint psf__requests pallets__flask; do
     d=$(ls -d "${fam}"-* 2>/dev/null | head -1)
-    [ -n "$d" ] && pip install -q -e "./$d" >/dev/null 2>&1 && echo "    $fam deps OK"
+    [ -n "$d" ] && python3 -m pip install -q -e "./$d" >/dev/null 2>&1 && echo "    $fam deps OK"
 done
 
 echo "[5/5] FREE SELF-TEST..."
