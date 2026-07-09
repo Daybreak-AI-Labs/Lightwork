@@ -105,12 +105,43 @@ budget code (no model), emitting a narrated story + a signed audit chain:
 
 ---
 
+## 5. Governed DGM code rung — `python proof/dgm_code_rung_proof.py`
+
+The self-modification (Darwin-Gödel-Machine) capability, made checkable. A real
+one-line code change is driven end-to-end through the **real governance chain**:
+the editable-surface boundary, a held-out fitness eval on isolated copies with
+real pytest, the capability non-escalation proof, an Ed25519 operator signature,
+and the append-only promotion ledger. No LLM, no network.
+
+```
+  [PASS]  editable-surface boundary         allowlisted path accepted; control-plane edit refused structurally
+  [PASS]  fitness discriminates (held-out)  held-out 0.462 -> 1.000 over 13 unseen tests, overfit=False
+  [PASS]  reward-laundering refused         held-in gamed; held-out flat -> OVERFIT, refused
+  [PASS]  capability non-escalation         before==after over 8 probed tools; no new authority
+  [PASS]  unforgeable human approval        Ed25519 operator signature; swapped payload NOT authorised
+  [PASS]  governed promotion + ledger       all 5 gates PASS; signed promotion recorded to append-only ledger
+  ----------------------------------------------------------------------------
+  6 guarantees PROVEN, 0 failed   (LLM proposer + container isolation stubbed, by design)
+```
+
+The load-bearing property is line 3: a candidate that **memorises the seen tests
+without fixing the capability** gains on the held-in split but not the held-out
+split, is flagged `OVERFIT`, and is refused. That is the anti-reward-laundering
+guard — the reason a self-improving loop measured against a held-out yardstick
+cannot quietly launder drift into a "promotion". Two seams are stubbed and
+disclosed: the LLM *proposer* that authors the patch (the harness supplies the
+exact diff a proposer would emit), and container isolation (the eval runs on the
+host and says so; a require-container deployment fails closed instead).
+
+---
+
 ## Reproduce & verify (≈1 minute, no provider key)
 
 ```bash
 # from a source checkout
 python proof/run_proof.py            # 7 platform guarantees
 python proof/self_harness_proof.py   # 7 self-learning-loop guarantees
+python proof/dgm_code_rung_proof.py  # 6 governed DGM code-rung guarantees
 python -m maverick.golden_path -o ./gp        # the receipts (story + signed audit.ndjson)
 python -m maverick.proof_pack -o ./proof      # signed evidence bundle
 
