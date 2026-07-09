@@ -1,9 +1,9 @@
 {% extends "base.html" %}
-{% block title %}Agents · Lightwork{% endblock %}
+{% block title %}Agent Factory · Lightwork{% endblock %}
 
-{# One workflow-step row. ``s`` is a step dict (server-rendered existing step)
-   or ``none`` (the empty row cloned for "Add step"). Kept as a macro so the
-   live rows and the <template> can't drift. #}
+{# One workflow-step row (Advanced editor). ``s`` is a step dict or ``none``
+   (the empty row cloned for "Add step"). Macro keeps live rows + <template>
+   in sync. #}
 {% macro wf_row(s) %}
   <div class="wf-step" style="border: 1px solid var(--border); border-radius: 6px; padding: 0.6rem; margin: 0.5rem 0;">
     <div style="display: flex; gap: 0.5rem; flex-wrap: wrap; align-items: flex-end;">
@@ -35,123 +35,175 @@
 
 {% block content %}
 <style>
-  /* Agent Factory — friendly "build a specialist" framing over the real
-     agent-override editor. Glass to match the chat + design system. Every
-     form-field id the save/validate script uses is preserved. */
+  /* Agent Factory — the two-column "build a specialist + department roster"
+     composition. Glass throughout; every agent-form id the save/validate
+     script reads is preserved (the tool chips + approval toggle sync into the
+     hidden inputs). */
   :where(body){
     --glass: color-mix(in srgb, var(--panel) 68%, transparent);
     --glass-soft: color-mix(in srgb, var(--panel) 54%, transparent);
     --glass-border: color-mix(in srgb, var(--text) 13%, transparent);
     --glass-edge: inset 0 1px 0 0 color-mix(in srgb, #ffffff 8%, transparent);
   }
-  .factory-lede{ max-width: 48rem; margin: 0 0 var(--space-5); }
-  .factory-lede h1{ font-family: var(--font-serif); font-weight: 400; font-size: var(--text-2xl);
-    letter-spacing: -0.01em; margin: 0 0 var(--space-1); }
-  .factory-lede p{ margin: 0; color: var(--muted); }
-  .factory{ display: grid; grid-template-columns: 1fr; gap: var(--space-4);
-    border: 1px solid var(--glass-border); border-radius: var(--radius-lg);
-    background: var(--glass-soft); box-shadow: var(--glass-edge);
-    -webkit-backdrop-filter: blur(12px); backdrop-filter: blur(12px);
+  .af-lede{ margin: 0 0 var(--space-5); }
+  .af-lede p{ margin: var(--space-1) 0 0; color: var(--muted); max-width: 46rem; }
+  .af-grid{ display: grid; grid-template-columns: minmax(0, 1.05fr) minmax(0, 0.95fr);
+    gap: var(--space-5); align-items: start; }
+  @media (max-width: 900px){ .af-grid{ grid-template-columns: 1fr; } }
+  .af-card{ border: 1px solid var(--glass-border); border-radius: var(--radius-lg);
+    background: var(--glass-soft); box-shadow: var(--shadow-sm), var(--glass-edge);
+    -webkit-backdrop-filter: blur(14px) saturate(150%); backdrop-filter: blur(14px) saturate(150%);
     padding: var(--space-5); }
-  .factory nav[aria-label="Agent roster"]{ border: 1px solid var(--glass-border);
-    border-radius: var(--radius-md); background: var(--glass); padding: var(--space-2); }
+  .af-card__title{ font-weight: var(--font-semibold); font-size: var(--text-lg); margin: 0 0 var(--space-4); }
   .fld{ margin: 0 0 var(--space-4); }
   .fld > label{ display: block; font-weight: var(--font-semibold); margin-bottom: var(--space-2); }
   .fld .sub{ font-weight: 400; color: var(--muted); }
-  .factory input[type="text"], .factory textarea, .factory select{
-    background: var(--surface-sunken); border: 1px solid var(--border); color: var(--text);
-    border-radius: var(--radius-md); padding: 0.55rem 0.7rem; font: inherit; }
-  .factory input[type="text"]:focus, .factory textarea:focus, .factory select:focus{
+  .af-card input[type="text"], .af-card textarea, .af-card select{
+    width: 100%; background: var(--surface-sunken); border: 1px solid var(--border); color: var(--text);
+    border-radius: var(--radius-md); padding: 0.55rem 0.7rem; font: inherit;
+    transition: border-color .13s ease, box-shadow .13s ease; }
+  .af-card input:focus, .af-card textarea:focus, .af-card select:focus{
     outline: none; border-color: var(--brand-border); box-shadow: 0 0 0 3px var(--brand-subtle); }
-  #f-persona{ min-height: 8.5rem; line-height: 1.5; }
-  /* Advanced: the power-user editor (deny-tools + workflow playbook), folded. */
+  #f-persona{ min-height: 7rem; line-height: 1.5; resize: vertical; }
+
+  /* tool chips */
+  .chips{ display: flex; flex-wrap: wrap; gap: var(--space-2); }
+  .chip{ display: inline-flex; align-items: center; gap: 6px; padding: 0.4rem 0.75rem;
+    border-radius: var(--radius-pill); border: 1px solid var(--border); background: var(--surface-sunken);
+    color: var(--text); font-size: var(--text-sm); cursor: pointer;
+    transition: border-color .12s ease, background .12s ease; }
+  .chip:hover{ border-color: var(--border-strong); }
+  .chip.on{ border-color: var(--brand-border); background: var(--brand-subtle); }
+  .chip .tick{ color: var(--brand-hi); font-weight: 700; }
+  .chip.add{ border-style: dashed; color: var(--muted); }
+
+  /* guardrails */
+  .guard-row{ display: flex; align-items: center; gap: var(--space-3); padding: 0.55rem 0; }
+  .guard-row + .guard-row{ border-top: 1px solid var(--hairline); }
+  .guard-row .tt{ flex: 1; } .guard-row .tt small{ display: block; color: var(--muted); }
+  .switch{ width: 42px; height: 24px; border-radius: var(--radius-pill); background: var(--border);
+    position: relative; cursor: pointer; flex: none; border: 0; transition: background .16s; }
+  .switch::after{ content: ""; position: absolute; top: 2px; inset-inline-start: 2px; width: 20px; height: 20px;
+    border-radius: 50%; background: #fff; transition: transform .16s; }
+  .switch[aria-pressed="true"]{ background: var(--brand); }
+  .switch[aria-pressed="true"]::after{ transform: translateX(18px); }
+  [dir="rtl"] .switch[aria-pressed="true"]::after{ transform: translateX(-18px); }
+  .risk-seg{ display: inline-flex; border: 1px solid var(--border); border-radius: var(--radius-md); overflow: hidden; }
+  .risk-seg button{ font: inherit; font-size: var(--text-sm); padding: 0.35rem 0.8rem; background: transparent;
+    color: var(--muted); border: 0; cursor: pointer; }
+  .risk-seg button.on{ background: var(--brand); color: var(--brand-fg); font-weight: var(--font-semibold); }
+  .model-badge{ display: inline-flex; align-items: center; gap: 6px; padding: 0.22rem 0.6rem;
+    border-radius: var(--radius-pill); font-size: var(--text-xs); font-weight: var(--font-semibold);
+    color: var(--accent); background: var(--accent-subtle);
+    border: 1px solid color-mix(in srgb, var(--accent) 42%, transparent); text-decoration: none; }
+
   .advanced{ border: 1px solid var(--glass-border); border-radius: var(--radius-md);
-    background: var(--glass); margin: var(--space-2) 0 var(--space-4); overflow: hidden; }
+    background: var(--glass); margin: 0 0 var(--space-4); overflow: hidden; }
   .advanced > summary{ cursor: pointer; list-style: none; padding: 0.6rem var(--space-4);
     display: flex; align-items: center; gap: var(--space-2); color: var(--muted); font-size: var(--text-sm); }
   .advanced > summary::-webkit-details-marker{ display: none; }
   .advanced > summary::before{ content: "⚙"; }
-  .advanced__caret{ margin-left: auto; transition: transform .18s ease; }
+  .advanced__caret{ margin-inline-start: auto; transition: transform .18s ease; }
   .advanced[open] .advanced__caret{ transform: rotate(180deg); }
   .advanced__body{ padding: 0 var(--space-4) var(--space-4); }
-  .factory-actions{ display: flex; gap: var(--space-2); flex-wrap: wrap;
+  .af-actions{ display: flex; gap: var(--space-2); flex-wrap: wrap;
     padding-top: var(--space-3); border-top: 1px solid var(--hairline); }
+
+  /* departments roster */
+  .roster__head{ display: flex; align-items: center; justify-content: space-between; margin: 0 0 var(--space-3); }
+  .roster__head h2{ margin: 0; font-size: var(--text-lg); font-weight: var(--font-semibold);
+    text-transform: none; letter-spacing: 0; color: var(--text); }
+  .dept{ border: 1px solid var(--glass-border); border-radius: var(--radius-lg); background: var(--glass-soft);
+    box-shadow: var(--shadow-sm), var(--glass-edge); -webkit-backdrop-filter: blur(12px); backdrop-filter: blur(12px);
+    padding: var(--space-4); margin-bottom: var(--space-3); }
+  .dept__head{ display: flex; align-items: center; gap: var(--space-3); }
+  .dept__avatar{ width: 38px; height: 38px; border-radius: 10px; flex: none; display: grid; place-items: center;
+    background: var(--brand-subtle); color: var(--brand-hi); font-weight: var(--font-semibold); }
+  .dept__name{ font-weight: var(--font-semibold); }
+  .dept__sub{ color: var(--muted); font-size: var(--text-sm); }
+  .dept__stats{ display: flex; gap: var(--space-5); margin: var(--space-3) 0; }
+  .dept__stat .n{ font-size: var(--text-xl); font-weight: var(--font-semibold); font-variant-numeric: tabular-nums; }
+  .dept__stat .l{ color: var(--muted); font-size: var(--text-xs); text-transform: uppercase; letter-spacing: 0.05em; }
+  .dept__foot{ display: flex; gap: var(--space-2); }
+  .dept__addon{ color: var(--muted); font-size: var(--text-xs); align-self: center; }
 </style>
-  <div class="factory-lede">
+
+  <div class="af-lede">
     <h1 class="page-title">Agent Factory</h1>
-    <p>Describe a specialist in plain English — its job, the tools it can reach, and its
-      guardrails — and Lightwork tailors it for you. Saving keeps the built-in agent intact
-      and patches only what you change; anything that would weaken the safety envelope is
-      rejected, not saved. Power-user controls live under <strong>Advanced</strong>.</p>
-    <p style="margin: var(--space-2) 0 0;"><a class="btn btn--ghost" href="/workforce">View your departments →</a></p>
+    <p>Describe a specialist in plain English — its job, the tools it can reach, and its guardrails —
+      and Lightwork tailors it for you. Saving patches only what you change; anything that would weaken
+      the safety envelope is rejected, not saved.</p>
   </div>
-  <details style="max-width: 48rem; margin-bottom: var(--space-3);"><summary class="muted" style="cursor: pointer; font-size: var(--text-sm);">For administrators: how edits are stored</summary>
-    <p class="muted" style="font-size: var(--text-sm); margin-bottom: 0;">
-      Saving writes a <em>tenant override</em> that inherits the built-in pack and
-      patches only what you change. Editing is disabled with
-      <code>[features] pack_editing = false</code>.
-    </p>
-  </details>
+
   {% if not editable %}
-  <p><span class="badge">read-only</span> <span class="muted">Agent editing has been turned off
-    by your administrator — viewing only.</span></p>
+  <p><span class="badge">read-only</span> <span class="muted">Agent editing is turned off by your administrator — viewing only.</span></p>
   {% endif %}
 
-  <div class="factory" style="display: flex; gap: 1.5rem; align-items: flex-start;">
-    <nav aria-label="Agent roster" style="min-width: 15rem; max-height: 70vh; overflow: auto;">
+  <div class="af-grid">
+    <!-- ============ LEFT: build a specialist ============ -->
+    <div class="af-card">
+      <div class="af-card__title">Build a specialist</div>
+
       {% if agents %}
-      <ul style="list-style: none; padding: 0; margin: 0;">
-        {% for a in agents %}
-        <li style="margin: 0.15rem 0;">
-          <a href="/agents?name={{ a.name }}"
-             {% if selected and selected.name == a.name %}class="active" aria-current="page"{% endif %}>
-            <code>{{ a.name }}</code>
-            {% if a.is_override %}<span class="badge">custom</span>{% endif %}
-            {% if a.has_workflow %}<span class="badge">workflow</span>{% endif %}
-          </a>
-        </li>
-        {% endfor %}
-      </ul>
-      {% else %}
-      <p class="muted">No agents discovered.</p>
+      <div class="fld">
+        <label for="agent-picker">Specialist <span class="sub">— pick one to tailor</span></label>
+        <select id="agent-picker" aria-label="Choose a specialist to tailor"
+                onchange="if(this.value) location.href='/agents?name=' + encodeURIComponent(this.value)">
+          {% if not selected %}<option value="">— choose a specialist —</option>{% endif %}
+          {% for a in agents %}
+          <option value="{{ a.name }}"{% if selected and selected.name == a.name %} selected{% endif %}>
+            {{ a.name }}{% if a.is_override %} (custom){% endif %}
+          </option>
+          {% endfor %}
+        </select>
+      </div>
       {% endif %}
-    </nav>
 
-    <section aria-label="Agent editor" style="flex: 1; min-width: 0;">
       {% if selected %}
-      <h2 style="margin-top: 0;">
-        <code>{{ selected.name }}</code>{% if selected.suite %} <span class="muted">· {{ selected.suite }}</span>{% endif %}
-      </h2>
-      {% if selected.is_override %}
-      <p class="muted">Customized fields: {{ selected.overridden|join(', ') or '—' }}
-        (everything else inherits the built-in agent).</p>
-      {% endif %}
       <div id="agent-msg" role="status" aria-live="polite" class="muted" style="min-height: 1.2rem;"></div>
-
       <form id="agent-form" data-name="{{ selected.name }}">
         <div class="fld">
-          <label for="f-description">Name / summary</label>
-          <input id="f-description" name="description" type="text" style="width: 100%;"
-                 value="{{ selected.description }}">
+          <label for="f-description">Name <span class="sub">— a short summary of the role</span></label>
+          <input id="f-description" name="description" type="text" value="{{ selected.description }}">
         </div>
         <div class="fld">
-          <label for="f-persona">What should this specialist do?
-            <span class="sub">— plain-English instructions</span></label>
-          <textarea id="f-persona" name="persona" rows="8" style="width: 100%;">{{ selected.persona }}</textarea>
+          <label for="f-persona">What should it do? <span class="sub">— plain English</span></label>
+          <textarea id="f-persona" name="persona" rows="6">{{ selected.persona }}</textarea>
         </div>
+
         <div class="fld">
-          <label for="f-allow">Skills &amp; tools it can use
-            <span class="sub">— space-separated</span></label>
-          <input id="f-allow" name="allow_tools" type="text" style="width: 100%;"
-                 value="{{ selected.allow_tools|join(' ') }}">
+          <label>Skills &amp; tools <span class="sub">— what it can reach</span></label>
+          <div class="chips" id="skill-chips" aria-label="Tools this specialist can use"></div>
+          {# The chips sync into this hidden input, which the save script reads. #}
+          <input id="f-allow" name="allow_tools" type="hidden" value="{{ selected.allow_tools|join(' ') }}">
         </div>
+
         <div class="fld">
-          <label for="f-risk">Guardrail <span class="sub">— highest risk this specialist may take</span></label>
-          <select id="f-risk" name="max_risk">
-            {% for r in ['low', 'medium', 'high'] %}
-            <option value="{{ r }}"{% if selected.max_risk == r %} selected{% endif %}>{{ r }}</option>
-            {% endfor %}
-          </select>
+          <label>Guardrails</label>
+          <div class="guard-row">
+            <span class="tt">Highest risk it may take
+              <small>How far it can go without a stricter gate.</small></span>
+            <span class="risk-seg" id="risk-seg" role="group" aria-label="Risk ceiling">
+              {% for r in ['low', 'medium', 'high'] %}
+              <button type="button" data-risk="{{ r }}"{% if selected.max_risk == r %} class="on"{% endif %}>{{ r }}</button>
+              {% endfor %}
+            </span>
+            <select id="f-risk" name="max_risk" hidden aria-label="Risk ceiling">
+              {% for r in ['low', 'medium', 'high'] %}
+              <option value="{{ r }}"{% if selected.max_risk == r %} selected{% endif %}>{{ r }}</option>
+              {% endfor %}
+            </select>
+          </div>
+          <div class="guard-row">
+            <span class="tt">Require human approval to finish
+              <small>Adds a sign-off gate to the last step before it completes.</small></span>
+            <button type="button" class="switch" id="g-approval" aria-pressed="false"
+                    aria-label="Require human approval to finish"></button>
+          </div>
+          <div class="guard-row">
+            <span class="tt">Model <small>Runs on your configured model; set per role in Settings.</small></span>
+            <a class="model-badge" href="/settings">● Model · Settings</a>
+          </div>
         </div>
 
         <details class="advanced">
@@ -161,17 +213,14 @@
           <div class="advanced__body">
             <div class="fld">
               <label for="f-deny">Denied tools <span class="sub">— space-separated; always blocked</span></label>
-              <input id="f-deny" name="deny_tools" type="text" style="width: 100%;"
-                     value="{{ selected.deny_tools|join(' ') }}">
+              <input id="f-deny" name="deny_tools" type="text" value="{{ selected.deny_tools|join(' ') }}">
             </div>
             <fieldset style="border: 1px solid var(--border); border-radius: 6px; margin: 0.5rem 0; padding: 0.6rem 0.8rem;">
               <legend>Workflow playbook <span class="muted">— ordered steps the agent follows</span></legend>
               <div id="wf-steps">
                 {% for s in selected.workflow %}{{ wf_row(s) }}{% endfor %}
               </div>
-              {% if editable %}
-              <button type="button" id="wf-add">+ Add step</button>
-              {% endif %}
+              {% if editable %}<button type="button" id="wf-add">+ Add step</button>{% endif %}
             </fieldset>
             {% if editable and selected.workflow %}
             <p><a class="btn btn--ghost" href="/workflow-builder?edit_agent={{ selected.name | urlencode }}">Edit playbook in builder</a></p>
@@ -180,8 +229,8 @@
         </details>
 
         {% if editable %}
-        <div class="factory-actions">
-          <button type="button" class="btn btn--primary" id="btn-save">Save specialist</button>
+        <div class="af-actions">
+          <button type="button" class="btn btn--primary" id="btn-save">Deploy specialist</button>
           <button type="button" class="btn" id="btn-validate">Validate</button>
           <button type="button" class="btn btn--ghost" id="btn-reset">Reset to built-in</button>
         </div>
@@ -197,35 +246,159 @@
       </div>
       {% endif %}
       {% else %}
-      <p class="muted">Select an agent from the roster to view or edit it.</p>
+      <p class="muted">Pick a specialist above to tailor it.</p>
       {% endif %}
-    </section>
+    </div>
+
+    <!-- ============ RIGHT: your departments ============ -->
+    <div>
+      <div class="roster__head">
+        <h2>Your departments</h2>
+        <a class="btn btn--ghost" href="/workforce" style="font-size: var(--text-sm);">Manage →</a>
+      </div>
+      <div id="dept-roster">
+        <p class="muted" id="dept-loading">Loading departments…</p>
+      </div>
+    </div>
   </div>
 
   {% if selected and editable %}
-  {# Empty-row template for "Add step" (cloned client-side). #}
   <template id="wf-row-tpl">{{ wf_row(none) }}</template>
+  {% endif %}
+
   <script>
+    // ---- tool chips: sync a friendly chip UI into the hidden #f-allow input ----
+    (function () {
+      var host = document.getElementById('skill-chips');
+      var input = document.getElementById('f-allow');
+      if (!host || !input) return;
+      var SUGGEST = ['web_search', 'email', 'browser', 'code', 'shell', 'files'];
+      var sel = (input.value || '').split(/\s+/).filter(Boolean);
+
+      function sync() { input.value = sel.join(' '); }
+      function render() {
+        host.textContent = '';
+        var seen = {};
+        sel.forEach(function (t) { seen[t] = 1; addChip(t, true); });
+        SUGGEST.forEach(function (t) { if (!seen[t]) addChip(t, false); });
+        var add = document.createElement('button');
+        add.type = 'button'; add.className = 'chip add'; add.textContent = '+ Add tool';
+        add.addEventListener('click', function () {
+          var name = (window.prompt('Tool name (e.g. slack_bot):') || '').trim();
+          if (name && sel.indexOf(name) === -1) { sel.push(name); sync(); render(); }
+        });
+        host.appendChild(add);
+      }
+      function addChip(tool, on) {
+        var b = document.createElement('button');
+        b.type = 'button'; b.className = 'chip' + (on ? ' on' : '');
+        if (on) { var t = document.createElement('span'); t.className = 'tick'; t.textContent = '✓'; b.appendChild(t); }
+        b.appendChild(document.createTextNode(tool));
+        b.addEventListener('click', function () {
+          var i = sel.indexOf(tool);
+          if (i === -1) sel.push(tool); else sel.splice(i, 1);
+          sync(); render();
+        });
+        host.appendChild(b);
+      }
+      render();
+    })();
+
+    // ---- risk segmented control -> hidden #f-risk select ----
+    (function () {
+      var seg = document.getElementById('risk-seg');
+      var sel = document.getElementById('f-risk');
+      if (!seg || !sel) return;
+      seg.addEventListener('click', function (e) {
+        var b = e.target.closest('button[data-risk]');
+        if (!b) return;
+        sel.value = b.dataset.risk;
+        seg.querySelectorAll('button').forEach(function (x) { x.classList.toggle('on', x === b); });
+      });
+    })();
+
+    // ---- "require approval" toggle: reflect + apply a review gate on save ----
+    (function () {
+      var t = document.getElementById('g-approval');
+      var steps = document.getElementById('wf-steps');
+      if (!t) return;
+      // On load: if any workflow step already carries an approval/review gate, show it on.
+      if (steps) {
+        var gated = Array.prototype.some.call(steps.querySelectorAll('.wf-gate'),
+          function (g) { return g.value === 'approval' || g.value === 'review'; });
+        t.setAttribute('aria-pressed', gated ? 'true' : 'false');
+      }
+      t.addEventListener('click', function () {
+        t.setAttribute('aria-pressed', t.getAttribute('aria-pressed') === 'true' ? 'false' : 'true');
+      });
+      window.__afApprovalOn = function () { return t.getAttribute('aria-pressed') === 'true'; };
+    })();
+
+    // ---- departments roster (real: /api/v1/departments + deploy) ----
+    (function () {
+      var host = document.getElementById('dept-roster');
+      if (!host) return;
+      function esc(s) { var d = document.createElement('div'); d.textContent = s == null ? '' : s; return d.innerHTML; }
+      function initials(s) { return (s || '?').trim().slice(0, 2).toUpperCase(); }
+      function render(list) {
+        if (!list.length) { host.innerHTML = '<p class="muted">No departments yet. Your specialist packs appear here as deployable teams.</p>'; return; }
+        host.innerHTML = list.map(function (d) {
+          var n = (d.members && d.members.length) || d.headcount || 0;
+          var deploy = d.entitled
+            ? '<button type="button" class="btn btn--primary dep-deploy" data-key="' + esc(d.key) + '" style="font-size:var(--text-sm);">Deploy team</button>'
+            : '<button type="button" class="btn dep-deploy" data-key="' + esc(d.key) + '" style="font-size:var(--text-sm);">Deploy team</button><span class="dept__addon">paid add-on</span>';
+          return '<div class="dept" data-key="' + esc(d.key) + '">'
+            + '<div class="dept__head"><span class="dept__avatar">' + esc(initials(d.title)) + '</span>'
+            + '<span><div class="dept__name">' + esc(d.title) + '</div>'
+            + '<div class="dept__sub">' + esc(d.charter || (n + ' specialists')) + '</div></span></div>'
+            + '<div class="dept__stats"><span class="dept__stat"><div class="n">' + n + '</div><div class="l">specialists</div></span></div>'
+            + '<div class="dept__foot">' + deploy
+            + '<a class="btn btn--ghost" href="/workforce" style="font-size:var(--text-sm);">View</a></div>'
+            + '<div class="dep-msg muted" role="status" aria-live="polite" style="font-size:var(--text-xs);margin-top:var(--space-2);"></div>'
+            + '</div>';
+        }).join('');
+      }
+      fetch('/api/v1/departments').then(function (r) { return r.ok ? r.json() : []; })
+        .then(function (list) { render(Array.isArray(list) ? list : []); })
+        .catch(function () { host.innerHTML = '<p class="muted">Could not load departments.</p>'; });
+
+      host.addEventListener('click', function (e) {
+        var btn = e.target.closest('.dep-deploy');
+        if (!btn) return;
+        var card = btn.closest('.dept');
+        var msg = card && card.querySelector('.dep-msg');
+        btn.disabled = true; if (msg) { msg.style.color = 'var(--muted)'; msg.textContent = 'Deploying…'; }
+        fetch('/api/v1/departments/' + encodeURIComponent(btn.dataset.key) + '/deploy',
+              { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: '{}' })
+          .then(function (r) { return r.json().catch(function () { return {}; }).then(function (j) { return { ok: r.ok || r.status === 201, status: r.status, j: j }; }); })
+          .then(function (res) {
+            btn.disabled = false;
+            if (res.ok) { if (msg) { msg.style.color = 'var(--accent)'; msg.textContent = 'Team deployed as a fleet.'; } }
+            else if (msg) { msg.style.color = 'var(--danger)'; msg.textContent = (res.j && res.j.detail) || ('Could not deploy (' + res.status + ').'); }
+          })
+          .catch(function () { btn.disabled = false; if (msg) { msg.style.color = 'var(--danger)'; msg.textContent = 'Could not deploy — check your connection.'; } });
+      });
+    })();
+  </script>
+
+  {% if selected and editable %}
+  <script>
+    // ---- save / validate / reset (real agent-override endpoints) ----
     (function () {
       const form = document.getElementById('agent-form');
       if (!form) return;
       const name = form.dataset.name;
       const msg = document.getElementById('agent-msg');
       const words = (s) => s.split(/\s+/).filter(Boolean);
+      function show(text, ok) { msg.textContent = text; msg.style.color = ok ? 'var(--accent)' : 'var(--danger)'; }
 
-      function show(text, ok) {
-        msg.textContent = text;
-        msg.style.color = ok ? 'var(--ok, green)' : 'var(--danger, crimson)';
-      }
-
-      // ---- workflow rows ----
       const stepsEl = document.getElementById('wf-steps');
-      document.getElementById('wf-add').addEventListener('click', () => {
+      const addBtn = document.getElementById('wf-add');
+      if (addBtn) addBtn.addEventListener('click', () => {
         stepsEl.appendChild(document.getElementById('wf-row-tpl').content.cloneNode(true));
       });
-      stepsEl.addEventListener('click', (e) => {
-        const btn = e.target.closest('button');
-        if (!btn) return;
+      if (stepsEl) stepsEl.addEventListener('click', (e) => {
+        const btn = e.target.closest('button'); if (!btn) return;
         const row = btn.closest('.wf-step');
         if (btn.classList.contains('wf-del')) row.remove();
         else if (btn.classList.contains('wf-up') && row.previousElementSibling)
@@ -236,9 +409,9 @@
 
       function gatherWorkflow() {
         const steps = [];
-        stepsEl.querySelectorAll('.wf-step').forEach((row) => {
+        stepsEl && stepsEl.querySelectorAll('.wf-step').forEach((row) => {
           const stepName = row.querySelector('.wf-name').value.trim();
-          if (!stepName) return;  // skip an unnamed (e.g. blank new) row
+          if (!stepName) return;
           steps.push({
             name: stepName,
             instruction: row.querySelector('.wf-instruction').value,
@@ -246,6 +419,11 @@
             gate: row.querySelector('.wf-gate').value || null,
           });
         });
+        // "Require approval to finish": gate the final step (or add a review step).
+        if (window.__afApprovalOn && window.__afApprovalOn()) {
+          if (steps.length) { if (!steps[steps.length - 1].gate) steps[steps.length - 1].gate = 'review'; }
+          else steps.push({ name: 'Final review', instruction: 'Human sign-off before finishing.', tools: [], gate: 'review' });
+        }
         return steps;
       }
 
@@ -259,32 +437,24 @@
           workflow: gatherWorkflow(),
         };
       }
-
       async function call(method, path, body) {
         const opts = { method, headers: {} };
-        if (body !== undefined) {
-          opts.headers['Content-Type'] = 'application/json';
-          opts.body = JSON.stringify(body);
-        }
+        if (body !== undefined) { opts.headers['Content-Type'] = 'application/json'; opts.body = JSON.stringify(body); }
         const r = await fetch(path, opts);
-        let data = {};
-        try { data = await r.json(); } catch (e) { /* 204 etc. */ }
+        let data = {}; try { data = await r.json(); } catch (e) {}
         return { status: r.status, data };
       }
-
       document.getElementById('btn-validate').addEventListener('click', async () => {
         const { data } = await call('POST', `/api/v1/agents/${name}/validate`, payload());
         if (data.errors && data.errors.length) show('Invalid: ' + data.errors.join('; '), false);
         else if (data.warnings && data.warnings.length) show('OK, with warnings: ' + data.warnings.join('; '), true);
         else show('Looks good.', true);
       });
-
       document.getElementById('btn-save').addEventListener('click', async () => {
         const { status, data } = await call('POST', `/api/v1/agents/${name}/override`, payload());
-        if (status === 200) { show('Saved.', true); window.location.search = '?name=' + encodeURIComponent(name); }
+        if (status === 200) { show('Deployed.', true); window.location.search = '?name=' + encodeURIComponent(name); }
         else show('Rejected: ' + (data.detail || ('HTTP ' + status)), false);
       });
-
       document.getElementById('btn-reset').addEventListener('click', async () => {
         const { status, data } = await call('DELETE', `/api/v1/agents/${name}/override`);
         if (status === 200) { show('Reverted to built-in.', true); window.location.search = '?name=' + encodeURIComponent(name); }
