@@ -41,6 +41,7 @@ from __future__ import annotations
 import argparse
 import json
 import logging
+import os
 import pathlib
 import sys
 from collections.abc import Callable
@@ -122,25 +123,61 @@ def oracle_proposer(inst: Instance) -> str:
     return inst.gold_patch
 
 
+def _worktree_diff(repo: Path) -> str:
+    """The repo's uncommitted changes as a raw, git-appliable unified diff --
+    INCLUDING new files (``git add -N`` intent-to-add makes untracked files
+    show in ``git diff``). This is the authoritative patch: it is literal
+    ``git diff`` output, so it always applies with ``git apply -p1``, unlike a
+    diff parsed out of the model's prose. Hardened env (no ext-diff/textconv,
+    no global config) mirrors ``swe_bench._git_diff``."""
+    import subprocess
+
+    env = {"GIT_CONFIG_GLOBAL": os.devnull, "GIT_CONFIG_NOSYSTEM": "1",
+           "GIT_CONFIG_SYSTEM": os.devnull, "GIT_OPTIONAL_LOCKS": "0",
+           "PATH": os.environ.get("PATH", "")}
+    try:
+        subprocess.run(["git", "-C", str(repo), "add", "-N", "."],
+                       capture_output=True, timeout=60, env=env)
+        out = subprocess.run(
+            ["git", "-C", str(repo), "diff", "--no-ext-diff", "--no-textconv"],
+            capture_output=True, text=True, timeout=60, env=env)
+        return out.stdout or ""
+    except (subprocess.SubprocessError, OSError):
+        return ""
+
+
+def _desanitize_csv_patch(diff: str) -> str:
+    """Undo ``swe_bench._sanitize_patch_for_csv``'s formula-injection guard: a
+    leading ``'`` prepended when the diff's first non-whitespace char is one of
+    ``= + - @``. That guard is correct for a CSV cell but makes the diff
+    non-appliable, which is why ``row.predicted_patch`` must never go straight
+    to ``git apply``. Fallback only -- the worktree diff is preferred."""
+    if diff[:1] == "'" and diff[1:2] in ("=", "+", "-", "@"):
+        return diff[1:]
+    return diff
+
+
 def llm_proposer(inst: Instance) -> str:
     """Generate a patch with the coding-mode agent (needs a provider key).
 
-    Thin adapter over the proven ``benchmarks/swe_bench.py`` solver
-    (``run_maverick``: coding mode, diff-only template, ``git apply --check``
-    self-validation, optional best-of-N via ``MAVERICK_BEST_OF_N``). It runs the
-    agent WITH the instance's checked-out tree as its working directory, captures
-    the predicted unified diff, then resets the tree -- so the governed evaluator
-    always scores from a clean base and the proposer can never leak edits into
-    the baseline arm.
+    Adapter over the proven ``benchmarks/swe_bench.py`` solver (``run_maverick``:
+    coding mode, best-of-N via ``MAVERICK_BEST_OF_N``). It runs the agent WITH
+    the instance's checked-out tree as its working directory, then captures the
+    agent's ACTUAL edits as a raw ``git diff`` (:func:`_worktree_diff`) -- which
+    is always ``git apply``-able. It deliberately does NOT return
+    ``row.predicted_patch``: that field is CSV-sanitized for the harness's CSV
+    column and can carry a leading ``'`` guard byte that makes ``git apply``
+    reject the whole patch ("No valid patches in input"). The prose-extracted
+    patch is only a de-sanitized fallback for the rare case the agent printed a
+    diff without editing the tree.
 
-    NOTE: the reset is ``git reset --hard`` + ``git clean -fdx`` on
-    ``inst.repo_path`` -- point it ONLY at a dedicated instance checkout (the
-    ``repos/<instance_id>`` tree the fetcher makes), never at a repo with
-    uncommitted work. Fail-loud on a missing key: a keyless run must not
-    silently score 0.
+    Writes a per-instance forensics sidecar (``<ledger-dir>/forensics/`` or
+    ``MAVERICK_SWEBENCH_FORENSICS``) with the model's result text, both patch
+    captures, and cost/turns -- so a failed apply/grade is debuggable without a
+    re-run. Resets the tree afterward (``git reset --hard`` + ``git clean
+    -fdx``): point ``repo_path`` ONLY at a dedicated instance checkout. Fail-loud
+    on a missing key -- a keyless run must not silently score 0.
     """
-    import os
-
     if not (os.environ.get("ANTHROPIC_API_KEY") or os.environ.get("MAVERICK_PROVIDER_READY")):
         raise RuntimeError(
             "llm_proposer needs a provider key (set ANTHROPIC_API_KEY, or set "
@@ -152,21 +189,50 @@ def llm_proposer(inst: Instance) -> str:
 
     prev_cwd = os.getcwd()
     os.chdir(inst.repo_path)  # build_sandbox() falls back to cwd for its workdir
+    row = tree_diff = prose_diff = None
     try:
         row = run_maverick(
             inst.instance_id, inst.brief,
             fail_to_pass=inst.fail_to_pass, pass_to_pass=inst.pass_to_pass,
             gold_patch=inst.gold_patch, language=inst.language)
-        return row.predicted_patch or ""
+        tree_diff = _worktree_diff(inst.repo_path)
+        prose_diff = _desanitize_csv_patch(row.predicted_patch or "")
+        # Authoritative: the agent's real edits. Fall back to its prose diff
+        # only when it printed a patch without touching the tree.
+        return tree_diff if tree_diff.strip() else prose_diff
     finally:
+        _dump_forensics(inst, row, tree_diff, prose_diff)
         os.chdir(prev_cwd)
-        # The agent may have edited the tree in place; the governed evaluator
-        # must start from the clean base. Patch-in-hand, reset hard + clean.
         try:
             _reset_workdir(inst.repo_path)
         except Exception:
             log.warning("llm_proposer: could not reset %s after proposing",
                         inst.repo_path, exc_info=True)
+
+
+def _dump_forensics(inst, row, tree_diff, prose_diff) -> None:
+    """Best-effort per-instance forensics sidecar; never raises into the run."""
+    try:
+        base = os.environ.get("MAVERICK_SWEBENCH_FORENSICS")
+        outdir = Path(base) if base else (_FORENSICS_DIR or Path.cwd() / "forensics")
+        outdir.mkdir(parents=True, exist_ok=True)
+        rec = {
+            "instance_id": inst.instance_id,
+            "cost_dollars": round(float(getattr(row, "cost_dollars", 0.0) or 0.0), 4),
+            "tokens_out": int(getattr(row, "tokens_out", 0) or 0),
+            "outcome": getattr(row, "outcome", ""),
+            "result_text": (getattr(row, "extra", {}) or {}).get("run_text", ""),
+            "tree_diff": tree_diff or "",
+            "prose_diff_desanitized": prose_diff or "",
+            "chosen": "tree" if (tree_diff or "").strip() else "prose",
+        }
+        (outdir / f"{inst.instance_id}.json").write_text(
+            json.dumps(rec, indent=2), encoding="utf-8")
+    except Exception:
+        log.debug("forensics dump failed for %s", inst.instance_id, exc_info=True)
+
+
+_FORENSICS_DIR: Path | None = None
 
 
 PROPOSERS: dict[str, Callable[[Instance], str]] = {
@@ -411,6 +477,10 @@ def main(argv: list[str] | None = None) -> int:
         instances = instances[: args.limit]
     propose = PROPOSERS[args.proposer]
     ledger = PromotionLedger(path=args.ledger)
+    # Forensics sidecars land next to the ledger so a failed apply/grade is
+    # debuggable without a costly re-run.
+    global _FORENSICS_DIR
+    _FORENSICS_DIR = args.ledger.resolve().parent / "forensics"
 
     print("=" * 78)
     print(f"  SWE-BENCH UNDER GOVERNANCE   proposer={args.proposer}  n={len(instances)}")
