@@ -288,3 +288,15 @@ def test_settings_page_renders_matrix(monkeypatch, tmp_path):
     assert 'value="operator:/benchmarks"' in body
     # locked admin cells render disabled, not as editable inputs.
     assert "Always available to admins" in body
+
+
+def test_nav_and_matrix_groups_are_unique():
+    """Regression: a page whose group differs from its list neighbours (e.g. an
+    entry re-homed to Admin mid-list) must merge into its group, not split the
+    sidebar into duplicate EXTEND/ADMIN sections (a shipped visual bug)."""
+    from maverick_dashboard import rbac, ui_visibility
+    for role in [None, *rbac.ROLES]:
+        labels = [g["label"] for g in ui_visibility.nav_groups(role)]
+        assert len(labels) == len(set(labels)), f"duplicate nav groups for {role}: {labels}"
+    mlabels = [g["label"] for g in ui_visibility.matrix()]
+    assert len(mlabels) == len(set(mlabels)), f"duplicate matrix groups: {mlabels}"

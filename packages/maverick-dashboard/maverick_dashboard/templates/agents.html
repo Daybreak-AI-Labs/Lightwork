@@ -121,9 +121,8 @@
     background: var(--brand-subtle); color: var(--brand-hi); font-weight: var(--font-semibold); }
   .dept__name{ font-weight: var(--font-semibold); }
   .dept__sub{ color: var(--muted); font-size: var(--text-sm); }
-  .dept__stats{ display: flex; gap: var(--space-5); margin: var(--space-3) 0; }
-  .dept__stat .n{ font-size: var(--text-xl); font-weight: var(--font-semibold); font-variant-numeric: tabular-nums; }
-  .dept__stat .l{ color: var(--muted); font-size: var(--text-xs); text-transform: uppercase; letter-spacing: 0.05em; }
+  .dept__preview{ color: var(--muted); font-size: var(--text-sm); margin: var(--space-3) 0;
+    text-transform: capitalize; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
   .dept__foot{ display: flex; gap: var(--space-2); }
   .dept__addon{ color: var(--muted); font-size: var(--text-xs); align-self: center; }
 </style>
@@ -146,17 +145,21 @@
 
       <div class="fld af-picker">
         {% if agents %}
-        <label for="agent-picker">Start from a specialist <span class="sub">— pick one to tailor</span></label>
+        <label for="agent-picker">Start from a specialist <span class="sub">— search {{ agents|length }} prebuilt specialists</span></label>
         <div style="display:flex; gap:var(--space-2); align-items:center;">
-          <select id="agent-picker" aria-label="Choose a specialist to tailor" style="flex:1;"
-                  onchange="if(this.value) location.href='/agents?name=' + encodeURIComponent(this.value)">
-            {% if not selected %}<option value="">— choose a specialist —</option>{% endif %}
+          {# A searchable picker, not a 2,000-option dropdown: type to filter,
+             pick to open. Navigation happens only on an exact match. #}
+          <input id="agent-picker" list="agent-picker-list" type="text" autocomplete="off"
+                 spellcheck="false" style="flex:1;"
+                 aria-label="Choose a specialist to tailor"
+                 placeholder="e.g. finance_forecasting, hr_onboarding…"
+                 value="{{ selected.name if selected else '' }}"
+                 onchange="if(this.value && document.querySelector('#agent-picker-list option[value=&quot;' + CSS.escape(this.value) + '&quot;]')) location.href='/agents?name=' + encodeURIComponent(this.value)">
+          <datalist id="agent-picker-list">
             {% for a in agents %}
-            <option value="{{ a.name }}"{% if selected and selected.name == a.name %} selected{% endif %}>
-              {{ a.name }}{% if a.is_override %} (custom){% endif %}
-            </option>
+            <option value="{{ a.name }}"{% if a.is_override %} label="{{ a.name }} (custom)"{% endif %}></option>
             {% endfor %}
-          </select>
+          </datalist>
           {% if editable %}
           <span class="sub">or</span>
           <a class="btn{% if creating %} btn--primary{% endif %}" href="/agents?new=1" id="btn-new-agent">＋ New custom agent</a>
@@ -355,10 +358,22 @@
       if (!host) return;
       function esc(s) { var d = document.createElement('div'); d.textContent = s == null ? '' : s; return d.innerHTML; }
       function initials(s) { return (s || '?').trim().slice(0, 2).toUpperCase(); }
+      // A member pack name like "aero_supplier_quality_aero" reads as
+      // "supplier quality" on the card: strip the suite prefix + underscores.
+      function memberLabel(name, key) {
+        var s = String(name || '');
+        var prefix = s.indexOf('_') > 0 ? s.slice(0, s.indexOf('_') + 1) : '';
+        if (prefix && key && key.indexOf(prefix.slice(0, -1)) === 0) s = s.slice(prefix.length);
+        else if (prefix) s = s.slice(prefix.length);
+        return s.replace(/_/g, ' ');
+      }
       function render(list) {
         if (!list.length) { host.innerHTML = '<p class="muted">No departments yet. Your specialist packs appear here as deployable teams.</p>'; return; }
         host.innerHTML = list.map(function (d) {
-          var n = (d.members && d.members.length) || d.headcount || 0;
+          var members = d.members || [];
+          var n = members.length || d.headcount || 0;
+          var preview = members.slice(0, 3).map(function (m) { return memberLabel(m, d.key); }).join(' · ');
+          if (n > 3) preview += ' +' + (n - 3) + ' more';
           var deploy = d.entitled
             ? '<button type="button" class="btn btn--primary dep-deploy" data-key="' + esc(d.key) + '" style="font-size:var(--text-sm);">Deploy team</button>'
             : '<button type="button" class="btn dep-deploy" data-key="' + esc(d.key) + '" style="font-size:var(--text-sm);">Deploy team</button><span class="dept__addon">paid add-on</span>';
@@ -366,7 +381,7 @@
             + '<div class="dept__head"><span class="dept__avatar">' + esc(initials(d.title)) + '</span>'
             + '<span><div class="dept__name">' + esc(d.title) + '</div>'
             + '<div class="dept__sub">' + esc(d.charter || (n + ' specialists')) + '</div></span></div>'
-            + '<div class="dept__stats"><span class="dept__stat"><div class="n">' + n + '</div><div class="l">specialists</div></span></div>'
+            + (preview ? '<p class="dept__preview">' + esc(preview) + '</p>' : '')
             + '<div class="dept__foot">' + deploy
             + '<a class="btn btn--ghost" href="/workforce" style="font-size:var(--text-sm);">View</a></div>'
             + '<div class="dep-msg muted" role="status" aria-live="polite" style="font-size:var(--text-xs);margin-top:var(--space-2);"></div>'
