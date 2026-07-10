@@ -717,6 +717,15 @@ def main(argv: list[str] | None = None) -> int:
                 print(f"  [ABORT] {consec_fail} consecutive non-resolved instances "
                       "(circuit breaker); stopping -- check the environment")
                 break
+            # Free environment pre-gate for paid proposers: never spend agent
+            # dollars on an instance this environment provably can't grade.
+            # The oracle stays un-gated so preflight exercises the full chain.
+            if args.proposer != "oracle":
+                why = _env_pregate(inst, Path(td) / f"pre{i}", timeout=args.timeout)
+                if why:
+                    ungradable += 1
+                    print(f"  [NOENV]  {inst.instance_id:40}  pre-gate ($0 spent): {why}")
+                    continue
             try:
                 patch = propose(inst)
             except RuntimeError as e:
@@ -740,6 +749,12 @@ def main(argv: list[str] | None = None) -> int:
                 resolved += 1
                 consec_fail = 0
                 tag = "PASS"
+            elif not r.boundary_ok and r.reason.startswith("empty patch"):
+                # No diff produced is an honest zero, not an anti-cheat refusal;
+                # counting it as CHEAT inflated boundary-refused on the scoreboard.
+                unresolved += 1
+                consec_fail += 1
+                tag = "EMPTY"
             elif not r.boundary_ok:
                 boundary_refused += 1
                 consec_fail += 1
@@ -767,6 +782,40 @@ def main(argv: list[str] | None = None) -> int:
     print(f"  agent spend (attributed): ~${spend:.2f}   |   signed ledger: {args.ledger}")
     print("=" * 78)
     return 0
+
+
+def _env_pregate(inst: Instance, workroot: Path, *, timeout: float) -> str:
+    """FREE baseline check before the (paid) proposer runs. Returns the
+    ungradable reason, or "" when the instance is gradable here.
+
+    govern_candidate already refuses these cases, but only AFTER the agent
+    has spent real money on the instance. Materializing one baseline copy,
+    applying the grader's test_patch, and running the instance's own tests
+    costs nothing -- an environment that can't run them (missing deps, wrong
+    interpreter era) or that already passes them (mis-seeded/shadowed) is
+    skipped at $0 instead of ~$1 of agent spend per doomed instance."""
+    from maverick.self_modify_eval import _default_materialize, git_apply, resolve_eval_sandbox
+    base_dir = workroot / "pregate"
+    try:
+        _default_materialize(inst.repo_path, base_dir)
+    except Exception as e:
+        return f"could not isolate workspace: {e}"
+    if (inst.test_patch or "").strip():
+        tp = git_apply(inst.test_patch, base_dir)
+        if not getattr(tp, "ok", False):
+            return f"grader test_patch did not apply: {getattr(tp, 'reason', 'unknown')}"
+    try:
+        sb = resolve_eval_sandbox(None, base_dir)
+    except Exception as e:
+        return f"sandbox refused (isolation policy): {e}"
+    score, all_pass, _ = _score(base_dir, inst, sb, timeout=timeout)
+    if all_pass:
+        return ("mis-seeded/shadowed: baseline already passes the target tests "
+                "(no failing bug to fix)")
+    if score == 0.0 and inst.pass_to_pass:
+        return ("baseline cannot run the instance's own passing tests "
+                "(missing deps / wrong interpreter era for this environment)")
+    return ""
 
 
 def _instance_spend(instance_id: str) -> float:
