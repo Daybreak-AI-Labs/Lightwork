@@ -367,6 +367,124 @@ class TestCmdForInterpreter:
         assert cmd.startswith("'/opt/v/bin/python' -m pytest ")
 
 
+class TestCmdForPytestIds:
+    """SWE-bench id addressing: path-qualified vs bare-name (sympy)."""
+
+    def test_all_path_qualified_unchanged(self, monkeypatch):
+        from maverick.coding_mode import _cmd_for
+        monkeypatch.delenv("MAVERICK_TEST_PYTHON", raising=False)
+        ids = ["tests/test_a.py::test_x", "pkg/tests/test_b.py::TestC::test_y"]
+        cmd = _cmd_for("pytest", ids)
+        # Path-qualified ids stay positional and quoted; no -k filter.
+        assert "-k " not in cmd
+        assert "'tests/test_a.py::test_x'" in cmd
+        assert "'pkg/tests/test_b.py::TestC::test_y'" in cmd
+
+    def test_all_bare_names_use_k_filter(self, monkeypatch):
+        from maverick.coding_mode import _cmd_for
+        monkeypatch.delenv("MAVERICK_TEST_PYTHON", raising=False)
+        cmd = _cmd_for("pytest", ["test_issue_24062", "test_str_repr"])
+        # A single -k expression joins the bare names with ' or '.
+        assert "-k 'test_issue_24062 or test_str_repr'" in cmd
+        # No bare name is passed as a positional file arg.
+        assert "'test_issue_24062' " not in cmd + " "
+        assert "'test_str_repr' " not in cmd + " "
+
+    def test_mixed_emits_paths_and_k(self, monkeypatch):
+        from maverick.coding_mode import _cmd_for
+        monkeypatch.delenv("MAVERICK_TEST_PYTHON", raising=False)
+        cmd = _cmd_for("pytest", ["tests/test_a.py::test_x", "test_bare"])
+        assert "'tests/test_a.py::test_x'" in cmd
+        assert "-k 'test_bare'" in cmd
+
+    def test_bare_names_scope_to_existing_roots(self, monkeypatch, tmp_path):
+        from maverick.coding_mode import _cmd_for
+        monkeypatch.delenv("MAVERICK_TEST_PYTHON", raising=False)
+        (tmp_path / "sympy").mkdir()
+        cmd = _cmd_for("pytest", ["test_issue_24062"], tmp_path)
+        # Existing conventional root is appended as a positional collection
+        # root; a non-existent one (tests/) is not.
+        assert cmd.rstrip().endswith("'sympy'")
+        assert "'tests'" not in cmd
+
+    def test_bare_names_no_workdir_falls_back_to_rootdir(self, monkeypatch):
+        from maverick.coding_mode import _cmd_for
+        monkeypatch.delenv("MAVERICK_TEST_PYTHON", raising=False)
+        cmd = _cmd_for("pytest", ["test_issue_24062"])
+        # No workdir -> no positional collection root appended.
+        assert cmd.rstrip().endswith("-k 'test_issue_24062'")
+
+
+class _FakeSandbox:
+    """Returns canned stdout for a shell command whose text contains a key."""
+    def __init__(self, responses):
+        self._responses = responses  # list of (substring, stdout)
+
+    def exec(self, cmd):
+        import types
+        for key, out in self._responses:
+            if key in cmd:
+                return types.SimpleNamespace(stdout=out, stderr="")
+        return types.SimpleNamespace(stdout="", stderr="")
+
+
+class TestResolveBarePytestIds:
+    """SWE-bench sympy: bind BARE names to exact file::name node ids so the
+    grader's exact `passing == total` check can resolve (no -k inflation)."""
+
+    _F = "sympy/physics/units/tests/test_quantities.py"
+
+    def test_bare_names_resolve_to_target_file(self, monkeypatch, tmp_path):
+        from maverick.coding_mode import _resolve_bare_pytest_ids
+        monkeypatch.delenv("MAVERICK_TEST_PYTHON", raising=False)
+        (tmp_path / "sympy").mkdir()
+        sb = _FakeSandbox([
+            ("grep -rlE", self._F + "\n"),
+            ("--collect-only",
+             self._F + "::test_issue_24062\n" + self._F + "::test_eq\n"),
+        ])
+        f2p, p2p = _resolve_bare_pytest_ids(
+            tmp_path, sb, ["test_issue_24062"], ["test_eq"])
+        assert f2p == [self._F + "::test_issue_24062"]
+        # `test_eq` binds to the target file's node id, NOT any other file's.
+        assert p2p == [self._F + "::test_eq"]
+
+    def test_path_qualified_pass_through_unchanged(self, tmp_path):
+        from maverick.coding_mode import _resolve_bare_pytest_ids
+        (tmp_path / "sympy").mkdir()
+        # No bare FAIL_TO_PASS to anchor on -> returned verbatim, no sandbox use.
+        sb = _FakeSandbox([])
+        ids_f = ["tests/test_a.py::test_x"]
+        ids_p = ["tests/test_a.py::test_y"]
+        f2p, p2p = _resolve_bare_pytest_ids(tmp_path, sb, ids_f, ids_p)
+        assert (f2p, p2p) == (ids_f, ids_p)
+
+    def test_unresolved_bare_name_stays_bare(self, monkeypatch, tmp_path):
+        from maverick.coding_mode import _resolve_bare_pytest_ids
+        monkeypatch.delenv("MAVERICK_TEST_PYTHON", raising=False)
+        (tmp_path / "sympy").mkdir()
+        sb = _FakeSandbox([
+            ("grep -rlE", self._F + "\n"),
+            ("--collect-only", self._F + "::test_issue_24062\n"),
+        ])
+        # `test_gone` isn't in the collected node ids -> left bare for the
+        # -k fallback rather than dropped.
+        f2p, p2p = _resolve_bare_pytest_ids(
+            tmp_path, sb, ["test_issue_24062"], ["test_gone"])
+        assert f2p == [self._F + "::test_issue_24062"]
+        assert p2p == ["test_gone"]
+
+    def test_no_target_file_returns_original(self, monkeypatch, tmp_path):
+        from maverick.coding_mode import _resolve_bare_pytest_ids
+        monkeypatch.delenv("MAVERICK_TEST_PYTHON", raising=False)
+        (tmp_path / "sympy").mkdir()
+        sb = _FakeSandbox([("grep -rlE", "")])  # grep finds nothing
+        f2p, p2p = _resolve_bare_pytest_ids(
+            tmp_path, sb, ["test_issue_24062"], ["test_eq"])
+        assert f2p == ["test_issue_24062"]
+        assert p2p == ["test_eq"]
+
+
 class TestTestRunResult:
     def test_all_pass_property(self):
         from maverick.coding_mode import TestRunResult
