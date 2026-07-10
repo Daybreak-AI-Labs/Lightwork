@@ -353,6 +353,20 @@ class TestCodingModeFromEnv:
         assert from_env().best_of_n == 1
 
 
+class TestCmdForInterpreter:
+    def test_pytest_defaults_to_python3(self, monkeypatch):
+        from maverick.coding_mode import _cmd_for
+        monkeypatch.delenv("MAVERICK_TEST_PYTHON", raising=False)
+        cmd = _cmd_for("pytest", ["tests/test_a.py::test_x"])
+        assert cmd.startswith("'python3' -m pytest ")
+
+    def test_pytest_honors_test_python_override(self, monkeypatch):
+        from maverick.coding_mode import _cmd_for
+        monkeypatch.setenv("MAVERICK_TEST_PYTHON", "/opt/v/bin/python")
+        cmd = _cmd_for("pytest", ["tests/test_a.py::test_x"])
+        assert cmd.startswith("'/opt/v/bin/python' -m pytest ")
+
+
 class TestTestRunResult:
     def test_all_pass_property(self):
         from maverick.coding_mode import TestRunResult
