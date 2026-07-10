@@ -188,6 +188,17 @@ _BENCH_ENV = {
 }
 
 
+# Round 4 (lever 2): appended to the brief on the retry attempt when the first
+# run produced no patch at all. Kept terse and imperative -- the agent already
+# has the full brief; this only fixes the missing-deliverable failure mode.
+_RETRY_ON_EMPTY_ADDENDUM = (
+    "\n\n---\nIMPORTANT: your previous attempt produced NO patch. You MUST "
+    "finish this attempt with a concrete unified diff (git-format) OR staged "
+    "edits to the working tree. Do not stop until you have written a real code "
+    "change that addresses the issue."
+)
+
+
 def llm_proposer(inst: Instance) -> str:
     """Generate a patch with the coding-mode agent (needs a provider key).
 
@@ -243,22 +254,45 @@ def llm_proposer(inst: Instance) -> str:
     # NEVER consults cwd -- the overlay is the one runtime knob it honors.
     restore = _point_sandbox_at(inst.repo_path)
     row = tree_diff = prose_diff = None
-    try:
-        row = run_maverick(
-            inst.instance_id, inst.brief,
+    attempt1_cost = 0.0
+
+    def _attempt(brief_text: str):
+        # Reset to the fixture commit (base + test_patch), not bare base, so
+        # run_maverick's pre-run reset keeps the graded tests present.
+        r = run_maverick(
+            inst.instance_id, brief_text,
             fail_to_pass=inst.fail_to_pass, pass_to_pass=inst.pass_to_pass,
             gold_patch=inst.gold_patch, language=inst.language,
-            # Reset to the fixture commit (base + test_patch), not bare base,
-            # so run_maverick's pre-run reset keeps the graded tests present.
             base_commit=fixture_sha)
         # Candidate = the agent's source edits ONLY: diff against the fixture
         # commit excludes the committed test_patch. Fall back to the desanitized
         # prose diff if the tree is clean (agent emitted a diff without editing).
-        tree_diff = _worktree_diff(inst.repo_path)
-        prose_diff = _desanitize_csv_patch(row.predicted_patch or "")
-        return tree_diff if tree_diff.strip() else prose_diff
+        td = _worktree_diff(inst.repo_path)
+        pd = _desanitize_csv_patch(getattr(r, "predicted_patch", "") or "")
+        return r, td, pd
+
+    try:
+        row, tree_diff, prose_diff = _attempt(inst.brief)
+        chosen = tree_diff if tree_diff.strip() else prose_diff
+        # Round 4 (lever 2): retry ONCE if the first attempt produced no patch
+        # at all (neither a working-tree diff nor a prose diff). A single empty
+        # attempt is often a formatting miss, not a capability ceiling; a
+        # pointed second try recovers a real fraction of them. Gated by
+        # MAVERICK_RETRY_ON_EMPTY (default ON; "0" disables).
+        if (os.environ.get("MAVERICK_RETRY_ON_EMPTY", "1") != "0"
+                and not (chosen or "").strip()):
+            attempt1_cost = float(getattr(row, "cost_dollars", 0.0) or 0.0)
+            # Hard reset BETWEEN attempts to the fixture commit (NOT base_sha):
+            # drop attempt 1's edits but keep the graded-test fixture so
+            # attempt 2 still gets real verifier feedback.
+            _hard_reset(inst.repo_path, fixture_sha)
+            row, tree_diff, prose_diff = _attempt(inst.brief + _RETRY_ON_EMPTY_ADDENDUM)
+            chosen = tree_diff if tree_diff.strip() else prose_diff
+        return chosen
     finally:
-        _dump_forensics(inst, row, tree_diff, prose_diff)
+        # Sidecar cost = attempt1 + attempt2 (extra_cost) so total-spend
+        # accounting via _instance_spend sums both attempts.
+        _dump_forensics(inst, row, tree_diff, prose_diff, extra_cost=attempt1_cost)
         restore()
         reset_config_cache()
         # Restore the tree to the pristine base_commit (drop the fixture commit
@@ -343,15 +377,22 @@ def _point_sandbox_at(repo: Path):
     return restore
 
 
-def _dump_forensics(inst, row, tree_diff, prose_diff) -> None:
-    """Best-effort per-instance forensics sidecar; never raises into the run."""
+def _dump_forensics(inst, row, tree_diff, prose_diff, extra_cost: float = 0.0) -> None:
+    """Best-effort per-instance forensics sidecar; never raises into the run.
+
+    ``extra_cost`` is added to the row's own cost before it is written -- used by
+    the retry-on-empty path so the sidecar (which ``_instance_spend`` reads back
+    for total-spend accounting) reflects attempt1 + attempt2, not just the second
+    attempt's row."""
     try:
         base = os.environ.get("MAVERICK_SWEBENCH_FORENSICS")
         outdir = Path(base) if base else (_FORENSICS_DIR or Path.cwd() / "forensics")
         outdir.mkdir(parents=True, exist_ok=True)
         rec = {
             "instance_id": inst.instance_id,
-            "cost_dollars": round(float(getattr(row, "cost_dollars", 0.0) or 0.0), 4),
+            "cost_dollars": round(
+                float(getattr(row, "cost_dollars", 0.0) or 0.0)
+                + float(extra_cost or 0.0), 4),
             "tokens_out": int(getattr(row, "tokens_out", 0) or 0),
             "outcome": getattr(row, "outcome", ""),
             "result_text": (getattr(row, "extra", {}) or {}).get("run_text", ""),
