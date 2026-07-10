@@ -696,7 +696,14 @@ def run_maverick(instance_id: str, brief: str, **kwargs) -> Row:
     # Pro budget. Wall is capped at 25 turns x 60s = 25 min effective.
     instance_cap = float(os.environ.get("MAVERICK_INSTANCE_HARD_CAP", "3.0"))
     instance_wall = float(os.environ.get("MAVERICK_INSTANCE_WALL_SEC", "1500"))
-    budget = Budget(max_dollars=instance_cap, max_wall_seconds=instance_wall)
+    # Dollars and wall are the OPERATOR's caps; raise the token/tool caps far
+    # above what the dollar cap can buy so they never bind first. The Budget
+    # defaults (1M input tokens) tripped BEFORE a $2.50 cap on large repos --
+    # observed live in round 3 as a universal "no-diff" on sphinx/seaborn
+    # while cost sat at ~$1.8 of $2.50 and wall at 369s of 1500s.
+    budget = Budget(max_dollars=instance_cap, max_wall_seconds=instance_wall,
+                    max_input_tokens=50_000_000, max_output_tokens=2_000_000,
+                    max_tool_calls=2_000)
     sandbox = build_sandbox()
     # Pre-initialize so the post-finally row construction always has
     # values, even if the agent raises before episode bookkeeping.

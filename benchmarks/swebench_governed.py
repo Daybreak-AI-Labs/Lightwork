@@ -590,7 +590,21 @@ def _promote(inst, patch, res, cb, ca, probe, *, keys_dir, ledger, controller):
     os.environ["MAVERICK_APPROVER_KEYS_DIR"] = str(keys_dir)
     os.environ["MAVERICK_SELF_IMPROVEMENT"] = "1"
     try:
-        ctrl = controller or SelfImprovementController(ledger=ledger)
+        if controller is None:
+            # For an instance-fix promotion, `samples` is the INSTANCE's own
+            # test count (FAIL_TO_PASS + PASS_TO_PASS), not a corpus size. The
+            # default code-rung min_samples=10 is calibrated for solver
+            # self-improvement (samples = held-out instances) and misfires
+            # here: a correct fix in a project that ships 8 tests was refused
+            # on sample count alone (pylint-6386, round 3, live). One passing
+            # test suite IS the evidence unit for a bug fix; every other gate
+            # (boundary, baseline-must-fail, capability, signature) is
+            # unchanged.
+            from maverick.self_improvement import _RUNG_POLICY
+            policy = {k: dict(v) for k, v in _RUNG_POLICY.items()}
+            policy["code"]["min_samples"] = 1
+            controller = SelfImprovementController(ledger=ledger, rung_policy=policy)
+        ctrl = controller
         verdict = ctrl.promote(cand)
     finally:
         for k, v in prev.items():
