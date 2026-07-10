@@ -70,12 +70,36 @@ def load_solver(solver_dir: Path):
     return mod
 
 
+def _instance_test_python(inst) -> str:
+    """Absolute path to this instance's era-correct venv interpreter, or ""
+    when MAVERICK_SWEBENCH_VENVS is unset / no venv exists. Mirrors
+    ``swebench_governed._venv_python`` so DGM grades with the SAME interpreter
+    the governed harness uses (each instance's own-era python, not host python3);
+    inlined rather than imported to avoid a heavier dep cycle."""
+    import os
+
+    base = os.environ.get("MAVERICK_SWEBENCH_VENVS", "").strip()
+    if not base:
+        return ""
+    iid = getattr(inst, "instance_id", "")
+    p = Path(base) / iid / "bin" / "python"
+    return str(p) if p.exists() else ""
+
+
 def score_instance(inst, patch: str, workroot: Path, *, timeout: float = 600.0) -> bool:
     """Did this patch resolve this instance, honestly?
 
     Anti-cheat first (a solver that edits tests/setup gets no credit), then
     apply to an isolated copy and run the instance's own FAIL_TO_PASS +
-    PASS_TO_PASS suites. Fail-closed on any error."""
+    PASS_TO_PASS suites. Fail-closed on any error.
+
+    Grading runs under this instance's era-correct venv interpreter when one is
+    configured (MAVERICK_SWEBENCH_VENVS): ``MAVERICK_TEST_PYTHON`` is pointed at
+    it for the duration of grading and restored afterward, so the DGM eval loop
+    honours the SAME per-instance interpreter the governed SWE-bench harness
+    does. No venv configured -> vpy == "" -> the env is left untouched."""
+    import os
+
     from maverick.coding_mode import defensive_validate, run_failing_tests
     from maverick.self_modify_eval import _default_materialize, git_apply, resolve_eval_sandbox
 
@@ -86,6 +110,10 @@ def score_instance(inst, patch: str, workroot: Path, *, timeout: float = 600.0) 
     if not dv.ok:
         return False
     work = Path(workroot)
+    prev_tp = os.environ.get("MAVERICK_TEST_PYTHON")
+    vpy = _instance_test_python(inst)
+    if vpy:
+        os.environ["MAVERICK_TEST_PYTHON"] = vpy
     try:
         _default_materialize(inst.repo_path, work / "tree")
         # SWE-bench grading semantics: the grader's test_patch goes on first
@@ -104,6 +132,12 @@ def score_instance(inst, patch: str, workroot: Path, *, timeout: float = 600.0) 
     except Exception:
         log.warning("score_instance failed for %s", inst.instance_id, exc_info=True)
         return False
+    finally:
+        if vpy:
+            if prev_tp is None:
+                os.environ.pop("MAVERICK_TEST_PYTHON", None)
+            else:
+                os.environ["MAVERICK_TEST_PYTHON"] = prev_tp
 
 
 def run_solver(solver_dir: Path, instances: list, workroot: Path,
@@ -361,6 +395,7 @@ __all__ = [
     "UpliftResult",
     "load_solver",
     "score_instance",
+    "_instance_test_python",
     "run_solver",
     "split_instances",
     "govern_solver_change",
