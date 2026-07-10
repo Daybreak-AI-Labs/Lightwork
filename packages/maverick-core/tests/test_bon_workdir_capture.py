@@ -174,3 +174,29 @@ def test_reset_skips_filter_metadata_without_executing_smudge_filter(tmp_path):
     _reset_workdir_to_head(repo)
     assert (repo / "a.txt").read_bytes() == b"changed\n"
     assert not marker.exists()
+
+
+def test_capture_works_on_blobless_partial_clone(tmp_path):
+    """A `git clone --filter=blob:none` writes `partialclonefilter = blob:none`
+    into .git/config -- a benign partial-clone value, NOT an executable filter.
+    The guard must not skip capture on it, or best-of-N is dead for every
+    blobless-cloned SWE-bench repo (observed live: universal EMPTY in tier B)."""
+    repo = tmp_path / "r"
+    _init_repo(repo, {"a.txt": b"orig\n"})
+    # simulate the config a partial clone leaves behind
+    _git(repo, "config", "remote.origin.promisor", "true")
+    _git(repo, "config", "remote.origin.partialclonefilter", "blob:none")
+    (repo / "a.txt").write_bytes(b"changed\n")
+
+    diff = _capture_workdir_diff(repo)
+    assert "a.txt" in diff and "changed" in diff  # capture actually happened
+
+
+def test_reset_works_on_blobless_partial_clone(tmp_path):
+    repo = tmp_path / "r"
+    _init_repo(repo, {"a.txt": b"orig\n"})
+    _git(repo, "config", "remote.origin.partialclonefilter", "blob:none")
+    (repo / "a.txt").write_bytes(b"changed\n")
+
+    _reset_workdir_to_head(repo)
+    assert (repo / "a.txt").read_bytes() == b"orig\n"  # reset actually happened

@@ -128,6 +128,21 @@ tail -3 /tmp/oracle4.log
 grep -q "resolved under governance: 1/1" /tmp/oracle4.log \
     || { echo "!!! SELF-TEST DID NOT PASS - paid run NOT started. Send this screen to Claude."; exit 1; }
 
+# FREE best-of-N smoke gate: exercise the EXACT diff-capture + reset path a
+# paid best-of-N run depends on, on the first few real staged repos we're about
+# to spend on. If capture comes back empty (the blobless-clone guard bug that
+# silently produced universal [EMPTY] and burned real money), ABORT before
+# spending a cent. This is the check that would have caught that $ loss for $0.
+echo "[2b/4] FREE best-of-N smoke gate (capture+reset on real staged repos)..."
+SMOKE_REPOS=$(head -3 gradable_manifest.jsonl \
+    | python3 -c "import sys,json;[print('$STAGE/repos/'+json.loads(l)['instance_id']) for l in sys.stdin if l.strip()]" 2>/dev/null)
+if [ -n "$SMOKE_REPOS" ]; then
+    python3 ~/Lightwork/benchmarks/bon_smoke.py $SMOKE_REPOS \
+        || { echo "!!! BEST-OF-N SMOKE FAILED - paid run NOT started (would have wasted money). Send this screen to Claude."; exit 1; }
+else
+    echo "!!! could not resolve smoke repos from manifest; refusing to spend blind"; exit 1
+fi
+
 echo "[3/4] SELF-TEST PASSED - launching PAID round 4 tier $TIER (caps: \$$INSTANCE_CAP/task, \$$ABORT total)..."
 env $OPUS_OVERRIDE \
 MAVERICK_BEST_OF_N=$BON \

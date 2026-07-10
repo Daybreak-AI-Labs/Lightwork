@@ -1769,14 +1769,35 @@ def _git_metadata_may_execute_filters(wd) -> bool:
     or smudge commands. Fail open by skipping capture/reset instead.
     """
     try:
-        candidates = [wd / ".git" / "config", wd / ".git" / "info" / "attributes"]
-        candidates.extend(wd.glob("**/.gitattributes"))
-        needles = ("filter", "[include", "include.path", "includeif")
-        for path in candidates:
+        # Git executes a command only via a `[filter "name"]` SECTION (its
+        # clean/smudge values) or a config INCLUDE that could pull one in. The
+        # bare word "filter" is NOT sufficient and caused a false positive on
+        # every partial clone: `git clone --filter=blob:none` writes a benign
+        # `partialclonefilter = blob:none` into .git/config that never runs a
+        # command, so matching "filter" skipped best-of-N reset/capture for the
+        # entire staged corpus. Match the executable surfaces precisely instead.
+        config_files = [wd / ".git" / "config"]
+        config_needles = ('[filter "', "[include", "include.path", "includeif")
+        for path in config_files:
             try:
                 if path.is_file():
                     text = path.read_text(encoding="utf-8", errors="ignore").lower()
-                    if any(needle in text for needle in needles):
+                    if any(needle in text for needle in config_needles):
+                        return True
+            except OSError:
+                return True
+        # An attributes file assigning a `filter` attribute references a named
+        # filter whose clean/smudge command lives in config -- treat that
+        # reference as unsafe. Attributes files never contain a
+        # `partialclonefilter` value, so there is no blobless-clone false
+        # positive here.
+        attr_files = [wd / ".git" / "info" / "attributes"]
+        attr_files.extend(wd.glob("**/.gitattributes"))
+        for path in attr_files:
+            try:
+                if path.is_file():
+                    text = path.read_text(encoding="utf-8", errors="ignore").lower()
+                    if "filter=" in text or "filter " in text:
                         return True
             except OSError:
                 return True
