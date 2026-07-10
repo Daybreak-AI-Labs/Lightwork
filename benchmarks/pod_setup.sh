@@ -56,10 +56,22 @@ python3 ~/Lightwork/benchmarks/fetch_swe_bench_verified.py \
 
 echo "[4/5] instance test dependencies..."
 cd ~/swebench_stage/repos
-for fam in pylint-dev__pylint psf__requests pallets__flask; do
-    d=$(ls -d "${fam}"-* 2>/dev/null | head -1)
-    [ -n "$d" ] && python3 -m pip install -q -e "./$d" >/dev/null 2>&1 && echo "    $fam deps OK"
+# Install the SELF-TEST instance's clone (pylint-8898) so its era's deps
+# (tomlkit, astroid 3.x) land -- NOT the alphabetically-first old clone,
+# whose 2.x-era deps differ. requests clones are py<=3.9 code and cannot
+# run on this pod's 3.10; the run's free pre-gate skips them at $0.
+for d in pylint-dev__pylint-8898 $(ls -d pallets__flask-* 2>/dev/null | head -1); do
+    [ -d "$d" ] || continue
+    python3 -m pip install -e "./$d" > "/tmp/deps_${d}.log" 2>&1 \
+        && echo "    $d deps OK" \
+        || { echo "!!! DEPS FAILED for $d - last lines:"; tail -5 "/tmp/deps_${d}.log"; }
 done
+python3 - <<'PY'
+import importlib.util
+need = ["tomlkit", "astroid", "platformdirs", "dill", "flask", "pytest"]
+missing = [m for m in need if importlib.util.find_spec(m) is None]
+print("    dep check:", "all OK" if not missing else f"MISSING: {missing}")
+PY
 
 echo "[5/5] FREE SELF-TEST..."
 cd ~/swebench_stage
