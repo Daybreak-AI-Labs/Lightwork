@@ -717,56 +717,72 @@ def main(argv: list[str] | None = None) -> int:
                 print(f"  [ABORT] {consec_fail} consecutive non-resolved instances "
                       "(circuit breaker); stopping -- check the environment")
                 break
-            # Free environment pre-gate for paid proposers: never spend agent
-            # dollars on an instance this environment provably can't grade.
-            # The oracle stays un-gated so preflight exercises the full chain.
-            if args.proposer != "oracle":
-                why = _env_pregate(inst, Path(td) / f"pre{i}", timeout=args.timeout)
-                if why:
-                    ungradable += 1
-                    print(f"  [NOENV]  {inst.instance_id:40}  pre-gate ($0 spent): {why}")
-                    continue
+            # Per-instance venv interpreter (SWE-bench era isolation): point
+            # MAVERICK_TEST_PYTHON at this instance's venv for the whole body
+            # (pre-gate + propose + govern) so both baseline grading and the
+            # agent's test feedback run against its own deps, then restore.
+            # No venv configured -> vpy == "" -> the env is left untouched.
+            vpy = _venv_python(inst)
+            prev_tp = os.environ.get("MAVERICK_TEST_PYTHON")
+            if vpy:
+                os.environ["MAVERICK_TEST_PYTHON"] = vpy
             try:
-                patch = propose(inst)
-            except RuntimeError as e:
-                # Missing provider key: config problem, not a per-instance
-                # failure. Abort loudly instead of skipping 500 instances.
-                print(f"  [ABORT] {e}")
-                return 2
-            except Exception as e:
-                # A per-instance proposer crash scores that instance 0 and the
-                # run continues -- one bad instance must not kill a $1k run.
-                print(f"  [ERROR] {inst.instance_id:40}  proposer failed: {e}")
-                unresolved += 1
-                consec_fail += 1
-                continue
-            # Attribute agent spend from the forensics sidecar (best-effort).
-            spend += _instance_spend(inst.instance_id)
-            r = govern_candidate(inst, patch, keys_dir=args.keys, ledger=ledger,
-                                 workroot=Path(td) / f"i{i}", timeout=args.timeout,
-                                 check_gold_overlap=(args.proposer != "oracle"))
-            if r.resolved_under_governance:
-                resolved += 1
-                consec_fail = 0
-                tag = "PASS"
-            elif not r.boundary_ok and r.reason.startswith("empty patch"):
-                # No diff produced is an honest zero, not an anti-cheat refusal;
-                # counting it as CHEAT inflated boundary-refused on the scoreboard.
-                unresolved += 1
-                consec_fail += 1
-                tag = "EMPTY"
-            elif not r.boundary_ok:
-                boundary_refused += 1
-                consec_fail += 1
-                tag = "CHEAT"
-            elif r.ungradable:
-                ungradable += 1  # ungradable-here does not count against the breaker
-                tag = "NOENV"
-            else:
-                unresolved += 1
-                consec_fail += 1
-                tag = "FAIL"
-            print(f"  [{tag}]  {inst.instance_id:40}  {r.reason}")
+                # Free environment pre-gate for paid proposers: never spend agent
+                # dollars on an instance this environment provably can't grade.
+                # The oracle stays un-gated so preflight exercises the full chain.
+                if args.proposer != "oracle":
+                    why = _env_pregate(inst, Path(td) / f"pre{i}", timeout=args.timeout)
+                    if why:
+                        ungradable += 1
+                        print(f"  [NOENV]  {inst.instance_id:40}  pre-gate ($0 spent): {why}")
+                        continue
+                try:
+                    patch = propose(inst)
+                except RuntimeError as e:
+                    # Missing provider key: config problem, not a per-instance
+                    # failure. Abort loudly instead of skipping 500 instances.
+                    print(f"  [ABORT] {e}")
+                    return 2
+                except Exception as e:
+                    # A per-instance proposer crash scores that instance 0 and the
+                    # run continues -- one bad instance must not kill a $1k run.
+                    print(f"  [ERROR] {inst.instance_id:40}  proposer failed: {e}")
+                    unresolved += 1
+                    consec_fail += 1
+                    continue
+                # Attribute agent spend from the forensics sidecar (best-effort).
+                spend += _instance_spend(inst.instance_id)
+                r = govern_candidate(inst, patch, keys_dir=args.keys, ledger=ledger,
+                                     workroot=Path(td) / f"i{i}", timeout=args.timeout,
+                                     check_gold_overlap=(args.proposer != "oracle"))
+                if r.resolved_under_governance:
+                    resolved += 1
+                    consec_fail = 0
+                    tag = "PASS"
+                elif not r.boundary_ok and r.reason.startswith("empty patch"):
+                    # No diff produced is an honest zero, not an anti-cheat refusal;
+                    # counting it as CHEAT inflated boundary-refused on the scoreboard.
+                    unresolved += 1
+                    consec_fail += 1
+                    tag = "EMPTY"
+                elif not r.boundary_ok:
+                    boundary_refused += 1
+                    consec_fail += 1
+                    tag = "CHEAT"
+                elif r.ungradable:
+                    ungradable += 1  # ungradable-here does not count against the breaker
+                    tag = "NOENV"
+                else:
+                    unresolved += 1
+                    consec_fail += 1
+                    tag = "FAIL"
+                print(f"  [{tag}]  {inst.instance_id:40}  {r.reason}")
+            finally:
+                if vpy:
+                    if prev_tp is None:
+                        os.environ.pop("MAVERICK_TEST_PYTHON", None)
+                    else:
+                        os.environ["MAVERICK_TEST_PYTHON"] = prev_tp
     n = len(instances) or 1
     gradable_total = resolved + boundary_refused + unresolved
     print("=" * 78)
@@ -782,6 +798,19 @@ def main(argv: list[str] | None = None) -> int:
     print(f"  agent spend (attributed): ~${spend:.2f}   |   signed ledger: {args.ledger}")
     print("=" * 78)
     return 0
+
+
+def _venv_python(inst: Instance) -> str:
+    """Absolute path to this instance's venv interpreter, or "" if none.
+    Operators build one venv per instance (pip install -e <repo> with its
+    own era's deps) under MAVERICK_SWEBENCH_VENVS; grading and the agent's
+    test feedback then run with that interpreter instead of host python3,
+    which is what makes mixed-era instances gradable on one box."""
+    base = os.environ.get("MAVERICK_SWEBENCH_VENVS", "").strip()
+    if not base:
+        return ""
+    p = Path(base) / inst.instance_id / "bin" / "python"
+    return str(p) if p.exists() else ""
 
 
 def _env_pregate(inst: Instance, workroot: Path, *, timeout: float) -> str:

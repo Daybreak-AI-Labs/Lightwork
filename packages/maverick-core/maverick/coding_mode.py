@@ -21,6 +21,7 @@ prose tasks.
 """
 from __future__ import annotations
 
+import os
 import re
 import subprocess
 from dataclasses import dataclass, field
@@ -1147,7 +1148,11 @@ def _cmd_for(runner: str, ids: list[str]):
         # own uninstalled package is importable — bare `pytest` can't import
         # it, and with an editable install of another checkout present it
         # would silently run the tests against THAT tree instead of this one.
-        return ("python3 -m pytest --tb=short -p no:cacheprovider "
+        # MAVERICK_TEST_PYTHON overrides the interpreter so a per-instance venv
+        # interpreter (SWE-bench era isolation) can be injected; the module form
+        # keeps the workdir on sys.path either way.
+        interp = os.environ.get("MAVERICK_TEST_PYTHON", "").strip() or "python3"
+        return (f"{q(interp)} -m pytest --tb=short -p no:cacheprovider "
                 + " ".join(q(i) for i in ids))
     if runner in ("jest", "vitest"):
         files: list[str] = []
