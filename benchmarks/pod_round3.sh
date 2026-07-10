@@ -26,7 +26,18 @@ if [ ! -f round3_new.jsonl ]; then
         --repos sphinx-doc/sphinx,sympy/sympy,mwaskom/seaborn,pytest-dev/pytest \
         --out-manifest round3_new.jsonl --stage --repos-dir ./repos \
         > /tmp/fetch3.log 2>&1 \
-        || { echo "!!! FETCH FAILED - last lines:"; tail -5 /tmp/fetch3.log; exit 1; }
+        || {
+            # A handful of failed clones must not kill the round: the manifest is
+            # written before staging, and an unstaged instance later pre-gates
+            # NOENV at $0. Only die if staging failed WHOLESALE.
+            staged=$(ls -d ./repos/*/ 2>/dev/null | wc -l)
+            if [ -f round3_new.jsonl ] && [ "$staged" -ge 50 ]; then
+                echo "    WARN: fetcher exited non-zero but $staged repos staged; continuing"
+                tail -2 /tmp/fetch3.log
+            else
+                echo "!!! FETCH FAILED - last lines:"; tail -5 /tmp/fetch3.log; exit 1
+            fi
+        }
 fi
 cat slice_manifest.jsonl round3_new.jsonl > round3_manifest.jsonl
 echo "    new: $(wc -l < round3_new.jsonl)  |  combined manifest: $(wc -l < round3_manifest.jsonl)"
