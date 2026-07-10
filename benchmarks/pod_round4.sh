@@ -15,8 +15,9 @@
 # nohup'd and survives closing the terminal.
 
 TIER="$1"
+LIMIT="${2:-0}"   # optional: attempt only the first N winnable instances (pilot mode)
 if [ -z "$TIER" ]; then
-    echo "!!! tier argument required:  bash pod_round4.sh A|B"
+    echo "!!! tier argument required:  bash pod_round4.sh A|B [pilot_n]"
     exit 1
 fi
 case "$TIER" in
@@ -42,8 +43,10 @@ else
     OPUS_OVERRIDE="MAVERICK_MODEL_OVERRIDE_ORCHESTRATOR=claude-opus-4-8"  # pragma: allowlist secret
 fi
 
+PILOT_TAG=""
+[ "$LIMIT" -gt 0 ] && PILOT_TAG=" (PILOT: first $LIMIT winnable)"
 echo "======================================================================"
-echo "  ROUND 4  TIER $TIER"
+echo "  ROUND 4  TIER $TIER$PILOT_TAG"
 echo "    best-of-N        : $BON"
 echo "    per-instance cap : \$$INSTANCE_CAP"
 echo "    total abort cap  : \$$ABORT   <-- expected WORST-CASE spend"
@@ -69,7 +72,10 @@ fi
 # the gold patch itself can't resolve here (era-NOENV, gate-refused-even-on-gold)
 # is pure waste, so target only the oracle ceiling. Falls back to the prior
 # rounds' attempted ids if the oracle preflight wasn't run.
-if [ -f preflight_oracle.log ]; then
+if [ -s winnable_ids.txt ]; then
+    cp winnable_ids.txt attempted_ids.txt
+    echo "    source: winnable_ids.txt (parallel oracle sweep)"
+elif [ -f preflight_oracle.log ]; then
     grep -E '\[PASS\][[:space:]]+[A-Za-z0-9_.-]+__[A-Za-z0-9_.-]+-[0-9]+[[:space:]]+resolved under governance$' \
         preflight_oracle.log \
         | grep -oE '[A-Za-z0-9_.-]+__[A-Za-z0-9_.-]+-[0-9]+' | sort -u > attempted_ids.txt
@@ -132,7 +138,7 @@ MAVERICK_SWEBENCH_VENVS=$VENVS \
 nohup python3 ~/Lightwork/benchmarks/swebench_governed.py \
     --manifest gradable_manifest.jsonl --proposer llm \
     --keys ~/dgm-keys --ledger slice4_ledger.json --timeout 900 \
-    --abort-at-dollars $ABORT \
+    --abort-at-dollars $ABORT --limit $LIMIT \
     > slice4.log 2>&1 &
 
 echo "[4/4] ROUND 4 TIER $TIER RUNNING (expect several hours; survives closing the terminal)"
