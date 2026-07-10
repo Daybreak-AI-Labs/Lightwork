@@ -36,7 +36,7 @@ else
     # coding-mode work AND seeds the best-of-N ladder) onto the Opus-class model.
     # MAVERICK_MODEL_OVERRIDE_<ROLE> is the supported per-role env override
     # (llm._resolve_model_for_role resolution order #1; beats config).
-    OPUS_OVERRIDE="MAVERICK_MODEL_OVERRIDE_ORCHESTRATOR=claude-opus-4-8"
+    OPUS_OVERRIDE="MAVERICK_MODEL_OVERRIDE_ORCHESTRATOR=claude-opus-4-8"  # pragma: allowlist secret
 fi
 
 echo "======================================================================"
