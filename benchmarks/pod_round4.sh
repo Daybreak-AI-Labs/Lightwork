@@ -35,7 +35,7 @@ if [ "$TIER" = A ]; then
     BON=4; INSTANCE_CAP=5; ABORT=120
     OPUS_OVERRIDE=""
 else
-    BON=4; INSTANCE_CAP=8; ABORT=300
+    BON=4; INSTANCE_CAP=8; ABORT=400
     # Force the coding worker (the orchestrator role that resolves the model for
     # coding-mode work AND seeds the best-of-N ladder) onto the Opus-class model.
     # MAVERICK_MODEL_OVERRIDE_<ROLE> is the supported per-role env override
