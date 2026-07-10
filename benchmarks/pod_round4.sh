@@ -6,11 +6,13 @@
 # re-runs just those, harder.
 #
 # Usage:  bash ~/Lightwork/benchmarks/pod_round4.sh A|B
-#   A  best-of-N=4, $5/task, default role models,  total abort $150
-#   B  best-of-N=4, $8/task, Opus-class worker,    total abort $600
+#   A  best-of-N=4, $5/task, default role models,  total abort $120
+#   B  best-of-N=4, $8/task, Opus-class worker,    total abort $300
 #
-# Everything before the paid launch is free. The run is nohup'd and survives
-# closing the terminal.
+# Targets ONLY the oracle-winnable set (preflight_oracle.log [PASS] ids), so
+# real spend is ~n_winnable x per-instance, well under the abort ceiling. Run
+# pod_preflight.sh first. Everything before the paid launch is free; the run is
+# nohup'd and survives closing the terminal.
 
 TIER="$1"
 if [ -z "$TIER" ]; then
@@ -26,12 +28,13 @@ esac
 STAGE=~/swebench_stage
 VENVS=$STAGE/venvs
 
-# Tier knobs.
+# Tier knobs. ABORT is a WORST-CASE ceiling; because round 4 targets only the
+# ~20-30 oracle-winnable instances (not all 159), real spend lands well under it.
 if [ "$TIER" = A ]; then
-    BON=4; INSTANCE_CAP=5; ABORT=150
+    BON=4; INSTANCE_CAP=5; ABORT=120
     OPUS_OVERRIDE=""
 else
-    BON=4; INSTANCE_CAP=8; ABORT=600
+    BON=4; INSTANCE_CAP=8; ABORT=300
     # Force the coding worker (the orchestrator role that resolves the model for
     # coding-mode work AND seeds the best-of-N ladder) onto the Opus-class model.
     # MAVERICK_MODEL_OVERRIDE_<ROLE> is the supported per-role env override
@@ -56,19 +59,31 @@ echo "key OK (${ANTHROPIC_API_KEY:0:13}..., length ${#ANTHROPIC_API_KEY})"
 
 cd "$STAGE" || { echo "!!! no stage dir $STAGE (run round 3 first)"; exit 1; }
 
-echo "[1/4] building gradable_manifest.jsonl from prior attempts..."
+echo "[1/4] building gradable_manifest.jsonl from the ORACLE-WINNABLE set..."
 if [ ! -f round3_manifest.jsonl ]; then
     echo "!!! round3_manifest.jsonl missing in $STAGE -- round 3 must have staged first"
     exit 1
 fi
-# Instance ids that prior rounds actually attempted (PASS/FAIL/EMPTY tag lines).
-grep -hoE '\[(PASS|FAIL|EMPTY)\][[:space:]]+[A-Za-z0-9_.-]+__[A-Za-z0-9_.-]+-[0-9]+' \
-    slice3b.log slice3c.log 2>/dev/null \
-    | awk '{print $2}' | sort -u > attempted_ids.txt
+# The winnable set = instances the GOLD patch resolves under governance in this
+# environment (preflight_oracle.log [PASS] lines). Spending the LLM on anything
+# the gold patch itself can't resolve here (era-NOENV, gate-refused-even-on-gold)
+# is pure waste, so target only the oracle ceiling. Falls back to the prior
+# rounds' attempted ids if the oracle preflight wasn't run.
+if [ -f preflight_oracle.log ]; then
+    grep -E '\[PASS\][[:space:]]+[A-Za-z0-9_.-]+__[A-Za-z0-9_.-]+-[0-9]+[[:space:]]+resolved under governance$' \
+        preflight_oracle.log \
+        | grep -oE '[A-Za-z0-9_.-]+__[A-Za-z0-9_.-]+-[0-9]+' | sort -u > attempted_ids.txt
+    echo "    source: preflight_oracle.log (oracle-winnable ceiling)"
+else
+    grep -hoE '\[(PASS|FAIL|EMPTY)\][[:space:]]+[A-Za-z0-9_.-]+__[A-Za-z0-9_.-]+-[0-9]+' \
+        slice3b.log slice3c.log 2>/dev/null \
+        | awk '{print $2}' | sort -u > attempted_ids.txt
+    echo "    source: slice3b/3c attempted ids (oracle preflight not found)"
+fi
 n_ids=$(wc -l < attempted_ids.txt)
-echo "    attempted ids found: $n_ids"
+echo "    winnable instance ids: $n_ids"
 if [ "$n_ids" -eq 0 ]; then
-    echo "!!! no attempted ids parsed from slice3b.log/slice3c.log -- nothing to re-run"
+    echo "!!! no winnable ids parsed -- run pod_preflight.sh first"
     exit 1
 fi
 # Filter the round-3 manifest down to those ids.
@@ -117,7 +132,7 @@ MAVERICK_SWEBENCH_VENVS=$VENVS \
 nohup python3 ~/Lightwork/benchmarks/swebench_governed.py \
     --manifest gradable_manifest.jsonl --proposer llm \
     --keys ~/dgm-keys --ledger slice4_ledger.json --timeout 900 \
-    --abort-at-dollars $ABORT --max-consecutive-failures 6 \
+    --abort-at-dollars $ABORT \
     > slice4.log 2>&1 &
 
 echo "[4/4] ROUND 4 TIER $TIER RUNNING (expect several hours; survives closing the terminal)"

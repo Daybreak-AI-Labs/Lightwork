@@ -24,10 +24,12 @@ echo "[2/3] sanity: two sympy instances via oracle on the REAL staging..."
 cd "$STAGE" || exit 1
 export MAVERICK_SWEBENCH_VENVS=$VENVS MAVERICK_SUPPRESS_SANDBOX_WARNING=1
 for iid in sympy__sympy-24066 sympy__sympy-24213; do
-    grep -F "\"$iid\"" round3_manifest.jsonl > "/tmp/pf_$iid.jsonl" 2>/dev/null
-    if [ ! -s "/tmp/pf_$iid.jsonl" ]; then echo "    (skip $iid: not in manifest)"; continue; fi
+    # write the 1-line manifest INTO $STAGE so _load_manifest derives
+    # repo_path from $STAGE/repos (not /tmp/repos).
+    grep -F "\"$iid\"" round3_manifest.jsonl > "$STAGE/pf_$iid.jsonl" 2>/dev/null
+    if [ ! -s "$STAGE/pf_$iid.jsonl" ]; then echo "    (skip $iid: not in manifest)"; continue; fi
     python3 ~/Lightwork/benchmarks/swebench_governed.py \
-        --manifest "/tmp/pf_$iid.jsonl" --proposer oracle \
+        --manifest "$STAGE/pf_$iid.jsonl" --proposer oracle \
         --keys ~/dgm-keys --ledger "/tmp/pf_$iid.ledger" --timeout 900 2>/dev/null \
         | grep -E "resolved under governance:|\[(PASS|FAIL|NOENV)\]" | head -3
 done
