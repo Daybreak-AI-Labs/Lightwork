@@ -66,9 +66,14 @@ for d in pylint-dev__pylint-8898 $(ls -d pallets__flask-* 2>/dev/null | head -1)
         && echo "    $d deps OK" \
         || { echo "!!! DEPS FAILED for $d - last lines:"; tail -5 "/tmp/deps_${d}.log"; }
 done
+# Era pins, verified against the staged instances: flask-2.3-era conftest
+# uses a private pytest API removed in pytest 8 (_pytest.monkeypatch.notset)
+# and needs werkzeug<3; pylint-8898's suite passes under pytest 7 too.
+python3 -m pip install -q 'pytest<8' 'werkzeug>=2.3,<3.0' 'blinker>=1.6.2' >/dev/null 2>&1 \
+    && echo "    era pins OK (pytest<8, werkzeug<3)"
 python3 - <<'PY'
 import importlib.util
-need = ["tomlkit", "astroid", "platformdirs", "dill", "flask", "pytest"]
+need = ["tomlkit", "astroid", "platformdirs", "dill", "flask", "pytest", "werkzeug", "blinker"]
 missing = [m for m in need if importlib.util.find_spec(m) is None]
 print("    dep check:", "all OK" if not missing else f"MISSING: {missing}")
 PY

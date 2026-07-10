@@ -749,6 +749,12 @@ def main(argv: list[str] | None = None) -> int:
                 resolved += 1
                 consec_fail = 0
                 tag = "PASS"
+            elif not r.boundary_ok and r.reason.startswith("empty patch"):
+                # No diff produced is an honest zero, not an anti-cheat refusal;
+                # counting it as CHEAT inflated boundary-refused on the scoreboard.
+                unresolved += 1
+                consec_fail += 1
+                tag = "EMPTY"
             elif not r.boundary_ok:
                 boundary_refused += 1
                 consec_fail += 1
