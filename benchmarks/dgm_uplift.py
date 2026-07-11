@@ -163,9 +163,16 @@ def score_instance(inst, patch: str, workroot: Path, *, timeout: float = 600.0) 
 
 
 def run_solver(solver_dir: Path, instances: list, workroot: Path,
-               *, timeout: float = 600.0) -> dict[str, bool]:
-    """Resolved-map for one solver version over a set of instances."""
+               *, timeout: float = 600.0, score_fn=None) -> dict[str, bool]:
+    """Resolved-map for one solver version over a set of instances.
+
+    ``score_fn(inst, patch, workroot, *, timeout) -> bool`` is the grading hook;
+    default is the host-path :func:`score_instance`. Inject
+    :func:`container_score_fn` to grade every emitted patch inside the
+    instance's OFFICIAL per-instance container -- the honest mode for real
+    SWE-bench corpora, where one host cannot reproduce every instance's era."""
     mod = load_solver(solver_dir)
+    scorer = score_fn or score_instance
     out: dict[str, bool] = {}
     for i, inst in enumerate(instances):
         try:
@@ -173,9 +180,74 @@ def run_solver(solver_dir: Path, instances: list, workroot: Path,
         except Exception:
             log.warning("solver crashed on %s", inst.instance_id, exc_info=True)
             patch = ""
-        out[inst.instance_id] = score_instance(
+        out[inst.instance_id] = scorer(
             inst, patch, Path(workroot) / f"i{i}", timeout=timeout)
     return out
+
+
+def container_score_fn(run_in_image, *, namespace: str | None = None,
+                       timeout: float = 1800.0, verified: dict | None = None):
+    """A ``score_fn`` that grades each emitted patch inside the instance's
+    OFFICIAL SWE-bench container -- the structural fix for the era-mismatch bug
+    class in the DGM's uplift measurement. Without this, held-out "uplift" is
+    measured in whatever environment the host happens to have, and the number
+    is noise (the exact failure that burned money on the pod runs).
+
+    Per emitted patch: $0 host anti-cheat boundary (gold-overlap ARMED -- a
+    solver output is never gold by definition) -> baseline mis-seed guard in
+    the image (cached per instance: the baseline verdict is a property of the
+    instance, shared across both solver arms and both splits -- saves ~half the
+    container runs) -> candidate graded by the official grader.
+
+    ``verified`` maps instance_id -> raw SWE-bench Verified row; None lazy-loads
+    the dataset once on first use. An instance that is NOT in Verified raises --
+    a synthetic/staged corpus must keep the host ``score_instance`` path, and
+    silently scoring 0 would fake a flat baseline instead of failing the run.
+    The larger of the caller's per-arm ``timeout`` and this factory's floor is
+    used: official eval scripts pip-install inside the image, which can dwarf a
+    host-tuned test timeout."""
+    import swebench_container_grade as CG
+
+    ns = namespace or CG.DEFAULT_IMAGE_NAMESPACE
+    floor = float(timeout)
+    state = {"verified": verified}
+    baseline_fails: dict[str, bool] = {}   # instance_id -> targets fail w/o patch
+
+    def _raw(instance_id: str) -> dict:
+        if state["verified"] is None:
+            from swebench_container_run import load_verified
+            state["verified"] = load_verified()
+        raw = state["verified"].get(instance_id)
+        if raw is None:
+            raise RuntimeError(
+                f"{instance_id} is not in SWE-bench Verified -- no official "
+                "image exists for it. Use the host score_instance path for a "
+                "synthetic/staged corpus, or inject `verified`.")
+        return raw
+
+    def score(inst, patch: str, workroot, *, timeout: float = floor) -> bool:
+        raw = _raw(inst.instance_id)
+        if not (patch or "").strip():
+            return False
+        ok, reason = CG.host_boundary(raw, patch)          # $0, before any container
+        if not ok:
+            log.info("boundary refused %s: %s", inst.instance_id, reason)
+            return False
+        eff = max(float(timeout or 0.0), floor)
+        iid = inst.instance_id
+        if iid not in baseline_fails:
+            base = CG.grade_in_container(raw, "", run_in_image,
+                                         timeout=eff, namespace=ns)
+            baseline_fails[iid] = (not base.error) and bool(base.fail_to_pass_failed)
+            if not baseline_fails[iid]:
+                log.warning("mis-seeded/bad-image %s: FAIL_TO_PASS do not fail "
+                            "at baseline (error=%r)", iid, base.error)
+        if not baseline_fails[iid]:
+            return False
+        r = CG.grade_in_container(raw, patch, run_in_image, timeout=eff, namespace=ns)
+        return bool(r.resolved and r.candidate_apply_ok and not r.error)
+
+    return score
 
 
 def split_instances(instances: list, *, held_out_frac: float = 0.34) -> tuple[list, list]:
@@ -231,6 +303,7 @@ def govern_solver_change(
     timeout: float = 600.0,
     controller=None,
     change_id: str | None = None,
+    score_fn=None,
 ) -> UpliftResult:
     """Decide whether a solver self-modification may be promoted. Never applies
     the patch to the live solver -- the caller does that (with
@@ -273,8 +346,10 @@ def govern_solver_change(
     if not held_out:
         out.reason = "no held-out instances (need >= 2 instances)"
         return out
-    r_base = run_solver(base_dir, instances, workroot / "eval_base", timeout=timeout)
-    r_cand = run_solver(cand_dir, instances, workroot / "eval_cand", timeout=timeout)
+    r_base = run_solver(base_dir, instances, workroot / "eval_base",
+                        timeout=timeout, score_fn=score_fn)
+    r_cand = run_solver(cand_dir, instances, workroot / "eval_cand",
+                        timeout=timeout, score_fn=score_fn)
     out.resolved_map = {"baseline": r_base, "candidate": r_cand}
     out.baseline_held_in, out.candidate_held_in = _rate(r_base, held_in), _rate(r_cand, held_in)
     out.baseline_held_out, out.candidate_held_out = _rate(r_base, held_out), _rate(r_cand, held_out)
@@ -417,6 +492,7 @@ __all__ = [
     "UpliftResult",
     "load_solver",
     "score_instance",
+    "container_score_fn",
     "_instance_test_python",
     "run_solver",
     "split_instances",

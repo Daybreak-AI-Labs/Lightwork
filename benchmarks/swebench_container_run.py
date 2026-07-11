@@ -358,18 +358,30 @@ def main(argv: list[str] | None = None) -> int:
                     help="write the JSON run report here (default: next to --ledger)")
     ap.add_argument("--best-of-n", type=int, default=1,
                     help="agent best-of-N sampling (default 1; higher = more spend)")
+    ap.add_argument("--max-steps", type=int, default=75,
+                    help="per-instance agent turn cap (MAVERICK_MAX_STEPS). The "
+                         "benchmark floor is 25, which real django/sympy instances "
+                         "blow past mid-fix -> 'no-diff'; 75 is a realistic budget.")
+    ap.add_argument("--agent-wall-sec", type=float, default=None,
+                    help="per-instance agent wall-clock cap (MAVERICK_INSTANCE_WALL_SEC)")
     ap.add_argument("--abort-at-dollars", type=float, default=0.0,
                     help="hard stop once cumulative agent spend reaches this (0 = off)")
     args = ap.parse_args(argv)
     logging.basicConfig(level=logging.INFO, format="%(message)s")
 
     # Agent-proposer plumbing: forensics sidecars (cost read-back) land next to
-    # the ledger; best-of-N is a cost knob. Oracle ignores all of this.
+    # the ledger; best-of-N / max-steps / wall are cost+capability knobs. Set
+    # MAVERICK_MAX_STEPS directly (not setdefault) so it overrides _BENCH_ENV's
+    # 25-step floor -- the floor caps the agent mid-fix on real instances.
+    # Oracle ignores all of this.
     if args.proposer != "oracle":
         import os
         os.environ.setdefault("MAVERICK_SWEBENCH_FORENSICS",
                               str(args.ledger.resolve().parent / "forensics"))
         os.environ["MAVERICK_BEST_OF_N"] = str(max(1, args.best_of_n))
+        os.environ["MAVERICK_MAX_STEPS"] = str(max(1, args.max_steps))
+        if args.agent_wall_sec is not None:
+            os.environ["MAVERICK_INSTANCE_WALL_SEC"] = str(args.agent_wall_sec)
 
     if args.ids.strip():
         ids = [s.strip() for s in args.ids.split(",") if s.strip()]
