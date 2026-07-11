@@ -7,7 +7,7 @@
 #
 # Usage:  bash ~/Lightwork/benchmarks/pod_round4.sh A|B
 #   A  best-of-N=4, $5/task, default role models,  total abort $120
-#   B  best-of-N=4, $8/task, Opus-class worker,    total abort $300
+#   B  best-of-N=4, $8/task, Opus-class worker,    total abort $400
 #
 # Targets ONLY the oracle-winnable set (preflight_oracle.log [PASS] ids), so
 # real spend is ~n_winnable x per-instance, well under the abort ceiling. Run
@@ -75,6 +75,16 @@ fi
 if [ -s winnable_ids.txt ]; then
     cp winnable_ids.txt attempted_ids.txt
     echo "    source: winnable_ids.txt (parallel oracle sweep)"
+    # Parity guard: a winnable list computed BEFORE the venvs were (re)built was
+    # computed in a DIFFERENT environment and lies about what is winnable NOW
+    # (observed live: 12 "winnable" pytest instances came back NOENV/EMPTY in
+    # the paid run -- 3 of them at full best-of-N price). Warn loudly.
+    if [ -d "$VENVS" ] && [ winnable_ids.txt -ot "$VENVS" ]; then
+        echo "    !!! WARNING: winnable_ids.txt is OLDER than $VENVS"
+        echo "    !!! The winnable set predates the current venvs; instances it"
+        echo "    !!! calls winnable may be NOENV/EMPTY now. Re-run pod_preflight.sh"
+        echo "    !!! (the family breaker will stop any per-family bleed at \$0)."
+    fi
 elif [ -f preflight_oracle.log ]; then
     grep -E '\[PASS\][[:space:]]+[A-Za-z0-9_.-]+__[A-Za-z0-9_.-]+-[0-9]+[[:space:]]+resolved under governance$' \
         preflight_oracle.log \
@@ -154,6 +164,7 @@ nohup python3 ~/Lightwork/benchmarks/swebench_governed.py \
     --manifest gradable_manifest.jsonl --proposer llm \
     --keys ~/dgm-keys --ledger slice4_ledger.json --timeout 900 \
     --abort-at-dollars $ABORT --limit $LIMIT \
+    --max-consecutive-failures 8 --max-family-failures 3 \
     > slice4.log 2>&1 &
 
 echo "[4/4] ROUND 4 TIER $TIER RUNNING (expect several hours; survives closing the terminal)"

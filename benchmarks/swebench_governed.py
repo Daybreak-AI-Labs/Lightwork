@@ -734,6 +734,13 @@ def main(argv: list[str] | None = None) -> int:
     ap.add_argument("--max-consecutive-failures", type=int, default=0,
                     help="abort after this many non-resolved instances in a row (0 = off) "
                          "-- a circuit breaker so a broken env doesn't burn a whole budget")
+    ap.add_argument("--max-family-failures", type=int, default=3,
+                    help="skip a repo family's remaining instances after this many "
+                         "consecutive PAID non-resolves in it (0 = off). A family whose "
+                         "env is broken fails identically instance after instance "
+                         "(observed live: 3 pytest EMPTYs in a row at full best-of-N "
+                         "price); this stops the bleed at $0 without killing the run "
+                         "for healthy families. Ignored for the oracle proposer.")
     ap.add_argument("--agent-wall-sec", type=float, default=None,
                     help="per-instance agent wall-clock cap (sets MAVERICK_INSTANCE_WALL_SEC)")
     ap.add_argument("--agent-max-steps", type=int, default=None,
@@ -759,9 +766,10 @@ def main(argv: list[str] | None = None) -> int:
     print("=" * 78)
     print(f"  SWE-BENCH UNDER GOVERNANCE   proposer={args.proposer}  n={len(instances)}")
     print("=" * 78)
-    resolved = boundary_refused = unresolved = ungradable = 0
+    resolved = boundary_refused = unresolved = ungradable = skipped = 0
     spend = 0.0
     consec_fail = 0
+    family_fail: dict[str, int] = {}
     with tempfile.TemporaryDirectory(prefix="swebench-gov-") as td:
         for i, inst in enumerate(instances):
             if args.abort_at_dollars and spend >= args.abort_at_dollars:
@@ -772,6 +780,20 @@ def main(argv: list[str] | None = None) -> int:
                 print(f"  [ABORT] {consec_fail} consecutive non-resolved instances "
                       "(circuit breaker); stopping -- check the environment")
                 break
+            # Family circuit breaker (paid proposers only): once a repo family
+            # has burned max_family_failures paid attempts in a row with nothing
+            # banked, its environment is broken, not its instances hard -- every
+            # further attempt is the same money for the same nothing. Skip the
+            # rest of the family at $0. Never gates the oracle: preflight must
+            # sweep everything to compute an honest winnable set.
+            fam = _family(inst.instance_id)
+            if (args.proposer != "oracle" and args.max_family_failures
+                    and family_fail.get(fam, 0) >= args.max_family_failures):
+                skipped += 1
+                print(f"  [SKIP]  {inst.instance_id:40}  family breaker ($0 spent): "
+                      f"{family_fail[fam]} consecutive paid non-resolves in {fam}; "
+                      "fix its env (venv/deps) and re-run this family")
+                continue
             # Per-instance venv interpreter (SWE-bench era isolation): point
             # MAVERICK_TEST_PYTHON at this instance's venv for the whole body
             # (pre-gate + propose + govern) so both baseline grading and the
@@ -804,34 +826,34 @@ def main(argv: list[str] | None = None) -> int:
                     print(f"  [ERROR] {inst.instance_id:40}  proposer failed: {e}")
                     unresolved += 1
                     consec_fail += 1
+                    family_fail[fam] = family_fail.get(fam, 0) + 1
                     continue
                 # Attribute agent spend from the forensics sidecar (best-effort).
-                spend += _instance_spend(inst.instance_id)
+                cost = _instance_spend(inst.instance_id)
+                spend += cost
                 r = govern_candidate(inst, patch, keys_dir=args.keys, ledger=ledger,
                                      workroot=Path(td) / f"i{i}", timeout=args.timeout,
                                      check_gold_overlap=(args.proposer != "oracle"))
-                if r.resolved_under_governance:
+                tag = _verdict_tag(r)
+                if tag == "PASS":
                     resolved += 1
                     consec_fail = 0
-                    tag = "PASS"
-                elif not r.boundary_ok and r.reason.startswith("empty patch"):
-                    # No diff produced is an honest zero, not an anti-cheat refusal;
-                    # counting it as CHEAT inflated boundary-refused on the scoreboard.
-                    unresolved += 1
+                    family_fail[fam] = 0
+                elif tag == "NOENV":
+                    ungradable += 1  # ungradable-here does not count against the breakers
+                else:  # EMPTY / CHEAT / FAIL all count against both breakers
+                    if tag == "CHEAT":
+                        boundary_refused += 1
+                    else:
+                        unresolved += 1
                     consec_fail += 1
-                    tag = "EMPTY"
-                elif not r.boundary_ok:
-                    boundary_refused += 1
-                    consec_fail += 1
-                    tag = "CHEAT"
-                elif r.ungradable:
-                    ungradable += 1  # ungradable-here does not count against the breaker
-                    tag = "NOENV"
-                else:
-                    unresolved += 1
-                    consec_fail += 1
-                    tag = "FAIL"
-                print(f"  [{tag}]  {inst.instance_id:40}  {r.reason}")
+                    family_fail[fam] = family_fail.get(fam, 0) + 1
+                # Paid runs show what each verdict COST inline -- three EMPTYs at
+                # full best-of-N price should be visible in the log as money, not
+                # discovered later in the provider console. Oracle lines stay
+                # suffix-free (pod launchers anchor regexes on their line ends).
+                cost_note = f"   [spent ~${cost:.2f}]" if args.proposer != "oracle" else ""
+                print(f"  [{tag}]  {inst.instance_id:40}  {r.reason}{cost_note}")
             finally:
                 if vpy:
                     if prev_tp is None:
@@ -843,7 +865,8 @@ def main(argv: list[str] | None = None) -> int:
     print("=" * 78)
     print(f"  resolved under governance: {resolved}/{len(instances)} ({100*resolved/n:.1f}% of all)"
           f"   |  boundary-refused: {boundary_refused}  |  unresolved: {unresolved}"
-          f"   |  ungradable-here: {ungradable}")
+          f"   |  ungradable-here: {ungradable}"
+          + (f"  |  family-skipped: {skipped}" if skipped else ""))
     if gradable_total:
         print(f"  resolved of GRADABLE (excl. ungradable): {resolved}/{gradable_total} "
               f"({100*resolved/gradable_total:.1f}%)")
@@ -853,6 +876,27 @@ def main(argv: list[str] | None = None) -> int:
     print(f"  agent spend (attributed): ~${spend:.2f}   |   signed ledger: {args.ledger}")
     print("=" * 78)
     return 0
+
+
+def _verdict_tag(r: GovernedResult) -> str:
+    """Scoreboard tag for a governed verdict. EMPTY (no diff produced) is an
+    honest zero, not an anti-cheat refusal; counting it as CHEAT inflated
+    boundary-refused on the scoreboard."""
+    if r.resolved_under_governance:
+        return "PASS"
+    if not r.boundary_ok:
+        return "EMPTY" if r.reason.startswith("empty patch") else "CHEAT"
+    if r.ungradable:
+        return "NOENV"
+    return "FAIL"
+
+
+def _family(instance_id: str) -> str:
+    """Repo family of an instance id: ``pytest-dev__pytest-10051`` ->
+    ``pytest-dev__pytest`` (the id minus its trailing issue number). Instances
+    of one family share a repo, an interpreter era, and a venv -- so they break
+    together, which is what makes a per-family circuit breaker sound."""
+    return instance_id.rsplit("-", 1)[0]
 
 
 def _venv_python(inst: Instance) -> str:

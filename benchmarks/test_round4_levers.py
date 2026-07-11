@@ -179,6 +179,94 @@ def test_retry_on_empty_disabled_runs_once(tmp_path, monkeypatch):
 
 
 # --------------------------------------------------------------------------
+# Family circuit breaker: a repo family whose env is broken fails identically
+# instance after instance at full paid price (observed live: 3 consecutive
+# pytest EMPTYs at best-of-N Opus price). After --max-family-failures paid
+# non-resolves in one family, its remaining instances are skipped at $0.
+# --------------------------------------------------------------------------
+
+def _write_manifest(tmp_path, ids):
+    rows = [
+        json.dumps({
+            "instance_id": iid, "repo_path": str(tmp_path),
+            "fail_to_pass": ["tests/t.py::test_x"], "pass_to_pass": [],
+            "brief": "fix it",
+        })
+        for iid in ids
+    ]
+    m = tmp_path / "m.jsonl"
+    m.write_text("\n".join(rows) + "\n", encoding="utf-8")
+    return m
+
+
+def test_family_key_strips_trailing_issue_number():
+    gov = _load_governed()
+    assert gov._family("pytest-dev__pytest-10051") == "pytest-dev__pytest"
+    assert gov._family("psf__requests-2931") == "psf__requests"
+
+
+def test_family_breaker_skips_dead_family_but_not_healthy_ones(tmp_path, monkeypatch, capsys):
+    gov = _load_governed()
+    manifest = _write_manifest(tmp_path, [
+        "acme__widget-1", "acme__widget-2", "acme__widget-3",
+        "acme__widget-4", "other__pkg-1",
+    ])
+    # Paid-style proposer that always comes back empty (the dead-env signature).
+    attempted: list[str] = []
+
+    def fake_proposer(inst):
+        attempted.append(inst.instance_id)
+        return ""
+
+    monkeypatch.setitem(gov.PROPOSERS, "fake", fake_proposer)
+    # Free pre-gate says "gradable" -- the live failure mode: pre-gate passes,
+    # the agent still can't produce anything, money burns.
+    monkeypatch.setattr(gov, "_env_pregate", lambda inst, workroot, timeout: "")
+    # Spend suffix: a forensics sidecar for the first instance shows its cost
+    # inline on the scoreboard, so a paid EMPTY is visible as money in the log.
+    forensics = tmp_path / "forensics"
+    forensics.mkdir()
+    (forensics / "acme__widget-1.json").write_text(
+        json.dumps({"cost_dollars": 1.5}), encoding="utf-8")
+    monkeypatch.setenv("MAVERICK_SWEBENCH_FORENSICS", str(forensics))
+
+    rc = gov.main([
+        "--manifest", str(manifest), "--proposer", "fake",
+        "--keys", str(tmp_path), "--ledger", str(tmp_path / "ledger.json"),
+        "--max-family-failures", "2",
+    ])
+    out = capsys.readouterr().out
+    assert rc == 0
+    # Two paid attempts on the dead family, then the breaker; the healthy
+    # family is still attempted.
+    assert attempted == ["acme__widget-1", "acme__widget-2", "other__pkg-1"]
+    assert out.count("[SKIP]") == 2
+    assert "family breaker ($0 spent)" in out
+    assert "family-skipped: 2" in out
+    assert "[spent ~$1.50]" in out          # cost visible on the paid EMPTY line
+
+
+def test_family_breaker_never_gates_the_oracle(tmp_path, capsys):
+    gov = _load_governed()
+    manifest = _write_manifest(tmp_path, [
+        "acme__widget-1", "acme__widget-2", "acme__widget-3",
+    ])
+    # Oracle with no gold patch -> EMPTY on every instance; even with the
+    # tightest breaker the oracle must sweep ALL of them (preflight computes
+    # the winnable set; skipping would corrupt the denominator).
+    rc = gov.main([
+        "--manifest", str(manifest), "--proposer", "oracle",
+        "--keys", str(tmp_path), "--ledger", str(tmp_path / "ledger.json"),
+        "--max-family-failures", "1",
+    ])
+    out = capsys.readouterr().out
+    assert rc == 0
+    assert "[SKIP]" not in out
+    assert out.count("[EMPTY]") == 3
+    assert "[spent" not in out              # oracle lines stay suffix-free
+
+
+# --------------------------------------------------------------------------
 # Deliverable 5: governance-tax parser
 # --------------------------------------------------------------------------
 
