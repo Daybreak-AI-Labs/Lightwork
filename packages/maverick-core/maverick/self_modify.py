@@ -224,7 +224,11 @@ def _diff_paths(patch: str) -> list[str]:
     seen: set[str] = set()
 
     def _add(raw: str) -> None:
-        p = raw.strip()
+        # git's ---/+++ headers separate the path from an optional timestamp with
+        # a TAB; git apply ignores everything from the tab on. Mirror that, or a
+        # "--- a/config.py\t2024-..." header parses as a different path than the
+        # one actually patched and slips past the protected-path classifier.
+        p = raw.split("\t", 1)[0].strip()
         if p.startswith(("a/", "b/")):
             p = p[2:]
         if not p or p == "/dev/null":

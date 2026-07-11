@@ -740,9 +740,14 @@ def _extract_diff_paths(patch: str) -> list[str]:
             if end > len('--- "a/'):
                 paths.add(line[len('--- "a/'):end].strip())
         elif line.startswith("+++ b/"):
-            paths.add(line[len("+++ b/"):].strip())
+            # git's ---/+++ headers separate the path from an optional timestamp
+            # with a TAB; git apply ignores everything from the tab on. Split on
+            # it, or "+++ b/tests/test_x.py\t2024-..." parses as a path that
+            # evades the anchored forbidden-path / exact test-id checks while the
+            # patch still edits the real test file.
+            paths.add(line[len("+++ b/"):].split("\t", 1)[0].strip())
         elif line.startswith("--- a/"):
-            paths.add(line[len("--- a/"):].strip())
+            paths.add(line[len("--- a/"):].split("\t", 1)[0].strip())
     paths.discard("/dev/null")
     return sorted(paths)
 
