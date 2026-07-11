@@ -1963,6 +1963,21 @@ async def evaluate_candidate(
         cand.score = 0.5
         return cand
 
+    # Anti-cheat boundary (graded mode only): refuse a candidate that edits the
+    # graded test files / conftest / lockfiles. Without this, a best-of-N attempt
+    # that rewrites the FAIL_TO_PASS tests via tools makes them pass, scores
+    # all_pass, and is SELECTED as the winner over honest candidates -- the exact
+    # gaming vector the governed harness refuses downstream, applied here so the
+    # selection itself is honest. Marking apply_check_passed=False + error drops
+    # it from select_best_candidate's usable pool.
+    guard = defensive_validate(patch, fail_to_pass=list(cfg.fail_to_pass),
+                               pass_to_pass=list(cfg.pass_to_pass))
+    if not guard.ok:
+        cand.apply_check_passed = False
+        cand.error = ("anti-cheat boundary refused: edits grading-sensitive paths "
+                      + ", ".join(guard.blocked_paths))
+        return cand
+
     import shutil as _shutil
     import subprocess as _subprocess
     import tempfile as _tempfile

@@ -545,6 +545,45 @@ class TestTestRunResult:
         assert "10/10" in s
 
 
+class TestBestOfNAntiCheat:
+    """A best-of-N candidate that edits the graded tests must be refused during
+    evaluation, so it can't be selected as the winner over honest candidates."""
+
+    def _git_repo(self, tmp_path):
+        import subprocess
+        repo = tmp_path / "repo"
+        (repo / "tests").mkdir(parents=True)
+        (repo / "tests" / "test_x.py").write_text(
+            "def test_a():\n    assert 1 == 2\n", encoding="utf-8")
+        env = ["-c", "user.email=t@t", "-c", "user.name=t"]
+        subprocess.run(["git", "-C", str(repo), "init", "-q"], check=True)
+        subprocess.run(["git", "-C", str(repo), "add", "-A"], check=True)
+        subprocess.run(["git", "-C", str(repo), *env, "commit", "-qm", "init"], check=True)
+        return repo
+
+    def test_test_file_edit_candidate_is_refused(self, tmp_path):
+        import asyncio
+
+        from maverick.coding_mode import CodingModeConfig, evaluate_candidate
+
+        repo = self._git_repo(tmp_path)
+        # Cheat: rewrite the graded test so the failing assertion passes.
+        cheat = (
+            "diff --git a/tests/test_x.py b/tests/test_x.py\n"
+            "--- a/tests/test_x.py\n+++ b/tests/test_x.py\n"
+            "@@ -1,2 +1,2 @@\n def test_a():\n-    assert 1 == 2\n+    assert 1 == 1\n"
+        )
+
+        class _SB:
+            workdir = None
+        _SB.workdir = str(repo)
+        cfg = CodingModeConfig(enabled=True, fail_to_pass=["tests/test_x.py::test_a"])
+        cand = asyncio.run(evaluate_candidate(cheat, repo, cfg, _SB(), 0))
+        assert cand.apply_check_passed is False
+        assert "boundary refused" in cand.error
+        assert cand.score == 0.0
+
+
 class TestRepoMapTool:
     def test_emits_top_level_listing(self, tmp_path):
         from maverick.tools.repo_map import repo_map
