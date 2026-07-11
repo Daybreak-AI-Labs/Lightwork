@@ -115,27 +115,41 @@ def score_instance(inst, patch: str, workroot: Path, *, timeout: float = 600.0) 
     if vpy:
         os.environ["MAVERICK_TEST_PYTHON"] = vpy
     try:
-        _default_materialize(inst.repo_path, work / "tree")
         # SWE-bench grading semantics: the grader's test_patch goes on first
         # (the graded tests usually don't exist at base_commit).
-        if (getattr(inst, "test_patch", "") or "").strip():
-            tp = git_apply(inst.test_patch, work / "tree")
-            if not tp.ok:
-                return False
-        sb = resolve_eval_sandbox(None, work / "tree")
-        # Baseline honesty guard: the graded FAIL_TO_PASS must FAIL before the
-        # candidate is applied. If they already pass at baseline, the instance is
-        # mis-seeded (no bug to fix) and ANY applying patch would score all_pass
-        # -- inflating the valuation-facing DGM resolved-rate. Not a resolve.
-        base = run_failing_tests(work / "tree", inst.fail_to_pass, [],
-                                 sb, timeout=timeout, language=inst.language)
+        def _prep(dst: Path):
+            _default_materialize(inst.repo_path, dst)
+            if (getattr(inst, "test_patch", "") or "").strip():
+                tp = git_apply(inst.test_patch, dst)
+                if not getattr(tp, "ok", False):
+                    return None
+            return resolve_eval_sandbox(None, dst)
+
+        # Baseline honesty guard on its OWN isolated copy: the graded FAIL_TO_PASS
+        # must FAIL before any candidate is applied. If they already pass at
+        # baseline the instance is mis-seeded (no bug to fix) and ANY applying
+        # patch would score all_pass -- inflating the DGM resolved-rate. The
+        # baseline runs on a SEPARATE tree from the candidate so its compiled
+        # bytecode (__pycache__ of the unpatched source) can't shadow the patched
+        # code when the candidate is graded.
+        base_tree = work / "base"
+        sb_base = _prep(base_tree)
+        if sb_base is None:
+            return False
+        base = run_failing_tests(base_tree, inst.fail_to_pass, [],
+                                 sb_base, timeout=timeout, language=inst.language)
         if base.all_pass:
             return False
-        applied = git_apply(patch, work / "tree")
+        # Candidate on a fresh copy.
+        cand_tree = work / "cand"
+        sb_cand = _prep(cand_tree)
+        if sb_cand is None:
+            return False
+        applied = git_apply(patch, cand_tree)
         if not applied.ok:
             return False
-        res = run_failing_tests(work / "tree", inst.fail_to_pass, inst.pass_to_pass,
-                                sb, timeout=timeout, language=inst.language)
+        res = run_failing_tests(cand_tree, inst.fail_to_pass, inst.pass_to_pass,
+                                sb_cand, timeout=timeout, language=inst.language)
         return bool(res.all_pass)
     except Exception:
         log.warning("score_instance failed for %s", inst.instance_id, exc_info=True)
