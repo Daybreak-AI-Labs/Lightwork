@@ -44,8 +44,12 @@ def solve(instance) -> str:
     prev = {k: os.environ.get(k) for k in
             ("MAVERICK_MAX_STEPS", "MAVERICK_BEST_OF_N", "MAVERICK_RETRY_ON_EMPTY")}
     try:
-        os.environ["MAVERICK_MAX_STEPS"] = str(_clamp(MAX_STEPS, 1, 200))
-        os.environ["MAVERICK_BEST_OF_N"] = str(_clamp(BEST_OF_N, 1, 5))
+        # Cost guardrails: per-attempt $ is already bounded by the agent's
+        # MAVERICK_INSTANCE_HARD_CAP, so steps can't run cost away; BEST_OF_N is
+        # the real multiplier, so cap it at 2 -- the proposer may tune the budget
+        # up, but not into a runaway.
+        os.environ["MAVERICK_MAX_STEPS"] = str(_clamp(MAX_STEPS, 1, 120))
+        os.environ["MAVERICK_BEST_OF_N"] = str(_clamp(BEST_OF_N, 1, 2))
         os.environ["MAVERICK_RETRY_ON_EMPTY"] = "1" if RETRY_ON_EMPTY else "0"
         # benchmarks/ is already on sys.path in the DGM process (dgm_uplift
         # inserts it); the agent machinery lives there, OUTSIDE this editable
