@@ -43,6 +43,7 @@ from __future__ import annotations
 
 import importlib.util
 import logging
+import os
 import pathlib
 import sys
 import uuid
@@ -454,38 +455,281 @@ def rollback_solver(solver_dir: Path, archive_snapshot: Path) -> None:
 
 # --- the LLM proposer (authors solver patches; needs a provider key) -----------
 
-def llm_solver_proposer(solver_dir: Path, feedback: str, *, model: str | None = None,
-                        max_tokens: int = 4096) -> str:
-    """Ask the coding-role model for a unified diff improving ``solver.py``,
-    given evaluation feedback (which instances failed and why). Returns the raw
-    diff text (the governed gate decides everything else). Fail-loud keyless."""
-    import os
-
-    if not (os.environ.get("ANTHROPIC_API_KEY") or os.environ.get("MAVERICK_PROVIDER_READY")):
-        raise RuntimeError(
-            "llm_solver_proposer needs a provider key (ANTHROPIC_API_KEY, or "
-            "MAVERICK_PROVIDER_READY=1 with a configured provider).")
-    from maverick.llm import LLM
-
-    src = (Path(solver_dir) / "solver.py").read_text(encoding="utf-8")
-    system = (
-        "You improve a bug-fixing solver. You are given the solver's current "
-        "source (solver.py: solve(instance) -> unified diff or '') and feedback "
-        "about instances it failed to resolve. Reply with ONLY a unified diff "
-        "against a/solver.py that makes the solver resolve more instances. "
-        "Never touch test files; never special-case instance ids -- generalise.")
-    user = f"Current solver.py:\n```python\n{src}\n```\n\nEvaluation feedback:\n{feedback}\n"
-    resp = LLM().complete(system, [{"role": "user", "content": user}],
-                          max_tokens=max_tokens, model=model)
-    text = (resp.text or "").strip()
-    # Tolerate a fenced reply; the boundary/apply gates judge the rest.
+def _extract_fenced_diff(text: str) -> str:
+    """Pull a unified diff out of a possibly fenced model reply."""
+    text = (text or "").strip()
     if "```" in text:
-        parts = text.split("```")
-        for p in parts:
+        for p in text.split("```"):
             body = p.removeprefix("diff").removeprefix("patch").strip("\n")
             if body.lstrip().startswith(("diff --git", "--- ")):
                 return body
     return text
+
+
+def _extract_fenced_code(text: str) -> str:
+    """Pull the FULL file body out of a fenced model reply, for the full-file
+    proposer (the model returns the complete new solver.py).
+
+    Cheap models paraphrase the file and SPLIT it across several ```python
+    blocks with prose in between (observed live: the top of the file in one
+    block, ``solve()`` in a later block, so 'largest block' grabs a half with
+    no ``solve``). So: if one block already defines ``solve``, use the largest
+    such block; otherwise CONCATENATE all code blocks in order to reassemble a
+    split file. No fences at all -> the whole text."""
+    text = (text or "").strip()
+    if "```" not in text:
+        return text
+    blocks = []
+    parts = text.split("```")
+    for i in range(1, len(parts), 2):          # fenced blocks are odd-indexed
+        b = parts[i]
+        nl = b.find("\n")
+        if nl != -1 and b[:nl].strip().lower() in ("python", "py", ""):
+            b = b[nl + 1:]
+        b = b.strip("\n")
+        if b.strip():
+            blocks.append(b)
+    if not blocks:
+        return text
+
+    def _is_full_module(b: str) -> bool:
+        # a self-contained solver.py: defines solve AND carries module setup
+        # (an import or a leading docstring) -- not just the solve() fragment.
+        return "def solve" in b and (
+            "import " in b or b.lstrip().startswith(('"""', "'''", "from ")))
+
+    full = [b for b in blocks if _is_full_module(b)]
+    if full:
+        return max(full, key=len)               # one clean complete file
+    return "\n".join(blocks)                     # reassemble a split file
+
+
+def _parse_search_replace(reply: str) -> tuple[list[tuple[str, str]], str]:
+    """Parse Aider-style SEARCH/REPLACE edit blocks out of a model reply:
+
+        <<<<<<< SEARCH
+        <exact existing lines>
+        =======
+        <replacement lines>
+        >>>>>>> REPLACE
+
+    Returns ``(edits, error)`` where edits is a list of ``(search, replace)``.
+    This is the robust proposer interface: the model quotes only the small
+    region it changes -- no line-number arithmetic (diffs), no reproducing the
+    whole file (which cheap and capable models alike split mid-statement across
+    code fences). ``("", ...)`` -> no well-formed block found."""
+    import re
+    blocks = re.findall(
+        r"<{5,}\s*SEARCH\s*\n(.*?)\n={5,}\s*\n(.*?)\n>{5,}\s*REPLACE",
+        reply or "", flags=re.DOTALL)
+    edits = [(s, r) for s, r in blocks]
+    if not edits:
+        return [], "no SEARCH/REPLACE blocks found in reply"
+    return edits, ""
+
+
+def _apply_search_replace(src_text: str, edits: list[tuple[str, str]]) -> tuple[str, str]:
+    """Apply SEARCH/REPLACE edits to ``src_text`` by EXACT string match. Each
+    SEARCH must occur exactly once (0 -> not found; >1 -> ambiguous), so the
+    edit is deterministic and unambiguous. Returns ``(new_text, error)``."""
+    text = src_text
+    for i, (search, replace) in enumerate(edits):
+        if not search.strip():
+            return "", f"edit {i}: empty SEARCH"
+        n = text.count(search)
+        if n == 0:
+            return "", (f"edit {i}: SEARCH not found (must be quoted EXACTLY):\n"
+                        f"{search[:200]}")
+        if n > 1:
+            return "", (f"edit {i}: SEARCH matches {n} places (add context to "
+                        f"make it unique):\n{search[:200]}")
+        text = text.replace(search, replace, 1)
+    if text == src_text:
+        return "", "edits changed nothing"
+    return text, ""
+
+
+def _full_file_to_patch(solver_dir: Path, new_source: str) -> tuple[str, str]:
+    """Diff a COMPLETE new ``solver.py`` against the current one via git -- the
+    robust proposer path. LLMs write correct Python far more reliably than
+    correct unified-diff arithmetic (two live cycles died on hunk headers /
+    non-matching context); having the model return the whole file and letting
+    ``git diff`` author the patch removes that entire failure class.
+
+    Returns ``(patch, error)``: ``("", why)`` if the reply isn't a plausible
+    solver (must define ``solve``) or changes nothing."""
+    import shutil
+    import subprocess
+    import tempfile
+
+    body = (new_source or "").strip()
+    if not body:
+        return "", "empty reply (no file body)"
+    if "def solve" not in body:
+        return "", "reply does not define solve(); not a solver file"
+    env = {"GIT_CONFIG_GLOBAL": os.devnull, "GIT_CONFIG_NOSYSTEM": "1",
+           "PATH": os.environ.get("PATH", "")}
+
+    def _git(*args, cwd):
+        return subprocess.run(["git", *args], cwd=cwd, capture_output=True,
+                              text=True, timeout=60, env=env)
+
+    td = tempfile.mkdtemp(prefix="dgm-full-")
+    try:
+        scratch = Path(td) / "s"
+        shutil.copytree(solver_dir, scratch,
+                        ignore=shutil.ignore_patterns(".git", "__pycache__"))
+        _git("init", "-q", ".", cwd=scratch)
+        _git("add", "-A", cwd=scratch)
+        _git("-c", "user.email=dgm@local", "-c", "user.name=dgm",
+             "commit", "-qm", "base", cwd=scratch)
+        (scratch / "solver.py").write_text(
+            body if body.endswith("\n") else body + "\n", encoding="utf-8")
+        canon = _git("diff", cwd=scratch).stdout
+        if not canon.strip():
+            return "", "new file is identical to the current solver"
+        return canon, ""
+    except Exception as e:
+        return "", f"full-file diff error: {type(e).__name__}: {e}"
+    finally:
+        shutil.rmtree(td, ignore_errors=True)
+
+
+def _canonicalize_solver_patch(solver_dir: Path, diff_text: str) -> tuple[str, str]:
+    """Turn a model-authored diff into a CANONICAL, guaranteed-applying one.
+
+    LLMs miscount hunk headers ("corrupt patch at line N" -- the exact failure
+    that killed the first live cycle, and the same class the agent path solved
+    with worktree diffs over prose diffs). Rather than trust the model's line
+    arithmetic: apply the diff to a scratch git copy of the solver, letting
+    ``--recount`` re-derive the counts from the hunk bodies, then re-emit
+    ``git diff`` -- git's own arithmetic, canonical by construction.
+
+    Returns ``(canonical_diff, error)``: ``("", why)`` when the diff is
+    unusable even recounted (the retry prompt gets ``why``); a diff that
+    changes nothing also returns ``("", ...)`` so a no-op can't reach the gate.
+    """
+    import shutil
+    import subprocess
+    import tempfile
+
+    if not (diff_text or "").strip():
+        return "", "empty reply (no diff found)"
+    env = {"GIT_CONFIG_GLOBAL": os.devnull, "GIT_CONFIG_NOSYSTEM": "1",
+           "PATH": os.environ.get("PATH", "")}
+
+    def _git(*args, cwd):
+        return subprocess.run(["git", *args], cwd=cwd, capture_output=True,
+                              text=True, timeout=60, env=env)
+
+    td = tempfile.mkdtemp(prefix="dgm-canon-")
+    try:
+        scratch = Path(td) / "s"
+        shutil.copytree(solver_dir, scratch,
+                        ignore=shutil.ignore_patterns(".git", "__pycache__"))
+        _git("init", "-q", ".", cwd=scratch)
+        _git("add", "-A", cwd=scratch)
+        _git("-c", "user.email=dgm@local", "-c", "user.name=dgm",
+             "commit", "-qm", "base", cwd=scratch)
+        patch_file = Path(td) / "p.diff"
+        patch_file.write_text(diff_text if diff_text.endswith("\n")
+                              else diff_text + "\n", encoding="utf-8")
+        last_err = ""
+        for extra in ((), ("--recount",), ("--recount", "--whitespace=fix")):
+            r = _git("apply", *extra, str(patch_file), cwd=scratch)
+            if r.returncode == 0:
+                canon = _git("diff", cwd=scratch).stdout
+                if not canon.strip():
+                    return "", "diff applied but changed nothing"
+                return canon, ""
+            last_err = (r.stderr or r.stdout or "").strip()[-500:]
+        return "", f"git apply failed even with --recount: {last_err}"
+    except Exception as e:  # scratch trouble is a repair failure, not a crash
+        return "", f"canonicalize error: {type(e).__name__}: {e}"
+    finally:
+        shutil.rmtree(td, ignore_errors=True)
+
+
+def llm_solver_proposer(solver_dir: Path, feedback: str, *, model: str | None = None,
+                        max_tokens: int = 8000) -> str:
+    """Author a solver improvement via the coding-role model and return a
+    git-canonical, guaranteed-applying patch.
+
+    Strategy: ask for the COMPLETE rewritten ``solver.py`` (not a diff) and let
+    ``git diff`` author the patch. LLMs write correct Python far more reliably
+    than correct unified-diff arithmetic -- two live cycles died on hunk headers
+    / non-matching context before this. One pointed retry if the reply isn't a
+    usable solver. As a last resort, if the reply happened to be a diff we
+    canonicalize that instead, so a diff-shaped answer still has a chance.
+    Returns "" when nothing usable was produced, so the gate refuses honestly
+    (never promotes garbage). Fail-loud keyless."""
+    if not (os.environ.get("ANTHROPIC_API_KEY") or os.environ.get("MAVERICK_PROVIDER_READY")):
+        raise RuntimeError(
+            "llm_solver_proposer needs a provider key (ANTHROPIC_API_KEY, or "
+            "MAVERICK_PROVIDER_READY=1 with a configured provider).")
+    from maverick.llm import LLM, ROLE_MODELS
+
+    # The proposer is ONE call per cycle -- author the solver improvement with a
+    # capable CODER-role model (config-overridable; never a hard-coded id, kernel
+    # rule 2). A weak default returned the file split across blocks / with broken
+    # string literals, defeating every reassembly heuristic; a capable model
+    # returns one clean, complete, valid file.
+    if model is None:
+        from maverick.config import get_role_model
+        model = get_role_model("coder") or ROLE_MODELS.get("coder")
+
+    src = (Path(solver_dir) / "solver.py").read_text(encoding="utf-8")
+    system = (
+        "You improve a bug-fixing solver (solver.py, whose solve(instance) -> a "
+        "unified diff or ''). Given its source and feedback on instances it "
+        "failed, propose edits as one or more SEARCH/REPLACE blocks in EXACTLY "
+        "this format:\n"
+        "<<<<<<< SEARCH\n<lines copied verbatim from the file>\n=======\n"
+        "<the replacement lines>\n>>>>>>> REPLACE\n"
+        "Copy the SEARCH lines EXACTLY (whitespace included) and include enough "
+        "context that each SEARCH occurs exactly once. Keep solve(instance) -> "
+        "str and never raise. Never edit tests; never special-case instance "
+        "ids -- generalise. Output only SEARCH/REPLACE blocks, no prose.")
+    base_user = (f"Current solver.py:\n```python\n{src}\n```\n\n"
+                 f"Evaluation feedback:\n{feedback}\n\n"
+                 "Reply with SEARCH/REPLACE blocks that improve the solver.")
+    llm = LLM()
+
+    def _ask(user: str) -> tuple[str, str]:
+        text = (llm.complete(system, [{"role": "user", "content": user}],
+                             max_tokens=max_tokens, model=model).text or "")
+        # Primary: SEARCH/REPLACE edits -> apply by exact match -> git diff.
+        edits, why = _parse_search_replace(text)
+        if edits:
+            new_src, aerr = _apply_search_replace(src, edits)
+            if new_src:
+                patch, gerr = _full_file_to_patch(solver_dir, new_src)
+                if patch:
+                    return patch, ""
+                return "", gerr
+            why = aerr
+        # Fallbacks: a full file, or a hand-authored diff (older reply shapes).
+        p2, w2 = _full_file_to_patch(solver_dir, _extract_fenced_code(text))
+        if p2:
+            return p2, ""
+        dtext = _extract_fenced_diff(text)
+        if dtext.lstrip().startswith(("diff --git", "--- ")):
+            dp, dw = _canonicalize_solver_patch(solver_dir, dtext)
+            if dp:
+                return dp, ""
+        return "", why
+
+    patch, why = _ask(base_user)
+    if patch:
+        return patch
+    log.warning("proposer reply unusable (%s); retrying once", why)
+    patch2, why2 = _ask(base_user + f"\n\nYour previous reply was unusable "
+                        f"({why}). Reply with ONLY SEARCH/REPLACE blocks; copy "
+                        "each SEARCH region byte-for-byte from the file above.")
+    if patch2:
+        return patch2
+    log.warning("proposer retry also unusable (%s)", why2)
+    return ""   # gate refuses on empty patch -> honest 'no usable improvement'
 
 
 __all__ = [
