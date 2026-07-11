@@ -49,7 +49,8 @@ log = logging.getLogger(__name__)
 
 # Docker Hub namespace the official pre-built eval images are published under.
 # make_test_spec's ``instance_image_key`` is the bare repo:tag; the published
-# image is docker.io/<namespace>/<key>. Overridable for a private mirror.
+# image is docker.io/<namespace>/<key> with ``__`` -> ``_1776_`` (Docker Hub
+# forbids ``__`` in repo names). Overridable for a private mirror.
 DEFAULT_IMAGE_NAMESPACE = "swebench"
 
 
@@ -92,9 +93,16 @@ def make_spec(instance: dict):
 
 def instance_image(spec, namespace: str = DEFAULT_IMAGE_NAMESPACE) -> str:
     """Fully-qualified official image for an instance, e.g.
-    ``swebench/sweb.eval.x86_64.astropy__astropy-12907:latest``."""
+    ``swebench/sweb.eval.x86_64.astropy_1776_astropy-12907:latest``.
+
+    Docker Hub repository names forbid ``__``; the official harness therefore
+    substitutes ``_1776_`` for ``__`` whenever a namespace is prefixed (see
+    ``swebench.harness.test_spec.TestSpec.instance_image_key``). ``make_spec``
+    builds a namespace-less spec, so ``spec.instance_image_key`` is the bare
+    ``repo:tag`` and we apply the identical substitution here -- otherwise the
+    pull 404s (``astropy__astropy`` is not a valid Docker Hub repo)."""
     key = spec.instance_image_key
-    return f"{namespace}/{key}" if namespace else key
+    return f"{namespace}/{key}".replace("__", "_1776_") if namespace else key
 
 
 def build_grade_script(spec, candidate_patch: str) -> str:
@@ -102,9 +110,16 @@ def build_grade_script(spec, candidate_patch: str) -> str:
     to ``/testbed`` (base64-piped so no diff byte can break the heredoc), then
     run the OFFICIAL ``eval_script`` (which applies the grader's test_patch and
     runs the graded tests between the Start/End markers). An empty candidate is
-    the BASELINE grade (eval_script only)."""
+    the BASELINE grade (eval_script only).
+
+    ``exec 2>&1`` merges stderr into stdout up front: the eval_script runs under
+    ``set -x`` and emits the Start/End markers as no-op ``: 'marker'`` commands,
+    so the markers surface only on the trace stream (stderr) while pytest's
+    PASSED/FAILED lines go to stdout. The official harness captures a single
+    combined log; we reproduce that ordered stream so the grader sees the
+    markers wrapping the results (separate streams -> zero tests parsed)."""
     patch = candidate_patch or ""
-    lines = ["#!/bin/bash", "set -uo pipefail"]
+    lines = ["#!/bin/bash", "exec 2>&1", "set -uo pipefail"]
     if patch.strip():
         b64 = base64.b64encode(patch.encode("utf-8")).decode("ascii")
         lines += [

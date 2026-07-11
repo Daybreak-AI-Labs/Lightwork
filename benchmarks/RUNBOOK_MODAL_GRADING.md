@@ -45,12 +45,12 @@ Expected (gold run):
 
 ```
 instance: astropy__astropy-12907
-image:    swebench/sweb.eval.x86_64.astropy__astropy-12907:latest
+image:    swebench/sweb.eval.x86_64.astropy_1776_astropy-12907:latest
 grading:  GOLD patch (must resolve) via modal
 ====================================================================
   candidate applied: True
   FAIL_TO_PASS: 2 pass / 0 fail
-  PASS_TO_PASS: <N> pass / 0 fail
+  PASS_TO_PASS: 13 pass / 0 fail
   RESOLVED (official): True
 ====================================================================
 VALIDATION: PASS -- official image + grading work end to end

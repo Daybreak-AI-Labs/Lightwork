@@ -55,7 +55,9 @@ def _fake_runner(log_text: str, *, exit_code: int = 1):
 
 def test_official_image_name():
     spec = CG.make_spec(_instance())
-    assert CG.instance_image(spec) == "swebench/sweb.eval.x86_64.astropy__astropy-12907:latest"
+    # Docker Hub forbids '__' in repo names -> official '_1776_' substitution when
+    # a namespace is prefixed. The bare (namespace-less) key keeps the '__'.
+    assert CG.instance_image(spec) == "swebench/sweb.eval.x86_64.astropy_1776_astropy-12907:latest"
     assert CG.instance_image(spec, namespace="") == "sweb.eval.x86_64.astropy__astropy-12907:latest"
 
 
