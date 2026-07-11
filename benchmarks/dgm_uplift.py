@@ -467,23 +467,86 @@ def _extract_fenced_diff(text: str) -> str:
 
 
 def _extract_fenced_code(text: str) -> str:
-    """Pull the FULL file body out of a fenced model reply. Prefers the largest
-    ```python block; falls back to the whole (defenced) text. Used for the
-    full-file proposer, where the model returns the complete new solver.py
-    rather than a hand-authored diff."""
+    """Pull the FULL file body out of a fenced model reply, for the full-file
+    proposer (the model returns the complete new solver.py).
+
+    Cheap models paraphrase the file and SPLIT it across several ```python
+    blocks with prose in between (observed live: the top of the file in one
+    block, ``solve()`` in a later block, so 'largest block' grabs a half with
+    no ``solve``). So: if one block already defines ``solve``, use the largest
+    such block; otherwise CONCATENATE all code blocks in order to reassemble a
+    split file. No fences at all -> the whole text."""
     text = (text or "").strip()
     if "```" not in text:
         return text
     blocks = []
     parts = text.split("```")
-    # fenced blocks are the odd-indexed parts; strip a leading language tag
-    for i in range(1, len(parts), 2):
+    for i in range(1, len(parts), 2):          # fenced blocks are odd-indexed
         b = parts[i]
         nl = b.find("\n")
         if nl != -1 and b[:nl].strip().lower() in ("python", "py", ""):
             b = b[nl + 1:]
-        blocks.append(b.strip("\n"))
-    return max(blocks, key=len) if blocks else text
+        b = b.strip("\n")
+        if b.strip():
+            blocks.append(b)
+    if not blocks:
+        return text
+
+    def _is_full_module(b: str) -> bool:
+        # a self-contained solver.py: defines solve AND carries module setup
+        # (an import or a leading docstring) -- not just the solve() fragment.
+        return "def solve" in b and (
+            "import " in b or b.lstrip().startswith(('"""', "'''", "from ")))
+
+    full = [b for b in blocks if _is_full_module(b)]
+    if full:
+        return max(full, key=len)               # one clean complete file
+    return "\n".join(blocks)                     # reassemble a split file
+
+
+def _parse_search_replace(reply: str) -> tuple[list[tuple[str, str]], str]:
+    """Parse Aider-style SEARCH/REPLACE edit blocks out of a model reply:
+
+        <<<<<<< SEARCH
+        <exact existing lines>
+        =======
+        <replacement lines>
+        >>>>>>> REPLACE
+
+    Returns ``(edits, error)`` where edits is a list of ``(search, replace)``.
+    This is the robust proposer interface: the model quotes only the small
+    region it changes -- no line-number arithmetic (diffs), no reproducing the
+    whole file (which cheap and capable models alike split mid-statement across
+    code fences). ``("", ...)`` -> no well-formed block found."""
+    import re
+    blocks = re.findall(
+        r"<{5,}\s*SEARCH\s*\n(.*?)\n={5,}\s*\n(.*?)\n>{5,}\s*REPLACE",
+        reply or "", flags=re.DOTALL)
+    edits = [(s, r) for s, r in blocks]
+    if not edits:
+        return [], "no SEARCH/REPLACE blocks found in reply"
+    return edits, ""
+
+
+def _apply_search_replace(src_text: str, edits: list[tuple[str, str]]) -> tuple[str, str]:
+    """Apply SEARCH/REPLACE edits to ``src_text`` by EXACT string match. Each
+    SEARCH must occur exactly once (0 -> not found; >1 -> ambiguous), so the
+    edit is deterministic and unambiguous. Returns ``(new_text, error)``."""
+    text = src_text
+    for i, (search, replace) in enumerate(edits):
+        if not search.strip():
+            return "", f"edit {i}: empty SEARCH"
+        n = text.count(search)
+        if n == 0:
+            return "", (f"edit {i}: SEARCH not found (must be quoted EXACTLY):\n"
+                        f"{search[:200]}")
+        if n > 1:
+            return "", (f"edit {i}: SEARCH matches {n} places (add context to "
+                        f"make it unique):\n{search[:200]}")
+        text = text.replace(search, replace, 1)
+    if text == src_text:
+        return "", "edits changed nothing"
+    return text, ""
 
 
 def _full_file_to_patch(solver_dir: Path, new_source: str) -> tuple[str, str]:
@@ -604,36 +667,56 @@ def llm_solver_proposer(solver_dir: Path, feedback: str, *, model: str | None = 
         raise RuntimeError(
             "llm_solver_proposer needs a provider key (ANTHROPIC_API_KEY, or "
             "MAVERICK_PROVIDER_READY=1 with a configured provider).")
-    from maverick.llm import LLM
+    from maverick.llm import LLM, ROLE_MODELS
+
+    # The proposer is ONE call per cycle -- author the solver improvement with a
+    # capable CODER-role model (config-overridable; never a hard-coded id, kernel
+    # rule 2). A weak default returned the file split across blocks / with broken
+    # string literals, defeating every reassembly heuristic; a capable model
+    # returns one clean, complete, valid file.
+    if model is None:
+        from maverick.config import get_role_model
+        model = get_role_model("coder") or ROLE_MODELS.get("coder")
 
     src = (Path(solver_dir) / "solver.py").read_text(encoding="utf-8")
     system = (
-        "You improve a bug-fixing solver. You are given the solver's current "
-        "source (solver.py, whose solve(instance) returns a unified diff or '') "
-        "and feedback about instances it failed to resolve. Reply with the "
-        "COMPLETE new contents of solver.py -- the entire file, ready to save, "
-        "in a single ```python code block. Do NOT reply with a diff. Keep "
-        "solve(instance) -> str and never raise. Never touch test files; never "
-        "special-case instance ids -- generalise so it resolves more bugs.")
+        "You improve a bug-fixing solver (solver.py, whose solve(instance) -> a "
+        "unified diff or ''). Given its source and feedback on instances it "
+        "failed, propose edits as one or more SEARCH/REPLACE blocks in EXACTLY "
+        "this format:\n"
+        "<<<<<<< SEARCH\n<lines copied verbatim from the file>\n=======\n"
+        "<the replacement lines>\n>>>>>>> REPLACE\n"
+        "Copy the SEARCH lines EXACTLY (whitespace included) and include enough "
+        "context that each SEARCH occurs exactly once. Keep solve(instance) -> "
+        "str and never raise. Never edit tests; never special-case instance "
+        "ids -- generalise. Output only SEARCH/REPLACE blocks, no prose.")
     base_user = (f"Current solver.py:\n```python\n{src}\n```\n\n"
                  f"Evaluation feedback:\n{feedback}\n\n"
-                 "Return the complete improved solver.py.")
+                 "Reply with SEARCH/REPLACE blocks that improve the solver.")
     llm = LLM()
 
-    def _ask(user: str):
-        resp = llm.complete(system, [{"role": "user", "content": user}],
-                            max_tokens=max_tokens, model=model)
-        text = resp.text or ""
-        # Primary: the whole file -> git diff. Fallback: a diff-shaped reply.
-        patch, why = _full_file_to_patch(solver_dir, _extract_fenced_code(text))
-        if patch:
-            return patch, ""
+    def _ask(user: str) -> tuple[str, str]:
+        text = (llm.complete(system, [{"role": "user", "content": user}],
+                             max_tokens=max_tokens, model=model).text or "")
+        # Primary: SEARCH/REPLACE edits -> apply by exact match -> git diff.
+        edits, why = _parse_search_replace(text)
+        if edits:
+            new_src, aerr = _apply_search_replace(src, edits)
+            if new_src:
+                patch, gerr = _full_file_to_patch(solver_dir, new_src)
+                if patch:
+                    return patch, ""
+                return "", gerr
+            why = aerr
+        # Fallbacks: a full file, or a hand-authored diff (older reply shapes).
+        p2, w2 = _full_file_to_patch(solver_dir, _extract_fenced_code(text))
+        if p2:
+            return p2, ""
         dtext = _extract_fenced_diff(text)
         if dtext.lstrip().startswith(("diff --git", "--- ")):
-            dpatch, dwhy = _canonicalize_solver_patch(solver_dir, dtext)
-            if dpatch:
-                return dpatch, ""
-            return "", f"{why}; diff fallback also failed: {dwhy}"
+            dp, dw = _canonicalize_solver_patch(solver_dir, dtext)
+            if dp:
+                return dp, ""
         return "", why
 
     patch, why = _ask(base_user)
@@ -641,8 +724,8 @@ def llm_solver_proposer(solver_dir: Path, feedback: str, *, model: str | None = 
         return patch
     log.warning("proposer reply unusable (%s); retrying once", why)
     patch2, why2 = _ask(base_user + f"\n\nYour previous reply was unusable "
-                        f"({why}). Return the COMPLETE solver.py file contents "
-                        "in one ```python block -- not a diff, not a fragment.")
+                        f"({why}). Reply with ONLY SEARCH/REPLACE blocks; copy "
+                        "each SEARCH region byte-for-byte from the file above.")
     if patch2:
         return patch2
     log.warning("proposer retry also unusable (%s)", why2)

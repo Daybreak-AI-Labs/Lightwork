@@ -131,3 +131,70 @@ def test_extract_fenced_code_picks_the_python_block(tmp_path):
     reply = "Sure:\n```python\ndef solve(instance):\n    return 'x'\n```\nDone."
     code = dgm_uplift._extract_fenced_code(reply)
     assert "def solve" in code and "Sure" not in code and "Done" not in code
+
+
+def test_extract_fenced_code_reassembles_a_split_file():
+    # The live failure: cheap models split the file across blocks (imports in
+    # one, solve() in a later one). Neither block alone is the whole file;
+    # reassembly must recover both.
+    reply = ('Plan.\n```python\n"""Improved."""\nimport os\n_ROLE = "coder"\n```\n'
+             'Main function:\n```python\ndef solve(instance):\n    return "p"\n```\n')
+    code = dgm_uplift._extract_fenced_code(reply)
+    assert "import os" in code and "def solve" in code
+
+
+def test_extract_fenced_code_prefers_a_complete_module_over_snippets():
+    reply = ('example:\n```python\nx = 1\n```\nfull file:\n'
+             '```python\nimport os\ndef solve(i):\n    return "p"\n```\n')
+    code = dgm_uplift._extract_fenced_code(reply)
+    assert "def solve" in code and "x = 1" not in code
+
+
+# --- SEARCH/REPLACE proposer interface (the robust default) --------------------
+
+def test_search_replace_parsed_and_applied_by_exact_match():
+    reply = (
+        "Improve it:\n"
+        "<<<<<<< SEARCH\n    return ''\n=======\n    return instance.gold_patch\n"
+        ">>>>>>> REPLACE\n")
+    edits, why = dgm_uplift._parse_search_replace(reply)
+    assert len(edits) == 1 and not why
+    new, err = dgm_uplift._apply_search_replace(_SOLVER, edits)
+    assert not err and "instance.gold_patch" in new and "return ''" not in new
+
+
+def test_search_replace_multiple_blocks_apply_in_order():
+    reply = (
+        "<<<<<<< SEARCH\n    x = 1\n=======\n    x = 10\n>>>>>>> REPLACE\n"
+        "<<<<<<< SEARCH\n    return ''\n=======\n    return 'p'\n>>>>>>> REPLACE\n")
+    edits, _ = dgm_uplift._parse_search_replace(reply)
+    new, err = dgm_uplift._apply_search_replace(_SOLVER, edits)
+    assert not err and "x = 10" in new and "return 'p'" in new
+
+
+def test_search_not_found_is_rejected_with_reason():
+    edits = [("this text is not in the file", "y")]
+    new, err = dgm_uplift._apply_search_replace(_SOLVER, edits)
+    assert new == "" and "not found" in err
+
+
+def test_search_ambiguous_match_is_rejected():
+    src = "a = f()\nb = f()\n"          # 'f()' occurs twice -> ambiguous
+    new, err = dgm_uplift._apply_search_replace(src, [("f()", "g()")])
+    assert new == "" and "matches 2" in err
+
+
+def test_whitespace_only_search_is_rejected():
+    new, err = dgm_uplift._apply_search_replace(_SOLVER, [("    ", "        ")])
+    assert new == "" and "empty SEARCH" in err
+
+
+def test_search_replace_noop_is_rejected():
+    edits = [("    x = 1\n", "    x = 1\n")]
+    new, err = dgm_uplift._apply_search_replace(_SOLVER, edits)
+    assert new == "" and "changed nothing" in err
+
+
+def test_reply_without_blocks_reports_missing():
+    edits, why = dgm_uplift._parse_search_replace("no edit blocks here, just prose")
+    assert edits == [] and "no SEARCH/REPLACE" in why
