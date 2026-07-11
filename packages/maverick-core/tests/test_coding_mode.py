@@ -510,6 +510,30 @@ class TestTestRunResult:
         assert r.all_pass is False
         assert r.score == 0.0
 
+    def test_failing_target_not_masked_by_passing_sibling(self):
+        # Regression: a -k substring collision ran an extra passing sibling, so
+        # `fail_to_pass_passing` reached the requested total (1) even though the
+        # real target FAILED. Counting the failure must keep it from scoring
+        # resolved.
+        from maverick.coding_mode import TestRunResult
+        r = TestRunResult(
+            fail_to_pass_passing=1, fail_to_pass_total=1, fail_to_pass_failing=1,
+            pass_to_pass_passing=5, pass_to_pass_total=5,
+        )
+        assert r.all_pass is False          # was True before the fix
+        assert r.score < 1.0                # no full credit with a live failure
+
+    def test_sibling_pass_inflation_does_not_false_negative(self):
+        # The flip side: extra passing siblings can push `passing` above total;
+        # with no failures that must still count as all-pass, not a false miss.
+        from maverick.coding_mode import TestRunResult
+        r = TestRunResult(
+            fail_to_pass_passing=2, fail_to_pass_total=1, fail_to_pass_failing=0,
+            pass_to_pass_passing=5, pass_to_pass_total=5,
+        )
+        assert r.all_pass is True
+        assert r.score == 1.0
+
     def test_summary_renders(self):
         from maverick.coding_mode import TestRunResult
         r = TestRunResult(

@@ -417,8 +417,14 @@ PROPOSERS: dict[str, Callable[[Instance], str]] = {
 
 # --- the governed scorer ------------------------------------------------------
 
-def _score(workdir: Path, inst: Instance, sandbox, *, timeout: float) -> tuple[float, bool, int]:
-    """Run the instance's tests in ``workdir``; return (score, all_pass, samples).
+def _score(workdir: Path, inst: Instance, sandbox, *, timeout: float
+           ) -> tuple[float, bool, int, int]:
+    """Run the instance's tests in ``workdir``; return
+    ``(score, all_pass, samples, fail_to_pass_passing)``.
+
+    ``fail_to_pass_passing`` is exposed so the baseline gate can require the
+    GRADED FAIL_TO_PASS tests specifically to fail at baseline (the SWE-bench
+    definition of "there is a bug"), not merely that *some* test fails.
 
     Prepends the isolated copy (and its ``src/``) to PYTHONPATH so the copy
     SHADOWS any cross-instance editable install (a ``__editable__.*.pth`` on
@@ -441,7 +447,7 @@ def _score(workdir: Path, inst: Instance, sandbox, *, timeout: float) -> tuple[f
         else:
             os.environ["PYTHONPATH"] = prev
     samples = res.fail_to_pass_total + res.pass_to_pass_total
-    return res.score, res.all_pass, samples
+    return res.score, res.all_pass, samples, res.fail_to_pass_passing
 
 
 # Grading-sensitive files: the base defensive_validate only WARNS on these, but
@@ -556,18 +562,23 @@ def govern_candidate(
     except Exception as e:
         out.reason = f"sandbox refused (isolation policy): {e}"
         return out
-    out.baseline_score, base_all_pass, out.samples = _score(base_dir, inst, sb_base, timeout=timeout)
-    # The baseline MUST fail the graded tests -- otherwise there is no bug to
-    # fix (mis-seeded instance) or the candidate copy is shadowed by an editable
-    # install so both arms test identical code. Either way it can't be a real
-    # resolution: mark ungradable, never resolved.
-    if base_all_pass:
+    out.baseline_score, base_all_pass, out.samples, base_f2p_pass = _score(
+        base_dir, inst, sb_base, timeout=timeout)
+    # The graded FAIL_TO_PASS tests MUST fail at baseline -- that IS the bug.
+    # Checking only `base_all_pass` (every test passes) missed the case where the
+    # FAIL_TO_PASS already pass at baseline but a PASS_TO_PASS is (env-)failing:
+    # the gate let it through, and a candidate that merely made the PASS_TO_PASS
+    # pass would be scored RESOLVED with no bug ever fixed. Require the graded
+    # failing tests to actually fail at baseline. Either "all pass" or "all
+    # FAIL_TO_PASS pass" means mis-seeded or an editable install shadows the copy.
+    f2p_all_pass_at_baseline = bool(inst.fail_to_pass) and base_f2p_pass >= len(inst.fail_to_pass)
+    if base_all_pass or f2p_all_pass_at_baseline:
         out.ungradable = True
-        out.reason = ("mis-seeded/shadowed: baseline already passes the target "
-                      "tests (no failing bug, or an editable install shadows the "
-                      "isolated copy -- grade in per-instance Docker)")
+        out.reason = ("mis-seeded/shadowed: baseline already passes the graded "
+                      "FAIL_TO_PASS tests (no failing bug, or an editable install "
+                      "shadows the isolated copy -- grade in per-instance Docker)")
         return out
-    out.candidate_score, out.tests_resolved, _ = _score(cand_dir, inst, sb_cand, timeout=timeout)
+    out.candidate_score, out.tests_resolved, _, _ = _score(cand_dir, inst, sb_cand, timeout=timeout)
     if not out.tests_resolved:
         # Honest-reporting distinction: if the BASELINE can't even run the
         # instance's previously-passing tests, this environment can't grade the
@@ -936,10 +947,13 @@ def _env_pregate(inst: Instance, workroot: Path, *, timeout: float) -> str:
         sb = resolve_eval_sandbox(None, base_dir)
     except Exception as e:
         return f"sandbox refused (isolation policy): {e}"
-    score, all_pass, _ = _score(base_dir, inst, sb, timeout=timeout)
-    if all_pass:
-        return ("mis-seeded/shadowed: baseline already passes the target tests "
-                "(no failing bug to fix)")
+    score, all_pass, _, f2p_pass = _score(base_dir, inst, sb, timeout=timeout)
+    # Same gate as govern_candidate, run for free before spending: the graded
+    # FAIL_TO_PASS must FAIL at baseline. Reject when all tests pass OR when the
+    # FAIL_TO_PASS specifically already pass (mis-seeded / shadowed copy).
+    if all_pass or (inst.fail_to_pass and f2p_pass >= len(inst.fail_to_pass)):
+        return ("mis-seeded/shadowed: baseline already passes the graded "
+                "FAIL_TO_PASS tests (no failing bug to fix)")
     if score == 0.0 and inst.pass_to_pass:
         return ("baseline cannot run the instance's own passing tests "
                 "(missing deps / wrong interpreter era for this environment)")

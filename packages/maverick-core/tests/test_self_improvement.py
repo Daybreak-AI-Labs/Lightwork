@@ -134,6 +134,16 @@ def test_max_auto_rung_ceiling_forces_human_above_it():
     assert any(g.gate == "human_approval" and not g.ok for g in v.gates)
 
 
+def test_unknown_max_auto_rung_fails_closed_not_open():
+    # Regression: a typo'd/unknown ceiling must behave as the MOST restrictive
+    # ceiling (require human for everything above the lowest rung), never as an
+    # unbounded ceiling that silently disables the autonomous-promotion gate.
+    ctrl = _ctrl(max_auto_rung="polciy")   # deliberate typo of "policy"
+    v = ctrl.evaluate(_cand(rung="policy", samples=8, capability_widens=False, approved=False))
+    assert not v.ok
+    assert any(g.gate == "human_approval" and not g.ok for g in v.gates)
+
+
 # -- reversibility ---------------------------------------------------------
 
 def test_non_reversible_change_is_rejected():
