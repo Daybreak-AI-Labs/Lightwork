@@ -229,6 +229,22 @@ def test_truncation_plus_deleted_head_is_audited_not_silently_healed(tmp_path, m
     assert remediated[0]["field"] == "receipt_head_anchor"
 
 
+def test_verify_chain_flags_truncation_when_head_also_deleted(tmp_path):
+    # Regression: an auditor calling verify_chain directly (no subsequent mint)
+    # must NOT see a cost-shaved chain as intact just because the .head anchor
+    # was deleted along with the tail -- completeness can't be verified, so it
+    # fails closed.
+    path = tmp_path / "receipts.jsonl"
+    for goal in (7, 9, 7, 9, 7):
+        br.mint(_world(), goal, KEY, path=path)
+    lines = path.read_text(encoding="utf-8").splitlines()
+    path.write_text("\n".join(lines[:3]) + "\n", encoding="utf-8")
+    (tmp_path / "receipts.jsonl.head").unlink()
+    report = br.verify_chain(path, KEY)
+    assert not report.ok
+    assert "anchor missing" in report.reason
+
+
 def test_forged_head_anchor_refuses_to_mint(tmp_path):
     # A head file that exists but fails its own HMAC is unambiguous tamper
     # evidence (this code only ever writes a correctly-signed head) -- mint()

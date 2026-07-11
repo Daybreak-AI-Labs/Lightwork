@@ -369,6 +369,16 @@ def verify_chain(path: str | Path | None = None, key: str | None = None) -> Chai
                            reason=f"chain truncated: {len(lines)} receipts "
                                   f"present but high-water anchor is {head} "
                                   "(deleted trailing receipt?)")
+    if head is None and lines:
+        # mint() writes the anchor on every receipt, so a non-empty chain must
+        # have one. A missing anchor is the completion of the cheapest tamper:
+        # drop the newest (priciest) receipts AND delete the .head sidecar that
+        # would reveal the truncation. Without this, verify_chain -- the function
+        # an auditor calls -- reported a cost-shaved chain as intact. Fail closed:
+        # completeness cannot be verified with the anchor gone.
+        return ChainReport(count=len(lines), broken_at=len(lines),
+                           reason="high-water anchor missing for a non-empty "
+                                  "chain (deleted to hide a tail truncation?)")
     return ChainReport(count=len(lines), broken_at=None)
 
 

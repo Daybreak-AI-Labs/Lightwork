@@ -62,6 +62,21 @@ def _rung_rank(rung: str) -> int:
         return len(RUNGS)
 
 
+def _ceiling_rank(rung: str) -> int:
+    """Rank of the autonomous-promotion CEILING (``max_auto_rung``).
+
+    A ceiling must fail closed in the OPPOSITE direction from a candidate rung:
+    an unknown/typo ceiling ("polciy") must behave as the MOST restrictive
+    ceiling -- below every real rung -- so every promotion still needs human
+    approval. Reusing :func:`_rung_rank` here would return ``len(RUNGS)`` (the
+    highest possible), which silently DISABLES the ceiling (nothing is ever
+    "above" it) -- fail-open, the exact opposite of the intent."""
+    try:
+        return RUNGS.index(rung)
+    except ValueError:
+        return -1
+
+
 # Per-rung gate policy. ``require_capability_evidence`` forces a non-escalation
 # proof (a change that can't show it didn't widen authority is refused at and
 # above ``tool``). ``require_human`` gates code/weights behind explicit sign-off.
@@ -328,7 +343,7 @@ class SelfImprovementController:
         # 4. Human approval -- required at code/weights, and for any rung above
         #    ``max_auto_rung`` (a deployment-wide ceiling on autonomous promotion).
         needs_human = bool(policy["require_human"]) or (
-            _rung_rank(cand.rung) > _rung_rank(self.max_auto_rung))
+            _rung_rank(cand.rung) > _ceiling_rank(self.max_auto_rung))
         human_ok, approver, human_reason = self._human_approval(cand, needs_human)
         gates.append(GateResult("human_approval", human_ok, "" if human_ok else human_reason))
 

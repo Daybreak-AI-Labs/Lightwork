@@ -35,10 +35,9 @@ from urllib.parse import unquote
 # _MAX_VARIANTS bounds deeper-layer expansion. It is NOT used to cap the count of
 # first-layer decodes: a count cap there would be order-dependent, letting an
 # attacker prepend >cap benign base64 tokens to starve the real (trailing)
-# payload out of the scanned set (the same trap builtin_rules avoids by always
-# granting each blob a decode). _MAX_B64_BLOBS mirrors builtin_rules' constant
-# and bounds only the EXTRA phase-realignment work, not the blob count itself.
-_MAX_B64_BLOBS = 20
+# payload out of the scanned set. _decode_base64 therefore grants every blob all
+# four phase alignments unconditionally (per-blob work is constant and the input
+# is bounded by _MAX_LEN), so no order-dependent budget can be starved.
 _MAX_VARIANTS = 24
 # Absolute ceiling on total variants (incl. a fully-decoded first layer) so a
 # pathological many-blob input can't exhaust memory; the first layer is bounded
@@ -115,29 +114,23 @@ def _strip_unicode(text: str) -> str | None:
 
 def _decode_base64(text: str) -> list[str]:
     out: list[str] = []
-    # Bound the EXTRA phase-realignment work (phases 1-3) globally so a hostile
-    # input can't turn the pre-pass into a decode bomb -- but, like
-    # builtin_rules._decode_b64_blobs, always grant every blob its phase-0
-    # decode even after that budget is spent, so a trailing payload blob is
-    # never starved by however many benign base64 decoys precede it. Capping by
-    # blob count instead would be order-dependent: an attacker just prepends
-    # enough benign blobs to exhaust the budget before finditer reaches the
-    # real payload.
-    extra_phase_budget = _MAX_B64_BLOBS * 3
+    # Every blob gets ALL 4 phase alignments, unconditionally. Per-blob work is
+    # constant (<=4 phases x 2 decoders) and the input is bounded by _MAX_LEN
+    # upstream (decoded_variants refuses longer text), so the total stays linear.
+    # A shared, iteration-order phase budget was starvable: a run of benign decoy
+    # blobs (which fail phase 0 and each drew from the pool) exhausted it before
+    # finditer reached a trailing, filler-prefixed (misaligned) payload -- which
+    # needs phases 1-3 to realign and was then left with only its phase-0 garbage
+    # decode, evading every downstream detector. Granting only phase 0 after the
+    # budget spent protected an ALIGNED trailing payload but not a misaligned one.
     for rx in (_B64_RE, _B64URL_RE):
         for m in rx.finditer(text):
             blob = m.group(0)
-            # Try all 4 phase alignments. The regex greedily grabs any leading
-            # base64-alphabet chars, so an attacker can prepend 1-3 filler chars
-            # ("ABCignore..." base64'd) -- that shifts every 4-byte boundary so
-            # the real payload decodes to garbage, silently defeating decode
-            # coverage. Decoding from each offset re-aligns one of them.
+            # The regex greedily grabs any leading base64-alphabet chars, so an
+            # attacker can prepend 1-3 filler chars to shift every 4-byte
+            # boundary and make the real payload decode to garbage at phase 0.
+            # Decoding from each offset re-aligns one of them.
             for phase in range(4):
-                # Phase 0 is always free; phases 1-3 draw from the shared budget.
-                if phase != 0:
-                    if extra_phase_budget <= 0:
-                        break
-                    extra_phase_budget -= 1
                 shifted = blob[phase:]
                 if len(shifted) < 4:
                     break

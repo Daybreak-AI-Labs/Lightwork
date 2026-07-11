@@ -510,6 +510,30 @@ class TestTestRunResult:
         assert r.all_pass is False
         assert r.score == 0.0
 
+    def test_failing_target_not_masked_by_passing_sibling(self):
+        # Regression: a -k substring collision ran an extra passing sibling, so
+        # `fail_to_pass_passing` reached the requested total (1) even though the
+        # real target FAILED. Counting the failure must keep it from scoring
+        # resolved.
+        from maverick.coding_mode import TestRunResult
+        r = TestRunResult(
+            fail_to_pass_passing=1, fail_to_pass_total=1, fail_to_pass_failing=1,
+            pass_to_pass_passing=5, pass_to_pass_total=5,
+        )
+        assert r.all_pass is False          # was True before the fix
+        assert r.score < 1.0                # no full credit with a live failure
+
+    def test_sibling_pass_inflation_does_not_false_negative(self):
+        # The flip side: extra passing siblings can push `passing` above total;
+        # with no failures that must still count as all-pass, not a false miss.
+        from maverick.coding_mode import TestRunResult
+        r = TestRunResult(
+            fail_to_pass_passing=2, fail_to_pass_total=1, fail_to_pass_failing=0,
+            pass_to_pass_passing=5, pass_to_pass_total=5,
+        )
+        assert r.all_pass is True
+        assert r.score == 1.0
+
     def test_summary_renders(self):
         from maverick.coding_mode import TestRunResult
         r = TestRunResult(
@@ -519,6 +543,45 @@ class TestTestRunResult:
         s = r.summary()
         assert "2/3" in s
         assert "10/10" in s
+
+
+class TestBestOfNAntiCheat:
+    """A best-of-N candidate that edits the graded tests must be refused during
+    evaluation, so it can't be selected as the winner over honest candidates."""
+
+    def _git_repo(self, tmp_path):
+        import subprocess
+        repo = tmp_path / "repo"
+        (repo / "tests").mkdir(parents=True)
+        (repo / "tests" / "test_x.py").write_text(
+            "def test_a():\n    assert 1 == 2\n", encoding="utf-8")
+        env = ["-c", "user.email=t@t", "-c", "user.name=t"]
+        subprocess.run(["git", "-C", str(repo), "init", "-q"], check=True)
+        subprocess.run(["git", "-C", str(repo), "add", "-A"], check=True)
+        subprocess.run(["git", "-C", str(repo), *env, "commit", "-qm", "init"], check=True)
+        return repo
+
+    def test_test_file_edit_candidate_is_refused(self, tmp_path):
+        import asyncio
+
+        from maverick.coding_mode import CodingModeConfig, evaluate_candidate
+
+        repo = self._git_repo(tmp_path)
+        # Cheat: rewrite the graded test so the failing assertion passes.
+        cheat = (
+            "diff --git a/tests/test_x.py b/tests/test_x.py\n"
+            "--- a/tests/test_x.py\n+++ b/tests/test_x.py\n"
+            "@@ -1,2 +1,2 @@\n def test_a():\n-    assert 1 == 2\n+    assert 1 == 1\n"
+        )
+
+        class _SB:
+            workdir = None
+        _SB.workdir = str(repo)
+        cfg = CodingModeConfig(enabled=True, fail_to_pass=["tests/test_x.py::test_a"])
+        cand = asyncio.run(evaluate_candidate(cheat, repo, cfg, _SB(), 0))
+        assert cand.apply_check_passed is False
+        assert "boundary refused" in cand.error
+        assert cand.score == 0.0
 
 
 class TestRepoMapTool:

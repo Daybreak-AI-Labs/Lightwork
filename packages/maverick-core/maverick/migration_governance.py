@@ -77,8 +77,15 @@ def version_checksum(statements: list[str]) -> str:
 
 
 def _sqlite_ladder() -> dict[int, list[str]]:
-    from .world_model import MIGRATIONS
-    return {int(v): list(stmts) for v, stmts in MIGRATIONS.items()}
+    from .world_model import MIGRATIONS, SCHEMA
+    # Fingerprint the base SCHEMA as version _BASE_VERSION so the ratchet governs
+    # the tables it -- and only it -- creates (share_links, signoffs, artifacts,
+    # projects, halt, provider_spend, harness_*, ...). The MIGRATIONS dict starts
+    # at v2, so without this an edit to a base table definition changed the schema
+    # with no checksum to catch it -- those tables were entirely ungoverned.
+    ladder: dict[int, list[str]] = {_BASE_VERSION: [SCHEMA]}
+    ladder.update({int(v): list(stmts) for v, stmts in MIGRATIONS.items()})
+    return ladder
 
 
 def _postgres_ladder() -> dict[int, list[str]]:
@@ -208,9 +215,45 @@ def load_lock() -> dict | None:
         return None
 
 
+def regen_blockers(
+    lads: dict[str, dict[int, list[str]]] | None = None,
+    existing_lock: dict | None = None,
+) -> list[str]:
+    """New versions (absent from ``existing_lock``) that carry a destructive
+    statement. ``--regen`` refuses these: the additive-only gate in
+    :func:`lock_problems` only inspects not-yet-locked versions, so writing a
+    destructive new migration into the lock unchecked would grandfather it into
+    immutability and it would never be re-judged."""
+    lads = lads if lads is not None else ladders()
+    if existing_lock is None:
+        existing_lock = load_lock()
+    locked = (existing_lock or {}).get("checksums", {})
+    fp = fingerprint(lads)
+    blockers: list[str] = []
+    for backend, current in fp["checksums"].items():
+        prior = locked.get(backend, {})
+        for version in current:
+            if version not in prior:
+                dead = _destructive_statements(lads[backend][int(version)])
+                if dead:
+                    blockers.append(
+                        f"{backend}: new migration v{version} has destructive "
+                        f"statement(s) {dead}")
+    return blockers
+
+
 def write_lock() -> Path:
+    lads = ladders()
+    # Refuse to launder a destructive NEW migration into the grandfathered set.
+    blockers = regen_blockers(lads)
+    if blockers:
+        raise ValueError(
+            "refusing to regenerate migrations.lock.json -- a new migration is "
+            "destructive and would be grandfathered into immutability. Make it "
+            "additive (old replicas still read the old schema):\n  - "
+            + "\n  - ".join(blockers))
     path = lock_path()
-    payload = fingerprint()
+    payload = fingerprint(lads)
     payload["_comment"] = (
         "Committed fingerprint of the world-model migration ladders. Generated "
         "by `python -m maverick.migration_governance --regen`. Do not hand-edit; "
@@ -242,7 +285,11 @@ def main(argv: list[str] | None = None) -> int:  # pragma: no cover -- CLI shell
     args = p.parse_args(argv)
 
     if args.regen:
-        path = write_lock()
+        try:
+            path = write_lock()
+        except ValueError as e:
+            print(f"migration governance: {e}")
+            return 1
         print(f"wrote {path}")
         return 0
 

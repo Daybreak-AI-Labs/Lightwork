@@ -276,18 +276,32 @@ def would_exceed(provider: str, projected_dollars: float, *,
 _alerted: set[tuple[str, str]] = set()
 
 
-def enforce(provider: str, *, now: float | None = None,
-            path: Path | None = None) -> CapStatus:
+def enforce(provider: str, *, projected_dollars: float = 0.0,
+            now: float | None = None, path: Path | None = None) -> CapStatus:
     """The LLM dispatch gate: raise :class:`ProviderCapExceeded` when the
-    provider's period spend has reached its cap; otherwise return the status
-    (so the caller can log remaining headroom). No cap -> no-op."""
+    provider's period spend has reached its cap -- OR when this call's
+    ``projected_dollars`` would push it over. Otherwise return the status (so the
+    caller can log remaining headroom). No cap -> no-op.
+
+    ``projected_dollars`` gates on the estimated cost of the CALL ABOUT TO RUN,
+    like ``Budget.check_projected``. Without it, ``enforce`` only fired once
+    spend had ALREADY passed the cap, so a single large-context call (or several
+    concurrent calls each seeing the same under-cap spend) sailed through and
+    blew past the hard ceiling. Projection bounds the overshoot to roughly the
+    in-flight set instead of an unbounded single call."""
     st = check(provider, now=now, path=path)
-    if not st.allowed:
+    projected = max(0.0, float(projected_dollars or 0.0))
+    reached = not st.allowed
+    would_exceed_cap = st.cap is not None and st.spent + projected > st.cap
+    if reached or would_exceed_cap:
         period = period_key(now)
         canon = _canon(provider)
-        if (canon, period) not in _alerted:
+        # Page the operator ONCE per period only when the cap is actually
+        # reached (spend >= cap). A projected-over block on a still-under-cap
+        # provider is normal backpressure, not an exhaustion event.
+        if reached and (canon, period) not in _alerted:
             _alerted.add((canon, period))
-            try:  # page the operator once: deployment-wide spend is exhausted
+            try:
                 from .ops_alert import alert
                 alert("provider_cost_cap_exhausted",
                       f"{canon} spend ${st.spent:.2f} reached the ${st.cap:.2f} "

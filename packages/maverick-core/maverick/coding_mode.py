@@ -740,9 +740,14 @@ def _extract_diff_paths(patch: str) -> list[str]:
             if end > len('--- "a/'):
                 paths.add(line[len('--- "a/'):end].strip())
         elif line.startswith("+++ b/"):
-            paths.add(line[len("+++ b/"):].strip())
+            # git's ---/+++ headers separate the path from an optional timestamp
+            # with a TAB; git apply ignores everything from the tab on. Split on
+            # it, or "+++ b/tests/test_x.py\t2024-..." parses as a path that
+            # evades the anchored forbidden-path / exact test-id checks while the
+            # patch still edits the real test file.
+            paths.add(line[len("+++ b/"):].split("\t", 1)[0].strip())
         elif line.startswith("--- a/"):
-            paths.add(line[len("--- a/"):].strip())
+            paths.add(line[len("--- a/"):].split("\t", 1)[0].strip())
     paths.discard("/dev/null")
     return sorted(paths)
 
@@ -989,6 +994,12 @@ class TestRunResult:
     fail_to_pass_total: int = 0
     pass_to_pass_passing: int = 0
     pass_to_pass_total: int = 0
+    # Observed FAILURES in each arm. Load-bearing for honesty: a `-k` substring
+    # selection can run MORE tests than requested, so a passing sibling inflates
+    # `*_passing` and, compared only against the requested total, masks a
+    # genuinely-failing target. Counting failures directly closes that hole.
+    fail_to_pass_failing: int = 0
+    pass_to_pass_failing: int = 0
     error: str = ""
     raw_output: str = ""
     runner: str = ""
@@ -1006,9 +1017,15 @@ class TestRunResult:
             return False
         if self.skipped:
             return False
+        # `>=` (not `==`): a -k substring collision can make `*_passing` exceed
+        # the requested total via passing siblings. `*_failing == 0` is the real
+        # guard -- a genuinely-failing target always increments the failure
+        # count, so a passing sibling can no longer mask it.
         return (
-            self.fail_to_pass_passing == self.fail_to_pass_total
-            and self.pass_to_pass_passing == self.pass_to_pass_total
+            self.fail_to_pass_passing >= self.fail_to_pass_total
+            and self.pass_to_pass_passing >= self.pass_to_pass_total
+            and self.fail_to_pass_failing == 0
+            and self.pass_to_pass_failing == 0
             and not self.error
         )
 
@@ -1016,7 +1033,9 @@ class TestRunResult:
     def score(self) -> float:
         """Combined score: did we fix the failing tests AND not break passing ones?
 
-        Returns in [0, 1]. 1.0 = perfect resolution.
+        Returns in [0, 1]. 1.0 = perfect resolution. Failures are subtracted so a
+        substring-collision sibling pass cannot score a non-fixing candidate as
+        resolved; clamped because sibling passes can push `passing` above total.
         """
         if self.error:
             return 0.0
@@ -1024,7 +1043,8 @@ class TestRunResult:
         if total == 0:
             return 0.0
         passing = self.fail_to_pass_passing + self.pass_to_pass_passing
-        return passing / total
+        failing = self.fail_to_pass_failing + self.pass_to_pass_failing
+        return min(1.0, max(0.0, passing - failing) / total)
 
     def summary(self) -> str:
         if self.error:
@@ -1776,10 +1796,12 @@ def run_failing_tests(
         return passed, failed, "\n".join(chunks), False
 
     try:
-        f_pass, _f_fail, f_out, f_incomplete = _run(fail_to_pass)
+        f_pass, f_fail, f_out, f_incomplete = _run(fail_to_pass)
         result.fail_to_pass_passing = f_pass
-        p_pass, _p_fail, p_out, p_incomplete = _run(pass_to_pass)
+        result.fail_to_pass_failing = f_fail
+        p_pass, p_fail, p_out, p_incomplete = _run(pass_to_pass)
         result.pass_to_pass_passing = p_pass
+        result.pass_to_pass_failing = p_fail
         result.raw_output = (f_out + "\n" + p_out)[-2000:]
         # June 17 council fix (test-runner audit #3): both call sites
         # previously discarded `_run`'s `failed` return, so a mid-stream
@@ -1939,6 +1961,21 @@ async def evaluate_candidate(
         # No ground-truth tests; score by apply-check (smaller diff
         # tie-break happens in select_best_candidate).
         cand.score = 0.5
+        return cand
+
+    # Anti-cheat boundary (graded mode only): refuse a candidate that edits the
+    # graded test files / conftest / lockfiles. Without this, a best-of-N attempt
+    # that rewrites the FAIL_TO_PASS tests via tools makes them pass, scores
+    # all_pass, and is SELECTED as the winner over honest candidates -- the exact
+    # gaming vector the governed harness refuses downstream, applied here so the
+    # selection itself is honest. Marking apply_check_passed=False + error drops
+    # it from select_best_candidate's usable pool.
+    guard = defensive_validate(patch, fail_to_pass=list(cfg.fail_to_pass),
+                               pass_to_pass=list(cfg.pass_to_pass))
+    if not guard.ok:
+        cand.apply_check_passed = False
+        cand.error = ("anti-cheat boundary refused: edits grading-sensitive paths "
+                      + ", ".join(guard.blocked_paths))
         return cand
 
     import shutil as _shutil

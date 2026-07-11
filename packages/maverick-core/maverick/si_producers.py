@@ -137,8 +137,17 @@ def propose_policy(summary, baseline, candidate, samples, *, rollback,
 
 
 def propose_tool(name, tracker: ToolOutcomeTracker, baseline_success, *, rollback,
-                 capability_widens=False, controller=None, **prov) -> Verdict:
-    """Phase 3: promote a synthesized tool only if its measured success beats baseline."""
+                 capability_widens=None, controller=None, **prov) -> Verdict:
+    """Phase 3: promote a synthesized tool only if its measured success beats baseline.
+
+    ``capability_widens`` defaults to ``None`` (UNPROVEN), not ``False``. A new
+    tool is a capability surface by definition, so asserting non-escalation by
+    default made the capability gate -- the very control the tool rung exists for
+    -- vacuous: any tool sailed through. ``None`` fails closed at the tool rung
+    (require_capability_evidence=True); the caller must PROVE non-escalation
+    (pass ``capability_widens=False`` from a real ``capability`` delta, or supply
+    before/after grants + probe tools on the candidate) for a tool to promote.
+    """
     return _propose(
         "tool", f"synthesized tool {name!r}", baseline_success,
         tracker.success_rate(name), tracker.samples(name),
