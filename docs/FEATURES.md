@@ -2435,18 +2435,23 @@ tested without spawning py-spy.
   exactly which digests differ and calls runs "comparable" only when
   config+inputs match; `audit_report()` sweeps the stored history. Two
   runs with differing digests are never claimed comparable.
-- **Compaction v6 hybrid** (`compaction/hybrid.py`, *experimental — opt-in,
-  not yet wired into the live compaction path*): the strategy picker
-  learned from this deployment's own outcomes — deterministic features
-  over the message window, a per-(feature-bucket, strategy) outcome ledger
-  (atomic 0600), epsilon-greedy with an injected PRNG, and an optional
-  pure-Python logistic `fit()` (no torch) whose versioned weights the
-  picker consults when present. Cold start = the existing default
-  strategy; every failure falls open like all compaction paths. An
-  online-learning heuristic, not a pretrained model — stated in the
-  docstring. The picker (`pick_strategy`) is implemented and unit-tested
-  but the live agent compaction path still uses the rule ladder; enabling
-  `[compaction] hybrid` is a no-op until it is wired in.
+- **Compaction v6 hybrid** (`compaction/hybrid.py`, *experimental — opt-in
+  via `[compaction] hybrid`, wired into the live compaction path*): the
+  strategy picker learned from this deployment's own outcomes —
+  deterministic features over the message window, a per-(feature-bucket,
+  strategy) outcome ledger (atomic 0600), epsilon-greedy with an injected
+  PRNG, and an optional pure-Python logistic `fit()` (no torch) whose
+  versioned weights the picker consults when present. Cold start = the
+  existing default strategy; every failure falls open like all compaction
+  paths. An online-learning heuristic, not a pretrained model — stated in
+  the docstring. With the knob on, `compaction.plugins.compact_with` (the
+  agent's live dispatcher) consults the picker, maps its abstract
+  vocabulary onto the registered implementations (truncate/structural →
+  heuristic, retrieval → graph, summarize → learned), and records the
+  achieved shrink back into the ledger so selection improves on this
+  instance's own results; an explicitly configured
+  `[context] compaction_strategy` always wins, with a one-time warning
+  when both knobs are set.
 - **Sandbox pool: Firecracker-warm + cross-run pooling**
   (`sandbox/firecracker.py` + `sandbox/pool.py`, `[sandbox]
   cross_run_pool` default OFF): Firecracker warm mode keeps one e2b

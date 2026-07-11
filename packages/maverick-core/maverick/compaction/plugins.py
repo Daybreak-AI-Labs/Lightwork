@@ -13,6 +13,20 @@ dispatches to the configured strategy (``[context] compaction_strategy`` / env
 ``MAVERICK_COMPACTION_STRATEGY``) and **fails safe** to the built-in when the
 named strategy is unknown, so a typo degrades to working compaction rather than
 to none.
+
+Selection precedence in :func:`compact_with`:
+
+1. an explicit ``strategy=`` argument;
+2. an explicitly configured name (env ``MAVERICK_COMPACTION_STRATEGY`` or
+   ``[context] compaction_strategy``) — this always beats the hybrid picker,
+   with a one-time warning when both are set;
+3. the **compaction v6 hybrid picker** (opt-in via ``[compaction] hybrid`` /
+   ``MAVERICK_COMPACTION_HYBRID``): the ledger-learned picker
+   (:mod:`maverick.compaction.hybrid`) chooses an abstract strategy, which
+   maps onto a registered implementation (``_ABSTRACT_TO_LIVE``); the achieved
+   shrink is recorded back into the picker's outcome ledger so selection
+   improves on this instance's own results — every step fail-open;
+4. the built-in ``heuristic``.
 """
 from __future__ import annotations
 
@@ -68,55 +82,126 @@ def available() -> list[str]:
 
 
 def _configured_name() -> str:
+    """The explicitly configured strategy name, or ``""`` when unset."""
     env = os.environ.get("MAVERICK_COMPACTION_STRATEGY", "").strip()
     if env:
         return env
     try:
         from ..config import load_config
-        name = str(((load_config() or {}).get("context") or {})
+        return str(((load_config() or {}).get("context") or {})
                    .get("compaction_strategy", "")).strip()
-        return name or _DEFAULT
     except Exception:  # pragma: no cover -- config never blocks compaction
-        return _DEFAULT
+        return ""
 
 
-_HYBRID_NOOP_WARNED = False
+# Compaction v6 wiring. The hybrid picker speaks the rule ladder's abstract
+# shrink vocabulary (tools/compaction_classifier); this registry speaks
+# implementation names. The reconciliation:
+#   - truncate / structural -> "heuristic": compact_messages IS the structural
+#     shrink (drop-oldest digests + content-addressed refs), and is also the
+#     right cheap path when there is too little to gain;
+#   - retrieval -> "graph": the entity-relation digest is the index half of
+#     "index + fetch on demand"; the structural refs it funnels through keep
+#     the re-run-the-tool retrieval half;
+#   - summarize -> "learned": the LLM summarizer (degrades deterministically
+#     to the structural shrink without an llm seam).
+_ABSTRACT_TO_LIVE = {
+    "truncate": "heuristic",
+    "structural": "heuristic",
+    "retrieval": "graph",
+    "summarize": "learned",
+}
+
+# Outcomes are recorded only for windows the ladder would not call "too small
+# to compact" (< ~4000 tokens ~= 16000 chars): a tiny window shrinks under no
+# strategy, so recording it would only add uniform noise to every arm.
+_HYBRID_RECORD_MIN_CHARS = 16_000
+
+_HYBRID_PICKER = None
+_HYBRID_SHADOWED_WARNED = False
 
 
-def _warn_hybrid_unwired_once() -> None:
-    """Warn once if ``[compaction] hybrid`` is set but the picker isn't wired.
+def _hybrid_picker():
+    """The shared persistent picker (ledger + optional weights under data_dir)."""
+    global _HYBRID_PICKER
+    if _HYBRID_PICKER is None:
+        from .hybrid import HybridPicker, default_ledger_path, default_weights_path
+        _HYBRID_PICKER = HybridPicker(ledger_path=default_ledger_path(),
+                                      weights_path=default_weights_path())
+    return _HYBRID_PICKER
 
-    The experimental hybrid strategy picker (``compaction.hybrid``) is not
-    connected to this live dispatch path, so enabling the flag would otherwise
-    be a *silent* no-op. Surface that at runtime — not just in the module
-    docstring — so an operator who flips the knob learns it has no effect yet.
-    """
-    global _HYBRID_NOOP_WARNED
-    if _HYBRID_NOOP_WARNED:
+
+def _warn_hybrid_shadowed_once(name: str) -> None:
+    """Warn once when ``[compaction] hybrid`` is on but an explicit strategy
+    name shadows it — the knob would otherwise look silently dead."""
+    global _HYBRID_SHADOWED_WARNED
+    if _HYBRID_SHADOWED_WARNED:
         return
     try:
         from .hybrid import enabled as _hybrid_enabled
-        if _hybrid_enabled():
-            _HYBRID_NOOP_WARNED = True
-            log.warning(
-                "[compaction] hybrid is enabled, but the experimental hybrid "
-                "strategy picker is not wired into the live compaction path; "
-                "the configured/default strategy is used instead (no effect on "
-                "compaction). See compaction/hybrid.py for status."
-            )
+        if not _hybrid_enabled():
+            return
     except Exception:  # pragma: no cover -- never block compaction on this check
-        pass
+        return
+    _HYBRID_SHADOWED_WARNED = True
+    log.warning(
+        "[compaction] hybrid is enabled but %r is explicitly configured "
+        "(MAVERICK_COMPACTION_STRATEGY / [context] compaction_strategy); the "
+        "explicit strategy wins and the hybrid picker stays inactive", name)
+
+
+def _hybrid_compact(messages: list[dict], **kwargs) -> list[dict] | None:
+    """Compact via the hybrid-picked strategy; ``None`` -> caller's default path.
+
+    Fail-open at every step: any error (picker, mapping, strategy) logs and
+    returns ``None`` so :func:`compact_with` proceeds with the built-in
+    default — compaction must never crash a run.
+    """
+    try:
+        from . import hybrid
+        if not hybrid.enabled():
+            return None
+        picker = _hybrid_picker()
+        abstract, reason = picker.pick(messages)
+        live = _ABSTRACT_TO_LIVE.get(abstract, _DEFAULT)
+        strat = _REGISTRY.get(live) or _REGISTRY[_DEFAULT]
+        before = hybrid.extract_features(messages)["total_chars"]
+        try:
+            out = strat.compact(messages, **kwargs)
+        except Exception:
+            # A strategy that raises is a real outcome — record the failure
+            # before falling open to the default path.
+            picker.record(messages, abstract, success=False)
+            raise
+        if before >= _HYBRID_RECORD_MIN_CHARS:
+            after = hybrid.extract_features(out)["total_chars"]
+            picker.record(messages, abstract, success=after < before)
+        log.debug("compaction hybrid: %s -> %s (%s)", abstract, live, reason)
+        return out
+    except Exception as e:
+        log.warning("compaction hybrid failed open to the default strategy: %s", e)
+        return None
 
 
 def compact_with(messages: list[dict], *, strategy: str | None = None,
                  **kwargs) -> list[dict]:
-    """Compact ``messages`` with the named/configured strategy.
+    """Compact ``messages`` with the named/configured/picked strategy.
 
     Fails safe to the built-in ``heuristic`` when the requested strategy is not
     registered — a misconfiguration degrades to working compaction, never none.
+    With no explicit name anywhere and ``[compaction] hybrid`` on, the v6
+    picker chooses (see the module docstring for the full precedence).
     """
-    _warn_hybrid_unwired_once()
-    name = strategy or _configured_name()
+    name = strategy
+    if not name:
+        name = _configured_name()
+        if name:
+            _warn_hybrid_shadowed_once(name)
+    if not name:
+        out = _hybrid_compact(messages, **kwargs)
+        if out is not None:
+            return out
+        name = _DEFAULT
     strat = _REGISTRY.get(name) or _REGISTRY[_DEFAULT]
     return strat.compact(messages, **kwargs)
 
