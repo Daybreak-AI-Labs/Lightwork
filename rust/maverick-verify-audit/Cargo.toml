@@ -13,7 +13,7 @@ path = "src/main.rs"
 # Ed25519 verification, pure Rust. verify_strict() rejects the malleable /
 # small-order signatures the RFC-8032 verify equation would otherwise accept,
 # matching `cryptography`'s strict PublicKey.verify (which also rejects them).
-ed25519-dalek = "2"
+ed25519-dalek = "3"
 sha2 = "0.11"
 hex = "0.4"
 # arbitrary_precision: KEEP the original number literal from each row verbatim
