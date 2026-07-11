@@ -133,12 +133,13 @@ def _filter_gradable(swg, instances: list, workroot: Path, *, timeout: float) ->
 
 
 def _baseline_feedback(dgm, solver_dir: Path, held_in: list, workroot: Path,
-                       *, timeout: float) -> str:
+                       *, timeout: float, score_fn=None) -> str:
     """Run the baseline solver on the HELD-IN slice and describe what it failed.
 
     Only held-in instances are ever shown to the proposer, so the held-out slice
     the gate promotes on stays genuinely unseen."""
-    resolved = dgm.run_solver(solver_dir, held_in, workroot, timeout=timeout)
+    resolved = dgm.run_solver(solver_dir, held_in, workroot, timeout=timeout,
+                              score_fn=score_fn)
     failed = [i.instance_id for i in held_in if not resolved.get(i.instance_id)]
     if not failed:
         return "The baseline solver already resolves every seen instance."
@@ -180,12 +181,13 @@ def _spend_from_log(path: Path) -> float:
     return total
 
 
-def _author_patch(args, dgm, solver_dir: Path, held_in: list, workroot: Path) -> str:
+def _author_patch(args, dgm, solver_dir: Path, held_in: list, workroot: Path,
+                  score_fn=None) -> str:
     """Produce the candidate solver patch (stub file, or the live LLM proposer)."""
     if args.stub:
         return _stub_patch(solver_dir, args.stub_patch)
     feedback = _baseline_feedback(dgm, solver_dir, held_in, workroot / "feedback",
-                                  timeout=args.timeout)
+                                  timeout=args.timeout, score_fn=score_fn)
     return dgm.llm_solver_proposer(solver_dir, feedback)
 
 
@@ -196,7 +198,7 @@ def _abort_ceiling(args, n_instances: int, n_held_in: int) -> float:
 
 
 def _run_governed(args, dgm, solver_dir: Path, patch: str, instances: list,
-                  work: Path):
+                  work: Path, score_fn=None):
     """Build a min_samples-tuned controller and drive the governed chain."""
     from maverick.self_improvement import (
         _RUNG_POLICY,
@@ -210,7 +212,18 @@ def _run_governed(args, dgm, solver_dir: Path, patch: str, instances: list,
     return dgm.govern_solver_change(
         solver_dir, patch, instances, keys_dir=args.keys, ledger=ledger,
         workroot=work / "gov", held_out_frac=args.held_out_frac,
-        timeout=args.timeout, controller=ctrl)
+        timeout=args.timeout, controller=ctrl, score_fn=score_fn)
+
+
+def _build_score_fn(args, dgm):
+    """The grading hook for this run: official-container grading when
+    --container-grade, else None (the host score_instance default)."""
+    if not getattr(args, "container_grade", False):
+        return None
+    import swebench_container_grade as CG
+    runner = (CG.modal_runner() if args.container_backend == "modal"
+              else CG.docker_runner())
+    return dgm.container_score_fn(runner, namespace=args.namespace)
 
 
 def _verdict(res) -> tuple[str, str]:
@@ -232,10 +245,17 @@ def run(args, *, workdir: Path | None = None) -> DriverOutcome:
     solver_dir = Path(args.solver)
     out = DriverOutcome(ledger_path=str(args.ledger))
 
+    score_fn = _build_score_fn(args, dgm)
     with _tmp(workdir) as td:
         work = Path(td)
         instances = swg._load_manifest(args.manifest)
-        if args.gradable_only:
+        if args.gradable_only and score_fn is not None:
+            # The host env pre-gate answers "can THIS HOST grade it" -- the wrong
+            # question under container grading (every Verified instance grades in
+            # its own image). Running it would drop the whole corpus for nothing.
+            print("  [note ]  --gradable-only ignored: --container-grade grades "
+                  "in official images, host env is irrelevant")
+        elif args.gradable_only:
             instances, out.n_dropped = _filter_gradable(
                 swg, instances, work / "pregate", timeout=args.timeout)
         if args.limit:
@@ -271,8 +291,10 @@ def run(args, *, workdir: Path | None = None) -> DriverOutcome:
         prev = os.environ.get(_SPEND_LOG_ENV)
         os.environ[_SPEND_LOG_ENV] = str(spend_log)
         try:
-            patch = _author_patch(args, dgm, solver_dir, held_in, work)
-            res = _run_governed(args, dgm, solver_dir, patch, instances, work)
+            patch = _author_patch(args, dgm, solver_dir, held_in, work,
+                                  score_fn=score_fn)
+            res = _run_governed(args, dgm, solver_dir, patch, instances, work,
+                                score_fn=score_fn)
         finally:
             if prev is None:
                 os.environ.pop(_SPEND_LOG_ENV, None)
@@ -333,6 +355,18 @@ def _parse_args(argv: list[str] | None) -> argparse.Namespace:
     ap.add_argument("--gradable-only", action="store_true",
                     help="pre-filter to instances this host can grade for free "
                          "(_env_pregate); prints how many were dropped")
+    ap.add_argument("--container-grade", action="store_true",
+                    help="grade every emitted patch in the instance's OFFICIAL "
+                         "SWE-bench container (dgm_uplift.container_score_fn) "
+                         "instead of on this host -- the honest mode for real "
+                         "Verified corpora. Implies the corpus must be Verified "
+                         "instance ids; makes --gradable-only a no-op (the host "
+                         "env is irrelevant when grading in containers).")
+    ap.add_argument("--container-backend", choices=("modal", "docker"),
+                    default="modal", help="container backend for --container-grade")
+    ap.add_argument("--namespace", default=None,
+                    help="image namespace for --container-grade "
+                         "(default: the official 'swebench' Docker Hub namespace)")
     ap.add_argument("--limit", type=int, default=0, help="cap the corpus size (0 = all)")
     ap.add_argument("--timeout", type=float, default=600.0,
                     help="per-arm test-run timeout in seconds")

@@ -214,6 +214,29 @@ def _grading_sensitive_paths(patch: str) -> list[str]:
     return host_check(patch)
 
 
+def host_boundary(instance: dict, candidate_patch: str, *,
+                  check_gold_overlap: bool = True) -> tuple[bool, str]:
+    """The $0 host-side anti-cheat boundary, shared by every container-grading
+    caller (the governed grade below, and the DGM's ``container_score_fn``):
+    ``defensive_validate`` (test/setup-edit refusal; optional gold-overlap
+    warning) plus the grading-sensitive-config hard refusal. One definition so
+    a candidate refused on one path is refused on all of them."""
+    from maverick.coding_mode import defensive_validate
+
+    f2p = list(instance.get("FAIL_TO_PASS") or instance.get("fail_to_pass") or [])
+    p2p = list(instance.get("PASS_TO_PASS") or instance.get("pass_to_pass") or [])
+    gold = "" if not check_gold_overlap else (
+        instance.get("patch", "") or instance.get("gold_patch", ""))
+    dv = defensive_validate(candidate_patch, fail_to_pass=f2p, pass_to_pass=p2p,
+                            gold_patch=gold)
+    if not dv.ok:
+        return False, ("; ".join(dv.blocked_paths) or "anti-cheat boundary refused")
+    sensitive = _grading_sensitive_paths(candidate_patch)
+    if sensitive:
+        return False, f"candidate edits grading-sensitive config: {sensitive}"
+    return True, "no test/config edits"
+
+
 def governed_container_grade(instance: dict, candidate_patch: str, run_in_image, *,
                              timeout: float = 1800.0,
                              namespace: str = DEFAULT_IMAGE_NAMESPACE,
@@ -233,27 +256,15 @@ def governed_container_grade(instance: dict, candidate_patch: str, run_in_image,
     ``swebench_governed._promote``) so this module has no key material and no
     ledger side effects -- it only decides ``resolved``.
     """
-    from maverick.coding_mode import defensive_validate
-
     out = ContainerGradeResult(instance_id=instance["instance_id"])
-    f2p = list(instance.get("FAIL_TO_PASS") or instance.get("fail_to_pass") or [])
-    p2p = list(instance.get("PASS_TO_PASS") or instance.get("pass_to_pass") or [])
 
-    # 1. Anti-cheat boundary, host-side, before anything runs in the container.
-    gold = "" if not check_gold_overlap else (
-        instance.get("patch", "") or instance.get("gold_patch", ""))
-    dv = defensive_validate(candidate_patch, fail_to_pass=f2p, pass_to_pass=p2p,
-                            gold_patch=gold)
-    out.boundary_ok = bool(dv.ok)
-    if not dv.ok:
-        out.boundary_reason = "; ".join(dv.blocked_paths) or "anti-cheat boundary refused"
-        return out
-    # Stricter than the base harness (parity with govern_candidate): hard-refuse
-    # candidate edits to grading-sensitive config that could rig the grader.
-    sensitive = _grading_sensitive_paths(candidate_patch)
-    if sensitive:
-        out.boundary_ok = False
-        out.boundary_reason = f"candidate edits grading-sensitive config: {sensitive}"
+    # 1. Anti-cheat boundary, host-side, before anything runs in the container
+    #    (shared definition -- see host_boundary).
+    ok, reason = host_boundary(instance, candidate_patch,
+                               check_gold_overlap=check_gold_overlap)
+    out.boundary_ok = ok
+    if not ok:
+        out.boundary_reason = reason
         return out
 
     # 2. Baseline mis-seed guard: the graded FAIL_TO_PASS must FAIL with no
