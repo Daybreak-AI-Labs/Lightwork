@@ -33,6 +33,30 @@ def test_allowlist_filter_drops_disallowed_fallbacks(monkeypatch, tmp_path):
     assert _allowlist_filter_fallbacks(chain) == ["anthropic:claude-sonnet-4-6"]
 
 
+def test_model_for_role_accepts_bare_vs_qualified_allowlist(monkeypatch, tmp_path):
+    # Regression: the resolved model may be bare ("claude-sonnet-4-6") while the
+    # allow-list stores it provider-qualified ("anthropic:claude-sonnet-4-6").
+    # An exact-membership check wrongly rejected it and substituted; canonical
+    # comparison must treat the two spellings as the same allowed model.
+    from maverick import llm
+    ro = _point_overlay(monkeypatch, tmp_path)
+    ro.set_allowed_models(["anthropic:claude-sonnet-4-6"])
+    monkeypatch.setattr(llm, "_resolve_model_for_role", lambda role: "claude-sonnet-4-6")
+    assert llm.model_for_role("orchestrator") == "claude-sonnet-4-6"
+
+
+def test_model_for_role_fallback_is_cheapest_not_lexicographic(monkeypatch, tmp_path):
+    # Regression: when neither the resolved model nor DEFAULT_MODEL is allowed,
+    # the fallback must be the CHEAPEST allowed model, not sorted(allow)[0].
+    # Here opus ($25/out) sorts before the far cheaper deepseek flash ($0.28),
+    # so lexicographic-first would force the most expensive allowed model.
+    from maverick import llm
+    ro = _point_overlay(monkeypatch, tmp_path)
+    ro.set_allowed_models(["anthropic:claude-opus-4-8", "openrouter:deepseek-v4-flash"])
+    monkeypatch.setattr(llm, "_resolve_model_for_role", lambda role: "openai:gpt-5.5")
+    assert llm.model_for_role("bulk") == "openrouter:deepseek-v4-flash"
+
+
 def test_allowlist_filter_noop_without_allowlist(monkeypatch, tmp_path):
     from maverick.llm import _allowlist_filter_fallbacks
     _point_overlay(monkeypatch, tmp_path)  # no allow-list set -> unrestricted

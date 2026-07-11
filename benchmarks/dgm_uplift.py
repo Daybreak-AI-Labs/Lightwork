@@ -122,10 +122,18 @@ def score_instance(inst, patch: str, workroot: Path, *, timeout: float = 600.0) 
             tp = git_apply(inst.test_patch, work / "tree")
             if not tp.ok:
                 return False
+        sb = resolve_eval_sandbox(None, work / "tree")
+        # Baseline honesty guard: the graded FAIL_TO_PASS must FAIL before the
+        # candidate is applied. If they already pass at baseline, the instance is
+        # mis-seeded (no bug to fix) and ANY applying patch would score all_pass
+        # -- inflating the valuation-facing DGM resolved-rate. Not a resolve.
+        base = run_failing_tests(work / "tree", inst.fail_to_pass, [],
+                                 sb, timeout=timeout, language=inst.language)
+        if base.all_pass:
+            return False
         applied = git_apply(patch, work / "tree")
         if not applied.ok:
             return False
-        sb = resolve_eval_sandbox(None, work / "tree")
         res = run_failing_tests(work / "tree", inst.fail_to_pass, inst.pass_to_pass,
                                 sb, timeout=timeout, language=inst.language)
         return bool(res.all_pass)

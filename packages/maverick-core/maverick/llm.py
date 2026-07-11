@@ -312,11 +312,43 @@ def model_for_role(role: str) -> str:
     try:
         from .runtime_overrides import allowed_models
         allow = allowed_models()
-        if allow and final not in allow:
-            final = DEFAULT_MODEL if DEFAULT_MODEL in allow else sorted(allow)[0]
+        if allow:
+            allow_canon = {_canonical_spec(a) for a in allow}
+            # Compare canonically: a bare ("claude-sonnet-4-6") and a
+            # provider-qualified ("anthropic:claude-sonnet-4-6") spelling of the
+            # same model must not read as a mismatch, or an operator-allowed
+            # model gets wrongly rejected and silently substituted.
+            if _canonical_spec(final) not in allow_canon:
+                if _canonical_spec(DEFAULT_MODEL) in allow_canon:
+                    final = DEFAULT_MODEL
+                else:
+                    # Cost-aware fallback: the CHEAPEST allowed model, not
+                    # sorted(allow)[0] -- lexicographic-first could force a cheap
+                    # bulk role onto the most expensive allowed model.
+                    final = _cheapest_allowed(allow)
     except Exception:  # pragma: no cover -- allow-list never breaks resolution
         pass
     return final
+
+
+def _canonical_spec(spec: str) -> str:
+    """``provider:model-id`` canonical form so a bare vs provider-qualified
+    spelling of the same model compares equal in the admin allow-list check."""
+    provider, model_id = _parse_spec(spec)
+    return f"{provider}:{model_id}"
+
+
+def _cheapest_allowed(allow: list[str]) -> str:
+    """The cheapest model in ``allow`` by published output price (input price as
+    a tie-break), name-sorted for determinism. Unknown-priced models rank last so
+    a known cheap model wins. The allow-list fallback uses this instead of
+    ``sorted(allow)[0]`` (lexicographic, cost-blind)."""
+    def rank(spec: str):
+        model_id = _parse_spec(spec)[1]
+        price = MODEL_PRICES.get(model_id)
+        out_in = (price[1], price[0]) if price else (float("inf"), float("inf"))
+        return (*out_in, spec)
+    return min(allow, key=rank)
 
 
 def _allowlist_filter_fallbacks(models: list[str]) -> list[str]:
