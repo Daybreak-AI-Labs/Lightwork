@@ -169,7 +169,7 @@ def _regrade(inst, patch: str, *, timeout: float) -> tuple[str, str]:
                 sb = resolve_eval_sandbox(None, wd)
             except Exception as e:  # noqa: BLE001
                 return NOT_RESOLVED, f"sandbox refused (isolation policy): {e}"
-            score, all_pass, _ = _score(wd, inst, sb, timeout=timeout)
+            score, all_pass, _, _, _ = _score(wd, inst, sb, timeout=timeout)
             if all_pass:
                 return RESOLVED, f"re-graded clean: score {score:.3f}, all target tests pass"
             return NOT_RESOLVED, f"re-graded score {score:.3f}; some FAIL/PASS_TO_PASS failing"
