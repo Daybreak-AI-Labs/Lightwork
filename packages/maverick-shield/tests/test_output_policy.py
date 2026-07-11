@@ -18,11 +18,11 @@ from maverick_shield.output_policy import (
 
 class TestSecretLeakDetection:
     @pytest.mark.parametrize("text,kind", [
-        ("your key is sk-ant-api03-" + "A" * 40, "anthropic_key"),
-        ("export AWS_ACCESS_KEY_ID=AKIA1234567890ABCDEF", "aws_access_key"),
+        ("your key is sk-ant-api03-" + "A" * 40, "anthropic_key"),  # pragma: allowlist secret
+        ("export AWS_ACCESS_KEY_ID=AKIA1234567890ABCDEF", "aws_access_key"),  # pragma: allowlist secret
         ("the applicant's SSN is 123-45-6789", "ssn"),
         ("charge card 4242 4242 4242 4242 today", "credit_card"),  # valid Luhn
-        ("-----BEGIN RSA PRIVATE KEY-----\nMIIB...", "private_key"),
+        ("-----BEGIN RSA PRIVATE KEY-----\nMIIB...", "private_key"),  # pragma: allowlist secret
     ])
     def test_flags_plaintext_secret_in_output(self, text, kind):
         result = scan_output(text)
@@ -30,7 +30,7 @@ class TestSecretLeakDetection:
         assert any(kind in r for r in result.reasons), (kind, result.reasons)
 
     def test_private_key_leak_is_critical(self):
-        r = scan_output("-----BEGIN OPENSSH PRIVATE KEY-----\nabc")
+        r = scan_output("-----BEGIN OPENSSH PRIVATE KEY-----\nabc")  # pragma: allowlist secret
         assert r.severity == "critical"
 
     def test_benign_output_has_no_secret_false_positive(self):
