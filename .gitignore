@@ -121,4 +121,7 @@ maverick-train-out/
 # artifacts of a run, not source; regenerate with swebench_container_run.py)
 container_run_ledger.json
 container_run_ledger.report.json
+agent_run_ledger.json
 *.report.json
+# Agent per-instance forensics sidecars (model result text, cost, diffs)
+/forensics/
