@@ -8,7 +8,7 @@ and the resolution parsed back out -- without spending a cent.
 """
 from __future__ import annotations
 
-import json
+import copy
 import sys
 from pathlib import Path
 
@@ -21,12 +21,11 @@ sys.path.insert(0, str(_ROOT / "benchmarks"))
 pytest.importorskip("swebench", reason="official swebench harness required")
 import swebench_container_grade as CG  # noqa: E402
 from swebench.harness.constants import END_TEST_OUTPUT, START_TEST_OUTPUT  # noqa: E402
-
-_FIXTURE = _ROOT / "benchmarks" / "testdata" / "astropy__astropy-12907.json"
+from testdata.astropy_12907 import INSTANCE as _ASTROPY  # noqa: E402
 
 
 def _instance() -> dict:
-    return json.loads(_FIXTURE.read_text())
+    return copy.deepcopy(_ASTROPY)
 
 
 def _canned_log(inst: dict, *, all_pass: bool) -> str:
