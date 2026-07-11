@@ -99,3 +99,35 @@ def test_extract_fenced_diff_unwraps_code_block():
     fenced = "Here:\n```diff\ndiff --git a/solver.py b/solver.py\n--- a/solver.py\n+++ b/solver.py\n```\n"
     out = dgm_uplift._extract_fenced_diff(fenced)
     assert out.startswith("diff --git")
+
+
+# --- full-file proposer path (the robust default) ------------------------------
+
+def test_full_file_produces_applying_canonical_patch(tmp_path):
+    d = _solver_dir(tmp_path)
+    new = "def solve(instance):\n    x = 1\n    y = 3\n    return instance.gold_patch\n"
+    patch, why = dgm_uplift._full_file_to_patch(d, new)
+    assert patch, why
+    assert "instance.gold_patch" in patch
+    (tmp_path / "v").mkdir()
+    assert _applies(_solver_dir(tmp_path / "v"), patch)
+
+
+def test_full_file_identical_is_rejected(tmp_path):
+    d = _solver_dir(tmp_path)
+    patch, why = dgm_uplift._full_file_to_patch(d, _SOLVER)
+    assert patch == ""
+    assert "identical" in why
+
+
+def test_full_file_without_solve_is_rejected(tmp_path):
+    d = _solver_dir(tmp_path)
+    patch, why = dgm_uplift._full_file_to_patch(d, "def not_a_solver():\n    return 1\n")
+    assert patch == ""
+    assert "solve" in why
+
+
+def test_extract_fenced_code_picks_the_python_block(tmp_path):
+    reply = "Sure:\n```python\ndef solve(instance):\n    return 'x'\n```\nDone."
+    code = dgm_uplift._extract_fenced_code(reply)
+    assert "def solve" in code and "Sure" not in code and "Done" not in code
