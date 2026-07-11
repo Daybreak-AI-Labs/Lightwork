@@ -116,3 +116,9 @@ maverick-train-out/
 
 # Cloudflare wrangler build cache
 .wrangler/
+
+# SWE-bench governed-run outputs (signed ledger + JSON report are generated
+# artifacts of a run, not source; regenerate with swebench_container_run.py)
+container_run_ledger.json
+container_run_ledger.report.json
+*.report.json

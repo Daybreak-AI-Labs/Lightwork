@@ -623,8 +623,14 @@ def govern_candidate(
     return out
 
 
-def _promote(inst, patch, res, cb, ca, probe, *, keys_dir, ledger, controller):
-    """Build the candidate, sign it with the operator key, run the governed gate."""
+def _promote(inst, patch, res, cb, ca, probe, *, keys_dir, ledger, controller,
+             rollback: dict | None = None):
+    """Build the candidate, sign it with the operator key, run the governed gate.
+
+    ``rollback`` overrides the recorded revert action. The host path leaves it
+    None (revert the worktree at ``inst.repo_path``); container grading passes an
+    image-relative revert, since the candidate is never applied to a persistent
+    local tree."""
     import hashlib
     import os
 
@@ -643,7 +649,7 @@ def _promote(inst, patch, res, cb, ca, probe, *, keys_dir, ledger, controller):
         samples=res.samples, payload=patch,
         payload_sha256=hashlib.sha256(patch.encode()).hexdigest(),
         capability_before=cb, capability_after=ca, probe_tools=probe,
-        rollback={"revert": f"git -C {inst.repo_path} checkout -- ."},
+        rollback=rollback or {"revert": f"git -C {inst.repo_path} checkout -- ."},
         id=inst.instance_id)
     sig = asig.sign_request(asig.ApprovalRequest.for_candidate(cand), priv)
     cand = Candidate(**{**cand.__dict__, "approval_signature": sig})
