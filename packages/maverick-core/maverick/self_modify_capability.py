@@ -55,13 +55,25 @@ _CLASS_PATTERNS: dict[str, tuple[str, ...]] = {
         r"httpx|aiohttp|smtplib|ftplib|paramiko|websockets)\b",
     ),
     "dynamic_code": (
-        r"(?<!\w)(eval|exec)\s*\(", r"\bcompile\s*\(",
+        # Bare builtin dynamic-exec calls, DOT-guarded so an unrelated METHOD of
+        # the same name is not a false positive: `compiler.compile(...)` (a query
+        # compiler), `frame.eval(...)`/`df.eval(...)` are attribute calls, not the
+        # builtins. This matches the AST pass, which already flags eval/exec/
+        # compile only as bare Names -- the regex now says the same thing.
+        r"(?<![\w.])(eval|exec)\s*\(", r"(?<![\w.])compile\s*\(",
         # Obfuscation constructs that reach the same primitives past a literal
         # regex (getattr(os,'sy'+'stem'), __builtins__[...], base64/codecs
         # payloads). A regex screen can't catch every spelling, so a change that
         # even *uses* dynamic-attribute/decoded-payload machinery is itself
-        # treated as a dynamic-code capability -- fail toward flagging.
-        r"\bgetattr\s*\(", r"\b__builtins__\b", r"\bcodecs\.decode\b",
+        # treated as a dynamic-code capability -- fail toward flagging. getattr is
+        # flagged UNLESS its attribute-name argument is a single string LITERAL:
+        # `getattr(x, "CONST")` is static attribute access (== x.CONST), not
+        # obfuscation. A non-literal name (`getattr(x, var)`), a concatenated one
+        # (`getattr(os, 'sy'+'stem')`), or a call split across lines we cannot
+        # verify all still flag -- every ambiguous form fails toward flagging.
+        r"(?<![\w.])getattr\s*\([^,]+,(?!\s*['\"][^'\"]*['\"]\s*[,)])",
+        r"(?<![\w.])getattr\s*\([^)]*$",
+        r"\b__builtins__\b", r"\bcodecs\.decode\b",
         r"\bbase64\b", r"\bglobals\s*\(\s*\)\s*\[", r"\bvars\s*\(\s*\)\s*\[",
     ),
     "fs_write": (
@@ -187,8 +199,17 @@ class _CapVisitor(ast.NodeVisitor):
         f = node.func
         if isinstance(f, ast.Name):
             nm = f.id
-            if nm in ("eval", "exec", "compile", "getattr"):
+            if nm in ("eval", "exec", "compile"):
                 self._add("dynamic_code")
+            elif nm == "getattr":
+                # getattr(x, "CONST") is static attribute access (== x.CONST); a
+                # single string-literal name is not dynamic. Flag any other form
+                # (variable/expression/concatenated name, or too few args to
+                # verify) -- fail toward flagging.
+                name_arg = node.args[1] if len(node.args) >= 2 else None
+                if not (isinstance(name_arg, ast.Constant)
+                        and isinstance(name_arg.value, str)):
+                    self._add("dynamic_code")
             elif nm == "__import__":
                 self._add("dynamic_import")
             elif nm == "open" and self._open_is_write(node):
