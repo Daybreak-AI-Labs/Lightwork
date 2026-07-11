@@ -395,19 +395,34 @@ def _feed_circuit(provider: str, error: bool) -> None:
         pass
 
 
-def _enforce_provider_cap(provider: str) -> None:
+def _safe_cap_projection(model_id, system, messages, tools, max_tokens,
+                         thinking_budget=None) -> float:
+    """Estimated cost of the pending call for the provider-cap projection.
+    Never raises -- a bad estimate must not block a legitimate call (fails to 0,
+    i.e. spend-only enforcement, the prior behaviour)."""
+    try:
+        return _estimate_call_cost(model_id, system, messages, tools, max_tokens,
+                                   thinking_budget)
+    except Exception:  # pragma: no cover -- estimate never blocks a call
+        return 0.0
+
+
+def _enforce_provider_cap(provider: str, projected_dollars: float = 0.0) -> None:
     """Deployment-wide provider spend ceiling gate ([budget.provider_caps]).
 
     Raises ``ProviderCapExceeded`` when the provider's period spend has reached
-    its cap -- so a failover chain moves to the next provider, or (no chain) the
-    call fails closed. A NO-OP unless a cap is configured for this provider, so
-    the default install is unchanged. ProviderCapExceeded is deliberately NOT
+    its cap -- OR when ``projected_dollars`` (this call's estimated cost) would
+    push it over -- so a failover chain moves to the next provider, or (no chain)
+    the call fails closed. Projecting the pending call closes the gap where a
+    single large call or concurrent calls, each seeing under-cap recorded spend,
+    blew past the ceiling. A NO-OP unless a cap is configured for this provider,
+    so the default install is unchanged. ProviderCapExceeded is deliberately NOT
     caught here: it must propagate. Only a missing module is swallowed."""
     try:
         from .provider_cost_cap import enforce
     except ImportError:  # pragma: no cover -- module always present
         return
-    enforce(provider)
+    enforce(provider, projected_dollars=projected_dollars)
 
 
 def _record_provider_spend(provider: str, dollars: float) -> None:
@@ -807,7 +822,11 @@ class LLM:
         from .privacy_egress import maybe_redact_egress
         system, messages = maybe_redact_egress(provider, system, messages)
         _record_provider_call(provider)
-        _enforce_provider_cap(provider)  # deployment-wide $ ceiling (opt-in)
+        # Project this call's cost into the deployment-wide $ ceiling so a single
+        # large call (or concurrent calls seeing the same under-cap spend) can't
+        # blow past it.
+        _enforce_provider_cap(provider, _safe_cap_projection(
+            model_id, system, messages, tools, max_tokens, thinking_budget))
         _run_preflight(model_id, system, messages, tools, max_tokens)
         client = self._get_client(provider)
         kwargs: dict[str, Any] = dict(
@@ -942,7 +961,11 @@ class LLM:
         from .privacy_egress import maybe_redact_egress
         system, messages = maybe_redact_egress(provider, system, messages)
         _record_provider_call(provider)
-        _enforce_provider_cap(provider)  # deployment-wide $ ceiling (opt-in)
+        # Project this call's cost into the deployment-wide $ ceiling so a single
+        # large call (or concurrent calls seeing the same under-cap spend) can't
+        # blow past it.
+        _enforce_provider_cap(provider, _safe_cap_projection(
+            model_id, system, messages, tools, max_tokens, thinking_budget))
         _run_preflight(model_id, system, messages, tools, max_tokens)
         client = self._get_client(provider)
         import time as _time

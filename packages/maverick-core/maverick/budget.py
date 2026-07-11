@@ -554,6 +554,17 @@ def _clamp_to_tenant_remainder(kwargs: dict) -> None:
     over-quota gate only fires *between* runs, letting one run blow past the
     tenant cap. No active tenant / no cap -> untouched (the default single-tenant
     install is unchanged). Never *raises* a cap, only lowers it.
+
+    KNOWN LIMITATION (concurrency): the remaining allowance is read ONCE here,
+    from recorded ledger spend. Two runs for the same tenant that START before
+    either records spend both clamp to the same remainder, so their PER-RUN caps
+    can sum to more than the tenant's daily ceiling (each run individually
+    respects its clamp; the aggregate can still overshoot). Closing this needs a
+    shared reservation with a release lifecycle (reserve the clamp at start,
+    reconcile against actual spend or release on completion) OR a continuous
+    re-check of live tenant spend inside ``Budget.check()`` -- both a design
+    change beyond an in-place clamp, tracked separately. The single-run and
+    between-run cases ARE enforced.
     """
     try:
         from .paths import current_tenant
