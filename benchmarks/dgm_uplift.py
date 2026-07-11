@@ -43,6 +43,7 @@ from __future__ import annotations
 
 import importlib.util
 import logging
+import os
 import pathlib
 import sys
 import uuid
@@ -454,11 +455,81 @@ def rollback_solver(solver_dir: Path, archive_snapshot: Path) -> None:
 
 # --- the LLM proposer (authors solver patches; needs a provider key) -----------
 
+def _extract_fenced_diff(text: str) -> str:
+    """Pull a unified diff out of a possibly fenced model reply."""
+    text = (text or "").strip()
+    if "```" in text:
+        for p in text.split("```"):
+            body = p.removeprefix("diff").removeprefix("patch").strip("\n")
+            if body.lstrip().startswith(("diff --git", "--- ")):
+                return body
+    return text
+
+
+def _canonicalize_solver_patch(solver_dir: Path, diff_text: str) -> tuple[str, str]:
+    """Turn a model-authored diff into a CANONICAL, guaranteed-applying one.
+
+    LLMs miscount hunk headers ("corrupt patch at line N" -- the exact failure
+    that killed the first live cycle, and the same class the agent path solved
+    with worktree diffs over prose diffs). Rather than trust the model's line
+    arithmetic: apply the diff to a scratch git copy of the solver, letting
+    ``--recount`` re-derive the counts from the hunk bodies, then re-emit
+    ``git diff`` -- git's own arithmetic, canonical by construction.
+
+    Returns ``(canonical_diff, error)``: ``("", why)`` when the diff is
+    unusable even recounted (the retry prompt gets ``why``); a diff that
+    changes nothing also returns ``("", ...)`` so a no-op can't reach the gate.
+    """
+    import shutil
+    import subprocess
+    import tempfile
+
+    if not (diff_text or "").strip():
+        return "", "empty reply (no diff found)"
+    env = {"GIT_CONFIG_GLOBAL": os.devnull, "GIT_CONFIG_NOSYSTEM": "1",
+           "PATH": os.environ.get("PATH", "")}
+
+    def _git(*args, cwd):
+        return subprocess.run(["git", *args], cwd=cwd, capture_output=True,
+                              text=True, timeout=60, env=env)
+
+    td = tempfile.mkdtemp(prefix="dgm-canon-")
+    try:
+        scratch = Path(td) / "s"
+        shutil.copytree(solver_dir, scratch,
+                        ignore=shutil.ignore_patterns(".git", "__pycache__"))
+        _git("init", "-q", ".", cwd=scratch)
+        _git("add", "-A", cwd=scratch)
+        _git("-c", "user.email=dgm@local", "-c", "user.name=dgm",
+             "commit", "-qm", "base", cwd=scratch)
+        patch_file = Path(td) / "p.diff"
+        patch_file.write_text(diff_text if diff_text.endswith("\n")
+                              else diff_text + "\n", encoding="utf-8")
+        last_err = ""
+        for extra in ((), ("--recount",), ("--recount", "--whitespace=fix")):
+            r = _git("apply", *extra, str(patch_file), cwd=scratch)
+            if r.returncode == 0:
+                canon = _git("diff", cwd=scratch).stdout
+                if not canon.strip():
+                    return "", "diff applied but changed nothing"
+                return canon, ""
+            last_err = (r.stderr or r.stdout or "").strip()[-500:]
+        return "", f"git apply failed even with --recount: {last_err}"
+    except Exception as e:  # scratch trouble is a repair failure, not a crash
+        return "", f"canonicalize error: {type(e).__name__}: {e}"
+    finally:
+        shutil.rmtree(td, ignore_errors=True)
+
+
 def llm_solver_proposer(solver_dir: Path, feedback: str, *, model: str | None = None,
                         max_tokens: int = 4096) -> str:
     """Ask the coding-role model for a unified diff improving ``solver.py``,
-    given evaluation feedback (which instances failed and why). Returns the raw
-    diff text (the governed gate decides everything else). Fail-loud keyless."""
+    given evaluation feedback (which instances failed and why). The reply is
+    CANONICALIZED (scratch-apply with --recount, re-emitted by git) so the
+    model's hunk-header arithmetic can never kill the cycle; if the diff is
+    unusable, ONE pointed retry carries the apply error back to the model.
+    Returns the canonical diff, or the last raw text so the governed gate
+    refuses with an honest reason. Fail-loud keyless."""
     import os
 
     if not (os.environ.get("ANTHROPIC_API_KEY") or os.environ.get("MAVERICK_PROVIDER_READY")):
@@ -475,17 +546,28 @@ def llm_solver_proposer(solver_dir: Path, feedback: str, *, model: str | None = 
         "against a/solver.py that makes the solver resolve more instances. "
         "Never touch test files; never special-case instance ids -- generalise.")
     user = f"Current solver.py:\n```python\n{src}\n```\n\nEvaluation feedback:\n{feedback}\n"
-    resp = LLM().complete(system, [{"role": "user", "content": user}],
-                          max_tokens=max_tokens, model=model)
-    text = (resp.text or "").strip()
-    # Tolerate a fenced reply; the boundary/apply gates judge the rest.
-    if "```" in text:
-        parts = text.split("```")
-        for p in parts:
-            body = p.removeprefix("diff").removeprefix("patch").strip("\n")
-            if body.lstrip().startswith(("diff --git", "--- ")):
-                return body
-    return text
+    llm = LLM()
+    resp = llm.complete(system, [{"role": "user", "content": user}],
+                        max_tokens=max_tokens, model=model)
+    raw = _extract_fenced_diff(resp.text or "")
+    canon, why = _canonicalize_solver_patch(solver_dir, raw)
+    if canon:
+        return canon
+    log.warning("proposer diff unusable (%s); retrying once with the error", why)
+    retry_user = (user +
+                  f"\n\nYour previous diff could not be applied ({why}). "
+                  "Re-emit the COMPLETE unified diff. Quote removed lines "
+                  "EXACTLY as they appear in the file and keep every hunk "
+                  "small; do not include line-count arithmetic you are not "
+                  "sure of.")
+    resp2 = llm.complete(system, [{"role": "user", "content": retry_user}],
+                         max_tokens=max_tokens, model=model)
+    raw2 = _extract_fenced_diff(resp2.text or "")
+    canon2, why2 = _canonicalize_solver_patch(solver_dir, raw2)
+    if canon2:
+        return canon2
+    log.warning("proposer retry diff also unusable (%s)", why2)
+    return raw2 or raw   # let the gate refuse with the honest reason
 
 
 __all__ = [
