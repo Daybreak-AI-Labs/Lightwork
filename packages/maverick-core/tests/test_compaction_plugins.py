@@ -82,32 +82,138 @@ def test_register_validates_strategy():
         cp.register(_NoName())
 
 
-def test_hybrid_flag_warns_once_and_is_a_noop(monkeypatch, caplog):
-    """Enabling [compaction] hybrid (unwired) logs one warning and does NOT
-    change compaction output — the no-op is loud, not silent."""
+def _hybrid_window(n=12, chars=4000):
+    """A window big enough to be worth compacting (> _HYBRID_RECORD_MIN_CHARS)
+    whose old tool_results the built-in shrink will digest."""
+    msgs = [{"role": "user", "content": "brief"}]
+    for i in range(n):
+        msgs.append({"role": "user", "content": [
+            {"type": "tool_result", "tool_use_id": f"t{i}", "content": "x" * chars}]})
+    return msgs
+
+
+def test_hybrid_flag_changes_strategy_selection(monkeypatch, tmp_path):
+    """The punchlist behavioral test: flipping [compaction] hybrid changes
+    which registered strategy actually runs."""
+    from random import Random
+
+    from maverick.compaction.hybrid import STRATEGIES, HybridPicker
+
+    calls = []
+
+    class _SpyGraph:
+        name = "graph"
+
+        def compact(self, messages, **kw):
+            calls.append(self.name)
+            return [{"role": "system", "content": "graph-compacted"}]
+
+    cp.register(_SpyGraph(), replace=True)
+    monkeypatch.delenv("MAVERICK_COMPACTION_STRATEGY", raising=False)
+    monkeypatch.setattr("maverick.config.load_config", dict)
+
+    msgs = _hybrid_window()
+    picker = HybridPicker(epsilon=0.0, rng=Random(0),
+                          ledger_path=tmp_path / "ledger.json")
+    # Teach the ledger that "retrieval" wins for this shape (>= _MIN_PULLS
+    # each so the bandit exploits rather than explores under-pulled arms).
+    for s in STRATEGIES:
+        for _ in range(3):
+            picker.record(msgs, s, success=(s == "retrieval"))
+    monkeypatch.setattr(cp, "_HYBRID_PICKER", picker)
+
+    # Flag off -> built-in path; the spy strategy is never consulted.
+    monkeypatch.delenv("MAVERICK_COMPACTION_HYBRID", raising=False)
+    cp.compact_with(msgs)
+    assert calls == []
+
+    # Flag on -> picker picks "retrieval" -> mapped to the registered "graph".
+    monkeypatch.setenv("MAVERICK_COMPACTION_HYBRID", "1")
+    out = cp.compact_with(msgs)
+    assert calls == ["graph"]
+    assert out == [{"role": "system", "content": "graph-compacted"}]
+
+
+def test_hybrid_records_outcomes_into_ledger(monkeypatch, tmp_path):
+    from random import Random
+
+    from maverick.compaction.hybrid import HybridPicker, bucket_key, extract_features
+
+    monkeypatch.setenv("MAVERICK_COMPACTION_HYBRID", "1")
+    monkeypatch.delenv("MAVERICK_COMPACTION_STRATEGY", raising=False)
+    monkeypatch.setattr("maverick.config.load_config", dict)
+    picker = HybridPicker(epsilon=0.0, rng=Random(0),
+                          ledger_path=tmp_path / "ledger.json")
+    monkeypatch.setattr(cp, "_HYBRID_PICKER", picker)
+
+    msgs = _hybrid_window()  # 48k chars of stale tool output -> shrinkable
+    cp.compact_with(msgs)
+    stats = picker._bandit.stats(bucket_key(extract_features(msgs)))
+    pulled = {a: v for a, v in stats.items() if v["pulls"]}
+    assert len(pulled) == 1  # exactly one outcome recorded for the picked arm
+    assert next(iter(pulled.values()))["mean_reward"] == 1.0  # it shrank
+
+
+def test_hybrid_skips_recording_tiny_windows(monkeypatch, tmp_path):
+    from random import Random
+
+    from maverick.compaction.hybrid import HybridPicker
+
+    monkeypatch.setenv("MAVERICK_COMPACTION_HYBRID", "1")
+    monkeypatch.delenv("MAVERICK_COMPACTION_STRATEGY", raising=False)
+    monkeypatch.setattr("maverick.config.load_config", dict)
+    ledger = tmp_path / "ledger.json"
+    monkeypatch.setattr(
+        cp, "_HYBRID_PICKER",
+        HybridPicker(epsilon=0.0, rng=Random(0), ledger_path=ledger))
+
+    msgs = _msgs(3)
+    assert cp.compact_with(msgs) == msgs  # tiny window passes through
+    assert not ledger.exists()  # nothing to learn from an uncompactable window
+
+
+def test_explicit_strategy_beats_hybrid_and_warns_once(monkeypatch, caplog):
     import logging
 
-    monkeypatch.setattr(cp, "_HYBRID_NOOP_WARNED", False)
+    cp.register(_Marker())
+    monkeypatch.setattr(cp, "_HYBRID_SHADOWED_WARNED", False)
     monkeypatch.setenv("MAVERICK_COMPACTION_HYBRID", "1")
+    monkeypatch.setenv("MAVERICK_COMPACTION_STRATEGY", "marker")
+    with caplog.at_level(logging.WARNING, logger="maverick.compaction.plugins"):
+        out = cp.compact_with(_msgs(2))
+        cp.compact_with(_msgs(2))  # second call must not warn again
+    assert out == [{"role": "system", "content": "compacted 2"}]
+    shadow_warnings = [r for r in caplog.records if "hybrid" in r.getMessage()]
+    assert len(shadow_warnings) == 1
+
+
+def test_hybrid_fails_open_to_builtin(monkeypatch, caplog):
+    import logging
+
+    monkeypatch.setenv("MAVERICK_COMPACTION_HYBRID", "1")
+    monkeypatch.delenv("MAVERICK_COMPACTION_STRATEGY", raising=False)
+    monkeypatch.setattr("maverick.config.load_config", dict)
+
+    class _Boom:
+        def pick(self, messages):
+            raise RuntimeError("boom")
+
+    monkeypatch.setattr(cp, "_HYBRID_PICKER", _Boom())
+    msgs = _msgs(3)
+    with caplog.at_level(logging.WARNING, logger="maverick.compaction.plugins"):
+        assert cp.compact_with(msgs) == msgs  # built-in passthrough, no raise
+    assert [r for r in caplog.records if "failed open" in r.getMessage()]
+
+
+def test_hybrid_flag_off_default_path_unchanged(monkeypatch, caplog):
+    import logging
+
+    monkeypatch.delenv("MAVERICK_COMPACTION_HYBRID", raising=False)
     monkeypatch.delenv("MAVERICK_COMPACTION_STRATEGY", raising=False)
     monkeypatch.setattr("maverick.config.load_config", dict)
     msgs = _msgs(3)
     with caplog.at_level(logging.WARNING, logger="maverick.compaction.plugins"):
-        out = cp.compact_with(msgs)
-        cp.compact_with(msgs)  # second call must not warn again
-    assert out == msgs  # behavior unchanged
-    hybrid_warnings = [r for r in caplog.records if "hybrid" in r.getMessage()]
-    assert len(hybrid_warnings) == 1
-
-
-def test_hybrid_flag_off_does_not_warn(monkeypatch, caplog):
-    import logging
-
-    monkeypatch.setattr(cp, "_HYBRID_NOOP_WARNED", False)
-    monkeypatch.delenv("MAVERICK_COMPACTION_HYBRID", raising=False)
-    monkeypatch.setattr("maverick.config.load_config", dict)
-    with caplog.at_level(logging.WARNING, logger="maverick.compaction.plugins"):
-        cp.compact_with(_msgs(3))
+        assert cp.compact_with(msgs) == msgs
     assert not [r for r in caplog.records if "hybrid" in r.getMessage()]
 
 

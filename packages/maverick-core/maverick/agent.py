@@ -2461,8 +2461,10 @@ class Agent:
             # richer strategy via [context] compaction_strategy (heuristic /
             # learned / multimodal / streaming / graph) — all registered in the
             # one compaction.plugins dispatcher, which fails safe to heuristic
-            # on an unknown name. The agent's llm seam + conversation id reach
-            # the strategies that use them.
+            # on an unknown name — or into the ledger-learned v6 picker via
+            # [compaction] hybrid (an explicit strategy name always wins). The
+            # agent's llm seam + conversation id reach the strategies that use
+            # them.
             # Process-reward guidance (opt-in, default off): if the PRM has
             # judged the last few steps unpromising, nudge a course-change. A
             # no-op unless [self_improvement] prm_guidance is on AND a PRM is
