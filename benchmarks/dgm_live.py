@@ -97,14 +97,33 @@ def _filter_gradable(swg, instances: list, workroot: Path, *, timeout: float) ->
     """Keep only instances this host can grade for free (``_env_pregate``).
 
     Returns (kept, dropped). Fail-closed: an instance that errors in the pregate
-    is dropped, not run."""
+    is dropped, not run.
+
+    The pregate runs under the instance's era-correct venv interpreter
+    (``MAVERICK_TEST_PYTHON``), exactly like ``swebench_governed.main`` and
+    ``dgm_uplift.score_instance`` do. Without this the filter grades every
+    instance with HOST python -- on a venv'd pod (all instances on their own
+    3.8/3.9 era) that drops the ENTIRE corpus and the run dies NO-RUN, or worse,
+    keeps a wrong-era subset the later venv-aware scoring disagrees with."""
+    import os
+
     kept: list = []
     dropped = 0
     for i, inst in enumerate(instances):
+        vpy = swg._venv_python(inst)
+        prev_tp = os.environ.get("MAVERICK_TEST_PYTHON")
+        if vpy:
+            os.environ["MAVERICK_TEST_PYTHON"] = vpy
         try:
             why = swg._env_pregate(inst, workroot / f"pre{i}", timeout=timeout)
         except Exception as e:  # noqa: BLE001 -- pregate must never crash the run
             why = f"pregate error: {e}"
+        finally:
+            if vpy:
+                if prev_tp is None:
+                    os.environ.pop("MAVERICK_TEST_PYTHON", None)
+                else:
+                    os.environ["MAVERICK_TEST_PYTHON"] = prev_tp
         if why:
             dropped += 1
             print(f"  [DROP ]  {inst.instance_id:40}  {why}")
@@ -229,6 +248,16 @@ def run(args, *, workdir: Path | None = None) -> DriverOutcome:
 
         held_in, held_out = dgm.split_instances(instances, held_out_frac=args.held_out_frac)
         out.n_held_in, out.n_held_out = len(held_in), len(held_out)
+
+        # The gate refuses on min_samples at the END -- after the proposer and
+        # both solver arms have already spent. If the held-out slice can't meet
+        # the evidence floor, that refusal is knowable NOW for $0: don't start.
+        if len(held_out) < args.min_samples:
+            out.verdict, out.reason = "NO-RUN", (
+                f"held-out slice ({len(held_out)}) < --min-samples "
+                f"({args.min_samples}); the gate would refuse AFTER spending -- "
+                "grow the gradable corpus or lower --min-samples")
+            return out
 
         if args.abort_at_dollars:
             ceiling = _abort_ceiling(args, len(instances), len(held_in))

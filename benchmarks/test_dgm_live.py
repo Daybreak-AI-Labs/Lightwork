@@ -135,6 +135,10 @@ class _FakeSwg:
     """Canned _env_pregate: gradable iff the instance is flagged ok."""
 
     @staticmethod
+    def _venv_python(inst):
+        return ""
+
+    @staticmethod
     def _env_pregate(inst, workroot, *, timeout):
         return "" if inst.ok else "baseline cannot run its own passing tests"
 
@@ -153,12 +157,48 @@ class TestPregateFilter:
 
         class _Boom:
             @staticmethod
+            def _venv_python(inst):
+                return ""
+
+            @staticmethod
             def _env_pregate(inst, workroot, *, timeout):
                 raise RuntimeError("materialize blew up")
 
         kept, dropped = drv._filter_gradable(
             _Boom, [_Inst("x", True)], tmp_path, timeout=1.0)
         assert kept == [] and dropped == 1
+
+    def test_pregate_runs_under_instance_venv(self, tmp_path, monkeypatch):
+        """The filter must grade with each instance's era-correct interpreter
+        (MAVERICK_TEST_PYTHON), like main() and score_instance -- otherwise a
+        venv'd pod pregates with HOST python and drops the whole corpus."""
+        drv = _load_driver()
+        monkeypatch.delenv("MAVERICK_TEST_PYTHON", raising=False)
+        seen: dict[str, str | None] = {}
+
+        class _VenvSwg:
+            @staticmethod
+            def _venv_python(inst):
+                return f"/venvs/{inst.instance_id}/bin/python"
+
+            @staticmethod
+            def _env_pregate(inst, workroot, *, timeout):
+                import os
+                seen[inst.instance_id] = os.environ.get("MAVERICK_TEST_PYTHON")
+                return ""
+
+        import os
+        kept, dropped = drv._filter_gradable(
+            _VenvSwg, [_Inst("repo__a-1", True), _Inst("repo__b-2", True)],
+            tmp_path, timeout=1.0)
+        assert dropped == 0 and len(kept) == 2
+        # Each pregate saw ITS instance's interpreter...
+        assert seen == {
+            "repo__a-1": "/venvs/repo__a-1/bin/python",
+            "repo__b-2": "/venvs/repo__b-2/bin/python",
+        }
+        # ...and the env is restored afterward.
+        assert os.environ.get("MAVERICK_TEST_PYTHON") is None
 
 
 # --- baseline solver: keyless returns "" --------------------------------------
@@ -207,6 +247,25 @@ class TestStubEndToEnd:
         recs = PromotionLedger(path=ledger).all()
         assert len(recs) == 1
         assert recs[0].rung == "code"
+
+    def test_no_run_when_held_out_below_min_samples(self, tmp_path):
+        """The min_samples refusal is knowable BEFORE any LLM/solver spend:
+        16 instances at held-out-frac 0.5 -> 8 held out < min_samples 10, so
+        the driver must refuse at $0 instead of spending and then being
+        refused by the gate at the end."""
+        pytest.importorskip("cryptography")
+        drv = _load_driver()
+        manifest, solver_dir = _seed_corpus(tmp_path)
+        keys = _write_keys(tmp_path)
+        ledger = tmp_path / "ledger.json"
+        args = drv._parse_args([
+            "--manifest", str(manifest), "--keys", str(keys),
+            "--ledger", str(ledger), "--solver", str(solver_dir),
+            "--held-out-frac", "0.5", "--min-samples", "10", "--stub"])
+        out = drv.run(args)
+        assert out.verdict == "NO-RUN"
+        assert "min-samples" in out.reason
+        assert not ledger.exists()             # nothing ran, nothing signed
 
     def test_abort_ceiling_refuses_before_running(self, tmp_path):
         pytest.importorskip("cryptography")

@@ -48,8 +48,13 @@ with open("round3_manifest.jsonl") as src, open("dgm_corpus.jsonl", "w") as dst:
             dst.write(line + "\n"); kept += 1
 print(f"    dgm_corpus.jsonl: {kept} winnable instances")
 PY
+# The gate's evidence floor is --min-samples 10 on the HELD-OUT half, so the
+# GRADABLE corpus must be >=20. The winnable list can be inflated (a family
+# whose env broke since the oracle sweep grades NOENV now -- observed live:
+# 12 pytest instances); the venv-aware --gradable-only pre-filter drops those
+# for free and dgm_live refuses at $0 if what's left can't meet the floor.
 n=$(wc -l < dgm_corpus.jsonl)
-[ "$n" -ge 12 ] || { echo "!!! corpus too small ($n); need >=12 for a held-out split"; exit 1; }
+[ "$n" -ge 20 ] || { echo "!!! corpus too small ($n); need >=20 (min-samples 10 on the held-out half)"; exit 1; }
 
 echo "[2/3] FREE self-test: offline DGM proof must be 6/6..."
 python3 ~/Lightwork/proof/dgm_uplift_proof.py 2>&1 | grep -E "PROVEN|failed" \
