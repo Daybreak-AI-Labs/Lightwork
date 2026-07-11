@@ -92,3 +92,25 @@ def test_mis_seeded_fail_to_pass_is_ungradable_not_resolved(tmp_path):
     assert out.resolved_under_governance is False
     assert not out.promoted
     assert ledger.all() == []          # nothing signed for a mis-seeded instance
+
+
+def test_score_returns_five_tuple_including_failing_count(tmp_path):
+    # Contract guard: _score must return (score, all_pass, samples,
+    # f2p_passing, f2p_failing). The 5th element (failing count) is load-bearing
+    # for the baseline mis-seed gate -- a `-k` sibling can inflate the passing
+    # count to the requested total while a real target still fails, so the gate
+    # needs failing==0 to tell "mis-seeded" from "real bug + colliding sibling".
+    # audit_ledger.py also imports and unpacks _score, so a silent arity change
+    # crashes the independent auditor's forensics re-grade.
+    from maverick.self_modify_eval import resolve_eval_sandbox
+    from swebench_governed import Instance, _score
+
+    repo = _seed_repo(tmp_path)
+    inst = Instance(instance_id="calc__misseed-2", repo_path=repo,
+                    fail_to_pass=FAIL_TO_PASS, pass_to_pass=PASS_TO_PASS,
+                    gold_patch="", brief="arity contract")
+    sb = resolve_eval_sandbox(None, repo)
+    result = _score(repo, inst, sb, timeout=120.0)
+    assert len(result) == 5, f"_score arity changed: {result!r}"
+    score, all_pass, samples, f2p_pass, f2p_fail = result
+    assert isinstance(f2p_pass, int) and isinstance(f2p_fail, int)
