@@ -37,6 +37,24 @@ def test_enabled_by_env(monkeypatch):
     assert car.at_rest_enabled() is False
 
 
+def test_natural_truthy_tokens_enable_not_disable(monkeypatch):
+    # Regression: a natural affirmative like 'on'/'yes'/'enabled'/'true' must
+    # ENABLE at-rest encryption, not silently disable it (which stored plaintext).
+    for tok in ("on", "yes", "enabled", "enable", "true", "y", "TRUE", " On "):
+        monkeypatch.setenv("MAVERICK_ENCRYPT_AT_REST", tok)
+        assert car.at_rest_enabled() is True, f"{tok!r} should enable encryption"
+
+
+def test_at_rest_floor_fails_safe_on_unrecognized_value(monkeypatch):
+    # An unrecognised value must keep the security floor ON (fail-safe), never
+    # silently downgrade to plaintext. Only an EXPLICIT false token disables.
+    monkeypatch.setenv("MAVERICK_ENCRYPT_AT_REST", "garbage")
+    assert car.at_rest_enabled() is True
+    for tok in ("0", "false", "off", "disabled", "no"):
+        monkeypatch.setenv("MAVERICK_ENCRYPT_AT_REST", tok)
+        assert car.at_rest_enabled() is False, f"{tok!r} should disable encryption"
+
+
 def test_implied_by_enterprise(monkeypatch):
     monkeypatch.setenv("MAVERICK_ENTERPRISE", "1")
     assert car.at_rest_enabled() is True

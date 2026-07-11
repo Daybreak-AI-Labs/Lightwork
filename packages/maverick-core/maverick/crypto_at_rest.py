@@ -82,7 +82,28 @@ def _have_crypto() -> bool:
 
 
 def _truthy(value: object) -> bool:
-    return str(value).strip().lower() in {"1", "true", "yes", "on"}
+    """True for the canonical affirmative tokens, aligned with
+    ``maverick.security_defaults._TRUE`` so an operator's natural ``on`` / ``yes``
+    / ``enabled`` / ``y`` reads the same here as in the rest of the security
+    stack. A divergent, smaller set silently mis-read ``enabled`` as False and --
+    for the at-rest floor -- disabled encryption, storing plaintext."""
+    try:
+        from .security_defaults import _TRUE
+    except Exception:  # pragma: no cover -- security_defaults always importable
+        _TRUE = {"1", "true", "yes", "on", "enable", "enabled", "y", "t"}
+    return str(value).strip().lower() in _TRUE
+
+
+def _falsey(value: object) -> bool:
+    """True for the canonical negative tokens (``0``/``false``/``off``/
+    ``disabled``/...). Used by the at-rest security floor, which stays ON unless
+    an EXPLICIT false token is given -- an unrecognised value must not silently
+    downgrade to plaintext."""
+    try:
+        from .security_defaults import _FALSE
+    except Exception:  # pragma: no cover
+        _FALSE = {"0", "false", "no", "off", "disable", "disabled", "n", "f"}
+    return str(value).strip().lower() in _FALSE
 
 
 def at_rest_enabled() -> bool:
@@ -105,7 +126,10 @@ def at_rest_enabled() -> bool:
         pass
     env = os.environ.get("MAVERICK_ENCRYPT_AT_REST")
     if env is not None and env.strip() != "":
-        return _truthy(env)
+        # Security floor: ON unless an EXPLICIT false token is given. An
+        # unrecognised value keeps encryption on (fail-safe) rather than
+        # silently writing plaintext.
+        return not _falsey(env)
     try:
         from .config import load_config
         cfg = (load_config() or {}).get("encryption") or {}
@@ -113,7 +137,9 @@ def at_rest_enabled() -> bool:
         cfg = {}
     if "at_rest" in cfg:
         v = cfg.get("at_rest")
-        return _truthy(v) if isinstance(v, str) else bool(v)
+        if isinstance(v, str):
+            return not _falsey(v)
+        return bool(v)
     # Enterprise mode implies at-rest encryption (sensitive data stays sealed).
     # Secure-by-default otherwise: seal new writes unless explicitly disabled.
     # Safe for existing installs -- reads are plaintext-tolerant (unseal_from_str
