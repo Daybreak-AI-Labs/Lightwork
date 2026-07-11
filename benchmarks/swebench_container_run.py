@@ -69,6 +69,7 @@ class InstanceOutcome:
     baseline_score: float = 0.0
     candidate_score: float = 0.0
     samples: int = 0
+    cost_dollars: float = 0.0       # agent spend for this instance (0 for oracle)
     reason: str = ""
 
     @property
@@ -118,7 +119,65 @@ def oracle_patch(instance: dict) -> str:
     return instance.get("patch", "") or instance.get("gold_patch", "")
 
 
-PROPOSERS = {"oracle": oracle_patch}
+def _materialize_repo(instance: dict, dst: Path) -> None:
+    """Check out ``instance``'s repo at ``base_commit`` into ``dst`` -- the local
+    tree the agent edits to PRODUCE a patch (grading then happens in the official
+    image, so the local checkout only needs the source at base_commit, not the
+    era environment). Fetch-by-SHA at depth 1 first (fast, minimal); full clone
+    is the fallback for a server that refuses arbitrary-SHA fetches. List-arg
+    subprocess, no shell -- consistent with swebench_governed's git helpers."""
+    import shutil
+    import subprocess
+    url = f"https://github.com/{instance['repo']}"
+    sha = instance["base_commit"]
+    dst.mkdir(parents=True, exist_ok=True)
+
+    def _git(*args, cwd=None, check=True):
+        return subprocess.run(["git", *args], cwd=cwd, capture_output=True,
+                              text=True, timeout=600, check=check)
+
+    _git("init", "-q", str(dst))
+    _git("remote", "add", "origin", url, cwd=dst)
+    try:
+        _git("fetch", "--depth", "1", "-q", "origin", sha, cwd=dst)
+        _git("checkout", "-q", "-b", "base", sha, cwd=dst)
+    except subprocess.CalledProcessError:
+        shutil.rmtree(dst, ignore_errors=True)
+        _git("clone", "-q", url, str(dst))
+        _git("checkout", "-q", "-b", "base", sha, cwd=dst)
+
+
+def agent_patch(instance: dict) -> str:
+    """Run the maverick coding agent against a fresh checkout of the instance at
+    base_commit and return its proposed fix, reusing the proven
+    ``swebench_governed.llm_proposer`` (best-of-N, retry-on-empty, opaque-mode
+    anti-cheat, forensics sidecar). The agent produces the patch; the official
+    container grades it -- so the agent's local era never matters. Needs a
+    provider key (llm_proposer fails loud without one)."""
+    import shutil
+    import tempfile
+
+    from swebench_governed import Instance, _sane_test_ids, llm_proposer
+    iid = instance["instance_id"]
+    td = Path(tempfile.mkdtemp(prefix=f"agent-{iid}-"))
+    try:
+        repo = td / "repo"
+        _materialize_repo(instance, repo)
+        f2p = _sane_test_ids(list(instance.get("FAIL_TO_PASS") or []),
+                             instance_id=iid, which="FAIL_TO_PASS")
+        p2p = _sane_test_ids(list(instance.get("PASS_TO_PASS") or []),
+                             instance_id=iid, which="PASS_TO_PASS")
+        inst = Instance(
+            instance_id=iid, repo_path=repo, fail_to_pass=f2p, pass_to_pass=p2p,
+            gold_patch=instance.get("patch", "") or "",
+            brief=instance.get("problem_statement", "") or "",
+            test_patch=instance.get("test_patch", "") or "", language="python")
+        return llm_proposer(inst) or ""
+    finally:
+        shutil.rmtree(td, ignore_errors=True)
+
+
+PROPOSERS = {"oracle": oracle_patch, "agent": agent_patch}
 
 
 # --- one instance, fully governed --------------------------------------------
@@ -239,10 +298,15 @@ class RunReport:
 
 def run(instances: dict[str, dict], ids: list[str], run_in_image, *, proposer: str,
         keys_dir: Path, ledger, namespace: str, timeout: float,
-        check_baseline: bool) -> RunReport:
+        check_baseline: bool, abort_at_dollars: float = 0.0) -> RunReport:
     propose = PROPOSERS[proposer]
     rep = RunReport(proposer=proposer, seed=-1, n_requested=len(ids))
+    spend = 0.0
     for iid in ids:
+        if abort_at_dollars and spend >= abort_at_dollars:
+            print(f"  [ABORT] cumulative agent spend ${spend:.2f} >= "
+                  f"${abort_at_dollars:.2f} cap; stopping")
+            break
         instance = instances.get(iid)
         if instance is None:
             rep.outcomes.append(InstanceOutcome(
@@ -253,12 +317,19 @@ def run(instances: dict[str, dict], ids: list[str], run_in_image, *, proposer: s
         o = govern_one(instance, patch, run_in_image, proposer=proposer,
                        keys_dir=keys_dir, ledger=ledger, namespace=namespace,
                        timeout=timeout, check_baseline=check_baseline)
+        # Agent spend for this instance, read back from llm_proposer's forensics
+        # sidecar (0 for the oracle, which spends nothing).
+        if proposer != "oracle":
+            from swebench_governed import _instance_spend
+            o.cost_dollars = round(_instance_spend(iid), 4)
+            spend += o.cost_dollars
         rep.outcomes.append(o)
         tag = ("RESOLVED+SIGNED" if o.resolved_under_governance else
                "resolved(no-promo)" if o.resolved else
                "boundary" if not o.boundary_ok else "not-resolved")
-        print(f"  [{tag:18}] {iid:42} F2P {o.fail_to_pass:>7}  P2P {o.pass_to_pass:>7}"
-              f"  {'' if o.resolved_under_governance else '-- ' + o.reason[:60]}")
+        cost = f"  ${o.cost_dollars:.2f}" if o.cost_dollars else ""
+        print(f"  [{tag:18}] {iid:42} F2P {o.fail_to_pass:>7}  P2P {o.pass_to_pass:>7}{cost}"
+              f"  {'' if o.resolved_under_governance else '-- ' + o.reason[:56]}")
     return rep
 
 
@@ -285,8 +356,20 @@ def main(argv: list[str] | None = None) -> int:
                          "weakens the honesty proof -- not for a credibility run)")
     ap.add_argument("--report", type=Path, default=None,
                     help="write the JSON run report here (default: next to --ledger)")
+    ap.add_argument("--best-of-n", type=int, default=1,
+                    help="agent best-of-N sampling (default 1; higher = more spend)")
+    ap.add_argument("--abort-at-dollars", type=float, default=0.0,
+                    help="hard stop once cumulative agent spend reaches this (0 = off)")
     args = ap.parse_args(argv)
     logging.basicConfig(level=logging.INFO, format="%(message)s")
+
+    # Agent-proposer plumbing: forensics sidecars (cost read-back) land next to
+    # the ledger; best-of-N is a cost knob. Oracle ignores all of this.
+    if args.proposer != "oracle":
+        import os
+        os.environ.setdefault("MAVERICK_SWEBENCH_FORENSICS",
+                              str(args.ledger.resolve().parent / "forensics"))
+        os.environ["MAVERICK_BEST_OF_N"] = str(max(1, args.best_of_n))
 
     if args.ids.strip():
         ids = [s.strip() for s in args.ids.split(",") if s.strip()]
@@ -306,16 +389,21 @@ def main(argv: list[str] | None = None) -> int:
 
     rep = run(instances, ids, run_in_image, proposer=args.proposer, keys_dir=args.keys,
               ledger=ledger, namespace=args.namespace, timeout=args.timeout,
-              check_baseline=not args.no_baseline)
+              check_baseline=not args.no_baseline, abort_at_dollars=args.abort_at_dollars)
     rep.seed = args.seed
 
     c = rep.counts()
+    graded = len(rep.outcomes)
+    total_cost = round(sum(o.cost_dollars for o in rep.outcomes), 2)
     print("=" * 88)
-    print(f"  resolved_under_governance : {c['resolved_under_governance']}/{len(ids)}")
+    print(f"  resolved_under_governance : {c['resolved_under_governance']}/{graded}")
     print(f"  resolved (not promoted)   : {c['resolved_not_promoted']}")
     print(f"  not resolved              : {c['not_resolved']}")
     print(f"  boundary refused          : {c['boundary_refused']}")
     print(f"  error                     : {c['error']}")
+    if args.proposer != "oracle":
+        per = round(total_cost / graded, 2) if graded else 0.0
+        print(f"  agent spend               : ${total_cost:.2f} total  (~${per:.2f}/instance)")
     print("=" * 88)
 
     report_path = args.report or args.ledger.with_suffix(".report.json")
