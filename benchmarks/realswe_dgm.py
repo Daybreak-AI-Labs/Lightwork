@@ -35,9 +35,18 @@ import swebench_container_grade as CG  # noqa: E402
 from swebench_container_run import agent_patch, load_verified  # noqa: E402
 
 # The two agent configurations. Candidate = the DGM-proposed budget improvement.
+# The candidate must also LIFT THE WALL: swe_bench.py defaults the per-instance
+# wall to 1500s (25 min). At 100 steps that wall binds around step ~75 and the
+# agent is cut off BEFORE it can spend its step budget -- a false "no-diff" that
+# looks like the model failing when really the clock did. So the candidate raises
+# the wall to 3600s (60 min) so the $ cap ($8) and the step cap (100) are the real
+# limits and every instance runs to ground. Baseline keeps the default wall: 25
+# steps never approach 25 min, so it changes nothing there.
 ARMS = {
-    "baseline":  {"MAVERICK_MAX_STEPS": "25",  "MAVERICK_BEST_OF_N": "1", "MAVERICK_INSTANCE_HARD_CAP": "3.0"},
-    "candidate": {"MAVERICK_MAX_STEPS": "100", "MAVERICK_BEST_OF_N": "1", "MAVERICK_INSTANCE_HARD_CAP": "8.0"},
+    "baseline":  {"MAVERICK_MAX_STEPS": "25",  "MAVERICK_BEST_OF_N": "1",
+                  "MAVERICK_INSTANCE_HARD_CAP": "3.0", "MAVERICK_INSTANCE_WALL_SEC": "1500"},
+    "candidate": {"MAVERICK_MAX_STEPS": "100", "MAVERICK_BEST_OF_N": "1",
+                  "MAVERICK_INSTANCE_HARD_CAP": "8.0", "MAVERICK_INSTANCE_WALL_SEC": "3600"},
 }
 DEFAULT_IDS = ["sympy__sympy-15976", "sympy__sympy-14531", "pytest-dev__pytest-5631"]
 
@@ -79,7 +88,7 @@ def main(argv: list[str] | None = None) -> int:
 
     print("=" * 78)
     print(f"  GOVERNED DGM ON REAL CODE  --  {len(ids)} instances x 2 arms (baseline/candidate)")
-    print("  improvement: agent budget 25 turns/$3  ->  100 turns/$8")
+    print("  improvement: agent budget 25 turns/$3/25min  ->  100 turns/$8/60min")
     print("=" * 78)
 
     # --- run each (arm, instance), resumable + metered -------------------------
@@ -130,7 +139,8 @@ def main(argv: list[str] | None = None) -> int:
     ctrl = SelfImprovementController(frozen_fn=lambda: False, ledger=ledger)
     os.environ["MAVERICK_SELF_IMPROVEMENT"] = "1"
     os.environ["MAVERICK_APPROVER_KEYS_DIR"] = str(args.keys)
-    payload = "agent budget: MAVERICK_MAX_STEPS 25->100, MAVERICK_INSTANCE_HARD_CAP 3->8"
+    payload = ("agent budget: MAVERICK_MAX_STEPS 25->100, "
+               "MAVERICK_INSTANCE_HARD_CAP 3->8, MAVERICK_INSTANCE_WALL_SEC 1500->3600")
     import hashlib
 
     from maverick import approval_signing as asig
@@ -140,7 +150,8 @@ def main(argv: list[str] | None = None) -> int:
         baseline_score=b_rate, candidate_score=c_rate, samples=n or len(ids),
         capability_widens=False, payload=payload,
         payload_sha256=hashlib.sha256(payload.encode()).hexdigest(),
-        rollback={"revert": "MAVERICK_MAX_STEPS=25, MAVERICK_INSTANCE_HARD_CAP=3"},
+        rollback={"revert": "MAVERICK_MAX_STEPS=25, MAVERICK_INSTANCE_HARD_CAP=3, "
+                            "MAVERICK_INSTANCE_WALL_SEC=1500"},
         id="realswe-dgm-config")
     priv = (Path(args.keys) / "operator.priv.hex").read_text().strip()
     sig = asig.sign_request(asig.ApprovalRequest.for_candidate(cand), priv)

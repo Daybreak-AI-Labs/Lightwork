@@ -63,18 +63,30 @@ export ANTHROPIC_API_KEY=sk-ant-...
 ## 4a. The 3-instance mechanism proof (start here — cheapest, ~$30–60)
 
 ```bash
+# 3 instances (default). For 5, just add two more ids to --ids.
 caffeinate -s python benchmarks/realswe_dgm.py \
     --keys ~/dgm-keys --out-dir ~/realswe_dgm \
     --ids sympy__sympy-15976,sympy__sympy-14531,pytest-dev__pytest-5631 \
     --max-dollars 60
+# 5 instances (add django + scikit-learn), raise the cap to match:
+#   --ids sympy__sympy-15976,sympy__sympy-14531,pytest-dev__pytest-5631,\
+#         scikit-learn__scikit-learn-13584,django__django-11039  --max-dollars 90
 # detach and let it run:  Ctrl-b then d      (the run keeps going)
 ```
 
-This runs each real GitHub issue under a **baseline** agent budget (25 turns/$3)
-and a **candidate** budget (100 turns/$8), grades every patch in the official
-SWE-bench container on Modal, and if the candidate lifts the held-out
-resolved-rate it **promotes the config change through the real governance rung
-and signs it into the ledger**. It is **resumable** (each solve is checkpointed
+This runs each real GitHub issue under a **baseline** agent budget
+(25 turns / $3 / 25 min wall) and a **candidate** budget
+(100 turns / $8 / 60 min wall), grades every patch in the official SWE-bench
+container on Modal, and if the candidate lifts the held-out resolved-rate it
+**promotes the config change through the real governance rung and signs it into
+the ledger**.
+
+> **Why the 60-minute wall matters.** The solver's default per-instance wall is
+> 25 minutes. At 100 turns that timer would cut the agent off around turn ~75 —
+> a false "no-diff" that looks like the model failing when really the *clock*
+> ran out. The candidate arm raises the wall to 60 min so the **step cap (100)**
+> and the **dollar cap ($8)** are the real limits and every instance **runs to
+> ground**. This is verified in the driver's config, not left to chance. It is **resumable** (each solve is checkpointed
 to `~/realswe_dgm/verdicts.json`) and **hard cost-capped** (`--max-dollars`), so
 if the Mac ever reboots you just re-run the identical command — it skips
 finished solves and never re-pays.
