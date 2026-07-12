@@ -133,13 +133,15 @@ def _filter_gradable(swg, instances: list, workroot: Path, *, timeout: float) ->
 
 
 def _baseline_feedback(dgm, solver_dir: Path, held_in: list, workroot: Path,
-                       *, timeout: float, score_fn=None) -> str:
+                       *, timeout: float, score_fn=None, checkpoint=None) -> str:
     """Run the baseline solver on the HELD-IN slice and describe what it failed.
 
     Only held-in instances are ever shown to the proposer, so the held-out slice
-    the gate promotes on stays genuinely unseen."""
+    the gate promotes on stays genuinely unseen. Shares the baseline-arm
+    checkpoint so these held-in verdicts are REUSED when the baseline arm scores
+    the full corpus (no duplicate agent spend on the held-in slice)."""
     resolved = dgm.run_solver(solver_dir, held_in, workroot, timeout=timeout,
-                              score_fn=score_fn)
+                              score_fn=score_fn, checkpoint=checkpoint)
     failed = [i.instance_id for i in held_in if not resolved.get(i.instance_id)]
     if not failed:
         return "The baseline solver already resolves every seen instance."
@@ -182,12 +184,13 @@ def _spend_from_log(path: Path) -> float:
 
 
 def _author_patch(args, dgm, solver_dir: Path, held_in: list, workroot: Path,
-                  score_fn=None) -> str:
+                  score_fn=None, checkpoint=None) -> str:
     """Produce the candidate solver patch (stub file, or the live LLM proposer)."""
     if args.stub:
         return _stub_patch(solver_dir, args.stub_patch)
     feedback = _baseline_feedback(dgm, solver_dir, held_in, workroot / "feedback",
-                                  timeout=args.timeout, score_fn=score_fn)
+                                  timeout=args.timeout, score_fn=score_fn,
+                                  checkpoint=checkpoint)
     return dgm.llm_solver_proposer(solver_dir, feedback)
 
 
@@ -198,7 +201,7 @@ def _abort_ceiling(args, n_instances: int, n_held_in: int) -> float:
 
 
 def _run_governed(args, dgm, solver_dir: Path, patch: str, instances: list,
-                  work: Path, score_fn=None):
+                  work: Path, score_fn=None, checkpoint_dir=None):
     """Build a min_samples-tuned controller and drive the governed chain."""
     from maverick.self_improvement import (
         _RUNG_POLICY,
@@ -212,7 +215,8 @@ def _run_governed(args, dgm, solver_dir: Path, patch: str, instances: list,
     return dgm.govern_solver_change(
         solver_dir, patch, instances, keys_dir=args.keys, ledger=ledger,
         workroot=work / "gov", held_out_frac=args.held_out_frac,
-        timeout=args.timeout, controller=ctrl, score_fn=score_fn)
+        timeout=args.timeout, controller=ctrl, score_fn=score_fn,
+        checkpoint_dir=checkpoint_dir)
 
 
 def _build_score_fn(args, dgm):
@@ -287,14 +291,33 @@ def run(args, *, workdir: Path | None = None) -> DriverOutcome:
                     f"--abort-at-dollars ${args.abort_at_dollars:.2f}; not started")
                 return out
 
+        # Checkpoints persist NEXT TO THE LEDGER (not in the temp workdir, which
+        # is wiped on restart) so a killed cycle resumes instead of re-spending.
+        ckpt_dir = getattr(args, "checkpoint_dir", None)
+        if ckpt_dir is None:
+            ckpt_dir = args.ledger.resolve().parent / "checkpoints"
+        Path(ckpt_dir).mkdir(parents=True, exist_ok=True)
+        base_ckpt = Path(ckpt_dir) / "baseline_arm.jsonl"
+
         spend_log = work / "spend.log"
         prev = os.environ.get(_SPEND_LOG_ENV)
         os.environ[_SPEND_LOG_ENV] = str(spend_log)
         try:
-            patch = _author_patch(args, dgm, solver_dir, held_in, work,
-                                  score_fn=score_fn)
+            # Persist the authored candidate patch: the proposer is
+            # non-deterministic, so on RESUME we must reuse the EXACT patch the
+            # candidate-arm checkpoint belongs to (re-authoring could yield a
+            # different solver, making the resumed verdicts inconsistent).
+            patch_file = Path(ckpt_dir) / "candidate_patch.diff"
+            if patch_file.exists() and patch_file.read_text().strip() and not args.stub:
+                patch = patch_file.read_text()
+                print(f"  [resume] reusing persisted candidate patch ({len(patch)} bytes)")
+            else:
+                patch = _author_patch(args, dgm, solver_dir, held_in, work,
+                                      score_fn=score_fn, checkpoint=base_ckpt)
+                if (patch or "").strip():
+                    patch_file.write_text(patch)
             res = _run_governed(args, dgm, solver_dir, patch, instances, work,
-                                score_fn=score_fn)
+                                score_fn=score_fn, checkpoint_dir=ckpt_dir)
         finally:
             if prev is None:
                 os.environ.pop(_SPEND_LOG_ENV, None)
@@ -378,6 +401,11 @@ def _parse_args(argv: list[str] | None) -> argparse.Namespace:
                          "file instead of the paid proposer (free end-to-end run)")
     ap.add_argument("--stub-patch", type=Path, default=None,
                     help="explicit patch file for --stub (else <solver>/stub_improve.patch)")
+    ap.add_argument("--checkpoint-dir", type=Path, default=None,
+                    help="persist per-instance verdicts + the authored patch here "
+                         "so a killed cycle RESUMES instead of re-spending "
+                         "(default: <ledger-dir>/checkpoints). Delete it to force "
+                         "a clean run.")
     return ap.parse_args(argv)
 
 

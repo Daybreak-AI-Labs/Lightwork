@@ -227,6 +227,56 @@ def test_govern_solver_change_promotes_real_uplift_measured_in_containers(tmp_pa
     assert kinds.count("baseline") == len(instances)   # cached: once per instance
 
 
+class _I:
+    def __init__(self, iid):
+        self.instance_id = iid
+
+
+def _mk_solver(tmp_path):
+    d = tmp_path / "solver"
+    d.mkdir()
+    (d / "solver.py").write_text("def solve(instance):\n    return 'x'\n")
+    return d
+
+
+def test_checkpoint_resume_skips_graded_instances_and_matches(tmp_path):
+    # A killed cycle must RESUME: instances already in the checkpoint are not
+    # re-graded (no wasted agent spend), and the resolved-map is identical.
+    calls = {"n": 0}
+
+    def scorer(inst, patch, wr, *, timeout=600.0):
+        calls["n"] += 1
+        return inst.instance_id.endswith("odd")
+
+    insts = [_I("a-even"), _I("b-odd"), _I("c-even")]
+    solver = _mk_solver(tmp_path)
+    ckpt = tmp_path / "ck.jsonl"
+    r1 = dgm_uplift.run_solver(solver, insts, tmp_path / "w1",
+                               score_fn=scorer, checkpoint=ckpt)
+    assert calls["n"] == 3
+    calls["n"] = 0
+    r2 = dgm_uplift.run_solver(solver, insts, tmp_path / "w2",
+                               score_fn=scorer, checkpoint=ckpt)
+    assert calls["n"] == 0            # all reused from checkpoint
+    assert r1 == r2 == {"a-even": False, "b-odd": True, "c-even": False}
+
+
+def test_partial_checkpoint_resumes_only_the_remainder(tmp_path):
+    solver = _mk_solver(tmp_path)
+    ckpt = tmp_path / "ck.jsonl"
+    ckpt.write_text('{"instance_id": "a-even", "resolved": false}\n')  # a already done
+    graded = []
+
+    def scorer(inst, patch, wr, *, timeout=600.0):
+        graded.append(inst.instance_id)
+        return True
+
+    out = dgm_uplift.run_solver(solver, [_I("a-even"), _I("b-odd")], tmp_path / "w",
+                                score_fn=scorer, checkpoint=ckpt)
+    assert graded == ["b-odd"]        # a-even skipped, only b-odd graded
+    assert out == {"a-even": False, "b-odd": True}
+
+
 def test_run_solver_defaults_to_host_scoring_unchanged(tmp_path, monkeypatch):
     """score_fn=None must keep the host score_instance path byte-for-byte (the
     offline proof and synthetic corpora depend on it)."""
