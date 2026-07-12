@@ -99,6 +99,13 @@ bot_token = "${TELEGRAM_BOT_TOKEN}"
 # internet; harmless to leave unset on a desktop install (localhost-only).
 token = "${MAVERICK_DASHBOARD_TOKEN}"
 
+# Department (suite) access for authenticated users with NO explicit grant on
+# the Users page (job-function scoping: a finance analyst sees and runs only
+# Finance specialists). Unset = unrestricted — scoping is opt-in per user.
+# Set a list for deny-by-default: new sign-ins may then use only these
+# departments until an admin grants more. Admins are never scoped.
+# default_suites = ["finance"]
+
 [flows]
 # The visual flow-automation engine (a deterministic graph of agent/action/
 # branch/switch/foreach/while/parallel/approval/delay/wait_event/scope/subflow/

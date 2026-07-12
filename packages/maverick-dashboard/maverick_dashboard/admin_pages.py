@@ -326,8 +326,14 @@ async def users_page(request: Request) -> HTMLResponse:
             bootstrap = [str(a).strip() for a in seq if str(a).strip()]
         except Exception:
             bootstrap = []
-    saved = {"set": "Role updated.", "removed": "User removed."}.get(
+    saved = {"set": "Role updated.", "removed": "User removed.",
+             "suites": "Department access updated.",
+             "suites_removed": "Department access removed."}.get(
         request.query_params.get("saved", ""), "")
+    from maverick.departments import department_title
+
+    from . import suite_grants
+    default_suites = suite_grants.default_suites()
     return _app().templates.TemplateResponse(request, "users.html", {
         "users": sorted(rbac.list_users().items()),
         "roles": rbac.ROLES,
@@ -336,6 +342,12 @@ async def users_page(request: Request) -> HTMLResponse:
         "auth_on": auth_on,
         "you": auth.caller_principal(request),
         "saved": saved,
+        "suite_grants": sorted(suite_grants.list_grants().items()),
+        "all_suites": sorted(((k, department_title(k))
+                              for k in suite_grants.known_suites()),
+                             key=lambda kv: kv[1]),
+        "default_suites": (sorted(default_suites)
+                           if default_suites is not None else None),
     })
 
 
@@ -363,4 +375,37 @@ async def users_remove(request: Request, principal: str = Form(...)) -> Redirect
     from . import rbac
     rbac.remove_user(principal.strip())
     return RedirectResponse("/users?saved=removed", status_code=303)
+
+
+@router.post("/users/suites/set")
+async def users_set_suites(request: Request) -> RedirectResponse:
+    """Scope a user to a set of departments (global admin only).
+
+    The grant store is GLOBAL control-plane data (like the role roster), so
+    this requires the global admin role — a tenant-local admin may not scope
+    users across the deployment. An empty selection is a valid grant meaning
+    "no departments"; use Remove to lift scoping entirely."""
+    auth.require_global_permission(request, "admin")
+    _app()._require_same_origin(request)
+    from . import suite_grants
+    form = await request.form()
+    principal = str(form.get("principal", "")).strip()
+    suites = [str(s) for s in form.getlist("suites")]
+    try:
+        suite_grants.set_suites(principal, suites)
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail="invalid principal or department") from exc
+    return RedirectResponse("/users?saved=suites", status_code=303)
+
+
+@router.post("/users/suites/remove")
+async def users_remove_suites(
+    request: Request, principal: str = Form(...),
+) -> RedirectResponse:
+    """Lift a user's department scoping (global admin only)."""
+    auth.require_global_permission(request, "admin")
+    _app()._require_same_origin(request)
+    from . import suite_grants
+    suite_grants.remove_grant(principal.strip())
+    return RedirectResponse("/users?saved=suites_removed", status_code=303)
 

@@ -97,6 +97,7 @@ from .api_schemas import (
     TriggerOut,
     TrustAgentIn,
     TrustRevokeIn,
+    UserSuitesIn,
     WorkflowDraftIn,
     WorkflowRefineIn,
     WorkflowSaveIn,
@@ -104,12 +105,14 @@ from .api_schemas import (
 from .auth import (
     assert_goal_access,
     caller_principal,
+    caller_suites,
     can_access_goal,
     execution_user_id_from_request,
     goal_owner_filter,
     is_dashboard_admin,
     require_global_permission,
     require_permission,
+    require_suite,
 )
 
 log = logging.getLogger(__name__)
@@ -366,6 +369,48 @@ async def remove_tenant_role(
     from maverick_dashboard import rbac
     _get_tenant_or_404(tenant_id)
     rbac.remove_tenant_role(tenant_id, principal)
+    return Response(status_code=204)
+
+
+# Per-user department access (suite grants): job-function scoping of the
+# workforce — a finance analyst uses Finance specialists, never Legal's.
+# Global control-plane data like the RBAC roster, so managed under the GLOBAL
+# admin role. Enforcement lives in auth.caller_suites/require_suite and the
+# departments/fleets routes.
+
+@router.get("/users/suites")
+async def list_user_suites(request: Request) -> dict:
+    """Every explicit department grant, plus the grantable suite catalog."""
+    require_global_permission(request, "admin")
+    from maverick_dashboard import suite_grants
+    default = suite_grants.default_suites()
+    return {
+        "grants": suite_grants.list_grants(),
+        "suites": sorted(suite_grants.known_suites()),
+        "default_suites": sorted(default) if default is not None else None,
+    }
+
+
+@router.put("/users/{principal}/suites", status_code=204)
+async def set_user_suites(
+    request: Request, principal: str, body: UserSuitesIn,
+) -> Response:
+    """Scope a user to exactly these departments (empty list = none)."""
+    require_global_permission(request, "admin")
+    from maverick_dashboard import suite_grants
+    try:
+        suite_grants.set_suites(principal, body.suites)
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    return Response(status_code=204)
+
+
+@router.delete("/users/{principal}/suites", status_code=204)
+async def remove_user_suites(request: Request, principal: str) -> Response:
+    """Lift a user's department scoping (back to unrestricted/default)."""
+    require_global_permission(request, "admin")
+    from maverick_dashboard import suite_grants
+    suite_grants.remove_grant(principal)
     return Response(status_code=204)
 
 
@@ -4551,6 +4596,13 @@ async def run_fleet_agent(
     agent = next((a for a in fleet.agents if a.name == payload.agent), None)
     if agent is None:
         raise HTTPException(status_code=404, detail="no such agent in fleet")
+    # Job-function scoping: a department-deployed agent carries its specialist
+    # pack (agent.domain); a caller granted other departments may not dispatch
+    # it, even if they own the fleet (e.g. a grant narrowed after deploy).
+    # Generic agents (no domain, or a pack outside any suite) are never scoped.
+    if agent.domain:
+        from maverick.domain import suite_for
+        require_suite(request, suite_for(agent.domain))
     # Running an agent under the oversight control plane is the paid (Gold)
     # "fleet governance" capability. Fail-open: a no-op unless license enforcement
     # is on and the license lacks it. Checked after existence (404) so a missing
@@ -5528,10 +5580,15 @@ async def list_departments_api(request: Request) -> list[dict]:
 
     Each entry carries ``entitled`` — whether the active tenant's plan includes
     the paid ``departments`` add-on, so the UI shows Deploy vs. Add-on-required.
+    Suite-scoped (job function): a caller with a department grant sees only
+    their departments; unscoped callers (auth off / admin / no grant) see all.
     """
     from maverick.departments import list_departments
+    allowed = caller_suites(request)
     out = []
     for d in list_departments():
+        if allowed is not None and d.key not in allowed:
+            continue
         row = d.to_dict()
         row["entitled"] = _department_entitled_for_request(d.key)
         out.append(row)
@@ -5545,6 +5602,9 @@ async def get_department_api(request: Request, key: str) -> dict:
     dept = get_department(key)
     if dept is None:
         raise HTTPException(status_code=404, detail="no such department")
+    # Job-function scoping: 403 (not 404) — the catalog is public product
+    # surface, the denial is about THIS user's grant, mirroring role gates.
+    require_suite(request, key)
     out = dept.to_dict()
     out["entitled"] = _department_entitled_for_request(key)
     out["roster"] = [
@@ -5559,10 +5619,12 @@ async def get_department_api(request: Request, key: str) -> dict:
 async def deploy_department_api(request: Request, key: str) -> dict:
     """Deploy a department as a fleet of its specialists — a PAID ADD-ON.
 
-    Gated three ways: ``operate`` RBAC (a viewer is 403'd), owner-scoping (you
-    cannot clobber another owner's fleet — that 404s), and the ``departments``
-    entitlement (a tenant without the add-on is 402'd). Mirrors
-    ``maverick.departments.deploy_department`` so the CLI enforces the same gate.
+    Gated four ways: ``operate`` RBAC (a viewer is 403'd), the caller's
+    department grant (a finance-scoped user deploying Legal is 403'd),
+    owner-scoping (you cannot clobber another owner's fleet — that 404s), and
+    the ``departments`` entitlement (a tenant without the add-on is 402'd).
+    Mirrors ``maverick.departments.deploy_department`` so the CLI enforces the
+    same entitlement gate.
     """
     require_permission(request, "operate")
     from maverick.departments import (
@@ -5575,6 +5637,7 @@ async def deploy_department_api(request: Request, key: str) -> dict:
 
     if get_department(key) is None:
         raise HTTPException(status_code=404, detail="no such department")
+    require_suite(request, key)
 
     principal = caller_principal(request)
     owner = principal or ""
@@ -5605,6 +5668,7 @@ async def deploy_department_api(request: Request, key: str) -> dict:
 @router.get("/departments/{key}/review")
 async def department_review_api(request: Request, key: str) -> dict:
     """A governed performance review: delivery + authority + learning."""
+    require_suite(request, key)
     from maverick.worker_review import review
     r = review(_world(), key, owner=goal_owner_filter(request))
     if r is None:

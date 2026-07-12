@@ -555,3 +555,8 @@ class TenantOut(BaseModel):
 class TenantRoleIn(BaseModel):
     """Grant a principal a role within one tenant (per-tenant RBAC)."""
     role: str = Field(..., pattern="^(admin|operator|auditor|viewer)$")
+
+
+class UserSuitesIn(BaseModel):
+    """Scope a principal to a set of department suites (job function)."""
+    suites: list[str] = Field(default_factory=list, max_length=64)
