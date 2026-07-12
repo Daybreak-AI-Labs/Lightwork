@@ -356,7 +356,13 @@
     (function () {
       var host = document.getElementById('dept-roster');
       if (!host) return;
-      function esc(s) { var d = document.createElement('div'); d.textContent = s == null ? '' : s; return d.innerHTML; }
+      // Quote-safe: escapes " and ' too, so values are safe in both element
+      // content and double/single-quoted attributes (data-key etc.).
+      function esc(s) {
+        return (s == null ? '' : String(s)).replace(/[&<>"']/g, function (c) {
+          return {'&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;'}[c];
+        });
+      }
       function initials(s) { return (s || '?').trim().slice(0, 2).toUpperCase(); }
       // A member pack name like "aero_supplier_quality_aero" reads as
       // "supplier quality" on the card: strip the suite prefix + underscores.

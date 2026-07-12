@@ -172,7 +172,14 @@
     // agent runs under its role capability + its own audit principal, so the
     // oversight control plane governs it. Values escaped via textContent.
     (function() {
-      function esc(s) { const d = document.createElement('div'); d.textContent = s == null ? '' : String(s); return d.innerHTML; }
+      // Quote-safe: escapes " and ' too, so values are safe in both element
+      // content and quoted attributes (the textContent->innerHTML trick left
+      // quotes unescaped).
+      function esc(s) {
+        return (s == null ? '' : String(s)).replace(/[&<>"']/g, function (c) {
+          return {'&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;'}[c];
+        });
+      }
       document.querySelectorAll('form.fleet-run-form').forEach(function(form) {
         form.addEventListener('submit', async function(e) {
           e.preventDefault();

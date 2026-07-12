@@ -27,28 +27,41 @@
   </div>
 
   <script>
-    fetch("/api/v1/perf").then(function (r) { return r.json(); }).then(function (d) {
+    // Build cells with textContent (mvEl) rather than innerHTML string
+    // concatenation: benchmark/SLA names come from local tool output and must
+    // never be interpreted as markup.
+    function row(cells) {
+      var tr = document.createElement("tr");
+      cells.forEach(function (c) { tr.appendChild(mvEl("td", null, c)); });
+      return tr;
+    }
+    fetch("/api/v1/perf").then(function (r) {
+      if (!r.ok) throw new Error("HTTP " + r.status);
+      return r.json();
+    }).then(function (d) {
       var slaBody = document.querySelector("#sla-table tbody");
-      (d.sla || []).forEach(function (row) {
-        var tr = document.createElement("tr");
-        tr.innerHTML = "<td>" + row.name + "</td><td>" + row.measured + row.unit +
-          "</td><td>" + row.threshold + row.unit + "</td><td>" +
-          (row.passed ? "PASS" : "BREACH") + "</td>";
-        slaBody.appendChild(tr);
+      (d.sla || []).forEach(function (r) {
+        slaBody.appendChild(row([
+          r.name,
+          String(r.measured) + (r.unit || ""),
+          String(r.threshold) + (r.unit || ""),
+          r.passed ? "PASS" : "BREACH",
+        ]));
       });
       var names = Object.keys(d.benchmarks || {});
       if (!names.length) { document.getElementById("perf-empty").hidden = false; }
       var bBody = document.querySelector("#bench-table tbody");
+      var trends = (d.retrospective && d.retrospective.trends) || {};
       names.forEach(function (n) {
-        var b = d.benchmarks[n];
-        var trend = (d.retrospective && d.retrospective.trends[n])
-          ? d.retrospective.trends[n].trend : "—";
-        var tr = document.createElement("tr");
-        tr.innerHTML = "<td>" + n + "</td><td>" + b.runs + "</td><td>" + b.latest +
-          "</td><td>" + b.best + "</td><td>" + trend + "</td><td>" +
-          (b.regression.regressed ? "REGRESSED" : "ok") + "</td>";
-        bBody.appendChild(tr);
+        var b = d.benchmarks[n] || {};
+        var trend = trends[n] ? trends[n].trend : "—";
+        var reg = b.regression && b.regression.regressed ? "REGRESSED" : "ok";
+        bBody.appendChild(row([n, b.runs, b.latest, b.best, trend, reg]));
       });
+    }).catch(function (e) {
+      document.getElementById("perf-empty").textContent =
+        "Could not load performance data (" + e.message + ").";
+      document.getElementById("perf-empty").hidden = false;
     });
   </script>
 {% endblock %}

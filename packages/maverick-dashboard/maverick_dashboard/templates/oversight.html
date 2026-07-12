@@ -58,7 +58,14 @@
       const box = document.getElementById('active-now');
       const why = document.getElementById('why-panel');
       if (!box) return;
-      function esc(s) { const d = document.createElement('div'); d.textContent = s == null ? '' : String(s); return d.innerHTML; }
+      // Quote-safe: escapes " and ' too, so values are safe in both element
+      // content and quoted attributes (the textContent->innerHTML trick left
+      // quotes unescaped).
+      function esc(s) {
+        return (s == null ? '' : String(s)).replace(/[&<>"']/g, function (c) {
+          return {'&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;'}[c];
+        });
+      }
       function ago(ts) {
         if (!ts) return '';
         const s = Math.max(0, Math.floor(Date.now() / 1000 - ts));
