@@ -179,6 +179,34 @@ def test_security_headers_present_on_every_response(monkeypatch, tmp_path):
     assert resp.headers["X-Content-Type-Options"] == "nosniff"
     assert resp.headers["Referrer-Policy"] == "same-origin"
     assert resp.headers["Cross-Origin-Opener-Policy"] == "same-origin"
+    assert "microphone=(self)" in resp.headers["Permissions-Policy"]
+    assert "camera=()" in resp.headers["Permissions-Policy"]
+    # Authenticated HTML must not be left in a shared/back-forward cache.
+    assert resp.headers["Cache-Control"] == "no-store"
+
+
+def test_static_assets_keep_explicit_caching(monkeypatch, tmp_path):
+    # setdefault("Cache-Control", "no-store") must not clobber the long-lived
+    # caching the static-asset routes set for themselves.
+    from maverick import world_model
+    monkeypatch.setattr(world_model, "DEFAULT_DB", tmp_path / "world.db")
+    monkeypatch.delenv("MAVERICK_DASHBOARD_TOKEN", raising=False)
+    resp = _client().get("/static/lightwork.css")
+    assert resp.status_code == 200
+    assert "max-age" in resp.headers["Cache-Control"]
+    assert "no-store" not in resp.headers["Cache-Control"]
+
+
+def test_hsts_only_on_https(monkeypatch, tmp_path):
+    # Plain-HTTP (loopback dev) must not get HSTS — it would pin http hosts to
+    # https and break local use. The forwarded-proto header opts in.
+    from maverick import world_model
+    monkeypatch.setattr(world_model, "DEFAULT_DB", tmp_path / "world.db")
+    monkeypatch.delenv("MAVERICK_DASHBOARD_TOKEN", raising=False)
+    client = _client()
+    assert "Strict-Transport-Security" not in client.get("/").headers
+    resp = client.get("/", headers={"X-Forwarded-Proto": "https"})
+    assert "max-age=" in resp.headers["Strict-Transport-Security"]
 
 
 # ---------- skill install gate ----------

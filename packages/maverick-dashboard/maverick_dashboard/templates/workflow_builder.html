@@ -1032,7 +1032,12 @@
       row.querySelector('.pb-step__up').addEventListener('click', function () { moveStep(row, -1); });
       row.querySelector('.pb-step__down').addEventListener('click', function () { moveStep(row, 1); });
       row.querySelector('.pb-step__rm').addEventListener('click', function () {
+        // Re-home focus before removing the focused ✕ button, so keyboard users
+        // aren't dropped to <body>: prefer the previous step's ✕, else Add step.
+        var prev = row.previousElementSibling;
+        var landing = (prev && prev.querySelector('.pb-step__rm')) || document.getElementById('pb-add-step');
         row.remove(); renumber(); schedulePbLint();
+        if (landing && typeof landing.focus === 'function') landing.focus();
       });
       row.querySelector('.pb-step__browse').addEventListener('click', function () {
         openPicker(row.querySelector('.pb-step__tools'), allowSet(), 'Tools for this step');
@@ -1172,9 +1177,11 @@
       var a = splitList(pbAllow.value);
       return a.length ? new Set(a) : null;   // restrict step picker to allowed tools
     }
+    var pickerOpener = null;   // element to restore focus to when the picker closes
     function openPicker(input, restrict, title) {
       pickerTarget = input;
       pickerRestrict = restrict || null;
+      pickerOpener = document.activeElement;
       tpTitle.textContent = title || 'Browse connectors';
       tpSearch.value = '';
       tpBackdrop.hidden = false;
@@ -1185,6 +1192,10 @@
     function closePicker() {
       tpBackdrop.hidden = true;
       pickerTarget = null; pickerRestrict = null;
+      // Return focus to the "Browse…" button that opened the picker, so a
+      // keyboard user isn't dropped to <body>.
+      if (pickerOpener && pickerOpener.isConnected && typeof pickerOpener.focus === 'function') pickerOpener.focus();
+      pickerOpener = null;
     }
     function pill(cls, text) {
       var s = document.createElement('span');

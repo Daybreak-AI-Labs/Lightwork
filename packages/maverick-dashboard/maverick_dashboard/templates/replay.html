@@ -30,7 +30,7 @@
   <div class="panel">
     {% if replay.entries %}
     <table>
-      <thead><tr><th>Time (UTC)</th><th>Event</th><th>Detail</th><th>Flags</th></tr></thead>
+      <thead><tr><th scope="col">Time (UTC)</th><th scope="col">Event</th><th scope="col">Detail</th><th scope="col">Flags</th></tr></thead>
       <tbody>
         {% for e in replay.entries %}
         <tr>
@@ -55,7 +55,7 @@
   <div class="panel">
     {% if goals %}
     <table>
-      <thead><tr><th>#</th><th>Title</th><th>Status</th><th></th></tr></thead>
+      <thead><tr><th scope="col">#</th><th scope="col">Title</th><th scope="col">Status</th><th scope="col"></th></tr></thead>
       <tbody>
         {% for g in goals %}
         <tr>

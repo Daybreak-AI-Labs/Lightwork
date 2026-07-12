@@ -48,6 +48,19 @@ def test_viewer_cannot_claim_or_release_approval(monkeypatch):
     assert app_mod._world().get_approval(aid).claimed_by is None
 
 
+# --- gallery curation requires the 'operate' permission ----------------------
+
+def test_viewer_cannot_curate_gallery(monkeypatch):
+    monkeypatch.setenv("MAVERICK_DASHBOARD_ADMINS", "")
+    from maverick_dashboard import rbac
+    rbac.set_role("user:v", "viewer")
+    _as(monkeypatch, "user:v")
+    # The 'operate' gate runs before the goal lookup, so a viewer is refused
+    # publishing to / unpublishing from the deployment-wide gallery outright.
+    assert client.post("/api/v1/gallery/1").status_code == 403
+    assert client.delete("/api/v1/gallery/1").status_code == 403
+
+
 # --- #1 GET /api/v1/cost.csv owner scoping -----------------------------------
 
 def _seeded_world():

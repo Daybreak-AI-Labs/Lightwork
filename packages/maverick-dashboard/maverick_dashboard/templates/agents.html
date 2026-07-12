@@ -203,7 +203,7 @@
             {% set cur_risk = selected.max_risk if selected else 'low' %}
             <span class="risk-seg" id="risk-seg" role="group" aria-label="Risk ceiling">
               {% for r in ['low', 'medium', 'high'] %}
-              <button type="button" data-risk="{{ r }}"{% if cur_risk == r %} class="on"{% endif %}>{{ r }}</button>
+              <button type="button" data-risk="{{ r }}"{% if cur_risk == r %} class="on" aria-pressed="true"{% else %} aria-pressed="false"{% endif %}>{{ r }}</button>
               {% endfor %}
             </span>
             <select id="f-risk" name="max_risk" hidden aria-label="Risk ceiling">
@@ -301,8 +301,13 @@
         SUGGEST.forEach(function (t) { if (!seen[t]) addChip(t, false); });
         var add = document.createElement('button');
         add.type = 'button'; add.className = 'chip add'; add.textContent = '+ Add tool';
-        add.addEventListener('click', function () {
-          var name = (window.prompt('Tool name (e.g. slack_bot):') || '').trim();
+        add.addEventListener('click', async function () {
+          var vals = await mvForm('Add a tool', [
+            { key: 'name', label: 'Tool name', type: 'text', required: true,
+              placeholder: 'e.g. slack_bot' },
+          ], { okText: 'Add' });
+          if (vals === null) return;
+          var name = (vals.name || '').trim();
           if (name && sel.indexOf(name) === -1) { sel.push(name); sync(); render(); }
         });
         host.appendChild(add);
@@ -331,7 +336,10 @@
         var b = e.target.closest('button[data-risk]');
         if (!b) return;
         sel.value = b.dataset.risk;
-        seg.querySelectorAll('button').forEach(function (x) { x.classList.toggle('on', x === b); });
+        seg.querySelectorAll('button').forEach(function (x) {
+          x.classList.toggle('on', x === b);
+          x.setAttribute('aria-pressed', x === b ? 'true' : 'false');
+        });
       });
     })();
 
