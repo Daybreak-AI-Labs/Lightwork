@@ -93,6 +93,21 @@ def test_login_redirects_with_state_and_pkce(login_env, client):
     assert tx["jti"]  # opaque id used to reject callback replay
 
 
+def test_auth_cookie_secure_only_on_plain_http_loopback(login_env, client):
+    # Plain-HTTP loopback dev: no Secure, or http://localhost never gets the
+    # cookie back.
+    plain = client.get("/auth/login", follow_redirects=False)
+    assert "secure" not in plain.headers["set-cookie"].lower()
+    # Behind a TLS-terminating proxy (connects over loopback but the user is on
+    # HTTPS): the forwarded-proto header must force Secure so the session cookie
+    # can't leak over a downgraded HTTP request.
+    fresh = TestClient(app)
+    proxied = fresh.get(
+        "/auth/login", follow_redirects=False,
+        headers={"X-Forwarded-Proto": "https"})
+    assert "secure" in proxied.headers["set-cookie"].lower()
+
+
 def test_login_sanitizes_open_redirect_return_to(login_env, client):
     """An external return_to is dropped to '/' before being stashed."""
     resp = client.get(

@@ -109,6 +109,29 @@ def _is_loopback_request(request: Request) -> bool:
     return host in _LOOPBACK_HOSTS
 
 
+def _request_is_https(request: Request) -> bool:
+    """True when the browser reached us over TLS, directly or via a
+    TLS-terminating reverse proxy (``X-Forwarded-Proto: https``). A proxy
+    connects to the app over loopback, so the peer being loopback does NOT
+    imply the user is on plain HTTP."""
+    if request.url.scheme == "https":
+        return True
+    forwarded = request.headers.get("x-forwarded-proto", "")
+    return forwarded.split(",")[0].strip().lower() == "https"
+
+
+def _cookie_secure(request: Request) -> bool:
+    """Whether to set ``Secure`` on the auth cookies.
+
+    Secure whenever the request arrived over TLS (so a session established
+    behind a TLS-terminating proxy that connects over loopback is NOT issued a
+    non-Secure cookie that could then leak over a downgraded HTTP request), and
+    on any genuinely non-loopback deployment. Only a plain-HTTP loopback dev
+    session omits it, so ``http://localhost`` still receives the cookie back.
+    """
+    return _request_is_https(request) or not _is_loopback_request(request)
+
+
 def _is_safe_return_to(value: str | None) -> bool:
     """Whether ``value`` is a safe *local* path to redirect a browser to.
 
@@ -356,7 +379,7 @@ async def auth_login(request: Request):
     response = RedirectResponse(auth_url, status_code=302)
     _set_cookie(
         response, TX_COOKIE, tx_cookie,
-        max_age=_TX_TTL, secure=not _is_loopback_request(request),
+        max_age=_TX_TTL, secure=_cookie_secure(request),
     )
     return response
 
@@ -498,7 +521,7 @@ async def auth_callback(request: Request):
     response = RedirectResponse(return_to, status_code=303)
     _set_cookie(
         response, SESSION_COOKIE, session_cookie,
-        max_age=_SESSION_TTL, secure=not _is_loopback_request(request),
+        max_age=_SESSION_TTL, secure=_cookie_secure(request),
     )
     _clear_cookie(response, TX_COOKIE)
     return response
