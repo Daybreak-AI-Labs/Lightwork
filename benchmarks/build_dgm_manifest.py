@@ -58,6 +58,7 @@ def build(ids: list[str], stage_dir: Path, manifest: Path) -> int:
             rows.append({
                 "instance_id": iid,
                 "repo_path": str(dst),
+                "base_commit": raw["base_commit"],   # exact SHA to reset to pre-run
                 "fail_to_pass": raw["FAIL_TO_PASS"],
                 "pass_to_pass": raw["PASS_TO_PASS"],
                 "gold_patch": raw["patch"],

@@ -40,6 +40,7 @@ from __future__ import annotations
 
 import argparse
 import logging
+import os
 import pathlib
 import sys
 import tempfile
@@ -61,6 +62,80 @@ log = logging.getLogger(__name__)
 _SOLVER_CALL_CAP = 0.10
 _PROPOSER_EST = 0.05
 _SPEND_LOG_ENV = "MAVERICK_DGM_SPEND_LOG"
+
+
+class RunLockHeld(RuntimeError):
+    """Raised when another live DGM run already holds the corpus lock."""
+
+
+def _acquire_run_lock(lock_path: Path):
+    """Take an EXCLUSIVE, non-blocking lock so two DGM runs can never share a
+    corpus (the exact bug that double-spent and cross-corrupted repos: an
+    orphaned run survived, a second was launched, both hit the same checkouts).
+
+    ``fcntl.flock`` is advisory but kernel-released the instant the holding
+    process dies -- so a crashed/killed run leaves NO stale lock, and a fresh
+    run reclaims it automatically. Returns the open handle; the CALLER MUST keep
+    it alive for the run's duration (closing it releases the lock). Raises
+    :class:`RunLockHeld` if a LIVE run holds it (message names the holding pid)."""
+    import fcntl
+    lock_path = Path(lock_path)
+    lock_path.parent.mkdir(parents=True, exist_ok=True)
+    fh = open(lock_path, "a+", encoding="utf-8")
+    try:
+        fcntl.flock(fh.fileno(), fcntl.LOCK_EX | fcntl.LOCK_NB)
+    except OSError as e:
+        fh.seek(0)
+        holder = (fh.read() or "").strip() or "unknown pid"
+        fh.close()
+        raise RunLockHeld(
+            f"another DGM run is already active (holds {lock_path}, pid {holder}); "
+            "refusing to start a second run on the same corpus. Wait for it, or "
+            "kill it first.") from e
+    fh.seek(0)
+    fh.truncate()
+    fh.write(str(os.getpid()))
+    fh.flush()
+    return fh
+
+
+def _reset_repos_to_base(manifest_path: Path) -> tuple[int, list[str]]:
+    """Reset every staged repo to its EXACT ``base_commit`` (+ clean untracked)
+    and verify HEAD, BEFORE any solver runs. Guarantees a pristine start even if
+    a prior killed run left a throwaway test-fixture commit checked out (which a
+    naive ``reset --hard HEAD`` would then cement -- the bug that produced an
+    invalid run). Returns ``(n_ok, problems)``; rows without ``base_commit``
+    (older manifests) are skipped with a note so behavior is unchanged."""
+    import json
+    import subprocess
+    env = {"GIT_CONFIG_GLOBAL": os.devnull, "GIT_CONFIG_NOSYSTEM": "1",
+           "PATH": os.environ.get("PATH", "")}
+
+    def _git(*a, cwd):
+        return subprocess.run(["git", "-C", str(cwd), *a], capture_output=True,
+                              text=True, timeout=180, env=env)
+
+    ok, problems = 0, []
+    for line in Path(manifest_path).read_text().splitlines():
+        line = line.strip()
+        if not line:
+            continue
+        row = json.loads(line)
+        iid, rp, base = row["instance_id"], Path(row["repo_path"]), row.get("base_commit")
+        if not base:
+            problems.append(f"{iid}: manifest has no base_commit (skipped reset)")
+            continue
+        if not (rp / ".git").is_dir():
+            problems.append(f"{iid}: repo missing at {rp}")
+            continue
+        _git("reset", "--hard", "-q", base, cwd=rp)
+        _git("clean", "-fdxq", cwd=rp)
+        head = _git("rev-parse", "HEAD", cwd=rp).stdout.strip()
+        if head == base:
+            ok += 1
+        else:
+            problems.append(f"{iid}: HEAD {head[:12]} != base {base[:12]} after reset")
+    return ok, problems
 
 
 @dataclass
@@ -242,14 +317,40 @@ def _verdict(res) -> tuple[str, str]:
 
 def run(args, *, workdir: Path | None = None) -> DriverOutcome:
     """Execute the whole driver flow. Returns a DriverOutcome (never raises for a
-    per-instance problem; a hard config error like a bad manifest still raises)."""
-    import os
+    per-instance problem; a hard config error like a bad manifest still raises).
 
+    Holds an exclusive corpus lock for its whole duration so a second run can
+    never start on the same corpus, and resets every repo to its base_commit
+    before scoring so a prior killed run can't leave an invalid checkout."""
     dgm, swg = _load_libs()
     solver_dir = Path(args.solver)
     out = DriverOutcome(ledger_path=str(args.ledger))
 
+    # Exclusive single-run lock (next to the ledger). Refuses to start if a live
+    # run holds it -- prevents the concurrent double-run that double-spent.
+    ckpt_dir_early = getattr(args, "checkpoint_dir", None) or args.ledger.resolve().parent / "checkpoints"
+    Path(ckpt_dir_early).mkdir(parents=True, exist_ok=True)
+    try:
+        _lock_fh = _acquire_run_lock(Path(ckpt_dir_early) / "run.lock")
+    except RunLockHeld as e:
+        out.verdict, out.reason = "LOCKED", str(e)
+        return out
+
     score_fn = _build_score_fn(args, dgm)
+    try:
+        # Pristine repos before any spend: reset to base_commit + verify.
+        n_ok, problems = _reset_repos_to_base(args.manifest)
+        if problems:
+            for p in problems:
+                print(f"  [reset] {p}")
+        print(f"  [reset] {n_ok} repo(s) verified at base_commit")
+        return _run_locked(args, dgm, swg, solver_dir, out, score_fn, workdir=workdir)
+    finally:
+        _lock_fh.close()  # releases the corpus lock
+
+
+def _run_locked(args, dgm, swg, solver_dir, out, score_fn, *, workdir=None) -> DriverOutcome:
+    """The run body, executed while holding the corpus lock (see :func:`run`)."""
     with _tmp(workdir) as td:
         work = Path(td)
         instances = swg._load_manifest(args.manifest)
