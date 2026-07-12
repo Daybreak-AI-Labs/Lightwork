@@ -135,7 +135,15 @@
   var draftMsg = document.getElementById('as-draft-msg');
   var current = null;   // {kind, subject}
 
-  function esc(s) { var d = document.createElement('div'); d.textContent = s == null ? '' : s; return d.innerHTML; }
+  // Escape for both element-content and quoted-attribute contexts: the old
+  // textContent->innerHTML trick left " and ' unescaped, so values placed in
+  // double-quoted attributes (data-subject etc.) could break out. Escape all
+  // five HTML-significant characters.
+  function esc(s) {
+    return (s == null ? '' : String(s)).replace(/[&<>"']/g, function (c) {
+      return {'&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;'}[c];
+    });
+  }
   function jfetch(url, opts) {
     opts = opts || {}; opts.headers = opts.headers || {};
     if (opts.body) opts.headers['Content-Type'] = 'application/json';
