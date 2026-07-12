@@ -42,6 +42,7 @@ supply one (``--patch``).
 from __future__ import annotations
 
 import importlib.util
+import json
 import logging
 import os
 import pathlib
@@ -163,26 +164,62 @@ def score_instance(inst, patch: str, workroot: Path, *, timeout: float = 600.0) 
                 os.environ["MAVERICK_TEST_PYTHON"] = prev_tp
 
 
+def _load_checkpoint(path) -> dict[str, bool]:
+    """Read a resolved-map from a JSONL checkpoint ({instance_id, resolved} per
+    line); ``{}`` if absent/unreadable. Later lines win (a re-grade overrides)."""
+    done: dict[str, bool] = {}
+    try:
+        if path and Path(path).exists():
+            for line in Path(path).read_text().splitlines():
+                line = line.strip()
+                if line:
+                    r = json.loads(line)
+                    done[r["instance_id"]] = bool(r["resolved"])
+    except (OSError, ValueError, KeyError):
+        log.warning("could not read checkpoint %s (starting fresh)", path, exc_info=True)
+    return done
+
+
 def run_solver(solver_dir: Path, instances: list, workroot: Path,
-               *, timeout: float = 600.0, score_fn=None) -> dict[str, bool]:
+               *, timeout: float = 600.0, score_fn=None, checkpoint=None
+               ) -> dict[str, bool]:
     """Resolved-map for one solver version over a set of instances.
 
     ``score_fn(inst, patch, workroot, *, timeout) -> bool`` is the grading hook;
     default is the host-path :func:`score_instance`. Inject
     :func:`container_score_fn` to grade every emitted patch inside the
     instance's OFFICIAL per-instance container -- the honest mode for real
-    SWE-bench corpora, where one host cannot reproduce every instance's era."""
+    SWE-bench corpora, where one host cannot reproduce every instance's era.
+
+    ``checkpoint`` is a JSONL path (OUTSIDE the auto-cleaned workroot) that
+    persists each instance's verdict as it lands. On restart the run RESUMES:
+    already-graded instances are skipped, so a 3-hour agent-solver cycle
+    survives a container restart instead of losing everything. Instances
+    already present are not re-solved (no wasted agent spend)."""
     mod = load_solver(solver_dir)
     scorer = score_fn or score_instance
+    done = _load_checkpoint(checkpoint)
     out: dict[str, bool] = {}
     for i, inst in enumerate(instances):
+        iid = inst.instance_id
+        if iid in done:
+            out[iid] = done[iid]
+            log.info("resume: %s already graded (%s)", iid, done[iid])
+            continue
         try:
             patch = mod.solve(inst) or ""
         except Exception:
-            log.warning("solver crashed on %s", inst.instance_id, exc_info=True)
+            log.warning("solver crashed on %s", iid, exc_info=True)
             patch = ""
-        out[inst.instance_id] = scorer(
-            inst, patch, Path(workroot) / f"i{i}", timeout=timeout)
+        res = scorer(inst, patch, Path(workroot) / f"i{i}", timeout=timeout)
+        out[iid] = res
+        if checkpoint:
+            try:
+                Path(checkpoint).parent.mkdir(parents=True, exist_ok=True)
+                with open(checkpoint, "a", encoding="utf-8") as fh:
+                    fh.write(json.dumps({"instance_id": iid, "resolved": bool(res)}) + "\n")
+            except OSError:
+                log.warning("could not append to checkpoint %s", checkpoint, exc_info=True)
     return out
 
 
@@ -305,6 +342,7 @@ def govern_solver_change(
     controller=None,
     change_id: str | None = None,
     score_fn=None,
+    checkpoint_dir=None,
 ) -> UpliftResult:
     """Decide whether a solver self-modification may be promoted. Never applies
     the patch to the live solver -- the caller does that (with
@@ -347,10 +385,18 @@ def govern_solver_change(
     if not held_out:
         out.reason = "no held-out instances (need >= 2 instances)"
         return out
+    # Checkpoints live OUTSIDE workroot (which is a temp dir) so a restart can
+    # resume. Distinct files per arm: the baseline and candidate solvers are
+    # different, so their verdicts must never share a key space.
+    ckpt_base = ckpt_cand = None
+    if checkpoint_dir is not None:
+        Path(checkpoint_dir).mkdir(parents=True, exist_ok=True)
+        ckpt_base = Path(checkpoint_dir) / "baseline_arm.jsonl"
+        ckpt_cand = Path(checkpoint_dir) / "candidate_arm.jsonl"
     r_base = run_solver(base_dir, instances, workroot / "eval_base",
-                        timeout=timeout, score_fn=score_fn)
+                        timeout=timeout, score_fn=score_fn, checkpoint=ckpt_base)
     r_cand = run_solver(cand_dir, instances, workroot / "eval_cand",
-                        timeout=timeout, score_fn=score_fn)
+                        timeout=timeout, score_fn=score_fn, checkpoint=ckpt_cand)
     out.resolved_map = {"baseline": r_base, "candidate": r_cand}
     out.baseline_held_in, out.candidate_held_in = _rate(r_base, held_in), _rate(r_cand, held_in)
     out.baseline_held_out, out.candidate_held_out = _rate(r_base, held_out), _rate(r_cand, held_out)
