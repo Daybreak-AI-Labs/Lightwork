@@ -34,6 +34,10 @@ echo "==> 4/6  Runtime + grading deps"
 pip install 'questionary>=2.0' 'rich>=13.7' 'fastapi>=0.110' 'uvicorn>=0.27' \
             'jinja2>=3.1' 'httpx>=0.27' 'python-multipart>=0.0.9' \
             'pyjwt[crypto]' cffi 'openai>=1.30' modal
+# SWE-bench run path needs these two: `datasets` loads SWE-bench Verified,
+# `swebench` is the official grader/harness used inside the Modal container.
+# (anthropic ships with maverick-core; modal is above.)
+pip install datasets swebench
 
 echo "==> 5/6  Ed25519 signing keys for the governed ledger (~/dgm-keys)"
 if [ ! -f "$HOME/dgm-keys/operator.priv.hex" ]; then
