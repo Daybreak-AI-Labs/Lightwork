@@ -298,6 +298,39 @@ def require_global_permission(request: Request, permission: str) -> None:
         raise HTTPException(status_code=403, detail="insufficient role for this action")
 
 
+def caller_suites(request: Request) -> frozenset[str] | None:
+    """The department suites the caller may use, or ``None`` for unrestricted.
+
+    Job-function scoping (``maverick_dashboard.suite_grants``), orthogonal to
+    the privilege role: it decides WHICH specialists a user works with, not how
+    much they may do. ``None`` — auth off, a dashboard admin, or a user with no
+    grant (and no configured default) — disables every suite gate, preserving
+    single-user behaviour."""
+    principal = caller_principal(request)
+    if principal is None or is_dashboard_admin(principal):
+        return None
+    from . import suite_grants
+    return suite_grants.granted_suites(principal)
+
+
+def suite_allowed(request: Request, suite: str | None) -> bool:
+    """Whether the caller may use department ``suite``.
+
+    ``suite`` is a suite key (``maverick.domain.suite_for``); ``None`` means a
+    generic/legacy pack that belongs to no department and is never scoped."""
+    if suite is None:
+        return True
+    allowed = caller_suites(request)
+    return allowed is None or suite in allowed
+
+
+def require_suite(request: Request, suite: str | None) -> None:
+    """Raise ``HTTPException(403)`` unless the caller may use ``suite``."""
+    if not suite_allowed(request, suite):
+        raise HTTPException(
+            status_code=403, detail="insufficient department access for this action")
+
+
 def goal_owner_filter(request: Request) -> str | None:
     """The ``owner`` value to pass to ``WorldModel.list_goals``.
 
