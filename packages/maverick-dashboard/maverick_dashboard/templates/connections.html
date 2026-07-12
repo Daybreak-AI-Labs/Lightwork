@@ -163,8 +163,9 @@
         });
         var del = el('button', 'btn btn--ghost', '🗑');
         del.type = 'button';
-        del.addEventListener('click', function () {
-          if (!window.confirm('Delete connection ‘' + c.name + '’?')) return;
+        del.setAttribute('aria-label', 'Delete connection ' + c.name);
+        del.addEventListener('click', async function () {
+          if (!(await mvConfirm('Delete connection “' + c.name + '”?', { okText: 'Delete' }))) return;
           api('/api/v1/connections/' + encodeURIComponent(c.name), { method: 'DELETE' })
             .then(function () { load(); });
         });

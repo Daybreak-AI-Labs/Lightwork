@@ -236,8 +236,8 @@
       jfetch('/api/v1/assessments/' + a.kind + '/' + encodeURIComponent(a.subject) + '/refresh', { method: 'POST', body: '{}' })
         .then(function (r) { return r.json(); }).then(function (x) { renderDetail(x); reload(); });
     });
-    document.getElementById('as-del').addEventListener('click', function () {
-      if (!window.confirm('Delete the assessment for ' + a.subject + '?')) return;
+    document.getElementById('as-del').addEventListener('click', async function () {
+      if (!(await mvConfirm('Delete the assessment for ' + a.subject + '?', { okText: 'Delete' }))) return;
       jfetch('/api/v1/assessments/' + a.kind + '/' + encodeURIComponent(a.subject), { method: 'DELETE' })
         .then(function () { detailCard.hidden = true; current = null; reload(); });
     });
@@ -254,11 +254,14 @@
       el.addEventListener('click', function () { decide(el.dataset.lens, 'needs_work'); });
     });
     Array.prototype.forEach.call(detailEl.querySelectorAll('.as-ev'), function (el) {
-      el.addEventListener('click', function () {
-        var note = window.prompt('Evidence note or link for “' + el.dataset.control + '”:');
-        if (!note) return;
+      el.addEventListener('click', async function () {
+        var vals = await mvForm('Add evidence', [
+          { key: 'note', label: 'Evidence note or link for “' + el.dataset.control + '”',
+            type: 'text', required: true },
+        ], { okText: 'Add' });
+        if (vals === null) return;
         jfetch('/api/v1/assessments/' + a.kind + '/' + encodeURIComponent(a.subject) + '/evidence',
-          { method: 'POST', body: JSON.stringify({ lens: el.dataset.lens, control: el.dataset.control, evidence: note }) })
+          { method: 'POST', body: JSON.stringify({ lens: el.dataset.lens, control: el.dataset.control, evidence: vals.note }) })
           .then(function (r) { return r.json(); }).then(function (x) { renderDetail(x); });
       });
     });
