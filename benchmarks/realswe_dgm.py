@@ -35,23 +35,41 @@ import swebench_container_grade as CG  # noqa: E402
 from swebench_container_run import agent_patch, load_verified  # noqa: E402
 
 # The two agent configurations. Candidate = the DGM-proposed budget improvement.
-# Strategy: rather than spread a fixed pot across many shallow attempts, we run a
-# SMALL set of instances DEEP so each one actually reaches a result. The candidate
-# gets 200 steps and a $20 hard cap -- and the wall must scale with it, because
-# swe_bench.py defaults the per-instance wall to 1500s (25 min); at 200 steps that
-# 25-min timer binds long before the step/$ budget and cuts the agent off mid-solve
-# (a false "no-diff" that reads as the model failing when really the CLOCK ran out).
-# So the candidate lifts the wall to 7200s (2 h): the step cap (200) and the dollar
-# cap ($20) are the real limits and every instance runs to ground. Baseline stays
-# the weak control (25 steps / $3 / 25 min) -- that is the "before" the uplift is
-# measured against; 25 steps never approach 25 min, so its wall is unchanged.
+# Uplift only SHOWS in the goldilocks band -- instances the weak config can't
+# finish but the strong one can. Too-hard (both fail) or too-easy (both pass)
+# give a flat 0 delta. So the candidate is 120 steps / $12 / 90 min: enough
+# headroom to clear medium instances the 25-step baseline can't, without the
+# 200-step tail that just burns $ on the ones neither config will crack. The
+# lifted wall (90 min vs the 25-min default) keeps the step/$ caps the real
+# limits so a solve is never cut off by the clock. Baseline stays the weak
+# control (25 steps / $3 / 25 min) -- the "before" the uplift is measured against.
 ARMS = {
     "baseline":  {"MAVERICK_MAX_STEPS": "25",  "MAVERICK_BEST_OF_N": "1",
                   "MAVERICK_INSTANCE_HARD_CAP": "3.0",  "MAVERICK_INSTANCE_WALL_SEC": "1500"},
-    "candidate": {"MAVERICK_MAX_STEPS": "200", "MAVERICK_BEST_OF_N": "1",
-                  "MAVERICK_INSTANCE_HARD_CAP": "20.0", "MAVERICK_INSTANCE_WALL_SEC": "7200"},
+    "candidate": {"MAVERICK_MAX_STEPS": "120", "MAVERICK_BEST_OF_N": "1",
+                  "MAVERICK_INSTANCE_HARD_CAP": "12.0", "MAVERICK_INSTANCE_WALL_SEC": "5400"},
 }
 DEFAULT_IDS = ["sympy__sympy-15976", "sympy__sympy-14531", "pytest-dev__pytest-5631"]
+
+
+def _easy_ids(n: int, exclude: set[str] | None = None) -> list[str]:
+    """Pick the ``n`` SWE-bench Verified instances with the smallest gold patches.
+
+    Gold-patch line count is the best cheap proxy for difficulty in the dataset:
+    a small non-test fix is a simple, well-scoped change -- exactly the kind an
+    agent can actually resolve, which is what gives a baseline-vs-candidate run
+    real headroom (vs the sympy/pytest internals that failed at every budget).
+    Data-driven and reproducible -- no hand-picked IDs, no memory guesswork.
+    """
+    exclude = exclude or set()
+    allinst = load_verified(None)  # all 500 (cached locally after first pull)
+    def plen(d: dict) -> int:
+        return len((d.get("patch") or "").splitlines())
+    ranked = sorted(
+        (d for d in allinst.values()
+         if d["instance_id"] not in exclude and plen(d) >= 4),
+        key=plen)
+    return [d["instance_id"] for d in ranked[:n]]
 
 
 def _cost_of(iid: str) -> float:
@@ -75,18 +93,27 @@ def main(argv: list[str] | None = None) -> int:
     ap.add_argument("--keys", required=True, type=Path)
     ap.add_argument("--out-dir", type=Path, default=Path.home() / "realswe_dgm")
     ap.add_argument("--ids", type=str, default=",".join(DEFAULT_IDS))
-    # Global safety net. The per-instance caps are the real limits (candidate
-    # $20 x 3 + baseline $3 x 3 = up to ~$69); set this above that so the global
-    # cap never stops the run before an instance finishes -- it only guards a
-    # runaway. Raise it with --max-dollars if you add instances.
-    ap.add_argument("--max-dollars", type=float, default=75.0)
+    ap.add_argument("--easy", type=int, default=0, metavar="N",
+                    help="ignore --ids; auto-pick the N Verified instances with the "
+                         "smallest gold patches (simplest fixes -> real headroom).")
+    # Global safety net. Per-instance caps are the real limits; this only guards a
+    # runaway. On EASY instances the agent finishes well under the caps, so actual
+    # spend is far below the theoretical max (candidate $12 + baseline $3 per
+    # instance). Default sized for a ~5-instance easy run; raise it if you add more.
+    ap.add_argument("--max-dollars", type=float, default=45.0)
     args = ap.parse_args(argv)
 
     if not (os.environ.get("ANTHROPIC_API_KEY") or os.environ.get("MAVERICK_PROVIDER_READY")):
         print("NO PROVIDER KEY.")
         return 2
 
-    ids = [s.strip() for s in args.ids.split(",") if s.strip()]
+    if args.easy > 0:
+        print(f"  selecting {args.easy} easiest Verified instances (smallest gold patches) ...",
+              flush=True)
+        ids = _easy_ids(args.easy)
+        print("  chosen:", ", ".join(ids))
+    else:
+        ids = [s.strip() for s in args.ids.split(",") if s.strip()]
     args.out_dir.mkdir(parents=True, exist_ok=True)
     ckpt_path = args.out_dir / "verdicts.json"
     verdicts = _load_ckpt(ckpt_path)          # {"<arm>:<iid>": {"resolved": bool, "cost": float}}
@@ -95,7 +122,7 @@ def main(argv: list[str] | None = None) -> int:
 
     print("=" * 78)
     print(f"  GOVERNED DGM ON REAL CODE  --  {len(ids)} instances x 2 arms (baseline/candidate)")
-    print("  improvement: agent budget 25 turns/$3/25min  ->  200 turns/$20/2h")
+    print("  improvement: agent budget 25 turns/$3/25min  ->  120 turns/$12/90min")
     print("=" * 78)
 
     # --- run each (arm, instance), resumable + metered -------------------------
@@ -119,7 +146,14 @@ def main(argv: list[str] | None = None) -> int:
                 gr = CG.governed_container_grade(inst, patch, runner, check_gold_overlap=True)
                 resolved = bool(getattr(gr, "resolved", False))
             except Exception as e:
-                print(f"  [err ] {key}: {type(e).__name__}: {e}")
+                # Never let a crash vanish into a silent $0 verdict again: write the
+                # FULL traceback to errors/<arm>_<iid>.log and echo the type/message.
+                import traceback
+                errdir = args.out_dir / "errors"
+                errdir.mkdir(exist_ok=True)
+                (errdir / f"{arm}_{iid}.log").write_text(traceback.format_exc())
+                print(f"  [err ] {key}: {type(e).__name__}: {e}  "
+                      f"(full traceback -> {errdir}/{arm}_{iid}.log)")
                 resolved = False
             cost = max(0.0, _cost_of(iid) - before) or _cost_of(iid)
             verdicts[key] = {"resolved": resolved, "cost": round(cost, 4)}
@@ -146,8 +180,8 @@ def main(argv: list[str] | None = None) -> int:
     ctrl = SelfImprovementController(frozen_fn=lambda: False, ledger=ledger)
     os.environ["MAVERICK_SELF_IMPROVEMENT"] = "1"
     os.environ["MAVERICK_APPROVER_KEYS_DIR"] = str(args.keys)
-    payload = ("agent budget: MAVERICK_MAX_STEPS 25->200, "
-               "MAVERICK_INSTANCE_HARD_CAP 3->20, MAVERICK_INSTANCE_WALL_SEC 1500->7200")
+    payload = ("agent budget: MAVERICK_MAX_STEPS 25->120, "
+               "MAVERICK_INSTANCE_HARD_CAP 3->12, MAVERICK_INSTANCE_WALL_SEC 1500->5400")
     import hashlib
 
     from maverick import approval_signing as asig
