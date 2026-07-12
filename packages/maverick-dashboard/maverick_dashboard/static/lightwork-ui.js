@@ -180,7 +180,11 @@
         return e;
       };
       window.mvWhen = function (ts) {
-        try { return new Date((ts || 0) * 1000).toLocaleString(); } catch (e) { return ''; }
+        // Return '' for missing/invalid timestamps rather than formatting the
+        // Unix epoch: (ts || 0) would turn 0/null/undefined/NaN into 1/1/1970,
+        // which then leaks into visible text and aria-labels.
+        if (!ts || !isFinite(ts)) return '';
+        try { return new Date(ts * 1000).toLocaleString(); } catch (e) { return ''; }
       };
     })();
 
@@ -193,13 +197,22 @@
       async function refresh() {
         try {
           const r = await fetch('/api/v1/halt');
-          if (!r.ok) { label.textContent = 'Stop all'; return; }
+          if (!r.ok) throw new Error('halt status ' + r.status);
           const j = await r.json();
           armed = !!j.active;
           pill.classList.toggle('armed', armed);
           label.textContent = armed ? 'STOPPED — click to resume' : 'Stop all';
           pill.setAttribute('aria-pressed', armed ? 'true' : 'false');
-        } catch (e) { label.textContent = 'Stop all'; }
+        } catch (e) {
+          // Keep the last known state on a transient poll failure — resetting the
+          // label to "Stop all" while leaving aria-pressed="true" would desync the
+          // visible and announced state. Seed a neutral state only if we never
+          // had one.
+          if (!pill.hasAttribute('aria-pressed')) {
+            label.textContent = 'Stop all';
+            pill.setAttribute('aria-pressed', 'false');
+          }
+        }
       }
       pill.addEventListener('click', async function(ev) {
         ev.preventDefault();
@@ -291,6 +304,7 @@
       const body = document.body;
       const btn = document.getElementById('nav-toggle');
       const backdrop = document.getElementById('nav-backdrop');
+      const sidebar = document.getElementById('sidebar');
       if (!btn) return;
       const KEY = 'mvk_sidebar_collapsed';
       const mobile = window.matchMedia('(max-width: 880px)');
@@ -299,6 +313,10 @@
         const shown = mobile.matches ? body.classList.contains('nav-open')
                                      : !body.classList.contains('nav-collapsed');
         btn.setAttribute('aria-expanded', shown ? 'true' : 'false');
+        // On mobile the closed drawer is only translated off-screen (still in
+        // the DOM + tab order). Mark it inert so keyboard focus can't land on
+        // the hidden nav links. Desktop-collapsed already uses display:none.
+        if (sidebar) sidebar.inert = mobile.matches && !body.classList.contains('nav-open');
       }
       function closeDrawer() { body.classList.remove('nav-open'); syncAria(); }
       btn.addEventListener('click', function() {

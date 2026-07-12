@@ -203,7 +203,7 @@
             {% set cur_risk = selected.max_risk if selected else 'low' %}
             <span class="risk-seg" id="risk-seg" role="group" aria-label="Risk ceiling">
               {% for r in ['low', 'medium', 'high'] %}
-              <button type="button" data-risk="{{ r }}"{% if cur_risk == r %} class="on"{% endif %}>{{ r }}</button>
+              <button type="button" data-risk="{{ r }}"{% if cur_risk == r %} class="on" aria-pressed="true"{% else %} aria-pressed="false"{% endif %}>{{ r }}</button>
               {% endfor %}
             </span>
             <select id="f-risk" name="max_risk" hidden aria-label="Risk ceiling">
@@ -336,7 +336,10 @@
         var b = e.target.closest('button[data-risk]');
         if (!b) return;
         sel.value = b.dataset.risk;
-        seg.querySelectorAll('button').forEach(function (x) { x.classList.toggle('on', x === b); });
+        seg.querySelectorAll('button').forEach(function (x) {
+          x.classList.toggle('on', x === b);
+          x.setAttribute('aria-pressed', x === b ? 'true' : 'false');
+        });
       });
     })();
 
