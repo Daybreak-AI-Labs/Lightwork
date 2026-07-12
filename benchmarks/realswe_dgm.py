@@ -35,18 +35,21 @@ import swebench_container_grade as CG  # noqa: E402
 from swebench_container_run import agent_patch, load_verified  # noqa: E402
 
 # The two agent configurations. Candidate = the DGM-proposed budget improvement.
-# The candidate must also LIFT THE WALL: swe_bench.py defaults the per-instance
-# wall to 1500s (25 min). At 100 steps that wall binds around step ~75 and the
-# agent is cut off BEFORE it can spend its step budget -- a false "no-diff" that
-# looks like the model failing when really the clock did. So the candidate raises
-# the wall to 3600s (60 min) so the $ cap ($8) and the step cap (100) are the real
-# limits and every instance runs to ground. Baseline keeps the default wall: 25
-# steps never approach 25 min, so it changes nothing there.
+# Strategy: rather than spread a fixed pot across many shallow attempts, we run a
+# SMALL set of instances DEEP so each one actually reaches a result. The candidate
+# gets 200 steps and a $20 hard cap -- and the wall must scale with it, because
+# swe_bench.py defaults the per-instance wall to 1500s (25 min); at 200 steps that
+# 25-min timer binds long before the step/$ budget and cuts the agent off mid-solve
+# (a false "no-diff" that reads as the model failing when really the CLOCK ran out).
+# So the candidate lifts the wall to 7200s (2 h): the step cap (200) and the dollar
+# cap ($20) are the real limits and every instance runs to ground. Baseline stays
+# the weak control (25 steps / $3 / 25 min) -- that is the "before" the uplift is
+# measured against; 25 steps never approach 25 min, so its wall is unchanged.
 ARMS = {
     "baseline":  {"MAVERICK_MAX_STEPS": "25",  "MAVERICK_BEST_OF_N": "1",
-                  "MAVERICK_INSTANCE_HARD_CAP": "3.0", "MAVERICK_INSTANCE_WALL_SEC": "1500"},
-    "candidate": {"MAVERICK_MAX_STEPS": "100", "MAVERICK_BEST_OF_N": "1",
-                  "MAVERICK_INSTANCE_HARD_CAP": "8.0", "MAVERICK_INSTANCE_WALL_SEC": "3600"},
+                  "MAVERICK_INSTANCE_HARD_CAP": "3.0",  "MAVERICK_INSTANCE_WALL_SEC": "1500"},
+    "candidate": {"MAVERICK_MAX_STEPS": "200", "MAVERICK_BEST_OF_N": "1",
+                  "MAVERICK_INSTANCE_HARD_CAP": "20.0", "MAVERICK_INSTANCE_WALL_SEC": "7200"},
 }
 DEFAULT_IDS = ["sympy__sympy-15976", "sympy__sympy-14531", "pytest-dev__pytest-5631"]
 
@@ -72,7 +75,11 @@ def main(argv: list[str] | None = None) -> int:
     ap.add_argument("--keys", required=True, type=Path)
     ap.add_argument("--out-dir", type=Path, default=Path.home() / "realswe_dgm")
     ap.add_argument("--ids", type=str, default=",".join(DEFAULT_IDS))
-    ap.add_argument("--max-dollars", type=float, default=55.0)
+    # Global safety net. The per-instance caps are the real limits (candidate
+    # $20 x 3 + baseline $3 x 3 = up to ~$69); set this above that so the global
+    # cap never stops the run before an instance finishes -- it only guards a
+    # runaway. Raise it with --max-dollars if you add instances.
+    ap.add_argument("--max-dollars", type=float, default=75.0)
     args = ap.parse_args(argv)
 
     if not (os.environ.get("ANTHROPIC_API_KEY") or os.environ.get("MAVERICK_PROVIDER_READY")):
@@ -88,7 +95,7 @@ def main(argv: list[str] | None = None) -> int:
 
     print("=" * 78)
     print(f"  GOVERNED DGM ON REAL CODE  --  {len(ids)} instances x 2 arms (baseline/candidate)")
-    print("  improvement: agent budget 25 turns/$3/25min  ->  100 turns/$8/60min")
+    print("  improvement: agent budget 25 turns/$3/25min  ->  200 turns/$20/2h")
     print("=" * 78)
 
     # --- run each (arm, instance), resumable + metered -------------------------
@@ -139,8 +146,8 @@ def main(argv: list[str] | None = None) -> int:
     ctrl = SelfImprovementController(frozen_fn=lambda: False, ledger=ledger)
     os.environ["MAVERICK_SELF_IMPROVEMENT"] = "1"
     os.environ["MAVERICK_APPROVER_KEYS_DIR"] = str(args.keys)
-    payload = ("agent budget: MAVERICK_MAX_STEPS 25->100, "
-               "MAVERICK_INSTANCE_HARD_CAP 3->8, MAVERICK_INSTANCE_WALL_SEC 1500->3600")
+    payload = ("agent budget: MAVERICK_MAX_STEPS 25->200, "
+               "MAVERICK_INSTANCE_HARD_CAP 3->20, MAVERICK_INSTANCE_WALL_SEC 1500->7200")
     import hashlib
 
     from maverick import approval_signing as asig

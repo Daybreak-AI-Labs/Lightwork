@@ -63,30 +63,33 @@ export ANTHROPIC_API_KEY=sk-ant-...
 ## 4a. The 3-instance mechanism proof (start here — cheapest, ~$30–60)
 
 ```bash
-# 3 instances (default). For 5, just add two more ids to --ids.
+# 3 instances, run DEEP (the default). Concentrated budget, real results.
 caffeinate -s python benchmarks/realswe_dgm.py \
     --keys ~/dgm-keys --out-dir ~/realswe_dgm \
     --ids sympy__sympy-15976,sympy__sympy-14531,pytest-dev__pytest-5631 \
-    --max-dollars 60
-# 5 instances (add django + scikit-learn), raise the cap to match:
-#   --ids sympy__sympy-15976,sympy__sympy-14531,pytest-dev__pytest-5631,\
-#         scikit-learn__scikit-learn-13584,django__django-11039  --max-dollars 90
+    --max-dollars 75
 # detach and let it run:  Ctrl-b then d      (the run keeps going)
 ```
 
 This runs each real GitHub issue under a **baseline** agent budget
 (25 turns / $3 / 25 min wall) and a **candidate** budget
-(100 turns / $8 / 60 min wall), grades every patch in the official SWE-bench
+(**200 turns / $20 / 2 h wall**), grades every patch in the official SWE-bench
 container on Modal, and if the candidate lifts the held-out resolved-rate it
 **promotes the config change through the real governance rung and signs it into
 the ledger**.
 
-> **Why the 60-minute wall matters.** The solver's default per-instance wall is
-> 25 minutes. At 100 turns that timer would cut the agent off around turn ~75 —
-> a false "no-diff" that looks like the model failing when really the *clock*
-> ran out. The candidate arm raises the wall to 60 min so the **step cap (100)**
-> and the **dollar cap ($8)** are the real limits and every instance **runs to
-> ground**. This is verified in the driver's config, not left to chance. It is **resumable** (each solve is checkpointed
+> **Deep, not wide.** Rather than spread a fixed pot across many shallow attempts
+> (which mostly time out with no diff), the candidate concentrates budget into 3
+> instances run to ground: **200 steps / $20 each, with a 2-hour wall** so the
+> step cap and the dollar cap are the real limits — not a 25-minute timer that
+> cuts the agent off mid-solve and produces a false "no-diff." The per-instance
+> $20 caps are what bind; `--max-dollars 75` is just the global runaway guard
+> (candidate 3×$20 + baseline 3×$3 ≈ $69 worst case). Same money as a wide run,
+> but each instance actually reaches a result.
+
+> **Runtime.** Deep solves are slower: a candidate instance can take up to ~2 h,
+> so the full run may be several hours. That's exactly why it runs under
+> `tmux` + `caffeinate` and is checkpointed — walk away and let it finish. It is **resumable** (each solve is checkpointed
 to `~/realswe_dgm/verdicts.json`) and **hard cost-capped** (`--max-dollars`), so
 if the Mac ever reboots you just re-run the identical command — it skips
 finished solves and never re-pays.
