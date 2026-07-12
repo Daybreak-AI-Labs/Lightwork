@@ -343,11 +343,39 @@ def test_logout_all_revokes_even_when_session_already_revoked(login_env, client)
     assert epoch_before > 0
 
     client.cookies.set(ol.SESSION_COOKIE, raw)
-    resp = client.get("/auth/logout?all=1", follow_redirects=False)
+    # Same-origin Referer so the destructive ?all revocation is honored.
+    resp = client.get(
+        "/auth/logout?all=1", follow_redirects=False,
+        headers={"Referer": "http://testserver/settings"})
     assert resp.status_code == 303
     # The epoch was re-bumped (>=), proving revoke fired despite the prior
     # revocation -- not silently skipped.
     assert sr.revocation_epoch("user-123") >= epoch_before
+
+
+def test_logout_all_ignored_cross_site(login_env, client):
+    # A cross-site top-level navigation to /auth/logout?all=1 (session-revocation
+    # CSRF) must NOT trigger the global revocation, though it may still clear the
+    # local cookie. With no same-origin Origin/Referer the ?all side effect is
+    # skipped.
+    import time
+
+    from maverick.web_session import sign_session
+    from maverick_dashboard import session_revocation as sr
+
+    now = int(time.time())
+    raw = sign_session(
+        {"sub": "user-xsite", "iat": now, "exp": now + 3600}, SESSION_SECRET)
+    epoch_before = sr.revocation_epoch("user-xsite")
+    assert epoch_before == 0
+
+    client.cookies.set(ol.SESSION_COOKIE, raw)
+    resp = client.get(
+        "/auth/logout?all=1", follow_redirects=False,
+        headers={"Referer": "http://evil.example/"})
+    assert resp.status_code == 303
+    # Cross-site referer -> the epoch was NOT bumped (revocation did not fire).
+    assert sr.revocation_epoch("user-xsite") == 0
 
 
 # ---- disabled: every route 404s -----------------------------------------------

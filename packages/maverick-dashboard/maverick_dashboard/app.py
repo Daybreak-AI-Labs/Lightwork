@@ -782,6 +782,22 @@ async def bearer_auth(request: Request, call_next):
                 from maverick.oidc import oidc_enabled
                 from maverick.proxy_auth import proxy_auth_enabled
                 if oidc_enabled() or proxy_auth_enabled():
+                    # Cookie-session (OIDC / reverse-proxy SSO) mode: run the
+                    # same-origin CSRF gate that no-token loopback mode enforces
+                    # below. Without it, /api/v1 mutations rely solely on the
+                    # mvk_session cookie's SameSite=Lax, which does not cover
+                    # sibling-subdomain requests or top-level-navigation vectors.
+                    # The app.py form handlers already call _require_same_origin
+                    # in this mode; this extends the same guard to the API routes.
+                    # Safe methods short-circuit to True inside _is_same_origin.
+                    if not _is_same_origin(request) and _allowed_extension_origin(request) is None:
+                        return JSONResponse(
+                            {"detail": "cross-site request blocked — for your "
+                                       "security, changes must be made from the "
+                                       "Lightwork page itself. Reload the "
+                                       "dashboard and try again."},
+                            status_code=403,
+                        )
                     return await call_next(request)
             except Exception:  # pragma: no cover - fall through to fail closed
                 pass
@@ -940,6 +956,28 @@ async def security_headers(request: Request, call_next):
     response.headers.setdefault(
         "Cross-Origin-Opener-Policy", "same-origin",
     )
+    # Drop the ambient-capability attack surface. microphone=(self) because
+    # the chat pages capture voice in-browser (getUserMedia); camera,
+    # geolocation, and payment are never used, so deny them outright.
+    response.headers.setdefault(
+        "Permissions-Policy",
+        "geolocation=(), camera=(), payment=(), microphone=(self)",
+    )
+    # no-store on everything by default so authenticated HTML and sensitive
+    # JSON aren't left in the browser's back/forward cache or a shared proxy
+    # after logout. setdefault preserves the explicit caching the static-asset
+    # and SSE routes already set (public max-age / no-cache).
+    response.headers.setdefault("Cache-Control", "no-store")
+    # HSTS only when the request actually arrived over TLS (directly or via a
+    # terminating proxy) — never on plain-HTTP loopback dev, which HSTS would
+    # otherwise pin to https and break.
+    if (
+        request.url.scheme == "https"
+        or request.headers.get("x-forwarded-proto", "").split(",")[0].strip() == "https"
+    ):
+        response.headers.setdefault(
+            "Strict-Transport-Security", "max-age=31536000; includeSubDomains",
+        )
     # Content-Security-Policy. The templates use first-party inline
     # <style>, <script>, and style="" attributes, so script/style-src
     # need 'unsafe-inline' for now (a nonce-based tightening is tracked
@@ -3128,6 +3166,9 @@ async def gallery_list(request: Request) -> JSONResponse:
 
 @app.post("/api/v1/gallery/{goal_id}")
 async def gallery_add(request: Request, goal_id: int) -> JSONResponse:
+    # The gallery is a deployment-wide showcase, not per-user personalization,
+    # so publishing to it takes "operate" (viewers can read it but not curate).
+    require_permission(request, "operate")
     g = _world().get_goal(goal_id)
     if g is None:
         raise HTTPException(status_code=404, detail="no such goal")
@@ -3148,6 +3189,7 @@ async def gallery_add(request: Request, goal_id: int) -> JSONResponse:
 
 @app.delete("/api/v1/gallery/{goal_id}")
 async def gallery_remove(request: Request, goal_id: int) -> JSONResponse:
+    require_permission(request, "operate")
     g = _world().get_goal(goal_id)
     if g is None:
         raise HTTPException(status_code=404, detail="no such goal")

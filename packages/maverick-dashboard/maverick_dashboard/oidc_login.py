@@ -43,7 +43,7 @@ import hashlib
 import logging
 import secrets
 import time
-from urllib.parse import urlencode
+from urllib.parse import urlencode, urlparse
 
 import httpx
 from fastapi import APIRouter, HTTPException, Request
@@ -512,16 +512,33 @@ def _csrf_reject():
     return out
 
 
+def _is_same_origin_get(request: Request) -> bool:
+    """True when a GET carries a same-origin Origin/Referer. Fails closed when
+    neither is present, so a destructive side effect on a GET can be gated
+    against cross-site top-level navigations (the session cookie is SameSite=Lax,
+    which rides such a navigation). A genuine same-origin link click sends a
+    Referer under the dashboard's Referrer-Policy: same-origin."""
+    expected = request.url.netloc
+    for header in ("origin", "referer"):
+        value = request.headers.get(header)
+        if value:
+            return urlparse(value).netloc == expected
+    return False
+
+
 @router.get("/auth/logout")
 async def auth_logout(request: Request):
     """Clear the session cookie and return to ``/``.
 
     ``?all=1`` (log out everywhere) additionally bumps the principal's revocation
     epoch, immediately invalidating every other session/bearer that principal
-    holds -- not just the cookie in this browser."""
+    holds -- not just the cookie in this browser. The ``all`` side effect is
+    gated on a same-origin Origin/Referer so a cross-site page cannot force a
+    global sign-out (session-revocation CSRF); the local cookie is always
+    cleared regardless."""
     if not login_enabled():
         raise HTTPException(status_code=404)
-    if request.query_params.get("all"):
+    if request.query_params.get("all") and _is_same_origin_get(request):
         # Derive the sub from the verified session payload DIRECTLY, not via
         # _principal_from_request_session -- that returns None for an
         # already-revoked session, so "log out everywhere" on a session that was
