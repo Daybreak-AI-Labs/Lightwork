@@ -136,6 +136,10 @@ def main(argv: list[str] | None = None) -> int:
     ap.add_argument("--trials", type=int, default=3)
     ap.add_argument("--max-dollars", type=float, default=5.0)
     ap.add_argument("--seed", type=int, default=20260712)
+    ap.add_argument("--out-dir", type=Path, default=None,
+                    help="persist keys/ledger/rows here and RESUME (skip done trials); "
+                         "cumulative spend survives restarts. Required for large runs on "
+                         "a recyclable host.")
     ap.add_argument("--keep", action="store_true")
     args = ap.parse_args(argv)
     _SPEND["cap"] = args.max_dollars
@@ -147,25 +151,48 @@ def main(argv: list[str] | None = None) -> int:
 
     from maverick.self_improvement import PromotionLedger
 
-    tmp = Path(tempfile.mkdtemp(prefix="dgm_discover_"))
-    keys = _make_keys(tmp)
-    ledger = PromotionLedger(path=tmp / "ledger.json")
-    master = random.Random(args.seed)
-    rows = []
+    # Persistent (resumable) or ephemeral run dir. A large run on a recyclable
+    # host MUST use --out-dir so a restart resumes instead of re-paying.
+    persistent = args.out_dir is not None
+    out = Path(args.out_dir) if persistent else Path(tempfile.mkdtemp(prefix="dgm_discover_"))
+    out.mkdir(parents=True, exist_ok=True)
+    keys = out / "keys"
+    keys = keys if (keys / "operator.priv.hex").exists() else _make_keys(out)
+    ledger = PromotionLedger(path=out / "ledger.json")
+    rows_path = out / "rows.jsonl"
+    spend_path = out / "spend.json"
+
+    # Resume: which trials already ran, and how much we already spent.
+    done: dict[int, dict] = {}
+    if rows_path.exists():
+        for line in rows_path.read_text().splitlines():
+            if line.strip():
+                r = json.loads(line)
+                done[r["trial"]] = r
+    if spend_path.exists():
+        try:
+            _SPEND["usd"] = float(json.loads(spend_path.read_text()).get("usd", 0.0))
+        except Exception:
+            pass
 
     print(f"MAVERICK -- CAPABILITY DISCOVERY: {args.trials} trials "
-          f"(hard cap ${args.max_dollars:.2f})")
+          f"(hard cap ${args.max_dollars:.2f}; {len(done)} already done; "
+          f"cum spend ${_SPEND['usd']:.2f})")
     print("=" * 74)
     for t in range(args.trials):
+        if t in done:
+            continue
         if _SPEND["usd"] >= args.max_dollars:
             print(f"  [stop] cost ceiling ${args.max_dollars:.2f} reached at trial {t}")
             break
-        rng = random.Random(master.randint(0, 1 << 40))
+        # Deterministic per-trial seed -> a resumed trial is identical, and the
+        # corpus never depends on how many trials ran before it.
+        rng = random.Random(f"{args.seed}-{t}")
         name = rng.choice(list(_HIDDEN))
         fn = _HIDDEN[name]
         tasks = _corpus(rng, fn, t)
-        sdir = tmp / f"solver_{t}"
-        sdir.mkdir()
+        sdir = out / f"solver_{t}"
+        sdir.mkdir(exist_ok=True)
         (sdir / "solver.py").write_text(_BASELINE)
         held_in, held_out = dgm_uplift.split_instances(tasks, held_out_frac=0.5)
 
@@ -174,7 +201,7 @@ def main(argv: list[str] | None = None) -> int:
             patch = dgm_uplift.llm_solver_proposer(sdir, _feedback(held_in))
         except Exception as e:
             patch = ""
-            print(f"  trial {t:3d} [{name:7s}] proposer error: {e}")
+            print(f"  trial {t:4d} [{name:7s}] proposer error: {e}")
         spent = _SPEND["usd"] - before
 
         verdict = "empty"
@@ -182,48 +209,58 @@ def main(argv: list[str] | None = None) -> int:
         if patch:
             res = dgm_uplift.govern_solver_change(
                 sdir, patch, tasks, keys_dir=keys, ledger=ledger,
-                workroot=tmp / f"gov{t}", held_out_frac=0.5, timeout=60,
+                workroot=out / f"gov{t}", held_out_frac=0.5, timeout=60,
                 score_fn=_score_fn)
             uplift = res.uplift
             verdict = ("PROMOTED" if res.promoted else
                        "OVERFIT" if res.overfit else "REFUSED")
-        rows.append({"trial": t, "op": name, "verdict": verdict,
-                     "uplift": round(uplift, 3), "usd": round(spent, 4)})
-        print(f"  trial {t:3d} [{name:7s}] -> {verdict:8s} "
-              f"held-out uplift {uplift:+.3f}   ${spent:.3f}  (cum ${_SPEND['usd']:.2f})")
+        row = {"trial": t, "op": name, "verdict": verdict,
+               "uplift": round(uplift, 3), "usd": round(spent, 4)}
+        with open(rows_path, "a", encoding="utf-8") as fh:
+            fh.write(json.dumps(row) + "\n")
+        spend_path.write_text(json.dumps({"usd": _SPEND["usd"], "calls": _SPEND["calls"]}))
+        done[t] = row
+        # keep the run dir from ballooning: solver/gov scratch is not needed once graded
+        import shutil as _sh
+        _sh.rmtree(sdir, ignore_errors=True)
+        _sh.rmtree(out / f"gov{t}", ignore_errors=True)
+        if (len(done)) % 25 == 0:
+            p = sum(1 for r in done.values() if r["verdict"] == "PROMOTED")
+            print(f"  {len(done):4d}/{args.trials}  promoted={p}  cum ${_SPEND['usd']:.2f}")
 
-    # --- audit + summary -------------------------------------------------------
+    # --- audit + summary (over ALL persisted rows, across restarts) ------------
+    all_rows = list(done.values())
     print("\n" + "=" * 74)
     audit = subprocess.run(
         [sys.executable, str(_HERE / "audit_ledger.py"),
-         "--ledger", str(tmp / "ledger.json"), "--keys", str(keys)],
+         "--ledger", str(out / "ledger.json"), "--keys", str(keys)],
         capture_output=True, text=True)
     for line in audit.stdout.splitlines():
         if "records |" in line or "AUDIT OK" in line or "INVALID" in line:
             print("  " + line.strip())
 
-    n = len(rows)
-    promoted = [r for r in rows if r["verdict"] == "PROMOTED"]
-    overfit = [r for r in rows if r["verdict"] == "OVERFIT"]
+    n = len(all_rows)
+    promoted = [r for r in all_rows if r["verdict"] == "PROMOTED"]
+    overfit = [r for r in all_rows if r["verdict"] == "OVERFIT"]
     print("\n" + "=" * 74)
     print(f"  TRIALS RUN: {n}   TOTAL LLM SPEND: ${_SPEND['usd']:.2f}  "
-          f"({_SPEND['calls']} calls, ${_SPEND['usd']/max(n,1):.3f}/trial)")
+          f"(${_SPEND['usd']/max(n,1):.3f}/trial)")
     print(f"  DISCOVERED + generalised (PROMOTED): {len(promoted)}/{n}")
     print(f"  memorised (OVERFIT, caught)        : {len(overfit)}/{n}")
     print(f"  failed to infer / no gain          : {n - len(promoted) - len(overfit)}/{n}")
     if promoted:
-        ops = sorted({r["op"] for r in promoted})
-        print(f"  operations the agent discovered    : {ops}")
+        import collections
+        byop = collections.Counter(r["op"] for r in promoted)
+        print(f"  operations discovered              : {dict(sorted(byop.items()))}")
         print(f"  mean held-out uplift on promotions : "
               f"+{sum(r['uplift'] for r in promoted)/len(promoted):.3f}")
     print(f"  ledger signatures re-verified      : audit exit {audit.returncode} (0=all valid)")
-    (tmp / "rows.json").write_text(json.dumps(rows, indent=2))
 
-    if args.keep:
-        print(f"\n  kept: {tmp}")
+    if persistent or args.keep:
+        print(f"\n  kept: {out}")
     else:
         import shutil
-        shutil.rmtree(tmp, ignore_errors=True)
+        shutil.rmtree(out, ignore_errors=True)
     return 0
 
 
