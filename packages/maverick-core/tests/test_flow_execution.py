@@ -69,6 +69,22 @@ class TestExecution:
         from maverick.flow import store
         assert store.load_run(run.run_id).owner == "user:a"
 
+
+    def test_action_flow_rejects_unsafe_shell_tool(self):
+        f = Flow(id="unsafe", name="unsafe", start="a", nodes={
+            "a": FlowNode(id="a", kind=NODE_ACTION, tool="shell",
+                          params={"args": {"cmd": "id"}}, output="o")})
+
+        assert "unsafe tool 'shell'" in "; ".join(f.validate())
+
+    def test_default_action_runner_blocks_unsafe_shell_tool(self):
+        run = execution.default_action_runner(world=None)
+
+        result, outcome = run("shell", {"args": {"cmd": "id"}}, {})
+
+        assert outcome == 0.0
+        assert result == "ERROR: unsafe flow action tool 'shell'"
+
     def test_flow_max_dollars_caps_agent_fan_out(self, tmp_path, monkeypatch):
         # Three chained agent nodes at the default $5 per-node reservation; a $12
         # aggregate cap lets 2 run and skips the 3rd (2*5=10 ok, +5 would exceed).

@@ -43,6 +43,18 @@ NODE_KINDS = frozenset({
 })
 _WORK_KINDS = frozenset({NODE_ACTION, NODE_AGENT})
 
+# Flow action nodes are operator-authored and bypass the normal agent loop, so
+# they must not expose tools that execute arbitrary code or mutate the host
+# filesystem directly. Keep this denylist small to preserve connector actions.
+UNSAFE_ACTION_TOOLS = frozenset({
+    "shell",
+    "read_file",
+    "write_file",
+    "list_dir",
+    "str_replace_editor",
+    "apply_patch",
+})
+
 
 @dataclass
 class FlowNode:
@@ -304,8 +316,11 @@ class Flow:
     def _validate_kind_fields(self, n: FlowNode) -> list[str]:
         """Flat required-field checks per kind (no sub-flow recursion)."""
         errs = []
-        if n.kind == NODE_ACTION and not n.tool:
-            errs.append(f"action node {n.id!r} has no tool")
+        if n.kind == NODE_ACTION:
+            if not n.tool:
+                errs.append(f"action node {n.id!r} has no tool")
+            elif n.tool in UNSAFE_ACTION_TOOLS:
+                errs.append(f"action node {n.id!r} uses unsafe tool {n.tool!r}")
         if n.kind == NODE_AGENT and not n.brief:
             errs.append(f"agent node {n.id!r} has no brief")
         if n.kind == NODE_BRANCH and not n.condition:
