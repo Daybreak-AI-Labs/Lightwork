@@ -32,13 +32,21 @@ Config::
     backend = "devcontainer"
     project_dir = "/path/to/your/repo"  # contains .devcontainer/
     timeout = 60
-    allow_network = true                # devcontainers usually need net
+    allow_network = false               # OFF by default (parity with docker/
+                                        # podman/kubernetes --network none); opt in
+    allow_root = false                  # keep the invoking uid:gid; true = root
     memory = "4g"                       # RAM cap (shared knob; "" / null disables)
 
 Every exec runs ``docker run`` with ``--cap-drop ALL``,
 ``--security-opt no-new-privileges``, a pids limit, and the ``--memory`` cap
-above, matching the hardened DockerBackend. The container user follows the
-spec's ``remoteUser`` and the network follows ``allow_network``.
+above, matching the hardened DockerBackend. Network is disabled by default
+(``--network none``) exactly like the other container backends -- set
+``allow_network = true`` when a run genuinely needs egress. The container user
+follows a non-root ``remoteUser`` from the spec when one is set; otherwise it is
+pinned to the invoking uid:gid (``container_user_args``) so a ``remoteUser:
+root`` spec can't silently run the agent as root against the writable host
+mount. Set ``allow_root = true`` (or ``MAVERICK_SANDBOX_ALLOW_ROOT``) to opt
+back into root.
 """
 from __future__ import annotations
 
@@ -50,7 +58,7 @@ import uuid
 from dataclasses import dataclass, field
 from pathlib import Path
 
-from .local import _SECRET_ENV_RE, ExecResult, scrub_env
+from .local import _SECRET_ENV_RE, ExecResult, container_user_args, scrub_env
 
 log = logging.getLogger(__name__)
 
@@ -156,8 +164,18 @@ def _parse_devcontainer(path: Path) -> DevcontainerSpec:
 class DevcontainerBackend:
     project_dir: Path
     timeout: float = 60.0
-    allow_network: bool = True
+    # OFF by default -- parity with docker/podman/kubernetes, which all default
+    # to ``--network none``. A devcontainer that genuinely needs egress opts in
+    # via ``[sandbox] allow_network = true``. Defaulting this True shipped weaker
+    # isolation than the DockerBackend this backend claims parity with.
+    allow_network: bool = False
     memory: str | None = "4g"
+    # Run as the invoking uid:gid by default (via ``container_user_args``) rather
+    # than root. The workspace is a WRITABLE host bind-mount, so a root container
+    # user lets a prompt-injected agent write root-owned files on the host. Set
+    # ``[sandbox] allow_root = true`` (or ``MAVERICK_SANDBOX_ALLOW_ROOT``) to keep
+    # root for images that require it -- matching DockerBackend.
+    allow_root: bool = False
     spec_override: DevcontainerSpec | None = None
 
     def __post_init__(self) -> None:
@@ -220,7 +238,19 @@ class DevcontainerBackend:
             args.extend(["--memory", str(self.memory),
                          "--memory-swap", str(self.memory)])
         if self.spec.remote_user and self.spec.remote_user != "root":
+            # A non-root remoteUser is an explicit, safe choice from the spec --
+            # honor it verbatim.
             args.extend(["--user", self.spec.remote_user])
+        else:
+            # remoteUser is root (the spec default or an explicit "root"):
+            # running as root against the writable {project_dir}:{workspace}
+            # host mount lets a prompt-injected agent write root-owned files on
+            # the host. Pin to the invoking uid:gid -- the SAME
+            # container_user_args/allow_root mechanism DockerBackend uses --
+            # unless the operator EXPLICITLY opts into root via allow_root /
+            # MAVERICK_SANDBOX_ALLOW_ROOT. Do not silently honor `remoteUser:
+            # root`.
+            args.extend(container_user_args(self.allow_root))
         for k, v in self.spec.container_env.items():
             # containerEnv is repo-supplied: reject names that aren't plain
             # shell identifiers, and skip secret-shaped names so a malicious

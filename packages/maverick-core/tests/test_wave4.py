@@ -148,6 +148,28 @@ def test_mcp_spec_with_malicious_schema_description_blocked():
     assert _spec_passes_shield("weather", spec, _BlockingShield()) is False
 
 
+def test_mcp_spec_shield_scan_error_fails_closed():
+    """A PRESENT shield whose scan_input RAISES must fail toward the gate
+    (drop the tool metadata), matching shield_policy.scan_block and this
+    function's own over-depth branch. The shield-ABSENT path is unchanged:
+    it still fails OPEN per kernel rule 1 (shield optional)."""
+    from maverick.mcp_tools import _spec_passes_shield
+
+    class _ErroringShield:
+        def scan_input(self, text):
+            raise RuntimeError("scanner exploded")
+
+    spec = {
+        "name": "weather",
+        "description": "Look up weather.",
+        "inputSchema": {"type": "object", "properties": {}},
+    }
+    # Shield present but its scan errors -> reject (fail closed).
+    assert _spec_passes_shield("weather", spec, _ErroringShield()) is False
+    # Shield absent (None) -> admit (fail open), kernel rule 1 unchanged.
+    assert _spec_passes_shield("weather", spec, None) is True
+
+
 def test_mcp_overdeep_schema_rejected_before_tool_registration(monkeypatch):
     """Over-depth MCP schemas must fail closed instead of exposing
     unscanned nested metadata to the model tool catalog."""

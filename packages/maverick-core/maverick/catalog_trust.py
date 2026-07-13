@@ -125,6 +125,16 @@ def shield_scan(text: str, *, label: str) -> None:
     try:
         from maverick_shield import Shield  # type: ignore
     except ImportError:
+        # Fail open per kernel rule 1, but NOT silently: without the shield
+        # extra, this catalog body (skill/persona/template) is concatenated
+        # into the agent system prompt UNSCANNED. Warn so operators can see the
+        # content-trust control is inactive (matches shield_policy's fail-open
+        # logging; the docstring promises fail-open-WITH-a-warning).
+        log.warning(
+            "content scanning unavailable: maverick_shield is not installed "
+            "(install the shield extra); %s admitted unscanned",
+            label,
+        )
         return
     try:
         verdict = Shield.from_config().scan_input(text)

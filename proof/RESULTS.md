@@ -29,10 +29,24 @@ chokepoint calls:
   [PASS]  Fleet can read, not write         finance_ap reaches billdotcom_read (GET-only); the write connector is refused + capability-denied
   [PASS]  Segregation of duties clean       all 70 finance packs SoD-clean (no compartment unions incompatible duties)
   [PASS]  Verified peer handoffs            authentic handoff verifies (rule=ok); tampered copy rejected (rule=tampered)
-  [PASS]  Tamper-evident audit ledger       2-row signed chain verifies clean; altering an amount is caught (bad_hash)
+  [PASS]  Audit ledger integrity (co-located key)   2-row signed chain verifies clean; altering an amount is caught (bad_hash) -- co-located key: detects non-privileged edits only, NOT tamper-evidence vs a same-uid actor (set MAVERICK_AUDIT_SIGNING_KEY for off-host key custody)
   ----------------------------------------------------------------------------
   7 guarantees PROVEN, 0 failed
 ```
+
+> **Audit-ledger custody caveat.** The signed (Ed25519) hash-chain always
+> *detects* an altered row, so the guarantee passes on integrity grounds. But by
+> default the Ed25519 key is **co-located** on the host under
+> `~/.maverick/audit/keys`, readable by the same uid that runs the agent — so it
+> is tamper-evidence against accidental or non-privileged edits, **not** against
+> an actor (a prompt-injected or self-modifying agent) running as the maverick
+> uid, who can read the key and cleanly re-sign the chain. The headline upgrades
+> to **"Tamper-evident audit ledger"** only when signing-key custody is moved
+> **off-host** — set `MAVERICK_AUDIT_SIGNING_KEY` (a KMS / secrets-manager-sourced
+> key) or `MAVERICK_AUDIT_SIGNING_KEY_WRAPPED` (a KMS-wrapped key), which
+> enterprise mode requires. Third-party tamper-evidence additionally needs the
+> verifier to hold the publisher's key out-of-band (see the verify commands
+> below).
 
 ## 2. Self-learning loop — `python proof/self_harness_proof.py`
 

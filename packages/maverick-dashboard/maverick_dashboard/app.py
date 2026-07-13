@@ -318,6 +318,14 @@ async def _lifespan(app: FastAPI):
     from maverick.residency import require_residency_or_die
     require_residency_or_die()  # strict region pin (#41); no-op unless opted in
     _assert_dashboard_auth_configured()
+    # Loud warning if reverse-proxy SSO is on but no upstream is trusted
+    # (neither trusted_proxies pinned nor trust_loopback explicitly set) --
+    # the forwarded identity header is then refused from every peer.
+    try:
+        from maverick.proxy_auth import warn_if_untrusted_proxy_config
+        warn_if_untrusted_proxy_config()
+    except Exception:  # pragma: no cover -- a warning must never block startup
+        pass
     await _reclaim_orphans()
     await _install_queue_dispatcher()
     await _install_automation_scheduler()
@@ -5134,6 +5142,37 @@ def _readiness_deep_checks() -> tuple[bool, dict[str, str]]:
     return ok, checks
 
 
+def _health_should_redact() -> bool:
+    """Redact the auth-exempt health payloads (``/healthz``, ``/readyz``)
+    whenever ANY auth mechanism is configured -- a static token, OIDC, or
+    reverse-proxy SSO -- not only when ``MAVERICK_DASHBOARD_TOKEN`` is set.
+
+    The platform treats token, OIDC, and proxy SSO as three independent auth
+    mechanisms, so an OIDC-only or proxy-SSO deployment runs with the token
+    UNSET. Gating on the token alone left the exempt (unauthenticated) probe
+    payload leaking operational signal to anyone on the network: the llm_key
+    status, a live in-flight goal gauge, the shield/agent-trust/client-binding
+    posture, and -- on a DB failure -- the absolute world.db path/DSN. Redact
+    whenever the deployment is authenticated at all; local-dev (no auth) keeps
+    the full checks for debuggability. One helper so the sites can't drift.
+    """
+    if os.environ.get("MAVERICK_DASHBOARD_TOKEN"):
+        return True
+    try:
+        from maverick.oidc import oidc_enabled
+        if oidc_enabled():
+            return True
+    except Exception:  # pragma: no cover -- never weaken redaction on a lookup error
+        pass
+    try:
+        from maverick.proxy_auth import proxy_auth_enabled
+        if proxy_auth_enabled():
+            return True
+    except Exception:  # pragma: no cover -- never weaken redaction on a lookup error
+        pass
+    return False
+
+
 @app.get("/healthz")
 async def healthz() -> JSONResponse:
     """Deep health: DB writable, LLM provider key present, runner alive."""
@@ -5151,11 +5190,12 @@ async def healthz() -> JSONResponse:
         # Council security finding: /healthz is auth-exempt so an
         # unauthenticated caller probing it during a DB failure used to
         # learn the absolute world.db path (and therefore the OS
-        # username). Surface only the exception type when an
-        # MAVERICK_DASHBOARD_TOKEN is configured (i.e. we're on a
-        # potentially exposed deployment). Local-dev (no token set)
-        # keeps the full detail for debuggability.
-        if os.environ.get("MAVERICK_DASHBOARD_TOKEN"):
+        # username). Surface only the exception type when the deployment is
+        # authenticated at all (token, OIDC, or reverse-proxy SSO -- see
+        # _health_should_redact; an OIDC-/proxy-only deploy runs with the
+        # token UNSET). Local-dev (no auth) keeps the full detail for
+        # debuggability.
+        if _health_should_redact():
             checks["db"] = f"fail: {type(e).__name__}"
         else:
             checks["db"] = f"fail: {type(e).__name__}: {e}"
@@ -5177,13 +5217,13 @@ async def healthz() -> JSONResponse:
 
     status = "ok" if overall_ok else "degraded"
     # /healthz + /readyz are auth-exempt (LB/k8s probes can't carry a bearer).
-    # On a token-protected (i.e. potentially exposed) deployment, the detailed
+    # On an authenticated (i.e. potentially exposed) deployment, the detailed
     # `checks` block leaks operational signal to anyone on the network:
     # whether an LLM key is configured (llm_key: ok/missing) and a live
     # in-flight goal gauge. Mirror the DB-path redaction already done above and
     # collapse the exempt payload to just the status (LB probes only need the
-    # 200/503). Local-dev (no token) keeps the full checks for debuggability.
-    if os.environ.get("MAVERICK_DASHBOARD_TOKEN"):
+    # 200/503). Local-dev (no auth) keeps the full checks for debuggability.
+    if _health_should_redact():
         payload: dict[str, Any] = {"status": status}
     else:
         payload = {"status": status, "checks": checks}
@@ -5200,7 +5240,7 @@ async def readyz() -> JSONResponse:
     health_ok = health.status_code == 200
     deep_ok, deep_checks = await run_in_threadpool(_readiness_deep_checks)
     overall_ok = health_ok and deep_ok
-    if os.environ.get("MAVERICK_DASHBOARD_TOKEN"):
+    if _health_should_redact():
         payload: dict[str, Any] = {"status": "ok" if overall_ok else "not_ready"}
     else:
         import json as _json
