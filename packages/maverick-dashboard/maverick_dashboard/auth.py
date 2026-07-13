@@ -32,6 +32,11 @@ from maverick.proxy_auth import (
     proxy_trusts,
 )
 
+# Arm the SCIM-group grant resolver (registered on import with
+# maverick.suite_grants) so the HTTP gates and the kernel deploy/dispatch
+# gates both see group-derived department grants from the first request.
+from . import scim_groups  # noqa: F401
+
 # Probe/discovery endpoints that must answer without a bearer even when OIDC is
 # on (load balancers and k8s liveness/readiness probes, plus the OpenAPI docs,
 # can't present an ID token). Mirrors the dashboard's existing bearer-auth
@@ -213,14 +218,28 @@ def is_dashboard_admin(principal: str) -> bool:
 
 
 def global_role_for_principal(principal: str | None) -> str | None:
-    """The principal's dashboard-wide RBAC role, ignoring tenant memberships."""
+    """The principal's dashboard-wide RBAC role, ignoring tenant memberships.
+
+    Resolution: explicit stored assignment, then the role mapped to the user's
+    SCIM groups (``[dashboard] group_roles`` — team membership in the IdP), then
+    the configured default. Explicit always beats derived, so an admin can still
+    pin an individual without fighting the group mapping."""
     if principal is None:
         return None
     if is_dashboard_admin(principal):
         return "admin"
     from . import rbac
-
-    return rbac.get_stored_role(principal) or rbac.default_role()
+    stored = rbac.get_stored_role(principal)
+    if stored:
+        return stored
+    try:
+        from . import scim_groups
+        group_role = scim_groups.role_for_principal(principal)
+        if group_role:
+            return group_role
+    except Exception:  # pragma: no cover - group mapping must never gate auth
+        pass
+    return rbac.default_role()
 
 
 def role_for_principal(principal: str | None) -> str | None:

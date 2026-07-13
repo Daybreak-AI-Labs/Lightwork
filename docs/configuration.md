@@ -106,6 +106,14 @@ token = "${MAVERICK_DASHBOARD_TOKEN}"
 # departments until an admin grants more. Admins are never scoped.
 # default_suites = ["finance"]
 
+# SCIM-group mapping: when your IdP (Okta/Entra) pushes Groups via SCIM,
+# these tables turn team membership into access — no per-user assignment.
+# An explicit Users-page assignment always beats the group-derived value.
+# [dashboard.group_roles]
+# "Finance Team" = "operator"
+# [dashboard.group_suites]
+# "Finance Team" = ["finance", "tax"]
+
 [flows]
 # The visual flow-automation engine (a deterministic graph of agent/action/
 # branch/switch/foreach/while/parallel/approval/delay/wait_event/scope/subflow/

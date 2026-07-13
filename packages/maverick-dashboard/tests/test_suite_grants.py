@@ -234,3 +234,89 @@ def test_users_page_manages_department_access(monkeypatch, tmp_path):
     r = c.post("/users/suites/remove", data={"principal": "user:fin"})
     assert r.status_code == 200
     assert suite_grants.get_grant("user:fin") is None
+
+
+def test_users_page_preselects_current_grant(monkeypatch, tmp_path):
+    # Each grant row carries its own edit form with the CURRENT departments
+    # preselected (like the role dropdown), so re-saving never overwrites blind.
+    c = _client(monkeypatch, tmp_path)
+    from maverick_dashboard import suite_grants
+    suite_grants.set_suites("user:fin", ["finance"])
+    page = c.get("/users").text
+    assert 'value="finance" selected' in page
+    assert 'value="legal" selected' not in page
+
+
+def test_scoped_user_sees_filtered_pack_catalog(monkeypatch, tmp_path):
+    # The catalog surfaces mirror /departments: a finance-scoped user browses
+    # finance specialists (plus generic no-suite packs), and another
+    # department's pack config 403s rather than rendering.
+    monkeypatch.setenv("MAVERICK_DASHBOARD_ADMINS", "")
+    c = _client(monkeypatch, tmp_path)
+    from maverick_dashboard import suite_grants
+    suite_grants.set_suites("user:fin", ["finance"])
+    _as(monkeypatch, "user:fin")
+
+    agents = c.get("/api/v1/agents").json()["agents"]
+    suites = {a.get("suite") for a in agents}
+    assert suites <= {"finance", None} and "finance" in suites
+
+    assert c.get("/api/v1/agents/finance_ap").status_code == 200
+    assert c.get("/api/v1/agents/legal_contracts").status_code == 403
+    assert c.get("/api/v1/agents/definitely_missing").status_code == 404
+
+    # Marketplace: grouped browse and flat search both scope to the grant.
+    store = c.get("/api/v1/marketplace/packs").json()["departments"]
+    assert {d["key"] for d in store} == {"finance"}
+    results = c.get("/api/v1/marketplace/packs?q=contract").json()["results"]
+    assert all(r["suite"] == "finance" for r in results)
+
+    # Unscoped callers still see the full catalog.
+    _as(monkeypatch, None)
+    all_suites = {a.get("suite")
+                  for a in c.get("/api/v1/agents").json()["agents"]}
+    assert "legal" in all_suites
+
+
+def test_scoped_user_sees_filtered_html_pages(monkeypatch, tmp_path):
+    # /workforce and /agents (HTML) must match the JSON filtering — the pages
+    # previously showed the full catalog, diverging from /api/v1/departments.
+    monkeypatch.setenv("MAVERICK_DASHBOARD_ADMINS", "")
+    c = _client(monkeypatch, tmp_path)
+    from maverick_dashboard import suite_grants
+    suite_grants.set_suites("user:fin", ["finance"])
+    _as(monkeypatch, "user:fin")
+
+    workforce = c.get("/workforce").text
+    assert "Close the books" in workforce            # the finance charter line
+    assert "Capital Markets" not in workforce        # another department's card
+
+    agents_page = c.get("/agents").text
+    assert "finance_ap" in agents_page
+    assert "legal_contracts" not in agents_page
+    # Deep-linking another department's editor renders no config.
+    selected = c.get("/agents?name=legal_contracts").text
+    assert "legal_contracts" not in selected
+
+
+def test_kernel_gate_blocks_dispatch_and_deploy_for_scoped_user(monkeypatch, tmp_path):
+    # The dispatch/deploy denials now come from the KERNEL chokepoints
+    # (maverick.fleet / maverick.departments), mapped to HTTP 403 here.
+    monkeypatch.setenv("MAVERICK_DASHBOARD_ADMINS", "")
+    c = _client(monkeypatch, tmp_path)
+    from maverick.fleet import Fleet, FleetAgent, save_fleet
+    from maverick_dashboard import api, suite_grants
+
+    monkeypatch.setattr(api, "_any_provider_key_set", lambda: True)
+    save_fleet(Fleet(name="mixed", owner="user:fin", agents=(
+        FleetAgent(name="legal_contracts", role="legal",
+                   description="", domain="legal_contracts"),
+    )))
+    suite_grants.set_suites("user:fin", ["finance"])
+    _as(monkeypatch, "user:fin")
+
+    r = c.post("/api/v1/fleets/mixed/run",
+               json={"agent": "legal_contracts", "prompt": "review this NDA"})
+    assert r.status_code == 403
+    assert "department" in r.json()["detail"]
+    assert c.post("/api/v1/departments/legal/deploy").status_code == 403

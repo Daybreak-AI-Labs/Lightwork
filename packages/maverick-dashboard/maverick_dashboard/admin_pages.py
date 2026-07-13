@@ -360,7 +360,8 @@ async def users_set_role(
     _app()._require_same_origin(request)
     from . import rbac
     try:
-        rbac.set_role(principal.strip(), role.strip())
+        rbac.set_role(principal.strip(), role.strip(),
+                      actor=auth.caller_principal(request) or "local")
     except ValueError as exc:
         raise HTTPException(status_code=400, detail="invalid principal or role") from exc
     return RedirectResponse("/users?saved=set", status_code=303)
@@ -373,7 +374,8 @@ async def users_remove(request: Request, principal: str = Form(...)) -> Redirect
     auth.require_permission(request, "admin")
     _app()._require_same_origin(request)
     from . import rbac
-    rbac.remove_user(principal.strip())
+    rbac.remove_user(principal.strip(),
+                     actor=auth.caller_principal(request) or "local")
     return RedirectResponse("/users?saved=removed", status_code=303)
 
 
@@ -392,7 +394,8 @@ async def users_set_suites(request: Request) -> RedirectResponse:
     principal = str(form.get("principal", "")).strip()
     suites = [str(s) for s in form.getlist("suites")]
     try:
-        suite_grants.set_suites(principal, suites)
+        suite_grants.set_suites(principal, suites,
+                                actor=auth.caller_principal(request) or "local")
     except ValueError as exc:
         raise HTTPException(status_code=400, detail="invalid principal or department") from exc
     return RedirectResponse("/users?saved=suites", status_code=303)
@@ -406,6 +409,7 @@ async def users_remove_suites(
     auth.require_global_permission(request, "admin")
     _app()._require_same_origin(request)
     from . import suite_grants
-    suite_grants.remove_grant(principal.strip())
+    suite_grants.remove_grant(principal.strip(),
+                              actor=auth.caller_principal(request) or "local")
     return RedirectResponse("/users?saved=suites_removed", status_code=303)
 

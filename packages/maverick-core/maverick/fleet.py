@@ -111,6 +111,23 @@ def fleets_dir(*, tenant: str | None = "__active__") -> Path:
     return data_dir("fleets", tenant=tenant)
 
 
+def ensure_dispatch_allowed(principal: str | None, agent: FleetAgent) -> None:
+    """Kernel gate: may ``principal`` dispatch this fleet agent?
+
+    A department-deployed agent carries its specialist pack (``agent.domain``);
+    a dispatcher scoped to other departments may not run it, even on a fleet
+    they own (e.g. a grant narrowed after deploy). Raises
+    :class:`maverick.suite_grants.DepartmentAccessError` on denial. Generic
+    agents (no domain, or a pack outside every suite), an empty principal
+    (host operator / auth off), and configured admins always pass — the same
+    fail-open invariant as :func:`maverick.departments.deploy_department`."""
+    if not agent.domain:
+        return
+    from .domain import suite_for
+    from .suite_grants import ensure_suite_allowed
+    ensure_suite_allowed(principal, suite_for(agent.domain))
+
+
 def save_fleet(fleet: Fleet, *, tenant: str | None = "__active__") -> Path:
     """Persist a fleet (0600). Raises ValueError on an invalid name."""
     if not valid_name(fleet.name):
