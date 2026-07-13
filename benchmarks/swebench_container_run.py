@@ -25,9 +25,12 @@ Proposers:
     are correct across a diverse random sample (gold resolves, baseline fails,
     signed). This is the credibility artifact you can run before spending a cent
     on an agent.
-  * (an LLM/agent proposer plugs in the same way -- swap the patch source; the
-    governance and grading are identical. That run costs Anthropic $ and is the
-    real solve-rate number.)
+  * ``agent`` -- runs the Maverick coding agent to produce a candidate, then
+    grades that candidate with the same container governance path. The CLI
+    ``--backend`` flag controls only the official grading backend; the agent
+    proposer is separately forced to use a non-host-visible Maverick sandbox
+    (container / remote / microVM policy) before it may run against untrusted
+    benchmark checkouts.
 
     # signed, non-cherry-picked artifact ($0 Anthropic, ~cents Modal):
     python benchmarks/swebench_container_run.py --n 4 --seed 1729 \
@@ -40,6 +43,7 @@ from __future__ import annotations
 import argparse
 import json
 import logging
+import os
 import random
 import sys
 from dataclasses import dataclass, field
@@ -147,13 +151,34 @@ def _materialize_repo(instance: dict, dst: Path) -> None:
         _git("checkout", "-q", "-b", "base", sha, cwd=dst)
 
 
+class _RequireContainerSandbox:
+    """Temporarily fail closed if the agent proposer would use host shell exec."""
+
+    _ENV_KEY = "MAVERICK_REQUIRE_CONTAINER_BACKEND"
+
+    def __enter__(self):
+        self._previous = os.environ.get(self._ENV_KEY)
+        os.environ[self._ENV_KEY] = "1"
+        return self
+
+    def __exit__(self, exc_type, exc, tb):
+        if self._previous is None:
+            os.environ.pop(self._ENV_KEY, None)
+        else:
+            os.environ[self._ENV_KEY] = self._previous
+        return False
+
+
 def agent_patch(instance: dict) -> str:
     """Run the maverick coding agent against a fresh checkout of the instance at
-    base_commit and return its proposed fix, reusing the proven
-    ``swebench_governed.llm_proposer`` (best-of-N, retry-on-empty, opaque-mode
-    anti-cheat, forensics sidecar). The agent produces the patch; the official
-    container grades it -- so the agent's local era never matters. Needs a
-    provider key (llm_proposer fails loud without one)."""
+    base_commit and return its proposed fix.
+
+    The CLI ``--backend`` flag controls only official grading. Before proposal,
+    force Maverick's own sandbox policy to require a non-host-visible backend so
+    untrusted benchmark repos cannot drive the auto-approved agent through the
+    default local host shell. Needs a provider key (llm_proposer fails loud
+    without one).
+    """
     import shutil
     import tempfile
 
@@ -172,7 +197,8 @@ def agent_patch(instance: dict) -> str:
             gold_patch=instance.get("patch", "") or "",
             brief=instance.get("problem_statement", "") or "",
             test_patch=instance.get("test_patch", "") or "", language="python")
-        return llm_proposer(inst) or ""
+        with _RequireContainerSandbox():
+            return llm_proposer(inst) or ""
     finally:
         shutil.rmtree(td, ignore_errors=True)
 
@@ -345,7 +371,9 @@ def main(argv: list[str] | None = None) -> int:
     ap.add_argument("--ids", type=str, default="",
                     help="comma-separated instance_ids (overrides --n/--seed)")
     ap.add_argument("--proposer", choices=sorted(PROPOSERS), default="oracle")
-    ap.add_argument("--backend", choices=("modal", "docker"), default="modal")
+    ap.add_argument("--backend", choices=("modal", "docker"), default="modal",
+                    help="official grading backend only; --proposer agent also "
+                         "requires Maverick's separate sandbox to be non-host-visible")
     ap.add_argument("--keys", required=True, type=Path,
                     help="dir with operator.priv.hex + operator.pub")
     ap.add_argument("--ledger", type=Path, default=Path("container_run_ledger.json"))
@@ -397,6 +425,9 @@ def main(argv: list[str] | None = None) -> int:
     print(f"  GOVERNED SWE-BENCH IN OFFICIAL CONTAINERS   proposer={args.proposer}  "
           f"n={len(ids)}  seed={args.seed}  backend={args.backend}")
     print(f"  ledger={args.ledger}   baseline-guard={'OFF' if args.no_baseline else 'ON'}")
+    if args.proposer != "oracle":
+        print("  proposer sandbox: Maverick require-container policy is enforced "
+              "separately from the grading backend")
     print("=" * 88)
 
     rep = run(instances, ids, run_in_image, proposer=args.proposer, keys_dir=args.keys,

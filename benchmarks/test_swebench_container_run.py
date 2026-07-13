@@ -10,6 +10,7 @@ turns container grading into a governed, signed run, for $0.
 from __future__ import annotations
 
 import copy
+import os
 import subprocess
 import sys
 from pathlib import Path
@@ -168,3 +169,31 @@ def test_sample_ids_is_deterministic_and_sorted():
     assert a == sorted(a)                             # sorted output
     assert len(a) == 5 and len(set(a)) == 5
     assert RUN.sample_ids(pool, 0, seed=1) == sorted(pool)   # 0 = all
+
+
+def test_agent_patch_requires_container_sandbox_for_proposer(monkeypatch, tmp_path):
+    """Agent proposal must not inherit the default host-visible local sandbox."""
+    import swebench_governed
+
+    inst = _instance()
+    inst["instance_id"] = "demo__repo-1"
+    observed = {}
+
+    def fake_materialize(instance, dst):
+        dst.mkdir(parents=True)
+        (dst / "README.md").write_text("fixture")
+
+    def fake_llm_proposer(agent_instance):
+        observed["env"] = os.environ.get("MAVERICK_REQUIRE_CONTAINER_BACKEND")
+        observed["repo_exists"] = agent_instance.repo_path.exists()
+        return "diff --git a/README.md b/README.md\n--- a/README.md\n+++ b/README.md\n@@ -1 +1 @@\n-fixture\n+fixed\n"
+
+    monkeypatch.delenv("MAVERICK_REQUIRE_CONTAINER_BACKEND", raising=False)
+    monkeypatch.setattr(RUN, "_materialize_repo", fake_materialize)
+    monkeypatch.setattr(swebench_governed, "llm_proposer", fake_llm_proposer)
+
+    patch = RUN.agent_patch(inst)
+
+    assert observed == {"env": "1", "repo_exists": True}
+    assert "fixed" in patch
+    assert os.environ.get("MAVERICK_REQUIRE_CONTAINER_BACKEND") is None
