@@ -41,9 +41,10 @@ supply one (``--patch``).
 """
 from __future__ import annotations
 
-import importlib.util
+import json
 import logging
 import pathlib
+import shlex
 import sys
 import uuid
 from dataclasses import dataclass, field
@@ -57,17 +58,90 @@ log = logging.getLogger(__name__)
 
 # --- running a solver version over instances -----------------------------------
 
-def load_solver(solver_dir: Path):
-    """Import ``solver.py`` from a directory under a unique module name (so
-    baseline and candidate copies never collide in ``sys.modules``)."""
+def load_solver(solver_dir: Path) -> Path:
+    """Validate that ``solver.py`` exists and return its path.
+
+    Solver code may be LLM-authored and is therefore untrusted. Do not import it
+    in the controller process: importing executes top-level Python before the
+    governance/capability gates can refuse the change. ``run_solver`` executes
+    the solver in the eval sandbox instead.
+    """
+    import ast
+
     path = Path(solver_dir) / "solver.py"
-    name = f"dgm_solver_{uuid.uuid4().hex}"
-    spec = importlib.util.spec_from_file_location(name, path)
-    mod = importlib.util.module_from_spec(spec)
-    spec.loader.exec_module(mod)
-    if not callable(getattr(mod, "solve", None)):
+    tree = ast.parse(path.read_text(encoding="utf-8"), filename=str(path))
+    has_solve = any(isinstance(n, ast.FunctionDef) and n.name == "solve" for n in tree.body)
+    if not has_solve:
         raise TypeError(f"{path} does not define solve(instance) -> str")
-    return mod
+    return path
+
+
+def _instance_payload(inst, repo_path: Path) -> dict:
+    """JSON-safe instance view passed to untrusted solver subprocesses."""
+    return {
+        "instance_id": inst.instance_id,
+        "repo_path": str(repo_path),
+        "fail_to_pass": list(getattr(inst, "fail_to_pass", []) or []),
+        "pass_to_pass": list(getattr(inst, "pass_to_pass", []) or []),
+        "gold_patch": getattr(inst, "gold_patch", ""),
+        "brief": getattr(inst, "brief", ""),
+        "language": getattr(inst, "language", "python"),
+        "total_tests": getattr(inst, "total_tests", 0),
+    }
+
+
+_SOLVER_RUNNER = r'''
+import importlib.util
+import json
+import sys
+import uuid
+from pathlib import Path
+from types import SimpleNamespace
+
+solver_path = Path(sys.argv[1])
+payload_path = Path(sys.argv[2])
+payload = json.loads(payload_path.read_text(encoding="utf-8"))
+inst = SimpleNamespace(**payload)
+name = f"dgm_solver_{uuid.uuid4().hex}"
+spec = importlib.util.spec_from_file_location(name, solver_path)
+mod = importlib.util.module_from_spec(spec)
+spec.loader.exec_module(mod)
+solve = getattr(mod, "solve", None)
+if not callable(solve):
+    raise TypeError(f"{solver_path} does not define solve(instance) -> str")
+patch = solve(inst) or ""
+if not isinstance(patch, str):
+    raise TypeError("solve(instance) must return str")
+sys.stdout.write(patch)
+'''
+
+
+def _solve_in_sandbox(solver_path: Path, inst, workroot: Path, sb, *,
+                      timeout: float = 600.0) -> str:
+    """Run one untrusted solver invocation through the eval sandbox.
+
+    The solver sees a throwaway copy of the instance repo, not ``inst.repo_path``,
+    so side effects performed while deciding what patch to emit cannot tamper
+    with the source tree later materialized by ``score_instance``.
+    """
+    from maverick.self_modify_eval import _default_materialize
+
+    work = Path(workroot)
+    work.mkdir(parents=True, exist_ok=True)
+    repo_copy = work / "solver-visible-repo"
+    _default_materialize(inst.repo_path, repo_copy)
+    runner = work / "run_solver_once.py"
+    payload = work / "instance.json"
+    runner.write_text(_SOLVER_RUNNER, encoding="utf-8")
+    payload.write_text(json.dumps(_instance_payload(inst, repo_copy)), encoding="utf-8")
+    cmd = (
+        f"{shlex.quote(sys.executable)} -I {shlex.quote(str(runner))} "
+        f"{shlex.quote(str(solver_path))} {shlex.quote(str(payload))}"
+    )
+    res = sb.exec(cmd, timeout=timeout)
+    if not getattr(res, "ok", False):
+        raise RuntimeError((getattr(res, "stderr", "") or "solver failed").strip()[:500])
+    return getattr(res, "stdout", "") or ""
 
 
 def score_instance(inst, patch: str, workroot: Path, *, timeout: float = 600.0) -> bool:
@@ -103,16 +177,20 @@ def score_instance(inst, patch: str, workroot: Path, *, timeout: float = 600.0) 
 def run_solver(solver_dir: Path, instances: list, workroot: Path,
                *, timeout: float = 600.0) -> dict[str, bool]:
     """Resolved-map for one solver version over a set of instances."""
-    mod = load_solver(solver_dir)
+    from maverick.self_modify_eval import resolve_eval_sandbox
+
+    solver_path = load_solver(solver_dir)
+    workroot = Path(workroot)
+    sb = resolve_eval_sandbox(None, workroot)
     out: dict[str, bool] = {}
     for i, inst in enumerate(instances):
+        inst_work = workroot / f"i{i}"
         try:
-            patch = mod.solve(inst) or ""
+            patch = _solve_in_sandbox(solver_path, inst, inst_work / "solve", sb, timeout=timeout)
         except Exception:
             log.warning("solver crashed on %s", inst.instance_id, exc_info=True)
             patch = ""
-        out[inst.instance_id] = score_instance(
-            inst, patch, Path(workroot) / f"i{i}", timeout=timeout)
+        out[inst.instance_id] = score_instance(inst, patch, inst_work / "score", timeout=timeout)
     return out
 
 
@@ -205,7 +283,24 @@ def govern_solver_change(
         out.reason = f"solver patch did not apply: {applied.reason}"
         return out
 
-    # 3. Run BOTH solver versions on BOTH instance splits (isolated copies,
+    # 3. Capability non-escalation proof over the solver patch BEFORE the
+    #    candidate solver is ever executed. A widening patch must not get a
+    #    chance to run arbitrary top-level/solve code and cause side effects
+    #    before the gate refuses it.
+    cb = ca = None
+    probe: tuple[str, ...] = ()
+    try:
+        baseline_files = {"solver.py": (base_dir / "solver.py").read_text(encoding="utf-8")}
+        cb, ca, probe = capability_delta(solver_patch, baseline_files=baseline_files)
+        if cb is not None and ca is not None and probe:
+            out.capability_widens = any(ca.permits(t) and not cb.permits(t) for t in probe)
+        if out.capability_widens:
+            out.reason = "capability widening refused before solver execution"
+            return out
+    except Exception:
+        log.debug("capability_delta failed", exc_info=True)
+
+    # 4. Run BOTH solver versions on BOTH instance splits (isolated copies,
     #    real tests, per-emitted-patch anti-cheat inside score_instance).
     held_in, held_out = split_instances(instances, held_out_frac=held_out_frac)
     if not held_out:
@@ -218,7 +313,7 @@ def govern_solver_change(
     out.baseline_held_out, out.candidate_held_out = _rate(r_base, held_out), _rate(r_cand, held_out)
     out.samples = sum(i.total_tests for i in held_out)
 
-    # 4. Overfit guard: gained on seen instances but not unseen -> memorisation.
+    # 5. Overfit guard: gained on seen instances but not unseen -> memorisation.
     out.overfit = (out.candidate_held_in > out.baseline_held_in
                    and out.candidate_held_out <= out.baseline_held_out)
     if out.overfit:
@@ -226,16 +321,6 @@ def govern_solver_change(
                       f"but held-out {out.baseline_held_out:.3f}->{out.candidate_held_out:.3f}; "
                       "solver memorised seen instances")
         return out
-
-    # 5. Capability non-escalation proof over the solver patch.
-    cb = ca = None
-    probe: tuple[str, ...] = ()
-    try:
-        cb, ca, probe = capability_delta(solver_patch)
-        if cb is not None and ca is not None and probe:
-            out.capability_widens = any(ca.permits(t) and not cb.permits(t) for t in probe)
-    except Exception:
-        log.debug("capability_delta failed", exc_info=True)
 
     # 6. Human-signed promotion through the governed gate -> ledger.
     import os
