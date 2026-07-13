@@ -1630,9 +1630,11 @@ pre-warming** (`max_tokens=0` prefill at orchestrator start) and a
   (a post-signature weights swap stops verifying); promotion lands in the
   append-only ledger; activation is an atomic pointer swap whose previous
   pointer is the byte-identical one-step rollback handle. Serving: a rendered
-  Ollama Modelfile (`ADAPTER`) + emitted `ollama create` command;
-  `llm._parse_spec` rewrites the base spec to the tuned model only while
-  enabled with a matching active pointer (fail-open otherwise). Trainers:
+  Ollama Modelfile (`ADAPTER`) + emitted `ollama create` command; the Ollama
+  provider client resolves base → tuned at request-build time
+  (`adapter_rung.effective_wire_model`, mtime-cached, fail-open), so spec
+  parsing, admin allow-lists, pricing, and telemetry keep the stable base
+  model id. Trainers:
   `stub` (deterministic; proofs/tests) and `dpo-lora` (delegates to
   `training/rlaif.py`, `[training]` extra). OFF by default AND inert until
   `base_model` is set (never hard-coded; wizard suggests an Apache-2.0 base).
