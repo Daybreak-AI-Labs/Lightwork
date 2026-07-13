@@ -2176,6 +2176,26 @@ _VOICE_SUFFIXES = {
 _VOICE_MAX_BYTES = 25 * 1024 * 1024
 
 
+def _voice_transcribe_concurrency_limit() -> int:
+    try:
+        return max(1, int(os.environ.get("MAVERICK_VOICE_TRANSCRIBE_CONCURRENCY", "2")))
+    except ValueError:
+        return 2
+
+
+_voice_transcribe_sem_limit = _voice_transcribe_concurrency_limit()
+_voice_transcribe_sem = asyncio.Semaphore(_voice_transcribe_sem_limit)
+
+
+def _get_voice_transcribe_semaphore() -> asyncio.Semaphore:
+    global _voice_transcribe_sem, _voice_transcribe_sem_limit
+    limit = _voice_transcribe_concurrency_limit()
+    if limit != _voice_transcribe_sem_limit:
+        _voice_transcribe_sem = asyncio.Semaphore(limit)
+        _voice_transcribe_sem_limit = limit
+    return _voice_transcribe_sem
+
+
 @router.post("/voice/transcribe")
 async def voice_transcribe(
     request: Request,
@@ -2194,6 +2214,11 @@ async def voice_transcribe(
     if not _voice_commands_enabled():
         raise HTTPException(status_code=404, detail="voice commands are disabled")
     require_permission(request, "operate")
+    # STT can spend provider quota or run a CPU-heavy local Whisper model.
+    # Apply the same dashboard spend backstop used by paid goal creation before
+    # reading/writing the upload or dispatching to the backend.
+    from maverick_dashboard.app import check_goal_rate_limit
+    check_goal_rate_limit(request)
 
     import os as _os
     import tempfile as _tempfile
@@ -2225,7 +2250,15 @@ async def voice_transcribe(
         args: dict = {"source": tmp.name}
         if lang:
             args["language"] = lang
-        text = await run_in_threadpool(_run_transcribe, args, None)
+        sem = _get_voice_transcribe_semaphore()
+        if sem.locked():
+            raise HTTPException(
+                status_code=429,
+                detail="voice transcription concurrency limit reached",
+                headers={"Retry-After": "1"},
+            )
+        async with sem:
+            text = await run_in_threadpool(_run_transcribe, args, None)
     finally:
         try:
             _os.unlink(tmp.name)
