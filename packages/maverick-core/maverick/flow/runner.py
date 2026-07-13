@@ -17,6 +17,7 @@ is where human-in-the-loop lives.
 from __future__ import annotations
 
 import re
+import threading
 import time
 from collections.abc import Callable
 from dataclasses import dataclass, field
@@ -59,6 +60,7 @@ PAUSED_STATUSES = frozenset({
 ACTIVE_STATUSES = frozenset({"queued", "running"}) | PAUSED_STATUSES
 
 _WHILE_DEFAULT_CAP = 100   # while-loop iterations when the node sets no limit
+_PARALLEL_MAX_WORKERS = 8   # cap fan-out threads for the whole flow run
 
 _VAR = re.compile(r"\{\{\s*(.+?)\s*\}\}")
 _COND = re.compile(r"^\s*(\S+)\s*(==|!=|>=|<=|>|<|contains)\s*(.+?)\s*$")
@@ -429,6 +431,7 @@ class _Ctx:
     resolve_flow: Callable[[str], Flow | None] | None = None
     flow_stack: set = field(default_factory=set)   # subflow ids on the call stack
     deadline: float | None = None                  # whole-flow wall-clock deadline
+    parallel_slots: Any = None                     # shared worker budget for fan-out
 
     def nested(self) -> _Ctx:
         # A copy that cannot pause (foreach body / subflow run straight). Shares
@@ -436,7 +439,8 @@ class _Ctx:
         # span the linear nesting.
         return _Ctx(self.agent_fn, self.action_fn, self.approve_fn, self.on_node,
                     self.now, allow_pause=False, resolve_flow=self.resolve_flow,
-                    flow_stack=self.flow_stack, deadline=self.deadline)
+                    flow_stack=self.flow_stack, deadline=self.deadline,
+                    parallel_slots=self.parallel_slots)
 
     def branched(self) -> _Ctx:
         # For a CONCURRENT parallel branch: its own flow_stack copy (independent
@@ -444,7 +448,8 @@ class _Ctx:
         # shared clock/deadline and the shared on_node sink.
         return _Ctx(self.agent_fn, self.action_fn, self.approve_fn, self.on_node,
                     self.now, allow_pause=False, resolve_flow=self.resolve_flow,
-                    flow_stack=set(self.flow_stack), deadline=self.deadline)
+                    flow_stack=set(self.flow_stack), deadline=self.deadline,
+                    parallel_slots=self.parallel_slots)
 
 
 def _render_params(node: FlowNode, data: dict) -> dict:
@@ -647,12 +652,34 @@ def _run_foreach(node: FlowNode, data: dict, ctx: _Ctx) -> str | None:
             sub = dict(data)
             sub[node.var] = item
             subs.append(sub)
-        workers = min(len(subs), _PARALLEL_MAX_WORKERS)
-        with _cf.ThreadPoolExecutor(max_workers=workers) as ex:
-            futs = [ex.submit(_run_chain, node.body, sub, ctx.branched(), node.body.start)
-                    for sub in subs]
-            for f in futs:
-                f.result()
+        threaded = []
+        inline = []
+        for sub in subs:
+            if ctx.parallel_slots is not None and ctx.parallel_slots.acquire(blocking=False):
+                threaded.append(sub)
+            else:
+                inline.append(sub)
+        first_error = None
+        if threaded:
+            with _cf.ThreadPoolExecutor(max_workers=len(threaded)) as ex:
+                futs = [ex.submit(_run_chain_with_parallel_slot, node.body, sub,
+                                  ctx.branched(), node.body.start)
+                        for sub in threaded]
+                for sub in inline:
+                    try:
+                        _run_chain(node.body, sub, ctx.branched(), node.body.start)
+                    except Exception as e:
+                        first_error = first_error or e
+                for f in futs:
+                    try:
+                        f.result()
+                    except Exception as e:
+                        first_error = first_error or e
+        else:
+            for sub in inline:
+                _run_chain(node.body, sub, ctx.branched(), node.body.start)
+        if first_error is not None:
+            raise first_error
         results = subs
     else:
         for item in items:
@@ -673,9 +700,6 @@ def _run_foreach(node: FlowNode, data: dict, ctx: _Ctx) -> str | None:
     return node.next
 
 
-_PARALLEL_MAX_WORKERS = 8   # cap fan-out threads per parallel node
-
-
 def _run_parallel(node: FlowNode, data: dict, ctx: _Ctx) -> str | None:
     base = dict(data)                     # frozen pre-parallel snapshot
     branch_outputs = [dict(base) for _ in node.branches]   # each isolated (sees only base)
@@ -685,12 +709,33 @@ def _run_parallel(node: FlowNode, data: dict, ctx: _Ctx) -> str | None:
         # (WAL + busy_timeout). A branch that raises propagates after the pool
         # joins the rest, so there are no leaked threads.
         import concurrent.futures as _cf
-        workers = min(len(node.branches), _PARALLEL_MAX_WORKERS)
-        with _cf.ThreadPoolExecutor(max_workers=workers) as ex:
-            futs = [ex.submit(_run_chain, br, sub, ctx.branched(), br.start)
-                    for br, sub in zip(node.branches, branch_outputs, strict=True)]
-            for f in futs:
-                f.result()                # wait for all; re-raise the first error
+        futs = []
+        inline = []
+        for br, sub in zip(node.branches, branch_outputs, strict=True):
+            if ctx.parallel_slots is not None and ctx.parallel_slots.acquire(blocking=False):
+                futs.append((br, sub))
+            else:
+                inline.append((br, sub))
+        first_error = None
+        if futs:
+            with _cf.ThreadPoolExecutor(max_workers=len(futs)) as ex:
+                futs = [ex.submit(_run_chain_with_parallel_slot, br, sub, ctx.branched(), br.start)
+                        for br, sub in futs]
+                for br, sub in inline:
+                    try:
+                        _run_chain(br, sub, ctx.branched(), br.start)
+                    except Exception as e:
+                        first_error = first_error or e
+                for f in futs:
+                    try:
+                        f.result()        # wait for all; re-raise the first error
+                    except Exception as e:
+                        first_error = first_error or e
+        else:
+            for br, sub in inline:
+                _run_chain(br, sub, ctx.branched(), br.start)
+        if first_error is not None:
+            raise first_error
     else:
         for br, sub in zip(node.branches, branch_outputs, strict=True):
             _run_chain(br, sub, ctx.nested(), br.start)
@@ -795,6 +840,14 @@ def _run_chain(flow: Flow, data: dict, ctx: _Ctx, start: str | None) -> None:
             raise RuntimeError(f"flow {flow.id!r} exceeded {limit} steps (cycle?)")
 
 
+def _run_chain_with_parallel_slot(flow: Flow, data: dict, ctx: _Ctx, start: str | None) -> None:
+    try:
+        _run_chain(flow, data, ctx, start)
+    finally:
+        if ctx.parallel_slots is not None:
+            ctx.parallel_slots.release()
+
+
 def run_flow(flow: Flow, *, agent_fn: AgentFn, action_fn: ActionFn,
              data: dict | None = None,
              approve_fn: Callable[[FlowNode, dict], str] | None = None,
@@ -814,7 +867,8 @@ def run_flow(flow: Flow, *, agent_fn: AgentFn, action_fn: ActionFn,
     ctx = _Ctx(agent_fn, action_fn, approve_fn, on_node or (lambda *_: None),
                _now, allow_pause=True, resolve_flow=resolve_flow,
                flow_stack={flow.id},   # so the top flow can't recurse into itself
-               deadline=(_now() + flow.max_seconds if flow.max_seconds and flow.max_seconds > 0 else None))
+               deadline=(_now() + flow.max_seconds if flow.max_seconds and flow.max_seconds > 0 else None),
+               parallel_slots=threading.BoundedSemaphore(_PARALLEL_MAX_WORKERS))
     if resume:
         data = dict(resume.get("data") or data or {})
         node = flow.node(resume.get("node_id"))
