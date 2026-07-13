@@ -15,6 +15,12 @@ mounting the router is inert until an operator opts in.
 State lives in ``<home>/scim_users.json`` (atomic 0600 write), keeping the full
 SCIM core attributes (id/userName/externalId/name/emails/active) so a round-trip
 with the IdP is faithful, and linking each user to a registry tenant.
+
+Groups: the ``/Groups`` resource stores IdP-pushed group membership
+(``<home>/scim_groups.json``). ``scim_groups.py`` maps those groups to
+dashboard roles and department grants via ``[dashboard] group_roles`` /
+``group_suites``, so access flows from Okta/Entra team membership instead of
+per-user hand assignment.
 """
 from __future__ import annotations
 
@@ -32,6 +38,7 @@ from maverick.paths import maverick_home
 router = APIRouter(prefix="/scim/v2", tags=["scim"])
 
 _USER_SCHEMA = "urn:ietf:params:scim:schemas:core:2.0:User"
+_GROUP_SCHEMA = "urn:ietf:params:scim:schemas:core:2.0:Group"
 _LIST_SCHEMA = "urn:ietf:params:scim:api:messages:2.0:ListResponse"
 _ERROR_SCHEMA = "urn:ietf:params:scim:api:messages:2.0:Error"
 _PATCH_SCHEMA = "urn:ietf:params:scim:api:messages:2.0:PatchOp"
@@ -308,6 +315,10 @@ async def resource_types(request: Request):
         "schemas": ["urn:ietf:params:scim:schemas:core:2.0:ResourceType"],
         "id": "User", "name": "User", "endpoint": "/Users",
         "schema": _USER_SCHEMA,
+    }, {
+        "schemas": ["urn:ietf:params:scim:schemas:core:2.0:ResourceType"],
+        "id": "Group", "name": "Group", "endpoint": "/Groups",
+        "schema": _GROUP_SCHEMA,
     }]
     return JSONResponse(rt, media_type="application/scim+json")
 
@@ -446,14 +457,243 @@ async def delete_user(uid: str, request: Request):
 
 
 # --------------------------------------------------------------------------
+# Groups (RFC 7643 §4.2): the IdP pushes group membership so access can be
+# managed by team, not per user. Stored in <home>/scim_groups.json; the
+# role/department mapping over these groups lives in scim_groups.py.
+# --------------------------------------------------------------------------
+def _groups_path():
+    return maverick_home() / "scim_groups.json"
+
+
+def _load_groups() -> dict[str, dict]:
+    try:
+        import json
+        raw = json.loads(_groups_path().read_text(encoding="utf-8"))
+    except (OSError, ValueError):
+        return {}
+    groups = raw.get("groups", []) if isinstance(raw, dict) else []
+    return {g["id"]: g for g in groups if isinstance(g, dict) and g.get("id")}
+
+
+def _save_groups(groups: dict[str, dict]) -> None:
+    import json
+    payload = {"groups": [groups[k] for k in sorted(groups)]}
+    atomic_write_text(_groups_path(), json.dumps(payload, indent=2, sort_keys=True))
+
+
+def _member_ids(value) -> list[str]:
+    """Normalize a SCIM ``members`` value to a list of member ids (user uids)."""
+    out: list[str] = []
+    if isinstance(value, list):
+        for m in value:
+            if isinstance(m, dict) and m.get("value"):
+                out.append(str(m["value"]))
+            elif isinstance(m, str) and m.strip():
+                out.append(m.strip())
+    return sorted(set(out))
+
+
+def _group_from_resource(resource: dict, *, gid: str,
+                         created: float | None = None) -> dict:
+    now = time.time()
+    return {
+        "id": gid,
+        "displayName": str(resource.get("displayName") or "").strip(),
+        "externalId": str(resource.get("externalId") or "").strip(),
+        "members": _member_ids(resource.get("members")),
+        "created_at": float(created if created is not None else now),
+        "updated_at": now,
+    }
+
+
+def _to_scim_group(rec: dict) -> dict:
+    res: dict[str, Any] = {
+        "schemas": [_GROUP_SCHEMA],
+        "id": rec["id"],
+        "displayName": rec.get("displayName", ""),
+        "members": [{"value": m, "$ref": f"/scim/v2/Users/{m}"}
+                    for m in rec.get("members", [])],
+        "meta": {
+            "resourceType": "Group",
+            "created": _iso(rec.get("created_at")),
+            "lastModified": _iso(rec.get("updated_at")),
+            "location": f"/scim/v2/Groups/{rec['id']}",
+        },
+    }
+    if rec.get("externalId"):
+        res["externalId"] = rec["externalId"]
+    return res
+
+
+@router.get("/Groups")
+async def list_groups(request: Request):
+    if (err := _authorize(request)) is not None:
+        return err
+    groups = _load_groups()
+    resources = [_to_scim_group(g) for g in (groups[k] for k in sorted(groups))]
+    flt = request.query_params.get("filter", "").strip()
+    if flt:
+        match = _parse_attr_eq(flt, "displayName")
+        if match is None:
+            return _scim_error(400, f"unsupported filter: {flt}",
+                               scim_type="invalidFilter")
+        resources = [r for r in resources
+                     if r.get("displayName", "").lower() == match.lower()]
+    body = {
+        "schemas": [_LIST_SCHEMA],
+        "totalResults": len(resources),
+        "startIndex": 1,
+        "itemsPerPage": len(resources),
+        "Resources": resources,
+    }
+    return JSONResponse(body, media_type="application/scim+json")
+
+
+@router.post("/Groups")
+async def create_group(request: Request):
+    if (err := _authorize(request)) is not None:
+        return err
+    resource = await _json_body(request)
+    display = str(resource.get("displayName") or "").strip()
+    if not display:
+        return _scim_error(400, "displayName is required", scim_type="invalidValue")
+    groups = _load_groups()
+    if any(g.get("displayName", "").lower() == display.lower()
+           for g in groups.values()):
+        return _scim_error(409, f"group {display!r} already exists",
+                           scim_type="uniqueness")
+    gid = uuid.uuid4().hex
+    rec = _group_from_resource(resource, gid=gid)
+    groups[gid] = rec
+    _save_groups(groups)
+    return JSONResponse(_to_scim_group(rec), status_code=201,
+                        media_type="application/scim+json")
+
+
+@router.get("/Groups/{gid}")
+async def get_group(gid: str, request: Request):
+    if (err := _authorize(request)) is not None:
+        return err
+    rec = _load_groups().get(gid)
+    if rec is None:
+        return _scim_error(404, f"group {gid} not found")
+    return JSONResponse(_to_scim_group(rec), media_type="application/scim+json")
+
+
+@router.put("/Groups/{gid}")
+async def replace_group(gid: str, request: Request):
+    if (err := _authorize(request)) is not None:
+        return err
+    groups = _load_groups()
+    existing = groups.get(gid)
+    if existing is None:
+        return _scim_error(404, f"group {gid} not found")
+    resource = await _json_body(request)
+    rec = _group_from_resource(resource, gid=gid,
+                               created=existing.get("created_at"))
+    if not rec["displayName"]:
+        rec["displayName"] = existing.get("displayName", "")
+    groups[gid] = rec
+    _save_groups(groups)
+    return JSONResponse(_to_scim_group(rec), media_type="application/scim+json")
+
+
+@router.patch("/Groups/{gid}")
+async def patch_group(gid: str, request: Request):
+    if (err := _authorize(request)) is not None:
+        return err
+    groups = _load_groups()
+    rec = groups.get(gid)
+    if rec is None:
+        return _scim_error(404, f"group {gid} not found")
+    body = await _json_body(request)
+    if _apply_group_patch(rec, body) is None:
+        return _scim_error(400, "unsupported PATCH operation",
+                           scim_type="invalidValue")
+    rec["updated_at"] = time.time()
+    groups[gid] = rec
+    _save_groups(groups)
+    return JSONResponse(_to_scim_group(rec), media_type="application/scim+json")
+
+
+@router.delete("/Groups/{gid}")
+async def delete_group(gid: str, request: Request):
+    if (err := _authorize(request)) is not None:
+        return err
+    groups = _load_groups()
+    if gid not in groups:
+        return _scim_error(404, f"group {gid} not found")
+    del groups[gid]
+    _save_groups(groups)
+    return JSONResponse(None, status_code=204)
+
+
+def _apply_group_patch(rec: dict, body: dict) -> bool | None:
+    """Apply a SCIM Group PatchOp in place: the Okta/Azure member-sync shapes.
+
+    Supported ops: replace ``displayName``; add / remove / replace ``members``
+    (including the ``members[value eq "<uid>"]`` remove-one path form). Returns
+    True on success, None if nothing applicable was found."""
+    import re
+    if _PATCH_SCHEMA not in (body.get("schemas") or []):
+        return None
+    ops = body.get("Operations") or body.get("operations") or []
+    if not isinstance(ops, list):
+        return None
+    applied = False
+    members = set(rec.get("members", []))
+    for op in ops:
+        if not isinstance(op, dict):
+            continue
+        verb = str(op.get("op", "")).lower()
+        path = str(op.get("path") or "").strip()
+        value = op.get("value")
+        one = re.fullmatch(r'members\[\s*value\s+eq\s+"([^"]*)"\s*\]', path,
+                           re.IGNORECASE)
+        if verb == "remove" and one:
+            members.discard(one.group(1))
+            applied = True
+        elif path.lower() == "members" or (not path and isinstance(value, list)):
+            ids = _member_ids(value)
+            if verb == "add":
+                members.update(ids)
+                applied = True
+            elif verb == "remove":
+                # No value = clear all (RFC 7644 §3.5.2.2); else remove listed.
+                members -= set(ids) if ids else set(members)
+                applied = True
+            elif verb == "replace":
+                members = set(ids)
+                applied = True
+        elif (verb in ("replace", "add")
+              and path.lower() == "displayname"
+              and isinstance(value, str) and value.strip()):
+            rec["displayName"] = value.strip()
+            applied = True
+        elif (verb in ("replace", "add") and not path
+              and isinstance(value, dict)
+              and isinstance(value.get("displayName"), str)):
+            rec["displayName"] = value["displayName"].strip()
+            applied = True
+    rec["members"] = sorted(members)
+    return True if applied else None
+
+
+# --------------------------------------------------------------------------
 # Helpers
 # --------------------------------------------------------------------------
-def _parse_username_eq(flt: str) -> str | None:
-    """Parse ``userName eq "value"`` -> value (case-insensitive op). None if the
-    filter isn't that exact, supported shape."""
+def _parse_attr_eq(flt: str, attr: str) -> str | None:
+    """Parse ``<attr> eq "value"`` -> value (case-insensitive op). None if the
+    filter isn't that exact, supported shape (the IdP existence probe)."""
     import re
-    m = re.fullmatch(r'\s*userName\s+eq\s+"([^"]*)"\s*', flt, re.IGNORECASE)
+    m = re.fullmatch(rf'\s*{re.escape(attr)}\s+eq\s+"([^"]*)"\s*', flt,
+                     re.IGNORECASE)
     return m.group(1) if m else None
+
+
+def _parse_username_eq(flt: str) -> str | None:
+    """Parse ``userName eq "value"`` -> value. None for any other filter."""
+    return _parse_attr_eq(flt, "userName")
 
 
 def _apply_patch(rec: dict, body: dict) -> bool | None:

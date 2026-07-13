@@ -357,7 +357,8 @@ async def set_tenant_role(
     _reject_tenant_role_assignment_under_per_user_tenancy()
     from maverick_dashboard import rbac
     _get_tenant_or_404(tenant_id)
-    rbac.set_tenant_role(tenant_id, principal, body.role)
+    rbac.set_tenant_role(tenant_id, principal, body.role,
+                         actor=caller_principal(request) or "local")
     return Response(status_code=204)
 
 
@@ -368,7 +369,8 @@ async def remove_tenant_role(
     require_global_permission(request, "admin")
     from maverick_dashboard import rbac
     _get_tenant_or_404(tenant_id)
-    rbac.remove_tenant_role(tenant_id, principal)
+    rbac.remove_tenant_role(tenant_id, principal,
+                            actor=caller_principal(request) or "local")
     return Response(status_code=204)
 
 
@@ -399,7 +401,8 @@ async def set_user_suites(
     require_global_permission(request, "admin")
     from maverick_dashboard import suite_grants
     try:
-        suite_grants.set_suites(principal, body.suites)
+        suite_grants.set_suites(principal, body.suites,
+                                actor=caller_principal(request) or "local")
     except ValueError as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
     return Response(status_code=204)
@@ -410,7 +413,8 @@ async def remove_user_suites(request: Request, principal: str) -> Response:
     """Lift a user's department scoping (back to unrestricted/default)."""
     require_global_permission(request, "admin")
     from maverick_dashboard import suite_grants
-    suite_grants.remove_grant(principal)
+    suite_grants.remove_grant(principal,
+                              actor=caller_principal(request) or "local")
     return Response(status_code=204)
 
 
@@ -3953,20 +3957,35 @@ def _require_pack_editing(request: Request) -> None:
 
 
 @router.get("/agents")
-async def list_agents_endpoint() -> dict:
-    """The agent roster: every pack, flagged by override/workflow status."""
+async def list_agents_endpoint(request: Request) -> dict:
+    """The agent roster: every pack, flagged by override/workflow status.
+
+    Suite-scoped (job function): a caller with a department grant sees their
+    departments' specialists plus generic packs (no suite); unscoped callers
+    (auth off / admin / no grant) see the full catalog — matching /departments.
+    """
     from maverick.domain_edit import list_agents
-    return {"agents": list_agents()}
+    allowed = caller_suites(request)
+    agents = list_agents()
+    if allowed is not None:
+        agents = [a for a in agents
+                  if a.get("suite") is None or a.get("suite") in allowed]
+    return {"agents": agents}
 
 
 @router.get("/agents/{name}")
-async def get_agent_endpoint(name: str) -> dict:
+async def get_agent_endpoint(request: Request, name: str) -> dict:
     """The merged pack the agent runs, plus provenance (overridden vs inherited)
     and lint findings -- the payload the editor renders."""
+    from maverick.domain import suite_for
     from maverick.domain_edit import resolved_view
     view = resolved_view(name)
     if view is None:
         raise HTTPException(status_code=404, detail=f"no such agent: {name!r}")
+    # Job-function scoping: pack config (persona, tool allowlist, risk ceiling)
+    # for another department is not this caller's to read. 404 first (catalog
+    # existence is public), 403 on grant, mirroring /departments/{key}.
+    require_suite(request, suite_for(name))
     return view
 
 
@@ -4596,13 +4615,20 @@ async def run_fleet_agent(
     agent = next((a for a in fleet.agents if a.name == payload.agent), None)
     if agent is None:
         raise HTTPException(status_code=404, detail="no such agent in fleet")
-    # Job-function scoping: a department-deployed agent carries its specialist
-    # pack (agent.domain); a caller granted other departments may not dispatch
-    # it, even if they own the fleet (e.g. a grant narrowed after deploy).
-    # Generic agents (no domain, or a pack outside any suite) are never scoped.
-    if agent.domain:
-        from maverick.domain import suite_for
-        require_suite(request, suite_for(agent.domain))
+    # Job-function scoping via the KERNEL gate (maverick.fleet), so this HTTP
+    # route and any other dispatcher share one resolution chain (explicit grant
+    # -> SCIM-group grant -> configured default; admins and auth-off pass). A
+    # department-deployed agent carries its specialist pack (agent.domain); a
+    # caller granted other departments may not dispatch it, even if they own
+    # the fleet (e.g. a grant narrowed after deploy).
+    from maverick.fleet import ensure_dispatch_allowed
+    from maverick.suite_grants import DepartmentAccessError
+    try:
+        ensure_dispatch_allowed(principal, agent)
+    except DepartmentAccessError as exc:
+        raise HTTPException(
+            status_code=403,
+            detail="insufficient department access for this action") from exc
     # Running an agent under the oversight control plane is the paid (Gold)
     # "fleet governance" capability. Fail-open: a no-op unless license enforcement
     # is on and the license lacks it. Checked after existence (404) so a missing
@@ -5634,6 +5660,7 @@ async def deploy_department_api(request: Request, key: str) -> dict:
         get_department,
     )
     from maverick.fleet import load_fleet
+    from maverick.suite_grants import DepartmentAccessError
 
     if get_department(key) is None:
         raise HTTPException(status_code=404, detail="no such department")
@@ -5660,6 +5687,12 @@ async def deploy_department_api(request: Request, key: str) -> dict:
         fleet = deploy_department(key, owner, tenant=tenant)
     except EntitlementError as e:
         raise HTTPException(status_code=402, detail=str(e)) from e
+    except DepartmentAccessError as e:
+        # Kernel backstop (maverick.departments enforces the grant for every
+        # caller); the require_suite gate above normally 403s first.
+        raise HTTPException(
+            status_code=403,
+            detail="insufficient department access for this action") from e
     if fleet is None:  # suite disabled between the check and the deploy
         raise HTTPException(status_code=404, detail="no such department")
     return {"fleet": fleet.to_dict()}
@@ -5827,12 +5860,23 @@ async def set_flow_autonomy_endpoint(request: Request, payload: FlowAutonomyIn) 
 
 @router.get("/marketplace/packs")
 async def marketplace_packs_api(request: Request, q: str = "") -> dict:
-    """Pack marketplace grouped by department, or a flat search when ``q`` set."""
+    """Pack marketplace grouped by department, or a flat search when ``q`` set.
+
+    Suite-scoped like /departments: a caller with a department grant browses
+    only their departments' shelves; unscoped callers see the full store.
+    """
     from maverick.marketplace.storefront import pack_marketplace, search_packs
+    allowed = caller_suites(request)
     query = (q or "").strip()
     if query:
-        return {"query": query, "results": search_packs(query)}
-    return {"departments": pack_marketplace()}
+        results = search_packs(query)
+        if allowed is not None:
+            results = [r for r in results if r.get("suite") in allowed]
+        return {"query": query, "results": results}
+    departments = pack_marketplace()
+    if allowed is not None:
+        departments = [d for d in departments if d.get("key") in allowed]
+    return {"departments": departments}
 
 
 @router.get("/marketplace/connectors")

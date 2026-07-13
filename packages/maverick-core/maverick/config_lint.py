@@ -91,9 +91,12 @@ KNOWN_SCHEMA: dict[str, set[str] | None] = {
     # approval links (automation_queue._public_base_url); without it here a client
     # configuring actionable channel approvals got a false "unknown key".
     # default_suites: deny-by-default department scoping for authenticated
-    # dashboard users with no explicit grant (maverick_dashboard.suite_grants).
+    # dashboard users with no explicit grant (maverick.suite_grants).
+    # group_roles / group_suites: SCIM-group -> role / department mapping
+    # tables (maverick_dashboard.scim_groups), so access flows from IdP team
+    # membership.
     "dashboard": {"token", "theme", "density", "allow_extension", "themes", "public_url",
-                  "default_suites"},
+                  "default_suites", "group_roles", "group_suites"},
     "analytics": {"mcp_client_language"},
     # --- dynamic / open-ended sections (any subkey accepted) ---
     "providers": None,

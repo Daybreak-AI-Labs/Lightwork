@@ -101,6 +101,13 @@ class EventKind:
     # not a silent edit. payload: tenant, field ("plan"|"quota"), old, new.
     TENANT_PLAN_CHANGED = "tenant_plan_changed"
     TENANT_QUOTA_CHANGED = "tenant_quota_changed"
+    # A user's dashboard access changed: privilege role (global or per-tenant)
+    # or department (suite) grant. One row per change so who-granted-whom-what
+    # -when is provable, not a silent JSON edit. payload: actor (the admin
+    # principal, "local" in auth-off mode), principal (the target), field
+    # ("role"|"tenant_role"|"suites"), tenant ("" unless tenant_role),
+    # old, new (role strings, suite lists, or None for absent).
+    ACCESS_GRANT_CHANGED = "access_grant_changed"
     FEDERATION_DELEGATE = "federation_delegate"
     # Agent Trust Plane: an external agent was refused an inbound action or an
     # outbound dial because it is absent from the [agent_trust] registry, its

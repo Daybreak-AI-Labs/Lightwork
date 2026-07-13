@@ -1372,8 +1372,16 @@ async def workforce_page(request: Request) -> HTMLResponse:
     from maverick.operating_record import assemble
     from maverick.outcomes import firm_totals, worker_cards
 
+    from .auth import caller_suites
+
     w = _world()
     depts = list_departments()
+    # Job-function scoping: mirror GET /api/v1/departments — a caller with a
+    # department grant sees only their departments (this page previously showed
+    # the full catalog, diverging from the JSON listing).
+    allowed = caller_suites(request)
+    if allowed is not None:
+        depts = [d for d in depts if d.key in allowed]
     owner = goal_owner_filter(request)
     firm = firm_totals(assemble(w, owner=owner)).to_dict()
     leaders = [c.to_dict() for c in worker_cards(w, top=5, owner=owner)]
@@ -1894,11 +1902,22 @@ async def agents_page(request: Request) -> HTMLResponse:
     creating = request.query_params.get("new") in ("1", "true", "yes")
     try:
         from maverick.config import get_features
+        from maverick.domain import suite_for
         from maverick.domain_edit import list_agents, resolved_view
+
+        from .auth import caller_suites
         editable = bool(get_features().get("pack_editing", True))
         agents = list_agents()
+        # Job-function scoping: mirror GET /api/v1/agents — a caller with a
+        # department grant browses their departments' specialists plus generic
+        # packs; a non-granted selection renders nothing rather than its config.
+        allowed = caller_suites(request)
+        if allowed is not None:
+            agents = [a for a in agents
+                      if a.get("suite") is None or a.get("suite") in allowed]
         name = request.query_params.get("name")
-        if name:
+        if name and (allowed is None or suite_for(name) is None
+                     or suite_for(name) in allowed):
             selected = resolved_view(name)
             creating = False  # editing an existing agent wins over the new form
     except Exception:  # never 500 the page if the factory layer is unavailable
