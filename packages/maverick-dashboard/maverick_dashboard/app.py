@@ -59,6 +59,7 @@ from .auth import (
     assert_goal_access,
     caller_principal,
     caller_role,
+    caller_suites,
     can_access_goal,
     can_access_goal_principal,
     execution_user_id_from_request,
@@ -3472,11 +3473,15 @@ async def chat_send(
     # Use the shared runner so this path gets the same concurrency cap,
     # budget defaults, and error handling as the REST API and MCP server.
     from maverick.runner import run_goal_in_thread
+    allowed_suites = caller_suites(request)
     user_id = execution_user_id_from_request(request)
     if user_id:
-        bg.add_task(run_goal_in_thread, goal_id, channel="dashboard", user_id=user_id)
+        bg.add_task(
+            run_goal_in_thread, goal_id,
+            channel="dashboard", user_id=user_id, allowed_suites=allowed_suites,
+        )
     else:
-        bg.add_task(run_goal_in_thread, goal_id)
+        bg.add_task(run_goal_in_thread, goal_id, allowed_suites=allowed_suites)
     return RedirectResponse(f"/chat/goal/{goal_id}", status_code=303)
 
 

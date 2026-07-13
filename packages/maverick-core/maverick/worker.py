@@ -45,15 +45,18 @@ Handler = Callable[[Job], None]
 BUILTIN_JOB_KINDS = frozenset({"run_goal", "start_goal"})
 
 
-def _run_identity_kwargs(payload: dict) -> dict[str, str]:
+def _run_identity_kwargs(payload: dict) -> dict[str, object]:
     """Extract optional runner identity context from a queue payload."""
-    run_kwargs: dict[str, str] = {}
+    run_kwargs: dict[str, object] = {}
     channel = str(payload.get("channel") or "").strip()
     user_id = str(payload.get("user_id") or "").strip()
     if channel:
         run_kwargs["channel"] = channel
     if user_id:
         run_kwargs["user_id"] = user_id
+    allowed_suites = payload.get("allowed_suites")
+    if allowed_suites is not None:
+        run_kwargs["allowed_suites"] = frozenset(str(s) for s in allowed_suites)
     return run_kwargs
 
 class UnknownJobKind(Exception):

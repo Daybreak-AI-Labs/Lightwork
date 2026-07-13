@@ -910,6 +910,7 @@ async def run_goal(  # noqa: C901  -- core goal-execution loop
     resume: bool = False,
     resume_episode_id: int | None = None,
     domain: str | None = None,
+    allowed_suites: frozenset[str] | None = None,
 ) -> str:
     goal = world.get_goal(goal_id)
     if not goal:
@@ -1120,7 +1121,7 @@ async def run_goal(  # noqa: C901  -- core goal-execution loop
             shield=shield, quarantine=quarantine, knowledge=knowledge,
             mcp_clients=mcp_clients,
             channel=channel, user_id=user_id, capability=capability,
-            episode_id=episode_id,
+            allowed_suites=allowed_suites, episode_id=episode_id,
         )
 
         brief, _planning_mode = await _build_orchestrator_brief(

@@ -478,17 +478,19 @@ async def create_goal(request: Request, payload: GoalIn, bg: BackgroundTasks) ->
     max_wall_seconds = min(payload.max_wall_seconds, DEFAULT_MAX_WALL_SECONDS)
     max_depth = min(payload.max_depth, DEFAULT_MAX_DEPTH)
 
+    allowed_suites = caller_suites(request)
     user_id = execution_user_id_from_request(request)
     if user_id:
         bg.add_task(
             run_goal_in_thread, goal_id,
             max_dollars, max_wall_seconds, max_depth,
-            channel="api", user_id=user_id,
+            channel="api", user_id=user_id, allowed_suites=allowed_suites,
         )
     else:
         bg.add_task(
             run_goal_in_thread, goal_id,
             max_dollars, max_wall_seconds, max_depth,
+            allowed_suites=allowed_suites,
         )
     g = w.get_goal(goal_id)
     if g is None:
@@ -3329,6 +3331,9 @@ async def create_schedule(request: Request, payload: ScheduleIn) -> ScheduleOut:
     owner = caller_principal(request) or ""
     if owner:
         job_payload["owner"] = owner
+    allowed_suites = caller_suites(request)
+    if allowed_suites is not None:
+        job_payload["allowed_suites"] = sorted(allowed_suites)
     user_id = execution_user_id_from_request(request)
     if user_id:
         job_payload["channel"] = "api"
@@ -5174,12 +5179,15 @@ async def compose_goal(request: Request, payload: ComposeIn, bg: BackgroundTasks
         min(payload.budget_dollars, DEFAULT_MAX_DOLLARS)
         if payload.budget_dollars is not None else DEFAULT_MAX_DOLLARS
     )
+    allowed_suites = caller_suites(request)
     user_id = execution_user_id_from_request(request)
     if user_id:
-        bg.add_task(run_goal_in_thread, goal_id, max_dollars,
-                    channel="api", user_id=user_id)
+        bg.add_task(
+            run_goal_in_thread, goal_id, max_dollars,
+            channel="api", user_id=user_id, allowed_suites=allowed_suites,
+        )
     else:
-        bg.add_task(run_goal_in_thread, goal_id, max_dollars)
+        bg.add_task(run_goal_in_thread, goal_id, max_dollars, allowed_suites=allowed_suites)
     g = w.get_goal(goal_id)
     if g is None:
         raise HTTPException(status_code=500, detail="goal vanished after create")
@@ -5525,11 +5533,15 @@ async def resume_goal(goal_id: int, request: Request, bg: BackgroundTasks) -> No
         )
     w.set_goal_status(goal_id, "pending", result=None)
     from maverick.runner import run_goal_in_thread
+    allowed_suites = caller_suites(request)
     user_id = execution_user_id_from_request(request)
     if user_id:
-        bg.add_task(run_goal_in_thread, goal_id, channel="api", user_id=user_id)
+        bg.add_task(
+            run_goal_in_thread, goal_id, channel="api", user_id=user_id,
+            allowed_suites=allowed_suites,
+        )
     else:
-        bg.add_task(run_goal_in_thread, goal_id)
+        bg.add_task(run_goal_in_thread, goal_id, allowed_suites=allowed_suites)
 
 
 # ---------------------------------------------------------------------------
