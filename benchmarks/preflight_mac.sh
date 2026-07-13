@@ -47,6 +47,12 @@ step "governed DGM gate (3 verdicts, signed)" \
 step "self-learning stack (breadth, signed)" \
   python benchmarks/self_learning_proof.py --no-scripts
 
+# 3b. The SWE-bench run path's own deps (NOT exercised by the in-process proofs
+#     above). Catches a missing datasets/swebench BEFORE any paid solve, so you
+#     never discover it mid-run.
+step "SWE-bench run-path deps (datasets, swebench)" \
+  python -c "import datasets, swebench"
+
 # 4. Signing keys are present, well-formed, and not world/group readable.
 step "Ed25519 operator keys (~/dgm-keys)" \
   python -c "from pathlib import Path; import binascii, stat; d=Path.home()/'dgm-keys'; h=d/'operator.priv.hex'; b=binascii.unhexlify(h.read_text().strip()); assert len(b)==32, len(b); assert stat.S_IMODE(d.stat().st_mode)==0o700, oct(stat.S_IMODE(d.stat().st_mode)); assert stat.S_IMODE(h.stat().st_mode)==0o600, oct(stat.S_IMODE(h.stat().st_mode))"
