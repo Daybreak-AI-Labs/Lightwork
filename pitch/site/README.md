@@ -14,9 +14,9 @@ proof/security moments). Every claim is verifiable from this repo.
 | `company.html` | Company, founder, contact |
 | `styles.css` | The shared design system |
 
-**Brand assets**: `daybreak-mark-dark.png` (nav + footer mark chip, derived from
-`Daybreak Labs Logo.jpg`), `daybreak-logo.png` (full horizontal lockup with tagline,
-970×305, opaque dark background — shown as a framed panel on dark sections),
+**Brand assets**: `daybreak-logo.png` (full horizontal lockup with tagline, 970×305,
+opaque dark background — used in the nav/footer brand chips and as a framed panel on
+dark sections), `daybreak-mark-dark.png` (standalone D mark, currently unreferenced),
 `favicon-32/180/512.png`, and `og.png` (1200×630 social card).
 
 ## Preview
