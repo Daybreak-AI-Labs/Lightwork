@@ -614,6 +614,10 @@ _FORBIDDEN_PATH_PATTERNS = [
     # `test[^/_][^/]*\.py$` false positive.
     re.compile(r"(?:^|/)test(?!(?:ing|utils|imonials)\.py$)[^/_][^/]*\.py$"),
     re.compile(r"(?:^|/)__tests__/"),
+    # Keep candidate patches from shadowing the real pytest runner when the
+    # grader executes `python -m pytest` from the candidate worktree.
+    re.compile(r"^pytest\.py$"),
+    re.compile(r"^pytest/"),
     re.compile(r"\.test\.(?:js|jsx|ts|tsx)$"),
     re.compile(r"\.spec\.(?:js|jsx|ts|tsx|rb)$"),
     # Wave 12 hardening: JVM family test files outside src/test/.
