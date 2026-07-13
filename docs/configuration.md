@@ -8,6 +8,19 @@ Lightwork reads `~/.maverick/config.toml`. The installer wizard writes it; you c
 [deployment]
 type = "desktop"       # desktop | docker | vps | phone
 
+[governance]
+# The business-shaped governance level picked at onboarding. Every level gets
+# the self-learning/self-improvement lifecycle; the level sets the governance
+# posture around it:
+#   essentials  small business (a gym, a studio) — learning, no ceremony
+#   standard    growing company — + signed audit trail, enforced daily quotas
+#   regulated   bank/clinic/government — + human sign-off (Ed25519) for
+#               code/weights promotions, WORM audit export, long retention
+# A label for humans + dashboards: the wizard expands it into the concrete
+# knobs ([audit], [quotas], [self_improvement], [retention], ...) below, so
+# hand-edits keep working. Re-run `maverick init` to switch levels.
+profile = "essentials"   # essentials | standard | regulated
+
 [providers.anthropic]
 api_key = "${ANTHROPIC_API_KEY}"   # env var interpolation
 

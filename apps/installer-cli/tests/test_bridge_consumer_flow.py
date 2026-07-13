@@ -1,4 +1,4 @@
-"""Desktop installer sidecar (bridge.py) drives the 4-question consumer
+"""Desktop installer sidecar (bridge.py) drives the 5-question consumer
 flow and writes the SAME config the CLI's run_consumer produces.
 
 The bridge speaks a line-delimited JSON protocol over stdin/stdout.
@@ -31,17 +31,18 @@ def _drive(monkeypatch, tmp_path, answers, *, key="sk-ant-test"):
     return sent
 
 
-def test_bridge_asks_four_questions_in_order(monkeypatch, tmp_path):
+def test_bridge_asks_five_questions_in_order(monkeypatch, tmp_path):
     sent = _drive(monkeypatch, tmp_path, [
         "",            # initial invoke (no answer)
         "Alex",        # name
+        "essentials",  # governance level
         "sk-ant-xyz",  # api key
         str(tmp_path / "ws"),  # workdir
         "$5",          # budget
     ])
     ids = [s["id"] for s in sent]
-    # name → api_key → workdir → budget → __done__
-    assert ids == ["name", "api_key", "workdir", "budget", "__done__"]
+    # name → governance → api_key → workdir → budget → __done__
+    assert ids == ["name", "governance", "api_key", "workdir", "budget", "__done__"]
     # No jargon questions (no "deployment", "providers", "channels", "safety").
     for forbidden in ("deployment", "providers", "channels", "safety"):
         assert forbidden not in ids
@@ -49,7 +50,7 @@ def test_bridge_asks_four_questions_in_order(monkeypatch, tmp_path):
 
 def test_bridge_writes_consumer_safe_defaults(monkeypatch, tmp_path):
     _drive(monkeypatch, tmp_path, [
-        "", "Alex", "sk-ant-xyz", str(tmp_path / "ws"), "$5",
+        "", "Alex", "essentials", "sk-ant-xyz", str(tmp_path / "ws"), "$5",
     ])
     config = tomllib.loads((tmp_path / ".maverick" / "config.toml").read_text())
     # Identical safe defaults to the CLI consumer flow.
@@ -67,7 +68,7 @@ def test_bridge_writes_consumer_safe_defaults(monkeypatch, tmp_path):
 
 def test_bridge_api_key_written_to_env(monkeypatch, tmp_path):
     _drive(monkeypatch, tmp_path, [
-        "", "Sam", "sk-ant-secret", str(tmp_path / "ws"), "$1",
+        "", "Sam", "essentials", "sk-ant-secret", str(tmp_path / "ws"), "$1",
     ])
     env = (tmp_path / ".maverick" / ".env").read_text()
     assert "ANTHROPIC_API_KEY=sk-ant-secret" in env
@@ -77,7 +78,7 @@ def test_bridge_api_key_written_to_env(monkeypatch, tmp_path):
 
 def test_bridge_blank_key_skips_env(monkeypatch, tmp_path):
     sent = _drive(monkeypatch, tmp_path, [
-        "", "Sam", "", str(tmp_path / "ws"), "$20",
+        "", "Sam", "essentials", "", str(tmp_path / "ws"), "$20",
     ])
     # No .env file when no key.
     assert not (tmp_path / ".maverick" / ".env").exists()
@@ -88,7 +89,7 @@ def test_bridge_blank_key_skips_env(monkeypatch, tmp_path):
 
 def test_bridge_budget_fallback_on_garbage(monkeypatch, tmp_path):
     _drive(monkeypatch, tmp_path, [
-        "", "Sam", "sk-ant-x", str(tmp_path / "ws"), "not-a-number",
+        "", "Sam", "essentials", "sk-ant-x", str(tmp_path / "ws"), "not-a-number",
     ])
     config = tomllib.loads((tmp_path / ".maverick" / "config.toml").read_text())
     assert config["budget"]["max_dollars"] == 5.0  # fallback
@@ -96,7 +97,7 @@ def test_bridge_budget_fallback_on_garbage(monkeypatch, tmp_path):
 
 def test_bridge_default_workdir_when_blank(monkeypatch, tmp_path):
     _drive(monkeypatch, tmp_path, [
-        "", "Sam", "sk-ant-x", "", "$5",
+        "", "Sam", "essentials", "sk-ant-x", "", "$5",
     ])
     config = tomllib.loads((tmp_path / ".maverick" / "config.toml").read_text())
     # Falls back to ~/Documents/Lightwork.
@@ -106,10 +107,34 @@ def test_bridge_default_workdir_when_blank(monkeypatch, tmp_path):
 def test_bridge_steps_carry_kind_for_ui(monkeypatch, tmp_path):
     """The Svelte UI needs `kind` to render text vs secret vs choice."""
     sent = _drive(monkeypatch, tmp_path, [
-        "", "Alex", "sk-ant-x", str(tmp_path / "ws"), "$5",
+        "", "Alex", "essentials", "sk-ant-x", str(tmp_path / "ws"), "$5",
     ])
     by_id = {s["id"]: s for s in sent}
     assert by_id["name"]["kind"] == "text"
     assert by_id["api_key"]["kind"] == "secret"
     assert by_id["workdir"]["kind"] == "text"
     assert by_id["budget"]["kind"] == "choice"
+    assert by_id["governance"]["kind"] == "choice"
+
+
+def test_bridge_governance_level_applies(monkeypatch, tmp_path):
+    """Picking a level in the desktop flow lands the same preset as the CLI."""
+    _drive(monkeypatch, tmp_path, [
+        "", "Sam", "regulated - bank / clinic / government (audit everything)",
+        "sk-ant-x", str(tmp_path / "ws"), "$5",
+    ])
+    config = tomllib.loads((tmp_path / ".maverick" / "config.toml").read_text())
+    assert config["governance"]["profile"] == "regulated"
+    assert config["audit"]["sign"] is True
+    assert config["quotas"]["enforce"] is True
+    assert config["self_learning"]["enable"] is True
+
+
+def test_bridge_governance_garbage_falls_back(monkeypatch, tmp_path):
+    """A UI that skips or garbles the step still writes a valid config."""
+    _drive(monkeypatch, tmp_path, [
+        "", "Sam", "whatever", "sk-ant-x", str(tmp_path / "ws"), "$5",
+    ])
+    config = tomllib.loads((tmp_path / ".maverick" / "config.toml").read_text())
+    assert config["governance"]["profile"] == "essentials"
+    assert "audit" not in config

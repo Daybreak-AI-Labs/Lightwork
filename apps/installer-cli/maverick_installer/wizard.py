@@ -2784,6 +2784,21 @@ def _cfg_deployment(deployment: str | None) -> list[str]:
     ]
 
 
+def _cfg_governance(profile: str | None) -> list[str]:
+    if not profile:
+        return []
+    # Record the governance level chosen at onboarding. This is a label for
+    # humans + dashboards: the enforceable knobs it expanded to ([audit],
+    # [quotas], [self_improvement], retention, ...) are written explicitly
+    # elsewhere in this file, so hand-edits keep working. Re-run
+    # `maverick init` to switch levels.
+    return [
+        "[governance]",
+        f"profile = {_toml_str(str(profile))}   # essentials | standard | regulated",
+        "",
+    ]
+
+
 def _cfg_providers(providers: list[str]) -> list[str]:
     lines: list[str] = []
     for prov in providers:
@@ -3697,6 +3712,7 @@ def write_config(
     deployment: str | None = None,
     suites: dict[str, bool] | None = None,
     license_cfg: dict[str, Any] | None = None,
+    governance_profile: str | None = None,
 ) -> None:
     CONFIG_DIR.mkdir(parents=True, exist_ok=True)
 
@@ -3787,6 +3803,7 @@ def write_config(
         "",
     ]
     lines += _cfg_deployment(deployment)
+    lines += _cfg_governance(governance_profile)
     lines += _cfg_providers(providers)
     lines += _cfg_role_models(role_models)
     lines += _cfg_channels(channels)
@@ -4095,15 +4112,25 @@ def write_consumer_config(
     keys: dict[str, str],
     workdir: str,
     budget: dict[str, float],
+    profile: str | None = None,
 ) -> None:
     """Write a consumer-mode config with the safety-seat safe defaults.
 
     Single source of truth shared by the CLI consumer flow
     (``run_consumer``) and the desktop installer sidecar
     (``maverick_installer.bridge``) so the two front ends can't drift.
-    Creates the workspace dir. Raises on write failure (caller renders
-    the branded error).
+    ``profile`` is the governance level from :data:`GOVERNANCE_PROFILES`
+    (unknown values fall back to the default) -- it layers the learning
+    lifecycle + governance posture on top of the safety-seat base, which
+    is identical at every level. Creates the workspace dir. Raises on
+    write failure (caller renders the branded error).
     """
+    preset = GOVERNANCE_PROFILES.get(profile or "")
+    if preset is None:
+        profile, preset = (
+            DEFAULT_GOVERNANCE_PROFILE,
+            GOVERNANCE_PROFILES[DEFAULT_GOVERNANCE_PROFILE],
+        )
     Path(workdir).expanduser().mkdir(parents=True, exist_ok=True)
     backend = "docker" if _docker_available() else "local"
     # Computer + browser always require explicit opt-in (consumer is
@@ -4133,6 +4160,8 @@ def write_consumer_config(
         },
         keys,
         {"computer_use": False, "browser": False, "ros": False},  # capabilities
+        advanced=dict(preset["advanced"]),
+        self_learning=dict(preset["self_learning"]),
         tool_acl={"denied_tools": denied_tools},
         rate_limits={
             "web_search": "5/60",
@@ -4140,9 +4169,10 @@ def write_consumer_config(
             "shell": "5/60",
             "mcp_*": "20/60",
         },
-        retention={"audit_days": 30, "episodes_days": 90, "events_days": 30},
+        retention=dict(preset["retention"]),
         persona={"name": "Lightwork", "style": "balanced", "user_name": user_name},
         web_search_enabled=True,
+        governance_profile=profile,
     )
 
 
@@ -4152,7 +4182,7 @@ def run_consumer() -> int:
     console.print()
     console.print(Panel.fit(
         "[bold]Lightwork setup[/bold]\n\n"
-        "Four questions. About a minute. You can change anything later\n"
+        "Five quick questions. About a minute. You can change anything later\n"
         "by running [bold]maverick init[/bold] again.",
         border_style="cyan",
     ))
@@ -4168,6 +4198,8 @@ def run_consumer() -> int:
         default=os.environ.get("USER") or os.environ.get("USERNAME") or "",
     ).strip() or "you"
 
+    profile = pick_governance_profile()
+
     keys = _consumer_api_key()
 
     workdir = _q_text(
@@ -4180,6 +4212,7 @@ def run_consumer() -> int:
     try:
         write_consumer_config(
             user_name=user_name, keys=keys, workdir=workdir, budget=budget,
+            profile=profile,
         )
     except Exception as e:
         show_install_failure(e)
@@ -4267,6 +4300,107 @@ _EXPRESS_SELF_LEARNING: dict[str, Any] = {
 }
 
 
+# --- Governance profiles: business-shaped onboarding levels --------------------
+#
+# One early question -- "what kind of business is this?" -- maps to a preset
+# bundle of ALREADY-EXISTING knobs. Every level gets the self-learning /
+# self-improvement lifecycle (that's the product); what escalates is the
+# governance posture around it. A gymnastics studio wants the learning without
+# the signing ceremony; a manufacturer wants budgets + an audit trail; a bank
+# wants everything signed, immutable, and quota-enforced. Kept as data (same
+# convention as _EXPRESS_ADVANCED) so tests can assert exactly what each level
+# enables without driving prompts. Budget caps are NOT part of a profile: they
+# are collected separately and are never optional at any level.
+
+# The closed learning lifecycle every level turns on. Safe-by-construction
+# subset: in-process learning + consolidation only -- no generate-and-run-code
+# autonomy, no MCP acquisition (those stay explicit opt-ins at every level).
+_LEARNING_LIFECYCLE: dict[str, Any] = {
+    "reflexion": True,
+    "dreaming": True,
+    "experience_guidance": True,
+    "skill_synthesis": True,
+    "credit_assignment": True,
+    "self_harness": True,
+    "data_engine": True,
+    "evaluator_evolution": True,
+    "consequence": True,
+    "rehearsal": True,
+}
+
+_PROFILE_SELF_LEARNING: dict[str, Any] = dict(_EXPRESS_SELF_LEARNING)
+
+# Governance additions by level (cumulative: standard ⊃ essentials,
+# regulated ⊃ standard). Every key is one _cfg_advanced recognises.
+_STANDARD_GOVERNANCE: dict[str, Any] = {
+    "memory_guard": True,         # governed memory writes
+    "governed_actions": True,     # side-effectful actions logged + gated
+    "calibration_enforce": True,  # confidence calibration gate
+    "fairness_monitor": True,
+    "audit_sign": True,           # Ed25519-signed audit chain
+    "enforce_quotas": True,       # per-principal daily spend/token caps
+}
+_REGULATED_GOVERNANCE: dict[str, Any] = {
+    **_STANDARD_GOVERNANCE,
+    "audit_rewards": True,        # provable-learning reward audit
+    "audit_worm": True,           # WORM export of closed audit day-files
+    "signed_approval": True,      # human Ed25519 sign-off for code/weights rungs
+}
+
+GOVERNANCE_PROFILES: dict[str, dict[str, Any]] = {
+    "essentials": {
+        "advanced": dict(_LEARNING_LIFECYCLE),
+        "self_learning": dict(_PROFILE_SELF_LEARNING),
+        "retention": {"audit_days": 30, "episodes_days": 90, "events_days": 30},
+    },
+    "standard": {
+        "advanced": {**_LEARNING_LIFECYCLE, **_STANDARD_GOVERNANCE},
+        "self_learning": dict(_PROFILE_SELF_LEARNING),
+        "retention": {"audit_days": 90, "episodes_days": 180, "events_days": 90},
+    },
+    "regulated": {
+        "advanced": {**_LEARNING_LIFECYCLE, **_REGULATED_GOVERNANCE},
+        "self_learning": dict(_PROFILE_SELF_LEARNING),
+        "retention": {"audit_days": 365, "episodes_days": 365, "events_days": 365},
+    },
+}
+
+DEFAULT_GOVERNANCE_PROFILE = "essentials"
+
+# (menu string, profile name) -- menu strings start with the profile name so
+# the picker can split()[0] them, same convention as pick_mode().
+_GOVERNANCE_CHOICES: list[str] = [
+    "essentials - small business: learn + improve, stay out of my way "
+    "(a gym, a studio, a shop)",
+    "standard   - growing company: + budgets enforced, signed audit trail "
+    "(a manufacturer, an agency)",
+    "regulated  - bank / clinic / government: + human sign-off, immutable "
+    "audit, long retention",
+]
+
+
+def pick_governance_profile() -> str:
+    """One onboarding question: how much governance does this business need?
+
+    Falls back to :data:`DEFAULT_GOVERNANCE_PROFILE` on anything it doesn't
+    recognise, so an <Enter> or a stubbed answer never lands outside the
+    three supported levels.
+    """
+    console.print()
+    console.print(
+        "[dim]Every level gets self-learning and self-improvement. The level "
+        "sets how much governance wraps it -- you can change it any time by "
+        "re-running maverick init.[/dim]"
+    )
+    pick = _q_select(
+        "What kind of business is this for?",
+        list(_GOVERNANCE_CHOICES),
+        default=_GOVERNANCE_CHOICES[0],
+    )
+    name = pick.split()[0]
+    return name if name in GOVERNANCE_PROFILES else DEFAULT_GOVERNANCE_PROFILE
+
+
 def run_express() -> int:
     """Express setup: a few user-specific questions, then turn on every safe
     single-user feature at once. The shortcut for "I want everything on"
@@ -4296,6 +4430,7 @@ def run_express() -> int:
         "What should we call you?",
         default=os.environ.get("USER") or os.environ.get("USERNAME") or "",
     ).strip() or "you"
+    profile = pick_governance_profile()
     keys = _consumer_api_key()
     workdir = _q_text(
         "Where can Lightwork work?",
@@ -4305,6 +4440,11 @@ def run_express() -> int:
 
     Path(workdir).expanduser().mkdir(parents=True, exist_ok=True)
     backend = "docker" if _docker_available() else "local"
+    # Express turns on every safe single-user feature; the governance level
+    # layers its posture (signed audit, quotas, WORM, signed approvals) on
+    # top. Union of two all-True dicts, so profile keys can only ADD.
+    preset = GOVERNANCE_PROFILES.get(
+        profile, GOVERNANCE_PROFILES[DEFAULT_GOVERNANCE_PROFILE])
     try:
         write_config(
             providers=["anthropic"],
@@ -4319,7 +4459,7 @@ def run_express() -> int:
             # Host-mutating capabilities require explicit opt-in even in express.
             capabilities={"computer_use": False, "browser": False,
                           "ros": False, "code_exec": False},
-            advanced=dict(_EXPRESS_ADVANCED),
+            advanced={**_EXPRESS_ADVANCED, **preset["advanced"]},
             persona={"name": "Lightwork", "style": "balanced", "user_name": user_name},
             web_search_enabled=True,
             self_learning=dict(_EXPRESS_SELF_LEARNING),
@@ -4329,6 +4469,8 @@ def run_express() -> int:
             oauth={"vault": True},
             durable={"enabled": True},
             deployment="desktop",
+            retention=dict(preset["retention"]),
+            governance_profile=profile,
         )
     except Exception as e:
         show_install_failure(e)
