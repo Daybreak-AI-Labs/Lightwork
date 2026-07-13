@@ -360,7 +360,39 @@ def _order_operands(lhs: Any, rhs: Any) -> tuple[Any, Any]:
         return str(lhs), str(rhs)
 
 
-_AND_OR = re.compile(r"\s+(?:and|or)\s+", re.IGNORECASE)
+def _split_bool_ops(expr: str, op: str) -> list[str]:
+    """Split on a boolean operator only when it appears outside quotes."""
+    out: list[str] = []
+    cur: list[str] = []
+    quote: str | None = None
+    i = 0
+    op_len = len(op)
+    while i < len(expr):
+        ch = expr[i]
+        if quote:
+            cur.append(ch)
+            if ch == quote:
+                quote = None
+            i += 1
+            continue
+        if ch in "'\"":
+            quote = ch
+            cur.append(ch)
+            i += 1
+            continue
+        if (
+            expr[i : i + op_len].lower() == op
+            and (i == 0 or expr[i - 1].isspace())
+            and (i + op_len == len(expr) or expr[i + op_len].isspace())
+        ):
+            out.append("".join(cur).strip())
+            cur = []
+            i += op_len
+            continue
+        cur.append(ch)
+        i += 1
+    out.append("".join(cur).strip())
+    return out
 
 
 def eval_condition(expr: str, data: dict) -> bool:
@@ -371,10 +403,8 @@ def eval_condition(expr: str, data: dict) -> bool:
     ``and`` / ``or`` (``or`` of ``and`` groups, standard precedence), e.g.
     ``amount > 100 and region == 'EU'``. Unparsable predicates are falsey."""
     s = str(expr or "").strip()
-    if not _AND_OR.search(s):
-        return _eval_predicate(s, data)
-    for or_part in re.split(r"\s+or\s+", s, flags=re.IGNORECASE):
-        parts = [p for p in re.split(r"\s+and\s+", or_part, flags=re.IGNORECASE) if p.strip()]
+    for or_part in _split_bool_ops(s, "or"):
+        parts = [p for p in _split_bool_ops(or_part, "and") if p.strip()]
         if parts and all(_eval_predicate(p, data) for p in parts):
             return True
     return False
