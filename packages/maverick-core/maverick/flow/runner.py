@@ -60,7 +60,6 @@ ACTIVE_STATUSES = frozenset({"queued", "running"}) | PAUSED_STATUSES
 
 _WHILE_DEFAULT_CAP = 100   # while-loop iterations when the node sets no limit
 
-_VAR = re.compile(r"\{\{\s*(.+?)\s*\}\}")
 _COND = re.compile(r"^\s*(\S+)\s*(==|!=|>=|<=|>|<|contains)\s*(.+?)\s*$")
 _FN_CALL = re.compile(r"^([a-zA-Z_]\w*)\s*\((.*)\)$")
 
@@ -76,10 +75,25 @@ def render(text: str, data: dict, *, allow_secrets: bool = False) -> str:
     Other render sites feed persisted flow data, prompts, or scoped inputs, so
     ``{{secret(...)}}`` must remain unavailable there.
     """
-    def _sub(m):
-        v = _eval_expr(m.group(1), data, allow_secrets=allow_secrets)
-        return m.group(0) if v is None else _as_text(v)
-    return _VAR.sub(_sub, str(text))
+    src = str(text)
+    out: list[str] = []
+    pos = 0
+    while True:
+        start = src.find("{{", pos)
+        if start < 0:
+            out.append(src[pos:])
+            break
+        end = src.find("}}", start + 2)
+        if end < 0:
+            out.append(src[pos:])
+            break
+        out.append(src[pos:start])
+        raw = src[start:end + 2]
+        expr = src[start + 2:end].strip()
+        v = _eval_expr(expr, data, allow_secrets=allow_secrets)
+        out.append(raw if v is None else _as_text(v))
+        pos = end + 2
+    return "".join(out)
 
 
 def _as_text(v: Any) -> str:
