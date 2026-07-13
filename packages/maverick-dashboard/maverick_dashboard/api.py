@@ -109,6 +109,7 @@ from .auth import (
     can_access_goal,
     execution_user_id_from_request,
     goal_owner_filter,
+    has_permission,
     is_dashboard_admin,
     require_global_permission,
     require_permission,
@@ -2403,11 +2404,13 @@ async def remove_skill_endpoint(request: Request, name: str) -> None:
 # ---------- self-learning: learned ledger + generated tools (#427) ----------
 
 
-def _learned_snapshot(limit: int = 50) -> dict:
+def _learned_snapshot(limit: int = 50, *, include_pending_items: bool = False) -> dict:
     """Read-only view of the self-learning ledger + on-disk generated tools.
 
-    Powers the /learned page and GET /api/v1/learned. Degrades to empty
-    lists if the self-learning module / ledger / dir is unavailable, so a
+    Powers the /learned page and GET /api/v1/learned. Pending corpus
+    counts are safe for viewers, but staged candidate details may contain
+    harvested operator text and are included only for admin callers. Degrades
+    to empty lists if the self-learning module / ledger / dir is unavailable, so a
     fresh install (feature never enabled) renders "nothing learned yet"
     instead of 500ing.
     """
@@ -2438,7 +2441,7 @@ def _learned_snapshot(limit: int = 50) -> dict:
         "learned": learned, "generated_tools": tools,
         "harness": harness, "harness_enabled": harness_enabled,
         "pending_corpus": {k: len(v) for k, v in pending.items()},
-        "pending_items": pending,
+        "pending_items": pending if include_pending_items else {},
         "transfer_memory": _transfer_memory(),
     }
 
@@ -2558,9 +2561,9 @@ def _resolve_generated_tool(name: str):
 
 
 @router.get("/learned")
-async def learned_api() -> dict:
+async def learned_api(request: Request) -> dict:
     """Learned-capability ledger entries + on-disk generated tool filenames."""
-    return _learned_snapshot()
+    return _learned_snapshot(include_pending_items=has_permission(request, "admin"))
 
 
 @router.delete("/generated-tools/{name}", status_code=204)

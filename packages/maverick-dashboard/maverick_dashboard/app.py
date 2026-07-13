@@ -63,6 +63,7 @@ from .auth import (
     can_access_goal_principal,
     execution_user_id_from_request,
     goal_owner_filter,
+    has_permission,
     require_permission,
     require_principal,
     websocket_caller_principal,
@@ -1659,7 +1660,8 @@ async def learned_page(request: Request) -> HTMLResponse:
     on-disk generated tools, with a remove action per generated tool (#427)."""
     from .api import _learned_snapshot
     return templates.TemplateResponse(
-        request, "learned.html", _learned_snapshot(),
+        request, "learned.html",
+        _learned_snapshot(include_pending_items=has_permission(request, "admin")),
     )
 
 
