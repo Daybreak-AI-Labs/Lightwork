@@ -5,6 +5,7 @@ from __future__ import annotations
 
 import importlib.util
 import json
+import os
 import sys
 import types
 from pathlib import Path
@@ -128,7 +129,7 @@ def test_retry_on_empty_uses_second_attempt_and_sums_cost(tmp_path, monkeypatch)
     monkeypatch.setattr(gov, "_git_head", lambda repo: "basesha")
     monkeypatch.setattr(gov, "_worktree_diff", lambda repo: "")  # force prose-diff path
     monkeypatch.setattr(gov, "_hard_reset", lambda repo, sha: None)
-    monkeypatch.setattr(gov, "_point_sandbox_at", lambda repo: (lambda: None))
+    monkeypatch.setattr(gov, "_point_sandbox_at", lambda repo, require_container=False: (lambda: None))
 
     inst = gov.Instance(
         instance_id="acme__widget-1", repo_path=tmp_path,
@@ -166,7 +167,7 @@ def test_retry_on_empty_disabled_runs_once(tmp_path, monkeypatch):
     monkeypatch.setattr(gov, "_git_head", lambda repo: "basesha")
     monkeypatch.setattr(gov, "_worktree_diff", lambda repo: "")
     monkeypatch.setattr(gov, "_hard_reset", lambda repo, sha: None)
-    monkeypatch.setattr(gov, "_point_sandbox_at", lambda repo: (lambda: None))
+    monkeypatch.setattr(gov, "_point_sandbox_at", lambda repo, require_container=False: (lambda: None))
 
     inst = gov.Instance(
         instance_id="acme__widget-2", repo_path=tmp_path,
@@ -176,6 +177,58 @@ def test_retry_on_empty_disabled_runs_once(tmp_path, monkeypatch):
     out = gov.llm_proposer(inst)
     assert calls["n"] == 1, "retry disabled must not re-run"
     assert out == ""
+
+
+def test_llm_proposer_default_shell_consent_requires_container_and_restores(tmp_path, monkeypatch):
+    gov = _load_governed()
+    monkeypatch.setenv("MAVERICK_PROVIDER_READY", "1")
+    monkeypatch.delenv("MAVERICK_CONSENT_MODE", raising=False)
+    monkeypatch.setenv("MAVERICK_SWEBENCH_FORENSICS", str(tmp_path / "forensics"))
+
+    stub = types.ModuleType("swe_bench")
+    stub.run_maverick = lambda *args, **kwargs: _FakeRow("--- a/x.py\n+++ b/x.py\n", 0.0)
+    monkeypatch.setitem(sys.modules, "swe_bench", stub)
+    monkeypatch.setattr(gov, "_git_head", lambda repo: "basesha")
+    monkeypatch.setattr(gov, "_worktree_diff", lambda repo: "")
+    monkeypatch.setattr(gov, "_hard_reset", lambda repo, sha: None)
+
+    seen: list[bool] = []
+
+    def fake_point(repo, require_container=False):
+        seen.append(require_container)
+        return lambda: None
+
+    monkeypatch.setattr(gov, "_point_sandbox_at", fake_point)
+    inst = gov.Instance("acme__widget-3", tmp_path, ["tests/t.py::test_x"], [])
+
+    assert gov.llm_proposer(inst).startswith("--- a/x.py")
+    assert seen == [True]
+    assert "MAVERICK_CONSENT_MODE" not in os.environ
+
+
+def test_llm_proposer_explicit_consent_does_not_force_container(tmp_path, monkeypatch):
+    gov = _load_governed()
+    monkeypatch.setenv("MAVERICK_PROVIDER_READY", "1")
+    monkeypatch.setenv("MAVERICK_CONSENT_MODE", "ask")
+    monkeypatch.setenv("MAVERICK_SWEBENCH_FORENSICS", str(tmp_path / "forensics"))
+
+    stub = types.ModuleType("swe_bench")
+    stub.run_maverick = lambda *args, **kwargs: _FakeRow("--- a/y.py\n+++ b/y.py\n", 0.0)
+    monkeypatch.setitem(sys.modules, "swe_bench", stub)
+    monkeypatch.setattr(gov, "_git_head", lambda repo: "basesha")
+    monkeypatch.setattr(gov, "_worktree_diff", lambda repo: "")
+    monkeypatch.setattr(gov, "_hard_reset", lambda repo, sha: None)
+
+    seen: list[bool] = []
+    monkeypatch.setattr(
+        gov, "_point_sandbox_at",
+        lambda repo, require_container=False: (seen.append(require_container) or (lambda: None)),
+    )
+    inst = gov.Instance("acme__widget-4", tmp_path, ["tests/t.py::test_x"], [])
+
+    assert gov.llm_proposer(inst).startswith("--- a/y.py")
+    assert seen == [False]
+    assert os.environ["MAVERICK_CONSENT_MODE"] == "ask"
 
 
 # --------------------------------------------------------------------------
