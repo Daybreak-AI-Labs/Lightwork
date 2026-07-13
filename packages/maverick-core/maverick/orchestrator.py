@@ -1769,15 +1769,23 @@ def _git_metadata_may_execute_filters(wd) -> bool:
     or smudge commands. Fail open by skipping capture/reset instead.
     """
     try:
-        # Git executes a command only via a `[filter "name"]` SECTION (its
-        # clean/smudge values) or a config INCLUDE that could pull one in. The
+        # Git executes a command via filter sections (modern `[filter "name"]`
+        # or deprecated-but-supported `[filter.name]` syntax), attributes files
+        # selected from config, or config includes that could pull either in. The
         # bare word "filter" is NOT sufficient and caused a false positive on
         # every partial clone: `git clone --filter=blob:none` writes a benign
         # `partialclonefilter = blob:none` into .git/config that never runs a
         # command, so matching "filter" skipped best-of-N reset/capture for the
         # entire staged corpus. Match the executable surfaces precisely instead.
         config_files = [wd / ".git" / "config"]
-        config_needles = ('[filter "', "[include", "include.path", "includeif")
+        config_needles = (
+            '[filter "',
+            "[filter.",
+            "[include",
+            "include.path",
+            "includeif",
+            "attributesfile",
+        )
         for path in config_files:
             try:
                 if path.is_file():
