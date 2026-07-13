@@ -67,17 +67,54 @@ _DIVIDER_CUT_RES = (
     re.compile(r"^\s*-{3,}\s*Original Message\s*-{3,}", re.IGNORECASE),
     re.compile(r"^\s*Begin forwarded message:\s*$", re.IGNORECASE),
 )
-_HTML_DROP_RE = re.compile(r"<(script|style)[^>]*>.*?</\1\s*>",
-                           re.IGNORECASE | re.DOTALL)
 _HTML_BREAK_RE = re.compile(r"<\s*(?:br|/p|/div|/tr|/li|/h[1-6])\s*/?\s*>",
                             re.IGNORECASE)
 _HTML_TAG_RE = re.compile(r"<[^>]+>")
 
 
+def _drop_html_raw_text(html: str) -> str:
+    """Remove script/style blocks with a bounded, single-pass scanner."""
+    text = html or ""
+    lower = text.lower()
+    out: list[str] = []
+    pos = 0
+    length = len(text)
+    while pos < length:
+        tag_start = text.find("<", pos)
+        if tag_start < 0:
+            out.append(text[pos:])
+            break
+        out.append(text[pos:tag_start])
+        tag_name_start = tag_start + 1
+        tag_name_end = tag_name_start
+        while tag_name_end < length and lower[tag_name_end].isalpha():
+            tag_name_end += 1
+        tag_name = lower[tag_name_start:tag_name_end]
+        if tag_name not in {"script", "style"}:
+            out.append(text[tag_start:tag_name_end])
+            pos = tag_name_end
+            continue
+        if tag_name_end < length and lower[tag_name_end] not in "\t\n\r\f />":
+            out.append(text[tag_start:tag_name_end])
+            pos = tag_name_end
+            continue
+        tag_end = text.find(">", tag_name_end)
+        if tag_end < 0:
+            break
+        close_start = lower.find(f"</{tag_name}", tag_end + 1)
+        if close_start < 0:
+            break
+        close_end = text.find(">", close_start + len(tag_name) + 2)
+        if close_end < 0:
+            break
+        pos = close_end + 1
+    return "".join(out)
+
+
 def _strip_html(html: str) -> str:
     """HTML body -> plain text (tags/CSS/JS are 3-10x the visible text)."""
     import html as _htmllib
-    text = _HTML_DROP_RE.sub("", html or "")
+    text = _drop_html_raw_text(html or "")
     text = _HTML_BREAK_RE.sub("\n", text)
     text = _HTML_TAG_RE.sub("", text)
     text = _htmllib.unescape(text)
