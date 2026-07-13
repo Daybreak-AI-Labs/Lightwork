@@ -730,17 +730,18 @@ def _reconcile_flow_crons() -> None:
     the same schedule is stale and cancelled; a scheduled flow with no matching
     live cron gets one seeded. Idempotent -- safe to run on every reconcile."""
     from maverick.flow import store
-    from maverick.scheduler import CronError, parse_cron, schedule_cron
+    from maverick.scheduler import CronError, next_run, schedule_cron
     want: dict[str, tuple[str, str]] = {}
     for f in store.list_flows():
         expr = f.schedule.strip()
         if not expr:
             continue
+        tz = f.timezone.strip()
         try:
-            parse_cron(expr)          # only arm a valid expression
+            next_run(expr, tz=tz)     # only arm schedules with a future occurrence
         except CronError:
             continue
-        want[f.id] = (expr, f.timezone.strip())
+        want[f.id] = (expr, tz)
     q = queue()
     covered: set[str] = set()
     for j in _pending(FLOW_CRON_KIND):
@@ -753,8 +754,11 @@ def _reconcile_flow_crons() -> None:
             q.cancel(j.id)            # stale (flow unscheduled, schedule/tz changed, or dup)
     for fid, (expr, tz) in want.items():
         if fid not in covered:
-            schedule_cron(q, expr, FLOW_CRON_KIND,
-                          {"flow_id": fid, "__cron__": expr, "__tz__": tz})
+            try:
+                schedule_cron(q, expr, FLOW_CRON_KIND,
+                              {"flow_id": fid, "__cron__": expr, "__tz__": tz})
+            except CronError:
+                continue
 
 
 def _dream_cron() -> str:

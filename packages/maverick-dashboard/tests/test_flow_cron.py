@@ -76,6 +76,15 @@ def test_reconcile_reseeds_when_expression_changes(monkeypatch, tmp_path):
     assert len(crons) == 1 and crons[0].payload["__cron__"] == "0 17 * * *"
 
 
+def test_reconcile_skips_unarmable_schedule(monkeypatch, tmp_path):
+    _isolate(monkeypatch, tmp_path)
+    from maverick_dashboard import automation_queue as aq
+    _reset_aq(monkeypatch, aq)
+    _save_flow("digest", "0 0 31 2 *")
+    aq._reconcile_flow_crons()
+    assert aq._pending(aq.FLOW_CRON_KIND) == []
+
+
 def test_handle_flow_cron_enqueues_a_fresh_run(monkeypatch, tmp_path):
     _isolate(monkeypatch, tmp_path)
     from maverick_dashboard import automation_queue as aq
