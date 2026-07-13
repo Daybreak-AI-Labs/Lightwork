@@ -6,11 +6,14 @@ network peer is the trusted upstream.
 """
 from __future__ import annotations
 
+import logging
+
 from maverick.proxy_auth import (
     principal_from_proxy,
     proxy_auth_enabled,
     proxy_header_name,
     proxy_trusts,
+    warn_if_untrusted_proxy_config,
 )
 
 
@@ -44,13 +47,27 @@ def test_header_default_and_override(monkeypatch):
     assert proxy_header_name() == "X-Auth-Request-Email"
 
 
-def test_trusts_loopback_by_default(monkeypatch):
+def test_unpinned_peer_is_untrusted_by_default(monkeypatch):
+    # #11: with no trusted_proxies pin and trust_loopback unset, NO peer is
+    # trusted -- a co-located loopback process must not be able to spoof
+    # X-Forwarded-User just by living on 127.0.0.1. Explicit opt-in required.
     _cfg(monkeypatch, {})
-    assert proxy_trusts("127.0.0.1") is True
-    assert proxy_trusts("::1") is True
+    assert proxy_trusts("127.0.0.1") is False
+    assert proxy_trusts("::1") is False
     assert proxy_trusts("10.0.0.9") is False   # a remote peer is not trusted
     assert proxy_trusts("") is False           # unknown peer fails closed
     assert proxy_trusts(None) is False
+
+
+def test_trusts_loopback_only_with_explicit_opt_in(monkeypatch):
+    # trust_loopback = true is the explicit opt-in for the same-host proxy.
+    _cfg(monkeypatch, {"auth": {"proxy": {"trust_loopback": True}}})
+    assert proxy_trusts("127.0.0.1") is True
+    assert proxy_trusts("::1") is True
+    assert proxy_trusts("10.0.0.9") is False   # opt-in is loopback-only
+    # An explicit false is honored the same way an unset value is (no trust).
+    _cfg(monkeypatch, {"auth": {"proxy": {"trust_loopback": False}}})
+    assert proxy_trusts("127.0.0.1") is False
 
 
 def test_trusts_configured_proxies_replace_default(monkeypatch):
@@ -59,6 +76,38 @@ def test_trusts_configured_proxies_replace_default(monkeypatch):
     # An explicit list is exact: it replaces the loopback default so a stray
     # local process can't assert identity unless you listed loopback too.
     assert proxy_trusts("127.0.0.1") is False
+
+
+def test_warn_if_untrusted_proxy_config(monkeypatch, caplog):
+    monkeypatch.delenv("MAVERICK_PROXY_AUTH", raising=False)
+
+    # Off by default -> silent.
+    _cfg(monkeypatch, {})
+    with caplog.at_level(logging.WARNING, logger="maverick.proxy_auth"):
+        warn_if_untrusted_proxy_config()
+    assert caplog.records == []
+
+    # Enabled but neither pinned nor trust_loopback set -> loud warning.
+    _cfg(monkeypatch, {"auth": {"proxy": {"enabled": True}}})
+    caplog.clear()
+    with caplog.at_level(logging.WARNING, logger="maverick.proxy_auth"):
+        warn_if_untrusted_proxy_config()
+    assert any(r.levelno == logging.WARNING for r in caplog.records)
+    assert "trusted_proxies" in caplog.text
+
+    # Pinned -> silent (a peer is configured).
+    _cfg(monkeypatch, {"auth": {"proxy": {"enabled": True, "trusted_proxies": ["10.0.0.5"]}}})
+    caplog.clear()
+    with caplog.at_level(logging.WARNING, logger="maverick.proxy_auth"):
+        warn_if_untrusted_proxy_config()
+    assert caplog.records == []
+
+    # Explicit trust_loopback -> silent (operator opted in deliberately).
+    _cfg(monkeypatch, {"auth": {"proxy": {"enabled": True, "trust_loopback": True}}})
+    caplog.clear()
+    with caplog.at_level(logging.WARNING, logger="maverick.proxy_auth"):
+        warn_if_untrusted_proxy_config()
+    assert caplog.records == []
 
 
 def test_principal_from_proxy_maps_to_user():

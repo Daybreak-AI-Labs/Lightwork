@@ -274,16 +274,36 @@ def record_usage(
     dollars: float,
     in_tokens: int = 0,
     out_tokens: int = 0,
+    *,
+    reservation_id: str | None = None,
 ) -> None:
     """Record a finished run's spend against ``principal`` for today's window.
 
     Always safe to call (even when enforcement is off — recording is how the
     ledger accrues chargeback data); fail-soft on any ledger error.
+
+    ``reservation_id``: when the run's budget reserved an in-flight tenant dollar
+    hold at start (``budget._tenant_reservation_id`` from
+    :func:`maverick.budget.budget_from_config`), pass it here so the hold is
+    released now that this run's actual spend is on the ledger — otherwise the
+    reservation lingers against the tenant's remaining allowance until its TTL
+    backstop expires. Lingering is conservative (it only ever *lowers* remaining,
+    never raises it), so releasing is an optimization, not a correctness
+    requirement. Release is fail-soft on the same tenant scope the ledger write
+    used.
     """
     try:
         UsageLedger().record(principal, dollars, in_tokens, out_tokens)
     except Exception as e:  # pragma: no cover - ledger is fully fail-soft
         log.warning("quotas: failed to record usage for %r: %s", principal, e)
+    if reservation_id:
+        try:
+            from .paths import current_tenant
+            from .tenant.registry import release_tenant_reservation
+            release_tenant_reservation(current_tenant(), reservation_id)
+        except Exception as e:  # pragma: no cover -- reservation release is fail-soft
+            log.warning("quotas: failed to release reservation %r: %s",
+                        reservation_id, e)
 
 
 def over_quota(principal: str) -> str | None:

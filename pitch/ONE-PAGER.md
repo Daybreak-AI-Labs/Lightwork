@@ -40,7 +40,8 @@ repriced to **reward defensible IP and punish thin AI wrappers.**
 - **Governance proven, not asserted:** six load-bearing invariants — no drafting
   agent reaches a state-mutator, no child out-scopes its parent, hard refusals
   are unstrippable, budget caps are never silently exceeded — machine-checked
-  across all 2,020 packs and fault-injected at **1,000,000 iterations**.
+  across all 2,020 packs with a non-vacuous fault-injection control
+  (property-fuzzed up to **5,000 iterations**).
 - **Grounded in primary sources:** **37 read-only public-data connectors**
   (SEC EDGAR, FRED, Treasury, CourtListener, openFDA, PubMed, …) auto-granted by
   suite, so analysts cite authoritative sources instead of model recall.

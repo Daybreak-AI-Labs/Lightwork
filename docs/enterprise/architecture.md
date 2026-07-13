@@ -123,8 +123,8 @@ customers adopt ahead of the deadline, not under it.
 - **Roster-wide governance invariant suite** — six governance invariants
   (tool-reachability, autonomy dial, capability attenuation, compartment
   isolation, unstrippable hard refusals, budget caps) verified across ALL 2,020
-  specialist packs and fault-injected at 1,000,000 iterations, each with a
-  fault-injection control proving the test is non-vacuous, plus hostile-argument
+  specialist packs, each with a
+  fault-injection control (property-fuzzed up to 5,000 iterations) proving the test is non-vacuous, plus hostile-argument
   fuzzing of every connector and tool. This is the machine-checkable evidence
   under the Art 14 oversight / NIST *Measure* obligations: the controls aren't
   asserted, they're proven to hold fleet-wide.

@@ -989,6 +989,10 @@ async def run_goal(  # noqa: C901  -- core goal-execution loop
             from . import quotas
             quotas.record_usage(
                 principal, budget.dollars, budget.input_tokens, budget.output_tokens,
+                # Release this run's in-flight tenant dollar hold now that its
+                # actual spend is on the ledger, so it isn't double-counted
+                # against the tenant cap for the rest of its TTL (finding #2).
+                reservation_id=getattr(budget, "_tenant_reservation_id", None),
             )
         except Exception:  # pragma: no cover -- ledger is fully fail-soft
             log.debug("usage ledger record skipped for %s", principal)

@@ -1104,8 +1104,9 @@ dispatch path so a v2 handler works everywhere unchanged.
 
 ## Sandboxes
 
-9 run-to-completion backends (`sandbox/`): local subprocess, Docker, gVisor, SSH,
-Podman, devcontainer, Firecracker microVM, Kubernetes, and Modal cloud (below).
+8 run-to-completion backends (`sandbox/`): local subprocess, Docker, gVisor, SSH,
+Podman, devcontainer, Kubernetes, and Modal cloud (below), plus an **experimental
+Firecracker microVM scaffold** (the exec path does not yet mount the workspace).
 Selected via `[sandbox] backend`.
 **Modal sandbox backend** (`sandbox/modal_backend.py`, `[sandbox] backend =
 "modal"`, `[modal]` extra): run agent shell in ephemeral Modal cloud sandboxes
