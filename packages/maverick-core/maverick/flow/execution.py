@@ -154,17 +154,19 @@ def execute(flow: Flow, *, agent_runner: AgentRunner, action_runner: ActionRunne
         owner = owner or prior.owner
         # Free-form human input merges into the run data on resume, so an approval
         # can also COLLECT data (a corrected value, a note) -- not just yes/no.
-        # When the paused node declares a `form`, only its declared field names
-        # are accepted -- the form is the server-side allowlist, so a resume
-        # caller can't overwrite arbitrary run-data keys (e.g. what a downstream
-        # branch routes on). A form-less node keeps free-form inputs.
+        # The merge is append-only for existing run data: a resume caller must not
+        # be able to change values that earlier nodes produced and that a human
+        # may have reviewed at the pause. When the paused node declares a `form`,
+        # only its declared field names are accepted as the server-side allowlist;
+        # form-less nodes keep free-form *new* inputs for compatibility.
         resume_data = dict(prior.data)
         if inputs:
             paused = flow.node(prior.cursor) if prior.cursor else None
             declared = [str(f.get("name")) for f in getattr(paused, "form", None) or []
                         if isinstance(f, dict) and f.get("name")]
-            if declared:
-                inputs = {k: v for k, v in inputs.items() if k in declared}
+            allowed = set(declared) if declared else set(inputs)
+            inputs = {k: v for k, v in inputs.items()
+                      if k in allowed and k not in resume_data}
             resume_data.update(inputs)
         resume = {"node_id": prior.cursor, "data": resume_data}
         if retryable_failure:
