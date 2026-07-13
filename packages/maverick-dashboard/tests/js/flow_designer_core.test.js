@@ -121,6 +121,23 @@ test('serializeNode carries setvar assignments', () => {
   assert.deepEqual(sv.assignments, { n: '{{add(c,1)}}' });
 });
 
+test('normalizeNode gives mutable defaults independent objects', () => {
+  const a = FDCore.normalizeNode({ id: 'a', kind: 'subflow', flow_ref: 'trusted' }, 0);
+  const b = FDCore.normalizeNode({ id: 'b', kind: 'subflow', flow_ref: 'untrusted' }, 1);
+  assert.notStrictEqual(a.params, b.params);
+  assert.notStrictEqual(a.assignments, b.assignments);
+  assert.notStrictEqual(a.subflow_inputs, b.subflow_inputs);
+  assert.notStrictEqual(a.cases, b.cases);
+  assert.notStrictEqual(a.branches, b.branches);
+
+  a.subflow_inputs.secret = '{{secret_token}}';
+  assert.deepEqual(b.subflow_inputs, {});
+
+  const out = FDCore.serializeFlow({ id: 'f', name: 'F', start: 'a', nodes: [a, b] });
+  assert.deepEqual(out.nodes[0].subflow_inputs, { secret: '{{secret_token}}' });
+  assert.ok(!('subflow_inputs' in out.nodes[1]));
+});
+
 test('serializeNode carries subflow_inputs only when set', () => {
   const on = FDCore.serializeNode(FDCore.normalizeNode(
     { id: 's', kind: 'subflow', flow_ref: 'child', subflow_inputs: { who: '{{name}}' } }, 0));
