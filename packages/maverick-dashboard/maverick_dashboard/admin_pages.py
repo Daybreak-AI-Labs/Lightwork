@@ -303,10 +303,8 @@ async def settings_reset_ui_visibility(request: Request) -> RedirectResponse:
     return RedirectResponse("/settings?saved=visibility_reset#ui-visibility", status_code=303)
 
 
-@router.get("/users", response_class=HTMLResponse)
-async def users_page(request: Request) -> HTMLResponse:
-    """Admin: manage dashboard user roles (admin / operator / auditor / viewer)."""
-    auth.require_permission(request, "admin")
+def _users_context(request: Request) -> dict:
+    """Template context for the /users page (shared with the invite handler)."""
     import os as _os
 
     from maverick.oidc import oidc_enabled
@@ -328,13 +326,14 @@ async def users_page(request: Request) -> HTMLResponse:
             bootstrap = []
     saved = {"set": "Role updated.", "removed": "User removed.",
              "suites": "Department access updated.",
-             "suites_removed": "Department access removed."}.get(
+             "suites_removed": "Department access removed.",
+             "invite_revoked": "Invitation revoked."}.get(
         request.query_params.get("saved", ""), "")
     from maverick.departments import department_title
 
-    from . import suite_grants
+    from . import invites, suite_grants
     default_suites = suite_grants.default_suites()
-    return _app().templates.TemplateResponse(request, "users.html", {
+    return {
         "users": sorted(rbac.list_users().items()),
         "roles": rbac.ROLES,
         "bootstrap_admins": sorted(bootstrap),
@@ -348,7 +347,17 @@ async def users_page(request: Request) -> HTMLResponse:
                              key=lambda kv: kv[1]),
         "default_suites": (sorted(default_suites)
                            if default_suites is not None else None),
-    })
+        "invites_on": invites.invites_enabled(),
+        "pending_invites": [i for i in invites.list_invites() if i.pending],
+    }
+
+
+@router.get("/users", response_class=HTMLResponse)
+async def users_page(request: Request) -> HTMLResponse:
+    """Admin: manage dashboard user roles (admin / operator / auditor / viewer)."""
+    auth.require_permission(request, "admin")
+    return _app().templates.TemplateResponse(request, "users.html",
+                                             _users_context(request))
 
 
 @router.post("/users/set")
@@ -377,6 +386,46 @@ async def users_remove(request: Request, principal: str = Form(...)) -> Redirect
     rbac.remove_user(principal.strip(),
                      actor=auth.caller_principal(request) or "local")
     return RedirectResponse("/users?saved=removed", status_code=303)
+
+
+@router.post("/users/invite", response_class=HTMLResponse)
+async def users_invite(request: Request, email: str = Form(...),
+                       role: str = Form(...)) -> HTMLResponse:
+    """Mint a single-use invite link (admin only) and show it ONCE.
+
+    The token is never stored (only its hash), so this response is the only
+    place the link exists — the admin copies it into an email/chat to the
+    invitee. Renders the users page directly instead of redirecting, because a
+    redirect would drop the one-time link."""
+    auth.require_permission(request, "admin")
+    _app()._require_same_origin(request)
+    from . import invites
+    if not invites.invites_enabled():
+        raise HTTPException(status_code=404, detail="invites are not enabled")
+    invited_by = auth.caller_principal(request) or "local-admin"
+    try:
+        inv, token = invites.create_invite(email, role, created_by=invited_by)
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    link = str(request.base_url).rstrip("/") + f"/auth/invite/{token}"
+    # Best-effort email (fail-soft): the copyable link below is always the
+    # fallback, so a broken SMTP account can never strand an invite.
+    sent, send_note = invites.send_invite_email(inv, link, invited_by=invited_by)
+    return _app().templates.TemplateResponse(request, "users.html", {
+        **_users_context(request), "invite_link": link, "invite_email": inv.email,
+        "invite_sent": sent, "invite_send_note": send_note,
+    })
+
+
+@router.post("/users/invite/revoke")
+async def users_invite_revoke(request: Request,
+                              invite_id: str = Form(...)) -> RedirectResponse:
+    """Revoke a pending invite link (admin only)."""
+    auth.require_permission(request, "admin")
+    _app()._require_same_origin(request)
+    from . import invites
+    invites.revoke_invite(invite_id.strip())
+    return RedirectResponse("/users?saved=invite_revoked", status_code=303)
 
 
 @router.post("/users/suites/set")

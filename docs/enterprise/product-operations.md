@@ -74,6 +74,15 @@ gated capabilities wired to fail-open chokepoints**:
 Every gate is a **no-op unless enforcement is on** (a dev/community box is
 byte-identical) and matches the canonical tier table in `docs/product-portfolio.md`.
 
+**Built (feature-access drop):** per-feature **checkbox control** in the vendor
+console (à-la-carte `features` grants below tier + explicit `features_denied`
+within tier — denial wins, and neither outlives a paid-active license), and the
+**background auto-refresher** (`start_refresher` / `[license]
+refresh_interval_seconds`, default 60 s once `api_url` is set; `python -m
+maverick.entitlements refresh` is the cron one-shot) so a console checkbox is
+live in a connected deployment ~a minute later. Operator's guide:
+[client-access-rollout.md](client-access-rollout.md).
+
 **To build next:** usage metering + seat enforcement on the connected API; embed
 Daybreak's publisher pubkey in the build (`_EMBEDDED_PUBKEYS`).
 

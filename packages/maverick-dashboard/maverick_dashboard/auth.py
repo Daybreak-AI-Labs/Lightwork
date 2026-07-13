@@ -102,6 +102,21 @@ def _proxy_principal(request: Request) -> VerifiedPrincipal | None:
     return principal_from_proxy(value)
 
 
+def _invite_session_principal(request: Request) -> VerifiedPrincipal | None:
+    """Locally-minted email-invite session identity (no-IdP mode).
+
+    Returns a principal only when ``[dashboard] invites`` is enabled AND the
+    ``mvk_session`` cookie verifies against the local session secret; any
+    error means None — invites must never break the auth path. Imported
+    lazily like :func:`_session_principal` so the gate takes no hard
+    dependency on the invites module."""
+    try:
+        from .invites import local_session_principal
+        return local_session_principal(request)
+    except Exception:  # pragma: no cover - invites must never break auth
+        return None
+
+
 def _session_principal(request: Request) -> VerifiedPrincipal | None:
     """Built-in browser-login identity: a valid ``mvk_session`` cookie.
 
@@ -469,6 +484,15 @@ def require_principal(
         return pp
 
     if not oidc_enabled():
+        # Email-invite local sessions (no IdP): a locally-minted mvk_session
+        # cookie establishes the principal so RBAC roles bind to invited users.
+        # Inert unless [dashboard] invites is on AND the cookie verifies; the
+        # legacy no-principal return below is otherwise byte-identical.
+        lp = _invite_session_principal(request)
+        if lp is not None:
+            request.state.principal = lp
+            _pin_tenant_from_principal(request, lp)
+            return lp
         if _dashboard_require_auth_enabled() and proxy_auth_enabled():
             raise HTTPException(status_code=401, detail="proxy identity header required")
         return None
@@ -483,10 +507,12 @@ def require_principal(
 
     if request.url.path in _OIDC_EXEMPT_PATHS or request.url.path == "/static/daybreak-logo.jpg":
         return None
-    if request.url.path.startswith("/share/"):
-        # Public read-only share links carry their own revocable token (verified
-        # in the route, which 404s an invalid one); an external recipient has no
-        # OIDC session, like the webhook paths below.
+    if request.url.path.startswith(("/share/", "/auth/invite/")):
+        # Public read-only share links and invite-accept links carry their own
+        # single-use/revocable token in the path (verified in the route, which
+        # 404s an invalid one); the external recipient has no OIDC session yet.
+        # The invite route additionally sends the browser through /auth/login
+        # before any role binds in SSO mode.
         return None
     if request.url.path.startswith("/scim/"):
         # SCIM clients (Okta/Azure AD) authenticate with a static IdP bearer

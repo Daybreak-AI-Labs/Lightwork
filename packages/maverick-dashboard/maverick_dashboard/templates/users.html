@@ -89,6 +89,65 @@
       their goals and in the audit log.</p>
   </div>
 
+  {% if invites_on %}
+  <div class="section-head"><h2>Invite someone by email</h2></div>
+  <div class="panel">
+    {% if invite_link %}
+    <div class="panel" role="status"
+         style="border-color: var(--brand-border); background: var(--brand-subtle); margin-bottom: var(--space-3);">
+      {% if invite_sent %}
+      <strong>Invitation emailed to <code>{{ invite_email }}</code>.</strong>
+      <p class="muted" style="margin: var(--space-2) 0 0; font-size: var(--text-sm);">The same link is
+        below in case you also want to share it directly — it works once and expires in 7 days.</p>
+      {% else %}
+      <strong>Invitation for <code>{{ invite_email }}</code> created.</strong>
+      <p class="muted" style="margin: var(--space-2) 0 0; font-size: var(--text-sm);">
+        {% if invite_send_note and 'disabled' not in invite_send_note and 'no sending account' not in invite_send_note %}
+        Emailing it failed ({{ invite_send_note }}) — copy the link and send it yourself.
+        {% else %}
+        Copy this link and send it to them — it is shown only once, works once, and expires in 7 days.
+        Anyone who opens it can accept, so send it directly to the invitee.
+        {% endif %}</p>
+      {% endif %}
+      <code style="display: block; margin-top: var(--space-2); word-break: break-all; user-select: all;">{{ invite_link }}</code>
+    </div>
+    {% endif %}
+    <form method="post" action="/users/invite" style="display: flex; flex-wrap: wrap; gap: var(--space-3); align-items: flex-end;">
+      <label style="display: flex; flex-direction: column; gap: var(--space-1); flex: 1 1 18rem;">
+        <span>Email address</span>
+        <input class="ctl" type="email" name="email" placeholder="colleague@company.com"
+               aria-label="Invitee email address" autocomplete="off" required />
+      </label>
+      <label style="display: flex; flex-direction: column; gap: var(--space-1);">
+        <span>Role</span>
+        <select class="ctl" name="role" aria-label="Invited role">
+          {% for r in roles %}<option value="{{ r }}"{% if r == 'viewer' %} selected{% endif %}>{{ r }}</option>{% endfor %}
+        </select>
+      </label>
+      <button type="submit" class="btn btn--primary">Create invite link</button>
+    </form>
+    <p class="muted" style="margin-bottom: 0; font-size: var(--text-sm);">
+      With company sign-in (SSO) on, the link asks them to sign in and then grants the role.
+      Without SSO, opening the link signs them in directly as <code>user:&lt;email&gt;</code>.
+      When a sending account is configured (<code>[email]</code> / <code>EMAIL_USER</code>),
+      the link is emailed to them automatically.</p>
+    {% if pending_invites %}
+    <div style="margin-top: var(--space-3);">
+      {% for inv in pending_invites %}
+      <div style="display: flex; flex-wrap: wrap; gap: var(--space-3); align-items: center; padding: var(--space-2) 0; border-top: 1px solid var(--hairline);">
+        <code style="flex: 1 1 14rem;">{{ inv.email }}</code>
+        <span class="badge">{{ inv.role }}</span>
+        <form method="post" action="/users/invite/revoke">
+          <input type="hidden" name="invite_id" value="{{ inv.id }}" />
+          <button type="submit" class="btn">Revoke</button>
+        </form>
+      </div>
+      {% endfor %}
+    </div>
+    {% endif %}
+  </div>
+  {% endif %}
+
   <div class="section-head"><h2>Department access</h2></div>
   <div class="panel">
     <p class="muted" style="margin-top: 0;">Scope a user to the departments their job needs — someone in
