@@ -190,31 +190,24 @@ def _pin_tenant_from_principal(request: Request, principal: VerifiedPrincipal) -
 
 
 def is_dashboard_admin(principal: str) -> bool:
-    """True iff ``principal`` is listed as a dashboard admin.
+    """True iff ``principal`` is a configured (bootstrap) dashboard admin.
 
-    Admins bypass owner scoping (they see and control every goal/fleet). The
-    roster is the ``[dashboard] admins`` list in ``~/.maverick/config.toml``,
-    with an optional ``MAVERICK_DASHBOARD_ADMINS`` (comma-separated) env
-    override. Comparison is exact against the full ``"user:<sub>"`` form.
+    Admins bypass owner scoping AND department scoping (they see and control
+    every goal/fleet/department). The roster is the ``[dashboard] admins`` list
+    in ``~/.maverick/config.toml`` with an optional ``MAVERICK_DASHBOARD_ADMINS``
+    (comma-separated) env override; comparison is exact against the full
+    ``"user:<sub>"`` form.
+
+    Single source of truth: delegates to :func:`maverick.suite_grants.is_admin_principal`
+    so the dashboard HTTP gates and the kernel deploy/dispatch gates can never
+    disagree about who bypasses scoping. NOTE this is the *config-pinned*
+    roster, not the effective RBAC role — a user assigned ``admin`` via the
+    Users page or a group mapping holds admin *permissions* but remains
+    department-scoped (an admin-of-finance administers finance); only the
+    config roster is the "never scoped" break-glass set.
     """
-    if not principal:
-        return False
-    admins: set[str] = set()
-    env = (os.environ.get("MAVERICK_DASHBOARD_ADMINS") or "").strip()
-    if env:
-        admins = {a.strip() for a in env.split(",") if a.strip()}
-    else:
-        try:
-            from maverick.config import load_config
-
-            raw = (load_config().get("dashboard", {}) or {}).get("admins", []) or []
-        except Exception:  # pragma: no cover - config read must never gate auth
-            raw = []
-        if isinstance(raw, str):
-            raw = [raw]
-        if isinstance(raw, (list, tuple)):
-            admins = {str(a).strip() for a in raw if str(a).strip()}
-    return principal in admins
+    from maverick.suite_grants import is_admin_principal
+    return is_admin_principal(principal)
 
 
 def global_role_for_principal(principal: str | None) -> str | None:
@@ -341,6 +334,22 @@ def suite_allowed(request: Request, suite: str | None) -> bool:
         return True
     allowed = caller_suites(request)
     return allowed is None or suite in allowed
+
+
+def scope_to_suites(request: Request, items, *, suite_of, keep_none: bool = True):
+    """Filter ``items`` to the caller's granted departments (job-function scope).
+
+    ``suite_of(item)`` returns the item's suite key, or ``None`` for a generic /
+    department-less item. Unscoped callers (auth off, admin, no grant) get every
+    item back unchanged; otherwise an item is kept when its suite is granted, or
+    when it is generic and ``keep_none`` is set (packs outside every department
+    stay visible). One helper so every catalog surface scopes identically —
+    the inline per-surface copies drifted (some kept generics, some didn't)."""
+    allowed = caller_suites(request)
+    if allowed is None:
+        return list(items)
+    return [it for it in items
+            if (suite_of(it) is None and keep_none) or suite_of(it) in allowed]
 
 
 def require_suite(request: Request, suite: str | None) -> None:

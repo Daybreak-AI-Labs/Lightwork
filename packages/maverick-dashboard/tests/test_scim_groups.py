@@ -150,20 +150,57 @@ def test_resource_types_advertise_groups(client):
 # ---------- group -> access resolution ----------
 
 def test_group_names_match_by_external_id_and_subject_directory(client):
-    uid = _mk_user(client, "alice@example.com", external_id="okta-sub-1")
+    uid = _mk_user(client, "alice@example.com", external_id="entra-oid-1")
     _mk_group(client, "Finance Team", [uid])
     from maverick_dashboard import scim_groups
-    # externalId carries the OIDC sub (Okta).
-    assert scim_groups.group_names_for_principal(
-        "user:okta-sub-1") == frozenset({"Finance Team"})
-    # Pairwise-sub IdPs (Entra): the sub only exists in the subject directory,
-    # recorded against the user's stable identifiers at login.
     from maverick_dashboard.subject_directory import record_login
-    record_login("pairwise-sub-9", ["alice@example.com"])
+    # externalId carries the IdP's immutable object id / sub (Okta/Entra).
+    assert scim_groups.group_names_for_principal(
+        "user:entra-oid-1") == frozenset({"Finance Team"})
+    # Pairwise-sub IdPs (Entra): the login sub differs from externalId, so we
+    # bridge through the subject directory — but ONLY on the non-forgeable
+    # externalId (the immutable oid), never email/userName.
+    record_login("pairwise-sub-9", ["entra-oid-1"])
     assert scim_groups.group_names_for_principal(
         "user:pairwise-sub-9") == frozenset({"Finance Team"})
     # An unknown principal belongs to nothing.
     assert scim_groups.group_names_for_principal("user:nobody") == frozenset()
+
+
+def test_forged_email_claim_cannot_inherit_group_access(client):
+    # SECURITY: the subject directory records login email/upn claims WITHOUT an
+    # email_verified check. If group matching bridged via email, an attacker who
+    # sets their unverified email claim to a victim's address would inherit the
+    # victim's group-mapped access. Granting must bridge only on the
+    # non-forgeable externalId/id, so an email-keyed directory entry confers
+    # NOTHING (over-matching stays safe for revocation only).
+    uid = _mk_user(client, "cfo@corp.com", external_id="entra-oid-cfo")
+    _mk_group(client, "Finance Admins", [uid])
+    from maverick_dashboard import scim_groups
+    from maverick_dashboard.subject_directory import record_login
+    # Attacker logs in; their unverified email claim is recorded as the CFO's.
+    record_login("attacker-sub", ["cfo@corp.com"])
+    assert scim_groups.group_names_for_principal("user:attacker-sub") == frozenset()
+    # The direct userName/email path is likewise refused (the sub is not the
+    # externalId), so a bare email-as-principal cannot inherit the group either.
+    assert scim_groups.group_names_for_principal("user:cfo@corp.com") == frozenset()
+
+
+def test_deactivated_user_confers_no_group_access(client):
+    # A deprovisioned (active=false) SCIM user must not confer group-derived
+    # access even while still listed in a mapped group.
+    uid = _mk_user(client, "bob@corp.com", external_id="oid-bob")
+    _mk_group(client, "Finance Team", [uid])
+    from maverick_dashboard import scim_groups
+    assert scim_groups.group_names_for_principal(
+        "user:oid-bob") == frozenset({"Finance Team"})
+    # Deactivate via SCIM PATCH.
+    r = client.patch(f"/scim/v2/Users/{uid}", json={
+        "schemas": ["urn:ietf:params:scim:api:messages:2.0:PatchOp"],
+        "Operations": [{"op": "replace", "path": "active", "value": False}]},
+        headers=_auth())
+    assert r.status_code == 200
+    assert scim_groups.group_names_for_principal("user:oid-bob") == frozenset()
 
 
 def test_group_role_most_privileged_and_stored_wins(client, monkeypatch):
@@ -212,3 +249,97 @@ def test_group_scoped_user_sees_only_their_departments(client, monkeypatch):
     keys = {d["key"] for d in client.get("/api/v1/departments").json()}
     assert keys == {"finance"}
     assert client.get("/api/v1/departments/legal").status_code == 403
+
+
+# ---------- SCIM Group store hardening ----------
+
+def test_patch_remove_members_with_value_does_not_clear_all(client):
+    # A remove op whose value is present but yields no parseable ids (a single
+    # dict, a display-only member, an empty list) must remove NOTHING, not wipe
+    # the group — the alternative silently revokes every member's access.
+    a = _mk_user(client, "a@x.com")
+    b = _mk_user(client, "b@x.com")
+    gid = _mk_group(client, "Team", [a, b])
+
+    def patch(op):
+        return client.patch(f"/scim/v2/Groups/{gid}", json={
+            "schemas": [_PATCH_SCHEMA], "Operations": [op]}, headers=_auth())
+
+    # value is a single dict (not a list) -> no ids -> members unchanged.
+    r = patch({"op": "remove", "path": "members", "value": {"value": a}})
+    assert {m["value"] for m in r.json()["members"]} == {a, b}
+    # value is an empty list -> members unchanged.
+    r = patch({"op": "remove", "path": "members", "value": []})
+    assert {m["value"] for m in r.json()["members"]} == {a, b}
+    # No value at all -> RFC clear-all still works.
+    r = patch({"op": "remove", "path": "members"})
+    assert r.json()["members"] == []
+
+
+def test_group_rename_enforces_uniqueness(client):
+    _mk_group(client, "Finance Team", [])
+    gid2 = _mk_group(client, "Other Team", [])
+    # PUT rename onto an existing name -> 409.
+    r = client.put(f"/scim/v2/Groups/{gid2}", json={
+        "schemas": [_GROUP_SCHEMA], "displayName": "finance team"},
+        headers=_auth())
+    assert r.status_code == 409
+    # PATCH rename onto an existing name -> 409.
+    r = client.patch(f"/scim/v2/Groups/{gid2}", json={
+        "schemas": [_PATCH_SCHEMA],
+        "Operations": [{"op": "replace", "path": "displayName",
+                        "value": "Finance Team"}]}, headers=_auth())
+    assert r.status_code == 409
+    # A no-op rename to its own current name is allowed.
+    r = client.patch(f"/scim/v2/Groups/{gid2}", json={
+        "schemas": [_PATCH_SCHEMA],
+        "Operations": [{"op": "replace", "path": "displayName",
+                        "value": "Other Team"}]}, headers=_auth())
+    assert r.status_code == 200
+
+
+def test_group_membership_changes_are_audited(client, monkeypatch, tmp_path):
+    import json as _json
+
+    import maverick.audit.writer as w
+    monkeypatch.setattr(w, "_default", w.AuditLog(audit_dir=tmp_path / "audit"))
+
+    a = _mk_user(client, "a@x.com")
+    gid = _mk_group(client, "Team", [a])          # create with a member
+    b = _mk_user(client, "b@x.com")
+    client.patch(f"/scim/v2/Groups/{gid}", json={   # add b
+        "schemas": [_PATCH_SCHEMA],
+        "Operations": [{"op": "add", "path": "members",
+                        "value": [{"value": b}]}]}, headers=_auth())
+    client.delete(f"/scim/v2/Groups/{gid}", headers=_auth())  # remove a + b
+
+    rows = []
+    for f in sorted((tmp_path / "audit").glob("*.ndjson")):
+        rows += [_json.loads(x) for x in f.read_text().splitlines() if x.strip()]
+    access = [r for r in rows if r.get("kind") == "access_grant_changed"]
+    # create(add a) + patch(add b) + delete(remove a, b) = 4 membership rows.
+    assert len(access) == 4
+    assert all(r["field"] == "group_membership" and r["actor"] == "scim"
+               for r in access)
+
+
+def test_string_group_suites_is_one_suite_not_unrestricted(client, monkeypatch):
+    # A group_suites value written as a bare string must resolve to that one
+    # suite, never to "no opinion" -> unrestricted.
+    uid = _mk_user(client, "a@x.com", external_id="oid-a")
+    _mk_group(client, "Finance Team", [uid])
+    _map_groups(monkeypatch, suites={"Finance Team": "finance"})  # a string
+    from maverick_dashboard import scim_groups
+    assert scim_groups.suites_for_principal("user:oid-a") == frozenset({"finance"})
+
+
+def test_case_insensitive_group_and_role_mapping(client, monkeypatch):
+    uid = _mk_user(client, "a@x.com", external_id="oid-a")
+    _mk_group(client, "Finance Team", [uid])
+    # Mapping key differs in case from the SCIM displayName; role value is
+    # capitalized. Both must still resolve.
+    _map_groups(monkeypatch, roles={"finance team": "Operator"},
+                suites={"FINANCE TEAM": ["finance"]})
+    from maverick_dashboard import scim_groups
+    assert scim_groups.role_for_principal("user:oid-a") == "operator"
+    assert scim_groups.suites_for_principal("user:oid-a") == frozenset({"finance"})

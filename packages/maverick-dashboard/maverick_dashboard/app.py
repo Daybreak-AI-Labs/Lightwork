@@ -1372,16 +1372,13 @@ async def workforce_page(request: Request) -> HTMLResponse:
     from maverick.operating_record import assemble
     from maverick.outcomes import firm_totals, worker_cards
 
-    from .auth import caller_suites
+    from .auth import scope_to_suites
 
     w = _world()
-    depts = list_departments()
     # Job-function scoping: mirror GET /api/v1/departments — a caller with a
-    # department grant sees only their departments (this page previously showed
-    # the full catalog, diverging from the JSON listing).
-    allowed = caller_suites(request)
-    if allowed is not None:
-        depts = [d for d in depts if d.key in allowed]
+    # department grant sees only their departments.
+    depts = scope_to_suites(request, list_departments(),
+                            suite_of=lambda d: d.key, keep_none=False)
     owner = goal_owner_filter(request)
     firm = firm_totals(assemble(w, owner=owner)).to_dict()
     leaders = [c.to_dict() for c in worker_cards(w, top=5, owner=owner)]
@@ -1536,8 +1533,12 @@ async def deliverables_page(request: Request, role: str = "") -> HTMLResponse:
     With no explicit ``?role=``, defaults to the caller's own persona roles
     (``[personas]`` config) so a logged-in analyst lands on their deliverables;
     ``?role=all`` widens to everything, ``?role=<r>`` picks a single role."""
+    from .auth import scope_to_suites
     from .deliverables import build_inbox, persona_roles_for
-    specs = _deliverable_specs()
+    # Job-function scoping: a scoped caller's inbox lists only their
+    # departments' deliverable specs (plus generic packs), matching /agents.
+    specs = scope_to_suites(request, _deliverable_specs(),
+                            suite_of=lambda s: s.get("suite"))
     owner = goal_owner_filter(request)
     runs_by_domain: dict[str, list] = {}
     for s in specs:
@@ -1877,8 +1878,15 @@ async def compartments_page(request: Request) -> HTMLResponse:
     can see which sealed agents exist and the capability envelope each runs
     under -- the compartments a Rung-2 seal acts on."""
     try:
-        from maverick.domain import available_domains
-        domains = sorted(available_domains().values(), key=lambda d: d.name)
+        from maverick.domain import available_domains, suite_for
+
+        from .auth import scope_to_suites
+        # Job-function scoping: a scoped caller sees only their departments'
+        # sealed agents and capability envelopes, matching /agents (this page
+        # otherwise leaks every department's pack config).
+        domains = scope_to_suites(
+            request, sorted(available_domains().values(), key=lambda d: d.name),
+            suite_of=lambda d: suite_for(d.name))
     except Exception:  # never 500 the page if the factory layer is unavailable
         domains = []
     return templates.TemplateResponse(request, "compartments.html", {"domains": domains})
@@ -1905,19 +1913,15 @@ async def agents_page(request: Request) -> HTMLResponse:
         from maverick.domain import suite_for
         from maverick.domain_edit import list_agents, resolved_view
 
-        from .auth import caller_suites
+        from .auth import scope_to_suites, suite_allowed
         editable = bool(get_features().get("pack_editing", True))
-        agents = list_agents()
         # Job-function scoping: mirror GET /api/v1/agents — a caller with a
         # department grant browses their departments' specialists plus generic
         # packs; a non-granted selection renders nothing rather than its config.
-        allowed = caller_suites(request)
-        if allowed is not None:
-            agents = [a for a in agents
-                      if a.get("suite") is None or a.get("suite") in allowed]
+        agents = scope_to_suites(request, list_agents(),
+                                 suite_of=lambda a: a.get("suite"))
         name = request.query_params.get("name")
-        if name and (allowed is None or suite_for(name) is None
-                     or suite_for(name) in allowed):
+        if name and suite_allowed(request, suite_for(name)):
             selected = resolved_view(name)
             creating = False  # editing an existing agent wins over the new form
     except Exception:  # never 500 the page if the factory layer is unavailable
@@ -1940,7 +1944,15 @@ async def assessments_page(request: Request) -> HTMLResponse:
     flows: list = []
     try:
         from maverick.domain_edit import list_agents
-        agents = [{"name": a["name"], "suite": a.get("suite")} for a in list_agents()]
+
+        from .auth import scope_to_suites
+        # Job-function scoping: the subject picker offers only the caller's
+        # departments' specialists, matching the scoped /agents roster (else a
+        # picked-but-403'd pack drives mixed failures mid-assessment).
+        agents = scope_to_suites(
+            request,
+            [{"name": a["name"], "suite": a.get("suite")} for a in list_agents()],
+            suite_of=lambda a: a.get("suite"))
     except Exception:  # never 500 the page if the factory layer is unavailable
         agents = []
     try:

@@ -104,18 +104,31 @@ def record_login(sub: str, identifiers: Iterable[str], *, at: float | None = Non
         return
 
 
-def subs_for(identifiers: Iterable[str]) -> set[str]:
-    """Every ``sub`` recorded at login under any of ``identifiers``. Used by SCIM
-    deprovision to reach a session whose ``sub`` is in no SCIM attribute."""
-    data = _load()
+def subs_in(index: dict, identifiers: Iterable[str]) -> set[str]:
+    """Every ``sub`` recorded under any of ``identifiers`` within a pre-loaded
+    ``index`` (see :func:`load_index`). Lets a caller that resolves many
+    identifier sets in one pass (e.g. group-membership matching over every SCIM
+    user) load the directory once instead of re-reading it per lookup."""
     out: set[str] = set()
     for i in identifiers:
         if not (i or "").strip():
             continue
-        entry = data.get(_key(i))
+        entry = index.get(_key(i))
         if isinstance(entry, dict) and entry.get("sub"):
             out.add(str(entry["sub"]))
     return out
+
+
+def load_index() -> dict:
+    """The raw identifier-hash -> {sub, ts} directory, read once. Pair with
+    :func:`subs_in` to resolve many lookups without re-reading the file."""
+    return _load()
+
+
+def subs_for(identifiers: Iterable[str]) -> set[str]:
+    """Every ``sub`` recorded at login under any of ``identifiers``. Used by SCIM
+    deprovision to reach a session whose ``sub`` is in no SCIM attribute."""
+    return subs_in(_load(), identifiers)
 
 
 def forget(identifiers: Iterable[str]) -> None:
@@ -135,4 +148,4 @@ def forget(identifiers: Iterable[str]) -> None:
         return
 
 
-__all__ = ["record_login", "subs_for", "forget"]
+__all__ = ["record_login", "subs_for", "subs_in", "load_index", "forget"]

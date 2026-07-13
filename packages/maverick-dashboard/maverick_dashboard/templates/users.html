@@ -95,8 +95,8 @@
       Finance sees and runs only the Finance specialists. Users without an entry may use
       {% if default_suites is none %}<strong>every department</strong>{% else %}only:
       <code>{{ default_suites|join(", ") or "none" }}</code> (set by <code>[dashboard] default_suites</code>){% endif %}.
-      Administrators are never scoped. This limits <em>which</em> departments a user works with;
-      their role above still decides <em>what</em> they may do.</p>
+      Permanent administrators (pinned in config) are never scoped. This limits <em>which</em>
+      departments a user works with; their role above still decides <em>what</em> they may do.</p>
 
     {% for principal, suites in suite_grants %}
     <div style="display: flex; flex-wrap: wrap; gap: var(--space-3); align-items: flex-start; padding: var(--space-3) 0; border-top: 1px solid var(--hairline);">
