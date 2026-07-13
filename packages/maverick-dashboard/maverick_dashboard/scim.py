@@ -103,6 +103,8 @@ def _authorize(request: Request) -> JSONResponse | None:
     # Any configured secret may match (rotation grace window); each compare is
     # constant-time.
     if not (token and any(_token_matches(token, s) for s in secrets)):
+        from .auth_metrics import record_auth_failure
+        record_auth_failure("scim_bad_token")
         return _scim_error(401, "invalid or missing SCIM bearer token")
     return None
 

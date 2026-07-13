@@ -145,6 +145,57 @@ def test_acs_verifies_sets_session_and_redirects(_enabled, monkeypatch):
     assert payload["sub"] == "alice@example.com"
 
 
+def test_acs_rejects_replayed_assertion(_enabled, monkeypatch, tmp_path):
+    # A captured, still-valid SAMLResponse must be single-use: the first POST
+    # mints a session, an identical replay is refused (401) before minting.
+    monkeypatch.setenv("MAVERICK_HOME", str(tmp_path))
+    import time
+    monkeypatch.setattr(saml_mod, "verify_acs_response", lambda r: saml_mod.SamlIdentity(
+        name_id="alice@example.com", assertion_id="assertion-abc",
+        expires_at=time.time() + 300))
+    first = _client().post("/saml/acs", data={"SAMLResponse": "signed"},
+                           follow_redirects=False)
+    assert first.status_code == 303 and first.cookies.get("mvk_session")
+    replay = _client().post("/saml/acs", data={"SAMLResponse": "signed"},
+                            follow_redirects=False)
+    assert replay.status_code == 401
+    assert "already used" in replay.text
+    assert replay.cookies.get("mvk_session") is None
+
+
+def test_acs_replay_store_failure_fails_closed(_enabled, monkeypatch, tmp_path):
+    # If single-use can't be proven (store unreadable), refuse the login rather
+    # than risk accepting a replay.
+    monkeypatch.setenv("MAVERICK_HOME", str(tmp_path))
+    from maverick_dashboard import saml_replay
+    monkeypatch.setattr(saml_mod, "verify_acs_response", lambda r: saml_mod.SamlIdentity(
+        name_id="a", assertion_id="assertion-xyz", expires_at=0.0))
+
+    def _boom(*a, **k):
+        raise saml_replay.ReplayStoreError("unreadable")
+
+    monkeypatch.setattr(saml_replay, "consume", _boom)
+    res = _client().post("/saml/acs", data={"SAMLResponse": "signed"},
+                         follow_redirects=False)
+    assert res.status_code == 503
+    assert res.cookies.get("mvk_session") is None
+
+
+def test_replay_store_consume_is_first_writer_wins(monkeypatch, tmp_path):
+    monkeypatch.setenv("MAVERICK_HOME", str(tmp_path))
+    import time
+
+    from maverick_dashboard import saml_replay
+    future = time.time() + 300
+    assert saml_replay.consume("aid-1", future) is True     # first use accepted
+    assert saml_replay.consume("aid-1", future) is False    # replay refused
+    assert saml_replay.consume("aid-2", future) is True     # a different id is fine
+    assert saml_replay.consume("", future) is False         # no id -> fail closed
+    # An already-expired assertion still records (pruned later) and is single-use.
+    assert saml_replay.consume("aid-3", time.time() - 10) is True
+    assert saml_replay.consume("aid-3", time.time() - 10) is False
+
+
 def test_acs_missing_response_is_400(_enabled):
     res = _client().post("/saml/acs", data={}, follow_redirects=False)
     assert res.status_code == 400
