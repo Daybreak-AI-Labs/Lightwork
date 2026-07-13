@@ -207,6 +207,20 @@ class TestStructuredVerify:
         assert v.reward_audit is None  # scalar path, no rubric attached
 
     @pytest.mark.asyncio
+    async def test_incomplete_rubric_rejects_instead_of_falling_back(
+        self, fake_llm, make_llm_response,
+    ):
+        from maverick.budget import Budget
+        from maverick.verifier import verify_proposal_structured
+        fake_llm.scripted = [make_llm_response(text=(
+            '{"dimensions": [{"name": "correctness", "score": 1.0}], '
+            '"score": 1.0, "confidence": 1.0, "accepts": true}'))]
+        v = await verify_proposal_structured("brief", "answer", fake_llm, Budget())
+        assert v.accepts is False
+        assert v.reward_audit is None
+        assert "incomplete" in v.critique
+
+    @pytest.mark.asyncio
     async def test_reward_signed_into_audit_when_enabled(
         self, fake_llm, make_llm_response, monkeypatch,
     ):
@@ -220,7 +234,10 @@ class TestStructuredVerify:
                             lambda kind, **kw: recorded.append((kind, kw)) or True)
         fake_llm.scripted = [make_llm_response(text=(
             '{"reasoning": "long trace", "dimensions": '
-            '[{"name": "safety", "score": 0.1, "critique": "unsafe"}], '
+            '[{"name": "correctness", "score": 1.0},'
+            '{"name": "completeness", "score": 1.0},'
+            '{"name": "grounding", "score": 1.0},'
+            '{"name": "safety", "score": 0.1, "critique": "unsafe"}], '
             '"score": 0.9, "confidence": 0.8}'))]
         await verify_proposal_structured("b", "a", fake_llm, Budget())
         assert recorded, "structured reward was not signed into the audit chain"
@@ -241,7 +258,10 @@ class TestStructuredVerify:
         recorded = []
         monkeypatch.setattr(audit, "record", lambda kind, **kw: recorded.append(kind) or True)
         fake_llm.scripted = [make_llm_response(text=(
-            '{"dimensions": [{"name": "safety", "score": 0.9}], "score": 0.9}'))]
+            '{"dimensions": [{"name": "correctness", "score": 0.9},'
+            '{"name": "completeness", "score": 0.9},'
+            '{"name": "grounding", "score": 0.9},'
+            '{"name": "safety", "score": 0.9}], "score": 0.9}'))]
         await verify_proposal_structured("b", "a", fake_llm, Budget())
         assert recorded == []
 
@@ -260,8 +280,10 @@ class TestStructuredVerify:
 
         monkeypatch.setattr(audit, "record", _boom)
         fake_llm.scripted = [make_llm_response(text=(
-            '{"dimensions": [{"name": "safety", "score": 0.9},'
-            '{"name": "correctness", "score": 0.9}], "score": 0.9}'))]
+            '{"dimensions": [{"name": "correctness", "score": 0.9},'
+            '{"name": "completeness", "score": 0.9},'
+            '{"name": "grounding", "score": 0.9},'
+            '{"name": "safety", "score": 0.9}], "score": 0.9}'))]
         v = await verify_proposal_structured("b", "a", fake_llm, Budget())
         assert v.accepts is True  # audit blew up; the verification still returned
 
@@ -274,7 +296,10 @@ class TestStructuredVerify:
         from maverick.verifier import verify_final
         monkeypatch.setattr(reasoning_reward, "enabled", lambda: True)
         fake_llm.scripted = [make_llm_response(text=(
-            '{"dimensions": [{"name": "safety", "score": 0.1}], '
+            '{"dimensions": [{"name": "correctness", "score": 1.0},'
+            '{"name": "completeness", "score": 1.0},'
+            '{"name": "grounding", "score": 1.0},'
+            '{"name": "safety", "score": 0.1, "critique": "unsafe"}], '
             '"score": 0.9, "confidence": 0.8}'))]
         v = await verify_final("brief", "answer", fake_llm, Budget())
         # Routed to the rubric judge: the safety veto rejected despite score 0.9.
