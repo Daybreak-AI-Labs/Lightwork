@@ -69,6 +69,64 @@ def test_http_json_source_with_injected_fetch(monkeypatch):
     assert r.events[0]["who"] == "acme" and r.cursor == "9"
 
 
+def test_http_json_rejects_large_content_length(monkeypatch):
+    class _Resp:
+        status_code = 200
+        headers = {"content-length": str(ev._MAX_HTTP_JSON_BYTES + 1)}
+
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *exc):
+            return None
+
+        def iter_bytes(self):
+            yield b"{}"
+
+    class _Client:
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *exc):
+            return None
+
+        def stream(self, method, url, headers=None):
+            return _Resp()
+
+    monkeypatch.setattr("maverick.tools._ssrf.safe_client", lambda url, **kw: _Client())
+    with pytest.raises(ev.EventSourceError, match="byte limit"):
+        ev._http_get_json("https://x/feed")
+
+
+def test_http_json_rejects_stream_over_byte_limit(monkeypatch):
+    class _Resp:
+        status_code = 200
+        headers = {}
+
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *exc):
+            return None
+
+        def iter_bytes(self):
+            yield b"["
+            yield b"x" * ev._MAX_HTTP_JSON_BYTES
+
+    class _Client:
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *exc):
+            return None
+
+        def stream(self, method, url, headers=None):
+            return _Resp()
+
+    monkeypatch.setattr("maverick.tools._ssrf.safe_client", lambda url, **kw: _Client())
+    with pytest.raises(ev.EventSourceError, match="byte limit"):
+        ev._http_get_json("https://x/feed")
+
 def test_http_json_requires_url():
     with pytest.raises(ev.EventSourceError):
         ev.HttpJsonSource().poll({}, cursor="")
