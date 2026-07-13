@@ -6,6 +6,7 @@ from __future__ import annotations
 
 import asyncio
 import datetime as _dt
+import difflib
 import json
 import logging
 import os
@@ -118,6 +119,30 @@ from .auth import (
 log = logging.getLogger(__name__)
 
 router = APIRouter(prefix="/api/v1", tags=["v1"])
+
+# Keep exact edit grading for normal-sized deliverables, but never feed the
+# full 200k-character request limit into difflib.SequenceMatcher. Certain
+# repetitive inputs make SequenceMatcher consume quadratic-like CPU, and this
+# module's endpoints run on the dashboard API path.
+_DELIVERABLE_EDIT_EXACT_SIMILARITY_CHARS = 20_000
+_DELIVERABLE_EDIT_SIMILARITY_SAMPLE_CHARS = 4_000
+
+
+def _sample_deliverable_text(text: str) -> str:
+    """Return a bounded head/tail sample for large deliverable similarity checks."""
+    if len(text) <= _DELIVERABLE_EDIT_SIMILARITY_SAMPLE_CHARS:
+        return text
+    head = _DELIVERABLE_EDIT_SIMILARITY_SAMPLE_CHARS // 2
+    tail = _DELIVERABLE_EDIT_SIMILARITY_SAMPLE_CHARS - head
+    return text[:head] + text[-tail:]
+
+
+def _deliverable_edit_similarity(original: str, revised: str) -> float:
+    """Compute edit similarity without unbounded SequenceMatcher CPU cost."""
+    if max(len(original), len(revised)) > _DELIVERABLE_EDIT_EXACT_SIMILARITY_CHARS:
+        original = _sample_deliverable_text(original)
+        revised = _sample_deliverable_text(revised)
+    return difflib.SequenceMatcher(None, original, revised).ratio()
 
 # Shared-store channel for Idempotency-Key dedup on goal creation (see
 # create_goal). Distinct from the channel/webhook idempotency namespaces.
@@ -3014,7 +3039,6 @@ async def edit_deliverable(request: Request, goal_id: int,
     if g is None:
         raise HTTPException(status_code=404, detail="no such goal")
     assert_goal_access(request, g)
-    import difflib
     original = g.result or ""
     revised = payload.text or ""
     w.set_goal_status(goal_id, g.status, result=revised)   # the edit is the deliverable now
@@ -3023,7 +3047,7 @@ async def edit_deliverable(request: Request, goal_id: int,
         # rewrite. Grounding this as 0.0 would punish it for text it never wrote,
         # so we save the human's text but ground nothing.
         return {"similarity": None}
-    similarity = difflib.SequenceMatcher(None, original, revised).ratio()
+    similarity = _deliverable_edit_similarity(original, revised)
     _ground_outcome(w, goal_id, similarity, kind="edit")
     return {"similarity": round(similarity, 3)}
 
