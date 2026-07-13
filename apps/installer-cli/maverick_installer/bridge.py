@@ -12,10 +12,12 @@ Protocol (line-delimited JSON):
 When the wizard is complete, sidecar emits ``{"id": "__done__", ...}``
 and exits.
 
-The four questions mirror the CLI's consumer mode exactly (name,
-sign-in key, working directory, budget) and the resulting config is
-written by the SAME ``write_consumer_config`` helper the CLI uses, so
-the GUI and CLI can't drift.
+The five questions mirror the CLI's consumer mode exactly (name,
+governance level, sign-in key, working directory, budget) and the
+resulting config is written by the SAME ``write_consumer_config``
+helper the CLI uses -- and the governance menu is imported from the
+SAME ``GOVERNANCE_CHOICES`` list the CLI shows -- so the GUI and CLI
+can't drift.
 """
 from __future__ import annotations
 
@@ -25,7 +27,12 @@ import sys
 from pathlib import Path
 from typing import Any
 
-from .wizard import DEFAULT_GOVERNANCE_PROFILE, GOVERNANCE_PROFILES, write_consumer_config
+from .wizard import (
+    DEFAULT_GOVERNANCE_PROFILE,
+    GOVERNANCE_CHOICES,
+    GOVERNANCE_PROFILES,
+    write_consumer_config,
+)
 
 
 def _step(id: str, question: str, choices: list[str], *, kind: str = "choice") -> dict[str, Any]:
@@ -64,23 +71,34 @@ def run() -> None:
     ))
     user_name = _recv().strip() or default_name or "you"
 
-    # Q2: governance level. Same three business-shaped levels as the CLI
-    # (wizard.GOVERNANCE_PROFILES); answers are matched on their first word
-    # and anything unrecognised falls back to the default, so a UI that
-    # skips this step still gets a valid config.
+    # Q2: governance level. The menu is wizard.GOVERNANCE_CHOICES verbatim --
+    # the CLI's list is the UX source of truth; do not re-author it here.
+    # Resolution is deliberately strict: a BLANK answer means "skipped" and
+    # takes the default, but a non-blank answer that names no known level is
+    # a protocol bug in the UI and must fail LOUDLY. Silently falling back
+    # would downgrade a bank that picked "regulated" to the least-governed
+    # tier with no error -- the one failure direction this selector must
+    # never have.
     _send(_step(
         "governance",
         "What kind of business is this for? Every level learns and "
         "improves; the level sets how much governance wraps it.",
-        [
-            "essentials - small business (a gym, a studio, a shop)",
-            "standard - growing company (a manufacturer, an agency)",
-            "regulated - bank / clinic / government (audit everything)",
-        ],
+        list(GOVERNANCE_CHOICES),
     ))
-    raw_profile = (_recv().strip().split() or [DEFAULT_GOVERNANCE_PROFILE])[0].lower()
-    profile = (raw_profile if raw_profile in GOVERNANCE_PROFILES
-               else DEFAULT_GOVERNANCE_PROFILE)
+    raw_answer = _recv().strip()
+    if not raw_answer:
+        profile = DEFAULT_GOVERNANCE_PROFILE
+    else:
+        first = raw_answer.split()[0].lower()
+        profile = first if first in GOVERNANCE_PROFILES else next(
+            (name for name in GOVERNANCE_PROFILES if name in raw_answer.lower()),
+            "",
+        )
+        if not profile:
+            raise ValueError(
+                f"unrecognized governance level answer: {raw_answer!r} "
+                f"(expected one of {sorted(GOVERNANCE_PROFILES)})"
+            )
 
     # Q3: API key (sign-in). The UI shows the console.anthropic.com link
     # and a masked field. Blank == skip (config saved without a key).

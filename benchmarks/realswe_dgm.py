@@ -9,12 +9,14 @@ SWE-bench container. If the improved config lifts the resolved-rate, the change
 is promoted through the REAL config rung (min_samples=3, no human needed) and
 SIGNED into the audit ledger, then re-verified by an independent auditor.
 
-Honest scope: 3 instances is a MECHANISM proof on real code -- baseline ->
-propose -> improved -> signed verdict, end to end -- not a statistically robust
-rate. Non-Django instances are used deliberately (Django is the hardest repo);
-this is disclosed, not hidden. Every solve is metered; a hard $ cap stops it.
-Resumable: each (instance, arm) verdict is checkpointed, so a container recycle
-never re-pays for finished work.
+Honest scope: a handful of instances is a MECHANISM proof on real code --
+baseline -> propose -> improved -> signed verdict, end to end -- not a
+statistically robust rate. Corpus selection is disclosed, not hidden: --ids
+runs exactly the instances you name, and --easy N picks the N Verified
+instances with the smallest gold patches (any repo, Django included) --
+the band where a budget uplift can actually show. Every solve is metered;
+a hard $ cap stops it. Resumable: each (instance, arm) verdict is
+checkpointed, so a container recycle never re-pays for finished work.
 
     python benchmarks/realswe_dgm.py --keys ~/dgm-keys --out-dir ~/realswe_dgm
 """
@@ -52,24 +54,21 @@ ARMS = {
 DEFAULT_IDS = ["sympy__sympy-15976", "sympy__sympy-14531", "pytest-dev__pytest-5631"]
 
 
-def _easy_ids(n: int, exclude: set[str] | None = None) -> list[str]:
-    """Pick the ``n`` SWE-bench Verified instances with the smallest gold patches.
+def _easy_ids(instances: dict[str, dict], n: int) -> list[str]:
+    """Pick the ``n`` instances with the smallest gold patches from ``instances``.
 
     Gold-patch line count is the best cheap proxy for difficulty in the dataset:
     a small non-test fix is a simple, well-scoped change -- exactly the kind an
     agent can actually resolve, which is what gives a baseline-vs-candidate run
     real headroom (vs the sympy/pytest internals that failed at every budget).
     Data-driven and reproducible -- no hand-picked IDs, no memory guesswork.
+    Takes the already-loaded instance map so the 500-row dataset is iterated
+    exactly once per run; each patch is split exactly once.
     """
-    exclude = exclude or set()
-    allinst = load_verified(None)  # all 500 (cached locally after first pull)
-    def plen(d: dict) -> int:
-        return len((d.get("patch") or "").splitlines())
     ranked = sorted(
-        (d for d in allinst.values()
-         if d["instance_id"] not in exclude and plen(d) >= 4),
-        key=plen)
-    return [d["instance_id"] for d in ranked[:n]]
+        (p, iid) for iid, d in instances.items()
+        if (p := len((d.get("patch") or "").splitlines())) >= 4)
+    return [iid for _, iid in ranked[:n]]
 
 
 def _cost_of(iid: str) -> float:
@@ -110,14 +109,16 @@ def main(argv: list[str] | None = None) -> int:
     if args.easy > 0:
         print(f"  selecting {args.easy} easiest Verified instances (smallest gold patches) ...",
               flush=True)
-        ids = _easy_ids(args.easy)
+        allinst = load_verified(None)  # one pass over all 500 (HF-cached)
+        ids = _easy_ids(allinst, args.easy)
+        instances = {iid: allinst[iid] for iid in ids}
         print("  chosen:", ", ".join(ids))
     else:
         ids = [s.strip() for s in args.ids.split(",") if s.strip()]
+        instances = load_verified(ids)
     args.out_dir.mkdir(parents=True, exist_ok=True)
     ckpt_path = args.out_dir / "verdicts.json"
     verdicts = _load_ckpt(ckpt_path)          # {"<arm>:<iid>": {"resolved": bool, "cost": float}}
-    instances = load_verified(ids)
     runner = CG.modal_runner()
 
     print("=" * 78)
@@ -155,7 +156,13 @@ def main(argv: list[str] | None = None) -> int:
                 print(f"  [err ] {key}: {type(e).__name__}: {e}  "
                       f"(full traceback -> {errdir}/{arm}_{iid}.log)")
                 resolved = False
-            cost = max(0.0, _cost_of(iid) - before) or _cost_of(iid)
+            # Strictly the delta: forensics/{iid}.json is keyed per INSTANCE
+            # (not per arm) and overwritten by each attempt, so when this arm
+            # errors before spending, before == after and the honest charge is
+            # $0. The old `or _cost_of(iid)` fallback re-charged the OTHER
+            # arm's full cost on that falsy-zero path, double-counting toward
+            # --max-dollars. First-ever attempt still works: before is 0.0.
+            cost = max(0.0, _cost_of(iid) - before)
             verdicts[key] = {"resolved": resolved, "cost": round(cost, 4)}
             ckpt_path.write_text(json.dumps(verdicts, indent=2))
             print(f"  [done] {key} -> resolved={resolved}  ${cost:.2f}")

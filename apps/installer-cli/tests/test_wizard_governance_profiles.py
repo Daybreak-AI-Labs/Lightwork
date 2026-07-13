@@ -124,6 +124,7 @@ def test_governance_split_by_level():
 
 def test_pick_defaults_to_essentials(monkeypatch):
     from maverick_installer import wizard
+    monkeypatch.setattr(wizard, "_prior_governance_profile", lambda: None)
     monkeypatch.setattr(wizard, "_q_select",
                         lambda m, c, default=None: default)
     assert wizard.pick_governance_profile() == "essentials"
@@ -131,15 +132,38 @@ def test_pick_defaults_to_essentials(monkeypatch):
 
 def test_pick_unrecognised_answer_falls_back(monkeypatch):
     from maverick_installer import wizard
+    monkeypatch.setattr(wizard, "_prior_governance_profile", lambda: None)
     monkeypatch.setattr(wizard, "_q_select", lambda *a, **kw: "$5")
     assert wizard.pick_governance_profile() == "essentials"
 
 
 def test_pick_each_level_selectable(monkeypatch):
     from maverick_installer import wizard
-    for choice in wizard._GOVERNANCE_CHOICES:
+    monkeypatch.setattr(wizard, "_prior_governance_profile", lambda: None)
+    for choice in wizard.GOVERNANCE_CHOICES:
         monkeypatch.setattr(wizard, "_q_select", lambda *a, c=choice, **kw: c)
         assert wizard.pick_governance_profile() == choice.split()[0]
+
+
+def test_pick_defaults_to_prior_level_on_rerun(monkeypatch, tmp_path: Path):
+    """Re-running init must NOT silently downgrade a regulated install:
+    the picker defaults to the previously recorded level, and even an
+    unrecognised answer falls back to the prior, not to essentials."""
+    from maverick_installer import wizard
+    cfg = tmp_path / ".maverick" / "config.toml"
+    cfg.parent.mkdir(parents=True)
+    cfg.write_text('[governance]\nprofile = "regulated"\n')
+    monkeypatch.setattr(wizard, "CONFIG_FILE", cfg)
+    seen = {}
+    def fake_select(message, choices, default=None):
+        seen["default"] = default
+        return default
+    monkeypatch.setattr(wizard, "_q_select", fake_select)
+    assert wizard.pick_governance_profile() == "regulated"
+    assert seen["default"].split()[0] == "regulated"
+    # Unrecognised answer -> prior, never a silent downgrade to essentials.
+    monkeypatch.setattr(wizard, "_q_select", lambda *a, **kw: "$5")
+    assert wizard.pick_governance_profile() == "regulated"
 
 
 # ---------- consumer flow, end to end per level ----------
@@ -155,6 +179,8 @@ def test_consumer_default_is_essentials(monkeypatch, tmp_path: Path):
     assert config["self_learning"]["create_tools"] is False
     assert config["reflexion"]["enable"] is True
     assert config["dreaming"]["enable"] is True
+    # The promotion ladder the lifecycle rides is actually ON.
+    assert config["self_improvement"]["enable"] is True
     # ...without the governance ceremony.
     assert "audit" not in config
     assert "quotas" not in config
@@ -177,9 +203,9 @@ def test_consumer_standard_level(monkeypatch, tmp_path: Path):
     assert config["quotas"]["enforce"] is True
     assert config["quotas"]["max_dollars_per_day"] == 25.0
     assert config["retention"]["audit_days"] == 90
-    # Still no human-signature gate and no WORM at standard.
-    assert "self_improvement" not in config or not config[
-        "self_improvement"].get("require_signed_approval")
+    # Ladder on; still no human-signature gate and no WORM at standard.
+    assert config["self_improvement"]["enable"] is True
+    assert not config["self_improvement"].get("require_signed_approval")
     assert "worm" not in config.get("audit", {})
     # The lifecycle is identical to essentials.
     assert config["self_learning"]["enable"] is True
@@ -198,6 +224,7 @@ def test_consumer_regulated_level(monkeypatch, tmp_path: Path):
     assert config["audit"]["sign"] is True
     assert config["audit"]["worm"]["provider"] == "local"
     assert config["quotas"]["enforce"] is True
+    assert config["self_improvement"]["enable"] is True
     assert config["self_improvement"]["require_signed_approval"] is True
     assert config["retention"]["audit_days"] == 365
     # Learning still on -- regulated is a stricter wrapper, not a lobotomy.
@@ -221,5 +248,6 @@ def test_express_regulated_adds_governance(monkeypatch, tmp_path: Path):
     assert config["self_learning"]["enable"] is True
     # ...plus the regulated posture on top.
     assert config["quotas"]["enforce"] is True
+    assert config["self_improvement"]["enable"] is True
     assert config["self_improvement"]["require_signed_approval"] is True
     assert config["retention"]["audit_days"] == 365

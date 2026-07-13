@@ -130,11 +130,44 @@ def test_bridge_governance_level_applies(monkeypatch, tmp_path):
     assert config["self_learning"]["enable"] is True
 
 
-def test_bridge_governance_garbage_falls_back(monkeypatch, tmp_path):
-    """A UI that skips or garbles the step still writes a valid config."""
+def test_bridge_governance_blank_answer_takes_default(monkeypatch, tmp_path):
+    """A UI that SKIPS the step (blank answer) still writes a valid config."""
     _drive(monkeypatch, tmp_path, [
-        "", "Sam", "whatever", "sk-ant-x", str(tmp_path / "ws"), "$5",
+        "", "Sam", "", "sk-ant-x", str(tmp_path / "ws"), "$5",
     ])
     config = tomllib.loads((tmp_path / ".maverick" / "config.toml").read_text())
     assert config["governance"]["profile"] == "essentials"
     assert "audit" not in config
+
+
+def test_bridge_governance_garbage_fails_loudly(monkeypatch, tmp_path):
+    """A NON-blank answer naming no known level is a UI protocol bug and must
+    error, never silently downgrade a bank to the least-governed tier."""
+    import pytest
+    with pytest.raises(ValueError, match="unrecognized governance level"):
+        _drive(monkeypatch, tmp_path, [
+            "", "Sam", "whatever", "sk-ant-x", str(tmp_path / "ws"), "$5",
+        ])
+    # Nothing half-written.
+    assert not (tmp_path / ".maverick" / "config.toml").exists()
+
+
+def test_bridge_governance_substring_answer_resolves(monkeypatch, tmp_path):
+    """A UI echoing a reworded label still resolves if it names the level."""
+    _drive(monkeypatch, tmp_path, [
+        "", "Sam", "The Regulated option please", "sk-ant-x",
+        str(tmp_path / "ws"), "$5",
+    ])
+    config = tomllib.loads((tmp_path / ".maverick" / "config.toml").read_text())
+    assert config["governance"]["profile"] == "regulated"
+
+
+def test_bridge_governance_menu_is_the_wizard_menu(monkeypatch, tmp_path):
+    """Rule 6: the wizard is the UX source of truth -- the desktop menu must
+    be the SAME list object contents the CLI shows, so they cannot drift."""
+    from maverick_installer import wizard
+    sent = _drive(monkeypatch, tmp_path, [
+        "", "Sam", "essentials", "sk-ant-x", str(tmp_path / "ws"), "$5",
+    ])
+    gov = next(s for s in sent if s["id"] == "governance")
+    assert gov["choices"] == list(wizard.GOVERNANCE_CHOICES)

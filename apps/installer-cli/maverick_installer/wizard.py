@@ -24,6 +24,11 @@ import sys
 from pathlib import Path
 from typing import Any
 
+try:
+    import tomllib  # Python 3.11+
+except ModuleNotFoundError:  # pragma: no cover -- Py 3.10 CI matrix
+    import tomli as tomllib  # type: ignore[no-redef]
+
 from rich.console import Console
 from rich.panel import Panel
 
@@ -2794,7 +2799,7 @@ def _cfg_governance(profile: str | None) -> list[str]:
     # `maverick init` to switch levels.
     return [
         "[governance]",
-        f"profile = {_toml_str(str(profile))}   # essentials | standard | regulated",
+        f"profile = {_toml_str(str(profile))}   # essentials | standard | regulated | custom",
         "",
     ]
 
@@ -3138,6 +3143,14 @@ def _cfg_advanced(  # noqa: C901 - flat sequence of independent opt-in toggles
             or advanced.get("evaluator_evolution") or advanced.get("signed_approval")):
         lines.append("")
         lines.append("[self_improvement]")
+        if (advanced.get("causal_promotion") or advanced.get("evaluator_evolution")
+                or advanced.get("signed_approval")):
+            # Every sub-toggle below rides the promotion ladder, and the ladder
+            # is off by default (self_improvement.enabled()). Without this line
+            # evaluator_evolution / require_signed_approval are written but
+            # inert -- a config that CLAIMS governance it never runs. Opting
+            # out of factory_learning alone does not turn the ladder on.
+            lines.append("enable = true")
         if advanced.get("causal_promotion"):
             lines.append("# Promote learned changes on their confounder-adjusted causal")
             lines.append("# effect (maverick.promotion_effect), not a correlation. Applies")
@@ -4367,9 +4380,10 @@ GOVERNANCE_PROFILES: dict[str, dict[str, Any]] = {
 
 DEFAULT_GOVERNANCE_PROFILE = "essentials"
 
-# (menu string, profile name) -- menu strings start with the profile name so
-# the picker can split()[0] them, same convention as pick_mode().
-_GOVERNANCE_CHOICES: list[str] = [
+# Menu strings start with the profile name so the picker can split()[0] them,
+# same convention as pick_mode(). Public: the desktop sidecar (bridge.py)
+# imports these so the two front ends show the SAME menu and cannot drift.
+GOVERNANCE_CHOICES: list[str] = [
     "essentials - small business: learn + improve, stay out of my way "
     "(a gym, a studio, a shop)",
     "standard   - growing company: + budgets enforced, signed audit trail "
@@ -4379,12 +4393,32 @@ _GOVERNANCE_CHOICES: list[str] = [
 ]
 
 
+def _prior_governance_profile() -> str | None:
+    """The [governance] profile recorded by a previous `maverick init`, if any.
+
+    Same pattern as pick_deployment's prior-choice defaulting: a re-run of the
+    wizard must default to what the operator ALREADY chose. Without this, an
+    operator on a regulated install re-running init to change a name would
+    silently downgrade to essentials -- dropping audit signing, quotas, and
+    signed approvals -- by accepting the default. Reads CONFIG_FILE (the file
+    this wizard writes) rather than the kernel loader so it honors the same
+    path every other wizard read/write uses.
+    """
+    try:
+        cfg = tomllib.loads(CONFIG_FILE.read_text())
+        prior = (cfg.get("governance") or {}).get("profile", "")
+        return prior if prior in GOVERNANCE_PROFILES else None
+    except Exception:  # pragma: no cover -- absent/invalid config: no prior
+        return None
+
+
 def pick_governance_profile() -> str:
     """One onboarding question: how much governance does this business need?
 
-    Falls back to :data:`DEFAULT_GOVERNANCE_PROFILE` on anything it doesn't
-    recognise, so an <Enter> or a stubbed answer never lands outside the
-    three supported levels.
+    Defaults to the previously configured level on a re-run, else
+    :data:`DEFAULT_GOVERNANCE_PROFILE`; falls back to the default on anything
+    it doesn't recognise, so an <Enter> or a stubbed answer never lands
+    outside the three supported levels.
     """
     console.print()
     console.print(
@@ -4392,13 +4426,18 @@ def pick_governance_profile() -> str:
         "sets how much governance wraps it -- you can change it any time by "
         "re-running maverick init.[/dim]"
     )
+    prior = _prior_governance_profile()
+    default = next(
+        (c for c in GOVERNANCE_CHOICES if c.split()[0] == prior),
+        GOVERNANCE_CHOICES[0],
+    )
     pick = _q_select(
         "What kind of business is this for?",
-        list(_GOVERNANCE_CHOICES),
-        default=_GOVERNANCE_CHOICES[0],
+        list(GOVERNANCE_CHOICES),
+        default=default,
     )
     name = pick.split()[0]
-    return name if name in GOVERNANCE_PROFILES else DEFAULT_GOVERNANCE_PROFILE
+    return name if name in GOVERNANCE_PROFILES else (prior or DEFAULT_GOVERNANCE_PROFILE)
 
 
 def run_express() -> int:
@@ -4469,7 +4508,12 @@ def run_express() -> int:
             oauth={"vault": True},
             durable={"enabled": True},
             deployment="desktop",
-            retention=dict(preset["retention"]),
+            # Express historically wrote NO [retention] table, and absent
+            # means keep-forever (retention is opt-in pruning). Preserve that
+            # at the default level; only an explicitly-picked governance
+            # upgrade may introduce pruning windows.
+            retention=(dict(preset["retention"])
+                       if profile != DEFAULT_GOVERNANCE_PROFILE else None),
             governance_profile=profile,
         )
     except Exception as e:
@@ -4950,6 +4994,12 @@ def run(fast: bool = False, resume: bool = False) -> int:
         finance=finance if finance.get("enable") else None,
         suites=suites,
         license_cfg=license_cfg or None,
+        # The advanced flow applies no preset -- the operator hand-picked
+        # every knob -- so record "custom" rather than omitting the label
+        # (dashboards keyed on [governance].profile would otherwise read
+        # advanced-configured tenants, the most governance-sensitive ones,
+        # as tier-less) or borrowing a level name the knobs may not match.
+        governance_profile="custom",
     )
     _clear_partial()
     ok = smoke_test()

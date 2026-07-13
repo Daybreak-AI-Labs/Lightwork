@@ -18,8 +18,10 @@ type = "desktop"       # desktop | docker | vps | phone
 #               code/weights promotions, WORM audit export, long retention
 # A label for humans + dashboards: the wizard expands it into the concrete
 # knobs ([audit], [quotas], [self_improvement], [retention], ...) below, so
-# hand-edits keep working. Re-run `maverick init` to switch levels.
-profile = "essentials"   # essentials | standard | regulated
+# hand-edits keep working. Re-run `maverick init` to switch levels (the wizard
+# defaults to your previously recorded level). The advanced wizard writes
+# "custom": the operator hand-picked every knob, no preset applies.
+profile = "essentials"   # essentials | standard | regulated | custom
 
 [providers.anthropic]
 api_key = "${ANTHROPIC_API_KEY}"   # env var interpolation
