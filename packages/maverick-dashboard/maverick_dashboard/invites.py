@@ -192,6 +192,47 @@ def consume_invite(token: str, *, used_by: str | None = None) -> Invite | None:
     return None
 
 
+# ---- emailing the link ---------------------------------------------------------
+
+def invite_email_enabled() -> bool:
+    """Whether minting an invite should also email the link (default ON when a
+    sending account is configured; ``[dashboard] invite_email = false`` opts
+    out and returns the UI to copy-the-link-yourself)."""
+    try:
+        from maverick.config import load_config
+        v = ((load_config() or {}).get("dashboard") or {}).get("invite_email")
+        if v is not None:
+            return bool(v)
+    except Exception:  # pragma: no cover - config read never gates sending
+        pass
+    return True
+
+
+def send_invite_email(invite: Invite, link: str, *, invited_by: str) -> tuple[bool, str]:
+    """Best-effort: email the invite link to the invitee. Returns
+    ``(sent, reason)`` and NEVER raises — the minting flow stays fail-soft (the
+    admin always still gets the copyable link). ``reason`` is a short operator
+    hint when not sent ("no sending account configured", an SMTP error, …)."""
+    from maverick import mailer
+    if not invite_email_enabled():
+        return False, "invite emails disabled ([dashboard] invite_email = false)"
+    if not mailer.configured():
+        return False, "no sending account configured ([email] / EMAIL_USER)"
+    days = max(1, int((invite.expires_at - invite.created_at) / 86400))
+    body = (
+        f"You've been invited to a Lightwork dashboard as {invite.role} "
+        f"(invited by {invited_by}).\n\n"
+        f"Open this link to accept:\n\n    {link}\n\n"
+        f"The link works once and expires in {days} day{'s' if days != 1 else ''}. "
+        f"If you weren't expecting this invitation, ignore this email.\n"
+    )
+    try:
+        mailer.send(invite.email, "You're invited to Lightwork", body)
+    except mailer.MailerError as e:
+        return False, str(e)
+    return True, "sent"
+
+
 # ---- local (no-IdP) sessions ---------------------------------------------------
 
 def _session_secret_path() -> Path:

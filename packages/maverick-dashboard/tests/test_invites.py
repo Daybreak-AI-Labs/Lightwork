@@ -164,6 +164,62 @@ def test_mint_rejects_bad_input(client, monkeypatch):
     assert r.status_code == 400
 
 
+# ---------- emailing the link ----------
+
+def test_mint_emails_the_link_when_configured(client, monkeypatch):
+    monkeypatch.setenv("MAVERICK_DASHBOARD_INVITES", "1")
+    monkeypatch.setenv("EMAIL_USER", "sender@daybreak.example")
+    monkeypatch.setenv("EMAIL_APP_PASSWORD", "pw")  # pragma: allowlist secret
+    from maverick import mailer
+    sent = {}
+
+    def fake_send(to, subject, body, **kw):
+        sent.update(to=to, subject=subject, body=body)
+    monkeypatch.setattr(mailer, "send", fake_send)
+    r = client.post("/users/invite", data={"email": "new@corp.com",
+                                           "role": "viewer"})
+    assert r.status_code == 200
+    assert sent["to"] == "new@corp.com"
+    assert "/auth/invite/inv_" in sent["body"]        # the link rides the email
+    assert "viewer" in sent["body"]
+    assert "emailed to" in r.text                      # UI reflects the send
+
+
+def test_mint_falls_back_to_copy_link_on_smtp_failure(client, monkeypatch):
+    monkeypatch.setenv("MAVERICK_DASHBOARD_INVITES", "1")
+    monkeypatch.setenv("EMAIL_USER", "sender@daybreak.example")
+    monkeypatch.setenv("EMAIL_APP_PASSWORD", "pw")  # pragma: allowlist secret
+    from maverick import mailer
+
+    def fake_send(*a, **kw):
+        raise mailer.MailerError("smtp send failed: ConnectionRefusedError")
+    monkeypatch.setattr(mailer, "send", fake_send)
+    r = client.post("/users/invite", data={"email": "new@corp.com",
+                                           "role": "viewer"})
+    assert r.status_code == 200                        # fail-soft: still minted
+    assert "/auth/invite/inv_" in r.text               # copyable link still shown
+    assert "Emailing it failed" in r.text
+
+
+def test_mint_without_sender_keeps_copy_link_flow(client, monkeypatch):
+    monkeypatch.setenv("MAVERICK_DASHBOARD_INVITES", "1")
+    r = client.post("/users/invite", data={"email": "new@corp.com",
+                                           "role": "viewer"})
+    assert r.status_code == 200
+    assert "Copy this link" in r.text                  # unconfigured = old UX
+
+
+def test_invite_email_knob_opts_out(monkeypatch):
+    monkeypatch.setattr("maverick.config.load_config",
+                        lambda *a, **k: {"dashboard": {"invite_email": False}})
+    from maverick_dashboard import invites
+    inv = invites.Invite(id="i", email="a@b.co", role="viewer", created_by="me",
+                         created_at=0.0, expires_at=7 * 86400.0)
+    sent, note = invites.send_invite_email(inv, "https://x/auth/invite/t",
+                                           invited_by="me")
+    assert sent is False and "disabled" in note
+
+
 # ---------- require_auth integration ----------
 
 def test_invites_satisfy_require_auth_boot_guard(monkeypatch):

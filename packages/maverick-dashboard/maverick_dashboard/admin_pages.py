@@ -400,14 +400,18 @@ async def users_invite(request: Request, email: str = Form(...),
     from . import invites
     if not invites.invites_enabled():
         raise HTTPException(status_code=404, detail="invites are not enabled")
+    invited_by = auth.caller_principal(request) or "local-admin"
     try:
-        inv, token = invites.create_invite(
-            email, role, created_by=auth.caller_principal(request) or "local-admin")
+        inv, token = invites.create_invite(email, role, created_by=invited_by)
     except ValueError as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
     link = str(request.base_url).rstrip("/") + f"/auth/invite/{token}"
+    # Best-effort email (fail-soft): the copyable link below is always the
+    # fallback, so a broken SMTP account can never strand an invite.
+    sent, send_note = invites.send_invite_email(inv, link, invited_by=invited_by)
     return _app().templates.TemplateResponse(request, "users.html", {
         **_users_context(request), "invite_link": link, "invite_email": inv.email,
+        "invite_sent": sent, "invite_send_note": send_note,
     })
 
 

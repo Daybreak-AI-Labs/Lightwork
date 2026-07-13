@@ -95,10 +95,20 @@
     {% if invite_link %}
     <div class="panel" role="status"
          style="border-color: var(--brand-border); background: var(--brand-subtle); margin-bottom: var(--space-3);">
+      {% if invite_sent %}
+      <strong>Invitation emailed to <code>{{ invite_email }}</code>.</strong>
+      <p class="muted" style="margin: var(--space-2) 0 0; font-size: var(--text-sm);">The same link is
+        below in case you also want to share it directly — it works once and expires in 7 days.</p>
+      {% else %}
       <strong>Invitation for <code>{{ invite_email }}</code> created.</strong>
-      <p class="muted" style="margin: var(--space-2) 0 0; font-size: var(--text-sm);">Copy this link and
-        send it to them — it is shown only once, works once, and expires in 7 days. Anyone who opens it
-        can accept, so send it directly to the invitee.</p>
+      <p class="muted" style="margin: var(--space-2) 0 0; font-size: var(--text-sm);">
+        {% if invite_send_note and 'disabled' not in invite_send_note and 'no sending account' not in invite_send_note %}
+        Emailing it failed ({{ invite_send_note }}) — copy the link and send it yourself.
+        {% else %}
+        Copy this link and send it to them — it is shown only once, works once, and expires in 7 days.
+        Anyone who opens it can accept, so send it directly to the invitee.
+        {% endif %}</p>
+      {% endif %}
       <code style="display: block; margin-top: var(--space-2); word-break: break-all; user-select: all;">{{ invite_link }}</code>
     </div>
     {% endif %}
@@ -118,7 +128,9 @@
     </form>
     <p class="muted" style="margin-bottom: 0; font-size: var(--text-sm);">
       With company sign-in (SSO) on, the link asks them to sign in and then grants the role.
-      Without SSO, opening the link signs them in directly as <code>user:&lt;email&gt;</code>.</p>
+      Without SSO, opening the link signs them in directly as <code>user:&lt;email&gt;</code>.
+      When a sending account is configured (<code>[email]</code> / <code>EMAIL_USER</code>),
+      the link is emailed to them automatically.</p>
     {% if pending_invites %}
     <div style="margin-top: var(--space-3);">
       {% for inv in pending_invites %}

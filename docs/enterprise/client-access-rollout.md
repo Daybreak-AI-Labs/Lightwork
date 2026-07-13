@@ -94,9 +94,15 @@ provisioning. What was missing was ergonomics: an admin had to hand-type
   require_auth = true` turns the deployment fail-closed: only invite sessions
   (or SSO/token/proxy) get in.
 
-Not built yet, deliberately: SMTP sending (the admin sends the link
-themselves — no mail-server config on day one) and a self-serve "email me a
-new link" page (needs SMTP; re-invite covers it).
+**Lightwork sends the email itself** when a sending account is configured:
+the platform mailer (`maverick.mailer`, stdlib SMTP) reuses the same
+`[email]` / `EMAIL_USER` + `EMAIL_APP_PASSWORD` account the email tool and
+wizard already know, so there is exactly one sending identity to set up.
+Minting an invite then emails the link automatically (fail-soft: a broken
+SMTP account just falls back to the copyable link; `[dashboard]
+invite_email = false` opts out; `MAVERICK_EMAIL_DISABLE=1` is the global
+kill switch). Not built yet, deliberately: a self-serve "email me a new
+link" page (re-invite covers it).
 
 ## 4. The desktop question — "maybe it downloads as an app and that's how we do everything"
 
