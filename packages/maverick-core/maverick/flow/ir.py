@@ -42,6 +42,31 @@ NODE_KINDS = frozenset({
     NODE_SETVAR,
 })
 _WORK_KINDS = frozenset({NODE_ACTION, NODE_AGENT})
+_DEFAULT_MAX_NODE_RETRIES = 5
+_HARD_MAX_NODE_RETRIES = 50
+
+
+def max_node_retries() -> int:
+    """Operator-configured ceiling for per-node retries.
+
+    Bound the knob itself so a bad environment/config value cannot turn flow
+    retries into a worker/spend-amplification vector.
+    """
+    import os
+
+    raw = os.environ.get("MAVERICK_FLOW_MAX_NODE_RETRIES")
+    if raw is None:
+        try:
+            from ..config import get_flows
+            raw = get_flows().get("max_node_retries", _DEFAULT_MAX_NODE_RETRIES)
+        except Exception:  # pragma: no cover -- config lookup must not block validation
+            raw = _DEFAULT_MAX_NODE_RETRIES
+    try:
+        value = int(raw or 0)
+    except (TypeError, ValueError):
+        value = _DEFAULT_MAX_NODE_RETRIES
+    return min(_HARD_MAX_NODE_RETRIES, max(0, value))
+
 
 
 @dataclass
@@ -274,6 +299,7 @@ class Flow:
             if n.kind not in NODE_KINDS:
                 errs.append(f"node {n.id!r}: unknown kind {n.kind!r}")
             errs.extend(self._validate_routing(n))
+            errs.extend(self._validate_retry_budget(n))
             errs.extend(self._validate_kind(n))
         seen_input_keys = set()
         for i, spec in enumerate(self.inputs):
@@ -288,6 +314,14 @@ class Flow:
             if typ not in INPUT_TYPES:
                 errs.append(f"input {key!r}: unknown type {typ!r}")
         return errs
+
+    def _validate_retry_budget(self, n: FlowNode) -> list[str]:
+        max_retries = max_node_retries()
+        if n.retries < 0:
+            return [f"node {n.id!r}: retries must be >= 0"]
+        if n.retries > max_retries:
+            return [f"node {n.id!r}: retries {n.retries} exceeds max_node_retries {max_retries}"]
+        return []
 
     def _validate_routing(self, n: FlowNode) -> list[str]:
         errs = []

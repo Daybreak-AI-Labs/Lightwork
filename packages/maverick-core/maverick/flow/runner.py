@@ -38,6 +38,7 @@ from .ir import (
     NODE_WHILE,
     Flow,
     FlowNode,
+    max_node_retries,
 )
 
 # Run statuses ----------------------------------------------------------------
@@ -487,7 +488,8 @@ def _run_work(node: FlowNode, data: dict, ctx: _Ctx) -> str | None:
     result: Any = None
     outcome: float | None = None
     last_exc: Exception | None = None
-    for attempt in range(max(0, node.retries) + 1):
+    retries = min(max(0, node.retries), max_node_retries())
+    for attempt in range(retries + 1):
         if attempt and backoff:
             time.sleep(min(_MAX_RETRY_BACKOFF, backoff * (2 ** (attempt - 1))))
         try:
