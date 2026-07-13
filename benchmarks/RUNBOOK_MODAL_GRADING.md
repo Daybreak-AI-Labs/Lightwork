@@ -14,8 +14,9 @@ so the era-mismatch bug class **cannot recur** — the environment travels with 
 instance. Our governance (anti-cheat boundary, mis-seed guard, signed promotion)
 runs around it, unchanged.
 
-Backends: **Modal** (per-instance sandboxes, pay-per-second, no host to run) or
-**Docker** (a VM with a Docker daemon). Same code path.
+Backends: **Docker** (a VM with a Docker daemon) for untrusted patches, or
+**Modal** only when you explicitly acknowledge provider-default networking in an
+isolated trusted environment. Same grading code path.
 
 ## Step 0 — one-time setup (Modal)
 
@@ -36,9 +37,9 @@ resolve. Then grade the **baseline** (no patch) — it must NOT resolve.
 ```bash
 cd ~/Lightwork
 # gold patch must RESOLVE (proves image + grading are correct):
-python benchmarks/swebench_container_grade.py --instance astropy__astropy-12907 --backend modal --gold
+python benchmarks/swebench_container_grade.py --instance astropy__astropy-12907 --backend docker --gold
 # baseline must NOT resolve (proves the tests really fail without a fix):
-python benchmarks/swebench_container_grade.py --instance astropy__astropy-12907 --backend modal
+python benchmarks/swebench_container_grade.py --instance astropy__astropy-12907 --backend docker
 ```
 
 Expected (gold run):
@@ -46,7 +47,7 @@ Expected (gold run):
 ```
 instance: astropy__astropy-12907
 image:    swebench/sweb.eval.x86_64.astropy_1776_astropy-12907:latest
-grading:  GOLD patch (must resolve) via modal
+grading:  GOLD patch (must resolve) via docker
 ====================================================================
   candidate applied: True
   FAIL_TO_PASS: 2 pass / 0 fail
@@ -60,17 +61,20 @@ If the gold run prints `VALIDATION: PASS`, the environment problem is solved for
 real — every instance now grades in its own correct container. If it fails,
 **stop and send the output** before spending on any run.
 
-### Docker instead of Modal
+### Modal for trusted isolated validation only
 
-On a VM with Docker installed (`docker` daemon running), swap the backend — no
-other change:
+The Docker backend runs untrusted candidate code with `--network none` and
+additional hardening. The Modal API used here does not expose an equivalent
+per-sandbox no-egress switch, so Modal fails closed by default. If you are
+grading only trusted patches in an isolated Modal environment with no reachable
+secrets or internal services, opt in explicitly:
 
 ```bash
-python benchmarks/swebench_container_grade.py --instance astropy__astropy-12907 --backend docker --gold
+python benchmarks/swebench_container_grade.py --instance astropy__astropy-12907 --backend modal --gold --allow-network
 ```
 
-The official images are large (~1–2 GB each); Docker pulls on first use, Modal
-caches them remotely.
+The official images are large (~1–2 GB each); Docker pulls on first use, and
+Modal caches them remotely.
 
 ## Step 2 — plug into the governed run (the DGM / SWE-bench score)
 

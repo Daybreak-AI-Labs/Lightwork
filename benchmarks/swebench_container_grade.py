@@ -289,10 +289,30 @@ def governed_container_grade(instance: dict, candidate_patch: str, run_in_image,
 
 # --- container backends -------------------------------------------------------
 
-def modal_runner(*, cpu: float = 2.0, memory_mb: int = 4096, app_name: str = "maverick-swebench"):
+def modal_runner(*, cpu: float = 2.0, memory_mb: int = 4096,
+                 app_name: str = "maverick-swebench",
+                 allow_network: bool = False):
     """A ``run_in_image`` backed by Modal Sandboxes (per-instance, pay-per-use).
-    Needs ``pip install modal`` and ``modal token new`` once."""
+    Needs ``pip install modal`` and ``modal token new`` once.
+
+    Candidate patches are untrusted code. Modal does not expose a per-sandbox
+    no-egress switch here, so the safe default fails closed instead of silently
+    running with provider-default networking. Pass ``allow_network=True`` only
+    for trusted patches in an isolated Modal environment with no reachable
+    secrets or internal services.
+    """
     def run(image: str, script: str, timeout: float) -> RunOutput:
+        if not allow_network:
+            return RunOutput(
+                stdout="",
+                stderr=(
+                    "modal backend refused: no no-egress sandbox policy is "
+                    "available here. Use the docker backend for untrusted "
+                    "patches, or pass allow_network=True only in an isolated "
+                    "trusted environment."
+                ),
+                exit_code=2,
+            )
         import modal
         app = modal.App.lookup(app_name, create_if_missing=True)
         sb = modal.Sandbox.create(
@@ -314,11 +334,17 @@ def modal_runner(*, cpu: float = 2.0, memory_mb: int = 4096, app_name: str = "ma
 
 
 def docker_runner(*, cpus: float = 2.0, memory: str = "4g"):
-    """A ``run_in_image`` backed by a local Docker daemon (a VM with Docker)."""
+    """A ``run_in_image`` backed by a local Docker daemon (a VM with Docker).
+
+    Candidate patches execute during the official eval, so containers run with
+    no network plus a small set of Docker hardening flags.
+    """
     def run(image: str, script: str, timeout: float) -> RunOutput:
         try:
             p = subprocess.run(
-                ["docker", "run", "--rm", f"--cpus={cpus}", f"--memory={memory}",
+                ["docker", "run", "--rm", "--network", "none",
+                 "--cap-drop", "ALL", "--security-opt", "no-new-privileges",
+                 "--pids-limit", "512", f"--cpus={cpus}", f"--memory={memory}",
                  "--entrypoint", "bash", image, "-c", script],
                 capture_output=True, text=True, timeout=timeout)
             return RunOutput(stdout=p.stdout, exit_code=p.returncode, stderr=p.stderr)
@@ -354,11 +380,15 @@ def main(argv: list[str] | None = None) -> int:
                          "environment validation: proves the image + grading work")
     ap.add_argument("--namespace", default=DEFAULT_IMAGE_NAMESPACE)
     ap.add_argument("--timeout", type=float, default=1800.0)
+    ap.add_argument("--allow-network", action="store_true",
+                    help="Modal only: acknowledge provider-default networking. "
+                         "Do not use for untrusted patches.")
     args = ap.parse_args(argv)
 
     inst = _load_instance(args.instance)
     patch = inst["patch"] if args.gold else ""
-    runner = modal_runner() if args.backend == "modal" else docker_runner()
+    runner = (modal_runner(allow_network=args.allow_network)
+              if args.backend == "modal" else docker_runner())
     spec = make_spec(inst)
     print(f"instance: {args.instance}")
     print(f"image:    {instance_image(spec, namespace=args.namespace)}")
