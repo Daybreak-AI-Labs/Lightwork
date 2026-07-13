@@ -426,7 +426,7 @@ def _active_run_count(flow_id: str, exclude_run_id: str) -> int:
     don't count -- they're exactly what the slot guard gates -- else two queued
     events would each see the other and defer forever."""
     from maverick.flow import store
-    return sum(1 for r in store.list_runs(flow_id=flow_id, limit=200)
+    return sum(1 for r in store.list_runs(flow_id=flow_id, limit=None)
                if r.run_id != exclude_run_id and r.status in _ACTIVE_RUN_STATUSES)
 
 
