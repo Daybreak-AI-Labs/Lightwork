@@ -35,7 +35,8 @@ def test_env_credentials_configure_it(monkeypatch):
 def test_config_table_credentials_configure_it(monkeypatch):
     monkeypatch.setattr("maverick.config.load_config", lambda *a, **k: {
         "email": {"user": "sender@daybreak.example",
-                  "app_password": "pw", "smtp_host": "mail.example", "smtp_port": 587}})
+                  "app_password": "pw",  # pragma: allowlist secret
+                  "smtp_host": "mail.example", "smtp_port": 587}})
     assert mailer.configured() is True
     seen = {}
 
