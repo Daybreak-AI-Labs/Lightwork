@@ -560,11 +560,9 @@ def _auto_apply_proposals() -> None:
 
     * SOFTEN (action -> agent): a chronically-failing fixed step handed to an
       agent; the brief derives from the node.
-    * HARDEN (agent -> action): a reliably-succeeding agent node that has been
-      calling ONE tool over and over, hardened to call that tool directly -- but
-      ONLY when that tool was confidently inferred from captured runs
-      (``inferred_tool``). Without it, hardening still needs a human to pick the
-      tool, so it's left as a surfaced proposal.
+    * HARDEN (agent -> action): never auto-applied. Even when telemetry infers
+      a likely tool, that inference is model-influenced and must remain a
+      surfaced proposal for human review before it can persist a direct action.
 
     Skips a node that already has a pending apply (so it is measured -- and
     auto-reverted if it regresses -- before another change). Idempotent +
@@ -579,10 +577,8 @@ def _auto_apply_proposals() -> None:
             kwargs: dict = {}
             if prop.from_kind == NODE_ACTION:       # soften: derive the brief
                 kwargs["brief"] = (node.brief or node.label) if node else ""
-            elif prop.inferred_tool:                # harden: only with an inferred tool
-                kwargs["tool"] = prop.inferred_tool
             else:
-                continue                            # harden with no known tool -> human-gated
+                continue                            # harden stays human-gated, even with an inferred tool
             try:
                 changed = evolve.apply_proposal(f, prop.node_id, prop.to_kind, **kwargs)
             except (KeyError, ValueError):

@@ -47,10 +47,10 @@ def test_auto_apply_softens_a_failing_action_when_enabled(monkeypatch, tmp_path)
     assert evolution_log.last_apply("fa", "a")["source"] == "auto-apply"
 
 
-def test_auto_apply_hardens_a_reliable_one_tool_agent_when_tool_inferred(monkeypatch, tmp_path):
-    # The forward HARDEN arrow: a reliably-succeeding agent node that consistently
-    # called one tool is autonomously hardened to a deterministic action calling
-    # that tool -- no human needed once the tool was inferred from captured runs.
+def test_auto_apply_leaves_reliable_one_tool_agent_for_human_review(monkeypatch, tmp_path):
+    # HARDEN proposals are model-influenced because their tool comes from captured
+    # agent behavior, so auto-apply must leave them for human review even when a
+    # single tool was inferred confidently.
     _isolate(monkeypatch, tmp_path)
     monkeypatch.setenv("MAVERICK_FLOWS_AUTO", "1")
     monkeypatch.setattr("maverick.config.get_flows",
@@ -67,7 +67,7 @@ def test_auto_apply_hardens_a_reliable_one_tool_agent_when_tool_inferred(monkeyp
     monkeypatch.setattr(aq, "_queue", None)
     aq._handle_flow_evolve()
     hardened = store.load_flow("fh").nodes["a"]
-    assert hardened.kind == "action" and hardened.tool == "summarize_tool"
+    assert hardened.kind == "agent" and not hardened.tool
 
 
 def test_auto_apply_leaves_a_reliable_agent_alone_without_an_inferred_tool(monkeypatch, tmp_path):
