@@ -64,6 +64,22 @@ DEFAULT_BINARY = "codex"
 DEFAULT_SANDBOX_MODE = "read-only"
 DEFAULT_TIMEOUT_SECONDS = 600.0
 
+_ENV_ALLOWLIST = (
+    "HOME",
+    "LANG",
+    "LC_ALL",
+    "LC_CTYPE",
+    "PATH",
+    "TERM",
+    "TMPDIR",
+    "USER",
+    "USERNAME",
+    "XDG_CACHE_HOME",
+    "XDG_CONFIG_HOME",
+    "XDG_DATA_HOME",
+    "CODEX_HOME",
+)
+
 _SANDBOX_MODES = ("read-only", "workspace-write", "danger-full-access")
 
 # One fenced json block carrying the emulated tool call. Non-greedy body so
@@ -184,12 +200,27 @@ class CodexCLIClient:
                 [self.binary, "login", "--with-access-token"],
                 input=self._access_token,
                 capture_output=True, text=True, timeout=60,
+                env=self._subprocess_env(),
             )
             if proc.returncode != 0:
                 raise RuntimeError(
                     "codex login --with-access-token failed "
                     f"(exit {proc.returncode}): {self._scrub(proc.stderr)[-500:]}"
                 )
+
+    def _subprocess_env(self) -> dict[str, str]:
+        """Minimal environment for Codex subprocesses.
+
+        ``codex exec`` is an agent runtime, not a passive model API.  Never
+        pass Maverick's full process environment through to it: provider keys,
+        cloud credentials, and deployment secrets must remain outside the
+        provider subprocess even if a prompt injection convinces Codex to run
+        read-only commands such as ``env`` or ``printenv``.
+        """
+        env = {k: v for k, v in os.environ.items() if k in _ENV_ALLOWLIST}
+        if "PATH" not in env:
+            env["PATH"] = os.defpath
+        return env
 
     def _scrub(self, text: str) -> str:
         """Secret-scrub subprocess output; belt-and-braces drop of the exact
@@ -360,6 +391,7 @@ class CodexCLIClient:
                     capture_output=True, text=True,
                     timeout=self.timeout_seconds,
                     cwd=self.cwd or tmp,
+                    env=self._subprocess_env(),
                 )
             except FileNotFoundError as e:
                 raise RuntimeError(
