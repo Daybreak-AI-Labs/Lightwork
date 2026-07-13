@@ -155,7 +155,12 @@ class TestLaunchPrefix:
         shim = r"C:\Users\me\AppData\Roaming\npm\codex.cmd"
         client = self._client(monkeypatch, tmp_path, shim)
         assert client._launch_prefix() == [
-            r"C:\Windows\System32\cmd.exe", "/c", shim,
+            r"C:\Windows\System32\cmd.exe", "/d", "/s", "/c", f'"{shim}"',
+        ]
+        cmd = client._launch_cmd("exec", "--model", "gpt&calc", "-")
+        assert cmd == [
+            r"C:\Windows\System32\cmd.exe", "/d", "/s", "/c",
+            f'"{shim}" "exec" "--model" "gpt&calc" "-"',
         ]
 
     def test_windows_real_exe_launched_directly(self, monkeypatch, tmp_path):
@@ -173,7 +178,7 @@ class TestLaunchPrefix:
         monkeypatch.delenv("COMSPEC", raising=False)  # falls back to cmd.exe
         shim = r"C:\tools\codex.bat"
         client = self._client(monkeypatch, tmp_path, shim)
-        assert client._launch_prefix() == ["cmd.exe", "/c", shim]
+        assert client._launch_prefix() == ["cmd.exe", "/d", "/s", "/c", f'"{shim}"']
 
 
 class TestAuthGating:
