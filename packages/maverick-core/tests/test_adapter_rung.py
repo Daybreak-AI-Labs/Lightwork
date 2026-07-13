@@ -9,6 +9,15 @@ from maverick import adapter_rung as ar
 from maverick.self_harness_eval import corpus_split
 
 
+@pytest.fixture(autouse=True)
+def _reset_adapter_caches():
+    """The config/pointer memo caches are module-global; clear them around each
+    test so mtime-keyed entries never leak across the isolated per-test HOMEs."""
+    ar._reset_caches()
+    yield
+    ar._reset_caches()
+
+
 def _examples() -> list[ar.TrainExample]:
     return [
         ar.TrainExample("p1", "good", "bad", provenance="human_correction"),
@@ -237,14 +246,54 @@ def test_effective_model_spec_rewrites_only_matching_base(tmp_path, monkeypatch)
     assert ar.effective_model_spec("anthropic:some-base") == "anthropic:some-base"
 
 
-def test_parse_spec_integration_maps_promoted_adapter(tmp_path, monkeypatch):
+def test_parse_spec_stays_pure_even_with_active_adapter(tmp_path, monkeypatch):
+    # The rewrite lives in the PROVIDER client, not the parser: _parse_spec must
+    # return the base id byte-identically so allow-lists, pricing, and metrics
+    # key on the stable base (the code-review layering/cardinality findings).
     from maverick.llm import _parse_spec
     _enable_cfg(monkeypatch, tmp_path)
     store = ar.AdapterStore(root=tmp_path / "store")
     m = _manifest(tmp_path)
     store.activate(m, record_id="rec-a")
-    assert _parse_spec("ollama:some-base") == ("ollama", ar.tuned_model_name(m))
+    assert _parse_spec("ollama:some-base") == ("ollama", "some-base")
     assert _parse_spec("ollama:untouched") == ("ollama", "untouched")
+
+
+def test_ollama_client_resolves_adapter_at_wire_time(tmp_path, monkeypatch):
+    # The wire-level seam: OllamaClient._build_kwargs swaps base -> tuned name
+    # when (and only when) the rung is enabled with a matching active pointer.
+    pytest.importorskip("openai")  # OllamaClient rides the OpenAI-compatible client
+    from maverick.providers.ollama_provider import OllamaClient
+
+    _enable_cfg(monkeypatch, tmp_path)
+    store = ar.AdapterStore(root=tmp_path / "store")
+    m = _manifest(tmp_path)
+    store.activate(m, record_id="rec-a")
+    client = OllamaClient()
+    kw = client._build_kwargs("sys", [{"role": "user", "content": "hi"}],
+                              None, 64, "some-base")
+    assert kw["model"] == ar.tuned_model_name(m)
+    # Non-matching base and disabled rung both serve the base unchanged.
+    kw2 = client._build_kwargs("sys", [{"role": "user", "content": "hi"}],
+                               None, 64, "other-model")
+    assert kw2["model"] == "other-model"
+    _enable_cfg(monkeypatch, tmp_path, enable=False)
+    ar._reset_caches()
+    kw3 = client._build_kwargs("sys", [{"role": "user", "content": "hi"}],
+                               None, 64, "some-base")
+    assert kw3["model"] == "some-base"
+
+
+def test_effective_wire_model_matches_local_alias(tmp_path, monkeypatch):
+    # 'local' is a registry alias for ollama; a pointer recorded under either
+    # provider spelling must resolve for both.
+    _enable_cfg(monkeypatch, tmp_path)
+    store = ar.AdapterStore(root=tmp_path / "store")
+    m = _manifest(tmp_path)  # base_model recorded as "ollama:some-base"
+    store.activate(m, record_id="rec-a")
+    assert ar.effective_wire_model("local", "some-base") == ar.tuned_model_name(m)
+    assert ar.effective_wire_model("vllm", "some-base") == "some-base"
+    assert ar.effective_wire_model("anthropic", "some-base") == "some-base"
 
 
 # --- config defaults ---------------------------------------------------------------
@@ -390,3 +439,189 @@ def test_manifest_load_ignores_unknown_keys(tmp_path):
     raw["future_field"] = "x"
     path.write_text(json.dumps(raw), encoding="utf-8")
     assert ar.AdapterManifest.load(tmp_path / "a").adapter_id == m.adapter_id
+
+
+# --- hardening regressions (code-review findings) --------------------------------
+
+def test_payload_refuses_directory_symlink(tmp_path):
+    # A symlink to a DIRECTORY must be refused: Path.is_dir() follows the link,
+    # so an is_dir() check ahead of the symlink check would skip (not refuse) it,
+    # smuggling unreviewed content past the boundary and out of the digest.
+    outside = tmp_path / "external"
+    outside.mkdir()
+    (outside / "post_init.py").write_text("import os\n", encoding="utf-8")
+    d = tmp_path / "adapter"
+    d.mkdir()
+    (d / "adapter.safetensors").write_bytes(b"w")
+    (d / "sub").symlink_to(outside, target_is_directory=True)
+    review = ar.review_adapter_payload(d)
+    assert not review.ok and "symlink" in review.reason
+
+
+def test_payload_requires_a_weight_file(tmp_path):
+    # Metadata-only dir (no .safetensors/.gguf) is not an adapter, even though
+    # every file is individually allowed.
+    d = tmp_path / "adapter"
+    d.mkdir()
+    (d / "adapter_config.json").write_text("{}", encoding="utf-8")
+    (d / "README.md").write_text("card", encoding="utf-8")
+    review = ar.review_adapter_payload(d)
+    assert not review.ok and "no weight file" in review.reason
+    (d / "adapter_model.safetensors").write_bytes(b"w")
+    assert ar.review_adapter_payload(d).ok
+
+
+def test_payload_accepts_standard_hf_adapter_files(tmp_path):
+    # A realistic HF/PEFT export must clear hygiene: weights + config + tokenizer
+    # protobuf + model card + .gitattributes.
+    d = tmp_path / "adapter"
+    d.mkdir()
+    (d / "adapter_model.safetensors").write_bytes(b"w")
+    (d / "adapter_config.json").write_text("{}", encoding="utf-8")
+    (d / "tokenizer.model").write_bytes(b"\x0a\x00proto")  # sentencepiece protobuf
+    (d / "README.md").write_text("card", encoding="utf-8")
+    (d / ".gitattributes").write_text("*.safetensors filter=lfs\n", encoding="utf-8")
+    review = ar.review_adapter_payload(d)
+    assert review.ok, review.reason
+    # ...but a smuggled script alongside them is still refused.
+    (d / "run.py").write_text("import os\n", encoding="utf-8")
+    assert not ar.review_adapter_payload(d).ok
+
+
+def _fake_rlaif(monkeypatch, captured: dict):
+    """Install a fake maverick.training.rlaif.train that records its args and
+    writes a valid safetensors adapter, so the dpo-lora seam is exercised
+    without torch/peft/GPU."""
+    import types
+
+    def fake_train(pairs, base_model, out_dir, *, lora=False, **kw):
+        captured["pairs"] = pairs
+        captured["base_model"] = base_model
+        captured["lora"] = lora
+        Path(out_dir).mkdir(parents=True, exist_ok=True)
+        (Path(out_dir) / "adapter_model.safetensors").write_bytes(b"trained")
+        return 0
+
+    fake_mod = types.SimpleNamespace(train=fake_train)
+    import maverick.training as training_pkg
+    monkeypatch.setattr(training_pkg, "rlaif", fake_mod, raising=False)
+    monkeypatch.setitem(__import__("sys").modules, "maverick.training.rlaif", fake_mod)
+    return captured
+
+
+def test_dpo_lora_passes_dict_pairs_and_strips_prefix(tmp_path, monkeypatch):
+    captured: dict = {}
+    _fake_rlaif(monkeypatch, captured)
+    review = ar.screen_examples([
+        ar.TrainExample("prompt one", "good answer", "bad answer",
+                        provenance="human_correction"),
+        ar.TrainExample("prompt two", "great", "meh", provenance="tenant_trace"),
+    ])
+    manifest = ar.get_trainer("dpo-lora").train(review, "ollama:some-base", tmp_path / "a")
+    # pairs are dicts with the keys rlaif requires, NOT tuples.
+    assert isinstance(captured["pairs"], list) and captured["pairs"]
+    for row in captured["pairs"]:
+        assert set(row) >= {"chosen_text", "rejected_text", "weight"}
+        assert isinstance(row["chosen_text"], str)
+    # the ollama: serving prefix is stripped before it reaches from_pretrained.
+    assert captured["base_model"] == "some-base"
+    assert captured["lora"] is True
+    # a real, hygiene-clean, digest-bound manifest is produced.
+    assert manifest.trainer == "dpo-lora"
+    assert ar.review_adapter_payload(tmp_path / "a").ok
+    assert manifest.payload_sha256 == ar.payload_digest_dir(tmp_path / "a")
+
+
+def test_dpo_lora_requires_preference_pairs(tmp_path, monkeypatch):
+    captured: dict = {}
+    _fake_rlaif(monkeypatch, captured)
+    review = ar.screen_examples([
+        ar.TrainExample("p", "just a completion", "", provenance="human_example")])
+    with pytest.raises(RuntimeError, match="preference pairs"):
+        ar.get_trainer("dpo-lora").train(review, "ollama:some-base", tmp_path / "a")
+    assert "pairs" not in captured  # never reached rlaif
+
+
+def test_govern_threads_configured_min_improvement(tmp_path, monkeypatch):
+    # A small held-out uplift below the configured floor must be refused when
+    # govern builds its own controller (no explicit controller passed).
+    import maverick.config as config
+    monkeypatch.setattr(config, "get_self_improvement",
+                        lambda: {"min_improvement": 0.5})
+    keydir = _keys(tmp_path)
+    _manifest(tmp_path)
+
+    def small_uplift(ref, ids):
+        # base resolves ~half; adapter adds only the first held-out case (< 0.5).
+        if "+adapter:" in ref:
+            return {c: (_base_pass(c) or c == ids[0]) for c in ids}
+        return {c: _base_pass(c) for c in ids}
+
+    res = ar.govern_adapter_change(tmp_path / "a", _cases(),
+                                   score_fn=small_uplift, keys_dir=keydir,
+                                   store=ar.AdapterStore(root=tmp_path / "store"))
+    assert not res.promoted
+    assert "min" in res.reason.lower() or "gate refused" in res.reason.lower()
+
+
+def test_govern_refuses_empty_base_model_id(tmp_path):
+    keydir = _keys(tmp_path)
+    review = ar.screen_examples(_examples())
+    ar.get_trainer("stub").train(review, "ollama:", tmp_path / "a")  # blank model id
+    res = ar.govern_adapter_change(tmp_path / "a", _cases(),
+                                   score_fn=_genuine_scorer, keys_dir=keydir,
+                                   store=ar.AdapterStore(root=tmp_path / "store"))
+    assert not res.promoted and "no model id" in res.reason
+
+
+def test_effective_model_spec_skips_non_ollama_base(tmp_path, monkeypatch):
+    # A vLLM/TGI base must never be rewritten to the ollama: provider.
+    _enable_cfg(monkeypatch, tmp_path, base_model="vllm:Qwen3-Coder")
+    store = ar.AdapterStore(root=tmp_path / "store")
+    review = ar.screen_examples(_examples())
+    m = ar.get_trainer("stub").train(review, "vllm:Qwen3-Coder", tmp_path / "a")
+    store.activate(m, record_id="rec-a")
+    assert ar.effective_model_spec("vllm:Qwen3-Coder") == "vllm:Qwen3-Coder"
+
+
+def test_emit_serving_artifacts_notes_non_ollama_base(tmp_path):
+    review = ar.screen_examples(_examples())
+    m = ar.get_trainer("stub").train(review, "vllm:Qwen3-Coder", tmp_path / "a")
+    serving = ar.emit_serving_artifacts(m, tmp_path / "a")
+    assert serving["create_command"] is None and "manually" in serving["note"]
+    assert not (tmp_path / "a" / ar.SERVING_BASENAME).exists()
+
+
+def test_effective_model_spec_disabled_does_not_read_config_tree(tmp_path, monkeypatch):
+    # The disabled default path must not pay a full get_adapter_rung() per call.
+    import maverick.config as config
+    calls = {"n": 0}
+
+    def counting():
+        calls["n"] += 1
+        return {"enable": False}
+
+    monkeypatch.setattr(config, "get_adapter_rung", counting)
+    ar._reset_caches()
+    for _ in range(5):
+        assert ar.effective_model_spec("ollama:base") == "ollama:base"
+    # memoized by config stat signature -> at most one real read, not five.
+    assert calls["n"] <= 1
+
+
+def test_atomic_write_json_delegates_to_shared_helper(tmp_path, monkeypatch):
+    # Regression: _atomic_write_json routes through file_lock.atomic_write_text
+    # (unique mkstemp temp name), not a PID-keyed temp that collides.
+    import maverick.file_lock as fl
+    seen = {}
+    real = fl.atomic_write_text
+
+    def spy(path, text, *, mode=0o600):
+        seen["mode"] = mode
+        return real(path, text, mode=mode)
+
+    monkeypatch.setattr(fl, "atomic_write_text", spy)
+    ar._atomic_write_json(tmp_path / "p.json", {"a": 1})
+    assert seen.get("mode") == 0o600
+    assert json.loads((tmp_path / "p.json").read_text()) == {"a": 1}
+    assert (tmp_path / "p.json").stat().st_mode & 0o777 == 0o600

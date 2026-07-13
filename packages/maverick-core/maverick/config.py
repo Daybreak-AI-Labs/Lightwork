@@ -1282,7 +1282,14 @@ def get_adapter_rung() -> dict:
     adapters on tenant-provenance data and promotes them through the existing
     ``weights`` rung (evidence + non-escalation + Ed25519 approval + rollback,
     maverick.adapter_rung). ``base_model`` is an operator-chosen local spec
-    (e.g. ``ollama:<model-id>``; never hard-coded). ``allow_model_output`` opts
+    (e.g. ``ollama:<model-id>``; never hard-coded). Auto-serving of a promoted
+    adapter is wired for the ``ollama``/``local`` providers (via the Ollama
+    Modelfile ``ADAPTER`` directive); other providers promote and ledger
+    normally but are served by operator wiring. For the ``dpo-lora`` trainer the
+    provider prefix is stripped and the remaining id must resolve for
+    ``transformers.from_pretrained`` (an HF id or local path) -- the Ollama
+    serving tag and the HF training id are not always the same string, so pick a
+    ``base_model`` valid for both, or a local path. ``allow_model_output`` opts
     in to training on frontier-model completions -- refused by default (the
     distillation-ToS guard); ``allow_synthetic`` likewise for generated data.
     ``trainer`` is ``stub`` (deterministic, proof/test path) or ``dpo-lora``
