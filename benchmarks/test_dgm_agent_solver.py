@@ -62,3 +62,45 @@ def test_solve_restores_env_knobs(monkeypatch):
     m.solve(object())                        # keyless: returns early, no leak
     import os
     assert os.environ.get("MAVERICK_MAX_STEPS") == "sentinel"
+
+
+def test_agent_solver_refuses_default_local_sandbox(monkeypatch):
+    m = _load()
+    monkeypatch.setenv("MAVERICK_PROVIDER_READY", "1")
+    monkeypatch.delenv("MAVERICK_SWEBENCH_ALLOW_HOST_EXEC", raising=False)
+    monkeypatch.delenv("MAVERICK_CONFIG", raising=False)
+    monkeypatch.delenv("MAVERICK_CONFIG_OVERLAY", raising=False)
+    assert m.solve(object()) == ""
+
+
+def test_bench_sandbox_gate_requires_isolation_or_explicit_host_opt_in(monkeypatch, tmp_path):
+    sys.path.insert(0, str(_ROOT / "benchmarks"))
+    import swebench_governed
+
+    home = tmp_path / "home"
+    home.mkdir()
+    monkeypatch.setenv("HOME", str(home))
+    monkeypatch.delenv("MAVERICK_CONFIG", raising=False)
+    monkeypatch.delenv("MAVERICK_CONFIG_OVERLAY", raising=False)
+    monkeypatch.delenv("MAVERICK_SWEBENCH_ALLOW_HOST_EXEC", raising=False)
+
+    from maverick.config import reset_config_cache
+
+    reset_config_cache()
+    try:
+        swebench_governed._ensure_untrusted_agent_sandbox()
+    except RuntimeError as exc:
+        assert "sandbox backend 'local'" in str(exc)
+    else:
+        raise AssertionError("local sandbox should be rejected for untrusted benchmarks")
+
+    cfg_dir = home / ".maverick"
+    cfg_dir.mkdir()
+    (cfg_dir / "config.toml").write_text('[sandbox]\nbackend = "docker"\n', encoding="utf-8")
+    reset_config_cache()
+    swebench_governed._ensure_untrusted_agent_sandbox()
+
+    (cfg_dir / "config.toml").write_text('[sandbox]\nbackend = "local"\n', encoding="utf-8")
+    monkeypatch.setenv("MAVERICK_SWEBENCH_ALLOW_HOST_EXEC", "1")
+    reset_config_cache()
+    swebench_governed._ensure_untrusted_agent_sandbox()
