@@ -47,6 +47,7 @@ from maverick.oidc import VerifiedPrincipal
 from starlette.concurrency import run_in_threadpool
 from starlette.exceptions import HTTPException as StarletteHTTPException
 
+from . import auth_metrics as _auth_metrics
 from ._shared import (
     _any_provider_key_set,
     _get_sse_semaphore,
@@ -854,6 +855,7 @@ async def bearer_auth(request: Request, call_next):
                     return await call_next(request)
             except Exception:  # pragma: no cover - fall through to fail closed
                 pass
+            _auth_metrics.record_auth_failure("require_auth_no_mechanism")
             return JSONResponse(
                 {"detail": "dashboard require_auth is set but no auth mechanism accepted the request"},
                 status_code=401,
@@ -866,6 +868,7 @@ async def bearer_auth(request: Request, call_next):
         try:
             from maverick.client import client_binding_enforced
             if client_binding_enforced():
+                _auth_metrics.record_auth_failure("client_binding")
                 return JSONResponse(
                     {"detail": "Sign-in is required on this deployment — an "
                                "administrator must configure dashboard "
@@ -923,6 +926,7 @@ async def bearer_auth(request: Request, call_next):
                 return await call_next(request)
         except Exception:  # pragma: no cover - invites must never open access
             pass
+        _auth_metrics.record_auth_failure("remote_no_token")
         return JSONResponse(
             {"detail": "Remote access to this dashboard requires an access "
                        "token — an administrator must configure one for "
@@ -938,6 +942,9 @@ async def bearer_auth(request: Request, call_next):
     # ``Authorization: Bearer`` header.
     if header_token and hmac.compare_digest(header_token.encode(), expected.encode()):
         return await call_next(request)
+    # The bad/missing-bearer case — the credential-stuffing signal an alert
+    # rule watches (a flood here means someone is probing the token).
+    _auth_metrics.record_auth_failure("bad_token")
     return JSONResponse({"detail": "unauthorized"}, status_code=401)
 
 
@@ -5348,6 +5355,20 @@ async def metrics(request: Request) -> PlainTextResponse:
         "# TYPE maverick_max_concurrent_goals gauge",
         f"maverick_max_concurrent_goals {MAX_CONCURRENT_GOALS}",
     ]
+
+    # Auth failures by reason — a bad-token / credential-stuffing flood is
+    # otherwise invisible (each attempt only returned a 401). Always emit the
+    # counter (even at 0) so an alert rule has a series to watch from boot.
+    lines += [
+        "# HELP maverick_auth_failures_total Rejected dashboard/SCIM auth attempts by reason",
+        "# TYPE maverick_auth_failures_total counter",
+    ]
+    auth_failures = _auth_metrics.auth_failure_counts()
+    if not auth_failures:
+        lines.append('maverick_auth_failures_total{reason="none"} 0')
+    for reason, n in sorted(auth_failures.items()):
+        safe = reason.replace("\\", "\\\\").replace('"', '\\"').replace("\n", " ")
+        lines.append(f'maverick_auth_failures_total{{reason="{safe}"}} {n}')
 
     # Job-queue depth + dead-letter — a growing pending backlog or rising failed
     # (dead-letter) count is the leading ops signal the goal counts can't show
