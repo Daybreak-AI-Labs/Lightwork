@@ -268,6 +268,20 @@ def test_evolve_pass_reverts_a_regression_when_enabled(monkeypatch, tmp_path):
     assert evolution_log.last_apply("f", "a")["source"] == "auto-revert"
 
 
+def test_evolve_pass_skips_stale_apply_after_manual_save(monkeypatch, tmp_path):
+    _isolate(monkeypatch, tmp_path)
+    monkeypatch.setenv("MAVERICK_FLOWS_AUTO", "1")
+    from maverick.flow import evolve, store
+    from maverick_dashboard import automation_queue as aq
+    _build_regressed_scenario()
+    edited = evolve.apply_proposal(store.load_flow("f"), "a", "action", tool="safe_tool")
+    store.save_flow(edited)
+    aq._handle_flow_evolve()
+    node = store.load_flow("f").nodes["a"]
+    assert node.kind == "action"
+    assert node.tool == "safe_tool"
+
+
 def test_evolve_pass_is_a_noop_when_disabled(monkeypatch, tmp_path):
     _isolate(monkeypatch, tmp_path)
     monkeypatch.delenv("MAVERICK_FLOWS_AUTO", raising=False)
