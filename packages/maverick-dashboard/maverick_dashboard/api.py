@@ -28,7 +28,7 @@ from maverick.runner import (
     DEFAULT_MAX_WALL_SECONDS,
 )
 from starlette.concurrency import run_in_threadpool
-from starlette.responses import JSONResponse, StreamingResponse
+from starlette.responses import FileResponse, JSONResponse, StreamingResponse
 
 from ._shared import (
     _any_provider_key_set,
@@ -817,10 +817,9 @@ async def download_goal_attachment(
             raise HTTPException(
                 status_code=410, detail="attachment bytes not on this host")
         path = fetched
-    data = await run_in_threadpool(path.read_bytes)
     safe_name = match.filename.replace('"', "_")
-    return Response(
-        content=data,
+    return FileResponse(
+        path,
         media_type=match.mime or "application/octet-stream",
         headers={
             "Content-Disposition": f'attachment; filename="{safe_name}"',
