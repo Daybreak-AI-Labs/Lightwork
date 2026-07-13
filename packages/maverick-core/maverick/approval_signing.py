@@ -197,11 +197,12 @@ def _keys_from_env() -> list[str]:
 
 
 def _keys_from_dir(dir_path: str | None) -> list[str]:
-    """Load raw 32-byte Ed25519 public keys from ``*.pub`` files in a directory,
-    returned as hex. Matches the audit key-dir format (raw ``pub_bytes``, see
-    :mod:`maverick.audit.signing`), so a KMS/secrets-manager or the audit
-    signing key dir can populate the approver set. Non-32-byte files are
-    skipped."""
+    """Load Ed25519 public keys from ``*.pub`` files in a directory, returned as
+    hex.
+
+    Accepts the raw 32-byte audit key-dir format (``pub_bytes``, see
+    :mod:`maverick.audit.signing`) and the legacy 64-character hex text format
+    used by earlier approver-key deployments. Non-key files are skipped."""
     if not dir_path:
         return []
     try:
@@ -216,6 +217,13 @@ def _keys_from_dir(dir_path: str | None) -> list[str]:
             continue
         if len(raw) == 32:
             out.append(raw.hex())
+            continue
+        try:
+            decoded = bytes.fromhex(raw.decode("ascii").strip())
+        except (UnicodeDecodeError, ValueError):
+            continue
+        if len(decoded) == 32:
+            out.append(decoded.hex())
     return out
 
 
