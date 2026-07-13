@@ -482,6 +482,15 @@ def _parse_spec(spec: str) -> tuple[str, str]:
     lookup in ``_provider_api_key``, which would otherwise miss the key and
     fail auth at call time.
     """
+    # A PROMOTED tenant adapter rewrites its base spec to the tuned local model
+    # ([adapter_rung] -> maverick.adapter_rung.effective_model_spec). Fail-open
+    # and off-by-default: disabled config, no active pointer, or any error
+    # leaves the spec byte-for-byte unchanged, so the legacy path is intact.
+    try:
+        from .adapter_rung import effective_model_spec
+        spec = effective_model_spec(spec)
+    except Exception:  # pragma: no cover -- serving never depends on the rung
+        pass
     if ":" in spec:
         provider, model_id = spec.split(":", 1)
     else:
