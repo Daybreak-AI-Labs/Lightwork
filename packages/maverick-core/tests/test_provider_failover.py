@@ -173,3 +173,92 @@ def test_llm_failover_does_not_retry_budget_exceeded_async(monkeypatch):
             "sys", [{"role": "user", "content": "hi"}], budget=Budget(max_dollars=100.0),
         ))
     assert calls == ["anthropic"]
+
+
+# ---- circuit-breaker enforcement (finding #9) -------------------------------
+
+def test_open_breaker_short_circuits_dispatch_and_fails_over(monkeypatch):
+    """An OPEN provider breaker must fast-fail BEFORE the client is called and
+    let the failover chain reach the next model."""
+    from maverick import circuit_breaker as cb
+
+    cb.reset_all()
+    # Trip the primary provider's breaker OPEN (threshold=1, long cooldown so it
+    # can't tick back to HALF_OPEN mid-test).
+    br = cb.get("llm:anthropic", failure_threshold=1, cooldown_seconds=999)
+    br.record_failure()
+    assert br.state is cb.CircuitState.OPEN
+
+    monkeypatch.setattr(pf, "fallback_models", lambda primary: ["openai:m2"])
+    monkeypatch.setattr("maverick.llm._run_preflight", lambda *a, **k: None)
+    calls = []
+
+    class _Client:
+        def __init__(self, provider):
+            self.provider = provider
+
+        def complete(self, **kwargs):
+            calls.append(self.provider)
+            return f"ok:{self.provider}"
+
+    monkeypatch.setattr(LLM, "_get_client", lambda self, provider: _Client(provider))
+    try:
+        out = LLM(model="anthropic:m1").complete(
+            "sys", [{"role": "user", "content": "hi"}])
+        # anthropic's client was NEVER invoked (breaker OPEN); failover reached
+        # openai, whose breaker is CLOSED.
+        assert calls == ["openai"]
+        assert out == "ok:openai"
+    finally:
+        cb.reset_all()
+
+
+def test_open_breaker_fast_fails_when_no_chain(monkeypatch):
+    """No failover chain: an OPEN breaker surfaces CircuitOpen instead of
+    dispatching (fast-fail rather than a dead-provider timeout)."""
+    from maverick import circuit_breaker as cb
+
+    cb.reset_all()
+    cb.get("llm:anthropic", failure_threshold=1, cooldown_seconds=999).record_failure()
+
+    monkeypatch.setattr(pf, "fallback_models", lambda primary: [])
+    monkeypatch.setattr("maverick.llm._run_preflight", lambda *a, **k: None)
+
+    def _boom_client(*a, **k):
+        raise AssertionError("client must not be called while breaker is OPEN")
+
+    monkeypatch.setattr(
+        LLM, "_get_client",
+        lambda self, provider: type("C", (), {"complete": _boom_client})())
+    try:
+        with pytest.raises(cb.CircuitOpen):
+            LLM(model="anthropic:m1").complete(
+                "sys", [{"role": "user", "content": "hi"}])
+    finally:
+        cb.reset_all()
+
+
+def test_breaker_internal_error_does_not_block_healthy_call(monkeypatch):
+    """CRITICAL fail-safe: if the breaker object itself errors, the call must
+    proceed -- breaker bookkeeping never blocks an otherwise healthy call."""
+    from maverick import circuit_breaker as cb
+
+    def _explode(*a, **k):
+        raise RuntimeError("breaker registry exploded")
+
+    # Break the breaker lookup used by BOTH the enforcer and the recorder.
+    monkeypatch.setattr(cb, "get", _explode)
+    monkeypatch.setattr(pf, "fallback_models", lambda primary: [])
+    monkeypatch.setattr("maverick.llm._run_preflight", lambda *a, **k: None)
+    calls = []
+
+    class _Client:
+        def complete(self, **kwargs):
+            calls.append("dispatched")
+            return "healthy"
+
+    monkeypatch.setattr(LLM, "_get_client", lambda self, provider: _Client())
+    out = LLM(model="anthropic:m1").complete(
+        "sys", [{"role": "user", "content": "hi"}])
+    assert out == "healthy"
+    assert calls == ["dispatched"]  # breaker error failed OPEN -> call proceeded

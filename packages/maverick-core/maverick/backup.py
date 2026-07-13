@@ -278,18 +278,40 @@ def restore_backup(tarball: str | Path, *, force: bool = False) -> Path:
         for src in staged_files:
             dst = root / src.relative_to(staged)
             dst.parent.mkdir(parents=True, exist_ok=True)
-            # Backups deliberately exclude SQLite sidecars (_SKIP_SUFFIXES): the
-            # consistent .db copy already folds in their content. But the LIVE
-            # root may still carry a stale/uncheckpointed world.db-wal (precisely
-            # the post-crash DR case) that SQLite would replay over the freshly
-            # restored bytes on next open — silently reverting the restore. Drop
-            # any pre-existing sidecars for each restored DB before writing it so
-            # nothing survives to be replayed against the restored content.
-            if dst.suffix == ".db":
-                for suffix in ("-wal", "-shm", "-journal"):
-                    Path(str(dst) + suffix).unlink(missing_ok=True)
-            dst.write_bytes(src.read_bytes())
-            os.chmod(dst, 0o600)
+            # Crash-consistent restore, mirroring create_backup's publish: write
+            # each file to a temp sibling, fsync the bytes, then os.replace it
+            # atomically into the live path. The prior straight dst.write_bytes()
+            # left a torn, unopenable file if the box lost power mid-write --
+            # exactly the DR artifact you reach for after a crash.
+            tmp = dst.with_name(dst.name + ".part")
+            try:
+                tmp.write_bytes(src.read_bytes())
+                os.chmod(tmp, 0o600)
+                # Windows only permits fsync() on a writable descriptor; "rb+" is
+                # writable on POSIX too (unlike "rb", which raises there).
+                with open(tmp, "rb+") as _f:
+                    os.fsync(_f.fileno())
+                # Backups deliberately exclude SQLite sidecars (_SKIP_SUFFIXES):
+                # the consistent .db copy already folds in their content. But the
+                # LIVE root may still carry a stale/uncheckpointed world.db-wal
+                # (the post-crash DR case) that SQLite would replay over the
+                # restored bytes on next open -- silently reverting the restore.
+                # Drop the pre-existing sidecars AFTER the new .db is durable in
+                # the temp but BEFORE it lands: os.replace then swaps in a .db
+                # with no accompanying stale sidecar, so no crash instant ever
+                # pairs the new .db with the old WAL (hence the unlink precedes,
+                # not follows, the replace).
+                if dst.suffix == ".db":
+                    for suffix in ("-wal", "-shm", "-journal"):
+                        Path(str(dst) + suffix).unlink(missing_ok=True)
+                os.replace(tmp, dst)
+            except BaseException:
+                try:
+                    if tmp.exists():
+                        tmp.unlink()
+                except OSError:
+                    pass
+                raise
     log.info("restore complete into %s (from client=%s, %d files verified)",
              root, backup_cid, len(staged_files))
     return root

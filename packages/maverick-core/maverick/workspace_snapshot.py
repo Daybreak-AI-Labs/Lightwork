@@ -179,8 +179,13 @@ def restore_snapshot(store: Path, snap_id: str, dest: Path) -> dict:
     dest.mkdir(parents=True, exist_ok=True)
     restored = 0
     skipped_links = 0
+    members_seen: set[str] = set()
     with tarfile.open(archive, "r:gz") as tar:
         for member in tar.getmembers():
+            # Record EVERY member's normalised path (files, dirs, even skipped
+            # links) so the reconciliation pass below only deletes destination
+            # entries the snapshot never contained.
+            members_seen.add(os.path.normpath(member.name))
             if member.issym() or member.islnk():
                 # Refuse links — a symlink member could later redirect a write
                 # outside dest even though the link file itself is "within".
@@ -219,8 +224,45 @@ def restore_snapshot(store: Path, snap_id: str, dest: Path) -> dict:
         log.warning(
             "restore_snapshot: skipped %d link member(s) not recreated in %s",
             skipped_links, dest)
+    # Reconcile the destination against the snapshot: delete files (and
+    # now-empty dirs) present in dest but ABSENT from the archive. Extraction
+    # alone only overwrites/creates members, so reverting an ADDITIVE change (a
+    # file the patch created) would otherwise leave the added file behind while
+    # revert reports success -- the rollback silently no-ops the add. Confined
+    # by the SAME guards as extraction: never delete outside dest, never through
+    # a symlink that escapes it. os.walk does not descend into symlinked dirs
+    # (followlinks defaults off) so the walk itself cannot leave the snapshot
+    # root; symlink entries are left untouched (never followed, never removed).
+    removed = 0
+    for cur, dirnames, filenames in os.walk(dest, topdown=False):
+        base = Path(cur)
+        for name in filenames:
+            fpath = base / name
+            if fpath.is_symlink():
+                continue
+            rel = os.path.normpath(os.path.relpath(fpath, dest))
+            if rel in members_seen:
+                continue
+            if not _is_within(dest, fpath) or not _resolved_within(dest, fpath):
+                continue  # would escape dest -- refuse to delete
+            fpath.unlink()
+            removed += 1
+        for name in dirnames:
+            dpath = base / name
+            if dpath.is_symlink():
+                continue  # a symlinked dir was never recursed into
+            rel = os.path.normpath(os.path.relpath(dpath, dest))
+            if rel in members_seen:
+                continue
+            if not _is_within(dest, dpath) or not _resolved_within(dest, dpath):
+                continue
+            try:
+                dpath.rmdir()  # succeeds only if already empty
+                removed += 1
+            except OSError:
+                pass  # still holds a kept file -- leave it in place
     return {"id": f"snap-{archive.name[5:9]}", "restored": restored,
-            "skipped_links": skipped_links, "dest": str(dest)}
+            "skipped_links": skipped_links, "removed": removed, "dest": str(dest)}
 
 
 # --- tool surface ----------------------------------------------------------
