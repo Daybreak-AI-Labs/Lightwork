@@ -386,7 +386,7 @@ async def saml_acs(request: Request):
     # attribute. Mirrors the OIDC callback's record_login.
     _record_session_subject(identity)
     # Reuse the OIDC login cookie hardening so SAML/OIDC sessions are identical.
-    from .oidc_login import SESSION_COOKIE, _is_loopback_request, _set_cookie
+    from .oidc_login import SESSION_COOKIE, _cookie_secure, _set_cookie
 
     response = RedirectResponse(relay, status_code=303)
     _set_cookie(
@@ -394,7 +394,7 @@ async def saml_acs(request: Request):
         SESSION_COOKIE,
         cookie,
         max_age=_SESSION_TTL,
-        secure=not _is_loopback_request(request),
+        secure=_cookie_secure(request),
     )
     return response
 

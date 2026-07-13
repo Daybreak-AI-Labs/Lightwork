@@ -166,6 +166,9 @@
           btn.closest('ul').querySelectorAll('button').forEach(function(b) { b.disabled = true; });
           const body = { key: btn.dataset.key };
           body[verdict] = [parseInt(btn.dataset.index, 10)];
+          function reenable() {
+            btn.closest('ul').querySelectorAll('button').forEach(function(b) { b.disabled = false; });
+          }
           try {
             const r = await fetch('/api/v1/harness-corpus/review', {
               method: 'POST',
@@ -174,11 +177,16 @@
             });
             if (!r.ok) {
               const j = await r.json().catch(function() { return {}; });
-              alert(j.detail || ('Failed: ' + r.status));
+              mvToast(j.detail || ('Failed: ' + r.status), { error: true });
+              reenable();
+              return;
             }
           } catch (e) {
-            alert(String(e));
+            mvToast('Network error — could not save your review', { error: true });
+            reenable();
+            return;
           }
+          // Reload only on success — pending indexes rebase after a resolution.
           location.reload();
         });
       });

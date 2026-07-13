@@ -88,4 +88,40 @@
       from your company sign-in (SSO), written as <code>user:&lt;sub&gt;</code> — the same string shown on
       their goals and in the audit log.</p>
   </div>
+
+  <div class="section-head"><h2>Department access</h2></div>
+  <div class="panel">
+    <p class="muted" style="margin-top: 0;">Scope a user to the departments their job needs — someone in
+      Finance sees and runs only the Finance specialists. Users without an entry may use
+      {% if default_suites is none %}<strong>every department</strong>{% else %}only:
+      <code>{{ default_suites|join(", ") or "none" }}</code> (set by <code>[dashboard] default_suites</code>){% endif %}.
+      Administrators are never scoped. This limits <em>which</em> departments a user works with;
+      their role above still decides <em>what</em> they may do.</p>
+
+    {% for principal, suites in suite_grants %}
+    <div style="display: flex; flex-wrap: wrap; gap: var(--space-3); align-items: center; padding: var(--space-3) 0; border-top: 1px solid var(--hairline);">
+      <code style="flex: 1 1 14rem; min-width: 0; overflow: hidden; text-overflow: ellipsis;">{{ principal }}{% if principal == you %} <span class="muted">(you)</span>{% endif %}</code>
+      <span style="flex: 2 1 18rem;">{% if suites %}{{ suites|join(", ") }}{% else %}<span class="muted">none</span>{% endif %}</span>
+      <form method="post" action="/users/suites/remove">
+        <input type="hidden" name="principal" value="{{ principal }}" />
+        <button type="submit" class="btn">Remove</button>
+      </form>
+    </div>
+    {% endfor %}
+
+    <form method="post" action="/users/suites/set" style="display: flex; flex-wrap: wrap; gap: var(--space-3); align-items: flex-end; margin-top: var(--space-3);">
+      <label style="display: flex; flex-direction: column; gap: var(--space-1); flex: 1 1 18rem;">
+        <span>User principal</span>
+        <input class="ctl" type="text" name="principal" placeholder="user:&lt;subject&gt;"
+               aria-label="User principal for department access" autocomplete="off" required />
+      </label>
+      <label style="display: flex; flex-direction: column; gap: var(--space-1); flex: 1 1 18rem;">
+        <span>Departments (hold Ctrl/Cmd to pick several)</span>
+        <select class="ctl" name="suites" aria-label="Departments this user may use" multiple size="8">
+          {% for key, title in all_suites %}<option value="{{ key }}">{{ title }}</option>{% endfor %}
+        </select>
+      </label>
+      <button type="submit" class="btn btn--primary">Save access</button>
+    </form>
+  </div>
 {% endblock %}

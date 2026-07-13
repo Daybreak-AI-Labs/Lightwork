@@ -1275,6 +1275,29 @@ def get_self_modify() -> dict:
     return {"enable": bool(cfg.get("enable", False)), "editable_paths": editable}
 
 
+def get_adapter_rung() -> dict:
+    """Return the ``[adapter_rung]`` section (governed in-tenant weights adaptation).
+
+    OFF by default AND inert until ``base_model`` is set: the rung trains LoRA
+    adapters on tenant-provenance data and promotes them through the existing
+    ``weights`` rung (evidence + non-escalation + Ed25519 approval + rollback,
+    maverick.adapter_rung). ``base_model`` is an operator-chosen local spec
+    (e.g. ``ollama:<model-id>``; never hard-coded). ``allow_model_output`` opts
+    in to training on frontier-model completions -- refused by default (the
+    distillation-ToS guard); ``allow_synthetic`` likewise for generated data.
+    ``trainer`` is ``stub`` (deterministic, proof/test path) or ``dpo-lora``
+    (real QLoRA via the [training] extra)."""
+    cfg = load_config().get("adapter_rung", {})
+    return {
+        "enable": bool(cfg.get("enable", False)),
+        "base_model": (str(cfg.get("base_model", "")).strip() or None),
+        "store_dir": (str(cfg.get("store_dir", "")).strip() or None),
+        "trainer": (str(cfg.get("trainer", "")).strip() or "stub"),
+        "allow_synthetic": bool(cfg.get("allow_synthetic", False)),
+        "allow_model_output": bool(cfg.get("allow_model_output", False)),
+    }
+
+
 def get_rehearsal() -> dict:
     """Return the ``[rehearsal]`` section (pre-execution rehearsal gate).
 

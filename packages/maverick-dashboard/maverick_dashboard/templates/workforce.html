@@ -131,7 +131,9 @@
               box.innerHTML = "<p class=\"muted\">This department is a paid add-on. " +
                 esc(res.body.detail || "Contact your administrator to enable it.") + "</p>";
             } else {
-              box.textContent = esc(res.body.detail || "Could not deploy.");
+              // textContent escapes on its own; passing esc()'d text here would
+              // double-encode (show literal &amp; / &lt;).
+              box.textContent = res.body.detail || "Could not deploy.";
             }
           }).catch(function () { box.textContent = "Could not deploy."; });
           return;

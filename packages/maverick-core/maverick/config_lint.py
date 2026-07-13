@@ -90,7 +90,10 @@ KNOWN_SCHEMA: dict[str, set[str] | None] = {
     # public_url: the externally-reachable base URL used to build signed flow
     # approval links (automation_queue._public_base_url); without it here a client
     # configuring actionable channel approvals got a false "unknown key".
-    "dashboard": {"token", "theme", "density", "allow_extension", "themes", "public_url"},
+    # default_suites: deny-by-default department scoping for authenticated
+    # dashboard users with no explicit grant (maverick_dashboard.suite_grants).
+    "dashboard": {"token", "theme", "density", "allow_extension", "themes", "public_url",
+                  "default_suites"},
     "analytics": {"mcp_client_language"},
     # --- dynamic / open-ended sections (any subkey accepted) ---
     "providers": None,

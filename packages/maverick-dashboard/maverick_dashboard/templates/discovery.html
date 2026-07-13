@@ -15,7 +15,7 @@
     </p>
     {% if discovery.tools.entries %}
     <table>
-      <thead><tr><th>Tool</th><th>Risk</th></tr></thead>
+      <thead><tr><th scope="col">Tool</th><th scope="col">Risk</th></tr></thead>
       <tbody>
         {% for t in discovery.tools.entries %}
         <tr><td>{{ t.name }}</td><td><span class="badge {{ 'danger' if t.risk == 'high' else '' }}">{{ t.risk }}</span></td></tr>
@@ -29,7 +29,7 @@
     <div class="section-head"><h2>MCP servers <span class="muted">({{ discovery.mcp_servers | length }})</span></h2></div>
     {% if discovery.mcp_servers %}
     <table>
-      <thead><tr><th>Name</th><th>Command</th><th>Supply-chain pin</th></tr></thead>
+      <thead><tr><th scope="col">Name</th><th scope="col">Command</th><th scope="col">Supply-chain pin</th></tr></thead>
       <tbody>
         {% for m in discovery.mcp_servers %}
         <tr>

@@ -201,6 +201,41 @@ SWE-bench Verified instances and the oracle patches with
 
 ---
 
+## 8. Governed adapter rung (in-tenant weights) — `python proof/adapter_rung_proof.py`
+
+The `weights` rung, closed end-to-end for in-tenant model adaptation: a
+LoRA-shaped adapter is trained on provenance-screened tenant data and driven
+through the same governance chain as the code rung — at the ladder's strictest
+policy (≥20 held-out samples, capability evidence, human signature).
+
+```
+  [PASS]  provenance boundary                 2 tenant examples kept; model_output + unknown provenance refused (distillation guard)
+  [PASS]  payload hygiene boundary            adapter dir carrying .py refused before eval; safetensors-only payload accepted
+  [PASS]  genuine uplift promotes             held-out 0.500 -> 1.000 over 22 unseen cases; signed, ledgered, Modelfile emitted
+  [PASS]  memoriser refused (overfit)         held-in 0.500->1.000 gamed; held-out flat -> OVERFIT, never reached the gate
+  [PASS]  unforgeable payload-bound approval  swapped weights digest NOT authorised
+  [PASS]  one-step rollback                   previous pointer restored byte-identical; ledger marks rolled_back
+  ----------------------------------------------------------------------------
+  6 guarantees PROVEN, 0 failed   (trainer + eval scorer stubbed, by design)
+```
+
+Three properties carry the weight here. **Weights cannot smuggle authority** —
+the payload boundary admits only inert formats (safetensors/gguf/json/text);
+code and pickle-bearing files are refused structurally, before any eval runs.
+**The tenant's knowledge stays the tenant's** — training data is screened at a
+provenance boundary where frontier-model output is refused by default (the
+distillation-ToS guard) and the kept set is content-hashed into the signed
+manifest, so an audit can always answer "what did this adapter learn from?".
+**A signature means these exact weights** — the approval payload embeds the
+payload digest, so weights swapped after sign-off stop verifying. Two seams are
+stubbed and disclosed, mirroring §5: the *trainer* (the `stub` trainer writes a
+deterministic artifact; `dpo-lora` delegates to the real QLoRA trainer in
+`maverick.training.rlaif`, `[training]` extra) and the *eval scorer* (a real
+run scores the tenant's private evals against base vs tuned serving via the
+rendered Ollama `ADAPTER` Modelfile; provider key / GPU required).
+
+---
+
 ## Reproduce & verify (≈1 minute, no provider key)
 
 ```bash
@@ -210,6 +245,7 @@ python proof/self_harness_proof.py   # 7 self-learning-loop guarantees
 python proof/dgm_code_rung_proof.py  # 6 governed DGM code-rung guarantees
 python proof/swebench_governed_proof.py       # 4 SWE-bench-under-governance guarantees
 python proof/dgm_uplift_proof.py     # 6 governed self-improvement (DGM uplift) guarantees
+python proof/adapter_rung_proof.py   # 6 governed adapter-rung (in-tenant weights) guarantees
 python -m maverick.golden_path -o ./gp        # the receipts (story + signed audit.ndjson)
 python -m maverick.proof_pack -o ./proof      # signed evidence bundle
 
