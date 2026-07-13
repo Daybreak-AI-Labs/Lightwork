@@ -24,9 +24,10 @@ The candidate patch comes from a *proposer*. Two are provided:
   measurement and needs ``ANTHROPIC_API_KEY`` (or another provider). It is a thin
   seam here; the agent loop lives in ``benchmarks/swe_bench.py``.
 
-No Docker required: tests run via ``sandbox.exec`` in an isolated copy of the
-checked-out repo (Docker only buys a reproducible dependency env; a venv with the
-instance's deps installed works for the local/no-Docker path).
+External SWE-bench grading requires an isolated sandbox by default: tests run
+via ``sandbox.exec`` only after a caller supplies a sandbox factory (for example
+a container backend). The no-Docker/host-exec path is reserved for trusted local
+fixtures and requires an explicit ``--allow-host-exec`` acknowledgement.
 
     python benchmarks/swebench_governed.py --manifest instances.jsonl \
         --proposer oracle --keys ./keys --ledger ./swebench_ledger.json
@@ -191,6 +192,7 @@ def govern_candidate(
     apply_fn: Callable[[str, Path], object] | None = None,
     timeout: float = 600.0,
     controller=None,
+    allow_host_exec: bool = False,
 ) -> GovernedResult:
     """Drive one candidate patch through the full governance chain. Never raises.
 
@@ -212,8 +214,14 @@ def govern_candidate(
         return out
 
     materialize = materialize or _default_materialize
-    apply = apply_fn or (lambda p, wd: git_apply(p, wd))
-    make_sb = sandbox_factory or (lambda wd: resolve_eval_sandbox(None, Path(wd)))
+    if sandbox_factory is None and not allow_host_exec:
+        def make_sb(wd):
+            raise RuntimeError(
+                "external SWE-bench evaluation requires an explicit sandbox_factory "
+                "or --allow-host-exec for trusted local fixtures; refusing to run "
+                "untrusted tests on the host")
+    else:
+        make_sb = sandbox_factory or (lambda wd: resolve_eval_sandbox(None, Path(wd)))
 
     # 1. Anti-cheat boundary -- structural, before any test is run.
     dv = defensive_validate(patch, fail_to_pass=inst.fail_to_pass,
@@ -234,14 +242,15 @@ def govern_candidate(
     except Exception as e:
         out.reason = f"could not isolate workspace: {e}"
         return out
-    applied = apply(patch, cand_dir)
-    if not getattr(applied, "ok", False):
-        out.reason = f"patch did not apply: {getattr(applied, 'reason', 'unknown')}"
-        return out
     try:
         sb_base, sb_cand = make_sb(base_dir), make_sb(cand_dir)
     except Exception as e:
         out.reason = f"sandbox refused (isolation policy): {e}"
+        return out
+    apply = apply_fn or (lambda p, wd: git_apply(p, wd, sandbox=sb_cand))
+    applied = apply(patch, cand_dir)
+    if not getattr(applied, "ok", False):
+        out.reason = f"patch did not apply: {getattr(applied, 'reason', 'unknown')}"
         return out
     out.baseline_score, _, out.samples = _score(base_dir, inst, sb_base, timeout=timeout)
     out.candidate_score, out.tests_resolved, _ = _score(cand_dir, inst, sb_cand, timeout=timeout)
@@ -343,6 +352,11 @@ def main(argv: list[str] | None = None) -> int:
     ap.add_argument("--ledger", type=Path, default=Path("swebench_ledger.json"))
     ap.add_argument("--limit", type=int, default=0)
     ap.add_argument("--timeout", type=float, default=600.0)
+    ap.add_argument(
+        "--allow-host-exec", action="store_true",
+        help=("DANGEROUS: allow trusted local fixture tests to run on the host "
+              "when no sandbox factory/container is supplied. Do not use for "
+              "attacker-controlled repos, test commands, or patches."))
     args = ap.parse_args(argv)
 
     instances = _load_manifest(args.manifest)
@@ -371,7 +385,8 @@ def main(argv: list[str] | None = None) -> int:
                 unresolved += 1
                 continue
             r = govern_candidate(inst, patch, keys_dir=args.keys, ledger=ledger,
-                                 workroot=Path(td) / f"i{i}", timeout=args.timeout)
+                                 workroot=Path(td) / f"i{i}", timeout=args.timeout,
+                                 allow_host_exec=args.allow_host_exec)
             if r.resolved_under_governance:
                 resolved += 1
                 tag = "PASS"
