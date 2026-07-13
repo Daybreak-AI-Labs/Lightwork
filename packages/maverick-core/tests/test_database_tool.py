@@ -94,6 +94,58 @@ def test_returning_write_is_committed(monkeypatch, tmp_path):
     assert "x" in check
 
 
+def test_row_returning_read_classified_sql_is_not_committed(monkeypatch):
+    import sys
+    import types
+
+    committed = {"called": False}
+
+    class _Result:
+        returns_rows = True
+
+        def keys(self):
+            return ["n"]
+
+        def fetchmany(self, _size):
+            return [(1,)]
+
+    class _Conn:
+        def execute(self, _stmt):
+            return _Result()
+
+        def commit(self):
+            committed["called"] = True
+
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *a):
+            return False
+
+    class _Engine:
+        def connect(self):
+            return _Conn()
+
+        def dispose(self):
+            pass
+
+    fake_sa = types.ModuleType("sqlalchemy")
+    fake_sa.create_engine = lambda url: _Engine()
+    fake_sa.text = lambda s: s
+    monkeypatch.setitem(sys.modules, "sqlalchemy", fake_sa)
+
+    from maverick.tools.database_tool import database_tool
+
+    out = database_tool().fn({
+        "op": "query",
+        "sql": "SELECT perform_side_effect()",
+        "url": "postgresql+psycopg://u:p@localhost/db",
+    })
+
+    assert "columns: ['n']" in out
+    assert committed["called"] is False
+
+
 def test_mysql_executable_comment_needs_confirm(monkeypatch):
     monkeypatch.setenv("DATABASE_URL", "mysql+pymysql://u:p@localhost/db")
     from maverick.tools.database_tool import database_tool
