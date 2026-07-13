@@ -2769,6 +2769,16 @@ def pick_license() -> dict[str, Any]:
         # The API token is a secret: reference an env var, never inline it
         # (config.toml interpolates ${VAR}; the value lives in ~/.maverick/.env).
         out["api_token"] = "${MAVERICK_LICENSE_API_TOKEN}"
+        # Near-instant propagation: the dashboard polls the API on this
+        # interval so an upgrade issued in the vendor console lights up
+        # without a redeploy. 0 disables; the kernel floors it at 30s.
+        interval = _q_text("    Auto-refresh interval in seconds "
+                           "(blank = 60, 0 = manual refresh only)", default="")
+        if interval.strip():
+            try:
+                out["refresh_interval_seconds"] = int(interval.strip())
+            except ValueError:
+                pass  # keep the 60s default rather than fail the wizard
     return out
 
 

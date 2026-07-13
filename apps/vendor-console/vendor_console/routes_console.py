@@ -78,6 +78,8 @@ def customer_detail(request: Request, customer_id: int,
             for lic in store.list_licenses(conn, customer_id)]
     return render(request, "customer_detail.html",
                   {"staff": staff, "customer": cust, "licenses": rows,
+                   "matrix": licensing.feature_matrix(
+                       licensing.active_license_doc(conn, customer_id)),
                    "checkin": store.latest_checkin_for(conn, customer_id),
                    "pubkey": licensing.public_key_hex(), "section": "customers"})
 
@@ -96,15 +98,24 @@ def set_customer_channel(request: Request, customer_id: int, channel: str = Form
 
 @router.post("/customers/{customer_id}/licenses")
 def issue_license(request: Request, customer_id: int, tier: str = Form(...),
-                  suites: str = Form(""), features: str = Form(""),
+                  suites_on: list[str] = Form([]), features_on: list[str] = Form([]),
+                  features_extra: str = Form(""),
                   seats: str = Form(""), expires: str = Form(""),
                   grace_days: int = Form(14), staff: Staff = Depends(require_write)):
+    """Issue/upsell from the feature-access checkboxes: ``features_on`` are the
+    checked registry features (grants below tier / denials for unchecked
+    in-tier ones are derived), ``suites_on`` the checked add-on suites, and
+    ``features_extra`` a comma-separated escape hatch for custom grants."""
     conn = request.app.state.conn
+    from maverick.entitlements import GATED_SUITES
+    extra = [f.strip() for f in features_extra.replace(",", "\n").splitlines()
+             if f.strip()]
+    features, denied = licensing.grants_from_checkboxes(tier, features_on, extra)
     try:
         licensing.issue_license(
             conn, customer_id=customer_id, tier=tier,
-            suites=[s.strip() for s in suites.split(",") if s.strip()],
-            features=[f.strip() for f in features.split(",") if f.strip()],
+            suites=[s for s in suites_on if s in GATED_SUITES],
+            features=features, features_denied=denied,
             seats=int(seats) if seats.strip() else None,
             expires=expires, grace_days=grace_days, actor=staff.email)
     except ValueError as e:

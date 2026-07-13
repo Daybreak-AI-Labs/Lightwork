@@ -40,6 +40,7 @@ def test_license_choices_are_written(tmp_path, monkeypatch):
         "publisher_pubkeys": ["aa" * 32],
         "api_url": "https://api.example/license",
         "api_token": "${MAVERICK_LICENSE_API_TOKEN}",
+        "refresh_interval_seconds": 60,
     })
     parsed = tomllib.loads(cfg)["license"]
     assert parsed["enforce"] is True
@@ -47,6 +48,21 @@ def test_license_choices_are_written(tmp_path, monkeypatch):
     assert parsed["api_url"] == "https://api.example/license"
     # The secret is an env reference, not an inline value.
     assert parsed["api_token"] == "${MAVERICK_LICENSE_API_TOKEN}"
+    assert parsed["refresh_interval_seconds"] == 60
+
+
+def test_refresh_interval_reaches_the_kernel(tmp_path, monkeypatch):
+    # Rule-6 integrity: the wizard's interval is exactly what the refresher polls.
+    cfg = _write(tmp_path, monkeypatch, {
+        "enforce": True, "api_url": "https://api.example/license",
+        "refresh_interval_seconds": 120,
+    })
+    parsed = tomllib.loads(cfg)
+    from maverick import entitlements as E
+    monkeypatch.setattr(E, "_license_cfg", lambda: dict(parsed["license"]))
+    monkeypatch.delenv("MAVERICK_LICENSE_API", raising=False)
+    monkeypatch.delenv("MAVERICK_LICENSE_REFRESH_INTERVAL", raising=False)
+    assert E.refresh_interval_seconds() == 120.0
 
 
 def test_entitlements_reads_what_the_wizard_writes(tmp_path, monkeypatch):

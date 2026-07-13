@@ -258,10 +258,20 @@ def _assert_dashboard_auth_configured() -> None:
             return
     except Exception:  # pragma: no cover
         pass
+    try:
+        # Email-invite local sessions count as a configured mechanism: with
+        # require_auth on, only a verified invite-minted session (or one of the
+        # modes above) passes the middleware — everything else 401s.
+        from .invites import invites_enabled
+        if invites_enabled():
+            return
+    except Exception:  # pragma: no cover
+        pass
     raise RuntimeError(
         "[dashboard] require_auth is set, but no auth mechanism is configured. "
-        "Set MAVERICK_DASHBOARD_TOKEN, enable OIDC ([auth.oidc]), or enable "
-        "reverse-proxy SSO ([auth.proxy]) -- refusing to serve the dashboard "
+        "Set MAVERICK_DASHBOARD_TOKEN, enable OIDC ([auth.oidc]), enable "
+        "reverse-proxy SSO ([auth.proxy]), or enable email invites "
+        "([dashboard] invites) -- refusing to serve the dashboard "
         "unauthenticated."
     )
 
@@ -321,7 +331,23 @@ async def _lifespan(app: FastAPI):
     await _reclaim_orphans()
     await _install_queue_dispatcher()
     await _install_automation_scheduler()
+    # Connected-entitlement auto-refresh: a deployment with [license] api_url
+    # configured polls the vendor console so an upgrade/downgrade issued there
+    # lands within ~a minute — no redeploy, no manual refresh. No-op (returns
+    # None) without an API URL or with refresh_interval_seconds = 0, so tests
+    # and offline/air-gapped boxes are untouched. Fail-open by construction:
+    # the loop never raises and a failed poll leaves the license file in charge.
+    try:
+        from maverick.entitlements import start_refresher
+        await run_in_threadpool(start_refresher)
+    except Exception:  # pragma: no cover - never block startup
+        log.exception("license auto-refresh not started")
     yield
+    try:
+        from maverick.entitlements import stop_refresher
+        await run_in_threadpool(stop_refresher)
+    except Exception:  # pragma: no cover - shutdown must never raise
+        pass
     await _stop_automation_scheduler()
     # Graceful drain: give running goals a bounded window to finish. Bounded by
     # MAVERICK_DRAIN_TIMEOUT (default 25s, under the typical 30s
@@ -391,6 +417,12 @@ app.include_router(admin_pages_router)
 # flow isn't fully configured, so including the router unconditionally is inert
 # off by default. See maverick_dashboard.oidc_login.
 app.include_router(oidc_login_router)
+# Email invite links (/auth/invite/{token}): single-use onboarding links an
+# admin mints on /users. Self-gates on [dashboard] invites (default off), so
+# including it unconditionally is inert. See maverick_dashboard.invite_routes.
+from .invite_routes import router as invite_router  # noqa: E402
+
+app.include_router(invite_router)
 # SCIM 2.0 user provisioning (/scim/v2). Self-gates on MAVERICK_SCIM_TOKEN and
 # 404s when unset, so including it is inert off by default. It carries its own
 # static IdP bearer, so the /scim/ prefix is exempted from the dashboard-token
@@ -768,10 +800,15 @@ async def bearer_auth(request: Request, call_next):
     if (request.url.path in _AUTH_EXEMPT or request.url.path.startswith("/share/")
             or request.url.path.startswith("/scim/")
             or request.url.path.startswith("/form/")
-            or request.url.path.startswith("/saml/")):
+            or request.url.path.startswith("/saml/")
+            or request.url.path.startswith("/auth/invite/")):
         # /share/<token> self-authenticates with its signed, revocable token
         # (verified in the route, which 404s an invalid/expired/revoked one) --
         # an external recipient has no dashboard bearer, like the webhook paths.
+        # /auth/invite/<token> is the same shape: the invitee has no credential
+        # yet; the single-use token IS the auth, verified (and same-origin-
+        # gated on the consuming POST) in the route, which 404s when invites
+        # are disabled.
         return await call_next(request)
     if not expected:
         if _require_auth_enabled():
@@ -790,6 +827,22 @@ async def bearer_auth(request: Request, call_next):
                     # The app.py form handlers already call _require_same_origin
                     # in this mode; this extends the same guard to the API routes.
                     # Safe methods short-circuit to True inside _is_same_origin.
+                    if not _is_same_origin(request) and _allowed_extension_origin(request) is None:
+                        return JSONResponse(
+                            {"detail": "cross-site request blocked — for your "
+                                       "security, changes must be made from the "
+                                       "Lightwork page itself. Reload the "
+                                       "dashboard and try again."},
+                            status_code=403,
+                        )
+                    return await call_next(request)
+                # Email-invite local sessions (no IdP): a VERIFIED locally-
+                # minted mvk_session cookie satisfies require_auth, under the
+                # same same-origin CSRF gate as the other cookie-session modes.
+                # An absent/invalid cookie falls through to the fail-closed 401
+                # below — the invite-accept route itself is path-exempt above.
+                from .invites import invites_enabled, local_session_principal
+                if invites_enabled() and local_session_principal(request) is not None:
                     if not _is_same_origin(request) and _allowed_extension_origin(request) is None:
                         return JSONResponse(
                             {"detail": "cross-site request blocked — for your "
@@ -852,6 +905,24 @@ async def bearer_auth(request: Request, call_next):
                     status_code=403,
                 )
             return await call_next(request)
+        # A VERIFIED invite-minted session is a real credential: accept it for
+        # remote access in no-token mode (same-origin-gated like every other
+        # cookie mode), so an invites-only deployment works over the network
+        # without extra config. Anonymous remote requests still 401 below.
+        try:
+            from .invites import invites_enabled, local_session_principal
+            if invites_enabled() and local_session_principal(request) is not None:
+                if not _is_same_origin(request) and _allowed_extension_origin(request) is None:
+                    return JSONResponse(
+                        {"detail": "cross-site request blocked — for your "
+                                   "security, changes must be made from the "
+                                   "Lightwork page itself. Reload the "
+                                   "dashboard and try again."},
+                        status_code=403,
+                    )
+                return await call_next(request)
+        except Exception:  # pragma: no cover - invites must never open access
+            pass
         return JSONResponse(
             {"detail": "Remote access to this dashboard requires an access "
                        "token — an administrator must configure one for "
