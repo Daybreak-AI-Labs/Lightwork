@@ -123,23 +123,63 @@ def oracle_proposer(inst: Instance) -> str:
     return inst.gold_patch
 
 
+def _neutralized_filter_config(repo: Path) -> list[str]:
+    """Return ``git -c`` args that turn worktree-declared filters into no-ops.
+
+    The benchmark agent controls the checkout, including ``.gitattributes`` and
+    ``.git/info/attributes``. ``git add -N``/``git diff`` may invoke clean
+    filters named by those files, so discover any literal ``filter=<name>``
+    declarations and override those filter drivers before asking host git for a
+    patch.
+    """
+    import re
+
+    names: set[str] = set()
+    candidates = list(repo.rglob(".gitattributes"))
+    info_attributes = repo / ".git" / "info" / "attributes"
+    if info_attributes.exists():
+        candidates.append(info_attributes)
+
+    for path in candidates:
+        try:
+            text = path.read_text(encoding="utf-8", errors="replace")
+        except OSError:
+            continue
+        names.update(re.findall(r"(?:^|\s)filter=([A-Za-z0-9_.-]+)(?=$|\s)", text))
+
+    args: list[str] = []
+    for name in sorted(names):
+        args.extend([
+            "-c", f"filter.{name}.clean=cat",
+            "-c", f"filter.{name}.smudge=cat",
+            "-c", f"filter.{name}.process=",
+            "-c", f"filter.{name}.required=false",
+        ])
+    return args
+
+
 def _worktree_diff(repo: Path) -> str:
     """The repo's uncommitted changes as a raw, git-appliable unified diff --
     INCLUDING new files (``git add -N`` intent-to-add makes untracked files
     show in ``git diff``). This is the authoritative patch: it is literal
     ``git diff`` output, so it always applies with ``git apply -p1``, unlike a
     diff parsed out of the model's prose. Hardened env (no ext-diff/textconv,
-    no global config) mirrors ``swe_bench._git_diff``."""
+    no global/system/local config) mirrors ``swe_bench._git_diff`` while also
+    refusing repository-local filter configuration from the agent-controlled
+    checkout."""
     import subprocess
 
-    env = {"GIT_CONFIG_GLOBAL": os.devnull, "GIT_CONFIG_NOSYSTEM": "1",
+    env = {"GIT_CONFIG_GLOBAL": os.devnull, "GIT_CONFIG_LOCAL": os.devnull,
+           "GIT_CONFIG_NOSYSTEM": "1",
            "GIT_CONFIG_SYSTEM": os.devnull, "GIT_OPTIONAL_LOCKS": "0",
            "PATH": os.environ.get("PATH", "")}
     try:
-        subprocess.run(["git", "-C", str(repo), "add", "-N", "."],
+        filter_config = _neutralized_filter_config(repo)
+        git = ["git", *filter_config, "-C", str(repo)]
+        subprocess.run([*git, "add", "-N", "."],
                        capture_output=True, timeout=60, env=env)
         out = subprocess.run(
-            ["git", "-C", str(repo), "diff", "--no-ext-diff", "--no-textconv"],
+            [*git, "diff", "--no-ext-diff", "--no-textconv"],
             capture_output=True, text=True, timeout=60, env=env)
         return out.stdout or ""
     except (subprocess.SubprocessError, OSError):
