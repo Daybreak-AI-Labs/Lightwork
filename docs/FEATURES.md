@@ -629,8 +629,8 @@ here.
   (`Sequence` / `If` / `While` / `ForEach` / `TryCatch`), and Make (Integromat)
   `BasicRouter` routes are all captured **structurally** (branch/foreach/switch/
   while/scope nodes, arms wired to rejoin, bodies as nested flows, Until's exit
-  condition negated, a Make router lowered to an if/else-if/else branch chain
-  from its route filters); graphless sources approximate each step as an agent
+  condition negated, and a Make router lowered to parallel fan-out route flows
+  guarded by its route filters); graphless sources approximate each step as an agent
   node that still runs. A UiPath Release/Schedule with no exposed activity tree
   stays a correct one-step *invocation* import — honestly reported
   `approximated` (the Orchestrator API returns no .xaml, so the process's
