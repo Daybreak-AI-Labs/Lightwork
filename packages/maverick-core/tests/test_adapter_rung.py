@@ -262,6 +262,7 @@ def test_parse_spec_stays_pure_even_with_active_adapter(tmp_path, monkeypatch):
 def test_ollama_client_resolves_adapter_at_wire_time(tmp_path, monkeypatch):
     # The wire-level seam: OllamaClient._build_kwargs swaps base -> tuned name
     # when (and only when) the rung is enabled with a matching active pointer.
+    pytest.importorskip("openai")  # OllamaClient rides the OpenAI-compatible client
     from maverick.providers.ollama_provider import OllamaClient
 
     _enable_cfg(monkeypatch, tmp_path)
