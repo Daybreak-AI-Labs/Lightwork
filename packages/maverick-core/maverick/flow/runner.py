@@ -23,6 +23,8 @@ from dataclasses import dataclass, field
 from typing import Any
 
 from .ir import (
+    MAX_FLOW_NODE_RETRIES,
+    MAX_FLOW_NODE_RETRY_SLEEP,
     NODE_ACTION,
     NODE_AGENT,
     NODE_APPROVAL,
@@ -474,9 +476,6 @@ def _invoke_work(node: FlowNode, data: dict, ctx: _Ctx):
         return (f"ERROR: node timed out after {node.timeout}s", 0.0)
 
 
-_MAX_RETRY_BACKOFF = 30.0   # cap a single backoff wait so a big N can't stall a worker
-
-
 def _run_work(node: FlowNode, data: dict, ctx: _Ctx) -> str | None:
     # Retry a failed work node up to `retries` more times -- a transient tool/agent
     # failure (outcome 0.0) OR a hard exception from the executor gets another
@@ -484,12 +483,13 @@ def _run_work(node: FlowNode, data: dict, ctx: _Ctx) -> str | None:
     # growing interval between attempts (capped) instead of re-hammering instantly;
     # backoff 0 keeps the original tight loop (and adds no sleep to existing flows).
     backoff = max(0.0, node.retry_backoff)
+    retries = min(max(0, node.retries), MAX_FLOW_NODE_RETRIES)
     result: Any = None
     outcome: float | None = None
     last_exc: Exception | None = None
-    for attempt in range(max(0, node.retries) + 1):
+    for attempt in range(retries + 1):
         if attempt and backoff:
-            time.sleep(min(_MAX_RETRY_BACKOFF, backoff * (2 ** (attempt - 1))))
+            _sleep_retry_backoff(ctx, min(MAX_FLOW_NODE_RETRY_SLEEP, backoff * (2 ** (attempt - 1))))
         try:
             result, outcome = _invoke_work(node, data, ctx)
             last_exc = None
@@ -510,6 +510,20 @@ def _run_work(node: FlowNode, data: dict, ctx: _Ctx) -> str | None:
     if outcome == 0.0 and node.on_error:
         return node.on_error
     return node.next
+
+
+def _sleep_retry_backoff(ctx: _Ctx, seconds: float) -> None:
+    if seconds <= 0:
+        return
+    if ctx.deadline is None:
+        time.sleep(seconds)
+        return
+    remaining = ctx.deadline - ctx.now()
+    if remaining <= 0:
+        raise RuntimeError("flow exceeded its wall-clock deadline during retry backoff")
+    time.sleep(min(seconds, remaining))
+    if seconds > remaining:
+        raise RuntimeError("flow exceeded its wall-clock deadline during retry backoff")
 
 
 def _run_subflow(node: FlowNode, data: dict, ctx: _Ctx) -> str | None:
