@@ -2,8 +2,10 @@
 
 The first slice of decomposing ``app.py`` by nav group: everything on this
 router is the site admin's control surface (RBAC "admin" permission via
-``auth.require_permission``), same-origin-checked on every mutation, and
-rendered with the shared app templates.
+``auth.require_permission`` for tenant-scoped administration and
+``auth.require_global_permission`` for global control-plane writes),
+same-origin-checked on every mutation, and rendered with the shared app
+templates.
 """
 from __future__ import annotations
 
@@ -286,7 +288,7 @@ async def settings_set_ui_visibility(request: Request) -> RedirectResponse:
     config.toml); a role can never be shown a page its permissions don't reach,
     and admins always keep Settings + Users."""
     _app()._require_same_origin(request)
-    auth.require_permission(request, "admin")
+    auth.require_global_permission(request, "admin")
     from maverick_dashboard import ui_visibility
     form = await request.form()
     ui_visibility.apply_selection(set(form.getlist("cell")))
@@ -297,7 +299,7 @@ async def settings_set_ui_visibility(request: Request) -> RedirectResponse:
 async def settings_reset_ui_visibility(request: Request) -> RedirectResponse:
     """Reset every page x role cell to its default visibility (admin)."""
     _app()._require_same_origin(request)
-    auth.require_permission(request, "admin")
+    auth.require_global_permission(request, "admin")
     from maverick_dashboard import ui_visibility
     ui_visibility.clear_overrides()
     return RedirectResponse("/settings?saved=visibility_reset#ui-visibility", status_code=303)
