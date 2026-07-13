@@ -261,8 +261,11 @@ def test_scoped_user_sees_filtered_pack_catalog(monkeypatch, tmp_path):
     suites = {a.get("suite") for a in agents}
     assert suites <= {"finance", None} and "finance" in suites
 
+    # Use a REAL legal pack so resolved_view() is non-None and the suite gate
+    # (not a missing-pack 404) is what answers — this test must not depend on
+    # another test polluting the domain registry with a synthetic pack.
     assert c.get("/api/v1/agents/finance_ap").status_code == 200
-    assert c.get("/api/v1/agents/legal_contracts").status_code == 403
+    assert c.get("/api/v1/agents/legal_briefs").status_code == 403
     assert c.get("/api/v1/agents/definitely_missing").status_code == 404
 
     # Marketplace: grouped browse and flat search both scope to the grant.
@@ -320,3 +323,23 @@ def test_kernel_gate_blocks_dispatch_and_deploy_for_scoped_user(monkeypatch, tmp
     assert r.status_code == 403
     assert "department" in r.json()["detail"]
     assert c.post("/api/v1/departments/legal/deploy").status_code == 403
+
+
+def test_scoped_user_sees_filtered_compartments_and_deliverables(monkeypatch, tmp_path):
+    # /compartments and /deliverables previously rendered the full pack/
+    # department catalog to scoped users, diverging from /agents. Both must now
+    # filter to the caller's grant.
+    monkeypatch.setenv("MAVERICK_DASHBOARD_ADMINS", "")
+    c = _client(monkeypatch, tmp_path)
+    from maverick_dashboard import suite_grants
+    suite_grants.set_suites("user:fin", ["finance"])
+    _as(monkeypatch, "user:fin")
+
+    comp = c.get("/compartments")
+    assert comp.status_code == 200
+    assert "finance_ap" in comp.text
+    assert "legal_contracts" not in comp.text
+
+    deliv = c.get("/deliverables")
+    assert deliv.status_code == 200
+    assert "legal_contracts" not in deliv.text

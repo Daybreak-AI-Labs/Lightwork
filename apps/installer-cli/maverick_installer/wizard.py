@@ -2051,7 +2051,76 @@ def pick_advanced() -> dict[str, Any]:
     # its own prompt; the result is nested under the "oidc" key and the writer
     # emits a single [auth.oidc] table for it.
     advanced["oidc"] = pick_oidc()
+    # Department (job-function) scoping only bites once sign-in is on, so it is
+    # offered right after — writes under [dashboard]. Returns {} when declined.
+    advanced["department_access"] = pick_department_access(
+        bool(advanced["oidc"].get("enabled")))
     return advanced
+
+
+def _split_csv(text: str) -> list[str]:
+    return [t.strip() for t in (text or "").split(",") if t.strip()]
+
+
+def _collect_group_pairs(prompt: str, *, csv_value: bool) -> dict[str, Any]:
+    """Collect ``Group Name = value`` lines until a blank entry. ``csv_value``
+    parses the right side as a comma-separated list (departments) instead of a
+    single token (role)."""
+    out: dict[str, Any] = {}
+    while True:
+        line = _q_text(prompt, default="").strip()
+        if not line or "=" not in line:
+            break
+        name, _, rhs = line.partition("=")
+        name, rhs = name.strip(), rhs.strip()
+        if not name or not rhs:
+            continue
+        out[name] = _split_csv(rhs) if csv_value else rhs
+    return out
+
+
+def pick_department_access(sso_enabled: bool) -> dict[str, Any]:
+    """Opt-in department (job-function) scoping for authenticated users.
+
+    Only meaningful once sign-in is on (it keys on the authenticated
+    principal), so it is skipped entirely when SSO is off. Collects the
+    deny-by-default department set and optional SCIM-group -> role / department
+    mappings, written under ``[dashboard]``. Returns ``{}`` when declined, so a
+    default install is unchanged.
+    """
+    if not sso_enabled:
+        return {}
+    console.print(
+        "[dim]Department scoping limits which specialist teams each signed-in "
+        "user can see and run — a finance analyst gets the Finance department, "
+        "not Legal. OFF by default (everyone sees every department); you can "
+        "always assign per-user access later on the dashboard Users page.[/dim]"
+    )
+    if not _q_confirm("Restrict users to specific departments by default?",
+                      default=False):
+        return {}
+    result: dict[str, Any] = {
+        "default_suites": _split_csv(_q_text(
+            "  Departments a new user may use until granted more (comma-separated "
+            "suite keys, e.g. finance,tax; blank = none)", default="")),
+    }
+    console.print(
+        "[dim]Optional: if your IdP pushes groups via SCIM, map a group to a "
+        "role and/or departments so access follows team membership. Enter one "
+        "'Group Name = value' per line; blank line to finish.[/dim]"
+    )
+    if _q_confirm("  Map IdP (SCIM) groups to roles/departments now?",
+                  default=False):
+        roles = _collect_group_pairs(
+            "    Group -> role (e.g. Finance Team=operator)", csv_value=False)
+        suites = _collect_group_pairs(
+            "    Group -> departments (e.g. Finance Team=finance,tax)",
+            csv_value=True)
+        if roles:
+            result["group_roles"] = roles
+        if suites:
+            result["group_suites"] = suites
+    return result
 
 
 def _docker_available() -> bool:
@@ -3548,6 +3617,32 @@ def _cfg_advanced(  # noqa: C901 - flat sequence of independent opt-in toggles
             val = oidc.get(key)
             if val:
                 _emit_kv(lines, key, val)
+    dept = advanced.get("department_access") or {}
+    if isinstance(dept, dict) and (dept.get("default_suites")
+                                   or dept.get("group_roles")
+                                   or dept.get("group_suites")):
+        # Department (job-function) scoping for signed-in users. default_suites
+        # is deny-by-default for users with no explicit grant; the group tables
+        # turn IdP (SCIM) team membership into a role / department grant.
+        lines.append("")
+        lines.append("[dashboard]")
+        if dept.get("default_suites"):
+            lines.append("# Departments a signed-in user may use until an admin "
+                         "grants more.")
+            _emit_kv(lines, "default_suites", list(dept["default_suites"]))
+        # Group names contain spaces, so the TOML key must be a quoted string
+        # ("Finance Team" = ...), not the bare key _emit_kv would render.
+        if dept.get("group_roles"):
+            lines.append("")
+            lines.append("[dashboard.group_roles]")
+            for group, role in dept["group_roles"].items():
+                lines.append(f"{_toml_str(group)} = {_toml_str(role)}")
+        if dept.get("group_suites"):
+            lines.append("")
+            lines.append("[dashboard.group_suites]")
+            for group, suites in dept["group_suites"].items():
+                rendered = ", ".join(_toml_str(s) for s in suites)
+                lines.append(f"{_toml_str(group)} = [{rendered}]")
     if advanced.get("saml"):
         lines.append("")
         # SAML 2.0 SP browser SSO (alongside OIDC). Fill in the SP/IdP details

@@ -62,7 +62,11 @@ def _locked(path: Path):
 
 
 def store_path() -> Path:
-    return Path.home() / ".maverick" / "dashboard-user-suites.json"
+    # maverick_home() honors MAVERICK_HOME, so the grant store shares a root
+    # with the SCIM user/group stores it resolves alongside (a MAVERICK_HOME
+    # deployment/backup keeps explicit grants and group grants together).
+    from .paths import maverick_home
+    return maverick_home() / "dashboard-user-suites.json"
 
 
 def known_suites() -> frozenset[str]:

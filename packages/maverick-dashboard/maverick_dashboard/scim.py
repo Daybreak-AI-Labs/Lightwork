@@ -26,6 +26,7 @@ from __future__ import annotations
 
 import hashlib
 import hmac
+import threading
 import time
 import uuid
 from typing import Any
@@ -465,6 +466,23 @@ def _groups_path():
     return maverick_home() / "scim_groups.json"
 
 
+# Serializes a group-store load-modify-save; cross_process_lock extends it
+# across dashboard workers. Group membership drives role/department access
+# (scim_groups.py), so a lost update here silently grants or withholds access
+# — the same hazard the rbac/suite-grants stores guard against.
+_GROUPS_LOCK = threading.Lock()
+
+
+def _locked_groups():
+    from contextlib import ExitStack
+
+    from maverick.file_lock import cross_process_lock
+    stack = ExitStack()
+    stack.enter_context(_GROUPS_LOCK)
+    stack.enter_context(cross_process_lock(_groups_path()))
+    return stack
+
+
 def _load_groups() -> dict[str, dict]:
     try:
         import json
@@ -479,6 +497,39 @@ def _save_groups(groups: dict[str, dict]) -> None:
     import json
     payload = {"groups": [groups[k] for k in sorted(groups)]}
     atomic_write_text(_groups_path(), json.dumps(payload, indent=2, sort_keys=True))
+
+
+def _group_name_taken(groups: dict[str, dict], name: str, exclude_gid: str) -> bool:
+    """True iff a DIFFERENT group already holds ``name`` (case-insensitive).
+
+    displayName is the key the [dashboard] group_roles / group_suites mapping
+    tables resolve on, so two groups sharing a name would let one group's
+    members silently inherit the other's mapped role/departments. Create
+    enforces this; rename (PUT/PATCH) must too."""
+    lowered = (name or "").strip().lower()
+    return any(gid != exclude_gid and g.get("displayName", "").lower() == lowered
+               for gid, g in groups.items())
+
+
+def _audit_group_membership(group_name: str, added, removed) -> None:
+    """One tamper-evident row per membership delta, so an IdP-driven access
+    change (add/remove a user from a mapped group) is provable, not a silent
+    JSON edit — mirroring the rbac / suite-grant mutators. Fail-soft: an audit
+    error never blocks the SCIM sync."""
+    if not added and not removed:
+        return
+    try:
+        from maverick.audit import EventKind, record
+        for uid in sorted(added):
+            record(EventKind.ACCESS_GRANT_CHANGED, agent="scim", actor="scim",
+                   principal=str(uid), field="group_membership", tenant="",
+                   old=None, new=group_name)
+        for uid in sorted(removed):
+            record(EventKind.ACCESS_GRANT_CHANGED, agent="scim", actor="scim",
+                   principal=str(uid), field="group_membership", tenant="",
+                   old=group_name, new=None)
+    except Exception:  # pragma: no cover -- audit must never break SCIM sync
+        pass
 
 
 def _member_ids(value) -> list[str]:
@@ -557,15 +608,16 @@ async def create_group(request: Request):
     display = str(resource.get("displayName") or "").strip()
     if not display:
         return _scim_error(400, "displayName is required", scim_type="invalidValue")
-    groups = _load_groups()
-    if any(g.get("displayName", "").lower() == display.lower()
-           for g in groups.values()):
-        return _scim_error(409, f"group {display!r} already exists",
-                           scim_type="uniqueness")
     gid = uuid.uuid4().hex
     rec = _group_from_resource(resource, gid=gid)
-    groups[gid] = rec
-    _save_groups(groups)
+    with _locked_groups():
+        groups = _load_groups()
+        if _group_name_taken(groups, display, gid):
+            return _scim_error(409, f"group {display!r} already exists",
+                               scim_type="uniqueness")
+        groups[gid] = rec
+        _save_groups(groups)
+    _audit_group_membership(display, added=set(rec["members"]), removed=set())
     return JSONResponse(_to_scim_group(rec), status_code=201,
                         media_type="application/scim+json")
 
@@ -584,17 +636,27 @@ async def get_group(gid: str, request: Request):
 async def replace_group(gid: str, request: Request):
     if (err := _authorize(request)) is not None:
         return err
-    groups = _load_groups()
-    existing = groups.get(gid)
-    if existing is None:
-        return _scim_error(404, f"group {gid} not found")
     resource = await _json_body(request)
-    rec = _group_from_resource(resource, gid=gid,
-                               created=existing.get("created_at"))
-    if not rec["displayName"]:
-        rec["displayName"] = existing.get("displayName", "")
-    groups[gid] = rec
-    _save_groups(groups)
+    with _locked_groups():
+        groups = _load_groups()
+        existing = groups.get(gid)
+        if existing is None:
+            return _scim_error(404, f"group {gid} not found")
+        rec = _group_from_resource(resource, gid=gid,
+                                   created=existing.get("created_at"))
+        if not rec["displayName"]:
+            rec["displayName"] = existing.get("displayName", "")
+        # Rename must honor the same case-insensitive uniqueness as create, or
+        # two groups share the mapping key.
+        if _group_name_taken(groups, rec["displayName"], gid):
+            return _scim_error(409, f"group {rec['displayName']!r} already exists",
+                               scim_type="uniqueness")
+        old_members = set(existing.get("members", []))
+        new_members = set(rec["members"])
+        groups[gid] = rec
+        _save_groups(groups)
+    _audit_group_membership(rec["displayName"], added=new_members - old_members,
+                            removed=old_members - new_members)
     return JSONResponse(_to_scim_group(rec), media_type="application/scim+json")
 
 
@@ -602,17 +664,28 @@ async def replace_group(gid: str, request: Request):
 async def patch_group(gid: str, request: Request):
     if (err := _authorize(request)) is not None:
         return err
-    groups = _load_groups()
-    rec = groups.get(gid)
-    if rec is None:
-        return _scim_error(404, f"group {gid} not found")
     body = await _json_body(request)
-    if _apply_group_patch(rec, body) is None:
-        return _scim_error(400, "unsupported PATCH operation",
-                           scim_type="invalidValue")
-    rec["updated_at"] = time.time()
-    groups[gid] = rec
-    _save_groups(groups)
+    with _locked_groups():
+        groups = _load_groups()
+        rec = groups.get(gid)
+        if rec is None:
+            return _scim_error(404, f"group {gid} not found")
+        old_members = set(rec.get("members", []))
+        old_name = rec.get("displayName", "")
+        if _apply_group_patch(rec, body) is None:
+            return _scim_error(400, "unsupported PATCH operation",
+                               scim_type="invalidValue")
+        if (rec.get("displayName", "") != old_name
+                and _group_name_taken(groups, rec.get("displayName", ""), gid)):
+            return _scim_error(409, f"group {rec['displayName']!r} already exists",
+                               scim_type="uniqueness")
+        rec["updated_at"] = time.time()
+        new_members = set(rec.get("members", []))
+        groups[gid] = rec
+        _save_groups(groups)
+    _audit_group_membership(rec.get("displayName", ""),
+                            added=new_members - old_members,
+                            removed=old_members - new_members)
     return JSONResponse(_to_scim_group(rec), media_type="application/scim+json")
 
 
@@ -620,11 +693,16 @@ async def patch_group(gid: str, request: Request):
 async def delete_group(gid: str, request: Request):
     if (err := _authorize(request)) is not None:
         return err
-    groups = _load_groups()
-    if gid not in groups:
-        return _scim_error(404, f"group {gid} not found")
-    del groups[gid]
-    _save_groups(groups)
+    with _locked_groups():
+        groups = _load_groups()
+        rec = groups.get(gid)
+        if rec is None:
+            return _scim_error(404, f"group {gid} not found")
+        del groups[gid]
+        _save_groups(groups)
+    # Deleting a mapped group revokes its members' group-derived access.
+    _audit_group_membership(rec.get("displayName", ""), added=set(),
+                            removed=set(rec.get("members", [])))
     return JSONResponse(None, status_code=204)
 
 
@@ -659,8 +737,15 @@ def _apply_group_patch(rec: dict, body: dict) -> bool | None:
                 members.update(ids)
                 applied = True
             elif verb == "remove":
-                # No value = clear all (RFC 7644 §3.5.2.2); else remove listed.
-                members -= set(ids) if ids else set(members)
+                # Clear-all ONLY when no value is supplied (RFC 7644 §3.5.2.2).
+                # A value that is PRESENT but yields no parseable ids (a single
+                # dict, a display-only member, an empty list) must remove
+                # nothing, not wipe the whole group — the alternative silently
+                # revokes every member's group-derived access.
+                if value is None:
+                    members = set()
+                else:
+                    members -= set(ids)
                 applied = True
             elif verb == "replace":
                 members = set(ids)
