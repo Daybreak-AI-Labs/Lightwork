@@ -63,6 +63,15 @@ def test_run_express_enables_all_safe_features(monkeypatch, tmp_path: Path):
     # Host-dangerous capabilities stay OFF (opt-in only).
     assert config["capabilities"]["computer_use"] is False
     assert config["capabilities"]["code_exec"] is False
+    denied_tools = set(config["security"]["denied_tools"])
+    assert denied_tools >= {
+        "computer",
+        "browser",
+        "shell",
+        "write_file",
+        "apply_patch",
+        "str_replace_editor",
+    }
     # Self-learning is on WITHOUT the generate-and-run-code autonomy.
     assert config["self_learning"]["create_tools"] is False
 
@@ -71,6 +80,21 @@ def test_run_express_enables_all_safe_features(monkeypatch, tmp_path: Path):
 
     # The smoke-test canary: sandbox survives the round-trip (no [flows] dup).
     assert config["sandbox"]["backend"] == "local"
+
+
+def test_run_express_docker_mode_keeps_host_mutation_tools_enabled(
+    monkeypatch, tmp_path: Path,
+):
+    wizard = _stub_wizard_io(monkeypatch, tmp_path)
+    monkeypatch.setattr(wizard, "_docker_available", lambda: True)
+
+    rc = wizard.run_express()
+
+    assert rc == 0
+    config = tomllib.loads((tmp_path / ".maverick" / "config.toml").read_text())
+    assert config["sandbox"]["backend"] == "docker"
+    denied_tools = set(config["security"]["denied_tools"])
+    assert denied_tools == {"computer", "browser"}
 
 
 def test_run_express_routed_via_pick_mode(monkeypatch, tmp_path: Path):

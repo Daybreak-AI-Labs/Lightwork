@@ -4280,6 +4280,12 @@ def run_express() -> int:
 
     Path(workdir).expanduser().mkdir(parents=True, exist_ok=True)
     backend = "docker" if _docker_available() else "local"
+    # Computer + browser are never enabled by express. If Docker is
+    # unavailable, fail closed on host-mutating tools too: the local backend
+    # runs against the user's host filesystem, not a container blast radius.
+    denied_tools = ["computer", "browser"]
+    if backend == "local":
+        denied_tools.extend(["shell", "write_file", "apply_patch", "str_replace_editor"])
     try:
         write_config(
             providers=["anthropic"],
@@ -4304,6 +4310,7 @@ def run_express() -> int:
             oauth={"vault": True},
             durable={"enabled": True},
             deployment="desktop",
+            tool_acl={"denied_tools": denied_tools},
         )
     except Exception as e:
         show_install_failure(e)
