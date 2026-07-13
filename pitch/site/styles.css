@@ -180,7 +180,8 @@ p{margin:16px 0 0}
 .footer .brand{font-size:22px}
 .footer-brand{display:flex;align-items:center;gap:11px;font-size:22px;font-weight:600;letter-spacing:-.02em;color:var(--ink)}
 .footer-brand .brand-mark img{height:24px}
-.brand-lockup img{height:84px;width:auto;display:block;margin-bottom:6px}
+.brand-lockup img{height:112px;width:auto;display:block;margin-bottom:6px;
+  border:1px solid var(--navy-line);border-radius:13px}
 .footer .blurb{color:var(--muted);font-size:15px;margin-top:14px;max-width:34ch}
 .footer h4{font-family:var(--sans);font-size:13px;font-weight:600;letter-spacing:.06em;text-transform:uppercase;color:var(--muted);margin:0 0 16px}
 .footer ul{list-style:none;margin:0;padding:0}
