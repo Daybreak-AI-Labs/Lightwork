@@ -255,6 +255,42 @@ def write_transfer_tried_db(tried: dict[str, float]) -> None:
                      f"VALUES ({_ph(2)})", (str(lid), float(ts)))
 
 
+def _corpus_row_sensitive(kind: str) -> bool:
+    """True for machine-owned corpus rows that mirror sealed file sidecars."""
+    return str(kind) in {"pending", "rejected"}
+
+
+def _encode_corpus_row(kind: str, row: object) -> str:
+    text = json.dumps(row, sort_keys=True)
+    if _corpus_row_sensitive(kind):
+        from .crypto_at_rest import at_rest_enabled
+        if at_rest_enabled():
+            from .crypto_at_rest import seal_to_str
+            return seal_to_str(text)
+    return text
+
+
+def _decode_corpus_row(kind: str, row: str) -> object:
+    if _corpus_row_sensitive(kind):
+        from .crypto_at_rest import at_rest_enabled, is_sealed_str, strict_at_rest, unseal_from_str
+        if at_rest_enabled():
+            if is_sealed_str(row):
+                row = unseal_from_str(row)
+            elif strict_at_rest():
+                log.error(
+                    "at-rest strict: withholding an unsealed harness_corpus.%s row",
+                    kind,
+                )
+                raise ValueError("unsealed sensitive corpus row withheld")
+            else:
+                log.warning(
+                    "at-rest: unsealed harness_corpus.%s row "
+                    "(pre-migration legacy or tampering); run 'maverick encryption migrate'",
+                    kind,
+                )
+    return json.loads(row)
+
+
 def load_corpus_db(kind: str) -> dict:
     """The corpus family from the world store, in the FILE shape:
     ``kind="live"`` returns ``{key: [row-dicts]}`` merged with any preserved
@@ -268,7 +304,7 @@ def load_corpus_db(kind: str) -> dict:
                     c, f"SELECT key, row FROM harness_corpus WHERE kind = {_ph(1)}"
                        " ORDER BY key, seq", (str(kind),)):
                 try:
-                    out.setdefault(str(key), []).append(json.loads(row))
+                    out.setdefault(str(key), []).append(_decode_corpus_row(str(kind), row))
                 except ValueError:
                     continue
             if kind == "live":
@@ -277,7 +313,7 @@ def load_corpus_db(kind: str) -> dict:
                            f"WHERE kind = {_ph(1)} ORDER BY key, seq",
                         ("extra",)):
                     try:
-                        out[str(key)] = json.loads(row)
+                        out[str(key)] = _decode_corpus_row("extra", row)
                     except ValueError:
                         continue
     except Exception:
@@ -300,12 +336,12 @@ def write_corpus_db(kind: str, data: dict) -> None:
             if kind == "live" and not isinstance(val, list):
                 _exec(c, f"INSERT INTO harness_corpus (kind, key, seq, row) "
                          f"VALUES ({_ph(4)})",
-                      ("extra", str(key), 0, json.dumps(val, sort_keys=True)))
+                      ("extra", str(key), 0, _encode_corpus_row("extra", val)))
                 continue
             for i, row in enumerate(val if isinstance(val, list) else []):
                 _exec(c, f"INSERT INTO harness_corpus (kind, key, seq, row) "
                          f"VALUES ({_ph(4)})",
-                      (str(kind), str(key), i, json.dumps(row, sort_keys=True)))
+                      (str(kind), str(key), i, _encode_corpus_row(str(kind), row)))
 
 
 __all__ = [
