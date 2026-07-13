@@ -329,6 +329,23 @@ def test_run_api_redacts_secrets_in_data(monkeypatch, tmp_path):
     assert got["data"]["api_key"] == "***redacted***" and got["data"]["user"] == "ada"
 
 
+def test_run_api_redacts_secrets_in_input_data(monkeypatch, tmp_path):
+    _isolate(monkeypatch, tmp_path)
+    from maverick.flow import store
+    rid = store.new_run_id()
+    store.save_run(store.FlowRun(run_id=rid, flow_id="f", status="completed",
+                                 data={"ok": True},
+                                 input_data={
+                                     "access_token": "tok_INPUT_SECRET_123",
+                                     "Authorization": "Bearer INPUT_AUTH_SECRET",
+                                     "user": "ada",
+                                 }))  # pragma: allowlist secret
+    got = _client().get("/api/v1/flows/runs/" + rid).json()
+    assert got["input_data"]["access_token"] == "***redacted***"
+    assert got["input_data"]["Authorization"] == "***redacted***"
+    assert got["input_data"]["user"] == "ada"
+
+
 def test_enqueue_flow_run_dedups_on_idem_key(monkeypatch, tmp_path):
     _isolate(monkeypatch, tmp_path)
     from maverick.flow import Flow, FlowNode, store
