@@ -339,16 +339,44 @@ def _canonical_spec(spec: str) -> str:
 
 
 def _cheapest_allowed(allow: list[str]) -> str:
-    """The cheapest model in ``allow`` by published output price (input price as
-    a tie-break), name-sorted for determinism. Unknown-priced models rank last so
-    a known cheap model wins. The allow-list fallback uses this instead of
-    ``sorted(allow)[0]`` (lexicographic, cost-blind)."""
+    """The cheapest model in ``allow`` by billable output price (input price as
+    a tie-break), name-sorted for determinism. Unknown-priced models rank last,
+    but subscription/self-hosted provider prefixes that the budget layer prices
+    at zero must win over paid hosted models. The allow-list fallback uses this
+    instead of ``sorted(allow)[0]`` (lexicographic, cost-blind)."""
+
     def rank(spec: str):
-        model_id = _parse_spec(spec)[1]
-        price = MODEL_PRICES.get(model_id)
+        price = _allowlist_rank_price(spec)
         out_in = (price[1], price[0]) if price else (float("inf"), float("inf"))
         return (*out_in, spec)
+
     return min(allow, key=rank)
+
+
+def _allowlist_rank_price(spec: str) -> tuple[float, float] | None:
+    """Return the price used for allow-list fallback ranking.
+
+    Keep this in step with ``budget._lookup_price`` for billable choices that
+    are known to be free or explicitly priced. Genuinely unknown hosted models
+    still rank last instead of inheriting the budget fallback estimate, because
+    an allow-list fallback should not prefer an unverified price over a known
+    cheap model.
+    """
+    provider, model_id = _parse_spec(spec)
+    if provider == "codex_cli":
+        return 0.0, 0.0
+    if spec in MODEL_PRICES:
+        return MODEL_PRICES[spec]
+    if model_id in MODEL_PRICES:
+        return MODEL_PRICES[model_id]
+    from .cost.router import price_for_model
+
+    priced = price_for_model(spec) or price_for_model(model_id)
+    if priced is not None:
+        return priced
+    if provider in ("ollama", "vllm", "tgi"):
+        return 0.0, 0.0
+    return None
 
 
 def _allowlist_filter_fallbacks(models: list[str]) -> list[str]:
