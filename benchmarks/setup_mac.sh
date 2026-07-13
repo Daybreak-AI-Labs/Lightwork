@@ -36,19 +36,38 @@ pip install 'questionary>=2.0' 'rich>=13.7' 'fastapi>=0.110' 'uvicorn>=0.27' \
             'pyjwt[crypto]' cffi 'openai>=1.30' modal
 
 echo "==> 5/6  Ed25519 signing keys for the governed ledger (~/dgm-keys)"
-if [ ! -f "$HOME/dgm-keys/operator.priv.hex" ]; then
-  python - <<'PY'
+python - <<'PY'
+import os
+from pathlib import Path
+
 from cryptography.hazmat.primitives.asymmetric.ed25519 import Ed25519PrivateKey
 from cryptography.hazmat.primitives import serialization as ser
-from pathlib import Path
-p = Ed25519PrivateKey.generate(); d = Path.home()/"dgm-keys"; d.mkdir(exist_ok=True)
-(d/"operator.priv.hex").write_text(p.private_bytes(ser.Encoding.Raw, ser.PrivateFormat.Raw, ser.NoEncryption()).hex())
-(d/"operator.pub").write_bytes(p.public_key().public_bytes(ser.Encoding.Raw, ser.PublicFormat.Raw))
-print("  wrote", d)
+
+d = Path.home() / "dgm-keys"
+priv_path = d / "operator.priv.hex"
+pub_path = d / "operator.pub"
+
+# The private key signs governance approvals, so keep both new and existing
+# installs restrictive even when the user's default umask is permissive.
+os.umask(0o077)
+d.mkdir(mode=0o700, exist_ok=True)
+os.chmod(d, 0o700)
+
+if priv_path.exists():
+    os.chmod(priv_path, 0o600)
+    print("  ~/dgm-keys already present, hardened permissions")
+else:
+    p = Ed25519PrivateKey.generate()
+    priv = p.private_bytes(ser.Encoding.Raw, ser.PrivateFormat.Raw, ser.NoEncryption()).hex()
+    fd = os.open(priv_path, os.O_WRONLY | os.O_CREAT | os.O_EXCL, 0o600)
+    with os.fdopen(fd, "w") as f:
+        f.write(priv)
+    pub_path.write_bytes(p.public_key().public_bytes(ser.Encoding.Raw, ser.PublicFormat.Raw))
+    print("  wrote", d)
+
+if pub_path.exists():
+    os.chmod(pub_path, 0o644)
 PY
-else
-  echo "  ~/dgm-keys already present, keeping it"
-fi
 
 echo "==> 6/6  Modal auth check"
 if modal profile current >/dev/null 2>&1; then

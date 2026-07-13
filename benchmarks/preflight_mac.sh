@@ -47,9 +47,9 @@ step "governed DGM gate (3 verdicts, signed)" \
 step "self-learning stack (breadth, signed)" \
   python benchmarks/self_learning_proof.py --no-scripts
 
-# 4. Signing keys are present and well-formed (the ledger can't sign without them).
+# 4. Signing keys are present, well-formed, and not world/group readable.
 step "Ed25519 operator keys (~/dgm-keys)" \
-  python -c "from pathlib import Path; h=Path.home()/'dgm-keys'/'operator.priv.hex'; import binascii; b=binascii.unhexlify(h.read_text().strip()); assert len(b)==32, len(b)"
+  python -c "from pathlib import Path; import binascii, stat; d=Path.home()/'dgm-keys'; h=d/'operator.priv.hex'; b=binascii.unhexlify(h.read_text().strip()); assert len(b)==32, len(b); assert stat.S_IMODE(d.stat().st_mode)==0o700, oct(stat.S_IMODE(d.stat().st_mode)); assert stat.S_IMODE(h.stat().st_mode)==0o600, oct(stat.S_IMODE(h.stat().st_mode))"
 
 # 5. Modal reachable (grading backend). Free -- just checks the token/profile.
 step "Modal auth (grading backend)" \

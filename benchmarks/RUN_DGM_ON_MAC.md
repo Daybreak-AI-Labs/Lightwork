@@ -23,8 +23,15 @@ chmod +x benchmarks/setup_mac.sh
 ```
 
 `setup_mac.sh` is idempotent and spends nothing. It creates `.venv`, installs
-the workspace, generates your Ed25519 signing keys in `~/dgm-keys`, and checks
-Modal auth.
+the workspace, generates your Ed25519 signing keys in `~/dgm-keys` with a `0700`
+directory and `0600` private key, and checks Modal auth.
+
+Treat `~/dgm-keys/operator.priv.hex` as an offline governance secret: do not copy
+it into the repo, mount it into containers, paste it into prompts, or expose it
+to any local shell that an LLM-controlled agent can operate. The benchmark
+runner only needs the key directory for the final human-approved signing/audit
+step; solving and Modal grading must not receive this directory as workspace
+input.
 
 ## 1. Open a shell and bring your secrets (nothing secret is committed)
 
@@ -45,7 +52,9 @@ This runs the **real** governed DGM gate, the signed audit chain, and the
 self-learning scoreboards entirely in-process (instant, free), then pings Modal.
 **Do not proceed until it prints `ALL CHECKS PASSED`.** This is the "check your
 work before spending" gate — if anything here is red, the paid run would just
-burn money hitting the same wall.
+burn money hitting the same wall. The preflight also fails if `~/dgm-keys` is
+not `0700` or `operator.priv.hex` is not `0600`; rerun `setup_mac.sh` to harden
+existing keys.
 
 ## 3. Keep the Mac awake for the whole run
 
