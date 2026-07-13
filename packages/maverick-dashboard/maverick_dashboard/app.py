@@ -63,6 +63,7 @@ from .auth import (
     can_access_goal_principal,
     execution_user_id_from_request,
     goal_owner_filter,
+    has_permission,
     require_permission,
     require_principal,
     websocket_caller_principal,
@@ -4759,7 +4760,7 @@ async def workflows_index_page(request: Request) -> HTMLResponse:
     try:
         from maverick import flow as _flow
         flows_enabled = _flow.enabled()
-        if flows_enabled:
+        if flows_enabled and has_permission(request, "operate"):
             from maverick.flow import store as _flow_store
             flows = _flow_store.list_flow_summaries()
     except Exception:  # pragma: no cover -- never block the page on the flow engine

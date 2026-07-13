@@ -231,6 +231,37 @@ def test_approvals_html_page_requires_operate_permission(monkeypatch, tmp_path):
     assert c.get("/approvals").status_code == 200
 
 
+def test_workflows_html_hides_flows_without_operate(monkeypatch, tmp_path):
+    # The HTML workflows index must not disclose saved flow metadata to
+    # viewer/auditor roles; the API protects the same list with "operate".
+    monkeypatch.setenv("MAVERICK_DASHBOARD_ADMINS", "")
+    c = _client(monkeypatch, tmp_path)
+    from maverick import flow
+    from maverick.flow import store as flow_store
+    from maverick_dashboard import rbac
+
+    monkeypatch.setattr(flow, "enabled", lambda: True)
+    monkeypatch.setattr(flow_store, "list_flow_summaries", lambda: [{
+        "id": "secret-acquisition-flow",
+        "name": "Confidential M&A Diligence Flow",
+        "nodes": 2,
+        "single_agent": False,
+    }])
+    rbac.set_role("user:vw-flow", "viewer")
+    _as(monkeypatch, "user:vw-flow")
+
+    r = c.get("/workflows")
+    assert r.status_code == 200
+    assert "secret-acquisition-flow" not in r.text
+    assert "Confidential M&amp;A Diligence Flow" not in r.text
+
+    rbac.set_role("user:op-flow", "operator")
+    _as(monkeypatch, "user:op-flow")
+    r = c.get("/workflows")
+    assert r.status_code == 200
+    assert "secret-acquisition-flow" in r.text
+    assert "Confidential M&amp;A Diligence Flow" in r.text
+
 def test_auditor_reads_audit_but_nothing_operational(monkeypatch, tmp_path):
     # Separation of duties: the auditor role reaches the audit trail (read-only)
     # but is 403'd from every operate/admin surface -- it can review the
