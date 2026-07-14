@@ -129,6 +129,7 @@ def apply_proposal(flow: Flow, node_id: str, to_kind: str, *,
     if to_kind == NODE_ACTION:
         n.tool = (tool or n.tool).strip()
         n.brief = ""
+        n.params = {}
         if not n.tool:
             raise ValueError("hardening to an action needs a tool name")
     else:  # NODE_AGENT
