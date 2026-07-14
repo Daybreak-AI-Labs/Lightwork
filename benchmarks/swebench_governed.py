@@ -24,9 +24,10 @@ The candidate patch comes from a *proposer*. Two are provided:
   measurement and needs ``ANTHROPIC_API_KEY`` (or another provider). It is a thin
   seam here; the agent loop lives in ``benchmarks/swe_bench.py``.
 
-No Docker required: tests run via ``sandbox.exec`` in an isolated copy of the
-checked-out repo (Docker only buys a reproducible dependency env; a venv with the
-instance's deps installed works for the local/no-Docker path).
+External SWE-bench grading requires an isolated sandbox by default: tests run
+via ``sandbox.exec`` only after a caller supplies a sandbox factory (for example
+a container backend). The no-Docker/host-exec path is reserved for trusted local
+fixtures and requires an explicit ``--allow-host-exec`` acknowledgement.
 
     python benchmarks/swebench_governed.py --manifest instances.jsonl \
         --proposer oracle --keys ./keys --ledger ./swebench_ledger.json
@@ -504,6 +505,7 @@ def govern_candidate(
     timeout: float = 600.0,
     controller=None,
     check_gold_overlap: bool = True,
+    allow_host_exec: bool = False,
 ) -> GovernedResult:
     """Drive one candidate patch through the full governance chain. Never raises.
 
@@ -530,8 +532,14 @@ def govern_candidate(
         return out
 
     materialize = materialize or _default_materialize
-    apply = apply_fn or (lambda p, wd: git_apply(p, wd))
-    make_sb = sandbox_factory or (lambda wd: resolve_eval_sandbox(None, Path(wd)))
+    if sandbox_factory is None and not allow_host_exec:
+        def make_sb(wd):
+            raise RuntimeError(
+                "external SWE-bench evaluation requires an explicit sandbox_factory "
+                "or --allow-host-exec for trusted local fixtures; refusing to run "
+                "untrusted tests on the host")
+    else:
+        make_sb = sandbox_factory or (lambda wd: resolve_eval_sandbox(None, Path(wd)))
 
     # 1. Anti-cheat boundary -- structural, before any test is run.
     dv = defensive_validate(patch, fail_to_pass=inst.fail_to_pass,
@@ -570,24 +578,31 @@ def govern_candidate(
     except Exception as e:
         out.reason = f"could not isolate workspace: {e}"
         return out
-    applied = apply(patch, cand_dir)
-    if not getattr(applied, "ok", False):
-        out.reason = f"patch did not apply: {getattr(applied, 'reason', 'unknown')}"
-        return out
-    # test_patch (the grader's added/updated tests) to BOTH arms -- the graded
-    # FAIL_TO_PASS usually don't exist at base_commit.
-    if (inst.test_patch or "").strip():
-        for arm_name, arm_dir in (("baseline", base_dir), ("candidate", cand_dir)):
-            tp = apply(inst.test_patch, arm_dir)
-            if not getattr(tp, "ok", False):
-                out.reason = (f"grader test_patch did not apply to {arm_name}: "
-                              f"{getattr(tp, 'reason', 'unknown')}")
-                return out
     try:
         sb_base, sb_cand = make_sb(base_dir), make_sb(cand_dir)
     except Exception as e:
         out.reason = f"sandbox refused (isolation policy): {e}"
         return out
+    # Sandboxes exist first so patch application is routed through the governed
+    # backend (not the host). Apply the CANDIDATE first, then the grader's
+    # test_patch to BOTH arms -- the graded FAIL_TO_PASS usually don't exist at
+    # base_commit. The baseline arm gets ONLY test_patch (no candidate).
+    def _apply(p, wd, sb):
+        if apply_fn is not None:
+            return apply_fn(p, wd)
+        return git_apply(p, wd, sandbox=sb)
+    applied = _apply(patch, cand_dir, sb_cand)
+    if not getattr(applied, "ok", False):
+        out.reason = f"patch did not apply: {getattr(applied, 'reason', 'unknown')}"
+        return out
+    if (inst.test_patch or "").strip():
+        for arm_name, arm_dir, arm_sb in (
+                ("baseline", base_dir, sb_base), ("candidate", cand_dir, sb_cand)):
+            tp = _apply(inst.test_patch, arm_dir, arm_sb)
+            if not getattr(tp, "ok", False):
+                out.reason = (f"grader test_patch did not apply to {arm_name}: "
+                              f"{getattr(tp, 'reason', 'unknown')}")
+                return out
     out.baseline_score, base_all_pass, out.samples, base_f2p_pass, base_f2p_fail = _score(
         base_dir, inst, sb_base, timeout=timeout)
     # The graded FAIL_TO_PASS tests MUST fail at baseline -- that IS the bug.
@@ -793,6 +808,11 @@ def main(argv: list[str] | None = None) -> int:
                     help="per-instance agent wall-clock cap (sets MAVERICK_INSTANCE_WALL_SEC)")
     ap.add_argument("--agent-max-steps", type=int, default=None,
                     help="per-instance agent turn cap (sets MAVERICK_MAX_STEPS)")
+    ap.add_argument(
+        "--allow-host-exec", action="store_true",
+        help=("DANGEROUS: allow trusted local fixture tests to run on the host "
+              "when no sandbox factory/container is supplied. Do not use for "
+              "attacker-controlled repos, test commands, or patches."))
     args = ap.parse_args(argv)
 
     # Surface the env knobs run_maverick reads as first-class flags.
@@ -881,7 +901,8 @@ def main(argv: list[str] | None = None) -> int:
                 spend += cost
                 r = govern_candidate(inst, patch, keys_dir=args.keys, ledger=ledger,
                                      workroot=Path(td) / f"i{i}", timeout=args.timeout,
-                                     check_gold_overlap=(args.proposer != "oracle"))
+                                     check_gold_overlap=(args.proposer != "oracle"),
+                                     allow_host_exec=args.allow_host_exec)
                 tag = _verdict_tag(r)
                 if tag == "PASS":
                     resolved += 1

@@ -87,7 +87,8 @@ def test_mis_seeded_fail_to_pass_is_ungradable_not_resolved(tmp_path):
     # FAIL_TO_PASS (add) were never failing, so there was no bug to fix. Under the
     # old gate this scored RESOLVED; it must now be ungradable.
     out = govern_candidate(inst, _mul_fix_diff(), keys_dir=keys, ledger=ledger,
-                           workroot=tmp_path / "work", timeout=120.0)
+                           workroot=tmp_path / "work", timeout=120.0,
+                           allow_host_exec=True)
     assert out.ungradable is True, out.reason
     assert out.resolved_under_governance is False
     assert not out.promoted

@@ -174,11 +174,12 @@ leaderboard reports its result under a signed reference monitor.
 
 The **real number** — what % of SWE-bench Verified the agent resolves under this
 chain — comes from `benchmarks/swebench_governed.py --proposer llm` over real
-Verified instances, which needs a provider key (the proof above uses the
-`oracle` proposer — the instance's gold patch — so it runs with no key and no
-Docker). Patch *generation* needs only the key; only reproducible *grading* at
-full scale needs Docker (a local venv with the instance's deps covers a curated
-slice).
+Verified instances, which needs a provider key and an explicit isolated grading
+sandbox. The proof above uses the `oracle` proposer and a self-seeded fixture, so
+it runs with no key and no Docker by explicitly opting in to trusted host
+execution; external benchmark runs refuse host execution by default unless the
+operator passes the dangerous `--allow-host-exec` acknowledgement for a trusted
+local-only corpus.
 
 ---
 

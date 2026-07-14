@@ -5,7 +5,9 @@ A self-contained, reproducible run that exercises the governed SWE-bench scorer
 (``benchmarks/swebench_governed.py``) on a fixture instance shaped exactly like a
 real SWE-bench task -- a repo with a bug, a set of ``FAIL_TO_PASS`` tests that are
 red until it's fixed, and ``PASS_TO_PASS`` regression tests that must stay green.
-No LLM, no network, no Docker.
+No LLM, no network, no Docker. Because this proof seeds the repository and
+patch itself, it explicitly opts in to the trusted host-exec fixture path; the
+external benchmark CLI refuses host execution by default.
 
     python proof/swebench_governed_proof.py   # exits 0 iff every guarantee holds
 
@@ -181,7 +183,8 @@ def run_all(work: Path) -> list[_R]:
 
     def gov(patch, sub):
         return govern_candidate(inst, patch, keys_dir=keys, ledger=ledger,
-                                workroot=work / sub, timeout=120.0)
+                                workroot=work / sub, timeout=120.0,
+                                allow_host_exec=True)
 
     out: list[_R] = []
 
