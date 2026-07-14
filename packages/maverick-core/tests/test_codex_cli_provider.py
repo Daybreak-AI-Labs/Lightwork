@@ -268,6 +268,29 @@ class TestExec:
         assert call.get("errors") == "replace"
         assert FAKE_TOKEN not in " ".join(cmd)
 
+    def test_exec_gets_sanitized_environment(self, codex_env, monkeypatch):
+        monkeypatch.setenv("OPENAI_API_KEY", "sk-test-secret")
+        monkeypatch.setenv("AWS_SECRET_ACCESS_KEY", "aws-test-secret")
+        fake = _FakeRun()
+        client = self._client(codex_env, monkeypatch, fake)
+        client.complete("s", [{"role": "user", "content": "q"}])
+        env = fake.calls[-1]["env"]
+        assert env["CODEX_HOME"] == str(codex_env / "codex-home")
+        assert "PATH" in env
+        assert "CODEX_ACCESS_TOKEN" not in env
+        assert "OPENAI_API_KEY" not in env
+        assert "AWS_SECRET_ACCESS_KEY" not in env
+
+    def test_login_gets_sanitized_environment(self, codex_env, monkeypatch):
+        monkeypatch.setenv("OPENAI_API_KEY", "sk-test-secret")
+        fake = _FakeRun()
+        monkeypatch.setattr(
+            "maverick.providers.codex_cli_provider.subprocess.run", fake)
+        CodexCLIClient().complete("sys", [{"role": "user", "content": "hi"}])
+        login = next(c for c in fake.calls if "login" in c["cmd"])
+        assert "CODEX_ACCESS_TOKEN" not in login["env"]
+        assert "OPENAI_API_KEY" not in login["env"]
+
     def test_budget_records_tokens_at_zero_dollars(self, codex_env, monkeypatch):
         fake = _FakeRun()
         client = self._client(codex_env, monkeypatch, fake)
