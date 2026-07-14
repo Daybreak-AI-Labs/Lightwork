@@ -58,6 +58,7 @@ def test_migrate_seals_existing_plaintext(monkeypatch, tmp_path):
         "signoffs.note": 0, "artifacts.content": 0,
         "projects.name": 0, "projects.description": 0,
         "fact_history.value": 0,
+        "harness_corpus.row": 0,
     }
 
     # On disk the columns are now sealed (ciphertext, no plaintext).
@@ -84,6 +85,7 @@ def test_migrate_seals_existing_plaintext(monkeypatch, tmp_path):
         "signoffs.note": 0, "artifacts.content": 0,
         "projects.name": 0, "projects.description": 0,
         "fact_history.value": 0,
+        "harness_corpus.row": 0,
     }
 
 

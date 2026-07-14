@@ -79,7 +79,20 @@ def load_solver(solver_dir: Path) -> Path:
 
 def _instance_payload(inst, repo_path: Path) -> dict:
     """JSON-safe instance view passed to untrusted solver subprocesses."""
-    return {
+    payload: dict = {}
+    # Carry the instance's own JSON-safe scalar fields first: light corpora
+    # (e.g. the fast-proof arithmetic tasks) define fields like spec/gold that
+    # the canonical SWE-bench keys below don't cover, and the sandboxed solver
+    # only sees this payload.
+    for key, val in (getattr(inst, "__dict__", {}) or {}).items():
+        if key.startswith("_"):
+            continue
+        if isinstance(val, (str, int, float, bool)) or val is None:
+            payload[key] = val
+        elif isinstance(val, (list, tuple)) and all(
+                isinstance(x, (str, int, float, bool)) for x in val):
+            payload[key] = list(val)
+    payload.update({
         "instance_id": inst.instance_id,
         "repo_path": str(repo_path),
         "fail_to_pass": list(getattr(inst, "fail_to_pass", []) or []),
@@ -88,7 +101,8 @@ def _instance_payload(inst, repo_path: Path) -> dict:
         "brief": getattr(inst, "brief", ""),
         "language": getattr(inst, "language", "python"),
         "total_tests": getattr(inst, "total_tests", 0),
-    }
+    })
+    return payload
 
 
 _SOLVER_RUNNER = r'''
@@ -130,7 +144,13 @@ def _solve_in_sandbox(solver_path: Path, inst, workroot: Path, sb, *,
     work = Path(workroot)
     work.mkdir(parents=True, exist_ok=True)
     repo_copy = work / "solver-visible-repo"
-    _default_materialize(inst.repo_path, repo_copy)
+    # Light corpora (spec/gold tasks with no source tree) have no repo_path;
+    # the solver still runs sandboxed, against an empty throwaway dir.
+    src_repo = getattr(inst, "repo_path", None)
+    if src_repo:
+        _default_materialize(src_repo, repo_copy)
+    else:
+        repo_copy.mkdir(parents=True, exist_ok=True)
     runner = work / "run_solver_once.py"
     payload = work / "instance.json"
     runner.write_text(_SOLVER_RUNNER, encoding="utf-8")
