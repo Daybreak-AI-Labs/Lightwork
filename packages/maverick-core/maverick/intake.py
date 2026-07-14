@@ -293,16 +293,35 @@ def generate_profile(spec: IntakeSpec, propose=None) -> DomainProfile:
     return validate_profile(profile)
 
 
-def ingest_docs(spec: IntakeSpec, kb, collection: str | None = None) -> int:
+def ingest_docs(spec: IntakeSpec, kb, collection: str | None = None,
+                *, ingested_by: str = "") -> int:
     """Ingest the spec's uploaded documents into the pack's knowledge collection.
-    Returns the number of chunks stored. Fail-soft per document."""
+    Returns the number of chunks stored. Fail-soft per document.
+
+    Each document is stamped with provenance (``ingested_by``, source, content
+    hash) and the ingestion is recorded on the signed audit chain so a governed
+    corpus has a tamper-evident record of what was loaded and by whom. The audit
+    write is best-effort: a missing audit backend never blocks onboarding.
+    """
     collection = collection or _slug(spec.name)
     total = 0
+    docs = 0
     for path in spec.doc_paths:
         try:
-            total += kb.ingest_path(collection, path)
+            n = kb.ingest_path(collection, path, ingested_by=ingested_by)
+            total += n
+            if n:
+                docs += 1
         except Exception as e:  # one bad upload must not abort onboarding
             log.warning("intake: failed to ingest %s (%s)", path, e)
+    if total:
+        try:
+            from .audit import record
+            record("evidence_capture", agent="intake",
+                   knowledge_collection=collection, documents=docs,
+                   chunks=total, ingested_by=ingested_by or "unknown")
+        except Exception:  # pragma: no cover -- audit is optional, never blocks
+            log.debug("intake: knowledge ingest audit event not recorded")
     return total
 
 

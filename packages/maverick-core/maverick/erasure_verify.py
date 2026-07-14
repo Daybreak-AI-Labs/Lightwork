@@ -17,8 +17,11 @@ read back. Read-only and fail-soft.
 """
 from __future__ import annotations
 
+import logging
 from datetime import datetime, timezone
 from urllib.parse import quote
+
+log = logging.getLogger(__name__)
 
 
 def _fact_subject_token(channel: str, user_id: str) -> str:
@@ -67,6 +70,17 @@ def verify_erasure(user_id: str, *, channel: str | None = None,
     resolved_channel = subject.get("channel") if isinstance(subject, dict) else channel
     counts["facts"] = _count_user_scoped_facts(
         user_id, channel=resolved_channel, tenant=tenant)
+    # Knowledge plane: a subject's ingested document chunks are a store the
+    # world-model export doesn't cover, so verify it here too. Contributes 0
+    # when knowledge RAG is off (fail-open in knowledge_admin), and only counts
+    # when the channel resolved (an unscoped subject is already indeterminate).
+    if resolved_channel:
+        try:
+            from .knowledge_admin import count_subject
+            counts["knowledge_chunks"] = count_subject(
+                resolved_channel, user_id, tenant=tenant)
+        except Exception as e:  # pragma: no cover -- knowledge is optional
+            log.warning("erasure_verify: knowledge count failed (fail-open): %s", e)
     residual = {k: v for k, v in counts.items() if v}
     # No resolved channel == the export could not scope to a single subject, so
     # the all-zero counts prove nothing. Never certify clean on that basis.

@@ -4813,6 +4813,23 @@ def erase(ctx, channel: str, user: str, yes: bool) -> None:
             err=True,
         )
 
+    # Step 5b: erase the subject's document chunks from the knowledge plane.
+    # A subject's uploaded documents are ingested with a `subject` provenance
+    # stamp; without this, their embedded chunks survived erasure in the vector
+    # store (an Art.17 gap for any deployment with knowledge RAG on). Fail-soft:
+    # knowledge is optional and a KB error must not abort the erase we've done.
+    knowledge_removed: dict[str, int] = {}
+    try:
+        from .. import knowledge_admin
+        knowledge_removed = knowledge_admin.erase_subject(channel, user)
+    except Exception as exc:  # pragma: no cover - defensive
+        click.echo(
+            f"warning: erased the database but could not scrub the knowledge base "
+            f"({type(exc).__name__}: {exc}); run `maverick knowledge residual "
+            f"--channel {channel} --user {user}` to check.",
+            err=True,
+        )
+
     # Scrubbing may have re-anchored signed audit files, so drop any cached
     # signer before appending the erase marker. The compatibility hook is safe:
     # it refuses to rewrite already-broken chains unless the erase helper
@@ -4830,6 +4847,7 @@ def erase(ctx, channel: str, user: str, yes: bool) -> None:
     # re-identify the erased person if audit logs are read.
     import secrets
 
+    knowledge_chunks = sum(knowledge_removed.values())
     audit.record(
         "erase",
         channel=channel,
@@ -4841,6 +4859,7 @@ def erase(ctx, channel: str, user: str, yes: bool) -> None:
         audit_lines_scrubbed=audit_scrubbed,
         facts_scrubbed=len(scrubbed_fact_keys),
         user_notes_scrubbed=removed_user_notes,
+        knowledge_chunks_scrubbed=knowledge_chunks,
     )
 
     click.echo(
@@ -4849,8 +4868,14 @@ def erase(ctx, channel: str, user: str, yes: bool) -> None:
         f"{removed_attachments} attachment file(s), "
         f"{audit_scrubbed} audit event(s) scrubbed, "
         f"{len(scrubbed_fact_keys)} fact(s) scrubbed, "
-        f"{removed_user_notes} user note(s) scrubbed"
+        f"{removed_user_notes} user note(s) scrubbed, "
+        f"{knowledge_chunks} knowledge chunk(s) scrubbed"
     )
+    if knowledge_removed:
+        click.echo(
+            "  knowledge removed (per collection): "
+            + ", ".join(f"{c}={n}" for c, n in sorted(knowledge_removed.items()))
+        )
     if scrubbed_fact_keys:
         click.echo(
             "  facts removed (global key/value, scoped with user:<channel>:<user_id>: "
@@ -5900,6 +5925,7 @@ from . import (  # noqa: E402,F401
     _connector_groups,
     _finance_groups,
     _import_groups,
+    _knowledge_groups,
     _learning_groups,
     _ops_groups,
     _reporting_groups,

@@ -11,8 +11,10 @@ external writes regardless of whether a Shield is wired).
 """
 from __future__ import annotations
 
+import hashlib
 import logging
 import re
+import time
 import uuid
 from dataclasses import dataclass
 
@@ -162,9 +164,26 @@ class KnowledgeBase:
         except Exception:  # pragma: no cover -- never block ingest on a scan bug
             return True
 
-    def ingest_text(self, collection: str, text: str, source: str = "") -> int:
+    def ingest_text(self, collection: str, text: str, source: str = "", *,
+                    subject: str = "", trust_tier: int = 2,
+                    sensitivity: str = "internal", ingested_by: str = "",
+                    extra_meta: dict | None = None) -> int:
         """Chunk, shield-scan, embed and store one document's text. Returns the
-        number of chunks stored (poisoned chunks are dropped)."""
+        number of chunks stored (poisoned chunks are dropped).
+
+        Every chunk is stamped with provenance so retrieval and governance can
+        reason about where a passage came from and whose data it is:
+
+        * ``source``     — document path/URL (the citation).
+        * ``subject``    — the data-subject key (e.g. ``slack:U123``) this
+          document belongs to, so a GDPR erasure can find and remove it; empty
+          for reference material with no subject.
+        * ``trust_tier`` — 3 first-party … 0 external/untrusted (the same
+          provenance scale memory-guard uses).
+        * ``sensitivity``— data-classification label (public/internal/…).
+        * ``ingested_by``— the principal that loaded it (audit attribution).
+        * ``doc_sha256`` — content hash (dedup + tamper-evidence).
+        """
         raw_chunks = list(chunk_text(text, self.chunk_size, self.chunk_overlap))
         chunks = [c for c in raw_chunks if self._safe(c)]
         # Boundary-split evasion guard: an attacker can straddle an injection
@@ -180,19 +199,34 @@ class KnowledgeBase:
         if not chunks:
             return 0
         vectors = self.embedder.embed(chunks)
+        base_meta = {
+            "source": source,
+            "subject": subject,
+            "trust_tier": int(trust_tier),
+            "sensitivity": sensitivity,
+            "ingested_by": ingested_by,
+            "ingested_at": time.time(),
+            "doc_sha256": hashlib.sha256(text.encode("utf-8")).hexdigest(),
+        }
+        if extra_meta:
+            base_meta.update(extra_meta)
         items = [
-            (uuid.uuid4().hex, c, v, {"source": source})
+            (uuid.uuid4().hex, c, v, dict(base_meta))
             for c, v in zip(chunks, vectors, strict=False)
         ]
         self.store.add(collection, items)
         return len(items)
 
-    def ingest_path(self, collection: str, path) -> int:
+    def ingest_path(self, collection: str, path, *, subject: str = "",
+                    trust_tier: int = 2, sensitivity: str = "internal",
+                    ingested_by: str = "") -> int:
         """Ingest a document from disk (parsed by extension).
 
         Images / process diagrams go through ``image_describer`` (OCR or a
         vision model); without one they're skipped rather than read as bytes.
-        The resulting text is shield-scanned like any other document."""
+        The resulting text is shield-scanned like any other document, and every
+        chunk carries the provenance passed here (subject / trust_tier /
+        sensitivity / ingested_by)."""
         from .parse import is_image
         if is_image(path):
             if self.image_describer is None:
@@ -205,7 +239,56 @@ class KnowledgeBase:
                 return 0
         else:
             text = extract_text(path)
-        return self.ingest_text(collection, text, source=str(path))
+        return self.ingest_text(
+            collection, text, source=str(path), subject=subject,
+            trust_tier=trust_tier, sensitivity=sensitivity, ingested_by=ingested_by)
+
+    # --- governance: erasure + verification over provenance -------------------
+
+    def collections(self) -> list[str]:
+        """Every collection the backing store holds (the erasure sweep surface).
+        Empty when the store predates the ``collections()`` primitive."""
+        fn = getattr(self.store, "collections", None)
+        return list(fn()) if callable(fn) else []
+
+    def erase_subject(self, subject: str, collections=None) -> dict[str, int]:
+        """Delete every chunk belonging to ``subject`` (GDPR Art. 17).
+
+        Sweeps the given collections (or every collection when ``None``) and
+        removes chunks whose provenance ``subject`` matches. Returns
+        ``{collection: chunks_removed}`` for the non-empty deletions — the
+        evidence a caller records to the signed audit chain.
+        """
+        if not subject:
+            return {}
+        cols = list(collections) if collections is not None else self.collections()
+        out: dict[str, int] = {}
+        for c in cols:
+            n = self.store.delete_where(c, "subject", subject)
+            if n:
+                out[c] = n
+        return out
+
+    def erase_source(self, source: str, collections=None) -> dict[str, int]:
+        """Delete every chunk from one document ``source`` (retract a document).
+        Same shape as :meth:`erase_subject`."""
+        if not source:
+            return {}
+        cols = list(collections) if collections is not None else self.collections()
+        out: dict[str, int] = {}
+        for c in cols:
+            n = self.store.delete_where(c, "source", source)
+            if n:
+                out[c] = n
+        return out
+
+    def count_subject(self, subject: str, collections=None) -> int:
+        """Residual chunks for ``subject`` — the erasure-verify primitive
+        (should be 0 after :meth:`erase_subject`)."""
+        if not subject:
+            return 0
+        cols = list(collections) if collections is not None else self.collections()
+        return sum(self.store.count_where(c, "subject", subject) for c in cols)
 
     def delete_collection(self, collection: str) -> None:
         """Delete an unapproved or retired collection from the backing store."""

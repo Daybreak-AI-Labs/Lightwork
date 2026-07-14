@@ -1150,16 +1150,22 @@ def pick_knowledge() -> dict[str, Any]:
     store = _q_select(
         "  Vector store:",
         [
-            "sqlite   - single-file, local (recommended to start)",
-            "pgvector - Postgres + pgvector (scale / shared)",
+            "sqlite   - single-file, local (default; fine to a few million chunks)",
+            "pgvector - Postgres + pgvector (enterprise: one DB to encrypt/back up/audit)",
+            "qdrant   - Qdrant (scale / dedicated retrieval infra)",
         ],
-        default="sqlite   - single-file, local (recommended to start)",
+        default="sqlite   - single-file, local (default; fine to a few million chunks)",
     ).split()[0]
     out["store"] = store
     if store == "pgvector":
-        dsn = _q_text("  pgvector DSN (blank = PGVECTOR_DSN env)", default="").strip()
+        dsn = _q_text("  pgvector DSN (blank = MAVERICK_KNOWLEDGE_DSN env)",
+                      default="").strip()
         if dsn:
             out["dsn"] = dsn
+    elif store == "qdrant":
+        url = _q_text("  Qdrant URL (blank = QDRANT_URL env)", default="").strip()
+        if url:
+            out["url"] = url
     return out
 
 
