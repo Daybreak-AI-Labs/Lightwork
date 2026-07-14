@@ -17,12 +17,15 @@ is where human-in-the-loop lives.
 from __future__ import annotations
 
 import re
+import threading
 import time
 from collections.abc import Callable
 from dataclasses import dataclass, field
 from typing import Any
 
 from .ir import (
+    MAX_FLOW_NODE_RETRIES,
+    MAX_FLOW_NODE_RETRY_SLEEP,
     NODE_ACTION,
     NODE_AGENT,
     NODE_APPROVAL,
@@ -38,6 +41,7 @@ from .ir import (
     NODE_WHILE,
     Flow,
     FlowNode,
+    max_node_retries,
 )
 
 # Run statuses ----------------------------------------------------------------
@@ -59,8 +63,8 @@ PAUSED_STATUSES = frozenset({
 ACTIVE_STATUSES = frozenset({"queued", "running"}) | PAUSED_STATUSES
 
 _WHILE_DEFAULT_CAP = 100   # while-loop iterations when the node sets no limit
+_PARALLEL_MAX_WORKERS = 8   # cap fan-out threads for the whole flow run
 
-_VAR = re.compile(r"\{\{\s*(.+?)\s*\}\}")
 _COND = re.compile(r"^\s*(\S+)\s*(==|!=|>=|<=|>|<|contains)\s*(.+?)\s*$")
 _FN_CALL = re.compile(r"^([a-zA-Z_]\w*)\s*\((.*)\)$")
 
@@ -76,10 +80,25 @@ def render(text: str, data: dict, *, allow_secrets: bool = False) -> str:
     Other render sites feed persisted flow data, prompts, or scoped inputs, so
     ``{{secret(...)}}`` must remain unavailable there.
     """
-    def _sub(m):
-        v = _eval_expr(m.group(1), data, allow_secrets=allow_secrets)
-        return m.group(0) if v is None else _as_text(v)
-    return _VAR.sub(_sub, str(text))
+    src = str(text)
+    out: list[str] = []
+    pos = 0
+    while True:
+        start = src.find("{{", pos)
+        if start < 0:
+            out.append(src[pos:])
+            break
+        end = src.find("}}", start + 2)
+        if end < 0:
+            out.append(src[pos:])
+            break
+        out.append(src[pos:start])
+        raw = src[start:end + 2]
+        expr = src[start + 2:end].strip()
+        v = _eval_expr(expr, data, allow_secrets=allow_secrets)
+        out.append(raw if v is None else _as_text(v))
+        pos = end + 2
+    return "".join(out)
 
 
 def _as_text(v: Any) -> str:
@@ -110,13 +129,66 @@ def _fn_slice(a: list) -> Any:
     return seq[start:end]
 
 
-# A nested UNBOUNDED quantifier (a group whose body has `*`/`+`, immediately
-# followed by another quantifier) is the classic catastrophic-backtracking
-# shape -- `(a+)+`, `(.*)*`, `(a+){2,}`. Python's `re` has no timeout, so we
-# reject the pattern outright rather than let it pin a shared worker.
-_REDOS_SHAPE = re.compile(r"\([^()]*[+*][^()]*\)[*+]|\([^()]*[+*][^()]*\)\{")
+# Python's backtracking ``re`` engine has no match timeout. Keep flow regexes
+# intentionally small and conservative: permit literal/character-class searches
+# and simple capture groups used for extraction, but reject constructs known to
+# create super-linear backtracking (alternation, nested groups, backreferences,
+# lookarounds, and quantified groups whose body is itself quantified).
 _REGEX_MAX_PATTERN = 200
 _REGEX_MAX_SUBJECT = 2000
+_GROUP_QUANTIFIERS = frozenset("*+?")
+
+
+def _regex_is_safe(pattern: str) -> bool:
+    """Return whether ``pattern`` stays within the flow-safe regex subset."""
+    in_class = False
+    escaped = False
+    groups: list[dict[str, bool]] = []
+    last_group_had_quantifier = False
+
+    for i, ch in enumerate(pattern):
+        if escaped:
+            if ch.isdigit() or ch in {"g", "k"}:
+                return False
+            escaped = False
+            last_group_had_quantifier = False
+            continue
+        if ch == "\\":
+            escaped = True
+            continue
+        if in_class:
+            if ch == "]":
+                in_class = False
+            continue
+        if ch == "[":
+            in_class = True
+            last_group_had_quantifier = False
+            continue
+        if ch == "|":
+            return False
+        if ch == "(":
+            if groups:
+                return False
+            if pattern[i + 1:i + 2] == "?":
+                return False
+            groups.append({"has_quantifier": False})
+            last_group_had_quantifier = False
+            continue
+        if ch == ")":
+            if not groups:
+                return False
+            last_group_had_quantifier = groups.pop()["has_quantifier"]
+            continue
+        if ch in _GROUP_QUANTIFIERS or ch == "{":
+            if groups:
+                groups[-1]["has_quantifier"] = True
+            elif last_group_had_quantifier:
+                return False
+            last_group_had_quantifier = False
+            continue
+        last_group_had_quantifier = False
+
+    return not escaped and not in_class and not groups
 
 
 def _fn_regex(a: list) -> str:
@@ -128,7 +200,7 @@ def _fn_regex(a: list) -> str:
     if len(a) < 2:
         return ""
     pattern = str(a[1])
-    if len(pattern) > _REGEX_MAX_PATTERN or _REDOS_SHAPE.search(pattern):
+    if len(pattern) > _REGEX_MAX_PATTERN or not _regex_is_safe(pattern):
         return ""
     subject = _as_text(a[0])[:_REGEX_MAX_SUBJECT]
     try:
@@ -360,7 +432,39 @@ def _order_operands(lhs: Any, rhs: Any) -> tuple[Any, Any]:
         return str(lhs), str(rhs)
 
 
-_AND_OR = re.compile(r"\s+(?:and|or)\s+", re.IGNORECASE)
+def _split_bool_ops(expr: str, op: str) -> list[str]:
+    """Split on a boolean operator only when it appears outside quotes."""
+    out: list[str] = []
+    cur: list[str] = []
+    quote: str | None = None
+    i = 0
+    op_len = len(op)
+    while i < len(expr):
+        ch = expr[i]
+        if quote:
+            cur.append(ch)
+            if ch == quote:
+                quote = None
+            i += 1
+            continue
+        if ch in "'\"":
+            quote = ch
+            cur.append(ch)
+            i += 1
+            continue
+        if (
+            expr[i : i + op_len].lower() == op
+            and (i == 0 or expr[i - 1].isspace())
+            and (i + op_len == len(expr) or expr[i + op_len].isspace())
+        ):
+            out.append("".join(cur).strip())
+            cur = []
+            i += op_len
+            continue
+        cur.append(ch)
+        i += 1
+    out.append("".join(cur).strip())
+    return out
 
 
 def eval_condition(expr: str, data: dict) -> bool:
@@ -371,10 +475,8 @@ def eval_condition(expr: str, data: dict) -> bool:
     ``and`` / ``or`` (``or`` of ``and`` groups, standard precedence), e.g.
     ``amount > 100 and region == 'EU'``. Unparsable predicates are falsey."""
     s = str(expr or "").strip()
-    if not _AND_OR.search(s):
-        return _eval_predicate(s, data)
-    for or_part in re.split(r"\s+or\s+", s, flags=re.IGNORECASE):
-        parts = [p for p in re.split(r"\s+and\s+", or_part, flags=re.IGNORECASE) if p.strip()]
+    for or_part in _split_bool_ops(s, "or"):
+        parts = [p for p in _split_bool_ops(or_part, "and") if p.strip()]
         if parts and all(_eval_predicate(p, data) for p in parts):
             return True
     return False
@@ -429,6 +531,7 @@ class _Ctx:
     resolve_flow: Callable[[str], Flow | None] | None = None
     flow_stack: set = field(default_factory=set)   # subflow ids on the call stack
     deadline: float | None = None                  # whole-flow wall-clock deadline
+    parallel_slots: Any = None                     # shared worker budget for fan-out
 
     def nested(self) -> _Ctx:
         # A copy that cannot pause (foreach body / subflow run straight). Shares
@@ -436,7 +539,8 @@ class _Ctx:
         # span the linear nesting.
         return _Ctx(self.agent_fn, self.action_fn, self.approve_fn, self.on_node,
                     self.now, allow_pause=False, resolve_flow=self.resolve_flow,
-                    flow_stack=self.flow_stack, deadline=self.deadline)
+                    flow_stack=self.flow_stack, deadline=self.deadline,
+                    parallel_slots=self.parallel_slots)
 
     def branched(self) -> _Ctx:
         # For a CONCURRENT parallel branch: its own flow_stack copy (independent
@@ -444,7 +548,8 @@ class _Ctx:
         # shared clock/deadline and the shared on_node sink.
         return _Ctx(self.agent_fn, self.action_fn, self.approve_fn, self.on_node,
                     self.now, allow_pause=False, resolve_flow=self.resolve_flow,
-                    flow_stack=set(self.flow_stack), deadline=self.deadline)
+                    flow_stack=set(self.flow_stack), deadline=self.deadline,
+                    parallel_slots=self.parallel_slots)
 
 
 def _render_params(node: FlowNode, data: dict) -> dict:
@@ -459,9 +564,10 @@ def _invoke_work(node: FlowNode, data: dict, ctx: _Ctx):
         return ctx.action_fn(node, _render_params(node, data), data)
     if not (node.timeout and node.timeout > 0):
         return _call()
-    # Soft per-node timeout: run the executor on a worker thread and give up
-    # waiting after `timeout`s (Python can't kill the thread, so the abandoned
-    # call finishes on its own -- but the flow stops blocking on it).
+    # Soft per-node timeout: run the executor on a worker thread and report a
+    # timeout if it runs too long. Python cannot kill a running thread safely,
+    # so on timeout we MUST wait for the callable to finish before retrying or
+    # continuing; otherwise crafted flows can accumulate abandoned work.
     import concurrent.futures as _cf
     ex = _cf.ThreadPoolExecutor(max_workers=1)
     fut = ex.submit(_call)
@@ -470,11 +576,8 @@ def _invoke_work(node: FlowNode, data: dict, ctx: _Ctx):
         ex.shutdown(wait=False)
         return res
     except _cf.TimeoutError:
-        ex.shutdown(wait=False)          # don't block on the runaway call
+        ex.shutdown(wait=True, cancel_futures=True)
         return (f"ERROR: node timed out after {node.timeout}s", 0.0)
-
-
-_MAX_RETRY_BACKOFF = 30.0   # cap a single backoff wait so a big N can't stall a worker
 
 
 def _run_work(node: FlowNode, data: dict, ctx: _Ctx) -> str | None:
@@ -484,12 +587,16 @@ def _run_work(node: FlowNode, data: dict, ctx: _Ctx) -> str | None:
     # growing interval between attempts (capped) instead of re-hammering instantly;
     # backoff 0 keeps the original tight loop (and adds no sleep to existing flows).
     backoff = max(0.0, node.retry_backoff)
+    retries = min(max(0, node.retries), MAX_FLOW_NODE_RETRIES)
     result: Any = None
     outcome: float | None = None
     last_exc: Exception | None = None
-    for attempt in range(max(0, node.retries) + 1):
+    retries = min(max(0, node.retries), max_node_retries())
+    for attempt in range(retries + 1):
+        if ctx.deadline is not None and ctx.now() > ctx.deadline:
+            raise RuntimeError("flow exceeded its wall-clock deadline during node retries")
         if attempt and backoff:
-            time.sleep(min(_MAX_RETRY_BACKOFF, backoff * (2 ** (attempt - 1))))
+            _sleep_retry_backoff(ctx, min(MAX_FLOW_NODE_RETRY_SLEEP, backoff * (2 ** (attempt - 1))))
         try:
             result, outcome = _invoke_work(node, data, ctx)
             last_exc = None
@@ -510,6 +617,20 @@ def _run_work(node: FlowNode, data: dict, ctx: _Ctx) -> str | None:
     if outcome == 0.0 and node.on_error:
         return node.on_error
     return node.next
+
+
+def _sleep_retry_backoff(ctx: _Ctx, seconds: float) -> None:
+    if seconds <= 0:
+        return
+    if ctx.deadline is None:
+        time.sleep(seconds)
+        return
+    remaining = ctx.deadline - ctx.now()
+    if remaining <= 0:
+        raise RuntimeError("flow exceeded its wall-clock deadline during retry backoff")
+    time.sleep(min(seconds, remaining))
+    if seconds > remaining:
+        raise RuntimeError("flow exceeded its wall-clock deadline during retry backoff")
 
 
 def _run_subflow(node: FlowNode, data: dict, ctx: _Ctx) -> str | None:
@@ -647,12 +768,34 @@ def _run_foreach(node: FlowNode, data: dict, ctx: _Ctx) -> str | None:
             sub = dict(data)
             sub[node.var] = item
             subs.append(sub)
-        workers = min(len(subs), _PARALLEL_MAX_WORKERS)
-        with _cf.ThreadPoolExecutor(max_workers=workers) as ex:
-            futs = [ex.submit(_run_chain, node.body, sub, ctx.branched(), node.body.start)
-                    for sub in subs]
-            for f in futs:
-                f.result()
+        threaded = []
+        inline = []
+        for sub in subs:
+            if ctx.parallel_slots is not None and ctx.parallel_slots.acquire(blocking=False):
+                threaded.append(sub)
+            else:
+                inline.append(sub)
+        first_error = None
+        if threaded:
+            with _cf.ThreadPoolExecutor(max_workers=len(threaded)) as ex:
+                futs = [ex.submit(_run_chain_with_parallel_slot, node.body, sub,
+                                  ctx.branched(), node.body.start)
+                        for sub in threaded]
+                for sub in inline:
+                    try:
+                        _run_chain(node.body, sub, ctx.branched(), node.body.start)
+                    except Exception as e:
+                        first_error = first_error or e
+                for f in futs:
+                    try:
+                        f.result()
+                    except Exception as e:
+                        first_error = first_error or e
+        else:
+            for sub in inline:
+                _run_chain(node.body, sub, ctx.branched(), node.body.start)
+        if first_error is not None:
+            raise first_error
         results = subs
     else:
         for item in items:
@@ -673,9 +816,6 @@ def _run_foreach(node: FlowNode, data: dict, ctx: _Ctx) -> str | None:
     return node.next
 
 
-_PARALLEL_MAX_WORKERS = 8   # cap fan-out threads per parallel node
-
-
 def _run_parallel(node: FlowNode, data: dict, ctx: _Ctx) -> str | None:
     base = dict(data)                     # frozen pre-parallel snapshot
     branch_outputs = [dict(base) for _ in node.branches]   # each isolated (sees only base)
@@ -685,12 +825,33 @@ def _run_parallel(node: FlowNode, data: dict, ctx: _Ctx) -> str | None:
         # (WAL + busy_timeout). A branch that raises propagates after the pool
         # joins the rest, so there are no leaked threads.
         import concurrent.futures as _cf
-        workers = min(len(node.branches), _PARALLEL_MAX_WORKERS)
-        with _cf.ThreadPoolExecutor(max_workers=workers) as ex:
-            futs = [ex.submit(_run_chain, br, sub, ctx.branched(), br.start)
-                    for br, sub in zip(node.branches, branch_outputs, strict=True)]
-            for f in futs:
-                f.result()                # wait for all; re-raise the first error
+        futs = []
+        inline = []
+        for br, sub in zip(node.branches, branch_outputs, strict=True):
+            if ctx.parallel_slots is not None and ctx.parallel_slots.acquire(blocking=False):
+                futs.append((br, sub))
+            else:
+                inline.append((br, sub))
+        first_error = None
+        if futs:
+            with _cf.ThreadPoolExecutor(max_workers=len(futs)) as ex:
+                futs = [ex.submit(_run_chain_with_parallel_slot, br, sub, ctx.branched(), br.start)
+                        for br, sub in futs]
+                for br, sub in inline:
+                    try:
+                        _run_chain(br, sub, ctx.branched(), br.start)
+                    except Exception as e:
+                        first_error = first_error or e
+                for f in futs:
+                    try:
+                        f.result()        # wait for all; re-raise the first error
+                    except Exception as e:
+                        first_error = first_error or e
+        else:
+            for br, sub in inline:
+                _run_chain(br, sub, ctx.branched(), br.start)
+        if first_error is not None:
+            raise first_error
     else:
         for br, sub in zip(node.branches, branch_outputs, strict=True):
             _run_chain(br, sub, ctx.nested(), br.start)
@@ -795,6 +956,14 @@ def _run_chain(flow: Flow, data: dict, ctx: _Ctx, start: str | None) -> None:
             raise RuntimeError(f"flow {flow.id!r} exceeded {limit} steps (cycle?)")
 
 
+def _run_chain_with_parallel_slot(flow: Flow, data: dict, ctx: _Ctx, start: str | None) -> None:
+    try:
+        _run_chain(flow, data, ctx, start)
+    finally:
+        if ctx.parallel_slots is not None:
+            ctx.parallel_slots.release()
+
+
 def run_flow(flow: Flow, *, agent_fn: AgentFn, action_fn: ActionFn,
              data: dict | None = None,
              approve_fn: Callable[[FlowNode, dict], str] | None = None,
@@ -814,7 +983,8 @@ def run_flow(flow: Flow, *, agent_fn: AgentFn, action_fn: ActionFn,
     ctx = _Ctx(agent_fn, action_fn, approve_fn, on_node or (lambda *_: None),
                _now, allow_pause=True, resolve_flow=resolve_flow,
                flow_stack={flow.id},   # so the top flow can't recurse into itself
-               deadline=(_now() + flow.max_seconds if flow.max_seconds and flow.max_seconds > 0 else None))
+               deadline=(_now() + flow.max_seconds if flow.max_seconds and flow.max_seconds > 0 else None),
+               parallel_slots=threading.BoundedSemaphore(_PARALLEL_MAX_WORKERS))
     if resume:
         data = dict(resume.get("data") or data or {})
         node = flow.node(resume.get("node_id"))

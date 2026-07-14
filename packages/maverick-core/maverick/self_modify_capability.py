@@ -61,6 +61,7 @@ _CLASS_PATTERNS: dict[str, tuple[str, ...]] = {
         # builtins. This matches the AST pass, which already flags eval/exec/
         # compile only as bare Names -- the regex now says the same thing.
         r"(?<![\w.])(eval|exec)\s*\(", r"(?<![\w.])compile\s*\(",
+        r"\bbuiltins\.(eval|exec|compile)\s*\(",
         # Obfuscation constructs that reach the same primitives past a literal
         # regex (getattr(os,'sy'+'stem'), __builtins__[...], base64/codecs
         # payloads). A regex screen can't catch every spelling, so a change that
@@ -205,10 +206,13 @@ class _CapVisitor(ast.NodeVisitor):
                 # getattr(x, "CONST") is static attribute access (== x.CONST); a
                 # single string-literal name is not dynamic. Flag any other form
                 # (variable/expression/concatenated name, or too few args to
-                # verify) -- fail toward flagging.
+                # verify) -- fail toward flagging. Literal names are resolved
+                # through the same attribute taxonomy as x.CONST, so dangerous
+                # static equivalents like getattr(os, "system") still classify.
                 name_arg = node.args[1] if len(node.args) >= 2 else None
-                if not (isinstance(name_arg, ast.Constant)
-                        and isinstance(name_arg.value, str)):
+                if isinstance(name_arg, ast.Constant) and isinstance(name_arg.value, str):
+                    self._add(self._literal_getattr_class(node.args[0], name_arg.value))
+                else:
                     self._add("dynamic_code")
             elif nm == "__import__":
                 self._add("dynamic_import")
@@ -237,6 +241,10 @@ class _CapVisitor(ast.NodeVisitor):
         self.generic_visit(node)
 
     @staticmethod
+    def _literal_getattr_class(value: ast.expr, attr: str) -> str | None:
+        return _CapVisitor._attr_class(ast.Attribute(value=value, attr=attr))
+
+    @staticmethod
     def _attr_class(f: ast.Attribute) -> str | None:
         attr = f.attr
         if attr in ("write_text", "write_bytes"):
@@ -260,6 +268,8 @@ class _CapVisitor(ast.NodeVisitor):
         if root == "codecs" and attr == "decode":
             return "dynamic_code"
         if root == "base64":
+            return "dynamic_code"
+        if root in ("builtins", "__builtins__") and attr in ("eval", "exec", "compile"):
             return "dynamic_code"
         if root in _NETWORK_ROOTS:
             return "network"

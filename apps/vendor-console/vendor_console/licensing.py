@@ -80,6 +80,7 @@ def _expiry_iso(expires: str | None) -> str | None:
 
 def issue_license(conn: sqlite3.Connection, *, customer_id: int, tier: str,
                   suites: list[str] | None = None, features: list[str] | None = None,
+                  features_denied: list[str] | None = None,
                   seats: int | None = None, expires: str | None = None,
                   grace_days: int = 14, actor: str = "system",
                   signing_key: str | None = None) -> License:
@@ -87,7 +88,12 @@ def issue_license(conn: sqlite3.Connection, *, customer_id: int, tier: str,
 
     This is also the **upsell** path: issuing a new license (e.g. Gold→Platinum,
     or +fleet) simply adds a newer row; :func:`active_license_doc` then serves it,
-    so a customer upgrades by picking up the new file — no redeploy."""
+    so a customer upgrades by picking up the new file — no redeploy.
+
+    ``features`` grants a gated feature à la carte below its tier;
+    ``features_denied`` switches one off even when the tier includes it —
+    together they are the console's per-feature checkboxes (see
+    ``maverick.entitlements.Entitlements.allows``)."""
     cust = store.get_customer(conn, customer_id)
     if cust is None:
         raise ValueError(f"no such customer: {customer_id}")
@@ -102,6 +108,8 @@ def issue_license(conn: sqlite3.Connection, *, customer_id: int, tier: str,
         "seats": seats, "issued_at": issued, "expires_at": exp,
         "grace_days": int(grace_days), "license_id": lic_id,
     }
+    if features_denied:
+        payload["features_denied"] = list(features_denied)
     doc = entitlements.sign_license(payload, signing_key or signing_key_hex())
     store.add_license(conn, customer_id=customer_id, license_id=lic_id, tier=tier,
                       suites=list(suites or []), features=list(features or []),
@@ -110,7 +118,9 @@ def issue_license(conn: sqlite3.Connection, *, customer_id: int, tier: str,
                       note="", created_by=actor)
     audit.record(conn, actor=actor, action="license.issue", target=cust.name,
                  detail={"license_id": lic_id, "tier": tier,
-                         "suites": list(suites or []), "expires_at": exp})
+                         "suites": list(suites or []),
+                         "features_denied": list(features_denied or []),
+                         "expires_at": exp})
     lic = store.get_license(conn, lic_id)
     assert lic is not None
     return lic
@@ -128,6 +138,74 @@ def revoke_license(conn: sqlite3.Connection, license_id: str, *, actor: str = "s
                      target=cust.name if cust else str(lic.customer_id),
                      detail={"license_id": license_id, "note": note})
     return ok
+
+
+# ---- the feature-access matrix (checkbox grid) ------------------------------
+
+def _tier_rank(tier: str | None, *, unknown: int = -1) -> int:
+    """Rank in the ordered ``models.TIERS`` tuple (basic < gold < platinum)."""
+    from .models import TIERS
+    return TIERS.index(tier) if tier in TIERS else unknown
+
+
+def feature_matrix(active_doc: dict | None) -> dict:
+    """The per-customer feature checkboxes, derived from the ONE canonical
+    registry (``maverick.entitlements.GATED_FEATURES`` / ``GATED_SUITES``) plus
+    the customer's active license doc. Returns::
+
+        {"tier": "gold" | None,
+         "features": [{"name", "min_tier", "enabled", "source"}, ...],
+         "suites":   [{"name", "enabled"}, ...],
+         "extra":    ["custom_feature", ...]}   # grants outside the registry
+
+    ``source`` explains WHY a box is checked/unchecked: ``tier`` (included in
+    the tier), ``grant`` (à-la-carte add), ``denied`` (explicitly off despite
+    tier), or ``off`` (below tier, not granted). The issue form posts the same
+    checkbox names back and :func:`grants_from_checkboxes` turns them into the
+    minimal ``features``/``features_denied`` lists for the new license."""
+    doc = active_doc or {}
+    tier = doc.get("tier")
+    rank = _tier_rank(tier)
+    granted = set(doc.get("features") or [])
+    denied = set(doc.get("features_denied") or [])
+    lic_suites = set(doc.get("suites") or [])
+    features = []
+    for name, min_tier in sorted(entitlements.GATED_FEATURES.items()):
+        in_tier = rank >= _tier_rank(min_tier, unknown=99)
+        if name in denied:
+            enabled, source = False, "denied"
+        elif in_tier:
+            enabled, source = True, "tier"
+        elif name in granted:
+            enabled, source = True, "grant"
+        else:
+            enabled, source = False, "off"
+        features.append({"name": name, "min_tier": min_tier,
+                         "enabled": enabled, "source": source})
+    suites = [{"name": s, "enabled": s in lic_suites}
+              for s in sorted(entitlements.GATED_SUITES)]
+    extra = sorted(granted - set(entitlements.GATED_FEATURES))
+    return {"tier": tier, "features": features, "suites": suites, "extra": extra}
+
+
+def grants_from_checkboxes(tier: str, checked: list[str],
+                           extra: list[str] | None = None) -> tuple[list[str], list[str]]:
+    """Turn the posted checkbox state into minimal license lists.
+
+    For each registry feature: checked below tier → explicit grant; unchecked
+    within tier → explicit denial; otherwise the tier already says it. ``extra``
+    passes through unregistered custom grants unchanged. Returns
+    ``(features, features_denied)``."""
+    rank = _tier_rank(tier)
+    on = set(checked)
+    grants, denials = list(extra or []), []
+    for name, min_tier in sorted(entitlements.GATED_FEATURES.items()):
+        in_tier = rank >= _tier_rank(min_tier, unknown=99)
+        if name in on and not in_tier:
+            grants.append(name)
+        elif name not in on and in_tier:
+            denials.append(name)
+    return grants, denials
 
 
 # ---- resolve what to serve / display ---------------------------------------

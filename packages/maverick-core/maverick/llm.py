@@ -339,16 +339,44 @@ def _canonical_spec(spec: str) -> str:
 
 
 def _cheapest_allowed(allow: list[str]) -> str:
-    """The cheapest model in ``allow`` by published output price (input price as
-    a tie-break), name-sorted for determinism. Unknown-priced models rank last so
-    a known cheap model wins. The allow-list fallback uses this instead of
-    ``sorted(allow)[0]`` (lexicographic, cost-blind)."""
+    """The cheapest model in ``allow`` by billable output price (input price as
+    a tie-break), name-sorted for determinism. Unknown-priced models rank last,
+    but subscription/self-hosted provider prefixes that the budget layer prices
+    at zero must win over paid hosted models. The allow-list fallback uses this
+    instead of ``sorted(allow)[0]`` (lexicographic, cost-blind)."""
+
     def rank(spec: str):
-        model_id = _parse_spec(spec)[1]
-        price = MODEL_PRICES.get(model_id)
+        price = _allowlist_rank_price(spec)
         out_in = (price[1], price[0]) if price else (float("inf"), float("inf"))
         return (*out_in, spec)
+
     return min(allow, key=rank)
+
+
+def _allowlist_rank_price(spec: str) -> tuple[float, float] | None:
+    """Return the price used for allow-list fallback ranking.
+
+    Keep this in step with ``budget._lookup_price`` for billable choices that
+    are known to be free or explicitly priced. Genuinely unknown hosted models
+    still rank last instead of inheriting the budget fallback estimate, because
+    an allow-list fallback should not prefer an unverified price over a known
+    cheap model.
+    """
+    provider, model_id = _parse_spec(spec)
+    if provider == "codex_cli":
+        return 0.0, 0.0
+    if spec in MODEL_PRICES:
+        return MODEL_PRICES[spec]
+    if model_id in MODEL_PRICES:
+        return MODEL_PRICES[model_id]
+    from .cost.router import price_for_model
+
+    priced = price_for_model(spec) or price_for_model(model_id)
+    if priced is not None:
+        return priced
+    if provider in ("ollama", "vllm", "tgi"):
+        return 0.0, 0.0
+    return None
 
 
 def _allowlist_filter_fallbacks(models: list[str]) -> list[str]:
@@ -385,14 +413,47 @@ def _record_provider_call(provider: str) -> None:
 
 def _feed_circuit(provider: str, error: bool) -> None:
     """Record a provider call's outcome on its circuit breaker so repeated
-    failures trip it (observable via ``maverick diag circuits``). Observe-only
-    here -- it does not short-circuit the call path. Never raises."""
+    failures trip it (observable via ``maverick diag circuits``). This is the
+    recorder half; ``_circuit_open`` is the enforcer half that consults the
+    state before dispatch. Never raises."""
     try:
         from .circuit_breaker import get
         br = get(f"llm:{provider}")
         br.record_failure() if error else br.record_success()
     except Exception:  # pragma: no cover -- breaker never blocks a call
         pass
+
+
+def _circuit_open(provider: str) -> bool:
+    """True only if this provider's circuit breaker is definitively OPEN.
+
+    Read BEFORE dispatch so an outage window fast-fails instead of hammering a
+    dead provider (``complete``/``complete_async``). Fails SAFE: any
+    breaker-INTERNAL error (import / registry / state read) returns False, so
+    breaker bookkeeping can never block an otherwise healthy call -- only a
+    cleanly-observed OPEN state short-circuits. HALF_OPEN returns False so the
+    single cooldown probe is allowed through; ``_feed_circuit`` records its
+    outcome and resolves the state."""
+    try:
+        from .circuit_breaker import CircuitState, get
+        return get(f"llm:{provider}").state is CircuitState.OPEN
+    except Exception:  # pragma: no cover -- breaker never blocks a call
+        return False
+
+
+def _enforce_circuit(provider: str) -> None:
+    """Fast-fail BEFORE dispatch when this provider's breaker is OPEN.
+
+    Raises ``CircuitOpen`` -- a transient provider signal the failover chain
+    treats as retryable (``should_retry_llm_error`` lets it through since it is
+    not a budget/egress/preflight/consent control error, and ``classify_error``
+    buckets it ``"other"``, in the default failover set). So a configured chain
+    moves to the next model and, chain or not, a dead-provider timeout is
+    skipped. No outcome is recorded (the call never ran). Fails safe: a
+    breaker-internal error proceeds (see ``_circuit_open``)."""
+    if _circuit_open(provider):
+        from .circuit_breaker import CircuitOpen
+        raise CircuitOpen(f"llm:{provider} breaker OPEN; skipping dispatch")
 
 
 def _safe_cap_projection(model_id, system, messages, tools, max_tokens,
@@ -829,6 +890,10 @@ class LLM:
             model_id, system, messages, tools, max_tokens, thinking_budget))
         _run_preflight(model_id, system, messages, tools, max_tokens)
         client = self._get_client(provider)
+        # Circuit-breaker enforcement (the breaker was observe-only): if this
+        # provider's breaker is OPEN, fast-fail before dispatch. _feed_circuit
+        # below still records the real outcome; this only short-circuits.
+        _enforce_circuit(provider)
         kwargs: dict[str, Any] = dict(
             system=system, messages=messages, tools=tools, budget=budget,
             max_tokens=max_tokens, thinking_budget=thinking_budget, model=model_id,
@@ -968,6 +1033,9 @@ class LLM:
             model_id, system, messages, tools, max_tokens, thinking_budget))
         _run_preflight(model_id, system, messages, tools, max_tokens)
         client = self._get_client(provider)
+        # Circuit-breaker enforcement -- see complete(). OPEN fast-fails with a
+        # failover-retryable CircuitOpen before dispatch; fails safe.
+        _enforce_circuit(provider)
         import time as _time
         # complete_async is the PRIMARY agent-loop path; the sync complete()
         # had the chaos hook + trace span but this one didn't, so chaos

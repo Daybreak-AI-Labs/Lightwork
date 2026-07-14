@@ -411,8 +411,14 @@ def build_sandbox(
         ).expanduser()
         return DevcontainerBackend(
             project_dir=project_dir, timeout=timeout,
-            allow_network=_config_bool(full_cfg.get("allow_network"), True),
+            # Default OFF -- parity with docker/podman/kubernetes (--network
+            # none). Previously defaulted True, shipping weaker isolation than
+            # the DockerBackend this backend claims parity with.
+            allow_network=_config_bool(full_cfg.get("allow_network"), False),
             memory=full_cfg.get("memory", "4g"),
+            # Drop to the invoking uid:gid unless the operator opts into root,
+            # exactly like docker/podman.
+            allow_root=_config_bool(full_cfg.get("allow_root"), False),
         )
     if chosen == "kubernetes":
         return KubernetesBackend(

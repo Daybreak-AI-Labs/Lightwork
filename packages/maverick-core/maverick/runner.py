@@ -106,6 +106,7 @@ def run_goal_in_thread(
     user_id: str | None = None,
     capability: Any | None = None,
     concurrency_principal: str | None = None,
+    allowed_suites: frozenset[str] | None = None,
 ) -> str | None:
     """Synchronously run a goal under the global concurrency semaphore.
 
@@ -180,7 +181,7 @@ def run_goal_in_thread(
                 llm, world, budget,
                 goal_id, sandbox=sandbox, max_depth=max_depth,
                 channel=channel, user_id=user_id, capability=capability,
-                resume=True,
+                allowed_suites=allowed_suites, resume=True,
             )
         except Exception:
             # If the swarm raises an unexpected exception (anything not
@@ -246,6 +247,7 @@ class Dispatcher(Protocol):
         user_id: str | None = None,
         capability: Any | None = None,
         concurrency_principal: str | None = None,
+        allowed_suites: frozenset[str] | None = None,
     ) -> str | None: ...
 
 
@@ -265,12 +267,14 @@ class LocalThreadDispatcher:
         user_id: str | None = None,
         capability: Any | None = None,
         concurrency_principal: str | None = None,
+        allowed_suites: frozenset[str] | None = None,
     ) -> str | None:
         return run_goal_in_thread(
             goal_id=goal_id, max_dollars=max_dollars,
             max_wall_seconds=max_wall_seconds, max_depth=max_depth,
             channel=channel, user_id=user_id, capability=capability,
             concurrency_principal=concurrency_principal,
+            allowed_suites=allowed_suites,
         )
 
 
@@ -300,6 +304,7 @@ def run_goal_in_background(
     user_id: str | None = None,
     capability: Any | None = None,
     concurrency_principal: str | None = None,
+    allowed_suites: frozenset[str] | None = None,
 ) -> str | None:
     """Dispatch a goal through the active :class:`Dispatcher`. Defaults to
     in-process thread execution; ``set_dispatcher`` swaps in a task queue
@@ -310,4 +315,5 @@ def run_goal_in_background(
         max_wall_seconds=max_wall_seconds, max_depth=max_depth,
         channel=channel, user_id=user_id, capability=capability,
         concurrency_principal=concurrency_principal,
+        allowed_suites=allowed_suites,
     )

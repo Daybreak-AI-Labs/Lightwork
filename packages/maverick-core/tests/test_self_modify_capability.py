@@ -109,6 +109,16 @@ class TestAstDetection:
     def test_attribute_call_on_imported_module(self):
         assert "fs_write" in cap.classes_in_source("import shutil\nshutil.rmtree(d)")
 
+    def test_builtins_dynamic_exec_attribute_is_caught(self):
+        assert "dynamic_code" in cap.classes_in_source("import builtins\nbuiltins.eval(user)")
+
+    def test_literal_getattr_dangerous_attributes_are_caught(self):
+        assert "process" in cap.classes_in_source('import os\ngetattr(os, "system")("id")')
+        assert "fs_write" in cap.classes_in_source(
+            'import shutil\ngetattr(shutil, "rmtree")(path)')
+        assert "dynamic_code" in cap.classes_in_source(
+            'import builtins\ngetattr(builtins, "eval")(code)')
+
     def test_from_import_of_dangerous_name_flags_immediately(self):
         assert "process" in cap.classes_in_source("from subprocess import run")
 

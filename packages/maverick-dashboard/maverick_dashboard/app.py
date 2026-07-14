@@ -47,6 +47,7 @@ from maverick.oidc import VerifiedPrincipal
 from starlette.concurrency import run_in_threadpool
 from starlette.exceptions import HTTPException as StarletteHTTPException
 
+from . import auth_metrics as _auth_metrics
 from ._shared import (
     _any_provider_key_set,
     _get_sse_semaphore,
@@ -59,10 +60,12 @@ from .auth import (
     assert_goal_access,
     caller_principal,
     caller_role,
+    caller_suites,
     can_access_goal,
     can_access_goal_principal,
     execution_user_id_from_request,
     goal_owner_filter,
+    has_permission,
     require_permission,
     require_principal,
     websocket_caller_principal,
@@ -258,10 +261,20 @@ def _assert_dashboard_auth_configured() -> None:
             return
     except Exception:  # pragma: no cover
         pass
+    try:
+        # Email-invite local sessions count as a configured mechanism: with
+        # require_auth on, only a verified invite-minted session (or one of the
+        # modes above) passes the middleware — everything else 401s.
+        from .invites import invites_enabled
+        if invites_enabled():
+            return
+    except Exception:  # pragma: no cover
+        pass
     raise RuntimeError(
         "[dashboard] require_auth is set, but no auth mechanism is configured. "
-        "Set MAVERICK_DASHBOARD_TOKEN, enable OIDC ([auth.oidc]), or enable "
-        "reverse-proxy SSO ([auth.proxy]) -- refusing to serve the dashboard "
+        "Set MAVERICK_DASHBOARD_TOKEN, enable OIDC ([auth.oidc]), enable "
+        "reverse-proxy SSO ([auth.proxy]), or enable email invites "
+        "([dashboard] invites) -- refusing to serve the dashboard "
         "unauthenticated."
     )
 
@@ -318,10 +331,34 @@ async def _lifespan(app: FastAPI):
     from maverick.residency import require_residency_or_die
     require_residency_or_die()  # strict region pin (#41); no-op unless opted in
     _assert_dashboard_auth_configured()
+    # Loud warning if reverse-proxy SSO is on but no upstream is trusted
+    # (neither trusted_proxies pinned nor trust_loopback explicitly set) --
+    # the forwarded identity header is then refused from every peer.
+    try:
+        from maverick.proxy_auth import warn_if_untrusted_proxy_config
+        warn_if_untrusted_proxy_config()
+    except Exception:  # pragma: no cover -- a warning must never block startup
+        pass
     await _reclaim_orphans()
     await _install_queue_dispatcher()
     await _install_automation_scheduler()
+    # Connected-entitlement auto-refresh: a deployment with [license] api_url
+    # configured polls the vendor console so an upgrade/downgrade issued there
+    # lands within ~a minute — no redeploy, no manual refresh. No-op (returns
+    # None) without an API URL or with refresh_interval_seconds = 0, so tests
+    # and offline/air-gapped boxes are untouched. Fail-open by construction:
+    # the loop never raises and a failed poll leaves the license file in charge.
+    try:
+        from maverick.entitlements import start_refresher
+        await run_in_threadpool(start_refresher)
+    except Exception:  # pragma: no cover - never block startup
+        log.exception("license auto-refresh not started")
     yield
+    try:
+        from maverick.entitlements import stop_refresher
+        await run_in_threadpool(stop_refresher)
+    except Exception:  # pragma: no cover - shutdown must never raise
+        pass
     await _stop_automation_scheduler()
     # Graceful drain: give running goals a bounded window to finish. Bounded by
     # MAVERICK_DRAIN_TIMEOUT (default 25s, under the typical 30s
@@ -391,6 +428,12 @@ app.include_router(admin_pages_router)
 # flow isn't fully configured, so including the router unconditionally is inert
 # off by default. See maverick_dashboard.oidc_login.
 app.include_router(oidc_login_router)
+# Email invite links (/auth/invite/{token}): single-use onboarding links an
+# admin mints on /users. Self-gates on [dashboard] invites (default off), so
+# including it unconditionally is inert. See maverick_dashboard.invite_routes.
+from .invite_routes import router as invite_router  # noqa: E402
+
+app.include_router(invite_router)
 # SCIM 2.0 user provisioning (/scim/v2). Self-gates on MAVERICK_SCIM_TOKEN and
 # 404s when unset, so including it is inert off by default. It carries its own
 # static IdP bearer, so the /scim/ prefix is exempted from the dashboard-token
@@ -768,10 +811,15 @@ async def bearer_auth(request: Request, call_next):
     if (request.url.path in _AUTH_EXEMPT or request.url.path.startswith("/share/")
             or request.url.path.startswith("/scim/")
             or request.url.path.startswith("/form/")
-            or request.url.path.startswith("/saml/")):
+            or request.url.path.startswith("/saml/")
+            or request.url.path.startswith("/auth/invite/")):
         # /share/<token> self-authenticates with its signed, revocable token
         # (verified in the route, which 404s an invalid/expired/revoked one) --
         # an external recipient has no dashboard bearer, like the webhook paths.
+        # /auth/invite/<token> is the same shape: the invitee has no credential
+        # yet; the single-use token IS the auth, verified (and same-origin-
+        # gated on the consuming POST) in the route, which 404s when invites
+        # are disabled.
         return await call_next(request)
     if not expected:
         if _require_auth_enabled():
@@ -799,8 +847,25 @@ async def bearer_auth(request: Request, call_next):
                             status_code=403,
                         )
                     return await call_next(request)
+                # Email-invite local sessions (no IdP): a VERIFIED locally-
+                # minted mvk_session cookie satisfies require_auth, under the
+                # same same-origin CSRF gate as the other cookie-session modes.
+                # An absent/invalid cookie falls through to the fail-closed 401
+                # below — the invite-accept route itself is path-exempt above.
+                from .invites import invites_enabled, local_session_principal
+                if invites_enabled() and local_session_principal(request) is not None:
+                    if not _is_same_origin(request) and _allowed_extension_origin(request) is None:
+                        return JSONResponse(
+                            {"detail": "cross-site request blocked — for your "
+                                       "security, changes must be made from the "
+                                       "Lightwork page itself. Reload the "
+                                       "dashboard and try again."},
+                            status_code=403,
+                        )
+                    return await call_next(request)
             except Exception:  # pragma: no cover - fall through to fail closed
                 pass
+            _auth_metrics.record_auth_failure("require_auth_no_mechanism")
             return JSONResponse(
                 {"detail": "dashboard require_auth is set but no auth mechanism accepted the request"},
                 status_code=401,
@@ -813,6 +878,7 @@ async def bearer_auth(request: Request, call_next):
         try:
             from maverick.client import client_binding_enforced
             if client_binding_enforced():
+                _auth_metrics.record_auth_failure("client_binding")
                 return JSONResponse(
                     {"detail": "Sign-in is required on this deployment — an "
                                "administrator must configure dashboard "
@@ -852,6 +918,25 @@ async def bearer_auth(request: Request, call_next):
                     status_code=403,
                 )
             return await call_next(request)
+        # A VERIFIED invite-minted session is a real credential: accept it for
+        # remote access in no-token mode (same-origin-gated like every other
+        # cookie mode), so an invites-only deployment works over the network
+        # without extra config. Anonymous remote requests still 401 below.
+        try:
+            from .invites import invites_enabled, local_session_principal
+            if invites_enabled() and local_session_principal(request) is not None:
+                if not _is_same_origin(request) and _allowed_extension_origin(request) is None:
+                    return JSONResponse(
+                        {"detail": "cross-site request blocked — for your "
+                                   "security, changes must be made from the "
+                                   "Lightwork page itself. Reload the "
+                                   "dashboard and try again."},
+                        status_code=403,
+                    )
+                return await call_next(request)
+        except Exception:  # pragma: no cover - invites must never open access
+            pass
+        _auth_metrics.record_auth_failure("remote_no_token")
         return JSONResponse(
             {"detail": "Remote access to this dashboard requires an access "
                        "token — an administrator must configure one for "
@@ -867,6 +952,9 @@ async def bearer_auth(request: Request, call_next):
     # ``Authorization: Bearer`` header.
     if header_token and hmac.compare_digest(header_token.encode(), expected.encode()):
         return await call_next(request)
+    # The bad/missing-bearer case — the credential-stuffing signal an alert
+    # rule watches (a flood here means someone is probing the token).
+    _auth_metrics.record_auth_failure("bad_token")
     return JSONResponse({"detail": "unauthorized"}, status_code=401)
 
 
@@ -1372,8 +1460,13 @@ async def workforce_page(request: Request) -> HTMLResponse:
     from maverick.operating_record import assemble
     from maverick.outcomes import firm_totals, worker_cards
 
+    from .auth import scope_to_suites
+
     w = _world()
-    depts = list_departments()
+    # Job-function scoping: mirror GET /api/v1/departments — a caller with a
+    # department grant sees only their departments.
+    depts = scope_to_suites(request, list_departments(),
+                            suite_of=lambda d: d.key, keep_none=False)
     owner = goal_owner_filter(request)
     firm = firm_totals(assemble(w, owner=owner)).to_dict()
     leaders = [c.to_dict() for c in worker_cards(w, top=5, owner=owner)]
@@ -1528,8 +1621,12 @@ async def deliverables_page(request: Request, role: str = "") -> HTMLResponse:
     With no explicit ``?role=``, defaults to the caller's own persona roles
     (``[personas]`` config) so a logged-in analyst lands on their deliverables;
     ``?role=all`` widens to everything, ``?role=<r>`` picks a single role."""
+    from .auth import scope_to_suites
     from .deliverables import build_inbox, persona_roles_for
-    specs = _deliverable_specs()
+    # Job-function scoping: a scoped caller's inbox lists only their
+    # departments' deliverable specs (plus generic packs), matching /agents.
+    specs = scope_to_suites(request, _deliverable_specs(),
+                            suite_of=lambda s: s.get("suite"))
     owner = goal_owner_filter(request)
     runs_by_domain: dict[str, list] = {}
     for s in specs:
@@ -1659,7 +1756,8 @@ async def learned_page(request: Request) -> HTMLResponse:
     on-disk generated tools, with a remove action per generated tool (#427)."""
     from .api import _learned_snapshot
     return templates.TemplateResponse(
-        request, "learned.html", _learned_snapshot(),
+        request, "learned.html",
+        _learned_snapshot(include_pending_items=has_permission(request, "admin")),
     )
 
 
@@ -1869,8 +1967,15 @@ async def compartments_page(request: Request) -> HTMLResponse:
     can see which sealed agents exist and the capability envelope each runs
     under -- the compartments a Rung-2 seal acts on."""
     try:
-        from maverick.domain import available_domains
-        domains = sorted(available_domains().values(), key=lambda d: d.name)
+        from maverick.domain import available_domains, suite_for
+
+        from .auth import scope_to_suites
+        # Job-function scoping: a scoped caller sees only their departments'
+        # sealed agents and capability envelopes, matching /agents (this page
+        # otherwise leaks every department's pack config).
+        domains = scope_to_suites(
+            request, sorted(available_domains().values(), key=lambda d: d.name),
+            suite_of=lambda d: suite_for(d.name))
     except Exception:  # never 500 the page if the factory layer is unavailable
         domains = []
     return templates.TemplateResponse(request, "compartments.html", {"domains": domains})
@@ -1894,11 +1999,18 @@ async def agents_page(request: Request) -> HTMLResponse:
     creating = request.query_params.get("new") in ("1", "true", "yes")
     try:
         from maverick.config import get_features
+        from maverick.domain import suite_for
         from maverick.domain_edit import list_agents, resolved_view
+
+        from .auth import scope_to_suites, suite_allowed
         editable = bool(get_features().get("pack_editing", True))
-        agents = list_agents()
+        # Job-function scoping: mirror GET /api/v1/agents — a caller with a
+        # department grant browses their departments' specialists plus generic
+        # packs; a non-granted selection renders nothing rather than its config.
+        agents = scope_to_suites(request, list_agents(),
+                                 suite_of=lambda a: a.get("suite"))
         name = request.query_params.get("name")
-        if name:
+        if name and suite_allowed(request, suite_for(name)):
             selected = resolved_view(name)
             creating = False  # editing an existing agent wins over the new form
     except Exception:  # never 500 the page if the factory layer is unavailable
@@ -1921,7 +2033,15 @@ async def assessments_page(request: Request) -> HTMLResponse:
     flows: list = []
     try:
         from maverick.domain_edit import list_agents
-        agents = [{"name": a["name"], "suite": a.get("suite")} for a in list_agents()]
+
+        from .auth import scope_to_suites
+        # Job-function scoping: the subject picker offers only the caller's
+        # departments' specialists, matching the scoped /agents roster (else a
+        # picked-but-403'd pack drives mixed failures mid-assessment).
+        agents = scope_to_suites(
+            request,
+            [{"name": a["name"], "suite": a.get("suite")} for a in list_agents()],
+            suite_of=lambda a: a.get("suite"))
     except Exception:  # never 500 the page if the factory layer is unavailable
         agents = []
     try:
@@ -3472,11 +3592,15 @@ async def chat_send(
     # Use the shared runner so this path gets the same concurrency cap,
     # budget defaults, and error handling as the REST API and MCP server.
     from maverick.runner import run_goal_in_thread
+    allowed_suites = caller_suites(request)
     user_id = execution_user_id_from_request(request)
     if user_id:
-        bg.add_task(run_goal_in_thread, goal_id, channel="dashboard", user_id=user_id)
+        bg.add_task(
+            run_goal_in_thread, goal_id,
+            channel="dashboard", user_id=user_id, allowed_suites=allowed_suites,
+        )
     else:
-        bg.add_task(run_goal_in_thread, goal_id)
+        bg.add_task(run_goal_in_thread, goal_id, allowed_suites=allowed_suites)
     return RedirectResponse(f"/chat/goal/{goal_id}", status_code=303)
 
 
@@ -5134,6 +5258,37 @@ def _readiness_deep_checks() -> tuple[bool, dict[str, str]]:
     return ok, checks
 
 
+def _health_should_redact() -> bool:
+    """Redact the auth-exempt health payloads (``/healthz``, ``/readyz``)
+    whenever ANY auth mechanism is configured -- a static token, OIDC, or
+    reverse-proxy SSO -- not only when ``MAVERICK_DASHBOARD_TOKEN`` is set.
+
+    The platform treats token, OIDC, and proxy SSO as three independent auth
+    mechanisms, so an OIDC-only or proxy-SSO deployment runs with the token
+    UNSET. Gating on the token alone left the exempt (unauthenticated) probe
+    payload leaking operational signal to anyone on the network: the llm_key
+    status, a live in-flight goal gauge, the shield/agent-trust/client-binding
+    posture, and -- on a DB failure -- the absolute world.db path/DSN. Redact
+    whenever the deployment is authenticated at all; local-dev (no auth) keeps
+    the full checks for debuggability. One helper so the sites can't drift.
+    """
+    if os.environ.get("MAVERICK_DASHBOARD_TOKEN"):
+        return True
+    try:
+        from maverick.oidc import oidc_enabled
+        if oidc_enabled():
+            return True
+    except Exception:  # pragma: no cover -- never weaken redaction on a lookup error
+        pass
+    try:
+        from maverick.proxy_auth import proxy_auth_enabled
+        if proxy_auth_enabled():
+            return True
+    except Exception:  # pragma: no cover -- never weaken redaction on a lookup error
+        pass
+    return False
+
+
 @app.get("/healthz")
 async def healthz() -> JSONResponse:
     """Deep health: DB writable, LLM provider key present, runner alive."""
@@ -5151,11 +5306,12 @@ async def healthz() -> JSONResponse:
         # Council security finding: /healthz is auth-exempt so an
         # unauthenticated caller probing it during a DB failure used to
         # learn the absolute world.db path (and therefore the OS
-        # username). Surface only the exception type when an
-        # MAVERICK_DASHBOARD_TOKEN is configured (i.e. we're on a
-        # potentially exposed deployment). Local-dev (no token set)
-        # keeps the full detail for debuggability.
-        if os.environ.get("MAVERICK_DASHBOARD_TOKEN"):
+        # username). Surface only the exception type when the deployment is
+        # authenticated at all (token, OIDC, or reverse-proxy SSO -- see
+        # _health_should_redact; an OIDC-/proxy-only deploy runs with the
+        # token UNSET). Local-dev (no auth) keeps the full detail for
+        # debuggability.
+        if _health_should_redact():
             checks["db"] = f"fail: {type(e).__name__}"
         else:
             checks["db"] = f"fail: {type(e).__name__}: {e}"
@@ -5177,13 +5333,13 @@ async def healthz() -> JSONResponse:
 
     status = "ok" if overall_ok else "degraded"
     # /healthz + /readyz are auth-exempt (LB/k8s probes can't carry a bearer).
-    # On a token-protected (i.e. potentially exposed) deployment, the detailed
+    # On an authenticated (i.e. potentially exposed) deployment, the detailed
     # `checks` block leaks operational signal to anyone on the network:
     # whether an LLM key is configured (llm_key: ok/missing) and a live
     # in-flight goal gauge. Mirror the DB-path redaction already done above and
     # collapse the exempt payload to just the status (LB probes only need the
-    # 200/503). Local-dev (no token) keeps the full checks for debuggability.
-    if os.environ.get("MAVERICK_DASHBOARD_TOKEN"):
+    # 200/503). Local-dev (no auth) keeps the full checks for debuggability.
+    if _health_should_redact():
         payload: dict[str, Any] = {"status": status}
     else:
         payload = {"status": status, "checks": checks}
@@ -5200,7 +5356,7 @@ async def readyz() -> JSONResponse:
     health_ok = health.status_code == 200
     deep_ok, deep_checks = await run_in_threadpool(_readiness_deep_checks)
     overall_ok = health_ok and deep_ok
-    if os.environ.get("MAVERICK_DASHBOARD_TOKEN"):
+    if _health_should_redact():
         payload: dict[str, Any] = {"status": "ok" if overall_ok else "not_ready"}
     else:
         import json as _json
@@ -5246,6 +5402,20 @@ async def metrics(request: Request) -> PlainTextResponse:
         "# TYPE maverick_max_concurrent_goals gauge",
         f"maverick_max_concurrent_goals {MAX_CONCURRENT_GOALS}",
     ]
+
+    # Auth failures by reason — a bad-token / credential-stuffing flood is
+    # otherwise invisible (each attempt only returned a 401). Always emit the
+    # counter (even at 0) so an alert rule has a series to watch from boot.
+    lines += [
+        "# HELP maverick_auth_failures_total Rejected dashboard/SCIM auth attempts by reason",
+        "# TYPE maverick_auth_failures_total counter",
+    ]
+    auth_failures = _auth_metrics.auth_failure_counts()
+    if not auth_failures:
+        lines.append('maverick_auth_failures_total{reason="none"} 0')
+    for reason, n in sorted(auth_failures.items()):
+        safe = reason.replace("\\", "\\\\").replace('"', '\\"').replace("\n", " ")
+        lines.append(f'maverick_auth_failures_total{{reason="{safe}"}} {n}')
 
     # Job-queue depth + dead-letter — a growing pending backlog or rising failed
     # (dead-letter) count is the leading ops signal the goal counts can't show

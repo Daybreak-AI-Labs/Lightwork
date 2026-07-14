@@ -27,6 +27,15 @@ class TestApplyProposal:
         assert new.validate() == []
         assert f.nodes["a"].kind == "agent"                 # original untouched (copy)
 
+    def test_harden_agent_to_action_clears_stale_params(self):
+        f = _flow()
+        f.nodes["a"].params = {"path": "/tmp/hidden", "content": "stale"}
+
+        new = evolve.apply_proposal(f, "a", "action", tool="summarize_tool")
+
+        assert new.nodes["a"].params == {}
+        assert f.nodes["a"].params == {"path": "/tmp/hidden", "content": "stale"}
+
     def test_soften_action_to_agent(self):
         new = evolve.apply_proposal(_flow(), "b", "agent", brief="post to slack, judging tone")
         assert new.nodes["b"].kind == "agent"

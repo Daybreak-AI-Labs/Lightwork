@@ -24,9 +24,10 @@ The candidate patch comes from a *proposer*. Two are provided:
   measurement and needs ``ANTHROPIC_API_KEY`` (or another provider). It is a thin
   seam here; the agent loop lives in ``benchmarks/swe_bench.py``.
 
-No Docker required: tests run via ``sandbox.exec`` in an isolated copy of the
-checked-out repo (Docker only buys a reproducible dependency env; a venv with the
-instance's deps installed works for the local/no-Docker path).
+External SWE-bench grading requires an isolated sandbox by default: tests run
+via ``sandbox.exec`` only after a caller supplies a sandbox factory (for example
+a container backend). The no-Docker/host-exec path is reserved for trusted local
+fixtures and requires an explicit ``--allow-host-exec`` acknowledgement.
 
     python benchmarks/swebench_governed.py --manifest instances.jsonl \
         --proposer oracle --keys ./keys --ledger ./swebench_ledger.json
@@ -131,6 +132,41 @@ def oracle_proposer(inst: Instance) -> str:
     return inst.gold_patch
 
 
+def _neutralized_filter_config(repo: Path) -> list[str]:
+    """Return ``git -c`` args that turn worktree-declared filters into no-ops.
+
+    The benchmark agent controls the checkout, including ``.gitattributes`` and
+    ``.git/info/attributes``. ``git add -N``/``git diff`` may invoke clean
+    filters named by those files, so discover any literal ``filter=<name>``
+    declarations and override those filter drivers before asking host git for a
+    patch.
+    """
+    import re
+
+    names: set[str] = set()
+    candidates = list(repo.rglob(".gitattributes"))
+    info_attributes = repo / ".git" / "info" / "attributes"
+    if info_attributes.exists():
+        candidates.append(info_attributes)
+
+    for path in candidates:
+        try:
+            text = path.read_text(encoding="utf-8", errors="replace")
+        except OSError:
+            continue
+        names.update(re.findall(r"(?:^|\s)filter=([A-Za-z0-9_.-]+)(?=$|\s)", text))
+
+    args: list[str] = []
+    for name in sorted(names):
+        args.extend([
+            "-c", f"filter.{name}.clean=cat",
+            "-c", f"filter.{name}.smudge=cat",
+            "-c", f"filter.{name}.process=",
+            "-c", f"filter.{name}.required=false",
+        ])
+    return args
+
+
 def _worktree_diff(repo: Path) -> str:
     """The agent's edits vs HEAD as a raw, git-appliable unified diff.
 
@@ -141,18 +177,24 @@ def _worktree_diff(repo: Path) -> str:
     the model's hand-written prose diff (which LLMs miscount -> "corrupt patch").
     ``git add -N`` first so brand-new files also appear. When HEAD is the grader
     test-fixture commit, this excludes test_patch by construction. Literal git
-    output, so it always applies with ``git apply -p1``. Hardened env mirrors
-    ``swe_bench._git_diff``."""
+    output, so it always applies with ``git apply -p1``. Hardened env (no
+    ext-diff/textconv, no global/system/local config) mirrors
+    ``swe_bench._git_diff`` while also refusing repository-local filter
+    configuration from the agent-controlled checkout (a filter driver could
+    otherwise run arbitrary commands during the diff)."""
     import subprocess
 
-    env = {"GIT_CONFIG_GLOBAL": os.devnull, "GIT_CONFIG_NOSYSTEM": "1",
+    env = {"GIT_CONFIG_GLOBAL": os.devnull, "GIT_CONFIG_LOCAL": os.devnull,
+           "GIT_CONFIG_NOSYSTEM": "1",
            "GIT_CONFIG_SYSTEM": os.devnull, "GIT_OPTIONAL_LOCKS": "0",
            "PATH": os.environ.get("PATH", "")}
     try:
-        subprocess.run(["git", "-C", str(repo), "add", "-N", "."],
+        filter_config = _neutralized_filter_config(repo)
+        git = ["git", *filter_config, "-C", str(repo)]
+        subprocess.run([*git, "add", "-N", "."],
                        capture_output=True, timeout=60, env=env)
         out = subprocess.run(
-            ["git", "-C", str(repo), "diff", "HEAD", "--no-ext-diff", "--no-textconv"],
+            [*git, "diff", "HEAD", "--no-ext-diff", "--no-textconv"],
             capture_output=True, text=True, timeout=60, env=env)
         return out.stdout or ""
     except (subprocess.SubprocessError, OSError):
@@ -171,13 +213,15 @@ def _desanitize_csv_patch(diff: str) -> str:
 
 
 # Benchmark env the coding agent needs, applied with setdefault so an operator
-# or the CLI can override any of them. Consent is deliberately NOT part of this
-# unconditional default set: agent_v0 consumes untrusted benchmark rows, so it
-# may auto-approve shell only after the sandbox gate below has verified an
-# isolated backend (or the operator explicitly opted in to host execution).
-# The rest mirror benchmarks/RUNBOOK_SWE_BENCH_VERIFIED.md: OPAQUE=1 is the
-# anti-cheat honesty gate (blocks test-file reads / git log -p / network),
-# MAX_STEPS bounds turns, LONG_CMD_TIMEOUT lets pytest run through the shell tool.
+# or the CLI can override any of them. These mirror
+# benchmarks/RUNBOOK_SWE_BENCH_VERIFIED.md: OPAQUE=1 is the anti-cheat honesty
+# gate (blocks test-file reads / git log -p / network), MAX_STEPS bounds turns,
+# LONG_CMD_TIMEOUT lets pytest run through the shell tool. Consent is deliberately
+# NOT part of this unconditional default set: agent_v0 consumes untrusted
+# benchmark rows, so llm_proposer may auto-approve shell only after the sandbox
+# gate has verified an isolated backend (or the operator explicitly opted in to
+# host execution), scopes it to a container-required sandbox, and restores it
+# after the run.
 _BENCH_ENV = {
     "MAVERICK_CODING_MODE": "1",
     "MAVERICK_BENCHMARK_OPAQUE": "1",
@@ -258,9 +302,13 @@ def llm_proposer(inst: Instance) -> str:
     it). Falls back to the agent's actual working-tree edits (:func:`_worktree_diff`,
     always ``git apply``-able) when no prose diff was emitted.
 
-    Sets the benchmark env (:data:`_BENCH_ENV`) via ``setdefault``. Shell consent
-    defaults to auto-approve only after this function verifies an isolated
-    sandbox backend, or after an explicit host-execution opt-in.
+    Sets the benchmark env (:data:`_BENCH_ENV`) via ``setdefault``. Fails closed
+    up front (:func:`_ensure_untrusted_agent_sandbox`) unless an isolated sandbox
+    backend is configured or the operator made an explicit host-execution opt-in.
+    Only then, when the operator did not explicitly choose a consent mode, does
+    the runner temporarily grant shell consent -- and still scoped to a
+    container-required sandbox -- so model-generated shell commands never default
+    to the unsandboxed local host backend.
 
     Writes a per-instance forensics sidecar (``<ledger-dir>/forensics/`` or
     ``MAVERICK_SWEBENCH_FORENSICS``) with the model's result text, both patch
@@ -274,52 +322,66 @@ def llm_proposer(inst: Instance) -> str:
             "MAVERICK_PROVIDER_READY=1 if another provider is configured in "
             "~/.maverick/config.toml). Use --proposer oracle for the keyless "
             "pipeline proof.")
+    # Fail closed before any env mutation or agent run: refuse untrusted
+    # benchmark rows unless an isolated sandbox backend is configured (or the
+    # operator opted in to host exec).
     _ensure_untrusted_agent_sandbox()
+    env_restore: dict[str, str | None] = {}
     for k, v in _BENCH_ENV.items():
-        os.environ.setdefault(k, v)
-    os.environ.setdefault("MAVERICK_CONSENT_MODE", "auto-approve")
+        if k not in os.environ:
+            env_restore[k] = None
+            os.environ[k] = v
+
+    auto_approve_shell = "MAVERICK_CONSENT_MODE" not in os.environ
+    if auto_approve_shell:
+        env_restore["MAVERICK_CONSENT_MODE"] = None
+        os.environ["MAVERICK_CONSENT_MODE"] = "auto-approve"
 
     from maverick.config import reset_config_cache
-    from swe_bench import run_maverick
 
-    base_sha = _git_head(inst.repo_path)
-    # Give the agent the GRADED tests so its own test verifier gives REAL
-    # feedback. The FAIL_TO_PASS/PASS_TO_PASS the agent is told to satisfy are
-    # added by the grader's test_patch, which does NOT exist at base_commit --
-    # so without this the agent runs "test not found" -> 0/N on everything,
-    # concludes its fix broke the suite, thrashes, and emits no diff (the
-    # observed failure). Commit test_patch as a fixture on top of base_commit:
-    # the tests now exist and run, opaque mode still blocks READING their
-    # source, and committing it keeps the candidate diff clean (git diff against
-    # this commit excludes the fixture).
-    fixture_sha = base_sha
-    if (inst.test_patch or "").strip() and base_sha:
-        if _commit_fixture(inst.repo_path, inst.test_patch):
-            fixture_sha = _git_head(inst.repo_path)
-
-    # Point the agent's sandbox at THIS instance's checkout. build_sandbox()
-    # reads [sandbox] workdir from config (default ~/maverick-workspace) and
-    # NEVER consults cwd -- the overlay is the one runtime knob it honors.
-    restore = _point_sandbox_at(inst.repo_path)
+    def restore():
+        return None
     row = tree_diff = prose_diff = None
     attempt1_cost = 0.0
-
-    def _attempt(brief_text: str):
-        # Reset to the fixture commit (base + test_patch), not bare base, so
-        # run_maverick's pre-run reset keeps the graded tests present.
-        r = run_maverick(
-            inst.instance_id, brief_text,
-            fail_to_pass=inst.fail_to_pass, pass_to_pass=inst.pass_to_pass,
-            gold_patch=inst.gold_patch, language=inst.language,
-            base_commit=fixture_sha)
-        # Candidate = the agent's source edits ONLY: diff against the fixture
-        # commit excludes the committed test_patch. Fall back to the desanitized
-        # prose diff if the tree is clean (agent emitted a diff without editing).
-        td = _worktree_diff(inst.repo_path)
-        pd = _desanitize_csv_patch(getattr(r, "predicted_patch", "") or "")
-        return r, td, pd
-
+    base_sha = ""
     try:
+        from swe_bench import run_maverick
+
+        base_sha = _git_head(inst.repo_path)
+        # Give the agent the GRADED tests so its own test verifier gives REAL
+        # feedback. The FAIL_TO_PASS/PASS_TO_PASS the agent is told to satisfy are
+        # added by the grader's test_patch, which does NOT exist at base_commit --
+        # so without this the agent runs "test not found" -> 0/N on everything,
+        # concludes its fix broke the suite, thrashes, and emits no diff (the
+        # observed failure). Commit test_patch as a fixture on top of base_commit:
+        # the tests now exist and run, opaque mode still blocks READING their
+        # source, and committing it keeps the candidate diff clean (git diff against
+        # this commit excludes the fixture).
+        fixture_sha = base_sha
+        if (inst.test_patch or "").strip() and base_sha:
+            if _commit_fixture(inst.repo_path, inst.test_patch):
+                fixture_sha = _git_head(inst.repo_path)
+
+        # Point the agent's sandbox at THIS instance's checkout. build_sandbox()
+        # reads [sandbox] workdir from config (default ~/maverick-workspace) and
+        # NEVER consults cwd -- the overlay is the one runtime knob it honors.
+        restore = _point_sandbox_at(inst.repo_path, require_container=auto_approve_shell)
+
+        def _attempt(brief_text: str):
+            # Reset to the fixture commit (base + test_patch), not bare base, so
+            # run_maverick's pre-run reset keeps the graded tests present.
+            r = run_maverick(
+                inst.instance_id, brief_text,
+                fail_to_pass=inst.fail_to_pass, pass_to_pass=inst.pass_to_pass,
+                gold_patch=inst.gold_patch, language=inst.language,
+                base_commit=fixture_sha)
+            # Candidate = the agent's source edits ONLY: diff against the fixture
+            # commit excludes the committed test_patch. Fall back to the desanitized
+            # prose diff if the tree is clean (agent emitted a diff without editing).
+            td = _worktree_diff(inst.repo_path)
+            pd = _desanitize_csv_patch(getattr(r, "predicted_patch", "") or "")
+            return r, td, pd
+
         row, tree_diff, prose_diff = _attempt(inst.brief)
         chosen = tree_diff if tree_diff.strip() else prose_diff
         # Round 4 (lever 2): retry ONCE if the first attempt produced no patch
@@ -343,6 +405,11 @@ def llm_proposer(inst: Instance) -> str:
         _dump_forensics(inst, row, tree_diff, prose_diff, extra_cost=attempt1_cost)
         restore()
         reset_config_cache()
+        for k, old in env_restore.items():
+            if old is None:
+                os.environ.pop(k, None)
+            else:
+                os.environ[k] = old
         # Restore the tree to the pristine base_commit (drop the fixture commit
         # AND the agent's edits) so the governed evaluator copies a clean base.
         _hard_reset(inst.repo_path, base_sha)
@@ -399,16 +466,21 @@ def _hard_reset(repo: Path, sha: str) -> None:
         log.warning("_hard_reset: could not reset %s", repo, exc_info=True)
 
 
-def _point_sandbox_at(repo: Path):
+def _point_sandbox_at(repo: Path, *, require_container: bool = False):
     """Redirect the agent's sandbox workdir to ``repo`` via a config overlay,
     reset the config cache so it takes effect, and return a restore() callable.
     build_sandbox() reads ``[sandbox] workdir`` from config and never consults
-    cwd; a MAVERICK_CONFIG_OVERLAY file is the runtime knob it honors."""
+    cwd; a MAVERICK_CONFIG_OVERLAY file is the runtime knob it honors. When
+    ``require_container`` is true, the overlay also refuses the unsandboxed
+    local backend before benchmark shell consent is auto-approved."""
     import tempfile
 
     from maverick.config import reset_config_cache
     overlay = Path(tempfile.gettempdir()) / f"mav_sbx_overlay_{os.getpid()}.toml"
-    overlay.write_text(f'[sandbox]\nworkdir = "{repo}"\n', encoding="utf-8")
+    body = f'[sandbox]\nworkdir = "{repo}"\n'
+    if require_container:
+        body += "require_container = true\n"
+    overlay.write_text(body, encoding="utf-8")
     prev = os.environ.get("MAVERICK_CONFIG_OVERLAY")
     os.environ["MAVERICK_CONFIG_OVERLAY"] = str(overlay)
     reset_config_cache()
@@ -531,6 +603,7 @@ def govern_candidate(
     timeout: float = 600.0,
     controller=None,
     check_gold_overlap: bool = True,
+    allow_host_exec: bool = False,
 ) -> GovernedResult:
     """Drive one candidate patch through the full governance chain. Never raises.
 
@@ -557,8 +630,14 @@ def govern_candidate(
         return out
 
     materialize = materialize or _default_materialize
-    apply = apply_fn or (lambda p, wd: git_apply(p, wd))
-    make_sb = sandbox_factory or (lambda wd: resolve_eval_sandbox(None, Path(wd)))
+    if sandbox_factory is None and not allow_host_exec:
+        def make_sb(wd):
+            raise RuntimeError(
+                "external SWE-bench evaluation requires an explicit sandbox_factory "
+                "or --allow-host-exec for trusted local fixtures; refusing to run "
+                "untrusted tests on the host")
+    else:
+        make_sb = sandbox_factory or (lambda wd: resolve_eval_sandbox(None, Path(wd)))
 
     # 1. Anti-cheat boundary -- structural, before any test is run.
     dv = defensive_validate(patch, fail_to_pass=inst.fail_to_pass,
@@ -597,24 +676,31 @@ def govern_candidate(
     except Exception as e:
         out.reason = f"could not isolate workspace: {e}"
         return out
-    applied = apply(patch, cand_dir)
-    if not getattr(applied, "ok", False):
-        out.reason = f"patch did not apply: {getattr(applied, 'reason', 'unknown')}"
-        return out
-    # test_patch (the grader's added/updated tests) to BOTH arms -- the graded
-    # FAIL_TO_PASS usually don't exist at base_commit.
-    if (inst.test_patch or "").strip():
-        for arm_name, arm_dir in (("baseline", base_dir), ("candidate", cand_dir)):
-            tp = apply(inst.test_patch, arm_dir)
-            if not getattr(tp, "ok", False):
-                out.reason = (f"grader test_patch did not apply to {arm_name}: "
-                              f"{getattr(tp, 'reason', 'unknown')}")
-                return out
     try:
         sb_base, sb_cand = make_sb(base_dir), make_sb(cand_dir)
     except Exception as e:
         out.reason = f"sandbox refused (isolation policy): {e}"
         return out
+    # Sandboxes exist first so patch application is routed through the governed
+    # backend (not the host). Apply the CANDIDATE first, then the grader's
+    # test_patch to BOTH arms -- the graded FAIL_TO_PASS usually don't exist at
+    # base_commit. The baseline arm gets ONLY test_patch (no candidate).
+    def _apply(p, wd, sb):
+        if apply_fn is not None:
+            return apply_fn(p, wd)
+        return git_apply(p, wd, sandbox=sb)
+    applied = _apply(patch, cand_dir, sb_cand)
+    if not getattr(applied, "ok", False):
+        out.reason = f"patch did not apply: {getattr(applied, 'reason', 'unknown')}"
+        return out
+    if (inst.test_patch or "").strip():
+        for arm_name, arm_dir, arm_sb in (
+                ("baseline", base_dir, sb_base), ("candidate", cand_dir, sb_cand)):
+            tp = _apply(inst.test_patch, arm_dir, arm_sb)
+            if not getattr(tp, "ok", False):
+                out.reason = (f"grader test_patch did not apply to {arm_name}: "
+                              f"{getattr(tp, 'reason', 'unknown')}")
+                return out
     out.baseline_score, base_all_pass, out.samples, base_f2p_pass, base_f2p_fail = _score(
         base_dir, inst, sb_base, timeout=timeout)
     # The graded FAIL_TO_PASS tests MUST fail at baseline -- that IS the bug.
@@ -820,6 +906,11 @@ def main(argv: list[str] | None = None) -> int:
                     help="per-instance agent wall-clock cap (sets MAVERICK_INSTANCE_WALL_SEC)")
     ap.add_argument("--agent-max-steps", type=int, default=None,
                     help="per-instance agent turn cap (sets MAVERICK_MAX_STEPS)")
+    ap.add_argument(
+        "--allow-host-exec", action="store_true",
+        help=("DANGEROUS: allow trusted local fixture tests to run on the host "
+              "when no sandbox factory/container is supplied. Do not use for "
+              "attacker-controlled repos, test commands, or patches."))
     args = ap.parse_args(argv)
 
     # Surface the env knobs run_maverick reads as first-class flags.
@@ -908,7 +999,8 @@ def main(argv: list[str] | None = None) -> int:
                 spend += cost
                 r = govern_candidate(inst, patch, keys_dir=args.keys, ledger=ledger,
                                      workroot=Path(td) / f"i{i}", timeout=args.timeout,
-                                     check_gold_overlap=(args.proposer != "oracle"))
+                                     check_gold_overlap=(args.proposer != "oracle"),
+                                     allow_host_exec=args.allow_host_exec)
                 tag = _verdict_tag(r)
                 if tag == "PASS":
                     resolved += 1

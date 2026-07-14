@@ -24,6 +24,11 @@ import sys
 from pathlib import Path
 from typing import Any
 
+try:
+    import tomllib  # Python 3.11+
+except ModuleNotFoundError:  # pragma: no cover -- Py 3.10 CI matrix
+    import tomli as tomllib  # type: ignore[no-redef]
+
 from rich.console import Console
 from rich.panel import Panel
 
@@ -1071,6 +1076,16 @@ def pick_flows() -> dict[str, Any]:
         return {"enable": False}
     out: dict[str, Any] = {"enable": True}
     console.print(
+        "[dim]Retries can recover transient agent/tool failures, but every retry "
+        "can spend provider budget or repeat side effects. Keep the per-node cap "
+        "small unless operations explicitly need more.[/dim]"
+    )
+    retry_cap = _q_text("Max retries per flow node", default="5").strip()
+    try:
+        out["max_node_retries"] = max(0, min(50, int(retry_cap or "5")))
+    except ValueError:
+        out["max_node_retries"] = 5
+    console.print(
         "[dim]For actionable channel approvals (clickable Approve/Reject links), "
         "the dashboard needs its externally-reachable base URL. Leave blank to "
         "skip -- approvals then happen from the dashboard.[/dim]"
@@ -1591,6 +1606,16 @@ def pick_advanced() -> dict[str, Any]:
             "inert until you set editable_paths. Pair with signed_approval.",
             default=False,
         ),
+        "adapter_rung": _q_confirm(
+            "Enable GOVERNED in-tenant weights adaptation? Train LoRA adapters for a "
+            "LOCAL open-weights base model on your own corrections and traces -- frontier-"
+            "model output is refused by default (distillation guard) -- and promote them "
+            "through the weights rung: held-out evidence, no new authority, Ed25519 human "
+            "signature, one-step rollback (maverick.adapter_rung). Nothing leaves the "
+            "tenant. Off by default AND inert until you set base_model; needs Ollama (or "
+            "compatible) serving and the [training] extra for real tuning.",
+            default=False,
+        ),
         "skill_synthesis": _q_confirm(
             "Test-time skill synthesis? Write a short task-specific cheat-sheet for "
             "each goal before working on it.",
@@ -2041,7 +2066,76 @@ def pick_advanced() -> dict[str, Any]:
     # its own prompt; the result is nested under the "oidc" key and the writer
     # emits a single [auth.oidc] table for it.
     advanced["oidc"] = pick_oidc()
+    # Department (job-function) scoping only bites once sign-in is on, so it is
+    # offered right after — writes under [dashboard]. Returns {} when declined.
+    advanced["department_access"] = pick_department_access(
+        bool(advanced["oidc"].get("enabled")))
     return advanced
+
+
+def _split_csv(text: str) -> list[str]:
+    return [t.strip() for t in (text or "").split(",") if t.strip()]
+
+
+def _collect_group_pairs(prompt: str, *, csv_value: bool) -> dict[str, Any]:
+    """Collect ``Group Name = value`` lines until a blank entry. ``csv_value``
+    parses the right side as a comma-separated list (departments) instead of a
+    single token (role)."""
+    out: dict[str, Any] = {}
+    while True:
+        line = _q_text(prompt, default="").strip()
+        if not line or "=" not in line:
+            break
+        name, _, rhs = line.partition("=")
+        name, rhs = name.strip(), rhs.strip()
+        if not name or not rhs:
+            continue
+        out[name] = _split_csv(rhs) if csv_value else rhs
+    return out
+
+
+def pick_department_access(sso_enabled: bool) -> dict[str, Any]:
+    """Opt-in department (job-function) scoping for authenticated users.
+
+    Only meaningful once sign-in is on (it keys on the authenticated
+    principal), so it is skipped entirely when SSO is off. Collects the
+    deny-by-default department set and optional SCIM-group -> role / department
+    mappings, written under ``[dashboard]``. Returns ``{}`` when declined, so a
+    default install is unchanged.
+    """
+    if not sso_enabled:
+        return {}
+    console.print(
+        "[dim]Department scoping limits which specialist teams each signed-in "
+        "user can see and run — a finance analyst gets the Finance department, "
+        "not Legal. OFF by default (everyone sees every department); you can "
+        "always assign per-user access later on the dashboard Users page.[/dim]"
+    )
+    if not _q_confirm("Restrict users to specific departments by default?",
+                      default=False):
+        return {}
+    result: dict[str, Any] = {
+        "default_suites": _split_csv(_q_text(
+            "  Departments a new user may use until granted more (comma-separated "
+            "suite keys, e.g. finance,tax; blank = none)", default="")),
+    }
+    console.print(
+        "[dim]Optional: if your IdP pushes groups via SCIM, map a group to a "
+        "role and/or departments so access follows team membership. Enter one "
+        "'Group Name = value' per line; blank line to finish.[/dim]"
+    )
+    if _q_confirm("  Map IdP (SCIM) groups to roles/departments now?",
+                  default=False):
+        roles = _collect_group_pairs(
+            "    Group -> role (e.g. Finance Team=operator)", csv_value=False)
+        suites = _collect_group_pairs(
+            "    Group -> departments (e.g. Finance Team=finance,tax)",
+            csv_value=True)
+        if roles:
+            result["group_roles"] = roles
+        if suites:
+            result["group_suites"] = suites
+    return result
 
 
 def _docker_available() -> bool:
@@ -2759,6 +2853,16 @@ def pick_license() -> dict[str, Any]:
         # The API token is a secret: reference an env var, never inline it
         # (config.toml interpolates ${VAR}; the value lives in ~/.maverick/.env).
         out["api_token"] = "${MAVERICK_LICENSE_API_TOKEN}"
+        # Near-instant propagation: the dashboard polls the API on this
+        # interval so an upgrade issued in the vendor console lights up
+        # without a redeploy. 0 disables; the kernel floors it at 30s.
+        interval = _q_text("    Auto-refresh interval in seconds "
+                           "(blank = 60, 0 = manual refresh only)", default="")
+        if interval.strip():
+            try:
+                out["refresh_interval_seconds"] = int(interval.strip())
+            except ValueError:
+                pass  # keep the 60s default rather than fail the wizard
     return out
 
 
@@ -2770,6 +2874,21 @@ def _cfg_deployment(deployment: str | None) -> list[str]:
     return [
         "[deployment]",
         f"type = {_toml_str(str(deployment))}",
+        "",
+    ]
+
+
+def _cfg_governance(profile: str | None) -> list[str]:
+    if not profile:
+        return []
+    # Record the governance level chosen at onboarding. This is a label for
+    # humans + dashboards: the enforceable knobs it expanded to ([audit],
+    # [quotas], [self_improvement], retention, ...) are written explicitly
+    # elsewhere in this file, so hand-edits keep working. Re-run
+    # `maverick init` to switch levels.
+    return [
+        "[governance]",
+        f"profile = {_toml_str(str(profile))}   # essentials | standard | regulated | custom",
         "",
     ]
 
@@ -3113,6 +3232,14 @@ def _cfg_advanced(  # noqa: C901 - flat sequence of independent opt-in toggles
             or advanced.get("evaluator_evolution") or advanced.get("signed_approval")):
         lines.append("")
         lines.append("[self_improvement]")
+        if (advanced.get("causal_promotion") or advanced.get("evaluator_evolution")
+                or advanced.get("signed_approval")):
+            # Every sub-toggle below rides the promotion ladder, and the ladder
+            # is off by default (self_improvement.enabled()). Without this line
+            # evaluator_evolution / require_signed_approval are written but
+            # inert -- a config that CLAIMS governance it never runs. Opting
+            # out of factory_learning alone does not turn the ladder on.
+            lines.append("enable = true")
         if advanced.get("causal_promotion"):
             lines.append("# Promote learned changes on their confounder-adjusted causal")
             lines.append("# effect (maverick.promotion_effect), not a correlation. Applies")
@@ -3149,6 +3276,21 @@ def _cfg_advanced(  # noqa: C901 - flat sequence of independent opt-in toggles
         lines.append("# without it every proposal is refused 'self-improvement disabled'.")
         lines.append("enable = true")
         lines.append('# editable_paths = ["packages/maverick-core/maverick/domains/*.toml"]')
+    if advanced.get("adapter_rung"):
+        lines.append("")
+        lines.append("[adapter_rung]")
+        lines.append("# Governed in-tenant weights adaptation (maverick.adapter_rung):")
+        lines.append("# LoRA adapters trained on YOUR corrections/traces, promoted through")
+        lines.append("# the weights rung (held-out evidence + non-escalation + Ed25519")
+        lines.append("# approval + one-step rollback). Frontier-model output is refused as")
+        lines.append("# training data unless allow_model_output = true (distillation guard).")
+        lines.append("# Inert until base_model is set to YOUR local serving spec; prefer an")
+        lines.append("# Apache-2.0/MIT base so no vendor can restrict the tenant's model.")
+        lines.append("enable = true")
+        lines.append('# base_model = "ollama:<model-id>"   # e.g. an Apache-2.0 Qwen3 size')
+        lines.append('# trainer = "dpo-lora"               # needs the [training] extra')
+        lines.append("# allow_synthetic = false")
+        lines.append("# allow_model_output = false")
     if advanced.get("rehearsal"):
         lines.append("")
         lines.append("[rehearsal]")
@@ -3192,6 +3334,8 @@ def _cfg_advanced(  # noqa: C901 - flat sequence of independent opt-in toggles
         lines.append("# delay) over agentic + tool steps; migrated workflows keep their shape")
         lines.append("# while any node can still be a full agentic goal (maverick.flow).")
         lines.append("enable = true")
+        lines.append("# Per-node retry cap; bounds repeated provider/tool calls.")
+        lines.append("max_node_retries = 5")
         if advanced.get("flows_auto_evolve"):
             lines.append("# Autonomously revert a node rewrite whose grounded outcomes")
             lines.append("# regressed (the loop undoes its own bad changes).")
@@ -3523,6 +3667,32 @@ def _cfg_advanced(  # noqa: C901 - flat sequence of independent opt-in toggles
             val = oidc.get(key)
             if val:
                 _emit_kv(lines, key, val)
+    dept = advanced.get("department_access") or {}
+    if isinstance(dept, dict) and (dept.get("default_suites")
+                                   or dept.get("group_roles")
+                                   or dept.get("group_suites")):
+        # Department (job-function) scoping for signed-in users. default_suites
+        # is deny-by-default for users with no explicit grant; the group tables
+        # turn IdP (SCIM) team membership into a role / department grant.
+        lines.append("")
+        lines.append("[dashboard]")
+        if dept.get("default_suites"):
+            lines.append("# Departments a signed-in user may use until an admin "
+                         "grants more.")
+            _emit_kv(lines, "default_suites", list(dept["default_suites"]))
+        # Group names contain spaces, so the TOML key must be a quoted string
+        # ("Finance Team" = ...), not the bare key _emit_kv would render.
+        if dept.get("group_roles"):
+            lines.append("")
+            lines.append("[dashboard.group_roles]")
+            for group, role in dept["group_roles"].items():
+                lines.append(f"{_toml_str(group)} = {_toml_str(role)}")
+        if dept.get("group_suites"):
+            lines.append("")
+            lines.append("[dashboard.group_suites]")
+            for group, suites in dept["group_suites"].items():
+                rendered = ", ".join(_toml_str(s) for s in suites)
+                lines.append(f"{_toml_str(group)} = [{rendered}]")
     if advanced.get("saml"):
         lines.append("")
         # SAML 2.0 SP browser SSO (alongside OIDC). Fill in the SP/IdP details
@@ -3672,6 +3842,7 @@ def write_config(
     deployment: str | None = None,
     suites: dict[str, bool] | None = None,
     license_cfg: dict[str, Any] | None = None,
+    governance_profile: str | None = None,
 ) -> None:
     CONFIG_DIR.mkdir(parents=True, exist_ok=True)
 
@@ -3762,6 +3933,7 @@ def write_config(
         "",
     ]
     lines += _cfg_deployment(deployment)
+    lines += _cfg_governance(governance_profile)
     lines += _cfg_providers(providers)
     lines += _cfg_role_models(role_models)
     lines += _cfg_channels(channels)
@@ -4070,15 +4242,25 @@ def write_consumer_config(
     keys: dict[str, str],
     workdir: str,
     budget: dict[str, float],
+    profile: str | None = None,
 ) -> None:
     """Write a consumer-mode config with the safety-seat safe defaults.
 
     Single source of truth shared by the CLI consumer flow
     (``run_consumer``) and the desktop installer sidecar
     (``maverick_installer.bridge``) so the two front ends can't drift.
-    Creates the workspace dir. Raises on write failure (caller renders
-    the branded error).
+    ``profile`` is the governance level from :data:`GOVERNANCE_PROFILES`
+    (unknown values fall back to the default) -- it layers the learning
+    lifecycle + governance posture on top of the safety-seat base, which
+    is identical at every level. Creates the workspace dir. Raises on
+    write failure (caller renders the branded error).
     """
+    preset = GOVERNANCE_PROFILES.get(profile or "")
+    if preset is None:
+        profile, preset = (
+            DEFAULT_GOVERNANCE_PROFILE,
+            GOVERNANCE_PROFILES[DEFAULT_GOVERNANCE_PROFILE],
+        )
     Path(workdir).expanduser().mkdir(parents=True, exist_ok=True)
     backend = "docker" if _docker_available() else "local"
     # Computer + browser always require explicit opt-in (consumer is
@@ -4108,6 +4290,8 @@ def write_consumer_config(
         },
         keys,
         {"computer_use": False, "browser": False, "ros": False},  # capabilities
+        advanced=dict(preset["advanced"]),
+        self_learning=dict(preset["self_learning"]),
         tool_acl={"denied_tools": denied_tools},
         rate_limits={
             "web_search": "5/60",
@@ -4115,9 +4299,10 @@ def write_consumer_config(
             "shell": "5/60",
             "mcp_*": "20/60",
         },
-        retention={"audit_days": 30, "episodes_days": 90, "events_days": 30},
+        retention=dict(preset["retention"]),
         persona={"name": "Lightwork", "style": "balanced", "user_name": user_name},
         web_search_enabled=True,
+        governance_profile=profile,
     )
 
 
@@ -4127,7 +4312,7 @@ def run_consumer() -> int:
     console.print()
     console.print(Panel.fit(
         "[bold]Lightwork setup[/bold]\n\n"
-        "Four questions. About a minute. You can change anything later\n"
+        "Five quick questions. About a minute. You can change anything later\n"
         "by running [bold]maverick init[/bold] again.",
         border_style="cyan",
     ))
@@ -4143,6 +4328,8 @@ def run_consumer() -> int:
         default=os.environ.get("USER") or os.environ.get("USERNAME") or "",
     ).strip() or "you"
 
+    profile = pick_governance_profile()
+
     keys = _consumer_api_key()
 
     workdir = _q_text(
@@ -4155,6 +4342,7 @@ def run_consumer() -> int:
     try:
         write_consumer_config(
             user_name=user_name, keys=keys, workdir=workdir, budget=budget,
+            profile=profile,
         )
     except Exception as e:
         show_install_failure(e)
@@ -4242,6 +4430,133 @@ _EXPRESS_SELF_LEARNING: dict[str, Any] = {
 }
 
 
+# --- Governance profiles: business-shaped onboarding levels --------------------
+#
+# One early question -- "what kind of business is this?" -- maps to a preset
+# bundle of ALREADY-EXISTING knobs. Every level gets the self-learning /
+# self-improvement lifecycle (that's the product); what escalates is the
+# governance posture around it. A gymnastics studio wants the learning without
+# the signing ceremony; a manufacturer wants budgets + an audit trail; a bank
+# wants everything signed, immutable, and quota-enforced. Kept as data (same
+# convention as _EXPRESS_ADVANCED) so tests can assert exactly what each level
+# enables without driving prompts. Budget caps are NOT part of a profile: they
+# are collected separately and are never optional at any level.
+
+# The closed learning lifecycle every level turns on. Safe-by-construction
+# subset: in-process learning + consolidation only -- no generate-and-run-code
+# autonomy, no MCP acquisition (those stay explicit opt-ins at every level).
+_LEARNING_LIFECYCLE: dict[str, Any] = {
+    "reflexion": True,
+    "dreaming": True,
+    "experience_guidance": True,
+    "skill_synthesis": True,
+    "credit_assignment": True,
+    "self_harness": True,
+    "data_engine": True,
+    "evaluator_evolution": True,
+    "consequence": True,
+    "rehearsal": True,
+}
+
+_PROFILE_SELF_LEARNING: dict[str, Any] = dict(_EXPRESS_SELF_LEARNING)
+
+# Governance additions by level (cumulative: standard ⊃ essentials,
+# regulated ⊃ standard). Every key is one _cfg_advanced recognises.
+_STANDARD_GOVERNANCE: dict[str, Any] = {
+    "memory_guard": True,         # governed memory writes
+    "governed_actions": True,     # side-effectful actions logged + gated
+    "calibration_enforce": True,  # confidence calibration gate
+    "fairness_monitor": True,
+    "audit_sign": True,           # Ed25519-signed audit chain
+    "enforce_quotas": True,       # per-principal daily spend/token caps
+}
+_REGULATED_GOVERNANCE: dict[str, Any] = {
+    **_STANDARD_GOVERNANCE,
+    "audit_rewards": True,        # provable-learning reward audit
+    "audit_worm": True,           # WORM export of closed audit day-files
+    "signed_approval": True,      # human Ed25519 sign-off for code/weights rungs
+}
+
+GOVERNANCE_PROFILES: dict[str, dict[str, Any]] = {
+    "essentials": {
+        "advanced": dict(_LEARNING_LIFECYCLE),
+        "self_learning": dict(_PROFILE_SELF_LEARNING),
+        "retention": {"audit_days": 30, "episodes_days": 90, "events_days": 30},
+    },
+    "standard": {
+        "advanced": {**_LEARNING_LIFECYCLE, **_STANDARD_GOVERNANCE},
+        "self_learning": dict(_PROFILE_SELF_LEARNING),
+        "retention": {"audit_days": 90, "episodes_days": 180, "events_days": 90},
+    },
+    "regulated": {
+        "advanced": {**_LEARNING_LIFECYCLE, **_REGULATED_GOVERNANCE},
+        "self_learning": dict(_PROFILE_SELF_LEARNING),
+        "retention": {"audit_days": 365, "episodes_days": 365, "events_days": 365},
+    },
+}
+
+DEFAULT_GOVERNANCE_PROFILE = "essentials"
+
+# Menu strings start with the profile name so the picker can split()[0] them,
+# same convention as pick_mode(). Public: the desktop sidecar (bridge.py)
+# imports these so the two front ends show the SAME menu and cannot drift.
+GOVERNANCE_CHOICES: list[str] = [
+    "essentials - small business: learn + improve, stay out of my way "
+    "(a gym, a studio, a shop)",
+    "standard   - growing company: + budgets enforced, signed audit trail "
+    "(a manufacturer, an agency)",
+    "regulated  - bank / clinic / government: + human sign-off, immutable "
+    "audit, long retention",
+]
+
+
+def _prior_governance_profile() -> str | None:
+    """The [governance] profile recorded by a previous `maverick init`, if any.
+
+    Same pattern as pick_deployment's prior-choice defaulting: a re-run of the
+    wizard must default to what the operator ALREADY chose. Without this, an
+    operator on a regulated install re-running init to change a name would
+    silently downgrade to essentials -- dropping audit signing, quotas, and
+    signed approvals -- by accepting the default. Reads CONFIG_FILE (the file
+    this wizard writes) rather than the kernel loader so it honors the same
+    path every other wizard read/write uses.
+    """
+    try:
+        cfg = tomllib.loads(CONFIG_FILE.read_text())
+        prior = (cfg.get("governance") or {}).get("profile", "")
+        return prior if prior in GOVERNANCE_PROFILES else None
+    except Exception:  # pragma: no cover -- absent/invalid config: no prior
+        return None
+
+
+def pick_governance_profile() -> str:
+    """One onboarding question: how much governance does this business need?
+
+    Defaults to the previously configured level on a re-run, else
+    :data:`DEFAULT_GOVERNANCE_PROFILE`; falls back to the default on anything
+    it doesn't recognise, so an <Enter> or a stubbed answer never lands
+    outside the three supported levels.
+    """
+    console.print()
+    console.print(
+        "[dim]Every level gets self-learning and self-improvement. The level "
+        "sets how much governance wraps it -- you can change it any time by "
+        "re-running maverick init.[/dim]"
+    )
+    prior = _prior_governance_profile()
+    default = next(
+        (c for c in GOVERNANCE_CHOICES if c.split()[0] == prior),
+        GOVERNANCE_CHOICES[0],
+    )
+    pick = _q_select(
+        "What kind of business is this for?",
+        list(GOVERNANCE_CHOICES),
+        default=default,
+    )
+    name = pick.split()[0]
+    return name if name in GOVERNANCE_PROFILES else (prior or DEFAULT_GOVERNANCE_PROFILE)
+
+
 def run_express() -> int:
     """Express setup: a few user-specific questions, then turn on every safe
     single-user feature at once. The shortcut for "I want everything on"
@@ -4271,6 +4586,7 @@ def run_express() -> int:
         "What should we call you?",
         default=os.environ.get("USER") or os.environ.get("USERNAME") or "",
     ).strip() or "you"
+    profile = pick_governance_profile()
     keys = _consumer_api_key()
     workdir = _q_text(
         "Where can Lightwork work?",
@@ -4280,6 +4596,17 @@ def run_express() -> int:
 
     Path(workdir).expanduser().mkdir(parents=True, exist_ok=True)
     backend = "docker" if _docker_available() else "local"
+    # Express turns on every safe single-user feature; the governance level
+    # layers its posture (signed audit, quotas, WORM, signed approvals) on
+    # top. Union of two all-True dicts, so profile keys can only ADD.
+    preset = GOVERNANCE_PROFILES.get(
+        profile, GOVERNANCE_PROFILES[DEFAULT_GOVERNANCE_PROFILE])
+    # Computer + browser are never enabled by express. If Docker is
+    # unavailable, fail closed on host-mutating tools too: the local backend
+    # runs against the user's host filesystem, not a container blast radius.
+    denied_tools = ["computer", "browser"]
+    if backend == "local":
+        denied_tools.extend(["shell", "write_file", "apply_patch", "str_replace_editor"])
     try:
         write_config(
             providers=["anthropic"],
@@ -4294,7 +4621,7 @@ def run_express() -> int:
             # Host-mutating capabilities require explicit opt-in even in express.
             capabilities={"computer_use": False, "browser": False,
                           "ros": False, "code_exec": False},
-            advanced=dict(_EXPRESS_ADVANCED),
+            advanced={**_EXPRESS_ADVANCED, **preset["advanced"]},
             persona={"name": "Lightwork", "style": "balanced", "user_name": user_name},
             web_search_enabled=True,
             self_learning=dict(_EXPRESS_SELF_LEARNING),
@@ -4304,6 +4631,14 @@ def run_express() -> int:
             oauth={"vault": True},
             durable={"enabled": True},
             deployment="desktop",
+            # Express historically wrote NO [retention] table, and absent
+            # means keep-forever (retention is opt-in pruning). Preserve that
+            # at the default level; only an explicitly-picked governance
+            # upgrade may introduce pruning windows.
+            retention=(dict(preset["retention"])
+                       if profile != DEFAULT_GOVERNANCE_PROFILE else None),
+            governance_profile=profile,
+            tool_acl={"denied_tools": denied_tools},
         )
     except Exception as e:
         show_install_failure(e)
@@ -4783,6 +5118,12 @@ def run(fast: bool = False, resume: bool = False) -> int:
         finance=finance if finance.get("enable") else None,
         suites=suites,
         license_cfg=license_cfg or None,
+        # The advanced flow applies no preset -- the operator hand-picked
+        # every knob -- so record "custom" rather than omitting the label
+        # (dashboards keyed on [governance].profile would otherwise read
+        # advanced-configured tenants, the most governance-sensitive ones,
+        # as tier-less) or borrowing a level name the knobs may not match.
+        governance_profile="custom",
     )
     _clear_partial()
     ok = smoke_test()

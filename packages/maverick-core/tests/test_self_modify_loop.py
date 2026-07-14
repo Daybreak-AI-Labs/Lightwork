@@ -369,6 +369,33 @@ class TestWiredApply:
         assert rep.applied is False and rep.rollback_id is None
         assert (tree / "f.py").read_text() == "VALUE = 1\n"   # untouched
 
+    def test_failed_live_apply_marks_ledger_rolled_back(self, _on, tmp_path):
+        tree = self._tree(tmp_path)
+        ledger = si.PromotionLedger(path=tmp_path / "ledger.json")
+        controller = _controller()
+        controller.ledger = ledger
+        archive = CodeArchive()
+        policy = WideningPolicy(tiers=(SurfaceTier("wide", ("*",), 0),))
+        patch = ("diff --git a/.maverick-apply.diff b/.maverick-apply.diff\n"
+                 "new file mode 100644\n"
+                 "--- /dev/null\n"
+                 "+++ b/.maverick-apply.diff\n"
+                 "@@ -0,0 +1 @@\n"
+                 "+staged-file collision\n")
+
+        rep = run_cycle(
+            archive=archive, proposer=lambda p, s: Proposal(patch, "collide"),
+            evaluate=lambda p, s: FakeEval(), policy=policy,
+            rung="prompt", controller=controller, ledger=ledger, tree=tree)
+
+        records = ledger.all()
+        assert rep.promoted is False
+        assert rep.applied is False
+        assert "apply failed" in rep.reason
+        assert len(records) == 1
+        assert records[0].rolled_back is True
+        assert records[0].rolled_back_at is not None
+
 
 class TestAuditBoundWidening:
     def test_track_record_arg_supersedes_ledger_and_archive(self, tmp_path):

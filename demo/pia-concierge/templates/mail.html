@@ -1,0 +1,33 @@
+{% extends "base.html" %}
+{% set active = 'mail' %}
+{% block title %}Requester inbox{% endblock %}
+{% block body %}
+<div class="page-head">
+  <div class="eyebrow">Requester mailbox</div>
+  <h1>Inbox</h1>
+  <p>Real email, delivered over SMTP by the platform's email tool and captured here.
+     The intake link in the message is what the requester clicks to complete the assessment.</p>
+</div>
+
+{% if inbox %}
+{% for m in inbox %}
+<div class="card">
+  <div class="flow">
+    <strong>{{ m.subject }}</strong>
+    <span class="spacer"></span>
+    <span class="faint mono" style="font-size:12px;">to {{ m.to }}</span>
+  </div>
+  <hr>
+  <div style="white-space:pre-wrap; font-size:14px;">{{ m.body }}</div>
+  <hr>
+  <div class="flow">
+    {% for token in m.body.split() %}{% if token.startswith('http') %}
+      <a class="btn sm" href="{{ token }}">Complete the assessment →</a>
+    {% endif %}{% endfor %}
+  </div>
+</div>
+{% endfor %}
+{% else %}
+<div class="empty">No mail yet. Submit a request in the ServiceNow view to trigger the intake email.</div>
+{% endif %}
+{% endblock %}

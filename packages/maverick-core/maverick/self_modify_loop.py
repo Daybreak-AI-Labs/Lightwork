@@ -428,6 +428,16 @@ def run_cycle(
                 cand.promoted = False
                 report.promoted = False
                 report.reason = f"promoted but apply failed: {applied.reason}"
+                try:
+                    from . import self_improvement
+                    ctrl = controller or self_improvement.shared()
+                    rollback = getattr(ctrl, "rollback", None)
+                    if callable(rollback):
+                        gate_verdict = getattr(verdict, "verdict", None)
+                        rollback(getattr(gate_verdict, "candidate_id", ""))
+                except Exception:  # pragma: no cover -- reconcile best-effort
+                    log.warning("self_modify_loop: failed to reconcile promotion ledger",
+                                exc_info=True)
 
         if not report.reason:
             report.reason = "" if cand.promoted else (

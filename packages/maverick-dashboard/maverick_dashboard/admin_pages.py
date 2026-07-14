@@ -2,8 +2,10 @@
 
 The first slice of decomposing ``app.py`` by nav group: everything on this
 router is the site admin's control surface (RBAC "admin" permission via
-``auth.require_permission``), same-origin-checked on every mutation, and
-rendered with the shared app templates.
+``auth.require_permission`` for tenant-scoped administration and
+``auth.require_global_permission`` for global control-plane writes),
+same-origin-checked on every mutation, and rendered with the shared app
+templates.
 """
 from __future__ import annotations
 
@@ -286,7 +288,7 @@ async def settings_set_ui_visibility(request: Request) -> RedirectResponse:
     config.toml); a role can never be shown a page its permissions don't reach,
     and admins always keep Settings + Users."""
     _app()._require_same_origin(request)
-    auth.require_permission(request, "admin")
+    auth.require_global_permission(request, "admin")
     from maverick_dashboard import ui_visibility
     form = await request.form()
     ui_visibility.apply_selection(set(form.getlist("cell")))
@@ -297,16 +299,14 @@ async def settings_set_ui_visibility(request: Request) -> RedirectResponse:
 async def settings_reset_ui_visibility(request: Request) -> RedirectResponse:
     """Reset every page x role cell to its default visibility (admin)."""
     _app()._require_same_origin(request)
-    auth.require_permission(request, "admin")
+    auth.require_global_permission(request, "admin")
     from maverick_dashboard import ui_visibility
     ui_visibility.clear_overrides()
     return RedirectResponse("/settings?saved=visibility_reset#ui-visibility", status_code=303)
 
 
-@router.get("/users", response_class=HTMLResponse)
-async def users_page(request: Request) -> HTMLResponse:
-    """Admin: manage dashboard user roles (admin / operator / auditor / viewer)."""
-    auth.require_permission(request, "admin")
+def _users_context(request: Request) -> dict:
+    """Template context for the /users page (shared with the invite handler)."""
     import os as _os
 
     from maverick.oidc import oidc_enabled
@@ -328,13 +328,14 @@ async def users_page(request: Request) -> HTMLResponse:
             bootstrap = []
     saved = {"set": "Role updated.", "removed": "User removed.",
              "suites": "Department access updated.",
-             "suites_removed": "Department access removed."}.get(
+             "suites_removed": "Department access removed.",
+             "invite_revoked": "Invitation revoked."}.get(
         request.query_params.get("saved", ""), "")
     from maverick.departments import department_title
 
-    from . import suite_grants
+    from . import invites, suite_grants
     default_suites = suite_grants.default_suites()
-    return _app().templates.TemplateResponse(request, "users.html", {
+    return {
         "users": sorted(rbac.list_users().items()),
         "roles": rbac.ROLES,
         "bootstrap_admins": sorted(bootstrap),
@@ -348,7 +349,17 @@ async def users_page(request: Request) -> HTMLResponse:
                              key=lambda kv: kv[1]),
         "default_suites": (sorted(default_suites)
                            if default_suites is not None else None),
-    })
+        "invites_on": invites.invites_enabled(),
+        "pending_invites": [i for i in invites.list_invites() if i.pending],
+    }
+
+
+@router.get("/users", response_class=HTMLResponse)
+async def users_page(request: Request) -> HTMLResponse:
+    """Admin: manage dashboard user roles (admin / operator / auditor / viewer)."""
+    auth.require_permission(request, "admin")
+    return _app().templates.TemplateResponse(request, "users.html",
+                                             _users_context(request))
 
 
 @router.post("/users/set")
@@ -360,7 +371,8 @@ async def users_set_role(
     _app()._require_same_origin(request)
     from . import rbac
     try:
-        rbac.set_role(principal.strip(), role.strip())
+        rbac.set_role(principal.strip(), role.strip(),
+                      actor=auth.caller_principal(request) or "local")
     except ValueError as exc:
         raise HTTPException(status_code=400, detail="invalid principal or role") from exc
     return RedirectResponse("/users?saved=set", status_code=303)
@@ -373,8 +385,49 @@ async def users_remove(request: Request, principal: str = Form(...)) -> Redirect
     auth.require_permission(request, "admin")
     _app()._require_same_origin(request)
     from . import rbac
-    rbac.remove_user(principal.strip())
+    rbac.remove_user(principal.strip(),
+                     actor=auth.caller_principal(request) or "local")
     return RedirectResponse("/users?saved=removed", status_code=303)
+
+
+@router.post("/users/invite", response_class=HTMLResponse)
+async def users_invite(request: Request, email: str = Form(...),
+                       role: str = Form(...)) -> HTMLResponse:
+    """Mint a single-use invite link (admin only) and show it ONCE.
+
+    The token is never stored (only its hash), so this response is the only
+    place the link exists — the admin copies it into an email/chat to the
+    invitee. Renders the users page directly instead of redirecting, because a
+    redirect would drop the one-time link."""
+    auth.require_permission(request, "admin")
+    _app()._require_same_origin(request)
+    from . import invites
+    if not invites.invites_enabled():
+        raise HTTPException(status_code=404, detail="invites are not enabled")
+    invited_by = auth.caller_principal(request) or "local-admin"
+    try:
+        inv, token = invites.create_invite(email, role, created_by=invited_by)
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    link = str(request.base_url).rstrip("/") + f"/auth/invite/{token}"
+    # Best-effort email (fail-soft): the copyable link below is always the
+    # fallback, so a broken SMTP account can never strand an invite.
+    sent, send_note = invites.send_invite_email(inv, link, invited_by=invited_by)
+    return _app().templates.TemplateResponse(request, "users.html", {
+        **_users_context(request), "invite_link": link, "invite_email": inv.email,
+        "invite_sent": sent, "invite_send_note": send_note,
+    })
+
+
+@router.post("/users/invite/revoke")
+async def users_invite_revoke(request: Request,
+                              invite_id: str = Form(...)) -> RedirectResponse:
+    """Revoke a pending invite link (admin only)."""
+    auth.require_permission(request, "admin")
+    _app()._require_same_origin(request)
+    from . import invites
+    invites.revoke_invite(invite_id.strip())
+    return RedirectResponse("/users?saved=invite_revoked", status_code=303)
 
 
 @router.post("/users/suites/set")
@@ -392,7 +445,8 @@ async def users_set_suites(request: Request) -> RedirectResponse:
     principal = str(form.get("principal", "")).strip()
     suites = [str(s) for s in form.getlist("suites")]
     try:
-        suite_grants.set_suites(principal, suites)
+        suite_grants.set_suites(principal, suites,
+                                actor=auth.caller_principal(request) or "local")
     except ValueError as exc:
         raise HTTPException(status_code=400, detail="invalid principal or department") from exc
     return RedirectResponse("/users?saved=suites", status_code=303)
@@ -406,6 +460,7 @@ async def users_remove_suites(
     auth.require_global_permission(request, "admin")
     _app()._require_same_origin(request)
     from . import suite_grants
-    suite_grants.remove_grant(principal.strip())
+    suite_grants.remove_grant(principal.strip(),
+                              actor=auth.caller_principal(request) or "local")
     return RedirectResponse("/users?saved=suites_removed", status_code=303)
 

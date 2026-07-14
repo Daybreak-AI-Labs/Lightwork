@@ -12,10 +12,12 @@ Protocol (line-delimited JSON):
 When the wizard is complete, sidecar emits ``{"id": "__done__", ...}``
 and exits.
 
-The four questions mirror the CLI's consumer mode exactly (name,
-sign-in key, working directory, budget) and the resulting config is
-written by the SAME ``write_consumer_config`` helper the CLI uses, so
-the GUI and CLI can't drift.
+The five questions mirror the CLI's consumer mode exactly (name,
+governance level, sign-in key, working directory, budget) and the
+resulting config is written by the SAME ``write_consumer_config``
+helper the CLI uses -- and the governance menu is imported from the
+SAME ``GOVERNANCE_CHOICES`` list the CLI shows -- so the GUI and CLI
+can't drift.
 """
 from __future__ import annotations
 
@@ -25,7 +27,12 @@ import sys
 from pathlib import Path
 from typing import Any
 
-from .wizard import write_consumer_config
+from .wizard import (
+    DEFAULT_GOVERNANCE_PROFILE,
+    GOVERNANCE_CHOICES,
+    GOVERNANCE_PROFILES,
+    write_consumer_config,
+)
 
 
 def _step(id: str, question: str, choices: list[str], *, kind: str = "choice") -> dict[str, Any]:
@@ -64,7 +71,36 @@ def run() -> None:
     ))
     user_name = _recv().strip() or default_name or "you"
 
-    # Q2: API key (sign-in). The UI shows the console.anthropic.com link
+    # Q2: governance level. The menu is wizard.GOVERNANCE_CHOICES verbatim --
+    # the CLI's list is the UX source of truth; do not re-author it here.
+    # Resolution is deliberately strict: a BLANK answer means "skipped" and
+    # takes the default, but a non-blank answer that names no known level is
+    # a protocol bug in the UI and must fail LOUDLY. Silently falling back
+    # would downgrade a bank that picked "regulated" to the least-governed
+    # tier with no error -- the one failure direction this selector must
+    # never have.
+    _send(_step(
+        "governance",
+        "What kind of business is this for? Every level learns and "
+        "improves; the level sets how much governance wraps it.",
+        list(GOVERNANCE_CHOICES),
+    ))
+    raw_answer = _recv().strip()
+    if not raw_answer:
+        profile = DEFAULT_GOVERNANCE_PROFILE
+    else:
+        first = raw_answer.split()[0].lower()
+        profile = first if first in GOVERNANCE_PROFILES else next(
+            (name for name in GOVERNANCE_PROFILES if name in raw_answer.lower()),
+            "",
+        )
+        if not profile:
+            raise ValueError(
+                f"unrecognized governance level answer: {raw_answer!r} "
+                f"(expected one of {sorted(GOVERNANCE_PROFILES)})"
+            )
+
+    # Q3: API key (sign-in). The UI shows the console.anthropic.com link
     # and a masked field. Blank == skip (config saved without a key).
     _send(_step(
         "api_key",
@@ -76,7 +112,7 @@ def run() -> None:
     raw_key = _recv().strip()
     keys: dict[str, str] = {"ANTHROPIC_API_KEY": raw_key} if raw_key else {}
 
-    # Q3: working directory
+    # Q4: working directory
     _send(_step(
         "workdir",
         "Where can Lightwork work? (a folder it can create files in)",
@@ -85,7 +121,7 @@ def run() -> None:
     ))
     workdir = _recv().strip() or default_workdir
 
-    # Q4: budget
+    # Q5: budget
     _send(_step(
         "budget",
         "Stop after spending how much per task?",
@@ -104,6 +140,7 @@ def run() -> None:
 
     write_consumer_config(
         user_name=user_name, keys=keys, workdir=workdir, budget=budget,
+        profile=profile,
     )
 
     if keys:

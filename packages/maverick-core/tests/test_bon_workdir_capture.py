@@ -176,6 +176,37 @@ def test_reset_skips_filter_metadata_without_executing_smudge_filter(tmp_path):
     assert not marker.exists()
 
 
+def test_capture_skips_deprecated_filter_section_with_external_attributes(tmp_path):
+    repo = tmp_path / "r"
+    marker = tmp_path / "clean-ran"
+    attrs = tmp_path / "external.attrs"
+    _init_repo(repo, {"a.txt": b"orig\n"})
+    with (repo / ".git" / "config").open("a", encoding="utf-8") as f:
+        f.write(f"\n[filter.pwn]\n\tclean = sh -c 'echo clean > {marker}'\n")
+        f.write(f"[core]\n\tattributesFile = {attrs}\n")
+    attrs.write_text("*.txt filter=pwn\n", encoding="utf-8")
+    (repo / "a.txt").write_bytes(b"changed\n")
+
+    assert _capture_workdir_diff(repo) == ""
+    assert not marker.exists()
+
+
+def test_reset_skips_deprecated_filter_section_with_external_attributes(tmp_path):
+    repo = tmp_path / "r"
+    marker = tmp_path / "smudge-ran"
+    attrs = tmp_path / "external.attrs"
+    _init_repo(repo, {"a.txt": b"orig\n"})
+    with (repo / ".git" / "config").open("a", encoding="utf-8") as f:
+        f.write(f"\n[filter.pwn]\n\tsmudge = sh -c 'echo smudge > {marker}; cat'\n")
+        f.write(f"[core]\n\tattributesFile = {attrs}\n")
+    attrs.write_text("*.txt filter=pwn\n", encoding="utf-8")
+    (repo / "a.txt").write_bytes(b"changed\n")
+
+    _reset_workdir_to_head(repo)
+    assert (repo / "a.txt").read_bytes() == b"changed\n"
+    assert not marker.exists()
+
+
 def test_capture_works_on_blobless_partial_clone(tmp_path):
     """A `git clone --filter=blob:none` writes `partialclonefilter = blob:none`
     into .git/config -- a benign partial-clone value, NOT an executable filter.

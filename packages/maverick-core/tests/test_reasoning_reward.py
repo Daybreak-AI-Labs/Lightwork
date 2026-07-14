@@ -115,6 +115,8 @@ def test_parse_structured_json_with_dimensions():
         "reasoning": "checked each claim",
         "dimensions": [
             {"name": "correctness", "score": 0.9, "critique": "ok"},
+            {"name": "completeness", "score": 0.8, "critique": "mostly complete"},
+            {"name": "grounding", "score": 0.7, "critique": "supported"},
             {"name": "safety", "score": 0.1, "critique": "unsafe"},
         ],
         "critique": "unsafe overall",
@@ -126,7 +128,7 @@ def test_parse_structured_json_with_dimensions():
     assert r.confidence == 0.7
     assert r.reasoning == "checked each claim"
     names = {d.name for d in r.dimensions}
-    assert names == {"correctness", "safety"}
+    assert names == {"correctness", "completeness", "grounding", "safety"}
     # safety 0.1 < 0.50 floor -> veto stamped from the rubric, blocks accept.
     assert r.vetoed is True
     assert r.accepts() is False
@@ -136,11 +138,29 @@ def test_parse_structured_derives_holistic_when_score_absent():
     payload = {
         "dimensions": [
             {"name": "correctness", "score": 0.5},
+            {"name": "completeness", "score": 0.5},
+            {"name": "grounding", "score": 0.5},
+            {"name": "safety", "score": 0.5},
         ],
     }
     r = parse_structured(json.dumps(payload))
-    # No explicit holistic -> derived from the single present dimension.
+    # No explicit holistic -> derived from the complete rubric.
     assert r.score == 0.5
+
+
+def test_parse_structured_rejects_incomplete_or_unknown_dimensions():
+    for dims in (
+        [{"name": "correctness", "score": 1.0}],
+        [
+            {"name": "correctness", "score": 1.0},
+            {"name": "completeness", "score": 1.0},
+            {"name": "grounding", "score": 1.0},
+            {"name": "made_up", "score": 1.0},
+        ],
+    ):
+        r = parse_structured(json.dumps({"dimensions": dims, "score": 1.0}))
+        assert r.dimensions == ()
+        assert r.accepts() is False
 
 
 def test_parse_structured_tag_fallback():
@@ -161,7 +181,12 @@ def test_parse_structured_fails_closed_on_garbage():
 
 def test_parse_structured_clamps_out_of_range_scores():
     payload = {"score": 5.0, "confidence": -3.0,
-               "dimensions": [{"name": "safety", "score": 2.0}]}
+               "dimensions": [
+                   {"name": "correctness", "score": 2.0},
+                   {"name": "completeness", "score": 2.0},
+                   {"name": "grounding", "score": 2.0},
+                   {"name": "safety", "score": 2.0},
+               ]}
     r = parse_structured(json.dumps(payload))
     assert r.score == 1.0
     assert r.confidence == 0.0

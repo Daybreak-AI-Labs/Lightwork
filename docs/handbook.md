@@ -273,7 +273,7 @@ never autonomous), (3) capability attenuation (a spawned child can never exceed
 its parent grant), (4) compartment isolation (a quarantine seal never bleeds
 across compartments/suites), (5) hard refusals (the universal refusal floor is
 unstrippable), and (6) budget caps (no cap is ever silently exceeded) — each
-fault-injected at 1,000,000 iterations with a non-vacuity control, alongside
+fault-injected with a non-vacuous control (property-fuzzed up to 5,000 iterations), alongside
 hostile-argument fuzzing of every connector and tool.
 
 Posture checks make claims testable: `maverick airgap check` fails if the

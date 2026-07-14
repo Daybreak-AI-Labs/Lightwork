@@ -87,6 +87,48 @@ class TestRetryAndOnError:
         run_flow(f, agent_fn=lambda *a: ("", None), action_fn=lambda *a: ("ERROR", 0.0))
         assert slept == []                # backoff 0 -> tight loop, no added latency
 
+    def test_validation_rejects_excessive_retries(self):
+        f = _flow([FlowNode(id="a", kind="action", tool="t", retries=11)])
+        assert "node 'a': retries must be <= 10" in f.validate()
+
+    def test_validation_rejects_excessive_retry_backoff_total(self):
+        f = _flow([FlowNode(id="a", kind="action", tool="t", retries=10, retry_backoff=30.0)])
+        assert "node 'a': retry backoff total must be <= 120s" in f.validate()
+
+    def test_runner_caps_unvalidated_retry_count(self, monkeypatch):
+        monkeypatch.setenv("MAVERICK_FLOW_MAX_NODE_RETRIES", "10")
+        calls = {"n": 0}
+
+        def action(node, params, data):
+            calls["n"] += 1
+            return ("ERROR", 0.0)
+        f = _flow([FlowNode(id="a", kind="action", tool="t", retries=999)])
+        run_flow(f, agent_fn=lambda *a: ("", None), action_fn=action)
+        assert calls["n"] == 11
+
+    def test_retry_backoff_honours_flow_deadline(self, monkeypatch):
+        slept = []
+        monkeypatch.setattr("maverick.flow.runner.time.sleep", lambda s: slept.append(s))
+        f = _flow([FlowNode(id="a", kind="action", tool="t", retries=3, retry_backoff=2.0)])
+        f.max_seconds = 0.5
+        res = run_flow(f, agent_fn=lambda *a: ("", None), action_fn=lambda *a: ("ERROR", 0.0),
+                       now=lambda: 100.0)
+        assert res.status == "failed"
+        assert "deadline" in res.error
+        assert slept == [0.5]
+
+    def test_runtime_clamps_retries_to_configured_cap(self, monkeypatch):
+        monkeypatch.setenv("MAVERICK_FLOW_MAX_NODE_RETRIES", "2")
+        calls = {"n": 0}
+
+        def action(node, params, data):
+            calls["n"] += 1
+            return ("ERROR", 0.0)
+        f = _flow([FlowNode(id="a", kind="action", tool="t", retries=100)])
+        res = run_flow(f, agent_fn=lambda *a: ("", None), action_fn=action)
+        assert res.status == STATUS_COMPLETED
+        assert calls["n"] == 3   # initial attempt + capped two retries
+
 
 class TestSubflow:
     def _child(self):
@@ -135,3 +177,12 @@ class TestValidation:
     def test_on_error_must_point_to_a_real_node(self):
         f = _flow([FlowNode(id="a", kind="agent", brief="x", on_error="ghost")])
         assert any("on_error" in e for e in f.validate())
+
+    def test_retries_cannot_exceed_configured_cap(self, monkeypatch):
+        monkeypatch.setenv("MAVERICK_FLOW_MAX_NODE_RETRIES", "3")
+        f = _flow([FlowNode(id="a", kind="action", tool="t", retries=4)])
+        assert any("retries 4 exceeds max_node_retries 3" in e for e in f.validate())
+
+    def test_negative_retries_are_rejected(self):
+        f = _flow([FlowNode(id="a", kind="action", tool="t", retries=-1)])
+        assert any("retries must be >= 0" in e for e in f.validate())

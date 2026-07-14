@@ -17,7 +17,7 @@ from collections.abc import Callable
 from typing import Any
 
 from . import node_outcomes, store
-from .ir import Flow, FlowNode
+from .ir import UNSAFE_ACTION_TOOLS, Flow, FlowNode
 from .runner import (
     PAUSED_STATUSES,
     STATUS_COMPLETED,
@@ -154,17 +154,19 @@ def execute(flow: Flow, *, agent_runner: AgentRunner, action_runner: ActionRunne
         owner = owner or prior.owner
         # Free-form human input merges into the run data on resume, so an approval
         # can also COLLECT data (a corrected value, a note) -- not just yes/no.
-        # When the paused node declares a `form`, only its declared field names
-        # are accepted -- the form is the server-side allowlist, so a resume
-        # caller can't overwrite arbitrary run-data keys (e.g. what a downstream
-        # branch routes on). A form-less node keeps free-form inputs.
+        # The merge is append-only for existing run data: a resume caller must not
+        # be able to change values that earlier nodes produced and that a human
+        # may have reviewed at the pause. When the paused node declares a `form`,
+        # only its declared field names are accepted as the server-side allowlist;
+        # form-less nodes keep free-form *new* inputs for compatibility.
         resume_data = dict(prior.data)
         if inputs:
             paused = flow.node(prior.cursor) if prior.cursor else None
             declared = [str(f.get("name")) for f in getattr(paused, "form", None) or []
                         if isinstance(f, dict) and f.get("name")]
-            if declared:
-                inputs = {k: v for k, v in inputs.items() if k in declared}
+            allowed = set(declared) if declared else set(inputs)
+            inputs = {k: v for k, v in inputs.items()
+                      if k in allowed and k not in resume_data}
             resume_data.update(inputs)
         resume = {"node_id": prior.cursor, "data": resume_data}
         if retryable_failure:
@@ -215,9 +217,12 @@ def execute(flow: Flow, *, agent_runner: AgentRunner, action_runner: ActionRunne
     # else the caller's argument -- carried across a resume from the prior run.
     run_origin = (prior.origin if (resume_run_id and prior)
                   else (placeholder.origin if placeholder else origin))
-    # Track reserved agent spend for the run. The max_dollars gate already tracks
-    # it; without a gate, wrap a plain spend tracker so cost is still recorded.
-    spent = [0.0]
+    # Track reserved agent spend for the run. Seed resumed runs from the durable
+    # cost already reserved before the pause so flow.max_dollars remains an
+    # aggregate per-run cap across approval/delay resume boundaries. The
+    # max_dollars gate updates this list too; without a gate, wrap a plain spend
+    # tracker so cost is still recorded.
+    spent = [float(prior.cost_dollars) if (resume_run_id and prior) else 0.0]
     if record_outcomes:
         if flow.max_dollars and flow.max_dollars > 0:
             # Aggregate per-run spend ceiling: a wide parallel / long foreach can't
@@ -347,6 +352,8 @@ def default_action_runner(world, sandbox=None) -> ActionRunner:
     returns an ``ERROR:`` string (0.0). Never raises into the flow."""
     def run(tool: str, params: dict, data: dict) -> tuple[Any, float | None]:
         try:
+            if tool in UNSAFE_ACTION_TOOLS:
+                return (f"ERROR: unsafe flow action tool {tool!r}", 0.0)
             from ..sandbox import LocalBackend
             from ..tools import base_registry
             reg = base_registry(world, sandbox or LocalBackend(), goal_id=None)
