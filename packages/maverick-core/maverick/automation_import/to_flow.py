@@ -21,8 +21,8 @@ Source-graph branch/loop capture, per importer:
   ``Switch`` -> ``switch``, ``Until`` -> ``while`` (negated exit), ``Scope`` ->
   ``scope`` (bodies wired);
 * Workato ``if`` -> ``branch``, ``foreach``/``repeat`` -> ``foreach``;
-* Make ``BasicRouter`` routes -> an if/else-if/else ``branch`` chain (each
-  route's filter is the condition, its modules the true arm).
+* Make ``BasicRouter`` routes -> ``parallel`` fan-out branches, with each
+  filtered route guarded by its own ``branch`` so all matching routes can run.
 
 Everything else lowers to an ordered chain. A UiPath import is a single process
 *invocation* (the Orchestrator API returns no .xaml), so its internal control
@@ -40,6 +40,7 @@ from ..flow.ir import (
     NODE_AGENT,
     NODE_BRANCH,
     NODE_FOREACH,
+    NODE_PARALLEL,
     NODE_SCOPE,
     NODE_SWITCH,
     NODE_WHILE,
@@ -671,7 +672,7 @@ def _has_router(modules: list) -> bool:
 def _make_seq(modules: list, nodes: dict, ctr: dict, report: list[dict],
               join: str | None) -> str | None:
     """Lower an ordered Make module list into a chain (tail -> ``join``),
-    returning the start node id. A router module becomes a branch chain. Built
+    returning the start node id. A router module becomes a parallel fan-out. Built
     right-to-left so each node knows its successor without a second pass."""
     nxt = join
     from .make import _step_from_module
@@ -692,32 +693,49 @@ def _make_seq(modules: list, nodes: dict, ctr: dict, report: list[dict],
     return nxt
 
 
+def _make_route_flow(route: dict, idx: int, report: list[dict]) -> Flow | None:
+    """Lower one Make router route as an isolated fan-out branch sub-flow."""
+    ctr = {"i": 0}
+    nodes: dict[str, FlowNode] = {}
+    body = _make_seq(route.get("flow", []) or [], nodes, ctr, report, None)
+    cond = _make_condition(route)
+    if cond is not None:
+        bid = f"r{idx}_guard"
+        nodes[bid] = FlowNode(id=bid, kind=NODE_BRANCH, condition=cond,
+                              if_true=body, if_false=None, label="router route")
+        report.append({"step": "router route", "node": bid, "kind": NODE_BRANCH,
+                       "fidelity": "preserved",
+                       "note": "Make router route filter -> branch guard"})
+        body = bid
+    if not nodes or body is None:
+        return None
+    flow = Flow(id=f"make_route_{idx}", name=f"Make router route {idx + 1}",
+                start=body, nodes=nodes)
+    return None if flow.validate() else flow
+
+
 def _make_router(routes: list, nodes: dict, ctr: dict, report: list[dict],
                  join: str | None) -> str | None:
-    """Lower a Make router into an if / else-if / else branch chain: each route's
-    filter is a ``branch`` whose true arm enters that route's lowered sub-flow and
-    whose false arm falls to the next route. A trailing route with no filter is
-    the else target. Returns the first branch (or the fallback body when a single
-    unconditional route makes the router a plain container)."""
-    valid = [r for r in (routes or []) if isinstance(r, dict)]
-    lowered = [(_make_condition(r), _make_seq(r.get("flow", []) or [], nodes, ctr, report, join))
-               for r in valid]
-    else_tgt = join
-    if lowered and lowered[-1][0] is None:
-        else_tgt = lowered[-1][1]      # trailing unconditional route = else
-        lowered = lowered[:-1]
-    for cond, body in reversed(lowered):
-        bid = f"n{ctr['i']}"
-        ctr["i"] += 1
-        nodes[bid] = FlowNode(id=bid, kind=NODE_BRANCH,
-                              condition=cond or "result == true",
-                              if_true=body, if_false=else_tgt, label="router")
-        report.append({"step": "router route", "node": bid, "kind": NODE_BRANCH,
-                       "fidelity": ("preserved" if cond else "approximated"),
-                       "note": ("Make router route -> branch" if cond
-                                else "router route without a readable filter -> branch (condition approximated)")})
-        else_tgt = bid
-    return else_tgt
+    """Lower a Make router into parallel route sub-flows.
+
+    Make routers are fan-out containers: each route evaluates independently and
+    every matching route can run for the same bundle. Model that with a
+    ``parallel`` node whose branches are isolated route flows; filtered routes
+    start with a guard branch, while unfiltered routes run unconditionally.
+    """
+    branches = [_make_route_flow(r, i, report)
+                for i, r in enumerate(routes or []) if isinstance(r, dict)]
+    branches = [b for b in branches if b is not None]
+    if not branches:
+        return join
+    pid = f"n{ctr['i']}"
+    ctr["i"] += 1
+    nodes[pid] = FlowNode(id=pid, kind=NODE_PARALLEL, branches=branches,
+                          next=join, label="router")
+    report.append({"step": "router", "node": pid, "kind": NODE_PARALLEL,
+                   "fidelity": "preserved",
+                   "note": "Make BasicRouter -> parallel fan-out; all matching routes can run"})
+    return pid
 
 
 def _make_to_flow(automation: ImportedAutomation, report: list[dict]) -> Flow | None:
