@@ -34,7 +34,7 @@ be added later as an option, never the baseline.
 [knowledge]
 enable = true
 store  = "pgvector"
-dsn    = "postgresql://user:pass@host/db"   # or MAVERICK_KNOWLEDGE_DSN / MAVERICK_PG_DSN
+dsn    = "postgresql://db-host/lightwork"   # credentials via MAVERICK_KNOWLEDGE_DSN / MAVERICK_PG_DSN env
 dim    = 1024                               # must match your embedder's width
 ```
 
