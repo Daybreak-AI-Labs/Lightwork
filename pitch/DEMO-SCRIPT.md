@@ -15,7 +15,7 @@
 ## Pre-flight (do this before they're in the room)
 
 ```bash
-pip install maverick-core            # or: from the monorepo, the editable install
+python -m pip install -e ./packages/maverick-core
 maverick version                     # confirm it runs
 ```
 

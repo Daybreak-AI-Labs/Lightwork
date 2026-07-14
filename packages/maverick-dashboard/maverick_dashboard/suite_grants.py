@@ -15,6 +15,7 @@ from __future__ import annotations
 
 from maverick.suite_grants import (  # noqa: F401
     DepartmentAccessError,
+    SuiteGrantStoreError,
     admin_principals,
     default_suites,
     ensure_suite_allowed,
@@ -31,7 +32,8 @@ from maverick.suite_grants import (  # noqa: F401
 )
 
 __all__ = [
-    "DepartmentAccessError", "store_path", "known_suites", "default_suites",
+    "DepartmentAccessError", "SuiteGrantStoreError", "store_path", "known_suites",
+    "default_suites",
     "admin_principals", "is_admin_principal", "register_grant_resolver",
     "list_grants", "get_grant", "granted_suites", "set_suites", "remove_grant",
     "suite_allowed_for", "ensure_suite_allowed",

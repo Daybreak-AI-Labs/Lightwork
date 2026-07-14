@@ -217,7 +217,7 @@ def test_train_returns_1_when_torch_missing(monkeypatch, capsys):
     )
     assert rc == 1
     err = capsys.readouterr().err
-    assert "maverick-agent[training]" in err
+    assert "packages/maverick-core[training]" in err
     assert "torch" in err
 
 

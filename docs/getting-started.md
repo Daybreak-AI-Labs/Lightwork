@@ -2,24 +2,30 @@
 
 ## Install
 
-The safest terminal path installs the published package with pipx instead of executing a remote bootstrap script:
+The Lightwork distribution names are not yet reserved on public PyPI, so do
+not install those names from the public index. Install a reviewed source
+commit instead:
 
 ```bash
-pipx install 'maverick-agent[installer]'
+git clone https://github.com/Day-AI-Labs/Lightwork
+cd Lightwork
+git checkout --detach <reviewed-full-40-character-commit-sha>
+pip install -e ./packages/maverick-core
+pip install -e ./apps/installer-cli
 maverick init
 ```
 
-If you need the no-prerequisite desktop bootstrap, download `deploy/desktop/install.sh` or `deploy/desktop/install.ps1` from a commit or release you trust, verify it, and set `MAVERICK_REF` to a full 40-character commit SHA. The scripts reject mutable branch/tag refs by default. Every `MAVERICK_*` variable can also be spelled `LIGHTWORK_*`.
-
-The PyPI package is `maverick-agent` (the `maverick` name is
-squatted). The `[installer]` extra pulls the wizard into the same
-pipx environment as the kernel so `maverick init` resolves.
+If you need the no-prerequisite desktop bootstrap, download
+`deploy/desktop/install.sh` or `deploy/desktop/install.ps1` from the same
+commit, verify it, and set `MAVERICK_REF` to the lowercase, full SHA. The
+scripts fail on missing or mutable refs and have no public-index fallback.
+Every `MAVERICK_*` variable can also be spelled `LIGHTWORK_*`.
 
 From source while iterating:
 
 ```bash
-git clone https://github.com/Day-AI-Labs/maverick
-cd maverick
+git clone https://github.com/Day-AI-Labs/Lightwork
+cd Lightwork
 pip install -e ./packages/maverick-core
 pip install -e ./apps/installer-cli
 maverick init

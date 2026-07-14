@@ -28,7 +28,9 @@ from __future__ import annotations
 
 import hashlib
 import json
+import math
 import secrets
+import string
 import threading
 import time
 from dataclasses import dataclass
@@ -41,14 +43,24 @@ _MAX_PENDING = 500                 # cap the store; an admin never needs more
 _INVITES_LOCK = threading.Lock()
 
 
+class InviteStoreError(RuntimeError):
+    """Invite state exists but cannot be read or validated safely."""
+
+
 def store_path() -> Path:
-    return Path.home() / ".maverick" / "dashboard-invites.json"
+    from maverick.paths import maverick_home
+
+    return maverick_home() / "dashboard-invites.json"
 
 
 def _locked(path: Path):
     from contextlib import ExitStack
 
-    from maverick.file_lock import cross_process_lock
+    from maverick.file_lock import cross_process_lock, ensure_private_directory
+    from maverick.paths import maverick_home
+
+    ensure_private_directory(maverick_home())
+    ensure_private_directory(path.parent)
     stack = ExitStack()
     stack.enter_context(_INVITES_LOCK)
     stack.enter_context(cross_process_lock(path))
@@ -95,14 +107,103 @@ def _hash(token: str) -> str:
 
 
 def _load() -> dict[str, dict]:
+    from maverick.file_lock import (
+        atomic_read_text,
+        ensure_private_directory,
+        ensure_private_file,
+    )
+    from maverick.paths import maverick_home
+
     p = store_path()
+    ensure_private_directory(maverick_home())
+    ensure_private_directory(p.parent)
     if not p.exists():
         return {}
     try:
-        data = json.loads(p.read_text(encoding="utf-8"))
-    except (OSError, ValueError):
-        return {}
-    return data if isinstance(data, dict) else {}
+        ensure_private_file(p)
+        data = _decode_json(atomic_read_text(p))
+    except InviteStoreError:
+        raise
+    except (OSError, ValueError) as exc:
+        raise InviteStoreError(f"invite store unreadable or corrupt: {exc}") from exc
+    if not isinstance(data, dict):
+        raise InviteStoreError("invite store corrupt: top-level value must be an object")
+    out: dict[str, dict] = {}
+    for invite_id, rec in data.items():
+        out[invite_id] = _validate_record(invite_id, rec)
+    return out
+
+
+def _decode_json(raw: str) -> object:
+    def _reject_constant(value: str):
+        raise ValueError(f"non-finite number {value!r}")
+
+    def _object(pairs: list[tuple[str, object]]) -> dict[str, object]:
+        out: dict[str, object] = {}
+        for key, value in pairs:
+            if key in out:
+                raise ValueError(f"duplicate key {key!r}")
+            out[key] = value
+        return out
+
+    try:
+        return json.loads(raw, parse_constant=_reject_constant, object_pairs_hook=_object)
+    except (TypeError, ValueError) as exc:
+        raise InviteStoreError(f"invite store corrupt: {exc}") from exc
+
+
+def _validate_record(invite_id: str, rec: object) -> dict:
+    from .rbac import ROLES
+
+    if not invite_id or invite_id != invite_id.strip() or len(invite_id) > 128:
+        raise InviteStoreError("invite store corrupt: invalid invite id")
+    if not isinstance(rec, dict) or rec.get("id") != invite_id:
+        raise InviteStoreError(f"invite store corrupt: record id mismatch for {invite_id!r}")
+    email = rec.get("email")
+    role = rec.get("role")
+    token_hash = rec.get("token_sha256")
+    if (
+        not isinstance(email, str)
+        or not email
+        or len(email) > 320
+        or email != email.strip().lower()
+        or "@" not in email
+    ):
+        raise InviteStoreError(f"invite store corrupt: invalid email for {invite_id!r}")
+    if role not in ROLES:
+        raise InviteStoreError(f"invite store corrupt: invalid role for {invite_id!r}")
+    if (
+        not isinstance(token_hash, str)
+        or len(token_hash) != 64
+        or any(ch not in string.hexdigits for ch in token_hash)
+    ):
+        raise InviteStoreError(f"invite store corrupt: invalid token digest for {invite_id!r}")
+    try:
+        created = float(rec["created_at"])
+        expires = float(rec["expires_at"])
+    except (KeyError, OverflowError, TypeError, ValueError) as exc:
+        raise InviteStoreError(f"invite store corrupt: invalid times for {invite_id!r}") from exc
+    if not math.isfinite(created) or created < 0 or not math.isfinite(expires) or expires < 0:
+        raise InviteStoreError(f"invite store corrupt: non-finite times for {invite_id!r}")
+    used_at = rec.get("used_at")
+    if used_at is not None:
+        try:
+            used_at = float(used_at)
+        except (OverflowError, TypeError, ValueError) as exc:
+            raise InviteStoreError(f"invite store corrupt: invalid used_at for {invite_id!r}") from exc
+        if not math.isfinite(used_at) or used_at < 0:
+            raise InviteStoreError(f"invite store corrupt: invalid used_at for {invite_id!r}")
+    created_by = rec.get("created_by", "")
+    used_by = rec.get("used_by")
+    if not isinstance(created_by, str) or len(created_by) > 512:
+        raise InviteStoreError(f"invite store corrupt: invalid created_by for {invite_id!r}")
+    if used_by is not None and (not isinstance(used_by, str) or len(used_by) > 512):
+        raise InviteStoreError(f"invite store corrupt: invalid used_by for {invite_id!r}")
+    clean = dict(rec)
+    clean["created_at"] = created
+    clean["expires_at"] = expires
+    clean["used_at"] = used_at
+    return clean
 
 
 def _write(data: dict[str, dict]) -> None:
@@ -128,11 +229,17 @@ def create_invite(email: str, role: str, *, created_by: str,
         raise ValueError("a valid email address is required")
     if role not in rbac.ROLES:
         raise ValueError("unknown role")
+    try:
+        ttl = float(ttl_hours)
+    except (OverflowError, TypeError, ValueError) as exc:
+        raise ValueError("invite TTL must be a finite number") from exc
+    if not math.isfinite(ttl):
+        raise ValueError("invite TTL must be a finite number")
     token = "inv_" + secrets.token_urlsafe(32)
     inv_id = "invite_" + secrets.token_hex(8)
     now = time.time()
     rec = {"id": inv_id, "email": email, "role": role, "created_by": created_by,
-           "created_at": now, "expires_at": now + float(ttl_hours) * 3600,
+           "created_at": now, "expires_at": now + ttl * 3600,
            "token_sha256": _hash(token), "used_at": None, "used_by": None}
     with _locked(store_path()):
         data = _load()
@@ -236,7 +343,9 @@ def send_invite_email(invite: Invite, link: str, *, invited_by: str) -> tuple[bo
 # ---- local (no-IdP) sessions ---------------------------------------------------
 
 def _session_secret_path() -> Path:
-    return Path.home() / ".maverick" / "dashboard-session.key"
+    from maverick.paths import maverick_home
+
+    return maverick_home() / "dashboard-session.key"
 
 
 def local_session_secret() -> str:
@@ -262,16 +371,19 @@ def local_session_secret() -> str:
     path = _session_secret_path()
     with _locked(path):
         if path.exists():
-            secret = path.read_text(encoding="utf-8").strip()
+            from maverick.file_lock import atomic_read_text, ensure_private_file
+
+            ensure_private_file(path)
+            secret = atomic_read_text(path).strip()
             if secret:
                 return secret
         secret = secrets.token_urlsafe(48)
-        path.parent.mkdir(parents=True, exist_ok=True)
-        path.write_text(secret, encoding="utf-8")
-        try:
-            path.chmod(0o600)
-        except OSError:  # pragma: no cover - best effort on non-POSIX
-            pass
+        # Create with a private mode and atomically publish it. A plain
+        # write_text()+chmod left a local-read window before the chmod and
+        # could expose the HMAC key used to mint dashboard sessions.
+        from maverick.file_lock import atomic_write_text
+
+        atomic_write_text(path, secret, mode=0o600)
         return secret
 
 

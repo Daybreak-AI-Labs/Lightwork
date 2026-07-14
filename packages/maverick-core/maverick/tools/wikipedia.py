@@ -70,7 +70,7 @@ def _run(args: dict[str, Any]) -> str:
     try:
         import httpx
     except ImportError:
-        return "ERROR: httpx not installed. Run: pip install 'maverick-agent[session]'"
+        return "ERROR: httpx not installed. Run: python -m pip install -e './packages/maverick-core[session]'"
 
     lang = args.get("lang") or "en"
     headers = {"User-Agent": _USER_AGENT, "Accept": "application/json"}

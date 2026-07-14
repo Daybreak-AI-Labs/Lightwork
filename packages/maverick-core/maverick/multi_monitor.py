@@ -65,7 +65,7 @@ def list_monitors() -> list[Monitor]:
         import mss
     except ImportError as e:
         raise ImportError(
-            "mss not installed. Run: pip install 'maverick-agent[computer-use]'"
+            "mss not installed. Run: python -m pip install -e './packages/maverick-core[computer-use]'"
         ) from e
     with mss.mss() as sct:
         raw = sct.monitors

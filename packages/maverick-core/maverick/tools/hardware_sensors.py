@@ -30,7 +30,7 @@ from . import Tool
 # Linux thermal-zone sysfs root; module-level so tests can point it at a tmp dir.
 _SYS_THERMAL = Path("/sys/class/thermal")
 
-_PSUTIL_HINT = " (psutil not installed; pip install 'maverick-agent[sensors]')"
+_PSUTIL_HINT = " (psutil not installed; python -m pip install -e './packages/maverick-core[sensors]')"
 
 
 def _path_in_cwd(path: str | None) -> bool:

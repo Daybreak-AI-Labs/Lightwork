@@ -10,7 +10,7 @@ Set up:
 
 Requires::
 
-    pip install 'maverick-channels[slack]'
+    python -m pip install -e './packages/maverick-channels[slack]'
 """
 from __future__ import annotations
 
@@ -46,7 +46,8 @@ class SlackChannel(Channel):
         super().__init__(handler)
         if not _HAVE_SLACK:
             raise ImportError(
-                "slack_sdk not installed. Run: pip install 'maverick-channels[slack]'"
+                "slack_sdk not installed. From the reviewed checkout run: "
+                "python -m pip install -e './packages/maverick-channels[slack]'"
             )
         self.app_token = app_token or os.environ.get("SLACK_APP_TOKEN")
         self.bot_token = bot_token or os.environ.get("SLACK_BOT_TOKEN")

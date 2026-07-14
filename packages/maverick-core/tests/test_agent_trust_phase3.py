@@ -82,6 +82,25 @@ def test_a2a_trust_block_per_caller(monkeypatch):
     assert _a2a_trust_block("anon") is not None
 
 
+def test_a2a_trust_state_load_error_fails_closed(monkeypatch):
+    from maverick.a2a_tasks import TaskEngine, _a2a_capability, _a2a_trust_block
+
+    def _broken_state():
+        raise OSError("trust registry unreadable")
+
+    monkeypatch.setattr(agent_trust, "load_trust_state", _broken_state)
+    assert "unavailable" in _a2a_trust_block("agent:vega")
+    monkeypatch.setenv("MAVERICK_A2A_TOKEN", "shared")
+    assert TaskEngine().auth_error("Bearer shared") is not None
+
+    def _broken_enforcement(cfg=None):
+        raise OSError("trust registry unreadable")
+
+    monkeypatch.setattr(agent_trust, "agent_trust_enforced", _broken_enforcement)
+    with pytest.raises(RuntimeError, match="policy unavailable"):
+        _a2a_capability()
+
+
 def test_a2a_capability_uses_caller_ceiling(monkeypatch):
     from maverick.a2a_tasks import _a2a_capability, _caller_agent
     reg = {"vega": TrustedAgent(id="vega", allow_tools=frozenset({"read_file"}))}
@@ -92,6 +111,23 @@ def test_a2a_capability_uses_caller_ceiling(monkeypatch):
         assert cap.allow_tools == frozenset({"read_file"})
     finally:
         _caller_agent.reset(cv)
+
+
+def test_external_agent_allowlist_does_not_implicitly_gain_coordination():
+    from maverick.capability import COORDINATION_TOOLS
+
+    entry = TrustedAgent(
+        id="reader",
+        allow_tools=frozenset({"read_file", "send_to_agent"}),
+    )
+    cap = entry.capability()
+
+    assert cap.permits("read_file")
+    assert cap.permits("send_to_agent")
+    assert all(
+        not cap.permits(tool)
+        for tool in COORDINATION_TOOLS - {"send_to_agent"}
+    )
 
 
 # ---- governance gating on federation delegation ---------------------------
@@ -223,6 +259,19 @@ def test_grpc_trust_capability_noop_when_disengaged(monkeypatch):
     assert server._trust_capability(_Ctx(), None) is None
 
 
+def test_grpc_trust_capability_load_error_fails_closed(monkeypatch):
+    pytest.importorskip("grpc")
+    from maverick import agent_trust
+    from maverick.grpc_api import server
+
+    def _broken_state():
+        raise OSError("trust registry unreadable")
+
+    monkeypatch.setattr(agent_trust, "load_trust_state", _broken_state)
+    with pytest.raises(PermissionError, match="policy unavailable"):
+        server._trust_capability(_Ctx(), None)
+
+
 # ---- MCP gating -----------------------------------------------------------
 
 
@@ -257,3 +306,16 @@ def test_mcp_disengaged_auth_only(monkeypatch):
     _patch(monkeypatch, {}, enforced=False)
     assert ht._check_bearer("Bearer shared") == (True, "")
     assert ht._check_bearer("Bearer wrong") == (False, "")
+
+
+def test_mcp_trust_state_load_error_fails_closed(monkeypatch):
+    from maverick import agent_trust
+    from maverick_mcp import http_transport as ht
+
+    monkeypatch.setenv("MAVERICK_MCP_TOKEN", "shared")
+
+    def _broken_state():
+        raise OSError("trust registry unreadable")
+
+    monkeypatch.setattr(agent_trust, "load_trust_state", _broken_state)
+    assert ht._check_bearer("Bearer shared") == (False, "")

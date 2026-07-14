@@ -55,7 +55,7 @@ class ChromaStore:
             import chromadb  # noqa: F401
         except ImportError as e:
             raise ImportError(
-                "chromadb not installed. Run: pip install 'maverick-agent[chroma]'"
+                "chromadb not installed. Run: python -m pip install -e './packages/maverick-core[chroma]'"
             ) from e
         from chromadb import PersistentClient
 

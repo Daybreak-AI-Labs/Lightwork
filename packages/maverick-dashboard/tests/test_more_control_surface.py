@@ -202,11 +202,16 @@ def test_resume_flips_cancelled_to_pending(monkeypatch, tmp_path):
     wm.set_goal_status(gid, "cancelled", result="cancelled via dashboard")
     from maverick_dashboard import app as dash_app
     dash_app._world_cache.clear()
-    # Stub runner so the background task doesn't actually start the agent.
+    # Stub the dispatcher-facing async seam so the background task doesn't
+    # actually start the agent (all launch surfaces now route through it).
     from maverick import runner
     captured = []
-    monkeypatch.setattr(runner, "run_goal_in_thread",
-                        lambda *a, **kw: captured.append(("called", a)))
+
+    async def _queued(*args, **kwargs):
+        captured.append(("called", args, kwargs))
+        return "queued"
+
+    monkeypatch.setattr(runner, "run_goal_in_background_async", _queued)
     client = _client()
     r = client.post(
         f"/api/v1/goals/{gid}/resume",
@@ -230,7 +235,11 @@ def test_resume_blocked_goal(monkeypatch, tmp_path):
     from maverick_dashboard import app as dash_app
     dash_app._world_cache.clear()
     from maverick import runner
-    monkeypatch.setattr(runner, "run_goal_in_thread", lambda *a, **kw: None)
+
+    async def _queued(*_args, **_kwargs):
+        return "queued"
+
+    monkeypatch.setattr(runner, "run_goal_in_background_async", _queued)
     client = _client()
     r = client.post(
         f"/api/v1/goals/{gid}/resume",

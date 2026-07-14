@@ -2,20 +2,21 @@
 
 Run a Lightwork agent swarm inside a GitHub workflow — on a PR, on a
 schedule, or on demand — under a **hard spend cap**. It installs
-`maverick-agent` from PyPI and runs `maverick start` with the inputs you
-give it, then writes the final answer to the job summary and exposes it as
-a step output.
+Lightwork from the action's own pinned source checkout and runs `maverick
+start` with the inputs you give it, then writes the final answer to the job
+summary and exposes it as a step output. It never falls back to an
+unqualified public-index install of a Lightwork distribution.
 
 ```yaml
-- uses: Day-AI-Labs/maverick/deploy/github-action@v0.1.6
+- uses: Day-AI-Labs/Lightwork/deploy/github-action@<full-40-character-commit-sha>
   with:
     goal: "Summarize the changes in this PR and flag anything risky."
     max-dollars: "0.50"
     anthropic-api-key: ${{ secrets.ANTHROPIC_API_KEY }}
 ```
 
-> Pin to a released tag (`@v0.1.6`) rather than `@main` so a workflow you
-> didn't write can't change under you.
+> Replace the placeholder with a reviewed 40-character commit SHA. Do not use
+> a mutable branch or tag for a workflow that receives provider secrets.
 
 ## Inputs
 
@@ -30,7 +31,7 @@ a step output.
 | `model` | — | Override the model (e.g. `claude-sonnet-4-6`). |
 | `sandbox` | `local` | Shell sandbox backend. A CI runner is already an ephemeral VM, so `local` is the default. |
 | `anthropic-api-key` | `""` | Exported as `ANTHROPIC_API_KEY`. For other providers, leave blank and set that provider's env var on the job. |
-| `version` | latest | `maverick-agent` version to install. **Pin it** for reproducible runs. |
+| `version` | `""` | Optional expected version of the source bundled with the pinned action. A mismatch fails closed. |
 | `python-version` | `3.12` | Python to set up. |
 | `step-summary` | `true` | Write the final answer to the job summary. |
 | `dry-run` | `false` | Install + print the resolved command, but don't run the swarm (no LLM calls, no spend). |
@@ -55,8 +56,8 @@ jobs:
   review:
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
-      - uses: Day-AI-Labs/maverick/deploy/github-action@v0.1.6
+      - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7
+      - uses: Day-AI-Labs/Lightwork/deploy/github-action@<full-40-character-commit-sha>
         with:
           template: code-review
           params: |
@@ -71,11 +72,11 @@ jobs:
 
 ```yaml
       - id: maverick
-        uses: Day-AI-Labs/maverick/deploy/github-action@v0.1.6
+        uses: Day-AI-Labs/Lightwork/deploy/github-action@<full-40-character-commit-sha>
         with:
           goal: "Review the diff on this PR and list concrete risks."
           anthropic-api-key: ${{ secrets.ANTHROPIC_API_KEY }}
-      - uses: actions/github-script@v7
+      - uses: actions/github-script@3a2844b7e9c422d3c10d287c895573f7108da1b3 # v9
         with:
           script: |
             github.rest.issues.createComment({
@@ -99,7 +100,7 @@ composite-action steps inherit it:
     env:
       OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
     steps:
-      - uses: Day-AI-Labs/maverick/deploy/github-action@v0.1.6
+      - uses: Day-AI-Labs/Lightwork/deploy/github-action@<full-40-character-commit-sha>
         with:
           goal: "..."
           model: gpt-4.1

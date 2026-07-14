@@ -172,7 +172,7 @@ def _run_transcribe(args: dict[str, Any], sandbox: Any = None) -> str:
         if backend == "local":
             return (
                 "ERROR: local Whisper not installed. "
-                "Run: pip install 'maverick-agent[voice]'"
+                "Run: python -m pip install -e './packages/maverick-core[voice]'"
             )
     return (
         "ERROR: no voice backend available. Set OPENAI_API_KEY / GROQ_API_KEY "

@@ -332,7 +332,7 @@ def test_persistently_dropped_channel_is_error(rig):
 
 def test_missing_grpcio_import_error(monkeypatch):
     monkeypatch.setitem(sys.modules, "grpc", None)  # import grpc -> ImportError
-    with pytest.raises(ImportError, match=r"maverick-agent\[grpc\]"):
+    with pytest.raises(ImportError, match=r"packages/maverick-core\[grpc\]"):
         load_grpc_plugin("localhost:50061")
 
 

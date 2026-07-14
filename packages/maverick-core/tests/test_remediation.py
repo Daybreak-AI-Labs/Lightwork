@@ -4,6 +4,7 @@ from __future__ import annotations
 import pytest
 from click.testing import CliRunner
 from maverick.cli import main
+from maverick.file_lock import private_path_is_restricted
 from maverick.remediation import (
     RemediationItem,
     apply_remediation,
@@ -89,9 +90,11 @@ def test_apply_appends_block_without_clobbering_and_audits(monkeypatch, tmp_path
     assert recorded and recorded[0][1]["section"] == "audit"
     # Hardening: the secret-bearing config is written private (0600), the prior
     # contents are backed up, and undo points at the backup.
-    assert oct(cfg.stat().st_mode)[-3:] == "600"
+    assert private_path_is_restricted(cfg, 0o600)
     bak = tmp_path / "config.toml.bak"
     assert bak.exists() and bak.read_text() == '[providers]\ndefault = "ollama"\n'
+    assert private_path_is_restricted(bak, 0o600)
+    assert private_path_is_restricted(tmp_path, 0o700)
     assert "restore" in res.undo
 
 

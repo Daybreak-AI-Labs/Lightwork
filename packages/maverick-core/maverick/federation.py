@@ -53,6 +53,7 @@ Off by default. Opt in::
 """
 from __future__ import annotations
 
+import hashlib
 import hmac
 import json
 import logging
@@ -108,6 +109,10 @@ _FED_RATE_MAX_KEYS = 8192
 
 _DEFAULT_ADDR = "127.0.0.1:50061"  # one port up from the goal API (50051)
 _DEFAULT_RPC_TIMEOUT_S = 10.0
+_MAX_CORRELATION_ID_BYTES = 256
+_CORRELATION_CACHE_MAX = 8192
+_CORRELATION_TTL_S = 24 * 60 * 60.0
+_CORRELATION_WAIT_S = 30.0
 
 # Sentinel: "no grant injected" (build from config) vs an explicit None
 # (capability enforcement off -> delegations run unrestricted).
@@ -120,6 +125,14 @@ class FederationError(ValueError):
 
 class FederationAuthError(FederationError):
     """Missing or invalid shared token (fail-closed)."""
+
+
+@dataclass
+class _CorrelationEntry:
+    digest: str
+    created_at: float
+    event: threading.Event
+    result: dict[str, Any] | None = None
 
 
 # -- config ----------------------------------------------------------------
@@ -223,13 +236,15 @@ def _default_record(kind: str, **kw: Any) -> None:
 
 
 def _redact(text: str) -> str:
-    """Strip detectable secrets from one field (best-effort, never raises)."""
+    """Strip detectable secrets from one field or fail closed."""
     try:
         from .safety.secret_detector import redact
         out, _ = redact(str(text or ""))
         return out
-    except Exception:  # pragma: no cover - redaction never blocks
-        return str(text or "")
+    except Exception as e:
+        # This value is about to cross a trust boundary. Returning the original
+        # text on detector failure is a silent data-loss-prevention bypass.
+        raise FederationError("federation egress redaction unavailable") from e
 
 
 def _shield_block(text: str) -> str | None:
@@ -492,7 +507,15 @@ class FederationNode:
         attempt, so a half the peer never logged shows up in reciprocity checks.
         """
         peer = self.peer(peer_name)
+        if correlation_id is not None and not isinstance(correlation_id, str):
+            raise FederationError("correlation_id must be a string")
         corr = (correlation_id or "").strip() or uuid.uuid4().hex
+        try:
+            correlation_size = len(corr.encode("utf-8"))
+        except UnicodeError as e:
+            raise FederationError("correlation_id is invalid") from e
+        if correlation_size > _MAX_CORRELATION_ID_BYTES:
+            raise FederationError("correlation_id is too long")
         # Egress control: a company governs which outside agents its agents may
         # *dial*. Disengaged -> no-op; engaged -> a peer absent from the trust
         # registry (or not permitted outbound) is refused before any connection
@@ -530,7 +553,22 @@ class FederationNode:
                 )
                 return DelegateOutcome(peer=peer.name, correlation_id=corr,
                                        accepted=False, reason=reason)
-            title, description = _redact(title), _redact(description)
+            try:
+                title, description = _redact(title), _redact(description)
+            except Exception:
+                reason = "outbound delegation refused: egress redaction unavailable"
+                agent_trust.record_denied(
+                    peer.name, direction="outbound", correlation_id=corr,
+                    rule="egress_redaction", reason=reason)
+                self._record(
+                    EventKind.FEDERATION_DELEGATE, agent="federation",
+                    peer_node=peer.name, correlation_id=corr, direction="sent",
+                    accepted=False, reason=reason,
+                )
+                return DelegateOutcome(
+                    peer=peer.name, correlation_id=corr,
+                    accepted=False, reason=reason,
+                )
         tools_sorted = sorted({str(t) for t in requested_tools})
         # Sign the (post-redaction) delegation so a receiver can verify our
         # identity against our pinned key, not just our shared token. Best-effort
@@ -539,6 +577,25 @@ class FederationNode:
         deadline_i = _to_int(deadline_ms)
         signed = _sign_delegation(self.node, peer.name, corr, title, description,
                                   tools_sorted, max_risk, deadline_i)
+        signed_complete = all(
+            signed.get(field) for field in ("sig", "pubkey", "key_id", "created_at")
+        )
+        if require_signed() and not signed_complete:
+            # A signed-required sender must not silently downgrade to the
+            # shared-token-only migration path when its signer is unavailable.
+            reason = "outbound signed delegation required but signing is unavailable"
+            agent_trust.record_denied(
+                peer.name, direction="outbound", correlation_id=corr,
+                rule="signing", reason=reason)
+            self._record(
+                EventKind.FEDERATION_DELEGATE, agent="federation",
+                peer_node=peer.name, correlation_id=corr, direction="sent",
+                accepted=False, reason=reason,
+            )
+            return DelegateOutcome(
+                peer=peer.name, correlation_id=corr,
+                accepted=False, reason=reason,
+            )
         payload = {
             "goal_title": title,
             "goal_description": description,
@@ -609,6 +666,101 @@ class FederationService:
         self._grant = local_grant
         self._goal_service = goal_service
         self._record = record or _default_record
+        # Per-peer correlation ids are the idempotency namespace for goal
+        # creation. The cache is service-local, bounded, and concurrency-safe;
+        # an identical in-flight retry waits for the original outcome.
+        self._correlations: OrderedDict[
+            tuple[str, str], _CorrelationEntry
+        ] = OrderedDict()
+        self._correlation_lock = threading.Lock()
+
+    @staticmethod
+    def _delegation_digest(payload: dict[str, Any]) -> str:
+        semantic = {
+            "goal_title": str(payload.get("goal_title") or ""),
+            "goal_description": str(payload.get("goal_description") or ""),
+            "requested_tools": sorted(
+                str(tool) for tool in (payload.get("requested_tools") or [])
+            ),
+            "max_risk": str(payload.get("max_risk") or ""),
+            "deadline_ms": _to_int(payload.get("deadline_ms")),
+        }
+        encoded = json.dumps(
+            semantic, sort_keys=True, separators=(",", ":"), ensure_ascii=False,
+        ).encode("utf-8")
+        return hashlib.sha256(encoded).hexdigest()
+
+    @staticmethod
+    def _validated_correlation(
+        payload: dict[str, Any],
+    ) -> tuple[str, str | None]:
+        raw = payload.get("correlation_id")
+        corr = raw.strip() if isinstance(raw, str) else ""
+        if not corr:
+            return "", "correlation_id is required"
+        try:
+            valid = len(corr.encode("utf-8")) <= _MAX_CORRELATION_ID_BYTES
+        except UnicodeError:
+            valid = False
+        if not valid:
+            return "", "correlation_id is invalid or too long"
+        return corr, None
+
+    def _claim_correlation(
+        self, peer: Peer, corr: str, digest: str,
+    ) -> tuple[str, tuple[str, str], dict[str, Any] | None]:
+        """Claim one delegation id, wait for an identical owner, or refuse."""
+        key = (peer.name, corr)
+        now = time.monotonic()
+        wait_for: threading.Event | None = None
+        with self._correlation_lock:
+            for old_key, entry in list(self._correlations.items()):
+                if (
+                    entry.result is not None
+                    and now - entry.created_at > _CORRELATION_TTL_S
+                ):
+                    self._correlations.pop(old_key, None)
+
+            existing = self._correlations.get(key)
+            if existing is not None:
+                if not hmac.compare_digest(existing.digest, digest):
+                    return "conflict", key, None
+                self._correlations.move_to_end(key)
+                if existing.result is not None:
+                    return "cached", key, dict(existing.result)
+                wait_for = existing.event
+            else:
+                if len(self._correlations) >= _CORRELATION_CACHE_MAX:
+                    # Never evict an unexpired completed claim: doing so would
+                    # reopen its correlation id to replay under cache churn.
+                    return "capacity", key, None
+                self._correlations[key] = _CorrelationEntry(
+                    digest=digest,
+                    created_at=now,
+                    event=threading.Event(),
+                )
+                return "owner", key, None
+
+        # Do not hold the cache lock while the first call creates a goal.
+        assert wait_for is not None
+        if not wait_for.wait(_CORRELATION_WAIT_S):
+            return "busy", key, None
+        with self._correlation_lock:
+            completed = self._correlations.get(key)
+            if completed is None or completed.result is None:
+                return "busy", key, None
+            return "cached", key, dict(completed.result)
+
+    def _finish_correlation(
+        self, key: tuple[str, str], result: dict[str, Any],
+    ) -> None:
+        with self._correlation_lock:
+            entry = self._correlations.get(key)
+            if entry is None:
+                return
+            entry.result = dict(result)
+            entry.event.set()
+            self._correlations.move_to_end(key)
 
     # Lazy so constructing the service never touches config/world unless used.
     def _local_grant(self) -> Any:
@@ -689,9 +841,9 @@ class FederationService:
         try:
             from .governance import Decision, evaluate
             verdict = evaluate("federation_delegate", risk=req_risk, capability=None)
-        except Exception as e:  # pragma: no cover - governance never breaks the path
-            log.debug("federation: governance eval skipped: %s", e)
-            return None
+        except Exception as e:
+            log.warning("federation: governance evaluation unavailable: %s", e)
+            return "org governance policy unavailable"
         if verdict.decision is Decision.DENY:
             return f"denied by org governance policy ({verdict.rule}): {verdict.reason}"
         if verdict.decision is Decision.REQUIRE_HUMAN:
@@ -720,7 +872,7 @@ class FederationService:
         }
 
     def delegate_goal(self, payload: dict[str, Any]) -> dict[str, Any]:
-        corr = str(payload.get("correlation_id") or "").strip()
+        corr, correlation_error = self._validated_correlation(payload)
         peer = self._authenticate(payload)
         if peer is None:
             # Forensic row, deliberately unattributed: a name offered by an
@@ -732,8 +884,9 @@ class FederationService:
                 accepted=False, reason="unauthorized",
             )
             return self._refuse("unauthorized: missing or invalid token")
-        if not corr:
-            return self._refuse_recorded(peer, corr, "correlation_id is required")
+        if correlation_error:
+            # Do not copy an attacker-sized identifier into retained audit data.
+            return self._refuse_recorded(peer, corr, correlation_error)
 
         requested = {str(t) for t in (payload.get("requested_tools") or [])
                      if str(t).strip()}
@@ -812,24 +965,51 @@ class FederationService:
         if not negotiation.ok:
             return self._refuse_recorded(peer, corr, negotiation.reason)
 
+        try:
+            request_digest = self._delegation_digest(payload)
+        except (TypeError, ValueError, UnicodeError):
+            return self._refuse_recorded(peer, corr, "delegation payload is invalid")
+        claim, correlation_key, cached = self._claim_correlation(
+            peer, corr, request_digest,
+        )
+        if claim == "cached":
+            assert cached is not None
+            return cached
+        if claim == "conflict":
+            return self._refuse_recorded(
+                peer, corr,
+                "correlation_id was already used with different delegation content",
+            )
+        if claim in {"busy", "capacity"}:
+            reason = (
+                "correlation_id is already in progress"
+                if claim == "busy"
+                else "correlation replay ledger capacity is full"
+            )
+            return self._refuse_recorded(peer, corr, reason)
+
+        def finish(result: dict[str, Any]) -> dict[str, Any]:
+            self._finish_correlation(correlation_key, result)
+            return result
+
         # Per-peer accepted-delegation rate cap: each admitted delegation spawns
         # a goal run, so charge the peer only after trust-plane and signed-
         # identity checks succeed. Token-only/invalid signatures must not be
         # able to consume the legitimate signed delegation quota.
         if not _fed_rate_ok(f"peer:{peer.name}"):
-            return self._refuse_recorded(peer, corr, "rate limit exceeded")
+            return finish(self._refuse_recorded(peer, corr, "rate limit exceeded"))
 
         deadline_ms = _to_int(payload.get("deadline_ms"))
         # Clamp the run's budget to the peer's registry ceiling (down only):
         # both wall-clock AND dollars. max_dollars was previously parsed and
         # advertised but enforced nowhere — wire it into the delegated run.
-        capped_dollars, capped_wall = agent_trust.clamp_budget(
-            decision.agent,
-            max_wall_seconds=(deadline_ms / 1000.0) if deadline_ms > 0 else None,
-        )
-        if capped_wall is not None:
-            deadline_ms = int(capped_wall * 1000.0)
         try:
+            capped_dollars, capped_wall = agent_trust.clamp_budget(
+                decision.agent,
+                max_wall_seconds=(deadline_ms / 1000.0) if deadline_ms > 0 else None,
+            )
+            if capped_wall is not None:
+                deadline_ms = int(capped_wall * 1000.0)
             goal_id = int(self._goals().start_goal(
                 str(payload.get("goal_title") or ""),
                 str(payload.get("goal_description") or ""),
@@ -844,13 +1024,25 @@ class FederationService:
                 capability=negotiation.granted,
             ))
         except ValueError as e:  # e.g. empty title
-            return self._refuse_recorded(peer, corr, str(e))
+            return finish(self._refuse_recorded(peer, corr, str(e)))
+        except Exception:
+            log.exception(
+                "federation: delegated goal creation failed for peer %s",
+                peer.name,
+            )
+            return finish(self._refuse_recorded(
+                peer, corr, "delegated goal creation unavailable",
+            ))
+        result = {"accepted": True, "goal_id": goal_id, "reason": ""}
+        # Publish the result before optional audit seams run, so a recorder
+        # failure can never reopen goal creation to a retry.
+        finish(result)
         self._record(
             EventKind.FEDERATION_DELEGATE, agent="federation", goal_id=goal_id,
             peer_node=peer.name, correlation_id=corr, direction="received",
             accepted=True, reason="",
         )
-        return {"accepted": True, "goal_id": goal_id, "reason": ""}
+        return result
 
     def goal_status(self, payload: dict[str, Any]) -> dict[str, Any]:
         peer = self._authenticate(payload)
@@ -893,7 +1085,7 @@ def _require_grpc():
     except ImportError as e:
         raise ImportError(
             "grpc not installed (needed for federated swarms over gRPC). "
-            "Run: pip install 'maverick-agent[grpc]'"
+            "Run: python -m pip install -e './packages/maverick-core[grpc]'"
         ) from e
     return grpc
 
@@ -923,7 +1115,7 @@ def _generate_stubs() -> None:
     except ImportError as e:
         raise ImportError(
             "grpcio-tools not installed (needed to generate stubs). "
-            "Run: pip install 'maverick-agent[grpc]'"
+            "Run: python -m pip install -e './packages/maverick-core[grpc]'"
         ) from e
     root = _PROTO.parents[2]
     rc = protoc.main([
@@ -959,17 +1151,34 @@ class _GrpcTransport:
         if self._stub is None:
             grpc = _require_grpc()
             pb2, pb2_grpc = _load_stubs()
-            from .grpc_tls import channel_credentials, tls_required
+            from .grpc_tls import (
+                _insecure_grpc_allowed,
+                _is_loopback_address,
+                channel_credentials,
+                tls_required,
+            )
             creds = channel_credentials("federation")
             if creds is not None:
                 channel = grpc.secure_channel(self.peer.target, creds)
             else:
                 # Refuse to ship cross-swarm data in the clear when TLS is
-                # required (client-bound/enterprise); else legacy insecure dial.
+                # required (client-bound/enterprise). Even when optional,
+                # plaintext is limited to loopback or an explicit trusted-net
+                # override, symmetric with grpc_tls.bind_port on the server.
                 if tls_required("federation"):
                     raise FederationError(
                         f"refusing to dial peer {self.peer.name!r} without TLS: "
                         "[federation] tls is required but not configured")
+                if (
+                    not _is_loopback_address(self.peer.target)
+                    and not _insecure_grpc_allowed()
+                ):
+                    raise FederationError(
+                        f"refusing to dial peer {self.peer.name!r} over plaintext "
+                        f"on non-loopback target {self.peer.target!r}: configure "
+                        "[federation] TLS, or set MAVERICK_ALLOW_INSECURE_GRPC=1 "
+                        "for an explicitly trusted network"
+                    )
                 channel = grpc.insecure_channel(self.peer.target)
             self._stub = pb2_grpc.MaverickFederationStub(channel)
             self._pb2 = pb2
@@ -1109,7 +1318,8 @@ def serve(
 
     ``max_workers`` defaults to ``MAVERICK_FEDERATION_MAX_WORKERS`` /
     ``[federation] max_workers`` (then 8); ``MAVERICK_FEDERATION_MAX_CONCURRENT``
-    / ``[federation] max_concurrent_rpcs`` optionally caps in-flight RPCs.
+    / ``[federation] max_concurrent_rpcs`` caps in-flight RPCs and defaults to
+    the worker count, preventing an unbounded executor queue.
     """
     if not federation_enabled():
         raise RuntimeError(
@@ -1127,7 +1337,7 @@ def serve(
         max_workers = _fed_int_setting(
             "MAVERICK_FEDERATION_MAX_WORKERS", "max_workers", 8)
     max_concurrent = _fed_int_setting(
-        "MAVERICK_FEDERATION_MAX_CONCURRENT", "max_concurrent_rpcs", None)
+        "MAVERICK_FEDERATION_MAX_CONCURRENT", "max_concurrent_rpcs", max_workers)
     server = grpc.server(
         futures.ThreadPoolExecutor(max_workers=max_workers),
         maximum_concurrent_rpcs=max_concurrent,

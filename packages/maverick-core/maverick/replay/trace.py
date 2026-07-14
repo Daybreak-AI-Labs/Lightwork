@@ -21,21 +21,22 @@ class TraceWriter:
     """Append events to a JSONL trace. Each ``record`` is one line, flushed."""
 
     def __init__(self, path: str | Path):
+        from ..file_lock import ensure_private_directory, ensure_private_file
+
         self.path = Path(path)
-        self.path.parent.mkdir(parents=True, exist_ok=True)
         # Traces mirror blackboard posts, which may contain private run data.
-        # Do not let the process umask create group/world-readable artifacts.
-        try:
-            os.chmod(self.path.parent, 0o700)
-        except OSError:
-            pass
+        # The shared helper applies a protected DACL on Windows; chmod alone
+        # only changes the DOS read-only bit there and is not a custody boundary.
+        ensure_private_directory(self.path.parent)
         flags = os.O_WRONLY | os.O_CREAT | os.O_APPEND
         if hasattr(os, "O_CLOEXEC"):
             flags |= os.O_CLOEXEC
+        if hasattr(os, "O_NOFOLLOW"):
+            flags |= os.O_NOFOLLOW
         self._seq = 0
         fd = os.open(self.path, flags, 0o600)
         try:
-            os.chmod(self.path, 0o600)
+            ensure_private_file(self.path, 0o600)
             self._fh = os.fdopen(fd, "a", encoding="utf-8")
         except Exception:
             os.close(fd)

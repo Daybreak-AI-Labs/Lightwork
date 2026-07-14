@@ -193,7 +193,7 @@ point.
 
 | Threat | Mitigation |
 |--------|------------|
-| A captured federation message is **replayed** at the same peer | Signed `created_at` freshness window **plus** a per-signature replay-nonce cache (federation delegate, channel federation); the cache is lock-guarded for the server thread pool. |
+| A captured federation message is **replayed** at the same peer | Every delegation, including token-only peers, is bound to a bounded per-peer `correlation_id` ledger: identical concurrent/retry requests coalesce, while the same id with changed content is refused. Signed peers additionally carry a `created_at` freshness window and signature replay protection. |
 | An **older** signed marketplace bundle is replayed to resurrect a withdrawn (e.g. malicious) listing | Per-origin monotonic `created_at` watermark — an import must be strictly newer than the last applied from that origin (also blocks exact-replay). |
 | A delegated capability grant is tampered with in transit / on the queue | gRPC and the queue worker **re-intersect** any wire-supplied capability with the receiver's own local policy (`_rpc_capability` / `_worker_capability`); a grant can only narrow, never broaden. |
 | Audit chain edited after the fact | Ed25519 hash-chain with cross-file anchoring; `maverick audit verify --pubkey <externally-held hex>` is required for third-party tamper-evidence (a co-located key only catches non-privileged edits). |
@@ -215,6 +215,8 @@ point.
 | Provider session cookies readable by another local user mid-write | Written **mode-at-creation** (`os.open(..., 0600)`), closing the world-readable window the old write-then-chmod left. |
 | Cross-tenant data decryption | Per-tenant DEK + AEAD context binding (`tenant/kms.py`); a tenant's key/ciphertext can't open another's (GCM auth fails). |
 | Forwarded channel user-ids leak across peers | Pseudonymized per-peer (HMAC under a per-pair secret) before they leave the host; no secret = no forwarding. |
+| A malicious A2A push target probes internal services | Push configuration accepts only a strict bounded schema, forbids URL credentials/control characters, and applies fail-closed SSRF validation before retaining the target. |
+| A remote gRPC client sends bearer credentials or goal data over plaintext | Both listener binds and client dials reject non-loopback plaintext by default. TLS/mTLS is the production path; `MAVERICK_ALLOW_INSECURE_GRPC=1` is the explicit trusted-network escape hatch. |
 
 ### Denial of service
 
@@ -222,7 +224,7 @@ point.
 |--------|------------|
 | A deeply-nested signed envelope crashes verification (`RecursionError` in the canonical-JSON digest) before the signature is even checked | Recursion-safe depth guard rejects over-nested envelopes first (`federation_envelope._within_depth`). |
 | A hostile A2A client sends a malformed `id`/`message.parts` shape to crash the task engine into a 500 | Parsers are shape-defensive: a non-string id resolves to "not found", a non-list `parts` yields empty text. A standing fuzz harness (`test_parser_fuzz`) holds the "never raises / fail-closed" contract across every untrusted-input parser. |
-| An outward surface is flooded | Per-peer token-bucket rate limiting (channel federation); bounded thread pools + `maximum_concurrent_rpcs` (gRPC/federation/webhooks); SSE/WS offload + a WS concurrency cap (dashboard); A2A in-memory task store is bounded. |
+| An outward surface is flooded | Per-peer token-bucket rate limiting (channel federation); bounded thread pools + `maximum_concurrent_rpcs` (gRPC/federation/webhooks); SSE/WS offload + a WS concurrency cap (dashboard); A2A applies per-request/task/artifact/global byte ceilings and terminalizes canceled semaphore waiters so cancellation cannot permanently consume capacity. |
 | A client-supplied budget/deadline bypasses caps | Clamped down to operator ceilings (A2A `_limits`, federation `clamp_budget`); budget caps are enforced at record time, never bypassed. |
 | ReDoS via adversarial text on the scanning surfaces | Secret-detector / shield regexes are anchored (verified <0.15s on 100 KB adversarial inputs). |
 
@@ -232,6 +234,8 @@ point.
 |--------|------------|
 | A peer obtains authority the receiver wouldn't grant | Delegations are **narrow-only**: the peer's requested tools intersect the receiver's local grant; the trust registry ceiling tightens it further; `negotiate_boot` refuses a delegation it can't fully equip. |
 | A queue worker honors an over-broad grant placed on the queue | The worker re-attenuates by its own local policy when enforcement is on (zero-trust across the queue boundary). |
+| A Redis writer plants an executable serialized object before the HMAC verifier runs | Producer and worker both require the bounded, versioned strict-JSON ARQ codec; pickle and every unknown codec are rejected before object reconstruction. |
+| Two fleets share a Redis service and consume each other's jobs | A validated deployment queue namespace is mandatory on both producer and worker. Deployments should also use dedicated Redis databases and ACL identities because ARQ job-body keys use global prefixes. |
 | A tool escapes the workspace via a symlink swapped after the path check (TOCTOU) | File tools verify containment **through the opened descriptor** (`/proc/self/fd`), immune to a post-check swap; writes `O_CREAT` without `O_TRUNC`, verify, then write — an escaped file is never truncated. |
 | An MCP/connector tool defaults to an under-restricted risk | Unclassified + MCP tools default to **high** risk; the capability `max_risk` ceiling drops over-risk tools at registry time; tool-ACL fails **closed** for restricted principals on a config-read error. |
 | An external surface served unauthenticated | Federation/A2A/MCP-HTTP all require credentials and refuse to start/serve without them; a client-bound deployment refuses to serve unbound (`require_client_binding`). |

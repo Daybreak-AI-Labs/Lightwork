@@ -1,9 +1,12 @@
 """Wave 8: coding mode, patch validation, test-driven verifier, repo_map."""
 from __future__ import annotations
 
+import os
 import subprocess
+import sys
 from pathlib import Path
 
+import pytest
 from maverick.coding_mode import (
     Candidate,
     extract_unified_diff,
@@ -366,6 +369,32 @@ class TestCmdForInterpreter:
         cmd = _cmd_for("pytest", ["tests/test_a.py::test_x"])
         assert cmd.startswith("'/opt/v/bin/python' -m pytest ")
 
+    @pytest.mark.skipif(os.name != "nt", reason="local cmd.exe behavior")
+    def test_local_windows_uses_current_interpreter_and_cmd_quoting(self, monkeypatch):
+        from maverick.coding_mode import _cmd_for
+
+        class LocalWindows:
+            host_visible_fs = True
+
+        monkeypatch.delenv("MAVERICK_TEST_PYTHON", raising=False)
+        cmd = _cmd_for(
+            "pytest",
+            ["tests/test_a.py::test_x"],
+            sandbox=LocalWindows(),
+        )
+        assert cmd.startswith(f'"{sys.executable}" -m pytest ')
+        assert '"tests/test_a.py::test_x"' in cmd
+
+    @pytest.mark.skipif(os.name != "nt", reason="local cmd.exe behavior")
+    def test_local_windows_rejects_cmd_expansion_in_test_id(self):
+        from maverick.coding_mode import _cmd_for
+
+        class LocalWindows:
+            host_visible_fs = True
+
+        with pytest.raises(ValueError, match="unsafe character"):
+            _cmd_for("pytest", ["tests/test_%PATH%.py"], sandbox=LocalWindows())
+
 
 class TestCmdForPytestIds:
     """SWE-bench id addressing: path-qualified vs bare-name (sympy)."""
@@ -670,7 +699,12 @@ class TestRepoMapTool:
         outside = tmp_path.parent / "outside-secret-dir"
         outside.mkdir(exist_ok=True)
         (outside / "secret.txt").write_text("nope")
-        (tmp_path / "host_root").symlink_to(outside, target_is_directory=True)
+        try:
+            (tmp_path / "host_root").symlink_to(outside, target_is_directory=True)
+        except OSError as exc:
+            if os.name == "nt" and getattr(exc, "winerror", None) == 1314:
+                pytest.skip("Windows symlink privilege is unavailable")
+            raise
 
         class _Sandbox:
             workdir = tmp_path

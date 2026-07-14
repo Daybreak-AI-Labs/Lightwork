@@ -46,6 +46,25 @@ def test_nonloopback_plaintext_allowed_with_explicit_optout(monkeypatch, _no_tls
     assert s.insecure == "0.0.0.0:50051"
 
 
+def test_plaintext_client_policy_matches_server_policy(monkeypatch, _no_tls_config):
+    assert grpc_tls.insecure_channel_allowed("localhost:50051")
+    assert grpc_tls.insecure_channel_allowed("[::1]:50051")
+    assert not grpc_tls.insecure_channel_allowed("worker.example:50051")
+    monkeypatch.setenv("MAVERICK_ALLOW_INSECURE_GRPC", "1")
+    assert grpc_tls.insecure_channel_allowed("worker.example:50051")
+
+
+def test_goal_client_refuses_remote_plaintext_before_loading_stubs(
+    monkeypatch, _no_tls_config,
+):
+    pytest.importorskip("grpc")
+    from maverick.grpc_dispatcher import GrpcDispatcher
+
+    monkeypatch.setattr(grpc_tls, "channel_credentials", lambda _section: None)
+    with pytest.raises(grpc_tls.TlsConfigError, match="non-loopback"):
+        GrpcDispatcher("worker.example:50051")._build_stub()
+
+
 # ---- enabled / required logic (hermetic via cfg=) -------------------------
 
 

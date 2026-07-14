@@ -5,10 +5,10 @@ atomic persistence roundtrip. Offline and deterministic.
 from __future__ import annotations
 
 import json
-import stat
 
 import pytest
 from maverick import quorum
+from maverick.file_lock import private_path_is_restricted
 
 
 @pytest.fixture(autouse=True)
@@ -212,7 +212,8 @@ def test_persistence_roundtrip(tmp_path, clock):
 def test_store_file_is_0600_atomic_json(tmp_path, clock):
     store = quorum.ProposalStore(path=tmp_path / "proposals.json", clock=clock)
     _propose(store)
-    assert stat.S_IMODE(store.path.stat().st_mode) == 0o600
+    assert private_path_is_restricted(store.path, 0o600)
+    assert private_path_is_restricted(store.path.parent, 0o700)
     assert json.loads(store.path.read_text(encoding="utf-8"))["chg-1"]["key"] \
         == "budget.max_dollars"
     # No temp-file droppings from the atomic write.

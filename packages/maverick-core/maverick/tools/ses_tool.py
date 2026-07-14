@@ -93,7 +93,7 @@ def _run(args: dict[str, Any]) -> str:
     try:
         import boto3  # noqa: F401
     except ImportError:
-        return "ERROR: boto3 not installed. Run: pip install 'maverick-agent[s3]'"
+        return "ERROR: boto3 not installed. Run: python -m pip install -e './packages/maverick-core[s3]'"
     try:
         return {
             "send":                _op_send,

@@ -55,7 +55,7 @@ class ModalBackend:
         except ImportError as e:
             raise RuntimeError(
                 "Modal sandbox backend needs the modal package. "
-                "Install: pip install 'maverick-agent[modal]' and run "
+                "Install: python -m pip install -e './packages/maverick-core[modal]' and run "
                 "`modal token new` once."
             ) from e
         self._client = modal

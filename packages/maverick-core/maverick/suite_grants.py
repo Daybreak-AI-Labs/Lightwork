@@ -46,6 +46,10 @@ class DepartmentAccessError(PermissionError):
         )
 
 
+class SuiteGrantStoreError(RuntimeError):
+    """Department policy exists but cannot be trusted or resolved safely."""
+
+
 # Serializes a grants load-modify-save in-process; cross_process_lock in
 # _locked() extends it across processes (multiple dashboard workers edit grants).
 _GRANTS_LOCK = threading.Lock()
@@ -54,7 +58,11 @@ _GRANTS_LOCK = threading.Lock()
 def _locked(path: Path):
     from contextlib import ExitStack
 
-    from .file_lock import cross_process_lock
+    from .file_lock import cross_process_lock, ensure_private_directory
+    from .paths import maverick_home
+
+    ensure_private_directory(maverick_home())
+    ensure_private_directory(path.parent)
     stack = ExitStack()
     stack.enter_context(_GRANTS_LOCK)
     stack.enter_context(cross_process_lock(path))
@@ -86,10 +94,19 @@ def admin_principals() -> frozenset[str]:
     if env:
         return frozenset(a.strip() for a in env.split(",") if a.strip())
     try:
-        from .config import load_config
-        raw = (load_config().get("dashboard", {}) or {}).get("admins", []) or []
-    except Exception:  # pragma: no cover - config read must never gate access
-        raw = []
+        from .config import config_source_errors, load_config
+
+        cfg = load_config()
+        if config_source_errors():
+            return frozenset()
+        dashboard = cfg.get("dashboard", {})
+        if dashboard is None:
+            dashboard = {}
+        if not isinstance(dashboard, dict):
+            return frozenset()
+        raw = dashboard.get("admins", []) or []
+    except Exception:  # malformed policy must never create a bypass principal
+        return frozenset()
     if isinstance(raw, str):
         raw = [raw]
     if not isinstance(raw, (list, tuple)):
@@ -104,38 +121,96 @@ def is_admin_principal(principal: str) -> bool:
 def default_suites() -> frozenset[str] | None:
     """Suites for an authenticated user with NO explicit grant.
 
-    ``None`` (the default, and on any config problem) means unrestricted —
-    scoping is opt-in per user. Set ``[dashboard] default_suites = ["finance"]``
-    for deny-by-default; unknown suite keys in the list are ignored."""
+    ``None`` (the default when the key is absent) means unrestricted — scoping
+    is opt-in per user. A present-but-invalid config source raises and blocks
+    dispatch instead of silently widening access. Set
+    ``[dashboard] default_suites = ["finance"]`` for deny-by-default; unknown
+    suite keys in the list are ignored (the safe, narrowing direction)."""
     try:
-        from .config import load_config
-        raw = (load_config().get("dashboard", {}) or {}).get("default_suites")
-    except Exception:  # pragma: no cover - config read must never gate auth
-        return None
+        from .config import config_source_errors, load_config
+
+        cfg = load_config()
+        if config_source_errors():
+            raise SuiteGrantStoreError(
+                "department defaults unavailable: an active config source is invalid"
+            )
+        dashboard = cfg.get("dashboard", {})
+        if dashboard is None:
+            dashboard = {}
+        if not isinstance(dashboard, dict):
+            raise SuiteGrantStoreError("department defaults invalid: [dashboard] must be a table")
+        if "default_suites" not in dashboard:
+            return None
+        raw = dashboard.get("default_suites")
+    except SuiteGrantStoreError:
+        raise
+    except Exception as exc:
+        raise SuiteGrantStoreError(f"department defaults unavailable: {exc}") from exc
     if not isinstance(raw, (list, tuple)):
-        return None
+        raise SuiteGrantStoreError("default_suites must be a list")
+    if any(not isinstance(s, str) for s in raw):
+        raise SuiteGrantStoreError("default_suites entries must be strings")
+    if not raw:
+        # An explicitly empty configured default is deny-all, distinct from the
+        # absent key's backwards-compatible unrestricted posture.
+        return frozenset()
     return frozenset(str(s) for s in raw) & known_suites()
 
 
 def _load() -> dict[str, list[str]]:
+    from .file_lock import atomic_read_text, ensure_private_directory, ensure_private_file
+    from .paths import maverick_home
+
     p = store_path()
+    ensure_private_directory(maverick_home())
+    ensure_private_directory(p.parent)
     if not p.exists():
         return {}
     try:
-        data = json.loads(p.read_text(encoding="utf-8"))
-    except (OSError, ValueError):
-        return {}
+        ensure_private_file(p)
+        data = _decode_json_object(atomic_read_text(p))
+    except SuiteGrantStoreError:
+        raise
+    except (OSError, ValueError) as exc:
+        raise SuiteGrantStoreError(f"suite-grant store unreadable or corrupt: {exc}") from exc
     if not isinstance(data, dict):
-        return {}
-    # Re-validate on read so a hand-edited / corrupt store can't inject an
-    # unknown suite or a non-string principal.
+        raise SuiteGrantStoreError("suite-grant store corrupt: top-level value must be an object")
     known = known_suites()
     out: dict[str, list[str]] = {}
-    for k, v in data.items():
-        if not (isinstance(k, str) and k.strip() and isinstance(v, list)):
-            continue
-        out[str(k)] = sorted({str(s) for s in v if isinstance(s, str)} & known)
+    for principal, suites in data.items():
+        if not isinstance(principal, str) or not principal.strip() or principal != principal.strip():
+            raise SuiteGrantStoreError(
+                "suite-grant store corrupt: principals must be non-blank trimmed strings"
+            )
+        if not isinstance(suites, list) or any(not isinstance(s, str) for s in suites):
+            raise SuiteGrantStoreError(
+                f"suite-grant store corrupt: suites for {principal!r} must be a string list"
+            )
+        unknown = set(suites) - known
+        if unknown:
+            raise SuiteGrantStoreError(
+                f"suite-grant store corrupt: unknown suite(s) for {principal!r}"
+            )
+        out[principal] = sorted(set(suites))
     return out
+
+
+def _decode_json_object(raw: str) -> object:
+    def _reject_constant(value: str):
+        raise ValueError(f"non-finite number {value!r}")
+
+    def _object(pairs: list[tuple[str, object]]) -> dict[str, object]:
+        out: dict[str, object] = {}
+        for key, value in pairs:
+            if key in out:
+                raise ValueError(f"duplicate key {key!r}")
+            out[key] = value
+        return out
+
+    try:
+        return json.loads(raw, parse_constant=_reject_constant, object_pairs_hook=_object)
+    except (TypeError, ValueError) as exc:
+        raise SuiteGrantStoreError(f"suite-grant store corrupt: {exc}") from exc
 
 
 def _write(data: dict[str, list[str]]) -> None:
@@ -167,7 +242,8 @@ def register_grant_resolver(fn) -> None:
     ``None`` means "no opinion" (fall through); an iterable of suite keys is a
     grant (validated against :func:`known_suites`). First non-None resolver
     wins, in registration order. Idempotent per function object; a resolver
-    error is swallowed (fail open, kernel rule 1) rather than blocking work."""
+    errors fail closed rather than silently widening an ungranted user to every
+    department."""
     if fn not in _EXTRA_RESOLVERS:
         _EXTRA_RESOLVERS.append(fn)
 
@@ -185,8 +261,10 @@ def granted_suites(principal: str) -> frozenset[str] | None:
     for fn in _EXTRA_RESOLVERS:
         try:
             derived = fn(principal)
-        except Exception:  # pragma: no cover - a grant source must fail open
-            continue
+        except Exception as exc:
+            raise SuiteGrantStoreError(
+                f"department grant resolver failed for {principal!r}: {exc}"
+            ) from exc
         if derived is not None:
             return frozenset(str(s) for s in derived) & known_suites()
     return default_suites()
@@ -260,7 +338,7 @@ def ensure_suite_allowed(principal: str | None, suite: str | None) -> None:
 
 
 __all__ = [
-    "DepartmentAccessError", "store_path", "known_suites", "default_suites",
+    "DepartmentAccessError", "SuiteGrantStoreError", "store_path", "known_suites", "default_suites",
     "admin_principals", "is_admin_principal", "register_grant_resolver",
     "list_grants", "get_grant", "granted_suites", "set_suites", "remove_grant",
     "suite_allowed_for", "ensure_suite_allowed",

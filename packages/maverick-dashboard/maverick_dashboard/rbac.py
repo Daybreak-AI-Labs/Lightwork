@@ -24,6 +24,16 @@ from pathlib import Path
 
 ROLES = ("admin", "operator", "auditor", "viewer")
 
+
+class RbacStoreError(RuntimeError):
+    """RBAC policy exists but cannot be trusted.
+
+    Treating a damaged roster as empty restores the authenticated-user default
+    and can promote a deliberately-demoted viewer back to operator. Readers and
+    mutators therefore refuse present-but-invalid state instead of overwriting
+    or broadening it.
+    """
+
 # Serializes a roster load-modify-save in-process; cross_process_lock in
 # _locked() extends it across processes (multiple dashboard workers edit roles).
 _RBAC_LOCK = threading.Lock()
@@ -32,7 +42,11 @@ _RBAC_LOCK = threading.Lock()
 def _locked(path: Path):
     from contextlib import ExitStack
 
-    from maverick.file_lock import cross_process_lock
+    from maverick.file_lock import cross_process_lock, ensure_private_directory
+    from maverick.paths import maverick_home
+
+    ensure_private_directory(maverick_home())
+    ensure_private_directory(path.parent)
     stack = ExitStack()
     stack.enter_context(_RBAC_LOCK)
     stack.enter_context(cross_process_lock(path))
@@ -55,7 +69,9 @@ _PERMISSIONS: dict[str, frozenset[str]] = {
 
 
 def store_path() -> Path:
-    return Path.home() / ".maverick" / "dashboard-users.json"
+    from maverick.paths import maverick_home
+
+    return maverick_home() / "dashboard-users.json"
 
 
 def default_role() -> str:
@@ -63,35 +79,78 @@ def default_role() -> str:
     ``operator`` (authenticated users keep today's access); set
     ``[dashboard] default_role = "viewer"`` for deny-by-default."""
     try:
-        from maverick.config import load_config
-        r = (load_config().get("dashboard", {}) or {}).get("default_role")
+        from maverick.config import config_source_errors, load_config
+
+        cfg = load_config()
+        if config_source_errors():
+            raise RbacStoreError("RBAC defaults unavailable: an active config source is invalid")
+        dashboard = cfg.get("dashboard", {})
+        if dashboard is None:
+            dashboard = {}
+        if not isinstance(dashboard, dict):
+            raise RbacStoreError("RBAC defaults invalid: [dashboard] must be a table")
+        if "default_role" not in dashboard:
+            return "operator"
+        r = dashboard.get("default_role")
         if isinstance(r, str) and r in ROLES:
             return r
-    except Exception:  # pragma: no cover - config read must never gate auth
-        pass
-    return "operator"
-
-
+        raise RbacStoreError("RBAC default_role is invalid")
+    except RbacStoreError:
+        raise
+    except Exception as exc:
+        raise RbacStoreError(f"RBAC defaults unavailable: {exc}") from exc
 def permissions_for(role: str | None) -> frozenset[str]:
     return _PERMISSIONS.get(role or "", frozenset())
 
 
 def _load() -> dict[str, str]:
+    from maverick.file_lock import (
+        atomic_read_text,
+        ensure_private_directory,
+        ensure_private_file,
+    )
+    from maverick.paths import maverick_home
+
     p = store_path()
+    ensure_private_directory(maverick_home())
+    ensure_private_directory(p.parent)
     if not p.exists():
         return {}
     try:
-        data = json.loads(p.read_text(encoding="utf-8"))
-    except (OSError, ValueError):
-        return {}
+        ensure_private_file(p)
+        data = _decode_json_object(atomic_read_text(p), label="RBAC roster")
+    except RbacStoreError:
+        raise
+    except (OSError, ValueError) as exc:
+        raise RbacStoreError(f"RBAC roster unreadable or corrupt: {exc}") from exc
     if not isinstance(data, dict):
-        return {}
-    # Re-validate on read so a hand-edited / corrupt store can't inject an
-    # unknown role or a non-string principal.
-    return {
-        str(k): v for k, v in data.items()
-        if isinstance(k, str) and k.strip() and isinstance(v, str) and v in ROLES
-    }
+        raise RbacStoreError("RBAC roster corrupt: top-level value must be an object")
+    out: dict[str, str] = {}
+    for principal, role in data.items():
+        if not isinstance(principal, str) or not principal.strip() or principal != principal.strip():
+            raise RbacStoreError("RBAC roster corrupt: principals must be non-blank trimmed strings")
+        if not isinstance(role, str) or role not in ROLES:
+            raise RbacStoreError(f"RBAC roster corrupt: invalid role for {principal!r}")
+        out[principal] = role
+    return out
+
+
+def _decode_json_object(raw: str, *, label: str) -> object:
+    def _reject_constant(value: str):
+        raise ValueError(f"non-finite number {value!r}")
+
+    def _object(pairs: list[tuple[str, object]]) -> dict[str, object]:
+        out: dict[str, object] = {}
+        for key, value in pairs:
+            if key in out:
+                raise ValueError(f"duplicate key {key!r}")
+            out[key] = value
+        return out
+
+    try:
+        return json.loads(raw, parse_constant=_reject_constant, object_pairs_hook=_object)
+    except (TypeError, ValueError) as exc:
+        raise RbacStoreError(f"{label} corrupt: {exc}") from exc
 
 
 def _write(data: dict[str, str]) -> None:
@@ -160,27 +219,51 @@ def remove_user(principal: str, *, actor: str = "") -> None:
 
 
 def tenant_store_path() -> Path:
-    return Path.home() / ".maverick" / "dashboard-tenant-roles.json"
+    from maverick.paths import maverick_home
+
+    return maverick_home() / "dashboard-tenant-roles.json"
 
 
 def _load_tenant() -> dict[str, dict[str, str]]:
+    from maverick.file_lock import (
+        atomic_read_text,
+        ensure_private_directory,
+        ensure_private_file,
+    )
+    from maverick.paths import maverick_home
+
     p = tenant_store_path()
+    ensure_private_directory(maverick_home())
+    ensure_private_directory(p.parent)
     if not p.exists():
         return {}
     try:
-        data = json.loads(p.read_text(encoding="utf-8"))
-    except (OSError, ValueError):
-        return {}
+        ensure_private_file(p)
+        data = _decode_json_object(atomic_read_text(p), label="tenant RBAC roster")
+    except RbacStoreError:
+        raise
+    except (OSError, ValueError) as exc:
+        raise RbacStoreError(f"tenant RBAC roster unreadable or corrupt: {exc}") from exc
     if not isinstance(data, dict):
-        return {}
+        raise RbacStoreError("tenant RBAC roster corrupt: top-level value must be an object")
     out: dict[str, dict[str, str]] = {}
     for tenant, members in data.items():
-        if not (isinstance(tenant, str) and tenant.strip() and isinstance(members, dict)):
-            continue
-        out[tenant] = {
-            str(k): v for k, v in members.items()
-            if isinstance(k, str) and k.strip() and isinstance(v, str) and v in ROLES
-        }
+        if not isinstance(tenant, str) or not tenant.strip() or tenant != tenant.strip():
+            raise RbacStoreError("tenant RBAC roster corrupt: tenant ids must be trimmed strings")
+        if not isinstance(members, dict):
+            raise RbacStoreError(f"tenant RBAC roster corrupt: members for {tenant!r} must be an object")
+        clean: dict[str, str] = {}
+        for principal, role in members.items():
+            if not isinstance(principal, str) or not principal.strip() or principal != principal.strip():
+                raise RbacStoreError(
+                    f"tenant RBAC roster corrupt: invalid principal in {tenant!r}"
+                )
+            if not isinstance(role, str) or role not in ROLES:
+                raise RbacStoreError(
+                    f"tenant RBAC roster corrupt: invalid role for {principal!r}"
+                )
+            clean[principal] = role
+        out[tenant] = clean
     return out
 
 
@@ -236,7 +319,7 @@ def list_tenant_roles(tenant: str) -> dict[str, str]:
 
 
 __all__ = [
-    "ROLES", "store_path", "default_role", "permissions_for",
+    "ROLES", "RbacStoreError", "store_path", "default_role", "permissions_for",
     "list_users", "get_stored_role", "set_role", "remove_user",
     "tenant_store_path", "get_tenant_role", "set_tenant_role",
     "remove_tenant_role", "list_tenant_roles",

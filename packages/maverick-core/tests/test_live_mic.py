@@ -120,5 +120,5 @@ def test_match_utterance_rejects_bad_grammar():
 
 def test_whisper_transcriber_actionable_when_voice_extra_missing(monkeypatch):
     monkeypatch.setitem(sys.modules, "faster_whisper", None)
-    with pytest.raises(ImportError, match=r"maverick-agent\[voice\]"):
+    with pytest.raises(ImportError, match=r"packages/maverick-core\[voice\]"):
         whisper_transcriber()

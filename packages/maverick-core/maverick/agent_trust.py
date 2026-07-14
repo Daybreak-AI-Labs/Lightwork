@@ -53,8 +53,8 @@ Registry format (``~/.maverick/config.toml``)::
 """
 from __future__ import annotations
 
-import contextlib
 import logging
+import math
 import os
 import re
 import threading
@@ -113,14 +113,19 @@ def _risk(value: object) -> str | None:
 
 
 def _positive_float(value: object) -> float | None:
-    """Coerce a config value to a positive float, or None (no ceiling)."""
+    """Coerce a config value to a finite positive float, or ``None``.
+
+    ``float("nan")`` and infinity compare in surprising ways and must never
+    become budget or credential-lifetime ceilings.  Treat them as malformed,
+    alongside zero and negative values.
+    """
     if isinstance(value, bool) or not isinstance(value, (int, float, str)):
         return None
     try:
         f = float(value)
     except (TypeError, ValueError):
         return None
-    return f if f > 0 else None
+    return f if math.isfinite(f) and f > 0 else None
 
 
 _INVALID = object()  # sentinel: a present-but-malformed security field
@@ -148,6 +153,41 @@ def _names(value: object) -> frozenset[str]:
     if isinstance(value, (list, tuple, set)):
         return frozenset(str(v).strip() for v in value if str(v).strip())
     return frozenset()
+
+
+def _security_names(entry: dict, key: str) -> object:
+    """Strictly parse a security-bound list field.
+
+    The permissive :func:`_names` helper is also used for untrusted runtime
+    requests, where ignoring junk is appropriate.  Registry policy is the
+    opposite: a present malformed ``allow_tools`` must not collapse to the
+    empty-set "allow all" sentinel, and a malformed deny/scope list must not
+    silently discard restrictions.  Missing fields remain legitimate empty
+    sets for backwards compatibility.
+    """
+    if key not in entry:
+        return frozenset()
+    value = entry.get(key)
+    if isinstance(value, str):
+        values: object = [value]
+    else:
+        values = value
+    if not isinstance(values, (list, tuple, set)):
+        return _INVALID
+    cleaned: list[str] = []
+    for item in values:
+        if not isinstance(item, str) or not item.strip():
+            return _INVALID
+        cleaned.append(item.strip())
+    return frozenset(cleaned)
+
+
+def _optional_positive_bound(entry: dict, key: str) -> object:
+    """Return a positive finite bound, absent ``None``, or ``_INVALID``."""
+    if key not in entry:
+        return None
+    parsed = _positive_float(entry.get(key))
+    return parsed if parsed is not None else _INVALID
 
 
 @dataclass(frozen=True)
@@ -235,11 +275,22 @@ class TrustedAgent:
         propagates onto the grant so the handed-out capability expires with the
         registry entry (a grant must never outlive the trust that minted it).
         """
-        from .capability import Capability
+        from .capability import COORDINATION_TOOLS, Capability
+        # The general Capability type keeps a coordination floor so trusted
+        # in-process specialists can always participate in their workforce.
+        # An external trust-registry allowlist is a different boundary: a
+        # caller granted only ``read_file`` must not implicitly gain fan-out,
+        # delegation, peer messaging, or user-interaction authority.  Convert
+        # every omitted coordination tool into an explicit deny; operators can
+        # opt in by naming the tool in ``allow_tools`` (or leave the allowlist
+        # empty to retain the documented allow-all behavior).
+        deny_tools = self.deny_tools
+        if self.allow_tools:
+            deny_tools = deny_tools | (COORDINATION_TOOLS - self.allow_tools)
         return Capability(
             principal=principal or f"agent:{self.id}",
             allow_tools=self.allow_tools,
-            deny_tools=self.deny_tools,
+            deny_tools=deny_tools,
             max_risk=self.max_risk,
             expires_at=self.expires_at,
         )
@@ -312,30 +363,89 @@ def load_trust_state() -> tuple[bool, dict[str, TrustedAgent]]:
     and the next see "disengaged, new registry". Env/enterprise still win for
     the enforced flag (they're not part of the config table).
     """
-    try:
-        from .config import load_config
-        cfg = load_config() or {}
-    except Exception:
+    # Do not turn an I/O/import/config-loader failure into a disengaged trust
+    # plane.  Cross-agent transports catch this seam and deny the request; an
+    # empty fallback here would instead report ``enforced=False`` and fail
+    # open at exactly the boundary this function protects.
+    from .config import config_source_errors, load_config
+    cfg = load_config()
+    source_errors = config_source_errors()
+    if source_errors:
+        paths = ", ".join(sorted(source_errors))
+        raise AgentTrustError(f"agent trust config source is unreadable: {paths}")
+    if cfg is None:
         cfg = {}
+    if not isinstance(cfg, dict):
+        raise AgentTrustError("agent trust config root must be a table")
+    trust_cfg = cfg.get("agent_trust")
+    if trust_cfg is not None and not isinstance(trust_cfg, dict):
+        raise AgentTrustError("agent_trust config section must be a table")
     return agent_trust_enforced(cfg), load_registry(cfg)
 
 
 def _agent_from_entry(entry: dict) -> TrustedAgent | None:
     """Parse one registry entry, or ``None`` if it's malformed (fail-closed: a
     bad entry simply never matches, it does not broaden trust)."""
-    agent_id = str(entry.get("id") or entry.get("origin") or "").strip()
+    raw_id = entry.get("id") or entry.get("origin") or ""
+    if not isinstance(raw_id, str):
+        log.warning("[agent_trust] skipping entry with non-string id")
+        return None
+    if entry.get("id") and entry.get("origin") and entry.get("id") != entry.get("origin"):
+        log.warning("[agent_trust] skipping entry with conflicting id/origin")
+        return None
+    agent_id = raw_id.strip()
     if not valid_agent_id(agent_id):
         log.warning("[agent_trust] skipping entry with bad id %r", agent_id)
         return None
-    pubkey = str(entry.get("pubkey") or "").strip().lower()
-    if pubkey and not _PUBKEY_RE.fullmatch(pubkey):
-        log.warning("[agent_trust] agent %r: ignoring malformed pubkey", agent_id)
+    if "pubkey" in entry:
+        raw_pubkey = entry.get("pubkey")
+        if not isinstance(raw_pubkey, str):
+            log.warning("[agent_trust] agent %r: malformed pubkey; dropping entry",
+                        agent_id)
+            return None
+        pubkey = raw_pubkey.strip().lower()
+        if not _PUBKEY_RE.fullmatch(pubkey):
+            log.warning("[agent_trust] agent %r: malformed pubkey; dropping entry",
+                        agent_id)
+            return None
+    else:
         pubkey = ""
-    direction = str(entry.get("direction") or "both").strip().lower()
-    if direction not in _DIRECTIONS:
-        log.warning("[agent_trust] agent %r: bad direction %r; using 'both'",
-                    agent_id, direction)
+
+    if "direction" in entry:
+        raw_direction = entry.get("direction")
+        if not isinstance(raw_direction, str):
+            log.warning("[agent_trust] agent %r: malformed direction; dropping entry",
+                        agent_id)
+            return None
+        direction = raw_direction.strip().lower()
+        if direction not in _DIRECTIONS:
+            log.warning("[agent_trust] agent %r: bad direction %r; dropping entry",
+                        agent_id, direction)
+            return None
+    else:
         direction = "both"
+
+    if "max_risk" in entry:
+        raw_risk = entry.get("max_risk")
+        max_risk = _risk(raw_risk.strip().lower()) if isinstance(raw_risk, str) else None
+        if max_risk is None:
+            log.warning("[agent_trust] agent %r: malformed max_risk; dropping entry",
+                        agent_id)
+            return None
+    else:
+        max_risk = None
+
+    max_dollars = _optional_positive_bound(entry, "max_dollars")
+    max_wall_seconds = _optional_positive_bound(entry, "max_wall_seconds")
+    allow_tools = _security_names(entry, "allow_tools")
+    deny_tools = _security_names(entry, "deny_tools")
+    data_scopes = _security_names(entry, "data_scopes")
+    if any(value is _INVALID for value in (
+        max_dollars, max_wall_seconds, allow_tools, deny_tools, data_scopes,
+    )):
+        log.warning("[agent_trust] agent %r: malformed security limit; "
+                    "dropping entry", agent_id)
+        return None
     not_before = _lifecycle_bound(entry, "not_before")
     expires_at = _lifecycle_bound(entry, "expires_at")
     if not_before is _INVALID or expires_at is _INVALID:
@@ -344,22 +454,42 @@ def _agent_from_entry(entry: dict) -> TrustedAgent | None:
         log.warning("[agent_trust] agent %r: malformed not_before/expires_at; "
                     "dropping entry (fail-closed)", agent_id)
         return None
+    tokens: dict[str, str] = {}
+    for field in ("a2a_token", "grpc_token", "mcp_token"):
+        value = entry.get(field, "")
+        if (
+            not isinstance(value, str)
+            or value != value.strip()
+            or len(value) > 4096
+            or any(ord(char) < 0x20 or ord(char) == 0x7F for char in value)
+        ):
+            log.warning(
+                "[agent_trust] agent %r: malformed %s; dropping entry",
+                agent_id,
+                field,
+            )
+            return None
+        tokens[field] = value
+    revoked = entry.get("revoked", False)
+    if not isinstance(revoked, bool):
+        log.warning("[agent_trust] agent %r: malformed revoked flag; dropping entry", agent_id)
+        return None
     return TrustedAgent(
         id=agent_id,
         pubkey=pubkey,
         direction=direction,
-        allow_tools=_names(entry.get("allow_tools")),
-        deny_tools=_names(entry.get("deny_tools")),
-        max_risk=_risk(entry.get("max_risk")),
-        max_dollars=_positive_float(entry.get("max_dollars")),
-        max_wall_seconds=_positive_float(entry.get("max_wall_seconds")),
-        data_scopes=_names(entry.get("data_scopes")),
-        a2a_token=str(entry.get("a2a_token") or ""),
-        grpc_token=str(entry.get("grpc_token") or ""),
-        mcp_token=str(entry.get("mcp_token") or ""),
+        allow_tools=allow_tools,  # type: ignore[arg-type]  # frozenset (not _INVALID)
+        deny_tools=deny_tools,  # type: ignore[arg-type]
+        max_risk=max_risk,
+        max_dollars=max_dollars,  # type: ignore[arg-type]  # float|None
+        max_wall_seconds=max_wall_seconds,  # type: ignore[arg-type]
+        data_scopes=data_scopes,  # type: ignore[arg-type]
+        a2a_token=tokens["a2a_token"],
+        grpc_token=tokens["grpc_token"],
+        mcp_token=tokens["mcp_token"],
         not_before=not_before,  # type: ignore[arg-type]  # float|None (not _INVALID)
         expires_at=expires_at,  # type: ignore[arg-type]
-        revoked=bool(entry.get("revoked")),
+        revoked=revoked,
     )
 
 
@@ -378,7 +508,14 @@ def load_registry(cfg: dict | None = None) -> dict[str, TrustedAgent]:
         except Exception:
             log.warning("agent_trust: config unreadable; registry is empty")
             return {}
-    raw = (cfg.get("agent_trust") or {}).get("agents")
+    if not isinstance(cfg, dict):
+        log.warning("agent_trust: config root must be a table; registry is empty")
+        return {}
+    trust_cfg = cfg.get("agent_trust")
+    if trust_cfg is not None and not isinstance(trust_cfg, dict):
+        log.warning("agent_trust: config section must be a table; registry is empty")
+        return {}
+    raw = (trust_cfg or {}).get("agents")
     out: dict[str, TrustedAgent] = {}
     if isinstance(raw, list):
         for item in raw[:_MAX_AGENTS]:
@@ -393,10 +530,20 @@ def load_registry(cfg: dict | None = None) -> dict[str, TrustedAgent]:
     # Merge the CLI-managed registry overlay (agent_trust.json, client-scoped):
     # managed entries add to / override the hand-edited config ones, so
     # `maverick trust` add/rotate/revoke take effect without editing TOML.
-    for item in _load_managed():
+    try:
+        managed = _load_managed()
+    except AgentTrustError as e:
+        # The overlay may contain a revocation or stricter replacement for a
+        # TOML entry.  Continuing with TOML after losing that overlay would
+        # silently re-trust the agent, so invalidate the whole snapshot.
+        log.warning("agent_trust: %s; registry is empty (fail-closed)", e)
+        return {}
+    for item in managed:
         agent = _agent_from_entry(item)
         if agent is None:
-            continue
+            log.warning("agent_trust: malformed managed entry; registry is "
+                        "empty (fail-closed)")
+            return {}
         if agent.id in out or len(out) < _MAX_AGENTS:
             out[agent.id] = agent
     return out
@@ -416,33 +563,59 @@ def managed_path():
 
 def _load_managed() -> list[dict]:
     import json
+
+    from .file_lock import atomic_read_text, ensure_private_directory, ensure_private_file
+    from .paths import maverick_home
+
     try:
         p = managed_path()
+        ensure_private_directory(maverick_home())
+        ensure_private_directory(p.parent)
         if not p.exists():
             return []
-        data = json.loads(p.read_text(encoding="utf-8"))
-    except Exception as e:  # pragma: no cover - a corrupt overlay must not crash reads
-        log.warning("agent_trust: managed registry unreadable: %s", e)
-        return []
-    return [a for a in data if isinstance(a, dict)] if isinstance(data, list) else []
+        ensure_private_file(p)
+        raw = atomic_read_text(p)
+        if len(raw) > 4 * 1024 * 1024:
+            raise AgentTrustError("managed registry exceeds the size limit")
+
+        def _reject_constant(value: str):
+            raise ValueError(f"non-finite number {value!r}")
+
+        def _object(pairs: list[tuple[str, object]]) -> dict[str, object]:
+            out: dict[str, object] = {}
+            for key, value in pairs:
+                if key in out:
+                    raise ValueError(f"duplicate key {key!r}")
+                out[key] = value
+            return out
+
+        data = json.loads(
+            raw,
+            parse_constant=_reject_constant,
+            object_pairs_hook=_object,
+        )
+    except AgentTrustError:
+        raise
+    except (OSError, UnicodeError, ValueError) as e:
+        raise AgentTrustError("managed registry is unreadable or invalid") from e
+    if not isinstance(data, list):
+        raise AgentTrustError("managed registry root must be a list")
+    if len(data) > _MAX_AGENTS or any(not isinstance(a, dict) for a in data):
+        raise AgentTrustError("managed registry has an invalid entry or size")
+    return data
 
 
 def _save_managed(entries: list[dict]) -> None:
     import json
-    import os as _os
-    import tempfile
+
+    from .file_lock import atomic_write_text, ensure_private_directory
+    from .paths import maverick_home
+
     p = managed_path()
-    p.parent.mkdir(parents=True, exist_ok=True)
-    fd, tmp = tempfile.mkstemp(dir=str(p.parent), prefix=".agent_trust.", suffix=".json")
-    try:
-        with _os.fdopen(fd, "w", encoding="utf-8") as f:
-            json.dump(entries[:_MAX_AGENTS], f, indent=2, sort_keys=True)
-        _os.chmod(tmp, 0o600)
-        _os.replace(tmp, p)
-    except Exception:
-        with contextlib.suppress(OSError):
-            _os.unlink(tmp)
-        raise
+    ensure_private_directory(maverick_home())
+    ensure_private_directory(p.parent)
+    body = json.dumps(entries[:_MAX_AGENTS], indent=2, sort_keys=True)
+    atomic_write_text(p, body, mode=0o600)
 
 
 def put_agent(entry: dict) -> TrustedAgent:
@@ -451,6 +624,9 @@ def put_agent(entry: dict) -> TrustedAgent:
     Validates via :func:`_agent_from_entry`; raises :class:`AgentTrustError` on a
     malformed entry so the CLI surfaces a clear error instead of silently
     dropping it."""
+    # CLI/programmatic callers naturally pass optional values as None/empty;
+    # canonicalize those to absence before applying strict on-disk parsing.
+    entry = {k: v for k, v in entry.items() if v not in (None, "", [], {})}
     raw_pubkey = str(entry.get("pubkey") or "").strip()
     if raw_pubkey and not _PUBKEY_RE.fullmatch(raw_pubkey):
         raise AgentTrustError(

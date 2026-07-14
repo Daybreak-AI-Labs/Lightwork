@@ -6,7 +6,7 @@ on:
       - 'v*'
   workflow_dispatch: {}
 
-# Publishes all six maverick-* packages to PyPI when a `v*` tag is
+# Publishes the explicit public Lightwork package allowlist to PyPI when a `v*` tag is
 # pushed. Uses PyPI trusted publishing (OIDC) -- no API tokens stored
 # in GitHub secrets. Set up the trusted-publishers config at
 # https://pypi.org/manage/account/publishing/ before this workflow
@@ -14,47 +14,40 @@ on:
 
 permissions:
   contents: read
-  id-token: write   # for PyPI OIDC
 
 jobs:
   build:
     runs-on: ubuntu-latest
     outputs:
-      built: ${{ steps.list.outputs.dirs }}
       names: ${{ steps.names.outputs.names }}
     steps:
-      - uses: actions/checkout@v7
-      - uses: actions/setup-python@v6
+      - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7
+      - uses: actions/setup-python@ece7cb06caefa5fff74198d8649806c4678c61a1 # v6
         with:
           python-version: "3.12"
       - name: Install build tools
         run: python -m pip install --upgrade build
 
-      - id: list
-        name: Discover packages
-        run: |
-          set -e
-          # Each package directory with a pyproject.toml under packages/
-          # or apps/ is a candidate.
-          dirs=()
-          for d in packages/* apps/*; do
-            if [ -f "$d/pyproject.toml" ]; then
-              dirs+=("$d")
-            fi
-          done
-          printf 'discovered: %s\n' "${dirs[@]}"
-          # Emit as a JSON array for the matrix job.
-          echo "dirs=$(printf '%s\n' "${dirs[@]}" | jq -R . | jq -sc .)" >> "$GITHUB_OUTPUT"
-
       - name: Build all packages
         run: |
-          set -e
+          set -euo pipefail
+          # Public-package allowlist. Never auto-discover apps/*: that once
+          # pulled the private vendor console into an OIDC-enabled publish run.
+          dirs=(
+            packages/maverick-core
+            packages/maverick-shield
+            packages/maverick-channels
+            packages/maverick-dashboard
+            packages/maverick-mcp
+            packages/maverick-evolve
+            packages/maverick-knowledge
+            apps/installer-cli
+          )
           mkdir -p dist-all
-          for d in packages/* apps/*; do
-            if [ -f "$d/pyproject.toml" ]; then
-              echo "==> Building $d"
-              (cd "$d" && python -m build --outdir ../../dist-all .)
-            fi
+          for d in "${dirs[@]}"; do
+            test -f "$d/pyproject.toml"
+            echo "==> Building $d"
+            (cd "$d" && python -m build --outdir ../../dist-all .)
           done
           ls -la dist-all
 
@@ -67,7 +60,7 @@ jobs:
           names=$(ls dist-all/*.whl | sed 's#.*/##; s/-[0-9].*//' | sort -u)
           echo "names=$(printf '%s\n' $names | jq -R . | jq -sc .)" >> "$GITHUB_OUTPUT"
 
-      - uses: actions/upload-artifact@v7
+      - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7
         with:
           name: dist
           path: dist-all/
@@ -75,6 +68,10 @@ jobs:
   publish:
     needs: build
     runs-on: ubuntu-latest
+    # The first-party public names are not all reserved yet. An environment
+    # owner must explicitly enable publishing after every allowlisted namespace
+    # and trusted-publisher binding has been verified out of band.
+    if: vars.MAVERICK_PUBLIC_PYPI_ENABLED == 'true'
     # One job per package. fail-fast: false means a package that has no
     # trusted publisher yet (or otherwise 4xx's) fails only its own job --
     # it can't abort the others the way a single `twine upload dist/*` did.
@@ -90,7 +87,7 @@ jobs:
     environment:
       name: pypi
     steps:
-      - uses: actions/download-artifact@v8
+      - uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8
         with:
           name: dist
           path: dist-all/
@@ -115,8 +112,8 @@ jobs:
       contents: write     # release attach
       id-token: write     # Sigstore OIDC
     steps:
-      - uses: actions/checkout@v7
-      - uses: actions/download-artifact@v8
+      - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7
+      - uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8
         with:
           name: dist
           path: dist/
@@ -161,7 +158,7 @@ jobs:
         # Runs only when the release never appeared, so the signatures are
         # still retrievable. Never fails the job.
         if: steps.attach.outputs.uploaded == 'false'
-        uses: actions/upload-artifact@v7
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7
         with:
           name: signatures
           path: signatures/*.cosign.bundle

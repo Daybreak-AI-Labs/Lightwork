@@ -93,7 +93,7 @@ def _run(args: dict[str, Any]) -> str:
     try:
         import roslibpy
     except ImportError:
-        return "ERROR: roslibpy not installed. Run: pip install 'maverick-agent[ros]'"
+        return "ERROR: roslibpy not installed. Run: python -m pip install -e './packages/maverick-core[ros]'"
     try:
         if op == "publish":
             return _op_publish(roslibpy, args)

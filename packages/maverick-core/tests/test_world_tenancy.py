@@ -12,6 +12,7 @@ from __future__ import annotations
 
 import asyncio
 from dataclasses import dataclass
+from pathlib import Path
 
 import pytest
 from maverick.paths import maverick_home
@@ -122,13 +123,19 @@ def test_handle_message_routes_goal_to_user_tenant(monkeypatch):
 
     captured = {}
 
-    async def _fake_run_goal(llm, world, budget, goal_id, **kwargs):
-        # Prove run_goal is handed the per-tenant world, not the shared one.
-        captured["world"] = world
+    async def _fake_dispatch(goal_id, **kwargs):
+        # The signed submission is created while the per-tenant context is
+        # active, and its goal/result remain in that isolated world.
+        tenant_world = world_for_tenant("tg:X")
+        captured["world"] = tenant_world
         captured["goal_id"] = goal_id
+        captured.update(kwargs)
+        tenant_world.set_goal_status(goal_id, "done", result="done")
         return "done"
 
-    monkeypatch.setattr(server_mod, "run_goal", _fake_run_goal)
+    monkeypatch.setattr(
+        "maverick.runner.run_goal_in_background_async", _fake_dispatch,
+    )
 
     msg = _Msg(text="hello from X", channel="tg", user_id="X")
     out = asyncio.run(srv._handle_message(msg))
@@ -175,10 +182,11 @@ def test_world_for_tenant_caps_cached_tenant_worlds(monkeypatch):
     third = world_for_tenant("tenant-3")
     assert third is not first
     keys = list(wm._tenant_worlds)
+    normalized = [Path(k).as_posix() for k in keys]
     assert len(wm._tenant_worlds) == 2
-    assert not any(k.endswith("tenant-2/world.db") for k in keys)  # evicted
-    assert any(k.endswith("tenant-1/world.db") for k in keys)      # kept (recent)
-    assert any(k.endswith("tenant-3/world.db") for k in keys)      # added
+    assert not any(k.endswith("tenant-2/world.db") for k in normalized)  # evicted
+    assert any(k.endswith("tenant-1/world.db") for k in normalized)  # kept
+    assert any(k.endswith("tenant-3/world.db") for k in normalized)  # added
     wm._tenant_worlds.clear()
 
 
@@ -187,10 +195,12 @@ def test_handle_message_rejects_tenant_resolution_failure(monkeypatch):
     monkeypatch.delenv("MAVERICK_TENANT", raising=False)
     server_mod, srv, shared = _build_server(monkeypatch)
 
-    async def _fake_run_goal(*args, **kwargs):
-        raise AssertionError("run_goal must not run without an isolated tenant")
+    async def _dispatch_must_not_run(*args, **kwargs):
+        raise AssertionError("dispatch must not run without an isolated tenant")
 
-    monkeypatch.setattr(server_mod, "run_goal", _fake_run_goal)
+    monkeypatch.setattr(
+        "maverick.runner.run_goal_in_background_async", _dispatch_must_not_run,
+    )
 
     msg = _Msg(text="do not fall back", channel="tg", user_id="X" * 201)
     out = asyncio.run(srv._handle_message(msg))
@@ -207,11 +217,15 @@ def test_handle_message_uses_shared_world_when_tenancy_off(monkeypatch):
 
     captured = {}
 
-    async def _fake_run_goal(llm, world, budget, goal_id, **kwargs):
-        captured["world"] = world
-        return "ok"
+    async def _fake_dispatch(goal_id, **kwargs):
+        captured["world"] = shared
+        captured.update(kwargs)
+        shared.set_goal_status(goal_id, "done", result="ok")
+        return "done"
 
-    monkeypatch.setattr(server_mod, "run_goal", _fake_run_goal)
+    monkeypatch.setattr(
+        "maverick.runner.run_goal_in_background_async", _fake_dispatch,
+    )
 
     msg = _Msg(text="hi", channel="tg", user_id="Y")
     asyncio.run(srv._handle_message(msg))

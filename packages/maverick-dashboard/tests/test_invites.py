@@ -72,15 +72,32 @@ def test_validation():
         invites.create_invite("not-an-email", "viewer", created_by="me")
     with pytest.raises(ValueError):
         invites.create_invite("a@b.co", "superuser", created_by="me")
+    with pytest.raises(ValueError):
+        invites.create_invite("a@b.co", "viewer", created_by="me", ttl_hours=float("inf"))
+
+
+def test_corrupt_invite_store_fails_closed_and_is_not_overwritten():
+    from maverick_dashboard import invites
+
+    path = invites.store_path()
+    path.parent.mkdir(parents=True, exist_ok=True)
+    original = '{"invite_x":{"id":"invite_x","role":"admin"}}'
+    path.write_text(original, encoding="utf-8")
+    with pytest.raises(invites.InviteStoreError):
+        invites.list_invites()
+    with pytest.raises(invites.InviteStoreError):
+        invites.create_invite("new@example.com", "viewer", created_by="admin")
+    assert path.read_text(encoding="utf-8") == original
 
 
 def test_local_session_secret_is_persistent_and_private(tmp_path):
+    from maverick.file_lock import private_path_is_restricted
     from maverick_dashboard import invites
     s1 = invites.local_session_secret()
     s2 = invites.local_session_secret()
     assert s1 == s2 and len(s1) >= 32
     key = invites._session_secret_path()
-    assert key.exists() and (key.stat().st_mode & 0o777) == 0o600
+    assert key.exists() and private_path_is_restricted(key)
 
 
 # ---------- HTTP: fail-closed while disabled ----------

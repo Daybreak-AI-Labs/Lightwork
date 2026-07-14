@@ -15,6 +15,7 @@ import hashlib
 import hmac
 import json
 import logging
+import math
 import os
 import threading
 import time
@@ -36,7 +37,8 @@ def _require_grpc():
         import grpc  # noqa: F401
     except ImportError as e:
         raise ImportError(
-            "grpc not installed. Run: pip install 'maverick-agent[grpc]'"
+                "grpc not installed. Run from a reviewed Lightwork checkout: "
+                "python -m pip install -e './packages/maverick-core[grpc]'"
         ) from e
     return __import__("grpc")
 
@@ -61,7 +63,8 @@ def _generate_stubs() -> None:
     except ImportError as e:
         raise ImportError(
             "grpcio-tools not installed (needed to generate stubs). "
-            "Run: pip install 'maverick-agent[grpc]'"
+            "Run from a reviewed Lightwork checkout: "
+            "python -m pip install -e './packages/maverick-core[grpc]'"
         ) from e
     out = str(_PROTO.parent)
     rc = protoc.main([
@@ -102,9 +105,110 @@ def _abort(context, code, details: str):
     raise PermissionError(details)
 
 
-def _require_authorized(context, bearer_token: str) -> None:
+def _require_authorized(context, bearer_token: str):
     agent = _authorize_caller(context, bearer_token)
     _trust_capability(context, agent)
+    return agent
+
+
+def _agent_owner(agent) -> str | None:
+    """Object owner for a per-agent token; ``None`` for the operator token.
+
+    The shared bearer is the backwards-compatible administrative principal and
+    may access every goal in the active client/tenant floor.  Per-agent tokens
+    are least-privilege principals and may access only ``agent:<id>`` goals.
+    """
+    if agent is None:
+        return None
+    return f"agent:{agent.id}"
+
+
+def _execution_identity(
+    agent, *, channel: str | None, user_id: str | None,
+) -> tuple[str | None, str | None]:
+    """Bind execution context to an authenticated per-agent identity.
+
+    ``channel`` and ``user_id`` select capability policy and user-scoped learned
+    context.  They therefore cannot remain caller assertions for a per-agent
+    token.  The shared operator token is trusted to forward those fields for the
+    cross-host dispatcher and keeps the historical behavior.
+    """
+    if agent is None:
+        return channel, user_id
+    return "grpc", str(agent.id)
+
+
+def _execution_budget(
+    agent,
+    *,
+    max_dollars: float | None,
+    max_wall_seconds: float | None,
+) -> tuple[float | None, float | None]:
+    """Clamp a per-agent request to its registry budget ceilings.
+
+    Protobuf floats can carry NaN/Infinity.  Normalize those (and non-positive
+    sentinel values) to "unspecified" before clamping, otherwise NaN can survive
+    ``min`` and later be replaced by a larger generic Budget default.  The
+    shared operator keeps its historical pass-through semantics.
+    """
+    if agent is None:
+        return max_dollars, max_wall_seconds
+
+    def _finite_positive(value: float | None) -> float | None:
+        if value is None:
+            return None
+        parsed = float(value)
+        return parsed if math.isfinite(parsed) and parsed > 0 else None
+
+    from ..agent_trust import clamp_budget
+
+    return clamp_budget(
+        agent,
+        max_dollars=_finite_positive(max_dollars),
+        max_wall_seconds=_finite_positive(max_wall_seconds),
+    )
+
+
+def _execution_depth(requested: int | None) -> int:
+    """Clamp remote recursion to a worker-owned ceiling.
+
+    ``RunGoal.max_depth`` is an untrusted protobuf integer.  Passing it through
+    lets an authenticated caller request an exponentially large swarm.  The
+    worker therefore owns the ceiling (defaulting to the normal runner depth),
+    with an absolute implementation bound matching the queue worker.
+    """
+    from ..runner import DEFAULT_MAX_DEPTH
+
+    default = min(64, max(1, int(DEFAULT_MAX_DEPTH)))
+    ceiling = _grpc_int_setting("MAVERICK_GRPC_MAX_DEPTH", "max_depth", default)
+    ceiling = min(64, max(1, ceiling or default))
+    try:
+        value = int(requested) if requested is not None and int(requested) > 0 else default
+    except (TypeError, ValueError, OverflowError):
+        value = default
+    return min(ceiling, max(1, value))
+
+
+def _stream_deadline(requested: float | None) -> float:
+    """Return a finite server-owned deadline for an episode stream.
+
+    A zero protobuf value previously meant "forever", allowing a handful of
+    authenticated clients to pin every gRPC worker on non-terminal goals.  A
+    caller can reconnect with ``since_id`` after the deadline.
+    """
+    ceiling = min(
+        3600.0,
+        _grpc_float_setting(
+            "MAVERICK_GRPC_STREAM_MAX_SECONDS", "stream_max_seconds", 300.0
+        ),
+    )
+    try:
+        value = float(requested) if requested is not None else ceiling
+    except (TypeError, ValueError, OverflowError):
+        value = ceiling
+    if not math.isfinite(value) or value <= 0:
+        value = ceiling
+    return min(value, ceiling)
 
 
 # --- per-caller request rate limiting (sliding 60s window) -------------------
@@ -238,13 +342,12 @@ def _trust_capability(context, agent):
     try:
         from .. import agent_trust
         enforced, registry = agent_trust.load_trust_state()
-    except Exception as e:  # pragma: no cover - config read never breaks the path
-        # Fail open (kernel philosophy), but do NOT do it silently: a trust-state
-        # load error means an operator-enabled trust plane has degraded to
-        # unenforced, which is security-relevant and must be visible.
-        log.warning("gRPC trust plane: could not load trust state (%s); "
-                    "proceeding WITHOUT inbound trust enforcement", e)
-        return None
+    except Exception as e:  # pragma: no cover - exercised via monkeypatched seam
+        # This is an inbound remote-control boundary, not an optional model
+        # enhancement. If trust state is unreadable we cannot prove admission,
+        # so deny instead of silently collapsing to bearer-only access.
+        log.error("gRPC trust plane: could not load trust state; refusing RPC: %s", e)
+        _abort(context, _grpc_code().UNAVAILABLE, "agent trust policy unavailable")
     if not enforced:
         return None
     agent_id = agent.id if agent is not None else "grpc"
@@ -258,9 +361,12 @@ def _trust_capability(context, agent):
 def _capability_from_json(raw: str):
     if not raw:
         return None
-    from ..queue_dispatcher import _deserialize_capability
+    from ..queue_dispatcher import QueueSecurityError, _deserialize_capability
 
-    return _deserialize_capability(json.loads(raw))
+    try:
+        return _deserialize_capability(json.loads(raw))
+    except QueueSecurityError as exc:
+        raise ValueError(str(exc)) from None
 
 
 def _rpc_capability(capability, *, channel: str | None = None, user_id: str | None = None):
@@ -273,9 +379,6 @@ def _rpc_capability(capability, *, channel: str | None = None, user_id: str | No
     This preserves legitimate delegated restrictions while ensuring external
     callers can only narrow, never broaden, the worker's configured policy.
     """
-    if capability is None:
-        return None
-
     from ..capability import capability_enforced, capability_from_config
 
     if not capability_enforced():
@@ -286,6 +389,11 @@ def _rpc_capability(capability, *, channel: str | None = None, user_id: str | No
         channel=channel,
         user_id=user_id,
     )
+    if capability is None:
+        # An omitted wire grant means "no additional caller restriction", not
+        # "bypass the worker's policy".  Always install the worker-owned
+        # capability when enforcement is enabled.
+        return local
     return local.intersect(capability, principal=local.principal)
 
 
@@ -296,27 +404,46 @@ def _servicer(service, pb2, pb2_grpc, *, bearer_token: str | None = None):
     class MaverickServicer(pb2_grpc.MaverickServicer):
         def StartGoal(self, request, context):
             agent = _authorize_caller(context, bearer_token)
-            capability = _trust_capability(context, agent)
+            trust_cap = _trust_capability(context, agent)
+            max_dollars, max_wall_seconds = _execution_budget(
+                agent,
+                max_dollars=request.max_dollars or None,
+                max_wall_seconds=request.max_wall_seconds or None,
+            )
+            channel, user_id = _execution_identity(
+                agent,
+                channel=request.channel or None,
+                user_id=request.user_id or None,
+            )
+            # StartGoal has no wire capability field, but it still executes on
+            # this worker and must receive the local capability floor.  When
+            # the trust plane supplies a caller ceiling, local policy
+            # intersects it rather than replacing either side.
+            capability = _rpc_capability(
+                trust_cap, channel=channel, user_id=user_id,
+            )
             try:
                 goal_id = service.start_goal(
                     request.title,
                     request.description,
-                    max_dollars=request.max_dollars or None,
-                    max_wall_seconds=request.max_wall_seconds or None,
-                    channel=request.channel or None,
-                    user_id=request.user_id or None,
+                    max_dollars=max_dollars,
+                    max_wall_seconds=max_wall_seconds,
+                    channel=channel,
+                    user_id=user_id,
                     capability=capability,
+                    owner=_agent_owner(agent) or "",
                 )
             except ValueError as e:
                 context.abort(_grpc_code().INVALID_ARGUMENT, str(e))
             return pb2.StartGoalResponse(goal_id=goal_id)
 
         def StreamEpisode(self, request, context):
-            _require_authorized(context, bearer_token)
+            agent = _require_authorized(context, bearer_token)
             for ev in service.stream_episode(
                 request.goal_id,
                 since_id=request.since_id,
-                max_seconds=request.max_seconds or None,
+                max_seconds=_stream_deadline(request.max_seconds or None),
+                expected_owner=_agent_owner(agent),
             ):
                 if not context.is_active():  # client hung up
                     return
@@ -326,12 +453,16 @@ def _servicer(service, pb2, pb2_grpc, *, bearer_token: str | None = None):
                 )
 
         def Cancel(self, request, context):
-            _require_authorized(context, bearer_token)
-            return pb2.CancelResponse(cancelled=service.cancel(request.goal_id))
+            agent = _require_authorized(context, bearer_token)
+            return pb2.CancelResponse(cancelled=service.cancel(
+                request.goal_id, expected_owner=_agent_owner(agent),
+            ))
 
         def GetStatus(self, request, context):
-            _require_authorized(context, bearer_token)
-            st = service.status(request.goal_id)
+            agent = _require_authorized(context, bearer_token)
+            st = service.status(
+                request.goal_id, expected_owner=_agent_owner(agent),
+            )
             if st is None:
                 return pb2.GoalStatus(goal_id=request.goal_id, found=False)
             return pb2.GoalStatus(
@@ -342,8 +473,16 @@ def _servicer(service, pb2, pb2_grpc, *, bearer_token: str | None = None):
         def RunGoal(self, request, context):
             agent = _authorize_caller(context, bearer_token)
             trust_cap = _trust_capability(context, agent)
-            channel = request.channel or None
-            user_id = request.user_id or None
+            max_dollars, max_wall_seconds = _execution_budget(
+                agent,
+                max_dollars=request.max_dollars or None,
+                max_wall_seconds=request.max_wall_seconds or None,
+            )
+            channel, user_id = _execution_identity(
+                agent,
+                channel=request.channel or None,
+                user_id=request.user_id or None,
+            )
             try:
                 capability = _rpc_capability(
                     _capability_from_json(request.capability_json),
@@ -357,15 +496,19 @@ def _servicer(service, pb2, pb2_grpc, *, bearer_token: str | None = None):
             # any RPC-supplied / locally-derived grant.
             if trust_cap is not None:
                 capability = (trust_cap if capability is None
-                              else capability.intersect(trust_cap, principal="grpc"))
+                              else capability.intersect(
+                                  trust_cap,
+                                  principal=_agent_owner(agent) or "grpc",
+                              ))
             st = service.run_goal(
                 request.goal_id,
-                max_dollars=request.max_dollars or None,
-                max_wall_seconds=request.max_wall_seconds or None,
+                max_dollars=max_dollars,
+                max_wall_seconds=max_wall_seconds,
                 channel=channel,
                 user_id=user_id,
-                max_depth=request.max_depth or None,
+                max_depth=_execution_depth(request.max_depth or None),
                 capability=capability,
+                expected_owner=_agent_owner(agent),
             )
             if st is None:
                 return pb2.GoalStatus(goal_id=request.goal_id, found=False)
@@ -400,6 +543,25 @@ def _grpc_int_setting(env: str, key: str, default: int | None) -> int | None:
         return default
 
 
+def _grpc_float_setting(env: str, key: str, default: float) -> float:
+    """A finite positive float gRPC setting from env/config (env wins)."""
+    raw = os.environ.get(env)
+    if raw is None:
+        try:
+            from ..config import load_config
+            val = ((load_config() or {}).get("grpc") or {}).get(key)
+            raw = None if val is None else str(val)
+        except Exception:
+            raw = None
+    if raw is None or str(raw).strip() == "":
+        return default
+    try:
+        value = float(raw)
+    except (TypeError, ValueError, OverflowError):
+        return default
+    return value if math.isfinite(value) and value > 0 else default
+
+
 def serve(
     address: str = _DEFAULT_ADDR,
     *,
@@ -415,9 +577,9 @@ def serve(
 
     ``max_workers`` defaults to ``MAVERICK_GRPC_MAX_WORKERS`` / ``[grpc]
     max_workers`` (then 8). ``MAVERICK_GRPC_MAX_CONCURRENT`` / ``[grpc]
-    max_concurrent_rpcs`` optionally caps in-flight RPCs (explicit
-    RESOURCE_EXHAUSTED backpressure instead of unbounded executor queueing);
-    unset preserves the prior unbounded behaviour.
+    max_concurrent_rpcs`` caps in-flight RPCs (explicit RESOURCE_EXHAUSTED
+    backpressure instead of unbounded executor queueing); it defaults to the
+    worker count.
     """
     # Fail closed: a client-bound deployment must not serve unbound.
     from ..client import require_client_binding
@@ -431,7 +593,7 @@ def serve(
     if max_workers is None:
         max_workers = _grpc_int_setting("MAVERICK_GRPC_MAX_WORKERS", "max_workers", 8)
     max_concurrent = _grpc_int_setting(
-        "MAVERICK_GRPC_MAX_CONCURRENT", "max_concurrent_rpcs", None)
+        "MAVERICK_GRPC_MAX_CONCURRENT", "max_concurrent_rpcs", max_workers)
     server = grpc.server(
         futures.ThreadPoolExecutor(max_workers=max_workers),
         maximum_concurrent_rpcs=max_concurrent,

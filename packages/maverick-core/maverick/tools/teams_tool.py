@@ -71,7 +71,7 @@ def _run(args: dict[str, Any]) -> str:
         with safe_client(url, timeout=30.0) as client:
             r = client.post(url, json=card)
     except ImportError:
-        return "ERROR: httpx not installed. Run: pip install 'maverick-agent[notifications]'"
+        return "ERROR: httpx not installed. Run: python -m pip install -e './packages/maverick-core[notifications]'"
     except BlockedHost as e:
         return f"ERROR: refusing to post to a private/disallowed host ({e})"
     except Exception as e:

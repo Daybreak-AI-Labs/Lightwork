@@ -215,7 +215,9 @@ def _locked(path: Path):
 
 
 def store_path() -> Path:
-    return Path.home() / ".maverick" / "dashboard-ui-visibility.json"
+    from maverick.paths import maverick_home
+
+    return maverick_home() / "dashboard-ui-visibility.json"
 
 
 def overrides() -> dict[str, dict[str, bool]]:

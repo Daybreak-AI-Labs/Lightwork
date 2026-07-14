@@ -135,8 +135,14 @@ _SDK_MODULE: dict[str, str] = {
 }
 
 _SDK_HINT: dict[str, str] = {
-    "openai": "openai SDK not installed. Run: pip install 'maverick-agent[openai]'",
-    "anthropic": "anthropic SDK not installed. Run: pip install maverick-agent",
+    "openai": (
+        "openai SDK not installed. From the reviewed checkout run: "
+        "python -m pip install -e './packages/maverick-core[openai]'"
+    ),
+    "anthropic": (
+        "anthropic SDK not installed. From the reviewed checkout run: "
+        "python -m pip install -e ./packages/maverick-core"
+    ),
 }
 
 

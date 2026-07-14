@@ -6,9 +6,9 @@ runtime, and every value is minted, never written out."""
 from __future__ import annotations
 
 import re
-import stat
 
 import pytest
+from maverick.file_lock import private_path_is_restricted
 from maverick.safety import honeytokens as ht
 
 # Assembled from parts -- never a full key-shaped literal in source.
@@ -68,7 +68,8 @@ class TestPlant:
         tokens = [ht.mint(k, seed="plant") for k in ht.KINDS]
         path = ht.plant(tmp_path, tokens)
         assert path == tmp_path / ".env.backup"
-        assert stat.S_IMODE(path.stat().st_mode) == 0o600
+        assert private_path_is_restricted(path, 0o600)
+        assert private_path_is_restricted(path.parent, 0o700)
         body = path.read_text()
         for tok in tokens:
             assert tok.value in body

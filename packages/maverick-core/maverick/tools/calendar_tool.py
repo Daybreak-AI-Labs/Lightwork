@@ -75,7 +75,7 @@ def _get_caldav_calendar():
         import caldav
     except ImportError as e:
         raise ImportError(
-            "caldav not installed. Run: pip install 'maverick-agent[calendar]'"
+            "caldav not installed. Run: python -m pip install -e './packages/maverick-core[calendar]'"
         ) from e
     url = _cfg("url", "CALDAV_URL")
     user = _cfg("user", "CALDAV_USER")
@@ -298,7 +298,7 @@ def calendar_tool() -> Tool:
             "optional description), find_slot (duration_minutes + "
             "search_days + earliest_hour + latest_hour). Config: "
             "CALDAV_URL + CALDAV_USER + CALDAV_PASSWORD (app password). "
-            "Install with: pip install 'maverick-agent[calendar]'."
+            "Install with: python -m pip install -e './packages/maverick-core[calendar]'."
         ),
         input_schema=_CAL_SCHEMA,
         fn=_run,

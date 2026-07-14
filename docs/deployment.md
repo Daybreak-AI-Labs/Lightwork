@@ -7,9 +7,17 @@ Four deployment targets, all driven by the same `maverick init` wizard.
 For most users.
 
 ```bash
-pipx install 'maverick-agent[installer]'
+git clone https://github.com/Day-AI-Labs/Lightwork
+cd Lightwork
+git checkout --detach <reviewed-full-40-character-commit-sha>
+pip install -e ./packages/maverick-core
+pip install -e ./apps/installer-cli
 maverick init
 ```
+
+Do not install the Lightwork distribution names from public PyPI until the
+project has reserved and protected every namespace. The desktop bootstrap
+scripts also require a lowercase, full commit SHA and fail closed.
 
 Runs as your user. Stores everything under `~/.maverick/`. The sandbox
 `workdir` defaults to `~/maverick-workspace/`. Nothing listens on a
@@ -51,7 +59,10 @@ The `vps` deployment target generates:
 - Config under `/etc/maverick/config.toml` (`MAVERICK_CONFIG` env)
 
 ```bash
-curl -sSL https://raw.githubusercontent.com/Day-AI-Labs/Lightwork/main/deploy/vps/install.sh | sudo bash
+LIGHTWORK_REF=<lowercase-full-40-character-commit-sha>
+curl -fsSLo /tmp/lightwork-install.sh \
+  "https://raw.githubusercontent.com/Day-AI-Labs/Lightwork/${LIGHTWORK_REF}/deploy/vps/install.sh"
+sudo MAVERICK_REF="$LIGHTWORK_REF" bash /tmp/lightwork-install.sh
 sudo systemctl enable --now maverick
 ```
 

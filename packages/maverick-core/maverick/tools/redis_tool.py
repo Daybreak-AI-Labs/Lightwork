@@ -18,7 +18,7 @@ or ``REDIS_HOST`` + ``REDIS_PORT`` + ``REDIS_DB`` + ``REDIS_PASSWORD``.
 
 Requires::
 
-    pip install 'maverick-agent[redis]'
+    python -m pip install -e './packages/maverick-core[redis]'
 """
 from __future__ import annotations
 
@@ -168,7 +168,7 @@ def _run(args: dict[str, Any]) -> str:
     except ImportError:
         return (
             "ERROR: redis not installed. "
-            "Run: pip install 'maverick-agent[redis]'"
+            "Run: python -m pip install -e './packages/maverick-core[redis]'"
         )
     needs_confirm = {"set", "delete", "lpush", "publish"}
     if op in needs_confirm and args.get("confirm") is not True:

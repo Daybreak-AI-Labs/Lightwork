@@ -84,7 +84,7 @@ def test_missing_modal_actionable(tmp_path, monkeypatch):
     monkeypatch.setitem(sys.modules, "modal", None)
     sb = ModalBackend(workdir=tmp_path, allow_network=True)
     res = sb.exec("echo hi")
-    assert res.exit_code == 125 and "maverick-agent[modal]" in res.stderr
+    assert res.exit_code == 125 and "packages/maverick-core[modal]" in res.stderr
 
 
 def test_sdk_v2_conformance(tmp_path):

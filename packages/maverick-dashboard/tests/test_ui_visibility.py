@@ -41,7 +41,9 @@ def test_registry_icons_exist_in_base_template():
     from pathlib import Path
 
     from maverick_dashboard import ui_visibility
-    base = (Path(ui_visibility.__file__).parent / "templates" / "base.html").read_text()
+    base = (
+        Path(ui_visibility.__file__).parent / "templates" / "base.html"
+    ).read_text(encoding="utf-8")
     for page in ui_visibility.PAGES:
         assert f'id="i-{page["icon"]}"' in base, page["path"]
 

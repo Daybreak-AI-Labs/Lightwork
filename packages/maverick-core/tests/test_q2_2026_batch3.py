@@ -116,10 +116,10 @@ def test_chroma_store_missing_dep_raises_importable_error(tmp_path, monkeypatch)
         # If chromadb is really installed, setting sys.modules to None
         # turns `import chromadb` into ImportError. So our error path
         # should still fire.
-        with pytest.raises(ImportError, match="maverick-agent\\[chroma\\]"):
+        with pytest.raises(ImportError, match="packages/maverick-core\\[chroma\\]"):
             cs.ChromaStore(path=tmp_path)
     else:
-        with pytest.raises(ImportError, match="maverick-agent\\[chroma\\]"):
+        with pytest.raises(ImportError, match="packages/maverick-core\\[chroma\\]"):
             cs.ChromaStore(path=tmp_path)
 
 

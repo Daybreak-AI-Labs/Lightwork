@@ -27,6 +27,15 @@ def test_put_and_load_merges_managed():
     assert reg["vega"].allow_tools == frozenset({"read_file"})
 
 
+def test_managed_registry_and_parent_are_private():
+    from maverick.file_lock import private_path_is_restricted
+
+    agent_trust.put_agent({"id": "vega", "pubkey": "ab" * 32})
+    path = agent_trust.managed_path()
+    assert private_path_is_restricted(path)
+    assert private_path_is_restricted(path.parent, 0o700)
+
+
 def test_put_replaces_same_id():
     agent_trust.put_agent({"id": "vega", "max_risk": "low"})
     agent_trust.put_agent({"id": "vega", "max_risk": "high"})
@@ -59,6 +68,40 @@ def test_managed_overrides_config_entry():
     assert agent_trust.load_registry(cfg)["vega"].max_risk == "low"
     agent_trust.put_agent({"id": "vega", "max_risk": "high"})
     assert agent_trust.load_registry(cfg)["vega"].max_risk == "high"  # managed wins
+
+
+def test_corrupt_managed_store_invalidates_entire_registry():
+    """A lost managed revocation must not expose the looser TOML entry."""
+    path = agent_trust.managed_path()
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text("{not-json", encoding="utf-8")
+
+    cfg = {"agent_trust": {"agents": [{"id": "vega", "max_risk": "high"}]}}
+    assert agent_trust.load_registry(cfg) == {}
+
+
+def test_malformed_managed_entry_invalidates_entire_registry():
+    import json
+
+    path = agent_trust.managed_path()
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text(json.dumps([
+        {"id": "vega", "max_risk": "low"},
+        {"id": "rigel", "allow_tools": {"read_file": True}},
+    ]), encoding="utf-8")
+
+    assert agent_trust.load_registry({}) == {}
+
+
+def test_mutator_refuses_to_overwrite_corrupt_managed_store():
+    path = agent_trust.managed_path()
+    path.parent.mkdir(parents=True, exist_ok=True)
+    original = "{not-json"
+    path.write_text(original, encoding="utf-8")
+
+    with pytest.raises(agent_trust.AgentTrustError, match="managed registry"):
+        agent_trust.put_agent({"id": "vega", "max_risk": "low"})
+    assert path.read_text(encoding="utf-8") == original
 
 
 def test_put_invalid_raises():

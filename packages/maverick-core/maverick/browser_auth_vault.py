@@ -9,7 +9,7 @@ ciphertext, so it's safe to sync/back up.
 
 ``encrypt_entry`` / ``decrypt_entry`` / ``Vault`` take an explicit key so they're
 unit-testable; the ``browser_auth_vault`` tool resolves the key from the key file.
-Requires the ``cryptography`` extra (``pip install maverick-agent[audit-signing]``);
+Requires the ``cryptography`` extra (``python -m pip install -e './packages/maverick-core[audit-signing]'``);
 the tool degrades with an actionable error when it's missing.
 """
 from __future__ import annotations
@@ -37,7 +37,7 @@ def _require_fernet():
     except ImportError as e:  # knob exemption: optional dep
         raise RuntimeError(
             "browser auth vault needs the 'cryptography' package. Install it "
-            "with: pip install 'maverick-agent[audit-signing]'") from e
+            "with: python -m pip install -e './packages/maverick-core[audit-signing]'") from e
     return Fernet
 
 

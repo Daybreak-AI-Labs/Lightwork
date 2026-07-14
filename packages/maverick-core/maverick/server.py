@@ -4,8 +4,8 @@
   - reads enabled channels from config (Telegram, Discord, Slack, Signal,
     WhatsApp, SMS, Email, Matrix, iMessage)
   - listens on each one
-  - for each incoming message, creates a goal and runs the swarm
-  - sends the response back via the same channel
+  - for each incoming message, creates a goal and dispatches the swarm
+  - sends the final result (or a truthful queued acknowledgement) via the same channel
 
 Each user gets their own goal/episode in the world model so context is
 preserved across messages. Budget caps still apply per-message.
@@ -24,10 +24,8 @@ import logging
 import os
 from pathlib import Path
 
-from .budget import budget_from_config
 from .config import load_config
 from .llm import LLM
-from .orchestrator import run_goal
 from .sandbox import build_sandbox
 from .world_model import WorldModel, open_world, world_for_tenant
 
@@ -97,13 +95,25 @@ class Server:
         except ImportError:
             log.warning("maverick-shield not installed; running without safety scans")
 
+    def _message_tenant_world(self, msg, principal_id: str):
+        """Resolve one message's tenant and world under the isolation policy."""
+        from .paths import tenant_by_user_enabled
+
+        tenant = (
+            f"{msg.channel or 'unknown'}:{principal_id}"
+            if tenant_by_user_enabled()
+            else None
+        )
+        world = self.world if tenant is None else world_for_tenant(tenant)
+        return tenant, world
+
     def _tenant_door_refusal(self, tenant: str | None) -> str | None:
         """Read-only admission check for a per-tenant message at the channel door.
 
         Returns a user-facing refusal string, or None to admit. Covers the
         roster (suspended), the provisioned daily-spend cap, and plan feature
-        gating (the ``channels`` entitlement). Registry read errors fail soft
-        (admit); a suspension/over-quota/plan denial is a deliberate refusal.
+        gating (the ``channels`` entitlement). Registry/policy errors refuse
+        admission rather than silently discarding a suspension or spend cap.
 
         ``tenant`` is None for legacy serve mode, but ``feature_allowed`` can
         still resolve an active tenant from MAVERICK_TENANT/client binding.
@@ -114,20 +124,23 @@ class Server:
                 assert_tenant_active,
                 tenant_over_quota,
             )
-        except Exception:  # pragma: no cover -- registry module optional
-            TenantSuspended = None  # type: ignore[assignment]
-        if tenant is not None and TenantSuspended is not None:
+        except Exception:
+            log.exception("tenant policy module unavailable; refusing message")
+            return "⚠ Workspace policy is unavailable. Try again later."
+        if tenant is not None:
             try:
                 assert_tenant_active(tenant)
             except TenantSuspended:
                 log.warning("message refused: tenant %s suspended", tenant)
                 return "⚠ This workspace is suspended. Contact your administrator."
-            except Exception:  # pragma: no cover -- fail-soft on reads
-                log.exception("tenant roster check failed; allowing")
+            except Exception:
+                log.exception("tenant roster check failed; refusing")
+                return "⚠ Workspace policy is unavailable. Try again later."
             try:
                 quota_reason = tenant_over_quota(tenant)
-            except Exception:  # pragma: no cover -- fail-soft on reads
-                quota_reason = None
+            except Exception:
+                log.exception("tenant quota check failed; refusing")
+                return "⚠ Workspace quota state is unavailable. Try again later."
             if quota_reason:
                 log.warning("message refused: %s", quota_reason)
                 return f"⚠ {quota_reason}"
@@ -139,7 +152,12 @@ class Server:
         # When tenant is None, feature_allowed resolves the active deployment
         # tenant (MAVERICK_TENANT/client binding) before deciding.
         from .billing import feature_allowed
-        if not feature_allowed("channels", tenant=tenant):
+        try:
+            channels_allowed = feature_allowed("channels", tenant=tenant)
+        except Exception:
+            log.exception("tenant channel entitlement check failed; refusing")
+            return "⚠ Workspace policy is unavailable. Try again later."
+        if not channels_allowed:
             log.warning("message refused: tenant %s plan lacks channel access", tenant)
             return ("⚠ This workspace's plan does not include channel access. "
                     "Contact your administrator to upgrade.")
@@ -152,11 +170,11 @@ class Server:
                 return f"⚠ Blocked: {'; '.join(verdict.reasons)}"
 
         from .oidc import OIDCError, oidc_enabled, verify_oidc_token
-        from .paths import tenant_by_user_enabled, tenant_scope
+        from .paths import tenant_scope
 
         # The authenticated sender. Room-based adapters keep msg.user_id as the
         # reply target and expose the human via msg.principal_id; the tenant, the
-        # conversation key, and run_goal's user_id must ALL agree on it -- else a
+        # conversation key, and the runner's user_id must ALL agree on it -- else a
         # user's world.db lands under a different tenant than their memory/audit.
         # When OIDC is enabled, do not trust the channel-provided principal:
         # fail closed unless a verified ID token supplies the Lightwork principal.
@@ -183,11 +201,8 @@ class Server:
         # backs startup orphan-reclaim and the dashboard. If per-user tenant
         # resolution fails, reject the message rather than running attacker input
         # against the shared world and breaking tenant isolation.
-        tenant = None
-        if tenant_by_user_enabled():
-            tenant = f"{msg.channel or 'unknown'}:{principal_id}"
         try:
-            world = self.world if tenant is None else world_for_tenant(tenant)
+            tenant, world = self._message_tenant_world(msg, principal_id)
         except Exception:
             log.exception("tenant world resolution failed; rejecting message")
             return "⚠ Tenant isolation is unavailable for this message. Try again later."
@@ -205,7 +220,12 @@ class Server:
         # plan is unlimited. Held across the whole goal run and released in the
         # finally below so a crash never leaks a slot.
         from .tenant import concurrency as tenant_concurrency
-        if not tenant_concurrency.acquire(tenant):
+        try:
+            acquired = tenant_concurrency.acquire(tenant)
+        except Exception:
+            log.exception("tenant concurrency policy failed; refusing")
+            return "⚠ Workspace policy is unavailable. Try again later."
+        if not acquired:
             log.warning("message refused: tenant %s at concurrency ceiling", tenant)
             return ("⚠ This workspace is at its concurrent-task limit. "
                     "Try again once a running task finishes.")
@@ -213,8 +233,8 @@ class Server:
         try:
             # Multi-turn: a single (channel, user_id) gets one conversation
             # row. Every inbound message becomes a 'user' turn; the
-            # orchestrator's final answer is appended as 'assistant' turn
-            # inside run_goal so future messages have history.
+            # orchestrator's final answer is appended as an 'assistant' turn
+            # inside the dispatched run so future messages have history.
 
             # EU AI Act Article 50: disclose AI to new channel users on
             # first turn. `first_turn_disclosure` checks the conversation
@@ -258,28 +278,62 @@ class Server:
                         log.warning("companion generation failed",
                                     exc_info=True)
 
-            budget = budget_from_config()
             try:
                 # Per-user tenant isolation when enabled (no-op otherwise): scopes
-                # the run's cross-session memory to the authenticated sender, then
-                # restores. Room-based adapters keep msg.user_id as the reply target
-                # and expose the sender via msg.principal_id.
+                # both queue-envelope creation and local execution to the
+                # authenticated sender, then restores. asyncio.to_thread preserves
+                # this context for the synchronous dispatcher without blocking a
+                # channel event loop on broker or gRPC I/O.
+                from .runner import run_goal_in_background_async
                 with tenant_scope(channel=msg.channel, user_id=principal_id):
-                    result = await run_goal(
-                        self.llm, world, budget, goal_id,
-                        sandbox=self.sandbox, max_depth=self.max_depth,
-                        conversation_id=conversation.id,
+                    dispatch_status = await run_goal_in_background_async(
+                        goal_id, max_depth=self.max_depth,
                         channel=msg.channel or "unknown",
                         user_id=f"{msg.channel or 'unknown'}:{principal_id}",
+                        conversation_id=conversation.id,
                     )
             except Exception:
-                log.exception("goal #%s run failed", goal_id)
+                log.exception("goal #%s dispatch failed", goal_id)
                 try:
                     world.set_goal_status(goal_id, "blocked", result="internal error")
                 except Exception:  # pragma: no cover
                     pass
                 # Don't leak internal error details to untrusted channel users.
                 return "⚠ An internal error occurred. Try again or check the logs."
+
+            if dispatch_status == "queued":
+                # QueueDispatcher returns after authenticated enqueue. It cannot
+                # supply a final channel reply yet, so be explicit rather than
+                # pretending the goal completed (or holding this event loop open
+                # while a worker may run for many minutes).
+                result = (
+                    f"Goal #{goal_id} was queued for background processing. "
+                    "Check its status in Lightwork."
+                )
+            elif dispatch_status in {None, "error"}:
+                # run_goal_in_thread uses this sentinel only for an unexpected
+                # local/worker crash; None means a dispatcher was unavailable.
+                # The async runner has already terminalized a pending goal. Keep
+                # the channel response generic and never fall back in-process.
+                return "An internal error occurred. Try again or check the logs."
+            else:
+                # LocalThreadDispatcher and gRPC wait for a terminal status. Read
+                # the result from the authoritative world rather than treating the
+                # status string itself as an answer. A remote worker must share the
+                # same world backend for this to succeed.
+                completed = world.get_goal(goal_id)
+                if completed is not None and completed.result is not None:
+                    result = completed.result
+                else:
+                    known_status = (
+                        dispatch_status
+                        if dispatch_status in {"done", "blocked", "failed", "cancelled"}
+                        else "unknown"
+                    )
+                    result = (
+                        f"Goal #{goal_id} finished with status {known_status}, "
+                        "but its result is not available in this process."
+                    )
 
             if self._shield is not None:
                 verdict = self._shield.scan_output(result)
@@ -693,14 +747,23 @@ def build_from_config() -> Server:
 
     _advise_channel_tenancy(server)
 
+    _install_goal_dispatcher()
+
+    return server
+
+
+def _install_goal_dispatcher() -> None:
+    """Install the selected remote dispatcher without weakening on failure."""
     # If [queue] backend selects a task queue, run goals out-of-process on a
     # worker pool instead of in this channel-server process. No-op by default.
     try:
         from .queue_dispatcher import install_from_config
         queue_installed = install_from_config()
-    except Exception:  # pragma: no cover -- never block server boot
-        log.exception("queue dispatcher install failed (running in-process)")
-        queue_installed = False
+    except Exception:  # pragma: no cover -- optional integration failure
+        # A selected-but-invalid queue installer pins a rejecting dispatcher.
+        # Do not let gRPC or the local default overwrite that security boundary.
+        log.exception("queue dispatcher install failed; dispatch remains fail-closed")
+        return
     # [grpc_dispatch] target: execute goals on a remote gRPC worker. The
     # queue backend wins when both are configured (it already owns dispatch).
     if not queue_installed:
@@ -709,8 +772,6 @@ def build_from_config() -> Server:
             install_grpc()
         except Exception:  # pragma: no cover -- never block server boot
             log.exception("gRPC dispatcher install failed (running in-process)")
-
-    return server
 
 
 def _extract_oidc_token(msg) -> str:

@@ -38,15 +38,19 @@ from __future__ import annotations
 import hashlib
 import json
 import logging
-import os
 import string
-import tempfile
 import threading
 import time
 from collections.abc import Callable
 from pathlib import Path
 
 from ..config import env_flag
+from ..file_lock import (
+    atomic_read_text,
+    atomic_write_text,
+    ensure_private_directory,
+    ensure_private_file,
+)
 
 log = logging.getLogger(__name__)
 
@@ -110,7 +114,9 @@ class LearningCache:
 
     def _load(self) -> dict[str, dict]:
         try:
-            raw = json.loads(self.path.read_text(encoding="utf-8"))
+            ensure_private_directory(self.path.parent)
+            ensure_private_file(self.path, 0o600)
+            raw = json.loads(atomic_read_text(self.path))
             entries = raw.get("entries", {})
             if isinstance(entries, dict):
                 return {str(k): dict(v) for k, v in entries.items() if isinstance(v, dict)}
@@ -123,28 +129,11 @@ class LearningCache:
 
     def _save_locked(self) -> None:
         """Atomic write (temp + rename), 0600 — entries may be sensitive."""
-        tmp: Path | None = None
         try:
-            self.path.parent.mkdir(parents=True, exist_ok=True)
-            fd, tmp_name = tempfile.mkstemp(
-                prefix=f"{self.path.name}.", suffix=".tmp", dir=self.path.parent
-            )
-            tmp = Path(tmp_name)
+            ensure_private_directory(self.path.parent)
             data = json.dumps({"version": 1, "entries": self._entries}, indent=0, sort_keys=True)
-            try:
-                os.fchmod(fd, 0o600)
-            except (OSError, AttributeError):  # pragma: no cover -- non-posix
-                pass  # os.fchmod is absent on Windows (AttributeError)
-            with os.fdopen(fd, "w", encoding="utf-8") as handle:
-                handle.write(data)
-            os.replace(tmp, self.path)
-            tmp = None
+            atomic_write_text(self.path, data, mode=0o600)
         except OSError as exc:  # pragma: no cover -- disk trouble never raises out
-            if tmp is not None:
-                try:
-                    tmp.unlink(missing_ok=True)
-                except OSError:
-                    pass
             log.warning("learning cache: could not persist %s (%s)", self.path, exc)
 
     def _evict_locked(self) -> None:

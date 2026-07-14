@@ -37,12 +37,66 @@ def test_degrade_is_loud_without_a_compliance_floor(tmp_path, monkeypatch, caplo
                for r in caplog.records), "degrade must log at ERROR, not be silent"
 
 
+@pytest.mark.parametrize(
+    "failure",
+    [ValueError("malformed chain tail"), OSError("audit key ACL denied")],
+    ids=["corrupt-tail", "custody-failure"],
+)
+def test_non_dependency_signer_failure_never_downgrades_to_unsigned(
+    tmp_path, monkeypatch, failure,
+):
+    def _boom(_path):
+        raise failure
+
+    monkeypatch.setattr(signing, "AuditSigner", _boom)
+    monkeypatch.setattr(compliance_profiles, "requires_floor", lambda _floor: False)
+    log = writer.AuditLog(tmp_path / "audit", sign=True)
+
+    assert log.record(_event()) is False
+    rows = list((tmp_path / "audit").glob("*.ndjson"))
+    assert not rows or all(path.read_text(encoding="utf-8") == "" for path in rows)
+    assert log._signing_enabled is True
+
+
 def test_refuses_to_write_unsigned_under_a_compliance_floor(tmp_path, monkeypatch):
     _force_missing_crypto(monkeypatch)
     monkeypatch.setattr(compliance_profiles, "requires_floor", lambda _floor: True)
     log = writer.AuditLog(tmp_path / "audit")
     with pytest.raises(RuntimeError, match="refusing to write UNSIGNED"):
         log.record(_event())
+
+
+@pytest.mark.parametrize(
+    "failure",
+    [
+        OSError("audit key is unreadable"),
+        ValueError("audit key material is invalid"),
+        RuntimeError("audit signer backend failed"),
+    ],
+    ids=["os-error", "value-error", "runtime-error"],
+)
+def test_compliance_floor_refuses_every_signer_init_failure(
+    tmp_path, monkeypatch, failure
+):
+    """A mandatory signing floor covers the signer, not just its dependency.
+
+    Corrupt keys and backend/I/O failures must never disable signing and append
+    plaintext merely because ``cryptography`` itself imported successfully.
+    """
+    def _boom(_path):
+        raise failure
+
+    monkeypatch.setattr(signing, "AuditSigner", _boom)
+    monkeypatch.setattr(compliance_profiles, "requires_floor", lambda _floor: True)
+    log = writer.AuditLog(tmp_path / "audit", sign=True)
+
+    with pytest.raises(RuntimeError, match="refusing to write UNSIGNED") as exc:
+        log.record(_event())
+
+    assert exc.value.__cause__ is failure
+    rows = list((tmp_path / "audit").glob("*.ndjson"))
+    assert not rows or all(path.read_text(encoding="utf-8") == "" for path in rows)
+    assert log._signing_enabled is True
 
 
 def test_offhost_requirement_refuses_unsigned_audit_write(tmp_path, monkeypatch):

@@ -123,7 +123,7 @@ def _run(args: dict[str, Any]) -> str:
     try:
         import httpx  # noqa: F401
     except ImportError:
-        return "ERROR: httpx not installed. Run: pip install 'maverick-agent[issue-trackers]'"
+        return "ERROR: httpx not installed. Run: python -m pip install -e './packages/maverick-core[issue-trackers]'"
     backend = _pick_backend((args.get("backend") or "").strip())
     target = (args.get("target") or "en").strip()
     source = (args.get("source") or "").strip()

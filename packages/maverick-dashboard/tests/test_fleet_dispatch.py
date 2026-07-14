@@ -126,8 +126,8 @@ def test_dispatch_preserves_explicit_zero_budget(monkeypatch, tmp_path):
         json={"agent": "coder", "prompt": "do no paid work", "max_dollars": 0.0},
     )
     assert r.status_code == 201, r.text
-    assert calls, "expected run_goal_in_thread to be scheduled"
-    assert calls[0]["args"][1] == 0.0
+    assert calls, "expected the local dispatcher to be scheduled"
+    assert calls[0]["kwargs"]["max_dollars"] == 0.0
 
 
 def test_dispatch_unknown_agent_404(monkeypatch, tmp_path):

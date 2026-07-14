@@ -63,7 +63,7 @@ def average_hash_file(path: str) -> str:
         from PIL import Image
     except ImportError as e:
         raise ImportError(
-            "Pillow not installed — pip install 'maverick-agent[computer-use]' "
+            "Pillow not installed — python -m pip install -e './packages/maverick-core[computer-use]' "
             "to hash image files (average_hash_from_pixels needs no deps)"
         ) from e
     with Image.open(path) as im:

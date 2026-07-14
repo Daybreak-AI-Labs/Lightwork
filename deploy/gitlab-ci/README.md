@@ -4,7 +4,9 @@ Run a Lightwork agent goal inside a GitLab pipeline — on a merge request, on
 a schedule, or on demand — under a **hard spend cap** and with
 non-interactive safety defaults. The reusable
 [`maverick.gitlab-ci.yml`](./maverick.gitlab-ci.yml) template installs
-`maverick-agent` from PyPI and runs `maverick start "$MAVERICK_GOAL"`.
+Lightwork from a verified source checkout or an explicitly configured trusted
+private index, then runs `maverick start "$MAVERICK_GOAL"`. There is no public
+PyPI fallback while the Lightwork project names remain unreserved.
 
 It is the GitLab counterpart to the [`deploy/github-action`](../github-action)
 wrapper and mirrors the same safety inputs: consent mode, budget cap, and
@@ -17,17 +19,20 @@ that `extends` the hidden `.maverick` job:
 
 ```yaml
 include:
-  - remote: 'https://gitlab.com/Day-AI-Labs/maverick/-/raw/main/deploy/gitlab-ci/maverick.gitlab-ci.yml'
+  - remote: 'https://gitlab.example/Lightwork/-/raw/<full-commit-sha>/deploy/gitlab-ci/maverick.gitlab-ci.yml'
 
 maverick:
   extends: .maverick
   variables:
     MAVERICK_GOAL: "Review the changes on this branch and flag any risks."
     MAVERICK_MAX_DOLLARS: "0.50"
+    MAVERICK_PACKAGE_INDEX_URL: "https://packages.example.com/simple"
+    MAVERICK_VERSION: "0.1.6"
 ```
 
-> Pin to a tag or commit (`/-/raw/v0.1.6/...`) rather than `main` so a
-> template you didn't write can't change under you.
+> Host the reviewed template where the runner can read it and replace the
+> placeholder with a full commit SHA. Do not include it from a mutable branch
+> or tag in a job that receives provider secrets.
 
 ## Required CI/CD variables
 
@@ -38,9 +43,10 @@ Set these under **Settings → CI/CD → Variables** (mark the API key as
 |---|---|---|
 | `ANTHROPIC_API_KEY` | yes | Provider key, written into the generated config. For another provider, leave it blank and set that provider's env var on the job. |
 | `MAVERICK_GOAL` | yes | The goal text passed to `maverick start`. The job fails fast if it is empty. |
+| `MAVERICK_SOURCE_DIR` + `MAVERICK_SOURCE_REF` | one install mode required | Path to an already checked-out Lightwork repository and its lowercase, full 40-character commit SHA. The job verifies `HEAD` before installing all first-party distributions locally. |
+| `MAVERICK_PACKAGE_INDEX_URL` + `MAVERICK_VERSION` | one install mode required | Explicit trusted private/simple index and exact Lightwork version. Ambient pip configuration is ignored and public PyPI hosts are rejected. |
 | `MAVERICK_MAX_DOLLARS` | no (default `1.0`) | Hard USD spend cap, wired into `[budget] max_dollars`. The kernel refuses to exceed it. |
 | `MAVERICK_MODEL` | no | Model override, e.g. `anthropic:claude-sonnet-4-6` (passed as `maverick --model`). |
-| `MAVERICK_VERSION` | no (latest) | `maverick-agent` version to install. **Pin it** for reproducible runs. |
 | `MAVERICK_PYTHON_VERSION` | no (default `3.12`) | Python image tag used for the job. |
 
 ## Safety defaults

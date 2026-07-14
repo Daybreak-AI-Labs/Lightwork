@@ -33,13 +33,14 @@ import asyncio
 import contextlib
 import hashlib
 import hmac
+import json
 import logging
 import os
 import uuid
 from collections.abc import AsyncIterator, Callable
 from contextvars import ContextVar
 from datetime import datetime, timezone
-from threading import Lock
+from threading import Lock, RLock
 from typing import Any
 
 log = logging.getLogger(__name__)
@@ -131,6 +132,16 @@ async def _run_slot() -> AsyncIterator[None]:
 _INVALID_PARAMS = -32602
 _AUTH_REQUIRED = -32001
 _TASK_NOT_FOUND = -32002
+_SERVER_BUSY = -32003
+_MAX_MESSAGE_ID_LENGTH = 256
+_MAX_REQUEST_RETAINED_BYTES = 64 * 1024
+_MAX_ARTIFACT_TEXT_BYTES = 128 * 1024
+_MAX_TASK_RETAINED_BYTES = 192 * 1024
+_MAX_TOTAL_RETAINED_BYTES = 32 * 1024 * 1024
+_MAX_ARTIFACT_NAME_BYTES = 256
+_MAX_PUSH_URL_BYTES = 4096
+_MAX_PUSH_TOKEN_BYTES = 4096
+_PUSH_CONFIG_FIELDS = frozenset({"url", "token"})
 
 
 def _now_iso() -> str:
@@ -143,6 +154,71 @@ def _new_id() -> str:
 
 def _text_parts(text: str) -> list[dict]:
     return [{"kind": "text", "text": text}]
+
+
+def _json_bytes(value: Any) -> bytes:
+    return json.dumps(
+        value,
+        sort_keys=True,
+        separators=(",", ":"),
+        ensure_ascii=False,
+        allow_nan=False,
+    ).encode("utf-8")
+
+
+def _truncate_utf8(value: Any, limit: int, *, marker: str = "\n[truncated]") -> str:
+    """Return a valid UTF-8 prefix whose encoded size is at most ``limit``."""
+    text = str(value or "")
+    raw = text.encode("utf-8", errors="replace")
+    text = raw.decode("utf-8")
+    if len(raw) <= limit:
+        return text
+    if limit <= 0:
+        return ""
+    suffix = marker.encode("utf-8")
+    if len(suffix) > limit:
+        suffix = b""
+    prefix = raw[: limit - len(suffix)].decode("utf-8", errors="ignore")
+    return prefix + suffix.decode("utf-8")
+
+
+def _artifact_for_budget(
+    text: Any, name: Any, max_bytes: int,
+) -> tuple[dict, int] | None:
+    """Build the largest artifact that fits an exact serialized-byte budget."""
+    if max_bytes <= 0:
+        return None
+    bounded_name = _truncate_utf8(name, _MAX_ARTIFACT_NAME_BYTES, marker="")
+    bounded_text = _truncate_utf8(text, _MAX_ARTIFACT_TEXT_BYTES)
+
+    def build(candidate: str) -> tuple[dict, int]:
+        artifact = {
+            "artifactId": _new_id(),
+            "name": bounded_name,
+            "parts": _text_parts(candidate),
+        }
+        return artifact, len(_json_bytes(artifact))
+
+    artifact, size = build(bounded_text)
+    if size <= max_bytes:
+        return artifact, size
+
+    # JSON escaping can make serialized size larger than raw UTF-8 size. Binary
+    # search the prefix budget and measure the actual retained representation.
+    source = bounded_text
+    high = len(source.encode("utf-8"))
+    low = 0
+    best: tuple[dict, int] | None = None
+    while low <= high:
+        middle = (low + high) // 2
+        candidate = _truncate_utf8(source, middle, marker="")
+        current, current_size = build(candidate)
+        if current_size <= max_bytes:
+            best = current, current_size
+            low = middle + 1
+        else:
+            high = middle - 1
+    return best
 
 
 def _message_text(message: dict) -> str:
@@ -260,8 +336,11 @@ def _a2a_capability() -> Any:
             if entry is not None:
                 cap = cap.intersect(entry.capability(principal="a2a"),
                                     principal="a2a")
-    except Exception as e:  # narrow: log, don't silently widen the ceiling
-        log.warning("a2a: trust ceiling read failed (using base ceiling): %s", e)
+    except Exception as e:
+        # This is a remote execution boundary. If an enabled trust ceiling
+        # cannot be read, abort before the runner starts rather than widening to
+        # the generic A2A capability.
+        raise RuntimeError("A2A agent trust policy unavailable") from e
     return cap
 
 
@@ -277,8 +356,8 @@ def _a2a_trust_block(principal: str = "anon") -> str | None:
     try:
         from . import agent_trust
         enforced, registry = agent_trust.load_trust_state()
-    except Exception:  # config unreadable -> can't assert engagement; admit
-        return None
+    except Exception:
+        return "agent trust policy unavailable"
     if not enforced:
         return None
     agent_id = _agent_id_of(principal) or "a2a"
@@ -333,6 +412,12 @@ class _Task:
         # Client-requested budget captured at creation, clamped to the operator
         # ceiling at run time (see TaskEngine._limits).
         self.budget_request: dict = {}
+        # Present only for caller-supplied messageId values. Used to remove the
+        # dedupe index entry when this task is eventually evicted.
+        self.idempotency_key: tuple[str, str] | None = None
+        # Exact retained request/artifact bytes charged to the engine-wide
+        # ceiling. Push configuration has its own strict field bounds.
+        self.retained_bytes = 0
 
     def set_state(self, state: str) -> dict:
         self.state = state
@@ -341,12 +426,14 @@ class _Task:
         return entry
 
     def add_artifact(self, text: str, name: str = "result") -> dict:
-        art = {
-            "artifactId": _new_id(),
-            "name": name,
-            "parts": _text_parts(text),
-        }
+        fitted = _artifact_for_budget(
+            text, name, _MAX_TASK_RETAINED_BYTES - self.retained_bytes,
+        )
+        if fitted is None:
+            return {}
+        art, size = fitted
         self.artifacts.append(art)
+        self.retained_bytes += size
         return art
 
     def to_dict(self) -> dict:
@@ -373,7 +460,13 @@ class TaskEngine:
     def __init__(self, runner: Runner | None = None):
         self._runner: Runner = runner or _default_runner
         self._tasks: dict[str, _Task] = {}
-        self._lock = Lock()
+        # A2A messageId is the protocol's idempotency key. Scope it to the
+        # authenticated principal so unrelated callers may use the same ID.
+        # Values carry a canonical request digest to reject key reuse with
+        # different content instead of returning the wrong task.
+        self._message_index: dict[tuple[str, str], tuple[str, str]] = {}
+        self._retained_bytes = 0
+        self._lock = RLock()
 
     # ---- auth + limits -------------------------------------------------
 
@@ -399,7 +492,11 @@ class TaskEngine:
                 per_caller = None
         if not env_token and per_caller is None and not given:
             if _env_true("MAVERICK_A2A_ALLOW_UNAUTHENTICATED"):
-                return None
+                block = _a2a_trust_block("anon")
+                return (
+                    _err(_AUTH_REQUIRED, f"refused by agent trust plane: {block}")
+                    if block else None
+                )
             return _err(
                 _AUTH_REQUIRED,
                 "A2A task endpoint requires auth: set MAVERICK_A2A_TOKEN, a "
@@ -409,9 +506,18 @@ class TaskEngine:
         if not given:
             return _err(_AUTH_REQUIRED, "missing bearer token")
         if env_token and hmac.compare_digest(env_token.encode(), given.encode()):
-            return None
+            principal = "bearer:" + hashlib.sha256(given.encode()).hexdigest()
+            block = _a2a_trust_block(principal)
+            return (
+                _err(_AUTH_REQUIRED, f"refused by agent trust plane: {block}")
+                if block else None
+            )
         if per_caller is not None:
-            return None
+            block = _a2a_trust_block(f"agent:{per_caller.id}")
+            return (
+                _err(_AUTH_REQUIRED, f"refused by agent trust plane: {block}")
+                if block else None
+            )
         return _err(_AUTH_REQUIRED, "invalid bearer token")
 
     @staticmethod
@@ -527,51 +633,248 @@ class TaskEngine:
 
     # ---- task helpers --------------------------------------------------
 
-    def _new_task(self, params: dict, principal: str = "anon") -> _Task:
-        message = (params or {}).get("message") or {}
+    def _evict_terminal_locked(self, *, exclude: _Task | None = None) -> bool:
+        evict_id = next(
+            (
+                task_id
+                for task_id, old in self._tasks.items()
+                if old is not exclude and old.state in TERMINAL_STATES
+            ),
+            None,
+        )
+        if evict_id is None:
+            return False
+        evicted = self._tasks.pop(evict_id)
+        self._retained_bytes = max(
+            0, self._retained_bytes - evicted.retained_bytes,
+        )
+        if evicted.idempotency_key is not None:
+            self._message_index.pop(evicted.idempotency_key, None)
+        return True
+
+    def _make_room_locked(
+        self, incoming_bytes: int, *, new_task: bool, exclude: _Task | None = None,
+    ) -> bool:
+        """Evict terminal records until count and retained-byte caps fit."""
+        while (
+            (new_task and len(self._tasks) >= _MAX_TASKS)
+            or self._retained_bytes + incoming_bytes > _MAX_TOTAL_RETAINED_BYTES
+        ):
+            if not self._evict_terminal_locked(exclude=exclude):
+                return False
+        return True
+
+    def _add_artifact(
+        self, task: _Task, text: Any, name: str = "result",
+    ) -> dict | None:
+        """Retain a bounded artifact while enforcing the engine-wide ceiling."""
+        with self._lock:
+            remaining = _MAX_TASK_RETAINED_BYTES - task.retained_bytes
+            fitted = _artifact_for_budget(text, name, remaining)
+            if fitted is None:
+                return None
+            artifact, size = fitted
+            if not self._make_room_locked(size, new_task=False, exclude=task):
+                # All retained bytes belong to active tasks. Do not exceed the
+                # global cap merely to preserve a result body.
+                available = min(
+                    remaining,
+                    max(0, _MAX_TOTAL_RETAINED_BYTES - self._retained_bytes),
+                )
+                fitted = _artifact_for_budget(text, name, available)
+                if fitted is None:
+                    return None
+                artifact, size = fitted
+            task.artifacts.append(artifact)
+            task.retained_bytes += size
+            self._retained_bytes += size
+            return artifact
+
+    @staticmethod
+    def _mark_canceled(task: _Task) -> None:
+        task.cancel_requested = True
+        if task.state not in TERMINAL_STATES:
+            task.set_state("canceled")
+
+    def _cancel_task(self, task: _Task) -> None:
+        with self._lock:
+            self._mark_canceled(task)
+
+    def _set_working(self, task: _Task) -> bool:
+        with self._lock:
+            if task.cancel_requested or task.state == "canceled":
+                self._mark_canceled(task)
+                return False
+            task.set_state("working")
+            return True
+
+    def _reject_task(
+        self, task: _Task, detail: str | None = None,
+    ) -> bool:
+        with self._lock:
+            if task.cancel_requested or task.state == "canceled":
+                self._mark_canceled(task)
+                return False
+            task.set_state("rejected")
+            if detail:
+                self._add_artifact(task, detail, "error")
+            return True
+
+    def _fail_task(self, task: _Task, detail: str) -> bool:
+        with self._lock:
+            if task.cancel_requested or task.state == "canceled":
+                self._mark_canceled(task)
+                return False
+            task.set_state("failed")
+            self._add_artifact(task, detail, "error")
+            return True
+
+    def _complete_task(self, task: _Task, result: Any) -> dict | None:
+        with self._lock:
+            if task.cancel_requested or task.state == "canceled":
+                self._mark_canceled(task)
+                return None
+            artifact = self._add_artifact(task, result or "")
+            task.set_state("completed")
+            return artifact
+
+    @staticmethod
+    def _encoded_request(params: dict) -> bytes:
+        try:
+            encoded = _json_bytes(params)
+        except (TypeError, ValueError) as e:
+            raise _RpcError(_INVALID_PARAMS, "params must contain valid JSON values") from e
+        if len(encoded) > _MAX_REQUEST_RETAINED_BYTES:
+            raise _RpcError(
+                _INVALID_PARAMS,
+                "A2A request exceeds the per-task retained-byte limit",
+            )
+        return encoded
+
+    @staticmethod
+    def _request_digest(params: dict) -> str:
+        return hashlib.sha256(TaskEngine._encoded_request(params)).hexdigest()
+
+    def _new_or_existing_task(
+        self, params: dict, principal: str = "anon",
+    ) -> tuple[_Task, bool]:
+        if not isinstance(params, dict):
+            raise _RpcError(_INVALID_PARAMS, "params must be an object")
+        message = params.get("message")
+        if not isinstance(message, dict):
+            raise _RpcError(_INVALID_PARAMS, "message must be an object")
+        if message.get("role") != "user":
+            raise _RpcError(_INVALID_PARAMS, "message.role must be 'user'")
+        if "kind" in message and message.get("kind") != "message":
+            raise _RpcError(_INVALID_PARAMS, "message.kind must be 'message'")
+        parts = message.get("parts")
+        if not isinstance(parts, list) or not parts:
+            raise _RpcError(_INVALID_PARAMS, "message.parts must be a non-empty array")
+        if any(not isinstance(part, dict) for part in parts):
+            raise _RpcError(_INVALID_PARAMS, "every message part must be an object")
+        if any(
+            part.get("kind") == "text" and not isinstance(part.get("text"), str)
+            for part in parts
+        ):
+            raise _RpcError(_INVALID_PARAMS, "text parts must carry string text")
+        for field_name in ("contextId", "taskId"):
+            value = message.get(field_name)
+            if value is not None and not isinstance(value, str):
+                raise _RpcError(
+                    _INVALID_PARAMS, f"message.{field_name} must be a string"
+                )
+        if "metadata" in message and not isinstance(message.get("metadata"), dict):
+            raise _RpcError(_INVALID_PARAMS, "message.metadata must be an object")
         context_id = message.get("contextId") or ""
+        supplied_message_id = message.get("messageId")
+        if (
+            not isinstance(supplied_message_id, str)
+            or not supplied_message_id.strip()
+            or len(supplied_message_id) > _MAX_MESSAGE_ID_LENGTH
+        ):
+            raise _RpcError(
+                _INVALID_PARAMS,
+                "messageId is required and must be a non-empty string up to "
+                f"{_MAX_MESSAGE_ID_LENGTH} chars",
+            )
+        encoded_request = self._encoded_request(params)
+        request_digest = hashlib.sha256(encoded_request).hexdigest()
+        idempotency_key = (principal, supplied_message_id)
         # Normalise the inbound message so history echoes a complete record.
         user_message = {
             "role": message.get("role", "user"),
             "parts": message.get("parts") or [],
-            "messageId": message.get("messageId") or _new_id(),
+            "messageId": supplied_message_id,
             "kind": "message",
         }
-        task = _Task(context_id, user_message)
-        task.principal = principal
-        task.budget_request = self._client_budget(params)
-        user_message["taskId"] = task.id
-        user_message["contextId"] = task.context_id
         with self._lock:
-            # Bound the in-memory task store so an authenticated client can't
-            # grow it without limit (memory DoS). Evict the oldest tasks past
-            # the cap -- dict preserves insertion order, so popping the front
-            # drops the least-recently-created. Override via
-            # MAVERICK_A2A_MAX_TASKS.
+            if idempotency_key is not None:
+                existing = self._message_index.get(idempotency_key)
+                if existing is not None:
+                    task_id, original_digest = existing
+                    task = self._tasks.get(task_id)
+                    if task is not None:
+                        if not hmac.compare_digest(original_digest, request_digest):
+                            raise _RpcError(
+                                _INVALID_PARAMS,
+                                "messageId was already used with different content",
+                            )
+                        return task, False
+                    self._message_index.pop(idempotency_key, None)
+
+            task = _Task(context_id, user_message)
+            task.principal = principal
+            task.budget_request = self._client_budget(params)
+            task.idempotency_key = idempotency_key
+            user_message["taskId"] = task.id
+            user_message["contextId"] = task.context_id
+            retained_request_size = len(_json_bytes({
+                "history": task.messages,
+                "budgetRequest": task.budget_request,
+            }))
+            if retained_request_size > _MAX_REQUEST_RETAINED_BYTES:
+                raise _RpcError(
+                    _INVALID_PARAMS,
+                    "A2A request exceeds the per-task retained-byte limit",
+                )
+            # Never evict a submitted/working task: doing so makes a live goal
+            # unqueryable and uncancellable. Reclaim terminal records for both
+            # the count cap and the exact retained-byte cap; otherwise apply
+            # backpressure.
+            if not self._make_room_locked(retained_request_size, new_task=True):
+                raise _RpcError(_SERVER_BUSY, "A2A task capacity is full")
+            task.retained_bytes = retained_request_size
             self._tasks[task.id] = task
-            while len(self._tasks) > _MAX_TASKS:
-                self._tasks.pop(next(iter(self._tasks)))
+            self._retained_bytes += retained_request_size
+            if idempotency_key is not None:
+                self._message_index[idempotency_key] = (task.id, request_digest)
+        return task, True
+
+    def _new_task(self, params: dict, principal: str = "anon") -> _Task:
+        """Compatibility helper for tests/internal callers that need a record."""
+        task, _created = self._new_or_existing_task(params, principal)
         return task
 
     async def _run(self, task: _Task) -> None:
         """Execute the goal, transitioning task state. Updates the record
         in place; callers read task.to_dict() afterwards."""
+        if task.cancel_requested or task.state == "canceled":
+            self._cancel_task(task)
+            return
         text = _message_text(task.messages[0])
         if not text:
-            task.set_state("rejected")
-            task.add_artifact("empty message: no text parts to act on", "error")
+            self._reject_task(task, "empty message: no text parts to act on")
             return
         tblock = _a2a_trust_block(task.principal)
         if tblock:
-            task.set_state("rejected")
-            task.add_artifact(f"refused by agent trust plane: {tblock}", "error")
+            self._reject_task(task, f"refused by agent trust plane: {tblock}")
             return
         block = self._shield_block(text)
         if block:
-            task.set_state("rejected")
-            task.add_artifact(f"blocked by safety shield: {block}", "error")
+            self._reject_task(task, f"blocked by safety shield: {block}")
             return
-        task.set_state("working")
+        if not self._set_working(task):
+            return
         limits = self._limits(task)
         # Bind the caller id so _a2a_capability applies THIS caller's ceiling
         # (the contextvar copies into the worker thread).
@@ -581,16 +884,27 @@ class TaskEngine:
             # process-wide default ThreadPoolExecutor (asyncio.to_thread) for up
             # to the max_wall ceiling and stall every other to_thread consumer.
             async with _run_slot():
-                result = await asyncio.to_thread(
-                    self._runner,
-                    text,
-                    max_dollars=limits["max_dollars"],
-                    max_wall=limits["max_wall"],
-                    max_depth=limits["max_depth"],
-                )
+                # Cancellation can land while this task is queued on the
+                # semaphore. Re-check after acquisition so a canceled waiter
+                # never reaches the synchronous runner.
+                if task.cancel_requested:
+                    result = None
+                else:
+                    result = await asyncio.to_thread(
+                        self._runner,
+                        text,
+                        max_dollars=limits["max_dollars"],
+                        max_wall=limits["max_wall"],
+                        max_depth=limits["max_depth"],
+                    )
+        except asyncio.CancelledError:
+            # Client disconnect/task cancellation must leave a durable terminal
+            # record, even though an already-running worker thread cannot be
+            # forcefully stopped by asyncio.
+            self._cancel_task(task)
+            raise
         except Exception as e:
             log.exception("a2a task %s failed", task.id)
-            task.set_state("failed")
             # Scrub the exception before it enters the artifact: it is returned
             # to the caller AND pushed to the notification webhook, and an
             # exception message can carry a secret/PII (a DB DSN, a token in a
@@ -600,22 +914,20 @@ class TaskEngine:
                 detail = scrub(f"{type(e).__name__}: {e}")
             except Exception:  # pragma: no cover -- never let reporting raise
                 detail = type(e).__name__
-            task.add_artifact(f"task failed: {detail}", "error")
+            self._fail_task(task, f"task failed: {detail}")
             return
         finally:
             _caller_agent.reset(cv)
-        if task.cancel_requested:
-            # A cancel landed while we were running; honour it and drop the
-            # result rather than reporting completion.
-            task.set_state("canceled")
-            return
-        task.add_artifact(result or "")
-        task.set_state("completed")
+        # Completion and cancellation arbitration are atomic under the engine
+        # lock, so a concurrent tasks/cancel cannot be resurrected to completed.
+        self._complete_task(task, result)
 
     # ---- JSON-RPC methods ----------------------------------------------
 
     async def send(self, params: dict, principal: str = "anon") -> dict:
-        task = self._new_task(params, principal)
+        task, created = self._new_or_existing_task(params, principal)
+        if not created:
+            return task.to_dict()
         await self._run(task)
         await self._fire_push(task)
         return task.to_dict()
@@ -624,59 +936,93 @@ class TaskEngine:
         self, params: dict, principal: str = "anon",
     ) -> AsyncIterator[dict]:
         """Yield A2A stream events (already in result-object form)."""
-        task = self._new_task(params, principal)
-        # 1. initial Task snapshot.
-        yield task.to_dict()
-        text = _message_text(task.messages[0])
-        block = None if text else "empty message"
-        if not block:
-            block = _a2a_trust_block(task.principal) or self._shield_block(text)
-        if block:
-            task.set_state("rejected")
-            yield _status_event(task, final=True)
-            await self._fire_push(task)
-            return
-        # 2. working status.
-        task.set_state("working")
-        yield _status_event(task, final=False)
-        # 3. run.
-        limits = self._limits(task)
-        cv = _caller_agent.set(_agent_id_of(task.principal))
+        task, created = self._new_or_existing_task(params, principal)
         try:
-            async with _run_slot():
-                result = await asyncio.to_thread(
-                    self._runner, text,
-                    max_dollars=limits["max_dollars"],
-                    max_wall=limits["max_wall"],
-                    max_depth=limits["max_depth"],
-                )
-        except Exception as e:
-            log.exception("a2a stream task %s failed", task.id)
-            task.set_state("failed")
-            # Scrub before the exception enters the artifact + push webhook
-            # (same reasoning as the non-streaming path above).
+            # 1. initial Task snapshot.
+            yield task.to_dict()
+            if not created:
+                return
+            if task.cancel_requested:
+                self._cancel_task(task)
+                yield _status_event(task, final=True)
+                await self._fire_push(task)
+                return
+            text = _message_text(task.messages[0])
+            block = None if text else "empty message"
+            if not block:
+                block = _a2a_trust_block(task.principal) or self._shield_block(text)
+            if block:
+                self._reject_task(task)
+                yield _status_event(task, final=True)
+                await self._fire_push(task)
+                return
+            if task.cancel_requested:
+                self._cancel_task(task)
+                yield _status_event(task, final=True)
+                await self._fire_push(task)
+                return
+            # 2. working status.
+            if not self._set_working(task):
+                yield _status_event(task, final=True)
+                await self._fire_push(task)
+                return
+            yield _status_event(task, final=False)
+            # 3. run.
+            limits = self._limits(task)
+            cv = _caller_agent.set(_agent_id_of(task.principal))
             try:
-                from .secrets import scrub
-                detail = scrub(f"{type(e).__name__}: {e}")
-            except Exception:  # pragma: no cover -- never let reporting raise
-                detail = type(e).__name__
-            task.add_artifact(f"task failed: {detail}", "error")
+                async with _run_slot():
+                    # A tasks/cancel request may have landed while this stream
+                    # waited for a concurrency slot. Never invoke its runner.
+                    if task.cancel_requested:
+                        result = None
+                    else:
+                        result = await asyncio.to_thread(
+                            self._runner, text,
+                            max_dollars=limits["max_dollars"],
+                            max_wall=limits["max_wall"],
+                            max_depth=limits["max_depth"],
+                        )
+            except asyncio.CancelledError:
+                self._cancel_task(task)
+                raise
+            except Exception as e:
+                log.exception("a2a stream task %s failed", task.id)
+                if task.cancel_requested:
+                    self._cancel_task(task)
+                    yield _status_event(task, final=True)
+                    await self._fire_push(task)
+                    return
+                # Scrub before the exception enters the artifact + push webhook
+                # (same reasoning as the non-streaming path above).
+                try:
+                    from .secrets import scrub
+                    detail = scrub(f"{type(e).__name__}: {e}")
+                except Exception:  # pragma: no cover -- never let reporting raise
+                    detail = type(e).__name__
+                self._fail_task(task, f"task failed: {detail}")
+                yield _status_event(task, final=True)
+                await self._fire_push(task)
+                return
+            finally:
+                _caller_agent.reset(cv)
+            if task.cancel_requested:
+                self._cancel_task(task)
+                yield _status_event(task, final=True)
+                await self._fire_push(task)
+                return
+            # 4. artifact then terminal status.
+            art = self._complete_task(task, result)
+            if art is not None:
+                yield _artifact_event(task, art)
             yield _status_event(task, final=True)
             await self._fire_push(task)
-            return
-        finally:
-            _caller_agent.reset(cv)
-        if task.cancel_requested:
-            task.set_state("canceled")
-            yield _status_event(task, final=True)
-            await self._fire_push(task)
-            return
-        # 4. artifact then terminal status.
-        art = task.add_artifact(result or "")
-        yield _artifact_event(task, art)
-        task.set_state("completed")
-        yield _status_event(task, final=True)
-        await self._fire_push(task)
+        except (asyncio.CancelledError, GeneratorExit):
+            # Closing an SSE generator at any yield point is cancellation too;
+            # otherwise disconnects can strand submitted/working records.
+            if created:
+                self._cancel_task(task)
+            raise
 
     def get(self, params: dict, principal: str = "anon") -> dict:
         task = self._owned((params or {}).get("id", ""), principal)
@@ -684,17 +1030,65 @@ class TaskEngine:
 
     def cancel(self, params: dict, principal: str = "anon") -> dict:
         task = self._owned((params or {}).get("id", ""), principal)
-        task.cancel_requested = True
-        if task.state not in TERMINAL_STATES:
-            task.set_state("canceled")
+        self._cancel_task(task)
         return task.to_dict()
 
     def set_push_config(self, params: dict, principal: str = "anon") -> dict:
-        task = self._owned((params or {}).get("taskId", ""), principal)
-        cfg = (params or {}).get("pushNotificationConfig") or {}
+        if not isinstance(params, dict):
+            raise _RpcError(_INVALID_PARAMS, "params must be an object")
+        task = self._owned(params.get("taskId", ""), principal)
+        cfg = params.get("pushNotificationConfig")
+        if not isinstance(cfg, dict):
+            raise _RpcError(
+                _INVALID_PARAMS, "pushNotificationConfig must be an object",
+            )
+        unknown = set(cfg) - _PUSH_CONFIG_FIELDS
+        if unknown:
+            raise _RpcError(
+                _INVALID_PARAMS,
+                "pushNotificationConfig contains unsupported fields: "
+                + ", ".join(sorted(str(field) for field in unknown)),
+            )
         url = cfg.get("url")
-        if not url:
-            raise _RpcError(_INVALID_PARAMS, "pushNotificationConfig.url required")
+        if not isinstance(url, str) or not url.strip():
+            raise _RpcError(
+                _INVALID_PARAMS, "pushNotificationConfig.url must be a string",
+            )
+        try:
+            url_size = len(url.encode("utf-8"))
+        except UnicodeError as e:
+            raise _RpcError(
+                _INVALID_PARAMS,
+                "pushNotificationConfig.url is invalid or too long",
+            ) from e
+        if url_size > _MAX_PUSH_URL_BYTES or any(
+            ord(char) < 0x20 or ord(char) == 0x7F for char in url
+        ):
+            raise _RpcError(
+                _INVALID_PARAMS,
+                "pushNotificationConfig.url is invalid or too long",
+            )
+        token = cfg.get("token")
+        if token is not None:
+            if not isinstance(token, str):
+                raise _RpcError(
+                    _INVALID_PARAMS,
+                    "pushNotificationConfig.token must be a string",
+                )
+            try:
+                token_size = len(token.encode("utf-8"))
+            except UnicodeError as e:
+                raise _RpcError(
+                    _INVALID_PARAMS,
+                    "pushNotificationConfig.token is invalid or too long",
+                ) from e
+            if token_size > _MAX_PUSH_TOKEN_BYTES or any(
+                ord(char) < 0x20 or ord(char) == 0x7F for char in token
+            ):
+                raise _RpcError(
+                    _INVALID_PARAMS,
+                    "pushNotificationConfig.token is invalid or too long",
+                )
         # Validate the push URL at REGISTRATION (not just at fire time): a
         # loopback/metadata/internal target must be refused here so it can never
         # be stored, mirroring the SSRF guard _fire_push applies. Reuse the same
@@ -706,18 +1100,30 @@ class TaskEngine:
             parsed = urlparse(url)
             if parsed.scheme not in ("http", "https"):
                 raise BlockedHost(f"scheme {parsed.scheme!r} not allowed")
+            if parsed.username is not None or parsed.password is not None:
+                raise BlockedHost("URL credentials are not allowed")
+            # Accessing .port validates malformed/out-of-range ports.
+            _validated_port = parsed.port
             resolve_pinned_ip(parsed.hostname or "")
-        except ImportError:  # pragma: no cover - SSRF guard unavailable
-            # Caught BEFORE the BlockedHost clause: if the import above failed,
-            # the BlockedHost name is unbound, and evaluating `except BlockedHost`
-            # would raise NameError instead of falling through here.
-            pass
-        except BlockedHost as e:
+        except ImportError as e:  # pragma: no cover - packaged with core
+            raise _RpcError(
+                _INVALID_PARAMS,
+                "pushNotificationConfig.url validation unavailable",
+            ) from e
+        except (BlockedHost, ValueError, UnicodeError) as e:
             raise _RpcError(
                 _INVALID_PARAMS, f"pushNotificationConfig.url rejected: {e}",
             ) from e
-        task.push_config = cfg
-        return {"taskId": task.id, "pushNotificationConfig": _redacted_push_config(cfg)}
+        # Retain only fields this implementation actually supports, after type
+        # and byte validation, so caller mutation cannot alter stored state.
+        safe_cfg = {"url": url}
+        if token is not None:
+            safe_cfg["token"] = token
+        task.push_config = safe_cfg
+        return {
+            "taskId": task.id,
+            "pushNotificationConfig": _redacted_push_config(safe_cfg),
+        }
 
     def get_push_config(self, params: dict, principal: str = "anon") -> dict:
         task = self._owned((params or {}).get("id", "")

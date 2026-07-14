@@ -24,6 +24,9 @@ class _World:
     def set_goal_status(self, *args, **kwargs):
         return None
 
+    def get_goal(self, goal_id):
+        return type("Goal", (), {"result": "ok"})()
+
 
 @dataclass(frozen=True)
 class _Principal:
@@ -53,11 +56,13 @@ def test_oidc_enabled_rejects_message_without_token(monkeypatch):
         seen_tokens.append(token)
         raise oidc_mod.OIDCError("missing token")
 
-    async def _run_goal_must_not_run(*args, **kwargs):
-        raise AssertionError("run_goal must not run without a verified OIDC token")
+    async def _dispatch_must_not_run(*args, **kwargs):
+        raise AssertionError("dispatch must not run without a verified OIDC token")
 
     monkeypatch.setattr(oidc_mod, "verify_oidc_token", _reject)
-    monkeypatch.setattr(server_mod, "run_goal", _run_goal_must_not_run)
+    monkeypatch.setattr(
+        "maverick.runner.run_goal_in_background_async", _dispatch_must_not_run,
+    )
 
     class _Msg:
         channel = "slack"
@@ -92,13 +97,14 @@ def test_oidc_enabled_uses_verified_principal_for_goal_context(monkeypatch):
 
     captured = {}
 
-    async def _fake_run_goal(*args, **kwargs):
+    async def _fake_dispatch(*args, **kwargs):
         captured.update(kwargs)
-        return "ok"
+        return "done"
 
     monkeypatch.setattr(oidc_mod, "verify_oidc_token", _verify)
-    monkeypatch.setattr(server_mod, "run_goal", _fake_run_goal)
-    monkeypatch.setattr(server_mod, "budget_from_config", lambda: object())
+    monkeypatch.setattr(
+        "maverick.runner.run_goal_in_background_async", _fake_dispatch,
+    )
 
     class _Msg:
         channel = "slack"

@@ -4,6 +4,7 @@ from __future__ import annotations
 from types import SimpleNamespace
 
 from maverick import dreaming, hindsight, reflexion
+from maverick.file_lock import private_path_is_restricted
 
 
 def _make_state(tmp_path, name, *, reflexions=(), insights=(), skills=()):
@@ -149,6 +150,7 @@ class TestLedger:
         text = path.read_text()
         assert "SECRET-GAINED" not in text
         assert "SECRET-REGRESSED" not in text
-        assert (path.stat().st_mode & 0o777) == 0o600
+        assert private_path_is_restricted(path, 0o600)
+        assert private_path_is_restricted(path.parent, 0o700)
         assert rows and rows[0][0] == "learning_update"
         assert rows[0][1]["replay"] == "hindsight"

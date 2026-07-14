@@ -154,7 +154,7 @@ def main() -> int:
     except ImportError:
         print(
             "torch is required to train the PRM head. Install it with:\n"
-            "    pip install 'maverick-agent[training]'",
+            "    python -m pip install -e './packages/maverick-core[training]'",
             file=sys.stderr,
         )
         return 1

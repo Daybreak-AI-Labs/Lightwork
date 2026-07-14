@@ -16,7 +16,7 @@ can run one under this playbook.
 | 0-20 | Doors + setup; the demo loop running on a screen |
 | 20-30 | Welcome: what Lightwork is in 5 minutes (handbook one-pager), what shipped lately (`CHANGELOG.md`) |
 | 30-60 | One prepared talk: a real deployment, a built skill/plugin, or a module deep-dive — showcase-wall evidence standard preferred ([`showcase.md`](../showcase.md)) |
-| 60-90 | Live workshop block: attendees install (`pipx install 'maverick-agent[installer]'`, `maverick init --fast`) and run a first goal with `maverick monitor` open; organizers float |
+| 60-90 | Live workshop block: attendees use a reviewed source checkout or signed release binary, run `maverick init --fast`, and execute a first goal with `maverick monitor` open; organizers float |
 | 90-115 | Open discussion / show-and-tell |
 | 115-120 | Pointers: docs, office hours, how to host the next one |
 

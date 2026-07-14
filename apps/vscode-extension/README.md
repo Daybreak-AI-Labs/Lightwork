@@ -13,8 +13,9 @@ This is an MVP (v0.1):
 
 ## Setup
 
-1. Install Lightwork: `pip install maverick-agent` (or run the
-   wizard: `maverick init`).
+1. Install Lightwork from a reviewed source commit:
+   `pip install -e ./packages/maverick-core` (then run `maverick init`). Do
+   not install the unreserved distribution name from public PyPI.
 2. Build the extension: `cd apps/vscode-extension && npm install && npm run compile`.
 3. From VS Code: **Run** → **Run Extension** (F5), or package with
    `vsce package` and install the `.vsix`.

@@ -18,6 +18,13 @@ class _FakeWorld:
     def get_goal(self, gid):
         return self._goals.get(gid)
 
+    def claim_goal_for_run(self, gid, *, expected_owner=None):
+        goal = self._goals.get(gid)
+        if goal is None or goal.status != "pending":
+            return False
+        goal.status = "active"
+        return True
+
     def close(self):
         pass
 
@@ -29,7 +36,7 @@ def _goal(status="done", result="all good"):
 # ---- service half: RunGoal ----
 
 def test_run_goal_dispatches_existing_and_returns_terminal():
-    goals = {7: _goal(status="running")}
+    goals = {7: _goal(status="pending")}
     calls = []
 
     def dispatch(goal_id, **kw):
@@ -84,6 +91,36 @@ def test_dispatcher_submit_returns_terminal_status():
     assert req.channel == "api" and req.user_id == "u"
     assert req.max_depth == 1
     assert "\"deny_tools\":[\"shell\"]" in req.capability_json
+
+
+def test_dispatcher_accepts_runner_concurrency_identity_without_forwarding_it():
+    import maverick.runner as runner_mod
+
+    stub, pb2 = _fake_stub(status="done")
+    dispatcher = GrpcDispatcher("worker:50051", stub_factory=lambda: (stub, pb2))
+    prior = runner_mod.get_dispatcher()
+    try:
+        runner_mod.set_dispatcher(dispatcher)
+        assert runner_mod.run_goal_in_background(
+            7,
+            channel="api",
+            user_id="u",
+            concurrency_principal="caller-controlled",
+        ) == "done"
+    finally:
+        runner_mod.set_dispatcher(prior)
+
+    request = stub.RunGoal.call_args.args[0]
+    assert not hasattr(request, "concurrency_principal")
+
+
+@pytest.mark.parametrize("grant", [frozenset(), frozenset({"finance"})])
+def test_dispatcher_refuses_suite_grant_before_building_or_calling_rpc(grant):
+    stub_factory = MagicMock(side_effect=AssertionError("RPC path was entered"))
+    dispatcher = GrpcDispatcher("worker:50051", stub_factory=stub_factory)
+
+    assert dispatcher.submit(7, allowed_suites=grant) is None
+    stub_factory.assert_not_called()
 
 
 def test_dispatcher_token_metadata():

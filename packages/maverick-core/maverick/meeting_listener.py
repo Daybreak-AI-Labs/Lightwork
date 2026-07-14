@@ -22,7 +22,6 @@ from __future__ import annotations
 
 import json
 import logging
-import os
 import re
 import time
 from collections.abc import Callable, Iterable
@@ -30,6 +29,7 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
 
+from .file_lock import atomic_write_text, ensure_private_directory
 from .paths import data_dir
 
 log = logging.getLogger(__name__)
@@ -215,15 +215,10 @@ class MeetingListener:
             ],
             "summary": self.summary(),
         }
-        out_dir = data_dir("meetings")
-        out_dir.mkdir(parents=True, exist_ok=True)
+        out_dir = ensure_private_directory(data_dir("meetings"))
         path = out_dir / f"{self.session_id}.json"
-        # Create the file 0600 ATOMICALLY (minutes can contain anything said in
-        # the room). write_text() would create it with the process umask (often
-        # 0644) and only the later chmod would tighten it, leaving a window in
-        # which another local user could read the transcript. Mirror
-        # trajectory_store's os.open(..., 0o600) fd creation to close that window.
-        fd = os.open(path, os.O_CREAT | os.O_WRONLY | os.O_TRUNC, 0o600)
-        with os.fdopen(fd, "w", encoding="utf-8") as fh:
-            fh.write(json.dumps(payload, indent=2))
+        # Minutes may contain anything said in the room. Publish a complete
+        # file from a create-time protected temp so neither Windows ACL
+        # inheritance nor a crash can expose permissive/partial content.
+        atomic_write_text(path, json.dumps(payload, indent=2), mode=0o600)
         return path

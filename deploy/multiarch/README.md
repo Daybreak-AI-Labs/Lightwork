@@ -72,8 +72,8 @@ Cross-builds emulate foreign arches with QEMU; register binfmt first.
 
 ```yaml
 # GitHub Actions
-- uses: docker/setup-qemu-action@v3        # registers binfmt handlers
-- uses: docker/setup-buildx-action@v3
+- uses: docker/setup-qemu-action@c7c53464625b32c7a7e944ae62b3e17d2b600130 # v3; registers binfmt handlers
+- uses: docker/setup-buildx-action@bb05f3f5519dd87d3ba754cc423b652a5edd6d2c # v4.2.0
 - run: PLATFORMS=linux/amd64,linux/arm64 deploy/multiarch/build.sh
 ```
 

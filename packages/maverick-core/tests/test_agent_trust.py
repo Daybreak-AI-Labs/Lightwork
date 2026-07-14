@@ -40,21 +40,99 @@ def test_load_registry_is_fail_closed_on_junk():
     cfg = {"agent_trust": {"agents": [
         "not-a-table",
         {"id": "BAD ID"},                      # invalid charset -> skipped
-        {"id": "x", "pubkey": "nothex"},       # bad pubkey -> kept, key dropped
-        {"id": "y", "direction": "sideways"},  # bad direction -> defaults to both
+        {"id": "x", "pubkey": "nothex"},       # bad pubkey -> entry dropped
+        {"id": "y", "direction": "sideways"},  # bad direction -> entry dropped
         {"id": "dup", "max_risk": "low"},
         {"id": "dup", "max_risk": "high"},     # duplicate -> first wins
     ]}}
     reg = load_registry(cfg)
-    assert set(reg) == {"x", "y", "dup"}
-    assert reg["x"].pubkey == ""
-    assert reg["y"].direction == "both"
+    assert set(reg) == {"dup"}
     assert reg["dup"].max_risk == "low"
 
 
 def test_load_registry_empty_when_absent_or_malformed():
     assert load_registry({}) == {}
     assert load_registry({"agent_trust": {"agents": "oops"}}) == {}
+
+
+@pytest.mark.parametrize(("field", "bad"), [
+    ("pubkey", ""),
+    ("pubkey", 123),
+    ("direction", "sideways"),
+    ("direction", ["both"]),
+    ("max_risk", "critical"),
+    ("max_risk", None),
+    ("max_dollars", 0),
+    ("max_dollars", -1),
+    ("max_dollars", float("nan")),
+    ("max_dollars", float("inf")),
+    ("max_dollars", "-inf"),
+    ("max_wall_seconds", True),
+    ("max_wall_seconds", "not-a-number"),
+    ("allow_tools", 123),
+    ("allow_tools", ["read_file", 123]),
+    ("allow_tools", [""]),
+    ("deny_tools", {"shell": True}),
+    ("deny_tools", [None]),
+    ("data_scopes", 123),
+    ("data_scopes", ["support", ""]),
+])
+def test_present_malformed_security_field_drops_entry(field, bad):
+    reg = load_registry({"agent_trust": {"agents": [
+        {"id": "v", field: bad},
+    ]}})
+    assert "v" not in reg
+
+
+def test_absent_optional_security_fields_remain_valid():
+    reg = load_registry({"agent_trust": {"agents": [{"id": "v"}]}})
+    assert reg["v"] == TrustedAgent(id="v")
+
+
+def test_load_trust_state_propagates_config_loader_failure(monkeypatch):
+    from maverick import config
+
+    def _broken_config():
+        raise OSError("config unreadable")
+
+    monkeypatch.setattr(config, "load_config", _broken_config)
+    with pytest.raises(OSError, match="config unreadable"):
+        agent_trust.load_trust_state()
+
+
+def test_load_trust_state_fails_closed_on_corrupt_active_toml(tmp_path, monkeypatch):
+    from maverick import config
+
+    path = tmp_path / "config.toml"
+    path.write_text("[agent_trust\nenforce = true\n", encoding="utf-8")
+    monkeypatch.setenv("MAVERICK_CONFIG", str(path))
+    config.reset_config_cache()
+    try:
+        with pytest.raises(agent_trust.AgentTrustError, match="source is unreadable"):
+            agent_trust.load_trust_state()
+    finally:
+        config.reset_config_cache()
+
+
+def test_load_trust_state_rejects_non_table_config_root(monkeypatch):
+    from maverick import config
+
+    monkeypatch.setattr(config, "load_config", list)
+    with pytest.raises(agent_trust.AgentTrustError, match="root must be a table"):
+        agent_trust.load_trust_state()
+
+
+def test_load_trust_state_rejects_non_table_trust_section(monkeypatch):
+    from maverick import config
+
+    monkeypatch.setattr(config, "load_config", lambda: {"agent_trust": []})
+    with pytest.raises(agent_trust.AgentTrustError, match="section must be a table"):
+        agent_trust.load_trust_state()
+
+
+def test_load_registry_non_table_config_is_empty():
+    assert load_registry([]) == {}
+    assert load_registry({"agent_trust": []}) == {}
 
 
 # ---- posture (engaged / disengaged) --------------------------------------

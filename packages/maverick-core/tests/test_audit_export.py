@@ -14,6 +14,7 @@ from click.testing import CliRunner
 from maverick.audit.events import AuditEvent, EventKind
 from maverick.audit.export import iter_audit_events, to_cef, to_jsonl
 from maverick.audit.writer import AuditLog
+from maverick.file_lock import private_path_is_restricted
 
 
 def test_cef_header_escapes_pipe_in_kind():
@@ -268,7 +269,7 @@ def test_cli_export_output_file_is_0600(monkeypatch, tmp_path):
     res = CliRunner().invoke(main, ["audit", "export", "-o", str(out)])
     assert res.exit_code == 0, res.output
     assert out.exists()
-    assert (out.stat().st_mode & 0o777) == 0o600
+    assert private_path_is_restricted(out, 0o600)
     rows = [json.loads(line) for line in out.read_text().splitlines() if line.strip()]
     assert rows[0]["name"] == "read_file"
 

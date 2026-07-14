@@ -30,6 +30,7 @@ Hand Lightwork a goal. Its orchestrator decomposes it, spawns specialist sub-age
 
 ```bash
 git clone https://github.com/Day-AI-Labs/Lightwork && cd Lightwork
+git checkout --detach <reviewed-full-40-character-commit-sha>
 pip install -e ./packages/maverick-core   # kernel (with deps)
 pip install -e ./apps/installer-cli       # + the setup wizard
 lightwork init                        # four questions, safe defaults
@@ -82,14 +83,17 @@ pipx install 'maverick-agent[installer]'
 lightwork init
 ```
 
-For source-based desktop bootstrapping, download `deploy/desktop/install.sh` or `deploy/desktop/install.ps1` from a commit or release you trust, verify it, and set `MAVERICK_REF` to a full 40-character commit SHA. The bootstrap scripts intentionally reject mutable branch/tag refs by default.
+For source-based desktop bootstrapping, download `deploy/desktop/install.sh` or `deploy/desktop/install.ps1` from a commit you trust, verify it, and set `MAVERICK_REF` to that lowercase, full 40-character commit SHA. The bootstrap scripts reject missing and mutable refs and never fall back to the public index.
 
 The PyPI distribution name is `maverick-agent` — Lightwork's original codename, kept because the `maverick` name is squatted on PyPI. The CLI it installs answers to **both `lightwork` and `maverick`**; every `MAVERICK_*` environment variable can equally be spelled `LIGHTWORK_*`. The `[installer]` extra pulls the wizard into the same pipx environment so `lightwork init` resolves.
 
 If you already installed the kernel without the extra, inject the wizard:
 
+From the reviewed source checkout, inject the local path so pipx never resolves
+a first-party name from a public index:
+
 ```bash
-pipx inject maverick-agent maverick-installer
+pipx inject maverick-agent ./apps/installer-cli
 ```
 
 ### From source
@@ -206,7 +210,7 @@ Run the swarm inside any repo's GitHub Actions — on a PR, a schedule, or on
 demand — under a hard spend cap:
 
 ```yaml
-- uses: Day-AI-Labs/Lightwork/deploy/github-action@v0.1.6
+- uses: Day-AI-Labs/Lightwork/deploy/github-action@<reviewed-full-40-character-commit-sha>
   with:
     goal: "Summarize this PR and flag anything risky."
     max-dollars: "0.50"

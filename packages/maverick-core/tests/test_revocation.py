@@ -3,7 +3,8 @@ from __future__ import annotations
 
 import pytest
 from maverick.capability import Capability
-from maverick.revocation import RevocationRegistry
+from maverick.file_lock import private_path_is_restricted
+from maverick.revocation import RevocationRegistry, RevocationStoreError
 from maverick.tools import Tool
 
 # ---- registry ----
@@ -45,16 +46,134 @@ def test_reread_on_file_change_propagates(tmp_path):
     assert running.is_revoked("agent:x") is True    # re-read on mtime change
 
 
-def test_corrupt_file_fails_open(tmp_path):
+def test_corrupt_file_fails_closed(tmp_path):
     p = tmp_path / "rev.json"
     p.write_text("{ not valid json", encoding="utf-8")
-    assert RevocationRegistry(p).is_revoked("agent:x") is False
+    with pytest.raises(RevocationStoreError, match="corrupt"):
+        RevocationRegistry(p).is_revoked("agent:x")
+
+
+@pytest.mark.parametrize(
+    "payload",
+    [
+        "[]",
+        '{"agent:x": null}',
+        '{"agent:x": {"revoked_at": "yesterday"}}',
+        '{"agent:x": {"revoked_at": NaN}}',
+        '{"agent:x": {"revoked_at": 1, "reason": []}}',
+        '{"agent:x": {"revoked_at": 1}, "agent:x": {"revoked_at": 2}}',
+    ],
+)
+def test_malformed_registry_records_fail_closed(tmp_path, payload):
+    p = tmp_path / "rev.json"
+    p.write_text(payload, encoding="utf-8")
+    with pytest.raises(RevocationStoreError, match="corrupt"):
+        RevocationRegistry(p).is_revoked("agent:x")
+
+
+def test_unreadable_registry_fails_closed(tmp_path, monkeypatch):
+    import maverick.revocation as R
+
+    p = tmp_path / "rev.json"
+    p.write_text("{}", encoding="utf-8")
+
+    def _unreadable(*args, **kwargs):
+        raise PermissionError("denied")
+
+    monkeypatch.setattr(R, "_bounded_read_text", _unreadable)
+    with pytest.raises(RevocationStoreError, match="unreadable"):
+        RevocationRegistry(p).is_revoked("agent:x")
+
+
+def test_oversize_registry_fails_closed_before_unbounded_read(
+    tmp_path, monkeypatch,
+):
+    import maverick.revocation as R
+
+    monkeypatch.setattr(R, "_MAX_STORE_BYTES", 32)
+    p = tmp_path / "rev.json"
+    p.write_bytes(b"x" * 33)
+
+    with pytest.raises(RevocationStoreError, match="exceeds 32 bytes"):
+        RevocationRegistry(p).is_revoked("agent:x")
+
+
+def test_too_many_registry_entries_fail_closed(tmp_path, monkeypatch):
+    import maverick.revocation as R
+
+    monkeypatch.setattr(R, "_MAX_ENTRIES", 1)
+    p = tmp_path / "rev.json"
+    p.write_text(
+        '{"agent:a":{"revoked_at":1},"agent:b":{"revoked_at":2}}',
+        encoding="utf-8",
+    )
+
+    with pytest.raises(RevocationStoreError, match="exceeds 1 entries"):
+        RevocationRegistry(p).is_revoked("agent:a")
+
+
+@pytest.mark.parametrize("field", ["principal", "reason"])
+def test_overlong_registry_fields_fail_closed(tmp_path, monkeypatch, field):
+    import maverick.revocation as R
+
+    if field == "principal":
+        monkeypatch.setattr(R, "_MAX_PRINCIPAL_LENGTH", 4)
+        payload = '{"agent:too-long":{"revoked_at":1}}'
+    else:
+        monkeypatch.setattr(R, "_MAX_REASON_LENGTH", 4)
+        payload = '{"a":{"revoked_at":1,"reason":"too long"}}'
+    p = tmp_path / "rev.json"
+    p.write_text(payload, encoding="utf-8")
+
+    with pytest.raises(RevocationStoreError, match="corrupt"):
+        RevocationRegistry(p).is_revoked("a")
+
+
+def test_operator_write_refuses_to_replace_corrupt_registry(tmp_path):
+    p = tmp_path / "rev.json"
+    damaged = b"{ not valid json"
+    p.write_bytes(damaged)
+
+    with pytest.raises(RevocationStoreError, match="corrupt"):
+        RevocationRegistry(p).revoke("agent:x")
+
+    assert p.read_bytes() == damaged
+
+
+def test_operator_write_refuses_over_limit_values(tmp_path, monkeypatch):
+    import maverick.revocation as R
+
+    monkeypatch.setattr(R, "_MAX_REASON_LENGTH", 4)
+    p = tmp_path / "rev.json"
+
+    with pytest.raises(ValueError, match="reason"):
+        RevocationRegistry(p).revoke("agent:x", reason="too long")
+
+    assert not p.exists()
+
+
+def test_entry_limit_refuses_write_without_losing_revocations(
+    tmp_path, monkeypatch,
+):
+    import maverick.revocation as R
+
+    monkeypatch.setattr(R, "_MAX_ENTRIES", 1)
+    p = tmp_path / "rev.json"
+    reg = RevocationRegistry(p)
+    reg.revoke("agent:a")
+
+    with pytest.raises(ValueError, match="exceeds 1 entries"):
+        reg.revoke("agent:b")
+
+    fresh = RevocationRegistry(p)
+    assert fresh.is_revoked("agent:a") is True
+    assert fresh.is_revoked("agent:b") is False
 
 
 def test_file_is_0600(tmp_path):
     p = tmp_path / "rev.json"
     RevocationRegistry(p).revoke("agent:x")
-    assert oct(p.stat().st_mode)[-3:] == "600"
+    assert private_path_is_restricted(p, 0o600)
 
 
 def test_revoke_subtree_walks_delegation_graph(tmp_path):
@@ -75,14 +194,26 @@ def test_revoke_subtree_leaf_only(tmp_path):
     assert reg.is_revoked("leaf") and not reg.is_revoked("root")
 
 
-def test_module_is_revoked_fails_open(monkeypatch):
+def test_module_is_revoked_fails_closed(monkeypatch):
     import maverick.revocation as R
 
     def _boom():
         raise RuntimeError("registry unavailable")
 
     monkeypatch.setattr(R, "shared", _boom)
-    assert R.is_revoked("agent:x") is False
+    assert R.is_revoked("agent:x") is True
+    assert R.is_revoked("") is False
+
+
+def test_module_revoked_principal_fails_closed(monkeypatch):
+    import maverick.revocation as R
+
+    def _boom():
+        raise RuntimeError("registry unavailable")
+
+    monkeypatch.setattr(R, "shared", _boom)
+    assert R.revoked_principal(("agent:x", "user:alice")) == "agent:x"
+    assert R.revoked_principal(()) is None
 
 
 def test_shared_is_keyed_per_tenant(tmp_path, monkeypatch):
@@ -198,6 +329,25 @@ async def test_non_revoked_principal_not_denied(tmp_path, monkeypatch):
     out = await agent._run_tool("read_file", {"path": "x"})
     assert "DENIED" not in out
     assert calls == [{"path": "x"}]  # ran normally
+
+
+@pytest.mark.asyncio
+async def test_corrupt_registry_denies_tool_call(tmp_path, monkeypatch):
+    p = tmp_path / "rev.json"
+    p.write_text("{ not valid json", encoding="utf-8")
+    import maverick.revocation as R
+
+    monkeypatch.setattr(R, "shared", lambda: RevocationRegistry(p))
+    agent = _agent(tmp_path)
+    agent.capability = Capability(principal="agent:coder-1")
+    calls: list = []
+    agent.tools.register(_spy_tool("read_file", calls))
+
+    out = await agent._run_tool("read_file", {"path": "x"})
+
+    assert "DENIED by capability" in out
+    assert "agent:coder-1" in out
+    assert calls == []
 
 
 @pytest.mark.asyncio

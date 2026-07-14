@@ -366,31 +366,15 @@ def _install_config_from_file(src: str) -> None:
     except Exception:
         pass
     dst = config_path()
-    dst.parent.mkdir(parents=True, exist_ok=True)
-    # Tighten ~/.maverick to 0700: a bare `init` can create it before any
-    # world-DB command does, and the config we're about to drop may carry inline
-    # provider api_keys. Matches world_model.
-    try:
-        os.chmod(dst.parent, 0o700)
-    except OSError:
-        pass
-    # Write with mode-at-creation 0600. The previous shutil.copyfile (like a
-    # write_text) created the file world-readable (0644 & ~umask) and only
-    # chmod'd it AFTER the whole config body -- which can embed raw api_keys --
-    # was on disk: a window a co-located user could read. Mirror wizard
-    # write_config: O_CREAT|O_WRONLY|O_TRUNC with 0o600, plus a final chmod to
-    # cover the case where dst pre-existed with looser perms. Copy the source
-    # bytes verbatim so comments/formatting survive.
+    from ..file_lock import atomic_write_bytes, ensure_private_directory
+
+    # A provisioned config may contain inline provider keys. Tighten the
+    # directory with a protected Windows DACL and publish the bytes from a
+    # create-time protected temp; POSIX mode bits passed to os.open do not
+    # provide the equivalent Windows custody boundary.
+    ensure_private_directory(dst.parent)
     data = src_path.read_bytes()
-    fd = os.open(str(dst), os.O_CREAT | os.O_WRONLY | os.O_TRUNC, 0o600)
-    try:
-        with os.fdopen(fd, "wb") as f:
-            f.write(data)
-    finally:
-        try:
-            os.chmod(dst, 0o600)
-        except OSError:
-            pass
+    atomic_write_bytes(dst, data, mode=0o600)
     click.echo(click.style(f"installed config -> {dst} (0600)", fg="green"))
 
 
@@ -409,18 +393,14 @@ def init(fast: bool, resume: bool, from_file: str | None) -> None:
     try:
         from maverick_installer.wizard import run as run_wizard
     except ImportError:
-        # The wizard lives in the optional `installer` extra. Installing
-        # `maverick-installer` into its own pipx venv (the previous
-        # message's advice) creates an isolated env where the kernel
-        # can't import it. The correct path is to inject the extra into
-        # the same env Lightwork already lives in.
+        # The wizard must come from the same reviewed source checkout as the
+        # kernel. The first-party public namespaces are not yet reserved, so
+        # suggesting an index lookup here would create a dependency-confusion
+        # path from an otherwise trusted local install.
         click.echo(
-            "Install: pipx install 'maverick-agent[installer]'",
-            err=True,
-        )
-        click.echo(
-            "Or, if Lightwork is already installed:  "
-            "pipx inject maverick-agent maverick-installer",
+            "Install the installer component from the same reviewed Lightwork "
+            "checkout; public-index lookup is disabled. See "
+            "docs/getting-started.md.",
             err=True,
         )
         sys.exit(2)
@@ -2445,7 +2425,11 @@ def dashboard(host: str, port: int, token) -> None:
     try:
         from maverick_dashboard.app import app as fastapi_app
     except ImportError:
-        click.echo("Install: pip install maverick-dashboard", err=True)
+        click.echo(
+            "Install the dashboard from the same reviewed Lightwork checkout; "
+            "public-index lookup is disabled.",
+            err=True,
+        )
         sys.exit(2)
     import uvicorn
     click.echo(f"Lightwork dashboard: http://{host}:{port}")
@@ -2472,7 +2456,11 @@ def mcp(use_http: bool, host: str, port: int) -> None:
     try:
         from maverick_mcp.server import MCPServer
     except ImportError:
-        click.echo("Install: pip install maverick-mcp-server", err=True)
+        click.echo(
+            "Install the MCP server from the same reviewed Lightwork checkout; "
+            "public-index lookup is disabled.",
+            err=True,
+        )
         sys.exit(2)
     from ..deployment import require_enterprise_or_die
     require_enterprise_or_die()
@@ -2480,7 +2468,11 @@ def mcp(use_http: bool, host: str, port: int) -> None:
         try:
             from maverick_mcp.http_transport import serve
         except ImportError:
-            click.echo("Install: pip install 'maverick-mcp-server[http]'", err=True)
+            click.echo(
+                "Install the MCP HTTP extra from the same reviewed Lightwork "
+                "checkout; public-index lookup is disabled.",
+                err=True,
+            )
             sys.exit(2)
         serve(host=host, port=port)
     else:
@@ -5532,14 +5524,18 @@ def audit_export(
                     "refusing to write audit export over a source audit log file"
                 )
 
-        # 0600 from creation: the export may contain PII, mirroring the
-        # writer's own day-file permissions.
-        fd = _os.open(output, _os.O_WRONLY | _os.O_CREAT | _os.O_TRUNC, 0o600)
-        n = 0
-        with _os.fdopen(fd, "w", encoding="utf-8") as f:
-            for line in lines:
-                f.write(line + "\n")
-                n += 1
+        # Private from creation on POSIX *and* Windows: os.open(..., 0o600)
+        # only adjusts POSIX mode bits and can inherit a broad Windows DACL.
+        # Stream through a protected unpublished temp, then atomically publish
+        # the complete export so PII is never exposed in a permissive or torn
+        # destination file.
+        from ..file_lock import atomic_write_text_chunks
+
+        n = atomic_write_text_chunks(
+            output_path,
+            (line + "\n" for line in lines),
+            mode=0o600,
+        )
         if n == 0:
             click.echo("no audit events to export", err=True)
         else:

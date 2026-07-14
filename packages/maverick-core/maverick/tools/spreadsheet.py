@@ -41,7 +41,7 @@ def _openpyxl():
     except ImportError as e:
         raise RuntimeError(
             "openpyxl not installed; .xlsx support needs it. "
-            "Run: pip install 'maverick-agent[spreadsheet]'") from e
+            "Run: python -m pip install -e './packages/maverick-core[spreadsheet]'") from e
 
 
 def _safe_path(sandbox, user_path: str) -> Path:

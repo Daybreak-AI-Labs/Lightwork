@@ -153,7 +153,7 @@ class _BrowserSession:
             from playwright.sync_api import sync_playwright
         except ImportError as e:
             raise ImportError(
-                "playwright not installed. Run: pip install 'maverick-agent[browser]' "
+                "playwright not installed. Run: python -m pip install -e './packages/maverick-core[browser]' "
                 "&& playwright install chromium"
             ) from e
         self._playwright = sync_playwright().start()

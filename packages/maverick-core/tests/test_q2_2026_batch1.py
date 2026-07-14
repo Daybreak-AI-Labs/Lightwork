@@ -170,7 +170,22 @@ def test_agent_bus_inboxes_bounded_under_unique_recipient_flood(monkeypatch):
         agent_bus.peek(f"ephemeral-{i}")  # creates an empty inbox per id
     # Empty inboxes are evicted once over the cap, so the live set stays near
     # the cap rather than growing to O(ids).
-    assert len(agent_bus._inboxes) <= agent_bus._MAX_INBOXES + 1
+    assert len(agent_bus._inboxes) <= agent_bus._MAX_INBOXES
+
+
+def test_agent_bus_hard_cap_refuses_nonempty_unique_recipient_flood(monkeypatch):
+    """Non-empty queues are preserved, but may not grow the registry past cap."""
+    from maverick import agent_bus
+
+    agent_bus.clear()
+    monkeypatch.setattr(agent_bus, "_MAX_INBOXES", 8)
+    for i in range(8):
+        assert agent_bus.send("sender", f"recipient-{i}", f"message-{i}")
+
+    assert not agent_bus.send("sender", "recipient-over-cap", "blocked")
+    assert len(agent_bus._inboxes) == 8
+    first = agent_bus.recv("recipient-0")
+    assert first is not None and first.payload == "message-0"
 
 
 def test_agent_bus_eviction_keeps_nonempty_inboxes(monkeypatch):

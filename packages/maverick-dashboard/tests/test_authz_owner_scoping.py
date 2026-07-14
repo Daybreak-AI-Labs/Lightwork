@@ -89,7 +89,7 @@ def no_run(monkeypatch):
     """Neuter the background runner so POST /goals doesn't spawn an agent."""
     import maverick.runner as runner
 
-    monkeypatch.setattr(runner, "run_goal_in_thread", lambda *a, **k: None)
+    monkeypatch.setattr(runner, "run_goal_in_thread", lambda *a, **k: "queued")
     # Generous rate cap so a test that creates several goals never 429s; the
     # global ceiling derives as 10x this.
     monkeypatch.setenv("MAVERICK_DASHBOARD_MAX_GOALS_PER_MIN", "1000")

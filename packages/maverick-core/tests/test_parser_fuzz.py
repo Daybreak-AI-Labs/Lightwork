@@ -197,15 +197,26 @@ def test_fuzz_a2a_message_text():
 
 
 def test_fuzz_a2a_send_malformed_message():
-    """End-to-end: send() with a malformed message must resolve to a task
-    (rejected/failed), never raise out of the runner to a 500."""
+    """Malformed messages fail with the documented RPC error, never an
+    unexpected exception that would escape the HTTP adapter as a 500."""
     import asyncio
 
-    from maverick.a2a_tasks import TaskEngine
+    from maverick.a2a_tasks import TaskEngine, _RpcError
     te = TaskEngine(runner=lambda *a, **k: "ok")
     for parts in ("not-a-list", 5, [1, 2], [{"kind": "text"}], None, {"x": 1}):
-        out = asyncio.run(te.send({"message": {"parts": parts}}, "anon"))
-        assert isinstance(out, dict) and out.get("kind") == "task"
+        with pytest.raises(_RpcError):
+            asyncio.run(
+                te.send(
+                    {
+                        "message": {
+                            "role": "user",
+                            "parts": parts,
+                            "messageId": "fuzz-malformed-parts",
+                        }
+                    },
+                    "anon",
+                )
+            )
 
 
 # ---- tokens + signatures -----------------------------------------------------

@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 from maverick.job_queue import JobQueue
+from maverick.paths import tenant_scope
 
 
 def _queue(tmp_path) -> JobQueue:
@@ -45,3 +46,42 @@ def test_cli_queue_status_and_failed(tmp_path, monkeypatch):
     r = runner.invoke(main, ["queue", "failed"])
     assert r.exit_code == 0, r.output
     assert "kaboom-error" in r.output
+
+
+def test_default_db_is_resolved_lazily_inside_tenant_scope(tmp_path, monkeypatch):
+    import maverick.job_queue as jq
+
+    # job_queue was imported before either scope. Its default must still follow
+    # the active tenant at construction time instead of freezing to root.
+    monkeypatch.setenv("MAVERICK_HOME", str(tmp_path))
+    monkeypatch.setattr(jq, "DEFAULT_DB", None)
+
+    with tenant_scope(tenant="fleet-a"):
+        first = jq.JobQueue()
+    with tenant_scope(tenant="fleet-b"):
+        second = jq.JobQueue()
+
+    assert first.db_path == tmp_path / "tenants" / "fleet-a" / "jobs.db"
+    assert second.db_path == tmp_path / "tenants" / "fleet-b" / "jobs.db"
+    assert first.db_path != second.db_path
+
+
+def test_dispatch_envelope_claim_is_atomic_and_prunable(tmp_path):
+    db_path = tmp_path / "jobs.db"
+    first = JobQueue(db_path=db_path)
+    second = JobQueue(db_path=db_path)
+
+    assert first.claim_dispatch_envelope(
+        "message_abcdefghijklmnop",
+        "nonce_abcdefghijklmnop",
+        expires_at=200,
+        now=100,
+    )
+    assert not second.claim_dispatch_envelope(
+        "message_abcdefghijklmnop",
+        "different_nonce_value",
+        expires_at=200,
+        now=100,
+    )
+    assert second.prune_dispatch_envelope_claims(now=199) == 0
+    assert second.prune_dispatch_envelope_claims(now=200) == 1

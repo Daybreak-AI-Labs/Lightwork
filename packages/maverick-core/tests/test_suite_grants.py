@@ -70,7 +70,7 @@ def test_resolution_chain_explicit_then_resolver_then_default(monkeypatch):
     assert sg.granted_suites("user:plain") == frozenset({"tax"})
 
 
-def test_resolver_error_fails_open_to_default(monkeypatch):
+def test_resolver_error_fails_closed(monkeypatch):
     import maverick.config as config
     monkeypatch.setattr(config, "load_config",
                         lambda: {"dashboard": {"default_suites": ["finance"]}})
@@ -79,7 +79,20 @@ def test_resolver_error_fails_open_to_default(monkeypatch):
         raise RuntimeError("group store unavailable")
 
     monkeypatch.setattr(sg, "_EXTRA_RESOLVERS", [broken])
-    assert sg.granted_suites("user:x") == frozenset({"finance"})
+    with pytest.raises(sg.SuiteGrantStoreError):
+        sg.granted_suites("user:x")
+
+
+def test_resolver_error_cannot_become_unrestricted_without_default(monkeypatch):
+    import maverick.config as config
+    monkeypatch.setattr(config, "load_config", dict)
+
+    def broken(principal):
+        raise RuntimeError("group store unavailable")
+
+    monkeypatch.setattr(sg, "_EXTRA_RESOLVERS", [broken])
+    with pytest.raises(sg.SuiteGrantStoreError):
+        sg.ensure_suite_allowed("user:x", "legal")
 
 
 def test_register_grant_resolver_is_idempotent(monkeypatch):

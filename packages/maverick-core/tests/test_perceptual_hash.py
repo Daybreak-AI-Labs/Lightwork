@@ -76,7 +76,7 @@ def test_hamming_validates_and_measures():
 
 def test_file_hash_without_pillow_is_actionable(monkeypatch, tmp_path):
     monkeypatch.setitem(sys.modules, "PIL", None)  # forces ImportError
-    with pytest.raises(ImportError, match=r"maverick-agent\[computer-use\]"):
+    with pytest.raises(ImportError, match=r"packages/maverick-core\[computer-use\]"):
         average_hash_file(str(tmp_path / "x.png"))
 
 

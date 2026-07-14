@@ -31,6 +31,20 @@ class TestAuditKeyPerms:
         mode = stat.S_IMODE(priv_path.stat().st_mode)
         assert mode == 0o600, oct(mode)
 
+    def test_private_key_bytes_are_never_newline_translated(self, monkeypatch, tmp_path):
+        """Raw Ed25519 material must remain exactly 32 bytes on Windows."""
+        from maverick.audit import signing
+
+        monkeypatch.setattr(signing, "KEY_DIR", tmp_path / "keys")
+        private = (b"A" * 10) + b"\n" + (b"B" * 21)
+
+        priv_path = signing._save_keypair(
+            private, b"P" * 32, "0123456789abcdef"
+        )
+
+        assert len(private) == 32
+        assert priv_path.read_bytes() == private
+
 
 class TestWorldDBPerms:
     @pytest.mark.skipif(os.name != "posix", reason="POSIX perms")

@@ -5,7 +5,8 @@ The contract lives in ``maverick.proto``; the behaviour lives in
 needed). ``server.serve`` binds the two behind the ``[grpc]`` extra.
 
 Run the server with: ``python -m maverick.grpc_api`` (after
-``pip install 'maverick-agent[grpc]'``).
+``python -m pip install -e './packages/maverick-core[grpc]'`` from a reviewed
+Lightwork checkout).
 """
 from __future__ import annotations
 

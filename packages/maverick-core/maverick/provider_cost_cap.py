@@ -42,14 +42,19 @@ from __future__ import annotations
 import json
 import logging
 import os
-import tempfile
 import threading
 import time
 from dataclasses import dataclass
 from datetime import datetime, timezone
 from pathlib import Path
 
-from .file_lock import cross_process_lock
+from .file_lock import (
+    atomic_read_text,
+    atomic_write_text,
+    cross_process_lock,
+    ensure_private_directory,
+    ensure_private_file,
+)
 from .paths import data_dir
 
 log = logging.getLogger(__name__)
@@ -166,8 +171,9 @@ def _ledger_path() -> Path:
 
 def _load(path: Path) -> dict:
     try:
-        with open(path, "rb") as f:
-            raw = json.load(f)
+        ensure_private_directory(path.parent)
+        ensure_private_file(path, 0o600)
+        raw = json.loads(atomic_read_text(path))
         return raw if isinstance(raw, dict) else {}
     except FileNotFoundError:
         return {}
@@ -177,20 +183,8 @@ def _load(path: Path) -> dict:
 
 
 def _save(path: Path, data: dict) -> None:
-    path.parent.mkdir(parents=True, exist_ok=True)
-    fd, tmp = tempfile.mkstemp(dir=str(path.parent),
-                               prefix=".provider-spend-", suffix=".tmp")
-    try:
-        with os.fdopen(fd, "w", encoding="utf-8") as f:
-            json.dump(data, f)
-        os.chmod(tmp, 0o600)
-        os.replace(tmp, path)
-    except BaseException:
-        try:
-            os.unlink(tmp)
-        except OSError:
-            pass
-        raise
+    ensure_private_directory(path.parent)
+    atomic_write_text(path, json.dumps(data), mode=0o600)
 
 
 def record(provider: str, dollars: float, *, now: float | None = None,

@@ -368,6 +368,15 @@ def _mount_task_endpoint(app: Any) -> None:
                 status_code=403,
             )
         authorization = request.headers.get("authorization")
+        # Authenticate before JSON parsing. The body is still byte-capped below,
+        # but unauthenticated clients should not get free parser/validation work
+        # on this budget-spending remote execution endpoint.
+        auth_err = engine.auth_error(authorization)
+        if auth_err is not None:
+            return JSONResponse(
+                _rpc_error(None, auth_err["code"], auth_err["message"]),
+                status_code=401,
+            )
         raw = await _read_limited_body(request)
         if raw is None:
             return JSONResponse(
@@ -382,13 +391,16 @@ def _mount_task_endpoint(app: Any) -> None:
             return JSONResponse(_rpc_error(None, -32600, "invalid request"))
         req_id = body.get("id")
         method = body.get("method")
-        params = body.get("params") or {}
-
-        auth_err = engine.auth_error(authorization)
-        if auth_err is not None:
+        params = body.get("params", {})
+        if params is None:
+            params = {}
+        if (
+            body.get("jsonrpc") != "2.0"
+            or not isinstance(method, str)
+            or not isinstance(params, dict)
+        ):
             return JSONResponse(
-                _rpc_error(req_id, auth_err["code"], auth_err["message"]),
-                status_code=401,
+                _rpc_error(req_id, -32600, "invalid JSON-RPC request")
             )
 
         # Bind every call to a principal so tasks are scoped to their creator: a

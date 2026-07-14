@@ -105,6 +105,20 @@ def test_unprovisioned_tenant_with_roster_refused(monkeypatch, tmp_path):
     assert "suspended" in out
 
 
+def test_corrupt_tenant_registry_is_refused_at_door(monkeypatch, tmp_path):
+    srv = _serve_with_tenancy(monkeypatch, tmp_path)
+    registry = tmp_path / "home" / "tenant_registry.json"
+    registry.parent.mkdir(parents=True, exist_ok=True)
+    registry.write_text(
+        '{"tenants":[{"id":"slack:UALICE","status":"suspnded"}]}',
+        encoding="utf-8",
+    )
+
+    out = asyncio.run(srv._handle_message(_Msg()))
+
+    assert "policy is unavailable" in out
+
+
 def test_active_tenant_without_per_user_is_refused_for_missing_channels(monkeypatch, tmp_path):
     monkeypatch.setenv("MAVERICK_HOME", str(tmp_path / "home"))
     monkeypatch.setenv("MAVERICK_TENANT", "freeco")

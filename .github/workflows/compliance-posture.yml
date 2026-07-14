@@ -65,8 +65,8 @@ jobs:
     # not retarget it to production or privileged self-hosted runners.
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v7
-      - uses: actions/setup-python@v6
+      - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7
+      - uses: actions/setup-python@ece7cb06caefa5fff74198d8649806c4678c61a1 # v6
         with:
           python-version: "3.12"
       - name: Install maverick-core (with audit-signing crypto)
@@ -105,7 +105,7 @@ jobs:
           echo "Enforcing the gate..."
           maverick soc2 > /dev/null
       - name: Upload evidence snapshot
-        uses: actions/upload-artifact@v7
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7
         continue-on-error: true
         with:
           name: soc2-evidence

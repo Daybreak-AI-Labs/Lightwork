@@ -447,8 +447,9 @@ so OIDC does not 401 inbound webhooks.
 
 **Gotchas**
 
-- **Needs the optional extra.** OIDC verification requires PyJWT:
-  `pip install 'maverick-agent[oidc]'` (equivalently `pip install
+- **Needs the optional extra.** OIDC verification requires PyJWT. From the
+  reviewed Lightwork checkout, run
+  `python -m pip install -e './packages/maverick-core[oidc]'` (equivalently `pip install
   'pyjwt[crypto]>=2.13.0'`). The kernel imports fine without it; you'll only hit
   the error when a token is actually verified.
 - **Asymmetric-only by design.** `algorithms` is filtered to asymmetric
@@ -473,12 +474,19 @@ revocation store is treated as "revoked", never silently un-revoked.
 
 Some IdPs (notably Entra/Azure AD) issue a **pairwise/per-app** OIDC `sub` that
 appears in no SCIM attribute. To still end such a user's live session on
-deprovision, a **subject directory** (`oidc-subjects.json`, 0600) records, at
-each login, the `sub` against the user's stable IdP identifiers (`email` /
-`preferred_username` / `oid` / `upn`). SCIM deprovision looks the `sub` up by the
-record's identifiers and revokes it. Privacy: the lookup keys are
-`sha256(identifier)` (raw emails never hit disk); the stored value is the opaque
-`sub`. The store is bounded (LRU) and purged on a hard SCIM delete.
+deprovision, a **subject directory** (`oidc-subjects.json`, private/DACL-aware)
+records, at each login, the `sub` against stable IdP identifiers. SCIM
+deprovision resolves and revokes the pairwise subject before acknowledging the
+lifecycle change. Privacy: lookup keys are `sha256(identifier)`; raw
+emails/usernames do not enter the binding index.
+
+A hard SCIM DELETE also writes a strict, bounded, atomic **retirement ledger**
+before deleting the tenant or visible SCIM record. It stores hashed stable
+identifiers and known subjects so a still-active IdP cannot restore access by
+minting a fresh token after deletion. A new pairwise `sub` inherits retirement
+when it presents the retired immutable IdP identifier. Only explicit successful
+reprovisioning clears that retirement, and only after the tenant and active SCIM
+record are durable. Corrupt binding/retirement state fails closed.
 
 ---
 
@@ -668,8 +676,9 @@ want_assertions_signed = true
 session_secret = "<32+ random bytes>"   # SAML reuses the browser-login session secret
 ```
 
-**Needs the extra:** `pip install 'maverick-agent[saml]'` (pysaml2). The routes
-503 with a hint if it's absent.
+**Needs the extra:** from the reviewed Lightwork checkout, run
+`python -m pip install -e './packages/maverick-core[saml]'` (pysaml2). The
+routes 503 with a hint if it's absent.
 
 **Wizard toggle:** yes — "Enable SAML 2.0 SSO?" (writes the `[auth.saml]` template).
 
@@ -744,7 +753,8 @@ export MAVERICK_ENCRYPT_AT_REST=0     # 1 to force-enable; 0 to force-disable
   --to <dir>`; if it's lost, the data is unrecoverable.
 - **Requires `cryptography`.** With at-rest enabled but the package missing,
   `seal()` **fails closed** (raises `EncryptionUnavailable`) rather than writing
-  plaintext: `pip install 'maverick-agent[audit-signing]'`.
+  plaintext. From the reviewed checkout, run
+  `python -m pip install -e './packages/maverick-core[audit-signing]'`.
 - **Transparent migration.** Sealed blobs carry a magic header; data written
   *before* you enabled encryption is read back transparently (no flag-day
   re-encrypt). New writes are sealed.
@@ -818,7 +828,8 @@ export MAVERICK_AUDIT_SIGN=0     # 1 to force-enable; 0 to force-disable
 
 - Precedence: explicit code arg > `MAVERICK_AUDIT_SIGN` env > `[audit] sign` in
   config > the secure-by-default posture (on).
-- Requires `cryptography` (`pip install 'maverick-agent[audit-signing]'`).
+- Requires `cryptography` (from the reviewed checkout, run
+  `python -m pip install -e './packages/maverick-core[audit-signing]'`).
 - The signing key lives under `~/.maverick/keys/`; `maverick soc2`'s
   `audit_signing_key` probe reports whether a key is present.
 
@@ -1056,7 +1067,8 @@ sign = true
 [encryption]
 at_rest = true
 
-# SSO for `maverick serve` / dashboard. Requires:  pip install 'maverick-agent[oidc]'
+# SSO for `maverick serve` / dashboard. From the reviewed checkout, install:
+# python -m pip install -e './packages/maverick-core[oidc]'
 [auth.oidc]
 enabled = true
 issuer = "https://login.example.com/"

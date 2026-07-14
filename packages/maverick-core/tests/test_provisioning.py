@@ -2,10 +2,9 @@
 opt-out for immutable/locked-down images."""
 from __future__ import annotations
 
-import stat
-
 import pytest
 from maverick import grpc_stubs
+from maverick.file_lock import private_path_is_restricted
 
 # ---- runtime-protoc opt-out -----------------------------------------------
 
@@ -51,18 +50,20 @@ def test_init_from_file_installs(monkeypatch, tmp_path):
     r = CliRunner().invoke(main, ["init", "--from-file", str(src)])
     assert r.exit_code == 0 and "installed config" in r.output
     assert dst.read_text() == src.read_text()
-    assert stat.S_IMODE(dst.stat().st_mode) == 0o600
+    assert private_path_is_restricted(dst, 0o600)
+    assert private_path_is_restricted(dst.parent, 0o700)
 
 
 def test_init_from_file_is_0600_at_creation_not_world_readable(monkeypatch, tmp_path):
-    """Regression: the config must be created mode-0600 at creation time.
+    """The config temp must have private custody before any key byte is written.
 
     The old shutil.copyfile path created the file world-readable (0644 & ~umask)
     and only chmod'd it AFTER the whole body -- which can carry inline provider
-    api_keys -- was on disk, a window a co-located user could read. The file must
-    be created via os.open with mode 0o600, and ~/.maverick tightened to 0700."""
+    api_keys -- was on disk. POSIX mode-at-creation alone does not establish a
+    protected Windows DACL, so verify the shared secure creator directly."""
     import os
 
+    import maverick.file_lock as file_lock
     from click.testing import CliRunner
     from maverick.cli import main
 
@@ -74,18 +75,27 @@ def test_init_from_file_is_0600_at_creation_not_world_readable(monkeypatch, tmp_
     dst = tmp_path / "installed" / "config.toml"
     monkeypatch.setenv("MAVERICK_CONFIG", str(dst))
 
-    seen: dict = {}
-    real_open = os.open
+    seen: list[tuple[int, bool, int]] = []
+    real_create = file_lock._secure_mkstemp
 
-    def spy_open(path, flags, mode=0o777):
-        if str(path) == str(dst):
-            seen["mode"] = mode
-            seen["creat"] = bool(flags & os.O_CREAT)
-        return real_open(path, flags, mode)
+    def spy_create(directory, *, prefix, suffix, mode):
+        fd, temp_path = real_create(
+            directory,
+            prefix=prefix,
+            suffix=suffix,
+            mode=mode,
+        )
+        if directory == dst.parent and prefix.startswith(".config.toml-"):
+            seen.append(
+                (
+                    mode,
+                    file_lock.private_path_is_restricted(temp_path, mode),
+                    os.stat(temp_path).st_size,
+                )
+            )
+        return fd, temp_path
 
-    monkeypatch.setattr(os, "open", spy_open)
-    # A permissive umask would expose a copyfile/write_text path as 0644/0666;
-    # mode-at-creation 0o600 is unaffected by it.
+    monkeypatch.setattr(file_lock, "_secure_mkstemp", spy_create)
     old_umask = os.umask(0)
     try:
         r = CliRunner().invoke(main, ["init", "--from-file", str(src)])
@@ -93,13 +103,10 @@ def test_init_from_file_is_0600_at_creation_not_world_readable(monkeypatch, tmp_
         os.umask(old_umask)
 
     assert r.exit_code == 0
-    # Created via os.open(..., O_CREAT, 0o600) -- not copyfile.
-    assert seen.get("creat") is True
-    assert seen.get("mode") == 0o600
-    # Final perms 0600, content byte-preserved, parent dir tightened to 0700.
-    assert stat.S_IMODE(dst.stat().st_mode) == 0o600
+    assert seen == [(0o600, True, 0)]
+    assert private_path_is_restricted(dst, 0o600)
     assert dst.read_text() == src.read_text()
-    assert stat.S_IMODE(dst.parent.stat().st_mode) == 0o700
+    assert private_path_is_restricted(dst.parent, 0o700)
 
 
 def test_init_from_file_missing(monkeypatch, tmp_path):

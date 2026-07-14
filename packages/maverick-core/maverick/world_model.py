@@ -1582,6 +1582,34 @@ class WorldModel:
                 (status, time.time(), _enc_field(result), goal_id),
             )
 
+    def claim_goal_for_run(
+        self, goal_id: int, *, expected_owner: str | None = None,
+    ) -> bool:
+        """Atomically claim one pending goal for execution.
+
+        Remote dispatch is an at-least-once boundary: a worker RPC can be
+        repeated after a timeout or a lost response.  The status transition is
+        therefore the execution claim, not a preceding read.  Exactly one
+        contender can move ``pending`` to ``active``; later calls observe the
+        already-active or terminal row and must not execute it again.
+
+        ``expected_owner`` is included in the same compare-and-swap so the
+        authorization check cannot be separated from the state change by a
+        race.  ``None`` is the administrative scope and intentionally omits the
+        owner predicate.
+        """
+        sql = (
+            "UPDATE goals SET status = 'active', updated_at = ? "
+            "WHERE id = ? AND status = 'pending'"
+        )
+        params: tuple[Any, ...] = (time.time(), int(goal_id))
+        if expected_owner is not None:
+            sql += " AND owner = ?"
+            params += (str(expected_owner),)
+        with self._writing() as conn:
+            cur = conn.execute(sql, params)
+            return cur.rowcount == 1
+
     def get_goal(self, goal_id: int) -> Goal | None:
         row = self._read_one("SELECT * FROM goals WHERE id = ?", (goal_id,))
         return _goal_from_row(row) if row else None

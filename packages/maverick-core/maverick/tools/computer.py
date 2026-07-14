@@ -87,7 +87,7 @@ def _ensure_pyautogui():
         import pyautogui  # noqa
     except ImportError as e:
         raise ImportError(
-            "pyautogui not installed. Run: pip install 'maverick-agent[computer-use]'"
+            "pyautogui not installed. Run: python -m pip install -e './packages/maverick-core[computer-use]'"
         ) from e
     return __import__("pyautogui")
 
@@ -99,7 +99,7 @@ def _screenshot_png_b64() -> str:
         from PIL import Image
     except ImportError as e:
         raise ImportError(
-            "mss + pillow not installed. Run: pip install 'maverick-agent[computer-use]'"
+            "mss + pillow not installed. Run: python -m pip install -e './packages/maverick-core[computer-use]'"
         ) from e
     with mss.mss() as sct:
         monitor = sct.monitors[1] if len(sct.monitors) > 1 else sct.monitors[0]

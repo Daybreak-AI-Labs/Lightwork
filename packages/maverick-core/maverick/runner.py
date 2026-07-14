@@ -20,6 +20,7 @@ Usage::
 """
 from __future__ import annotations
 
+import asyncio
 import logging
 import threading
 import time
@@ -104,6 +105,7 @@ def run_goal_in_thread(
     *,
     channel: str | None = None,
     user_id: str | None = None,
+    conversation_id: int | None = None,
     capability: Any | None = None,
     concurrency_principal: str | None = None,
     allowed_suites: frozenset[str] | None = None,
@@ -180,7 +182,8 @@ def run_goal_in_thread(
             run_goal_sync(
                 llm, world, budget,
                 goal_id, sandbox=sandbox, max_depth=max_depth,
-                channel=channel, user_id=user_id, capability=capability,
+                conversation_id=conversation_id, channel=channel,
+                user_id=user_id, capability=capability,
                 allowed_suites=allowed_suites, resume=True,
             )
         except Exception:
@@ -229,11 +232,10 @@ class Dispatcher(Protocol):
     """Where a goal runs. The seam between "execute in-process" (today) and a
     distributed task queue (arq / Celery / Temporal) later.
 
-    ``submit`` runs a goal to completion and returns its terminal status string
-    (or ``None`` if it could not start), the same contract as
-    :func:`run_goal_in_thread`, so swapping the dispatcher never changes a
-    caller's interface. A queue-backed implementation would enqueue the goal and
-    wait on (or hand back) the result without callers noticing.
+    ``submit`` returns a terminal status for a waiting dispatcher, ``"queued"``
+    for an accepted asynchronous enqueue, or ``None`` when it could not start.
+    This keeps acceptance distinct from failure while preserving the terminal
+    status contract of :func:`run_goal_in_thread`.
     """
 
     def submit(
@@ -245,6 +247,7 @@ class Dispatcher(Protocol):
         max_depth: int = DEFAULT_MAX_DEPTH,
         channel: str | None = None,
         user_id: str | None = None,
+        conversation_id: int | None = None,
         capability: Any | None = None,
         concurrency_principal: str | None = None,
         allowed_suites: frozenset[str] | None = None,
@@ -265,6 +268,7 @@ class LocalThreadDispatcher:
         max_depth: int = DEFAULT_MAX_DEPTH,
         channel: str | None = None,
         user_id: str | None = None,
+        conversation_id: int | None = None,
         capability: Any | None = None,
         concurrency_principal: str | None = None,
         allowed_suites: frozenset[str] | None = None,
@@ -272,7 +276,8 @@ class LocalThreadDispatcher:
         return run_goal_in_thread(
             goal_id=goal_id, max_dollars=max_dollars,
             max_wall_seconds=max_wall_seconds, max_depth=max_depth,
-            channel=channel, user_id=user_id, capability=capability,
+            channel=channel, user_id=user_id, conversation_id=conversation_id,
+            capability=capability,
             concurrency_principal=concurrency_principal,
             allowed_suites=allowed_suites,
         )
@@ -302,6 +307,7 @@ def run_goal_in_background(
     *,
     channel: str | None = None,
     user_id: str | None = None,
+    conversation_id: int | None = None,
     capability: Any | None = None,
     concurrency_principal: str | None = None,
     allowed_suites: frozenset[str] | None = None,
@@ -309,11 +315,87 @@ def run_goal_in_background(
     """Dispatch a goal through the active :class:`Dispatcher`. Defaults to
     in-process thread execution; ``set_dispatcher`` swaps in a task queue
     without breaking callers (the contract is unchanged: returns the terminal
-    status, or ``None`` if it could not start)."""
+    status, ``"queued"`` after asynchronous acceptance, or ``None`` if it could
+    not start)."""
     return get_dispatcher().submit(
         goal_id, max_dollars=max_dollars,
         max_wall_seconds=max_wall_seconds, max_depth=max_depth,
-        channel=channel, user_id=user_id, capability=capability,
+        channel=channel, user_id=user_id, conversation_id=conversation_id,
+        capability=capability,
         concurrency_principal=concurrency_principal,
         allowed_suites=allowed_suites,
     )
+
+
+async def run_goal_in_background_async(
+    goal_id: int,
+    max_dollars: float | None = None,
+    max_wall_seconds: float | None = None,
+    max_depth: int = DEFAULT_MAX_DEPTH,
+    *,
+    channel: str | None = None,
+    user_id: str | None = None,
+    conversation_id: int | None = None,
+    capability: Any | None = None,
+    concurrency_principal: str | None = None,
+    allowed_suites: frozenset[str] | None = None,
+) -> str | None:
+    """Dispatch without blocking an async channel or HTTP event loop.
+
+    Dispatcher submission is deliberately synchronous: local execution waits
+    for the terminal status, queue submission may perform broker I/O, and gRPC
+    waits for the worker RPC.  ``asyncio.to_thread`` preserves contextvars
+    (including the active tenant) while keeping all three paths off the caller's
+    event loop.
+    """
+    try:
+        status = await asyncio.to_thread(
+            run_goal_in_background,
+            goal_id,
+            max_dollars,
+            max_wall_seconds,
+            max_depth,
+            channel=channel,
+            user_id=user_id,
+            conversation_id=conversation_id,
+            capability=capability,
+            concurrency_principal=concurrency_principal,
+            allowed_suites=allowed_suites,
+        )
+    except Exception:
+        # Adapters historically rely on the background runner's no-raise
+        # contract. A rejecting queue or broken broker must fail closed, but it
+        # must not strand the newly-created goal as "pending" or trigger an
+        # in-process fallback. Keep the external error generic and the details
+        # in operator logs.
+        log.exception("goal #%s dispatcher submission failed", goal_id)
+        await asyncio.to_thread(_mark_dispatch_failure, goal_id, "dispatch failed")
+        return "error"
+    if status is None:
+        # ``None`` means the dispatcher could not start the goal. Queue-backed
+        # acceptance has the explicit ``queued`` status, so this is no longer
+        # ambiguous with a successful asynchronous enqueue.
+        await asyncio.to_thread(_mark_dispatch_failure, goal_id, "dispatch unavailable")
+    return status
+
+
+def _mark_dispatch_failure(goal_id: int, result: str) -> None:
+    """Best-effort terminalization after a dispatcher cannot start a goal."""
+    world = None
+    try:
+        from .world_model import close_world_if_owned, open_world
+
+        world = open_world()
+        goal = world.get_goal(goal_id)
+        # Do not clobber a worker that started despite an ambiguous transport
+        # failure, or any goal that reached a terminal state in the meantime.
+        if goal is not None and goal.status == "pending":
+            world.set_goal_status(goal_id, "blocked", result=result)
+    except Exception:  # pragma: no cover - status repair must never mask dispatch
+        log.exception("failed to terminalize undispatched goal #%s", goal_id)
+    finally:
+        if world is not None:
+            try:
+                close_world_if_owned(world)
+            except Exception:  # pragma: no cover - best-effort cleanup
+                log.debug("dispatch failure world close failed", exc_info=True)

@@ -1,9 +1,4 @@
-"""REST API endpoint tests.
-
-v0.1.6: the BackgroundTask runner is now `maverick.runner.run_goal_in_thread`
-with signature ``(goal_id, max_dollars, max_wall_seconds, max_depth)``,
-so the create_returns_pending monkeypatch takes 4 positional args (was 1).
-"""
+"""REST API endpoint tests."""
 from __future__ import annotations
 
 import pytest
@@ -39,8 +34,10 @@ class TestGoals:
         # The new signature is (goal_id, max_dollars, max_wall_seconds, max_depth).
         import maverick.runner as runner_mod
         called = []
-        def fake_run(goal_id, max_dollars=2.0, max_wall_seconds=1800.0, max_depth=3,
-                     **kwargs):
+
+        def fake_run(
+            goal_id, max_dollars=2.0, max_wall_seconds=1800.0, max_depth=3, **_kwargs,
+        ):
             # The endpoint also threads channel/user_id/capability/
             # concurrency_principal/allowed_suites; this double only asserts
             # the budget knobs, so swallow the rest instead of going stale on
@@ -59,6 +56,66 @@ class TestGoals:
         # Verify payload's max_dollars propagated (the fix from the council
         # security review).
         assert called[0][1] == 1.0
+
+    def test_create_uses_installed_dispatcher_not_local_execution(self, monkeypatch):
+        monkeypatch.setenv("ANTHROPIC_API_KEY", "sk-ant-fake")
+        import maverick.runner as runner_mod
+
+        submitted = []
+
+        class FakeDispatcher:
+            def submit(self, goal_id, **kwargs):
+                submitted.append((goal_id, kwargs))
+                return "queued"
+
+        monkeypatch.setattr(runner_mod, "_dispatcher", FakeDispatcher())
+        monkeypatch.setattr(
+            runner_mod,
+            "run_goal_in_thread",
+            lambda *a, **k: pytest.fail("dashboard bypassed installed dispatcher"),
+        )
+
+        resp = client.post("/api/v1/goals", json={"title": "dispatch me"})
+
+        assert resp.status_code == 201
+        assert submitted == [
+            (
+                resp.json()["id"],
+                {
+                    "max_dollars": 2.0,
+                    "max_wall_seconds": 1800.0,
+                    "max_depth": 3,
+                    "channel": None,
+                    "user_id": None,
+                    "conversation_id": None,
+                    "capability": None,
+                    "concurrency_principal": None,
+                    "allowed_suites": None,
+                },
+            )
+        ]
+
+    def test_create_preserves_explicit_empty_suite_snapshot(self, monkeypatch):
+        """An explicit empty grant must not widen to unrestricted in dispatch."""
+        monkeypatch.setenv("ANTHROPIC_API_KEY", "sk-ant-fake")
+        import maverick.runner as runner_mod
+        from maverick_dashboard import api as api_mod
+
+        submitted = []
+
+        class FakeDispatcher:
+            def submit(self, goal_id, **kwargs):
+                submitted.append((goal_id, kwargs))
+                return "queued"
+
+        monkeypatch.setattr(api_mod, "caller_suites", lambda _request: frozenset())
+        monkeypatch.setattr(runner_mod, "_dispatcher", FakeDispatcher())
+
+        resp = client.post("/api/v1/goals", json={"title": "no-suite goal"})
+
+        assert resp.status_code == 201
+        assert submitted[0][1]["allowed_suites"] == frozenset()
+        assert submitted[0][1]["allowed_suites"] is not None
 
 
     def test_idempotency_key_dedups_create(self, monkeypatch):

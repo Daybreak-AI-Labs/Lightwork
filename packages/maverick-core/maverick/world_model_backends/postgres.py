@@ -752,7 +752,7 @@ class PostgresWorldModel:
             import psycopg  # noqa: F401
         except ImportError as e:
             raise ImportError(
-                "psycopg not installed. Run: pip install 'maverick-agent[postgres]'"
+                "psycopg not installed. Run: python -m pip install -e './packages/maverick-core[postgres]'"
             ) from e
         import psycopg
         self._dsn = dsn or os.environ.get("MAVERICK_PG_DSN") or ""
@@ -775,7 +775,7 @@ class PostgresWorldModel:
             except ImportError as e:
                 raise ImportError(
                     "[world_model] pool_size set but psycopg_pool is not "
-                    "installed. Run: pip install 'maverick-agent[postgres]'"
+                    "installed. Run: python -m pip install -e './packages/maverick-core[postgres]'"
                 ) from e
             self._pool = ConnectionPool(
                 self._dsn, min_size=1, max_size=size, open=True,
@@ -1047,6 +1047,32 @@ class PostgresWorldModel:
             params += fparams
         with self._tx() as cur:
             cur.execute(sql, tuple(params))
+
+    def claim_goal_for_run(
+        self, goal_id: int, *, expected_owner: str | None = None,
+    ) -> bool:
+        """Atomically claim a pending goal at the remote execution boundary.
+
+        The Postgres backend currently isolates goals by tenant rather than the
+        SQLite ``owner`` column.  A concrete owner scope cannot be proven here,
+        so fail closed; shared-operator calls still receive the tenant-scoped
+        compare-and-swap used by cross-host dispatch.
+        """
+        if expected_owner is not None:
+            return False
+        now = time.time()
+        frag, fparams = _tenant_scope()
+        sql = (
+            "UPDATE goals SET status='active', updated_at=%s "
+            "WHERE id=%s AND status='pending'"
+        )
+        params: list = [now, int(goal_id)]
+        if frag:
+            sql += " AND " + frag
+            params += fparams
+        with self._tx() as cur:
+            cur.execute(sql, tuple(params))
+            return cur.rowcount == 1
 
     # --- Backend parity (SQLite v13 -> v20 catch-up): methods on existing
     #     tables that the SQLite WorldModel exposes but the PG backend lacked.

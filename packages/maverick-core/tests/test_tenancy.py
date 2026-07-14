@@ -241,14 +241,19 @@ def test_server_tenant_scope_uses_authenticated_principal(monkeypatch):
         def set_goal_status(self, *args, **kwargs):
             return None
 
+        def get_goal(self, goal_id):
+            return type("Goal", (), {"result": "ok"})()
+
     captured = {}
 
-    async def _fake_run_goal(*args, **kwargs):
+    async def _fake_dispatch(*args, **kwargs):
         captured["kwargs"] = kwargs
         captured["tenant"] = current_tenant()
-        return "ok"
+        return "done"
 
-    monkeypatch.setattr(server_mod, "run_goal", _fake_run_goal)
+    monkeypatch.setattr(
+        "maverick.runner.run_goal_in_background_async", _fake_dispatch,
+    )
     world = _World()
     # With per-user tenancy on, _handle_message routes through world_for_tenant
     # (a real per-tenant world.db); point it at the stub so we can assert the

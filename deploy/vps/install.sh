@@ -1,11 +1,11 @@
 #!/usr/bin/env bash
 # Lightwork VPS bootstrap script.
 #
-# Usage (defaults to the latest published release for a reproducible install):
-#   curl -sSL https://raw.githubusercontent.com/Day-AI-Labs/Lightwork/main/deploy/vps/install.sh | sudo bash
-#
-# Or pin to a specific tag / full commit SHA:
-#   curl -sSL ...install.sh | sudo MAVERICK_VERSION=v0.1.0 bash
+# Usage (the script URL and checkout must use the same reviewed commit):
+#   LIGHTWORK_REF=<lowercase-full-40-character-commit-sha>
+#   curl -fsSLo /tmp/lightwork-install.sh \
+#     "https://raw.githubusercontent.com/Day-AI-Labs/Lightwork/${LIGHTWORK_REF}/deploy/vps/install.sh"
+#   sudo MAVERICK_REF="$LIGHTWORK_REF" bash /tmp/lightwork-install.sh
 #
 # What it does:
 #   1. Installs Python 3.12, pipx, git
@@ -17,18 +17,15 @@
 
 set -euo pipefail
 
-# Default to the latest *published release* for a reproducible, reviewed install
-# rather than the mutable `main` branch (supply-chain hardening). An explicit
-# MAVERICK_VERSION (tag or full SHA) always wins; if no release can be resolved
-# (offline, or none published yet) we fall back to `main` with a loud warning.
-resolve_default_version() {
-  local tag
-  tag="$(curl -fsSL https://api.github.com/repos/Day-AI-Labs/Lightwork/releases/latest 2>/dev/null \
-         | grep -m1 '"tag_name"' \
-         | sed -E 's/.*"tag_name"[[:space:]]*:[[:space:]]*"([^"]+)".*/\1/' || true)"
-  if [[ -n "${tag}" ]]; then printf '%s' "${tag}"; else printf 'main'; fi
+MAVERICK_REF="${MAVERICK_REF:-}"
+STAGED_SOURCE=""
+
+cleanup_staged_source() {
+  if [[ -n "${STAGED_SOURCE:-}" && -d "$STAGED_SOURCE" ]]; then
+    rm -rf -- "$STAGED_SOURCE"
+  fi
 }
-MAVERICK_VERSION="${MAVERICK_VERSION:-$(resolve_default_version)}"
+trap cleanup_staged_source EXIT
 
 # Everything user-facing (the pipx venv, the wizard, the systemd service)
 # runs as one non-root account with one consistent HOME, so the `maverick`
@@ -45,6 +42,13 @@ TARGET_HOME="$(getent passwd "$TARGET_USER" | cut -d: -f6 || true)"
 TARGET_HOME="${TARGET_HOME:-/var/lib/${TARGET_USER}}"
 
 log() { echo "==> $*" >&2; }
+
+validate_source_pin() {
+  [[ "$MAVERICK_REF" =~ ^[0-9a-f]{40}$ ]] || {
+    echo "MAVERICK_REF is required and must be a lowercase, full 40-character commit SHA; mutable tags/branches are refused." >&2
+    exit 1
+  }
+}
 
 run_as_user() {
   # Run a command as TARGET_USER with their HOME set.
@@ -87,37 +91,33 @@ install_system_deps() {
 }
 
 install_maverick() {
-  # Supply-chain warning: installing from the mutable `main` branch (the default
-  # when MAVERICK_VERSION is unset) means a `curl | sudo bash` bootstrap runs
-  # whatever main points at right now -- not a reviewed, immutable revision. For
-  # a production VPS, pin a released tag or a full commit SHA:
-  #   curl -sSL ...install.sh | sudo MAVERICK_VERSION=v0.1.6 bash
-  if [[ "${MAVERICK_VERSION}" == "main" ]]; then
-    log "WARNING: installing from the mutable 'main' branch. For a reproducible,"
-    log "         reviewable install, set MAVERICK_VERSION to a release tag or a"
-    log "         full commit SHA (see the usage header)."
-  fi
-  log "Installing maverick @ ${MAVERICK_VERSION} for user ${TARGET_USER}..."
-  if [[ ! -d /opt/maverick ]]; then
-    # A shallow --branch clone is the fast path for a tag/branch. It can't
-    # name a commit SHA, so on failure fall back to a full clone + checkout of
-    # the exact ref -- which still FAILS CLOSED: an invalid/typo'd ref makes
-    # `git checkout` abort under `set -e` rather than silently installing the
-    # mutable default branch (the old `|| git clone <repo>` did exactly that,
-    # defeating the supply-chain pinning this script documents).
-    git clone --branch "${MAVERICK_VERSION}" --depth 1 \
-        https://github.com/Day-AI-Labs/Lightwork /opt/maverick 2>/dev/null \
-      || {
-        git clone https://github.com/Day-AI-Labs/Lightwork /opt/maverick
-        git -C /opt/maverick checkout "${MAVERICK_VERSION}"
-      }
-  else
-    git -C /opt/maverick fetch --depth 1 origin "${MAVERICK_VERSION}" 2>/dev/null \
-      || git -C /opt/maverick fetch origin
-    # Hard-fail (no `|| git pull` fallback) so a bad ref aborts instead of
-    # silently advancing the checkout to the tracking branch's tip.
-    git -C /opt/maverick checkout "${MAVERICK_VERSION}"
-  fi
+  log "Installing maverick @ ${MAVERICK_REF} for user ${TARGET_USER}..."
+  # Build a fresh source tree and verify it before replacing the managed
+  # checkout. Reusing /opt/maverick would let dirty tracked or untracked files
+  # survive an otherwise-correct `git checkout <sha>` and enter the pipx build.
+  install -d -m 0755 /opt
+  STAGED_SOURCE="$(mktemp -d /opt/maverick.stage.XXXXXX)"
+  git clone --no-checkout --filter=blob:none \
+    https://github.com/Day-AI-Labs/Lightwork "$STAGED_SOURCE"
+  git -C "$STAGED_SOURCE" fetch --depth 1 origin "$MAVERICK_REF"
+  git -C "$STAGED_SOURCE" -c advice.detachedHead=false checkout --detach FETCH_HEAD
+  actual_ref="$(git -C "$STAGED_SOURCE" rev-parse HEAD)"
+  [[ "$actual_ref" == "$MAVERICK_REF" ]] || {
+    echo "Checked-out source is at '$actual_ref', not required ref '$MAVERICK_REF'." >&2
+    exit 1
+  }
+  [[ -z "$(git -C "$STAGED_SOURCE" status --porcelain --untracked-files=all)" ]] || {
+    echo "Fresh Lightwork checkout is unexpectedly dirty; refusing installation." >&2
+    exit 1
+  }
+  [[ -f "$STAGED_SOURCE/packages/maverick-core/pyproject.toml" ]] || {
+    echo "Pinned checkout is not a complete Lightwork source tree." >&2
+    exit 1
+  }
+  chmod 0755 "$STAGED_SOURCE"
+  rm -rf -- /opt/maverick
+  mv -- "$STAGED_SOURCE" /opt/maverick
+  STAGED_SOURCE=""
   # pipx names the venv after the distribution Name, which is
   # `maverick-agent` (packages/maverick-core/pyproject.toml), NOT the
   # `maverick` console-script. Every inject must target `maverick-agent`
@@ -152,6 +152,9 @@ install_service() {
 }
 
 main() {
+  # Validate the immutable source decision before apt, user, or filesystem
+  # changes. A missing pin must never degrade to a mutable release/tag/branch.
+  validate_source_pin
   require_root
   ensure_target_user
   install_system_deps

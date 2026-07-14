@@ -1,6 +1,8 @@
 """gRPC goal service (transport-agnostic; no grpc required)."""
 from __future__ import annotations
 
+import threading
+from concurrent.futures import ThreadPoolExecutor
 from dataclasses import dataclass
 
 import pytest
@@ -46,6 +48,15 @@ class _FakeWorld:
         if g:
             g.status = status
             g.result = result
+
+    def claim_goal_for_run(self, goal_id, *, expected_owner=None):
+        g = self.s["goals"].get(goal_id)
+        if g is None or g.status != "pending":
+            return False
+        if expected_owner is not None and g.owner != expected_owner:
+            return False
+        g.status = "active"
+        return True
 
     def goal_events(self, goal_id, since_id=0, limit=200):
         return [e for e in self.s["events"] if e.goal_id == goal_id and e.id > since_id]
@@ -189,3 +200,113 @@ def test_status_reports_goal():
     st = svc.status(5)
     assert st is not None and st.status == "active"
     assert svc.status(404) is None
+
+
+def test_run_goal_retry_returns_status_without_duplicate_dispatch():
+    shared = _shared()
+    shared["goals"][8] = _Goal(id=8, status="pending")
+    dispatches = []
+
+    def dispatch(gid, **_kwargs):
+        dispatches.append(gid)
+        shared["goals"][gid].status = "done"
+        shared["goals"][gid].result = "finished"
+
+    svc = GoalService(
+        world_factory=lambda: _FakeWorld(shared),
+        dispatch=dispatch,
+        spawn=lambda fn: fn(),
+    )
+
+    first = svc.run_goal(8)
+    retry = svc.run_goal(8)  # models a client retry after losing first response
+
+    assert dispatches == [8]
+    assert first is not None and first.status == "done"
+    assert retry is not None and retry.status == "done"
+    assert retry.result == "finished"
+
+
+@pytest.mark.parametrize("status", ["active", "done", "blocked", "failed", "cancelled"])
+def test_run_goal_rejects_already_active_and_terminal_rows(status):
+    shared = _shared()
+    shared["goals"][9] = _Goal(id=9, status=status, result="prior")
+    svc = _service(shared)
+
+    current = svc.run_goal(9)
+
+    assert current is not None and current.status == status
+    assert "dispatched" not in shared
+
+
+def test_run_goal_claim_is_atomic_across_world_connections(tmp_path):
+    """Two worker RPCs racing on one shared DB execute the goal only once."""
+    from maverick.world_model import WorldModel
+
+    db = tmp_path / "grpc-claim.db"
+    seed = WorldModel(db)
+    goal_id = seed.create_goal("run once")
+    seed.close()
+
+    dispatches = []
+    dispatch_lock = threading.Lock()
+
+    def dispatch(gid, **_kwargs):
+        with dispatch_lock:
+            dispatches.append(gid)
+
+    svc = GoalService(world_factory=lambda: WorldModel(db), dispatch=dispatch)
+    with ThreadPoolExecutor(max_workers=2) as pool:
+        statuses = list(pool.map(lambda _i: svc.run_goal(goal_id), range(2)))
+
+    assert dispatches == [goal_id]
+    assert all(status is not None and status.status == "active" for status in statuses)
+
+
+def test_world_claim_binds_owner_inside_compare_and_swap(tmp_path):
+    from maverick.world_model import WorldModel
+
+    world = WorldModel(tmp_path / "owner-claim.db")
+    try:
+        goal_id = world.create_goal("owned", owner="agent:alice")
+        assert not world.claim_goal_for_run(
+            goal_id, expected_owner="agent:bob",
+        )
+        assert world.get_goal(goal_id).status == "pending"
+        assert world.claim_goal_for_run(
+            goal_id, expected_owner="agent:alice",
+        )
+        assert world.get_goal(goal_id).status == "active"
+        assert not world.claim_goal_for_run(
+            goal_id, expected_owner="agent:alice",
+        )
+    finally:
+        world.close()
+
+
+def test_per_agent_owner_scope_blocks_cross_goal_access():
+    shared = _shared()
+    shared["goals"].update({
+        1: _Goal(id=1, status="done", result="alice result", owner="agent:alice"),
+        2: _Goal(id=2, status="active", result="bob secret", owner="agent:bob"),
+    })
+    shared["events"] = [
+        _Event(1, 2, "worker", "tool", "bob private event", 1.0),
+    ]
+    svc = _service(shared)
+
+    # Missing and wrong-owner ids are deliberately indistinguishable on every
+    # read/control/execute path, and a denied RunGoal is never dispatched.
+    assert svc.status(2, expected_owner="agent:alice") is None
+    assert list(svc.stream_episode(2, expected_owner="agent:alice")) == []
+    assert svc.cancel(2, expected_owner="agent:alice") is False
+    assert shared["goals"][2].status == "active"
+    assert svc.run_goal(2, expected_owner="agent:alice") is None
+    assert "dispatched" not in shared
+
+    # Alice can still read and run her own goal.  The shared operator scope
+    # (None) retains administrative access to Bob's goal for compatibility.
+    own = svc.status(1, expected_owner="agent:alice")
+    assert own is not None and own.result == "alice result"
+    assert svc.run_goal(1, expected_owner="agent:alice") is not None
+    assert svc.status(2, expected_owner=None) is not None

@@ -24,6 +24,7 @@ from __future__ import annotations
 import os
 import re
 import subprocess
+import sys
 from dataclasses import dataclass, field
 from pathlib import Path
 
@@ -1160,14 +1161,20 @@ def detect_test_runner(workdir: Path, language: str = "") -> str:
     return "unsupported"
 
 
-def _cmd_for(runner: str, ids: list[str], workdir: Path | None = None):
+def _cmd_for(
+    runner: str,
+    ids: list[str],
+    workdir: Path | None = None,
+    *,
+    sandbox=None,
+):
     """Return shell command string OR list-of-strings (cargo runs per-id).
 
     `workdir` is only consulted for the pytest branch (to scope collection
     roots when every id is a bare function name); other runners ignore it.
     """
     def q(s: str) -> str:
-        return "'" + s.replace("'", "'\"'\"'") + "'"
+        return _shell_quote_arg(s, sandbox)
     if runner == "pytest":
         # Wave 9 fix (council #12): NO `-x` — that aborts on first
         # failure and we can never count PASS_TO_PASS correctly.
@@ -1179,7 +1186,7 @@ def _cmd_for(runner: str, ids: list[str], workdir: Path | None = None):
         # MAVERICK_TEST_PYTHON overrides the interpreter so a per-instance venv
         # interpreter (SWE-bench era isolation) can be injected; the module form
         # keeps the workdir on sys.path either way.
-        interp = os.environ.get("MAVERICK_TEST_PYTHON", "").strip() or "python3"
+        interp = _test_interpreter(sandbox)
         base = f"{q(interp)} -m pytest --tb=short -p no:cacheprovider"
         # SWE-bench id addressing: most families give `path/to/file.py::name`,
         # but sympy gives BARE FUNCTION NAMES (e.g. `test_issue_24062`) with no
@@ -1610,6 +1617,44 @@ def _is_bare_pytest_id(i: str) -> bool:
     return not ("::" in i or "/" in i or i.endswith(".py"))
 
 
+def _uses_local_windows_shell(sandbox) -> bool:
+    return bool(
+        os.name == "nt"
+        and sandbox is not None
+        and getattr(sandbox, "host_visible_fs", False)
+    )
+
+
+def _test_interpreter(sandbox=None) -> str:
+    configured = os.environ.get("MAVERICK_TEST_PYTHON", "").strip()
+    if configured:
+        return configured
+    # A remote/container sandbox is normally POSIX even when the controller is
+    # Windows, so retain its portable `python3`. A host-visible Windows backend
+    # must use the running interpreter: the WindowsApps `python3` alias may be a
+    # different installation without pytest or the target dependencies.
+    return sys.executable if _uses_local_windows_shell(sandbox) else "python3"
+
+
+def _shell_quote_arg(value: str, sandbox=None) -> str:
+    """Quote one shell argument for the backend that will execute it.
+
+    POSIX single-quote escaping remains the remote/container default. Local
+    Windows uses cmd.exe, where single quotes are ordinary characters. Always
+    double-quote there, reject expansion/control characters, and double a
+    trailing backslash run so the CRT cannot consume the closing quote.
+    """
+    value = str(value)
+    if not _uses_local_windows_shell(sandbox):
+        return "'" + value.replace("'", "'\"'\"'") + "'"
+    if any(char in value for char in ('\0', '\r', '\n', '"', '%', '!')):
+        raise ValueError("unsafe character in Windows shell argument")
+    trailing = len(value) - len(value.rstrip("\\"))
+    if trailing:
+        value = value[:-trailing] + ("\\" * (trailing * 2))
+    return f'"{value}"'
+
+
 def _resolve_bare_pytest_ids(
     workdir: Path, sandbox, fail_ids: list[str], pass_ids: list[str],
 ) -> tuple[list[str], list[str]]:
@@ -1635,7 +1680,7 @@ def _resolve_bare_pytest_ids(
         return fail_ids, pass_ids
 
     def shq(s: str) -> str:
-        return "'" + s.replace("'", "'\"'\"'") + "'"
+        return _shell_quote_arg(s, sandbox)
 
     roots = [d for d in ("sympy", "tests", "test", "testing")
              if (workdir / d).is_dir()] or ["."]
@@ -1655,7 +1700,7 @@ def _resolve_bare_pytest_ids(
         return fail_ids, pass_ids
 
     # 2) Collect exact node ids (parametrize-expanded) from the target file(s).
-    interp = os.environ.get("MAVERICK_TEST_PYTHON", "").strip() or "python3"
+    interp = _test_interpreter(sandbox)
     coll_cmd = (shq(interp) + " -m pytest --collect-only -q -p no:cacheprovider "
                 "--continue-on-collection-errors "
                 + " ".join(shq(f) for f in target_files))
@@ -1766,7 +1811,7 @@ def run_failing_tests(
         # failed) tally does NOT reflect the full requested set.
         if not test_ids:
             return 0, 0, "", False
-        cmd = _cmd_for(runner, test_ids, workdir)
+        cmd = _cmd_for(runner, test_ids, workdir, sandbox=sandbox)
         cmds = cmd if isinstance(cmd, list) else [cmd]
         passed = failed = 0
         chunks: list[str] = []

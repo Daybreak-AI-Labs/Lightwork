@@ -190,13 +190,16 @@
 
   <section id="install">
     <h2>Install</h2>
-    <pre id="install-cmd">pipx install 'maverick-agent[installer]'
+    <pre id="install-cmd">git clone https://github.com/Day-AI-Labs/Lightwork &amp;&amp; cd Lightwork
+git checkout --detach &lt;reviewed-full-40-character-commit-sha&gt;
+pip install -e ./packages/maverick-core -e ./apps/installer-cli
 maverick init</pre>
-    <p class="platform-note">PyPI name is <code>maverick-agent</code>. The <code>[installer]</code> extra pulls the wizard into the same pipx environment so <code>maverick init</code> resolves. The CLI is also available as <code>lightwork</code>. Requires Python 3.10+.</p>
+    <p class="platform-note">Install from a reviewed source commit. The Lightwork distribution names are not yet reserved on public PyPI, so public-index installation is disabled until those namespaces are secured. Requires Python 3.10+.</p>
 
     <div class="terminal" aria-label="Terminal session example">
-      <span class="prompt">$</span> pipx install 'maverick-agent[installer]'<br>
-      <span class="out">  installed package maverick-agent 0.1.4 / maverick-installer 0.1.4</span><br>
+      <span class="prompt">$</span> git checkout --detach &lt;reviewed-full-40-character-commit-sha&gt;<br>
+      <span class="out">  HEAD is now at the reviewed Lightwork commit</span><br>
+      <span class="prompt">$</span> pip install -e ./packages/maverick-core -e ./apps/installer-cli<br>
       <span class="prompt">$</span> maverick init<br>
       <span class="out">  How do you want to set this up?</span><br>
       <span class="out">    consumer  Four questions, safe defaults. About a minute.</span><br>

@@ -5,9 +5,6 @@ HOME); listings are injected — no catalog fetch, no network.
 """
 from __future__ import annotations
 
-import os
-import stat
-
 import pytest
 from maverick.catalog import CatalogEntry
 from maverick.federation_envelope import (
@@ -16,6 +13,7 @@ from maverick.federation_envelope import (
     sign_envelope,
     verify_envelope,
 )
+from maverick.file_lock import private_path_is_restricted
 from maverick.marketplace.federation import (
     MAX_LISTINGS_PER_ENVELOPE,
     SCHEMA,
@@ -103,8 +101,7 @@ def test_import_round_trip_namespaces_and_persists(tmp_path):
     assert row["fed_name"] == "summarize-url"
     assert row["imported_at"] == 1_750_000_100.0
     # Atomic 0600 store.
-    mode = stat.S_IMODE(os.stat(store).st_mode)
-    assert mode == 0o600
+    assert private_path_is_restricted(store, 0o600)
     # Namespacing: every imported name carries the validated origin prefix,
     # so it can never equal a plain local listing name.
     assert all(r["name"].startswith("peer-a/") for r in rows)

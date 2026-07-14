@@ -2,10 +2,10 @@
 from __future__ import annotations
 
 import os
-import stat
 
 import pytest
 from maverick import operating_record as orec
+from maverick.file_lock import private_path_is_restricted
 from maverick.world_model import WorldModel
 
 
@@ -96,7 +96,7 @@ def test_capsule_roundtrip_and_tamper_detection(world, tmp_path, monkeypatch):
     assert ok, reason
     # Written atomically (temp + replace): no .tmp sibling left behind.
     assert not out.with_name(out.name + ".tmp").exists()
-    assert stat.S_IMODE(os.stat(out).st_mode) == 0o600
+    assert private_path_is_restricted(out, 0o600)
     # Tamper with one decision: the capsule must fail verification.
     text = out.read_text(encoding="utf-8").replace(
         "Reconcile the quarterly ledger", "Reconcile the doctored ledger")

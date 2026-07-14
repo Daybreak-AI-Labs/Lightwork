@@ -19,7 +19,7 @@ Fail-open, always: a cache must never break the tool path. ANY redis error in
 ``get``/``store`` — connection refused, auth, timeout, even the ``redis``
 package missing — logs at debug and behaves as a miss / no-op; the tool just
 runs. The client import is lazy and comes from the existing ``redis`` extra:
-``pip install 'maverick-agent[redis]'``.
+``python -m pip install -e './packages/maverick-core[redis]'``.
 
 Default OFF and never auto-imported by ``tool_cache`` — the caller wires it::
 
@@ -74,7 +74,7 @@ class RedisToolCache:
 
     def _client(self):
         if self._cli is None:
-            import redis  # lazy -- the `redis` extra: pip install 'maverick-agent[redis]'
+            import redis  # lazy -- the `redis` extra: python -m pip install -e './packages/maverick-core[redis]'
             self._cli = redis.Redis.from_url(self.url, decode_responses=True)
         return self._cli
 

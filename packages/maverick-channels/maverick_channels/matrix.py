@@ -12,7 +12,7 @@ Set up:
 
 Requires::
 
-    pip install 'maverick-channels[matrix]'
+    python -m pip install -e './packages/maverick-channels[matrix]'
 """
 from __future__ import annotations
 
@@ -45,7 +45,8 @@ class MatrixChannel(Channel):
         super().__init__(handler)
         if not _HAVE_MATRIX:
             raise ImportError(
-                "matrix-nio not installed. Run: pip install 'maverick-channels[matrix]'"
+                "matrix-nio not installed. From the reviewed checkout run: "
+                "python -m pip install -e './packages/maverick-channels[matrix]'"
             )
         self.homeserver = homeserver
         self.user_id = user_id

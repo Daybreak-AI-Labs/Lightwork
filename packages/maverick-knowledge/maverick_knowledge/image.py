@@ -64,7 +64,8 @@ def build_ocr_describer(
 ):
     """An OCR describer (pytesseract + Pillow).
 
-    Needs the ``vision`` extra: ``pip install maverick-knowledge[vision]`` (plus
+    Needs the ``vision`` extra from the reviewed checkout:
+    ``python -m pip install -e './packages/maverick-knowledge[vision]'`` (plus
     the system ``tesseract`` binary). Returns ``callable(path) -> str``.
 
     Image files are bounded before decode/OCR, and Tesseract is called with a
@@ -75,7 +76,8 @@ def build_ocr_describer(
         from PIL import Image
     except ModuleNotFoundError as e:
         raise RuntimeError(
-            "OCR needs the 'vision' extra: pip install maverick-knowledge[vision]"
+            "OCR needs the 'vision' extra. From the reviewed checkout run: "
+            "python -m pip install -e './packages/maverick-knowledge[vision]'"
         ) from e
 
     if max_image_pixels <= 0:

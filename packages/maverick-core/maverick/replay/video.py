@@ -164,7 +164,7 @@ def render(goal_id: int, out_path: Path, *, sandbox=None,
         return RenderResult(len(frames), frame_dir, concat_path, command, False,
                             "Pillow not installed; wrote frame manifest + ffmpeg "
                             "command for out-of-band encoding "
-                            "(pip install 'maverick-agent[computer-use]')")
+                            "(python -m pip install -e './packages/maverick-core[computer-use]')")
 
     try:
         from ..tools import sandbox_run

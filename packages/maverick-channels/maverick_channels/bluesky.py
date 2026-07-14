@@ -8,7 +8,8 @@ app password generated at bsky.app -> Settings -> App Passwords; never
 the account password.
 
 Heavy deps deferred to import time; the optional install is
-``pip install 'maverick-channels[bluesky]'`` which pulls in httpx
+``python -m pip install -e './packages/maverick-channels[bluesky]'``
+which pulls in httpx
 (already a transitive of openai-compat providers).
 """
 from __future__ import annotations
@@ -124,7 +125,8 @@ class BlueskyChannel(Channel):
             import httpx
         except ImportError as e:
             raise RuntimeError(
-                "httpx not installed. Run: pip install 'maverick-channels[bluesky]'"
+                "httpx not installed. From the reviewed checkout run: "
+                "python -m pip install -e './packages/maverick-channels[bluesky]'"
             ) from e
         if not self.handle or not self.password:
             raise RuntimeError(

@@ -29,7 +29,7 @@ def analytics_cmd(ctx, sql: str | None, top: int) -> None:
         from ..duckdb_analytics import WorldAnalytics
 
         # duckdb imports lazily inside the constructor, so the actionable
-        # "pip install 'maverick-agent[duckdb]'" ImportError fires HERE --
+        # "python -m pip install -e './packages/maverick-core[duckdb]'" ImportError fires HERE --
         # construction must sit inside the catch or the user gets a raw
         # traceback (round-3 platform-test finding).
         from . import open_world  # lazy: monkeypatch-reachable

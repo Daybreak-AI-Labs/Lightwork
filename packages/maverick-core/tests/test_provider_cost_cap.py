@@ -5,11 +5,11 @@ Offline; config comes from a per-test TOML via MAVERICK_CONFIG.
 from __future__ import annotations
 
 import json
-import stat
 from datetime import datetime, timezone
 
 import pytest
 from maverick import provider_cost_cap as pcc
+from maverick.file_lock import private_path_is_restricted
 
 T0 = datetime(2026, 6, 10, 12, 0, tzinfo=timezone.utc).timestamp()
 DAY = 86400.0
@@ -210,7 +210,8 @@ def test_prune_drops_old_periods(caps_config, ledger):
 
 def test_ledger_is_atomic_0600_json(caps_config, ledger):
     pcc.record("anthropic", 1.0, now=T0, path=ledger)
-    assert stat.S_IMODE(ledger.stat().st_mode) == 0o600
+    assert private_path_is_restricted(ledger, 0o600)
+    assert private_path_is_restricted(ledger.parent, 0o700)
     assert json.loads(ledger.read_text(encoding="utf-8")) == {
         "2026-06-10": {"anthropic": 1.0},
     }

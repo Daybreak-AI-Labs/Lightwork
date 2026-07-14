@@ -306,8 +306,12 @@ def _mcp_trust_ok(agent) -> bool:
     try:
         from maverick import agent_trust
         enforced, registry = agent_trust.load_trust_state()
-    except Exception:  # pragma: no cover - config read never breaks auth
-        return True
+    except Exception as e:  # pragma: no cover - exercised via monkeypatched seam
+        # MCP can invoke tools on behalf of a remote agent. An unreadable trust
+        # policy is therefore an admission failure, not a reason to downgrade
+        # silently to the shared bearer.
+        log.error("MCP trust plane unavailable; refusing inbound caller: %s", e)
+        return False
     if not enforced:
         return True
     agent_id = agent.id if agent is not None else "mcp"

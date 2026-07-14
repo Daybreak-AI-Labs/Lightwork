@@ -59,7 +59,7 @@ def connect(dsn: str, *, autocommit: bool = False):
         import psycopg
     except ImportError as e:  # pragma: no cover - exercised only without the extra
         raise ImportError(
-            "psycopg not installed. Run: pip install 'maverick-agent[postgres]'"
+            "psycopg not installed. Run: python -m pip install -e './packages/maverick-core[postgres]'"
         ) from e
     return psycopg.connect(dsn, autocommit=autocommit)
 

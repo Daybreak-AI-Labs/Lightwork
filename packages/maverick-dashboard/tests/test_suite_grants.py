@@ -44,7 +44,9 @@ def test_store_roundtrip_and_validation(monkeypatch, tmp_path):
 
 
 def test_corrupt_store_is_revalidated_on_read(monkeypatch, tmp_path):
-    # A hand-edited store can't inject unknown suites or non-string principals.
+    # A partially malformed store is one untrusted policy snapshot, not a bag of
+    # independently salvageable grants: dropping only the restrictive rows can
+    # widen those principals to the unrestricted default.
     monkeypatch.setenv("HOME", str(tmp_path))
     from maverick_dashboard import suite_grants
     p = suite_grants.store_path()
@@ -52,7 +54,12 @@ def test_corrupt_store_is_revalidated_on_read(monkeypatch, tmp_path):
     p.write_text(
         '{"user:a": ["finance", "bogus_suite", 7], "": ["legal"], "user:b": "legal"}',
         encoding="utf-8")
-    assert suite_grants.list_grants() == {"user:a": ["finance"]}
+    original = p.read_text(encoding="utf-8")
+    with pytest.raises(suite_grants.SuiteGrantStoreError):
+        suite_grants.list_grants()
+    with pytest.raises(suite_grants.SuiteGrantStoreError):
+        suite_grants.set_suites("user:new", ["finance"])
+    assert p.read_text(encoding="utf-8") == original
 
 
 def test_concurrent_set_suites_does_not_lose_grants(monkeypatch, tmp_path):

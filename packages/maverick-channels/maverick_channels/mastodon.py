@@ -99,7 +99,8 @@ class MastodonChannel(Channel):
             import httpx
         except ImportError as e:
             raise RuntimeError(
-                "httpx not installed. Run: pip install 'maverick-channels[mastodon]'"
+                "httpx not installed. From the reviewed checkout run: "
+                "python -m pip install -e './packages/maverick-channels[mastodon]'"
             ) from e
         params = {"types[]": "mention", "limit": 30}
         if self._last_seen_id:

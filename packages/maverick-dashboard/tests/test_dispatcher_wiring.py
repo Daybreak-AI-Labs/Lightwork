@@ -48,3 +48,32 @@ async def test_both_off_is_noop(monkeypatch):
         "maverick.grpc_dispatcher.install_from_config", lambda: False)
     # No raise, no dispatcher change -> default in-process install.
     await dash_app._install_queue_dispatcher()
+
+
+@pytest.mark.asyncio
+async def test_invalid_selected_queue_cannot_fall_through_to_grpc(monkeypatch):
+    import maverick.queue_dispatcher as qd
+    import maverick.runner as runner
+
+    calls = []
+    original = runner.get_dispatcher()
+
+    def broken_queue():
+        runner.set_dispatcher(qd._FailClosedQueueDispatcher("bad queue"))
+        calls.append("queue")
+        raise qd.QueueSecurityError("bad queue")
+
+    monkeypatch.setattr(
+        "maverick.queue_dispatcher.install_from_config", broken_queue
+    )
+    monkeypatch.setattr(
+        "maverick.grpc_dispatcher.install_from_config",
+        lambda: calls.append("grpc") or True,
+    )
+    try:
+        await dash_app._install_queue_dispatcher()
+        assert calls == ["queue"]
+        with pytest.raises(qd.QueueSecurityError, match="bad queue"):
+            runner.get_dispatcher().submit(1)
+    finally:
+        runner.set_dispatcher(original)

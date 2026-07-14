@@ -90,7 +90,7 @@ def test_no_psutil_sysfs_thermal_fallback(tmp_path, monkeypatch):
     # Fans/battery need psutil: labeled unavailable with the install hint.
     assert "fans: unavailable on this host (psutil not installed" in out
     assert "battery: unavailable on this host (psutil not installed" in out
-    assert "maverick-agent[sensors]" in out
+    assert "packages/maverick-core[sensors]" in out
 
 
 def test_sysfs_fallback_when_psutil_has_no_temps(tmp_path, monkeypatch):
@@ -140,7 +140,7 @@ def test_psutil_platform_without_sensor_apis(monkeypatch):
     assert "temperatures: unavailable on this host" in out
     assert "fans: unavailable on this host" in out
     # psutil IS installed: no misleading install hint.
-    assert "maverick-agent[sensors]" not in out
+    assert "packages/maverick-core[sensors]" not in out
     assert "battery: 55% (on battery)" in out
 
 

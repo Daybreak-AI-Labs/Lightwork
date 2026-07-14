@@ -502,27 +502,54 @@ def _localize_files_for_term(term: str, workdir: Path, use_rg: bool) -> list[str
             "-g", "!**/docs/**", "-g", "!**/.git/**",
             term, str(workdir),
         ]
-    else:
-        cmd = [
-            "grep", "-rlF", "--include=*.py",
-            "--exclude-dir=tests", "--exclude-dir=test",
-            "--exclude-dir=docs", "--exclude-dir=.git",
-            term, str(workdir),
-        ]
-    raw = _localize_run(cmd)
-    return [ln for ln in raw.splitlines() if ln.strip()]
+        raw = _localize_run(cmd)
+        return [ln for ln in raw.splitlines() if ln.strip()]
+
+    # Windows does not provide POSIX grep. Keep the no-ripgrep fallback
+    # dependency-free, bounded, and constrained to regular Python files under
+    # the supplied worktree.
+    found: list[str] = []
+    excluded = {"tests", "test", "docs", ".git"}
+    for path in workdir.rglob("*.py"):
+        try:
+            rel = path.relative_to(workdir)
+            if excluded.intersection(rel.parts) or not path.is_file():
+                continue
+            if path.stat().st_size > 1_000_000:
+                continue
+            if term in path.read_text(encoding="utf-8", errors="replace"):
+                found.append(str(path))
+                if len(found) >= 5:
+                    break
+        except OSError:
+            continue
+    return found
 
 
 def _localize_skeleton(path: Path, workdir: Path, max_lines: int = 40) -> str:
     """A compact `def`/`class` outline of one file (grep -n style), capped."""
-    raw = _localize_run(
-        ["grep", "-nE", r"^[[:space:]]*(async def |def |class )", str(path)],
-    )
-    lines = [ln for ln in raw.splitlines() if ln.strip()][:max_lines]
+    try:
+        root = workdir.resolve(strict=True)
+        candidate = path if path.is_absolute() else root / path
+        candidate = candidate.resolve(strict=True)
+        candidate.relative_to(root)
+        if not candidate.is_file() or candidate.stat().st_size > 1_000_000:
+            return ""
+        pattern = re.compile(r"^\s*(?:async\s+def\s+|def\s+|class\s+)")
+        lines = [
+            f"{line_no}:{line}"
+            for line_no, line in enumerate(
+                candidate.read_text(encoding="utf-8", errors="replace").splitlines(),
+                1,
+            )
+            if pattern.match(line)
+        ][:max_lines]
+    except (OSError, RuntimeError, ValueError):
+        return ""
     if not lines:
         return ""
     try:
-        rel = path.relative_to(workdir).as_posix()
+        rel = candidate.relative_to(root).as_posix()
     except ValueError:
         rel = path.name
     return f"### {rel}\n" + "\n".join(lines) + "\n"

@@ -68,7 +68,7 @@ def _run(args):
 def test_missing_dep_reported(monkeypatch):
     monkeypatch.setitem(sys.modules, "aiortc", None)  # force ImportError
     out = _run({"op": "offer"})
-    assert "ERROR" in out and "maverick-agent[webrtc]" in out
+    assert "ERROR" in out and "packages/maverick-core[webrtc]" in out
 
 
 def test_offer_returns_sdp_and_call_shape(monkeypatch):

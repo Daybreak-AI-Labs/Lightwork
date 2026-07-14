@@ -7,8 +7,12 @@
 La méthode la plus sûre en terminal consiste à installer le paquet publié avec pipx, plutôt qu'à exécuter un script d'amorçage distant :
 
 ```bash
-pipx install 'maverick-agent[installer]'
-maverick init
+git clone https://github.com/Day-AI-Labs/Lightwork
+cd Lightwork
+git checkout --detach <reviewed-full-40-character-commit-sha>
+python -m pip install -e ./packages/maverick-core
+python -m pip install -e ./apps/installer-cli
+lightwork init
 ```
 
 Si vous avez besoin de l'amorçage bureau sans prérequis, téléchargez `deploy/desktop/install.sh` ou `deploy/desktop/install.ps1` depuis un commit ou une release de confiance, vérifiez le script, puis donnez à `MAVERICK_REF` la valeur d'un SHA de commit complet de 40 caractères. Par défaut, les scripts rejettent les références mutables vers des branches ou des tags.

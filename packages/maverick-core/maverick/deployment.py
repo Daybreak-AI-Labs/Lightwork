@@ -217,8 +217,9 @@ def _verify_shield() -> GuaranteeCheck:
     except Exception:
         return GuaranteeCheck(
             name, False,
-            "maverick-shield not installed; input/tool/output screening is off "
-            "(pip install maverick-shield)",
+            "maverick-shield not installed; input/tool/output screening is off. "
+            "Install Shield from the same reviewed Lightwork checkout; "
+            "public-index lookup is disabled",
         )
     try:
         shield = Shield.from_config(warn_if_missing=False)

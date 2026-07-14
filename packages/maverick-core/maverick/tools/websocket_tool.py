@@ -6,7 +6,7 @@ message, reads one reply, and closes. Scheme is restricted to ``ws``/``wss`` and
 the host runs through the same SSRF guard as ``http_fetch`` (private/loopback
 hosts refused unless ``MAVERICK_FETCH_ALLOW_PRIVATE=1``). The host check runs
 *before* importing the optional ``websockets`` dependency, so the SSRF guard is
-testable without it. Requires ``pip install maverick-agent[websocket]``.
+testable without it. Requires ``python -m pip install -e './packages/maverick-core[websocket]'``.
 """
 from __future__ import annotations
 
@@ -55,7 +55,7 @@ async def _run(args: dict[str, Any]) -> str:
         import websockets
     except ImportError:
         return ("ERROR: websockets not installed. "
-                "Run: pip install 'maverick-agent[websocket]'")
+                "Run: python -m pip install -e './packages/maverick-core[websocket]'")
     message = args.get("message")
     timeout = float(args.get("timeout") or 30)
     want_recv = args.get("recv", True)

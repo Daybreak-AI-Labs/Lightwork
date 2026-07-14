@@ -44,7 +44,7 @@ inputs:
     required: false
     default: ""
   version:
-    description: "maverick-agent version to install from PyPI (e.g. 0.1.6). Default: latest. Pin this for reproducible runs."
+    description: "Optional expected version of the Lightwork source bundled with this action (e.g. 0.1.6). The action fails if it does not match."
     required: false
     default: ""
   python-version:
@@ -72,7 +72,7 @@ runs:
   using: "composite"
   steps:
     - name: Set up Python
-      uses: actions/setup-python@v5
+      uses: actions/setup-python@a26af69be951a213d495a4c3e4e4022e16d87065 # v5
       with:
         python-version: ${{ inputs.python-version }}
 
@@ -81,12 +81,48 @@ runs:
       env:
         IN_VERSION: ${{ inputs.version }}
       run: |
-        set -o pipefail
-        if [ -n "$IN_VERSION" ]; then
-          python -m pip install "maverick-agent==$IN_VERSION"
-        else
-          python -m pip install "maverick-agent"
+        set -euo pipefail
+        action_root="$(cd "$GITHUB_ACTION_PATH/../.." && pwd -P)"
+        core_project="$action_root/packages/maverick-core/pyproject.toml"
+
+        if [ ! -f "$core_project" ]; then
+          echo "::error::The action checkout does not contain the Lightwork source tree."
+          exit 1
         fi
+
+        if [ -n "$IN_VERSION" ]; then
+          actual_version="$(LIGHTWORK_CORE_PROJECT="$core_project" python - <<'PY'
+        import os
+        import pathlib
+        import re
+
+        project = pathlib.Path(os.environ["LIGHTWORK_CORE_PROJECT"])
+        match = re.search(
+            r'(?m)^version\s*=\s*"([^"]+)"\s*$',
+            project.read_text(encoding="utf-8"),
+        )
+        if match is None:
+            raise SystemExit("could not read bundled Lightwork version")
+        print(match.group(1))
+        PY
+          )"
+          if [ "$IN_VERSION" != "$actual_version" ]; then
+            echo "::error::Requested Lightwork version '$IN_VERSION' does not match bundled source version '$actual_version'."
+            exit 1
+          fi
+        fi
+
+        # All first-party distributions are supplied as local direct
+        # requirements in one resolver transaction. This prevents pip from
+        # satisfying maverick-* dependencies with an untrusted public-index
+        # package if a project name is unreserved or later compromised.
+        python -m pip install \
+          "$action_root/packages/maverick-core[all]" \
+          "$action_root/packages/maverick-shield" \
+          "$action_root/packages/maverick-channels" \
+          "$action_root/packages/maverick-dashboard" \
+          "$action_root/packages/maverick-mcp" \
+          "$action_root/apps/installer-cli"
         maverick version || maverick --help
 
     - name: Run the swarm

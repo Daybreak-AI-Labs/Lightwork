@@ -7,8 +7,12 @@
 टर्मिनल से इंस्टॉल करने का सबसे सुरक्षित तरीका है कि रिमोट बूटस्ट्रैप स्क्रिप्ट चलाने के बजाय pipx से प्रकाशित पैकेज इंस्टॉल किया जाए:
 
 ```bash
-pipx install 'maverick-agent[installer]'
-maverick init
+git clone https://github.com/Day-AI-Labs/Lightwork
+cd Lightwork
+git checkout --detach <reviewed-full-40-character-commit-sha>
+python -m pip install -e ./packages/maverick-core
+python -m pip install -e ./apps/installer-cli
+lightwork init
 ```
 
 अगर आपको बिना किसी पूर्व-आवश्यकता वाला डेस्कटॉप बूटस्ट्रैप चाहिए, तो किसी भरोसेमंद कमिट या रिलीज़ से `deploy/desktop/install.sh` या `deploy/desktop/install.ps1` डाउनलोड करें, उसे सत्यापित करें, और `MAVERICK_REF` में पूरा 40-अक्षर वाला कमिट SHA सेट करें। ये स्क्रिप्ट डिफ़ॉल्ट रूप से परिवर्तनशील ब्रांच/टैग रेफ़रेंस अस्वीकार कर देती हैं।

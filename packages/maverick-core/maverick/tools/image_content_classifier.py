@@ -112,8 +112,11 @@ def _classify_file(path: str, sandbox: Any | None = None) -> dict[str, Any] | st
     try:
         from PIL import Image
     except ImportError:
-        return ("ERROR: Pillow not installed (pip install 'maverick-agent[computer-use]') "
-                "— or pass raw 'pixels' + 'width'/'height' instead of 'file'")
+        return (
+            "ERROR: Pillow not installed (from the reviewed checkout run: "
+            "python -m pip install -e './packages/maverick-core[computer-use]') "
+            "— or pass raw 'pixels' + 'width'/'height' instead of 'file'"
+        )
     try:
         with Image.open(target) as im:
             # Downsample before converting so large inputs are bounded before

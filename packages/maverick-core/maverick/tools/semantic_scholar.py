@@ -80,7 +80,7 @@ def _run(args: dict[str, Any]) -> str:
     try:
         import httpx
     except ImportError:
-        return "ERROR: httpx not installed. Run: pip install 'maverick-agent[session]'"
+        return "ERROR: httpx not installed. Run: python -m pip install -e './packages/maverick-core[session]'"
 
     headers = {}
     api_key = os.environ.get("SEMANTIC_SCHOLAR_API_KEY")

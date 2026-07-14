@@ -7,6 +7,11 @@ that the surface is invisible (404) when no SCIM token is configured.
 """
 from __future__ import annotations
 
+import json
+import threading
+import time
+from concurrent.futures import ThreadPoolExecutor
+
 import pytest
 from starlette.testclient import TestClient
 
@@ -127,14 +132,43 @@ class TestAuth:
         assert client.get(f"/scim/v2/Users/{uid}",
                           headers=_auth()).json()["active"] is False
 
-    def test_hard_delete_forgets_directory_entry(self, client):
+    def test_hard_delete_durably_denies_direct_and_pairwise_fresh_tokens(self, client):
+        from fastapi import HTTPException
+        from maverick.oidc import VerifiedPrincipal
+        from maverick_dashboard import auth
         from maverick_dashboard import subject_directory as sd
-        sd.record_login("pairwise-BBB", ["carol@example.com"])
-        r = _make_user(client, username="carol@example.com")
+
+        sd.record_login("pairwise-BBB", ["entra-object-carol"])
+        r = _make_user(
+            client,
+            username="carol@example.com",
+            externalId="entra-object-carol",
+        )
         uid = r.json()["id"]
-        client.delete(f"/scim/v2/Users/{uid}", headers=_auth())
-        # The mapping shouldn't outlive the deleted account.
-        assert sd.subs_for(["carol@example.com"]) == set()
+        assert client.delete(f"/scim/v2/Users/{uid}", headers=_auth()).status_code == 204
+
+        # The raw SCIM resource is gone, but its hashed lifecycle binding and
+        # pairwise-sub bridge remain authoritative instead of falling through
+        # to the deployment's default role.
+        assert client.get(f"/scim/v2/Users/{uid}", headers=_auth()).status_code == 404
+        assert sd.subs_for(["entra-object-carol"]) == {"pairwise-BBB"}
+        assert sd.is_retired("entra-object-carol") is True
+        assert sd.is_retired("pairwise-BBB") is True
+        # A lagging IdP may mint a brand-new pairwise subject after DELETE. Its
+        # login-time binding to the retired immutable object id must inherit the
+        # tombstone rather than falling through as an unknown/default user.
+        sd.record_login("pairwise-AFTER-delete", ["entra-object-carol"])
+        assert sd.is_retired("pairwise-AFTER-delete") is True
+        for sub in (
+            "entra-object-carol",
+            "pairwise-BBB",
+            "pairwise-AFTER-delete",
+        ):
+            with pytest.raises(HTTPException) as exc:
+                auth._enforce_scim_active(
+                    VerifiedPrincipal(sub=sub, issuer="issuer", audience="aud")
+                )
+            assert exc.value.status_code == 401
 
 
 class TestDiscovery:
@@ -164,6 +198,73 @@ class TestLifecycle:
         uid = _make_user(client).json()["id"]
         from maverick.tenant import registry
         assert registry.get_tenant(uid) is not None
+
+    def test_create_tenant_failure_never_commits_active_scim_identity(
+        self, client, monkeypatch
+    ):
+        from maverick.tenant import registry
+
+        def fail_create(*_args, **_kwargs):
+            raise RuntimeError("simulated tenant provisioning failure")
+
+        monkeypatch.setattr(registry, "create_tenant", fail_create)
+        response = _make_user(client, username="no-tenant@example.com")
+        assert response.status_code == 500
+        listed = client.get("/scim/v2/Users", headers=_auth()).json()
+        assert listed["totalResults"] == 0
+
+    def test_partial_tenant_create_is_compensated_before_scim_failure(
+        self, client, monkeypatch
+    ):
+        from maverick.tenant import registry
+
+        original_create = registry.create_tenant
+
+        def fail_after_registry_commit(*args, **kwargs):
+            original_create(*args, **kwargs)
+            raise OSError("simulated workspace materialization failure")
+
+        monkeypatch.setattr(registry, "create_tenant", fail_after_registry_commit)
+        response = _make_user(client, username="partial-tenant@example.com")
+        assert response.status_code == 500
+        assert registry.list_tenants() == []
+        assert client.get("/scim/v2/Users", headers=_auth()).json()["totalResults"] == 0
+
+    def test_reprovision_clears_hard_delete_tombstone_for_pairwise_subject(self, client):
+        from maverick.oidc import VerifiedPrincipal
+        from maverick_dashboard import auth
+        from maverick_dashboard import subject_directory as sd
+
+        sd.record_login("pairwise-reprovisioned", ["entra-object-reprovisioned"])
+        # This unverified-email binding is safe for over-revocation, but must
+        # never be treated as authoritative when access is restored.
+        sd.record_login("forged-email-sub", ["returning@example.com"])
+        first = _make_user(
+            client,
+            username="returning@example.com",
+            externalId="entra-object-reprovisioned",
+        )
+        assert first.status_code == 201
+        uid = first.json()["id"]
+        assert client.delete(f"/scim/v2/Users/{uid}", headers=_auth()).status_code == 204
+        assert sd.is_retired("pairwise-reprovisioned") is True
+
+        second = _make_user(
+            client,
+            username="returning@example.com",
+            externalId="entra-object-reprovisioned",
+        )
+        assert second.status_code == 201
+        assert second.json()["id"] != uid
+        assert sd.is_retired("pairwise-reprovisioned") is False
+        assert sd.is_retired("forged-email-sub") is True
+        # The retained authoritative externalId -> pairwise-sub binding now
+        # resolves the newly durable active record.
+        auth._enforce_scim_active(
+            VerifiedPrincipal(
+                sub="pairwise-reprovisioned", issuer="issuer", audience="aud"
+            )
+        )
 
     def test_duplicate_username_409(self, client):
         _make_user(client)
@@ -279,3 +380,116 @@ class TestLifecycle:
         assert r.status_code == 500
         assert client.get(f"/scim/v2/Users/{uid}", headers=_auth()).status_code == 200
         assert registry.get_tenant(uid) is not None
+
+    def test_corrupt_retirement_ledger_prevents_delete_acknowledgement(self, client):
+        from maverick.tenant import registry
+        from maverick_dashboard import subject_directory as sd
+
+        uid = _make_user(
+            client,
+            username="retry-delete@example.com",
+            externalId="immutable-retry-delete",
+        ).json()["id"]
+        damaged = '{"subjects":{"bad":NaN}}'
+        sd._retired_path().write_text(damaged, encoding="utf-8")
+
+        response = client.delete(f"/scim/v2/Users/{uid}", headers=_auth())
+        assert response.status_code == 500
+        assert client.get(f"/scim/v2/Users/{uid}", headers=_auth()).status_code == 200
+        assert registry.get_tenant(uid) is not None
+        assert sd._retired_path().read_text(encoding="utf-8") == damaged
+
+
+class TestUserStoreHardening:
+    def test_missing_store_retains_empty_bootstrap_semantics(self):
+        from maverick_dashboard import scim
+
+        assert not scim._store_path().exists()
+        assert scim._load() == {}
+
+    def test_corrupt_present_store_fails_closed_and_is_not_overwritten(self, monkeypatch):
+        from maverick_dashboard import scim
+        from maverick_dashboard.app import app
+
+        monkeypatch.setenv("MAVERICK_SCIM_TOKEN", _TOKEN)
+        damaged = '{"users": ['
+        scim._store_path().write_text(damaged, encoding="utf-8")
+        with pytest.raises(scim.ScimStoreError):
+            scim._load()
+
+        client = TestClient(
+            app,
+            headers={"Origin": "http://testserver"},
+            raise_server_exceptions=False,
+        )
+        response = _make_user(client, username="must-not-commit@example.com")
+        assert response.status_code == 500
+        assert scim._store_path().read_text(encoding="utf-8") == damaged
+
+    def test_unreadable_present_store_fails_closed(self, monkeypatch):
+        from maverick_dashboard import scim
+
+        scim._store_path().write_text('{"users": []}', encoding="utf-8")
+
+        def denied(_path):
+            raise PermissionError("simulated ACL denial")
+
+        monkeypatch.setattr(scim, "atomic_read_text", denied)
+        with pytest.raises(scim.ScimStoreError, match="unreadable"):
+            scim._load()
+
+    def test_schema_rejects_non_boolean_active_and_duplicate_external_id(self, client):
+        from maverick_dashboard import scim
+
+        _make_user(client, username="a@example.com", externalId="shared-id")
+        _make_user(client, username="b@example.com", externalId="other-id")
+        data = json.loads(scim._store_path().read_text(encoding="utf-8"))
+        data["users"][0]["active"] = "true"
+        scim._store_path().write_text(json.dumps(data), encoding="utf-8")
+        with pytest.raises(scim.ScimStoreError, match="active"):
+            scim._load()
+
+        data["users"][0]["active"] = True
+        for record in data["users"]:
+            record["externalId"] = "shared-id"
+        scim._store_path().write_text(json.dumps(data), encoding="utf-8")
+        with pytest.raises(scim.ScimStoreError, match="duplicate externalId"):
+            scim._load()
+
+        data["users"][0]["externalId"] = "first-external-id"
+        data["users"][1]["externalId"] = data["users"][0]["id"]
+        scim._store_path().write_text(json.dumps(data), encoding="utf-8")
+        with pytest.raises(scim.ScimStoreError, match="identity collision"):
+            scim._load()
+
+    def test_concurrent_user_mutations_do_not_lose_updates(self):
+        from maverick_dashboard import scim
+
+        start = threading.Event()
+
+        def add_user(index: int):
+            start.wait()
+            with scim._locked_users():
+                users = scim._load()
+                # Make an unlocked implementation reliably overlap here.
+                time.sleep(0.03)
+                uid = f"{index + 1:032x}"
+                users[uid] = scim._record_from_resource(
+                    {"userName": f"user-{index}@example.com"}, uid=uid
+                )
+                scim._save(users)
+
+        with ThreadPoolExecutor(max_workers=2) as pool:
+            futures = [pool.submit(add_user, index) for index in range(2)]
+            start.set()
+            for future in futures:
+                future.result(timeout=5)
+        assert set(scim._load()) == {f"{index + 1:032x}" for index in range(2)}
+
+    def test_store_and_parent_are_private(self, client):
+        from maverick.file_lock import private_path_is_restricted
+        from maverick_dashboard import scim
+
+        assert _make_user(client).status_code == 201
+        assert private_path_is_restricted(scim._store_path(), 0o600)
+        assert private_path_is_restricted(scim._store_path().parent, 0o700)

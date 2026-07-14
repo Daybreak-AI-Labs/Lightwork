@@ -14,7 +14,7 @@ swarm and needs a provider key + budget), so it's safe to run unattended.
 # PyPI publish is pending — until the first tagged release, install the `maverick`
 # CLI from a source clone (`pip install -e packages/maverick-core packages/maverick-mcp`)
 # or via the native installer (see Releases).
-pip install maverick-agent maverick-mcp-server   # provides the `maverick` CLI (post-publish)
+python -m pip install -e ./packages/maverick-core -e ./packages/maverick-mcp
 mvn -q compile exec:java
 ```
 

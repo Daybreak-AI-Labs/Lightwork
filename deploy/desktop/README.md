@@ -1,17 +1,25 @@
 # Desktop deployment
 
-## Terminal install (recommended)
+## Terminal install
 
-Use the published package instead of piping a mutable remote script into a shell:
+The Lightwork distribution names are not yet reserved on public PyPI. Do not
+install those names from the public index. Use a reviewed source commit:
 
 ```bash
-pipx install 'maverick-agent[installer]'
-maverick init
+export MAVERICK_REF=<full-40-character-commit-sha>
+bash deploy/desktop/install.sh
 ```
+
+On Windows, set `$env:MAVERICK_REF` and run `deploy/desktop/install.ps1`.
+Both scripts fail before changing the machine when the ref is missing or
+mutable, and neither has a public-index fallback.
 
 ## Source bootstrap (advanced)
 
-The desktop bootstrap scripts are retained for controlled source installs. Download `install.sh` or `install.ps1` from a commit or release you trust, verify it, then set `MAVERICK_REF` to a full 40-character commit SHA before running. Mutable branch/tag refs are rejected unless `MAVERICK_ALLOW_UNPINNED=1` (`$env:MAVERICK_ALLOW_UNPINNED = "1"` on Windows) is set explicitly for trusted local testing.
+Download `install.sh` or `install.ps1` from the same commit you intend to
+install, verify the script, and set `MAVERICK_REF` to that lowercase, full
+40-character commit SHA before running it. Mutable branch/tag refs are always
+rejected.
 
 ## Native bundles (planned)
 

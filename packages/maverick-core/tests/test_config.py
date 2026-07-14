@@ -4,7 +4,15 @@ from __future__ import annotations
 import tempfile
 from pathlib import Path
 
-from maverick.config import _interp, get_safety, load_config
+from maverick.config import _interp, config_path, get_safety, load_config
+
+
+def test_default_config_path_honors_maverick_home(tmp_path, monkeypatch):
+    home = tmp_path / "isolated-home"
+    monkeypatch.setenv("MAVERICK_HOME", str(home))
+    monkeypatch.delenv("MAVERICK_CONFIG", raising=False)
+
+    assert config_path() == home / "config.toml"
 
 
 def test_missing_config_returns_empty_dict():
@@ -25,6 +33,72 @@ def test_corrupt_config_fails_soft_to_empty_dict():
         assert load_config(path) == {}
     finally:
         path.unlink()
+
+
+def test_corrupt_active_config_exposes_security_health_error(tmp_path, monkeypatch):
+    import maverick.config as cfg_mod
+
+    path = tmp_path / "config.toml"
+    path.write_text("[agent_trust\nenforce = true\n", encoding="utf-8")
+    monkeypatch.setenv("MAVERICK_CONFIG", str(path))
+    cfg_mod.reset_config_cache()
+    try:
+        assert cfg_mod.load_config() == {}  # ordinary consumers remain fail-soft
+        assert str(path) in cfg_mod.config_source_errors()
+    finally:
+        cfg_mod.reset_config_cache()
+
+
+def test_deleted_corrupt_optional_overlay_clears_security_health_error(
+    tmp_path, monkeypatch,
+):
+    import maverick.config as cfg_mod
+
+    path = tmp_path / "config.toml"
+    path.write_text("", encoding="utf-8")
+    overlay = tmp_path / cfg_mod.DASHBOARD_OVERRIDES_BASENAME
+    overlay.write_text("[agent_trust\nenforce = true\n", encoding="utf-8")
+    monkeypatch.setenv("MAVERICK_CONFIG", str(path))
+    cfg_mod.reset_config_cache()
+    try:
+        cfg_mod.load_config()
+        assert str(overlay) in cfg_mod.config_source_errors()
+
+        overlay.unlink()
+        cfg_mod.load_config()  # optional overlay is now skipped
+
+        assert str(overlay) not in cfg_mod.config_source_errors()
+    finally:
+        cfg_mod.reset_config_cache()
+
+
+def test_unreadable_optional_overlay_retains_security_health_error(
+    tmp_path, monkeypatch,
+):
+    import maverick.config as cfg_mod
+
+    path = tmp_path / "config.toml"
+    path.write_text("", encoding="utf-8")
+    overlay = tmp_path / cfg_mod.DASHBOARD_OVERRIDES_BASENAME
+    overlay.write_text("[agent_trust\nenforce = true\n", encoding="utf-8")
+    monkeypatch.setenv("MAVERICK_CONFIG", str(path))
+    cfg_mod.reset_config_cache()
+    try:
+        cfg_mod.load_config()
+        assert str(overlay) in cfg_mod.config_source_errors()
+
+        real_stat = Path.stat
+
+        def _deny_overlay_stat(self, *args, **kwargs):
+            if self == overlay:
+                raise PermissionError("policy source is not readable")
+            return real_stat(self, *args, **kwargs)
+
+        monkeypatch.setattr(Path, "stat", _deny_overlay_stat)
+
+        assert str(overlay) in cfg_mod.config_source_errors()
+    finally:
+        cfg_mod.reset_config_cache()
 
 
 def test_env_var_interpolation(monkeypatch):

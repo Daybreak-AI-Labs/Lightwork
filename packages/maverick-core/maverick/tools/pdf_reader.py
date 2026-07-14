@@ -221,7 +221,7 @@ def _run_read_pdf(args: dict[str, Any]) -> str:
     if text is None:
         return (
             "ERROR: no PDF parser available. Run: "
-            "pip install 'maverick-agent[pdf]'"
+            "python -m pip install -e './packages/maverick-core[pdf]'"
         )
 
     if len(text) > max_chars:
@@ -237,7 +237,7 @@ def read_pdf() -> Tool:
             "Read text from a PDF (local path or http(s) URL). Supports "
             "pages='1-5,8,10-' for ranges, include_tables=true to extract "
             "tables as markdown. Tries pdfplumber first, falls back to "
-            "pypdf. Install with: pip install 'maverick-agent[pdf]'."
+            "pypdf. Install with: python -m pip install -e './packages/maverick-core[pdf]'."
         ),
         input_schema=_PDF_INPUT_SCHEMA,
         fn=_run_read_pdf,

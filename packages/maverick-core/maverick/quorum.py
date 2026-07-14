@@ -39,7 +39,6 @@ from __future__ import annotations
 import json
 import logging
 import os
-import tempfile
 import threading
 import time
 from collections.abc import Callable
@@ -47,6 +46,12 @@ from dataclasses import dataclass, field
 from fnmatch import fnmatchcase
 from pathlib import Path
 
+from .file_lock import (
+    atomic_read_text,
+    atomic_write_text,
+    ensure_private_directory,
+    ensure_private_file,
+)
 from .paths import data_dir
 
 log = logging.getLogger(__name__)
@@ -176,8 +181,9 @@ class ProposalStore:
 
     def _load(self) -> dict:
         try:
-            with open(self.path, "rb") as f:
-                raw = json.load(f)
+            ensure_private_directory(self.path.parent)
+            ensure_private_file(self.path, 0o600)
+            raw = json.loads(atomic_read_text(self.path))
             return raw if isinstance(raw, dict) else {}
         except FileNotFoundError:
             return {}
@@ -186,20 +192,8 @@ class ProposalStore:
             return {}
 
     def _save(self, data: dict) -> None:
-        self.path.parent.mkdir(parents=True, exist_ok=True)
-        fd, tmp = tempfile.mkstemp(dir=str(self.path.parent),
-                                   prefix=".proposals-", suffix=".tmp")
-        try:
-            with os.fdopen(fd, "w", encoding="utf-8") as f:
-                json.dump(data, f)
-            os.chmod(tmp, 0o600)
-            os.replace(tmp, self.path)
-        except BaseException:
-            try:
-                os.unlink(tmp)
-            except OSError:
-                pass
-            raise
+        ensure_private_directory(self.path.parent)
+        atomic_write_text(self.path, json.dumps(data), mode=0o600)
 
     @staticmethod
     def _to_proposal(rec: dict) -> Proposal:
