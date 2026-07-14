@@ -31,6 +31,14 @@ class VectorStore(Protocol):
 
     def delete_collection(self, collection: str) -> None: ...
 
+    def collections(self) -> list[str]: ...
+
+    def delete_where(self, collection: str, key: str, value: str) -> int: ...
+
+    def count_where(self, collection: str, key: str, value: str) -> int: ...
+
+    def count(self, collection: str) -> int: ...
+
 
 def _cosine(a: list[float], b: list[float]) -> float:
     if not a or not b or len(a) != len(b):
@@ -109,6 +117,47 @@ class SqliteVectorStore:
         with self._lock:
             self._db.execute("DELETE FROM chunks WHERE collection = ?", (collection,))
             self._db.commit()
+
+    def collections(self) -> list[str]:
+        """Every collection with at least one chunk (the erasure sweep surface)."""
+        with self._lock:
+            rows = self._db.execute(
+                "SELECT DISTINCT collection FROM chunks ORDER BY collection"
+            ).fetchall()
+        return [r[0] for r in rows]
+
+    def delete_where(self, collection: str, key: str, value: str) -> int:
+        """Delete every chunk whose ``meta[key] == value``. Returns the count.
+
+        The GDPR erasure primitive: a subject's or source's chunks are removed
+        by provenance, not by similarity. Meta is matched in Python (no JSON1
+        dependency) — collections are per-domain corpora, not billion-row sets.
+        """
+        with self._lock:
+            rows = self._db.execute(
+                "SELECT id, meta FROM chunks WHERE collection = ?", (collection,)
+            ).fetchall()
+            doomed = [
+                cid for cid, meta in rows
+                if (json.loads(meta or "{}")).get(key) == value
+            ]
+            if doomed:
+                self._db.executemany(
+                    "DELETE FROM chunks WHERE collection = ? AND id = ?",
+                    [(collection, cid) for cid in doomed],
+                )
+                self._db.commit()
+        return len(doomed)
+
+    def count_where(self, collection: str, key: str, value: str) -> int:
+        """Chunks whose ``meta[key] == value`` — the erasure-verify primitive."""
+        with self._lock:
+            rows = self._db.execute(
+                "SELECT meta FROM chunks WHERE collection = ?", (collection,)
+            ).fetchall()
+        return sum(
+            1 for (meta,) in rows if (json.loads(meta or "{}")).get(key) == value
+        )
 
     def count(self, collection: str) -> int:
         with self._lock:
@@ -317,6 +366,38 @@ class PgVectorStore:
                 (self._namespace, collection),
             )
 
+    def collections(self) -> list[str]:
+        """Every collection with at least one chunk in this namespace."""
+        with self._lock, self._db.cursor() as cur:
+            rows = cur.execute(
+                f"SELECT DISTINCT collection FROM {self._table} "
+                "WHERE namespace = %s ORDER BY collection",
+                (self._namespace,),
+            ).fetchall()
+        return [r[0] for r in rows]
+
+    def delete_where(self, collection: str, key: str, value: str) -> int:
+        """Delete every chunk whose ``meta[key] == value``. Returns the count.
+
+        JSONB containment (``@>``) keeps the erasure sweep in Postgres.
+        """
+        with self._lock, self._db.cursor() as cur:
+            cur.execute(
+                f"DELETE FROM {self._table} "
+                "WHERE namespace = %s AND collection = %s AND meta @> %s::jsonb",
+                (self._namespace, collection, json.dumps({key: value})),
+            )
+            return int(cur.rowcount or 0)
+
+    def count_where(self, collection: str, key: str, value: str) -> int:
+        with self._lock, self._db.cursor() as cur:
+            (n,) = cur.execute(
+                f"SELECT COUNT(*) FROM {self._table} "
+                "WHERE namespace = %s AND collection = %s AND meta @> %s::jsonb",
+                (self._namespace, collection, json.dumps({key: value})),
+            ).fetchone()
+        return int(n)
+
     def count(self, collection: str) -> int:
         with self._lock, self._db.cursor() as cur:
             (n,) = cur.execute(
@@ -339,6 +420,162 @@ class PgVectorStore:
         self.close()
 
 
+class QdrantStore:
+    """Qdrant-backed vector store — the certified external engine for clients
+    with dedicated retrieval infrastructure or corpora beyond pgvector's
+    comfortable range.
+
+    Same protocol + per-collection compartments as the other stores. One Qdrant
+    collection per (namespace, knowledge collection) pair, named
+    ``{namespace}__{collection}``, so tenant isolation survives a shared
+    cluster. Payload carries ``text`` + the chunk ``meta`` (flattened under
+    ``meta``), and ``delete_where``/``count_where`` filter on ``meta.{key}`` —
+    the same erasure-by-provenance primitive the embedded stores expose.
+
+    Requires the optional ``qdrant-client`` dependency
+    (``pip install 'maverick-knowledge[qdrant]'``); imported lazily so the
+    package stays dependency-free by default.
+    """
+
+    def __init__(self, url: str | None = None, *, api_key: str | None = None,
+                 dim: int = 1024, namespace: str = "default") -> None:
+        try:
+            from qdrant_client import QdrantClient
+        except ImportError as e:  # pragma: no cover -- exercised only without the extra
+            raise ImportError(
+                "qdrant store needs qdrant-client. "
+                "Run: pip install 'maverick-knowledge[qdrant]'"
+            ) from e
+        import os
+
+        self._url = url or os.environ.get("QDRANT_URL") or ""
+        if not self._url:
+            raise RuntimeError(
+                "qdrant store requires QDRANT_URL or [knowledge] url in config.toml.")
+        if dim <= 0:
+            raise ValueError(f"qdrant store needs a positive dim, got {dim}")
+        self._dim = int(dim)
+        self._namespace = str(namespace or "default")
+        self._client = QdrantClient(
+            url=self._url, api_key=api_key or os.environ.get("QDRANT_API_KEY") or None)
+
+    def _cname(self, collection: str) -> str:
+        return f"{self._namespace}__{collection}"
+
+    def _ensure(self, collection: str) -> str:
+        from qdrant_client import models
+        name = self._cname(collection)
+        if not self._client.collection_exists(name):
+            self._client.create_collection(
+                collection_name=name,
+                vectors_config=models.VectorParams(
+                    size=self._dim, distance=models.Distance.COSINE),
+            )
+        return name
+
+    @staticmethod
+    def _point_id(cid: str) -> str:
+        """Qdrant point ids must be UUIDs or ints; map arbitrary chunk ids
+        deterministically so re-adding the same id upserts, matching the
+        other stores' INSERT OR REPLACE semantics."""
+        import uuid as _uuid
+        return str(_uuid.uuid5(_uuid.NAMESPACE_URL, f"maverick-chunk:{cid}"))
+
+    def _meta_filter(self, key: str, value: str):
+        from qdrant_client import models
+        return models.Filter(must=[models.FieldCondition(
+            key=f"meta.{key}", match=models.MatchValue(value=value))])
+
+    def add(self, collection, items) -> None:
+        if not items:
+            return
+        from qdrant_client import models
+        name = self._ensure(collection)
+        self._client.upsert(
+            collection_name=name,
+            points=[
+                models.PointStruct(
+                    id=self._point_id(cid),
+                    vector=[float(x) for x in vec],
+                    payload={"text": text, "meta": dict(meta or {}), "chunk_id": cid},
+                )
+                for cid, text, vec, meta in items
+            ],
+        )
+
+    def search(self, collection, vector, k: int = 5) -> list[Match]:
+        if k <= 0:
+            return []
+        if len(vector) != self._dim:
+            raise ValueError(
+                f"knowledge: query vector dim {len(vector)} != store dim "
+                f"{self._dim}; the corpus was embedded with a different "
+                "embedder/model than this query")
+        name = self._cname(collection)
+        if not self._client.collection_exists(name):
+            return []
+        hits = self._client.query_points(
+            collection_name=name, query=[float(x) for x in vector], limit=int(k),
+            with_payload=True,
+        ).points
+        return [
+            Match(
+                float(h.score),
+                str((h.payload or {}).get("text", "")),
+                dict((h.payload or {}).get("meta") or {}),
+            )
+            for h in hits
+        ]
+
+    def delete_collection(self, collection: str) -> None:
+        name = self._cname(collection)
+        if self._client.collection_exists(name):
+            self._client.delete_collection(name)
+
+    def collections(self) -> list[str]:
+        prefix = f"{self._namespace}__"
+        names = [c.name for c in self._client.get_collections().collections]
+        return sorted(n[len(prefix):] for n in names if n.startswith(prefix))
+
+    def delete_where(self, collection: str, key: str, value: str) -> int:
+        from qdrant_client import models
+        name = self._cname(collection)
+        if not self._client.collection_exists(name):
+            return 0
+        doomed = self.count_where(collection, key, value)
+        if doomed:
+            self._client.delete(
+                collection_name=name,
+                points_selector=models.FilterSelector(
+                    filter=self._meta_filter(key, value)),
+            )
+        return doomed
+
+    def count_where(self, collection: str, key: str, value: str) -> int:
+        name = self._cname(collection)
+        if not self._client.collection_exists(name):
+            return 0
+        return int(self._client.count(
+            collection_name=name, count_filter=self._meta_filter(key, value),
+            exact=True,
+        ).count)
+
+    def count(self, collection: str) -> int:
+        name = self._cname(collection)
+        if not self._client.collection_exists(name):
+            return 0
+        return int(self._client.count(collection_name=name, exact=True).count)
+
+    def close(self) -> None:
+        client = getattr(self, "_client", None)
+        if client is not None:
+            try:
+                client.close()
+            except Exception:  # pragma: no cover -- close is best-effort
+                pass
+            self._client = None
+
+
 def _namespace_from_cfg(cfg: dict) -> str:
     """Stable pgvector namespace preserving per-workspace knowledge isolation."""
     raw = cfg.get("namespace") or cfg.get("tenant") or cfg.get("path") or "default"
@@ -359,6 +596,13 @@ def build_store(cfg: dict | None = None):
     if backend == "pgvector":
         return PgVectorStore(
             dsn=cfg.get("dsn") or None,
+            dim=int(cfg.get("dim", 1024)),
+            namespace=_namespace_from_cfg(cfg),
+        )
+    if backend == "qdrant":
+        return QdrantStore(
+            url=cfg.get("url") or None,
+            api_key=cfg.get("api_key") or None,
             dim=int(cfg.get("dim", 1024)),
             namespace=_namespace_from_cfg(cfg),
         )
