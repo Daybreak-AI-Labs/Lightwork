@@ -39,7 +39,12 @@ class TestGoals:
         # The new signature is (goal_id, max_dollars, max_wall_seconds, max_depth).
         import maverick.runner as runner_mod
         called = []
-        def fake_run(goal_id, max_dollars=2.0, max_wall_seconds=1800.0, max_depth=3):
+        def fake_run(goal_id, max_dollars=2.0, max_wall_seconds=1800.0, max_depth=3,
+                     **kwargs):
+            # The endpoint also threads channel/user_id/capability/
+            # concurrency_principal/allowed_suites; this double only asserts
+            # the budget knobs, so swallow the rest instead of going stale on
+            # every new dispatch kwarg.
             called.append((goal_id, max_dollars, max_wall_seconds, max_depth))
         monkeypatch.setattr(runner_mod, "run_goal_in_thread", fake_run)
         resp = client.post("/api/v1/goals", json={

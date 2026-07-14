@@ -936,6 +936,13 @@ def pick_capabilities() -> dict[str, bool]:
         "connector schema offered on every turn.",
         default=True,
     )
+    jd_hiring = _q_confirm(
+        "Enable JD hiring in the Agent Factory? HR can upload a job "
+        "description to match it against the specialist roster or draft a "
+        "new specialist from it (drafts stay envelope-clamped and require "
+        "human approval to save).",
+        default=True,
+    )
     return {
         "computer_use": use_computer,
         "browser": use_browser,
@@ -943,6 +950,7 @@ def pick_capabilities() -> dict[str, bool]:
         "code_exec": use_code_exec,
         "embedded_flash": embedded_flash,
         "deferred_tools": deferred_tools,
+        "jd_hiring": jd_hiring,
     }
 
 
@@ -3097,6 +3105,15 @@ def _cfg_capabilities(
     return lines
 
 
+def _cfg_agent_factory(jd_hiring: bool) -> list[str]:
+    # JD hiring is default-on in the kernel (maverick.jd_hiring); only write
+    # the table when the operator opted OUT, matching the
+    # write-only-on-divergence convention.
+    if jd_hiring:
+        return []
+    return ["", "[agent_factory]", "jd_hiring = false"]
+
+
 def _cfg_suites(suites: dict[str, bool] | None) -> list[str]:
     if not suites:
         return []
@@ -3966,8 +3983,11 @@ def write_config(
     # The embedded-device flash gate lives under [embedded], not
     # [capabilities] -- pull it out before emitting the capabilities block.
     embedded_flash = bool(capability_config.pop("embedded_flash", False))
+    # JD hiring lives under [agent_factory] (kernel: maverick.jd_hiring).
+    jd_hiring = bool(capability_config.pop("jd_hiring", True))
 
     lines += _cfg_capabilities(capability_config, embedded_flash)
+    lines += _cfg_agent_factory(jd_hiring)
     lines += _cfg_suites(suites)
     lines += _cfg_license(license_cfg)
     lines += _cfg_advanced(advanced, providers)

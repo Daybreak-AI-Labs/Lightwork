@@ -129,6 +129,9 @@ def test_retry_on_empty_uses_second_attempt_and_sums_cost(tmp_path, monkeypatch)
     monkeypatch.setattr(gov, "_git_head", lambda repo: "basesha")
     monkeypatch.setattr(gov, "_worktree_diff", lambda repo: "")  # force prose-diff path
     monkeypatch.setattr(gov, "_hard_reset", lambda repo, sha: None)
+    # The host-exec consent gate fires before these stubs matter; nothing
+    # real executes in this test (run_maverick + sandbox are faked).
+    monkeypatch.setattr(gov, "_ensure_untrusted_agent_sandbox", lambda: None)
     monkeypatch.setattr(gov, "_point_sandbox_at", lambda repo, require_container=False: (lambda: None))
 
     inst = gov.Instance(
@@ -167,6 +170,9 @@ def test_retry_on_empty_disabled_runs_once(tmp_path, monkeypatch):
     monkeypatch.setattr(gov, "_git_head", lambda repo: "basesha")
     monkeypatch.setattr(gov, "_worktree_diff", lambda repo: "")
     monkeypatch.setattr(gov, "_hard_reset", lambda repo, sha: None)
+    # The host-exec consent gate fires before these stubs matter; nothing
+    # real executes in this test (run_maverick + sandbox are faked).
+    monkeypatch.setattr(gov, "_ensure_untrusted_agent_sandbox", lambda: None)
     monkeypatch.setattr(gov, "_point_sandbox_at", lambda repo, require_container=False: (lambda: None))
 
     inst = gov.Instance(
@@ -191,6 +197,9 @@ def test_llm_proposer_default_shell_consent_requires_container_and_restores(tmp_
     monkeypatch.setattr(gov, "_git_head", lambda repo: "basesha")
     monkeypatch.setattr(gov, "_worktree_diff", lambda repo: "")
     monkeypatch.setattr(gov, "_hard_reset", lambda repo, sha: None)
+    # The host-exec consent gate fires before these stubs matter; nothing
+    # real executes in this test (run_maverick + sandbox are faked).
+    monkeypatch.setattr(gov, "_ensure_untrusted_agent_sandbox", lambda: None)
 
     seen: list[bool] = []
 
@@ -218,6 +227,9 @@ def test_llm_proposer_explicit_consent_does_not_force_container(tmp_path, monkey
     monkeypatch.setattr(gov, "_git_head", lambda repo: "basesha")
     monkeypatch.setattr(gov, "_worktree_diff", lambda repo: "")
     monkeypatch.setattr(gov, "_hard_reset", lambda repo, sha: None)
+    # The host-exec consent gate fires before these stubs matter; nothing
+    # real executes in this test (run_maverick + sandbox are faked).
+    monkeypatch.setattr(gov, "_ensure_untrusted_agent_sandbox", lambda: None)
 
     seen: list[bool] = []
     monkeypatch.setattr(

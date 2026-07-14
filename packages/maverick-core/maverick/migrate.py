@@ -36,7 +36,8 @@ log = logging.getLogger(__name__)
 # [security] "silently do nothing" -- advice that would delete live config).
 # When adding a new config section, add it here or migrate will lint it.
 KNOWN_SECTIONS = frozenset({
-    "a2a", "adaptive_compute", "agent", "agent_trust", "analytics", "approval",
+    "a2a", "adaptive_compute", "agent", "agent_factory", "agent_trust",
+    "analytics", "approval",
     "approval_delegation", "attachments", "audit", "auth", "autonomy",
     "deployment",
     "benchmark", "billing", "budget", "cache", "calendar", "calibration",

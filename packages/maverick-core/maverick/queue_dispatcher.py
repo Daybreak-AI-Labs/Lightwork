@@ -180,6 +180,7 @@ def _payload(
     user_id,
     capability: Any | None,
     concurrency_principal: str | None = None,
+    allowed_suites: frozenset[str] | None = None,
 ) -> dict:
     """JSON-safe job payload, including the explicit security capability grant."""
     return {
@@ -191,6 +192,11 @@ def _payload(
         "user_id": user_id,
         "capability": _serialize_capability(capability),
         "concurrency_principal": concurrency_principal,
+        # The caller's department grant must survive the queue boundary, or a
+        # suite-scoped goal would run unscoped on the worker (run_queued_goal
+        # already deserializes this key).
+        "allowed_suites": (sorted(allowed_suites)
+                           if allowed_suites is not None else None),
     }
 
 
@@ -211,6 +217,7 @@ class QueueDispatcher:
         user_id: str | None = None,
         capability: Any | None = None,
         concurrency_principal: str | None = None,
+        allowed_suites: frozenset[str] | None = None,
     ) -> str | None:
         from .runner import DEFAULT_MAX_DEPTH
 
@@ -223,6 +230,7 @@ class QueueDispatcher:
             user_id=user_id,
             capability=capability,
             concurrency_principal=concurrency_principal,
+            allowed_suites=allowed_suites,
         )
         self._enqueue(JOB_NAME, payload)
         log.info("queued goal #%s for worker execution", goal_id)
