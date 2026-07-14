@@ -1483,11 +1483,12 @@ async def flow_schema_endpoint(request: Request, flow_id: str) -> dict:
 
 
 def _run_out(run) -> dict:
-    """A flow run for the API with secret-looking values in its ``data`` masked,
+    """A flow run for the API with secret-looking values in its payloads masked,
     so a token a connector put into the run never leaves over HTTP."""
     from maverick.flow.redact import redact
     d = run.to_dict()
     d["data"] = redact(d.get("data") or {})
+    d["input_data"] = redact(d.get("input_data") or {})
     return d
 
 
