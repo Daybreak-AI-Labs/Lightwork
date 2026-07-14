@@ -226,10 +226,49 @@ def verify_acs_response(saml_response: str) -> SamlIdentity:  # pragma: no cover
 class SamlIdentity:
     name_id: str
     attributes: dict[str, list] = field(default_factory=dict)
+    # Assertion ID + its NotOnOrAfter epoch, used to enforce single-use of the
+    # assertion (replay defense). Empty/0 when the response shape hid them.
+    assertion_id: str = ""
+    expires_at: float = 0.0
 
     @property
     def principal(self) -> str:
         return f"user:{self.name_id}"
+
+
+def _iso_to_epoch(value) -> float:
+    """Parse a SAML ``NotOnOrAfter`` timestamp (ISO 8601, trailing ``Z``) to a
+    UTC epoch. 0.0 on anything unparseable — the replay store then applies its
+    own bounded TTL."""
+    s = str(value or "").strip()
+    if not s:
+        return 0.0
+    from datetime import datetime, timezone
+    try:
+        dt = datetime.fromisoformat(s.replace("Z", "+00:00"))
+    except ValueError:
+        return 0.0
+    if dt.tzinfo is None:
+        dt = dt.replace(tzinfo=timezone.utc)
+    return dt.timestamp()
+
+
+def _assertion_replay_fields(authn_response) -> tuple[str, float]:
+    """Best-effort (assertion_id, expires_at_epoch) from a verified pysaml2
+    response, for single-use enforcement. Returns ``("", 0.0)`` when the shape
+    hides them; the ACS then logs and proceeds (a real signed assertion always
+    carries an ID, so this only degrades on unusual pysaml2 shapes)."""
+    assertion = getattr(authn_response, "assertion", None)
+    if isinstance(assertion, (list, tuple)):
+        assertion = assertion[0] if assertion else None
+    if assertion is None:
+        return "", 0.0
+    aid = str(getattr(assertion, "id", "") or "").strip()
+    expires = 0.0
+    conditions = getattr(assertion, "conditions", None)
+    if conditions is not None:
+        expires = _iso_to_epoch(getattr(conditions, "not_on_or_after", ""))
+    return aid, expires
 
 
 def extract_identity(authn_response) -> SamlIdentity:
@@ -255,7 +294,9 @@ def extract_identity(authn_response) -> SamlIdentity:
         attrs = authn_response.get_identity() or {}
     except Exception:  # pragma: no cover
         attrs = {}
-    return SamlIdentity(name_id=name_id, attributes=dict(attrs))
+    assertion_id, expires_at = _assertion_replay_fields(authn_response)
+    return SamlIdentity(name_id=name_id, attributes=dict(attrs),
+                        assertion_id=assertion_id, expires_at=expires_at)
 
 
 def mint_session_cookie(name_id: str, *, secret: str | None = None) -> str:
@@ -375,18 +416,41 @@ async def saml_acs(request: Request):
         return JSONResponse({"detail": "missing SAMLResponse"}, status_code=400)
     try:
         identity = verify_acs_response(saml_response)
-        cookie = mint_session_cookie(identity.name_id)
     except SamlUnavailable as e:
         return JSONResponse({"detail": str(e)}, status_code=503)
     except Exception:  # noqa: BLE001 -- never leak why verification failed
         log.warning("SAML ACS: assertion verification failed")
         return JSONResponse({"detail": "SAML assertion did not verify"}, status_code=401)
+    # Single-use: the assertion signature + NotOnOrAfter alone let a captured
+    # SAMLResponse be replayed until it expires (allow_unsolicited means no
+    # InResponseTo binding). Refuse an assertion ID we've already consumed. A
+    # real signed assertion always carries an ID; if the shape hid it we log
+    # and proceed rather than lock out logins on pysaml2 shape variance.
+    from . import saml_replay
+    if identity.assertion_id:
+        try:
+            if not saml_replay.consume(identity.assertion_id, identity.expires_at):
+                log.warning("SAML ACS: assertion replay rejected")
+                return JSONResponse(
+                    {"detail": "SAML assertion already used"}, status_code=401)
+        except saml_replay.ReplayStoreError:
+            # Fail closed: we can't prove single-use, so refuse (the user just
+            # retries with a fresh assertion).
+            log.warning("SAML ACS: replay store unavailable; refusing login")
+            return JSONResponse(
+                {"detail": "SAML session store unavailable"}, status_code=503)
+    else:
+        log.warning("SAML ACS: assertion carried no ID; replay defense skipped")
+    try:
+        cookie = mint_session_cookie(identity.name_id)
+    except SamlUnavailable as e:
+        return JSONResponse({"detail": str(e)}, status_code=503)
     # Record the NameID (the session sub) so SCIM deprovision can revoke this
     # live session even for a persistent/transient NameID that maps to no SCIM
     # attribute. Mirrors the OIDC callback's record_login.
     _record_session_subject(identity)
     # Reuse the OIDC login cookie hardening so SAML/OIDC sessions are identical.
-    from .oidc_login import SESSION_COOKIE, _is_loopback_request, _set_cookie
+    from .oidc_login import SESSION_COOKIE, _cookie_secure, _set_cookie
 
     response = RedirectResponse(relay, status_code=303)
     _set_cookie(
@@ -394,7 +458,7 @@ async def saml_acs(request: Request):
         SESSION_COOKIE,
         cookie,
         max_age=_SESSION_TTL,
-        secure=not _is_loopback_request(request),
+        secure=_cookie_secure(request),
     )
     return response
 

@@ -1,0 +1,54 @@
+{% extends "base.html" %}
+{% set active = 'servicenow' %}
+{% block title %}ServiceNow — Privacy Requests{% endblock %}
+{% block body %}
+<div class="sim-banner">
+  <span class="sim-chip">Simulated</span>
+  <span>This is a stand-in for the customer's <b>ServiceNow</b> (or Jira, Zendesk, email…) intake.
+  Creating a request fires a real HTTP webhook to Lightwork — point it at a live instance and nothing else changes.</span>
+</div>
+
+<div class="page-head">
+  <div class="eyebrow">IT Service Management · Privacy Office</div>
+  <h1>Submit a privacy assessment request</h1>
+  <p>An employee rolling out a new system or vendor raises a ticket here — the way they already do.
+     They never open Lightwork.</p>
+</div>
+
+<div class="grid two">
+  <div class="card">
+    <h2>New request</h2>
+    <form method="post" action="/servicenow/create">
+      <label class="field"><span class="lbl">Short description</span>
+        <input type="text" name="short_description" required
+               value="Privacy review for new marketing CRM (Acme CRM)"></label>
+      <label class="field"><span class="lbl">Requested by</span>
+        <input type="text" name="requester" required value="Jordan Ellis (Marketing Ops)"></label>
+      <label class="field"><span class="lbl">Requester email</span>
+        <input type="email" name="requester_email" required value="jordan.ellis@company.com"></label>
+      <label class="field"><span class="lbl">System / vendor under review</span>
+        <input type="text" name="system_name" required value="Acme CRM"></label>
+      <label class="field"><span class="lbl">Data types involved</span>
+        <input type="text" name="data_types" required
+               value="Customer name, email, phone, browsing history"></label>
+      <button class="btn" type="submit">Submit request →</button>
+    </form>
+  </div>
+
+  <div class="card">
+    <h2>Privacy request queue</h2>
+    {% if tickets %}
+    <table>
+      <tr><th>Number</th><th>Short description</th><th>State</th></tr>
+      {% for t in tickets %}
+      <tr class="clickable" onclick="location='/servicenow/ticket/{{ t.number }}'">
+        <td class="mono">{{ t.number }}</td>
+        <td>{{ t.short_description }}<br><span class="faint mono">{{ t.system_name }}</span></td>
+        <td><span class="pill state-{{ t.state|replace(' ','') }}">{{ t.state }}</span></td>
+      </tr>
+      {% endfor %}
+    </table>
+    {% else %}<div class="empty">No requests yet. Submit one to kick off the flow.</div>{% endif %}
+  </div>
+</div>
+{% endblock %}

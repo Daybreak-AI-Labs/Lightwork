@@ -920,7 +920,7 @@ class Agent:
             # curated domain pack as a specialist child (persona + compartment +
             # attenuated envelope), and discover what's available.
             reg.register(spawn_specialist_tool(self))
-            reg.register(list_specialists_tool())
+            reg.register(list_specialists_tool(self))
         # Per-domain document knowledge: bind a knowledge_search tool to this
         # agent's collections when a knowledge base is configured for the run.
         kb = getattr(self.ctx, "knowledge", None)
@@ -2461,8 +2461,10 @@ class Agent:
             # richer strategy via [context] compaction_strategy (heuristic /
             # learned / multimodal / streaming / graph) — all registered in the
             # one compaction.plugins dispatcher, which fails safe to heuristic
-            # on an unknown name. The agent's llm seam + conversation id reach
-            # the strategies that use them.
+            # on an unknown name — or into the ledger-learned v6 picker via
+            # [compaction] hybrid (an explicit strategy name always wins). The
+            # agent's llm seam + conversation id reach the strategies that use
+            # them.
             # Process-reward guidance (opt-in, default off): if the PRM has
             # judged the last few steps unpromising, nudge a course-change. A
             # no-op unless [self_improvement] prm_guidance is on AND a PRM is

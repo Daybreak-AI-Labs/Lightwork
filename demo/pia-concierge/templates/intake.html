@@ -1,0 +1,144 @@
+{% extends "base.html" %}
+{% block title %}Privacy intake — {{ case.subject }}{% endblock %}
+{% block body %}
+<div class="page-head">
+  <div class="eyebrow">Privacy assessment · {{ case.id }}</div>
+  <h1>Privacy questionnaire — {{ case.subject }}</h1>
+  <p>A few quick questions about how {{ case.subject }} handles personal data. This takes about
+     two minutes. Your answers feed a first-pass risk assessment that the privacy team reviews.</p>
+</div>
+
+<div class="card" id="chat">
+  <div id="thread"></div>
+  <div id="controls" style="margin-top:16px;"></div>
+</div>
+
+<div class="card">
+  <h2>Attach documents (optional)</h2>
+  <p class="muted" style="margin-bottom:10px;">DPA, security overview, architecture diagram — anything that helps the review.</p>
+  <form id="uploadForm">
+    <div class="flow">
+      <input type="file" id="fileInput" style="flex:1;">
+      <button class="btn ghost" type="submit">Attach</button>
+    </div>
+  </form>
+  <div id="uploads" class="muted" style="margin-top:10px;">
+    {% for u in case.uploads %}<div class="mono">📎 {{ u }}</div>{% endfor %}
+  </div>
+</div>
+
+{% if done %}
+<div class="card" style="border-color: var(--low);">
+  <div class="flow">
+    <span class="risk low">✓ submitted</span>
+    <span class="muted">Your answers are with the privacy team. The assessment was scored by
+      Lightwork and is awaiting human review in the governed approvals queue.</span>
+  </div>
+</div>
+{% endif %}
+
+<div id="submitBar" class="card" style="display:none;">
+  <div class="flow">
+    <strong>All set.</strong>
+    <span class="muted">Submit your answers for the privacy team's first-pass review.</span>
+    <span class="spacer"></span>
+    <form method="post" action="/intake/{{ case.id }}/submit">
+      <button class="btn" type="submit">Submit for review →</button>
+    </form>
+  </div>
+</div>
+
+<div class="flow" style="margin-top:8px;">
+  <button class="btn ghost sm" id="autofill">⚡ Auto-fill (presenter)</button>
+  <span class="faint" style="font-size:12px;">Fills realistic demo answers so you can skip the typing on stage.</span>
+</div>
+
+<script>
+const CASE = "{{ case.id }}";
+const QUESTIONS = {{ questions|tojson }};
+let idx = 0;
+const thread = document.getElementById('thread');
+const controls = document.getElementById('controls');
+const submitBar = document.getElementById('submitBar');
+
+function bubble(who, text) {
+  const d = document.createElement('div');
+  d.style.cssText = 'margin:10px 0; display:flex; ' + (who==='bot'?'':'justify-content:flex-end;');
+  const b = document.createElement('div');
+  b.style.cssText = 'max-width:78%; padding:10px 14px; border-radius:14px; font-size:14px; ' +
+    (who==='bot'
+      ? 'background:var(--bg-raise); border:1px solid var(--line);'
+      : 'background:var(--accent-glow); border:1px solid var(--accent-dim); color:var(--ink);');
+  b.textContent = text;
+  d.appendChild(b);
+  thread.appendChild(d);
+  thread.scrollTop = thread.scrollHeight;
+}
+
+const SEVLABEL = {high:'sev-high', medium:'sev-medium', low:'sev-low'};
+
+function ask() {
+  controls.innerHTML = '';
+  if (idx >= QUESTIONS.length) {
+    bubble('bot', "That's everything — thank you. You can attach documents below, then submit for review.");
+    submitBar.style.display = 'block';
+    return;
+  }
+  const q = QUESTIONS[idx];
+  bubble('bot', q.prompt);
+  const wrap = document.createElement('div');
+  wrap.className = 'flow';
+  const opts = [['yes','Yes'],['no','No'],['na','N/A'],['unknown','Not sure']];
+  opts.forEach(([val,lbl]) => {
+    const btn = document.createElement('button');
+    btn.className = 'btn ghost sm';
+    btn.textContent = lbl;
+    btn.onclick = () => answer(q, val, lbl);
+    wrap.appendChild(btn);
+  });
+  const sec = document.createElement('span');
+  sec.className = 'faint';
+  sec.style.cssText = 'font-size:12px; margin-left:auto;';
+  sec.innerHTML = '<span class="sev-dot '+(SEVLABEL[q.severity]||'')+'"></span> ' + q.section;
+  wrap.appendChild(sec);
+  controls.appendChild(wrap);
+}
+
+async function answer(q, val, lbl) {
+  bubble('me', lbl);
+  const fd = new FormData();
+  fd.append('question_id', q.id);
+  fd.append('answer', val);
+  await fetch(`/intake/${CASE}/answer`, {method:'POST', body:fd});
+  idx++;
+  setTimeout(ask, 250);
+}
+
+document.getElementById('uploadForm').onsubmit = async (e) => {
+  e.preventDefault();
+  const f = document.getElementById('fileInput').files[0];
+  if (!f) return;
+  const fd = new FormData();
+  fd.append('file', f);
+  const r = await (await fetch(`/intake/${CASE}/upload`, {method:'POST', body:fd})).json();
+  const box = document.getElementById('uploads');
+  box.innerHTML = (r.uploads||[]).map(u => '<div class="mono">📎 '+u+'</div>').join('');
+  document.getElementById('fileInput').value = '';
+};
+
+document.getElementById('autofill').onclick = async () => {
+  await fetch(`/intake/${CASE}/autofill`, {method:'POST'});
+  bubble('bot', "(Auto-filled with realistic demo answers.)");
+  idx = QUESTIONS.length;
+  ask();
+};
+
+{% if done %}
+document.getElementById('autofill').style.display = 'none';
+bubble('bot', "This assessment has already been submitted — thank you!");
+{% else %}
+bubble('bot', "Hi! I'll ask a few questions about how {{ case.subject }} handles personal data.");
+ask();
+{% endif %}
+</script>
+{% endblock %}

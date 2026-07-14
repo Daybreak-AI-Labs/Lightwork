@@ -20,6 +20,14 @@ def test_worktree_diff_neutralizes_checkout_clean_filters(tmp_path):
     repo = tmp_path / "repo"
     repo.mkdir()
     subprocess.run(["git", "init", "-q"], cwd=repo, check=True)
+    # Real SWE-bench instances are checked out at a base_commit, so _worktree_diff
+    # captures the agent's edits with ``git diff HEAD`` (staged OR unstaged). Give
+    # the fixture a HEAD; owned.pwn / .gitattributes stay NEW below, so they still
+    # appear in the diff and still drive git to run the (neutralized) clean filter.
+    subprocess.run(
+        ["git", "-c", "user.email=t@example.com", "-c", "user.name=t",
+         "commit", "-q", "--allow-empty", "-m", "base"],
+        cwd=repo, check=True)
 
     marker = tmp_path / "filter-ran"
     subprocess.run(

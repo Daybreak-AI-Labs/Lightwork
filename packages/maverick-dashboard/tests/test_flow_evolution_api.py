@@ -47,10 +47,10 @@ def test_auto_apply_softens_a_failing_action_when_enabled(monkeypatch, tmp_path)
     assert evolution_log.last_apply("fa", "a")["source"] == "auto-apply"
 
 
-def test_auto_apply_hardens_a_reliable_one_tool_agent_when_tool_inferred(monkeypatch, tmp_path):
-    # The forward HARDEN arrow: a reliably-succeeding agent node that consistently
-    # called one tool is autonomously hardened to a deterministic action calling
-    # that tool -- no human needed once the tool was inferred from captured runs.
+def test_auto_apply_leaves_reliable_one_tool_agent_for_human_review(monkeypatch, tmp_path):
+    # HARDEN proposals are model-influenced because their tool comes from captured
+    # agent behavior, so auto-apply must leave them for human review even when a
+    # single tool was inferred confidently.
     _isolate(monkeypatch, tmp_path)
     monkeypatch.setenv("MAVERICK_FLOWS_AUTO", "1")
     monkeypatch.setattr("maverick.config.get_flows",
@@ -67,7 +67,7 @@ def test_auto_apply_hardens_a_reliable_one_tool_agent_when_tool_inferred(monkeyp
     monkeypatch.setattr(aq, "_queue", None)
     aq._handle_flow_evolve()
     hardened = store.load_flow("fh").nodes["a"]
-    assert hardened.kind == "action" and hardened.tool == "summarize_tool"
+    assert hardened.kind == "agent" and not hardened.tool
 
 
 def test_auto_apply_leaves_a_reliable_agent_alone_without_an_inferred_tool(monkeypatch, tmp_path):
@@ -225,6 +225,24 @@ def test_signals_unknown_flow_is_404(monkeypatch, tmp_path):
     assert _client().get("/api/v1/flows/ghost/signals").status_code == 404
 
 
+def test_signals_are_owner_scoped(monkeypatch, tmp_path):
+    _isolate(monkeypatch, tmp_path)
+    from maverick.flow import node_outcomes, store
+    from maverick.flow.ir import Flow, FlowNode
+    from maverick_dashboard import api as api_mod
+
+    store.save_flow(Flow(
+        id="alice-flow", name="Alice", start="g", owner="user:alice",
+        nodes={"g": FlowNode(id="g", kind="approval", prompt="ok?", label="gate")},
+    ))
+    node_outcomes.record("alice-flow", "g", "approval", 1.0)
+    monkeypatch.setattr(api_mod, "caller_principal", lambda request: "user:bob")
+    monkeypatch.setattr(api_mod, "is_dashboard_admin", lambda principal: False)
+    monkeypatch.setattr(api_mod, "require_permission", lambda request, permission: None)
+
+    assert _client().get("/api/v1/flows/alice-flow/signals").status_code == 404
+
+
 def test_impact_unchanged_node(monkeypatch, tmp_path):
     _isolate(monkeypatch, tmp_path)
     c = _client()
@@ -266,6 +284,20 @@ def test_evolve_pass_reverts_a_regression_when_enabled(monkeypatch, tmp_path):
     aq._handle_flow_evolve()
     assert store.load_flow("f").nodes["a"].kind == "agent"          # undone
     assert evolution_log.last_apply("f", "a")["source"] == "auto-revert"
+
+
+def test_evolve_pass_skips_stale_apply_after_manual_save(monkeypatch, tmp_path):
+    _isolate(monkeypatch, tmp_path)
+    monkeypatch.setenv("MAVERICK_FLOWS_AUTO", "1")
+    from maverick.flow import evolve, store
+    from maverick_dashboard import automation_queue as aq
+    _build_regressed_scenario()
+    edited = evolve.apply_proposal(store.load_flow("f"), "a", "action", tool="safe_tool")
+    store.save_flow(edited)
+    aq._handle_flow_evolve()
+    node = store.load_flow("f").nodes["a"]
+    assert node.kind == "action"
+    assert node.tool == "safe_tool"
 
 
 def test_evolve_pass_is_a_noop_when_disabled(monkeypatch, tmp_path):
@@ -327,6 +359,23 @@ def test_run_api_redacts_secrets_in_data(monkeypatch, tmp_path):
                                  data={"api_key": "sk-secret", "user": "ada"}))  # pragma: allowlist secret
     got = _client().get("/api/v1/flows/runs/" + rid).json()
     assert got["data"]["api_key"] == "***redacted***" and got["data"]["user"] == "ada"
+
+
+def test_run_api_redacts_secrets_in_input_data(monkeypatch, tmp_path):
+    _isolate(monkeypatch, tmp_path)
+    from maverick.flow import store
+    rid = store.new_run_id()
+    store.save_run(store.FlowRun(run_id=rid, flow_id="f", status="completed",
+                                 data={"ok": True},
+                                 input_data={
+                                     "access_token": "tok_INPUT_SECRET_123",
+                                     "Authorization": "Bearer INPUT_AUTH_SECRET",
+                                     "user": "ada",
+                                 }))  # pragma: allowlist secret
+    got = _client().get("/api/v1/flows/runs/" + rid).json()
+    assert got["input_data"]["access_token"] == "***redacted***"
+    assert got["input_data"]["Authorization"] == "***redacted***"
+    assert got["input_data"]["user"] == "ada"
 
 
 def test_enqueue_flow_run_dedups_on_idem_key(monkeypatch, tmp_path):

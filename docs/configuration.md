@@ -8,6 +8,21 @@ Lightwork reads `~/.maverick/config.toml`. The installer wizard writes it; you c
 [deployment]
 type = "desktop"       # desktop | docker | vps | phone
 
+[governance]
+# The business-shaped governance level picked at onboarding. Every level gets
+# the self-learning/self-improvement lifecycle; the level sets the governance
+# posture around it:
+#   essentials  small business (a gym, a studio) — learning, no ceremony
+#   standard    growing company — + signed audit trail, enforced daily quotas
+#   regulated   bank/clinic/government — + human sign-off (Ed25519) for
+#               code/weights promotions, WORM audit export, long retention
+# A label for humans + dashboards: the wizard expands it into the concrete
+# knobs ([audit], [quotas], [self_improvement], [retention], ...) below, so
+# hand-edits keep working. Re-run `maverick init` to switch levels (the wizard
+# defaults to your previously recorded level). The advanced wizard writes
+# "custom": the operator hand-picked every knob, no preset applies.
+profile = "essentials"   # essentials | standard | regulated | custom
+
 [providers.anthropic]
 api_key = "${ANTHROPIC_API_KEY}"   # env var interpolation
 
@@ -98,6 +113,21 @@ bot_token = "${TELEGRAM_BOT_TOKEN}"
 # Optional bearer token. Required for VPS deploys reachable from the open
 # internet; harmless to leave unset on a desktop install (localhost-only).
 token = "${MAVERICK_DASHBOARD_TOKEN}"
+
+# Department (suite) access for authenticated users with NO explicit grant on
+# the Users page (job-function scoping: a finance analyst sees and runs only
+# Finance specialists). Unset = unrestricted — scoping is opt-in per user.
+# Set a list for deny-by-default: new sign-ins may then use only these
+# departments until an admin grants more. Admins are never scoped.
+# default_suites = ["finance"]
+
+# SCIM-group mapping: when your IdP (Okta/Entra) pushes Groups via SCIM,
+# these tables turn team membership into access — no per-user assignment.
+# An explicit Users-page assignment always beats the group-derived value.
+# [dashboard.group_roles]
+# "Finance Team" = "operator"
+# [dashboard.group_suites]
+# "Finance Team" = ["finance", "tax"]
 
 [flows]
 # The visual flow-automation engine (a deterministic graph of agent/action/

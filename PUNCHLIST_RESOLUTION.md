@@ -85,11 +85,15 @@ them blind would be worse than flagging them.
    validated against a live Postgres. *Plan:* add `trust_tier SMALLINT DEFAULT 3` to `facts`,
    persist it in `upsert_fact`, read it in `get_facts_with_trust`; regen the lock; test on PG.
 
-4. **Compaction-hybrid wiring (finding #8).** The picker is implemented + tested but not in the
-   live path, and its strategy vocabulary (`truncate/structural/retrieval/summarize`) must first
-   be reconciled with `compaction.strategies` before wiring `pick_strategy` behind `[compaction]
-   hybrid`. *Plan:* align the vocab, add one caller in `compaction.plugins.compact_with`, add a
-   behavioral test that flipping the flag changes strategy selection.
+4. **Compaction-hybrid wiring (finding #8).** ✅ **RESOLVED** — the plan below shipped:
+   `compaction.plugins.compact_with` now consults the hybrid picker when `[compaction] hybrid`
+   is on and no strategy is explicitly named, maps the abstract vocabulary onto the registered
+   implementations (`_ABSTRACT_TO_LIVE`: truncate/structural → heuristic, retrieval → graph,
+   summarize → learned), records the achieved shrink back into the outcome ledger, and fails
+   open to the built-in on any error. Behavioral tests cover flag-flips-selection, explicit
+   config beating the picker (with a one-time shadow warning), ledger recording, and fail-open.
+   *(Original plan: align the vocab, add one caller in `compaction.plugins.compact_with`, add a
+   behavioral test that flipping the flag changes strategy selection.)*
 
 ---
 

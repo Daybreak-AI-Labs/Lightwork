@@ -21,6 +21,35 @@ class TestForbiddenPaths:
         assert not result.ok
         assert "tests/test_foo.py" in result.blocked_paths
 
+    def test_timestamped_diff_header_cannot_smuggle_a_test_edit(self):
+        # Regression: git ---/+++ headers may carry a trailing tab+timestamp that
+        # git apply ignores. A plain unified diff (no `diff --git` line, so the
+        # only path source is the ---/+++ headers) editing a root-level test file
+        # -- which matches ONLY the $-anchored forbidden pattern -- must still be
+        # blocked, or the timestamp defeats the anchor and git apply patches the
+        # real test file.
+        from maverick.coding_mode import defensive_validate
+        ts = "\t2024-01-01 00:00:00.000000000 +0000"
+        patch = (f"--- a/test_evil.py{ts}\n"
+                 f"+++ b/test_evil.py{ts}\n"
+                 "@@ -1 +1 @@\n-assert x == 1\n+assert x == 2\n")
+        result = defensive_validate(patch)
+        assert not result.ok
+        assert "test_evil.py" in result.blocked_paths
+
+    def test_timestamped_diff_header_cannot_smuggle_a_graded_file_edit(self):
+        # Same evasion against the exact FAIL_TO_PASS path match: a graded file
+        # that is NOT named like a test still must not be editable by appending a
+        # timestamp that defeats the exact-string membership check.
+        from maverick.coding_mode import defensive_validate
+        ts = "\t2024-01-01 00:00:00.000000000 +0000"
+        graded = "pkg/checks.py"
+        patch = (f"--- a/{graded}{ts}\n+++ b/{graded}{ts}\n"
+                 "@@ -1 +1 @@\n-a\n+b\n")
+        result = defensive_validate(patch, fail_to_pass=[f"{graded}::test_a"])
+        assert not result.ok
+        assert graded in result.blocked_paths
+
     def test_conftest_warned_not_blocked(self):
         """Wave 12 (council F8a): conftest.py changes are no longer
         hard-blocked; the grader either accepts the edit (when the

@@ -106,10 +106,13 @@ def test_wizard_model_ids_have_pricing():
     cost from the user. Wizard-offered ids must be priced.
 
     Exemptions:
-      - ollama / openrouter / tgi / openai_compatible / vllm / azure /
-        bedrock: local, aggregated, or self-hosted catalogs whose model id
-        is a placeholder for whatever the endpoint serves (dynamic, zero
-        per-token cost known to the kernel).
+      - ollama / openrouter / tgi / openai_compatible / vllm: local,
+        aggregated, or self-hosted catalogs whose model id is a placeholder
+        for whatever the endpoint serves (dynamic, zero per-token cost known
+        to the kernel).
+      - azure / bedrock: paid hosted providers with dynamic placeholders;
+        budget._lookup_price must fail closed for those placeholders rather
+        than billing them at a fallback estimate.
       - codex_cli: ChatGPT/Codex subscription via the Codex CLI -- no
         per-token API invoice exists; budget._lookup_price prices the
         codex_cli: prefix at $0 deliberately (not a silent fallback).
@@ -119,9 +122,10 @@ def test_wizard_model_ids_have_pricing():
     except ImportError:
         pytest.skip("maverick-core not installed in this environment")
     unpriced: list[str] = []
+    fail_closed_dynamic = {"azure", "bedrock"}
     for prov_id, info in models.PROVIDERS.items():
         if prov_id in ("ollama", "openrouter", "tgi", "openai_compatible",
-                       "vllm", "azure", "bedrock", "codex_cli"):
+                       "vllm", "codex_cli") or prov_id in fail_closed_dynamic:
             continue
         for m in info["models"]:
             if m["id"] not in MODEL_PRICES:
@@ -129,3 +133,15 @@ def test_wizard_model_ids_have_pricing():
     assert not unpriced, (
         f"wizard offers models not priced in llm.MODEL_PRICES: {unpriced}"
     )
+
+
+def test_paid_dynamic_hosted_placeholders_fail_closed():
+    """Azure/Bedrock placeholders must not use fallback budget pricing."""
+    try:
+        from maverick.budget import UnpricedModelError, _lookup_price
+    except ImportError:
+        pytest.skip("maverick-core not installed in this environment")
+
+    for model in ("azure", "azure:azure", "bedrock", "bedrock:bedrock"):
+        with pytest.raises(UnpricedModelError):
+            _lookup_price(model)

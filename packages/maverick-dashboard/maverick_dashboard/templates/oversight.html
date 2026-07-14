@@ -58,7 +58,14 @@
       const box = document.getElementById('active-now');
       const why = document.getElementById('why-panel');
       if (!box) return;
-      function esc(s) { const d = document.createElement('div'); d.textContent = s == null ? '' : String(s); return d.innerHTML; }
+      // Quote-safe: escapes " and ' too, so values are safe in both element
+      // content and quoted attributes (the textContent->innerHTML trick left
+      // quotes unescaped).
+      function esc(s) {
+        return (s == null ? '' : String(s)).replace(/[&<>"']/g, function (c) {
+          return {'&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;'}[c];
+        });
+      }
       function ago(ts) {
         if (!ts) return '';
         const s = Math.max(0, Math.floor(Date.now() / 1000 - ts));
@@ -77,8 +84,8 @@
           let h = '<div class="panel" style="border-color: var(--brand);">'
                 + '<div style="display:flex; justify-content:space-between; align-items:center;">'
                 + '<strong>Why #' + esc(id) + ' — ' + esc(d.title) + '</strong>'
-                + '<button onclick="document.getElementById(\'why-panel\').innerHTML=\'\'" '
-                + 'style="background:none;border:1px solid var(--border);border-radius:4px;color:var(--muted);cursor:pointer;padding:0.1rem 0.5rem;">close</button></div>'
+                + '<button type="button" class="btn btn--ghost" data-why-close '
+                + 'style="font-size:var(--text-sm);padding:0.1rem 0.5rem;">close</button></div>'
                 + '<p class="muted" style="margin:0.3rem 0;">status <strong>' + esc(d.status) + '</strong>'
                 + ' · cost <strong>$' + esc((d.cost_dollars || 0).toFixed ? d.cost_dollars.toFixed(4) : d.cost_dollars) + '</strong>'
                 + (sum ? ' · ' + sum : '') + '</p>';
@@ -100,6 +107,10 @@
         const b = ev.target.closest('button[data-why]');
         if (b) showWhy(b.getAttribute('data-why'));
       });
+      // Close the drill-down panel (delegated, so no per-render inline handler).
+      if (why) why.addEventListener('click', function(ev) {
+        if (ev.target.closest('[data-why-close]')) why.innerHTML = '';
+      });
       async function tick() {
         try {
           const r = await fetch('/api/v1/oversight/active');
@@ -112,8 +123,8 @@
             h += '<tr><td class="muted">#' + esc(g.id) + '</td><td>' + esc(g.title) + '</td>'
                + '<td><code>' + esc(g.activity || '—') + '</code></td>'
                + '<td class="muted" style="white-space:nowrap;">' + esc(ago(g.updated_at)) + '</td>'
-               + '<td><button type="button" data-why="' + esc(g.id) + '" '
-               + 'style="background:none;border:1px solid var(--border);border-radius:4px;color:var(--brand);cursor:pointer;padding:0.1rem 0.5rem;">why?</button></td></tr>';
+               + '<td><button type="button" class="btn btn--ghost" data-why="' + esc(g.id) + '" '
+               + 'style="font-size:var(--text-sm);padding:0.1rem 0.5rem;">why?</button></td></tr>';
           }
           box.innerHTML = h + '</tbody></table>';
         } catch (e) { /* keep last render on a transient error */ }

@@ -56,3 +56,17 @@ def test_schedule_cron_reads_tz_from_payload():
                                  {"__cron__": "0 9 * * *", "__tz__": "America/New_York"},
                                  after=_after(2026, 7, 1))
     assert _local(run_at, "America/New_York").hour == 9   # tz honoured via the payload
+
+
+def test_dst_fall_back_never_returns_a_past_fold_candidate():
+    from zoneinfo import ZoneInfo
+
+    zone = ZoneInfo("America/New_York")
+    after_dt = dt.datetime(2026, 11, 1, 1, 30, 30, tzinfo=zone).replace(fold=1)
+    after = after_dt.timestamp()
+
+    ts = next_run("31 1 * * *", after=after, tz="America/New_York")
+    d = _local(ts, "America/New_York")
+
+    assert ts > after
+    assert (d.year, d.month, d.day, d.hour, d.minute) == (2026, 11, 2, 1, 31)

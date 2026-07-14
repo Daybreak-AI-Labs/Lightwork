@@ -71,6 +71,16 @@ class TestHtmlStripping:
         assert "Invoice" in out and "attached" in out
         assert "<" not in out and "color:red" not in out and "x()" not in out
 
+    def test_strip_html_handles_unclosed_raw_text_tags_quickly(self):
+        html = "<script>" * 5000 + "visible"
+        out = _strip_html(html)
+        assert out == ""
+
+    def test_strip_html_keeps_similar_non_raw_text_tags(self):
+        html = "<scripture>Keep this</scripture><stylex>and this</stylex>"
+        out = _strip_html(html)
+        assert "Keep this" in out and "and this" in out
+
     def test_singlepart_html_message_stripped(self):
         ch = EmailChannel.__new__(EmailChannel)
         msg = EmailMessage()

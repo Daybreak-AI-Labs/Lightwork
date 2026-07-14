@@ -77,6 +77,11 @@ class SwarmContext:
     # enabled; children inherit an *attenuated* copy so a sub-agent can never
     # exceed it. Typed Any to avoid importing the capability module here.
     capability: Any | None = None
+    # Department-suite grant for this run. None == unrestricted (auth off,
+    # dashboard admin, or no explicit/default grant). Non-None means specialist
+    # discovery/spawn tools may only expose packs whose suite is in the grant;
+    # generic packs with no suite remain unscoped.
+    allowed_suites: frozenset[str] | None = None
     # Verified peer-to-peer handoffs (bus_handoff): the run's signed-delegation
     # trust domain -- an ephemeral issuer key + a process-wide replay nonce cache.
     # Lazily installed by ``bus_handoff.authority_for`` when capability

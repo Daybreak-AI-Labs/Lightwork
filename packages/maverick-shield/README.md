@@ -12,8 +12,8 @@ See [`../../docs/safety.md`](../../docs/safety.md) for profiles and
 ## Roster-wide governance invariants
 
 Beyond the three runtime chokepoints, the platform enforces six governance
-invariants verified across all 2,020 specialist packs and fault-injected at
-1,000,000 iterations:
+invariants verified across all 2,020 specialist packs with a non-vacuous
+fault-injection control (property-fuzzed up to 5,000 iterations):
 
 1. **Tool-reachability** — no drafting/non-builder agent can reach a
    state-mutating tool.

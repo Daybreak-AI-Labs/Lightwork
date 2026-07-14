@@ -127,7 +127,14 @@ def claim_handoffs_are_verified():
 
 
 def claim_audit_is_tamper_evident():
-    """The action ledger is a signed hash-chain: altering a row breaks verification."""
+    """The action ledger is a signed hash-chain: altering a row breaks verification.
+
+    The chain ALWAYS detects an edited row (integrity). Whether that rises to
+    *tamper-evidence against a same-uid actor* depends on key custody: a
+    co-located on-disk key can be read and used to re-sign, so the detail says so
+    and points at off-host custody; an off-host (env-injected / KMS) key closes
+    that gap. See :func:`maverick.audit.signing.active_key_is_offhost`.
+    """
     import tempfile
     from pathlib import Path
 
@@ -148,10 +155,34 @@ def claim_audit_is_tamper_evident():
             path.write_text("\n".join(rows).replace('"amount": 6000', '"amount": 60') + "\n")
             broken = signing.verify_chain(path, signer.public_key_hex)
             _check(broken, "tampering an audited row was NOT detected")
-            return ("2-row signed chain verifies clean; altering an amount is "
+            base = ("2-row signed chain verifies clean; altering an amount is "
                     f"caught ({broken[0].reason})")
+            if signing.active_key_is_offhost():
+                return base + "; key custody is off-host -- tamper-evident against a same-uid actor"
+            return (base + " -- co-located key: detects non-privileged edits only, "
+                    f"NOT tamper-evidence vs a same-uid actor (set {signing._SIGNING_KEY_ENV} "
+                    "for off-host key custody)")
     finally:
         signing.KEY_DIR = saved_key_dir
+
+
+def _audit_ledger_label() -> str:
+    """Label for the audit-ledger guarantee, honest about signing-key custody.
+
+    Only claims *tamper-evidence* when the key is held off-host (env-injected /
+    KMS): with the default co-located on-disk key the chain still verifies for
+    integrity (it detects accidental / non-privileged edits), but a same-uid
+    actor can read the key and cleanly re-sign, so the headline is downgraded to
+    an integrity claim rather than a tamper-evidence one.
+    """
+    try:
+        from .audit import signing
+        offhost = signing.active_key_is_offhost()
+    except BaseException:
+        offhost = False
+    if offhost:
+        return "Tamper-evident audit ledger"
+    return "Audit ledger integrity (co-located key)"
 
 
 # label, fn, needs_crypto
@@ -203,7 +234,11 @@ def run_all(*, crypto: bool | None = None) -> list[GuaranteeResult]:
             continue
         try:
             detail = fn()
-            results.append(GuaranteeResult(label, True, detail, needs_crypto))
+            # The audit-ledger headline must reflect signing-key custody: it may
+            # only claim tamper-evidence when the key is off-host (co-located key
+            # verifies for integrity but a same-uid actor can re-sign).
+            row_label = _audit_ledger_label() if fn is claim_audit_is_tamper_evident else label
+            results.append(GuaranteeResult(row_label, True, detail, needs_crypto))
         except BaseException as e:  # a proof must report its own failure
             results.append(GuaranteeResult(
                 label, False, f"{type(e).__name__}: {e}", needs_crypto))

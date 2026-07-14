@@ -43,7 +43,7 @@ import hashlib
 import logging
 import secrets
 import time
-from urllib.parse import urlencode
+from urllib.parse import urlencode, urlparse
 
 import httpx
 from fastapi import APIRouter, HTTPException, Request
@@ -107,6 +107,29 @@ def _is_loopback_request(request: Request) -> bool:
     """
     host = request.client.host if request.client else ""
     return host in _LOOPBACK_HOSTS
+
+
+def _request_is_https(request: Request) -> bool:
+    """True when the browser reached us over TLS, directly or via a
+    TLS-terminating reverse proxy (``X-Forwarded-Proto: https``). A proxy
+    connects to the app over loopback, so the peer being loopback does NOT
+    imply the user is on plain HTTP."""
+    if request.url.scheme == "https":
+        return True
+    forwarded = request.headers.get("x-forwarded-proto", "")
+    return forwarded.split(",")[0].strip().lower() == "https"
+
+
+def _cookie_secure(request: Request) -> bool:
+    """Whether to set ``Secure`` on the auth cookies.
+
+    Secure whenever the request arrived over TLS (so a session established
+    behind a TLS-terminating proxy that connects over loopback is NOT issued a
+    non-Secure cookie that could then leak over a downgraded HTTP request), and
+    on any genuinely non-loopback deployment. Only a plain-HTTP loopback dev
+    session omits it, so ``http://localhost`` still receives the cookie back.
+    """
+    return _request_is_https(request) or not _is_loopback_request(request)
 
 
 def _is_safe_return_to(value: str | None) -> bool:
@@ -356,7 +379,7 @@ async def auth_login(request: Request):
     response = RedirectResponse(auth_url, status_code=302)
     _set_cookie(
         response, TX_COOKIE, tx_cookie,
-        max_age=_TX_TTL, secure=not _is_loopback_request(request),
+        max_age=_TX_TTL, secure=_cookie_secure(request),
     )
     return response
 
@@ -498,7 +521,7 @@ async def auth_callback(request: Request):
     response = RedirectResponse(return_to, status_code=303)
     _set_cookie(
         response, SESSION_COOKIE, session_cookie,
-        max_age=_SESSION_TTL, secure=not _is_loopback_request(request),
+        max_age=_SESSION_TTL, secure=_cookie_secure(request),
     )
     _clear_cookie(response, TX_COOKIE)
     return response
@@ -512,16 +535,33 @@ def _csrf_reject():
     return out
 
 
+def _is_same_origin_get(request: Request) -> bool:
+    """True when a GET carries a same-origin Origin/Referer. Fails closed when
+    neither is present, so a destructive side effect on a GET can be gated
+    against cross-site top-level navigations (the session cookie is SameSite=Lax,
+    which rides such a navigation). A genuine same-origin link click sends a
+    Referer under the dashboard's Referrer-Policy: same-origin."""
+    expected = request.url.netloc
+    for header in ("origin", "referer"):
+        value = request.headers.get(header)
+        if value:
+            return urlparse(value).netloc == expected
+    return False
+
+
 @router.get("/auth/logout")
 async def auth_logout(request: Request):
     """Clear the session cookie and return to ``/``.
 
     ``?all=1`` (log out everywhere) additionally bumps the principal's revocation
     epoch, immediately invalidating every other session/bearer that principal
-    holds -- not just the cookie in this browser."""
+    holds -- not just the cookie in this browser. The ``all`` side effect is
+    gated on a same-origin Origin/Referer so a cross-site page cannot force a
+    global sign-out (session-revocation CSRF); the local cookie is always
+    cleared regardless."""
     if not login_enabled():
         raise HTTPException(status_code=404)
-    if request.query_params.get("all"):
+    if request.query_params.get("all") and _is_same_origin_get(request):
         # Derive the sub from the verified session payload DIRECTLY, not via
         # _principal_from_request_session -- that returns None for an
         # already-revoked session, so "log out everywhere" on a session that was

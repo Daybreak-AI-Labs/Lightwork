@@ -169,8 +169,12 @@ def _op_query(sql: str, url: str, limit: int, confirm: bool,
                 # A confirmed write with a RETURNING clause reports returns_rows,
                 # so commit here too -- SQLAlchemy 2.0 is commit-as-you-go and the
                 # connection would otherwise roll the write back on block exit.
-                # A plain SELECT opened no transaction, so this is a no-op for reads.
-                conn.commit()
+                # Do not commit unconfirmed read-classified statements: SELECT can
+                # still have transactional side effects on some databases (for
+                # example through stored/volatile functions), and those must not
+                # bypass the confirm=true safety gate.
+                if needs_confirm:
+                    conn.commit()
                 return "\n".join(out)
             conn.commit()
             return f"ok: {result.rowcount} row(s) affected"

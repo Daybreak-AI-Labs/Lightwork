@@ -33,6 +33,7 @@ import csv
 import json
 import os
 import re
+import shutil
 import sys
 import threading
 import time
@@ -397,6 +398,190 @@ def _maverick_failing_test_context(fail_ids: list) -> str:
     return ""
 
 
+# Round 4 lever 3: a localization pre-pass. Before the agent starts, mine the
+# brief for candidate symbols, ripgrep them over the source tree, and hand the
+# agent a compact skeleton of the files most likely to hold the bug. This turns
+# the first few turns (which the agent otherwise spends blindly grepping) into
+# free context. Gate: MAVERICK_LOCALIZE (default ON; "0" disables).
+_LOCALIZE_STOPWORDS = frozenset({
+    # English filler that survives the identifier regexes.
+    "the", "this", "that", "with", "from", "have", "when", "then", "else",
+    "true", "false", "none", "null", "return", "import", "class", "self",
+    "test", "tests", "value", "values", "error", "errors", "issue", "should",
+    "would", "could", "which", "there", "their", "about", "into", "your",
+    "will", "must", "does", "done", "code", "line", "lines", "file", "files",
+    "case", "cases", "example", "expected", "actual", "result", "results",
+    "function", "method", "object", "string", "number", "output", "input",
+    "above", "below", "using", "used", "call", "called", "calls", "name",
+    "names", "type", "types", "data", "list", "dict", "args", "kwargs",
+    "raise", "raised", "assert", "print", "python", "github", "https", "http",
+})
+
+
+def _localize_extract_terms(brief: str, cap: int = 12) -> list[str]:
+    """Mine candidate symbols from a brief for the localization pre-pass.
+
+    Pulls code-fenced tokens, dotted paths, CamelCase / snake_case identifiers
+    (>=4 chars), and quoted strings; dedupes preserving first-seen order, drops
+    stopwords / short / non-identifier junk, and caps the list. Never raises."""
+    if not brief:
+        return []
+    try:
+        candidates: list[str] = []
+        # `code-fenced` tokens (inline backticks) -- highest signal.
+        candidates += re.findall(r"`([^`\n]{2,60})`", brief)
+        # "quoted" / 'quoted' strings.
+        candidates += re.findall(r"\"([^\"\n]{2,60})\"", brief)
+        candidates += re.findall(r"'([^'\n]{2,60})'", brief)
+        # dotted.attribute.paths (module.Class.method, pkg.mod).
+        candidates += re.findall(r"\b[A-Za-z_]\w*(?:\.[A-Za-z_]\w*)+\b", brief)
+        # CamelCase identifiers.
+        candidates += re.findall(r"\b[A-Z][a-z0-9]+(?:[A-Z][a-z0-9]*)+\b", brief)
+        # snake_case identifiers.
+        candidates += re.findall(r"\b[a-z][a-z0-9]*(?:_[a-z0-9]+)+\b", brief)
+        seen: set[str] = set()
+        out: list[str] = []
+        for raw in candidates:
+            term = raw.strip().strip(".,:;()[]{}").strip()
+            if not term:
+                continue
+            # A dotted path -> keep the most specific leaf too, but search the
+            # whole token (rg -F treats it literally).
+            low = term.lower()
+            if low in seen:
+                continue
+            # Drop pure stopwords and too-short bare words. Keep dotted /
+            # mixed-case tokens even if a component is a stopword.
+            bare = term.replace("_", "").replace(".", "")
+            if len(bare) < 4:
+                continue
+            if "." not in term and "_" not in term and not any(c.isupper() for c in term):
+                if low in _LOCALIZE_STOPWORDS or not term.isidentifier():
+                    continue
+            seen.add(low)
+            out.append(term)
+            if len(out) >= cap:
+                break
+        return out
+    except Exception:
+        return []
+
+
+def _localize_run(cmd: list[str], timeout: float = 30.0) -> str:
+    """Run a read-only search command with a hardened env; "" on any failure.
+
+    Mirrors :func:`_git_diff`'s env discipline: no inherited config / secrets,
+    PATH only. Used for the `rg`/`grep` localization probes."""
+    import subprocess
+    env = {
+        "GIT_CONFIG_GLOBAL": os.devnull,
+        "GIT_CONFIG_NOSYSTEM": "1",
+        "GIT_CONFIG_SYSTEM": os.devnull,
+        "GIT_OPTIONAL_LOCKS": "0",
+        "PATH": os.environ.get("PATH", ""),
+        "LC_ALL": "C",
+    }
+    try:
+        out = subprocess.run(
+            cmd, capture_output=True, text=True, timeout=timeout, env=env,
+        )
+        return out.stdout or ""
+    except (subprocess.SubprocessError, OSError):
+        return ""
+
+
+def _localize_files_for_term(term: str, workdir: Path, use_rg: bool) -> list[str]:
+    """Files under ``workdir`` (excl. tests/docs/.git) that contain ``term``."""
+    if use_rg:
+        # Glob order matters: later globs win in ripgrep, so the `*.py`
+        # inclusion MUST precede the exclusions or it re-includes tests/.
+        cmd = [
+            "rg", "-l", "--max-count", "5", "-F", "--no-messages",
+            "-g", "*.py",
+            "-g", "!**/tests/**", "-g", "!**/test/**",
+            "-g", "!**/docs/**", "-g", "!**/.git/**",
+            term, str(workdir),
+        ]
+    else:
+        cmd = [
+            "grep", "-rlF", "--include=*.py",
+            "--exclude-dir=tests", "--exclude-dir=test",
+            "--exclude-dir=docs", "--exclude-dir=.git",
+            term, str(workdir),
+        ]
+    raw = _localize_run(cmd)
+    return [ln for ln in raw.splitlines() if ln.strip()]
+
+
+def _localize_skeleton(path: Path, workdir: Path, max_lines: int = 40) -> str:
+    """A compact `def`/`class` outline of one file (grep -n style), capped."""
+    raw = _localize_run(
+        ["grep", "-nE", r"^[[:space:]]*(async def |def |class )", str(path)],
+    )
+    lines = [ln for ln in raw.splitlines() if ln.strip()][:max_lines]
+    if not lines:
+        return ""
+    try:
+        rel = path.relative_to(workdir).as_posix()
+    except ValueError:
+        rel = path.name
+    return f"### {rel}\n" + "\n".join(lines) + "\n"
+
+
+def _maverick_localization_context(brief: str, workdir: Path) -> str:
+    """Localization pre-pass: point the agent at the source files most likely
+    to hold the bug, with a compact def/class skeleton of each.
+
+    Extracts candidate symbols from ``brief``, ripgreps each over the source
+    tree (excluding tests/docs/.git), scores files by the number of DISTINCT
+    terms they match, and emits a def/class outline for the top few. Best-effort
+    and side-effect free: returns "" on any failure and never raises. Gated by
+    MAVERICK_LOCALIZE (default ON; set "0" to disable)."""
+    if os.environ.get("MAVERICK_LOCALIZE", "1") == "0":
+        return ""
+    try:
+        if workdir is None:
+            return ""
+        wd = Path(workdir)
+        if not wd.exists() or not wd.is_dir():
+            return ""
+        terms = _localize_extract_terms(brief)
+        if not terms:
+            return ""
+        use_rg = shutil.which("rg") is not None
+        scores: dict[str, int] = {}
+        for term in terms:
+            for f in _localize_files_for_term(term, wd, use_rg):
+                scores[f] = scores.get(f, 0) + 1
+        if not scores:
+            return ""
+        # Top 5 files by distinct-term hits; stable tiebreak by path.
+        top = sorted(scores.items(), key=lambda kv: (-kv[1], kv[0]))[:5]
+        chunks: list[str] = []
+        total = 0
+        budget = 6000
+        for fpath, _hits in top:
+            skel = _localize_skeleton(Path(fpath), wd)
+            if not skel:
+                continue
+            if total + len(skel) > budget:
+                skel = skel[: max(0, budget - total)]
+            chunks.append(skel)
+            total += len(skel)
+            if total >= budget:
+                break
+        if not chunks:
+            return ""
+        return (
+            "LIKELY-RELEVANT SOURCE FILES (localization pre-pass; the bug is "
+            "probably in one of these -- start here, verify against the code):\n\n"
+            + "\n".join(chunks)
+            + "\n"
+        )
+    except Exception:
+        return ""
+
+
 def _maverick_pro_block(kwargs: dict) -> str:
     """Surface Pro `requirements` + `interface` fields into the brief."""
     requirements = (kwargs.get("requirements") or "").strip()
@@ -685,7 +870,18 @@ def run_maverick(instance_id: str, brief: str, **kwargs) -> Row:
     # them lose easy points because the agent has to infer the spec.
     pro_block = _maverick_pro_block(kwargs)
 
-    enriched_brief = brief + pro_block + failing_test_context
+    # Round 4 (lever 3): localization pre-pass. Resolve the sandbox workdir the
+    # same way the failing-test pre-read does, then prepend a skeleton of the
+    # files most likely to hold the bug. Best-effort; "" on any failure.
+    localization_context = ""
+    try:
+        from maverick.sandbox import build_sandbox as _build_sandbox_for_loc
+        _loc_workdir = Path(_build_sandbox_for_loc().workdir)
+        localization_context = _maverick_localization_context(brief, _loc_workdir)
+    except Exception:
+        localization_context = ""
+
+    enriched_brief = localization_context + brief + pro_block + failing_test_context
 
     start = time.monotonic()
     world = WorldModel()
@@ -696,7 +892,14 @@ def run_maverick(instance_id: str, brief: str, **kwargs) -> Row:
     # Pro budget. Wall is capped at 25 turns x 60s = 25 min effective.
     instance_cap = float(os.environ.get("MAVERICK_INSTANCE_HARD_CAP", "3.0"))
     instance_wall = float(os.environ.get("MAVERICK_INSTANCE_WALL_SEC", "1500"))
-    budget = Budget(max_dollars=instance_cap, max_wall_seconds=instance_wall)
+    # Dollars and wall are the OPERATOR's caps; raise the token/tool caps far
+    # above what the dollar cap can buy so they never bind first. The Budget
+    # defaults (1M input tokens) tripped BEFORE a $2.50 cap on large repos --
+    # observed live in round 3 as a universal "no-diff" on sphinx/seaborn
+    # while cost sat at ~$1.8 of $2.50 and wall at 369s of 1500s.
+    budget = Budget(max_dollars=instance_cap, max_wall_seconds=instance_wall,
+                    max_input_tokens=50_000_000, max_output_tokens=2_000_000,
+                    max_tool_calls=2_000)
     sandbox = build_sandbox()
     # Pre-initialize so the post-finally row construction always has
     # values, even if the agent raises before episode bookkeeping.

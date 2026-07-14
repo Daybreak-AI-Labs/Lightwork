@@ -493,9 +493,13 @@ async def verify_proposal_structured(
         return VerifierVerdict.reject(f"verifier call failed: {e}")
 
     reward = reasoning_reward.parse_structured(resp.text)
-    if getattr(reward, "dimensions", ()):  # a compliant rubric reply
+    if getattr(reward, "dimensions", ()):  # a compliant, complete rubric reply
         _maybe_audit_reward(reward)
         return _verdict_from_reward(reward)
+    if reasoning_reward.looks_structured(resp.text):
+        return VerifierVerdict.reject(
+            "structured verifier returned an incomplete or invalid rubric"
+        )
     # Non-rubric reply (or garbage): behave exactly like the scalar verifier.
     return _parse(resp.text)
 

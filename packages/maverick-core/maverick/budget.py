@@ -16,6 +16,7 @@ import math
 import os
 import threading
 import time
+import uuid
 from dataclasses import dataclass, field
 
 log = logging.getLogger(__name__)
@@ -170,6 +171,18 @@ def _lookup_price(model: str | None) -> tuple[float, float]:
         "ollama", "vllm", "tgi",
     ):
         return 0.0, 0.0
+    # Azure OpenAI and AWS Bedrock are paid hosted providers whose installer
+    # entries necessarily use dynamic placeholders/deployment names. Billing
+    # them at the generic Sonnet fallback can undercount real provider spend, so
+    # fail closed even when global strict pricing is disabled.
+    provider = model.split(":", 1)[0] if ":" in model else model
+    if provider in ("azure", "bedrock"):
+        raise UnpricedModelError(
+            f"no verified price for hosted provider model {model!r}; refusing "
+            "to bill at an estimate. Configure a concrete model id that exists "
+            "in maverick.llm.MODEL_PRICES, or add verified pricing before using "
+            "this paid provider with dollar caps."
+        )
     # Genuinely unknown model: no verified rate exists. Default behaviour bills
     # at the documented Sonnet fallback estimate, but that was silent — phantom
     # mispricing with no signal. Make it observable (warn once per id), and let
@@ -541,28 +554,51 @@ def budget_from_config(*, defaults: dict | None = None,
     for key, val in overrides.items():
         if val is not None and key in _BUDGET_KEY_TYPES:
             kwargs[key] = val
-    _clamp_to_tenant_remainder(kwargs)
-    return Budget(**kwargs)
+    reservation_id = _clamp_to_tenant_remainder(kwargs)
+    budget = Budget(**kwargs)
+    if reservation_id:
+        # Handle so the run can release the tenant hold when it records its
+        # actual spend: ``quotas.record_usage(..., reservation_id=b._tenant_reservation_id)``.
+        budget._tenant_reservation_id = reservation_id
+    return budget
 
 
-def _clamp_to_tenant_remainder(kwargs: dict) -> None:
+def _clamp_to_tenant_remainder(kwargs: dict) -> str | None:
     """Clamp ``kwargs['max_dollars']`` to the active tenant's remaining daily
-    allowance (#78), in place.
+    allowance (#78) in place, and RESERVE that clamped cap against the tenant so
+    concurrent runs coordinate (finding #2). Returns the reservation id, or
+    ``None`` when no reservation was made (no active tenant / no cap / clamp 0).
 
     Highest precedence: the tenant's aggregate daily ceiling is a billing
     guarantee, so it overrides even an explicit ``--max-dollars``. Without it the
     over-quota gate only fires *between* runs, letting one run blow past the
     tenant cap. No active tenant / no cap -> untouched (the default single-tenant
     install is unchanged). Never *raises* a cap, only lowers it.
+
+    Concurrency (finding #2, fixed): the remaining allowance now subtracts BOTH
+    recorded ledger spend AND outstanding in-flight reservations, and this run
+    reserves its clamped cap before returning. So N runs that START for one
+    tenant before any records spend each see the prior starts' holds, and their
+    per-run caps sum to <= the tenant's daily ceiling instead of each clamping to
+    the full remainder (an up-to-N x overshoot). The reservation carries a TTL
+    backstop derived from the wall cap, so a crashed run that never records spend
+    only dents the cap until the hold expires; the hold is released when the run
+    records actual spend (``quotas.record_usage(..., reservation_id=...)``).
+    Residual: the remaining-read and the reserve are not one critical section,
+    so a sub-millisecond race between two simultaneous starts on the same host
+    can still briefly double-reserve -- but the window shrank from a whole run to
+    that gap, and an over-hold only ever LOWERS remaining (conservative), never
+    raises it.
     """
     try:
         from .paths import current_tenant
         from .tenant.registry import tenant_remaining_today
-        remaining = tenant_remaining_today(current_tenant())
+        tenant = current_tenant()
+        remaining = tenant_remaining_today(tenant)
     except Exception:  # pragma: no cover -- quota coordination never blocks a run
-        return
+        return None
     if remaining is None:
-        return
+        return None
     # The clamp must only ever LOWER the effective cap. When no max_dollars was
     # set, the effective cap is Budget's own default (not "unbounded"), so clamp
     # against that -- otherwise a tenant with a large remainder would silently
@@ -570,4 +606,27 @@ def _clamp_to_tenant_remainder(kwargs: dict) -> None:
     current = kwargs.get("max_dollars")
     if current is None:
         current = Budget.__dataclass_fields__["max_dollars"].default
-    kwargs["max_dollars"] = min(float(current), remaining)
+    clamped = min(float(current), remaining)
+    kwargs["max_dollars"] = clamped
+    if clamped <= 0:
+        return None
+    # Reserve the clamped per-run cap so a concurrent start for this tenant sees
+    # our in-flight hold. Best-effort: reservation bookkeeping must never raise
+    # into the run path (mirrors the try/except above).
+    try:
+        from .tenant.registry import reserve_tenant_dollars
+        # A run cannot spend past its wall cap, so the wall cap is a tight, safe
+        # TTL backstop; bound it so a crashed run can't dent the cap for long.
+        wall = kwargs.get("max_wall_seconds")
+        try:
+            wall = float(wall)
+            if not math.isfinite(wall) or wall <= 0:
+                raise ValueError
+        except (TypeError, ValueError):
+            wall = float(Budget.__dataclass_fields__["max_wall_seconds"].default)
+        ttl = min(max(wall, 300.0), 6 * 3600.0)
+        reservation_id = uuid.uuid4().hex
+        reserve_tenant_dollars(tenant, clamped, ttl, reservation_id)
+        return reservation_id
+    except Exception:  # pragma: no cover -- reservation never blocks a run
+        return None

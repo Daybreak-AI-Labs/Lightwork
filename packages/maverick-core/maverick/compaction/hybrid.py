@@ -29,17 +29,16 @@ Off by default: ``[compaction] hybrid = true`` (or
 ``MAVERICK_COMPACTION_HYBRID=1``) enables :func:`pick_strategy`; disabled, it
 returns the ladder's pick — existing behavior.
 
-Status: EXPERIMENTAL — :func:`pick_strategy` is implemented and unit-tested but
-**not yet wired into the live agent compaction path** (``agent.py`` ->
-``compaction.plugins.compact_with`` -> ``compaction.strategies``), which still
-uses the rule ladder. Wiring it requires reconciling this module's abstract
-shrink vocabulary (``truncate | structural | retrieval | summarize``) with the
-live *implementation* vocabulary (``heuristic | learned | multimodal |
-streaming | graph``) — a non-trivial mapping, not a 1:1 rename. Setting
-``[compaction] hybrid`` is therefore a no-op on real runs until a caller is
-added; ``compaction.plugins.compact_with`` now logs a one-time warning when the
-flag is set so that no-op is explicit rather than silent. See docs/ROADMAP.md
-(Performance).
+Status: EXPERIMENTAL, **wired into the live agent compaction path** — with the
+knob on, ``agent.py`` -> ``compaction.plugins.compact_with`` consults a shared
+persistent :class:`HybridPicker`, maps this module's abstract shrink vocabulary
+(``truncate | structural | retrieval | summarize``) onto the registered
+implementation that realizes it (``plugins._ABSTRACT_TO_LIVE``: truncate /
+structural -> ``heuristic``, retrieval -> ``graph``, summarize -> ``learned``),
+runs it, and records the achieved shrink back into the ledger — every step
+fail-open to the built-in default. An explicitly configured strategy
+(``MAVERICK_COMPACTION_STRATEGY`` / ``[context] compaction_strategy``) always
+wins over the picker.
 """
 from __future__ import annotations
 
@@ -332,7 +331,7 @@ def load_weights(path: Path | str | None) -> dict | None:
 # The picker
 # ---------------------------------------------------------------------------
 
-def _default_ledger_path() -> Path:
+def default_ledger_path() -> Path:
     from ..paths import data_dir
     return data_dir() / "compaction_hybrid.json"
 
@@ -415,7 +414,7 @@ def pick_strategy(messages: list[dict], picker: HybridPicker | None = None
             feats = extract_features(messages)
             return default_strategy(feats), "hybrid disabled: rule ladder"
         if picker is None:
-            picker = HybridPicker(ledger_path=_default_ledger_path(),
+            picker = HybridPicker(ledger_path=default_ledger_path(),
                                   weights_path=default_weights_path())
         return picker.pick(messages)
     except Exception as e:
@@ -438,5 +437,6 @@ __all__ = [
     "load_weights",
     "HybridPicker",
     "pick_strategy",
+    "default_ledger_path",
     "default_weights_path",
 ]

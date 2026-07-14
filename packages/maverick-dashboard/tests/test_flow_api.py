@@ -159,6 +159,29 @@ def test_singleton_defers_a_run_while_another_is_in_flight(monkeypatch, tmp_path
     assert store.load_run("r_new").status == "queued"
 
 
+def test_singleton_defers_when_active_run_is_older_than_recent_window(monkeypatch, tmp_path):
+    _isolate(monkeypatch, tmp_path)
+    from maverick.flow import store
+    from maverick_dashboard import automation_queue as aq
+    _reset_aq(monkeypatch, aq)
+    _singleton_flow(mc=1)
+    now = [1_000.0]
+    monkeypatch.setattr(store.time, "time", lambda: now[0])
+    store.save_run(store.FlowRun(run_id="r_active", flow_id="s", status="running"))
+    now[0] = 2_000.0
+    for i in range(201):
+        store.save_run(store.FlowRun(run_id=f"r_done_{i}", flow_id="s", status="completed"))
+    store.save_run(store.FlowRun(run_id="r_new", flow_id="s", status="queued"))
+
+    assert all(r.run_id != "r_active" for r in store.list_runs(flow_id="s", limit=200))
+
+    aq._handle_flow_run(_Job({"flow_id": "s", "run_id": "r_new"}))
+
+    # Even if many newer runs push the active run out of the recent list window,
+    # the singleton cap still sees it and leaves the new run queued for retry.
+    assert store.load_run("r_new").status == "queued"
+
+
 def test_singleton_runs_when_the_slot_is_free(monkeypatch, tmp_path):
     _isolate(monkeypatch, tmp_path)
     from maverick.flow import execution, store

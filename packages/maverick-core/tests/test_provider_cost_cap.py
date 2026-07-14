@@ -129,6 +129,27 @@ def test_enforce_noop_without_cap(ledger):
     assert st.allowed and st.cap is None and st.remaining is None
 
 
+def test_enforce_raises_when_projection_would_exceed(caps_config, ledger):
+    # Under the cap on recorded spend ($19 < $20), but this call's projected $5
+    # would push it to $24 -- projection must block it BEFORE dispatch, where the
+    # old spend-only check let it (and a concurrent set of such calls) sail past.
+    pcc.record("openai", 19.0, now=T0, path=ledger)
+    with pytest.raises(pcc.ProviderCapExceeded):
+        pcc.enforce("openai", projected_dollars=5.0, now=T0, path=ledger)
+
+
+def test_enforce_passes_when_projection_fits(caps_config, ledger):
+    pcc.record("openai", 10.0, now=T0, path=ledger)
+    st = pcc.enforce("openai", projected_dollars=5.0, now=T0, path=ledger)  # 15 < 20
+    assert st.allowed
+
+
+def test_enforce_noop_projection_without_cap(ledger):
+    # A huge projection on a provider with no cap configured is still a no-op.
+    st = pcc.enforce("anthropic", projected_dollars=10_000.0, now=T0, path=ledger)
+    assert st.allowed and st.cap is None
+
+
 # --- period rollover (injected clock) --------------------------------------------
 
 def test_day_rollover_resets_the_window(caps_config, ledger):

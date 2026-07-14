@@ -358,11 +358,27 @@
       background: var(--muted-subtle); color: var(--muted);
     }
     .badge::before { content: ""; flex: none; width: 6px; height: 6px; border-radius: 50%; background: currentColor; }
-    .badge.active, .badge.success { background: var(--success-subtle); color: var(--success); }
-    .badge.blocked { background: var(--warn-subtle); color: var(--warn); }
-    .badge.failure { background: var(--danger-subtle); color: var(--danger); }
-    .badge.info    { background: var(--info-subtle); color: var(--info); }
-    .badge.done, .badge.pending, .badge.cancelled { background: var(--muted-subtle); color: var(--muted); }
+    /* State modifiers accept the many status vocabularies the pages actually
+       emit (goal/run/assessment/tool states, plus literal danger/warn used in
+       templates), so an interpolated `badge {{ status }}` gets the right tint
+       instead of silently falling through to neutral gray — a failed/denied
+       state was rendering identically to a done one. */
+    .badge.active, .badge.success, .badge.succeeded, .badge.passed,
+    .badge.approved, .badge.completed, .badge.resolved, .badge.reviewed,
+    .badge.ok, .badge.healthy { background: var(--success-subtle); color: var(--success); }
+    .badge.blocked, .badge.warn, .badge.warning, .badge.needs_review,
+    .badge.awaiting, .badge.unpinned, .badge.paused, .badge.degraded,
+    .badge.stale { background: var(--warn-subtle); color: var(--warn); }
+    .badge.failure, .badge.failed, .badge.error, .badge.danger,
+    .badge.denied, .badge.deny, .badge.breach, .badge.regressed {
+      background: var(--danger-subtle); color: var(--danger);
+    }
+    .badge.info, .badge.running, .badge.in_progress, .badge.queued {
+      background: var(--info-subtle); color: var(--info);
+    }
+    .badge.done, .badge.pending, .badge.cancelled, .badge.canceled,
+    .badge.unknown, .badge.draft, .badge.idle,
+    .badge.skipped { background: var(--muted-subtle); color: var(--muted); }
 
     code { background: var(--surface-sunken); padding: 0.1rem 0.3rem; border-radius: var(--radius-sm); font-size: 0.85em; }
     .muted { color: var(--muted); }

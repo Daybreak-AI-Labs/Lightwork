@@ -70,6 +70,23 @@ class TestScorers:
         assert score == Score(0.0, 0)
 
 
+def _strict_git_apply_check(patch: str, workdir: Path) -> int:
+    """Run plain (NO --recount) ``git apply --check -p1`` and return git's exit
+    code. Used to PROVE a miscounted-header patch is rejected by strict git
+    apply, so the recount test genuinely exercises the fallback and would fail
+    against the unpatched ``run_git_apply`` (which had no recount rung)."""
+    import subprocess
+    pf = Path(workdir) / ".strict-check.diff"
+    pf.write_text(patch, encoding="utf-8")
+    try:
+        return subprocess.run(
+            ["git", "apply", "--check", "-p1", pf.name],
+            cwd=str(workdir), capture_output=True, text=True,
+        ).returncode
+    finally:
+        pf.unlink()
+
+
 class TestGitApply:
     def test_applies_a_clean_patch(self, tmp_path):
         src = _seed_repo(tmp_path)
@@ -77,13 +94,60 @@ class TestGitApply:
         assert res.ok is True
         assert (src / "pkg" / "a.py").read_text() == "VALUE = 99\n"
 
+    def test_applies_a_miscounted_header_patch(self, tmp_path):
+        # Recount rescue: a patch whose hunk header OVER-COUNTS the new side
+        # (claims 4 new lines while the body has only 3) is REJECTED by strict
+        # `git apply` ("corrupt patch") because git hits EOF still expecting a
+        # line. `git apply --recount` re-derives the counts from the body and
+        # applies it — the LLM-miscounted-header failure mode the fallback
+        # exists for. The change/context are otherwise correct.
+        src = _seed_repo(tmp_path)
+        (src / "pkg" / "c.py").write_text("A = 1\nB = 2\nC = 3\n", encoding="utf-8")
+        miscounted = (
+            "diff --git a/pkg/c.py b/pkg/c.py\n--- a/pkg/c.py\n+++ b/pkg/c.py\n"
+            "@@ -1,3 +1,4 @@\n"   # +1,4 over-counts: the body has only 3 new lines
+            " A = 1\n"
+            "-B = 2\n"
+            "+B = 99\n"
+            " C = 3\n"
+        )
+        # Guard: prove the miscount is REAL — strict git apply rejects it, so
+        # this test passes only because of the --recount fallback (it would fail
+        # against the pre-fix run_git_apply that had no recount rung).
+        assert _strict_git_apply_check(miscounted, src) != 0
+        res = ev.git_apply(miscounted, src)   # default LocalBackend
+        assert res.ok is True
+        assert (src / "pkg" / "c.py").read_text() == "A = 1\nB = 99\nC = 3\n"
+
     def test_rejects_a_non_applying_patch(self, tmp_path):
+        # A wrong-CONTEXT patch fails strict AND recount — recount only fixes
+        # header line counts, never a context mismatch — so it stays fail-closed
+        # and leaves the file untouched.
         src = _seed_repo(tmp_path)
         bad = ("diff --git a/pkg/a.py b/pkg/a.py\n--- a/pkg/a.py\n+++ b/pkg/a.py\n"
                "@@ -1 +1 @@\n-DOES_NOT_MATCH\n+new\n")
         res = ev.git_apply(bad, src)
         assert res.ok is False
         assert (src / "pkg" / "a.py").read_text() == "VALUE = 1\n"   # untouched
+
+    def test_recount_does_not_rescue_context_mismatch(self, tmp_path):
+        # Explicit: a patch with correct line counts but WRONG context lines
+        # fails both the strict and the recount gate. Recount re-derives counts,
+        # not context — so a genuine mismatch must never sneak through.
+        src = _seed_repo(tmp_path)
+        (src / "pkg" / "c.py").write_text("A = 1\nB = 2\nC = 3\n", encoding="utf-8")
+        wrong_context = (
+            "diff --git a/pkg/c.py b/pkg/c.py\n--- a/pkg/c.py\n+++ b/pkg/c.py\n"
+            "@@ -1,3 +1,3 @@\n"
+            " A = 1\n"
+            "-DOES_NOT_MATCH\n"   # this line isn't in the file → context mismatch
+            "+B = 99\n"
+            " C = 3\n"
+        )
+        res = ev.git_apply(wrong_context, src)
+        assert res.ok is False
+        assert "patch does not apply" in res.reason
+        assert (src / "pkg" / "c.py").read_text() == "A = 1\nB = 2\nC = 3\n"
 
     def test_empty_patch_refused(self, tmp_path):
         assert ev.git_apply("", tmp_path).ok is False

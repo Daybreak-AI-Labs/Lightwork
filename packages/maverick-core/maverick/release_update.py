@@ -20,6 +20,8 @@ from __future__ import annotations
 import hashlib
 import json
 import os
+import shutil
+import tempfile
 from dataclasses import dataclass, field
 from pathlib import Path
 
@@ -125,6 +127,35 @@ def verify_bundle(bundle_dir: str | Path, *,
     return BundleCheck(True, "ok", doc.get("version", ""), manifest=doc)
 
 
+def _stage_verified_bundle(source: Path, manifest: dict) -> tempfile.TemporaryDirectory[str]:
+    """Copy verified bundle bytes into a private temp dir and verify them again.
+
+    ``apply_bundle`` performs deployment work after verification, so the original
+    staging directory may be mutable during migrations. Installing from this
+    private copy pins the artifact bytes that survived a post-copy hash check.
+    """
+    tmp = tempfile.TemporaryDirectory(prefix="maverick-bundle-")
+    staged = Path(tmp.name)
+    try:
+        (staged / "manifest.json").write_text(json.dumps(manifest), encoding="utf-8")
+        for art in manifest.get("artifacts", []):
+            name = art.get("name", "")
+            src = source / name
+            dst = staged / name
+            dst.parent.mkdir(parents=True, exist_ok=True)
+            shutil.copy2(src, dst)
+            actual = sha256_file(dst)
+            if actual != art.get("sha256"):
+                raise ValueError(
+                    f"staged artifact hash mismatch: {name} "
+                    f"({actual[:12]}… != {str(art.get('sha256'))[:12]}…)"
+                )
+        return tmp
+    except Exception:
+        tmp.cleanup()
+        raise
+
+
 @dataclass
 class UpgradePlan:
     ok: bool
@@ -186,8 +217,9 @@ def apply_bundle(bundle_dir: str | Path, current_version: str, *,
     Deployment-agnostic by injection — the caller passes ``migrate(id)`` (run one
     governed migration) and ``install(bundle_dir, manifest)`` (swap the binary /
     container tag); this owns the *order and the gates* so the risky steps only
-    run after the signature, hashes, and version-gap checks pass. ``dry_run``
-    stops after planning.
+    run after the signature, hashes, and version-gap checks pass. For non-dry
+    applies, ``bundle_dir`` is a private staged copy whose artifact hashes were
+    rechecked before migrations run. ``dry_run`` stops after planning.
 
     ``snapshot()`` (optional) captures a checkpoint **before** the risky steps
     and returns an opaque handle; ``rollback(bundle_dir, manifest, handle)``
@@ -200,7 +232,7 @@ def apply_bundle(bundle_dir: str | Path, current_version: str, *,
     if not vc.ok:
         return ApplyResult(False, f"verify: {vc.reason}", current_version, vc.version)
     # Reuse the manifest verify_bundle already parsed — no second read/parse, and
-    # we plan/install from provably the same bytes we just verified (no TOCTOU).
+    # no chance to act on a different manifest file than the one just verified.
     manifest = vc.manifest
     plan = plan_upgrade(current_version, manifest)
     if not plan.ok:
@@ -208,45 +240,53 @@ def apply_bundle(bundle_dir: str | Path, current_version: str, *,
     if dry_run:
         return ApplyResult(True, "dry-run ok", plan.from_version, plan.to_version,
                            list(plan.migrations), dry_run=True)
-    handle = ""
-    if snapshot is not None:
-        try:
-            handle = str(snapshot() or "")
-        except Exception as e:  # noqa: BLE001 - snapshot fails BEFORE any change; safe to abort
-            return ApplyResult(False, f"snapshot failed: {e}",
-                               plan.from_version, plan.to_version)
-
-    def _undo(reason: str, applied: list[str]) -> ApplyResult:
-        """Fail an apply, auto-rolling-back to the snapshot when a hook + handle
-        exist. If the rollback itself fails, say so loudly (that's the
-        break-glass case an operator must see)."""
-        if rollback is not None and handle:
+    try:
+        staged_tmp = _stage_verified_bundle(d, manifest)
+    except Exception as e:  # noqa: BLE001 - no deployment changes have run yet
+        return ApplyResult(False, f"stage failed: {e}", plan.from_version, plan.to_version)
+    staged = Path(staged_tmp.name)
+    try:
+        handle = ""
+        if snapshot is not None:
             try:
-                rollback(d, manifest, handle)
-            except Exception as e:  # noqa: BLE001
-                return ApplyResult(False, f"{reason}; rollback ALSO failed: {e}",
-                                   plan.from_version, plan.to_version, applied,
-                                   snapshot=handle, rolled_back=False)
-            return ApplyResult(False, reason, plan.from_version, plan.to_version,
-                               applied, snapshot=handle, rolled_back=True)
-        return ApplyResult(False, reason, plan.from_version, plan.to_version,
-                           applied, snapshot=handle)
+                handle = str(snapshot() or "")
+            except Exception as e:  # noqa: BLE001 - snapshot fails BEFORE any change; safe to abort
+                return ApplyResult(False, f"snapshot failed: {e}",
+                                   plan.from_version, plan.to_version)
 
-    applied: list[str] = []
-    for mig in plan.migrations:
-        try:
-            if migrate is not None:
-                migrate(mig)
-            applied.append(mig)
-        except Exception as e:  # noqa: BLE001 - stop at the first failing migration
-            return _undo(f"migration {mig} failed: {e}", applied)
-    if install is not None:
-        try:
-            install(d, manifest)
-        except Exception as e:  # noqa: BLE001
-            return _undo(f"install failed after migrations: {e}", applied)
-    return ApplyResult(True, "applied", plan.from_version, plan.to_version,
-                       applied, snapshot=handle)
+        def _undo(reason: str, applied: list[str]) -> ApplyResult:
+            """Fail an apply, auto-rolling-back to the snapshot when a hook + handle
+            exist. If the rollback itself fails, say so loudly (that's the
+            break-glass case an operator must see)."""
+            if rollback is not None and handle:
+                try:
+                    rollback(staged, manifest, handle)
+                except Exception as e:  # noqa: BLE001
+                    return ApplyResult(False, f"{reason}; rollback ALSO failed: {e}",
+                                       plan.from_version, plan.to_version, applied,
+                                       snapshot=handle, rolled_back=False)
+                return ApplyResult(False, reason, plan.from_version, plan.to_version,
+                                   applied, snapshot=handle, rolled_back=True)
+            return ApplyResult(False, reason, plan.from_version, plan.to_version,
+                               applied, snapshot=handle)
+
+        applied: list[str] = []
+        for mig in plan.migrations:
+            try:
+                if migrate is not None:
+                    migrate(mig)
+                applied.append(mig)
+            except Exception as e:  # noqa: BLE001 - stop at the first failing migration
+                return _undo(f"migration {mig} failed: {e}", applied)
+        if install is not None:
+            try:
+                install(staged, manifest)
+            except Exception as e:  # noqa: BLE001
+                return _undo(f"install failed after migrations: {e}", applied)
+        return ApplyResult(True, "applied", plan.from_version, plan.to_version,
+                           applied, snapshot=handle)
+    finally:
+        staged_tmp.cleanup()
 
 
 def rollback_bundle(bundle_dir: str | Path, handle: str, *, rollback,

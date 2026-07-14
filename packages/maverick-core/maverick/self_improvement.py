@@ -62,6 +62,21 @@ def _rung_rank(rung: str) -> int:
         return len(RUNGS)
 
 
+def _ceiling_rank(rung: str) -> int:
+    """Rank of the autonomous-promotion CEILING (``max_auto_rung``).
+
+    A ceiling must fail closed in the OPPOSITE direction from a candidate rung:
+    an unknown/typo ceiling ("polciy") must behave as the MOST restrictive
+    ceiling -- below every real rung -- so every promotion still needs human
+    approval. Reusing :func:`_rung_rank` here would return ``len(RUNGS)`` (the
+    highest possible), which silently DISABLES the ceiling (nothing is ever
+    "above" it) -- fail-open, the exact opposite of the intent."""
+    try:
+        return RUNGS.index(rung)
+    except ValueError:
+        return -1
+
+
 # Per-rung gate policy. ``require_capability_evidence`` forces a non-escalation
 # proof (a change that can't show it didn't widen authority is refused at and
 # above ``tool``). ``require_human`` gates code/weights behind explicit sign-off.
@@ -197,6 +212,17 @@ class PromotionRecord:
     promoted_at: float
     rolled_back: bool = False
     rolled_back_at: float | None = None
+    # Signature material so a THIRD PARTY can re-verify the promotion from the
+    # ledger file alone (see benchmarks/audit_ledger.py). All default to None so
+    # a ledger written before this field existed still loads, and a promotion
+    # with no cryptographic approval (dev/community path) records them as None --
+    # i.e. this is purely additive and backward-compatible.
+    #  * approver_id       -- key-id whose Ed25519 signature satisfied the gate
+    #  * payload_sha256     -- digest the approver signed (pins WHAT was approved)
+    #  * approval_signature -- the hex Ed25519 signature over (id, rung, digest)
+    approver_id: str | None = None
+    payload_sha256: str | None = None
+    approval_signature: str | None = None
 
     def to_dict(self) -> dict:
         return {
@@ -206,6 +232,9 @@ class PromotionRecord:
             "promoted_at": self.promoted_at,
             "rolled_back": self.rolled_back,
             "rolled_back_at": self.rolled_back_at,
+            "approver_id": self.approver_id,
+            "payload_sha256": self.payload_sha256,
+            "approval_signature": self.approval_signature,
         }
 
 
@@ -314,7 +343,7 @@ class SelfImprovementController:
         # 4. Human approval -- required at code/weights, and for any rung above
         #    ``max_auto_rung`` (a deployment-wide ceiling on autonomous promotion).
         needs_human = bool(policy["require_human"]) or (
-            _rung_rank(cand.rung) > _rung_rank(self.max_auto_rung))
+            _rung_rank(cand.rung) > _ceiling_rank(self.max_auto_rung))
         human_ok, approver, human_reason = self._human_approval(cand, needs_human)
         gates.append(GateResult("human_approval", human_ok, "" if human_ok else human_reason))
 
@@ -386,10 +415,20 @@ class SelfImprovementController:
             self.audit_fn(content="self_improvement_rejected", decision="reject",
                           rung=cand.rung, candidate=cand.id, reason=verdict.blocking_reason)
             return verdict
+        # Persist the signature material ONLY when the candidate carried a
+        # cryptographic approval, so a third party can re-verify the Ed25519
+        # signature from the ledger alone. ``verdict.approver_id`` is the key-id
+        # that actually satisfied the human-approval gate (reused, not
+        # recomputed). No signature (dev/community boolean path) => all None, so
+        # the record is byte-for-byte what it was before this change.
+        signed = bool(cand.approval_signature)
         rec = PromotionRecord(
             id=cand.id, rung=cand.rung, summary=cand.summary,
             baseline_score=cand.baseline_score, candidate_score=cand.candidate_score,
             promoted_at=self.now(),
+            approver_id=verdict.approver_id if signed else None,
+            payload_sha256=cand.payload_sha256 if signed else None,
+            approval_signature=cand.approval_signature if signed else None,
         )
         if self.ledger is not None:
             self.ledger.add(rec)
@@ -472,6 +511,11 @@ class PromotionLedger:
                     promoted_at=float(d.get("promoted_at", 0.0)),
                     rolled_back=bool(d.get("rolled_back", False)),
                     rolled_back_at=d.get("rolled_back_at"),
+                    # New signature fields default None so a pre-existing ledger
+                    # (written before they were added) loads exactly as before.
+                    approver_id=d.get("approver_id", None),
+                    payload_sha256=d.get("payload_sha256", None),
+                    approval_signature=d.get("approval_signature", None),
                 )
                 self._records[rec.id] = rec
             except (KeyError, TypeError, ValueError):

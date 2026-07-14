@@ -63,6 +63,8 @@ python benchmarks/fetch_swe_bench_verified.py --limit 50 --clone \
 MAVERICK_BENCH_DRY_RUN=1 python benchmarks/swebench_governed.py \
     --manifest ./swebench_verified/instances.jsonl \
     --proposer llm --keys ~/dgm-keys --limit 3
+# Add --allow-host-exec only for a trusted local smoke corpus; external
+# instances should use an explicit container sandbox.
 ```
 
 ### 4. The paid run
@@ -74,8 +76,9 @@ MAVERICK_INSTANCE_HARD_CAP=3.0 python benchmarks/swebench_governed.py \
     --proposer llm --keys ~/dgm-keys \
     --ledger ./swebench_ledger.json --limit 50
 
-# then the full 500 (~$650–1,210). Docker + ~80GB disk recommended here so
-# grading runs in the reproducible per-instance envs (see
+# then the full 500 (~$650–1,210). Use an explicit container sandbox here; do
+# not pass --allow-host-exec for untrusted external instances. Docker + ~80GB
+# disk recommended so grading runs in the reproducible per-instance envs (see
 # RUNBOOK_SWE_BENCH_VERIFIED.md for the Epoch-optimized images).
 ```
 

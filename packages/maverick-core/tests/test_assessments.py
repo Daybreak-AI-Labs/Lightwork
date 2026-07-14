@@ -153,3 +153,29 @@ def test_refresh_on_change_only_touches_existing(monkeypatch):
     _use_surface(monkeypatch, {**SAFE, "allow_tools": ["read_file", "shell"], "max_risk": "high"})
     changed = A.refresh_on_change("agent", "calm_bot", now=3.0)
     assert changed is not None and changed["status"] == "needs_review"
+
+
+def test_real_flow_surface_reports_flownode_tool_and_approval():
+    from maverick.flow.ir import Flow, FlowNode
+    from maverick.flow.store import save_flow
+
+    save_flow(Flow(
+        id="risky_flow",
+        name="Risky flow",
+        start="run_shell",
+        nodes={
+            "run_shell": FlowNode(id="run_shell", kind="action", tool="shell", next="approve"),
+            "approve": FlowNode(id="approve", kind="approval"),
+        },
+    ))
+
+    surface = A.flow_surface("risky_flow")
+
+    assert surface is not None
+    assert surface["allow_tools"] == ["shell"]
+    assert surface["max_risk"] == "medium"
+    assert surface["has_human_gate"] is True
+
+    draft = A.auto_draft("flow", "risky_flow", template="security_only", now=1.0)
+    findings = draft["lenses"]["security"]["findings"]
+    assert any(f["control"] == "Arbitrary code / shell execution" and f["severity"] == "high" for f in findings)

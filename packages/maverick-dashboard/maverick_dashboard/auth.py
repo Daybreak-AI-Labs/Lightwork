@@ -32,6 +32,11 @@ from maverick.proxy_auth import (
     proxy_trusts,
 )
 
+# Arm the SCIM-group grant resolver (registered on import with
+# maverick.suite_grants) so the HTTP gates and the kernel deploy/dispatch
+# gates both see group-derived department grants from the first request.
+from . import scim_groups  # noqa: F401
+
 # Probe/discovery endpoints that must answer without a bearer even when OIDC is
 # on (load balancers and k8s liveness/readiness probes, plus the OpenAPI docs,
 # can't present an ID token). Mirrors the dashboard's existing bearer-auth
@@ -95,6 +100,21 @@ def _proxy_principal(request: Request) -> VerifiedPrincipal | None:
     if not value:
         return None
     return principal_from_proxy(value)
+
+
+def _invite_session_principal(request: Request) -> VerifiedPrincipal | None:
+    """Locally-minted email-invite session identity (no-IdP mode).
+
+    Returns a principal only when ``[dashboard] invites`` is enabled AND the
+    ``mvk_session`` cookie verifies against the local session secret; any
+    error means None — invites must never break the auth path. Imported
+    lazily like :func:`_session_principal` so the gate takes no hard
+    dependency on the invites module."""
+    try:
+        from .invites import local_session_principal
+        return local_session_principal(request)
+    except Exception:  # pragma: no cover - invites must never break auth
+        return None
 
 
 def _session_principal(request: Request) -> VerifiedPrincipal | None:
@@ -185,42 +205,49 @@ def _pin_tenant_from_principal(request: Request, principal: VerifiedPrincipal) -
 
 
 def is_dashboard_admin(principal: str) -> bool:
-    """True iff ``principal`` is listed as a dashboard admin.
+    """True iff ``principal`` is a configured (bootstrap) dashboard admin.
 
-    Admins bypass owner scoping (they see and control every goal/fleet). The
-    roster is the ``[dashboard] admins`` list in ``~/.maverick/config.toml``,
-    with an optional ``MAVERICK_DASHBOARD_ADMINS`` (comma-separated) env
-    override. Comparison is exact against the full ``"user:<sub>"`` form.
+    Admins bypass owner scoping AND department scoping (they see and control
+    every goal/fleet/department). The roster is the ``[dashboard] admins`` list
+    in ``~/.maverick/config.toml`` with an optional ``MAVERICK_DASHBOARD_ADMINS``
+    (comma-separated) env override; comparison is exact against the full
+    ``"user:<sub>"`` form.
+
+    Single source of truth: delegates to :func:`maverick.suite_grants.is_admin_principal`
+    so the dashboard HTTP gates and the kernel deploy/dispatch gates can never
+    disagree about who bypasses scoping. NOTE this is the *config-pinned*
+    roster, not the effective RBAC role — a user assigned ``admin`` via the
+    Users page or a group mapping holds admin *permissions* but remains
+    department-scoped (an admin-of-finance administers finance); only the
+    config roster is the "never scoped" break-glass set.
     """
-    if not principal:
-        return False
-    admins: set[str] = set()
-    env = (os.environ.get("MAVERICK_DASHBOARD_ADMINS") or "").strip()
-    if env:
-        admins = {a.strip() for a in env.split(",") if a.strip()}
-    else:
-        try:
-            from maverick.config import load_config
-
-            raw = (load_config().get("dashboard", {}) or {}).get("admins", []) or []
-        except Exception:  # pragma: no cover - config read must never gate auth
-            raw = []
-        if isinstance(raw, str):
-            raw = [raw]
-        if isinstance(raw, (list, tuple)):
-            admins = {str(a).strip() for a in raw if str(a).strip()}
-    return principal in admins
+    from maverick.suite_grants import is_admin_principal
+    return is_admin_principal(principal)
 
 
 def global_role_for_principal(principal: str | None) -> str | None:
-    """The principal's dashboard-wide RBAC role, ignoring tenant memberships."""
+    """The principal's dashboard-wide RBAC role, ignoring tenant memberships.
+
+    Resolution: explicit stored assignment, then the role mapped to the user's
+    SCIM groups (``[dashboard] group_roles`` — team membership in the IdP), then
+    the configured default. Explicit always beats derived, so an admin can still
+    pin an individual without fighting the group mapping."""
     if principal is None:
         return None
     if is_dashboard_admin(principal):
         return "admin"
     from . import rbac
-
-    return rbac.get_stored_role(principal) or rbac.default_role()
+    stored = rbac.get_stored_role(principal)
+    if stored:
+        return stored
+    try:
+        from . import scim_groups
+        group_role = scim_groups.role_for_principal(principal)
+        if group_role:
+            return group_role
+    except Exception:  # pragma: no cover - group mapping must never gate auth
+        pass
+    return rbac.default_role()
 
 
 def role_for_principal(principal: str | None) -> str | None:
@@ -296,6 +323,55 @@ def require_global_permission(request: Request, permission: str) -> None:
     """Raise ``HTTPException(403)`` unless the global role grants permission."""
     if not has_global_permission(request, permission):
         raise HTTPException(status_code=403, detail="insufficient role for this action")
+
+
+def caller_suites(request: Request) -> frozenset[str] | None:
+    """The department suites the caller may use, or ``None`` for unrestricted.
+
+    Job-function scoping (``maverick_dashboard.suite_grants``), orthogonal to
+    the privilege role: it decides WHICH specialists a user works with, not how
+    much they may do. ``None`` — auth off, a dashboard admin, or a user with no
+    grant (and no configured default) — disables every suite gate, preserving
+    single-user behaviour."""
+    principal = caller_principal(request)
+    if principal is None or is_dashboard_admin(principal):
+        return None
+    from . import suite_grants
+    return suite_grants.granted_suites(principal)
+
+
+def suite_allowed(request: Request, suite: str | None) -> bool:
+    """Whether the caller may use department ``suite``.
+
+    ``suite`` is a suite key (``maverick.domain.suite_for``); ``None`` means a
+    generic/legacy pack that belongs to no department and is never scoped."""
+    if suite is None:
+        return True
+    allowed = caller_suites(request)
+    return allowed is None or suite in allowed
+
+
+def scope_to_suites(request: Request, items, *, suite_of, keep_none: bool = True):
+    """Filter ``items`` to the caller's granted departments (job-function scope).
+
+    ``suite_of(item)`` returns the item's suite key, or ``None`` for a generic /
+    department-less item. Unscoped callers (auth off, admin, no grant) get every
+    item back unchanged; otherwise an item is kept when its suite is granted, or
+    when it is generic and ``keep_none`` is set (packs outside every department
+    stay visible). One helper so every catalog surface scopes identically —
+    the inline per-surface copies drifted (some kept generics, some didn't)."""
+    allowed = caller_suites(request)
+    if allowed is None:
+        return list(items)
+    return [it for it in items
+            if (suite_of(it) is None and keep_none) or suite_of(it) in allowed]
+
+
+def require_suite(request: Request, suite: str | None) -> None:
+    """Raise ``HTTPException(403)`` unless the caller may use ``suite``."""
+    if not suite_allowed(request, suite):
+        raise HTTPException(
+            status_code=403, detail="insufficient department access for this action")
 
 
 def goal_owner_filter(request: Request) -> str | None:
@@ -408,6 +484,15 @@ def require_principal(
         return pp
 
     if not oidc_enabled():
+        # Email-invite local sessions (no IdP): a locally-minted mvk_session
+        # cookie establishes the principal so RBAC roles bind to invited users.
+        # Inert unless [dashboard] invites is on AND the cookie verifies; the
+        # legacy no-principal return below is otherwise byte-identical.
+        lp = _invite_session_principal(request)
+        if lp is not None:
+            request.state.principal = lp
+            _pin_tenant_from_principal(request, lp)
+            return lp
         if _dashboard_require_auth_enabled() and proxy_auth_enabled():
             raise HTTPException(status_code=401, detail="proxy identity header required")
         return None
@@ -422,10 +507,12 @@ def require_principal(
 
     if request.url.path in _OIDC_EXEMPT_PATHS or request.url.path == "/static/daybreak-logo.jpg":
         return None
-    if request.url.path.startswith("/share/"):
-        # Public read-only share links carry their own revocable token (verified
-        # in the route, which 404s an invalid one); an external recipient has no
-        # OIDC session, like the webhook paths below.
+    if request.url.path.startswith(("/share/", "/auth/invite/")):
+        # Public read-only share links and invite-accept links carry their own
+        # single-use/revocable token in the path (verified in the route, which
+        # 404s an invalid one); the external recipient has no OIDC session yet.
+        # The invite route additionally sends the browser through /auth/login
+        # before any role binds in SSO mode.
         return None
     if request.url.path.startswith("/scim/"):
         # SCIM clients (Okta/Azure AD) authenticate with a static IdP bearer

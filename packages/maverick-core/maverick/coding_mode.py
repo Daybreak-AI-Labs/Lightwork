@@ -21,6 +21,7 @@ prose tasks.
 """
 from __future__ import annotations
 
+import os
 import re
 import subprocess
 from dataclasses import dataclass, field
@@ -613,6 +614,10 @@ _FORBIDDEN_PATH_PATTERNS = [
     # `test[^/_][^/]*\.py$` false positive.
     re.compile(r"(?:^|/)test(?!(?:ing|utils|imonials)\.py$)[^/_][^/]*\.py$"),
     re.compile(r"(?:^|/)__tests__/"),
+    # Keep candidate patches from shadowing the real pytest runner when the
+    # grader executes `python -m pytest` from the candidate worktree.
+    re.compile(r"^pytest\.py$"),
+    re.compile(r"^pytest/"),
     re.compile(r"\.test\.(?:js|jsx|ts|tsx)$"),
     re.compile(r"\.spec\.(?:js|jsx|ts|tsx|rb)$"),
     # Wave 12 hardening: JVM family test files outside src/test/.
@@ -739,9 +744,14 @@ def _extract_diff_paths(patch: str) -> list[str]:
             if end > len('--- "a/'):
                 paths.add(line[len('--- "a/'):end].strip())
         elif line.startswith("+++ b/"):
-            paths.add(line[len("+++ b/"):].strip())
+            # git's ---/+++ headers separate the path from an optional timestamp
+            # with a TAB; git apply ignores everything from the tab on. Split on
+            # it, or "+++ b/tests/test_x.py\t2024-..." parses as a path that
+            # evades the anchored forbidden-path / exact test-id checks while the
+            # patch still edits the real test file.
+            paths.add(line[len("+++ b/"):].split("\t", 1)[0].strip())
         elif line.startswith("--- a/"):
-            paths.add(line[len("--- a/"):].strip())
+            paths.add(line[len("--- a/"):].split("\t", 1)[0].strip())
     paths.discard("/dev/null")
     return sorted(paths)
 
@@ -988,6 +998,12 @@ class TestRunResult:
     fail_to_pass_total: int = 0
     pass_to_pass_passing: int = 0
     pass_to_pass_total: int = 0
+    # Observed FAILURES in each arm. Load-bearing for honesty: a `-k` substring
+    # selection can run MORE tests than requested, so a passing sibling inflates
+    # `*_passing` and, compared only against the requested total, masks a
+    # genuinely-failing target. Counting failures directly closes that hole.
+    fail_to_pass_failing: int = 0
+    pass_to_pass_failing: int = 0
     error: str = ""
     raw_output: str = ""
     runner: str = ""
@@ -1005,9 +1021,15 @@ class TestRunResult:
             return False
         if self.skipped:
             return False
+        # `>=` (not `==`): a -k substring collision can make `*_passing` exceed
+        # the requested total via passing siblings. `*_failing == 0` is the real
+        # guard -- a genuinely-failing target always increments the failure
+        # count, so a passing sibling can no longer mask it.
         return (
-            self.fail_to_pass_passing == self.fail_to_pass_total
-            and self.pass_to_pass_passing == self.pass_to_pass_total
+            self.fail_to_pass_passing >= self.fail_to_pass_total
+            and self.pass_to_pass_passing >= self.pass_to_pass_total
+            and self.fail_to_pass_failing == 0
+            and self.pass_to_pass_failing == 0
             and not self.error
         )
 
@@ -1015,7 +1037,9 @@ class TestRunResult:
     def score(self) -> float:
         """Combined score: did we fix the failing tests AND not break passing ones?
 
-        Returns in [0, 1]. 1.0 = perfect resolution.
+        Returns in [0, 1]. 1.0 = perfect resolution. Failures are subtracted so a
+        substring-collision sibling pass cannot score a non-fixing candidate as
+        resolved; clamped because sibling passes can push `passing` above total.
         """
         if self.error:
             return 0.0
@@ -1023,7 +1047,8 @@ class TestRunResult:
         if total == 0:
             return 0.0
         passing = self.fail_to_pass_passing + self.pass_to_pass_passing
-        return passing / total
+        failing = self.fail_to_pass_failing + self.pass_to_pass_failing
+        return min(1.0, max(0.0, passing - failing) / total)
 
     def summary(self) -> str:
         if self.error:
@@ -1135,8 +1160,12 @@ def detect_test_runner(workdir: Path, language: str = "") -> str:
     return "unsupported"
 
 
-def _cmd_for(runner: str, ids: list[str]):
-    """Return shell command string OR list-of-strings (cargo runs per-id)."""
+def _cmd_for(runner: str, ids: list[str], workdir: Path | None = None):
+    """Return shell command string OR list-of-strings (cargo runs per-id).
+
+    `workdir` is only consulted for the pytest branch (to scope collection
+    roots when every id is a bare function name); other runners ignore it.
+    """
     def q(s: str) -> str:
         return "'" + s.replace("'", "'\"'\"'") + "'"
     if runner == "pytest":
@@ -1147,8 +1176,49 @@ def _cmd_for(runner: str, ids: list[str]):
         # own uninstalled package is importable — bare `pytest` can't import
         # it, and with an editable install of another checkout present it
         # would silently run the tests against THAT tree instead of this one.
-        return ("python3 -m pytest --tb=short -p no:cacheprovider "
-                + " ".join(q(i) for i in ids))
+        # MAVERICK_TEST_PYTHON overrides the interpreter so a per-instance venv
+        # interpreter (SWE-bench era isolation) can be injected; the module form
+        # keeps the workdir on sys.path either way.
+        interp = os.environ.get("MAVERICK_TEST_PYTHON", "").strip() or "python3"
+        base = f"{q(interp)} -m pytest --tb=short -p no:cacheprovider"
+        # SWE-bench id addressing: most families give `path/to/file.py::name`,
+        # but sympy gives BARE FUNCTION NAMES (e.g. `test_issue_24062`) with no
+        # file path. Passing a bare name as a positional arg makes pytest treat
+        # it as a file path -> "file or directory not found" -> 0 collected ->
+        # every sympy instance scores 0. Partition the ids: path-qualified ones
+        # keep today's exact behavior (positional, quoted); bare names are routed
+        # through a single `-k` expression so pytest resolves them by node-id.
+        path_ids: list[str] = []
+        bare_ids: list[str] = []
+        for i in ids:
+            if "::" in i or "/" in i or i.endswith(".py"):
+                path_ids.append(i)
+            else:
+                bare_ids.append(i)
+        parts = [base]
+        parts.extend(q(i) for i in path_ids)
+        if bare_ids:
+            # COLLISION CAVEAT: `-k EXPR` matches on a SUBSTRING of the node id
+            # (no regex/word boundaries available), so `-k test_eq` can also
+            # match `test_eq_something` in an unrelated file and inflate counts.
+            # pytest offers no exact-match mode for `-k`; we accept substring
+            # matching and rely on the scoped collection roots below to bound
+            # the blast radius. Names are plain identifiers, but we build the
+            # expression defensively via a quoted join regardless.
+            expr = " or ".join(bare_ids)
+            parts.append(f"-k {q(expr)}")
+            if not path_ids and workdir is not None:
+                # Only bare names -> no positional paths -> pytest would collect
+                # from rootdir and crawl the whole tree. Scope collection to the
+                # repo's conventional test roots when they exist so the run stays
+                # fast; if none exist, fall back to rootdir collection (no
+                # positional path appended).
+                roots = [
+                    d for d in ("sympy", "tests", "test", "testing")
+                    if (workdir / d).is_dir()
+                ]
+                parts.extend(q(d) for d in roots)
+        return " ".join(parts)
     if runner in ("jest", "vitest"):
         files: list[str] = []
         names: list[str] = []
@@ -1533,6 +1603,90 @@ def classify_failure(raw_output: str) -> tuple[str, str]:
     return ("other", "")
 
 
+def _is_bare_pytest_id(i: str) -> bool:
+    """A SWE-bench id with no file addressing (the sympy shape, e.g.
+    ``test_issue_24062``). Path-qualified ids contain ``::`` or ``/`` or
+    end ``.py``; everything else is a bare function name."""
+    return not ("::" in i or "/" in i or i.endswith(".py"))
+
+
+def _resolve_bare_pytest_ids(
+    workdir: Path, sandbox, fail_ids: list[str], pass_ids: list[str],
+) -> tuple[list[str], list[str]]:
+    """Bind SWE-bench BARE function-name ids to exact ``file::name`` node ids.
+
+    sympy's FAIL_TO_PASS / PASS_TO_PASS are bare names with no file path. Under
+    pytest ``-k`` (the fallback in :func:`_cmd_for`) a bare name matches on
+    SUBSTRING across the WHOLE collection, so a generic name like ``test_eq``
+    (defined in several sympy test files) pulls in unrelated tests and inflates
+    the pass count — which breaks the grader's exact ``passing == total`` check.
+
+    This resolves that by (1) locating the test FILE(S) that define the
+    FAIL_TO_PASS tests, then (2) collecting exact, parametrize-expanded node ids
+    from those file(s) and binding every bare name to the node id(s) that live
+    there. Path-qualified ids pass through untouched. All shell is routed
+    through ``sandbox.exec`` (kernel rule 4). Best-effort: on any failure the
+    original ids are returned and _cmd_for's ``-k`` fallback still applies.
+    """
+    bare = {i for i in (fail_ids + pass_ids) if _is_bare_pytest_id(i)}
+    f2p_bare = [i for i in fail_ids if _is_bare_pytest_id(i)]
+    if not bare or not f2p_bare:
+        # Nothing bare, or no bare FAIL_TO_PASS to anchor the target file(s) on.
+        return fail_ids, pass_ids
+
+    def shq(s: str) -> str:
+        return "'" + s.replace("'", "'\"'\"'") + "'"
+
+    roots = [d for d in ("sympy", "tests", "test", "testing")
+             if (workdir / d).is_dir()] or ["."]
+    # 1) Find the file(s) that DEFINE the failing tests. Anchor on an
+    #    optionally-indented `def NAME(` so class-method tests match too.
+    alt_f = "|".join(re.escape(n) for n in f2p_bare)
+    grep_cmd = ("grep -rlE "
+                + shq(r"^[[:space:]]*def (" + alt_f + r")[[:space:]]*\(")
+                + " " + " ".join(shq(r) for r in roots))
+    try:
+        gr = sandbox.exec(grep_cmd)
+        target_files = [ln.strip() for ln in (gr.stdout or "").splitlines()
+                        if ln.strip().endswith(".py")]
+    except Exception:
+        return fail_ids, pass_ids
+    if not target_files:
+        return fail_ids, pass_ids
+
+    # 2) Collect exact node ids (parametrize-expanded) from the target file(s).
+    interp = os.environ.get("MAVERICK_TEST_PYTHON", "").strip() or "python3"
+    coll_cmd = (shq(interp) + " -m pytest --collect-only -q -p no:cacheprovider "
+                "--continue-on-collection-errors "
+                + " ".join(shq(f) for f in target_files))
+    try:
+        cr = sandbox.exec(coll_cmd)
+    except Exception:
+        return fail_ids, pass_ids
+    funcmap: dict[str, list[str]] = {}
+    for line in ((cr.stdout or "") + "\n" + (cr.stderr or "")).splitlines():
+        line = line.strip()
+        if not re.match(r"\S+\.py::", line):
+            continue
+        func = line.rsplit("::", 1)[1].split("[", 1)[0]
+        funcmap.setdefault(func, []).append(line)
+    if not funcmap:
+        return fail_ids, pass_ids
+
+    def _resolve(ids: list[str]) -> list[str]:
+        out: list[str] = []
+        for i in ids:
+            if not _is_bare_pytest_id(i):
+                out.append(i)
+                continue
+            nodes = funcmap.get(i)
+            # Unresolved bare names stay bare -> _cmd_for's -k fallback.
+            out.extend(nodes or [i])
+        return out
+
+    return _resolve(fail_ids), _resolve(pass_ids)
+
+
 def run_failing_tests(
     workdir: Path,
     fail_to_pass: list[str],
@@ -1576,6 +1730,19 @@ def run_failing_tests(
             skipped=True, runner=runner,
         )
 
+    # SWE-bench sympy addresses tests by BARE function name (no file path).
+    # Bind those to exact file::name node ids up front so both the command
+    # (positional, exact) and the totals below reflect the real test set;
+    # otherwise the -k fallback's substring matching inflates the pass count
+    # and the grader's exact `passing == total` check never resolves. No-op
+    # for path-qualified families (pylint, django, ...).
+    if runner == "pytest":
+        try:
+            fail_to_pass, pass_to_pass = _resolve_bare_pytest_ids(
+                workdir, sandbox, fail_to_pass, pass_to_pass)
+        except Exception:
+            pass
+
     result = TestRunResult(
         fail_to_pass_total=len(fail_to_pass),
         pass_to_pass_total=len(pass_to_pass),
@@ -1599,7 +1766,7 @@ def run_failing_tests(
         # failed) tally does NOT reflect the full requested set.
         if not test_ids:
             return 0, 0, "", False
-        cmd = _cmd_for(runner, test_ids)
+        cmd = _cmd_for(runner, test_ids, workdir)
         cmds = cmd if isinstance(cmd, list) else [cmd]
         passed = failed = 0
         chunks: list[str] = []
@@ -1633,10 +1800,12 @@ def run_failing_tests(
         return passed, failed, "\n".join(chunks), False
 
     try:
-        f_pass, _f_fail, f_out, f_incomplete = _run(fail_to_pass)
+        f_pass, f_fail, f_out, f_incomplete = _run(fail_to_pass)
         result.fail_to_pass_passing = f_pass
-        p_pass, _p_fail, p_out, p_incomplete = _run(pass_to_pass)
+        result.fail_to_pass_failing = f_fail
+        p_pass, p_fail, p_out, p_incomplete = _run(pass_to_pass)
         result.pass_to_pass_passing = p_pass
+        result.pass_to_pass_failing = p_fail
         result.raw_output = (f_out + "\n" + p_out)[-2000:]
         # June 17 council fix (test-runner audit #3): both call sites
         # previously discarded `_run`'s `failed` return, so a mid-stream
@@ -1796,6 +1965,21 @@ async def evaluate_candidate(
         # No ground-truth tests; score by apply-check (smaller diff
         # tie-break happens in select_best_candidate).
         cand.score = 0.5
+        return cand
+
+    # Anti-cheat boundary (graded mode only): refuse a candidate that edits the
+    # graded test files / conftest / lockfiles. Without this, a best-of-N attempt
+    # that rewrites the FAIL_TO_PASS tests via tools makes them pass, scores
+    # all_pass, and is SELECTED as the winner over honest candidates -- the exact
+    # gaming vector the governed harness refuses downstream, applied here so the
+    # selection itself is honest. Marking apply_check_passed=False + error drops
+    # it from select_best_candidate's usable pool.
+    guard = defensive_validate(patch, fail_to_pass=list(cfg.fail_to_pass),
+                               pass_to_pass=list(cfg.pass_to_pass))
+    if not guard.ok:
+        cand.apply_check_passed = False
+        cand.error = ("anti-cheat boundary refused: edits grading-sensitive paths "
+                      + ", ".join(guard.blocked_paths))
         return cand
 
     import shutil as _shutil

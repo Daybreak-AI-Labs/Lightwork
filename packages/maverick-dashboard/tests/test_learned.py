@@ -116,6 +116,64 @@ def test_harness_view_shows_recent_rate_and_pending_corpus(monkeypatch, tmp_path
     assert body["pending_items"]["m1"][0]["goal"] == "g"
 
 
+def _enable_oidc_principal_map(monkeypatch, *, default_role: str = "viewer") -> None:
+    import maverick_dashboard.auth as auth
+    import maverick_dashboard.rbac as rbac
+    from maverick.oidc import VerifiedPrincipal
+
+    monkeypatch.setattr(auth, "oidc_enabled", lambda: True)
+    monkeypatch.setattr(rbac, "default_role", lambda: default_role)
+
+    def _verify(token, **_kw):
+        return VerifiedPrincipal(
+            sub=token, issuer="https://issuer.example", audience="maverick",
+            claims={"sub": token},
+        )
+
+    monkeypatch.setattr(auth, "verify_oidc_token", _verify)
+
+
+def _as(user: str) -> dict[str, str]:
+    return {"Authorization": f"Bearer {user}", "Origin": "http://testserver"}
+
+
+def test_pending_corpus_details_are_admin_only(monkeypatch, tmp_path):
+    _isolate(monkeypatch, tmp_path)
+    _enable_oidc_principal_map(monkeypatch, default_role="viewer")
+    import maverick_dashboard.rbac as rbac
+    from maverick import config
+    from maverick import self_harness_eval as ev
+
+    cpath = tmp_path / "corpus.json"
+    cpath.write_text("{}")
+    ev.stage_candidates(cpath, "m1", [{
+        "goal": "SECRET: acquisition target payroll",
+        "expected": "confidential spreadsheet row 17",
+    }])
+    monkeypatch.setattr(config, "load_config", lambda *a, **k: {
+        "self_harness": {"enable": True, "eval_corpus": str(cpath)},
+        "dashboard": {"default_role": "viewer"},
+    })
+
+    viewer_body = _client().get("/api/v1/learned", headers=_as("lowpriv")).json()
+    assert viewer_body["pending_corpus"] == {"m1": 1}
+    assert viewer_body["pending_items"] == {}
+    viewer_page = _client().get("/learned", headers=_as("lowpriv")).text
+    assert "harvested corpus candidate" in viewer_page
+    assert 'class="pc-resolve"' not in viewer_page
+    assert "SECRET: acquisition target payroll" not in viewer_page
+    assert "confidential spreadsheet row 17" not in viewer_page
+
+    monkeypatch.setattr(
+        rbac, "get_stored_role", lambda p: "admin" if p == "user:admin" else None,
+    )
+    admin_body = _client().get("/api/v1/learned", headers=_as("admin")).json()
+    assert (
+        admin_body["pending_items"]["m1"][0]["goal"]
+        == "SECRET: acquisition target payroll"
+    )
+
+
 def test_harness_corpus_review_endpoint(monkeypatch, tmp_path):
     # The dashboard resolves staged candidates with the SAME verdicts as the
     # CLI: accept merges into the live corpus, reject is remembered. Cross-

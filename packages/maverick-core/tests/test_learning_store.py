@@ -257,6 +257,50 @@ def test_migrate_store_carries_the_corpus_family(world_corpus, monkeypatch):
     assert ev.load_rejected(cpath) == {"M": ["old reject"]}
 
 
+def test_world_corpus_seals_machine_owned_rows(world_corpus, monkeypatch):
+    import base64
+    import sqlite3
+
+    pytest.importorskip("cryptography")
+
+    from maverick import self_harness_eval as ev
+    from maverick.crypto_at_rest import is_sealed_str
+    from maverick.paths import data_dir
+
+    monkeypatch.setenv("MAVERICK_ENCRYPT_AT_REST", "1")
+    monkeypatch.setenv("MAVERICK_ENCRYPTION_KEY", base64.b64encode(b"k" * 32).decode("ascii"))
+    cpath = world_corpus
+
+    assert ev.stage_candidates(cpath, "M", [
+        {"goal": "SECRET_CORPUS_GOAL", "expected": "SECRET_EXPECTED_HINT"},
+    ]) == 1
+    assert ev.load_pending(cpath)["M"][0]["goal"] == "SECRET_CORPUS_GOAL"
+
+    conn = sqlite3.connect(data_dir("world.db"))
+    try:
+        row = conn.execute(
+            "SELECT row FROM harness_corpus WHERE kind = 'pending'"
+        ).fetchone()[0]
+    finally:
+        conn.close()
+    assert "SECRET_CORPUS_GOAL" not in row
+    assert "SECRET_EXPECTED_HINT" not in row
+    assert is_sealed_str(row)
+
+    res = ev.resolve_pending(cpath, "M", accept=[], reject=[1])
+    assert res["rejected"] == 1
+    assert ev.load_rejected(cpath) == {"M": ["SECRET_CORPUS_GOAL"]}
+    conn = sqlite3.connect(data_dir("world.db"))
+    try:
+        rejected = conn.execute(
+            "SELECT row FROM harness_corpus WHERE kind = 'rejected'"
+        ).fetchone()[0]
+    finally:
+        conn.close()
+    assert "SECRET_CORPUS_GOAL" not in rejected
+    assert is_sealed_str(rejected)
+
+
 def test_migrate_store_requires_world_config(tmp_path, monkeypatch):
     from maverick.cli import main
     monkeypatch.setenv("MAVERICK_HOME", str(tmp_path / "home"))

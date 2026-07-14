@@ -37,7 +37,8 @@ Lightwork is proprietary, commercially licensed software (see
 - **Proven governance**: a roster-wide invariant test suite checks six
   governance invariants (tool-reachability, autonomy dial, capability
   attenuation, compartment isolation, unstrippable hard refusals, budget
-  caps) across all 2,020 packs, fault-injected at 1,000,000 iterations,
+  caps) across all 2,020 packs with a non-vacuous fault-injection control
+  (property-fuzzed up to 5,000 iterations),
   plus hostile-argument fuzzing of every connector and tool.
   Email, Matrix, WhatsApp, SMS, iMessage — one config, all channels.
 - **Build an agent from a demonstration**: watch a person do their job,

@@ -56,6 +56,20 @@ def test_propose_tool_rejected_when_it_widens_capability(tmp_path, monkeypatch):
     assert not v.ok
 
 
+def test_propose_tool_rejected_without_capability_proof(tmp_path, monkeypatch):
+    # Regression: with no explicit non-escalation proof, capability_widens is
+    # UNPROVEN (None), not an asserted False, so the tool rung fails closed --
+    # a synthesized tool can't sail through the capability gate by default.
+    monkeypatch.setenv("MAVERICK_SELF_IMPROVEMENT", "1")
+    t = ToolOutcomeTracker(path=tmp_path / "to.json")
+    for _ in range(6):
+        t.record("unproven_tool", True)
+    v = propose_tool("unproven_tool", t, baseline_success=0.3, rollback="snap",
+                     controller=_ctrl(tmp_path))          # no capability_widens
+    assert not v.ok
+    assert any(g.gate == "capability" and not g.ok for g in v.gates)
+
+
 # -- Phase 1/2/4: verifier / policy / prompt -------------------------------
 
 def test_propose_verifier_adopts_better_discriminator(tmp_path, monkeypatch):

@@ -93,6 +93,21 @@ def test_login_redirects_with_state_and_pkce(login_env, client):
     assert tx["jti"]  # opaque id used to reject callback replay
 
 
+def test_auth_cookie_secure_only_on_plain_http_loopback(login_env, client):
+    # Plain-HTTP loopback dev: no Secure, or http://localhost never gets the
+    # cookie back.
+    plain = client.get("/auth/login", follow_redirects=False)
+    assert "secure" not in plain.headers["set-cookie"].lower()
+    # Behind a TLS-terminating proxy (connects over loopback but the user is on
+    # HTTPS): the forwarded-proto header must force Secure so the session cookie
+    # can't leak over a downgraded HTTP request.
+    fresh = TestClient(app)
+    proxied = fresh.get(
+        "/auth/login", follow_redirects=False,
+        headers={"X-Forwarded-Proto": "https"})
+    assert "secure" in proxied.headers["set-cookie"].lower()
+
+
 def test_login_sanitizes_open_redirect_return_to(login_env, client):
     """An external return_to is dropped to '/' before being stashed."""
     resp = client.get(
@@ -343,11 +358,39 @@ def test_logout_all_revokes_even_when_session_already_revoked(login_env, client)
     assert epoch_before > 0
 
     client.cookies.set(ol.SESSION_COOKIE, raw)
-    resp = client.get("/auth/logout?all=1", follow_redirects=False)
+    # Same-origin Referer so the destructive ?all revocation is honored.
+    resp = client.get(
+        "/auth/logout?all=1", follow_redirects=False,
+        headers={"Referer": "http://testserver/settings"})
     assert resp.status_code == 303
     # The epoch was re-bumped (>=), proving revoke fired despite the prior
     # revocation -- not silently skipped.
     assert sr.revocation_epoch("user-123") >= epoch_before
+
+
+def test_logout_all_ignored_cross_site(login_env, client):
+    # A cross-site top-level navigation to /auth/logout?all=1 (session-revocation
+    # CSRF) must NOT trigger the global revocation, though it may still clear the
+    # local cookie. With no same-origin Origin/Referer the ?all side effect is
+    # skipped.
+    import time
+
+    from maverick.web_session import sign_session
+    from maverick_dashboard import session_revocation as sr
+
+    now = int(time.time())
+    raw = sign_session(
+        {"sub": "user-xsite", "iat": now, "exp": now + 3600}, SESSION_SECRET)
+    epoch_before = sr.revocation_epoch("user-xsite")
+    assert epoch_before == 0
+
+    client.cookies.set(ol.SESSION_COOKIE, raw)
+    resp = client.get(
+        "/auth/logout?all=1", follow_redirects=False,
+        headers={"Referer": "http://evil.example/"})
+    assert resp.status_code == 303
+    # Cross-site referer -> the epoch was NOT bumped (revocation did not fire).
+    assert sr.revocation_epoch("user-xsite") == 0
 
 
 # ---- disabled: every route 404s -----------------------------------------------

@@ -109,6 +109,16 @@ class TestAstDetection:
     def test_attribute_call_on_imported_module(self):
         assert "fs_write" in cap.classes_in_source("import shutil\nshutil.rmtree(d)")
 
+    def test_builtins_dynamic_exec_attribute_is_caught(self):
+        assert "dynamic_code" in cap.classes_in_source("import builtins\nbuiltins.eval(user)")
+
+    def test_literal_getattr_dangerous_attributes_are_caught(self):
+        assert "process" in cap.classes_in_source('import os\ngetattr(os, "system")("id")')
+        assert "fs_write" in cap.classes_in_source(
+            'import shutil\ngetattr(shutil, "rmtree")(path)')
+        assert "dynamic_code" in cap.classes_in_source(
+            'import builtins\ngetattr(builtins, "eval")(code)')
+
     def test_from_import_of_dangerous_name_flags_immediately(self):
         assert "process" in cap.classes_in_source("from subprocess import run")
 
@@ -124,3 +134,63 @@ class TestAstDetection:
 
     def test_clean_source_has_nothing(self):
         assert cap.classes_in_source("def f(x):\n    return x + 1") == frozenset()
+
+
+class TestDynamicCodePrecision:
+    """dynamic_code must flag every obfuscation spelling (fail-closed) WITHOUT
+    firing on same-named methods (`compiler.compile`, `df.eval`) or on a getattr
+    whose attribute name is a plain string literal (`getattr(x, "CONST")` is
+    static attribute access, == x.CONST). Regressions here surfaced as real gold
+    fixes wrongly held back by the capability gate (django-15930, pytest-5631).
+    The line regex is what fires -- diff fragments rarely AST-parse -- so this is
+    pinned on ``classes_in`` (the regex screen), not just ``classes_in_source``."""
+
+    def _dyn(self, line: str) -> bool:
+        return "dynamic_code" in classes_in([line])
+
+    # --- false positives that must NOT flag (the fix) ------------------------
+    def test_method_named_compile_is_not_builtin_compile(self):
+        # django__django-15930's gold fix: an ORM query-compiler method call.
+        assert not self._dyn("sql, params = compiler.compile(Value(True))")
+        assert not self._dyn("x = self.query.compile(node)")
+
+    def test_method_named_eval_or_exec_is_not_the_builtin(self):
+        assert not self._dyn('out = df.eval("a + b")')
+        assert not self._dyn("cur.execute(sql)")           # not exec(
+
+    def test_getattr_with_string_literal_name_is_static(self):
+        # pytest-dev__pytest-5631's gold fix: getattr(mod, "DEFAULT", sentinel).
+        assert not self._dyn('m = getattr(sys.modules.get("mock"), "DEFAULT", object())')
+        assert not self._dyn('x = getattr(obj, "attr_name")')
+        assert not self._dyn('y = getattr(self.thing, "CONST", None)')
+        assert not self._dyn('z = getattr(obj,"nospace")')
+
+    # --- threats that must STILL flag (fail-closed preserved) ----------------
+    def test_builtin_dynamic_exec_still_flags(self):
+        assert self._dyn("v = eval(user_input)")
+        assert self._dyn("exec(payload)")
+        assert self._dyn('c = compile(src, "<s>", "exec")')
+
+    def test_dynamic_getattr_name_still_flags(self):
+        assert self._dyn("f = getattr(os, 'sy'+'stem')")   # concatenation
+        assert self._dyn("g = getattr(mod, dynamic_name)")  # variable name
+        assert self._dyn("h = getattr(mod, name, None)")    # variable + default
+
+    def test_getattr_split_across_lines_flags_conservatively(self):
+        # A getattr whose args we cannot see on the line can't be proven safe.
+        assert self._dyn("val = getattr(")
+
+    def test_other_obfuscation_primitives_still_flag(self):
+        assert self._dyn('b = __builtins__["eval"]')
+        assert self._dyn('d = codecs.decode(blob, "rot13")')
+        assert self._dyn("import base64")
+
+    def test_real_instance_gold_patches_do_not_widen(self):
+        # The two gold fixes that motivated this precision fix must show NO new
+        # capability class vs their own baseline files (empty baseline here, so
+        # this proves the added lines introduce nothing -- not merely masked).
+        django = ("sql, params = compiler.compile(Value(True))")
+        pytest_ = ('m = getattr(sys.modules.get("mock"), "DEFAULT", object())')
+        for added in (django, pytest_):
+            w, new = widens(_patch(added))
+            assert w is False, f"{added!r} wrongly widens -> {new}"
