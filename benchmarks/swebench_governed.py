@@ -216,9 +216,12 @@ def _desanitize_csv_patch(diff: str) -> str:
 # or the CLI can override any of them. These mirror
 # benchmarks/RUNBOOK_SWE_BENCH_VERIFIED.md: OPAQUE=1 is the anti-cheat honesty
 # gate (blocks test-file reads / git log -p / network), MAX_STEPS bounds turns,
-# LONG_CMD_TIMEOUT lets pytest run through the shell tool. Consent is handled
-# separately in llm_proposer so default high-risk shell approval is scoped to a
-# container-required sandbox and restored after the run.
+# LONG_CMD_TIMEOUT lets pytest run through the shell tool. Consent is deliberately
+# NOT part of this unconditional default set: agent_v0 consumes untrusted
+# benchmark rows, so llm_proposer may auto-approve shell only after the sandbox
+# gate has verified an isolated backend (or the operator explicitly opted in to
+# host execution), scopes it to a container-required sandbox, and restores it
+# after the run.
 _BENCH_ENV = {
     "MAVERICK_CODING_MODE": "1",
     "MAVERICK_BENCHMARK_OPAQUE": "1",
@@ -227,6 +230,54 @@ _BENCH_ENV = {
     "MAVERICK_LONG_CMD_TIMEOUT": "600",
 }
 
+
+_ISOLATED_SANDBOX_BACKENDS = {
+    "devcontainer",
+    "docker",
+    "firecracker",
+    "gvisor",
+    "kubernetes",
+    "modal",
+    "podman",
+}
+_HOST_EXEC_OPT_IN = "MAVERICK_SWEBENCH_ALLOW_HOST_EXEC"
+
+
+def _truthy_env(name: str) -> bool:
+    return os.environ.get(name, "").strip().lower() in {"1", "true", "yes", "on"}
+
+
+def _configured_sandbox_backend() -> str:
+    try:
+        from maverick.config import load_config
+        cfg = (load_config() or {}).get("sandbox", {}) or {}
+    except Exception:
+        cfg = {}
+    return str(cfg.get("backend") or "local").strip().lower()
+
+
+def _bench_sandbox_is_isolated(backend: str) -> bool:
+    return backend in _ISOLATED_SANDBOX_BACKENDS or backend.startswith("ep:")
+
+
+def _ensure_untrusted_agent_sandbox() -> None:
+    """Fail closed before running the coding agent on untrusted instances.
+
+    The coding agent may execute shell commands suggested by benchmark-controlled
+    briefs/repositories.  The default Maverick sandbox backend is ``local``,
+    which runs those commands on the host.  Require an isolated backend unless
+    the operator has made an explicit, auditable host-exec opt-in.
+    """
+    backend = _configured_sandbox_backend()
+    if _bench_sandbox_is_isolated(backend) or _truthy_env(_HOST_EXEC_OPT_IN):
+        return
+    raise RuntimeError(
+        "refusing to run agent_v0 on an untrusted benchmark instance with "
+        f"sandbox backend {backend!r}; configure [sandbox] backend to docker, "
+        "podman, gvisor, devcontainer, kubernetes, firecracker, modal, or an "
+        f"entry-point backend, or set {_HOST_EXEC_OPT_IN}=1 to explicitly "
+        "accept host shell execution."
+    )
 
 # Round 4 (lever 2): appended to the brief on the retry attempt when the first
 # run produced no patch at all. Kept terse and imperative -- the agent already
@@ -251,11 +302,13 @@ def llm_proposer(inst: Instance) -> str:
     it). Falls back to the agent's actual working-tree edits (:func:`_worktree_diff`,
     always ``git apply``-able) when no prose diff was emitted.
 
-    Sets the benchmark env (:data:`_BENCH_ENV`) via ``setdefault``. When the
-    operator did not explicitly choose a consent mode, the runner temporarily
-    grants shell consent only after requiring a container sandbox backend; this
-    avoids defaulting model-generated shell commands to the unsandboxed local
-    host backend.
+    Sets the benchmark env (:data:`_BENCH_ENV`) via ``setdefault``. Fails closed
+    up front (:func:`_ensure_untrusted_agent_sandbox`) unless an isolated sandbox
+    backend is configured or the operator made an explicit host-execution opt-in.
+    Only then, when the operator did not explicitly choose a consent mode, does
+    the runner temporarily grant shell consent -- and still scoped to a
+    container-required sandbox -- so model-generated shell commands never default
+    to the unsandboxed local host backend.
 
     Writes a per-instance forensics sidecar (``<ledger-dir>/forensics/`` or
     ``MAVERICK_SWEBENCH_FORENSICS``) with the model's result text, both patch
@@ -269,6 +322,10 @@ def llm_proposer(inst: Instance) -> str:
             "MAVERICK_PROVIDER_READY=1 if another provider is configured in "
             "~/.maverick/config.toml). Use --proposer oracle for the keyless "
             "pipeline proof.")
+    # Fail closed before any env mutation or agent run: refuse untrusted
+    # benchmark rows unless an isolated sandbox backend is configured (or the
+    # operator opted in to host exec).
+    _ensure_untrusted_agent_sandbox()
     env_restore: dict[str, str | None] = {}
     for k, v in _BENCH_ENV.items():
         if k not in os.environ:
