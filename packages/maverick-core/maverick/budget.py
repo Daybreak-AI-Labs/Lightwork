@@ -171,6 +171,18 @@ def _lookup_price(model: str | None) -> tuple[float, float]:
         "ollama", "vllm", "tgi",
     ):
         return 0.0, 0.0
+    # Azure OpenAI and AWS Bedrock are paid hosted providers whose installer
+    # entries necessarily use dynamic placeholders/deployment names. Billing
+    # them at the generic Sonnet fallback can undercount real provider spend, so
+    # fail closed even when global strict pricing is disabled.
+    provider = model.split(":", 1)[0] if ":" in model else model
+    if provider in ("azure", "bedrock"):
+        raise UnpricedModelError(
+            f"no verified price for hosted provider model {model!r}; refusing "
+            "to bill at an estimate. Configure a concrete model id that exists "
+            "in maverick.llm.MODEL_PRICES, or add verified pricing before using "
+            "this paid provider with dollar caps."
+        )
     # Genuinely unknown model: no verified rate exists. Default behaviour bills
     # at the documented Sonnet fallback estimate, but that was silent — phantom
     # mispricing with no signal. Make it observable (warn once per id), and let
