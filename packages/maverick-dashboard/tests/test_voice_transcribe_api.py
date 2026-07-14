@@ -139,3 +139,27 @@ def test_speak_404_when_disabled(monkeypatch, tmp_path):
     monkeypatch.setenv("MAVERICK_VOICE_COMMANDS", "0")
     r = _client().post("/api/v1/voice/speak", json={"text": "hello"})
     assert r.status_code == 404
+
+
+def test_transcribe_uses_dashboard_rate_limit(monkeypatch, tmp_path):
+    _isolate(monkeypatch, tmp_path)
+    monkeypatch.setenv("MAVERICK_DASHBOARD_MAX_GOALS_PER_MIN", "1")
+    monkeypatch.setenv("MAVERICK_DASHBOARD_MAX_GOALS_GLOBAL_PER_MIN", "100")
+    from maverick_dashboard import app as app_mod
+    app_mod._goal_times.clear()
+    app_mod._goal_times_global.clear()
+
+    import maverick.tools.voice as voice_mod
+    calls = 0
+
+    def _fake_transcribe(args, sandbox=None):
+        nonlocal calls
+        calls += 1
+        return "ok"
+
+    monkeypatch.setattr(voice_mod, "_run_transcribe", _fake_transcribe)
+    client = _client()
+    assert _post_audio(client).status_code == 200
+    r = _post_audio(client)
+    assert r.status_code == 429
+    assert calls == 1

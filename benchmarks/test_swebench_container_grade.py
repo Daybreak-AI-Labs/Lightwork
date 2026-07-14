@@ -9,6 +9,7 @@ and the resolution parsed back out -- without spending a cent.
 from __future__ import annotations
 
 import copy
+import subprocess
 import sys
 from pathlib import Path
 
@@ -107,6 +108,45 @@ def test_candidate_apply_failure_is_flagged():
         "install log ...", "install log ...\n__MAVERICK_CANDIDATE_APPLY_FAILED__")
     r = CG.grade_in_container(inst, "diff --git a/x b/x\n", _fake_runner(log), timeout=60)
     assert r.candidate_apply_ok is False
+
+
+# --- backend isolation -------------------------------------------------------
+
+def test_docker_runner_disables_network_and_hardens_container(monkeypatch):
+    calls = {}
+
+    def fake_run(argv, **kwargs):
+        calls["argv"] = argv
+        calls["kwargs"] = kwargs
+        return subprocess.CompletedProcess(argv, 0, stdout="ok", stderr="")
+
+    monkeypatch.setattr(CG.subprocess, "run", fake_run)
+    out = CG.docker_runner(cpus=1.0, memory="256m")("img:latest", "echo hi", 30)
+
+    assert out.exit_code == 0
+    argv = calls["argv"]
+    assert "--network" in argv
+    assert argv[argv.index("--network") + 1] == "none"
+    assert "--cap-drop" in argv
+    assert argv[argv.index("--cap-drop") + 1] == "ALL"
+    assert "--security-opt" in argv
+    assert argv[argv.index("--security-opt") + 1] == "no-new-privileges"
+    assert "--pids-limit" in argv
+    assert calls["kwargs"]["timeout"] == 30
+
+
+def test_modal_runner_fails_closed_without_network_acknowledgement(monkeypatch):
+    class BombModal:
+        class App:
+            @staticmethod
+            def lookup(*args, **kwargs):  # pragma: no cover - must not be reached
+                raise AssertionError("Modal should not be called")
+
+    monkeypatch.setitem(sys.modules, "modal", BombModal)
+    out = CG.modal_runner()("img:latest", "echo hi", 30)
+
+    assert out.exit_code == 2
+    assert "refused" in out.stderr
 
 
 # --- governance ---------------------------------------------------------------

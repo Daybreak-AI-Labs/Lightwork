@@ -1016,6 +1016,22 @@ def _erodes_policy(line: str) -> bool:
     return bool(_POLICY_EROSION_RE.search(line or ""))
 
 
+def _screen_addendum_line(line: str) -> str | None:
+    """Apply the prompt-addendum safety screen to an already-proposed line.
+
+    Transfer can source legacy/tampered addenda that predate the current
+    proposal guard, so every write path must re-run the same syntax and semantic
+    checks before a line can land in another model's recalled prompt.
+    """
+    line = _sanitize_line(line)
+    if not line or len(line) > 280:
+        return None
+    if _erodes_policy(line):
+        log.warning("self_harness: refused policy-eroding addendum line: %r", line)
+        return None
+    return line
+
+
 # Failure-class-grounded guidance for the deterministic proposer. arXiv
 # 2603.23994 warns the STARTING ARTIFACT bounds what the loop can ever learn, so
 # a generic "slow down and verify" line is a weak seed. These per-class lines
@@ -1183,11 +1199,8 @@ def propose_addendum(sig: FailureSignature, *, propose_fn: ProposeFn | None = No
     except Exception as e:  # pragma: no cover -- a bad proposer can't crash the loop
         log.warning("self_harness: proposer failed for %s (%s)", sig.signature, e)
         return None
-    line = _sanitize_line(line)  # control chars + multi-line + secrets neutralized
-    if not line or len(line) > 280:
-        return None
-    if _erodes_policy(line):  # semantic screen: no "bypass/ignore <safety>" guidance
-        log.warning("self_harness: refused policy-eroding proposal: %r", line)
+    line = _screen_addendum_line(line)
+    if line is None:
         return None
     # The hypothesis rides into the signed audit + the provenance sidecar (a human
     # reads both), so it gets the SAME syntactic scrub as the line -- control
@@ -1949,7 +1962,10 @@ def transferable_lines(source_model: str, path: Path | None = None, *,
             continue
         if _is_relapsing(rec, failure_share=share, min_outcomes=min_out):
             continue
-        out.append(ln)
+        screened = _screen_addendum_line(ln)
+        if screened is None:
+            continue
+        out.append(screened)
     return out
 
 

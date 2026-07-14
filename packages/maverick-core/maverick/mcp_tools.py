@@ -130,12 +130,16 @@ def _spec_passes_shield(name: str, spec: dict, shield) -> bool:
     try:
         v = shield.scan_input(payload)
         return bool(v.allowed)
-    except Exception as e:  # pragma: no cover
-        # Fail-open per repo rules, but NOT silently: this is the chokepoint
-        # that keeps a hostile MCP server's tool description/schema out of the
-        # agent's catalog, so a scan error that lets it through must be logged.
-        log.warning("mcp tool %r shield scan errored (fail-open): %s", name, e)
-        return True
+    except Exception as e:
+        # Shield is PRESENT but its scan raised: fail toward the gate (drop the
+        # tool metadata), matching shield_policy.scan_block and this function's
+        # own over-depth branch above. This is the chokepoint that keeps a
+        # hostile MCP server's tool description/schema out of the agent's
+        # catalog, so a scan error must NOT admit it. The shield-ABSENT path
+        # returned True earlier (kernel rule 1: fail open, warn); only a
+        # present-but-erroring scan rejects here.
+        log.warning("mcp tool %r shield scan errored (failing closed): %s", name, e)
+        return False
 
 
 def _build_tool(client: MCPClient, prefixed: str, original: str, spec: dict) -> Tool:

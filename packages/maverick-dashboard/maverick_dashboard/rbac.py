@@ -111,7 +111,21 @@ def get_stored_role(principal: str) -> str | None:
     return _load().get((principal or "").strip())
 
 
-def set_role(principal: str, role: str) -> None:
+def _audit_role_change(actor: str, principal: str, field: str, tenant: str,
+                       old, new) -> None:
+    """One tamper-evident audit row per role change, so who-granted-whom-what
+    is provable rather than a silent JSON edit. Fail-soft: an audit error never
+    blocks the mutation (mirrors the tenant registry's billing audit)."""
+    try:
+        from maverick.audit import EventKind, record
+        record(EventKind.ACCESS_GRANT_CHANGED, agent=actor or "local",
+               actor=actor or "local", principal=principal, field=field,
+               tenant=tenant, old=old, new=new)
+    except Exception:  # pragma: no cover -- audit must never break the store
+        pass
+
+
+def set_role(principal: str, role: str, *, actor: str = "") -> None:
     principal = (principal or "").strip()
     if not principal:
         raise ValueError("empty principal")
@@ -119,15 +133,22 @@ def set_role(principal: str, role: str) -> None:
         raise ValueError("unknown role")
     with _locked(store_path()):
         data = _load()
+        old = data.get(principal)
         data[principal] = role
         _write(data)
+    if old != role:
+        _audit_role_change(actor, principal, "role", "", old, role)
 
 
-def remove_user(principal: str) -> None:
+def remove_user(principal: str, *, actor: str = "") -> None:
+    principal = (principal or "").strip()
     with _locked(store_path()):
         data = _load()
-        if data.pop((principal or "").strip(), None) is not None:
+        removed = data.pop(principal, None)
+        if removed is not None:
             _write(data)
+    if removed is not None:
+        _audit_role_change(actor, principal, "role", "", removed, None)
 
 
 # --- Per-tenant role memberships ---------------------------------------------
@@ -175,7 +196,8 @@ def get_tenant_role(tenant: str, principal: str) -> str | None:
     return members.get((principal or "").strip())
 
 
-def set_tenant_role(tenant: str, principal: str, role: str) -> None:
+def set_tenant_role(tenant: str, principal: str, role: str, *,
+                    actor: str = "") -> None:
     tenant = (tenant or "").strip()
     principal = (principal or "").strip()
     if not tenant or not principal:
@@ -184,18 +206,28 @@ def set_tenant_role(tenant: str, principal: str, role: str) -> None:
         raise ValueError("unknown role")
     with _locked(tenant_store_path()):
         data = _load_tenant()
+        old = data.get(tenant, {}).get(principal)
         data.setdefault(tenant, {})[principal] = role
         _write_tenant(data)
+    if old != role:
+        _audit_role_change(actor, principal, "tenant_role", tenant, old, role)
 
 
-def remove_tenant_role(tenant: str, principal: str) -> None:
+def remove_tenant_role(tenant: str, principal: str, *, actor: str = "") -> None:
+    tenant = (tenant or "").strip()
+    principal = (principal or "").strip()
+    removed = None
     with _locked(tenant_store_path()):
         data = _load_tenant()
-        members = data.get((tenant or "").strip())
-        if members and members.pop((principal or "").strip(), None) is not None:
-            if not members:
-                data.pop((tenant or "").strip(), None)
-            _write_tenant(data)
+        members = data.get(tenant)
+        if members:
+            removed = members.pop(principal, None)
+            if removed is not None:
+                if not members:
+                    data.pop(tenant, None)
+                _write_tenant(data)
+    if removed is not None:
+        _audit_role_change(actor, principal, "tenant_role", tenant, removed, None)
 
 
 def list_tenant_roles(tenant: str) -> dict[str, str]:

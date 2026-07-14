@@ -162,6 +162,21 @@ class TestEnforcement:
             ap.ApprovalRequest.for_candidate(cand), priv_hex)
         assert ap.verify_candidate(cand) == ap.key_id(pub_bytes.hex())
 
+    def test_hex_text_keys_loaded_from_dir_enforce_signatures(
+        self, tmp_path, monkeypatch
+    ):
+        # Regression: legacy deployments may store approver keys as 64-character
+        # hex text in *.pub files. Loading them must still enable enforcement so
+        # the human gate cannot fall back to the self-settable approved boolean.
+        _priv, pub = _keypair()
+        (tmp_path / "approver.pub").write_text(pub, encoding="ascii")
+        monkeypatch.delenv("MAVERICK_APPROVER_KEYS", raising=False)
+        monkeypatch.setenv("MAVERICK_APPROVER_KEYS_DIR", str(tmp_path))
+        monkeypatch.setattr(ap, "_config_approval", dict)
+
+        assert ap.trusted_approver_keys() == [pub]
+        assert ap.signing_enforced() is True
+
 
 class TestGateIntegration:
     """The controller's human-approval gate under enforcement."""

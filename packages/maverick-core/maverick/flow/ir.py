@@ -36,12 +36,28 @@ NODE_SCOPE = "scope"        # try/catch: run a body; a failure routes to on_erro
 NODE_SUBFLOW = "subflow"    # run another saved flow as a nested step (reuse)
 NODE_SETVAR = "setvar"      # set flow-data keys from expressions (compose / loop counter)
 
+MAX_FLOW_NODE_RETRIES = 10
+MAX_FLOW_NODE_RETRY_BACKOFF_TOTAL = 120.0
+MAX_FLOW_NODE_RETRY_SLEEP = 30.0
+
 NODE_KINDS = frozenset({
     NODE_ACTION, NODE_AGENT, NODE_BRANCH, NODE_SWITCH, NODE_FOREACH, NODE_WHILE,
     NODE_PARALLEL, NODE_APPROVAL, NODE_DELAY, NODE_WAIT, NODE_SCOPE, NODE_SUBFLOW,
     NODE_SETVAR,
 })
 _WORK_KINDS = frozenset({NODE_ACTION, NODE_AGENT})
+
+# Flow action nodes are operator-authored and bypass the normal agent loop, so
+# they must not expose tools that execute arbitrary code or mutate the host
+# filesystem directly. Keep this denylist small to preserve connector actions.
+UNSAFE_ACTION_TOOLS = frozenset({
+    "shell",
+    "read_file",
+    "write_file",
+    "list_dir",
+    "str_replace_editor",
+    "apply_patch",
+})
 
 
 @dataclass
@@ -259,9 +275,9 @@ class Flow:
         if self.start not in self.nodes:
             errs.append(f"start node {self.start!r} is not in the flow")
         if self.schedule.strip():
-            from ..scheduler import CronError, parse_cron
+            from ..scheduler import CronError, next_run
             try:
-                parse_cron(self.schedule)
+                next_run(self.schedule, tz=self.timezone.strip())
             except CronError as e:
                 errs.append(f"invalid schedule {self.schedule!r}: {e}")
         seen_ids = set()
@@ -273,6 +289,7 @@ class Flow:
             seen_ids.add(n.id)
             if n.kind not in NODE_KINDS:
                 errs.append(f"node {n.id!r}: unknown kind {n.kind!r}")
+            errs.extend(self._validate_retry_policy(n))
             errs.extend(self._validate_routing(n))
             errs.extend(self._validate_kind(n))
         seen_input_keys = set()
@@ -287,6 +304,19 @@ class Flow:
             typ = str(spec.get("type") or "text")
             if typ not in INPUT_TYPES:
                 errs.append(f"input {key!r}: unknown type {typ!r}")
+        return errs
+
+    def _validate_retry_policy(self, n: FlowNode) -> list[str]:
+        errs = []
+        retries = max(0, n.retries)
+        backoff = max(0.0, n.retry_backoff)
+        if retries > MAX_FLOW_NODE_RETRIES:
+            errs.append(f"node {n.id!r}: retries must be <= {MAX_FLOW_NODE_RETRIES}")
+        if backoff and _retry_backoff_total(min(retries, MAX_FLOW_NODE_RETRIES), backoff) > MAX_FLOW_NODE_RETRY_BACKOFF_TOTAL:
+            errs.append(
+                f"node {n.id!r}: retry backoff total must be <= "
+                f"{MAX_FLOW_NODE_RETRY_BACKOFF_TOTAL:g}s"
+            )
         return errs
 
     def _validate_routing(self, n: FlowNode) -> list[str]:
@@ -304,8 +334,11 @@ class Flow:
     def _validate_kind_fields(self, n: FlowNode) -> list[str]:
         """Flat required-field checks per kind (no sub-flow recursion)."""
         errs = []
-        if n.kind == NODE_ACTION and not n.tool:
-            errs.append(f"action node {n.id!r} has no tool")
+        if n.kind == NODE_ACTION:
+            if not n.tool:
+                errs.append(f"action node {n.id!r} has no tool")
+            elif n.tool in UNSAFE_ACTION_TOOLS:
+                errs.append(f"action node {n.id!r} uses unsafe tool {n.tool!r}")
         if n.kind == NODE_AGENT and not n.brief:
             errs.append(f"agent node {n.id!r} has no brief")
         if n.kind == NODE_BRANCH and not n.condition:
@@ -437,3 +470,10 @@ __all__ = [
     "NODE_WHILE", "NODE_PARALLEL", "NODE_APPROVAL", "NODE_DELAY", "NODE_WAIT",
     "NODE_SCOPE", "NODE_SUBFLOW", "NODE_KINDS",
 ]
+
+
+def _retry_backoff_total(retries: int, backoff: float) -> float:
+    total = 0.0
+    for attempt in range(1, max(0, retries) + 1):
+        total += min(MAX_FLOW_NODE_RETRY_SLEEP, backoff * (2 ** (attempt - 1)))
+    return total

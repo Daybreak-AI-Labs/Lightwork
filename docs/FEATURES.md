@@ -629,8 +629,8 @@ here.
   (`Sequence` / `If` / `While` / `ForEach` / `TryCatch`), and Make (Integromat)
   `BasicRouter` routes are all captured **structurally** (branch/foreach/switch/
   while/scope nodes, arms wired to rejoin, bodies as nested flows, Until's exit
-  condition negated, a Make router lowered to an if/else-if/else branch chain
-  from its route filters); graphless sources approximate each step as an agent
+  condition negated, and a Make router lowered to parallel fan-out route flows
+  guarded by its route filters); graphless sources approximate each step as an agent
   node that still runs. A UiPath Release/Schedule with no exposed activity tree
   stays a correct one-step *invocation* import — honestly reported
   `approximated` (the Orchestrator API returns no .xaml, so the process's
@@ -1104,8 +1104,9 @@ dispatch path so a v2 handler works everywhere unchanged.
 
 ## Sandboxes
 
-9 run-to-completion backends (`sandbox/`): local subprocess, Docker, gVisor, SSH,
-Podman, devcontainer, Firecracker microVM, Kubernetes, and Modal cloud (below).
+8 run-to-completion backends (`sandbox/`): local subprocess, Docker, gVisor, SSH,
+Podman, devcontainer, Kubernetes, and Modal cloud (below), plus an **experimental
+Firecracker microVM scaffold** (the exec path does not yet mount the workspace).
 Selected via `[sandbox] backend`.
 **Modal sandbox backend** (`sandbox/modal_backend.py`, `[sandbox] backend =
 "modal"`, `[modal]` extra): run agent shell in ephemeral Modal cloud sandboxes
@@ -1617,6 +1618,28 @@ pre-warming** (`max_tokens=0` prefill at orchestrator start) and a
   default and byte-identical to before while off; gated by `[self_improvement]
   enable` + the `factory_learning` sub-knob (wizard step) or
   `MAVERICK_FACTORY_LEARNING`. CLI: `maverick factory-learn [--dry-run]`.
+- **Governed adapter rung — in-tenant weights** (`adapter_rung.py`,
+  `[adapter_rung]`) — LoRA adapters for a LOCAL open-weights base, trained on
+  tenant-provenance data and promoted through the existing `weights` rung.
+  Training data passes a provenance boundary (frontier-model output refused by
+  default — the distillation-ToS guard; synthetic opt-in; unknown always
+  refused) and is content-hashed into the manifest. The payload passes a
+  hygiene boundary BEFORE any eval (safetensors/gguf/json/text only; code and
+  pickle-bearing formats refused structurally, so weights can never smuggle
+  executable authority). Fitness is held-in/held-out with the code rung's
+  overfit refusal; the Ed25519 approval payload EMBEDS the weights digest
+  (a post-signature weights swap stops verifying); promotion lands in the
+  append-only ledger; activation is an atomic pointer swap whose previous
+  pointer is the byte-identical one-step rollback handle. Serving: a rendered
+  Ollama Modelfile (`ADAPTER`) + emitted `ollama create` command; the Ollama
+  provider client resolves base → tuned at request-build time
+  (`adapter_rung.effective_wire_model`, mtime-cached, fail-open), so spec
+  parsing, admin allow-lists, pricing, and telemetry keep the stable base
+  model id. Trainers:
+  `stub` (deterministic; proofs/tests) and `dpo-lora` (delegates to
+  `training/rlaif.py`, `[training]` extra). OFF by default AND inert until
+  `base_model` is set (never hard-coded; wizard suggests an Apache-2.0 base).
+  Proof: `python proof/adapter_rung_proof.py` — 6 guarantees.
 - **Domain packs** — spawn domain agents from profiles (legal / privacy / generic
   packs) on the sector-seal foundation.
 - **Pack output contract** — a pack's optional `[output]` block declares the

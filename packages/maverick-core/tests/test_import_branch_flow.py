@@ -6,7 +6,7 @@ from __future__ import annotations
 
 from maverick.automation_import import n8n, power_automate
 from maverick.automation_import.to_flow import to_flow, to_flow_with_report
-from maverick.flow.ir import NODE_ACTION, NODE_AGENT, NODE_BRANCH, NODE_FOREACH
+from maverick.flow.ir import NODE_ACTION, NODE_AGENT, NODE_BRANCH, NODE_FOREACH, NODE_PARALLEL
 
 _IF_WF = {
     "id": "7", "name": "Route by amount", "active": True,
@@ -384,18 +384,45 @@ _MAKE_ROUTER = {
 }
 
 
-def test_make_router_becomes_a_branch_chain():
+def test_make_router_becomes_parallel_fan_out():
     from maverick.automation_import import make
     f, report = to_flow_with_report(make.translate(_MAKE_ROUTER))
     assert f.validate() == []
-    branch = next(n for n in f.nodes.values() if n.kind == NODE_BRANCH)
+    router = next(n for n in f.nodes.values() if n.kind == NODE_PARALLEL)
+    assert len(router.branches) == 2
+    guarded = router.branches[0]
+    branch = next(n for n in guarded.nodes.values() if n.kind == NODE_BRANCH)
     assert branch.condition.endswith("> 80")             # filter operator mapped
-    # the filtered route's deal is the true arm; the unconditional route is the else
-    assert f.nodes[branch.if_true].kind == NODE_ACTION
-    assert f.nodes[branch.if_false].kind == NODE_ACTION
-    # the pre-router action runs first, then the router branch
-    assert f.nodes[f.start].kind == NODE_ACTION and f.nodes[f.start].next == branch.id
-    assert any(e["kind"] == NODE_BRANCH and e["fidelity"] == "preserved" for e in report)
+    assert guarded.nodes[branch.if_true].kind == NODE_ACTION
+    assert router.branches[1].nodes[router.branches[1].start].kind == NODE_ACTION
+    # the pre-router action runs first, then the fan-out router.
+    assert f.nodes[f.start].kind == NODE_ACTION and f.nodes[f.start].next == router.id
+    assert any(e["kind"] == NODE_PARALLEL and e["fidelity"] == "preserved" for e in report)
+
+
+def test_make_router_runs_all_matching_routes():
+    from maverick.automation_import import make
+    from maverick.flow.runner import STATUS_COMPLETED, run_flow
+
+    bp = {"name": "fanout", "flow": [
+        {"id": 1, "module": "gateway:CustomWebHook"},
+        {"id": 2, "module": "builtin:BasicRouter", "routes": [
+            {"filter": {"conditions": [[{"a": "amount", "o": "number:greater", "b": "100"}]]},
+             "flow": [{"id": 3, "module": "audit:Log", "mapper": {}}]},
+            {"filter": {"conditions": [[{"a": "amount", "o": "number:greater", "b": "50"}]]},
+             "flow": [{"id": 4, "module": "approval:Request", "mapper": {}}]},
+        ]},
+    ]}
+    f = to_flow(make.translate(bp))
+    seen = []
+    result = run_flow(
+        f,
+        agent_fn=lambda node, brief, data: (brief, None),
+        action_fn=lambda node, params, data: seen.append(node.tool) or ({"ok": True}, None),
+        data={"amount": 200},
+    )
+    assert result.status == STATUS_COMPLETED
+    assert seen == ["audit", "approval"]
 
 
 def test_make_without_a_router_still_lowers_linearly():

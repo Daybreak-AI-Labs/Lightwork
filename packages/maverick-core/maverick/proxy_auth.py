@@ -7,15 +7,18 @@ Lightwork maps that value to a ``user:<id>`` principal that drops straight into
 the capability/role + tenant model -- no hand-rolled OAuth flow to own.
 
 SECURITY: a forwarded header is trivially spoofable by a *direct* client, so it
-is honored ONLY when the request's network peer is a trusted upstream
-(``trusted_proxies``; default: loopback, since the proxy usually runs on the
-same host as the dashboard). The operator MUST also (a) make the proxy the only
-ingress to the dashboard and (b) configure the proxy to strip any
-client-supplied copy of the header. Default-off; opt-in via ``[auth.proxy]
-enabled`` / ``MAVERICK_PROXY_AUTH``.
+is honored ONLY when the request's network peer is a trusted upstream. The peer
+must be pinned via ``trusted_proxies``; an unpinned deployment refuses the
+header unless the operator explicitly opts into loopback trust with
+``[auth.proxy] trust_loopback = true`` (off by default, since a bare loopback
+peer can't be told from any other co-located process). The operator MUST also
+(a) make the proxy the only ingress to the dashboard and (b) configure the
+proxy to strip any client-supplied copy of the header. Default-off; opt-in via
+``[auth.proxy] enabled`` / ``MAVERICK_PROXY_AUTH``.
 """
 from __future__ import annotations
 
+import logging
 import os
 
 from ._envparse import coerce_bool, is_truthy
@@ -23,6 +26,8 @@ from ._envparse import coerce_bool, is_truthy
 _DEFAULT_HEADER = "X-Forwarded-User"
 # The proxy normally shares the host, so loopback is the safe default peer.
 _LOOPBACK = frozenset({"127.0.0.1", "::1", "localhost"})
+
+log = logging.getLogger(__name__)
 
 
 def _section() -> dict:
@@ -53,25 +58,16 @@ def proxy_header_name() -> str:
 def _trust_loopback_fallback() -> bool:
     """Whether to trust loopback peers when ``trusted_proxies`` is unset.
 
-    The same-host proxy is the documented default, so loopback stays trusted in
-    the standard single-host deployment. But trusting loopback by IP alone can't
-    tell the real proxy from ANY other co-located loopback process -- a sidecar,
-    another container in the pod's network namespace, or an SSRF pivot to
-    127.0.0.1 -- each of which could then spoof ``X-Forwarded-User: admin``.
-    So enterprise mode requires an explicit ``trusted_proxies`` pin and does NOT
-    fall back to loopback; operators can also force the fallback off with
-    ``[auth.proxy] trust_loopback = false``.
+    OFF unless the operator EXPLICITLY opts in with ``[auth.proxy]
+    trust_loopback = true``. Trusting loopback by IP alone can't tell the real
+    proxy from ANY other co-located loopback process -- a sidecar, another
+    container in the pod's network namespace, or an SSRF pivot to 127.0.0.1 --
+    each of which could then spoof ``X-Forwarded-User: admin``. So an unpinned
+    deployment refuses the forwarded header in EVERY mode (enterprise included,
+    which already failed closed); to accept it the operator must either pin
+    ``trusted_proxies`` or set ``trust_loopback = true``.
     """
-    val = _section().get("trust_loopback")
-    if val is not None:
-        return coerce_bool(val)
-    try:
-        from .enterprise import enterprise_enabled
-        if enterprise_enabled():
-            return False
-    except Exception:  # pragma: no cover -- never weaken posture on a lookup error
-        pass
-    return True
+    return coerce_bool(_section().get("trust_loopback"))
 
 
 def proxy_trusts(client_host: str | None) -> bool:
@@ -79,9 +75,9 @@ def proxy_trusts(client_host: str | None) -> bool:
 
     A configured ``[auth.proxy] trusted_proxies = ["10.0.0.5", ...]`` is the
     secure form (the exact proxy peer is pinned). With no pin, loopback is
-    trusted only when the loopback fallback is allowed (see
-    :func:`_trust_loopback_fallback` -- on by default, OFF under enterprise mode
-    or ``trust_loopback = false``). An empty/unknown peer is never trusted.
+    trusted only when the operator explicitly opted in with ``[auth.proxy]
+    trust_loopback = true`` (see :func:`_trust_loopback_fallback` -- OFF by
+    default in every mode). An empty/unknown peer is never trusted.
     """
     if not client_host:
         return False
@@ -89,6 +85,31 @@ def proxy_trusts(client_host: str | None) -> bool:
     if isinstance(trusted, (list, tuple)) and trusted:
         return client_host in {str(t).strip() for t in trusted}
     return _trust_loopback_fallback() and client_host in _LOOPBACK
+
+
+def warn_if_untrusted_proxy_config() -> None:
+    """Loudly warn at startup when reverse-proxy SSO is enabled but no upstream
+    is trusted: neither ``trusted_proxies`` pinned nor ``trust_loopback``
+    explicitly set. In that state the forwarded identity header is refused from
+    every peer (secure, but proxy auth is effectively non-functional and login
+    via the proxy will fail) -- the operator almost certainly meant to pin the
+    proxy. No-op when proxy auth is off or a peer is already configured.
+    """
+    if not proxy_auth_enabled():
+        return
+    section = _section()
+    trusted = section.get("trusted_proxies")
+    if isinstance(trusted, (list, tuple)) and trusted:
+        return
+    if section.get("trust_loopback") is not None:
+        return
+    log.warning(
+        "reverse-proxy SSO ([auth.proxy] enabled) is on but no upstream is "
+        "trusted: pin [auth.proxy] trusted_proxies to your proxy's peer "
+        "address, or set [auth.proxy] trust_loopback = true if the proxy shares "
+        "this host. Until then the forwarded identity header is refused from "
+        "every peer and login via the proxy will fail.",
+    )
 
 
 def principal_from_proxy(value: str):
@@ -108,5 +129,6 @@ __all__ = [
     "proxy_auth_enabled",
     "proxy_header_name",
     "proxy_trusts",
+    "warn_if_untrusted_proxy_config",
     "principal_from_proxy",
 ]

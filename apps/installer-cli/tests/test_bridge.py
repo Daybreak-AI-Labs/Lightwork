@@ -30,7 +30,7 @@ def _run(monkeypatch, tmp_path, answers):
     return tomllib.loads((tmp_path / ".maverick" / "config.toml").read_text())
 
 
-_ANSWERS = ["", "Alex", "sk-ant-x", "", "$5"]  # name, key, workdir(blank), budget
+_ANSWERS = ["", "Alex", "essentials", "sk-ant-x", "", "$5"]  # name, governance, key, workdir(blank), budget
 
 
 def test_bridge_uses_docker_when_daemon_available(monkeypatch, tmp_path):

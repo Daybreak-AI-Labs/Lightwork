@@ -183,7 +183,9 @@ def next_run(expr: str, *, after: float | None = None, tz: str = "") -> float:
                 hour=0, minute=0, second=0, microsecond=0)
             continue
         if t.hour in hour and t.minute in minute:
-            return t.timestamp()
+            candidate_ts = t.timestamp()
+            if candidate_ts > after_ts:
+                return candidate_ts
         t += _dt.timedelta(minutes=1)
     raise CronError(f"no match for {expr!r} within 9 years")
 

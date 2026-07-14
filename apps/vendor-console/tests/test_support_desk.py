@@ -2,8 +2,12 @@
 API, status/comment flow, and RBAC."""
 from __future__ import annotations
 
+import asyncio
+
+import pytest
 from fastapi.testclient import TestClient
-from vendor_console import store, support
+from starlette.exceptions import HTTPException
+from vendor_console import routes_api, store, support
 from vendor_console.util import hash_token
 
 BUNDLE = {
@@ -96,3 +100,42 @@ def test_intake_rejects_an_oversize_bundle(app):
     r = c.post("/api/v1/support", headers={"Authorization": f"Bearer {token}"}, json=big)
     assert r.status_code == 413
     assert store.list_tickets(conn) == []                          # nothing stored
+
+
+def test_support_body_limit_stops_streaming_before_buffering_everything():
+    class StreamingRequest:
+        headers = {}
+
+        def __init__(self):
+            self.chunks_read = 0
+
+        async def stream(self):
+            for _ in range(10):
+                self.chunks_read += 1
+                yield b"x" * 250_000
+
+    req = StreamingRequest()
+    with pytest.raises(HTTPException) as exc:
+        asyncio.run(routes_api._read_limited_body(req))
+
+    assert exc.value.status_code == 413
+    assert req.chunks_read == 5
+
+
+def test_support_body_limit_rejects_oversized_content_length_without_streaming():
+    class StreamingRequest:
+        headers = {"content-length": "1000001"}
+
+        def __init__(self):
+            self.stream_called = False
+
+        async def stream(self):
+            self.stream_called = True
+            yield b""
+
+    req = StreamingRequest()
+    with pytest.raises(HTTPException) as exc:
+        asyncio.run(routes_api._read_limited_body(req))
+
+    assert exc.value.status_code == 413
+    assert req.stream_called is False

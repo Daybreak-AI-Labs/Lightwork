@@ -57,6 +57,30 @@ def test_model_for_role_fallback_is_cheapest_not_lexicographic(monkeypatch, tmp_
     assert llm.model_for_role("bulk") == "openrouter:deepseek-v4-flash"
 
 
+def test_model_for_role_fallback_prefers_zero_cost_local_models(monkeypatch, tmp_path):
+    # Regression: the allow-list fallback must use the same zero-cost semantics
+    # as budget accounting for local/subscription providers. Otherwise a local
+    # allowed model can be skipped in favor of a paid hosted fallback.
+    from maverick import llm
+
+    ro = _point_overlay(monkeypatch, tmp_path)
+    ro.set_allowed_models(["ollama:my-local", "openrouter:deepseek-v4-flash"])
+    monkeypatch.setattr(llm, "_resolve_model_for_role", lambda role: "openai:gpt-5.5")
+
+    assert llm.model_for_role("bulk") == "ollama:my-local"
+
+
+def test_cheapest_allowed_prefers_subscription_and_self_hosted_prefixes():
+    # codex_cli is subscription-metered, while unknown vllm/tgi models are
+    # self-hosted. All should rank as zero-cost ahead of a priced remote model.
+    from maverick.llm import _cheapest_allowed
+
+    hosted = "openrouter:deepseek-v4-flash"
+    assert _cheapest_allowed(["codex_cli:gpt-5.5", hosted]) == "codex_cli:gpt-5.5"
+    assert _cheapest_allowed(["vllm:z-local", hosted]) == "vllm:z-local"
+    assert _cheapest_allowed(["tgi:z-local", hosted]) == "tgi:z-local"
+
+
 def test_allowlist_filter_noop_without_allowlist(monkeypatch, tmp_path):
     from maverick.llm import _allowlist_filter_fallbacks
     _point_overlay(monkeypatch, tmp_path)  # no allow-list set -> unrestricted

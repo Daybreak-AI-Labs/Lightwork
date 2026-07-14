@@ -5,6 +5,7 @@ from __future__ import annotations
 
 import sqlite3
 import tarfile
+from pathlib import Path
 
 import pytest
 from maverick import backup, client
@@ -230,6 +231,51 @@ def test_restore_clears_stale_wal_sidecar():
     rows = {r[0] for r in con.execute("SELECT v FROM t").fetchall()}
     con.close()
     assert rows == {"secret-data"}, rows
+
+
+def test_restore_is_atomic_and_leaves_no_part_temp(monkeypatch):
+    """Crash-consistent restore: each file lands via a fsync'd temp + os.replace
+    (not a torn direct write), no .part temp survives, and a DB's stale sidecar
+    is cleared BEFORE the restored .db lands -- so no crash instant pairs the new
+    .db with the old WAL."""
+    import os as _os
+
+    from maverick.paths import data_dir
+    root = data_dir()
+    _seed(root)
+    tar = backup.create_backup()
+
+    # A stale, pre-existing sidecar in the live root (the post-crash DR case).
+    (root / "world.db").unlink()
+    (root / "world.db-wal").write_bytes(b"stale-wal-bytes")
+
+    real_replace = _os.replace
+    seen = {"replaced": [], "wal_present_at_db_replace": None}
+
+    def _spy_replace(a, b, **kw):
+        b_path = Path(b)
+        seen["replaced"].append(b_path.name)
+        if b_path.suffix == ".db":
+            seen["wal_present_at_db_replace"] = (root / "world.db-wal").exists()
+        return real_replace(a, b, **kw)
+
+    monkeypatch.setattr(backup.os, "replace", _spy_replace)
+    backup.restore_backup(tar, force=True)
+
+    # Correct contents restored.
+    con = sqlite3.connect(str(root / "world.db"))
+    assert con.execute("SELECT v FROM t").fetchone()[0] == "secret-data"
+    con.close()
+    assert (root / "agent_trust.json").read_text() == '[{"id":"vega"}]'
+
+    # No leftover temp anywhere under the root.
+    assert list(root.rglob("*.part")) == []
+
+    # Every restored file went through os.replace (atomic write), and by the time
+    # the .db was swapped in its stale sidecar was already gone.
+    assert "world.db" in seen["replaced"]
+    assert seen["wal_present_at_db_replace"] is False
+    assert not (root / "world.db-wal").exists()
 
 
 def test_create_errors_when_no_data(monkeypatch, tmp_path):

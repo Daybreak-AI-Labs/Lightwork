@@ -401,6 +401,11 @@ def rotate_audit_keypair() -> str:
 
 _KMS_WRAPPED_KEY_ENV = "MAVERICK_AUDIT_SIGNING_KEY_WRAPPED"
 
+# One-time guard so the co-located-key custody warning (emitted when
+# _load_or_create_keypair generates a local private key) fires once per process
+# rather than on every AuditSigner construction.
+_LOCAL_KEY_WARNED = False
+
 
 def require_offhost_signing() -> bool:
     """Whether the audit signing key MUST live off-host (KMS / injected), so the
@@ -482,6 +487,26 @@ def _kms_wrapped_keypair() -> tuple[bytes, bytes, str] | None:
     return priv_bytes, pub_bytes, key_id
 
 
+def active_key_is_offhost() -> bool:
+    """Whether the ACTIVE audit signing key is held off-host (KMS / injected).
+
+    True when the signer's private key comes from an env-injected key
+    (:func:`_injected_keypair`, sourced from a KMS / secrets manager) or a
+    KMS-wrapped key (:func:`_kms_wrapped_keypair`) -- it never lives
+    generated-and-left on local disk. False for the default co-located on-disk
+    key: that key still lets :func:`verify_chain` detect accidental /
+    non-privileged edits (integrity), but an actor running as the maverick uid
+    can read it and cleanly re-sign the whole chain, so it is NOT tamper-evidence
+    against a same-uid actor. Any *tamper-evidence* claim must be gated on this
+    returning True.
+    """
+    if _injected_keypair() is not None:
+        return True
+    if _kms_wrapped_keypair() is not None:
+        return True
+    return False
+
+
 def _load_or_create_keypair() -> tuple[bytes, bytes, str]:
     """Load the most-recent keypair or generate one if none exists.
 
@@ -534,6 +559,22 @@ def _load_or_create_keypair() -> tuple[bytes, bytes, str]:
             pub_path = key_dir / f"{key_id}.pub"
             if pub_path.exists():
                 return latest.read_bytes(), pub_path.read_bytes(), key_id
+    # Falling through to a locally generated + saved private key. Be honest about
+    # what its custody buys: integrity vs. accidental/non-privileged edits, NOT
+    # tamper-evidence against a same-uid actor who can read the key and re-sign.
+    global _LOCAL_KEY_WARNED
+    if not _LOCAL_KEY_WARNED:
+        _LOCAL_KEY_WARNED = True
+        log.warning(
+            "audit signing: generating a co-located Ed25519 signing key under %s. "
+            "A same-uid on-disk key gives integrity against accidental / "
+            "non-privileged edits only -- it is NOT tamper-evidence against an "
+            "actor running as the maverick uid, who can read the key and cleanly "
+            "re-sign the chain. For tamper-evidence, custody the key off-host: set "
+            "%s (a KMS / secrets-manager-sourced Ed25519 key) or %s (a KMS-wrapped "
+            "key).",
+            key_dir, _SIGNING_KEY_ENV, _KMS_WRAPPED_KEY_ENV,
+        )
     priv, pub, key_id = _generate_keypair()
     _save_keypair(priv, pub, key_id)
     return priv, pub, key_id
@@ -1118,6 +1159,7 @@ __all__ = [
     "verify_ed25519",
     "ChainBreak",
     "KEY_DIR",
+    "active_key_is_offhost",
     "reanchor_file",
     "rotate_audit_keypair",
 ]

@@ -920,7 +920,7 @@ class Agent:
             # curated domain pack as a specialist child (persona + compartment +
             # attenuated envelope), and discover what's available.
             reg.register(spawn_specialist_tool(self))
-            reg.register(list_specialists_tool())
+            reg.register(list_specialists_tool(self))
         # Per-domain document knowledge: bind a knowledge_search tool to this
         # agent's collections when a knowledge base is configured for the run.
         kb = getattr(self.ctx, "knowledge", None)
