@@ -239,6 +239,13 @@ class TestExpressions:
     def test_literal_comma_inside_nested_call_survives(self):
         assert render("{{default(missing, concat('a', 'b'))}}", {}) == "ab"
 
+    def test_unclosed_placeholders_render_linearly(self):
+        text = "{{" * 20000
+        assert render(text, {"name": "Ada"}) == text
+
+    def test_unclosed_placeholder_preserves_remainder(self):
+        assert render("hi {{name}} then {{", {"name": "Ada"}) == "hi Ada then {{"
+
 
 class TestLoopControls:
     def _counting_agent(self):
