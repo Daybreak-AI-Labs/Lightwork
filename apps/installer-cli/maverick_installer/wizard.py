@@ -4589,6 +4589,12 @@ def run_express() -> int:
     # top. Union of two all-True dicts, so profile keys can only ADD.
     preset = GOVERNANCE_PROFILES.get(
         profile, GOVERNANCE_PROFILES[DEFAULT_GOVERNANCE_PROFILE])
+    # Computer + browser are never enabled by express. If Docker is
+    # unavailable, fail closed on host-mutating tools too: the local backend
+    # runs against the user's host filesystem, not a container blast radius.
+    denied_tools = ["computer", "browser"]
+    if backend == "local":
+        denied_tools.extend(["shell", "write_file", "apply_patch", "str_replace_editor"])
     try:
         write_config(
             providers=["anthropic"],
@@ -4620,6 +4626,7 @@ def run_express() -> int:
             retention=(dict(preset["retention"])
                        if profile != DEFAULT_GOVERNANCE_PROFILE else None),
             governance_profile=profile,
+            tool_acl={"denied_tools": denied_tools},
         )
     except Exception as e:
         show_install_failure(e)
