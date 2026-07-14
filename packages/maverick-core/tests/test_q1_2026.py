@@ -140,6 +140,10 @@ def test_killswitch_default_path_follows_current_home(tmp_path, monkeypatch):
     import maverick.killswitch as ks
 
     monkeypatch.delenv("MAVERICK_HALT_FILE", raising=False)
+    # The repo-root autouse fixture pins MAVERICK_HOME (which takes precedence
+    # over HOME in maverick_home()). Clear it here so this test exercises the
+    # HOME -> ~/.maverick resolution it is specifically about.
+    monkeypatch.delenv("MAVERICK_HOME", raising=False)
     new_home = tmp_path / "rehomed"
     (new_home / ".maverick").mkdir(parents=True)
     monkeypatch.setenv("HOME", str(new_home))

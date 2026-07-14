@@ -80,6 +80,10 @@ def test_bench_sandbox_gate_requires_isolation_or_explicit_host_opt_in(monkeypat
     home = tmp_path / "home"
     home.mkdir()
     monkeypatch.setenv("HOME", str(home))
+    # The repo-root autouse fixture pins MAVERICK_HOME (which takes precedence
+    # over HOME when resolving config_path()). Point it at this test's home so
+    # the [sandbox] config written under home/.maverick below is the one read.
+    monkeypatch.setenv("MAVERICK_HOME", str(home / ".maverick"))
     monkeypatch.delenv("MAVERICK_CONFIG", raising=False)
     monkeypatch.delenv("MAVERICK_CONFIG_OVERLAY", raising=False)
     monkeypatch.delenv("MAVERICK_SWEBENCH_ALLOW_HOST_EXEC", raising=False)
