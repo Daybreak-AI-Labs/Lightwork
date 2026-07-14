@@ -185,22 +185,53 @@ class CodexCLIClient:
         except Exception:  # pragma: no cover -- config read fails soft
             return {}
 
-    def _launch_prefix(self) -> list[str]:
-        """The argv head that actually launches Codex.
+    @staticmethod
+    def _cmd_quote(arg: str) -> str:
+        """Quote one argv element for cmd.exe's /c command string.
+
+        Windows ``subprocess`` still builds one command line for ``cmd.exe``.
+        For ``.cmd``/``.bat`` shims, every shim argument must therefore stay
+        inside quotes so cmd metacharacters such as ``&`` and ``|`` remain data
+        instead of command separators. Backslashes before quotes are doubled to
+        preserve normal Windows argv parsing after cmd removes the outer quotes.
+        """
+        quoted = ['"']
+        backslashes = 0
+        for ch in arg:
+            if ch == "\\":
+                backslashes += 1
+                continue
+            if ch == '"':
+                quoted.append("\\" * (backslashes * 2 + 1))
+                quoted.append('"')
+            else:
+                quoted.append("\\" * backslashes)
+                quoted.append(ch)
+            backslashes = 0
+        quoted.append("\\" * (backslashes * 2))
+        quoted.append('"')
+        return "".join(quoted)
+
+    def _launch_cmd(self, *args: str) -> list[str]:
+        """Complete argv that launches Codex with ``args``.
 
         A real executable is launched directly by its absolute path. On Windows
         a `.cmd`/`.bat` shim (how npm installs the `codex` bin) cannot be run by
         CreateProcess without an interpreter, so route it through ``%COMSPEC%``
-        (cmd.exe) ``/c``. That is still a fixed argv with no shell string
-        parsing, so it stays within the no-shell rule (the interpreter is an
-        explicit argv entry, not a subprocess shell). No-op off Windows and for
-        a direct ``.exe``.
+        (cmd.exe) ``/d /s /c``. The command interpreted by cmd is a single
+        string whose every argv element is quoted, preserving list-argv
+        semantics for untrusted values such as model ids.
         """
         path = self._binary_path
         if os.name == "nt" and path.lower().endswith((".cmd", ".bat")):
             comspec = os.environ.get("COMSPEC") or "cmd.exe"
-            return [comspec, "/c", path]
-        return [path]
+            command = " ".join(self._cmd_quote(part) for part in (path, *args))
+            return [comspec, "/d", "/s", "/c", command]
+        return [path, *args]
+
+    def _launch_prefix(self) -> list[str]:
+        """Backward-compatible argv head for tests and diagnostics."""
+        return self._launch_cmd()
 
     # ------------------------------------------------------------------ auth
 
@@ -214,7 +245,7 @@ class CodexCLIClient:
                 return
             self._login_attempted = True
             proc = subprocess.run(  # fixed argv, no shell
-                [*self._launch_prefix(), "login", "--with-access-token"],
+                self._launch_cmd("login", "--with-access-token"),
                 input=self._access_token,
                 capture_output=True, text=True, timeout=60,
                 encoding="utf-8", errors="replace",
@@ -378,15 +409,15 @@ class CodexCLIClient:
         self._ensure_login()
         with tempfile.TemporaryDirectory(prefix="mav-codex-") as tmp:
             last_msg = Path(tmp) / "last-message.txt"
-            cmd = [
-                *self._launch_prefix(), "exec",
+            cmd = self._launch_cmd(
+                "exec",
                 "--json",
                 "--skip-git-repo-check",
                 "--sandbox", self.sandbox_mode,
                 "--output-last-message", str(last_msg),
                 "--model", model,
                 "-",  # prompt on STDIN: no argv-size limit, not in `ps` output
-            ]
+            )
             try:
                 proc = subprocess.run(  # fixed argv, no shell
                     cmd,
