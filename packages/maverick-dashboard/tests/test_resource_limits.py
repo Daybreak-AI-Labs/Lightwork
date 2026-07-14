@@ -4,7 +4,8 @@ Covers:
   * SSE goal-event stream concurrency cap (503 past the limit).
   * Per-client goal rate limiting (one client's flood doesn't 429 another).
   * A2A JSON-RPC body-size cap (oversized body rejected with 413).
-  * /healthz minimal payload when an auth token is configured.
+  * /healthz minimal payload when ANY auth mechanism is configured
+    (static token, OIDC, or reverse-proxy SSO).
 """
 from __future__ import annotations
 
@@ -184,6 +185,64 @@ def test_healthz_full_payload_without_token(monkeypatch, tmp_path):
     body = r.json()
     assert "checks" in body
     assert "llm_key" in body["checks"]
+
+
+# ---------- finding #8: redaction gates on ANY auth mechanism, not just token -
+
+def test_healthz_redacts_under_oidc_without_token(monkeypatch, tmp_path):
+    # An OIDC-only deployment runs with MAVERICK_DASHBOARD_TOKEN UNSET. The
+    # auth-exempt /healthz payload must still redact -- gating on the token
+    # alone left the full checks block (llm_key, in-flight gauge, posture)
+    # readable by any unauthenticated network peer.
+    _setup(monkeypatch, tmp_path)  # delenvs the token
+    monkeypatch.setenv("ANTHROPIC_API_KEY", "sk-ant-fake")
+    monkeypatch.setattr("maverick.oidc.oidc_enabled", lambda: True)
+
+    r = _client().get("/healthz")
+    assert r.status_code == 200
+    assert r.json() == {"status": "ok"}
+    assert "checks" not in r.json()
+
+
+def test_readyz_redacts_under_oidc_without_token(monkeypatch, tmp_path):
+    _setup(monkeypatch, tmp_path)
+    monkeypatch.setenv("ANTHROPIC_API_KEY", "sk-ant-fake")
+    monkeypatch.setattr("maverick.oidc.oidc_enabled", lambda: True)
+
+    body = _client().get("/readyz").json()
+    assert set(body) == {"status"}       # posture detail suppressed
+    assert "checks" not in body
+
+
+def test_healthz_hides_db_path_under_oidc_on_db_failure(monkeypatch, tmp_path):
+    # The un-redacted DB-failure branch appends str(e), which carries the
+    # absolute world.db path/DSN. Under OIDC (no token) that must collapse to
+    # the exception type only -- here, to no checks block at all.
+    _setup(monkeypatch, tmp_path)
+    monkeypatch.setattr("maverick.oidc.oidc_enabled", lambda: True)
+
+    class _Broken:
+        def ping(self):
+            raise RuntimeError("/abs/secret/home/world.db is locked")
+
+    from maverick_dashboard import app as dash_app
+    monkeypatch.setattr(dash_app, "_world", lambda: _Broken())
+    r = _client().get("/healthz")
+    assert r.status_code == 503
+    assert r.json() == {"status": "degraded"}
+    assert "secret" not in r.text        # no DB path leaks
+
+
+def test_healthz_redacts_under_proxy_sso_without_token(monkeypatch, tmp_path):
+    # A reverse-proxy-SSO deployment also runs token-less.
+    _setup(monkeypatch, tmp_path)
+    monkeypatch.setenv("ANTHROPIC_API_KEY", "sk-ant-fake")
+    monkeypatch.setattr("maverick.proxy_auth.proxy_auth_enabled", lambda: True)
+
+    r = _client().get("/healthz")
+    assert r.status_code == 200
+    assert r.json() == {"status": "ok"}
+    assert "checks" not in r.json()
 
 
 def test_rate_limit_dict_does_not_grow_unbounded(monkeypatch, tmp_path):

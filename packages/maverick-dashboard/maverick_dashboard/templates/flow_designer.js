@@ -30,6 +30,8 @@
   var undoStack = [], redoStack = [], pendingSnap = null;   // serialized rootFlow snapshots
   var chatHistory = [];     // copilot transcript: {role, content}
   var lastRunId = null;     // most recent run started here (grounds "why did it fail?")
+  var runGen = 0;           // bumped per run so a superseded watch stops painting
+  var activeES = null;      // the live run's EventSource, closed when a new run starts
 
   var canvas = document.getElementById('fd-canvas');
   var vp = document.getElementById('fd-viewport');
@@ -399,7 +401,12 @@
   function deleteNode(id) {
     pushHistory();
     flow.nodes = flow.nodes.filter(function (n) { return n.id !== id; });
-    flow.nodes.forEach(function (n) { ['next', 'if_true', 'if_false', 'on_error', 'on_expire'].forEach(function (k) { if (n[k] === id) n[k] = null; }); });
+    flow.nodes.forEach(function (n) {
+      ['next', 'if_true', 'if_false', 'on_error', 'on_expire'].forEach(function (k) { if (n[k] === id) n[k] = null; });
+      // Also clear a switch node's case targets, or the deleted id survives in
+      // cases[].to (invisible on canvas, but serialized + routed on Run).
+      (n.cases || []).forEach(function (c) { if (c.to === id) c.to = null; });
+    });
     if (flow.start === id) flow.start = flow.nodes.length ? flow.nodes[0].id : '';
     selectNode(null); render();
   }
@@ -535,6 +542,14 @@
     s.addEventListener('change', function () { onchange(s.value); }); return s;
   }
   function renderProps() {
+    // Preserve focus + caret in the connector-search field across a rebuild:
+    // the debounced registry search repaints this panel while the user is
+    // still typing in it (loadTools -> renderProps). Without this the field
+    // would blur mid-search.
+    var _toolCaret = null;
+    if (document.activeElement && document.activeElement.id === 'fd-tool-input') {
+      try { _toolCaret = document.activeElement.selectionStart; } catch (e) { _toolCaret = -1; }
+    }
     props.textContent = '';
     var selCount = Object.keys(multiSel).length;
     if (selCount) {
@@ -566,6 +581,7 @@
         reqCb.addEventListener('change', function () { spec.required = reqCb.checked; });
         reqWrap.appendChild(reqCb); reqWrap.appendChild(document.createTextNode('req'));
         var rm = document.createElement('button'); rm.className = 'btn btn--ghost'; rm.type = 'button'; rm.textContent = '🗑';
+        rm.setAttribute('aria-label', 'Remove input');
         rm.addEventListener('click', function () { flowInputs.splice(ii, 1); renderProps(); });
         row.appendChild(keyIn); row.appendChild(typeSel); row.appendChild(reqWrap); row.appendChild(rm);
         props.appendChild(row);
@@ -597,9 +613,13 @@
         });
         props.appendChild(field('Category', catSel));
       }
-      var toolIn = input(n.tool, function (v) { n.tool = v; scheduleToolSearch(v); renderProps(); render(); },
+      // No renderProps() here: rebuilding the panel on every keystroke would
+      // destroy this very input and blur it. The debounced scheduleToolSearch
+      // refreshes the catalog + meta hints, and renderProps restores focus.
+      var toolIn = input(n.tool, function (v) { n.tool = v; scheduleToolSearch(v); render(); },
         toolFilterCategory ? ('search ' + toolFilterCategory + '…') : 'search all connectors…');
       toolIn.setAttribute('list', 'fd-tools');
+      toolIn.id = 'fd-tool-input';
       props.appendChild(field('Connector / tool', toolIn));
       var meta = toolCatalog[n.tool];
       if (meta && meta.category) {
@@ -640,6 +660,7 @@
         var ts = select(c.to || '', targets, function (v) { c.to = v || null; render(); });
         ts.style.flex = '1';
         var rm = document.createElement('button'); rm.className = 'btn btn--ghost'; rm.type = 'button'; rm.textContent = '🗑';
+        rm.setAttribute('aria-label', 'Remove case');
         rm.title = 'Remove case';
         rm.addEventListener('click', function () { n.cases.splice(ci, 1); renderProps(); render(); });
         rowc.appendChild(vi); rowc.appendChild(ts); rowc.appendChild(rm); cwrap.appendChild(rowc);
@@ -703,6 +724,7 @@
         var edit = document.createElement('button'); edit.className = 'btn btn--ghost'; edit.type = 'button'; edit.style.flex = '1';
         edit.textContent = '✏️ Branch ' + (bi + 1) + ' (' + cnt + ')'; edit.addEventListener('click', function () { enterSub(n, 'parallel', bi); });
         var rm = document.createElement('button'); rm.className = 'btn btn--ghost'; rm.type = 'button'; rm.textContent = '🗑';
+        rm.setAttribute('aria-label', 'Remove branch');
         rm.title = 'Remove branch ' + (bi + 1);
         rm.addEventListener('click', function () { n.branches.splice(bi, 1); renderProps(); render(); });
         rowb.appendChild(edit); rowb.appendChild(rm); wrap.appendChild(rowb);
@@ -735,6 +757,7 @@
         var nm = input(fld.name || '', function (v) { fld.name = v; }, 'key'); nm.style.flex = '1';
         var lb = input(fld.label || '', function (v) { fld.label = v; }, 'prompt shown'); lb.style.flex = '1';
         var rm = document.createElement('button'); rm.className = 'btn btn--ghost'; rm.type = 'button'; rm.textContent = '🗑';
+        rm.setAttribute('aria-label', 'Remove field');
         rm.addEventListener('click', function () { n.form.splice(fi, 1); renderProps(); });
         frow.appendChild(nm); frow.appendChild(lb); frow.appendChild(rm); fwrap.appendChild(frow);
       });
@@ -755,6 +778,7 @@
         keyIn.addEventListener('change', function () { var nv = keyIn.value.trim(); if (nv && nv !== k) { n.subflow_inputs[nv] = n.subflow_inputs[k]; delete n.subflow_inputs[k]; renderProps(); } });
         var valIn = input(n.subflow_inputs[k], function (v) { n.subflow_inputs[k] = v; }, '{{order_id}}'); valIn.style.flex = '2';
         var rm = document.createElement('button'); rm.className = 'btn btn--ghost'; rm.type = 'button'; rm.textContent = '🗑';
+        rm.setAttribute('aria-label', 'Remove input');
         rm.addEventListener('click', function () { delete n.subflow_inputs[k]; renderProps(); render(); });
         rowi.appendChild(keyIn); rowi.appendChild(valIn); rowi.appendChild(rm); si.appendChild(rowi);
       });
@@ -776,6 +800,7 @@
         keyIn.addEventListener('change', function () { var nv = keyIn.value.trim(); if (nv && nv !== k) { n.assignments[nv] = n.assignments[k]; delete n.assignments[k]; renderProps(); } });
         var valIn = input(n.assignments[k], function (v) { n.assignments[k] = v; }, '{{add(count,1)}}'); valIn.style.flex = '2';
         var rm = document.createElement('button'); rm.className = 'btn btn--ghost'; rm.type = 'button'; rm.textContent = '🗑';
+        rm.setAttribute('aria-label', 'Remove assignment');
         rm.addEventListener('click', function () { delete n.assignments[k]; renderProps(); render(); });
         rowv.appendChild(keyIn); rowv.appendChild(valIn); rowv.appendChild(rm); sv.appendChild(rowv);
       });
@@ -851,6 +876,13 @@
     var del = document.createElement('button'); del.className = 'btn btn--ghost'; del.type = 'button'; del.textContent = '🗑 Delete';
     del.addEventListener('click', function () { deleteNode(n.id); });
     row.appendChild(mk); row.appendChild(dup); row.appendChild(del); props.appendChild(row);
+    if (_toolCaret !== null) {
+      var _ti = document.getElementById('fd-tool-input');
+      if (_ti) {
+        _ti.focus();
+        if (_toolCaret >= 0) { try { _ti.setSelectionRange(_toolCaret, _toolCaret); } catch (e) {} }
+      }
+    }
   }
   function hint(t) { var p = document.createElement('p'); p.className = 'fd__empty'; p.textContent = t; return p; }
 
@@ -1052,8 +1084,12 @@
     function proceed() {
       save(function () {
         apiFetch('/api/v1/flows/' + encodeURIComponent(rootFlow.id) + '/run', { method: 'POST', body: JSON.stringify({ data: data, dry_run: !!dryRun }) })
-          .then(function (r) { return r.json(); })
-          .then(function (j) {
+          .then(function (r) { return r.json().catch(function () { return {}; }).then(function (j) { return { ok: r.ok, status: r.status, j: j }; }); })
+          .then(function (res) {
+            // Check res.ok first: a 4xx/5xx returns {detail} with no run_id, and
+            // treating that as "Run started" would swallow the real failure.
+            if (!res.ok) { say(res.j.detail || ('Run failed (' + res.status + ')'), true); return; }
+            var j = res.j;
             if (!j.run_id) { say('Run started'); return; }
             runState = {}; runCursor = null; lastRunId = j.run_id;
             say((dryRun ? '🧪 Dry run ' : 'Running ') + '(run ' + j.run_id.slice(0, 8) + '…)');
@@ -1104,34 +1140,43 @@
   function watchRun(runId) {
     // Live status over SSE; falls back to polling where EventSource or the
     // stream isn't available (older proxies, stream-slot exhaustion).
-    if (typeof EventSource === 'undefined') { pollRun(runId, 0); return; }
+    // Supersede any previous run's watch: close its stream and bump the
+    // generation so a stale snapshot/poll can't repaint over the new run.
+    if (activeES) { try { activeES.close(); } catch (e) {} activeES = null; }
+    var gen = ++runGen;
+    if (typeof EventSource === 'undefined') { pollRun(runId, 0, gen); return; }
     var es;
     try { es = new EventSource('/api/v1/flows/runs/' + encodeURIComponent(runId) + '/events'); }
-    catch (e) { pollRun(runId, 0); return; }
+    catch (e) { pollRun(runId, 0, gen); return; }
+    activeES = es;
     var gotAny = false;
+    function drop() { es.close(); if (activeES === es) activeES = null; }
     function onSnap(evt) {
+      if (gen !== runGen) { drop(); return; }   // a newer run started; stop
       gotAny = true;
-      try { if (handleRunUpdate(JSON.parse(evt.data), runId)) es.close(); } catch (e) { /* keep streaming */ }
+      try { if (handleRunUpdate(JSON.parse(evt.data), runId)) drop(); } catch (e) { /* keep streaming */ }
     }
     es.addEventListener('snapshot', onSnap);
-    es.addEventListener('terminal', function (evt) { onSnap(evt); es.close(); });
-    es.addEventListener('timeout', function () { es.close(); pollRun(runId, 0); });
+    es.addEventListener('terminal', function (evt) { onSnap(evt); drop(); });
+    es.addEventListener('timeout', function () { drop(); pollRun(runId, 0, gen); });
     es.onerror = function () {
       // never connected -> fall back to polling; a drop mid-stream lets
       // EventSource retry on its own
-      if (!gotAny) { es.close(); pollRun(runId, 0); }
+      if (!gotAny) { drop(); pollRun(runId, 0, gen); }
     };
   }
-  function pollRun(runId, tick) {
+  function pollRun(runId, tick, gen) {
     // Poll until a terminal/paused state: fast at first, backing off to 3s so a
     // long run keeps updating the canvas instead of silently going dark.
+    if (gen != null && gen !== runGen) return;   // superseded by a newer run
     apiFetch('/api/v1/flows/runs/' + encodeURIComponent(runId))
       .then(function (r) { return r.ok ? r.json() : null; })
       .then(function (run) {
+        if (gen != null && gen !== runGen) return;
         if (!run) return;
         if (handleRunUpdate(run, runId)) return;
         var wait = Math.min(3000, 900 + (tick || 0) * 150);
-        setTimeout(function () { pollRun(runId, (tick || 0) + 1); }, wait);
+        setTimeout(function () { pollRun(runId, (tick || 0) + 1, gen); }, wait);
       }).catch(function () {});
   }
   function offerFixIt(runId) {
@@ -1332,6 +1377,7 @@
           var row = document.createElement('div'); row.style.display = 'flex'; row.style.gap = '4px'; row.style.marginBottom = '4px';
           var nm = document.createElement('span'); nm.style.flex = '1'; nm.textContent = '‘' + t.name + '’ → this flow';
           var rm = document.createElement('button'); rm.className = 'btn btn--ghost'; rm.type = 'button'; rm.textContent = '🗑';
+          rm.setAttribute('aria-label', 'Remove webhook trigger');
           rm.addEventListener('click', function () {
             apiFetch('/api/v1/triggers/' + encodeURIComponent(t.name), { method: 'DELETE' })
               .then(function () { showTriggers(); }).catch(function () {});
@@ -1408,8 +1454,10 @@
   }
   function chatAppend(role, text) {
     var log = document.getElementById('fd-chat-log');
-    log.appendChild(chatMsgEl(role, text));
+    var el = chatMsgEl(role, text);
+    log.appendChild(el);
     log.scrollTop = log.scrollHeight;
+    return el;
   }
   function placeNewNodes(f) {
     // Give canvas positions to nodes the copilot just added (patched nodes keep
@@ -1438,13 +1486,15 @@
     inp.value = '';
     chatAppend('user', text);
     chatHistory.push({ role: 'user', content: text });
-    chatAppend('note', '…thinking');
+    // Track THIS request's note element so concurrent sends each remove their
+    // own "…thinking" line instead of blindly deleting whatever is last.
+    var thinking = chatAppend('note', '…thinking');
+    function clearThinking() { if (thinking && thinking.parentNode) thinking.parentNode.removeChild(thinking); }
     var body = { message: text, flow: toApiFlow(), history: chatHistory.slice(-12), run_id: lastRunId || '' };
     apiFetch('/api/v1/flows/chat', { method: 'POST', body: JSON.stringify(body) })
       .then(function (r) { return r.json().then(function (j) { return { ok: r.ok, j: j }; }); })
       .then(function (res) {
-        var log = document.getElementById('fd-chat-log');
-        log.removeChild(log.lastChild);                       // the …thinking note
+        clearThinking();
         if (!res.ok) { chatAppend('note', res.j.detail || 'The copilot call failed.'); return; }
         var j = res.j;
         chatAppend('assistant', j.reply || 'Done.');
@@ -1460,8 +1510,7 @@
           say('🤖 Copilot edited the flow — review and Save.');
         }
       }).catch(function () {
-        var log = document.getElementById('fd-chat-log');
-        if (log.lastChild && log.lastChild.textContent === '…thinking') log.removeChild(log.lastChild);
+        clearThinking();
         chatAppend('note', 'The copilot call failed.');
       });
   }

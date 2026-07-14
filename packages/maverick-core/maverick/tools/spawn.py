@@ -14,7 +14,7 @@ blackboard.
 from __future__ import annotations
 
 import asyncio
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Any
 
 from .._envparse import env_float, env_int
 from . import Tool
@@ -629,6 +629,26 @@ def spawn_swarm_tool(parent: Agent) -> Tool:
     )
 
 
+def _suite_allowed(ctx: Any, suite: str | None) -> bool:
+    """Whether this run may use a specialist suite."""
+    if suite is None:
+        return True
+    allowed = getattr(ctx, "allowed_suites", None)
+    return allowed is None or suite in allowed
+
+
+def _visible_domains(domains: dict, ctx: Any | None) -> dict:
+    """Filter specialist domains to the run's department-suite grant."""
+    if ctx is None or getattr(ctx, "allowed_suites", None) is None:
+        return domains
+    from ..domain import suite_for
+
+    return {
+        name: profile for name, profile in domains.items()
+        if _suite_allowed(ctx, suite_for(name))
+    }
+
+
 def spawn_specialist_tool(parent: Agent) -> Tool:
     """Spawn a curated business-suite pack (a ``DomainProfile``) as a child.
 
@@ -640,7 +660,7 @@ def spawn_specialist_tool(parent: Agent) -> Tool:
     running fleet: the orchestrator deploys named specialists under itself.
     """
     async def fn(args: dict) -> str:
-        from ..domain import agent_from_profile, enabled_domains
+        from ..domain import agent_from_profile, enabled_domains, suite_for
 
         if "domain" not in args or "task" not in args:
             return "ERROR: spawn_specialist requires 'domain' and 'task'"
@@ -656,6 +676,9 @@ def spawn_specialist_tool(parent: Agent) -> Tool:
                 f"ERROR: no enabled specialist domain {domain!r}. Call "
                 f"list_specialists to see the roster. Some available: {sample}"
             )
+        suite = suite_for(domain)
+        if not _suite_allowed(parent.ctx, suite):
+            return f"ERROR: specialist domain {domain!r} is outside your department grant"
         if parent.depth + 1 > parent.ctx.max_depth:
             return f"ERROR: max depth {parent.ctx.max_depth} reached"
         _blocked = _synthesis_reserve_block(parent)
@@ -702,14 +725,14 @@ def spawn_specialist_tool(parent: Agent) -> Tool:
     )
 
 
-def list_specialists_tool() -> Tool:
+def list_specialists_tool(parent: Agent | None = None) -> Tool:
     """List the spawnable specialist domains, honoring the operator's suite toggles."""
     async def fn(args: dict) -> str:
         from collections import Counter
 
         from ..domain import enabled_domains, suite_for
 
-        domains = enabled_domains()
+        domains = _visible_domains(enabled_domains(), parent.ctx if parent is not None else None)
         flt = (args.get("suite") or "").strip()
         query = (args.get("query") or "").strip()
         # Query search: rank the WHOLE roster by relevance to the task, so an

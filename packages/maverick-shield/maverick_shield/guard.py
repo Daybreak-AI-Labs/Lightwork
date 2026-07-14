@@ -40,6 +40,16 @@ def _collect_arg_strings(value: Any) -> list[str]:
     out: list[str] = []
     if isinstance(value, str):
         out.append(value)
+    elif isinstance(value, (bytes, bytearray)):
+        # DECODE bytes to their real text -- str(b"rm -rf /") is the repr
+        # "b'rm -rf /'", which re-introduces the exact quoting this function
+        # exists to strip and lets a destructive command in a bytes arg slip past
+        # rule anchors. latin-1 is a lossless byte->char fallback for non-UTF-8.
+        raw = bytes(value)
+        try:
+            out.append(raw.decode("utf-8"))
+        except UnicodeDecodeError:
+            out.append(raw.decode("latin-1"))
     elif isinstance(value, dict):
         for k, v in value.items():
             if isinstance(k, str):

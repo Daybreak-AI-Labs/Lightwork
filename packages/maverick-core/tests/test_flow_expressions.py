@@ -45,6 +45,9 @@ class TestStringAndCollectionTransforms:
         # outright -> "" rather than pinning a worker (re has no timeout).
         assert render("{{regex(s, \"(a+)+$\")}}", {"s": "aaaaaaaaaaaaaaaaX"}) == ""
         assert render("{{regex(s, \"(.*)*\")}}", {"s": "abc"}) == ""
+        assert render("{{regex(s, \"(a?)+$\")}}", {"s": "aaaaaaaaaaaaaaaaX"}) == ""
+        assert render("{{regex(s, \"(a|aa)+$\")}}", {"s": "aaaaaaaaaaaaaaaaX"}) == ""
+        assert render("{{regex(s, \"(a+)\\1\")}}", {"s": "aa"}) == ""
         # a normal capture with a single '+' inside a group still works
         assert render("{{regex(email, \"([a-z]+)@\")}}", {"email": "bob@x.com"}) == "bob"
 
@@ -89,6 +92,19 @@ class TestConditionComposition:
         assert eval_condition(c, {"tier": "gold", "amount": 0, "region": "US"}) is True
         assert eval_condition(c, {"tier": "silver", "amount": 2000, "region": "EU"}) is True
         assert eval_condition(c, {"tier": "silver", "amount": 2000, "region": "US"}) is False
+
+    def test_quoted_literals_can_contain_boolean_operator_words(self):
+        assert eval_condition("role == 'contractor or vendor'", {"role": "contractor or vendor"}) is True
+        assert eval_condition(
+            "department == 'Research and Development'",
+            {"department": "Research and Development"},
+        ) is True
+
+    def test_boolean_operators_still_compose_around_quoted_literals(self):
+        c = "role == 'contractor or vendor' and region == 'EU' or tier == 'gold'"
+        assert eval_condition(c, {"role": "contractor or vendor", "region": "EU", "tier": "silver"}) is True
+        assert eval_condition(c, {"role": "employee", "region": "EU", "tier": "silver"}) is False
+        assert eval_condition(c, {"role": "employee", "region": "US", "tier": "gold"}) is True
 
 
 class TestDateFunctions:
@@ -222,6 +238,13 @@ class TestExpressions:
 
     def test_literal_comma_inside_nested_call_survives(self):
         assert render("{{default(missing, concat('a', 'b'))}}", {}) == "ab"
+
+    def test_unclosed_placeholders_render_linearly(self):
+        text = "{{" * 20000
+        assert render(text, {"name": "Ada"}) == text
+
+    def test_unclosed_placeholder_preserves_remainder(self):
+        assert render("hi {{name}} then {{", {"name": "Ada"}) == "hi Ada then {{"
 
 
 class TestLoopControls:

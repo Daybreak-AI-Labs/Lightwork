@@ -304,7 +304,7 @@ class TestCsvRoundTrip:
             "repo": "test/x",
             "base_commit": "a" * 40,
             "patch": "diff --git a/x b/x\n@@\n-a\n+b\n",
-            "test_patch": "should not appear in manifest",
+            "test_patch": "diff --git a/tests/t.py b/tests/t.py\n@@\n-a\n+b\n",
             "problem_statement": "fix the bug",
             "hints_text": "",
             "version": "1.0",
@@ -322,4 +322,8 @@ class TestCsvRoundTrip:
         assert decoded["fail_to_pass"] == ["test_x"]
         assert decoded["pass_to_pass"] == ["test_y", "test_z"]
         assert decoded["gold_patch"].startswith("diff --git")
-        assert "test_patch" not in decoded
+        # The grader's test_patch rides in the manifest: SWE-bench semantics
+        # apply it to both arms before scoring (the graded tests usually don't
+        # exist at base_commit). The agent never reads the manifest, and the
+        # anti-cheat boundary refuses candidate patches that touch tests.
+        assert decoded["test_patch"].startswith("diff --git a/tests/")

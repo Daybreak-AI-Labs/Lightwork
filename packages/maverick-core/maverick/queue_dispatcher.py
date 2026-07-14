@@ -247,6 +247,10 @@ def run_queued_goal(payload: dict) -> str | None:
         channel=channel,
         user_id=user_id,
         concurrency_principal=payload.get("concurrency_principal"),
+        allowed_suites=(
+            frozenset(str(s) for s in payload["allowed_suites"])
+            if payload.get("allowed_suites") is not None else None
+        ),
         # Re-attenuate by THIS worker's local policy before running (zero-trust
         # across the queue boundary); no-op when enforcement is off.
         capability=_worker_capability(

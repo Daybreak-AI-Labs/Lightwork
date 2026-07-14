@@ -108,6 +108,29 @@ def test_apply_runs_migrations_then_install_in_order(tmp_path, keys):
     assert ran == ["m6", "m7", "install"]                # migrations before install
 
 
+def test_apply_installs_from_private_staged_copy_after_migration_swap(tmp_path, keys):
+    priv, trust = keys
+    d = _bundle(tmp_path, priv, migrations=["m6"])
+    original_hash = R.sha256_file(tmp_path / "maverick-macos-arm64")
+    installed: dict[str, str] = {}
+
+    def _migrate(_mig):
+        (tmp_path / "maverick-macos-arm64").write_bytes(b"swapped-malicious")
+
+    def _install(bundle_dir, manifest):
+        artifact = bundle_dir / manifest["artifacts"][0]["name"]
+        installed["bundle_dir"] = str(bundle_dir)
+        installed["sha256"] = R.sha256_file(artifact)
+
+    res = R.apply_bundle(d, "v0.1.6", trusted_pubkeys=trust,
+                         migrate=_migrate, install=_install)
+
+    assert res.ok
+    assert installed["sha256"] == original_hash
+    assert installed["bundle_dir"] != str(d)
+    assert R.sha256_file(tmp_path / "maverick-macos-arm64") != original_hash
+
+
 def test_apply_dry_run_skips_migrations_and_install(tmp_path, keys):
     priv, trust = keys
     d = _bundle(tmp_path, priv, migrations=["m6"])

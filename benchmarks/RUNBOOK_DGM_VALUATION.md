@@ -97,6 +97,22 @@ grade a curated pure-Python slice (pip-install each instance repo's deps into a
 venv first); move to Docker for the full 500 so the number is
 leaderboard-comparable.
 
+Verified live on a real instance (July 2026): `pylint-dev__pylint-8898` resolves
+under governance end-to-end with the oracle proposer — the whole chain works on
+real external data with zero LLM cost. Three grading realities the harness now
+handles, learned from that run:
+
+- **`test_patch` is applied to BOTH arms** before scoring (SWE-bench semantics:
+  the graded tests usually don't exist at `base_commit`). The manifest carries
+  it; the anti-cheat still refuses any *candidate* patch touching tests.
+- **Malformed upstream test ids** (the dataset comma-split parametrized ids like
+  `test_x[foo,`) are dropped LOUDLY at load — one bad id otherwise aborts the
+  whole pytest chunk and zeroes the instance.
+- **`ungradable-here` (NOENV) is reported separately from unresolved**: if the
+  baseline can't run the instance's own passing tests (deps/pytest-version
+  mismatch — e.g. flask 2.3's conftest needs an older pytest), the environment
+  can't grade it. Never counted as resolved; never blamed on the agent.
+
 ---
 
 ## Rung 2 — the governed uplift (the agent improves its own solver)

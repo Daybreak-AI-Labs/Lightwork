@@ -84,8 +84,13 @@ A connected deployment authenticates every machine call with its **serve token**
 
 ## Status
 
-**Built:** license lifecycle (customers → issue/upsell/revoke → serve), **release
+**Built:** license lifecycle (customers → issue/upsell/revoke → serve) with a
+**per-feature checkbox matrix** on the customer page (à-la-carte grants +
+explicit denials, driven by the kernel's gated-feature registry; a connected
+deployment picks changes up on its ~60 s auto-refresh poll), **release
 publishing** (signed manifests + channels + serve API), **support desk** (bundle
 intake → triaged tickets), fleet check-in board, local + TOTP auth with RBAC, and
-a hash-chained vendor audit trail over every action. **Next:** billing/usage
-(invoices via `billing.py`), SSO, and the concrete per-deployment update hooks.
+a hash-chained vendor audit trail over every action. Hosting it on your own
+domain: [`deploy/cloudflare/`](../../deploy/cloudflare/README.md) (Tunnel +
+Access). **Next:** billing/usage (invoices via `billing.py`), SSO, and the
+concrete per-deployment update hooks.

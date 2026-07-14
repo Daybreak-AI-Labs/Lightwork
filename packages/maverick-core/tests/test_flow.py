@@ -64,6 +64,11 @@ class TestFlowIR:
         f.schedule = "not a cron"
         assert any("invalid schedule" in e for e in f.validate())
 
+    def test_unarmable_schedule_is_a_validation_error(self):
+        f = _flow([FlowNode(id="a", kind="agent", brief="x")])
+        f.schedule = "0 0 31 2 *"
+        assert any("invalid schedule" in e for e in f.validate())
+
     def test_roundtrip_serialisation_nested(self):
         body = _flow([FlowNode(id="x", kind="agent", brief="do {{item}}")], start="x")
         f = _flow([
@@ -184,6 +189,33 @@ class TestRunner:
         r = run_flow(f, agent_fn=_agent, action_fn=_action,
                      resolve_flow=lambda fid: sub if fid == "shared" else None, data={})
         assert r.status == STATUS_COMPLETED
+
+    def test_nested_parallel_threads_are_globally_bounded(self):
+        import threading
+        import time
+
+        lock = threading.Lock()
+        baseline = threading.active_count()
+        max_threads = baseline
+
+        def note_threads(node, brief, data):
+            nonlocal max_threads
+            with lock:
+                max_threads = max(max_threads, threading.active_count())
+            time.sleep(0.01)
+            return (brief, 0.9)
+
+        def nested_parallel(depth):
+            if depth == 0:
+                return _flow([FlowNode(id="leaf", kind="agent", brief="leaf")], start="leaf")
+            return _flow([FlowNode(
+                id=f"p{depth}", kind="parallel",
+                branches=[nested_parallel(depth - 1) for _ in range(8)],
+            )], start=f"p{depth}")
+
+        r = run_flow(nested_parallel(3), agent_fn=note_threads, action_fn=_action, data={})
+        assert r.status == STATUS_COMPLETED
+        assert max_threads <= baseline + 12
 
     def test_approval_pauses_then_resumes(self):
         f = _flow([

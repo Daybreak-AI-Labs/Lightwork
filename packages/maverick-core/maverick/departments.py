@@ -300,13 +300,20 @@ def deploy_department(key: str, owner: str, *, cfg: dict | None = None,
     """Deploy a department as a fleet of its specialists.
 
     Entitlement-gated: raises :class:`EntitlementError` when the tenant's plan
-    lacks the ``departments`` add-on. Returns ``None`` if the department has no
-    enabled packs; otherwise the saved :class:`~maverick.fleet.Fleet`."""
+    lacks the ``departments`` add-on. Grant-gated at the kernel: raises
+    :class:`maverick.suite_grants.DepartmentAccessError` when ``owner`` is a
+    scoped principal whose department grant excludes ``key`` — so every caller
+    (dashboard, CLI, future surfaces) inherits job-function scoping; an empty
+    owner (host operator / auth off) and configured admins stay unrestricted.
+    Returns ``None`` if the department has no enabled packs; otherwise the
+    saved :class:`~maverick.fleet.Fleet`."""
     dept = get_department(key, cfg)
     if dept is None:
         return None
     if not department_entitled(key, tenant=tenant):
         raise EntitlementError(key)
+    from .suite_grants import ensure_suite_allowed
+    ensure_suite_allowed(owner, key)
     fleet = fleet_from_department(dept, owner, cfg=cfg, name=name)
     if save:
         from .fleet import save_fleet

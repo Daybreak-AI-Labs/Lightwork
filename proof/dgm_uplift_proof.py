@@ -253,9 +253,9 @@ def run_all(work: Path) -> list[_R]:
     # AFTER splitting so each side holds both kinds (held-out gets A+B -- the
     # unseen B instance is what a genuine uplift must fix; held-in gets a B
     # instance for the memoriser to "learn").
-    ids = [f"calc-inst-{i:02d}" for i in range(1, 6)]
+    ids = [f"calc-inst-{i:02d}" for i in range(1, 17)]  # >=10 held-out for the code-rung evidence gate
     from maverick.self_harness_eval import corpus_split
-    in_ids, out_ids = corpus_split([{"goal": i} for i in ids], held_out_frac=0.34)
+    in_ids, out_ids = corpus_split([{"goal": i} for i in ids], held_out_frac=0.7)
     kind_of = {}
     for pos, iid in enumerate(out_ids):
         kind_of[iid] = "B" if pos == 0 else "A"     # held-out: 1 B + rest A
@@ -263,7 +263,7 @@ def run_all(work: Path) -> list[_R]:
         kind_of[iid] = "B" if pos == 0 else "A"     # held-in: 1 B + rest A
     inst_root = work / "instances"
     instances = [_seed_instance(inst_root, iid, kind_of[iid]) for iid in ids]
-    held_in, held_out = split_instances(instances, held_out_frac=0.34)
+    held_in, held_out = split_instances(instances, held_out_frac=0.7)
 
     solver_dir = work / "solver"
     solver_dir.mkdir()
@@ -272,7 +272,10 @@ def run_all(work: Path) -> list[_R]:
     def gov(patch, sub, change_id):
         return govern_solver_change(
             solver_dir, patch, instances, keys_dir=keys, ledger=ledger,
-            workroot=work / sub, timeout=120.0, controller=ctrl, change_id=change_id)
+            workroot=work / sub, timeout=120.0, controller=ctrl, change_id=change_id,
+            # Match the fixture's kind-assignment split so the scoring split's
+            # held-out set is the one the kinds were laid out for.
+            held_out_frac=0.7)
 
     out: list[_R] = []
 

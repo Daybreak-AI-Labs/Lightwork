@@ -353,6 +353,138 @@ class TestCodingModeFromEnv:
         assert from_env().best_of_n == 1
 
 
+class TestCmdForInterpreter:
+    def test_pytest_defaults_to_python3(self, monkeypatch):
+        from maverick.coding_mode import _cmd_for
+        monkeypatch.delenv("MAVERICK_TEST_PYTHON", raising=False)
+        cmd = _cmd_for("pytest", ["tests/test_a.py::test_x"])
+        assert cmd.startswith("'python3' -m pytest ")
+
+    def test_pytest_honors_test_python_override(self, monkeypatch):
+        from maverick.coding_mode import _cmd_for
+        monkeypatch.setenv("MAVERICK_TEST_PYTHON", "/opt/v/bin/python")
+        cmd = _cmd_for("pytest", ["tests/test_a.py::test_x"])
+        assert cmd.startswith("'/opt/v/bin/python' -m pytest ")
+
+
+class TestCmdForPytestIds:
+    """SWE-bench id addressing: path-qualified vs bare-name (sympy)."""
+
+    def test_all_path_qualified_unchanged(self, monkeypatch):
+        from maverick.coding_mode import _cmd_for
+        monkeypatch.delenv("MAVERICK_TEST_PYTHON", raising=False)
+        ids = ["tests/test_a.py::test_x", "pkg/tests/test_b.py::TestC::test_y"]
+        cmd = _cmd_for("pytest", ids)
+        # Path-qualified ids stay positional and quoted; no -k filter.
+        assert "-k " not in cmd
+        assert "'tests/test_a.py::test_x'" in cmd
+        assert "'pkg/tests/test_b.py::TestC::test_y'" in cmd
+
+    def test_all_bare_names_use_k_filter(self, monkeypatch):
+        from maverick.coding_mode import _cmd_for
+        monkeypatch.delenv("MAVERICK_TEST_PYTHON", raising=False)
+        cmd = _cmd_for("pytest", ["test_issue_24062", "test_str_repr"])
+        # A single -k expression joins the bare names with ' or '.
+        assert "-k 'test_issue_24062 or test_str_repr'" in cmd
+        # No bare name is passed as a positional file arg.
+        assert "'test_issue_24062' " not in cmd + " "
+        assert "'test_str_repr' " not in cmd + " "
+
+    def test_mixed_emits_paths_and_k(self, monkeypatch):
+        from maverick.coding_mode import _cmd_for
+        monkeypatch.delenv("MAVERICK_TEST_PYTHON", raising=False)
+        cmd = _cmd_for("pytest", ["tests/test_a.py::test_x", "test_bare"])
+        assert "'tests/test_a.py::test_x'" in cmd
+        assert "-k 'test_bare'" in cmd
+
+    def test_bare_names_scope_to_existing_roots(self, monkeypatch, tmp_path):
+        from maverick.coding_mode import _cmd_for
+        monkeypatch.delenv("MAVERICK_TEST_PYTHON", raising=False)
+        (tmp_path / "sympy").mkdir()
+        cmd = _cmd_for("pytest", ["test_issue_24062"], tmp_path)
+        # Existing conventional root is appended as a positional collection
+        # root; a non-existent one (tests/) is not.
+        assert cmd.rstrip().endswith("'sympy'")
+        assert "'tests'" not in cmd
+
+    def test_bare_names_no_workdir_falls_back_to_rootdir(self, monkeypatch):
+        from maverick.coding_mode import _cmd_for
+        monkeypatch.delenv("MAVERICK_TEST_PYTHON", raising=False)
+        cmd = _cmd_for("pytest", ["test_issue_24062"])
+        # No workdir -> no positional collection root appended.
+        assert cmd.rstrip().endswith("-k 'test_issue_24062'")
+
+
+class _FakeSandbox:
+    """Returns canned stdout for a shell command whose text contains a key."""
+    def __init__(self, responses):
+        self._responses = responses  # list of (substring, stdout)
+
+    def exec(self, cmd):
+        import types
+        for key, out in self._responses:
+            if key in cmd:
+                return types.SimpleNamespace(stdout=out, stderr="")
+        return types.SimpleNamespace(stdout="", stderr="")
+
+
+class TestResolveBarePytestIds:
+    """SWE-bench sympy: bind BARE names to exact file::name node ids so the
+    grader's exact `passing == total` check can resolve (no -k inflation)."""
+
+    _F = "sympy/physics/units/tests/test_quantities.py"
+
+    def test_bare_names_resolve_to_target_file(self, monkeypatch, tmp_path):
+        from maverick.coding_mode import _resolve_bare_pytest_ids
+        monkeypatch.delenv("MAVERICK_TEST_PYTHON", raising=False)
+        (tmp_path / "sympy").mkdir()
+        sb = _FakeSandbox([
+            ("grep -rlE", self._F + "\n"),
+            ("--collect-only",
+             self._F + "::test_issue_24062\n" + self._F + "::test_eq\n"),
+        ])
+        f2p, p2p = _resolve_bare_pytest_ids(
+            tmp_path, sb, ["test_issue_24062"], ["test_eq"])
+        assert f2p == [self._F + "::test_issue_24062"]
+        # `test_eq` binds to the target file's node id, NOT any other file's.
+        assert p2p == [self._F + "::test_eq"]
+
+    def test_path_qualified_pass_through_unchanged(self, tmp_path):
+        from maverick.coding_mode import _resolve_bare_pytest_ids
+        (tmp_path / "sympy").mkdir()
+        # No bare FAIL_TO_PASS to anchor on -> returned verbatim, no sandbox use.
+        sb = _FakeSandbox([])
+        ids_f = ["tests/test_a.py::test_x"]
+        ids_p = ["tests/test_a.py::test_y"]
+        f2p, p2p = _resolve_bare_pytest_ids(tmp_path, sb, ids_f, ids_p)
+        assert (f2p, p2p) == (ids_f, ids_p)
+
+    def test_unresolved_bare_name_stays_bare(self, monkeypatch, tmp_path):
+        from maverick.coding_mode import _resolve_bare_pytest_ids
+        monkeypatch.delenv("MAVERICK_TEST_PYTHON", raising=False)
+        (tmp_path / "sympy").mkdir()
+        sb = _FakeSandbox([
+            ("grep -rlE", self._F + "\n"),
+            ("--collect-only", self._F + "::test_issue_24062\n"),
+        ])
+        # `test_gone` isn't in the collected node ids -> left bare for the
+        # -k fallback rather than dropped.
+        f2p, p2p = _resolve_bare_pytest_ids(
+            tmp_path, sb, ["test_issue_24062"], ["test_gone"])
+        assert f2p == [self._F + "::test_issue_24062"]
+        assert p2p == ["test_gone"]
+
+    def test_no_target_file_returns_original(self, monkeypatch, tmp_path):
+        from maverick.coding_mode import _resolve_bare_pytest_ids
+        monkeypatch.delenv("MAVERICK_TEST_PYTHON", raising=False)
+        (tmp_path / "sympy").mkdir()
+        sb = _FakeSandbox([("grep -rlE", "")])  # grep finds nothing
+        f2p, p2p = _resolve_bare_pytest_ids(
+            tmp_path, sb, ["test_issue_24062"], ["test_eq"])
+        assert f2p == ["test_issue_24062"]
+        assert p2p == ["test_eq"]
+
+
 class TestTestRunResult:
     def test_all_pass_property(self):
         from maverick.coding_mode import TestRunResult
@@ -378,6 +510,30 @@ class TestTestRunResult:
         assert r.all_pass is False
         assert r.score == 0.0
 
+    def test_failing_target_not_masked_by_passing_sibling(self):
+        # Regression: a -k substring collision ran an extra passing sibling, so
+        # `fail_to_pass_passing` reached the requested total (1) even though the
+        # real target FAILED. Counting the failure must keep it from scoring
+        # resolved.
+        from maverick.coding_mode import TestRunResult
+        r = TestRunResult(
+            fail_to_pass_passing=1, fail_to_pass_total=1, fail_to_pass_failing=1,
+            pass_to_pass_passing=5, pass_to_pass_total=5,
+        )
+        assert r.all_pass is False          # was True before the fix
+        assert r.score < 1.0                # no full credit with a live failure
+
+    def test_sibling_pass_inflation_does_not_false_negative(self):
+        # The flip side: extra passing siblings can push `passing` above total;
+        # with no failures that must still count as all-pass, not a false miss.
+        from maverick.coding_mode import TestRunResult
+        r = TestRunResult(
+            fail_to_pass_passing=2, fail_to_pass_total=1, fail_to_pass_failing=0,
+            pass_to_pass_passing=5, pass_to_pass_total=5,
+        )
+        assert r.all_pass is True
+        assert r.score == 1.0
+
     def test_summary_renders(self):
         from maverick.coding_mode import TestRunResult
         r = TestRunResult(
@@ -387,6 +543,81 @@ class TestTestRunResult:
         s = r.summary()
         assert "2/3" in s
         assert "10/10" in s
+
+
+class TestBestOfNAntiCheat:
+    """A best-of-N candidate that edits the graded tests must be refused during
+    evaluation, so it can't be selected as the winner over honest candidates."""
+
+    def _git_repo(self, tmp_path):
+        import subprocess
+        repo = tmp_path / "repo"
+        (repo / "tests").mkdir(parents=True)
+        (repo / "tests" / "test_x.py").write_text(
+            "def test_a():\n    assert 1 == 2\n", encoding="utf-8")
+        env = ["-c", "user.email=t@t", "-c", "user.name=t"]
+        subprocess.run(["git", "-C", str(repo), "init", "-q"], check=True)
+        subprocess.run(["git", "-C", str(repo), "add", "-A"], check=True)
+        subprocess.run(["git", "-C", str(repo), *env, "commit", "-qm", "init"], check=True)
+        return repo
+
+    def test_test_file_edit_candidate_is_refused(self, tmp_path):
+        import asyncio
+
+        from maverick.coding_mode import CodingModeConfig, evaluate_candidate
+
+        repo = self._git_repo(tmp_path)
+        # Cheat: rewrite the graded test so the failing assertion passes.
+        cheat = (
+            "diff --git a/tests/test_x.py b/tests/test_x.py\n"
+            "--- a/tests/test_x.py\n+++ b/tests/test_x.py\n"
+            "@@ -1,2 +1,2 @@\n def test_a():\n-    assert 1 == 2\n+    assert 1 == 1\n"
+        )
+
+        class _SB:
+            workdir = None
+        _SB.workdir = str(repo)
+        cfg = CodingModeConfig(enabled=True, fail_to_pass=["tests/test_x.py::test_a"])
+        cand = asyncio.run(evaluate_candidate(cheat, repo, cfg, _SB(), 0))
+        assert cand.apply_check_passed is False
+        assert "boundary refused" in cand.error
+        assert cand.score == 0.0
+
+
+class TestDefensiveValidatePytestShadowing:
+    def test_blocks_top_level_pytest_module(self):
+        from maverick.coding_mode import defensive_validate
+
+        patch = (
+            "diff --git a/pytest.py b/pytest.py\n"
+            "new file mode 100644\n"
+            "--- /dev/null\n+++ b/pytest.py\n"
+            "@@ -0,0 +1,2 @@\n"
+            "+print('1 passed in 0.01s')\n"
+            "+raise SystemExit(0)\n"
+        )
+
+        result = defensive_validate(patch)
+
+        assert result.ok is False
+        assert "pytest.py" in result.blocked_paths
+
+    def test_blocks_top_level_pytest_package(self):
+        from maverick.coding_mode import defensive_validate
+
+        patch = (
+            "diff --git a/pytest/__main__.py b/pytest/__main__.py\n"
+            "new file mode 100644\n"
+            "--- /dev/null\n+++ b/pytest/__main__.py\n"
+            "@@ -0,0 +1,2 @@\n"
+            "+print('1 passed in 0.01s')\n"
+            "+raise SystemExit(0)\n"
+        )
+
+        result = defensive_validate(patch)
+
+        assert result.ok is False
+        assert "pytest/__main__.py" in result.blocked_paths
 
 
 class TestRepoMapTool:

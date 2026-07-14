@@ -295,7 +295,7 @@ def load_run(run_id: str) -> FlowRun | None:
 
 
 def list_runs(*, flow_id: str | None = None, owner: str | None = None,
-              limit: int = 50) -> list[FlowRun]:
+              limit: int | None = 50) -> list[FlowRun]:
     d = _runs_dir()
     if not d.exists():
         return []
@@ -311,6 +311,8 @@ def list_runs(*, flow_id: str | None = None, owner: str | None = None,
             continue
         runs.append(run)
     runs.sort(key=lambda r: r.updated, reverse=True)
+    if limit is None:
+        return runs
     return runs[: max(0, int(limit))]
 
 

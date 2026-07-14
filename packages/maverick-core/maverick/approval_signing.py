@@ -48,15 +48,23 @@ APPROVAL_MESSAGE_VERSION = "maverick-approval-v1"
 def payload_digest(payload: object) -> str:
     """Canonical SHA-256 hex of a candidate payload, stable across runs.
 
-    JSON with sorted keys when the payload is JSON-serialisable (the common
-    case: a config diff, a tool source string, an adapter ref); otherwise a
-    ``repr`` fallback so a non-serialisable payload still gets a deterministic
-    digest rather than raising. The digest is what the approver signs, so it
-    must be reproducible by both the signer (offline) and the gate."""
-    try:
-        blob = json.dumps(payload, sort_keys=True, default=str).encode("utf-8")
-    except (TypeError, ValueError):
-        blob = repr(payload).encode("utf-8")
+    A ``str``/``bytes`` payload -- the common case: a unified-diff patch, a tool
+    source string, an adapter ref -- is hashed as its RAW bytes, so the digest
+    covers exactly the bytes that get applied and agrees with what the creation
+    sites record (``sha256(patch.encode())``). A structured payload falls back to
+    canonical sorted-key JSON, and a non-serialisable one to ``repr``, so it
+    still gets a deterministic digest rather than raising. Either way the digest
+    is a pure function of the payload, reproducible by both the offline signer
+    and the gate -- which is what makes it a sound binding."""
+    if isinstance(payload, str):
+        blob = payload.encode("utf-8")
+    elif isinstance(payload, (bytes, bytearray)):
+        blob = bytes(payload)
+    else:
+        try:
+            blob = json.dumps(payload, sort_keys=True, default=str).encode("utf-8")
+        except (TypeError, ValueError):
+            blob = repr(payload).encode("utf-8")
     return hashlib.sha256(blob).hexdigest()
 
 
@@ -91,12 +99,31 @@ class ApprovalRequest:
     def for_candidate(cls, candidate: object) -> ApprovalRequest:
         """Build the request for a ``self_improvement.Candidate``.
 
-        Uses the candidate's precomputed ``payload_sha256`` when present, else
-        digests its ``payload`` -- so the gate and an offline signer agree on
-        what was approved without the caller having to thread the digest."""
-        digest = getattr(candidate, "payload_sha256", None)
-        if not digest:
-            digest = payload_digest(getattr(candidate, "payload", None))
+        The digest is ALWAYS recomputed from the candidate's actual ``payload``
+        when one is present -- never taken from the self-reported
+        ``payload_sha256`` field. That field is an independent, agent-settable
+        attribute; trusting it let a valid signature over a benign digest be
+        replayed onto a swapped malicious ``payload`` (the payload it carried was
+        never hashed), which silently defeats the whole point of the signature.
+        Binding to the real payload restores the guarantee in this module's
+        docstring: change the payload, and a prior signature stops verifying. A
+        self-reported digest that disagrees with the real payload is a tamper
+        signal -- it is logged and discarded, not honoured. The stored field is
+        only consulted when there is no payload to hash (a digest-only request)."""
+        payload = getattr(candidate, "payload", None)
+        reported = getattr(candidate, "payload_sha256", None)
+        if payload is not None:
+            digest = payload_digest(payload)
+            if reported and str(reported) != digest:
+                log.warning(
+                    "approval: candidate %s payload_sha256 %s does not match the "
+                    "actual payload digest %s -- binding the approval to the real "
+                    "payload so a swapped payload cannot inherit a prior signature",
+                    str(getattr(candidate, "id", "")), str(reported)[:12], digest[:12])
+        elif reported:
+            digest = str(reported)
+        else:
+            digest = payload_digest(None)
         return cls(
             candidate_id=str(getattr(candidate, "id", "")),
             rung=str(getattr(candidate, "rung", "")),
@@ -170,11 +197,12 @@ def _keys_from_env() -> list[str]:
 
 
 def _keys_from_dir(dir_path: str | None) -> list[str]:
-    """Load raw 32-byte Ed25519 public keys from ``*.pub`` files in a directory,
-    returned as hex. Matches the audit key-dir format (raw ``pub_bytes``, see
-    :mod:`maverick.audit.signing`), so a KMS/secrets-manager or the audit
-    signing key dir can populate the approver set. Non-32-byte files are
-    skipped."""
+    """Load Ed25519 public keys from ``*.pub`` files in a directory, returned as
+    hex.
+
+    Accepts the raw 32-byte audit key-dir format (``pub_bytes``, see
+    :mod:`maverick.audit.signing`) and the legacy 64-character hex text format
+    used by earlier approver-key deployments. Non-key files are skipped."""
     if not dir_path:
         return []
     try:
@@ -189,6 +217,13 @@ def _keys_from_dir(dir_path: str | None) -> list[str]:
             continue
         if len(raw) == 32:
             out.append(raw.hex())
+            continue
+        try:
+            decoded = bytes.fromhex(raw.decode("ascii").strip())
+        except (UnicodeDecodeError, ValueError):
+            continue
+        if len(decoded) == 32:
+            out.append(decoded.hex())
     return out
 
 

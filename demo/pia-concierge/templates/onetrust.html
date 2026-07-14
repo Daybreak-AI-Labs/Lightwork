@@ -1,0 +1,52 @@
+{% extends "base.html" %}
+{% set active = 'onetrust' %}
+{% block title %}OneTrust — Assessments{% endblock %}
+{% block body %}
+<div class="sim-banner"><span class="sim-chip">Simulated</span>
+  <span>Stand-in for the customer's <b>OneTrust</b> tenant. Lightwork filed these records through the
+  <b>real</b> OneTrust integration tool (<span class="mono">POST /api/assessment/v2/assessments</span>,
+  confirm-gated) — repoint <span class="mono">ONETRUST_HOSTNAME</span> at a live sandbox and it's identical.</span></div>
+
+<div class="page-head">
+  <div class="eyebrow">Assessment Automation</div>
+  <h1>Assessments</h1>
+  <p>Completed privacy impact assessments, filed automatically on approval — pre-populated with the
+     risk rating, findings, and required controls.</p>
+</div>
+
+{% if assessments %}
+<div class="card">
+  <table>
+    <tr><th>ID</th><th>Assessment</th><th>Subject</th><th>Risk</th><th>Status</th></tr>
+    {% for a in assessments %}
+    <tr>
+      <td class="mono" style="color:var(--accent);">{{ a.assessment_id }}</td>
+      <td>{{ a.name }}<br><span class="faint" style="font-size:12px;">{{ a.template }}</span></td>
+      <td>{{ a.subject }}</td>
+      <td><span class="risk {{ a.risk_level }}">{{ a.risk_level }}</span></td>
+      <td><span class="pill state-Resolved">{{ a.status }}</span></td>
+    </tr>
+    {% endfor %}
+  </table>
+</div>
+{% for a in assessments %}
+<div class="card">
+  <div class="flow">
+    <span class="mono" style="color:var(--accent);">{{ a.assessment_id }}</span>
+    <strong>{{ a.name }}</strong>
+    <span class="spacer"></span>
+    <span class="risk {{ a.risk_level }}">{{ a.risk_level }} risk</span>
+  </div>
+  {% if a.result and a.result.findings %}
+  <hr>
+  <div class="muted" style="font-size:13px;">
+    {{ a.result.answered }}/{{ a.result.total }} questions answered ·
+    {{ a.result.findings|length }} findings captured
+  </div>
+  {% endif %}
+</div>
+{% endfor %}
+{% else %}
+<div class="empty">No assessments filed yet. Approve one in the Approvals queue.</div>
+{% endif %}
+{% endblock %}

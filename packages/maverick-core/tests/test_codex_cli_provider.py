@@ -155,7 +155,12 @@ class TestLaunchPrefix:
         shim = r"C:\Users\me\AppData\Roaming\npm\codex.cmd"
         client = self._client(monkeypatch, tmp_path, shim)
         assert client._launch_prefix() == [
-            r"C:\Windows\System32\cmd.exe", "/c", shim,
+            r"C:\Windows\System32\cmd.exe", "/d", "/s", "/c", f'"{shim}"',
+        ]
+        cmd = client._launch_cmd("exec", "--model", "gpt&calc", "-")
+        assert cmd == [
+            r"C:\Windows\System32\cmd.exe", "/d", "/s", "/c",
+            f'"{shim}" "exec" "--model" "gpt&calc" "-"',
         ]
 
     def test_windows_real_exe_launched_directly(self, monkeypatch, tmp_path):
@@ -173,7 +178,7 @@ class TestLaunchPrefix:
         monkeypatch.delenv("COMSPEC", raising=False)  # falls back to cmd.exe
         shim = r"C:\tools\codex.bat"
         client = self._client(monkeypatch, tmp_path, shim)
-        assert client._launch_prefix() == ["cmd.exe", "/c", shim]
+        assert client._launch_prefix() == ["cmd.exe", "/d", "/s", "/c", f'"{shim}"']
 
 
 class TestAuthGating:
@@ -262,6 +267,29 @@ class TestExec:
         assert call.get("encoding") == "utf-8"
         assert call.get("errors") == "replace"
         assert FAKE_TOKEN not in " ".join(cmd)
+
+    def test_exec_gets_sanitized_environment(self, codex_env, monkeypatch):
+        monkeypatch.setenv("OPENAI_API_KEY", "sk-test-secret")
+        monkeypatch.setenv("AWS_SECRET_ACCESS_KEY", "aws-test-secret")
+        fake = _FakeRun()
+        client = self._client(codex_env, monkeypatch, fake)
+        client.complete("s", [{"role": "user", "content": "q"}])
+        env = fake.calls[-1]["env"]
+        assert env["CODEX_HOME"] == str(codex_env / "codex-home")
+        assert "PATH" in env
+        assert "CODEX_ACCESS_TOKEN" not in env
+        assert "OPENAI_API_KEY" not in env
+        assert "AWS_SECRET_ACCESS_KEY" not in env
+
+    def test_login_gets_sanitized_environment(self, codex_env, monkeypatch):
+        monkeypatch.setenv("OPENAI_API_KEY", "sk-test-secret")
+        fake = _FakeRun()
+        monkeypatch.setattr(
+            "maverick.providers.codex_cli_provider.subprocess.run", fake)
+        CodexCLIClient().complete("sys", [{"role": "user", "content": "hi"}])
+        login = next(c for c in fake.calls if "login" in c["cmd"])
+        assert "CODEX_ACCESS_TOKEN" not in login["env"]
+        assert "OPENAI_API_KEY" not in login["env"]
 
     def test_budget_records_tokens_at_zero_dollars(self, codex_env, monkeypatch):
         fake = _FakeRun()

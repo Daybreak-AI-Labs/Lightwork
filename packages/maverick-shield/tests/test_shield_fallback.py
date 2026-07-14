@@ -64,6 +64,22 @@ def test_tool_call_scan_with_attack_payload():
     assert not verdict.allowed
 
 
+def test_bytes_arg_is_decoded_not_repr():
+    # Regression: a destructive command in a BYTES arg must be scanned as its
+    # real text, not str(b"...") == "b'...'" which re-adds quoting and hides it
+    # from the rule anchors.
+    from maverick_shield.guard import _collect_arg_strings
+    out = _collect_arg_strings({"cmd": b"rm -rf /"})
+    assert "rm -rf /" in out
+    assert not any(s.startswith("b'") or s.startswith('b"') for s in out)
+
+
+def test_bytes_destructive_command_is_blocked():
+    s = Shield(warn_if_missing=False)
+    verdict = s.scan_tool_call("shell", {"cmd": b"rm -rf /"})
+    assert not verdict.allowed
+
+
 def test_output_scan_with_benign_text():
     s = Shield(warn_if_missing=False)
     verdict = s.scan_output("here is the summary you requested")

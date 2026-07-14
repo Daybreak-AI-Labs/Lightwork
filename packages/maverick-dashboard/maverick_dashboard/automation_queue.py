@@ -426,7 +426,7 @@ def _active_run_count(flow_id: str, exclude_run_id: str) -> int:
     don't count -- they're exactly what the slot guard gates -- else two queued
     events would each see the other and defer forever."""
     from maverick.flow import store
-    return sum(1 for r in store.list_runs(flow_id=flow_id, limit=200)
+    return sum(1 for r in store.list_runs(flow_id=flow_id, limit=None)
                if r.run_id != exclude_run_id and r.status in _ACTIVE_RUN_STATUSES)
 
 
@@ -612,7 +612,10 @@ def _handle_flow_evolve(_job=None) -> None:
                 impact = evolve.measure(f.id, node_id, float(last.get("ts") or 0.0))
                 if not evolve.regressed(impact):
                     continue
-                prior = store.load_version(f.id, int(last.get("version") or 0) - 1)
+                apply_version = int(last.get("version") or 0)
+                if int(f.version or 0) != apply_version:
+                    continue  # stale apply boundary; a newer save may be human work
+                prior = store.load_version(f.id, apply_version - 1)
                 if prior is None or node_id not in prior.nodes:
                     continue
                 reverted = evolve.revert_node(f, node_id, prior.nodes[node_id])
@@ -638,11 +641,9 @@ def _auto_apply_proposals() -> None:
 
     * SOFTEN (action -> agent): a chronically-failing fixed step handed to an
       agent; the brief derives from the node.
-    * HARDEN (agent -> action): a reliably-succeeding agent node that has been
-      calling ONE tool over and over, hardened to call that tool directly -- but
-      ONLY when that tool was confidently inferred from captured runs
-      (``inferred_tool``). Without it, hardening still needs a human to pick the
-      tool, so it's left as a surfaced proposal.
+    * HARDEN (agent -> action): never auto-applied. Even when telemetry infers
+      a likely tool, that inference is model-influenced and must remain a
+      surfaced proposal for human review before it can persist a direct action.
 
     Skips a node that already has a pending apply (so it is measured -- and
     auto-reverted if it regresses -- before another change). Idempotent +
@@ -657,10 +658,8 @@ def _auto_apply_proposals() -> None:
             kwargs: dict = {}
             if prop.from_kind == NODE_ACTION:       # soften: derive the brief
                 kwargs["brief"] = (node.brief or node.label) if node else ""
-            elif prop.inferred_tool:                # harden: only with an inferred tool
-                kwargs["tool"] = prop.inferred_tool
             else:
-                continue                            # harden with no known tool -> human-gated
+                continue                            # harden stays human-gated, even with an inferred tool
             try:
                 changed = evolve.apply_proposal(f, prop.node_id, prop.to_kind, **kwargs)
             except (KeyError, ValueError):
@@ -730,17 +729,18 @@ def _reconcile_flow_crons() -> None:
     the same schedule is stale and cancelled; a scheduled flow with no matching
     live cron gets one seeded. Idempotent -- safe to run on every reconcile."""
     from maverick.flow import store
-    from maverick.scheduler import CronError, parse_cron, schedule_cron
+    from maverick.scheduler import CronError, next_run, schedule_cron
     want: dict[str, tuple[str, str]] = {}
     for f in store.list_flows():
         expr = f.schedule.strip()
         if not expr:
             continue
+        tz = f.timezone.strip()
         try:
-            parse_cron(expr)          # only arm a valid expression
+            next_run(expr, tz=tz)     # only arm schedules with a future occurrence
         except CronError:
             continue
-        want[f.id] = (expr, f.timezone.strip())
+        want[f.id] = (expr, tz)
     q = queue()
     covered: set[str] = set()
     for j in _pending(FLOW_CRON_KIND):
@@ -753,8 +753,11 @@ def _reconcile_flow_crons() -> None:
             q.cancel(j.id)            # stale (flow unscheduled, schedule/tz changed, or dup)
     for fid, (expr, tz) in want.items():
         if fid not in covered:
-            schedule_cron(q, expr, FLOW_CRON_KIND,
-                          {"flow_id": fid, "__cron__": expr, "__tz__": tz})
+            try:
+                schedule_cron(q, expr, FLOW_CRON_KIND,
+                              {"flow_id": fid, "__cron__": expr, "__tz__": tz})
+            except CronError:
+                continue
 
 
 def _dream_cron() -> str:

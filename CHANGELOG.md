@@ -52,8 +52,8 @@ project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   widened. On by default with a kill-switch: `[workforce] data_grounding = false`
   / `MAVERICK_WORKFORCE_DATA_GROUNDING=off`, plus an installer wizard step.
 - **Roster-wide governance invariant test suite** — six load-bearing invariants,
-  each verified across all 2,020 packs and fault-injected at 1,000,000 iterations
-  with a non-vacuity control: (1) tool reachability — no drafting agent can reach
+  each verified across all 2,020 packs with a non-vacuous fault-injection control
+  (property-fuzzed up to 5,000 iterations): (1) tool reachability — no drafting agent can reach
   a state-mutating tool; (2) autonomy dial — an onboarding agent is never
   autonomous and a high-risk action is never autonomous even when graduated;
   (3) capability attenuation — a spawned child can never exceed its parent grant

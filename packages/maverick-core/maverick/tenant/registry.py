@@ -58,6 +58,12 @@ _STATUSES = frozenset({ACTIVE, SUSPENDED})
 # from both the CLI and the dashboard, which are separate processes).
 _REGISTRY_LOCK = threading.Lock()
 
+# Serializes the in-flight reservations load-modify-save (a separate file from
+# the roster, so a separate lock: reserving a run's dollars must not contend
+# with a suspend/set_quota roster edit). Cross-process flock on the sidecar
+# extends it across the CLI / dashboard / serve processes.
+_RESERVE_LOCK = threading.Lock()
+
 
 class TenantSuspended(PermissionError):
     """Raised when work is attempted for a suspended (or deleted) tenant."""
@@ -395,22 +401,131 @@ def _tenant_daily_cap(tenant_id: str) -> float:
     return cap if cap > 0 else 0.0
 
 
+# ---- In-flight dollar reservations (concurrent daily-cap enforcement) --------
+#
+# The usage ledger is written only at run END, so N runs that START for one
+# tenant before any of them records spend would each read the same remaining
+# allowance and each clamp to the full remainder -- collectively overshooting
+# the daily ceiling by up to N x (finding #2). A run therefore RESERVES its
+# clamped per-run dollar cap here at start; tenant_remaining_today subtracts
+# outstanding (non-expired) reservations as well as recorded spend, so a
+# concurrent start sees the in-flight hold. Each reservation carries a TTL, so a
+# crashed run that never records spend (and so never releases) only dents the
+# cap until the hold expires -- the cap self-heals rather than being permanently
+# reduced. Stored as a sibling of the tenant usage ledger
+# (``tenants/<t>/usage/reservations.json``) with the same atomic
+# temp-file+os.replace + cross-process flock discipline the ledger uses.
+
+
+def _reservations_path(tenant_id: str):
+    from ..paths import data_dir
+    return data_dir("usage", "reservations.json", tenant=tenant_id)
+
+
+def _load_reservations(tenant_id: str) -> dict:
+    try:
+        raw = json.loads(_reservations_path(tenant_id).read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError):
+        return {}
+    return raw if isinstance(raw, dict) else {}
+
+
+def _live_reservations(data: dict, now: float) -> dict:
+    """Return only the well-formed, non-expired, positive-amount holds in
+    ``data`` (the pruning + parsing shared by the read and write paths)."""
+    out: dict = {}
+    for rid, v in data.items():
+        if not isinstance(v, dict):
+            continue
+        try:
+            exp = float(v.get("expires_at", 0.0))
+            amt = float(v.get("dollars", 0.0))
+        except (TypeError, ValueError):
+            continue
+        if exp > now and amt > 0:
+            out[str(rid)] = {"dollars": amt, "expires_at": exp}
+    return out
+
+
+def _outstanding_reservations(tenant_id: str | None, *, now: float | None = None) -> float:
+    """Sum of a tenant's outstanding (non-expired) in-flight dollar holds."""
+    tid = (tenant_id or "").strip()
+    if not tid:
+        return 0.0
+    at = time.time() if now is None else now
+    return sum(v["dollars"] for v in _live_reservations(_load_reservations(tid), at).values())
+
+
+def reserve_tenant_dollars(tenant_id: str | None, amount: float,
+                           ttl_seconds: float, reservation_id: str) -> None:
+    """Hold ``amount`` dollars in-flight against ``tenant_id`` under
+    ``reservation_id`` for ``ttl_seconds`` from now.
+
+    Makes concurrent run starts see each other's not-yet-recorded spend:
+    :func:`tenant_remaining_today` subtracts outstanding reservations. The TTL is
+    a backstop -- a crashed run that never releases only reduces the cap until
+    the hold expires. Atomic read-modify-write (in-process lock + cross-process
+    flock + temp-file replace) that also prunes expired holds. A blank tenant/id
+    or a non-positive amount is a no-op. Callers wrap this (it must never raise
+    into the run path)."""
+    tid = (tenant_id or "").strip()
+    if not tid or not reservation_id:
+        return
+    try:
+        amt = float(amount or 0.0)
+        ttl = float(ttl_seconds or 0.0)
+    except (TypeError, ValueError):
+        return
+    if amt <= 0:
+        return
+    now = time.time()
+    path = _reservations_path(tid)
+    with _RESERVE_LOCK, cross_process_lock(path):
+        data = _live_reservations(_load_reservations(tid), now)
+        data[str(reservation_id)] = {"dollars": amt, "expires_at": now + ttl}
+        atomic_write_text(path, json.dumps(data, indent=2, sort_keys=True))
+
+
+def release_tenant_reservation(tenant_id: str | None, reservation_id: str) -> bool:
+    """Release a hold taken by :func:`reserve_tenant_dollars` (e.g. once the run
+    has recorded its actual spend, so it isn't double-counted against the cap for
+    the rest of its TTL). Also prunes expired holds. Returns True if the id was
+    present; a no-op returning False for a blank tenant/id."""
+    tid = (tenant_id or "").strip()
+    if not tid or not reservation_id:
+        return False
+    now = time.time()
+    path = _reservations_path(tid)
+    with _RESERVE_LOCK, cross_process_lock(path):
+        data = _load_reservations(tid)
+        existed = str(reservation_id) in data
+        data.pop(str(reservation_id), None)
+        atomic_write_text(
+            path, json.dumps(_live_reservations(data, now), indent=2, sort_keys=True))
+    return existed
+
+
 def tenant_remaining_today(tenant_id: str | None) -> float | None:
     """Dollars a tenant may still spend today before hitting its daily cap.
 
     Returns ``None`` when no cap applies (no tenant, unprovisioned, cap 0/unset,
     enforcement off) so callers leave their own ceiling untouched. Otherwise the
-    non-negative remainder ``cap - spent_today`` -- which a per-run budget can
-    clamp to so a single run can't overshoot the tenant's aggregate ceiling
-    (#78). Coordinates the per-run cap with the per-tenant cap; without it the
-    over-quota gate only fires *between* runs, after the overshoot."""
+    non-negative remainder ``cap - spent_today - outstanding_reservations`` --
+    which a per-run budget can clamp to so a single run can't overshoot the
+    tenant's aggregate ceiling (#78). Subtracting outstanding in-flight
+    reservations (spend that concurrent runs have committed to but not yet
+    recorded) is what closes the concurrency hole in finding #2: two runs that
+    start before either records spend see each other's holds instead of both
+    clamping to the full remainder. Coordinates the per-run cap with the
+    per-tenant cap; without it the over-quota gate only fires *between* runs,
+    after the overshoot."""
     tid = (tenant_id or "").strip()
     if not tid:
         return None
     cap = _tenant_daily_cap(tid)
     if cap <= 0:
         return None
-    return max(0.0, cap - tenant_spend_today(tid))
+    return max(0.0, cap - tenant_spend_today(tid) - _outstanding_reservations(tid))
 
 
 __all__ = [
@@ -419,4 +534,5 @@ __all__ = [
     "resume_tenant", "delete_tenant", "set_quota", "set_plan",
     "is_active", "assert_tenant_active", "tenant_spend_today",
     "tenant_over_quota", "tenant_remaining_today",
+    "reserve_tenant_dollars", "release_tenant_reservation",
 ]

@@ -134,6 +134,16 @@ def test_max_auto_rung_ceiling_forces_human_above_it():
     assert any(g.gate == "human_approval" and not g.ok for g in v.gates)
 
 
+def test_unknown_max_auto_rung_fails_closed_not_open():
+    # Regression: a typo'd/unknown ceiling must behave as the MOST restrictive
+    # ceiling (require human for everything above the lowest rung), never as an
+    # unbounded ceiling that silently disables the autonomous-promotion gate.
+    ctrl = _ctrl(max_auto_rung="polciy")   # deliberate typo of "policy"
+    v = ctrl.evaluate(_cand(rung="policy", samples=8, capability_widens=False, approved=False))
+    assert not v.ok
+    assert any(g.gate == "human_approval" and not g.ok for g in v.gates)
+
+
 # -- reversibility ---------------------------------------------------------
 
 def test_non_reversible_change_is_rejected():
@@ -198,6 +208,76 @@ def test_ledger_persists_across_instances(tmp_path):
     reloaded = PromotionLedger(path=p)
     assert reloaded.get("abc") is not None
     assert reloaded.get("abc").candidate_score == 0.9
+
+
+# -- signature material persisted in the ledger (independent verifiability) --
+
+def test_promotion_record_signature_fields_round_trip(tmp_path):
+    """approver_id/payload_sha256/approval_signature survive save -> load so a
+    third party can re-verify the Ed25519 signature from the ledger file alone."""
+    from maverick.self_improvement import PromotionRecord
+    p = tmp_path / "si.json"
+    led = PromotionLedger(path=p)
+    led.add(PromotionRecord(
+        id="sig-1", rung="code", summary="signed change",
+        baseline_score=0.2, candidate_score=0.9, promoted_at=2.0,
+        approver_id="abc123deadbeef00", payload_sha256="deadbeef" * 8,
+        approval_signature="ff" * 64))
+    rec = PromotionLedger(path=p).get("sig-1")
+    assert rec is not None
+    assert rec.approver_id == "abc123deadbeef00"
+    assert rec.payload_sha256 == "deadbeef" * 8
+    assert rec.approval_signature == "ff" * 64
+    assert rec.to_dict()["approval_signature"] == "ff" * 64
+
+
+def test_old_ledger_without_signature_fields_still_loads(tmp_path):
+    """A ledger written BEFORE the signature fields existed loads exactly as
+    before; the new fields default None (backward compatibility)."""
+    import json
+    p = tmp_path / "si.json"
+    p.write_text(json.dumps([{
+        "id": "old-1", "rung": "config", "summary": "legacy",
+        "baseline_score": 0.1, "candidate_score": 0.5, "promoted_at": 1.0,
+        "rolled_back": False, "rolled_back_at": None,
+    }]), encoding="utf-8")
+    rec = PromotionLedger(path=p).get("old-1")
+    assert rec is not None
+    assert rec.candidate_score == 0.5
+    assert rec.approver_id is None
+    assert rec.payload_sha256 is None
+    assert rec.approval_signature is None
+
+
+def test_promote_persists_candidate_signature_material(tmp_path, monkeypatch):
+    """promote() copies a candidate's signature material into the ledger record,
+    and mark_rolled_back preserves it through the to_dict -> constructor round-trip."""
+    monkeypatch.setenv("MAVERICK_SELF_IMPROVEMENT", "1")
+    ledger = PromotionLedger(path=tmp_path / "si.json")
+    ctrl = _ctrl(ledger=ledger)
+    cand = _cand(rung="config", payload_sha256="ab" * 32, approval_signature="cd" * 64)
+    assert ctrl.promote(cand).ok
+    rec = ledger.get(cand.id)
+    assert rec.payload_sha256 == "ab" * 32
+    assert rec.approval_signature == "cd" * 64
+    ctrl.rollback(cand.id, undo=lambda: None)
+    rec2 = ledger.get(cand.id)
+    assert rec2.rolled_back is True
+    assert rec2.approval_signature == "cd" * 64  # survived the rolled-back rewrite
+
+
+def test_promote_without_signature_leaves_fields_none(tmp_path, monkeypatch):
+    """A promotion with no cryptographic approval records None -- unchanged
+    behaviour from before the fields existed."""
+    monkeypatch.setenv("MAVERICK_SELF_IMPROVEMENT", "1")
+    ledger = PromotionLedger(path=tmp_path / "si.json")
+    ctrl = _ctrl(ledger=ledger)
+    rec = None
+    assert ctrl.promote(_cand(rung="config")).ok
+    rec = ledger.get(next(iter(r.id for r in ledger.all())))
+    assert rec.approver_id is None
+    assert rec.payload_sha256 is None
+    assert rec.approval_signature is None
 
 
 # -- disabled-by-default posture (kernel rule 1) ---------------------------

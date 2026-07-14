@@ -88,12 +88,20 @@ def flow_surface(flow_id: str) -> dict[str, Any] | None:
     kinds: set[str] = set()
     gated = False
     for n in nodes:
-        n = n if isinstance(n, dict) else {}
-        kinds.add(str(n.get("kind") or ""))
-        if n.get("kind") == "approval":
+        if isinstance(n, dict):
+            kind = str(n.get("kind") or "")
+            node_tools = list(n.get("tools") or [])
+            if n.get("tool"):
+                node_tools.append(n["tool"])
+        else:
+            kind = str(getattr(n, "kind", "") or "")
+            node_tools = [getattr(n, "tool", "")]
+        kinds.add(kind)
+        if kind == "approval":
             gated = True
-        for t in (n.get("tools") or []):
-            tools.add(str(t))
+        for t in node_tools:
+            if t:
+                tools.add(str(t))
     return {
         "kind": "flow",
         "subject": flow_id,

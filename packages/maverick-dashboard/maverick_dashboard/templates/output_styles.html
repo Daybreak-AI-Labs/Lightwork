@@ -6,6 +6,7 @@
 
   <div class="panel">
     <form method="post" action="/styles/set" style="margin: 0;">
+      <div role="radiogroup" aria-label="Output style">
       <table>
         <thead><tr><th scope="col"></th><th scope="col">style</th><th scope="col">guidance</th></tr></thead>
         <tbody>
@@ -23,6 +24,7 @@
           {% endfor %}
         </tbody>
       </table>
+      </div>
       <div style="margin-top: var(--space-3); display: flex; align-items: center; gap: var(--space-3);">
         <button type="submit" class="btn btn--primary">Apply</button>
         {% if active %}<span class="muted">Active: <code>{{ active }}</code></span>{% endif %}

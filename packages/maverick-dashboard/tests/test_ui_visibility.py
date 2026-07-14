@@ -260,6 +260,29 @@ def test_settings_matrix_save_reset_and_authz(monkeypatch, tmp_path):
     assert c.get("/benchmarks").status_code == 200
 
 
+def test_settings_matrix_requires_global_admin_for_tenant_local_admin(
+    monkeypatch, tmp_path
+):
+    # The visibility matrix is global control-plane state, so a tenant-local
+    # admin must not be allowed to change it for every other tenant/user.
+    monkeypatch.setenv("MAVERICK_DASHBOARD_ADMINS", "")
+    c = _client(monkeypatch, tmp_path)
+    from maverick.paths import reset_tenant, set_tenant
+    from maverick_dashboard import rbac, ui_visibility
+
+    rbac.set_role("user:tenant-admin", "viewer")
+    rbac.set_tenant_role("acme", "user:tenant-admin", "admin")
+    _as(monkeypatch, "user:tenant-admin")
+
+    tok = set_tenant("acme")
+    try:
+        assert c.post("/settings/ui-visibility", data={"cell": []}).status_code == 403
+        assert c.post("/settings/ui-visibility/reset").status_code == 403
+        assert ui_visibility.overrides() == {}
+    finally:
+        reset_tenant(tok)
+
+
 def test_matrix_save_cannot_lock_admins_out(monkeypatch, tmp_path):
     # A save with NOTHING checked hides everything hideable -- and the admin
     # must still reach /settings and /users to undo it.

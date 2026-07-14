@@ -90,6 +90,19 @@ class TestReviewPatch:
             _patch("packages/maverick-core/maverick/agent.py"), self._surface())
         assert r.ok is False and r.unknown
 
+    def test_timestamped_diff_header_cannot_smuggle_a_protected_edit(self):
+        # Regression: git ---/+++ headers may carry a trailing tab+timestamp that
+        # git apply ignores. A plain unified diff (no `diff --git` line) editing a
+        # control-plane file with that suffix must still be classified protected
+        # -- even against a permissive '**' allowlist -- or the boundary is blind
+        # to an edit git apply then applies to the real control-plane file.
+        prot = "packages/maverick-core/maverick/self_improvement.py"
+        ts = "\t2024-01-01 00:00:00.000000000 +0000"
+        patch = (f"--- a/{prot}{ts}\n+++ b/{prot}{ts}\n@@ -1 +1 @@\n-old\n+new\n")
+        r = sm.review_patch(patch, sm.EditableSurface(editable_globs=("**",)))
+        assert r.ok is False
+        assert any("self_improvement" in p for p in r.protected)
+
     def test_rejects_empty_patch(self):
         assert sm.review_patch("", sm.EditableSurface(editable_globs=("**",))).ok is False
 

@@ -187,6 +187,77 @@ def test_enforce_env_can_disable(monkeypatch, caplog):
     assert [n for n, _ in out] == ["wp"]  # loaded (enforcement disabled via env)
 
 
+# ---------- advisory: permissions unenforced under isolation 'none' (#15) ----
+
+def test_advisory_warning_when_granted_but_isolation_none(monkeypatch, caplog):
+    # A plugin DECLARES network, the operator GRANTS it, so it loads -- but
+    # isolation 'none' (the default) runs it in-process, so the grant is only
+    # advisory. Warn so the operator knows it isn't runtime-enforced.
+    monkeypatch.setenv("MAVERICK_PLUGINS_ALLOW", "*")
+    monkeypatch.setattr(
+        plugins, "_plugins_config",
+        lambda: {"grant": ["network"], "enforce_permissions": True},
+    )
+    monkeypatch.delenv("MAVERICK_PLUGIN_ISOLATION", raising=False)
+    monkeypatch.setattr("maverick.config.load_config", lambda *a, **k: {})
+    _set_eps(monkeypatch, {"maverick.tools": [
+        _FakeEP("wp", lambda: "ok", dist=_FakeDist("wp", _manifest_toml(network=True))),
+    ]})
+    with caplog.at_level(logging.WARNING, logger="maverick.plugins"):
+        out = plugins.discover_tools()
+    assert [n for n, _ in out] == ["wp"]          # loaded (granted)
+    assert "ADVISORY" in caplog.text              # ...but flagged as advisory
+    assert "isolation" in caplog.text
+
+
+def test_advisory_warns_even_when_enforce_disabled(monkeypatch, caplog):
+    # enforce off => an ungranted permission loads with a warning; it, too, is
+    # advisory under isolation 'none'.
+    monkeypatch.setenv("MAVERICK_PLUGINS_ALLOW", "*")
+    monkeypatch.setattr(plugins, "_plugins_config",
+                        lambda: {"enforce_permissions": False})
+    monkeypatch.delenv("MAVERICK_PLUGIN_ISOLATION", raising=False)
+    monkeypatch.setattr("maverick.config.load_config", lambda *a, **k: {})
+    _set_eps(monkeypatch, {"maverick.tools": [
+        _FakeEP("wp", lambda: "ok", dist=_FakeDist("wp", _manifest_toml(fs_write=True))),
+    ]})
+    with caplog.at_level(logging.WARNING, logger="maverick.plugins"):
+        out = plugins.discover_tools()
+    assert [n for n, _ in out] == ["wp"]
+    assert "ADVISORY" in caplog.text
+
+
+def test_no_advisory_for_manifestless_plugin(monkeypatch, caplog):
+    # No declared permissions => no grant to qualify => no advisory noise.
+    monkeypatch.setenv("MAVERICK_PLUGINS_ALLOW", "*")
+    monkeypatch.delenv("MAVERICK_PLUGIN_ISOLATION", raising=False)
+    monkeypatch.setattr("maverick.config.load_config", lambda *a, **k: {})
+    _set_eps(monkeypatch, {"maverick.tools": [
+        _FakeEP("plain", lambda: "ok", dist=_FakeDist("plain-pkg")),  # no manifest
+    ]})
+    with caplog.at_level(logging.WARNING, logger="maverick.plugins"):
+        out = plugins.discover_tools()
+    assert [n for n, _ in out] == ["plain"]
+    assert "ADVISORY" not in caplog.text
+
+
+def test_no_advisory_when_isolation_confines(monkeypatch, caplog):
+    # With isolation actually enforcing (subprocess), the grant is not advisory.
+    monkeypatch.setenv("MAVERICK_PLUGINS_ALLOW", "*")
+    monkeypatch.setattr(
+        plugins, "_plugins_config",
+        lambda: {"grant": ["network"], "enforce_permissions": True},
+    )
+    monkeypatch.setenv("MAVERICK_PLUGIN_ISOLATION", "subprocess")
+    _set_eps(monkeypatch, {"maverick.tools": [
+        _FakeEP("wp", lambda: "ok", dist=_FakeDist("wp", _manifest_toml(network=True))),
+    ]})
+    with caplog.at_level(logging.WARNING, logger="maverick.plugins"):
+        out = plugins.discover_tools()
+    assert [n for n, _ in out] == ["wp"]
+    assert "ADVISORY" not in caplog.text
+
+
 # ---------- pure helpers ----------
 
 def test_permission_violations():

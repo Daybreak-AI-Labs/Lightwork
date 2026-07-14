@@ -77,14 +77,42 @@ class TestSignVerify:
         _priv, pub = _keypair()
         assert ap.verify(ap.ApprovalRequest.for_candidate(_candidate()), "", [pub]) is None
 
-    def test_explicit_payload_sha256_overrides_payload(self):
-        priv, pub = _keypair()
-        digest = ap.payload_digest({"canonical": "form"})
-        cand = _candidate(payload={"anything": 1}, payload_sha256=digest)
+    def test_self_reported_digest_cannot_override_the_real_payload(self):
+        # Regression for the substitution attack: the request digest is bound to
+        # the ACTUAL payload, never to the self-settable payload_sha256 field. A
+        # candidate that carries a digest for some OTHER payload must still be
+        # signed over its own payload's digest -- the stale field is ignored.
+        other = ap.payload_digest({"canonical": "form"})
+        cand = _candidate(payload={"anything": 1}, payload_sha256=other)
         req = ap.ApprovalRequest.for_candidate(cand)
-        assert req.payload_sha256 == digest
-        sig = ap.sign_request(req, priv)
-        assert ap.verify(req, sig, [pub]) == ap.key_id(pub)
+        assert req.payload_sha256 == ap.payload_digest({"anything": 1})
+        assert req.payload_sha256 != other
+
+    def test_swapped_payload_cannot_inherit_prior_signature(self):
+        # The exact TOCTOU/substitution the module exists to prevent: an approver
+        # signs a BENIGN candidate; an agent then swaps in a malicious payload but
+        # KEEPS the benign payload_sha256 and the benign signature, hoping the
+        # gate binds to the (unchanged) self-reported digest. It must not verify.
+        priv, pub = _keypair()
+        benign = _candidate(payload={"diff": "benign"})
+        benign_digest = ap.payload_digest(benign.payload)
+        sig = ap.sign_request(ap.ApprovalRequest.for_candidate(benign), priv)
+        # Attacker keeps benign id + benign digest + benign signature, swaps payload.
+        swapped = _candidate(id=benign.id, payload={"diff": "rm -rf /"},
+                             payload_sha256=benign_digest)
+        swapped.approval_signature = sig
+        assert ap.verify_candidate(swapped) is None          # refused
+        # And the request it builds is bound to the malicious bytes, not the digest.
+        assert ap.ApprovalRequest.for_candidate(swapped).payload_sha256 != benign_digest
+
+    def test_string_payload_digest_matches_raw_sha256(self):
+        # payload_digest of a str/bytes payload hashes the raw bytes, so it equals
+        # the sha256(patch.encode()) the creation sites (swebench/dgm) record --
+        # keeping sign, ledger, and the independent auditor consistent.
+        import hashlib
+        patch = "diff --git a/x b/x\n-old\n+new\n"
+        assert ap.payload_digest(patch) == hashlib.sha256(patch.encode()).hexdigest()
+        assert ap.payload_digest(patch.encode()) == hashlib.sha256(patch.encode()).hexdigest()
 
 
 class TestEnforcement:
@@ -133,6 +161,21 @@ class TestEnforcement:
         cand.approval_signature = ap.sign_request(
             ap.ApprovalRequest.for_candidate(cand), priv_hex)
         assert ap.verify_candidate(cand) == ap.key_id(pub_bytes.hex())
+
+    def test_hex_text_keys_loaded_from_dir_enforce_signatures(
+        self, tmp_path, monkeypatch
+    ):
+        # Regression: legacy deployments may store approver keys as 64-character
+        # hex text in *.pub files. Loading them must still enable enforcement so
+        # the human gate cannot fall back to the self-settable approved boolean.
+        _priv, pub = _keypair()
+        (tmp_path / "approver.pub").write_text(pub, encoding="ascii")
+        monkeypatch.delenv("MAVERICK_APPROVER_KEYS", raising=False)
+        monkeypatch.setenv("MAVERICK_APPROVER_KEYS_DIR", str(tmp_path))
+        monkeypatch.setattr(ap, "_config_approval", dict)
+
+        assert ap.trusted_approver_keys() == [pub]
+        assert ap.signing_enforced() is True
 
 
 class TestGateIntegration:

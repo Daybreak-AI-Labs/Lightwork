@@ -298,8 +298,8 @@ def _find_manifest(ep):
     return None
 
 
-def _permission_violations(manifest, granted: set[str]) -> list[str]:
-    """Permissions the manifest requests that aren't in the granted set."""
+def _requested_permissions(manifest) -> list[str]:
+    """Permission names the manifest declares (regardless of grant)."""
     if manifest is None:
         return []
     perms = manifest.permissions
@@ -312,7 +312,43 @@ def _permission_violations(manifest, granted: set[str]) -> list[str]:
         requested.append("subprocess")
     if perms.sensitive_envs:
         requested.append("sensitive_envs")
-    return [r for r in requested if r not in granted]
+    return requested
+
+
+def _permission_violations(manifest, granted: set[str]) -> list[str]:
+    """Permissions the manifest requests that aren't in the granted set."""
+    return [r for r in _requested_permissions(manifest) if r not in granted]
+
+
+def _warn_permissions_advisory(ep, group: str, manifest, dist: str | None) -> None:
+    """Advisory (finding #15): a granted permission is only meaningful when the
+    plugin actually runs confined.
+
+    With ``[plugins] isolation = "none"`` (the default outside enterprise) a
+    plugin runs in the HOST interpreter, so a manifest permission the operator
+    granted is self-asserted, not runtime-enforced -- nothing stops the plugin
+    from touching the network / filesystem / subprocess regardless of what it
+    declared. Emit a warning at load so the operator knows the grant is
+    advisory and can opt into real confinement via ``[plugins] isolation``. We
+    do NOT change the default isolation mode (that would break in-process
+    plugins) or weaken the allowlist/permission gate -- this only informs.
+
+    Fires only for plugins that actually declare permissions: a manifest-less
+    plugin declares none, so there is no grant to qualify as advisory.
+    """
+    requested = _requested_permissions(manifest)
+    if not requested:
+        return
+    from .plugin_isolation import isolation_mode
+    if isolation_mode() != "none":
+        return
+    log.warning(
+        "plugin %s.%s (%s) declares permission(s) %s, but plugin isolation is "
+        "'none': the plugin runs in-process and these permissions are ADVISORY "
+        "only -- self-asserted, not runtime-enforced. Set [plugins] isolation = "
+        '"subprocess" (or "subinterpreter") to confine plugin calls.',
+        group, ep.name, dist or "unknown-dist", requested,
+    )
 
 
 def _plugin_signing_policy() -> tuple[str | None, bool, set[str]]:
@@ -389,8 +425,30 @@ def _ep_module_file(ep):
     return None
 
 
+# Non-source distribution files that still execute (or steer execution) once
+# the package is importable: native extensions, byte-compiled code, and .pth
+# startup hooks. Hashing only ``.py`` left these OUTSIDE the signature, so a
+# swapped ``.so`` ran as "verified" native code under a signed plugin. The
+# on-disk coverage scan (``_ondisk_files_covered``) flags any of these that a
+# tamperer dropped next to signed modules without touching the dist RECORD.
+_SIGNED_ONDISK_SUFFIXES = (".so", ".pyd", ".dylib", ".pth")
+
+
 def _ep_importable_files(ep) -> dict[str, str] | None:
-    """Return importable plugin Python files and sha256s without importing code."""
+    """Return the signed file set (relpath -> sha256) without importing code.
+
+    Covers EVERY distribution file under the plugin's package root -- not just
+    ``.py``. Native extensions (``.so``/``.pyd``/``.dylib``), byte-compiled
+    ``.pyc``, and shipped data files all execute or steer execution once the
+    package is importable, so a signature that hashed only ``.py`` left them
+    swappable under a "verified" plugin. Also hashes any top-level ``.pth`` the
+    dist ships (a site-packages ``.pth`` runs code at interpreter startup). The
+    signing and verify paths both call this, so the recomputed manifest mirrors
+    the signed one exactly -- an added, changed, or removed distribution file
+    makes the manifests differ and verification fails closed. The signature
+    bundle itself is excluded (it embeds this manifest, so it cannot hash
+    itself).
+    """
     module = _ep_module_name(ep)
     dist = getattr(ep, "dist", None)
     if not module or dist is None:
@@ -404,9 +462,14 @@ def _ep_importable_files(ep) -> dict[str, str] | None:
     files: dict[str, str] = {}
     for f in dist_files:
         rel = str(f).replace("\\", "/")
+        if rel.rsplit("/", 1)[-1] == "maverick_plugin.sig.json":
+            continue
         is_module = rel in {module_rel + ".py", module_rel + "/__init__.py"}
-        is_package_file = rel.startswith(top + "/") and rel.endswith(".py")
-        if not (is_module or is_package_file):
+        under_pkg = rel.startswith(top + "/")
+        # A .pth at the site-packages root (outside the package dir) injects
+        # code at interpreter startup -- bring it inside the signature too.
+        is_pth = rel.endswith(".pth") and "/" not in rel
+        if not (is_module or under_pkg or is_pth):
             continue
         try:
             data = Path(dist.locate_file(f)).read_bytes()
@@ -416,6 +479,51 @@ def _ep_importable_files(ep) -> dict[str, str] | None:
     if module_rel + ".py" not in files and module_rel + "/__init__.py" not in files:
         return None
     return dict(sorted(files.items()))
+
+
+def _ondisk_files_covered(ep, signed_rels: dict) -> bool:
+    """Fail-closed: refuse if the on-disk package tree carries an auto-loading
+    or native file (``.so``/``.pyd``/``.dylib``/``.pth``) absent from the signed
+    manifest.
+
+    The manifest is recomputed from the dist RECORD, which is itself an on-disk,
+    editable text file -- a tamperer could drop a rogue extension next to signed
+    modules WITHOUT listing it in RECORD, and RECORD-based enumeration alone
+    would miss it. This walks the actual package directory as a second, RECORD-
+    independent check. ``__pycache__`` is skipped (its ``.pyc`` files are
+    generated at import time and are legitimately absent from the manifest).
+    Returns False (deny) on any uncertainty.
+    """
+    module = _ep_module_name(ep)
+    dist = getattr(ep, "dist", None)
+    if not module or dist is None:
+        return False
+    top = module.split(".", 1)[0]
+    try:
+        pkg_dir = Path(dist.locate_file(top))
+        base = pkg_dir.parent
+    except Exception:
+        return False
+    if not pkg_dir.is_dir():
+        # Single-module plugin (top.py, no package dir): nothing extra to walk.
+        return True
+    try:
+        for p in pkg_dir.rglob("*"):
+            if "__pycache__" in p.parts or not p.is_file():
+                continue
+            if p.suffix.lower() not in _SIGNED_ONDISK_SUFFIXES:
+                continue
+            rel = str(p.relative_to(base)).replace("\\", "/")
+            if rel not in signed_rels:
+                log.warning(
+                    "plugin package %r carries un-signed file %s on disk; "
+                    "refusing to load (not covered by the signed manifest)",
+                    top, rel,
+                )
+                return False
+    except Exception:
+        return False
+    return True
 
 
 def _plugin_manifest_digest(manifest: dict) -> str:
@@ -476,6 +584,11 @@ def _plugin_signature_ok(ep, root_pub: str | None, revoked: set[str]) -> bool:
     manifest = _expected_plugin_signature_manifest(ep)
     if not bundle or not manifest or bundle.get("manifest") != manifest:
         return False
+    # The equality above proves the RECORD-listed file set matches the signed
+    # manifest byte-for-byte. RECORD is itself editable on disk, so also refuse
+    # if the package directory carries a native/.pth file NOT in the signed set.
+    if not _ondisk_files_covered(ep, manifest.get("files", {})):
+        return False
     try:
         res = verify_digest(
             _plugin_manifest_digest(manifest), bundle, root_pub=root_pub, revoked=revoked
@@ -514,7 +627,8 @@ def _gate(ep, group: str, allow, name_dists, granted, enforce) -> bool:
             )
             return False
     # Manifest-declared permissions vs the user's grant.
-    violations = _permission_violations(_find_manifest(ep), granted)
+    manifest = _find_manifest(ep)
+    violations = _permission_violations(manifest, granted)
     if violations:
         if enforce:
             log.warning(
@@ -551,6 +665,9 @@ def _gate(ep, group: str, allow, name_dists, granted, enforce) -> bool:
             group, name, dist or "unknown-dist",
         )
         return False
+    # The plugin will load. If it declares permissions but nothing confines it
+    # at runtime (isolation 'none'), tell the operator the grant is advisory.
+    _warn_permissions_advisory(ep, group, manifest, dist)
     return True
 
 

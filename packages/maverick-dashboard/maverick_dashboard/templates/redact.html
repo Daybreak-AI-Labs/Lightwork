@@ -7,7 +7,7 @@
     <label for="redact-input">Text to redact</label>
     <textarea id="redact-input" rows="8" style="width:100%"></textarea>
     <div id="kind-toggles" style="margin:0.5rem 0"></div>
-    <button id="redact-preview">Preview</button>
+    <button id="redact-preview" class="btn btn--primary">Preview</button>
     <div class="section-head"><h2>Result <span id="proof-badge" class="muted"></span></h2></div>
     <pre id="redact-output" style="white-space:pre-wrap"></pre>
   </div>
@@ -16,34 +16,57 @@
     const toggles = document.getElementById("kind-toggles");
     const output = document.getElementById("redact-output");
     const badge = document.getElementById("proof-badge");
+    const previewBtn = document.getElementById("redact-preview");
     let kinds = [];
+    let inflight = false;
     async function preview(selected) {
-      const res = await fetch("/api/v1/redact/preview", {
-        method: "POST",
-        headers: {"Content-Type": "application/json"},
-        body: JSON.stringify({text: input.value, kinds: selected || []}),
-      });
-      const d = await res.json();
-      kinds = [...new Set(d.findings.map(f => f.kind))];
-      toggles.replaceChildren(...kinds.map(k => {
-        const id = "kind-" + k.replace(/[^a-z0-9]/gi, "-");
-        const label = document.createElement("label");
-        label.style.marginRight = "0.75rem";
-        const box = document.createElement("input");
-        box.type = "checkbox"; box.id = id; box.value = k;
-        box.checked = !selected || selected.includes(k);
-        box.addEventListener("change", () => {
-          const chosen = [...toggles.querySelectorAll("input:checked")].map(b => b.value);
-          preview(chosen);
+      if (inflight) return;              // one request at a time (button + toggles share it)
+      inflight = true;
+      previewBtn.disabled = true; previewBtn.setAttribute("aria-busy", "true");
+      badge.className = "muted"; badge.textContent = "Checking…";
+      try {
+        const res = await fetch("/api/v1/redact/preview", {
+          method: "POST",
+          headers: {"Content-Type": "application/json"},
+          body: JSON.stringify({text: input.value, kinds: selected || []}),
         });
-        label.append(box, " " + k);
-        return label;
-      }));
-      output.textContent = d.redacted;
-      badge.textContent = d.proven_clean ? "(proven clean)" :
-        "(residual: " + d.residual.join(", ") + ")";
+        let d = {};
+        try { d = await res.json(); } catch (e) {}
+        if (!res.ok) {
+          const msg = (d && d.detail) ? d.detail : ("Preview failed (" + res.status + ").");
+          badge.className = "badge failure"; badge.textContent = msg;
+          mvToast(msg, { error: true });
+          return;
+        }
+        const findings = (d && d.findings) || [];
+        kinds = [...new Set(findings.map(f => f.kind))];
+        toggles.replaceChildren(...kinds.map(k => {
+          const id = "kind-" + k.replace(/[^a-z0-9]/gi, "-");
+          const label = document.createElement("label");
+          label.style.marginRight = "0.75rem";
+          const box = document.createElement("input");
+          box.type = "checkbox"; box.id = id; box.value = k;
+          box.checked = !selected || selected.includes(k);
+          box.addEventListener("change", () => {
+            const chosen = [...toggles.querySelectorAll("input:checked")].map(b => b.value);
+            preview(chosen);
+          });
+          label.append(box, " " + k);
+          return label;
+        }));
+        output.textContent = d.redacted || "";
+        badge.className = "muted";
+        badge.textContent = d.proven_clean ? "(proven clean)" :
+          "(residual: " + ((d.residual || []).join(", ")) + ")";
+      } catch (e) {
+        badge.className = "badge failure";
+        badge.textContent = "Network error — is the dashboard still running?";
+        mvToast("Network error running the redaction preview", { error: true });
+      } finally {
+        inflight = false;
+        previewBtn.disabled = false; previewBtn.removeAttribute("aria-busy");
+      }
     }
-    document.getElementById("redact-preview")
-      .addEventListener("click", () => preview(null));
+    previewBtn.addEventListener("click", () => preview(null));
   </script>
 {% endblock %}

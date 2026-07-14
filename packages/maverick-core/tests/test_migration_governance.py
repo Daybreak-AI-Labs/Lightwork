@@ -121,6 +121,47 @@ def test_clean_ladder_against_its_own_lock_has_no_problems():
     assert mg.lock_problems(lock, lads) == []
 
 
+# ---- regen may not launder a destructive new version ----------------------
+
+def test_regen_refuses_destructive_new_version():
+    # The additive-only gate only inspects not-yet-locked versions, so --regen
+    # must refuse to write a destructive NEW version into the lock (which would
+    # grandfather it into immutability, never to be re-judged).
+    lads = {"sqlite": {1: [], 2: ["ALTER TABLE g DROP COLUMN z"]}, "postgres": {1: []}}
+    existing = mg.fingerprint({"sqlite": {1: []}, "postgres": {1: []}})  # v2 not locked
+    blockers = mg.regen_blockers(lads, existing)
+    assert any("destructive" in b and "v2" in b for b in blockers)
+
+
+def test_regen_allows_additive_new_version():
+    lads = {"sqlite": {1: [], 2: ["ALTER TABLE g ADD COLUMN z TEXT"]}, "postgres": {1: []}}
+    existing = mg.fingerprint({"sqlite": {1: []}, "postgres": {1: []}})
+    assert mg.regen_blockers(lads, existing) == []
+
+
+# ---- the base SCHEMA is governed by the ratchet ---------------------------
+
+def test_base_schema_is_fingerprinted():
+    lads = mg.ladders()
+    assert mg._BASE_VERSION in lads["sqlite"]
+    assert lads["sqlite"][mg._BASE_VERSION]          # the base SCHEMA string
+    # and the committed lock pins it
+    lock = mg.load_lock()
+    assert str(mg._BASE_VERSION) in lock["checksums"]["sqlite"]
+
+
+def test_editing_base_schema_is_caught_by_the_ratchet():
+    # An edit to a base-schema table definition must change the v1 checksum and
+    # fail the immutability check -- previously the base SCHEMA was never
+    # fingerprinted, so those tables were ungoverned.
+    lads = mg.ladders()
+    lock = mg.load_lock()
+    lads["sqlite"][mg._BASE_VERSION] = (
+        list(lads["sqlite"][mg._BASE_VERSION]) + ["ALTER TABLE goals ADD COLUMN sneaky TEXT"])
+    probs = mg.lock_problems(lock, lads)
+    assert any("checksum changed" in p and "v1" in p for p in probs)
+
+
 # ---- guard: real ladders match the committed lock -------------------------
 
 def test_real_ladders_pass_governance():

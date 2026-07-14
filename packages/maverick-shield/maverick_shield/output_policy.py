@@ -40,6 +40,53 @@ _REFUSAL_LEAK_PATTERNS: list[re.Pattern] = [
 ]
 
 
+# Plaintext secret / PII shapes the model must not emit in an answer. These are
+# deliberately specific (fixed prefixes, exact lengths, Luhn-checked cards) to
+# keep false positives near zero; the input-side builtin rules never looked at
+# the OUTPUT, so a leaked key/SSN/card in a completion passed straight through.
+_SECRET_PATTERNS: list[tuple[str, re.Pattern[str]]] = [
+    ("private_key", re.compile(r"-----BEGIN (?:[A-Z0-9 ]+ )?PRIVATE KEY-----")),
+    ("anthropic_key", re.compile(r"\bsk-ant-[A-Za-z0-9_-]{20,}\b")),
+    ("stripe_key", re.compile(r"\b[sr]k_(?:live|test)_[A-Za-z0-9]{16,}\b")),
+    ("api_key", re.compile(r"\bsk-[A-Za-z0-9_-]{20,}\b")),
+    ("google_api_key", re.compile(r"\bAIza[0-9A-Za-z_\-]{35}\b")),
+    ("aws_access_key", re.compile(r"\bAKIA[0-9A-Z]{16}\b")),
+    ("github_token", re.compile(r"\bgh[pousr]_[A-Za-z0-9_]{30,}\b")),
+    ("slack_token", re.compile(r"\bxox[bpaors]-[A-Za-z0-9-]{10,}\b")),
+    ("jwt", re.compile(r"\beyJ[A-Za-z0-9_-]{10,}\.[A-Za-z0-9_-]{10,}\.[A-Za-z0-9_-]{10,}\b")),
+    ("ssn", re.compile(r"\b\d{3}-\d{2}-\d{4}\b")),
+]
+# A 13-19 digit run (single space/dash separators allowed); bounded repetition so
+# it can't ReDoS on attacker output. Confirmed with Luhn before flagging.
+_CARD_RE = re.compile(r"(?<!\d)\d(?:[ -]?\d){12,18}(?!\d)")
+
+
+def _luhn_ok(digits: str) -> bool:
+    total = 0
+    for i, ch in enumerate(reversed(digits)):
+        d = int(ch)
+        if i % 2 == 1:
+            d *= 2
+            if d > 9:
+                d -= 9
+        total += d
+    return total % 10 == 0
+
+
+def detect_secret_leak(text: str) -> list[str]:
+    """Kinds of plaintext secret/PII present in ``text`` (empty if none)."""
+    hits: list[str] = []
+    for kind, pat in _SECRET_PATTERNS:
+        if pat.search(text):
+            hits.append(kind)
+    for m in _CARD_RE.finditer(text):
+        digits = m.group(0).replace(" ", "").replace("-", "")
+        if 13 <= len(digits) <= 19 and _luhn_ok(digits):
+            hits.append("credit_card")
+            break
+    return hits
+
+
 @dataclass
 class OutputPolicyResult:
     blocked: bool
@@ -98,5 +145,13 @@ def scan_output(
     if detect_refusal_leak(text):
         reasons.append("refusal_leak")
         if severity != "critical":
+            severity = "high"
+    leaks = detect_secret_leak(text)
+    if leaks:
+        reasons.extend(f"secret_leak:{k}" for k in leaks)
+        # A private key leaking is catastrophic; any other secret/PII is high.
+        if "private_key" in leaks:
+            severity = "critical"
+        elif severity == "none":
             severity = "high"
     return OutputPolicyResult(blocked=bool(reasons), severity=severity, reasons=reasons)

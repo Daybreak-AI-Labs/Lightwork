@@ -90,7 +90,13 @@ KNOWN_SCHEMA: dict[str, set[str] | None] = {
     # public_url: the externally-reachable base URL used to build signed flow
     # approval links (automation_queue._public_base_url); without it here a client
     # configuring actionable channel approvals got a false "unknown key".
-    "dashboard": {"token", "theme", "density", "allow_extension", "themes", "public_url"},
+    # default_suites: deny-by-default department scoping for authenticated
+    # dashboard users with no explicit grant (maverick.suite_grants).
+    # group_roles / group_suites: SCIM-group -> role / department mapping
+    # tables (maverick_dashboard.scim_groups), so access flows from IdP team
+    # membership.
+    "dashboard": {"token", "theme", "density", "allow_extension", "themes", "public_url",
+                  "default_suites", "group_roles", "group_suites"},
     "analytics": {"mcp_client_language"},
     # --- dynamic / open-ended sections (any subkey accepted) ---
     "providers": None,
@@ -369,7 +375,59 @@ def lint_config(cfg: dict) -> list[Finding]:
                 )
 
     findings.extend(_lint_inline_secrets(cfg))
+    findings.extend(_lint_group_mappings(cfg))
     return findings
+
+
+def _lint_group_mappings(cfg: dict) -> list[Finding]:
+    """Advise on the SCIM-group -> access mapping tables.
+
+    ``[dashboard.group_roles]`` values must name a real dashboard role, and
+    ``[dashboard.group_suites]`` values must name real department suites. The
+    runtime already fails safe on a bad value (an unknown role/suite confers
+    nothing rather than widening access), but a silent no-op is a nasty
+    footgun, so surface the typo up front."""
+    out: list[Finding] = []
+    dash = cfg.get("dashboard")
+    if not isinstance(dash, dict):
+        return out
+    roles = {"admin", "operator", "auditor", "viewer"}
+    try:
+        from .domain import SUITE_PREFIXES
+        suites = set(SUITE_PREFIXES.values())
+    except Exception:  # pragma: no cover - never let a lint import break config
+        suites = set()
+
+    gr = dash.get("group_roles")
+    if isinstance(gr, dict):
+        for group, role in gr.items():
+            if not (isinstance(role, str) and role.strip().lower() in roles):
+                out.append(Finding(
+                    section="dashboard.group_roles", key=str(group),
+                    severity="error",
+                    message=(f"dashboard.group_roles[{group!r}] must name a role "
+                             f"{sorted(roles)}, got {role!r}")))
+
+    gs = dash.get("group_suites")
+    if isinstance(gs, dict):
+        for group, val in gs.items():
+            vals = [val] if isinstance(val, str) else (
+                list(val) if isinstance(val, (list, tuple)) else None)
+            if vals is None:
+                out.append(Finding(
+                    section="dashboard.group_suites", key=str(group),
+                    severity="error",
+                    message=(f"dashboard.group_suites[{group!r}] must be a suite "
+                             f"name or list of suite names, got {type(val).__name__}")))
+                continue
+            unknown = [s for s in vals if s not in suites] if suites else []
+            if unknown:
+                out.append(Finding(
+                    section="dashboard.group_suites", key=str(group),
+                    severity="warning",
+                    message=(f"dashboard.group_suites[{group!r}] names unknown "
+                             f"department(s) {unknown} (they confer no access)")))
+    return out
 
 
 def format_findings(findings: list[Finding]) -> str:

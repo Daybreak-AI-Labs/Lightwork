@@ -195,6 +195,7 @@ class Entitlements:
     tier: str = BASE_TIER
     suites: tuple[str, ...] = ()
     features: tuple[str, ...] = ()
+    features_denied: tuple[str, ...] = ()
     customer: str | None = None
     status: str = UNLICENSED
     expires_at: datetime | None = None
@@ -209,14 +210,28 @@ class Entitlements:
 
     def allows(self, feature: str) -> bool:
         """True iff ``feature`` may run. Core features (not in the registry and
-        not an explicit paid grant) always run — fail-open on the kernel."""
+        not an explicit paid grant or denial) always run — fail-open on the
+        kernel. Within a live license the checkbox semantics are:
+
+        - ``features`` grants a gated feature à la carte, even below its
+          registry tier (e.g. Gold + ``advanced_evolve``).
+        - ``features_denied`` switches a feature off even when the tier would
+          include it (e.g. Gold minus ``siem_export``). Denial wins over grant.
+
+        Both lists only bind while the license is paid-active (``resolve``
+        drops them otherwise), so an expired/invalid license still fails open
+        to the base tier — a denial can never outlive the license that made it.
+        """
         required = GATED_FEATURES.get(feature)
-        if required is None and feature not in self.features and feature not in GATED_SUITES:
+        if (required is None and feature not in self.features
+                and feature not in self.features_denied and feature not in GATED_SUITES):
             return True  # core capability
         if not self.paid_active:
             return False
+        if feature in self.features_denied:
+            return False  # explicit per-feature denial (checkbox off)
         if required is not None:
-            return self.tier_at_least(required)
+            return self.tier_at_least(required) or feature in self.features
         return feature in self.features  # explicit per-feature grant
 
     def suite_enabled(self, suite: str) -> bool:
@@ -256,6 +271,7 @@ def resolve(doc: dict | None, *, trusted_pubkeys: list[str] | None = None,
         tier=str(doc.get("tier", BASE_TIER)) if live else BASE_TIER,
         suites=tuple(doc.get("suites", [])) if live else (),
         features=tuple(doc.get("features", [])) if live else (),
+        features_denied=tuple(doc.get("features_denied", [])) if live else (),
         customer=doc.get("customer"),
         status=status,
         expires_at=exp,
@@ -440,6 +456,98 @@ def refresh_from_server(url: str | None = None, *, token: str | None = None,
     return RefreshResult(True, "ok", ent.status, changed)
 
 
+# ---- background auto-refresh (near-instant entitlement propagation) --------
+#
+# The connected path above is pull-based; nothing in the kernel called it on a
+# schedule, so a license issued in the vendor console only landed when someone
+# ran a manual refresh. This loop closes that gap: a long-lived process (the
+# dashboard, `maverick mcp`, …) calls start_refresher() once and the deployment
+# then picks up upgrades/downgrades within one interval of the console issuing
+# them — checkbox flipped at HQ, feature live at the client ~a minute later.
+# Every poll also records a fleet check-in server-side, so the fleet board
+# stays near-live for free.
+
+DEFAULT_REFRESH_INTERVAL = 60.0   # seconds; a signed license is ~1 KB of JSON
+_MIN_REFRESH_INTERVAL = 30.0      # floor so a config typo can't hammer the API
+
+_REFRESHER_STOP = None            # threading.Event of the live refresher, else None
+_REFRESHER_THREAD = None
+
+
+def refresh_interval_seconds() -> float:
+    """The configured auto-refresh interval (``[license] refresh_interval_seconds``
+    / ``MAVERICK_LICENSE_REFRESH_INTERVAL``), clamped to a 30 s floor.
+
+    Returns 0 (disabled) when no entitlement API is configured — an offline /
+    air-gapped box has nothing to poll — or when the operator explicitly sets
+    the interval to 0. Defaults to 60 s when an API is configured, because a
+    connected deployment that opted into the entitlement API expects upgrades
+    to propagate without a redeploy."""
+    cfg = _license_cfg()
+    api_url = os.environ.get("MAVERICK_LICENSE_API") or cfg.get("api_url")
+    if not api_url:
+        return 0.0
+    raw = os.environ.get("MAVERICK_LICENSE_REFRESH_INTERVAL")
+    if raw is None:
+        raw = cfg.get("refresh_interval_seconds", DEFAULT_REFRESH_INTERVAL)
+    try:
+        interval = float(raw)
+    except (TypeError, ValueError):
+        return DEFAULT_REFRESH_INTERVAL
+    if interval <= 0:
+        return 0.0
+    return max(interval, _MIN_REFRESH_INTERVAL)
+
+
+def start_refresher(interval: float | None = None, *, refresh=None):
+    """Start the background license-refresh thread (idempotent; daemon).
+
+    Returns the thread, or ``None`` when auto-refresh is disabled (no API
+    configured / interval 0) or a refresher is already running. ``refresh`` is
+    injectable for tests and defaults to :func:`refresh_from_server`, which
+    never raises — so the loop can't die on a network blip, and a failed poll
+    simply leaves the last-known-good license file in charge (fail-open)."""
+    global _REFRESHER_STOP, _REFRESHER_THREAD
+    if _REFRESHER_THREAD is not None and _REFRESHER_THREAD.is_alive():
+        return None
+    # An explicit interval argument is caller-controlled (tests use tiny ones);
+    # config-sourced values are already floor-clamped in refresh_interval_seconds.
+    every = float(interval) if interval is not None else refresh_interval_seconds()
+    if every <= 0:
+        return None
+    import logging
+    import threading
+    log = logging.getLogger(__name__)
+    stop = threading.Event()
+    do_refresh = refresh or refresh_from_server
+
+    def _loop() -> None:
+        while not stop.wait(every):
+            try:
+                res = do_refresh()
+            except Exception:  # noqa: BLE001 - belt+braces; the loop must survive
+                log.debug("license refresh raised unexpectedly", exc_info=True)
+                continue
+            if getattr(res, "changed", False):
+                reset_cache()
+                log.info("entitlements updated from server: %s", current().summary())
+
+    t = threading.Thread(target=_loop, name="maverick-license-refresh", daemon=True)
+    _REFRESHER_STOP, _REFRESHER_THREAD = stop, t
+    t.start()
+    return t
+
+
+def stop_refresher(timeout: float = 2.0) -> None:
+    """Signal the refresher to exit and join it briefly (safe to call anytime)."""
+    global _REFRESHER_STOP, _REFRESHER_THREAD
+    if _REFRESHER_STOP is not None:
+        _REFRESHER_STOP.set()
+    if _REFRESHER_THREAD is not None and _REFRESHER_THREAD.is_alive():
+        _REFRESHER_THREAD.join(timeout=timeout)
+    _REFRESHER_STOP = _REFRESHER_THREAD = None
+
+
 # ---- CLI: python -m maverick.entitlements {keygen,issue,verify,show} -------
 # Self-contained so it needs no wiring into the main cli.py. `keygen`/`issue`
 # are Daybreak-side (keep the private key secret); `verify`/`show` run on a
@@ -466,6 +574,10 @@ def main(argv: list[str] | None = None) -> int:  # pragma: no cover -- CLI shell
     iss.add_argument("--grace-days", type=int, default=DEFAULT_GRACE_DAYS)
     iss.add_argument("--key", required=True, help="publisher private key hex, or @path")
     iss.add_argument("-o", "--out", default="license.json")
+
+    rf = sub.add_parser("refresh", help="one-shot connected refresh (cron/systemd-"
+                                        "timer alternative to the in-process loop)")
+    rf.add_argument("--url", default=None, help="entitlement API URL (default: config)")
 
     vf = sub.add_parser("verify", help="verify a license file")
     vf.add_argument("--file", default=None)
@@ -504,6 +616,12 @@ def main(argv: list[str] | None = None) -> int:  # pragma: no cover -- CLI shell
         Path(args.out).write_text(json.dumps(doc, indent=2) + "\n", encoding="utf-8")
         print(f"wrote {args.out}  ({args.customer} · {args.tier})  key_id={doc['key_id'][:16]}…")
         return 0
+
+    if args.cmd == "refresh":
+        res = refresh_from_server(args.url)
+        print(f"{'ok' if res.ok else 'FAILED'}: {res.reason} · status={res.status}"
+              f"{' · updated' if res.changed else ''}")
+        return 0 if res.ok else 1
 
     # verify / show
     trust = [k.strip() for k in args.pubkey.split(",")] if args.pubkey else None

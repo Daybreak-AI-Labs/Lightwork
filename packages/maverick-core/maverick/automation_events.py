@@ -19,6 +19,8 @@ polling reaches out to third-party endpoints, so the operator opts in
 """
 from __future__ import annotations
 
+import json
+import time
 from collections.abc import Callable
 from dataclasses import dataclass, field
 from typing import Any, Protocol, runtime_checkable
@@ -88,6 +90,8 @@ def enabled() -> bool:
 # ---- helpers ---------------------------------------------------------------
 
 _MAX_EVENTS = 25  # per poll, so a backlog can't spawn an unbounded goal burst
+_MAX_HTTP_JSON_BYTES = 2 * 1024 * 1024  # bound external feed bodies before JSON parse
+_MAX_HTTP_TEXT_BYTES = 1024 * 1024  # RSS/Atom bodies are small; cap hostile feeds
 
 
 def _dig(obj: Any, path: str) -> Any:
@@ -208,11 +212,61 @@ def _http_get(url: str, headers: dict | None = None, timeout: float = 15.0) -> A
     return resp
 
 
-def _http_get_json(url: str, headers: dict | None = None, timeout: float = 15.0) -> Any:
-    """GET ``url`` and parse JSON. Isolated so tests can inject a fake."""
-    resp = _http_get(url, headers=headers, timeout=timeout)
+def _http_read_bytes(
+    url: str,
+    headers: dict | None = None,
+    timeout: float = 15.0,
+    *,
+    max_bytes: int,
+) -> bytes:
+    """GET ``url`` through the SSRF guard and read at most ``max_bytes``.
+
+    ``safe_get()`` materializes the whole response before returning, which is
+    fine for small tools but unsafe for event sources that poll operator-provided
+    feeds repeatedly. Use the same pinned safe client in streaming mode so a
+    malicious feed cannot force an unbounded body download before we reject it.
+    """
     try:
-        return resp.json()
+        from .tools._ssrf import BlockedHost, safe_client
+    except Exception as e:  # pragma: no cover -- guard unavailable
+        raise EventSourceError("SSRF guard unavailable") from e
+    try:
+        with safe_client(url, timeout=timeout) as client:
+            with client.stream("GET", url, headers=headers or {}) as resp:
+                if getattr(resp, "status_code", 200) >= 400:
+                    raise EventSourceError(f"source returned HTTP {resp.status_code}")
+                length = resp.headers.get("content-length")
+                if length and int(length) > max_bytes:
+                    raise EventSourceError(
+                        f"source response exceeds {max_bytes} byte limit")
+                deadline = time.monotonic() + timeout
+                chunks: list[bytes] = []
+                total = 0
+                for chunk in resp.iter_bytes():
+                    if time.monotonic() > deadline:
+                        raise EventSourceError("source response exceeded fetch timeout")
+                    total += len(chunk)
+                    if total > max_bytes:
+                        raise EventSourceError(
+                            f"source response exceeds {max_bytes} byte limit")
+                    chunks.append(chunk)
+                if time.monotonic() > deadline:
+                    raise EventSourceError("source response exceeded fetch timeout")
+                return b"".join(chunks)
+    except EventSourceError:
+        raise
+    except BlockedHost as e:
+        raise EventSourceError(f"blocked by SSRF guard: {e}") from e
+    except Exception as e:
+        raise EventSourceError(f"fetch failed: {type(e).__name__}: {e}") from e
+
+
+def _http_get_json(url: str, headers: dict | None = None, timeout: float = 15.0) -> Any:
+    """GET ``url`` and parse a bounded JSON body. Isolated for test injection."""
+    raw = _http_read_bytes(
+        url, headers=headers, timeout=timeout, max_bytes=_MAX_HTTP_JSON_BYTES)
+    try:
+        return json.loads(raw.decode("utf-8"))
     except Exception as e:
         raise EventSourceError("source did not return JSON") from e
 
@@ -267,8 +321,10 @@ register("http_json", HttpJsonSource)
 
 
 def _http_get_text(url: str, headers: dict | None = None, timeout: float = 15.0) -> str:
-    """GET ``url`` as text. Isolated for test injection."""
-    return _http_get(url, headers=headers, timeout=timeout).text or ""
+    """GET ``url`` as bounded text. Isolated for test injection."""
+    raw = _http_read_bytes(
+        url, headers=headers, timeout=timeout, max_bytes=_MAX_HTTP_TEXT_BYTES)
+    return raw.decode("utf-8", "replace")
 
 
 def _parse_feed(text: str) -> list[dict]:

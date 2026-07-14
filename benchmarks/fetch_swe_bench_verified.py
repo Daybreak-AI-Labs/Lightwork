@@ -90,8 +90,13 @@ def _row_to_manifest(row: dict) -> dict:
         "fail_to_pass": _parse_test_list(row.get("FAIL_TO_PASS")),
         "pass_to_pass": _parse_test_list(row.get("PASS_TO_PASS")),
         "gold_patch": row.get("patch", ""),
-        # test_patch is NOT included — that's the grader's test fixture,
-        # not for the agent. Surfaced separately in run_meta if needed.
+        # test_patch is the GRADER's fixture: SWE-bench semantics apply it to
+        # the tree before running FAIL_TO_PASS (the graded tests are often
+        # added/updated by it). The trusted scorer needs it; the agent never
+        # reads the manifest (and the anti-cheat still refuses any CANDIDATE
+        # patch that touches tests). gold_patch already makes this file
+        # secret-bearing, so including test_patch adds no new exposure.
+        "test_patch": row.get("test_patch", ""),
         "version": row.get("version", ""),
         "difficulty": row.get("difficulty", ""),
         "language": "python",  # SWE-bench Verified is Python-only

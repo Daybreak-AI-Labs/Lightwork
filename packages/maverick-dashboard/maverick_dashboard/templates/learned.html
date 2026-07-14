@@ -70,18 +70,21 @@
     {% if transfer_memory and transfer_memory.pairs %}
       <p class="muted">transfer memory: {{ transfer_memory.pairs }} (target, line) pair{{ '' if transfer_memory.pairs == 1 else 's' }} judged{% if transfer_memory.last_judged_at %} · last {{ transfer_memory.last_judged_at | datetime }}{% endif %}</p>
     {% endif %}
-    {% for key, items in pending_items | dictsort %}
-      <p class="badge info" style="display:inline-block">📥 <code>{{ key }}</code>: {{ items | length }} harvested corpus candidate{{ '' if items | length == 1 else 's' }} awaiting review</p>
-      <ul class="pending-corpus" data-key="{{ key }}">
-      {% for c in items %}
-        <li>
-          {{ c.goal }}
-          <span class="muted">(expected: {{ c.expected }})</span>
-          <button class="pc-resolve" data-key="{{ key }}" data-index="{{ loop.index }}" data-verdict="accept">Accept</button>
-          <button class="pc-resolve" data-key="{{ key }}" data-index="{{ loop.index }}" data-verdict="reject">Reject</button>
-        </li>
-      {% endfor %}
-      </ul>
+    {% for key, count in pending_corpus | dictsort %}
+      {% set items = pending_items.get(key, []) %}
+      <p class="badge info" style="display:inline-block">📥 <code>{{ key }}</code>: {{ count }} harvested corpus candidate{{ '' if count == 1 else 's' }} awaiting review</p>
+      {% if items %}
+        <ul class="pending-corpus" data-key="{{ key }}">
+        {% for c in items %}
+          <li>
+            {{ c.goal }}
+            <span class="muted">(expected: {{ c.expected }})</span>
+            <button class="pc-resolve" data-key="{{ key }}" data-index="{{ loop.index }}" data-verdict="accept">Accept</button>
+            <button class="pc-resolve" data-key="{{ key }}" data-index="{{ loop.index }}" data-verdict="reject">Reject</button>
+          </li>
+        {% endfor %}
+        </ul>
+      {% endif %}
     {% endfor %}
     {% if harness %}
       {% for h in harness %}
@@ -166,6 +169,9 @@
           btn.closest('ul').querySelectorAll('button').forEach(function(b) { b.disabled = true; });
           const body = { key: btn.dataset.key };
           body[verdict] = [parseInt(btn.dataset.index, 10)];
+          function reenable() {
+            btn.closest('ul').querySelectorAll('button').forEach(function(b) { b.disabled = false; });
+          }
           try {
             const r = await fetch('/api/v1/harness-corpus/review', {
               method: 'POST',
@@ -174,11 +180,16 @@
             });
             if (!r.ok) {
               const j = await r.json().catch(function() { return {}; });
-              alert(j.detail || ('Failed: ' + r.status));
+              mvToast(j.detail || ('Failed: ' + r.status), { error: true });
+              reenable();
+              return;
             }
           } catch (e) {
-            alert(String(e));
+            mvToast('Network error — could not save your review', { error: true });
+            reenable();
+            return;
           }
+          // Reload only on success — pending indexes rebase after a resolution.
           location.reload();
         });
       });

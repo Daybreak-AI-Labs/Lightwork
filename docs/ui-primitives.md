@@ -118,6 +118,7 @@ and the Workflows index. `.btn--icon` is the compact square button for a row's
 ## Adoption
 
 In use by: the Automations page, the workflow builder (schedules, triggers,
-connector picker), the killswitch pill, fleets, learned-tools, and the goal
-cancel action. New destructive actions and notifications should use these rather
-than native dialogs.
+connector picker), the killswitch pill, fleets, learned-tools, the goal
+cancel action, the assessments register (delete + add-evidence), connections
+(delete), and the agent-factory tool picker. New destructive actions and
+notifications should use these rather than native dialogs.

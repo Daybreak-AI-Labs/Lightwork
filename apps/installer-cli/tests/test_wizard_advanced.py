@@ -757,3 +757,29 @@ def test_donate_trajectories_writes_and_is_read(tmp_path, monkeypatch):
 def test_donate_trajectories_off_writes_no_section(tmp_path, monkeypatch):
     cfg = _write(tmp_path, monkeypatch, {"donate_trajectories": False})
     assert "[telemetry]" not in cfg
+
+
+def test_department_access_writes_dashboard_scoping(tmp_path, monkeypatch):
+    # The department-access step writes [dashboard] default_suites + the SCIM
+    # group-mapping tables, and the result must be valid, round-trippable TOML
+    # (group names carry spaces, so the keys must be quoted).
+    cfg = _write(tmp_path, monkeypatch, {"department_access": {
+        "default_suites": ["finance", "tax"],
+        "group_roles": {"Finance Team": "operator"},
+        "group_suites": {"Finance Team": ["finance", "tax"]},
+    }})
+    assert "[dashboard]" in cfg
+    assert 'default_suites = ["finance", "tax"]' in cfg
+    assert "[dashboard.group_roles]" in cfg
+    assert "[dashboard.group_suites]" in cfg
+    parsed = tomllib.loads(cfg)
+    dash = parsed["dashboard"]
+    assert dash["default_suites"] == ["finance", "tax"]
+    assert dash["group_roles"]["Finance Team"] == "operator"
+    assert dash["group_suites"]["Finance Team"] == ["finance", "tax"]
+
+
+def test_department_access_absent_writes_no_dashboard_section(tmp_path, monkeypatch):
+    cfg = _write(tmp_path, monkeypatch, {"department_access": {}})
+    assert "[dashboard.group_roles]" not in cfg
+    assert "default_suites" not in cfg
