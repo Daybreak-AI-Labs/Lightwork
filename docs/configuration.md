@@ -247,6 +247,20 @@ enable = false             # mine failures -> propose -> regression-validate ->
 # Lifecycle & evaluation knobs (all default off / historical behavior; the
 # wizard's advanced follow-up writes each on opt-in — details in
 # docs/proposals/self-harness.md):
+#   risk_limited = true          conservative profile: require >=8 held-out
+#                                cases, 2% effect floor, two-arm 95% confidence
+#                                floor, sealed best-of-3, 3 judge votes, recent
+#                                calibration, metamorphic checks, one promotion,
+#                                operational caps, and canary staging. Requires
+#                                an explicitly provisioned holdout ledger and the
+#                                exact deployed system prompt. Constituent knobs
+#                                may only tighten; fixed search/query
+#                                multiplicities cannot be raised. Does NOT turn
+#                                either `enable` flag on.
+#   holdout_ledger = "/protected/self-harness-holdout.db"
+#                                durable cross-cycle query/alpha accounting;
+#                                provision with `maverick self-harness holdout
+#                                provision --path <path>` before risk-limited use
 #   eval_corpus = "/path.json"   {model|domain: [{goal, expected}]} — enables
 #                                the auto-built live A/B on scheduled runs
 #   eval_budget_dollars = 5.0    spend cap per auto-evaluated cycle (fail-closed)

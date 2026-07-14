@@ -24,10 +24,10 @@ def world_home(tmp_path, monkeypatch):
     return home
 
 
-def _ctrl(monkeypatch):
+def _ctrl(monkeypatch, ledger_path):
     monkeypatch.setattr(si, "enabled", lambda: True)
     return si.SelfImprovementController(frozen_fn=lambda: False,
-                                        ledger=si.PromotionLedger())
+                                        ledger=si.PromotionLedger(path=ledger_path))
 
 
 def _promote(model, line, ctrl, path=None):
@@ -35,7 +35,7 @@ def _promote(model, line, ctrl, path=None):
         [{"model_id": model, "failure_class": "timeout",
           "goal_text": f"task {i}", "failure_msg": "x"} for i in range(3)],
         model_id=model, controller=ctrl, min_support=3, path=path,
-        held_in=["a", "b"], held_out=["c", "d", "e"],
+        held_in=["a", "b"], held_out=["c", "d", "e", "f", "g"],
         propose_fn=lambda s, _l=line: _l,
         score_with=lambda a, c: 0.95, score_without=lambda a, c: 0.4)
 
@@ -56,7 +56,7 @@ def test_explicit_path_always_means_the_file_store(world_home, tmp_path,
                                                    monkeypatch):
     # The seam's contract: tests/tenant redirection pass explicit paths and
     # stay on files even when the world store is configured.
-    ctrl = _ctrl(monkeypatch)
+    ctrl = _ctrl(monkeypatch, tmp_path / "promotion-ledger.json")
     store = tmp_path / "explicit.json"
     rep = _promote("M", "file line", ctrl, path=store)
     assert rep.promoted == 1
@@ -67,7 +67,7 @@ def test_explicit_path_always_means_the_file_store(world_home, tmp_path,
 def test_full_lifecycle_through_the_world_store(world_home, monkeypatch):
     # Promote -> recall -> outcome -> canary review -> forget, all with
     # path=None routed to the world DB; no JSON store file is ever written.
-    ctrl = _ctrl(monkeypatch)
+    ctrl = _ctrl(monkeypatch, world_home / "promotion-ledger.json")
     rep = _promote("M", "verify the export first", ctrl)
     assert rep.promoted == 1
     assert not sh._store_path().exists()       # nothing on disk at the default path
@@ -86,9 +86,9 @@ def test_full_lifecycle_through_the_world_store(world_home, monkeypatch):
 
 
 def test_transfer_one_shot_via_world_store(world_home, monkeypatch):
-    ctrl = _ctrl(monkeypatch)
+    ctrl = _ctrl(monkeypatch, world_home / "promotion-ledger.json")
     _promote("SRC", "solid line", ctrl)
-    quad = (["a", "b"], ["c", "d", "e"],
+    quad = (["a", "b"], ["c", "d", "e", "f", "g"],
             lambda a, c: 0.95, lambda a, c: 0.4)
     rep = sh.run_transfer("SRC", ["TGT"], eval_for_target=lambda m: quad,
                           controller=ctrl)
@@ -104,12 +104,12 @@ def test_world_store_concurrency_keeps_every_promotion(world_home, monkeypatch):
     # The battery's concurrency drill, against the DB store: 8 threads each
     # promote a distinct line; none may be lost to a read-modify-write race.
     import threading
-    ctrl = _ctrl(monkeypatch)
+    ctrl = _ctrl(monkeypatch, world_home / "promotion-ledger.json")
     errs: list[Exception] = []
 
     def work(i):
         try:
-            _promote("M", f"guidance line {i}", _ctrl(monkeypatch))
+            _promote("M", f"guidance line {i}", ctrl)
         except Exception as e:  # pragma: no cover
             errs.append(e)
 
@@ -122,7 +122,6 @@ def test_world_store_concurrency_keeps_every_promotion(world_home, monkeypatch):
     bullets = [ln for ln in sh.recall_addendum("M").splitlines()
                if ln.startswith("- ")]
     assert len(bullets) == 8
-    del ctrl
 
 
 def test_migrate_store_imports_and_backs_up(world_home, monkeypatch):
@@ -150,7 +149,7 @@ def test_migrate_store_imports_and_backs_up(world_home, monkeypatch):
 
 def test_migrate_store_merges_conflicting_blocks(world_home, monkeypatch):
     from maverick.cli import main
-    ctrl = _ctrl(monkeypatch)
+    ctrl = _ctrl(monkeypatch, world_home / "promotion-ledger.json")
     _promote("M", "db-era line", ctrl)          # already in the world store
     src = sh._store_path()
     src.parent.mkdir(parents=True, exist_ok=True)

@@ -387,7 +387,7 @@ def review_and_promote(
             summary=f"factory guidance [{corr.scope}/{corr.signal}]: {corr.detail}",
             baseline_score=baseline, candidate_score=candidate, samples=samples,
             capability_widens=False,  # guidance text never widens authority
-            rollback=True,            # remove the line from the promoted store
+            rollback={"action": "remove_factory_correction", "key": corr.key()},
             provenance={"kind": "factory_correction", "key": corr.key()},
         )
         try:

@@ -30,6 +30,7 @@ Schema overview::
 from __future__ import annotations
 
 import logging
+import math
 import os
 import re
 import time
@@ -700,6 +701,11 @@ def get_self_harness() -> dict:
     historical behavior so enabling the feature changes nothing until an
     operator opts into the stricter/optional paths:
 
+    - ``risk_limited``: opt into the conservative unattended-promotion profile
+      (held-out/effect/confidence floors, sealed best-of-3 selection, replicated
+      judge votes, durable holdout accounting, operational caps, recent judge
+      calibration, metamorphic checks, and canary staging). Safety-critical
+      constituent settings may tighten but cannot weaken this contract.
     - ``min_support``: recurring failures before a weakness is mined (>=1).
     - ``require_held_out`` / ``min_held_out`` / ``min_delta``: the validation
       evidence floors (default off / 0 / 0.0) -- never promote on only the mined
@@ -718,11 +724,19 @@ def get_self_harness() -> dict:
       (0 = never; only acted on when a driver/CLI runs retirement).
     """
     cfg = load_config().get("self_harness", {})
+    # One explicit profile for unattended, research-grade promotion.  It changes
+    # defaults plus non-weakenable safety floors/ceilings. Constituent knobs may
+    # still be tightened deliberately.
+    # The feature itself remains OFF unless ``enable`` is set (kernel rule 1).
+    risk_limited = bool(cfg.get("risk_limited", False))
 
     def _num(key, default, cast):
         try:
-            return cast(cfg.get(key, default))
-        except (TypeError, ValueError):
+            value = cast(cfg.get(key, default))
+            if isinstance(value, float) and not math.isfinite(value):
+                return cast(default)
+            return value
+        except (OverflowError, TypeError, ValueError):
             return default
 
     raw_by_class = cfg.get("min_support_by_class", {})
@@ -730,8 +744,8 @@ def get_self_harness() -> dict:
     if isinstance(raw_by_class, dict):
         for k, v in raw_by_class.items():
             try:
-                by_class[str(k)] = max(1, int(v))
-            except (TypeError, ValueError):
+                by_class[str(k)] = max(3 if risk_limited else 1, int(v))
+            except (OverflowError, TypeError, ValueError):
                 continue
 
     # Mining bucket dimensions: keep only allowlisted reflexion dims
@@ -740,48 +754,140 @@ def get_self_harness() -> dict:
     raw_dims = cfg.get("mine_bucket_by", [])
     if isinstance(raw_dims, str):
         raw_dims = [raw_dims]
+    elif not isinstance(raw_dims, (list, tuple)):
+        raw_dims = []
     bucket_by = tuple(dict.fromkeys(
         d for d in (raw_dims or []) if isinstance(d, str) and d in _allowed_dims))
 
-    def _factor(key):
+    def _factor(key, default=None):
         v = cfg.get(key)
         try:
-            return float(v) if v is not None else None
-        except (TypeError, ValueError):
-            return None
+            value = float(v) if v is not None else default
+            # NaN defeats every ``> cap`` comparison and infinity silently
+            # disables a cap. In the risk profile, an invalid override must
+            # fall back to the conservative default rather than turn it off.
+            return value if value is None or math.isfinite(value) else default
+        except (OverflowError, TypeError, ValueError):
+            return default
+
+    def _risk_cap(key: str, ceiling: float) -> float | None:
+        value = _factor(key, ceiling if risk_limited else None)
+        if not risk_limited:
+            return value
+        if value is None or value <= 0.0:
+            return ceiling
+        return min(value, ceiling)
+
+    raw_family_alpha = _num("holdout_family_alpha", 0.05, float)
+    raw_query_alpha = _num(
+        "holdout_query_alpha", 0.025 if risk_limited else 0.05, float)
+    raw_max_queries = max(1, _num(
+        "holdout_max_queries", 2 if risk_limited else 1, int))
+    if risk_limited:
+        family_alpha = (
+            min(raw_family_alpha, 0.05)
+            if 1e-12 <= raw_family_alpha < 1.0 else 0.05)
+        holdout_max_queries = min(raw_max_queries, 2)
+        query_alpha = (
+            min(raw_query_alpha, 0.025)
+            if 1e-12 <= raw_query_alpha < 1.0 else 0.025)
+        # A stricter family budget must also tighten each allocated query so the
+        # fixed policy remains internally valid instead of failing at runtime.
+        query_alpha = min(
+            query_alpha, family_alpha / holdout_max_queries)
+    else:
+        family_alpha = raw_family_alpha
+        query_alpha = raw_query_alpha
+        holdout_max_queries = raw_max_queries
+
+    raw_calibration_age = max(
+        0.0, _num(
+            "calibration_max_age_hours", 24.0 if risk_limited else 0.0, float))
+    calibration_max_age = (
+        min(raw_calibration_age, 24.0)
+        if risk_limited and raw_calibration_age > 0.0
+        else (24.0 if risk_limited else raw_calibration_age)
+    )
+    raw_eval_budget = _factor(
+        "eval_budget_dollars", 5.0 if risk_limited else None)
+    if risk_limited:
+        eval_budget = (
+            min(raw_eval_budget, 5.0)
+            if raw_eval_budget is not None and raw_eval_budget > 0.0 else 5.0)
+    else:
+        eval_budget = (
+            raw_eval_budget
+            if raw_eval_budget is not None and raw_eval_budget > 0.0 else None)
 
     return {
         "enable": bool(cfg.get("enable", False)),
+        "risk_limited": risk_limited,
         # Run the governed cycle for every configured role model as part of
         # `maverick dream` (the nightly learning beat), so the harness operates
         # itself without a second cron entry. Default off -- `dream` behaves
         # exactly as before.
         "auto_run": bool(cfg.get("auto_run", False)),
-        "min_support": max(1, _num("min_support", 3, int)),
+        "min_support": (
+            max(3, _num("min_support", 3, int)) if risk_limited
+            else max(1, _num("min_support", 3, int))),
         "min_support_by_class": by_class,
-        "require_held_out": bool(cfg.get("require_held_out", False)),
-        "min_held_out": max(0, _num("min_held_out", 0, int)),
-        "min_delta": max(0.0, _num("min_delta", 0.0, float)),
-        "confidence_z": max(0.0, _num("confidence_z", 0.0, float)),
-        "max_cost_factor": _factor("max_cost_factor"),
-        "max_latency_factor": _factor("max_latency_factor"),
-        "max_tool_calls_factor": _factor("max_tool_calls_factor"),
+        "require_held_out": (
+            True if risk_limited else bool(cfg.get("require_held_out", False))),
+        "min_held_out": (
+            max(8, _num("min_held_out", 8, int)) if risk_limited
+            else max(0, _num("min_held_out", 0, int))),
+        "min_delta": (
+            max(0.02, _num("min_delta", 0.02, float)) if risk_limited
+            else max(0.0, _num("min_delta", 0.0, float))),
+        "confidence_z": (
+            max(1.96, _num("confidence_z", 1.96, float)) if risk_limited
+            else max(0.0, _num("confidence_z", 0.0, float))),
+        "max_cost_factor": _risk_cap("max_cost_factor", 1.25),
+        "max_latency_factor": _risk_cap("max_latency_factor", 1.25),
+        "max_tool_calls_factor": _risk_cap("max_tool_calls_factor", 1.10),
         "semantic_mining": bool(cfg.get("semantic_mining", False)),
-        "candidates_per_signature": max(1, _num("candidates_per_signature", 1, int)),
+        # Keep the risk study's search multiplicity fixed. More proposals are
+        # not a tighter control: they increase selection pressure and compute.
+        "candidates_per_signature": (
+            3 if risk_limited else max(
+                1, _num("candidates_per_signature", 1, int))),
+        # A risk-limited pass may activate at most one isolated winner.  A
+        # second candidate must be evaluated in a new cycle against a freshly
+        # snapshotted deployed prompt, rather than being composed onto a stale
+        # baseline that never included the first winner.
+        "max_promotions_per_cycle": (
+            1 if risk_limited else max(
+                0, _num("max_promotions_per_cycle", 0, int))),
         # Cross-validate a candidate across this many holdout-fold rotations
         # before promoting (1 = single fixed split, the historical behavior; >1
         # requires the lift to generalize across every rotation).
-        "holdout_rotations": max(1, _num("holdout_rotations", 1, int)),
+        "holdout_rotations": (
+            1 if risk_limited else max(
+                1, _num("holdout_rotations", 1, int))),
+        # A sealed holdout is a consumable statistical resource. Risk-limited
+        # evaluation requires an explicitly provisioned durable query ledger;
+        # runtime code never creates it because deletion must not reset budget.
+        "holdout_ledger": (str(cfg["holdout_ledger"])
+                           if cfg.get("holdout_ledger") else None),
+        "holdout_family_alpha": family_alpha,
+        "holdout_query_alpha": query_alpha,
+        "holdout_max_queries": holdout_max_queries,
         # Self-consistency for the LLM-as-judge in the auto-built evaluator: ask
         # the judge this many times (diverse framings) and take the majority vote
         # (1 = single call, the historical behavior).
-        "judge_samples": max(1, _num("judge_samples", 1, int)),
+        "judge_samples": (
+            max(3, _num("judge_samples", 3, int)) if risk_limited
+            else max(1, _num("judge_samples", 1, int))),
         # Feed the auto-built LLM judge's verdicts into the calibration
         # interlock: each corpus-labeled verdict is recorded as a
         # (vote-share confidence, agrees-with-label) sample, so
         # calibration.learning_frozen can detect THIS loop's judge drifting.
         # Default off -- telemetry only, never load-bearing.
-        "calibrate_judge": bool(cfg.get("calibrate_judge", False)),
+        "calibrate_judge": (
+            True if risk_limited else bool(cfg.get("calibrate_judge", False))),
+        # A conservative run requires a recent adequate calibration receipt;
+        # collecting judge telemetry alone is not an interlock.
+        "calibration_max_age_hours": calibration_max_age,
         # Nightly cross-model transfer: after the dream-beat cycles, try each
         # fleet model's graduated lines on the rest of the fleet (gated,
         # canaried, budget-capped; the tried-memory keeps steady-state spend
@@ -811,14 +917,18 @@ def get_self_harness() -> dict:
         # (summarizer-role model) and require the candidate's lift to survive
         # the rewording -- rejects lines overfit to exact phrasing. Default off;
         # tolerance allows a small slip on the paraphrases.
-        "metamorphic": bool(cfg.get("metamorphic", False)),
-        "metamorphic_tolerance": max(0.0, _num("metamorphic_tolerance", 0.0, float)),
+        "metamorphic": (
+            True if risk_limited else bool(cfg.get("metamorphic", False))),
+        "metamorphic_tolerance": (
+            0.0 if risk_limited
+            else max(0.0, _num("metamorphic_tolerance", 0.0, float))),
         "mine_bucket_by": bucket_by,
         # Stage every promotion as a CANARY (on probation): still recalled, but
         # graduated to permanent / demoted from real run outcomes by the cycle's
         # canary review, rather than permanent on arrival (default off -- a
         # promotion lands permanent, the historical behavior).
-        "promote_as_canary": bool(cfg.get("promote_as_canary", False)),
+        "promote_as_canary": (
+            True if risk_limited else bool(cfg.get("promote_as_canary", False))),
         "retire_after_days": max(0.0, _num("retire_after_days", 0.0, float)),
         # Re-measure each existing line's live A/B lift each cycle and DEMOTE
         # dead weight (default off -- a general corpus can under-credit a line
@@ -832,8 +942,7 @@ def get_self_harness() -> dict:
         # (runner + judge share the pot; kernel rule 3). None/<=0 = uncapped,
         # the historical behavior. An exhausted budget fails the evaluation
         # CLOSED -- candidates are rejected, never promoted on partial scores.
-        "eval_budget_dollars": (lambda v: v if v is not None and v > 0 else None)(
-            _factor("eval_budget_dollars")),
+        "eval_budget_dollars": eval_budget,
     }
 
 

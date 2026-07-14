@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 import pytest
-from maverick_evolve.eval_harness import EvalCase, evaluate
+from maverick_evolve.eval_harness import EvalCase, evaluate, evaluate_case
 
 
 @pytest.mark.asyncio
@@ -50,3 +50,65 @@ async def test_weighting():
     rep = await evaluate(agent, cases)
     # only the weight-1 case passes -> 1/4
     assert rep.score == 0.25
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("weight", [True, -1.0, float("nan"), float("inf")])
+async def test_invalid_case_weight_fails_before_agent_access(weight):
+    calls = []
+
+    async def agent(prompt):
+        calls.append(prompt)
+        return "good"
+
+    with pytest.raises(ValueError, match="weight"):
+        await evaluate(
+            agent, [EvalCase(prompt="unsafe", check=lambda _out: True, weight=weight)])
+    assert calls == []
+
+
+@pytest.mark.asyncio
+async def test_finite_weights_with_infinite_total_fail_before_agent_access():
+    calls = []
+
+    async def agent(prompt):
+        calls.append(prompt)
+        return "good"
+
+    cases = [
+        EvalCase(prompt=f"case-{index}", check=lambda _out: True, weight=1e308)
+        for index in range(2)
+    ]
+    with pytest.raises(ValueError, match="finite positive total weight"):
+        await evaluate(agent, cases)
+    assert calls == []
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    "bad_score",
+    [float("nan"), float("inf"), True, "bad", -0.01, 1.01, 999.0],
+)
+async def test_reference_scorer_rejects_invalid_numeric_evidence(bad_score):
+    async def agent(_prompt: str) -> str:
+        return "output"
+
+    with pytest.raises(ValueError, match="evaluator score"):
+        await evaluate_case(
+            agent,
+            EvalCase(prompt="case", reference="reference"),
+            scorer=lambda _out, _reference: bad_score,
+        )
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("bad_result", [1, 0, "false", None])
+async def test_ground_truth_check_rejects_non_boolean_result(bad_result):
+    async def agent(_prompt: str) -> str:
+        return "output"
+
+    with pytest.raises(ValueError, match="exact boolean"):
+        await evaluate_case(
+            agent,
+            EvalCase(prompt="case", check=lambda _out: bad_result),
+        )

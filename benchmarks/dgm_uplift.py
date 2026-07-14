@@ -131,6 +131,40 @@ sys.stdout.write(patch)
 '''
 
 
+def _windows_shell_quote_arg(value: str) -> str:
+    """Quote one argv element for LocalBackend's Windows ``cmd.exe``.
+
+    ``SandboxV2.exec`` deliberately accepts a command string, so a local
+    Windows sandbox ultimately parses it with ``cmd.exe``.  POSIX single
+    quotes are ordinary filename characters there, while an unquoted path can
+    turn ``&`` or ``|`` into a second command.  Keep every element inside
+    double quotes, fail closed on cmd expansion/control characters, and double
+    trailing backslashes so Windows argv parsing cannot consume the closing
+    quote.
+
+    Percent and delayed-expansion bangs remain active even inside double
+    quotes under cmd, so rejecting them is safer than attempting context-
+    dependent escaping.  Windows filenames cannot contain a double quote or
+    NUL/newline, making those refusals lossless for this path-only command.
+    """
+    value = str(value)
+    if any(char in value for char in ('\0', '\r', '\n', '"', '%', '!')):
+        raise ValueError("unsafe character in Windows sandbox argument")
+    trailing = len(value) - len(value.rstrip("\\"))
+    if trailing:
+        value = value[:-trailing] + ("\\" * (trailing * 2))
+    return f'"{value}"'
+
+
+def _sandbox_shell_quote_arg(value: str, sb) -> str:
+    """Quote for the shell used by ``sb``, not merely the controller OS."""
+    if os.name == "nt" and getattr(sb, "host_visible_fs", False):
+        return _windows_shell_quote_arg(value)
+    # Remote/container backends remain POSIX even when their controller runs
+    # on Windows.  shlex.quote is the correct renderer for those shells.
+    return shlex.quote(str(value))
+
+
 def _solve_in_sandbox(solver_path: Path, inst, workroot: Path, sb, *,
                       timeout: float = 600.0) -> str:
     """Run one untrusted solver invocation through the eval sandbox.
@@ -155,10 +189,8 @@ def _solve_in_sandbox(solver_path: Path, inst, workroot: Path, sb, *,
     payload = work / "instance.json"
     runner.write_text(_SOLVER_RUNNER, encoding="utf-8")
     payload.write_text(json.dumps(_instance_payload(inst, repo_copy)), encoding="utf-8")
-    cmd = (
-        f"{shlex.quote(sys.executable)} -I {shlex.quote(str(runner))} "
-        f"{shlex.quote(str(solver_path))} {shlex.quote(str(payload))}"
-    )
+    argv = (sys.executable, "-I", str(runner), str(solver_path), str(payload))
+    cmd = " ".join(_sandbox_shell_quote_arg(arg, sb) for arg in argv)
     res = sb.exec(cmd, timeout=timeout)
     if not getattr(res, "ok", False):
         raise RuntimeError((getattr(res, "stderr", "") or "solver failed").strip()[:500])

@@ -9,6 +9,7 @@ from __future__ import annotations
 
 import random
 
+from maverick.file_lock import private_path_is_restricted
 from maverick.self_modify_archive import CodeArchive, CodeCandidate
 
 
@@ -154,7 +155,6 @@ class TestPersistence:
         assert CodeArchive.load(p).candidates == []
 
     def test_saved_file_is_owner_only(self, tmp_path):
-        import stat
         p = tmp_path / "arch.json"
         CodeArchive().save(p)
-        assert stat.S_IMODE(p.stat().st_mode) == 0o600
+        assert private_path_is_restricted(p, 0o600)

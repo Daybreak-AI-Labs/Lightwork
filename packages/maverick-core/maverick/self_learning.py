@@ -341,6 +341,7 @@ def add_mcp_server(
     with a model-supplied free-text command.
     """
     from .config import config_path
+    from .file_lock import atomic_write_text, cross_process_lock, ensure_private_file
     from .mcp_client import MCPServerSpec
 
     if not _NAME_RE.match(name):
@@ -355,39 +356,34 @@ def add_mcp_server(
     )  # __post_init__ runs the CVE-2026-30615 input validation.
 
     path = config_path()
-    existing = path.read_text(encoding="utf-8") if path.exists() else ""
-    header = f"[mcp_servers.{name}]"
-    if header in existing:
-        raise ValueError(f"mcp server {name!r} already configured")
-
-    block = [header, f"command = {_toml_value(command)}"]
-    if spec.args:
-        block.append(f"args = {_toml_value(spec.args)}")
-    if spec.env:
-        block.append(f"env = {_toml_value(spec.env)}")
-    if spec.pin_sha256:
-        block.append(f"pin_sha256 = {_toml_value(spec.pin_sha256)}")
-    body = ("" if existing.endswith("\n") or not existing else "\n") + \
-        "\n" + "\n".join(block) + "\n"
-
-    # Atomic write (temp + os.replace), NOT an append to the live config: a
-    # crash / power-loss / ENOSPC mid-write used to leave a truncated TOML block
-    # at EOF, making the WHOLE config unparseable -- the next load_config() would
-    # raise and the deployment would fail to start. We already hold the full
-    # file in `existing`; render the new content in memory and swap it in atomically.
     path.parent.mkdir(parents=True, exist_ok=True)
-    tmp = path.with_name(path.name + ".tmp")
-    fd = os.open(tmp, os.O_WRONLY | os.O_CREAT | os.O_TRUNC, 0o600)
-    try:
-        with os.fdopen(fd, "w", encoding="utf-8") as f:
-            f.write(existing + body)
-        os.chmod(tmp, 0o600)
-        os.replace(tmp, path)
-    finally:
-        try:
-            tmp.unlink()
-        except FileNotFoundError:
-            pass
+    # Serialize the complete read/validate/write transaction.  Without this,
+    # concurrent capability acquisitions can both read the same predecessor and
+    # silently discard one another's server block.
+    with cross_process_lock(path):
+        if path.exists():
+            # Config can contain provider credentials.  ``chmod`` is not an ACL
+            # boundary on Windows, so tighten legacy files before reading them.
+            ensure_private_file(path, 0o600)
+        existing = path.read_text(encoding="utf-8") if path.exists() else ""
+        header = f"[mcp_servers.{name}]"
+        if header in existing:
+            raise ValueError(f"mcp server {name!r} already configured")
+
+        block = [header, f"command = {_toml_value(command)}"]
+        if spec.args:
+            block.append(f"args = {_toml_value(spec.args)}")
+        if spec.env:
+            block.append(f"env = {_toml_value(spec.env)}")
+        if spec.pin_sha256:
+            block.append(f"pin_sha256 = {_toml_value(spec.pin_sha256)}")
+        body = ("" if existing.endswith("\n") or not existing else "\n") + \
+            "\n" + "\n".join(block) + "\n"
+
+        # Unique private staging + handle-bound atomic publication.  This keeps
+        # credential bytes out of a predictable temp path and leaves the live
+        # TOML either wholly old or wholly new on any failure.
+        atomic_write_text(path, existing + body, mode=0o600)
     record(need or name, "mcp", name, source=command)
     return spec
 

@@ -41,7 +41,7 @@ def _promote(model, line_key, store):
              "goal_text": f"task run {i}", "failure_msg": line_key} for i in range(3)]
     sh.run_self_harness(
         recs, model_id=model, min_support=3, held_in=["a", "b"],
-        held_out=["c", "d", "e"], score_with=lambda a, c: 0.95,
+        held_out=["c", "d", "e", "f", "g"], score_with=lambda a, c: 0.95,
         score_without=lambda a, c: 0.4, controller=ctrl, path=store)
 
 

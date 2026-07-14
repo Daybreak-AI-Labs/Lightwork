@@ -125,16 +125,73 @@ def test_malformed_weights_fall_open(tmp_path):
     assert LinearPRM(str(bad)).score(ctx).promise == HeuristicPRM().score(ctx).promise
 
 
+def test_non_finite_weights_fall_open(tmp_path):
+    import json
+
+    from maverick.prm import FEATURE_NAMES, ROLE_VOCAB
+
+    bad = tmp_path / "non-finite.json"
+    weights = [0.0] * 12
+    weights[0] = float("nan")
+    bad.write_text(json.dumps({
+        "kind": "linear",
+        "feature_names": list(FEATURE_NAMES),
+        "role_vocab": list(ROLE_VOCAB),
+        "input_dim": 12,
+        "promise": {"w": weights, "b": 0.0},
+        "progress": {"w": [0.0] * 12, "b": 0.0},
+    }), encoding="utf-8")
+    ctx = _final_ctx()
+    assert LinearPRM(str(bad)).score(ctx).promise == HeuristicPRM().score(ctx).promise
+
+
+def test_oversized_artifact_falls_open_without_parsing(tmp_path):
+    from maverick.prm import MAX_LINEAR_PRM_ARTIFACT_BYTES
+
+    bad = tmp_path / "oversized.json"
+    bad.write_bytes(b" " * (MAX_LINEAR_PRM_ARTIFACT_BYTES + 1))
+    ctx = _final_ctx()
+    assert LinearPRM(str(bad)).score(ctx).promise == HeuristicPRM().score(ctx).promise
+
+
 # ---------- env selection ----------
 
 def test_build_from_env_selects_linear(tmp_path, monkeypatch):
+    import hashlib
+
+    model = prm_linear.fit(_separating_examples(), epochs=50)
+    path = tmp_path / "prm_linear.json"
+    prm_linear.save(model, path)
+    monkeypatch.chdir(tmp_path)
+    monkeypatch.setenv("MAVERICK_PRM", "linear")
+    monkeypatch.setenv("MAVERICK_PRM_PATH", path.name)
+    monkeypatch.setenv(
+        "MAVERICK_PRM_BOOTSTRAP_SHA256",
+        hashlib.sha256(path.read_bytes()).hexdigest(),
+    )
+    prm = build_from_env()
+    assert isinstance(prm, LinearPRM)
+    assert prm.path == str(path)
+
+
+def test_build_from_env_linear_requires_durable_recovery_authority(
+    tmp_path, monkeypatch,
+):
+    from maverick.self_improvement import PromotionLedger, SelfImprovementController
+
     model = prm_linear.fit(_separating_examples(), epochs=50)
     path = tmp_path / "prm_linear.json"
     prm_linear.save(model, path)
     monkeypatch.setenv("MAVERICK_PRM", "linear")
     monkeypatch.setenv("MAVERICK_PRM_PATH", str(path))
-    prm = build_from_env()
-    assert isinstance(prm, LinearPRM)
+    controller = SelfImprovementController(
+        frozen_fn=lambda: False, audit_fn=lambda **_kwargs: None,
+        ledger=PromotionLedger(),
+    )
+
+    assert isinstance(
+        build_from_env(recovery_controller=controller), HeuristicPRM,
+    )
 
 
 def test_build_from_env_linear_without_path_falls_open(monkeypatch):

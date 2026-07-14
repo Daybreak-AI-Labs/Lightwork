@@ -72,6 +72,18 @@ class TrajectoryStep:
     # [0,1], carried on the final step. Both optional and absent in old rows.
     parent_step: int | None = None
     outcome: float | None = None
+    # A terminal outcome is training evidence only when an independent producer
+    # records where it came from and when it was verified.  Agent-generated
+    # verifier confidence intentionally leaves these fields empty: confidence is
+    # not ground truth and must not become a label for the verifier that emitted
+    # it.  Examples of trusted sources are ``human``, ``tests``, ``transaction``,
+    # and ``ground_truth``.
+    outcome_source: str = ""
+    outcome_verified_at: float | None = None
+    # Optional stable task identity.  ``goal_id`` remains the backwards-
+    # compatible fallback; a stable task id lets repeated attempts stay in the
+    # same evaluation group instead of leaking across train and test.
+    task_id: str = ""
 
     def redacted(self) -> TrajectoryStep:
         """A copy safe to persist: scrub free-text fields."""
@@ -82,6 +94,9 @@ class TrajectoryStep:
             error=_scrub(self.error)[:500], verifier_confidence=self.verifier_confidence,
             promise=self.promise, progress=self.progress, domain=_scrub(self.domain)[:64],
             parent_step=self.parent_step, outcome=self.outcome,
+            outcome_source=_scrub(self.outcome_source)[:120],
+            outcome_verified_at=self.outcome_verified_at,
+            task_id=_scrub(self.task_id)[:160],
         )
 
 

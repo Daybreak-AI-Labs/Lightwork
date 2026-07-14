@@ -52,11 +52,15 @@ than adding a new ungoverned optimizer:
    the *hypothesis* — a one-line "why this should help" — is carried as METADATA
    into the signed audit + provenance sidecar, never into the prompt (it is
    scrubbed like the line but not policy-screened, since it can't ride a prompt).
-   With `candidates_per_signature > 1` the stage does **best-of-N**: it draws
-   several candidate lines for the signature, validates each, and promotes the
-   strongest survivor (highest held-out delta) — GEPA-style Pareto selection that
-   only matters for a *stochastic* proposer (a deterministic one collapses to the
-   single candidate, so the determinism guarantee is unchanged at the default).
+   With `candidates_per_signature > 1` the stage does **sealed best-of-N**: it
+   draws several candidate lines for the signature and ranks them only on
+   held-in development evidence. The winner is frozen before the held-out scorer
+   is called; only that winner receives the held-out confirmation evaluation (or
+   configured rotation battery). This avoids selecting the maximum on a test set
+   and promoting from the same score. It only matters for a *stochastic*
+   proposer (a deterministic one collapses to the single candidate, so the
+   determinism guarantee is unchanged at the default). With no held-in
+   development cases, best-of-N refuses to search on held-out data.
 3. **VALIDATE** — `validate_proposal(...)` runs the paper's acceptance test: the
    edit must not regress **either** a held-in split (the mined cases) or a
    **held-out** split (unseen cases — the overfitting guard), and must help at
@@ -100,19 +104,28 @@ safety model as skills and insights.
 - **Two gates, not one:** self-harness only proposes; promotion needs the
   self-improvement controller. A frozen verifier or a disabled controller leaves
   the store untouched.
-- **No overfitting promotion:** the held-out split is mandatory; a pure trade is
-  rejected. A live caller can tighten the evidence bar with opt-in floors
+- **No overfitting promotion:** when held-out evidence is required, a pure trade
+  is rejected and held-in examples cannot inflate the shared gate's sample
+  count. Production scorers return structured evidence (`success`, actual
+  `samples`, `attempted`, aligned `outcomes`, `complete`, and `clean`); a dirty,
+  partial, asymmetric, or budget-exhausted A/B is indeterminate and cannot
+  promote. A live caller can tighten the evidence bar with opt-in floors
   (default off, back-compatible): `require_held_out` (never promote on only the
-  mined examples), `min_held_out` (an unseen-sample floor — a 1-of-1 "win" is not
-  evidence), `min_delta` (an effect-size floor), `confidence_z` (the candidate's
-  held-out **Wilson lower bound** must clear the baseline — statistically-confident
-  generalization, not luck), and `max_cost_factor`/`max_latency_factor`/
-  `max_tool_calls_factor` (reject a line that lifts pass-rate while regressing
-  **cost/latency/tool-churn** — a scorer may return `{success, cost, latency,
-  tool_calls}`), and `metamorphic_fn` (a meaning-preserving paraphraser — the
-  held-out improvement must **survive paraphrasing** the unseen cases, catching a
-  line overfit to surface wording, not the weakness). Mining support is
-  per-class-adaptable (`min_support_by_class`).
+  mined examples), `min_held_out` (an unseen-case floor — a 1-of-1 "win" is not
+  evidence), `min_delta` (an effect-size floor), `confidence_z` (a conservative
+  lower bound on the **candidate-minus-baseline effect**, accounting for
+  uncertainty in both arms, must clear the configured practical-effect floor),
+  and `max_cost_factor`/
+  `max_latency_factor`/`max_tool_calls_factor` (reject a line that lifts pass-rate
+  while regressing **cost/latency/tool-churn**; if a factor is configured, missing
+  or invalid metric evidence rejects), and `metamorphic_fn` (a
+  meaning-preserving paraphraser — the held-out improvement must **survive
+  paraphrasing** the unseen cases, catching a line overfit to surface wording,
+  not the weakness). Duplicate or normalized-alias cases, cross-split leakage,
+  incomplete transforms, and unchanged/permuted "paraphrases" reject before
+  they can count as independent evidence. Mining support is per-class-adaptable
+  (`min_support_by_class`). Programmatically injected legacy scalar scorers
+  remain a trusted compatibility seam and cannot prove per-case completeness.
 - **Reversible + audited:** every applied line has a rollback handle and a signed
   `LEARNING_UPDATE` audit row.
 - **Bounded + non-eroding:** an addendum is capped (`_MAX_LINES_PER_MODEL`,
@@ -183,11 +196,16 @@ safety model as skills and insights.
   `relapse_min_outcomes` is the evidence floor before a window is judged.
 - **Robust validation:** `holdout_rotations` cross-validates a candidate across K
   deterministic holdout folds (`corpus_kfold_splits`) and promotes only if the
-  lift holds on **every** fold — a lucky single split can't carry it. The LLM
+  lift holds on **every** fold — a lucky single split can't carry it. In sealed
+  best-of-N mode, the candidate is fixed first and the rotation battery uses
+  only the sealed confirmation pool; losing proposals never touch it. The LLM
   judge supports **self-consistency** (`judge_samples` → `llm_judge(samples=)`):
-  ask N times with diverse meaning-preserving framings, take the majority vote,
-  fall open to the deterministic heuristic on a tie. Both default to the
-  single-split / single-call historical behavior.
+  ask N times with diverse meaning-preserving framings and take the majority
+  vote. Production memoization replicates candidate and baseline arms
+  symmetrically and requires every configured draw to remain clean. Sealed
+  development and confirmation use opposite deterministic aggregate arm order
+  so one arm is not always favored by warmup/cache/provider position. Both
+  rotations and replicated judging default to historical single settings.
 - **Scoped validation:** a domain-scoped candidate is judged on its own
   department's ground truth. The corpus's domain keys (the loader's documented
   `{model|domain: [...]}` shape) become per-domain evaluation quads via the
@@ -211,6 +229,9 @@ safety model as skills and insights.
   interlock (vote-share confidence vs the operator's `expected` label, source
   `self_harness_judge`), arming the verifier-drift freeze against this loop's
   own judge — a drifting judge pauses learning instead of silently steering it.
+  Risk-limited promotion additionally binds the receipt to the exact evaluator,
+  requires at least 20 natural correct/incorrect examples from the current
+  cycle, and rechecks that receipt immediately before artifact activation.
 
 ## Operating it
 
@@ -274,12 +295,16 @@ safety model as skills and insights.
   undo handle (`--domain` scopes the rollback to one department's block).
 
 Config (`[self_harness]`, resolved by `config.get_self_harness` / `settings()`):
-`enable`, `min_support`, the validation floors (`require_held_out`, `min_held_out`,
-`min_delta`, `confidence_z`, `max_cost_factor`/`max_latency_factor`/
+`enable`, `risk_limited`, `min_support`, the validation floors
+(`require_held_out`, `min_held_out`, `min_delta`, `confidence_z`,
+`max_cost_factor`/`max_latency_factor`/
 `max_tool_calls_factor`, `min_support_by_class`), `candidates_per_signature`
-(best-of-N proposing), `semantic_mining`, `mine_bucket_by` (per-domain/per-tool
-mining), `holdout_rotations` (K-fold cross-validation), `judge_samples`
-(self-consistency judging), `promote_as_canary` (stage every promotion on canary
+(sealed best-of-N proposing), `semantic_mining`, `mine_bucket_by`
+(per-domain/per-tool mining), `max_promotions_per_cycle`, `holdout_rotations`
+(K-fold confirmation), `holdout_ledger`, `holdout_family_alpha`,
+`holdout_query_alpha`, `holdout_max_queries`, `judge_samples`
+(self-consistency judging), `calibration_max_age_hours`, `promote_as_canary`
+(stage every promotion on canary
 probation), `efficacy_review`, `eval_corpus`, `eval_budget_dollars` (spend
 ceiling for one auto-evaluated cycle's LLM calls — the runner and judge share
 the pot, and an exhausted budget fails the evaluation *closed*: candidates are
@@ -293,6 +318,55 @@ these automatically, and the dashboard `/learned` page surfaces per-line
 provenance, recall→outcome counters, canary state, the department tag, and
 conflict warnings (parity with `show --verbose` / `efficacy` / `canary` /
 `conflicts`).
+
+For unattended evaluation, `risk_limited = true` selects conservative defaults
+as one coherent profile: `require_held_out = true`, `min_held_out = 8`,
+`min_delta = 0.02`, `confidence_z = 1.96`,
+`candidates_per_signature = 3`, `max_promotions_per_cycle = 1`,
+`holdout_rotations = 1`, `judge_samples = 3`,
+`calibrate_judge = true`, `calibration_max_age_hours = 24`,
+`metamorphic = true`, `promote_as_canary = true`,
+`max_cost_factor = 1.25`, `max_latency_factor = 1.25`,
+`max_tool_calls_factor = 1.10`, and `eval_budget_dollars = 5`. It also requires
+an explicitly provisioned `holdout_ledger` and the exact deployed system-prompt
+snapshot used by both A/B arms. The default family alpha is `0.05`, charged in
+two `0.025` queries at most (confirmation and metamorphic). Invalid numeric
+overrides, absent authoritative metrics, stale calibration, missing prompt
+identity, or a missing/exhausted/tampered ledger fail closed. Explicit
+constituent settings may tighten but cannot weaken these floors, caps, and
+required controls. The profile does not turn `enable` on or enable the shared
+self-improvement gate.
+
+One provisioned ledger is one statistical study: exact case/label views are
+recorded separately, but reordered corpora, metadata edits, overlapping subsets,
+and evaluator/signature changes cannot mint a fresh query allowance. A new
+study requires explicit provisioning of a new ledger.
+
+Provision and independently verify the ledger before running the profile:
+
+```console
+maverick self-harness holdout provision --path /protected/self-harness-holdout.db
+maverick self-harness holdout verify --path /protected/self-harness-holdout.db --json
+maverick self-harness run --model MODEL \
+  --system-prompt-file /protected/deployed-system-prompt.txt
+```
+
+Runtime never recreates a missing ledger, because deletion must not reset a
+spent statistical budget. The SQLite ledger uses strict schema checks,
+append-only triggers, full synchronization, a hash chain, atomic query charging,
+and commit readback. This is a same-host durable control, not an external trust
+anchor: production operators should replicate its tip to append-only/WORM audit
+storage, restrict filesystem/database administration, and use an authoritative
+remote broker when multiple hosts share a holdout.
+
+Promotion is likewise a recoverable transaction. The controller durably writes
+`PREPARE`, applies the exact compare-and-swap artifact revision, then writes
+`COMMIT`; a proven unchanged artifact can be `ABORT`ed. Startup recovery inspects
+unresolved preparations and blocks conflicting promotion until the applied
+artifact and receipt agree. Prompt-addendum and verifier-artifact deployments
+use this protocol, so a crash cannot silently turn a receipt-only or
+artifact-only update into an accepted promotion.
+
 - Automatic operation: set `[self_harness] auto_run = true` and the fleet-wide
   cycle (`run_self_harness_all_models`) runs as part of `maverick dream` — the
   same nightly beat that consolidates insights and turns the data-engine

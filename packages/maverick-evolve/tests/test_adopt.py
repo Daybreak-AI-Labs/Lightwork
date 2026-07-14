@@ -23,7 +23,8 @@ max_risk = "low"
 
 def _setup(tmp_path, config):
     archive = Archive()
-    archive.add(Candidate(config=config, score=0.9))
+    candidate = archive.add(Candidate(config=config, score=0.9))
+    archive.mark_confirmed(candidate.id)
     apath = tmp_path / "archive.json"
     archive.save(apath)
     pack = tmp_path / "finance_sox.toml"
@@ -49,6 +50,18 @@ def test_capability_keys_are_refused(tmp_path):
         plan_adoption(apath, pack, keys=["allow_tools"])
 
 
+def test_adoption_refuses_development_only_archive(tmp_path):
+    archive = Archive()
+    archive.add(Candidate(config={"persona": "unconfirmed"}, score=1.0))
+    archive_path = tmp_path / "development.json"
+    archive.save(archive_path)
+    pack = tmp_path / "finance_sox.toml"
+    pack.write_text(PACK, encoding="utf-8")
+
+    with pytest.raises(ValueError, match="no promotion-confirmed candidate"):
+        plan_adoption(archive_path, pack)
+
+
 def test_adopt_writes_valid_toml_and_backs_up(tmp_path):
     apath, pack = _setup(tmp_path, {"persona": "New persona."})
     out = tmp_path / "user-domains"
@@ -62,7 +75,8 @@ def test_adopt_writes_valid_toml_and_backs_up(tmp_path):
     assert adopt_best(apath, pack, out_dir=out) is None
     # ...and re-adoption after a new best backs up the previous adopted pack.
     archive = Archive.load(apath)
-    archive.add(Candidate(config={"persona": "Even newer."}, score=0.95))
+    candidate = archive.add(Candidate(config={"persona": "Even newer."}, score=0.95))
+    archive.mark_confirmed(candidate.id)
     archive.save(apath)
     dest2 = adopt_best(apath, pack, out_dir=out)
     assert dest2 == dest
@@ -84,7 +98,8 @@ def test_inplace_adoption_preserves_original_in_bak(tmp_path):
 
     # New best, second in-place adoption: pack -> V2, .bak STILL = the original.
     archive = Archive.load(apath)
-    archive.add(Candidate(config={"persona": "V2 persona."}, score=0.99))
+    candidate = archive.add(Candidate(config={"persona": "V2 persona."}, score=0.99))
+    archive.mark_confirmed(candidate.id)
     archive.save(apath)
     assert adopt_best(apath, pack) == pack
     assert tomllib.loads(pack.read_text(encoding="utf-8"))["persona"] == "V2 persona."
@@ -148,7 +163,9 @@ def test_adopt_best_roundtrips_real_shipped_pack(tmp_path):
     pack.write_text(src.read_text(encoding="utf-8"), encoding="utf-8")
 
     archive = Archive()
-    archive.add(Candidate(config={"persona": "Evolved SoD scanner."}, score=0.95))
+    candidate = archive.add(
+        Candidate(config={"persona": "Evolved SoD scanner."}, score=0.95))
+    archive.mark_confirmed(candidate.id)
     apath = tmp_path / "archive.json"
     archive.save(apath)
 
@@ -162,6 +179,43 @@ def test_adopt_best_roundtrips_real_shipped_pack(tmp_path):
     assert adopted["workflow"] == original["workflow"]
     assert adopted["output"] == original["output"]
     assert adopted["allow_tools"] == original["allow_tools"]
+
+
+def test_adopt_recomputes_plan_after_serialization(tmp_path, monkeypatch):
+    """A destination update immediately before lock acquisition is preserved."""
+    from contextlib import contextmanager
+
+    import maverick.file_lock as file_lock
+
+    apath, pack = _setup(tmp_path, {"persona": "Evolved persona."})
+    out = tmp_path / "out"
+    out.mkdir()
+    dest = out / pack.name
+    dest.write_text(PACK, encoding="utf-8")
+    concurrent = PACK.replace(
+        'description = "SOX control testing"',
+        'description = "Concurrent operator edit"',
+    )
+    original_lock = file_lock.cross_process_lock
+    injected = False
+
+    @contextmanager
+    def mutate_before_serialized_plan(path):
+        nonlocal injected
+        if Path(path) == dest and not injected:
+            injected = True
+            dest.write_text(concurrent, encoding="utf-8")
+        with original_lock(path):
+            yield
+
+    monkeypatch.setattr(file_lock, "cross_process_lock", mutate_before_serialized_plan)
+    assert adopt_best(apath, pack, out_dir=out) == dest
+
+    with open(dest, "rb") as f:
+        adopted = tomllib.load(f)
+    assert injected is True
+    assert adopted["persona"] == "Evolved persona."
+    assert adopted["description"] == "Concurrent operator edit"
 
 
 def test_concurrent_adopt_keeps_one_bak_and_no_temp(tmp_path):

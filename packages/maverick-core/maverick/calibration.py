@@ -31,6 +31,7 @@ from __future__ import annotations
 
 import json
 import logging
+import math
 import os
 import threading
 import time
@@ -49,6 +50,7 @@ log = logging.getLogger(__name__)
 # exactly the historical paths below (single-tenant behaviour unchanged).
 SAMPLES_PATH = data_dir("calibration.ndjson")
 VERDICT_PATH = data_dir("calibration_verdict.json")
+RISK_VERDICT_PATH = data_dir("self_harness_calibration_receipt.json")
 
 
 def _samples_path() -> Path:
@@ -67,6 +69,19 @@ def _verdict_path() -> Path:
         return data_dir("calibration_verdict.json")
     except Exception:  # pragma: no cover -- never let path resolution block a run
         return VERDICT_PATH
+
+
+def _risk_verdict_path() -> Path:
+    """Tenant-scoped, evaluator-bound Self-Harness promotion receipt.
+
+    Kept separate from the general learning-freeze verdict: a narrow current-
+    cycle assessment that is intentionally inadequate until enough judge calls
+    complete must not overwrite the broader donation interlock's state.
+    """
+    try:
+        return data_dir("self_harness_calibration_receipt.json")
+    except Exception:  # pragma: no cover -- path resolution cannot block a run
+        return RISK_VERDICT_PATH
 
 # Last-resort defaults; live values come from ``[calibration]`` (config.get_calibration).
 _DEFAULTS = {
@@ -114,6 +129,12 @@ class CalibrationSample:
     correct: bool
     ts: float = 0.0
     source: str = ""
+    # Stable identity of the evaluator implementation that emitted this
+    # confidence (model + judge protocol/configuration).  Empty preserves
+    # legacy/general calibration samples, but a risk-limited promotion requires
+    # an exact non-empty match so one verifier's receipt cannot authorize
+    # another verifier after a model or prompt-protocol change.
+    evaluator_id: str = ""
     # An ADVERSARIAL probe: a crafted plausible-but-wrong (or ugly-but-correct)
     # case whose ground truth is known. Natural samples measure drift; probes
     # measure whether the judge is being *gamed* (reward laundering) -- a
@@ -262,7 +283,8 @@ def _clamp01(v: float) -> float:
 
 def record_sample(
     confidence: float, correct: bool, *, source: str = "",
-    adversarial: bool = False, path: Path | None = None,
+    adversarial: bool = False, evaluator_id: str = "",
+    path: Path | None = None,
 ) -> bool:
     """Append one ``(confidence, ground_truth)`` calibration sample. Never raises.
 
@@ -272,7 +294,9 @@ def record_sample(
         path = _samples_path()
     entry = CalibrationSample(
         confidence=_clamp01(confidence), correct=bool(correct),
-        ts=time.time(), source=str(source or "")[:120], adversarial=bool(adversarial),
+        ts=time.time(), source=str(source or "")[:120],
+        evaluator_id=str(evaluator_id or "").strip()[:240],
+        adversarial=bool(adversarial),
     )
     with _lock:
         try:
@@ -291,7 +315,7 @@ def record_sample(
 
 def record_probe(
     confidence: float, correct: bool, *, source: str = "",
-    path: Path | None = None,
+    evaluator_id: str = "", path: Path | None = None,
 ) -> bool:
     """Append one ADVERSARIAL calibration probe: a crafted case (plausible but
     wrong, or ugly but correct) with known ground truth, tagged so
@@ -302,7 +326,9 @@ def record_probe(
     should hold immutable (cf. the evaluator anchors): a proposer or co-evolving
     evaluator that games the judge shows up as adversarial discrimination
     collapsing while natural discrimination stays healthy."""
-    return record_sample(confidence, correct, source=source, adversarial=True, path=path)
+    return record_sample(
+        confidence, correct, source=source, adversarial=True,
+        evaluator_id=evaluator_id, path=path)
 
 
 def current_resistance(path: Path | None = None) -> float | None:
@@ -332,6 +358,7 @@ def load_samples(path: Path | None = None) -> list[CalibrationSample]:
                         correct=bool(d.get("correct", False)),
                         ts=float(d.get("ts", 0.0) or 0.0),
                         source=str(d.get("source", "")),
+                        evaluator_id=str(d.get("evaluator_id", "")),
                         adversarial=bool(d.get("adversarial", False)),
                     ))
                 except (json.JSONDecodeError, TypeError, ValueError):
@@ -343,17 +370,54 @@ def load_samples(path: Path | None = None) -> list[CalibrationSample]:
 
 def run_assessment(
     *, samples_path: Path | None = None, verdict_path: Path | None = None,
+    evaluator_id: str | None = None, since: float | None = None,
 ) -> CalibrationReport:
-    """Assess the ledger and persist the verdict that :func:`learning_frozen` reads."""
+    """Assess the ledger and persist the verdict that :func:`learning_frozen` reads.
+
+    ``evaluator_id`` and ``since`` form the risk-limited receipt boundary.  When
+    supplied, only samples from that exact evaluator at or after ``since`` are
+    eligible, and the persisted verdict records both the identity and evidence
+    timestamps.  Re-running an assessment over old or differently configured
+    judge evidence therefore cannot mint a fresh authorization receipt.  With
+    both omitted, historical all-sample calibration behavior is unchanged.
+    """
     if samples_path is None:
         samples_path = _samples_path()
     if verdict_path is None:
         verdict_path = _verdict_path()
-    report = assess(load_samples(samples_path))
+    samples = load_samples(samples_path)
+    bound_id: str | None = None
+    if evaluator_id is not None:
+        bound_id = str(evaluator_id or "").strip()[:240]
+        samples = [sample for sample in samples
+                   if bound_id and sample.evaluator_id == bound_id]
+    evidence_since: float | None = None
+    if since is not None:
+        try:
+            evidence_since = float(since)
+        except (TypeError, ValueError, OverflowError):
+            evidence_since = float("nan")
+        if not math.isfinite(evidence_since) or evidence_since < 0:
+            samples = []
+        else:
+            samples = [sample for sample in samples
+                       if math.isfinite(sample.ts) and sample.ts >= evidence_since]
+    report = assess(samples)
+    payload = report.to_dict()
+    if evaluator_id is not None or since is not None:
+        timestamps = [sample.ts for sample in samples
+                      if math.isfinite(sample.ts) and sample.ts >= 0]
+        payload.update({
+            "schema": "maverick-calibration-receipt-v2",
+            "evaluator_id": bound_id or "",
+            "evidence_since": evidence_since,
+            "sample_min_ts": min(timestamps) if timestamps else None,
+            "sample_max_ts": max(timestamps) if timestamps else None,
+        })
     with _lock:
         try:
             verdict_path.parent.mkdir(parents=True, exist_ok=True)
-            verdict_path.write_text(json.dumps(report.to_dict(), indent=2), encoding="utf-8")
+            verdict_path.write_text(json.dumps(payload, indent=2), encoding="utf-8")
             try:
                 os.chmod(verdict_path, 0o600)
             except OSError:
@@ -420,4 +484,5 @@ __all__ = [
     "learning_frozen",
     "SAMPLES_PATH",
     "VERDICT_PATH",
+    "RISK_VERDICT_PATH",
 ]

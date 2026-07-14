@@ -9,7 +9,7 @@ from __future__ import annotations
 
 import pytest
 from maverick import evaluator_evolution as ee
-from maverick.self_improvement import SelfImprovementController
+from maverick.self_improvement import PromotionLedger, SelfImprovementController
 
 # -- epsilon-best-belief --------------------------------------------------------
 
@@ -234,7 +234,7 @@ def test_consider_promotion_no_op_when_disabled(monkeypatch):
     assert slot.evaluator_id == "old" and slot.epoch == 1
 
 
-def test_consider_promotion_promotes_better_judge_and_erases(monkeypatch):
+def test_consider_promotion_promotes_better_judge_and_erases(tmp_path, monkeypatch):
     monkeypatch.setenv("MAVERICK_SELF_IMPROVEMENT", "1")
     monkeypatch.setenv("MAVERICK_EVALUATOR_EVOLUTION", "1")
     monkeypatch.setattr(ee, "_audit", lambda *a, **k: None)
@@ -242,7 +242,10 @@ def test_consider_promotion_promotes_better_judge_and_erases(monkeypatch):
     slot = ee.EvaluatorSlot(role="reviewer", evaluator_id="old")
     records = [ee.EvaluatorRecord("r1", "old"), ee.EvaluatorRecord("r2", "other")]
     # Controller that auto-promotes the evaluator rung (ceiling raised).
-    ctrl = _ctrl(max_auto_rung="evaluator")
+    ctrl = _ctrl(
+        max_auto_rung="evaluator",
+        ledger=PromotionLedger(path=tmp_path / "promotion-ledger.json"),
+    )
     res = ee.consider_promotion(
         slot,
         _verdicts(anchor, agree=8),               # incumbent: 8/14 agree
@@ -274,14 +277,16 @@ def test_consider_promotion_blocked_by_calibration_freeze(monkeypatch):
     assert slot.evaluator_id == "old" and slot.epoch == 1
 
 
-def test_consider_promotion_needs_human_above_default_ceiling(monkeypatch):
+def test_consider_promotion_needs_human_above_default_ceiling(tmp_path, monkeypatch):
     monkeypatch.setenv("MAVERICK_SELF_IMPROVEMENT", "1")
     monkeypatch.setenv("MAVERICK_EVALUATOR_EVOLUTION", "1")
     monkeypatch.setattr(ee, "_audit", lambda *a, **k: None)
     anchor = _anchor(n=14)
     slot = ee.EvaluatorSlot(role="reviewer", evaluator_id="old")
     # Default ceiling is "policy", below "evaluator": a swap needs approval.
-    ctrl = _ctrl()  # max_auto_rung defaults to "policy"
+    ctrl = _ctrl(
+        ledger=PromotionLedger(path=tmp_path / "promotion-ledger.json"),
+    )  # max_auto_rung defaults to "policy"
     refused = ee.consider_promotion(
         slot, _verdicts(anchor, agree=8), {"new": _verdicts(anchor, agree=14)},
         anchor, [], lock=None, controller=ctrl,

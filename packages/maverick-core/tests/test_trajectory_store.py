@@ -50,11 +50,18 @@ def test_capture_off_by_default_is_noop(tmp_path, monkeypatch):
 def test_record_and_iter_roundtrip(tmp_path):
     store = TrajectoryStore(path=tmp_path / "t.ndjson")
     assert store.record(_step(step=0, tool="read_file", tool_succeeded=True))
-    assert store.record(_step(step=1, tool="shell", tool_succeeded=False, error="boom"))
+    assert store.record(_step(
+        step=1, tool="shell", tool_succeeded=False, error="boom",
+        task_id="stable-task", outcome=0.0, outcome_source="tests",
+        outcome_verified_at=3.0,
+    ))
     steps = list(store.iter_steps(goal_id=7))
     assert len(steps) == 2
     assert steps[0].tool == "read_file"
     assert steps[1].tool_succeeded is False
+    assert steps[1].task_id == "stable-task"
+    assert steps[1].outcome_source == "tests"
+    assert steps[1].outcome_verified_at == 3.0
 
 
 def test_secrets_are_redacted_before_disk(tmp_path):

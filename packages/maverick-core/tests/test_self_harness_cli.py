@@ -70,6 +70,35 @@ def test_show_empty(_home):
     assert r.exit_code == 0 and "no learned guidance" in r.output
 
 
+def test_holdout_ledger_cli_provisions_once_and_verifies_json(_home):
+    path = _home / "sealed-holdout.db"
+    runner = CliRunner()
+    created = runner.invoke(
+        main, ["self-harness", "holdout", "provision", "--path", str(path)])
+    assert created.exit_code == 0, created.output
+    assert path.exists() and "ledger id" in created.output
+
+    duplicate = runner.invoke(
+        main, ["self-harness", "holdout", "provision", "--path", str(path)])
+    assert duplicate.exit_code != 0
+
+    verified = runner.invoke(
+        main, ["self-harness", "holdout", "verify", "--path", str(path), "--json"])
+    assert verified.exit_code == 0, verified.output
+    payload = json.loads(verified.output)
+    assert payload["path"] == str(path)
+    assert payload["events"] == 0 and payload["queries"] == 0
+    assert re.fullmatch(r"[0-9a-f]{64}", payload["ledger_id"])
+
+
+def test_holdout_ledger_cli_requires_path_or_config(_home, monkeypatch):
+    from maverick import config
+
+    monkeypatch.setattr(config, "load_config", lambda *a, **k: {"self_harness": {}})
+    result = CliRunner().invoke(main, ["self-harness", "holdout", "verify"])
+    assert result.exit_code != 0 and "holdout ledger path" in result.output
+
+
 def test_forget_removes_all_for_model(_home):
     _seed()
     r = CliRunner().invoke(main, ["self-harness", "forget", "--model", "claude-x", "--yes"])
@@ -319,6 +348,43 @@ def test_run_cli_all_models(_home, monkeypatch):
     r = CliRunner().invoke(main, ["self-harness", "run", "--all-models", "--no-retire"])
     assert r.exit_code == 0, r.output
     assert "model: model-a" in r.output and "model: model-b" in r.output
+
+
+def test_run_cli_forwards_exact_deployed_prompt(_home, monkeypatch):
+    from maverick import self_improvement_runner as runner
+
+    prompt = _home / "deployed-system.txt"
+    prompt.write_bytes(b"Exact deployed system prompt\n")
+    seen = []
+
+    def _spy(**kwargs):
+        seen.append(kwargs.get("evaluation_system"))
+        return sh.SelfHarnessReport(model_id="model-a"), 0
+
+    monkeypatch.setattr(runner, "run_self_harness_cycle", _spy)
+    result = CliRunner().invoke(
+        main,
+        ["self-harness", "run", "--model", "model-a",
+         "--system-prompt-file", str(prompt)],
+    )
+
+    assert result.exit_code == 0, result.output
+    assert seen == ["Exact deployed system prompt\n"]
+
+
+@pytest.mark.parametrize("payload", [b"", b"\x00bad", b"\xff"])
+def test_run_cli_rejects_invalid_deployed_prompt(_home, payload):
+    prompt = _home / "bad-system.txt"
+    prompt.write_bytes(payload)
+
+    result = CliRunner().invoke(
+        main,
+        ["self-harness", "run", "--model", "model-a",
+         "--system-prompt-file", str(prompt)],
+    )
+
+    assert result.exit_code != 0
+    assert "cannot read deployed system prompt" in result.output
 
 
 def test_transfer_cli_requires_corpus_then_reports(_home, monkeypatch):

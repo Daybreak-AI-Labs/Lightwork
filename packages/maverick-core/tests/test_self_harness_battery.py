@@ -14,6 +14,7 @@ import threading
 import pytest
 from maverick import self_harness as sh
 from maverick import self_improvement as si
+from maverick.file_lock import private_path_is_restricted
 
 # --------------------------------------------------------------------------
 # helpers
@@ -34,7 +35,7 @@ def _enable_si(monkeypatch, *, frozen=False):
 
 
 GOOD_AB = dict(score_with=lambda a, c: 0.95, score_without=lambda a, c: 0.4)
-ENOUGH = dict(held_in=["a", "b"], held_out=["c", "d", "e"])
+ENOUGH = dict(held_in=["a", "b"], held_out=["c", "d", "e", "f", "g"])
 
 
 # ==========================================================================
@@ -237,12 +238,12 @@ def test_validate_rejects_non_finite_or_out_of_range(bad):
 
 GATE_CASES = [
     # (si_on, frozen, n_samples, dry, expect_promote)
-    (True, False, 5, False, True),
-    (True, False, 4, False, False),   # too few samples
-    (True, True, 5, False, False),    # frozen verifier
-    (False, False, 5, False, False),  # SI disabled
-    (True, False, 5, True, False),    # dry (no scorer)
-    (True, False, 8, False, True),
+    (True, False, 7, False, True),
+    (True, False, 6, False, False),   # four held-out cases: too little evidence
+    (True, True, 7, False, False),    # frozen verifier
+    (False, False, 7, False, False),  # SI disabled
+    (True, False, 7, True, False),    # dry (no scorer)
+    (True, False, 10, False, True),
 ]
 
 
@@ -283,12 +284,12 @@ def test_corrupt_store_loads_empty(monkeypatch, tmp_path, content):
     assert sh.recall_addendum("M", store) == ""
 
 
-def test_store_is_0600_after_write(monkeypatch, tmp_path):
+def test_store_is_private_after_write(monkeypatch, tmp_path):
     store = tmp_path / "s.json"
     ctrl = _enable_si(monkeypatch)
     sh.run_self_harness(_recs(3), model_id="M", min_support=3, controller=ctrl,
                         path=store, **ENOUGH, **GOOD_AB)
-    assert store.exists() and oct(store.stat().st_mode)[-3:] == "600"
+    assert store.exists() and private_path_is_restricted(store)
 
 
 def test_rollback_handle_restores_exactly(tmp_path):
@@ -314,7 +315,7 @@ def test_concurrent_passes_keep_store_valid(monkeypatch, tmp_path):
                  "goal_text": f"task run {i}", "failure_msg": f"e{k}"} for i in range(3)]
         sh.run_self_harness(recs, model_id="M", min_support=3,
                             held_in=["task run 0", "task run 1"],
-                            held_out=["u0", "u1", "u2"], controller=ctrl,
+                            held_out=["u0", "u1", "u2", "u3", "u4"], controller=ctrl,
                             path=store, **GOOD_AB)
 
     threads = [threading.Thread(target=worker, args=(k,)) for k in range(12)]
@@ -636,17 +637,26 @@ def test_self_harness_model_based(monkeypatch, tmp_path):
 
         rep = sh.run_self_harness(
             recs, model_id=target, min_support=3,
-            held_in=["a", "b"], held_out=["c", "d", "e"],
+            held_in=["a", "b"], held_out=["c", "d", "e", "f", "g"],
             score_with=sw, score_without=wo,
             propose_fn=lambda sig, _lf=line_for: _lf[sig.failure_class],
             controller=ctrl, path=store)
 
-        # Update the reference: if the gate is open, the first MAX promotions (in
-        # strongest-first order) are applied via compose; else nothing changes.
-        expected_promotions = min(len(ordered_lines), MAX) if gate_open else 0
+        # Update the reference in strongest-first order. A proposal identical to
+        # the already-newest deployed line is a no-op, so the transactional gate
+        # correctly refuses it rather than issuing a promotion receipt for no
+        # artifact change. Continue until MAX *actual* changes are applied.
+        expected_promotions = 0
         if gate_open:
-            for line in ordered_lines[:MAX]:
-                ref[target] = compose(ref.get(target, []), line)
+            for line in ordered_lines:
+                if expected_promotions >= MAX:
+                    break
+                before = ref.get(target, [])
+                after = compose(before, line)
+                if after == before:
+                    continue
+                ref[target] = after
+                expected_promotions += 1
             if not ref.get(target):
                 ref.pop(target, None)
 
