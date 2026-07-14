@@ -56,6 +56,14 @@ def test_status_only_update_preserves_result(world):
     assert world.get_goal(gid).result == "partial"
 
 
+def test_goal_execution_claim_is_atomic(world):
+    gid = world.create_goal("claim exactly once")
+
+    assert world.claim_goal_for_run(gid) is True
+    assert world.get_goal(gid).status == "active"
+    assert world.claim_goal_for_run(gid) is False
+
+
 def test_get_missing_goal_returns_none(world):
     assert world.get_goal(999_999_999) is None
 

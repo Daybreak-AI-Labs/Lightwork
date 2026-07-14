@@ -10,7 +10,7 @@ CLIP-style zero-shot image classification.
 Seams: the embedders are **injected** (``audio_embed(bytes) -> vector``,
 ``text_embed(labels) -> vectors``) so the ranking math is testable offline.
 The default adapters lazy-load transformers' ClapModel behind the ``[clap]``
-extra (``pip install 'maverick-agent[clap]'``); model name comes from
+extra (``python -m pip install -e './packages/maverick-core[clap]'``); model name comes from
 ``MAVERICK_CLAP_MODEL`` (default ``laion/clap-htsat-unfused``). Nothing is
 downloaded until a default adapter is actually called.
 
@@ -147,7 +147,7 @@ def _load_clap():
         except ImportError as e:
             raise ImportError(
                 "CLAP audio understanding needs transformers + torch. "
-                "Run: pip install 'maverick-agent[clap]'"
+                "Run: python -m pip install -e './packages/maverick-core[clap]'"
             ) from e
         name = os.environ.get("MAVERICK_CLAP_MODEL", DEFAULT_CLAP_MODEL)
         _clap = (ClapModel.from_pretrained(name), ClapProcessor.from_pretrained(name))

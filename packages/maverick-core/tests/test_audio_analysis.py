@@ -100,7 +100,7 @@ def test_emotion_default_adapter_needs_clap_extra(monkeypatch):
     monkeypatch.setitem(sys.modules, "torch", None)
     import maverick.tools.audio_understanding as au
     monkeypatch.setattr(au, "_clap", None)
-    with pytest.raises(ImportError, match=r"maverick-agent\[clap\]"):
+    with pytest.raises(ImportError, match=r"packages/maverick-core\[clap\]"):
         classify_emotion(b"clip")
 
 
@@ -117,5 +117,5 @@ def test_clap_frame_embed_shares_clap_extra(monkeypatch):
         w.setsampwidth(2)
         w.setframerate(8000)
         w.writeframes(b"\x00\x40" * 8)
-    with pytest.raises(ImportError, match=r"maverick-agent\[clap\]"):
+    with pytest.raises(ImportError, match=r"packages/maverick-core\[clap\]"):
         clap_frame_embed(buf.getvalue())

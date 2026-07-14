@@ -15,6 +15,8 @@ from __future__ import annotations
 
 import asyncio
 import os
+import secrets
+import threading
 from dataclasses import dataclass, field
 from typing import Any
 
@@ -51,6 +53,11 @@ def _default_max_total_spawns() -> int:
         return 64
 
 
+def _new_bus_namespace() -> str:
+    """Opaque routing capability for one swarm's in-process message bus."""
+    return secrets.token_hex(16)
+
+
 @dataclass
 class SwarmContext:
     llm: LLM
@@ -59,6 +66,14 @@ class SwarmContext:
     blackboard: Blackboard
     sandbox: Any
     goal_id: int
+    # Agent-bus isolation: every run gets an unguessable namespace and a
+    # run-scoped roster. Agent tools must be both namespaced and roster-bound,
+    # so learning another run's display id cannot route a message into it.
+    bus_namespace: str = field(default_factory=_new_bus_namespace, init=False)
+    _bus_agents: set[str] = field(default_factory=set, init=False, repr=False)
+    _bus_agents_lock: threading.Lock = field(
+        default_factory=threading.Lock, init=False, repr=False,
+    )
     max_depth: int = 3
     use_skills: bool = field(default_factory=_default_use_skills)
     shield: Any | None = None
@@ -128,6 +143,22 @@ class SwarmContext:
     last_subtrajectories: list = field(default_factory=list)
     _spawns_used: int = 0
     _workdir_lock: asyncio.Lock | None = field(default=None, repr=False)
+
+    def register_bus_agent(self, agent_id: str) -> None:
+        """Add an instantiated agent to this run's communication roster."""
+        with self._bus_agents_lock:
+            self._bus_agents.add(agent_id)
+
+    def knows_bus_agent(self, agent_id: str) -> bool:
+        """Whether ``agent_id`` belongs to this exact swarm/run."""
+        with self._bus_agents_lock:
+            return agent_id in self._bus_agents
+
+    @property
+    def bus_agents(self) -> frozenset[str]:
+        """Immutable roster snapshot for diagnostics and tests."""
+        with self._bus_agents_lock:
+            return frozenset(self._bus_agents)
 
     @property
     def workdir_lock(self) -> asyncio.Lock:

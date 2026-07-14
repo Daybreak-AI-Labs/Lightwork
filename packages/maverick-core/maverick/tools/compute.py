@@ -270,7 +270,7 @@ def _run(args: dict[str, Any]) -> str:
     if not _have_sympy():
         return (
             f"ERROR: '{op}' requires sympy. "
-            "Run: pip install 'maverick-agent[math]'"
+            "Run: python -m pip install -e './packages/maverick-core[math]'"
         )
 
     if op == "simplify":

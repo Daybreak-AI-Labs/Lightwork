@@ -39,6 +39,20 @@ def test_bad_role_rejected():
         rbac.set_tenant_role("acme", "user:x", "superuser")
 
 
+def test_corrupt_tenant_role_store_does_not_fall_back_to_global_operator():
+    from maverick.paths import reset_tenant, set_tenant
+    from maverick_dashboard import auth, rbac
+
+    rbac.set_role("user:alice", "operator")
+    path = rbac.tenant_store_path()
+    path.write_text('{"acme":{"user:alice":"not-a-role"}}', encoding="utf-8")
+    tok = set_tenant("acme")
+    try:
+        assert auth.role_for_principal("user:alice") is None
+    finally:
+        reset_tenant(tok)
+
+
 def test_role_for_principal_uses_tenant_membership(monkeypatch):
     from maverick.paths import reset_tenant, set_tenant
     from maverick_dashboard import auth, rbac

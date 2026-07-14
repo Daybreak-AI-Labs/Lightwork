@@ -6,6 +6,7 @@ builder clamps max_dollars to the tenant's remaining daily allowance."""
 from __future__ import annotations
 
 import json
+import math
 import time
 
 import pytest
@@ -146,3 +147,18 @@ def test_no_reservation_without_active_tenant(tmp_path):
     assert not hasattr(b, "_tenant_reservation_id")
     home = tmp_path / ".maverick"
     assert not (home.exists() and list(home.rglob("reservations.json")))
+
+
+def test_corrupt_reservations_clamp_budget_to_zero(monkeypatch):
+    monkeypatch.setenv("MAVERICK_TENANT", "acme")
+    registry.create_tenant("acme", max_daily_dollars=10.0)
+    path = registry._reservations_path("acme")
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text('{"rid":{"dollars":NaN,"expires_at":9999999999}}', encoding="utf-8")
+    assert budget_from_config(max_dollars=5.0).max_dollars == 0.0
+
+
+@pytest.mark.parametrize("amount,ttl", [(math.nan, 60), (1, math.inf), (1, -1)])
+def test_nonfinite_or_invalid_reservation_is_rejected(amount, ttl):
+    with pytest.raises(ValueError):
+        registry.reserve_tenant_dollars("acme", amount, ttl, "rid")

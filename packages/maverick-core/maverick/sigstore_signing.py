@@ -8,7 +8,7 @@ sigstore *bundle* (certificate + signature + log proof) alongside it, and
 verifies an artifact against a bundle for an expected identity/issuer pair.
 
 Opt-in and dependency-light: the real flow needs the ``sigstore`` package (the
-``maverick-agent[sigstore]`` extra) plus an OIDC identity (ambient CI
+the local ``packages/maverick-core[sigstore]`` extra) plus an OIDC identity (ambient CI
 credential or interactive browser flow), and both entry points take an injected
 ``signer`` / ``verifier`` seam so tests (and embedders) run fully offline with
 fakes -- the default implementations are thin lazy adapters over ``sigstore``.
@@ -34,7 +34,10 @@ from pathlib import Path
 
 log = logging.getLogger(__name__)
 
-_INSTALL_HINT = "Install 'maverick-agent[sigstore]' to enable sigstore keyless signing."
+_INSTALL_HINT = (
+    "From the reviewed checkout run: python -m pip install -e "
+    "'./packages/maverick-core[sigstore]' to enable sigstore keyless signing."
+)
 
 # A signer turns artifact bytes into a sigstore bundle (JSON text).
 Signer = Callable[[bytes], str]

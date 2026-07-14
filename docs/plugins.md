@@ -49,7 +49,8 @@ def weather_tool():
     )
 ```
 
-Install it: `pip install maverick-weather-plugin` — and on the next swarm
+Install it from a reviewed local checkout, for example
+`python -m pip install -e ./plugins/maverick-weather-plugin` — and on the next swarm
 run, every agent gets a `weather` tool in its catalog. The tool passes
 through `Shield.scan_tool_call` just like a built-in.
 

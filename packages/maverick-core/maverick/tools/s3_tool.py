@@ -22,7 +22,7 @@ Mutations (put / delete) gated by confirm=true.
 
 Requires::
 
-    pip install 'maverick-agent[s3]'
+    python -m pip install -e './packages/maverick-core[s3]'
 """
 from __future__ import annotations
 
@@ -148,7 +148,7 @@ def _run(args: dict[str, Any]) -> str:
     except ImportError:
         return (
             "ERROR: boto3 not installed. "
-            "Run: pip install 'maverick-agent[s3]'"
+            "Run: python -m pip install -e './packages/maverick-core[s3]'"
         )
     try:
         if op == "list_buckets":

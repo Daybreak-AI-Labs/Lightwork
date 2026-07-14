@@ -4,6 +4,7 @@ from __future__ import annotations
 import json
 
 from maverick import reliability_cert as rc
+from maverick.file_lock import private_path_is_restricted
 
 
 def test_certify_with_injected_checks_pass():
@@ -39,7 +40,7 @@ def test_write_cert_0600(tmp_path):
     cert = rc.certify({"a": lambda: (True, "ok")})
     path = rc.write_cert(cert, tmp_path / "cert.json")
     assert path.exists()
-    assert oct(path.stat().st_mode)[-3:] == "600"
+    assert private_path_is_restricted(path, 0o600)
     loaded = json.loads(path.read_text())
     assert loaded["kind"] == "maverick-reliability-cert"
 

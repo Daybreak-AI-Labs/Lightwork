@@ -186,7 +186,7 @@ def _run(args: dict[str, Any]) -> str:
     try:
         import httpx  # noqa: F401
     except ImportError:
-        return "ERROR: httpx not installed. Run: pip install 'maverick-agent[issue-trackers]'"
+        return "ERROR: httpx not installed. Run: python -m pip install -e './packages/maverick-core[issue-trackers]'"
     limit = max(1, min(int(args.get("limit") or 25), 100))
     try:
         if op == "issues":

@@ -73,17 +73,29 @@ def _acquire_run_lock(lock_path: Path):
     corpus (the exact bug that double-spent and cross-corrupted repos: an
     orphaned run survived, a second was launched, both hit the same checkouts).
 
-    ``fcntl.flock`` is advisory but kernel-released the instant the holding
-    process dies -- so a crashed/killed run leaves NO stale lock, and a fresh
-    run reclaims it automatically. Returns the open handle; the CALLER MUST keep
-    it alive for the run's duration (closing it releases the lock). Raises
-    :class:`RunLockHeld` if a LIVE run holds it (message names the holding pid)."""
-    import fcntl
+    The OS lock (``flock`` on POSIX, ``msvcrt`` byte-range lock on Windows) is
+    kernel-released the instant the holding process dies, so a crashed/killed
+    run leaves NO stale lock and a fresh run reclaims it automatically. Returns
+    the open handle; the CALLER MUST keep it alive for the run's duration
+    (closing it releases the lock). Raises :class:`RunLockHeld` if a LIVE run
+    holds it (message names the holding pid)."""
     lock_path = Path(lock_path)
     lock_path.parent.mkdir(parents=True, exist_ok=True)
     fh = open(lock_path, "a+", encoding="utf-8")
     try:
-        fcntl.flock(fh.fileno(), fcntl.LOCK_EX | fcntl.LOCK_NB)
+        if os.name == "nt":
+            import msvcrt
+
+            # Lock a byte well beyond the tiny PID text. Locking byte zero also
+            # blocks contenders from reading the holder PID on Windows; a
+            # beyond-EOF byte-range lock preserves that diagnostic while still
+            # refusing a second process/handle.
+            fh.seek(4096)
+            msvcrt.locking(fh.fileno(), msvcrt.LK_NBLCK, 1)
+        else:
+            import fcntl
+
+            fcntl.flock(fh.fileno(), fcntl.LOCK_EX | fcntl.LOCK_NB)
     except OSError as e:
         fh.seek(0)
         holder = (fh.read() or "").strip() or "unknown pid"
@@ -96,6 +108,7 @@ def _acquire_run_lock(lock_path: Path):
     fh.truncate()
     fh.write(str(os.getpid()))
     fh.flush()
+    os.fsync(fh.fileno())
     return fh
 
 

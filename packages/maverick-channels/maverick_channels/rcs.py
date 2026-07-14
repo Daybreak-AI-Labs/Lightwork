@@ -47,7 +47,7 @@ Config::
 
 Requires::
 
-    pip install 'maverick-channels[rcs]'   # fastapi + httpx + google-auth
+    python -m pip install -e './packages/maverick-channels[rcs]'
 """
 from __future__ import annotations
 
@@ -98,7 +98,8 @@ class RcsChannel(Channel):
         super().__init__(handler)
         if not _HAVE_DEPS:
             raise ImportError(
-                "fastapi not installed. Run: pip install 'maverick-channels[rcs]'"
+                "fastapi not installed. From the reviewed checkout run: "
+                "python -m pip install -e './packages/maverick-channels[rcs]'"
             )
         self.agent_id = agent_id or os.environ.get("RCS_AGENT_ID")
         self.service_account_json = (
@@ -287,7 +288,8 @@ class RcsChannel(Channel):
             import google.auth.transport.requests
         except ImportError as e:
             raise ImportError(
-                "google-auth not installed. Run: pip install 'maverick-channels[rcs]'"
+                "google-auth not installed. From the reviewed checkout run: "
+                "python -m pip install -e './packages/maverick-channels[rcs]'"
             ) from e
         if self._credentials is None:
             self._credentials, _ = google.auth.load_credentials_from_file(

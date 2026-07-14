@@ -8,7 +8,7 @@ Uses the gateway WebSocket so no public webhook is needed. Set up:
 
 Requires::
 
-    pip install 'maverick-channels[discord]'
+    python -m pip install -e './packages/maverick-channels[discord]'
 """
 from __future__ import annotations
 
@@ -90,7 +90,8 @@ class DiscordChannel(Channel):
         super().__init__(handler)
         if not _HAVE_DISCORD:
             raise ImportError(
-                "discord.py not installed. Run: pip install 'maverick-channels[discord]'"
+                "discord.py not installed. From the reviewed checkout run: "
+                "python -m pip install -e './packages/maverick-channels[discord]'"
             )
         self.token = token or os.environ.get("DISCORD_BOT_TOKEN")
         if not self.token:

@@ -26,14 +26,24 @@ from __future__ import annotations
 
 import hashlib
 import hmac
+import json
+import math
 import threading
 import time
 import uuid
+from contextlib import ExitStack
+from pathlib import Path
 from typing import Any
 
 from fastapi import APIRouter, Request
 from fastapi.responses import JSONResponse
-from maverick.file_lock import atomic_write_text
+from maverick.file_lock import (
+    atomic_read_text,
+    atomic_write_text,
+    cross_process_lock,
+    ensure_private_directory,
+    ensure_private_file,
+)
 from maverick.paths import maverick_home
 
 router = APIRouter(prefix="/scim/v2", tags=["scim"])
@@ -112,23 +122,177 @@ def _authorize(request: Request) -> JSONResponse | None:
 # --------------------------------------------------------------------------
 # Store
 # --------------------------------------------------------------------------
-def _store_path():
+_USERS_LOCK = threading.Lock()
+_MAX_STORE_CHARS = 4 * 1024 * 1024
+_MAX_RECORDS = 100_000
+_MAX_ID_CHARS = 1024
+_MAX_TEXT_CHARS = 16_384
+_MAX_TIMESTAMP = 253_402_300_799.0  # 9999-12-31T23:59:59Z
+_USER_FIELDS = frozenset({
+    "id", "userName", "externalId", "displayName", "givenName",
+    "familyName", "email", "active", "created_at", "updated_at",
+})
+_GROUP_FIELDS = frozenset({
+    "id", "displayName", "externalId", "members", "created_at", "updated_at",
+})
+
+
+class ScimStoreError(RuntimeError):
+    """A present SCIM authorization store cannot be trusted.
+
+    Missing files retain the bootstrap meaning "no provisioned resources".
+    A file that exists but is unreadable, malformed, or schema-invalid must
+    never be interpreted as empty: doing so can discard deprovisioning state or
+    let group-derived authorization fall through to permissive defaults.
+    """
+
+
+def _store_path() -> Path:
     return maverick_home() / "scim_users.json"
 
 
-def _load() -> dict[str, dict]:
+def _locked_users():
+    """Serialize the entire user-store load/modify/save across all workers."""
+    ensure_private_directory(maverick_home())
+    stack = ExitStack()
+    stack.enter_context(_USERS_LOCK)
+    stack.enter_context(cross_process_lock(_store_path()))
+    return stack
+
+
+def _reject_json_constant(value: str):
+    raise ValueError(f"non-finite number {value!r}")
+
+
+def _strict_json_object(pairs: list[tuple[str, object]]) -> dict[str, object]:
+    result: dict[str, object] = {}
+    for key, value in pairs:
+        if key in result:
+            raise ValueError(f"duplicate object key {key!r}")
+        result[key] = value
+    return result
+
+
+def _read_store(path: Path, kind: str) -> dict | None:
+    """Read strict JSON, distinguishing a missing store from a damaged one."""
     try:
-        import json
-        raw = json.loads(_store_path().read_text(encoding="utf-8"))
-    except (OSError, ValueError):
-        return {}
-    users = raw.get("users", []) if isinstance(raw, dict) else []
-    return {u["id"]: u for u in users if isinstance(u, dict) and u.get("id")}
+        ensure_private_directory(maverick_home())
+        ensure_private_file(path)
+        raw = atomic_read_text(path)
+    except FileNotFoundError:
+        return None
+    except OSError as e:
+        raise ScimStoreError(f"SCIM {kind} store unreadable: {e}") from e
+    if len(raw) > _MAX_STORE_CHARS:
+        raise ScimStoreError(f"SCIM {kind} store exceeds the size limit")
+    try:
+        decoded = json.loads(
+            raw,
+            parse_constant=_reject_json_constant,
+            object_pairs_hook=_strict_json_object,
+        )
+    except (RecursionError, TypeError, ValueError) as e:
+        raise ScimStoreError(f"SCIM {kind} store corrupt: {e}") from e
+    if not isinstance(decoded, dict):
+        raise ScimStoreError(
+            f"SCIM {kind} store corrupt: top-level value must be an object"
+        )
+    return decoded
+
+
+def _clean_string(
+    record: dict,
+    field: str,
+    *,
+    required: bool = False,
+    limit: int = _MAX_TEXT_CHARS,
+) -> str:
+    value = record.get(field)
+    if not isinstance(value, str):
+        raise ScimStoreError(f"SCIM record field {field!r} must be a string")
+    if (
+        value != value.strip()
+        or len(value) > limit
+        or (required and not value)
+        or any(ord(char) < 0x20 or ord(char) == 0x7F for char in value)
+    ):
+        raise ScimStoreError(f"SCIM record field {field!r} is invalid")
+    return value
+
+
+def _timestamp(record: dict, field: str) -> int | float:
+    value = record.get(field)
+    if isinstance(value, bool) or not isinstance(value, (int, float)):
+        raise ScimStoreError(f"SCIM record field {field!r} must be a timestamp")
+    try:
+        valid = math.isfinite(value) and 0 <= value <= _MAX_TIMESTAMP
+    except (OverflowError, TypeError, ValueError):
+        valid = False
+    if not valid:
+        raise ScimStoreError(f"SCIM record field {field!r} is invalid")
+    return value
+
+
+def _validated_users(raw: dict) -> dict[str, dict]:
+    if set(raw) != {"users"}:
+        raise ScimStoreError("SCIM user store corrupt: unexpected top-level fields")
+    records = raw.get("users")
+    if not isinstance(records, list) or len(records) > _MAX_RECORDS:
+        raise ScimStoreError("SCIM user store corrupt: 'users' must be a bounded list")
+    users: dict[str, dict] = {}
+    usernames: set[str] = set()
+    external_ids: set[str] = set()
+    for record in records:
+        if not isinstance(record, dict):
+            raise ScimStoreError("SCIM user store corrupt: every user must be an object")
+        if set(record) != _USER_FIELDS:
+            raise ScimStoreError("SCIM user store corrupt: unexpected user fields")
+        uid = _clean_string(record, "id", required=True, limit=_MAX_ID_CHARS)
+        if len(uid) != 32 or any(char not in "0123456789abcdef" for char in uid):
+            raise ScimStoreError("SCIM user store corrupt: invalid internal user id")
+        username = _clean_string(record, "userName", required=True)
+        external_id = _clean_string(record, "externalId", limit=_MAX_ID_CHARS)
+        for field in ("displayName", "givenName", "familyName", "email"):
+            _clean_string(record, field)
+        if not isinstance(record.get("active"), bool):
+            raise ScimStoreError("SCIM user store corrupt: 'active' must be a boolean")
+        _timestamp(record, "created_at")
+        _timestamp(record, "updated_at")
+        username_key = username.casefold()
+        if uid in users or username_key in usernames:
+            raise ScimStoreError("SCIM user store corrupt: duplicate user identity")
+        if external_id and external_id in external_ids:
+            # One IdP identity matching multiple users would union their groups.
+            raise ScimStoreError("SCIM user store corrupt: duplicate externalId")
+        if uid in external_ids or (external_id and external_id in users):
+            # group_names_for_principal treats both fields as authoritative.
+            # A collision across their namespaces would match two records and
+            # union otherwise unrelated group memberships.
+            raise ScimStoreError(
+                "SCIM user store corrupt: authoritative identity collision"
+            )
+        users[uid] = dict(record)
+        usernames.add(username_key)
+        if external_id:
+            external_ids.add(external_id)
+    return users
+
+
+def _load() -> dict[str, dict]:
+    raw = _read_store(_store_path(), "user")
+    return {} if raw is None else _validated_users(raw)
 
 
 def _save(users: dict[str, dict]) -> None:
-    import json
+    if not isinstance(users, dict) or any(not isinstance(k, str) for k in users):
+        raise ScimStoreError("SCIM users must be an object keyed by id")
     payload = {"users": [users[k] for k in sorted(users)]}
+    validated = _validated_users(payload)
+    if set(validated) != set(users) or any(
+        not isinstance(k, str) or validated[k].get("id") != k for k in users
+    ):
+        raise ScimStoreError("SCIM user store keys do not match record ids")
+    ensure_private_directory(maverick_home())
     atomic_write_text(_store_path(), json.dumps(payload, indent=2, sort_keys=True))
 
 
@@ -140,10 +304,10 @@ def _primary_email(resource: dict) -> str:
     if isinstance(emails, list):
         for e in emails:
             if isinstance(e, dict) and e.get("primary") and e.get("value"):
-                return str(e["value"])
+                return str(e["value"]).strip()
         for e in emails:
             if isinstance(e, dict) and e.get("value"):
-                return str(e["value"])
+                return str(e["value"]).strip()
     return ""
 
 
@@ -163,17 +327,18 @@ def _coerce_active(value: Any) -> bool:
 def _record_from_resource(resource: dict, *, uid: str, created: float | None = None) -> dict:
     """Normalize an incoming SCIM User into our stored record."""
     name = resource.get("name") if isinstance(resource.get("name"), dict) else {}
+    given_name = str(name.get("givenName") or "").strip()
+    family_name = str(name.get("familyName") or "").strip()
     now = time.time()
     return {
         "id": uid,
         "userName": str(resource.get("userName") or "").strip(),
         "externalId": str(resource.get("externalId") or "").strip(),
         "displayName": str(resource.get("displayName")
-                            or " ".join(p for p in [name.get("givenName"),
-                                                    name.get("familyName")] if p)
+                            or " ".join(p for p in [given_name, family_name] if p)
                             or "").strip(),
-        "givenName": str(name.get("givenName") or "").strip(),
-        "familyName": str(name.get("familyName") or "").strip(),
+        "givenName": given_name,
+        "familyName": family_name,
         "email": _primary_email(resource),
         "active": _coerce_active(resource.get("active", True)),
         "created_at": float(created if created is not None else now),
@@ -214,15 +379,44 @@ def _iso(ts: float | None) -> str:
 
 
 # --------------------------------------------------------------------------
-# Tenant linkage (provisioning is best-effort; deprovisioning must fail closed)
+# Tenant linkage (provisioning and deprovisioning both fail closed)
 # --------------------------------------------------------------------------
 def _provision_tenant(uid: str, display_name: str) -> None:
+    """Create the tenant before the SCIM identity is made active.
+
+    The old best-effort helper swallowed every registry failure, allowing POST
+    to commit and return an active SCIM user with no isolation boundary behind
+    it. A randomly generated SCIM id must not already name a tenant; treating
+    that condition as an error also avoids attaching an identity to unrelated
+    pre-existing state after an (extremely unlikely) id collision.
+    """
+    from maverick.tenant import registry
+
+    if registry.get_tenant(uid) is not None:
+        raise RuntimeError("SCIM tenant id already exists")
+    try:
+        registry.create_tenant(uid, display_name=display_name or uid)
+    except Exception:
+        # create_tenant persists the registry row before materializing its
+        # workspace. If that final mkdir fails, compensate the partial row so a
+        # failed SCIM POST cannot leave an orphan active tenant either.
+        _rollback_provisioned_tenant(uid)
+        raise
+
+
+def _rollback_provisioned_tenant(uid: str) -> None:
+    """Best-effort compensation after a later SCIM create step fails."""
     try:
         from maverick.tenant import registry
-        if registry.get_tenant(uid) is None:
-            registry.create_tenant(uid, display_name=display_name or uid)
-    except Exception:  # pragma: no cover -- tenant linkage never blocks SCIM
+
+        registry.delete_tenant(uid, purge=True)
+    except Exception:  # pragma: no cover - preserve the original create failure
         pass
+
+
+def _identity_values(rec: dict) -> list[str]:
+    return [str(rec.get(key) or "") for key in
+            ("externalId", "userName", "email", "id")]
 
 
 def _revoke_user_sessions(rec: dict) -> None:
@@ -239,44 +433,63 @@ def _revoke_user_sessions(rec: dict) -> None:
     subject directory closes that gap: it recorded this user's ``sub`` against
     its stable identifiers at login, so we look the ``sub`` up by the SCIM
     record's identifiers and revoke it too."""
-    ids = [str(rec.get(k) or "") for k in ("externalId", "userName", "email", "id")]
-    try:
-        from .session_revocation import revoke_principal
-        for value in ids:
-            revoke_principal(value)
-        # Reach a pairwise/per-app sub recorded at login under these identifiers.
-        from .subject_directory import subs_for
-        for sub in subs_for(ids):
-            revoke_principal(sub)
-    except Exception:  # pragma: no cover -- revocation never blocks SCIM
-        pass
+    ids = _identity_values(rec)
+    from .session_revocation import revoke_principal
+    for value in ids:
+        revoke_principal(value)
+    # Reach a pairwise/per-app sub recorded at login under these identifiers.
+    # An unreadable directory/revocation store aborts deprovisioning so the IdP
+    # retries; acknowledging success without terminating those credentials is
+    # an access-control failure, not a best-effort telemetry miss.
+    from .subject_directory import subs_for
+    for sub in subs_for(ids):
+        revoke_principal(sub)
+
+
+def _retire_user_identity(rec: dict) -> None:
+    """Revoke live credentials and persist a deny tombstone for fresh ones."""
+    _revoke_user_sessions(rec)
+    from .subject_directory import retire
+
+    retire(_identity_values(rec))
+
+
+def _reinstate_user_identity(rec: dict) -> None:
+    """Clear a tombstone only after an active SCIM record is durable."""
+    from .subject_directory import reinstate
+
+    # Direct subjects may equal any SCIM identifier, but a pairwise-sub bridge
+    # is authorization-sensitive and may only be revived through the IdP's
+    # immutable externalId (or our internal id), never an unverified email/UPN
+    # claim that happens to match userName/email.
+    reinstate(
+        _identity_values(rec),
+        linked_identifiers=[str(rec.get("externalId") or ""), rec["id"]],
+    )
 
 
 def _set_tenant_active(uid: str, active: bool, rec: dict | None = None) -> None:
     if not active and rec is not None:
-        _revoke_user_sessions(rec)
+        _retire_user_identity(rec)
     from maverick.tenant import registry
     if registry.get_tenant(uid) is None:
+        if active:
+            raise RuntimeError("cannot activate a SCIM user without a tenant")
         return
     (registry.resume_tenant if active else registry.suspend_tenant)(uid)
 
 
 def _delete_tenant(uid: str, rec: dict | None = None) -> None:
     if rec is not None:
-        _revoke_user_sessions(rec)
+        # Write the durable deny decision before removing either the tenant or
+        # SCIM record. If a later step fails, authentication still fails closed
+        # and the IdP can safely retry the DELETE.
+        _retire_user_identity(rec)
     from maverick.tenant import registry
     registry.delete_tenant(uid)
-    if rec is not None:
-        # Hard delete: purge the user's subject-directory entries after the
-        # tenant is gone; the mapping is no longer needed and shouldn't outlive
-        # the account. Cleanup remains best-effort and must not turn a completed
-        # tenant deletion into a SCIM failure.
-        try:
-            from .subject_directory import forget
-            forget([str(rec.get(k) or "") for k in
-                    ("externalId", "userName", "email", "id")])
-        except Exception:  # pragma: no cover -- cleanup never blocks SCIM
-            pass
+    # Keep the hashed identifier -> pairwise-sub binding. It contains no raw
+    # identifier and is needed both to enforce the tombstone and to reactivate
+    # that exact pairwise subject if the IdP explicitly provisions it again.
 
 
 # --------------------------------------------------------------------------
@@ -370,17 +583,48 @@ async def create_user(request: Request):
     username = str(resource.get("userName") or "").strip()
     if not username:
         return _scim_error(400, "userName is required", scim_type="invalidValue")
-    users = _load()
-    # SCIM uniqueness on userName -> 409.
-    if any(u.get("userName", "").lower() == username.lower() for u in users.values()):
-        return _scim_error(409, f"userName {username!r} already exists", scim_type="uniqueness")
     uid = uuid.uuid4().hex
     rec = _record_from_resource(resource, uid=uid)
-    users[uid] = rec
-    _save(users)
-    _provision_tenant(uid, rec["displayName"] or username)
-    if not rec["active"]:
-        _set_tenant_active(uid, False, rec)
+    with _locked_users():
+        users = _load()
+        # Check and commit under one cross-worker critical section; otherwise
+        # simultaneous IdP retries can both pass uniqueness and lose a write.
+        if any(u.get("userName", "").casefold() == username.casefold()
+               for u in users.values()):
+            return _scim_error(
+                409,
+                f"userName {username!r} already exists",
+                scim_type="uniqueness",
+            )
+        try:
+            _provision_tenant(uid, rec["displayName"] or username)
+        except Exception:
+            return _scim_error(500, "tenant provisioning failed")
+        try:
+            if not rec["active"]:
+                _set_tenant_active(uid, False, rec)
+            users[uid] = rec
+            _save(users)
+        except Exception:
+            _rollback_provisioned_tenant(uid)
+            return _scim_error(500, "SCIM user provisioning failed")
+        if rec["active"]:
+            try:
+                # A previous hard DELETE may have left a durable tombstone for
+                # these IdP identifiers/pairwise subjects. Clear it only after
+                # both tenant and active SCIM record are durable.
+                _reinstate_user_identity(rec)
+            except Exception:
+                # Keep denial authoritative if the retirement ledger cannot be
+                # updated, and compensate the newly created resource so an IdP
+                # retry is not trapped behind a uniqueness conflict.
+                users.pop(uid, None)
+                try:
+                    _save(users)
+                except Exception:
+                    pass
+                _rollback_provisioned_tenant(uid)
+                return _scim_error(500, "identity lifecycle update failed")
     return JSONResponse(_to_scim(rec), status_code=201, media_type="application/scim+json")
 
 
@@ -398,23 +642,46 @@ async def get_user(uid: str, request: Request):
 async def replace_user(uid: str, request: Request):
     if (err := _authorize(request)) is not None:
         return err
-    users = _load()
-    existing = users.get(uid)
-    if existing is None:
-        return _scim_error(404, f"user {uid} not found")
     resource = await _json_body(request)
-    rec = _record_from_resource(resource, uid=uid, created=existing.get("created_at"))
-    # userName is immutable in practice; keep the stored one if the PUT omits it.
-    if not rec["userName"]:
-        rec["userName"] = existing.get("userName", "")
-    was_active = bool(existing.get("active", True))
-    if rec["active"] != was_active:
-        try:
-            _set_tenant_active(uid, rec["active"], rec)
-        except Exception:
-            return _scim_error(500, "tenant lifecycle update failed")
-    users[uid] = rec
-    _save(users)
+    with _locked_users():
+        users = _load()
+        existing = users.get(uid)
+        if existing is None:
+            return _scim_error(404, f"user {uid} not found")
+        rec = _record_from_resource(
+            resource, uid=uid, created=existing.get("created_at")
+        )
+        # userName is immutable in practice; keep it if the PUT omits it.
+        if not rec["userName"]:
+            rec["userName"] = existing.get("userName", "")
+        if any(
+            other_uid != uid
+            and other.get("userName", "").casefold() == rec["userName"].casefold()
+            for other_uid, other in users.items()
+        ):
+            return _scim_error(
+                409,
+                f"userName {rec['userName']!r} already exists",
+                scim_type="uniqueness",
+            )
+        was_active = bool(existing.get("active", True))
+        if rec["active"] != was_active:
+            try:
+                _set_tenant_active(uid, rec["active"], rec)
+            except Exception:
+                return _scim_error(500, "tenant lifecycle update failed")
+        elif not rec["active"]:
+            try:
+                _retire_user_identity(rec)
+            except Exception:
+                return _scim_error(500, "identity lifecycle update failed")
+        users[uid] = rec
+        _save(users)
+        if rec["active"]:
+            try:
+                _reinstate_user_identity(rec)
+            except Exception:
+                return _scim_error(500, "identity lifecycle update failed")
     return JSONResponse(_to_scim(rec), media_type="application/scim+json")
 
 
@@ -422,23 +689,49 @@ async def replace_user(uid: str, request: Request):
 async def patch_user(uid: str, request: Request):
     if (err := _authorize(request)) is not None:
         return err
-    users = _load()
-    rec = users.get(uid)
-    if rec is None:
-        return _scim_error(404, f"user {uid} not found")
     body = await _json_body(request)
-    was_active = bool(rec.get("active", True))
-    applied = _apply_patch(rec, body)
-    if applied is None:
-        return _scim_error(400, "unsupported PATCH operation", scim_type="invalidValue")
-    rec["updated_at"] = time.time()
-    if bool(rec.get("active", True)) != was_active:
-        try:
-            _set_tenant_active(uid, bool(rec.get("active", True)), rec)
-        except Exception:
-            return _scim_error(500, "tenant lifecycle update failed")
-    users[uid] = rec
-    _save(users)
+    with _locked_users():
+        users = _load()
+        rec = users.get(uid)
+        if rec is None:
+            return _scim_error(404, f"user {uid} not found")
+        was_active = bool(rec.get("active", True))
+        applied = _apply_patch(rec, body)
+        if applied is None:
+            return _scim_error(
+                400, "unsupported PATCH operation", scim_type="invalidValue"
+            )
+        rec["userName"] = str(rec.get("userName") or "").strip()
+        if not rec["userName"]:
+            return _scim_error(400, "userName is required", scim_type="invalidValue")
+        if any(
+            other_uid != uid
+            and other.get("userName", "").casefold() == rec["userName"].casefold()
+            for other_uid, other in users.items()
+        ):
+            return _scim_error(
+                409,
+                f"userName {rec['userName']!r} already exists",
+                scim_type="uniqueness",
+            )
+        rec["updated_at"] = time.time()
+        if bool(rec.get("active", True)) != was_active:
+            try:
+                _set_tenant_active(uid, bool(rec.get("active", True)), rec)
+            except Exception:
+                return _scim_error(500, "tenant lifecycle update failed")
+        elif not bool(rec.get("active", True)):
+            try:
+                _retire_user_identity(rec)
+            except Exception:
+                return _scim_error(500, "identity lifecycle update failed")
+        users[uid] = rec
+        _save(users)
+        if bool(rec.get("active", True)):
+            try:
+                _reinstate_user_identity(rec)
+            except Exception:
+                return _scim_error(500, "identity lifecycle update failed")
     return JSONResponse(_to_scim(rec), media_type="application/scim+json")
 
 
@@ -446,16 +739,17 @@ async def patch_user(uid: str, request: Request):
 async def delete_user(uid: str, request: Request):
     if (err := _authorize(request)) is not None:
         return err
-    users = _load()
-    if uid not in users:
-        return _scim_error(404, f"user {uid} not found")
-    rec = users.get(uid)
-    try:
-        _delete_tenant(uid, rec)
-    except Exception:
-        return _scim_error(500, "tenant deletion failed")
-    del users[uid]
-    _save(users)
+    with _locked_users():
+        users = _load()
+        if uid not in users:
+            return _scim_error(404, f"user {uid} not found")
+        rec = users.get(uid)
+        try:
+            _delete_tenant(uid, rec)
+        except Exception:
+            return _scim_error(500, "tenant deletion failed")
+        del users[uid]
+        _save(users)
     return JSONResponse(None, status_code=204)
 
 
@@ -464,7 +758,7 @@ async def delete_user(uid: str, request: Request):
 # managed by team, not per user. Stored in <home>/scim_groups.json; the
 # role/department mapping over these groups lives in scim_groups.py.
 # --------------------------------------------------------------------------
-def _groups_path():
+def _groups_path() -> Path:
     return maverick_home() / "scim_groups.json"
 
 
@@ -476,28 +770,82 @@ _GROUPS_LOCK = threading.Lock()
 
 
 def _locked_groups():
-    from contextlib import ExitStack
-
-    from maverick.file_lock import cross_process_lock
+    ensure_private_directory(maverick_home())
     stack = ExitStack()
     stack.enter_context(_GROUPS_LOCK)
     stack.enter_context(cross_process_lock(_groups_path()))
     return stack
 
 
+def _validated_groups(raw: dict) -> dict[str, dict]:
+    if set(raw) != {"groups"}:
+        raise ScimStoreError("SCIM group store corrupt: unexpected top-level fields")
+    records = raw.get("groups")
+    if not isinstance(records, list) or len(records) > _MAX_RECORDS:
+        raise ScimStoreError("SCIM group store corrupt: 'groups' must be a bounded list")
+    groups: dict[str, dict] = {}
+    display_names: set[str] = set()
+    external_ids: set[str] = set()
+    for record in records:
+        if not isinstance(record, dict):
+            raise ScimStoreError("SCIM group store corrupt: every group must be an object")
+        if set(record) != _GROUP_FIELDS:
+            raise ScimStoreError("SCIM group store corrupt: unexpected group fields")
+        gid = _clean_string(record, "id", required=True, limit=_MAX_ID_CHARS)
+        if len(gid) != 32 or any(char not in "0123456789abcdef" for char in gid):
+            raise ScimStoreError("SCIM group store corrupt: invalid internal group id")
+        display_name = _clean_string(record, "displayName", required=True)
+        external_id = _clean_string(record, "externalId", limit=_MAX_ID_CHARS)
+        members = record.get("members")
+        if not isinstance(members, list) or len(members) > _MAX_RECORDS:
+            raise ScimStoreError(
+                "SCIM group store corrupt: 'members' must be a bounded list"
+            )
+        clean_members: list[str] = []
+        seen_members: set[str] = set()
+        for member in members:
+            if (
+                not isinstance(member, str)
+                or member != member.strip()
+                or not member
+                or len(member) > _MAX_ID_CHARS
+                or len(member) != 32
+                or any(char not in "0123456789abcdef" for char in member)
+                or member in seen_members
+            ):
+                raise ScimStoreError("SCIM group store corrupt: invalid member id")
+            clean_members.append(member)
+            seen_members.add(member)
+        _timestamp(record, "created_at")
+        _timestamp(record, "updated_at")
+        name_key = display_name.casefold()
+        if gid in groups or name_key in display_names:
+            # displayName is the authorization-mapping key and must be unique.
+            raise ScimStoreError("SCIM group store corrupt: duplicate group identity")
+        if external_id and external_id in external_ids:
+            raise ScimStoreError("SCIM group store corrupt: duplicate externalId")
+        groups[gid] = {**record, "members": clean_members}
+        display_names.add(name_key)
+        if external_id:
+            external_ids.add(external_id)
+    return groups
+
+
 def _load_groups() -> dict[str, dict]:
-    try:
-        import json
-        raw = json.loads(_groups_path().read_text(encoding="utf-8"))
-    except (OSError, ValueError):
-        return {}
-    groups = raw.get("groups", []) if isinstance(raw, dict) else []
-    return {g["id"]: g for g in groups if isinstance(g, dict) and g.get("id")}
+    raw = _read_store(_groups_path(), "group")
+    return {} if raw is None else _validated_groups(raw)
 
 
 def _save_groups(groups: dict[str, dict]) -> None:
-    import json
+    if not isinstance(groups, dict) or any(not isinstance(k, str) for k in groups):
+        raise ScimStoreError("SCIM groups must be an object keyed by id")
     payload = {"groups": [groups[k] for k in sorted(groups)]}
+    validated = _validated_groups(payload)
+    if set(validated) != set(groups) or any(
+        validated[k].get("id") != k for k in groups
+    ):
+        raise ScimStoreError("SCIM group store keys do not match record ids")
+    ensure_private_directory(maverick_home())
     atomic_write_text(_groups_path(), json.dumps(payload, indent=2, sort_keys=True))
 
 
@@ -508,8 +856,8 @@ def _group_name_taken(groups: dict[str, dict], name: str, exclude_gid: str) -> b
     tables resolve on, so two groups sharing a name would let one group's
     members silently inherit the other's mapped role/departments. Create
     enforces this; rename (PUT/PATCH) must too."""
-    lowered = (name or "").strip().lower()
-    return any(gid != exclude_gid and g.get("displayName", "").lower() == lowered
+    folded = (name or "").strip().casefold()
+    return any(gid != exclude_gid and g.get("displayName", "").casefold() == folded
                for gid, g in groups.items())
 
 
@@ -823,4 +1171,4 @@ def _patch_path(rec: dict, path: str, value: Any) -> bool:
     return False
 
 
-__all__ = ["router", "scim_enabled"]
+__all__ = ["ScimStoreError", "router", "scim_enabled"]

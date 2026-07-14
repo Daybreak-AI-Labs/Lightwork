@@ -42,3 +42,48 @@ def test_dashboard_omits_a2a_agent_card_when_disabled(monkeypatch):
     client = TestClient(dashboard_app.app)
 
     assert client.get("/.well-known/agent-card.json").status_code == 404
+
+
+def test_dashboard_a2a_endpoint_uses_only_its_own_bearer(monkeypatch):
+    """Dashboard auth must not force credential reuse across trust domains."""
+    import maverick.a2a_tasks as a2a_tasks
+
+    monkeypatch.setattr(
+        a2a_tasks, "_default_runner", lambda text, **kwargs: f"ran:{text}"
+    )
+    monkeypatch.setenv("MAVERICK_A2A_ENABLED", "1")
+    monkeypatch.setenv("MAVERICK_A2A_TOKEN", "a2a-secret")
+    monkeypatch.setenv("MAVERICK_DASHBOARD_TOKEN", "dashboard-secret")
+    dashboard_app = _reload_dashboard_app(monkeypatch)
+
+    from fastapi.testclient import TestClient
+
+    client = TestClient(dashboard_app.app)
+    rpc = {
+        "jsonrpc": "2.0",
+        "id": 1,
+        "method": "message/send",
+        "params": {
+            "message": {
+                "role": "user",
+                "messageId": "dashboard-a2a-integration-1",
+                "parts": [{"kind": "text", "text": "hello"}],
+            }
+        },
+    }
+
+    missing = client.post("/a2a/v1", json=rpc)
+    assert missing.status_code == 401
+    wrong_domain = client.post(
+        "/a2a/v1",
+        headers={"Authorization": "Bearer dashboard-secret"},
+        json=rpc,
+    )
+    assert wrong_domain.status_code == 401
+    accepted = client.post(
+        "/a2a/v1",
+        headers={"Authorization": "Bearer a2a-secret"},
+        json=rpc,
+    )
+    assert accepted.status_code == 200
+    assert accepted.json()["result"]["status"]["state"] == "completed"

@@ -162,7 +162,7 @@ def test_postgres_without_dep_raises_actionable():
     if _HAS_PSYCOPG:
         pytest.skip("psycopg IS installed; can't test the missing-dep path")
     from maverick.world_model_backends import PostgresWorldModel
-    with pytest.raises(ImportError, match="maverick-agent\\[postgres\\]"):
+    with pytest.raises(ImportError, match="packages/maverick-core\\[postgres\\]"):
         PostgresWorldModel(dsn="postgres://test")
 
 

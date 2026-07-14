@@ -86,7 +86,7 @@ class QdrantStore:
             from qdrant_client import QdrantClient  # noqa: F401
         except ImportError as e:
             raise ImportError(
-                "qdrant-client not installed. Run: pip install 'maverick-agent[qdrant]'"
+                "qdrant-client not installed. Run: python -m pip install -e './packages/maverick-core[qdrant]'"
             ) from e
         from qdrant_client import QdrantClient
 

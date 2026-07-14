@@ -25,7 +25,7 @@ class WorldAnalytics:
             import duckdb
         except ImportError as e:
             raise ImportError(
-                "duckdb not installed. Run: pip install 'maverick-agent[duckdb]'"
+                "duckdb not installed. Run: python -m pip install -e './packages/maverick-core[duckdb]'"
             ) from e
         self._conn = conn or duckdb.connect(":memory:", config={"enable_external_access": "false"})
         self._query_limit = max(1, int(query_limit))

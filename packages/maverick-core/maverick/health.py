@@ -160,8 +160,13 @@ def _check_openai() -> None:
     try:
         from openai import AuthenticationError, OpenAI
     except ImportError:
-        _row(YELLOW, "openai", "SDK not installed",
-             fix="pip install 'maverick-agent[openai]'")
+        _row(
+            YELLOW,
+            "openai",
+            "SDK not installed",
+            fix=("install the OpenAI extra from the same reviewed Lightwork "
+                 "checkout; public-index lookup is disabled"),
+        )
         return
     try:
         client = OpenAI(api_key=key)
@@ -320,8 +325,13 @@ def _check_channels(cfg: dict) -> None:
                 __import__(mod)
                 _row(GREEN, f"channel:{name}", f"{friendly} installed")
             except ImportError:
-                _row(YELLOW, f"channel:{name}", f"{friendly} not installed",
-                     fix=f"pip install 'maverick-channels[{name}]'")
+                _row(
+                    YELLOW,
+                    f"channel:{name}",
+                    f"{friendly} not installed",
+                    fix=("install this channel extra from the same reviewed "
+                         "Lightwork checkout; public-index lookup is disabled"),
+                )
                 continue
         elif name == "signal":
             if not shutil.which("signal-cli"):
@@ -365,10 +375,16 @@ def _check_shield() -> None:
             _row(RED, "shield",
                  "shield REQUIRED (enterprise / [safety] require_shield) but "
                  "maverick-shield is not installed — external traffic is refused",
-                 fix="pip install maverick-shield")
+                 fix=("install Shield from the same reviewed Lightwork checkout; "
+                      "public-index lookup is disabled"))
             return
-        _row(YELLOW, "shield", "maverick-shield not installed",
-             fix="pip install maverick-shield  (built-in fallback rules will activate)")
+        _row(
+            YELLOW,
+            "shield",
+            "maverick-shield not installed",
+            fix=("install Shield from the same reviewed Lightwork checkout; "
+                 "public-index lookup is disabled"),
+        )
         return
     # warn_if_missing=False: doctor renders the shield row (with remediation)
     # itself, so the raw "SDK not installed" log line would just bleed into the

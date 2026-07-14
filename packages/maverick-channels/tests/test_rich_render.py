@@ -42,9 +42,11 @@ def test_render_html_mermaid_block():
 
 
 def test_write_artifact_0600(tmp_path):
+    from maverick.file_lock import private_path_is_restricted
+
     p = rr.write_artifact(_MATHY, out_dir=tmp_path)
     assert p.exists() and p.suffix == ".html"
-    assert oct(p.stat().st_mode)[-3:] == "600"
+    assert private_path_is_restricted(p)
     # same text -> same artifact path (content-addressed)
     assert rr.write_artifact(_MATHY, out_dir=tmp_path) == p
 

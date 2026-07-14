@@ -190,7 +190,7 @@ def _run(args: dict[str, Any]) -> str:
     try:
         import httpx  # noqa: F401
     except ImportError:
-        return "ERROR: httpx not installed. Run: pip install 'maverick-agent[issue-trackers]'"
+        return "ERROR: httpx not installed. Run: python -m pip install -e './packages/maverick-core[issue-trackers]'"
     try:
         channel = _normalize_snowflake(args.get("channel_id"), "channel_id")
         if op == "post":

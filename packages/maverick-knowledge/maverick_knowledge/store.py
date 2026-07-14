@@ -227,7 +227,8 @@ class PgVectorStore:
             import psycopg
         except ImportError as e:  # pragma: no cover -- exercised only without psycopg
             raise ImportError(
-                "pgvector store needs psycopg. Run: pip install 'maverick-knowledge[pgvector]'"
+                "pgvector store needs psycopg. From the reviewed checkout run: "
+                "python -m pip install -e './packages/maverick-knowledge[pgvector]'"
             ) from e
         import os
 

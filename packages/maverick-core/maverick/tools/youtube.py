@@ -12,7 +12,7 @@ Accepts either a bare video id or a full youtube.com / youtu.be URL.
 
 Requires::
 
-    pip install 'maverick-agent[youtube]'
+    python -m pip install -e './packages/maverick-core[youtube]'
 """
 from __future__ import annotations
 
@@ -124,7 +124,7 @@ def _run(args: dict[str, Any]) -> str:
     except ImportError:
         return (
             "ERROR: youtube-transcript-api not installed. "
-            "Run: pip install 'maverick-agent[youtube]'"
+            "Run: python -m pip install -e './packages/maverick-core[youtube]'"
         )
     try:
         entries = _fetch_transcript(video_id, lang)

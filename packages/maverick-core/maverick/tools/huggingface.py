@@ -182,7 +182,7 @@ def _run(args: dict[str, Any]) -> str:
         if op == "summarize":
             return _op_summarize(model, args.get("text") or "", parameters)
     except ImportError:
-        return "ERROR: httpx not installed. Run: pip install 'maverick-agent[issue-trackers]'"
+        return "ERROR: httpx not installed…195 tokens truncated…puter-use]'"
     except Exception as e:
         return f"ERROR: HF request failed: {type(e).__name__}: {e}"
     return f"ERROR: unknown op {op!r}"

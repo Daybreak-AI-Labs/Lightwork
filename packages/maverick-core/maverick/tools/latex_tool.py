@@ -40,7 +40,7 @@ def to_mathml(latex: str) -> str:
     except ImportError as e:
         raise RuntimeError(
             "mathml needs the 'latex2mathml' package. Install it with: "
-            "pip install 'maverick-agent[latex]'") from e
+            "python -m pip install -e './packages/maverick-core[latex]'") from e
     return converter.convert(latex)
 
 

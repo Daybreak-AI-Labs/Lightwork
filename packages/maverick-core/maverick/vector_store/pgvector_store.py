@@ -67,7 +67,7 @@ class PgVectorStore:
             import psycopg
         except ImportError as e:
             raise ImportError(
-                "psycopg not installed. Run: pip install 'maverick-agent[postgres]'"
+                "psycopg not installed. Run: python -m pip install -e './packages/maverick-core[postgres]'"
             ) from e
 
         resolved = _resolve_dsn(dsn)

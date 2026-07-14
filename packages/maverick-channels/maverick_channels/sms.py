@@ -16,7 +16,7 @@ Config::
 
 Requires::
 
-    pip install 'maverick-channels[sms]'
+    python -m pip install -e './packages/maverick-channels[sms]'
 """
 from __future__ import annotations
 
@@ -69,7 +69,8 @@ class SMSChannel(Channel):
         super().__init__(handler)
         if not _HAVE_DEPS:
             raise ImportError(
-                "fastapi/twilio not installed. Run: pip install 'maverick-channels[sms]'"
+                "fastapi/twilio not installed. From the reviewed checkout run: "
+                "python -m pip install -e './packages/maverick-channels[sms]'"
             )
         self.account_sid = account_sid or os.environ.get("TWILIO_ACCOUNT_SID")
         self.auth_token = auth_token or os.environ.get("TWILIO_AUTH_TOKEN")

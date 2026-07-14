@@ -52,7 +52,10 @@ Lightwork is proprietary, commercially licensed software (see
 ## Quick start
 
 ```bash
-pipx install 'maverick-agent[installer]'
+git clone https://github.com/Day-AI-Labs/Lightwork && cd Lightwork
+git checkout --detach <reviewed-full-40-character-commit-sha>
+pip install -e ./packages/maverick-core
+pip install -e ./apps/installer-cli
 maverick init                # interactive wizard (3 minutes)
 maverick start "review my latest commit"
 ```

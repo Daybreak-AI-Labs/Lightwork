@@ -43,6 +43,10 @@ class InvalidTenantError(ValueError):
     """Raised when a tenant id cannot be represented safely on disk."""
 
 
+class TenantPolicyError(RuntimeError):
+    """Tenant isolation policy cannot be resolved without risking data mixing."""
+
+
 def _tenant_segment(tenant: str) -> str:
     # Normalise to NFC first so the same name in different Unicode normal forms
     # (e.g. NFC "josé" vs NFD "josé") maps to ONE on-disk namespace rather
@@ -78,11 +82,8 @@ def current_tenant_id() -> str | None:
     # Client binding: one deployment = one enterprise client. The configured
     # client id is the tenant FLOOR, so client data never resolves to an
     # un-scoped shared root. None when no client is bound (legacy single-root).
-    try:
-        from .client import client_id
-        return client_id()
-    except Exception:  # pragma: no cover - client resolution never blocks paths
-        return None
+    from .client import client_id
+    return client_id()
 
 
 def current_tenant() -> str | None:
@@ -141,21 +142,33 @@ def tenant_by_user_enabled() -> bool:
     ``[tenancy] by_user = true`` makes the server isolate each channel user
     into their own tenant (so one user's cross-session memory can't leak to
     another). Off -> single shared tenant, behaviour unchanged."""
-    if os.environ.get("MAVERICK_TENANT_BY_USER", "").strip().lower() in {
-        "1",
-        "true",
-        "yes",
-        "on",
-    }:
-        base = True
-    else:
-        try:
-            from .config import load_config
-
-            cfg = (load_config() or {}).get("tenancy") or {}
-            base = bool(cfg.get("by_user"))
-        except Exception:
+    env = os.environ.get("MAVERICK_TENANT_BY_USER")
+    if env is not None and env.strip():
+        value = env.strip().lower()
+        if value in {"1", "true", "yes", "on"}:
+            return True
+        if value in {"0", "false", "no", "off"}:
             return False
+        raise TenantPolicyError("MAVERICK_TENANT_BY_USER must be a boolean")
+    try:
+        from .config import config_source_errors, load_config
+
+        loaded = load_config()
+        if config_source_errors():
+            raise TenantPolicyError(
+                "tenant isolation policy unavailable: an active config source is invalid"
+            )
+        cfg = loaded.get("tenancy") or {}
+        if not isinstance(cfg, dict):
+            raise TenantPolicyError("[tenancy] must be a table")
+        raw = cfg.get("by_user", False)
+        if not isinstance(raw, bool):
+            raise TenantPolicyError("[tenancy] by_user must be a boolean")
+        base = raw
+    except TenantPolicyError:
+        raise
+    except Exception as exc:
+        raise TenantPolicyError(f"tenant isolation policy unavailable: {exc}") from exc
     # This is an operator-selected isolation control, not a paid-feature gate.
     # If an operator enables per-user tenancy, never silently degrade to the
     # shared world because a license is missing/expired/under-tiered. Named
@@ -195,6 +208,7 @@ __all__ = [
     "maverick_home",
     "data_dir",
     "InvalidTenantError",
+    "TenantPolicyError",
     "MAX_TENANT_SEGMENT_LENGTH",
     "tenant_by_user_enabled",
     "tenant_scope",

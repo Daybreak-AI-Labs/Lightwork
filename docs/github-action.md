@@ -3,7 +3,7 @@
 Drive a Lightwork swarm from your own CI with the composite action in
 [`deploy/github-action/`](../deploy/github-action/). Hand it a goal (or a
 [goal template](../benchmarks/example-templates/)) and a dollar cap; it
-installs `maverick-agent`, runs `maverick start`, and writes the answer to
+installs from that reviewed Lightwork checkout, runs `maverick start`, and writes the answer to
 the job summary.
 
 ## Quickstart
@@ -20,7 +20,7 @@ jobs:
   run:
     runs-on: ubuntu-latest
     steps:
-      - uses: Day-AI-Labs/maverick/deploy/github-action@v0.1.6
+      - uses: Day-AI-Labs/Lightwork/deploy/github-action@<reviewed-full-40-character-commit-sha>
         with:
           goal: ${{ inputs.goal }}
           max-dollars: "0.50"
@@ -28,7 +28,8 @@ jobs:
 ```
 
 1. Add your provider key as a repo **secret** (`ANTHROPIC_API_KEY`).
-2. Pin the action to a released tag (`@v0.1.6`), not `@main`.
+2. Replace the placeholder with a reviewed full 40-character commit SHA; do
+   not use a mutable branch or tag.
 3. Keep `max-dollars` small to start — it's a hard cap the kernel enforces.
 
 ## Common patterns

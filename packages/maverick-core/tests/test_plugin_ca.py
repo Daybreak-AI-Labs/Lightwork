@@ -5,6 +5,7 @@ import pytest
 
 cryptography = pytest.importorskip("cryptography")
 
+from maverick.file_lock import private_path_is_restricted  # noqa: E402
 from maverick.plugin_ca import (  # noqa: E402
     PluginCA,
     new_publisher_keypair,
@@ -31,7 +32,11 @@ def test_init_root_creates_keys_0600(tmp_path):
     ca = PluginCA(tmp_path / "ca")
     pub = ca.init_root()
     assert len(pub) == 64  # raw ed25519 pub, hex
-    assert oct((tmp_path / "ca" / "root.key").stat().st_mode)[-3:] == "600"
+    ca_dir = tmp_path / "ca"
+    assert private_path_is_restricted(ca_dir, 0o700)
+    assert private_path_is_restricted(ca_dir / "root.key", 0o600)
+    assert private_path_is_restricted(ca_dir / "root.pub", 0o644)
+    assert private_path_is_restricted(ca_dir / "revocations.json", 0o600)
     with pytest.raises(RuntimeError, match="already exists"):
         ca.init_root()
 

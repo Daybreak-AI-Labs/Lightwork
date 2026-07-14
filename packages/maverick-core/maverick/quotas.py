@@ -22,13 +22,18 @@ from __future__ import annotations
 
 import json
 import logging
+import math
 import os
-import tempfile
 import threading
-from contextlib import contextmanager
 from datetime import datetime, timezone
 
-from ._envparse import env_bool
+from .file_lock import (
+    atomic_read_text,
+    atomic_write_text,
+    cross_process_lock,
+    ensure_private_directory,
+    ensure_private_file,
+)
 from .paths import data_dir
 
 log = logging.getLogger(__name__)
@@ -41,33 +46,15 @@ log = logging.getLogger(__name__)
 _RECORD_LOCK = threading.Lock()
 
 
-@contextmanager
-def _cross_process_lock(target):
-    """Advisory exclusive lock over the ledger's read-modify-write, keyed on a
-    stable sidecar file (never the ledger itself -- os.replace swaps its inode).
-    POSIX-only; degrades to a no-op where fcntl/flock is unavailable."""
-    lock_path = target.parent / (target.name + ".lock")
-    fd = None
-    try:
-        target.parent.mkdir(parents=True, exist_ok=True)
-        fd = os.open(str(lock_path), os.O_CREAT | os.O_RDWR, 0o600)
-    except OSError:
-        yield  # cannot create the lock file -> proceed best-effort
-        return
-    try:
-        try:
-            import fcntl
-            fcntl.flock(fd, fcntl.LOCK_EX)
-        except (ImportError, OSError):
-            pass  # non-POSIX / exotic FS -> in-process lock still applies
-        yield
-    finally:
-        try:
-            import fcntl
-            fcntl.flock(fd, fcntl.LOCK_UN)
-        except (ImportError, OSError):
-            pass
-        os.close(fd)
+_cross_process_lock = cross_process_lock
+
+
+class UsageLedgerError(RuntimeError):
+    """Usage state exists but cannot be trusted for quota enforcement."""
+
+
+class QuotaPolicyError(RuntimeError):
+    """Quota configuration cannot be resolved safely."""
 
 
 def _ledger_path():
@@ -81,50 +68,102 @@ def _today() -> str:
     return datetime.now(timezone.utc).strftime("%Y-%m-%d")
 
 
+def _decode_ledger(raw: str) -> object:
+    def _reject_constant(value: str):
+        raise ValueError(f"non-finite number {value!r}")
+
+    def _object(pairs: list[tuple[str, object]]) -> dict[str, object]:
+        out: dict[str, object] = {}
+        for key, value in pairs:
+            if key in out:
+                raise ValueError(f"duplicate key {key!r}")
+            out[key] = value
+        return out
+
+    try:
+        return json.loads(raw, parse_constant=_reject_constant, object_pairs_hook=_object)
+    except (TypeError, ValueError) as exc:
+        raise UsageLedgerError(f"usage ledger corrupt: {exc}") from exc
+
+
+def _validate_ledger(data: object) -> dict:
+    if not isinstance(data, dict):
+        raise UsageLedgerError("usage ledger corrupt: top-level value must be an object")
+    validated: dict[str, dict[str, dict[str, int | float]]] = {}
+    for principal, days in data.items():
+        if not principal or principal != principal.strip() or len(principal) > 1024:
+            raise UsageLedgerError("usage ledger corrupt: invalid principal")
+        if not isinstance(days, dict):
+            raise UsageLedgerError(f"usage ledger corrupt: days for {principal!r} must be an object")
+        clean_days: dict[str, dict[str, int | float]] = {}
+        for day, cell in days.items():
+            try:
+                datetime.strptime(day, "%Y-%m-%d")
+            except (TypeError, ValueError) as exc:
+                raise UsageLedgerError(
+                    f"usage ledger corrupt: invalid day for {principal!r}"
+                ) from exc
+            if not isinstance(cell, dict):
+                raise UsageLedgerError(
+                    f"usage ledger corrupt: bucket {principal!r}/{day!r} must be an object"
+                )
+            dollars = cell.get("dollars", 0.0)
+            in_tokens = cell.get("in_tokens", 0)
+            out_tokens = cell.get("out_tokens", 0)
+            if isinstance(dollars, bool) or not isinstance(dollars, (int, float)):
+                raise UsageLedgerError("usage ledger corrupt: dollars must be numeric")
+            if not math.isfinite(float(dollars)) or float(dollars) < 0:
+                raise UsageLedgerError("usage ledger corrupt: dollars must be finite and non-negative")
+            if (
+                isinstance(in_tokens, bool)
+                or not isinstance(in_tokens, int)
+                or in_tokens < 0
+                or isinstance(out_tokens, bool)
+                or not isinstance(out_tokens, int)
+                or out_tokens < 0
+            ):
+                raise UsageLedgerError("usage ledger corrupt: token counts must be non-negative integers")
+            clean_days[day] = {
+                "dollars": float(dollars),
+                "in_tokens": in_tokens,
+                "out_tokens": out_tokens,
+            }
+        validated[principal] = clean_days
+    return validated
+
+
 class UsageLedger:
     """A persistent ``(principal, day) -> {dollars, in_tokens, out_tokens}`` tally.
 
     Not a hot path (written once per run, read once per goal start), so each
     call reloads from disk rather than holding shared mutable state — that keeps
     concurrent runs / processes from clobbering each other's totals on the
-    last-writer-wins of an in-memory cache. All I/O is fail-soft.
+    last-writer-wins of an in-memory cache. Missing state is empty; corrupt or
+    unreadable existing state raises so enforcement cannot interpret it as zero.
     """
 
     def __init__(self, path=None) -> None:
         self.path = path if path is not None else _ledger_path()
 
     def _load(self) -> dict:
+        ensure_private_directory(self.path.parent)
+        if not self.path.exists():
+            return {}
         try:
-            with open(self.path, "rb") as f:
-                data = json.load(f)
-            return data if isinstance(data, dict) else {}
-        except FileNotFoundError:
-            return {}
-        except (OSError, ValueError) as e:
-            log.warning("quotas: cannot read ledger %s: %s", self.path, e)
-            return {}
+            ensure_private_file(self.path)
+            data = _decode_ledger(atomic_read_text(self.path))
+        except UsageLedgerError:
+            raise
+        except OSError as exc:
+            raise UsageLedgerError(f"usage ledger unreadable: {exc}") from exc
+        return _validate_ledger(data)
 
     def _save(self, data: dict) -> None:
-        try:
-            self.path.parent.mkdir(parents=True, exist_ok=True)
-            # A UNIQUE temp file: a fixed ".json.tmp" name collides under
-            # concurrent saves (one os.replace moves it out from under another,
-            # dropping the write). mkstemp keeps each writer's temp private.
-            fd, tmp = tempfile.mkstemp(
-                dir=str(self.path.parent), prefix=".ledger-", suffix=".tmp")
-            try:
-                with os.fdopen(fd, "w", encoding="utf-8") as f:
-                    json.dump(data, f)
-                os.chmod(tmp, 0o600)
-                os.replace(tmp, self.path)
-            except BaseException:
-                try:
-                    os.unlink(tmp)
-                except OSError:
-                    pass
-                raise
-        except OSError as e:
-            log.warning("quotas: cannot write ledger %s: %s", self.path, e)
+        ensure_private_directory(self.path.parent)
+        atomic_write_text(
+            self.path,
+            json.dumps(data, sort_keys=True, allow_nan=False),
+        )
 
     def record(
         self,
@@ -139,7 +178,17 @@ class UsageLedger:
         clamped to zero; a blank principal is ignored. Never raises."""
         if not principal:
             return
+        if principal != principal.strip() or len(principal) > 1024:
+            raise ValueError("principal must be a trimmed string of at most 1024 characters")
         day = day or _today()
+        try:
+            amount = float(dollars or 0.0)
+            in_count = int(in_tokens or 0)
+            out_count = int(out_tokens or 0)
+        except (OverflowError, TypeError, ValueError) as exc:
+            raise ValueError("usage values must be finite numbers") from exc
+        if not math.isfinite(amount):
+            raise ValueError("usage dollars must be finite")
         # Serialize the whole load-modify-save so concurrent records accumulate
         # instead of clobbering each other (in-process lock + cross-process
         # flock on a sidecar file).
@@ -147,9 +196,9 @@ class UsageLedger:
             data = self._load()
             bucket = data.setdefault(principal, {})
             cell = bucket.setdefault(day, {"dollars": 0.0, "in_tokens": 0, "out_tokens": 0})
-            cell["dollars"] = float(cell.get("dollars", 0.0)) + max(0.0, float(dollars or 0.0))
-            cell["in_tokens"] = int(cell.get("in_tokens", 0)) + max(0, int(in_tokens or 0))
-            cell["out_tokens"] = int(cell.get("out_tokens", 0)) + max(0, int(out_tokens or 0))
+            cell["dollars"] = float(cell.get("dollars", 0.0)) + max(0.0, amount)
+            cell["in_tokens"] = int(cell.get("in_tokens", 0)) + max(0, in_count)
+            cell["out_tokens"] = int(cell.get("out_tokens", 0)) + max(0, out_count)
             self._save(data)
 
     def usage(self, principal: str, *, day: str | None = None) -> dict:
@@ -224,9 +273,12 @@ def _env_float(name: str) -> float | None:
     if not raw:
         return None
     try:
-        return float(raw)
-    except (TypeError, ValueError):
-        return None
+        value = float(raw)
+    except (OverflowError, TypeError, ValueError) as exc:
+        raise QuotaPolicyError(f"{name} must be a finite non-negative number") from exc
+    if not math.isfinite(value) or value < 0:
+        raise QuotaPolicyError(f"{name} must be a finite non-negative number")
+    return value
 
 
 def _quota_config() -> dict:
@@ -234,27 +286,49 @@ def _quota_config() -> dict:
 
     Env wins over config (same precedence the rest of the kernel uses for
     opt-in toggles). Returns ``enforce`` plus the two caps; ``0``/unset cap
-    means "no limit on this dimension". Fail-soft -> all-off on any error.
+    means "no limit on this dimension". Invalid or unreadable policy raises so
+    enforcement cannot silently switch itself off.
     """
     cfg: dict = {}
     try:
-        from .config import load_config
-        cfg = (load_config() or {}).get("quotas") or {}
-    except Exception:
-        cfg = {}
+        from .config import config_source_errors, load_config
 
-    enforce = bool(cfg.get("enforce", False))
-    if env_bool("MAVERICK_QUOTA_ENFORCE"):
-        enforce = True
+        loaded = load_config()
+        if config_source_errors():
+            raise QuotaPolicyError("quota policy unavailable: an active config source is invalid")
+        cfg = loaded.get("quotas") or {}
+        if not isinstance(cfg, dict):
+            raise QuotaPolicyError("[quotas] must be a table")
+    except QuotaPolicyError:
+        raise
+    except Exception as exc:
+        raise QuotaPolicyError(f"quota policy unavailable: {exc}") from exc
+
+    raw_enforce = cfg.get("enforce", False)
+    if not isinstance(raw_enforce, bool):
+        raise QuotaPolicyError("[quotas] enforce must be a boolean")
+    enforce = raw_enforce
+    env_enforce = os.environ.get("MAVERICK_QUOTA_ENFORCE")
+    if env_enforce is not None and env_enforce.strip():
+        value = env_enforce.strip().lower()
+        if value in {"1", "true", "yes", "on"}:
+            enforce = True
+        elif value in {"0", "false", "no", "off"}:
+            enforce = False
+        else:
+            raise QuotaPolicyError("MAVERICK_QUOTA_ENFORCE must be a boolean")
 
     def _cap(env_name: str, cfg_key: str) -> float:
         env_val = _env_float(env_name)
         if env_val is not None:
-            return max(0.0, env_val)
+            return env_val
         try:
-            return max(0.0, float(cfg.get(cfg_key, 0) or 0))
-        except (TypeError, ValueError):
-            return 0.0
+            value = float(cfg.get(cfg_key, 0) or 0)
+        except (OverflowError, TypeError, ValueError) as exc:
+            raise QuotaPolicyError(f"[quotas] {cfg_key} must be numeric") from exc
+        if not math.isfinite(value) or value < 0:
+            raise QuotaPolicyError(f"[quotas] {cfg_key} must be finite and non-negative")
+        return value
 
     return {
         "enforce": enforce,
@@ -311,8 +385,8 @@ def over_quota(principal: str) -> str | None:
     else ``None``.
 
     Returns ``None`` (allow) when enforcement is off, no caps are configured,
-    the principal is blank, or anything goes wrong reading the ledger — quotas
-    only ever *refuse*; they never crash a run.
+    or the principal is blank. An unreadable/corrupt ledger raises so the
+    orchestration chokepoint can block instead of treating unknown spend as 0.
     """
     cfg = _quota_config()
     if not cfg["enforce"] or not principal:
@@ -321,11 +395,7 @@ def over_quota(principal: str) -> str | None:
     max_tokens = cfg["max_tokens_per_day"]
     if max_dollars <= 0 and max_tokens <= 0:
         return None
-    try:
-        used = UsageLedger().usage(principal)
-    except Exception as e:  # pragma: no cover - ledger is fully fail-soft
-        log.warning("quotas: failed to read usage for %r: %s", principal, e)
-        return None
+    used = UsageLedger().usage(principal)
     if max_dollars > 0 and used["dollars"] >= max_dollars:
         return (
             f"principal {principal!r} is over its daily spend quota "
@@ -342,6 +412,8 @@ def over_quota(principal: str) -> str | None:
 
 __all__ = [
     "UsageLedger",
+    "UsageLedgerError",
+    "QuotaPolicyError",
     "quotas_enforced",
     "record_usage",
     "over_quota",

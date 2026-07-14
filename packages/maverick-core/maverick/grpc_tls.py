@@ -54,6 +54,16 @@ def _insecure_grpc_allowed() -> bool:
     return env_bool("MAVERICK_ALLOW_INSECURE_GRPC")
 
 
+def insecure_channel_allowed(address: str) -> bool:
+    """Whether a client may open a plaintext channel to ``address``.
+
+    Keep client and server policy symmetric: loopback is suitable for local
+    development or a same-host TLS terminator, while a remote plaintext dial
+    requires the same deliberate escape hatch as a remote plaintext bind.
+    """
+    return _is_loopback_address(address) or _insecure_grpc_allowed()
+
+
 def _section(name: str) -> dict:
     try:
         from .config import load_config
@@ -165,7 +175,7 @@ def bind_port(server: Any, address: str, section: str) -> bool:
     # in cleartext leaks goal content + bearer tokens. A loopback bind (behind a
     # local TLS-terminating proxy) is fine; an explicit MAVERICK_ALLOW_INSECURE_GRPC=1
     # accepts plaintext on a trusted private network.
-    if not _is_loopback_address(address) and not _insecure_grpc_allowed():
+    if not insecure_channel_allowed(address):
         raise TlsConfigError(
             f"[{section}] refusing a plaintext bind on non-loopback address "
             f"{address!r}: set [{section}] tls = true (with tls_cert/tls_key, and "
@@ -184,5 +194,6 @@ __all__ = [
     "tls_required",
     "server_credentials",
     "channel_credentials",
+    "insecure_channel_allowed",
     "bind_port",
 ]

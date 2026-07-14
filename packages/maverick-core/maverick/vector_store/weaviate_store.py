@@ -75,7 +75,7 @@ class WeaviateStore:
             import weaviate  # noqa: F401
         except ImportError as e:
             raise ImportError(
-                "weaviate-client not installed. Run: pip install 'maverick-agent[weaviate]'"
+                "weaviate-client not installed. Run: python -m pip install -e './packages/maverick-core[weaviate]'"
             ) from e
         import weaviate
 

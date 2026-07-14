@@ -11,7 +11,7 @@ flow, complementing ``mcp_oauth``'s machine-to-machine client_credentials):
 The token POST is injectable (``fetch=``) so ``exchange_code`` unit-tests against
 a mock token endpoint with no network (same pattern as ``mcp_oauth``). Token URLs
 must be https. Optionally decodes an ``id_token`` claim set when ``pyjwt`` is
-installed (``pip install maverick-agent[oidc]``).
+installed (``python -m pip install -e './packages/maverick-core[oidc]'``).
 """
 from __future__ import annotations
 

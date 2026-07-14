@@ -18,7 +18,7 @@ a collection accidentally.
 
 Requires::
 
-    pip install 'maverick-agent[mongodb]'
+    python -m pip install -e './packages/maverick-core[mongodb]'
 """
 from __future__ import annotations
 
@@ -277,7 +277,7 @@ def _run(args: dict[str, Any]) -> str:
     except ImportError:
         return (
             "ERROR: pymongo not installed. "
-            "Run: pip install 'maverick-agent[mongodb]'"
+            "Run: python -m pip install -e './packages/maverick-core[mongodb]'"
         )
     # Build ONE client for this call and close it in finally so we don't leak a
     # pool + monitor threads per op.

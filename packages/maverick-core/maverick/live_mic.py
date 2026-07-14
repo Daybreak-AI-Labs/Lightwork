@@ -16,7 +16,7 @@ The real adapters are optional and never required here:
   pipe). The loop only sees an iterable of ``bytes``.
 * **Transcription**: :func:`whisper_transcriber` builds a chunk transcriber
   on local faster-whisper when the ``[voice]`` extra is installed
-  (``pip install 'maverick-agent[voice]'``); model size comes from
+  (``python -m pip install -e './packages/maverick-core[voice]'``); model size comes from
   ``MAVERICK_WHISPER_MODEL`` (default ``small``), matching tools/voice.py.
 
 Deterministic by construction: no thread, no clock, no model in the loop.
@@ -134,7 +134,7 @@ def whisper_transcriber(model_size: str | None = None) -> Callable[[bytes], str]
     except ImportError as e:
         raise ImportError(
             "live-mic transcription needs faster-whisper. "
-            "Run: pip install 'maverick-agent[voice]'"
+            "Run: python -m pip install -e './packages/maverick-core[voice]'"
         ) from e
     size = model_size or os.environ.get("MAVERICK_WHISPER_MODEL", "small")
     model = WhisperModel(size, device="cpu", compute_type="int8")

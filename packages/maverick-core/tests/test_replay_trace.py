@@ -2,8 +2,8 @@
 from __future__ import annotations
 
 import os
-import stat
 
+from maverick.file_lock import private_path_is_restricted
 from maverick.replay.trace import TraceWriter, read_trace, replay
 
 
@@ -73,8 +73,8 @@ def test_trace_writer_locks_down_trace_permissions(tmp_path):
     finally:
         os.umask(old_umask)
 
-    assert stat.S_IMODE(trace_dir.stat().st_mode) == 0o700
-    assert stat.S_IMODE(path.stat().st_mode) == 0o600
+    assert private_path_is_restricted(trace_dir, 0o700)
+    assert private_path_is_restricted(path, 0o600)
     assert read_trace(path)[0]["content"] == "SECRET_TOKEN=topsecret"
 
 
@@ -89,6 +89,6 @@ def test_trace_writer_repairs_permissive_existing_permissions(tmp_path):
     with TraceWriter(path) as w:
         w.record("observation", content="still private")
 
-    assert stat.S_IMODE(trace_dir.stat().st_mode) == 0o700
-    assert stat.S_IMODE(path.stat().st_mode) == 0o600
+    assert private_path_is_restricted(trace_dir, 0o700)
+    assert private_path_is_restricted(path, 0o600)
     assert read_trace(path)[0]["content"] == "still private"

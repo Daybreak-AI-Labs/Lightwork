@@ -143,7 +143,8 @@ def _check_shield() -> list[str]:
     except ImportError:
         return [
             "  ! shield not installed (kernel runs without it; "
-            "install with `pip install maverick-shield` for "
+            "install from the reviewed checkout with "
+            "`python -m pip install -e ./packages/maverick-shield` for "
             "guardrails)",
         ]
 

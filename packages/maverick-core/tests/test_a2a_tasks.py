@@ -2,6 +2,7 @@
 push config, auth, and budget clamping. Goals are faked via an injected
 runner so these never touch an LLM or sandbox."""
 import asyncio
+import uuid
 
 import pytest
 from maverick.a2a_tasks import (
@@ -16,7 +17,19 @@ def _fake_runner(text, *, max_dollars, max_wall, max_depth):
 
 
 def _msg(text):
-    return {"message": {"role": "user", "parts": [{"kind": "text", "text": text}]}}
+    return {
+        "message": {
+            "role": "user",
+            "parts": [{"kind": "text", "text": text}],
+            "messageId": str(uuid.uuid4()),
+        }
+    }
+
+
+def _msg_id(text, message_id):
+    params = _msg(text)
+    params["message"]["messageId"] = message_id
+    return params
 
 
 def _collect(agen):
@@ -41,8 +54,19 @@ def test_send_completes_with_artifact():
 
 def test_empty_message_is_rejected():
     eng = TaskEngine(runner=_fake_runner)
-    task = asyncio.run(eng.send({"message": {"role": "user", "parts": []}}))
+    task = asyncio.run(eng.send(_msg("")))
     assert task["status"]["state"] == "rejected"
+
+
+def test_missing_message_id_is_rejected_before_execution():
+    eng = TaskEngine(runner=_fake_runner)
+
+    with pytest.raises(_RpcError, match="messageId is required"):
+        asyncio.run(
+            eng.send(
+                {"message": {"role": "user", "parts": [{"kind": "text", "text": "x"}]}}
+            )
+        )
 
 
 def test_runner_failure_marks_failed():
@@ -52,6 +76,76 @@ def test_runner_failure_marks_failed():
     task = asyncio.run(eng.send(_msg("hi")))
     assert task["status"]["state"] == "failed"
     assert "kaboom" in task["artifacts"][0]["parts"][0]["text"]
+
+
+def test_message_id_is_principal_scoped_idempotency_key():
+    calls = []
+
+    def runner(text, **kwargs):
+        calls.append(text)
+        return f"ran:{text}"
+
+    eng = TaskEngine(runner=runner)
+    params = _msg_id("charge once", "message-123")
+    first = asyncio.run(eng.send(params, "agent:alice"))
+    replay = asyncio.run(eng.send(params, "agent:alice"))
+
+    assert replay["id"] == first["id"]
+    assert replay["status"]["state"] == "completed"
+    assert calls == ["charge once"]
+
+    # The same opaque ID belongs to a different idempotency namespace for Bob.
+    bob = asyncio.run(eng.send(params, "agent:bob"))
+    assert bob["id"] != first["id"]
+    assert calls == ["charge once", "charge once"]
+
+
+def test_message_id_reuse_with_different_content_is_rejected():
+    eng = TaskEngine(runner=_fake_runner)
+    asyncio.run(eng.send(_msg_id("first", "message-123"), "agent:alice"))
+
+    with pytest.raises(_RpcError, match="different content"):
+        asyncio.run(eng.send(_msg_id("changed", "message-123"), "agent:alice"))
+
+
+def test_concurrent_duplicate_message_runs_once():
+    calls = 0
+
+    def runner(text, **kwargs):
+        nonlocal calls
+        calls += 1
+        return "ok"
+
+    eng = TaskEngine(runner=runner)
+    params = _msg_id("once", "message-concurrent")
+
+    async def drive():
+        return await asyncio.gather(
+            eng.send(params, "agent:alice"),
+            eng.send(params, "agent:alice"),
+        )
+
+    first, second = asyncio.run(drive())
+    assert first["id"] == second["id"]
+    assert calls == 1
+
+
+def test_task_capacity_never_evicts_active_tasks(monkeypatch):
+    import maverick.a2a_tasks as a2at
+
+    monkeypatch.setattr(a2at, "_MAX_TASKS", 2)
+    eng = TaskEngine(runner=_fake_runner)
+    first = eng._new_task(_msg_id("one", "m1"))
+    second = eng._new_task(_msg_id("two", "m2"))
+
+    with pytest.raises(_RpcError, match="capacity"):
+        eng._new_task(_msg_id("three", "m3"))
+    assert first.id in eng._tasks and second.id in eng._tasks
+
+    first.set_state("completed")
+    third = eng._new_task(_msg_id("three", "m3"))
+    assert first.id not in eng._tasks
+    assert second.id in eng._tasks and third.id in eng._tasks
 
 
 # ---- message/stream --------------------------------------------------
@@ -292,6 +386,16 @@ def test_http_endpoint_send_and_card(monkeypatch):
            "params": _msg("hello")}
     # no bearer -> 401
     assert client.post("/a2a/v1", json=rpc).status_code == 401
+    # Auth is checked before parsing hostile JSON.
+    assert client.post(
+        "/a2a/v1", content=b"{not-json", headers={"Content-Type": "application/json"}
+    ).status_code == 401
+    invalid = client.post(
+        "/a2a/v1",
+        headers={"Authorization": "Bearer tok"},
+        json={"jsonrpc": "2.0", "id": 9, "method": "message/send", "params": []},
+    )
+    assert invalid.json()["error"]["code"] == -32600
     # with bearer -> completed task
     r = client.post("/a2a/v1", headers={"Authorization": "Bearer tok"}, json=rpc)
     assert r.status_code == 200

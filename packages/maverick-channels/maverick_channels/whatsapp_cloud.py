@@ -32,7 +32,7 @@ Config::
 
 Requires::
 
-    pip install 'maverick-channels[whatsapp-cloud]'   # fastapi + httpx
+    python -m pip install -e './packages/maverick-channels[whatsapp-cloud]'
 """
 from __future__ import annotations
 
@@ -80,7 +80,8 @@ class WhatsAppCloudChannel(Channel):
         super().__init__(handler)
         if not _HAVE_DEPS:
             raise ImportError(
-                "fastapi not installed. Run: pip install 'maverick-channels[whatsapp-cloud]'"
+                "fastapi not installed. From the reviewed checkout run: "
+                "python -m pip install -e './packages/maverick-channels[whatsapp-cloud]'"
             )
         self.access_token = access_token or os.environ.get("WHATSAPP_CLOUD_ACCESS_TOKEN")
         self.phone_number_id = phone_number_id or os.environ.get("WHATSAPP_CLOUD_PHONE_NUMBER_ID")

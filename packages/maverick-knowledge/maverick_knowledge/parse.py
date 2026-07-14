@@ -131,7 +131,8 @@ def extract_text(path: str | Path) -> str:
         except ModuleNotFoundError as e:
             raise RuntimeError(
                 "PDF parsing needs the 'parsers' extra: "
-                "pip install maverick-knowledge[parsers]"
+                "From the reviewed checkout run: python -m pip install -e "
+                "'./packages/maverick-knowledge[parsers]'"
             ) from e
         reader = PdfReader(str(path))
         _check_pdf_page_count(reader)
@@ -142,7 +143,8 @@ def extract_text(path: str | Path) -> str:
         except ModuleNotFoundError as e:
             raise RuntimeError(
                 "DOCX parsing needs the 'parsers' extra: "
-                "pip install maverick-knowledge[parsers]"
+                "From the reviewed checkout run: python -m pip install -e "
+                "'./packages/maverick-knowledge[parsers]'"
             ) from e
         _check_docx_uncompressed_size(path)
         return "\n".join(p.text for p in docx.Document(str(path)).paragraphs)

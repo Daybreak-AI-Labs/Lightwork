@@ -952,8 +952,8 @@ async def run_goal(  # noqa: C901  -- core goal-execution loop
     try:
         from . import quotas
         _quota_reason = quotas.over_quota(principal) if quotas.quotas_enforced() else None
-    except Exception:  # pragma: no cover -- quotas are fully fail-soft
-        _quota_reason = None
+    except Exception as exc:
+        _quota_reason = f"principal quota policy unavailable: {exc}"
     if _quota_reason:
         world.set_goal_status(goal_id, "blocked", result=f"over quota: {_quota_reason}")
         log.warning("goal #%s refused: %s", goal_id, _quota_reason)
@@ -962,13 +962,17 @@ async def run_goal(  # noqa: C901  -- core goal-execution loop
     # Per-tenant daily-spend cap. The channel door already enforces this, but
     # dashboard/CLI/gRPC-initiated runs bypass that door, so enforce here too.
     # Opt-in: tenant_over_quota returns None unless a provisioned tenant has a
-    # cap (or [billing] enforce_plan_caps). Fail-soft; no-op for single-tenant.
+    # cap (or [billing] enforce_plan_caps). A policy read failure blocks the
+    # start instead of silently restoring an unlimited tenant.
     try:
         from .paths import current_tenant_id
-        from .tenant.registry import tenant_over_quota
-        _tenant_reason = tenant_over_quota(current_tenant_id())
-    except Exception:  # pragma: no cover -- tenant quota is fully fail-soft
-        _tenant_reason = None
+        from .tenant.registry import assert_tenant_active, tenant_over_quota
+
+        _tenant_id = current_tenant_id()
+        assert_tenant_active(_tenant_id)
+        _tenant_reason = tenant_over_quota(_tenant_id)
+    except Exception as exc:
+        _tenant_reason = f"tenant policy unavailable or inactive: {exc}"
     if _tenant_reason:
         world.set_goal_status(goal_id, "blocked", result=f"over quota: {_tenant_reason}")
         log.warning("goal #%s refused: %s", goal_id, _tenant_reason)
@@ -1113,6 +1117,7 @@ async def run_goal(  # noqa: C901  -- core goal-execution loop
 
     mcp_specs = load_mcp_specs_from_config()
     mcp_clients: list = []
+    ctx = None
 
     try:
         # Start MCP clients INSIDE the try so the finally below always stops
@@ -1640,6 +1645,17 @@ async def run_goal(  # noqa: C901  -- core goal-execution loop
     finally:
         if mcp_clients:
             await stop_mcp_clients(mcp_clients)
+        # A namespace is a per-run routing capability, so its queued traffic
+        # must not outlive the run. Besides preventing stale delivery, clearing
+        # non-empty inboxes here stops completed swarms from permanently
+        # consuming the process-wide inbox cap.
+        if ctx is not None:
+            try:
+                from . import agent_bus
+
+                agent_bus.clear(namespace=ctx.bus_namespace)
+            except Exception:  # pragma: no cover - run cleanup is best effort
+                log.warning("failed to clear agent-bus namespace", exc_info=True)
         # Restore the trace context to its prior value so the next goal on
         # this thread/task doesn't inherit goal_id / conversation_id from this
         # one, AND a concurrent/outer goal isn't wiped (FastAPI threadpool

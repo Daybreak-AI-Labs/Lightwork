@@ -145,7 +145,8 @@ def test_flash_write_command_line(tmp_path, have_openocd, flash_enabled):
         "file": "fw.bin", "address": "0x08000000",
     })
     cmd = sb.commands[0]
-    assert f"program {tmp_path}/fw.bin verify 0x8000000" in cmd
+    expected = (tmp_path / "fw.bin").resolve().as_posix()
+    assert f"program {expected} verify 0x8000000" in cmd
     assert not out.startswith("ERROR")
 
 
@@ -254,7 +255,7 @@ def test_i2c_missing_smbus2_is_actionable(no_config, monkeypatch):
     t = embedded_device()  # no injected bus -> tries the smbus2 adapter
     out = t.fn({"op": "i2c_read", "addr": "0x68", "length": 1})
     assert out.startswith("ERROR") and "smbus2 not installed" in out
-    assert "maverick-agent[i2c]" in out
+    assert "packages/maverick-core[i2c]" in out
 
 
 def test_i2c_bus_failure_is_error_string(no_config):

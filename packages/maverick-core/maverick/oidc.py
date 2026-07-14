@@ -326,7 +326,7 @@ def _require_pyjwt():
     except ModuleNotFoundError as e:
         raise OIDCError(
             "OIDC verification requires PyJWT, which isn't installed. "
-            "Install the optional extra:  pip install 'maverick-agent[oidc]'  "
+            "Install the optional extra:  python -m pip install -e './packages/maverick-core[oidc]'  "
             "(or  pip install 'pyjwt[crypto]>=2.13.0' )."
         ) from e
 

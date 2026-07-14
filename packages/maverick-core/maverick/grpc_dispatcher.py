@@ -7,6 +7,11 @@ protocol by calling the worker's ``RunGoal`` RPC (added to
 completion and returns its terminal status — the same contract as the local
 thread dispatcher, so no caller changes.
 
+The legacy ``RunGoal`` wire schema cannot carry department-suite grants.
+Therefore a non-``None`` ``allowed_suites`` value (including the explicit
+deny-all empty set) is rejected locally before any RPC instead of widening the
+grant on the worker. Unrestricted ``None`` remains backwards compatible.
+
 Deployment contract (same as the arq QueueDispatcher): the API process and
 the worker must **share the world DB** (the Postgres backend) — the RPC
 carries only the goal id, not the goal. The worker is just
@@ -87,13 +92,22 @@ class GrpcDispatcher:
             return self._stub_factory()
         import grpc
 
-        from .grpc_api.server import _load_stubs  # compiled-on-demand stubs
-        from .grpc_tls import channel_credentials, tls_required
-        pb2, pb2_grpc = _load_stubs()
+        from .grpc_tls import (
+            TlsConfigError,
+            channel_credentials,
+            insecure_channel_allowed,
+            tls_required,
+        )
         # Dial the worker's goal API ([grpc] section) over TLS when configured,
         # mirroring the federation client. The bearer token + goal payloads must
         # not cross the wire in the clear: fail closed when TLS is required.
         creds = channel_credentials("grpc")
+        if creds is None and not insecure_channel_allowed(self.target):
+            raise TlsConfigError(
+                f"refusing to dial non-loopback gRPC worker {self.target!r} "
+                "without TLS; configure [grpc] TLS or explicitly set "
+                "MAVERICK_ALLOW_INSECURE_GRPC=1 for a trusted private network"
+            )
         if creds is not None:
             channel = grpc.secure_channel(self.target, creds)
         elif tls_required("grpc"):
@@ -102,6 +116,8 @@ class GrpcDispatcher:
                 "[grpc] tls is required but not configured")
         else:
             channel = grpc.insecure_channel(self.target)  # legacy single-host dev
+        from .grpc_api.server import _load_stubs  # compiled-on-demand stubs
+        pb2, pb2_grpc = _load_stubs()
         return pb2_grpc.MaverickStub(channel), pb2
 
     def _metadata(self) -> list[tuple[str, str]]:
@@ -125,10 +141,28 @@ class GrpcDispatcher:
         max_dollars: float | None = None,
         max_wall_seconds: float | None = None,
         max_depth: int = 3,
+        conversation_id: int | None = None,
         channel: str | None = None,
         user_id: str | None = None,
         capability: Any | None = None,
+        concurrency_principal: str | None = None,
+        allowed_suites: frozenset[str] | None = None,
     ) -> str | None:
+        # The remote service derives its scheduling/concurrency identity from
+        # the authenticated bearer principal. Never forward a caller-selected
+        # principal across this trust boundary, but retain the Dispatcher API.
+        # Conversation ownership is not yet represented in the gRPC contract;
+        # forwarding a raw row id would let a per-agent caller select another
+        # owner's history. Queue dispatch authenticates this field, while gRPC
+        # deliberately omits it until the worker can authorize the association.
+        del concurrency_principal, conversation_id
+        if allowed_suites is not None:
+            log.warning(
+                "gRPC dispatch of goal %s refused: the legacy RunGoal wire "
+                "schema cannot preserve an allowed_suites grant",
+                goal_id,
+            )
+            return None
         if max_depth is None:
             from .runner import DEFAULT_MAX_DEPTH
             max_depth = DEFAULT_MAX_DEPTH

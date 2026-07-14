@@ -174,7 +174,7 @@ def sign_envelope(payload: dict) -> dict:
     if not audit_signing._have_crypto():
         raise FederationError(
             "cryptography not installed; cannot sign federation envelopes. "
-            "Run: pip install 'maverick-agent[audit-signing]'"
+            "Run: python -m pip install -e './packages/maverick-core[audit-signing]'"
         )
     from cryptography.hazmat.primitives.asymmetric import ed25519
     priv, pub, key_id = audit_signing._load_or_create_keypair()

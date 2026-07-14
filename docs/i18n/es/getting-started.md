@@ -7,8 +7,12 @@
 La vía más segura desde la terminal es instalar el paquete publicado con pipx, en lugar de ejecutar un script de arranque remoto:
 
 ```bash
-pipx install 'maverick-agent[installer]'
-maverick init
+git clone https://github.com/Day-AI-Labs/Lightwork
+cd Lightwork
+git checkout --detach <reviewed-full-40-character-commit-sha>
+python -m pip install -e ./packages/maverick-core
+python -m pip install -e ./apps/installer-cli
+lightwork init
 ```
 
 Si necesitas el arranque de escritorio sin requisitos previos, descarga `deploy/desktop/install.sh` o `deploy/desktop/install.ps1` desde un commit o una release en los que confíes, verifica el script y establece `MAVERICK_REF` con el SHA completo de 40 caracteres de un commit. Por defecto, los scripts rechazan referencias mutables a ramas o etiquetas.

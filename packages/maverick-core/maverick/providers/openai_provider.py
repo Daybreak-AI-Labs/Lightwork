@@ -104,7 +104,7 @@ def _openai_import_error_message(e: ImportError) -> str:
     A bare ``except ImportError`` also catches a missing *transitive*
     dependency (e.g. openai -> httpx -> idna): ModuleNotFoundError subclasses
     ImportError. Reporting "openai SDK not installed" then sends the user to
-    ``pip install maverick-agent[openai]``, which won't help because openai
+    ``python -m pip install -e './packages/maverick-core[openai]'``, which won't help because openai
     IS installed. Use find_spec to tell the two cases apart -- it locates the
     package without executing its (failing) ``__init__``.
     """
@@ -114,7 +114,7 @@ def _openai_import_error_message(e: ImportError) -> str:
     except Exception:
         present = False
     if not present:
-        return "openai SDK not installed. Run: pip install 'maverick-agent[openai]'"
+        return "openai SDK not installed. Run: python -m pip install -e './packages/maverick-core[openai]'"
     return (
         f"the openai SDK is installed but failed to import ({e}); a dependency "
         "is likely missing or broken. Try: pip install --upgrade "

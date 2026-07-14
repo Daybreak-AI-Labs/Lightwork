@@ -19,7 +19,6 @@ how to undo it. ``apply`` defaults to a dry run.
 from __future__ import annotations
 
 import os
-import tempfile
 from dataclasses import dataclass
 from typing import Any
 
@@ -202,39 +201,15 @@ def _write_config_atomic(path, text: str, *, prior: str) -> str:
     A temp file in the same dir is written + fsync'd then ``os.replace``-d, so a
     crash / full disk can never truncate the live config; ``0600`` keeps the
     secret-bearing file off other users (mirrors the wizard / audit signer)."""
-    path.parent.mkdir(mode=0o700, parents=True, exist_ok=True)
-    try:
-        os.chmod(path.parent, 0o700)
-    except OSError:
-        pass
+    from .file_lock import atomic_write_text, ensure_private_directory
+
+    ensure_private_directory(path.parent)
     backup = ""
     if prior.strip():
         bak = path.with_name(path.name + ".bak")
-        fd = os.open(str(bak), os.O_WRONLY | os.O_CREAT | os.O_TRUNC, 0o600)
-        with os.fdopen(fd, "w", encoding="utf-8") as f:
-            f.write(prior)
+        atomic_write_text(bak, prior, mode=0o600)
         backup = str(bak)
-    fd, tmp = tempfile.mkstemp(dir=str(path.parent), prefix=".config-", suffix=".tmp")
-    try:
-        try:
-            os.fchmod(fd, 0o600)
-        except (OSError, AttributeError):  # os.fchmod is absent on Windows
-            pass  # mkstemp already created the file owner-only
-        with os.fdopen(fd, "w", encoding="utf-8") as f:
-            f.write(text)
-            f.flush()
-            os.fsync(f.fileno())
-        os.replace(tmp, path)
-    except BaseException:
-        try:
-            os.unlink(tmp)
-        except OSError:
-            pass
-        raise
-    try:
-        os.chmod(path, 0o600)
-    except OSError:
-        pass
+    atomic_write_text(path, text, mode=0o600)
     return backup
 
 

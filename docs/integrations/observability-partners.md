@@ -70,7 +70,7 @@ receive them; LangSmith qualifies via whatever OTLP endpoint and auth headers
 its own documentation specifies.
 
 ```bash
-pip install 'maverick-agent[observability]'   # exporter deps are optional
+python -m pip install -e './packages/maverick-core[observability]'   # optional exporters
 
 export MAVERICK_OTEL_EXPORTER=otlp
 # Default endpoint is a local collector: http://localhost:4318/v1/traces.

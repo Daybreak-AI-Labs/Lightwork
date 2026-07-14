@@ -53,7 +53,7 @@ class AzureOpenAIClient(OpenAIClient):
             from openai import AsyncAzureOpenAI, AzureOpenAI
         except ImportError as e:
             raise ImportError(
-                "openai SDK not installed. Run: pip install 'maverick-agent[openai]'"
+                "openai SDK not installed. Run: python -m pip install -e './packages/maverick-core[openai]'"
             ) from e
         endpoint = (
             base_url

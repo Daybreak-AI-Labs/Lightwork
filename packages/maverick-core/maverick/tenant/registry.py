@@ -17,12 +17,18 @@ from __future__ import annotations
 
 import json
 import logging
+import math
 import os
 import threading
 import time
 from dataclasses import dataclass, replace
 
-from ..file_lock import atomic_write_text, cross_process_lock
+from ..file_lock import (
+    atomic_read_text,
+    atomic_write_text,
+    cross_process_lock,
+    ensure_private_directory,
+)
 from ..paths import _tenant_segment, maverick_home
 
 log = logging.getLogger(__name__)
@@ -73,6 +79,10 @@ class UnknownTenant(KeyError):
     """Raised when an operation targets a tenant that was never provisioned."""
 
 
+class TenantRegistryError(RuntimeError):
+    """Tenant control-plane state exists but cannot be trusted."""
+
+
 def _registry_path():
     return maverick_home() / "tenant_registry.json"
 
@@ -100,21 +110,33 @@ class TenantRecord:
 
     @classmethod
     def from_dict(cls, d: dict) -> TenantRecord:
-        if not isinstance(d, dict) or not d.get("id"):
+        if not isinstance(d, dict) or not isinstance(d.get("id"), str) or not d["id"].strip():
             raise ValueError("tenant record must be an object with an id")
-        status = str(d.get("status") or ACTIVE)
+        tenant_id = d["id"]
+        if tenant_id != tenant_id.strip():
+            raise ValueError("tenant id must be trimmed")
+        _validate_id(tenant_id)
+        status = d.get("status", ACTIVE)
+        if not isinstance(status, str):
+            raise ValueError("tenant status must be a string")
         if status not in _STATUSES:
-            status = ACTIVE
+            raise ValueError(f"unknown tenant status: {status!r}")
         try:
-            cap = float(d.get("max_daily_dollars") or 0.0)
-        except (TypeError, ValueError):
-            cap = 0.0
+            cap = float(d.get("max_daily_dollars", 0.0) or 0.0)
+            created = float(d.get("created_at", 0.0) or 0.0)
+            updated = float(d.get("updated_at", 0.0) or 0.0)
+        except (OverflowError, TypeError, ValueError) as exc:
+            raise ValueError("tenant numeric fields must be finite numbers") from exc
+        if not all(math.isfinite(value) and value >= 0 for value in (cap, created, updated)):
+            raise ValueError("tenant numeric fields must be finite and non-negative")
+        plan = d.get("plan", "free") or "free"
+        display_name = d.get("display_name", "") or ""
+        if not isinstance(plan, str) or not isinstance(display_name, str):
+            raise ValueError("tenant plan and display_name must be strings")
         return cls(
-            id=str(d["id"]), status=status, plan=str(d.get("plan") or "free"),
-            display_name=str(d.get("display_name") or ""),
-            max_daily_dollars=max(0.0, cap),
-            created_at=float(d.get("created_at") or 0.0),
-            updated_at=float(d.get("updated_at") or 0.0),
+            id=tenant_id, status=status, plan=plan,
+            display_name=display_name, max_daily_dollars=cap,
+            created_at=created, updated_at=updated,
         )
 
     @property
@@ -133,18 +155,52 @@ def _validate_id(tenant_id: str) -> str:
 
 
 def _load() -> dict[str, TenantRecord]:
-    try:
-        raw = json.loads(_registry_path().read_text(encoding="utf-8"))
-    except (OSError, json.JSONDecodeError):
+    from ..file_lock import ensure_private_file
+
+    ensure_private_directory(maverick_home())
+    path = _registry_path()
+    ensure_private_directory(path.parent)
+    if not path.exists():
         return {}
+    try:
+        ensure_private_file(path)
+        raw = _decode_json(atomic_read_text(path), label="tenant registry")
+    except TenantRegistryError:
+        raise
+    except OSError as exc:
+        raise TenantRegistryError(f"tenant registry unreadable: {exc}") from exc
+    if not isinstance(raw, dict) or not isinstance(raw.get("tenants"), list):
+        raise TenantRegistryError(
+            "tenant registry corrupt: top-level object must contain a tenants list"
+        )
     out: dict[str, TenantRecord] = {}
-    for d in raw.get("tenants", []) if isinstance(raw, dict) else []:
+    for d in raw["tenants"]:
         try:
             rec = TenantRecord.from_dict(d)
-        except ValueError:
-            continue
+        except (TypeError, ValueError) as exc:
+            raise TenantRegistryError(f"tenant registry corrupt: {exc}") from exc
+        if rec.id in out:
+            raise TenantRegistryError(f"tenant registry corrupt: duplicate tenant {rec.id!r}")
         out[rec.id] = rec
     return out
+
+
+def _decode_json(raw: str, *, label: str) -> object:
+    def _reject_constant(value: str):
+        raise ValueError(f"non-finite number {value!r}")
+
+    def _object(pairs: list[tuple[str, object]]) -> dict[str, object]:
+        out: dict[str, object] = {}
+        for key, value in pairs:
+            if key in out:
+                raise ValueError(f"duplicate key {key!r}")
+            out[key] = value
+        return out
+
+    try:
+        return json.loads(raw, parse_constant=_reject_constant, object_pairs_hook=_object)
+    except (TypeError, ValueError) as exc:
+        raise TenantRegistryError(f"{label} corrupt: {exc}") from exc
 
 
 def _save(records: dict[str, TenantRecord]) -> None:
@@ -164,6 +220,8 @@ def _save(records: dict[str, TenantRecord]) -> None:
 def _locked():
     """Serialize a roster load-modify-save in-process AND cross-process."""
     from contextlib import ExitStack
+    ensure_private_directory(maverick_home())
+    ensure_private_directory(_registry_path().parent)
     stack = ExitStack()
     stack.enter_context(_REGISTRY_LOCK)
     stack.enter_context(cross_process_lock(_registry_path()))
@@ -300,7 +358,10 @@ def is_active(tenant_id: str | None) -> bool:
     tid = (tenant_id or "").strip()
     if not tid:
         return True
-    rec = _load().get(tid)
+    try:
+        rec = _load().get(tid)
+    except TenantRegistryError:
+        return False
     if rec is None:
         return not _registry_path().exists()
     return rec.active
@@ -311,7 +372,18 @@ def assert_tenant_active(tenant_id: str | None) -> None:
     No-op for None / deployments without a registry, so existing flows are
     unchanged until tenant provisioning is enabled.
     """
-    if not is_active(tenant_id):
+    tid = (tenant_id or "").strip()
+    if not tid:
+        return
+    path = _registry_path()
+    if not path.exists():
+        return
+    # Unlike the convenience bool returned by is_active(), admission paths
+    # need to distinguish a legitimate suspension from unreadable or corrupt
+    # control-plane state.  Let TenantRegistryError propagate so callers can
+    # emit an operator-visible policy outage and, critically, still deny work.
+    rec = _load().get(tid)
+    if rec is None or not rec.active:
         raise TenantSuspended(f"tenant is suspended or unknown: {tenant_id!r}")
 
 
@@ -321,7 +393,8 @@ def tenant_spend_today(tenant_id: str) -> float:
     Reads the tenant-scoped ledger (``tenants/<t>/usage/ledger.json`` — the
     same file the orchestrator's per-principal recording lands in when the
     run is tenant-pinned) and sums every principal's bucket for the current
-    UTC day. Fail-soft: an unreadable ledger counts as zero spend.
+    UTC day. An unreadable/corrupt ledger counts as infinite spend so a policy
+    outage cannot reset a capped tenant's apparent usage to zero.
     """
     from ..paths import data_dir
     from ..quotas import UsageLedger, _today
@@ -334,12 +407,9 @@ def tenant_spend_today(tenant_id: str) -> float:
             for days in data.values() if isinstance(days, dict)
         )
     except Exception as e:
-        # Spend read never blocks serving, but it must not be SILENT: an
-        # unreadable ledger counts as 0 spend, which under-enforces the daily
-        # cap (a tenant at its limit looks unused). Surface it.
-        log.warning("tenant_spend_today: unreadable usage ledger for %r: %s; "
-                    "counting 0 spend (daily cap under-enforced)", tenant_id, e)
-        return 0.0
+        log.error("tenant_spend_today: unreadable usage ledger for %r: %s; "
+                  "treating spend as over cap", tenant_id, e)
+        return float("inf")
 
 
 def _enforce_plan_caps() -> bool:
@@ -352,12 +422,31 @@ def _enforce_plan_caps() -> bool:
     over ``[billing] enforce_plan_caps``."""
     env = os.environ.get("MAVERICK_ENFORCE_PLAN_CAPS")
     if env is not None and env.strip() != "":
-        return env.strip().lower() in {"1", "true", "yes", "on"}
+        value = env.strip().lower()
+        if value in {"1", "true", "yes", "on"}:
+            return True
+        if value in {"0", "false", "no", "off"}:
+            return False
+        raise TenantRegistryError("MAVERICK_ENFORCE_PLAN_CAPS must be a boolean")
     try:
-        from ..config import load_config
-        return bool(((load_config() or {}).get("billing") or {}).get("enforce_plan_caps"))
-    except Exception:  # pragma: no cover -- config never blocks quota resolution
-        return False
+        from ..config import config_source_errors, load_config
+
+        cfg = load_config()
+        if config_source_errors():
+            raise TenantRegistryError(
+                "tenant plan-cap policy unavailable: an active config source is invalid"
+            )
+        billing = cfg.get("billing") or {}
+        if not isinstance(billing, dict):
+            raise TenantRegistryError("[billing] must be a table")
+        value = billing.get("enforce_plan_caps", False)
+        if not isinstance(value, bool):
+            raise TenantRegistryError("[billing] enforce_plan_caps must be a boolean")
+        return value
+    except TenantRegistryError:
+        raise
+    except Exception as exc:
+        raise TenantRegistryError(f"tenant plan-cap policy unavailable: {exc}") from exc
 
 
 def tenant_over_quota(tenant_id: str | None) -> str | None:
@@ -396,8 +485,10 @@ def _tenant_daily_cap(tenant_id: str) -> float:
         try:
             from ..billing import entitlements_for
             cap = entitlements_for(rec.plan).max_daily_dollars
-        except Exception:  # pragma: no cover -- billing never blocks quota
-            cap = 0.0
+        except Exception as exc:
+            raise TenantRegistryError(
+                f"tenant plan-cap entitlement unavailable for {rec.id!r}: {exc}"
+            ) from exc
     return cap if cap > 0 else 0.0
 
 
@@ -423,11 +514,45 @@ def _reservations_path(tenant_id: str):
 
 
 def _load_reservations(tenant_id: str) -> dict:
-    try:
-        raw = json.loads(_reservations_path(tenant_id).read_text(encoding="utf-8"))
-    except (OSError, json.JSONDecodeError):
+    from ..file_lock import ensure_private_file
+
+    ensure_private_directory(maverick_home())
+    path = _reservations_path(tenant_id)
+    ensure_private_directory(path.parent)
+    if not path.exists():
         return {}
-    return raw if isinstance(raw, dict) else {}
+    try:
+        ensure_private_file(path)
+        raw = _decode_json(atomic_read_text(path), label="tenant reservation store")
+    except TenantRegistryError:
+        raise
+    except OSError as exc:
+        raise TenantRegistryError(f"tenant reservation store unreadable: {exc}") from exc
+    if not isinstance(raw, dict):
+        raise TenantRegistryError(
+            "tenant reservation store corrupt: top-level value must be an object"
+        )
+    out: dict[str, dict[str, float]] = {}
+    for reservation_id, value in raw.items():
+        if not reservation_id or reservation_id != reservation_id.strip():
+            raise TenantRegistryError("tenant reservation ids must be non-blank strings")
+        if not isinstance(value, dict):
+            raise TenantRegistryError(
+                f"tenant reservation {reservation_id!r} must be an object"
+            )
+        try:
+            amount = float(value["dollars"])
+            expiry = float(value["expires_at"])
+        except (KeyError, OverflowError, TypeError, ValueError) as exc:
+            raise TenantRegistryError(
+                f"tenant reservation {reservation_id!r} has invalid numeric fields"
+            ) from exc
+        if not math.isfinite(amount) or amount <= 0 or not math.isfinite(expiry) or expiry <= 0:
+            raise TenantRegistryError(
+                f"tenant reservation {reservation_id!r} must be finite and positive"
+            )
+        out[reservation_id] = {"dollars": amount, "expires_at": expiry}
+    return out
 
 
 def _live_reservations(data: dict, now: float) -> dict:
@@ -474,10 +599,12 @@ def reserve_tenant_dollars(tenant_id: str | None, amount: float,
     try:
         amt = float(amount or 0.0)
         ttl = float(ttl_seconds or 0.0)
-    except (TypeError, ValueError):
-        return
+    except (OverflowError, TypeError, ValueError) as exc:
+        raise ValueError("reservation amount and TTL must be finite numbers") from exc
     if amt <= 0:
         return
+    if not math.isfinite(amt) or not math.isfinite(ttl) or ttl <= 0:
+        raise ValueError("reservation amount and TTL must be finite and positive")
     now = time.time()
     path = _reservations_path(tid)
     with _RESERVE_LOCK, cross_process_lock(path):
@@ -530,6 +657,7 @@ def tenant_remaining_today(tenant_id: str | None) -> float | None:
 
 __all__ = [
     "ACTIVE", "SUSPENDED", "TenantRecord", "TenantSuspended", "UnknownTenant",
+    "TenantRegistryError",
     "list_tenants", "get_tenant", "create_tenant", "suspend_tenant",
     "resume_tenant", "delete_tenant", "set_quota", "set_plan",
     "is_active", "assert_tenant_active", "tenant_spend_today",

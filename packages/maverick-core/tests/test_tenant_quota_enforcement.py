@@ -1,5 +1,5 @@
 """Per-tenant daily-spend cap on the CORE run path (#74), plan-cap fallback
-(#81), and loud fail-soft spend reads (#77).
+(#81), and fail-closed spend reads (#77).
 
 The channel door already enforced the per-tenant cap; dashboard/CLI/gRPC runs
 bypass that door, so run_goal must enforce it too. All opt-in: a tenant cap only
@@ -99,6 +99,6 @@ def test_spend_read_warns_on_unreadable_ledger(monkeypatch, caplog):
     def _boom(self):
         raise OSError("corrupt ledger")
     monkeypatch.setattr(quotas.UsageLedger, "_load", _boom)
-    with caplog.at_level(logging.WARNING):
-        assert registry.tenant_spend_today("gamma") == 0.0   # fail-soft
+    with caplog.at_level(logging.ERROR):
+        assert registry.tenant_spend_today("gamma") == float("inf")
     assert any("unreadable usage ledger" in r.getMessage() for r in caplog.records)

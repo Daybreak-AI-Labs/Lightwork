@@ -467,7 +467,7 @@ def _run_fetch(args: dict[str, Any]) -> str:
     try:
         import httpx  # noqa: F401
     except ImportError:
-        return "ERROR: httpx not installed. Run: pip install 'maverick-agent[session]'"
+        return "ERROR: httpx not installed. Run: python -m pip install -e './packages/maverick-core[session]'"
 
     method = (args.get("method") or "GET").upper()
     headers = dict(args.get("headers") or {})

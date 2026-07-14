@@ -2,17 +2,22 @@
 # One-command self-learning training run for a cloud GPU pod (RunPod, Lambda,
 # Vast, a cloud VM, or any GPU host). Runs the whole flow with ZERO laptop
 # involvement: install -> train the CPU step PRM (L2) -> real DPO fine-tune of
-# the proposer (L3, GPU) -> optionally prove the lift. Self-contained: it only
-# calls `python -m maverick.training.*` + `maverick`, so it works straight after
-# a pip install -- you do NOT need the repo checked out on the pod.
+# the proposer (L3, GPU) -> optionally prove the lift. Installation is only
+# allowed from a checked-out Lightwork tree at an exact commit; there is no
+# fallback to an unclaimed public package name.
 #
 # Quick start on a fresh GPU pod (paste once):
 #
-#   curl -fsSL https://raw.githubusercontent.com/Day-AI-Labs/Lightwork/main/scripts/train_runpod.sh -o train.sh
+#   LIGHTWORK_REF=<full-40-character-commit-sha>
+#   git clone https://github.com/Day-AI-Labs/Lightwork lightwork
+#   git -C lightwork checkout --detach "$LIGHTWORK_REF"
 #   # upload your two inputs to the pod first (see below), then:
-#   bash train.sh                      # cheap 0.5B proof run (default)
+#   MAVERICK_SOURCE_DIR="$PWD/lightwork" MAVERICK_SOURCE_REF="$LIGHTWORK_REF" \
+#     bash lightwork/scripts/train_runpod.sh    # cheap 0.5B proof run (default)
 #   # …or graduate to the strongest ownable model on one 80GB GPU:
-#   BASE_MODEL=Qwen/Qwen3-Coder-30B-A3B LORA=1 BITS=4 bash train.sh
+#   BASE_MODEL=Qwen/Qwen3-Coder-30B-A3B LORA=1 BITS=4 \
+#     MAVERICK_SOURCE_DIR="$PWD/lightwork" MAVERICK_SOURCE_REF="$LIGHTWORK_REF" \
+#     bash lightwork/scripts/train_runpod.sh
 #
 # Inputs: the script GENERATES both from your maverick data if they're absent,
 # so you bring EITHER the two JSONL files OR your ~/.maverick (outbox + world DB):
@@ -35,7 +40,9 @@
 #   OUTBOX          donation outbox to auto-generate inputs from
 #                   (default ~/.maverick/outbox)
 #   SCORES          default ./scores.json (prove-learning runs only if present)
-#   INSTALL         1 (pip install 'maverick-agent[training]') | 0 to skip
+#   INSTALL         1 (install from MAVERICK_SOURCE_DIR) | 0 to skip
+#   MAVERICK_SOURCE_DIR  checked-out Lightwork root (required when INSTALL=1)
+#   MAVERICK_SOURCE_REF  lowercase full commit SHA required when INSTALL=1
 #   SKIP_DPO        0 | 1 to run only the CPU PRM step
 #   DRY_RUN         0 | 1 to print the commands without executing
 #   BETA EPOCHS LR MIN_MARGIN MAX_PAIRS   DPO hyperparameters (passed through)
@@ -60,6 +67,8 @@ OUTBOX="${OUTBOX:-$HOME/.maverick/outbox}"
 OUT_DIR="${OUT_DIR:-./maverick-train-out}"
 SCORES="${SCORES:-./scores.json}"
 INSTALL="${INSTALL:-1}"
+MAVERICK_SOURCE_DIR="${MAVERICK_SOURCE_DIR:-}"
+MAVERICK_SOURCE_REF="${MAVERICK_SOURCE_REF:-}"
 SKIP_DPO="${SKIP_DPO:-0}"
 DRY_RUN="${DRY_RUN:-0}"
 BETA="${BETA:-0.1}"; EPOCHS="${EPOCHS:-1}"
@@ -80,7 +89,18 @@ run "mkdir -p '$OUT_DIR'"
 
 if [ "$INSTALL" = "1" ]; then
   say "1/4 Install (torch + transformers via the [training] extra)"
-  run "pip install --quiet 'maverick-agent[training]'"
+  [ -n "$MAVERICK_SOURCE_DIR" ] || die "INSTALL=1 requires MAVERICK_SOURCE_DIR pointing to a checked-out Lightwork repository."
+  [ -d "$MAVERICK_SOURCE_DIR/.git" ] || die "MAVERICK_SOURCE_DIR is not a git checkout: $MAVERICK_SOURCE_DIR"
+  [ -f "$MAVERICK_SOURCE_DIR/packages/maverick-core/pyproject.toml" ] || die "MAVERICK_SOURCE_DIR is not a complete Lightwork checkout: $MAVERICK_SOURCE_DIR"
+  [[ "$MAVERICK_SOURCE_REF" =~ ^[0-9a-f]{40}$ ]] || die "MAVERICK_SOURCE_REF must be a lowercase, full 40-character commit SHA."
+  actual_ref="$(git -c core.fsmonitor=false -C "$MAVERICK_SOURCE_DIR" rev-parse HEAD)"
+  [ "$actual_ref" = "$MAVERICK_SOURCE_REF" ] || die "Lightwork source is at $actual_ref, not required ref $MAVERICK_SOURCE_REF."
+  [ -z "$(git -c core.fsmonitor=false -C "$MAVERICK_SOURCE_DIR" status --porcelain --untracked-files=all)" ] \
+    || die "MAVERICK_SOURCE_DIR contains local or untracked changes; refusing to train from unreviewed source."
+  printf '+ python -m pip install --quiet %q\n' "$MAVERICK_SOURCE_DIR/packages/maverick-core[training]"
+  if [ "$DRY_RUN" != "1" ]; then
+    python -m pip install --quiet "$MAVERICK_SOURCE_DIR/packages/maverick-core[training]"
+  fi
 fi
 
 say "2/4 GPU check"

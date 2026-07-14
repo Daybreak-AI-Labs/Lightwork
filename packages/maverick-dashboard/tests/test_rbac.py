@@ -31,6 +31,24 @@ def test_store_roundtrip_and_validation(monkeypatch, tmp_path):
         rbac.set_role("", "viewer")
 
 
+def test_corrupt_roster_denies_and_mutator_refuses_overwrite(monkeypatch, tmp_path):
+    monkeypatch.setenv("HOME", str(tmp_path))
+    monkeypatch.setenv("MAVERICK_HOME", str(tmp_path / ".maverick"))
+    monkeypatch.setenv("MAVERICK_DASHBOARD_ADMINS", "")
+    from maverick_dashboard import auth, rbac
+
+    path = rbac.store_path()
+    path.parent.mkdir(parents=True, exist_ok=True)
+    original = '{"user:viewer":"viewer","user:viewer":"operator"}'
+    path.write_text(original, encoding="utf-8")
+    with pytest.raises(rbac.RbacStoreError):
+        rbac.list_users()
+    assert auth.role_for_principal("user:viewer") is None
+    with pytest.raises(rbac.RbacStoreError):
+        rbac.set_role("user:new", "admin")
+    assert path.read_text(encoding="utf-8") == original
+
+
 def test_concurrent_set_role_does_not_lose_assignments(monkeypatch, tmp_path):
     """set_role does a load-modify-save; without the lock two concurrent role
     assignments both load the same roster and the second drops the first -- a

@@ -43,13 +43,16 @@ def test_raw_identifiers_never_hit_disk():
     assert "s1" in raw
 
 
-def test_corrupt_directory_degrades_to_empty():
+def test_corrupt_directory_fails_closed_and_is_not_overwritten():
     sd._path().parent.mkdir(parents=True, exist_ok=True)
-    sd._path().write_text("{ not json", encoding="utf-8")
-    # A damaged directory must not raise into login/SCIM -- it only weakens reach.
-    assert sd.subs_for(["a@x.com"]) == set()
-    sd.record_login("s1", ["a@x.com"])  # overwrites the corrupt file
-    assert sd.subs_for(["a@x.com"]) == {"s1"}
+    damaged = "{ not json"
+    sd._path().write_text(damaged, encoding="utf-8")
+    # Authorization/deprovision reads must not interpret damaged lifecycle
+    # state as empty. Login recording remains best-effort but cannot erase it.
+    with pytest.raises(sd.SubjectDirectoryError, match="corrupt"):
+        sd.subs_for(["a@x.com"])
+    sd.record_login("s1", ["a@x.com"])
+    assert sd._path().read_text(encoding="utf-8") == damaged
 
 
 def test_lru_prune_keeps_newest(monkeypatch):
@@ -73,3 +76,40 @@ def test_relogin_updates_sub_last_wins():
     sd.record_login("old-sub", ["alice@x.com"], at=1.0)
     sd.record_login("new-sub", ["alice@x.com"], at=2.0)
     assert sd.subs_for(["alice@x.com"]) == {"new-sub"}
+
+
+def test_retirement_covers_direct_and_pairwise_subject_and_can_be_reinstated():
+    sd.record_login("pairwise-sub", ["immutable-oid"])
+    sd.retire(["immutable-oid"], at=7.0)
+
+    assert sd.is_retired("immutable-oid") is True
+    assert sd.is_retired("pairwise-sub") is True
+    raw = sd._retired_path().read_text(encoding="utf-8")
+    assert "immutable-oid" not in raw
+    assert "pairwise-sub" not in raw
+
+    sd.reinstate(["immutable-oid"])
+    assert sd.is_retired("immutable-oid") is False
+    assert sd.is_retired("pairwise-sub") is False
+
+
+def test_new_pairwise_subject_inherits_retired_identifier_durably():
+    sd.retire(["immutable-oid"], at=7.0)
+    sd.record_login("new-pairwise-sub", ["immutable-oid"], at=8.0)
+
+    assert sd.is_retired("new-pairwise-sub") is True
+    # Even if the lookup binding is later pruned, recording permanently copied
+    # the retirement decision to the opaque subject itself.
+    sd.forget(["immutable-oid"])
+    assert sd.is_retired("new-pairwise-sub") is True
+
+
+def test_corrupt_retirement_ledger_fails_closed_and_is_not_overwritten():
+    damaged = '{"subjects":{"bad":NaN}}'
+    sd._retired_path().write_text(damaged, encoding="utf-8")
+
+    with pytest.raises(sd.SubjectDirectoryError, match="corrupt"):
+        sd.is_retired("someone")
+    with pytest.raises(sd.SubjectDirectoryError):
+        sd.retire(["someone"])
+    assert sd._retired_path().read_text(encoding="utf-8") == damaged

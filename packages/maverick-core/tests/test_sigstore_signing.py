@@ -67,7 +67,7 @@ def test_sign_rejects_empty_bundle_from_signer(artifact):
 
 
 def test_sign_without_sigstore_extra_is_informative(artifact, no_sigstore):
-    with pytest.raises(SigstoreUnavailable, match=r"maverick-agent\[sigstore\]"):
+    with pytest.raises(SigstoreUnavailable, match=r"packages/maverick-core\[sigstore\]"):
         sign_artifact(artifact)
 
 
@@ -141,7 +141,7 @@ def test_verify_without_sigstore_extra_refuses_closed(artifact, no_sigstore):
     sign_artifact(artifact, signer=lambda d: "{}")
     result = verify_artifact(artifact, None, identity=IDENTITY, issuer=ISSUER)
     assert not result.ok
-    assert "maverick-agent[sigstore]" in result.reason
+    assert "packages/maverick-core[sigstore]" in result.reason
 
 
 # ---- CLI -------------------------------------------------------------------
@@ -155,7 +155,7 @@ def test_cli_sign_missing_file_exits_2(tmp_path, capsys):
 def test_cli_sign_without_sigstore_exits_2(artifact, no_sigstore, capsys):
     rc = sigstore_signing.main(["sign", str(artifact)])
     assert rc == 2
-    assert "maverick-agent[sigstore]" in capsys.readouterr().err
+    assert "packages/maverick-core[sigstore]" in capsys.readouterr().err
 
 
 def test_cli_verify_refuses_on_missing_bundle(artifact, capsys):

@@ -135,13 +135,17 @@ def test_server_passes_channel_user_to_run_goal(monkeypatch):
             return self._gid
         def set_goal_status(self, *args, **kwargs):
             return None
+        def get_goal(self, goal_id):
+            return type("Goal", (), {"result": "ok"})()
 
     captured = {}
-    async def _fake_run_goal(*args, **kwargs):
+    async def _fake_dispatch(*args, **kwargs):
         captured.update(kwargs)
-        return "ok"
+        return "done"
 
-    monkeypatch.setattr(server_mod, "run_goal", _fake_run_goal)
+    monkeypatch.setattr(
+        "maverick.runner.run_goal_in_background_async", _fake_dispatch,
+    )
     monkeypatch.setattr(server_mod, "build_sandbox", lambda: object())
     monkeypatch.setattr("maverick.compliance.first_turn_disclosure", lambda *a, **k: None)
 

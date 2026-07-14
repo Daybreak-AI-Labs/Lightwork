@@ -55,7 +55,9 @@ def _no_real_run(monkeypatch):
     import maverick.runner as runner_mod
     called = []
 
-    def fake_run(goal_id, max_dollars=None, max_wall_seconds=None, max_depth=3):
+    def fake_run(
+        goal_id, max_dollars=None, max_wall_seconds=None, max_depth=3, **_kwargs,
+    ):
         called.append(goal_id)
 
     monkeypatch.setattr(runner_mod, "run_goal_in_thread", fake_run)
@@ -383,7 +385,9 @@ def test_webhook_run_honors_template_budget(monkeypatch, tmp_path):
     import maverick.runner as runner_mod
     seen = {}
 
-    def fake_run(goal_id, max_dollars=None, max_wall_seconds=None, max_depth=3):
+    def fake_run(
+        goal_id, max_dollars=None, max_wall_seconds=None, max_depth=3, **_kwargs,
+    ):
         seen["dollars"] = max_dollars
         seen["wall"] = max_wall_seconds
 
@@ -409,7 +413,9 @@ def test_webhook_run_clamps_oversized_template_budget(monkeypatch, tmp_path):
     import maverick.runner as runner_mod
     seen = {}
 
-    def fake_run(goal_id, max_dollars=None, max_wall_seconds=None, max_depth=3):
+    def fake_run(
+        goal_id, max_dollars=None, max_wall_seconds=None, max_depth=3, **_kwargs,
+    ):
         seen["dollars"] = max_dollars
         seen["wall"] = max_wall_seconds
 

@@ -2,6 +2,8 @@
 monotonic epoch; any credential whose iat predates it is rejected."""
 from __future__ import annotations
 
+import math
+
 import pytest
 from maverick_dashboard import session_revocation as sr
 
@@ -40,6 +42,8 @@ def test_blank_principal_is_noop():
 def test_garbage_iat_treated_as_revoked():
     sr.revoke_principal("dave", at=100.0)
     assert sr.is_revoked("dave", issued_at="not-a-number") is True
+    assert sr.is_revoked("dave", issued_at=math.nan) is True
+    assert sr.is_revoked("dave", issued_at=math.inf) is True
 
 
 def test_absent_store_is_not_an_error():
@@ -56,3 +60,21 @@ def test_corrupt_store_fails_closed():
     with pytest.raises(sr.RevocationStoreError):
         sr.revocation_epoch("eve")
     assert sr.is_revoked("eve", issued_at=2.0) is True
+
+
+@pytest.mark.parametrize(
+    "content",
+    ["[]", '{"eve":NaN}', '{"eve":100,"eve":0}', '{"eve":-1}'],
+)
+def test_parseable_but_untrusted_store_fails_closed(content):
+    sr._path().parent.mkdir(parents=True, exist_ok=True)
+    sr._path().write_text(content, encoding="utf-8")
+    with pytest.raises(sr.RevocationStoreError):
+        sr.revocation_epoch("eve")
+    assert sr.is_revoked("eve", issued_at=1000.0) is True
+
+
+@pytest.mark.parametrize("epoch", [math.nan, math.inf, -math.inf, 0.0])
+def test_revoke_rejects_nonfinite_or_nonpositive_epoch(epoch):
+    with pytest.raises(ValueError):
+        sr.revoke_principal("eve", at=epoch)

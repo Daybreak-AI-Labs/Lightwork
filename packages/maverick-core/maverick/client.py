@@ -63,15 +63,37 @@ def _raw_client_id() -> str:
     raw = (os.environ.get("MAVERICK_CLIENT_ID") or "").strip()
     if not raw:
         try:
-            from .config import load_config
-            raw = str(((load_config() or {}).get("client") or {}).get("id") or "").strip()
-        except Exception:  # pragma: no cover - config never blocks path resolution
-            raw = ""
+            from .config import config_source_errors, load_config
+
+            cfg = load_config()
+            if config_source_errors():
+                raise ClientBindingError(
+                    "client binding unavailable: an active config source is invalid"
+                )
+            client = cfg.get("client") or {}
+            if not isinstance(client, dict):
+                raise ClientBindingError("[client] must be a table")
+            raw = str(client.get("id") or "").strip()
+        except ClientBindingError:
+            raise
+        except Exception as exc:
+            raise ClientBindingError(f"client binding unavailable: {exc}") from exc
     return raw
 
 
 def _resolve() -> str | None:
-    raw = _raw_client_id()
+    try:
+        raw = _raw_client_id()
+    except ClientBindingError:
+        # Resilient on the hot path: a corrupt/unreadable config source must not
+        # crash path resolution (every ``data_dir`` call, including
+        # ``world_model``'s import-time ``DEFAULT_DB``) or a diagnostic like
+        # ``maverick config-lint`` whose whole job is to REPORT that corrupt
+        # file. Production still fails closed at the startup guard
+        # ``require_client_binding()``, which calls ``_raw_client_id()``
+        # directly, and every trust/auth caller inspects ``config_source_errors``
+        # itself -- so the fail-closed seam is preserved where it belongs.
+        return None
     if not raw:
         return None
     if not _CLIENT_RE.fullmatch(raw):

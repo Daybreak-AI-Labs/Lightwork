@@ -352,7 +352,7 @@ def _run(args: dict[str, Any], workdir: Path | None = None) -> str:
             try:
                 import httpx  # noqa: F401
             except ImportError:
-                return "ERROR: httpx not installed. Run: pip install 'maverick-agent[issue-trackers]'"
+                return "ERROR: httpx not installed. Run: python -m pip install -e './packages/maverick-core[issue-trackers]'"
             op_id = (args.get("op_id") or "").strip()
             if not op_id:
                 return "ERROR: call requires op_id"

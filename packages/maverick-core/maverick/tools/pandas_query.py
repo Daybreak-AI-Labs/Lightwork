@@ -92,7 +92,7 @@ def _load(path: Path):
         import pandas as pd
     except ImportError as e:
         raise ImportError(
-            "pandas not installed. Run: pip install 'maverick-agent[pandas]'"
+            "pandas not installed. Run: python -m pip install -e './packages/maverick-core[pandas]'"
         ) from e
     ext = path.suffix.lower()
     # Read at most _MAX_LOAD_ROWS+1 so a huge file can't exhaust memory; the

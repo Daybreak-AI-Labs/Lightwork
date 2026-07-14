@@ -7,8 +7,12 @@
 Der sicherste Weg im Terminal ist, das veröffentlichte Paket mit pipx zu installieren, statt ein entferntes Bootstrap-Skript auszuführen:
 
 ```bash
-pipx install 'maverick-agent[installer]'
-maverick init
+git clone https://github.com/Day-AI-Labs/Lightwork
+cd Lightwork
+git checkout --detach <reviewed-full-40-character-commit-sha>
+python -m pip install -e ./packages/maverick-core
+python -m pip install -e ./apps/installer-cli
+lightwork init
 ```
 
 Wenn Sie das Desktop-Bootstrap ohne Voraussetzungen benötigen, laden Sie `deploy/desktop/install.sh` oder `deploy/desktop/install.ps1` von einem Commit oder Release herunter, dem Sie vertrauen, prüfen Sie das Skript und setzen Sie `MAVERICK_REF` auf einen vollständigen, 40 Zeichen langen Commit-SHA. Veränderliche Branch- oder Tag-Referenzen lehnen die Skripte standardmäßig ab.

@@ -32,8 +32,14 @@ from __future__ import annotations
 import hashlib
 import json
 import logging
-import os
 from pathlib import Path
+
+from ..file_lock import (
+    atomic_read_bytes,
+    atomic_write_bytes,
+    ensure_private_directory,
+    ensure_private_file,
+)
 
 log = logging.getLogger(__name__)
 
@@ -158,7 +164,9 @@ def _process_file(
     if not path.exists() or path.is_dir():
         return 0, 0
     try:
-        raw = path.read_bytes()
+        ensure_private_directory(path.parent)
+        ensure_private_file(path, 0o600)
+        raw = atomic_read_bytes(path)
     except OSError as e:
         log.warning("audit erase: %s: %s", path, e)
         return 0, 0
@@ -195,25 +203,8 @@ def _process_file(
     from .sealing import encode_segment
     new_bytes = encode_segment("".join(parts), sealed=was_sealed)
 
-    tmp = path.with_suffix(".ndjson.erasetmp")
     try:
-        # Preserve perms.
-        try:
-            mode = path.stat().st_mode & 0o777
-        except OSError:
-            mode = 0o600
-        with open(tmp, "wb") as dst:
-            dst.write(new_bytes)
-            # fsync before the atomic replace so a crash can't leave the erase
-            # half-committed (an authorized GDPR erasure must be durable, matching
-            # the signing/sealing rewriters in this package).
-            dst.flush()
-            os.fsync(dst.fileno())
-        tmp.replace(path)
-        try:
-            os.chmod(path, mode)
-        except OSError:
-            pass
+        atomic_write_bytes(path, new_bytes, mode=0o600)
         if any_signed:
             try:
                 from .signing import reanchor_day_after_erase, reanchor_file
@@ -228,11 +219,6 @@ def _process_file(
                 log.warning("audit erase: could not reanchor %s after rewrite: %s", path, e)
     except OSError as e:
         log.warning("audit erase: %s: %s", path, e)
-        if tmp.exists():
-            try:
-                tmp.unlink()
-            except OSError:
-                pass
         return 0, 0
     return matched, written
 

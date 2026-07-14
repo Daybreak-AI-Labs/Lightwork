@@ -58,8 +58,9 @@ Hot-reloads the Svelte frontend. Clicking **Install** runs the bundled
 bootstrap, so test in a throwaway VM/container unless you actually want
 Lightwork installed on your dev box. The desktop app pins the installed
 source to the git commit captured at build time; set
-`MAVERICK_INSTALL_REF=<commit-or-tag>` while building only when you need
-to override that ref intentionally.
+`MAVERICK_INSTALL_REF=<lowercase-full-40-character-commit-sha>` while building
+only when you need to override that ref intentionally. Mutable tags and
+branches are rejected by the build script.
 
 ## Producing native bundles
 

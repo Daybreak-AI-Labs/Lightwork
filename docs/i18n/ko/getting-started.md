@@ -7,8 +7,12 @@
 터미널에서 가장 안전한 설치 방법은 원격 부트스트랩 스크립트를 실행하는 대신 pipx로 게시된 패키지를 설치하는 것입니다.
 
 ```bash
-pipx install 'maverick-agent[installer]'
-maverick init
+git clone https://github.com/Day-AI-Labs/Lightwork
+cd Lightwork
+git checkout --detach <reviewed-full-40-character-commit-sha>
+python -m pip install -e ./packages/maverick-core
+python -m pip install -e ./apps/installer-cli
+lightwork init
 ```
 
 사전 요구 사항이 없는 데스크톱 부트스트랩이 필요하다면, 신뢰할 수 있는 커밋이나 릴리스에서 `deploy/desktop/install.sh` 또는 `deploy/desktop/install.ps1`을 내려받아 검증한 뒤 `MAVERICK_REF`에 40자 전체 커밋 SHA를 설정하세요. 이 스크립트들은 기본적으로 변경 가능한 브랜치/태그 참조를 거부합니다.

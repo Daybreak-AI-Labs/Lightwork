@@ -62,19 +62,77 @@ from maverick.suite_grants import known_suites, register_grant_resolver
 from .rbac import ROLES  # ordered most-privileged first; group mapping honors it
 
 
-def _config_table(key: str) -> dict:
+class GroupAccessPolicyError(RuntimeError):
+    """Group-derived access policy cannot be read or validated."""
+
+
+def _config_table(key: str) -> dict | None:
+    """Return a configured mapping, preserving absent-vs-corrupt semantics."""
     try:
-        from maverick.config import load_config
-        raw = (load_config().get("dashboard", {}) or {}).get(key)
-    except Exception:  # pragma: no cover - config read must never gate access
-        return {}
-    return raw if isinstance(raw, dict) else {}
+        from maverick.config import config_source_errors, load_config
+
+        cfg = load_config()
+        errors = config_source_errors()
+    except Exception as e:
+        raise GroupAccessPolicyError("group access config is unreadable") from e
+    if errors:
+        paths = ", ".join(sorted(errors))
+        raise GroupAccessPolicyError(
+            f"group access config source is unreadable: {paths}"
+        )
+    if not isinstance(cfg, dict):
+        raise GroupAccessPolicyError("group access config root must be a table")
+    dashboard = cfg.get("dashboard")
+    if dashboard is None:
+        return None
+    if not isinstance(dashboard, dict):
+        raise GroupAccessPolicyError("dashboard config must be a table")
+    raw = dashboard.get(key)
+    if raw is None:
+        return None
+    if not isinstance(raw, dict):
+        raise GroupAccessPolicyError(f"dashboard.{key} must be a table")
+    return raw
 
 
 def _ci_mapping(key: str) -> dict:
     """The ``[dashboard.<key>]`` table re-keyed by case-folded group name, so
     lookups survive an IdP renaming a group's case."""
-    return {str(k).strip().casefold(): v for k, v in _config_table(key).items()}
+    table = _config_table(key)
+    if not table:
+        return {}
+    result: dict[str, object] = {}
+    for raw_name, raw_value in table.items():
+        if not isinstance(raw_name, str) or not raw_name.strip():
+            raise GroupAccessPolicyError(f"dashboard.{key} has an invalid group name")
+        name = raw_name.strip().casefold()
+        if name in result:
+            raise GroupAccessPolicyError(
+                f"dashboard.{key} has duplicate case-insensitive group names"
+            )
+        if key == "group_roles":
+            if not isinstance(raw_value, str) or raw_value.strip().lower() not in ROLES:
+                raise GroupAccessPolicyError(
+                    f"dashboard.{key} has an invalid role for {raw_name!r}"
+                )
+            result[name] = raw_value.strip().lower()
+        elif key == "group_suites":
+            if isinstance(raw_value, str):
+                values = [raw_value]
+            elif isinstance(raw_value, (list, tuple)):
+                values = list(raw_value)
+            else:
+                raise GroupAccessPolicyError(
+                    f"dashboard.{key} has an invalid suite list for {raw_name!r}"
+                )
+            if any(not isinstance(value, str) or not value.strip() for value in values):
+                raise GroupAccessPolicyError(
+                    f"dashboard.{key} has an invalid suite for {raw_name!r}"
+                )
+            result[name] = [value.strip() for value in values]
+        else:  # pragma: no cover - only the two policy tables are internal callers
+            raise GroupAccessPolicyError(f"unsupported group access table {key!r}")
+    return result
 
 
 def _sub_of(principal: str) -> str:
@@ -83,48 +141,74 @@ def _sub_of(principal: str) -> str:
 
 
 def _active(rec: dict) -> bool:
-    """Whether a stored SCIM user record is active. Stored ``active`` is a bool,
-    but coerce defensively so a hand-edited ``"false"`` string can't read truthy
-    and confer group access to a deprovisioned user."""
-    v = rec.get("active", True)
-    if isinstance(v, bool):
-        return v
-    return str(v).strip().lower() == "true"
+    """Whether a validated SCIM record carries the literal boolean ``true``.
+
+    The store parser rejects non-booleans; this defensive identity check keeps
+    a directly supplied or future record shape from treating a truthy string as
+    active and conferring group access.
+    """
+    return rec.get("active") is True
+
+
+def _matching_users(principal: str) -> dict[str, dict]:
+    """Validated SCIM users authoritatively bound to ``principal``."""
+    sub = _sub_of(principal)
+    if not sub:
+        return {}
+    from . import subject_directory
+    from .scim import _load
+
+    if subject_directory.is_retired(sub):
+        return {}
+    users = _load()
+    if not users:
+        return {}
+    directory = subject_directory.load_index()
+    matched: dict[str, dict] = {}
+    for uid, rec in users.items():
+        ext_id = str(rec.get("externalId") or "")
+        int_id = str(rec.get("id") or "")
+        if sub in (ext_id, int_id) or sub in subject_directory.subs_in(
+            directory, [ext_id, int_id]
+        ):
+            matched[uid] = rec
+    return matched
+
+
+def active_for_principal(principal: str) -> bool | None:
+    """SCIM lifecycle status for an authenticated principal.
+
+    ``None`` means the SCIM roster has no authoritative binding (no opinion),
+    ``True`` means matched and active, and ``False`` means matched but
+    deprovisioned. Store/directory corruption raises so authentication can deny
+    rather than grant the deployment default role.
+    """
+    sub = _sub_of(principal)
+    if not sub:
+        return None
+    from .subject_directory import is_retired
+
+    # A hard DELETE removes the SCIM resource, but never its denial decision.
+    # Check the hashed retirement ledger before interpreting an absent roster
+    # match as "no opinion" and falling through to the deployment default role.
+    if is_retired(sub):
+        return False
+    matched = _matching_users(principal)
+    if not matched:
+        return None
+    return all(_active(rec) for rec in matched.values())
 
 
 def group_names_for_principal(principal: str) -> frozenset[str]:
     """The displayNames of every SCIM group the (active) principal belongs to."""
-    sub = _sub_of(principal)
-    if not sub:
-        return frozenset()
-    from . import subject_directory
-    from .scim import _load, _load_groups
-    users = _load()
+    from .scim import _load_groups
+
+    users = _matching_users(principal)
     groups = _load_groups()
     if not users or not groups:
         return frozenset()
 
-    directory = subject_directory.load_index()  # one read for the whole scan
-    matched: set[str] = set()
-    for uid, rec in users.items():
-        if not _active(rec):
-            continue  # deprovisioned users confer no group-derived access
-        # Authoritative sub bindings only (see module docstring): the IdP's
-        # externalId (its immutable object id) or our internal id.
-        ext_id = str(rec.get("externalId") or "")
-        int_id = str(rec.get("id") or "")
-        if sub in (ext_id, int_id):
-            matched.add(uid)
-            continue
-        # Pairwise-sub IdPs (Entra): the login sub differs from externalId, so
-        # bridge through the subject directory — but ONLY on the non-forgeable
-        # identifiers (externalId/oid, internal id). We deliberately do NOT
-        # bridge via userName/email: those enter the directory as UNVERIFIED
-        # login claims (no email_verified check at record time), so keying a
-        # grant on them would let a forged email claim resolve another user's
-        # SCIM record and inherit its group-mapped role/departments.
-        if sub in subject_directory.subs_in(directory, [ext_id, int_id]):
-            matched.add(uid)
+    matched = {uid for uid, rec in users.items() if _active(rec)}
     if not matched:
         return frozenset()
     return frozenset(
@@ -137,16 +221,23 @@ def group_names_for_principal(principal: str) -> frozenset[str]:
 def role_for_principal(principal: str) -> str | None:
     """The most-privileged role mapped to any of the principal's groups, or
     ``None`` when no group carries a role mapping."""
-    mapping = _ci_mapping("group_roles")
-    if not mapping:
+    try:
+        mapping = _ci_mapping("group_roles")
+        if not mapping:
+            return None
+        names = group_names_for_principal(principal)
+        mapped = {mapping[n.casefold()]
+                  for n in names if n.casefold() in mapping}
+        for role in ROLES:  # ROLES is ordered most-privileged first
+            if role in mapped:
+                return role
         return None
-    names = group_names_for_principal(principal)
-    mapped = {str(mapping[n.casefold()]).strip().lower()
-              for n in names if n.casefold() in mapping}
-    for role in ROLES:  # ROLES is ordered most-privileged first
-        if role in mapped:
-            return role
-    return None
+    except Exception:
+        # auth.global_role_for_principal deliberately swallows resolver errors
+        # and falls through to the deployment default (historically operator).
+        # Return the least-privileged valid role instead, so corrupt SCIM state
+        # or policy cannot silently broaden access through that fallback.
+        return "viewer"
 
 
 def suites_for_principal(principal: str) -> frozenset[str] | None:
@@ -157,25 +248,27 @@ def suites_for_principal(principal: str) -> frozenset[str] | None:
     NOT unrestricted: once any of the caller's groups matches a ``group_suites``
     row, the result is the intersection with the real suite catalog — deny is
     the safe direction for a misconfiguration, never a silent widening."""
-    mapping = _ci_mapping("group_suites")
-    if not mapping:
-        return None
-    names = group_names_for_principal(principal)
-    hit = False
-    out: set[str] = set()
-    for n in names:
-        key = n.casefold()
-        if key not in mapping:
-            continue
-        hit = True
-        raw = mapping[key]
-        if isinstance(raw, str):
-            out.add(raw)  # a lone string is one suite, never "unrestricted"
-        elif isinstance(raw, (list, tuple)):
-            out.update(str(s) for s in raw)
-    if not hit:
-        return None
-    return frozenset(out) & known_suites()
+    try:
+        mapping = _ci_mapping("group_suites")
+        if not mapping:
+            return None
+        names = group_names_for_principal(principal)
+        hit = False
+        out: set[str] = set()
+        for n in names:
+            key = n.casefold()
+            if key not in mapping:
+                continue
+            hit = True
+            out.update(mapping[key])
+        if not hit:
+            return None
+        return frozenset(out) & known_suites()
+    except Exception:
+        # The kernel grant chain also swallows resolver errors and otherwise
+        # falls through to an unrestricted default. An explicit empty result
+        # is the only fail-closed answer at this integration seam.
+        return frozenset()
 
 
 # Plug group-derived grants into the KERNEL resolution chain, so the
@@ -185,5 +278,6 @@ def suites_for_principal(principal: str) -> frozenset[str] | None:
 register_grant_resolver(suites_for_principal)
 
 __all__ = [
-    "group_names_for_principal", "role_for_principal", "suites_for_principal",
+    "GroupAccessPolicyError", "active_for_principal", "group_names_for_principal",
+    "role_for_principal", "suites_for_principal",
 ]

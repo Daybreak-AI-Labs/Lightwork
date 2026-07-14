@@ -491,7 +491,7 @@ def seal(plaintext: bytes) -> bytes:
     if not _have_crypto():
         raise EncryptionUnavailable(
             "at-rest encryption enabled but 'cryptography' is not installed "
-            "(pip install 'maverick-agent[audit-signing]')"
+            "(python -m pip install -e './packages/maverick-core[audit-signing]')"
         )
     from cryptography.hazmat.primitives.ciphers.aead import AESGCM
 

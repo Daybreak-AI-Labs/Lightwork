@@ -198,7 +198,7 @@ def test_default_embedder_reports_actionable_install_hint(tmp_path, monkeypatch)
     audio = tmp_path / "clip.wav"
     audio.write_bytes(_wav_bytes())
     out = audio_understanding().fn({"audio_path": str(audio), "labels": ["siren"]})
-    assert out.startswith("ERROR") and "maverick-agent[clap]" in out
+    assert out.startswith("ERROR") and "packages/maverick-core[clap]" in out
 
 
 def test_factory_registered_in_base_registry():

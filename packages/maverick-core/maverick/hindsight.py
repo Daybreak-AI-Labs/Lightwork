@@ -32,11 +32,18 @@ from __future__ import annotations
 
 import json
 import logging
-import os
 import time
 from dataclasses import asdict, dataclass, field
 from pathlib import Path
 from typing import Any
+
+from .file_lock import (
+    atomic_read_text,
+    atomic_write_text,
+    cross_process_lock,
+    ensure_private_directory,
+    ensure_private_file,
+)
 
 log = logging.getLogger(__name__)
 
@@ -228,7 +235,7 @@ def write_ledger(
         p = Path(path) if path is not None else \
             Path(dreaming._tenant_path("dreams/hindsight.ndjson",
                                        dreaming.DEFAULT_DIR / "hindsight.ndjson"))
-        p.parent.mkdir(parents=True, exist_ok=True)
+        ensure_private_directory(p.parent)
         # Goal titles/descriptions are sensitive world-model content.
         # Persist only aggregate counts in the plaintext ledger so --ledger
         # cannot become a side channel that copies decrypted goal text out of
@@ -242,10 +249,18 @@ def write_ledger(
             "gained": len(report.gained),
             "regressed": len(report.regressed),
         }
-        fd = os.open(p, os.O_APPEND | os.O_CREAT | os.O_WRONLY, 0o600)
-        os.chmod(p, 0o600)
-        with os.fdopen(fd, "a", encoding="utf-8") as f:
-            f.write(json.dumps(row, default=str) + "\n")
+        line = json.dumps(row, default=str) + "\n"
+        # The ledger is append-only logically, but an OS append open cannot
+        # request a protected DACL at creation through Python on Windows. A
+        # stable sidecar serializes the read/append/publish transaction while
+        # the shared atomic writer creates the replacement privately.
+        with cross_process_lock(p):
+            try:
+                ensure_private_file(p, 0o600)
+                current = atomic_read_text(p)
+            except FileNotFoundError:
+                current = ""
+            atomic_write_text(p, current + line, mode=0o600)
     except Exception as e:  # pragma: no cover -- ledger never blocks
         log.debug("hindsight: ledger write skipped: %s", e)
         return False

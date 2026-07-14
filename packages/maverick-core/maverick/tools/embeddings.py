@@ -15,7 +15,7 @@ Backend: ``fastembed`` (local, CPU, no network). Default model is
 
 Requires::
 
-    pip install 'maverick-agent[embeddings]'
+    python -m pip install -e './packages/maverick-core[embeddings]'
 """
 from __future__ import annotations
 
@@ -147,7 +147,7 @@ def _run(args: dict[str, Any]) -> str:
     except ImportError:
         return (
             "ERROR: fastembed not installed. "
-            "Run: pip install 'maverick-agent[embeddings]'"
+            "Run: python -m pip install -e './packages/maverick-core[embeddings]'"
         )
     model_name = (args.get("model") or "").strip() or _default_model()
     try:

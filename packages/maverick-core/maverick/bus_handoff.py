@@ -5,8 +5,9 @@
 verifier. This module bridges them: a delegation rides the bus as an
 :class:`~maverick.handoff.Envelope`, minted + signed by the run's
 :class:`HandoffAuthority` and verified on receipt -- so a peer-to-peer handoff
-actually carries scoped authority the receiver can trust (replay, tamper, expiry,
-and out-of-scope all rejected), the trust frame the bare bus lacks.
+actually carries scoped authority the receiver can trust (routing, sender,
+replay, tamper, expiry, and out-of-scope all rejected), the trust frame the bare
+bus lacks.
 
 Trust model. In-process the bus is a single trust domain, so the authority is a
 per-run **ephemeral Ed25519 issuer**: the orchestrator is the trust root, mints
@@ -14,9 +15,10 @@ per-run **ephemeral Ed25519 issuer**: the orchestrator is the trust root, mints
 originate in this run is rejected. The value is real even in-process (it rejects
 stale/forged/out-of-scope delegations and is the exact seam a *multi-node* bus
 slots a durable issuer into), but it is not a defense against code already running
-inside the process with ``SwarmContext`` access. Consistent with kernel rule #1
-the layer fails **open**: with ``cryptography`` absent or capability enforcement
-off, no authority is installed and a delegation falls back to a plain bus message.
+inside the process with ``SwarmContext`` access. Capability enforcement being
+off leaves this optional layer disabled. Once enforcement is on, however, a
+delegation fails **closed** if signing authority is unavailable; callers must
+use the explicitly untrusted plain-message tool instead of silently downgrading.
 """
 from __future__ import annotations
 
@@ -87,11 +89,18 @@ class HandoffAuthority:
             grant=grant,
             issuer_private_hex=self.issuer_private_hex,
             issuer_pub_hex=self.issuer_pub_hex,
-            required_tools=tuple(required_tools),
+            required_tools=required_tools,
             body=body,
         )
 
-    def verify(self, env: Envelope, *, now: float | None = None) -> HandoffVerdict:
+    def verify(
+        self,
+        env: Envelope,
+        *,
+        now: float | None = None,
+        expected_recipient: str | None = None,
+        expected_sender: str | None = None,
+    ) -> HandoffVerdict:
         """Verify a handoff against this run's issuer + nonce cache (replay-safe)."""
         with self._lock:
             return verify_handoff(
@@ -100,6 +109,8 @@ class HandoffAuthority:
                 nonce_cache=self.nonce_cache,
                 now=now,
                 max_age_s=self.max_age_s,
+                expected_recipient=expected_recipient,
+                expected_sender=expected_sender,
             )
 
 
@@ -128,13 +139,14 @@ class HandoffDelivery:
 
 
 def authority_for(ctx: Any) -> HandoffAuthority | None:
-    """Get-or-create the run's :class:`HandoffAuthority`, or ``None`` (fail-open).
+    """Get-or-create the run's :class:`HandoffAuthority`.
 
     Installed only when ``cryptography`` is present AND capability enforcement is
     on -- handoff *verification* is meaningful exactly when the operator has opted
-    into capability enforcement. Otherwise returns ``None`` and callers fall back
-    to plain bus messages. Idempotent + locked: all agents in a run share one
-    authority (one issuer, one nonce cache).
+    into capability enforcement. Otherwise returns ``None``. A signed-delegation
+    caller must treat ``None`` as unavailable, never silently downgrade to plain
+    traffic. Idempotent + locked: all agents in a run share one authority (one
+    issuer, one nonce cache).
     """
     existing = getattr(ctx, "handoff_authority", None)
     if existing is not None:
@@ -148,8 +160,8 @@ def authority_for(ctx: Any) -> HandoffAuthority | None:
     except (KeyboardInterrupt, SystemExit):
         raise
     except BaseException:
-        # A broken/partial crypto backend can *panic* (not ImportError); the
-        # trust layer must fail open (plain messages), never break tool-building.
+        # A broken/partial crypto backend can *panic* (not ImportError). Report
+        # authority unavailable; signed-delegation callers fail closed.
         return None
     lock = getattr(ctx, "_handoff_lock", None)
     if lock is None:
@@ -176,6 +188,7 @@ def send_handoff(
     required_tools=(),
     body: str = "",
     goal_id: int | None = None,
+    namespace: str | None = None,
 ) -> str:
     """Mint a signed handoff and deliver it to ``recipient``'s bus inbox.
 
@@ -187,7 +200,14 @@ def send_handoff(
         sender=sender, recipient=recipient, grant=grant, task=task,
         required_tools=required_tools, body=body,
     )
-    if not agent_bus.send(sender, recipient, env, correlation_id=env.nonce, goal_id=goal_id):
+    if not agent_bus.send(
+        sender,
+        recipient,
+        env,
+        correlation_id=env.nonce,
+        goal_id=goal_id,
+        namespace=namespace,
+    ):
         raise RuntimeError(f"bus inbox full for {recipient!r}; handoff not delivered")
     return env.nonce
 
@@ -198,6 +218,7 @@ def receive_handoff(
     *,
     timeout: float = 0.0,
     now: float | None = None,
+    namespace: str | None = None,
 ) -> HandoffDelivery | None:
     """Pull one bus message; if it's a handoff envelope, verify it.
 
@@ -205,16 +226,30 @@ def receive_handoff(
     whether the receiver may proceed (and under which grant); a non-handoff
     payload returns with ``verdict=None`` (unverified, like a plain message).
     """
-    msg = agent_bus.recv(agent_id, timeout=timeout)
+    recv_kwargs = {"timeout": timeout}
+    if namespace is not None:
+        recv_kwargs["namespace"] = namespace
+    msg = agent_bus.recv(agent_id, **recv_kwargs)
     if msg is None:
         return None
     if isinstance(msg.payload, Envelope):
-        if authority is None:
+        if msg.recipient != agent_id:
+            verdict = HandoffVerdict(
+                False,
+                "delivery_recipient_mismatch",
+                "delivery wrapper does not match the receiving inbox",
+            )
+        elif authority is None:
             verdict = HandoffVerdict(
                 False, "no_authority", "no handoff authority installed for this run"
             )
         else:
-            verdict = authority.verify(msg.payload, now=now)
+            verdict = authority.verify(
+                msg.payload,
+                now=now,
+                expected_recipient=agent_id,
+                expected_sender=msg.sender,
+            )
         return HandoffDelivery(sender=msg.sender, payload=msg.payload, verdict=verdict)
     return HandoffDelivery(sender=msg.sender, payload=msg.payload, verdict=None)
 

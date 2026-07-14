@@ -186,7 +186,8 @@ def _load_pil():
         from PIL import Image
     except ImportError as e:
         raise ImportError(
-            "local image ops need Pillow. Run: pip install 'maverick-agent[computer-use]'"
+            "local image ops need Pillow. From the reviewed checkout run: "
+            "python -m pip install -e './packages/maverick-core[computer-use]'"
         ) from e
     return Image
 

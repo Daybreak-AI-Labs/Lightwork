@@ -11,6 +11,8 @@ those teams to dashboard roles ([dashboard] group_roles) and department grants
 """
 from __future__ import annotations
 
+import json
+
 import pytest
 from starlette.testclient import TestClient
 
@@ -201,6 +203,36 @@ def test_deactivated_user_confers_no_group_access(client):
         headers=_auth())
     assert r.status_code == 200
     assert scim_groups.group_names_for_principal("user:oid-bob") == frozenset()
+    assert scim_groups.active_for_principal("user:oid-bob") is False
+
+    # A fresh token from a lagging/misconfigured IdP must not regain the global
+    # default role after SCIM has deprovisioned the identity.
+    from fastapi import HTTPException
+    from maverick.oidc import VerifiedPrincipal
+    from maverick_dashboard import auth
+
+    with pytest.raises(HTTPException) as exc:
+        auth._enforce_scim_active(
+            VerifiedPrincipal(sub="oid-bob", issuer="issuer", audience="aud")
+        )
+    assert exc.value.status_code == 401
+
+
+def test_corrupt_subject_binding_directory_blocks_lifecycle_resolution(client, tmp_path):
+    _mk_user(client, "alice@example.com", external_id="oid-alice")
+    (tmp_path / "oidc-subjects.json").write_text('{"bad":NaN}', encoding="utf-8")
+
+    from fastapi import HTTPException
+    from maverick.oidc import VerifiedPrincipal
+    from maverick_dashboard import auth, subject_directory
+
+    with pytest.raises(subject_directory.SubjectDirectoryError):
+        subject_directory.load_index()
+    with pytest.raises(HTTPException) as exc:
+        auth._enforce_scim_active(
+            VerifiedPrincipal(sub="oid-alice", issuer="issuer", audience="aud")
+        )
+    assert exc.value.status_code == 503
 
 
 def test_group_role_most_privileged_and_stored_wins(client, monkeypatch):
@@ -252,6 +284,112 @@ def test_group_scoped_user_sees_only_their_departments(client, monkeypatch):
 
 
 # ---------- SCIM Group store hardening ----------
+
+def test_missing_group_store_retains_empty_bootstrap_semantics():
+    from maverick_dashboard import scim
+
+    assert not scim._groups_path().exists()
+    assert scim._load_groups() == {}
+
+
+def test_corrupt_group_store_fails_closed_and_mutator_does_not_overwrite(client):
+    from maverick_dashboard import scim
+    from maverick_dashboard.app import app
+
+    damaged = '{"groups": ['
+    scim._groups_path().write_text(damaged, encoding="utf-8")
+    with pytest.raises(scim.ScimStoreError):
+        scim._load_groups()
+    no_raise_client = TestClient(
+        app,
+        headers={"Origin": "http://testserver"},
+        raise_server_exceptions=False,
+    )
+    response = no_raise_client.post(
+        "/scim/v2/Groups",
+        json={"schemas": [_GROUP_SCHEMA], "displayName": "Must Not Commit"},
+        headers=_auth(),
+    )
+    assert response.status_code == 500
+    assert scim._groups_path().read_text(encoding="utf-8") == damaged
+
+
+def test_unreadable_group_store_fails_closed(monkeypatch):
+    from maverick_dashboard import scim
+
+    scim._groups_path().write_text('{"groups": []}', encoding="utf-8")
+
+    def denied(_path):
+        raise PermissionError("simulated ACL denial")
+
+    monkeypatch.setattr(scim, "atomic_read_text", denied)
+    with pytest.raises(scim.ScimStoreError, match="unreadable"):
+        scim._load_groups()
+
+
+def test_group_store_schema_rejects_malformed_members(client):
+    from maverick_dashboard import scim
+
+    uid = _mk_user(client, "a@example.com", external_id="oid-a")
+    _mk_group(client, "Finance Team", [uid])
+    data = json.loads(scim._groups_path().read_text(encoding="utf-8"))
+    data["groups"][0]["members"] = [{"value": uid}]
+    scim._groups_path().write_text(json.dumps(data), encoding="utf-8")
+    with pytest.raises(scim.ScimStoreError, match="invalid member id"):
+        scim._load_groups()
+
+
+def test_corrupt_scim_state_denies_group_derived_access(client, monkeypatch):
+    uid = _mk_user(client, "a@example.com", external_id="oid-a")
+    _mk_group(client, "Finance Team", [uid])
+    _map_groups(
+        monkeypatch,
+        roles={"Finance Team": "operator"},
+        suites={"Finance Team": ["finance"]},
+    )
+    from maverick import suite_grants
+    from maverick_dashboard import auth, scim, scim_groups
+
+    scim._groups_path().write_text("not-json", encoding="utf-8")
+    with pytest.raises(scim.ScimStoreError):
+        scim_groups.group_names_for_principal("user:oid-a")
+    # The surrounding role/grant integrations otherwise catch exceptions and
+    # fall through to operator/unrestricted defaults. The resolver itself must
+    # return an explicit least-privilege answer at that seam.
+    assert scim_groups.role_for_principal("user:oid-a") == "viewer"
+    assert scim_groups.suites_for_principal("user:oid-a") == frozenset()
+    assert auth.global_role_for_principal("user:oid-a") == "viewer"
+    assert suite_grants.granted_suites("user:oid-a") == frozenset()
+
+
+def test_config_source_error_and_malformed_mapping_deny(monkeypatch):
+    import maverick.config as config
+    from maverick_dashboard import scim_groups
+
+    monkeypatch.setattr(config, "load_config", dict)
+    monkeypatch.setattr(
+        config,
+        "config_source_errors",
+        lambda: {"config.toml": "simulated parse error"},
+    )
+    assert scim_groups.role_for_principal("user:any") == "viewer"
+    assert scim_groups.suites_for_principal("user:any") == frozenset()
+
+    def invalid_table(key):
+        return {"Finance Team": "owner" if key == "group_roles" else 42}
+
+    monkeypatch.setattr(scim_groups, "_config_table", invalid_table)
+    assert scim_groups.role_for_principal("user:any") == "viewer"
+    assert scim_groups.suites_for_principal("user:any") == frozenset()
+
+
+def test_group_store_and_parent_are_private(client):
+    from maverick.file_lock import private_path_is_restricted
+    from maverick_dashboard import scim
+
+    assert _mk_group(client, "Private Team")
+    assert private_path_is_restricted(scim._groups_path(), 0o600)
+    assert private_path_is_restricted(scim._groups_path().parent, 0o700)
 
 def test_patch_remove_members_with_value_does_not_clear_all(client):
     # A remove op whose value is present but yields no parseable ids (a single

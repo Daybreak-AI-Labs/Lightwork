@@ -31,11 +31,18 @@ from __future__ import annotations
 import hashlib
 import json
 import logging
-import os
 import time
 import uuid
 from dataclasses import dataclass
 from pathlib import Path
+
+from .file_lock import (
+    atomic_read_text,
+    atomic_write_text,
+    cross_process_lock,
+    ensure_private_directory,
+    ensure_private_file,
+)
 
 log = logging.getLogger(__name__)
 
@@ -54,7 +61,7 @@ def _require_crypto() -> None:
     if not _have_crypto():
         raise RuntimeError(
             "plugin CA needs the cryptography package. "
-            "Install: pip install 'maverick-agent[audit-signing]'")
+            "Install: python -m pip install -e './packages/maverick-core[audit-signing]'")
 
 
 def _keypair() -> tuple[str, str]:
@@ -113,25 +120,29 @@ class PluginCA:
     def init_root(self) -> str:
         """Create the root keypair (refuses to overwrite). Returns pub hex."""
         _require_crypto()
-        if self._priv_path.exists():
-            raise RuntimeError(f"root already exists at {self._priv_path}")
-        self.dir.mkdir(parents=True, exist_ok=True)
-        try:
-            os.chmod(self.dir, 0o700)
-        except OSError:  # pragma: no cover
-            pass
-        priv_hex, pub_hex = _keypair()
-        self._priv_path.write_text(priv_hex, encoding="utf-8")
-        os.chmod(self._priv_path, 0o600)
-        self._pub_path.write_text(pub_hex, encoding="utf-8")
-        self._write_crl({"revoked": {}, "sig": ""})
+        ensure_private_directory(self.dir)
+        with cross_process_lock(self._priv_path):
+            try:
+                ensure_private_file(self._priv_path, 0o600)
+            except FileNotFoundError:
+                pass
+            else:
+                raise RuntimeError(f"root already exists at {self._priv_path}")
+            priv_hex, pub_hex = _keypair()
+            atomic_write_text(self._priv_path, priv_hex, mode=0o600)
+            atomic_write_text(self._pub_path, pub_hex, mode=0o644)
+            self._write_crl({"revoked": {}, "sig": ""})
         return pub_hex
 
     def root_pub(self) -> str:
-        return self._pub_path.read_text(encoding="utf-8").strip()
+        ensure_private_directory(self.dir)
+        ensure_private_file(self._pub_path, 0o644)
+        return atomic_read_text(self._pub_path).strip()
 
     def _root_priv(self) -> str:
-        return self._priv_path.read_text(encoding="utf-8").strip()
+        ensure_private_directory(self.dir)
+        ensure_private_file(self._priv_path, 0o600)
+        return atomic_read_text(self._priv_path).strip()
 
     # -- issuing ------------------------------------------------------------
 
@@ -155,24 +166,27 @@ class PluginCA:
     # -- revocation ---------------------------------------------------------
 
     def revoke(self, serial: str, *, reason: str = "") -> None:
-        crl = self._load_crl()
-        crl["revoked"][serial] = {"at": time.time(), "reason": reason}
-        self._write_crl(crl)
+        ensure_private_directory(self.dir)
+        with cross_process_lock(self._crl_path):
+            crl = self._load_crl()
+            crl["revoked"][serial] = {"at": time.time(), "reason": reason}
+            self._write_crl(crl)
 
     def _write_crl(self, crl: dict) -> None:
         crl["sig"] = _sign(self._root_priv(),
                            _canonical({"revoked": crl["revoked"]}))
-        tmp = self._crl_path.with_suffix(".tmp")
-        tmp.write_text(json.dumps(crl, sort_keys=True), encoding="utf-8")
-        os.replace(tmp, self._crl_path)
-        try:
-            os.chmod(self._crl_path, 0o600)
-        except OSError:  # pragma: no cover
-            pass
+        ensure_private_directory(self.dir)
+        atomic_write_text(
+            self._crl_path,
+            json.dumps(crl, sort_keys=True),
+            mode=0o600,
+        )
 
     def _load_crl(self) -> dict:
         try:
-            crl = json.loads(self._crl_path.read_text(encoding="utf-8"))
+            ensure_private_directory(self.dir)
+            ensure_private_file(self._crl_path, 0o600)
+            crl = json.loads(atomic_read_text(self._crl_path))
         except OSError as exc:
             raise RuntimeError("CRL missing; refusing to infer revocation state") from exc
         except ValueError as exc:

@@ -1,13 +1,13 @@
 <#
   Lightwork desktop bootstrap (Windows).
 
-  Zero prerequisites. It installs Python 3.12 if missing, installs the
-  published Lightwork package from PyPI into an isolated pipx environment,
-  and launches the wizard (`maverick init`).
+  Zero prerequisites. It installs Python 3.12 if missing, checks out an exact
+  Lightwork commit into an isolated pipx environment, and launches the wizard
+  (`maverick init`). There is deliberately no public-package-index fallback.
 
-  Advanced source installs must pin $env:MAVERICK_REF to a full
-  40-character commit SHA. Mutable branches/tags are rejected unless
-  $env:MAVERICK_ALLOW_UNPINNED = "1" is set explicitly.
+  Set $env:MAVERICK_REF to a reviewed, lowercase, full 40-character commit
+  SHA. Mutable refs and an omitted ref fail before the script changes the
+  machine.
 
   If Python is already installed but not detected, point straight at it:
     $env:MAVERICK_PYTHON = "C:\path\to\python.exe"
@@ -18,7 +18,6 @@ $ErrorActionPreference = 'Stop'
 $Repo   = if ($env:MAVERICK_REPO) { $env:MAVERICK_REPO } else { 'Day-AI-Labs/Lightwork' }
 $Ref    = if ($env:MAVERICK_REF)  { $env:MAVERICK_REF }  else { '' }
 $SrcDir = Join-Path $env:LOCALAPPDATA 'Lightwork\src'
-$AllowUnpinned = if ($env:MAVERICK_ALLOW_UNPINNED) { $env:MAVERICK_ALLOW_UNPINNED } else { '' }
 
 # How to call the resolved Python: $PyExe + $PyPre (e.g. 'py' + '-3').
 $script:PyExe = $null
@@ -31,17 +30,15 @@ function Have($cmd) { [bool](Get-Command $cmd -ErrorAction SilentlyContinue) }
 function Py { & $script:PyExe @($script:PyPre + $args) }
 
 function Test-PinnedRef($ref) {
-  return ($ref -match '^[0-9a-fA-F]{40}$')
+  return ($ref -cmatch '^[0-9a-f]{40}$')
 }
 
 function Ensure-SourcePin {
-  if (-not $Ref) { return }
-  if (Test-PinnedRef $Ref) { return }
-  if ($AllowUnpinned -eq '1') {
-    Write-Warn "Installing from unpinned ref '$Ref' because MAVERICK_ALLOW_UNPINNED=1."
-    return
+  if (-not $Ref) {
+    Die "MAVERICK_REF is required. Set it to a reviewed, full 40-character Lightwork commit SHA; public-index fallback is disabled."
   }
-  Die "MAVERICK_REF must be a full 40-character commit SHA. Ref '$Ref' is mutable; set MAVERICK_ALLOW_UNPINNED=1 only for trusted local testing."
+  if (Test-PinnedRef $Ref) { return }
+  Die "MAVERICK_REF must be a lowercase, full 40-character commit SHA; got '$Ref'."
 }
 
 function Ensure-RepoSlug {
@@ -49,7 +46,7 @@ function Ensure-RepoSlug {
   # below. Constrain it to a GitHub "owner/repo" slug so a hostile or typo'd
   # value can't point the install at a different repo or smuggle URL/shell
   # metacharacters into the git command. Mirrors validate_repo in install.sh.
-  # (Only the source path uses $Repo; the default PyPI install never touches it.)
+  # (Only the source path uses $Repo.)
   if ($Repo -notmatch '^[A-Za-z0-9._-]+/[A-Za-z0-9._-]+$') {
     Die "MAVERICK_REPO must be a GitHub 'owner/repo' slug (letters, digits, '.', '_', '-'); got '$Repo'."
   }
@@ -202,30 +199,45 @@ function Fetch-Source {
   Ensure-SourcePin
   Ensure-RepoSlug
   Ensure-GitForSource
-  if (Test-Path (Join-Path $SrcDir '.git')) {
-    Write-Step "Updating Lightwork source ($Repo@$Ref) ..."
-    git -C $SrcDir remote set-url origin "https://github.com/$Repo"
-    git -C $SrcDir fetch --depth 1 origin $Ref
-    git -C $SrcDir checkout --detach FETCH_HEAD | Out-Null
-  } else {
-    Write-Step "Downloading Lightwork ($Repo@$Ref) ..."
-    Remove-Item -Recurse -Force $SrcDir -ErrorAction SilentlyContinue
-    New-Item -ItemType Directory -Force -Path (Split-Path $SrcDir) | Out-Null
-    git clone --no-checkout --depth 1 "https://github.com/$Repo" $SrcDir
-    git -C $SrcDir fetch --depth 1 origin $Ref
-    git -C $SrcDir checkout --detach FETCH_HEAD | Out-Null
+  Write-Step "Downloading a fresh Lightwork source tree ($Repo@$Ref) ..."
+  $srcParent = Split-Path $SrcDir
+  New-Item -ItemType Directory -Force -Path $srcParent | Out-Null
+  $stageDir = Join-Path $srcParent ("src.stage." + [Guid]::NewGuid().ToString('N'))
+  try {
+    git clone --no-checkout --filter=blob:none "https://github.com/$Repo" $stageDir
+    if ($LASTEXITCODE -ne 0) { Die "Could not clone the Lightwork source repository." }
+    git -C $stageDir fetch --depth 1 origin $Ref
+    if ($LASTEXITCODE -ne 0) { Die "Could not fetch required Lightwork commit '$Ref'." }
+    git -C $stageDir -c advice.detachedHead=false checkout --detach FETCH_HEAD | Out-Null
+    if ($LASTEXITCODE -ne 0) { Die "Could not check out required Lightwork commit '$Ref'." }
+    $actualRef = ((git -C $stageDir rev-parse HEAD 2>$null) | Out-String).Trim()
+    if ($LASTEXITCODE -ne 0 -or $actualRef -cne $Ref) {
+      Die "Checked-out source is at '$actualRef', not required ref '$Ref'."
+    }
+    $dirty = ((git -C $stageDir status --porcelain --untracked-files=all 2>$null) | Out-String).Trim()
+    if ($LASTEXITCODE -ne 0 -or $dirty) {
+      Die "Fresh pinned Lightwork checkout is unexpectedly dirty."
+    }
+    if (-not (Test-Path (Join-Path $stageDir 'packages\maverick-core\pyproject.toml'))) {
+      Die "Pinned checkout is not a complete Lightwork source tree."
+    }
+    Remove-Item -Recurse -Force -LiteralPath $SrcDir -ErrorAction SilentlyContinue
+    Move-Item -LiteralPath $stageDir -Destination $SrcDir
+    $stageDir = $null
+  } finally {
+    if ($stageDir -and (Test-Path -LiteralPath $stageDir)) {
+      Remove-Item -Recurse -Force -LiteralPath $stageDir -ErrorAction SilentlyContinue
+    }
   }
 }
 
 # 3. Install agent + wizard into one pipx venv.
 Write-Step "Installing the agent + setup wizard (this can take a minute) ..."
-if ($Ref) {
-  Fetch-Source
-  Py -m pipx install --force (Join-Path $SrcDir 'packages\maverick-core')
-  Py -m pipx inject --force maverick-agent (Join-Path $SrcDir 'apps\installer-cli')
-} else {
-  Py -m pipx install --force 'maverick-agent[installer]'
-}
+Fetch-Source
+Py -m pipx install --force (Join-Path $SrcDir 'packages\maverick-core')
+if ($LASTEXITCODE -ne 0) { Die "pipx could not install the pinned Lightwork core source." }
+Py -m pipx inject --force maverick-agent (Join-Path $SrcDir 'apps\installer-cli')
+if ($LASTEXITCODE -ne 0) { Die "pipx could not install the pinned Lightwork wizard source." }
 
 # 4. Locate the maverick shim and launch the wizard.
 $binDir = $null

@@ -53,7 +53,7 @@ def _need_serial():
         import serial.tools.list_ports  # noqa: F401
         return None
     except ImportError:
-        return "ERROR: pyserial not installed. Run: pip install 'maverick-agent[serial]'"
+        return "ERROR: pyserial not installed. Run: python -m pip install -e './packages/maverick-core[serial]'"
 
 
 def _valid_port(port: str) -> bool:

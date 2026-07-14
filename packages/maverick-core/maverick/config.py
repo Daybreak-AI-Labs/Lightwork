@@ -42,15 +42,16 @@ except ModuleNotFoundError:  # pragma: no cover
     import tomli as tomllib  # type: ignore
 
 
-# Note: do NOT cache `Path.home()` at module import time. It evaluates
-# eagerly against the import-time HOME env var, and stays stale if HOME
-# is later patched (e.g. by pytest's monkeypatch.setenv("HOME", ...)
-# for test isolation). Resolve dynamically inside config_path() instead.
+# Note: do not cache the default at module import time. Both the platform home
+# and the documented MAVERICK_HOME override can change in test/embedded
+# processes, so resolve them dynamically inside config_path().
 DEFAULT_CONFIG_BASENAME = (".maverick", "config.toml")
 
 
 def _default_config_path() -> Path:
-    return Path.home() / DEFAULT_CONFIG_BASENAME[0] / DEFAULT_CONFIG_BASENAME[1]
+    from .paths import maverick_home
+
+    return maverick_home() / DEFAULT_CONFIG_BASENAME[1]
 
 
 def __getattr__(name: str):
@@ -109,6 +110,10 @@ def config_path() -> Path:
 # inbound A2A delegate triggers ~6-10 full parses); this removes the redundant
 # I/O + tokenize while preserving exact semantics.
 _toml_cache: dict[str, tuple[int, int, dict]] = {}
+# General configuration remains fail-soft, but security boundaries need to
+# distinguish "file absent" from "present but unreadable/corrupt". Track the
+# latter alongside the parsed cache so trust/auth callers can fail closed.
+_toml_errors: dict[str, str] = {}
 # Bound the cache so a deployment with many per-tenant config paths
 # (~/.maverick/tenants/<t>/config.toml) can't grow it without limit. Entries
 # are cheap to rebuild (a stat + parse), so a simple oldest-first cap is enough.
@@ -120,6 +125,7 @@ def reset_config_cache() -> None:
     change)."""
     global _env_last_check
     _toml_cache.clear()
+    _toml_errors.clear()
     _env_file_cache.clear()
     _env_last_check = None
 
@@ -192,11 +198,17 @@ def _load_env_file(path: Path) -> None:
 def _read_toml_raw(path: Path) -> dict:
     """Parsed TOML for ``path`` (NO interpolation), memoized by mtime+size.
     Returns ``{}`` for a missing file, and ``{}`` + a warning for a corrupt one."""
+    key = str(path)
     try:
         st = path.stat()
-    except OSError:
-        return {}  # missing/inaccessible -> defaults (no warning, like before)
-    key = str(path)
+    except FileNotFoundError:
+        _toml_cache.pop(key, None)
+        _toml_errors.pop(key, None)
+        return {}  # an absent optional config legitimately means defaults
+    except OSError as e:
+        _toml_cache.pop(key, None)
+        _toml_errors[key] = f"{type(e).__name__}: {e}"
+        return {}  # general callers stay fail-soft; security callers inspect health
     cached = _toml_cache.get(key)
     if cached is not None and cached[0] == st.st_mtime_ns and cached[1] == st.st_size:
         return cached[2]
@@ -212,11 +224,16 @@ def _read_toml_raw(path: Path) -> dict:
             "ignoring unreadable %s (%s: %s); using defaults",
             path, type(e).__name__, e,
         )
+        _toml_errors[key] = f"{type(e).__name__}: {e}"
         raw = {}
+    else:
+        _toml_errors.pop(key, None)
     # Evict oldest entries first when over the cap (dicts preserve insertion
     # order). Re-fetching ``key`` below keeps the just-read path resident.
     while len(_toml_cache) >= _TOML_CACHE_MAX:
-        _toml_cache.pop(next(iter(_toml_cache)), None)
+        evicted = next(iter(_toml_cache))
+        _toml_cache.pop(evicted, None)
+        _toml_errors.pop(evicted, None)
     _toml_cache[key] = (st.st_mtime_ns, st.st_size, raw)
     return raw
 
@@ -240,6 +257,45 @@ def _deep_merge_config(base: dict, overlay: dict) -> dict:
 def dashboard_overrides_path() -> Path:
     """Path to the dashboard-owned config overlay (next to config.toml)."""
     return config_path().parent / DASHBOARD_OVERRIDES_BASENAME
+
+
+def config_source_errors() -> dict[str, str]:
+    """Unreadable/corrupt files among the active config sources.
+
+    ``load_config`` intentionally returns defaults for malformed TOML so a typo
+    does not crash ordinary model-selection calls. Authentication and trust
+    callers inspect this seam immediately after loading and deny remote control
+    if policy may have been lost.
+    """
+    paths = [config_path(), dashboard_overrides_path()]
+    overlay = os.environ.get(CONFIG_OVERLAY_ENV)
+    if overlay:
+        paths.append(Path(overlay).expanduser())
+    tenant = tenant_config_path()
+    if tenant is not None:
+        paths.append(tenant)
+    # Optional overlays are skipped by ``load_config`` once they disappear, so
+    # a parse error cached while the file existed would otherwise remain
+    # security-significant forever. Clear it only when the filesystem
+    # definitively reports that the source is absent. Permission failures and
+    # every other I/O error remain fail-closed: they may mean policy exists but
+    # cannot be inspected.
+    for path in paths:
+        key = str(path)
+        if key not in _toml_errors:
+            continue
+        try:
+            path.stat()
+        except FileNotFoundError:
+            _toml_cache.pop(key, None)
+            _toml_errors.pop(key, None)
+        except OSError:
+            pass
+    return {
+        str(path): _toml_errors[str(path)]
+        for path in paths
+        if str(path) in _toml_errors
+    }
 
 
 def tenant_config_path() -> Path | None:

@@ -189,7 +189,8 @@ def _pin_tenant_from_principal(request: Request, principal: VerifiedPrincipal) -
     authentication dependency, immediately after a principal is established and
     before route handlers choose tenant-scoped world state. The reset token is
     stored on request state for the outer middleware to clean up after the
-    response. Pinning is best-effort and never blocks authentication.
+    response. If an opted-in isolation policy cannot be resolved, authentication
+    is refused instead of silently serving the caller from the shared root.
     """
     try:
         from maverick.paths import set_tenant, tenant_by_user_enabled
@@ -200,8 +201,13 @@ def _pin_tenant_from_principal(request: Request, principal: VerifiedPrincipal) -
         if not name or getattr(request.state, "tenant_pin_token", None) is not None:
             return
         request.state.tenant_pin_token = set_tenant(f"api:{name}")
-    except Exception:  # pragma: no cover -- tenant pinning must fail open
-        return
+    except HTTPException:
+        raise
+    except Exception as exc:
+        raise HTTPException(
+            status_code=503,
+            detail="tenant isolation policy unavailable",
+        ) from exc
 
 
 def is_dashboard_admin(principal: str) -> bool:
@@ -237,17 +243,20 @@ def global_role_for_principal(principal: str | None) -> str | None:
     if is_dashboard_admin(principal):
         return "admin"
     from . import rbac
-    stored = rbac.get_stored_role(principal)
-    if stored:
-        return stored
     try:
+        stored = rbac.get_stored_role(principal)
+        if stored:
+            return stored
         from . import scim_groups
         group_role = scim_groups.role_for_principal(principal)
         if group_role:
             return group_role
-    except Exception:  # pragma: no cover - group mapping must never gate auth
-        pass
-    return rbac.default_role()
+        return rbac.default_role()
+    except Exception:
+        # A damaged role roster, group-membership source, or config default is
+        # deny-all. Falling through to the historical operator default would
+        # turn a policy outage into a privilege escalation.
+        return None
 
 
 def role_for_principal(principal: str | None) -> str | None:
@@ -276,8 +285,10 @@ def role_for_principal(principal: str | None) -> str | None:
             tenant_role = rbac.get_tenant_role(tid, principal)
             if tenant_role:
                 return tenant_role
-    except Exception:  # pragma: no cover - tenant resolution never gates auth
-        pass
+    except Exception:
+        # Never replace an unreadable tenant-local demotion with the broader
+        # global/default role.
+        return None
     return global_role_for_principal(principal)
 
 
@@ -424,6 +435,27 @@ def assert_goal_access(request: Request, goal) -> None:
         raise HTTPException(status_code=404, detail="no such goal")
 
 
+def _enforce_scim_active(principal: VerifiedPrincipal) -> None:
+    """Reject a SCIM-matched principal that has been deprovisioned.
+
+    Revocation epochs terminate credentials minted before deprovisioning, but
+    an IdP that mistakenly continues issuing fresh tokens could otherwise give
+    the inactive user the dashboard's global default role. The live SCIM roster
+    is therefore an authentication gate as well as a group-grant source.
+    """
+    try:
+        from .scim_groups import active_for_principal
+
+        active = active_for_principal(principal.principal)
+    except Exception as exc:
+        raise HTTPException(
+            status_code=503,
+            detail="identity lifecycle policy unavailable",
+        ) from exc
+    if active is False:
+        raise HTTPException(status_code=401, detail="invalid identity")
+
+
 def require_principal(
     request: Request = None,  # type: ignore[assignment]
     websocket: WebSocket = None,  # type: ignore[assignment,name-defined]
@@ -475,10 +507,12 @@ def require_principal(
         from .session_revocation import is_revoked
         if is_revoked(ws_principal.sub, ws_principal.claims.get("iat")):
             raise HTTPException(status_code=401, detail="invalid OIDC token")
+        _enforce_scim_active(ws_principal)
         return ws_principal
 
     pp = _proxy_principal(request)
     if pp is not None:
+        _enforce_scim_active(pp)
         request.state.principal = pp
         _pin_tenant_from_principal(request, pp)
         return pp
@@ -490,6 +524,7 @@ def require_principal(
         # legacy no-principal return below is otherwise byte-identical.
         lp = _invite_session_principal(request)
         if lp is not None:
+            _enforce_scim_active(lp)
             request.state.principal = lp
             _pin_tenant_from_principal(request, lp)
             return lp
@@ -501,6 +536,7 @@ def require_principal(
     # configured; otherwise this returns None and nothing changes.
     sp = _session_principal(request)
     if sp is not None:
+        _enforce_scim_active(sp)
         request.state.principal = sp
         _pin_tenant_from_principal(request, sp)
         return sp
@@ -559,6 +595,7 @@ def require_principal(
             status_code=401, detail="invalid OIDC token",
             headers={"WWW-Authenticate": "Bearer"},
         ) from None
+    _enforce_scim_active(principal)
     request.state.principal = principal
     _pin_tenant_from_principal(request, principal)
     return principal

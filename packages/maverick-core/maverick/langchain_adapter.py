@@ -101,7 +101,7 @@ def maverick_langchain_tool(
     except ImportError as e:
         raise ImportError(
             "LangChain adapter needs langchain-core "
-            "(pip install 'maverick-agent[langchain]')") from e
+            "(python -m pip install -e './packages/maverick-core[langchain]')") from e
 
     def _run(goal: str, description: str = "") -> str:
         return run_maverick_goal(

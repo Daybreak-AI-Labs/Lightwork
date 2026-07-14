@@ -143,11 +143,9 @@ def write_artifact(text: str, *, out_dir: Path | None = None) -> Path:
     out_dir.mkdir(parents=True, exist_ok=True)
     digest = hashlib.sha256(text.encode("utf-8")).hexdigest()[:16]
     path = out_dir / f"reply-{digest}.html"
-    path.write_text(render_html(text), encoding="utf-8")
-    try:
-        os.chmod(path, 0o600)
-    except OSError:  # pragma: no cover
-        pass
+    from maverick.file_lock import atomic_write_text
+
+    atomic_write_text(path, render_html(text))
     return path
 
 

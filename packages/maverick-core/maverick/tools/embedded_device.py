@@ -112,7 +112,11 @@ def _safe_path(sandbox, user_path: str) -> str:
         candidate.relative_to(workdir)
     except ValueError as e:
         raise ValueError(f"path {user_path!r} escapes the workspace") from e
-    return str(candidate)
+    # OpenOCD's command language treats backslash as an escape. Windows-native
+    # paths therefore trip the injection guard below (or can be reinterpreted
+    # by Tcl). Forward-slash absolute paths are accepted by Windows/OpenOCD and
+    # preserve the already-verified workspace confinement.
+    return candidate.as_posix()
 
 
 def _safe_cfg(name: str, what: str) -> str:
@@ -236,7 +240,7 @@ def smbus2_bus(bus_number: int = 1):
         from smbus2 import SMBus, i2c_msg
     except ImportError as e:
         raise ImportError(
-            "smbus2 not installed — pip install 'maverick-agent[i2c]' "
+            "smbus2 not installed — python -m pip install -e './packages/maverick-core[i2c]' "
             "(or pip install smbus2) to talk to /dev/i2c-* on this host"
         ) from e
 

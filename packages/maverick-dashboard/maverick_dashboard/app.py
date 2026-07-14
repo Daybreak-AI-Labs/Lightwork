@@ -550,7 +550,10 @@ async def _install_queue_dispatcher() -> None:
             log.info("queue dispatcher installed: goals run out-of-process")
             return
     except Exception:
-        log.exception("queue dispatcher install failed (running in-process)")
+        # The queue installer pins a rejecting dispatcher before raising. Keep
+        # that fail-closed state; a gRPC fallback would silently overwrite it.
+        log.exception("queue dispatcher install failed; dispatch remains fail-closed")
+        return
     # gRPC dispatch had a complete install_from_config() that nothing called, so
     # [grpc_dispatch] target was silently ignored and goals kept running
     # in-process. Wire it in as the fallback out-of-process path.
@@ -565,6 +568,11 @@ _AUTH_EXEMPT = {
     "/healthz", "/livez", "/readyz",
     "/openapi.json", "/docs", "/redoc", "/docs/oauth2-redirect",
     "/.well-known/agent-card.json", "/.well-known/agent.json",
+    # The A2A task endpoint enforces its own shared/per-agent bearer and trust
+    # plane. Requiring the unrelated dashboard bearer here would either block
+    # valid A2A identities or pressure operators to reuse one credential across
+    # two trust domains.
+    "/a2a/v1",
     # /webhook/start authenticates with its own HMAC signature instead of
     # the dashboard bearer / same-origin checks (external senders have
     # neither), so it must bypass the centralized middleware.
@@ -3591,16 +3599,20 @@ async def chat_send(
         bg.add_task(_att.generate_companions, w, goal_id)
     # Use the shared runner so this path gets the same concurrency cap,
     # budget defaults, and error handling as the REST API and MCP server.
-    from maverick.runner import run_goal_in_thread
+    from maverick.runner import run_goal_in_background_async
     allowed_suites = caller_suites(request)
     user_id = execution_user_id_from_request(request)
     if user_id:
         bg.add_task(
-            run_goal_in_thread, goal_id,
+            run_goal_in_background_async, goal_id,
             channel="dashboard", user_id=user_id, allowed_suites=allowed_suites,
         )
     else:
-        bg.add_task(run_goal_in_thread, goal_id, allowed_suites=allowed_suites)
+        bg.add_task(
+            run_goal_in_background_async,
+            goal_id,
+            allowed_suites=allowed_suites,
+        )
     return RedirectResponse(f"/chat/goal/{goal_id}", status_code=303)
 
 
@@ -3644,7 +3656,7 @@ async def webhook_start(request: Request, bg: BackgroundTasks) -> JSONResponse:
         title[:200], description[:8000], owner=caller_principal(request) or "",
     )
 
-    from maverick.runner import DEFAULT_MAX_DOLLARS, run_goal_in_thread
+    from maverick.runner import DEFAULT_MAX_DOLLARS, run_goal_in_background_async
     budget = payload.get("budget")
     max_dollars = None
     if budget is not None:
@@ -3652,13 +3664,13 @@ async def webhook_start(request: Request, bg: BackgroundTasks) -> JSONResponse:
             max_dollars = float(budget)
         except (TypeError, ValueError):
             raise HTTPException(status_code=400, detail="budget must be a number") from None
-        # Clamp to the same ceiling the REST route enforces. run_goal_in_thread
+        # Clamp to the same ceiling the REST route enforces. The shared runner
         # treats max_dollars as the highest-precedence override with no cap of
         # its own, so an unclamped webhook value (negative, or arbitrarily
         # large) would defeat the budget ceiling -- budget caps are not
         # optional, even on an externally reachable signed endpoint.
         max_dollars = min(max(max_dollars, 0.0), DEFAULT_MAX_DOLLARS)
-    bg.add_task(run_goal_in_thread, goal_id, max_dollars)
+    bg.add_task(run_goal_in_background_async, goal_id, max_dollars)
     return JSONResponse({"goal_id": goal_id}, status_code=201)
 
 
@@ -3790,7 +3802,7 @@ async def webhook_run(request: Request, bg: BackgroundTasks) -> JSONResponse:
     )
     # Provenance: link this run to its trigger for the Automations run history.
     w.record_goal_origin(goal_id, "trigger", name)
-    from maverick.runner import run_goal_in_thread
+    from maverick.runner import run_goal_in_background_async
     # Honour the template's own budget/wall caps on every fire -- an operator who
     # baked budget_dollars/budget_wall_seconds into the template expects them to
     # hold when a trigger runs it, exactly as the CLI template-run path does
@@ -3803,7 +3815,7 @@ async def webhook_run(request: Request, bg: BackgroundTasks) -> JSONResponse:
     # likewise clamps its externally-influenced budget.
     max_dollars = min(float(tpl.budget_dollars), 100.0)
     max_wall = min(float(tpl.budget_wall_seconds), 86400.0)
-    bg.add_task(run_goal_in_thread, goal_id, max_dollars, max_wall)
+    bg.add_task(run_goal_in_background_async, goal_id, max_dollars, max_wall)
     return JSONResponse({"goal_id": goal_id, "trigger": name}, status_code=201)
 
 
@@ -4039,8 +4051,8 @@ async def webhook_gitlab(request: Request, bg: BackgroundTasks) -> JSONResponse:
     w = _world()
     title = f"{event.issue_id}: {event.title}".strip()
     goal_id = w.create_goal(title[:200], build_brief(event)[:8000], owner="")
-    from maverick.runner import run_goal_in_thread
-    bg.add_task(run_goal_in_thread, goal_id, None)
+    from maverick.runner import run_goal_in_background_async
+    bg.add_task(run_goal_in_background_async, goal_id, None)
     return JSONResponse({"goal_id": goal_id}, status_code=201)
 
 
@@ -4180,8 +4192,8 @@ async def _handle_issue_webhook(
     title = f"{event.issue_id}: {event.title}".strip()
     # Webhook-driven goal: no authenticated principal -> unowned ("").
     goal_id = w.create_goal(title[:200], build_brief(event)[:8000], owner="")
-    from maverick.runner import run_goal_in_thread
-    bg.add_task(run_goal_in_thread, goal_id, None)
+    from maverick.runner import run_goal_in_background_async
+    bg.add_task(run_goal_in_background_async, goal_id, None)
     return JSONResponse({"goal_id": goal_id}, status_code=201)
 
 

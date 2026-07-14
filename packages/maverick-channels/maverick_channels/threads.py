@@ -39,7 +39,7 @@ Config::
 
 Requires::
 
-    pip install 'maverick-channels[threads]'   # httpx
+    python -m pip install -e './packages/maverick-channels[threads]'
 """
 from __future__ import annotations
 
@@ -98,7 +98,8 @@ class ThreadsChannel(Channel):
             import httpx
         except ImportError as e:
             raise RuntimeError(
-                "httpx not installed. Run: pip install 'maverick-channels[threads]'"
+                "httpx not installed. From the reviewed checkout run: "
+                "python -m pip install -e './packages/maverick-channels[threads]'"
             ) from e
         async with httpx.AsyncClient(timeout=30.0) as client:
             resp = await client.get(
@@ -197,7 +198,8 @@ class ThreadsChannel(Channel):
             import httpx
         except ImportError as e:
             raise RuntimeError(
-                "httpx not installed. Run: pip install 'maverick-channels[threads]'"
+                "httpx not installed. From the reviewed checkout run: "
+                "python -m pip install -e './packages/maverick-channels[threads]'"
             ) from e
         base = f"{THREADS_BASE}/{API_VERSION}/{self.user_id}"
         reply_to = user_id if str(user_id or "").isdigit() else None

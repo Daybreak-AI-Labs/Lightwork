@@ -215,7 +215,9 @@ def _to_goal_out(g) -> GoalOut:
 
 def _to_tenant_out(rec) -> TenantOut:
     from maverick.workspace import Workspace
-    config_path = str(Workspace(rec.id).root / "config.toml")
+    # API paths use a stable slash representation on every server OS; clients
+    # should not need to understand Windows path separators.
+    config_path = (Workspace(rec.id).root / "config.toml").as_posix()
     return TenantOut(
         id=rec.id, status=rec.status, plan=rec.plan,
         display_name=rec.display_name, max_daily_dollars=rec.max_daily_dollars,
@@ -517,7 +519,7 @@ async def create_goal(request: Request, payload: GoalIn, bg: BackgroundTasks) ->
         prior = w.lookup_processed_message(_IDEMPOTENCY_CHANNEL, idem_ext)
         g0 = w.get_goal(prior) if prior is not None else None
         return _to_goal_out(g0 or w.get_goal(goal_id))
-    from maverick.runner import run_goal_in_thread
+    from maverick.runner import run_goal_in_background_async
     # Enforce server-side execution caps even when callers request larger values.
     max_dollars = min(payload.max_dollars, DEFAULT_MAX_DOLLARS)
     max_wall_seconds = min(payload.max_wall_seconds, DEFAULT_MAX_WALL_SECONDS)
@@ -527,13 +529,13 @@ async def create_goal(request: Request, payload: GoalIn, bg: BackgroundTasks) ->
     user_id = execution_user_id_from_request(request)
     if user_id:
         bg.add_task(
-            run_goal_in_thread, goal_id,
+            run_goal_in_background_async, goal_id,
             max_dollars, max_wall_seconds, max_depth,
             channel="api", user_id=user_id, allowed_suites=allowed_suites,
         )
     else:
         bg.add_task(
-            run_goal_in_thread, goal_id,
+            run_goal_in_background_async, goal_id,
             max_dollars, max_wall_seconds, max_depth,
             allowed_suites=allowed_suites,
         )
@@ -2315,7 +2317,7 @@ async def voice_transcribe(
             detail=(
                 "no speech-to-text backend available. Set OPENAI_API_KEY or "
                 "GROQ_API_KEY, or install faster-whisper "
-                "(pip install 'maverick-agent[voice]')."
+                "(python -m pip install -e './packages/maverick-core[voice]')."
             ),
         )
     return JSONResponse({"text": text.strip()})
@@ -3745,7 +3747,7 @@ async def poll_event_triggers(request: Request, bg: BackgroundTasks, name: str =
     when the feature is on."""
     require_permission(request, "operate")
     _require_event_triggers()
-    from maverick.runner import run_goal_in_thread
+    from maverick.runner import run_goal_in_background_async
 
     from maverick_dashboard import event_poll
 
@@ -3757,9 +3759,14 @@ async def poll_event_triggers(request: Request, bg: BackgroundTasks, name: str =
 
     def _fire(goal_id: int) -> None:
         if user_id:
-            bg.add_task(run_goal_in_thread, goal_id, channel="api", user_id=user_id)
+            bg.add_task(
+                run_goal_in_background_async,
+                goal_id,
+                channel="api",
+                user_id=user_id,
+            )
         else:
-            bg.add_task(run_goal_in_thread, goal_id)
+            bg.add_task(run_goal_in_background_async, goal_id)
 
     def _fire_flow(flow_id: str, data: dict, owner: str, idem_key: str = "",
                    origin: str = "manual") -> str:
@@ -4797,7 +4804,7 @@ async def run_fleet_agent(
         capability_from_config,
     )
     from maverick.fleet import governance_enabled, load_fleet, record_run
-    from maverick.runner import run_goal_in_thread
+    from maverick.runner import run_goal_in_background_async
 
     fleet = load_fleet(fleet_name)
     principal = caller_principal(request)
@@ -4880,7 +4887,7 @@ async def run_fleet_agent(
     # user-created, so using them as scheduler principals lets one caller mint
     # many lanes and bypass MAVERICK_MAX_CONCURRENT_GOALS_PER_PRINCIPAL.
     bg.add_task(
-        run_goal_in_thread, goal_id, max_dollars,
+        run_goal_in_background_async, goal_id, max_dollars,
         channel="fleet", user_id=agent_principal, capability=cap,
         concurrency_principal=principal,
     )
@@ -5430,7 +5437,7 @@ async def compose_goal(request: Request, payload: ComposeIn, bg: BackgroundTasks
     goal_id = w.create_goal(
         title[:200], description[:8000], owner=caller_principal(request) or "",
     )
-    from maverick.runner import run_goal_in_thread
+    from maverick.runner import run_goal_in_background_async
     max_dollars = (
         min(payload.budget_dollars, DEFAULT_MAX_DOLLARS)
         if payload.budget_dollars is not None else DEFAULT_MAX_DOLLARS
@@ -5439,11 +5446,16 @@ async def compose_goal(request: Request, payload: ComposeIn, bg: BackgroundTasks
     user_id = execution_user_id_from_request(request)
     if user_id:
         bg.add_task(
-            run_goal_in_thread, goal_id, max_dollars,
+            run_goal_in_background_async, goal_id, max_dollars,
             channel="api", user_id=user_id, allowed_suites=allowed_suites,
         )
     else:
-        bg.add_task(run_goal_in_thread, goal_id, max_dollars, allowed_suites=allowed_suites)
+        bg.add_task(
+            run_goal_in_background_async,
+            goal_id,
+            max_dollars,
+            allowed_suites=allowed_suites,
+        )
     g = w.get_goal(goal_id)
     if g is None:
         raise HTTPException(status_code=500, detail="goal vanished after create")
@@ -5788,16 +5800,20 @@ async def resume_goal(goal_id: int, request: Request, bg: BackgroundTasks) -> No
             detail=f"goal is {g.status!r}; only blocked/cancelled/failed goals can resume",
         )
     w.set_goal_status(goal_id, "pending", result=None)
-    from maverick.runner import run_goal_in_thread
+    from maverick.runner import run_goal_in_background_async
     allowed_suites = caller_suites(request)
     user_id = execution_user_id_from_request(request)
     if user_id:
         bg.add_task(
-            run_goal_in_thread, goal_id, channel="api", user_id=user_id,
+            run_goal_in_background_async, goal_id, channel="api", user_id=user_id,
             allowed_suites=allowed_suites,
         )
     else:
-        bg.add_task(run_goal_in_thread, goal_id, allowed_suites=allowed_suites)
+        bg.add_task(
+            run_goal_in_background_async,
+            goal_id,
+            allowed_suites=allowed_suites,
+        )
 
 
 # ---------------------------------------------------------------------------

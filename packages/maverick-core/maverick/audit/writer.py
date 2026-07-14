@@ -19,6 +19,12 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
 
+from ..file_lock import (
+    atomic_write_bytes,
+    cross_process_lock,
+    ensure_private_directory,
+    ensure_private_file,
+)
 from ..paths import data_dir
 from .events import AuditEvent, EventKind, is_valid_day
 
@@ -73,6 +79,12 @@ DEFAULT_AUDIT_DIR = data_dir("audit")
 _live_logs: weakref.WeakSet[AuditLog] = weakref.WeakSet()
 _live_logs_lock = threading.Lock()
 
+# Serialize distinct AuditLog/AuditSigner instances that target the same file
+# even on platforms without a usable OS advisory lock. A fixed stripe table is
+# bounded (unlike one immortal Lock per tenant/day path); collisions only make
+# unrelated local audit writes briefly serialize, which is safe.
+_APPEND_LOCK_STRIPES = tuple(threading.Lock() for _ in range(64))
+
 
 class _file_append_lock:
     """Advisory cross-process exclusive lock for the duration of an append.
@@ -80,38 +92,80 @@ class _file_append_lock:
     Two processes appending to the same day-file can interleave torn records
     once a line exceeds ``PIPE_BUF`` (single-``write`` atomicity no longer
     holds), corrupting NDJSON and -- when signing -- the hash chain. An
-    advisory ``flock`` on the open file handle serializes concurrent writers.
+    advisory OS lock on the open file handle serializes concurrent writers.
+    POSIX uses ``flock`` and Windows uses ``msvcrt.locking``. A bounded striped
+    process lock additionally covers distinct writer instances in this process.
 
-    POSIX-only: on platforms without ``fcntl`` (e.g. Windows) this degrades to
-    a no-op -- the in-process ``threading.Lock`` still covers same-process
-    concurrency; cross-process append safety is simply not available there.
+    Failure to acquire the OS lock is fatal for the append. Continuing with only
+    the process-local stripe would let two service processes interleave unsigned
+    rows or fork a signed hash chain while still reporting a successful write.
     """
 
     def __init__(self, fileobj: Any):
         self._fileobj = fileobj
         self._locked = False
+        self._backend: str | None = None
+        name = os.path.abspath(os.fspath(getattr(fileobj, "name", "")))
+        self._thread_lock = _APPEND_LOCK_STRIPES[hash(name) % len(_APPEND_LOCK_STRIPES)]
 
     def __enter__(self) -> _file_append_lock:
+        self._thread_lock.acquire()
         try:
-            import fcntl
-        except ImportError:  # non-POSIX (e.g. Windows): no advisory lock
+            try:
+                import fcntl
+            except ImportError:
+                # Windows byte-range locking. Every Lightwork audit writer
+                # locks the first byte (locking past EOF is supported for a new
+                # empty file), so tail-read + append is one cross-process
+                # transaction.
+                try:
+                    import msvcrt
+                except ImportError as exc:  # pragma: no cover - supported OSes
+                    raise OSError(
+                        "audit append has no cross-process lock backend"
+                    ) from exc
+                original_pos = self._fileobj.tell()
+                self._fileobj.seek(0)
+                try:
+                    msvcrt.locking(self._fileobj.fileno(), msvcrt.LK_LOCK, 1)
+                finally:
+                    self._fileobj.seek(original_pos)
+                self._locked = True
+                self._backend = "msvcrt"
+            else:
+                fcntl.flock(self._fileobj.fileno(), fcntl.LOCK_EX)
+                self._locked = True
+                self._backend = "fcntl"
             return self
-        try:
-            fcntl.flock(self._fileobj.fileno(), fcntl.LOCK_EX)
-            self._locked = True
-        except OSError as e:  # pragma: no cover - exotic FS without flock
-            log.warning("audit: advisory flock unavailable (%s); appending unlocked", e)
-        return self
+        # failure-policy: fail_closed
+        except BaseException:
+            # __exit__ is not called when __enter__ raises. Never strand the
+            # in-process stripe after a filesystem/backend failure.
+            self._thread_lock.release()
+            raise
 
     def __exit__(self, *exc: Any) -> None:
-        if not self._locked:
-            return
         try:
-            import fcntl
+            if self._locked and self._backend == "fcntl":
+                try:
+                    import fcntl
 
-            fcntl.flock(self._fileobj.fileno(), fcntl.LOCK_UN)
-        except (ImportError, OSError):  # pragma: no cover - best-effort unlock
-            pass
+                    fcntl.flock(self._fileobj.fileno(), fcntl.LOCK_UN)
+                except (ImportError, OSError):  # pragma: no cover - best-effort
+                    pass
+            elif self._locked and self._backend == "msvcrt":
+                try:
+                    import msvcrt
+
+                    original_pos = self._fileobj.tell()
+                    self._fileobj.seek(0)
+                    msvcrt.locking(self._fileobj.fileno(), msvcrt.LK_UNLCK, 1)
+                    self._fileobj.seek(original_pos)
+                except (ImportError, OSError, ValueError):  # pragma: no cover
+                    pass
+        finally:
+            self._locked = False
+            self._thread_lock.release()
 
 
 def _resolve_signing(explicit: bool | None) -> bool:
@@ -151,6 +205,22 @@ def _resolve_signing(explicit: bool | None) -> bool:
     # failure-policy: best_effort
     except Exception:
         return False
+
+
+def _prepare_private_audit_file(path: Path) -> None:
+    """Create one empty audit file privately, or tighten an existing file.
+
+    The stable sidecar lock closes the first-writer race: two dashboard workers
+    may both observe a new UTC day, but only one may publish the initial empty
+    file. The second rechecks under the lock and must never replace a file after
+    the first worker has already appended evidence to it.
+    """
+    ensure_private_directory(path.parent)
+    with cross_process_lock(path):
+        try:
+            ensure_private_file(path, 0o600)
+        except FileNotFoundError:
+            atomic_write_bytes(path, b"", mode=0o600)
 
 
 class AuditLog:
@@ -201,11 +271,7 @@ class AuditLog:
 
     def _ensure_dir(self) -> bool:
         try:
-            self.audit_dir.mkdir(parents=True, exist_ok=True)
-            try:
-                os.chmod(self.audit_dir, 0o700)
-            except OSError:
-                pass
+            ensure_private_directory(self.audit_dir)
             return True
         except OSError as e:
             log.warning("audit: cannot create dir %s: %s", self.audit_dir, e)
@@ -214,18 +280,22 @@ class AuditLog:
     def _rotate_if_needed(self) -> Path | None:
         day_str = datetime.now(timezone.utc).strftime("%Y-%m-%d")
         if self._current_day == day_str and self._current_path is not None:
+            try:
+                # Do not silently recreate a deleted live log: that would
+                # restart a signed chain at genesis after evidence vanished.
+                ensure_private_file(self._current_path, 0o600)
+            except OSError as e:
+                log.warning("audit: live file is unavailable: %s", e)
+                return None
             return self._current_path
         if not self._ensure_dir():
             return None
         path = self._path_for(day_str)
-        # Create the file with chmod 600 if it doesn't exist.
-        if not path.exists():
-            try:
-                path.touch()
-                os.chmod(path, 0o600)
-            except OSError as e:
-                log.warning("audit: cannot create %s: %s", path, e)
-                return None
+        try:
+            _prepare_private_audit_file(path)
+        except OSError as e:
+            log.warning("audit: cannot create or protect %s: %s", path, e)
+            return None
         self._current_path = path
         self._current_day = day_str
         if self._signing_enabled:
@@ -282,9 +352,9 @@ class AuditLog:
     def _signer_for(self, path: Path) -> Any:
         """Lazily build (and rotate with the day file) the AuditSigner.
 
-        Falls back to unsigned writes if signing was requested but the
-        crypto extra is missing — and disables further attempts so the
-        warning logs once, not per record.
+        Falls back to unsigned only when the optional crypto dependency is
+        missing and no compliance floor mandates signing. Corrupt keys,
+        malformed tails, and custody/locking failures always fail closed.
         """
         if not self._signing_enabled:
             return None
@@ -294,13 +364,22 @@ class AuditLog:
 
                 self._signer = AuditSigner(path)
                 self._signer_path = path
-            except ImportError:
-                # A compliance floor (e.g. HIPAA) that mandates signed,
-                # tamper-evident audit rows must NOT silently degrade to plaintext
-                # -- mirror crypto_at_rest's fail-closed posture and refuse rather
-                # than let an operator believe tamper-evidence is active when it
-                # isn't. Only the no-floor (secure-by-default) path degrades, and
-                # then loudly (error, not warning).
+            # failure-policy: fail_soft_with_audit
+            except Exception as e:
+                from .signing import OffHostSigningRequiredError
+
+                # An explicit off-host custody requirement is already a strict
+                # policy error with a precise operator-facing message. Preserve
+                # it rather than hiding it inside the generic compliance error.
+                if isinstance(e, OffHostSigningRequiredError):
+                    raise
+
+                # A compliance floor (e.g. HIPAA) mandates a functioning signed,
+                # tamper-evident writer -- not merely an installed cryptography
+                # package. A corrupt/unreadable key, invalid key material, or any
+                # other signer-initialization failure is just as unsafe as a
+                # missing dependency. Refuse every such downgrade instead of
+                # disabling signing and appending plaintext.
                 try:
                     from ..compliance_profiles import FLOOR_AUDIT_LOG, requires_floor
                     floored = requires_floor(FLOOR_AUDIT_LOG)
@@ -308,27 +387,34 @@ class AuditLog:
                 except Exception:  # pragma: no cover - floor lookup never blocks
                     floored = False
                 if floored:
+                    if isinstance(e, ImportError):
+                        detail = (
+                            "the 'cryptography' extra is not installed. Run: "
+                            "python -m pip install -e "
+                            "'./packages/maverick-core[audit-signing]'"
+                        )
+                    else:
+                        detail = f"the audit signer could not initialize ({type(e).__name__})"
                     raise RuntimeError(
                         "audit: an active compliance profile requires signed, "
-                        "tamper-evident audit logs, but the 'cryptography' extra is "
-                        "not installed -- refusing to write UNSIGNED. Run: "
-                        "pip install 'maverick-agent[audit-signing]'"
-                    ) from None
-                log.error(
-                    "audit: signing enabled but 'cryptography' not installed; "
-                    "writing UNSIGNED. Run: pip install 'maverick-agent[audit-signing]'"
-                )
-                self._signing_enabled = False
-                return None
-            # failure-policy: fail_soft_with_audit
-            except Exception as e:  # pragma: no cover - defensive
-                from .signing import OffHostSigningRequiredError
+                        f"tamper-evident audit logs, but {detail} -- refusing to "
+                        "write UNSIGNED."
+                    ) from e
 
-                if isinstance(e, OffHostSigningRequiredError):
-                    raise
-                log.warning("audit: signer init failed (%s); writing unsigned", e)
-                self._signing_enabled = False
-                return None
+                # Outside a mandatory floor, retain only the documented
+                # optional-dependency fallback. Integrity/custody failures are
+                # not availability choices and must never downgrade the stream.
+                if isinstance(e, ImportError):
+                    log.error(
+                        "audit: signing enabled but 'cryptography' not installed; "
+                        "writing UNSIGNED. Run: python -m pip install -e "
+                        "'./packages/maverick-core[audit-signing]'"
+                    )
+                    self._signing_enabled = False
+                    return None
+                raise OSError(
+                    "audit signer could not initialize; refusing unsigned downgrade"
+                ) from e
         return self._signer
 
     def reset_signer_for_dir(self, audit_dir: Path) -> None:

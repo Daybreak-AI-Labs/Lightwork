@@ -21,7 +21,7 @@ When enabled, it wraps:
   - Provider dispatches (provider + model + tokens + cost in attributes)
 
 Deps are heavyweight + optional. Install with:
-    pip install 'maverick-agent[observability]'
+    python -m pip install -e './packages/maverick-core[observability]'
 
 Failures during span/metric export are logged and swallowed.
 """
@@ -137,7 +137,7 @@ def _initialize() -> None:
             except ImportError:
                 log.warning(
                     "observability: MAVERICK_SENTRY_DSN set but sentry-sdk is "
-                    "not installed. pip install 'maverick-agent[sentry]'")
+                    "not installed. python -m pip install -e './packages/maverick-core[sentry]'")
 
         if _otel_enabled():
             try:
@@ -151,7 +151,7 @@ def _initialize() -> None:
             except ImportError:
                 log.warning(
                     "observability: opentelemetry not installed. "
-                    "Install with: pip install 'maverick-agent[observability]'"
+                    "Install with: python -m pip install -e './packages/maverick-core[observability]'"
                 )
                 return
             endpoint = os.environ.get(
@@ -185,7 +185,7 @@ def _initialize() -> None:
             except ImportError:
                 log.warning(
                     "observability: prometheus_client not installed. "
-                    "Install with: pip install 'maverick-agent[observability]'"
+                    "Install with: python -m pip install -e './packages/maverick-core[observability]'"
                 )
                 return
             port_str = os.environ.get("MAVERICK_PROMETHEUS_PORT", "9100")

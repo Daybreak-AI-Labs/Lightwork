@@ -4,8 +4,11 @@ off-by-default knob. Fully offline; the secret fixture is built at runtime so
 no real-looking credential is committed."""
 from __future__ import annotations
 
+from pathlib import Path
+
 import pytest
 from maverick.cache import learning as lc
+from maverick.file_lock import private_path_is_restricted
 
 
 @pytest.fixture
@@ -33,31 +36,43 @@ def test_persists_across_instances_with_0600(tmp_path, now):
     path = tmp_path / "lc.json"
     first = lc.LearningCache(path, clock=lambda: now["t"])
     first.put("repo build command", "make build", verified_by="verifier:g2")
-    assert (path.stat().st_mode & 0o777) == 0o600
+    assert private_path_is_restricted(path, 0o600)
+    assert private_path_is_restricted(path.parent, 0o700)
     second = lc.LearningCache(path, clock=lambda: now["t"])  # a fresh "run"
     assert second.get("Repo build command")["result"] == "make build"
 
 
 def test_temp_file_is_restrictive_before_replace(tmp_path, now, monkeypatch):
+    import maverick.file_lock as file_lock
+
     path = tmp_path / "lc.json"
     cache = lc.LearningCache(path, clock=lambda: now["t"])
-    original_replace = lc.os.replace
-    observed = {}
-    old_umask = lc.os.umask(0o022)
+    real_create = file_lock._secure_mkstemp
+    observed: list[tuple[int, bool, int]] = []
 
-    def assert_tmp_mode_before_replace(src, dst):
-        observed["mode"] = src.stat().st_mode & 0o777
-        observed["contains_result"] = "private ops data" in src.read_text(encoding="utf-8")
-        return original_replace(src, dst)
+    def record_create(directory, *, prefix, suffix, mode):
+        fd, temp_path = real_create(
+            directory,
+            prefix=prefix,
+            suffix=suffix,
+            mode=mode,
+        )
+        observed.append(
+            (
+                mode,
+                file_lock.private_path_is_restricted(temp_path, mode),
+                Path(temp_path).stat().st_size,
+            )
+        )
+        return fd, temp_path
 
-    try:
-        monkeypatch.setattr(lc.os, "replace", assert_tmp_mode_before_replace)
-        cache.put("private task", "private ops data", verified_by="verifier:g2")
-    finally:
-        lc.os.umask(old_umask)
+    monkeypatch.setattr(file_lock, "_secure_mkstemp", record_create)
+    cache.put("private task", "private ops data", verified_by="verifier:g2")
 
-    assert observed == {"mode": 0o600, "contains_result": True}
-    assert (path.stat().st_mode & 0o777) == 0o600
+    assert observed == [(0o600, True, 0)]
+    assert "private ops data" in path.read_text(encoding="utf-8")
+    assert private_path_is_restricted(path, 0o600)
+    assert list(tmp_path.glob("*.tmp")) == []
 
 
 def test_ttl_expiry_with_injected_clock(cache, now):

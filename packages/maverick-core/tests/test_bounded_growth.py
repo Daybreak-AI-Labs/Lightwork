@@ -30,7 +30,13 @@ def test_a2a_task_store_is_bounded(monkeypatch):
     ids = []
     for i in range(10):
         t = asyncio.run(eng.send(
-            {"message": {"role": "user", "parts": [{"kind": "text", "text": f"g{i}"}]}}
+            {
+                "message": {
+                    "role": "user",
+                    "parts": [{"kind": "text", "text": f"g{i}"}],
+                    "messageId": f"bounded-growth-{i}",
+                }
+            }
         ))
         ids.append(t["id"])
     assert len(eng._tasks) == 3  # capped

@@ -17,7 +17,6 @@ from __future__ import annotations
 import json
 import logging
 import math
-import os
 from dataclasses import dataclass
 
 log = logging.getLogger(__name__)
@@ -103,20 +102,19 @@ class CanaryStore:
 
     def _load(self) -> dict:
         try:
+            from .file_lock import ensure_private_file
+
+            ensure_private_file(self.path)
             return json.loads(self.path.read_text(encoding="utf-8")) or {}
         except (OSError, ValueError):
             return {}
 
     def _save(self, data: dict) -> None:
+        from .file_lock import atomic_write_text, ensure_private_directory
+
         p = self.path
-        p.parent.mkdir(parents=True, exist_ok=True)
-        tmp = p.with_suffix(".tmp")
-        tmp.write_text(json.dumps(data, sort_keys=True, indent=2), encoding="utf-8")
-        try:
-            os.chmod(tmp, 0o600)
-        except OSError:
-            pass
-        os.replace(tmp, p)
+        ensure_private_directory(p.parent)
+        atomic_write_text(p, json.dumps(data, sort_keys=True, indent=2), mode=0o600)
 
     def record(self, release: str, metrics: dict) -> None:
         data = self._load()

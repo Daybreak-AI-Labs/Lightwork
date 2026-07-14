@@ -18,7 +18,7 @@ def test_split_holds_end_to_end(tmp_path):
     ev = e2e.run_e2e(tmp_path)
     assert ev["proof"]["ok"] is True
     # Control plane only enqueued — the goal was still pending after submit.
-    assert ev["control_plane"]["submit_returned"] is None
+    assert ev["control_plane"]["submit_returned"] == "queued"
     assert ev["control_plane"]["goal_status_after_enqueue"] == "pending"
     assert ev["control_plane"]["job_kind"] == "run_goal"
     # Data plane claimed it out-of-band and the status flowed back through the

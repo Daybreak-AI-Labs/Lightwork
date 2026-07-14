@@ -18,10 +18,15 @@ Exposed as ``maverick audit seal``; runs only when at-rest encryption is enabled
 """
 from __future__ import annotations
 
-import os
 import re
-import tempfile
 from pathlib import Path
+
+from ..file_lock import (
+    atomic_read_bytes,
+    atomic_write_bytes,
+    ensure_private_directory,
+    ensure_private_file,
+)
 
 _DAY_RE = re.compile(r"^\d{4}-\d{2}-\d{2}$")
 
@@ -40,7 +45,10 @@ def segment_text(path: Path, *, fail_soft: bool = True) -> str:
     mistaken for a valid empty chain.
     """
     try:
-        raw = Path(path).read_bytes()
+        path = Path(path)
+        ensure_private_directory(path.parent)
+        ensure_private_file(path, 0o600)
+        raw = atomic_read_bytes(path)
     except OSError as e:
         if fail_soft:
             return ""
@@ -80,24 +88,15 @@ def encode_segment(text: str, *, sealed: bool) -> bytes:
 
 def _atomic_write_bytes(path: Path, data: bytes) -> None:
     """Replace ``path`` with ``data`` atomically and privately (0600)."""
-    fd, tmp = tempfile.mkstemp(dir=str(path.parent), prefix=".seal-", suffix=".tmp")
+    ensure_private_directory(path.parent)
     try:
-        try:
-            os.fchmod(fd, 0o600)
-        except (OSError, AttributeError):  # os.fchmod is absent on Windows
-            pass  # mkstemp already created the file owner-only
-        with os.fdopen(fd, "wb") as f:
-            f.write(data)
-            f.flush()
-            os.fsync(f.fileno())
-        os.replace(tmp, path)
-    # failure-policy: fail_closed
-    except BaseException:
-        try:
-            os.unlink(tmp)
-        except OSError:
-            pass
-        raise
+        # Tighten legacy state before replacement. A missing destination is the
+        # normal first-write case: atomic_write_bytes creates its unpublished
+        # temp with private custody before publishing it over this path.
+        ensure_private_file(path, 0o600)
+    except FileNotFoundError:
+        pass
+    atomic_write_bytes(path, data, mode=0o600)
 
 
 def seal_closed_segments(audit_dir: Path | None = None, *,
@@ -134,7 +133,8 @@ def seal_closed_segments(audit_dir: Path | None = None, *,
             report[p.name] = "skipped (current)"  # live append stays plaintext
             continue
         try:
-            raw = p.read_bytes()
+            ensure_private_file(p, 0o600)
+            raw = atomic_read_bytes(p)
         except OSError as e:
             report[p.name] = f"error ({e})"
             continue

@@ -14,12 +14,19 @@ mirroring the rbac roster's load-modify-save under a cross-process lock.
 from __future__ import annotations
 
 import json
+import math
 import threading
 import time
 from contextlib import ExitStack, contextmanager
 from pathlib import Path
 
-from maverick.file_lock import atomic_write_text, cross_process_lock
+from maverick.file_lock import (
+    atomic_read_text,
+    atomic_write_text,
+    cross_process_lock,
+    ensure_private_directory,
+    ensure_private_file,
+)
 from maverick.paths import maverick_home
 
 _LOCK = threading.Lock()
@@ -37,6 +44,7 @@ def _path() -> Path:
 
 @contextmanager
 def _locked():
+    ensure_private_directory(maverick_home())
     with ExitStack() as stack:
         stack.enter_context(_LOCK)
         stack.enter_context(cross_process_lock(_path()))
@@ -47,17 +55,48 @@ def _load() -> dict:
     """The epoch map. A genuinely-absent store is empty (no revocations yet);
     a store that EXISTS but is unreadable/corrupt raises ``RevocationStoreError``
     so the revocation check fails closed instead of fail-open."""
+    ensure_private_directory(maverick_home())
     try:
-        raw = _path().read_text(encoding="utf-8")
+        ensure_private_file(_path())
+        raw = atomic_read_text(_path())
     except FileNotFoundError:
         return {}
     except OSError as e:  # EIO / EACCES / ENFILE ... -- present but unreadable
         raise RevocationStoreError(f"revocation store unreadable: {e}") from e
+    def _reject_constant(value: str):
+        raise ValueError(f"non-finite number {value!r}")
+
+    def _object(pairs: list[tuple[str, object]]) -> dict[str, object]:
+        data: dict[str, object] = {}
+        for key, value in pairs:
+            if key in data:
+                raise ValueError(f"duplicate principal {key!r}")
+            data[key] = value
+        return data
+
     try:
-        data = json.loads(raw)
-    except ValueError as e:  # corrupt JSON
+        data = json.loads(raw, parse_constant=_reject_constant, object_pairs_hook=_object)
+    except (TypeError, ValueError) as e:  # corrupt JSON
         raise RevocationStoreError(f"revocation store corrupt: {e}") from e
-    return data if isinstance(data, dict) else {}
+    if not isinstance(data, dict):
+        raise RevocationStoreError(
+            "revocation store corrupt: top-level value must be an object"
+        )
+    validated: dict[str, float] = {}
+    for principal, epoch in data.items():
+        if not principal or principal != principal.strip() or len(principal) > 1024:
+            raise RevocationStoreError("revocation store corrupt: invalid principal")
+        if isinstance(epoch, bool) or not isinstance(epoch, (int, float)):
+            raise RevocationStoreError(
+                f"revocation store corrupt: epoch for {principal!r} must be numeric"
+            )
+        value = float(epoch)
+        if not math.isfinite(value) or value <= 0:
+            raise RevocationStoreError(
+                f"revocation store corrupt: epoch for {principal!r} must be finite and positive"
+            )
+        validated[principal] = value
+    return validated
 
 
 def revoke_principal(principal: str, *, at: float | None = None) -> None:
@@ -68,7 +107,12 @@ def revoke_principal(principal: str, *, at: float | None = None) -> None:
     p = (principal or "").strip()
     if not p:
         return
-    ts = time.time() if at is None else float(at)
+    try:
+        ts = time.time() if at is None else float(at)
+    except (OverflowError, TypeError, ValueError) as exc:
+        raise ValueError("revocation epoch must be a finite positive number") from exc
+    if not math.isfinite(ts) or ts <= 0:
+        raise ValueError("revocation epoch must be a finite positive number")
     with _locked():
         data = _load()
         data[p] = max(float(data.get(p, 0.0) or 0.0), ts)
@@ -96,9 +140,10 @@ def is_revoked(principal: str, issued_at: float | None) -> bool:
     if issued_at is None:
         return True
     try:
-        return float(issued_at) < floor
-    except (TypeError, ValueError):
+        issued = float(issued_at)
+        return not math.isfinite(issued) or issued < floor
+    except (OverflowError, TypeError, ValueError):
         return True
 
 
-__all__ = ["revoke_principal", "revocation_epoch", "is_revoked"]
+__all__ = ["RevocationStoreError", "revoke_principal", "revocation_epoch", "is_revoked"]

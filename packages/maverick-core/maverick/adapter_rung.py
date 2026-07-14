@@ -612,7 +612,8 @@ def default_store_root() -> Path:
     try:
         return _store_root_from_cfg(_adapter_cfg())
     except Exception:  # pragma: no cover
-        return Path.home() / ".maverick" / "adapters"
+        from .paths import maverick_home
+        return maverick_home() / "adapters"
 
 
 # --- serving seam (Ollama Modelfile ADAPTER) ---------------------------------------

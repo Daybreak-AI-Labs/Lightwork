@@ -15,7 +15,7 @@ caller's job — copy the SDP blobs over any channel you already have (the
 dashboard, a webhook, a file). One connection at a time, held module-level,
 mirroring the browser tool's single persistent session.
 
-``aiortc`` is optional (``pip install 'maverick-agent[webrtc]'``); every
+``aiortc`` is optional (``python -m pip install -e './packages/maverick-core[webrtc]'``); every
 aiortc import is lazy so the kernel — and these ops' error paths — work
 without it.
 
@@ -66,7 +66,7 @@ async def _run(args: dict[str, Any]) -> str:
         from aiortc import RTCPeerConnection, RTCSessionDescription
     except ImportError:
         return ("ERROR: aiortc not installed. "
-                "Run: pip install 'maverick-agent[webrtc]'")
+                "Run: python -m pip install -e './packages/maverick-core[webrtc]'")
 
     if op == "offer":
         if _state["pc"] is not None:  # replace any previous connection

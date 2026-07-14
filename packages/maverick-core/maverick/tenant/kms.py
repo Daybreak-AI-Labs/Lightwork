@@ -58,7 +58,7 @@ def _aesgcm(key: bytes):
     if not _have_crypto():
         raise EncryptionUnavailable(
             "per-tenant KMS needs the 'cryptography' extra "
-            "(pip install 'maverick-agent[audit-signing]')")
+            "(python -m pip install -e './packages/maverick-core[audit-signing]')")
     from cryptography.hazmat.primitives.ciphers.aead import AESGCM
     return AESGCM(key)
 

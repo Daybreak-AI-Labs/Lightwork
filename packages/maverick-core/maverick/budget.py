@@ -595,7 +595,12 @@ def _clamp_to_tenant_remainder(kwargs: dict) -> str | None:
         from .tenant.registry import tenant_remaining_today
         tenant = current_tenant()
         remaining = tenant_remaining_today(tenant)
-    except Exception:  # pragma: no cover -- quota coordination never blocks a run
+    except Exception as exc:
+        # An unreadable tenant registry/ledger/reservation store may be hiding a
+        # cap or an existing hold. Zero the run allowance rather than treating
+        # that policy outage as "unlimited".
+        log.error("tenant budget policy unavailable; clamping run to zero: %s", exc)
+        kwargs["max_dollars"] = 0.0
         return None
     if remaining is None:
         return None
@@ -628,5 +633,9 @@ def _clamp_to_tenant_remainder(kwargs: dict) -> str | None:
         reservation_id = uuid.uuid4().hex
         reserve_tenant_dollars(tenant, clamped, ttl, reservation_id)
         return reservation_id
-    except Exception:  # pragma: no cover -- reservation never blocks a run
+    except Exception as exc:
+        # Running after a failed reservation reopens the concurrent overspend
+        # window. Deny this start; a later retry can reserve after state heals.
+        log.error("tenant budget reservation failed; clamping run to zero: %s", exc)
+        kwargs["max_dollars"] = 0.0
         return None

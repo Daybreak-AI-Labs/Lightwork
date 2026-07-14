@@ -4,6 +4,7 @@ from __future__ import annotations
 from click.testing import CliRunner
 from maverick import release_canary as rc
 from maverick.cli import main
+from maverick.file_lock import private_path_is_restricted
 
 # ---- compare (pure, direction-aware) ----
 
@@ -75,7 +76,7 @@ def test_store_roundtrip(tmp_path):
     store.record("v2", {"cost_usd": 1.4})
     assert store.releases() == ["v1", "v2"]
     assert store.get("absent") is None
-    assert oct((tmp_path / "canary.json").stat().st_mode)[-3:] == "600"
+    assert private_path_is_restricted(tmp_path / "canary.json", 0o600)
 
 
 # ---- CLI ----

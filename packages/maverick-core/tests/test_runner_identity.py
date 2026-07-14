@@ -29,9 +29,14 @@ def test_run_goal_in_thread_propagates_execution_identity(monkeypatch):
     monkeypatch.setattr(budget_mod, "budget_from_config", lambda **_kwargs: object())
     monkeypatch.setattr(orchestrator, "run_goal_sync", fake_run_goal_sync)
 
-    assert runner.run_goal_in_thread(42, max_depth=2, channel="api", user_id="alice") == "done"
+    assert runner.run_goal_in_thread(
+        42, max_depth=2, channel="api", user_id="alice", conversation_id=9,
+        allowed_suites=frozenset({"finance"}),
+    ) == "done"
     assert captured["channel"] == "api"
     assert captured["user_id"] == "alice"
+    assert captured["conversation_id"] == 9
+    assert captured["allowed_suites"] == frozenset({"finance"})
     assert captured["resume"] is True
 
 

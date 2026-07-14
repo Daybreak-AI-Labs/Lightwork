@@ -193,7 +193,7 @@ def _run(args: dict[str, Any], sandbox) -> str:
         try:
             import httpx  # noqa: F401
         except ImportError:
-            return "ERROR: httpx not installed (backend=hf). Run: pip install 'maverick-agent[issue-trackers]'"
+            return "ERROR: httpx not installed (backend=hf). Run: python -m pip install -e './packages/maverick-core[issue-trackers]'"
     lang = (args.get("lang") or "eng").strip()
     hf_model = (args.get("hf_model") or "").strip()
     try:

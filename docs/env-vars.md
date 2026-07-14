@@ -130,8 +130,43 @@ for false unless noted otherwise.
 | `GLASSES_ALLOWED_USER_IDS` | — | Allowlist for the glasses/wearable channel. |
 | `IRC_SERVER` / `IRC_PASSWORD` | config `[channels.irc]` | IRC server host / password. |
 
-Config-only knobs (no env var): `[queue] backend = "arq"` (out-of-process goal
-execution), `[billing.plans]` (override plan entitlements), `[egress]` /
+### Fleet queue
+
+`[queue] backend = "arq"` selects authenticated out-of-process goal execution.
+Run only the matching hardened worker entry point:
+
+```bash
+arq maverick.arq_worker.WorkerSettings
+```
+
+| Env var | Config equivalent | Description |
+| --- | --- | --- |
+| `MAVERICK_QUEUE_SIGNING_KEY` | `[queue] signing_key` | Required shared HMAC key of at least 32 UTF-8 bytes. Supply through a secret manager, not source control. |
+| `MAVERICK_QUEUE_NAMESPACE` | `[queue] namespace` | Required non-secret deployment id (1-64 safe characters). Producer and workers must match; distinct fleets must not share it. |
+| `MAVERICK_QUEUE_REDIS_DSN` | `[queue] redis_dsn` | Shared `redis://`, `rediss://`, or `unix://` endpoint. Non-loopback TCP requires `rediss://`; hostname and certificate validation are forced on. |
+| `MAVERICK_QUEUE_REDIS_CA_CERTS` | `[queue] redis_ca_certs` | Optional private-CA bundle for `rediss://`. |
+| `MAVERICK_QUEUE_REDIS_CERTFILE` / `MAVERICK_QUEUE_REDIS_KEYFILE` | `[queue] redis_certfile` / `redis_keyfile` | Optional client mTLS pair; both are required together. |
+| `MAVERICK_QUEUE_WORKER_MAX_DOLLARS` | `[queue] worker_max_dollars` | Worker-local per-goal spend ceiling; signed producer requests can only narrow it. |
+| `MAVERICK_QUEUE_WORKER_MAX_WALL_SECONDS` | `[queue] worker_max_wall_seconds` | Worker-local wall-time ceiling. |
+| `MAVERICK_QUEUE_WORKER_MAX_DEPTH` | `[queue] worker_max_depth` | Worker-local recursion-depth ceiling (1-64). |
+
+Use a dedicated Redis database and ACL identity per Lightwork deployment. ARQ
+stores job bodies under global Redis key prefixes even when its ready queue is
+namespaced, so a dedicated database/ACL is defense in depth against accidental
+cross-fleet access. Network workers also require the same Postgres world-model
+backend for durable, tenant-aware replay claims. The worker refuses to poll if
+the HMAC key or shared claim store is unavailable. The unsafe
+`MAVERICK_ALLOW_INSECURE_QUEUE_REDIS=1` escape hatch is only for isolated local
+development networks.
+
+For a codec or signing-key rollout, pause producers, drain (or deliberately
+purge) the old deployment queue, deploy workers and producers together, then
+resume. Old pickle records and envelopes signed by a retired key are rejected;
+there is intentionally no silent compatibility fallback. Generate and rotate
+the HMAC value in your secret manager, and keep it out of process arguments,
+logs, and repository configuration.
+
+Other config-only knobs: `[billing.plans]` (override plan entitlements), `[egress]` /
 `[tenancy.egress.<t>]` (per-tenant egress plane). Tenants are managed with
 `maverick tenant …`; invoices/entitlements with `maverick billing …`.
 
@@ -268,9 +303,12 @@ Config equivalents live under `[effort]` (`enabled`, `default`, `<role>`) and
 | `MAVERICK_WEBHOOK_WORKERS` | config `[webhooks] workers` (4) | Outbound webhook dispatch thread-pool size. |
 | `MAVERICK_WEBHOOK_MAX_INFLIGHT` | config `[webhooks] max_inflight` (16×workers) | Cap on queued+running dispatches; excess is dropped + logged (bounds memory under a burst against a slow receiver). |
 | `MAVERICK_GRPC_MAX_WORKERS` | config `[grpc] max_workers` (8) | gRPC goal-API server thread-pool size. |
-| `MAVERICK_GRPC_MAX_CONCURRENT` | config `[grpc] max_concurrent_rpcs` (unbounded) | Max in-flight gRPC RPCs (RESOURCE_EXHAUSTED backpressure past the cap). |
+| `MAVERICK_GRPC_MAX_CONCURRENT` | config `[grpc] max_concurrent_rpcs` (worker count) | Max in-flight gRPC RPCs (RESOURCE_EXHAUSTED backpressure past the cap). |
+| `MAVERICK_GRPC_MAX_DEPTH` | config `[grpc] max_depth` (runner default, hard max 64) | Worker-owned recursion ceiling for remote `RunGoal` calls. |
+| `MAVERICK_GRPC_STREAM_MAX_SECONDS` | config `[grpc] stream_max_seconds` (300, hard max 3600) | Per-call episode-stream deadline; clients resume with `since_id`. |
+| `MAVERICK_ALLOW_INSECURE_GRPC` | unset (off) | Explicitly permit non-loopback plaintext gRPC binds and client dials. Keep unset in production; configure `[grpc]` / `[federation]` TLS instead. |
 | `MAVERICK_FEDERATION_MAX_WORKERS` | config `[federation] max_workers` (8) | Federation server thread-pool size. |
-| `MAVERICK_FEDERATION_MAX_CONCURRENT` | config `[federation] max_concurrent_rpcs` (unbounded) | Max in-flight federation RPCs. |
+| `MAVERICK_FEDERATION_MAX_CONCURRENT` | config `[federation] max_concurrent_rpcs` (worker count) | Max in-flight federation RPCs. |
 | `MAVERICK_GH_APP_WEBHOOK_SECRET` | unset | Webhook secret for the GitHub App; requests are rejected if unset. |
 | `MAVERICK_TRIGGER_LABELS` / `MAVERICK_GH_TRIGGER_LABELS` | built-in default | Comma-separated issue labels that trigger a GitHub-App run. |
 | `MAVERICK_BOT_LINEAR_ID` | unset | Linear user id identifying "the bot" for issue webhooks. |

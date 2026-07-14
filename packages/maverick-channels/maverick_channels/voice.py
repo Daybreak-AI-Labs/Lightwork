@@ -31,7 +31,7 @@ Provider support:
 
 Requires::
 
-    pip install 'maverick-channels[voice]'
+    python -m pip install -e './packages/maverick-channels[voice]'
 """
 from __future__ import annotations
 
@@ -98,7 +98,8 @@ class VoiceChannel(Channel):
         if not _HAVE_DEPS:
             raise ImportError(
                 "fastapi/httpx not installed. Run: "
-                "pip install 'maverick-channels[voice]'"
+                "From the reviewed checkout run: python -m pip install -e "
+                "'./packages/maverick-channels[voice]'"
             )
         self.provider = provider
         # Each provider keeps its key in its own env var; fall back to the

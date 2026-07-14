@@ -52,6 +52,8 @@ import threading
 from dataclasses import dataclass
 from pathlib import Path
 
+from ..file_lock import atomic_write_text, ensure_private_directory
+
 log = logging.getLogger(__name__)
 
 KINDS = ("aws_key", "api_key", "password")
@@ -137,8 +139,7 @@ def plant(dir, tokens, filename: str = ".env.backup") -> Path:
     env backup. Returns the file path. Duplicate kinds get numbered variable
     names so every value lands in the file.
     """
-    base = Path(dir)
-    base.mkdir(parents=True, exist_ok=True)
+    base = ensure_private_directory(Path(dir))
     path = base / filename
     lines = [
         "# Backup environment -- restored from prod. Do not commit or share.",
@@ -153,13 +154,7 @@ def plant(dir, tokens, filename: str = ".env.backup") -> Path:
         used.add(candidate)
         lines.append(f"{candidate}={tok.value}")
     body = "\n".join(lines) + "\n"
-    fd = os.open(path, os.O_WRONLY | os.O_CREAT | os.O_TRUNC, 0o600)
-    with os.fdopen(fd, "w", encoding="utf-8") as fh:
-        fh.write(body)
-    try:
-        os.chmod(path, 0o600)  # pre-existing files keep 0600 too
-    except OSError:  # pragma: no cover -- exotic filesystems
-        pass
+    atomic_write_text(path, body, mode=0o600)
     return path
 
 

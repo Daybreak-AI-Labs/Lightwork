@@ -23,7 +23,11 @@ run. ``run_live`` also calls ``sandbox_can_read`` as its hard guard.
 from __future__ import annotations
 
 import argparse
+import base64
+import os
+import shlex
 import shutil
+import subprocess
 import sys
 import tempfile
 from pathlib import Path
@@ -43,14 +47,30 @@ def sandbox_can_read(codebase: str | Path) -> tuple[bool, str]:
         return False, f"codebase {str(codebase)!r} has no .py sources to mount"
     ws = Path(tempfile.mkdtemp(prefix="moat-preflight-"))
     try:
-        import os
         os.environ.setdefault("MAVERICK_SUPPRESS_SANDBOX_WARNING", "1")
         dst = ws / src.name
         shutil.copytree(src, dst, ignore=shutil.ignore_patterns("__pycache__", "*.pyc"))
         rel = dst.relative_to(ws) / pys[0].relative_to(src)
         from maverick.sandbox import build_sandbox
         sb = build_sandbox(workdir=ws, backend="local")
-        res = sb.exec(f"cat {rel}")
+        # LocalBackend intentionally uses the host shell: `cat` is unavailable
+        # under cmd.exe and a raw filename would also make this preflight
+        # vulnerable to shell metacharacters. Pass an opaque base64 path to the
+        # current Python executable and let pathlib perform the read on every
+        # supported host.
+        encoded_path = base64.urlsafe_b64encode(os.fsencode(str(rel))).decode("ascii")
+        argv = [
+            sys.executable,
+            "-c",
+            (
+                "import base64,os,pathlib,sys;"
+                "p=pathlib.Path(os.fsdecode(base64.urlsafe_b64decode(sys.argv[1])));"
+                "sys.stdout.buffer.write(p.read_bytes())"
+            ),
+            encoded_path,
+        ]
+        command = subprocess.list2cmdline(argv) if os.name == "nt" else shlex.join(argv)
+        res = sb.exec(command)
         out = str(getattr(res, "stdout", res) or "")
         if not out.strip():
             return False, f"sandbox returned empty content for {rel}"

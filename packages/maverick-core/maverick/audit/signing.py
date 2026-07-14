@@ -50,6 +50,15 @@ from dataclasses import dataclass
 from datetime import datetime, timezone
 from pathlib import Path
 
+from ..file_lock import (
+    atomic_read_bytes,
+    atomic_read_text,
+    atomic_write_bytes,
+    atomic_write_text,
+    cross_process_lock,
+    ensure_private_directory,
+    ensure_private_file,
+)
 from ..paths import data_dir
 
 log = logging.getLogger(__name__)
@@ -84,6 +93,8 @@ def _key_dir() -> Path:
 
 
 _KEY_ID_RE = re.compile(r"^[0-9a-f]{16}$")
+_HASH_RE = re.compile(r"^[0-9a-f]{64}$")
+_SIG_RE = re.compile(r"^[0-9a-f]{128}$")
 
 # Cross-file tip-ledger (#462/#443): a signed, chained ledger recording each
 # completed day-file's tip hash + row count, so deleting or truncating a WHOLE
@@ -103,14 +114,10 @@ def _key_paths_for_id(key_id: str) -> tuple[Path, Path] | tuple[None, None]:
     if not _is_valid_key_id(key_id):
         return None, None
     key_dir = _key_dir()
-    pub_path = (key_dir / f"{key_id}.pub").resolve()
-    priv_path = (key_dir / f"{key_id}.key").resolve()
-    try:
-        pub_path.relative_to(key_dir.resolve())
-        priv_path.relative_to(key_dir.resolve())
-    except ValueError:
-        return None, None
-    return pub_path, priv_path
+    # key_id is fixed-width lowercase hex, so these components cannot traverse.
+    # Keep the final path unresolved so ensure_private_file can reject a planted
+    # symlink instead of validating only its referent.
+    return key_dir / f"{key_id}.pub", key_dir / f"{key_id}.key"
 
 
 # Env var carrying an externally-managed Ed25519 audit-signing PRIVATE key
@@ -138,13 +145,7 @@ def _injected_marker_for_id(key_id: str) -> Path | None:
     """
     if not _is_valid_key_id(key_id):
         return None
-    key_dir = _key_dir()
-    marker = (key_dir / f"{key_id}.injected").resolve()
-    try:
-        marker.relative_to(key_dir.resolve())
-    except ValueError:
-        return None
-    return marker
+    return _key_dir() / f"{key_id}.injected"
 
 
 def _decode_injected_key(raw: str) -> bytes | None:
@@ -247,18 +248,14 @@ def _provision_injected_pubkey(pub: bytes, key_id: str) -> None:
     verification needs the on-disk pub.
     """
     try:
-        key_dir = _key_dir()
-        key_dir.mkdir(parents=True, exist_ok=True)
+        key_dir = ensure_private_directory(_key_dir())
         pub_path = key_dir / f"{key_id}.pub"
-        if not pub_path.exists():
-            pub_path.write_bytes(pub)
-            try:
-                os.chmod(pub_path, 0o644)
-            except OSError:
-                pass
+        atomic_write_bytes(pub_path, pub, mode=0o644)
         marker = key_dir / f"{key_id}.injected"
-        if not marker.exists():
-            marker.write_bytes(b"")
+        if marker.exists():
+            ensure_private_file(marker, 0o600)
+        else:
+            atomic_write_bytes(marker, b"", mode=0o600)
     except OSError:
         # Never let key-dir provisioning failure break audit signing.
         log.debug("could not persist injected audit pubkey for %s", key_id)
@@ -307,7 +304,7 @@ def _generate_keypair() -> tuple[bytes, bytes, str]:
     """Return (private_key_bytes, public_key_bytes, key_id)."""
     if not _have_crypto():
         raise ImportError(
-            "cryptography not installed. Run: pip install 'maverick-agent[audit-signing]'"
+            "cryptography not installed. Run: python -m pip install -e './packages/maverick-core[audit-signing]'"
         )
     from cryptography.hazmat.primitives import serialization
     from cryptography.hazmat.primitives.asymmetric import ed25519
@@ -333,41 +330,35 @@ _ACTIVE_POINTER = "active"
 
 
 def _active_key_id(key_dir: Path) -> str | None:
-    """The explicitly-recorded active key id, or None if the pointer is absent,
-    unreadable, or names a key whose files no longer exist (corrupt/legacy)."""
+    """The explicitly-recorded active key id, or None for a legacy directory.
+
+    A present-but-invalid pointer is security state corruption, not a reason to
+    guess from mtimes and possibly reactivate an older key.
+    """
+    pointer = key_dir / _ACTIVE_POINTER
     try:
-        kid = (key_dir / _ACTIVE_POINTER).read_text(encoding="utf-8").strip()
-    except OSError:
+        ensure_private_file(pointer, 0o600)
+    except FileNotFoundError:
         return None
-    if kid and (key_dir / f"{kid}.key").exists() and (key_dir / f"{kid}.pub").exists():
-        return kid
-    return None
+    kid = atomic_read_text(pointer).strip()
+    if not _is_valid_key_id(kid):
+        raise ValueError("audit active-key pointer is invalid")
+    if not (key_dir / f"{kid}.key").exists() or not (key_dir / f"{kid}.pub").exists():
+        raise ValueError("audit active-key pointer names an incomplete keypair")
+    return kid
 
 
 def _save_keypair(priv: bytes, pub: bytes, key_id: str) -> Path:
-    key_dir = _key_dir()
-    key_dir.mkdir(parents=True, exist_ok=True)
-    try:
-        os.chmod(key_dir, 0o700)
-    except OSError:
-        pass
+    if not _is_valid_key_id(key_id) or len(priv) != 32 or len(pub) != 32:
+        raise ValueError("invalid audit Ed25519 keypair")
+    key_dir = ensure_private_directory(_key_dir())
     priv_path = key_dir / f"{key_id}.key"
     pub_path = key_dir / f"{key_id}.pub"
-    # Create the private signing key (the audit chain's trust anchor) with the
-    # mode set AT creation. write_bytes() + a later chmod left a world-readable
-    # window during which another local user could read -- and then forge with
-    # -- the key. The dir chmod above is best-effort and may not apply.
-    fd = os.open(str(priv_path), os.O_WRONLY | os.O_CREAT | os.O_TRUNC, 0o600)
-    try:
-        os.write(fd, priv)
-    finally:
-        os.close(fd)
-    pub_path.write_bytes(pub)
-    try:
-        os.chmod(priv_path, 0o600)
-        os.chmod(pub_path, 0o644)
-    except OSError:
-        pass
+    # Both files are created with their final ACL/mode before the first key byte
+    # is written. In particular, POSIX mode bits passed to os.open are not a
+    # Windows DACL; the shared atomic writer uses a create-time protected DACL.
+    atomic_write_bytes(priv_path, priv, mode=0o600)
+    atomic_write_bytes(pub_path, pub, mode=0o644)
     # Record the active key explicitly. Selection must NOT depend on mtime
     # ordering: two keys minted within the same filesystem mtime tick (coarse
     # FS, or a fast rotate) tie, and ``max(..., key=mtime)`` over a sorted list
@@ -375,10 +366,7 @@ def _save_keypair(priv: bytes, pub: bytes, key_id: str) -> Path:
     # silently defeating rotation. ``_save_keypair`` always runs for the
     # newest-minted key (initial generate + rotate), so this pointer always
     # names the key that should be active.
-    try:
-        (key_dir / _ACTIVE_POINTER).write_text(key_id, encoding="utf-8")
-    except OSError:  # best-effort; selection falls back to newest-mtime
-        pass
+    atomic_write_text(key_dir / _ACTIVE_POINTER, key_id, mode=0o600)
     return priv_path
 
 
@@ -394,8 +382,10 @@ def rotate_audit_keypair() -> str:
     instances (next day-file / process restart); a long-running signer keeps its
     in-memory key until restarted.
     """
-    priv, pub, key_id = _generate_keypair()
-    _save_keypair(priv, pub, key_id)
+    key_dir = ensure_private_directory(_key_dir())
+    with cross_process_lock(key_dir / _ACTIVE_POINTER):
+        priv, pub, key_id = _generate_keypair()
+        _save_keypair(priv, pub, key_id)
     return key_id
 
 
@@ -507,7 +497,23 @@ def active_key_is_offhost() -> bool:
     return False
 
 
-def _load_or_create_keypair() -> tuple[bytes, bytes, str]:
+def _read_disk_keypair(key_dir: Path, key_id: str) -> tuple[bytes, bytes, str]:
+    """Read one locally-custodied keypair after ACL and shape validation."""
+    pub_path, priv_path = _key_paths_for_id(key_id)
+    if pub_path is None or priv_path is None:
+        raise ValueError("audit key directory contains an invalid key id")
+    ensure_private_file(priv_path, 0o600)
+    ensure_private_file(pub_path, 0o644)
+    priv = atomic_read_bytes(priv_path)
+    pub = atomic_read_bytes(pub_path)
+    if len(priv) != 32 or len(pub) != 32:
+        raise ValueError("audit Ed25519 key files must each contain 32 raw bytes")
+    if hashlib.sha256(pub).hexdigest()[:16] != key_id:
+        raise ValueError("audit public key does not match its key id")
+    return priv, pub, key_id
+
+
+def _load_or_create_keypair_unlocked() -> tuple[bytes, bytes, str]:
     """Load the most-recent keypair or generate one if none exists.
 
     Key-source precedence: an env-injected key (:func:`_injected_keypair`) >
@@ -541,24 +547,26 @@ def _load_or_create_keypair() -> tuple[bytes, bytes, str]:
 
     key_dir = _key_dir()
     if key_dir.exists():
+        ensure_private_directory(key_dir)
         # Prefer the explicit active-key pointer (deterministic -- immune to the
         # mtime tie that would otherwise let a rotation silently keep the old
         # key). Fall back to newest-mtime for legacy key dirs written before the
         # pointer existed; use st_mtime_ns there for finer tie resolution.
         active = _active_key_id(key_dir)
         if active is not None:
-            return (
-                (key_dir / f"{active}.key").read_bytes(),
-                (key_dir / f"{active}.pub").read_bytes(),
-                active,
-            )
+            return _read_disk_keypair(key_dir, active)
         priv_files = sorted(key_dir.glob("*.key"))
         if priv_files:
+            for candidate in priv_files:
+                if not _is_valid_key_id(candidate.stem):
+                    raise ValueError("audit key directory contains an invalid key filename")
+                ensure_private_file(candidate, 0o600)
             latest = max(priv_files, key=lambda p: p.stat().st_mtime_ns)
             key_id = latest.stem
             pub_path = key_dir / f"{key_id}.pub"
-            if pub_path.exists():
-                return latest.read_bytes(), pub_path.read_bytes(), key_id
+            if not pub_path.exists():
+                raise ValueError("audit key directory contains an incomplete keypair")
+            return _read_disk_keypair(key_dir, key_id)
     # Falling through to a locally generated + saved private key. Be honest about
     # what its custody buys: integrity vs. accidental/non-privileged edits, NOT
     # tamper-evidence against a same-uid actor who can read the key and re-sign.
@@ -580,16 +588,107 @@ def _load_or_create_keypair() -> tuple[bytes, bytes, str]:
     return priv, pub, key_id
 
 
+def _load_or_create_keypair() -> tuple[bytes, bytes, str]:
+    """Select a signing key, serializing local first-use provisioning.
+
+    Off-host keys retain their read-only-container behavior. The on-disk path
+    uses the stable active-pointer sidecar so simultaneous fleet workers cannot
+    observe another worker's private key before its public half and pointer are
+    durably published.
+    """
+    injected = _injected_keypair()
+    if injected is not None:
+        priv, pub, key_id = injected
+        _provision_injected_pubkey(pub, key_id)
+        return priv, pub, key_id
+
+    kms = _kms_wrapped_keypair()
+    if kms is not None:
+        priv, pub, key_id = kms
+        _provision_injected_pubkey(pub, key_id)
+        return priv, pub, key_id
+
+    if require_offhost_signing():
+        raise OffHostSigningRequiredError(
+            "off-host audit signing is required (enterprise mode / [audit] "
+            "require_offhost_key) but no off-host key is configured. Set "
+            f"{_SIGNING_KEY_ENV} (a KMS/secrets-manager-sourced Ed25519 key) or "
+            f"{_KMS_WRAPPED_KEY_ENV} (a KMS-wrapped key) so the audit signing key "
+            "never lives generated-and-left on the local host."
+        )
+
+    key_dir = ensure_private_directory(_key_dir())
+    with cross_process_lock(key_dir / _ACTIVE_POINTER):
+        return _load_or_create_keypair_unlocked()
+
+
+def _prepare_private_audit_file(path: Path) -> None:
+    """Privately create or tighten an audit file without a first-writer race."""
+    ensure_private_directory(path.parent)
+    with cross_process_lock(path):
+        try:
+            ensure_private_file(path, 0o600)
+        except FileNotFoundError:
+            atomic_write_bytes(path, b"", mode=0o600)
+
+
+def _validated_tail_hash(data: object, *, operation: str, path: Path) -> str:
+    """Return a structurally valid signed tail hash, or reject corruption.
+
+    A wholly unsigned object is accepted for compatibility when signing is
+    enabled on an existing unsigned log. Any partial signing vocabulary is
+    suspicious: chaining from an absent or malformed hash would silently reset
+    the signed chain after a truncated/tampered tail.
+    """
+    if not isinstance(data, dict):
+        raise ValueError(
+            f"audit chain {operation}: last line of {path} must be a JSON object; "
+            "refusing to silently restart the chain"
+        )
+    signed_fields = {"prev_hash", "hash", "sig", "key_id"}
+    present = signed_fields.intersection(data)
+    if not present:
+        return ""
+    if present != signed_fields:
+        missing = ", ".join(sorted(signed_fields - present))
+        raise ValueError(
+            f"audit chain {operation}: last line of {path} has incomplete "
+            f"signing fields (missing {missing}); refusing to append"
+        )
+    row_hash = data["hash"]
+    prev_hash = data["prev_hash"]
+    sig = data["sig"]
+    key_id = data["key_id"]
+    if not isinstance(row_hash, str) or not _HASH_RE.fullmatch(row_hash):
+        raise ValueError(
+            f"audit chain {operation}: last line of {path} has an invalid hash"
+        )
+    if not isinstance(prev_hash, str) or (
+        prev_hash != "" and not _HASH_RE.fullmatch(prev_hash)
+    ):
+        raise ValueError(
+            f"audit chain {operation}: last line of {path} has an invalid prev_hash"
+        )
+    if not isinstance(sig, str) or not _SIG_RE.fullmatch(sig):
+        raise ValueError(
+            f"audit chain {operation}: last line of {path} has an invalid signature"
+        )
+    if not isinstance(key_id, str) or not _is_valid_key_id(key_id):
+        raise ValueError(
+            f"audit chain {operation}: last line of {path} has an invalid key_id"
+        )
+    return row_hash
+
+
 class AuditSigner:
     """Sign + chain audit log lines.
 
     Wraps an NDJSON sink, adding ``prev_hash`` / ``hash`` / ``sig`` /
     ``key_id`` fields to each row before writing.
 
-    Thread-safe. A single AuditSigner per file is assumed; cross-
-    process concurrency would need an external lock (we don't bake
-    that in to avoid adding flock/fcntl complexity for the common
-    single-process case).
+    Thread-safe and cross-process safe. Tail discovery, hash/sign construction,
+    and append are serialized under an OS-backed file lock so independent
+    service workers cannot fork the chain.
     """
 
     def __init__(self, audit_path: Path):
@@ -597,12 +696,22 @@ class AuditSigner:
         self._path = audit_path
         self._priv_bytes, self._pub_bytes, self._key_id = _load_or_create_keypair()
         try:
+            from cryptography.hazmat.primitives import serialization
             from cryptography.hazmat.primitives.asymmetric import ed25519
         except ImportError as e:
             raise ImportError(
-                "cryptography not installed. Run: pip install 'maverick-agent[audit-signing]'"
+                "cryptography not installed. Run: python -m pip install -e './packages/maverick-core[audit-signing]'"
             ) from e
         self._signer = ed25519.Ed25519PrivateKey.from_private_bytes(self._priv_bytes)
+        derived_pub = self._signer.public_key().public_bytes(
+            encoding=serialization.Encoding.Raw,
+            format=serialization.PublicFormat.Raw,
+        )
+        if derived_pub != self._pub_bytes:
+            raise ValueError("audit private/public signing key files do not match")
+        if hashlib.sha256(derived_pub).hexdigest()[:16] != self._key_id:
+            raise ValueError("audit signing key does not match its key id")
+        _prepare_private_audit_file(self._path)
         self._last_hash = self._resume_last_hash()
 
     def _resume_last_hash(self) -> str:
@@ -614,45 +723,92 @@ class AuditSigner:
         verifies clean. If the last non-empty line is unparseable, raise so
         the caller surfaces it instead of starting a fresh chain.
         """
-        if not self._path.exists() or self._path.stat().st_size == 0:
-            return ""
-        with open(self._path, "rb") as f:
-            last_line = b""
-            for line in f:
-                if line.strip():
-                    last_line = line
+        from .writer import _file_append_lock
+
+        ensure_private_file(self._path, 0o600)
+        with open(self._path, "a+b") as f, _file_append_lock(f):
+            return self._locked_tail_hash(f, operation="resume")
+
+    def _locked_tail_hash(self, fileobj, *, operation: str = "append") -> str:
+        """Read the current on-disk chain tip from an append-locked handle.
+
+        ``AuditSigner`` instances are process-local, but a day file may have
+        several writers (dashboard workers, ``serve``, cron jobs). Their cached
+        ``_last_hash`` values can therefore be stale even though each instance's
+        own thread lock is sound. The append lock must cover both reading the
+        real tail and constructing/writing the next row; otherwise two signers
+        can append siblings that name the same predecessor and fork the chain.
+        """
+        # Read backwards in bounded chunks. Scanning the entire day file for
+        # every event would make signing quadratic over a long-running day and
+        # turn the integrity fix into an availability problem.
+        fileobj.seek(0, os.SEEK_END)
+        position = fileobj.tell()
+        pending = b""
+        last_line = b""
+        while position > 0 and not last_line:
+            size = min(position, 64 * 1024)
+            position -= size
+            fileobj.seek(position)
+            combined = fileobj.read(size) + pending
+            lines = combined.splitlines()
+            if position > 0:
+                pending = lines[0] if lines else combined
+                complete_lines = lines[1:]
+            else:
+                complete_lines = lines
+            last_line = next(
+                (line for line in reversed(complete_lines) if line.strip()),
+                b"",
+            )
         if not last_line:
             return ""
         try:
             data = json.loads(last_line)
         except json.JSONDecodeError as e:
             raise ValueError(
-                f"audit chain resume: last line of {self._path} is unparseable "
+                f"audit chain {operation}: last line of {self._path} is unparseable "
                 "(torn write?); refusing to silently restart the chain"
             ) from e
-        return str(data.get("hash") or "")
+        return _validated_tail_hash(data, operation=operation, path=self._path)
 
     def write(self, event: dict) -> bool:
         """Append a signed + chained event row. Returns True on success."""
         with self._lock:
-            payload = dict(event)
-            payload["prev_hash"] = self._last_hash
-            payload["key_id"] = self._key_id
-            row_bytes = json.dumps(payload, sort_keys=True, default=str).encode("utf-8")
-            row_hash = hashlib.sha256(row_bytes).hexdigest()
-            sig = self._signer.sign(bytes.fromhex(row_hash)).hex()
-            payload["hash"] = row_hash
-            payload["sig"] = sig
-            line = json.dumps(payload, default=str) + "\n"
             try:
                 from .writer import _file_append_lock
 
-                self._path.parent.mkdir(parents=True, exist_ok=True)
-                with open(self._path, "a", encoding="utf-8") as f:
-                    # Cross-process advisory lock: serialize concurrent writers
-                    # so an append above PIPE_BUF can't interleave a torn row
-                    # into the signed chain. POSIX-only; no-op elsewhere.
+                # A deleted/replaced live file is integrity state loss. Do not
+                # recreate it at genesis; require an existing private regular
+                # file on every append.
+                ensure_private_directory(self._path.parent)
+                ensure_private_file(self._path, 0o600)
+                with open(self._path, "a+b") as f:
+                    # Cross-process advisory lock covers tail read, hash/sign,
+                    # and append as one transaction. Merely locking f.write()
+                    # is insufficient: independent signers may have cached the
+                    # same old tip and would append a cryptographically valid but
+                    # structurally forked pair of rows.
                     with _file_append_lock(f):
+                        actual_tail = self._locked_tail_hash(f)
+                        payload = dict(event)
+                        payload["prev_hash"] = actual_tail
+                        payload["key_id"] = self._key_id
+                        row_bytes = json.dumps(
+                            payload, sort_keys=True, default=str
+                        ).encode("utf-8")
+                        row_hash = hashlib.sha256(row_bytes).hexdigest()
+                        payload["hash"] = row_hash
+                        payload["sig"] = self._signer.sign(
+                            bytes.fromhex(row_hash)
+                        ).hex()
+                        line = (json.dumps(payload, default=str) + "\n").encode(
+                            "utf-8"
+                        )
+                        # Switching an update-mode stream from reading to writing
+                        # requires an intervening seek. O_APPEND still guarantees
+                        # that the bytes land at the physical end of the file.
+                        f.seek(0, os.SEEK_END)
                         f.write(line)
                         # fsync so a power loss can't lose committed audit rows
                         # (or leave a torn line that breaks chain resume). The
@@ -660,10 +816,7 @@ class AuditSigner:
                         # than the small write cost here.
                         f.flush()
                         os.fsync(f.fileno())
-                try:
-                    os.chmod(self._path, 0o600)
-                except OSError:
-                    pass
+                ensure_private_file(self._path, 0o600)
                 # Only advance the in-memory chain head AFTER the row is
                 # durably on disk; otherwise a crash between write and this
                 # line would chain the next row on a hash that isn't there.
@@ -689,7 +842,9 @@ def _segment_text(path: Path) -> str:
     return segment_text(path, fail_soft=False)
 
 
-def verify_chain(path: Path, pubkey_hex: str | None = None) -> list[ChainBreak]:
+def verify_chain(  # noqa: C901 - linear forensic checks stay auditable together
+    path: Path, pubkey_hex: str | None = None
+) -> list[ChainBreak]:
     """Walk every line; verify chain links + signatures.
 
     If ``pubkey_hex`` is None, the verifier looks up each row's
@@ -711,26 +866,33 @@ def verify_chain(path: Path, pubkey_hex: str | None = None) -> list[ChainBreak]:
     def _load_pubkey(key_id: str):
         if key_id in pubkey_cache:
             return pubkey_cache[key_id]
-        if pubkey_hex:
-            obj = ed25519.Ed25519PublicKey.from_public_bytes(bytes.fromhex(pubkey_hex))
-        else:
-            # Trust a local .pub only when its private .key sibling also exists
-            # — i.e. this host actually generated that keypair — OR when an
-            # ``.injected`` marker is present (the key was provisioned out of
-            # band from a KMS/secret-manager, so the private half is
-            # deliberately absent from disk). That closes the "attacker drops a
-            # lone forged <id>.pub and re-signs rows" vector while still honoring
-            # key rotation (writes .key+.pub) and env-injected keys (write
-            # .pub+.injected). Both rest on the key dir being access-controlled;
-            # for third-party tamper-evidence, callers should pass the trusted
-            # pubkey_hex explicitly.
-            pub_path, priv_path = _key_paths_for_id(key_id)
-            if pub_path is None or not pub_path.exists():
+        try:
+            if pubkey_hex:
+                raw_pub = bytes.fromhex(pubkey_hex)
+            else:
+                key_dir = _key_dir()
+                if not key_dir.exists():
+                    return None
+                ensure_private_directory(key_dir)
+                pub_path, priv_path = _key_paths_for_id(key_id)
+                if pub_path is None or priv_path is None or not pub_path.exists():
+                    return None
+                marker = _injected_marker_for_id(key_id)
+                if priv_path.exists():
+                    ensure_private_file(priv_path, 0o600)
+                elif marker is not None and marker.exists():
+                    ensure_private_file(marker, 0o600)
+                else:
+                    return None
+                ensure_private_file(pub_path, 0o644)
+                raw_pub = atomic_read_bytes(pub_path)
+                if hashlib.sha256(raw_pub).hexdigest()[:16] != key_id:
+                    return None
+            if len(raw_pub) != 32:
                 return None
-            marker = _injected_marker_for_id(key_id)
-            if not priv_path.exists() and (marker is None or not marker.exists()):
-                return None
-            obj = ed25519.Ed25519PublicKey.from_public_bytes(pub_path.read_bytes())
+            obj = ed25519.Ed25519PublicKey.from_public_bytes(raw_pub)
+        except (OSError, ValueError):
+            return None
         pubkey_cache[key_id] = obj
         return obj
 
@@ -748,6 +910,11 @@ def verify_chain(path: Path, pubkey_hex: str | None = None) -> list[ChainBreak]:
                 data = json.loads(line)
             except json.JSONDecodeError as e:
                 breaks.append(ChainBreak(n, "malformed", str(e)))
+                continue
+            if not isinstance(data, dict):
+                breaks.append(
+                    ChainBreak(n, "malformed", "audit row must be a JSON object")
+                )
                 continue
             row_hash = data.get("hash")
             sig = data.get("sig")
@@ -775,6 +942,18 @@ def verify_chain(path: Path, pubkey_hex: str | None = None) -> list[ChainBreak]:
                 continue
             if not row_hash or not sig or not key_id:
                 breaks.append(ChainBreak(n, "malformed", "missing hash/sig/key_id"))
+                continue
+            if not all(
+                isinstance(value, str)
+                for value in (row_hash, sig, row_prev, key_id)
+            ):
+                breaks.append(
+                    ChainBreak(
+                        n,
+                        "malformed",
+                        "hash/sig/prev_hash/key_id must be strings",
+                    )
+                )
                 continue
             if row_prev != prev:
                 breaks.append(
@@ -820,9 +999,11 @@ def _file_tip_and_count(path: Path) -> tuple[str, int]:
                 continue
             count += 1
             try:
-                tip = str(json.loads(line).get("hash") or tip)
+                data = json.loads(line)
             except json.JSONDecodeError:
-                pass
+                continue
+            if isinstance(data, dict):
+                tip = str(data.get("hash") or tip)
     return tip, count
 
 
@@ -850,6 +1031,8 @@ def _anchored_days(audit_dir: Path) -> set[str]:
                 d = json.loads(line)
             except json.JSONDecodeError:
                 continue
+            if not isinstance(d, dict):
+                continue
             if d.get("kind") == "anchor" and d.get("day"):
                 days.add(str(d["day"]))
     return days
@@ -866,14 +1049,16 @@ def _anchor_marker_path(audit_dir: Path) -> Path:
 
 def _mark_anchor_ledger_required(audit_dir: Path) -> None:
     marker = _anchor_marker_path(audit_dir)
-    if marker.exists():
-        return
     try:
-        audit_dir.mkdir(parents=True, exist_ok=True)
-        marker.write_text(
-            "anchors.ndjson is required for audit tamper-evidence\n",
-            encoding="utf-8",
-        )
+        ensure_private_directory(audit_dir)
+        if marker.exists():
+            ensure_private_file(marker, 0o600)
+        else:
+            atomic_write_text(
+                marker,
+                "anchors.ndjson is required for audit tamper-evidence\n",
+                mode=0o600,
+            )
     except OSError as e:  # pragma: no cover - best-effort marker
         log.warning("audit anchors: failed to write ledger marker: %s", e)
 
@@ -993,6 +1178,8 @@ def verify_anchors(audit_dir: Path, pubkey_hex: str | None = None) -> list[Chain
                 d = json.loads(line)
             except json.JSONDecodeError:
                 continue
+            if not isinstance(d, dict):
+                continue
             if d.get("kind") == "anchor" and d.get("day"):
                 latest[str(d["day"])] = d
     for day, anc in sorted(latest.items()):
@@ -1055,7 +1242,9 @@ def reanchor_file(path: Path, *, force: bool = False, preverified: bool = False)
     from cryptography.hazmat.primitives.asymmetric import ed25519
 
     try:
-        raw = path.read_bytes()
+        ensure_private_directory(path.parent)
+        ensure_private_file(path, 0o600)
+        raw = atomic_read_bytes(path)
     except OSError:
         return -1
     # A closed day-file may be at-rest *sealed* (#1015). Re-chain its decrypted
@@ -1076,6 +1265,9 @@ def reanchor_file(path: Path, *, force: bool = False, preverified: bool = False)
         except json.JSONDecodeError:
             # Never drop data on a rewrite: preserve unparseable lines
             # verbatim (and out of the chain), mirroring verify_chain.
+            parsed.append(("raw", raw))
+            continue
+        if not isinstance(data, dict):
             parsed.append(("raw", raw))
             continue
         if data.get("sig") and data.get("hash") and data.get("key_id"):
@@ -1127,28 +1319,10 @@ def reanchor_file(path: Path, *, force: bool = False, preverified: bool = False)
     from .sealing import encode_segment
     new_bytes = encode_segment(new_content, sealed=was_sealed)
 
-    tmp = path.with_suffix(".ndjson.reanchortmp")
     try:
-        mode = path.stat().st_mode & 0o777
-    except OSError:
-        mode = 0o600
-    try:
-        with open(tmp, "wb") as f:
-            f.write(new_bytes)
-            f.flush()
-            os.fsync(f.fileno())
-        tmp.replace(path)
-        try:
-            os.chmod(path, mode)
-        except OSError:
-            pass
+        atomic_write_bytes(path, new_bytes, mode=0o600)
     except OSError as e:
         log.warning("audit reanchor: %s: %s", path, e)
-        if tmp.exists():
-            try:
-                tmp.unlink()
-            except OSError:
-                pass
         return -1
     return resigned
 

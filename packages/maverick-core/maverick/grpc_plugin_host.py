@@ -115,7 +115,7 @@ def _require_grpc():
     except ImportError as e:
         raise ImportError(
             "grpc not installed (needed for gRPC plugins). "
-            "Run: pip install 'maverick-agent[grpc]'"
+            "Run: python -m pip install -e './packages/maverick-core[grpc]'"
         ) from e
     return grpc
 
@@ -148,7 +148,7 @@ def _generate_stubs() -> None:
     except ImportError as e:
         raise ImportError(
             "grpcio-tools not installed (needed to generate stubs). "
-            "Run: pip install 'maverick-agent[grpc]'"
+            "Run: python -m pip install -e './packages/maverick-core[grpc]'"
         ) from e
     root = _PROTO.parents[2]
     rc = protoc.main([

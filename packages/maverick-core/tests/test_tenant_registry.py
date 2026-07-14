@@ -104,13 +104,36 @@ def test_registry_round_trips_on_disk():
     assert tr.get_tenant("acme").plan == "pro"
 
 
+@pytest.mark.parametrize(
+    "content",
+    [
+        "[]",
+        '{"tenants":[{"id":"acme","status":"suspnded"}]}',
+        '{"tenants":[{"id":"acme","status":"active","max_daily_dollars":NaN}]}',
+        '{"tenants":[],"tenants":[]}',
+    ],
+)
+def test_corrupt_registry_fails_closed_and_is_not_overwritten(content, tmp_path):
+    path = tmp_path / "tenant_registry.json"
+    path.write_text(content, encoding="utf-8")
+    with pytest.raises(tr.TenantRegistryError):
+        tr.list_tenants()
+    assert tr.is_active("acme") is False
+    with pytest.raises(tr.TenantRegistryError):
+        tr.assert_tenant_active("acme")
+    with pytest.raises(tr.TenantRegistryError):
+        tr.create_tenant("new")
+    assert path.read_text(encoding="utf-8") == content
+
+
 # ---- atomic persistence + concurrency-safe roster edits ----
 
 def test_save_is_atomic_0600_no_temp(tmp_path):
-    import stat
+    from maverick.file_lock import private_path_is_restricted
+
     tr.create_tenant("acme")
     path = tmp_path / "tenant_registry.json"
-    assert stat.S_IMODE(path.stat().st_mode) == 0o600
+    assert private_path_is_restricted(path)
     # A valid, fully-written JSON roster -- never a truncated file.
     import json
     assert "acme" in {t["id"] for t in json.loads(path.read_text())["tenants"]}

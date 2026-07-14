@@ -78,6 +78,45 @@ def test_verified_handoff_round_trips_and_returns_the_grant():
 
 
 @crypto
+def test_signed_handoff_redirected_to_another_inbox_is_rejected():
+    """A valid signature for worker A is not authority for worker B."""
+    auth = HandoffAuthority.for_run()
+    env = auth.mint(
+        sender="agent:lead-0",
+        recipient="agent:worker-a",
+        grant=_grant(principal="agent:worker-a"),
+        task="read",
+    )
+    agent_bus.send("agent:lead-0", "agent:worker-b", env)
+    agent_bus.send("agent:lead-0", "agent:worker-a", env)
+
+    d = receive_handoff(auth, "agent:worker-b")
+    correct = receive_handoff(auth, "agent:worker-a")
+
+    assert d is not None and not d.ok
+    assert d.verdict.rule == "recipient_mismatch"
+    assert correct is not None and correct.ok
+
+
+@crypto
+def test_signed_handoff_wrapper_sender_must_match_signed_sender():
+    """The unsigned bus wrapper cannot relabel a signed delegation's sender."""
+    auth = HandoffAuthority.for_run()
+    env = auth.mint(
+        sender="agent:lead-0",
+        recipient="agent:worker-1",
+        grant=_grant(principal="agent:worker-1"),
+        task="read",
+    )
+    agent_bus.send("agent:mallory", "agent:worker-1", env)
+
+    d = receive_handoff(auth, "agent:worker-1")
+
+    assert d is not None and not d.ok
+    assert d.verdict.rule == "sender_mismatch"
+
+
+@crypto
 def test_tampering_in_transit_is_rejected():
     import dataclasses
     auth = HandoffAuthority.for_run()
@@ -154,6 +193,8 @@ def test_recv_verified_handoff_installs_grant_for_tool_enforcement(monkeypatch, 
         goal_id=goal_id, use_skills=False,
     )
     agent = Agent(ctx=ctx, role="worker", brief="b")
+    assert ctx.knows_bus_agent(agent.name)
+    ctx.register_bus_agent("lead-0")
     agent.capability = Capability(
         principal=agent.name,
         allow_tools=frozenset({"recv_from_agent", "read_file", "shell"}),
@@ -173,7 +214,9 @@ def test_recv_verified_handoff_installs_grant_for_tool_enforcement(monkeypatch, 
         nonce="n", ts=time.time(), required_tools=("read_file",),
     )
 
-    def fake_receive_handoff(authority, agent_id, *, timeout=0.0, now=None):
+    def fake_receive_handoff(
+        authority, agent_id, *, timeout=0.0, now=None, namespace=None,
+    ):
         return HandoffDelivery(
             sender="lead-0", payload=env,
             verdict=HandoffVerdict(True, "ok", "handoff verified", grant=delegated),

@@ -32,7 +32,7 @@ from pathlib import Path
 # In production arq routes the function to a remote worker; here the broker
 # bridge below delivers it to the JobQueue the local Worker polls, so the two
 # real substrates compose.
-from .queue_dispatcher import JOB_NAME, QueueDispatcher
+from .queue_dispatcher import JOB_NAME, QUEUED_STATUS, QueueDispatcher
 from .worker import Worker
 from .world_model import WorldModel
 
@@ -98,7 +98,7 @@ def run_e2e(workdir: Path, *, execute=None) -> dict:
     control_did_not_execute = status_after_enqueue == status_initial == "pending"
     worker_claimed = bool(claimed) and len(done_jobs) == 1
     status_flowed_back = status_after_run == "done"
-    enqueued_one = submit_returned is None and len(pending) == 1
+    enqueued_one = submit_returned == QUEUED_STATUS and len(pending) == 1
     ok = bool(control_did_not_execute and worker_claimed and status_flowed_back
               and enqueued_one)
 

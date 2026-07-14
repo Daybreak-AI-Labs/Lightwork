@@ -9,8 +9,8 @@ jobs:
   lint:
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v7
-      - uses: actions/setup-python@v6
+      - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7
+      - uses: actions/setup-python@ece7cb06caefa5fff74198d8649806c4678c61a1 # v6
         with:
           python-version: "3.12"
       - name: Install ruff
@@ -187,8 +187,8 @@ jobs:
   audit:
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v7
-      - uses: actions/setup-python@v6
+      - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7
+      - uses: actions/setup-python@ece7cb06caefa5fff74198d8649806c4678c61a1 # v6
         with:
           python-version: "3.12"
       - name: Install packages (so pip-audit sees the real dependency tree)
@@ -209,12 +209,14 @@ jobs:
           # the package extras, plus twilio (which pulls requests/urllib3), so
           # pip-audit sees the real surface we ship -- not a stale bare env.
           pip install 'fastapi>=0.110' 'uvicorn>=0.27' 'jinja2>=3.1' \
-                      'httpx>=0.27' 'python-multipart>=0.0.27' \
-                      'starlette>=1.0.1' 'requests>=2.33.0' 'urllib3>=2.7.0' \
-                      'pillow>=12.2.0' 'twilio>=9.0'
+                      'httpx>=0.27' 'python-multipart>=0.0.31' \
+                      'starlette>=1.3.1' 'requests>=2.33.0' 'urllib3>=2.7.0' \
+                      'pillow>=12.3.0' 'pypdf>=6.13.3' 'aiohttp>=3.14.1' \
+                      'click>=8.3.3' 'cryptography>=48.0.1' 'twilio>=9.0'
       - name: pip-audit (known CVEs in dependencies)
         # BLOCKING: the dependency floors are now bumped past every CVE this
-        # surfaced (pillow/python-multipart/requests/starlette/urllib3). A new
+        # surfaced (including aiohttp/cryptography/pillow/python-multipart/
+        # requests/starlette/urllib3). A new
         # advisory should fail the build and prompt a floor bump -- that's the
         # whole point of the gate. Re-add `|| true` only as a temporary
         # measure if an upstream CVE lands with no fix available yet.
@@ -223,7 +225,7 @@ jobs:
           # PYSEC-2026-196; 26.1.2 patches it. Bump pip to the fixed floor
           # before auditing so the gate reflects our shipped dependency tree,
           # not a stale CVE in the runner's own tooling.
-          python -m pip install --upgrade 'pip>=26.1.2'
+          python -m pip install --upgrade 'pip>=26.1.2' 'setuptools>=83.0.0'
           python -m pip install pip-audit
           pip-audit
       - name: SAST (bandit, high-severity)
@@ -278,7 +280,7 @@ jobs:
           cyclonedx-py environment -o sbom.cyclonedx.json || \
             cyclonedx-py environment > sbom.cyclonedx.json
       - name: Upload SBOM
-        uses: actions/upload-artifact@v7
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7
         continue-on-error: true
         with:
           name: sbom-cyclonedx
@@ -292,8 +294,8 @@ jobs:
       matrix:
         python-version: ["3.10", "3.11", "3.12"]
     steps:
-      - uses: actions/checkout@v7
-      - uses: actions/setup-python@v6
+      - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7
+      - uses: actions/setup-python@ece7cb06caefa5fff74198d8649806c4678c61a1 # v6
         with:
           python-version: ${{ matrix.python-version }}
       - name: Install packages
@@ -332,8 +334,8 @@ jobs:
     # is maverick_shield/redteam_corpus.jsonl — grow it by PR.
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v7
-      - uses: actions/setup-python@v6
+      - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7
+      - uses: actions/setup-python@ece7cb06caefa5fff74198d8649806c4678c61a1 # v6
         with:
           python-version: "3.12"
       - name: Install shield
@@ -352,8 +354,8 @@ jobs:
     # without any API key. Deterministic and offline by construction.
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v7
-      - uses: actions/setup-python@v6
+      - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7
+      - uses: actions/setup-python@ece7cb06caefa5fff74198d8649806c4678c61a1 # v6
         with:
           python-version: "3.12"
       - name: Install packages
@@ -388,8 +390,8 @@ jobs:
           --health-timeout 5s
           --health-retries 5
     steps:
-      - uses: actions/checkout@v7
-      - uses: actions/setup-python@v6
+      - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7
+      - uses: actions/setup-python@ece7cb06caefa5fff74198d8649806c4678c61a1 # v6
         with:
           python-version: "3.12"
       - name: Install
@@ -411,7 +413,7 @@ jobs:
   docker:
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v7
+      - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7
       - name: Build image
         # Docker Hub base-image pulls intermittently time out on CI runners
         # (registry-1.docker.io i/o timeout). Retry with backoff so a transient

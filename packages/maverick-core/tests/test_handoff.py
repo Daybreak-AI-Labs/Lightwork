@@ -223,3 +223,66 @@ def test_unsigned_envelope_is_rejected():
     )
     v = verify_handoff(env, trusted_issuers={"y"}, now=1000.0)
     assert not v.ok and v.rule == "unsigned"
+
+
+@crypto
+def test_handoff_rejects_oversized_or_nonfinite_security_fields():
+    priv, pub = _keypair()
+    with pytest.raises(ValueError, match="too large|exceeds"):
+        mint_handoff(
+            sender="a", recipient="agent:finance_payroll-1",
+            task="x" * (32 * 1024 + 1), grant=_grant(),
+            issuer_private_hex=priv, issuer_pub_hex=pub,
+        )
+    with pytest.raises(ValueError, match="required_tools exceeds"):
+        mint_handoff(
+            sender="a", recipient="agent:finance_payroll-1", task="t",
+            grant=_grant(), issuer_private_hex=priv, issuer_pub_hex=pub,
+            required_tools=(f"tool-{i}" for i in range(129)),
+        )
+    with pytest.raises(ValueError, match="grant expiry is invalid"):
+        mint_handoff(
+            sender="a", recipient="agent:finance_payroll-1", task="t",
+            grant=_grant(expires_at=float("inf")),
+            issuer_private_hex=priv, issuer_pub_hex=pub,
+        )
+
+
+@crypto
+def test_handoff_verifier_never_raises_on_nonfinite_timestamp():
+    env = Envelope(
+        sender="a", recipient="agent:finance_payroll-1", task="t",
+        grant=_grant(), nonce="n", ts=float("nan"),
+        grant_sig="x", issuer_pub="y", sig="z",
+    )
+    verdict = verify_handoff(env, trusted_issuers={"y"}, now=1000.0)
+    assert not verdict.ok and verdict.rule == "malformed"
+
+
+@crypto
+def test_nonce_cache_saturation_fails_closed_then_prunes_expired_entries():
+    priv, pub = _keypair()
+    first = mint_handoff(
+        sender="a", recipient="agent:finance_payroll-1", task="one", grant=_grant(),
+        issuer_private_hex=priv, issuer_pub_hex=pub, ts=1000.0, nonce="n1",
+    )
+    second = mint_handoff(
+        sender="a", recipient="agent:finance_payroll-1", task="two", grant=_grant(),
+        issuer_private_hex=priv, issuer_pub_hex=pub, ts=1001.0, nonce="n2",
+    )
+    cache = NonceCache(max_entries=1)
+    assert verify_handoff(
+        first, trusted_issuers={pub}, nonce_cache=cache, now=1000.0
+    ).ok
+    full = verify_handoff(
+        second, trusted_issuers={pub}, nonce_cache=cache, now=1001.0
+    )
+    assert not full.ok and full.rule == "nonce_cache_full"
+
+    replacement = mint_handoff(
+        sender="a", recipient="agent:finance_payroll-1", task="three", grant=_grant(),
+        issuer_private_hex=priv, issuer_pub_hex=pub, ts=1301.0, nonce="n3",
+    )
+    assert verify_handoff(
+        replacement, trusted_issuers={pub}, nonce_cache=cache, now=1301.0
+    ).ok

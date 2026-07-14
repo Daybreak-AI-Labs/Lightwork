@@ -2,13 +2,12 @@
 
 Budget caps one run; quotas cap a principal across runs over a rolling day, so
 an operator can chargeback / rate-limit spend per user. Default-off and opt-in
-(``[quotas] enforce`` or ``MAVERICK_QUOTA_*``), and fail-soft: a ledger error
-must never crash a run. ``HOME`` is isolated per-test by the autouse conftest
+(``[quotas] enforce`` or ``MAVERICK_QUOTA_*``). Recording remains fail-soft,
+but enforcement rejects corrupt state rather than treating unknown usage as
+zero. ``HOME`` is isolated per-test by the autouse conftest
 fixture, so every ledger lands under the temp ``~/.maverick``.
 """
 from __future__ import annotations
-
-import json
 
 import pytest
 from maverick.quotas import (
@@ -114,14 +113,26 @@ def test_ledger_is_tenant_scoped(monkeypatch):
         reset_tenant(tok2)
 
 
-def test_corrupt_ledger_is_fail_soft(tmp_path):
+def test_corrupt_ledger_fails_closed_and_is_not_overwritten(tmp_path):
     path = tmp_path / "ledger.json"
     path.write_text("{ not json")
     led = UsageLedger(path=path)
-    # Reads as empty, and a write recovers (overwrites) without raising.
-    assert led.usage("alice")["dollars"] == 0.0
-    led.record("alice", 1.0, 0, 0)
-    assert json.loads(path.read_text())["alice"]
+    original = path.read_text(encoding="utf-8")
+    from maverick.quotas import UsageLedgerError
+    with pytest.raises(UsageLedgerError):
+        led.usage("alice")
+    with pytest.raises(UsageLedgerError):
+        led.record("alice", 1.0, 0, 0)
+    assert path.read_text(encoding="utf-8") == original
+
+
+@pytest.mark.parametrize("content", ["[]", '{"alice":NaN}', '{"alice":{},"alice":{}}'])
+def test_parseable_untrusted_ledger_is_rejected(tmp_path, content):
+    from maverick.quotas import UsageLedgerError
+    path = tmp_path / "ledger.json"
+    path.write_text(content, encoding="utf-8")
+    with pytest.raises(UsageLedgerError):
+        UsageLedger(path=path)._load()
 
 
 def test_record_usage_fail_soft_on_bad_path(monkeypatch, caplog):

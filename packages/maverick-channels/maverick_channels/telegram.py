@@ -6,7 +6,7 @@ and any message you send to your bot reaches the orchestrator.
 
 Requires::
 
-    pip install maverick-channels[telegram]
+    python -m pip install -e './packages/maverick-channels[telegram]'
 """
 from __future__ import annotations
 
@@ -46,7 +46,8 @@ class TelegramChannel(Channel):
         if not _HAVE_TELEGRAM:
             raise ImportError(
                 "python-telegram-bot not installed. Install with: "
-                "pip install maverick-channels[telegram]"
+                "From the reviewed checkout run: python -m pip install -e "
+                "'./packages/maverick-channels[telegram]'"
             )
         self.token = token or os.environ.get("TELEGRAM_BOT_TOKEN")
         if not self.token:

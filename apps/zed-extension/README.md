@@ -28,8 +28,10 @@ split; anything else would be pretending the sandbox isn't there.
 ## Prerequisites
 
 - The `maverick` CLI installed and on PATH, with the MCP server package:
-  `pip install maverick-agent maverick-mcp-server` (or the installers under
-  `apps/` / `deploy/`).
+  from the reviewed Lightwork checkout, run
+  `pip install -e ./packages/maverick-core -e ./packages/maverick-mcp` (or use
+  the pinned-source installers under `apps/` / `deploy/`). Public PyPI names
+  remain disabled until every Lightwork namespace is reserved and protected.
 - Zed (stable) with assistant/context-server support.
 
 ## Building / installing as a dev extension

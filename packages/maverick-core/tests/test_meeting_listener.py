@@ -4,8 +4,8 @@ from __future__ import annotations
 
 import json
 import os
-import stat
 
+from maverick.file_lock import private_path_is_restricted
 from maverick.meeting_listener import (
     ActionItem,
     MeetingListener,
@@ -145,7 +145,8 @@ def test_finalize_writes_0600_artifact_with_minutes(tmp_path, monkeypatch):
     assert path.parent == tmp_path / "mhome" / "meetings"
     # Sanitized to one path segment: separators replaced, so '..' is inert.
     assert path.name == "standup-..-x.json"
-    assert stat.S_IMODE(os.stat(path).st_mode) == 0o600
+    assert private_path_is_restricted(path, 0o600)
+    assert private_path_is_restricted(path.parent, 0o700)
     payload = json.loads(path.read_text())
     assert payload["duration_seconds"] == 20.0
     assert payload["speakers"] == ["Alice"]
@@ -166,7 +167,7 @@ def test_finalize_creates_file_0600_even_under_permissive_umask(tmp_path, monkey
         path = m.finalize()
     finally:
         os.umask(old)
-    assert stat.S_IMODE(os.stat(path).st_mode) == 0o600
+    assert private_path_is_restricted(path, 0o600)
 
 
 def test_injected_clock_drives_started_and_duration(tmp_path, monkeypatch):

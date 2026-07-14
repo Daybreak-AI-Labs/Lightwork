@@ -109,7 +109,9 @@ vLLM), configured in `~/.maverick/config.toml`, never hard-coded — and the
 The 90-second path:
 
 ```bash
-pipx install 'maverick-agent[installer]'
+git clone https://github.com/Day-AI-Labs/Lightwork && cd Lightwork
+git checkout --detach <reviewed-full-40-character-commit-sha>
+pip install -e ./packages/maverick-core -e ./apps/installer-cli
 maverick init          # wizard: four questions, safe defaults (--fast skips)
 maverick start "Research the three best static site generators for a docs \
 site, compare them in a table, and scaffold the winner" --max-dollars 2.0

@@ -75,7 +75,7 @@ One page per speaker, containing:
 - [ ] One person is **producer** (not a speaker): admits speakers, runs the
       holding slides, watches chat, cuts a frozen screen share.
 - [ ] Backup presenter machine with the demo environment cloned.
-- [ ] Demo environment: a clean install (`pipx install 'maverick-agent[installer]'`,
+- [ ] Demo environment: a clean reviewed-source or signed-release install (`maverick init --fast`,
       `maverick init`), `maverick doctor` green, API keys with low spend
       limits, budget caps configured.
 

@@ -1,17 +1,13 @@
 # maverick-installer
 
-The interactive setup wizard. Installed as part of the kernel's
-`[installer]` extra:
+The interactive setup wizard. Until the Lightwork distribution names are
+reserved and protected on public PyPI, install it from the same pinned source
+checkout as the kernel:
 
 ```bash
-pipx install 'maverick-agent[installer]'
+pip install -e ./packages/maverick-core
+pip install -e ./apps/installer-cli
 maverick init
-```
-
-If the kernel is already installed without the extra:
-
-```bash
-pipx inject maverick-agent maverick-installer
 ```
 
 A standalone `maverick-init` entry point is also exposed (same flags).

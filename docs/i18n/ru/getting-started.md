@@ -7,8 +7,12 @@
 Самый безопасный способ установки из терминала — поставить опубликованный пакет через pipx, а не выполнять удалённый bootstrap-скрипт:
 
 ```bash
-pipx install 'maverick-agent[installer]'
-maverick init
+git clone https://github.com/Day-AI-Labs/Lightwork
+cd Lightwork
+git checkout --detach <reviewed-full-40-character-commit-sha>
+python -m pip install -e ./packages/maverick-core
+python -m pip install -e ./apps/installer-cli
+lightwork init
 ```
 
 Если вам нужен десктопный bootstrap без предварительных требований, скачайте `deploy/desktop/install.sh` или `deploy/desktop/install.ps1` из коммита или релиза, которому вы доверяете, проверьте скрипт и задайте в `MAVERICK_REF` полный 40-символьный SHA коммита. По умолчанию скрипты отклоняют изменяемые ссылки на ветки и теги.

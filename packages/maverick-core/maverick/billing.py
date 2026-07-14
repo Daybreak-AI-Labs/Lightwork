@@ -18,6 +18,7 @@ from __future__ import annotations
 
 import hashlib
 import json
+import math
 from dataclasses import dataclass, field
 
 from .quotas import UsageLedger
@@ -201,22 +202,57 @@ DEFAULT_PLANS: dict[str, Entitlements] = {
 }
 
 
+class BillingPolicyError(RuntimeError):
+    """Billing/feature policy cannot be resolved safely."""
+
+
 def entitlements_for(plan: str) -> Entitlements:
     """The entitlements for ``plan`` (config override or built-in default;
     unknown plans fall back to ``free``)."""
     try:
-        from .config import load_config
-        plans = (load_config() or {}).get("billing", {}).get("plans") or {}
+        from .config import config_source_errors, load_config
+
+        cfg = load_config()
+        if config_source_errors():
+            raise BillingPolicyError(
+                "billing policy unavailable: an active config source is invalid"
+            )
+        billing = cfg.get("billing") or {}
+        if not isinstance(billing, dict):
+            raise BillingPolicyError("[billing] must be a table")
+        plans = billing.get("plans") or {}
+        if not isinstance(plans, dict):
+            raise BillingPolicyError("[billing.plans] must be a table")
         spec = plans.get(plan)
-        if isinstance(spec, dict):
+        if spec is not None:
+            if not isinstance(spec, dict):
+                raise BillingPolicyError(f"billing plan {plan!r} must be a table")
+            features = spec.get("features") or []
+            if not isinstance(features, (list, tuple)) or any(
+                not isinstance(feature, str) or not feature.strip()
+                for feature in features
+            ):
+                raise BillingPolicyError(f"billing plan {plan!r} has invalid features")
+            dollars = float(spec.get("max_daily_dollars", 0) or 0)
+            concurrent = spec.get("max_concurrent_goals", 0) or 0
+            if isinstance(concurrent, bool) or not isinstance(concurrent, int):
+                raise BillingPolicyError(
+                    f"billing plan {plan!r} max_concurrent_goals must be an integer"
+                )
+            if not math.isfinite(dollars) or dollars < 0 or concurrent < 0:
+                raise BillingPolicyError(f"billing plan {plan!r} has invalid limits")
             return Entitlements(
                 plan=plan,
-                features=frozenset(str(f) for f in (spec.get("features") or [])),
-                max_daily_dollars=float(spec.get("max_daily_dollars", 0) or 0),
-                max_concurrent_goals=int(spec.get("max_concurrent_goals", 0) or 0),
+                features=frozenset(feature.strip() for feature in features),
+                max_daily_dollars=dollars,
+                max_concurrent_goals=concurrent,
             )
-    except Exception:  # pragma: no cover -- config never blocks gating
-        pass
+    except BillingPolicyError:
+        raise
+    except (OverflowError, TypeError, ValueError) as exc:
+        raise BillingPolicyError(f"billing policy invalid: {exc}") from exc
+    except Exception as exc:
+        raise BillingPolicyError(f"billing policy unavailable: {exc}") from exc
     return DEFAULT_PLANS.get(plan, DEFAULT_PLANS["free"])
 
 
@@ -265,32 +301,27 @@ def feature_allowed(feature: str, *, tenant: str | None = None) -> bool:
         by ``MAVERICK_TENANT_BY_USER`` with no roster) -> allowed;
       * a registered tenant -> allowed iff its plan includes ``feature``.
 
-    Fail-open: any lookup error allows the feature (never block on billing).
+    Policy lookup errors propagate so a communication surface can refuse rather
+    than silently restoring a feature removed by tenant policy.
     """
-    try:
-        tid = tenant or _active_tenant_id()
-        if not tid:
-            return True
-        from .tenant.registry import get_tenant
-        rec = get_tenant(tid)
-        if rec is None:
-            return True
-        return entitled(rec.plan, feature)
-    except Exception:  # pragma: no cover -- entitlement checks never block a run
+    tid = tenant or _active_tenant_id()
+    if not tid:
         return True
+    from .tenant.registry import get_tenant
+    rec = get_tenant(tid)
+    if rec is None:
+        return True
+    return entitled(rec.plan, feature)
 
 
 def _active_tenant_id() -> str | None:
-    try:
-        from .paths import current_tenant_id
-        return current_tenant_id()
-    except Exception:  # pragma: no cover
-        return None
+    from .paths import current_tenant_id
+    return current_tenant_id()
 
 
 __all__ = [
     "RateCard", "LineItem", "Invoice",
     "rate_ledger", "generate_invoice", "ledger_for_tenant",
     "Entitlements", "DEFAULT_PLANS", "entitlements_for", "entitled",
-    "tenant_entitled", "feature_allowed",
+    "BillingPolicyError", "tenant_entitled", "feature_allowed",
 ]

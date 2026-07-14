@@ -792,6 +792,17 @@ class Agent:
         # to override globally via MAVERICK_MAX_STEPS, default 25.
         self.max_steps = env_int("MAVERICK_MAX_STEPS", max_steps)
         self.name = f"{role}-{depth}-{uuid.uuid4().hex[:6]}"
+        # Register before tool construction: bus tool closures enforce the
+        # SwarmContext roster on every send/receive/delegation. If an unusual
+        # test/adapter context lacks the hook, legacy tool behavior is retained;
+        # a real SwarmContext registration error fails the bus closed while the
+        # rest of the agent can still run.
+        _register_bus_agent = getattr(self.ctx, "register_bus_agent", None)
+        if callable(_register_bus_agent):
+            try:
+                _register_bus_agent(self.name)
+            except Exception as e:
+                log.warning("agent bus roster registration failed for %s: %s", self.name, e)
 
         # Resolve the model BEFORE building the system prompt: the self-harness
         # addendum layer (_with_harness_addendum) recalls guidance keyed on
@@ -904,12 +915,12 @@ class Agent:
         )
         # Cross-agent bus tools, bound to this agent's id so send records
         # the right sender and recv drains the right inbox.
-        reg.register(send_to_agent(self.name))
+        reg.register(send_to_agent(self.name, ctx=self.ctx))
         # recv is handoff-aware (verifies a signed delegation via the run's
         # handoff authority); delegate_to_agent is the producer, offered only
         # when capability enforcement is on -- otherwise a handoff is just a
         # plain message and send_to_agent already covers it.
-        reg.register(recv_from_agent(self.name, agent=self))
+        reg.register(recv_from_agent(self.name, agent=self, ctx=self.ctx))
         from .capability import capability_enforced
         if capability_enforced():
             reg.register(delegate_to_agent(self))
@@ -1365,8 +1376,9 @@ class Agent:
         # Revocation kill-switch: a still-valid grant can be revoked out of
         # band (leaked key / rogue agent / offboard); the registry is re-read
         # on change so a revoke in another process reaches this running agent.
-        # Fail-open (revocation never bricks a run) and only when a grant
-        # exists (== capability enforcement is on).
+        # Fail closed when configured revocation state cannot be trusted, and
+        # only consult it when a grant exists (== capability enforcement is
+        # on).
         if cap is None:
             return None
         from .revocation import revoked_principal as _revoked_principal

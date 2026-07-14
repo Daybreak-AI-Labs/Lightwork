@@ -28,8 +28,10 @@ Workflow:
 """
 from __future__ import annotations
 
+import hashlib
 import json
 import logging
+import math
 import sqlite3
 import threading
 import time
@@ -43,7 +45,16 @@ from .paths import data_dir
 log = logging.getLogger(__name__)
 
 
-DEFAULT_DB = data_dir("jobs.db")
+# Compatibility override for callers/tests that historically monkeypatched the
+# module constant.  ``None`` means "resolve the active tenant at construction
+# time".  Computing ``data_dir("jobs.db")`` here used to freeze whichever
+# tenant (usually the shared root) happened to be active when this module was
+# first imported, then leak that path into every later tenant scope.
+DEFAULT_DB: Path | None = None
+
+
+def _default_db() -> Path:
+    return Path(DEFAULT_DB) if DEFAULT_DB is not None else data_dir("jobs.db")
 
 
 @dataclass
@@ -72,6 +83,17 @@ CREATE TABLE IF NOT EXISTS jobs (
   updated_at  REAL NOT NULL
 );
 CREATE INDEX IF NOT EXISTS idx_jobs_ready ON jobs(status, run_at);
+
+-- Durable at-most-once claims for authenticated queue dispatch envelopes.
+-- The database itself is tenant-scoped by JobQueue's lazy default path.
+CREATE TABLE IF NOT EXISTS dispatch_envelope_claims (
+  message_id    TEXT PRIMARY KEY,
+  nonce_hash    TEXT NOT NULL,
+  expires_at    REAL NOT NULL,
+  claimed_at    REAL NOT NULL
+);
+CREATE INDEX IF NOT EXISTS idx_dispatch_claim_expiry
+  ON dispatch_envelope_claims(expires_at);
 """
 
 
@@ -85,7 +107,8 @@ class JobQueue:
     """
 
     def __init__(self, db_path: Path | None = None) -> None:
-        self.db_path = Path(db_path or DEFAULT_DB).expanduser()
+        selected = db_path if db_path is not None else _default_db()
+        self.db_path = Path(selected).expanduser()
         self.db_path.parent.mkdir(parents=True, exist_ok=True)
         self._lock = threading.Lock()
         self._ensure_schema()
@@ -121,6 +144,66 @@ class JobQueue:
                 (kind, json.dumps(payload or {}, default=str), rid, now, now),
             )
             return int(cur.lastrowid)
+
+    def claim_dispatch_envelope(
+        self,
+        message_id: str,
+        nonce: str,
+        *,
+        expires_at: float,
+        now: float | None = None,
+    ) -> bool:
+        """Atomically consume an authenticated dispatch envelope once.
+
+        The claim is intentionally permanent for the lifetime of the signed
+        envelope, including when the worker crashes or execution raises after
+        this method returns.  Releasing it would turn a broker retry into a
+        second opportunity to spend money or repeat side effects.  Operators
+        must submit a fresh signed envelope to retry a post-claim failure.
+
+        Only a SHA-256 digest of the nonce is retained.  Expired rows can be
+        pruned safely because the worker rejects expired signatures before it
+        reaches this store.
+        """
+        if not isinstance(message_id, str) or not message_id:
+            raise ValueError("message_id must be a non-empty string")
+        if not isinstance(nonce, str) or not nonce:
+            raise ValueError("nonce must be a non-empty string")
+        expiry = float(expires_at)
+        if not math.isfinite(expiry) or expiry <= 0:
+            raise ValueError("expires_at must be positive")
+        claimed_at = time.time() if now is None else float(now)
+        if not math.isfinite(claimed_at):
+            raise ValueError("now must be finite")
+        nonce_hash = hashlib.sha256(nonce.encode("utf-8")).hexdigest()
+        try:
+            with self._lock, self._conn() as c:
+                # Keep the replay table bounded. A worker authenticates expiry
+                # before calling us, so removing an already-expired claim
+                # cannot make its old envelope executable again.
+                c.execute(
+                    "DELETE FROM dispatch_envelope_claims WHERE expires_at <= ?",
+                    (claimed_at,),
+                )
+                c.execute(
+                    "INSERT INTO dispatch_envelope_claims "
+                    "(message_id, nonce_hash, expires_at, claimed_at) "
+                    "VALUES (?, ?, ?, ?)",
+                    (message_id, nonce_hash, expiry, claimed_at),
+                )
+            return True
+        except sqlite3.IntegrityError:
+            return False
+
+    def prune_dispatch_envelope_claims(self, *, now: float | None = None) -> int:
+        """Remove claims whose signed envelope can no longer be accepted."""
+        cutoff = time.time() if now is None else float(now)
+        with self._lock, self._conn() as c:
+            cur = c.execute(
+                "DELETE FROM dispatch_envelope_claims WHERE expires_at <= ?",
+                (cutoff,),
+            )
+            return int(cur.rowcount)
 
     def claim(
         self,

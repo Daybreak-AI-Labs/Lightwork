@@ -27,6 +27,7 @@ certify a real Okta/Entra round-trip before relying on it.
 from __future__ import annotations
 
 import logging
+import secrets
 import time
 from collections.abc import Mapping
 from dataclasses import dataclass, field
@@ -40,6 +41,8 @@ log = logging.getLogger(__name__)
 router = APIRouter(tags=["auth"])
 
 _SESSION_TTL = 8 * 60 * 60  # 8h, matching the OIDC browser session
+_TX_TTL = 10 * 60
+TX_COOKIE = "mvk_saml_tx"
 _MAX_ACS_BODY_BYTES = 1024 * 1024
 _MAX_SAML_RESPONSE_BYTES = 768 * 1024
 
@@ -161,7 +164,10 @@ def _pysaml2_config(cfg: SamlConfig) -> dict:
                 "endpoints": {
                     "assertion_consumer_service": [(cfg.acs_url, BINDING_HTTP_POST)],
                 },
-                "allow_unsolicited": True,
+                # IdP-initiated/unsolicited responses cannot be bound to the
+                # browser that started login and permit login CSRF/session
+                # swapping.  Require every assertion to answer an SP request.
+                "allow_unsolicited": False,
                 "authn_requests_signed": bool(cfg.sp_key_file),
                 "want_assertions_signed": cfg.want_assertions_signed,
                 "want_response_signed": False,
@@ -184,7 +190,7 @@ def _client(cfg: SamlConfig | None = None):  # pragma: no cover -- needs pysaml2
         from saml2.client import Saml2Client  # type: ignore
         from saml2.config import Config  # type: ignore
     except ImportError as e:
-        raise SamlUnavailable("SAML SSO needs pysaml2 (pip install 'maverick-agent[saml]')") from e
+        raise SamlUnavailable("SAML SSO needs pysaml2 (python -m pip install -e './packages/maverick-core[saml]')") from e
     conf = Config()
     conf.load(_pysaml2_config(cfg))
     return Saml2Client(config=conf)
@@ -197,25 +203,56 @@ def sp_metadata_xml(client=None, cfg: SamlConfig | None = None) -> str:  # pragm
     return create_metadata_string(None, config=client.config).decode("utf-8")
 
 
+def prepare_login_redirect(
+    client=None, cfg: SamlConfig | None = None, *, relay_state: str = "/"
+) -> tuple[str, str]:  # pragma: no cover
+    """Build an AuthnRequest and return its request ID plus redirect URL."""
+    try:
+        from saml2 import BINDING_HTTP_REDIRECT  # type: ignore
+    except ImportError as e:
+        raise SamlUnavailable(
+            "SAML SSO needs pysaml2 (python -m pip install -e './packages/maverick-core[saml]')"
+        ) from e
+
+    client = client or _client(cfg)
+    reqid, info = client.prepare_for_authenticate(
+        relay_state=relay_state, binding=BINDING_HTTP_REDIRECT
+    )
+    return str(reqid or ""), dict(info["headers"]).get("Location", "")
+
+
 def login_redirect_url(
     client=None, cfg: SamlConfig | None = None, *, relay_state: str = "/"
 ) -> str:  # pragma: no cover
-    from saml2 import BINDING_HTTP_REDIRECT  # type: ignore
-
-    client = client or _client(cfg)
-    _reqid, info = client.prepare_for_authenticate(
-        relay_state=relay_state, binding=BINDING_HTTP_REDIRECT
-    )
-    return dict(info["headers"]).get("Location", "")
+    """Compatibility wrapper returning only the IdP redirect URL."""
+    _reqid, url = prepare_login_redirect(client, cfg, relay_state=relay_state)
+    return url
 
 
-def verify_acs_response(saml_response: str) -> SamlIdentity:  # pragma: no cover
+def verify_acs_response(
+    saml_response: str, *, request_id: str
+) -> SamlIdentity:  # pragma: no cover
     """Verify a posted SAMLResponse (pysaml2 checks the XML signature) and return
-    the identity. Isolated so the ACS route logic is testable with this mocked."""
-    from saml2 import BINDING_HTTP_POST  # type: ignore
+    the identity.  ``request_id`` is required so pysaml2 also verifies the
+    response's ``InResponseTo`` binding."""
+    if not request_id:
+        raise SamlUnavailable("SAML login transaction carried no request ID")
+    try:
+        from saml2 import BINDING_HTTP_POST  # type: ignore
+    except ImportError as e:
+        raise SamlUnavailable(
+            "SAML SSO needs pysaml2 (python -m pip install -e './packages/maverick-core[saml]')"
+        ) from e
 
     client = _client()
-    authn = client.parse_authn_request_response(saml_response, BINDING_HTTP_POST)
+    authn = client.parse_authn_request_response(
+        saml_response,
+        BINDING_HTTP_POST,
+        outstanding={request_id: ""},
+    )
+    in_response_to = str(getattr(authn, "in_response_to", "") or "")
+    if not in_response_to or not secrets.compare_digest(in_response_to, request_id):
+        raise ValueError("SAML response did not match the login request")
     return extract_identity(authn)
 
 
@@ -227,7 +264,7 @@ class SamlIdentity:
     name_id: str
     attributes: dict[str, list] = field(default_factory=dict)
     # Assertion ID + its NotOnOrAfter epoch, used to enforce single-use of the
-    # assertion (replay defense). Empty/0 when the response shape hid them.
+    # assertion (replay defense). The ACS fails closed when the ID is missing.
     assertion_id: str = ""
     expires_at: float = 0.0
 
@@ -256,8 +293,8 @@ def _iso_to_epoch(value) -> float:
 def _assertion_replay_fields(authn_response) -> tuple[str, float]:
     """Best-effort (assertion_id, expires_at_epoch) from a verified pysaml2
     response, for single-use enforcement. Returns ``("", 0.0)`` when the shape
-    hides them; the ACS then logs and proceeds (a real signed assertion always
-    carries an ID, so this only degrades on unusual pysaml2 shapes)."""
+    hides them; the ACS rejects that response because single-use cannot then be
+    proven."""
     assertion = getattr(authn_response, "assertion", None)
     if isinstance(assertion, (list, tuple)):
         assertion = assertion[0] if assertion else None
@@ -329,6 +366,16 @@ def _safe_relay_state(value: str | None, default: str) -> str:
     return value
 
 
+def _clear_saml_tx(response):
+    """Expire the SAML transaction cookie using its original narrow path."""
+    response.delete_cookie(TX_COOKIE, path="/saml")
+    return response
+
+
+def _tx_error(detail: str, *, status_code: int) -> JSONResponse:
+    return _clear_saml_tx(JSONResponse({"detail": detail}, status_code=status_code))
+
+
 # Attribute names IdPs commonly carry the stable email / UPN under. SCIM
 # deprovision revokes by externalId/userName/email/id, so recording the SAML
 # NameID against these lets ``subject_directory.subs_for`` reach a session whose
@@ -390,61 +437,125 @@ async def saml_login(request: Request):
         return off
     cfg = load_saml_config()
     relay = _safe_relay_state(request.query_params.get("return_to"), cfg.default_relay_state)
+    secret = _session_secret()
+    if not secret:
+        return JSONResponse(
+            {"detail": "SAML needs the browser-login session secret"}, status_code=503
+        )
+    state = secrets.token_urlsafe(32)
     try:
-        url = login_redirect_url(cfg=cfg, relay_state=relay)
+        request_id, url = prepare_login_redirect(cfg=cfg, relay_state=state)
     except SamlUnavailable as e:
         return JSONResponse({"detail": str(e)}, status_code=503)
-    if not url:
+    if not request_id or not url:
         return JSONResponse({"detail": "could not build SAML AuthnRequest"}, status_code=502)
-    return RedirectResponse(url, status_code=303)
+    from maverick.web_session import sign_session
+
+    tx_cookie = sign_session(
+        {
+            "request_id": request_id,
+            "state": state,
+            "return_to": relay,
+            "jti": secrets.token_urlsafe(16),
+            "exp": int(time.time()) + _TX_TTL,
+        },
+        secret,
+    )
+    response = RedirectResponse(url, status_code=303)
+    # SAML HTTP-POST is cross-site, so Lax would suppress this cookie at the
+    # ACS. SameSite=None therefore requires Secure; SAML browser SSO must use
+    # HTTPS even when the rest of a loopback development server does not.
+    response.set_cookie(
+        TX_COOKIE,
+        tx_cookie,
+        max_age=_TX_TTL,
+        httponly=True,
+        samesite="none",
+        secure=True,
+        path="/saml",
+    )
+    return response
 
 
 @router.post("/saml/acs")
 async def saml_acs(request: Request):
     if (off := _disabled()) is not None:
         return off
+    cfg = load_saml_config()
+    secret = _session_secret()
+    if not secret:
+        return JSONResponse(
+            {"detail": "SAML needs the browser-login session secret"}, status_code=503
+        )
+    from maverick.web_session import verify_session
+
+    raw_tx = request.cookies.get(TX_COOKIE)
+    tx = verify_session(raw_tx, secret) if raw_tx else None
+    if not tx:
+        log.warning("SAML ACS: missing or invalid login transaction")
+        return _tx_error("invalid SAML login transaction", status_code=401)
+    request_id = tx.get("request_id")
+    tx_state = tx.get("state")
+    return_to = tx.get("return_to")
+    tx_id = tx.get("jti")
+    tx_exp = tx.get("exp")
+    if (
+        not all(
+            isinstance(v, str) and v
+            for v in (request_id, tx_state, return_to, tx_id)
+        )
+        or isinstance(tx_exp, bool)
+        or not isinstance(tx_exp, (int, float))
+    ):
+        log.warning("SAML ACS: malformed login transaction")
+        return _tx_error("invalid SAML login transaction", status_code=401)
+
     if not await _cache_limited_body(request, limit=_MAX_ACS_BODY_BYTES):
-        return JSONResponse({"detail": "SAML ACS request too large"}, status_code=413)
+        return _tx_error("SAML ACS request too large", status_code=413)
     form = await request.form()
     saml_response = str(form.get("SAMLResponse") or "")
     if _form_value_too_large(saml_response, limit=_MAX_SAML_RESPONSE_BYTES):
-        return JSONResponse({"detail": "SAMLResponse too large"}, status_code=413)
-    relay = _safe_relay_state(
-        str(form.get("RelayState") or ""), load_saml_config().default_relay_state
-    )
+        return _tx_error("SAMLResponse too large", status_code=413)
+    relay_state = str(form.get("RelayState") or "")
     if not saml_response:
-        return JSONResponse({"detail": "missing SAMLResponse"}, status_code=400)
+        return _tx_error("missing SAMLResponse", status_code=400)
+    if not relay_state or not secrets.compare_digest(relay_state, tx_state):
+        log.warning("SAML ACS: RelayState mismatch (possible login CSRF)")
+        return _tx_error("invalid SAML login transaction", status_code=401)
+    relay = _safe_relay_state(return_to, cfg.default_relay_state)
     try:
-        identity = verify_acs_response(saml_response)
+        identity = verify_acs_response(saml_response, request_id=request_id)
     except SamlUnavailable as e:
-        return JSONResponse({"detail": str(e)}, status_code=503)
+        return _tx_error(str(e), status_code=503)
     except Exception:  # noqa: BLE001 -- never leak why verification failed
         log.warning("SAML ACS: assertion verification failed")
-        return JSONResponse({"detail": "SAML assertion did not verify"}, status_code=401)
-    # Single-use: the assertion signature + NotOnOrAfter alone let a captured
-    # SAMLResponse be replayed until it expires (allow_unsolicited means no
-    # InResponseTo binding). Refuse an assertion ID we've already consumed. A
-    # real signed assertion always carries an ID; if the shape hid it we log
-    # and proceed rather than lock out logins on pysaml2 shape variance.
+        return _tx_error("SAML assertion did not verify", status_code=401)
+    # Single-use: InResponseTo prevents unsolicited assertions, but a captured
+    # valid response could otherwise be replayed until expiry. A signed SAML
+    # assertion always has an ID; reject if pysaml2 cannot expose it rather than
+    # silently disabling replay defense.
     from . import saml_replay
-    if identity.assertion_id:
-        try:
-            if not saml_replay.consume(identity.assertion_id, identity.expires_at):
-                log.warning("SAML ACS: assertion replay rejected")
-                return JSONResponse(
-                    {"detail": "SAML assertion already used"}, status_code=401)
-        except saml_replay.ReplayStoreError:
-            # Fail closed: we can't prove single-use, so refuse (the user just
-            # retries with a fresh assertion).
-            log.warning("SAML ACS: replay store unavailable; refusing login")
-            return JSONResponse(
-                {"detail": "SAML session store unavailable"}, status_code=503)
-    else:
-        log.warning("SAML ACS: assertion carried no ID; replay defense skipped")
+    if not identity.assertion_id:
+        log.warning("SAML ACS: assertion carried no ID; refusing login")
+        return _tx_error("SAML assertion did not verify", status_code=401)
+    try:
+        if not saml_replay.consume(f"transaction:{tx_id}", float(tx_exp)):
+            log.warning("SAML ACS: login transaction replay rejected")
+            return _tx_error(
+                "SAML login transaction already used", status_code=401
+            )
+        if not saml_replay.consume(identity.assertion_id, identity.expires_at):
+            log.warning("SAML ACS: assertion replay rejected")
+            return _tx_error("SAML assertion already used", status_code=401)
+    except saml_replay.ReplayStoreError:
+        # Fail closed: we can't prove single-use, so refuse (the user just
+        # retries with a fresh assertion).
+        log.warning("SAML ACS: replay store unavailable; refusing login")
+        return _tx_error("SAML session store unavailable", status_code=503)
     try:
         cookie = mint_session_cookie(identity.name_id)
     except SamlUnavailable as e:
-        return JSONResponse({"detail": str(e)}, status_code=503)
+        return _tx_error(str(e), status_code=503)
     # Record the NameID (the session sub) so SCIM deprovision can revoke this
     # live session even for a persistent/transient NameID that maps to no SCIM
     # attribute. Mirrors the OIDC callback's record_login.
@@ -453,6 +564,7 @@ async def saml_acs(request: Request):
     from .oidc_login import SESSION_COOKIE, _cookie_secure, _set_cookie
 
     response = RedirectResponse(relay, status_code=303)
+    _clear_saml_tx(response)
     _set_cookie(
         response,
         SESSION_COOKIE,

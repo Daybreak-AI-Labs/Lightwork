@@ -18,7 +18,7 @@ offline with synthetic vectors:
   as tools/audio_understanding.
 
 The default adapters reuse audio_understanding's CLAP loader and therefore
-share its ``[clap]`` extra (``pip install 'maverick-agent[clap]'``) and
+share its ``[clap]`` extra (``python -m pip install -e './packages/maverick-core[clap]'``) and
 ``MAVERICK_CLAP_MODEL`` knob.
 """
 from __future__ import annotations

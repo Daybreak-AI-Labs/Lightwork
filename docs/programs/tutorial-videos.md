@@ -17,7 +17,7 @@ docs; no fabricated outputs — record against a real seeded workspace
 ## Season 2 — the working loop (5 episodes)
 
 **S2E1 — From zero to first goal.** Cold open: "One command, one goal."
-Beats: `pip install 'maverick-agent[dev]'` → `maverick init` (wizard tour:
+Beats: reviewed checkout + `python -m pip install -e './packages/maverick-core[dev]'` → `maverick init` (wizard tour:
 provider, safety profile, budget) → `maverick start "summarize this repo"`
 → `maverick monitor`. Close on the result + where it lives
 (`maverick runs`).

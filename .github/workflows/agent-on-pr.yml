@@ -7,9 +7,11 @@ name: Lightwork agent on PR (reusable)
 #
 #     jobs:
 #       review:
-#         uses: Day-AI-Labs/Lightwork/.github/workflows/agent-on-pr.yml@main
+#         uses: Day-AI-Labs/Lightwork/.github/workflows/agent-on-pr.yml@<full-40-character-commit-sha>
 #         with:
 #           goal: "Review this PR for logic bugs and missing edge cases."
+#           # Must match the immutable SHA in `uses:` above.
+#           lightwork_ref: "<full-40-character-commit-sha>"
 #           max_dollars: 0.50
 #           # Optional: run as your customized workforce by committing a bundle
 #           # (domains/*.toml + roles.toml, e.g. via `maverick overrides export`)
@@ -17,12 +19,21 @@ name: Lightwork agent on PR (reusable)
 #           overrides_path: ".maverick"
 #         secrets:
 #           ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
+#           # Needed when the caller's GITHUB_TOKEN cannot read the private
+#           # Lightwork repository. Use a read-only GitHub App/PAT token.
+#           LIGHTWORK_SOURCE_TOKEN: ${{ secrets.LIGHTWORK_SOURCE_TOKEN }}
 
 on:
   workflow_call:
     inputs:
       goal:
         description: 'Goal text for the agent.'
+        required: true
+        type: string
+      lightwork_ref:
+        description: >-
+          Full 40-character commit SHA of the trusted Lightwork source to
+          install. Use the same SHA that pins this reusable workflow.
         required: true
         type: string
       max_dollars:
@@ -53,6 +64,11 @@ on:
         required: false
       OPENAI_API_KEY:
         required: false
+      LIGHTWORK_SOURCE_TOKEN:
+        description: >-
+          Optional read-only token for checking out the private Lightwork
+          repository. The caller GITHUB_TOKEN is used when this is omitted.
+        required: false
 
 permissions:
   contents: read
@@ -63,19 +79,63 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: ${{ inputs.timeout_minutes }}
     steps:
-      - uses: actions/checkout@v7
+      - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7
         with:
           fetch-depth: 0
           persist-credentials: false
 
-      - uses: actions/setup-python@v6
+      - uses: actions/setup-python@ece7cb06caefa5fff74198d8649806c4678c61a1 # v6
         with:
           python-version: "3.12"
 
-      - name: Install Lightwork
+      - name: Validate immutable Lightwork source ref
+        shell: bash
+        env:
+          LIGHTWORK_REF: ${{ inputs.lightwork_ref }}
         run: |
-          python -m pip install --upgrade pip
-          pip install 'maverick-agent[all]'
+          set -euo pipefail
+          if [[ ! "$LIGHTWORK_REF" =~ ^[0-9a-f]{40}$ ]]; then
+            echo "::error::lightwork_ref must be a lowercase, full 40-character commit SHA."
+            exit 1
+          fi
+
+      - name: Checkout pinned Lightwork runtime source
+        uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7
+        with:
+          repository: Day-AI-Labs/Lightwork
+          ref: ${{ inputs.lightwork_ref }}
+          path: .lightwork-runtime
+          fetch-depth: 1
+          persist-credentials: false
+          token: ${{ secrets.LIGHTWORK_SOURCE_TOKEN || github.token }}
+
+      - name: Install Lightwork
+        shell: bash
+        env:
+          LIGHTWORK_REF: ${{ inputs.lightwork_ref }}
+        run: |
+          set -euo pipefail
+          source_root="$GITHUB_WORKSPACE/.lightwork-runtime"
+          actual_ref="$(git -C "$source_root" rev-parse HEAD)"
+          if [ "$actual_ref" != "$LIGHTWORK_REF" ]; then
+            echo "::error::Checked-out Lightwork commit '$actual_ref' does not match the requested ref."
+            exit 1
+          fi
+
+          # Supply all first-party distributions as local direct requirements
+          # in one resolver transaction. Never resolve an unclaimed
+          # maverick-* project name from the public package index.
+          python -m pip install \
+            "$source_root/packages/maverick-core[all]" \
+            "$source_root/packages/maverick-shield" \
+            "$source_root/packages/maverick-channels" \
+            "$source_root/packages/maverick-dashboard" \
+            "$source_root/packages/maverick-mcp" \
+            "$source_root/apps/installer-cli"
+
+          # Keep the reviewed calling-repository checkout as the agent's only
+          # source tree. Installed wheels do not need this temporary checkout.
+          rm -rf -- "$source_root"
 
       - name: Run agent
         id: run
@@ -160,7 +220,7 @@ jobs:
         # (GHA's default bash -eo pipefail fails the step) -- a failed run is
         # exactly when the reviewer most needs to see the captured output.
         if: always() && github.event_name == 'pull_request'
-        uses: actions/github-script@v9
+        uses: actions/github-script@3a2844b7e9c422d3c10d287c895573f7108da1b3 # v9
         with:
           script: |
             const fs = require('fs');

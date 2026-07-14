@@ -175,7 +175,7 @@ def test_p2_native_confirm_alert_migrated_to_primitives():
     import pathlib
     base = pathlib.Path(__file__).resolve().parents[1] / "maverick_dashboard" / "templates"
     for f in ["base.html", "chat_goal.html", "fleets.html", "learned.html"]:
-        src = (base / f).read_text()
+        src = (base / f).read_text(encoding="utf-8")
         assert "confirm('" not in src and 'confirm("' not in src, f
         assert "alert('" not in src and 'alert("' not in src, f
 

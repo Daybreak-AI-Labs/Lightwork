@@ -54,12 +54,12 @@ def test_grpc_worker_setting_env_and_config(monkeypatch):
     assert server._grpc_int_setting("MAVERICK_GRPC_MAX_WORKERS", "max_workers", 8) == 12
 
 
-def test_grpc_concurrent_defaults_none(monkeypatch):
+def test_grpc_concurrent_can_default_to_worker_count(monkeypatch):
     from maverick.grpc_api import server
     monkeypatch.delenv("MAVERICK_GRPC_MAX_CONCURRENT", raising=False)
     monkeypatch.setattr("maverick.config.load_config", dict)
     assert server._grpc_int_setting(
-        "MAVERICK_GRPC_MAX_CONCURRENT", "max_concurrent_rpcs", None) is None
+        "MAVERICK_GRPC_MAX_CONCURRENT", "max_concurrent_rpcs", 8) == 8
 
 
 def test_grpc_setting_bad_value_falls_back(monkeypatch):

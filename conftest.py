@@ -28,6 +28,8 @@ import os
 import shutil
 import tempfile
 
+import pytest
+
 _session_home = tempfile.mkdtemp(prefix="maverick-test-home-")
 os.environ["HOME"] = _session_home
 os.environ["USERPROFILE"] = _session_home  # Windows: what Path.home() reads
@@ -39,3 +41,18 @@ atexit.register(shutil.rmtree, _session_home, True)
 # stability (same pattern as the MAVERICK_BUILTIN_SKILLS=0 pin); the secure
 # DEFAULT itself is covered by test_secure_defaults.py, which overrides this.
 os.environ.setdefault("MAVERICK_SECURE_DEFAULT", "0")
+
+
+@pytest.fixture(autouse=True)
+def _isolate_dynamic_maverick_home(tmp_path, monkeypatch):
+    """Give every package a fresh dynamic home, including on Windows.
+
+    The core test package already did this locally, but dashboard/channels/MCP
+    tests share the repo-root session home. Stores migrated to the documented
+    ``MAVERICK_HOME`` resolver then leaked RBAC grants, invites, and UI policy
+    across tests. Set every supported home input consistently per test; an
+    individual test can still override any of them afterward.
+    """
+    monkeypatch.setenv("HOME", str(tmp_path))
+    monkeypatch.setenv("USERPROFILE", str(tmp_path))
+    monkeypatch.setenv("MAVERICK_HOME", str(tmp_path / ".maverick"))

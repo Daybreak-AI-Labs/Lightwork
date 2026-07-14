@@ -505,7 +505,7 @@ def train(
         print(
             "RLAIF/DPO training needs torch + transformers, which are "
             "optional. Install them with:\n"
-            "    pip install 'maverick-agent[training]'",
+            "    python -m pip install -e './packages/maverick-core[training]'",
             file=sys.stderr,
         )
         return 1
@@ -605,7 +605,7 @@ def _train_dpo_lora(
         print(
             "QLoRA DPO needs torch + transformers + peft + bitsandbytes "
             "(+ a GPU). Install them with:\n"
-            "    pip install 'maverick-agent[training]'",
+            "    python -m pip install -e './packages/maverick-core[training]'",
             file=sys.stderr,
         )
         return 1

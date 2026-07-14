@@ -1,20 +1,26 @@
 #!/usr/bin/env bash
 # Lightwork desktop bootstrap (macOS / Linux).
 #
-# Zero prerequisites. It installs Python 3 if missing, installs the
-# published Lightwork package from PyPI into an isolated pipx environment,
-# and launches the wizard (`maverick init`).
+# Zero prerequisites. It installs Python 3 if missing, checks out an exact
+# Lightwork commit into an isolated pipx environment, and launches the wizard
+# (`maverick init`). There is deliberately no public-package-index fallback.
 #
-# Advanced source installs must pin MAVERICK_REF to a full 40-character
-# commit SHA. Mutable branches/tags are rejected unless
-# MAVERICK_ALLOW_UNPINNED=1 is set explicitly.
+# Set MAVERICK_REF to a reviewed, lowercase, full 40-character commit SHA.
+# Mutable refs and an omitted ref fail before the script changes the machine.
 
 set -euo pipefail
 
 REPO="${MAVERICK_REPO:-Day-AI-Labs/Lightwork}"
 REF="${MAVERICK_REF:-}"
 SRC_DIR="${XDG_DATA_HOME:-$HOME/.local/share}/maverick/src"
-ALLOW_UNPINNED="${MAVERICK_ALLOW_UNPINNED:-}"
+STAGED_SRC=""
+
+cleanup_staged_source() {
+  if [ -n "${STAGED_SRC:-}" ] && [ -d "$STAGED_SRC" ]; then
+    rm -rf -- "$STAGED_SRC"
+  fi
+}
+trap cleanup_staged_source EXIT
 
 log()  { printf '==> %s\n' "$*" >&2; }
 warn() { printf '!!  %s\n' "$*" >&2; }
@@ -73,12 +79,9 @@ ensure_pipx() {
 }
 
 validate_source_pin() {
-  [ -n "$REF" ] || return 0
-  case "$REF" in
-    [0-9a-fA-F][0-9a-fA-F][0-9a-fA-F][0-9a-fA-F][0-9a-fA-F][0-9a-fA-F][0-9a-fA-F][0-9a-fA-F][0-9a-fA-F][0-9a-fA-F][0-9a-fA-F][0-9a-fA-F][0-9a-fA-F][0-9a-fA-F][0-9a-fA-F][0-9a-fA-F][0-9a-fA-F][0-9a-fA-F][0-9a-fA-F][0-9a-fA-F][0-9a-fA-F][0-9a-fA-F][0-9a-fA-F][0-9a-fA-F][0-9a-fA-F][0-9a-fA-F][0-9a-fA-F][0-9a-fA-F][0-9a-fA-F][0-9a-fA-F][0-9a-fA-F][0-9a-fA-F][0-9a-fA-F][0-9a-fA-F][0-9a-fA-F][0-9a-fA-F][0-9a-fA-F][0-9a-fA-F][0-9a-fA-F][0-9a-fA-F]) return 0 ;;
-  esac
-  [ "$ALLOW_UNPINNED" = "1" ] && { warn "Installing from unpinned ref '$REF' because MAVERICK_ALLOW_UNPINNED=1."; return 0; }
-  die "MAVERICK_REF must be a full 40-character commit SHA. Ref '$REF' is mutable; set MAVERICK_ALLOW_UNPINNED=1 only for trusted local testing."
+  [ -n "$REF" ] || die "MAVERICK_REF is required. Set it to a reviewed, full 40-character Lightwork commit SHA; public-index fallback is disabled."
+  [[ "$REF" =~ ^[0-9a-f]{40}$ ]] && return 0
+  die "MAVERICK_REF must be a lowercase, full 40-character commit SHA; got '$REF'."
 }
 
 validate_repo() {
@@ -86,7 +89,7 @@ validate_repo() {
   # clone/fetch below. Constrain it to a GitHub "owner/repo" slug so a hostile
   # or typo'd value can't point the install at a different repo or smuggle
   # shell/URL metacharacters into the git command. (Only the source path uses
-  # REPO; the default PyPI install never touches it.)
+  # REPO.)
   if [[ ! "$REPO" =~ ^[A-Za-z0-9._-]+/[A-Za-z0-9._-]+$ ]]; then
     die "MAVERICK_REPO must be a GitHub 'owner/repo' slug (letters, digits, '.', '_', '-'); got '$REPO'."
   fi
@@ -95,31 +98,31 @@ validate_repo() {
 fetch_source() {
   validate_repo
   validate_source_pin
-  if [ -d "$SRC_DIR/.git" ]; then
-    log "Updating Lightwork source ($REPO@$REF) ..."
-    git -C "$SRC_DIR" remote set-url origin "https://github.com/$REPO"
-    git -C "$SRC_DIR" fetch --depth 1 origin "$REF"
-    git -C "$SRC_DIR" checkout --detach FETCH_HEAD >/dev/null 2>&1
-  else
-    log "Downloading Lightwork ($REPO@$REF) ..."
-    rm -rf "$SRC_DIR"
-    mkdir -p "$(dirname "$SRC_DIR")"
-    git clone --no-checkout --depth 1 "https://github.com/$REPO" "$SRC_DIR"
-    git -C "$SRC_DIR" fetch --depth 1 origin "$REF"
-    git -C "$SRC_DIR" checkout --detach FETCH_HEAD >/dev/null 2>&1
-  fi
+  log "Downloading a fresh Lightwork source tree ($REPO@$REF) ..."
+  mkdir -p "$(dirname "$SRC_DIR")"
+  STAGED_SRC="$(mktemp -d "$(dirname "$SRC_DIR")/src.stage.XXXXXX")"
+  git clone --no-checkout --filter=blob:none \
+    "https://github.com/$REPO" "$STAGED_SRC"
+  git -C "$STAGED_SRC" fetch --depth 1 origin "$REF"
+  git -C "$STAGED_SRC" -c advice.detachedHead=false \
+    checkout --detach FETCH_HEAD >/dev/null 2>&1
+  actual_ref="$(git -C "$STAGED_SRC" rev-parse HEAD)"
+  [ "$actual_ref" = "$REF" ] || die "Checked-out source is at '$actual_ref', not required ref '$REF'."
+  [ -z "$(git -C "$STAGED_SRC" status --porcelain --untracked-files=all)" ] \
+    || die "Fresh pinned Lightwork checkout is unexpectedly dirty."
+  [ -f "$STAGED_SRC/packages/maverick-core/pyproject.toml" ] \
+    || die "Pinned checkout is not a complete Lightwork source tree."
+  rm -rf -- "$SRC_DIR"
+  mv -- "$STAGED_SRC" "$SRC_DIR"
+  STAGED_SRC=""
 }
 
 install_maverick() {
   log "Installing the agent + setup wizard (this can take a minute) ..."
-  if [ -n "$REF" ]; then
-    fetch_source
-    pipx_cmd install --force "$SRC_DIR/packages/maverick-core"
-    # The wizard ships in apps/installer-cli; install it into the same venv.
-    pipx_cmd inject --force maverick-agent "$SRC_DIR/apps/installer-cli"
-  else
-    pipx_cmd install --force 'maverick-agent[installer]'
-  fi
+  fetch_source
+  pipx_cmd install --force "$SRC_DIR/packages/maverick-core"
+  # The wizard ships in apps/installer-cli; install it into the same venv.
+  pipx_cmd inject --force maverick-agent "$SRC_DIR/apps/installer-cli"
 }
 
 run_wizard() {
@@ -145,7 +148,7 @@ main() {
   validate_source_pin
   ensure_python
   ensure_pipx
-  [ -z "$REF" ] || ensure_git
+  ensure_git
   install_maverick
   # The desktop GUI installer sets MAVERICK_NO_WIZARD: do the install but
   # skip the interactive wizard (the app then points the user at

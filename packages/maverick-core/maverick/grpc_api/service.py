@@ -90,6 +90,23 @@ class GoalService:
         t.start()
         return t
 
+    @staticmethod
+    def _goal_for_owner(world: object, goal_id: int, expected_owner: str | None):
+        """Return a goal only when it belongs to ``expected_owner``.
+
+        ``None`` is the explicit administrative scope used by the shared gRPC
+        operator token.  A concrete owner is used for per-agent tokens; an
+        ownership mismatch is intentionally indistinguishable from a missing
+        goal so callers cannot enumerate another agent's goal ids.
+        """
+        goal = world.get_goal(goal_id)
+        if goal is None:
+            return None
+        owner = getattr(goal, "owner", "") or ""
+        if expected_owner is not None and owner != expected_owner:
+            return None
+        return goal
+
     def start_goal(
         self,
         title: str,
@@ -131,15 +148,28 @@ class GoalService:
         return goal_id
 
     def stream_episode(
-        self, goal_id: int, *, since_id: int = 0, max_seconds: float | None = None
+        self,
+        goal_id: int,
+        *,
+        since_id: int = 0,
+        max_seconds: float | None = None,
+        expected_owner: str | None = None,
     ) -> Iterator[EventDTO]:
         """Yield goal events in id order as they land, until the goal reaches a
         terminal status (or ``max_seconds`` elapses). A final synthetic event
-        (``kind="status"``) carries the terminal status + result."""
+        (``kind="status"``) carries the terminal status + result.
+
+        ``expected_owner`` scopes per-agent callers.  ``None`` is reserved for
+        the shared operator principal and preserves its administrative access.
+        """
         world = self._world_factory()
         started = time.monotonic()
         last = since_id
         try:
+            # Authorize before reading even one event: event content can contain
+            # goal prompts, tool output, and other tenant-sensitive data.
+            if self._goal_for_owner(world, goal_id, expected_owner) is None:
+                return
             while True:
                 events = world.goal_events(goal_id, since_id=last, limit=_PAGE)
                 for e in events:
@@ -153,7 +183,7 @@ class GoalService:
                 # of events was pending does not strand events 201..N unsent.
                 if len(events) == _PAGE:
                     continue
-                g = world.get_goal(goal_id)
+                g = self._goal_for_owner(world, goal_id, expected_owner)
                 if g is None:
                     return
                 if g.status in TERMINAL_STATUSES:
@@ -178,15 +208,36 @@ class GoalService:
         user_id: str | None = None,
         max_depth: int | None = None,
         capability: Any | None = None,
+        expected_owner: str | None = None,
     ) -> GoalStatusDTO | None:
         """Run an EXISTING goal row to completion and return its terminal
         status — the worker half of the cross-host gRPC Dispatcher (caller and
         worker must share the world DB, e.g. the Postgres backend). Returns
-        None when the goal id doesn't exist here (DBs not shared / bad id)."""
+        None when the goal id doesn't exist here (DBs not shared / bad id) or
+        does not belong to ``expected_owner``.  ``None`` owner scope is the
+        shared operator's administrative access."""
         world = self._world_factory()
         try:
-            if world.get_goal(goal_id) is None:
+            goal = self._goal_for_owner(world, goal_id, expected_owner)
+            if goal is None:
                 return None
+            # This RPC is the remote worker's at-least-once delivery boundary.
+            # Claim in the database, in one pending -> active CAS, before any
+            # side effect.  A retry after a timeout/lost response (or a racing
+            # second worker) returns the current status without re-running the
+            # swarm or spending the budget twice.
+            if not world.claim_goal_for_run(
+                goal_id, expected_owner=expected_owner,
+            ):
+                current = self._goal_for_owner(world, goal_id, expected_owner)
+                if current is None:
+                    return None
+                return GoalStatusDTO(
+                    goal_id=goal_id,
+                    status=current.status,
+                    result=getattr(current, "result", None),
+                    owner=getattr(current, "owner", "") or "",
+                )
         finally:
             _close(world)
         if max_depth is None:
@@ -201,12 +252,14 @@ class GoalService:
             max_depth=max_depth,
             capability=capability,
         )
-        return self.status(goal_id)
+        return self.status(goal_id, expected_owner=expected_owner)
 
-    def status(self, goal_id: int) -> GoalStatusDTO | None:
+    def status(
+        self, goal_id: int, *, expected_owner: str | None = None,
+    ) -> GoalStatusDTO | None:
         world = self._world_factory()
         try:
-            g = world.get_goal(goal_id)
+            g = self._goal_for_owner(world, goal_id, expected_owner)
             if g is None:
                 return None
             return GoalStatusDTO(
@@ -216,12 +269,13 @@ class GoalService:
         finally:
             _close(world)
 
-    def cancel(self, goal_id: int) -> bool:
+    def cancel(self, goal_id: int, *, expected_owner: str | None = None) -> bool:
         """Mark a goal cancelled. Returns False if the goal doesn't exist or is
-        already terminal. Honoured at the next dispatch / turn boundary."""
+        already terminal, or if it belongs to a different scoped owner.
+        Honoured at the next dispatch / turn boundary."""
         world = self._world_factory()
         try:
-            g = world.get_goal(goal_id)
+            g = self._goal_for_owner(world, goal_id, expected_owner)
             if g is None or g.status in TERMINAL_STATUSES:
                 return False
             world.set_goal_status(goal_id, "cancelled", result="cancelled via API")
