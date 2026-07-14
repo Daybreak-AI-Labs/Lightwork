@@ -612,7 +612,10 @@ def _handle_flow_evolve(_job=None) -> None:
                 impact = evolve.measure(f.id, node_id, float(last.get("ts") or 0.0))
                 if not evolve.regressed(impact):
                     continue
-                prior = store.load_version(f.id, int(last.get("version") or 0) - 1)
+                apply_version = int(last.get("version") or 0)
+                if int(f.version or 0) != apply_version:
+                    continue  # stale apply boundary; a newer save may be human work
+                prior = store.load_version(f.id, apply_version - 1)
                 if prior is None or node_id not in prior.nodes:
                     continue
                 reverted = evolve.revert_node(f, node_id, prior.nodes[node_id])
