@@ -563,9 +563,10 @@ def _invoke_work(node: FlowNode, data: dict, ctx: _Ctx):
         return ctx.action_fn(node, _render_params(node, data), data)
     if not (node.timeout and node.timeout > 0):
         return _call()
-    # Soft per-node timeout: run the executor on a worker thread and give up
-    # waiting after `timeout`s (Python can't kill the thread, so the abandoned
-    # call finishes on its own -- but the flow stops blocking on it).
+    # Soft per-node timeout: run the executor on a worker thread and report a
+    # timeout if it runs too long. Python cannot kill a running thread safely,
+    # so on timeout we MUST wait for the callable to finish before retrying or
+    # continuing; otherwise crafted flows can accumulate abandoned work.
     import concurrent.futures as _cf
     ex = _cf.ThreadPoolExecutor(max_workers=1)
     fut = ex.submit(_call)
@@ -574,7 +575,7 @@ def _invoke_work(node: FlowNode, data: dict, ctx: _Ctx):
         ex.shutdown(wait=False)
         return res
     except _cf.TimeoutError:
-        ex.shutdown(wait=False)          # don't block on the runaway call
+        ex.shutdown(wait=True, cancel_futures=True)
         return (f"ERROR: node timed out after {node.timeout}s", 0.0)
 
 
@@ -590,6 +591,8 @@ def _run_work(node: FlowNode, data: dict, ctx: _Ctx) -> str | None:
     outcome: float | None = None
     last_exc: Exception | None = None
     for attempt in range(retries + 1):
+        if ctx.deadline is not None and ctx.now() > ctx.deadline:
+            raise RuntimeError("flow exceeded its wall-clock deadline during node retries")
         if attempt and backoff:
             _sleep_retry_backoff(ctx, min(MAX_FLOW_NODE_RETRY_SLEEP, backoff * (2 ** (attempt - 1))))
         try:
