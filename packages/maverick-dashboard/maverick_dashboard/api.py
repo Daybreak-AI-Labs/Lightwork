@@ -55,6 +55,7 @@ from .api_schemas import (
     EventTriggerOut,
     FactIn,
     FeedbackIn,
+    FleetAgentAddIn,
     FleetCreateIn,
     FleetRunIn,
     FlowApplyIn,
@@ -72,6 +73,8 @@ from .api_schemas import (
     HaltIn,
     ImportRunIn,
     ImportRunOut,
+    JDDraftIn,
+    JDMatchIn,
     LearningToggleIn,
     OAuthAuthorizeIn,
     OAuthExchangeIn,
@@ -474,6 +477,16 @@ async def create_goal(request: Request, payload: GoalIn, bg: BackgroundTasks) ->
     title = (title or "").strip()
     if not title:
         raise HTTPException(status_code=400, detail="title is required")
+    # Run AS a specialist pack (JD hires, department deploys): the orchestrator
+    # inherits a domain stamped on the goal row, binding that pack's persona,
+    # capability envelope and compartment. Validate against the enabled roster
+    # and the caller's department grant before accepting it.
+    domain = (payload.domain or "").strip() or None
+    if domain:
+        from maverick.domain import enabled_domains, suite_for
+        if domain not in enabled_domains():
+            raise HTTPException(status_code=400, detail=f"unknown specialist: {domain!r}")
+        require_suite(request, suite_for(domain))
     w = _world()
     # Idempotency-Key (optional, RFC-style): a client whose POST times out at the
     # LB and retries must not double-create / double-bill a paid run -- and on a
@@ -494,6 +507,8 @@ async def create_goal(request: Request, payload: GoalIn, bg: BackgroundTasks) ->
             if g0 is not None:
                 return _to_goal_out(g0)  # replay: original goal, no new run
     goal_id = w.create_goal(title[:200], description, owner=caller_principal(request) or "")
+    if domain:
+        w.set_goal_domain(goal_id, domain)
     if idem_key and not w.mark_message_processed(
         _IDEMPOTENCY_CHANNEL, idem_ext, goal_id=goal_id
     ):
@@ -4093,6 +4108,121 @@ async def delete_agent_override(request: Request, name: str) -> dict:
     return {"removed": removed, "agent": view}
 
 
+# ---- JD hiring: map a job description onto the roster / draft a new pack ----
+# HR uploads a JD; matching is offline (hybrid router over the full roster,
+# custom packs included), drafting rides the same intake pipeline as
+# `maverick onboard` (clamped envelope, generated deny-floor), and persisting
+# stays the pack editor's existing human-approved save.
+
+def _require_jd_hiring() -> None:
+    from maverick.jd_hiring import jd_hiring_enabled
+    if not jd_hiring_enabled():
+        raise HTTPException(
+            status_code=403,
+            detail="JD hiring is disabled ([agent_factory] jd_hiring = false)")
+
+
+def _scoped_jd_matches(request: Request, jd_text: str, k: int) -> dict:
+    from maverick.jd_hiring import match_jd
+    matches = match_jd(jd_text, k=k)
+    # Job-function scoping, mirroring /agents: a department-scoped caller only
+    # sees their departments' specialists plus generic (suite-less) packs.
+    allowed = caller_suites(request)
+    if allowed is not None:
+        matches = [m for m in matches if m.suite is None or m.suite in allowed]
+    return {"matches": [m.to_dict() for m in matches]}
+
+
+@router.post("/agents/jd/match")
+async def match_agents_to_jd(request: Request, payload: JDMatchIn) -> dict:
+    """Rank the specialist roster against a pasted job description.
+
+    Deterministic and offline (no LLM): "do we already employ this role?"
+    answered against all shipped packs plus tenant custom packs."""
+    _require_jd_hiring()
+    # First call builds the router index over the ~2k-pack roster; keep the
+    # event loop free (same reason the drafters run in the threadpool).
+    return await run_in_threadpool(_scoped_jd_matches, request, payload.jd_text, payload.k)
+
+
+@router.post("/agents/jd/match-from-file")
+async def match_agents_to_jd_upload(
+    request: Request,
+    file: UploadFile = File(...),
+    k: int = Form(5),
+) -> dict:
+    """Upload path: rank the roster against a JD document (.txt/.md, or
+    PDF/Word/OpenDocument when the maverick-knowledge parsers are installed)."""
+    _require_jd_hiring()
+    raw = await file.read(_WORKFLOW_DOC_MAX_BYTES + 1)
+    if len(raw) > _WORKFLOW_DOC_MAX_BYTES:
+        raise HTTPException(status_code=400, detail="file too large; paste the key parts instead")
+    try:
+        text = raw.decode("utf-8")
+    except UnicodeDecodeError:
+        text = await run_in_threadpool(
+            _extract_binary_doc_text, raw, file.filename or "upload")
+        if text is None:
+            raise HTTPException(
+                status_code=400,
+                detail=("could not read this file as text — upload a .txt / .md / "
+                        ".pdf / .docx job description, or paste it instead"),
+            ) from None
+    if not text.strip():
+        raise HTTPException(status_code=400, detail="the uploaded file was empty")
+    return await run_in_threadpool(
+        _scoped_jd_matches, request, text, max(1, min(int(k), 20)))
+
+
+@router.post("/agents/jd/draft")
+async def draft_agent_from_jd(request: Request, payload: JDDraftIn) -> dict:
+    """Draft (not save) a clamped specialist pack from a job description.
+
+    Uses the intake LLM proposer when a provider is configured (spend-capped
+    like workflow drafting), else the deterministic keyless path. The response
+    prefills the pack editor; saving remains the editor's existing
+    admin-gated, lint-checked override write."""
+    _require_jd_hiring()
+    # Same gate as the editor this feeds: drafting reveals pack-editing surface.
+    _require_pack_editing(request)
+    from maverick.jd_hiring import draft_from_jd
+
+    llm = None
+    budget = None
+    from maverick.config import any_provider_configured
+    if any_provider_configured():
+        try:
+            from maverick.budget import Budget
+            from maverick.llm import LLM
+            llm = LLM()
+            # A draft is one bounded completion; cap it like workflow drafting
+            # so the endpoint can't be spammed into a cost amplifier.
+            budget = Budget(max_dollars=0.50)
+        except Exception:  # provider misconfig -> deterministic draft, not a 500
+            llm = None
+            budget = None
+    profile = await run_in_threadpool(
+        lambda: draft_from_jd(payload.role_title, payload.jd_text,
+                              industry=payload.industry, llm=llm, budget=budget))
+    return {
+        "draft": {
+            "name": profile.name,
+            "description": profile.description,
+            "persona": profile.persona,
+            "allow_tools": list(profile.allow_tools),
+            "deny_tools": list(profile.deny_tools),
+            "max_risk": profile.max_risk,
+            "refuse": list(profile.refuse),
+            "workflow": [
+                {"name": s.name, "instruction": s.instruction,
+                 "tools": list(s.tools), "gate": s.gate}
+                for s in profile.workflow
+            ],
+        },
+        "generated_with_llm": llm is not None,
+    }
+
+
 # ---- roles: per-client editable system-prompt addendum -----------------------
 # Same gate pattern as agents: GET is read-only; mutations require role_editing.
 # Role model/effort routing is configured elsewhere ([models]/[effort]) and is
@@ -4808,6 +4938,45 @@ async def create_fleet(request: Request, payload: FleetCreateIn) -> dict:
     except ValueError as e:
         raise HTTPException(status_code=400, detail=str(e)) from e
     return {"fleet": load_fleet(payload.name).to_dict()}
+
+
+@router.post("/fleets/{fleet_name}/agents", status_code=201)
+async def add_fleet_agent(request: Request, fleet_name: str,
+                          payload: FleetAgentAddIn) -> dict:
+    """Add one specialist pack to a fleet roster (the JD-hire deploy step).
+
+    Creates the fleet (owned by the caller) if it doesn't exist; owner-scoped
+    like create/delete. The added agent carries ``domain=pack`` so dispatch
+    binds the pack's capability envelope, and the caller's department grant
+    must cover the pack's suite — the same kernel gate department deploys use.
+    """
+    require_permission(request, "operate")
+    from maverick.domain import suite_for
+    from maverick.fleet import load_fleet, valid_name
+    from maverick.jd_hiring import add_pack_to_fleet
+    from maverick.suite_grants import DepartmentAccessError, ensure_suite_allowed
+
+    if not valid_name(fleet_name):
+        raise HTTPException(status_code=400, detail="invalid fleet name")
+    principal = caller_principal(request)
+    existing = load_fleet(fleet_name)
+    if (
+        existing is not None and existing.owner != (principal or "")
+        and principal is not None and not is_dashboard_admin(principal)
+    ):
+        raise HTTPException(status_code=404, detail="no such fleet")
+    try:
+        ensure_suite_allowed(principal, suite_for(payload.pack))
+    except DepartmentAccessError as e:
+        raise HTTPException(status_code=403, detail=str(e)) from e
+    owner = existing.owner if existing is not None else (principal or "")
+    try:
+        fleet = await run_in_threadpool(
+            lambda: add_pack_to_fleet(payload.pack, fleet_name, owner,
+                                      role=payload.role))
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e)) from e
+    return {"fleet": fleet.to_dict()}
 
 
 @router.delete("/fleets/{fleet_name}", status_code=204)

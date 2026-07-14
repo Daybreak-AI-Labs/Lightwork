@@ -32,6 +32,28 @@ class AgentOverrideIn(BaseModel):
     extends: str | None = None
 
 
+class JDMatchIn(BaseModel):
+    """A job description to rank the specialist roster against. Bounded like a
+    goal description: JD text flows into scoring and draft prompts."""
+    jd_text: str = Field(..., min_length=1, max_length=16000)
+    k: int = Field(5, ge=1, le=20)
+
+
+class JDDraftIn(BaseModel):
+    """Draft (not save) a new specialist pack from a job description. The
+    result prefills the pack editor; persisting stays the editor's existing
+    human-approved save."""
+    role_title: str = Field(..., min_length=1, max_length=120)
+    jd_text: str = Field(..., min_length=1, max_length=16000)
+    industry: str = Field("", max_length=120)
+
+
+class FleetAgentAddIn(BaseModel):
+    """Add one specialist pack to a fleet roster (the JD-hire deploy step)."""
+    pack: str = Field(..., min_length=1, max_length=120)
+    role: str | None = Field(default=None, max_length=64)
+
+
 class AssessmentRefreshIn(BaseModel):
     """Auto-draft (or re-draft) a governance assessment. ``template`` selects
     which lenses to run; ``None`` keeps the existing/default one."""
@@ -82,6 +104,9 @@ class GoalIn(BaseModel):
     max_depth: int = Field(3, ge=1, le=5)
     template: str | None = None
     params: dict[str, str] | None = None
+    # Run the goal AS a specialist pack: the orchestrator inherits a domain
+    # stamped on the goal row (persona + capability envelope + compartment).
+    domain: str | None = Field(None, max_length=120)
 
 
 class GoalOut(BaseModel):

@@ -138,6 +138,29 @@
   <p><span class="badge">read-only</span> <span class="muted">Agent editing is turned off by your administrator — viewing only.</span></p>
   {% endif %}
 
+  <details class="af-card" id="jd-card" style="margin-bottom: var(--space-4);">
+    <summary style="cursor: pointer; font-weight: 600;">Hire from a job description
+      <span class="muted" style="font-weight: 400;">— paste a JD to meet the specialists you already employ, or draft a new one</span>
+    </summary>
+    <div style="margin-top: 0.8rem;">
+      <div class="fld">
+        <label for="jd-text">Job description <span class="sub">— paste the text, or upload a file below</span></label>
+        <textarea id="jd-text" rows="7" placeholder="Paste the role's summary and responsibilities — bullet points become the draft's playbook steps."></textarea>
+      </div>
+      <div class="fld" style="display: flex; gap: var(--space-2); flex-wrap: wrap; align-items: center;">
+        <label for="jd-file" class="sub">or upload</label>
+        <input id="jd-file" type="file" accept=".txt,.md,.pdf,.docx,.doc,.odt">
+        <span style="flex: 1;"></span>
+        <button type="button" class="btn btn--primary" id="jd-match">Find matching specialists</button>
+        {% if editable %}
+        <button type="button" class="btn" id="jd-draft">Draft a new specialist</button>
+        {% endif %}
+      </div>
+      <div id="jd-msg" role="status" aria-live="polite" class="muted" style="min-height: 1.2rem;"></div>
+      <div id="jd-results"></div>
+    </div>
+  </details>
+
   <div class="af-grid">
     <!-- ============ LEFT: build a specialist ============ -->
     <div class="af-card">
@@ -285,6 +308,169 @@
   {% endif %}
 
   <script>
+    // ---- JD hiring: match the roster / draft a new specialist from a JD ----
+    // Runs BEFORE the chips/risk initializers below so a drafted pack stashed in
+    // sessionStorage can prefill the form inputs those initializers read.
+    (function () {
+      var jdText = document.getElementById('jd-text');
+      var jdFile = document.getElementById('jd-file');
+      var jdMsg = document.getElementById('jd-msg');
+      var results = document.getElementById('jd-results');
+      var matchBtn = document.getElementById('jd-match');
+      var draftBtn = document.getElementById('jd-draft');
+
+      function esc(s) {
+        return (s == null ? '' : String(s)).replace(/[&<>"']/g, function (c) {
+          return {'&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;'}[c];
+        });
+      }
+      function say(text, ok) {
+        if (jdMsg) { jdMsg.textContent = text; jdMsg.style.color = ok ? 'var(--accent)' : 'var(--danger)'; }
+      }
+
+      // --- prefill the editor from a drafted pack (set BEFORE initializers run) ---
+      (function prefill() {
+        var raw = sessionStorage.getItem('jd-draft');
+        if (!raw) return;
+        var form = document.getElementById('agent-form');
+        if (!form || form.dataset.creating !== '1') return;
+        sessionStorage.removeItem('jd-draft');
+        var d; try { d = JSON.parse(raw); } catch (e) { return; }
+        function set(id, v) { var el = document.getElementById(id); if (el && v != null) el.value = v; }
+        set('f-new-id', d.name);
+        set('f-description', d.description);
+        set('f-persona', d.persona);
+        set('f-allow', (d.allow_tools || []).join(' '));
+        set('f-deny', (d.deny_tools || []).join(' '));
+        if (d.max_risk) {
+          set('f-risk', d.max_risk);
+          var seg = document.getElementById('risk-seg');
+          if (seg) seg.querySelectorAll('button[data-risk]').forEach(function (b) {
+            var on = b.dataset.risk === d.max_risk;
+            b.classList.toggle('on', on);
+            b.setAttribute('aria-pressed', on ? 'true' : 'false');
+          });
+        }
+        var stepsEl = document.getElementById('wf-steps');
+        var tpl = document.getElementById('wf-row-tpl');
+        if (stepsEl && tpl && Array.isArray(d.workflow)) {
+          d.workflow.forEach(function (s) {
+            var frag = tpl.content.cloneNode(true);
+            frag.querySelector('.wf-name').value = s.name || '';
+            frag.querySelector('.wf-instruction').value = s.instruction || '';
+            frag.querySelector('.wf-tools').value = (s.tools || []).join(' ');
+            frag.querySelector('.wf-gate').value = s.gate || '';
+            stepsEl.appendChild(frag);
+          });
+        }
+        var m = document.getElementById('agent-msg');
+        if (m) m.textContent = 'Drafted from the job description — review the envelope and playbook, then save.';
+      })();
+
+      if (!matchBtn) return;
+
+      function renderMatches(list) {
+        if (!list.length) {
+          results.innerHTML = '<p class="muted">No matches — draft a new specialist instead.</p>';
+          return;
+        }
+        var rows = list.map(function (m, i) {
+          var pct = Math.round((m.fit || 0) * 100);
+          var terms = (m.matched_terms || []).slice(0, 6).join(', ');
+          return '<div class="panel" style="margin: 0.5rem 0; padding: 0.6rem 0.8rem;">'
+            + '<div style="display: flex; gap: var(--space-2); align-items: center; flex-wrap: wrap;">'
+            + '<strong><a href="/agents?name=' + encodeURIComponent(m.name) + '">' + esc(m.name) + '</a></strong>'
+            + (m.department ? '<span class="muted">' + esc(m.department) + '</span>' : '')
+            + '<span class="muted" style="margin-left: auto;">fit ' + pct + '%</span>'
+            + '<button type="button" class="btn jd-hire-btn" data-pack="' + esc(m.name) + '">Add to team…</button>'
+            + '</div>'
+            + '<div class="muted" style="font-size: var(--text-sm);">' + esc(m.description || '') + '</div>'
+            + (terms ? '<div class="muted" style="font-size: var(--text-xs);">matches: ' + esc(terms) + '</div>' : '')
+            + '</div>';
+        }).join('');
+        results.innerHTML = '<p class="muted" style="margin-top: 0.6rem;">Specialists already on your roster, best fit first:</p>' + rows;
+      }
+
+      matchBtn.addEventListener('click', function () {
+        var text = (jdText.value || '').trim();
+        var file = jdFile.files && jdFile.files[0];
+        say('Matching against the roster…', true);
+        var req;
+        if (!text && file) {
+          var fd = new FormData();
+          fd.append('file', file);
+          fd.append('k', '5');
+          req = fetch('/api/v1/agents/jd/match-from-file', { method: 'POST', body: fd });
+        } else if (text) {
+          req = fetch('/api/v1/agents/jd/match', {
+            method: 'POST', headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ jd_text: text, k: 5 }),
+          });
+        } else {
+          say('Paste a job description or choose a file first.', false);
+          return;
+        }
+        req.then(function (r) { return r.json().then(function (j) { return { ok: r.ok, j: j }; }); })
+          .then(function (res) {
+            if (!res.ok) { say((res.j && res.j.detail) || 'Matching failed.', false); return; }
+            say('', true);
+            renderMatches(res.j.matches || []);
+          })
+          .catch(function () { say('Matching failed — check your connection.', false); });
+      });
+
+      results.addEventListener('click', function (e) {
+        var btn = e.target.closest('.jd-hire-btn');
+        if (!btn) return;
+        var pack = btn.dataset.pack;
+        var ask = window.mvForm
+          ? mvForm('Add ' + pack + ' to a team', [
+              { key: 'team', label: 'Team (fleet) name', type: 'text', required: true,
+                placeholder: 'e.g. finance-team' },
+            ], { okText: 'Add' })
+          : Promise.resolve({ team: window.prompt('Team (fleet) name, e.g. finance-team') });
+        ask.then(function (vals) {
+          var team = vals && (vals.team || '').trim();
+          if (!team) return;
+          fetch('/api/v1/fleets/' + encodeURIComponent(team) + '/agents', {
+            method: 'POST', headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ pack: pack }),
+          }).then(function (r) { return r.json().then(function (j) { return { ok: r.ok, j: j }; }); })
+            .then(function (res) {
+              if (res.ok) say(pack + ' added to team "' + team + '".', true);
+              else say((res.j && res.j.detail) || 'Could not add to the team.', false);
+            })
+            .catch(function () { say('Could not add to the team — check your connection.', false); });
+        });
+      });
+
+      if (draftBtn) draftBtn.addEventListener('click', function () {
+        var text = (jdText.value || '').trim();
+        if (!text) { say('Paste the job description first — the draft is built from it.', false); return; }
+        var ask = window.mvForm
+          ? mvForm('Draft a new specialist', [
+              { key: 'title', label: 'Role title', type: 'text', required: true,
+                placeholder: 'e.g. Accounts Payable Specialist' },
+            ], { okText: 'Draft' })
+          : Promise.resolve({ title: window.prompt('Role title, e.g. Accounts Payable Specialist') });
+        ask.then(function (vals) {
+          var title = vals && (vals.title || '').trim();
+          if (!title) return;
+          say('Drafting a clamped specialist from the JD…', true);
+          fetch('/api/v1/agents/jd/draft', {
+            method: 'POST', headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ role_title: title, jd_text: text }),
+          }).then(function (r) { return r.json().then(function (j) { return { ok: r.ok, j: j }; }); })
+            .then(function (res) {
+              if (!res.ok) { say((res.j && res.j.detail) || 'Drafting failed.', false); return; }
+              sessionStorage.setItem('jd-draft', JSON.stringify(res.j.draft || {}));
+              location.href = '/agents?new=1';
+            })
+            .catch(function () { say('Drafting failed — check your connection.', false); });
+        });
+      });
+    })();
+
     // ---- tool chips: sync a friendly chip UI into the hidden #f-allow input ----
     (function () {
       var host = document.getElementById('skill-chips');
