@@ -107,7 +107,9 @@ def test_onboard_decline_defers_enabled_knowledge_ingestion(tmp_path, monkeypatc
             self.embedder = embedder
             self.shield = shield
 
-        def ingest_path(self, collection, path):
+        def ingest_path(self, collection, path, **kwargs):
+            # Provenance kwargs (ingested_by, subject, …) are passed by
+            # intake.ingest_docs; the double records the call and accepts them.
             ingested.append((collection, path))
             return 1
 
@@ -150,7 +152,9 @@ def test_onboard_approval_ingests_enabled_knowledge_then_saves(tmp_path, monkeyp
             self.embedder = embedder
             self.shield = shield
 
-        def ingest_path(self, collection, path):
+        def ingest_path(self, collection, path, **kwargs):
+            # Provenance kwargs (ingested_by, subject, …) are passed by
+            # intake.ingest_docs; the double records the call and accepts them.
             ingested.append((collection, path))
             return 1
 
