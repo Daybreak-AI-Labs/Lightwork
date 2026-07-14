@@ -4616,6 +4616,26 @@ def _conversation_user_matches(conv_user_id: str, requested: str, channel: str) 
     return channel == "cli" and requested == "local" and conv_user_id.startswith("local:")
 
 
+def _erase_subject_knowledge(channel: str, user: str) -> dict[str, int]:
+    """Scrub a subject's document chunks from the knowledge plane (Art. 17).
+
+    Extracted from ``erase`` so the command stays under the complexity cap.
+    Fail-soft: knowledge is optional and a KB error must not abort the erase
+    already performed on the world model — it only warns and returns ``{}``.
+    """
+    try:
+        from .. import knowledge_admin
+        return knowledge_admin.erase_subject(channel, user)
+    except Exception as exc:  # pragma: no cover - defensive
+        click.echo(
+            f"warning: erased the database but could not scrub the knowledge base "
+            f"({type(exc).__name__}: {exc}); run `maverick knowledge residual "
+            f"--channel {channel} --user {user}` to check.",
+            err=True,
+        )
+        return {}
+
+
 @main.command()
 @click.option("--channel", required=True, help="Channel name (e.g. telegram, sms).")
 @click.option("--user", required=True, help="The channel user_id to erase.")
@@ -4818,17 +4838,7 @@ def erase(ctx, channel: str, user: str, yes: bool) -> None:
     # stamp; without this, their embedded chunks survived erasure in the vector
     # store (an Art.17 gap for any deployment with knowledge RAG on). Fail-soft:
     # knowledge is optional and a KB error must not abort the erase we've done.
-    knowledge_removed: dict[str, int] = {}
-    try:
-        from .. import knowledge_admin
-        knowledge_removed = knowledge_admin.erase_subject(channel, user)
-    except Exception as exc:  # pragma: no cover - defensive
-        click.echo(
-            f"warning: erased the database but could not scrub the knowledge base "
-            f"({type(exc).__name__}: {exc}); run `maverick knowledge residual "
-            f"--channel {channel} --user {user}` to check.",
-            err=True,
-        )
+    knowledge_removed = _erase_subject_knowledge(channel, user)
 
     # Scrubbing may have re-anchored signed audit files, so drop any cached
     # signer before appending the erase marker. The compatibility hook is safe:
