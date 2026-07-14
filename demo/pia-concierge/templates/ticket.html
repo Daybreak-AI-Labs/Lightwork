@@ -1,0 +1,56 @@
+{% extends "base.html" %}
+{% set active = 'servicenow' %}
+{% block title %}{{ ticket.number }}{% endblock %}
+{% block body %}
+<div class="sim-banner"><span class="sim-chip">Simulated</span>
+  <span>ServiceNow ticket record. Lightwork writes work notes and state changes back here through the governed connector.</span></div>
+
+<div class="page-head">
+  <div class="flow">
+    <h1 style="font-size:22px;">{{ ticket.number }}</h1>
+    <span class="pill state-{{ ticket.state|replace(' ','') }}">{{ ticket.state }}</span>
+    {% if case %}<span class="faint mono">→ {{ case.id }}</span>{% endif %}
+  </div>
+  <p>{{ ticket.short_description }}</p>
+</div>
+
+<div class="grid two">
+  <div class="card">
+    <h2>Details</h2>
+    <dl class="kv">
+      <dt>Requested by</dt><dd>{{ ticket.requester }}</dd>
+      <dt>Email</dt><dd class="mono">{{ ticket.requester_email }}</dd>
+      <dt>System / vendor</dt><dd>{{ ticket.system_name }}</dd>
+      <dt>Data types</dt><dd>{{ ticket.data_types }}</dd>
+      <dt>Lightwork case</dt><dd class="mono">{{ case.id if case else '—' }}</dd>
+    </dl>
+    {% if case and case.stage in ('intake_sent',) %}
+    <hr>
+    <p class="muted">Waiting on the requester to complete the intake questionnaire.</p>
+    <a class="btn ghost sm" href="/mail">Open requester inbox →</a>
+    {% endif %}
+    {% if case and case.stage == 'pending_review' %}
+    <hr>
+    <p class="muted">Scored by Lightwork — awaiting human approval in the governed queue.</p>
+    <a class="btn ghost sm" href="{{ dashboard_url }}/approvals" target="lightwork">Open Lightwork approvals ↗</a>
+    {% endif %}
+    {% if case %}
+    <hr>
+    <div class="flow">
+      <a class="btn ghost sm" href="{{ dashboard_url }}/chat/goal/{{ case.goal_id }}" target="lightwork">Lightwork goal timeline ↗</a>
+      {% if case.onetrust_id %}<a class="btn ghost sm" href="/onetrust">Filed assessment {{ case.onetrust_id }} →</a>{% endif %}
+    </div>
+    {% endif %}
+  </div>
+
+  <div class="card">
+    <h2>Activity / work notes</h2>
+    {% for n in ticket.work_notes|reverse %}
+    <div style="padding:8px 0; border-bottom:1px solid var(--line-soft);">
+      <div class="faint mono" style="font-size:12px;">{{ n.by }}</div>
+      <div>{{ n.text }}</div>
+    </div>
+    {% endfor %}
+  </div>
+</div>
+{% endblock %}

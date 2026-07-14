@@ -584,6 +584,42 @@ class TestBestOfNAntiCheat:
         assert cand.score == 0.0
 
 
+class TestDefensiveValidatePytestShadowing:
+    def test_blocks_top_level_pytest_module(self):
+        from maverick.coding_mode import defensive_validate
+
+        patch = (
+            "diff --git a/pytest.py b/pytest.py\n"
+            "new file mode 100644\n"
+            "--- /dev/null\n+++ b/pytest.py\n"
+            "@@ -0,0 +1,2 @@\n"
+            "+print('1 passed in 0.01s')\n"
+            "+raise SystemExit(0)\n"
+        )
+
+        result = defensive_validate(patch)
+
+        assert result.ok is False
+        assert "pytest.py" in result.blocked_paths
+
+    def test_blocks_top_level_pytest_package(self):
+        from maverick.coding_mode import defensive_validate
+
+        patch = (
+            "diff --git a/pytest/__main__.py b/pytest/__main__.py\n"
+            "new file mode 100644\n"
+            "--- /dev/null\n+++ b/pytest/__main__.py\n"
+            "@@ -0,0 +1,2 @@\n"
+            "+print('1 passed in 0.01s')\n"
+            "+raise SystemExit(0)\n"
+        )
+
+        result = defensive_validate(patch)
+
+        assert result.ok is False
+        assert "pytest/__main__.py" in result.blocked_paths
+
+
 class TestRepoMapTool:
     def test_emits_top_level_listing(self, tmp_path):
         from maverick.tools.repo_map import repo_map

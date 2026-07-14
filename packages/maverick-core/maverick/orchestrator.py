@@ -910,6 +910,7 @@ async def run_goal(  # noqa: C901  -- core goal-execution loop
     resume: bool = False,
     resume_episode_id: int | None = None,
     domain: str | None = None,
+    allowed_suites: frozenset[str] | None = None,
 ) -> str:
     goal = world.get_goal(goal_id)
     if not goal:
@@ -989,6 +990,10 @@ async def run_goal(  # noqa: C901  -- core goal-execution loop
             from . import quotas
             quotas.record_usage(
                 principal, budget.dollars, budget.input_tokens, budget.output_tokens,
+                # Release this run's in-flight tenant dollar hold now that its
+                # actual spend is on the ledger, so it isn't double-counted
+                # against the tenant cap for the rest of its TTL (finding #2).
+                reservation_id=getattr(budget, "_tenant_reservation_id", None),
             )
         except Exception:  # pragma: no cover -- ledger is fully fail-soft
             log.debug("usage ledger record skipped for %s", principal)
@@ -1120,7 +1125,7 @@ async def run_goal(  # noqa: C901  -- core goal-execution loop
             shield=shield, quarantine=quarantine, knowledge=knowledge,
             mcp_clients=mcp_clients,
             channel=channel, user_id=user_id, capability=capability,
-            episode_id=episode_id,
+            allowed_suites=allowed_suites, episode_id=episode_id,
         )
 
         brief, _planning_mode = await _build_orchestrator_brief(
@@ -1741,10 +1746,11 @@ def _donate_bestofn_candidates(llm, world, budget, goal_id, candidates, best) ->
 def _git_env_without_user_config() -> dict[str, str]:
     """Return a scrubbed environment for host-side best-of-N git reads.
 
-    Git clean/smudge filters are command hooks.  The sandbox workdir can be
-    attacker-controlled, so never let global/system config or the orchestrator's
-    process environment add more filter definitions to these host-side probes.
-    Local repo config is still checked separately before any git command runs.
+    Git clean/smudge filters and fsmonitor hooks are command hooks.  The
+    sandbox workdir can be attacker-controlled, so never let global/system
+    config, the orchestrator's process environment, or repo-local fsmonitor
+    settings add executable helpers to these host-side probes. Local repo config
+    is still checked separately before any git command runs.
     """
     env = {
         "GIT_CONFIG_GLOBAL": os.devnull,
@@ -1753,6 +1759,13 @@ def _git_env_without_user_config() -> dict[str, str]:
         "GIT_TERMINAL_PROMPT": "0",
         "HOME": os.devnull,
         "PATH": os.environ.get("PATH", ""),
+        # Override repo-local config entries that can cause otherwise read-only
+        # host-side Git probes to execute workspace-controlled programs.
+        "GIT_CONFIG_COUNT": "2",
+        "GIT_CONFIG_KEY_0": "core.fsmonitor",
+        "GIT_CONFIG_VALUE_0": "false",
+        "GIT_CONFIG_KEY_1": "core.untrackedCache",
+        "GIT_CONFIG_VALUE_1": "false",
     }
     for key in ("LANG", "LC_ALL", "LC_CTYPE", "TMPDIR"):
         if key in os.environ:
@@ -1764,20 +1777,29 @@ def _git_metadata_may_execute_filters(wd) -> bool:
     """Conservatively detect local git metadata that can make git run commands.
 
     A coding attempt can write the mounted workdir, including `.gitattributes`,
-    `.git/info/attributes`, and local config. If those mention filters or config
-    includes, host-side `git add`/`reset` may execute attacker-controlled clean
-    or smudge commands. Fail open by skipping capture/reset instead.
+    `.git/info/attributes`, and local config. If those mention filters, config
+    includes, or fsmonitor hooks, host-side `git add`/`reset` may execute
+    attacker-controlled commands. Fail open by skipping capture/reset instead.
     """
     try:
-        # Git executes a command only via a `[filter "name"]` SECTION (its
-        # clean/smudge values) or a config INCLUDE that could pull one in. The
+        # Git executes a command via filter sections (modern `[filter "name"]`
+        # or deprecated-but-supported `[filter.name]` syntax), attributes files
+        # selected from config, or config includes that could pull either in. The
         # bare word "filter" is NOT sufficient and caused a false positive on
         # every partial clone: `git clone --filter=blob:none` writes a benign
         # `partialclonefilter = blob:none` into .git/config that never runs a
         # command, so matching "filter" skipped best-of-N reset/capture for the
         # entire staged corpus. Match the executable surfaces precisely instead.
         config_files = [wd / ".git" / "config"]
-        config_needles = ('[filter "', "[include", "include.path", "includeif")
+        config_needles = (
+            '[filter "',
+            "[filter.",
+            "[include",
+            "include.path",
+            "includeif",
+            "fsmonitor",
+            "attributesfile",
+        )
         for path in config_files:
             try:
                 if path.is_file():

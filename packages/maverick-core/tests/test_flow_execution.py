@@ -69,6 +69,22 @@ class TestExecution:
         from maverick.flow import store
         assert store.load_run(run.run_id).owner == "user:a"
 
+
+    def test_action_flow_rejects_unsafe_shell_tool(self):
+        f = Flow(id="unsafe", name="unsafe", start="a", nodes={
+            "a": FlowNode(id="a", kind=NODE_ACTION, tool="shell",
+                          params={"args": {"cmd": "id"}}, output="o")})
+
+        assert "unsafe tool 'shell'" in "; ".join(f.validate())
+
+    def test_default_action_runner_blocks_unsafe_shell_tool(self):
+        run = execution.default_action_runner(world=None)
+
+        result, outcome = run("shell", {"args": {"cmd": "id"}}, {})
+
+        assert outcome == 0.0
+        assert result == "ERROR: unsafe flow action tool 'shell'"
+
     def test_flow_max_dollars_caps_agent_fan_out(self, tmp_path, monkeypatch):
         # Three chained agent nodes at the default $5 per-node reservation; a $12
         # aggregate cap lets 2 run and skips the 3rd (2*5=10 ok, +5 would exceed).
@@ -94,6 +110,28 @@ class TestExecution:
         run = execution.execute(f, agent_runner=lambda brief, d: ("ok", 1.0),
                                 action_runner=lambda t, p, d: ("", None))
         assert run.data["r1"] == "ok" and run.data["r2"] == "ok"
+
+    def test_flow_max_dollars_survives_delay_resume(self, tmp_path, monkeypatch):
+        _patch_home(tmp_path, monkeypatch)
+        ran = []
+        f = Flow(id="fBR", name="f", start="a", max_dollars=5.0, nodes={
+            "a": FlowNode(id="a", kind=NODE_AGENT, brief="before", output="r1", next="pause"),
+            "pause": FlowNode(id="pause", kind="delay", seconds=1.0, next="b"),
+            "b": FlowNode(id="b", kind=NODE_AGENT, brief="after", output="r2")})
+
+        def agent(brief, d):
+            ran.append(brief)
+            return (f"ran:{brief}", 1.0)
+
+        paused = execution.execute(f, agent_runner=agent, action_runner=lambda t, p, d: ("", None),
+                                   now=lambda: 100.0)
+        assert paused.status == "paused_delay" and paused.cost_dollars == 5.0
+
+        resumed = execution.execute(f, agent_runner=agent, action_runner=lambda t, p, d: ("", None),
+                                    resume_run_id=paused.run_id, now=lambda: 101.0)
+        assert ran == ["before"]
+        assert "budget exhausted" in str(resumed.data["r2"])
+        assert resumed.cost_dollars == 5.0
 
     def test_execute_records_node_outcomes(self, tmp_path, monkeypatch):
         _patch_home(tmp_path, monkeypatch)
@@ -169,6 +207,32 @@ class TestExecution:
                                     inputs={"corrected": "the fixed value"})
         assert got["brief"] == "use the fixed value"        # human input threaded in
         assert resumed.data["corrected"] == "the fixed value"
+
+    def test_resume_inputs_cannot_overwrite_existing_run_data(self, tmp_path, monkeypatch):
+        # Resume-time inputs may collect new values, but they must not tamper
+        # with trusted data created before the approval pause.
+        _patch_home(tmp_path, monkeypatch)
+        f = Flow(id="f-guard", name="f", start="a", nodes={
+            "a": FlowNode(id="a", kind="approval", prompt="approve?", next="b"),
+            "b": FlowNode(id="b", kind=NODE_AGENT,
+                          brief="pay {{amount}} because {{note}}", output="r")})
+        got = {}
+
+        def ag(brief, d):
+            got["brief"] = brief
+            return ("done", 1.0)
+
+        paused = execution.execute(
+            f, agent_runner=ag, action_runner=lambda *a: ("", None),
+            data={"amount": "100.00"})
+        assert paused.status == "paused_approval"
+        resumed = execution.execute(
+            f, agent_runner=ag, action_runner=lambda *a: ("", None),
+            resume_run_id=paused.run_id, decision="approved",
+            inputs={"amount": "999999.00", "note": "reviewed"})
+        assert got["brief"] == "pay 100.00 because reviewed"
+        assert resumed.data["amount"] == "100.00"
+        assert resumed.data["note"] == "reviewed"
 
     def test_dry_run_traces_but_records_no_outcomes(self, tmp_path, monkeypatch):
         # A sandboxed dry run exercises the graph (status trace captured) but must

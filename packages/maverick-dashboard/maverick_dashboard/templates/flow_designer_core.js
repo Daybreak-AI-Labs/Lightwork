@@ -15,10 +15,16 @@ var FDCore = (function () {
     'items', 'var', 'prompt', 'flow_ref', 'on_error', 'output', 'label',
     'assignee', 'on_expire'];
 
+  function defaultValue(v) {
+    if (Array.isArray(v)) return v.slice();
+    if (v && typeof v === 'object') return Object.assign({}, v);
+    return v;
+  }
+
   // Upgrade a raw node dict into an editable node object (defaults + id fallback).
   function normalizeNode(nd, i) {
     var n = {}, k;
-    for (k in NODE_DEFAULTS) n[k] = NODE_DEFAULTS[k];
+    for (k in NODE_DEFAULTS) n[k] = defaultValue(NODE_DEFAULTS[k]);
     for (k in (nd || {})) n[k] = nd[k];
     n.id = n.id || ('n' + i);
     return n;

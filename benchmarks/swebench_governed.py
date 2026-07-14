@@ -171,15 +171,13 @@ def _desanitize_csv_patch(diff: str) -> str:
 
 
 # Benchmark env the coding agent needs, applied with setdefault so an operator
-# or the CLI can override any of them. THE critical one is CONSENT_MODE: the
-# ``shell`` tool declares risk="high", which under secure-by-default resolves to
-# "ask" and DENIES non-interactively -- so without this every shell/git call the
-# agent makes is refused and it produces no patch (the first paid run's failure).
-# The rest mirror benchmarks/RUNBOOK_SWE_BENCH_VERIFIED.md: OPAQUE=1 is the
-# anti-cheat honesty gate (blocks test-file reads / git log -p / network),
-# MAX_STEPS bounds turns, LONG_CMD_TIMEOUT lets pytest run through the shell tool.
+# or the CLI can override any of them. These mirror
+# benchmarks/RUNBOOK_SWE_BENCH_VERIFIED.md: OPAQUE=1 is the anti-cheat honesty
+# gate (blocks test-file reads / git log -p / network), MAX_STEPS bounds turns,
+# LONG_CMD_TIMEOUT lets pytest run through the shell tool. Consent is handled
+# separately in llm_proposer so default high-risk shell approval is scoped to a
+# container-required sandbox and restored after the run.
 _BENCH_ENV = {
-    "MAVERICK_CONSENT_MODE": "auto-approve",
     "MAVERICK_CODING_MODE": "1",
     "MAVERICK_BENCHMARK_OPAQUE": "1",
     "MAVERICK_USE_SKILLS": "0",
@@ -211,10 +209,11 @@ def llm_proposer(inst: Instance) -> str:
     it). Falls back to the agent's actual working-tree edits (:func:`_worktree_diff`,
     always ``git apply``-able) when no prose diff was emitted.
 
-    Sets the benchmark env (:data:`_BENCH_ENV`) via ``setdefault`` -- most
-    importantly ``MAVERICK_CONSENT_MODE=auto-approve`` so the agent's shell/git
-    tools are not consent-denied non-interactively. Safe for a THROWAWAY instance
-    checkout on a disposable box; use a container sandbox backend for the full run.
+    Sets the benchmark env (:data:`_BENCH_ENV`) via ``setdefault``. When the
+    operator did not explicitly choose a consent mode, the runner temporarily
+    grants shell consent only after requiring a container sandbox backend; this
+    avoids defaulting model-generated shell commands to the unsandboxed local
+    host backend.
 
     Writes a per-instance forensics sidecar (``<ledger-dir>/forensics/`` or
     ``MAVERICK_SWEBENCH_FORENSICS``) with the model's result text, both patch
@@ -228,50 +227,62 @@ def llm_proposer(inst: Instance) -> str:
             "MAVERICK_PROVIDER_READY=1 if another provider is configured in "
             "~/.maverick/config.toml). Use --proposer oracle for the keyless "
             "pipeline proof.")
+    env_restore: dict[str, str | None] = {}
     for k, v in _BENCH_ENV.items():
-        os.environ.setdefault(k, v)
+        if k not in os.environ:
+            env_restore[k] = None
+            os.environ[k] = v
+
+    auto_approve_shell = "MAVERICK_CONSENT_MODE" not in os.environ
+    if auto_approve_shell:
+        env_restore["MAVERICK_CONSENT_MODE"] = None
+        os.environ["MAVERICK_CONSENT_MODE"] = "auto-approve"
 
     from maverick.config import reset_config_cache
-    from swe_bench import run_maverick
 
-    base_sha = _git_head(inst.repo_path)
-    # Give the agent the GRADED tests so its own test verifier gives REAL
-    # feedback. The FAIL_TO_PASS/PASS_TO_PASS the agent is told to satisfy are
-    # added by the grader's test_patch, which does NOT exist at base_commit --
-    # so without this the agent runs "test not found" -> 0/N on everything,
-    # concludes its fix broke the suite, thrashes, and emits no diff (the
-    # observed failure). Commit test_patch as a fixture on top of base_commit:
-    # the tests now exist and run, opaque mode still blocks READING their
-    # source, and committing it keeps the candidate diff clean (git diff against
-    # this commit excludes the fixture).
-    fixture_sha = base_sha
-    if (inst.test_patch or "").strip() and base_sha:
-        if _commit_fixture(inst.repo_path, inst.test_patch):
-            fixture_sha = _git_head(inst.repo_path)
-
-    # Point the agent's sandbox at THIS instance's checkout. build_sandbox()
-    # reads [sandbox] workdir from config (default ~/maverick-workspace) and
-    # NEVER consults cwd -- the overlay is the one runtime knob it honors.
-    restore = _point_sandbox_at(inst.repo_path)
+    def restore():
+        return None
     row = tree_diff = prose_diff = None
     attempt1_cost = 0.0
-
-    def _attempt(brief_text: str):
-        # Reset to the fixture commit (base + test_patch), not bare base, so
-        # run_maverick's pre-run reset keeps the graded tests present.
-        r = run_maverick(
-            inst.instance_id, brief_text,
-            fail_to_pass=inst.fail_to_pass, pass_to_pass=inst.pass_to_pass,
-            gold_patch=inst.gold_patch, language=inst.language,
-            base_commit=fixture_sha)
-        # Candidate = the agent's source edits ONLY: diff against the fixture
-        # commit excludes the committed test_patch. Fall back to the desanitized
-        # prose diff if the tree is clean (agent emitted a diff without editing).
-        td = _worktree_diff(inst.repo_path)
-        pd = _desanitize_csv_patch(getattr(r, "predicted_patch", "") or "")
-        return r, td, pd
-
+    base_sha = ""
     try:
+        from swe_bench import run_maverick
+
+        base_sha = _git_head(inst.repo_path)
+        # Give the agent the GRADED tests so its own test verifier gives REAL
+        # feedback. The FAIL_TO_PASS/PASS_TO_PASS the agent is told to satisfy are
+        # added by the grader's test_patch, which does NOT exist at base_commit --
+        # so without this the agent runs "test not found" -> 0/N on everything,
+        # concludes its fix broke the suite, thrashes, and emits no diff (the
+        # observed failure). Commit test_patch as a fixture on top of base_commit:
+        # the tests now exist and run, opaque mode still blocks READING their
+        # source, and committing it keeps the candidate diff clean (git diff against
+        # this commit excludes the fixture).
+        fixture_sha = base_sha
+        if (inst.test_patch or "").strip() and base_sha:
+            if _commit_fixture(inst.repo_path, inst.test_patch):
+                fixture_sha = _git_head(inst.repo_path)
+
+        # Point the agent's sandbox at THIS instance's checkout. build_sandbox()
+        # reads [sandbox] workdir from config (default ~/maverick-workspace) and
+        # NEVER consults cwd -- the overlay is the one runtime knob it honors.
+        restore = _point_sandbox_at(inst.repo_path, require_container=auto_approve_shell)
+
+        def _attempt(brief_text: str):
+            # Reset to the fixture commit (base + test_patch), not bare base, so
+            # run_maverick's pre-run reset keeps the graded tests present.
+            r = run_maverick(
+                inst.instance_id, brief_text,
+                fail_to_pass=inst.fail_to_pass, pass_to_pass=inst.pass_to_pass,
+                gold_patch=inst.gold_patch, language=inst.language,
+                base_commit=fixture_sha)
+            # Candidate = the agent's source edits ONLY: diff against the fixture
+            # commit excludes the committed test_patch. Fall back to the desanitized
+            # prose diff if the tree is clean (agent emitted a diff without editing).
+            td = _worktree_diff(inst.repo_path)
+            pd = _desanitize_csv_patch(getattr(r, "predicted_patch", "") or "")
+            return r, td, pd
+
         row, tree_diff, prose_diff = _attempt(inst.brief)
         chosen = tree_diff if tree_diff.strip() else prose_diff
         # Round 4 (lever 2): retry ONCE if the first attempt produced no patch
@@ -295,6 +306,11 @@ def llm_proposer(inst: Instance) -> str:
         _dump_forensics(inst, row, tree_diff, prose_diff, extra_cost=attempt1_cost)
         restore()
         reset_config_cache()
+        for k, old in env_restore.items():
+            if old is None:
+                os.environ.pop(k, None)
+            else:
+                os.environ[k] = old
         # Restore the tree to the pristine base_commit (drop the fixture commit
         # AND the agent's edits) so the governed evaluator copies a clean base.
         _hard_reset(inst.repo_path, base_sha)
@@ -351,16 +367,21 @@ def _hard_reset(repo: Path, sha: str) -> None:
         log.warning("_hard_reset: could not reset %s", repo, exc_info=True)
 
 
-def _point_sandbox_at(repo: Path):
+def _point_sandbox_at(repo: Path, *, require_container: bool = False):
     """Redirect the agent's sandbox workdir to ``repo`` via a config overlay,
     reset the config cache so it takes effect, and return a restore() callable.
     build_sandbox() reads ``[sandbox] workdir`` from config and never consults
-    cwd; a MAVERICK_CONFIG_OVERLAY file is the runtime knob it honors."""
+    cwd; a MAVERICK_CONFIG_OVERLAY file is the runtime knob it honors. When
+    ``require_container`` is true, the overlay also refuses the unsandboxed
+    local backend before benchmark shell consent is auto-approved."""
     import tempfile
 
     from maverick.config import reset_config_cache
     overlay = Path(tempfile.gettempdir()) / f"mav_sbx_overlay_{os.getpid()}.toml"
-    overlay.write_text(f'[sandbox]\nworkdir = "{repo}"\n', encoding="utf-8")
+    body = f'[sandbox]\nworkdir = "{repo}"\n'
+    if require_container:
+        body += "require_container = true\n"
+    overlay.write_text(body, encoding="utf-8")
     prev = os.environ.get("MAVERICK_CONFIG_OVERLAY")
     os.environ["MAVERICK_CONFIG_OVERLAY"] = str(overlay)
     reset_config_cache()

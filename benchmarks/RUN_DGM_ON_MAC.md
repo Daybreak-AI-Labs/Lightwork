@@ -23,8 +23,15 @@ chmod +x benchmarks/setup_mac.sh
 ```
 
 `setup_mac.sh` is idempotent and spends nothing. It creates `.venv`, installs
-the workspace, generates your Ed25519 signing keys in `~/dgm-keys`, and checks
-Modal auth.
+the workspace, generates your Ed25519 signing keys in `~/dgm-keys` with a `0700`
+directory and `0600` private key, and checks Modal auth.
+
+Treat `~/dgm-keys/operator.priv.hex` as an offline governance secret: do not copy
+it into the repo, mount it into containers, paste it into prompts, or expose it
+to any local shell that an LLM-controlled agent can operate. The benchmark
+runner only needs the key directory for the final human-approved signing/audit
+step; solving and Modal grading must not receive this directory as workspace
+input.
 
 ## 1. Open a shell and bring your secrets (nothing secret is committed)
 
@@ -45,7 +52,9 @@ This runs the **real** governed DGM gate, the signed audit chain, and the
 self-learning scoreboards entirely in-process (instant, free), then pings Modal.
 **Do not proceed until it prints `ALL CHECKS PASSED`.** This is the "check your
 work before spending" gate — if anything here is red, the paid run would just
-burn money hitting the same wall.
+burn money hitting the same wall. The preflight also fails if `~/dgm-keys` is
+not `0700` or `operator.priv.hex` is not `0600`; rerun `setup_mac.sh` to harden
+existing keys.
 
 ## 3. Keep the Mac awake for the whole run
 
@@ -60,39 +69,41 @@ cd ~/Lightwork && source .venv/bin/activate
 export ANTHROPIC_API_KEY=sk-ant-...
 ```
 
-## 4a. The 3-instance mechanism proof (start here — cheapest, ~$30–60)
+## 4a. The 5-instance mechanism proof (start here — cheapest, ~$20–45)
 
 ```bash
-# 3 instances, run DEEP (the default). Concentrated budget, real results.
+# Recommended: auto-pick the 5 easiest Verified instances (smallest gold
+# patches -- the band where a budget uplift can actually show).
 caffeinate -s python benchmarks/realswe_dgm.py \
     --keys ~/dgm-keys --out-dir ~/realswe_dgm \
-    --ids sympy__sympy-15976,sympy__sympy-14531,pytest-dev__pytest-5631 \
-    --max-dollars 75
+    --easy 5 --max-dollars 45
 # detach and let it run:  Ctrl-b then d      (the run keeps going)
+#
+# Or name instances yourself (disclosed selection, any repo):
+#   --ids django__django-11179,django__django-11880,sympy__sympy-23950
 ```
 
 This runs each real GitHub issue under a **baseline** agent budget
 (25 turns / $3 / 25 min wall) and a **candidate** budget
-(**200 turns / $20 / 2 h wall**), grades every patch in the official SWE-bench
-container on Modal, and if the candidate lifts the held-out resolved-rate it
-**promotes the config change through the real governance rung and signs it into
-the ledger**.
+(**120 turns / $12 / 90 min wall**), grades every patch in the official
+SWE-bench container on Modal, and if the candidate lifts the held-out
+resolved-rate it **promotes the config change through the real governance rung
+and signs it into the ledger**.
 
-> **Deep, not wide.** Rather than spread a fixed pot across many shallow attempts
-> (which mostly time out with no diff), the candidate concentrates budget into 3
-> instances run to ground: **200 steps / $20 each, with a 2-hour wall** so the
-> step cap and the dollar cap are the real limits — not a 25-minute timer that
-> cuts the agent off mid-solve and produces a false "no-diff." The per-instance
-> $20 caps are what bind; `--max-dollars 75` is just the global runaway guard
-> (candidate 3×$20 + baseline 3×$3 ≈ $69 worst case). Same money as a wide run,
-> but each instance actually reaches a result.
+> **The goldilocks band.** Uplift only shows on instances the weak config
+> can't finish but the strong one can. Too-hard corpora (the original sympy/
+> pytest internals ids failed at every budget) and too-easy ones both give a
+> flat 0 delta. `--easy N` ranks all 500 Verified instances by gold-patch size
+> and takes the N smallest — data-driven, reproducible, not hand-picked. The
+> per-instance caps ($12 candidate / $3 baseline) are what bind;
+> `--max-dollars` (default 45) is the global runaway guard.
 
-> **Runtime.** Deep solves are slower: a candidate instance can take up to ~2 h,
-> so the full run may be several hours. That's exactly why it runs under
-> `tmux` + `caffeinate` and is checkpointed — walk away and let it finish. It is **resumable** (each solve is checkpointed
-to `~/realswe_dgm/verdicts.json`) and **hard cost-capped** (`--max-dollars`), so
-if the Mac ever reboots you just re-run the identical command — it skips
-finished solves and never re-pays.
+> **Runtime.** A candidate instance can take up to ~90 min, so the full run
+> may take a few hours. That's exactly why it runs under `tmux` + `caffeinate`
+> and is checkpointed — walk away and let it finish. It is **resumable** (each
+> solve is checkpointed to `~/realswe_dgm/verdicts.json`) and **hard
+> cost-capped** (`--max-dollars`), so if the Mac ever reboots you just re-run
+> the identical command — it skips finished solves and never re-pays.
 
 ## 4b. The 10-instance statistical run (optional, more convincing, ~$80–120)
 

@@ -41,6 +41,51 @@ def test_snapshot_then_restore_roundtrip(tmp_path):
     assert (dest / "sub" / "b.txt").read_text(encoding="utf-8") == "beta"
 
 
+def test_restore_removes_files_added_after_snapshot(tmp_path):
+    """Reverting an ADDITIVE change must delete files the patch created.
+    Regression: restore only extracted members, so an added file survived the
+    rollback while restore still reported success -- the revert silently
+    no-op'd the add."""
+    src = _src(tmp_path)                       # state A: a.txt, sub/b.txt
+    store = tmp_path / "snaps"
+    man = create_snapshot(src, store, label="state-A")
+
+    # State B: a patch ADDS a new file and a whole new subdir, and edits an
+    # existing file (to prove restore still overwrites the edit).
+    (src / "added.txt").write_text("NEW", encoding="utf-8")
+    (src / "newdir").mkdir()
+    (src / "newdir" / "nested.txt").write_text("NEW2", encoding="utf-8")
+    (src / "a.txt").write_text("EDITED", encoding="utf-8")
+
+    res = restore_snapshot(store, man["id"], src)   # in-place rollback
+
+    # The added file and added subdir are GONE.
+    assert not (src / "added.txt").exists()
+    assert not (src / "newdir").exists()
+    # The edited file is back to its snapshot content.
+    assert (src / "a.txt").read_text(encoding="utf-8") == "alpha"
+    # The untouched snapshot file survives.
+    assert (src / "sub" / "b.txt").read_text(encoding="utf-8") == "beta"
+    assert res["restored"] == 2
+    assert res["removed"] == 3   # added.txt + newdir/nested.txt + empty newdir
+
+
+def test_revert_change_reports_success_and_drops_added_file(tmp_path):
+    """End-to-end via revert_change: it returns True AND the additive file is
+    removed (the finding: revert returned True while the added file lingered)."""
+    from maverick.self_modify_apply import revert_change
+
+    src = _src(tmp_path)
+    store = tmp_path / "snaps"
+    man = create_snapshot(src, store, label="cp")
+    (src / "leftover.txt").write_text("added by a patch", encoding="utf-8")
+
+    ok = revert_change(man["id"], tree=src, store=store)
+
+    assert ok is True
+    assert not (src / "leftover.txt").exists()
+
+
 def test_ids_increment_and_list_newest_first(tmp_path):
     src = _src(tmp_path)
     store = tmp_path / "snaps"

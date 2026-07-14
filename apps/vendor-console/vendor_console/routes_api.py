@@ -38,6 +38,21 @@ def _customer_from_token(request: Request) -> Customer:
     return cust
 
 
+async def _read_limited_body(request: Request) -> bytes:
+    clen = request.headers.get("content-length", "")
+    if clen.isdigit() and int(clen) > _MAX_BUNDLE_BYTES:
+        raise HTTPException(status_code=413, detail="support bundle too large (max 1 MB)")
+
+    chunks: list[bytes] = []
+    total = 0
+    async for chunk in request.stream():
+        total += len(chunk)
+        if total > _MAX_BUNDLE_BYTES:
+            raise HTTPException(status_code=413, detail="support bundle too large (max 1 MB)")
+        chunks.append(chunk)
+    return b"".join(chunks)
+
+
 @router.get("/healthz")
 def healthz(request: Request) -> PlainTextResponse:
     ok, broken = audit.verify_chain(request.app.state.conn)
@@ -84,12 +99,7 @@ async def intake_support(request: Request):
     """File a redacted support bundle as a ticket (deduped by correlation_id)."""
     conn = request.app.state.conn
     cust = _customer_from_token(request)
-    clen = request.headers.get("content-length", "")
-    if clen.isdigit() and int(clen) > _MAX_BUNDLE_BYTES:
-        raise HTTPException(status_code=413, detail="support bundle too large (max 1 MB)")
-    raw = await request.body()
-    if len(raw) > _MAX_BUNDLE_BYTES:                        # catches chunked bodies too
-        raise HTTPException(status_code=413, detail="support bundle too large (max 1 MB)")
+    raw = await _read_limited_body(request)
     try:
         bundle = json.loads(raw or b"{}")
     except Exception as e:  # noqa: BLE001 - malformed body → 400, not a 500

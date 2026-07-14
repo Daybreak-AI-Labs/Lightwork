@@ -12,7 +12,11 @@ substrate's load-bearing guarantees:
   test: ``JobQueue.claim`` flips ``pending -> running`` with a guarded
   ``UPDATE ... WHERE status='pending'``, so two workers racing the same row
   resolve to one winner. A duplicate here would mean the guard is broken (double
-  work, double spend).
+  work, double spend). SCOPE: this is DB-level exactly-once on the CLAIM path
+  only. It does NOT exercise the reclaim path, which is at-least-once for side
+  effects -- a worker frozen past its lease can have its job reclaimed and re-run
+  by a peer, so handlers must be idempotent. See the CAVEAT where the metric is
+  computed.
 * **Drains clean** -- no job left ``pending``/``running``; no worker raised.
 
 No Redis/gRPC network and no LLM: execution is stubbed at the same boundary as
@@ -118,6 +122,13 @@ def run_soak(workdir: Path, *, goals: int = _DEFAULT_GOALS,
         control_world.conn.close()
 
     zero_loss = done == goals and not lost
+    # CAVEAT: this proves DB-level exactly-once -- claim() atomically flips
+    # pending->running under contention, so no two workers execute the same
+    # READY job. It does NOT exercise the reclaim path: a worker frozen (not
+    # crashed) past its lease can have its job reclaimed and re-run by a peer,
+    # which is at-least-once for side effects (handlers must be idempotent). The
+    # soak never freezes a worker mid-job, so this metric does not cover that
+    # case -- see worker._reclaim_stale for the reclaim-path caveat.
     exactly_once = not duplicates and sum(exec_counts.values()) == goals
     drained_clean = remaining == 0 and not worker_errors and not stuck_threads
     control_did_not_execute = pending_after_submit == goals and enqueued == goals
@@ -144,6 +155,9 @@ def run_soak(workdir: Path, *, goals: int = _DEFAULT_GOALS,
         "proof": {
             "control_plane_did_not_execute": control_did_not_execute,
             "zero_loss": zero_loss,
+            # Proves claim() atomicity (DB-level exactly-once on the claim path),
+            # NOT reclaim-path side-effect idempotency under a worker freeze
+            # longer than the lease -- see the CAVEAT where this is computed.
             "exactly_once_under_contention": exactly_once,
             "drained_clean": drained_clean,
             "ok": ok,

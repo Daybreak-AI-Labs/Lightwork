@@ -29,10 +29,14 @@ Hand Lightwork a goal. Its orchestrator decomposes it, spawns specialist sub-age
 > **Proprietary software — not open source.** Lightwork is enterprise software; use, redistribution, and derivative works require a license. [Contact us](https://github.com/Day-AI-Labs/Lightwork) for evaluation or commercial access. See [`LICENSE`](./LICENSE) and [`TRADEMARK.md`](./TRADEMARK.md).
 
 ```bash
-pipx install 'maverick-agent[installer]'
+git clone https://github.com/Day-AI-Labs/Lightwork && cd Lightwork
+pip install -e ./packages/maverick-core   # kernel (with deps)
+pip install -e ./apps/installer-cli       # + the setup wizard
 lightwork init                        # four questions, safe defaults
 lightwork start "Build a CLI that emails me a digest of today's top Hacker News stories — research the API, write it, and verify it runs"
 ```
+
+> A one-line `pipx install 'maverick-agent[installer]'` is **coming with the first tagged release** — the eight packages aren't on the public PyPI index yet (see [Status](#status)). Until then, use the source install above, the [one-line bootstrap or double-click installer](#install).
 
 Prefer no terminal? Grab the [**double-click desktop installer**](#install). New here? See [`docs/getting-started.md`](./docs/getting-started.md).
 
@@ -44,9 +48,9 @@ Alpha, but **installable today**: the one-line installers work on Windows/macOS/
 
 | Component | v0.1 (today) | Planned (v0.2+) |
 |---|---|---|
-| Install | **Native installer (`.exe` / `.dmg` / `.AppImage`)**, one-line bootstrap (`install.ps1` / `install.sh`), pipx, or from source | Code-signed bundles + auto-update |
+| Install | **Native installer (`.exe` / `.dmg` / `.AppImage`)**, one-line bootstrap (`install.ps1` / `install.sh`), or from source | pipx (`maverick-agent`, on first PyPI release), code-signed bundles + auto-update |
 | GUI | Native installer app + local web dashboard (`lightwork dashboard`) + chat at `/chat` | Native Tauri shell for the agent itself + iOS/Android |
-| Sandbox | Local subprocess, Docker, gVisor, Podman, devcontainer, Firecracker, Kubernetes, SSH, Modal | Daytona |
+| Sandbox | Local subprocess, Docker, gVisor, Podman, devcontainer, Kubernetes, SSH, Modal | Firecracker microVM (scaffold — exec path does not yet mount the workspace), Daytona |
 | AI providers | Anthropic (full), OpenAI, OpenRouter, Ollama, Gemini, DeepSeek, Bedrock, Azure, xAI, Moonshot, TGI, vLLM (per-role routable) | Cohere |
 | Channels | All 17 wired — Telegram, Discord, Slack, Signal, Email, Matrix, Bluesky, Mastodon, Voice, IRC, Threads, RCS, Glasses; WhatsApp (Cloud API + Twilio)/SMS (need Twilio), iMessage (macOS-only) | Push notifications |
 | Safety | Shield wired at 3 chokepoints; agent-shield SDK if installed, else a built-in rule set | Agent-shield full ~115 patterns |
@@ -69,9 +73,9 @@ Grab the installer for your OS from the **[latest release ›](https://github.co
 
 It's unsigned for now, so the first launch shows an "unknown developer" prompt — on Windows click **More info → Run anyway**; on macOS right-click the app → **Open**. The app installs Python and Lightwork for you, then you're set.
 
-### Terminal install with pipx
+### Terminal install with pipx (coming with the first tagged release)
 
-If you already have Python 3.10+, install the published package instead of running a remote bootstrap script:
+Once the packages are published to PyPI on the first tagged release, a single pipx command will install everything. **This does not work yet** — the packages aren't on the public index (see [Status](#status)); until then use the [From source](#from-source) steps above. The published command will be:
 
 ```bash
 pipx install 'maverick-agent[installer]'

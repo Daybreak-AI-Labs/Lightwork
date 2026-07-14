@@ -45,3 +45,30 @@ def test_fast_node_under_timeout_succeeds():
     res = run_flow(f, agent_fn=lambda *a: ("", None),
                    action_fn=lambda n, p, d: ("quick", 1.0))
     assert res.status == "completed" and res.data["r"] == "quick"
+
+
+def test_timed_out_retries_do_not_overlap_abandoned_work():
+    active = 0
+    max_active = 0
+    calls = 0
+
+    def slow_action(node, params, data):
+        nonlocal active, max_active, calls
+        calls += 1
+        active += 1
+        max_active = max(max_active, active)
+        try:
+            time.sleep(0.08)
+            return ("done", 1.0)
+        finally:
+            active -= 1
+
+    f = Flow(id="f", name="f", start="a", nodes={
+        "a": FlowNode(id="a", kind="action", tool="t", timeout=0.01, retries=3, output="r")})
+    res = run_flow(f, agent_fn=lambda *a: ("", None), action_fn=slow_action)
+
+    assert res.status == "completed"
+    assert calls == 4
+    assert max_active == 1
+    assert active == 0
+    assert "timed out" in str(res.data["r"])

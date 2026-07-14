@@ -25,6 +25,7 @@ from maverick.orchestrator import (  # noqa: E402
 
 _ENV = {"GIT_CONFIG_GLOBAL": "/dev/null", "GIT_CONFIG_SYSTEM": "/dev/null",
         "GIT_CONFIG_NOSYSTEM": "1", "PATH": "/usr/bin:/bin:/usr/local/bin"}
+_SAFE_GIT_CONFIG = ["-c", "core.fsmonitor=false", "-c", "core.untrackedCache=false"]
 
 
 def _smoke_one(repo: Path) -> tuple[bool, str]:
@@ -34,7 +35,7 @@ def _smoke_one(repo: Path) -> tuple[bool, str]:
         return False, "not a git repo"
     # pick a tracked python file to perturb
     try:
-        out = subprocess.run(["git", "-C", str(repo), "ls-files", "*.py"],
+        out = subprocess.run(["git", *_SAFE_GIT_CONFIG, "-C", str(repo), "ls-files", "*.py"],
                              capture_output=True, text=True, timeout=30, env=_ENV)
         files = [f for f in out.stdout.splitlines() if f.strip()]
     except (subprocess.SubprocessError, OSError) as e:

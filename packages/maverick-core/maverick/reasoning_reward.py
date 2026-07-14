@@ -288,26 +288,49 @@ def _dimensions_from(
     raw_dims: object,
     rubric: tuple[tuple[str, float, float], ...],
 ) -> tuple[DimensionScore, ...]:
-    """Build validated DimensionScores, stamping the veto flag from the rubric."""
+    """Build validated DimensionScores, stamping the veto flag from the rubric.
+
+    A structured verifier response is only compliant when it scores every
+    rubric dimension exactly once. Missing dimensions would otherwise remove
+    their veto floors (notably ``safety``), and unknown names could distract
+    audit consumers with facets that have no configured policy meaning.
+    """
     floors = {name: floor for name, _, floor in rubric}
-    out: list[DimensionScore] = []
+    required = set(floors)
+    by_name: dict[str, DimensionScore] = {}
     if not isinstance(raw_dims, list):
         return ()
     for item in raw_dims:
         if not isinstance(item, dict):
-            continue
+            return ()
         name = str(item.get("name", "")).strip().lower()
-        if not name:
-            continue
+        if name not in required or name in by_name:
+            return ()
         score = _clamp01(item.get("score", 0.0))
-        floor = floors.get(name, 0.0)
-        out.append(DimensionScore(
+        floor = floors[name]
+        by_name[name] = DimensionScore(
             name=name,
             score=score,
             critique=str(item.get("critique", "") or ""),
             vetoes=floor > 0.0 and score < floor,
-        ))
-    return tuple(out)
+        )
+    if set(by_name) != required:
+        return ()
+    return tuple(by_name[name] for name, _, _ in rubric)
+
+
+def looks_structured(text: str) -> bool:
+    """Return True when a reply appears to be attempting the rubric JSON contract."""
+    if not text or not text.strip():
+        return False
+    m = _JSON_OBJECT_RE.search(text)
+    if m is None:
+        return False
+    try:
+        data = json.loads(m.group(0))
+    except json.JSONDecodeError:
+        return False
+    return isinstance(data, dict) and "dimensions" in data
 
 
 def parse_structured(
@@ -336,6 +359,10 @@ def parse_structured(
         except (json.JSONDecodeError, ValueError) as e:
             return ReasoningReward.reject(f"reasoning reward: JSON parse failed: {e}")
         dims = _dimensions_from(data.get("dimensions"), rubric)
+        if "dimensions" in data and not dims:
+            return ReasoningReward.reject(
+                "reasoning reward: incomplete or invalid rubric dimensions"
+            )
         has_score = "score" in data
         score = _clamp01(data.get("score", 0.0))
         if not has_score and dims:

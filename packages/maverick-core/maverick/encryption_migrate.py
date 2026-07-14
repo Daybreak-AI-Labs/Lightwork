@@ -137,6 +137,23 @@ def migrate_world_db(
                 if not dry_run:
                     work.append((table, col, r["rid"], val))
             report[f"{table}.{col}"] = sealed
+        try:
+            rows = conn.execute(
+                "SELECT rowid AS rid, row AS val FROM harness_corpus "
+                "WHERE kind IN ('pending', 'rejected')"
+            ).fetchall()
+        except sqlite3.OperationalError:
+            pass  # corpus table absent on an older schema
+        else:
+            sealed = 0
+            for r in rows:
+                val = r["val"]
+                if val is None or is_sealed_str(val):
+                    continue
+                sealed += 1
+                if not dry_run:
+                    work.append(("harness_corpus", "row", r["rid"], val))
+            report["harness_corpus.row"] = sealed
         if dry_run or not work:
             log.info("encryption migrate (dry_run=%s): %s", dry_run, report)
             return report

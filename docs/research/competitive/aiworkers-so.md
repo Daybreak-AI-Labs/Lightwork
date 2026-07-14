@@ -126,7 +126,7 @@ Per the kernel rule, this is the right competitive frame: compete on
 7. **Roster-wide governance invariant test suite.** Six invariants — tool
    reachability, autonomy dial, capability attenuation, compartment isolation,
    hard refusals, budget caps — are verified across all 2,020 packs and
-   fault-injected at 1,000,000 iterations, each with a non-vacuity control, plus
+   each fault-injected with a non-vacuous control (property-fuzzed up to 5,000 iterations), plus
    hostile-argument fuzzing of every connector and tool. "Full audit log"
    doesn't survive this kind of provable, roster-wide governance evidence.
    *be* the platform a Workers-Delos-like product is built on.

@@ -6,6 +6,7 @@ from __future__ import annotations
 
 import asyncio
 import datetime as _dt
+import difflib
 import json
 import logging
 import os
@@ -28,7 +29,7 @@ from maverick.runner import (
     DEFAULT_MAX_WALL_SECONDS,
 )
 from starlette.concurrency import run_in_threadpool
-from starlette.responses import JSONResponse, StreamingResponse
+from starlette.responses import FileResponse, JSONResponse, StreamingResponse
 
 from ._shared import (
     _any_provider_key_set,
@@ -109,6 +110,7 @@ from .auth import (
     can_access_goal,
     execution_user_id_from_request,
     goal_owner_filter,
+    has_permission,
     is_dashboard_admin,
     require_global_permission,
     require_permission,
@@ -118,6 +120,30 @@ from .auth import (
 log = logging.getLogger(__name__)
 
 router = APIRouter(prefix="/api/v1", tags=["v1"])
+
+# Keep exact edit grading for normal-sized deliverables, but never feed the
+# full 200k-character request limit into difflib.SequenceMatcher. Certain
+# repetitive inputs make SequenceMatcher consume quadratic-like CPU, and this
+# module's endpoints run on the dashboard API path.
+_DELIVERABLE_EDIT_EXACT_SIMILARITY_CHARS = 20_000
+_DELIVERABLE_EDIT_SIMILARITY_SAMPLE_CHARS = 4_000
+
+
+def _sample_deliverable_text(text: str) -> str:
+    """Return a bounded head/tail sample for large deliverable similarity checks."""
+    if len(text) <= _DELIVERABLE_EDIT_SIMILARITY_SAMPLE_CHARS:
+        return text
+    head = _DELIVERABLE_EDIT_SIMILARITY_SAMPLE_CHARS // 2
+    tail = _DELIVERABLE_EDIT_SIMILARITY_SAMPLE_CHARS - head
+    return text[:head] + text[-tail:]
+
+
+def _deliverable_edit_similarity(original: str, revised: str) -> float:
+    """Compute edit similarity without unbounded SequenceMatcher CPU cost."""
+    if max(len(original), len(revised)) > _DELIVERABLE_EDIT_EXACT_SIMILARITY_CHARS:
+        original = _sample_deliverable_text(original)
+        revised = _sample_deliverable_text(revised)
+    return difflib.SequenceMatcher(None, original, revised).ratio()
 
 # Shared-store channel for Idempotency-Key dedup on goal creation (see
 # create_goal). Distinct from the channel/webhook idempotency namespaces.
@@ -357,7 +383,8 @@ async def set_tenant_role(
     _reject_tenant_role_assignment_under_per_user_tenancy()
     from maverick_dashboard import rbac
     _get_tenant_or_404(tenant_id)
-    rbac.set_tenant_role(tenant_id, principal, body.role)
+    rbac.set_tenant_role(tenant_id, principal, body.role,
+                         actor=caller_principal(request) or "local")
     return Response(status_code=204)
 
 
@@ -368,7 +395,8 @@ async def remove_tenant_role(
     require_global_permission(request, "admin")
     from maverick_dashboard import rbac
     _get_tenant_or_404(tenant_id)
-    rbac.remove_tenant_role(tenant_id, principal)
+    rbac.remove_tenant_role(tenant_id, principal,
+                            actor=caller_principal(request) or "local")
     return Response(status_code=204)
 
 
@@ -399,7 +427,8 @@ async def set_user_suites(
     require_global_permission(request, "admin")
     from maverick_dashboard import suite_grants
     try:
-        suite_grants.set_suites(principal, body.suites)
+        suite_grants.set_suites(principal, body.suites,
+                                actor=caller_principal(request) or "local")
     except ValueError as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
     return Response(status_code=204)
@@ -410,7 +439,8 @@ async def remove_user_suites(request: Request, principal: str) -> Response:
     """Lift a user's department scoping (back to unrestricted/default)."""
     require_global_permission(request, "admin")
     from maverick_dashboard import suite_grants
-    suite_grants.remove_grant(principal)
+    suite_grants.remove_grant(principal,
+                              actor=caller_principal(request) or "local")
     return Response(status_code=204)
 
 
@@ -478,17 +508,19 @@ async def create_goal(request: Request, payload: GoalIn, bg: BackgroundTasks) ->
     max_wall_seconds = min(payload.max_wall_seconds, DEFAULT_MAX_WALL_SECONDS)
     max_depth = min(payload.max_depth, DEFAULT_MAX_DEPTH)
 
+    allowed_suites = caller_suites(request)
     user_id = execution_user_id_from_request(request)
     if user_id:
         bg.add_task(
             run_goal_in_thread, goal_id,
             max_dollars, max_wall_seconds, max_depth,
-            channel="api", user_id=user_id,
+            channel="api", user_id=user_id, allowed_suites=allowed_suites,
         )
     else:
         bg.add_task(
             run_goal_in_thread, goal_id,
             max_dollars, max_wall_seconds, max_depth,
+            allowed_suites=allowed_suites,
         )
     g = w.get_goal(goal_id)
     if g is None:
@@ -813,10 +845,9 @@ async def download_goal_attachment(
             raise HTTPException(
                 status_code=410, detail="attachment bytes not on this host")
         path = fetched
-    data = await run_in_threadpool(path.read_bytes)
     safe_name = match.filename.replace('"', "_")
-    return Response(
-        content=data,
+    return FileResponse(
+        path,
         media_type=match.mime or "application/octet-stream",
         headers={
             "Content-Disposition": f'attachment; filename="{safe_name}"',
@@ -1477,11 +1508,12 @@ async def flow_schema_endpoint(request: Request, flow_id: str) -> dict:
 
 
 def _run_out(run) -> dict:
-    """A flow run for the API with secret-looking values in its ``data`` masked,
+    """A flow run for the API with secret-looking values in its payloads masked,
     so a token a connector put into the run never leaves over HTTP."""
     from maverick.flow.redact import redact
     d = run.to_dict()
     d["data"] = redact(d.get("data") or {})
+    d["input_data"] = redact(d.get("input_data") or {})
     return d
 
 
@@ -1876,6 +1908,7 @@ async def flow_signals_endpoint(request: Request, flow_id: str) -> dict:
     f = store.load_flow(flow_id)
     if f is None:
         raise HTTPException(status_code=404, detail="no such flow")
+    _assert_flow_access(request, f)
     stats = node_outcomes.stats(flow_id)
     trigger = stats.get(execution.TRIGGER_NODE)
     nodes = {}
@@ -2173,6 +2206,26 @@ _VOICE_SUFFIXES = {
 _VOICE_MAX_BYTES = 25 * 1024 * 1024
 
 
+def _voice_transcribe_concurrency_limit() -> int:
+    try:
+        return max(1, int(os.environ.get("MAVERICK_VOICE_TRANSCRIBE_CONCURRENCY", "2")))
+    except ValueError:
+        return 2
+
+
+_voice_transcribe_sem_limit = _voice_transcribe_concurrency_limit()
+_voice_transcribe_sem = asyncio.Semaphore(_voice_transcribe_sem_limit)
+
+
+def _get_voice_transcribe_semaphore() -> asyncio.Semaphore:
+    global _voice_transcribe_sem, _voice_transcribe_sem_limit
+    limit = _voice_transcribe_concurrency_limit()
+    if limit != _voice_transcribe_sem_limit:
+        _voice_transcribe_sem = asyncio.Semaphore(limit)
+        _voice_transcribe_sem_limit = limit
+    return _voice_transcribe_sem
+
+
 @router.post("/voice/transcribe")
 async def voice_transcribe(
     request: Request,
@@ -2191,6 +2244,11 @@ async def voice_transcribe(
     if not _voice_commands_enabled():
         raise HTTPException(status_code=404, detail="voice commands are disabled")
     require_permission(request, "operate")
+    # STT can spend provider quota or run a CPU-heavy local Whisper model.
+    # Apply the same dashboard spend backstop used by paid goal creation before
+    # reading/writing the upload or dispatching to the backend.
+    from maverick_dashboard.app import check_goal_rate_limit
+    check_goal_rate_limit(request)
 
     import os as _os
     import tempfile as _tempfile
@@ -2222,7 +2280,15 @@ async def voice_transcribe(
         args: dict = {"source": tmp.name}
         if lang:
             args["language"] = lang
-        text = await run_in_threadpool(_run_transcribe, args, None)
+        sem = _get_voice_transcribe_semaphore()
+        if sem.locked():
+            raise HTTPException(
+                status_code=429,
+                detail="voice transcription concurrency limit reached",
+                headers={"Retry-After": "1"},
+            )
+        async with sem:
+            text = await run_in_threadpool(_run_transcribe, args, None)
     finally:
         try:
             _os.unlink(tmp.name)
@@ -2403,11 +2469,13 @@ async def remove_skill_endpoint(request: Request, name: str) -> None:
 # ---------- self-learning: learned ledger + generated tools (#427) ----------
 
 
-def _learned_snapshot(limit: int = 50) -> dict:
+def _learned_snapshot(limit: int = 50, *, include_pending_items: bool = False) -> dict:
     """Read-only view of the self-learning ledger + on-disk generated tools.
 
-    Powers the /learned page and GET /api/v1/learned. Degrades to empty
-    lists if the self-learning module / ledger / dir is unavailable, so a
+    Powers the /learned page and GET /api/v1/learned. Pending corpus
+    counts are safe for viewers, but staged candidate details may contain
+    harvested operator text and are included only for admin callers. Degrades
+    to empty lists if the self-learning module / ledger / dir is unavailable, so a
     fresh install (feature never enabled) renders "nothing learned yet"
     instead of 500ing.
     """
@@ -2438,7 +2506,7 @@ def _learned_snapshot(limit: int = 50) -> dict:
         "learned": learned, "generated_tools": tools,
         "harness": harness, "harness_enabled": harness_enabled,
         "pending_corpus": {k: len(v) for k, v in pending.items()},
-        "pending_items": pending,
+        "pending_items": pending if include_pending_items else {},
         "transfer_memory": _transfer_memory(),
     }
 
@@ -2558,9 +2626,9 @@ def _resolve_generated_tool(name: str):
 
 
 @router.get("/learned")
-async def learned_api() -> dict:
+async def learned_api(request: Request) -> dict:
     """Learned-capability ledger entries + on-disk generated tool filenames."""
-    return _learned_snapshot()
+    return _learned_snapshot(include_pending_items=has_permission(request, "admin"))
 
 
 @router.delete("/generated-tools/{name}", status_code=204)
@@ -3014,7 +3082,6 @@ async def edit_deliverable(request: Request, goal_id: int,
     if g is None:
         raise HTTPException(status_code=404, detail="no such goal")
     assert_goal_access(request, g)
-    import difflib
     original = g.result or ""
     revised = payload.text or ""
     w.set_goal_status(goal_id, g.status, result=revised)   # the edit is the deliverable now
@@ -3023,7 +3090,7 @@ async def edit_deliverable(request: Request, goal_id: int,
         # rewrite. Grounding this as 0.0 would punish it for text it never wrote,
         # so we save the human's text but ground nothing.
         return {"similarity": None}
-    similarity = difflib.SequenceMatcher(None, original, revised).ratio()
+    similarity = _deliverable_edit_similarity(original, revised)
     _ground_outcome(w, goal_id, similarity, kind="edit")
     return {"similarity": round(similarity, 3)}
 
@@ -3329,6 +3396,9 @@ async def create_schedule(request: Request, payload: ScheduleIn) -> ScheduleOut:
     owner = caller_principal(request) or ""
     if owner:
         job_payload["owner"] = owner
+    allowed_suites = caller_suites(request)
+    if allowed_suites is not None:
+        job_payload["allowed_suites"] = sorted(allowed_suites)
     user_id = execution_user_id_from_request(request)
     if user_id:
         job_payload["channel"] = "api"
@@ -3953,20 +4023,35 @@ def _require_pack_editing(request: Request) -> None:
 
 
 @router.get("/agents")
-async def list_agents_endpoint() -> dict:
-    """The agent roster: every pack, flagged by override/workflow status."""
+async def list_agents_endpoint(request: Request) -> dict:
+    """The agent roster: every pack, flagged by override/workflow status.
+
+    Suite-scoped (job function): a caller with a department grant sees their
+    departments' specialists plus generic packs (no suite); unscoped callers
+    (auth off / admin / no grant) see the full catalog — matching /departments.
+    """
     from maverick.domain_edit import list_agents
-    return {"agents": list_agents()}
+    allowed = caller_suites(request)
+    agents = list_agents()
+    if allowed is not None:
+        agents = [a for a in agents
+                  if a.get("suite") is None or a.get("suite") in allowed]
+    return {"agents": agents}
 
 
 @router.get("/agents/{name}")
-async def get_agent_endpoint(name: str) -> dict:
+async def get_agent_endpoint(request: Request, name: str) -> dict:
     """The merged pack the agent runs, plus provenance (overridden vs inherited)
     and lint findings -- the payload the editor renders."""
+    from maverick.domain import suite_for
     from maverick.domain_edit import resolved_view
     view = resolved_view(name)
     if view is None:
         raise HTTPException(status_code=404, detail=f"no such agent: {name!r}")
+    # Job-function scoping: pack config (persona, tool allowlist, risk ceiling)
+    # for another department is not this caller's to read. 404 first (catalog
+    # existence is public), 403 on grant, mirroring /departments/{key}.
+    require_suite(request, suite_for(name))
     return view
 
 
@@ -4596,13 +4681,20 @@ async def run_fleet_agent(
     agent = next((a for a in fleet.agents if a.name == payload.agent), None)
     if agent is None:
         raise HTTPException(status_code=404, detail="no such agent in fleet")
-    # Job-function scoping: a department-deployed agent carries its specialist
-    # pack (agent.domain); a caller granted other departments may not dispatch
-    # it, even if they own the fleet (e.g. a grant narrowed after deploy).
-    # Generic agents (no domain, or a pack outside any suite) are never scoped.
-    if agent.domain:
-        from maverick.domain import suite_for
-        require_suite(request, suite_for(agent.domain))
+    # Job-function scoping via the KERNEL gate (maverick.fleet), so this HTTP
+    # route and any other dispatcher share one resolution chain (explicit grant
+    # -> SCIM-group grant -> configured default; admins and auth-off pass). A
+    # department-deployed agent carries its specialist pack (agent.domain); a
+    # caller granted other departments may not dispatch it, even if they own
+    # the fleet (e.g. a grant narrowed after deploy).
+    from maverick.fleet import ensure_dispatch_allowed
+    from maverick.suite_grants import DepartmentAccessError
+    try:
+        ensure_dispatch_allowed(principal, agent)
+    except DepartmentAccessError as exc:
+        raise HTTPException(
+            status_code=403,
+            detail="insufficient department access for this action") from exc
     # Running an agent under the oversight control plane is the paid (Gold)
     # "fleet governance" capability. Fail-open: a no-op unless license enforcement
     # is on and the license lacks it. Checked after existence (404) so a missing
@@ -5174,12 +5266,15 @@ async def compose_goal(request: Request, payload: ComposeIn, bg: BackgroundTasks
         min(payload.budget_dollars, DEFAULT_MAX_DOLLARS)
         if payload.budget_dollars is not None else DEFAULT_MAX_DOLLARS
     )
+    allowed_suites = caller_suites(request)
     user_id = execution_user_id_from_request(request)
     if user_id:
-        bg.add_task(run_goal_in_thread, goal_id, max_dollars,
-                    channel="api", user_id=user_id)
+        bg.add_task(
+            run_goal_in_thread, goal_id, max_dollars,
+            channel="api", user_id=user_id, allowed_suites=allowed_suites,
+        )
     else:
-        bg.add_task(run_goal_in_thread, goal_id, max_dollars)
+        bg.add_task(run_goal_in_thread, goal_id, max_dollars, allowed_suites=allowed_suites)
     g = w.get_goal(goal_id)
     if g is None:
         raise HTTPException(status_code=500, detail="goal vanished after create")
@@ -5525,11 +5620,15 @@ async def resume_goal(goal_id: int, request: Request, bg: BackgroundTasks) -> No
         )
     w.set_goal_status(goal_id, "pending", result=None)
     from maverick.runner import run_goal_in_thread
+    allowed_suites = caller_suites(request)
     user_id = execution_user_id_from_request(request)
     if user_id:
-        bg.add_task(run_goal_in_thread, goal_id, channel="api", user_id=user_id)
+        bg.add_task(
+            run_goal_in_thread, goal_id, channel="api", user_id=user_id,
+            allowed_suites=allowed_suites,
+        )
     else:
-        bg.add_task(run_goal_in_thread, goal_id)
+        bg.add_task(run_goal_in_thread, goal_id, allowed_suites=allowed_suites)
 
 
 # ---------------------------------------------------------------------------
@@ -5634,6 +5733,7 @@ async def deploy_department_api(request: Request, key: str) -> dict:
         get_department,
     )
     from maverick.fleet import load_fleet
+    from maverick.suite_grants import DepartmentAccessError
 
     if get_department(key) is None:
         raise HTTPException(status_code=404, detail="no such department")
@@ -5660,6 +5760,12 @@ async def deploy_department_api(request: Request, key: str) -> dict:
         fleet = deploy_department(key, owner, tenant=tenant)
     except EntitlementError as e:
         raise HTTPException(status_code=402, detail=str(e)) from e
+    except DepartmentAccessError as e:
+        # Kernel backstop (maverick.departments enforces the grant for every
+        # caller); the require_suite gate above normally 403s first.
+        raise HTTPException(
+            status_code=403,
+            detail="insufficient department access for this action") from e
     if fleet is None:  # suite disabled between the check and the deploy
         raise HTTPException(status_code=404, detail="no such department")
     return {"fleet": fleet.to_dict()}
@@ -5827,12 +5933,23 @@ async def set_flow_autonomy_endpoint(request: Request, payload: FlowAutonomyIn) 
 
 @router.get("/marketplace/packs")
 async def marketplace_packs_api(request: Request, q: str = "") -> dict:
-    """Pack marketplace grouped by department, or a flat search when ``q`` set."""
+    """Pack marketplace grouped by department, or a flat search when ``q`` set.
+
+    Suite-scoped like /departments: a caller with a department grant browses
+    only their departments' shelves; unscoped callers see the full store.
+    """
     from maverick.marketplace.storefront import pack_marketplace, search_packs
+    allowed = caller_suites(request)
     query = (q or "").strip()
     if query:
-        return {"query": query, "results": search_packs(query)}
-    return {"departments": pack_marketplace()}
+        results = search_packs(query)
+        if allowed is not None:
+            results = [r for r in results if r.get("suite") in allowed]
+        return {"query": query, "results": results}
+    departments = pack_marketplace()
+    if allowed is not None:
+        departments = [d for d in departments if d.get("key") in allowed]
+    return {"departments": departments}
 
 
 @router.get("/marketplace/connectors")
