@@ -208,6 +208,32 @@ class TestExecution:
         assert got["brief"] == "use the fixed value"        # human input threaded in
         assert resumed.data["corrected"] == "the fixed value"
 
+    def test_resume_inputs_cannot_overwrite_existing_run_data(self, tmp_path, monkeypatch):
+        # Resume-time inputs may collect new values, but they must not tamper
+        # with trusted data created before the approval pause.
+        _patch_home(tmp_path, monkeypatch)
+        f = Flow(id="f-guard", name="f", start="a", nodes={
+            "a": FlowNode(id="a", kind="approval", prompt="approve?", next="b"),
+            "b": FlowNode(id="b", kind=NODE_AGENT,
+                          brief="pay {{amount}} because {{note}}", output="r")})
+        got = {}
+
+        def ag(brief, d):
+            got["brief"] = brief
+            return ("done", 1.0)
+
+        paused = execution.execute(
+            f, agent_runner=ag, action_runner=lambda *a: ("", None),
+            data={"amount": "100.00"})
+        assert paused.status == "paused_approval"
+        resumed = execution.execute(
+            f, agent_runner=ag, action_runner=lambda *a: ("", None),
+            resume_run_id=paused.run_id, decision="approved",
+            inputs={"amount": "999999.00", "note": "reviewed"})
+        assert got["brief"] == "pay 100.00 because reviewed"
+        assert resumed.data["amount"] == "100.00"
+        assert resumed.data["note"] == "reviewed"
+
     def test_dry_run_traces_but_records_no_outcomes(self, tmp_path, monkeypatch):
         # A sandboxed dry run exercises the graph (status trace captured) but must
         # NOT ground outcomes -- mock successes would skew the self-rewrite signal.
