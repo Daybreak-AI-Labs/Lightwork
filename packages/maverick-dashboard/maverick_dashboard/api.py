@@ -1882,6 +1882,7 @@ async def flow_signals_endpoint(request: Request, flow_id: str) -> dict:
     f = store.load_flow(flow_id)
     if f is None:
         raise HTTPException(status_code=404, detail="no such flow")
+    _assert_flow_access(request, f)
     stats = node_outcomes.stats(flow_id)
     trigger = stats.get(execution.TRIGGER_NODE)
     nodes = {}

@@ -225,6 +225,24 @@ def test_signals_unknown_flow_is_404(monkeypatch, tmp_path):
     assert _client().get("/api/v1/flows/ghost/signals").status_code == 404
 
 
+def test_signals_are_owner_scoped(monkeypatch, tmp_path):
+    _isolate(monkeypatch, tmp_path)
+    from maverick.flow import node_outcomes, store
+    from maverick.flow.ir import Flow, FlowNode
+    from maverick_dashboard import api as api_mod
+
+    store.save_flow(Flow(
+        id="alice-flow", name="Alice", start="g", owner="user:alice",
+        nodes={"g": FlowNode(id="g", kind="approval", prompt="ok?", label="gate")},
+    ))
+    node_outcomes.record("alice-flow", "g", "approval", 1.0)
+    monkeypatch.setattr(api_mod, "caller_principal", lambda request: "user:bob")
+    monkeypatch.setattr(api_mod, "is_dashboard_admin", lambda principal: False)
+    monkeypatch.setattr(api_mod, "require_permission", lambda request, permission: None)
+
+    assert _client().get("/api/v1/flows/alice-flow/signals").status_code == 404
+
+
 def test_impact_unchanged_node(monkeypatch, tmp_path):
     _isolate(monkeypatch, tmp_path)
     c = _client()
