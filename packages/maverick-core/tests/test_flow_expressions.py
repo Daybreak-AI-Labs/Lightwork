@@ -93,6 +93,19 @@ class TestConditionComposition:
         assert eval_condition(c, {"tier": "silver", "amount": 2000, "region": "EU"}) is True
         assert eval_condition(c, {"tier": "silver", "amount": 2000, "region": "US"}) is False
 
+    def test_quoted_literals_can_contain_boolean_operator_words(self):
+        assert eval_condition("role == 'contractor or vendor'", {"role": "contractor or vendor"}) is True
+        assert eval_condition(
+            "department == 'Research and Development'",
+            {"department": "Research and Development"},
+        ) is True
+
+    def test_boolean_operators_still_compose_around_quoted_literals(self):
+        c = "role == 'contractor or vendor' and region == 'EU' or tier == 'gold'"
+        assert eval_condition(c, {"role": "contractor or vendor", "region": "EU", "tier": "silver"}) is True
+        assert eval_condition(c, {"role": "employee", "region": "EU", "tier": "silver"}) is False
+        assert eval_condition(c, {"role": "employee", "region": "US", "tier": "gold"}) is True
+
 
 class TestDateFunctions:
     def test_today_is_an_iso_date(self):
