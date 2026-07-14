@@ -12,8 +12,8 @@ them so those mutants now die too.
        did NOT fail the concurrency battery -- because on POSIX ``flock``
        happens to serialize threads as well, so it masked the loss. But
        ``file_lock`` documents that ``flock`` DEGRADES TO A NO-OP where it is
-       unavailable (non-POSIX / exotic FS), and there the in-process ``_lock``
-       is the ONLY thing serializing concurrent passes. That fallback path had
+       unavailable on a POSIX/exotic FS, and there the in-process ``_lock`` is
+       the ONLY thing serializing concurrent passes. That fallback path had
        no test. ``test_in_process_lock_is_sole_serializer_without_flock`` makes
        the cross-process lock a no-op (simulating that platform) and proves the
        in-process lock alone loses no updates -- so removing it now fails here.
@@ -74,7 +74,7 @@ def _promote(model, line_key, store):
              "channel": None, "user_id": None} for i in range(3)]
     sh.run_self_harness(
         recs, model_id=model, min_support=3, held_in=["a", "b"],
-        held_out=["c", "d", "e"], score_with=lambda a, c: 0.95,
+        held_out=["c", "d", "e", "f", "g"], score_with=lambda a, c: 0.95,
         score_without=lambda a, c: 0.4, controller=ctrl, path=store)
 
 
@@ -90,11 +90,11 @@ def _enabled(monkeypatch):
 
 
 def test_in_process_lock_is_sole_serializer_without_flock(_enabled, monkeypatch, tmp_path):
-    # Simulate a platform where flock is unavailable: file_lock's cross_process
+    # Simulate a POSIX filesystem where flock is unavailable: file_lock's cross_process
     # lock degrades to a no-op (it catches ImportError/OSError around fcntl).
     # Force that degradation by making fcntl.flock raise OSError, so ONLY the
     # in-process threading.Lock can serialize the load-modify-save.
-    import fcntl
+    fcntl = pytest.importorskip("fcntl")
 
     def _no_flock(*_a, **_k):
         raise OSError("flock unavailable on this platform")

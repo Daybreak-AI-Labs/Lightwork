@@ -76,7 +76,7 @@ def _pass(store, model, line, *, promote=True):
     sw, swo = (0.95, 0.4) if promote else (0.5, 0.5)
     sh.run_self_harness(
         recs, model_id=model, min_support=3, held_in=["a", "b"],
-        held_out=["c", "d", "e"], score_with=lambda a, c, _v=sw: _v,
+        held_out=["c", "d", "e", "f", "g"], score_with=lambda a, c, _v=sw: _v,
         score_without=lambda a, c, _v=swo: _v, controller=ctrl,
         propose_fn=lambda s, _l=line: _l, path=store)
 

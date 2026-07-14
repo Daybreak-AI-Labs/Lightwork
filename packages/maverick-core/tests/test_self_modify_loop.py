@@ -49,10 +49,13 @@ def _tiers() -> WideningPolicy:
     ))
 
 
-def _controller():
+def _controller(tmp_path, *, ledger=None):
+    durable_ledger = ledger if ledger is not None else si.PromotionLedger(
+        path=tmp_path / "promotion-ledger.json")
     return si.SelfImprovementController(
         min_improvement=0.0, max_auto_rung="policy",
-        frozen_fn=lambda: False, audit_fn=lambda **k: None)
+        frozen_fn=lambda: False, audit_fn=lambda **k: None,
+        ledger=durable_ledger)
 
 
 @pytest.fixture
@@ -139,13 +142,13 @@ class TestRunCycle:
         assert rep.review_ok is False
         assert "protected" in rep.reason
 
-    def test_promotes_a_clean_prompt_change_and_archives_it(self, _on):
+    def test_promotes_a_clean_prompt_change_and_archives_it(self, _on, tmp_path):
         a = CodeArchive()
         a.add(CodeCandidate(summary="seed", patch="+a", score=1.0, promoted=True))
         rep = run_cycle(
             archive=a, proposer=lambda p, s: Proposal(_patch(), "tune pack"),
             evaluate=lambda p, s: FakeEval(), policy=_tiers(),
-            rung="prompt", controller=_controller())
+            rung="prompt", controller=_controller(tmp_path))
         assert rep.review_ok and rep.evaluated
         assert rep.promoted is True, rep.reason
         # the candidate is now in the archive, marked promoted
@@ -153,37 +156,39 @@ class TestRunCycle:
         assert cand is not None and cand.promoted is True
         assert cand.summary == "tune pack"
 
-    def test_code_rung_without_signature_archives_but_does_not_promote(self, _on):
+    def test_code_rung_without_signature_archives_but_does_not_promote(
+        self, _on, tmp_path,
+    ):
         a = CodeArchive()
         a.add(CodeCandidate(summary="seed", patch="+a", score=1.0, promoted=True))
         rep = run_cycle(
             archive=a, proposer=lambda p, s: Proposal(_patch(), "risky"),
             evaluate=lambda p, s: FakeEval(), policy=_tiers(),
-            rung="code", controller=_controller())
+            rung="code", controller=_controller(tmp_path))
         assert rep.evaluated is True
         assert rep.promoted is False         # no human signature -> refused
         cand = a.get(rep.candidate_id)
         assert cand is not None and cand.promoted is False   # kept as an ancestor
 
-    def test_failed_evaluation_is_not_promoted(self, _on):
+    def test_failed_evaluation_is_not_promoted(self, _on, tmp_path):
         a = CodeArchive()
         a.add(CodeCandidate(summary="seed", patch="+a", score=1.0, promoted=True))
         rep = run_cycle(
             archive=a, proposer=lambda p, s: Proposal(_patch(), "x"),
             evaluate=lambda p, s: FakeEval(ok=False, reason="did not apply"),
-            policy=_tiers(), rung="prompt", controller=_controller())
+            policy=_tiers(), rung="prompt", controller=_controller(tmp_path))
         assert rep.evaluated is False
         assert rep.promoted is False
         assert "did not apply" in rep.reason
 
-    def test_widening_construct_blocks_promotion(self, _on):
+    def test_widening_construct_blocks_promotion(self, _on, tmp_path):
         a = CodeArchive()
         a.add(CodeCandidate(summary="seed", patch="+a", score=1.0, promoted=True))
         rep = run_cycle(
             archive=a,
             proposer=lambda p, s: Proposal(_patch(added="os.system('x')"), "sneaky"),
             evaluate=lambda p, s: FakeEval(), policy=_tiers(),
-            rung="prompt", controller=_controller())
+            rung="prompt", controller=_controller(tmp_path))
         assert rep.evaluated is True
         assert rep.promoted is False         # capability screen -> gate refused
         cand = a.get(rep.candidate_id)
@@ -197,7 +202,7 @@ class TestRunLoop:
                         evaluate=lambda p, s: FakeEval(), cycles=5)
         assert len(reps) == 1 and "disabled" in reps[0].reason
 
-    def test_threads_generation_and_accumulates(self, _on):
+    def test_threads_generation_and_accumulates(self, _on, tmp_path):
         a = CodeArchive()
         a.add(CodeCandidate(summary="seed", patch="+a", score=1.0, promoted=True))
         # Each cycle proposes a distinct patch so the archive grows.
@@ -209,7 +214,7 @@ class TestRunLoop:
 
         reps = run_loop(
             archive=a, proposer=propose, evaluate=lambda p, s: FakeEval(),
-            policy=_tiers(), cycles=3, rung="prompt", controller=_controller())
+            policy=_tiers(), cycles=3, rung="prompt", controller=_controller(tmp_path))
         assert len(reps) == 3
         assert all(r.promoted for r in reps)
         # seed + 3 new promoted candidates
@@ -350,7 +355,7 @@ class TestWiredApply:
         rep = run_cycle(
             archive=a, proposer=lambda p, s: Proposal(self._apply_patch(), "bump"),
             evaluate=lambda p, s: FakeEval(), policy=policy,
-            rung="prompt", controller=_controller(), tree=tree, store=store)
+            rung="prompt", controller=_controller(tmp_path), tree=tree, store=store)
         assert rep.promoted is True, rep.reason
         assert rep.applied is True
         assert rep.rollback_id and rep.rollback_id.startswith("snap-")
@@ -364,7 +369,7 @@ class TestWiredApply:
         rep = run_cycle(
             archive=a, proposer=lambda p, s: Proposal(self._apply_patch(), "bump"),
             evaluate=lambda p, s: FakeEval(), policy=policy,
-            rung="prompt", controller=_controller())   # no tree
+            rung="prompt", controller=_controller(tmp_path))   # no tree
         assert rep.promoted is True
         assert rep.applied is False and rep.rollback_id is None
         assert (tree / "f.py").read_text() == "VALUE = 1\n"   # untouched
@@ -372,8 +377,7 @@ class TestWiredApply:
     def test_failed_live_apply_marks_ledger_rolled_back(self, _on, tmp_path):
         tree = self._tree(tmp_path)
         ledger = si.PromotionLedger(path=tmp_path / "ledger.json")
-        controller = _controller()
-        controller.ledger = ledger
+        controller = _controller(tmp_path, ledger=ledger)
         archive = CodeArchive()
         policy = WideningPolicy(tiers=(SurfaceTier("wide", ("*",), 0),))
         patch = ("diff --git a/.maverick-apply.diff b/.maverick-apply.diff\n"

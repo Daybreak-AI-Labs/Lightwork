@@ -12,10 +12,11 @@ from maverick.si_producers import (
 )
 
 
-def _ctrl(tmp_path):
+def _ctrl(tmp_path, *, max_auto_rung="policy"):
     return SelfImprovementController(
         frozen_fn=lambda: False, audit_fn=lambda **k: None,
         ledger=PromotionLedger(path=tmp_path / "led.json"),
+        max_auto_rung=max_auto_rung,
     )
 
 
@@ -74,10 +75,51 @@ def test_propose_tool_rejected_without_capability_proof(tmp_path, monkeypatch):
 
 def test_propose_verifier_adopts_better_discriminator(tmp_path, monkeypatch):
     monkeypatch.setenv("MAVERICK_SELF_IMPROVEMENT", "1")
-    v = propose_verifier("retrained head", baseline_discrimination=0.15,
-                         candidate_discrimination=0.31, samples=12,
-                         rollback="head-v1", controller=_ctrl(tmp_path))
-    assert v.ok
+    common = dict(
+        baseline_discrimination=0.15,
+        candidate_discrimination=0.31,
+        samples=12,
+        rollback="head-v1",
+    )
+    blocked = propose_verifier(
+        "retrained head", controller=_ctrl(tmp_path), **common)
+    assert blocked.rung == "evaluator" and not blocked.ok
+    assert any(gate.gate == "human_approval" and not gate.ok
+               for gate in blocked.gates)
+
+    allowed = propose_verifier(
+        "retrained head",
+        controller=_ctrl(tmp_path, max_auto_rung="evaluator"),
+        **common,
+    )
+    assert allowed.rung == "evaluator" and allowed.ok
+
+
+def test_propose_verifier_accepts_external_signed_approval(tmp_path, monkeypatch):
+    from maverick import approval_signing
+
+    monkeypatch.setenv("MAVERICK_SELF_IMPROVEMENT", "1")
+    monkeypatch.setattr(approval_signing, "signing_enforced", lambda: True)
+    monkeypatch.setattr(
+        approval_signing, "verify_candidate",
+        lambda candidate: "approver-key" if candidate.approval_signature == "signed" else None,
+    )
+    requests = []
+
+    def approve(request):
+        requests.append(request)
+        return "signed"
+
+    verdict = propose_verifier(
+        "retrained head", baseline_discrimination=0.15,
+        candidate_discrimination=0.31, samples=12, rollback="head-v1",
+        approve=approve, controller=_ctrl(tmp_path),
+        artifact_sha256="a" * 64,
+    )
+
+    assert verdict.ok and verdict.rung == "evaluator"
+    assert verdict.approver_id == "approver-key"
+    assert len(requests) == 1 and requests[0].rung == "evaluator"
 
 
 def test_propose_policy_requires_evidence(tmp_path, monkeypatch):

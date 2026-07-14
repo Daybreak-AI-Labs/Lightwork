@@ -9,23 +9,50 @@ from __future__ import annotations
 from . import config_space
 from .agent_adapter import evolve_live, make_agent_factory
 from .archive import Archive, Candidate
-from .eval_harness import EvalCase, EvalReport, evaluate
+from .eval_harness import EvalCase, EvalReport, evaluate, evaluate_case
 from .loop import evolve_continuous
-from .runner import EvolutionFrozen, calibration_frozen, evolve_with_eval
+from .metaproductive import (
+    CladeNode,
+    MetaproductiveArchive,
+    MetaproductiveSearchError,
+    evolve_metaproductive,
+)
+from .runner import (
+    ConfirmationAuthorize,
+    ConfirmationPermit,
+    ConfirmationRequest,
+    EvolutionFrozen,
+    calibration_frozen,
+    confirm_candidate,
+    evolve_metaproductive_with_eval,
+    evolve_with_eval,
+    strict_calibration_ready,
+)
 from .search import evolve
 
 __all__ = [
     "EvalCase",
     "EvalReport",
     "evaluate",
+    "evaluate_case",
     "Archive",
     "Candidate",
     "evolve",
+    "evolve_metaproductive",
+    "evolve_metaproductive_with_eval",
+    "MetaproductiveArchive",
+    "MetaproductiveSearchError",
+    "CladeNode",
     "config_space",
     "evolve_with_eval",
     "evolve_continuous",
     "evolve_live",
     "make_agent_factory",
     "calibration_frozen",
+    "strict_calibration_ready",
+    "confirm_candidate",
     "EvolutionFrozen",
+    "ConfirmationAuthorize",
+    "ConfirmationPermit",
+    "ConfirmationRequest",
 ]

@@ -6,6 +6,8 @@ persisted-verdict freeze gate, and the interlock wired into donation.write_recor
 """
 from __future__ import annotations
 
+import json
+
 from maverick import calibration
 from maverick.calibration import CalibrationSample, assess
 
@@ -58,11 +60,14 @@ class TestAssess:
 class TestLedgerAndVerdict:
     def test_record_and_load_roundtrip(self, tmp_path):
         p = tmp_path / "cal.ndjson"
-        assert calibration.record_sample(0.9, True, source="t", path=p) is True
+        assert calibration.record_sample(
+            0.9, True, source="t", evaluator_id="judge:v2", path=p) is True
         assert calibration.record_sample(0.1, False, path=p) is True
         loaded = calibration.load_samples(path=p)
         assert len(loaded) == 2
         assert loaded[0].correct is True and loaded[1].correct is False
+        assert loaded[0].evaluator_id == "judge:v2"
+        assert loaded[1].evaluator_id == ""
 
     def test_run_assessment_persists_verdict(self, tmp_path):
         sp = tmp_path / "cal.ndjson"
@@ -86,6 +91,43 @@ class TestLedgerAndVerdict:
         assert len(loaded) == 1
         assert loaded[0].confidence == 0.7
         assert loaded[0].correct is True
+
+    def test_bound_assessment_filters_evaluator_and_current_window(
+        self, tmp_path, monkeypatch,
+    ):
+        samples_path = tmp_path / "cal.ndjson"
+        verdict_path = tmp_path / "receipt.json"
+        monkeypatch.setattr(calibration, "_settings", lambda: {
+            **calibration._DEFAULTS,
+            "min_samples": 20,
+            "min_discrimination": 0.15,
+        })
+
+        # Old evidence from the right judge and current evidence from the wrong
+        # judge must not enter this exact current-cycle assessment.
+        monkeypatch.setattr(calibration.time, "time", lambda: 50.0)
+        for _ in range(20):
+            calibration.record_sample(
+                0.99, False, evaluator_id="judge:A", path=samples_path)
+        monkeypatch.setattr(calibration.time, "time", lambda: 200.0)
+        for _ in range(20):
+            calibration.record_sample(
+                0.99, False, evaluator_id="judge:B", path=samples_path)
+        for _ in range(15):
+            calibration.record_sample(
+                0.9, True, evaluator_id="judge:A", path=samples_path)
+            calibration.record_sample(
+                0.1, False, evaluator_id="judge:A", path=samples_path)
+
+        report = calibration.run_assessment(
+            samples_path=samples_path, verdict_path=verdict_path,
+            evaluator_id="judge:A", since=100.0)
+        assert report.adequate is True and report.n == 30
+        receipt = json.loads(verdict_path.read_text(encoding="utf-8"))
+        assert receipt["schema"] == "maverick-calibration-receipt-v2"
+        assert receipt["evaluator_id"] == "judge:A"
+        assert receipt["evidence_since"] == 100.0
+        assert receipt["sample_min_ts"] == receipt["sample_max_ts"] == 200.0
 
 
 class TestLearningFrozen:

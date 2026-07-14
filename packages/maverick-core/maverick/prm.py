@@ -26,10 +26,15 @@ trajectory ingestion is queued for v0.3.
 """
 from __future__ import annotations
 
+import hashlib
+import json
 import logging
+import math
 import os
-from collections.abc import Mapping
+import threading
+from collections.abc import Callable, Mapping
 from dataclasses import dataclass
+from pathlib import Path
 from typing import Protocol
 
 log = logging.getLogger(__name__)
@@ -40,6 +45,7 @@ ROLE_VOCAB = ["orchestrator", "researcher", "coder", "writer", "verifier", "othe
 
 # Upper bound for learned artifact architecture to avoid oversized loads.
 MAX_LEARNED_PRM_HIDDEN_DIM = 1024
+MAX_LINEAR_PRM_ARTIFACT_BYTES = 256 * 1024
 
 # Names of the 12 features produced by step_features(), in order.
 FEATURE_NAMES = [
@@ -338,16 +344,27 @@ class LinearPRM:
     ``python -m maverick.training.prm_linear``. Like :class:`LearnedPRM` it
     fails OPEN -- a missing, malformed, or vocabulary-mismatched artifact logs
     a warning ONCE and delegates every score to HeuristicPRM, so the swarm
-    never blocks on model availability.
+    never blocks on model availability. A long-lived governed instance detects
+    atomic replacement of its stable path but adopts only the exact digest and
+    revision authorized by its durable promotion ledger (or its explicit
+    bootstrap); schema-valid out-of-band JSON falls back to the heuristic.
     """
     name = "linear"
 
-    def __init__(self, path: str):
+    def __init__(self, path: str, *, authority: Callable[[], object] | None = None):
         self.path = path
+        self._authority = authority
         self._fallback = HeuristicPRM()
         self._head = None        # cached (promise_w, promise_b, progress_w, progress_b)
         self._warned = False
         self._failed = False
+        self._fingerprint = None
+        # A low-level caller that does not supply ledger authority explicitly
+        # provisions the first valid artifact as its immutable bootstrap. It
+        # may still fail open while missing and recover when that bootstrap is
+        # first installed, but it will not accept an arbitrary later replace.
+        self._bootstrap_sha256: str | None = None
+        self._load_lock = threading.Lock()
 
     def _warn_once(self, msg: str) -> None:
         if not self._warned:
@@ -359,10 +376,21 @@ class LinearPRM:
         """Validate the JSON artifact and return (pw, pb, gw, gb)."""
         if not isinstance(meta, Mapping):
             raise ValueError("artifact did not contain an object")
+        if meta.get("kind", "linear") != "linear":
+            raise ValueError("artifact kind is not linear")
+        if meta.get("schema_version", 1) != 1:
+            raise ValueError("unsupported linear PRM schema_version")
         if meta.get("feature_names") != FEATURE_NAMES:
             raise ValueError("feature_names do not match this Lightwork build")
         if meta.get("role_vocab") != ROLE_VOCAB:
             raise ValueError("role_vocab does not match this Lightwork build")
+        input_dim = meta.get("input_dim", len(FEATURE_NAMES))
+        if isinstance(input_dim, bool) or not isinstance(input_dim, int):
+            raise ValueError("input_dim must be an integer")
+        if input_dim != len(FEATURE_NAMES):
+            raise ValueError(
+                f"input_dim={input_dim} does not match expected {len(FEATURE_NAMES)}"
+            )
 
         def _vec(head_name: str):
             head = meta.get(head_name)
@@ -373,35 +401,108 @@ class LinearPRM:
                 raise ValueError(
                     f"{head_name!r} weights must be length {len(FEATURE_NAMES)}"
                 )
-            return [float(x) for x in w], float(head.get("b", 0.0))
+            bias_raw = head.get("b", 0.0)
+            if (any(isinstance(x, bool) or not isinstance(x, (int, float)) for x in w)
+                    or isinstance(bias_raw, bool)
+                    or not isinstance(bias_raw, (int, float))):
+                raise ValueError(f"{head_name!r} parameters must be numeric")
+            try:
+                values = [float(x) for x in w]
+                bias = float(bias_raw)
+            except (TypeError, ValueError) as exc:
+                raise ValueError(f"{head_name!r} parameters must be numeric") from exc
+            if not all(math.isfinite(value) for value in values) or not math.isfinite(bias):
+                raise ValueError(f"{head_name!r} parameters must be finite")
+            return values, bias
 
         pw, pb = _vec("promise")
         gw, gb = _vec("progress")
         return pw, pb, gw, gb
 
-    def _load(self):
-        if self._head is not None:
-            return self._head
-        if self._failed:
-            return None
+    @classmethod
+    def validate_artifact(
+        cls, path: str | os.PathLike[str], *, expected_sha256: str | None = None,
+    ) -> str:
+        """Validate a safe-JSON linear artifact and return its SHA-256 digest.
+
+        Deployment code uses the same parser as serving, eliminating the common
+        failure where a candidate passes a trainer-side shape check but falls
+        open to the heuristic when the serving process reads it.
+        """
+        artifact_path = Path(path).expanduser()
+        if artifact_path.stat().st_size > MAX_LINEAR_PRM_ARTIFACT_BYTES:
+            raise ValueError("linear PRM artifact exceeds size limit")
+        payload = artifact_path.read_bytes()
+        if len(payload) > MAX_LINEAR_PRM_ARTIFACT_BYTES:
+            raise ValueError("linear PRM artifact exceeds size limit")
+        digest = hashlib.sha256(payload).hexdigest()
+        if expected_sha256 is not None and digest != expected_sha256:
+            raise ValueError("linear PRM artifact digest mismatch")
         try:
-            import json
-            from pathlib import Path
-            meta = json.loads(
-                Path(self.path).expanduser().read_text(encoding="utf-8"))
-            self._head = self._head_from_meta(meta)
-            return self._head
-        except Exception as e:
-            self._failed = True
-            self._warn_once(f"could not load artifact from {self.path!r} ({e})")
-            return None
+            meta = json.loads(payload.decode("utf-8"))
+        except (UnicodeDecodeError, json.JSONDecodeError) as exc:
+            raise ValueError("linear PRM artifact is not valid UTF-8 JSON") from exc
+        cls._head_from_meta(meta)
+        return digest
+
+    def _load(self):
+        path = Path(self.path).expanduser()
+        with self._load_lock:
+            try:
+                stat = path.stat()
+                fingerprint = (
+                    stat.st_dev, stat.st_ino, stat.st_size,
+                    stat.st_mtime_ns, stat.st_ctime_ns,
+                )
+            except OSError:
+                fingerprint = ("missing",)
+            if fingerprint == self._fingerprint:
+                if self._head is not None:
+                    return self._head
+                if self._failed:
+                    return None
+            else:
+                # Atomic activation swaps the stable serving path to a new inode.
+                # Invalidate both a prior head and a prior fail-open result so a
+                # long-lived agent adopts a promoted (or restored) artifact.
+                self._head = None
+                self._failed = False
+                self._fingerprint = fingerprint
+            try:
+                if path.stat().st_size > MAX_LINEAR_PRM_ARTIFACT_BYTES:
+                    raise ValueError("linear PRM artifact exceeds size limit")
+                payload = path.read_bytes()
+                if len(payload) > MAX_LINEAR_PRM_ARTIFACT_BYTES:
+                    raise ValueError("linear PRM artifact exceeds size limit")
+                digest = hashlib.sha256(payload).hexdigest()
+                version = f"linear-v1-{digest}"
+                if self._authority is None:
+                    if self._bootstrap_sha256 is None:
+                        self._bootstrap_sha256 = digest
+                    elif digest != self._bootstrap_sha256:
+                        raise ValueError(
+                            "artifact replacement lacks promotion-ledger authority"
+                        )
+                else:
+                    revision = self._authority()
+                    if (getattr(revision, "sha256", None) != digest
+                            or getattr(revision, "version", None) != version):
+                        raise ValueError(
+                            "artifact digest/revision is not promotion-ledger authorized"
+                        )
+                meta = json.loads(payload.decode("utf-8"))
+                self._head = self._head_from_meta(meta)
+                return self._head
+            except Exception as e:
+                self._failed = True
+                self._warn_once(f"could not load artifact from {self.path!r} ({e})")
+                return None
 
     def score(self, ctx: StepContext) -> StepReward:
         head = self._load()
         if head is None:
             return self._fallback.score(ctx)
         try:
-            import math
             pw, pb, gw, gb = head
             x = step_features(ctx)
             promise = math.tanh(
@@ -414,7 +515,7 @@ class LinearPRM:
             return self._fallback.score(ctx)
 
 
-def build_from_env() -> ProcessRewardModel:
+def build_from_env(*, recovery_controller=None) -> ProcessRewardModel:
     """Resolve the PRM backend from env / config.
 
     MAVERICK_PRM=null|heuristic|remote|learned|linear
@@ -422,6 +523,12 @@ def build_from_env() -> ProcessRewardModel:
     MAVERICK_PRM_API_KEY=...   (when remote)
     MAVERICK_PRM_PATH=...      (when learned: model dir w/ head.pt + head.json;
                                 when linear: a prm_linear.json file)
+    MAVERICK_PRM_BOOTSTRAP_SHA256=...  (explicit initial linear artifact root)
+
+    ``recovery_controller`` is an explicit startup seam for deployments using a
+    non-shared promotion ledger. Linear artifacts are never exposed until any
+    write-ahead PREPARE for their stable path has reconciled; absent an explicit
+    controller, the process-wide self-improvement controller is used.
 
     Default: NullPRM (preserves pre-Wave-7c behavior).
     """
@@ -446,5 +553,31 @@ def build_from_env() -> ProcessRewardModel:
         if not path:
             log.warning("PRM=linear but MAVERICK_PRM_PATH unset; falling back to heuristic")
             return HeuristicPRM()
-        return LinearPRM(path=path)
+        try:
+            from .self_improvement import shared
+            from .verifier_head import VerifierArtifactDeployment
+
+            artifact_path = Path(path).expanduser()
+            controller = (
+                recovery_controller
+                if recovery_controller is not None
+                else shared()
+            )
+            deployment = VerifierArtifactDeployment(
+                artifact_path.parent / ".maverick-prm-artifacts", artifact_path,
+                bootstrap_sha256=os.environ.get("MAVERICK_PRM_BOOTSTRAP_SHA256"),
+            )
+            deployment.recover_for_serving(controller)
+        except Exception:
+            log.exception(
+                "linear PRM startup recovery is unresolved; falling back to heuristic"
+            )
+            return HeuristicPRM()
+        # Serve the exact lexical path recovery inspected. Keeping a relative
+        # env value here would let a later process-wide chdir redirect the
+        # long-lived PRM to an artifact that was never reconciled.
+        return LinearPRM(
+            path=str(deployment.active_path),
+            authority=deployment.authority_resolver(controller),
+        )
     return NullPRM()

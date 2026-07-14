@@ -7,11 +7,15 @@ persistence, generated-tool validation/loading, and the
 """
 from __future__ import annotations
 
+import os
+from pathlib import Path
+
 import pytest
-from maverick import self_learning
+from maverick import file_lock, self_learning
 from maverick.blackboard import Blackboard
 from maverick.budget import Budget
 from maverick.catalog import CatalogEntry
+from maverick.file_lock import private_path_is_restricted
 from maverick.llm import LLMResponse
 from maverick.tools import Tool, ToolRegistry
 
@@ -234,7 +238,7 @@ class TestAddMcpServer:
         assert 'args = ["server.js"]' in text
 
     def test_atomic_write_preserves_existing_and_leaves_no_temp(self, monkeypatch, tmp_path):
-        # The block is written via temp + os.replace, not appended to the live
+        # The block is written via unique private staging, not appended to the live
         # file: pre-existing config survives, the result is always valid TOML
         # (a truncated append would corrupt the whole file), permissions stay
         # private for config secrets, and no .tmp leaks.
@@ -252,8 +256,8 @@ class TestAddMcpServer:
         self_learning.add_mcp_server("second", "node")
 
         text = cfg.read_text()
-        assert (cfg.stat().st_mode & 0o777) == 0o600
-        assert not cfg.with_name(cfg.name + ".tmp").exists()  # no temp leak
+        assert private_path_is_restricted(cfg, 0o600)
+        assert not list(tmp_path.glob(".config.toml-*.tmp"))  # no temp leak
         parsed = tomllib.loads(text)  # valid TOML, not a truncated append
         assert parsed["self_learning"]["enable"] is True       # prior content kept
         assert "first" in parsed["mcp_servers"]
@@ -265,20 +269,87 @@ class TestAddMcpServer:
         cfg.chmod(0o600)
         monkeypatch.setattr("maverick.config.config_path", lambda: cfg)
 
-        def fail_replace(src, dst):
-            assert (src.stat().st_mode & 0o777) == 0o600
-            assert 'api_key = "SECRET"' in src.read_text(encoding="utf-8")
+        staged = {}
+        secure_mkstemp = file_lock._secure_mkstemp
+
+        def capture_staged(*args, **kwargs):
+            fd, path = secure_mkstemp(*args, **kwargs)
+            staged["path"] = Path(path)
+            return fd, path
+
+        monkeypatch.setattr(file_lock, "_secure_mkstemp", capture_staged)
+
+        def fail_publish(*publish_args):
+            src = staged["path"]
+            assert private_path_is_restricted(src, 0o600)
+            if os.name == "nt":
+                duplicate = os.dup(publish_args[0])
+                try:
+                    os.lseek(duplicate, 0, os.SEEK_SET)
+                    staged_text = os.read(duplicate, 1_000_000).decode("utf-8")
+                finally:
+                    os.close(duplicate)
+            else:
+                staged_text = src.read_text(encoding="utf-8")
+            assert 'api_key = "SECRET"' in staged_text
             raise OSError("simulated replace failure")
 
-        monkeypatch.setattr(self_learning.os, "replace", fail_replace)
+        seam = "_windows_replace_open_fd" if os.name == "nt" else "_replace_with_retry"
+        monkeypatch.setattr(file_lock, seam, fail_publish)
 
         with pytest.raises(OSError, match="simulated replace failure"):
             self_learning.add_mcp_server("private", "node")
 
-        tmp = cfg.with_name(cfg.name + ".tmp")
-        assert not tmp.exists()
-        assert (cfg.stat().st_mode & 0o777) == 0o600
+        assert not list(tmp_path.glob(".config.toml-*.tmp"))
+        assert private_path_is_restricted(cfg, 0o600)
         assert 'api_key = "SECRET"' in cfg.read_text(encoding="utf-8")
+
+    def test_concurrent_additions_are_serialized_without_lost_update(
+        self, monkeypatch, tmp_path,
+    ):
+        import threading
+
+        cfg = tmp_path / "config.toml"
+        monkeypatch.setattr("maverick.config.config_path", lambda: cfg)
+        real_write = file_lock.atomic_write_text
+        first_staged = threading.Event()
+        release_first = threading.Event()
+        writes = []
+
+        def controlled_write(*args, **kwargs):
+            writes.append(args[1])
+            if len(writes) == 1:
+                first_staged.set()
+                assert release_first.wait(5), "test did not release first writer"
+            return real_write(*args, **kwargs)
+
+        monkeypatch.setattr(file_lock, "atomic_write_text", controlled_write)
+        errors = []
+
+        def add(name):
+            try:
+                self_learning.add_mcp_server(name, "node")
+            except Exception as exc:  # pragma: no cover - surfaced below
+                errors.append(exc)
+
+        first = threading.Thread(target=add, args=("firstmcp",))
+        second = threading.Thread(target=add, args=("secondmcp",))
+        first.start()
+        assert first_staged.wait(5), "first writer never reached publication"
+        second.start()
+        # The second call cannot enter publication until the first releases the
+        # complete read/validate/write transaction.
+        assert len(writes) == 1
+        release_first.set()
+        first.join(5)
+        second.join(5)
+
+        assert not first.is_alive() and not second.is_alive()
+        assert errors == []
+        text = cfg.read_text(encoding="utf-8")
+        assert "[mcp_servers.firstmcp]" in text
+        assert "[mcp_servers.secondmcp]" in text
+        assert len(writes) == 2
 
     def test_rejects_duplicate(self, monkeypatch, tmp_path):
         cfg = tmp_path / "config.toml"

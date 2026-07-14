@@ -88,21 +88,29 @@ def settings() -> dict:
     the stricter floors / optional paths via config or the wizard."""
     try:
         from .config import get_self_harness
-        return get_self_harness()
+        resolved = get_self_harness()
+        if not isinstance(resolved, dict):
+            raise ValueError("self-harness settings are not a mapping")
+        return {**resolved, "_config_valid": True}
     except Exception:  # pragma: no cover -- config never blocks a run
-        return {"enable": False, "auto_run": False,
+        return {"enable": False, "risk_limited": True, "auto_run": False,
+                "_config_valid": False,
                 "min_support": 3, "min_support_by_class": {},
-                "require_held_out": False, "min_held_out": 0, "min_delta": 0.0,
-                "confidence_z": 0.0, "max_cost_factor": None,
-                "max_latency_factor": None, "max_tool_calls_factor": None,
+                "require_held_out": True, "min_held_out": 8, "min_delta": 0.02,
+                "confidence_z": 1.96, "max_cost_factor": 1.25,
+                "max_latency_factor": 1.25, "max_tool_calls_factor": 1.10,
                 "semantic_mining": False, "retire_after_days": 0.0,
-                "candidates_per_signature": 1, "mine_bucket_by": (),
-                "holdout_rotations": 1, "judge_samples": 1,
-                "metamorphic": False, "metamorphic_tolerance": 0.0,
-                "calibrate_judge": False, "transfer_auto": False,
+                "candidates_per_signature": 3, "mine_bucket_by": (),
+                "max_promotions_per_cycle": 1,
+                "holdout_rotations": 1, "judge_samples": 3,
+                "holdout_ledger": None, "holdout_family_alpha": 0.05,
+                "holdout_query_alpha": 0.05, "holdout_max_queries": 1,
+                "metamorphic": True, "metamorphic_tolerance": 0.0,
+                "calibrate_judge": True, "calibration_max_age_hours": 24.0,
+                "transfer_auto": False,
                 "corpus_harvest": "off", "store": "files",
                 "relapse_failure_share": 0.0, "relapse_min_outcomes": 5,
-                "promote_as_canary": False,
+                "promote_as_canary": True,
                 "efficacy_review": False, "eval_corpus": None,
                 "eval_budget_dollars": None}
 
@@ -177,6 +185,51 @@ def _write_addenda(addenda: dict[str, str], path: Path | None = None) -> None:
     from .file_lock import atomic_write_text
     p = path if path is not None else _store_path()
     atomic_write_text(p, json.dumps(addenda, indent=2, sort_keys=True), mode=0o600)
+
+
+def _load_addenda_strict(path: Path) -> dict[str, str]:
+    """Load the prompt-bound store for a privileged CAS, failing on corruption.
+
+    The public recall path remains tolerant so a damaged optional addendum never
+    breaks an agent run. Promotion is different: treating malformed state as an
+    empty mapping would overwrite evidence and make an ungoverned mutation look
+    like a clean baseline.
+    """
+    if _world_routed(path):
+        from . import learning_store
+        raw = learning_store.load_addenda_db()
+    else:
+        if path.is_symlink():
+            raise ValueError("addenda store must not be a symbolic link")
+        try:
+            raw = json.loads(path.read_text(encoding="utf-8"))
+        except FileNotFoundError:
+            return {}
+        except (OSError, UnicodeError, ValueError) as exc:
+            raise ValueError("addenda store is unreadable or malformed") from exc
+    if not isinstance(raw, dict) or any(
+            not isinstance(key, str) or not isinstance(value, str)
+            for key, value in raw.items()):
+        raise ValueError("addenda store must map strings to strings")
+    return dict(raw)
+
+
+def _addenda_artifact_revision(path: Path, store: Mapping[str, str]):
+    """Return the content-addressed full-store revision used by promotion CAS."""
+    from .self_improvement import ArtifactRevision
+
+    canonical = json.dumps(
+        dict(store), sort_keys=True, separators=(",", ":"),
+        ensure_ascii=False, allow_nan=False).encode("utf-8")
+    digest = hashlib.sha256(canonical).hexdigest()
+    version = "sha256:" + hashlib.sha256(b"self-harness-version\0" + canonical).hexdigest()
+    location = "world" if _world_routed(path) else os.path.normcase(
+        os.path.abspath(os.fspath(path)))
+    return ArtifactRevision(
+        identity=f"self_harness:addenda:{location}",
+        sha256=digest,
+        version=version,
+    )
 
 
 def _scoped_key(model_id: str, context: str) -> str:
@@ -1228,6 +1281,16 @@ class ValidationResult:
     baseline_score: float = 0.0
     candidate_score: float = 0.0
     samples: int = 0
+    # Honest split denominators after excluding nothing: production structured
+    # scorers fail closed unless every requested arm/case completed. ``samples``
+    # is the promotion-evidence denominator (held-out when present), never the
+    # held-in + held-out total.
+    held_in_samples: int = 0
+    held_out_samples: int = 0
+    # Conservative lower confidence bound on candidate - baseline.  Passing this
+    # into the shared promotion gate prevents a point-estimate win from being
+    # reinterpreted there as causal evidence.
+    effect_ci_low: float | None = None
 
 
 # A scorer returns either a plain success rate in [0,1], OR a mapping
@@ -1236,6 +1299,7 @@ class ValidationResult:
 # pass rate while making the model slower / pricier / chattier). Injected: a
 # live A/B needs a real model, exactly like learning_rollout's constraints.
 ScoreFn = Callable[[str, list[str]], object]
+HoldoutAuthorize = Callable[[str, str, list[str]], float]
 
 
 def _wilson_lower_bound(successes: float, n: int, z: float = 1.96) -> float:
@@ -1252,12 +1316,267 @@ def _wilson_lower_bound(successes: float, n: int, z: float = 1.96) -> float:
     return max(0.0, (centre - margin) / denom)
 
 
+def _wilson_upper_bound(successes: float, n: int, z: float = 1.96) -> float:
+    """Upper endpoint paired with :func:`_wilson_lower_bound`."""
+    if n <= 0:
+        return 1.0
+    phat = max(0.0, min(1.0, successes / n))
+    z2 = z * z
+    denom = 1.0 + z2 / n
+    centre = phat + z2 / (2 * n)
+    margin = z * math.sqrt((phat * (1 - phat) + z2 / (4 * n)) / n)
+    return min(1.0, (centre + margin) / denom)
+
+
+def _difference_ci_lower(candidate_rate: float, baseline_rate: float,
+                         candidate_n: int, baseline_n: int,
+                         z: float = 1.96) -> float:
+    """Newcombe score lower bound for a difference of two proportions.
+
+    The former gate compared the candidate's Wilson lower bound with the
+    baseline *point estimate*.  That ignores baseline uncertainty and can promote
+    noise.  Newcombe's score construction combines the candidate lower and
+    baseline upper Wilson distances into a bound on the actual uplift.
+    """
+    if candidate_n <= 0 or baseline_n <= 0:
+        return float("-inf")
+    c = max(0.0, min(1.0, float(candidate_rate)))
+    b = max(0.0, min(1.0, float(baseline_rate)))
+    c_lb = _wilson_lower_bound(round(c * candidate_n), candidate_n, z)
+    b_ub = _wilson_upper_bound(round(b * baseline_n), baseline_n, z)
+    return (c - b) - math.sqrt((c - c_lb) ** 2 + (b_ub - b) ** 2)
+
+
+def _binary_leaves(value: object) -> tuple[bool, ...] | None:
+    """Flatten one case's replicated binary draws, or reject malformed data."""
+    if value in (False, True, 0, 1):
+        return (bool(value),)
+    if not isinstance(value, (list, tuple)) or not value:
+        return None
+    leaves: list[bool] = []
+    for item in value:
+        nested = _binary_leaves(item)
+        if nested is None:
+            return None
+        leaves.extend(nested)
+    return tuple(leaves)
+
+
+def _paired_difference_ci_lower(candidate_outcomes: tuple, baseline_outcomes: tuple,
+                                z: float = 1.96) -> float:
+    """Conservative lower bound for uplift on matched binary cases.
+
+    The auto evaluator runs both arms on the same tasks.  Treating those arms as
+    independent throws away that pairing and reconstructing integer counts from
+    rounded aggregate rates can misstate the evidence.  For matched outcomes,
+    uplift is ``P(candidate wins, baseline loses) - P(candidate loses,
+    baseline wins)``.  Wilson-bound both discordant proportions in the adverse
+    directions; using two 95% endpoints gives a conservative simultaneous lower
+    bound without pretending repeated draws are independent tasks.
+    """
+    if not candidate_outcomes or len(candidate_outcomes) != len(baseline_outcomes):
+        return float("-inf")
+    pairs: list[tuple[bool, bool]] = []
+    for candidate, baseline in zip(candidate_outcomes, baseline_outcomes, strict=True):
+        candidate_draws = _binary_leaves(candidate)
+        baseline_draws = _binary_leaves(baseline)
+        if candidate_draws is None or baseline_draws is None:
+            return float("-inf")
+        # Replicate calls reduce measurement noise but do not mint independent
+        # tasks. Collapse each task adversarially for a lower bound: the
+        # candidate succeeds only if every draw succeeds, while the baseline
+        # succeeds if any draw succeeds.
+        pairs.append((all(candidate_draws), any(baseline_draws)))
+    improvements = sum(candidate and not baseline for candidate, baseline in pairs)
+    regressions = sum(baseline and not candidate for candidate, baseline in pairs)
+    n = len(pairs)
+    return (_wilson_lower_bound(improvements, n, z)
+            - _wilson_upper_bound(regressions, n, z))
+
+
+def _outcomes_match_rate(outcomes: tuple | None, rate: object) -> bool:
+    """Reject structured evidence whose aggregate contradicts its case rows."""
+    if outcomes is None:
+        return True
+    if not isinstance(rate, (int, float)) or isinstance(rate, bool):
+        return False
+    leaves: list[bool] = []
+    for value in outcomes:
+        case = _binary_leaves(value)
+        if case is None:
+            return False
+        leaves.extend(case)
+    observed = (sum(leaves) / len(leaves)) if leaves else 0.0
+    return math.isclose(float(rate), observed, rel_tol=0.0, abs_tol=1e-12)
+
+
 def _score_parts(v: object) -> tuple:
     """(success, cost, latency, tool_calls) from a scorer result -- a bare rate
     or a mapping. Non-numeric/missing fields are ``None`` and simply not gated."""
     if isinstance(v, Mapping):
         return (v.get("success"), v.get("cost"), v.get("latency"), v.get("tool_calls"))
     return (v, None, None, None)
+
+
+def _structured_evidence(v: object, fallback: int) -> tuple[int, int, tuple | None, bool]:
+    """Return ``(samples, attempted, outcomes, complete)`` for one arm.
+
+    Aggregate third-party scorers retain the historical full-coverage assumption.
+    Production corpus scorers return explicit evidence, allowing the validator to
+    reject dropped/asymmetric cases instead of fabricating a denominator.
+    """
+    if not isinstance(v, Mapping) or not any(
+            k in v for k in ("samples", "attempted", "outcomes", "complete", "clean")):
+        return fallback, fallback, None, True
+    samples = v.get("samples", fallback)
+    attempted = v.get("attempted", samples)
+    outcomes = v.get("outcomes")
+    valid_counts = (isinstance(samples, int) and not isinstance(samples, bool)
+                    and isinstance(attempted, int) and not isinstance(attempted, bool)
+                    and 0 <= samples <= attempted
+                    # The validator supplied exactly ``fallback`` cases.  A
+                    # structured provider cannot claim completeness over a
+                    # smaller private denominator and thereby borrow the
+                    # caller's held-out count for the evidence floor.
+                    and attempted == fallback)
+    if not valid_counts:
+        return 0, max(0, fallback), None, False
+    if outcomes is not None:
+        if not isinstance(outcomes, (list, tuple)) or len(outcomes) != attempted:
+            return samples, attempted, None, False
+        outcomes = tuple(outcomes)
+    complete = bool(v.get("complete", samples == attempted))
+    clean = bool(v.get("clean", True))
+    return samples, attempted, outcomes, complete and clean and samples == attempted
+
+
+def _call_score(fn: ScoreFn, add: str, cases: list[str]) -> tuple[object, bool]:
+    """Call one arm and snapshot its cleanliness before the next arm overwrites it."""
+    value = fn(add, cases)
+    clean = bool(getattr(fn, "last_clean", True))
+    if isinstance(value, Mapping) and "clean" in value:
+        clean = clean and bool(value.get("clean"))
+    return value, clean
+
+
+def _call_ab(
+    *, add: str, cases: list[str], score_with: ScoreFn,
+    score_without: ScoreFn, candidate_first: bool,
+) -> tuple[object, bool, object, bool]:
+    """Call both aggregate arms and preserve each call-local clean flag."""
+    if candidate_first:
+        with_raw, with_clean = _call_score(score_with, add, cases)
+        without_raw, without_clean = _call_score(score_without, add, cases)
+    else:
+        without_raw, without_clean = _call_score(score_without, add, cases)
+        with_raw, with_clean = _call_score(score_with, add, cases)
+    return with_raw, with_clean, without_raw, without_clean
+
+
+def _metamorphic_failure(
+    *, add: str, held_out: list[str], score_with: ScoreFn,
+    score_without: ScoreFn, metamorphic_fn: Callable[[list[str]], list[str]],
+    metamorphic_tolerance: float, in_delta: float, out_delta: float,
+    result_base: dict, signature: str,
+    holdout_authorize: HoldoutAuthorize | None,
+) -> ValidationResult | None:
+    """Return a rejection when required paraphrase evidence is not robust.
+
+    The transform and both A/B arms are load-bearing once configured: missing,
+    partial, asymmetric, dirty, or non-finite evidence is indeterminate.  A
+    candidate must retain its original held-out lift within the configured
+    absolute tolerance; merely becoming non-harmful on paraphrases is not proof
+    that the learned guidance generalized.
+    """
+    metamorphic_z = 0.0
+    if holdout_authorize is not None:
+        try:
+            # Spend the transformed-view query before the paraphraser sees the
+            # sealed source cases. The purpose plus source-view digest and the
+            # evaluator epoch bind what is authorized; a failed transform still
+            # burns the query, so crash/error paths cannot reveal cases for free.
+            metamorphic_z = float(
+                holdout_authorize("metamorphic", signature, list(held_out)))
+            if not math.isfinite(metamorphic_z) or metamorphic_z <= 0:
+                raise ValueError("invalid holdout critical value")
+        except Exception:
+            return ValidationResult(
+                False, in_delta, out_delta,
+                "sealed holdout authorization failed", **result_base)
+    try:
+        mcases = [str(c) for c in (metamorphic_fn(list(held_out)) or [])]
+    except Exception:
+        return ValidationResult(False, in_delta, out_delta,
+                                _INDETERMINATE_REASON, **result_base)
+    source_identities = {_case_identity(source) for source in held_out}
+    if (len(mcases) != len(held_out)
+            or _case_list_failure("metamorphic", mcases) is not None
+            # A permutation of the unchanged holdout is not a metamorphic
+            # transformation. Reject collisions against the complete source
+            # set, rather than only comparing equal list positions.
+            or any(_case_identity(transformed) in source_identities
+                   for transformed in mcases)):
+        return ValidationResult(False, in_delta, out_delta,
+                                _INDETERMINATE_REASON, **result_base)
+    try:
+        # A sealed evaluation must not always grant the candidate the same
+        # provider/cache/warmup position. The main splits use opposite order;
+        # choose the transformed view's order independently and reproducibly.
+        digest = hashlib.sha256(
+            f"{signature}\0metamorphic".encode()).digest()
+        m_with_raw, mw_clean, m_without_raw, mo_clean = _call_ab(
+            add=add, cases=mcases, score_with=score_with,
+            score_without=score_without,
+            candidate_first=(holdout_authorize is None or digest[0] % 2 == 0),
+        )
+    except Exception:
+        return ValidationResult(False, in_delta, out_delta,
+                                _INDETERMINATE_REASON, **result_base)
+    m_with, *_ = _score_parts(m_with_raw)
+    m_without, *_ = _score_parts(m_without_raw)
+    mw_n, mw_attempted, mw_outcomes, mw_complete = _structured_evidence(
+        m_with_raw, len(mcases))
+    mo_n, mo_attempted, mo_outcomes, mo_complete = _structured_evidence(
+        m_without_raw, len(mcases))
+    m_structured = [isinstance(v, Mapping) and any(
+        k in v for k in ("samples", "attempted", "outcomes", "complete", "clean"))
+        for v in (m_with_raw, m_without_raw)]
+    m_paired = mw_attempted == mo_attempted and mw_n == mo_n
+    if mw_outcomes is not None or mo_outcomes is not None:
+        m_paired = m_paired and mw_outcomes is not None and mo_outcomes is not None
+    m_valid = (
+        mw_clean and mo_clean and mw_complete and mo_complete and m_paired
+        and (not any(m_structured) or all(m_structured))
+        and _outcomes_match_rate(mw_outcomes, m_with)
+        and _outcomes_match_rate(mo_outcomes, m_without)
+        and all(isinstance(s, (int, float)) and not isinstance(s, bool)
+                and math.isfinite(s) and 0.0 <= s <= 1.0
+                for s in (m_with, m_without))
+    )
+    if not m_valid:
+        return ValidationResult(False, in_delta, out_delta,
+                                _INDETERMINATE_REASON, **result_base)
+    m_delta = m_with - m_without
+    if metamorphic_z > 0:
+        if mw_outcomes is not None and mo_outcomes is not None:
+            m_ci_low = _paired_difference_ci_lower(
+                mw_outcomes, mo_outcomes, metamorphic_z)
+        else:
+            m_ci_low = _difference_ci_lower(
+                m_with, m_without, mw_n, mo_n, metamorphic_z)
+        if m_ci_low <= 0:
+            return ValidationResult(
+                False, in_delta, out_delta,
+                ("metamorphic improvement not confident "
+                 f"(effect CI lower {m_ci_low:.3g} <= 0)"),
+                **result_base)
+    required = out_delta - metamorphic_tolerance
+    if m_delta < required:
+        return ValidationResult(
+            False, in_delta, out_delta,
+            f"failed metamorphic check (overfit to wording; paraphrase delta "
+            f"{m_delta:.3g} < required {required:.3g})", **result_base)
+    return None
 
 
 # The rejection reason for an evaluation that never actually judged the line
@@ -1267,7 +1586,65 @@ def _score_parts(v: object) -> tuple:
 _INDETERMINATE_REASON = "scorer returned a non-finite or out-of-range value"
 
 
-def validate_proposal(
+def _valid_validation_policy(
+    *, min_delta: object, min_held_out: object, confidence_z: object,
+    max_cost_factor: object, max_latency_factor: object,
+    max_tool_calls_factor: object, metamorphic_tolerance: object,
+) -> bool:
+    """Reject non-finite policy values that would defeat numeric comparisons."""
+    if (not isinstance(min_held_out, int) or isinstance(min_held_out, bool)
+            or min_held_out < 0):
+        return False
+    required = (min_delta, confidence_z, metamorphic_tolerance)
+    optional = (max_cost_factor, max_latency_factor, max_tool_calls_factor)
+
+    def _nonnegative_finite(value: object) -> bool:
+        return (isinstance(value, (int, float)) and not isinstance(value, bool)
+                and math.isfinite(float(value)) and float(value) >= 0.0)
+
+    return (all(_nonnegative_finite(value) for value in required)
+            and all(value is None or _nonnegative_finite(value)
+                    for value in optional))
+
+
+def _case_identity(case: str) -> str:
+    return " ".join(unicodedata.normalize("NFKC", case).split()).casefold()
+
+
+def _case_list_failure(label: str, cases: object) -> str | None:
+    if not isinstance(cases, list) or any(
+            not isinstance(case, str) or not case.strip()
+            or len(case) > 1_048_576 or "\x00" in case
+            for case in cases):
+        return f"{label} cases are malformed or duplicated"
+    identities = [_case_identity(case) for case in cases]
+    if len(set(identities)) != len(identities):
+        return f"{label} cases are malformed or duplicated"
+    return None
+
+
+def _operational_regression_reason(
+    factors_and_pairs: tuple[tuple[str, float | None, tuple[object, object]], ...],
+) -> str | None:
+    """Validate configured resource evidence and return the first regression."""
+    for label, factor, (candidate, baseline) in factors_and_pairs:
+        if factor is None:
+            continue
+        valid = (
+            isinstance(candidate, (int, float)) and not isinstance(candidate, bool)
+            and math.isfinite(candidate) and candidate >= 0
+            and isinstance(baseline, (int, float)) and not isinstance(baseline, bool)
+            and math.isfinite(baseline) and baseline >= 0
+        )
+        if not valid:
+            return f"{label} evidence missing or invalid on held-out"
+        if candidate > baseline * factor:
+            return (f"{label} regressed on held-out "
+                    f"({candidate:.3g} > {baseline:.3g} x {factor})")
+    return None
+
+
+def validate_proposal(  # noqa: C901 - gate remains one fail-closed evidence boundary
     proposal: HarnessProposal, *, held_in: list[str], held_out: list[str],
     score_with: ScoreFn, score_without: ScoreFn,
     min_delta: float = 0.0, min_held_out: int = 0, confidence_z: float = 0.0,
@@ -1275,6 +1652,7 @@ def validate_proposal(
     max_tool_calls_factor: float | None = None,
     metamorphic_fn: Callable[[list[str]], list[str]] | None = None,
     metamorphic_tolerance: float = 0.0,
+    holdout_authorize: HoldoutAuthorize | None = None,
 ) -> ValidationResult:
     """The Self-Harness acceptance test: a harness edit must not regress EITHER
     split and must help at least one (reject pure trades).
@@ -1297,28 +1675,136 @@ def validate_proposal(
     rejects a line whose held-out improvement does NOT survive paraphrasing the
     unseen cases -- catching a line overfit to surface wording rather than the
     underlying weakness (``metamorphic_tolerance`` allows a small slip)."""
+    if not _valid_validation_policy(
+            min_delta=min_delta, min_held_out=min_held_out,
+            confidence_z=confidence_z, max_cost_factor=max_cost_factor,
+            max_latency_factor=max_latency_factor,
+            max_tool_calls_factor=max_tool_calls_factor,
+            metamorphic_tolerance=metamorphic_tolerance):
+        return ValidationResult(
+            False, 0.0, 0.0, "invalid validation policy",
+            baseline_score=0.0, candidate_score=0.0, samples=0,
+            held_in_samples=0, held_out_samples=0)
+    case_failure = (
+        _case_list_failure("held-in", held_in)
+        or _case_list_failure("held-out", held_out)
+    )
+    if (case_failure is None
+            and {_case_identity(case) for case in held_in}
+            & {_case_identity(case) for case in held_out}):
+        case_failure = "held-in and held-out cases overlap"
+    if case_failure is not None:
+        return ValidationResult(
+            False, 0.0, 0.0, case_failure,
+            baseline_score=0.0, candidate_score=0.0, samples=0,
+            held_in_samples=0, held_out_samples=0)
     add = proposal.addendum_line
-    in_with, in_ci, in_li, in_ti = _score_parts(score_with(add, held_in))
-    in_without, *_ = _score_parts(score_without(add, held_in))
-    out_with, out_cost, out_lat, out_tc = _score_parts(score_with(add, held_out))
-    out_without, owo_cost, owo_lat, owo_tc = _score_parts(score_without(add, held_out))
-    n = len(held_in) + len(held_out)
+    # Spend/record authorization before any scorer sees a sealed confirmation
+    # case. A missing/corrupt/exhausted ledger therefore cannot leak results and
+    # then retroactively decide whether the access counted.
+    if held_out and holdout_authorize is not None:
+        try:
+            permit_z = float(holdout_authorize(
+                "confirmation", proposal.signature, list(held_out)))
+            if not math.isfinite(permit_z) or permit_z <= 0:
+                raise ValueError("invalid holdout critical value")
+            confidence_z = max(confidence_z, permit_z)
+        except Exception:
+            return ValidationResult(
+                False, 0.0, 0.0, "sealed holdout authorization failed",
+                baseline_score=0.0, candidate_score=0.0, samples=0,
+                held_in_samples=0, held_out_samples=0)
+    # Snapshot ``last_clean`` immediately after each call; the next call on the
+    # same scorer overwrites it. Sealed paths deterministically counterbalance
+    # the aggregate arm order across development and confirmation so the
+    # candidate is not systematically favored by warmup/cache/provider drift.
+    # Legacy injected scorers retain their historical call order.
+    sealed_ab = holdout_authorize is not None
+    order_digest = hashlib.sha256(
+        f"{proposal.signature}\0ab-order".encode()).digest()
+    in_candidate_first = not sealed_ab or order_digest[0] % 2 == 0
+    try:
+        in_with_raw, iw_clean, in_without_raw, io_clean = _call_ab(
+            add=add, cases=held_in, score_with=score_with,
+            score_without=score_without, candidate_first=in_candidate_first)
+        out_with_raw, ow_clean, out_without_raw, oo_clean = _call_ab(
+            add=add, cases=held_out, score_with=score_with,
+            score_without=score_without,
+            candidate_first=(not in_candidate_first if sealed_ab else True))
+    except Exception:
+        return ValidationResult(
+            False, 0.0, 0.0, _INDETERMINATE_REASON,
+            baseline_score=0.0, candidate_score=0.0, samples=0,
+            held_in_samples=0, held_out_samples=0)
+    in_with, in_ci, in_li, in_ti = _score_parts(in_with_raw)
+    in_without, iwo_cost, iwo_lat, iwo_tc = _score_parts(in_without_raw)
+    out_with, out_cost, out_lat, out_tc = _score_parts(out_with_raw)
+    out_without, owo_cost, owo_lat, owo_tc = _score_parts(out_without_raw)
+
+    iw_n, iw_attempted, iw_outcomes, iw_complete = _structured_evidence(
+        in_with_raw, len(held_in))
+    io_n, io_attempted, io_outcomes, io_complete = _structured_evidence(
+        in_without_raw, len(held_in))
+    ow_n, ow_attempted, ow_outcomes, ow_complete = _structured_evidence(
+        out_with_raw, len(held_out))
+    oo_n, oo_attempted, oo_outcomes, oo_complete = _structured_evidence(
+        out_without_raw, len(held_out))
+    structured_flags = [isinstance(v, Mapping) and any(
+        k in v for k in ("samples", "attempted", "outcomes", "complete", "clean"))
+        for v in (in_with_raw, in_without_raw, out_with_raw, out_without_raw)]
+    evidence_clean = all((iw_clean, io_clean, ow_clean, oo_clean,
+                          iw_complete, io_complete, ow_complete, oo_complete))
+    evidence_paired = (iw_attempted == io_attempted and ow_attempted == oo_attempted)
+    # One structured arm beside one opaque arm cannot prove matched coverage.
+    evidence_symmetric = not any(structured_flags) or all(structured_flags)
+    if iw_outcomes is not None or io_outcomes is not None:
+        evidence_paired = evidence_paired and iw_outcomes is not None and io_outcomes is not None
+    if ow_outcomes is not None or oo_outcomes is not None:
+        evidence_paired = evidence_paired and ow_outcomes is not None and oo_outcomes is not None
+    outcome_rates_match = all((
+        _outcomes_match_rate(iw_outcomes, in_with),
+        _outcomes_match_rate(io_outcomes, in_without),
+        _outcomes_match_rate(ow_outcomes, out_with),
+        _outcomes_match_rate(oo_outcomes, out_without),
+    ))
+    held_in_n = min(iw_n, io_n)
+    held_out_n = min(ow_n, oo_n)
     # A score is a success RATE in [0,1]. A buggy/hostile scorer returning a
     # non-finite (NaN/inf) or out-of-range value must NOT drive a promotion: an
     # inf candidate would otherwise sail past the gate's "candidate >= baseline"
     # evidence check. Reject up front. (Found by the 1000-round fuzz campaign.)
     scores = (in_with, in_without, out_with, out_without)
-    if not all(isinstance(s, (int, float)) and math.isfinite(s) and 0.0 <= s <= 1.0
-               for s in scores):
+    if (not evidence_clean or not evidence_paired or not evidence_symmetric
+            or not outcome_rates_match
+            or not all(isinstance(s, (int, float)) and not isinstance(s, bool)
+                       and math.isfinite(s)
+                       and 0.0 <= s <= 1.0 for s in scores)):
         return ValidationResult(False, 0.0, 0.0, _INDETERMINATE_REASON,
-                                baseline_score=0.0, candidate_score=0.0, samples=n)
+                                baseline_score=0.0, candidate_score=0.0, samples=0,
+                                held_in_samples=held_in_n,
+                                held_out_samples=held_out_n)
     in_delta, out_delta = in_with - in_without, out_with - out_without
-    # The gate sees the unseen split as the honest baseline/candidate evidence.
-    base = dict(baseline_score=out_without, candidate_score=out_with, samples=n)
+    # The gate sees ONLY unseen confirmation evidence when it exists.  Held-in
+    # examples guide proposal search but can never inflate the promotion floor.
+    if held_out:
+        ev_base, ev_cand, ev_n = out_without, out_with, held_out_n
+        ev_cand_outcomes, ev_base_outcomes = ow_outcomes, oo_outcomes
+        ev_costs = (out_cost, owo_cost)
+        ev_lats = (out_lat, owo_lat)
+        ev_tools = (out_tc, owo_tc)
+    else:
+        ev_base, ev_cand, ev_n = in_without, in_with, held_in_n
+        ev_cand_outcomes, ev_base_outcomes = iw_outcomes, io_outcomes
+        ev_costs = (in_ci, iwo_cost)
+        ev_lats = (in_li, iwo_lat)
+        ev_tools = (in_ti, iwo_tc)
+    base = dict(baseline_score=ev_base, candidate_score=ev_cand, samples=ev_n,
+                held_in_samples=held_in_n, held_out_samples=held_out_n,
+                effect_ci_low=None)
     # Unseen-sample floor: too few held-out cases is not trustworthy generalization.
-    if min_held_out and len(held_out) < min_held_out:
+    if min_held_out and held_out_n < min_held_out:
         return ValidationResult(False, in_delta, out_delta,
-                                f"too few held-out cases ({len(held_out)} < {min_held_out})",
+                                f"too few held-out cases ({held_out_n} < {min_held_out})",
                                 **base)
     # Non-negative on both, strictly positive on at least one.
     if in_delta < 0 or out_delta < 0:
@@ -1327,34 +1813,43 @@ def validate_proposal(
     if in_delta <= 0 and out_delta <= 0:
         return ValidationResult(False, in_delta, out_delta,
                                 "no improvement on either split", **base)
-    # Effect-size floor: a sub-threshold lift is noise, not a durable improvement.
-    if max(in_delta, out_delta) < min_delta:
+    # Effect-size floor: when a held-out split exists, ONLY its lift can satisfy
+    # the promotion floor.  Letting a large development-set lift compensate for
+    # weak confirmation evidence launders overfit search progress into a sealed
+    # promotion decision.
+    evidence_delta = out_delta if held_out else in_delta
+    if evidence_delta < min_delta:
         return ValidationResult(
             False, in_delta, out_delta,
-            f"improvement below threshold ({max(in_delta, out_delta):.4g} < {min_delta})",
+            f"confirmation improvement below threshold "
+            f"({evidence_delta:.4g} < {min_delta})",
             **base)
-    # Statistical confidence: be CONFIDENT the candidate beats the baseline on
-    # unseen cases, not just lucky on a small sample (Wilson lower bound).
-    if confidence_z > 0 and held_out:
-        n_out = len(held_out)
-        lb = _wilson_lower_bound(round(out_with * n_out), n_out, confidence_z)
-        if lb < out_without:
+    # Statistical confidence: bound the UPLIFT itself, including uncertainty in
+    # both arms.  The previous candidate-LB > baseline-point rule understated
+    # uncertainty in the baseline and was anti-conservative under noisy search.
+    if confidence_z > 0 and ev_n > 0:
+        if ev_cand_outcomes is not None and ev_base_outcomes is not None:
+            ci_low = _paired_difference_ci_lower(
+                ev_cand_outcomes, ev_base_outcomes, confidence_z)
+        else:
+            ci_low = _difference_ci_lower(ev_cand, ev_base, ev_n, ev_n, confidence_z)
+        base["effect_ci_low"] = ci_low
+        if ci_low <= min_delta:
             return ValidationResult(
                 False, in_delta, out_delta,
-                f"held-out improvement not confident (lb {lb:.3g} < baseline {out_without:.3g})",
+                f"held-out improvement not confident "
+                f"(effect CI lower {ci_low:.3g} <= {min_delta:.3g})",
                 **base)
     # Operational regression: a line that lifts pass rate but blows up cost,
     # latency, or tool-call churn on the unseen split is not a net win.
-    for label, factor, cand, basel in (
-            ("cost", max_cost_factor, out_cost, owo_cost),
-            ("latency", max_latency_factor, out_lat, owo_lat),
-            ("tool_calls", max_tool_calls_factor, out_tc, owo_tc)):
-        if (factor is not None and isinstance(cand, (int, float))
-                and isinstance(basel, (int, float)) and cand > basel * factor):
-            return ValidationResult(
-                False, in_delta, out_delta,
-                f"{label} regressed on held-out ({cand:.3g} > {basel:.3g} x {factor})",
-                **base)
+    operational_failure = _operational_regression_reason((
+        ("cost", max_cost_factor, ev_costs),
+        ("latency", max_latency_factor, ev_lats),
+        ("tool_calls", max_tool_calls_factor, ev_tools),
+    ))
+    if operational_failure is not None:
+        return ValidationResult(
+            False, in_delta, out_delta, operational_failure, **base)
     # Metamorphic robustness: a line that helps only the EXACT held-out wording is
     # overfit to surface form, not the underlying weakness. If an injected
     # ``metamorphic_fn`` (a meaning-preserving paraphraser -- a real one needs a
@@ -1362,30 +1857,15 @@ def validate_proposal(
     # must SURVIVE the transform (held-out delta stays >= -tolerance on the
     # paraphrases). A line that flips to hurting paraphrased cases is rejected.
     if metamorphic_fn is not None and held_out:
-        try:
-            mcases = [str(c) for c in (metamorphic_fn(list(held_out)) or [])]
-        except Exception as e:
-            # An exhausted budget mid-paraphrase is INDETERMINATE, not a free
-            # pass: silently skipping the check under a dead pot would let the
-            # last candidates of a sweep dodge the robustness bar the earlier
-            # ones cleared. Any other bad transform can't fail a candidate --
-            # skip the check as before.
-            from .budget import BudgetExceeded
-            if isinstance(e, BudgetExceeded):
-                return ValidationResult(False, in_delta, out_delta,
-                                        _INDETERMINATE_REASON, **base)
-            mcases = []
-        if mcases:
-            m_with, *_ = _score_parts(score_with(add, mcases))
-            m_without, *_ = _score_parts(score_without(add, mcases))
-            if (isinstance(m_with, (int, float)) and isinstance(m_without, (int, float))
-                    and math.isfinite(m_with) and math.isfinite(m_without)):
-                m_delta = m_with - m_without
-                if m_delta < -metamorphic_tolerance:
-                    return ValidationResult(
-                        False, in_delta, out_delta,
-                        f"failed metamorphic check (overfit to wording; "
-                        f"paraphrase delta {m_delta:.3g})", **base)
+        failure = _metamorphic_failure(
+            add=add, held_out=held_out, score_with=score_with,
+            score_without=score_without, metamorphic_fn=metamorphic_fn,
+            metamorphic_tolerance=metamorphic_tolerance,
+            in_delta=in_delta, out_delta=out_delta, result_base=base,
+            signature=proposal.signature,
+            holdout_authorize=holdout_authorize)
+        if failure is not None:
+            return failure
     return ValidationResult(True, in_delta, out_delta, "validated", **base)
 
 
@@ -1428,7 +1908,13 @@ def _validate_rotated(
     base = dict(
         baseline_score=sum(r.baseline_score for r in results) / k,
         candidate_score=sum(r.candidate_score for r in results) / k,
-        samples=len(pool))
+        samples=len(pool),
+        held_in_samples=len(pool),
+        held_out_samples=len(pool),
+        effect_ci_low=(min(r.effect_ci_low for r in results
+                           if r.effect_ci_low is not None)
+                       if all(r.effect_ci_low is not None for r in results)
+                       else None))
     if n_pass == k:
         return ValidationResult(True, in_delta, out_delta,
                                 f"validated across {k} rotations", **base)
@@ -1505,6 +1991,52 @@ def _rollback_handle(path: Path | None = None) -> Callable[[], None]:
     return _rollback
 
 
+def _cas_rollback_handle(
+    path: Path, *, before_store: dict[str, str], after_store: dict[str, str],
+    store_key: str, before_meta: dict[str, dict],
+) -> Callable[[], None]:
+    """Restore only an exact promoted generation, never a newer store.
+
+    The old snapshot rollback could erase unrelated promotions that landed
+    after this candidate. This handle first proves the complete addenda store is
+    still the exact ``after`` revision. It then restores the prior source of
+    truth and reconciles only the affected block's metadata.
+    """
+    before_revision = _addenda_artifact_revision(path, before_store)
+    after_revision = _addenda_artifact_revision(path, after_store)
+    prior_records = {
+        key: dict(value) for key, value in before_meta.items()
+        if value.get("model_id") == store_key
+    }
+
+    def _rollback() -> None:
+        from .file_lock import cross_process_lock
+
+        with _lock, cross_process_lock(path), _store_rmw_lock(path):
+            current = _load_addenda_strict(path)
+            if _addenda_artifact_revision(path, current) != after_revision:
+                raise RuntimeError(
+                    "refusing rollback because the addenda store has a newer revision")
+            _write_addenda(before_store, path)
+            restored = _load_addenda_strict(path)
+            if _addenda_artifact_revision(path, restored) != before_revision:
+                raise RuntimeError("addenda rollback did not restore the declared revision")
+            try:
+                meta = load_line_meta(path)
+                # Remove records introduced/retained only by the reverted block,
+                # restore any evicted prior records, and preserve unrelated
+                # models/scopes plus their newer recall counters.
+                _reconcile_meta(meta, store_key, _bullets(before_store.get(store_key, "")))
+                for key, value in prior_records.items():
+                    meta.setdefault(key, value)
+                _write_line_meta(meta, path)
+            except Exception:  # pragma: no cover -- source of truth is restored
+                log.debug("self_harness: rollback metadata reconciliation failed",
+                          exc_info=True)
+
+    return _rollback
+
+
 # Serializes the store's load-modify-save so concurrent passes (the runner, a
 # manual CLI, parallel per-model passes) can't clobber each other. The whole
 # read-compose-write is one critical section -- an in-process lock plus a
@@ -1514,6 +2046,28 @@ def _rollback_handle(path: Path | None = None) -> Callable[[], None]:
 _lock = threading.Lock()
 
 
+def _apply_addendum_locked(
+    proposal: HarnessProposal, path: Path, before: dict[str, str], *,
+    provenance: dict | None = None,
+) -> dict[str, str]:
+    """Apply one proposal while the caller holds every store/CAS lock."""
+    store_key = _scoped_key(proposal.model_id, proposal.context)
+    after = dict(before)
+    new_block = _compose_addendum(
+        store_key, before.get(store_key, ""), proposal.addendum_line)
+    after[store_key] = new_block
+    _write_addenda(after, path)
+    try:
+        meta = load_line_meta(path)
+        _upsert_line_meta(meta, store_key, proposal.addendum_line,
+                          provenance or {}, now=time.time())
+        _reconcile_meta(meta, store_key, _bullets(new_block))
+        _write_line_meta(meta, path)
+    except Exception:  # pragma: no cover -- sidecar is best-effort
+        log.debug("self_harness: line-meta update failed", exc_info=True)
+    return after
+
+
 def _apply_addendum(proposal: HarnessProposal, path: Path | None = None, *,
                     provenance: dict | None = None) -> None:
     """Write the accepted line into the model's addendum block (atomically), and
@@ -1521,27 +2075,11 @@ def _apply_addendum(proposal: HarnessProposal, path: Path | None = None, *,
     written. The sidecar update is best-effort: a failure there never perturbs
     the addenda store (the source of truth)."""
     p = path if path is not None else _store_path()
-    # A domain-scoped line lands under a composite store key; a model-wide line
-    # under the bare model id (byte-identical to the pre-scoping store). The meta
-    # line-id and reconciliation use the SAME key, so the sidecar stays consistent
-    # with whichever block the line actually lives in.
-    store_key = _scoped_key(proposal.model_id, proposal.context)
     from .file_lock import cross_process_lock
     with _lock, cross_process_lock(p), _store_rmw_lock(p):
         before = load_addenda(p)
-        after = dict(before)
-        new_block = _compose_addendum(
-            store_key, before.get(store_key, ""), proposal.addendum_line)
-        after[store_key] = new_block
-        _write_addenda(after, p)
-        try:
-            meta = load_line_meta(p)
-            _upsert_line_meta(meta, store_key, proposal.addendum_line,
-                              provenance or {}, now=time.time())
-            _reconcile_meta(meta, store_key, _bullets(new_block))
-            _write_line_meta(meta, p)
-        except Exception:  # pragma: no cover -- sidecar is best-effort
-            log.debug("self_harness: line-meta update failed", exc_info=True)
+        _apply_addendum_locked(
+            proposal, p, before, provenance=provenance)
 
 
 # ---- RECALL-USAGE TRACKING ------------------------------------------------
@@ -2139,19 +2677,25 @@ def _governance_readiness() -> tuple[bool, bool]:
 def _best_validated_candidate(
     sig: FailureSignature, *, first: HarnessProposal, propose_fn, k: int,
     held_in: list[str], held_out: list[str], score_with, score_without,
-    validate_kwargs: dict,
+    validate_kwargs: dict, holdout_rotations: int = 1,
 ) -> tuple[HarnessProposal | None, ValidationResult | None]:
-    """Best-of-N candidate selection (GEPA-style): generate up to ``k`` candidate
-    lines for one signature, validate each, and keep the strongest ACCEPTED one.
+    """Best-of-N with a sealed confirmation boundary.
 
     ``first`` is the proposal already in hand (counted once by the caller); up to
     ``k-1`` more are drawn from ``propose_fn`` and de-duped by normalized line, so
     a DETERMINISTIC proposer -- which returns the same line every call -- collapses
     to exactly the single-candidate result and ``k`` only ever matters for a
-    STOCHASTIC (e.g. LLM-at-temperature) proposer. "Best" is the highest held-out
-    delta (the generalization signal), ties broken toward more samples; operational
-    REGRESSIONS were already rejected inside ``validate_proposal``, so this only
-    PREFERS the strongest survivor. ``(None, None)`` if none pass."""
+    STOCHASTIC (e.g. LLM-at-temperature) proposer.
+
+    Candidates compete ONLY on ``held_in`` development evidence.  The winner is
+    frozen before the held-out scorer is called, then receives exactly one
+    confirmation evaluation (or a configured rotation battery).  Selecting the
+    maximum on held-out and promoting from that same score adaptively overfits the
+    test set; this boundary is what makes the reported held-out evidence honest.
+    ``(None, None)`` if development finds no survivor or confirmation fails.
+    """
+    if not held_in:
+        return None, None  # no development set -> best-of-N would search on test
     candidates = [first]
     for _ in range(max(0, k - 1)):
         p = propose_addendum(sig, propose_fn=propose_fn)
@@ -2159,22 +2703,42 @@ def _best_validated_candidate(
             candidates.append(p)
     seen: set[str] = set()
     best: tuple[tuple, HarnessProposal, ValidationResult] | None = None
+    dev_kwargs = dict(validate_kwargs)
+    dev_kwargs.update(min_held_out=0, confidence_z=0.0, metamorphic_fn=None)
     for proposal in candidates:
         norm = _norm_line(proposal.addendum_line)
         if norm in seen:
             continue
         seen.add(norm)
         vr = validate_proposal(
-            proposal, held_in=held_in, held_out=held_out,
-            score_with=score_with, score_without=score_without, **validate_kwargs)
+            proposal, held_in=held_in, held_out=[],
+            score_with=score_with, score_without=score_without, **dev_kwargs)
         if not vr.accepted:
             continue
-        key = (round(vr.held_out_delta, 6), vr.samples)
+        key = (round(vr.held_in_delta, 6), vr.samples)
         if best is None or key > best[0]:
             best = (key, proposal, vr)
     if best is None:
         return None, None
-    return best[1], best[2]
+    selected = best[1]
+    if holdout_rotations > 1 and held_out:
+        min_required = int(validate_kwargs.get("min_held_out", 0) or 0)
+        if min_required and len(held_out) < min_required:
+            return None, None
+        rotation_kwargs = dict(validate_kwargs)
+        # The floor applies to the complete sealed pool, not each smaller fold.
+        rotation_kwargs["min_held_out"] = 0
+        confirmed = _validate_rotated(
+            selected, pool=list(held_out), rotations=holdout_rotations,
+            score_with=score_with, score_without=score_without,
+            validate_kwargs=rotation_kwargs)
+    else:
+        confirmed = validate_proposal(
+            selected, held_in=held_in, held_out=held_out,
+            score_with=score_with, score_without=score_without, **validate_kwargs)
+    if not confirmed.accepted:
+        return None, None
+    return selected, confirmed
 
 
 def run_self_harness(
@@ -2188,14 +2752,17 @@ def run_self_harness(
     max_latency_factor: float | None = None, max_tool_calls_factor: float | None = None,
     min_support_by_class: dict[str, int] | None = None,
     candidates_per_signature: int = 1,
+    max_promotions_per_cycle: int = 0,
     semantic_mining: bool = False,
     similarity_fn: Callable[[str, str], float] | None = None,
     bucket_by: tuple[str, ...] = (),
     metamorphic_fn: Callable[[list[str]], list[str]] | None = None,
     metamorphic_tolerance: float = 0.0,
+    holdout_authorize: HoldoutAuthorize | None = None,
     holdout_rotations: int = 1,
     canary: bool = False,
     eval_for_context: Callable[[str], tuple | None] | None = None,
+    promotion_authorize: Callable[[], bool] | None = None,
 ) -> SelfHarnessReport:
     """One self-harness pass for ``model_id``: mine weaknesses, propose minimal
     edits, validate on held-in/held-out, and GATE each survivor through the
@@ -2217,6 +2784,10 @@ def run_self_harness(
     general pool (which under-credits a narrow line). It may also supply
     scorers a dry pass lacks, so a domain-keyed-only corpus still validates its
     scoped candidates. Default ``None`` = the historical single evaluation.
+    ``promotion_authorize`` is a final fail-closed evidence receipt checked
+    after validation and immediately before the governed apply transaction. It
+    lets risk-limited callers bind a just-completed evaluation to a fresh judge
+    calibration window; default ``None`` preserves historical behavior.
     Returns a :class:`SelfHarnessReport`. Never raises -- a learning pass must
     not perturb anything."""
     report = SelfHarnessReport(model_id=str(model_id))
@@ -2233,6 +2804,12 @@ def run_self_harness(
                              similarity_fn=sim_fn, bucket_by=bucket_by)
         report.mined = len(sigs)
         for sig in sigs:
+            if (max_promotions_per_cycle
+                    and report.promoted >= max_promotions_per_cycle):
+                report.skipped.append(
+                    "promotion cap reached; refresh deployed prompt before "
+                    "evaluating the next candidate")
+                break
             # The addendum block holds at most _MAX_LINES_PER_MODEL lines. Stop
             # once this pass has filled them: signatures are sorted STRONGEST
             # (highest support) first, so processing more would only let a weaker
@@ -2278,7 +2855,8 @@ def run_self_harness(
                 max_latency_factor=max_latency_factor,
                 max_tool_calls_factor=max_tool_calls_factor,
                 metamorphic_fn=metamorphic_fn,
-                metamorphic_tolerance=metamorphic_tolerance)
+                metamorphic_tolerance=metamorphic_tolerance,
+                holdout_authorize=holdout_authorize)
             if candidates_per_signature and candidates_per_signature > 1:
                 # Best-of-N: keep the strongest of several candidate lines for this
                 # signature (only meaningful with a stochastic proposer; a
@@ -2287,7 +2865,8 @@ def run_self_harness(
                     sig, first=proposal, propose_fn=propose_fn,
                     k=candidates_per_signature, held_in=hi, held_out=ho,
                     score_with=sw, score_without=swo,
-                    validate_kwargs=validate_kwargs)
+                    validate_kwargs=validate_kwargs,
+                    holdout_rotations=holdout_rotations)
                 if proposal is None or vr is None:
                     report.skipped.append(f"rejected (no candidate passed): {sig.signature}")
                     continue
@@ -2312,7 +2891,8 @@ def run_self_harness(
             report.validated += 1
 
             ok, why = _gate_and_apply(proposal, vr, controller=controller,
-                                      path=path, canary=canary)
+                                      path=path, canary=canary,
+                                      promotion_authorize=promotion_authorize)
             if not ok:
                 # Surface WHY the gate refused (e.g. "too few samples (3 < 5)",
                 # frozen verifier, disabled controller) so an operator with a
@@ -2340,41 +2920,126 @@ def run_self_harness(
 
 def _gate_and_apply(proposal: HarnessProposal, vr: ValidationResult, *,
                     controller=None, path: Path | None = None,
-                    canary: bool = False) -> tuple[bool, str]:
-    """Judge the validated proposal through ``self_improvement.consider()`` on
-    the ``prompt`` rung and apply it ONLY on a promoting verdict. Returns
-    ``(ok, reason)`` -- ``reason`` names the blocking gate when refused.
+                    canary: bool = False,
+                    promotion_authorize: Callable[[], bool] | None = None,
+                    ) -> tuple[bool, str]:
+    """Prepare, CAS-apply, and commit one governed prompt promotion.
 
-    Promotion therefore requires the self-improvement controller to be engaged
-    (``[self_improvement] enable``): self_harness mines/proposes/validates, but
-    the *promotion decision* -- evidence floor, calibration-freeze interlock,
-    reversibility -- belongs to the one governed gate every rung shares. The
-    rollback handle is captured BEFORE any write, so the reversibility gate is
-    satisfied and a refused candidate leaves the store untouched."""
+    The durable ledger never claims promotion before the exact intended addenda
+    generation is live. A crash after PREPARE is recoverable by comparing the
+    current full-store revision with the declared before/after revisions; a
+    third state remains in-doubt and blocks later writes instead of guessing.
+    """
     from . import self_improvement as si
+    from .file_lock import cross_process_lock
 
-    cand = si.Candidate(
-        rung="prompt",
-        summary=f"self-harness addendum [{proposal.model_id}]: {proposal.addendum_line}",
-        baseline_score=vr.baseline_score,
-        candidate_score=vr.candidate_score,
-        samples=vr.samples,
-        payload={"model_id": proposal.model_id, "line": proposal.addendum_line},
-        rollback=_rollback_handle(path),
-        provenance={"source": "self_harness", "signature": proposal.signature,
-                    "hypothesis": proposal.hypothesis or None},
-    )
-    verdict = si.consider(cand, controller=controller)
-    if not getattr(verdict, "ok", False):
-        reason = getattr(verdict, "blocking_reason", "") or "refused"
-        return False, reason  # gate refused -> nothing written
+    if promotion_authorize is not None:
+        try:
+            if promotion_authorize() is not True:
+                return False, "fresh evaluator-bound calibration receipt unavailable"
+        except Exception:
+            log.debug(
+                "self_harness: promotion evidence authorization failed",
+                exc_info=True)
+            return False, "fresh evaluator-bound calibration receipt unavailable"
+    if not si.enabled():
+        return False, "self-improvement disabled"
+    active = controller or si.shared()
+    p = path if path is not None else _store_path()
     apply_prov = {
         "signature": proposal.signature, "rationale": proposal.rationale,
         "hypothesis": proposal.hypothesis or None,
-        "held_out_delta": round(vr.held_out_delta, 4), "samples": vr.samples}
+        "held_out_delta": round(vr.held_out_delta, 4), "samples": vr.samples,
+        "held_in_samples": vr.held_in_samples,
+        "held_out_samples": vr.held_out_samples,
+        "effect_ci_low": (round(vr.effect_ci_low, 6)
+                          if vr.effect_ci_low is not None else None)}
     if canary:  # only stamp the flag when staging -- non-canary leaves meta clean
         apply_prov["canary"] = True
-    _apply_addendum(proposal, path=path, provenance=apply_prov)
+
+    store_key = _scoped_key(proposal.model_id, proposal.context)
+    with _lock, cross_process_lock(p), _store_rmw_lock(p):
+        try:
+            before_store = _load_addenda_strict(p)
+            before_revision = _addenda_artifact_revision(p, before_store)
+
+            def _inspect(identity: str):
+                if identity != before_revision.identity:
+                    raise si.PromotionLedgerError("unexpected artifact identity")
+                return before_revision
+
+            # Resolve a crash-left PREPARE before admitting another write to the
+            # same full-store artifact. The addenda lock stabilizes inspection.
+            active.recover_promotions(
+                _inspect, artifact_identity=before_revision.identity)
+            after_store = dict(before_store)
+            after_store[store_key] = _compose_addendum(
+                store_key, before_store.get(store_key, ""), proposal.addendum_line)
+            after_revision = _addenda_artifact_revision(p, after_store)
+        except Exception as exc:
+            log.warning(
+                "self_harness: cannot establish addenda transaction baseline: %s", exc)
+            return False, "addenda state or promotion recovery is unavailable"
+        if before_revision == after_revision:
+            return False, "candidate does not change the deployed addendum"
+
+        before_meta = load_line_meta(p)
+        rollback = _cas_rollback_handle(
+            p, before_store=before_store, after_store=after_store,
+            store_key=store_key, before_meta=before_meta)
+        cand = si.Candidate(
+            rung="prompt",
+            summary=(f"self-harness addendum [{proposal.model_id}]: "
+                     f"{proposal.addendum_line}"),
+            baseline_score=vr.baseline_score,
+            candidate_score=vr.candidate_score,
+            samples=vr.samples,
+            effect_ci_low=vr.effect_ci_low,
+            payload={
+                "model_id": proposal.model_id,
+                "line": proposal.addendum_line,
+                "artifact_identity": before_revision.identity,
+                "before_sha256": before_revision.sha256,
+                "after_sha256": after_revision.sha256,
+            },
+            rollback=rollback,
+            provenance={"source": "self_harness", "signature": proposal.signature,
+                        "hypothesis": proposal.hypothesis or None},
+        )
+        preparation = si.prepare_promotion(
+            cand, before=before_revision, after=after_revision,
+            controller=active)
+        if not preparation.ok:
+            return False, preparation.blocking_reason or "refused"
+
+        if preparation.committed:
+            current = _addenda_artifact_revision(p, _load_addenda_strict(p))
+            if current != after_revision:
+                return False, "committed promotion artifact is not deployed"
+        elif preparation.needs_apply:
+            try:
+                written = _apply_addendum_locked(
+                    proposal, p, before_store, provenance=apply_prov)
+                observed = _addenda_artifact_revision(p, _load_addenda_strict(p))
+                if written != after_store or observed != after_revision:
+                    raise RuntimeError("addenda CAS readback differs from prepared intent")
+            except Exception as exc:
+                log.warning("self_harness: addenda transaction apply failed: %s", exc)
+                try:
+                    observed = _addenda_artifact_revision(p, _load_addenda_strict(p))
+                    aborted = si.abort_prepared(
+                        preparation, artifact=observed,
+                        reason="addenda artifact application failed", controller=active)
+                    return False, aborted.blocking_reason or "artifact application failed"
+                except Exception:
+                    return False, "artifact application is in doubt; recovery required"
+            verdict = si.commit_prepared(
+                preparation, artifact=observed, controller=active)
+            if not verdict.ok:
+                return False, verdict.blocking_reason or "promotion commit failed"
+        else:
+            return False, "promotion transaction is not applicable"
+
     try:
         from .audit import EventKind, record
         # Record the DIAGNOSTIC PROVENANCE alongside the line: which weakness it
@@ -2388,7 +3053,10 @@ def _gate_and_apply(proposal: HarnessProposal, vr: ValidationResult, *,
                line=proposal.addendum_line, phase="apply",
                signature=proposal.signature, rationale=proposal.rationale,
                hypothesis=proposal.hypothesis or None,
-               held_out_delta=round(vr.held_out_delta, 4), samples=vr.samples)
+               held_out_delta=round(vr.held_out_delta, 4), samples=vr.samples,
+               held_in_samples=vr.held_in_samples,
+               held_out_samples=vr.held_out_samples,
+               effect_ci_low=vr.effect_ci_low)
     except Exception:  # pragma: no cover -- audit best-effort
         pass
     return True, "promoted"

@@ -1108,6 +1108,73 @@ def harness() -> None:
     """Inspect and roll back the self-harness learned operating guidance."""
 
 
+def _holdout_ledger_path(path: Path | None) -> Path:
+    if path is not None:
+        return path
+    from ..config import get_self_harness
+
+    configured = str(get_self_harness().get("holdout_ledger") or "").strip()
+    if not configured:
+        raise click.ClickException(
+            "no holdout ledger path supplied; pass --path or set "
+            "[self_harness] holdout_ledger")
+    return Path(configured)
+
+
+@harness.group("holdout")
+def harness_holdout() -> None:
+    """Provision or verify the risk-limited sealed-holdout query ledger."""
+
+
+@harness_holdout.command("provision")
+@click.option("--path", type=click.Path(path_type=Path, dir_okay=False),
+              default=None, help="Ledger path (default: configured holdout_ledger).")
+def harness_holdout_provision(path: Path | None) -> None:
+    """Create the durable query ledger exactly once; existing paths are refused."""
+    from ..self_harness_holdout import HoldoutLedgerError, HoldoutQueryLedger
+
+    target = _holdout_ledger_path(path)
+    try:
+        ledger = HoldoutQueryLedger.provision(target)
+        status = ledger.verify()
+    except (HoldoutLedgerError, OSError, ValueError) as exc:
+        raise click.ClickException(str(exc)) from exc
+    click.echo(f"provisioned holdout ledger: {target}")
+    click.echo(f"ledger id: {status.ledger_id}")
+    click.echo("record that ledger id in an independently protected audit system")
+
+
+@harness_holdout.command("verify")
+@click.option("--path", type=click.Path(path_type=Path, dir_okay=False),
+              default=None, help="Ledger path (default: configured holdout_ledger).")
+@click.option("--json", "as_json", is_flag=True, help="Emit machine-readable JSON.")
+def harness_holdout_verify(path: Path | None, as_json: bool) -> None:
+    """Verify the complete event chain, transactional tip, and query count."""
+    import json as _json
+
+    from ..self_harness_holdout import HoldoutLedgerError, HoldoutQueryLedger
+
+    target = _holdout_ledger_path(path)
+    try:
+        status = HoldoutQueryLedger(target).verify()
+    except (HoldoutLedgerError, OSError, ValueError) as exc:
+        raise click.ClickException(str(exc)) from exc
+    payload = {
+        "path": str(target),
+        "ledger_id": status.ledger_id,
+        "events": status.ledger_events,
+        "queries": status.queries,
+        "tip_sha256": status.ledger_tip_sha256,
+    }
+    if as_json:
+        click.echo(_json.dumps(payload, sort_keys=True))
+        return
+    click.echo(f"verified holdout ledger: {target}")
+    click.echo(f"ledger id: {status.ledger_id}")
+    click.echo(f"events: {status.ledger_events}  queries: {status.queries}")
+    click.echo(f"tip sha256: {status.ledger_tip_sha256 or '(empty ledger)'}")
+
+
 @harness.command("show")
 @click.option("--model", default=None, help="Only show this model's guidance.")
 @click.option("--json", "as_json", is_flag=True, help="Emit JSON.")
@@ -1331,6 +1398,13 @@ def _echo_harness_cycle(report, retired: int) -> None:
 @click.option("--model", default=None, help="Model to run for (default: orchestrator).")
 @click.option("--all-models", is_flag=True,
               help="Run for every configured role model (the whole fleet), not just one.")
+@click.option(
+    "--system-prompt-file", type=click.Path(
+        exists=True, file_okay=True, dir_okay=False, readable=True, path_type=Path),
+    default=None,
+    help=("Exact deployed system-prompt snapshot for both A/B arms; required by "
+          "risk-limited automatic evaluation."),
+)
 @click.option("--limit", type=int, default=500,
               help="Max recent reflexions to scan for weaknesses.")
 @click.option("--retire/--no-retire", default=True,
@@ -1339,16 +1413,17 @@ def _echo_harness_cycle(report, retired: int) -> None:
               help="Stage this run's promotions as canaries: recalled on probation, "
                    "graduated/demoted from real run outcomes "
                    "(default: [self_harness] promote_as_canary).")
-def harness_run(model: str | None, all_models: bool, limit: int, retire: bool,
-                canary: bool) -> None:
+def harness_run(model: str | None, all_models: bool, system_prompt_file: Path | None,
+                limit: int, retire: bool, canary: bool) -> None:
     """Run one governed self-harness cycle: mine → propose → validate → gate,
     then retire stale guidance. The on-demand / scheduled entry point.
 
-    Without a live A/B scorer (a real model + eval harness, injected
-    programmatically via run_self_harness_cycle — a real evaluation needs a real
-    model) this is a DRY pass that writes no NEW guidance; stale-line retirement
-    still runs. Promotion also requires [self_improvement] enable (the shared
-    governed gate). Safe to schedule: it never perturbs a run.
+    With ``eval_corpus`` configured, the cycle builds the live A/B evaluator.
+    Risk-limited evaluation additionally requires ``--system-prompt-file`` so
+    the baseline is the exact deployed prompt, not a generic helper prompt.
+    Without a live evaluator this is a DRY pass that writes no NEW guidance;
+    stale-line retirement still runs. Promotion also requires [self_improvement]
+    enable (the shared governed gate). Safe to schedule: it never perturbs a run.
 
     --all-models runs the cycle for EVERY distinct configured role model so worker
     models learn their own harness, not just the orchestrator.
@@ -1362,9 +1437,23 @@ def harness_run(model: str | None, all_models: bool, limit: int, retire: bool,
     # The flag STAGES; leaving it off defers to [self_harness] promote_as_canary
     # (None = config decides), so a scheduled `run` keeps the operator's default.
     stage = True if canary else None
+    evaluation_system = None
+    if system_prompt_file is not None:
+        try:
+            with system_prompt_file.open("rb") as prompt_stream:
+                raw = prompt_stream.read(1024 * 1024 + 1)
+            if len(raw) > 1024 * 1024:
+                raise ValueError("system prompt exceeds the 1 MiB limit")
+            evaluation_system = raw.decode("utf-8")
+            if not evaluation_system.strip() or "\x00" in evaluation_system:
+                raise ValueError("system prompt must be non-empty UTF-8 text without NULs")
+        except (OSError, UnicodeError, ValueError) as exc:
+            raise click.ClickException(
+                f"cannot read deployed system prompt: {exc}") from exc
     if all_models:
         results = runner.run_self_harness_all_models(limit=limit, retire=retire,
-                                                     canary=stage)
+                                                     canary=stage,
+                                                     evaluation_system=evaluation_system)
         if not results:
             click.echo("no configured role models to run.")
             return
@@ -1372,7 +1461,8 @@ def harness_run(model: str | None, all_models: bool, limit: int, retire: bool,
             _echo_harness_cycle(report, retired)
         return
     report, retired = runner.run_self_harness_cycle(model_id=model, limit=limit,
-                                                    retire=retire, canary=stage)
+                                                    retire=retire, canary=stage,
+                                                    evaluation_system=evaluation_system)
     _echo_harness_cycle(report, retired)
 
 

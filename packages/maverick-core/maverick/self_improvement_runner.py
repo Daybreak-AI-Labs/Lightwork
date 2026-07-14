@@ -28,6 +28,8 @@ from __future__ import annotations
 import logging
 import math
 import time
+import unicodedata
+import uuid
 from collections.abc import Callable, Mapping
 
 from .si_producers import ToolOutcomeTracker, propose_policy, propose_prompt, propose_tool
@@ -38,6 +40,7 @@ log = logging.getLogger(__name__)
 # -- calibration: arm the verifier-drift interlock from any ground truth -----
 
 def collect_calibration(confidence: float, correct: bool, *, source: str = "auto",
+                        evaluator_id: str = "",
                         enabled_fn: Callable[[], bool] | None = None) -> bool:
     """Record a ``(verifier_confidence, ground_truth)`` sample when collection is on.
 
@@ -51,7 +54,9 @@ def collect_calibration(confidence: float, correct: bool, *, source: str = "auto
         on = enabled_fn() if enabled_fn is not None else calibration.collect_from_coding_enabled()
         if not on:
             return False
-        return bool(calibration.record_sample(float(confidence), bool(correct), source=source))
+        return bool(calibration.record_sample(
+            float(confidence), bool(correct), source=source,
+            evaluator_id=evaluator_id))
     except Exception:  # pragma: no cover -- never block a run on calibration capture
         log.debug("calibration capture failed", exc_info=True)
         return False
@@ -91,36 +96,165 @@ def review_generated_tools(names, tracker: ToolOutcomeTracker, *, baseline_succe
 
 # -- judgment: a training set for the small reward head (Phase 1) ------------
 
-def build_prm_examples(store, *, limit: int = 10_000) -> list[dict]:
-    """Turn captured trajectory steps into ``{features, promise, progress}`` rows.
+def build_prm_examples(  # noqa: C901 - trust validation stays at the corpus boundary
+    store, *, limit: int = 10_000,
+    trusted_labels: Mapping[object, Mapping[str, object]] | None = None,
+    trusted_outcome_sources: frozenset[str] | None = None,
+) -> list[dict]:
+    """Build outcome-supervised PRM rows without recycling PRM predictions.
 
-    Model-agnostic: ``features`` is the deterministic 12-vector
-    ``prm.step_features`` builds from a step (role one-hot, tool outcome, error,
-    finality, ...). These rows train the LearnedPRM *head* (a tiny MLP) -- the
-    judgment rung -- with no LLM training involved. Only steps that carry a
-    promise label are emitted.
+    A captured step's ``promise`` and ``progress`` fields are predictions made by
+    the currently active PRM.  They are features of the historical decision, not
+    labels, and are deliberately ignored here.  An episode is emitted only when
+    it has either:
+
+    * a delayed terminal ``outcome`` whose ``outcome_source`` is explicitly
+      trusted and whose ``outcome_verified_at`` is no earlier than the episode;
+      or
+    * a caller-supplied ``trusted_labels`` entry.  Passing that mapping is an
+      explicit trust boundary: the caller is responsible for authenticating its
+      provenance. Entries are keyed by ``(goal_id, episode_id)`` or
+      ``(task_id, episode_id)`` and contain ``outcome``, ``source``, and
+      ``verified_at``. Requiring an episode key prevents one task-level label
+      from being copied across independent attempts.
+
+    The terminal outcome is a Monte-Carlo promise/value target for every step in
+    the episode. ``progress`` remains unlabeled unless the trusted entry supplies
+    it; inventing a progress target from verifier confidence would recreate the
+    circular training bug.  Identity and event/label time are retained so the
+    verifier head can perform a leakage-resistant group/temporal split.
     """
     try:
         from .prm import StepContext, step_features
     except Exception:  # pragma: no cover
         return []
-    rows: list[dict] = []
-    for s in store.iter_steps(limit=limit):
-        if s.promise is None:
-            continue
+
+    # Stored source names are ordinary trajectory metadata, not attestations.
+    # Trust none by default; a caller that has authenticated a native producer
+    # must opt into its exact source, or supply independently authenticated
+    # ``trusted_labels``. This prevents an agent-written ``source='tests'``
+    # string from becoming its own reward label.
+    if trusted_outcome_sources is None:
+        trusted_outcome_sources = frozenset()
+    allowed_sources = {str(v).strip().lower() for v in trusted_outcome_sources if str(v).strip()}
+    explicit = trusted_labels or {}
+
+    def _finite(value) -> float | None:
         try:
-            ctx = StepContext(
-                goal_id=int(s.goal_id or 0), step_index=int(s.step or 0), role=s.role or "other",
-                tool_name=(s.tool or None), tool_succeeded=s.tool_succeeded,
-                is_final=bool(s.is_final), error=(s.error or None), prior_step_score=0.5,
-            )
-            rows.append({
-                "features": step_features(ctx),
-                "promise": float(s.promise),
-                "progress": float(s.progress) if s.progress is not None else 0.0,
-            })
-        except Exception:  # pragma: no cover -- skip a malformed row, never crash
+            number = float(value)
+        except (TypeError, ValueError):
+            return None
+        return number if math.isfinite(number) else None
+
+    def _bounded(value) -> float | None:
+        number = _finite(value)
+        return number if number is not None and 0.0 <= number <= 1.0 else None
+
+    try:
+        captured = list(store.iter_steps(limit=limit))
+    except Exception:  # pragma: no cover -- an unavailable store is no corpus
+        return []
+
+    episodes: dict[tuple[int, int], list] = {}
+    for step in captured:
+        try:
+            key = (int(step.goal_id or 0), int(step.episode_id or 0))
+        except (TypeError, ValueError):
             continue
+        episodes.setdefault(key, []).append(step)
+
+    rows: list[dict] = []
+    for (goal_id, episode_id), episode in episodes.items():
+        ordered = sorted(
+            episode,
+            key=lambda s: (_finite(getattr(s, "ts", None)) or 0.0,
+                           int(getattr(s, "step", 0) or 0)),
+        )
+        episode_end = max((_finite(getattr(s, "ts", None)) or 0.0 for s in ordered), default=0.0)
+        task_ids = {
+            str(getattr(s, "task_id", "") or "").strip()
+            for s in ordered if str(getattr(s, "task_id", "") or "").strip()
+        }
+        # Never let one task's terminal outcome label another task's steps just
+        # because both were recorded under the same episode key.
+        if len(task_ids) > 1:
+            continue
+        task_id = next(iter(task_ids), str(goal_id))
+
+        # An injected label mapping is explicit trusted input.  Native stored
+        # outcomes require both independent-source provenance and delayed time.
+        matching_labels = [explicit.get(key) for key in (
+            (goal_id, episode_id), (task_id, episode_id))
+            if isinstance(explicit.get(key), Mapping)]
+        if len(matching_labels) > 1 and dict(matching_labels[0]) != dict(matching_labels[1]):
+            continue
+        label = matching_labels[0] if matching_labels else None
+        label_kind = "explicit_trusted" if label is not None else "verified_outcome"
+
+        if label is None:
+            candidates = []
+            for s in ordered:
+                outcome = _bounded(getattr(s, "outcome", None))
+                source = str(getattr(s, "outcome_source", "") or "").strip().lower()
+                verified_at = _finite(getattr(s, "outcome_verified_at", None))
+                if (bool(getattr(s, "is_final", False))
+                        and outcome is not None and source in allowed_sources
+                        and verified_at is not None and verified_at >= episode_end):
+                    candidates.append((verified_at, outcome, source))
+            if not candidates:
+                continue
+            verified_at, outcome, source = max(candidates, key=lambda item: item[0])
+            promise_label = outcome
+            progress_label = None
+        else:
+            outcome = _bounded(label.get("outcome"))
+            source = str(label.get("source") or "").strip()
+            verified_at = _finite(label.get("verified_at"))
+            if (outcome is None or not source or verified_at is None
+                    or verified_at < episode_end):
+                continue
+            promise_label = _bounded(label.get("promise"))
+            if promise_label is None:
+                promise_label = outcome
+            progress_label = _bounded(label.get("progress"))
+
+        outcome_id = f"{task_id}:{episode_id}:{source}:{verified_at:.6f}"
+        for s in ordered:
+            event_ts = _finite(getattr(s, "ts", None))
+            if event_ts is None:
+                continue
+            try:
+                ctx = StepContext(
+                    goal_id=goal_id, step_index=int(s.step or 0), role=s.role or "other",
+                    tool_name=(s.tool or None), tool_succeeded=s.tool_succeeded,
+                    is_final=bool(s.is_final), error=(s.error or None), prior_step_score=0.5,
+                )
+                rows.append({
+                    "features": step_features(ctx),
+                    "promise": promise_label,
+                    "progress": progress_label,
+                    "goal_id": goal_id,
+                    "task_id": task_id,
+                    "episode_id": episode_id,
+                    "step": int(s.step or 0),
+                    "ts": event_ts,
+                    "outcome": outcome,
+                    "outcome_id": outcome_id,
+                    "outcome_source": source,
+                    "outcome_verified_at": verified_at,
+                    "label_kind": label_kind,
+                })
+            except Exception:  # pragma: no cover -- skip malformed steps only
+                continue
+    # Equalize task influence. A verbose/model-controlled trajectory may expose
+    # useful within-task process features, but it cannot receive more aggregate
+    # training weight or promotion evidence than a concise task.
+    per_task: dict[str, int] = {}
+    for row in rows:
+        key = str(row["task_id"])
+        per_task[key] = per_task.get(key, 0) + 1
+    for row in rows:
+        row["weight"] = 1.0 / per_task[str(row["task_id"])]
     return rows
 
 
@@ -140,6 +274,28 @@ def emit_strategy_candidate(kind: str, summary: str, baseline: float, candidate:
 
 # -- self-harness: learn a model-specific harness addendum (Phase 4 sibling) --
 
+def _risk_calibration_boundary(
+    settings: Mapping[str, object], *, scoring: bool,
+    evaluator_id: str | None,
+) -> tuple[str | None, Callable[[], bool] | None]:
+    """Preflight calibration and build the final post-eval receipt check."""
+    if not _fresh_calibration_receipt(settings):
+        return ("risk-limited promotion requires a fresh adequate calibration "
+                "receipt", None)
+    if not bool(settings.get("risk_limited")) or not scoring:
+        return None, None
+    bound_id = str(evaluator_id or "").strip()
+    if not bound_id:
+        return "risk-limited promotion requires an exact evaluator identity", None
+    evidence_since = time.time()
+
+    def _authorize_promotion() -> bool:
+        return _refresh_bound_calibration_receipt(
+            settings, evaluator_id=bound_id, evidence_since=evidence_since)
+
+    return None, _authorize_promotion
+
+
 def run_self_harness_pass(
     reflexions=None, *, model_id: str | None = None,
     held_in=None, held_out=None,
@@ -152,7 +308,9 @@ def run_self_harness_pass(
     metamorphic_fn=None, metamorphic_tolerance: float | None = None,
     holdout_rotations: int | None = None,
     canary: bool | None = None,
+    holdout_authorize=None,
     eval_for_context=None,
+    calibration_evaluator_id: str | None = None,
 ):
     """The automatic entry point for the self-harness loop (mine -> propose ->
     validate -> gate), to be called by a scheduler / the self-improvement loop.
@@ -178,6 +336,35 @@ def run_self_harness_pass(
         if not self_harness.enabled():
             return self_harness.SelfHarnessReport(model_id=str(model_id or ""))
         st = self_harness.settings()
+        if st.get("_config_valid") is not True:
+            report = self_harness.SelfHarnessReport(model_id=str(model_id or ""))
+            report.skipped.append(
+                "self-harness configuration could not be resolved safely")
+            return report
+        calibration_reason, promotion_authorize = _risk_calibration_boundary(
+            st,
+            scoring=(score_with is not None or score_without is not None
+                     or eval_for_context is not None),
+            evaluator_id=calibration_evaluator_id)
+        if calibration_reason is not None:
+            report = self_harness.SelfHarnessReport(model_id=str(model_id or ""))
+            report.skipped.append(calibration_reason)
+            return report
+        live_evaluation = (
+            score_with is not None or score_without is not None
+            or eval_for_context is not None)
+        if (st.get("risk_limited") and live_evaluation
+                and holdout_authorize is None):
+            report = self_harness.SelfHarnessReport(model_id=str(model_id or ""))
+            report.skipped.append(
+                "risk-limited promotion requires sealed holdout query authorization")
+            return report
+        if (st.get("risk_limited") and live_evaluation
+                and metamorphic_fn is None):
+            report = self_harness.SelfHarnessReport(model_id=str(model_id or ""))
+            report.skipped.append(
+                "risk-limited promotion requires a bound metamorphic evaluator")
+            return report
         floors = _validation_floors(st)
         if min_support is None:
             min_support = st["min_support"]
@@ -199,6 +386,30 @@ def run_self_harness_pass(
             canary = st.get("promote_as_canary", False)
         if metamorphic_tolerance is None:
             metamorphic_tolerance = floors["metamorphic_tolerance"]
+        if st.get("risk_limited"):
+            # Public Python arguments are not an escape hatch from the risk
+            # contract.  Clamp every override that could reduce evidence,
+            # increase search multiplicity, bypass canary staging, or tolerate
+            # metamorphic regression. Invalid values fall back to the profile.
+            min_support = (
+                max(st["min_support"], min_support)
+                if isinstance(min_support, int) and not isinstance(min_support, bool)
+                else st["min_support"])
+            min_delta = (
+                max(floors["min_delta"], float(min_delta))
+                if isinstance(min_delta, (int, float))
+                and not isinstance(min_delta, bool) and math.isfinite(float(min_delta))
+                else floors["min_delta"])
+            min_held_out = (
+                max(floors["min_held_out"], min_held_out)
+                if isinstance(min_held_out, int)
+                and not isinstance(min_held_out, bool)
+                else floors["min_held_out"])
+            require_held_out = True
+            candidates_per_signature = st["candidates_per_signature"]
+            holdout_rotations = 1
+            canary = True
+            metamorphic_tolerance = 0.0
         if not model_id:
             from .llm import model_for_role
             model_id = model_for_role("orchestrator")
@@ -216,15 +427,107 @@ def run_self_harness_pass(
             max_tool_calls_factor=floors["max_tool_calls_factor"],
             min_support_by_class=st["min_support_by_class"],
             candidates_per_signature=candidates_per_signature,
+            max_promotions_per_cycle=st.get("max_promotions_per_cycle", 0),
             semantic_mining=semantic_mining, similarity_fn=similarity_fn,
             bucket_by=bucket_by, metamorphic_fn=metamorphic_fn,
             metamorphic_tolerance=metamorphic_tolerance,
             holdout_rotations=holdout_rotations, canary=bool(canary),
-            eval_for_context=eval_for_context)
+            holdout_authorize=holdout_authorize,
+            eval_for_context=eval_for_context,
+            promotion_authorize=promotion_authorize)
     except Exception:  # pragma: no cover -- learning never perturbs a run
         log.debug("self-harness pass failed", exc_info=True)
         from . import self_harness
         return self_harness.SelfHarnessReport(model_id=str(model_id or ""))
+
+
+def _fresh_calibration_receipt(
+    settings: Mapping[str, object], *, now: float | None = None,
+    evaluator_id: str | None = None, evidence_since: float | None = None,
+) -> bool:
+    """Require a structurally valid, recent risk-limited calibration receipt.
+
+    The initial cycle check may read the general calibration verdict
+    (``evaluator_id=None``).  The final pre-promotion check supplies an exact
+    evaluator identity and current-cycle evidence boundary, which selects the
+    separate Self-Harness receipt and prevents a stale/different judge verdict
+    from authorizing a promotion.
+    """
+    if not bool(settings.get("risk_limited")):
+        return True
+    try:
+        max_age = float(settings.get("calibration_max_age_hours", 24.0)) * 3600.0
+        if not math.isfinite(max_age) or max_age <= 0:
+            return False
+        from . import calibration
+        receipt_path = (calibration._risk_verdict_path()
+                        if evaluator_id is not None else None)
+        verdict = (calibration._load_verdict(receipt_path)
+                   if receipt_path is not None else calibration._load_verdict())
+        if not isinstance(verdict, Mapping) or verdict.get("adequate") is not True:
+            return False
+        stamp = float(verdict.get("ts"))
+        sample_n = verdict.get("n")
+        n_correct = verdict.get("n_correct")
+        n_incorrect = verdict.get("n_incorrect")
+        if any(not isinstance(value, int) or isinstance(value, bool)
+               for value in (sample_n, n_correct, n_incorrect)):
+            return False
+        calibration_settings = calibration._settings()
+        min_samples = max(
+            20, int(calibration_settings.get("min_samples", 20)))
+        min_discrimination = max(
+            0.15, float(calibration_settings.get("min_discrimination", 0.15)))
+        discrimination = float(verdict.get("discrimination"))
+        brier = float(verdict.get("brier"))
+        natural_n = n_correct + n_incorrect
+        if (natural_n < min_samples or n_correct <= 0 or n_incorrect <= 0
+                or n_correct + n_incorrect > sample_n
+                or not math.isfinite(discrimination)
+                or discrimination < min_discrimination or discrimination > 1.0
+                or not math.isfinite(brier) or not 0.0 <= brier <= 1.0):
+            return False
+        current = time.time() if now is None else float(now)
+        if (not math.isfinite(current) or not math.isfinite(stamp)
+                or not 0.0 <= current - stamp <= max_age):
+            return False
+        if evaluator_id is None:
+            return True
+        bound_id = str(evaluator_id or "").strip()
+        if (not bound_id
+                or verdict.get("schema") != "maverick-calibration-receipt-v2"
+                or str(verdict.get("evaluator_id") or "") != bound_id):
+            return False
+        sample_min = float(verdict.get("sample_min_ts"))
+        sample_max = float(verdict.get("sample_max_ts"))
+        required_start = (0.0 if evidence_since is None
+                          else float(evidence_since))
+        return (all(math.isfinite(value)
+                    for value in (sample_min, sample_max, required_start))
+                and required_start <= sample_min <= sample_max <= stamp
+                and float(verdict.get("evidence_since")) == required_start)
+    except (OSError, TypeError, ValueError, OverflowError):
+        return False
+
+
+def _refresh_bound_calibration_receipt(
+    settings: Mapping[str, object], *, evaluator_id: str,
+    evidence_since: float,
+) -> bool:
+    """Reassess the exact judge after this pass and verify a current watermark."""
+    bound_id = str(evaluator_id or "").strip()
+    try:
+        if not bound_id or not math.isfinite(float(evidence_since)):
+            return False
+        from . import calibration
+        calibration.run_assessment(
+            verdict_path=calibration._risk_verdict_path(),
+            evaluator_id=bound_id, since=float(evidence_since))
+        return _fresh_calibration_receipt(
+            settings, evaluator_id=bound_id,
+            evidence_since=float(evidence_since))
+    except (OSError, TypeError, ValueError, OverflowError):
+        return False
 
 
 def _validation_floors(st: dict) -> dict:
@@ -240,9 +543,98 @@ def _validation_floors(st: dict) -> dict:
         metamorphic_tolerance=st.get("metamorphic_tolerance", 0.0))
 
 
+def _normalize_eval_manifest(raw: object) -> dict[str, list[dict[str, str]]]:
+    """Normalize one already-read raw corpus snapshot for evaluation.
+
+    Risk-limited cycles hash the raw manifest and evaluate this derived view of
+    the *same object*. Reopening the path after authorization would let an
+    atomic file swap authorize corpus A while exposing corpus B to the judge.
+    """
+    if not isinstance(raw, Mapping):
+        return {}
+    out: dict[str, list[dict[str, str]]] = {}
+    for key, rows in raw.items():
+        if not isinstance(rows, list):
+            continue
+        cases = []
+        for row in rows:
+            if isinstance(row, Mapping) and str(row.get("goal") or "").strip():
+                cases.append({
+                    "goal": str(row["goal"]),
+                    "expected": str(row.get("expected") or ""),
+                })
+        if cases:
+            out[str(key)] = cases
+    return out
+
+
+def _effective_eval_index(raw: object) -> dict[str, str]:
+    """Validate the usable corpus and index its unique goal/label semantics.
+
+    Non-risk loading remains tolerant, but a sealed family cannot be ambiguous:
+    normalized duplicate goals inside one scope, or any semantic goal reused
+    across scopes, fail closed before any query is authorized. Cross-scope reuse
+    could otherwise expose a task as development evidence in one context and as
+    sealed confirmation evidence in another.
+    """
+    corpus = _normalize_eval_manifest(raw)
+    if not corpus:
+        raise ValueError("evaluation corpus has no usable cases")
+    index: dict[str, str] = {}
+    global_identities: set[str] = set()
+    for scope, rows in corpus.items():
+        seen: set[str] = set()
+        for row in rows:
+            goal, expected = row["goal"], row["expected"]
+            identity = " ".join(
+                unicodedata.normalize("NFKC", goal).split()).casefold()
+            if (not identity or "\x00" in goal or "\x00" in expected
+                    or len(goal) > 32_768 or len(expected) > 32_768):
+                raise ValueError("evaluation corpus contains a malformed case")
+            if identity in seen:
+                raise ValueError(
+                    f"evaluation corpus scope {scope!r} contains duplicate goals")
+            seen.add(identity)
+            # Reusing one semantic task in two scopes can put it in a
+            # development split for one context and a sealed split for another.
+            # Reject the alias globally, even when its label agrees.
+            if identity in global_identities:
+                raise ValueError(
+                    "evaluation corpus reuses a normalized goal across scopes")
+            global_identities.add(identity)
+            index[goal] = expected
+    return index
+
+
+def _effective_eval_family(
+    index: Mapping[str, str], exposed_cases: list[str],
+) -> dict[str, object]:
+    """Canonical identity of the exact sealed set the evaluator will expose.
+
+    Corpus key order, row order, ignored metadata, and unrelated model/domain
+    scopes cannot mint a new budget for an unchanged holdout.  Labels remain in
+    the identity even though scorers receive goals as their lookup key.
+    """
+    if (not exposed_cases or len(set(exposed_cases)) != len(exposed_cases)
+            or any(not isinstance(case, str) or case not in index
+                   for case in exposed_cases)):
+        raise ValueError("sealed cases must be distinct goals from the corpus")
+    return {
+        "schema": "maverick-self-harness-effective-family-v2",
+        "cases": [
+            {"goal": goal, "expected": index[goal]}
+            for goal in sorted(exposed_cases)
+        ],
+    }
+
+
 def _auto_evaluator(model_id: str, *, corpus_path: str, held_out_frac: float = 0.3,
                     budget=None, judge_samples: int = 1,
-                    judge_unknown: bool = False):
+                    judge_unknown: bool = False, system_prefix: str = "",
+                    verifier_model: str | None = None,
+                    strict_judge: bool = False,
+                    calibration_evaluator_id: str | None = None,
+                    corpus_manifest: Mapping[str, object] | None = None):
     """Build ``(held_in, held_out, score_with, score_without)`` -- the LIVE A/B --
     from a configured eval corpus + the model's own LLM client, so the driver can
     actually PROMOTE rather than only dry-inspect. The candidate ``model_id``
@@ -254,22 +646,33 @@ def _auto_evaluator(model_id: str, *, corpus_path: str, held_out_frac: float = 0
     try:
         from . import self_harness_eval as ev
         from .llm import LLM, model_for_role
-        cases = ev.corpus_cases(ev.load_eval_corpus(corpus_path), model_id)
+        corpus = (
+            _normalize_eval_manifest(corpus_manifest)
+            if corpus_manifest is not None
+            else ev.load_eval_corpus(corpus_path)
+        )
+        cases = ev.corpus_cases(corpus, model_id)
         if not cases:
             return None
         held_in, held_out = ev.corpus_split(cases, held_out_frac=held_out_frac)
         if not held_out:
             return None
+        judge_model = verifier_model or model_for_role("verifier")
         score_with, score_without = ev.corpus_ab_scorers(
             cases,
-            run_fn=ev.llm_runner(LLM(model_id), budget=budget),
-            judge_fn=ev.llm_judge(LLM(model_for_role("verifier")), budget=budget,
-                                  samples=judge_samples),
-            judge_unknown=judge_unknown)
-        # The baseline arm ignores the candidate line: memoize it (averaged,
-        # clean-only) so best-of-N, rotation folds, efficacy review, and the
-        # transfer sweep all stop re-buying the same measurement.
-        return held_in, held_out, score_with, _memo_scorer(score_without)
+            run_fn=ev.llm_runner(
+                LLM(model_id), budget=budget, system_prefix=system_prefix),
+            judge_fn=ev.llm_judge(LLM(judge_model), budget=budget,
+                                  samples=judge_samples, strict=strict_judge,
+                                  evaluator_id=calibration_evaluator_id),
+            judge_unknown=judge_unknown, detailed=True)
+        # Replicate BOTH arms symmetrically.  Averaging only the baseline while a
+        # candidate gets one lucky draw biases promotion; strict replication also
+        # makes a mid-draw outage indeterminate instead of silently falling back
+        # to whichever arm happened to finish first.
+        return (held_in, held_out,
+                _memo_scorer(score_with, by_line=True, require_all_draws=True),
+                _memo_scorer(score_without, require_all_draws=True))
     except Exception:  # pragma: no cover -- a missing provider/corpus stays dry
         log.debug("self-harness auto-evaluator construction failed", exc_info=True)
         return None
@@ -288,7 +691,11 @@ def _domain_of_context(context: str) -> str:
 
 def _context_evaluator(model_id: str, *, corpus_path: str, budget=None,
                        judge_samples: int = 1, held_out_frac: float = 0.3,
-                       judge_unknown: bool = False):
+                       judge_unknown: bool = False, system_prefix: str = "",
+                       verifier_model: str | None = None,
+                       strict_judge: bool = False,
+                       calibration_evaluator_id: str | None = None,
+                       corpus_manifest: Mapping[str, object] | None = None):
     """Build the ``eval_for_context`` seam from the corpus: a domain-scoped
     signature (``"domain=finance"``) is validated against the corpus's
     ``finance``-keyed cases -- its own department's ground truth -- instead of
@@ -306,13 +713,20 @@ def _context_evaluator(model_id: str, *, corpus_path: str, budget=None,
     try:
         from . import self_harness_eval as ev
         from .llm import LLM, model_for_role
-        corpus = ev.load_eval_corpus(corpus_path)
+        corpus = (
+            _normalize_eval_manifest(corpus_manifest)
+            if corpus_manifest is not None
+            else ev.load_eval_corpus(corpus_path)
+        )
         domain_keys = {k for k in corpus if k != str(model_id)}
         if not domain_keys:
             return None
-        run_fn = ev.llm_runner(LLM(model_id), budget=budget)
-        judge_fn = ev.llm_judge(LLM(model_for_role("verifier")), budget=budget,
-                                samples=judge_samples)
+        run_fn = ev.llm_runner(
+            LLM(model_id), budget=budget, system_prefix=system_prefix)
+        judge_model = verifier_model or model_for_role("verifier")
+        judge_fn = ev.llm_judge(LLM(judge_model), budget=budget,
+                                samples=judge_samples, strict=strict_judge,
+                                evaluator_id=calibration_evaluator_id)
         cache: dict[str, tuple | None] = {}
 
         def _for_context(context: str):
@@ -327,8 +741,12 @@ def _context_evaluator(model_id: str, *, corpus_path: str, budget=None,
                 else:
                     sw, swo = ev.corpus_ab_scorers(
                         ev.corpus_cases(corpus, d), run_fn=run_fn,
-                        judge_fn=judge_fn, judge_unknown=judge_unknown)
-                    cache[d] = (held_in, held_out, sw, _memo_scorer(swo))
+                        judge_fn=judge_fn, judge_unknown=judge_unknown,
+                        detailed=True)
+                    cache[d] = (
+                        held_in, held_out,
+                        _memo_scorer(sw, by_line=True, require_all_draws=True),
+                        _memo_scorer(swo, require_all_draws=True))
             return cache[d]
 
         return _for_context
@@ -360,11 +778,113 @@ def _eval_budget(settings: dict):
         return None
 
 
-def run_self_harness_cycle(
+def _build_holdout_authorizer(
+    settings: Mapping[str, object], *, corpus_path: str,
+    model_id: str, evaluation_system: str,
+    verifier_model: str | None = None,
+    metamorphic_model: str | None = None,
+    held_out_frac: float = 0.3,
+    corpus_manifest: Mapping[str, object] | None = None,
+):
+    """Bind one cycle to an explicitly provisioned cross-cycle holdout ledger."""
+    from . import self_harness_eval as ev
+    from .llm import model_for_role
+    from .self_harness_holdout import (
+        AlphaBudget,
+        HoldoutQuery,
+        HoldoutQueryLedger,
+        fingerprint_manifest,
+    )
+
+    ledger_path = str(settings.get("holdout_ledger") or "").strip()
+    if not ledger_path:
+        raise ValueError("risk-limited holdout ledger is not configured")
+    raw_manifest = (
+        dict(corpus_manifest)
+        if corpus_manifest is not None
+        else ev._load_raw(corpus_path)
+    )
+    if not isinstance(raw_manifest, dict) or not raw_manifest:
+        raise ValueError("evaluation corpus manifest is unavailable")
+    effective_index = _effective_eval_index(raw_manifest)
+    ledger = HoldoutQueryLedger(ledger_path)
+    ledger_status = ledger.verify()
+    # One provisioned ledger is one statistical study. Every exact or
+    # overlapping case family in that study shares the same global query/alpha
+    # budget; corpus edits cannot mint a fresh allowance. Starting a new study
+    # requires the explicit, auditable act of provisioning a new ledger.
+    study_digest = fingerprint_manifest({
+        "schema": "maverick-self-harness-ledger-study-v1",
+        "ledger_id": ledger_status.ledger_id,
+    })
+    policy = AlphaBudget(
+        family_alpha=float(settings.get("holdout_family_alpha", 0.05)),
+        query_alpha=float(settings.get("holdout_query_alpha", 0.025)),
+        max_queries=int(settings.get("holdout_max_queries", 2)),
+    )
+    cycle_id = uuid.uuid4().hex
+    bound_verifier = str(verifier_model or model_for_role("verifier")).strip()
+    if not bound_verifier:
+        raise ValueError("verifier model is unavailable")
+    metamorphic_enabled = bool(settings.get("metamorphic"))
+    bound_metamorphic = ""
+    if metamorphic_enabled:
+        bound_metamorphic = str(
+            metamorphic_model or model_for_role("summarizer")
+        ).strip()
+        if not bound_metamorphic:
+            raise ValueError("metamorphic model is unavailable")
+    bound_evaluator_id = ev.judge_evaluator_identity(
+        bound_verifier, samples=int(settings.get("judge_samples", 1)),
+        strict=True)
+    evaluator_epoch = fingerprint_manifest({
+        "schema": "maverick-self-harness-evaluator-v3",
+        "candidate_model": str(model_id),
+        "verifier_model": bound_verifier,
+        "runner_protocol": "llm-runner-v1",
+        "judge_protocol": "llm-judge-v2-untrusted-json-opaque-verdict",
+        "judge_evaluator_id": bound_evaluator_id,
+        "judge_samples": int(settings.get("judge_samples", 1)),
+        "judge_unknown": metamorphic_enabled,
+        "held_out_frac": float(held_out_frac),
+        "metamorphic_enabled": metamorphic_enabled,
+        "metamorphic_protocol": (
+            "llm-paraphraser-v1" if metamorphic_enabled else ""
+        ),
+        "metamorphic_model": bound_metamorphic,
+        "deployed_system_sha256": fingerprint_manifest(str(evaluation_system)),
+    })
+    counter = 0
+
+    def _authorize(purpose: str, signature: str, cases: list[str]) -> float:
+        nonlocal counter
+        family_digest = fingerprint_manifest(
+            _effective_eval_family(effective_index, cases))
+        counter += 1
+        query = HoldoutQuery(
+            holdout_sha256=study_digest,
+            view_sha256=fingerprint_manifest({
+                "purpose": str(purpose),
+                "effective_family_sha256": family_digest,
+                "cases": sorted(cases),
+            }),
+            query_id=f"{cycle_id}:{counter}",
+            cycle_id=cycle_id,
+            signature=str(signature),
+            evaluator_epoch=evaluator_epoch,
+            purpose=str(purpose),
+        )
+        return ledger.authorize(query, policy).critical_z_two_sided
+
+    return _authorize
+
+
+def run_self_harness_cycle(  # noqa: C901 - one fail-closed orchestration boundary
     reflexions=None, *, model_id: str | None = None, limit: int = 500,
     retire: bool = True, retire_after_days: float | None = None,
     held_in=None, held_out=None, score_with=None, score_without=None,
-    propose_fn=None, controller=None, **pass_kwargs,
+    propose_fn=None, controller=None, evaluation_system: str | None = None,
+    **pass_kwargs,
 ):
     """One full DRIVER cycle -- a governed learning pass THEN stale-line
     retirement -- the unit a scheduler (cron / the self-improvement loop) invokes
@@ -389,6 +909,13 @@ def run_self_harness_cycle(
         # together, so the operator's cap bounds the whole cycle, not each
         # evaluator.
         eval_budget = _eval_budget(st) if st is not None else None
+        # Resolve evaluator identities once and reuse those exact values for
+        # holdout authorization and construction. Re-resolving a role between
+        # those steps creates a TOCTOU gap: the ledger can authorize judge A
+        # while judge B actually sees the sealed cases.
+        bound_verifier_model: str | None = None
+        bound_metamorphic_model: str | None = None
+        calibration_evaluator_id: str | None = None
         # AUTO-WIRE the live A/B from config so a scheduled cycle can actually
         # PROMOTE, not just dry-inspect: if the caller injected no scorers and
         # [self_harness] eval_corpus is set, build the model-generates /
@@ -397,8 +924,83 @@ def run_self_harness_cycle(
         if score_with is None and score_without is None and st is not None:
             corpus_path = st.get("eval_corpus")
             if corpus_path:
+                from . import self_harness_eval as eval_module
                 from .llm import model_for_role
                 model_id = model_id or model_for_role("orchestrator")
+                # One immutable-in-memory snapshot feeds both the holdout
+                # family digest and every evaluator built below. Never reopen
+                # a mutable corpus path after spending authorization for it.
+                corpus_manifest = eval_module._load_raw(str(corpus_path))
+                try:
+                    bound_verifier_model = str(
+                        model_for_role("verifier")
+                    ).strip() or None
+                except Exception:
+                    log.debug("self-harness verifier identity resolution failed",
+                              exc_info=True)
+                if (st.get("metamorphic")
+                        and pass_kwargs.get("metamorphic_fn") is None):
+                    try:
+                        bound_metamorphic_model = str(
+                            model_for_role("summarizer")
+                        ).strip() or None
+                    except Exception:
+                        log.debug(
+                            "self-harness paraphraser identity resolution failed",
+                            exc_info=True)
+                # Risk-limited evidence must compare the exact deployed prompt
+                # snapshot against that snapshot plus the candidate. A generic
+                # helper prompt is not a valid baseline for unattended change.
+                if st.get("risk_limited") and not str(evaluation_system or "").strip():
+                    report = self_harness.SelfHarnessReport(model_id=str(model_id))
+                    report.skipped.append(
+                        "risk-limited auto-evaluation requires deployed prompt snapshot")
+                    return report, 0
+                if st.get("risk_limited") and not bound_verifier_model:
+                    report = self_harness.SelfHarnessReport(model_id=str(model_id))
+                    report.skipped.append(
+                        "risk-limited auto-evaluation requires a bound verifier model")
+                    return report, 0
+                if st.get("risk_limited"):
+                    calibration_evaluator_id = eval_module.judge_evaluator_identity(
+                        str(bound_verifier_model),
+                        samples=int(st.get("judge_samples", 1)), strict=True)
+                    # The exact identity is reused by every evaluator and by the
+                    # final post-evaluation calibration receipt. A caller cannot
+                    # substitute a receipt for some other judge configuration.
+                    pass_kwargs["calibration_evaluator_id"] = (
+                        calibration_evaluator_id)
+                if (st.get("risk_limited") and st.get("metamorphic")
+                        and pass_kwargs.get("metamorphic_fn") is None
+                        and not bound_metamorphic_model):
+                    report = self_harness.SelfHarnessReport(model_id=str(model_id))
+                    report.skipped.append(
+                        "risk-limited metamorphic evaluation requires a bound "
+                        "paraphraser model")
+                    return report, 0
+                if (st.get("risk_limited")
+                        and pass_kwargs.get("metamorphic_fn") is not None
+                        and pass_kwargs.get("holdout_authorize") is None):
+                    report = self_harness.SelfHarnessReport(model_id=str(model_id))
+                    report.skipped.append(
+                        "risk-limited injected metamorphic evaluation requires a "
+                        "caller-supplied holdout authorizer bound to that transform")
+                    return report, 0
+                if st.get("risk_limited") and pass_kwargs.get(
+                        "holdout_authorize") is None:
+                    try:
+                        pass_kwargs["holdout_authorize"] = _build_holdout_authorizer(
+                            st, corpus_path=str(corpus_path), model_id=str(model_id),
+                            evaluation_system=str(evaluation_system),
+                            verifier_model=bound_verifier_model,
+                            metamorphic_model=bound_metamorphic_model,
+                            corpus_manifest=corpus_manifest)
+                    except Exception:
+                        report = self_harness.SelfHarnessReport(model_id=str(model_id))
+                        report.skipped.append(
+                            "risk-limited auto-evaluation requires a valid provisioned "
+                            "holdout ledger and remaining query budget")
+                        return report, 0
                 # With metamorphic validation on, paraphrased (non-corpus)
                 # goals must be JUDGEABLE, not indeterminate -- the LLM judge
                 # doesn't need the expected hint.
@@ -406,7 +1008,13 @@ def run_self_harness_cycle(
                 built = _auto_evaluator(model_id, corpus_path=corpus_path,
                                         judge_samples=st.get("judge_samples", 1),
                                         budget=eval_budget,
-                                        judge_unknown=judge_unknown)
+                                        judge_unknown=judge_unknown,
+                                        system_prefix=str(evaluation_system or ""),
+                                        verifier_model=bound_verifier_model,
+                                        strict_judge=bool(st.get("risk_limited")),
+                                        calibration_evaluator_id=(
+                                            calibration_evaluator_id),
+                                        corpus_manifest=corpus_manifest)
                 if built is not None:
                     held_in, held_out, score_with, score_without = built
                 # Scoped evaluation: the corpus's domain keys validate matching
@@ -417,9 +1025,22 @@ def run_self_harness_cycle(
                     efc = _context_evaluator(model_id, corpus_path=corpus_path,
                                              judge_samples=st.get("judge_samples", 1),
                                              budget=eval_budget,
-                                             judge_unknown=judge_unknown)
+                                             judge_unknown=judge_unknown,
+                                             system_prefix=str(evaluation_system or ""),
+                                             verifier_model=bound_verifier_model,
+                                             strict_judge=bool(st.get("risk_limited")),
+                                             calibration_evaluator_id=(
+                                                 calibration_evaluator_id),
+                                             corpus_manifest=corpus_manifest)
                     if efc is not None:
                         pass_kwargs["eval_for_context"] = efc
+        if (st is not None and st.get("risk_limited")
+                and score_with is not None and score_without is not None
+                and held_out and pass_kwargs.get("holdout_authorize") is None):
+            report = self_harness.SelfHarnessReport(model_id=str(model_id or ""))
+            report.skipped.append(
+                "risk-limited evaluation requires sealed holdout query authorization")
+            return report, 0
         # Metamorphic validation (opt-in, [self_harness] metamorphic): reject a
         # candidate whose lift does not survive PARAPHRASING the held-out cases
         # (overfit to exact wording). Built only when something will actually
@@ -429,11 +1050,24 @@ def run_self_harness_cycle(
             try:
                 from . import self_harness_eval as ev
                 from .llm import LLM, model_for_role
+                if not bound_metamorphic_model:
+                    bound_metamorphic_model = str(
+                        model_for_role("summarizer")
+                    ).strip() or None
+                if not bound_metamorphic_model:
+                    raise ValueError("metamorphic model is unavailable")
                 pass_kwargs["metamorphic_fn"] = ev.llm_paraphraser(
-                    LLM(model_for_role("summarizer")), budget=eval_budget)
-            except Exception:  # pragma: no cover -- no paraphraser = check off
+                    LLM(bound_metamorphic_model), budget=eval_budget)
+            except Exception:
                 log.debug("self-harness paraphraser construction failed",
                           exc_info=True)
+                if st.get("risk_limited"):
+                    report = self_harness.SelfHarnessReport(
+                        model_id=str(model_id or ""))
+                    report.skipped.append(
+                        "risk-limited metamorphic evaluation could not construct "
+                        "the authorized paraphraser")
+                    return report, 0
         report = run_self_harness_pass(
             reflexions, model_id=model_id, limit=limit,
             held_in=held_in, held_out=held_out, score_with=score_with,
@@ -462,7 +1096,10 @@ def run_self_harness_cycle(
                         min_outcomes=int((st or {}).get("relapse_min_outcomes", 5)))
             except Exception:  # pragma: no cover -- lifecycle never perturbs a run
                 log.debug("self-harness relapse review failed", exc_info=True)
-            if (self_harness.settings().get("efficacy_review")
+            if ((st or {}).get("risk_limited") and (st or {}).get("efficacy_review")):
+                report.skipped.append(
+                    "risk-limited efficacy review requires a separately budgeted live set")
+            elif (self_harness.settings().get("efficacy_review")
                     and score_with is not None and score_without is not None):
                 try:
                     cases = list(held_out or []) + list(held_in or [])
@@ -497,20 +1134,61 @@ def _finite_score(val) -> bool:
 
 def _avg_scores(a, b):
     """Mean of two scorer results (bare rates or mappings); numeric fields
-    present in both are averaged, anything else keeps ``a``'s value."""
+    present in both are averaged, anything else keeps ``a``'s value.
+
+    Replication reduces measurement variance but does *not* create new unique
+    held-out cases.  Detailed results therefore keep the per-case denominator
+    and fold replicate outcomes together instead of summing ``samples`` and
+    ``attempted`` (which would let three cases masquerade as six independent
+    observations at the promotion gate).
+    """
     if isinstance(a, Mapping) and isinstance(b, Mapping):
         out = dict(a)
+        a_draws = a.get("draws", 1)
+        b_draws = b.get("draws", 1)
+        if not isinstance(a_draws, int) or isinstance(a_draws, bool) or a_draws < 1:
+            a_draws = 1
+        if not isinstance(b_draws, int) or isinstance(b_draws, bool) or b_draws < 1:
+            b_draws = 1
+        total_draws = a_draws + b_draws
         for k in ("success", "cost", "latency", "tool_calls"):
             av, bv = a.get(k), b.get(k)
             if isinstance(av, (int, float)) and isinstance(bv, (int, float)):
-                out[k] = (av + bv) / 2
+                out[k] = (av * a_draws + bv * b_draws) / total_draws
+        # Both draws were requested over the same case list. Preserve that
+        # unique-case denominator; mismatched counts are marked incomplete and
+        # rejected by the validator.
+        for k in ("samples", "attempted"):
+            av, bv = a.get(k), b.get(k)
+            if isinstance(av, int) and isinstance(bv, int) and av == bv:
+                out[k] = av
+            elif isinstance(av, int) and isinstance(bv, int):
+                out[k] = min(av, bv)
+                out["complete"] = False
+        if isinstance(a.get("outcomes"), (list, tuple)) and isinstance(
+                b.get("outcomes"), (list, tuple)):
+            if len(a["outcomes"]) == len(b["outcomes"]):
+                out["outcomes"] = list(zip(a["outcomes"], b["outcomes"], strict=True))
+            else:
+                out["outcomes"] = []
+                out["complete"] = False
+        out["draws"] = total_draws
+        if "complete" in a or "complete" in b:
+            out["complete"] = (bool(out.get("complete", True))
+                               and bool(a.get("complete")) and bool(b.get("complete")))
+        if "clean" in a or "clean" in b:
+            out["clean"] = bool(a.get("clean")) and bool(b.get("clean"))
+        if "budget_exhausted" in a or "budget_exhausted" in b:
+            out["budget_exhausted"] = bool(a.get("budget_exhausted")) or bool(
+                b.get("budget_exhausted"))
         return out
     if isinstance(a, (int, float)) and isinstance(b, (int, float)):
         return (a + b) / 2
     return a
 
 
-def _memo_scorer(fn, *, draws: int = 2):
+def _memo_scorer(fn, *, draws: int = 2, by_line: bool = False,
+                 require_all_draws: bool = False):
     """Cache a scorer on its goals tuple. The BASELINE arm ignores the
     candidate line, yet ``validate_proposal`` re-scores it per candidate --
     with K candidates that is (K-1)x redundant LLM generations per pool, the
@@ -529,22 +1207,46 @@ def _memo_scorer(fn, *, draws: int = 2):
     def _clean() -> bool:
         return bool(getattr(fn, "last_clean", True))
 
+    def _mark_clean(value) -> bool:
+        if isinstance(value, Mapping) and "clean" in value:
+            # Neither channel may overrule the other: the structured payload
+            # describes case coverage, while ``last_clean`` carries provider
+            # degradation detected outside that payload.
+            return bool(value.get("clean")) and _clean()
+        return _clean()
+
+    def _indeterminate_like(value):
+        if isinstance(value, Mapping):
+            out = dict(value)
+            out.update(success=float("nan"), samples=0, complete=False, clean=False)
+            return out
+        return float("nan")
+
     def _scored(line, goals):
-        key = tuple(goals)
+        key = ((str(line), tuple(goals)) if by_line else tuple(goals))
         if key in cache:
-            return cache[key]
+            cached = cache[key]
+            _scored.last_clean = _mark_clean(cached)
+            return cached
         first = fn(line, goals)
-        if not (_finite_score(first) and _clean()):
+        first_clean = _finite_score(first) and _mark_clean(first)
+        _scored.last_clean = first_clean
+        if not first_clean:
             return first  # indeterminate/dirty: use once, never freeze
         val = first
         for _ in range(max(0, int(draws) - 1)):
             nxt = fn(line, goals)
-            if not (_finite_score(nxt) and _clean()):
+            if not (_finite_score(nxt) and _mark_clean(nxt)):
+                if require_all_draws:
+                    _scored.last_clean = False
+                    return _indeterminate_like(first)
                 return first  # keep the clean draw, don't freeze a mix
             val = _avg_scores(val, nxt)
         cache[key] = val
+        _scored.last_clean = _mark_clean(val)
         return val
 
+    _scored.last_clean = True
     return _scored
 
 
@@ -578,6 +1280,10 @@ def _transfer_context(st: dict, corpus_path: str):
     arm memoized, one eval-budget pot across everything, and the SAME floors +
     metamorphic/judge_unknown wiring the cycle applies -- a transferred line
     must clear the gate home-grown lines clear, not a weaker copy of it."""
+    if st.get("risk_limited"):
+        raise ValueError(
+            "risk-limited transfer requires explicit per-target deployed-prompt "
+            "snapshots and a separately budgeted holdout authorizer")
     budget = _eval_budget(st)
     judge_unknown = bool(st.get("metamorphic"))
     cache: dict[str, tuple | None] = {}
@@ -631,6 +1337,10 @@ def run_self_harness_transfer(source_model: str, *, targets=None,
         eval_for_target, validate_kwargs = (
             _context if _context is not None
             else _transfer_context(st, corpus_path))
+        if (st.get("risk_limited")
+                and not validate_kwargs.get("holdout_authorize")):
+            raise ValueError(
+                "risk-limited transfer context lacks holdout authorization")
         if targets is None:
             targets = harness_fleet_models()
         return self_harness.run_transfer(

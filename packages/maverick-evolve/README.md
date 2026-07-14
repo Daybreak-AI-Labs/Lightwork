@@ -1,29 +1,98 @@
 # maverick-evolve
 
-Governed self-evolution for Lightwork — the safe rungs of the ladder.
+Governed, config-only evolution for Lightwork.
 
-This package builds toward open-ended self-improvement **without** (yet) letting
-an agent rewrite its own kernel code. It provides the three foundations every
-safe self-evolving system needs first:
+The package separates adaptive development search from adoption evidence:
 
-- **`eval_harness`** (Stage 0) — a *trusted fitness function*. You cannot evolve
-  without a metric you believe; this scores an agent config against a held-out
-  set of cases. Pairs with `maverick.calibration` (freeze evolution when the
-  judge drifts) and `maverick.credit` (attribute outcomes to components).
-- **`archive`** (Stage 2) — a *diverse* archive of high-performing configs. Keeping
-  diversity (not just the single best) is the published trick for escaping the
-  "plateau"/local-optimum trap that naive self-improvement falls into.
-- **`search`** (Stage 1) — **config-only** evolutionary search: propose a mutated
-  config, score it on a held-out split, keep it only if it genuinely beats the
-  incumbent. Mutations are bounded to configuration (prompts, role roster,
-  workflow knobs) — they cannot escape the sandbox, so this rung is safe to run.
+- `eval_harness` evaluates immutable task snapshots with injected graders.
+- `search` performs bounded config mutation and keeps a diverse archive.
+- `metaproductive` is an experimental HGM-inspired search policy that treats a
+  lineage's ability to produce useful descendants as a search signal.
+- `runner` freezes one development champion and optionally compares it with the
+  original seed on an independent sealed confirmation set.
+- `adopt` performs lock-protected publication of a confirmed config.
 
-## Explicitly out of scope (for now)
+This is not unrestricted self-code modification. Candidate mutation stays
+inside the declared config space. Evolved code still requires an isolated
+runtime, capability controls, independent evaluation, and human-governed
+promotion.
 
-Code self-modification (the true Darwin-Gödel step) is **not** in this package.
-That rung needs an out-of-process sandbox runtime, hard capability bounds, and
-human-gated promotion; it is research-cadence and is intentionally deferred. The
-design rationale lives in `docs/research/`.
+## Risk-limited confirmation
 
-All of this is opt-in and depends on `maverick-agent`; nothing here runs unless
-an operator wires an evolution loop.
+`evolve_with_eval`, `evolve_metaproductive_with_eval`, and
+`evolve_continuous` accept a sealed `confirmation_cases` snapshot. Adaptive
+search never receives that snapshot or its scorer. Search fixes one champion,
+then the seed and champion each receive one counterbalanced evaluation per
+confirmation case. A tie, evaluator error, insufficient practical margin, or
+non-positive uncertainty-adjusted paired lift keeps the seed.
+
+Set `risk_limited=True` for the production-oriented contract. Before any
+development evaluation it requires:
+
+- sealed confirmation with at least 20 positive-weight cases by default;
+- distinct positive-weight prompts after Unicode/whitespace normalization;
+- a finite uncertainty threshold (`confirmation_confidence_z=1.96` by default);
+- SHA-256 `confirmation_family_id` and `confirmation_evaluator_id` bindings; and
+- a durable `confirmation_authorize(request)` callback that spends a
+  pre-registered holdout query before either arm receives a sealed case.
+
+The callback returns a short-lived `ConfirmationPermit` containing the exact
+request digest, authorized critical value, authorization id, durable ledger tip,
+and validity window. The request carries a fresh nonce plus both candidate ids,
+the sealed-family/evaluator digests, and the distinct case count, so a receipt
+cannot be replayed for another comparison. The runner uses the stricter of the
+permit and configured thresholds. The family and evaluator identities must bind
+the complete task/label manifest, grader implementation, model/system snapshots,
+study epoch, and query policy; prompts alone are not an evaluator identity.
+Continuous evolution defers archive publication until confirmation passes.
+The exact evaluator's calibration receipt must contain at least 20 natural
+correct/incorrect examples, is checked before exposure, and is checked again
+after sealed evaluation before a champion can be returned for publication.
+
+The non-risk path remains available for development compatibility. Its scores
+must not be described as independent final-test evidence.
+
+## Metaproductive development search
+
+`evolve_metaproductive_with_eval` decouples expansion budget from exact
+agent/case evaluation budget. It records each node/case observation at most
+once, samples expansion parents from complete-clade Beta posteriors, prioritizes
+under-evaluated nodes, and freezes the final development champion by a
+conservative Wilson lower bound.
+
+Outcomes are Bernoulli by default. `allow_fractional_outcomes=True` is an
+explicit heuristic mode; its Beta/Wilson quantities are search scores, not
+calibrated statistical evidence. A reused in-memory archive must be bound to an
+explicit `case_family_id` covering evaluator semantics; archives without that
+identity are deliberately non-resumable. Development case weights must be equal
+because the current posterior samples tasks uniformly; unequal weights are
+rejected rather than silently misrepresented. Duplicate or failed mutations
+still consume expansion budget, and tree/evidence inconsistencies fail closed.
+
+Clade observations overlap, so their posteriors are correlated. The policy is
+an exploration heuristic inspired by HGM, not a reproduction of HGM and not
+promotion proof. The ordinary sealed confirmation boundary remains mandatory
+for adoption.
+
+## Integrity boundaries
+
+- Archive envelopes use canonical JSON, full SHA-256 identities/checksums, size
+  bounds, finite numeric validation, and strict schema/version handling.
+- Resumed scores are observations only; active runs revalidate candidates and
+  reject configs outside the declared capability/config envelope.
+- Calibration backend errors freeze evolution. Risk-limited mode additionally
+  requires a fresh, evaluator-bound, internally coherent positive receipt,
+  applies its sample floor to the natural cohort rather than probe-inflated
+  totals, and never honors the `MAVERICK_LEARNING_FROZEN=0` development override.
+- Same-process adoption is serialized, and cross-process publication relies on
+  the shared strict file-locking layer.
+
+The local archive confirmation marker is checksummed and durably revoked before
+resumed revalidation, but it is not a signed, externally anchored, expiring
+promotion receipt. Adoption therefore remains an explicit operator action.
+
+These controls establish protocol behavior. They do not establish a
+"beyond-SOTA" result. That claim requires an equal-budget, multi-seed comparison
+against the strongest applicable baselines on a temporal sealed holdout, with a
+pre-registered margin and no safety regression. See
+`docs/research/2026-07-14-risk-limited-dgm-self-learning.md`.

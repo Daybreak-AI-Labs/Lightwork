@@ -15,6 +15,7 @@ department's live persona.
 from __future__ import annotations
 
 import shutil
+import threading
 from pathlib import Path
 
 from .archive import Archive
@@ -27,6 +28,7 @@ except ModuleNotFoundError:  # pragma: no cover -- Python 3.10
 # Keys adoption may overlay onto a pack. Capability scopes (allow_*, max_risk)
 # are deliberately excluded: evolution must never widen a security envelope.
 ADOPTABLE_KEYS = frozenset({"persona", "description", "models"})
+_adopt_lock = threading.Lock()
 
 
 def _toml_value(value) -> str:
@@ -113,9 +115,12 @@ def plan_adoption(
     config is left untouched.
     """
     archive = Archive.load(archive_path)
-    best = archive.best()
+    best = archive.confirmed_best()
     if best is None:
-        raise ValueError(f"archive {archive_path} has no candidates")
+        if archive.best() is None:
+            raise ValueError(f"archive {archive_path} has no candidates")
+        raise ValueError(
+            f"archive {archive_path} has no promotion-confirmed candidate")
     with open(pack_path, "rb") as f:
         pack = tomllib.load(f)
     wanted = set(keys) if keys else set(ADOPTABLE_KEYS)
@@ -151,20 +156,25 @@ def adopt_best(
     pack_path = Path(pack_path)
     dest_dir = Path(out_dir) if out_dir is not None else pack_path.parent
     dest = dest_dir / pack_path.name
-    # Idempotent: once an adopted pack exists at the destination, plan against
-    # THAT, so re-running with an unchanged archive best is a no-op instead of
-    # rewriting (and re-backing-up) the same content forever.
-    base = dest if dest.exists() else pack_path
-    adopted, changes = plan_adoption(archive_path, base, keys=keys)
-    if not changes:
-        return None
     dest_dir.mkdir(parents=True, exist_ok=True)
-    body = render_pack(adopted)
     # Serialize the whole back-up + write across processes: the .bak guard
     # (dest.exists() and not bak.exists()) is a TOCTOU, and the write used a
     # fixed ".tmp" -- two concurrent adoptions of the same dest would race both.
     from maverick.file_lock import atomic_write_text, cross_process_lock
-    with cross_process_lock(dest):
+    # ``cross_process_lock`` is advisory and older Windows runtimes may not
+    # provide the platform byte-range implementation. The local lock closes the
+    # same-process gap (CLI/tests/embedded workers) while the sidecar covers
+    # cooperating processes where supported.
+    with (_adopt_lock, cross_process_lock(dest),
+          cross_process_lock(archive_path)):
+        # Re-read both authority inputs and recompute the complete plan only
+        # after serialization. A pre-lock plan can overwrite a newer pack or
+        # adopt a champion whose confirmation was concurrently revoked.
+        base = dest if dest.exists() else pack_path
+        adopted, changes = plan_adoption(archive_path, base, keys=keys)
+        if not changes:
+            return None
+        body = render_pack(adopted)
         # Back up the PRISTINE pack once and never clobber it. With the default
         # out_dir (dest == pack_path), a second adoption used to copy the
         # already-adopted V1 over the .bak, destroying the original pack -- so the

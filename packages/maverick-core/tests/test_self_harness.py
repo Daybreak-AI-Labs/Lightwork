@@ -8,6 +8,9 @@ addendum is recalled into the prompt.
 from __future__ import annotations
 
 import json
+import math
+import time
+from pathlib import Path
 
 import pytest
 from maverick import self_harness as sh
@@ -78,9 +81,12 @@ def _sig_proposal():
 def test_validate_accepts_only_non_regressing_improvement():
     p = _sig_proposal()
     helps = sh.validate_proposal(
-        p, held_in=["a", "b"], held_out=["c", "d", "e"],
+        p, held_in=["a", "b"], held_out=["c", "d", "e", "f", "g"],
         score_with=lambda a, c: 0.9, score_without=lambda a, c: 0.5)
+    # Promotion evidence is the unseen split only; mined/development examples
+    # must not inflate the shared gate's sample floor.
     assert helps.accepted and helps.samples == 5
+    assert helps.held_in_samples == 2 and helps.held_out_samples == 5
     assert helps.baseline_score == 0.5 and helps.candidate_score == 0.9
 
 
@@ -97,6 +103,174 @@ def test_validate_rejects_pure_trade_and_no_op():
         p, held_in=["a"], held_out=["c"],
         score_with=lambda a, c: 0.5, score_without=lambda a, c: 0.5)
     assert not noop.accepted and "no improvement" in noop.reason
+
+
+def test_validate_rejects_dirty_or_partial_arm():
+    """A provider fallback or dropped case cannot manufacture A/B uplift."""
+    p = _sig_proposal()
+
+    def clean_with(_line, _cases):
+        clean_with.last_clean = True
+        return 1.0
+
+    def dirty_without(_line, _cases):
+        dirty_without.last_clean = False
+        return 0.0
+
+    clean_with.last_clean = dirty_without.last_clean = True
+    dirty = sh.validate_proposal(
+        p, held_in=["a"], held_out=["b", "c", "d", "e", "f"],
+        score_with=clean_with, score_without=dirty_without)
+    assert not dirty.accepted and dirty.reason == sh._INDETERMINATE_REASON
+    assert dirty.samples == 0
+
+    def partial(_line, cases):
+        n = len(cases)
+        return {"success": 1.0, "samples": max(0, n - 1), "attempted": n,
+                "outcomes": [True] * max(0, n - 1) + ([None] if n else []),
+                "complete": not n, "clean": True}
+
+    def complete(_line, cases):
+        n = len(cases)
+        return {"success": 0.0, "samples": n, "attempted": n,
+                "outcomes": [False] * n, "complete": True, "clean": True}
+
+    dropped = sh.validate_proposal(
+        p, held_in=["a"], held_out=["b", "c", "d", "e", "f"],
+        score_with=partial, score_without=complete)
+    assert not dropped.accepted and dropped.reason == sh._INDETERMINATE_REASON
+
+
+def test_promotion_floor_counts_only_held_out_cases(monkeypatch, store):
+    """A huge development set cannot launder one confirmation case into N=101."""
+    ctrl = _enable(monkeypatch)
+    rep = sh.run_self_harness(
+        _three(), model_id="M", min_support=3, controller=ctrl, path=store,
+        held_in=[f"dev-{i}" for i in range(100)], held_out=["shadow-only"],
+        score_with=lambda _a, _c: 0.9, score_without=lambda _a, _c: 0.4)
+    assert rep.promoted == 0
+    assert any("insufficient evidence: 1 < 5" in s for s in rep.skipped)
+
+
+def test_confidence_bounds_uplift_not_candidate_alone():
+    """Baseline uncertainty matters: 72% vs 60% over 100 is not a 95% win."""
+    vr = sh.validate_proposal(
+        _sig_proposal(), held_in=["dev"], held_out=[f"h{i}" for i in range(100)],
+        score_with=lambda _a, cases: 0.72 if len(cases) > 1 else 0.8,
+        score_without=lambda _a, cases: 0.60 if len(cases) > 1 else 0.5,
+        confidence_z=1.96)
+    assert not vr.accepted and "effect CI lower" in vr.reason
+
+
+def test_confidence_uses_paired_case_outcomes_and_checks_aggregate():
+    def structured(success, cases):
+        outcomes = [success] * len(cases)
+        return {"success": float(success), "samples": len(cases),
+                "attempted": len(cases), "outcomes": outcomes,
+                "complete": True, "clean": True}
+
+    vr = sh.validate_proposal(
+        _sig_proposal(), held_in=["dev"],
+        held_out=["a", "b", "c", "d", "e"],
+        score_with=lambda _line, cases: structured(True, cases),
+        score_without=lambda _line, cases: structured(False, cases),
+        confidence_z=1.96)
+    assert vr.accepted and vr.effect_ci_low is not None and vr.effect_ci_low > 0
+
+    def contradictory(line, cases):
+        # A model-controlled aggregate cannot overrule its per-case evidence.
+        return {"success": 1.0, "samples": len(cases), "attempted": len(cases),
+                "outcomes": [False] * len(cases), "complete": True, "clean": True}
+
+    bad = sh.validate_proposal(
+        _sig_proposal(), held_in=["dev"], held_out=["a", "b", "c", "d", "e"],
+        score_with=contradictory,
+        score_without=lambda _line, cases: structured(False, cases))
+    assert not bad.accepted and bad.reason == sh._INDETERMINATE_REASON
+
+
+def test_holdout_authorization_is_spent_before_any_scorer_access():
+    scorer_calls = []
+
+    def scorer(_line, _cases):
+        scorer_calls.append("called")
+        return 1.0
+
+    def refuse(*_args):
+        raise RuntimeError("budget exhausted")
+
+    vr = sh.validate_proposal(
+        _sig_proposal(), held_in=["dev"], held_out=["sealed"],
+        score_with=scorer, score_without=scorer, holdout_authorize=refuse)
+    assert not vr.accepted and vr.reason == "sealed holdout authorization failed"
+    assert scorer_calls == []
+
+
+def test_holdout_authorization_accounts_confirmation_and_metamorphic_views():
+    authorizations = []
+    events = []
+
+    def authorize(purpose, signature, cases):
+        authorizations.append((purpose, signature, tuple(cases)))
+        events.append(f"authorize:{purpose}")
+        return 1.96
+
+    def transform(cases):
+        events.append("transform")
+        return [f"para::{case}" for case in cases]
+
+    def structured(success, cases):
+        return {"success": float(success), "samples": len(cases),
+                "attempted": len(cases), "outcomes": [success] * len(cases),
+                "complete": True, "clean": True}
+
+    vr = sh.validate_proposal(
+        _sig_proposal(), held_in=["dev"],
+        held_out=[f"sealed-{index}" for index in range(8)],
+        score_with=lambda _line, cases: structured(True, cases),
+        score_without=lambda _line, cases: structured(False, cases),
+        metamorphic_fn=transform,
+        holdout_authorize=authorize)
+    assert vr.accepted
+    assert [item[0] for item in authorizations] == ["confirmation", "metamorphic"]
+    assert all(item[1] == _sig_proposal().signature for item in authorizations)
+    assert events.index("authorize:metamorphic") < events.index("transform")
+
+
+def test_refused_metamorphic_holdout_query_never_reaches_transform():
+    transformed = []
+
+    def authorize(purpose, _signature, _cases):
+        if purpose == "metamorphic":
+            raise RuntimeError("query budget exhausted")
+        return 1.96
+
+    def transform(cases):
+        transformed.append(tuple(cases))
+        return [f"para::{case}" for case in cases]
+
+    def structured(success, cases):
+        return {"success": float(success), "samples": len(cases),
+                "attempted": len(cases), "outcomes": [success] * len(cases),
+                "complete": True, "clean": True}
+
+    vr = sh.validate_proposal(
+        _sig_proposal(), held_in=["dev"],
+        held_out=[f"sealed-{index}" for index in range(8)],
+        score_with=lambda _line, cases: structured(True, cases),
+        score_without=lambda _line, cases: structured(False, cases),
+        metamorphic_fn=transform, holdout_authorize=authorize)
+
+    assert not vr.accepted and vr.reason == "sealed holdout authorization failed"
+    assert transformed == []
+
+
+def test_configured_operational_gate_requires_metric_evidence():
+    vr = sh.validate_proposal(
+        _sig_proposal(), held_in=["dev"], held_out=["a", "b", "c", "d", "e"],
+        score_with=lambda _a, _c: 0.9, score_without=lambda _a, _c: 0.4,
+        max_cost_factor=1.2)
+    assert not vr.accepted and "cost evidence missing" in vr.reason
 
 
 # ---------- store + recall ----------
@@ -139,6 +313,68 @@ def test_full_loop_promotes_through_the_gate(monkeypatch, store):
     assert rep.mined == 1 and rep.validated == 1 and rep.promoted == 1
     # The learned line is now recalled into A's prompt.
     assert "timeout" in sh.recall_addendum("A", store).lower()
+
+
+def test_prompt_artifact_commits_only_after_atomic_apply(monkeypatch, store, tmp_path):
+    monkeypatch.setenv("MAVERICK_SELF_HARNESS", "1")
+    monkeypatch.setattr(si, "enabled", lambda: True)
+    ledger_path = tmp_path / "promotions.json"
+    ctrl = si.SelfImprovementController(
+        frozen_fn=lambda: False, ledger=si.PromotionLedger(path=ledger_path))
+    rep = sh.run_self_harness(
+        [_refl("A", "timeout", f"export ledger {index}") for index in range(3)],
+        model_id="A", controller=ctrl, min_support=3, path=store,
+        held_in=["a", "b"], held_out=["c", "d", "e", "f", "g"],
+        score_with=lambda _line, _cases: 0.9,
+        score_without=lambda _line, _cases: 0.4)
+    assert rep.promoted == 1
+    events = [json.loads(line) for line in Path(
+        f"{ledger_path}.journal").read_text(encoding="utf-8").splitlines()]
+    assert [event["event"] for event in events] == ["prepare", "commit"]
+    assert ctrl.ledger.all()[0].id == events[0]["transaction"]["record"]["id"]
+
+
+def test_prompt_artifact_write_failure_aborts_without_receipt(
+    monkeypatch, store, tmp_path,
+):
+    monkeypatch.setenv("MAVERICK_SELF_HARNESS", "1")
+    monkeypatch.setattr(si, "enabled", lambda: True)
+    ledger_path = tmp_path / "promotions.json"
+    ctrl = si.SelfImprovementController(
+        frozen_fn=lambda: False, ledger=si.PromotionLedger(path=ledger_path))
+    monkeypatch.setattr(sh, "_write_addenda", lambda *_a, **_k: (_ for _ in ()).throw(
+        OSError("disk full")))
+    rep = sh.run_self_harness(
+        [_refl("A", "timeout", f"export ledger {index}") for index in range(3)],
+        model_id="A", controller=ctrl, min_support=3, path=store,
+        held_in=["a", "b"], held_out=["c", "d", "e", "f", "g"],
+        score_with=lambda _line, _cases: 0.9,
+        score_without=lambda _line, _cases: 0.4)
+    assert rep.promoted == 0 and not store.exists()
+    assert ctrl.ledger.all() == []
+    events = [json.loads(line) for line in Path(
+        f"{ledger_path}.journal").read_text(encoding="utf-8").splitlines()]
+    assert [event["event"] for event in events] == ["prepare", "abort"]
+
+
+def test_promotion_cap_requires_a_fresh_cycle_baseline(monkeypatch, store):
+    ctrl = _enable(monkeypatch)
+    refl = [
+        _refl("A", failure, f"{failure} task {index}")
+        for failure in ("timeout", "auth") for index in range(3)
+    ]
+    rep = sh.run_self_harness(
+        refl, model_id="A", controller=ctrl, min_support=3, path=store,
+        held_in=["a", "b"], held_out=["c", "d", "e", "f", "g"],
+        propose_fn=lambda sig: f"Mitigate {sig.failure_class} before proceeding.",
+        score_with=lambda _line, _cases: 0.9,
+        score_without=lambda _line, _cases: 0.4,
+        max_promotions_per_cycle=1,
+    )
+    assert rep.mined == 2 and rep.promoted == 1
+    assert any("refresh deployed prompt" in reason for reason in rep.skipped)
+    assert len([line for line in sh.recall_addendum("A", store).splitlines()
+                if line.startswith("- ")]) == 1
 
 
 def test_gate_refusal_leaves_store_untouched(monkeypatch, store):
@@ -239,7 +475,7 @@ def test_pass_caps_promotions_and_keeps_strongest(monkeypatch, store):
                  for i in range(n)]
     rep = sh.run_self_harness(
         recs, model_id="M", min_support=3, controller=ctrl, path=store,
-        held_in=["a", "b"], held_out=["c", "d", "e"],
+        held_in=["a", "b"], held_out=["c", "d", "e", "f", "g"],
         score_with=lambda a, c: 0.95, score_without=lambda a, c: 0.4)
     assert rep.promoted == sh._MAX_LINES_PER_MODEL          # capped, not 12
     recalled = sh.recall_addendum("M", store)
@@ -260,6 +496,25 @@ def test_gate_reason_is_surfaced(monkeypatch, store):
         score_with=lambda a, c: 0.9, score_without=lambda a, c: 0.4)
     assert rep.promoted == 0
     assert any("insufficient evidence" in s and "5 samples" in s for s in rep.skipped)
+    assert not store.exists()
+
+
+def test_final_promotion_authorizer_runs_after_validation_before_apply(
+    monkeypatch, store,
+):
+    ctrl = _enable(monkeypatch)
+    calls = []
+    rep = sh.run_self_harness(
+        _three(), model_id="M", min_support=3, controller=ctrl, path=store,
+        held_in=["a", "b"], held_out=["c", "d", "e", "f", "g"],
+        score_with=lambda _line, _cases: 0.95,
+        score_without=lambda _line, _cases: 0.4,
+        promotion_authorize=lambda: calls.append("checked") or False,
+    )
+    assert rep.validated == 1 and rep.promoted == 0
+    assert calls == ["checked"]
+    assert any("evaluator-bound calibration" in reason
+               for reason in rep.skipped)
     assert not store.exists()
 
 
@@ -362,7 +617,7 @@ def test_stress_50_rounds_invariants(monkeypatch, tmp_path):
         rep = sh.run_self_harness(
             recs, model_id="M", min_support=3,
             held_in=["task run 0", "task run 1"],
-            held_out=["u0", "u1", "u2", "u3"],
+            held_out=["u0", "u1", "u2", "u3", "u4"],
             score_with=lambda a, c: 0.95, score_without=lambda a, c: 0.4,
             controller=ctrl, path=acc)
         ck(100 + k, rep.promoted == 1, f"acc expected promote, got {rep.skipped}")
@@ -459,7 +714,7 @@ def test_promotion_records_provenance_in_audit(monkeypatch, store):
     refl = [_refl("M", "timeout", "export the nightly ledger") for _ in range(3)]
     rep = sh.run_self_harness(
         refl, model_id="M", controller=ctrl, min_support=3, path=store,
-        held_in=["a", "b"], held_out=["c", "d", "e"],
+        held_in=["a", "b"], held_out=["c", "d", "e", "f", "g"],
         score_with=lambda a, c: 0.95, score_without=lambda a, c: 0.4)
     assert rep.promoted == 1
     applies = [kw for kw in captured if kw.get("phase") == "apply"]
@@ -517,6 +772,32 @@ def test_validate_min_delta_floor():
     assert sh.validate_proposal(_sig_proposal(), **kw).accepted
 
 
+def test_validate_min_delta_cannot_be_laundered_by_held_in_lift():
+    def sw(_add, cases):
+        return 0.9 if cases and cases[0].startswith("in") else 0.51
+
+    result = sh.validate_proposal(
+        _sig_proposal(), held_in=["in-a", "in-b"],
+        held_out=["out-a", "out-b"], score_with=sw,
+        score_without=lambda _add, _cases: 0.5, min_delta=0.05,
+    )
+    assert not result.accepted
+    assert "confirmation improvement below threshold" in result.reason
+
+
+def test_validate_confidence_lower_bound_must_clear_effect_floor():
+    result = sh.validate_proposal(
+        _sig_proposal(),
+        held_in=[f"in-{index}" for index in range(100)],
+        held_out=[f"out-{index}" for index in range(100)],
+        score_with=lambda _add, _cases: 0.57,
+        score_without=lambda _add, _cases: 0.50,
+        min_delta=0.05, confidence_z=1.96,
+    )
+    assert not result.accepted
+    assert "effect CI lower" in result.reason
+
+
 def test_run_strict_floors_block_weak_evidence(monkeypatch, store):
     ctrl = _enable(monkeypatch)
     refl = [_refl("M", "timeout", "export the nightly ledger") for _ in range(3)]
@@ -545,7 +826,7 @@ def _promote_line(store, model, fclass, line, controller):
         [{"model_id": model, "failure_class": fclass, "goal_text": f"task {i}",
           "failure_msg": "x"} for i in range(3)],
         model_id=model, controller=controller, min_support=3, path=store,
-        held_in=["a", "b"], held_out=["c", "d", "e"],
+        held_in=["a", "b"], held_out=["c", "d", "e", "f", "g"],
         propose_fn=lambda s, _l=line: _l,
         score_with=lambda a, c: 0.95, score_without=lambda a, c: 0.4)
 
@@ -555,7 +836,7 @@ def test_provenance_recorded_on_promote(monkeypatch, store):
     refl = [_refl("M", "timeout", "export the nightly ledger") for _ in range(3)]
     rep = sh.run_self_harness(
         refl, model_id="M", controller=ctrl, min_support=3, path=store,
-        held_in=["a", "b"], held_out=["c", "d", "e"],
+        held_in=["a", "b"], held_out=["c", "d", "e", "f", "g"],
         score_with=lambda a, c: 0.95, score_without=lambda a, c: 0.4)
     assert rep.promoted == 1
     prov = sh.line_provenance("M", store)
@@ -748,6 +1029,618 @@ def test_settings_reads_and_clamps_config(monkeypatch):
     assert st2["min_support"] == 1 and st2["min_held_out"] == 0 and st2["min_delta"] == 0.0
 
 
+def test_risk_limited_profile_sets_conservative_defaults_and_allows_overrides(monkeypatch):
+    from maverick import config
+
+    monkeypatch.setattr(config, "load_config", lambda *a, **k: {
+        "self_harness": {"risk_limited": True}})
+    st = config.get_self_harness()
+    assert st["risk_limited"] is True
+    assert st["min_support"] == 3
+    assert st["require_held_out"] is True and st["min_held_out"] == 8
+    assert st["min_delta"] == 0.02 and st["confidence_z"] == 1.96
+    assert st["candidates_per_signature"] == 3 and st["holdout_rotations"] == 1
+    assert st["max_promotions_per_cycle"] == 1
+    assert st["judge_samples"] == 3 and st["calibrate_judge"] is True
+    assert st["metamorphic"] is True and st["promote_as_canary"] is True
+    assert st["max_cost_factor"] == 1.25
+    assert st["max_latency_factor"] == 1.25
+    assert st["max_tool_calls_factor"] == 1.1
+    assert st["eval_budget_dollars"] == 5.0
+    assert st["calibration_max_age_hours"] == 24.0
+    assert st["holdout_ledger"] is None
+    assert st["holdout_family_alpha"] == 0.05
+    assert st["holdout_query_alpha"] == 0.025
+    assert st["holdout_max_queries"] == 2
+
+    monkeypatch.setattr(config, "load_config", lambda *a, **k: {
+        "self_harness": {
+            "risk_limited": True,
+            "min_support": 1,
+            "min_support_by_class": {"auth": 1},
+            "min_delta": 0.1,
+            "candidates_per_signature": 1,
+            "metamorphic": False,
+        }})
+    overridden = config.get_self_harness()
+    assert overridden["min_support"] == 3
+    assert overridden["min_support_by_class"] == {"auth": 3}
+    assert overridden["min_delta"] == 0.1
+    assert overridden["candidates_per_signature"] == 3
+    assert overridden["metamorphic"] is True
+
+    monkeypatch.setattr(config, "load_config", lambda *a, **k: {
+        "self_harness": {
+            "risk_limited": True,
+            "max_cost_factor": float("nan"),
+            "max_latency_factor": float("inf"),
+            "eval_budget_dollars": float("nan"),
+            "confidence_z": float("inf"),
+            "holdout_query_alpha": float("nan"),
+        }})
+    invalid = config.get_self_harness()
+    assert invalid["max_cost_factor"] == 1.25
+    assert invalid["max_latency_factor"] == 1.25
+    assert invalid["eval_budget_dollars"] == 5.0
+    assert invalid["confidence_z"] == 1.96
+    assert invalid["holdout_query_alpha"] == 0.025
+
+    monkeypatch.setattr(config, "load_config", lambda *a, **k: {
+        "self_harness": {
+            "risk_limited": True,
+            "require_held_out": False,
+            "min_held_out": 0,
+            "min_delta": 0.0,
+            "confidence_z": 0.0,
+            "max_cost_factor": 100.0,
+            "max_latency_factor": 100.0,
+            "max_tool_calls_factor": 100.0,
+            "max_promotions_per_cycle": 0,
+            "judge_samples": 1,
+            "calibrate_judge": False,
+            "calibration_max_age_hours": 999.0,
+            "holdout_family_alpha": 0.9,
+            "holdout_query_alpha": 0.8,
+            "holdout_max_queries": 999,
+            "metamorphic": False,
+            "metamorphic_tolerance": 1.0,
+            "promote_as_canary": False,
+            "eval_budget_dollars": 0.0,
+        }})
+    hardened = config.get_self_harness()
+    assert hardened["require_held_out"] is True
+    assert hardened["min_held_out"] == 8
+    assert hardened["min_delta"] == 0.02
+    assert hardened["confidence_z"] == 1.96
+    assert hardened["max_cost_factor"] == 1.25
+    assert hardened["max_latency_factor"] == 1.25
+    assert hardened["max_tool_calls_factor"] == 1.1
+    assert hardened["max_promotions_per_cycle"] == 1
+    assert hardened["judge_samples"] == 3
+    assert hardened["calibrate_judge"] is True
+    assert hardened["calibration_max_age_hours"] == 24.0
+    assert hardened["holdout_family_alpha"] == 0.05
+    assert hardened["holdout_query_alpha"] == 0.025
+    assert hardened["holdout_max_queries"] == 2
+    assert hardened["metamorphic"] is True
+    assert hardened["metamorphic_tolerance"] == 0.0
+    assert hardened["promote_as_canary"] is True
+    assert hardened["eval_budget_dollars"] == 5.0
+
+
+def test_risk_limited_profile_requires_fresh_adequate_calibration(monkeypatch):
+    from maverick import calibration
+    from maverick import self_improvement_runner as runner
+
+    st = {"risk_limited": True, "calibration_max_age_hours": 24.0}
+    monkeypatch.setattr(calibration, "_load_verdict", lambda: None)
+    assert runner._fresh_calibration_receipt(st, now=100_000.0) is False
+    monkeypatch.setattr(calibration, "_load_verdict", lambda: {
+        "adequate": True, "n": 50, "n_correct": 25,
+        "n_incorrect": 25, "discrimination": 0.7, "brier": 0.1,
+        "ts": 99_000.0})
+    assert runner._fresh_calibration_receipt(st, now=100_000.0) is True
+    monkeypatch.setattr(calibration, "_load_verdict", lambda: {
+        "adequate": True, "n": 50, "n_correct": 25,
+        "n_incorrect": 25, "discrimination": 0.7, "brier": 0.1,
+        "ts": 1.0})
+    assert runner._fresh_calibration_receipt(st, now=100_000.0) is False
+
+
+def test_risk_profile_resolver_failures_never_fall_back_to_development(monkeypatch):
+    from maverick import config
+
+    monkeypatch.setattr(config, "get_self_harness", lambda: (_ for _ in ()).throw(
+        OverflowError("bad numeric setting")))
+    resolved = sh.settings()
+    assert resolved["_config_valid"] is False
+    assert resolved["risk_limited"] is True
+    assert resolved["require_held_out"] is True
+    assert resolved["promote_as_canary"] is True
+
+
+def test_risk_profile_handles_non_iterable_bucket_and_infinite_integer(monkeypatch):
+    from maverick import config
+
+    monkeypatch.setattr(config, "load_config", lambda *a, **k: {
+        "self_harness": {
+            "enable": True,
+            "risk_limited": True,
+            "mine_bucket_by": 42,
+            "holdout_max_queries": float("inf"),
+        },
+    })
+    resolved = config.get_self_harness()
+    assert resolved["risk_limited"] is True
+    assert resolved["mine_bucket_by"] == ()
+    assert resolved["holdout_max_queries"] == 2
+
+
+def test_risk_pass_arguments_cannot_weaken_profile(monkeypatch):
+    from maverick import config
+    from maverick import self_improvement_runner as runner
+
+    monkeypatch.setattr(config, "load_config", lambda *a, **k: {
+        "self_harness": {"enable": True, "risk_limited": True},
+    })
+    monkeypatch.setattr(
+        runner, "_risk_calibration_boundary", lambda *_a, **_k: (None, lambda: True))
+    seen = {}
+
+    def capture(_reflexions, **kwargs):
+        seen.update(kwargs)
+        return sh.SelfHarnessReport(model_id="M")
+
+    monkeypatch.setattr(sh, "run_self_harness", capture)
+    runner.run_self_harness_pass(
+        [], model_id="M", held_in=["dev"], held_out=["sealed"],
+        score_with=lambda _line, _cases: 1.0,
+        score_without=lambda _line, _cases: 0.0,
+        holdout_authorize=lambda *_args: 1.96,
+        metamorphic_fn=lambda cases: [f"para::{case}" for case in cases],
+        calibration_evaluator_id="sha256:judge",
+        min_support=1, require_held_out=False, min_delta=0.0,
+        min_held_out=0, candidates_per_signature=1,
+        holdout_rotations=99, canary=False, metamorphic_tolerance=1.0,
+    )
+
+    assert seen["min_support"] == 3
+    assert seen["require_held_out"] is True
+    assert seen["min_delta"] == 0.02
+    assert seen["min_held_out"] == 8
+    assert seen["candidates_per_signature"] == 3
+    assert seen["holdout_rotations"] == 1
+    assert seen["canary"] is True
+    assert seen["metamorphic_tolerance"] == 0.0
+
+
+def test_risk_limited_receipt_is_bound_to_exact_current_evaluator(
+    monkeypatch,
+):
+    from maverick import calibration
+    from maverick import self_improvement_runner as runner
+
+    st = {"risk_limited": True, "calibration_max_age_hours": 24.0}
+    receipt = {
+        "schema": "maverick-calibration-receipt-v2",
+        "adequate": True,
+        "evaluator_id": "judge:A",
+        "n": 30,
+        "n_correct": 15,
+        "n_incorrect": 15,
+        "discrimination": 0.8,
+        "brier": 0.1,
+        "evidence_since": 90.0,
+        "sample_min_ts": 95.0,
+        "sample_max_ts": 99.0,
+        "ts": 100.0,
+    }
+    monkeypatch.setattr(calibration, "_settings", lambda: {
+        **calibration._DEFAULTS,
+        "min_samples": 20,
+        "min_discrimination": 0.15,
+    })
+    monkeypatch.setattr(calibration, "_risk_verdict_path", lambda: object())
+    monkeypatch.setattr(calibration, "_load_verdict", lambda _path: receipt)
+
+    assert runner._fresh_calibration_receipt(
+        st, now=101.0, evaluator_id="judge:A", evidence_since=90.0)
+    # An inflated total cannot hide an evaluator cohort below the immutable
+    # 20-sample, two-class calibration floor.
+    receipt.update(n=100, n_correct=1, n_incorrect=1)
+    assert not runner._fresh_calibration_receipt(
+        st, now=101.0, evaluator_id="judge:A", evidence_since=90.0)
+    receipt.update(n=30, n_correct=15, n_incorrect=15)
+    assert not runner._fresh_calibration_receipt(
+        st, now=101.0, evaluator_id="judge:B", evidence_since=90.0)
+    # A receipt with no sample from this cycle cannot be replayed into it, even
+    # though its file timestamp is still fresh.
+    assert not runner._fresh_calibration_receipt(
+        st, now=101.0, evaluator_id="judge:A", evidence_since=99.5)
+
+
+def test_post_evaluation_refresh_uses_only_bound_judge_samples(
+    monkeypatch, tmp_path,
+):
+    from maverick import calibration
+    from maverick import self_improvement_runner as runner
+
+    samples_path = tmp_path / "calibration.ndjson"
+    receipt_path = tmp_path / "self-harness-receipt.json"
+    now = time.time()
+    rows = []
+    for _index in range(10):
+        for confidence, correct in ((0.9, True), (0.1, False)):
+            rows.append({
+                "confidence": confidence, "correct": correct, "ts": now,
+                "source": "self_harness_judge", "evaluator_id": "judge:A",
+                "adversarial": False,
+            })
+    # Plenty of differently-bound data cannot help judge:A's receipt.
+    rows.extend({
+        "confidence": 0.99, "correct": True, "ts": now,
+        "source": "self_harness_judge", "evaluator_id": "judge:B",
+        "adversarial": False,
+    } for _ in range(20))
+    # Judge C has both classes but only 18 current-cycle samples: the immutable
+    # risk floor is 20 even when config asks for fewer.
+    for _index in range(9):
+        for confidence, correct in ((0.9, True), (0.1, False)):
+            rows.append({
+                "confidence": confidence, "correct": correct, "ts": now,
+                "source": "self_harness_judge", "evaluator_id": "judge:C",
+                "adversarial": False,
+            })
+    samples_path.write_text(
+        "".join(json.dumps(row) + "\n" for row in rows), encoding="utf-8")
+    monkeypatch.setattr(calibration, "_samples_path", lambda: samples_path)
+    monkeypatch.setattr(calibration, "_risk_verdict_path", lambda: receipt_path)
+    monkeypatch.setattr(calibration, "_settings", lambda: {
+        **calibration._DEFAULTS,
+        "min_samples": 4,
+        "min_discrimination": 0.15,
+    })
+
+    settings = {"risk_limited": True, "calibration_max_age_hours": 24.0}
+    assert runner._refresh_bound_calibration_receipt(
+        settings, evaluator_id="judge:A", evidence_since=now - 0.01)
+    assert not runner._refresh_bound_calibration_receipt(
+        settings, evaluator_id="judge:B", evidence_since=now - 0.01)
+    assert not runner._refresh_bound_calibration_receipt(
+        settings, evaluator_id="judge:C", evidence_since=now - 0.01)
+
+
+def test_risk_limited_auto_cycle_refuses_missing_holdout_ledger(
+    monkeypatch, tmp_path,
+):
+    from maverick import config
+    from maverick import self_improvement_runner as runner
+
+    corpus_path = tmp_path / "corpus.json"
+    corpus_path.write_text(json.dumps({
+        "M": [{"goal": f"g{index}", "expected": "ok"} for index in range(30)]
+    }), encoding="utf-8")
+    monkeypatch.setattr(config, "load_config", lambda *a, **k: {
+        "self_harness": {
+            "enable": True, "risk_limited": True,
+            "eval_corpus": str(corpus_path),
+        }})
+    report, retired = runner.run_self_harness_cycle(
+        reflexions=[], model_id="M", retire=False,
+        evaluation_system="exact deployed system prompt")
+    assert retired == 0 and report.promoted == 0
+    assert any("provisioned holdout ledger" in reason for reason in report.skipped)
+
+
+def test_holdout_evaluator_epoch_binds_full_evaluator_identity(monkeypatch, tmp_path):
+    from types import SimpleNamespace
+
+    from maverick import self_harness_eval as eval_module
+    from maverick import self_improvement_runner as runner
+    from maverick.self_harness_holdout import (
+        HoldoutQueryLedger,
+        fingerprint_manifest,
+    )
+
+    corpus_path = tmp_path / "corpus.json"
+    corpus_path.write_text(json.dumps({
+        "M": [{"goal": "sealed", "expected": "ok"}],
+    }), encoding="utf-8")
+    ledger_path = tmp_path / "holdout.db"
+    HoldoutQueryLedger.provision(ledger_path)
+    settings = {
+        "holdout_ledger": str(ledger_path),
+        "holdout_family_alpha": 0.05,
+        "holdout_query_alpha": 0.01,
+        "holdout_max_queries": 5,
+        "judge_samples": 3,
+        "metamorphic": True,
+    }
+    captured = []
+
+    def capture(_self, query, _policy):
+        captured.append(query)
+        return SimpleNamespace(critical_z_two_sided=1.96)
+
+    monkeypatch.setattr(HoldoutQueryLedger, "authorize", capture)
+    combinations = [
+        ("verifier-v1", "paraphraser-v1"),
+        ("verifier-v2", "paraphraser-v1"),
+        ("verifier-v1", "paraphraser-v2"),
+    ]
+    for verifier_model, metamorphic_model in combinations:
+        authorize = runner._build_holdout_authorizer(
+            settings, corpus_path=str(corpus_path), model_id="M",
+            evaluation_system="deployed prompt", verifier_model=verifier_model,
+            metamorphic_model=metamorphic_model,
+        )
+        authorize("confirmation", "sig", ["sealed"])
+
+    expected = fingerprint_manifest({
+        "schema": "maverick-self-harness-evaluator-v3",
+        "candidate_model": "M",
+        "verifier_model": "verifier-v1",
+        "runner_protocol": "llm-runner-v1",
+        "judge_protocol": "llm-judge-v2-untrusted-json-opaque-verdict",
+        "judge_evaluator_id": eval_module.judge_evaluator_identity(
+            "verifier-v1", samples=3, strict=True),
+        "judge_samples": 3,
+        "judge_unknown": True,
+        "held_out_frac": 0.3,
+        "metamorphic_enabled": True,
+        "metamorphic_protocol": "llm-paraphraser-v1",
+        "metamorphic_model": "paraphraser-v1",
+        "deployed_system_sha256": fingerprint_manifest("deployed prompt"),
+    })
+    assert captured[0].evaluator_epoch == expected
+    assert len({query.evaluator_epoch for query in captured}) == 3
+
+
+def test_holdout_family_hash_matches_effective_evaluation_view(
+    monkeypatch, tmp_path,
+):
+    from types import SimpleNamespace
+
+    from maverick import self_improvement_runner as runner
+    from maverick.self_harness_holdout import HoldoutQueryLedger
+
+    ledger_path = tmp_path / "holdout.db"
+    HoldoutQueryLedger.provision(ledger_path)
+    settings = {
+        "holdout_ledger": str(ledger_path),
+        "holdout_family_alpha": 0.05,
+        "holdout_query_alpha": 0.01,
+        "holdout_max_queries": 5,
+        "judge_samples": 3,
+        "metamorphic": False,
+    }
+    captured = []
+
+    def capture(_self, query, _policy):
+        captured.append(query)
+        return SimpleNamespace(critical_z_two_sided=1.96)
+
+    monkeypatch.setattr(HoldoutQueryLedger, "authorize", capture)
+    base = {"M": [{"goal": "sealed", "expected": "ok"}]}
+    inert_metadata = {
+        "M": [{"goal": "sealed", "expected": "ok", "comment": "ignored"}],
+        "provenance": {"revision": 99},
+    }
+    changed_label = {"M": [{"goal": "sealed", "expected": "different"}]}
+    unrelated_scope = {
+        **base,
+        "finance": [{"goal": "unrelated", "expected": "finance-ok"}],
+    }
+    for manifest in (base, inert_metadata, unrelated_scope, changed_label):
+        authorize = runner._build_holdout_authorizer(
+            settings, corpus_path="unused.json", model_id="M",
+            evaluation_system="deployed prompt", verifier_model="verifier-v1",
+            corpus_manifest=manifest,
+        )
+        authorize("confirmation", "sig", ["sealed"])
+
+    # One provisioned ledger is one study budget, even when the corpus changes.
+    assert len({query.holdout_sha256 for query in captured}) == 1
+    # Inert metadata and an unrelated scope do not change the evaluated view.
+    assert captured[0].view_sha256 == captured[1].view_sha256
+    assert captured[2].view_sha256 == captured[0].view_sha256
+    # A material label change remains auditable in the view identity without
+    # receiving a fresh study budget.
+    assert captured[3].view_sha256 != captured[0].view_sha256
+
+    with pytest.raises(ValueError, match="duplicate goals"):
+        runner._build_holdout_authorizer(
+            settings, corpus_path="unused.json", model_id="M",
+            evaluation_system="deployed prompt", verifier_model="verifier-v1",
+            corpus_manifest={
+                "M": [
+                    {"goal": "sealed", "expected": "ok"},
+                    {"goal": "sealed", "expected": "ok"},
+                ],
+            },
+        )
+
+    with pytest.raises(ValueError, match="reuses a normalized goal"):
+        runner._build_holdout_authorizer(
+            settings, corpus_path="unused.json", model_id="M",
+            evaluation_system="deployed prompt", verifier_model="verifier-v1",
+            corpus_manifest={
+                "M": [{"goal": "Pay invoice", "expected": "ok"}],
+                "finance": [{"goal": "  pay  invoice ", "expected": "ok"}],
+            },
+        )
+
+
+def test_overlapping_holdout_views_share_one_ledger_study_budget(tmp_path):
+    from maverick import self_improvement_runner as runner
+    from maverick.self_harness_holdout import (
+        HoldoutBudgetExhausted,
+        HoldoutQueryLedger,
+    )
+
+    ledger_path = tmp_path / "holdout.db"
+    HoldoutQueryLedger.provision(ledger_path)
+    settings = {
+        "holdout_ledger": str(ledger_path),
+        "holdout_family_alpha": 0.05,
+        "holdout_query_alpha": 0.025,
+        "holdout_max_queries": 2,
+        "judge_samples": 3,
+        "metamorphic": False,
+    }
+    goals = [f"sealed-{index}" for index in range(10)]
+    authorize = runner._build_holdout_authorizer(
+        settings, corpus_path="unused.json", model_id="M",
+        evaluation_system="deployed prompt", verifier_model="verifier-v1",
+        corpus_manifest={
+            "M": [{"goal": goal, "expected": "ok"} for goal in goals],
+        },
+    )
+
+    authorize("confirmation", "sig-a", goals[:9])
+    authorize("confirmation", "sig-b", goals[1:])
+    with pytest.raises(HoldoutBudgetExhausted):
+        authorize("confirmation", "sig-c", goals[:9])
+
+
+def test_risk_limited_cycle_reuses_authorized_evaluator_models(
+    monkeypatch, tmp_path,
+):
+    from maverick import config, llm
+    from maverick import self_improvement_runner as runner
+
+    corpus_path = tmp_path / "corpus.json"
+    corpus_path.write_text(json.dumps({
+        "M": [{"goal": "sealed", "expected": "ok"}],
+    }), encoding="utf-8")
+    monkeypatch.setattr(config, "load_config", lambda *a, **k: {
+        "self_harness": {
+            "enable": True, "risk_limited": True,
+            "eval_corpus": str(corpus_path),
+        }})
+    role_calls = []
+
+    def role_model(role):
+        role_calls.append(role)
+        return {"verifier": "verifier-bound",
+                "summarizer": "paraphraser-bound"}[role]
+
+    monkeypatch.setattr(llm, "model_for_role", role_model)
+    seen = {}
+    manifest_ids = []
+
+    def authorizer(_settings, **kwargs):
+        manifest_ids.append(id(kwargs["corpus_manifest"]))
+        seen["authorized_verifier"] = kwargs["verifier_model"]
+        seen["authorized_metamorphic"] = kwargs["metamorphic_model"]
+        return lambda *_args: 1.96
+
+    def auto(_model_id, **kwargs):
+        manifest_ids.append(id(kwargs["corpus_manifest"]))
+        seen["auto_verifier"] = kwargs["verifier_model"]
+        return None
+
+    def context(_model_id, **kwargs):
+        manifest_ids.append(id(kwargs["corpus_manifest"]))
+        seen["context_verifier"] = kwargs["verifier_model"]
+        return None
+
+    monkeypatch.setattr(runner, "_build_holdout_authorizer", authorizer)
+    monkeypatch.setattr(runner, "_auto_evaluator", auto)
+    monkeypatch.setattr(runner, "_context_evaluator", context)
+    monkeypatch.setattr(
+        runner, "run_self_harness_pass",
+        lambda *_args, **_kwargs: sh.SelfHarnessReport(model_id="M"),
+    )
+
+    runner.run_self_harness_cycle(
+        reflexions=[], model_id="M", retire=False,
+        evaluation_system="deployed prompt",
+    )
+    assert role_calls == ["verifier", "summarizer"]
+    assert len(set(manifest_ids)) == 1
+    assert seen == {
+        "authorized_verifier": "verifier-bound",
+        "authorized_metamorphic": "paraphraser-bound",
+        "auto_verifier": "verifier-bound",
+        "context_verifier": "verifier-bound",
+    }
+
+
+def test_risk_limited_cycle_refuses_unbound_injected_metamorphic_transform(
+    monkeypatch, tmp_path,
+):
+    from maverick import config, llm
+    from maverick import self_improvement_runner as runner
+
+    corpus_path = tmp_path / "corpus.json"
+    corpus_path.write_text(json.dumps({
+        "M": [{"goal": "sealed", "expected": "ok"}],
+    }), encoding="utf-8")
+    monkeypatch.setattr(config, "load_config", lambda *a, **k: {
+        "self_harness": {
+            "enable": True, "risk_limited": True,
+            "eval_corpus": str(corpus_path),
+        }})
+    monkeypatch.setattr(
+        llm, "model_for_role", lambda role: f"bound-{role}")
+
+    report, retired = runner.run_self_harness_cycle(
+        reflexions=[], model_id="M", retire=False,
+        evaluation_system="deployed prompt",
+        metamorphic_fn=lambda cases: list(cases),
+    )
+    assert retired == 0 and report.promoted == 0
+    assert any("caller-supplied holdout authorizer" in reason
+               for reason in report.skipped)
+
+
+def test_risk_limited_cycle_does_not_silently_disable_failed_metamorphic_check(
+    monkeypatch, tmp_path,
+):
+    from maverick import config, llm, self_harness_eval
+    from maverick import self_improvement_runner as runner
+
+    corpus_path = tmp_path / "corpus.json"
+    corpus_path.write_text(json.dumps({
+        "M": [{"goal": "sealed", "expected": "ok"}],
+    }), encoding="utf-8")
+    monkeypatch.setattr(config, "load_config", lambda *a, **k: {
+        "self_harness": {
+            "enable": True, "risk_limited": True,
+            "eval_corpus": str(corpus_path),
+        }})
+    monkeypatch.setattr(
+        llm, "model_for_role", lambda role: f"bound-{role}")
+    monkeypatch.setattr(
+        runner, "_build_holdout_authorizer",
+        lambda *_args, **_kwargs: (lambda *_query: 1.96),
+    )
+    def scorer(_line, _cases):
+        return 1.0
+
+    monkeypatch.setattr(
+        runner, "_auto_evaluator",
+        lambda *_args, **_kwargs: (["dev"], ["sealed"], scorer, scorer),
+    )
+    monkeypatch.setattr(
+        runner, "_context_evaluator", lambda *_args, **_kwargs: None,
+    )
+    monkeypatch.setattr(
+        self_harness_eval, "llm_paraphraser",
+        lambda *_args, **_kwargs: (_ for _ in ()).throw(
+            RuntimeError("paraphraser unavailable")),
+    )
+
+    report, retired = runner.run_self_harness_cycle(
+        reflexions=[], model_id="M", retire=False,
+        evaluation_system="deployed prompt",
+    )
+    assert retired == 0 and report.promoted == 0
+    assert any("could not construct the authorized paraphraser" in reason
+               for reason in report.skipped)
+
+
 # ---------- wave 6: confidence, cost/latency, adaptive support ----------
 
 def test_wilson_lower_bound_rewards_more_evidence():
@@ -755,6 +1648,90 @@ def test_wilson_lower_bound_rewards_more_evidence():
     assert sh._wilson_lower_bound(1, 1) < sh._wilson_lower_bound(50, 50)
     assert sh._wilson_lower_bound(0, 0) == 0.0
     assert 0.0 <= sh._wilson_lower_bound(8, 10) <= 1.0
+
+
+@pytest.mark.parametrize("override", [
+    {"confidence_z": float("inf")},
+    {"min_delta": float("nan")},
+    {"max_cost_factor": float("nan")},
+    {"max_latency_factor": float("inf")},
+    {"metamorphic_tolerance": -1.0},
+    {"min_held_out": True},
+])
+def test_validate_rejects_invalid_policy_before_scorer_access(override):
+    calls = []
+
+    def scorer(_add, _cases):
+        calls.append(True)
+        return 1.0
+
+    result = sh.validate_proposal(
+        _sig_proposal(), held_in=["a"], held_out=["b"],
+        score_with=scorer, score_without=scorer, **override)
+    assert not result.accepted and result.reason == "invalid validation policy"
+    assert calls == []
+
+
+def test_validate_rejects_boolean_scalar_scores():
+    result = sh.validate_proposal(
+        _sig_proposal(), held_in=["a"], held_out=["b"],
+        score_with=lambda _add, _cases: True,
+        score_without=lambda _add, _cases: False)
+    assert not result.accepted and "non-finite" in result.reason
+
+
+def test_validate_rejects_normalized_cross_split_overlap_before_access():
+    calls = []
+
+    def scorer(_add, _cases):
+        calls.append("score")
+        return 1.0
+
+    def authorize(*_args):
+        calls.append("authorize")
+        return 1.96
+
+    result = sh.validate_proposal(
+        _sig_proposal(), held_in=["Task A"], held_out=[" task  a "],
+        score_with=scorer, score_without=scorer,
+        holdout_authorize=authorize,
+    )
+    assert not result.accepted and result.reason == (
+        "held-in and held-out cases overlap"
+    )
+    assert calls == []
+
+
+def test_sealed_aggregate_arms_counterbalance_but_legacy_order_is_stable():
+    held_in = ["dev-a", "dev-b"]
+    held_out = ["sealed-a", "sealed-b"]
+
+    def run(authorize):
+        calls = []
+
+        def score_with(_add, cases):
+            calls.append(("with", tuple(cases)))
+            return 0.9
+
+        def score_without(_add, cases):
+            calls.append(("without", tuple(cases)))
+            return 0.4
+
+        sh.validate_proposal(
+            _sig_proposal(), held_in=held_in, held_out=held_out,
+            score_with=score_with, score_without=score_without,
+            holdout_authorize=authorize,
+        )
+        return calls
+
+    sealed = run(lambda *_args: 0.0001)
+    assert sealed[0][1] == tuple(held_in) and sealed[2][1] == tuple(held_out)
+    assert sealed[0][0] != sealed[2][0]
+
+    legacy = run(None)
+    assert [label for label, _cases in legacy] == [
+        "with", "without", "with", "without",
+    ]
 
 
 def test_validate_confidence_gate_rejects_lucky_small_sample():
@@ -788,6 +1765,34 @@ def test_validate_rejects_cost_regression():
     assert vr2.accepted
 
 
+@pytest.mark.parametrize(("metric", "cap_key", "factor"), [
+    ("cost", "max_cost_factor", 1.25),
+    ("latency", "max_latency_factor", 1.25),
+    ("tool_calls", "max_tool_calls_factor", 1.10),
+])
+def test_operational_caps_accept_exact_boundary_and_reject_next_float(
+    metric, cap_key, factor,
+):
+    baseline = lambda _add, _cases: {"success": 0.4, metric: 1.0}  # noqa: E731
+
+    exact = sh.validate_proposal(
+        _sig_proposal(), held_in=["dev"], held_out=["sealed"],
+        score_with=lambda _add, _cases: {"success": 0.9, metric: factor},
+        score_without=baseline, **{cap_key: factor},
+    )
+    assert exact.accepted
+
+    over = sh.validate_proposal(
+        _sig_proposal(), held_in=["dev"], held_out=["sealed"],
+        score_with=lambda _add, _cases: {
+            "success": 0.9,
+            metric: math.nextafter(factor, math.inf),
+        },
+        score_without=baseline, **{cap_key: factor},
+    )
+    assert not over.accepted and f"{metric} regressed" in over.reason
+
+
 # a scorer that helps the EXACT held-out wording but hurts paraphrased ("para") cases
 def _meta_sw(add, cases):
     return 0.3 if (cases and str(cases[0]).startswith("para")) else 0.9
@@ -818,13 +1823,67 @@ def test_validate_metamorphic_off_by_default():
     assert vr.accepted
 
 
-def test_validate_metamorphic_bad_fn_is_skipped():
-    # a raising transform can't fail a candidate -> the check is skipped
+def test_validate_metamorphic_bad_fn_is_indeterminate():
+    # Once configured, a broken robustness gate must fail closed.
     vr = sh.validate_proposal(
         _sig_proposal(), held_in=["a", "b"], held_out=["orig1", "orig2"],
         score_with=lambda a, c: 0.9, score_without=lambda a, c: 0.4,
         metamorphic_fn=lambda cases: (_ for _ in ()).throw(RuntimeError("boom")))
-    assert vr.accepted
+    assert not vr.accepted and vr.reason == sh._INDETERMINATE_REASON
+
+
+@pytest.mark.parametrize("transformed", [
+    [" original   one ", "ORIGINAL TWO"],
+    ["same paraphrase", " SAME   PARAPHRASE "],
+    ["Original Two", "Original One"],
+])
+def test_validate_metamorphic_rejects_identity_or_duplicate_cases(transformed):
+    vr = sh.validate_proposal(
+        _sig_proposal(), held_in=["dev-one", "dev-two"],
+        held_out=["Original One", "Original Two"],
+        score_with=lambda _add, _cases: 0.9,
+        score_without=lambda _add, _cases: 0.4,
+        metamorphic_fn=lambda _cases: list(transformed),
+    )
+    assert not vr.accepted and vr.reason == sh._INDETERMINATE_REASON
+
+
+def test_validate_metamorphic_rejects_partial_or_dirty_evidence():
+    def dirty_with(_line, cases):
+        dirty_with.last_clean = not str(cases[0]).startswith("para")
+        n = len(cases)
+        return {"success": 0.9, "samples": n, "attempted": n,
+                "outcomes": [True] * n, "complete": True, "clean": True}
+
+    def clean_without(_line, cases):
+        n = len(cases)
+        return {"success": 0.4, "samples": n, "attempted": n,
+                "outcomes": [False] * n, "complete": True, "clean": True}
+
+    dirty_with.last_clean = True
+    vr = sh.validate_proposal(
+        _sig_proposal(), held_in=["a", "b"], held_out=["orig1", "orig2"],
+        score_with=dirty_with, score_without=clean_without,
+        metamorphic_fn=lambda cases: [f"para{i}" for i in range(len(cases))])
+    assert not vr.accepted and vr.reason == sh._INDETERMINATE_REASON
+
+
+def test_structured_evidence_cannot_claim_a_smaller_private_denominator():
+    def dishonest_with(_line, _cases):
+        return {"success": 1.0, "samples": 1, "attempted": 1,
+                "outcomes": [True], "complete": True, "clean": True}
+
+    def dishonest_without(_line, _cases):
+        return {"success": 0.0, "samples": 1, "attempted": 1,
+                "outcomes": [False], "complete": True, "clean": True}
+
+    vr = sh.validate_proposal(
+        _sig_proposal(), held_in=["dev"],
+        held_out=["a", "b", "c", "d", "e"],
+        score_with=dishonest_with, score_without=dishonest_without,
+        min_held_out=5)
+    assert not vr.accepted and vr.reason == sh._INDETERMINATE_REASON
+    assert vr.samples == 0
 
 
 def test_run_self_harness_metamorphic_blocks_overfit(monkeypatch, store):
@@ -956,7 +2015,7 @@ def test_structured_hypothesis_in_provenance_and_audit(monkeypatch, store):
     refl = [_refl("M", "timeout", "export the nightly ledger") for _ in range(3)]
     rep = sh.run_self_harness(
         refl, model_id="M", controller=ctrl, min_support=3, path=store,
-        held_in=["a", "b"], held_out=["c", "d", "e"], propose_fn=fn,
+        held_in=["a", "b"], held_out=["c", "d", "e", "f", "g"], propose_fn=fn,
         score_with=lambda a, c: 0.95, score_without=lambda a, c: 0.4)
     assert rep.promoted == 1
     # provenance sidecar carries the hypothesis
@@ -990,7 +2049,7 @@ def test_best_of_n_promotes_strongest_candidate(monkeypatch, store):
     refl = [_refl("M", "timeout", "export the nightly ledger") for _ in range(3)]
     rep = sh.run_self_harness(
         refl, model_id="M", controller=ctrl, min_support=3, path=store,
-        held_in=["a", "b"], held_out=["c", "d", "e"], propose_fn=_stateful(cands),
+        held_in=["a", "b"], held_out=["c", "d", "e", "f", "g"], propose_fn=_stateful(cands),
         score_with=sw, score_without=lambda a, c: 0.4, candidates_per_signature=3)
     assert rep.promoted == 1
     recalled = sh.recall_addendum("M", store)
@@ -1005,7 +2064,7 @@ def test_best_of_n_deterministic_collapses_to_single(monkeypatch, store):
     refl = [_refl("M", "timeout", "export the nightly ledger") for _ in range(3)]
     rep = sh.run_self_harness(
         refl, model_id="M", controller=ctrl, min_support=3, path=store,
-        held_in=["a", "b"], held_out=["c", "d", "e"],
+        held_in=["a", "b"], held_out=["c", "d", "e", "f", "g"],
         propose_fn=lambda s: "One fixed guidance line.",
         score_with=lambda a, c: 0.95, score_without=lambda a, c: 0.4,
         candidates_per_signature=5)
@@ -1019,7 +2078,7 @@ def test_best_of_n_skips_when_no_candidate_passes(monkeypatch, store):
     refl = [_refl("M", "timeout", "export the nightly ledger") for _ in range(3)]
     rep = sh.run_self_harness(
         refl, model_id="M", controller=ctrl, min_support=3, path=store,
-        held_in=["a", "b"], held_out=["c", "d", "e"],
+        held_in=["a", "b"], held_out=["c", "d", "e", "f", "g"],
         propose_fn=_stateful(["alpha line one", "beta line two"]),
         score_with=lambda a, c: 0.4, score_without=lambda a, c: 0.4,  # no lift
         candidates_per_signature=2)
@@ -1041,6 +2100,64 @@ def test_best_validated_candidate_unit():
         score_with=sw, score_without=lambda a, c: 0.4, validate_kwargs={})
     assert proposal.addendum_line == "high delta line"
     assert vr.accepted and round(vr.held_out_delta, 2) == 0.5
+
+
+def test_best_of_n_seals_confirmation_until_winner_is_frozen():
+    sig = _sig("timeout")
+    fn = _stateful(["weak development line", "strong development line"])
+    first = sh.propose_addendum(sig, propose_fn=fn)
+    shadow = ["shadow-1", "shadow-2", "shadow-3", "shadow-4", "shadow-5"]
+    shadow_candidates = []
+
+    def sw(add, cases):
+        if any(str(c).startswith("shadow-") for c in cases):
+            shadow_candidates.append(add)
+            return 0.9
+        return 0.9 if add == "strong development line" else 0.55
+
+    proposal, vr = sh._best_validated_candidate(
+        sig, first=first, propose_fn=fn, k=2,
+        held_in=["dev-1", "dev-2"], held_out=shadow,
+        score_with=sw, score_without=lambda _a, _c: 0.4,
+        validate_kwargs={})
+    assert proposal.addendum_line == "strong development line"
+    assert vr.accepted
+    assert shadow_candidates == ["strong development line"]
+
+
+def test_validate_metamorphic_rejects_when_original_lift_disappears():
+    def with_line(_add, cases):
+        return 0.9 if str(cases[0]).startswith("orig") else 0.4
+
+    vr = sh.validate_proposal(
+        _sig_proposal(), held_in=["a", "b"], held_out=["orig1", "orig2"],
+        score_with=with_line, score_without=lambda _a, _c: 0.4,
+        metamorphic_fn=lambda cases: [f"para{i}" for i in range(len(cases))])
+    assert not vr.accepted and "metamorphic" in vr.reason
+
+
+def test_best_of_n_and_rotations_compose_without_leaking_losers():
+    sig = _sig("timeout")
+    fn = _stateful(["weak development line", "strong development line"])
+    first = sh.propose_addendum(sig, propose_fn=fn)
+    seen_on_shadow = []
+
+    def sw(add, cases):
+        if any(str(c).startswith("shadow-") for c in cases):
+            seen_on_shadow.append(add)
+        if any(str(c).startswith("dev-") for c in cases):
+            return 0.9 if add == "strong development line" else 0.55
+        return 0.9
+
+    proposal, vr = sh._best_validated_candidate(
+        sig, first=first, propose_fn=fn, k=2,
+        held_in=["dev-1", "dev-2"],
+        held_out=[f"shadow-{i}" for i in range(6)],
+        score_with=sw, score_without=lambda _a, _c: 0.4,
+        validate_kwargs={}, holdout_rotations=3)
+    assert proposal.addendum_line == "strong development line"
+    assert vr.accepted and "rotations" in vr.reason
+    assert seen_on_shadow and set(seen_on_shadow) == {"strong development line"}
 
 
 def test_candidates_per_signature_config(monkeypatch):
@@ -1138,7 +2255,7 @@ def test_run_self_harness_semantic_flag(monkeypatch, store):
     ctrl = _enable(monkeypatch)
     rs = [_refl("M", "auth", g) for g in ("authenticating", "authentication", "authenticate")]
     common = dict(model_id="M", controller=ctrl, min_support=3, path=store,
-                  held_in=["a", "b"], held_out=["c", "d", "e"],
+                 held_in=["a", "b"], held_out=["c", "d", "e", "f", "g"],
                   score_with=lambda a, c: 0.95, score_without=lambda a, c: 0.4)
     # without semantic mining the variants don't cluster -> nothing mined
     rep_off = sh.run_self_harness(rs, **common)
@@ -1157,7 +2274,7 @@ def test_runner_pass_applies_semantic_config(monkeypatch, store):
     monkeypatch.setattr(sh, "_store_path", lambda: store)
     rs = [_refl("M", "auth", g) for g in ("authenticating", "authentication", "authenticate")]
     rep = runner.run_self_harness_pass(
-        rs, model_id="M", held_in=["a", "b"], held_out=["c", "d", "e"], controller=ctrl,
+        rs, model_id="M", held_in=["a", "b"], held_out=["c", "d", "e", "f", "g"], controller=ctrl,
         score_with=lambda a, c: 0.95, score_without=lambda a, c: 0.4)
     assert rep.mined == 1 and rep.promoted == 1     # config flag drove semantic clustering
 
@@ -1402,7 +2519,7 @@ def test_run_self_harness_rotation_rejects_nongeneralizing(monkeypatch, store):
     rs = [_refl("M", "timeout", "process the nightly report") for _ in range(3)]
     sw, wo = _scorers_with_bad_goal("a")                # "a" lands in held_in below
     kw = dict(model_id="M", controller=ctrl, min_support=3, path=store,
-              held_in=["a", "b"], held_out=["c", "d", "e"],
+              held_in=["a", "b"], held_out=["c", "d", "e", "f", "g"],
               score_with=sw, score_without=wo)
     # Rotation ON (leave-one-out): the fold holding out "a" regresses -> rejected.
     rep_rot = sh.run_self_harness(rs, holdout_rotations=5, **kw)
@@ -1542,7 +2659,7 @@ def test_report_records_readiness_healthy(monkeypatch, store):
     refl = [_refl("M", "timeout", "export the nightly ledger") for _ in range(3)]
     rep = sh.run_self_harness(
         refl, model_id="M", controller=ctrl, min_support=3, path=store,
-        held_in=["a", "b"], held_out=["c", "d", "e"],
+        held_in=["a", "b"], held_out=["c", "d", "e", "f", "g"],
         score_with=lambda a, c: 0.9, score_without=lambda a, c: 0.4)
     assert rep.frozen is False and rep.gate_enabled is True and rep.promoted == 1
 
@@ -1558,7 +2675,7 @@ def test_report_frozen_blocks_promotion_and_is_surfaced(monkeypatch, store):
     refl = [_refl("M", "timeout", "export the nightly ledger") for _ in range(3)]
     rep = sh.run_self_harness(
         refl, model_id="M", controller=ctrl, min_support=3, path=store,
-        held_in=["a", "b"], held_out=["c", "d", "e"],
+        held_in=["a", "b"], held_out=["c", "d", "e", "f", "g"],
         score_with=lambda a, c: 0.9, score_without=lambda a, c: 0.4)
     assert rep.frozen is True and rep.promoted == 0
 
@@ -1572,7 +2689,7 @@ def test_report_gate_disabled_is_recorded(monkeypatch, store):
     refl = [_refl("M", "timeout", "export the nightly ledger") for _ in range(3)]
     rep = sh.run_self_harness(
         refl, model_id="M", min_support=3, path=store,
-        held_in=["a", "b"], held_out=["c", "d", "e"],
+        held_in=["a", "b"], held_out=["c", "d", "e", "f", "g"],
         score_with=lambda a, c: 0.9, score_without=lambda a, c: 0.4)
     assert rep.gate_enabled is False and rep.promoted == 0
 
@@ -1599,7 +2716,7 @@ def test_run_all_models_learns_per_model(monkeypatch, store):
                 + [_refl("B", "auth", "log into the partner portal") for _ in range(3)])
     results = runner.run_self_harness_all_models(
         reflexions=combined, controller=ctrl,
-        held_in=["a", "b"], held_out=["c", "d", "e"],
+        held_in=["a", "b"], held_out=["c", "d", "e", "f", "g"],
         score_with=lambda a, c: 0.9, score_without=lambda a, c: 0.4)
     assert set(results) == {"A", "B"}
     assert results["A"][0].promoted == 1 and results["B"][0].promoted == 1
@@ -1679,7 +2796,7 @@ def test_run_self_harness_canary_marks_promoted_line(monkeypatch, store):
     refl = [_refl("M", "timeout", "export the nightly ledger") for _ in range(3)]
     rep = sh.run_self_harness(
         refl, model_id="M", controller=ctrl, min_support=3, path=store,
-        held_in=["a", "b"], held_out=["c", "d", "e"],
+        held_in=["a", "b"], held_out=["c", "d", "e", "f", "g"],
         score_with=lambda a, c: 0.9, score_without=lambda a, c: 0.4, canary=True)
     assert rep.promoted == 1 and len(sh.list_canaries("M", store)) == 1
     # a canary is still recalled (active, just on probation)
@@ -1889,7 +3006,7 @@ def test_cycle_auto_evaluates_and_promotes_from_corpus(monkeypatch, tmp_path, st
     ctrl = _enable(monkeypatch)
     monkeypatch.setattr(sh, "_store_path", lambda: store)
     # a tiny eval corpus for model M, and config pointing the driver at it
-    corpus = {"M": [{"goal": f"g{i}", "expected": "WIN"} for i in range(6)]}
+    corpus = {"M": [{"goal": f"g{i}", "expected": "WIN"} for i in range(17)]}
     cpath = tmp_path / "corpus.json"
     cpath.write_text(_json.dumps(corpus))
     monkeypatch.setattr(config, "load_config", lambda *a, **k: {
@@ -1940,6 +3057,68 @@ def test_auto_evaluator_none_without_cases(monkeypatch, tmp_path):
     # no cases for model M -> None (caller stays dry)
     assert runner._auto_evaluator("M", corpus_path=str(cpath)) is None
     assert runner._auto_evaluator("M", corpus_path=str(tmp_path / "missing.json")) is None
+
+
+def test_evaluator_builders_use_bound_verifier_without_role_reresolution(
+    monkeypatch, tmp_path,
+):
+    from maverick import llm
+    from maverick import self_improvement_runner as runner
+
+    models = []
+
+    class _FakeLLM:
+        def __init__(self, model="x", **_kwargs):
+            models.append(model)
+
+        def complete(self, *_args, **_kwargs):
+            return type("R", (), {"text": "yes"})()
+
+    monkeypatch.setattr(llm, "LLM", _FakeLLM)
+    monkeypatch.setattr(
+        llm, "model_for_role",
+        lambda _role: (_ for _ in ()).throw(
+            AssertionError("authorized model must not be re-resolved")),
+    )
+    corpus_path = tmp_path / "corpus.json"
+    authorized_manifest = {
+        "M": [{"goal": f"m-{index}", "expected": "ok"}
+              for index in range(4)],
+        "finance": [{"goal": f"f-{index}", "expected": "ok"}
+                    for index in range(4)],
+    }
+    # The path changes after authorization. Both evaluator builders must use
+    # the supplied authorized snapshot, never reopen this replacement corpus.
+    corpus_path.write_text(json.dumps({
+        "M": [{"goal": "replacement-m", "expected": "bad"}],
+        "finance": [{"goal": "replacement-f", "expected": "bad"}],
+    }), encoding="utf-8")
+
+    built = runner._auto_evaluator(
+        "M", corpus_path=str(corpus_path),
+        verifier_model="authorized-verifier",
+        corpus_manifest=authorized_manifest,
+    )
+    assert built is not None
+    held_in, held_out, *_ = built
+    assert set(held_in) | set(held_out) == {
+        "m-0", "m-1", "m-2", "m-3",
+    }
+    context = runner._context_evaluator(
+        "M", corpus_path=str(corpus_path),
+        verifier_model="authorized-verifier",
+        corpus_manifest=authorized_manifest,
+    )
+    assert context is not None
+    domain_quad = context("domain=finance")
+    assert domain_quad is not None
+    domain_in, domain_out, *_ = domain_quad
+    assert set(domain_in) | set(domain_out) == {
+        "f-0", "f-1", "f-2", "f-3",
+    }
+    assert models == [
+        "M", "authorized-verifier", "M", "authorized-verifier",
+    ]
 
 
 # ---------- A1/A2: outcome attribution scoping + cycle drives the lifecycle ----------
@@ -2010,7 +3189,7 @@ def test_pass_stages_canary_from_config(monkeypatch, store):
     refl = [_refl("M", "timeout", "export the nightly ledger") for _ in range(3)]
     rep = runner.run_self_harness_pass(
         refl, model_id="M", controller=ctrl,
-        held_in=["a", "b"], held_out=["c", "d", "e"],
+        held_in=["a", "b"], held_out=["c", "d", "e", "f", "g"],
         propose_fn=lambda s: "staged line",
         score_with=lambda a, c: 0.95, score_without=lambda a, c: 0.4)
     assert rep.promoted == 1
@@ -2028,7 +3207,7 @@ def test_pass_canary_arg_overrides_config(monkeypatch, store):
     refl = [_refl("M", "timeout", "export the nightly ledger") for _ in range(3)]
     rep = runner.run_self_harness_pass(
         refl, model_id="M", controller=ctrl, canary=False,
-        held_in=["a", "b"], held_out=["c", "d", "e"],
+        held_in=["a", "b"], held_out=["c", "d", "e", "f", "g"],
         propose_fn=lambda s: "permanent line",
         score_with=lambda a, c: 0.95, score_without=lambda a, c: 0.4)
     assert rep.promoted == 1
@@ -2166,7 +3345,7 @@ def test_harness_outcome_credits_only_tools_actually_used(monkeypatch, store):
               for _ in range(3)]
         rep = sh.run_self_harness(
             rs, model_id="M", controller=ctrl, min_support=3, path=store,
-            held_in=["a", "b"], held_out=["c", "d", "e"],
+            held_in=["a", "b"], held_out=["c", "d", "e", "f", "g"],
             propose_fn=lambda s, _l=line: _l,
             score_with=lambda a, c: 0.95, score_without=lambda a, c: 0.4,
             bucket_by=("tool",))
@@ -2225,7 +3404,7 @@ def test_scoped_signature_validated_against_domain_quad(monkeypatch, store):
 
     def efc(context):
         seen.append(context)
-        return (["a", "b"], ["c", "d", "e"],
+        return (["a", "b"], ["c", "d", "e", "f", "g"],
                 lambda a, c: 0.95, lambda a, c: 0.4)
 
     rep = sh.run_self_harness(
@@ -2247,7 +3426,7 @@ def test_eval_for_context_supplies_scorers_to_dry_pass(monkeypatch, store):
     rep = sh.run_self_harness(
         rs, model_id="M", controller=ctrl, min_support=3, path=store,
         bucket_by=("domain",),
-        eval_for_context=lambda c: (["a", "b"], ["c", "d", "e"],
+        eval_for_context=lambda c: (["a", "b"], ["c", "d", "e", "f", "g"],
                                     lambda a, cs: 0.95, lambda a, cs: 0.4))
     assert rep.promoted == 1
     assert sh.recall_addendum("M", store, domain="finance")
@@ -2261,7 +3440,7 @@ def test_eval_for_context_failure_keeps_defaults(monkeypatch, store):
           for _ in range(3)]
     rep = sh.run_self_harness(
         rs, model_id="M", controller=ctrl, min_support=3, path=store,
-        held_in=["a", "b"], held_out=["c", "d", "e"],
+        held_in=["a", "b"], held_out=["c", "d", "e", "f", "g"],
         score_with=lambda a, c: 0.95, score_without=lambda a, c: 0.4,
         bucket_by=("domain",), eval_for_context=lambda c: 1 / 0)
     assert rep.promoted == 1                                  # defaults carried it
@@ -2343,7 +3522,7 @@ def test_recall_addendum_scopes_to_role(monkeypatch, store):
           for _ in range(3)]
     rep = sh.run_self_harness(
         rs, model_id="M", controller=ctrl, min_support=3, path=store,
-        held_in=["a", "b"], held_out=["c", "d", "e"],
+        held_in=["a", "b"], held_out=["c", "d", "e", "f", "g"],
         score_with=lambda a, c: 0.9, score_without=lambda a, c: 0.4,
         bucket_by=("role",))
     assert rep.mined == 1 and rep.promoted == 1
@@ -2396,7 +3575,7 @@ def test_reflexion_records_role(tmp_path):
 # ---------- cross-model transfer: engine, tried-memory, gating ----------
 
 def _quad_good():
-    return (["a", "b"], ["c", "d", "e"],
+    return (["a", "b"], ["c", "d", "e", "f", "g"],
             lambda a, c: 0.95, lambda a, c: 0.4)
 
 
@@ -2597,7 +3776,7 @@ def test_runner_transfer_end_to_end(monkeypatch, tmp_path, store):
     _promote_line(store, "SRC", "c0", "MAGIC-LINE bound the export window", ctrl)
     cpath = tmp_path / "corpus.json"
     cpath.write_text(_json.dumps(
-        {"TGT": [{"goal": f"g{i}", "expected": "WIN"} for i in range(6)]}))
+        {"TGT": [{"goal": f"g{i}", "expected": "WIN"} for i in range(17)]}))
     monkeypatch.setattr(config, "load_config", lambda *a, **k: {
         "self_harness": {"enable": True, "eval_corpus": str(cpath)}})
 
@@ -2706,6 +3885,27 @@ def test_memo_scorer_never_caches_a_dirty_arm():
     fn.last_clean = True                     # provider recovered
     assert memo("", ["g"]) == 0.0 and fn.calls == 3   # two clean draws freeze
     assert memo("", ["g"]) == 0.0 and fn.calls == 3   # cached
+
+
+def test_memo_scorer_mapping_cannot_override_provider_dirty_signal():
+    from maverick import self_improvement_runner as runner
+
+    def fn(_line, goals):
+        fn.calls += 1
+        fn.last_clean = False
+        n = len(goals)
+        return {"success": 1.0, "samples": n, "attempted": n,
+                "outcomes": [True] * n, "complete": True, "clean": True}
+
+    fn.calls = 0
+    fn.last_clean = True
+    memo = runner._memo_scorer(fn, require_all_draws=True)
+    value = memo("", ["g"])
+    assert value["clean"] is True  # original payload cannot be rewritten as proof
+    assert memo.last_clean is False
+    assert fn.calls == 1
+    memo("", ["g"])
+    assert fn.calls == 2  # dirty result was never cached
 
 
 def test_metamorphic_budget_death_is_indeterminate():
@@ -2962,7 +4162,7 @@ def test_cycle_metamorphic_rejects_wording_overfit_line(monkeypatch, tmp_path, s
     from maverick import self_improvement_runner as runner
     ctrl = _enable(monkeypatch)
     monkeypatch.setattr(sh, "_store_path", lambda: store)
-    corpus = {"M": [{"goal": f"g{i}", "expected": "WIN"} for i in range(6)]}
+    corpus = {"M": [{"goal": f"g{i}", "expected": "WIN"} for i in range(17)]}
     cpath = tmp_path / "corpus.json"
     cpath.write_text(_json.dumps(corpus))
 
@@ -3017,7 +4217,7 @@ def test_cycle_promotes_domain_scoped_line_from_domain_corpus(monkeypatch, tmp_p
     from maverick import self_improvement_runner as runner
     ctrl = _enable(monkeypatch)
     monkeypatch.setattr(sh, "_store_path", lambda: store)
-    corpus = {"finance": [{"goal": f"g{i}", "expected": "WIN"} for i in range(6)]}
+    corpus = {"finance": [{"goal": f"g{i}", "expected": "WIN"} for i in range(17)]}
     cpath = tmp_path / "corpus.json"
     cpath.write_text(_json.dumps(corpus))
     monkeypatch.setattr(config, "load_config", lambda *a, **k: {

@@ -145,6 +145,7 @@ python -m maverick.training.export_texts  --in ~/.maverick/outbox --out proposer
 # 2. L2 — train the learned step PRM (CPU, seconds)
 python -m maverick.training.prm_linear --data trajectories.jsonl --out prm_linear.json
 export MAVERICK_PRM=linear MAVERICK_PRM_PATH="$PWD/prm_linear.json"
+export MAVERICK_PRM_BOOTSTRAP_SHA256="$(sha256sum prm_linear.json | cut -d' ' -f1)"
 
 # 3. L3 — real DPO (GPU; needs the [training] extra)
 python -m pip install -e './packages/maverick-core[training]'

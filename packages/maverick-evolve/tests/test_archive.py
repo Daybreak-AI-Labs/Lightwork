@@ -1,8 +1,18 @@
 from __future__ import annotations
 
+import hashlib
+import json
 import random
 
+import pytest
 from maverick_evolve.archive import Archive, Candidate
+
+
+def _payload_digest(payload: dict) -> str:
+    canonical = json.dumps(
+        payload, sort_keys=True, separators=(",", ":"), ensure_ascii=False,
+        allow_nan=False)
+    return hashlib.sha256(canonical.encode("utf-8")).hexdigest()
 
 
 def test_add_and_best():
@@ -12,12 +22,145 @@ def test_add_and_best():
     assert a.best().config == {"x": 2}
 
 
+def test_config_identity_uses_complete_sha256():
+    config = {"persona": "careful", "fanout": 4}
+    expected = hashlib.sha256(
+        json.dumps(config, sort_keys=True).encode("utf-8")).hexdigest()
+    candidate = Candidate(config=config)
+
+    assert candidate.id == expected
+    assert len(candidate.id) == 64
+    assert all(ch in "0123456789abcdef" for ch in candidate.id)
+    with pytest.raises(ValueError, match="does not match"):
+        Candidate(config=config, id=expected[:12])
+
+
+def test_schema_v2_truncated_ids_migrate_to_full_digest(tmp_path):
+    config = {"persona": "legacy", "fanout": 2}
+    full_id = hashlib.sha256(
+        json.dumps(config, sort_keys=True).encode("utf-8")).hexdigest()
+    payload = {
+        "capacity": 50,
+        "candidates": [{"config": config, "score": 0.75, "id": full_id[:12]}],
+    }
+    path = tmp_path / "legacy-v2.json"
+    path.write_text(json.dumps({
+        "schema_version": 2,
+        "payload": payload,
+        "sha256": _payload_digest(payload),
+    }), encoding="utf-8")
+
+    archive = Archive.load(path)
+    assert archive.candidates[0].id == full_id
+    archive.save(path)
+    migrated = json.loads(path.read_text(encoding="utf-8"))
+    assert migrated["schema_version"] == 4
+    assert migrated["payload"]["candidates"][0]["id"] == full_id
+    assert migrated["payload"]["confirmed_candidate_id"] is None
+
+
+def test_schema_v3_refuses_truncated_or_mismatched_ids():
+    config = {"x": 1}
+    full_id = hashlib.sha256(
+        json.dumps(config, sort_keys=True).encode("utf-8")).hexdigest()
+    for bad_id in (full_id[:12], "0" * 64):
+        payload = {
+            "capacity": 50,
+            "candidates": [{"config": config, "score": 0.5, "id": bad_id}],
+        }
+        envelope = {
+            "schema_version": 3,
+            "payload": payload,
+            "sha256": _payload_digest(payload),
+        }
+        with pytest.raises(ValueError, match="archive payload is invalid"):
+            Archive.from_dict(envelope)
+
+
+def test_legacy_unenveloped_archive_migrates_missing_or_short_id():
+    config = {"x": 1}
+    expected = Candidate(config=config).id
+    archive = Archive.from_dict({
+        "capacity": 2,
+        "candidates": [
+            {"config": config, "score": 0.2, "id": expected[:12]},
+        ],
+    })
+    assert archive.candidates[0].id == expected
+
+
+def test_archive_revalidates_mutable_candidate_identity_before_use(tmp_path):
+    archive = Archive()
+    candidate = Candidate(config={"x": {"nested": 1}}, score=0.5)
+    archive.add(candidate)
+    candidate.config["x"]["nested"] = 2
+
+    with pytest.raises(ValueError, match="does not match"):
+        archive.best()
+    with pytest.raises(ValueError, match="does not match"):
+        archive.save(tmp_path / "poisoned.json")
+    assert not (tmp_path / "poisoned.json").exists()
+
+
+def test_save_refuses_archive_its_loader_would_reject(tmp_path, monkeypatch):
+    import maverick_evolve.archive as archive_module
+
+    archive = Archive()
+    archive.add(Candidate(config={"x": "large-enough"}, score=0.5))
+    monkeypatch.setattr(archive_module, "_MAX_ARCHIVE_BYTES", 64)
+    path = tmp_path / "oversized.json"
+    with pytest.raises(ValueError, match="size limit"):
+        archive.save(path)
+    assert not path.exists()
+
+
+@pytest.mark.parametrize("config", [
+    {"x": float("nan")},
+    {"x": float("inf")},
+    {1: "non-string-key"},
+    {"x": ("tuple",)},
+])
+def test_candidate_identity_rejects_noncanonical_config(config):
+    with pytest.raises(ValueError):
+        Candidate(config=config)
+
+
+def test_archive_rejects_envelope_downgrade_and_duplicate_json_keys(tmp_path):
+    with pytest.raises(ValueError, match="legacy archive body is malformed"):
+        Archive.from_dict({"payload": {"capacity": 50, "candidates": []}})
+
+    path = tmp_path / "duplicate.json"
+    path.write_text('{"capacity":50,"capacity":1,"candidates":[]}', encoding="utf-8")
+    with pytest.raises(ValueError, match="cannot be read as JSON"):
+        Archive.load(path)
+
+
 def test_dedup_keeps_higher_score():
     a = Archive()
     a.add(Candidate(config={"x": 1}, score=0.5))
     a.add(Candidate(config={"x": 1}, score=0.8))  # same config id
     assert len(a.candidates) == 1
     assert a.best().score == 0.8
+
+
+def test_archive_confirmation_tracks_only_the_exact_current_best():
+    archive = Archive()
+    first = archive.add(Candidate(config={"x": 1}, score=0.5))
+    archive.mark_confirmed(first.id)
+    assert archive.confirmed_best().id == first.id
+
+    second = archive.add(Candidate(config={"x": 2}, score=0.9))
+    assert archive.confirmed_best() is None
+    archive.mark_confirmed(second.id)
+    assert archive.confirmed_best().id == second.id
+
+
+def test_archive_refuses_confirmation_of_non_best_candidate():
+    archive = Archive()
+    lower = archive.add(Candidate(config={"x": 1}, score=0.5))
+    archive.add(Candidate(config={"x": 2}, score=0.9))
+    with pytest.raises(ValueError, match="current archive best"):
+        archive.mark_confirmed(lower.id)
 
 
 def test_config_distance():

@@ -1,17 +1,18 @@
 """Stage 1: config-only evolutionary search.
 
-Propose a mutated config, score it on a held-out split, keep it only if it
+Propose a mutated config, score it on a development split, keep it only if it
 genuinely beats the incumbent. Mutations are bounded to **configuration**
 (prompts, role roster, workflow knobs) -- never code -- so a candidate can't
 escape the sandbox and this rung is safe to actually run.
 
 Dependency-injected: the caller supplies ``mutate(config) -> config`` and an
 async ``score(config) -> float`` (typically wrapping ``eval_harness.evaluate``
-on a *held-out* set, gated by ``maverick.calibration``). Pure control flow, so
+on a development set, gated by ``maverick.calibration``). Pure control flow, so
 it tests without a model. Code self-modification is a later, separate rung.
 """
 from __future__ import annotations
 
+import copy
 import random
 from collections.abc import Awaitable, Callable
 
@@ -74,7 +75,7 @@ async def evolve(
 
     for _ in range(max(0, generations)):
         parent = archive.sample(rng) or archive.best()
-        child_config = mutate(dict(parent.config))
+        child_config = mutate(copy.deepcopy(parent.config))
         child_score = await _score_memo(child_config)
         child = archive.add(Candidate(config=child_config, score=child_score))
         if child.score > best.score + min_improvement:

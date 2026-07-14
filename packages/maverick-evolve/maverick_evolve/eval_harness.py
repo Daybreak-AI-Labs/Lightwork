@@ -13,6 +13,7 @@ freeze evolution when the judge drifts.
 """
 from __future__ import annotations
 
+import math
 from collections.abc import Awaitable, Callable
 from dataclasses import dataclass
 
@@ -57,22 +58,66 @@ async def evaluate(
     An agent that raises on a case scores 0 for that case (robustness counts).
     """
     scorer = scorer or _contains_scorer
+    weights: list[float] = []
+    for case in cases:
+        raw_weight = case.weight
+        if (isinstance(raw_weight, bool)
+                or not isinstance(raw_weight, (int, float))):
+            raise ValueError("case weight must be numeric, not boolean")
+        weight = float(raw_weight)
+        if not math.isfinite(weight) or weight < 0.0:
+            raise ValueError("case weight must be finite and non-negative")
+        weights.append(weight)
+    total = sum(weights)
+    if cases and (not math.isfinite(total) or total <= 0.0):
+        raise ValueError(
+            "evaluation cases must have finite positive total weight")
     passed = 0.0
     total_weight = 0.0
-    for case in cases:
-        total_weight += case.weight
-        try:
-            out = await agent(case.prompt)
-        except Exception:
-            out = ""
-        if case.check is not None:
-            score = 1.0 if case.check(out) else 0.0
-        elif case.reference is not None:
-            score = max(0.0, min(1.0, float(scorer(out, case.reference))))
-        else:
-            score = 0.0
-        passed += case.weight * score
+    for case, weight in zip(cases, weights, strict=True):
+        total_weight += weight
+        score = await evaluate_case(agent, case, scorer=scorer)
+        passed += weight * score
     return EvalReport(n=len(cases), passed=passed, total_weight=total_weight)
 
 
-__all__ = ["EvalCase", "EvalReport", "evaluate"]
+async def evaluate_case(
+    agent: Callable[[str], Awaitable[str]],
+    case: EvalCase,
+    *,
+    scorer: Callable[[str, str], float] | None = None,
+) -> float:
+    """Evaluate one agent/case exposure and return its bounded outcome.
+
+    DGM's risk-limited confirmation uses this seam to interleave the seed and
+    frozen champion case by case. Each arm still receives exactly one exposure
+    per sealed case, while alternating order avoids giving one arm every cold or
+    every warm evaluator/provider position.
+    """
+    scorer = scorer or _contains_scorer
+    try:
+        out = await agent(case.prompt)
+    except Exception:
+        out = ""
+    if case.check is not None:
+        checked = case.check(out)
+        if not isinstance(checked, bool):
+            raise ValueError("ground-truth check must return an exact boolean")
+        return 1.0 if checked else 0.0
+    if case.reference is not None:
+        raw_score = scorer(out, case.reference)
+        if isinstance(raw_score, bool):
+            raise ValueError("evaluator score must be numeric, not boolean")
+        try:
+            score = float(raw_score)
+        except (TypeError, ValueError) as exc:
+            raise ValueError("evaluator score must be numeric") from exc
+        # Python's min/max handling of NaN is order-dependent; the historical
+        # clamp turned NaN into 1.0 and could manufacture a perfect champion.
+        if not math.isfinite(score) or not 0.0 <= score <= 1.0:
+            raise ValueError("evaluator score must be finite and in [0, 1]")
+        return score
+    return 0.0
+
+
+__all__ = ["EvalCase", "EvalReport", "evaluate", "evaluate_case"]

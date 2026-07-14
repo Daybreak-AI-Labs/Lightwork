@@ -47,7 +47,7 @@ from maverick import self_improvement as si
 # --------------------------------------------------------------------------
 
 GOOD_AB = dict(score_with=lambda a, c: 0.95, score_without=lambda a, c: 0.4)
-ENOUGH = dict(held_in=["a", "b"], held_out=["c", "d", "e"])
+ENOUGH = dict(held_in=["a", "b"], held_out=["c", "d", "e", "f", "g"])
 
 
 def _enable_si(monkeypatch):

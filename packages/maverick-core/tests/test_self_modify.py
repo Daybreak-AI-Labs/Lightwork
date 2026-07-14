@@ -142,11 +142,12 @@ class TestProposeCodeChange:
         return sm.EditableSurface(
             editable_globs=("packages/maverick-core/maverick/domains/*.toml",))
 
-    def _controller(self):
+    def _controller(self, tmp_path):
         from maverick import self_improvement as si
         return si.SelfImprovementController(
             min_improvement=0.0, max_auto_rung="policy",
-            frozen_fn=lambda: False, audit_fn=lambda **k: None)
+            frozen_fn=lambda: False, audit_fn=lambda **k: None,
+            ledger=si.PromotionLedger(path=tmp_path / "promotion-ledger.json"))
 
     def test_disabled_is_a_noop(self, monkeypatch):
         monkeypatch.setattr(sm, "enabled", lambda: False)
@@ -175,7 +176,7 @@ class TestProposeCodeChange:
         assert called == []                 # the gate was never reached
         assert "protected" in res.reason
 
-    def test_clean_change_promotes_through_the_gate(self, monkeypatch):
+    def test_clean_change_promotes_through_the_gate(self, monkeypatch, tmp_path):
         # A low-rung edit to an allowlisted path that beats baseline promotes.
         from maverick import self_improvement as si
         monkeypatch.setattr(sm, "enabled", lambda: True)
@@ -184,11 +185,11 @@ class TestProposeCodeChange:
             _patch("packages/maverick-core/maverick/domains/foo.toml"),
             summary="tune pack", baseline_score=0.5, candidate_score=0.9, samples=8,
             rollback="snap-1", surface=self._surface(), capability_widens=False,
-            rung="prompt", controller=self._controller())
+            rung="prompt", controller=self._controller(tmp_path))
         assert res.review.ok is True
         assert res.ok is True, res.reason
 
-    def test_code_rung_refused_without_human_approval(self, monkeypatch):
+    def test_code_rung_refused_without_human_approval(self, monkeypatch, tmp_path):
         # The surface is clean, but the code rung needs a human signature -- the
         # boundary passing does NOT bypass the promotion ladder.
         from maverick import self_improvement as si
@@ -198,12 +199,12 @@ class TestProposeCodeChange:
             _patch("packages/maverick-core/maverick/domains/foo.toml"),
             summary="risky", baseline_score=0.5, candidate_score=0.9, samples=20,
             rollback="snap-1", surface=self._surface(), capability_widens=False,
-            rung="code", controller=self._controller())
+            rung="code", controller=self._controller(tmp_path))
         assert res.review.ok is True         # surface fine
         assert res.ok is False               # ...but the code rung gate refused
         assert "approval" in res.reason.lower() or "human" in res.reason.lower()
 
-    def test_insufficient_evidence_refused(self, monkeypatch):
+    def test_insufficient_evidence_refused(self, monkeypatch, tmp_path):
         from maverick import self_improvement as si
         monkeypatch.setattr(sm, "enabled", lambda: True)
         monkeypatch.setattr(si, "enabled", lambda: True)
@@ -211,7 +212,7 @@ class TestProposeCodeChange:
             _patch("packages/maverick-core/maverick/domains/foo.toml"),
             summary="no gain", baseline_score=0.9, candidate_score=0.9, samples=8,
             rollback="snap-1", surface=self._surface(), capability_widens=False,
-            rung="prompt", controller=self._controller())
+            rung="prompt", controller=self._controller(tmp_path))
         assert res.ok is False               # no improvement over baseline
 
 
@@ -334,13 +335,14 @@ class TestCapabilityScreenIntoGate:
         return sm.EditableSurface(
             editable_globs=("packages/maverick-core/maverick/domains/*.py",))
 
-    def _controller(self):
+    def _controller(self, tmp_path):
         from maverick import self_improvement as si
         return si.SelfImprovementController(
             min_improvement=0.0, max_auto_rung="policy",
-            frozen_fn=lambda: False, audit_fn=lambda **k: None)
+            frozen_fn=lambda: False, audit_fn=lambda **k: None,
+            ledger=si.PromotionLedger(path=tmp_path / "promotion-ledger.json"))
 
-    def test_screen_blocks_a_widening_prompt_change(self, monkeypatch):
+    def test_screen_blocks_a_widening_prompt_change(self, monkeypatch, tmp_path):
         # An allowlisted, baseline-beating PROMPT edit that would otherwise
         # auto-promote is refused because it adds a process-spawn line.
         from maverick import self_improvement as si
@@ -353,12 +355,12 @@ class TestCapabilityScreenIntoGate:
             patch, summary="sneaky", baseline_score=0.5, candidate_score=0.9,
             samples=8, rollback="snap", surface=self._surface(),
             capability_widens=False,  # caller claims bounded...
-            rung="prompt", controller=self._controller())
+            rung="prompt", controller=self._controller(tmp_path))
         assert res.review.ok is True         # surface is clean
         assert res.ok is False               # ...but the screen overrode -> blocked
         assert "capability" in res.reason.lower()
 
-    def test_caller_false_is_honoured_when_screen_is_clean(self, monkeypatch):
+    def test_caller_false_is_honoured_when_screen_is_clean(self, monkeypatch, tmp_path):
         from maverick import self_improvement as si
         monkeypatch.setattr(sm, "enabled", lambda: True)
         monkeypatch.setattr(si, "enabled", lambda: True)
@@ -367,5 +369,5 @@ class TestCapabilityScreenIntoGate:
         res = sm.propose_code_change(
             patch, summary="tune", baseline_score=0.5, candidate_score=0.9,
             samples=8, rollback="snap", surface=self._surface(),
-            capability_widens=False, rung="prompt", controller=self._controller())
+            capability_widens=False, rung="prompt", controller=self._controller(tmp_path))
         assert res.ok is True, res.reason

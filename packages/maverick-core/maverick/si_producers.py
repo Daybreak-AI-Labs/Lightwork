@@ -112,12 +112,24 @@ class ToolOutcomeTracker:
 def _propose(rung: str, summary: str, baseline: float, candidate: float, samples: int,
              *, controller: SelfImprovementController | None = None,
              capability_widens: bool | None = None, approved: bool = False,
-             rollback=None, payload=None, provenance: dict | None = None) -> Verdict:
+             rollback=None, payload=None, provenance: dict | None = None,
+             approve=None) -> Verdict:
     cand = Candidate(
         rung=rung, summary=summary, baseline_score=baseline, candidate_score=candidate,
         samples=samples, capability_widens=capability_widens, approved=approved,
         rollback=rollback, payload=payload, provenance=provenance or {},
     )
+    if approve is not None:
+        try:
+            from .approval_signing import ApprovalRequest
+
+            request = ApprovalRequest.for_candidate(cand)
+            signature = approve(request)
+            if signature:
+                cand.approval_signature = str(signature)
+                cand.payload_sha256 = request.payload_sha256
+        except Exception:
+            log.warning("self-improvement approval request failed", exc_info=True)
     return consider(cand, controller=controller)
 
 
@@ -198,16 +210,27 @@ def propose_with_effect(rung, summary, effect: EffectEstimate, *, rollback,
 
 
 def propose_verifier(summary, baseline_discrimination, candidate_discrimination, samples,
-                     *, rollback, controller=None, **prov) -> Verdict:
+                     *, rollback, controller=None, approve=None, **prov) -> Verdict:
     """Phase 1: adopt a retrained verifier head only if it discriminates better.
 
     A better *judge* doesn't widen authority, so capability is bounded by
-    construction; it rides the same evidence + reversibility + freeze gates.
+    construction. It uses the dedicated evaluator rung: by default that sits
+    above the autonomous policy ceiling and therefore requires human approval;
+    deployments must explicitly opt into autonomous evaluator co-evolution or
+    provide ``approve(ApprovalRequest) -> signature`` from an external signer.
     """
-    return _propose("policy", f"verifier update: {summary}",
+    provenance = {"kind": "verifier", **prov}
+    return _propose("evaluator", f"verifier update: {summary}",
                     baseline_discrimination, candidate_discrimination, samples,
                     controller=controller, capability_widens=False,
-                    rollback=rollback, provenance={"kind": "verifier", **prov})
+                    rollback=rollback,
+                    payload={
+                        "kind": "verifier", "summary": str(summary),
+                        "baseline_discrimination": baseline_discrimination,
+                        "candidate_discrimination": candidate_discrimination,
+                        "samples": samples, "provenance": provenance,
+                    },
+                    provenance=provenance, approve=approve)
 
 
 def propose_code(summary, *, validate: Callable[[], tuple[bool, str]],
