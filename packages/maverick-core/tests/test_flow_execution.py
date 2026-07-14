@@ -95,6 +95,28 @@ class TestExecution:
                                 action_runner=lambda t, p, d: ("", None))
         assert run.data["r1"] == "ok" and run.data["r2"] == "ok"
 
+    def test_flow_max_dollars_survives_delay_resume(self, tmp_path, monkeypatch):
+        _patch_home(tmp_path, monkeypatch)
+        ran = []
+        f = Flow(id="fBR", name="f", start="a", max_dollars=5.0, nodes={
+            "a": FlowNode(id="a", kind=NODE_AGENT, brief="before", output="r1", next="pause"),
+            "pause": FlowNode(id="pause", kind="delay", seconds=1.0, next="b"),
+            "b": FlowNode(id="b", kind=NODE_AGENT, brief="after", output="r2")})
+
+        def agent(brief, d):
+            ran.append(brief)
+            return (f"ran:{brief}", 1.0)
+
+        paused = execution.execute(f, agent_runner=agent, action_runner=lambda t, p, d: ("", None),
+                                   now=lambda: 100.0)
+        assert paused.status == "paused_delay" and paused.cost_dollars == 5.0
+
+        resumed = execution.execute(f, agent_runner=agent, action_runner=lambda t, p, d: ("", None),
+                                    resume_run_id=paused.run_id, now=lambda: 101.0)
+        assert ran == ["before"]
+        assert "budget exhausted" in str(resumed.data["r2"])
+        assert resumed.cost_dollars == 5.0
+
     def test_execute_records_node_outcomes(self, tmp_path, monkeypatch):
         _patch_home(tmp_path, monkeypatch)
         f = Flow(id="fX", name="f", start="a", nodes={
