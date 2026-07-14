@@ -1076,6 +1076,16 @@ def pick_flows() -> dict[str, Any]:
         return {"enable": False}
     out: dict[str, Any] = {"enable": True}
     console.print(
+        "[dim]Retries can recover transient agent/tool failures, but every retry "
+        "can spend provider budget or repeat side effects. Keep the per-node cap "
+        "small unless operations explicitly need more.[/dim]"
+    )
+    retry_cap = _q_text("Max retries per flow node", default="5").strip()
+    try:
+        out["max_node_retries"] = max(0, min(50, int(retry_cap or "5")))
+    except ValueError:
+        out["max_node_retries"] = 5
+    console.print(
         "[dim]For actionable channel approvals (clickable Approve/Reject links), "
         "the dashboard needs its externally-reachable base URL. Leave blank to "
         "skip -- approvals then happen from the dashboard.[/dim]"
@@ -3324,6 +3334,8 @@ def _cfg_advanced(  # noqa: C901 - flat sequence of independent opt-in toggles
         lines.append("# delay) over agentic + tool steps; migrated workflows keep their shape")
         lines.append("# while any node can still be a full agentic goal (maverick.flow).")
         lines.append("enable = true")
+        lines.append("# Per-node retry cap; bounds repeated provider/tool calls.")
+        lines.append("max_node_retries = 5")
         if advanced.get("flows_auto_evolve"):
             lines.append("# Autonomously revert a node rewrite whose grounded outcomes")
             lines.append("# regressed (the loop undoes its own bad changes).")

@@ -41,6 +41,7 @@ from .ir import (
     NODE_WHILE,
     Flow,
     FlowNode,
+    max_node_retries,
 )
 
 # Run statuses ----------------------------------------------------------------
@@ -590,6 +591,7 @@ def _run_work(node: FlowNode, data: dict, ctx: _Ctx) -> str | None:
     result: Any = None
     outcome: float | None = None
     last_exc: Exception | None = None
+    retries = min(max(0, node.retries), max_node_retries())
     for attempt in range(retries + 1):
         if ctx.deadline is not None and ctx.now() > ctx.deadline:
             raise RuntimeError("flow exceeded its wall-clock deadline during node retries")

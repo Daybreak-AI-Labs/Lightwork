@@ -1424,6 +1424,10 @@ def get_flows() -> dict:
     default deployment is unaffected.
     """
     cfg = load_config().get("flows", {})
+    try:
+        max_node_retries = int(cfg.get("max_node_retries", 5) or 5)
+    except (TypeError, ValueError):
+        max_node_retries = 5
     return {
         "enable": bool(cfg.get("enable", False)),
         # Opt-in autonomous self-correction: a scheduled pass reverts an applied
@@ -1437,6 +1441,11 @@ def get_flows() -> dict:
         # this key here auto_apply could never be read from config (only the env
         # var / a monkeypatch), so the [flows] auto_apply knob was inert.
         "auto_apply": bool(cfg.get("auto_apply", False)),
+        # Per-node action/agent retries are useful for transient failures, but
+        # must stay bounded because every retry may invoke tools/providers. Env
+        # MAVERICK_FLOW_MAX_NODE_RETRIES can override this at runtime; the flow
+        # IR also hard-caps the effective value defensively.
+        "max_node_retries": max_node_retries,
     }
 
 
