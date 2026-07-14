@@ -135,6 +135,25 @@ class TestDeliverableEditGrounding:
         assert w.get_goal(gid).result == "a human-written memo"   # still saved
         assert consequence.resolve(gid, eid) is None               # ...but not grounded
 
+    def test_large_edit_similarity_uses_bounded_sample(self, monkeypatch):
+        from maverick_dashboard import api
+
+        calls = []
+
+        class SpyMatcher:
+            def __init__(self, _junk, original, revised):
+                calls.append((len(original), len(revised)))
+
+            def ratio(self):
+                return 0.5
+
+        monkeypatch.setattr(api.difflib, "SequenceMatcher", SpyMatcher)
+        similarity = api._deliverable_edit_similarity("a" * 200_000, "b" * 200_000)
+
+        assert similarity == 0.5
+        assert calls == [(api._DELIVERABLE_EDIT_SIMILARITY_SAMPLE_CHARS,
+                          api._DELIVERABLE_EDIT_SIMILARITY_SAMPLE_CHARS)]
+
 
 class TestSystemOfRecordLoop:
     """Register a business key during a run, then have a system of record report
