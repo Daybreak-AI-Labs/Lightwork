@@ -17,7 +17,7 @@ from collections.abc import Callable
 from typing import Any
 
 from . import node_outcomes, store
-from .ir import Flow, FlowNode
+from .ir import UNSAFE_ACTION_TOOLS, Flow, FlowNode
 from .runner import (
     PAUSED_STATUSES,
     STATUS_COMPLETED,
@@ -350,6 +350,8 @@ def default_action_runner(world, sandbox=None) -> ActionRunner:
     returns an ``ERROR:`` string (0.0). Never raises into the flow."""
     def run(tool: str, params: dict, data: dict) -> tuple[Any, float | None]:
         try:
+            if tool in UNSAFE_ACTION_TOOLS:
+                return (f"ERROR: unsafe flow action tool {tool!r}", 0.0)
             from ..sandbox import LocalBackend
             from ..tools import base_registry
             reg = base_registry(world, sandbox or LocalBackend(), goal_id=None)
