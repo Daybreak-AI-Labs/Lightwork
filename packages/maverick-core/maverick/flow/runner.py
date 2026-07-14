@@ -110,13 +110,66 @@ def _fn_slice(a: list) -> Any:
     return seq[start:end]
 
 
-# A nested UNBOUNDED quantifier (a group whose body has `*`/`+`, immediately
-# followed by another quantifier) is the classic catastrophic-backtracking
-# shape -- `(a+)+`, `(.*)*`, `(a+){2,}`. Python's `re` has no timeout, so we
-# reject the pattern outright rather than let it pin a shared worker.
-_REDOS_SHAPE = re.compile(r"\([^()]*[+*][^()]*\)[*+]|\([^()]*[+*][^()]*\)\{")
+# Python's backtracking ``re`` engine has no match timeout. Keep flow regexes
+# intentionally small and conservative: permit literal/character-class searches
+# and simple capture groups used for extraction, but reject constructs known to
+# create super-linear backtracking (alternation, nested groups, backreferences,
+# lookarounds, and quantified groups whose body is itself quantified).
 _REGEX_MAX_PATTERN = 200
 _REGEX_MAX_SUBJECT = 2000
+_GROUP_QUANTIFIERS = frozenset("*+?")
+
+
+def _regex_is_safe(pattern: str) -> bool:
+    """Return whether ``pattern`` stays within the flow-safe regex subset."""
+    in_class = False
+    escaped = False
+    groups: list[dict[str, bool]] = []
+    last_group_had_quantifier = False
+
+    for i, ch in enumerate(pattern):
+        if escaped:
+            if ch.isdigit() or ch in {"g", "k"}:
+                return False
+            escaped = False
+            last_group_had_quantifier = False
+            continue
+        if ch == "\\":
+            escaped = True
+            continue
+        if in_class:
+            if ch == "]":
+                in_class = False
+            continue
+        if ch == "[":
+            in_class = True
+            last_group_had_quantifier = False
+            continue
+        if ch == "|":
+            return False
+        if ch == "(":
+            if groups:
+                return False
+            if pattern[i + 1:i + 2] == "?":
+                return False
+            groups.append({"has_quantifier": False})
+            last_group_had_quantifier = False
+            continue
+        if ch == ")":
+            if not groups:
+                return False
+            last_group_had_quantifier = groups.pop()["has_quantifier"]
+            continue
+        if ch in _GROUP_QUANTIFIERS or ch == "{":
+            if groups:
+                groups[-1]["has_quantifier"] = True
+            elif last_group_had_quantifier:
+                return False
+            last_group_had_quantifier = False
+            continue
+        last_group_had_quantifier = False
+
+    return not escaped and not in_class and not groups
 
 
 def _fn_regex(a: list) -> str:
@@ -128,7 +181,7 @@ def _fn_regex(a: list) -> str:
     if len(a) < 2:
         return ""
     pattern = str(a[1])
-    if len(pattern) > _REGEX_MAX_PATTERN or _REDOS_SHAPE.search(pattern):
+    if len(pattern) > _REGEX_MAX_PATTERN or not _regex_is_safe(pattern):
         return ""
     subject = _as_text(a[0])[:_REGEX_MAX_SUBJECT]
     try:

@@ -45,6 +45,9 @@ class TestStringAndCollectionTransforms:
         # outright -> "" rather than pinning a worker (re has no timeout).
         assert render("{{regex(s, \"(a+)+$\")}}", {"s": "aaaaaaaaaaaaaaaaX"}) == ""
         assert render("{{regex(s, \"(.*)*\")}}", {"s": "abc"}) == ""
+        assert render("{{regex(s, \"(a?)+$\")}}", {"s": "aaaaaaaaaaaaaaaaX"}) == ""
+        assert render("{{regex(s, \"(a|aa)+$\")}}", {"s": "aaaaaaaaaaaaaaaaX"}) == ""
+        assert render("{{regex(s, \"(a+)\\1\")}}", {"s": "aa"}) == ""
         # a normal capture with a single '+' inside a group still works
         assert render("{{regex(email, \"([a-z]+)@\")}}", {"email": "bob@x.com"}) == "bob"
 
