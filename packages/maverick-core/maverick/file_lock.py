@@ -28,6 +28,7 @@ lock on Windows, plus bounded in-process lock stripes on both platforms.
 """
 from __future__ import annotations
 
+import logging
 import math
 import os
 import re
@@ -39,6 +40,8 @@ import time
 from collections.abc import Iterable
 from contextlib import contextmanager
 from pathlib import Path
+
+log = logging.getLogger(__name__)
 
 __all__ = [
     "cross_process_lock",
@@ -548,21 +551,41 @@ def cross_process_lock(target: str | Path):
         try:
             try:
                 import fcntl
-                fcntl.flock(fd, fcntl.LOCK_EX)
-                backend = "fcntl"
             except ImportError:
-                if os.name == "nt":
-                    import msvcrt
+                fcntl = None  # type: ignore[assignment]
+            if fcntl is not None:
+                try:
+                    fcntl.flock(fd, fcntl.LOCK_EX)
+                    backend = "fcntl"
+                except OSError as exc:
+                    # flock is genuinely unavailable on this platform/filesystem
+                    # (a non-POSIX or network/overlay FS that answers LOCK_EX
+                    # with ENOLCK/EOPNOTSUPP). Cross-process serialization is
+                    # impossible there; the in-process lock held above
+                    # (``_local_lock_for``) still serializes this process, so
+                    # degrade to it rather than make every audit write and
+                    # security-state read-modify-write fail on such a platform.
+                    # A lock-FILE creation failure (the ``os.open`` above) still
+                    # propagates -- only acquisition on an already-open fd
+                    # degrades, so ``test_cross_process_lock_fails_closed_when_
+                    # dir_unwritable`` stays fail-closed.
+                    log.debug(
+                        "cross_process_lock: flock unavailable for %s (%s); "
+                        "relying on the in-process lock only", lock_path, exc,
+                    )
+                    backend = None
+            elif os.name == "nt":
+                import msvcrt
 
-                    if os.fstat(fd).st_size == 0:
-                        os.write(fd, b"\0")
-                    os.lseek(fd, 0, os.SEEK_SET)
-                    msvcrt.locking(fd, msvcrt.LK_LOCK, 1)
-                    backend = "msvcrt"
-                else:  # pragma: no cover - supported platforms have one backend
-                    raise RuntimeError(
-                        "no cross-process lock backend is available"
-                    ) from None
+                if os.fstat(fd).st_size == 0:
+                    os.write(fd, b"\0")
+                os.lseek(fd, 0, os.SEEK_SET)
+                msvcrt.locking(fd, msvcrt.LK_LOCK, 1)
+                backend = "msvcrt"
+            else:  # pragma: no cover - supported platforms have one backend
+                raise RuntimeError(
+                    "no cross-process lock backend is available"
+                ) from None
             harden_path_permissions(lock_path)
             held[canonical] = 1
             try:
