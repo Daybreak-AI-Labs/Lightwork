@@ -263,9 +263,9 @@ class Flow:
         if self.start not in self.nodes:
             errs.append(f"start node {self.start!r} is not in the flow")
         if self.schedule.strip():
-            from ..scheduler import CronError, parse_cron
+            from ..scheduler import CronError, next_run
             try:
-                parse_cron(self.schedule)
+                next_run(self.schedule, tz=self.timezone.strip())
             except CronError as e:
                 errs.append(f"invalid schedule {self.schedule!r}: {e}")
         seen_ids = set()

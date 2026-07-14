@@ -64,6 +64,11 @@ class TestFlowIR:
         f.schedule = "not a cron"
         assert any("invalid schedule" in e for e in f.validate())
 
+    def test_unarmable_schedule_is_a_validation_error(self):
+        f = _flow([FlowNode(id="a", kind="agent", brief="x")])
+        f.schedule = "0 0 31 2 *"
+        assert any("invalid schedule" in e for e in f.validate())
+
     def test_roundtrip_serialisation_nested(self):
         body = _flow([FlowNode(id="x", kind="agent", brief="do {{item}}")], start="x")
         f = _flow([
