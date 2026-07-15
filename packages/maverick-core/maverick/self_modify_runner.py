@@ -151,7 +151,6 @@ def _default_evaluate(
     sandbox=None,
     budget=None,
     cfg: dict,
-    cache_baseline: bool = False,
     require_tracked_source: bool = True,
     expected_source_manifest: str | None = None,
 ):
@@ -167,9 +166,8 @@ def _default_evaluate(
     validated backend rooted at each copy. Fixed-root sandbox objects are refused
     because they cannot prove independent baseline/candidate workspace binding.
 
-    Baseline caching is disabled in the stock runner so every candidate and
-    baseline derive from the same captured source snapshot. The compatibility
-    flag remains only for trusted callers that bind source revision themselves."""
+    Baseline caching is disabled so every candidate and baseline derive from
+    the same captured source snapshot."""
     eval_tests = tuple(str(t).strip() for t in (cfg.get("eval_tests") or [])
                        if str(t).strip())
     if len(eval_tests) < 2:
@@ -448,7 +446,6 @@ def run(  # noqa: C901 -- orchestration keeps each privileged refusal visible
         try:
             raw_ev = evaluate or _default_evaluate(
                 tree=stock_tree, sandbox=sandbox, budget=budget, cfg=cfg,
-                cache_baseline=False,
                 require_tracked_source=stock_requires_tracked_source,
                 expected_source_manifest=stock_snapshot,
             )

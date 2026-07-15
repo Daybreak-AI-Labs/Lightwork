@@ -485,7 +485,6 @@ def _learning_apply_refusal() -> str | None:
 
 
 def run_git_apply(patch: str, workdir: Path, sb, *,
-                  patch_name: str = ".maverick-apply.diff",
                   budget=None) -> tuple[bool, str]:
     """Stage ``patch`` and apply it to ``workdir`` via an ALREADY-RESOLVED backend
     ``sb`` (kernel rule 4: shell only via ``sandbox.exec``): ``git apply --check``
@@ -592,9 +591,7 @@ def git_apply(patch: str, workdir: Path, *, sandbox=None, budget=None) -> ApplyR
         sb = resolve_eval_sandbox(sandbox, workdir)
     except EvalSandboxError as e:
         return ApplyResult(False, str(e))
-    ok, msg = run_git_apply(
-        patch, workdir, sb, patch_name=".maverick-eval-patch.diff",
-        budget=budget)
+    ok, msg = run_git_apply(patch, workdir, sb, budget=budget)
     return ApplyResult(ok, msg)
 
 
