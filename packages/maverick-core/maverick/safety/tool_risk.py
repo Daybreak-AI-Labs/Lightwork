@@ -358,6 +358,33 @@ def tool_risk(name: str, overrides: dict[str, str] | None = None) -> str:
     return _DEFAULT_RISK_LEVEL
 
 
+def tool_risk_is_classified(
+    name: str, overrides: dict[str, str] | None = None,
+) -> bool:
+    """Whether ``name`` has an intentional risk classification.
+
+    ``tool_risk`` retains its compatibility fallback of ``medium`` for unknown
+    names, but reliability and workflow governance must distinguish that
+    fallback from an explicitly reviewed medium-risk tool. Otherwise a newly
+    installed mutating plugin silently gains automatic retries and bypasses
+    high-risk approval gates merely because its name is absent from the table.
+    """
+    name = str(name or "")
+    overrides = _load_overrides() if overrides is None else overrides
+    if name in overrides or name in _DEFAULT_RISK:
+        return True
+    if any(
+        any(ch in pattern for ch in "*?[") and fnmatch.fnmatchcase(name, pattern)
+        for pattern in overrides
+    ):
+        return True
+    return bool(
+        name.startswith("mcp_")
+        or name in _read_connector_names()
+        or name in _enterprise_connector_names()
+    )
+
+
 def tools_exceeding(
     tool_names,
     max_risk: str | None,
@@ -385,4 +412,7 @@ def risk_map(tool_names, overrides: dict[str, str] | None = None) -> dict[str, s
     return {n: tool_risk(n, overrides) for n in tool_names}
 
 
-__all__ = ["RISK_LEVELS", "risk_rank", "tool_risk", "tools_exceeding", "risk_map"]
+__all__ = [
+    "RISK_LEVELS", "risk_rank", "tool_risk", "tool_risk_is_classified",
+    "tools_exceeding", "risk_map",
+]

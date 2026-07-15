@@ -24,8 +24,23 @@ def _path():
     return data_dir("flows", "evolution.ndjson")
 
 
-def record_apply(flow_id: str, node_id: str, from_kind: str, to_kind: str,
-                 version: int, *, source: str = "manual") -> None:
+def _current_revision(flow_id: str) -> str:
+    from .store import load_flow
+
+    flow = load_flow(flow_id)
+    return str(flow.revision or "") if flow is not None else ""
+
+
+def record_apply(
+    flow_id: str,
+    node_id: str,
+    from_kind: str,
+    to_kind: str,
+    version: int,
+    *,
+    source: str = "manual",
+    revision: str | None = None,
+) -> None:
     """Record that ``node_id`` in ``flow_id`` was swapped ``from_kind -> to_kind``,
     producing definition ``version``. ``source`` is ``manual`` (a human applied a
     proposal) or ``auto`` (the sweep did). Best-effort; never raises."""
@@ -33,6 +48,7 @@ def record_apply(flow_id: str, node_id: str, from_kind: str, to_kind: str,
         "ts": time.time(), "flow_id": str(flow_id), "node_id": str(node_id),
         "from_kind": str(from_kind), "to_kind": str(to_kind),
         "version": int(version), "source": str(source),
+        "revision": str(_current_revision(flow_id) if revision is None else revision),
     })
 
 
@@ -40,18 +56,27 @@ def _rows() -> list[dict]:
     return tail_rows(_path(), _MAX_ROWS)
 
 
-def history(flow_id: str, node_id: str | None = None) -> list[dict]:
+def history(
+    flow_id: str,
+    node_id: str | None = None,
+    *,
+    revision: str | None = None,
+) -> list[dict]:
     """Apply events for a flow (optionally one node), newest first."""
+    expected_revision = _current_revision(flow_id) if revision is None else str(revision)
     rows = [r for r in _rows() if r.get("flow_id") == flow_id
+            and str(r.get("revision") or "") == expected_revision
             and (node_id is None or str(r.get("node_id")) == str(node_id))]
     rows.sort(key=lambda r: r.get("ts") or 0.0, reverse=True)
     return rows
 
 
-def last_apply(flow_id: str, node_id: str) -> dict | None:
+def last_apply(
+    flow_id: str, node_id: str, *, revision: str | None = None,
+) -> dict | None:
     """The most recent apply event for a node, or ``None`` if it was never
     changed -- i.e. there's no before/after boundary to measure yet."""
-    rows = history(flow_id, node_id)
+    rows = history(flow_id, node_id, revision=revision)
     return rows[0] if rows else None
 
 
@@ -64,10 +89,18 @@ def improvement_count() -> int:
     latest apply is a forward one, not a revert. An honest "your workflows got
     better and stayed better N times" moat number -- an inflated one would erode
     the very trust it's meant to build."""
-    latest: dict[tuple[str, str], dict] = {}
-    forward: set[tuple[str, str]] = set()
+    latest: dict[tuple[str, str, str], dict] = {}
+    forward: set[tuple[str, str, str]] = set()
+    revisions: dict[str, str] = {}
     for r in _rows():   # append-only chronological tail: last write per node wins
-        key = (str(r.get("flow_id")), str(r.get("node_id")))
+        flow_id = str(r.get("flow_id"))
+        revision = str(r.get("revision") or "")
+        if flow_id not in revisions:
+            revisions[flow_id] = _current_revision(flow_id)
+        current = revisions[flow_id]
+        if revision != current:
+            continue
+        key = (flow_id, revision, str(r.get("node_id")))
         latest[key] = r
         if r.get("source") != "auto-revert":
             forward.add(key)

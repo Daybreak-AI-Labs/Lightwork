@@ -48,8 +48,12 @@ def is_retry_safe(name: str) -> bool:
     classification is treated conservatively as not-retry-safe.
     """
     try:
-        from .safety.tool_risk import tool_risk
-        return tool_risk(name) != "high"
+        from .safety.tool_risk import tool_risk, tool_risk_is_classified
+        # An unknown plugin happens to inherit the compatibility display level
+        # "medium", but has never been reviewed as read/idempotent. Treat it as
+        # non-retry-safe until a built-in or configuration explicitly classifies
+        # it; this same predicate drives flow approval/quarantine boundaries.
+        return tool_risk_is_classified(name) and tool_risk(name) != "high"
     except Exception:  # pragma: no cover -- classification never blocks a call
         return False
 

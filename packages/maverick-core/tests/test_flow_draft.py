@@ -2,7 +2,7 @@
 always-runnable single-agent fallback. The LLM ``complete`` is injected."""
 from __future__ import annotations
 
-from maverick.flow.draft import draft_flow
+from maverick.flow.draft import draft_flow, rank_tool_catalog
 
 
 class _Resp:
@@ -91,3 +91,107 @@ def test_empty_description_rejected():
     import pytest
     with pytest.raises(ValueError):
         draft_flow("   ", complete=_complete("{}"))
+
+
+def test_draft_preserves_valid_inputs_and_bounds_operational_limits():
+    js = ('{"id":"x","name":"Bounded","start":"n0","version":99,'
+          '"owner":"attacker","max_seconds":999999,"max_dollars":999,'
+          '"max_concurrent":999,"schedule":"0 9 * * 1","timezone":"UTC",'
+          '"inputs":['
+          '{"key":"amount","type":"number","label":"Amount","required":true,"default":12},'
+          '{"key":"bad key","type":"text"},'
+          '{"key":"amount","type":"text"},'
+          '{"key":"when","type":"date","default":"not-a-date"}],'
+          '"nodes":[{"id":"n0","kind":"agent","brief":"process {{amount}}"}]}')
+    flow, notes = draft_flow("process an amount weekly", complete=_complete(js))
+
+    assert notes == []
+    assert flow.owner == "" and flow.version == 1  # model cannot claim ownership/version
+    assert flow.max_seconds == 86_400.0
+    assert flow.max_dollars == 100.0
+    assert flow.max_concurrent == 32
+    assert flow.schedule == "0 9 * * 1" and flow.timezone == "UTC"
+    assert flow.inputs == [
+        {"key": "amount", "type": "number", "label": "Amount",
+         "required": True, "default": 12.0},
+        {"key": "when", "type": "date", "label": "when", "required": False},
+    ]
+    assert flow.validate() == []
+
+
+def test_tool_catalog_ranking_handles_paraphrases_and_unseen_real_tools():
+    catalog = [
+        {"name": "slack_bot", "description": "Post a message to a Slack channel",
+         "params": ["channel", "text"]},
+        {"name": "pagerduty_incidents",
+         "description": "Create PagerDuty alerts for the on-call engineer",
+         "params": ["summary"]},
+        {"name": "snowflake_query", "description": "Run a warehouse query",
+         "params": ["sql"]},
+        {"name": "unrelated", "description": "Resize an image", "params": []},
+    ]
+
+    chat = rank_tool_catalog("tell the team in chat when the report is ready", catalog)
+    assert chat[0]["name"] == "slack_bot"
+    pager = rank_tool_catalog("page the on-call engineer when production breaks", catalog)
+    assert pager[0]["name"] == "pagerduty_incidents"
+    unseen = rank_tool_catalog("use snowflake_query for this warehouse report", catalog)
+    assert unseen[0]["name"] == "snowflake_query"
+    assert all(item["name"] != "unrelated" for item in unseen)
+
+
+def test_hallucinated_action_tool_fails_closed_to_agent_fallback():
+    js = ('{"start":"n0","nodes":[{"id":"n0","kind":"action",'
+          '"tool":"totally_made_up","params":{}}]}')
+    flow, notes = draft_flow(
+        "send the alert", tools=("slack_bot",), complete=_complete(js))
+
+    assert flow.is_single_agent()
+    assert any("unavailable tool 'totally_made_up'" in note for note in notes)
+
+
+def test_nested_hallucinated_action_tool_cannot_evade_binding_check():
+    js = ('{"start":"loop","nodes":[{"id":"loop","kind":"foreach",'
+          '"items":"rows","body":{"start":"send","nodes":['
+          '{"id":"send","kind":"action","tool":"ghost_send","params":{}}]}}]}')
+    flow, notes = draft_flow(
+        "send every row", tools=("slack_bot",), complete=_complete(js))
+
+    assert flow.is_single_agent()
+    assert any("ghost_send" in note and ".body" in note for note in notes)
+
+
+def test_known_action_missing_required_param_fails_with_diagnostic():
+    js = ('{"start":"n0","nodes":[{"id":"n0","kind":"action",'
+          '"tool":"slack_bot","params":{"text":"hello"}}]}')
+    schema = {
+        "slack_bot": {
+            "type": "object",
+            "properties": {"channel": {"type": "string"}, "text": {"type": "string"}},
+            "required": ["channel", "text"],
+        }
+    }
+    flow, notes = draft_flow(
+        "post hello to Slack", tools=("slack_bot",), tool_schemas=schema,
+        complete=_complete(js),
+    )
+
+    assert flow.is_single_agent()
+    assert any("missing required params: channel" in note for note in notes)
+
+
+def test_flow_drafter_receives_promoted_factory_guidance(monkeypatch):
+    from maverick import factory_learning
+    seen = {}
+
+    monkeypatch.setattr(
+        factory_learning, "augment_system_prompt",
+        lambda system, **kwargs: system + "\nPROMOTED FACTORY CORRECTION",
+    )
+
+    def capture(system, messages, budget=None, max_tokens=0, **kwargs):
+        seen["system"] = system
+        return _Resp('{"start":"a","nodes":[{"id":"a","kind":"agent","brief":"x"}]}')
+
+    draft_flow("do it", tools=(), complete=capture)
+    assert "PROMOTED FACTORY CORRECTION" in seen["system"]

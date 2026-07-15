@@ -219,6 +219,23 @@ def test_catalog_no_trust_tofu_reports_verified_false(tmp_path, monkeypatch):
     assert s.verified is False
 
 
+def test_caller_can_force_signature_when_manual_tofu_is_enabled(tmp_path, monkeypatch):
+    _write_config(tmp_path, monkeypatch, "")
+    monkeypatch.setattr(catalog, "resolve", lambda *args, **kwargs: _entry())
+    monkeypatch.setattr(
+        skills,
+        "_fetch_skill_source_bytes",
+        lambda source: _BODY.encode(),
+    )
+    with pytest.raises(ValueError, match="sig|trusted_pubkeys"):
+        skills.install_from_catalog(
+            "summarize-url",
+            skills_dir=tmp_path / "skills",
+            require_signature=True,
+        )
+    assert not list((tmp_path / "skills").glob("*.md"))
+
+
 def test_catalog_no_trust_signed_self_asserted_is_not_verified(tmp_path, monkeypatch):
     # A self-signed skill with no configured trust anchor is integrity, not
     # authenticity: install succeeds but verified stays False.

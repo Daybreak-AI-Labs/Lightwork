@@ -916,13 +916,23 @@ def learn_demo(ctx: click.Context, demo_file, name, industry, source, no_llm, ye
               help="Distinct packs that must exhibit a gap before it's a correction.")
 @click.option("--dry-run", is_flag=True,
               help="Show mined corrections without promoting any.")
-def factory_learn(min_support, dry_run) -> None:
+@click.option(
+    "--evidence",
+    "evidence_path",
+    type=click.Path(exists=True, dir_okay=False),
+    help=("Strict version-2 JSON with unique paired case IDs, dataset/split/"
+          "evaluator/model/prompt hashes, run provenance, and a canonical "
+          "evidence digest. Required for live promotion; v1 is dry-run only."),
+)
+def factory_learn(min_support, dry_run, evidence_path) -> None:
     """Improve the agent factory from what its packs got wrong.
 
     Mines recurring provisioning/approval gaps into proposer corrections and
     promotes those the self-improvement gate accepts; promoted guidance is then
     folded into future pack generation. Off unless [self_improvement] enable
-    (or MAVERICK_FACTORY_LEARNING) is set.
+    (or MAVERICK_FACTORY_LEARNING) is set. Live promotion requires strict v2
+    evidence with unique paired case IDs, immutable evaluator/data/model/prompt
+    hashes, provenance, and a verified canonical digest; v1 is inspection-only.
     """
     from .. import factory_learning
 
@@ -940,7 +950,18 @@ def factory_learn(min_support, dry_run) -> None:
     if dry_run:
         click.echo("\n(dry run: nothing promoted)")
         return
-    promoted = factory_learning.review_and_promote(min_support=min_support)
+    if not evidence_path:
+        raise click.ClickException(
+            "promotion requires --evidence with strict version-2 paired-case "
+            "provenance and a canonical evidence digest; recurrence alone is not "
+            "proof that guidance improves drafts"
+        )
+    try:
+        scorer = factory_learning.load_measured_evidence(evidence_path)
+    except ValueError as exc:
+        raise click.ClickException(str(exc)) from exc
+    promoted = factory_learning.review_and_promote(
+        min_support=min_support, scorer=scorer)
     if promoted:
         click.echo(click.style(f"\nPromoted {len(promoted)} correction(s) through "
                                "the self-improvement gate.", fg="green"))

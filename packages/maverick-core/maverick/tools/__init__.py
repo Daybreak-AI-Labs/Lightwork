@@ -587,6 +587,7 @@ def base_registry(
     channel: str | None = None,
     user_id: str | None = None,
     budget: Any = None,
+    _include_generated_tools: bool = True,
 ) -> ToolRegistry:
     """Build the base tool set (no spawn tools).
 
@@ -609,6 +610,11 @@ def base_registry(
 
     ``budget`` binds tools that perform their own metered provider calls
     (for example ``view_video``) to the active run budget.
+
+    ``_include_generated_tools`` is an internal recursion guard used only by
+    :func:`base_tool_names`: namespace introspection must assemble the built-in
+    registry without recursively loading generated tools whose own collision
+    check calls ``base_tool_names``.
     """
     from .ask_user import ask_user
     from .attachments import list_attachments_tool
@@ -1257,7 +1263,6 @@ def base_registry(
         enable_browser=enable_browser,
     )
 
-    _apply_tool_acl(reg, channel=channel, user_id=user_id)
     _apply_mcp_tools(reg, mcp_clients)
     # Per-tool rate limits from ~/.maverick/config.toml [rate_limits].
     # Wrap AFTER MCP + before plugin tools so MCP-exposed tools (which
@@ -1267,11 +1272,17 @@ def base_registry(
     _apply_python_plugins(reg)
     _apply_ts_plugins(reg)
     _apply_grpc_plugins(reg)
-    _apply_generated_tools(reg)
+    if _include_generated_tools:
+        _apply_generated_tools(reg, sandbox)
     # Second rate-limit pass to cover plugin-registered tools. Earlier
     # pass already wrapped core + MCP tools; double-wrapping is avoided
     # because apply_to_registry walks the current dict snapshot.
     _apply_rate_limits(reg, fail_silently=True)
+    # ACLs are an execution-boundary policy and therefore run only after every
+    # registration source (core, optional, MCP, Python/TS/gRPC plugins, and
+    # generated tools).  Applying them earlier lets later providers bypass a
+    # user's allow/deny list simply by registering the same capability class.
+    _apply_tool_acl(reg, channel=channel, user_id=user_id)
     _apply_deferred_loading(reg)
 
     # Opt-in: route configured enterprise-connector WRITES through GovernedActions
@@ -1300,7 +1311,9 @@ def base_tool_names() -> set[str] | None:
         from ..sandbox.local import LocalBackend
         from ..world_model import open_world
 
-        reg = base_registry(open_world(None), LocalBackend())
+        reg = base_registry(
+            open_world(None), LocalBackend(), _include_generated_tools=False,
+        )
         return {t.name for t in reg.all()}
     except Exception as e:  # pragma: no cover -- best-effort introspection
         import logging as _logging
@@ -1443,18 +1456,18 @@ def _apply_grpc_plugins(reg: ToolRegistry) -> None:
         pass
 
 
-def _apply_generated_tools(reg: ToolRegistry) -> None:
+def _apply_generated_tools(reg: ToolRegistry, sandbox: Any = None) -> None:
     # Self-learning: tools the agent generated for itself on a prior run
     # live in ~/.maverick/generated_tools/ and load like first-class tools.
-    # Only consulted when [self_learning] enable is set — generated tools
-    # execute in-process, so the kernel never imports them by default.
+    # Only consulted when [self_learning] enable is set. Persisted source is
+    # never imported in the kernel; loading returns sandbox-backed proxies.
     try:
         from .. import self_learning
         if self_learning.enabled():
-            for t in self_learning.load_generated_tools():
+            for t in self_learning.load_generated_tools(sandbox=sandbox):
                 # Same no-shadowing rule as the plugin/MCP loaders: a generated
                 # tool named e.g. "shell"/"read_file" must never silently replace
-                # a built-in (generated tools execute in-process).
+                # a built-in.
                 if t.name in reg._tools:
                     import logging as _logging
                     _logging.getLogger(__name__).warning(

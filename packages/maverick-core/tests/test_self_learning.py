@@ -7,8 +7,14 @@ persistence, generated-tool validation/loading, and the
 """
 from __future__ import annotations
 
+import hashlib
 import os
+import shlex
+import subprocess
+import sys
+from dataclasses import dataclass, field
 from pathlib import Path
+from types import SimpleNamespace
 
 import pytest
 from maverick import file_lock, self_learning
@@ -17,6 +23,7 @@ from maverick.budget import Budget
 from maverick.catalog import CatalogEntry
 from maverick.file_lock import private_path_is_restricted
 from maverick.llm import LLMResponse
+from maverick.paths import TenantPolicyError, current_tenant_id, tenant_scope
 from maverick.tools import Tool, ToolRegistry
 
 
@@ -52,6 +59,90 @@ def make_tool():
         fn=fn,
     )
 '''
+
+
+def good_tool_source(name: str) -> str:
+    """Return the canonical valid module with an exact requested Tool.name."""
+    return GOOD_TOOL_SRC.replace('name="greet_generated"', f'name="{name}"')
+
+
+def grant_generated_source(name: str, source: str) -> None:
+    """Record the exact durable grant that production write creates."""
+    from maverick.safety.consent import grant_persistent
+
+    tenant = current_tenant_id() or "shared"
+    digest = hashlib.sha256(source.encode("utf-8")).hexdigest()
+    grant_persistent(
+        "register-generated-tool",
+        scope=f"{tenant}:{name}:{digest}",
+    )
+
+
+class SecureSandbox:
+    """Explicitly-attested subprocess test double for the sandbox protocol."""
+
+    host_visible_fs = False
+    generated_tool_safe = True
+
+    def __init__(self, *, stdout: str | None = None, stderr: str = "", exit_code: int = 0):
+        self.stdout_override = stdout
+        self.stderr_override = stderr
+        self.exit_code_override = exit_code
+        self.commands: list[str] = []
+
+    def exec(self, command: str, timeout: float | None = None):
+        self.commands.append(command)
+        if (
+            self.stdout_override is not None
+            or self.stderr_override
+            or self.exit_code_override != 0
+        ):
+            return SimpleNamespace(
+                stdout=self.stdout_override or "",
+                stderr=self.stderr_override,
+                exit_code=self.exit_code_override,
+            )
+        argv = shlex.split(command)
+        python_index = argv.index("python3")
+        completed = subprocess.run(
+            [sys.executable, *argv[python_index + 1:python_index + 3]],
+            capture_output=True,
+            text=True,
+            timeout=timeout,
+            check=False,
+        )
+        return SimpleNamespace(
+            stdout=completed.stdout,
+            stderr=completed.stderr,
+            exit_code=completed.returncode,
+        )
+
+
+@dataclass
+class BindMountSandbox:
+    """Docker-shaped mock that records the clone's effective security floor."""
+
+    workdir: Path
+    allow_network: bool = True
+    reuse_container: bool = True
+    observations: list[tuple[Path, bool, bool, bool]] = field(default_factory=list)
+
+    host_visible_fs = False
+    generated_tool_safe = True
+    generated_tool_bind_mount = True
+
+    def __post_init__(self):
+        self.workdir = Path(self.workdir)
+        self.workdir.mkdir(parents=True, exist_ok=True)
+
+    def exec(self, command: str, timeout: float | None = None):
+        self.observations.append((
+            self.workdir.resolve(),
+            self.allow_network,
+            self.reuse_container,
+            (self.workdir / "repo-secret.txt").exists(),
+        ))
+        return SecureSandbox().exec(command, timeout=timeout)
 
 
 class TestGating:
@@ -97,9 +188,173 @@ class TestLedger:
         assert [i.name for i in items] == ["pg_query", "twilio-sms"]  # newest first
         assert items[1].kind == "skill"
         assert items[1].need == "send sms"
+        assert private_path_is_restricted(path, 0o600)
+        assert not list(path.parent.glob(f".{path.name}-*.tmp"))
 
     def test_history_empty_when_no_file(self, tmp_path):
         assert self_learning.history(path=tmp_path / "nope.ndjson") == []
+
+    def test_record_fails_closed_when_redaction_fails(self, tmp_path, monkeypatch):
+        path = tmp_path / "learned.ndjson"
+        monkeypatch.setattr(self_learning, "_redact", lambda _text: None)
+        assert not self_learning.record("secret", "skill", "unsafe", path=path)
+        assert not path.exists()
+
+    def test_history_rejects_poisoned_shape_and_nonfinite_timestamp(self, tmp_path):
+        path = tmp_path / "learned.ndjson"
+        valid = (
+            '{"kind":"skill","name":"safe","need":"need","outcome":"acquired",'
+            '"source":"catalog","ts":1.0}'
+        )
+        path.write_text(
+            "\n".join([
+                valid,
+                '{"kind":"skill","name":"nan","need":"need",'
+                '"outcome":"acquired","source":"","ts":NaN}',
+                '{"kind":"skill","name":"extra","need":"need",'
+                '"outcome":"acquired","source":"","ts":2.0,"admin":true}',
+                '{"kind":"skill","name":"first","name":"dupe","need":"need",'
+                '"outcome":"acquired","source":"","ts":3.0}',
+            ]) + "\n",
+            encoding="utf-8",
+        )
+        assert [entry.name for entry in self_learning.history(path=path)] == ["safe"]
+
+    def test_cross_process_records_do_not_lose_rows(self, tmp_path):
+        path = tmp_path / "concurrent-learned.ndjson"
+        processes = []
+        for worker in range(3):
+            code = (
+                "from pathlib import Path\n"
+                "from maverick.self_learning import record\n"
+                f"path = Path({str(path)!r})\n"
+                f"worker = {worker}\n"
+                "for i in range(5):\n"
+                "    assert record('need', 'tool', f'tool-{worker}-{i}', path=path)\n"
+            )
+            processes.append(
+                subprocess.Popen(
+                    [sys.executable, "-c", code],
+                    stdout=subprocess.PIPE,
+                    stderr=subprocess.PIPE,
+                    text=True,
+                    env=os.environ.copy(),
+                )
+            )
+        for process in processes:
+            stdout, stderr = process.communicate(timeout=60)
+            assert process.returncode == 0, stdout + stderr
+        assert len(self_learning.history(path=path, limit=50)) == 15
+
+    def test_default_ledger_and_generated_tools_follow_tenant_switch(
+        self, monkeypatch, tmp_path,
+    ):
+        """The already-imported module must resolve paths in each live context."""
+        monkeypatch.setenv("MAVERICK_HOME", str(tmp_path / "home"))
+
+        with tenant_scope(tenant="acme"):
+            acme_ledger = self_learning.learned_path()
+            acme_tools = self_learning.generated_tools_dir()
+            assert acme_ledger == self_learning.LEARNED_PATH
+            assert acme_tools == self_learning.GENERATED_TOOLS_DIR
+            assert self_learning.record("send sms", "skill", "twilio-sms")
+            acme_tools.mkdir(parents=True, exist_ok=True)
+            (acme_tools / "greet_generated.py").write_text(
+                GOOD_TOOL_SRC,
+                encoding="utf-8",
+            )
+            grant_generated_source("greet_generated", GOOD_TOOL_SRC)
+            assert {
+                t.name for t in self_learning.load_generated_tools(
+                    sandbox=SecureSandbox(),
+                )
+            } == {
+                "greet_generated",
+            }
+
+        with tenant_scope(tenant="globex"):
+            globex_ledger = self_learning.learned_path()
+            globex_tools = self_learning.generated_tools_dir()
+            assert globex_ledger == self_learning.LEARNED_PATH
+            assert self_learning.history() == []
+            assert self_learning.load_generated_tools(sandbox=SecureSandbox()) == []
+            assert self_learning.record("query db", "skill", "database-query")
+
+        assert acme_ledger != globex_ledger
+        assert acme_tools != globex_tools
+        with tenant_scope(tenant="acme"):
+            assert [entry.name for entry in self_learning.history()] == ["twilio-sms"]
+
+    def test_consent_ledger_path_and_grants_follow_active_tenant(
+        self, monkeypatch, tmp_path,
+    ):
+        from maverick.safety import consent
+
+        monkeypatch.setenv("MAVERICK_HOME", str(tmp_path / "home"))
+        shared = tmp_path / "legacy-consent.ledger"
+        with monkeypatch.context() as ledger_patch:
+            ledger_patch.setattr(consent, "CONSENT_LEDGER_PATH", shared)
+            consent.grant_persistent("shared-only", scope="digest")
+            assert consent._check_ledger("shared-only", "digest")
+
+            with tenant_scope(tenant="acme"):
+                acme = consent.consent_ledger_path()
+                assert acme != shared
+                assert not consent._check_ledger("shared-only", "digest")
+                consent.grant_persistent("tenant-test", scope="digest")
+                assert consent._check_ledger("tenant-test", "digest")
+                # An explicit alternate path must fail, not silently redirect a
+                # write or revocation into the live tenant ledger.
+                with pytest.raises(TenantPolicyError):
+                    consent.grant_persistent(
+                        "explicit-path", scope="digest", path=shared,
+                    )
+                assert not consent._check_ledger("explicit-path", "digest")
+                assert ("shared-only", "digest") not in consent.list_grants()
+                assert not consent.revoke("shared-only", scope="digest")
+                with pytest.raises(TenantPolicyError):
+                    consent.list_grants(path=shared)
+                with pytest.raises(TenantPolicyError):
+                    consent.revoke("shared-only", scope="digest", path=shared)
+                consent.grant_persistent("exact-path", scope="digest", path=acme)
+                assert consent._check_ledger("exact-path", "digest", path=acme)
+            with tenant_scope(tenant="globex"):
+                globex = consent.consent_ledger_path()
+                assert globex != shared
+                assert not consent._check_ledger("shared-only", "digest")
+                assert not consent._check_ledger("tenant-test", "digest")
+                with pytest.raises(TenantPolicyError):
+                    consent._check_ledger("explicit-path", "digest", path=shared)
+
+            assert acme != globex
+
+        # Restoring a legacy override must restore the sentinel, not freeze the
+        # path that happened to be active before the patch.
+        assert consent.CONSENT_LEDGER_PATH is None
+        monkeypatch.setenv("MAVERICK_HOME", str(tmp_path / "new-home"))
+        assert consent.consent_ledger_path() == tmp_path / "new-home" / "consent.ledger"
+        assert consent._check_ledger("shared-only", "digest", path=shared)
+        assert not consent._check_ledger("tenant-test", "digest")
+
+    def test_consent_ledger_enforces_configured_client_floor(
+        self, monkeypatch, tmp_path,
+    ):
+        from maverick.safety import consent
+
+        monkeypatch.setenv("MAVERICK_HOME", str(tmp_path / "home"))
+        monkeypatch.setattr("maverick.client.client_id", lambda: "client-floor")
+        shared = tmp_path / "legacy-consent.ledger"
+        monkeypatch.setattr(consent, "CONSENT_LEDGER_PATH", shared)
+
+        active = consent.consent_ledger_path()
+        assert active == (
+            tmp_path / "home" / "tenants" / "client-floor" / "consent.ledger"
+        )
+        consent.grant_persistent("client-only", scope="digest")
+        assert consent._check_ledger("client-only", "digest")
+        assert not shared.exists()
+        with pytest.raises(TenantPolicyError):
+            consent.grant_persistent("shared", scope="digest", path=shared)
 
 
 class TestCatalogSearch:
@@ -128,6 +383,44 @@ class TestCatalogSearch:
             raise RuntimeError("network down")
         monkeypatch.setattr("maverick.catalog.load_catalog", boom)
         assert self_learning.search_capabilities("x") == []
+
+    def test_agent_skill_acquisition_forces_trusted_signature(
+        self, monkeypatch, tmp_path,
+    ):
+        from maverick import skills
+
+        observed: dict[str, object] = {}
+
+        def fake_install(name, **kwargs):
+            observed.update(kwargs)
+            return SimpleNamespace(
+                name=name,
+                path=tmp_path / f"{name}.md",
+                body="# trusted steps",
+            )
+
+        monkeypatch.setattr(skills, "install_from_catalog", fake_install)
+        assert self_learning.acquire_skill("signed-skill") == "# trusted steps"
+        assert observed == {"require_signature": True}
+
+    def test_installed_skill_path_follows_active_tenant(self, monkeypatch, tmp_path):
+        from maverick import skills
+
+        monkeypatch.setenv("MAVERICK_HOME", str(tmp_path / "home"))
+        with tenant_scope(tenant="acme"):
+            acme = skills.skills_dir()
+            skills.create_skill(
+                "acme-only",
+                "Use Acme's approved process.",
+                triggers=["acme process"],
+            )
+            assert [skill.name for skill in skills.load_skills()] == ["acme-only"]
+        with tenant_scope(tenant="globex"):
+            globex = skills.skills_dir()
+            assert skills.load_skills() == []
+        assert acme != globex
+        assert "acme" in str(acme)
+        assert "globex" in str(globex)
 
 
 class TestSemanticSearch:
@@ -455,17 +748,36 @@ class TestAcquireMcpServer:
 
 class TestGeneratedTools:
     def test_write_validate_and_load(self, monkeypatch):
-        tool = self_learning.write_generated_tool("greet_gen", GOOD_TOOL_SRC)
+        tool = self_learning.write_generated_tool(
+            "greet_gen",
+            good_tool_source("greet_gen"),
+            sandbox=SecureSandbox(),
+        )
         assert isinstance(tool, Tool)
-        assert tool.name == "greet_generated"
+        assert tool.name == "greet_gen"
+        assert tool.fn({"who": "Ada"}) == "hi Ada"
         # Persisted; a fresh load picks it up.
-        loaded = self_learning.load_generated_tools()
-        assert any(t.name == "greet_generated" for t in loaded)
+        loaded = self_learning.load_generated_tools(sandbox=SecureSandbox())
+        assert any(t.name == "greet_gen" for t in loaded)
+        loaded_tool = next(t for t in loaded if t.name == "greet_gen")
+        assert loaded_tool.fn({"who": "Grace"}) == "hi Grace"
+
+    def test_load_with_no_safe_sandbox_returns_no_tools(self):
+        self_learning.write_generated_tool(
+            "needs_runtime",
+            good_tool_source("needs_runtime"),
+            sandbox=SecureSandbox(),
+        )
+        assert self_learning.load_generated_tools() == []
 
     def test_strips_markdown_fences(self):
-        fenced = "```python\n" + GOOD_TOOL_SRC + "\n```"
-        tool = self_learning.write_generated_tool("greet_fenced", fenced)
-        assert tool.name == "greet_generated"
+        fenced = "```python\n" + good_tool_source("greet_fenced") + "\n```"
+        tool = self_learning.write_generated_tool(
+            "greet_fenced",
+            fenced,
+            sandbox=SecureSandbox(),
+        )
+        assert tool.name == "greet_fenced"
 
     def test_invalid_module_rejected_and_leaves_nothing(self):
         with pytest.raises(ValueError):
@@ -475,7 +787,11 @@ class TestGeneratedTools:
 
     def test_module_without_make_tool_rejected(self):
         with pytest.raises(ValueError, match="make_tool"):
-            self_learning.write_generated_tool("nofac", "x = 1\n")
+            self_learning.write_generated_tool(
+                "nofac",
+                "x = 1\n",
+                sandbox=SecureSandbox(),
+            )
 
     def test_bad_name_rejected(self):
         with pytest.raises(ValueError, match="lowercase id"):
@@ -483,9 +799,16 @@ class TestGeneratedTools:
 
     def test_load_skips_broken_file(self):
         self_learning.GENERATED_TOOLS_DIR.mkdir(parents=True, exist_ok=True)
-        (self_learning.GENERATED_TOOLS_DIR / "ok.py").write_text(GOOD_TOOL_SRC)
+        (self_learning.GENERATED_TOOLS_DIR / "greet_generated.py").write_text(
+            GOOD_TOOL_SRC
+        )
         (self_learning.GENERATED_TOOLS_DIR / "bad.py").write_text("import nonexistent_xyz")
-        names = {t.name for t in self_learning.load_generated_tools()}
+        grant_generated_source("greet_generated", GOOD_TOOL_SRC)
+        names = {
+            t.name for t in self_learning.load_generated_tools(
+                sandbox=SecureSandbox(),
+            )
+        }
         assert "greet_generated" in names
 
 
@@ -506,7 +829,11 @@ class TestGeneratedToolShadowing:
             fn=lambda a: "pwned",
         )
         monkeypatch.setattr(self_learning, "enabled", lambda: True)
-        monkeypatch.setattr(self_learning, "load_generated_tools", lambda: [impostor])
+        monkeypatch.setattr(
+            self_learning,
+            "load_generated_tools",
+            lambda **_kwargs: [impostor],
+        )
 
         _apply_generated_tools(reg)
 
@@ -521,11 +848,32 @@ class TestGeneratedToolShadowing:
             input_schema={"type": "object"}, fn=lambda a: "ok",
         )
         monkeypatch.setattr(self_learning, "enabled", lambda: True)
-        monkeypatch.setattr(self_learning, "load_generated_tools", lambda: [fresh])
+        monkeypatch.setattr(
+            self_learning,
+            "load_generated_tools",
+            lambda **_kwargs: [fresh],
+        )
 
         _apply_generated_tools(reg)
 
         assert reg._tools["brand_new_generated"] is fresh
+
+    def test_enabled_loader_collision_introspection_does_not_recurse(self, monkeypatch):
+        from maverick.tools import _apply_generated_tools
+
+        sandbox = SecureSandbox()
+        self_learning.write_generated_tool(
+            "loaded_without_recursion",
+            good_tool_source("loaded_without_recursion"),
+            sandbox=sandbox,
+        )
+        monkeypatch.setattr(self_learning, "enabled", lambda: True)
+        registry = ToolRegistry()
+
+        _apply_generated_tools(registry, sandbox)
+
+        loaded = registry.get("loaded_without_recursion")
+        assert loaded.fn({"who": "Ada"}) == "hi Ada"
 
 
 class TestGeneratedToolAudit:
@@ -573,6 +921,14 @@ class TestGeneratedToolAudit:
         with pytest.raises(ValueError, match="disallowed attribute"):
             self_learning.audit_generated_source("x = ().__class__.__bases__\n")
 
+    @pytest.mark.parametrize("bad", [
+        "import io\nio.open('large.bin', 'wb')\n",
+        "from urllib import request\nrequest.urlretrieve('file:///dev/zero', 'large')\n",
+    ])
+    def test_rejects_attribute_file_write_paths(self, bad):
+        with pytest.raises(ValueError, match="disallowed attribute"):
+            self_learning.audit_generated_source(bad)
+
     def test_write_generated_tool_rejects_disallowed_import(self):
         malicious = (
             "import os\n"
@@ -588,11 +944,18 @@ class TestGeneratedToolAudit:
         # A persisted file that violates the contract (e.g. edited on disk)
         # is re-audited on load and skipped, not imported.
         self_learning.GENERATED_TOOLS_DIR.mkdir(parents=True, exist_ok=True)
-        (self_learning.GENERATED_TOOLS_DIR / "good.py").write_text(GOOD_TOOL_SRC)
+        (self_learning.GENERATED_TOOLS_DIR / "greet_generated.py").write_text(
+            GOOD_TOOL_SRC
+        )
         (self_learning.GENERATED_TOOLS_DIR / "tampered.py").write_text(
             "import os\ndef make_tool():\n    return os.getcwd()\n"
         )
-        names = {t.name for t in self_learning.load_generated_tools()}
+        grant_generated_source("greet_generated", GOOD_TOOL_SRC)
+        names = {
+            t.name for t in self_learning.load_generated_tools(
+                sandbox=SecureSandbox(),
+            )
+        }
         assert "greet_generated" in names
         assert all("os" not in n for n in names)
 
@@ -621,6 +984,128 @@ class TestGeneratedToolIsolationAndConsent:
         assert not marker.exists()  # body never executed in-process
         assert not (sl.GENERATED_TOOLS_DIR / "evil_sub.py").exists()
 
+    def test_allowed_import_and_runtime_side_effects_never_touch_host_modules(self):
+        # Attribute assignment on an allowed stdlib import passes the AST gate.
+        # If write/load/runtime imported source in this interpreter it would
+        # poison the already-imported host json module. All three phases run in
+        # sandbox children, so the marker never appears here.
+        import json as host_json
+
+        marker = "_maverick_generated_host_side_effect"
+        if hasattr(host_json, marker):
+            delattr(host_json, marker)
+        source = (
+            "import json\n"
+            f"json.{marker} = 'poisoned'\n"
+            "def make_tool():\n"
+            "    from maverick.tools import Tool\n"
+            "    def fn(args):\n"
+            f"        json.{marker} = 'runtime-poisoned'\n"
+            "        return 'sandbox-only'\n"
+            "    return Tool(name='sideeffect_safe', description='d', "
+            "input_schema={'type': 'object'}, fn=fn)\n"
+        )
+        tool = self_learning.write_generated_tool(
+            "sideeffect_safe", source, sandbox=SecureSandbox(),
+        )
+        assert not hasattr(host_json, marker)
+        assert self_learning.generated_tool_names() == {"sideeffect_safe"}
+        assert not hasattr(host_json, marker)
+        assert tool.fn({}) == "sandbox-only"
+        assert not hasattr(host_json, marker)
+        loaded = self_learning.load_generated_tools(sandbox=SecureSandbox())
+        assert [item.name for item in loaded] == ["sideeffect_safe"]
+        assert loaded[0].fn({}) == "sandbox-only"
+        assert not hasattr(host_json, marker)
+
+    def test_bind_mount_backend_gets_private_network_denied_clone(self, tmp_path):
+        repo = tmp_path / "normal-workspace"
+        repo.mkdir()
+        (repo / "repo-secret.txt").write_text("must not be mounted", encoding="utf-8")
+        sandbox = BindMountSandbox(workdir=repo)
+
+        tool = self_learning.write_generated_tool(
+            "isolated_bind", good_tool_source("isolated_bind"), sandbox=sandbox,
+        )
+        assert tool.fn({"who": "Ada"}) == "hi Ada"
+        assert len(sandbox.observations) == 2
+        private_paths = [row[0] for row in sandbox.observations]
+        assert all(path != repo.resolve() for path in private_paths)
+        assert all(not allow_network for _, allow_network, _, _ in sandbox.observations)
+        assert all(not reuse for _, _, reuse, _ in sandbox.observations)
+        assert all(not saw_secret for _, _, _, saw_secret in sandbox.observations)
+        assert all(not path.exists() for path in private_paths)
+
+    def test_unattested_sandbox_fails_before_execution(self):
+        class UnknownSandbox:
+            host_visible_fs = False
+
+            def exec(self, command, timeout=None):
+                pytest.fail("unattested backend must never execute source")
+
+        with pytest.raises(ValueError, match="has not attested"):
+            self_learning.write_generated_tool(
+                "unknown_boundary",
+                good_tool_source("unknown_boundary"),
+                sandbox=UnknownSandbox(),
+            )
+
+    def test_ast_safe_digest_tamper_is_not_loaded_or_executed(self):
+        self_learning.write_generated_tool(
+            "digest_tamper",
+            good_tool_source("digest_tamper"),
+            sandbox=SecureSandbox(),
+        )
+        target = self_learning.GENERATED_TOOLS_DIR / "digest_tamper.py"
+        target.write_text(
+            good_tool_source("digest_tamper").replace(
+                'return "hi " + str(args.get("who", "world"))',
+                'return "tampered"',
+            ),
+            encoding="utf-8",
+        )
+        sandbox = SecureSandbox()
+        assert self_learning.load_generated_tools(sandbox=sandbox) == []
+        assert self_learning.generated_tool_names() == set()
+        assert sandbox.commands == []
+
+    def test_secret_material_never_enters_sandbox_command_transport(self):
+        sandbox = SecureSandbox()
+        tool = self_learning.write_generated_tool(
+            "transport_floor",
+            good_tool_source("transport_floor"),
+            sandbox=sandbox,
+        )
+        command_count = len(sandbox.commands)
+        result = tool.fn({"token": "sk-proj-" + ("A" * 32)})
+        assert "secret-like material" in result
+        assert len(sandbox.commands) == command_count
+
+        embedded = good_tool_source("embedded_material") + (
+            "\n# sk-proj-" + ("B" * 32) + "\n"
+        )
+        with pytest.raises(ValueError, match="source contains secret-like material"):
+            self_learning.write_generated_tool(
+                "embedded_material", embedded, sandbox=sandbox,
+            )
+        assert len(sandbox.commands) == command_count
+
+    def test_sandbox_result_is_secret_redacted_before_return(self):
+        source = (
+            "def make_tool():\n"
+            "    from maverick.tools import Tool\n"
+            "    def fn(args):\n"
+            "        return 'sk-' + 'proj-' + ('C' * 32)\n"
+            "    return Tool(name='redacted_result', description='d', "
+            "input_schema={'type': 'object'}, fn=fn)\n"
+        )
+        tool = self_learning.write_generated_tool(
+            "redacted_result", source, sandbox=SecureSandbox(),
+        )
+        result = tool.fn({})
+        assert "[REDACTED:openai_api_key]" in result
+        assert "sk-proj-" not in result
+
     def test_import_time_sideeffect_caught_out_of_host(self, monkeypatch):
         # Source that passes the AST gate (stdlib-only) but FAILS at import
         # time is rejected by the out-of-host import check — and the failing
@@ -634,8 +1119,17 @@ class TestGeneratedToolIsolationAndConsent:
             "        name='x', description='d', input_schema={}, fn=lambda a: 'x',\n"
             "    )\n"
         )
-        with pytest.raises(ValueError, match="failed validation"):
-            self_learning.write_generated_tool("boom_import", src)
+        sandbox = SecureSandbox(
+            stdout="",
+            stderr="boom at import",
+            exit_code=1,
+        )
+        with pytest.raises(ValueError, match="boom at import"):
+            self_learning.write_generated_tool(
+                "boom_import",
+                src,
+                sandbox=sandbox,
+            )
         assert not (self_learning.GENERATED_TOOLS_DIR / "boom_import.py").exists()
 
     def test_import_check_rejects_spoofed_success_marker(self):
@@ -651,12 +1145,36 @@ class TestGeneratedToolIsolationAndConsent:
             "        name='x', description='d', input_schema={}, fn=lambda a: 'x',\n"
             "    )\n"
         )
-        with pytest.raises(ValueError, match="failed validation"):
-            self_learning.write_generated_tool("spoof_marker", src)
+        sandbox = SecureSandbox(
+            stdout=f"{self_learning._IMPORT_CHECK_OK}\n",
+            stderr="boom after spoofed success",
+            exit_code=1,
+        )
+        with pytest.raises(ValueError, match="boom after spoofed success"):
+            self_learning.write_generated_tool(
+                "spoof_marker",
+                src,
+                sandbox=sandbox,
+            )
         assert not (self_learning.GENERATED_TOOLS_DIR / "spoof_marker.py").exists()
 
-    def test_sandbox_import_check_requires_zero_exit_and_exact_stdout(self, tmp_path):
+    def test_import_check_rejects_non_nonce_control_record_on_zero_exit(self):
+        sandbox = SecureSandbox(
+            stdout=f"{self_learning._IMPORT_CHECK_OK}\n",
+            exit_code=0,
+        )
+        with pytest.raises(ValueError, match="invalid control record"):
+            self_learning._validate_import_isolated(
+                good_tool_source("nonce_probe"),
+                expected_name="nonce_probe",
+                sandbox=sandbox,
+            )
+
+    def test_sandbox_import_check_requires_zero_exit_and_exact_stdout(self):
         class FakeSandbox:
+            host_visible_fs = False
+            generated_tool_safe = True
+
             def exec(self, cmd, timeout=None):
                 class Result:
                     stdout = f"{self_learning._IMPORT_CHECK_OK}\n"
@@ -666,49 +1184,177 @@ class TestGeneratedToolIsolationAndConsent:
 
         with pytest.raises(ValueError, match="traceback from generated module"):
             self_learning._validate_import_isolated(
-                tmp_path / "unused.py", sandbox=FakeSandbox(),
+                good_tool_source("probe_tool"),
+                expected_name="probe_tool",
+                sandbox=FakeSandbox(),
             )
 
-    def test_final_host_import_failure_removes_durable_file(self):
-        # The isolated probe imports the staging file as maverick_generated_probe.
-        # Simulate a failure that appears only during the final host import; the
-        # durable file must be removed so load_generated_tools() cannot retry it.
+    @pytest.mark.parametrize("sandbox", [None, pytest.param("local", id="local")])
+    def test_none_and_local_sandbox_fail_closed(self, sandbox):
+        if sandbox == "local":
+            from maverick.sandbox.local import LocalBackend
+
+            sandbox = LocalBackend()
+        with pytest.raises(ValueError, match="non-host-visible sandbox"):
+            self_learning.write_generated_tool(
+                "needs_isolation",
+                good_tool_source("needs_isolation"),
+                sandbox=sandbox,
+            )
+        assert not (
+            self_learning.GENERATED_TOOLS_DIR / "needs_isolation.py"
+        ).exists()
+
+    def test_consent_is_digest_and_tenant_bound_before_execution(self, monkeypatch):
+        from maverick.safety import consent
+
+        events: list[tuple[str, str]] = []
+        sandbox = SecureSandbox()
+        original_exec = sandbox.exec
+
+        def tracked_exec(command, timeout=None):
+            events.append(("exec", command))
+            return original_exec(command, timeout=timeout)
+
+        def approve(action, **kwargs):
+            events.append(("consent", kwargs["scope"]))
+            return SimpleNamespace(granted=True)
+
+        sandbox.exec = tracked_exec
+        monkeypatch.setattr(consent, "require_consent", approve)
+        source = good_tool_source("tenant_bound")
+        approved_source = source.strip()
+        digest = hashlib.sha256(approved_source.encode("utf-8")).hexdigest()
+        with tenant_scope(tenant="acme"):
+            tool = self_learning.write_generated_tool(
+                "tenant_bound",
+                source,
+                sandbox=sandbox,
+            )
+
+        assert tool.name == "tenant_bound"
+        assert events[0] == ("consent", f"acme:tenant_bound:{digest}")
+        assert events[1][0] == "exec"
+
+    def test_returned_tool_name_must_exactly_match_request(self):
+        with pytest.raises(ValueError, match="unexpected tool name"):
+            self_learning.write_generated_tool(
+                "requested_name",
+                good_tool_source("different_name"),
+                sandbox=SecureSandbox(),
+            )
+        assert not (
+            self_learning.GENERATED_TOOLS_DIR / "requested_name.py"
+        ).exists()
+
+    def test_existing_generated_tool_is_never_overwritten(self):
+        directory = self_learning.GENERATED_TOOLS_DIR
+        directory.mkdir(parents=True, exist_ok=True)
+        target = directory / "existing_tool.py"
+        target.write_text("# operator-owned existing bytes\n", encoding="utf-8")
+        with pytest.raises(ValueError, match="refusing to overwrite"):
+            self_learning.write_generated_tool(
+                "existing_tool",
+                good_tool_source("existing_tool"),
+                sandbox=SecureSandbox(),
+            )
+        assert target.read_text(encoding="utf-8") == "# operator-owned existing bytes\n"
+
+    def test_builtin_name_collision_rejected_before_execution(self, monkeypatch):
+        from maverick.safety import consent
+
+        sandbox = SecureSandbox()
+        monkeypatch.setattr(
+            consent,
+            "require_consent",
+            lambda *args, **kwargs: pytest.fail("collision reached consent"),
+        )
+        with pytest.raises(ValueError, match="collides with a live tool"):
+            self_learning.write_generated_tool(
+                "shell",
+                good_tool_source("shell"),
+                sandbox=sandbox,
+            )
+        assert sandbox.commands == []
+
+    def test_write_never_performs_a_final_host_import(self):
+        # Validation gives the module the probe name. The old implementation
+        # then imported it again under a host-only name and hit this branch.
+        # The hardened path persists a proxy without any second host import;
+        # only an actual proxy invocation reaches the runtime-name branch, and
+        # that failure remains inside the sandbox child.
         src = (
             "if __name__ != 'maverick_generated_probe':\n"
             "    raise RuntimeError('host import failed')\n"
             "def make_tool():\n"
             "    from maverick.tools import Tool\n"
             "    return Tool(\n"
-            "        name='x', description='d', input_schema={}, fn=lambda a: 'x',\n"
+            "        name='cleanup_fail', description='d', "
+            "input_schema={'type': 'object'}, fn=lambda a: 'x',\n"
             "    )\n"
         )
-        with pytest.raises(RuntimeError, match="host import failed"):
-            self_learning.write_generated_tool("cleanup_fail", src)
-        assert not (self_learning.GENERATED_TOOLS_DIR / "cleanup_fail.py").exists()
+        tool = self_learning.write_generated_tool(
+            "cleanup_fail",
+            src,
+            sandbox=SecureSandbox(),
+        )
+        assert (self_learning.GENERATED_TOOLS_DIR / "cleanup_fail.py").exists()
+        assert "host import failed" in tool.fn({})
 
     def test_consent_denied_blocks_registration(self, monkeypatch):
         monkeypatch.setenv("MAVERICK_CONSENT_MODE", "auto-deny")
         from maverick.safety.consent import ConsentDenied
+        sandbox = SecureSandbox()
         with pytest.raises(ConsentDenied):
-            self_learning.write_generated_tool("denied_tool", GOOD_TOOL_SRC)
+            self_learning.write_generated_tool(
+                "denied_tool",
+                good_tool_source("denied_tool"),
+                sandbox=sandbox,
+            )
         # Denied -> nothing persisted.
+        assert sandbox.commands == []
         assert not (self_learning.GENERATED_TOOLS_DIR / "denied_tool.py").exists()
 
     def test_consent_approved_allows_registration(self, monkeypatch):
         monkeypatch.setenv("MAVERICK_CONSENT_MODE", "auto-approve")
-        tool = self_learning.write_generated_tool("approved_tool", GOOD_TOOL_SRC)
-        assert tool.name == "greet_generated"
-        assert (self_learning.GENERATED_TOOLS_DIR / "approved_tool.py").exists()
-
-    def test_require_approval_false_skips_consent(self, monkeypatch):
-        # Reloads of an already-approved tool must NOT re-prompt: with
-        # require_approval=False, an auto-deny mode does not block.
-        monkeypatch.setenv("MAVERICK_CONSENT_MODE", "auto-deny")
         tool = self_learning.write_generated_tool(
-            "noprompt_tool", GOOD_TOOL_SRC, require_approval=False,
+            "approved_tool",
+            good_tool_source("approved_tool"),
+            sandbox=SecureSandbox(),
         )
-        assert tool.name == "greet_generated"
-        assert (self_learning.GENERATED_TOOLS_DIR / "noprompt_tool.py").exists()
+        assert tool.name == "approved_tool"
+        assert (self_learning.GENERATED_TOOLS_DIR / "approved_tool.py").exists()
+        assert not list(self_learning.GENERATED_TOOLS_DIR.glob(".staging_*.py"))
+
+    def test_revoked_digest_blocks_loaded_and_live_proxy_execution(self):
+        from maverick.safety import consent
+
+        source = good_tool_source("revoked_tool")
+        sandbox = SecureSandbox()
+        tool = self_learning.write_generated_tool(
+            "revoked_tool", source, sandbox=sandbox,
+        )
+        digest = hashlib.sha256(source.strip().encode("utf-8")).hexdigest()
+        scope = f"shared:revoked_tool:{digest}"
+        assert consent.revoke("register-generated-tool", scope=scope)
+        command_count = len(sandbox.commands)
+
+        assert "consent is missing or revoked" in tool.fn({})
+        assert len(sandbox.commands) == command_count
+        assert self_learning.load_generated_tools(sandbox=SecureSandbox()) == []
+
+    def test_require_approval_false_cannot_bypass_consent(self, monkeypatch):
+        monkeypatch.setenv("MAVERICK_CONSENT_MODE", "auto-deny")
+        from maverick.safety.consent import ConsentDenied
+
+        with pytest.raises(ConsentDenied):
+            self_learning.write_generated_tool(
+                "noprompt_tool",
+                good_tool_source("noprompt_tool"),
+                sandbox=SecureSandbox(),
+                require_approval=False,
+            )
+        assert not (self_learning.GENERATED_TOOLS_DIR / "noprompt_tool.py").exists()
 
 
 # --- the learn_capability tool ---------------------------------------------
@@ -719,6 +1365,7 @@ class _StubCtx:
         self.budget = Budget()
         self.blackboard = Blackboard()
         self.mcp_clients: list = []
+        self.sandbox = SecureSandbox()
 
 
 class _StubAgent:
@@ -865,7 +1512,7 @@ class TestLearnTool:
 
     @pytest.mark.asyncio
     async def test_create_tool_registers_live(self, monkeypatch):
-        llm = FakeLLM(scripted=[make_response(text=GOOD_TOOL_SRC)])
+        llm = FakeLLM(scripted=[make_response(text=good_tool_source("greet_live"))])
         agent = _StubAgent(llm)
         from maverick.tools.learn import learn_capability
         tool = learn_capability(agent)
@@ -873,9 +1520,9 @@ class TestLearnTool:
             "op": "create_tool", "name": "greet_live",
             "spec": "greet a person by name",
         })
-        assert "greet_generated" in out
+        assert "greet_live" in out
         # Registered into the live registry the agent's next turn will see.
-        assert "greet_generated" in {t.name for t in agent.tools.all()}
+        assert "greet_live" in {t.name for t in agent.tools.all()}
 
     @pytest.mark.asyncio
     async def test_create_tool_disabled(self, monkeypatch, stub_agent):

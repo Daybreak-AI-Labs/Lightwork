@@ -152,7 +152,7 @@
       </button>
       <button type="button" id="wf-form-playbook" class="seg__opt" aria-pressed="false">
         Agent playbook
-        <span class="seg__sub">a specialist with persona, tools &amp; gated steps</span>
+        <span class="seg__sub">an unsaved specialist first pass with persona &amp; tools</span>
       </button>
     </div>
 
@@ -275,7 +275,8 @@
         </div>
       </div>
       <div class="wf__field">
-        <label>Steps <span class="wf__hint" style="text-transform: none; letter-spacing: 0;">— a top-to-bottom flow; each step can pause for a human gate</span></label>
+        <label>Steps <span class="wf__hint" style="text-transform: none; letter-spacing: 0;">— a top-to-bottom playbook; gates are review instructions</span></label>
+        <p class="wf__hint" id="pb-gate-boundary">Playbook gates guide the agent and reviewer but do not create a runtime pause. For a system-enforced checkpoint, use an <a href="/flows/designer">executable Flow approval node</a>.</p>
         <div class="pb-flow">
           <div class="pb-flow__node pb-flow__start"><span class="dot" aria-hidden="true"></span>Trigger — the agent starts here</div>
           <div id="pb-steps"></div>
@@ -299,8 +300,8 @@
         <ul id="pb-lint" class="wf__lint"></ul>
       </div>
       <div class="wf__row">
-        <button type="button" id="pb-save-btn" class="btn btn--primary">Save playbook</button>
-        <span class="wf__hint">Saved playbooks become specialists on <a href="/agents">Agents</a>.</span>
+        <button type="button" id="pb-save-btn" class="btn btn--primary"{% if not pack_editing_allowed %} disabled title="A dashboard admin must validate and save this draft"{% endif %}>Save playbook</button>
+        <span class="wf__hint">{% if pack_editing_allowed %}Saved playbooks become specialists on <a href="/agents">Agents</a>.{% else %}This first pass stays unsaved until a dashboard admin validates and saves it.{% endif %}</span>
       </div>
     </div>
 
@@ -484,11 +485,8 @@
     var pickerTarget = null;      // the tool <input> to insert into
     var pickerRestrict = null;    // Set of names to limit to, or null for all
     var RISK_RANK = { low: 0, medium: 1, high: 2 };
-    // Whether this caller can save an Agent Playbook. Playbook save + the live
-    // governance lint go through the admin-gated pack-editing path, while
-    // drafting only needs "operate" — so without this guard a non-admin could
-    // build a whole playbook and only discover a 403 at Save. When false, we
-    // disable playbook mode up front and explain why.
+    // Draft/refine is an unsaved operator workspace. Reading an existing pack,
+    // live governance validation, and Save remain the admin control boundary.
     var PACK_EDITING = {{ pack_editing_allowed | tojson }};
 
     var EXAMPLES = {
@@ -507,6 +505,12 @@
     function setStatus(msg, isErr) {
       status.textContent = msg || '';
       status.style.color = isErr ? 'var(--danger)' : 'var(--muted)';
+    }
+    function playbookNoteSuffix(d) {
+      var notes = (d && Array.isArray(d.notes) ? d.notes : [])
+        .filter(function (n) { return typeof n === 'string' && n.trim(); })
+        .slice(0, 3);
+      return notes.length ? (' ' + notes.join(' ')) : '';
     }
     function setBusy(btn, on) {
       btn.disabled = on;
@@ -535,11 +539,6 @@
     }
 
     function setForm(next) {
-      if (next === 'playbook' && !PACK_EDITING) {
-        setStatus('Agent playbooks require a dashboard admin to save. Ask an admin, '
-          + 'or build a reusable template here instead.', true);
-        return;
-      }
       mode = next;
       var isTpl = mode === 'template';
       formTplBtn.classList.toggle('is-active', isTpl);
@@ -547,22 +546,24 @@
       formPbBtn.classList.toggle('is-active', !isTpl);
       formPbBtn.setAttribute('aria-pressed', String(!isTpl));
       noun.textContent = isTpl ? 'workflow' : 'agent';
-      if (!isTpl) { loadRoster(); loadTools(); }
+      if (!isTpl) {
+        if (PACK_EDITING) loadRoster();
+        loadTools();
+      }
       renderExamples();
       hidePanels();
-      setStatus('');
+      setStatus(!isTpl && !PACK_EDITING
+        ? 'Draft mode — you can create and refine a first pass; an admin must validate and save it.'
+        : '');
     }
     formTplBtn.addEventListener('click', function () { setForm('template'); });
     formPbBtn.addEventListener('click', function () { setForm('playbook'); });
     if (!PACK_EDITING) {
-      // Signal the disabled affordance visually and to assistive tech.
-      formPbBtn.disabled = true;
-      formPbBtn.setAttribute('aria-disabled', 'true');
-      formPbBtn.title = 'Agent playbooks require a dashboard admin';
-      formPbBtn.style.opacity = '0.55';
-      formPbBtn.style.cursor = 'not-allowed';
+      // Keep authoring available while making the mutation boundary explicit.
+      formPbBtn.title = 'Draft an unsaved first pass for admin review';
       var pbSub = formPbBtn.querySelector('.seg__sub');
-      if (pbSub) pbSub.textContent = 'requires a dashboard admin';
+      if (pbSub) pbSub.textContent = 'draft now; admin validates and saves';
+      pbSaveBtn.disabled = true;
     }
 
     fileBtn.addEventListener('click', function () { fileInput.click(); });
@@ -1107,6 +1108,14 @@
     function renderLint(data, name) {
       pbLintEl.textContent = '';
       pbGovern.classList.remove('is-ok', 'is-err');
+      if (!PACK_EDITING) {
+        pbLintEl.appendChild(lintLine(
+          'warn',
+          'Draft only — a dashboard admin must run governance validation and save this playbook.'
+        ));
+        pbSaveBtn.disabled = true;
+        return;
+      }
       if (!data) { pbSaveBtn.disabled = false; return; }
       var errs = data.errors || [], warns = data.warnings || [];
       if (existingNames && existingNames.has(name)) {
@@ -1123,6 +1132,7 @@
       pbSaveBtn.disabled = errs.length > 0;   // a pack that fails lint is refused on save
     }
     async function pbLint() {
+      if (!PACK_EDITING) { renderLint(null); return; }
       var name = pbName.value.trim();
       if (!name) { renderLint(null); return; }
       await loadRoster();
@@ -1140,6 +1150,10 @@
     pbPreview.addEventListener('change', schedulePbLint);
 
     pbSaveBtn.addEventListener('click', async function () {
+      if (!PACK_EDITING) {
+        setStatus('A dashboard admin must validate and save this draft.', true);
+        return;
+      }
       var name = pbName.value.trim();
       if (!name) { setStatus('Give the agent a name (id).', true); return; }
       pbSaveBtn.disabled = true;
@@ -1160,7 +1174,7 @@
       } catch (e) {
         setStatus('Could not save the playbook.', true);
       } finally {
-        pbSaveBtn.disabled = false;
+        pbSaveBtn.disabled = !PACK_EDITING;
       }
     });
 
@@ -1283,7 +1297,8 @@
         if (!resp.ok) { setStatus(data.detail || ('Draft failed: ' + resp.status), true); return; }
         if (mode === 'playbook') {
           renderPlaybook(data);
-          setStatus('Draft ready — review the persona, tools, and gated steps, then save.');
+          setStatus('Draft ready — review the persona, tools, and gated steps, then save.'
+            + playbookNoteSuffix(data));
         } else {
           renderDraft(data);
           setStatus('Draft ready — review and edit below, then save.');
@@ -1320,7 +1335,8 @@
         if (!resp.ok) { setStatus(data.detail || ('Refine failed: ' + resp.status), true); return; }
         if (isPb) renderPlaybook(data); else renderDraft(data);
         instrEl.value = '';
-        setStatus('Refined — review the update, refine again, or save.');
+        setStatus('Refined — review the update, refine again, or save.'
+          + (isPb ? playbookNoteSuffix(data) : ''));
       } catch (e) {
         setStatus('Could not reach the refining service.', true);
       } finally {
@@ -1339,16 +1355,25 @@
     //   ?edit=<name>       -> rehydrate the TEMPLATE editor; Save overwrites.
     //   ?template=<name>   -> jump to automating it (schedule / webhook trigger).
     var PB_EDIT = {{ edit_agent_prefill | tojson }};
+    var PB_EDIT_DENIED = {{ edit_agent_denied | tojson }};
     var WF_EDIT = {{ edit_prefill | tojson }};
     var WF_PREFILL = {{ prefill | tojson }};
+    var AUTHOR_HANDOFF = null;
+    try {
+      AUTHOR_HANDOFF = JSON.parse(sessionStorage.getItem('lightwork.authoring-handoff') || 'null');
+      if (!AUTHOR_HANDOFF || AUTHOR_HANDOFF.kind !== 'agent' || !AUTHOR_HANDOFF.brief
+          || Date.now() - Number(AUTHOR_HANDOFF.created_at || 0) > 10 * 60 * 1000) {
+        AUTHOR_HANDOFF = null;
+      }
+    } catch (e) { AUTHOR_HANDOFF = null; }
     if (PB_EDIT && PB_EDIT.name && PACK_EDITING) {
       setForm('playbook');
       pbEditPreserve = PB_EDIT.preserve || null;
       renderPlaybook(PB_EDIT);
       setStatus('Editing agent “' + PB_EDIT.name + '” — change the persona, tools, or steps, then Save to overwrite.');
-    } else if (PB_EDIT && PB_EDIT.name) {
-      // Non-admin deep-linked to an agent edit: playbook editing is admin-only.
-      setStatus('Editing agent “' + PB_EDIT.name + '” requires a dashboard admin.', true);
+    } else if (PB_EDIT_DENIED) {
+      // The server deliberately withheld the existing pack from page data.
+      setStatus('Editing agent “' + PB_EDIT_DENIED + '” requires a dashboard admin. You can still draft a new unsaved first pass.', true);
     } else if (WF_EDIT && WF_EDIT.name) {
       setForm('template');
       wfEditingName = WF_EDIT.name;   // Save overwrites this template
@@ -1360,6 +1385,11 @@
       showSaved('/templates', 'Open Templates');
       showScheduling({ name: WF_PREFILL.name, params: WF_PREFILL.params || [] });
       showTriggers({ name: WF_PREFILL.name, params: WF_PREFILL.params || [] });
+    } else if (AUTHOR_HANDOFF) {
+      sessionStorage.removeItem('lightwork.authoring-handoff');
+      setForm('playbook');
+      brief.value = String(AUTHOR_HANDOFF.brief).slice(0, 8000);
+      draft();
     }
   })();
   </script>

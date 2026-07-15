@@ -16,7 +16,7 @@ import re
 import threading
 import time
 from collections import deque
-from contextlib import asynccontextmanager
+from contextlib import asynccontextmanager, contextmanager
 from pathlib import Path
 from typing import Any
 from urllib.parse import urlparse
@@ -57,7 +57,9 @@ from ._shared import (
 from ._shared import _world_cache as _world_cache  # re-export: tests clear app._world_cache
 from .api import router as api_router
 from .auth import (
+    AutomationAuthorizationError,
     assert_goal_access,
+    auth_genuinely_off,
     caller_principal,
     caller_role,
     caller_suites,
@@ -68,6 +70,8 @@ from .auth import (
     has_permission,
     require_permission,
     require_principal,
+    require_principal_in_request_context,
+    stored_automation_identity,
     websocket_caller_principal,
 )
 from .oidc_login import router as oidc_login_router
@@ -414,7 +418,10 @@ app = FastAPI(
     # auth layer ON TOP OF the existing MAVERICK_DASHBOARD_TOKEN middleware, not
     # a replacement for it. `enforce_page_visibility` runs second so the
     # role-based page-visibility policy sees the established principal.
-    dependencies=[Depends(require_principal), Depends(enforce_page_visibility)],
+    dependencies=[
+        Depends(require_principal_in_request_context),
+        Depends(enforce_page_visibility),
+    ],
     lifespan=_lifespan,
 )
 app.include_router(api_router)
@@ -1600,7 +1607,7 @@ def _deliverable_specs() -> list[dict]:
     runs on ``/goals``). Fail-soft to an empty list so the page never 500s if
     the factory layer is unavailable."""
     try:
-        from maverick.domain import available_domains, suite_for
+        from maverick.domain import available_domains, enforced_gate, suite_for
     except Exception:  # pragma: no cover -- factory layer unavailable
         return []
     specs: list[dict] = []
@@ -1614,7 +1621,7 @@ def _deliverable_specs() -> list[dict]:
             "shape": out.shape,
             "consumers": list(out.consumers),
             "cadence": out.cadence,
-            "gate": out.gate,
+            "gate": enforced_gate(prof),
             "suite": suite_for(name),
         })
     return specs
@@ -3674,8 +3681,185 @@ async def webhook_start(request: Request, bg: BackgroundTasks) -> JSONResponse:
     return JSONResponse({"goal_id": goal_id}, status_code=201)
 
 
+@contextmanager
+def _stored_trigger_tenant(trigger: dict):
+    """Pin a trigger fire to its creation namespace and recheck admission."""
+    tenant = str(trigger.get("tenant") or "").strip()
+    if tenant:
+        from maverick.tenant.registry import (
+            TenantRegistryError,
+            TenantSuspended,
+            assert_tenant_active,
+        )
+
+        try:
+            assert_tenant_active(tenant)
+        except TenantSuspended as exc:
+            raise HTTPException(status_code=404, detail="trigger unavailable") from exc
+        except TenantRegistryError as exc:
+            raise HTTPException(
+                status_code=503, detail="trigger authorization unavailable") from exc
+    from maverick.paths import reset_tenant, set_tenant
+
+    token = set_tenant(tenant or None)
+    try:
+        yield tenant
+    finally:
+        reset_tenant(token)
+
+
+def _stored_trigger_identity(trigger: dict) -> tuple[str, str | None, frozenset[str] | None]:
+    """Revalidate a request-less trigger owner's current execution authority."""
+    try:
+        return stored_automation_identity(str(trigger.get("owner") or ""))
+    except AutomationAuthorizationError as exc:
+        raise HTTPException(
+            status_code=409, detail="trigger owner is unavailable"
+        ) from exc
+
+
+async def _run_trigger_goal_in_tenant(
+    goal_id: int,
+    max_dollars: float | None,
+    max_wall: float | None,
+    *,
+    tenant: str,
+    owner: str,
+    allowed_suites: frozenset[str] | None,
+) -> None:
+    """Restore durable trigger identity for the post-response goal runner."""
+    from maverick.paths import reset_tenant, set_tenant
+    from maverick.runner import run_goal_in_background_async
+
+    if tenant:
+        from maverick.tenant.registry import assert_tenant_active
+
+        assert_tenant_active(tenant)
+    current_owner, current_user_id, current_suites = stored_automation_identity(owner)
+    if allowed_suites is None:
+        run_suites = current_suites
+    elif current_suites is None:
+        run_suites = allowed_suites
+    else:
+        run_suites = allowed_suites & current_suites
+    token = set_tenant(tenant or None)
+    try:
+        await run_goal_in_background_async(
+            goal_id,
+            max_dollars,
+            max_wall,
+            channel="api" if current_user_id else None,
+            user_id=current_user_id,
+            concurrency_principal=current_owner or None,
+            allowed_suites=run_suites,
+        )
+    finally:
+        reset_tenant(token)
+
+
+def _fire_stored_trigger(
+    request: Request,
+    bg: BackgroundTasks,
+    payload: dict,
+    name: str,
+    trigger: dict,
+) -> JSONResponse:
+    """Fire a trigger under its durable tenant, owner, and current grants."""
+    with _stored_trigger_tenant(trigger) as tenant:
+        owner, user_id, allowed_suites = _stored_trigger_identity(trigger)
+        if trigger.get("flow"):
+            from maverick import flow as flow_mod
+
+            if not flow_mod.enabled():
+                raise HTTPException(status_code=409, detail="the flow engine is off")
+            from maverick.flow import store as flow_store
+
+            flow = flow_store.load_flow(trigger["flow"])
+            if flow is None:
+                raise HTTPException(status_code=409, detail="trigger flow unavailable")
+            expected_owner = str(trigger.get("flow_owner") or "")
+            expected_revision = str(trigger.get("flow_revision") or "")
+            if not expected_revision and not auth_genuinely_off():
+                raise HTTPException(status_code=409, detail="trigger flow binding is stale")
+            if expected_revision and (
+                flow.owner != expected_owner or flow.revision != expected_revision
+            ):
+                raise HTTPException(status_code=409, detail="trigger flow binding is stale")
+            check_goal_rate_limit(request, source="webhook")
+            inbound_data = payload.get("data")
+            run_data = (
+                {str(k): v for k, v in inbound_data.items()}
+                if isinstance(inbound_data, dict)
+                else {}
+            )
+            delivery = str(payload.get("id") or "").strip()
+            idem = f"webhook:{name}:{delivery}" if delivery else ""
+            from maverick_dashboard import automation_queue as aq
+
+            try:
+                run_id = aq.enqueue_flow_run(
+                    trigger["flow"],
+                    run_data,
+                    owner=owner,
+                    idem_key=idem,
+                    channel="api" if user_id else None,
+                    user_id=user_id,
+                    allowed_suites=allowed_suites,
+                )
+            except flow_store.FlowSnapshotError as exc:
+                raise HTTPException(
+                    status_code=409, detail="trigger flow binding is unavailable"
+                ) from exc
+            return JSONResponse(
+                {"run_id": run_id, "trigger": name, "flow": trigger["flow"]},
+                status_code=201,
+            )
+
+        from maverick.templates import load_template
+
+        try:
+            tpl = load_template(trigger["template"])
+        except (ValueError, FileNotFoundError) as exc:
+            raise HTTPException(
+                status_code=409, detail="trigger template unavailable"
+            ) from exc
+        declared = set(tpl.params)
+        params = dict(trigger.get("params") or {})
+        inbound = payload.get("data")
+        if isinstance(inbound, dict):
+            for key, value in inbound.items():
+                if key in declared:
+                    params[str(key)] = str(value)[:2000]
+        try:
+            title, description = tpl.render(**params)
+        except ValueError as exc:
+            from maverick.secrets import scrub
+
+            detail = scrub(str(exc))[:500] or "template parameters are invalid"
+            raise HTTPException(status_code=400, detail=detail) from exc
+
+        check_goal_rate_limit(request, source="webhook")
+        world = _world()
+        goal_id = world.create_goal(
+            title[:200], description[:8000], owner=owner)
+        world.record_goal_origin(goal_id, "trigger", name)
+        max_dollars = min(float(tpl.budget_dollars), 100.0)
+        max_wall = min(float(tpl.budget_wall_seconds), 86400.0)
+        bg.add_task(
+            _run_trigger_goal_in_tenant,
+            goal_id,
+            max_dollars,
+            max_wall,
+            tenant=tenant,
+            owner=owner,
+            allowed_suites=allowed_suites,
+        )
+        return JSONResponse(
+            {"goal_id": goal_id, "trigger": name}, status_code=201)
+
+
 @app.post("/webhook/run")
-async def webhook_run(request: Request, bg: BackgroundTasks) -> JSONResponse:
+async def webhook_run(request: Request, bg: BackgroundTasks) -> JSONResponse:  # noqa: C901
     """Fire a registered trigger: render its saved template and run it as a goal.
 
     Body is JSON ``{"trigger": "<name>", "data"?: {...}, "id"?: "<delivery-id>"}``.
@@ -3716,7 +3900,26 @@ async def webhook_run(request: Request, bg: BackgroundTasks) -> JSONResponse:
         if not flow_mod.enabled():
             raise HTTPException(status_code=409, detail="the flow engine is off")
         from maverick.flow import store as flow_store
-        run = flow_store.load_run(resume_id)
+        # The webhook HMAC covers the full payload, so an explicit tenant claim
+        # is authenticated.  Scope lookup and the queued continuation to that
+        # same tenant; without it a tenant run must never fall through to a
+        # same-id object in the shared namespace.
+        resume_tenant = str(payload.get("tenant") or "").strip()
+        tenant_token = None
+        if resume_tenant:
+            from maverick.tenant.registry import assert_tenant_active
+            try:
+                assert_tenant_active(resume_tenant)
+            except (KeyError, PermissionError) as exc:
+                raise HTTPException(status_code=404, detail="tenant unavailable") from exc
+            from maverick.paths import set_tenant
+            tenant_token = set_tenant(resume_tenant)
+        try:
+            run = flow_store.load_run(resume_id)
+        finally:
+            if tenant_token is not None:
+                from maverick.paths import reset_tenant
+                reset_tenant(tenant_token)
         if run is None:
             raise HTTPException(status_code=404, detail="no such run")
         if run.status != "paused_event":
@@ -3728,9 +3931,12 @@ async def webhook_run(request: Request, bg: BackgroundTasks) -> JSONResponse:
         inputs = ({str(k): v for k, v in inbound_evt.items()}
                   if isinstance(inbound_evt, dict) else {})
         from maverick_dashboard import automation_queue as aq
-        aq.queue().enqueue(aq.FLOW_RESUME_KIND, {
+        resume_payload = {
             "flow_id": run.flow_id, "run_id": run.run_id, "owner": run.owner,
-            "inputs": inputs})
+            "inputs": inputs}
+        if resume_tenant:
+            resume_payload["tenant"] = resume_tenant
+        aq.queue().enqueue(aq.FLOW_RESUME_KIND, resume_payload)
         return JSONResponse({"run_id": run.run_id, "status": "resuming"},
                             status_code=202)
 
@@ -3750,73 +3956,7 @@ async def webhook_run(request: Request, bg: BackgroundTasks) -> JSONResponse:
     if trig is None:
         raise HTTPException(status_code=404, detail="unknown trigger")
 
-    if trig.get("flow"):
-        # A flow-target trigger: start a durable flow run with the inbound
-        # ``data`` as the run data (same shape as an event-trigger fire). The
-        # caller's delivery ``id`` doubles as the run's idempotency key, so a
-        # re-delivered webhook returns the existing run instead of a duplicate.
-        from maverick import flow as flow_mod
-        if not flow_mod.enabled():
-            raise HTTPException(status_code=409, detail="the flow engine is off")
-        from maverick.flow import store as flow_store
-        if flow_store.load_flow(trig["flow"]) is None:
-            raise HTTPException(status_code=409, detail="trigger flow unavailable")
-        check_goal_rate_limit(request, source="webhook")
-        inbound_data = payload.get("data")
-        run_data = ({str(k): v for k, v in inbound_data.items()}
-                    if isinstance(inbound_data, dict) else {})
-        delivery = str(payload.get("id") or "").strip()
-        idem = f"webhook:{name}:{delivery}" if delivery else ""
-        from maverick_dashboard import automation_queue as aq
-        run_id = aq.enqueue_flow_run(trig["flow"], run_data, owner="", idem_key=idem)
-        return JSONResponse({"run_id": run_id, "trigger": name,
-                             "flow": trig["flow"]}, status_code=201)
-
-    from maverick.templates import load_template
-    try:
-        tpl = load_template(trig["template"])
-    except (ValueError, FileNotFoundError) as exc:
-        # The template was deleted/renamed after the trigger was registered.
-        raise HTTPException(
-            status_code=409, detail=f"trigger template unavailable: {exc}") from exc
-    # Merge: operator defaults, then inbound overrides for DECLARED params only,
-    # each coerced to a length-bounded string. This bounds what an external
-    # caller can inject -- they fill declared slots, never add new ones.
-    declared = set(tpl.params)
-    params = dict(trig.get("params") or {})
-    inbound = payload.get("data")
-    if isinstance(inbound, dict):
-        for k, v in inbound.items():
-            if k in declared:
-                params[str(k)] = str(v)[:2000]
-    try:
-        title, description = tpl.render(**params)
-    except ValueError as exc:                 # a required param still missing
-        raise HTTPException(status_code=400, detail=str(exc)) from exc
-
-    check_goal_rate_limit(request, source="webhook")
-    w = _world()
-    # HMAC webhooks carry no OIDC principal -> unowned, same as /webhook/start.
-    goal_id = w.create_goal(
-        title[:200], description[:8000], owner=caller_principal(request) or "",
-    )
-    # Provenance: link this run to its trigger for the Automations run history.
-    w.record_goal_origin(goal_id, "trigger", name)
-    from maverick.runner import run_goal_in_background_async
-    # Honour the template's own budget/wall caps on every fire -- an operator who
-    # baked budget_dollars/budget_wall_seconds into the template expects them to
-    # hold when a trigger runs it, exactly as the CLI template-run path does
-    # (kernel rule 3: budget caps are not optional). Still bound them: a template
-    # from a catalog install or a hand-edited on-disk file is NOT clamped by
-    # save_user_template (that runs only on save), so cap at the same ceiling the
-    # save layer enforces (WorkflowSaveIn: <=100 $, <=86400 s) -- otherwise an
-    # HMAC-signed burst against such a trigger could amplify per-fire spend far
-    # past what any builder-authored template could set. Peer route /webhook/start
-    # likewise clamps its externally-influenced budget.
-    max_dollars = min(float(tpl.budget_dollars), 100.0)
-    max_wall = min(float(tpl.budget_wall_seconds), 86400.0)
-    bg.add_task(run_goal_in_background_async, goal_id, max_dollars, max_wall)
-    return JSONResponse({"goal_id": goal_id, "trigger": name}, status_code=201)
+    return _fire_stored_trigger(request, bg, payload, name, trig)
 
 
 def _flow_approve_page(title: str, message: str, *, status: int = 200,
@@ -3848,17 +3988,32 @@ def _load_paused_approval_run(token: str):
     from maverick.flow.approvals import verify_token
     claim = verify_token(token)
     if not claim:
-        return None, "This approval link is invalid or has expired."
-    run = store.load_run(claim["run_id"])
+        return None, "This approval link is invalid or has expired.", ""
+    tenant = str(claim.get("tenant") or "")
+    tenant_token = None
+    if tenant:
+        try:
+            from maverick.tenant.registry import assert_tenant_active
+            assert_tenant_active(tenant)
+        except Exception:
+            return None, "That tenant is not active.", tenant
+        from maverick.paths import set_tenant
+        tenant_token = set_tenant(tenant)
+    try:
+        run = store.load_run(claim["run_id"])
+    finally:
+        if tenant_token is not None:
+            from maverick.paths import reset_tenant
+            reset_tenant(tenant_token)
     if run is None:
-        return None, "That flow run no longer exists."
+        return None, "That flow run no longer exists.", tenant
     if run.status != "paused_approval":
-        return None, f"This run is no longer awaiting approval (status: {run.status})."
+        return None, f"This run is no longer awaiting approval (status: {run.status}).", tenant
     if (str(run.cursor or "") != claim.get("cursor")
             or str(run.prompt or "") != claim.get("prompt")
             or float(run.updated or 0.0) != float(claim.get("updated", -1.0))):
-        return None, "This approval link is for an older approval step."
-    return run, claim["decision"]
+        return None, "This approval link is for an older approval step.", tenant
+    return run, claim["decision"], tenant
 
 
 @app.get("/flow/approve", response_class=HTMLResponse)
@@ -3870,7 +4025,7 @@ async def flow_approve_confirm(request: Request, token: str = "") -> HTMLRespons
     from maverick import flow
     if not flow.enabled():
         raise HTTPException(status_code=404, detail="the flow engine is off")
-    run, decision = _load_paused_approval_run(token)
+    run, decision, _tenant = _load_paused_approval_run(token)
     if run is None:
         return _flow_approve_page("Approval unavailable", decision, status=410)
     verb = "approve" if decision == "approved" else "reject"
@@ -3890,11 +4045,11 @@ async def flow_approve_submit(request: Request, token: str = Form("")) -> HTMLRe
     from maverick import flow
     if not flow.enabled():
         raise HTTPException(status_code=404, detail="the flow engine is off")
-    run, decision = _load_paused_approval_run(token)
+    run, decision, tenant = _load_paused_approval_run(token)
     if run is None:
         return _flow_approve_page("Approval unavailable", decision, status=410)
     from maverick_dashboard import automation_queue as aq
-    aq.enqueue_flow_resume(run.flow_id, run.run_id, decision, run.owner)
+    aq.enqueue_flow_resume(run.flow_id, run.run_id, decision, run.owner, tenant=tenant)
     verb = "approved" if decision == "approved" else "rejected"
     return _flow_approve_page("Thanks — recorded",
                               f"You {verb} “{run.flow_id}”. It is resuming now; "
@@ -4202,23 +4357,24 @@ def _goal_deliverable(g):
 
     Returns ``(contract, rendered)`` -- the pack's output contract (label /
     consumers / cadence / gate) and the result parsed per its ``shape`` -- or
-    ``(None, None)`` for a generic goal, a pack that declares only prose, or
-    when the factory layer is unavailable. So a goal page only grows a titled
-    deliverable card when a pack actually asked for one; everything else keeps
-    today's plain prose result."""
+    ``(None, None)`` for a generic/ungated prose goal or when the factory layer
+    is unavailable. A terminal-gated prose pack still returns its contract so
+    the reviewer gets a sign-off panel even when an AI-generated playbook did
+    not also generate a structured output contract."""
     try:
         from maverick.deliverable import render_deliverable
-        from maverick.domain import available_domains
+        from maverick.domain import available_domains, enforced_gate
         prof = available_domains().get(g.domain) if g.domain else None
         if prof is None:
             return None, None
         rendered = render_deliverable(prof.output.shape, g.result)
-        if not rendered.structured:
+        gate = enforced_gate(prof)
+        if not rendered.structured and not gate:
             return None, None
         out = prof.output
         contract = {"shape": out.shape, "deliverable": out.deliverable,
                     "consumers": list(out.consumers), "cadence": out.cadence,
-                    "gate": out.gate}
+                    "gate": gate}
         return contract, rendered
     except Exception:  # never 500 the goal page if the factory layer is unavailable
         return None, None
@@ -4287,8 +4443,46 @@ async def shared_goal(request: Request, token: str) -> HTMLResponse:
     g = w.get_goal(goal_id)
     if g is None:  # pragma: no cover -- link resolved but goal gone
         raise HTTPException(status_code=404, detail="not found")
+    # Resolve-time authorization matters as much as mint-time authorization:
+    # an edit/rerun/rejection invalidates approval but cannot recall a token
+    # already copied. Fail closed without revealing whether a gate exists.
+    if g.status != "done":
+        raise HTTPException(status_code=404, detail="not found")
+    try:
+        from maverick.domain import (
+            available_domains,
+            deliverable_release_allowed,
+        )
+        prof = available_domains().get(g.domain) if g.domain else None
+        if g.domain and prof is None:
+            # A removed/renamed pack is unavailable policy, not an ungated
+            # pack. Existing copied tokens must fail closed.
+            raise HTTPException(status_code=404, detail="not found")
+        if prof is not None and not deliverable_release_allowed(
+            prof, w.signoff_for(goal_id),
+        ):
+            raise HTTPException(status_code=404, detail="not found")
+    except HTTPException:
+        raise
+    except Exception as exc:
+        # A gate lookup failure must not turn a token into an ungoverned public
+        # export. Unknown/no-domain goals remain shareable through the normal
+        # path; known factory failures fail closed here.
+        if g.domain:
+            raise HTTPException(status_code=404, detail="not found") from exc
     contract, rendered = _goal_deliverable(g)
     artifacts = _goal_artifacts(w, goal_id)
+    # Re-check after materializing the composite payload. If an artifact or
+    # result changed between the first authorization read and these reads, its
+    # transaction revoked sign-off; never render that mixed-version snapshot.
+    if prof is not None:
+        try:
+            if not deliverable_release_allowed(prof, w.signoff_for(goal_id)):
+                raise HTTPException(status_code=404, detail="not found")
+        except HTTPException:
+            raise
+        except Exception as exc:
+            raise HTTPException(status_code=404, detail="not found") from exc
     return templates.TemplateResponse(
         request, "shared_goal.html",
         {"goal": g, "deliverable": contract, "rendered": rendered, "artifacts": artifacts})
@@ -4858,7 +5052,14 @@ async def workflow_builder_page(request: Request, template: str | None = None,
     prefill = None
     edit_prefill = None
     edit_agent_prefill = None
-    if edit_agent:
+    # Drafting an unsaved first pass needs only ``operate``; reading or saving
+    # an existing pack remains the admin-only control-plane boundary. Compute
+    # this before loading the requested agent so a non-admin deep-link cannot
+    # receive pack internals embedded in page JavaScript.
+    from .api import pack_editing_denial
+    pack_editing_allowed = pack_editing_denial(request) is None
+    edit_agent_denied = str(edit_agent or "") if edit_agent and not pack_editing_allowed else ""
+    if edit_agent and pack_editing_allowed:
         from maverick.domain_edit import read_override, resolved_view
         try:
             view = resolved_view(edit_agent)
@@ -4901,14 +5102,6 @@ async def workflow_builder_page(request: Request, template: str | None = None,
             prefill = {"name": tpl.name, "params": list(tpl.params), "title": tpl.title}
         except (ValueError, FileNotFoundError):
             prefill = None
-    # Whether this caller can actually save an Agent Playbook. Playbook save +
-    # live governance lint go through the admin-gated pack-editing path, while
-    # drafting only needs "operate" -- so a non-admin could previously build a
-    # whole playbook and only hit a 403 at Save. Reuse the SAME predicate the
-    # enforce path uses (so the two can't drift) to disable playbook mode up
-    # front with an explanation instead.
-    from .api import pack_editing_denial
-    pack_editing_allowed = pack_editing_denial(request) is None
     return templates.TemplateResponse(
         request, "workflow_builder.html",
         {
@@ -4918,6 +5111,7 @@ async def workflow_builder_page(request: Request, template: str | None = None,
             "prefill": prefill,
             "edit_prefill": edit_prefill,
             "edit_agent_prefill": edit_agent_prefill,
+            "edit_agent_denied": edit_agent_denied,
         },
     )
 

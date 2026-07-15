@@ -16,9 +16,68 @@ from pathlib import Path
 
 import pytest
 from maverick.budget import Budget
-from maverick.orchestrator import run_goal
+from maverick.orchestrator import _finished_webhook_payload, run_goal
 from maverick.sandbox import LocalBackend
 from maverick.world_model import WorldModel
+
+
+def test_gated_terminal_result_is_withheld_until_persisted_approval(tmp_path: Path):
+    from maverick.domain import DomainProfile, WorkflowStep
+
+    world = WorldModel(path=tmp_path / "world.db")
+    gid = world.create_goal("review me")
+    world.set_goal_status(gid, "done", result="sensitive draft")
+    profile = DomainProfile(
+        name="generated",
+        allow_tools=["read_file"],
+        max_risk="low",
+        workflow=[WorkflowStep("approve", gate="approval")],
+    )
+
+    pending = _finished_webhook_payload(
+        world,
+        goal_id=gid,
+        status="done",
+        result="sensitive draft",
+        domain_profile=profile,
+    )
+    assert pending == {
+        "goal_id": gid,
+        "status": "done",
+        "gate": "approval",
+        "release_status": "pending_signoff",
+    }
+
+    world.record_signoff(gid, "approved", decided_by="reviewer")
+    released = _finished_webhook_payload(
+        world,
+        goal_id=gid,
+        status="done",
+        result="sensitive draft",
+        domain_profile=profile,
+    )
+    assert released["result"] == "sensitive draft"
+
+
+def test_nonempty_domain_with_unavailable_policy_never_releases_result(tmp_path: Path):
+    world = WorldModel(path=tmp_path / "world.db")
+    gid = world.create_goal("orphaned policy")
+    world.set_goal_status(gid, "done", result="must stay private")
+
+    payload = _finished_webhook_payload(
+        world,
+        goal_id=gid,
+        status="done",
+        result="must stay private",
+        domain_profile=None,
+        domain="removed_pack",
+    )
+
+    assert payload == {
+        "goal_id": gid,
+        "status": "done",
+        "release_status": "policy_unavailable",
+    }
 
 
 @pytest.mark.asyncio

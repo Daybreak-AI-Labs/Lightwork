@@ -1617,7 +1617,10 @@ pre-warming** (`max_tokens=0` prefill at orchestrator start) and a
   pack generation (`augment_system_prompt`, scope-matched per suite). OFF by
   default and byte-identical to before while off; gated by `[self_improvement]
   enable` + the `factory_learning` sub-knob (wizard step) or
-  `MAVERICK_FACTORY_LEARNING`. CLI: `maverick factory-learn [--dry-run]`.
+  `MAVERICK_FACTORY_LEARNING`. Live promotion requires self-digested v2 paired
+  evidence with immutable data/split/evaluator/model/prompt provenance and uses
+  the shared PREPARE/CAS/COMMIT promotion ledger; v1 evidence is preview-only.
+  CLI: `maverick factory-learn [--dry-run]`.
 - **Governed adapter rung — in-tenant weights** (`adapter_rung.py`,
   `[adapter_rung]`) — LoRA adapters for a LOCAL open-weights base, trained on
   tenant-provenance data and promoted through the existing `weights` rung.

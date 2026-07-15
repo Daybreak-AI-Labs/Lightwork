@@ -186,6 +186,16 @@ pack's envelope. Mine and preview the corrections without applying them:
 maverick factory-learn --dry-run
 ```
 
+Live promotion additionally requires `--evidence` in strict version 2 format:
+unique paired held-out case IDs and normalized baseline/candidate scores, frozen
+dataset/split/evaluator/model/prompt SHA-256 identifiers, run provenance, and a
+canonical payload digest. The gate uses a family-wise-corrected, one-sided
+paired empirical-Bernstein lower confidence bound rather than raw mean lift.
+Version 1 evidence can still be inspected, but cannot alter the live correction
+artifact. Accepted changes use the shared configured improvement margin and a
+durable PREPARE â†’ exact-digest CAS apply â†’ COMMIT transaction; evidence lineage
+is embedded in the hash-chained promotion receipt.
+
 ## Evaluator co-evolution
 
 The verifier-calibration interlock (above) keeps learning honest by **freezing**

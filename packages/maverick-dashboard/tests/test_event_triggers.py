@@ -60,6 +60,54 @@ def test_store_round_trip_and_cursor(monkeypatch, tmp_path):
     assert s.delete_trigger("my-feed", owner="user:alice") is True
 
 
+def test_store_namespaces_same_public_name_by_tenant(monkeypatch, tmp_path):
+    _isolate(monkeypatch, tmp_path)
+    from maverick_dashboard import event_triggers_store as s
+
+    s.set_trigger(
+        "feed", "triage", "http_json", tenant="acme", owner="user:alice"
+    )
+    s.set_trigger(
+        "feed", "triage", "http_json", tenant="globex", owner="user:alice"
+    )
+
+    assert s.get_trigger("feed") is None  # ambiguous outside a tenant context
+    assert s.set_cursor("feed", "a-1", tenant="acme") is True
+    assert s.get_trigger("feed", tenant="acme")["cursor"] == "a-1"
+    assert s.get_trigger("feed", tenant="globex")["cursor"] == ""
+    assert s.delete_trigger("feed", owner="user:alice", tenant="acme") is True
+    assert s.get_trigger("feed", tenant="acme") is None
+    assert s.get_trigger("feed", tenant="globex") is not None
+
+
+def test_history_is_tenant_scoped_and_scrubs_notes(monkeypatch, tmp_path):
+    _isolate(monkeypatch, tmp_path)
+    from maverick.paths import reset_tenant, set_tenant
+    from maverick_dashboard import trigger_events_store as tes
+
+    token = set_tenant("acme")
+    try:
+        tes.record(
+            "feed",
+            "user:alice",
+            tes.POLL_ERROR,
+            note="Authorization: Bearer sk-proj-abcdefghijklmnopqrstuvwxyz123456",
+        )
+    finally:
+        reset_tenant(token)
+    token = set_tenant("globex")
+    try:
+        tes.record("feed", "user:alice", tes.FIRED, fired=[2])
+    finally:
+        reset_tenant(token)
+
+    acme = tes.history(owner="user:alice", tenant="acme")
+    globex = tes.history(owner="user:alice", tenant="globex")
+    assert [row["kind"] for row in acme] == [tes.POLL_ERROR]
+    assert [row["kind"] for row in globex] == [tes.FIRED]
+    assert "sk-proj-" not in acme[0]["note"]
+
+
 # ---- management API ---------------------------------------------------------
 
 def test_create_list_delete(monkeypatch, tmp_path):
@@ -359,6 +407,83 @@ def test_poll_runs_under_trigger_tenant(monkeypatch, tmp_path):
     assert seen["tenant"] == "tenant:acme"
 
 
+def test_world_factory_resolves_after_trigger_tenant_is_pinned(monkeypatch, tmp_path):
+    _isolate(monkeypatch, tmp_path)
+    import maverick.automation_events as ev
+    from maverick.paths import current_tenant_id
+    from maverick_dashboard import event_poll
+    from maverick_dashboard import event_triggers_store as s
+
+    monkeypatch.setattr(
+        ev,
+        "_http_get_json",
+        lambda *a, **k: {"items": [{"id": "1"}]},
+    )
+    s.set_trigger(
+        "feed",
+        "triage",
+        "http_json",
+        tenant="acme",
+        config={"url": "http://x", "items_path": "items", "id_field": "id"},
+    )
+    resolved = []
+
+    class _W:
+        pass
+
+    def _world_factory():
+        resolved.append(current_tenant_id())
+        return _W()
+
+    event_poll.poll_and_fire(
+        _world_factory,
+        [s.get_trigger("feed", tenant="acme")],
+        fire=lambda _g: None,
+    )
+    assert resolved == ["acme"]
+
+
+def test_deprovisioned_trigger_owner_is_not_polled(monkeypatch, tmp_path):
+    _isolate(monkeypatch, tmp_path)
+    import maverick.automation_events as ev
+    from maverick_dashboard import event_poll
+    from maverick_dashboard import event_triggers_store as s
+
+    polled = []
+    monkeypatch.setattr(
+        ev,
+        "_http_get_json",
+        lambda *a, **k: polled.append(True) or {"items": []},
+    )
+    monkeypatch.setattr(
+        "maverick_dashboard.scim_groups.active_for_principal", lambda _p: False
+    )
+    s.set_trigger(
+        "feed",
+        "triage",
+        "http_json",
+        owner="user:alice",
+        config={"url": "http://x"},
+    )
+
+    result = event_poll.poll_and_fire(
+        object(), [s.get_trigger("feed")], fire=lambda _g: None
+    )[0]
+    assert result["poll_error"] is True
+    assert result["notes"] == ["trigger authorization unavailable"]
+    assert polled == []
+
+
+def test_poll_markers_are_tenant_scoped(monkeypatch, tmp_path):
+    _isolate(monkeypatch, tmp_path)
+    from maverick_dashboard import automation_queue as aq
+
+    acme = aq._trigger_poll_key({"name": "feed", "tenant": "acme"})
+    globex = aq._trigger_poll_key({"name": "feed", "tenant": "globex"})
+    assert acme != globex
+    assert "acme" not in acme and "globex" not in globex
+
+
 def test_all_skipped_events_record_no_fired_row(monkeypatch, tmp_path, _no_real_run):
     # A poll whose events all fail template render is NOT "fired" -- it records
     # event_skipped, not a misleading FIRED row (which the UI would count).
@@ -412,6 +537,64 @@ def test_flywheel_handler_is_gated_and_fail_open(monkeypatch, tmp_path):
     # a raising flywheel must not escape the handler (fail-open like the dream cycle)
     monkeypatch.setattr(fw, "maybe_run", lambda: (_ for _ in ()).throw(RuntimeError("x")))
     aq._handle_flywheel(None)          # no raise
+
+
+def test_recurring_learners_visit_shared_and_active_tenants_in_isolation(
+    monkeypatch, tmp_path,
+):
+    """The one global cron must drive every private learning store explicitly.
+
+    Poison the caller's ambient ContextVar and make one tenant's dream fail: the
+    shared pass and remaining tenant must still run, and the caller scope must be
+    restored afterwards.
+    """
+    from types import SimpleNamespace
+
+    _isolate(monkeypatch, tmp_path)
+    monkeypatch.delenv("MAVERICK_TENANT", raising=False)
+    monkeypatch.setattr("maverick.client.client_id", lambda: None)
+    tenants = [
+        SimpleNamespace(id="acme", active=True),
+        SimpleNamespace(id="globex", active=True),
+        SimpleNamespace(id="retired", active=False),
+    ]
+    monkeypatch.setattr("maverick.tenant.registry.list_tenants", lambda: tenants)
+    monkeypatch.setattr("maverick.tenant.registry.assert_tenant_active", lambda _t: None)
+
+    from maverick import assessments, dreaming, flywheel
+    from maverick.paths import current_tenant_id, reset_tenant, set_tenant
+    from maverick_dashboard import automation_queue as aq
+
+    dream_calls = []
+    assessment_calls = []
+    flywheel_calls = []
+
+    def _dream(_world):
+        tenant = current_tenant_id() or ""
+        dream_calls.append(tenant)
+        if tenant == "acme":
+            raise RuntimeError("tenant-local failure")
+
+    monkeypatch.setattr(dreaming, "enabled", lambda: True)
+    monkeypatch.setattr(dreaming, "dream_cycle", _dream)
+    monkeypatch.setattr(assessments, "sweep_due",
+                        lambda: assessment_calls.append(current_tenant_id() or ""))
+    monkeypatch.setattr(flywheel, "maybe_run",
+                        lambda: flywheel_calls.append(current_tenant_id() or ""))
+    monkeypatch.setattr(aq, "_world", lambda: object())
+
+    ambient = set_tenant("ambient-poison")
+    try:
+        aq._handle_dream(None)
+        aq._handle_assess_sweep(None)
+        aq._handle_flywheel(None)
+        assert current_tenant_id() == "ambient-poison"
+    finally:
+        reset_tenant(ambient)
+
+    assert dream_calls == ["", "acme", "globex"]
+    assert assessment_calls == ["", "acme", "globex"]
+    assert flywheel_calls == ["", "acme", "globex"]
 
 
 def test_list_is_owner_scoped(monkeypatch, tmp_path):

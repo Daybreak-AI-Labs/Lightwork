@@ -105,6 +105,7 @@ def test_migrate_seals_artifacts_projects_signoffs_and_fact_history(monkeypatch,
     gid = wm.create_goal("g", "d")
     wm.add_artifact(gid, "text", "t", "artifact body secret")
     pid = wm.create_project("project name secret", description="project desc secret")
+    wm.set_goal_status(gid, "done", result="draft")
     wm.record_signoff(gid, "approved", note="signoff note secret")
     wm.upsert_fact("k", "fact history secret")
     wm.conn.close()

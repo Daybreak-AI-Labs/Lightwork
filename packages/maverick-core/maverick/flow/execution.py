@@ -14,19 +14,23 @@ from __future__ import annotations
 
 import contextvars
 from collections.abc import Callable
+from functools import wraps
 from typing import Any
 
 from . import node_outcomes, store
-from .ir import UNSAFE_ACTION_TOOLS, Flow, FlowNode
+from .ir import Flow, FlowNode, action_tool_policy_error
 from .runner import (
     PAUSED_STATUSES,
+    STATUS_CLAIMED,
     STATUS_COMPLETED,
     STATUS_FAILED,
+    STATUS_INDETERMINATE,
     STATUS_PAUSED_APPROVAL,
+    STATUS_RESUMING,
+    STATUS_RUNNING,
     run_flow,
 )
 
-STATUS_RUNNING = "running"   # written while a run is executing (was: stuck on "queued")
 TRIGGER_NODE = "__trigger__"  # reserved node id under which a trigger's run-outcome is grounded
 
 _RESUMABLE = PAUSED_STATUSES
@@ -90,19 +94,19 @@ def _spend_tracked(agent_runner: AgentRunner, per_call: float, spent: list) -> A
 # no double-invocation of the stateful budget wrappers on a fallback path. Set +
 # read happen synchronously on one thread (even under the foreach pool), so the
 # value is always the right node.
-_active_node: contextvars.ContextVar[tuple[str, str]] = contextvars.ContextVar(
-    "_flow_active_node", default=("", ""))
+_active_node: contextvars.ContextVar[tuple[str, str, str]] = contextvars.ContextVar(
+    "_flow_active_node", default=("", "", ""))
 
 
 def _call_agent(runner: AgentRunner, brief: str, data: dict, wall: float,
-                flow_id: str = "", node_id: str = "") -> tuple:
+                flow_id: str = "", node_id: str = "", revision: str = "") -> tuple:
     """Invoke an agent runner, bounding its wall-clock to a node ``timeout`` when
     set so a timed-out node's underlying goal self-terminates near the point the
     flow gives up waiting -- instead of running on to its default cap, still
     spending budget after the flow moved on. Injected 2-arg test runners that
     don't accept ``wall`` are called plainly. Publishes the current node id on a
     ContextVar so the production runner can attribute its goal's tools to it."""
-    token = _active_node.set((flow_id, node_id))
+    token = _active_node.set((flow_id, node_id, revision))
     try:
         if wall and wall > 0:
             try:
@@ -114,7 +118,56 @@ def _call_agent(runner: AgentRunner, brief: str, data: dict, wall: float,
         _active_node.reset(token)
 
 
-def execute(flow: Flow, *, agent_runner: AgentRunner, action_runner: ActionRunner,
+def _serialize_runs(fn):
+    """Hold one durable run lock across state check, execution, and save.
+
+    Queue delivery is intentionally at-least-once.  Without this boundary two
+    workers can both load the same paused approval and both execute the approved
+    side effect before either publishes ``completed``.  The second worker now
+    observes the first worker's terminal state and receives FlowNotResumable.
+    """
+    @wraps(fn)
+    def guarded(flow: Flow, **kwargs):
+        resume_id = kwargs.get("resume_run_id")
+        run_id = resume_id or kwargs.get("run_id")
+        if not run_id:
+            return fn(flow, **kwargs)
+        with store.run_lock(str(run_id)):
+            if not resume_id:
+                current = store.load_run(str(run_id))
+                if current is not None and current.status == STATUS_RUNNING:
+                    # A previous worker crossed the durable execution boundary
+                    # and vanished.  Its last tool may have committed, so an
+                    # at-least-once delivery must quarantine rather than replay.
+                    current.status = STATUS_INDETERMINATE
+                    current.error = (
+                        current.error
+                        or "fresh run interrupted after execution began; external effects may have committed"
+                    )
+                    store.save_run(current)
+                    return current
+                if current is not None and current.status not in {"queued", STATUS_CLAIMED}:
+                    # At-least-once queue redelivery after the first attempt
+                    # published a terminal/pause state is a no-op.
+                    return current
+            try:
+                return fn(flow, **kwargs)
+            except BaseException as exc:
+                # If execution escaped after the durable resume claim, the
+                # external-effect boundary is unknowable.  Preserve that honest
+                # state and never let queue redelivery replay it automatically.
+                current = store.load_run(str(run_id))
+                if current is not None and current.status in {STATUS_RESUMING, STATUS_RUNNING}:
+                    current.status = STATUS_INDETERMINATE
+                    phase = "resume" if resume_id else "execution"
+                    current.error = f"{phase} interrupted: {type(exc).__name__}: {exc}"
+                    store.save_run(current)
+                raise
+    return guarded
+
+
+@_serialize_runs
+def execute(flow: Flow, *, agent_runner: AgentRunner, action_runner: ActionRunner,  # noqa: C901
             owner: str = "", data: dict | None = None,
             approve_fn: Callable[[FlowNode, dict], str] | None = None,
             run_id: str | None = None,
@@ -133,6 +186,14 @@ def execute(flow: Flow, *, agent_runner: AgentRunner, action_runner: ActionRunne
     pollute the self-rewrite signal."""
     resume = None
     prior = None
+    definition_digest = ""
+    definition_version = 0
+    definition_revision = ""
+    subflow_digests: dict[str, str | None] = {}
+    execution_channel = ""
+    execution_user_id = ""
+    allowed_suites: list[str] | None = None
+    has_pinned_plan = False
     if resume_run_id:
         prior = store.load_run(resume_run_id)
         if prior is None:
@@ -150,6 +211,22 @@ def execute(flow: Flow, *, agent_runner: AgentRunner, action_runner: ActionRunne
                 f"run {resume_run_id!r} is not paused (status {prior.status!r})"
                 + ("; it has no failure cursor to retry from"
                    if from_failure and prior.status == STATUS_FAILED else ""))
+        # Resume the immutable graph captured at run start.  This makes an
+        # approval meaningful: an edit made while the run is paused cannot swap
+        # the reviewed downstream action (or a referenced child flow) for a new
+        # one.  Runs created before snapshots existed retain legacy behaviour.
+        if prior.definition_digest:
+            flow = store.load_flow_snapshot(prior.definition_digest)
+            definition_digest = prior.definition_digest
+            definition_version = prior.definition_version
+            definition_revision = prior.definition_revision or flow.revision
+            subflow_digests = dict(prior.subflow_digests)
+            has_pinned_plan = True
+        execution_channel = prior.execution_channel
+        execution_user_id = prior.execution_user_id
+        allowed_suites = (
+            list(prior.allowed_suites) if prior.allowed_suites is not None else None
+        )
         run_id = prior.run_id
         owner = owner or prior.owner
         # Free-form human input merges into the run data on resume, so an approval
@@ -182,6 +259,44 @@ def execute(flow: Flow, *, agent_runner: AgentRunner, action_runner: ActionRunne
     # A fresh run may have a queued placeholder (saved at enqueue with the
     # idempotency key + original inputs) -- preserve those instead of resetting.
     placeholder = store.load_run(rid) if (run_id and not resume_run_id) else None
+    if placeholder is not None and placeholder.definition_digest:
+        flow = store.load_flow_snapshot(placeholder.definition_digest)
+        definition_digest = placeholder.definition_digest
+        definition_version = placeholder.definition_version
+        definition_revision = placeholder.definition_revision or flow.revision
+        subflow_digests = dict(placeholder.subflow_digests)
+        has_pinned_plan = True
+    if placeholder is not None:
+        execution_channel = placeholder.execution_channel
+        execution_user_id = placeholder.execution_user_id
+        allowed_suites = (
+            list(placeholder.allowed_suites)
+            if placeholder.allowed_suites is not None else None
+        )
+    if has_pinned_plan:
+        # Durable runs created before owner-bound snapshots were introduced may
+        # already contain a crafted cross-user child manifest.  Revalidate the
+        # immutable objects before any node executor is reached.
+        expected_flow_id = (
+            prior.flow_id
+            if prior is not None
+            else placeholder.flow_id
+            if placeholder is not None
+            else flow.id
+        )
+        if flow.id != expected_flow_id:
+            raise store.FlowSnapshotError(
+                "flow snapshot identity does not match the durable run"
+            )
+        store.validate_snapshot_bundle_owners(flow, subflow_digests)
+    plan_errors = flow.validate()
+    if plan_errors:
+        raise ValueError(
+            "invalid flow execution plan: " + "; ".join(plan_errors))
+    if not has_pinned_plan:
+        definition_digest, definition_version, subflow_digests = (
+            store.snapshot_flow_bundle(flow))
+        definition_revision = flow.revision
     # Per-node run trace for the designer overlay. Seeded from the prior run on
     # resume so the pre-pause nodes' status survives across the pause.
     node_states: dict = dict(prior.nodes) if (resume_run_id and prior) else {}
@@ -211,7 +326,13 @@ def execute(flow: Flow, *, agent_runner: AgentRunner, action_runner: ActionRunne
                 entry["seconds"] = round(durations[node.id], 3)
             node_states[node.id] = entry
         if outcome is not None and record_outcomes:
-            node_outcomes.record(flow.id, node.id, node.kind, outcome)
+            node_outcomes.record(
+                flow.id,
+                node.id,
+                node.kind,
+                outcome,
+                revision=definition_revision or flow.revision,
+            )
 
     # Origin (what fired this run) comes from the queued placeholder when present,
     # else the caller's argument -- carried across a resume from the prior run.
@@ -239,24 +360,60 @@ def execute(flow: Flow, *, agent_runner: AgentRunner, action_runner: ActionRunne
             data=dict(data or {}), origin=run_origin,
             created=(placeholder.created if placeholder else 0.0),
             input_data=(placeholder.input_data if placeholder else dict(data or {})),
-            idem_key=(placeholder.idem_key if placeholder else "")))
+            idem_key=(placeholder.idem_key if placeholder else ""),
+            dry_run=(placeholder.dry_run if placeholder else not record_outcomes),
+            definition_digest=definition_digest,
+            definition_version=definition_version,
+            definition_revision=definition_revision,
+            subflow_digests=subflow_digests,
+            execution_channel=execution_channel,
+            execution_user_id=execution_user_id,
+            allowed_suites=allowed_suites,
+        ))
+
+    def _resolve_pinned_flow(flow_ref: str) -> Flow | None:
+        if flow_ref in subflow_digests:
+            digest = subflow_digests[flow_ref]
+            return store.load_flow_snapshot(digest) if digest else None
+        # Backward compatibility for a run persisted before subflow snapshots
+        # existed.  New runs never reach this path for a resolvable reference.
+        return store.load_flow(flow_ref) if (resume_run_id and not has_pinned_plan) else None
+
+    if resume_run_id and prior is not None:
+        # First-writer-wins claim BEFORE any downstream executor is invoked.  A
+        # crash after this point leaves an indeterminate run, never the old
+        # paused row that another delivery could replay.
+        prior.status = STATUS_RESUMING
+        store.save_run(prior)
 
     res = run_flow(
         flow,
         agent_fn=lambda node, brief, d: _timed(node.id, lambda: _call_agent(
-            agent_runner, brief, d, node.timeout, flow_id=flow.id, node_id=node.id)),
+            agent_runner,
+            brief,
+            d,
+            node.timeout,
+            flow_id=flow.id,
+            node_id=node.id,
+            revision=definition_revision or flow.revision,
+        )),
         action_fn=lambda node, params, d: _timed(node.id, lambda: action_runner(node.tool, params, d)),
         approve_fn=approve_fn, data=data, resume=resume, on_node=_on_node, now=now,
         # A subflow node resolves to another SAVED flow; the runner's flow_stack
         # guards against a cyclic reference (this loader stays a plain lookup).
-        resolve_flow=store.load_flow,
+        resolve_flow=_resolve_pinned_flow,
     )
     # Ground the TRIGGER's run-outcome (which triggers produce valuable runs vs.
     # noise) when a triggered run reaches a terminal state -- the top-of-funnel
     # signal, kept under a reserved node id so it's separable from work nodes.
     if record_outcomes and run_origin != "manual" and res.status in (STATUS_COMPLETED, STATUS_FAILED):
-        node_outcomes.record(flow.id, TRIGGER_NODE, "trigger",
-                             1.0 if res.status == STATUS_COMPLETED else 0.0)
+        node_outcomes.record(
+            flow.id,
+            TRIGGER_NODE,
+            "trigger",
+            1.0 if res.status == STATUS_COMPLETED else 0.0,
+            revision=definition_revision or flow.revision,
+        )
 
     # Snapshot the paused human task's declared UI (choices/form/assignee) onto
     # the run, like `prompt` -- the viewer must render what the node said AT
@@ -283,20 +440,42 @@ def execute(flow: Flow, *, agent_runner: AgentRunner, action_runner: ActionRunne
                     else (placeholder.input_data if placeholder else dict(data or {}))),
         idem_key=(prior.idem_key if (resume_run_id and prior)
                   else (placeholder.idem_key if placeholder else "")),
+        dry_run=(prior.dry_run if (resume_run_id and prior)
+                 else (placeholder.dry_run if placeholder else not record_outcomes)),
+        definition_digest=definition_digest,
+        definition_version=definition_version,
+        definition_revision=definition_revision,
+        subflow_digests=subflow_digests,
+        execution_channel=execution_channel,
+        execution_user_id=execution_user_id,
+        allowed_suites=allowed_suites,
     )
     store.save_run(run)
     # Learn the shape of this flow's output keys from a REAL run's data (never a
     # dry run -- mock executors produce placeholder shapes), so the designer's
     # data pills can offer nested keys. Field names + types only; best-effort.
-    if record_outcomes:
+    if record_outcomes and res.status != STATUS_INDETERMINATE:
         from .schema_infer import infer_output_shapes
         # record_flow_schema owns the best-effort swallow.
-        store.record_flow_schema(flow.id, infer_output_shapes(flow, res.data))
+        store.record_flow_schema(
+            flow.id,
+            infer_output_shapes(flow, res.data),
+            revision=definition_revision or flow.revision,
+        )
     return run
 
 
-def default_agent_runner(world, *, owner: str = "", budget_dollars: float = 5.0,
-                         budget_wall_seconds: float = 3600.0) -> AgentRunner:
+def default_agent_runner(
+    world,
+    *,
+    owner: str = "",
+    budget_dollars: float = 5.0,
+    budget_wall_seconds: float = 3600.0,
+    channel: str | None = None,
+    user_id: str | None = None,
+    allowed_suites: frozenset[str] | None = None,
+    concurrency_principal: str | None = None,
+) -> AgentRunner:
     """Production ``agent_runner``: an agent node becomes a governed goal.
 
     Creates a goal from the (rendered) brief, runs it through the durable runner,
@@ -312,7 +491,14 @@ def default_agent_runner(world, *, owner: str = "", budget_dollars: float = 5.0,
         try:
             from ..runner import run_goal_in_thread
             result = run_goal_in_thread(
-                gid, budget_dollars=budget_dollars, wall_seconds=ws)
+                gid,
+                max_dollars=budget_dollars,
+                max_wall_seconds=ws,
+                channel=channel,
+                user_id=user_id,
+                allowed_suites=allowed_suites,
+                concurrency_principal=(concurrency_principal or owner or user_id),
+            )
         except Exception as e:  # pragma: no cover -- runner wiring varies by env
             return (f"agent step failed: {type(e).__name__}: {e}", 0.0)
         g = world.get_goal(gid)
@@ -325,14 +511,16 @@ def default_agent_runner(world, *, owner: str = "", budget_dollars: float = 5.0,
         # the inference support -- and a failed attempt's tools are noise anyway.
         # A reliable node (the only harden candidate) succeeds ~once per run, so
         # this yields ~one tool record per logical run, aligned with node_outcomes.
-        fid, nid = _active_node.get()
+        fid, nid, revision = _active_node.get()
         if fid and nid and outcome == 1.0:
-            _capture_node_tools(fid, nid, gid)
+            _capture_node_tools(fid, nid, gid, revision=revision)
         return (result if result is not None else (g.result if g else ""), outcome)
     return run
 
 
-def _capture_node_tools(flow_id: str, node_id: str, goal_id: int) -> None:
+def _capture_node_tools(
+    flow_id: str, node_id: str, goal_id: int, *, revision: str = "",
+) -> None:
     """Record the distinct tools an agent node's goal used (for harden inference).
     No-op when trajectory capture is off (nothing to read); never raises."""
     try:
@@ -341,27 +529,47 @@ def _capture_node_tools(flow_id: str, node_id: str, goal_id: int) -> None:
             return
         tools = trajectory_store.tools_for_goal(goal_id)
         from . import node_tools
-        node_tools.record(flow_id, node_id, tools)
+        node_tools.record(flow_id, node_id, tools, revision=revision)
     except Exception:  # pragma: no cover -- capture must never break a run
         pass
 
 
-def default_action_runner(world, sandbox=None) -> ActionRunner:
+def default_action_runner(
+    world,
+    sandbox=None,
+    *,
+    channel: str | None = None,
+    user_id: str | None = None,
+) -> ActionRunner:
     """Production ``action_runner``: resolve the named tool from the base registry
     and call it with the rendered params. Outcome is success (1.0) unless the tool
     returns an ``ERROR:`` string (0.0). Never raises into the flow."""
     def run(tool: str, params: dict, data: dict) -> tuple[Any, float | None]:
         try:
-            if tool in UNSAFE_ACTION_TOOLS:
-                return (f"ERROR: unsafe flow action tool {tool!r}", 0.0)
+            if policy_error := action_tool_policy_error(tool):
+                return (f"ERROR: {policy_error}", 0.0)
             from ..sandbox import LocalBackend
             from ..tools import base_registry
-            reg = base_registry(world, sandbox or LocalBackend(), goal_id=None)
+            reg = base_registry(
+                world,
+                sandbox or LocalBackend(),
+                goal_id=None,
+                channel=channel,
+                user_id=user_id,
+            )
             t = next((x for x in reg.all() if x.name == tool), None)
             if t is None:
                 return (f"ERROR: no such tool {tool!r}", 0.0)
-            result = t.fn(**params)
+            # Go through the registry's authoritative dispatch path: it owns the
+            # ToolFn(args_dict) contract, sync/async/generator normalization,
+            # tracing, cache invalidation and retry-safety policy.
+            from ..workflow import _drive
+            result = _drive(reg.run(tool, params))
         except Exception as e:
+            from ..budget import BudgetExceeded
+            from ..killswitch import Halted
+            if isinstance(e, (BudgetExceeded, Halted)):
+                raise
             return (f"ERROR: {type(e).__name__}: {e}", 0.0)
         ok = not (isinstance(result, str) and result.startswith("ERROR"))
         return (result, 1.0 if ok else 0.0)
@@ -381,4 +589,7 @@ def sandbox_runners() -> tuple[AgentRunner, ActionRunner]:
     return agent, action
 
 
-__all__ = ["execute", "default_agent_runner", "default_action_runner", "sandbox_runners"]
+__all__ = [
+    "execute", "default_agent_runner", "default_action_runner", "sandbox_runners",
+    "STATUS_RUNNING", "STATUS_RESUMING", "STATUS_INDETERMINATE",
+]

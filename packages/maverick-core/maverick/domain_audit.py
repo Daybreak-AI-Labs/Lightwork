@@ -15,7 +15,13 @@ from __future__ import annotations
 
 from dataclasses import asdict, dataclass, field
 
-from .domain import DomainProfile, available_domains, suite_for
+from .domain import (
+    DomainProfile,
+    available_domains,
+    declared_prompt_gate,
+    enforced_gate,
+    suite_for,
+)
 from .domain_refusals import refusals_for
 
 # State-mutating / host-control tools a drafting agent must never reach.
@@ -47,22 +53,17 @@ class PackAudit:
     denied_irreversible: list[str] = field(default_factory=list)
     n_refusals: int = 0
     refusals: list[str] = field(default_factory=list)
-    human_gate: str | None = None          # the sign-off on the deliverable / playbook
+    # ``human_gate`` remains as a compatibility alias, but now means only a
+    # persisted release control.  Prompt-only declarations are separate so a
+    # GRC export cannot accidentally claim a control that does not execute.
+    human_gate: str | None = None
+    declared_prompt_gate: str | None = None
+    enforced_gate: str | None = None
     deliverable: str = ""
     consumers: list[str] = field(default_factory=list)
     knowledge_sources: list[str] = field(default_factory=list)
     autonomy: str = "suggest"              # baseline authority rung (pack block or suite default)
     autonomy_onboarding: bool = True       # starts supervised until graduated
-
-
-def _human_gate(p: DomainProfile) -> str | None:
-    """The strongest human sign-off the pack declares (approval > review)."""
-    gates = {p.output.gate} | {s.gate for s in p.workflow}
-    if "approval" in gates:
-        return "approval"
-    if "review" in gates:
-        return "review"
-    return None
 
 
 def audit_profile(profile: DomainProfile) -> PackAudit:
@@ -84,6 +85,8 @@ def audit_profile(profile: DomainProfile) -> PackAudit:
     refusals = refusals_for(profile.name, profile.refuse)
     from .agent_autonomy import default_profile_for
     _auto = profile.autonomy or default_profile_for(profile.name)
+    declared = declared_prompt_gate(profile)
+    enforced = enforced_gate(profile)
     return PackAudit(
         name=profile.name,
         suite=suite,
@@ -95,7 +98,9 @@ def audit_profile(profile: DomainProfile) -> PackAudit:
         denied_irreversible=denied,
         n_refusals=len(refusals),
         refusals=refusals,
-        human_gate=_human_gate(profile),
+        human_gate=enforced,
+        declared_prompt_gate=declared,
+        enforced_gate=enforced,
         deliverable=profile.output.deliverable,
         consumers=list(profile.output.consumers),
         knowledge_sources=list(profile.knowledge_sources),
@@ -115,6 +120,7 @@ def summarize(audits: list[PackAudit]) -> dict:
     total = len(audits)
     builders = [a for a in audits if a.is_builder]
     non_builders = [a for a in audits if not a.is_builder]
+    gate_rank = {None: 0, "review": 1, "approval": 2}
     return {
         "packs": total,
         "suites": len({a.suite for a in audits if a.suite}),
@@ -122,7 +128,17 @@ def summarize(audits: list[PackAudit]) -> dict:
         # The load-bearing safety invariant: no drafting agent reaches a mutator.
         "drafting_agents_reaching_a_mutator": sum(
             1 for a in non_builders if a.reachable_dangerous),
-        "packs_with_human_gate": sum(1 for a in audits if a.human_gate),
+        # Compatibility headline, now intentionally counts *enforced* gates.
+        "packs_with_human_gate": sum(1 for a in audits if a.enforced_gate),
+        "packs_with_declared_prompt_gate": sum(
+            1 for a in audits if a.declared_prompt_gate
+        ),
+        "packs_with_unenforced_prompt_gate": sum(
+            1
+            for a in audits
+            if gate_rank.get(a.declared_prompt_gate, 0)
+            > gate_rank.get(a.enforced_gate, 0)
+        ),
         "packs_with_refusals_beyond_universal": sum(
             1 for a in audits if a.n_refusals > 2),
         "packs_with_effort_tier": sum(1 for a in audits if a.effort),

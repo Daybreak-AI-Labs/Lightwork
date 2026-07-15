@@ -227,9 +227,15 @@ class PromotionRecord:
     approver_id: str | None = None
     payload_sha256: str | None = None
     approval_signature: str | None = None
+    # Evidence/provenance is part of the authoritative receipt, not merely a
+    # best-effort audit event.  Defaults preserve compatibility with journals
+    # written before evidence-bearing external-artifact transactions existed.
+    samples: int | None = None
+    effect_ci_low: float | None = None
+    provenance: dict[str, Any] = field(default_factory=dict)
 
     def to_dict(self) -> dict:
-        return {
+        data = {
             "id": self.id, "rung": self.rung, "summary": self.summary,
             "baseline_score": self.baseline_score,
             "candidate_score": self.candidate_score,
@@ -240,6 +246,15 @@ class PromotionRecord:
             "payload_sha256": self.payload_sha256,
             "approval_signature": self.approval_signature,
         }
+        # Do not rewrite legacy receipts just because a newer reader loaded
+        # them.  New evidence-bearing receipts opt in to these fields.
+        if self.samples is not None:
+            data["samples"] = self.samples
+        if self.effect_ci_low is not None:
+            data["effect_ci_low"] = self.effect_ci_low
+        if self.provenance:
+            data["provenance"] = self.provenance
+        return data
 
 
 @dataclass(frozen=True)
@@ -361,6 +376,27 @@ def _canonical_json(value: Any) -> str:
     """Return the one byte representation used by journal hash links."""
     return json.dumps(value, sort_keys=True, separators=(",", ":"),
                       ensure_ascii=False, allow_nan=False)
+
+
+def _receipt_provenance(value: Any) -> dict[str, Any]:
+    """Return bounded, canonical JSON provenance for a durable receipt.
+
+    A candidate may be supplied by an extension, so arbitrary Python objects,
+    non-finite numbers, integer keys, and unbounded blobs must not reach the
+    hash-chained promotion journal.  Invalid provenance fails the privileged
+    transition closed instead of silently dropping the evidence lineage.
+    """
+    if not isinstance(value, dict):
+        raise ValueError("promotion provenance must be an object")
+    if any(not isinstance(key, str) for key in value):
+        raise ValueError("promotion provenance keys must be strings")
+    canonical = _canonical_json(value)
+    if len(canonical.encode("utf-8")) > 32_768:
+        raise ValueError("promotion provenance exceeds 32768 bytes")
+    parsed = json.loads(canonical)
+    if not isinstance(parsed, dict):  # pragma: no cover - guarded above
+        raise ValueError("promotion provenance must be an object")
+    return parsed
 
 
 def _capability_widens(cand: Candidate) -> bool | None:
@@ -596,6 +632,9 @@ class SelfImprovementController:
             approver_id=verdict.approver_id if signed else None,
             payload_sha256=cand.payload_sha256 if signed else None,
             approval_signature=cand.approval_signature if signed else None,
+            samples=cand.samples,
+            effect_ci_low=cand.effect_ci_low,
+            provenance=_receipt_provenance(cand.provenance),
         )
 
     @staticmethod
@@ -657,7 +696,9 @@ class SelfImprovementController:
             content="self_improvement_prepared", decision="prepare",
             rung=cand.rung, candidate=cand.id, transaction=transaction.id,
             artifact=before.identity, before_sha256=before.sha256,
-            after_sha256=after.sha256)
+            after_sha256=after.sha256, samples=transaction.record.samples,
+            effect_ci_low=transaction.record.effect_ci_low,
+            provenance=transaction.record.provenance)
         return PromotionPreparation(verdict, transaction)
 
     def commit_prepared(
@@ -697,7 +738,10 @@ class SelfImprovementController:
                 rung=preparation.verdict.rung,
                 candidate=preparation.verdict.candidate_id,
                 transaction=transaction.id, artifact=artifact.identity,
-                artifact_sha256=artifact.sha256)
+                artifact_sha256=artifact.sha256,
+                samples=transaction.record.samples,
+                effect_ci_low=transaction.record.effect_ci_low,
+                provenance=transaction.record.provenance)
         return preparation.verdict
 
     def abort_prepared(
@@ -763,7 +807,10 @@ class SelfImprovementController:
                 self._audit(
                     content="self_improvement_recovered", decision=tx.state,
                     rung=tx.record.rung, candidate=tx.record.id,
-                    transaction=tx.id, artifact=tx.before.identity)
+                    transaction=tx.id, artifact=tx.before.identity,
+                    samples=tx.record.samples,
+                    effect_ci_low=tx.record.effect_ci_low,
+                    provenance=tx.record.provenance)
         return recovered
 
     def promote(self, cand: Candidate) -> Verdict:
@@ -811,7 +858,8 @@ class SelfImprovementController:
         self._audit(content="self_improvement_promoted", decision="promote",
                     rung=cand.rung, candidate=cand.id,
                     improvement=round(cand.candidate_score - cand.baseline_score, 6),
-                    approver=verdict.approver_id)
+                    approver=verdict.approver_id, samples=rec.samples,
+                    effect_ci_low=rec.effect_ci_low, provenance=rec.provenance)
         return verdict
 
     def rollback(self, record_id: str, *, undo: Callable[[], None] | None = None) -> bool:
@@ -959,6 +1007,19 @@ def _record_from_dict(raw: Any) -> PromotionRecord:
         raise PromotionLedgerError("promotion ledger record is not an object")
     try:
         rolled_back_at = raw.get("rolled_back_at")
+        samples = raw.get("samples")
+        if (samples is not None
+                and (not isinstance(samples, int) or isinstance(samples, bool)
+                     or samples < 0 or samples > 1_000_000_000)):
+            raise TypeError("samples is not a valid non-negative integer")
+        effect_ci_low = raw.get("effect_ci_low")
+        if effect_ci_low is not None:
+            if (not isinstance(effect_ci_low, (int, float))
+                    or isinstance(effect_ci_low, bool)
+                    or not math.isfinite(float(effect_ci_low))
+                    or not -1.0 <= float(effect_ci_low) <= 1.0):
+                raise TypeError("effect_ci_low is not a finite normalized effect")
+            effect_ci_low = float(effect_ci_low)
         return PromotionRecord(
             id=str(raw["id"]), rung=str(raw["rung"]),
             summary=str(raw.get("summary", "")),
@@ -970,6 +1031,9 @@ def _record_from_dict(raw: Any) -> PromotionRecord:
             approver_id=raw.get("approver_id"),
             payload_sha256=raw.get("payload_sha256"),
             approval_signature=raw.get("approval_signature"),
+            samples=samples,
+            effect_ci_low=effect_ci_low,
+            provenance=_receipt_provenance(raw.get("provenance", {})),
         )
     except (KeyError, TypeError, ValueError) as exc:
         raise PromotionLedgerError("promotion ledger contains an invalid record") from exc

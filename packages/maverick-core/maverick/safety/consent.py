@@ -32,13 +32,59 @@ import sys
 import threading
 import time
 from dataclasses import dataclass
+from pathlib import Path
 
-from ..paths import data_dir
+from ..paths import TenantPolicyError, current_tenant_id, data_dir
 
 log = logging.getLogger(__name__)
 
+# Legacy single-user override.  Keep this as a real attribute so test/integration
+# patching restores ``None`` instead of materialising a tenant path returned by
+# module ``__getattr__`` and pinning later calls to that stale location.
+CONSENT_LEDGER_PATH: Path | None = None
 
-CONSENT_LEDGER_PATH = data_dir("consent.ledger")
+
+def _same_ledger_path(left: Path, right: Path) -> bool:
+    """Compare canonical paths, failing closed on resolution errors."""
+    try:
+        return left.expanduser().resolve(strict=False) == right.expanduser().resolve(
+            strict=False
+        )
+    except (OSError, RuntimeError):
+        return False
+
+
+def _resolve_ledger_path(path: Path | None = None) -> Path:
+    """Resolve a consent ledger without crossing a tenant boundary.
+
+    ``CONSENT_LEDGER_PATH`` and the explicit ``path=`` argument predate tenant
+    isolation.  They remain available to unscoped, single-user deployments,
+    but a named tenant must always use its own data directory.  In particular,
+    a stale process-wide override must never turn into a shared-grant fallback
+    in a long-lived multi-tenant worker.
+    """
+    if current_tenant_id() is not None:
+        active = data_dir("consent.ledger")
+        if path is not None and not _same_ledger_path(Path(path), active):
+            raise TenantPolicyError(
+                "explicit consent ledger path does not match the active tenant"
+            )
+        return active
+    if path is not None:
+        return Path(path)
+    override = CONSENT_LEDGER_PATH
+    return Path(override) if override is not None else data_dir("consent.ledger")
+
+
+def consent_ledger_path() -> Path:
+    """The active tenant's consent ledger.
+
+    A module-level path is unsafe in long-lived multi-tenant workers because it
+    freezes whichever tenant imported this module first. An explicitly assigned
+    legacy attribute remains an override for unscoped integrations/tests; it is
+    deliberately ignored once a tenant or client floor is active.
+    """
+    return _resolve_ledger_path()
 
 
 class ConsentDenied(Exception):
@@ -87,50 +133,57 @@ def _resolve_mode(risk: str | None = None) -> str:
     return "auto-approve"
 
 
-def _ledger_lines() -> list[str]:
-    if not CONSENT_LEDGER_PATH.exists():
+def _ledger_lines(path: Path | None = None) -> list[str]:
+    path = _resolve_ledger_path(path)
+    if not path.exists():
         return []
     try:
-        return CONSENT_LEDGER_PATH.read_text().splitlines()
+        return path.read_text().splitlines()
     except OSError:
         return []
 
 
-def _append_ledger(line: str) -> None:
+def _append_ledger(line: str, path: Path | None = None) -> None:
+    path = _resolve_ledger_path(path)
     try:
-        CONSENT_LEDGER_PATH.parent.mkdir(parents=True, exist_ok=True)
-        with open(CONSENT_LEDGER_PATH, "a", encoding="utf-8") as f:
+        path.parent.mkdir(parents=True, exist_ok=True)
+        with open(path, "a", encoding="utf-8") as f:
             f.write(line + "\n")
         try:
-            os.chmod(CONSENT_LEDGER_PATH, 0o600)
+            os.chmod(path, 0o600)
         except OSError:
             pass
     except OSError as e:
         log.warning("consent: cannot append to ledger: %s", e)
 
 
-def _check_ledger(action: str, scope: str | None) -> bool:
+def _check_ledger(action: str, scope: str | None, path: Path | None = None) -> bool:
     """True if a prior ``grant`` for ``(action, scope)`` is recorded."""
     key = f"grant\t{action}\t{scope or ''}"
     # Compare the stored record verbatim. ``_ledger_lines`` already stripped the
     # line terminator via splitlines(); a blanket .strip() here ate the trailing
     # TAB of a scope-less grant (``grant\taction\t``), so a scope-less
     # grant_persistent() never matched and was silently re-prompted forever.
-    return any(line.split("|", 1)[-1] == key for line in _ledger_lines())
+    return any(line.split("|", 1)[-1] == key for line in _ledger_lines(path))
 
 
-def grant_persistent(action: str, scope: str | None = None) -> None:
+def grant_persistent(
+    action: str, scope: str | None = None, *, path: Path | None = None,
+) -> None:
     """Record a forever-grant; subsequent require_consent() returns immediately.
 
     Use sparingly; the more we ledger, the less the prompts matter.
     """
     ts = time.time()
-    _append_ledger(f"{ts}|grant\t{action}\t{scope or ''}")
+    _append_ledger(f"{ts}|grant\t{action}\t{scope or ''}", path)
 
 
-def revoke(action: str, scope: str | None = None) -> bool:
+def revoke(
+    action: str, scope: str | None = None, *, path: Path | None = None,
+) -> bool:
     """Remove all matching grants. Returns True if anything was removed."""
-    lines = _ledger_lines()
+    path = _resolve_ledger_path(path)
+    lines = _ledger_lines(path)
     if not lines:
         return False
     key = f"grant\t{action}\t{scope or ''}"
@@ -138,18 +191,18 @@ def revoke(action: str, scope: str | None = None) -> bool:
     if len(kept) == len(lines):
         return False
     try:
-        CONSENT_LEDGER_PATH.write_text("\n".join(kept) + "\n" if kept else "")
-        os.chmod(CONSENT_LEDGER_PATH, 0o600)
+        path.write_text("\n".join(kept) + "\n" if kept else "")
+        os.chmod(path, 0o600)
         return True
     except OSError as e:
         log.warning("consent: cannot rewrite ledger: %s", e)
         return False
 
 
-def list_grants() -> list[tuple[str, str]]:
+def list_grants(*, path: Path | None = None) -> list[tuple[str, str]]:
     """Return [(action, scope), ...] of all current grants."""
     out: list[tuple[str, str]] = []
-    for line in _ledger_lines():
+    for line in _ledger_lines(path):
         body = line.split("|", 1)[-1]
         parts = body.split("\t")
         if len(parts) >= 3 and parts[0] == "grant":

@@ -30,6 +30,7 @@ import threading
 import time
 import traceback
 from collections.abc import Callable
+from contextlib import contextmanager
 from pathlib import Path
 
 from .job_queue import Job, JobQueue
@@ -72,10 +73,41 @@ def _run_identity_kwargs(payload: dict) -> dict[str, object]:
         run_kwargs["channel"] = channel
     if user_id:
         run_kwargs["user_id"] = user_id
+    concurrency_principal = str(payload.get("concurrency_principal") or "").strip()
+    if concurrency_principal:
+        run_kwargs["concurrency_principal"] = concurrency_principal
     allowed_suites = payload.get("allowed_suites")
     if allowed_suites is not None:
         run_kwargs["allowed_suites"] = frozenset(str(s) for s in allowed_suites)
     return run_kwargs
+
+
+@contextmanager
+def _job_tenant_context(payload: dict):
+    """Pin a durable job to its captured tenant before any work begins.
+
+    Queue workers are process-global and run outside the HTTP request task that
+    originally selected a tenant.  Merely persisting ``payload['tenant']`` is
+    therefore not isolation: without restoring the ContextVar, ``run_goal`` and
+    custom handlers open the ambient/shared world.  Validate current tenant
+    status before re-arming or dispatching so a suspended tenant cannot keep
+    executing autonomous work from an old queue row.
+    """
+    tenant = str(payload.get("tenant") or "").strip()
+    if not tenant:
+        yield
+        return
+
+    from .tenant.registry import assert_tenant_active
+
+    assert_tenant_active(tenant)
+    from .paths import reset_tenant, set_tenant
+
+    token = set_tenant(tenant)
+    try:
+        yield
+    finally:
+        reset_tenant(token)
 
 class UnknownJobKind(Exception):
     """Raised when no handler is registered for a job.kind."""
@@ -298,13 +330,14 @@ class Worker:
         )
         hb.start()
         try:
-            # Re-arm the next cron occurrence INSIDE the guarded block (before
-            # dispatch) so a re-arm enqueue failure routes through the same
-            # retry/dead-letter path as a handler failure -- durably, instead of
-            # the old best-effort-once swallow. It is idempotent, so a retry that
-            # re-enters here never duplicates the successor.
-            self._maybe_rearm(job)
-            self._dispatch(job)
+            with _job_tenant_context(job.payload):
+                # Re-arm the next cron occurrence INSIDE the tenant + guarded
+                # block (before dispatch) so suspended tenants cannot continue
+                # autonomous schedules and a re-arm enqueue failure routes
+                # through the same retry/dead-letter path as handler failure.
+                # It is idempotent, so a retry never duplicates the successor.
+                self._maybe_rearm(job)
+                self._dispatch(job)
             # Fence the terminal write with the attempt we claimed at: if our
             # lease was reclaimed and re-claimed mid-run, this no-ops instead of
             # clobbering the peer that now owns the job.
@@ -316,8 +349,22 @@ class Worker:
                             retry_after=None, max_attempts=0,
                             expected_attempts=job.attempts)
             log.warning("worker: job %d has no handler (%s)", job.id, e)
-        except Exception:
-            err = traceback.format_exc(limit=4)
+        except Exception as exc:
+            # Put the actionable exception summary first: JobQueue bounds the
+            # durable error, and long Windows paths can otherwise consume that
+            # budget before the final traceback line. Scrub both the persisted
+            # row and log message because provider/tool failures may carry a
+            # credential in their exception text.
+            raw = (
+                f"{type(exc).__name__}: {exc}\n"
+                + traceback.format_exc(limit=4)
+            )
+            try:
+                from .secrets import scrub
+
+                err = scrub(raw)
+            except Exception:  # never persist an unredacted fallback
+                err = f"{type(exc).__name__}: job handler failed (details redacted)"
             self.queue.fail(
                 job.id, err,
                 retry_after=self.retry_after,
@@ -325,7 +372,7 @@ class Worker:
                 expected_attempts=job.attempts,
             )
             log.warning("worker: job %d failed, requeued: %s",
-                        job.id, err.splitlines()[-1])
+                        job.id, err.splitlines()[0])
         finally:
             hb_stop.set()
             hb.join(timeout=5.0)

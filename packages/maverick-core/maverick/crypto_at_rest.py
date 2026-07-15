@@ -509,7 +509,10 @@ def seal(plaintext: bytes) -> bytes:
     return _MAGIC + nonce + ct
 
 
-def unseal(blob: bytes) -> bytes:
+def _unseal_with_key_cache(
+    blob: bytes,
+    key_cache: dict[tuple[str, bytes], object],
+) -> bytes:
     """Decrypt a sealed blob. A blob *without* the magic header is returned
     unchanged — plaintext written before encryption was enabled (transparent
     migration). Raises :class:`EncryptionUnavailable` only when a genuinely
@@ -542,16 +545,19 @@ def unseal(blob: bytes) -> bytes:
         keyid = body[:_KEYID_BYTES]
         nonce = body[_KEYID_BYTES:_KEYID_BYTES + _NONCE_BYTES]
         ct = body[_KEYID_BYTES + _NONCE_BYTES:]
-        key = _resolve_key_by_id(keyid)
+        cache_key = ("v2", keyid)
+        cipher = key_cache.get(cache_key)
+        if cipher is None:
+            cipher = AESGCM(_resolve_key_by_id(keyid))
+            key_cache[cache_key] = cipher
         try:
-            return AESGCM(key).decrypt(nonce, ct, None)
+            return cipher.decrypt(nonce, ct, None)
         except InvalidTag as e:
             raise EncryptionUnavailable(
                 "cannot decrypt sealed data: wrong at-rest key or altered "
                 "ciphertext (GCM authentication failed)"
             ) from e
 
-    key = _load_or_create_key()
     body = blob[len(_MAGIC):]
     # A sealed blob is MAGIC || 12-byte nonce || ciphertext+16-byte GCM tag.
     # Guard the length before slicing so a truncated blob raises the documented
@@ -562,8 +568,13 @@ def unseal(blob: bytes) -> bytes:
             "the data is corrupt or not a Lightwork at-rest blob"
         )
     nonce, ct = body[:_NONCE_BYTES], body[_NONCE_BYTES:]
+    cache_key = ("v1", b"")
+    cipher = key_cache.get(cache_key)
+    if cipher is None:
+        cipher = AESGCM(_load_or_create_key())
+        key_cache[cache_key] = cipher
     try:
-        return AESGCM(key).decrypt(nonce, ct, None)
+        return cipher.decrypt(nonce, ct, None)
     except InvalidTag as e:
         # Wrong key (e.g. a rotated/restored key) or tampered ciphertext.
         # Honor the documented contract: surface EncryptionUnavailable rather
@@ -573,6 +584,11 @@ def unseal(blob: bytes) -> bytes:
             "cannot decrypt sealed data: wrong at-rest key or the ciphertext "
             "has been altered (GCM authentication failed)"
         ) from e
+
+
+def unseal(blob: bytes) -> bytes:
+    """Decrypt one sealed blob with a request-local key cache."""
+    return _unseal_with_key_cache(blob, {})
 
 
 def seal_text(text: str) -> bytes:
@@ -633,6 +649,36 @@ def unseal_from_str(s: str) -> str:
     return unseal(blob).decode("utf-8", errors="replace")
 
 
+def unseal_many_from_str(values: list[str]) -> list[str]:
+    """Decrypt TEXT-column tokens while resolving each key once per batch.
+
+    Single-value integrity checks are preserved, but repeated config/key-file
+    I/O is removed from encrypted result-set reads. The cache is discarded on
+    return so rotations and tenant-context changes are observed by the next
+    query.
+    """
+    key_cache: dict[tuple[str, bytes], object] = {}
+    out: list[str] = []
+    for value in values:
+        if not is_sealed_str(value):
+            out.append(value)
+            continue
+        try:
+            blob = base64.b64decode(value[len(_STR_PREFIX):], validate=True)
+        except (ValueError, binascii.Error):
+            out.append(value)
+            continue
+        if not is_sealed(blob) or len(blob) < len(_MAGIC) + _NONCE_BYTES + 16:
+            out.append(value)
+            continue
+        out.append(
+            _unseal_with_key_cache(blob, key_cache).decode(
+                "utf-8", errors="replace"
+            )
+        )
+    return out
+
+
 __all__ = [
     "at_rest_enabled",
     "per_tenant_at_rest",
@@ -644,6 +690,7 @@ __all__ = [
     "unseal_to_text",
     "seal_to_str",
     "unseal_from_str",
+    "unseal_many_from_str",
     "rotate_at_rest_key",
     "backup_key_material",
     "EncryptionUnavailable",

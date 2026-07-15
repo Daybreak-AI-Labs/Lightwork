@@ -28,22 +28,56 @@ def _secret() -> str | None:
     return inbound_secret()
 
 
+def _secret_for_tenant(tenant: str) -> str | None:
+    """Resolve the signing key inside the token's tenant scope."""
+    if not tenant:
+        return _secret()
+    try:
+        from ..tenant.registry import assert_tenant_active
+        assert_tenant_active(tenant)
+        from ..paths import reset_tenant, set_tenant
+        token = set_tenant(tenant)
+    except Exception:
+        return None
+    try:
+        return _secret()
+    finally:
+        reset_tenant(token)
+
+
+def _decode_body(body: str) -> dict | None:
+    if not body or len(body) > 12_000:
+        return None
+    try:
+        pad = "=" * (-len(body) % 4)
+        payload = json.loads(base64.urlsafe_b64decode(body + pad))
+    except (ValueError, TypeError):
+        return None
+    return payload if isinstance(payload, dict) else None
+
+
 def _sign(material: bytes, secret: str) -> str:
     return hmac.new(secret.encode("utf-8"), material, hashlib.sha256).hexdigest()
 
 
 def mint_token(run_id: str, decision: str, *, cursor: str | None = None,
                prompt: str = "", updated: float | None = None,
+               tenant: str | None = None,
                ttl: int = _DEFAULT_TTL, now: float | None = None) -> str | None:
     """A signed, self-expiring token authorising ONE decision on ONE approval
     pause. ``None`` when no secret is configured or inputs are invalid (fail closed)."""
-    secret = _secret()
+    if tenant is None:
+        from ..paths import current_tenant_id
+        tenant = current_tenant_id() or ""
+    tenant = str(tenant or "")
+    secret = _secret_for_tenant(tenant)
     if (not secret or decision not in _DECISIONS or not run_id or not cursor
             or updated is None):
         return None
     exp = int((now if now is not None else time.time()) + ttl)
     raw = json.dumps({"r": str(run_id), "d": decision, "e": exp,
-                      "c": str(cursor), "p": str(prompt), "u": float(updated)},
+                      "c": str(cursor)[:256], "p": str(prompt)[:2000],
+                      "u": float(updated), "t": tenant},
                      separators=(",", ":"), sort_keys=True).encode("utf-8")
     body = base64.urlsafe_b64encode(raw).decode("ascii").rstrip("=")
     return f"{body}.{_sign(body.encode('ascii'), secret)}"
@@ -52,16 +86,22 @@ def mint_token(run_id: str, decision: str, *, cursor: str | None = None,
 def verify_token(token: str, *, now: float | None = None) -> dict | None:
     """Return the approval claim for a valid, unexpired, correctly-signed token;
     ``None`` otherwise (no secret / bad format / bad signature / expired)."""
-    secret = _secret()
-    if not secret or not token or "." not in token:
+    if not token or len(token) > 16_384 or "." not in token:
         return None
     body, _, sig = token.partition(".")
-    if not hmac.compare_digest(sig, _sign(body.encode("ascii"), secret)):
+    payload = _decode_body(body)
+    if payload is None:
         return None
+    # The tenant is untrusted until the signature verifies, but it is safe to
+    # use solely as a key-selection namespace. No run data is read beforehand.
+    tenant = str(payload.get("t") or "")
+    secret = _secret_for_tenant(tenant)
     try:
-        pad = "=" * (-len(body) % 4)
-        payload = json.loads(base64.urlsafe_b64decode(body + pad))
-    except (ValueError, TypeError):
+        valid_sig = bool(secret) and hmac.compare_digest(
+            sig, _sign(body.encode("ascii"), secret or ""))
+    except (UnicodeEncodeError, ValueError):
+        return None
+    if not valid_sig:
         return None
     run_id, decision, exp = payload.get("r"), payload.get("d"), payload.get("e")
     cursor, updated = payload.get("c"), payload.get("u")
@@ -72,19 +112,20 @@ def verify_token(token: str, *, now: float | None = None) -> dict | None:
         return None
     return {"run_id": str(run_id), "decision": str(decision),
             "cursor": str(cursor), "prompt": str(payload.get("p", "")),
-            "updated": float(updated)}
+            "updated": float(updated), "tenant": tenant}
 
 
 def approval_links(base_url: str, run_id: str, *, cursor: str | None = None,
                    prompt: str = "", updated: float | None = None,
+                   tenant: str | None = None,
                    ttl: int = _DEFAULT_TTL, now: float | None = None) -> dict | None:
     """The approve/reject URLs for a run (pointing at ``/flow/approve``), or
     ``None`` when unsigned (no secret) so the caller can fall back to a plain
     notification."""
     approve = mint_token(run_id, "approved", cursor=cursor, prompt=prompt,
-                         updated=updated, ttl=ttl, now=now)
+                         updated=updated, tenant=tenant, ttl=ttl, now=now)
     reject = mint_token(run_id, "rejected", cursor=cursor, prompt=prompt,
-                        updated=updated, ttl=ttl, now=now)
+                        updated=updated, tenant=tenant, ttl=ttl, now=now)
     if not (approve and reject):
         return None
     base = base_url.rstrip("/")

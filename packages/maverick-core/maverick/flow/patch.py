@@ -26,7 +26,7 @@ from __future__ import annotations
 
 from typing import Any
 
-from .ir import Flow, FlowNode
+from .ir import Flow, FlowNode, partition_draft_validation_errors
 
 PATCH_OPS = frozenset({"add_node", "remove_node", "set_field", "set_flow_field", "rewire"})
 
@@ -161,11 +161,19 @@ def describe_patch(p: dict) -> str:
     return f"unknown op {op!r}"
 
 
-def apply_patches(flow: Flow, patches: list[dict[str, Any]]) -> Flow:
+def apply_patches(
+    flow: Flow,
+    patches: list[dict[str, Any]],
+    *,
+    allow_unclassified_draft: bool = False,
+) -> Flow:
     """Apply ``patches`` in order to a copy of ``flow`` and return the result.
 
     Raises :class:`PatchError` if any patch is malformed or the patched flow
-    fails :meth:`Flow.validate`; ``flow`` itself is never mutated.
+    fails :meth:`Flow.validate`; ``flow`` itself is never mutated. The
+    ``allow_unclassified_draft`` escape hatch is reserved for an unsaved
+    authoring preview: it tolerates only the exact unclassified-action policy
+    error, never a structural, safety, or tool-binding error.
     """
     _require(isinstance(patches, list) and patches, "no patches to apply")
     out = flow.copy()
@@ -179,8 +187,10 @@ def apply_patches(flow: Flow, patches: list[dict[str, Any]]) -> Flow:
         except PatchError as e:
             raise PatchError(f"patch {i} ({describe_patch(p)}): {e}") from e
     errs = out.validate()
-    if errs:
-        raise PatchError("patched flow is invalid: " + "; ".join(errs[:5]))
+    blocking, unclassified = partition_draft_validation_errors(errs)
+    rejected = blocking or ([] if allow_unclassified_draft else unclassified)
+    if rejected:
+        raise PatchError("patched flow is invalid: " + "; ".join(rejected[:5]))
     return out
 
 

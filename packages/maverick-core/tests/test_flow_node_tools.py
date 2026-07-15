@@ -96,7 +96,7 @@ def test_driver_publishes_the_active_node_to_the_runner(tmp_path, monkeypatch):
         return ("ok", 1.0)
     execution.execute(_agent_flow(), agent_runner=runner,
                       action_runner=lambda t, p, d: ("", None))
-    assert seen["node"] == ("f", "a")                 # (flow_id, node_id) of the agent node
+    assert seen["node"] == ("f", "a", "")             # flow, node, definition generation
 
 
 def test_tool_capture_records_only_on_success_not_per_retry(tmp_path, monkeypatch):
@@ -117,7 +117,7 @@ def test_tool_capture_records_only_on_success_not_per_retry(tmp_path, monkeypatc
         return "ok"
     monkeypatch.setattr("maverick.runner.run_goal_in_thread", succeed)
     run = execution.default_agent_runner(w)
-    token = execution._active_node.set(("f", "a"))
+    token = execution._active_node.set(("f", "a", ""))
     try:
         run("brief", {})                              # two successful runs -> two rows
         run("brief", {})

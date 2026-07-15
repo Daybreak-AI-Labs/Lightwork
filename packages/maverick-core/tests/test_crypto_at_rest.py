@@ -219,6 +219,25 @@ def test_seal_to_str_roundtrip_and_passthrough():
     assert car.is_sealed_str(tok) and not car.is_sealed_str("plain value")
 
 
+@requires_crypto
+def test_unseal_many_from_str_reuses_one_key_resolution(monkeypatch):
+    tokens = [car.seal_to_str(f"secret-{i}") for i in range(4)]
+    original = car._load_or_create_key
+    calls = 0
+
+    def counted_load():
+        nonlocal calls
+        calls += 1
+        return original()
+
+    monkeypatch.setattr(car, "_load_or_create_key", counted_load)
+
+    assert car.unseal_many_from_str([tokens[0], "legacy", *tokens[1:]]) == [
+        "secret-0", "legacy", "secret-1", "secret-2", "secret-3",
+    ]
+    assert calls == 1
+
+
 def test_unseal_from_str_treats_marker_collisions_as_plaintext():
     invalid_b64 = "MVKAR1:A"
     decoded_without_magic = "MVKAR1:" + base64.b64encode(b"Hello").decode("ascii")

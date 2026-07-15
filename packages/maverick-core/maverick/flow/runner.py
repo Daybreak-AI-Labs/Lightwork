@@ -23,8 +23,9 @@ from collections.abc import Callable
 from dataclasses import dataclass, field
 from typing import Any
 
+from ..budget import BudgetExceeded
+from ..killswitch import Halted
 from .ir import (
-    MAX_FLOW_NODE_RETRIES,
     MAX_FLOW_NODE_RETRY_SLEEP,
     NODE_ACTION,
     NODE_AGENT,
@@ -45,12 +46,17 @@ from .ir import (
 )
 
 # Run statuses ----------------------------------------------------------------
+STATUS_QUEUED = "queued"
+STATUS_CLAIMED = "claimed"
+STATUS_RUNNING = "running"
+STATUS_RESUMING = "resuming"
 STATUS_COMPLETED = "completed"
 STATUS_PAUSED_APPROVAL = "paused_approval"
 STATUS_PAUSED_DELAY = "paused_delay"
 STATUS_PAUSED_EVENT = "paused_event"
 STATUS_REJECTED = "rejected"
 STATUS_FAILED = "failed"
+STATUS_INDETERMINATE = "indeterminate"
 
 # The single source of truth for "which statuses mean a run is parked and
 # resumable" and "which statuses mean a run is still in flight". Every gate that
@@ -60,7 +66,14 @@ STATUS_FAILED = "failed"
 PAUSED_STATUSES = frozenset({
     STATUS_PAUSED_APPROVAL, STATUS_PAUSED_DELAY, STATUS_PAUSED_EVENT,
 })
-ACTIVE_STATUSES = frozenset({"queued", "running"}) | PAUSED_STATUSES
+ACTIVE_STATUSES = frozenset({
+    STATUS_QUEUED, STATUS_CLAIMED, STATUS_RUNNING, STATUS_RESUMING,
+}) | PAUSED_STATUSES
+# A quarantined run may have committed an external side effect, but no reliable
+# acknowledgement reached the engine.  It is deliberately neither active nor
+# retryable: an operator must reconcile the external system before choosing a
+# compensating or replacement action.
+QUARANTINED_STATUSES = frozenset({STATUS_INDETERMINATE})
 
 _WHILE_DEFAULT_CAP = 100   # while-loop iterations when the node sets no limit
 _PARALLEL_MAX_WORKERS = 8   # cap fan-out threads for the whole flow run
@@ -520,6 +533,14 @@ class _NodeError(Exception):
         self.node_id = node_id
 
 
+class _Indeterminate(Exception):
+    """A work boundary may have committed an effect without proving its state."""
+
+    def __init__(self, node_id: str, detail: str, *, boundary: str = "high-risk action"):
+        super().__init__(f"{boundary} {node_id!r} is indeterminate: {detail}")
+        self.node_id = node_id
+
+
 @dataclass
 class _Ctx:
     agent_fn: AgentFn
@@ -564,20 +585,17 @@ def _invoke_work(node: FlowNode, data: dict, ctx: _Ctx):
         return ctx.action_fn(node, _render_params(node, data), data)
     if not (node.timeout and node.timeout > 0):
         return _call()
-    # Soft per-node timeout: run the executor on a worker thread and report a
-    # timeout if it runs too long. Python cannot kill a running thread safely,
-    # so on timeout we MUST wait for the callable to finish before retrying or
-    # continuing; otherwise crafted flows can accumulate abandoned work.
+    # Soft per-node timeout: Python cannot kill a running thread safely.  Once a
+    # call crosses the deadline we therefore MUST wait for its authoritative
+    # result.  Discarding a later success and labelling it failed would invite a
+    # retry of an external mutation that actually committed.
     import concurrent.futures as _cf
-    ex = _cf.ThreadPoolExecutor(max_workers=1)
-    fut = ex.submit(_call)
-    try:
-        res = fut.result(timeout=node.timeout)
-        ex.shutdown(wait=False)
-        return res
-    except _cf.TimeoutError:
-        ex.shutdown(wait=True, cancel_futures=True)
-        return (f"ERROR: node timed out after {node.timeout}s", 0.0)
+    with _cf.ThreadPoolExecutor(max_workers=1) as ex:
+        fut = ex.submit(_call)
+        try:
+            return fut.result(timeout=node.timeout)
+        except _cf.TimeoutError:
+            return fut.result()
 
 
 def _run_work(node: FlowNode, data: dict, ctx: _Ctx) -> str | None:
@@ -587,11 +605,25 @@ def _run_work(node: FlowNode, data: dict, ctx: _Ctx) -> str | None:
     # growing interval between attempts (capped) instead of re-hammering instantly;
     # backoff 0 keeps the original tight loop (and adds no sleep to existing flows).
     backoff = max(0.0, node.retry_backoff)
-    retries = min(max(0, node.retries), MAX_FLOW_NODE_RETRIES)
     result: Any = None
     outcome: float | None = None
     last_exc: Exception | None = None
     retries = min(max(0, node.retries), max_node_retries())
+    high_risk_action = False
+    ambiguous_agent = node.kind == NODE_AGENT
+    if node.kind == NODE_AGENT:
+        # An agent attempt may already have invoked a mutating tool before its
+        # goal failed.  Without a replay ledger for the whole agent trajectory,
+        # automatically creating a second goal is never side-effect safe.
+        retries = 0
+    elif node.kind == NODE_ACTION:
+        # High-risk tools may have committed before a response was lost.  The
+        # registry deliberately executes them once; a flow-level retry must not
+        # bypass that exactly-once safety boundary.
+        from ..tool_reliability import is_retry_safe
+        high_risk_action = not is_retry_safe(node.tool)
+        if high_risk_action:
+            retries = 0
     for attempt in range(retries + 1):
         if ctx.deadline is not None and ctx.now() > ctx.deadline:
             raise RuntimeError("flow exceeded its wall-clock deadline during node retries")
@@ -600,6 +632,8 @@ def _run_work(node: FlowNode, data: dict, ctx: _Ctx) -> str | None:
         try:
             result, outcome = _invoke_work(node, data, ctx)
             last_exc = None
+        except (BudgetExceeded, Halted):
+            raise
         except Exception as e:   # a raising executor is a retryable failure, not instant death
             last_exc, outcome = e, 0.0
             continue
@@ -607,15 +641,32 @@ def _run_work(node: FlowNode, data: dict, ctx: _Ctx) -> str | None:
             break
     # A hard exception that survived every retry stays terminal (records WHERE it
     # failed via _NodeError up the chain) -- retries buy attempts, not silence.
+    if (high_risk_action or ambiguous_agent) and (
+        last_exc is not None or outcome == 0.0
+    ):
+        detail = (f"{type(last_exc).__name__}: {last_exc}" if last_exc is not None
+                  else str(result))
+        # Ambiguity is not a grounded failure signal.  Preserve the trace status
+        # but do not feed a guessed 0.0 into self-learning.
+        ctx.on_node(node, STATUS_INDETERMINATE, None)
+        raise _Indeterminate(
+            node.id,
+            detail[:500],
+            boundary="agent trajectory" if ambiguous_agent else "high-risk action",
+        )
     if last_exc is not None:
         raise last_exc
-    if node.output:
-        data[node.output] = result
     ctx.on_node(node, "done", outcome)
     # A node that still failed routes to its on_error handler if it has one, so a
     # flow can catch and recover instead of poisoning `data` and marching on.
+    # Never publish a failed connector result under its ordinary output key: it
+    # may contain raw auth headers/error bodies and is not valid business data.
     if outcome == 0.0 and node.on_error:
         return node.on_error
+    if outcome == 0.0:
+        raise RuntimeError(f"work node failed: {str(result)[:500]}")
+    if node.output:
+        data[node.output] = result
     return node.next
 
 
@@ -637,7 +688,9 @@ def _run_subflow(node: FlowNode, data: dict, ctx: _Ctx) -> str | None:
     sub = ctx.resolve_flow(node.flow_ref) if ctx.resolve_flow else None
     if sub is None or sub.id in ctx.flow_stack:   # missing OR would recurse -> failure
         ctx.on_node(node, "error", 0.0)
-        return node.on_error or node.next
+        if node.on_error is not None:
+            return node.on_error
+        raise RuntimeError(f"subflow {node.flow_ref!r} is missing or cyclic")
     # Runs on the SAME data dict (threaded), so the sub-flow reads parent data and
     # its outputs flow back. Nested: it cannot pause (v1 -- HITL lives up top). The
     # flow id is on the stack for its duration so a cyclic reference is caught.
@@ -947,7 +1000,7 @@ def _run_chain(flow: Flow, data: dict, ctx: _Ctx, start: str | None) -> None:
             return
         try:
             cursor = _run_node(node, data, ctx)
-        except (_Pause, _Reject, _NodeError):
+        except (_Pause, _Reject, _NodeError, _Indeterminate):
             raise
         except Exception as e:
             raise _NodeError(node.id, e) from e
@@ -1046,13 +1099,19 @@ def run_flow(flow: Flow, *, agent_fn: AgentFn, action_fn: ActionFn,
         # node id as the cursor so the run can be retried from right there.
         return FlowRunResult(status=STATUS_FAILED, data=data, error=str(e),
                              cursor=e.node_id)
+    except _Indeterminate as e:
+        return FlowRunResult(status=STATUS_INDETERMINATE, data=data, error=str(e),
+                             cursor=e.node_id)
+    except (BudgetExceeded, Halted):
+        raise
     except Exception as e:  # a node executor blew up -> surface, don't crash the caller
         return FlowRunResult(status=STATUS_FAILED, data=data, error=str(e))
 
 
 __all__ = [
     "run_flow", "render", "eval_condition", "FlowRunResult",
+    "STATUS_QUEUED", "STATUS_CLAIMED", "STATUS_RUNNING", "STATUS_RESUMING",
     "STATUS_COMPLETED", "STATUS_PAUSED_APPROVAL", "STATUS_PAUSED_DELAY",
-    "STATUS_PAUSED_EVENT", "STATUS_REJECTED", "STATUS_FAILED",
-    "PAUSED_STATUSES", "ACTIVE_STATUSES",
+    "STATUS_PAUSED_EVENT", "STATUS_REJECTED", "STATUS_FAILED", "STATUS_INDETERMINATE",
+    "PAUSED_STATUSES", "ACTIVE_STATUSES", "QUARANTINED_STATUSES",
 ]

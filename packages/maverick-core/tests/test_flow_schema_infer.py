@@ -14,7 +14,7 @@ def test_infer_shape_object_array_scalar():
 
 def test_infer_output_shapes_maps_output_keys():
     flow = Flow(id="f", name="f", start="a", nodes={
-        "a": FlowNode(id="a", kind="action", tool="t", output="order"),
+        "a": FlowNode(id="a", kind="action", tool="web_search", output="order"),
         "b": FlowNode(id="b", kind="agent", brief="x", output="note"),
     })
     data = {"order": {"total": 10, "currency": "USD"}, "note": "ok"}
@@ -40,16 +40,18 @@ def test_execute_records_schema_only_for_real_runs(tmp_path, monkeypatch):
     monkeypatch.setattr("maverick.paths.data_dir", lambda *p, **k: tmp_path.joinpath(*p))
     from maverick.flow import execution, store
     f = Flow(id="fs", name="f", start="a", nodes={
-        "a": FlowNode(id="a", kind="action", tool="t", output="order")})
+        "a": FlowNode(id="a", kind="action", tool="web_search", output="order")})
+    f = store.save_flow(f)
     execution.execute(
         f, agent_runner=lambda b, d: ("", None),
         action_runner=lambda t, p, d: ({"total": 9, "id": "z"}, 1.0))
     assert store.load_flow_schema("fs")["order"] == {"type": "object", "keys": ["id", "total"]}
     # a dry run (record_outcomes=False) must NOT pollute the schema
     store2 = tmp_path / "flows" / "schema" / "fd.json"
+    dry_flow = store.save_flow(Flow(id="fd", name="f", start="a", nodes={
+        "a": FlowNode(id="a", kind="action", tool="web_search", output="order")}))
     execution.execute(
-        Flow(id="fd", name="f", start="a", nodes={
-            "a": FlowNode(id="a", kind="action", tool="t", output="order")}),
+        dry_flow,
         agent_runner=lambda b, d: ("", None),
         action_runner=lambda t, p, d: ({"mock": True}, 1.0), record_outcomes=False)
     assert not store2.exists()

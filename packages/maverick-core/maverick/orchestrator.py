@@ -212,6 +212,50 @@ def _fire_webhook(event: str, payload: dict[str, Any]) -> None:
         log.debug("webhook %s skipped: %s", event, e)
 
 
+def _finished_webhook_payload(
+    world: WorldModel,
+    *,
+    goal_id: int,
+    status: str,
+    result: str,
+    domain_profile: Any | None,
+    domain: str | None = None,
+) -> dict[str, Any]:
+    """Build a lifecycle payload without bypassing deliverable sign-off.
+
+    Authenticated goal views retain the draft so a reviewer can inspect it,
+    but an outbound webhook is an external release boundary.  For a gated
+    terminal deliverable, omit the bytes until a persisted approval exists and
+    advertise the pending state explicitly. Gate lookup failures fail closed.
+    """
+    payload: dict[str, Any] = {"goal_id": goal_id, "status": status}
+    if status == "done" and domain and domain_profile is None:
+        # A requested domain whose pack disappeared or could not be loaded is
+        # unavailable policy, not a generic/ungated run.
+        payload["release_status"] = "policy_unavailable"
+        return payload
+    if status == "done" and domain_profile is not None:
+        try:
+            from .domain import deliverable_release_allowed, enforced_gate
+            gate = enforced_gate(domain_profile)
+            if gate and not deliverable_release_allowed(
+                domain_profile, world.signoff_for(goal_id),
+            ):
+                payload.update(
+                    gate=gate,
+                    release_status="pending_signoff",
+                )
+                return payload
+        except Exception:
+            # A profile exists but its release policy could not be evaluated.
+            # Withholding content is safer than silently converting it to an
+            # ungated payload; reviewers can still access the persisted draft.
+            payload["release_status"] = "policy_unavailable"
+            return payload
+    payload["result"] = result
+    return payload
+
+
 def _budget_task_class(goal: Any, domain: str | None = None) -> str:
     """A coarse, stable task-class key for the self-tuning budget learner.
 
@@ -1165,6 +1209,7 @@ async def run_goal(  # noqa: C901  -- core goal-execution loop
         # knowledge_search -- instead of the generic orchestrator. This is how
         # the factory's packs actually execute a task end to end.
         root = None
+        domain_profile = None
         if domain:
             try:
                 from .domain import agent_from_profile, enabled_domains
@@ -1181,6 +1226,7 @@ async def run_goal(  # noqa: C901  -- core goal-execution loop
                         "goal_id": goal_id, "status": "blocked", "result": msg,
                     })
                     return msg
+                domain_profile = _profile
                 root = agent_from_profile(_profile, ctx, brief, depth=0)
             except Exception as e:
                 msg = (
@@ -1327,10 +1373,17 @@ async def run_goal(  # noqa: C901  -- core goal-execution loop
                     "goal_id": goal_id,
                     "patch_size_bytes": len(result.final_patch.encode("utf-8")),
                 })
-                _fire_webhook("goal_finished", {
-                    "goal_id": goal_id, "status": "done",
-                    "result": result.final_patch,
-                })
+                _fire_webhook(
+                    "goal_finished",
+                    _finished_webhook_payload(
+                        world,
+                        goal_id=goal_id,
+                        status="done",
+                        result=result.final_patch,
+                        domain_profile=domain_profile,
+                        domain=domain,
+                    ),
+                )
                 return result.final_patch
             # A budget / wall-clock exhaustion inside the agent surfaces as
             # result.error (the agent swallows BudgetExceeded so spawned
@@ -1483,9 +1536,17 @@ async def run_goal(  # noqa: C901  -- core goal-execution loop
             "goal_id": goal_id,
             "patch_size_bytes": len(summary.encode("utf-8")),
         })
-        _fire_webhook("goal_finished", {
-            "goal_id": goal_id, "status": "done", "result": summary,
-        })
+        _fire_webhook(
+            "goal_finished",
+            _finished_webhook_payload(
+                world,
+                goal_id=goal_id,
+                status="done",
+                result=summary,
+                domain_profile=domain_profile,
+                domain=domain,
+            ),
+        )
 
         # Trajectory donation (Karpathy data-engine analog). Default OFF;
         # only fires when the user opted into [telemetry] donate_trajectories

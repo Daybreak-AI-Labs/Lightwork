@@ -129,6 +129,63 @@ def test_deleted_flow_advances_cursor_not_wedged(monkeypatch, tmp_path):
     assert any("flow unavailable" in n for n in out["triggers"][0]["notes"])
 
 
+def test_event_trigger_rejects_deleted_recreated_flow_binding(monkeypatch, tmp_path):
+    _isolate(monkeypatch, tmp_path)
+    _save_flow()
+    import maverick.automation_events as ev
+    from maverick.flow import store as flow_store
+    from maverick.flow.ir import Flow, FlowNode
+    from maverick_dashboard import automation_queue as aq
+    from maverick_dashboard import event_triggers_store
+
+    _reset_aq(monkeypatch, aq)
+    box = [{"items": [{"id": "1", "email": "old@example.com"}]}]
+    monkeypatch.setattr(
+        ev, "_http_get_json", lambda *a, **k: box[0]
+    )
+    client = _client()
+    assert client.post(
+        "/api/v1/event-triggers",
+        json={
+            "name": "bound",
+            "flow": "onboard",
+            "source": "http_json",
+            "config": {
+                "url": "https://x",
+                "items_path": "items",
+                "id_field": "id",
+            },
+        },
+    ).status_code == 201
+    binding = event_triggers_store.get_trigger("bound")
+    original = flow_store.load_flow("onboard")
+    assert binding["flow_revision"] == original.revision
+    client.post("/api/v1/event-triggers/poll")  # establish cursor
+
+    assert flow_store.delete_flow("onboard") is True
+    flow_store.save_flow(Flow(
+        id="onboard",
+        name="Replacement",
+        owner="user:bob",
+        start="a",
+        nodes={"a": FlowNode(id="a", kind="agent", brief="replacement")},
+    ))
+    box[0] = {
+        "items": [
+            {"id": "2", "email": "new@example.com"},
+            {"id": "1", "email": "old@example.com"},
+        ]
+    }
+
+    result = client.post("/api/v1/event-triggers/poll").json()["triggers"][0]
+    assert result["fired_flows"] == []
+    assert result["notes"] == ["flow unavailable: binding is stale"]
+    assert not [
+        job for job in aq.queue().list(status="pending")
+        if job.kind == aq.FLOW_RUN_KIND
+    ]
+
+
 def test_event_flow_queue_restores_trigger_tenant(monkeypatch, tmp_path):
     # A flow_run job enqueued under a tenant must load/execute/persist under
     # THAT tenant when the worker drains it later -- not whatever tenant the
@@ -147,7 +204,8 @@ def test_event_flow_queue_restores_trigger_tenant(monkeypatch, tmp_path):
 
     monkeypatch.setattr(execution, "default_agent_runner", _fake_agent)
     monkeypatch.setattr(execution, "default_action_runner",
-                        lambda world: (lambda t, p, d: ("ok", 1.0)))
+                        lambda world, sandbox=None, **kwargs: (
+                            lambda t, p, d: ("ok", 1.0)))
 
     shared = Flow(id="same", name="Shared", start="a",
                   nodes={"a": FlowNode(id="a", kind="agent", brief="shared {{secret}}")})
@@ -165,13 +223,15 @@ def test_event_flow_queue_restores_trigger_tenant(monkeypatch, tmp_path):
 
     aq._handle_flow_run(jobs[-1])   # drained OUTSIDE tenant-a -- must restore it itself
 
-    assert observed == ["tenant TENANT_DATA"]
+    # Runtime prompts are now redacted before reaching the model-facing runner;
+    # the tenant-specific definition still proves which namespace was loaded.
+    assert observed == ["tenant ***redacted***"]
     assert store.load_run(run_id) is None   # not visible from the shared namespace
     tok = set_tenant("tenant-a")
     try:
         run = store.load_run(run_id)
         assert run is not None
         assert run.status == "completed"
-        assert run.data["secret"] == "TENANT_DATA"
+        assert run.data["secret"] == "***redacted***"
     finally:
         reset_tenant(tok)

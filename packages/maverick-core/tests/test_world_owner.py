@@ -4,8 +4,11 @@ authz. The world model stores + filters by an owner principal; the access
 """
 from __future__ import annotations
 
+import concurrent.futures
 import sqlite3
+import threading
 
+import pytest
 from maverick.world_model import SCHEMA_VERSION, WorldModel
 
 
@@ -55,6 +58,7 @@ def test_signoff_record_and_read(tmp_path):
     w = WorldModel(tmp_path / "w.db")
     gid = w.create_goal("forecast", domain="finance_cash13w")
     assert w.signoff_for(gid) is None                      # unreviewed
+    w.set_goal_status(gid, "done", result="draft")
     w.record_signoff(gid, "approved", decided_by="user:alice", note="ties out")
     s = w.signoff_for(gid)
     assert s["decision"] == "approved"
@@ -65,11 +69,42 @@ def test_signoff_record_and_read(tmp_path):
 def test_signoff_latest_decision_wins(tmp_path):
     w = WorldModel(tmp_path / "w.db")
     gid = w.create_goal("forecast", domain="finance_cash13w")
-    w.record_signoff(gid, "rejected", decided_by="user:bob", note="rework week 3")
-    w.record_signoff(gid, "approved", decided_by="user:alice")  # supersedes
+    w.set_goal_status(gid, "done", result="draft")
+    assert w.record_signoff(
+        gid, "rejected", decided_by="user:bob", note="rework week 3",
+    ) is True
+    assert w.record_signoff(gid, "rejected", decided_by="user:bob") is False
+    assert w.record_signoff(
+        gid, "approved", decided_by="user:alice",
+    ) is True  # supersedes
     s = w.signoff_for(gid)
     assert s["decision"] == "approved" and s["decided_by"] == "user:alice"
     assert s["note"] is None                                # the new decision's (empty) note
+
+
+def test_concurrent_identical_signoff_has_one_authoritative_transition(tmp_path):
+    db = tmp_path / "w.db"
+    first = WorldModel(db)
+    second = WorldModel(db)
+    gid = first.create_goal("forecast", domain="finance_cash13w")
+    first.set_goal_status(gid, "done", result="draft")
+    version = first.get_goal(gid).updated_at
+    barrier = threading.Barrier(2)
+
+    def approve(world):
+        barrier.wait(timeout=5)
+        return world.record_signoff(
+            gid,
+            "approved",
+            decided_by="user:alice",
+            expected_updated_at=version,
+        )
+
+    with concurrent.futures.ThreadPoolExecutor(max_workers=2) as pool:
+        changed = list(pool.map(approve, (first, second)))
+
+    assert sorted(changed) == [False, True]
+    assert first.signoff_for(gid)["decision"] == "approved"
 
 
 def test_signoffs_for_goals_batch(tmp_path):
@@ -77,10 +112,57 @@ def test_signoffs_for_goals_batch(tmp_path):
     a = w.create_goal("a", domain="finance_cash13w")
     b = w.create_goal("b", domain="finance_cash13w")
     c = w.create_goal("c", domain="finance_cash13w")  # unreviewed
+    for gid in (a, b, c):
+        w.set_goal_status(gid, "done", result=f"draft-{gid}")
     w.record_signoff(a, "approved")
     w.record_signoff(b, "rejected")
     assert w.signoffs_for_goals([a, b, c]) == {a: "approved", b: "rejected"}
     assert w.signoffs_for_goals([]) == {}
+
+
+def test_signoff_requires_finished_immutable_payload(tmp_path):
+    w = WorldModel(tmp_path / "w.db")
+    gid = w.create_goal("forecast", domain="finance_cash13w")
+    with pytest.raises(ValueError, match="not finished"):
+        w.record_signoff(gid, "approved")
+
+    w.set_goal_status(gid, "done", result="v1")
+    reviewed = w.get_goal(gid)
+    w.record_signoff(
+        gid,
+        "approved",
+        expected_updated_at=reviewed.updated_at,
+    )
+    assert w.signoff_for(gid)["decision"] == "approved"
+
+    # A result rewrite invalidates approval, and a stale reviewer version can
+    # no longer land a decision over the replacement bytes.
+    w.set_goal_status(gid, "done", result="v2")
+    assert w.signoff_for(gid) is None
+    with pytest.raises(ValueError, match="changed"):
+        w.record_signoff(
+            gid,
+            "approved",
+            expected_updated_at=reviewed.updated_at,
+        )
+
+
+def test_new_artifact_version_invalidates_signoff(tmp_path):
+    w = WorldModel(tmp_path / "w.db")
+    gid = w.create_goal("forecast", domain="finance_cash13w")
+    w.set_goal_status(gid, "done", result="draft")
+    reviewed = w.get_goal(gid)
+    w.record_signoff(gid, "approved")
+
+    w.add_artifact(gid, "table", "Forecast", "v1")
+
+    assert w.signoff_for(gid) is None
+    with pytest.raises(ValueError, match="changed"):
+        w.record_signoff(
+            gid,
+            "approved",
+            expected_updated_at=reviewed.updated_at,
+        )
 
 
 def test_artifact_versioning_and_latest(tmp_path):

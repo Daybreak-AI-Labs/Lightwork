@@ -120,6 +120,33 @@ def test_real_agent_surface_resolves():
     assert s is not None and s["kind"] == "agent" and "allow_tools" in s
 
 
+def test_prompt_only_gate_is_not_counted_as_human_oversight(monkeypatch):
+    import maverick.domain_edit as domain_edit
+
+    monkeypatch.setattr(domain_edit, "resolved_view", lambda _name: {
+        "description": "generated medium-risk pack",
+        "allow_tools": ["read_file"],
+        "deny_tools": [],
+        "max_risk": "medium",
+        "workflow": [
+            {"name": "approve", "gate": "approval"},
+            {"name": "release", "gate": None},
+        ],
+        "declared_prompt_gate": "approval",
+        "enforced_gate": None,
+    })
+
+    surface = A.agent_surface("generated")
+
+    assert surface["declared_prompt_gate"] == "approval"
+    assert surface["enforced_gate"] is None
+    assert surface["has_human_gate"] is False
+    findings = A._ai_risk_findings(surface)
+    oversight = next(f for f in findings if f["control"] == "Human oversight")
+    assert oversight["severity"] == "high"
+    assert "prompt-only" in oversight["note"]
+
+
 def test_review_writes_an_audit_event(monkeypatch, tmp_path):
     # A sign-off is anchored in the signed audit chain, not just the register.
     _use_surface(monkeypatch, SAFE)

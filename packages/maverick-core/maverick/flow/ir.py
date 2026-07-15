@@ -3,10 +3,10 @@
 A :class:`Flow` is a graph of typed nodes. The control-flow nodes (branch /
 foreach / parallel / approval / delay) run deterministically and are auditable
 and replayable; the *work* nodes are either a deterministic ``action`` (a typed
-connector/tool call -- subject to that tool's own confirm gate) or an ``agent``
+connector/tool call -- with an explicit human gate when high-risk) or an ``agent``
 (a brief run as a governed goal -- what today's templates already are). This is
 the "do both" architecture: the graph decides *when/whether/in what order* and
-waits for human approval at an explicit ``approval`` node; the agent decides
+requires approval at an explicit ``approval`` node; the agent decides
 *what happens inside a step*. A single ``agent`` node with no routing IS
 today's template, so a Flow is a superset, not a parallel product.
 
@@ -72,9 +72,10 @@ def max_node_retries() -> int:
     return min(_HARD_MAX_NODE_RETRIES, max(0, value))
 
 
-# Flow action nodes are operator-authored and bypass the normal agent loop, so
-# they must not expose tools that execute arbitrary code or mutate the host
-# filesystem directly. Keep this denylist small to preserve connector actions.
+# Flow action nodes bypass the governed agent loop and dispatch one tool
+# directly.  Host/workspace/code/device primitives therefore do not belong in
+# this IR at all: use an agent node (which carries capability, sandbox, consent,
+# and tool-ACL enforcement) or a purpose-built connector action instead.
 UNSAFE_ACTION_TOOLS = frozenset({
     "shell",
     "read_file",
@@ -82,7 +83,115 @@ UNSAFE_ACTION_TOOLS = frozenset({
     "list_dir",
     "str_replace_editor",
     "apply_patch",
+    "ast_edit",
+    "code_exec",
+    "compute",
+    "container_build",
+    "notebook_exec",
+    "wasm_run",
+    "computer",
+    "browser",
+    "clipboard",
+    "serial",
+    "ros",
+    "android",
+    "ios_sim",
+    "repo_map",
+    "dep_graph",
+    "preview_diff",
+    "semantic_code_search",
+    "lsp_bridge",
+    "cross_repo_deps",
+    "git_advanced",
+    "file_watcher",
+    "workspace_snapshot",
+    "plugin_lockfile",
+    "memory",
+    "kv_memory",
+    "obsidian",
+    "list_attachments",
+    "view_image",
+    "view_video",
+    "transcribe_audio",
+    "speak",
+    "spreadsheet",
+    "pandas_query",
+    "sql_query",
+    "self_edit",
 })
+
+
+def action_tool_policy_error(tool: str) -> str:
+    """Return why ``tool`` may not be a direct flow action, or ``""``.
+
+    Unknown plugin/generated tools are not assumed safe merely because the
+    compatibility risk display calls them ``medium``.  An operator must first
+    classify them through the central tool-risk policy; runtime repeats this
+    check so a forged/stale graph cannot bypass validation.
+    """
+    name = str(tool or "").strip()
+    if not name:
+        return "action tool is missing"
+    if name in UNSAFE_ACTION_TOOLS:
+        return f"unsafe direct action tool {name!r}"
+    from ..safety.tool_risk import tool_risk_is_classified
+
+    if not tool_risk_is_classified(name):
+        return f"unclassified direct action tool {name!r}"
+    return ""
+
+
+_DRAFT_UNCLASSIFIED_ACTION = "draft_unclassified_action"
+
+
+class _ValidationError(str):
+    """A display-compatible validation error carrying a non-forgeable code.
+
+    Node ids, tool names, and imported labels are attacker-controlled strings.
+    Draft policy must therefore never infer an error class by searching its
+    rendered text: a crafted id could make an unrelated structural error look
+    like the one preview-only exception. A ``str`` subclass keeps every public
+    caller and JSON response compatible while carrying internal provenance.
+    """
+
+    def __new__(cls, message: str, *, code: str = ""):
+        obj = super().__new__(cls, message)
+        obj.code = code
+        return obj
+
+
+def _prefix_validation_errors(
+    prefix: str, errors: list[str],
+) -> list[str]:
+    """Prefix nested errors without discarding their internal provenance."""
+    return [
+        _ValidationError(
+            f"{prefix}{error}", code=str(getattr(error, "code", "")),
+        )
+        for error in errors
+    ]
+
+
+def partition_draft_validation_errors(
+    errors: list[str],
+) -> tuple[list[str], list[str]]:
+    """Split save/runtime blockers from draft-only classification blockers.
+
+    An authoring/import surface may display a structurally sound action whose
+    installed tool has not yet been assigned an operator risk policy. That
+    graph remains deliberately unsaveable and unexecutable; only the unsaved
+    first-pass response may tolerate this one exact error class.
+    """
+    policy = []
+    blocking = []
+    for error in errors:
+        target = (
+            policy
+            if getattr(error, "code", "") == _DRAFT_UNCLASSIFIED_ACTION
+            else blocking
+        )
+        target.append(error)
+    return blocking, policy
 
 
 @dataclass
@@ -247,6 +356,9 @@ class Flow:
     start: str
     nodes: dict[str, FlowNode] = field(default_factory=dict)
     version: int = 1
+    # Opaque, non-reused store generation token.  The IR only round-trips it;
+    # persistence owns creation and compare-and-swap semantics.
+    revision: str = ""
     notify: bool = False             # push a notification on approval-pause / finish
     max_seconds: float = 0.0         # whole-flow wall-clock deadline (0 = no limit)
     max_dollars: float = 0.0         # aggregate agent spend ceiling for one run (0 = no limit)
@@ -267,7 +379,7 @@ class Flow:
     def to_dict(self) -> dict:
         return {
             "id": self.id, "name": self.name, "start": self.start,
-            "version": self.version, "notify": self.notify,
+            "version": self.version, "revision": self.revision, "notify": self.notify,
             "max_seconds": self.max_seconds, "max_dollars": self.max_dollars,
             "schedule": self.schedule, "timezone": self.timezone, "owner": self.owner,
             "max_concurrent": self.max_concurrent, "inputs": self.inputs,
@@ -282,6 +394,7 @@ class Flow:
             start=str(d.get("start", "")),
             nodes={n.id: n for n in nodes},
             version=int(d.get("version", 1) or 1),
+            revision=str(d.get("revision", "") or ""),
             notify=bool(d.get("notify", False)),
             max_seconds=float(d.get("max_seconds", 0.0) or 0.0),
             max_dollars=float(d.get("max_dollars", 0.0) or 0.0),
@@ -291,7 +404,7 @@ class Flow:
             inputs=[dict(i) for i in (d.get("inputs") or []) if isinstance(i, dict)],
         )
 
-    def validate(self) -> list[str]:
+    def validate(self, *, _inherited_approval: bool = False) -> list[str]:
         """Structural problems (empty list = valid). Not an execution check."""
         errs: list[str] = []
         if not self.nodes:
@@ -317,7 +430,10 @@ class Flow:
             errs.extend(self._validate_retry_policy(n))
             errs.extend(self._validate_routing(n))
             errs.extend(self._validate_retry_budget(n))
-            errs.extend(self._validate_kind(n))
+            errs.extend(self._validate_kind(
+                n, inherited_approval=_inherited_approval))
+        errs.extend(self._validate_high_risk_approval_paths(
+            inherited_approval=_inherited_approval))
         seen_input_keys = set()
         for i, spec in enumerate(self.inputs):
             key = str(spec.get("key") or "").strip()
@@ -362,8 +478,11 @@ class Flow:
                 errs.append(f"node {n.id!r}: {label} -> unknown node {ref!r}")
         return errs
 
-    def _validate_kind(self, n: FlowNode) -> list[str]:
-        return self._validate_kind_fields(n) + self._validate_kind_nested(n)
+    def _validate_kind(
+        self, n: FlowNode, *, inherited_approval: bool = False,
+    ) -> list[str]:
+        return self._validate_kind_fields(n) + self._validate_kind_nested(
+            n, inherited_approval=inherited_approval)
 
     def _validate_kind_fields(self, n: FlowNode) -> list[str]:
         """Flat required-field checks per kind (no sub-flow recursion)."""
@@ -371,10 +490,25 @@ class Flow:
         if n.kind == NODE_ACTION:
             if not n.tool:
                 errs.append(f"action node {n.id!r} has no tool")
-            elif n.tool in UNSAFE_ACTION_TOOLS:
-                errs.append(f"action node {n.id!r} uses unsafe tool {n.tool!r}")
+            elif policy_error := action_tool_policy_error(n.tool):
+                code = (
+                    _DRAFT_UNCLASSIFIED_ACTION
+                    if policy_error.startswith("unclassified direct action tool ")
+                    else ""
+                )
+                errs.append(_ValidationError(
+                    f"action node {n.id!r} uses {policy_error}", code=code))
+            elif n.retries:
+                from ..tool_reliability import is_retry_safe
+                if not is_retry_safe(n.tool):
+                    errs.append(
+                        f"action node {n.id!r}: high-risk tool {n.tool!r} cannot be retried")
         if n.kind == NODE_AGENT and not n.brief:
             errs.append(f"agent node {n.id!r} has no brief")
+        if n.kind == NODE_AGENT and n.retries:
+            errs.append(
+                f"agent node {n.id!r} cannot be automatically retried; "
+                "its prior attempt may have produced side effects")
         if n.kind == NODE_BRANCH and not n.condition:
             errs.append(f"branch node {n.id!r} has no condition")
         if n.kind == NODE_SWITCH:
@@ -394,9 +528,89 @@ class Flow:
             errs.append(f"subflow node {n.id!r} has no flow_ref")
         return errs
 
-    def _validate_kind_nested(self, n: FlowNode) -> list[str]:
+    def _incoming_edges(self, node_id: str) -> list[tuple[FlowNode, str]]:
+        """Return every root-graph edge that can enter ``node_id``."""
+        incoming: list[tuple[FlowNode, str]] = []
+        for source in self.nodes.values():
+            for label, target in (
+                ("next", source.next),
+                ("if_true", source.if_true),
+                ("if_false", source.if_false),
+                ("on_error", source.on_error),
+                ("on_expire", source.on_expire),
+            ):
+                if target == node_id:
+                    incoming.append((source, label))
+            for case in source.cases:
+                target = case.get("to") if isinstance(case, dict) else None
+                if target == node_id:
+                    incoming.append((source, "case"))
+        return incoming
+
+    def _is_approval_gated(self, node_id: str) -> bool:
+        """Whether all entries to a non-start node resolve an approval first."""
+        if node_id == self.start:
+            return False
+        incoming = self._incoming_edges(node_id)
+        return bool(incoming) and all(
+            source.kind == NODE_APPROVAL and label == "next" and not source.choices
+            for source, label in incoming
+        )
+
+    def _validate_high_risk_approval_paths(
+        self, *, inherited_approval: bool = False,
+    ) -> list[str]:
+        """Require every route into a high-risk action to cross a human gate.
+
+        A connector's static ``confirm=true`` parameter is not an authorization.
+        The only accepted incoming edge is a binary approval node's ordinary
+        ``next`` edge, which is traversed only after literal ``approved``.
+        Choice approvals are routing inputs, not authorization: every declared
+        choice continues, so values such as ``hold`` must never unlock an action.
+        Checking *all* incoming edges prevents a branch/error/expiry route from
+        bypassing a gate that merely exists elsewhere in the graph.
+        """
+        from ..tool_reliability import is_retry_safe
+
+        errs: list[str] = []
+        for node in self.nodes.values():
+            if (node.kind != NODE_ACTION or not node.tool
+                    or node.tool in UNSAFE_ACTION_TOOLS or is_retry_safe(node.tool)):
+                continue
+            # A top-level human gate before the enclosing durable container
+            # authorizes its nested work. Nested flows cannot pause safely, so
+            # generated/imported graphs deliberately hoist the gate instead of
+            # inserting an approval into a foreach/parallel/scope body.
+            if inherited_approval:
+                continue
+            if node.id == self.start:
+                errs.append(
+                    f"high-risk action node {node.id!r} cannot be the flow start; "
+                    "it must follow an approval node")
+            edges = self._incoming_edges(node.id)
+            if not edges:
+                errs.append(
+                    f"high-risk action node {node.id!r} must be reached from an "
+                    "approval node's next edge")
+                continue
+            bypasses = [
+                f"{source.id}.{label}"
+                for source, label in edges
+                if (source.kind != NODE_APPROVAL or label != "next"
+                    or bool(source.choices))
+            ]
+            if bypasses:
+                errs.append(
+                    f"high-risk action node {node.id!r} has approval-bypassing "
+                    f"incoming edge(s): {', '.join(bypasses)}")
+        return errs
+
+    def _validate_kind_nested(
+        self, n: FlowNode, *, inherited_approval: bool = False,
+    ) -> list[str]:
         """Body/branch checks for the container kinds (recurses into sub-flows)."""
         errs = []
+        nested_approval = inherited_approval or self._is_approval_gated(n.id)
         if n.kind == NODE_WHILE and not n.condition:
             errs.append(f"while node {n.id!r} has no condition")
         if n.kind == NODE_FOREACH and not n.items:
@@ -405,13 +619,19 @@ class Flow:
             if n.body is None:
                 errs.append(f"{n.kind} node {n.id!r} has no body")
             else:
-                errs.extend(f"{n.kind} {n.id!r} body: {e}" for e in n.body.validate())
+                errs.extend(_prefix_validation_errors(
+                    f"{n.kind} {n.id!r} body: ",
+                    n.body.validate(_inherited_approval=nested_approval),
+                ))
                 errs.extend(f"{n.kind} {n.id!r} body: {e}" for e in _pause_node_errors(n.body))
         if n.kind == NODE_PARALLEL:
             if not n.branches:
                 errs.append(f"parallel node {n.id!r} has no branches")
             for i, b in enumerate(n.branches):
-                errs.extend(f"parallel {n.id!r} branch {i}: {e}" for e in b.validate())
+                errs.extend(_prefix_validation_errors(
+                    f"parallel {n.id!r} branch {i}: ",
+                    b.validate(_inherited_approval=nested_approval),
+                ))
                 errs.extend(f"parallel {n.id!r} branch {i}: {e}" for e in _pause_node_errors(b))
         if n.kind == NODE_SETVAR and not n.assignments:
             errs.append(f"setvar node {n.id!r} has no assignments")
@@ -424,6 +644,112 @@ class Flow:
             return False
         only = next(iter(self.nodes.values()))
         return only.kind == NODE_AGENT and not only.next
+
+
+def _is_high_risk_action(node: FlowNode) -> bool:
+    from ..tool_reliability import is_retry_safe
+
+    return bool(
+        node.kind == NODE_ACTION
+        and node.tool
+        and node.tool not in UNSAFE_ACTION_TOOLS
+        and not is_retry_safe(node.tool)
+    )
+
+
+def _contains_high_risk(flow: Flow) -> bool:
+    for node in flow.nodes.values():
+        if _is_high_risk_action(node):
+            return True
+        if node.body is not None and _contains_high_risk(node.body):
+            return True
+        if any(_contains_high_risk(branch) for branch in node.branches):
+            return True
+    return False
+
+
+def _clamp_high_risk_retries(flow: Flow) -> None:
+    for node in flow.nodes.values():
+        if _is_high_risk_action(node):
+            node.retries = 0
+        if node.body is not None:
+            _clamp_high_risk_retries(node.body)
+        for branch in node.branches:
+            _clamp_high_risk_retries(branch)
+
+
+def _approval_gate_id(flow: Flow, target_id: str) -> str:
+    base = f"{target_id}_approval"
+    gate_id = base
+    suffix = 2
+    while gate_id in flow.nodes:
+        gate_id = f"{base}_{suffix}"
+        suffix += 1
+    return gate_id
+
+
+def _rewire_gate_bypasses(
+    target_id: str,
+    gate_id: str,
+    bypasses: list[tuple[FlowNode, str]],
+) -> None:
+    for source, edge_label in bypasses:
+        if edge_label != "case":
+            setattr(source, edge_label, gate_id)
+            continue
+        for case in source.cases:
+            if isinstance(case, dict) and case.get("to") == target_id:
+                case["to"] = gate_id
+
+
+def _gate_before(flow: Flow, target: FlowNode, *, nested: bool) -> None:
+    incoming = flow._incoming_edges(target.id)
+    bypasses = [
+        (source, edge_label) for source, edge_label in incoming
+        if source.kind != NODE_APPROVAL or edge_label != "next"
+    ]
+    if flow.start != target.id and incoming and not bypasses:
+        return
+
+    gate_id = _approval_gate_id(flow, target.id)
+    _rewire_gate_bypasses(target.id, gate_id, bypasses)
+    if flow.start == target.id:
+        flow.start = gate_id
+    label = target.label or target.tool or target.id
+    prompt = (f"Approve high-risk actions in: {label}?" if nested
+              else f"Approve high-risk action: {label}?")
+    flow.nodes[gate_id] = FlowNode(
+        id=gate_id,
+        kind=NODE_APPROVAL,
+        prompt=prompt,
+        next=target.id,
+        label=f"Approve {label}",
+    )
+
+
+def ensure_high_risk_approvals(flow: Flow) -> Flow:
+    """Return a copy with deterministic human gates before high-risk actions.
+
+    This is the safe boundary for generated and imported first-pass graphs. At
+    the durable root it gates each direct high-risk action. When such an action
+    lives inside a non-resumable foreach/parallel/scope body, it instead gates
+    the nearest enclosing root container; validation treats that human decision
+    as inherited authorization inside the container. Repeated application is
+    idempotent.
+    """
+    governed = flow.copy()
+    _clamp_high_risk_retries(governed)
+    for node in list(governed.nodes.values()):
+        if _is_high_risk_action(node):
+            _gate_before(governed, node, nested=False)
+            continue
+        nested_risk = (
+            (node.body is not None and _contains_high_risk(node.body))
+            or any(_contains_high_risk(branch) for branch in node.branches)
+        )
+        if nested_risk:
+            _gate_before(governed, node, nested=True)
+    return governed
 
 
 def _pause_node_errors(flow: Flow) -> list[str]:
@@ -499,7 +825,9 @@ def coerce_inputs(flow: Flow, data: dict) -> tuple[dict, list[str]]:
 
 
 __all__ = [
-    "Flow", "FlowNode", "single_agent_flow", "coerce_inputs", "INPUT_TYPES",
+    "Flow", "FlowNode", "single_agent_flow", "ensure_high_risk_approvals",
+    "action_tool_policy_error", "partition_draft_validation_errors",
+    "coerce_inputs", "INPUT_TYPES",
     "NODE_ACTION", "NODE_AGENT", "NODE_BRANCH", "NODE_SWITCH", "NODE_FOREACH",
     "NODE_WHILE", "NODE_PARALLEL", "NODE_APPROVAL", "NODE_DELAY", "NODE_WAIT",
     "NODE_SCOPE", "NODE_SUBFLOW", "NODE_KINDS",

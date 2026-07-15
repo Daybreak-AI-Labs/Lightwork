@@ -27,45 +27,86 @@ SAFETY / KERNEL RULES
 ---------------------
 The whole feature is OFF by default (kernel rule 1: the kernel runs
 without extra persisted state). Turn it on with ``MAVERICK_SELF_LEARNING=1``
-or ``[self_learning] enable = true``. Because "create a tool" means
-generating and executing fresh in-process code, enabling it is an
-explicit, opt-in trust decision. Generated source is AST-constrained to
-stdlib-only, import-validated in an out-of-host child process, scanned
-through the Shield (when installed), and consent-gated at first
-registration before it is ever persisted (#424); the generation LLM call
-is metered against the run Budget (kernel rule 3). An approved tool's
-``fn`` still runs in-process at runtime (the out-of-process tool runtime
-is a documented future hardening).
+or ``[self_learning] enable = true``. Because "create a tool" means running
+fresh model-authored code, enabling it is an explicit, opt-in trust decision.
+Generated source is AST-constrained to stdlib-only, scanned through the Shield
+(when installed), and bound to tenant/name/digest consent before it is executed
+or persisted (#424). Both shape validation and every later ``fn`` call run in
+an isolated sandbox; the kernel process only handles bounded JSON metadata and
+string results. The generation LLM call is metered against the run Budget
+(kernel rule 3).
 """
 from __future__ import annotations
 
 import ast
-import importlib.util
+import base64
+import hashlib
 import json
 import logging
-import os
+import math
 import re
-import subprocess
-import sys
+import secrets
+import tempfile
 import threading
 import time
-from dataclasses import asdict, dataclass
+from collections.abc import Iterator
+from contextlib import contextmanager
+from dataclasses import asdict, dataclass, fields, is_dataclass, replace
 from pathlib import Path
 from typing import Any
 
 from .config import env_flag
+from .file_lock import (
+    atomic_read_text,
+    atomic_write_text,
+    cross_process_lock,
+    ensure_private_directory,
+    ensure_private_file,
+)
 from .paths import data_dir
 
 log = logging.getLogger(__name__)
 
-LEARNED_PATH = data_dir("learned.ndjson")
-GENERATED_TOOLS_DIR = data_dir("generated_tools")
+def learned_path() -> Path:
+    """The active tenant's learned-capability ledger.
+
+    Resolve this at each operation rather than at module import: dashboard and
+    worker processes serve several tenant contexts without re-importing this
+    module, so a frozen path can otherwise send one tenant's capability history
+    to whichever tenant happened to import the module first.
+    """
+    override = globals().get("LEARNED_PATH")
+    return Path(override) if override is not None else data_dir("learned.ndjson")
+
+
+def generated_tools_dir() -> Path:
+    """The active tenant's persisted generated-tool directory."""
+    override = globals().get("GENERATED_TOOLS_DIR")
+    return Path(override) if override is not None else data_dir("generated_tools")
+
+
+def __getattr__(name: str) -> Path:
+    """Backward-compatible, dynamically resolved legacy path attributes."""
+    if name == "LEARNED_PATH":
+        return learned_path()
+    if name == "GENERATED_TOOLS_DIR":
+        return generated_tools_dir()
+    raise AttributeError(name)
 
 # A generated tool module must be addressable as a plain identifier and
 # must not shadow a stdlib / kernel module name when imported.
 _NAME_RE = re.compile(r"^[a-z][a-z0-9_]{1,40}$")
 _TOKEN_RE = re.compile(r"[A-Za-z0-9_]+")
 _lock = threading.Lock()
+_VALID_LEARNED_KINDS = frozenset({"skill", "mcp", "tool", "api"})
+_VALID_LEARNED_OUTCOMES = frozenset({"acquired", "failed"})
+_MAX_LEARNED_TEXT = {
+    "need": 300,
+    "name": 512,
+    "source": 2048,
+}
+_LEARNED_FIELDS = frozenset({"ts", "need", "kind", "name", "source", "outcome"})
+_MAX_LEARNED_LEDGER_BYTES = 16 * 1024 * 1024
 
 
 # --------------------------------------------------------------------------
@@ -111,59 +152,140 @@ class Learned:
         return asdict(self)
 
 
-def _redact(text: str) -> str:
+def _redact(text: str) -> str | None:
     try:
         from .safety.secret_detector import redact
         return redact(str(text or ""))[0]
     except Exception:  # pragma: no cover
-        return str(text or "")
+        # This is durable cross-run state. If the redaction boundary is missing,
+        # drop the row rather than persist potentially sensitive model/tool text.
+        return None
+
+
+def _safe_learned_text(value: object, field: str, *, required: bool) -> str | None:
+    try:
+        raw = str(value or "")
+    except Exception:
+        return None
+    redacted = _redact(raw)
+    if not isinstance(redacted, str):
+        return None
+    text = redacted.strip()
+    if required and not text:
+        return None
+    if len(text) > _MAX_LEARNED_TEXT[field]:
+        return None
+    # Ledger fields are rendered in CLI/dashboard surfaces. Keep each on one
+    # printable line so a poisoned row cannot forge another record or label.
+    if any(ord(ch) < 32 or ord(ch) == 127 for ch in text):
+        return None
+    return text
+
+
+def _validated_learned(
+    *, ts: object, need: object, kind: object, name: object,
+    source: object, outcome: object,
+) -> Learned | None:
+    if isinstance(ts, bool):
+        return None
+    try:
+        safe_ts = float(ts)
+    except (TypeError, ValueError):
+        return None
+    try:
+        safe_kind = str(kind or "")
+        safe_outcome = str(outcome or "")
+    except Exception:
+        return None
+    safe_need = _safe_learned_text(need, "need", required=True)
+    safe_name = _safe_learned_text(name, "name", required=True)
+    safe_source = _safe_learned_text(source, "source", required=False)
+    if (
+        not math.isfinite(safe_ts) or safe_ts < 0
+        or safe_kind not in _VALID_LEARNED_KINDS
+        or safe_outcome not in _VALID_LEARNED_OUTCOMES
+        or safe_need is None or safe_name is None or safe_source is None
+    ):
+        return None
+    return Learned(
+        ts=safe_ts, need=safe_need, kind=safe_kind, name=safe_name,
+        source=safe_source, outcome=safe_outcome,
+    )
 
 
 def record(
     need: str, kind: str, name: str, *,
     source: str = "", outcome: str = "acquired",
-    path: Path = LEARNED_PATH,
+    path: Path | None = None,
 ) -> bool:
-    """Append a learned-capability entry. Never raises."""
-    entry = Learned(
-        ts=time.time(), need=_redact(need)[:300], kind=kind,
-        name=name, source=source, outcome=outcome,
+    """Atomically append a validated, redacted learned-capability entry."""
+    path = path if path is not None else learned_path()
+    entry = _validated_learned(
+        ts=time.time(), need=need, kind=kind, name=name,
+        source=source, outcome=outcome,
     )
+    if entry is None:
+        return False
     with _lock:
         try:
-            path.parent.mkdir(parents=True, exist_ok=True)
-            with open(path, "a", encoding="utf-8") as f:
-                f.write(json.dumps(entry.to_dict(), default=str) + "\n")
-            try:
-                os.chmod(path, 0o600)
-            except OSError:
-                pass
+            ensure_private_directory(path.parent)
+            with cross_process_lock(path):
+                if path.exists():
+                    ensure_private_file(path, 0o600)
+                    if path.stat().st_size > _MAX_LEARNED_LEDGER_BYTES:
+                        raise ValueError("learned ledger exceeds the size limit")
+                previous = atomic_read_text(path) if path.exists() else ""
+                if previous and not previous.endswith("\n"):
+                    previous += "\n"
+                atomic_write_text(
+                    path,
+                    previous + json.dumps(entry.to_dict(), sort_keys=True) + "\n",
+                    mode=0o600,
+                )
             return True
-        except OSError as e:
+        except (OSError, RuntimeError, ValueError) as e:
             log.warning("self_learning: ledger write failed: %s", e)
             return False
 
 
-def history(*, limit: int = 50, path: Path = LEARNED_PATH) -> list[Learned]:
+def history(*, limit: int = 50, path: Path | None = None) -> list[Learned]:
     """Most-recent-first list of learned capabilities."""
+    path = path if path is not None else learned_path()
     if not path.exists():
         return []
     out: list[Learned] = []
     try:
-        with open(path, encoding="utf-8") as f:
-            for raw in f:
-                try:
-                    d = json.loads(raw)
-                    out.append(Learned(**{
-                        k: d.get(k) for k in (
-                            "ts", "need", "kind", "name", "source", "outcome",
-                        )
-                    }))
-                except (json.JSONDecodeError, TypeError):
+        ensure_private_directory(path.parent)
+        with cross_process_lock(path):
+            ensure_private_file(path, 0o600)
+            if path.stat().st_size > _MAX_LEARNED_LEDGER_BYTES:
+                return []
+            rows = atomic_read_text(path).splitlines()
+        for raw in rows:
+            try:
+                def _object(pairs: list[tuple[str, object]]) -> dict[str, object]:
+                    result: dict[str, object] = {}
+                    for key, value in pairs:
+                        if key in result:
+                            raise ValueError(f"duplicate key {key!r}")
+                        result[key] = value
+                    return result
+
+                d = json.loads(raw, object_pairs_hook=_object)
+                if not isinstance(d, dict) or frozenset(d) != _LEARNED_FIELDS:
                     continue
-    except OSError:
+                entry = _validated_learned(
+                    ts=d.get("ts"), need=d.get("need"), kind=d.get("kind"),
+                    name=d.get("name"), source=d.get("source"),
+                    outcome=d.get("outcome"),
+                )
+                if entry is not None:
+                    out.append(entry)
+            except (json.JSONDecodeError, TypeError, ValueError):
+                continue
+    except (OSError, RuntimeError):
         return []
-    out.sort(key=lambda e: e.ts or 0.0, reverse=True)
+    out.sort(key=lambda e: e.ts, reverse=True)
     return out[: max(1, limit)]
 
 
@@ -291,15 +413,17 @@ def search_capabilities(
 # acquire: skills
 # --------------------------------------------------------------------------
 def acquire_skill(name: str, *, need: str = "") -> str:
-    """Install a catalog skill by name (hash-verified) and return its body.
+    """Install a trusted catalog skill by name and return its body.
 
     Returns the SKILL.md body so the caller can inject the steps into the
     live context immediately. Raises ValueError on failure (propagated to
-    the agent as a tool-result string).
+    the agent as a tool-result string). Autonomous acquisition requires an
+    Ed25519 signature anchored in ``[skills].trusted_pubkeys``; a catalog hash
+    alone is same-host TOFU and cannot safely authorize persistent prompt text.
     """
     from .skills import install_from_catalog
 
-    skill = install_from_catalog(name)
+    skill = install_from_catalog(name, require_signature=True)
     record(need or name, "skill", skill.name, source=str(skill.path))
     return skill.body
 
@@ -514,14 +638,12 @@ Hard rules:
 # *asks* for stdlib-only, no subprocess/file/env access — this ENFORCES it
 # before the module is ever imported, so a generated (LLM-authored) module
 # that strays from the contract is rejected instead of executed. This is a
-# guardrail, not a true sandbox: it bounds the obvious escape surface
-# (dangerous imports, eval/exec, the dunder introspection chain) but a
-# determined adversary with getattr tricks could still get around an AST
-# allowlist. So validation no longer happens in the host: the import + shape
-# check runs out-of-host (``_validate_import_isolated``), and registration is
-# consent-gated. A full out-of-process tool RUNTIME (running an approved tool's
-# fn in a sandbox on every call) is the remaining follow-up. The feature is
-# opt-in/full-autonomy, so this layered trade-off is deliberate and documented.
+# guardrail, not a security boundary: it bounds the obvious escape surface
+# (dangerous imports, eval/exec, the dunder introspection chain) but a determined
+# adversary may still find a Python introspection path around an AST allowlist.
+# The actual boundary is therefore process isolation: source is never imported
+# in the kernel interpreter, and both validation and every invocation execute
+# through the sandbox protocol below.
 _SAFE_IMPORT_TOP = frozenset({
     "__future__", "json", "re", "math", "datetime", "urllib", "base64",
     "hashlib", "hmac", "time", "random", "string", "collections", "itertools",
@@ -529,12 +651,14 @@ _SAFE_IMPORT_TOP = frozenset({
     "uuid", "csv", "io", "dataclasses", "enum", "zoneinfo",
 })
 _BANNED_CALLS = frozenset({
-    "eval", "exec", "compile", "__import__", "open", "input", "breakpoint",
+    "eval", "exec", "compile", "__import__", "open", "FileIO", "urlretrieve",
+    "input", "breakpoint",
 })
 _BANNED_ATTRS = frozenset({
     "__globals__", "__subclasses__", "__bases__", "__mro__", "__builtins__",
     "__code__", "__closure__", "__dict__", "__class__", "__base__",
-    "__getattribute__", "__reduce__", "__reduce_ex__",
+    "__getattribute__", "__reduce__", "__reduce_ex__", "open", "FileIO",
+    "urlretrieve",
 })
 
 
@@ -588,15 +712,6 @@ def audit_generated_source(source: str) -> None:
                 )
 
 
-def _import_module_from_path(name: str, path: Path):
-    spec = importlib.util.spec_from_file_location(f"maverick_generated_{name}", path)
-    if spec is None or spec.loader is None:
-        raise ImportError(f"cannot load generated tool {name!r}")
-    module = importlib.util.module_from_spec(spec)
-    spec.loader.exec_module(module)  # noqa: S102 -- opt-in code execution
-    return module
-
-
 def _shield_ok(source: str) -> tuple[bool, str]:
     """Scan generated source through the Shield. Fail-open if absent."""
     try:
@@ -612,150 +727,643 @@ def _shield_ok(source: str) -> tuple[bool, str]:
     return False, "; ".join(getattr(verdict, "reasons", []) or ["blocked by Shield"])
 
 
-# Out-of-host import/shape check (#424). The AST audit above bounds the source
-# statically; this confirms the module actually imports cleanly and exposes a
-# valid make_tool() WITHOUT executing it in the kernel interpreter, so an
-# import-time side-effect (or anything the static audit missed) can't touch the
-# live process. The body runs in a throwaway child: a real sandbox backend when
-# the call site has one, else a short-lived plain subprocess with a timeout.
+def _shield_generated_output(output: str) -> None:
+    """Fail closed on blocked/erroring Shield scans for generated-code output."""
+    try:
+        from maverick_shield import Shield  # type: ignore
+    except ImportError:
+        return
+    try:
+        verdict = Shield.from_config().scan_output(output)
+    except Exception as e:
+        raise ValueError("generated tool output safety scan failed") from e
+    if not getattr(verdict, "allowed", True):
+        raise ValueError("generated tool output was blocked by the safety scanner")
+
+
+# Generated-code protocol. Source and arguments are embedded as base64 in a
+# POSIX-shell-quoted probe, so no host staging path is exposed to a container or
+# remote backend. Generated stdout is redirected to stderr. The only accepted
+# stdout is one nonce-bound, base64-encoded JSON control record plus ``\n``.
 _IMPORT_CHECK_TIMEOUT = 20.0
-# Printed by the probe on success. Generated module stdout is redirected to
-# stderr while the probe imports and shape-checks the module, so stdout is a
-# probe-only control channel. Validation requires both exit code 0 and stdout
-# exactly equal to this marker line; generated code cannot spoof success by
-# printing the marker before crashing.
-_IMPORT_CHECK_OK = "__MAVERICK_TOOL_OK__"
-_IMPORT_CHECK_PROBE = '''
-import contextlib, importlib.util, sys
-_spec = importlib.util.spec_from_file_location("maverick_generated_probe", {path!r})
-_mod = importlib.util.module_from_spec(_spec)
-with contextlib.redirect_stdout(sys.stderr):
-    _spec.loader.exec_module(_mod)
-    if not hasattr(_mod, "make_tool"):
-        print("module does not define make_tool()"); sys.exit(1)
-    _t = _mod.make_tool()
-    if not (getattr(_t, "name", "") and callable(getattr(_t, "fn", None))):
-        print("make_tool() did not return a valid Tool"); sys.exit(1)
-print({ok!r})
+_RUNTIME_TIMEOUT = 30.0
+_MAX_GENERATED_SOURCE_BYTES = 8 * 1024
+_MAX_GENERATED_SCHEMA_BYTES = 16 * 1024
+_MAX_GENERATED_INPUT_BYTES = 8 * 1024
+_MAX_GENERATED_OUTPUT_BYTES = 32 * 1024
+_MAX_GENERATED_DESCRIPTION_CHARS = 2048
+_MAX_CONTROL_BYTES = 64 * 1024
+_MAX_SANDBOX_ERROR_CHARS = 2000
+_IMPORT_CHECK_OK = "__MAVERICK_TOOL_META_V1__"
+_RUNTIME_OK = "__MAVERICK_TOOL_RESULT_V1__"
+_SAFE_GENERATED_BACKENDS = frozenset({
+    "maverick.sandbox.docker.DockerBackend",
+    "maverick.sandbox.podman.PodmanBackend",
+    "maverick.sandbox.firecracker.FirecrackerBackend",
+})
+_REJECTED_GENERATED_BACKENDS = frozenset({
+    "maverick.sandbox.devcontainer.DevcontainerBackend",
+    "maverick.sandbox.local.LocalBackend",
+    "maverick.sandbox.modal_backend.ModalBackend",
+    "maverick.sandbox.ssh.SSHBackend",
+    "maverick.sandbox.kubernetes.KubernetesBackend",
+})
+_PRIVATE_WORKDIR_BACKENDS = frozenset({
+    "maverick.sandbox.docker.DockerBackend",
+    "maverick.sandbox.podman.PodmanBackend",
+    "maverick.sandbox.firecracker.FirecrackerBackend",
+})
+
+_PROBE_BOOTSTRAP = r'''
+import base64 as _b64, contextlib as _ctx, hashlib as _hashlib, json as _json, sys as _sys, types as _types
+class _Tool:
+    def __init__(self, name, description, input_schema, fn, parallel_safe=False):
+        self.name = name
+        self.description = description
+        self.input_schema = input_schema
+        self.fn = fn
+        self.parallel_safe = parallel_safe
+_tools = _types.ModuleType("maverick.tools")
+_tools.Tool = _Tool
+_maverick = _types.ModuleType("maverick")
+_maverick.tools = _tools
+_sys.modules["maverick"] = _maverick
+_sys.modules["maverick.tools"] = _tools
+_b64decode = _b64.b64decode
+_b64encode = _b64.b64encode
+_sha256 = _hashlib.sha256
+_json_encode = _json.JSONEncoder(
+    allow_nan=False, check_circular=True, ensure_ascii=True,
+    separators=(",", ":"), sort_keys=True,
+).encode
+'''
+
+_IMPORT_CHECK_PROBE = _PROBE_BOOTSTRAP + r'''
+_source = _b64decode(__SOURCE_B64__).decode("utf-8", errors="strict")
+_mod = _types.ModuleType("maverick_generated_probe")
+with _ctx.redirect_stdout(_sys.stderr):
+    exec(compile(_source, "<maverick-generated-tool>", "exec"), _mod.__dict__)
+    if not callable(getattr(_mod, "make_tool", None)):
+        raise SystemExit("module does not define make_tool()")
+    _tool = _mod.make_tool()
+    if type(_tool) is not _Tool or not callable(_tool.fn):
+        raise SystemExit("make_tool() did not return a valid Tool")
+    if _tool.name != __EXPECTED_NAME__:
+        raise SystemExit("make_tool() returned an unexpected tool name")
+    _metadata = {
+        "description": _tool.description,
+        "input_schema": _tool.input_schema,
+        "name": _tool.name,
+    }
+    _payload = _json_encode(_metadata).encode("utf-8")
+    if len(_payload) > __MAX_CONTROL_BYTES__:
+        raise SystemExit("generated tool metadata is too large")
+print(__CONTROL_PREFIX__ + _b64encode(_payload).decode("ascii"))
+'''
+
+_RUNTIME_PROBE = _PROBE_BOOTSTRAP + r'''
+_source = _b64decode(__SOURCE_B64__).decode("utf-8", errors="strict")
+_args_raw = _b64decode(__ARGS_B64__)
+_args = _json.loads(_args_raw.decode("utf-8", errors="strict"))
+_mod = _types.ModuleType("maverick_generated_runtime")
+with _ctx.redirect_stdout(_sys.stderr):
+    exec(compile(_source, "<maverick-generated-tool>", "exec"), _mod.__dict__)
+    if not callable(getattr(_mod, "make_tool", None)):
+        raise SystemExit("module does not define make_tool()")
+    _tool = _mod.make_tool()
+    if type(_tool) is not _Tool or not callable(_tool.fn):
+        raise SystemExit("make_tool() did not return a valid Tool")
+    _actual_metadata = {
+        "description": _tool.description,
+        "input_schema": _tool.input_schema,
+        "name": _tool.name,
+    }
+    _actual_metadata_raw = _json_encode(_actual_metadata).encode("utf-8")
+    if _sha256(_actual_metadata_raw).hexdigest() != __METADATA_DIGEST__:
+        raise SystemExit("generated tool metadata changed after validation")
+    _result = _tool.fn(_args)
+    if type(_result) is not str:
+        raise SystemExit("generated tool fn must return str")
+    _payload = _result.encode("utf-8")
+    if len(_payload) > __MAX_OUTPUT_BYTES__:
+        raise SystemExit("generated tool result exceeds the output limit")
+print(__CONTROL_PREFIX__ + _b64encode(_payload).decode("ascii"))
 '''
 
 
-def _raise_if_import_check_failed(stdout: str | None, stderr: str | None, exit_code: int) -> None:
-    """Shared success check for the sandbox and plain-subprocess import probes:
-    a clean run prints exactly the OK sentinel and exits 0."""
-    if exit_code != 0 or (stdout or "") != f"{_IMPORT_CHECK_OK}\n":
-        detail = (stderr or "").strip() or (stdout or "").strip()
+def _reject_json_constant(value: str) -> None:
+    raise ValueError(f"non-finite JSON constant {value!r}")
+
+
+def _reject_duplicate_json_keys(
+    pairs: list[tuple[str, object]],
+) -> dict[str, object]:
+    out: dict[str, object] = {}
+    for key, value in pairs:
+        if key in out:
+            raise ValueError(f"duplicate JSON key {key!r}")
+        out[key] = value
+    return out
+
+
+def _strict_json_loads(raw: str) -> Any:
+    return json.loads(
+        raw,
+        parse_constant=_reject_json_constant,
+        object_pairs_hook=_reject_duplicate_json_keys,
+    )
+
+
+def _safe_generated_error(value: object) -> str:
+    redacted = _redact(str(value or "").strip())
+    if not isinstance(redacted, str):
+        return "error details could not be safely redacted"
+    return redacted[:_MAX_SANDBOX_ERROR_CHARS]
+
+
+def _require_secret_free(text: str, *, label: str) -> None:
+    """Keep detected credentials out of sandbox command-line transport."""
+    try:
+        from .safety.secret_detector import scan
+
+        matches = scan(text)
+    except Exception as e:
+        raise ValueError(f"could not scan {label} for secrets") from e
+    if matches:
+        raise ValueError(f"{label} contains secret-like material")
+
+
+def _sandbox_error_detail(result: Any) -> str:
+    stderr = getattr(result, "stderr", "")
+    stdout = getattr(result, "stdout", "")
+    detail = stderr if isinstance(stderr, str) and stderr.strip() else stdout
+    if not isinstance(detail, str):
+        return "sandbox returned malformed output"
+    return _safe_generated_error(detail)
+
+
+def _assert_safe_generated_sandbox(sandbox: Any) -> None:
+    """Require an explicitly supported/attested, non-host-visible boundary."""
+    from .sandbox import fs_is_host_visible
+
+    if sandbox is None or fs_is_host_visible(sandbox):
         raise ValueError(
-            f"generated tool failed validation: {detail or 'import check failed'}"
+            "generated tool execution requires a non-host-visible sandbox; "
+            "None and LocalBackend are not safe execution boundaries"
         )
+    backend = f"{sandbox.__class__.__module__}.{sandbox.__class__.__name__}"
+    if backend in _REJECTED_GENERATED_BACKENDS:
+        raise ValueError(
+            f"sandbox backend {sandbox.__class__.__name__} cannot isolate generated tools from its "
+            "normal workspace and network"
+        )
+    if (
+        backend not in _SAFE_GENERATED_BACKENDS
+        and not bool(getattr(sandbox, "generated_tool_safe", False))
+    ):
+        raise ValueError(
+            f"sandbox backend {sandbox.__class__.__name__} has not attested "
+            "generated-tool isolation"
+        )
+    if not callable(getattr(sandbox, "exec", None)):
+        raise ValueError("generated tool sandbox does not implement exec()")
 
 
-def _validate_import_isolated(path: Path, *, sandbox: Any = None) -> None:
-    """Import ``path`` and check its make_tool() shape in a child process.
+def _clone_generated_sandbox(sandbox: Any, private_workdir: Path | None) -> Any:
+    """Clone a dataclass backend with generated-code-specific security floors."""
+    available = {field.name for field in fields(sandbox)}
+    changes: dict[str, Any] = {}
+    if private_workdir is not None:
+        if "workdir" not in available:
+            raise ValueError("bind-mounted sandbox cannot accept a private workdir")
+        changes["workdir"] = private_workdir
+    if "allow_network" in available:
+        changes["allow_network"] = False
+    if "network" in available:
+        changes["network"] = "egress-deny"
+    if "reuse_container" in available:
+        changes["reuse_container"] = False
+    if "warm" in available:
+        changes["warm"] = False
+    try:
+        return replace(sandbox, **changes)
+    except Exception as e:
+        raise ValueError(
+            "could not construct isolated generated-tool sandbox: "
+            f"{type(e).__name__}: {_safe_generated_error(e)}"
+        ) from e
 
-    Raises ValueError if the module fails to import, doesn't expose a valid
-    make_tool(), or the check times out / crashes. The check NEVER executes
-    the generated body in the host interpreter. Routes through
-    ``sandbox.exec()`` when a backend is supplied (the kernel's mediated-shell
-    chokepoint); otherwise falls back to a plain ``subprocess`` with a hard
-    timeout. (Note: a plain subprocess is process-isolation, not a security
-    sandbox — pair it with a real [sandbox] backend for untrusted goals.)
-    """
+
+@contextmanager
+def _generated_sandbox(sandbox: Any) -> Iterator[Any]:
+    """Yield a network-denied boundary with no normal host-workspace mount."""
+    _assert_safe_generated_sandbox(sandbox)
+    backend = f"{sandbox.__class__.__module__}.{sandbox.__class__.__name__}"
+    bind_mount = bool(getattr(sandbox, "generated_tool_bind_mount", False))
+    private = bind_mount or backend in _PRIVATE_WORKDIR_BACKENDS
+    network_needs_floor = (
+        bool(getattr(sandbox, "allow_network", False))
+        or getattr(sandbox, "network", "egress-deny") != "egress-deny"
+        or bool(getattr(sandbox, "reuse_container", False))
+        or bool(getattr(sandbox, "warm", False))
+    )
+    if not private and not network_needs_floor:
+        yield sandbox
+        return
+    if not is_dataclass(sandbox):
+        raise ValueError(
+            "generated tool sandbox cannot be safely cloned to remove workspace/network access"
+        )
+    temp = tempfile.TemporaryDirectory(prefix="maverick-generated-") if private else None
+    clone: Any = None
+    try:
+        private_path = Path(temp.name) if temp is not None else None
+        clone = _clone_generated_sandbox(sandbox, private_path)
+        yield clone
+    finally:
+        if clone is not None:
+            close = getattr(clone, "close", None)
+            if callable(close):
+                try:
+                    close()
+                except Exception:
+                    pass
+        if temp is not None:
+            temp.cleanup()
+
+
+def _sandbox_probe(sandbox: Any, probe: str, *, timeout: float) -> Any:
     import shlex
 
-    probe = _IMPORT_CHECK_PROBE.format(path=str(path), ok=_IMPORT_CHECK_OK)
-    if sandbox is not None:
-        cmd = f"{shlex.quote(sys.executable)} -c {shlex.quote(probe)}"
-        try:
-            result = sandbox.exec(cmd, timeout=_IMPORT_CHECK_TIMEOUT)
-        except Exception as e:  # backend unavailable -> treat as failed check
-            raise ValueError(
-                f"generated tool import check could not run: {type(e).__name__}: {e}"
-            ) from e
-        _raise_if_import_check_failed(
-            result.stdout, result.stderr, getattr(result, "exit_code", 1),
-        )
-        return
+    # Bound BOTH streams before they cross the sandbox/host boundary. Generated
+    # code can deliberately print forever or bypass Python's stdout redirect;
+    # a shell file-size limit prevents capture_output from accumulating an
+    # attacker-sized buffer, while head keeps returned diagnostics bounded.
+    command = (
+        "_mav_tmp=$(mktemp -d) || exit 125; "
+        "trap 'rm -rf \"$_mav_tmp\"' EXIT HUP INT TERM; "
+        f"(ulimit -f 256 || exit 125; python3 -c {shlex.quote(probe)} ) "
+        ' >"$_mav_tmp/out" 2>"$_mav_tmp/err"; '
+        "_mav_status=$?; "
+        f'head -c {_MAX_CONTROL_BYTES} "$_mav_tmp/out"; '
+        f'head -c {_MAX_SANDBOX_ERROR_CHARS} "$_mav_tmp/err" >&2; '
+        "exit $_mav_status"
+    )
     try:
-        proc = subprocess.run(  # noqa: S603 -- isolated import check, not a tool shell
-            [sys.executable, "-c", probe],
-            capture_output=True, text=True, timeout=_IMPORT_CHECK_TIMEOUT,
+        with _generated_sandbox(sandbox) as isolated:
+            return isolated.exec(command, timeout=timeout)
+    except ValueError:
+        raise
+    except Exception as e:
+        raise ValueError(
+            "generated tool sandbox could not run: "
+            f"{type(e).__name__}: {_safe_generated_error(e)}"
+        ) from e
+
+
+def _control_payload(result: Any, *, marker: str, nonce: str) -> bytes:
+    exit_code = getattr(result, "exit_code", 1)
+    stdout = getattr(result, "stdout", None)
+    prefix = f"{marker}:{nonce}:"
+    if exit_code != 0 or not isinstance(stdout, str):
+        raise ValueError(
+            "generated tool sandbox failed: "
+            f"{_sandbox_error_detail(result) or 'probe failed'}"
         )
-    except subprocess.TimeoutExpired as e:
-        raise ValueError("generated tool failed validation: import timed out") from e
-    _raise_if_import_check_failed(proc.stdout, proc.stderr, proc.returncode)
+    if not stdout.endswith("\n") or stdout.count("\n") != 1 or not stdout.startswith(prefix):
+        raise ValueError("generated tool sandbox returned an invalid control record")
+    encoded = stdout[len(prefix):-1]
+    if not encoded or len(encoded) > ((_MAX_CONTROL_BYTES * 4 // 3) + 8):
+        raise ValueError("generated tool sandbox control record is too large")
+    try:
+        payload = base64.b64decode(encoded, validate=True)
+    except (ValueError, TypeError) as e:
+        raise ValueError("generated tool sandbox control record is not valid base64") from e
+    if len(payload) > _MAX_CONTROL_BYTES:
+        raise ValueError("generated tool sandbox control payload is too large")
+    return payload
+
+
+def _validate_tool_metadata(metadata: Any, *, expected_name: str) -> dict[str, Any]:
+    if not isinstance(metadata, dict) or set(metadata) != {
+        "description", "input_schema", "name",
+    }:
+        raise ValueError("generated tool returned invalid metadata fields")
+    name = metadata.get("name")
+    description = metadata.get("description")
+    schema = metadata.get("input_schema")
+    if name != expected_name:
+        raise ValueError(
+            f"make_tool() returned {name!r}; expected exactly {expected_name!r}"
+        )
+    if (
+        not isinstance(description, str)
+        or not description.strip()
+        or len(description) > _MAX_GENERATED_DESCRIPTION_CHARS
+        or any(ord(ch) < 32 and ch not in "\n\t" for ch in description)
+    ):
+        raise ValueError("generated tool description is invalid")
+    if not isinstance(schema, dict) or schema.get("type") != "object":
+        raise ValueError("generated tool input_schema must be a JSON object schema")
+    properties = schema.get("properties", {})
+    required = schema.get("required", [])
+    if not isinstance(properties, dict) or not isinstance(required, list):
+        raise ValueError("generated tool input_schema properties/required are invalid")
+    if any(not isinstance(item, str) for item in required) or len(set(required)) != len(required):
+        raise ValueError("generated tool input_schema required must contain unique strings")
+    if any(item not in properties for item in required):
+        raise ValueError("generated tool input_schema requires an undeclared property")
+    try:
+        schema_raw = json.dumps(
+            schema, allow_nan=False, ensure_ascii=True, separators=(",", ":"), sort_keys=True,
+        ).encode("utf-8")
+    except (TypeError, ValueError, RecursionError) as e:
+        raise ValueError("generated tool input_schema is not bounded JSON") from e
+    if len(schema_raw) > _MAX_GENERATED_SCHEMA_BYTES:
+        raise ValueError("generated tool input_schema exceeds the size limit")
+    return {"name": name, "description": description, "input_schema": schema}
+
+
+def _validate_import_isolated(
+    source: str, *, expected_name: str, sandbox: Any,
+) -> dict[str, Any]:
+    """Execute/shape-check source in isolation and return bounded metadata."""
+    nonce = secrets.token_hex(16)
+    prefix = f"{_IMPORT_CHECK_OK}:{nonce}:"
+    encoded = base64.b64encode(source.encode("utf-8")).decode("ascii")
+    probe = (
+        _IMPORT_CHECK_PROBE
+        .replace("__SOURCE_B64__", repr(encoded))
+        .replace("__EXPECTED_NAME__", repr(expected_name))
+        .replace("__MAX_CONTROL_BYTES__", str(_MAX_CONTROL_BYTES))
+        .replace("__CONTROL_PREFIX__", repr(prefix))
+    )
+    result = _sandbox_probe(sandbox, probe, timeout=_IMPORT_CHECK_TIMEOUT)
+    payload = _control_payload(result, marker=_IMPORT_CHECK_OK, nonce=nonce)
+    try:
+        metadata = _strict_json_loads(payload.decode("utf-8", errors="strict"))
+    except (UnicodeDecodeError, json.JSONDecodeError, TypeError, ValueError, RecursionError) as e:
+        raise ValueError("generated tool returned invalid metadata JSON") from e
+    return _validate_tool_metadata(metadata, expected_name=expected_name)
+
+
+def _reserved_tool_names() -> frozenset[str]:
+    """Return every kernel/live tool name a generated tool must not shadow."""
+    from .capability import COORDINATION_TOOLS
+    from .tools import base_tool_names
+
+    names = base_tool_names()
+    if names is None:
+        raise ValueError("could not establish the live tool namespace")
+    return frozenset(names) | frozenset(COORDINATION_TOOLS) | {"learn_capability"}
+
+
+def _generated_consent_scope(tenant: str, name: str, digest: str) -> str:
+    return f"{tenant}:{name}:{digest}"
+
+
+def _generated_consent_granted(
+    *, tenant: str, name: str, digest: str,
+) -> bool:
+    """Check the durable digest grant for this tenant without prompting."""
+    try:
+        from .paths import current_tenant_id
+        from .safety.consent import list_grants
+
+        if (current_tenant_id() or "shared") != tenant:
+            return False
+        scope = _generated_consent_scope(tenant, name, digest)
+        return ("register-generated-tool", scope) in set(list_grants())
+    except Exception:
+        return False
+
+
+def _execute_generated_tool(
+    *, source: str, metadata: dict[str, Any], args: dict[str, Any], sandbox: Any,
+) -> str:
+    """Run one generated tool call through the nonce-bound sandbox protocol."""
+    if not isinstance(args, dict):
+        raise ValueError("generated tool input must be an object")
+    try:
+        args_raw = json.dumps(
+            args, allow_nan=False, ensure_ascii=True, separators=(",", ":"), sort_keys=True,
+        ).encode("utf-8")
+        metadata_raw = json.dumps(
+            metadata, allow_nan=False, ensure_ascii=True, separators=(",", ":"), sort_keys=True,
+        ).encode("utf-8")
+    except (TypeError, ValueError, RecursionError) as e:
+        raise ValueError("generated tool input is not bounded JSON") from e
+    if len(args_raw) > _MAX_GENERATED_INPUT_BYTES:
+        raise ValueError("generated tool input exceeds the size limit")
+    _require_secret_free(source, label="generated tool source")
+    _require_secret_free(args_raw.decode("utf-8"), label="generated tool input")
+
+    nonce = secrets.token_hex(16)
+    prefix = f"{_RUNTIME_OK}:{nonce}:"
+    probe = (
+        _RUNTIME_PROBE
+        .replace(
+            "__SOURCE_B64__",
+            repr(base64.b64encode(source.encode("utf-8")).decode("ascii")),
+        )
+        .replace(
+            "__ARGS_B64__",
+            repr(base64.b64encode(args_raw).decode("ascii")),
+        )
+        .replace("__METADATA_DIGEST__", repr(hashlib.sha256(metadata_raw).hexdigest()))
+        .replace("__MAX_OUTPUT_BYTES__", str(_MAX_GENERATED_OUTPUT_BYTES))
+        .replace("__CONTROL_PREFIX__", repr(prefix))
+    )
+    result = _sandbox_probe(sandbox, probe, timeout=_RUNTIME_TIMEOUT)
+    payload = _control_payload(result, marker=_RUNTIME_OK, nonce=nonce)
+    if len(payload) > _MAX_GENERATED_OUTPUT_BYTES:
+        raise ValueError("generated tool result exceeds the output limit")
+    try:
+        output = payload.decode("utf-8", errors="strict")
+    except UnicodeDecodeError as e:
+        raise ValueError("generated tool result is not valid UTF-8") from e
+    redacted = _redact(output)
+    if not isinstance(redacted, str):
+        raise ValueError("generated tool result could not be safely redacted")
+    _shield_generated_output(redacted)
+    return redacted
+
+
+def _generated_tool_proxy(
+    *, source: str, metadata: dict[str, Any], sandbox: Any,
+    tenant: str, digest: str,
+) -> Any:
+    """Build a host-safe Tool containing metadata and a sandbox-call closure."""
+    from .tools import Tool
+
+    name = str(metadata["name"])
+
+    def _run(args: dict[str, Any]) -> str:
+        if not _generated_consent_granted(
+            tenant=tenant, name=name, digest=digest,
+        ):
+            return (
+                "ERROR: generated tool execution blocked because its "
+                "tenant/name/digest consent is missing or revoked"
+            )
+        try:
+            return _execute_generated_tool(
+                source=source, metadata=metadata, args=args, sandbox=sandbox,
+            )
+        except Exception as e:
+            return (
+                f"ERROR: generated tool {name!r} sandbox execution failed: "
+                f"{_safe_generated_error(e)}"
+            )
+
+    return Tool(
+        name=name,
+        description=str(metadata["description"]),
+        input_schema=dict(metadata["input_schema"]),
+        fn=_run,
+        parallel_safe=False,
+    )
+
+
+def _read_generated_source(path: Path) -> str:
+    ensure_private_file(path, 0o600)
+    if path.stat().st_size > _MAX_GENERATED_SOURCE_BYTES:
+        raise ValueError("generated tool source exceeds the size limit")
+    source = atomic_read_text(path)
+    if len(source.encode("utf-8")) > _MAX_GENERATED_SOURCE_BYTES:
+        raise ValueError("generated tool source exceeds the size limit")
+    return source
+
+
+def generated_tool_names() -> set[str]:
+    """Discover consented generated-tool names without importing/executing source."""
+    from .paths import current_tenant_id
+
+    directory = generated_tools_dir()
+    if not directory.exists():
+        return set()
+    tenant = current_tenant_id() or "shared"
+    names: set[str] = set()
+    try:
+        ensure_private_directory(directory)
+    except (OSError, PermissionError, RuntimeError):
+        return set()
+    for path in sorted(directory.glob("*.py")):
+        if path.name.startswith((".", "_")) or not _NAME_RE.fullmatch(path.stem):
+            continue
+        try:
+            with cross_process_lock(path):
+                source = _read_generated_source(path)
+            _require_secret_free(source, label="generated tool source")
+            audit_generated_source(source)
+            ok, _reason = _shield_ok(source)
+            if not ok:
+                continue
+            digest = hashlib.sha256(source.encode("utf-8")).hexdigest()
+            if _generated_consent_granted(
+                tenant=tenant, name=path.stem, digest=digest,
+            ):
+                names.add(path.stem)
+        except (OSError, PermissionError, RuntimeError, ValueError):
+            continue
+    return names
 
 
 def write_generated_tool(
     name: str, source: str, *, need: str = "",
     sandbox: Any = None, require_approval: bool = True,
 ) -> Any:
-    """Validate generated tool ``source`` and persist it, returning the Tool.
+    """Consent, validate, and atomically persist a generated tool.
 
-    Validation, in order (#424): name regex -> static AST audit (stdlib-only
-    enforcement) -> Shield scan -> OUT-OF-HOST import + make_tool() shape check
-    (``_validate_import_isolated``: a child process, never the kernel
-    interpreter) -> operator consent. Only after ALL of these pass is the
-    module written to the durable ``generated_tools/`` dir and registered; a
-    tool that fails validation or is denied leaves nothing behind.
+    Static checks and namespace checks run first. Consent is bound to the active
+    tenant, requested tool name, and exact source digest *before* source runs in
+    the isolated shape probe. The host never imports the source. After atomic
+    persistence, the returned Tool is a metadata-only proxy whose every call
+    rechecks consent and executes the same bytes in an isolated boundary.
 
-    The generated body is NOT executed in this process here — the import check
-    runs in a ``sandbox.exec()`` child when ``sandbox`` is given, otherwise a
-    timed plain subprocess. At RUNTIME the persisted tool's ``fn`` still runs
-    in-process under the self-learning opt-in (an out-of-process tool RUNTIME
-    is the documented future hardening). ``require_approval`` gates the FIRST
-    registration via the consent queue; reloads of an already-approved tool
-    don't re-prompt.
+    ``require_approval`` remains for API compatibility but can no longer bypass
+    this security boundary: generated code always requires digest-bound consent.
     """
-    from .safety.consent import require_consent
+    from .paths import current_tenant_id
+    from .safety.consent import (
+        ConsentDenied,
+        grant_persistent,
+        require_consent,
+    )
 
     if not _NAME_RE.match(name):
         raise ValueError(
             f"tool name {name!r} must be lowercase id (a-z0-9_), 3-42 chars"
         )
     source = _strip_fences(source)
-    # Enforce the stdlib-only contract BEFORE the module is imported/executed.
+    if len(source.encode("utf-8")) > _MAX_GENERATED_SOURCE_BYTES:
+        raise ValueError("generated tool source exceeds the size limit")
+    _require_secret_free(source, label="generated tool source")
+    # Enforce the stdlib-only contract before source reaches any interpreter.
     audit_generated_source(source)
     ok, reason = _shield_ok(source)
     if not ok:
         raise ValueError(f"generated tool rejected by Shield: {reason}")
 
-    GENERATED_TOOLS_DIR.mkdir(parents=True, exist_ok=True)
-    # Validate from a staging path first so a broken module never lands at
-    # the durable path the loader scans on every run.
-    staging = GENERATED_TOOLS_DIR / f".staging_{name}.py"
-    staging.write_text(source, encoding="utf-8")
-    try:
-        _validate_import_isolated(staging, sandbox=sandbox)
-    finally:
-        staging.unlink(missing_ok=True)
+    if name in _reserved_tool_names():
+        raise ValueError(f"generated tool name {name!r} collides with a live tool")
+    _assert_safe_generated_sandbox(sandbox)
 
-    # Consent gate the FIRST registration of a never-seen tool. Denial (or a
-    # non-interactive context under a gating consent mode) -> nothing persisted.
-    if require_approval:
-        require_consent(
-            "register-generated-tool", risk="high", scope=name,
-            detail=(
-                f"Register LLM-generated tool {name!r} (stdlib-only, "
-                f"import-validated out-of-host). It runs IN-PROCESS at runtime."
-            ),
-            raise_on_deny=True,
+    digest = hashlib.sha256(source.encode("utf-8")).hexdigest()
+    tenant = current_tenant_id() or "shared"
+    scope = _generated_consent_scope(tenant, name, digest)
+    if not require_approval:
+        log.warning(
+            "require_approval=False no longer bypasses generated-tool consent"
         )
+    decision = require_consent(
+        "register-generated-tool",
+        risk="high",
+        scope=scope,
+        detail=(
+            f"Register LLM-generated tool {name!r} for tenant {tenant!r}; "
+            f"sha256={digest}. It is stdlib-only; validation and every runtime "
+            "call execute in an isolated, network-denied sandbox."
+        ),
+        provenance=f"self-learning:{tenant}:{name}:sha256={digest}",
+        raise_on_deny=True,
+    )
+    if not getattr(decision, "granted", False):
+        raise ConsentDenied("register-generated-tool")
 
-    target = GENERATED_TOOLS_DIR / f"{name}.py"
-    target.write_text(source, encoding="utf-8")
-    # Re-derive the Tool object for the caller to register live. The body has
-    # already passed the out-of-host import check; importing it here is the
-    # in-process runtime trust the opt-in accepts (documented residual trust).
-    # If this final host import still fails, remove the durable file so later
-    # reloads cannot repeatedly execute import-time side effects.
-    try:
-        module = _import_module_from_path(name, target)
-        tool = module.make_tool()
-    except Exception:
-        target.unlink(missing_ok=True)
-        raise
-    record(need or name, "tool", tool.name, source=str(target))
+    # Consent must happen before any execution, including the sandbox probe.
+    metadata = _validate_import_isolated(
+        source, expected_name=name, sandbox=sandbox,
+    )
+
+    tools_dir = generated_tools_dir()
+    ensure_private_directory(tools_dir)
+    target = tools_dir / f"{name}.py"
+    with cross_process_lock(target):
+        if target.exists():
+            raise ValueError(
+                f"generated tool {name!r} already exists; refusing to overwrite it"
+            )
+        atomic_write_text(target, source, mode=0o600)
+        try:
+            # A later process must be able to distinguish these approved bytes
+            # from an AST-safe file swapped in after registration.
+            grant_persistent("register-generated-tool", scope=scope)
+            if not _generated_consent_granted(
+                tenant=tenant, name=name, digest=digest,
+            ):
+                raise ValueError("could not persist generated-tool digest consent")
+        except Exception:
+            target.unlink(missing_ok=True)
+            raise
+    tool = _generated_tool_proxy(
+        source=source,
+        metadata=metadata,
+        sandbox=sandbox,
+        tenant=tenant,
+        digest=digest,
+    )
+    record(need or name, "tool", name, source=str(target))
     return tool
 
 
@@ -768,31 +1376,58 @@ def _strip_fences(text: str) -> str:
     return t.strip()
 
 
-def load_generated_tools() -> list[Any]:
-    """Import every persisted generated tool. Best-effort, per-file isolated.
+def load_generated_tools(*, sandbox: Any = None) -> list[Any]:
+    """Load persisted tools as sandbox proxies; never host-import their source.
 
-    A module that raises on import or whose ``make_tool()`` misbehaves is
-    logged and skipped — one bad generated tool can't take the swarm down.
-    Only consulted when self-learning is enabled (see base_registry).
+    A module that fails audit, consent, or isolated validation is logged and
+    skipped without taking down registry assembly. Only consulted when
+    self-learning is enabled (see base_registry).
     """
+    from .paths import current_tenant_id
     from .tools import Tool
 
-    if not GENERATED_TOOLS_DIR.exists():
+    tools_dir = generated_tools_dir()
+    if not tools_dir.exists():
         return []
+    try:
+        ensure_private_directory(tools_dir)
+        _assert_safe_generated_sandbox(sandbox)
+        reserved = _reserved_tool_names()
+    except Exception as e:
+        log.warning("generated tools unavailable: %s", e)
+        return []
+    tenant = current_tenant_id() or "shared"
     out: list[Tool] = []
-    for p in sorted(GENERATED_TOOLS_DIR.glob("*.py")):
-        if p.name.startswith((".", "_")):
+    for p in sorted(tools_dir.glob("*.py")):
+        if (
+            p.name.startswith((".", "_"))
+            or not _NAME_RE.fullmatch(p.stem)
+            or p.stem in reserved
+        ):
             continue
         try:
-            # Re-audit on every load: a persisted file could have been
-            # tampered with on disk since it was written.
-            audit_generated_source(p.read_text(encoding="utf-8"))
-            module = _import_module_from_path(p.stem, p)
-            tool = module.make_tool()
-            if isinstance(tool, Tool) and tool.name and callable(tool.fn):
-                out.append(tool)
-            else:
-                log.warning("generated tool %s: make_tool() invalid; skipping", p.name)
+            with cross_process_lock(p):
+                source = _read_generated_source(p)
+            _require_secret_free(source, label="generated tool source")
+            audit_generated_source(source)
+            ok, reason = _shield_ok(source)
+            if not ok:
+                raise ValueError(f"rejected by Shield: {reason}")
+            digest = hashlib.sha256(source.encode("utf-8")).hexdigest()
+            if not _generated_consent_granted(
+                tenant=tenant, name=p.stem, digest=digest,
+            ):
+                raise ValueError("tenant/name/digest consent is missing or revoked")
+            metadata = _validate_import_isolated(
+                source, expected_name=p.stem, sandbox=sandbox,
+            )
+            out.append(_generated_tool_proxy(
+                source=source,
+                metadata=metadata,
+                sandbox=sandbox,
+                tenant=tenant,
+                digest=digest,
+            ))
         except Exception as e:
             log.warning("generated tool %s failed to load: %s", p.name, e)
     return out
@@ -994,10 +1629,12 @@ async def preflight(
 
 __all__ = [
     "enabled", "settings", "Learned", "record", "history",
+    "learned_path", "generated_tools_dir",
     "Candidate", "search_capabilities", "acquire_skill", "add_mcp_server",
     "acquire_mcp_server", "mcp_acquisition_enabled",
     "write_generated_tool", "load_generated_tools", "audit_generated_source",
     "preflight",
     "validate_spec_url", "probe_openapi_spec", "discover_openapi_spec",
-    "LEARNED_PATH", "GENERATED_TOOLS_DIR", "TOOL_AUTHOR_SYSTEM",
+    "LEARNED_PATH", "GENERATED_TOOLS_DIR",  # noqa: F822 - dynamic __getattr__ API
+    "TOOL_AUTHOR_SYSTEM",
 ]
