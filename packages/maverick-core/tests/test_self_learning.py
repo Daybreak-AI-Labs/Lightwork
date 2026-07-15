@@ -291,14 +291,33 @@ class TestLedger:
         from maverick.safety import consent
 
         monkeypatch.setenv("MAVERICK_HOME", str(tmp_path / "home"))
+        shared = tmp_path / "legacy-consent.ledger"
+        monkeypatch.setattr(consent, "CONSENT_LEDGER_PATH", shared)
+        consent.grant_persistent("shared-only", scope="digest")
+        assert consent._check_ledger("shared-only", "digest")
+
         with tenant_scope(tenant="acme"):
             acme = consent.consent_ledger_path()
+            assert acme != shared
+            assert not consent._check_ledger("shared-only", "digest")
             consent.grant_persistent("tenant-test", scope="digest")
             assert consent._check_ledger("tenant-test", "digest")
+            # The legacy explicit path escape hatch is also ignored when a
+            # tenant is active, for both writes and reads.
+            consent.grant_persistent("explicit-path", scope="digest", path=shared)
+            assert consent._check_ledger("explicit-path", "digest", path=shared)
         with tenant_scope(tenant="globex"):
             globex = consent.consent_ledger_path()
+            assert globex != shared
+            assert not consent._check_ledger("shared-only", "digest")
             assert not consent._check_ledger("tenant-test", "digest")
+            assert not consent._check_ledger("explicit-path", "digest", path=shared)
+
         assert acme != globex
+        assert consent.consent_ledger_path() == shared
+        assert consent._check_ledger("shared-only", "digest")
+        assert not consent._check_ledger("tenant-test", "digest")
+        assert not consent._check_ledger("explicit-path", "digest", path=shared)
 
 
 class TestCatalogSearch:

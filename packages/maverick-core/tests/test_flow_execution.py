@@ -30,7 +30,9 @@ class TestLowering:
             steps=[iir.ImportedStep(name="Post", app="slack", operation="post",
                                     params={"text": "hi"}, tools_hint=["slack"])])
         f = to_flow(a)
-        assert f.nodes["n0"].kind == NODE_ACTION and f.nodes["n0"].tool == "slack"
+        assert f.nodes["n0"].kind == NODE_ACTION
+        assert f.nodes["n0"].tool == "slack_bot"
+        assert f.nodes["n0"].params["op"] == "post"
 
     def test_ambiguous_step_becomes_agent(self):
         a = iir.ImportedAutomation(

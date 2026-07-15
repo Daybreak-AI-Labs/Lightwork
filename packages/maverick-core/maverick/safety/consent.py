@@ -34,19 +34,36 @@ import time
 from dataclasses import dataclass
 from pathlib import Path
 
-from ..paths import data_dir
+from ..paths import current_tenant_id, data_dir
 
 log = logging.getLogger(__name__)
+
+def _resolve_ledger_path(path: Path | None = None) -> Path:
+    """Resolve a consent ledger without crossing a tenant boundary.
+
+    ``CONSENT_LEDGER_PATH`` and the explicit ``path=`` argument predate tenant
+    isolation.  They remain available to unscoped, single-user deployments,
+    but a named tenant must always use its own data directory.  In particular,
+    a stale process-wide override must never turn into a shared-grant fallback
+    in a long-lived multi-tenant worker.
+    """
+    if current_tenant_id() is not None:
+        return data_dir("consent.ledger")
+    if path is not None:
+        return Path(path)
+    override = globals().get("CONSENT_LEDGER_PATH")
+    return Path(override) if override is not None else data_dir("consent.ledger")
+
 
 def consent_ledger_path() -> Path:
     """The active tenant's consent ledger.
 
     A module-level path is unsafe in long-lived multi-tenant workers because it
     freezes whichever tenant imported this module first. An explicitly assigned
-    legacy attribute remains an override for integrations/tests.
+    legacy attribute remains an override for unscoped integrations/tests; it is
+    deliberately ignored once a tenant or client floor is active.
     """
-    override = globals().get("CONSENT_LEDGER_PATH")
-    return Path(override) if override is not None else data_dir("consent.ledger")
+    return _resolve_ledger_path()
 
 
 def __getattr__(name: str) -> Path:
@@ -102,7 +119,7 @@ def _resolve_mode(risk: str | None = None) -> str:
 
 
 def _ledger_lines(path: Path | None = None) -> list[str]:
-    path = Path(path) if path is not None else consent_ledger_path()
+    path = _resolve_ledger_path(path)
     if not path.exists():
         return []
     try:
@@ -112,7 +129,7 @@ def _ledger_lines(path: Path | None = None) -> list[str]:
 
 
 def _append_ledger(line: str, path: Path | None = None) -> None:
-    path = Path(path) if path is not None else consent_ledger_path()
+    path = _resolve_ledger_path(path)
     try:
         path.parent.mkdir(parents=True, exist_ok=True)
         with open(path, "a", encoding="utf-8") as f:
@@ -150,7 +167,7 @@ def revoke(
     action: str, scope: str | None = None, *, path: Path | None = None,
 ) -> bool:
     """Remove all matching grants. Returns True if anything was removed."""
-    path = Path(path) if path is not None else consent_ledger_path()
+    path = _resolve_ledger_path(path)
     lines = _ledger_lines(path)
     if not lines:
         return False
